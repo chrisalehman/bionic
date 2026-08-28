@@ -154,7 +154,7 @@ _setup_self_dir() {
 
 SETUP_LIB_DIR="${BIONIC_LIB_DIR:-$(_setup_self_dir)/lib}"
 
-for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh; do
+for _setup_lib in deps.sh detect.sh hooks.sh jit.sh env.sh width.sh; do
   if [ ! -f "${SETUP_LIB_DIR}/${_setup_lib}" ]; then
     echo "setup.sh: cannot find ${SETUP_LIB_DIR}/${_setup_lib} — the payload looks incomplete." >&2
     echo "          reinstall with: claude plugin install bionic@bionic" >&2
@@ -184,6 +184,12 @@ done
 # table stores and nobody can type.
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/jit.sh"
+# width.sh, for the column budget every line below is held inside. The rule is
+# doctor's (spec AC-15, 100 columns) and so is the file — one number and one
+# truncator, consumed by both scripts, rather than the copy-per-script this
+# wave shipped at slice 4/3 and then broke at slice 4/4.
+# shellcheck source=/dev/null
+. "${SETUP_LIB_DIR}/width.sh"
 
 # ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -468,7 +474,7 @@ _setup_print_plan() {
     [ -n "$id" ] || continue
     _setup_item_pending "$id" || continue
     verb="$(_setup_item_verb "$id")" || continue
-    lines="${lines}${prefix}$(_setup_trunc "$verb" "$(( SETUP_LINE_WIDTH - ${#prefix} ))")"$'\n'
+    lines="${lines}$(bionic_line "$prefix" "$verb")"$'\n'
   done 3< <(_setup_item_ids)
   [ -n "$lines" ] || return 1
   say "bionic would:"
@@ -508,44 +514,22 @@ SETUP_NIL='–'
 # other is a decision still waiting to be made.
 SETUP_ASK='?'
 
-# THE ONE COLUMN BUDGET (epic-19 AC-F4, grounding §4(a)). item()'s third field
-# and the --all plan's verb lines both interpolate absolute paths — settings.json,
-# a shell rc, the legacy skill directory — with no bound, and none of them wrap
-# cleanly inside the command relay's fenced block. Follows doctor.sh's own rule
-# rather than inventing a second one: spec AC-15 holds every line doctor prints
-# to 100 columns (doctor.sh:179), and this script has the identical reason to.
-# There is no shared helper to reuse across the two scripts — doctor's own
-# per-row `_doctor_trunc` was deleted at epic-18 wave-03 alongside the Patrol
-# rows that called it (epic-19 w1 slice 4/2 note), and doctor's replacement
-# truncates whole composed strings from the right (`_doctor_absent_list`,
-# `_doctor_verdict`) the same way this one does, so the shape carries over even
-# though the callers do not.
-SETUP_LINE_WIDTH=100
+# THE COLUMN BUDGET IS NOT THIS FILE'S (epic-19 AC-F4, grounding §4(a); moved
+# out at S9). item()'s third field and the --all plan's verb lines both
+# interpolate absolute paths — settings.json, a shell rc, the legacy skill
+# directory — with no bound, and none of them wrap cleanly inside the command
+# relay's fenced block. The rule they answer to is doctor's: spec AC-15 holds
+# every line doctor prints to 100 columns, and this script has the identical
+# reason to.
+#
+# SO THE NUMBER AND THE TRUNCATOR LIVE IN lib/width.sh, sourced above, and both
+# scripts consume them. Slice 4/3 built this budget for setup.sh alone and slice
+# 4/4 then broke it in doctor.sh in the same wave — the same number written
+# twice in two files with nothing binding them, which is what the Step-6 review
+# called out and what one owner ends. `bionic_line` is where the prefix-aware
+# arithmetic lives now; nothing about the shape below changed except who owns it.
 
-_setup_trunc() {  # <string> <budget> -> string, elided with … past budget
-  local s="${1:-}" max="${2:-0}" cut
-  [ "$max" -gt 0 ] || { printf '%s' "$s"; return 0; }
-  if [ "${#s}" -gt "$max" ]; then
-    # "…" is three bytes for one terminal column — the same fact that keeps
-    # SETUP_OK/SETUP_BAD/SETUP_NIL off the padded field above. Cutting three
-    # bytes short of the budget rather than one means the ellipsis's extra
-    # weight can never push the whole line past it.
-    cut=$(( max - 3 )); [ "$cut" -gt 0 ] || cut=0
-    printf '%.*s…' "$cut" "$s"
-  else
-    printf '%s' "$s"
-  fi
-}
-
-# THE BUDGET IS COMPUTED FROM THE REAL PREFIX, not assumed, so a label longer
-# than the %-22s minimum (`retired permission block` already is) still leaves
-# the free-form third field bounded rather than quietly blowing the budget
-# item() exists to hold.
-item() {
-  local prefix
-  prefix="$(printf '   %s %-22s ' "$1" "$2")"
-  printf '%s%s\n' "$prefix" "$(_setup_trunc "${3:-}" "$(( SETUP_LINE_WIDTH - ${#prefix} ))")"
-}
+item() { printf '%s\n' "$(bionic_line "$(printf '   %s %-22s ' "$1" "$2")" "${3:-}")"; }
 action() { SETUP_ACTIONS="${SETUP_ACTIONS}${1}"$'\n'; }
 # deps.sh owns the one prompt shape — and the one short-circuit, because
 # `install_dep` and `install_plugin_native` ask through it directly and a
@@ -1229,10 +1213,14 @@ setup_claude_proxy() {
 # lands on a person's screen.
 _setup_rc_why() {  # <item>
   case "${1:-}" in
-    # SHORTENED TO RIDE ON THE LINE IT PRINTS ON (AC-F4/AC-15): with its
-    # "   — " lead-in this was 107 columns — "the bypass mode" carried no
-    # information "bypass" does not, so trimming it is the whole fix; nothing
-    # about the mechanism the sentence describes changed.
+    # WRITTEN TO RIDE ON THE LINE IT PRINTS ON (AC-F4/AC-15). Its caller is a
+    # bare `say "   — …"`, five columns of lead-in and no truncator between this
+    # string and the screen, so the budget is kept HERE, by the length of the
+    # sentence: 93 characters, 98 columns printed. Slice 4/1 replaced the old
+    # 55-character line ("launches claude with bypass available in the mode
+    # cycle") with this longer and more exact one — the flag stopped starting
+    # the session in bypass and started only offering it — which is what spends
+    # most of the room. There is none left for another clause.
     claude-proxy) echo "keeps bypass selectable in the shift+tab cycle; the session still starts in your default mode" ;;
     *)            echo "a shell line bionic needs" ;;
   esac

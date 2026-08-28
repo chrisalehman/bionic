@@ -58,6 +58,7 @@ expect_match() {
   # shellcheck disable=SC2053  # RHS is a glob on purpose
   if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.400s' "$actual")"; fi
 }
+expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 expect_no_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose
@@ -117,12 +118,30 @@ make_git_marketplace_clone() {  # <version> -> clone dir on stdout
 
 # ---------- driving doctor ----------
 
+# A LONG PATH SEGMENT, used by the fixture rc below and by Section 5's clone.
+LONGSEG="$(printf 'segment-%.0s' $(seq 1 8))"
+
+# THE SHELL RC IS A FIXTURE, NOT THE MACHINE'S (added at S9 with Section 5).
+# doctor's ENVIRONMENT section names the rc it read, and until this existed the
+# suite read the real `$HOME/.zshrc` — so that row's width, and whether it said
+# the proxy was on, depended on whose machine ran the suite. It is now bionic's
+# own block at a deliberately long path: deterministic, and long enough that the
+# row it renders needs the column budget to survive.
+FIXTURE_RC="${TMP}/${LONGSEG}/${LONGSEG}/dot.zshrc"
+mkdir -p "$(dirname "$FIXTURE_RC")"
+{
+  echo '# ─── bionic:rc:start ───'
+  echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+  echo '# ─── bionic:rc:end ───'
+} > "$FIXTURE_RC"
+
 # `(cd "$REPO" && ...)` UNCONDITIONALLY, not only for the directory-feed case:
 # it costs nothing for the git-feed/unknown cases and removes any dependence
 # on how this suite itself was invoked, matching REPO's `git rev-parse HEAD`
 # to what a run through tests/run.sh (which itself `cd`s to $REPO) would see.
-run_doctor() {  # <claude-home>
-  ( cd "$REPO" && BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+run_doctor() {  # <claude-home> [shell-rc]
+  ( cd "$REPO" && HOME="$TMP" BIONIC_SHELL_RC="${2:-$FIXTURE_RC}" \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
@@ -195,13 +214,137 @@ expect_no_match "10: a degraded feed kind never prints an update command" \
   "*claude plugin update*" "$ROW4"
 
 echo ""
-echo "=== Section 5: registration ==="
+echo "=== Section 5: every line doctor prints fits the column budget ==="
+
+# WHY THIS SECTION IS IN THIS SUITE. doctor.sh's format rules have always stated
+# the budget — nothing printed may exceed 100 columns, because a wrapped line is
+# one row turned into two — and nothing has enforced it since
+# tests/doctor.test.sh was deleted at 8582861 (epic-18 wave-03). The row F5 added
+# is what found the gap: on the wave's own T3 capture it measured 104 columns,
+# because `unknown — ${LATEST_CAUSE}` interpolates free text nobody bounded.
+# Slice 4/3 had built exactly this wall for setup.sh (tests/command-relay.test.sh
+# Group B) one slice earlier. This is that wall, on the other script, driving the
+# four feed-kind arms above plus the worst case below.
+#
+# THE RULER IS THE PRODUCT'S OWN (`bionic_cols`, payload/scripts/lib/width.sh) —
+# the same function doctor truncates with, because a wall measured in bytes
+# while the script budgets in columns is a wall with a gap in it. That ruler is
+# pinned directly, positives and negatives, in command-relay.test.sh Group B0.
+# shellcheck source=/dev/null
+. "${PAYLOAD}/scripts/lib/width.sh"
+
+# ONE EXEMPTION, NAMED AND NEVER SILENT. The half-uninstalled teardown line is a
+# raw URL inside a pipefail wrapper that a person has to PASTE — 132 columns, and
+# eliding it would hand them a command that fails instead of a line that wraps.
+# doctor.sh says so where it prints it. So the rule this suite walls is "every
+# line fits except that one", and the arms below prove the exemption is load-
+# bearing rather than a hole: on a fixture that prints it, at least one
+# over-budget line must exist and every over-budget line must BE it.
+REMOVE_CMD_LINE='*curl -fsSL *remove.sh | bash'"'"
+
+over_budget_lines() {  # <text> -> every line wider than the budget
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$(bionic_cols "$line")" -gt "$BIONIC_LINE_WIDTH" ] && printf '%s\n' "$line"
+  done <<< "$1"
+  return 0
+}
+
+expect_all_lines_fit() {  # <label> <text>
+  local label="$1" over line bad=""
+  over="$(over_budget_lines "$2")"
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    # shellcheck disable=SC2254  # RHS is a glob on purpose
+    case "$line" in $REMOVE_CMD_LINE) continue ;; esac
+    bad="$line"; break
+  done <<< "$over"
+  if [ -z "$bad" ]; then ok "$label"
+  else no "$label" "$(bionic_cols "$bad") columns (budget ${BIONIC_LINE_WIDTH}): ${bad}"; fi
+}
+
+# THE WORST CASE THE REVIEW NAMED, built rather than argued: a git feed whose
+# marketplace clone has no plugin.json, so `detect_plugin_latest`'s cause is
+# `no plugin.json at <installLocation>/payload/.claude-plugin/plugin.json` —
+# an absolute path inside a sentence inside a row that already spends 25 columns
+# on its prefix. The clone lives under a deliberately long directory so the
+# untruncated row would run past 280 columns.
+CLONE5="${TMP}/${LONGSEG}/${LONGSEG}/clone"
+mkdir -p "$CLONE5/.claude-plugin"
+jq -nc '{plugins:[{name:"bionic", source:"./payload"}]}' \
+  > "$CLONE5/.claude-plugin/marketplace.json"
+HOME5="$(make_registry_home)"
+write_known_marketplaces "$HOME5" '{"source":"github","repo":"example/bionic"}' "$CLONE5"
+
+OUT5="$(run_doctor "$HOME5")"
+ROW5="$(version_row "$OUT5")"
+
+# The positive the wall means nothing without: this fixture really does reach
+# the unbounded arm, and really does carry the long path into the row.
+expect_match "12: the missing-manifest fixture reaches the unknown arm" \
+  "*version*unknown — no plugin.json at *" "$ROW5"
+# The long clone path is no longer READABLE in the row — that is the point:
+# it was elided to fit. The elision itself is the assertion.
+expect_match "13: and the long clone path was elided rather than printed whole" \
+  "*…" "$ROW5"
+
+expect_all_lines_fit "14: git feed, current — every line fits the budget"          "$OUT1"
+expect_all_lines_fit "15: git feed, lagging — every line fits the budget"          "$OUT2"
+expect_all_lines_fit "16: directory feed — every line fits the budget"             "$OUT3"
+expect_all_lines_fit "17: unknown feed kind — every line fits the budget"          "$OUT4"
+expect_all_lines_fit "18: git feed, missing manifest, long path — every line fits" "$OUT5"
+
+# THE EXEMPTION IS LOAD-BEARING, and this is the arm that says so. These
+# fixtures have no bionic entry in installed_plugins.json, so doctor calls the
+# machine half-uninstalled and prints the teardown command — over the budget, on
+# purpose, and the only thing above it. Delete the exemption and 14/15/17 go
+# red; delete the reason for it and this arm does.
+# A HALF-UNINSTALLED MACHINE: no bionic entry in the registry (registered=no)
+# and a legacy footprint in the rc (`detect_env_todo_tools`), which is the
+# disjunction detect_half_uninstalled asks for. Only that machine prints the
+# teardown command.
+HALF_RC="${TMP}/${LONGSEG}/half.zshrc"
+{
+  echo '# ─── bionic:rc:start ───'
+  echo 'claude() { command claude --allow-dangerously-skip-permissions "$@"; }'
+  echo '# ─── bionic:rc:end ───'
+  echo 'export CLAUDE_CODE_ENABLE_TODO_TOOLS=1'
+} > "$HALF_RC"
+HOME6="$(make_registry_home)"
+write_empty_known_marketplaces "$HOME6"
+OUT6="$(run_doctor "$HOME6" "$HALF_RC")"
+OVER6="$(over_budget_lines "$OUT6")"
+
+expect_match "20: the half-uninstalled fixture prints the teardown command" \
+  "*curl -fsSL *remove.sh | bash*" "$OUT6"
+# COUNTED, not pattern-matched against the whole blob: "every over-budget line
+# is that command" is only asserted if the number of them is asserted too — a
+# glob with a leading `*` would happily skip past a second offending line.
+OVER6_N="$(printf '%s\n' "$OVER6" | awk 'NF { n++ } END { print n + 0 }')"
+expect_eq "21: exactly one line on that machine is over the budget" "1" "$OVER6_N"
+expect_match "22: and it is that paste-verbatim command" \
+  "$REMOVE_CMD_LINE" "$OVER6"
+expect_all_lines_fit "23: half-uninstalled — every other line still fits" "$OUT6"
+
+# The rc row is the other line the walk found over the budget (101 columns on a
+# short $HOME). The fixture rc path is far longer than that, so this proves the
+# row is elided rather than merely short.
+RC_ROW="$(printf '%s\n' "$OUT1" | awk '/claude\(\) shell proxy/')"
+expect_match "24: the proxy row's rc path was elided to fit" "*…*" "$RC_ROW"
+# AND THE HALF THAT SURVIVED IS THE HALF THAT MATTERS. Truncation takes the end
+# of a string; a row that elided its own closing sentence would state a fact and
+# withhold what to do about it. The path gives way, the sentence does not.
+expect_match "25: and the sentence after the path survived the cut whole" \
+  "* — new shells pick it up" "$RC_ROW"
+
+echo ""
+echo "=== Section 6: registration ==="
 
 # THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner
 # (tests/run.sh hand-lists every suite by name) — see
 # tests/doctor-patrol.test.sh's own registration case for the prior instance
 # of this lesson.
-expect_true "11: tests/run.sh names doctor-version.test.sh" \
+expect_true "26: tests/run.sh names doctor-version.test.sh" \
   grep -q 'run "doctor-version.test.sh" bash tests/doctor-version.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"
 
 echo ""
