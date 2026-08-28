@@ -20,13 +20,14 @@
 #   agents: state=<stock|modified|unknown> total=<n|unknown> modified=<n|unknown> names=<a.md,b.md|-> cause=<text|->
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
-#   env:rc-claude-proxy present=<yes|no>
+#   env:rc-claude-proxy present=<yes|no|stale>
 #   env:zshrc-legacy present=<yes|no>
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
 #   state:half-uninstalled=<yes|no>
 #   load-state=<loaded|failed|absent|unknown> error=<CLI error text|-> [cause=<text>]
 #   dup=<bare-name> ids=<a@x>,<b@y> fix=<consolidation command>
+#   plugin:latest state=<current|lag|unknown> installed=<v|-> latest=<v|-> cause=<text|->
 #
 # `unknown` APPEARS WHERE HONESTY REQUIRES IT. Two of these values can read
 # `unknown` where the spec's table sketched only yes/no: a dependency whose
@@ -76,6 +77,20 @@ _detect_self_dir() {
 if ! declare -F check_dep >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$(cd "$(_detect_self_dir)" && pwd -P)/deps.sh"
+fi
+
+# env.sh, THE SAME SOFT SOURCE, FOR ITS READ HALF ONLY — `rc_get`, `rc_file` and
+# `rc_default`. Those own the question "is bionic's proxy line inside bionic's
+# markers", and `detect_rc_claude_proxy` below now asks THEM rather than
+# answering it a second way (epic-19 W1 Step-6 DUPLICATION FAIL: the two
+# predicates disagreed on every machine carrying an older proxy line). env.sh's
+# write half is never called from here, the same way this file never installs a
+# dependency it can only report on. No cycle: env.sh sources deps.sh and nothing
+# else, so this file loads deps.sh, then env.sh over the top of it, and a caller
+# that already has either gets neither again.
+if ! declare -F rc_get >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(_detect_self_dir)" && pwd -P)/env.sh"
 fi
 
 _detect_plugin_root() {
@@ -302,24 +317,48 @@ detect_env_todo_tools() {
 # `claude()` proxy setup writes, inside its own marker pair:
 #
 #     # ─── bionic:rc:start ───
-#     claude() { command claude --dangerously-skip-permissions "$@"; }
+#     claude() { command claude --allow-dangerously-skip-permissions "$@"; }
 #     # ─── bionic:rc:end ───
 #
-# THE MARKERS ARE THE PREDICATE, and only the markers. A `claude()` function a
-# user wrote for themselves is not bionic's footprint, must not be reported as
-# bionic's, and must not be removed as bionic's — so this asks whether the START
-# MARKER is there, exactly as detect_zshrc_legacy_block does for the retired
-# block, and never whether the file mentions the flag.
+# ONE OWNER FOR THE PREDICATE, AND IT IS env.sh's. `rc_get` — what setup already
+# consumes to decide whether the item is done — asks whether `rc_default`'s line
+# is INSIDE bionic's markers, and this function asks `rc_get`. It used to grep
+# the START MARKER on its own, which agreed with setup only for as long as the
+# line between the markers never changed; slice 4/1 changed it
+# (`--dangerously-skip-permissions` → `--allow-dangerously-skip-permissions`)
+# and every install already on disk became a machine setup called pending and
+# doctor called healthy. Two owners of one concept, disagreeing in the field:
+# the Step-6 review's DUPLICATION FAIL, closed by deleting the second owner
+# rather than by adding a test that watches them drift.
 #
-# The literals are env.sh's (RC_START); this file cannot source env.sh — env.sh
-# sources deps.sh and detect.sh is loaded by doors that have not — so the marker
-# is spelled here and tests/rc-item.test.sh pins the pair. Verbatim,
-# box-drawing dashes included.
+# THREE STATES, BECAUSE THERE ARE THREE MACHINES.
+#
+#   yes    — the markers hold exactly the line this payload writes.
+#   stale  — the markers are there and hold something else: an older payload's
+#            text, or a hand edit between them. This person CONSENTED; what they
+#            carry is bionic's own block gone out of date, which setup rewrites
+#            and doctor must not paint green.
+#   no     — no markers at all. Never asked, or asked and declined — a correctly
+#            configured machine either way.
+#
+# The `no`/`stale` split is why the marker test survives at all: it is no longer
+# the predicate, it is what tells a stale block from an absent one. A `claude()`
+# function a user wrote for themselves sits outside the markers and is none of
+# these — not claimed here, not removed by /bionic:remove.
 detect_rc_claude_proxy() {
   local rc present=no
-  rc="$(_detect_shell_rc)"
-  if [ -f "$rc" ] && grep -qF '# ─── bionic:rc:start ───' "$rc" 2>/dev/null; then
+  if rc_get claude-proxy 2>/dev/null; then
     present=yes
+  else
+    # The file `rc_get` just looked in, so the two halves of this answer cannot
+    # come to be about two different files. Unresolvable (a shell bionic writes
+    # no rc for) leaves it empty and the answer `no`, which is the truth: there
+    # is no file that could hold bionic's block.
+    rc="$(rc_file 2>/dev/null)" || rc=""
+    if [ -n "$rc" ] && [ -n "${RC_START:-}" ] && [ -f "$rc" ] && \
+       grep -qF "$RC_START" "$rc" 2>/dev/null; then
+      present=stale
+    fi
   fi
   echo "env:rc-claude-proxy present=${present}"
   return 0
@@ -938,6 +977,121 @@ detect_reconverge_hint() {  # <lag|hooks> -> the whole sentence for that state, 
           printf 'claude plugin update bionic@bionic\n' ;;
       esac ;;
   esac
+}
+
+# ─── Installed vs the marketplace's latest (git-feed installs only) ──────────
+#
+# THE GENUINE ABSENCE THIS CLOSES (F5, epic-19 wave-01, spec AC-F5; grounding
+# item 5, record/epic-19/step1-fixes-grounding.md, found no plugin-version-vs-
+# latest check anywhere in the shipped surface). On a GIT-SOURCE feed the CLI
+# already keeps a cached clone of the marketplace repo at
+# `known_marketplaces.json`'s `installLocation` — that clone IS the CLI's own
+# record of what the marketplace currently offers, so reading its
+# `plugin.json` answers "what's latest" from a file already on disk. No
+# network fetch, no timeout to design, no request that can hang doctor —
+# exactly the local-registry route the epic's grounding preferred over a live
+# check (detect_reconverge_hint's `installLocation`/`gitCommitSha` reads are
+# the precedent this follows).
+#
+# NOT FOR DIRECTORY FEEDS, and this function does not self-guard that: on a
+# directory-source marketplace `installLocation` names the SAME tree the CLI
+# already runs (detect_reconverge_hint's doctrine, above), so comparing its
+# plugin.json against itself would report "current" unconditionally and
+# answer nothing. Callers branch on `detect_marketplace_feed_kind` themselves
+# and reach for `detect_registry_sha_lag` + `detect_reconverge_hint` on that
+# feed instead (doctor.sh's version row does exactly this) — a caller that
+# gets the branch wrong fails LOUD, as an always-"current" row, rather than
+# silently degrading to `unknown`.
+#
+# A CACHED ANSWER, NOT A LIVE ONE. The clone updates on `claude plugin
+# marketplace update` (or a fresh install), not on every doctor run, so a
+# `lag` verdict here can also mean "the cache itself is stale" — one layer
+# removed from "you are behind the true latest". That is still strictly more
+# honest than no check at all, and it costs zero network round-trips.
+DETECT_MARKETPLACE_SOURCE_JQ='.plugins[]? | select(.name == $n) | .source // empty'
+
+detect_plugin_latest() {  # -> one line, always exit 0
+  local mp loc mp_json source_field plugin_json latest fact installed
+
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=jq is not on PATH, so the marketplace clone cannot be read"
+    return 0
+  fi
+
+  mp="$(_detect_known_marketplaces_file)"
+  if [ ! -f "$mp" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=no marketplace registry at ${mp}"
+    return 0
+  fi
+
+  loc="$(jq -r '.bionic.installLocation // empty' "$mp" 2>/dev/null)"
+  if [ -z "$loc" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=known_marketplaces.json has no bionic entry"
+    return 0
+  fi
+
+  mp_json="${loc}/.claude-plugin/marketplace.json"
+  if [ ! -f "$mp_json" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=no marketplace.json in the cached clone at ${loc}"
+    return 0
+  fi
+
+  source_field="$(jq -r --arg n bionic "$DETECT_MARKETPLACE_SOURCE_JQ" "$mp_json" 2>/dev/null | head -1)"
+  case "$source_field" in
+    ''|null)
+      echo "plugin:latest state=unknown installed=- latest=- cause=marketplace.json names no bionic plugin entry"
+      return 0 ;;
+    \{*)
+      # A source OBJECT (url/github kind) names a SEPARATE repo this clone does
+      # not itself contain — bionic's own manifest uses a plain relative path
+      # ("./payload") because the plugin ships from the same repo as the
+      # marketplace; a fork that re-points the plugin at another repo has no
+      # local answer without a second fetch.
+      echo "plugin:latest state=unknown installed=- latest=- cause=bionic's marketplace entry names a separate-repo source; no local clone to read"
+      return 0 ;;
+  esac
+
+  plugin_json="${loc}/${source_field#./}/.claude-plugin/plugin.json"
+  if [ ! -f "$plugin_json" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=no plugin.json at ${plugin_json}"
+    return 0
+  fi
+
+  latest="$(jq -r '.version // empty' "$plugin_json" 2>/dev/null)"
+  if [ -z "$latest" ]; then
+    echo "plugin:latest state=unknown installed=- latest=- cause=the marketplace's plugin.json has no version field"
+    return 0
+  fi
+  # THE ONE FIELD ON THIS PAGE THAT COMES OUT OF SOMEBODY ELSE'S FILE AND IS
+  # PRINTED VERBATIM. It reaches doctor's FIX section and, from there, a relayed
+  # block a person is invited to paste from. This line's own grammar is
+  # `key=value` separated by spaces, and every reader of it splits on that — so
+  # a `version` carrying a space, a newline or a backtick does not need an
+  # author with bad intent to fabricate a second fact line or break out of a
+  # fence; a typo in a fork's manifest does it. A version is a short token of
+  # digits, letters, dots and dashes. Anything else is not a version bionic can
+  # report, and `unknown` with a cause is the honest answer — the same answer
+  # every other unreadable input on this page gets.
+  case "$latest" in
+    *[!0-9A-Za-z.-]*|????????????????????????????????*)
+      echo "plugin:latest state=unknown installed=- latest=- cause=the marketplace's plugin.json version is not a version-shaped token"
+      return 0 ;;
+  esac
+
+  fact="$(detect_plugin_integrity)"
+  installed="${fact#plugin: version=}"; installed="${installed%% *}"
+  case "$installed" in
+    ''|unknown)
+      echo "plugin:latest state=unknown installed=- latest=${latest} cause=the installed plugin's own version could not be read"
+      return 0 ;;
+  esac
+
+  if [ "$installed" = "$latest" ]; then
+    echo "plugin:latest state=current installed=${installed} latest=${latest} cause=-"
+  else
+    echo "plugin:latest state=lag installed=${installed} latest=${latest} cause=-"
+  fi
+  return 0
 }
 
 # ─── Bounded execution ───────────────────────────────────────────────────────

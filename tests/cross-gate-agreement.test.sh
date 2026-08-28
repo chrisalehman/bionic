@@ -2539,8 +2539,15 @@ expect_contains "…and the landing sweep on Stop (no matcher), timeout 10" \
 # must be live exactly while that skill is and dead otherwise.
 expect_contains "…and the Patrol-duties wall on Stop (no matcher), timeout 10" \
   "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh|10" "$SKILL_HOOKS_ROWS"
-expect_eq "…exactly twelve registrations in the frontmatter block, nothing extra" \
-  "12" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
+# THE PATROL SELF-HEAL joined the same channel at epic-19 w1 (AC-F6). Stop is the only
+# recurring orchestrator event there is, and a Patrol that dies mid-run is invisible until
+# somebody attempts a dispatch or runs doctor by hand — so the turn's end is where the
+# looking has to happen. Registered here for the D1 reason again: the fact it reads is the
+# governing skill's own Patrol stamp, so it must be live exactly while that skill is.
+expect_contains "…and the Patrol self-heal on Stop (no matcher), timeout 10" \
+  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh|10" "$SKILL_HOOKS_ROWS"
+expect_eq "…exactly thirteen registrations in the frontmatter block, nothing extra" \
+  "13" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
 
 # THE EVENT NAMES THE GATE ANSWERS TO, pinned as the SPAN that decides them rather than as a
 # literal comparison that a refactor can move: the relevance hoist is one `case` over
@@ -2980,9 +2987,9 @@ echo "=== N — the wave-02 facts: one root, one vocabulary, one launch referenc
 # a resume looks like in that mode, which is the fixture-fidelity failure the header forbids.
 # The async half of the same property IS driven, at §N.6.
 
-# -------------------------------------------------------------- N.1 seven bodies, one root
+# -------------------------------------------------------------- N.1 eight bodies, one root
 #
-# `resolve_project_root()` is a SEVEN-copy family: FOUR since S4+S5 (w2-s45 §5 call 7) — the
+# `resolve_project_root()` is an EIGHT-copy family: FOUR since S4+S5 (w2-s45 §5 call 7) — the
 # governing-skill hook is the origin, the evidence gate its long-standing twin, and the
 # dispatch wall and the probe took copies when R5 made the wall run the probe inline — plus
 # TWO MORE from epic-16 w2 Step-6 remediation R3 (ap review A-1): the poker and stop-orders
@@ -3004,15 +3011,20 @@ EG_N="$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh"
 SP_N="$BIONIC_HOOKS_DIR/session-poker.sh"
 SO_N="$BIONIC_HOOKS_DIR/stop-orders.sh"
 ACG_N="$BIONIC_HOOKS_DIR/agent-context-guard.sh"
+# The EIGHTH is hooks/patrol-revive.sh (epic-19 w1, AC-F6): it reads the Patrol stamp at the
+# main repository's root to decide whether the run's clock died, so a copy that rooted a
+# worktree at its own tree would find no stamp and stay silent for every turn a run spends
+# inside one — the same inert-where-it-binds failure the seventh was added against.
+PR_N="$BIONIC_HOOKS_DIR/patrol-revive.sh"
 
 expect_eq "the root resolver extracts at all (this section is not vacuous)" "yes" \
   "$([ -n "$(fn_body "$GS_N" resolve_project_root)" ] && echo yes || echo no)"
-for _n in "$DP_N" "$PB_N" "$EG_N" "$SP_N" "$SO_N" "$ACG_N"; do
+for _n in "$DP_N" "$PB_N" "$EG_N" "$SP_N" "$SO_N" "$ACG_N" "$PR_N"; do
   expect_eq "$(basename "$_n")'s resolve_project_root() is the origin's, body for body" \
     "$(fn_body "$GS_N" resolve_project_root)" "$(fn_body "$_n" resolve_project_root)"
 done
 
-# -------------------------------------------------------------- N.2 seven ANSWERS, one root
+# -------------------------------------------------------------- N.2 eight ANSWERS, one root
 #
 # Bodies being equal is a claim about the text. This is the claim about the ANSWER, taken
 # where the field case took it: inside a real `git worktree add`, which is the input that
@@ -3041,16 +3053,16 @@ NMAIN=$(cd "$NREPO" && pwd -P)
 # PreToolUse gate meets the second shape on the first artifact write into a project, and
 # the climb-to-the-nearest-existing-ancestor is the part of the resolver that handles it.
 for _p in "$NWT/.bionic/docs/record/x.md" "$NWT/deep/not/created/yet/x.md"; do
-  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N"; do
+  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N" "$PR_N"; do
     expect_eq "$(basename "$_n") roots '${_p#$NWT/}' at the MAIN repository, not the worktree" \
       "$NMAIN" "$(cd "$NWT" && root_via "$_n" "$_p")"
   done
 done
-# The paired negative: outside any repository all seven fall back, and to the SAME fallback.
-# Without it the seven could agree by having all stopped resolving anything.
+# The paired negative: outside any repository all eight fall back, and to the SAME fallback.
+# Without it the eight could agree by having all stopped resolving anything.
 NOUT="$SANDBOX/fx/nroot/notarepo"
 mkdir -p "$NOUT"
-# HERMETICITY PRECONDITION (epic-18 W3, slice 4/3). The seven rows below assert what
+# HERMETICITY PRECONDITION (epic-18 W3, slice 4/3). The eight rows below assert what
 # resolve_project_root answers when there is no git repository AND no `.bionic/` anywhere
 # above the target — only then does the supplied fallback win. That second half is a fact
 # about the MACHINE, not about the code: $SANDBOX lives under $TMPDIR, which every other
@@ -3073,7 +3085,7 @@ while [ -n "$_anc" ] && [ "$_anc" != "/" ] && [ "$_anc" != "." ]; do
   if [ -d "$_anc/.bionic" ]; then NOUT_DIRTY="$_anc"; fi
   _anc=$(dirname "$_anc")
 done
-for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N"; do
+for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N" "$PR_N"; do
   expect_eq "$(basename "$_n") falls back outside any repository" \
     "$NOUT" "$(cd "$NOUT" && root_via "$_n" "$NOUT/x.md" "$NOUT")"
 done
@@ -3094,7 +3106,7 @@ mkdir -p "$NBWS/sub"
 # Asked from $NOUT — a directory unrelated to NBWS and itself outside any repository, so a
 # resolver that answered `pwd` (the old bug) would land on $NOUT, not $NBWS.
 for _p in "$NBWS/.bionic/docs/record/x.md" "$NBWS/sub/deep/not/created/yet/x.md"; do
-  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N"; do
+  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N" "$PR_N"; do
     expect_eq "$(basename "$_n") roots '${_p#$NBWS/}' at NBWS from an unrelated cwd, not the fallback" \
       "$NBWS" "$(cd "$NOUT" && root_via "$_n" "$_p" "$NOUT")"
   done
