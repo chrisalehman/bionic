@@ -49,8 +49,9 @@
 # covers the roster as it stands now: epic-18 wave-03 deleted nineteen of those
 # suites on the reliability ruling (commit 8582861), one of the nineteen
 # (fresh-home.test.sh) was later revived, rc-item.test.sh was added new, and
-# epic-19 wave-01 added doctor-patrol.test.sh (F3) — 25 `run` lines as of this
-# writing (`grep -c '^run "' tests/run.sh` equals `ls tests/*.test.sh | wc -l`;
+# epic-19 wave-01 added doctor-patrol.test.sh (F3) and command-relay.test.sh
+# (F4) — 27 `run` lines as of this writing (`grep -c '^run "' tests/run.sh`
+# equals `ls tests/*.test.sh | wc -l`;
 # a maintainer re-derives the count rather than trusting a number in a
 # comment, this one included). Neither audit file re-covers what changed since
 # it ran; a suite added or restored after S8b carries no isolation proof
@@ -275,6 +276,15 @@ run "fresh-home.test.sh" bash tests/fresh-home.test.sh
 # deleted at 8582861 for fingerprinting the whole machine). Hand-listed like every
 # suite outside hooks/.
 run "doctor-patrol.test.sh" bash tests/doctor-patrol.test.sh
+# The command-relay contract (F4, epic-19 wave-01, spec AC-F4): the shared
+# voice-contract block (and every rendered command file it reaches) demands a
+# fenced code block rather than the collapsible "one block", proven alongside
+# `render.sh --check` so a template edit without a re-render goes red here too;
+# and setup.sh's item()/plan-verb free-form fields — which routinely carry
+# absolute paths with no bound — stay inside the same 100-column budget
+# doctor.sh already holds itself to (AC-15). Hand-listed like every suite
+# outside hooks/.
+run "command-relay.test.sh" bash tests/command-relay.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
