@@ -52,6 +52,13 @@ VOICE_BLOCK="${REPO}/agents-src/blocks/voice-contract.md"
 SETUP_MD="${PAYLOAD}/commands/setup.md"
 DOCTOR_MD="${PAYLOAD}/commands/doctor.md"
 RENDER_SH="${REPO}/agents-src/render.sh"
+WIDTH_SH="${PAYLOAD}/scripts/lib/width.sh"
+
+# The column budget and its ruler, sourced from the product rather than
+# restated: this suite asserts against `BIONIC_LINE_WIDTH`, so a change to the
+# budget moves the assertion with it and can never leave the two disagreeing.
+# shellcheck source=/dev/null
+. "$WIDTH_SH"
 
 command -v jq >/dev/null 2>&1 || { echo "command-relay.test.sh: jq is required"; exit 1; }
 
@@ -69,17 +76,24 @@ expect_not_contains() {
   case "$hay" in *"$needle"*) no "$label" "'$needle' should not be in: $(printf '%.200s' "$hay")" ;; *) ok "$label" ;; esac
 }
 # All-lines-fit is the AC-15 assertion, restated for setup.sh's own output: no
-# line printed may exceed the column budget. Byte length via LC_ALL=C, the same
-# unit item()'s own ${#s} check uses, so test and implementation agree on what
-# "100" means for a line carrying a 3-byte glyph.
+# line printed may exceed the column budget.
+#
+# MEASURED IN COLUMNS, THROUGH THE PRODUCT'S OWN COUNTER. The budget is a column
+# count — a terminal lays out columns — and the glyphs this report prints are
+# three bytes each for one column, so a byte ruler condemns a line that fits and
+# was what this helper used before S9. `bionic_cols` (lib/width.sh) is the one
+# owner of that measurement, and a test measuring one way while the script
+# truncates another is a wall with a gap in it. Using the implementation's own
+# ruler cannot catch a bug IN the ruler, so the ruler is pinned directly below.
 expect_all_lines_fit() {  # <label> <max-width> <text>
   local label="$1" max="$2" text="$3" longest=0 n
   while IFS= read -r line || [ -n "$line" ]; do
-    n=$(LC_ALL=C awk -v s="$line" 'BEGIN { print length(s) }')
+    n="$(bionic_cols "$line")"
     [ "$n" -gt "$longest" ] && longest="$n"
   done <<< "$text"
   if [ "$longest" -le "$max" ]; then ok "$label"; else no "$label" "longest line is ${longest} columns (budget ${max})"; fi
 }
+expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 
 # AN EXPLICIT /tmp TEMPLATE, short side only. macOS's `mktemp -d` ignores
 # TMPDIR and always roots under /var/folders/.../T — itself 50-60 columns
@@ -105,6 +119,37 @@ expect_contains "A4: rendered doctor.md carries the fenced-block demand" "fenced
 
 expect_true "A5: render.sh --check finds no drift (templates, finals and manifest agree)" \
   bash "$RENDER_SH" --check
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Group B0 — the ruler and the truncator themselves (lib/width.sh)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# EVERY ASSERTION IN GROUP B IS MEASURED WITH `bionic_cols`, so a ruler that
+# always answered 0 would pass every all-lines-fit arm below with nothing under
+# it. These four pin the ruler and its truncator directly, each negative beside
+# the positive it means nothing without.
+
+ASCII_S='abcdefghij'                       # 10 bytes, 10 columns
+GLYPH_S='✓ ✗ – — ≥ … ·'                    # 7 glyphs (six 3-byte, · is 2) + 6 spaces
+expect_eq "B0a: bionic_cols counts a plain ASCII string as its length" \
+  "10" "$(bionic_cols "$ASCII_S")"
+expect_eq "B0b: bionic_cols counts each 3-byte glyph as one column" \
+  "13" "$(bionic_cols "$GLYPH_S")"
+# `wc -c`, not `${#GLYPH_S}`: bash's length is CHARACTERS under a UTF-8 locale
+# and bytes under C, and this arm is only worth anything if it is bytes. The
+# 26-vs-13 gap is the whole reason a byte ruler cannot wall this report.
+expect_eq "B0c: and that is fewer columns than the string has bytes" \
+  "26" "$(printf '%s' "$GLYPH_S" | wc -c | tr -d ' ')"
+
+expect_eq "B0d: bionic_trunc leaves a string inside the budget untouched" \
+  "$ASCII_S" "$(bionic_trunc "$ASCII_S" 20)"
+expect_eq "B0e: bionic_trunc elides a string past the budget, to the budget" \
+  "abcd…" "$(bionic_trunc "$ASCII_S" 5)"
+expect_eq "B0f: an elided string measures exactly its budget in columns" \
+  "5" "$(bionic_cols "$(bionic_trunc "$ASCII_S" 5)")"
+
+expect_eq "B0g: the budget setup and doctor share is 100 columns" \
+  "100" "$BIONIC_LINE_WIDTH"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Group B — width truncation on setup's free-form fields
@@ -149,14 +194,14 @@ write_env_fixture() {  # <settings-file>
 SHORT_SETTINGS="$TMP/s.json"
 write_env_fixture "$SHORT_SETTINGS"
 SHORT_OUT="$(run_setup BIONIC_SETTINGS_FILE="$SHORT_SETTINGS" -- --only environment)"
-expect_all_lines_fit "B1: --only environment, short path — every line fits 100 columns" 100 "$SHORT_OUT"
+expect_all_lines_fit "B1: --only environment, short path — every line fits 100 columns" "$BIONIC_LINE_WIDTH" "$SHORT_OUT"
 expect_contains      "B2: --only environment, short path — full path shown, untouched" "$SHORT_SETTINGS" "$SHORT_OUT"
 expect_not_contains  "B3: --only environment, short path — nothing needed eliding" "…" "$SHORT_OUT"
 
 LONG_SETTINGS="$TMP/${LONGSEG}/${LONGSEG}/${LONGSEG}/settings.json"
 write_env_fixture "$LONG_SETTINGS"
 LONG_OUT="$(run_setup BIONIC_SETTINGS_FILE="$LONG_SETTINGS" -- --only environment)"
-expect_all_lines_fit "B4: --only environment, long path — every line still fits 100 columns" 100 "$LONG_OUT"
+expect_all_lines_fit "B4: --only environment, long path — every line still fits 100 columns" "$BIONIC_LINE_WIDTH" "$LONG_OUT"
 expect_contains      "B5: --only environment, long path — the field was elided" "…" "$LONG_OUT"
 expect_not_contains  "B6: --only environment, long path — the untruncated path is gone" "$LONG_SETTINGS" "$LONG_OUT"
 
@@ -173,13 +218,13 @@ write_rc_fixture() {  # <rc-file>
 SHORT_RC="$TMP/r.zshrc"
 write_rc_fixture "$SHORT_RC"
 SHORT_RC_OUT="$(run_setup BIONIC_SHELL_RC="$SHORT_RC" -- --only claude-proxy)"
-expect_all_lines_fit "B7: --only claude-proxy, short rc path — every line fits 100 columns" 100 "$SHORT_RC_OUT"
+expect_all_lines_fit "B7: --only claude-proxy, short rc path — every line fits 100 columns" "$BIONIC_LINE_WIDTH" "$SHORT_RC_OUT"
 expect_contains      "B8: --only claude-proxy, short rc path — full path shown, untouched" "$SHORT_RC" "$SHORT_RC_OUT"
 
 LONG_RC="$TMP/${LONGSEG}/${LONGSEG}/${LONGSEG}/dot.zshrc"
 write_rc_fixture "$LONG_RC"
 LONG_RC_OUT="$(run_setup BIONIC_SHELL_RC="$LONG_RC" -- --only claude-proxy)"
-expect_all_lines_fit "B9: --only claude-proxy, long rc path — every line still fits 100 columns" 100 "$LONG_RC_OUT"
+expect_all_lines_fit "B9: --only claude-proxy, long rc path — every line still fits 100 columns" "$BIONIC_LINE_WIDTH" "$LONG_RC_OUT"
 expect_contains      "B10: --only claude-proxy, long rc path — the field was elided" "…" "$LONG_RC_OUT"
 expect_not_contains  "B11: --only claude-proxy, long rc path — the untruncated path is gone" "$LONG_RC" "$LONG_RC_OUT"
 
@@ -192,7 +237,7 @@ ALL_OUT="$(run_setup BIONIC_SETTINGS_FILE="$TMP/${LONGSEG}/${LONGSEG}/settings.j
                      BIONIC_SHELL_RC="$TMP/${LONGSEG}/${LONGSEG}/dot.zshrc" \
                      -- --all)"
 expect_contains      "B13: --all plan reaches the environment/claude-proxy verb lines" "bionic would:" "$ALL_OUT"
-expect_all_lines_fit "B14: --all plan, long paths pending — every line fits 100 columns" 100 "$ALL_OUT"
+expect_all_lines_fit "B14: --all plan, long paths pending — every line fits 100 columns" "$BIONIC_LINE_WIDTH" "$ALL_OUT"
 
 echo ""
 echo "command-relay.test.sh: ${PASS}/${TOTAL} passed"

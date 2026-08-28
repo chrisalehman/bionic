@@ -20,7 +20,7 @@
 #   agents: state=<stock|modified|unknown> total=<n|unknown> modified=<n|unknown> names=<a.md,b.md|-> cause=<text|->
 #   dep:<name> lane=<3a|3b> present=<yes|no|unknown> version=<v|unknown> constraint=<c> verdict=<ok|violation|unknown>
 #   env:todo-tools present=<yes|no>
-#   env:rc-claude-proxy present=<yes|no>
+#   env:rc-claude-proxy present=<yes|no|stale>
 #   env:zshrc-legacy present=<yes|no>
 #   env:legacy-channel-hooks count=<n|unknown>
 #   env:legacy-hook-files count=<n|unknown> path=<dir> names=<a.sh,b.sh|-> [cause=<text>]
@@ -77,6 +77,20 @@ _detect_self_dir() {
 if ! declare -F check_dep >/dev/null 2>&1; then
   # shellcheck source=/dev/null
   . "$(cd "$(_detect_self_dir)" && pwd -P)/deps.sh"
+fi
+
+# env.sh, THE SAME SOFT SOURCE, FOR ITS READ HALF ONLY — `rc_get`, `rc_file` and
+# `rc_default`. Those own the question "is bionic's proxy line inside bionic's
+# markers", and `detect_rc_claude_proxy` below now asks THEM rather than
+# answering it a second way (epic-19 W1 Step-6 DUPLICATION FAIL: the two
+# predicates disagreed on every machine carrying an older proxy line). env.sh's
+# write half is never called from here, the same way this file never installs a
+# dependency it can only report on. No cycle: env.sh sources deps.sh and nothing
+# else, so this file loads deps.sh, then env.sh over the top of it, and a caller
+# that already has either gets neither again.
+if ! declare -F rc_get >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(_detect_self_dir)" && pwd -P)/env.sh"
 fi
 
 _detect_plugin_root() {
@@ -306,21 +320,45 @@ detect_env_todo_tools() {
 #     claude() { command claude --allow-dangerously-skip-permissions "$@"; }
 #     # ─── bionic:rc:end ───
 #
-# THE MARKERS ARE THE PREDICATE, and only the markers. A `claude()` function a
-# user wrote for themselves is not bionic's footprint, must not be reported as
-# bionic's, and must not be removed as bionic's — so this asks whether the START
-# MARKER is there, exactly as detect_zshrc_legacy_block does for the retired
-# block, and never whether the file mentions the flag.
+# ONE OWNER FOR THE PREDICATE, AND IT IS env.sh's. `rc_get` — what setup already
+# consumes to decide whether the item is done — asks whether `rc_default`'s line
+# is INSIDE bionic's markers, and this function asks `rc_get`. It used to grep
+# the START MARKER on its own, which agreed with setup only for as long as the
+# line between the markers never changed; slice 4/1 changed it
+# (`--dangerously-skip-permissions` → `--allow-dangerously-skip-permissions`)
+# and every install already on disk became a machine setup called pending and
+# doctor called healthy. Two owners of one concept, disagreeing in the field:
+# the Step-6 review's DUPLICATION FAIL, closed by deleting the second owner
+# rather than by adding a test that watches them drift.
 #
-# The literals are env.sh's (RC_START); this file cannot source env.sh — env.sh
-# sources deps.sh and detect.sh is loaded by doors that have not — so the marker
-# is spelled here and tests/rc-item.test.sh pins the pair. Verbatim,
-# box-drawing dashes included.
+# THREE STATES, BECAUSE THERE ARE THREE MACHINES.
+#
+#   yes    — the markers hold exactly the line this payload writes.
+#   stale  — the markers are there and hold something else: an older payload's
+#            text, or a hand edit between them. This person CONSENTED; what they
+#            carry is bionic's own block gone out of date, which setup rewrites
+#            and doctor must not paint green.
+#   no     — no markers at all. Never asked, or asked and declined — a correctly
+#            configured machine either way.
+#
+# The `no`/`stale` split is why the marker test survives at all: it is no longer
+# the predicate, it is what tells a stale block from an absent one. A `claude()`
+# function a user wrote for themselves sits outside the markers and is none of
+# these — not claimed here, not removed by /bionic:remove.
 detect_rc_claude_proxy() {
   local rc present=no
-  rc="$(_detect_shell_rc)"
-  if [ -f "$rc" ] && grep -qF '# ─── bionic:rc:start ───' "$rc" 2>/dev/null; then
+  if rc_get claude-proxy 2>/dev/null; then
     present=yes
+  else
+    # The file `rc_get` just looked in, so the two halves of this answer cannot
+    # come to be about two different files. Unresolvable (a shell bionic writes
+    # no rc for) leaves it empty and the answer `no`, which is the truth: there
+    # is no file that could hold bionic's block.
+    rc="$(rc_file 2>/dev/null)" || rc=""
+    if [ -n "$rc" ] && [ -n "${RC_START:-}" ] && [ -f "$rc" ] && \
+       grep -qF "$RC_START" "$rc" 2>/dev/null; then
+      present=stale
+    fi
   fi
   echo "env:rc-claude-proxy present=${present}"
   return 0

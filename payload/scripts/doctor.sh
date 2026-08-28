@@ -128,6 +128,12 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 # for the one shell-out it makes.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/patrol.sh"
+# width.sh, which owns the 100-column rule this file's format rules state and
+# every row builder below now enforces. It was prose here and a constant in
+# setup.sh until S9 — the same number in two files with nothing binding them,
+# and the copy nothing walled (this one) was the one that broke.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/width.sh"
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
@@ -176,11 +182,17 @@ BIONIC_PLUGIN_ID="bionic@bionic"
 #      nothing. They are counted and summarised, and only the rows carrying a
 #      real value are printed.
 #
-# AND EVERY LINE FITS. Nothing printed below may exceed 100 columns —
-# tests/doctor.test.sh used to wall it for both fixture machines; that suite
-# was deleted at 8582861 (epic-18 wave-03) and nothing replaced the wall —
-# because a wrapped line is rule 1 broken by the terminal rather than by this
-# file.
+# AND EVERY LINE FITS. Nothing printed below may exceed `BIONIC_LINE_WIDTH`
+# columns (lib/width.sh, 100) — because a wrapped line is rule 1 broken by the
+# terminal rather than by this file. This used to be a sentence and nothing
+# else: tests/doctor.test.sh walled it for both fixture machines until that
+# suite was deleted at 8582861 (epic-18 wave-03), and the next row added to this
+# file — F5's version row, slice 4/4 of this very wave — came out at 104 columns
+# on the wave's own T3 capture and past 130 in its worst case. The rule is now
+# enforced where rows are BUILT (the three builders below, plus the verdict
+# line), so a row added by a future arm inherits the bound the same way it
+# inherits the format, and walled from outside by an all-lines-fit assertion on
+# real output in tests/doctor-version.test.sh and tests/command-relay.test.sh.
 
 # The three symbols, and the invariant that gives them meaning: ✗ is printed if
 # and only if the same run puts a matching line in FIX. Anything true but not
@@ -207,9 +219,9 @@ _doctor_rtrim() {  # <line>
 # CLAUDE_CODE_ENABLE_TODO_TOOLS, 29 characters — and a label that overruns its
 # column pushes one row's value out of line with every other row's.
 _doctor_item() {  # <symbol> <label> <value>
-  local line
-  printf -v line '  %s %-30s %s' "$1" "$2" "${3:-}"
-  printf '%s\n' "$(_doctor_rtrim "$line")"
+  local prefix
+  printf -v prefix '  %s %-30s ' "$1" "$2"
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${3:-}")")"
 }
 
 # The FIX section, accumulated as the run discovers problems and printed near the
@@ -303,31 +315,27 @@ _doctor_unknown_cause() {  # <kind> — the install mechanism the table names
 # hypothetical: `—` is the version cell of every row whose mechanism keeps no
 # version, which on an ordinary machine is a third of the table.
 #
-# SO CELLS ARE PADDED BY COLUMN COUNT. The multi-byte glyphs are a closed set —
-# this file names all of them — so measuring is a substitution away from being
-# exact, with no locale to depend on and no external process per cell.
-_doctor_cols() {  # <string> -> its width in terminal columns
-  local s="${1:-}"
-  s="${s//✓/.}"; s="${s//✗/.}"; s="${s//–/.}"; s="${s//—/.}"
-  s="${s//≥/.}"; s="${s//…/.}"; s="${s//·/.}"
-  printf '%s' "${#s}"
-}
+# SO CELLS ARE PADDED BY COLUMN COUNT, and the counter is `bionic_cols`
+# (lib/width.sh) — the same one the budget below is measured with, because a
+# report that padded in one unit and truncated in another is a table that can
+# still come out crooked. This file used to carry its own copy (`_doctor_cols`);
+# it was deleted at S9 with the shared owner it duplicated.
 
 # One cell, padded to a column width. A cell already at or over its width is
 # printed whole and pushes its neighbours right — truncating a name to keep a
 # column straight would be choosing the table's looks over its content.
 _doctor_cell() {  # <string> <width>
   local s="${1:-}" w="${2:-0}" n
-  n=$(( w - $(_doctor_cols "$s") ))
+  n=$(( w - $(bionic_cols "$s") ))
   if [ "$n" -gt 0 ]; then printf '%s%*s' "$s" "$n" ""; else printf '%s' "$s"; fi
 }
 
 # `component  count  detail` — four rows on a healthy machine, so the count
 # column is narrow and the detail column gets the room.
 _doctor_native_row() {  # <symbol> <component> <count> <detail>
-  local line
-  line="  $1 $(_doctor_cell "$2" 10) $(_doctor_cell "$3" 8) ${4:-}"
-  printf '%s\n' "$(_doctor_rtrim "$line")"
+  local prefix
+  prefix="  $1 $(_doctor_cell "$2" 10) $(_doctor_cell "$3" 8) "
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${4:-}" "${5:-}")")"
 }
 
 # `name  version  source  state`. The source column is what makes this table
@@ -335,18 +343,18 @@ _doctor_native_row() {  # <symbol> <component> <count> <detail>
 # entirely different machinery, and which machinery it was decides what a user
 # types to repair or remove it.
 _doctor_third_row() {  # <symbol> <name> <version> <source> <state>
-  local line
-  line="  $1 $(_doctor_cell "$2" 21) $(_doctor_cell "$3" 11) $(_doctor_cell "$4" 17) ${5:-}"
-  printf '%s\n' "$(_doctor_rtrim "$line")"
+  local prefix
+  prefix="  $1 $(_doctor_cell "$2" 21) $(_doctor_cell "$3" 11) $(_doctor_cell "$4" 17) "
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${5:-}")")"
 }
 
 # `KEY=value  state`. The left cell is one token on purpose — an environment
 # name and its value are a single fact, and splitting them into two columns made
 # a reader join them back up by eye on every row.
 _doctor_env_row() {  # <symbol> <key=value or label> <state>
-  local line
-  line="  $1 $(_doctor_cell "$2" 42) ${3:-}"
-  printf '%s\n' "$(_doctor_rtrim "$line")"
+  local prefix
+  prefix="  $1 $(_doctor_cell "$2" 42) "
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${3:-}")")"
 }
 
 # WHICH MACHINERY PUT IT THERE, in the words a user would use for it. Keyed on
@@ -960,6 +968,14 @@ if [ "$ENV_MISSING" -gt 0 ]; then
   fix "${ENV_MISSING} of bionic's environment settings $(_doctor_plural "$ENV_MISSING" is are) not written → run /bionic:setup"
 fi
 
+# A STALE PROXY BLOCK IS THE ONE STATE OF THIS ITEM THAT EARNS A FIX LINE.
+# Absent is an offer nobody took, and never a problem (see the row itself, in
+# ENVIRONMENT below); stale is bionic's OWN block, consented to, carrying a line
+# this payload no longer writes. Setup rewrites the block wholesale, so the
+# repair is the same command as the offer — but this time there is something
+# broken to repair, which is what makes the row ✗ instead of `–`.
+[ "$RC_PROXY_STATE" = "stale" ] && fix "the claude() shell proxy is an older line → run /bionic:setup"
+
 [ "$LEGACY_STATE" = "yes" ] && fix "the legacy .zshrc alias block is still there → run /bionic:setup"
 case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
@@ -1044,10 +1060,10 @@ else
     # reading, and a cold machine has enough of them to run past a terminal's
     # width — where the line would break into a second one and undo the whole
     # rule. The count above is exact either way.
-    
-    if [ "${#_doctor_verdict}" -gt 99 ]; then
-      _doctor_verdict="$(printf '%.96s' "$_doctor_verdict")…"
-    fi
+    # Through the shared truncator (lib/width.sh), which is where the budget
+    # lives — this line used to carry its own pair of literals, 99 and 96, which
+    # were the 100-column rule written a third time in a third unit.
+    _doctor_verdict="$(bionic_trunc "$_doctor_verdict" "$BIONIC_LINE_WIDTH")"
   fi
   printf '%s\n' "$_doctor_verdict"
   if [ -n "$FIX_LINES_OTHER" ]; then
@@ -1088,7 +1104,7 @@ case "$FEED_KIND" in
         _doctor_native_row "$DOCTOR_OK" "version" "$LATEST_INSTALLED" "up to date" ;;
       lag)
         _doctor_native_row "$DOCTOR_BAD" "version" "$LATEST_INSTALLED" \
-          "${LATEST_LATEST} available → claude plugin update bionic@bionic" ;;
+          "${LATEST_LATEST} available" " → claude plugin update bionic@bionic" ;;
       *)
         _doctor_native_row "$DOCTOR_NIL" "version" "?" "unknown — ${LATEST_CAUSE}" ;;
     esac ;;
@@ -1186,8 +1202,11 @@ echo "ENVIRONMENT"
 # THREE COLUMNS, LIKE THE TABLES ABOVE (Chris 2026-08-22): setting · value · state.
 # An env var's value is the configured one; its state says whether this session
 # carries it; the statusline's value is the command.
-_doctor_env3() {  # <symbol> <setting> <value> <state>
-  printf '%s\n' "$(_doctor_rtrim "  $1 $(_doctor_cell "$2" 36) $(_doctor_cell "$3" 13) ${4:-}")"
+# The fifth argument is the instruction the cut may not eat (lib/width.sh) — the
+# rc rows name a path of unbounded length and then say what to do about it.
+_doctor_env3() {  # <symbol> <setting> <value> <state> [<instruction>]
+  printf '%s\n' "$(_doctor_rtrim \
+    "$(bionic_line "  $1 $(_doctor_cell "$2" 36) $(_doctor_cell "$3" 13) " "${4:-}" "${5:-}")")"
 }
 printf '    %-36s %-13s %s\n' "setting" "value" "state"
 for _env_key in $ENV_KEYS; do
@@ -1213,11 +1232,21 @@ done
 # `claude()` function that puts the bypass mode in reach of the command a person
 # types — and someone who was asked and said no has a correctly configured
 # machine, not a broken one. So absent is `–` with the route to say yes, never
-# `✗` with a repair. Present is read from the MARKERS (detect.sh), so a claude()
-# function a user wrote for themselves is neither claimed here nor removable by
-# /bionic:remove.
+# `✗` with a repair. Presence is env.sh's `rc_get` (through detect.sh), so a
+# claude() function a user wrote for themselves — outside bionic's markers — is
+# neither claimed here nor removable by /bionic:remove.
+#
+# AND THE THIRD STATE IS NOT ABSENCE. `stale` is bionic's own block holding a
+# line this payload no longer writes, on a machine that already said yes. That
+# person is owed the truth and a command, not a green tick: the ✗ here is
+# matched by the fix line gathered above, which is the invariant those symbols
+# are worth anything under.
 if [ "$RC_PROXY_STATE" = "yes" ]; then
-  _doctor_env3 "$DOCTOR_OK" "claude() shell proxy" "on" "in $(_detect_shell_rc) — new shells pick it up"
+  _doctor_env3 "$DOCTOR_OK" "claude() shell proxy" "on" \
+    "in $(_detect_shell_rc)" " — new shells pick it up"
+elif [ "$RC_PROXY_STATE" = "stale" ]; then
+  _doctor_env3 "$DOCTOR_BAD" "claude() shell proxy" "stale" \
+    "in $(_detect_shell_rc)" " — /bionic:setup rewrites it"
 else
   _doctor_env3 "$DOCTOR_NIL" "claude() shell proxy" "—" "not set — /bionic:setup offers it"
 fi
