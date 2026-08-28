@@ -461,13 +461,14 @@ _setup_item_pending() {  # <name> -> 0 when the item has something to ask about
 # The whole page. Non-zero means there was nothing to print, which is a machine
 # with nothing left to set up rather than an error.
 _setup_print_plan() {
-  local id verb lines=""
+  local id verb prefix lines=""
+  prefix="  • "
   # fd 3: the standard input belongs to the question this page is printed for.
   while IFS= read -r id <&3; do
     [ -n "$id" ] || continue
     _setup_item_pending "$id" || continue
     verb="$(_setup_item_verb "$id")" || continue
-    lines="${lines}  • ${verb}"$'\n'
+    lines="${lines}${prefix}$(_setup_trunc "$verb" "$(( SETUP_LINE_WIDTH - ${#prefix} ))")"$'\n'
   done 3< <(_setup_item_ids)
   [ -n "$lines" ] || return 1
   say "bionic would:"
@@ -506,7 +507,45 @@ SETUP_NIL='–'
 # lose the only distinction that matters here: one of them is a decision and the
 # other is a decision still waiting to be made.
 SETUP_ASK='?'
-item()   { printf '   %s %-22s %s\n' "$1" "$2" "${3:-}"; }
+
+# THE ONE COLUMN BUDGET (epic-19 AC-F4, grounding §4(a)). item()'s third field
+# and the --all plan's verb lines both interpolate absolute paths — settings.json,
+# a shell rc, the legacy skill directory — with no bound, and none of them wrap
+# cleanly inside the command relay's fenced block. Follows doctor.sh's own rule
+# rather than inventing a second one: spec AC-15 holds every line doctor prints
+# to 100 columns (doctor.sh:179), and this script has the identical reason to.
+# There is no shared helper to reuse across the two scripts — doctor's own
+# per-row `_doctor_trunc` was deleted at epic-18 wave-03 alongside the Patrol
+# rows that called it (epic-19 w1 slice 4/2 note), and doctor's replacement
+# truncates whole composed strings from the right (`_doctor_absent_list`,
+# `_doctor_verdict`) the same way this one does, so the shape carries over even
+# though the callers do not.
+SETUP_LINE_WIDTH=100
+
+_setup_trunc() {  # <string> <budget> -> string, elided with … past budget
+  local s="${1:-}" max="${2:-0}" cut
+  [ "$max" -gt 0 ] || { printf '%s' "$s"; return 0; }
+  if [ "${#s}" -gt "$max" ]; then
+    # "…" is three bytes for one terminal column — the same fact that keeps
+    # SETUP_OK/SETUP_BAD/SETUP_NIL off the padded field above. Cutting three
+    # bytes short of the budget rather than one means the ellipsis's extra
+    # weight can never push the whole line past it.
+    cut=$(( max - 3 )); [ "$cut" -gt 0 ] || cut=0
+    printf '%.*s…' "$cut" "$s"
+  else
+    printf '%s' "$s"
+  fi
+}
+
+# THE BUDGET IS COMPUTED FROM THE REAL PREFIX, not assumed, so a label longer
+# than the %-22s minimum (`retired permission block` already is) still leaves
+# the free-form third field bounded rather than quietly blowing the budget
+# item() exists to hold.
+item() {
+  local prefix
+  prefix="$(printf '   %s %-22s ' "$1" "$2")"
+  printf '%s%s\n' "$prefix" "$(_setup_trunc "${3:-}" "$(( SETUP_LINE_WIDTH - ${#prefix} ))")"
+}
 action() { SETUP_ACTIONS="${SETUP_ACTIONS}${1}"$'\n'; }
 # deps.sh owns the one prompt shape — and the one short-circuit, because
 # `install_dep` and `install_plugin_native` ask through it directly and a
@@ -1190,7 +1229,11 @@ setup_claude_proxy() {
 # lands on a person's screen.
 _setup_rc_why() {  # <item>
   case "${1:-}" in
-    claude-proxy) echo "keeps the bypass mode selectable in the shift+tab cycle; the session still starts in your default mode" ;;
+    # SHORTENED TO RIDE ON THE LINE IT PRINTS ON (AC-F4/AC-15): with its
+    # "   — " lead-in this was 107 columns — "the bypass mode" carried no
+    # information "bypass" does not, so trimming it is the whole fix; nothing
+    # about the mechanism the sentence describes changed.
+    claude-proxy) echo "keeps bypass selectable in the shift+tab cycle; the session still starts in your default mode" ;;
     *)            echo "a shell line bionic needs" ;;
   esac
 }
