@@ -33,4 +33,6 @@ a fresh clone carries the path-scoped channel and nothing else. Rules addressed 
 *dispatched agent* belong in `agents-src/blocks/` instead, which renders into the six role
 files under `agents/` and ships with the plugin; the two channels differ in when an edit
 lands (a rules file on the next read, a role file on the next session), not in reach.
-`tests/scripts.test.sh` pins the roster of files here, so adding one is a deliberate act.
+Nothing pins the roster of files here any more — `tests/scripts.test.sh` did, and was retired with
+the reliability-tier cut (epic-18 W3, commit 8582861) — so adding one is a deliberate act by
+review, not by test.
