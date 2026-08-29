@@ -438,10 +438,29 @@ echo "=== Section 9: one cure, two surfaces — and the column budget ==="
 # is two answers, so the literal is pinned from BOTH files rather than from
 # either alone — the shape tests/cross-gate-agreement.test.sh uses wherever two
 # readers have to agree.
+lines_matching() {  # <text> <glob> -> the matching lines
+  local line out=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    # shellcheck disable=SC2053  # RHS is a glob on purpose
+    if [[ "$line" == $2 ]]; then out="${out}${line}"$'\n'; fi
+  done <<< "$1"
+  printf '%s' "$out"
+}
+
 CURE='re-invoke /bionic:canonical-sdlc'
 POKER_TEXT="$(cat "${PAYLOAD}/hooks/session-poker.sh")"
 DOCTOR_TEXT="$(cat "$DOCTOR_SH")"
-expect_match "33: hooks/session-poker.sh spells the cure this way" "*${CURE}*" "$POKER_TEXT"
+# PINNED TO THE DECISION THAT AGREES, not to the file that contains it. The
+# phrase occurs three times in hooks/session-poker.sh and only one of them is
+# the cure doctor is echoing — the `check=wall-blind` decision record; another
+# is the unrelated predecessor-row message inside the roster detail block. A
+# glob over the whole file stays green if the wall-blind cure alone is reworded
+# or deleted, which is the exact drift this pin exists to catch, so the match is
+# made against that ONE line. An extraction that found nothing fails the match
+# rather than passing it, which is what keeps this from becoming a pin over air.
+POKER_WALL_LINE="$(lines_matching "$POKER_TEXT" '*check=wall-blind*')"
+expect_match "33: session-poker.sh spells the cure on its wall-blind decision" \
+  "*check=wall-blind*cure=${CURE}*" "$POKER_WALL_LINE"
 expect_match "34: payload/scripts/doctor.sh spells it identically" "*${CURE}*" "$DOCTOR_TEXT"
 
 # THE BUDGET, MEASURED WITH THE PRODUCT'S OWN RULER rather than by eye
@@ -458,15 +477,6 @@ expect_match "34: payload/scripts/doctor.sh spells it identically" "*${CURE}*" "
 # what that file's own header says the omission costs.
 # shellcheck source=/dev/null
 . "${PAYLOAD}/scripts/lib/width.sh"
-
-lines_matching() {  # <text> <glob> -> the matching lines
-  local line out=""
-  while IFS= read -r line || [ -n "$line" ]; do
-    # shellcheck disable=SC2053  # RHS is a glob on purpose
-    if [[ "$line" == $2 ]]; then out="${out}${line}"$'\n'; fi
-  done <<< "$1"
-  printf '%s' "$out"
-}
 
 first_over_budget() {  # <text> -> the first line wider than the budget, or empty
   local line
@@ -498,6 +508,45 @@ else
   no "36: every new Patrol row and fix line fits the ${BIONIC_LINE_WIDTH}-column budget" \
      "$(bionic_cols "$WIDE") columns: ${WIDE}"
 fi
+
+echo ""
+echo "=== Section 10: a firing Patrol with NO roster file and NOTHING dispatched ==="
+
+# THE HEALTHY HALF OF `present=no`, and the reason Section 7's row is gated on a
+# COUNT rather than on the file. The roster file is written by the FIRST
+# dispatch — hooks/dispatch-preflight.sh appends its header and the first row
+# together and nothing pre-creates it at session start — so a perfectly healthy
+# session that has not dispatched anything yet has no roster file either. This
+# fixture is Section 7's with exactly one thing removed: the three `Agent`
+# tool_uses. `blind` is the field that separates the two (`agents - rostered -
+# refused`), and a session with no launches has nothing unrecorded.
+#
+# 1.3.0 printed `0 open dispatches` here and that number was TRUE. This slice
+# exists to stop doctor claiming a count nobody dispatched; saying "launches
+# unrecorded" over a session that launched nothing is the same error pointed the
+# other way. This section is the control that keeps the fix from overshooting,
+# and it is why the absent row is gated on `blind > 0` rather than on
+# `present = no`.
+
+SID10="bbbbbbbb-7777-2222-3333-444455556666"
+SHORT10="${SID10%%-*}"
+spawn_live_pid; PID10="$LIVE_PID"
+REPO10="$(make_repo_without_roster)"
+HOME10="$(make_claude_home "$SID10" "$PID10" "$REPO10")"
+TR10="$(transcript_of "$HOME10" "$SID10")"
+plant_patrol_job "$TR10" "toolu_1" "abc12345"
+# No plant_agent_dispatch call — the absence IS the variable under test.
+plant_patrol_stamp "$REPO10" "$SID10"
+
+OUT10="$(run_doctor "$HOME10")"
+PB10="$(patrol_block "$OUT10")"
+
+expect_match "37: a session that dispatched nothing keeps its true zero" \
+  "*✓ session ${SHORT10} · 0 open dispatches*" "$PB10"
+expect_no_match "38: and is never described as a missing record" \
+  "*roster absent*" "$PB10"
+expect_no_match "39: nor earns an unrostered-launch fix line it cannot have" \
+  "*session ${SHORT10}: * unrostered*" "$OUT10"
 
 echo ""
 echo "========================================"

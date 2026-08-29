@@ -897,7 +897,22 @@ _patrol_flush() {
       # (F3) is about the Patrol, and the stamp above has already answered that
       # question; the roster is a different object, and its absence is what the
       # text says rather than what the symbol implies.
-      if [ "$_p_present" = "yes" ]; then
+      #
+      # AN ABSENT FILE IS NOT YET A DEFECT — `blind` IS (Step-6 correctness
+      # FLAG, t1-six-axis-review §1). The roster file is created by the FIRST
+      # dispatch: hooks/dispatch-preflight.sh:1337-1344 appends its header and
+      # its first row together, and no hook pre-creates it at session start. So
+      # `present=no` describes two different machines — a session whose wall was
+      # lost and is launching agents nobody recorded, and a perfectly healthy
+      # session that has simply not dispatched anything yet. Only the first has
+      # something unrecorded, and `blind` (launches the roster never saw, from
+      # the same `patrol-wall/v1` record the fix line below reads) is the field
+      # that tells them apart. Gating on the file alone would print `roster
+      # absent — launches unrecorded` over a session with no launches — the same
+      # class of untrue claim this arm exists to end, pointed the other way — so
+      # a zero `blind` falls through to the ordinary count row, where `0 open
+      # dispatches` is what 1.3.0 printed and was TRUE.
+      if [ "$_p_present" = "yes" ] || [ "$blind" -eq 0 ]; then
         open="$_p_open"
         _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches)"
       else
