@@ -154,6 +154,46 @@ plant_patrol_stamp() {  # <repo> <sid> [<backdate-hours>]
   return 0
 }
 
+# A repo whose session never wrote a roster at all — the state this suite's
+# Sections 7 and 9 are about, and the one lib/patrol.sh reports as
+# `present=no|rows=0|open=0`. `make_repo_with_roster` called with no names
+# produces the same tree, which is exactly how Section 3 acquired it by
+# accident; this builder says out loud what that fixture is.
+make_repo_without_roster() {  # -> repo dir on stdout
+  local dir
+  dir="$(mktemp -d -p "$TMP")"
+  mkdir -p "$dir/.bionic/tmp"
+  printf '%s' "$dir"
+}
+
+# ONE LAUNCH, AS THE TRANSCRIPT RECORDS IT: the `Agent` tool_use lib/patrol.sh's
+# scan counts (`_patrol_scan_jq`, the `A` record) plus the ordinary tool_result
+# it joins to.
+#
+# THE RESULT IS BENIGN ON PURPOSE. A refusal is credited only when a tool_result
+# carrying `PreToolUse:Agent hook error:` joins BY tool_use_id to an `Agent`
+# tool_use (`_patrol_join_awk`) — the join, not the marker, is the rule — so
+# these launches land in `dispatched=` and none of them in `refused=`, and the
+# `blind=` arithmetic under test is `agents - rostered - 0`.
+#
+# `isSidechain:false` and no `agent_id` key anywhere in the entry: both are what
+# the scan's two main-thread filters test, and a fixture that failed either would
+# be counted as somebody else's turn and vanish from the tally.
+plant_agent_dispatch() {  # <transcript> <tool_use_id>
+  local t="$1" tid="$2"
+  jq -nc --arg id "$tid" \
+    '{type:"assistant",isSidechain:false,
+      message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"Agent",
+        input:{description:"fixture slice",subagent_type:"general-purpose",
+               prompt:"Do the fixture work and report back."}}]}}' \
+    >> "$t"
+  jq -nc --arg id "$tid" \
+    '{type:"user",isSidechain:false,
+      message:{role:"user",content:[{type:"tool_result",tool_use_id:$id,
+        content:"The agent finished and reported back."}]}}' \
+    >> "$t"
+}
+
 # ---------- driving doctor ----------
 
 run_doctor() {  # <claude-home>
@@ -222,7 +262,11 @@ echo "=== Section 3: duplicate Patrols — the one survivor ==="
 SID3="dddddddd-1111-2222-3333-444455556666"
 SHORT3="${SID3%%-*}"
 spawn_live_pid; PID3="$LIVE_PID"
-REPO3="$(make_repo_with_roster "$SID3")"  # no dispatches at all — open=0
+REPO3="$(make_repo_with_roster "$SID3" -- alpha)"  # a roster, one closed row — open=0
+# THE ROSTER IS PRESENT AND EMPTY OF OPEN WORK, which is not the same fixture as
+# a session that never wrote one. This section owns the duplicate-Patrol fix line
+# and wants the ordinary `0 open dispatches` row underneath it; the no-roster case
+# it used to be built on is Section 7's, where it is asserted rather than incidental.
 HOME3="$(make_claude_home "$SID3" "$PID3" "$REPO3")"
 TR3="$(transcript_of "$HOME3" "$SID3")"
 plant_patrol_job "$TR3" "toolu_1" "old11111"
@@ -311,6 +355,149 @@ echo "=== Section 6: registration ==="
 # nothing needed to be — this is that suite's live successor).
 expect_true "26: tests/run.sh names doctor-patrol.test.sh" \
   grep -q 'run "doctor-patrol.test.sh" bash tests/doctor-patrol.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"
+
+echo ""
+echo "=== Section 7: a firing Patrol with NO roster file and launches in the transcript ==="
+
+# THE DEFECT THIS SECTION OWNS (Chris, 2026-08-29, on the 1.3.0 plugin):
+# `/bionic:doctor` printed `✓ session 61be8dc9 · 0 open dispatches` while two
+# agents were running. The launch-time hook was never registered in that
+# session — hooks do not survive a continue, a /clear+resume or a
+# /reload-plugins — so no roster file was ever written, and doctor rendered the
+# ABSENCE of the record as the NUMBER zero. Every Patrol tick on that machine
+# was emitting `NOTIFY wall-blind` at the same moment. lib/patrol.sh had both
+# facts the whole time (`patrol-roster/v1 … present=no`, `patrol-wall/v1 …
+# blind=N`); the renderer parsed the first, read neither, and printed a count
+# nobody dispatched.
+#
+# THE ROW KEEPS ITS ✓. The Patrol IS running — that is what the stamp says and
+# what running-or-nothing (F3) reports. The roster is the thing that is missing,
+# and that is what the text now says.
+
+SID7="ffffffff-1111-2222-3333-444455556666"
+SHORT7="${SID7%%-*}"
+spawn_live_pid; PID7="$LIVE_PID"
+REPO7="$(make_repo_without_roster)"
+HOME7="$(make_claude_home "$SID7" "$PID7" "$REPO7")"
+TR7="$(transcript_of "$HOME7" "$SID7")"
+plant_patrol_job "$TR7" "toolu_1" "abc12345"
+plant_agent_dispatch "$TR7" "toolu_a1"
+plant_agent_dispatch "$TR7" "toolu_a2"
+plant_agent_dispatch "$TR7" "toolu_a3"
+plant_patrol_stamp "$REPO7" "$SID7"
+
+OUT7="$(run_doctor "$HOME7")"
+PB7="$(patrol_block "$OUT7")"
+
+expect_match "27: an absent roster is rendered as absent, not as a count" \
+  "*✓ session ${SHORT7} · roster absent — launches unrecorded*" "$PB7"
+# THE ORIGINAL LIE, WALLED. Not "the number is right now" — the claim itself is
+# withdrawn, because a session with no roster has no open-dispatch count to make.
+expect_no_match "28: and the row makes no open-dispatch claim at all" \
+  "*open dispatch*" "$PB7"
+expect_match "29: the fix line names the unrostered launches and ends in the cure" \
+  "*session ${SHORT7}: 3 launches unrostered → re-invoke /bionic:canonical-sdlc*" "$OUT7"
+
+echo ""
+echo "=== Section 8: a firing Patrol whose roster is PRESENT and incomplete ==="
+
+# THE OTHER HALF, and what keeps Section 7's row honest: here the roster is
+# real — one open dispatch, and the row still says exactly that — while the
+# transcript carries three launches, so two of them never reached the wall. The
+# roster is not absent, it is INCOMPLETE, and the count doctor prints stays the
+# count it can stand behind. `blind = 3 launches - 1 rostered - 0 refused = 2`.
+
+SID8="aaaaaaaa-9999-2222-3333-444455556666"
+SHORT8="${SID8%%-*}"
+spawn_live_pid; PID8="$LIVE_PID"
+REPO8="$(make_repo_with_roster "$SID8" beta)"
+HOME8="$(make_claude_home "$SID8" "$PID8" "$REPO8")"
+TR8="$(transcript_of "$HOME8" "$SID8")"
+plant_patrol_job "$TR8" "toolu_1" "abc12345"
+plant_agent_dispatch "$TR8" "toolu_a1"
+plant_agent_dispatch "$TR8" "toolu_a2"
+plant_agent_dispatch "$TR8" "toolu_a3"
+plant_patrol_stamp "$REPO8" "$SID8"
+
+OUT8="$(run_doctor "$HOME8")"
+PB8="$(patrol_block "$OUT8")"
+
+expect_match "30: a present roster still prints its own open count, unchanged" \
+  "*✓ session ${SHORT8} · 1 open dispatch*" "$PB8"
+expect_no_match "31: and a present roster is never re-rendered as absent" \
+  "*roster absent*" "$PB8"
+expect_match "32: the fix line reports only the launches the roster never saw" \
+  "*session ${SHORT8}: 2 launches unrostered → re-invoke /bionic:canonical-sdlc*" "$OUT8"
+
+echo ""
+echo "=== Section 9: one cure, two surfaces — and the column budget ==="
+
+# ONE CURE, SPELLED ONCE. hooks/session-poker.sh decides `wall-blind` at tick
+# time and names the repair; doctor names the same repair from the same fact
+# hours later, off the same `patrol-wall/v1` record. Two spellings of one cure
+# is two answers, so the literal is pinned from BOTH files rather than from
+# either alone — the shape tests/cross-gate-agreement.test.sh uses wherever two
+# readers have to agree.
+CURE='re-invoke /bionic:canonical-sdlc'
+POKER_TEXT="$(cat "${PAYLOAD}/hooks/session-poker.sh")"
+DOCTOR_TEXT="$(cat "$DOCTOR_SH")"
+expect_match "33: hooks/session-poker.sh spells the cure this way" "*${CURE}*" "$POKER_TEXT"
+expect_match "34: payload/scripts/doctor.sh spells it identically" "*${CURE}*" "$DOCTOR_TEXT"
+
+# THE BUDGET, MEASURED WITH THE PRODUCT'S OWN RULER rather than by eye
+# (lib/width.sh — `bionic_cols` counts COLUMNS, and every glyph on these rows is
+# three bytes and one column wide). Sections 7 and 8 print the only rows and fix
+# lines in the product that this suite is the first to produce;
+# tests/doctor-version.test.sh walls the rest of the page but never drives a live
+# Patrol, so nothing else measures these.
+#
+# THE RULER OVER-COUNTS `→` AND THAT IS THE SAFE DIRECTION. The arrow is not in
+# lib/width.sh's closed glyph set, so each one measures three columns instead of
+# one and a fix line carrying two of them is scored four columns wide. The
+# effect is a wall that is stricter than the terminal, never looser — which is
+# what that file's own header says the omission costs.
+# shellcheck source=/dev/null
+. "${PAYLOAD}/scripts/lib/width.sh"
+
+lines_matching() {  # <text> <glob> -> the matching lines
+  local line out=""
+  while IFS= read -r line || [ -n "$line" ]; do
+    # shellcheck disable=SC2053  # RHS is a glob on purpose
+    if [[ "$line" == $2 ]]; then out="${out}${line}"$'\n'; fi
+  done <<< "$1"
+  printf '%s' "$out"
+}
+
+first_over_budget() {  # <text> -> the first line wider than the budget, or empty
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    if [ "$(bionic_cols "$line")" -gt "$BIONIC_LINE_WIDTH" ]; then printf '%s' "$line"; return 0; fi
+  done <<< "$1"
+  return 0
+}
+
+# TWO CAPTURES, SEPARATED BY A REAL NEWLINE. `$(...)` strips the trailing one,
+# so gluing the two captures together concatenated the two fix lines into a
+# single 152-column string and the budget check below failed on a line that does
+# not exist — caught by this suite's own first green run.
+NEW_FIX="$(lines_matching "$OUT7" '*launches unrostered*')
+$(lines_matching "$OUT8" '*launches unrostered*')"
+
+# THE POSITIVE THE WALL IS WORTHLESS WITHOUT: both fix lines really were
+# produced, so the width check below is measuring text and not an empty string.
+expect_match "35: both new fix lines were extracted for measurement" \
+  "*3 launches unrostered*2 launches unrostered*" "$(printf '%s' "$NEW_FIX" | tr '\n' ' ')"
+
+WIDE="$(first_over_budget "${PB7}
+${PB8}
+${NEW_FIX}")"
+if [ -z "$WIDE" ]; then
+  ok "36: every new Patrol row and fix line fits the ${BIONIC_LINE_WIDTH}-column budget"
+else
+  no "36: every new Patrol row and fix line fits the ${BIONIC_LINE_WIDTH}-column budget" \
+     "$(bionic_cols "$WIDE") columns: ${WIDE}"
+fi
 
 echo ""
 echo "========================================"
