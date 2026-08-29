@@ -846,7 +846,7 @@ PATROL_LIVE=0
 
 PATROL_LINES="$(patrol_report 2>/dev/null)"
 
-_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""
+_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""
 
 # WHY THE JOB COUNT ALONE CANNOT ANSWER "IS IT RUNNING" (Step-6 correctness C1,
 # a FAIL against AC-F3). The jobs on this page are RECONSTRUCTED FROM THE
@@ -878,12 +878,61 @@ _p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
   [ "$_p_n_patrol" -gt 0 ] || return 0
-  local short="${_p_sid%%-*}" j id extras="" n open=0
+  local short="${_p_sid%%-*}" j id extras="" n open=0 blind="${_p_blind}"
+  case "$blind" in ''|*[!0-9]*) blind=0 ;; esac
   case "$_p_stamp" in
     firing)
       PATROL_LIVE=$((PATROL_LIVE + 1))
-      [ "$_p_present" = "yes" ] && open="$_p_open"
-      _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches)" ;;
+      # AN ABSENT ROSTER IS NOT A ZERO, and printing it as one is the defect
+      # this arm exists to end (Chris 2026-08-29, on 1.3.0: `✓ session 61be8dc9 ·
+      # 0 open dispatches` on a machine running two agents). The launch-time
+      # hook does not survive a continue, a /clear+resume or a /reload-plugins,
+      # so a long session can lose the wall and never write a roster file at
+      # all — and `0 open dispatches` is then a number nobody dispatched,
+      # printed beside a Patrol whose every tick was emitting `NOTIFY
+      # wall-blind`. lib/patrol.sh has always said which of the two it is
+      # (`present=yes|no`); this is the first renderer to read it.
+      #
+      # THE ROW KEEPS ITS ✓ BECAUSE THE PATROL IS RUNNING. Running-or-nothing
+      # (F3) is about the Patrol, and the stamp above has already answered that
+      # question; the roster is a different object, and its absence is what the
+      # text says rather than what the symbol implies.
+      #
+      # AN ABSENT FILE IS NOT YET A DEFECT — `blind` IS (Step-6 correctness
+      # FLAG, t1-six-axis-review §1). The roster file is created by the FIRST
+      # dispatch: hooks/dispatch-preflight.sh:1337-1344 appends its header and
+      # its first row together, and no hook pre-creates it at session start. So
+      # `present=no` describes two different machines — a session whose wall was
+      # lost and is launching agents nobody recorded, and a perfectly healthy
+      # session that has simply not dispatched anything yet. Only the first has
+      # something unrecorded, and `blind` (launches the roster never saw, from
+      # the same `patrol-wall/v1` record the fix line below reads) is the field
+      # that tells them apart. Gating on the file alone would print `roster
+      # absent — launches unrecorded` over a session with no launches — the same
+      # class of untrue claim this arm exists to end, pointed the other way — so
+      # a zero `blind` falls through to the ordinary count row, where `0 open
+      # dispatches` is what 1.3.0 printed and was TRUE.
+      if [ "$_p_present" = "yes" ] || [ "$blind" -eq 0 ]; then
+        open="$_p_open"
+        _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches)"
+      else
+        _patrol_add "  ${DOCTOR_OK} session ${short} · roster absent — launches unrecorded"
+      fi
+      # THE COUNT IS THE ACTIONABLE HALF, and it is the same fact
+      # hooks/session-poker.sh raises as `NOTIFY wall-blind` at tick time — same
+      # record, same subtraction, and deliberately THE SAME CURE STRING, because
+      # two spellings of one repair read as two repairs
+      # (tests/doctor-patrol.test.sh §9 pins the literal from both files). It is
+      # printed for a present-but-incomplete roster too: the row's open count
+      # stays true, and this line says what it does not cover.
+      #
+      # THE LINE ENDS IN THE COMMAND and carries no cause clause, which is
+      # doctor's first format rule meeting lib/width.sh's 100 columns — the
+      # spelled-out cause ran the line to 116. The row above already names the
+      # absence, and the cure names the repair.
+      if [ "$blind" -gt 0 ]; then
+        fix "session ${short}: ${blind} $(_doctor_plural "$blind" launch launches) unrostered → re-invoke /bionic:canonical-sdlc"
+      fi ;;
     not-firing)
       fix "session ${short}: the Patrol is armed but not firing → ask Claude to re-arm the Patrol" ;;
   esac
@@ -916,7 +965,7 @@ while IFS= read -r _p_line; do
     "patrol-session/v1|"*)
       _patrol_flush
       _p_sid="$(_doctor_pfield "$_p_line" session)"
-      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp="" ;;
+      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind="" ;;
     "patrol-job/v1|"*)
       if [ "$(_doctor_pfield "$_p_line" kind)" = "patrol" ]; then
         _p_n_patrol=$((_p_n_patrol + 1))
@@ -929,6 +978,14 @@ while IFS= read -r _p_line; do
     "patrol-roster/v1|"*)
       _p_open="$(_doctor_pfield "$_p_line" open)"
       _p_present="$(_doctor_pfield "$_p_line" present)" ;;
+    "patrol-wall/v1|"*)
+      # LAUNCHES THE ROSTER NEVER SAW, already computed and already net of
+      # refusals (lib/patrol.sh: agents - rostered - refused, floored at 0). The
+      # field is EMPTY when the transcript could not be read at all — no jq on
+      # the box, no file under projects/ — and an empty count is not a count, so
+      # `_patrol_flush` treats it as zero rather than as an alarm. A machine
+      # without jq gets a quieter page, never a false one.
+      _p_blind="$(_doctor_pfield "$_p_line" blind)" ;;
   esac
 done <<EOF
 $PATROL_LINES
