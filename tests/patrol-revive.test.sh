@@ -316,10 +316,15 @@ expect_reason_names "21: …with the poker resolved to an absolute path" "${BION
 # an age in seconds, and the limit it was judged against, which follows the
 # project's own knob (1m here, so 120s).
 TOTAL=$((TOTAL + 1))
-if printf '%s' "$(reason_of)" | grep -qE '[0-9]+s old'; then
+# MATCHED WITHOUT A PIPE INTO `grep -q`. Under `set -o pipefail` (line 37) a `grep -q` that
+# exits on its first match SIGPIPEs the producer, and the pipeline reports 141 — this very
+# assertion failed that way once on a reason that plainly said "600s old" (wave-1.3.2 slice
+# 4/9). The text is captured first and matched in the shell.
+R22_REASON="$(reason_of)"
+if [[ "$R22_REASON" =~ [0-9]+s\ old ]]; then
   pass "22: …and states the age it measured"
 else
-  fail "22: the notice states no age" "$(reason_of)"
+  fail "22: the notice states no age" "$R22_REASON"
 fi
 expect_reason_names "22b: …against the limit this project's interval sets" "120s limit"
 expect_reason_names "22c: …naming that interval as its source" "60s poker-interval"
