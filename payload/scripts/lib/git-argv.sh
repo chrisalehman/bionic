@@ -21,6 +21,13 @@
 # it is gone. Then the remainder is tokenised with single quotes, double quotes
 # and backslash escapes honoured, splitting into segments at the operators
 # (newline ; & | && ||) that are OUTSIDE quotes. Each segment is one argv.
+# Grouping parentheses end a segment too, so `(git push …)` is read. Then, per
+# segment, everything before the real argv[0] comes off: shell openers (`{`,
+# `then`, `do`, `else`, `!`) and command-taking prefixes (`sudo`, `time`,
+# `nice`, `xargs`, `ssh <host>`, `find … -exec`, `env`, `nohup`, `command`,
+# `exec`) — see _git_argv_skip. Finally a `sh -c '<string>'` or `eval
+# '<string>'` segment is re-read, its string expanded into more segments, to
+# depth 2 — see git_argv_expand, which is what the walls iterate.
 # Ported from bionic-omni bundle/policies/_shell.py @ 29fc09e, whose Python
 # equivalent has been in production there; the port is behavioural, not
 # line-by-line — the destination parsing that file keeps in its callers
@@ -122,6 +129,7 @@ BEGIN {
   have = 0
   seg = ""
   segn = 0
+  gdepth = 0
   Ln = length(body)
   i = 1
   while (i <= Ln) {
@@ -182,6 +190,30 @@ BEGIN {
       continue
     }
 
+    # GROUPING PARENTHESES are boundaries too (R-12). `(git push origin main)`
+    # is a subshell whose first word is `git`, and bash needs no space after
+    # the paren — so unless the paren ends a segment here, the token reads
+    # `(git` and no wall recognises it. A `(` preceded by `$`, `<` or `>` is
+    # NOT grouping: it opens a command substitution or a process substitution,
+    # which stay out of scope, so their closing `)` (depth 0) stays a
+    # character and `$(git push origin main)` keeps reading as one word.
+    if (c == "(" && !have) {
+      pv = (i > 1 ? substr(body, i - 1, 1) : "")
+      if (pv != "$" && pv != "<" && pv != ">") {
+        if (segn) { print seg }
+        seg = ""; segn = 0; gdepth++
+        i++
+        continue
+      }
+    }
+    if (c == ")" && gdepth > 0) {
+      if (have) { seg = flush_tok(seg, tok, segn); segn++; tok = ""; have = 0 }
+      if (segn) { print seg }
+      seg = ""; segn = 0; gdepth--
+      i++
+      continue
+    }
+
     tok = tok c
     have = 1
     i++
@@ -210,22 +242,38 @@ git_argv_segments() {
   GIT_ARGV_CMD="$1" awk "$GIT_ARGV_AWK"
 }
 
-# git_argv_parse <segment-line>
+# _git_argv_skip <segment-line>
 #
-# Reads ONE segment (a line from git_argv_segments). Returns 0 and sets
-# GIT_SUB (the git subcommand) and GIT_ARGS (its arguments, US-separated) when
-# the segment invokes git; returns 1 otherwise.
+# THE SUPERSET RULE (R-12, critic C-1 2026-08-30). Sets GIT_ARGV_REST to the
+# segment with everything BEFORE the real argv[0] removed. Always returns 0.
 #
-# Skipped before argv[0]: leading VAR=value assignments and an `env`/`command`/
-# `nohup` runner, so `GIT_SSH_COMMAND=ssh git push ...` reads as a push.
-# Skipped after it: git's own global options. The value-taking ones are named
-# so their VALUE is consumed too; every other `-...` word is dropped on its
-# own, which is what makes `git --no-pager commit` a commit. Same shape as the
-# GIT alternation in _shell.py:35-39.
-git_argv_parse() {
-  GIT_SUB=""
-  GIT_ARGS=""
-  local _line="$1" _oldifs="$IFS" _hadf=0 _n=0 _a
+# The 1.3.1 walls this library replaced matched `git push` after ANY
+# whitespace. Reading argv[0] of a `; && || | &` segment is narrower than that,
+# not wider: every construct that opens a command without one of those
+# separators (`(`, `{`, `then`, `do`, `else`, `!`) and every command that TAKES
+# another command (`sudo`, `time`, `nice`, `xargs`, `ssh`, `find -exec`) leaves
+# git at argv[1..n]. Nine push spellings 1.3.1 refused walked through 1.3.2
+# before this function existed (critic-step6.md §C-1).
+#
+# Two kinds of word are removed, in one loop so they compose (`then sudo git
+# push`, `( time git push )`):
+#   OPENERS — a grouping/keyword word that is not a command at all. `(` and `)`
+#     mostly never reach here (the scanner makes grouping parens segment
+#     boundaries) but `{`, `}` and the reserved words do, since bash separates
+#     them with `;` or whitespace only.
+#   PREFIXES — a command whose own argument is the next command. Each is
+#     removed WITH its options, and the option that takes a separate value word
+#     eats that too, or the value becomes a phantom argv[0]. `ssh` additionally
+#     eats one non-option word: the host.
+# `find` is the odd one: the command it runs is after `-exec`/`-execdir`, not
+# at argv[1], so the scan skips to there and a `find` with no -exec yields
+# nothing — which is what keeps `find . -name 'git'` a non-command.
+#
+# OUT OF SCOPE, deliberately: `$(...)` and backticks. Their contents are a
+# command the shell runs, but reading them needs a nesting tokeniser rather
+# than a prefix skip, and no AC asks for it (see the report's Assumptions).
+_git_argv_skip() {
+  local _line="$1" _oldifs="$IFS" _hadf=0 _n=0 _w
 
   case "$-" in *f*) _hadf=1 ;; esac
   set -f
@@ -237,7 +285,64 @@ git_argv_parse() {
 
   while [ $# -gt 0 ]; do
     case "$1" in
-      env|command|nohup) shift ;;
+      '('|')'|'{'|'}'|'!'|then|else|elif|do|done|fi|if|while|until|env|command|nohup|exec)
+        shift
+        ;;
+      time)
+        shift
+        if [ "${1:-}" = "-p" ]; then shift; fi
+        ;;
+      nice)
+        shift
+        case "${1:-}" in
+          -n|--adjustment) shift; if [ $# -gt 0 ]; then shift; fi ;;
+          --adjustment=*|-[0-9]*|--[0-9]*) shift ;;
+        esac
+        ;;
+      sudo|doas)
+        shift
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --) shift; break ;;
+            -u|-g|-p|-U|-C|-r|-t|-h|-D|-R) shift; if [ $# -gt 0 ]; then shift; fi ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        ;;
+      xargs)
+        shift
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --) shift; break ;;
+            -I|-i|-n|-L|-P|-s|-E|-a|-d|--replace|--max-args|--max-procs|--max-lines|--arg-file|--delimiter|--eof)
+              shift; if [ $# -gt 0 ]; then shift; fi ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        ;;
+      ssh)
+        shift
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --) shift; break ;;
+            -o|-p|-i|-l|-F|-L|-R|-D|-b|-c|-e|-m|-O|-Q|-S|-W|-w|-J|-E|-B|-I) shift; if [ $# -gt 0 ]; then shift; fi ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        if [ $# -gt 0 ]; then shift; fi   # the host
+        ;;
+      find|*/find)
+        shift
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            -exec|-execdir|-ok|-okdir) shift; break ;;
+            *) shift ;;
+          esac
+        done
+        ;;
       *=*)
         # A leading assignment only — `--git-dir=x` is not one, and neither is
         # anything whose name is not an identifier.
@@ -249,6 +354,43 @@ git_argv_parse() {
       *) break ;;
     esac
   done
+
+  GIT_ARGV_REST=""
+  for _w in "$@"; do
+    if [ "$_n" -eq 0 ]; then GIT_ARGV_REST="$_w"; else GIT_ARGV_REST="$GIT_ARGV_REST$GIT_ARGV_US$_w"; fi
+    _n=$((_n + 1))
+  done
+  return 0
+}
+
+# git_argv_parse <segment-line>
+#
+# Reads ONE segment (a line from git_argv_segments / git_argv_expand). Returns
+# 0 and sets GIT_SUB (the git subcommand) and GIT_ARGS (its arguments,
+# US-separated) when the segment invokes git; returns 1 otherwise.
+#
+# Skipped before argv[0]: whatever _git_argv_skip removes — leading VAR=value
+# assignments, shell openers and command-taking prefixes — so
+# `GIT_SSH_COMMAND=ssh git push ...` and `sudo git push ...` both read as a
+# push. Skipped after it: git's own global options. The value-taking ones are
+# named so their VALUE is consumed too; every other `-...` word is dropped on
+# its own, which is what makes `git --no-pager commit` a commit. Same shape as
+# the GIT alternation in _shell.py:35-39.
+git_argv_parse() {
+  GIT_SUB=""
+  GIT_ARGS=""
+  local _oldifs="$IFS" _hadf=0 _n=0 _a
+
+  _git_argv_skip "$1"
+  [ -n "$GIT_ARGV_REST" ] || return 1
+
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f
+  IFS="$GIT_ARGV_US"
+  # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+  set -- $GIT_ARGV_REST
+  IFS="$_oldifs"
+  [ "$_hadf" -eq 1 ] || set +f
 
   [ $# -gt 0 ] || return 1
   case "$1" in
@@ -277,6 +419,91 @@ git_argv_parse() {
   return 0
 }
 
+# git_argv_inner <segment-line>
+#
+# Prints the command STRING a runner segment would execute, and returns 0; on
+# any other segment prints nothing and returns 1.
+#
+# Two runners, both taking one string: `sh|bash|zsh|dash|ksh -c '<string>'` and
+# `eval '<string>'`. The scanner has already stripped the quotes, so the string
+# arrives as one token and can be re-read by git_argv_segments as-is. The `-c`
+# match is `-c` or a short cluster ENDING in c (`-lc`, `-ec`) — never a long
+# option that merely contains one, so `bash --norc -c '…'` still finds the
+# real `-c`. cmd-class.sh's unwrap_runner is this same reading in awk; the two
+# libraries were written in one wave and disagreed about it until R-12
+# (critic-step6.md §C-5).
+git_argv_inner() {
+  local _oldifs="$IFS" _hadf=0 _b _out="" _n=0 _w
+
+  _git_argv_skip "$1"
+  [ -n "$GIT_ARGV_REST" ] || return 1
+
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f
+  IFS="$GIT_ARGV_US"
+  # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+  set -- $GIT_ARGV_REST
+  IFS="$_oldifs"
+  [ "$_hadf" -eq 1 ] || set +f
+
+  [ $# -gt 0 ] || return 1
+  _b="${1##*/}"
+  case "$_b" in
+    sh|bash|zsh|dash|ksh|ash)
+      shift
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          -c|-[!-]*c)
+            shift
+            [ $# -gt 0 ] || return 1
+            printf '%s' "$1"
+            return 0
+            ;;
+          -*) shift ;;
+          *) return 1 ;;
+        esac
+      done
+      return 1
+      ;;
+    eval)
+      shift
+      [ $# -gt 0 ] || return 1
+      for _w in "$@"; do
+        if [ "$_n" -eq 0 ]; then _out="$_w"; else _out="$_out $_w"; fi
+        _n=$((_n + 1))
+      done
+      printf '%s' "$_out"
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+# git_argv_expand <command>
+#
+# The segment list every wall reads: git_argv_segments of the command, PLUS the
+# segments of any `sh -c` / `eval` string inside it, recursively, to depth 2.
+# Depth 2 because one wrapper is the shape a model writes and two is already a
+# deliberate evasion; unbounded recursion would make a self-referential string
+# loop forever.
+git_argv_expand() {
+  _git_argv_expand_at "$1" 0
+}
+
+_git_argv_expand_at() {
+  local _cmd="$1" _depth="$2" _line _inner
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    printf '%s\n' "$_line"
+    if [ "$_depth" -lt 2 ]; then
+      _inner="$(git_argv_inner "$_line")" || continue
+      [ -n "$_inner" ] || continue
+      _git_argv_expand_at "$_inner" $((_depth + 1))
+    fi
+  done <<< "$(git_argv_segments "$_cmd")"
+  return 0
+}
+
 # git_argv_has_sub <command> <subcommand>
 #
 # Returns 0 if any segment of the command invokes `git <subcommand>`. On
@@ -287,7 +514,7 @@ git_argv_has_sub() {
     [ -n "$_line" ] || continue
     git_argv_parse "$_line" || continue
     if [ "$GIT_SUB" = "$_want" ]; then return 0; fi
-  done <<< "$(git_argv_segments "$_cmd")"
+  done <<< "$(git_argv_expand "$_cmd")"
   return 1
 }
 
