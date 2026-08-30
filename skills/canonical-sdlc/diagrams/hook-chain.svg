@@ -87,7 +87,7 @@
 
   <!-- ============================ lane 2 ============================ -->
   <text x="40" y="486" font-size="12.5" font-weight="700" letter-spacing="1.2" fill="#16191d">RUN-STATE-GATED</text>
-  <text x="200" y="486" font-size="12" fill="#626b76">eight scripts that read canonical-sdlc state on disk first and exit 0 in silence when it is absent — outside a run they are no-ops.</text>
+  <text x="200" y="486" font-size="12" fill="#626b76">nine scripts that read canonical-sdlc state on disk first and exit 0 in silence when it is absent — outside a run they are no-ops.</text>
   <text x="54" y="506" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">WHAT RUNS</text>
   <text x="300" y="506" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">REGISTERED</text>
   <text x="566" y="506" font-size="9.5" font-weight="700" letter-spacing="1.1" fill="#8b949e">ARM</text>

@@ -120,6 +120,31 @@ else
   fail "4: the three-way agreement is broken — see #1-3 above for which side moved"
 fi
 
+# ---------- §A2: the classifier regex is the spelling that DECIDES ----------
+#
+# Review-b (bionic 1.3.2 wave-01, B-4b): the prose marker is what §1-4 pin, but
+# what actually classifies a cron job as the Patrol is the jq `test("…")` regex
+# a few lines below the header. If that regex drifted the prose pin would stay
+# green while every tick misclassified. So the regex is read back too and must
+# MATCH the prose marker — not "agree with a regex that could itself have
+# drifted", which is why it is compared against the literal, never trusted alone.
+
+# classifier_regex_of <patrol.sh path> -> the ERE inside jq's test("…") that
+# names the poker tick, jq-unescaped (\\. -> \.), or empty if absent.
+classifier_regex_of() {
+  grep -m1 -oE 'test\("session-poker\\\\\.sh[^"]*"\)' "$1" 2>/dev/null \
+    | sed -e 's/^test("//' -e 's/")$//' -e 's/\\\\/\\/g'
+}
+
+TOTAL=$((TOTAL + 1))
+CLASSIFIER_RE="$(classifier_regex_of "$PATROL_LIB")"
+if [ -n "$MARKER" ] && [ -n "$CLASSIFIER_RE" ] && printf '%s\n' "$MARKER" | grep -qE -- "$CLASSIFIER_RE"; then
+  pass "4b: patrol.sh's classifier regex ($CLASSIFIER_RE) matches the prose marker '$MARKER' — the deciding spelling agrees"
+else
+  fail "4b: patrol.sh's classifier regex does not match the prose marker" \
+    "regex='$CLASSIFIER_RE' marker='$MARKER'"
+fi
+
 # ---------- §B: anti-vacuity — mutating exactly one spelling goes red ----------
 
 WORK="$(mktemp -d)" || { echo "patrol-marker: cannot create a scratch dir"; exit 1; }
@@ -174,6 +199,21 @@ doctor_and_check() {
 doctor_and_check "5: mutating patrol.sh's own spelling alone goes red" lib
 doctor_and_check "6: mutating patrol-duties-gate.sh's spelling alone goes red" gate
 doctor_and_check "7: mutating SKILL.md's spelling alone goes red" skill
+
+# 7b: mutating ONLY the classifier regex (prose intact) must go red at §4b —
+# proves 4b reads the regex, not the prose it sits beside
+TOTAL=$((TOTAL + 1))
+scratch_re="$(mktemp -d)"
+cp "$WORK/patrol.sh" "$scratch_re/patrol.sh"
+sed -i.bak 's/test("session-poker\\\\\.sh\[\[:space:\]\]+tick")/test("session-poker\\\\.sh[[:space:]]+tock")/' "$scratch_re/patrol.sh"
+mut_re="$(classifier_regex_of "$scratch_re/patrol.sh")"
+mut_marker="$(marker_of "$scratch_re/patrol.sh")"
+if [ -n "$mut_marker" ] && [ -n "$mut_re" ] && [ "$mut_re" != "$CLASSIFIER_RE" ] && ! printf '%s\n' "$mut_marker" | grep -qE -- "$mut_re"; then
+  pass "7b: mutating patrol.sh's classifier regex alone (prose intact) goes red at 4b"
+else
+  fail "7b: mutating the classifier regex alone did not go red" "mutated regex='$mut_re' marker='$mut_marker'"
+fi
+rm -rf "$scratch_re"
 
 # the control: an UNMUTATED trio must still agree — proves §5-7's red comes
 # from the mutation, not from a broken harness that would be red regardless
