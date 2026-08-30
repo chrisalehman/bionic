@@ -339,22 +339,32 @@ patrol_stamp_file() {  # <session-id> -> absolute path, or empty
   printf '%s/.bionic/tmp/%s%s%s' "$real" "$PATROL_STAMP_PREFIX" "$1" "$PATROL_STAMP_SUFFIX"
 }
 
-write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
-  local sid="$1" verb="$2" f d
-  f="$(patrol_stamp_file "$sid")" || return 1
-  [ -n "$f" ] || return 1
-  d="${f%/*}"
+# THE .bionic/tmp WRITE GUARD, one copy for both of this script's writers — the Patrol
+# stamp below and the adopted row further down. It was written inline in the stamp writer
+# and is a function now because a second writer arrived (epic-20 W1 B-1): a guard this
+# specific, copied by hand into a second call site, is a guard that drifts.
+tmp_dir_ok() {  # <.bionic/tmp path> -> 0 safe to write in, 1 refuse
+  local d="$1" _repo _target _common _root
   case "$d" in */.bionic/tmp) : ;; *) return 1 ;; esac
   if [ -L "${d%/tmp}" ]; then
     # The spawned-worktree link (.bionic -> main checkout's) is trusted only when its
     # target resolves inside this same repo — mirrors stop-guard's _bionic_symlink_in_repo.
-    local _repo="${d%/.bionic/tmp}" _target _common _root
+    _repo="${d%/.bionic/tmp}"
     _target="$(cd "${d%/tmp}" 2>/dev/null && pwd -P)" || return 1
     _common="$(git -C "$_repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
     _root="$(cd "${_common%/.git}" 2>/dev/null && pwd -P)" || return 1
     case "$_target/" in "$_root"/*) : ;; *) return 1 ;; esac
   fi
   [ -L "$d" ] && return 1
+  return 0
+}
+
+write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
+  local sid="$1" verb="$2" f d
+  f="$(patrol_stamp_file "$sid")" || return 1
+  [ -n "$f" ] || return 1
+  d="${f%/*}"
+  tmp_dir_ok "$d" || return 1
   mkdir -p "$d" 2>/dev/null || return 1
   [ -L "$f" ] && return 1
   printf '%s|at=%s|session=%s|verb=%s\n' "$PATROL_STAMP_SCHEMA" "$(iso_now)" "$sid" "$verb" \
@@ -548,9 +558,18 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
 # three addresses derived from that id — observe, message, stop — plus a verdict taken from
 # disk rather than from memory.
 #
-# IT IS READ-ONLY, ABSOLUTELY. No roster is written (not even the current session's), no
-# Patrol stamp is taken (this is not a tick and must not age the arming wall's clock), and
-# nothing is stopped or messaged. The verb's whole product is text the operator ledgers.
+# IT WRITES EXACTLY ONE THING, AND IT IS THIS SESSION'S OWN ROSTER. Everything else this
+# verb touches is read: no PREDECESSOR roster is ever written (that session may still be
+# appending to it), no Patrol stamp is taken (this is not a tick and must not age the
+# arming wall's clock), and nothing is stopped or messaged.
+#
+# The one write is the adoption itself, and it exists because printing an id was only half
+# a cure (epic-20 W1 B-1). Every wall downstream of the id asks THIS session's roster
+# whether the agent is ours — hooks/stop-guard.sh establishes ownership from a
+# `confirmed`/`identified` row carrying the resolved id, hooks/stop-check.sh classifies
+# from the same accepted set — so with no row of ours the predecessor's agent classifies
+# FOREIGN and every stop of it is refused. `adopt_write_row` below is the successor saying
+# on disk what this verb has just said on the terminal: this contract is mine now.
 #
 # THIS SESSION'S OWN ROWS ARE NEVER ADOPTED. They are not lost — the running session still
 # holds them — and printing them would invite the successor to re-ledger work it is already
@@ -685,6 +704,67 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
   ' "$1" 2>/dev/null
 }
 
+# THE ADOPTED ROW — the verb's one write, and the second half of the B-1 cure. What it
+# records is an ownership fact, and each field is there because a named reader asks for it:
+#
+#   status=identified   the accepted set hooks/stop-guard.sh and hooks/stop-check.sh
+#                       establish ownership BY ID from. `confirmed` would do as well and
+#                       says less: the id is known, which is exactly what `identified` means.
+#   agent_id=           the TRANSCRIPT form, the only form either gate resolves a target to.
+#   teammate_id=        the ADDRESSING form `<name>@session-<id8>`, the only spelling the
+#                       platform's stop primitive takes for a teammate — built for THIS
+#                       session, because this session is the one that now holds the row and
+#                       hooks/stop-guard.sh reads the recorded address before it constructs
+#                       one. A predecessor's row may carry no teammate_id at all.
+#   adopted_from=       provenance. The agent is still filed under the predecessor's own
+#                       subagents directory, and that directory is what hooks/stop-guard.sh
+#                       must widen its resolution to; without this field it cannot know
+#                       which session to widen to, and a blind project-wide walk is exactly
+#                       the name-oracle the 4/9 ownership rule removed.
+#   the contract        deliverable/progress/cadence, copied forward unchanged — the same
+#                       forward-copy every roster writer in the fleet performs, so the
+#                       successor's readers see the contract the predecessor declared.
+#
+# THE APPEND IDIOM IS hooks/dispatch-preflight.sh's (:1339-1347), copied deliberately:
+# header-if-absent, `chmod 600`, ONE `printf` of one line, NO LOCK. A single O_APPEND write
+# of well under a pipe buffer is not interleaved by the kernel; a read-modify-write here
+# would drop rows another writer appended in between (hooks/execution-recorder.sh:399-419).
+#
+# IDEMPOTENT BY READ-BEFORE-APPEND. `adopt` is the first verb a resumed session runs and it
+# is run again at the next resume, so a row already carrying this agent's id AND a
+# provenance is left alone — otherwise the roster would grow one row per run without
+# carrying one new fact. The read is ADVISORY, never a lock: a lost race duplicates a row,
+# which every reader in the fleet already tolerates (the last row carrying a name wins).
+#
+# A ROW WITH NO ID IS NEVER WRITTEN. That is the UNADDRESSABLE verdict's whole content —
+# there is no identity to file — and a row carrying `agent_id=` empty would be inert at
+# every by-id reader while looking like an adoption on disk.
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> -> 0 written/already there, 1 not
+  local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
+  local launch="$9" osid="${10}" d
+  [ -n "$id" ] || return 1
+  [ -n "$sid" ] || return 1
+  d="${f%/*}"
+  tmp_dir_ok "$d" || return 1
+  [ -L "$f" ] && return 1
+  if [ -f "$f" ] && awk -v k="|agent_id=${id}|" '
+        index($0, k) > 0 && index($0, "|adopted_from=") > 0 { found = 1 }
+        END { exit !found }' "$f" 2>/dev/null; then
+    return 0
+  fi
+  mkdir -p "$d" 2>/dev/null || return 1
+  if [ ! -e "$f" ]; then
+    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+      >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
+  fi
+  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=|teammate_id=%s|adopted_from=%s|tool_use_id=\n' \
+    "$sid" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
+    "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" \
+    "$(clean "$name")@session-$(printf '%s' "$sid" | cut -c1-8)" "$(clean "$osid")" \
+    >> "$f" 2>/dev/null || return 1
+  return 0
+}
+
 # A roster path is absolute or project-relative, exactly as the row's writer left it.
 adopt_abs() {  # <path> <repo root>
   case "$1" in
@@ -790,6 +870,9 @@ case "$VERB" in
       exit 2
     fi
     ADOPT_DIR="$REPO_REAL/.bionic/tmp"
+    # The ONE file this verb writes: this session's own roster. Named here, once, so the
+    # loop below cannot be read as writing anything it iterates over.
+    ADOPT_OWN_ROSTER="$ADOPT_DIR/roster-${SESSION_ID}.state"
     ADOPT_ROWS=0
     ADOPT_SESSIONS=0
     ADOPT_NOW="$(now_epoch)"
@@ -869,13 +952,34 @@ case "$VERB" in
           "$(clean "$RPROG_ABS")" "${PROG_AGE:-unknown}" "${CAD_S:-unknown}" \
           "$(clean "$TX")" "$TX_PRESENT"
 
+        # ---- the adoption itself, written before it is printed
+        #
+        # The row is what makes the address below TRUE: hooks/stop-guard.sh accepts
+        # `<name>@session-<this session>` as an identity because THIS session's roster
+        # records it, and resolves the agent at all because the row names the session it is
+        # filed under. Printing the address without writing the row would hand the operator
+        # a second line they cannot use.
+        if [ -n "$RID" ]; then
+          adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
+            "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" \
+            || die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
+        fi
+
         say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — $VERDICT"
         if [ -n "$RID" ]; then
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
           printf '  message     : SendMessage to:%s\n' "$RID"
-          printf '  stop        : TaskStop %s\n' "$RID"
+          # THE ADDRESS THE PLATFORM ACCEPTS, not the one this verb happens to hold. The id
+          # on the roster is the TRANSCRIPT form; the stop primitive takes
+          # `<name>@session-<id8>` for a teammate and rejects the transcript form (capture
+          # record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), so
+          # printing the id cost the operator a refusal they could not clear. The session
+          # named is THIS one — the row above is what makes that spelling resolve, and
+          # hooks/stop-guard.sh reads the recorded address before constructing one.
+          printf '  stop        : TaskStop %s@session-%s\n' "$(clean "$RNAME")" \
+            "$(printf '%s' "$SESSION_ID" | cut -c1-8)"
         else
           printf '  agent id    : (none — no identified row on that roster)\n'
           printf '  observe     : unavailable without an id\n'

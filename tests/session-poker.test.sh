@@ -815,16 +815,35 @@ tx_text() {  # <text> — one assistant entry carrying one text block
 
 export CLAUDE_CONFIG_DIR="$C8"
 
-_before="$(cd "$R8/.bionic/tmp" && cksum roster-*.state | sort)"
+# THE PREDECESSOR ROSTERS ARE THE READ-ONLY HALF, and they are what this cksum brackets.
+# `adopt` writes exactly one file — the ADOPTING session's own roster (§8g) — so a bracket
+# over every roster in the directory could no longer separate "wrote its own row" from
+# "wrote into a predecessor's file", which is the thing that must never happen: those rows
+# belong to a session that may still be appending to them, and a reader-modifies-writer
+# would drop rows appended concurrently (hooks/execution-recorder.sh:399-419).
+_before="$(cd "$R8/.bionic/tmp" && cksum "roster-$ADOPT_A.state" "roster-$ADOPT_B.state")"
+_own_before="$(cksum < "$(roster_of "$R8")")"
 poke "$R8" adopt
-_after="$(cd "$R8/.bionic/tmp" && cksum roster-*.state | sort)"
+_after="$(cd "$R8/.bionic/tmp" && cksum "roster-$ADOPT_A.state" "roster-$ADOPT_B.state")"
+_own_after="$(cksum < "$(roster_of "$R8")")"
 
 # ---------- 8a: the id and the three addresses it buys ----------
 expect_contains "the landed agent's id is printed" "$ID_LANDED" "$OUT"
 expect_contains "the observe address is the predecessor's own subagent transcript" \
   "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_LANDED}.jsonl" "$OUT"
 expect_contains "the message address is a SendMessage by id" "SendMessage to:$ID_LANDED" "$OUT"
-expect_contains "the stop address is a TaskStop by full id" "TaskStop $ID_LANDED" "$OUT"
+# THE ADDRESS THE PLATFORM ACCEPTS, and not the one this verb happens to hold. The id
+# `adopt` reads off the roster is the TRANSCRIPT form (`aname-<hex>`); the stop primitive
+# takes `<name>@session-<id8>` for a teammate (capture
+# record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), and printing
+# the other one handed the operator a line they could not type. The session named is the
+# ADOPTING one, because the row `adopt` writes into THIS session's roster is what makes
+# hooks/stop-guard.sh accept that spelling as an identity (§8g, and tests/stop-guard.test.sh
+# §14).
+expect_contains "the stop address is the form the stop primitive accepts" \
+  "TaskStop landed-one@session-${SID:0:8}" "$OUT"
+expect_absent "…never the transcript-form id, which the platform rejects for a teammate" \
+  "TaskStop $ID_LANDED" "$OUT"
 expect_contains "the row names the predecessor session it came from" "from=$ADOPT_A" "$OUT"
 expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
 
@@ -850,7 +869,7 @@ expect_contains "an agent with no transcript on disk says so" "transcript_presen
 # ---------- 8d: what adopt must NOT do ----------
 expect_absent "this session's own rows are never adopted" "mine-current" "$OUT"
 expect_absent "a row already swept MET is closed, not adopted" "closed-one" "$OUT"
-expect_eq "no roster file is modified" "$_before" "$_after"
+expect_eq "no PREDECESSOR roster is modified — not one byte" "$_before" "$_after"
 expect_eq "adopt writes no Patrol stamp — it is not a tick" "no" \
   "$([ -e "$R8/.bionic/tmp/patrol-${SID}.state" ] && echo yes || echo no)"
 expect_eq "open predecessor rows exit in the NOTIFY band" 1 "$RC"
@@ -864,6 +883,53 @@ expect_eq "open predecessor rows exit in the NOTIFY band" 1 "$RC"
 poke "$R8" adopt
 expect_absent "an acked predecessor row is closed for adopt too" "name=silent-one" "$OUT"
 expect_contains "…and its unacked siblings still adopt" "name=landed-one" "$OUT"
+
+# ---------- 8g: the adopted row, written into THIS session's roster ----------
+#
+# WHAT THE ROW BUYS. Reading a predecessor's id back is not enough to ACT on the agent:
+# hooks/stop-guard.sh reads ownership off THIS session's roster, and with no row carrying
+# the id it classifies the target FOREIGN and refuses every stop of it. The row is the
+# successor session saying, on disk, "this contract is mine now" — status `identified`
+# because the id is known, `adopted_from=` because where it came from is a fact worth
+# keeping, and `teammate_id=` because that is the only spelling the stop primitive takes.
+#
+# The predecessor's file is never touched (8d): a row is COPIED FORWARD, not moved.
+OWN_ROSTER="$(roster_of "$R8")"
+ADOPTED_ROW="$(grep -F "|name=landed-one|" "$OWN_ROSTER" | tail -1)"
+
+expect_eq "the adopting session's own roster IS written" "no" \
+  "$([ "$_own_before" = "$_own_after" ] && echo yes || echo no)"
+expect_contains "the adopted row is status=identified — the id is known" \
+  "|status=identified|" "$ADOPTED_ROW"
+expect_contains "…filed under the ADOPTING session's key" "|session=$SID|" "$ADOPTED_ROW"
+expect_contains "…carrying the transcript-form agent id the predecessor recorded" \
+  "|agent_id=$ID_LANDED|" "$ADOPTED_ROW"
+expect_contains "…and the address form the stop primitive takes, built for THIS session" \
+  "|teammate_id=landed-one@session-${SID:0:8}|" "$ADOPTED_ROW"
+expect_contains "…the contracted deliverable, copied forward" \
+  "|deliverable=$R8/.bionic/docs/record/landed-one.md|" "$ADOPTED_ROW"
+expect_contains "…its progress artifact" \
+  "|progress=$R8/.bionic/tmp/progress-landed.md|" "$ADOPTED_ROW"
+expect_contains "…its declared cadence" "|cadence=10 minutes|" "$ADOPTED_ROW"
+expect_contains "…and the provenance of the adoption" "|adopted_from=$ADOPT_A|" "$ADOPTED_ROW"
+expect_contains "the roster file carries its schema header" "roster-state/v1" \
+  "$(head -1 "$OWN_ROSTER")"
+
+# A ROW WITH NO ID BUYS NOTHING, so none is written. UNADDRESSABLE is the whole point of
+# that verdict: there is no identity to file, and a row carrying an empty `agent_id=` would
+# be inert at every by-id reader while looking like an adoption on disk.
+expect_absent "an UNADDRESSABLE row is not adopted onto the roster" \
+  "name=orphan-one" "$(cat "$OWN_ROSTER")"
+expect_absent "…nor is the phantom id on an intended row" \
+  "name=phantom-id" "$(cat "$OWN_ROSTER")"
+
+# IDEMPOTENT. `adopt` is the FIRST thing a resumed session runs and it is run again on the
+# next resume; an append per run would grow the roster without adding a fact, and every
+# reader would re-read the same contract N times.
+_dup_before="$(grep -c -F "|name=landed-one|" "$OWN_ROSTER")"
+poke "$R8" adopt
+_dup_after="$(grep -c -F "|name=landed-one|" "$OWN_ROSTER")"
+expect_eq "a second adopt appends no second row for the same agent" "$_dup_before" "$_dup_after"
 
 # ---------- 8f: nothing to adopt, and no session key ----------
 R8B="$(make_repo s8-alone)"; new_roster "$R8B"
