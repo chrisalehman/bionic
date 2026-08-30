@@ -41,9 +41,15 @@ INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 
 # Read every segment. A segment is a push only when git is argv[0] (after
-# leading VAR=value assignments and git's own global options) and `push` is the
-# subcommand — so `echo 'git push origin main'`, `grep 'git push' README.md`
-# and a heredoc body are not pushes, and `git -C <dir> push` is.
+# leading VAR=value assignments, shell openers, command-taking prefixes and
+# git's own global options) and `push` is the subcommand — so
+# `echo 'git push origin main'`, `grep 'git push' README.md` and a heredoc body
+# are not pushes, and `git -C <dir> push`, `sudo git push`,
+# `if …; then git push …; fi` and `sh -c 'git push …'` are.
+#
+# git_argv_EXPAND, not git_argv_segments: the expanded list adds the segments
+# of any `sh -c` / `eval` string, which the segment list on its own leaves as a
+# single opaque token (R-12, critic C-1/C-5).
 IS_PUSH=0
 while IFS= read -r segment; do
   [ -n "$segment" ] || continue
@@ -69,7 +75,7 @@ while IFS= read -r segment; do
     echo "BLOCKED: Force pushing is not allowed from Claude Code." >&2
     exit 2
   fi
-done <<< "$(git_argv_segments "$COMMAND")"
+done <<< "$(git_argv_expand "$COMMAND")"
 
 # Skip if no actual push command found
 if [ "$IS_PUSH" -eq 0 ]; then
