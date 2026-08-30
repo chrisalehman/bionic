@@ -3850,8 +3850,11 @@ printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadop
 
 # SITE 1 — the poker prints the address, and it is the successor session that is named.
 R_AD_OUT=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SPO" adopt 2>&1 )
+# The FIRST address on the line. adopt prints the alternate spelling beside it — the
+# launching session's, since which of the two the platform keys on is unproven — and both
+# resolve to the same row at both gates; this section drives the one adopt leads with.
 R_AD_ADDR=$(printf '%s\n' "$R_AD_OUT" | grep -F 'stop        : TaskStop ' | head -1 \
-            | sed 's/.*TaskStop //')
+            | sed 's/.*TaskStop //' | awk '{print $1}')
 expect_eq "adopt prints the addressing form, built from the ADOPTING session" \
   "adoptee@session-$(printf '%s' "$SID_B" | cut -c1-8)" "$R_AD_ADDR"
 
