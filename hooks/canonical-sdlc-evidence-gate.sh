@@ -39,9 +39,15 @@ set -u
 # symlink, so the first candidate alone would refuse every command in a
 # directory-source session. Byte-identical twin of the loader in
 # protect-main.sh.
+#
+# ONE LOADER IDIOM ACROSS THE FOUR LIBRARY-SOURCING WALLS (review-b B-4c). The
+# directory is `$(dirname "$0")`, which is what the other eleven hooks in this
+# directory already use and what tests/cmd-class.test.sh §C6 extracts; the
+# readability test is `-r`, which is what actually predicts whether `.` will
+# succeed (`-f` passes on a file the process cannot read, and the wall would
+# then refuse one line later with a worse message).
 # [WALL: tests/git-argv.test.sh]
-_eg_self="${BASH_SOURCE[0]}"
-case "$_eg_self" in */*) _eg_dir="${_eg_self%/*}" ;; *) _eg_dir="." ;; esac
+_eg_dir="$(dirname "$0")"
 _eg_lib=""
 for _eg_cand in "$_eg_dir/../scripts/lib/git-argv.sh" "$_eg_dir/../payload/scripts/lib/git-argv.sh"; do
   if [ -r "$_eg_cand" ]; then _eg_lib="$_eg_cand"; break; fi

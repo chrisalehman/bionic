@@ -106,21 +106,7 @@ BEGIN {
       }
       continue
     }
-    s = line
-    # A here-STRING (<<<) has no body. Blank it before scanning so its third
-    # angle bracket cannot look like a tag introducer. Its operand stays a
-    # word on this line, which is what it is.
-    gsub(/<<</, "   ", s)
-    # The opener itself is removed as it is recognised, so the tag does not
-    # survive as a phantom argv word: `cat > f <<NOTE` is `cat` and `f`.
-    while (match(s, /(^|[ \t])<<-?[ \t]*["']?[A-Za-z_][A-Za-z0-9_]*["']?([ \t]|$)/)) {
-      tag = substr(s, RSTART, RLENGTH)
-      s = substr(s, 1, RSTART - 1) " " substr(s, RSTART + RLENGTH)
-      sub(/^[ \t]*<<-?[ \t]*/, "", tag)
-      gsub(/["' \t]/, "", tag)
-      qn++
-      TAG[qn] = tag
-    }
+    s = strip_heredoc_openers(line)
     body = body s "\n"
   }
 
@@ -223,6 +209,73 @@ BEGIN {
   exit 0
 }
 
+# Finds every heredoc opener on ONE line, appends its tag to the TAG queue, and
+# returns the line with the openers removed — so the tag never survives as a
+# phantom argv word (`cat > f <<NOTE` is `cat` and `f`).
+#
+# QUOTE STATE IS THE WHOLE POINT (review-b B-1, 2026-08-30). The scan this
+# replaced was a bare `match()` with no quote tracking, so
+# `echo "see <<EOF for the heredoc format"` opened a phantom body that swallowed
+# every following line — a real push on the next line walked through 1.3.2 and
+# was blocked by 1.3.1. A `<<` inside a quoted span is text the command
+# receives, never a redirection.
+#
+# This is the same reading as cmd-class.sh:heredoc_tag, in the same language,
+# deliberately not a third shared file: a shared awk snippet would put a THIRD
+# fail-closed load path in front of four walls (D1 requires each to name the
+# library it could not read). The two are pinned against each other instead, by
+# tests/git-argv.test.sh Section 1d. The one difference is scope, not reading:
+# this collects EVERY opener on the line, because several heredocs may open at
+# once and close in the order they opened; cmd-class needs only the first.
+#
+# A here-STRING (<<<) has no body. It becomes whitespace so its third angle
+# bracket cannot look like a tag introducer; the operand stays a word.
+function strip_heredoc_openers(s,   i, L, c, q, j, t, ch, out) {
+  L = length(s)
+  q = ""
+  out = ""
+  i = 1
+  while (i <= L) {
+    c = substr(s, i, 1)
+    if (q != "") {
+      out = out c
+      if (c == q) { q = "" }
+      else if (c == "\\" && q == "\"") { i++; out = out substr(s, i, 1) }
+      i++
+      continue
+    }
+    if (c == "'" || c == "\"") { q = c; out = out c; i++; continue }
+    if (c == "\\") { out = out c; i++; out = out substr(s, i, 1); i++; continue }
+    if (c == "<" && substr(s, i + 1, 1) == "<") {
+      if (substr(s, i + 2, 1) == "<") { out = out "   "; i += 3; continue }
+      j = i + 2
+      if (substr(s, j, 1) == "-") j++
+      while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+      ch = substr(s, j, 1)
+      if (ch == "'" || ch == "\"") j++
+      t = ""
+      while (j <= L) {
+        c = substr(s, j, 1)
+        if (c ~ /[A-Za-z0-9_]/) { t = t c; j++ } else break
+      }
+      if (t != "") {
+        if ((ch == "'" || ch == "\"") && substr(s, j, 1) == ch) j++
+        qn++
+        TAG[qn] = t
+        out = out " "
+        i = j
+        continue
+      }
+      out = out "<"
+      i++
+      continue
+    }
+    out = out c
+    i++
+  }
+  return out
+}
+
 # Appends one token to the accumulating segment. A token can carry a newline
 # (it came out of a quoted span); the output format is one segment per line, so
 # fold it to a space.
@@ -291,6 +344,23 @@ _git_argv_skip() {
       time)
         shift
         if [ "${1:-}" = "-p" ]; then shift; fi
+        ;;
+      timeout|gtimeout|*/timeout|*/gtimeout)
+        # `timeout [-s SIG] [-k DUR] <duration> <command>` — the duration is a
+        # bare word that would otherwise read as argv[0]. cmd-class.sh has
+        # stripped this since it was written; git-argv did not (review-a S-1).
+        shift
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            --) shift; break ;;
+            -s|-k|--signal|--kill-after) shift; if [ $# -gt 0 ]; then shift; fi ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        case "${1:-}" in
+          [0-9]*) shift ;;
+        esac
         ;;
       nice)
         shift

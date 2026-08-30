@@ -2616,10 +2616,15 @@ HOOKS_JSON_ROWS=$(jq -r '
 # the guarded form is PRESENT) would still pass beside it. The landing gate joined
 # them when teammates got their landing verdict: its Stop arm stays skill-scoped, and
 # only the SubagentStop arm needs the channel that reaches an agent context.
+# background-suite-guard.sh joined them at bionic 1.3.2 (B-9): it refuses a subagent's
+# BACKGROUNDED suite, so like the other four it is meaningless on the main thread and
+# ruinous if it fires in every session on the machine. Added here by review-b B-2, which
+# measured the gap by mutating hooks.json to register it UNGUARDED and watching this
+# suite stay 415/415.
 L2_UNGUARDED=$(printf '%s\n' "$HOOKS_JSON_ROWS" \
-  | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh|landing-gate\.sh' \
+  | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh|landing-gate\.sh|background-suite-guard\.sh' \
   | /usr/bin/grep -v 'agent-context-guard\.sh')
-expect_eq "…and the three walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
+expect_eq "…and the four walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
 # The landing gate is the one wall registered on TWO events across the two channels, so
 # its always-on entry must not drift onto the event the skill channel already owns: a
 # second Stop registration would sweep twice per turn and journal two markers.
@@ -2723,6 +2728,13 @@ expect_contains "…and on Edit, behind the guard" \
   "$HOOKS_JSON_ROWS"
 expect_contains "…and the LANDING verdict on SubagentStop, behind the guard, with no matcher" \
   'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|' \
+  "$HOOKS_JSON_ROWS"
+# The FIFTH guarded entry (bionic 1.3.2, B-9): the backgrounded-suite wall on Bash. It
+# has no skill-channel twin by design — like SubagentStop it only means anything inside
+# an agent context, so the guarded always-on entry is the whole of its coverage, and the
+# pairing loop below deliberately does not include it.
+expect_contains "…and the BACKGROUNDED-SUITE wall on Bash, behind the guard" \
+  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/background-suite-guard.sh|' \
   "$HOOKS_JSON_ROWS"
 
 # The two channels cover the SAME three events: for each guarded always-on entry there is

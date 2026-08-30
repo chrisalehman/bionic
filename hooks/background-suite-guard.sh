@@ -55,7 +55,8 @@ COMMAND=$(_jq '.tool_input.command')
 CMD_CLASS_LIB_WANT="$(dirname "$0")/../scripts/lib/cmd-class.sh"
 CMD_CLASS_LIB=""
 for _cand in "$CMD_CLASS_LIB_WANT" "$(dirname "$0")/../payload/scripts/lib/cmd-class.sh"; do
-  [ -f "$_cand" ] && { CMD_CLASS_LIB="$_cand"; break; }
+  # -r, not -f (review-b B-4c): readability is what predicts whether `.` succeeds.
+  [ -r "$_cand" ] && { CMD_CLASS_LIB="$_cand"; break; }
 done
 if [ -z "$CMD_CLASS_LIB" ] || ! . "$CMD_CLASS_LIB"; then
   cat >&2 <<EOF
