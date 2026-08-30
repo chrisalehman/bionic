@@ -882,6 +882,7 @@ export CLAUDE_CONFIG_DIR="$C8"
 _before="$(cd "$R8/.bionic/tmp" && cksum "roster-$ADOPT_A.state" "roster-$ADOPT_B.state")"
 _own_before="$(cksum < "$(roster_of "$R8")")"
 poke "$R8" adopt
+ADOPT_OUT="$OUT"   # kept for §8h's paired positive, which runs after later `poke`s
 _after="$(cd "$R8/.bionic/tmp" && cksum "roster-$ADOPT_A.state" "roster-$ADOPT_B.state")"
 _own_after="$(cksum < "$(roster_of "$R8")")"
 
@@ -1006,6 +1007,46 @@ expect_contains "…and says so rather than printing nothing" "nothing to adopt"
 
 OUT="$( cd "$R8" && CLAUDE_CODE_SESSION_ID="" bash "$POKER" adopt 2>&1 )"; RC=$?
 expect_eq "adopt with no session key REFUSES with exit 3" "3" "$RC"
+
+# ---------- 8h: a row the roster REFUSED buys no stop address (review-a C-3) ----------
+#
+# `die()` prints and returns — it does not exit (hooks/session-poker.sh:156, and the tick
+# depends on that). So a failed `adopt_write_row` used to warn and then print the address
+# block anyway: `TaskStop <name>@session-<id8>` for a row that is not on this session's
+# roster, which is exactly what both stop gates refuse as FOREIGN. The operator was handed
+# a line that cannot work, at the one moment they are trying to reach an adopted agent.
+#
+# THE WRITE IS MADE TO FAIL THROUGH THE WRITER'S OWN REFUSAL — a symlink where the roster
+# goes, which `adopt_write_row` declines like every other .bionic/tmp writer in the fleet.
+# Never a chmod: a suite that runs as root would silently stop failing.
+R8U="$(make_repo s8-roster-refused)"
+mkdir -p "$R8U/.bionic/docs/record"
+add_row_to "$R8U" "$ADOPT_A" name=landed-two status=identified \
+  agent_id=alanded-two-7777777777777777 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8U/.bionic/docs/record/landed-two.md"
+printf 'the report\n' > "$R8U/.bionic/docs/record/landed-two.md"
+ln -s "$R8U/.bionic/tmp/not-a-roster.state" "$(roster_of "$R8U")"
+poke "$R8U" adopt
+expect_contains "the refused row is still REPORTED — the read half is unaffected" \
+  "landed-two" "$OUT"
+expect_contains "…with its id, which is a fact the roster write did not change" \
+  "alanded-two-7777777777777777" "$OUT"
+expect_absent "…but no stop address, because the row the gates read was never written" \
+  "TaskStop" "$OUT"
+expect_contains "…the stop line naming the write that failed instead" \
+  "NOT journalled" "$OUT"
+expect_contains "…and the cure, in terms of what the gates actually read" \
+  "ownership from THIS session" "$OUT"
+# Exit 1 is `adopt`'s "there are rows for you to ledger" signal, taken whenever it found
+# any (`ADOPT_ROWS > 0`) — a warned write does not change it, and this pins that it does not.
+expect_eq "…and the verb still exits 1: the found-rows signal, not a refusal" "1" "$RC"
+
+# THE PAIRED POSITIVE is §8a on the same rendering: with the roster writable, the SAME
+# block prints `TaskStop landed-one@session-…`. Without that pairing this case would pass
+# against a verb that had simply stopped printing addresses at all.
+expect_contains "the writable-roster fixture still offers the stop address (§8a's row)" \
+  "TaskStop landed-one@session-" "$ADOPT_OUT"
 
 unset CLAUDE_CONFIG_DIR
 
