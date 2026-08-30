@@ -238,6 +238,85 @@ HEREDOC_THEN_PUSH=$(printf 'cat > /tmp/note.txt <<%sNOTE%s\nnothing to see\nNOTE
 expect_block "after a heredoc, a real main push is still blocked" "$HEREDOC_THEN_PUSH"
 
 # ============================================================
+# SECTION 7: shell constructs and command-taking prefixes (AC-9, R-12)
+# ============================================================
+#
+# THE REGRESSION THIS SECTION EXISTS FOR (critic C-1, 2026-08-30). The 1.3.2
+# rewrite reads argv[0] of a segment split on `; && || | &`. The 1.3.1 hook it
+# replaced matched `(^|[[:space:]])git[[:space:]]+push` — the token after ANY
+# whitespace. So every construct that starts a new command WITHOUT one of those
+# separators (`(`, `{`, `then`, `do`), and every command that takes another
+# command as its argument (`sudo`, `time`, `xargs`, `find -exec`, `ssh`), put
+# `git` at argv[1..n] where the new reader does not look. Nine spellings 1.3.1
+# refused walked through 1.3.2 (critic-step6.md §C-1 Repro 1). R-12 makes the
+# argv reading a SUPERSET: openers are skipped before argv[0] is read, prefixes
+# are skipped with their own options, and `sh -c`/`eval` strings are re-read.
+#
+# Feature branch again, so Block 3 cannot mask the result.
+
+echo ""
+echo "=== Section 7: openers, prefixes and runner strings (all BLOCKED) ==="
+export FAKE_BRANCH="feat/cool-thing"
+
+# --- shell constructs that open a command without a separator ---
+expect_block "AC-9 subshell ( … )"                "( git push origin main )"
+expect_block "AC-9 subshell without spaces"       "(git push origin main)"
+expect_block "AC-9 group { …; }"                  "{ git push origin main; }"
+expect_block "AC-9 if/then"                       "if true; then git push origin main; fi"
+expect_block "AC-9 if <command> directly"         "if git push origin main; then echo ok; fi"
+expect_block "AC-9 for/do"                        "for i in 1; do git push origin main; done"
+expect_block "AC-9 while/do"                      "while false; do git push origin main; done"
+expect_block "AC-9 else branch"                   "if false; then true; else git push origin main; fi"
+expect_block "AC-9 negation !"                    "! git push origin main"
+expect_block "AC-9 background & is a separator"   "true & git push origin main"
+
+# --- commands whose argument is another command ---
+expect_block "AC-9 sudo"                          "sudo git push origin main"
+expect_block "AC-9 sudo -u <user>"                "sudo -u ci git push origin main"
+expect_block "AC-9 sudo --"                       "sudo -- git push origin main"
+expect_block "AC-9 time"                          "time git push origin main"
+expect_block "AC-9 time -p"                       "time -p git push origin main"
+expect_block "AC-9 nice -n <N>"                   "nice -n 10 git push origin main"
+expect_block "AC-9 nohup"                         "nohup git push origin main"
+expect_block "AC-9 exec"                          "exec git push origin main"
+expect_block "AC-9 command"                       "command git push origin main"
+expect_block "AC-9 env VAR=v"                     "env GIT_ASKPASS=cat git push origin main"
+expect_block "AC-9 xargs"                         "xargs git push origin main"
+expect_block "AC-9 xargs -I{}"                    "xargs -I{} git push origin main"
+expect_block "AC-9 xargs -I {} (separate value)"  "xargs -I {} git push origin main"
+expect_block "AC-9 xargs -n 1 -0"                 "xargs -n 1 -0 git push origin main"
+expect_block "AC-9 find … -exec … \\;"            "find . -exec git push origin main \\;"
+expect_block "AC-9 find … -execdir … \\;"         "find . -execdir git push origin main \\;"
+expect_block "AC-9 ssh <host>"                    "ssh box git push origin main"
+expect_block "AC-9 ssh -p <port> <host>"          "ssh -p 22 box git push origin main"
+
+# --- runner strings: one level of re-reading (C-5) ---
+expect_block "AC-9 sh -c '<string>'"              "sh -c 'git push origin main'"
+expect_block "AC-9 bash -c \"<string>\""          'bash -c "git push origin main"'
+expect_block "AC-9 zsh -c '<string>'"             "zsh -c 'git push origin main'"
+expect_block "AC-9 dash -c '<string>'"            "dash -c 'git push origin main'"
+expect_block "AC-9 eval \"<string>\""             'eval "git push origin main"'
+expect_block "AC-9 eval '<string>'"               "eval 'git push origin main'"
+expect_block "AC-9 sh -c over a construct"        "sh -c '( git push origin main )'"
+
+# --- stacked: a prefix in front of a construct, and vice versa ---
+expect_block "AC-9 then + sudo"                   "if true; then sudo git push origin main; fi"
+expect_block "AC-9 subshell + time"               "( time git push origin main )"
+
+# --- and the negatives stay negative ---
+expect_allow "AC-10 echo of a sudo push line"     'echo "sudo git push origin main"'
+expect_allow "AC-10 echo of a subshell push line" "echo '( git push origin main )'"
+expect_allow "AC-10 find with no -exec"           "find . -name 'git'"
+expect_allow "AC-10 find -name git push"          "find . -name 'git push'"
+expect_allow "AC-10 sudo of a non-push"           "sudo git status"
+expect_allow "AC-10 xargs of a non-push"          "xargs git log"
+expect_allow "AC-10 sudo push to a topic branch"  "sudo git push origin topic/main"
+expect_allow "AC-10 then + push to a topic branch" "if true; then git push origin topic/main; fi"
+expect_allow "AC-10 ssh to a host called main"    "ssh main ls"
+expect_allow "AC-10 a heredoc body with a sudo push" \
+  "$(printf 'cat > /tmp/note.txt <<%sNOTE%s\nsudo git push origin main\nNOTE\n' "'" "'")"
+
+# ============================================================
 # Results
 # ============================================================
 

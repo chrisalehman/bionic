@@ -84,14 +84,16 @@ eq() {  # <label> <expected> <actual>
 # per line, tokens joined by `|`.
 segs() { git_argv_segments "$1" | tr "$US" '|'; }
 
-# Parses the FIRST git segment of a whole command line.
+# Parses the FIRST git segment of a whole command line — over the EXPANDED
+# segment list, which is what both hooks read: the segments of the line plus
+# the segments of any `sh -c`/`eval` string inside it (R-12).
 parse_cmd() {
   local line
   GIT_SUB=""; GIT_ARGS=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     if git_argv_parse "$line"; then return 0; fi
-  done <<< "$(git_argv_segments "$1")"
+  done <<< "$(git_argv_expand "$1")"
   return 1
 }
 
@@ -410,6 +412,65 @@ gate_silent "echo naming a commit is silent"             'echo "we will git comm
 gate_silent "a heredoc body naming a commit is silent"   "$HD_COMMIT"
 gate_silent "git status is silent"                       'git status'
 gate_silent "a push is not a commit"                     'git push origin feature'
+
+# R-12 (critic C-1): the same superset the push wall gets. A commit wrapped in
+# a subshell, a group, an `if`, a `for`, behind `sudo`, or inside a `sh -c`
+# string bypassed the gate entirely — matrix, ledger, walk artifact and all —
+# because `git` landed at argv[1..n] of the segment.
+gate_fires  "R-12 ( git commit ) blocks"                 '( git commit -m x )'
+gate_fires  "R-12 (git commit) unspaced blocks"          '(git commit -m x)'
+gate_fires  "R-12 { git commit; } blocks"                '{ git commit -m x; }'
+gate_fires  "R-12 if/then git commit blocks"             'if true; then git commit -m x; fi'
+gate_fires  "R-12 for/do git commit blocks"              'for i in 1; do git commit -m x; done'
+gate_fires  "R-12 sudo git commit blocks"                'sudo git commit -m x'
+gate_fires  "R-12 time git commit blocks"                'time git commit -m x'
+gate_fires  "R-12 xargs -I{} git commit blocks"          'xargs -I{} git commit -m x'
+gate_fires  "R-12 find -exec git commit blocks"          'find . -exec git commit -m x \;'
+gate_fires  "R-12 ssh <host> git commit blocks"          'ssh box git commit -m x'
+gate_fires  "R-12 sh -c git commit blocks"               "sh -c 'git commit -m x'"
+gate_fires  "R-12 bash -c git commit blocks"             'bash -c "git commit -m x"'
+gate_fires  "R-12 eval git commit blocks"                'eval "git commit -m x"'
+gate_fires  "R-12 true & git commit blocks"              'true & git commit -m x'
+gate_silent "R-12 echo of a sudo commit is silent"       'echo "sudo git commit -m x"'
+gate_silent "R-12 find with no -exec is silent"          "find . -name 'git commit'"
+gate_silent "R-12 sudo of a non-commit is silent"        'sudo git status'
+
+# --- the library-level reading behind those gate answers (AC-11, R-12) ---
+echo ""
+echo "=== Section 4b: git_argv_expand reads openers, prefixes and -c strings ==="
+
+has_push() {  # <command> -> yes|no
+  if git_argv_has_sub "$1" push; then echo yes; else echo no; fi
+}
+
+eq "R-12 subshell"          "yes" "$(has_push '( git push origin main )')"
+eq "R-12 subshell unspaced" "yes" "$(has_push '(git push origin main)')"
+eq "R-12 brace group"       "yes" "$(has_push '{ git push origin main; }')"
+eq "R-12 then"              "yes" "$(has_push 'if true; then git push origin main; fi')"
+eq "R-12 do"                "yes" "$(has_push 'for i in 1; do git push origin main; done')"
+eq "R-12 sudo"              "yes" "$(has_push 'sudo git push origin main')"
+eq "R-12 sudo -u <user>"    "yes" "$(has_push 'sudo -u ci git push origin main')"
+eq "R-12 time"              "yes" "$(has_push 'time git push origin main')"
+eq "R-12 nice -n"           "yes" "$(has_push 'nice -n 10 git push origin main')"
+eq "R-12 xargs"             "yes" "$(has_push 'xargs git push origin main')"
+eq "R-12 xargs -I{}"        "yes" "$(has_push 'xargs -I{} git push origin main')"
+eq "R-12 find -exec"        "yes" "$(has_push 'find . -exec git push origin main \;')"
+eq "R-12 ssh <host>"        "yes" "$(has_push 'ssh box git push origin main')"
+eq "R-12 sh -c"             "yes" "$(has_push "sh -c 'git push origin main'")"
+eq "R-12 eval"              "yes" "$(has_push 'eval "git push origin main"')"
+eq "R-12 bare & separator"  "yes" "$(has_push 'true & git push origin main')"
+
+# The destination reading must survive the skip: a prefix must not swallow the
+# refspec, and it must not invent one.
+eq "R-12 sudo push keeps its destinations"  "origin|main" "$(dests_of 'sudo git push origin main')"
+eq "R-12 subshell push keeps its dests"     "origin|main" "$(dests_of '( git push origin main )')"
+eq "R-12 sh -c push keeps its dests"        "origin|main" "$(dests_of "sh -c 'git push origin main'")"
+eq "R-12 find -exec push keeps main"        "origin|main|;" "$(dests_of 'find . -exec git push origin main \;')"
+
+eq "R-12 prose is still not a push"         "no"  "$(has_push 'echo "sudo git push origin main"')"
+eq "R-12 find without -exec is not a push"  "no"  "$(has_push "find . -name 'git'")"
+eq "R-12 a heredoc body is still not a push" "no" "$(has_push "$HD_PUSH")"
+eq "R-12 command substitution stays OUT of scope" "no" "$(has_push 'echo $(git push origin main)')"
 
 # ============================================================
 # Results
