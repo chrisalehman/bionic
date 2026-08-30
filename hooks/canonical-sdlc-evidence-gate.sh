@@ -542,6 +542,38 @@ rigor_ord() {  # $1 = a rigor lane name (or empty)
   esac
 }
 
+# Is the independent auditor's verdict a WALL on this run? (B-10 / R-11.)
+# SKILL.md's rigor table: `tested` = "Both independent assurance roles.
+# Self-review only." — no auditor is ever sent, so demanding an auditor
+# CONFIRMED on every matrix row (and an `auditor:` pointer in the Step-5 block)
+# refused a `tested` run for the absence of a verdict its own rigor says nobody
+# was commissioned to write. B-10's repro: a bugfix · tested · task run refused
+# at current: 9 on "matrix row 'AC-1' auditor verdict is 'empty'".
+#
+# At `tested` the matrix's auditor column is NOT READ — any value, empty
+# included, passes — and the Step-5 pointer is not demanded. At
+# `peer-reviewed` (which adds the auditor) and `audited` both walls stand
+# unchanged.
+#
+# FAIL-CLOSED on an unknown or missing value: a plan that does not say what
+# rigor it runs at has not bought the relaxation, and a typo must not become a
+# bypass (same rationale as walk_mode's off-enum arm). This is deliberately
+# ASYMMETRIC with effective_row_rigor, which resolves an unknown frontmatter
+# rigor DOWN to the tested floor: there, the fallback picks a lane for a row
+# that must run in one; here, the fallback decides whether a wall stands.
+#
+# Scope: the MATRIX wall and the Step-5 pointer only. The task-ledger lanes
+# (apply_rigor_lanes) were already rigor-keyed and read EFFECTIVE row rigor, so
+# a row whose own cell raises it above the frontmatter keeps its auditor/critic
+# demand there — the matrix carries no per-row rigor cell to raise.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+matrix_auditor_required() {
+  case "$RIGOR" in
+    tested) return 1 ;;
+    *)      return 0 ;;  # peer-reviewed, audited, and anything unrecognized
+  esac
+}
+
 # Proof-shape test (D-slice 4/2): an evidence value counts as "proof-shaped"
 # — a command invocation + result counts, not prose — iff it contains BOTH
 # at least one digit AND at least one command token. A command token is any
@@ -1113,8 +1145,10 @@ validate_ship_step() {
 # Mid-discharge commits: at current: 5, rows with status
 # pending/blocked skip the per-tier key check, and the Step-5 `auditor:`
 # pointer is required only when no such row remains. The full contract —
-# per-tier keys + CONFIRMED on every non-waived row — bites on the 5→6
-# advance via the 6..9 prefix check. The status cell is enum-checked
+# per-tier keys, plus (at peer-reviewed/audited rigor) CONFIRMED on every
+# non-waived row — bites on the 5→6 advance via the 6..9 prefix check. At
+# `tested` rigor the auditor column is not a wall at all: see
+# matrix_auditor_required. The status cell is enum-checked
 # (pending|blocked|discharged|waived) since the relaxation makes it
 # load-bearing.
 #
@@ -1427,7 +1461,10 @@ validate_matrix() {
         esac
       done
     fi
-    # Once past the Verify gate, every non-waived row must be CONFIRMED.
+    # Once past the Verify gate, every non-waived row must be CONFIRMED —
+    # at peer-reviewed and audited rigor. At `tested` no auditor was ever
+    # commissioned (SKILL.md's rigor table), so this whole arm stands down;
+    # matrix_auditor_required is the predicate and carries the reasoning.
     #
     # T4 is the exception, and it is not a relaxation. T4's evidence IS the
     # user's own confirmation — an independent auditor sent at it can only
@@ -1451,7 +1488,7 @@ validate_matrix() {
     # because the attribution is correct and sending the user to rewrite it
     # would point them at the one thing that is not broken.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    if [ "$CURRENT" -gt 5 ] 2>/dev/null; then
+    if [ "$CURRENT" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
       if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
          || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
         :
@@ -1602,8 +1639,9 @@ validate_walk_artifact() {
   return 0
 }
 
-# Verify gate: tests floor, a required non-empty auditor pointer,
-# then the Verification Matrix.
+# Verify gate: tests floor, the Verification Matrix, and — at peer-reviewed or
+# audited rigor, once no row is still pending — a non-empty `auditor:` pointer.
+# At `tested` that pointer is not demanded (matrix_auditor_required).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_verify_step() {
   local aud
@@ -1613,9 +1651,10 @@ validate_verify_step() {
   validate_walk_artifact
   # The auditor is the Step-5 exit gate — it cannot have run while
   # rows are still pending/blocked, so the pointer is required only once
-  # every row is discharged or waived.
+  # every row is discharged or waived, and only where an auditor exists at
+  # all (matrix_auditor_required: never at `tested`).
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if [ "$UNDISCHARGED" -eq 0 ]; then
+  if [ "$UNDISCHARGED" -eq 0 ] && matrix_auditor_required; then
     if ! block_has auditor; then
       block_matrix "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
         "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
