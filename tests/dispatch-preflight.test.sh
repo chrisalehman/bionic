@@ -2070,6 +2070,57 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_AMBIG_WAIVED" "waivedambig
 expect_status "a waiver does not excuse an ambiguous deliverable label" "2" "$GATE_ST"
 expect_contains "…and the refusal still names both candidates" "a-notes.md" "$GATE_ERR"
 
+# ---- S18b: the deliverable span ends at the next LABELLED LINE, not at the next
+# registered label (wave-bionic-1.3.2, found at dispatch) ----
+#
+# A span used to run on until the next label THIS WALL KNOWS or a blank line, so a brief
+# that put `Evidence log: <path>` on the line after `Expected artifact: <path>` had two
+# paths in one deliverable span and was refused as ambiguous — for a brief whose author had
+# named exactly one deliverable and one input, each on its own labelled line. `Evidence
+# log:` is not in the label table and does not need to be: any line that OPENS with a short
+# `<Word>:` head is a new field, and a field ends where the next one begins. Two paths on
+# the deliverable label OWN line are still the ambiguity the wall exists to refuse.
+BRIEF_EVIDENCE_LOG='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-evlog.md
+Evidence log: .bionic/docs/record/w99-evlog.log
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r18evlog yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_EVIDENCE_LOG" "evlogbot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "S18b Evidence log: on the NEXT line does not make the deliverable ambiguous" \
+  "0" "$GATE_ST"
+expect_status "S18b …and the deliverable is the one on the label own line" \
+  ".bionic/docs/record/w99-evlog.md" "$(roster_field "$ROW" deliverable)"
+
+# The same brief with the two paths on ONE line is still refused: the fix bounds the span,
+# it does not stop the wall counting.
+BRIEF_TWO_ON_ONE_LINE='Your slice: build the widget.
+Expected artifact: .bionic/docs/record/w99-two.md .bionic/docs/record/w99-two.log
+Expected duration: ~20 minutes.'
+
+REPO=$(make_repo r18twoline yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_ON_ONE_LINE" "twolinebot")"
+expect_status "S18b two paths on the deliverable label OWN line are still REFUSED" "2" "$GATE_ST"
+expect_contains "S18b …and the refusal still names both candidates" "w99-two.log" "$GATE_ERR"
+
+# A prose continuation line (no label head) still belongs to the span — the R6-4 window
+# stays open, so a path named in a later sentence is still found.
+BRIEF_PROSE_CONT='Your slice: assess the wave.
+Expected artifact: a written report.
+Put it at .bionic/docs/record/w99-cont.md when you are done.
+Expected duration: 20 minutes'
+
+REPO=$(make_repo r18prosecont yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_PROSE_CONT" "contbot")"
+ROW=$(roster_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "S18b a prose continuation line is still inside the span" "0" "$GATE_ST"
+expect_status "S18b …and its path is the contract" \
+  ".bionic/docs/record/w99-cont.md" "$(roster_field "$ROW" deliverable)"
+
 # ---- R6-2: every refusal message recommends a brief the walls ACCEPT ----
 #
 # The containment refusal handed the author `Expected artifact: .bionic/docs/record/<name>.md`
