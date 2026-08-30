@@ -166,6 +166,24 @@ delivered_plan() {  # <repo>
   write_plan "$1" "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')"
 }
 
+stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
+
+# THE ARMING RECORD — the sibling of the stamp whose mtime `arm` sets and the tick compares a
+# delivery against (R-13). Spelled out here the way stamp_of spells the stamp: one place in
+# this suite knows the layout, and a rename on the writer's side shows up as a failure rather
+# than as a fixture that quietly stops describing anything.
+armed_of() { printf '%s%s' "$(stamp_of "$@")" ".armed"; }
+
+# A DISARM FIXTURE DESCRIBES A PATROL THAT ARMED BEFORE THE RUN DELIVERED, and from 1.3.2
+# that ordering is what the tick reads — so it is fixture DATA, set by arming through the
+# real verb and dating the record back, exactly as `backdate` sets staleness and as
+# tests/cross-gate-agreement.test.sh §S.3 sets "newest". Nothing here sleeps, and nothing is
+# left to a same-second tie.
+armed_ago() {  # <repo> [seconds ago, default 3600]
+  poke "$1" arm
+  backdate "$(armed_of "$1")" "${2:-3600}"
+}
+
 # ---------- running the poker (same watchdog shape as tests/session-sweeper.test.sh) ----------
 
 POKE_BOUND=20
@@ -297,7 +315,10 @@ section "Section 3: tick — the accelerated-clock decisions (AC-7, re-authored 
 
 # --- empty roster -> DISARM ---
 R3E="$(make_repo s3-empty)"; new_roster "$R3E"
-# The run says it is delivered, so the empty roster is a finish and not a lull (AC-14).
+# The run says it is delivered, so the empty roster is a finish and not a lull (AC-14) — and
+# the Patrol armed before that delivery was recorded, which is what makes the delivery THIS
+# run's (R-13, AC-14's second half).
+armed_ago "$R3E"
 delivered_plan "$R3E"
 poke "$R3E" tick
 expect_eq "an empty roster ticks quietly (exit 0)" "0" "$RC"
@@ -357,7 +378,7 @@ expect_contains "…decision=NOTIFY survives the marker" "decision=NOTIFY" "$OUT
 expect_contains "…naming the row" "rows=overdue-swept" "$OUT"
 
 # --- all rows closed (MET), roster non-empty -> DISARM generalizes past "empty" ---
-R3C="$(make_repo s3-closed)"; new_roster "$R3C"; delivered_plan "$R3C"
+R3C="$(make_repo s3-closed)"; new_roster "$R3C"; armed_ago "$R3C"; delivered_plan "$R3C"
 DEL_C="$R3C/delivered.md"; echo "done" > "$DEL_C"
 add_row "$R3C" name=finished deliverable="$DEL_C" duration="1 minute" \
   launched_at="$(iso_ago 600)"
@@ -402,7 +423,7 @@ expect_absent   "…never NOTIFY on a duration the parser refused" "decision=NOT
 # and its artifact — accounted for by a human rather than written to disk — will never
 # appear. DISARM requires OPEN=0, so the self-wake could not be ended by the ordinary path
 # an orchestrator uses to close a row that produced no artifact.
-R3AK="$(make_repo s3-all-acked)"; new_roster "$R3AK"; delivered_plan "$R3AK"
+R3AK="$(make_repo s3-all-acked)"; new_roster "$R3AK"; armed_ago "$R3AK"; delivered_plan "$R3AK"
 add_row "$R3AK" name=acked-1 deliverable="$R3AK/absent-1.md" duration="1 minute" \
   launched_at="$(iso_ago 600)"
 add_row "$R3AK" name=acked-2 deliverable="$R3AK/absent-2.md" duration="1 minute" \
@@ -426,7 +447,7 @@ expect_absent   "…never NOTIFY on rows a human already closed" "decision=NOTIF
 # The sandbox label deliberately does NOT contain the row name: the DISARM line now names
 # the plan path it decided from, and a repo dir called `s3-acked-overdue` would put the row
 # name into the output by way of the fixture rather than by way of a notification.
-R3AN="$(make_repo s3-ack-past-due)"; new_roster "$R3AN"; delivered_plan "$R3AN"
+R3AN="$(make_repo s3-ack-past-due)"; new_roster "$R3AN"; armed_ago "$R3AN"; delivered_plan "$R3AN"
 add_row "$R3AN" name=acked-overdue deliverable="$R3AN/absent-acked-overdue.md" \
   duration="1 minute" launched_at="$(iso_ago 100000)"
 ack_rows "$R3AN" acked-overdue
@@ -550,7 +571,8 @@ section "Section 6: the Patrol stamp — the arm verb, and stamp-before-decide o
 # design (doctrine: arm at engagement, never on dispatch), so the first stamp cannot come
 # from a tick that has a roster to read. Without the verb the wall is a chicken-and-egg.
 
-stamp_of() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "${2:-$SID}"; }
+# `stamp_of`, `armed_of` and `armed_ago` are defined with the other fixture builders above:
+# Section 3's DISARM cases need them, and a definition here would be too late for those.
 mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
 
 # ---------- the arm verb ----------
@@ -1053,8 +1075,7 @@ expect_contains "the usage surface names the disarm verb" "session-poker.sh disa
 # This is the producer the plan missed: DISARM is not a run-close ceremony, it is the
 # decision every quiet stretch reaches. The decision line still prints — the removal is
 # after it, so nothing above can be skipped by it.
-R9C="$(make_repo s9-tick-disarm)"; new_roster "$R9C"; delivered_plan "$R9C"
-poke "$R9C" arm
+R9C="$(make_repo s9-tick-disarm)"; new_roster "$R9C"; armed_ago "$R9C"; delivered_plan "$R9C"
 poke "$R9C" tick
 expect_contains "an empty roster still decides DISARM" "decision=DISARM" "$OUT"
 expect_eq "…and that tick removed the stamp it wrote: the decision and the disk agree" "no" \
@@ -1079,11 +1100,10 @@ expect_eq "…and that tick KEEPS the stamp" "yes" \
 # dispatch wall died looks like. The stamp follows that precedence rather than the decision
 # line — stopping the clock on the one tick that says "your wall is gone" would take the
 # monitor down with it.
-R9E="$(make_repo s9-blind)"; new_roster "$R9E"; delivered_plan "$R9E"
+R9E="$(make_repo s9-blind)"; new_roster "$R9E"; armed_ago "$R9E"; delivered_plan "$R9E"
 C9E="$(fake_config_dir s9e)"
 tx_dispatch 2 | write_transcript "$C9E" "$SID"
 export CLAUDE_CONFIG_DIR="$C9E"
-poke "$R9E" arm
 poke "$R9E" tick
 expect_contains "an empty roster under a blind wall still prints its DISARM line" \
   "decision=DISARM" "$OUT"
@@ -1159,8 +1179,8 @@ expect_eq "AC-13: …and KEEPS the stamp" "yes" \
 
 # --- AC-14: empty roster, plan at current: 9 with delivered: -> DISARM, stamp REMOVED ---
 R10C="$(make_repo s10-delivered)"; new_roster "$R10C"
+armed_ago "$R10C"
 write_plan "$R10C" "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')"
-poke "$R10C" arm
 poke "$R10C" tick
 expect_eq "AC-14: a delivered run over an empty roster ticks cleanly (exit 0)" "0" "$RC"
 expect_contains "AC-14: …and decides DISARM — the run said it is delivered" \
@@ -1187,10 +1207,10 @@ expect_eq "AC-14 discriminator: …and KEEPS the stamp" "yes" \
 
 # --- an incident run answers too: <docs-root>/incidents/ is the second plan directory ---
 R10E="$(make_repo s10-incident)"; new_roster "$R10E"
+armed_ago "$R10E"
 mkdir -p "$R10E/.bionic/docs/incidents"
 printf '%s' "$(plan_body 9 'delivered: incident closed; report: record/fixture/x.md')" \
   > "$R10E/.bionic/docs/incidents/inc-01.md"
-poke "$R10E" arm
 poke "$R10E" tick
 expect_contains "a delivered INCIDENT plan DISARMs too — both plan directories are read" \
   "decision=DISARM" "$OUT"
@@ -1201,7 +1221,7 @@ expect_contains "a delivered INCIDENT plan DISARMs too — both plan directories
 R10F="$(make_repo s10-too-deep)"; new_roster "$R10F"
 write_plan "$R10F" "$(plan_body 9 'delivered: too deep to be seen')" \
   "epic-99/wave-01/nested/plan.md"
-poke "$R10F" arm
+armed_ago "$R10F"
 poke "$R10F" tick
 expect_contains "a plan at depth 3 is not a candidate, so the tick QUIETs" "decision=QUIET" "$OUT"
 write_plan "$R10F" "$(plan_body 9 'delivered: at depth two')" "epic-99/wave-01.plan.md"
@@ -1221,7 +1241,7 @@ printf 'a scratch note with no SDLC State heading at all\n' \
 # The plan is backdated rather than the scrap re-touched: a same-second tie reads as "not
 # newer" to `-nt`, which would pass this case without the filter ever being exercised.
 backdate "$R10G/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" 3600
-poke "$R10G" arm
+armed_ago "$R10G" 7200
 poke "$R10G" tick
 expect_contains "a NEWER marker-less .md does not shadow the delivered plan" \
   "decision=DISARM" "$OUT"
@@ -1248,7 +1268,7 @@ R10I="$(make_repo s10-delivered-but-open)"; new_roster "$R10I"
 delivered_plan "$R10I"
 add_row "$R10I" name=still-running deliverable="$R10I/absent.md" \
   duration="4 hours" launched_at="$(iso_ago 60)"
-poke "$R10I" arm
+armed_ago "$R10I"
 poke "$R10I" tick
 expect_contains "a DELIVERED plan with an open row still decides QUIET" "decision=QUIET" "$OUT"
 expect_absent "…never DISARM while the roster carries open work" "decision=DISARM" "$OUT"
@@ -1264,6 +1284,47 @@ delivered_plan "$R10J"
 poke "$R10J" tick
 expect_eq "an absent roster still REFUSES (exit 2), delivered plan or not" "2" "$RC"
 expect_absent "…and decides nothing" "decision=" "$OUT"
+
+# --- AC-14 (R-13, critic C-4): a delivery that PREDATES this Patrol's arming is the
+#     PREVIOUS run's, and never DISARMs the one that just armed ---
+#
+# THE WINDOW THIS CLOSES. A session finishes run W — its plan records `delivered:` — and
+# then starts W+1. Arming happens at Step 0 (SKILL.md §Dispatch: "at engagement"), but
+# W+1's plan, and its `## SDLC State`, does not exist until Step 1-3. In that gap the
+# newest SDLC-State plan is still W's, its Step-9 line still says `delivered:`, and the
+# roster is empty because nothing has been dispatched yet — so the tick took DISARM,
+# removed the stamp, and hooks/dispatch-preflight.sh refused W+1's very first dispatch on
+# the arming wall (critic C-4, wave-1.3.2 Step 6).
+#
+# The arming instant is FIXTURE DATA here, set by backdating the plan — never by sleeping,
+# and never left to a same-second tie (tests/cross-gate-agreement.test.sh §S.3's rule).
+R10K="$(make_repo s10-delivered-before-arm)"; new_roster "$R10K"
+delivered_plan "$R10K"
+backdate "$R10K/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" 3600
+poke "$R10K" arm
+poke "$R10K" tick
+expect_eq "AC-14: a delivery older than the arming instant ticks quietly (exit 0)" "0" "$RC"
+expect_contains "AC-14: …and decides QUIET — that delivery belongs to the previous run" \
+  "decision=QUIET" "$OUT"
+expect_absent "AC-14: …never DISARM at the START of the next run" "decision=DISARM" "$OUT"
+expect_contains "AC-14: …and says so in words the reader can act on" \
+  "before this Patrol armed" "$OUT"
+expect_eq "AC-14: …and the stamp STAYS, so the first dispatch of the new run is not refused" "yes" \
+  "$([ -f "$(stamp_of "$R10K")" ] && echo yes || echo no)"
+
+# --- no arming record at all -> open, exactly as every other doubt does (ADR-002 §3) ---
+# A tick in a session that never armed has nothing to date the delivery against. The fail
+# direction is the ADR's, without exception: a wrong `open` costs a Patrol that keeps
+# ticking over a finished run, which one `disarm` ends; a wrong `delivered` ends the
+# supervision of a live run, terminally, and nothing recovers it.
+R10L="$(make_repo s10-never-armed)"; new_roster "$R10L"
+delivered_plan "$R10L"
+poke "$R10L" tick
+expect_eq "a tick with no arming record ticks quietly (exit 0)" "0" "$RC"
+expect_contains "…and decides QUIET — there is nothing to date the delivery against" \
+  "decision=QUIET" "$OUT"
+expect_absent "…never DISARM off a delivery it cannot place in time" "decision=DISARM" "$OUT"
+expect_contains "…naming the missing arming record as the reason" "arming record" "$OUT"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'
