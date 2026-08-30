@@ -358,6 +358,18 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         if (tag != "") intag = 1
       }
       if (mode == "heredoc") { printf "%s", out; exit }
+      # mode=head: the WHOLE command reduced to the text classify_argv would
+      # read — assignments, openers, command-taking prefixes and ONE runner
+      # wrapper removed. farm-out-reminder.sh reads it for its tier-2 matcher,
+      # which used to carry its own sed twins of strip_leading/unwrap_runner
+      # (review-b B-4a). One reader, one set of rules.
+      if (mode == "head") {
+        hd0 = trim(out)
+        gsub(/\n/, " ", hd0)
+        hd1 = strip_leading(hd0)
+        printf "%s", strip_leading(unwrap_runner(hd1))
+        exit
+      }
       k = segments(out, seg)
       CD_SEEN = 0
       for (i = 1; i <= k; i++) {
@@ -374,6 +386,10 @@ _cmd_class_awk() {  # <mode> ; command on stdin
 
 cmd_strip_heredocs() {  # <command> -> the command with every heredoc body removed
   printf '%s' "${1-}" | _cmd_class_awk heredoc
+}
+
+cmd_unwrap_head() {  # <command> -> the command reduced to what argv[0] reads
+  printf '%s' "${1-}" | _cmd_class_awk head
 }
 
 cmd_class_lines() {  # <command> -> "<class>\t<segment>" per non-empty segment

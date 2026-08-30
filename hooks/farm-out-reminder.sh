@@ -108,24 +108,15 @@ deny_reason() {  # $1=class $2=role
 # ── classification (B-5: argv positions, read by scripts/lib/cmd-class.sh) ───────
 # override check + wrapper unwrap precede classification.
 
-strip_prefixes() {  # env / FARM_OUT_*= / nohup / timeout wrappers → stripped form
-  printf '%s' "$1" | sed -E 's/^(env +)?(FARM_OUT_[A-Z_]+=[^ ]+ +)?(nohup +)?(timeout +[0-9]+[smh]? +)?//'
-}
-
-unwrap() {  # one level of sh -c / bash -c / eval / bash <(...) → inner command
-  local c="$1"
-  case "$c" in
-    "sh -c "*|"bash -c "*)
-      printf '%s' "$c" | sed -E "s/^(sh|bash) -c +//; s/^'(.*)'\$/\1/; s/^\"(.*)\"\$/\1/" ;;
-    "eval "*) printf '%s' "${c#eval }" ;;
-    "bash <("*)
-      # bash <(cat FILE) ≡ bash FILE (process substitution feeding a reader);
-      # collapse to the executed script so the workaround closes onto the
-      # tier-2 matcher — the inner `cat test.sh` alone would not match.
-      printf '%s' "$c" | sed -E 's/^bash <\((cat|tac) +//; s/^bash <\(//; s/\)$//; s/^/bash /' ;;
-    *) printf '%s' "$c" ;;
-  esac
-}
+# The sed twins that used to live here — strip_prefixes() and unwrap() — are
+# GONE (review-b B-4a). They were hand-rolled copies of the library's
+# strip_leading()/unwrap_runner() with their own smaller rule set: the prefix
+# strip knew only `env`, `FARM_OUT_*=`, `nohup` and `timeout <n>`, so a `sudo`,
+# a `time`, an `xargs` or an ordinary `FOO=1` left the wrapper sitting at
+# argv[0] and the tier-2 matcher below never fired. Tier-2 now reads
+# cmd_unwrap_head, which is the same reduction cmd_class itself performs — one
+# reader, one set of rules, and the R-12 superset applies to the nudge tier too.
+# [WALL: tests/cmd-class.test.sh]
 
 role_for_class() {  # $1=class → the role a redirect names
   case "$1" in suite) printf 'test-runner' ;; *) printf 'implementor' ;; esac
@@ -196,7 +187,8 @@ fi
 CMD_CLASS_LIB_WANT="$(dirname "$0")/../scripts/lib/cmd-class.sh"
 CMD_CLASS_LIB=""
 for _cand in "$CMD_CLASS_LIB_WANT" "$(dirname "$0")/../payload/scripts/lib/cmd-class.sh"; do
-  [ -f "$_cand" ] && { CMD_CLASS_LIB="$_cand"; break; }
+  # -r, not -f (review-b B-4c): readability is what predicts whether `.` succeeds.
+  [ -r "$_cand" ] && { CMD_CLASS_LIB="$_cand"; break; }
 done
 if [ -z "$CMD_CLASS_LIB" ] || ! . "$CMD_CLASS_LIB"; then
   _unreadable="farm-out checkpoint: this wall cannot read commands — its classifier failed to load ($CMD_CLASS_LIB_WANT). A wall that cannot classify refuses rather than waving work through. Fix: restore payload/scripts/lib/cmd-class.sh or re-install the plugin; if you must proceed now, re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
@@ -218,7 +210,7 @@ SAFE_FLAT=$(cmd_strip_heredocs "$CMD" \
   | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
   | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
 
-TARGET=$(unwrap "$(strip_prefixes "$SAFE_FLAT")")
+TARGET=$(cmd_unwrap_head "$SAFE_FLAT")
 CLASS=""; ROLE=""
 
 # Chain segmentation (≥3 &&-joined segments) feeds both chain arms below;
