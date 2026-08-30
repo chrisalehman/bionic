@@ -105,8 +105,8 @@ deny_reason() {  # $1=class $2=role
   printf '%s' "farm-out checkpoint: this $1-class command doesn't belong on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Fix: dispatch it — Agent(subagent_type: $2, prompt carrying the command from this tool call): $safe — scrubbed and truncated for the log; the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
 }
 
-# ── classification (4/2 tier-1; classify_tier2 lands in 4/3) ─────────────
-# override check + wrapper unwrap precede classify_tier1.
+# ── classification (B-5: argv positions, read by scripts/lib/cmd-class.sh) ───────
+# override check + wrapper unwrap precede classification.
 
 strip_prefixes() {  # env / FARM_OUT_*= / nohup / timeout wrappers → stripped form
   printf '%s' "$1" | sed -E 's/^(env +)?(FARM_OUT_[A-Z_]+=[^ ]+ +)?(nohup +)?(timeout +[0-9]+[smh]? +)?//'
@@ -121,38 +121,31 @@ unwrap() {  # one level of sh -c / bash -c / eval / bash <(...) → inner comman
     "bash <("*)
       # bash <(cat FILE) ≡ bash FILE (process substitution feeding a reader);
       # collapse to the executed script so the workaround closes onto the
-      # tier-1 matcher — the inner `cat test.sh` alone would not match.
+      # tier-2 matcher — the inner `cat test.sh` alone would not match.
       printf '%s' "$c" | sed -E 's/^bash <\((cat|tac) +//; s/^bash <\(//; s/\)$//; s/^/bash /' ;;
     *) printf '%s' "$c" ;;
   esac
 }
 
-classify_tier1() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
-  local c="$1"
-  # Patterns match mid-command by design: the (^|[;&| ]) anchor and the
-  # ([;&| ]|$) terminator let a tier-1 token be found after a separator
-  # (`true ; npm install`, `bash test.sh; echo done`) while a substring
-  # inside a word (`echo remake`) never matches. A short (<3-segment) chain
-  # that carries a tier-1 token thus denies here on purpose; the ≥3-segment
-  # &&-chain is a separate arm (class=chain) reached only when this one skips.
-  # [WALL: tests/farm-out-reminder.test.sh]
-  if printf '%s' "$c" | grep -qE '(^|[;&| ])bash +([^ ]*/)?(test\.sh|tests/run\.sh)([;&| ]|$)|(^|[;&| ])bash +[^ ]+\.test\.sh([;&| ]|$)|^(npm|pnpm|yarn) +test([;&| ]|$)|^pytest([;&| ]|$)|^go +test([;&| ]|$)|^cargo +test([;&| ]|$)|^make +test([;&| ]|$)'; then
-    CLASS="suite"; ROLE="test-runner"; return 0; fi
-  # Command position only: start-of-command or after a real separator
-  # (;|&), optionally via a bash/sh runner. A bare space is NOT a
-  # separator here — `ls claude-bootstrap.sh` reads the script, it does
-  # not run it (2026-07-22 false-positive fix).
-  if printf '%s' "$c" | grep -qE '(^|[;&|] ?)(bash +|sh +)?([^ ]*/)?claude-(bootstrap|reset)\.sh([;&| ]|$)'; then
-    CLASS="bootstrap"; ROLE="implementor"; return 0; fi
-  if printf '%s' "$c" | grep -qE '(^|[;&| ])(npm|pnpm|yarn) +(install|add|ci)([;&| ]|$)|(^|[;&| ])pip3? +install([;&| ]|$)|(^|[;&| ])uv +(sync|pip)([;&| ]|$)|(^|[;&| ])brew +install([;&| ]|$)'; then
-    CLASS="install"; ROLE="implementor"; return 0; fi
-  # `make clean` is trivial → stays silent; `make test` already classified suite
-  # above. Every other `make`/`make <target>` is tier-1 build. ERE has no negative
-  # lookahead, so the clean exemption is a guard rather than baked into the pattern.
-  case "$c" in "make clean"|"make clean "*) return 1 ;; esac
-  if printf '%s' "$c" | grep -qE '(^|[;&| ])(npm|pnpm|yarn) +run +build([;&| ]|$)|(^|[;&| ])cargo +build([;&| ]|$)|(^|[;&| ])go +build([;&| ]|$)|(^|[;&| ])docker +build([;&| ]|$)|(^|[;&| ])make( +[^ ]+)?([;&| ]|$)'; then
-    CLASS="build"; ROLE="implementor"; return 0; fi
-  return 1
+role_for_class() {  # $1=class → the role a redirect names
+  case "$1" in suite) printf 'test-runner' ;; *) printf 'implementor' ;; esac
+}
+
+classify_tier1() {  # $1=command text → sets CLASS ROLE, rc 0 on match
+  # ONE READER, argv-positional (payload/scripts/lib/cmd-class.sh). The regex classifier
+  # this replaced matched mid-string after any space, so `make( +[^ ]+)?` denied
+  # `git commit -m "make the row green"` as class=build and a heredoc body carrying
+  # `bash tests/run.sh` denied as class=suite — both measured, research-b3 §2. Prose,
+  # quoted strings and heredoc bodies are never argv[0], so they no longer classify.
+  # A short (<3-segment) chain that carries a tier-1 command still denies here on
+  # purpose; the ≥3-segment chain is a separate arm (class=chain) reached only when
+  # this one skips.
+  # [WALL: tests/cmd-class.test.sh]
+  local c
+  c=$(cmd_class "$1")
+  [ "$c" = "none" ] && return 1
+  CLASS="$c"; ROLE=$(role_for_class "$c")
+  return 0
 }
 
 emit_tier1() {  # $1=class $2=role — deny, or downgrade to a nudge under advisory
@@ -190,15 +183,50 @@ if printf '%s' "$FLAT" | grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)'; then
   log_event "override" "user-sanctioned"; exit 0
 fi
 
-TARGET=$(unwrap "$(strip_prefixes "$FLAT")")
+# ── the command reader, sourced FAIL-CLOSED (design D1, Chris 2026-08-30) ────────
+#
+# A wall that cannot classify REFUSES; it never waves work through. The sanctioned
+# bypass is checked above this line and still works, because the override is a human
+# saying "I know" and must not depend on a file being present.
+#
+# TWO SPELLINGS OF ONE DIRECTORY. payload/hooks is a symlink to <repo>/hooks and `$0`
+# is textual, so "../scripts/lib" resolves only when the harness reached this file
+# through ${CLAUDE_PLUGIN_ROOT}/hooks/. The repo spelling is the second candidate.
+# Both land on payload/scripts/lib/cmd-class.sh — tests/cmd-class.test.sh §C6 pins it.
+CMD_CLASS_LIB_WANT="$(dirname "$0")/../scripts/lib/cmd-class.sh"
+CMD_CLASS_LIB=""
+for _cand in "$CMD_CLASS_LIB_WANT" "$(dirname "$0")/../payload/scripts/lib/cmd-class.sh"; do
+  [ -f "$_cand" ] && { CMD_CLASS_LIB="$_cand"; break; }
+done
+if [ -z "$CMD_CLASS_LIB" ] || ! . "$CMD_CLASS_LIB"; then
+  _unreadable="farm-out checkpoint: this wall cannot read commands — its classifier failed to load ($CMD_CLASS_LIB_WANT). A wall that cannot classify refuses rather than waving work through. Fix: restore payload/scripts/lib/cmd-class.sh or re-install the plugin; if you must proceed now, re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
+  log_event "deny" "unreadable"
+  if [ "$MODE" = "advisory" ]; then
+    jq -n --arg c "$_unreadable" \
+      '{hookSpecificOutput:{hookEventName:"PreToolUse",additionalContext:$c}}' 2>/dev/null
+  else
+    jq -n --arg r "$_unreadable" \
+      '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}' 2>/dev/null
+  fi
+  exit 0
+fi
+
+# The heredoc-free form of the command. Chain segmentation and the tier-2 matcher read
+# it rather than FLAT, so a `&&` or an `npx` inside a heredoc body cannot reshape the
+# decision any more than it can classify.
+SAFE_FLAT=$(cmd_strip_heredocs "$CMD" \
+  | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
+  | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
+
+TARGET=$(unwrap "$(strip_prefixes "$SAFE_FLAT")")
 CLASS=""; ROLE=""
 
 # Chain segmentation (≥3 &&-joined segments) feeds both chain arms below;
 # compute the segment list once. Empty/0 when no `&&` is present.
 CHAIN_SEGS=""; CHAIN_COUNT=0
-case "$FLAT" in
+case "$SAFE_FLAT" in
   *"&&"*)
-    CHAIN_SEGS=$(printf '%s' "$FLAT" | awk '{ gsub(/&&/, "\n"); print }')
+    CHAIN_SEGS=$(printf '%s' "$SAFE_FLAT" | awk '{ gsub(/&&/, "\n"); print }')
     CHAIN_COUNT=$(printf '%s\n' "$CHAIN_SEGS" | grep -cE '[^[:space:]]')
     ;;
 esac
@@ -207,7 +235,7 @@ esac
 # A ≥3-segment && chain defers to the chain tier-1 arm below so it keeps its
 # class=chain label: now that install/build share the suite/bootstrap segment
 # anchoring, an unguarded single-command match would relabel those chains.
-if [ "${CHAIN_COUNT:-0}" -lt 3 ] && classify_tier1 "$TARGET"; then
+if [ "${CHAIN_COUNT:-0}" -lt 3 ] && classify_tier1 "$CMD"; then
   emit_tier1 "$CLASS" "$ROLE"
 fi
 
@@ -218,7 +246,7 @@ if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   while IFS= read -r _seg; do
     _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
     [ -n "$_seg" ] || continue
-    if classify_tier1 "$(unwrap "$(strip_prefixes "$_seg")")"; then
+    if classify_tier1 "$_seg"; then
       CHAIN_ROLE="$ROLE"; break
     fi
   done <<EOF
