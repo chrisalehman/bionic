@@ -717,6 +717,61 @@ SUB=$(session_subagents_dir "$TRANSCRIPT") || exit 0
 OBSERVER=$(sanitize "$(_jq '.agent_id')" 200)
 [ -n "$OBSERVER" ] || OBSERVER="orchestrator"
 
+# THE DIRECTORIES THIS SESSION HAS ADOPTED INTO (epic-20 W1 B-1). DELIBERATELY DUPLICATED
+# from hooks/stop-guard.sh's copy, per TDD §9 and for the reason that file's header gives:
+# a sourced library the installer misses is a silently inert consumer, and this one decides
+# whether an observation is worth writing down at all.
+#
+# WHY THIS SCRIPT NEEDS IT. The scope test below asks whether the observed agent is one
+# this session can act on, and answered that with "is its log under THIS session's own
+# subagents directory". After a `/clear`+resume the agents the session has ADOPTED are
+# filed under the PREDECESSOR's directory — same processes, still working — so every
+# observation of one was dropped here, silently, and the stop gate then refused the stop for
+# want of a look that had in fact been taken. Widening the gate's resolution without
+# widening this test would leave the cure half-built: the gate would resolve the target and
+# still find no record to discharge it.
+#
+# KEYED ON THE ROSTER, never a walk: this session may record observations of agents in
+# exactly those sessions its own roster says it adopted from, and in no others. Fail-closed
+# — an unreadable roster or a value that is not a session id yields no directory, so the
+# record is skipped and the later stop refuses, which is the safe side.
+adopted_subagent_dirs() {  # -> one directory per line
+  local line osid d p cfg seen=" "
+  [ -f "$ROSTER_FILE" ] || return 0
+  [ -L "$ROSTER_FILE" ] && return 0
+  cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  while IFS= read -r line; do
+    case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    osid=$(line_field "$line" adopted_from)
+    [ -n "$osid" ] || continue
+    case "$osid" in *[!A-Za-z0-9-]*) continue ;; esac
+    case "$seen" in *" $osid "*) continue ;; esac
+    seen="$seen$osid "
+    d="${TRANSCRIPT%/*}/$osid/subagents"
+    [ -d "$d" ] && printf '%s\n' "$d"
+    for p in "$cfg"/projects/*/; do
+      [ -d "${p}${osid}/subagents" ] || continue
+      [ "${p}${osid}/subagents" = "$d" ] && continue
+      printf '%s\n' "${p}${osid}/subagents"
+    done
+  done < "$ROSTER_FILE"
+  return 0
+}
+
+ADOPTED_DIRS=()
+while IFS= read -r _adir; do
+  [ -n "$_adir" ] && ADOPTED_DIRS+=("$_adir")
+done < <(adopted_subagent_dirs)
+
+log_in_scope() {  # <log path> -> 0 if this session can act on that agent
+  local l="$1" d
+  case "$l" in "$SUB"/*) return 0 ;; esac
+  for d in ${ADOPTED_DIRS+"${ADOPTED_DIRS[@]}"}; do
+    case "$l" in "$d"/*) return 0 ;; esac
+  done
+  return 1
+}
+
 # Write one observation under a lock. Read-modify-write on shared state races
 # otherwise (checklist A4), and the temp file must carry an unpredictable name
 # (checklist A2) — a predictable one plus a planted symlink was a proven
@@ -803,7 +858,9 @@ while IFS= read -r mline; do
   # deliberately resolves more widely than that (it must work from any cwd and
   # reports out-of-project matches explicitly); this is where that wider view
   # stops being dischargeable evidence.
-  case "$M_LOG" in "$SUB"/*) : ;; *) continue ;; esac
+  # …and the sessions it has ADOPTED from, which are its own to act on by the row it
+  # wrote down (epic-20 W1 B-1). Anything else is still dropped.
+  log_in_scope "$M_LOG" || continue
 
   # THE LOG MUST BE ON DISK. The residual disclosed above argues that forging a
   # machine line costs the target's current log mtime and size, "which the gate
