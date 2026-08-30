@@ -844,6 +844,14 @@ expect_contains "the stop address is the form the stop primitive accepts" \
   "TaskStop landed-one@session-${SID:0:8}" "$OUT"
 expect_absent "…never the transcript-form id, which the platform rejects for a teammate" \
   "TaskStop $ID_LANDED" "$OUT"
+# BOTH SPELLINGS ARE OFFERED, because only one of them is proven (follow-up, 2026-08-30).
+# The captured payload says the addressing form carries the LAUNCHING session's eight
+# characters, which for an adopted agent is the PREDECESSOR's; the row this verb writes
+# carries this session's. Both resolve to the same row at both stop gates, so the cost of
+# printing the alternate is one clause and the cost of printing only the wrong one is a
+# refusal the operator cannot clear.
+expect_contains "…and the alternate spelling is offered beside it" \
+  "(or landed-one@session-${ADOPT_A:0:8} if the platform keys on the launching session)" "$OUT"
 expect_contains "the row names the predecessor session it came from" "from=$ADOPT_A" "$OUT"
 expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
 
