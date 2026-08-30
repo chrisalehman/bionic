@@ -1154,6 +1154,120 @@ write_plan "$h17q" "$(plan 6 "$step6_body" "$v101_matrix_pending")" > /dev/null
 expect_block "17q pending row at current 6 → block (relaxation is 5-only)" \
   "$h17q" 'git commit -m "x"' "AC-2"
 
+# --- 17r: `slice: 9` rows — evidence only Step 9 can produce --------------
+#
+# A criterion whose only evidence is a Step-9 lifecycle artifact (the close-out
+# report, continuation.md, the ADR the close-out writes) cannot be discharged
+# while the plan sits at Steps 5..8: the artifact it would cite does not exist
+# yet. Such a row declares `slice: 9` in its AC block — parsed like
+# `provenance:`, never a sixth table cell (the 7-field row pin would refuse
+# every row) — and is then exempt from TWO separate arms while current < 9:
+# the per-tier evidence keys, and the CONFIRMED/auditor wall that bites at
+# current > 5. At current: 9 the artifact exists and the row is ordinary.
+# The tag is T0-only: every other tier names evidence that exists before Step
+# 9, so `slice: 9` there is a mis-tag and blocks, naming the tier.
+
+# T0 pending row whose AC block is the tag, beside a fully discharged T3 row
+# so the rest of the matrix is valid (matrix_complete's shape, which 17f2
+# pins as an allow at current: 6).
+v9_matrix="## Verification Matrix
+
+stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T0 | pending | see AC-2 |  |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a; origin B cdn purged
+  cold-client: fresh incognito profile, no SW cache
+  contact: clicked open — panel closed → open
+  readback: panel.visible === true via page eval
+AC-2:
+  provenance: spec §Close-out obligations
+  slice: 9"
+
+# The same matrix with the tag replaced by an ordinary line — the control that
+# keeps every allow below non-vacuous: untagged, this row blocks at current 6.
+v9_matrix_untagged="${v9_matrix/  slice: 9/  note: written at close-out}"
+
+# The tag on a tier that has evidence before Step 9 — a mis-tag.
+v9_matrix_t1="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T1 | pending | see AC-2 |  |}"
+v9_matrix_t4="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T4 | pending | see AC-2 |  |}"
+
+# The tagged row once Step 9 has run: discharged, T0 keys present, CONFIRMED.
+v9_matrix_discharged="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T0 | discharged | see AC-2 | CONFIRMED |}"
+v9_matrix_discharged="${v9_matrix_discharged/  slice: 9/  slice: 9
+  tier-run: read .bionic/docs/record/wave-01/close-out.md
+  readback: close-out names all 9 steps and the continuation}"
+
+# Post-Verify step bodies for the 7 / 8 / 9 cases (the shapes their own
+# validators demand — 29a and 19's integrate fixtures pin these independently).
+v9_step7_body="  n/a: no architectural decision in this wave"
+v9_step8_body="  merge: merged wave/bionic-1.3.2 into main
+  worktree-removed: n/a
+  cleanup: n/a"
+v9_step9_body="  delivered: close-out report and continuation.md written"
+
+# 17r — the exemption holds at every post-Verify step before 9 (AC-6).
+h17r6=$(make_home)
+write_plan "$h17r6" "$(plan 6 "$step6_body" "$v9_matrix")" > /dev/null
+expect_allow "17r T0 pending row with slice: 9 at current 6 → allow" \
+  "$h17r6" 'git commit -m "x"'
+
+h17r7=$(make_home)
+write_plan "$h17r7" "$(plan 7 "$v9_step7_body" "$v9_matrix")" > /dev/null
+expect_allow "17r T0 pending row with slice: 9 at current 7 → allow" \
+  "$h17r7" 'git commit -m "x"'
+
+h17r8=$(make_home)
+write_plan "$h17r8" "$(plan 8 "$v9_step8_body" "$v9_matrix")" > /dev/null
+expect_allow "17r T0 pending row with slice: 9 at current 8 → allow" \
+  "$h17r8" 'git commit -m "x"'
+
+# 17r — control: the SAME row without the tag blocks at current 6, so the
+# three allows above are the tag's doing and not the fixture's.
+h17r_ctl=$(make_home)
+write_plan "$h17r_ctl" "$(plan 6 "$step6_body" "$v9_matrix_untagged")" > /dev/null
+expect_block "17r untagged T0 pending row at current 6 → block (control)" \
+  "$h17r_ctl" 'git commit -m "x"' "AC-2"
+
+# 17r — at current: 9 the artifact exists, so the row is ordinary and its
+# pending state blocks (AC-7).
+h17r9=$(make_home)
+write_plan "$h17r9" "$(plan 9 "$v9_step9_body" "$v9_matrix")" > /dev/null
+expect_block "17r slice: 9 row still pending at current 9 → block" \
+  "$h17r9" 'git commit -m "x"' "AC-2"
+
+# 17r — and discharging it the ordinary way at current: 9 passes, so the block
+# above is the row's state and not the tag becoming poison.
+h17r9d=$(make_home)
+write_plan "$h17r9d" "$(plan 9 "$v9_step9_body" "$v9_matrix_discharged")" > /dev/null
+expect_allow "17r slice: 9 row discharged + CONFIRMED at current 9 → allow" \
+  "$h17r9d" 'git commit -m "x"'
+
+# 17r — the tag on T1..T4 is a mis-tag: block, naming the tier (AC-8).
+h17rt1=$(make_home)
+write_plan "$h17rt1" "$(plan 6 "$step6_body" "$v9_matrix_t1")" > /dev/null
+# Substring is the tag, not the tier: today's missing-key refusal for this row
+# ALSO contains "T1", so a tier-only assertion would pass for the wrong reason.
+# The current-5 case below is where "names the tier" discriminates.
+expect_block "17r slice: 9 on a T1 row at current 6 → block naming the tier" \
+  "$h17rt1" 'git commit -m "x"' "slice: 9"
+
+h17rt4=$(make_home)
+write_plan "$h17rt4" "$(plan 6 "$step6_body" "$v9_matrix_t4")" > /dev/null
+expect_block "17r slice: 9 on a T4 row at current 6 → block naming the tier" \
+  "$h17rt4" 'git commit -m "x"' "slice: 9"
+
+# 17r — the mis-tag is a shape error, so it fires at the Verify gate too,
+# where a pending row is otherwise exempt from everything.
+h17rt5=$(make_home)
+write_plan "$h17rt5" "$(plan 5 "$step5_base" "$v9_matrix_t1")" > /dev/null
+expect_block "17r slice: 9 on a T1 row at current 5 → block naming the tier" \
+  "$h17rt5" 'git commit -m "x"' "T1"
 # ============================================================
 # Section 18: matrix parser — section scoping + fenced-code skip
 # ============================================================
@@ -4470,6 +4584,63 @@ HOOK="$_real_hook"
 # Restore-proof: the real hook still refuses the impostor after the detour.
 expect_block "30g meta: the real hook still refuses the impostor after the mutation proof" \
   "$h30b" 'git commit -m "x"' "CONFIRMED"
+
+# ============================================================
+# Section 31: a refusal on a call that also writes the plan (B-6)
+# ============================================================
+#
+# The gate reads the plan off disk when the CALL starts. So a single Bash call
+# that edits the plan and then commits is judged against the PRE-EDIT plan: the
+# fix the agent just wrote is invisible, and the refusal reads as though it had
+# never been made. The observed reflex is to re-run the same combined call. When
+# the refused command's text names the plan, the refusal now says so.
+
+echo ""
+echo "=== Section 31: refusal names the edit-then-commit split ==="
+
+# 31a — a python3 heredoc writing the plan's absolute path, then a commit,
+# refused by the matrix arm → the refusal carries the split line.
+h31a=$(make_home)
+p31a=$(write_plan "$h31a" "$(plan 6 "$step6_body" "$v101_matrix_pending")")
+cmd31a=$(printf 'python3 - <<%s\nopen("%s","a").write("\\nAC-2:\\n  tier-run: x\\n")\nEOF\ngit commit -m "discharge AC-2"' "'EOF'" "$p31a")
+expect_block "31a refusal on a call that also writes the plan → names the split" \
+  "$h31a" "$cmd31a" "this command also writes the plan"
+
+# 31a — the same refusal still names the row it refused (the note is an extra
+# line, not a replacement).
+expect_block "31a the split line does not displace the original refusal" \
+  "$h31a" "$cmd31a" "AC-2"
+
+# 31b — the project-relative spelling of the same path (what an agent actually
+# types) is matched too.
+h31b=$(make_home)
+write_plan "$h31b" "$(plan 6 "$step6_body" "$v101_matrix_pending")" > /dev/null
+expect_block "31b relative plan path in the command → names the split" \
+  "$h31b" 'python3 -c "open('"'"'.bionic/docs/plans/active.md'"'"',\"a\")" && git commit -m "x"' \
+  "this command also writes the plan"
+
+# 31c — a refused commit that does NOT name the plan gets the ordinary 3-line
+# refusal and no split line. Same fixture and same extractor as 31a, so this
+# pins the note's scope rather than asserting an empty world.
+TOTAL=$((TOTAL + 1))
+run_hook "$h31a" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "AC-2" \
+   && ! echo "$HOOK_STDERR" | grep -q "also writes the plan"; then
+  echo "PASS: 31c plain commit refusal carries no split line"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected a block naming AC-2 with NO split line): 31c"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# 31d — the note rides on a refusal, never on its own: a command that names the
+# plan but has nothing to refuse is still allowed silently.
+h31d=$(make_home)
+p31d=$(write_plan "$h31d" "$(plan 6 "$step6_body" "$matrix_complete")")
+expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent" \
+  "$h31d" "python3 -c \"open('$p31d','a')\" && git commit -m \"x\""
 
 # ============================================================
 # Summary
