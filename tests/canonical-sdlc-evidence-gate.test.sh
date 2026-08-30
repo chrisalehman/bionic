@@ -4560,7 +4560,19 @@ write_plan "$h30k" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 CONFIRMED "$GOOD
 #
 # The doctored copy lives in a temp dir and the real hook is never touched.
 h30g_dir=$(mktemp -d); cleanup_dirs+=("$h30g_dir")
-DOCTORED_HOOK="$h30g_dir/loose-gate.sh"
+# Since 1.3.2 the gate reads commands through scripts/lib/git-argv.sh and
+# REFUSES when it cannot load it (spec AC-12, Chris D1). A doctored copy alone
+# in a bare temp dir therefore refuses everything for the wrong reason, so the
+# copy gets the shipped layout around it: hooks/ beside scripts/lib/.
+mkdir -p "$h30g_dir/hooks" "$h30g_dir/scripts/lib"
+for _h30g_cand in "${BIONIC_HOOKS_DIR}/../scripts/lib/git-argv.sh" \
+                  "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/git-argv.sh"; do
+  if [ -r "$_h30g_cand" ]; then
+    cp "$_h30g_cand" "$h30g_dir/scripts/lib/git-argv.sh"
+    break
+  fi
+done
+DOCTORED_HOOK="$h30g_dir/hooks/loose-gate.sh"
 sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \
   "$HOOK" > "$DOCTORED_HOOK"
 
