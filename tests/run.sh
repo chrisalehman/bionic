@@ -50,7 +50,7 @@
 # suites on the reliability ruling (commit 8582861), one of the nineteen
 # (fresh-home.test.sh) was later revived, rc-item.test.sh was added new, and
 # epic-19 wave-01 added doctor-patrol.test.sh (F3) and command-relay.test.sh
-# (F4) — 28 `run` lines as of this writing (`grep -c '^run "' tests/run.sh`
+# (F4), and bionic 1.3.2 added git-argv, cmd-class and patrol-marker — 31 `run` lines as of this writing (`grep -c '^run "' tests/run.sh`
 # equals `ls tests/*.test.sh | wc -l`;
 # a maintainer re-derives the count rather than trusting a number in a
 # comment, this one included). Neither audit file re-covers what changed since
@@ -293,6 +293,17 @@ run "command-relay.test.sh" bash tests/command-relay.test.sh
 # undeterminable feed kind degrades to an honest `unknown` line. Hand-listed
 # like every suite outside hooks/.
 run "doctor-version.test.sh" bash tests/doctor-version.test.sh
+# bionic 1.3.2 (wave-01-dogfood-fixes, 2026-08-30) — three suites for the three shared-truth
+# additions of that wave, each hand-listed like every suite outside hooks/:
+#   - git-argv.test.sh: scripts/lib/git-argv.sh (the git-argv reading protect-main and the
+#     evidence gate source), the fail-closed sourcing proof, and the in-tree `source` pin
+#   - cmd-class.test.sh: scripts/lib/cmd-class.sh (the argv-positional suite-class reading
+#     farm-out-reminder and background-suite-guard source), same fail-closed proof
+#   - patrol-marker.test.sh: the `session-poker.sh tick` marker pinned across its three
+#     spellings (lib/patrol.sh SSoT, patrol-duties-gate.sh, SKILL.md)
+run "git-argv.test.sh" bash tests/git-argv.test.sh
+run "cmd-class.test.sh" bash tests/cmd-class.test.sh
+run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
