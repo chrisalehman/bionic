@@ -19,9 +19,13 @@
 # symlink, so the first candidate alone would refuse every command in a
 # directory-source session. Byte-identical twin of the loader in
 # canonical-sdlc-evidence-gate.sh.
+#
+# ONE LOADER IDIOM ACROSS THE FOUR LIBRARY-SOURCING WALLS (review-b B-4c):
+# `$(dirname "$0")` for the directory — the idiom the other eleven hooks here
+# already use and the one tests/cmd-class.test.sh §C6 extracts — and `-r` for
+# the readability test, which is what actually predicts whether `.` succeeds.
 # [WALL: tests/git-argv.test.sh]
-_pm_self="${BASH_SOURCE[0]}"
-case "$_pm_self" in */*) _pm_dir="${_pm_self%/*}" ;; *) _pm_dir="." ;; esac
+_pm_dir="$(dirname "$0")"
 _pm_lib=""
 for _pm_cand in "$_pm_dir/../scripts/lib/git-argv.sh" "$_pm_dir/../payload/scripts/lib/git-argv.sh"; do
   if [ -r "$_pm_cand" ]; then _pm_lib="$_pm_cand"; break; fi

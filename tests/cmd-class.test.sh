@@ -194,6 +194,22 @@ case_is none 'bash run.sh'
 case_is none 'run.sh'
 case_is none 'sudo git status'
 
+# --- cmd_unwrap_head: the reduction farm-out's tier-2 matcher reads (B-4a) ---
+# It replaced two sed twins in farm-out-reminder.sh whose rule set was smaller
+# than the library's, so `sudo npx x` and `FOO=1 npx x` never reached tier-2.
+head_of() { bash -c '. "$1" || exit 1; cmd_unwrap_head "$2"' _ "$LIB" "$2" 2>&1; }
+expect_eq "head: a bare command is unchanged"      'npx create-thing' "$(head_of _ 'npx create-thing')"
+expect_eq "head: env prefix comes off"             'npx create-thing' "$(head_of _ 'env npx create-thing')"
+expect_eq "head: an ordinary assignment comes off" 'npx create-thing' "$(head_of _ 'FOO=1 npx create-thing')"
+expect_eq "head: sudo comes off"                   'npx create-thing' "$(head_of _ 'sudo npx create-thing')"
+expect_eq "head: timeout <n> comes off"            'npx create-thing' "$(head_of _ 'timeout 60 npx create-thing')"
+expect_eq "head: nohup comes off"                  'npx create-thing' "$(head_of _ 'nohup npx create-thing')"
+expect_eq "head: one sh -c wrapper comes off"      'npx create-thing' "$(head_of _ "sh -c 'npx create-thing'")"
+expect_eq "head: eval comes off"                   'npx create-thing' "$(head_of _ 'eval "npx create-thing"')"
+expect_eq "head: bash <(cat F) collapses to the script" 'bash tests/run.sh' "$(head_of _ 'bash <(cat tests/run.sh)')"
+expect_eq "head: prose is left alone"              'echo make sure the row is green' \
+  "$(head_of _ 'echo make sure the row is green')"
+
 # --- prose, quoted strings and heredoc bodies NEVER classify (AC-15, B-5) ---
 case_is none 'git commit -m "make the row green"'
 case_is none 'echo "npm install done"'
@@ -271,9 +287,14 @@ expect_empty "AC-15 …silent on echo \"npm install done\"" \
 # THE UNQUOTED SHAPE, which is the one that was measurably RED (research-b3 §2: the quote
 # in `echo 'make sure…'` blocked the space anchor by luck, so only the unquoted spelling and
 # the heredoc body reproduced the field DENY).
-expect_empty "AC-15 …silent on unquoted prose carrying `make <word>`" \
+# SINGLE-quoted labels, deliberately. These two carried backticks inside DOUBLE
+# quotes until 2026-08-30, so the suite ran `make` and `npm install` for real on
+# every invocation — writing a package-lock.json into the repo root and a log
+# into ~/.npm/_logs (auditor-step5.md F-3). A test suite must not execute the
+# commands it is describing.
+expect_empty 'AC-15 …silent on unquoted prose carrying `make <word>`' \
   "$(farm_decision 'echo make sure the row is green')"
-expect_empty "AC-15 …silent on unquoted prose carrying `npm install`" \
+expect_empty 'AC-15 …silent on unquoted prose carrying `npm install`' \
   "$(farm_decision 'echo run npm install first')"
 
 # --- AC-16: still a wall on the real thing ---
@@ -321,6 +342,19 @@ expect_empty "ls claude-bootstrap.sh stays silent (reading a script is not runni
   "$(farm_decision 'ls claude-bootstrap.sh')"
 D=$(farm_decision 'bash claude-bootstrap.sh')
 expect_contains "a bootstrap-class command still denies" '"deny"' "$D"
+
+# --- B-4a: tier-2 reads the library, so its wrappers come off too ---
+# `npx`/`uvx`/`git clone`/`docker run` are the NUDGE tier. Before the sed twins
+# were deleted, only env/nohup/timeout/FARM_OUT_*= came off, so a sudo- or
+# assignment-wrapped tier-2 command reached the matcher with the wrapper still
+# at argv[0] and nudged nobody.
+expect_contains "B-4a tier-2 still nudges a bare npx" 'additionalContext' \
+  "$(farm_decision 'npx create-thing')"
+# A DIFFERENT class, because nudge_once suppresses a repeat of the same one.
+expect_contains "B-4a …and now through sudo" 'additionalContext' \
+  "$(farm_decision 'sudo git clone https://example.invalid/r.git')"
+expect_empty "B-4a …but prose naming npx still says nothing" \
+  "$(farm_decision 'echo run npx create-thing first')"
 
 # --- advisory mode still downgrades a deny to a nudge ---
 printf 'farm-out-mode: advisory\n' > "$FARM_REPO/.bionic/config.yaml"
