@@ -1191,14 +1191,23 @@ case "$VERB" in
         # records it, and resolves the agent at all because the row names the session it is
         # filed under. Printing the address without writing the row would hand the operator
         # a second line they cannot use.
+        # THE WRITE'S ANSWER IS READ, because `die()` prints and RETURNS — it does not exit
+        # (:156, and every other caller depends on that). A warning followed by the address
+        # block below would hand the operator a `TaskStop` line that both stop gates refuse
+        # as FOREIGN, since ownership is taken from the row that was just NOT written
+        # (review-a C-3). So the row's own state decides which rendering it gets.
+        ROW_JOURNALLED=no
         if [ -n "$RID" ]; then
-          adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
-            "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" \
-            || die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
+          if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
+               "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID"; then
+            ROW_JOURNALLED=yes
+          else
+            die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
+          fi
         fi
 
         say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — $VERDICT"
-        if [ -n "$RID" ]; then
+        if [ -n "$RID" ] && [ "$ROW_JOURNALLED" = yes ]; then
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
@@ -1222,6 +1231,22 @@ case "$VERB" in
           printf '  stop        : TaskStop %s@session-%s  (or %s@session-%s if the platform keys on the launching session)\n' \
             "$(clean "$RNAME")" "$(printf '%s' "$SESSION_ID" | cut -c1-8)" \
             "$(clean "$RNAME")" "$(printf '%s' "$OSID" | cut -c1-8)"
+        elif [ -n "$RID" ]; then
+          # ADDRESSABLE FOR EVERYTHING BUT THE STOP. The id is real and the transcript and
+          # the message address do not depend on this session's roster — only ownership
+          # does, and that is precisely what the failed write cost. So the two true lines
+          # are still printed and the one that would be false is replaced by its cause,
+          # which is the UNADDRESSABLE shape below applied to the half that is missing.
+          printf '  agent id    : %s\n' "$RID"
+          printf '  observe     : %s (%s)\n' "$TX" \
+            "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
+          printf '  message     : SendMessage to:%s\n' "$RID"
+          printf '  stop        : unavailable — this adoption was NOT journalled to\n'
+          printf '                %s\n' "$ADOPT_OWN_ROSTER"
+          printf '  cure        : both stop gates take ownership from THIS session'"'"'s roster, so\n'
+          printf '                until that write lands every stop of %s is refused as\n' "$(clean "$RNAME")"
+          printf '                FOREIGN. Clear that path — a symlink where the roster goes, or\n'
+          printf '                a .bionic/tmp that is not a writable real directory — and re-run adopt.\n'
         else
           printf '  agent id    : (none — no identified row on that roster)\n'
           printf '  observe     : unavailable without an id\n'
