@@ -1088,6 +1088,14 @@ validate_ship_step() {
 # advance via the 6..9 prefix check. The status cell is enum-checked
 # (pending|blocked|discharged|waived) since the relaxation makes it
 # load-bearing.
+#
+# Close-out criteria: a T0 row whose AC block carries `slice: 9` keeps that
+# same relaxation ALL THE WAY to current: 9 — both the per-tier keys and the
+# CONFIRMED wall — because its evidence is a Step-9 artifact that does not
+# exist yet. It is two exemptions, not one: the key loop and the CONFIRMED
+# arm are separate branches, and a row exempted from only the first still
+# meets the second at current: 6. At current: 9 the tag stops exempting
+# anything. See the tag's own note inside validate_matrix.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
 # Per-tier required evidence keys — MIRROR of the canonical table in
@@ -1171,13 +1179,37 @@ user_confirmed_form_ok() {
     | grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]'
 }
 
+# The plan is read off disk when the CALL starts (PLAN is resolved at :245
+# before any of the command runs). So a single Bash call that edits the plan
+# and THEN commits is judged against the pre-edit plan: the fix the agent just
+# wrote is invisible to every arm below, and the refusal reads as though it had
+# never been made. The observed reflex on that refusal is to re-run the same
+# combined call, which fails identically forever. When the refused command's
+# text names the plan, say so. Matched against the absolute path and against
+# the path relative to the project root — the two spellings an agent writes.
+# A commit MESSAGE that merely quotes the path also matches; the line is
+# advice appended to an already-refused call, so a false positive costs a
+# sentence and a false negative costs the loop this exists to break.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+plan_write_note() {
+  local rel="$PLAN"
+  [ -n "$PLAN" ] || return 0
+  case "$PLAN" in "$PROJECT_DIR"/*) rel="${PLAN#"$PROJECT_DIR"/}" ;; esac
+  case "$COMMAND" in
+    *"$PLAN"*|*"$rel"*)
+      echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
+  esac
+}
+
 # 3-line BLOCKED/Plan/Fix emit for the matrix arm (mirrors the pattern
-# every other validator uses). $1 = message tail, $2 = fix line.
+# every other validator uses), plus the edit-then-commit note when the refused
+# command also writes the plan. $1 = message tail, $2 = fix line.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 block_matrix() {
   echo "BLOCKED: canonical-sdlc step ${CURRENT} — $1" >&2
   echo "Plan: $PLAN" >&2
   echo "Fix: $2" >&2
+  plan_write_note >&2
   exit 2
 }
 
@@ -1189,7 +1221,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc slice_val slice9
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -1282,6 +1314,38 @@ validate_matrix() {
       block_matrix "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
         "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
     fi
+    # `slice: 9` (B-2, 2026-08-30): a criterion whose only evidence is a Step-9
+    # lifecycle artifact — the close-out report, continuation.md, the ADR the
+    # close-out writes — cannot be discharged at Steps 5..8, because the thing
+    # it would cite does not exist yet. Such a row had only dishonest homes: a
+    # `waiver:` that records the criterion as let go, or a discharged row
+    # citing an artifact nobody had written. The tag is an AC-block line parsed
+    # exactly like `provenance:` above — never a sixth table cell, which the
+    # 7-field row pin a few lines up would refuse on every row.
+    #
+    # It exempts the row from TWO SEPARATE ARMS while current < 9: the per-tier
+    # key loop below, and the CONFIRMED/auditor wall further down. Exempting
+    # only the first leaves the row blocking at current: 6 on an empty auditor
+    # cell, which is the same wall wearing a different refusal.
+    #
+    # T0-ONLY. Every other tier names evidence that exists before Step 9 (a
+    # suite run, a live surface, the user's own word), so `slice: 9` there is a
+    # mis-tag rather than a deferral: it blocks at ANY step, naming the tier —
+    # including current: 5, where a pending row is otherwise exempt from
+    # everything and the mis-tag would sit unread until the 5→6 advance.
+    # Only the exact value `9` means anything; `slice: 4` is an ordinary
+    # annotation this hook does not read.
+    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+    slice_val=$(echo "$block_txt" | grep -E '^[[:space:]]*slice[[:space:]]*:' | head -1 \
+      | sed -E 's/^[[:space:]]*slice[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+    slice9=0
+    if [ "$slice_val" = "9" ]; then
+      if [ "$tier" != "T0" ]; then
+        block_matrix "matrix row '${ac}' is ${tier} and carries 'slice: 9' — only a T0 row defers its evidence to the close-out." \
+          "a ${tier} row's evidence exists before Step 9 — discharge '${ac}' at its own tier, or retier the row to T0 if the criterion really is a close-out obligation."
+      fi
+      slice9=1
+    fi
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
     if echo "$ev" | grep -qE 'waiver:' || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
@@ -1292,6 +1356,15 @@ validate_matrix() {
       # (the 6..9 prefix check), mirroring the CONFIRMED rule. This is what
       # gives a mid-walk corrective commit an honest home at current: 5.
       UNDISCHARGED=1
+    elif [ "$slice9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+         && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
+      # Close-out row before Step 9 — see the `slice: 9` note above. Sits
+      # BELOW the current: 5 arm on purpose: at the Verify gate the existing
+      # relaxation must still set UNDISCHARGED, which keeps the Step-5
+      # `auditor:` pointer optional while any row is undischarged.
+      # A non-numeric CURRENT makes `-lt` fail, so the exemption is
+      # fail-closed on a malformed step.
+      :
     else
       for key in $(keys_for_tier "$tier"); do
         if ! echo "$block_txt" | grep -qE "^[[:space:]]*${key}[[:space:]]*:"; then
@@ -1352,6 +1425,12 @@ validate_matrix() {
     if [ "$CURRENT" -gt 5 ] 2>/dev/null; then
       if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
          || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+        :
+      elif [ "$slice9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+           && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
+        # The second of the `slice: 9` tag's two arms. An auditor cannot
+        # CONFIRM a row whose evidence Step 9 has not produced; demanding it
+        # here would re-impose the wall the key-loop exemption just lifted.
         :
       elif [ "$tier" = "T4" ] && user_confirmed_form_ok "$block_txt" \
            && { [ -z "$aud" ] || [ "$aud" = "CONFIRMED" ]; }; then
