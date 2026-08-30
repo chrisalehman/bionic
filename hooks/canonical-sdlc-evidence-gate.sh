@@ -1284,7 +1284,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc slice_val slice9
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc slice_val slice9 row_is_waived
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -1358,6 +1358,18 @@ validate_matrix() {
           "set the status cell to one of: pending, blocked, discharged, waived." ;;
     esac
     block_txt=$(matrix_block "$ac")
+    # Is this row WAIVED? A `waiver:` token in the evidence cell or a
+    # `waiver:` line in the AC block — the loop's long-standing test, hoisted
+    # into one flag (review-a C-2) so every per-row demand below reads the same
+    # fact. Deliberately NOT the status cell alone: a row that says `waived`
+    # while recording no waiver has not been through the Waiver Protocol, and
+    # the per-tier key loop has always demanded its evidence anyway.
+    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+    row_is_waived=0
+    if echo "$ev" | grep -qE 'waiver:' \
+       || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+      row_is_waived=1
+    fi
     # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
     # implementation` in an AC block is circular — it names the change as the
     # source of its own requirement, which is unfalsifiable by construction.
@@ -1403,7 +1415,14 @@ validate_matrix() {
       | sed -E 's/^[[:space:]]*slice[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
     slice9=0
     if [ "$slice_val" = "9" ]; then
-      if [ "$tier" != "T0" ]; then
+      # A WAIVED row is exempt from the tier refusal (review-a C-2). The tag on
+      # a non-T0 row is a mis-tag, but a waiver has already dissolved that
+      # row's evidence contract — every other per-row demand in this loop
+      # (per-tier keys, the CONFIRMED wall) yields to it, and refusing here
+      # left a waived row with no way out but retiering a criterion nobody
+      # intends to discharge. The unwaived mis-tag still blocks at every step.
+      # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+      if [ "$tier" != "T0" ] && [ "$row_is_waived" = "0" ]; then
         block_matrix "matrix row '${ac}' is ${tier} and carries 'slice: 9' — only a T0 row defers its evidence to the close-out." \
           "a ${tier} row's evidence exists before Step 9 — discharge '${ac}' at its own tier, or retier the row to T0 if the criterion really is a close-out obligation."
       fi
@@ -1411,7 +1430,7 @@ validate_matrix() {
     fi
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
-    if echo "$ev" | grep -qE 'waiver:' || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+    if [ "$row_is_waived" = "1" ]; then
       :
     elif [ "$CURRENT" = "5" ] && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
       # A row still being discharged carries no evidence contract at
@@ -1489,8 +1508,7 @@ validate_matrix() {
     # would point them at the one thing that is not broken.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     if [ "$CURRENT" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
-      if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
-         || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+      if [ "$status" = "waived" ] || [ "$row_is_waived" = "1" ]; then
         :
       elif [ "$slice9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
            && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
