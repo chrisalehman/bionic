@@ -442,6 +442,16 @@ fire "$D"; expect_quiet "32: …and the very next turn is silent — the forever
 D=$(make_env 1m)
 printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
   > "$D/.bionic/tmp/roster-$SID.state"
+# THE ROSTER IS NO LONGER THE WHOLE PREDICATE (bionic 1.3.2, wave-1.3.2 slice 4/4). An empty
+# roster on a run that has not delivered is a lull, not a finish, and the tick QUIETs and
+# keeps its stamp — so this fixture has to say the run IS delivered to reach the DISARM this
+# case is about. `current: 9` with `delivered:` on the Step-9 line is the only spelling
+# hooks/session-poker.sh's run_state() accepts.
+mkdir -p "$D/.bionic/docs/plans/epic-99"
+{
+  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 9\n\n'
+  printf -- '- Step 9: delivered: fixture run closed; report: record/fixture/close-out.md\n'
+} > "$D/.bionic/docs/plans/epic-99/wave-01.plan.md"
 write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
 G7_TICK=$( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$D/no-config" \
              bash "$POKER_FOR_DISARM" tick 2>&1 )

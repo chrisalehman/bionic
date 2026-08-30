@@ -3890,6 +3890,184 @@ done
 
 # ============================================================
 echo ""
+echo "=== S — which plan answers for the run: the tick reads what the gate reads (wave-1.3.2 4/4, AC-13/AC-14) ==="
+# ============================================================
+#
+# THE COPY THIS SECTION EXISTS FOR. `hooks/session-poker.sh tick` DISARMs the Patrol —
+# terminally, for the rest of the session — and from 1.3.2 that decision needs the RUN to
+# say it is delivered, which means the tick reads a plan. It is the sixth reader of "which
+# *.md answers for this run", and hooks/patrol-revive.sh:64-70 refused to become the fifth
+# for a reason worth restating: an UNFILTERED "newest *.md under plans/" read is a measured
+# incident. On 2026-08-15 a marker-less scrap won the newest race, `current:` parsed empty,
+# and every wall reading it passed silently for ~15 minutes
+# (.bionic/docs/record/session-20260815-landing-supervision/t8-forensic-read.md).
+#
+# So the tick got the gate's read rather than an approximation of it, and this section is
+# the wall that keeps the copy honest — in BOTH directions, because the two failures are
+# different. A drifted PREDICATE (the `## SDLC State` filter, the fence rule, the CR
+# translation) makes the tick DISARM off a scrap file: silent, terminal, unrecoverable. A
+# drifted SELECTION (depth, the strict `-nt` ordering, the two plan directories) makes it
+# answer for the wrong wave.
+#
+# TWO PROOFS, because either alone is weak. First the TEXT: the four bodies the tick copied
+# are compared to canonical-sdlc-evidence-gate.sh's, which is the designated origin (it
+# documents the contract at its definition site) — §N.1's and §Q's method. Then the
+# BEHAVIOUR: both readers are handed the same repository and asked which file answered, and
+# their answers are compared to each other. Text agreement without behaviour would miss a
+# call site that never invokes its copy; behaviour without text would miss a drift the
+# fixtures happen not to reach.
+
+PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
+
+# ---- S.1 the four bodies -------------------------------------------------
+
+# Non-vacuity FIRST, on the origin: an extractor that silently returns nothing would make
+# every comparison below trivially true, which is exactly how this class of wall dies.
+for _fn in has_sdlc_state resolve_docs_root normalize_newlines; do
+  expect_eq "the extractor pulls a real ${_fn}() body out of the evidence gate" "yes" \
+    "$([ -n "$(fn_body "$PARTY_EG" "$_fn")" ] && echo yes || echo no)"
+done
+expect_eq "…and that body is the marker predicate, not some other function" "yes" \
+  "$(case "$(fn_body "$PARTY_EG" has_sdlc_state)" in *'## SDLC State'*) echo yes ;; *) echo no ;; esac)"
+
+for _fn in has_sdlc_state resolve_docs_root normalize_newlines; do
+  expect_eq "the poker's ${_fn}() is the evidence gate's, body for body" \
+    "$(fn_body "$PARTY_EG" "$_fn")" "$(fn_body "$PARTY_PK_S" "$_fn")"
+done
+
+# ---- S.2 the selection block ---------------------------------------------
+#
+# The gate holds this at file scope; the poker holds it inside `newest_sdlc_plan()`, because
+# a tick that ran a find on every invocation would charge `arm`, `disarm` and `interval` for
+# a read only `tick` takes. So the comparison normalizes INDENTATION and drops comment-only
+# lines — the same allowance `fn_code()` above makes for the same reason — and what remains
+# is executable text, compared line for line. Every drift that matters is inside it: the
+# `-maxdepth 2` bound, the STRICT `-nt` ordering that makes "newest" total rather than
+# find-order dependent, the two plan directories, and the `has_sdlc_state` guard itself.
+sel_block() {  # <file> -> the newest-SDLC-State-plan selection, indentation- and comment-normalized
+  awk '
+    !f && index($0, "PLAN_DIRS=(") { f = 1 }
+    f {
+      line = $0
+      sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)
+      if (line == "" || line ~ /^#/) next
+      print line
+      if (line == "done") exit
+    }
+  ' "$1"
+}
+
+S_EG_SEL="$(sel_block "$PARTY_EG")"
+expect_eq "the extractor pulls a real selection block out of the evidence gate" "yes" \
+  "$([ -n "$S_EG_SEL" ] && echo yes || echo no)"
+expect_eq "…carrying the depth bound the layout needs" "yes" \
+  "$(case "$S_EG_SEL" in *'-maxdepth 2'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "…and the STRICT newest test, not a >= that depends on find order" "yes" \
+  "$(case "$S_EG_SEL" in *'-nt "$PLAN"'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "the poker's newest-plan selection is the evidence gate's, line for line" \
+  "$S_EG_SEL" "$(sel_block "$PARTY_PK_S")"
+
+# THE DISCRIMINATOR. Without this the comparison above proves only that two files exist: a
+# `sel_block` that stopped matching would return two empty strings and pass. One plausible
+# drift — the strict `-nt` relaxed so the FIRST candidate wins the tie — is applied to a
+# COPY of the poker, and the same comparison must go red. The shipped file is never touched.
+S_MUT_DIR="$SANDBOX/runstate-mutant"; mkdir -p "$S_MUT_DIR"
+sed 's/\[ "\$f" -nt "\$PLAN" \]/[ "$f" = "$f" ]/' "$PARTY_PK_S" > "$S_MUT_DIR/session-poker.sh"
+expect_eq "the mutation applies (the code has not moved out from under this proof)" "no" \
+  "$(cmp -s "$PARTY_PK_S" "$S_MUT_DIR/session-poker.sh" && echo yes || echo no)"
+expect_eq "…and with the strict-newest test flipped, the copies SPLIT (§S discriminates)" "no" \
+  "$([ "$S_EG_SEL" = "$(sel_block "$S_MUT_DIR/session-poker.sh")" ] && echo yes || echo no)"
+
+# ---- S.3 the round trip: one repository, two readers, one answer ---------
+#
+# Driven rather than grepped, because the property is behavioural. The gate is asked through
+# its own refusal (which names `Plan:` and the step it could not find); the tick is asked
+# through the QUIET line it now prints over an empty roster, which names the plan it decided
+# from and where that plan says the run is. Neither answer is rebuilt here.
+
+s_backdate() {  # <file> — an hour older than everything else in the fixture
+  touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1 hour' +%Y%m%d%H%M.%S)" "$1"
+}
+
+s_eg_read() {  # <repo> -> "<plan path>|<current>", or "none"
+  local out st plan cur
+  out=$(mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$1" "git commit -m x" \
+        | env -u CLAUDE_PROJECT_DIR bash "$PARTY_EG" 2>&1); st=$?
+  [ "$st" -eq 0 ] && { echo none; return; }
+  plan=$(printf '%s\n' "$out" | sed -n 's/^Plan: //p' | head -1)
+  cur=$(printf '%s\n' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)
+  if [ -z "$plan" ] || [ -z "$cur" ]; then echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)"; return; fi
+  printf '%s|%s\n' "$plan" "$cur"
+}
+
+s_pk_read() {  # <repo> -> "<plan path>|<current>", or "none"
+  local out plan cur
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+    > "$1/.bionic/tmp/roster-$SID_A.state"
+  out=$( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
+           bash "$PARTY_PK_S" tick 2>&1 )
+  case "$out" in *'no plan carrying an unfenced'*) echo none; return ;; esac
+  plan=$(printf '%s\n' "$out" | sed -n 's/.*(\(\/[^ ]*\.md\) is at current: .*/\1/p' | head -1)
+  cur=$(printf '%s\n' "$out" | sed -n 's/.* is at current: \([^ )]*\).*/\1/p' | head -1)
+  if [ -z "$plan" ] || [ -z "$cur" ]; then echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)"; return; fi
+  printf '%s|%s\n' "$plan" "$cur"
+}
+
+# S.3a — a NEWER marker-less .md must lose to an older real plan. This is the 2026-08-15
+# incident in fixture form, and it is the case that decides whether the tick can DISARM off
+# a scrap file.
+S_R1=$(new_repo "s-marker-less-newest")
+write_plan "$S_R1/.bionic/docs/plans/epic-99/wave-01.plan.md" "current: 4"
+printf 'a scratch note — no SDLC State heading anywhere in it\n' \
+  > "$S_R1/.bionic/docs/plans/epic-99/zz-newest-scrap.md"
+# "Newest" is fixture DATA, set by backdating the loser — never by sleeping, and never left
+# to a same-second tie, which `-nt` resolves as "not newer" and would pass this case for a
+# reason the fixture never states.
+s_backdate "$S_R1/.bionic/docs/plans/epic-99/wave-01.plan.md"
+S_EG=$(s_eg_read "$S_R1"); S_PK=$(s_pk_read "$S_R1")
+expect_eq "the gate skips the newer marker-less file and answers from the plan" \
+  "$S_R1/.bionic/docs/plans/epic-99/wave-01.plan.md|4" "$S_EG"
+expect_eq "…and the tick answers from the SAME file, at the same step" "$S_EG" "$S_PK"
+
+# S.3b — the newest REAL plan wins, so the pin is on ordering and not merely on filtering.
+# Its paired discriminator is S.3a: one case where the newest file loses, one where it wins.
+S_R2=$(new_repo "s-newest-real-plan")
+write_plan "$S_R2/.bionic/docs/plans/epic-98/wave-01.plan.md" "current: 4"
+write_plan "$S_R2/.bionic/docs/plans/epic-99/wave-02.plan.md" "current: 6"
+s_backdate "$S_R2/.bionic/docs/plans/epic-98/wave-01.plan.md"
+S_EG=$(s_eg_read "$S_R2"); S_PK=$(s_pk_read "$S_R2")
+expect_eq "the gate takes the NEWER of two real plans" \
+  "$S_R2/.bionic/docs/plans/epic-99/wave-02.plan.md|6" "$S_EG"
+expect_eq "…and so does the tick" "$S_EG" "$S_PK"
+
+# S.3c — a `## SDLC State` that exists only inside a fence is documentation, not a run.
+# Both readers must answer "no canonical run here" rather than parsing the example.
+S_R3=$(new_repo "s-fenced-only")
+mkdir -p "$S_R3/.bionic/docs/plans/epic-99"
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+  printf -- 'intent: build\nrigor: audited\nscale: wave\n---\n\n# a document ABOUT plans\n\n'
+  printf '```\n## SDLC State\ncurrent: 4\n```\n'
+} > "$S_R3/.bionic/docs/plans/epic-99/schema-notes.md"
+S_EG=$(s_eg_read "$S_R3"); S_PK=$(s_pk_read "$S_R3")
+expect_eq "a fenced-only heading is not a plan to the gate" "none" "$S_EG"
+expect_eq "…and is not a plan to the tick either" "none" "$S_PK"
+
+# S.3d — depth 3 is out of reach for both. Paired with the same content at depth 2, so what
+# is pinned is the bound rather than a mistyped fixture.
+S_R4=$(new_repo "s-depth")
+write_plan "$S_R4/.bionic/docs/plans/epic-99/wave-01/too-deep.plan.md" "current: 4"
+S_EG=$(s_eg_read "$S_R4"); S_PK=$(s_pk_read "$S_R4")
+expect_eq "a plan at depth 3 is invisible to the gate" "none" "$S_EG"
+expect_eq "…and invisible to the tick" "none" "$S_PK"
+write_plan "$S_R4/.bionic/docs/plans/epic-99/wave-01.plan.md" "current: 4"
+S_EG=$(s_eg_read "$S_R4"); S_PK=$(s_pk_read "$S_R4")
+expect_eq "…and the SAME content at depth 2 is seen by the gate (the bound is pinned)" \
+  "$S_R4/.bionic/docs/plans/epic-99/wave-01.plan.md|4" "$S_EG"
+expect_eq "…and by the tick" "$S_EG" "$S_PK"
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "cross-gate-agreement: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
 [ "$FAIL" -eq 0 ]
