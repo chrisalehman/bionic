@@ -141,6 +141,59 @@ case_is install 'brew install jq'
 case_is bootstrap 'bash claude-bootstrap.sh'
 case_is bootstrap './claude-bootstrap.sh'
 
+# --- R-12: the reading is a SUPERSET of the 1.3.1 string match (critic C-1) ---
+# A suite reached through a shell construct or a command-taking prefix lands at
+# argv[1..n], where the 1.3.2 reader did not look, so `sudo bash tests/run.sh`
+# and `( bash tests/run.sh )` walked past both the farm-out wall and the new
+# B-9 background wall that 1.3.1's `(^|[;&| ])bash +tests/run\.sh` refused.
+case_is suite 'sudo bash tests/run.sh'
+case_is suite 'sudo -u ci bash tests/run.sh'
+case_is suite '( bash tests/run.sh )'
+case_is suite '(bash tests/run.sh)'
+case_is suite '{ bash tests/run.sh; }'
+case_is suite 'if true; then bash tests/run.sh; fi'
+case_is suite 'for i in 1; do bash tests/run.sh; done'
+case_is suite '! bash tests/run.sh'
+case_is suite 'xargs bash tests/run.sh'
+case_is suite 'xargs -I{} bash tests/run.sh'
+case_is suite 'nice -n 10 bash tests/run.sh'
+case_is suite 'exec bash tests/run.sh'
+case_is suite 'ssh box bash tests/run.sh'
+case_is suite 'find . -exec bash tests/run.sh \;'
+case_is suite 'true & bash tests/run.sh'
+case_is suite 'eval "bash tests/run.sh"'
+case_is suite "sh -c 'sudo bash tests/run.sh'"
+
+# --- C-2: a DIRECTLY EXECUTED suite is a suite ---
+# tests/run.sh is -rwxr-xr-x with a bash shebang, so `./tests/run.sh` is an
+# ordinary invocation; classify_argv only reached the suite arm when argv[0]
+# was bash/sh/zsh, so a script at argv[0] fell through every arm to `none`.
+# And the `bash run.sh` arm required a `/` in the name, which is exactly the
+# shape `cd <worktree>/tests && bash run.sh` does not have.
+case_is suite './tests/run.sh'
+case_is suite 'tests/run.sh'
+case_is suite './tests/run.sh --serial'
+case_is suite './tests/cmd-class.test.sh'
+case_is suite 'tests/cmd-class.test.sh'
+case_is suite './test.sh'
+case_is suite 'cd tests && bash run.sh'
+case_is suite '(cd tests; bash run.sh)'
+case_is suite 'cd tests && bash run.sh 2>&1 | tee /tmp/e.log'
+case_is suite 'bash -c "./tests/run.sh"'
+case_is suite 'sudo ./tests/run.sh'
+
+# --- and the negatives the superset must NOT swallow ---
+case_is none 'ls tests/run.sh'
+case_is none 'cat ./tests/run.sh'
+case_is none 'echo "sudo bash tests/run.sh"'
+case_is none "echo '( bash tests/run.sh )'"
+case_is none 'vim tests/run.sh'
+case_is none 'git add tests/run.sh'
+case_is none 'find . -name run.sh'
+case_is none 'bash run.sh'
+case_is none 'run.sh'
+case_is none 'sudo git status'
+
 # --- prose, quoted strings and heredoc bodies NEVER classify (AC-15, B-5) ---
 case_is none 'git commit -m "make the row green"'
 case_is none 'echo "npm install done"'
@@ -234,6 +287,22 @@ expect_contains "AC-16 …DENIES pytest tests/" '"deny"' "$(farm_decision 'pytes
 expect_contains "AC-16 …DENIES npm test" '"deny"' "$(farm_decision 'npm test')"
 expect_contains "AC-16 …DENIES make test" '"deny"' "$(farm_decision 'make test')"
 
+# --- AC-16 (R-12/C-2): the same wall through a construct, a prefix, or a
+#     directly executed script. One list, driven through BOTH walls below. ---
+SUPERSET_SUITES=(
+  'sudo bash tests/run.sh'
+  '( bash tests/run.sh )'
+  'if true; then bash tests/run.sh; fi'
+  'xargs bash tests/run.sh'
+  './tests/run.sh'
+  'tests/run.sh'
+  'cd tests && bash run.sh'
+  '(cd tests; bash run.sh)'
+)
+for sc in "${SUPERSET_SUITES[@]}"; do
+  expect_contains "AC-16 farm-out DENIES [$sc]" '"deny"' "$(farm_decision "$sc")"
+done
+
 # --- behaviour the library must not have changed ---
 expect_empty "the sanctioned override still silences the wall" \
   "$(farm_decision 'FARM_OUT_ALLOW=1 bash tests/run.sh')"
@@ -307,6 +376,15 @@ expect_empty "AC-24 …silently" "$ERR$OUT"
 
 run_guarded "$(mk_bash_payload "$GREPO" 'git commit -m "make the row green"' "$AGENT_ID" true)"
 expect_eq "AC-24 …and B-5's prose case is not a suite either" 0 "$ST"
+
+# --- AC-16 (R-12/C-2): the B-9 wall refuses the same superset ---
+for sc in "${SUPERSET_SUITES[@]}"; do
+  run_guarded "$(mk_bash_payload "$GREPO" "$sc" "$AGENT_ID" true)"
+  expect_eq "AC-16 background-suite-guard REFUSES backgrounded [$sc]" 2 "$ST"
+done
+# NEGATIVE CONTROL on the same arm: prose that merely names a suite is not one.
+run_guarded "$(mk_bash_payload "$GREPO" 'echo "sudo bash tests/run.sh"' "$AGENT_ID" true)"
+expect_eq "AC-16 …but prose naming a suite is still ALLOWED" 0 "$ST"
 
 # --- the guard's own partition still holds: an UNARMED session is silent ---
 UREPO=$(make_repo unarmed)
