@@ -4871,6 +4871,84 @@ expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fai
   "$h32m2" 'git commit -m "x"' "requires 'auditor:"
 
 # ============================================================
+# Section 33: a waiver outranks the `slice: 9` tier refusal (review-a C-2)
+# ============================================================
+#
+# The `slice: 9` tag (Section 17r) is T0-only: on any other tier it is a
+# mis-tag, and the refusal fires at every step. That check sat ABOVE the
+# `waiver:` exemption in the row loop, so a row an author had WAIVED — the
+# criterion let go, its evidence contract dissolved — still met the tier
+# refusal, and the only way past it was to retier a row nobody intends to
+# discharge. A waiver outranks every other per-row demand in this loop (the
+# per-tier keys, the CONFIRMED wall); it outranks this one too.
+#
+# The waiver test is the loop's existing one — a `waiver:` token in the
+# evidence cell or a `waiver:` line in the AC block — so "waived" means the
+# same thing here as it does for the per-tier keys three lines below.
+
+echo ""
+echo "=== Section 33: a waiver outranks the slice: 9 tier refusal ==="
+
+# A T1 row (not T0, so the tag is a mis-tag) carrying `slice: 9`, WAIVED via
+# the evidence cell. AC-1 is an ordinary discharged row so the matrix is
+# otherwise complete and each verdict below is the waived row's doing.
+m33_waived="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |
+
+AC-1:
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted
+AC-2:
+  slice: 9"
+
+# The same row with the waiver taken away: pending, no token anywhere.
+m33_unwaived="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | pending | see AC-2 |  |}"
+
+# The waiver in the AC BLOCK rather than the evidence cell — the loop's other
+# spelling of the same fact.
+m33_waived_block="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | waived | dropped, see block | waived |}"
+m33_waived_block="${m33_waived_block/  slice: 9/  slice: 9
+  waiver: dana 2026-08-30 criterion dropped}"
+
+# 33a — waived T1 row carrying slice: 9 → commits.
+h33a=$(make_home)
+write_plan "$h33a" "$(plan 6 "$step6_body" "$m33_waived")" > /dev/null
+expect_allow "33a waived T1 row carrying 'slice: 9' at current 6 → allow (waiver outranks)" \
+  "$h33a" 'git commit -m "x"'
+
+# 33b — the same row UNWAIVED still blocks on the mis-tag, so 33a is the
+# waiver's doing and not the tier refusal having been deleted.
+h33b=$(make_home)
+write_plan "$h33b" "$(plan 6 "$step6_body" "$m33_unwaived")" > /dev/null
+expect_block "33b control: the same T1 row unwaived still blocks on the mis-tag" \
+  "$h33b" 'git commit -m "x"' "only a T0 row defers its evidence to the close-out"
+
+# 33c — the block-line spelling of the waiver reads the same way.
+h33c=$(make_home)
+write_plan "$h33c" "$(plan 6 "$step6_body" "$m33_waived_block")" > /dev/null
+expect_allow "33c the waiver as an AC-block line (not the evidence cell) → allow too" \
+  "$h33c" 'git commit -m "x"'
+
+# 33d — scope control: the waiver exempts the row from the TIER refusal, not
+# from the loop's unconditional arms. The same waived row with a circular
+# `provenance: implementation` still blocks — the provenance arm sits above
+# both, deliberately, and this fix did not move it.
+m33_waived_prov="${m33_waived/AC-2:
+  slice: 9/AC-2:
+  slice: 9
+  provenance: implementation}"
+h33d=$(make_home)
+write_plan "$h33d" "$(plan 6 "$step6_body" "$m33_waived_prov")" > /dev/null
+expect_block "33d control: a waived row still meets the provenance arm above it" \
+  "$h33d" 'git commit -m "x"' "provenance: implementation"
+
+# ============================================================
 # Summary
 # ============================================================
 
