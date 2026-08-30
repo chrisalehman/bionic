@@ -975,11 +975,21 @@ case "$VERB" in
           # on the roster is the TRANSCRIPT form; the stop primitive takes
           # `<name>@session-<id8>` for a teammate and rejects the transcript form (capture
           # record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), so
-          # printing the id cost the operator a refusal they could not clear. The session
-          # named is THIS one — the row above is what makes that spelling resolve, and
-          # hooks/stop-guard.sh reads the recorded address before constructing one.
-          printf '  stop        : TaskStop %s@session-%s\n' "$(clean "$RNAME")" \
-            "$(printf '%s' "$SESSION_ID" | cut -c1-8)"
+          # printing the id cost the operator a refusal they could not clear.
+          #
+          # BOTH SPELLINGS, because only one of them is proven and it is not known which.
+          # That capture shows the eight characters belong to the session that LAUNCHED the
+          # agent — the PREDECESSOR's, here — while the row written above carries THIS
+          # session's, which is what makes the successor's spelling resolve at both stop
+          # gates. Neither gate can tell them apart: each resolves on the base name and
+          # takes ownership from the id on this session's roster, so the two are one row
+          # with two names and are permitted or refused together (tests/stop-guard.test.sh
+          # §14, tests/stop-check.test.sh §10(d)). The cost of naming the alternate is one
+          # clause; the cost of naming only the wrong one is a refusal the operator cannot
+          # clear, which is the defect this whole verb is being repaired for.
+          printf '  stop        : TaskStop %s@session-%s  (or %s@session-%s if the platform keys on the launching session)\n' \
+            "$(clean "$RNAME")" "$(printf '%s' "$SESSION_ID" | cut -c1-8)" \
+            "$(clean "$RNAME")" "$(printf '%s' "$OSID" | cut -c1-8)"
         else
           printf '  agent id    : (none — no identified row on that roster)\n'
           printf '  observe     : unavailable without an id\n'
