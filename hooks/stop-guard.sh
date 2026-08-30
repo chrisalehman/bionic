@@ -121,6 +121,64 @@ session_subagents_dir() {  # <transcript-path>
   printf '%s/subagents\n' "${tr%.jsonl}"
 }
 
+# THE DIRECTORIES THIS SESSION HAS ADOPTED INTO — the one widening of the scope above, and
+# it is named by a row on this session's own roster rather than guessed at.
+#
+# WHY IT EXISTS (epic-20 W1 B-1). A `/clear`+resume loses the conversation, never the
+# agents: they are the same processes, still working, still filed under the session that
+# LAUNCHED them. hooks/session-poker.sh's `adopt` reads their ids back and files an
+# `identified` row carrying `adopted_from=<that session>` here, and the successor then could
+# not stop a single one of them — resolution was `${transcript}/subagents` and nothing else,
+# so every spelling of a predecessor's agent was MATCH_COUNT=0 and refused as "unresolved"
+# before the roster was read at all. Writing the row is necessary and not sufficient: the
+# ownership clause it feeds is downstream of a resolution that never happened.
+#
+# WHY IT IS NOT A PROJECT-WIDE WALK. hooks/stop-check.sh scans the whole project because it
+# DECIDES NOTHING; this gate decides, and a walk that resolved any agent anywhere would hand
+# back exactly the name-oracle slice 4/9 removed — a dead fleet answering to names a live
+# session still uses. The scope widens by the sessions this roster names and by no others,
+# which is a fact this session wrote down about itself.
+#
+# FAIL-CLOSED. An unreadable roster, a symlinked state path, a value that is not a session
+# id: each yields no extra directory, so resolution stays exactly as narrow as it was and
+# the stop is refused rather than admitted. `state_paths` is consulted here and again below,
+# deliberately — this read must not move the refusal order, so it declines rather than denies.
+adopted_subagent_dirs() {  # <repo> <session-id> <transcript-path> -> one directory per line
+  local repo="$1" sid="$2" tr="$3"
+  local paths roster line osid d p cfg seen=" "
+  [ -n "$sid" ] || return 0
+  case "$tr" in *.jsonl) : ;; *) return 0 ;; esac
+  paths=$(state_paths "$repo") || return 0
+  roster="${paths%|*}/roster-${sid}.state"
+  [ -f "$roster" ] || return 0
+  [ -L "$roster" ] && return 0
+  cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+  while IFS= read -r line; do
+    case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
+    osid=$(record_field "$line" adopted_from)
+    [ -n "$osid" ] || continue
+    # A SESSION ID, NEVER A PATH. The roster is repo-controlled (TDD §8), and this value is
+    # about to become part of a directory name: anything outside the character set a session
+    # uuid is spelled with is refused rather than sanitised, the same posture every other
+    # repo-sourced path in this gate takes.
+    case "$osid" in *[!A-Za-z0-9-]*) continue ;; esac
+    case "$seen" in *" $osid "*) continue ;; esac
+    seen="$seen$osid "
+    # The sibling of THIS session's own transcript first — one session's transcripts and
+    # its predecessors' sit in the same project directory, which is the ordinary case and
+    # needs no walk. The keyed walk after it covers the one case that breaks: a worktree cwd
+    # files its session under a different project slug while sharing one `.bionic/tmp`.
+    d="${tr%/*}/$osid/subagents"
+    [ -d "$d" ] && printf '%s\n' "$d"
+    for p in "$cfg"/projects/*/; do
+      [ -d "${p}${osid}/subagents" ] || continue
+      [ "${p}${osid}/subagents" = "$d" ] && continue
+      printf '%s\n' "${p}${osid}/subagents"
+    done
+  done < "$roster"
+  return 0
+}
+
 # One field out of a versioned record, BY KEY. Never by position: the discarded
 # run's fixed-field-order parser broke undiagnosably the moment a field was
 # added (checklist A6), so an unknown extra field must be inert here.
@@ -299,7 +357,14 @@ TRANSCRIPT=$(_jq '.transcript_path')
 SUB=$(session_subagents_dir "$TRANSCRIPT") \
   || deny "This stop request carries no usable transcript path, so its session's agents cannot be resolved."
 
-MATCHES=$(scan_subagent_dirs "${RAW%@*}" "$SUB")
+# THIS SESSION'S OWN DIRECTORY, PLUS THE ONES ITS ROSTER SAYS IT ADOPTED INTO. The second
+# set is empty for every session that never ran `adopt`, which is what keeps this identical
+# to the pre-B-1 scan everywhere else.
+ADOPTED_DIRS=()
+while IFS= read -r _adir; do
+  [ -n "$_adir" ] && ADOPTED_DIRS+=("$_adir")
+done < <(adopted_subagent_dirs "$REPO" "$SID" "$TRANSCRIPT")
+MATCHES=$(scan_subagent_dirs "${RAW%@*}" "$SUB" ${ADOPTED_DIRS+"${ADOPTED_DIRS[@]}"})
 MATCH_COUNT=0
 [ -n "$MATCHES" ] && MATCH_COUNT=$(printf '%s\n' "$MATCHES" | grep -c .)
 

@@ -484,6 +484,18 @@ elif [ "$SESSION_ID" = "$OWN_SESSION_ID" ]; then
 elif [ -n "$ROSTER_ID_MATCH" ]; then
   CLASSIFICATION="ours"
   OURS_BECAUSE="this session's roster confirms it by agent id (roster-${OWN_SESSION_ID}.state)"
+  # OURS BY ADOPTION, said out loud. A row carrying `adopted_from=` is one
+  # hooks/session-poker.sh's `adopt` wrote after a `/clear`+resume: the agent is still the
+  # predecessor's — same process, same subagents directory — and this session took the
+  # contract over. The by-id clause above already answers OURS for it, and answering MUTELY
+  # is what this adds to: the operator is reading OURS about an agent filed under a session
+  # they are not in, and the provenance is what tells them which session's directory the
+  # observe address below names, and which one hooks/stop-guard.sh widened its resolution to.
+  # It is reported, never judged (§4: this command decides nothing).
+  ADOPTED_FROM=$(line_field "$ROSTER_ID_MATCH" adopted_from)
+  if [ -n "$ADOPTED_FROM" ]; then
+    OURS_BECAUSE="this session ADOPTED it (adopted_from=${ADOPTED_FROM}) and its roster confirms it by agent id (roster-${OWN_SESSION_ID}.state)"
+  fi
 elif owning_session_on_disk "$SESSION_ID"; then
   CLASSIFICATION="foreign"
 else
