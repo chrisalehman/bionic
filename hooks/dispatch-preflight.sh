@@ -705,12 +705,49 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # were not sitting inside it, and without the skip that span would end at the
     # very label whose membership is the question. (No apostrophes in here — the
     # whole program is one single-quoted shell word.)
-    function spanend(h, skip,   j, e, s, bl) {
+    # The last index within s (1-based) before the first FOLLOWING line that opens a
+    # short `<Word>:` head, or 0 when no such line follows. A field ends where the next
+    # one begins, and the wall must not need the label table to know that a new line
+    # beginning `Evidence log:` is a different field from the one above it. Bounded to
+    # three words and no punctuation before the colon, so a prose sentence that merely
+    # contains a colon ("it runs in three steps: first...") is not mistaken for a head;
+    # written without interval expressions, which not every awk implements.
+    # THE SKIPPED HIT KEEPS ITS LINE. `skipabs` is the absolute offset of the one label
+    # hit this call is pretending does not exist (the cadence rule in END asks where the
+    # PROGRESS span would end if the cadence label were not inside it). The contract
+    # writes `Cadence:` on a line of its own beneath `Progress:`, so bounding at that
+    # line would answer the question the caller is asking with the fact it is asking
+    # about, and every colon-form cadence would stop lifting.
+    function labelline(s, base, skipabs,   i, j, k, line, ls, le) {
+      i = 1
+      while ((j = index(substr(s, i), "\n")) > 0) {
+        j = i + j - 1
+        k = index(substr(s, j + 1), "\n")
+        line = (k > 0 ? substr(s, j + 1, k - 1) : substr(s, j + 1))
+        if (line ~ /^[ \t]*[A-Za-z][A-Za-z0-9_-]*([ \t][A-Za-z0-9_-]+)?([ \t][A-Za-z0-9_-]+)?:[ \t]/) {
+          ls = base + j
+          le = ls + length(line) - 1
+          if (!(skipabs > 0 && skipabs >= ls && skipabs <= le)) return j - 1
+        }
+        i = j + 1
+      }
+      return 0
+    }
+    function spanend(h, skip,   j, e, s, bl, ll) {
       e = length(text)
       for (j = 1; j <= nh; j++) if (j != skip && HLS[j] > HLS[h] && HLS[j] - 1 < e) e = HLS[j] - 1
       s = substr(text, HVS[h], e - HVS[h] + 1)
       bl = index(s, "\n\n")            # a blank line ends a field, whatever follows
       if (bl > 0) e = HVS[h] + bl - 2
+      # ...and so does the next LABELLED LINE, registered label or not. Before this bound
+      # a brief carrying `Evidence log: <path>` on the line after `Expected artifact:
+      # <path>` put both paths in one deliverable span and was refused as ambiguous, for
+      # naming exactly one deliverable and one input on lines of their own
+      # (wave-bionic-1.3.2, found at dispatch). A prose continuation line has no head and
+      # stays inside the span, so the R6-4 window is unchanged.
+      s = substr(text, HVS[h], e - HVS[h] + 1)
+      ll = labelline(s, HVS[h], (skip > 0 ? HLS[skip] : 0))
+      if (ll > 0 && HVS[h] + ll - 1 < e) e = HVS[h] + ll - 1
       return e
     }
     function spanof(h) { return substr(text, HVS[h], spanend(h, 0) - HVS[h] + 1) }
