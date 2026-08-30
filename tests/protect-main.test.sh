@@ -19,8 +19,13 @@ TOTAL=0
 
 run_hook() {
   # Feeds a simulated tool_input to the hook on stdin.
+  #
+  # The payload is built with `jq -n --arg`, not string interpolation: the
+  # AC-9/AC-10 cases below carry double quotes and newlines (a heredoc), and
+  # hand-built JSON mangles both. Same idiom as
+  # tests/canonical-sdlc-evidence-gate.test.sh:run_hook.
   local cmd="$1"
-  echo "{\"tool_input\":{\"command\":\"$cmd\"}}" | bash "$HOOK" 2>/dev/null
+  jq -n --arg c "$cmd" '{tool_input: {command: $c}}' | bash "$HOOK" 2>/dev/null
 }
 
 expect_block() {
@@ -171,6 +176,66 @@ expect_allow "env GIT_AUTHOR_DATE on commit"          "env GIT_AUTHOR_DATE='2026
 # downstream "git push anywhere in segment" check.
 expect_block "GIT_SSH_COMMAND prefix on push"         "GIT_SSH_COMMAND=ssh git push origin main"
 expect_block "GIT_ASKPASS prefix on push"             "GIT_ASKPASS=cat git push origin main"
+
+# ============================================================
+# SECTION 5: spellings git honours and the old string match missed (AC-9)
+# ============================================================
+#
+# Every case below is a real push whose destination is main. The pre-1.3.2 hook
+# read the command as text — `git push` had to be two adjacent words, quotes
+# were deleted wholesale, and a refspec was matched with a regex — so a global
+# option, a quoted branch name or a refs/heads/ spelling walked straight past
+# it (research-b3-b5-b9-cmd-parsing.md §2). The branch is a feature branch here
+# so Block 3 (any push while on main) cannot mask the result: what these pin is
+# the destination reading, nothing else.
+
+echo ""
+echo "=== Section 5: git spellings that reach main (all BLOCKED) ==="
+export FAKE_BRANCH="feat/cool-thing"
+
+expect_block "AC-9 -C <dir> global option"        "git -C /tmp/r push origin main"
+expect_block "AC-9 -c <cfg> global option"        "git -c user.name=x push origin main"
+expect_block "AC-9 HEAD:refs/heads/main"          "git push origin HEAD:refs/heads/main"
+expect_block "AC-9 delete refspec :main"          "git push origin :main"
+expect_block "AC-9 force refspec +main"           "git push origin +main"
+expect_block "AC-9 double-quoted main"            'git push origin "main"'
+expect_block "AC-9 single-quoted main"            "git push origin 'main'"
+expect_block "AC-9 refs/heads/main"               "git push origin refs/heads/main"
+expect_block "AC-9 feature:refs/heads/main"       "git push origin feature:refs/heads/main"
+expect_block "AC-9 force-with-lease onto main"    "git push --force-with-lease origin main"
+expect_block "AC-9 -C <dir> force push of main"   "git -C /tmp/r push --force origin main"
+
+# The force wall is a wall wherever the flag sits, including behind a global
+# option — research measured `git -C /tmp/r push --force origin feature` as a
+# clean miss.
+expect_block "AC-9 -C <dir> force push of a feature branch" \
+                                                  "git -C /tmp/r push --force origin feature"
+
+# ============================================================
+# SECTION 6: spellings that only LOOK like a main push (AC-10)
+# ============================================================
+#
+# The mirror image. `topic/main` and `main-fixes` are ordinary branches;
+# `echo` and a heredoc body are text the shell prints or writes, not a push it
+# runs. The heredoc case is the one the old hook got backwards: it split
+# segments on newlines, so every line of a body became a candidate command and
+# a document that MENTIONED a main push was refused as if it were one.
+
+echo ""
+echo "=== Section 6: near-misses and prose (all ALLOWED) ==="
+export FAKE_BRANCH="feat/cool-thing"
+
+expect_allow "AC-10 topic/main is its own branch"  "git push origin topic/main"
+expect_allow "AC-10 main-fixes is its own branch"  "git push origin main-fixes"
+expect_allow "AC-10 HEAD:refs/heads/feature/main"  "git push origin HEAD:refs/heads/feature/main"
+expect_allow "AC-10 echo of a push line"           "echo 'git push origin main'"
+
+HEREDOC_PUSH=$(printf 'cat > /tmp/note.txt <<%sNOTE%s\ngit push origin main\nNOTE\n' "'" "'")
+expect_allow "AC-10 heredoc body containing a push line" "$HEREDOC_PUSH"
+
+# A heredoc must not swallow the command that follows it either.
+HEREDOC_THEN_PUSH=$(printf 'cat > /tmp/note.txt <<%sNOTE%s\nnothing to see\nNOTE\ngit push origin main\n' "'" "'")
+expect_block "after a heredoc, a real main push is still blocked" "$HEREDOC_THEN_PUSH"
 
 # ============================================================
 # Results

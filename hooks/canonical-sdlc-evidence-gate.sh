@@ -28,6 +28,35 @@
 
 set -u
 
+# The command reader (scripts/lib/git-argv.sh) — the same library
+# protect-main.sh uses, and the SSoT for "what are the words of this command".
+#
+# FAIL-CLOSED (Chris, D1 2026-08-30): a wall that cannot load its library
+# REFUSES. Two candidate paths because the shipped tree has two real shapes —
+# the installed plugin root (hooks/ and scripts/ as siblings) and this repo,
+# where payload/hooks is a symlink to the top-level hooks/ and the library
+# lives under payload/scripts/lib/. `..` is resolved by the kernel AFTER the
+# symlink, so the first candidate alone would refuse every command in a
+# directory-source session. Byte-identical twin of the loader in
+# protect-main.sh.
+# [WALL: tests/git-argv.test.sh]
+_eg_self="${BASH_SOURCE[0]}"
+case "$_eg_self" in */*) _eg_dir="${_eg_self%/*}" ;; *) _eg_dir="." ;; esac
+_eg_lib=""
+for _eg_cand in "$_eg_dir/../scripts/lib/git-argv.sh" "$_eg_dir/../payload/scripts/lib/git-argv.sh"; do
+  if [ -r "$_eg_cand" ]; then _eg_lib="$_eg_cand"; break; fi
+done
+if [ -z "$_eg_lib" ]; then
+  echo "BLOCKED: the evidence gate cannot read commands — its library is missing." >&2
+  echo "Expected scripts/lib/git-argv.sh beside $_eg_dir/.. — reinstall the bionic plugin." >&2
+  exit 2
+fi
+# shellcheck source=/dev/null
+if ! . "$_eg_lib"; then
+  echo "BLOCKED: the evidence gate cannot read commands — $_eg_lib failed to load." >&2
+  exit 2
+fi
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
@@ -36,18 +65,18 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
-# Is any segment of the command a `git commit`? Parse segments split on
-# &&, ||, ; like protect-main.sh. Ignore content inside quotes (commit
-# messages often contain "git commit" as prose).
+# Is any segment of the command a `git commit`? The library answers by argv
+# position: git must be argv[0] (after leading VAR=value assignments and git's
+# own global options) and `commit` the subcommand. That is what makes
+# `git -C <dir> commit`, `git -c user.name=x commit` and
+# `git --no-pager commit` commits — all three were invisible to the string
+# match this replaced — while `echo "we will git commit later"` and a heredoc
+# body naming a commit stay silent.
+# [WALL: tests/git-argv.test.sh]
 IS_COMMIT=0
-while IFS= read -r segment; do
-  segment="${segment#"${segment%%[![:space:]]*}"}"
-  stripped=$(echo "$segment" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g")
-  if echo "$stripped" | grep -qE '(^|[[:space:]])git[[:space:]]+commit([[:space:]]|$)'; then
-    IS_COMMIT=1
-    break
-  fi
-done <<< "$(echo "$COMMAND" | sed 's/&&/\n/g; s/||/\n/g; s/;/\n/g')"
+if git_argv_has_sub "$COMMAND" commit; then
+  IS_COMMIT=1
+fi
 
 if [ "$IS_COMMIT" -eq 0 ]; then
   exit 0
