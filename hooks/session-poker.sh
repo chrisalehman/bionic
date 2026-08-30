@@ -143,6 +143,23 @@ PATROL_STAMP_SCHEMA="patrol-stamp/v1"
 PATROL_STAMP_PREFIX="patrol-"
 PATROL_STAMP_SUFFIX=".state"
 
+# THE ARMING RECORD — a sibling of the stamp, whose MTIME is the instant this session armed.
+# It is a second file rather than a field inside the stamp because the stamp is rewritten
+# whole by every tick: a field would have to be read back and re-emitted on each of them, and
+# one silent read-back failure would erase the session's arming instant for good. The marker
+# is written once, by `arm`, and removed with the stamp — nothing else touches it, so it
+# cannot drift. Its mtime carries full filesystem resolution, which is what lets the
+# comparison below be `-nt` (the selection block's own primitive) rather than a
+# whole-second arithmetic that ties.
+#
+# NO OTHER READER SEES IT: every consumer of the stamp addresses the exact
+# `patrol-<sid>.state` path (hooks/dispatch-preflight.sh, hooks/patrol-revive.sh,
+# scripts/lib/patrol.sh) — none of them globs — so a `patrol-<sid>.state.armed` beside it
+# changes nothing they read, and the stamp's own shape, which the arming wall ages, is
+# untouched.
+PATROL_ARMED_SCHEMA="patrol-armed/v1"
+PATROL_ARMED_SUFFIX=".armed"
+
 # `adopt`'s own schema, and the two numbers its report tail is cut with. The floor is what
 # separates a REPORT from the one-line sign-offs that usually follow it in an agent's
 # transcript ("done", "no task tools here"); the cap is what keeps a 40 KB report out of a
@@ -359,6 +376,34 @@ tmp_dir_ok() {  # <.bionic/tmp path> -> 0 safe to write in, 1 refuse
   return 0
 }
 
+# The arming record's path — the stamp's, plus one suffix, so the two can never resolve to
+# different directories and a mis-resolved root loses both together rather than half.
+patrol_armed_file() {  # <session-id> -> absolute path, or empty
+  local f
+  f="$(patrol_stamp_file "$1")" || return 1
+  [ -n "$f" ] || return 1
+  printf '%s%s' "$f" "$PATROL_ARMED_SUFFIX"
+}
+
+# WRITTEN BY `arm` AND BY NOTHING ELSE. Its content is for a human reading .bionic/tmp; the
+# fact the tick reads is its mtime. A failure here is NOT fatal to arming: the stamp is what
+# the arming wall reads, and a session armed without a marker simply never auto-DISARMs —
+# which is the safe direction (ADR-002 §3), where refusing to arm would take the dispatch
+# wall down over a bookkeeping file.
+write_patrol_armed_marker() {  # <session-id> -> 0 written, 1 not
+  local sid="$1" f d
+  f="$(patrol_armed_file "$sid")" || return 1
+  [ -n "$f" ] || return 1
+  d="${f%/*}"
+  tmp_dir_ok "$d" || return 1
+  mkdir -p "$d" 2>/dev/null || return 1
+  [ -L "$f" ] && return 1
+  printf '%s|at=%s|session=%s\n' "$PATROL_ARMED_SCHEMA" "$(iso_now)" "$sid" \
+    > "$f" 2>/dev/null || return 1
+  chmod 600 "$f" 2>/dev/null
+  return 0
+}
+
 write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
   local sid="$1" verb="$2" f d
   f="$(patrol_stamp_file "$sid")" || return 1
@@ -390,11 +435,18 @@ write_patrol_stamp() {  # <session-id> <verb> -> 0 written, 1 not
 # no-op. The directory shape is checked exactly as the writer checks it, so a resolution
 # that landed somewhere else removes nothing.
 remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 could not
-  local sid="$1" f d
+  local sid="$1" f d a
   f="$(patrol_stamp_file "$sid")" || return 1
   [ -n "$f" ] || return 1
   d="${f%/*}"
   case "$d" in */.bionic/tmp) : ;; *) return 1 ;; esac
+  # THE ARMING RECORD GOES WITH THE STAMP, best-effort. Both halves say "this session's
+  # Patrol is live", so leaving one behind leaves the disk saying half of a thing that
+  # ended. It is best-effort because no reader consults the marker without a stamp beside
+  # it, so a survivor claims nothing — where a surviving STAMP claims a live clock, which
+  # is why that one decides the return code.
+  a="$(patrol_armed_file "$sid")" || a=""
+  if [ -n "$a" ] && [ ! -L "$a" ] && [ -e "$a" ]; then rm -f "$a" 2>/dev/null; fi
   [ -L "$f" ] && return 0
   [ -e "$f" ] || return 0
   rm -f "$f" 2>/dev/null
@@ -567,10 +619,11 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
 #
 # FAIL DIRECTION IS `open`, without exception. No project root, no docs root, no plan, an
 # unreadable plan, a plan whose `current:` will not parse, a `current: 9` with no
-# `delivered:` — every one of them answers `open`, and `open` never DISARMs. A wrong `open`
-# costs a Patrol that keeps ticking over a finished run, which one `disarm` ends; a wrong
-# `delivered` costs the silent, terminal end of supervision over a live wave, which nothing
-# recovers. The asymmetry is the whole design.
+# `delivered:`, a delivery this session cannot place in time (no arming record), and a
+# delivery that PREDATES this session's arming — every one of them answers `open`, and `open`
+# never DISARMs. A wrong `open` costs a Patrol that keeps ticking over a finished run, which
+# one `disarm` ends; a wrong `delivered` costs the silent, terminal end of supervision over a
+# live wave, which nothing recovers. The asymmetry is the whole design.
 
 # Per-project docs root: `docs-root:` in .bionic/config.yaml if set, else
 # <project>/.bionic/docs. [PIN: tests/cross-gate-agreement.test.sh §S]
@@ -642,8 +695,8 @@ newest_sdlc_plan() {  # <docs root> -> path on stdout, empty if there is no plan
 # The `why` half is not decoration: it is the whole content of the QUIET line this feeds. A
 # tick that says "no open row, but the run is not delivered" and stops there tells its reader
 # nothing they can act on, and the reader is a model deciding whether the Patrol is broken.
-run_state() {  # <project root> -> "delivered|<why>" or "open|<why>" on stdout
-  local repo="$1" docs_root plan section current line
+run_state() {  # <project root> <arming-record path, may be empty> -> "delivered|<why>" or "open|<why>"
+  local repo="$1" armed="${2:-}" docs_root plan section current line
   if [ -z "$repo" ] || [ ! -d "$repo" ]; then
     printf 'open|no project root resolved, so no plan could be read'
     return 0
@@ -677,9 +730,36 @@ run_state() {  # <project root> -> "delivered|<why>" or "open|<why>" on stdout
           | grep -E '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:' \
           | head -1)"
   case "$line" in
-    *delivered:*) printf 'delivered|%s is at current: 9 and its Step 9 line records delivered:' "$plan" ;;
-    *)            printf 'open|%s is at current: 9 but its Step 9 line records no delivered:' "$plan" ;;
+    *delivered:*) : ;;
+    *) printf 'open|%s is at current: 9 but its Step 9 line records no delivered:' "$plan"
+       return 0 ;;
   esac
+
+  # WHOSE DELIVERY IS IT? A `delivered:` on the newest plan says a run finished; it does not
+  # say THIS run finished. A session that closes run W and then starts W+1 arms at Step 0 —
+  # SKILL.md §Dispatch, "at engagement" — while W+1's plan, and the `## SDLC State` that
+  # would answer for it, does not exist until Step 1-3. Through that whole window the newest
+  # SDLC-State plan is W's, its Step-9 line still records `delivered:`, and the roster is
+  # empty because nothing has been dispatched yet: the tick DISARMed, removed the stamp, and
+  # the arming wall refused the new run's first dispatch (critic C-4, wave-1.3.2 Step 6).
+  #
+  # So a delivery counts only if it POSTDATES this Patrol's arming, and the arming instant is
+  # the mtime of the record `arm` wrote. `-nt` rather than a seconds comparison: it is the
+  # same primitive the selection block above uses, it carries whatever resolution the
+  # filesystem has, and it resolves a tie as NOT newer — which is the fail direction this
+  # whole function already takes everywhere else.
+  #
+  # NO RECORD IS DOUBT, AND DOUBT IS `open` (ADR-002 §3). A tick in a session that never
+  # armed cannot place the delivery in time at all.
+  if [ -z "$armed" ] || [ ! -f "$armed" ]; then
+    printf 'open|%s records delivered:, but this session has no arming record to date it against' "$plan"
+    return 0
+  fi
+  if [ ! "$plan" -nt "$armed" ]; then
+    printf 'open|%s records delivered:, but it was delivered before this Patrol armed — that is the previous run' "$plan"
+    return 0
+  fi
+  printf 'delivered|%s is at current: 9 and its Step 9 line records delivered:' "$plan"
 }
 
 # ---------------------------------------------------------------- adoption
@@ -965,6 +1045,12 @@ case "$VERB" in
       die "Check that .bionic/tmp is a writable real directory under the project root."
       exit 2
     fi
+    # THE SECOND HALF OF ARMING: the instant, recorded so a later tick can tell THIS run's
+    # delivery from the previous one's (R-13). Advisory — a session armed without it keeps
+    # ticking and never auto-DISARMs, which is the safe direction — so it warns and the arm
+    # still stands.
+    write_patrol_armed_marker "$SESSION_ID" \
+      || die "WARN — the arming instant could not be recorded; this Patrol will not auto-DISARM (run \`disarm\` to stop it)."
     say "armed — the Patrol stamp is fresh for this session: $(patrol_stamp_file "$SESSION_ID")"
     exit 0
     ;;
@@ -1337,15 +1423,17 @@ EOF
     RUN_STATE=open
     RUN_STATE_WHY="the roster still carries open work"
     if [ "$OPEN" -eq 0 ]; then
-      RUN_STATE_RAW="$(run_state "$REPO_REAL")"
+      RUN_STATE_RAW="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")")"
       RUN_STATE="${RUN_STATE_RAW%%|*}"
       RUN_STATE_WHY="${RUN_STATE_RAW#*|}"
     fi
 
-    # DISARM — no open row AND a run that says it is delivered. "No open row" alone was the
-    # whole predicate until 1.3.2, and it is also exactly what a live wave looks like between
-    # two batches: every writer of a slice landed, the next not yet briefed. The tick ended
-    # the Patrol there, terminally, and the rest of the wave ran unsupervised (epic-20 W1
+    # DISARM — no open row AND a run that says it is delivered, in a delivery that POSTDATES
+    # this Patrol's arming (R-13: an older one is the previous run's close-out, still newest
+    # while the new run's plan does not exist yet). "No open row" alone was the whole
+    # predicate until 1.3.2, and it is also exactly what a live wave looks like between two
+    # batches: every writer of a slice landed, the next not yet briefed. The tick ended the
+    # Patrol there, terminally, and the rest of the wave ran unsupervised (epic-20 W1
     # dogfood, idea §B-4; R-4, AC-13/AC-14). The first conjunct still generalizes the spec's
     # literal "disarmed on empty roster" to a roster whose every row is MET/WAIVED/acked (S2
     # design decision, logged to the plan); the second is what tells a finish from a lull.

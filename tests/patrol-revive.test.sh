@@ -72,6 +72,12 @@ make_env() {  # [interval] -> project dir on stdout
 
 stamp_path() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "$2"; }
 
+# The arming record `session-poker.sh arm` writes beside the stamp (bionic 1.3.2, R-13). This
+# hook never reads it — it reads the stamp's mtime and nothing else — but Group 7 drives a
+# real DISARM tick, and from 1.3.2 a tick DISARMs only on a delivery that POSTDATES this
+# session's arming, so the fixture there has to carry one.
+armed_path() { printf '%s.armed' "$(stamp_path "$1" "$2")"; }
+
 write_stamp() {  # <project> <session>
   printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$2" \
     > "$(stamp_path "$1" "$2")"
@@ -452,7 +458,13 @@ mkdir -p "$D/.bionic/docs/plans/epic-99"
   printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 9\n\n'
   printf -- '- Step 9: delivered: fixture run closed; report: record/fixture/close-out.md\n'
 } > "$D/.bionic/docs/plans/epic-99/wave-01.plan.md"
-write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
+# ARMED THROUGH THE REAL VERB, and dated back, so the plan written a moment ago is a
+# delivery that POSTDATES the arming — which is what the tick now requires before it will
+# DISARM (R-13, critic C-4). A hand-written stamp alone leaves the session with no arming
+# record at all, and the tick QUIETs rather than reaching the decision this case is about.
+( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_FOR_DISARM" arm ) >/dev/null 2>&1
+backdate "$(armed_path "$D" "$SID")" 600
+backdate "$(stamp_path "$D" "$SID")" 600
 G7_TICK=$( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$D/no-config" \
              bash "$POKER_FOR_DISARM" tick 2>&1 )
 TOTAL=$((TOTAL + 1))
