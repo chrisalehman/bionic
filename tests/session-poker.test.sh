@@ -135,6 +135,37 @@ ack_rows() {  # <repo> <name>...
     >/dev/null 2>&1
 }
 
+# ---------- plan fixtures: the run-state read the tick takes (B-4, AC-13/AC-14) ----------
+#
+# WHY EVERY DISARM FIXTURE BELOW GREW A PLAN. `open == 0` used to be the whole DISARM
+# predicate, and it is also what a live wave looks like between two batches — so the tick
+# ended the Patrol of runs with days of work left (epic-20 W1 dogfood, idea §B-4). DISARM
+# now needs the RUN to say it is delivered: `current: 9` with `delivered:` on the `Step 9:`
+# line, read out of the newest plan carrying an unfenced `## SDLC State`. A fixture that
+# writes no plan is therefore a fixture that cannot DISARM, which is AC-13's second half.
+#
+# CLOCK DISCIPLINE HOLDS: nothing here sleeps. `touch` after the write is what makes a
+# fixture the newest candidate, exactly as `backdate` drives staleness above.
+plan_body() {  # <current> [evidence text for the Step-<current> line] -> a whole plan file
+  printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: %s\n\n- Step %s: %s\n' \
+    "$1" "$1" "${2:-evidence for this step}"
+}
+
+write_plan() {  # <repo> <body> [path relative to <docs-root>/plans]
+  local repo="$1" body="$2" rel="${3:-epic-99-fixture/wave-01-fixture.plan.md}"
+  local f="$repo/.bionic/docs/plans/$rel"
+  mkdir -p "$(dirname "$f")"
+  printf '%s' "$body" > "$f"
+  touch "$f"
+}
+
+# The shorthand every DISARM fixture uses: a run that reached Step 9 and recorded a
+# delivery. `delivered:` is the token the close-out step writes and the only one run_state
+# accepts.
+delivered_plan() {  # <repo>
+  write_plan "$1" "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')"
+}
+
 # ---------- running the poker (same watchdog shape as tests/session-sweeper.test.sh) ----------
 
 POKE_BOUND=20
@@ -266,6 +297,8 @@ section "Section 3: tick — the accelerated-clock decisions (AC-7, re-authored 
 
 # --- empty roster -> DISARM ---
 R3E="$(make_repo s3-empty)"; new_roster "$R3E"
+# The run says it is delivered, so the empty roster is a finish and not a lull (AC-14).
+delivered_plan "$R3E"
 poke "$R3E" tick
 expect_eq "an empty roster ticks quietly (exit 0)" "0" "$RC"
 expect_contains "…and decides DISARM" "decision=DISARM" "$OUT"
@@ -324,7 +357,7 @@ expect_contains "…decision=NOTIFY survives the marker" "decision=NOTIFY" "$OUT
 expect_contains "…naming the row" "rows=overdue-swept" "$OUT"
 
 # --- all rows closed (MET), roster non-empty -> DISARM generalizes past "empty" ---
-R3C="$(make_repo s3-closed)"; new_roster "$R3C"
+R3C="$(make_repo s3-closed)"; new_roster "$R3C"; delivered_plan "$R3C"
 DEL_C="$R3C/delivered.md"; echo "done" > "$DEL_C"
 add_row "$R3C" name=finished deliverable="$DEL_C" duration="1 minute" \
   launched_at="$(iso_ago 600)"
@@ -369,7 +402,7 @@ expect_absent   "…never NOTIFY on a duration the parser refused" "decision=NOT
 # and its artifact — accounted for by a human rather than written to disk — will never
 # appear. DISARM requires OPEN=0, so the self-wake could not be ended by the ordinary path
 # an orchestrator uses to close a row that produced no artifact.
-R3AK="$(make_repo s3-all-acked)"; new_roster "$R3AK"
+R3AK="$(make_repo s3-all-acked)"; new_roster "$R3AK"; delivered_plan "$R3AK"
 add_row "$R3AK" name=acked-1 deliverable="$R3AK/absent-1.md" duration="1 minute" \
   launched_at="$(iso_ago 600)"
 add_row "$R3AK" name=acked-2 deliverable="$R3AK/absent-2.md" duration="1 minute" \
@@ -390,7 +423,10 @@ expect_absent   "…never NOTIFY on rows a human already closed" "decision=NOTIF
 # The take-2 capture (record/w2-t3-ac6-take2.txt:29) showed 10 of 11 open rows notified,
 # nine of them acked ~15 minutes earlier — every tick re-alarming on closed work, which is
 # the false-alarm class this wave exists to end.
-R3AN="$(make_repo s3-acked-overdue)"; new_roster "$R3AN"
+# The sandbox label deliberately does NOT contain the row name: the DISARM line now names
+# the plan path it decided from, and a repo dir called `s3-acked-overdue` would put the row
+# name into the output by way of the fixture rather than by way of a notification.
+R3AN="$(make_repo s3-ack-past-due)"; new_roster "$R3AN"; delivered_plan "$R3AN"
 add_row "$R3AN" name=acked-overdue deliverable="$R3AN/absent-acked-overdue.md" \
   duration="1 minute" launched_at="$(iso_ago 100000)"
 ack_rows "$R3AN" acked-overdue
@@ -1009,7 +1045,7 @@ expect_contains "the usage surface names the disarm verb" "session-poker.sh disa
 # This is the producer the plan missed: DISARM is not a run-close ceremony, it is the
 # decision every quiet stretch reaches. The decision line still prints — the removal is
 # after it, so nothing above can be skipped by it.
-R9C="$(make_repo s9-tick-disarm)"; new_roster "$R9C"
+R9C="$(make_repo s9-tick-disarm)"; new_roster "$R9C"; delivered_plan "$R9C"
 poke "$R9C" arm
 poke "$R9C" tick
 expect_contains "an empty roster still decides DISARM" "decision=DISARM" "$OUT"
@@ -1035,7 +1071,7 @@ expect_eq "…and that tick KEEPS the stamp" "yes" \
 # dispatch wall died looks like. The stamp follows that precedence rather than the decision
 # line — stopping the clock on the one tick that says "your wall is gone" would take the
 # monitor down with it.
-R9E="$(make_repo s9-blind)"; new_roster "$R9E"
+R9E="$(make_repo s9-blind)"; new_roster "$R9E"; delivered_plan "$R9E"
 C9E="$(fake_config_dir s9e)"
 tx_dispatch 2 | write_transcript "$C9E" "$SID"
 export CLAUDE_CONFIG_DIR="$C9E"
@@ -1065,6 +1101,161 @@ if [ -d "$R9FWT" ]; then
 else
   ok "disarming from a worktree cwd removes the MAIN repository's stamp (skipped: no worktree)"
 fi
+
+# ============================================================
+section "Section 10: the run-state read — DISARM belongs to a delivered run (B-4, AC-13/AC-14)"
+# ============================================================
+#
+# THE DEFECT, from this repo's own dogfood (idea file §B-4). A wave landed every writer of
+# one slice, the roster went quiet for the minutes it took to brief the next, and the tick
+# that fired in that gap DISARMed — terminally, by doctrine — leaving the rest of the wave
+# unsupervised. `open == 0` answered "finished" for a state that was a lull.
+#
+# THE CURE: `open == 0` is necessary and no longer sufficient. The run itself has to say it
+# is delivered, in the one place a canonical-sdlc run says so — `current: 9` plus
+# `delivered:` on the `Step 9:` line of the newest plan carrying an unfenced `## SDLC
+# State`. Everything else, INCLUDING the absence of any plan at all, is `open`, and `open`
+# QUIETs with the stamp kept.
+#
+# The stamp is the discriminating half of every case here. QUIET vs DISARM is one word in a
+# decision line; kept-vs-removed stamp is what the arming wall and hooks/patrol-revive.sh
+# actually read, so a fix that printed QUIET and removed the stamp anyway would be no fix.
+
+# --- AC-13a: empty roster, plan mid-run at current: 7 -> QUIET, stamp KEPT ---
+R10A="$(make_repo s10-current-7)"; new_roster "$R10A"
+write_plan "$R10A" "$(plan_body 7 'record/fixture/verify.md')"
+poke "$R10A" arm
+poke "$R10A" tick
+expect_eq "AC-13: an empty roster mid-run ticks cleanly (exit 0)" "0" "$RC"
+expect_contains "AC-13: …and decides QUIET, not DISARM — the run is at current: 7" \
+  "decision=QUIET" "$OUT"
+expect_absent "AC-13: …never DISARM on a roster that is merely between batches" \
+  "decision=DISARM" "$OUT"
+expect_eq "AC-13: …and the tick KEEPS its stamp, so the Patrol keeps firing" "yes" \
+  "$([ -f "$(stamp_of "$R10A")" ] && echo yes || echo no)"
+expect_contains "AC-13: …and the line says WHICH plan and WHERE the run is" "current: 7" "$OUT"
+
+# --- AC-13b: empty roster, no readable plan at all -> QUIET, stamp KEPT ---
+# The fail direction, stated as its own case: a run whose plan the tick cannot find is not
+# a finished run. This is the one that governs an unfamiliar project, a docs-root override
+# pointing somewhere else, and a plan that has not been written yet.
+R10B="$(make_repo s10-no-plan)"; new_roster "$R10B"
+poke "$R10B" arm
+poke "$R10B" tick
+expect_eq "AC-13: an empty roster with NO plan ticks cleanly (exit 0)" "0" "$RC"
+expect_contains "AC-13: …and decides QUIET — no plan is not a delivered run" \
+  "decision=QUIET" "$OUT"
+expect_absent "AC-13: …never DISARM with nothing read to decide it from" "decision=DISARM" "$OUT"
+expect_eq "AC-13: …and KEEPS the stamp" "yes" \
+  "$([ -f "$(stamp_of "$R10B")" ] && echo yes || echo no)"
+
+# --- AC-14: empty roster, plan at current: 9 with delivered: -> DISARM, stamp REMOVED ---
+R10C="$(make_repo s10-delivered)"; new_roster "$R10C"
+write_plan "$R10C" "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')"
+poke "$R10C" arm
+poke "$R10C" tick
+expect_eq "AC-14: a delivered run over an empty roster ticks cleanly (exit 0)" "0" "$RC"
+expect_contains "AC-14: …and decides DISARM — the run said it is delivered" \
+  "decision=DISARM" "$OUT"
+expect_eq "AC-14: …and the DISARM removes the stamp, as it always did" "no" \
+  "$([ -e "$(stamp_of "$R10C")" ] && echo yes || echo no)"
+
+# --- THE DISCRIMINATOR for AC-14: current: 9, no `delivered:` -> QUIET, stamp KEPT ---
+# AC-14 alone is satisfied by the OLD predicate too (an empty roster DISARMed whatever the
+# plan said), so it proves nothing on its own. This case is the half that only the new
+# predicate can pass: same roster, same `current: 9`, one token missing. Step 9 is reached
+# well before the close-out is written, and a Patrol that dies at the top of Step 9 dies
+# during the last stretch of work it exists to watch.
+R10D="$(make_repo s10-step9-undelivered)"; new_roster "$R10D"
+write_plan "$R10D" "$(plan_body 9 'close-out drafting, report not written yet')"
+poke "$R10D" arm
+poke "$R10D" tick
+expect_contains "AC-14 discriminator: current: 9 with no delivered: decides QUIET" \
+  "decision=QUIET" "$OUT"
+expect_absent "AC-14 discriminator: …never DISARM before the delivery is recorded" \
+  "decision=DISARM" "$OUT"
+expect_eq "AC-14 discriminator: …and KEEPS the stamp" "yes" \
+  "$([ -f "$(stamp_of "$R10D")" ] && echo yes || echo no)"
+
+# --- an incident run answers too: <docs-root>/incidents/ is the second plan directory ---
+R10E="$(make_repo s10-incident)"; new_roster "$R10E"
+mkdir -p "$R10E/.bionic/docs/incidents"
+printf '%s' "$(plan_body 9 'delivered: incident closed; report: record/fixture/x.md')" \
+  > "$R10E/.bionic/docs/incidents/inc-01.md"
+poke "$R10E" arm
+poke "$R10E" tick
+expect_contains "a delivered INCIDENT plan DISARMs too — both plan directories are read" \
+  "decision=DISARM" "$OUT"
+
+# --- depth is bounded at 2, exactly as the gate bounds it ---
+# A plan three levels down is not a candidate. The pairing matters: the SAME content at
+# depth 2 DISARMs, so this case pins the bound rather than a broken fixture.
+R10F="$(make_repo s10-too-deep)"; new_roster "$R10F"
+write_plan "$R10F" "$(plan_body 9 'delivered: too deep to be seen')" \
+  "epic-99/wave-01/nested/plan.md"
+poke "$R10F" arm
+poke "$R10F" tick
+expect_contains "a plan at depth 3 is not a candidate, so the tick QUIETs" "decision=QUIET" "$OUT"
+write_plan "$R10F" "$(plan_body 9 'delivered: at depth two')" "epic-99/wave-01.plan.md"
+poke "$R10F" tick
+expect_contains "…and the SAME content at depth 2 DISARMs (the bound is pinned, not the fixture)" \
+  "decision=DISARM" "$OUT"
+
+# --- the newest-race filter: a newer marker-less .md never wins the selection ---
+# The 2026-08-15 incident in one fixture. An unfiltered "newest *.md" read would take
+# `scratch.md`, parse no `current:`, and answer `open` — which happens to be safe here — so
+# the discriminating direction is the other one: the marker-less file is NEWER than a
+# DELIVERED plan, and a filtered read still finds the plan and still DISARMs.
+R10G="$(make_repo s10-newest-race)"; new_roster "$R10G"
+write_plan "$R10G" "$(plan_body 9 'delivered: the real plan')"
+printf 'a scratch note with no SDLC State heading at all\n' \
+  > "$R10G/.bionic/docs/plans/epic-99-fixture/zz-scratch.md"
+# The plan is backdated rather than the scrap re-touched: a same-second tie reads as "not
+# newer" to `-nt`, which would pass this case without the filter ever being exercised.
+backdate "$R10G/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md" 3600
+poke "$R10G" arm
+poke "$R10G" tick
+expect_contains "a NEWER marker-less .md does not shadow the delivered plan" \
+  "decision=DISARM" "$OUT"
+
+# --- a fenced `## SDLC State` is documentation, not a run ---
+R10H="$(make_repo s10-fenced)"; new_roster "$R10H"
+mkdir -p "$R10H/.bionic/docs/plans/epic-99-fixture"
+{
+  printf '# a document ABOUT plans\n\n'
+  printf '```\n## SDLC State\ncurrent: 9\n- Step 9: delivered: not a real run\n```\n'
+} > "$R10H/.bionic/docs/plans/epic-99-fixture/schema-notes.md"
+poke "$R10H" arm
+poke "$R10H" tick
+expect_contains "a plan-shaped FENCED example is not a run, so the tick QUIETs" \
+  "decision=QUIET" "$OUT"
+expect_eq "…and KEEPS the stamp" "yes" \
+  "$([ -f "$(stamp_of "$R10H")" ] && echo yes || echo no)"
+
+# --- the predicate is a CONJUNCTION: a delivered plan never overrides an open row ---
+# Without this, "run_state == delivered" could have been written as the whole predicate and
+# every case above would still pass. A plan is a claim about the run; the roster is the fact
+# about the work, and an open row outranks the claim.
+R10I="$(make_repo s10-delivered-but-open)"; new_roster "$R10I"
+delivered_plan "$R10I"
+add_row "$R10I" name=still-running deliverable="$R10I/absent.md" \
+  duration="4 hours" launched_at="$(iso_ago 60)"
+poke "$R10I" arm
+poke "$R10I" tick
+expect_contains "a DELIVERED plan with an open row still decides QUIET" "decision=QUIET" "$OUT"
+expect_absent "…never DISARM while the roster carries open work" "decision=DISARM" "$OUT"
+expect_eq "…and KEEPS the stamp" "yes" \
+  "$([ -f "$(stamp_of "$R10I")" ] && echo yes || echo no)"
+
+# --- the absent-roster REFUSAL is untouched by any of this ---
+# The never-ran case keeps its own answer (Section 5): an absent roster is not an empty one,
+# it is usually the wrong project root, and it refuses rather than deciding. Re-pinned here
+# because the DISARM predicate moved past it and a future edit could route it into QUIET.
+R10J="$(make_repo s10-no-roster)"
+delivered_plan "$R10J"
+poke "$R10J" tick
+expect_eq "an absent roster still REFUSES (exit 2), delivered plan or not" "2" "$RC"
+expect_absent "…and decides nothing" "decision=" "$OUT"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

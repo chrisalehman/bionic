@@ -536,6 +536,152 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
     | grep -c -F "|status=intended|"
 }
 
+# ---------------------------------------------------------------- the run's own state
+#
+# WHAT THE TICK COULD NOT SEE UNTIL NOW. `open == 0` is not "this run is finished" — it is
+# "nothing is dispatched at this instant", which is equally the gap between two batches of a
+# live wave: every writer of one slice landed, the next slice not yet briefed. DISARM is
+# terminal by doctrine (skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the
+# Patrol"), so taking it in that gap ended the supervision of a run with days of work left,
+# silently, and the next stretch of the wave ran unwatched. That is measured on this repo's
+# own epic-20 W1 dogfood, not projected (the idea file's §B-4). The roster cannot tell the
+# two states apart, because a finished run and a mid-wave lull spell the same zero.
+#
+# THE PLAN CAN. A canonical-sdlc run publishes where it is in one line of its own plan, and
+# it says it is FINISHED in exactly one way: `current: 9` with a `Step 9:` line carrying
+# `delivered:`. So the tick takes ONE plan read, bounded to those two fields (D3, Chris
+# 2026-08-30), and DISARM now requires the RUN to say it is delivered rather than the roster
+# merely being quiet. Everything else the plan holds is none of the tick's business.
+#
+# THE READ IS THE EVIDENCE GATE'S, NOT A NEW ONE. `has_sdlc_state()`, `resolve_docs_root()`,
+# `normalize_newlines()` and the newest-plan selection inside `newest_sdlc_plan()` are copies
+# of hooks/canonical-sdlc-evidence-gate.sh's, held body-for-body by
+# tests/cross-gate-agreement.test.sh §S. Copied rather than approximated because the
+# UNFILTERED read is a measured incident: on 2026-08-15 a marker-less *.md that happened to
+# be newest under plans/ won the newest race, `current:` parsed empty, and every wall reading
+# it passed silently for ~15 minutes
+# (.bionic/docs/record/session-20260815-landing-supervision/t8-forensic-read.md). A tick
+# reading the plan that way would DISARM off a scrap file. hooks/patrol-revive.sh:64-70
+# refused a plan read outright for that reason; the `## SDLC State` filter is what makes the
+# read safe to take here, which is why it is pinned rather than merely reused.
+#
+# FAIL DIRECTION IS `open`, without exception. No project root, no docs root, no plan, an
+# unreadable plan, a plan whose `current:` will not parse, a `current: 9` with no
+# `delivered:` — every one of them answers `open`, and `open` never DISARMs. A wrong `open`
+# costs a Patrol that keeps ticking over a finished run, which one `disarm` ends; a wrong
+# `delivered` costs the silent, terminal end of supervision over a live wave, which nothing
+# recovers. The asymmetry is the whole design.
+
+# Per-project docs root: `docs-root:` in .bionic/config.yaml if set, else
+# <project>/.bionic/docs. [PIN: tests/cross-gate-agreement.test.sh §S]
+resolve_docs_root() {
+  local proj="$1"
+  local config="$proj/.bionic/config.yaml"
+  if [ -f "$config" ]; then
+    local override
+    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
+      | head -1 \
+      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
+      | sed -E "s/^['\"]//;s/['\"]\$//" \
+      | sed -E 's/[[:space:]]+$//')
+    if [ -n "$override" ]; then
+      case "$override" in
+        /*) echo "$override" ;;
+        *)  echo "$proj/$override" ;;
+      esac
+      return
+    fi
+  fi
+  echo "$proj/.bionic/docs"
+}
+
+# CRLF and CR-only line endings TRANSLATED, never deleted: a deleted CR would join two
+# lines into one and hand `current:` a value that was never written.
+# [PIN: tests/cross-gate-agreement.test.sh §S]
+normalize_newlines() {
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
+}
+
+# A CANDIDATE IS A PLAN ONLY IF IT CARRIES AN UNFENCED `## SDLC State` HEADING — the
+# newest-race filter described above. Fence-aware, because a schema example is documentation
+# and not a run. [PIN: tests/cross-gate-agreement.test.sh §S]
+has_sdlc_state() {
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## SDLC State/ { found = 1 }
+    END { exit !found }'
+}
+
+# The newest such plan across this project's two plan directories, or empty. Depth 2 covers
+# the directory-per-epic layout (<docs-root>/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md) as
+# well as the flat one. The loop body below is the gate's, line for line — including the
+# STRICT `-nt` ordering, which is what makes "newest" a total answer rather than one that
+# depends on find's directory order. [PIN: tests/cross-gate-agreement.test.sh §S]
+newest_sdlc_plan() {  # <docs root> -> path on stdout, empty if there is no plan
+  local DOCS_ROOT="$1"
+  local PLAN_DIRS d f PLAN
+  PLAN_DIRS=( "${DOCS_ROOT}/plans" "${DOCS_ROOT}/incidents" )
+  PLAN=""
+  for d in "${PLAN_DIRS[@]}"; do
+    [ -d "$d" ] || continue
+    while IFS= read -r -d '' f; do
+      if [ -z "$PLAN" ] || [ "$f" -nt "$PLAN" ]; then
+        has_sdlc_state "$f" || continue
+        PLAN="$f"
+      fi
+    done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
+  done
+  printf '%s' "$PLAN"
+}
+
+# THE TWO FIELDS, AND NOTHING ELSE. `current:` and the `Step 9:` line are read out of the
+# fence-aware `## SDLC State` section exactly as the evidence gate reads them, so a plan
+# documenting the schema inside a ``` example cannot answer for the run.
+#
+# The `why` half is not decoration: it is the whole content of the QUIET line this feeds. A
+# tick that says "no open row, but the run is not delivered" and stops there tells its reader
+# nothing they can act on, and the reader is a model deciding whether the Patrol is broken.
+run_state() {  # <project root> -> "delivered|<why>" or "open|<why>" on stdout
+  local repo="$1" docs_root plan section current line
+  if [ -z "$repo" ] || [ ! -d "$repo" ]; then
+    printf 'open|no project root resolved, so no plan could be read'
+    return 0
+  fi
+  docs_root="$(resolve_docs_root "$repo")"
+  plan="$(newest_sdlc_plan "$docs_root")"
+  if [ -z "$plan" ]; then
+    printf 'open|no plan carrying an unfenced "## SDLC State" under %s/{plans,incidents}' "$docs_root"
+    return 0
+  fi
+  section="$(normalize_newlines "$plan" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## SDLC State/ { flag=1; next }
+    /^## / { flag=0 }
+    flag')"
+  current="$(printf '%s\n' "$section" \
+             | grep -E '^[[:space:]]*current[[:space:]]*:' \
+             | head -1 \
+             | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
+             | tr -d '[:space:]')"
+  if [ -z "$current" ]; then
+    printf 'open|%s carries no readable "current:" line' "$plan"
+    return 0
+  fi
+  if [ "$current" != "9" ]; then
+    printf 'open|%s is at current: %s' "$plan" "$current"
+    return 0
+  fi
+  line="$(printf '%s\n' "$section" \
+          | grep -E '^[[:space:]]*-?[[:space:]]*Step[[:space:]]+9[[:space:]]*:' \
+          | head -1)"
+  case "$line" in
+    *delivered:*) printf 'delivered|%s is at current: 9 and its Step 9 line records delivered:' "$plan" ;;
+    *)            printf 'open|%s is at current: 9 but its Step 9 line records no delivered:' "$plan" ;;
+  esac
+}
+
 # ---------------------------------------------------------------- adoption
 #
 # WHAT A `/clear`+RESUME ACTUALLY LOSES, and what it does not. Lost: the completion message
@@ -1174,13 +1320,33 @@ EOF
       exit 2
     fi
 
-    # DISARM — no open row, whether because the roster is empty or because every row on it
-    # is already MET/WAIVED (S2 design decision: "no open rows" generalizes the spec's
-    # literal "disarmed on empty roster", logged to the plan).
-    if [ "$TOTAL" -eq 0 ] || [ "$OPEN" -eq 0 ]; then
+    # THE RUN-STATE READ, taken only where it can change the answer. `TOTAL == 0` implies
+    # `OPEN == 0` — the loop that raises OPEN is the loop that raises TOTAL — so this single
+    # test covers both arms of the old predicate, and a roster with open work never pays for
+    # a find over the docs tree.
+    RUN_STATE=open
+    RUN_STATE_WHY="the roster still carries open work"
+    if [ "$OPEN" -eq 0 ]; then
+      RUN_STATE_RAW="$(run_state "$REPO_REAL")"
+      RUN_STATE="${RUN_STATE_RAW%%|*}"
+      RUN_STATE_WHY="${RUN_STATE_RAW#*|}"
+    fi
+
+    # DISARM — no open row AND a run that says it is delivered. "No open row" alone was the
+    # whole predicate until 1.3.2, and it is also exactly what a live wave looks like between
+    # two batches: every writer of a slice landed, the next not yet briefed. The tick ended
+    # the Patrol there, terminally, and the rest of the wave ran unsupervised (epic-20 W1
+    # dogfood, idea §B-4; R-4, AC-13/AC-14). The first conjunct still generalizes the spec's
+    # literal "disarmed on empty roster" to a roster whose every row is MET/WAIVED/acked (S2
+    # design decision, logged to the plan); the second is what tells a finish from a lull.
+    #
+    # An empty roster on a run that has not delivered falls through to QUIET below, and QUIET
+    # KEEPS THE STAMP — which is the half that matters on disk. The clock keeps running, the
+    # arming wall stays satisfied, and hooks/patrol-revive.sh has nothing to report.
+    if [ "$OPEN" -eq 0 ] && [ "$RUN_STATE" = delivered ]; then
       printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
-      say "DISARM — no open row on this roster; the Patrol may stop."
+      say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
       # A blind wall outranks a quiet roster on the EXIT CODE alone — the decision line
       # above still says what the roster says. Silence here would be the detector's own
       # failure mode: the roster of a session whose wall is blind is exactly the roster
@@ -1216,7 +1382,16 @@ EOF
 
     printf '%s|at=%s|session=%s|decision=QUIET|total=%s|open=%s\n' \
       "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
-    say "QUIET — $OPEN open row(s) on this roster, none past their declared duration."
+    # THE QUIET LINE HAS TWO READINGS NOW, and printing the wrong one is how this fix would
+    # be mistaken for the bug it repairs. "0 open row(s), none past their declared duration"
+    # over a mid-run lull says nothing about why the Patrol did not stop, and its reader is a
+    # model deciding whether the Patrol is broken. So the empty-roster reading names the run
+    # state it decided from — which plan, and where that plan says the run is.
+    if [ "$OPEN" -eq 0 ]; then
+      say "QUIET — no open row on this roster, but the run is not delivered (${RUN_STATE_WHY}); the Patrol keeps its stamp and its clock."
+    else
+      say "QUIET — $OPEN open row(s) on this roster, none past their declared duration."
+    fi
     [ "$WALL_BLIND" -eq 1 ] && exit 1
     exit 0
     ;;
