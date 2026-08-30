@@ -28,18 +28,31 @@
 #   1. HEREDOC BODIES ARE DELETED FIRST, terminator included. A `<<TAG` (or `<<-TAG`, or a
 #      quoted tag) opens a body that belongs to the command that WROTE it, never to the
 #      shell; nothing in it is a command. `<<<` is a here-string and opens nothing.
-#   2. THE REST IS SPLIT on `;`, `&&`, `||`, `|`, a bare `&` and newline — outside quotes.
-#      A `&` that is part of a redirection (`2>&1`, `&>log`) is not a separator.
+#   2. THE REST IS SPLIT on `;`, `&&`, `||`, `|`, a bare `&`, newline and a GROUPING
+#      PARENTHESIS — outside quotes. A `&` that is part of a redirection (`2>&1`, `&>log`)
+#      is not a separator, and neither is the `(` of `$(…)` or `<(…)`.
 #   3. EACH SEGMENT IS UNWRAPPED: leading `VAR=value` assignments (quoted values included),
-#      `env`/`nohup`/`command`/`time`, `timeout <n>`; then ONE level of `sh -c`/`bash -c`/
-#      `eval`/`bash <(cat FILE)`. An unwrap that yields a chain is re-split and re-read,
-#      bounded at depth 2.
+#      shell openers (`{`, `}`, `!`, `then`, `else`, `elif`, `do`, `if`, `while`, `until`),
+#      command-taking prefixes with their own options (`sudo [-u u] [--]`, `time [-p]`,
+#      `nice [-n N]`, `env`, `nohup`, `command`, `exec`, `xargs [-I{} -n N …]`,
+#      `ssh [opts] <host>`, `find … -exec`), `timeout <n>`; then ONE level of `sh -c`/
+#      `bash -c`/`eval`/`bash <(cat FILE)`. An unwrap that yields a chain is re-split and
+#      re-read, bounded at depth 2.
 #   4. THE RESULT IS TOKENISED with quotes honoured, and argv[0] (plus argv[1], and argv[2]
 #      for `npm run build`) decides. A token that carried WHITESPACE INSIDE QUOTES is prose
-#      by construction and is replaced with an opaque marker that matches nothing.
+#      by construction and is replaced with an opaque marker that matches nothing. A SCRIPT
+#      at argv[0] decides too: `./tests/run.sh` runs the suite as surely as
+#      `bash tests/run.sh` does.
 #
-# `cd <dir> &&` needs no rule of its own: step 2 already makes the command after it a
-# segment in its own right.
+# THE SUPERSET RULE (R-12, critic C-1 2026-08-30). Steps 2 and 3 together exist so that this
+# reading is a superset of the `(^|[;&| ])bash +tests/run\.sh` string match bionic 1.3.1
+# used. Positional reading alone is NARROWER: `sudo bash tests/run.sh` and
+# `( bash tests/run.sh )` put the runner at argv[1..n] where nothing looked, and four walls
+# lost spellings 1.3.1 refused. Any new arm here is a wall — measure both directions.
+#
+# `cd <dir> &&` needs no rule of its own for the path form: step 2 already makes the command
+# after it a segment. It does license one thing — the BASENAME form `bash run.sh`, which is
+# a real suite invocation only once a cd has put the shell in that directory.
 #
 # EXPORTS (all take the command as $1; none write outside their own locals):
 #   cmd_strip_heredocs <cmd>  -> the command with every heredoc body removed
@@ -91,8 +104,14 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     }
 
     # ---------- 2. segmentation ----------
-    function segments(s, arr,   i, c, L, q, cur, k, nx, pv) {
-      L = length(s); q = ""; cur = ""; k = 0
+    # GROUPING PARENTHESES end a segment (R-12, critic C-1/C-2). Without that,
+    # (cd tests; bash run.sh) leaves the closing paren glued to the last word
+    # as run.sh) and no arm recognises it. A ( preceded by $ < or > opens a
+    # command substitution or a process substitution instead: those are NOT
+    # boundaries, so bash <(cat FILE) still reaches unwrap_runner intact, and
+    # the matching ) at depth 0 stays an ordinary character.
+    function segments(s, arr,   i, c, L, q, cur, k, nx, pv, gd) {
+      L = length(s); q = ""; cur = ""; k = 0; gd = 0
       for (i = 1; i <= L; i++) {
         c = substr(s, i, 1)
         if (q != "") {
@@ -103,6 +122,14 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         }
         if (c == "'"'"'" || c == "\"") { q = c; cur = cur c; continue }
         if (c == "\\") { cur = cur c; i++; cur = cur substr(s, i, 1); continue }
+        if (c == "(") {
+          pv = (i > 1 ? substr(s, i - 1, 1) : "")
+          if (pv != "$" && pv != "<" && pv != ">") {
+            arr[++k] = cur; cur = ""; gd++; continue
+          }
+          cur = cur c; continue
+        }
+        if (c == ")" && gd > 0) { arr[++k] = cur; cur = ""; gd--; continue }
         if (c == "\n" || c == ";") { arr[++k] = cur; cur = ""; continue }
         if (c == "&") {
           nx = substr(s, i + 1, 1); pv = (i > 1 ? substr(s, i - 1, 1) : "")
@@ -135,20 +162,77 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       }
       return substr(s, j)
     }
+    # Removes the leading options of a command-taking prefix. An option NAMED in
+    # val takes a separate value word, which comes off with it (quoted values
+    # included) or the value becomes a phantom argv[0]. A bare -- ends them.
+    function skip_opts(s, val,   w) {
+      s = trim(s)
+      while (s != "") {
+        if (substr(s, 1, 1) != "-") break
+        if (match(s, /^--([ \t]|$)/)) { s = trim(substr(s, RLENGTH + 1)); break }
+        match(s, /^[^ \t]+/)
+        w = substr(s, 1, RLENGTH)
+        s = trim(substr(s, RLENGTH + 1))
+        if (index(val, " " w " ") > 0 && s != "") s = trim(consume_value(s, 1))
+      }
+      return s
+    }
+    # Drops one non-option word — the ssh host.
+    function drop_word(s) {
+      s = trim(s)
+      if (s == "") return s
+      match(s, /^[^ \t]+/)
+      return trim(substr(s, RLENGTH + 1))
+    }
+    # The command a find runs is after -exec / -execdir, never at argv[1]. A
+    # find with no -exec runs nothing, so it yields nothing: that is what keeps
+    # find . -name run.sh out of the suite class.
+    function after_exec(s) {
+      if (match(s, /(^|[ \t])-(exec|execdir|ok|okdir)([ \t]+|$)/))
+        return trim(substr(s, RSTART + RLENGTH))
+      return ""
+    }
+    # THE SUPERSET RULE (R-12, critic C-1). Everything before the real argv[0]
+    # comes off here: leading assignments, shell OPENERS that start a command
+    # without a ; && || | & separator, and command-taking PREFIXES whose own
+    # argument is the next command. One loop, so they compose — then sudo bash
+    # tests/run.sh and ( time git push ) both read through. Reading argv[0] of a
+    # segment WITHOUT this is strictly narrower than the whitespace-anchored
+    # string match bionic 1.3.1 used, which is the regression this repairs.
     function strip_leading(s,   t) {
       s = trim(s)
       for (;;) {
         t = s
         if (match(s, /^[A-Za-z_][A-Za-z0-9_]*=/)) {
           s = trim(consume_value(s, RLENGTH + 1))
-        } else if (match(s, /^(env|nohup|command|time)[ \t]+/)) {
+        } else if (match(s, /^[({})!][ \t]*/)) {
           s = trim(substr(s, RLENGTH + 1))
+        } else if (match(s, /^(then|else|elif|do|done|fi|if|while|until|env|nohup|command|exec)([ \t]+|$)/)) {
+          s = trim(substr(s, RLENGTH + 1))
+        } else if (match(s, /^time([ \t]+-p)?([ \t]+|$)/)) {
+          s = trim(substr(s, RLENGTH + 1))
+        } else if (match(s, /^nice([ \t]+(-n[ \t]*[0-9]+|-[0-9]+|--adjustment[= \t][ \t]*[0-9]+))?([ \t]+|$)/)) {
+          s = trim(substr(s, RLENGTH + 1))
+        } else if (match(s, /^(sudo|doas)([ \t]+|$)/)) {
+          s = skip_opts(trim(substr(s, RLENGTH + 1)), " -u -g -p -U -C -r -t -h -D -R ")
+        } else if (match(s, /^xargs([ \t]+|$)/)) {
+          s = skip_opts(trim(substr(s, RLENGTH + 1)), " -I -i -n -L -P -s -E -a -d --replace --max-args --max-procs --max-lines --arg-file --delimiter --eof ")
+        } else if (match(s, /^ssh([ \t]+|$)/)) {
+          s = drop_word(skip_opts(trim(substr(s, RLENGTH + 1)), " -o -p -i -l -F -L -R -D -b -c -e -m -O -Q -S -W -w -J -E -B -I "))
+        } else if (match(s, /^(find|[^ \t]*\/find)([ \t]+|$)/)) {
+          s = after_exec(s)
         } else if (match(s, /^g?timeout[ \t]+(-[^ \t]+[ \t]+)*[0-9]+[smhd]?[ \t]+/)) {
           s = trim(substr(s, RLENGTH + 1))
         }
         if (s == t) break
       }
       return s
+    }
+    # Does this segment change directory? A cd is what makes the bare basename
+    # form bash run.sh a real suite invocation two segments later.
+    function is_cd(s) {
+      s = strip_leading(s)
+      return (s ~ /^cd([ \t]|$)/)
     }
     function dequote_whole(s,   c) {
       s = trim(s); c = substr(s, 1, 1)
@@ -200,18 +284,30 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       n = argv_tok(s, a)
       if (n == 0) return "none"
       b0 = base(a[1])
-      if (b0 == "bash" || b0 == "sh" || b0 == "zsh") {
+      if (b0 == "bash" || b0 == "sh" || b0 == "zsh" || b0 == "dash" || b0 == "ksh") {
         # skip the runner s own options: `bash -x tests/run.sh` runs the same suite
         i = 2
         while (i <= n && substr(a[i], 1, 1) == "-") i++
         a1 = (i <= n ? a[i] : ""); b1 = base(a1)
         if (b1 ~ /^claude-(bootstrap|reset)\.sh$/) return "bootstrap"
         if (b1 == "test.sh" || b1 ~ /\.test\.sh$/) return "suite"
-        if (b1 == "run.sh" && index(a1, "/") > 0) return "suite"
+        # A bare `run.sh` is only a suite invocation when a cd put us in its
+        # directory — which is exactly the shape `cd <worktree>/tests && bash
+        # run.sh` takes, and the shape the path-component requirement missed
+        # (critic C-2). On its own the word says nothing, so it stays none.
+        if (b1 == "run.sh" && (index(a1, "/") > 0 || CD_SEEN)) return "suite"
         return "none"
       }
       a1 = (n >= 2 ? a[2] : ""); a2 = (n >= 3 ? a[3] : "")
       if (b0 ~ /^claude-(bootstrap|reset)\.sh$/) return "bootstrap"
+      # A SCRIPT AT ARGV[0] IS THE COMMAND (critic C-2). tests/run.sh is
+      # -rwxr-xr-x with a bash shebang, so ./tests/run.sh runs the suite exactly
+      # as `bash tests/run.sh` does; before this arm a script at argv[0] fell
+      # through every arm to none. The path component is what separates running
+      # it from naming it: `ls tests/run.sh` is argv[0] ls and stays none, and a
+      # bare `run.sh` word is not something the shell would run either.
+      if (index(a[1], "/") > 0 && (b0 == "run.sh" || b0 == "test.sh" || b0 ~ /\.test\.sh$/))
+        return "suite"
       if (b0 == "pytest") return "suite"
       if (b0 == "npm" || b0 == "pnpm" || b0 == "yarn") {
         if (a1 == "test") return "suite"
@@ -263,10 +359,14 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       }
       if (mode == "heredoc") { printf "%s", out; exit }
       k = segments(out, seg)
+      CD_SEEN = 0
       for (i = 1; i <= k; i++) {
         t = trim(seg[i])
         if (t == "") continue
         printf "%s\t%s\n", class_seg(t, 0), t
+        # Left-to-right, so a cd only licenses the basename form in the
+        # segments that FOLLOW it.
+        if (is_cd(t)) CD_SEEN = 1
       }
     }
   '
