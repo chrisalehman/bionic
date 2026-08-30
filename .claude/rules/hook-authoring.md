@@ -44,11 +44,14 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
 
 ## False-positives and merge-commit handling
 
-- **`~/.claude/hooks/protect-main.sh` false-positive on `GIT_VAR=... git commit`.** Commands
-  starting with `GIT_VAR=... git commit` trip Block 3 on main (the loop's `^GIT_` regex
-  catches the prefix, then Block 3 fires because the branch is main). Workaround: prefix with
-  `env` — `env GIT_VAR=... git commit` is matched by `^env ` which additionally requires
-  `git push` in the segment and passes.
+- **`protect-main.sh` and the evidence gate read git ARGV, not text** (bionic 1.3.2,
+  wave-01-dogfood-fixes B-3). Both source `scripts/lib/git-argv.sh`: leading `VAR=value`
+  assignments and git's global options (`-C <dir>`, `-c k=v`, `--no-pager`, …) are skipped
+  before the subcommand is read, refspec DESTINATIONS are parsed (`HEAD:refs/heads/main`,
+  `:main`, `+main`, quoted forms), and heredoc bodies and quoted strings never match. The
+  old `GIT_VAR=... git commit` false positive and its `env` workaround are gone with the
+  regexes that caused them. A hook that cannot load the library REFUSES, naming the path —
+  never silently allows; `tests/git-argv.test.sh` proves that by renaming the library away.
 
 - **Any hook inspecting HEAD's file list must use `git show -m --name-only --format= HEAD`**,
   not `git show --name-only --pretty=format: HEAD`. Without `-m`, a clean merge commit (no

@@ -1154,6 +1154,120 @@ write_plan "$h17q" "$(plan 6 "$step6_body" "$v101_matrix_pending")" > /dev/null
 expect_block "17q pending row at current 6 → block (relaxation is 5-only)" \
   "$h17q" 'git commit -m "x"' "AC-2"
 
+# --- 17r: `slice: 9` rows — evidence only Step 9 can produce --------------
+#
+# A criterion whose only evidence is a Step-9 lifecycle artifact (the close-out
+# report, continuation.md, the ADR the close-out writes) cannot be discharged
+# while the plan sits at Steps 5..8: the artifact it would cite does not exist
+# yet. Such a row declares `slice: 9` in its AC block — parsed like
+# `provenance:`, never a sixth table cell (the 7-field row pin would refuse
+# every row) — and is then exempt from TWO separate arms while current < 9:
+# the per-tier evidence keys, and the CONFIRMED/auditor wall that bites at
+# current > 5. At current: 9 the artifact exists and the row is ordinary.
+# The tag is T0-only: every other tier names evidence that exists before Step
+# 9, so `slice: 9` there is a mis-tag and blocks, naming the tier.
+
+# T0 pending row whose AC block is the tag, beside a fully discharged T3 row
+# so the rest of the matrix is valid (matrix_complete's shape, which 17f2
+# pins as an allow at current: 6).
+v9_matrix="## Verification Matrix
+
+stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T3 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T0 | pending | see AC-2 |  |
+
+AC-1:
+  tier-run: https://app.example/panel — opened the panel
+  fresh: origin A rebuilt token-9f3a; origin B cdn purged
+  cold-client: fresh incognito profile, no SW cache
+  contact: clicked open — panel closed → open
+  readback: panel.visible === true via page eval
+AC-2:
+  provenance: spec §Close-out obligations
+  slice: 9"
+
+# The same matrix with the tag replaced by an ordinary line — the control that
+# keeps every allow below non-vacuous: untagged, this row blocks at current 6.
+v9_matrix_untagged="${v9_matrix/  slice: 9/  note: written at close-out}"
+
+# The tag on a tier that has evidence before Step 9 — a mis-tag.
+v9_matrix_t1="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T1 | pending | see AC-2 |  |}"
+v9_matrix_t4="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T4 | pending | see AC-2 |  |}"
+
+# The tagged row once Step 9 has run: discharged, T0 keys present, CONFIRMED.
+v9_matrix_discharged="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T0 | discharged | see AC-2 | CONFIRMED |}"
+v9_matrix_discharged="${v9_matrix_discharged/  slice: 9/  slice: 9
+  tier-run: read .bionic/docs/record/wave-01/close-out.md
+  readback: close-out names all 9 steps and the continuation}"
+
+# Post-Verify step bodies for the 7 / 8 / 9 cases (the shapes their own
+# validators demand — 29a and 19's integrate fixtures pin these independently).
+v9_step7_body="  n/a: no architectural decision in this wave"
+v9_step8_body="  merge: merged wave/bionic-1.3.2 into main
+  worktree-removed: n/a
+  cleanup: n/a"
+v9_step9_body="  delivered: close-out report and continuation.md written"
+
+# 17r — the exemption holds at every post-Verify step before 9 (AC-6).
+h17r6=$(make_home)
+write_plan "$h17r6" "$(plan 6 "$step6_body" "$v9_matrix")" > /dev/null
+expect_allow "17r T0 pending row with slice: 9 at current 6 → allow" \
+  "$h17r6" 'git commit -m "x"'
+
+h17r7=$(make_home)
+write_plan "$h17r7" "$(plan 7 "$v9_step7_body" "$v9_matrix")" > /dev/null
+expect_allow "17r T0 pending row with slice: 9 at current 7 → allow" \
+  "$h17r7" 'git commit -m "x"'
+
+h17r8=$(make_home)
+write_plan "$h17r8" "$(plan 8 "$v9_step8_body" "$v9_matrix")" > /dev/null
+expect_allow "17r T0 pending row with slice: 9 at current 8 → allow" \
+  "$h17r8" 'git commit -m "x"'
+
+# 17r — control: the SAME row without the tag blocks at current 6, so the
+# three allows above are the tag's doing and not the fixture's.
+h17r_ctl=$(make_home)
+write_plan "$h17r_ctl" "$(plan 6 "$step6_body" "$v9_matrix_untagged")" > /dev/null
+expect_block "17r untagged T0 pending row at current 6 → block (control)" \
+  "$h17r_ctl" 'git commit -m "x"' "AC-2"
+
+# 17r — at current: 9 the artifact exists, so the row is ordinary and its
+# pending state blocks (AC-7).
+h17r9=$(make_home)
+write_plan "$h17r9" "$(plan 9 "$v9_step9_body" "$v9_matrix")" > /dev/null
+expect_block "17r slice: 9 row still pending at current 9 → block" \
+  "$h17r9" 'git commit -m "x"' "AC-2"
+
+# 17r — and discharging it the ordinary way at current: 9 passes, so the block
+# above is the row's state and not the tag becoming poison.
+h17r9d=$(make_home)
+write_plan "$h17r9d" "$(plan 9 "$v9_step9_body" "$v9_matrix_discharged")" > /dev/null
+expect_allow "17r slice: 9 row discharged + CONFIRMED at current 9 → allow" \
+  "$h17r9d" 'git commit -m "x"'
+
+# 17r — the tag on T1..T4 is a mis-tag: block, naming the tier (AC-8).
+h17rt1=$(make_home)
+write_plan "$h17rt1" "$(plan 6 "$step6_body" "$v9_matrix_t1")" > /dev/null
+# Substring is the tag, not the tier: today's missing-key refusal for this row
+# ALSO contains "T1", so a tier-only assertion would pass for the wrong reason.
+# The current-5 case below is where "names the tier" discriminates.
+expect_block "17r slice: 9 on a T1 row at current 6 → block naming the tier" \
+  "$h17rt1" 'git commit -m "x"' "slice: 9"
+
+h17rt4=$(make_home)
+write_plan "$h17rt4" "$(plan 6 "$step6_body" "$v9_matrix_t4")" > /dev/null
+expect_block "17r slice: 9 on a T4 row at current 6 → block naming the tier" \
+  "$h17rt4" 'git commit -m "x"' "slice: 9"
+
+# 17r — the mis-tag is a shape error, so it fires at the Verify gate too,
+# where a pending row is otherwise exempt from everything.
+h17rt5=$(make_home)
+write_plan "$h17rt5" "$(plan 5 "$step5_base" "$v9_matrix_t1")" > /dev/null
+expect_block "17r slice: 9 on a T1 row at current 5 → block naming the tier" \
+  "$h17rt5" 'git commit -m "x"' "T1"
 # ============================================================
 # Section 18: matrix parser — section scoping + fenced-code skip
 # ============================================================
@@ -4446,7 +4560,19 @@ write_plan "$h30k" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 CONFIRMED "$GOOD
 #
 # The doctored copy lives in a temp dir and the real hook is never touched.
 h30g_dir=$(mktemp -d); cleanup_dirs+=("$h30g_dir")
-DOCTORED_HOOK="$h30g_dir/loose-gate.sh"
+# Since 1.3.2 the gate reads commands through scripts/lib/git-argv.sh and
+# REFUSES when it cannot load it (spec AC-12, Chris D1). A doctored copy alone
+# in a bare temp dir therefore refuses everything for the wrong reason, so the
+# copy gets the shipped layout around it: hooks/ beside scripts/lib/.
+mkdir -p "$h30g_dir/hooks" "$h30g_dir/scripts/lib"
+for _h30g_cand in "${BIONIC_HOOKS_DIR}/../scripts/lib/git-argv.sh" \
+                  "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/git-argv.sh"; do
+  if [ -r "$_h30g_cand" ]; then
+    cp "$_h30g_cand" "$h30g_dir/scripts/lib/git-argv.sh"
+    break
+  fi
+done
+DOCTORED_HOOK="$h30g_dir/hooks/loose-gate.sh"
 sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \
   "$HOOK" > "$DOCTORED_HOOK"
 
@@ -4470,6 +4596,357 @@ HOOK="$_real_hook"
 # Restore-proof: the real hook still refuses the impostor after the detour.
 expect_block "30g meta: the real hook still refuses the impostor after the mutation proof" \
   "$h30b" 'git commit -m "x"' "CONFIRMED"
+
+# ============================================================
+# Section 31: a refusal on a call that also writes the plan (B-6)
+# ============================================================
+#
+# The gate reads the plan off disk when the CALL starts. So a single Bash call
+# that edits the plan and then commits is judged against the PRE-EDIT plan: the
+# fix the agent just wrote is invisible, and the refusal reads as though it had
+# never been made. The observed reflex is to re-run the same combined call. When
+# the refused command's text names the plan, the refusal now says so.
+
+echo ""
+echo "=== Section 31: refusal names the edit-then-commit split ==="
+
+# 31a — a python3 heredoc writing the plan's absolute path, then a commit,
+# refused by the matrix arm → the refusal carries the split line.
+h31a=$(make_home)
+p31a=$(write_plan "$h31a" "$(plan 6 "$step6_body" "$v101_matrix_pending")")
+cmd31a=$(printf 'python3 - <<%s\nopen("%s","a").write("\\nAC-2:\\n  tier-run: x\\n")\nEOF\ngit commit -m "discharge AC-2"' "'EOF'" "$p31a")
+expect_block "31a refusal on a call that also writes the plan → names the split" \
+  "$h31a" "$cmd31a" "this command also writes the plan"
+
+# 31a — the same refusal still names the row it refused (the note is an extra
+# line, not a replacement).
+expect_block "31a the split line does not displace the original refusal" \
+  "$h31a" "$cmd31a" "AC-2"
+
+# 31b — the project-relative spelling of the same path (what an agent actually
+# types) is matched too.
+h31b=$(make_home)
+write_plan "$h31b" "$(plan 6 "$step6_body" "$v101_matrix_pending")" > /dev/null
+expect_block "31b relative plan path in the command → names the split" \
+  "$h31b" 'python3 -c "open('"'"'.bionic/docs/plans/active.md'"'"',\"a\")" && git commit -m "x"' \
+  "this command also writes the plan"
+
+# 31c — a refused commit that does NOT name the plan gets the ordinary 3-line
+# refusal and no split line. Same fixture and same extractor as 31a, so this
+# pins the note's scope rather than asserting an empty world.
+TOTAL=$((TOTAL + 1))
+run_hook "$h31a" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] \
+   && echo "$HOOK_STDERR" | grep -q "AC-2" \
+   && ! echo "$HOOK_STDERR" | grep -q "also writes the plan"; then
+  echo "PASS: 31c plain commit refusal carries no split line"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected a block naming AC-2 with NO split line): 31c"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# 31d — the note rides on a refusal, never on its own: a command that names the
+# plan but has nothing to refuse is still allowed silently.
+h31d=$(make_home)
+p31d=$(write_plan "$h31d" "$(plan 6 "$step6_body" "$matrix_complete")")
+expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent" \
+  "$h31d" "python3 -c \"open('$p31d','a')\" && git commit -m \"x\""
+
+# ============================================================
+# Section 32: the auditor wall is rigor-keyed (B-10 / R-11)
+# ============================================================
+#
+# SKILL.md's rigor table says `tested` skips BOTH independent assurance roles
+# — "Self-review only." The gate read the matrix's auditor column
+# unconditionally, so a `tested` run met a CONFIRMED wall for a verdict its own
+# rigor says nobody was ever sent to write. B-10's repro: a bugfix · tested ·
+# task run refused at `current: 9` on "matrix row 'AC-1' auditor verdict is
+# 'empty', not CONFIRMED".
+#
+# The rule: at `tested` the matrix's auditor column is not read (any value —
+# empty included — passes the post-Verify CONFIRMED arm at every step 6..9) and
+# the Step-5 `auditor:` pointer is not demanded once the rows are discharged.
+# At `peer-reviewed` and `audited` both walls are exactly as they were. An
+# unknown or missing frontmatter `rigor:` takes the STRICT reading — fail
+# closed, since a plan that does not say what rigor it runs at has not bought
+# the relaxation.
+#
+# The task-ledger side (apply_rigor_lanes) was already rigor-keyed; 32f/32k pin
+# it as B-10's mirror so the two surfaces cannot drift apart.
+
+echo ""
+echo "=== Section 32: the auditor wall is rigor-keyed ==="
+
+# A wave plan at a caller-chosen frontmatter rigor. Same shape as
+# matrix_frontmatter (walk: exempt, deploy_target: none, no multi_agent — so the
+# walk arm and the dispatch ledger stay out of the way), with `rigor` as the one
+# variable. Pass an empty string for $1 to omit the key entirely.
+plan_rigor() {  # $1 rigor (empty = key absent)  $2 current  $3 step body  $4 matrix
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\n'
+  printf -- 'canonical_sdlc_version: 14\n'
+  printf -- 'intent: build\n'
+  [ -n "$1" ] && printf -- 'rigor: %s\n' "$1"
+  printf -- 'scale: wave\n'
+  printf -- 'deploy_target: none\n'
+  printf -- 'use_worktree: false\n'
+  printf -- 'has_ui: true\n'
+  printf -- 'walk: exempt\n'
+  printf -- '---\n'
+  printf -- '## SDLC State\ncurrent: %s\nStep %s:\n%s\n\n%s\n' "$2" "$2" "$3" "$4"
+}
+
+# Every row discharged, every per-tier key present, EVERY AUDITOR CELL EMPTY.
+# The only thing standing between this matrix and a clean commit is the
+# CONFIRMED arm, so each verdict below is that arm's doing.
+m32_empty_aud="## Verification Matrix
+
+stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 |  |
+| AC-2 | T1 | discharged | see AC-2 |  |
+
+AC-1:
+  tier-run: bash tests/canonical-sdlc-evidence-gate.test.sh
+  readback: 120/120 asserted
+AC-2:
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted"
+
+# The same matrix carrying a STANDING REFUTED verdict. At tested the column is
+# not read at all, so this passes too — the relaxation is "the column is not a
+# gate", not "an empty cell is tolerated".
+m32_refuted="${m32_empty_aud/| AC-1 | T1 | discharged | see AC-1 |  |/| AC-1 | T1 | discharged | see AC-1 | REFUTED |}"
+
+# The same matrix with AC-2's `readback:` key removed. The rest of the matrix
+# contract is untouched by B-10, so this must still block at tested — the
+# discrimination control for every 32a..32d allow.
+m32_missing_key="${m32_empty_aud/  readback: 332\/332 asserted/  fixture-fidelity: n\/a}"
+
+# Step-5 tests floor with NO `auditor:` pointer.
+step5_noaud="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5"
+
+# ---- AC-26: at `tested` the wall is not there ------------------------------
+
+# 32a..32d — the post-Verify CONFIRMED arm is a prefix contract at 6, 7, 8 and
+# 9 (dispatch()); B-10's own repro was at 9, so all four steps are pinned. The
+# 7/8/9 step bodies are Section 17r's, which their own validators pin already.
+h32a=$(make_home)
+write_plan "$h32a" "$(plan_rigor tested 6 "$step6_body" "$m32_empty_aud")" > /dev/null
+expect_allow "32a rigor tested, rows discharged, auditor cells empty, current 6 → allow" \
+  "$h32a" 'git commit -m "x"'
+
+h32b=$(make_home)
+write_plan "$h32b" "$(plan_rigor tested 7 "$v9_step7_body" "$m32_empty_aud")" > /dev/null
+expect_allow "32b same at current 7 → allow" "$h32b" 'git commit -m "x"'
+
+h32c=$(make_home)
+write_plan "$h32c" "$(plan_rigor tested 8 "$v9_step8_body" "$m32_empty_aud")" > /dev/null
+expect_allow "32c same at current 8 → allow" "$h32c" 'git commit -m "x"'
+
+h32d=$(make_home)
+write_plan "$h32d" "$(plan_rigor tested 9 "$v9_step9_body" "$m32_empty_aud")" > /dev/null
+expect_allow "32d same at current 9 → allow (B-10's own repro step)" \
+  "$h32d" 'git commit -m "x"'
+
+# 32e — the Step-5 `auditor:` pointer is the same wall one step earlier: it is
+# demanded once no row is pending. At tested there is no auditor to point at.
+h32e=$(make_home)
+write_plan "$h32e" "$(plan_rigor tested 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
+expect_allow "32e rigor tested, all rows discharged, no Step-5 auditor: pointer → allow" \
+  "$h32e" 'git commit -m "x"'
+
+# 32f — the task-ledger mirror (AC-26, second half): a `done` row at tested
+# whose evidence names no auditor verdict commits.
+v32f_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: reproduced and fixed the boundary case
+- T2: fixed enum check, bash suite 12/12"
+h32f=$(make_home)
+write_plan "$h32f" "$(task_plan_rigor tested "$v32f_body")" > /dev/null
+expect_allow "32f task scale: done row at tested with no auditor verdict → allow" \
+  "$h32f" 'git commit -m "x"'
+
+# 32n — the column is not READ at tested, not merely tolerated when empty: a
+# standing REFUTED verdict passes too. Pinned deliberately (it is the sharpest
+# statement of the rule, and the case a narrower fix would get wrong).
+h32n=$(make_home)
+write_plan "$h32n" "$(plan_rigor tested 6 "$step6_body" "$m32_refuted")" > /dev/null
+expect_allow "32n rigor tested, a REFUTED auditor cell at current 6 → allow (column unread)" \
+  "$h32n" 'git commit -m "x"'
+
+# 32o — discrimination control: everything ELSE the matrix demands still bites
+# at tested. AC-2 (T1) is missing its `readback:` key on the same fixture family
+# and at the same step, so 32a..32d are the auditor arm standing down and not
+# the matrix going quiet.
+h32o=$(make_home)
+write_plan "$h32o" "$(plan_rigor tested 6 "$step6_body" "$m32_missing_key")" > /dev/null
+expect_block "32o control: tested plan missing a per-tier key still blocks at current 6" \
+  "$h32o" 'git commit -m "x"' "readback"
+
+# ---- AC-27: at peer-reviewed and audited the wall is unchanged -------------
+
+h32g=$(make_home)
+write_plan "$h32g" "$(plan_rigor audited 6 "$step6_body" "$m32_empty_aud")" > /dev/null
+expect_block "32g the same fixture at rigor audited, current 6 → block (CONFIRMED)" \
+  "$h32g" 'git commit -m "x"' "auditor verdict is 'empty', not CONFIRMED"
+
+h32h=$(make_home)
+write_plan "$h32h" "$(plan_rigor peer-reviewed 6 "$step6_body" "$m32_empty_aud")" > /dev/null
+expect_block "32h the same fixture at rigor peer-reviewed, current 6 → block (CONFIRMED)" \
+  "$h32h" 'git commit -m "x"' "auditor verdict is 'empty', not CONFIRMED"
+
+# 32i/32j — the Step-5 pointer half of AC-27.
+h32i=$(make_home)
+write_plan "$h32i" "$(plan_rigor audited 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
+expect_block "32i rigor audited, discharged rows, no Step-5 auditor: pointer → block" \
+  "$h32i" 'git commit -m "x"' "requires 'auditor:"
+
+h32j=$(make_home)
+write_plan "$h32j" "$(plan_rigor peer-reviewed 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
+expect_block "32j rigor peer-reviewed, discharged rows, no Step-5 auditor: pointer → block" \
+  "$h32j" 'git commit -m "x"' "requires 'auditor:"
+
+# 32k — a row whose OWN rigor cell RAISES it above the plan's frontmatter
+# follows the row's rigor (the floor model, slice 4/8): a tested plan, one
+# `done` row raised to peer-reviewed, proof-shaped evidence naming no auditor →
+# that row still demands the verdict. The relaxation is keyed to effective
+# rigor, never to the frontmatter alone.
+v32k_body="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | peer-reviewed | fix the frontmatter parser | done |
+| T2 | bugfix | tested | fix enum | active |
+
+## SDLC State
+
+scale: task
+current: T2
+
+- T1: bash test.sh 12/12 green
+- T2: fixed enum check, bash suite 12/12"
+h32k=$(make_home)
+write_plan "$h32k" "$(task_plan_rigor tested "$v32k_body")" > /dev/null
+expect_block "32k task scale: tested plan, one row raised to peer-reviewed, no auditor → block" \
+  "$h32k" 'git commit -m "x"' "no 'auditor' verdict"
+
+# ---- fail-closed on an unknown or missing rigor ----------------------------
+
+# 32l — no `rigor:` key at all. A plan that never says what rigor it runs at
+# has not bought the relaxation, so the strict reading holds.
+h32l=$(make_home)
+write_plan "$h32l" "$(plan_rigor "" 6 "$step6_body" "$m32_empty_aud")" > /dev/null
+expect_block "32l frontmatter with NO rigor key at current 6 → block (fail closed)" \
+  "$h32l" 'git commit -m "x"' "not CONFIRMED"
+
+# 32m — an off-enum value reads the same way; a typo must not become a bypass
+# (same rationale as walk_mode's off-enum arm).
+h32m=$(make_home)
+write_plan "$h32m" "$(plan_rigor reviewed 6 "$step6_body" "$m32_empty_aud")" > /dev/null
+expect_block "32m off-enum rigor 'reviewed' at current 6 → block (a typo is not a bypass)" \
+  "$h32m" 'git commit -m "x"' "not CONFIRMED"
+
+# 32m2 — and the Step-5 pointer half fails closed too.
+h32m2=$(make_home)
+write_plan "$h32m2" "$(plan_rigor "" 5 "$step5_noaud" "$m32_empty_aud")" > /dev/null
+expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fail closed)" \
+  "$h32m2" 'git commit -m "x"' "requires 'auditor:"
+
+# ============================================================
+# Section 33: a waiver outranks the `slice: 9` tier refusal (review-a C-2)
+# ============================================================
+#
+# The `slice: 9` tag (Section 17r) is T0-only: on any other tier it is a
+# mis-tag, and the refusal fires at every step. That check sat ABOVE the
+# `waiver:` exemption in the row loop, so a row an author had WAIVED — the
+# criterion let go, its evidence contract dissolved — still met the tier
+# refusal, and the only way past it was to retier a row nobody intends to
+# discharge. A waiver outranks every other per-row demand in this loop (the
+# per-tier keys, the CONFIRMED wall); it outranks this one too.
+#
+# The waiver test is the loop's existing one — a `waiver:` token in the
+# evidence cell or a `waiver:` line in the AC block — so "waived" means the
+# same thing here as it does for the per-tier keys three lines below.
+
+echo ""
+echo "=== Section 33: a waiver outranks the slice: 9 tier refusal ==="
+
+# A T1 row (not T0, so the tag is a mis-tag) carrying `slice: 9`, WAIVED via
+# the evidence cell. AC-1 is an ordinary discharged row so the matrix is
+# otherwise complete and each verdict below is the waived row's doing.
+m33_waived="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |
+
+AC-1:
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted
+AC-2:
+  slice: 9"
+
+# The same row with the waiver taken away: pending, no token anywhere.
+m33_unwaived="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | pending | see AC-2 |  |}"
+
+# The waiver in the AC BLOCK rather than the evidence cell — the loop's other
+# spelling of the same fact.
+m33_waived_block="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | waived | dropped, see block | waived |}"
+m33_waived_block="${m33_waived_block/  slice: 9/  slice: 9
+  waiver: dana 2026-08-30 criterion dropped}"
+
+# 33a — waived T1 row carrying slice: 9 → commits.
+h33a=$(make_home)
+write_plan "$h33a" "$(plan 6 "$step6_body" "$m33_waived")" > /dev/null
+expect_allow "33a waived T1 row carrying 'slice: 9' at current 6 → allow (waiver outranks)" \
+  "$h33a" 'git commit -m "x"'
+
+# 33b — the same row UNWAIVED still blocks on the mis-tag, so 33a is the
+# waiver's doing and not the tier refusal having been deleted.
+h33b=$(make_home)
+write_plan "$h33b" "$(plan 6 "$step6_body" "$m33_unwaived")" > /dev/null
+expect_block "33b control: the same T1 row unwaived still blocks on the mis-tag" \
+  "$h33b" 'git commit -m "x"' "only a T0 row defers its evidence to the close-out"
+
+# 33c — the block-line spelling of the waiver reads the same way.
+h33c=$(make_home)
+write_plan "$h33c" "$(plan 6 "$step6_body" "$m33_waived_block")" > /dev/null
+expect_allow "33c the waiver as an AC-block line (not the evidence cell) → allow too" \
+  "$h33c" 'git commit -m "x"'
+
+# 33d — scope control: the waiver exempts the row from the TIER refusal, not
+# from the loop's unconditional arms. The same waived row with a circular
+# `provenance: implementation` still blocks — the provenance arm sits above
+# both, deliberately, and this fix did not move it.
+m33_waived_prov="${m33_waived/AC-2:
+  slice: 9/AC-2:
+  slice: 9
+  provenance: implementation}"
+h33d=$(make_home)
+write_plan "$h33d" "$(plan 6 "$step6_body" "$m33_waived_prov")" > /dev/null
+expect_block "33d control: a waived row still meets the provenance arm above it" \
+  "$h33d" 'git commit -m "x"' "provenance: implementation"
 
 # ============================================================
 # Summary

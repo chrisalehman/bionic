@@ -250,14 +250,18 @@ observe_nosid() {  # <sid> <transcript> <repo> <typed-target> [args…]
 # written before that slice passes none of them and gets the identical row it got
 # before — an empty `deliverable=` is what the writer emits for a dispatch that
 # declared nothing.
-roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status] [deliverable] [waiver] [teammate-id]
+# `adopted_from=` is the tenth optional argument for the same reason the contract fields
+# are the seventh through ninth: hooks/session-poker.sh's `adopt` writes it onto a row in
+# the ADOPTING session's roster, and a suite that could only plant rows without it could not
+# express a taken-over agent at all — which is exactly the state §14 is about.
+roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status] [deliverable] [waiver] [teammate-id] [adopted-from]
   local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
-  local deliv="${7:-}" waiver="${8:-}" tmid="${9:-}"
+  local deliv="${7:-}" waiver="${8:-}" tmid="${9:-}" afrom="${10:-}"
   local f="$repo/.bionic/tmp/roster-$sid.state"
   mkdir -p "$repo/.bionic/tmp"
   [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=|progress=%s|absent=|waiver=%s|teammate_id=%s|tool_use_id=toolu_01FIXTURE\n' \
-    "$status" "$sid" "$name" "$aid" "$deliv" "$prog" "$waiver" "$tmid" >> "$f"
+  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=|progress=%s|absent=|waiver=%s|teammate_id=%s|adopted_from=%s|tool_use_id=toolu_01FIXTURE\n' \
+    "$status" "$sid" "$name" "$aid" "$deliv" "$prog" "$waiver" "$tmid" "$afrom" >> "$f"
   return 0
 }
 
@@ -1274,6 +1278,126 @@ plant_agent "$I_SUB_B" "aforeigner-33333333333" "foreigner3"
 observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-33333333333"
 run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "foreigner3@session-deadbeef")"
 expect_status "a name@session naming the WRONG session is not an identity: REFUSED" 2 "$GUARD_ST"
+
+# ============================================================
+echo ""
+echo "=== Section 14: an ADOPTED agent is stoppable by the session that took it over ==="
+# ============================================================
+#
+# THE DEFECT, from the field (epic-20 W1, 2026-08-30). After a `/clear`+resume the agents a
+# predecessor session launched are still running, and `session-poker.sh adopt` reads their
+# ids back off the predecessor's roster — but every stop of one was refused as
+# "unresolved: no agent in THIS session's metadata answers to it". Resolution here is
+# `${transcript}/subagents` and nothing else, so a predecessor's agent — filed under the
+# PREDECESSOR's directory — was MATCH_COUNT=0 for every spelling, bare name, addressing form
+# and transcript id alike. The refusal fired before the roster was read at all, which is why
+# writing an adopted row is necessary and not sufficient: the ownership clause it feeds is
+# downstream of a resolution that never happened.
+#
+# The widening is keyed on the ADOPTED ROW, never on a project-wide walk: this session may
+# resolve targets in exactly those sessions it has taken a row from, and in no others. The
+# discriminator at the end of this section is what proves that distinction is real.
+
+IFS='|' read -r AD_REPO AD_TR AD_SUB <<< "$(make_world adoptstop yes)"
+AD_TR_B="${AD_TR%/*}/$SID_B.jsonl"
+AD_SUB_B="${AD_TR_B%.jsonl}/subagents"
+
+# The adopted agent: filed under the PREDECESSOR ($SID_B), rostered by the ADOPTING session
+# ($SID_A) with the row `adopt` writes — `identified`, the transcript-form id, the
+# addressing form built for THIS session, and the provenance.
+plant_agent "$AD_SUB_B" "aadoptee-1111111111111111" "adoptee"
+roster_row "$AD_REPO" "$SID_A" "adoptee" "aadoptee-1111111111111111" "" "identified" "" "" \
+  "adoptee@session-${SID_A:0:8}" "$SID_B"
+
+# The payload is the ADOPTING session's own: its session key and its own transcript. That
+# is the configuration the field hit, and the one §13 does not cover — §13 hands the gate
+# the PREDECESSOR's transcript, which makes resolution succeed for a reason a resumed
+# session cannot reproduce.
+printf 'DEBUG-OBS>>%s<<\n' "$( cd "$AD_REPO" && CLAUDE_CONFIG_DIR="${AD_TR%/projects/*}" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" "aadoptee-1111111111111111" 2>&1 | tail -20 )"
+observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-1111111111111111"
+printf 'DEBUG-STATE>>%s<<\n' "$(cat "$AD_REPO/$STATE_REL" 2>&1)"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee@session-${SID_A:0:8}")"
+printf 'DEBUG-ADOPT-ERR>>%s<<\n' "$GUARD_ERR"
+expect_status "an observed ADOPTED agent is stoppable at the address adopt prints" 0 "$GUARD_ST"
+expect_absent "…and the unresolved refusal is gone" \
+  "no agent in THIS session's metadata" "$GUARD_ERR"
+
+# THE CEREMONY IS UNCHANGED for an adopted row: what the fix restores is resolution, not a
+# free pass. A second adopted agent, never looked at, is refused — and refused for the
+# RIGHT reason, which is the half a status assertion alone cannot tell apart from the
+# defect (both exit 2).
+plant_agent "$AD_SUB_B" "aadoptee-2222222222222222" "adoptee2"
+roster_row "$AD_REPO" "$SID_A" "adoptee2" "aadoptee-2222222222222222" "" "identified" "" "" \
+  "adoptee2@session-${SID_A:0:8}" "$SID_B"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee2@session-${SID_A:0:8}")"
+expect_status "an UNOBSERVED adopted agent is still refused" 2 "$GUARD_ST"
+expect_contains "…and the refusal is the observation demand, not the unresolved one" \
+  "No observation" "$GUARD_ERR"
+expect_absent "…the unresolved refusal does not fire for a rostered adopted row" \
+  "no agent in THIS session's metadata" "$GUARD_ERR"
+
+# The transcript-form id resolves through the widened scan too — this adds a way IN to
+# resolution, it does not swap one address form for another.
+observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-2222222222222222"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-2222222222222222")"
+expect_status "the transcript-form id of an adopted agent resolves as well" 0 "$GUARD_ST"
+
+# BOTH SPELLINGS OF THE SAME ROW (follow-up, 2026-08-30). The captured payload says the
+# addressing form carries the LAUNCHING session's eight characters — for an adopted agent
+# that is the PREDECESSOR — while the row this session wrote carries its own. Which one the
+# platform keys on for an agent it handed to a successor is unknown, and this gate does not
+# need to know: BOTH resolve to the same row, take the same fresh-observation requirement,
+# and are permitted or refused together. What establishes ownership here is the id on this
+# session's roster, and neither spelling changes which id the target resolves to.
+plant_agent "$AD_SUB_B" "aadoptee-5555555555555555" "adoptee3"
+roster_row "$AD_REPO" "$SID_A" "adoptee3" "aadoptee-5555555555555555" "" "identified" "" "" \
+  "adoptee3@session-${SID_A:0:8}" "$SID_B"
+
+# Unobserved first, in the PREDECESSOR's spelling: the ceremony is the same one, so the
+# refusal is the observation demand and never the unresolved refusal.
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee3@session-${SID_B:0:8}")"
+expect_status "the predecessor's spelling of an adopted row is refused unobserved, like the other" \
+  2 "$GUARD_ST"
+expect_contains "…with the observation demand" "No observation" "$GUARD_ERR"
+expect_absent "…never the unresolved refusal" \
+  "no agent in THIS session's metadata" "$GUARD_ERR"
+
+# …and observed, it permits — the same verdict the adopting session's spelling gets.
+observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-5555555555555555"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee3@session-${SID_B:0:8}")"
+expect_status "an observed adopted agent stops under the PREDECESSOR's spelling too" 0 "$GUARD_ST"
+
+# The pair, proven to be one row rather than two lucky paths: the same agent, observed once
+# more, stops under the ADOPTING session's spelling. Two spellings, one contract.
+observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-5555555555555555"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee3@session-${SID_A:0:8}")"
+expect_status "…and under the ADOPTING session's spelling, identically" 0 "$GUARD_ST"
+
+# WHAT THE WIDENING IS AND IS NOT. It restores RESOLUTION for the sessions this roster
+# names — a directory at a time, since that is the grain a row can name — and it grants no
+# ownership whatever. An agent sitting in the adopted directory that this session holds NO
+# row for resolves and is then refused by the rule that has always refused it: its metadata
+# is filed under another session and no row of ours carries its id.
+plant_agent "$AD_SUB_B" "aneveradopted-333333333333" "neveradopted"
+observe "$SID_A" "$AD_TR" "$AD_REPO" "aneveradopted-333333333333"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "neveradopted@session-${SID_A:0:8}")"
+expect_status "an unadopted agent in the adopted directory: still REFUSED" 2 "$GUARD_ST"
+expect_contains "…as FOREIGN, by the ownership rule rather than by failing to resolve" \
+  "was not launched by this session" "$GUARD_ERR"
+
+# THE DISCRIMINATOR. A THIRD session, adopted from by nobody, stays exactly as invisible as
+# it was: the scan widened by the sessions the roster names and not to the project. Without
+# this the passes above would be equally green under a blind project-wide walk — which is
+# the name-oracle slice 4/9 removed, and the one thing this fix must not reintroduce.
+AD_SID_C="cccccccc-3333-4444-5555-666666666666"
+AD_SUB_C="${AD_TR%/*}/$AD_SID_C/subagents"
+mkdir -p "$AD_SUB_C"
+: > "${AD_TR%/*}/$AD_SID_C.jsonl"
+plant_agent "$AD_SUB_C" "astranger-4444444444444444" "stranger"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "stranger@session-${SID_A:0:8}")"
+expect_status "an agent in a session this roster never adopted from: REFUSED" 2 "$GUARD_ST"
+expect_contains "…with the unresolved refusal, unchanged" \
+  "no agent in THIS session's metadata" "$GUARD_ERR"
 
 # ============================================================
 echo ""
