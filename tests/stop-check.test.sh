@@ -867,6 +867,53 @@ expect_contains "C-2 regression: an unconfirmed row's own agent is still OURS by
 expect_contains "C-2 regression: the contract still comes from the unconfirmed row" \
   "deliverable_source=roster" "$M10D"
 
+# --- (d) OURS BY ADOPTION: a predecessor's agent this session took over ---
+#
+# WHAT `/clear`+resume LOSES is the conversation, never the agent: it is the same process,
+# still working, still filed under the session that launched it. `session-poker.sh adopt`
+# reads that row back and files an `identified` row carrying `adopted_from=` on THIS
+# session's roster — the successor saying, on disk, that the contract is now its own.
+#
+# The by-id clause above already answers OURS for such a row, and that is the behaviour
+# this pins first. What it must NOT do is answer it MUTELY: an adopted agent is ours by a
+# different route than "we launched it", and an operator reading OURS about an agent
+# sitting in another session's directory needs the reason on the same line — the provenance
+# is what tells them which session's transcript the observe address will name.
+ADOPTED10="10101010-0000-0000-0000-000000000003"
+make_agent "$H10" "$S10" "$ADOPTED10" "aadoptee-3030303030303030" "adoptee" "still working" >/dev/null
+printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-3030303030303030|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=adopted|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=|teammate_id=adoptee@session-%s|adopted_from=%s\n' \
+  "$OWN10" "${OWN10:0:8}" "$ADOPTED10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+
+OUT10F=$(run_check_as "$OWN10" "$H10" "$R10" "adoptee@session-${OWN10:0:8}")
+M10F=$(printf '%s\n' "$OUT10F" | grep '^stop-check-observation/')
+expect_contains "an ADOPTED row makes a predecessor's agent OURS" \
+  "Classification: OURS" "$OUT10F"
+expect_contains "…and the reason names the adoption, not a launch we never made" \
+  "adopted_from=$ADOPTED10" "$OUT10F"
+expect_contains "…while the machine line still reports it classification=ours" \
+  "|classification=ours|" "$M10F"
+
+# BOTH SPELLINGS, ONE ROW (follow-up, 2026-08-30). The addressing form the platform hands
+# back carries the LAUNCHING session's eight characters — the PREDECESSOR's, for an adopted
+# agent — while the row this session wrote carries its own. This command resolves on the
+# base name and establishes ownership from the id, so neither spelling changes its answer;
+# pinned here because a reader who only saw the assertions above could reasonably conclude
+# the suffix was load-bearing, and an operator who types the other one must not be told a
+# different story about the same agent.
+OUT10G=$(run_check_as "$OWN10" "$H10" "$R10" "adoptee@session-${ADOPTED10:0:8}")
+expect_contains "the PREDECESSOR's spelling of an adopted row is OURS too" \
+  "Classification: OURS" "$OUT10G"
+expect_contains "…naming the same session it was adopted from" \
+  "adopted_from=$ADOPTED10" "$OUT10G"
+expect_contains "…and resolving to the same agent id" \
+  "aadoptee-3030303030303030" "$OUT10G"
+
+# THE PAIRED NEGATIVE, without which the two assertions above pass over a fixture that
+# would say OURS for any reason at all: the same by-id ownership with NO adoption on the
+# row reports OURS and says nothing about a provenance it does not have.
+expect_absent "a row that was never adopted claims no adoption" \
+  "adopted_from=" "$(run_check_as "$OWN10" "$H10" "$R10" "id-target-2")"
+
 # ============================================================
 echo ""
 echo "=== Section 11: one logical agent is not an ambiguity (epic-16 w2 S3, field 2026-08-11) ==="

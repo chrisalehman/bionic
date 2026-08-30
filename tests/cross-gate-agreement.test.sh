@@ -2616,10 +2616,15 @@ HOOKS_JSON_ROWS=$(jq -r '
 # the guarded form is PRESENT) would still pass beside it. The landing gate joined
 # them when teammates got their landing verdict: its Stop arm stays skill-scoped, and
 # only the SubagentStop arm needs the channel that reaches an agent context.
+# background-suite-guard.sh joined them at bionic 1.3.2 (B-9): it refuses a subagent's
+# BACKGROUNDED suite, so like the other four it is meaningless on the main thread and
+# ruinous if it fires in every session on the machine. Added here by review-b B-2, which
+# measured the gap by mutating hooks.json to register it UNGUARDED and watching this
+# suite stay 415/415.
 L2_UNGUARDED=$(printf '%s\n' "$HOOKS_JSON_ROWS" \
-  | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh|landing-gate\.sh' \
+  | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh|landing-gate\.sh|background-suite-guard\.sh' \
   | /usr/bin/grep -v 'agent-context-guard\.sh')
-expect_eq "…and the three walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
+expect_eq "…and the four walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
 # The landing gate is the one wall registered on TWO events across the two channels, so
 # its always-on entry must not drift onto the event the skill channel already owns: a
 # second Stop registration would sweep twice per turn and journal two markers.
@@ -2723,6 +2728,13 @@ expect_contains "…and on Edit, behind the guard" \
   "$HOOKS_JSON_ROWS"
 expect_contains "…and the LANDING verdict on SubagentStop, behind the guard, with no matcher" \
   'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|' \
+  "$HOOKS_JSON_ROWS"
+# The FIFTH guarded entry (bionic 1.3.2, B-9): the backgrounded-suite wall on Bash. It
+# has no skill-channel twin by design — like SubagentStop it only means anything inside
+# an agent context, so the guarded always-on entry is the whole of its coverage, and the
+# pairing loop below deliberately does not include it.
+expect_contains "…and the BACKGROUNDED-SUITE wall on Bash, behind the guard" \
+  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/background-suite-guard.sh|' \
   "$HOOKS_JSON_ROWS"
 
 # The two channels cover the SAME three events: for each guarded always-on entry there is
@@ -3817,6 +3829,254 @@ Q_MUT_R="$( ( . "$Q_MUT" >/dev/null 2>&1; _patrol_scan "$Q_C1" ) 2>/dev/null \
             | awk -F'\t' '$1=="REFUSED"{print $2+0}' )"
 expect_eq "…and the truncating copy misses the late marker, so the pair splits (§Q discriminates)" \
   "0" "$Q_MUT_R"
+
+# ============================================================
+echo ""
+echo "=== Section R — the ADOPTED address: one construction, three sites ==="
+# ============================================================
+#
+# `<name>@session-<id8>` is the only spelling the platform's stop primitive takes for a
+# teammate (capture record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9),
+# and after epic-20 W1 three scripts build or accept it: hooks/stop-guard.sh constructs it
+# for its refusals and accepts it as an identity, hooks/stop-check.sh prints it beside every
+# ambiguous candidate, and hooks/session-poker.sh's `adopt` prints it as the stop address
+# for an agent this session has taken over. The field defect was exactly a disagreement of
+# this kind — adopt printed the TRANSCRIPT form, which the platform rejects — so what is
+# pinned here is not that three files contain a string but that the string ONE of them
+# prints is the string the other two answer to, over one fixture world.
+
+RREPO_AD=$(new_repo "adopted-address")
+RSLUG_AD=$(printf '%s' "$RREPO_AD" | sed 's/[^a-zA-Z0-9]/-/g')
+RPROJ_AD="$CLAUDE_CONFIG_DIR/projects/$RSLUG_AD"
+RSUB_AD="$RPROJ_AD/$SID_A/subagents"
+mkdir -p "$RSUB_AD" "$RPROJ_AD/$SID_B/subagents" "$RREPO_AD/.bionic/tmp"
+printf '{}\n' > "$RPROJ_AD/$SID_A.jsonl"
+printf '{}\n' > "$RPROJ_AD/$SID_B.jsonl"
+plant "$RSUB_AD" "aadoptee-4444444444444444" "adoptee"
+write_plan "$RREPO_AD/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+
+# THE PREDECESSOR'S ROW, as hooks/execution-recorder.sh left it when that session died:
+# `identified`, the transcript-form id, a contract that never landed.
+printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-4444444444444444|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lands.md|source=declared|duration=|progress=|claims=|cadence=10 minutes|absent=|waiver=|tool_use_id=toolu_01FIXTURE\n' \
+  "$SID_A" >> "$RREPO_AD/.bionic/tmp/roster-$SID_A.state"
+
+# SITE 1 — the poker prints the address, and it is the successor session that is named.
+R_AD_OUT=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SPO" adopt 2>&1 )
+# The FIRST address on the line. adopt prints the alternate spelling beside it — the
+# launching session's, since which of the two the platform keys on is unproven — and both
+# resolve to the same row at both gates; this section drives the one adopt leads with.
+R_AD_ADDR=$(printf '%s\n' "$R_AD_OUT" | grep -F 'stop        : TaskStop ' | head -1 \
+            | sed 's/.*TaskStop //' | awk '{print $1}')
+expect_eq "adopt prints the addressing form, built from the ADOPTING session" \
+  "adoptee@session-$(printf '%s' "$SID_B" | cut -c1-8)" "$R_AD_ADDR"
+
+# SITE 2 — the observation answers to that exact string, and says why it is ours.
+R_AD_CHECK=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$OBSERVE" "$R_AD_ADDR" 2>&1 )
+expect_contains "the observation resolves the address adopt printed" \
+  "aadoptee-4444444444444444" "$R_AD_CHECK"
+expect_contains "…and classifies it OURS by the adoption the poker wrote" \
+  "Classification: OURS" "$R_AD_CHECK"
+expect_contains "…naming the session it was adopted from" "adopted_from=$SID_A" "$R_AD_CHECK"
+
+# SITE 3 — the stop gate resolves the same string and accepts it as an IDENTITY. The
+# paired negative first: resolution succeeding is not the ceremony being skipped.
+R_AD_ST_OUT=$(mk_stop_payload "$SID_B" "$RPROJ_AD/$SID_B.jsonl" "$RREPO_AD" "$R_AD_ADDR" \
+              | bash "$PARTY_SG" 2>&1); R_AD_ST=$?
+expect_eq "before any discharge the stop gate still refuses" "2" "$R_AD_ST"
+expect_absent "…and never with the unresolved refusal the field hit" \
+  "no agent in THIS session's metadata" "$R_AD_ST_OUT"
+
+( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SWEEPER" ack adoptee ) >/dev/null 2>&1
+R_AD_ST_OUT=$(mk_stop_payload "$SID_B" "$RPROJ_AD/$SID_B.jsonl" "$RREPO_AD" "$R_AD_ADDR" \
+              | bash "$PARTY_SG" 2>&1); R_AD_ST=$?
+expect_eq "the stop gate accepts the address adopt printed, discharged by the ack" \
+  "0" "$R_AD_ST"
+
+# THE CONSTRUCTION ITSELF, at all three sites: eight characters of a session id, cut the
+# same way. A site that starts spelling it differently — a full uuid, a different width —
+# splits from the other two here rather than in the field.
+for _f in "$PARTY_SG" "$OBSERVE" "$SPO"; do
+  expect_true "$(basename "$_f") builds the address as @session-<first 8 of a session id>" \
+    grep -qE '@session-\$\(printf .%s. "\$[A-Za-z_]+" \| cut -c1-8\)' "$_f"
+done
+
+# ============================================================
+echo ""
+echo "=== S — which plan answers for the run: the tick reads what the gate reads (wave-1.3.2 4/4, AC-13/AC-14) ==="
+# ============================================================
+#
+# THE COPY THIS SECTION EXISTS FOR. `hooks/session-poker.sh tick` DISARMs the Patrol —
+# terminally, for the rest of the session — and from 1.3.2 that decision needs the RUN to
+# say it is delivered, which means the tick reads a plan. It is the sixth reader of "which
+# *.md answers for this run", and hooks/patrol-revive.sh:64-70 refused to become the fifth
+# for a reason worth restating: an UNFILTERED "newest *.md under plans/" read is a measured
+# incident. On 2026-08-15 a marker-less scrap won the newest race, `current:` parsed empty,
+# and every wall reading it passed silently for ~15 minutes
+# (.bionic/docs/record/session-20260815-landing-supervision/t8-forensic-read.md).
+#
+# So the tick got the gate's read rather than an approximation of it, and this section is
+# the wall that keeps the copy honest — in BOTH directions, because the two failures are
+# different. A drifted PREDICATE (the `## SDLC State` filter, the fence rule, the CR
+# translation) makes the tick DISARM off a scrap file: silent, terminal, unrecoverable. A
+# drifted SELECTION (depth, the strict `-nt` ordering, the two plan directories) makes it
+# answer for the wrong wave.
+#
+# TWO PROOFS, because either alone is weak. First the TEXT: the four bodies the tick copied
+# are compared to canonical-sdlc-evidence-gate.sh's, which is the designated origin (it
+# documents the contract at its definition site) — §N.1's and §Q's method. Then the
+# BEHAVIOUR: both readers are handed the same repository and asked which file answered, and
+# their answers are compared to each other. Text agreement without behaviour would miss a
+# call site that never invokes its copy; behaviour without text would miss a drift the
+# fixtures happen not to reach.
+
+PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
+
+# ---- S.1 the four bodies -------------------------------------------------
+
+# Non-vacuity FIRST, on the origin: an extractor that silently returns nothing would make
+# every comparison below trivially true, which is exactly how this class of wall dies.
+for _fn in has_sdlc_state resolve_docs_root normalize_newlines; do
+  expect_eq "the extractor pulls a real ${_fn}() body out of the evidence gate" "yes" \
+    "$([ -n "$(fn_body "$PARTY_EG" "$_fn")" ] && echo yes || echo no)"
+done
+expect_eq "…and that body is the marker predicate, not some other function" "yes" \
+  "$(case "$(fn_body "$PARTY_EG" has_sdlc_state)" in *'## SDLC State'*) echo yes ;; *) echo no ;; esac)"
+
+for _fn in has_sdlc_state resolve_docs_root normalize_newlines; do
+  expect_eq "the poker's ${_fn}() is the evidence gate's, body for body" \
+    "$(fn_body "$PARTY_EG" "$_fn")" "$(fn_body "$PARTY_PK_S" "$_fn")"
+done
+
+# ---- S.2 the selection block ---------------------------------------------
+#
+# The gate holds this at file scope; the poker holds it inside `newest_sdlc_plan()`, because
+# a tick that ran a find on every invocation would charge `arm`, `disarm` and `interval` for
+# a read only `tick` takes. So the comparison normalizes INDENTATION and drops comment-only
+# lines — the same allowance `fn_code()` above makes for the same reason — and what remains
+# is executable text, compared line for line. Every drift that matters is inside it: the
+# `-maxdepth 2` bound, the STRICT `-nt` ordering that makes "newest" total rather than
+# find-order dependent, the two plan directories, and the `has_sdlc_state` guard itself.
+sel_block() {  # <file> -> the newest-SDLC-State-plan selection, indentation- and comment-normalized
+  awk '
+    !f && index($0, "PLAN_DIRS=(") { f = 1 }
+    f {
+      line = $0
+      sub(/^[[:space:]]+/, "", line); sub(/[[:space:]]+$/, "", line)
+      if (line == "" || line ~ /^#/) next
+      print line
+      if (line == "done") exit
+    }
+  ' "$1"
+}
+
+S_EG_SEL="$(sel_block "$PARTY_EG")"
+expect_eq "the extractor pulls a real selection block out of the evidence gate" "yes" \
+  "$([ -n "$S_EG_SEL" ] && echo yes || echo no)"
+expect_eq "…carrying the depth bound the layout needs" "yes" \
+  "$(case "$S_EG_SEL" in *'-maxdepth 2'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "…and the STRICT newest test, not a >= that depends on find order" "yes" \
+  "$(case "$S_EG_SEL" in *'-nt "$PLAN"'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "the poker's newest-plan selection is the evidence gate's, line for line" \
+  "$S_EG_SEL" "$(sel_block "$PARTY_PK_S")"
+
+# THE DISCRIMINATOR. Without this the comparison above proves only that two files exist: a
+# `sel_block` that stopped matching would return two empty strings and pass. One plausible
+# drift — the strict `-nt` relaxed so the FIRST candidate wins the tie — is applied to a
+# COPY of the poker, and the same comparison must go red. The shipped file is never touched.
+S_MUT_DIR="$SANDBOX/runstate-mutant"; mkdir -p "$S_MUT_DIR"
+sed 's/\[ "\$f" -nt "\$PLAN" \]/[ "$f" = "$f" ]/' "$PARTY_PK_S" > "$S_MUT_DIR/session-poker.sh"
+expect_eq "the mutation applies (the code has not moved out from under this proof)" "no" \
+  "$(cmp -s "$PARTY_PK_S" "$S_MUT_DIR/session-poker.sh" && echo yes || echo no)"
+expect_eq "…and with the strict-newest test flipped, the copies SPLIT (§S discriminates)" "no" \
+  "$([ "$S_EG_SEL" = "$(sel_block "$S_MUT_DIR/session-poker.sh")" ] && echo yes || echo no)"
+
+# ---- S.3 the round trip: one repository, two readers, one answer ---------
+#
+# Driven rather than grepped, because the property is behavioural. The gate is asked through
+# its own refusal (which names `Plan:` and the step it could not find); the tick is asked
+# through the QUIET line it now prints over an empty roster, which names the plan it decided
+# from and where that plan says the run is. Neither answer is rebuilt here.
+
+s_backdate() {  # <file> — an hour older than everything else in the fixture
+  touch -t "$(date -v-1H +%Y%m%d%H%M.%S 2>/dev/null || date -d '-1 hour' +%Y%m%d%H%M.%S)" "$1"
+}
+
+s_eg_read() {  # <repo> -> "<plan path>|<current>", or "none"
+  local out st plan cur
+  out=$(mk_bash_payload "$SID_A" "$SANDBOX/t.jsonl" "$1" "git commit -m x" \
+        | env -u CLAUDE_PROJECT_DIR bash "$PARTY_EG" 2>&1); st=$?
+  [ "$st" -eq 0 ] && { echo none; return; }
+  plan=$(printf '%s\n' "$out" | sed -n 's/^Plan: //p' | head -1)
+  cur=$(printf '%s\n' "$out" | sed -n "s/.*has no 'Step \([^']*\):' line.*/\1/p" | head -1)
+  if [ -z "$plan" ] || [ -z "$cur" ]; then echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)"; return; fi
+  printf '%s|%s\n' "$plan" "$cur"
+}
+
+s_pk_read() {  # <repo> -> "<plan path>|<current>", or "none"
+  local out plan cur
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+    > "$1/.bionic/tmp/roster-$SID_A.state"
+  out=$( cd "$1" && env CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$1/no-such-config" \
+           bash "$PARTY_PK_S" tick 2>&1 )
+  case "$out" in *'no plan carrying an unfenced'*) echo none; return ;; esac
+  plan=$(printf '%s\n' "$out" | sed -n 's/.*(\(\/[^ ]*\.md\) is at current: .*/\1/p' | head -1)
+  cur=$(printf '%s\n' "$out" | sed -n 's/.* is at current: \([^ )]*\).*/\1/p' | head -1)
+  if [ -z "$plan" ] || [ -z "$cur" ]; then echo "other:$(printf '%s' "$out" | head -1 | cut -c1-60)"; return; fi
+  printf '%s|%s\n' "$plan" "$cur"
+}
+
+# S.3a — a NEWER marker-less .md must lose to an older real plan. This is the 2026-08-15
+# incident in fixture form, and it is the case that decides whether the tick can DISARM off
+# a scrap file.
+S_R1=$(new_repo "s-marker-less-newest")
+write_plan "$S_R1/.bionic/docs/plans/epic-99/wave-01.plan.md" "current: 4"
+printf 'a scratch note — no SDLC State heading anywhere in it\n' \
+  > "$S_R1/.bionic/docs/plans/epic-99/zz-newest-scrap.md"
+# "Newest" is fixture DATA, set by backdating the loser — never by sleeping, and never left
+# to a same-second tie, which `-nt` resolves as "not newer" and would pass this case for a
+# reason the fixture never states.
+s_backdate "$S_R1/.bionic/docs/plans/epic-99/wave-01.plan.md"
+S_EG=$(s_eg_read "$S_R1"); S_PK=$(s_pk_read "$S_R1")
+expect_eq "the gate skips the newer marker-less file and answers from the plan" \
+  "$S_R1/.bionic/docs/plans/epic-99/wave-01.plan.md|4" "$S_EG"
+expect_eq "…and the tick answers from the SAME file, at the same step" "$S_EG" "$S_PK"
+
+# S.3b — the newest REAL plan wins, so the pin is on ordering and not merely on filtering.
+# Its paired discriminator is S.3a: one case where the newest file loses, one where it wins.
+S_R2=$(new_repo "s-newest-real-plan")
+write_plan "$S_R2/.bionic/docs/plans/epic-98/wave-01.plan.md" "current: 4"
+write_plan "$S_R2/.bionic/docs/plans/epic-99/wave-02.plan.md" "current: 6"
+s_backdate "$S_R2/.bionic/docs/plans/epic-98/wave-01.plan.md"
+S_EG=$(s_eg_read "$S_R2"); S_PK=$(s_pk_read "$S_R2")
+expect_eq "the gate takes the NEWER of two real plans" \
+  "$S_R2/.bionic/docs/plans/epic-99/wave-02.plan.md|6" "$S_EG"
+expect_eq "…and so does the tick" "$S_EG" "$S_PK"
+
+# S.3c — a `## SDLC State` that exists only inside a fence is documentation, not a run.
+# Both readers must answer "no canonical run here" rather than parsing the example.
+S_R3=$(new_repo "s-fenced-only")
+mkdir -p "$S_R3/.bionic/docs/plans/epic-99"
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+  printf -- 'intent: build\nrigor: audited\nscale: wave\n---\n\n# a document ABOUT plans\n\n'
+  printf '```\n## SDLC State\ncurrent: 4\n```\n'
+} > "$S_R3/.bionic/docs/plans/epic-99/schema-notes.md"
+S_EG=$(s_eg_read "$S_R3"); S_PK=$(s_pk_read "$S_R3")
+expect_eq "a fenced-only heading is not a plan to the gate" "none" "$S_EG"
+expect_eq "…and is not a plan to the tick either" "none" "$S_PK"
+
+# S.3d — depth 3 is out of reach for both. Paired with the same content at depth 2, so what
+# is pinned is the bound rather than a mistyped fixture.
+S_R4=$(new_repo "s-depth")
+write_plan "$S_R4/.bionic/docs/plans/epic-99/wave-01/too-deep.plan.md" "current: 4"
+S_EG=$(s_eg_read "$S_R4"); S_PK=$(s_pk_read "$S_R4")
+expect_eq "a plan at depth 3 is invisible to the gate" "none" "$S_EG"
+expect_eq "…and invisible to the tick" "none" "$S_PK"
+write_plan "$S_R4/.bionic/docs/plans/epic-99/wave-01.plan.md" "current: 4"
+S_EG=$(s_eg_read "$S_R4"); S_PK=$(s_pk_read "$S_R4")
+expect_eq "…and the SAME content at depth 2 is seen by the gate (the bound is pinned)" \
+  "$S_R4/.bionic/docs/plans/epic-99/wave-01.plan.md|4" "$S_EG"
+expect_eq "…and by the tick" "$S_EG" "$S_PK"
 
 # ============================================================
 echo ""

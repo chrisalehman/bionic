@@ -28,6 +28,41 @@
 
 set -u
 
+# The command reader (scripts/lib/git-argv.sh) — the same library
+# protect-main.sh uses, and the SSoT for "what are the words of this command".
+#
+# FAIL-CLOSED (Chris, D1 2026-08-30): a wall that cannot load its library
+# REFUSES. Two candidate paths because the shipped tree has two real shapes —
+# the installed plugin root (hooks/ and scripts/ as siblings) and this repo,
+# where payload/hooks is a symlink to the top-level hooks/ and the library
+# lives under payload/scripts/lib/. `..` is resolved by the kernel AFTER the
+# symlink, so the first candidate alone would refuse every command in a
+# directory-source session. Byte-identical twin of the loader in
+# protect-main.sh.
+#
+# ONE LOADER IDIOM ACROSS THE FOUR LIBRARY-SOURCING WALLS (review-b B-4c). The
+# directory is `$(dirname "$0")`, which is what the other eleven hooks in this
+# directory already use and what tests/cmd-class.test.sh §C6 extracts; the
+# readability test is `-r`, which is what actually predicts whether `.` will
+# succeed (`-f` passes on a file the process cannot read, and the wall would
+# then refuse one line later with a worse message).
+# [WALL: tests/git-argv.test.sh]
+_eg_dir="$(dirname "$0")"
+_eg_lib=""
+for _eg_cand in "$_eg_dir/../scripts/lib/git-argv.sh" "$_eg_dir/../payload/scripts/lib/git-argv.sh"; do
+  if [ -r "$_eg_cand" ]; then _eg_lib="$_eg_cand"; break; fi
+done
+if [ -z "$_eg_lib" ]; then
+  echo "BLOCKED: the evidence gate cannot read commands — its library is missing." >&2
+  echo "Expected scripts/lib/git-argv.sh beside $_eg_dir/.. — reinstall the bionic plugin." >&2
+  exit 2
+fi
+# shellcheck source=/dev/null
+if ! . "$_eg_lib"; then
+  echo "BLOCKED: the evidence gate cannot read commands — $_eg_lib failed to load." >&2
+  exit 2
+fi
+
 INPUT=$(cat)
 COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 
@@ -36,18 +71,18 @@ if [ -z "$COMMAND" ]; then
   exit 0
 fi
 
-# Is any segment of the command a `git commit`? Parse segments split on
-# &&, ||, ; like protect-main.sh. Ignore content inside quotes (commit
-# messages often contain "git commit" as prose).
+# Is any segment of the command a `git commit`? The library answers by argv
+# position: git must be argv[0] (after leading VAR=value assignments and git's
+# own global options) and `commit` the subcommand. That is what makes
+# `git -C <dir> commit`, `git -c user.name=x commit` and
+# `git --no-pager commit` commits — all three were invisible to the string
+# match this replaced — while `echo "we will git commit later"` and a heredoc
+# body naming a commit stay silent.
+# [WALL: tests/git-argv.test.sh]
 IS_COMMIT=0
-while IFS= read -r segment; do
-  segment="${segment#"${segment%%[![:space:]]*}"}"
-  stripped=$(echo "$segment" | sed "s/'[^']*'//g; s/\"[^\"]*\"//g")
-  if echo "$stripped" | grep -qE '(^|[[:space:]])git[[:space:]]+commit([[:space:]]|$)'; then
-    IS_COMMIT=1
-    break
-  fi
-done <<< "$(echo "$COMMAND" | sed 's/&&/\n/g; s/||/\n/g; s/;/\n/g')"
+if git_argv_has_sub "$COMMAND" commit; then
+  IS_COMMIT=1
+fi
 
 if [ "$IS_COMMIT" -eq 0 ]; then
   exit 0
@@ -510,6 +545,38 @@ rigor_ord() {  # $1 = a rigor lane name (or empty)
     peer-reviewed) echo 1 ;;
     audited)       echo 2 ;;
     *)             echo 0 ;;  # tested, empty, or unknown → the floor
+  esac
+}
+
+# Is the independent auditor's verdict a WALL on this run? (B-10 / R-11.)
+# SKILL.md's rigor table: `tested` = "Both independent assurance roles.
+# Self-review only." — no auditor is ever sent, so demanding an auditor
+# CONFIRMED on every matrix row (and an `auditor:` pointer in the Step-5 block)
+# refused a `tested` run for the absence of a verdict its own rigor says nobody
+# was commissioned to write. B-10's repro: a bugfix · tested · task run refused
+# at current: 9 on "matrix row 'AC-1' auditor verdict is 'empty'".
+#
+# At `tested` the matrix's auditor column is NOT READ — any value, empty
+# included, passes — and the Step-5 pointer is not demanded. At
+# `peer-reviewed` (which adds the auditor) and `audited` both walls stand
+# unchanged.
+#
+# FAIL-CLOSED on an unknown or missing value: a plan that does not say what
+# rigor it runs at has not bought the relaxation, and a typo must not become a
+# bypass (same rationale as walk_mode's off-enum arm). This is deliberately
+# ASYMMETRIC with effective_row_rigor, which resolves an unknown frontmatter
+# rigor DOWN to the tested floor: there, the fallback picks a lane for a row
+# that must run in one; here, the fallback decides whether a wall stands.
+#
+# Scope: the MATRIX wall and the Step-5 pointer only. The task-ledger lanes
+# (apply_rigor_lanes) were already rigor-keyed and read EFFECTIVE row rigor, so
+# a row whose own cell raises it above the frontmatter keeps its auditor/critic
+# demand there — the matrix carries no per-row rigor cell to raise.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+matrix_auditor_required() {
+  case "$RIGOR" in
+    tested) return 1 ;;
+    *)      return 0 ;;  # peer-reviewed, audited, and anything unrecognized
   esac
 }
 
@@ -1084,10 +1151,20 @@ validate_ship_step() {
 # Mid-discharge commits: at current: 5, rows with status
 # pending/blocked skip the per-tier key check, and the Step-5 `auditor:`
 # pointer is required only when no such row remains. The full contract —
-# per-tier keys + CONFIRMED on every non-waived row — bites on the 5→6
-# advance via the 6..9 prefix check. The status cell is enum-checked
+# per-tier keys, plus (at peer-reviewed/audited rigor) CONFIRMED on every
+# non-waived row — bites on the 5→6 advance via the 6..9 prefix check. At
+# `tested` rigor the auditor column is not a wall at all: see
+# matrix_auditor_required. The status cell is enum-checked
 # (pending|blocked|discharged|waived) since the relaxation makes it
 # load-bearing.
+#
+# Close-out criteria: a T0 row whose AC block carries `slice: 9` keeps that
+# same relaxation ALL THE WAY to current: 9 — both the per-tier keys and the
+# CONFIRMED wall — because its evidence is a Step-9 artifact that does not
+# exist yet. It is two exemptions, not one: the key loop and the CONFIRMED
+# arm are separate branches, and a row exempted from only the first still
+# meets the second at current: 6. At current: 9 the tag stops exempting
+# anything. See the tag's own note inside validate_matrix.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
 # Per-tier required evidence keys — MIRROR of the canonical table in
@@ -1171,13 +1248,37 @@ user_confirmed_form_ok() {
     | grep -qE '^[A-Za-z][A-Za-z0-9._-]*[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]+[^[:space:]]'
 }
 
+# The plan is read off disk when the CALL starts (PLAN is resolved at :245
+# before any of the command runs). So a single Bash call that edits the plan
+# and THEN commits is judged against the pre-edit plan: the fix the agent just
+# wrote is invisible to every arm below, and the refusal reads as though it had
+# never been made. The observed reflex on that refusal is to re-run the same
+# combined call, which fails identically forever. When the refused command's
+# text names the plan, say so. Matched against the absolute path and against
+# the path relative to the project root — the two spellings an agent writes.
+# A commit MESSAGE that merely quotes the path also matches; the line is
+# advice appended to an already-refused call, so a false positive costs a
+# sentence and a false negative costs the loop this exists to break.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+plan_write_note() {
+  local rel="$PLAN"
+  [ -n "$PLAN" ] || return 0
+  case "$PLAN" in "$PROJECT_DIR"/*) rel="${PLAN#"$PROJECT_DIR"/}" ;; esac
+  case "$COMMAND" in
+    *"$PLAN"*|*"$rel"*)
+      echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
+  esac
+}
+
 # 3-line BLOCKED/Plan/Fix emit for the matrix arm (mirrors the pattern
-# every other validator uses). $1 = message tail, $2 = fix line.
+# every other validator uses), plus the edit-then-commit note when the refused
+# command also writes the plan. $1 = message tail, $2 = fix line.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 block_matrix() {
   echo "BLOCKED: canonical-sdlc step ${CURRENT} — $1" >&2
   echo "Plan: $PLAN" >&2
   echo "Fix: $2" >&2
+  plan_write_note >&2
   exit 2
 }
 
@@ -1189,7 +1290,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc slice_val slice9 row_is_waived
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -1263,6 +1364,18 @@ validate_matrix() {
           "set the status cell to one of: pending, blocked, discharged, waived." ;;
     esac
     block_txt=$(matrix_block "$ac")
+    # Is this row WAIVED? A `waiver:` token in the evidence cell or a
+    # `waiver:` line in the AC block — the loop's long-standing test, hoisted
+    # into one flag (review-a C-2) so every per-row demand below reads the same
+    # fact. Deliberately NOT the status cell alone: a row that says `waived`
+    # while recording no waiver has not been through the Waiver Protocol, and
+    # the per-tier key loop has always demanded its evidence anyway.
+    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+    row_is_waived=0
+    if echo "$ev" | grep -qE 'waiver:' \
+       || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+      row_is_waived=1
+    fi
     # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
     # implementation` in an AC block is circular — it names the change as the
     # source of its own requirement, which is unfalsifiable by construction.
@@ -1282,9 +1395,48 @@ validate_matrix() {
       block_matrix "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
         "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
     fi
+    # `slice: 9` (B-2, 2026-08-30): a criterion whose only evidence is a Step-9
+    # lifecycle artifact — the close-out report, continuation.md, the ADR the
+    # close-out writes — cannot be discharged at Steps 5..8, because the thing
+    # it would cite does not exist yet. Such a row had only dishonest homes: a
+    # `waiver:` that records the criterion as let go, or a discharged row
+    # citing an artifact nobody had written. The tag is an AC-block line parsed
+    # exactly like `provenance:` above — never a sixth table cell, which the
+    # 7-field row pin a few lines up would refuse on every row.
+    #
+    # It exempts the row from TWO SEPARATE ARMS while current < 9: the per-tier
+    # key loop below, and the CONFIRMED/auditor wall further down. Exempting
+    # only the first leaves the row blocking at current: 6 on an empty auditor
+    # cell, which is the same wall wearing a different refusal.
+    #
+    # T0-ONLY. Every other tier names evidence that exists before Step 9 (a
+    # suite run, a live surface, the user's own word), so `slice: 9` there is a
+    # mis-tag rather than a deferral: it blocks at ANY step, naming the tier —
+    # including current: 5, where a pending row is otherwise exempt from
+    # everything and the mis-tag would sit unread until the 5→6 advance.
+    # Only the exact value `9` means anything; `slice: 4` is an ordinary
+    # annotation this hook does not read.
+    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+    slice_val=$(echo "$block_txt" | grep -E '^[[:space:]]*slice[[:space:]]*:' | head -1 \
+      | sed -E 's/^[[:space:]]*slice[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+    slice9=0
+    if [ "$slice_val" = "9" ]; then
+      # A WAIVED row is exempt from the tier refusal (review-a C-2). The tag on
+      # a non-T0 row is a mis-tag, but a waiver has already dissolved that
+      # row's evidence contract — every other per-row demand in this loop
+      # (per-tier keys, the CONFIRMED wall) yields to it, and refusing here
+      # left a waived row with no way out but retiering a criterion nobody
+      # intends to discharge. The unwaived mis-tag still blocks at every step.
+      # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+      if [ "$tier" != "T0" ] && [ "$row_is_waived" = "0" ]; then
+        block_matrix "matrix row '${ac}' is ${tier} and carries 'slice: 9' — only a T0 row defers its evidence to the close-out." \
+          "a ${tier} row's evidence exists before Step 9 — discharge '${ac}' at its own tier, or retier the row to T0 if the criterion really is a close-out obligation."
+      fi
+      slice9=1
+    fi
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
-    if echo "$ev" | grep -qE 'waiver:' || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+    if [ "$row_is_waived" = "1" ]; then
       :
     elif [ "$CURRENT" = "5" ] && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
       # A row still being discharged carries no evidence contract at
@@ -1292,6 +1444,15 @@ validate_matrix() {
       # (the 6..9 prefix check), mirroring the CONFIRMED rule. This is what
       # gives a mid-walk corrective commit an honest home at current: 5.
       UNDISCHARGED=1
+    elif [ "$slice9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+         && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
+      # Close-out row before Step 9 — see the `slice: 9` note above. Sits
+      # BELOW the current: 5 arm on purpose: at the Verify gate the existing
+      # relaxation must still set UNDISCHARGED, which keeps the Step-5
+      # `auditor:` pointer optional while any row is undischarged.
+      # A non-numeric CURRENT makes `-lt` fail, so the exemption is
+      # fail-closed on a malformed step.
+      :
     else
       for key in $(keys_for_tier "$tier"); do
         if ! echo "$block_txt" | grep -qE "^[[:space:]]*${key}[[:space:]]*:"; then
@@ -1325,7 +1486,10 @@ validate_matrix() {
         esac
       done
     fi
-    # Once past the Verify gate, every non-waived row must be CONFIRMED.
+    # Once past the Verify gate, every non-waived row must be CONFIRMED —
+    # at peer-reviewed and audited rigor. At `tested` no auditor was ever
+    # commissioned (SKILL.md's rigor table), so this whole arm stands down;
+    # matrix_auditor_required is the predicate and carries the reasoning.
     #
     # T4 is the exception, and it is not a relaxation. T4's evidence IS the
     # user's own confirmation — an independent auditor sent at it can only
@@ -1349,9 +1513,14 @@ validate_matrix() {
     # because the attribution is correct and sending the user to rewrite it
     # would point them at the one thing that is not broken.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    if [ "$CURRENT" -gt 5 ] 2>/dev/null; then
-      if [ "$status" = "waived" ] || echo "$ev" | grep -qE 'waiver:' \
-         || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+    if [ "$CURRENT" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
+      if [ "$status" = "waived" ] || [ "$row_is_waived" = "1" ]; then
+        :
+      elif [ "$slice9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+           && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
+        # The second of the `slice: 9` tag's two arms. An auditor cannot
+        # CONFIRM a row whose evidence Step 9 has not produced; demanding it
+        # here would re-impose the wall the key-loop exemption just lifted.
         :
       elif [ "$tier" = "T4" ] && user_confirmed_form_ok "$block_txt" \
            && { [ -z "$aud" ] || [ "$aud" = "CONFIRMED" ]; }; then
@@ -1494,8 +1663,9 @@ validate_walk_artifact() {
   return 0
 }
 
-# Verify gate: tests floor, a required non-empty auditor pointer,
-# then the Verification Matrix.
+# Verify gate: tests floor, the Verification Matrix, and — at peer-reviewed or
+# audited rigor, once no row is still pending — a non-empty `auditor:` pointer.
+# At `tested` that pointer is not demanded (matrix_auditor_required).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_verify_step() {
   local aud
@@ -1505,9 +1675,10 @@ validate_verify_step() {
   validate_walk_artifact
   # The auditor is the Step-5 exit gate — it cannot have run while
   # rows are still pending/blocked, so the pointer is required only once
-  # every row is discharged or waived.
+  # every row is discharged or waived, and only where an auditor exists at
+  # all (matrix_auditor_required: never at `tested`).
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if [ "$UNDISCHARGED" -eq 0 ]; then
+  if [ "$UNDISCHARGED" -eq 0 ] && matrix_auditor_required; then
     if ! block_has auditor; then
       block_matrix "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
         "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
