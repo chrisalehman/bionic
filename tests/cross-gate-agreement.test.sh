@@ -3820,6 +3820,73 @@ expect_eq "…and the truncating copy misses the late marker, so the pair splits
 
 # ============================================================
 echo ""
+echo "=== Section R — the ADOPTED address: one construction, three sites ==="
+# ============================================================
+#
+# `<name>@session-<id8>` is the only spelling the platform's stop primitive takes for a
+# teammate (capture record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9),
+# and after epic-20 W1 three scripts build or accept it: hooks/stop-guard.sh constructs it
+# for its refusals and accepts it as an identity, hooks/stop-check.sh prints it beside every
+# ambiguous candidate, and hooks/session-poker.sh's `adopt` prints it as the stop address
+# for an agent this session has taken over. The field defect was exactly a disagreement of
+# this kind — adopt printed the TRANSCRIPT form, which the platform rejects — so what is
+# pinned here is not that three files contain a string but that the string ONE of them
+# prints is the string the other two answer to, over one fixture world.
+
+RREPO_AD=$(new_repo "adopted-address")
+RSLUG_AD=$(printf '%s' "$RREPO_AD" | sed 's/[^a-zA-Z0-9]/-/g')
+RPROJ_AD="$CLAUDE_CONFIG_DIR/projects/$RSLUG_AD"
+RSUB_AD="$RPROJ_AD/$SID_A/subagents"
+mkdir -p "$RSUB_AD" "$RPROJ_AD/$SID_B/subagents" "$RREPO_AD/.bionic/tmp"
+printf '{}\n' > "$RPROJ_AD/$SID_A.jsonl"
+printf '{}\n' > "$RPROJ_AD/$SID_B.jsonl"
+plant "$RSUB_AD" "aadoptee-4444444444444444" "adoptee"
+write_plan "$RREPO_AD/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+
+# THE PREDECESSOR'S ROW, as hooks/execution-recorder.sh left it when that session died:
+# `identified`, the transcript-form id, a contract that never landed.
+printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-4444444444444444|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lands.md|source=declared|duration=|progress=|claims=|cadence=10 minutes|absent=|waiver=|tool_use_id=toolu_01FIXTURE\n' \
+  "$SID_A" >> "$RREPO_AD/.bionic/tmp/roster-$SID_A.state"
+
+# SITE 1 — the poker prints the address, and it is the successor session that is named.
+R_AD_OUT=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SPO" adopt 2>&1 )
+R_AD_ADDR=$(printf '%s\n' "$R_AD_OUT" | grep -F 'stop        : TaskStop ' | head -1 \
+            | sed 's/.*TaskStop //')
+expect_eq "adopt prints the addressing form, built from the ADOPTING session" \
+  "adoptee@session-$(printf '%s' "$SID_B" | cut -c1-8)" "$R_AD_ADDR"
+
+# SITE 2 — the observation answers to that exact string, and says why it is ours.
+R_AD_CHECK=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$OBSERVE" "$R_AD_ADDR" 2>&1 )
+expect_contains "the observation resolves the address adopt printed" \
+  "aadoptee-4444444444444444" "$R_AD_CHECK"
+expect_contains "…and classifies it OURS by the adoption the poker wrote" \
+  "Classification: OURS" "$R_AD_CHECK"
+expect_contains "…naming the session it was adopted from" "adopted_from=$SID_A" "$R_AD_CHECK"
+
+# SITE 3 — the stop gate resolves the same string and accepts it as an IDENTITY. The
+# paired negative first: resolution succeeding is not the ceremony being skipped.
+R_AD_ST_OUT=$(mk_stop_payload "$SID_B" "$RPROJ_AD/$SID_B.jsonl" "$RREPO_AD" "$R_AD_ADDR" \
+              | bash "$PARTY_SG" 2>&1); R_AD_ST=$?
+expect_eq "before any discharge the stop gate still refuses" "2" "$R_AD_ST"
+expect_absent "…and never with the unresolved refusal the field hit" \
+  "no agent in THIS session's metadata" "$R_AD_ST_OUT"
+
+( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SWEEPER" ack adoptee ) >/dev/null 2>&1
+R_AD_ST_OUT=$(mk_stop_payload "$SID_B" "$RPROJ_AD/$SID_B.jsonl" "$RREPO_AD" "$R_AD_ADDR" \
+              | bash "$PARTY_SG" 2>&1); R_AD_ST=$?
+expect_eq "the stop gate accepts the address adopt printed, discharged by the ack" \
+  "0" "$R_AD_ST"
+
+# THE CONSTRUCTION ITSELF, at all three sites: eight characters of a session id, cut the
+# same way. A site that starts spelling it differently — a full uuid, a different width —
+# splits from the other two here rather than in the field.
+for _f in "$PARTY_SG" "$OBSERVE" "$SPO"; do
+  expect_true "$(basename "$_f") builds the address as @session-<first 8 of a session id>" \
+    grep -qE '@session-\$\(printf .%s. "\$[A-Za-z_]+" \| cut -c1-8\)' "$_f"
+done
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "cross-gate-agreement: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
 [ "$FAIL" -eq 0 ]
