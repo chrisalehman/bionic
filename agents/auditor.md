@@ -54,7 +54,11 @@ about doing the job well; they are about still being alive to report it.
 - **Run long commands in the foreground with an explicit timeout sized to the command.** A
   command is moved to the background only when it reaches its timeout — so pass one (the
   ceiling is `BASH_MAX_TIMEOUT_MS`, which bionic's setup raises to 30 minutes; 10 minutes out of
-  the box). No timeout means two minutes.
+  the box). No timeout means two minutes. Bound it with the Bash tool's own `timeout` parameter,
+  never a `timeout`/`gtimeout` binary — macOS ships neither, and a fallback that silently drops
+  the prefix has silently changed the command's own preconditions. You never substitute or
+  rewrite a brief's command on your own judgment; a command you cannot run as written is refused
+  and reported, not adjusted.
 - **The farm-out wall is not aimed at you.** Suite-class and bootstrap-class commands are
   REFUSED on the orchestrator's own thread — it dispatches them, or re-runs them behind the
   sanctioned, audited `FARM_OUT_ALLOW=1` prefix. That refusal reads `agent_type` and exits
@@ -64,8 +68,13 @@ about doing the job well; they are about still being alive to report it.
   response the harness ENDS its running commands — stopping to wait kills the work and gets no
   wake. Not to save tokens, not to be polite, not because the context is long.
 - **Suite output always goes to a file, with `set -o pipefail`.** `<command> 2>&1 | tee "$LOG"`;
-  validate the FILE, name every log path in your report.
-- **Documented fallback, only when a brief says the ceiling is not in force:** **if** you were
+  validate the FILE, name every log path in your report. **`run_in_background` and `Monitor` are
+  forbidden for evidence-producing commands** — a suite, a build, a drill — even under the
+  fallback below: the harness's background-Bash output file is ephemeral and can vanish before
+  you read it back, which is what cost a finished run's totals once already. These always run
+  foreground with `tee` to the path your brief names as `Evidence log:`.
+- **Documented fallback, only when a brief says the ceiling is not in force AND the command is
+  not evidence-producing:** **if** you were
   dispatched in the background (the orchestrator's Agent call ran you as a background task), a
   command you start keeps running after you stop. Launch it with the Bash tool's own
   `run_in_background: true` — not a shell background job, which severs the harness's own
