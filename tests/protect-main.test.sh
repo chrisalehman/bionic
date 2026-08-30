@@ -277,6 +277,11 @@ expect_block "AC-9 sudo --"                       "sudo -- git push origin main"
 expect_block "AC-9 time"                          "time git push origin main"
 expect_block "AC-9 time -p"                       "time -p git push origin main"
 expect_block "AC-9 nice -n <N>"                   "nice -n 10 git push origin main"
+expect_block "AC-9 nice (bare)"                   "nice git push origin main"
+expect_block "AC-9 timeout <N>"                   "timeout 60 git push origin main"
+expect_block "AC-9 gtimeout <N>"                  "gtimeout 60 git push origin main"
+expect_block "AC-9 timeout -s KILL <N>"           "timeout -s KILL 60 git push origin main"
+expect_block "AC-9 timeout 30s (suffixed)"        "timeout 30s git push origin main"
 expect_block "AC-9 nohup"                         "nohup git push origin main"
 expect_block "AC-9 exec"                          "exec git push origin main"
 expect_block "AC-9 command"                       "command git push origin main"
@@ -315,6 +320,19 @@ expect_allow "AC-10 then + push to a topic branch" "if true; then git push origi
 expect_allow "AC-10 ssh to a host called main"    "ssh main ls"
 expect_allow "AC-10 a heredoc body with a sudo push" \
   "$(printf 'cat > /tmp/note.txt <<%sNOTE%s\nsudo git push origin main\nNOTE\n' "'" "'")"
+expect_allow "AC-10 echo of a timeout push line"  'echo "timeout 60 git push origin main"'
+
+# --- B-1 (review-b): a QUOTED <<WORD must not open a phantom heredoc ---
+# `echo "see <<EOF for the format"` had no quote state in the heredoc scan, so
+# every following line was read as body — a real push on the next line walked
+# through 1.3.2 and was blocked by 1.3.1.
+expect_block "B-1 a quoted <<WORD does not swallow the next line" \
+  "$(printf 'echo "see <<EOF for the heredoc format"\ngit push origin main\n')"
+expect_block "B-1 …single-quoted too" \
+  "$(printf "echo 'run <<EOF to open a heredoc'\ngit push origin main\n")"
+# PAIRED POSITIVE: a real unquoted opener still hides its body.
+expect_allow "B-1 an UNQUOTED heredoc body is still ignored" \
+  "$(printf 'cat > /tmp/n.txt <<EOF\ngit push origin main\nEOF\n')"
 
 # ============================================================
 # Results

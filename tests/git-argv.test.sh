@@ -150,6 +150,59 @@ eq "the command AFTER a heredoc still parses" \
 eq "a here-string is not a heredoc opener" \
    "$(printf 'grep|x|y\ngit|status')" "$(segs "$(printf 'grep x <<< y\ngit status\n')")"
 
+# --- B-1 (review-b): a QUOTED <<WORD is text, not a redirection ---
+# The heredoc scan had no quote state, so `echo "see <<EOF for the format"`
+# opened a phantom body that swallowed every line after it — including a real
+# push on the next line, which 22493c8 blocked and f15641f allowed. cmd-class.sh
+# has been quote-aware from the start; this is the two libraries agreeing.
+HD_QUOTED=$(printf 'echo "see <<EOF for the heredoc format"\ngit push origin main\n')
+eq "a quoted <<WORD opens no heredoc (the next line still parses)" \
+   "$(printf 'echo|see <<EOF for the heredoc format\ngit|push|origin|main')" "$(segs "$HD_QUOTED")"
+
+HD_SQ=$(printf "echo 'run <<EOF to open a heredoc'\ngit push origin main\n")
+eq "…single quotes too" \
+   "$(printf 'echo|run <<EOF to open a heredoc\ngit|push|origin|main')" "$(segs "$HD_SQ")"
+
+# PAIRED POSITIVE, so the fix above is not just "never open a heredoc": a REAL
+# unquoted opener still swallows its body.
+HD_REAL=$(printf 'cat > /tmp/n.txt <<EOF\ngit push origin main\nEOF\n')
+eq "an UNQUOTED opener still removes its body" \
+   "$(printf 'cat|/tmp/n.txt')" "$(segs "$HD_REAL")"
+
+echo ""
+echo "=== Section 1d: the two libraries agree about heredocs (review-b B-1) ==="
+#
+# ONE READING, TWO RENDERINGS. git-argv.sh and cmd-class.sh each carry the
+# quote-aware heredoc pass in their own awk program (see the report's A-2 for
+# why not a third shared file). What makes that safe is this arm: the same
+# fixtures go through BOTH, and both must agree on which lines survive as
+# commands. A drift in either shows up here rather than in the field.
+CC_LIB=""
+for cand in "${BIONIC_HOOKS_DIR}/../scripts/lib/cmd-class.sh" \
+            "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/cmd-class.sh"; do
+  if [ -r "$cand" ]; then CC_LIB="$cand"; break; fi
+done
+if [ -z "$CC_LIB" ]; then
+  no "cmd-class.sh is reachable for the agreement arm" "not found from ${BIONIC_HOOKS_DIR}"
+else
+  ok "cmd-class.sh is reachable for the agreement arm"
+  # Does the sibling library keep the push line as live text?
+  cc_keeps() {
+    bash -c '. "$1" || exit 1
+      out=$(cmd_strip_heredocs "$2")
+      case "$out" in *"git push origin main"*) echo yes ;; *) echo no ;; esac' \
+      _ "$CC_LIB" "$1" 2>/dev/null
+  }
+  # Does ours?
+  ga_keeps() { if git_argv_has_sub "$1" push; then echo yes; else echo no; fi; }
+
+  for pair in "quoted-double:$HD_QUOTED" "quoted-single:$HD_SQ" "real-heredoc:$HD_REAL"; do
+    lbl="${pair%%:*}"; fx="${pair#*:}"
+    eq "agreement [$lbl]: git-argv and cmd-class read the same lines as live" \
+       "$(cc_keeps "$fx")" "$(ga_keeps "$fx")"
+  done
+fi
+
 echo ""
 echo "=== Section 1b: git global options and the subcommand ==="
 
@@ -431,7 +484,15 @@ gate_fires  "R-12 sh -c git commit blocks"               "sh -c 'git commit -m x
 gate_fires  "R-12 bash -c git commit blocks"             'bash -c "git commit -m x"'
 gate_fires  "R-12 eval git commit blocks"                'eval "git commit -m x"'
 gate_fires  "R-12 true & git commit blocks"              'true & git commit -m x'
+gate_fires  "R-12 exec git commit blocks"                'exec git commit -m x'
+gate_fires  "R-12 nice git commit blocks"                'nice git commit -m x'
+gate_fires  "R-12 timeout N git commit blocks"           'timeout 60 git commit -m x'
+gate_fires  "R-12 gtimeout N git commit blocks"          'gtimeout 60 git commit -m x'
+gate_fires  "R-12 timeout -s KILL N git commit blocks"   'timeout -s KILL 60 git commit -m x'
+gate_fires  "R-12 { git commit; } after a cd blocks"     'cd /tmp && { git commit -m x; }'
+gate_fires  "R-12 while/do git commit blocks"            'while false; do git commit -m x; done'
 gate_silent "R-12 echo of a sudo commit is silent"       'echo "sudo git commit -m x"'
+gate_silent "R-12 echo of a timeout commit is silent"    'echo "timeout 60 git commit -m x"'
 gate_silent "R-12 find with no -exec is silent"          "find . -name 'git commit'"
 gate_silent "R-12 sudo of a non-commit is silent"        'sudo git status'
 
