@@ -31,7 +31,10 @@
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 #
-# Registered on both channels: hooks/hooks.json (agent contexts, behind agent-context-guard.sh) and skills/canonical-sdlc/SKILL.md frontmatter (main thread).
+# Registered ONCE, in hooks/hooks.json, for both the main thread and agent contexts.
+# The two-channel partition it used to need — skill frontmatter for the main thread,
+# settings for agent contexts — is gone: what scopes the wall now is an on-disk fact,
+# `active_run` under the artifact's own project root.
 
 set -u
 
@@ -55,83 +58,18 @@ fi
 # Match files under the project's docs root (default <project>/.bionic/
 # docs/, configurable via <project>/.bionic/config.yaml `docs-root:`).
 #
-# Strategy: the project root is COMPUTED from git, never DISCOVERED by
-# walking for an existing `.bionic/`. From that root, resolve docs-root and
-# check whether FILE_PATH lives under <docs-root>/{specs,plans,adrs,incidents}/.
+# Strategy: the project root is the LIBRARY's answer (lib/root.sh's `project_root`,
+# spec AC-10) — the nearest ancestor of the target holding a real `.bionic/`, with a
+# linked worktree mapped onto its main repository first. From that root, resolve
+# docs-root and check whether FILE_PATH lives under
+# <docs-root>/{specs,plans,adrs,incidents}/.
 #
-# `git rev-parse --git-common-dir` names the MAIN repository's .git even from
-# inside a linked worktree (`--git-dir` would name the worktree's private
-# dir), so every worktree of one repo resolves to ONE root and therefore one
-# `.bionic/` tree.
+# THE WORKTREE MAPPING IS LOAD-BEARING, not a refinement. Every worktree of one repo
+# has to resolve to ONE root and therefore one `.bionic/` tree: while this gate and
+# the evidence gate disagreed about which tree was real, no artifact placement
+# satisfied both — obey this one and every commit from the worktree ran ungated, obey
+# that one and every artifact write was blocked.
 #
-# `--path-format=absolute` is load-bearing, not cosmetic: the bare form
-# returns a RELATIVE path (`.git` at the root, `../.git` one level down),
-# whose dirname is `.` or `..` — a cwd-dependent string, not a root. It landed
-# in git 2.31.
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-#
-# OLD-GIT FALLBACK (Step-6 finding K2). On git < 2.31 `--path-format` is an
-# unknown option and rev-parse exits 129 — which the single-branch predecessor
-# could not tell apart from "not a repository", so the root silently became the
-# session's cwd and EVERY canonical-sdlc artifact write on such a machine
-# blocked as misplaced, pointing the author at whatever directory the session
-# started in. Fail-closed in the wrong direction, and wave-introduced: the
-# walk-up predecessor worked on every git version. Plan assumption 6 claimed a
-# `cd`-and-`pwd` fallback already covered this; it did not exist. A documented
-# mitigation that was never built is worse than an unlogged one — it reads as
-# retired, and a reviewer who checks the local git version moves on.
-#
-# So: retry the BARE form, which every git has, and absolutize its answer here.
-# It answers RELATIVE inside the main repo and ABSOLUTE from a linked worktree,
-# hence the `case`. Only when BOTH forms fail is this genuinely not a
-# repository, and the supplied fallback wins as before.
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-#
-# `git -C` needs a directory that EXISTS, and this is a PreToolUse gate: on
-# the first artifact write into a project the target's parent directories have
-# not been created yet. Climbing to the nearest existing ancestor supplies git
-# a valid cwd — it is not a search for `.bionic/`; the loop's condition never
-# mentions it, and the answer still comes from git.
-#
-# The walk-up-for-`.bionic/` predecessor could not resolve a root in a project
-# where `.bionic/` did not already exist, and resolved a linked worktree to
-# the worktree instead of its parent repo.
-resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
-  local d common root
-  d=$(dirname "$1")
-  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
-    d=$(dirname "$d")
-  done
-  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-    dirname "$common"
-    return
-  fi
-  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
-    case "$common" in
-      /*) root=$(dirname "$common") ;;
-      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
-    esac
-    if [ -n "$root" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-  fi
-  # NO-GIT FALLBACK: the pin follows the TARGET, never the shell. Outside any
-  # repository, walk up from the nearest existing ancestor of the target for
-  # the nearest directory already carrying a `.bionic/` tree and answer there;
-  # only when none exists does the supplied fallback (default pwd) win — which
-  # preserves the first-write-into-a-fresh-project path and changes nothing
-  # inside a git repository, where the arms above always answer first.
-  root="$d"
-  while [ -n "$root" ] && [ "$root" != "/" ] && [ "$root" != "." ]; do
-    if [ -d "$root/.bionic" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-    root=$(dirname "$root")
-  done
-  printf '%s\n' "${2:-$(pwd)}"
-}
 
 # Resolve a path's ancestors to their physical form, keeping any tail that does
 # not exist yet. `git` answers with the PHYSICAL root, while FILE_PATH arrives
@@ -230,14 +168,203 @@ resolve_docs_root() {
   echo "$proj/.bionic/docs"
 }
 
-PROJECT_ROOT_FROM_PATH=$(resolve_project_root "$FILE_PATH" || true)
+# ---------- the library ----------
+#
+# One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
+# payload/scripts/lib/loader.sh. FAIL OPEN: an artifact written in the wrong place is
+# a mistake a person can move, and the evidence gate's own misplacement sweep catches
+# the consequential half of it at commit time. Refusing every Write and Edit on the
+# machine because a file is missing is not recoverable at that price.
+BIONIC_LIB_WANT="root.sh run.sh"
+# --- bionic-loader/v2 BEGIN
+# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
+# library cannot load itself, so the duplication is the design and
+# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
+# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
+#
+# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
+# on a line above this block. Afterwards exactly one of these is non-empty:
+#   BIONIC_LIB          a readable directory holding every wanted basename
+#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
+# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
+#
+# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
+# healthy hook pays nothing for the healing path — not a jq, not a registry read.
+#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
+#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
+#      siblings, and the repo, where payload/hooks is a symlink to the top-level
+#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
+#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
+#      would find nothing in a directory-source session.
+#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
+#      plugin was installed from; that marketplace's source.path in
+#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
+#      a fork installs under its own name.
+#  (3) the newest version directory in that marketplace's plugin cache, by
+#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
+# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
+# upstream-broken publish breaks every location equally and is not covered.
+#
+# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
+# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
+_bl_dir="$(dirname "$0")"
+_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_try() {
+  [ -n "${1:-}" ] || return 1
+  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
+  [ -d "$1" ] || return 1
+  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
+  BIONIC_LIB="$1"
+}
+if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
+  _bl_mk=""
+  if [ -r "$_bl_pd/installed_plugins.json" ]; then
+    # First key only, and the prefix stripped by parameter expansion rather than
+    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
+    # `jq` runs with its stderr closed, so a machine missing jq degrades to
+    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
+    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
+    _bl_mk="${_bl_keys%%
+*}"
+    _bl_mk="${_bl_mk#bionic@}"
+  fi
+  if [ -n "$_bl_mk" ]; then
+    _bl_src=""
+    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
+      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
+    fi
+    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
+    if [ -z "$BIONIC_LIB" ]; then
+      _bl_best=""; _bl_bestk=""
+      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
+        [ -d "$_bl_v" ] || continue
+        _bl_n="${_bl_v##*/}"
+        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
+        _bl_x1=""; _bl_x2=""; _bl_x3=""
+        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
+$_bl_n
+BIONIC_LOADER_VER
+        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
+        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
+      done
+      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
+    fi
+  fi
+fi
+if [ -z "$BIONIC_LIB" ]; then
+  # The name in the message is the first library this hook asked for. A candidate
+  # directory qualifies only when it holds ALL of them, so with none qualifying the
+  # first wanted name is the honest thing to hand the reader.
+  BIONIC_LIB_MISSING="${_bl_want%% *}"
+  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
+fi
+# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
+# stand aside. Blocking reversible work because a file is missing buys no safety and
+# costs the session.
+loader_fail_open() {
+  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+  exit 0
+}
+# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
+# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
+# here, before the hook sources anything. Whole-string and not prefix, so
+# `claude plugin update bionic@bionic; git push origin main` is refused like any
+# other push. There is no env-var override: a variable an agent turn can set on
+# itself is not a wall.
+loader_fail_closed() {
+  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
+  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
+  case "${2:-}" in
+    "claude plugin update bionic@bionic"|\
+    "claude plugin install bionic@bionic"|\
+    "bash $_bl_root/scripts/doctor.sh"|\
+    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
+  esac
+  cat >&2 <<BIONIC_LOADER_REFUSE
+BLOCKED: $1 cannot load its library (${BIONIC_LIB_MISSING:-the bionic library}), so it
+cannot read this command. A wall that cannot read a command refuses it rather than
+waving it through.
+
+Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
+
+Until the plugin is whole again this wall permits exactly four commands, each matched
+as a whole string:
+
+    claude plugin update bionic@bionic
+    claude plugin install bionic@bionic
+    bash $_bl_root/scripts/doctor.sh
+    bash $_bl_root/scripts/setup.sh
+
+Anything else is refused, including one of those four with another command chained
+after it. Run one of them, or act from your own terminal.
+BIONIC_LOADER_REFUSE
+  exit 2
+}
+# --- bionic-loader/v2 END
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing-skill"; fi
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/root.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/run.sh"
+
+# THE ROOT THAT OWNS THE ARTIFACT — the artifact's own, not the invoking session's.
+PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
-  # No root at all — resolve_project_root falls back to pwd, so this is
-  # reachable only if pwd itself is empty. Kept as a defensive guard against a
-  # future resolver change; it is not the misplacement fail-open, which is
-  # closed below by the UNDER_DOCS_ROOT verdict.
+  # project_root always answers, so this is unreachable in practice. Kept as a
+  # defensive guard; it is not the misplacement fail-open, which is closed below by
+  # the UNDER_DOCS_ROOT verdict.
   exit 0
 fi
+
+# ---------- WHAT ARMS THIS WALL (AC-7, and one deviation from it) ----------
+#
+# Always-on registration means this hook is delivered on every Write and Edit in every
+# project on the machine, so what scopes it has to be an on-disk fact rather than a
+# skill somebody armed. For nine of the ten governance hooks that fact is `active_run`
+# and nothing else. This one needs two more clauses, and the reason is structural
+# rather than defensive.
+#
+# THE ARTIFACT THIS GATE EXISTS FOR IS THE ONE THAT CREATES THE RUN. A wave's plan is
+# written at Step 3, into a project that has no plan yet — so `active_run` is false at
+# the exact moment the frontmatter contract most needs to bind, and a run-scoped-only
+# gate would pass the write that establishes `canonical_sdlc_version`, the triple and
+# the flags every later wall reads. Measured, not reasoned: 46 assertions in
+# tests/canonical-sdlc-governing-skill.test.sh go red under the bare predicate, and
+# every one of them is a project's first artifact.
+#
+# So the wall is armed by the PROJECT, with the run as one of three ways to show one:
+#   - an open run under this root, or
+#   - a `.bionic/` tree already at this root, or
+#   - a target path inside a `.bionic/` tree — the first-artifact case, where the
+#     directory does not exist yet and this write is what creates it, or
+#   - CONTENT that declares `canonical_sdlc_version:` — a file that calls itself a
+#     canonical-sdlc artifact is one wherever it lands, and catching it OUTSIDE the
+#     docs root is the whole of the AC-13 misplacement wall.
+# Anything else is a Write in a project that has nothing to do with this lifecycle and
+# passes in silence. A `deploy.plan.md` in an unrelated repository that claims nothing
+# is not this gate's business, and under always-on registration that has to be true by
+# construction rather than by which skill happened to be armed.
+if ! active_run "$PROJECT_ROOT_FROM_PATH" >/dev/null \
+   && [ ! -d "$PROJECT_ROOT_FROM_PATH/.bionic" ]; then
+  case "$FILE_PATH" in
+    */.bionic/*) : ;;
+    *)
+      # The leading frontmatter block only — the same reading the evidence gate's
+      # misplacement sweep uses, so a fenced example inside a documentation page
+      # cannot arm a wall by quoting one.
+      if ! echo "$INPUT" \
+           | jq -r '(.tool_input.content // .tool_input.new_string // "")' 2>/dev/null \
+           | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' \
+           | awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f' \
+           | grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:'; then
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
 DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
 
 # Incident 0001: the audit stream must live where a consuming project cannot
