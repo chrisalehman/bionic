@@ -348,6 +348,11 @@ run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh
 #     version-2 preflight attestation that records it. The kill datum this suite's memory
 #     term is built on is the one written at :63-68 of this file.
 run "resources.test.sh" bash tests/resources.test.sh
+#   - docs-pins.test.sh: doc-text agreement pins with no other home. §1 (RELEASE, spec
+#     AC-36) is the help version pair — replaces the coverage version-ssot.test.sh had
+#     before it was deleted below; WALLS and SCHED append their own numbered sections
+#     to this same file in later slices of this wave rather than each owning a suite.
+run "docs-pins.test.sh" bash tests/docs-pins.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
