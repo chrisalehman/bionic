@@ -299,13 +299,25 @@ fire_raw "$d" "$(jq -nc --arg c "$d" '{session_id:"s",cwd:$c,hook_event_name:"St
 d=$(make_env); u_tick "$d"; junk "$d"; a_tool "$d" ListAgents; junk "$d"; a_tool "$d" TaskList
 fire "$d"; expect_allow "20: malformed transcript lines do not break the read"
 
-# 21: no plan file at all — the TaskList duty is still satisfiable, and an empty
-# plan name must never match every write.
-d=$(make_env_planless); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" TaskList
-fire "$d"; expect_allow "21: a project with no plans dir still passes on TaskList"
-
+# 21/22: NO PLAN, NO RUN, NO DUTY (bionic 1.4.0, spec AC-7). The gate is registered
+# always-on now, so it is delivered on every Stop in every project on the machine, and
+# what scopes it is `active_run`. A project with no plan has no run, no Patrol and
+# therefore no Patrol duties — the gate says nothing, and it says nothing before it
+# parses the transcript at all, which is where its whole cost lives.
 d=$(make_env_planless); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
-fire "$d"; expect_block "22: with no plan file, an unrelated Edit satisfies nothing" "$TL_MISSING" "$LA_MISSING"
+fire "$d"; expect_allow "21: a project with no plan is silent even with both duties skipped"
+
+# THE PAIRED POSITIVE, and it is what keeps 21 from passing vacuously: the SAME
+# transcript, in a project that does have an open run, refuses. Nothing separates the
+# two but the plan file.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
+fire "$d"; expect_block "22: …and with a plan, that same unrelated Edit satisfies nothing" "$TL_MISSING" "$LA_MISSING"
+
+# 22b: the plan's basename must never be an EMPTY needle — an empty one would make
+# every write in the turn discharge the task-list duty. Driven by an Edit whose path
+# shares no component with the plan's name.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/unrelated-file.txt"
+fire "$d"; expect_block "22b: an Edit that does not name the plan leaves the task-list duty owed" "$TL_MISSING" "$LA_MISSING"
 
 # 23: THE GATE WRITES NOTHING. It is a gate, and gates only read (TDD §3.2).
 d=$(make_env); u_tick "$d"

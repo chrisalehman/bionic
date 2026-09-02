@@ -61,12 +61,29 @@ OTHER_SID="99999999-8888-7777-6666-555555555555"
 
 # A scratch project carrying a .bionic/tmp and a TINY poker-interval, so 2x the
 # interval is two seconds and a backdated stamp is decisively stale without any
-# wait. No git repository is created: resolve_project_root's no-git arm answers at
-# the nearest ancestor carrying `.bionic/`, which is this directory itself.
+# wait. No git repository is created: `project_root` answers at the nearest ancestor
+# carrying `.bionic/`, which is this directory itself.
+#
+# AND AN OPEN RUN (bionic 1.4.0, spec AC-7). The hook is registered always-on now, so it
+# is delivered on every Stop in every project on the machine, and its first scope
+# condition is `active_run` — there is no Patrol to be dead where there is no run. Every
+# fixture that expects this monitor to SPEAK therefore needs a plan; §11 below drives the
+# paired negative, where the plan is the only thing missing.
 make_env() {  # [interval] -> project dir on stdout
   local dir; dir=$(mktemp -d)
-  mkdir -p "$dir/.bionic/tmp"
+  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
   printf 'poker-interval: %s\n' "${1:-1s}" > "$dir/.bionic/config.yaml"
+  cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<'PRPLAN'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: slices in flight
+PRPLAN
   printf '%s' "$dir"
 }
 
@@ -101,13 +118,19 @@ stdin_for() {  # <cwd> [session] [event] [stop_hook_active]
       hook_event_name:$e,stop_hook_active:$a}'
 }
 
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2).
+# The hook takes its session key from lib/session.sh, env first, and the stamp filename
+# is built from it — so a driver that left the runner's own id in the environment would
+# have this monitor watching a file the fixture never wrote.
 fire() {  # <cwd> [session] [event] [stop_hook_active]
-  HOOK_OUT=$(bash "$HOOK" <<< "$(stdin_for "$1" "${2:-$SID}" "${3:-Stop}" "${4:-false}")" 2>/dev/null)
+  HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="${2:-$SID}" bash "$HOOK" \
+    <<< "$(stdin_for "$1" "${2:-$SID}" "${3:-Stop}" "${4:-false}")" 2>/dev/null)
   HOOK_RC=$?
 }
 
 fire_raw() {  # <stdin-json>
-  HOOK_OUT=$(bash "$HOOK" <<< "$1" 2>/dev/null); HOOK_RC=$?
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$1" 2>/dev/null); HOOK_RC=$?
 }
 
 reason_of()   { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
@@ -268,8 +291,21 @@ git -C "$WTREPO" config user.name "T"
 echo seed > "$WTREPO/README.md"
 git -C "$WTREPO" add README.md >/dev/null 2>&1
 git -C "$WTREPO" commit -qm seed >/dev/null 2>&1
-mkdir -p "$WTREPO/.bionic/tmp"
+mkdir -p "$WTREPO/.bionic/tmp" "$WTREPO/.bionic/docs/plans"
 printf 'poker-interval: 1s\n' > "$WTREPO/.bionic/config.yaml"
+# The open run this monitor is scoped by lives at the MAIN repository too — same
+# mapping, same reason: a reader rooted at the worktree would find neither.
+cat > "$WTREPO/.bionic/docs/plans/wave-01.plan.md" <<'PRWTPLAN'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: slices in flight
+PRWTPLAN
 WT="$WTBASE/wt"
 git -C "$WTREPO" worktree add -q -b pr-wt "$WT" >/dev/null 2>&1
 

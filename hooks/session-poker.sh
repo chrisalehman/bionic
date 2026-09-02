@@ -97,9 +97,7 @@
 #            for" as no rows existing, so all read DISARM (S2 design decision plus epic-16
 #            w2 Step-6 remediation R4, both logged to the plan). A DISARM tick REMOVES this
 #            session's stamp as its last act — the decision is terminal, so the disk record
-#            that a Patrol runs here has to stop saying so — except on a tick that also
-#            found the dispatch wall blind, where the wall-blind NOTIFY outranks the DISARM
-#            and the stamp stays.
+#            that a Patrol runs here has to stop saying so.
 #   NOTIFY   at least one UNACKED UNMET row's elapsed time (now − launched_at) exceeds its own
 #            declared `duration=`, read by the same parser `verdict` uses for `cadence=`
 #            (hooks/session-sweeper.sh's parse_seconds, duplicated below — see that file's
@@ -1315,36 +1313,16 @@ EOF
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
 
-    # ---------- THE BLIND-WALL CHECK, BEFORE ANYTHING IS DECIDED FROM THE ROSTER ----------
-    #
-    # It runs here, ahead of the read, because the loudest symptom of a blind wall is the
-    # absent-roster REFUSAL at the bottom of this verb — a message that names the wrong
-    # cause ("nothing has been dispatched yet") for the one state where the diagnosis
-    # matters most. Emitting first means the diagnosis travels WITH that refusal instead of
-    # being lost behind it. It decides nothing else: the roster's own verdict is untouched,
-    # and a session whose transcript cannot be resolved is silent rather than alarmed.
-    WALL_BLIND=0
-    TRANSCRIPT="$(session_transcript "$SESSION_ID")" || TRANSCRIPT=""
-    if [ -n "$TRANSCRIPT" ]; then
-      TX_DISPATCHES="$(count_main_thread_dispatches "$TRANSCRIPT")"
-      TX_REFUSED="$(count_refused_dispatches "$TRANSCRIPT")"
-      ROSTERED="$(count_rostered_dispatches "$ROSTER_FILE" "$SESSION_ID")"
-      [ -n "$TX_DISPATCHES" ] || TX_DISPATCHES=0
-      [ -n "$TX_REFUSED" ]    || TX_REFUSED=0
-      [ -n "$ROSTERED" ]      || ROSTERED=0
-      case "${TX_DISPATCHES}${TX_REFUSED}${ROSTERED}" in
-        *[!0-9]*) : ;;   # an unreadable count is no count — refuse rather than guess
-        *)
-          if [ "$TX_DISPATCHES" -gt "$(( ROSTERED + TX_REFUSED ))" ]; then
-            WALL_BLIND=1
-            printf '%s|at=%s|session=%s|decision=NOTIFY|check=wall-blind|dispatches=%s|rostered=%s|refused=%s|cure=re-invoke /bionic:canonical-sdlc\n' \
-              "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" \
-              "$TX_DISPATCHES" "$ROSTERED" "$TX_REFUSED"
-            say "NOTIFY wall-blind: ${TX_DISPATCHES} dispatches, ${ROSTERED} rostered — re-invoke /bionic:canonical-sdlc (hooks do not survive continue, /clear+resume, or /reload-plugins)"
-          fi
-          ;;
-      esac
-    fi
+    # THE BLIND-WALL CHECK IS GONE (bionic 1.4.0, spec AC-7). It compared main-thread
+    # `Agent` tool_uses in the transcript against rows on the roster and raised a NOTIFY
+    # when dispatches outnumbered them, on the reasoning that the dispatch wall lived in
+    # the governing skill's frontmatter and therefore died with a `/clear`, a continue or
+    # a `/reload-plugins`. Every wall is registered in hooks/hooks.json now and survives
+    # all three, so the condition it detected cannot arise the way it did — while its
+    # false positive could and did: the check had no "no active run" branch, so a session
+    # that had simply not engaged a run read as a session whose wall had died (observed
+    # 20:07Z, 2026-09-02). A diagnosis for a failure mode the registration change removes,
+    # firing on sessions that have nothing wrong with them, is worth less than nothing.
 
     # EXACTLY ONE verdict read over the whole roster (no name argument), run from the repo
     # root exactly as landing-gate.sh runs it. `|| exit 9` keeps a failed `cd` out of the
@@ -1470,19 +1448,6 @@ EOF
       printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
-      # A blind wall outranks a quiet roster on the EXIT CODE alone — the decision line
-      # above still says what the roster says. Silence here would be the detector's own
-      # failure mode: the roster of a session whose wall is blind is exactly the roster
-      # that looks finished.
-      #
-      # AND IT OUTRANKS THE STAMP REMOVAL OUTRIGHT, which is the one place the precedence
-      # is more than an exit code. An empty roster under a blind wall is not a finished
-      # run, it is a run whose dispatches stopped being recorded — so the clock is the last
-      # thing that should stop, and the stamp stays exactly where the re-invoke the NOTIFY
-      # names will need it. SKILL.md §Dispatch states this order for the model; this is the
-      # same order taken on disk.
-      [ "$WALL_BLIND" -eq 1 ] && exit 1
-
       # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
       # so the stamp this very tick wrote before it decided has to stop claiming a live
       # clock, or hooks/patrol-revive.sh reads the stop this line just chose as a death and
@@ -1515,7 +1480,6 @@ EOF
     else
       say "QUIET — $OPEN open row(s) on this roster, none past their declared duration."
     fi
-    [ "$WALL_BLIND" -eq 1 ] && exit 1
     exit 0
     ;;
 esac
