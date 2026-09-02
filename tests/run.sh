@@ -348,6 +348,13 @@ run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh
 #     version-2 preflight attestation that records it. The kill datum this suite's memory
 #     term is built on is the one written at :63-68 of this file.
 run "resources.test.sh" bash tests/resources.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 3.1, spec AC-15): doctor's
+# `walls` row. The four hooks the loader idiom replaced are asked, through the idiom itself
+# (`bionic_loader_pin` driven with $0 set to each hook's own path), whether the library they
+# source still resolves; a copied payload tree with one library deleted is the fixture.
+# Hermetic: HOME and BIONIC_PLUGINS_DIR are overridden per run, so the healing candidates
+# cannot reach this machine's real registry and quietly repair the damage.
+run "doctor-walls.test.sh" bash tests/doctor-walls.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions

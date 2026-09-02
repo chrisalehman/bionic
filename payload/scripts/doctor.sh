@@ -134,6 +134,14 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 # and the copy nothing walled (this one) was the one that broke.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/width.sh"
+# loader.sh, which is a CARRIER and not a loader: sourcing it defines
+# `bionic_loader_pin` and nothing else. Doctor wants it for one job — the
+# `walls` row below drives the canonical idiom text against each wall hook's own
+# path instead of re-implementing the candidate list a third time. A row that
+# re-derived "where would this hook look" could disagree with where the hook
+# actually looks, which is the whole failure the row exists to catch.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/loader.sh"
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
@@ -509,6 +517,89 @@ for _cm in "$_doctor_payload_root"/commands/*.md; do
   _cm_name="${_cm##*/}"; _cm_name="${_cm_name%.md}"
   COMMAND_NAMES="${COMMAND_NAMES}${COMMAND_NAMES:+, }${_cm_name}"
   [ -s "$_cm" ] && COMMANDS_OK=$((COMMANDS_OK + 1))
+done
+
+# ─── The walls, and whether they can still read a command ────────────────────
+#
+# THE ONE FACT THIS REPORT GATHERS BY RUNNING SOMEBODY ELSE'S CODE (AC-15,
+# handoff 3.1). Four hooks stand over actions that cannot be taken back or
+# cannot be re-classified — protect-main and the evidence gate refuse a command
+# they cannot read, farm-out-reminder and background-suite-guard classify one —
+# and each of them finds its library through the loader idiom
+# (payload/scripts/lib/loader.sh, spec AC-16). A wall whose library has gone
+# missing is the lockout this whole wave is named for: the wall fires, cannot
+# read, and refuses everything including the command that would repair it.
+#
+# ASKED THROUGH THE IDIOM ITSELF, never through a copy of it. `bionic_loader_pin`
+# prints the canonical block; it runs here in a child shell whose `$0` is the
+# HOOK'S OWN PATH, which is the single input the block's candidate list is a
+# function of. So this row cannot drift from what the hook will do when it
+# fires — a re-implementation of "beside the hook, then the marketplace source,
+# then the newest cache version" would be a fourth copy of the thing the pin
+# exists to keep at one.
+#
+# READ-ONLY, LIKE EVERYTHING ELSE HERE. The block sets three variables and
+# defines two functions; it executes neither `loader_fail_open` nor
+# `loader_fail_closed`, so nothing refuses and nothing exits on doctor's behalf.
+#
+# THE WANTED BASENAMES COME FROM THE HOOK, not from a list kept here. A hook
+# that adopts the idiom declares them on a `BIONIC_LIB_WANT=` line above the
+# block; one that has not yet adopted it names its library in the `lib/<name>.sh`
+# path it sources. Either way the answer is the hook's own, so this row keeps
+# telling the truth across the slice that rewrites the hooks.
+BIONIC_WALL_HOOKS="protect-main canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard"
+
+_doctor_wall_want() {  # <hook-file> -> space-separated library basenames
+  local f="${1:-}" want=""
+  want="$(grep -m1 '^[[:space:]]*BIONIC_LIB_WANT=' "$f" 2>/dev/null \
+          | sed -e 's/^[[:space:]]*BIONIC_LIB_WANT=//' -e 's/^["'"'"']//' -e 's/["'"'"']$//')"
+  if [ -z "$want" ]; then
+    # No declaration: read the library out of the source path itself, from the
+    # CODE lines only — a prose mention in a header comment is not a dependency.
+    want="$(grep -v '^[[:space:]]*#' "$f" 2>/dev/null \
+            | grep -oE 'lib/[A-Za-z0-9_.-]+\.sh' \
+            | sed 's|^lib/||' | sort -u | tr '\n' ' ')"
+  fi
+  printf '%s' "$want"
+}
+
+# The idiom, plus one line that reports what it concluded. Built once: the pin is
+# a heredoc `cat`, and paying for it per wall would be four subshells for one
+# constant string.
+_DOCTOR_LOADER_BLOCK="$(bionic_loader_pin 2>/dev/null)"
+_DOCTOR_LOADER_PROBE="${_DOCTOR_LOADER_BLOCK}
+printf 'lib=%s|missing=%s|cands=%s\\n' \"\$BIONIC_LIB\" \"\$BIONIC_LIB_MISSING\" \"\$BIONIC_LIB_CANDS\""
+
+_doctor_wall_probe() {  # <hook-file> <wanted basenames> -> lib=…|missing=…|cands=…
+  BIONIC_LIB_WANT="${2:-}" bash -c "$_DOCTOR_LOADER_PROBE" "$1" 2>/dev/null
+}
+
+WALLS_TOTAL=0; WALLS_OK=0; WALL_ROWS=""
+for _wall in $BIONIC_WALL_HOOKS; do
+  WALLS_TOTAL=$((WALLS_TOTAL + 1))
+  _wall_file="${_doctor_payload_root}/hooks/${_wall}.sh"
+  if [ ! -r "$_wall_file" ]; then
+    WALL_ROWS="${WALL_ROWS}$(_doctor_native_row "$DOCTOR_BAD" "wall" "—" \
+      "${_wall} is not in this payload — reinstall the plugin")"$'\n'
+    fix "the ${_wall} wall is missing from the payload → run /bionic:setup — repair"
+    continue
+  fi
+  _wall_want="$(_doctor_wall_want "$_wall_file")"
+  _wall_probe="$(_doctor_wall_probe "$_wall_file" "$_wall_want")"
+  _wall_lib="$(_doctor_pfield "$_wall_probe" lib)"
+  if [ -n "$_wall_lib" ]; then
+    WALLS_OK=$((WALLS_OK + 1))
+    continue
+  fi
+  # `missing` is the first basename the hook asked for and did not get; with an
+  # empty probe (no bash, no pin) fall back to what the hook declared, so the row
+  # names a library either way rather than an empty string.
+  _wall_missing="$(_doctor_pfield "$_wall_probe" missing)"
+  [ -n "$_wall_missing" ] || _wall_missing="${_wall_want%% *}"
+  [ -n "$_wall_missing" ] || _wall_missing="the bionic library"
+  WALL_ROWS="${WALL_ROWS}$(_doctor_native_row "$DOCTOR_BAD" "wall" "—" \
+    "${_wall} cannot load ${_wall_missing}")"$'\n'
+  fix "the ${_wall} wall cannot load ${_wall_missing} → run /bionic:setup — repair"
 done
 
 INST_AGENT_FACT="$(detect_installed_agent_copies)"
@@ -1253,6 +1344,19 @@ case "$PLUGIN_HOOKS" in
     _doctor_native_row "$DOCTOR_BAD" "hooks" "${HOOK_RESOLVING}/${HOOK_TOTAL}" \
       "$(detect_reconverge_hint hooks)" ;;
 esac
+# THE WALLS ROW (AC-15). One row when everything resolves — four healthy walls
+# are four lines about nothing, which is format rule 4 — and one row per wall
+# that cannot, named, when any of them fails. `intact → clean` is the spec's own
+# word for the healthy case, and the ✗ here is matched by the FIX line gathered
+# beside the probe, which is the invariant these symbols are worth anything under.
+if [ "$WALLS_OK" = "$WALLS_TOTAL" ] && [ "$WALLS_TOTAL" -gt 0 ]; then
+  _doctor_native_row "$DOCTOR_OK" "walls" "${WALLS_OK}/${WALLS_TOTAL}" \
+    "every wall resolves its library"
+else
+  _doctor_native_row "$DOCTOR_BAD" "walls" "${WALLS_OK}/${WALLS_TOTAL}" \
+    "a wall that cannot read a command refuses it"
+  printf '%s' "$WALL_ROWS"
+fi
 if [ "$COMMANDS_OK" = "$COMMANDS_TOTAL" ] && [ "$COMMANDS_TOTAL" -gt 0 ]; then
   _doctor_native_row "$DOCTOR_OK" "commands" "${COMMANDS_OK}/${COMMANDS_TOTAL}" "$COMMAND_NAMES"
 else
