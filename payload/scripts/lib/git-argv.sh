@@ -740,6 +740,9 @@ _git_argv_expand_at() {
 #                        the list is unaffected;
 #   `( … )`              a group starts where its parent is, and every move
 #                        made inside it ends with it;
+#   `{ …; }`             the current shell, so a move inside it holds — but
+#                        the operator after the `}` binds to the whole
+#                        group (`{ cd wt; } & git push` moved nothing);
 #   `sh -c '…'`          a child shell starting where its parent is, whose
 #                        moves never come back;
 #   `eval '…'`           the CURRENT shell: its moves do come back.
@@ -749,9 +752,12 @@ _git_argv_expand_at() {
 # target the scanner keeps as written (`cd "$WT"`): the caller cannot read
 # it and falls back.
 #
-# NOT MODELLED, deliberately: conditions. `if false; then cd wt; fi` reads
-# as a move because the reader does not evaluate `false` — the same line
-# the library draws for `$(…)`. A wall that must refuse it has Block 1.
+# NOT MODELLED, deliberately: whether a command RAN. Nothing here evaluates
+# a condition, so the body of an `if`, `while`, `until` or `case` reads as
+# if it ran (`if false; then cd wt; fi` is a move), and the left side of a
+# `||` is taken to have succeeded — right for a `cd`, unknowable for
+# `test -d x || cd main`. The same line the library draws for `$(…)`. A wall
+# that must refuse those has Block 1.
 git_argv_expand_moves() {
   _git_argv_moves_at "$1" "" 0
 }
@@ -763,12 +769,44 @@ _git_argv_moves_at() {
   local _cmd="$1" _cur="$2" _depth="$3"
   local _line _d _rest _term _seg _at _inner _rc _kind
   local _stack="" _lstack="" _sdepth=0 _base="$2" _skip=0 _skipat="" _skipset=0 _pipe=0
+  local _bstack="" _bclosed=0 _bcur="" _w _lead
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _d="${_line%%"$GIT_ARGV_RS"*}"
     _rest="${_line#*"$GIT_ARGV_RS"}"
     _term="${_rest%%"$GIT_ARGV_RS"*}"
     _seg="${_rest#*"$GIT_ARGV_RS"}"
+
+    # BRACE GROUPS are a list scope, not a subshell (critic pass 3). `{ …; }`
+    # runs in the current shell, so a move inside it holds — but the operator
+    # after the `}` binds to the WHOLE group: `{ cd wt; } & git push` moved
+    # nothing in the parent, and `{ cd wt; } | cat` ran the group in a
+    # pipeline subshell. The scanner does not track braces (bash separates
+    # them with `;`/whitespace only), so they are read here from the leading
+    # words: a `{` saves the list's starting point and the directory at
+    # entry; a `}` restores the starting point (the `;` inside the group
+    # moved it) and remembers the entry directory for a `|` on this segment.
+    _bclosed=0
+    _lead="$_seg"
+    while [ -n "$_lead" ]; do
+      _w="${_lead%%"$GIT_ARGV_US"*}"
+      case "$_w" in
+        '{') _bstack="$_bstack$GIT_ARGV_US$_base$GIT_ARGV_RS$_cur" ;;
+        '}')
+          if [ -n "$_bstack" ]; then
+            _w="${_bstack##*"$GIT_ARGV_US"}"; _bstack="${_bstack%"$GIT_ARGV_US"*}"
+            _base="${_w%%"$GIT_ARGV_RS"*}"; _bcur="${_w#*"$GIT_ARGV_RS"}"
+            _bclosed=1
+          fi
+          ;;
+        then|else|elif|do|'!') ;;
+        *) break ;;
+      esac
+      case "$_lead" in
+        *"$GIT_ARGV_US"*) _lead="${_lead#*"$GIT_ARGV_US"}" ;;
+        *) _lead="" ;;
+      esac
+    done
 
     # Entering a group inherits the current directory and starts a list
     # there; leaving one restores what the parent had, list start included.
@@ -828,7 +866,7 @@ _git_argv_moves_at() {
         continue
         ;;
       '&')  _skip=0; _cur="$_base" ;;
-      '|')  _skip=0; _pipe=1 ;;
+      '|')  _skip=0; _pipe=1; [ "$_bclosed" -eq 0 ] || _cur="$_bcur" ;;
       ';'|nl|eof) _skip=0; _base="$_cur" ;;
       *)    _skip=0 ;;
     esac

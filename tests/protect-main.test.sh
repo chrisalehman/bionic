@@ -499,6 +499,18 @@ expect_block_in "S8 pushd -n <worktree> && push: -n only stacks" \
 expect_allow_in "S8 a # comment on the cd line" \
   "$S8_MAIN" "$(printf 'cd %s  # into the worktree\ngit push origin feat' "$S8_WT")"
 
+# --- third critic pass: brace groups bind the operator after them ---
+expect_block_in "S8 { cd <worktree>; } & push: the whole group ran in the background" \
+  "$S8_MAIN" "{ cd $S8_WT; } & git push"
+expect_block_in "S8 { cd <worktree>; } | cat; push: the whole group was a pipeline element" \
+  "$S8_MAIN" "{ cd $S8_WT; } | cat; git push"
+expect_allow_in "S8 { cd <worktree>; } && push: braces are not a subshell" \
+  "$S8_MAIN" "{ cd $S8_WT; } && git push origin feat"
+expect_allow_in "S8 { cd <worktree>; push; }" \
+  "$S8_MAIN" "{ cd $S8_WT; git push origin feat; }"
+expect_block_in "S8 { cd <main>; } || cd <worktree>; push: the group succeeded" \
+  "$S8_WT"   "{ cd $S8_MAIN; } || cd $S8_WT; git push"
+
 # --- fail-closed: a target git cannot read falls back to the hook cwd ---
 expect_block_in "S8 cd to a directory that is not a repo" \
   "$S8_MAIN" "cd $S8_NOREPO && git push origin feat"

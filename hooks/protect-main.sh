@@ -112,9 +112,10 @@ while IFS= read -r line; do
   #
   # NOT MODELLED, deliberately: a `cd` target the shell would expand (`$VAR`,
   # `$(…)`) — read as written, so it falls back to the hook cwd, which
-  # refuses; write the path. And conditions: `if false; then cd wt; fi` reads
-  # as a move, because nothing here evaluates `false` — the line the library
-  # draws for `$(…)` too. Both are named in git_argv_expand_moves.
+  # refuses; write the path. And whether a command RAN: the body of an `if`,
+  # `while`, `until` or `case` reads as if it ran, and the left side of a
+  # `||` as if it succeeded, because nothing here evaluates a condition —
+  # the line the library draws for `$(…)` too. Named in git_argv_expand_moves.
   CURRENT_BRANCH=""
   _pm_resolved=0
   _pm_hops="$PUSH_AT"

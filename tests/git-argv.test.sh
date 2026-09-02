@@ -465,6 +465,28 @@ eq "a literal RS cannot hide a push"    "cd|x" \
 eq "…the push is still read"            "git|push|origin|main" \
    "$(segs "$(printf 'cd x\036; git push origin main')" | sed -n 2p)"
 
+# --- third critic pass: brace groups are a LIST scope, not a subshell ---
+# `{ …; }` runs in the current shell, so a move inside it holds — but the
+# operator after the `}` binds to the whole group, and the `;` inside it
+# must not have moved the list's starting point.
+eq "{ cd; } & push: the whole group ran in the background" "<hook>:{ cd /a / /a:} / <hook>:git push" \
+   "$(moves_of '{ cd /a; } & git push')"
+eq "{ cd; } | cat; push: the whole group was a pipeline element" "<hook>:{ cd /a / /a:} / <hook>:cat / <hook>:git push" \
+   "$(moves_of '{ cd /a; } | cat; git push')"
+eq "{ cd; } && push: the move holds (no subshell)" "<hook>:{ cd /a / /a:} / /a:git push" \
+   "$(moves_of '{ cd /a; } && git push')"
+eq "{ cd; push; }: inside the group too"  "<hook>:{ cd /a / /a:git push / /a:}" \
+   "$(moves_of '{ cd /a; git push; }')"
+eq "{ cd A; } || cd B: the group succeeded" "<hook>:{ cd /a / /a:} / /a:cd /b / /a:git push" \
+   "$(moves_of '{ cd /a; } || cd /b; git push')"
+eq "cd; { cd; } & push: back to the list before the group" "<hook>:cd /a / /a:{ cd /b / /b:} / /a:git push" \
+   "$(moves_of 'cd /a; { cd /b; } & git push')"
+eq "{ { cd; }; } & push: nested braces"  "<hook>:{ { cd /a / /a:} / /a:} / <hook>:git push" \
+   "$(moves_of '{ { cd /a; }; } & git push')"
+eq "cd && { cd; } | cat; push: the outer move survives the piped group" \
+   "<hook>:cd /a / /a:{ cd /b / /b:} / /a:cat / /a:git push" \
+   "$(moves_of 'cd /a && { cd /b; } | cat; git push')"
+
 # ============================================================
 # Section 2: fail-closed sourcing (AC-12)
 # ============================================================
