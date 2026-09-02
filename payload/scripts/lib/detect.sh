@@ -622,28 +622,62 @@ _detect_installed_plugins_file() {
 }
 
 # The marketplace REGISTRATION file, a sibling of the plugin one above and named the
-# same way. `known_marketplaces.json` is keyed by marketplace name — bionic's own
-# marketplace manifest (`.claude-plugin/marketplace.json`) fixes that name to `bionic`,
-# so the lookup below is not a guess — and each entry's `source.source` is the CLI's own
-# record of how that feed was registered: `"directory"` for a local checkout (what a
-# dogfood install is) or a git kind (`"github"`, `"url"`, …) for anything fetched from a
-# repo. `detect_reconverge_hint` below is the one caller.
+# same way. `known_marketplaces.json` is keyed by marketplace NAME, and that name is
+# not fixed to the literal `bionic` — it is whatever marketplace this particular
+# install's feed was registered under, which `_detect_marketplace_name` below reads
+# out of the plugin registry rather than assuming. Each entry's `source.source` is the
+# CLI's own record of how that feed was registered: `"directory"` for a local checkout
+# (what a dogfood install is) or a git kind (`"github"`, `"url"`, …) for anything
+# fetched from a repo. `detect_reconverge_hint` below is the one caller.
 _detect_known_marketplaces_file() {
   printf '%s' "${BIONIC_KNOWN_MARKETPLACES_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/known_marketplaces.json}"
 }
 
+# THE MARKETPLACE NAME THIS INSTALL ACTUALLY CAME FROM (L-DETECT/4.1, AC-18). Bugfix:
+# `detect_marketplace_feed_kind` used to key `known_marketplaces.json` on the literal
+# string `bionic`, which is merely bionic's OWN marketplace's usual name — a fork
+# registered under any other name (`bionic@my-fork`) has no `bionic` entry in that
+# file at all and read `unknown` forever, on a machine whose registry carries every
+# fact needed to answer correctly.
+#
+# THE ORACLE IS installed_plugins.json, the same file `_detect_registry_install_path`
+# reads: its keys are `<plugin-name>@<marketplace-name>`, so the marketplace name for
+# THIS install is the suffix of whichever key's plugin-name half is `bionic` — the
+# same `split("@")` shape `DETECT_PLUGIN_ROOT_JQ` already keys on, one field over.
+#
+# `bionic` IS STILL THE FALLBACK, not a magic string. When the registry is missing,
+# unparsable, or names no `bionic` entry, this returns the literal `bionic` rather
+# than propagating a failure into the feed-kind lookup — that is the CLI's documented
+# public marketplace name (README.md) and the correct guess for the overwhelmingly
+# common case, exactly the same "unknown defaults to the safer common case" posture
+# `detect_reconverge_hint` already documents for the neighboring question.
+DETECT_MARKETPLACE_NAME_JQ='.plugins // {} | keys[] | select(split("@")[0] == "bionic") | split("@")[1] // empty'
+
+_detect_marketplace_name() {
+  local reg name
+  reg="$(_detect_installed_plugins_file)"
+  [ -f "$reg" ] || { printf 'bionic\n'; return 0; }
+  command -v jq >/dev/null 2>&1 || { printf 'bionic\n'; return 0; }
+  name="$(jq -r "$DETECT_MARKETPLACE_NAME_JQ" "$reg" 2>/dev/null | head -1)"
+  case "$name" in ''|null) printf 'bionic\n' ;; *) printf '%s\n' "$name" ;; esac
+  return 0
+}
+
 # WHICH FEED BIONIC CAME FROM, answered the same oracle-not-guess way as the install
 # path above: the file the CLI itself wrote when the marketplace was registered, read
-# once, here. `directory` on a local-checkout feed, `git` on anything fetched from a
-# repo, `unknown` when the file is missing, unparsable, or names no `bionic` entry —
-# `jq`-less machines get `unknown` too rather than a hand-rolled second reading, since
-# this only feeds an advisory hint and a wrong guess there is worse than an honest one.
+# once, here, under the marketplace name THIS install is actually registered under
+# (`_detect_marketplace_name`, immediately above — not a literal). `directory` on a
+# local-checkout feed, `git` on anything fetched from a repo, `unknown` when the file
+# is missing, unparsable, or names no entry for that marketplace — `jq`-less machines
+# get `unknown` too rather than a hand-rolled second reading, since this only feeds an
+# advisory hint and a wrong guess there is worse than an honest one.
 detect_marketplace_feed_kind() {
-  local mp kind
+  local mp name kind
   mp="$(_detect_known_marketplaces_file)"
   [ -f "$mp" ] || { printf 'unknown\n'; return 0; }
   command -v jq >/dev/null 2>&1 || { printf 'unknown\n'; return 0; }
-  kind="$(jq -r '.bionic.source.source // empty' "$mp" 2>/dev/null)"
+  name="$(_detect_marketplace_name)"
+  kind="$(jq -r --arg n "$name" '.[$n].source.source // empty' "$mp" 2>/dev/null)"
   case "$kind" in
     directory) printf 'directory\n' ;;
     ''|null)   printf 'unknown\n' ;;
