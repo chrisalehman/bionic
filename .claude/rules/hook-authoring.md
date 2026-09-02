@@ -53,6 +53,22 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
   regexes that caused them. A hook that cannot load the library REFUSES, naming the path —
   never silently allows; `tests/git-argv.test.sh` proves that by renaming the library away.
 
+- **`protect-main.sh` Block 3 judges the branch WHERE THE PUSH RUNS, not in the hook's cwd —
+  and every push segment is judged, inside the loop.** The hook's cwd is the session's — the
+  main checkout, on main — and a worktree push moves first (`cd <repo>/.worktrees/x && git
+  push origin x`, `git -C <worktree> push`). The library reads the moves by the shell's own
+  rules (`git_argv_expand_moves`: `;`/`&&`/newline keep a `cd`, `||` judges the next segment
+  where the shell was before, `&`/`|` run the cd in a subshell of its own, `( … )` and
+  `sh -c` moves end with their group, `cd -`/`popd`/a bare `cd` empty the directory) and
+  keeps the `-C <dir>` values (`GIT_C_DIRS`); Block 3 composes the two and asks git for HEAD
+  there. Fail-closed: a target git cannot read — including a `cd "$VAR"` the scanner keeps as
+  written — falls back to the hook cwd. A real repo in detached HEAD is judged on its own
+  branchless state. Hit as three false blocks in one day (2026-08-05, upstream PR #16) and
+  again after the 1.3.2 tokenizer rewrite dropped the reading; a first cut that took every
+  `cd` as a move and judged only the last push opened `git push && cd wt && git push` and
+  `( cd wt ) && git push` from main (critic, 2026-09-02). `tests/protect-main.test.sh`
+  Section 8 pins all of it against real repositories, both directions.
+
 - **Any hook inspecting HEAD's file list must use `git show -m --name-only --format= HEAD`**,
   not `git show --name-only --pretty=format: HEAD`. Without `-m`, a clean merge commit (no
   conflicts) emits zero output — git's default "combined diff" format is empty unless parents

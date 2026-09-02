@@ -71,6 +71,10 @@ exec "$REAL_GIT" "$@"
 FAKEGIT
 chmod +x "$FAKE_BIN/git"
 
+# The PATH without the shim, for Section 8: its cases are real repositories
+# whose branch is the fact under test, so the shim's controllable answer would
+# only hide the reading.
+REAL_PATH="$PATH"
 export PATH="$FAKE_BIN:$PATH"
 
 cleanup() { rm -rf "$FAKE_BIN"; }
@@ -333,6 +337,148 @@ expect_block "B-1 …single-quoted too" \
 # PAIRED POSITIVE: a real unquoted opener still hides its body.
 expect_allow "B-1 an UNQUOTED heredoc body is still ignored" \
   "$(printf 'cat > /tmp/n.txt <<EOF\ngit push origin main\nEOF\n')"
+
+# ============================================================
+# SECTION 8: Block 3 judges the branch WHERE THE PUSH RUNS (real repos)
+# ============================================================
+#
+# THE FALSE BLOCK THIS SECTION EXISTS FOR. Block 3 read HEAD in the hook's own
+# cwd. The hook's cwd is the session's — the main checkout, on main — while a
+# worktree push moves first: `cd <repo>/.worktrees/x && git push origin x`, or
+# `git -C <worktree> push origin x`. Every such push was refused as "Cannot
+# push while on 'main'" (three in one day on 2026-08-05; upstream PR #16). The
+# same reading, run the other way, is a wall: a `cd <main checkout>` in front
+# of a bare push from a feature-branch cwd IS a push from main and must be
+# blocked. Block 1 and Block 2 are untouched by any of this — an explicit main
+# destination or a force stays refused wherever the push runs.
+#
+# No shim here (REAL_PATH): the repositories are real and their branch is the
+# fact under test. The hook is run with a chosen cwd, because that is the
+# variable the defect was about.
+
+run_hook_in() {  # <hook cwd> <command> [HOME for the hook]
+  local dir="$1" cmd="$2" home="${3:-$HOME}"
+  ( cd "$dir" && jq -n --arg c "$cmd" '{tool_input: {command: $c}}' \
+      | PATH="$REAL_PATH" HOME="$home" bash "$HOOK" 2>/dev/null )
+}
+expect_block_in() {  # <label> <hook cwd> <command> [HOME]
+  local label="$1"
+  TOTAL=$((TOTAL + 1))
+  if run_hook_in "$2" "$3" "${4:-$HOME}"; then
+    echo "FAIL (expected BLOCK): $label"; FAIL=$((FAIL + 1))
+  else
+    echo "PASS: $label"; PASS=$((PASS + 1))
+  fi
+}
+expect_allow_in() {  # <label> <hook cwd> <command> [HOME]
+  local label="$1"
+  TOTAL=$((TOTAL + 1))
+  if run_hook_in "$2" "$3" "${4:-$HOME}"; then
+    echo "PASS: $label"; PASS=$((PASS + 1))
+  else
+    echo "FAIL (expected ALLOW): $label"; FAIL=$((FAIL + 1))
+  fi
+}
+
+echo ""
+echo "=== Section 8: the branch where the push runs (real repos, no shim) ==="
+
+S8=$(mktemp -d)
+S8_MAIN="$S8/main"                    # the main checkout, on master
+S8_WT="$S8_MAIN/.worktrees/feat"      # a linked worktree, on feat
+S8_DETACHED="$S8/detached"            # a real repo with no branch at all
+S8_NOREPO="$S8/notrepo"               # a directory git knows nothing about
+_s8_git() { PATH="$REAL_PATH" git -c user.email=t@t -c user.name=t "$@"; }
+_s8_git init -q -b master "$S8_MAIN"
+_s8_git -C "$S8_MAIN" commit -q --allow-empty -m init
+_s8_git -C "$S8_MAIN" worktree add -q "$S8_WT" -b feat
+_s8_git init -q -b master "$S8_DETACHED"
+_s8_git -C "$S8_DETACHED" commit -q --allow-empty -m init
+_s8_git -C "$S8_DETACHED" checkout -q --detach
+mkdir -p "$S8_NOREPO"
+cleanup() { rm -rf "$FAKE_BIN" "$S8"; }
+
+# --- the baseline both directions rest on ---
+expect_block_in "S8 from the main checkout, a push is judged on master" \
+  "$S8_MAIN" "git push origin feat"
+expect_allow_in "S8 from the worktree, a push is judged on feat" \
+  "$S8_WT"   "git push origin feat"
+
+# --- the worktree shape: judged where the push runs, not where the hook is ---
+expect_allow_in "S8 cd <worktree> && push, from the main checkout" \
+  "$S8_MAIN" "cd $S8_WT && git push origin feat"
+expect_allow_in "S8 cd <worktree> && bare push" \
+  "$S8_MAIN" "cd $S8_WT && git push"
+expect_allow_in "S8 cd <worktree> && push -u" \
+  "$S8_MAIN" "cd $S8_WT && git push -u origin feat"
+expect_allow_in "S8 git -C <worktree> push" \
+  "$S8_MAIN" "git -C $S8_WT push origin feat"
+expect_allow_in "S8 git -C <worktree> bare push" \
+  "$S8_MAIN" "git -C $S8_WT push"
+expect_allow_in "S8 a relative cd (.worktrees/feat)" \
+  "$S8_MAIN" "cd .worktrees/feat && git push origin feat"
+expect_allow_in "S8 a quoted cd with a trailing space" \
+  "$S8_MAIN" "cd \"$S8_WT\" && git push origin feat"
+expect_allow_in "S8 a ~-rooted cd is expanded" \
+  "$S8_MAIN" "cd ~/main/.worktrees/feat && git push origin feat" "$S8"
+expect_allow_in "S8 cd then -C compose (cd <root> && git -C main/.worktrees/feat)" \
+  "$S8_MAIN" "cd $S8 && git -C main/.worktrees/feat push origin feat"
+expect_allow_in "S8 the push inside sh -c is read where it runs" \
+  "$S8_MAIN" "sh -c 'cd $S8_WT && git push origin feat'"
+expect_allow_in "S8 a real repo with no branch (detached HEAD) is not main" \
+  "$S8_MAIN" "cd $S8_DETACHED && git push origin HEAD:feat/x"
+
+# --- the same reading is a wall in the other direction ---
+expect_block_in "S8 cd <main checkout> && bare push, from the worktree" \
+  "$S8_WT"   "cd $S8_MAIN && git push"
+expect_block_in "S8 git -C <main checkout> push origin, from the worktree" \
+  "$S8_WT"   "git -C $S8_MAIN push origin"
+expect_block_in "S8 the LAST cd decides (worktree, then main checkout)" \
+  "$S8_WT"   "cd $S8_WT && cd $S8_MAIN && git push origin feat"
+
+# --- every push is judged where IT runs, not where the last one does ---
+expect_block_in "S8 two pushes: the first runs on master" \
+  "$S8_MAIN" "git push && cd $S8_WT && git push"
+expect_block_in "S8 two pushes: the second runs on master" \
+  "$S8_WT"   "cd $S8_WT && git push origin feat && cd $S8_MAIN && git push"
+
+# --- a move the shell itself discards, or cannot be named, is no move ---
+expect_block_in "S8 cd <worktree> & push: the cd ran in the background" \
+  "$S8_MAIN" "cd $S8_WT & git push"
+expect_block_in "S8 cd <worktree> | push: the cd ran in a pipe" \
+  "$S8_MAIN" "cd $S8_WT | git push"
+expect_block_in "S8 cd <worktree> || push: runs only if the cd failed" \
+  "$S8_MAIN" "cd $S8_WT || git push"
+expect_allow_in "S8 cd <worktree> || exit 1; push: the guard shape" \
+  "$S8_MAIN" "cd $S8_WT || exit 1; git push origin feat"
+expect_block_in "S8 cd <worktree> && cd - && push: back somewhere unknown" \
+  "$S8_MAIN" "cd $S8_WT && cd - && git push"
+expect_block_in "S8 pushd <worktree> && popd && push" \
+  "$S8_MAIN" "pushd $S8_WT && popd && git push"
+expect_block_in "S8 ( cd <worktree> ) && push: the group's move ends with it" \
+  "$S8_MAIN" "( cd $S8_WT ) && git push"
+expect_allow_in "S8 ( cd <worktree> && push ): the move holds inside the group" \
+  "$S8_MAIN" "( cd $S8_WT && git push origin feat )"
+expect_allow_in "S8 cd <worktree> && ( push ): the group starts where its parent is" \
+  "$S8_MAIN" "cd $S8_WT && ( git push origin feat )"
+expect_block_in "S8 sh -c 'cd <worktree>' && push: a child shell's move never comes back" \
+  "$S8_MAIN" "sh -c 'cd $S8_WT' && git push"
+
+# --- fail-closed: a target git cannot read falls back to the hook cwd ---
+expect_block_in "S8 cd to a directory that is not a repo" \
+  "$S8_MAIN" "cd $S8_NOREPO && git push origin feat"
+expect_block_in "S8 cd to a directory that does not exist" \
+  "$S8_MAIN" "cd $S8/nowhere && git push origin feat"
+expect_block_in "S8 git -C a directory that does not exist" \
+  "$S8_MAIN" "git -C $S8/nowhere push origin feat"
+
+# --- Blocks 1 and 2 do not move ---
+expect_block_in "S8 an explicit master refspec from the worktree" \
+  "$S8_MAIN" "cd $S8_WT && git push origin HEAD:master"
+expect_block_in "S8 an explicit main destination via -C" \
+  "$S8_MAIN" "git -C $S8_WT push origin main"
+expect_block_in "S8 a force push from the worktree" \
+  "$S8_MAIN" "cd $S8_WT && git push --force origin feat"
 
 # ============================================================
 # Results

@@ -271,6 +271,137 @@ eq "--force-with-lease=<ref> sets force" "1" "$(force_of 'git push --force-with-
 eq "a leading + sets force"        "1" "$(force_of 'git push origin +main')"
 eq "-C <dir> does not hide --force" "1" "$(force_of 'git -C /tmp/r push --force origin feature')"
 
+echo ""
+echo "=== Section 1e: where the push RUNS — git -C hops and a leading cd ==="
+#
+# protect-main's Block 3 asks which branch is checked out where the push
+# happens. Skipping `-C <dir>` (1b) reads the subcommand correctly but throws
+# the one word that answers that question away; and a `cd <dir>` segment
+# before the push moves the shell before git ever runs. Both are the worktree
+# shape — `cd <repo>/.worktrees/x && git push origin x` — and until now Block 3
+# judged the hook's own cwd for it, which is the main checkout on main.
+
+cdirs_of() {  # <command> -> the -C values of the first git segment, joined by `|`
+  parse_cmd "$1" || { echo "<not-a-git-command>"; return 0; }
+  printf '%s' "${GIT_C_DIRS:-}" | tr "$US" '|'
+}
+cd_dir_of() {  # <command> -> the directory the LAST cd/pushd segment names, or <none>
+  local line d out="<none>"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    if d="$(git_argv_cd_dir "$line" 2>/dev/null)"; then out="$d"; fi
+  done <<< "$(git_argv_expand "$1")"
+  printf '%s' "$out"
+}
+
+eq "-C <dir> is kept as a hop"          "/tmp/r"   "$(cdirs_of 'git -C /tmp/r push origin main')"
+eq "two -C hops keep their order"       "/a|b"     "$(cdirs_of 'git -C /a -C b push origin main')"
+eq "a quoted -C value is one hop"       "/my dir"  "$(cdirs_of 'git -C "/my dir" push origin main')"
+eq "no -C means no hops"                ""         "$(cdirs_of 'git push origin main')"
+eq "-c <cfg> is not a hop"              ""         "$(cdirs_of 'git -c user.name=x push origin main')"
+eq "hops reset between parses"          ""         "$(cdirs_of 'git push origin main')"
+
+eq "cd <dir> before the push"           "/tmp/r"        "$(cd_dir_of 'cd /tmp/r && git push origin main')"
+eq "pushd <dir> before the push"        "/tmp/r"        "$(cd_dir_of 'pushd /tmp/r && git push origin main')"
+eq "a leading ~ is the home directory"  "$HOME/wt"      "$(cd_dir_of 'cd ~/wt && git push origin main')"
+eq "a bare ~ is the home directory"     "$HOME"         "$(cd_dir_of 'cd ~ && git push origin main')"
+eq "a quoted directory is one word"     "/tmp/my dir"   "$(cd_dir_of 'cd "/tmp/my dir" && git push origin main')"
+eq "cd -- <dir>"                        "/tmp/r"        "$(cd_dir_of 'cd -- /tmp/r && git push origin main')"
+eq "cd -P <dir> (an option first)"      "/tmp/r"        "$(cd_dir_of 'cd -P /tmp/r && git push origin main')"
+eq "a cd behind then"                   "/tmp/r"        "$(cd_dir_of 'if true; then cd /tmp/r; git push origin main; fi')"
+eq "a cd inside sh -c"                  "/tmp/r"        "$(cd_dir_of "sh -c 'cd /tmp/r && git push origin main'")"
+eq "the LAST cd wins"                   "/b"            "$(cd_dir_of 'cd /a && cd /b && git push origin main')"
+eq "no cd means none"                   "<none>"        "$(cd_dir_of 'git push origin main')"
+eq "a bare cd is not a directory read"  "<none>"        "$(cd_dir_of 'cd && git push origin main')"
+eq "cd - is not a directory read"       "<none>"        "$(cd_dir_of 'cd - && git push origin main')"
+eq "two words are not a directory"      "<none>"        "$(cd_dir_of 'cd /a /b && git push origin main')"
+eq "a quoted cd line is prose"          "<none>"        "$(cd_dir_of "echo 'cd /tmp/r && git push origin main'")"
+eq "cd in a heredoc body is prose"      "<none>" \
+   "$(cd_dir_of "$(printf 'cat > /tmp/n.txt <<%sNOTE%s\ncd /tmp/r\nNOTE\ngit push origin main\n' "'" "'")")"
+
+# A move the reader can SEE but cannot NAME is a third answer, not "no move":
+# the shell went somewhere, so the directory in effect before it is stale.
+cd_rc_of() {  # <segment> -> git_argv_cd_dir's exit status
+  git_argv_cd_dir "$(git_argv_segments "$1")" >/dev/null 2>&1; echo $?
+}
+eq "rc 0: a named move"                 "0" "$(cd_rc_of 'cd /tmp/r')"
+eq "rc 1: not a move at all"            "1" "$(cd_rc_of 'echo hi')"
+eq "rc 2: a bare cd moves (home)"       "2" "$(cd_rc_of 'cd')"
+eq "rc 2: cd - moves (previous dir)"    "2" "$(cd_rc_of 'cd -')"
+eq "rc 2: cd a b moves (substitution)"  "2" "$(cd_rc_of 'cd /a /b')"
+eq "rc 2: popd moves"                   "2" "$(cd_rc_of 'popd')"
+eq "rc 2: a bare pushd moves"           "2" "$(cd_rc_of 'pushd')"
+
+echo ""
+echo "=== Section 1f: git_argv_expand_moves — the directory each segment runs in ==="
+#
+# The list a wall reads when WHERE matters: git_argv_expand, with each line
+# prefixed by the directory the shell is in when that segment runs (empty =
+# wherever the hook is). A `cd` moves the segments after it only when the
+# shell itself keeps the move: joined by `;`, `&&` or a newline. `&` and `|`
+# run the cd in a subshell of its own; `||` runs the NEXT segment only if the
+# cd failed, so that one segment is judged where the shell was before; a
+# `( … )` group starts where its parent is and its moves end with it; a
+# `sh -c` string is a child shell whose moves never come back. A move the
+# reader cannot name (`cd -`, `popd`, a bare `cd`) empties the directory —
+# the hook's own cwd is the side that refuses.
+
+RS=$'\036'
+moves_of() {  # <command> -> "<dir>:<segment words>" per line, joined by " / "
+  local line at seg out=""
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    at="${line%%"$RS"*}"; seg="${line#*"$RS"}"
+    seg="$(printf '%s' "$seg" | tr "$US" ' ')"
+    out="${out:+$out / }${at:-<hook>}:${seg}"
+  done <<< "$(git_argv_expand_moves "$1")"
+  printf '%s' "$out"
+}
+
+eq "no move: the hook cwd"             "<hook>:git push origin main" \
+   "$(moves_of 'git push origin main')"
+eq "cd && push"                        "<hook>:cd /a / /a:git push" \
+   "$(moves_of 'cd /a && git push')"
+eq "cd ; push"                         "<hook>:cd /a / /a:git push" \
+   "$(moves_of 'cd /a; git push')"
+eq "cd <newline> push"                 "<hook>:cd /a / /a:git push" \
+   "$(moves_of "$(printf 'cd /a\ngit push')")"
+eq "cd & push: the cd ran in the background" "<hook>:cd /a / <hook>:git push" \
+   "$(moves_of 'cd /a & git push')"
+eq "cd | push: the cd ran in a pipe"   "<hook>:cd /a / <hook>:git push" \
+   "$(moves_of 'cd /a | git push')"
+eq "cd || push: runs only if the cd failed" "<hook>:cd /a / <hook>:git push" \
+   "$(moves_of 'cd /a || git push')"
+eq "cd || exit 1; push: the move holds after the guard" "<hook>:cd /a / <hook>:exit 1 / /a:git push" \
+   "$(moves_of 'cd /a || exit 1; git push')"
+eq "cd then cd -: somewhere unknown"   "<hook>:cd /a / /a:cd - / <hook>:git push" \
+   "$(moves_of 'cd /a && cd - && git push')"
+eq "pushd then popd: somewhere unknown" "<hook>:pushd /a / /a:popd / <hook>:git push" \
+   "$(moves_of 'pushd /a && popd && git push')"
+eq "cd then bare cd: home, unknown here" "<hook>:cd /a / /a:cd / <hook>:git push" \
+   "$(moves_of 'cd /a && cd && git push')"
+eq "( cd ) && push: the group's move ends with it" "<hook>:cd /a / <hook>:git push" \
+   "$(moves_of '( cd /a ) && git push')"
+eq "( cd && push ): the move holds inside" "<hook>:cd /a / /a:git push" \
+   "$(moves_of '( cd /a && git push )')"
+eq "cd && ( cd ) && push: the outer move survives the group" "<hook>:cd /a / /a:cd /b / /a:git push" \
+   "$(moves_of 'cd /a && ( cd /b ) && git push')"
+eq "cd && ( push ): the group starts where its parent is" "<hook>:cd /a / /a:git push" \
+   "$(moves_of 'cd /a && ( git push )')"
+eq "sh -c 'cd' && push: a child shell's move never comes back" \
+   "<hook>:sh -c cd /a / <hook>:cd /a / <hook>:git push" \
+   "$(moves_of "sh -c 'cd /a' && git push")"
+eq "sh -c 'cd && push': the move holds inside the child" \
+   "<hook>:sh -c cd /a && git push / <hook>:cd /a / /a:git push" \
+   "$(moves_of "sh -c 'cd /a && git push'")"
+eq "cd && sh -c 'push': the child starts where its parent is" \
+   "<hook>:cd /a / /a:sh -c git push / /a:git push" \
+   "$(moves_of "cd /a && sh -c 'git push'")"
+eq "two pushes: each where it runs"    "<hook>:git push / <hook>:cd /a / /a:git push" \
+   "$(moves_of 'git push && cd /a && git push')"
+eq "the last cd decides"               "<hook>:cd /a / /a:cd /b / /b:git push" \
+   "$(moves_of 'cd /a && cd /b && git push')"
+
 # ============================================================
 # Section 2: fail-closed sourcing (AC-12)
 # ============================================================
