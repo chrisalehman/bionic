@@ -138,8 +138,16 @@ mk_agent_post() {  # <sid> <transcript> <cwd> <name> <agentId> <tool_use_id>
 }
 
 REC_OUT=""; REC_ERR=""; REC_ST=0
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2: a
+# plain /clear re-keys env, payload and pid file together). Since bionic 1.4.0 the hook
+# takes its session id from lib/session.sh, where the env value is primary — so a driver
+# that left the runner's own CLAUDE_CODE_SESSION_ID in the environment would be driving a
+# DIVERGENCE, not a session, and every roster filename below would be built from the
+# wrong key. A payload with no session key exports an empty one, which is what keeps the
+# no-session-key arms reaching the fail direction they pin.
 run_rec() {  # <payload-json>
-  REC_OUT=$(printf '%s' "$1" | bash "$REC" 2>"$SANDBOX/.err"); REC_ST=$?
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  REC_OUT=$(printf '%s' "$1" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$REC" 2>"$SANDBOX/.err"); REC_ST=$?
   REC_ERR=$(cat "$SANDBOX/.err")
   return 0
 }
