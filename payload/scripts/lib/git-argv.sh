@@ -743,6 +743,10 @@ _git_argv_expand_at() {
 #   `{ …; }`             the current shell, so a move inside it holds — but
 #                        the operator after the `}` binds to the whole
 #                        group (`{ cd wt; } & git push` moved nothing);
+#   `if … fi`, `while`/`until`/`for … done`, `case … esac`
+#                        the same scope as braces: the move holds, and the
+#                        operator after `fi`/`done`/`esac` binds to the
+#                        whole compound;
 #   `sh -c '…'`          a child shell starting where its parent is, whose
 #                        moves never come back;
 #   `eval '…'`           the CURRENT shell: its moves do come back.
@@ -777,22 +781,27 @@ _git_argv_moves_at() {
     _term="${_rest%%"$GIT_ARGV_RS"*}"
     _seg="${_rest#*"$GIT_ARGV_RS"}"
 
-    # BRACE GROUPS are a list scope, not a subshell (critic pass 3). `{ …; }`
-    # runs in the current shell, so a move inside it holds — but the operator
-    # after the `}` binds to the WHOLE group: `{ cd wt; } & git push` moved
-    # nothing in the parent, and `{ cd wt; } | cat` ran the group in a
-    # pipeline subshell. The scanner does not track braces (bash separates
+    # BRACE GROUPS AND COMPOUNDS are a list scope, not a subshell (critic
+    # passes 3 and 4). `{ …; }`, `if … fi`, `while`/`until`/`for … done` and
+    # `case … esac` run in the current shell, so a move inside one holds —
+    # but the operator after the closing word binds to the WHOLE construct:
+    # `{ cd wt; } & git push` and `for f in x; do cd wt; done & git push`
+    # moved nothing in the parent, and `{ cd wt; } | cat` ran the group in a
+    # pipeline subshell. The scanner does not track these (bash separates
     # them with `;`/whitespace only), so they are read here from the leading
-    # words: a `{` saves the list's starting point and the directory at
-    # entry; a `}` restores the starting point (the `;` inside the group
-    # moved it) and remembers the entry directory for a `|` on this segment.
+    # words: an opener saves the list's starting point and the directory at
+    # entry; a closer restores the starting point (the `;` inside moved it)
+    # and remembers the entry directory for a `|` on this segment.
     _bclosed=0
     _lead="$_seg"
     while [ -n "$_lead" ]; do
       _w="${_lead%%"$GIT_ARGV_US"*}"
       case "$_w" in
-        '{') _bstack="$_bstack$GIT_ARGV_US$_base$GIT_ARGV_RS$_cur" ;;
-        '}')
+        '{'|if|while|until|for|select|case)
+          _bstack="$_bstack$GIT_ARGV_US$_base$GIT_ARGV_RS$_cur"
+          case "$_w" in '{') ;; *) break ;; esac
+          ;;
+        '}'|fi|done|esac)
           if [ -n "$_bstack" ]; then
             _w="${_bstack##*"$GIT_ARGV_US"}"; _bstack="${_bstack%"$GIT_ARGV_US"*}"
             _base="${_w%%"$GIT_ARGV_RS"*}"; _bcur="${_w#*"$GIT_ARGV_RS"}"

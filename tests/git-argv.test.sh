@@ -487,6 +487,25 @@ eq "cd && { cd; } | cat; push: the outer move survives the piped group" \
    "<hook>:cd /a / /a:{ cd /b / /b:} / /a:cat / /a:git push" \
    "$(moves_of 'cd /a && { cd /b; } | cat; git push')"
 
+# --- fourth critic pass: compound commands are the same scope as braces ---
+# `if … fi`, `while/until/for … done` run in the current shell; the
+# operator after `fi`/`done` binds to the whole compound.
+eq "for … done & push: the whole loop ran in the background" \
+   "<hook>:for f in x / <hook>:do cd /a / /a:done / <hook>:git push" \
+   "$(moves_of 'for f in x; do cd /a; done & git push')"
+eq "if … fi & push: the whole compound ran in the background" \
+   "<hook>:if true / <hook>:then cd /a / /a:fi / <hook>:git push" \
+   "$(moves_of 'if true; then cd /a; fi & git push')"
+eq "while … done | cat; push: the loop was a pipeline element" \
+   "<hook>:while true / <hook>:do cd /a / /a:break / /a:done / <hook>:cat / <hook>:git push" \
+   "$(moves_of 'while true; do cd /a; break; done | cat; git push')"
+eq "if … fi; push: the move holds (no subshell)" \
+   "<hook>:if true / <hook>:then cd /a / /a:fi / /a:git push" \
+   "$(moves_of 'if true; then cd /a; fi; git push')"
+eq "cd; if … fi & push: back to the list before the compound" \
+   "<hook>:cd /b / /b:if true / /b:then cd /a / /a:fi / /b:git push" \
+   "$(moves_of 'cd /b; if true; then cd /a; fi & git push')"
+
 # ============================================================
 # Section 2: fail-closed sourcing (AC-12)
 # ============================================================

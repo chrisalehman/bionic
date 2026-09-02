@@ -60,7 +60,8 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
   rules (`git_argv_expand_moves`: `;`/`&&`/newline keep a `cd`; `||` skips the next segment
   and judges it where the shell was before; `&` discards every move of the whole and-or list;
   `|` makes its two elements subshells; `( … )` and `sh -c` moves end with their group;
-  `{ …; }` runs in the current shell but the operator after `}` binds to the whole group;
+  `{ …; }` and `if`/`while`/`until`/`for`/`case` compounds run in the current shell but the
+  operator after `}`/`fi`/`done`/`esac` binds to the whole construct;
   `eval` moves come back; `cd -`/`popd`/a bare `cd` empty the directory) and keeps the
   `-C <dir>` values (`GIT_C_DIRS`); Block 3 composes the two and asks git for HEAD there.
   The scanner strips `#` comments and scrubs BOTH separators (US and RS) from its input so

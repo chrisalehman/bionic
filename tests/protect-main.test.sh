@@ -511,6 +511,16 @@ expect_allow_in "S8 { cd <worktree>; push; }" \
 expect_block_in "S8 { cd <main>; } || cd <worktree>; push: the group succeeded" \
   "$S8_WT"   "{ cd $S8_MAIN; } || cd $S8_WT; git push"
 
+# --- fourth critic pass: compound commands bind the operator after them ---
+expect_block_in "S8 for … do cd <worktree>; done & push: the whole loop ran in the background" \
+  "$S8_MAIN" "for f in x; do cd $S8_WT; done & git push"
+expect_block_in "S8 if … then cd <worktree>; fi | cat; push: the compound was a pipeline element" \
+  "$S8_MAIN" "if true; then cd $S8_WT; fi | cat; git push"
+expect_allow_in "S8 if … then cd <worktree>; fi; push: the move holds" \
+  "$S8_MAIN" "if true; then cd $S8_WT; fi; git push origin feat"
+expect_allow_in "S8 for … do cd <worktree>; push; done &: that push runs in the worktree" \
+  "$S8_MAIN" "for f in x; do cd $S8_WT; git push origin feat; done &"
+
 # --- fail-closed: a target git cannot read falls back to the hook cwd ---
 expect_block_in "S8 cd to a directory that is not a repo" \
   "$S8_MAIN" "cd $S8_NOREPO && git push origin feat"
