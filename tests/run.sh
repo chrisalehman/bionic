@@ -320,6 +320,12 @@ run "run-predicate.test.sh" bash tests/run-predicate.test.sh
 # classes, the two fail policies and the four-command repair allowlist. Hermetic: HOME
 # and BIONIC_PLUGINS_DIR are overridden per run, so the real ~/.claude is never read.
 run "loader.test.sh" bash tests/loader.test.sh
+# ── bionic 1.4.0, the library spine (wave-bionic-1.4.0-update) ────────────────
+#   - root.test.sh: scripts/lib/root.sh — `project_root` / `project_root_candidates`,
+#     seven real on-disk topologies (nested repo under a .bionic workspace, linked
+#     worktree, phantom nested .bionic, symlinked .bionic, .bionic inside $HOME,
+#     unrelated repo, no-git/no-.bionic) each paired with a differential control
+run "root.test.sh" bash tests/root.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
