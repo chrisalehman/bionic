@@ -304,6 +304,12 @@ run "doctor-version.test.sh" bash tests/doctor-version.test.sh
 run "git-argv.test.sh" bash tests/git-argv.test.sh
 run "cmd-class.test.sh" bash tests/cmd-class.test.sh
 run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
+# ── bionic 1.4.0, the library spine (wave-bionic-1.4.0-update) ────────────────
+#   - root.test.sh: scripts/lib/root.sh — `project_root` / `project_root_candidates`,
+#     seven real on-disk topologies (nested repo under a .bionic workspace, linked
+#     worktree, phantom nested .bionic, symlinked .bionic, .bionic inside $HOME,
+#     unrelated repo, no-git/no-.bionic) each paired with a differential control
+run "root.test.sh" bash tests/root.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
