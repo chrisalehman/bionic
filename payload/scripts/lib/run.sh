@@ -76,14 +76,21 @@ active_plan() {
   for d in "$droot/plans" "$droot/incidents"; do
     [ -d "$d" ] || continue
     while IFS= read -r -d '' f; do
-      # LINE ENDINGS ARE TRANSLATED, NEVER DELETED. `tr -d '\r'` collapses a CR-only
-      # (classic-Mac) file to a single line, every line-anchored match misses, and the
-      # plan becomes invisible to every wall in the fleet while a wave is live — the
-      # recorded fail-dangerous shape (.claude/rules/hook-authoring.md; the evidence
-      # gate carries the same normalization at its own parse). awk splits on \n, so a
-      # CR-only file arrives as one record that gsub re-splits into real lines.
-      awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$f" 2>/dev/null \
-        | grep -q '^## SDLC State' || continue
+      # FENCE-AWARE, and line endings TRANSLATED rather than deleted. Two failure modes,
+      # opposite directions, both recorded:
+      #   - a `## SDLC State` heading that appears only inside a ``` fenced example is
+      #     DOCUMENTATION. Counting it makes a page about the lifecycle look like a live
+      #     run, and every always-on hook then binds in a project that has none.
+      #   - `tr -d '\r'` collapses a CR-only (classic-Mac) file to a single line, every
+      #     line-anchored match misses, and a real plan becomes invisible to the whole
+      #     fleet while a wave is live (.claude/rules/hook-authoring.md).
+      # awk splits on \n, so a CR-only file arrives as one record that gsub re-splits
+      # into real lines. The evidence gate carries the same reading at its own parse.
+      _run_lines "$f" | awk '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^## SDLC State/ { found = 1 }
+        END { exit !found }' || continue
       if [ -z "$plan" ] || [ "$f" -nt "$plan" ]; then
         plan="$f"
       fi
@@ -114,7 +121,10 @@ active_run() {
   # Flush-left current: line — the only place this key appears in the plan's own convention
   # (frontmatter never carries it; it lives in ## SDLC State).
   local current
-  current=$(_run_lines "$plan" | grep -m1 '^current:' \
+  current=$(_run_lines "$plan" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    { print }' | grep -m1 '^current:' \
     | sed -E 's/^current:[[:space:]]*//' \
     | tr -d '[:space:]')
   [ -n "$current" ] || return 1
