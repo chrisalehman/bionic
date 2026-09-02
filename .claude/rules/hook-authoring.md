@@ -57,17 +57,21 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
   and every push segment is judged, inside the loop.** The hook's cwd is the session's — the
   main checkout, on main — and a worktree push moves first (`cd <repo>/.worktrees/x && git
   push origin x`, `git -C <worktree> push`). The library reads the moves by the shell's own
-  rules (`git_argv_expand_moves`: `;`/`&&`/newline keep a `cd`, `||` judges the next segment
-  where the shell was before, `&`/`|` run the cd in a subshell of its own, `( … )` and
-  `sh -c` moves end with their group, `cd -`/`popd`/a bare `cd` empty the directory) and
-  keeps the `-C <dir>` values (`GIT_C_DIRS`); Block 3 composes the two and asks git for HEAD
-  there. Fail-closed: a target git cannot read — including a `cd "$VAR"` the scanner keeps as
-  written — falls back to the hook cwd. A real repo in detached HEAD is judged on its own
-  branchless state. Hit as three false blocks in one day (2026-08-05, upstream PR #16) and
-  again after the 1.3.2 tokenizer rewrite dropped the reading; a first cut that took every
-  `cd` as a move and judged only the last push opened `git push && cd wt && git push` and
-  `( cd wt ) && git push` from main (critic, 2026-09-02). `tests/protect-main.test.sh`
-  Section 8 pins all of it against real repositories, both directions.
+  rules (`git_argv_expand_moves`: `;`/`&&`/newline keep a `cd`; `||` skips the next segment
+  and judges it where the shell was before; `&` discards every move of the whole and-or list;
+  `|` makes its two elements subshells; `( … )` and `sh -c` moves end with their group;
+  `eval` moves come back; `cd -`/`popd`/a bare `cd` empty the directory) and keeps the
+  `-C <dir>` values (`GIT_C_DIRS`); Block 3 composes the two and asks git for HEAD there.
+  The scanner strips `#` comments and scrubs BOTH separators (US and RS) from its input so
+  neither can be injected. Fail-closed: a target git cannot read — including a `cd "$VAR"`
+  the scanner keeps as written — falls back to the hook cwd. A real repo in detached HEAD is
+  judged on its own branchless state. Not modelled: conditions (`if false; then cd wt; fi`
+  reads as a move). Hit as three false blocks in one day (2026-08-05, upstream PR #16) and
+  again after the 1.3.2 tokenizer rewrite dropped the reading; two adversarial passes
+  (2026-09-02) each found holes in a looser reading — every `cd` as a move, a move cancelled
+  only on its own segment, `eval` as a child shell, an unguarded RS — and each is pinned.
+  `tests/protect-main.test.sh` Section 8 pins all of it against real repositories, both
+  directions.
 
 - **Any hook inspecting HEAD's file list must use `git show -m --name-only --format= HEAD`**,
   not `git show --name-only --pretty=format: HEAD`. Without `-m`, a clean merge commit (no

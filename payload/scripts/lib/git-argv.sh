@@ -81,11 +81,17 @@ GIT_ARGV_AWK=""
 IFS= read -r -d '' GIT_ARGV_AWK <<'GITARGVAWK' || true
 BEGIN {
   US = sprintf("%c", 31)
+  RS2 = sprintf("%c", 30)
   # META MODE (GIT_ARGV_META=1): each printed segment is prefixed by the
   # grouping depth it ran at and the operator that ended it — see emit().
   meta = (ENVIRON["GIT_ARGV_META"] == "1")
   cmd = ENVIRON["GIT_ARGV_CMD"]
+  # Both separators are stripped from the INPUT so neither can be injected:
+  # a literal one inside a word would split a line where a reader does not
+  # expect it (critic pass 2, F1: `cd x<RS>; git push origin main` hid the
+  # push from every block).
   gsub(US, " ", cmd)
+  gsub(RS2, " ", cmd)
   gsub(/\r/, "", cmd)
 
   # ---- 1. remove heredoc bodies -------------------------------------------
@@ -161,6 +167,14 @@ BEGIN {
       continue
     }
 
+    # A comment: `#` where a word would start, through the end of the line.
+    # The newline is left for the boundary rule below. A `#` inside a word
+    # (`foo#bar`, `${#x}`) or inside quotes is a character.
+    if (c == "#" && !have) {
+      while (i <= Ln && substr(body, i, 1) != "\n") i++
+      continue
+    }
+
     # Word separators. Redirection arrows are separators, not segment
     # boundaries: `git push origin main>log` must still yield `main`.
     if (c == " " || c == "\t" || c == "<" || c == ">") {
@@ -170,15 +184,16 @@ BEGIN {
     }
 
     # Segment boundaries. The operator is read whole (`&&` is not `&`,
-    # `||` is not `|`): the second character of a doubled operator closes an
-    # empty segment, which is never printed.
+    # `||` is not `|`) and consumed whole. In meta mode an operator that
+    # closes NO segment is still reported, as an empty one: the `||` or `&`
+    # after a `)` belongs to the group it follows, and a reader of moves
+    # has to see it (critic pass 2, F2-F4).
     if (c == "\n" || c == ";" || c == "&" || c == "|") {
       if (have) { seg = flush_tok(seg, tok, segn); segn++; tok = ""; have = 0 }
-      if (segn) {
-        term = (c == "\n") ? "nl" : c
-        if ((c == "&" || c == "|") && substr(body, i + 1, 1) == c) term = c c
-        emit(seg, gdepth, term)
-      }
+      term = (c == "\n") ? "nl" : c
+      if ((c == "&" || c == "|") && substr(body, i + 1, 1) == c) { term = c c; i++ }
+      if (segn) { emit(seg, gdepth, term) }
+      else if (meta) { emit("", gdepth, term) }
       seg = ""
       segn = 0
       i++
@@ -222,10 +237,10 @@ BEGIN {
 # `<depth> RS <term> RS <segment>`: the grouping depth the segment ran at
 # (0 outside any `( … )`) and the operator that ended it — `;`, `nl`, `&&`,
 # `||`, `&`, `|`, `(`, `)` or `eof`. RS is the record separator (\036), the
-# same argument as US: no real command line contains one.
-function emit(s, depth, term,   RS2) {
+# same argument as US: no real command line contains one, and the input is
+# scrubbed of both so none can be made to.
+function emit(s, depth, term) {
   if (!meta) { print s; return }
-  RS2 = sprintf("%c", 30)
   print depth RS2 term RS2 s
 }
 
@@ -543,12 +558,15 @@ git_argv_parse() {
 #
 # Reads a segment that MOVES THE SHELL. Three answers:
 #   0  a `cd <dir>` / `pushd <dir>` whose target this reader can name — the
-#      directory is printed;
+#      directory is in GIT_CD_DIR;
 #   2  a move whose target it cannot name: a bare `cd` (home), `cd -` (the
 #      previous directory), `cd a b` (bash's substitution form), `popd`, a
-#      bare `pushd` — nothing is printed, but the directory in effect before
-#      it is now STALE and a caller must drop it;
-#   1  not a move at all.
+#      bare `pushd` — GIT_CD_DIR is empty, and the directory in effect
+#      before it is now STALE, so a caller must drop it;
+#   1  not a move at all — `pushd -n` included, which only stacks.
+# A variable rather than stdout, the way _git_argv_skip sets GIT_ARGV_REST:
+# the caller reads every segment of every command, and a command
+# substitution per segment is a fork per segment (critic pass 2, nit 2).
 #
 # A push runs where the shell IS, and the shell is wherever the last move
 # before it went — `cd <repo>/.worktrees/x && git push origin x` is the
@@ -563,7 +581,8 @@ git_argv_parse() {
 # `$(…)`) is printed as written; git cannot read it, and the caller's
 # fallback is its own cwd — the side that refuses.
 git_argv_cd_dir() {
-  local _oldifs="$IFS" _hadf=0 _d=""
+  local _oldifs="$IFS" _hadf=0 _d="" _verb=""
+  GIT_CD_DIR=""
 
   _git_argv_skip "$1"
   [ -n "$GIT_ARGV_REST" ] || return 1
@@ -577,7 +596,8 @@ git_argv_cd_dir() {
   [ "$_hadf" -eq 1 ] || set +f
 
   [ $# -gt 0 ] || return 1
-  case "$1" in
+  _verb="$1"
+  case "$_verb" in
     cd|pushd) shift ;;
     popd) return 2 ;;
     *) return 1 ;;
@@ -587,6 +607,7 @@ git_argv_cd_dir() {
     case "$1" in
       --) shift; break ;;
       -) break ;;
+      -n) [ "$_verb" = "pushd" ] && return 1; shift ;;
       -*) shift ;;
       *) break ;;
     esac
@@ -599,7 +620,7 @@ git_argv_cd_dir() {
     "~") _d="$HOME" ;;
     "~/"*) _d="$HOME/${_d#\~/}" ;;
   esac
-  printf '%s' "$_d"
+  GIT_CD_DIR="$_d"
   return 0
 }
 
@@ -695,30 +716,53 @@ _git_argv_expand_at() {
 # is in when that segment runs — empty for "wherever the caller is". Same
 # lines, same order, same depth-2 re-reading of `sh -c` / `eval` strings.
 #
-# THE SHELL'S OWN RULES, and nothing looser (critic, 2026-09-02: a reading
-# that took every `cd` as a move opened `cd wt & git push` and
-# `( cd wt ) && git push` from main). A `cd` moves the segments after it only
+# THE SHELL'S OWN RULES, and nothing looser (critic, 2026-09-02, two passes:
+# a reading that took every `cd` as a move opened `cd wt & git push` and
+# `( cd wt ) && git push` from main; one that cancelled a move only on its
+# own segment opened `cd wt && true & git push`, `( cd wt ); ( git push )`
+# and `cd main || cd wt; git push`). A `cd` moves the segments after it only
 # when the shell itself keeps the move:
-#   `;`, `&&`, newline   the move holds for what follows;
-#   `||`                 the NEXT segment runs only if the cd FAILED, so it is
-#                        judged where the shell was before the cd; the move
-#                        holds again after that (`cd x || exit 1; git push`);
-#   `&`, `|`             the cd ran in a subshell of its own — no move;
+#   `;`, `&&`, newline   the move holds; `;` and newline also END the and-or
+#                        list, so the list's starting directory moves up;
+#   `||`                 the NEXT segment runs only if this one FAILED. A cd
+#                        is taken to succeed, so that segment is judged where
+#                        the shell was before the last move and its own
+#                        effects are not applied; a chain of `||` stays
+#                        skipped (`cd a || cd b || cd c` leaves the shell in
+#                        a); the move holds again after `;` (`cd x || exit 1;
+#                        git push`). The same rule after a `)`: the group is
+#                        taken to succeed;
+#   `&`                  backgrounds the WHOLE and-or list before it: every
+#                        move since the list began is discarded;
+#   `|`                  a pipeline binds tighter than && and ||, and each of
+#                        its elements is a subshell: the element before the
+#                        `|` and the one after it move nothing; the rest of
+#                        the list is unaffected;
 #   `( … )`              a group starts where its parent is, and every move
 #                        made inside it ends with it;
-#   `sh -c '…'`, `eval`  a child shell starting where its parent is, whose
-#                        moves never come back.
+#   `sh -c '…'`          a child shell starting where its parent is, whose
+#                        moves never come back;
+#   `eval '…'`           the CURRENT shell: its moves do come back.
 # A move the reader cannot name (git_argv_cd_dir returns 2) EMPTIES the
 # directory: the shell went somewhere, so what was in effect is stale, and
-# the caller's own cwd is the side that refuses.
+# the caller's own cwd is the side that refuses. The same is true of a
+# target the scanner keeps as written (`cd "$WT"`): the caller cannot read
+# it and falls back.
+#
+# NOT MODELLED, deliberately: conditions. `if false; then cd wt; fi` reads
+# as a move because the reader does not evaluate `false` — the same line
+# the library draws for `$(…)`. A wall that must refuse it has Block 1.
 git_argv_expand_moves() {
   _git_argv_moves_at "$1" "" 0
 }
 
+# Sets GIT_ARGV_MOVES_END to the directory the shell is in when the command
+# finishes — what an `eval` hands back to its caller.
+GIT_ARGV_MOVES_END=""
 _git_argv_moves_at() {
   local _cmd="$1" _cur="$2" _depth="$3"
-  local _line _d _rest _term _seg _at _inner _target _rc _prev
-  local _stack="" _sdepth=0 _ov=0 _ovdir=""
+  local _line _d _rest _term _seg _at _inner _rc _kind
+  local _stack="" _lstack="" _sdepth=0 _base="$2" _skip=0 _skipat="" _skipset=0 _pipe=0
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _d="${_line%%"$GIT_ARGV_RS"*}"
@@ -726,38 +770,77 @@ _git_argv_moves_at() {
     _term="${_rest%%"$GIT_ARGV_RS"*}"
     _seg="${_rest#*"$GIT_ARGV_RS"}"
 
-    # Entering a group inherits the current directory; leaving one restores
-    # what the parent had. The stack is a US-joined string (bash 3.2).
+    # Entering a group inherits the current directory and starts a list
+    # there; leaving one restores what the parent had, list start included.
+    # The stacks are US-joined strings (bash 3.2). An operator that follows
+    # a `)` arrives as an empty segment at the parent's depth, which is what
+    # pops the group before the operator is applied.
     while [ "$_d" -gt "$_sdepth" ]; do
       _stack="$_stack$GIT_ARGV_US$_cur"
+      _lstack="$_lstack$GIT_ARGV_US$_base"
+      _base="$_cur"
       _sdepth=$((_sdepth + 1))
     done
     while [ "$_d" -lt "$_sdepth" ]; do
-      _cur="${_stack##*"$GIT_ARGV_US"}"
-      _stack="${_stack%"$GIT_ARGV_US"*}"
+      _cur="${_stack##*"$GIT_ARGV_US"}"; _stack="${_stack%"$GIT_ARGV_US"*}"
+      _base="${_lstack##*"$GIT_ARGV_US"}"; _lstack="${_lstack%"$GIT_ARGV_US"*}"
       _sdepth=$((_sdepth - 1))
     done
 
+    # Where this segment runs, and whether its effects count. A segment
+    # after `||` is judged where the shell was before the last move and
+    # changes nothing; a pipeline element changes nothing either.
     _at="$_cur"
-    if [ "$_ov" -eq 1 ]; then _at="$_ovdir"; _ov=0; fi
-    printf '%s%s%s\n' "$_at" "$GIT_ARGV_RS" "$_seg"
+    if [ "$_skip" -eq 1 ]; then _at="$_skipat"; fi
+    [ -z "$_seg" ] || printf '%s%s%s\n' "$_at" "$GIT_ARGV_RS" "$_seg"
 
-    if [ "$_depth" -lt 2 ]; then
-      if _inner="$(git_argv_inner "$_seg")" && [ -n "$_inner" ]; then
-        _git_argv_moves_at "$_inner" "$_at" $((_depth + 1))
-        continue
+    if [ -n "$_seg" ]; then
+      _kind=""
+      if [ "$_depth" -lt 2 ]; then
+        if _inner="$(git_argv_inner "$_seg")" && [ -n "$_inner" ]; then
+          _kind="child"
+          _git_argv_skip "$_seg"   # git_argv_inner ran in a subshell; re-read argv[0] here
+          case "${GIT_ARGV_REST%%"$GIT_ARGV_US"*}" in eval) _kind="eval" ;; esac
+          _git_argv_moves_at "$_inner" "$_at" $((_depth + 1))
+          if [ "$_kind" = "eval" ] && [ "$_skip" -eq 0 ] && [ "$_pipe" -eq 0 ] \
+             && [ "$_term" != "|" ]; then
+            _cur="$GIT_ARGV_MOVES_END"
+          fi
+        fi
+      fi
+      if [ -z "$_kind" ] && [ "$_skip" -eq 0 ] && [ "$_pipe" -eq 0 ] \
+         && [ "$_term" != "|" ]; then
+        git_argv_cd_dir "$_seg"; _rc=$?
+        if [ "$_rc" -eq 0 ]; then _skipat="$_cur"; _skipset=1; _cur="$GIT_CD_DIR"
+        elif [ "$_rc" -eq 2 ]; then _skipat="$_cur"; _skipset=1; _cur=""
+        fi
       fi
     fi
 
-    _target="$(git_argv_cd_dir "$_seg")"; _rc=$?
-    [ "$_rc" -ne 1 ] || continue
+    # What the operator does to the segments after it. (The "where the
+    # shell was before" of a `||` is a flag plus a value, not a value alone:
+    # the empty string — the caller's own cwd — is a real answer.)
+    _pipe=0
     case "$_term" in
-      '&'|'|') continue ;;
+      '||')
+        if [ "$_skip" -eq 0 ] && [ "$_skipset" -eq 0 ]; then _skipat="$_cur"; fi
+        _skip=1
+        continue
+        ;;
+      '&')  _skip=0; _cur="$_base" ;;
+      '|')  _skip=0; _pipe=1 ;;
+      ';'|nl|eof) _skip=0; _base="$_cur" ;;
+      *)    _skip=0 ;;
     esac
-    _prev="$_cur"
-    if [ "$_rc" -eq 0 ]; then _cur="$_target"; else _cur=""; fi
-    if [ "$_term" = "||" ]; then _ov=1; _ovdir="$_prev"; fi
+    _skipat=""; _skipset=0
   done <<< "$(_git_argv_segments_meta "$_cmd")"
+
+  # Close any group the input left open, then hand the caller the result.
+  while [ "$_sdepth" -gt 0 ]; do
+    _cur="${_stack##*"$GIT_ARGV_US"}"; _stack="${_stack%"$GIT_ARGV_US"*}"
+    _sdepth=$((_sdepth - 1))
+  done
+  GIT_ARGV_MOVES_END="$_cur"
   return 0
 }
 

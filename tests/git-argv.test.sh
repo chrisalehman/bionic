@@ -286,10 +286,10 @@ cdirs_of() {  # <command> -> the -C values of the first git segment, joined by `
   printf '%s' "${GIT_C_DIRS:-}" | tr "$US" '|'
 }
 cd_dir_of() {  # <command> -> the directory the LAST cd/pushd segment names, or <none>
-  local line d out="<none>"
+  local line out="<none>"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    if d="$(git_argv_cd_dir "$line" 2>/dev/null)"; then out="$d"; fi
+    if git_argv_cd_dir "$line"; then out="$GIT_CD_DIR"; fi
   done <<< "$(git_argv_expand "$1")"
   printf '%s' "$out"
 }
@@ -331,6 +331,7 @@ eq "rc 2: cd - moves (previous dir)"    "2" "$(cd_rc_of 'cd -')"
 eq "rc 2: cd a b moves (substitution)"  "2" "$(cd_rc_of 'cd /a /b')"
 eq "rc 2: popd moves"                   "2" "$(cd_rc_of 'popd')"
 eq "rc 2: a bare pushd moves"           "2" "$(cd_rc_of 'pushd')"
+eq "rc 1: pushd -n only stacks, no move" "1" "$(cd_rc_of 'pushd -n /tmp/r')"
 
 echo ""
 echo "=== Section 1f: git_argv_expand_moves — the directory each segment runs in ==="
@@ -401,6 +402,68 @@ eq "two pushes: each where it runs"    "<hook>:git push / <hook>:cd /a / /a:git 
    "$(moves_of 'git push && cd /a && git push')"
 eq "the last cd decides"               "<hook>:cd /a / /a:cd /b / /b:git push" \
    "$(moves_of 'cd /a && cd /b && git push')"
+
+# --- second critic pass (2026-09-02): the shell's rules, not a looser reading ---
+
+# Sibling groups: the first group's move must not leak into the second.
+eq "( cd ); ( push ): siblings do not share a move" "<hook>:cd /a / <hook>:git push" \
+   "$(moves_of '( cd /a ); ( git push )')"
+eq "( cd ) && ( push ): nor when joined by &&" "<hook>:cd /a / <hook>:git push" \
+   "$(moves_of '( cd /a ) && ( git push )')"
+eq "( ( cd ) ); ( push ): nested then sibling" "<hook>:cd /a / <hook>:git push" \
+   "$(moves_of '( ( cd /a ) ); ( git push )')"
+eq "cd && ( ( cd ) ); push: the outer move survives nesting" "<hook>:cd /a / /a:cd /b / /a:git push" \
+   "$(moves_of 'cd /a && ( ( cd /b ) ); git push')"
+
+# `||`: the segment after it runs only if the previous one FAILED. A cd is
+# assumed to succeed, so that segment is judged where the shell was before
+# the cd and its own move is not applied — and a chain of `||` stays skipped.
+eq "cd A || cd B: the shell is in A"   "<hook>:cd /a / <hook>:cd /b / /a:git push" \
+   "$(moves_of 'cd /a || cd /b; git push')"
+eq "cd A || cd B || cd C: still A"     "<hook>:cd /a / <hook>:cd /b / <hook>:cd /c / /a:git push" \
+   "$(moves_of 'cd /a || cd /b || cd /c; git push')"
+eq "( cd A ) || cd B: the group succeeded, B never ran" "<hook>:cd /a / <hook>:cd /b / <hook>:git push" \
+   "$(moves_of '( cd /a ) || cd /b; git push')"
+eq "cd A || sh -c 'cd B': the child never ran" \
+   "<hook>:cd /a / <hook>:sh -c cd /b / <hook>:cd /b / /a:git push" \
+   "$(moves_of "cd /a || sh -c 'cd /b'; git push")"
+
+# `&` backgrounds the WHOLE and-or list before it; `|` puts only its own two
+# elements in subshells (a pipeline binds tighter than && and ||).
+eq "cd && cmd & push: the whole list ran in the background" "<hook>:cd /a / /a:git status / <hook>:git push" \
+   "$(moves_of 'cd /a && git status & git push')"
+eq "cd; cd && cmd & push: back to the list's start" "<hook>:cd /a / /a:cd /b / /b:true / /a:git push" \
+   "$(moves_of 'cd /a; cd /b && true & git push')"
+eq "cd && a | b; push: a pipeline inside the list keeps the move" \
+   "<hook>:cd /a / /a:echo x / /a:grep x / /a:git push" \
+   "$(moves_of 'cd /a && echo x | grep x; git push')"
+eq "cmd | cd; push: a pipeline element's cd is a subshell's" "<hook>:echo x / <hook>:cd /a / <hook>:git push" \
+   "$(moves_of 'echo x | cd /a; git push')"
+
+# `eval` runs in the CURRENT shell: its moves come back, both directions.
+eq "cd && eval 'cd' && push: the eval moved the shell" "<hook>:cd /a / /a:eval cd /b / /a:cd /b / /b:git push" \
+   "$(moves_of "cd /a && eval 'cd /b' && git push")"
+eq "eval 'cd' && push: the eval's move holds" "<hook>:eval cd /a / <hook>:cd /a / /a:git push" \
+   "$(moves_of "eval 'cd /a' && git push")"
+eq "eval 'cd' & push: backgrounded, no move" "<hook>:eval cd /a / <hook>:cd /a / <hook>:git push" \
+   "$(moves_of "eval 'cd /a' & git push")"
+
+# The scanner's own hygiene: a `#` comment is not words, and a literal
+# record separator in the input is a space — the same guard the unit
+# separator has had all along, or a `cd x<RS>` would split the move line at
+# the wrong place and hide the push from every block.
+eq "a # comment after the cd is not words" "<hook>:cd /a / /a:git push" \
+   "$(moves_of "$(printf 'cd /a  # go there\ngit push')")"
+eq "a # inside a word is a character"   "<hook>:foo#bar / <hook>:git push" \
+   "$(moves_of 'foo#bar; git push')"
+eq "a quoted # is a character"          "<hook>:echo #x / <hook>:git push" \
+   "$(moves_of 'echo "#x"; git push')"
+eq "a literal RS in a cd target is a space" "<hook>:cd /a / /a:git push" \
+   "$(moves_of "$(printf 'cd /a\036 && git push')")"
+eq "a literal RS cannot hide a push"    "cd|x" \
+   "$(segs "$(printf 'cd x\036; git push origin main')" | head -1)"
+eq "…the push is still read"            "git|push|origin|main" \
+   "$(segs "$(printf 'cd x\036; git push origin main')" | sed -n 2p)"
 
 # ============================================================
 # Section 2: fail-closed sourcing (AC-12)

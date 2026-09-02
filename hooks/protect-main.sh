@@ -109,6 +109,12 @@ while IFS= read -r line; do
   # (detached HEAD) is judged on its own state: no branch is not main. Block 1
   # refuses an explicit main destination whatever the cwd, so this reading
   # only ever decides the IMPLICIT push.
+  #
+  # NOT MODELLED, deliberately: a `cd` target the shell would expand (`$VAR`,
+  # `$(…)`) — read as written, so it falls back to the hook cwd, which
+  # refuses; write the path. And conditions: `if false; then cd wt; fi` reads
+  # as a move, because nothing here evaluates `false` — the line the library
+  # draws for `$(…)` too. Both are named in git_argv_expand_moves.
   CURRENT_BRANCH=""
   _pm_resolved=0
   _pm_hops="$PUSH_AT"

@@ -464,6 +464,41 @@ expect_allow_in "S8 cd <worktree> && ( push ): the group starts where its parent
 expect_block_in "S8 sh -c 'cd <worktree>' && push: a child shell's move never comes back" \
   "$S8_MAIN" "sh -c 'cd $S8_WT' && git push"
 
+# --- second critic pass (2026-09-02): the shell's rules, not a looser reading ---
+S8_RS=$'\036'
+expect_block_in "S8 a literal RS cannot hide an explicit main push from Block 1" \
+  "$S8_WT"   "cd x${S8_RS}; git push origin main"
+expect_block_in "S8 a literal RS cannot hide a force push from Block 2" \
+  "$S8_WT"   "cd x${S8_RS}; git push --force origin feat"
+expect_allow_in "S8 a literal RS in the cd target is a space (the move still reads)" \
+  "$S8_MAIN" "cd ${S8_WT}${S8_RS} && git push origin feat"
+expect_block_in "S8 ( cd <worktree> ); ( push ): sibling groups do not share a move" \
+  "$S8_MAIN" "( cd $S8_WT ); ( git push )"
+expect_block_in "S8 ( cd <worktree> ) && ( push )" \
+  "$S8_MAIN" "( cd $S8_WT ) && ( git push )"
+expect_block_in "S8 ( ( cd <worktree> ) ); ( push )" \
+  "$S8_MAIN" "( ( cd $S8_WT ) ); ( git push )"
+expect_block_in "S8 cd <main> || cd <worktree>; push: the shell is in main" \
+  "$S8_WT"   "cd $S8_MAIN || cd $S8_WT; git push"
+expect_allow_in "S8 cd <worktree> || cd <main>; push: the shell is in the worktree" \
+  "$S8_MAIN" "cd $S8_WT || cd $S8_MAIN; git push origin feat"
+expect_block_in "S8 ( cd <main> ) || cd <worktree>; push: the group succeeded" \
+  "$S8_MAIN" "( cd $S8_MAIN ) || cd $S8_WT; git push"
+expect_block_in "S8 cd <worktree> && cmd & push: the whole list ran in the background" \
+  "$S8_MAIN" "cd $S8_WT && git status & git push"
+expect_allow_in "S8 cd <worktree> && push &: that push runs in the worktree" \
+  "$S8_MAIN" "cd $S8_WT && git push origin feat &"
+expect_allow_in "S8 cd <worktree> && a | b; push: a pipeline inside the list keeps the move" \
+  "$S8_MAIN" "cd $S8_WT && echo x | grep x; git push origin feat"
+expect_block_in "S8 cd <worktree> && eval 'cd <main>' && push: eval moved the shell" \
+  "$S8_MAIN" "cd $S8_WT && eval 'cd $S8_MAIN' && git push"
+expect_allow_in "S8 eval 'cd <worktree>' && push: eval's move holds" \
+  "$S8_MAIN" "eval 'cd $S8_WT' && git push origin feat"
+expect_block_in "S8 pushd -n <worktree> && push: -n only stacks" \
+  "$S8_MAIN" "pushd -n $S8_WT && git push"
+expect_allow_in "S8 a # comment on the cd line" \
+  "$S8_MAIN" "$(printf 'cd %s  # into the worktree\ngit push origin feat' "$S8_WT")"
+
 # --- fail-closed: a target git cannot read falls back to the hook cwd ---
 expect_block_in "S8 cd to a directory that is not a repo" \
   "$S8_MAIN" "cd $S8_NOREPO && git push origin feat"
