@@ -255,6 +255,11 @@ run "jit.test.sh" bash tests/jit.test.sh
 # name without touching the rest of the file, and the difference between a value the FILE
 # carries and a value THIS PROCESS has. Hand-listed like every suite outside hooks/.
 run "env.test.sh" bash tests/env.test.sh
+# The session-id function (bionic 1.4.0 wave, spec AC-2, plan slice L-SESSION):
+# payload/scripts/lib/session.sh's session_id — env is primary, a payload sid
+# is a witness only; divergence prints once and env still wins. Hand-listed
+# like every suite outside hooks/.
+run "session.test.sh" bash tests/session.test.sh
 # The rc item (epic-18 wave-03 slice 4/7, spec R6 / AC-5, AC-6): the `claude()`
 # shell function as a setup-managed item — env.sh's roster and rc write/read/delete,
 # the consented step in setup.sh, doctor's row, and remove.sh's strip through both
