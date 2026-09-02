@@ -355,6 +355,13 @@ run "resources.test.sh" bash tests/resources.test.sh
 # Hermetic: HOME and BIONIC_PLUGINS_DIR are overridden per run, so the healing candidates
 # cannot reach this machine's real registry and quietly repair the damage.
 run "doctor-walls.test.sh" bash tests/doctor-walls.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 4.6, spec AC-23):
+# scripts/lib/width.sh's closed glyph set, measured under `LC_ALL=C` — the locale the
+# substitution exists for, and the only one where the assertion is not vacuous. Section 2
+# is differential: it sweeps the glyphs doctor.sh and setup.sh actually put into a bounded
+# row and requires each to measure one column, so the next glyph someone reaches for is
+# caught here rather than by a crooked table on somebody's terminal.
+run "width.test.sh" bash tests/width.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
