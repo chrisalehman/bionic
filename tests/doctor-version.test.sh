@@ -400,6 +400,37 @@ expect_true "31: tests/run.sh names doctor-version.test.sh" \
   grep -q 'run "doctor-version.test.sh" bash tests/doctor-version.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"
 
 echo ""
+echo "=== Section 8: feed kind is keyed on the installed plugin's own marketplace name (AC-18, L-DETECT/4.1) ==="
+
+# THE DEFECT. detect_marketplace_feed_kind used to key known_marketplaces.json
+# on the LITERAL string "bionic" — so a machine that registered bionic's feed
+# under any other marketplace name (a fork, e.g. `bionic@my-fork`) found no
+# entry at all and read `unknown` forever, even though the registry has every
+# fact needed to answer correctly. The fix reads the marketplace name FROM
+# installed_plugins.json's own `bionic@<name>` key rather than assuming it.
+#
+# A DIRECTORY-SOURCE FIXTURE UNDER THE NAME "my-fork", never "bionic" anywhere
+# in either registry file. Before the fix this reads `unknown` (no `.bionic`
+# key in known_marketplaces.json); after, it reads as a directory feed and the
+# version row shows the same reconverge integration as Section 3's `bionic`-
+# named fixture.
+HOME9="$(make_registry_home)"
+jq -nc --argjson src '{"source":"directory","path":"'"$REPO"'"}' --arg loc "$REPO" \
+  '{"my-fork":{source:$src, installLocation:$loc, lastUpdated:"2026-08-27T00:00:00Z"}}' \
+  > "$HOME9/plugins/known_marketplaces.json"
+jq -nc --arg path "$REPO" --arg sha "$REPO_HEAD" \
+  '{plugins:{"bionic@my-fork":[{installPath:$path, gitCommitSha:$sha}]}}' \
+  > "$HOME9/plugins/installed_plugins.json"
+
+OUT9="$(run_doctor "$HOME9")"
+ROW9="$(version_row "$OUT9")"
+
+expect_match "32: a bionic@my-fork registry still reads as a directory feed, not unknown" \
+  "*✓ version*${REAL_VERSION}*tree matches the registered cache*" "$ROW9"
+expect_no_match "33: no marketplace-latest language leaks in for the fork's feed" \
+  "*available*claude plugin update*" "$ROW9"
+
+echo ""
 echo "========================================"
 echo "doctor-version: $PASS/$TOTAL passed"
 echo "========================================"

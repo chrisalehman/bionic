@@ -55,6 +55,16 @@ PATROL_WALL_SCHEMA="patrol-wall/v1"
 # built-in — because two copies of a constant drift the first time either moves.
 PATROL_INTERVAL_LAST_RESORT=1800
 
+# HOW STALE IS STALE (L-DETECT/4.5, improvement, spec AC-22). "The stamp is
+# stale past twice the poker interval" is a judgment call three sites in this
+# payload each carry as their own inline arithmetic: this file's own
+# `patrol_stamp_state` below, `hooks/session-poker.sh` and `hooks/dispatch-
+# preflight.sh`. One exported constant is the single owner of the multiplier;
+# `patrol_stamp_state` reads it a few lines down. `session-poker.sh` and
+# `dispatch-preflight.sh` keep their own inline `* 2` for now — switching
+# those two readers to this constant is later slices' work, not this one's.
+export PATROL_STALE_MULTIPLIER=2
+
 # The CLI's config directory, through the same override chain every other
 # library here reads, so a fixture machine redirects this one with the knob it
 # already uses for the rest.
@@ -300,7 +310,7 @@ patrol_stamp_state() {  # <repo-root> <sid> -> state=…|age=…|limit=…|inter
   local repo="${1:-}" sid="${2:-}" f iv secs src mt age limit state
   f="${repo}/.bionic/tmp/patrol-${sid}.state"
   iv="$(patrol_interval "$repo")"; secs="${iv%% *}"; src="${iv##* }"
-  limit=$(( secs * 2 ))
+  limit=$(( secs * PATROL_STALE_MULTIPLIER ))
   if [ -L "$f" ] || [ ! -f "$f" ]; then
     state="never-armed"; age=""
   else
