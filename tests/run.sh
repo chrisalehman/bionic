@@ -304,6 +304,13 @@ run "doctor-version.test.sh" bash tests/doctor-version.test.sh
 run "git-argv.test.sh" bash tests/git-argv.test.sh
 run "cmd-class.test.sh" bash tests/cmd-class.test.sh
 run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, 2026-09-02) — the library spine's unit suites, one
+# per fact, hand-listed like every suite outside hooks/:
+#   - resources.test.sh: scripts/lib/resources.sh (probe / budget / pressure — the parallel
+#     budget as a function of the machine instead of a number a human guessed) and the
+#     version-2 preflight attestation that records it. The kill datum this suite's memory
+#     term is built on is the one written at :63-68 of this file.
+run "resources.test.sh" bash tests/resources.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
