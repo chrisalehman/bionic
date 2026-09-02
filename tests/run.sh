@@ -314,6 +314,11 @@ run "shell-rc.test.sh" bash tests/shell-rc.test.sh
 # detect_plugin_latest, which gains a real `ahead` state for an installed build newer
 # than the marketplace's cached clone.
 run "version-compare.test.sh" bash tests/version-compare.test.sh
+# bionic 1.4.0 (L-DETECT/4.5, spec AC-22): scripts/lib/patrol.sh's PATROL_STALE_MULTIPLIER,
+# one exported staleness constant replacing the inline "twice the poker interval" literal in
+# patrol_stamp_state's own reader (session-poker.sh and dispatch-preflight.sh switch to it in
+# later slices).
+run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
