@@ -341,6 +341,13 @@ run "version-compare.test.sh" bash tests/version-compare.test.sh
 # patrol_stamp_state's own reader (session-poker.sh and dispatch-preflight.sh switch to it in
 # later slices).
 run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, 2026-09-02) — the library spine's unit suites, one
+# per fact, hand-listed like every suite outside hooks/:
+#   - resources.test.sh: scripts/lib/resources.sh (probe / budget / pressure — the parallel
+#     budget as a function of the machine instead of a number a human guessed) and the
+#     version-2 preflight attestation that records it. The kill datum this suite's memory
+#     term is built on is the one written at :63-68 of this file.
+run "resources.test.sh" bash tests/resources.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions

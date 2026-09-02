@@ -35,11 +35,35 @@
 # BY KEY and never by position (checklist A6). A version line is always present so a
 # future field addition is a readable change rather than a silent parse break.
 #
-#     version=1                       kind=preflight-attestation
+#     version=2                       kind=preflight-attestation
 #     session_id=<session key>        written_at=<epoch>   written_at_iso=<UTC>
 #     repo=<resolved repo root>       git_branch= git_head= git_dirty=
 #     credential_source=<where the credential was found, never the credential>
 #     other_sessions=<count seen by the warn-only scan>
+#     cores= mem_gb= disk_free_gb= load_1m= os=        (v2, AC-24's five probe fields)
+#     budget=writers=N suites=N worktrees=N test_jobs=N source=probe    (v2)
+#
+# VERSION 2 (AC-25, wave-bionic-1.4.0-update). The attestation is the only record written
+# once per session, before any dispatch, keyed to the session and to the repo — which makes
+# it the right place for the machine the fleet is about to run on and the parallel budget
+# derived from it. The five probe fields and the budget line come from
+# payload/scripts/lib/resources.sh; nothing here re-derives them.
+#
+#   * The budget VALUE is deliberately the whole `parallel-budget:` string the plan header
+#     carries, so Step 0, the dispatch wall and doctor read one string instead of four
+#     fields and a formula. `source=probe` distinguishes it from a hand-set override.
+#   * A machine where the library cannot be read still takes an attestation, and it is a
+#     VERSION 1 one. Resources are a context probe, never a blocking one (§4): a missing
+#     library must not stop a dispatch, and an empty-fielded v2 would be a lie about a
+#     machine nobody measured. v1 is the honest record of "no budget recorded", which is
+#     exactly what doctor prints for it (AC-27).
+#
+# READING an attestation (`--read <file>`, AC-25). Versions 1 AND 2 are accepted: a v1
+# record on disk when a v2 writer lands is the ordinary mid-upgrade state, and refusing it
+# would block every session until each repo took a fresh attestation. An UNRECOGNISED
+# version is refused, because a record whose schema this script does not know cannot be
+# read by key with any confidence. The dispatch wall does not use this path and still reads
+# only the record's existence and session key (its own comment at :265 explains why).
 #
 # The key is spelled `session_id` deliberately: it is the payload field name the reading
 # gate receives, and it is what the CURRENTLY INSTALLED old-name gate greps for. Until
@@ -66,6 +90,9 @@
 #   exit 2 — refused or could not complete; no attestation on disk (prior one deleted)
 #   exit 3 — no session key; REFUSED, state left untouched
 #   exit 4 — the state lock is held by another writer; state left untouched
+#   exit 5 — `--read <file>` only: the named file is not a readable attestation this
+#            script's reader recognises (absent, a symlink, no version line, or a version
+#            outside the supported set). Nothing is ever written on this path.
 #
 # Hostile-repo posture (design §8): a repo controls its own .bionic/ contents, so every
 # path this script writes is checked for symlink redirection first and the record is
@@ -83,7 +110,10 @@ set -u
 HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
 
-ATTESTATION_VERSION=1
+# The version a fresh attestation is written AS, and the set a reader ACCEPTS. They differ
+# on purpose: a writer emits one schema, a reader must tolerate every schema still on disk.
+ATTESTATION_VERSION=2
+ATTESTATION_VERSIONS_SUPPORTED="1 2"
 # D-3 payload-shape canary (w3 slice 4/4): the same-actor wall in hooks/stop-guard.sh reads
 # observer identity from the undocumented top-level `agent_id` field on subagent-invoked
 # PostToolUse|Bash payloads (validated .bionic/docs/record/w3-slice1-posttooluse-probe.md,
@@ -109,6 +139,81 @@ ROSTER_SUFFIX=".state"
 say()  { printf 'preflight: %s\n' "$1"; }
 warn() { printf 'preflight: WARN %s\n' "$1"; }
 die()  { printf 'preflight: %s\n' "$1" >&2; }
+
+# ---------------------------------------------------------------- read mode (AC-25)
+#
+# `bash preflight-probe.sh --read <file>` validates an attestation and echoes its record
+# lines (comments stripped) on stdout. STRICTLY READ-ONLY: it takes no lock, prunes
+# nothing, writes nothing, and needs no session key — which is why it is handled here,
+# before the session-key refusal and every path below it.
+#
+# It exists because the schema lives in THIS file (ownership table), so the acceptance
+# rule "versions 1 and 2" belongs beside the writer that produces them, not copied into
+# each of doctor, the Step 0 display and the tick.
+#
+# A symlink is not followed, for the same reason no other path here follows one: the
+# attestation sits inside a repo, and a repo controls its own `.bionic/` contents.
+attestation_version_supported() {  # <version string>
+  local v
+  for v in $ATTESTATION_VERSIONS_SUPPORTED; do
+    [ "$v" = "${1:-}" ] && return 0
+  done
+  return 1
+}
+
+if [ "${1:-}" = "--read" ]; then
+  _read_target="${2:-}"
+  if [ -z "$_read_target" ]; then
+    die "REFUSED — --read needs a file path."
+    exit 5
+  fi
+  if [ -L "$_read_target" ]; then
+    die "REFUSED — $_read_target is a symbolic link; an attestation is never read through one."
+    exit 5
+  fi
+  if [ ! -f "$_read_target" ] || [ ! -r "$_read_target" ]; then
+    die "REFUSED — no readable attestation at $_read_target."
+    exit 5
+  fi
+  # By key, never by position (checklist A6).
+  _read_version="$(grep -m1 '^version=' "$_read_target" 2>/dev/null | cut -d= -f2-)"
+  if [ -z "$_read_version" ]; then
+    die "REFUSED — $_read_target carries no version= line; it is not an attestation record."
+    exit 5
+  fi
+  if ! attestation_version_supported "$_read_version"; then
+    die "REFUSED — attestation version $_read_version is not one this reader knows"
+    die "(supported: $ATTESTATION_VERSIONS_SUPPORTED). Re-take the attestation with a"
+    die "matching build: bash ${HOOK_DIR}/preflight-probe.sh"
+    exit 5
+  fi
+  grep -v '^#' "$_read_target" 2>/dev/null | grep -E '^[A-Za-z_][A-Za-z0-9_]*='
+  exit 0
+fi
+
+# ---------------------------------------------------------------- the resources library
+#
+# FAIL-OPEN, deliberately, and the only load in this script that is (design D1 fail-closed
+# applies to WALLS, not to context probes). A machine whose library is missing must still
+# be able to attest and dispatch; what it loses is the budget line, and the record says so
+# by staying at version 1 rather than carrying five empty fields.
+#
+# TWO SPELLINGS OF ONE DIRECTORY, the same pair hooks/farm-out-reminder.sh resolves:
+# payload/hooks is a symlink to <repo>/hooks and `$0` is textual, so "../scripts/lib"
+# resolves only when this file was reached through ${CLAUDE_PLUGIN_ROOT}/hooks/; the repo
+# spelling is the second candidate. -r, not -f: readability is what predicts whether `.`
+# succeeds.
+RESOURCES_LIB=""
+for _cand in "$HOOK_DIR/../scripts/lib/resources.sh" \
+             "$HOOK_DIR/../payload/scripts/lib/resources.sh"; do
+  [ -r "$_cand" ] && { RESOURCES_LIB="$_cand"; break; }
+done
+PROBE_CORES=""; PROBE_MEM_GB=""; PROBE_DISK_GB=""; PROBE_LOAD_1M=""; PROBE_OS=""
+PROBE_BUDGET=""
+if [ -n "$RESOURCES_LIB" ]; then
+  # shellcheck disable=SC1090
+  . "$RESOURCES_LIB" 2>/dev/null || RESOURCES_LIB=""
+fi
 
 # ---------------------------------------------------------------- session key (design §7)
 
@@ -377,6 +482,31 @@ else
   say "session roster: this session's transcript directory was not found (context only)"
 fi
 
+# The machine, and the budget derived from it (AC-24, AC-25). A CONTEXT probe: it records,
+# it never blocks. The probe runs FROM THE REPO ROOT because its disk term bounds worktrees
+# and worktrees are cut beside the repo, not beside whatever directory the operator stood in.
+if [ -n "$RESOURCES_LIB" ]; then
+  _probe_line="$( cd "$REPO_REAL" 2>/dev/null && resources_probe 2>/dev/null )"
+  # Read by key, never by position — the same rule the attestation itself is read under.
+  _pf() { printf '%s\n' "$_probe_line" | tr ' ' '\n' | grep "^$1=" | head -1 | cut -d= -f2-; }
+  PROBE_CORES="$(_pf cores)"; PROBE_MEM_GB="$(_pf mem_gb)"
+  PROBE_DISK_GB="$(_pf disk_free_gb)"; PROBE_LOAD_1M="$(_pf load_1m)"; PROBE_OS="$(_pf os)"
+  if [ -n "$PROBE_CORES" ] && [ -n "$PROBE_MEM_GB" ] && [ -n "$PROBE_DISK_GB" ] &&
+     [ -n "$PROBE_LOAD_1M" ] && [ -n "$PROBE_OS" ]; then
+    _budget="$(resources_budget "$PROBE_CORES" "$PROBE_MEM_GB" "$PROBE_DISK_GB" 2>/dev/null)"
+    if [ -n "$_budget" ]; then
+      PROBE_BUDGET="$_budget source=probe"
+      say "machine: ${PROBE_CORES}c, ${PROBE_MEM_GB} GB, ${PROBE_DISK_GB} GB free, load ${PROBE_LOAD_1M} (${PROBE_OS})"
+      say "budget: $PROBE_BUDGET"
+    fi
+  fi
+  # Any gap in the five fields or the budget leaves PROBE_BUDGET empty, and the write below
+  # falls back to a version 1 record rather than attesting to a half-measured machine.
+  [ -n "$PROBE_BUDGET" ] || say "resources: not measured on this run (attestation stays at version 1)"
+else
+  say "resources: library not found beside this script (attestation stays at version 1)"
+fi
+
 # D-3 payload-shape canary (w3 slice 4/4): compare the pinned validated CLI version against
 # what's actually installed. Warn only — never blocking, never written into the attestation —
 # because the last-known-good behavior (the discriminator holding) is what the pin records,
@@ -483,9 +613,18 @@ tmp="$(mktemp "$STATE_FILE.XXXXXX" 2>/dev/null)"
 [ -n "$tmp" ] && [ -f "$tmp" ] || abort_write "could not create a temporary file in $STATE_DIR"
 chmod 600 "$tmp" 2>/dev/null || abort_write "could not restrict permissions on the temporary file"
 
+# A record is version 2 only when it can actually carry what version 2 promises. With no
+# budget measured, the honest record is the version 1 schema — which the reader above still
+# accepts and doctor renders as "no budget recorded" (AC-27).
+if [ -n "$PROBE_BUDGET" ]; then
+  RECORD_VERSION="$ATTESTATION_VERSION"
+else
+  RECORD_VERSION=1
+fi
+
 {
   printf '# bionic environment attestation — machine-local, safe to delete\n'
-  printf 'version=%s\n'      "$ATTESTATION_VERSION"
+  printf 'version=%s\n'      "$RECORD_VERSION"
   printf 'kind=%s\n'         "preflight-attestation"
   printf 'session_id=%s\n'   "$SESSION_ID"
   printf 'written_at=%s\n'   "$(date -u +%s)"
@@ -496,6 +635,17 @@ chmod 600 "$tmp" 2>/dev/null || abort_write "could not restrict permissions on t
   printf 'git_dirty=%s\n'    "$GIT_DIRTY"
   printf 'credential_source=%s\n' "$CRED_SOURCE"
   printf 'other_sessions=%s\n'    "$OTHER_SESSIONS"
+  if [ "$RECORD_VERSION" -ge 2 ]; then
+    # The five probe fields (AC-24), then the budget as ONE string in exactly the shape the
+    # plan header's `parallel-budget:` carries, so every reader takes a string rather than
+    # re-deriving a formula (spec Design §3, ownership table).
+    printf 'cores=%s\n'        "$PROBE_CORES"
+    printf 'mem_gb=%s\n'       "$PROBE_MEM_GB"
+    printf 'disk_free_gb=%s\n' "$PROBE_DISK_GB"
+    printf 'load_1m=%s\n'      "$PROBE_LOAD_1M"
+    printf 'os=%s\n'           "$PROBE_OS"
+    printf 'budget=%s\n'       "$PROBE_BUDGET"
+  fi
 } > "$tmp" 2>/dev/null || abort_write "could not write the attestation record"
 
 mv -f "$tmp" "$STATE_FILE" 2>/dev/null || abort_write "could not install the attestation at $STATE_FILE"
