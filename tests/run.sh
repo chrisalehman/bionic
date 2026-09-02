@@ -245,6 +245,15 @@ run "detect-probes.test.sh" bash tests/detect-probes.test.sh
 # different fixture regime — and so, like every suite outside hooks/, hand-listed here or
 # it never runs.
 run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
+# The worktree LEASE (bionic 1.4.0 wave, spec AC-11/AC-28, plan slice WORKTREE):
+# payload/scripts/lib/worktree.sh — the land verb (merge --no-ff, remove,
+# prune, and the four refusals around it), the legacy `.bionic` links C2
+# retired, and the lease overruns the Patrol tick reports. Its own suite rather
+# than a group in spawn-worktree.test.sh: that one drives an EXECUTED script
+# against a scratch repo, this one sources a library and calls functions, and
+# the fixture regimes differ (a fixture claude-home for the D1 predicate).
+# Hand-listed like every suite outside hooks/.
+run "worktree.test.sh" bash tests/worktree.test.sh
 # The JIT / degradation contract (epic-17 W3 S10, spec AC-5): payload/scripts/lib/jit.sh's
 # jit_check + jit_offer, driven against a fixture PATH, proving jit_offer calls install_dep
 # BY NAME (the ownership-table agreement) and mutates nothing on decline. Hand-listed like

@@ -11,7 +11,7 @@
 # somebody can PROVE is at the intended base is. Every successful create prints
 # exactly one line, and the dispatcher quotes that line into its ledger row:
 #
-#   spawn-worktree: OK path=<abs> branch=<b> head=<sha> base=<sha> bionic-symlink=<abs>
+#   spawn-worktree: OK path=<abs> branch=<b> head=<sha> base=<sha>
 #
 # That is why `head=` and `base=` are both full 40-character SHAs even when the
 # caller named the base with a short one: the whole point of the field pair is
@@ -28,10 +28,15 @@
 # failure it removes what it created and refuses. There is never an unattested
 # worktree: no half-built tree, no orphan branch.
 #
-# ONE SYMLINK, NOTHING ELSE. `<worktree>/.bionic` -> `<main-root>/.bionic`, so
-# a writer in a spawned tree reads and writes the SAME plan, ledger and record
-# files as everyone else. No `.claude/rules` affordance (W1 ruling; rules
-# absorb into the plugin in W4).
+# NO SYMLINK, AND THAT IS THE POINT (bionic 1.4.0, design ledger C2). This
+# script used to plant `<worktree>/.bionic` -> `<main-root>/.bionic` so a writer
+# in a spawned tree reached the same plan, ledger and record files as everyone
+# else. It reaches them now through `project_root`, which maps a linked
+# worktree to the main checkout by `--git-common-dir` — the same answer without
+# a link in the tree to be followed by the wrong reader, chased by a cleanup, or
+# checked out over. `create` plants nothing; `remove` and `land` DELETE a legacy
+# link an older bionic left behind, and `worktree_legacy_links` in
+# payload/scripts/lib/worktree.sh lists them for doctor.
 #
 # THE MAIN ROOT, NOT THE CURRENT ONE. Paths resolve against the main checkout,
 # found through `--git-common-dir` rather than `--show-toplevel`, and a
@@ -67,11 +72,12 @@ Usage:
   spawn-worktree.sh create <base-sha> <branch-name> [worktree-parent-dir]
   spawn-worktree.sh remove <worktree-path>
 
-create  makes the branch AND the worktree at exactly <base-sha>, plants
-        <worktree>/.bionic -> <main-root>/.bionic, verifies all of it, and
-        prints one OK attestation line. Default parent: <main-root>/.worktrees.
-        A relative parent resolves against the main root, never against pwd.
-remove  removes the worktree and KEEPS the branch.
+create  makes the branch AND the worktree at exactly <base-sha>, verifies
+        both, and prints one OK attestation line. Nothing is planted in the
+        tree. Default parent: <main-root>/.worktrees. A relative parent
+        resolves against the main root, never against pwd.
+remove  removes the worktree and KEEPS the branch, deleting a legacy
+        <worktree>/.bionic symlink first if an older bionic left one.
 USAGE
 }
 
@@ -84,6 +90,9 @@ main_root=""; wt=""; branch=""; created=0
 
 cleanup_partial() {
   [ -n "$wt" ] || return 0
+  # A legacy link (C2) would make git refuse the removal below; nothing here
+  # plants one any more, but an aborted create on a tree that already had one
+  # must still come away clean.
   if [ -L "${wt}/.bionic" ]; then rm -f "${wt}/.bionic"; fi
   if [ -n "$main_root" ] && [ -d "$wt" ]; then
     git -C "$main_root" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
@@ -167,30 +176,17 @@ cmd_create() {
   git -C "$main_root" worktree add --quiet -b "$branch" "$wt" "$base_sha" >/dev/null 2>&1 \
     || abort_created worktree-add-failed
 
-  # The branch's own tree can already carry a `.bionic` path — and `ln -s` into
-  # an existing directory plants the link INSIDE it, producing a worktree whose
-  # `.bionic` leads somewhere else entirely while the attestation claims
-  # otherwise. Refuse rather than resolve it.
-  if [ -e "${wt}/.bionic" ] || [ -L "${wt}/.bionic" ]; then
-    abort_created bionic-path-occupied
-  fi
-  ln -s "${main_root}/.bionic" "${wt}/.bionic" 2>/dev/null || abort_created symlink-plant-failed
-
-  # Read everything back. Nothing below is taken from an argument.
+  # Read everything back. Nothing below is taken from an argument. A `.bionic`
+  # path the branch itself carries is checked out here like any other tracked
+  # content and is left exactly alone: since C2 this script plants nothing into
+  # the tree, so there is no target for it to occupy.
   local head
   head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
   [ "$head" = "$base_sha" ] || abort_created head-mismatch
   [ "$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$branch" ] \
     || abort_created branch-mismatch
-  [ -L "${wt}/.bionic" ] || abort_created symlink-missing
 
-  local link_target expected_target
-  link_target="$(cd "${wt}/.bionic" 2>/dev/null && pwd -P)"
-  [ -n "$link_target" ] || abort_created symlink-dangling
-  expected_target="$(cd "${main_root}/.bionic" && pwd -P)"
-  [ "$link_target" = "$expected_target" ] || abort_created symlink-wrong-target
-
-  contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha} bionic-symlink=${link_target}"
+  contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}"
 }
 
 cmd_remove() {
@@ -210,18 +206,16 @@ cmd_remove() {
   local root; root="$( cd "$wt_abs" && resolve_main_root )"
   [ -n "$root" ] || refuse repo-root-unresolvable
 
-  # The symlink is this script's own; git reads it as an untracked file and
-  # would refuse to remove the tree over it. Taken away first, and put back
-  # verbatim if git refuses for a reason that is genuinely the caller's
-  # business — uncommitted work.
-  local link=""
+  # A LEGACY link (C2) — one an older bionic planted, since nothing plants one
+  # now. git reads it as an untracked file and would refuse to remove the tree
+  # over it, so it is taken away first, and it is NOT put back: the retirement
+  # is the point, and a refusal that restored it would leave the next call to
+  # meet the same obstacle.
   if [ -L "${wt_abs}/.bionic" ]; then
-    link="$(readlink "${wt_abs}/.bionic")"
     rm -f "${wt_abs}/.bionic"
   fi
 
   if ! git -C "$root" worktree remove "$wt_abs" >/dev/null 2>&1; then
-    if [ -n "$link" ]; then ln -s "$link" "${wt_abs}/.bionic"; fi
     refuse worktree-remove-refused
   fi
 
