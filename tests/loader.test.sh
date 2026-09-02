@@ -242,6 +242,41 @@ case "$DCANDS" in
   *) fail "D.4 candidate list records what was tried" "CANDS=[$DCANDS]" ;;
 esac
 
+# ── §H — the BIONIC_LIB_WANT contract ADOPT writes ─────────────────────────
+# A hook may want more than one basename. A candidate directory qualifies only when
+# it holds ALL of them, so a directory holding half the library is not "found" — the
+# alternative is a hook that sources one file and dies on the next.
+H1="$WORK/h1"; mkdir -p "$H1/scripts/lib"; : > "$H1/scripts/lib/git-argv.sh"
+mkdir -p "$H1/payload/scripts/lib"; : > "$H1/payload/scripts/lib/git-argv.sh"; : > "$H1/payload/scripts/lib/cmd-class.sh"
+mkdir -p "$H1/hooks"
+{ echo '#!/bin/bash'; echo 'set -u'; echo 'BIONIC_LIB_WANT="git-argv.sh cmd-class.sh"'; cat "$BLOCK"; printf '%s\n' "$REPORT_TAIL"; } > "$H1/hooks/probe.sh"
+runhook "$H1" "$WORK/h1-plugins" "" > "$WORK/h1.out" 2>"$WORK/h1.err"
+eq "H.1 a partial directory is skipped; the complete one wins" \
+   "$(field "$WORK/h1.out" LIB)" "$H1/hooks/../payload/scripts/lib"
+
+# jq absent entirely (not merely broken): the healing path must degrade to MISSING,
+# quietly, rather than erroring on the way down. `command -v jq` is not consulted, so
+# this fixture runs with a PATH that has no jq on it at all.
+H2="$WORK/h2"; mkhook "$H2" "$REPORT_TAIL"
+H2PD="$WORK/h2-plugins"; mkdir -p "$H2PD"
+printf '%s\n' '{"plugins":{"bionic@bionic":[{"installPath":"/nowhere"}]}}' > "$H2PD/installed_plugins.json"
+# A REALISTIC no-jq PATH: every other tool the block may reach for is present, jq
+# alone is absent. Emptying PATH outright would also strip dirname and prove nothing
+# about jq.
+NOJQ_BIN="$WORK/nojq-bin"; mkdir -p "$NOJQ_BIN"
+for t in dirname sed head cat printf env; do
+  _p="$(command -v "$t" 2>/dev/null)" && ln -sf "$_p" "$NOJQ_BIN/$t"
+done
+if command -v jq >/dev/null 2>&1 && [ ! -e "$NOJQ_BIN/jq" ]; then
+  pass "H.0 the no-jq fixture really lacks jq"
+else
+  fail "H.0 the no-jq fixture really lacks jq"
+fi
+env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$H2PD" PATH="$NOJQ_BIN" /bin/bash "$H2/hooks/probe.sh" > "$WORK/h2.out" 2>"$WORK/h2.err"; H2RC=$?
+eq "H.2 no jq on PATH: the block still exits 0"        "$H2RC" "0"
+eq "H.3 no jq on PATH: BIONIC_LIB_MISSING is set"      "$(field "$WORK/h2.out" MISSING)" "git-argv.sh"
+eq "H.4 no jq on PATH: nothing leaks to stderr"        "$(cat "$WORK/h2.err")" ""
+
 # ── §E — loader_fail_open: one stderr line, exit 0 ─────────────────────────
 E="$WORK/e"; mkhook "$E" 'loader_fail_open "farm-out-reminder"; echo "REACHED-PAST-FAIL-OPEN"'
 runhook "$E" "$WORK/e-plugins" "" > "$WORK/e.out" 2>"$WORK/e.err"; ERC=$?
