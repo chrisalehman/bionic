@@ -51,15 +51,22 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 # are not pushes, and `git -C <dir> push`, `sudo git push`,
 # `if …; then git push …; fi` and `sh -c 'git push …'` are.
 #
-# git_argv_EXPAND, not git_argv_segments: the expanded list adds the segments
-# of any `sh -c` / `eval` string, which the segment list on its own leaves as a
-# single opaque token (R-12, critic C-1/C-5).
-IS_PUSH=0
-while IFS= read -r segment; do
-  [ -n "$segment" ] || continue
+# git_argv_expand_moves, not git_argv_segments: the expanded list adds the
+# segments of any `sh -c` / `eval` string, which the segment list on its own
+# leaves as a single opaque token (R-12, critic C-1/C-5) — and the moves
+# variant prefixes each segment with the directory the shell is in when it
+# runs, which Block 3 needs (see there).
+#
+# EVERY PUSH IS JUDGED, inside the loop, by all three blocks. A command may
+# carry two pushes that run in two places (`git push && cd wt && git push`);
+# a block that ran once after the loop judged only the last (critic,
+# 2026-09-02). A command with no push falls out of the loop and is allowed.
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  PUSH_AT="${line%%"$GIT_ARGV_RS"*}"
+  segment="${line#*"$GIT_ARGV_RS"}"
   git_argv_parse "$segment" || continue
   [ "$GIT_SUB" = "push" ] || continue
-  IS_PUSH=1
   git_push_targets
 
   # Block 1: this push writes to main/master. GIT_DESTS is US-separated, so
@@ -79,21 +86,70 @@ while IFS= read -r segment; do
     echo "BLOCKED: Force pushing is not allowed from Claude Code." >&2
     exit 2
   fi
-done <<< "$(git_argv_expand "$COMMAND")"
 
-# Skip if no actual push command found
-if [ "$IS_PUSH" -eq 0 ]; then
-  exit 0
-fi
-
-# Block 3: Any push while on main/master branch (catches implicit pushes
-# like "git push origin", "git push origin HEAD", bare "git push")
-# [WALL: tests/protect-main.test.sh]
-CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
-if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
-  echo "BLOCKED: Cannot push while on '$CURRENT_BRANCH' branch from Claude Code." >&2
-  echo "Switch to a feature branch or push manually from your terminal." >&2
-  exit 2
-fi
+  # Block 3: Any push while on main/master branch (catches implicit pushes
+  # like "git push origin", "git push origin HEAD", bare "git push")
+  # [WALL: tests/protect-main.test.sh]
+  #
+  # JUDGED WHERE THE PUSH RUNS, not where this hook runs. The hook's cwd is
+  # the session's — the main checkout, on main — and a worktree push moves
+  # first: `cd <repo>/.worktrees/x && git push origin x`, or
+  # `git -C <worktree> push`. Until this read the command's own moves, every
+  # such push was refused as a push from main (three false blocks in one day,
+  # 2026-08-05; PR #16 carried the same fix against the pre-1.3.2 text
+  # matcher). Where the shell is when this segment runs is the library's
+  # reading (PUSH_AT, from git_argv_expand_moves — it applies the shell's own
+  # rules for `&&`, `||`, `&`, `|`, `( … )`, `sh -c` and an unnameable `cd`);
+  # git's own `-C` hops come after it, in git's order (`git -C a -C b` is a
+  # then b), so the whole list goes to git as-is.
+  #
+  # FAIL-CLOSED: a target git cannot read (no such directory, not a
+  # repository, a `cd "$VAR"` the reader kept as written) falls back to the
+  # hook's own cwd — the side that refuses. A real repository with no branch
+  # (detached HEAD) is judged on its own state: no branch is not main. Block 1
+  # refuses an explicit main destination whatever the cwd, so this reading
+  # only ever decides the IMPLICIT push.
+  #
+  # NOT MODELLED, deliberately: a `cd` target the shell would expand (`$VAR`,
+  # `$(…)`) — read as written, so it falls back to the hook cwd, which
+  # refuses; write the path. And whether a command RAN: the body of an `if`,
+  # `while`, `until` or `case` reads as if it ran, and the left side of a
+  # `||` as if it succeeded, because nothing here evaluates a condition —
+  # the line the library draws for `$(…)` too. Named in git_argv_expand_moves.
+  CURRENT_BRANCH=""
+  _pm_resolved=0
+  _pm_hops="$PUSH_AT"
+  if [ -n "$GIT_C_DIRS" ]; then
+    if [ -n "$_pm_hops" ]; then _pm_hops="$_pm_hops$GIT_ARGV_US$GIT_C_DIRS"; else _pm_hops="$GIT_C_DIRS"; fi
+  fi
+  if [ -n "$_pm_hops" ]; then
+    _pm_oldifs="$IFS"
+    set -f
+    IFS="$GIT_ARGV_US"
+    # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+    set -- $_pm_hops
+    IFS="$_pm_oldifs"
+    set +f
+    # Rewrite the hop list in place as `-C <hop>` pairs (bash 3.2: no arrays).
+    _pm_n=$#
+    while [ "$_pm_n" -gt 0 ]; do
+      set -- "$@" -C "$1"
+      shift
+      _pm_n=$((_pm_n - 1))
+    done
+    if git "$@" rev-parse --git-dir >/dev/null 2>&1; then
+      _pm_resolved=1
+      CURRENT_BRANCH=$(git "$@" symbolic-ref --short HEAD 2>/dev/null || echo "")
+    fi
+  fi
+  if [ "$_pm_resolved" -eq 0 ]; then
+    CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+  fi
+  if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+    echo "BLOCKED: Cannot push while on '$CURRENT_BRANCH' branch from Claude Code." >&2
+    echo "Switch to a feature branch or push manually from your terminal." >&2
+    exit 2
+  fi
+done <<< "$(git_argv_expand_moves "$COMMAND")"
 
 exit 0
