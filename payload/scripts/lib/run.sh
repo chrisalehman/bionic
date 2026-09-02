@@ -30,6 +30,16 @@
 #
 # [WALL: tests/run-predicate.test.sh]
 
+# _run_lines <file> -> the file with its line endings TRANSLATED to \n, never deleted.
+# A trailing \r is stripped from each record (CRLF) and any remaining lone \r becomes a
+# real newline (classic-Mac CR-only). Every read in this file is line-anchored, so it
+# must see real newlines: `tr -d '\r'` would collapse a CR-only plan to one line, every
+# match would miss, and the run would read as CLOSED while it was live — the
+# fail-dangerous direction (.claude/rules/hook-authoring.md).
+_run_lines() {
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null
+}
+
 # docs_root <root> -> the absolute docs root for <root>: its .bionic/config.yaml's
 # `docs-root:` value if set (relative values are joined onto <root>; absolute values pass
 # through unchanged), else <root>/.bionic/docs. Byte-identical convention to
@@ -66,7 +76,14 @@ active_plan() {
   for d in "$droot/plans" "$droot/incidents"; do
     [ -d "$d" ] || continue
     while IFS= read -r -d '' f; do
-      grep -q '^## SDLC State' "$f" 2>/dev/null || continue
+      # LINE ENDINGS ARE TRANSLATED, NEVER DELETED. `tr -d '\r'` collapses a CR-only
+      # (classic-Mac) file to a single line, every line-anchored match misses, and the
+      # plan becomes invisible to every wall in the fleet while a wave is live — the
+      # recorded fail-dangerous shape (.claude/rules/hook-authoring.md; the evidence
+      # gate carries the same normalization at its own parse). awk splits on \n, so a
+      # CR-only file arrives as one record that gsub re-splits into real lines.
+      awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$f" 2>/dev/null \
+        | grep -q '^## SDLC State' || continue
       if [ -z "$plan" ] || [ "$f" -nt "$plan" ]; then
         plan="$f"
       fi
@@ -85,11 +102,11 @@ active_run() {
 
   # Frontmatter close: a plan explicitly abandoned is never active, regardless of `current:`.
   local frontmatter
-  frontmatter=$(awk '
+  frontmatter=$(_run_lines "$plan" | awk '
     NR == 1 && $0 == "---" { f = 1; next }
     f && $0 == "---" { exit }
     f { print }
-  ' "$plan")
+  ')
   if printf '%s\n' "$frontmatter" | grep -q '^abandoned:'; then
     return 1
   fi
@@ -97,7 +114,7 @@ active_run() {
   # Flush-left current: line — the only place this key appears in the plan's own convention
   # (frontmatter never carries it; it lives in ## SDLC State).
   local current
-  current=$(grep -m1 '^current:' "$plan" \
+  current=$(_run_lines "$plan" | grep -m1 '^current:' \
     | sed -E 's/^current:[[:space:]]*//' \
     | tr -d '[:space:]')
   [ -n "$current" ] || return 1
@@ -116,7 +133,7 @@ active_run() {
 
   # Step 9: open unless a Step-9 evidence line records delivery.
   if [ "$current" = "9" ]; then
-    if grep -qE '^- Step 9:.*delivered:' "$plan"; then
+    if _run_lines "$plan" | grep -qE '^- Step 9:.*delivered:'; then
       return 1
     fi
     printf '%s\n' "$plan"
