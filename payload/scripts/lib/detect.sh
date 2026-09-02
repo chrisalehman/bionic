@@ -93,6 +93,17 @@ if ! declare -F rc_get >/dev/null 2>&1; then
   . "$(cd "$(_detect_self_dir)" && pwd -P)/env.sh"
 fi
 
+# shell.sh, THE SAME SOFT SOURCE, FOR `shell_rc_file` — the one rc-file resolver
+# (L-DETECT/4.4, spec AC-21). `_detect_shell_rc` below used to carry its own copy
+# of the zsh/bashrc case split; remove.sh's `_rm_shell_rc` carried a second,
+# byte-identical one. Two owners of one answer is the duplication this file's own
+# header forbids for every other fact it holds, so this fact gets the same
+# single-source treatment as `rc_get`/`rc_file` just above.
+if ! declare -F shell_rc_file >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(_detect_self_dir)" && pwd -P)/shell.sh"
+fi
+
 _detect_plugin_root() {
   if [ -n "${BIONIC_PLUGIN_ROOT:-}" ]; then echo "$BIONIC_PLUGIN_ROOT"; return; fi
   if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then echo "$CLAUDE_PLUGIN_ROOT"; return; fi
@@ -100,13 +111,9 @@ _detect_plugin_root() {
   ( cd "$(_detect_self_dir)/../.." && pwd -P )
 }
 
+# A thin caller of shell.sh's one resolver — see the source guard above.
 _detect_shell_rc() {
-  if [ -n "${BIONIC_SHELL_RC:-}" ]; then echo "$BIONIC_SHELL_RC"; return; fi
-  local shell_name="${SHELL:-/bin/bash}"
-  case "${shell_name##*/}" in
-    zsh) echo "$HOME/.zshrc" ;;
-    *)   echo "$HOME/.bashrc" ;;
-  esac
+  shell_rc_file
 }
 
 # ─── Plugin integrity ────────────────────────────────────────────────────────
