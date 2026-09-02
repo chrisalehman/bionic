@@ -304,6 +304,11 @@ run "doctor-version.test.sh" bash tests/doctor-version.test.sh
 run "git-argv.test.sh" bash tests/git-argv.test.sh
 run "cmd-class.test.sh" bash tests/cmd-class.test.sh
 run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
+# bionic 1.4.0 (L-DETECT/4.4, spec AC-21): scripts/lib/shell.sh's shell_rc_file, the one
+# rc-file resolver detect.sh's and remove.sh's shell-rc functions now both delegate to,
+# pinned structurally (thin caller, no hand-rolled case split) and by cross-file agreement
+# across zsh/bash/fish/unrecognized $SHELL.
+run "shell-rc.test.sh" bash tests/shell-rc.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
