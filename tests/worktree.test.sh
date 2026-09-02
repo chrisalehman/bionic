@@ -104,6 +104,7 @@ echo "=== Group 1: the library exists and parses ==="
 expect_true "worktree.sh passes bash -n" bash -n "$LIB"
 expect_true "worktree_legacy_links is defined"    declare -f worktree_legacy_links
 expect_true "worktree_land is defined"            declare -f worktree_land
+expect_true "worktree_lease_overruns is defined"  declare -f worktree_lease_overruns
 
 echo ""
 echo "=== Group 2: worktree_legacy_links — what C2 retired, listed ==="
@@ -315,6 +316,66 @@ expect_match "land with no path is refused" "spawn-worktree: REFUSED *" \
   "$( cd "$V" && bash "$SPAWN" land 2>/dev/null )"
 expect_true "the usage text names the land verb" \
   grep -q 'spawn-worktree.sh land' "$SPAWN"
+
+echo ""
+echo "=== Group 8: worktree_lease_overruns — a tree outliving its row ==="
+#
+# C1's tick finding. The lease ends when the row is fact-discharged; a tree
+# still standing after that is a slot counted against the worktree budget that
+# nobody holds, and saying so is the whole of this function's job — it lands
+# nothing and removes nothing.
+#
+# THE MAPPING IS BY CONVENTION, because the roster carries no worktree field: a
+# tree at `.worktrees/<dir>` belongs to the row named `W-<DIR>` uppercased, the
+# spelling every wave in this repo has used. The walk starts from the TREES, so
+# a row with no tree is silent and a tree with no discharged row is silent.
+
+O="$(new_repo "$TMP/overrun")"
+new_tree "$O" l-root      >/dev/null
+new_tree "$O" adopt       >/dev/null
+new_tree "$O" still-going >/dev/null
+VERDICTS="$TMP/verdicts.txt"
+
+: > "$VERDICTS"
+expect_eq "no discharged rows, no overruns" "" "$(worktree_lease_overruns "$O" "$VERDICTS")"
+
+cat > "$VERDICTS" <<'V'
+landing-verdict/v1|at=2026-09-02T00:00:00Z|session=s|name=W-L-ROOT|state=MET|acked=no|detail=x
+landing-verdict/v1|at=2026-09-02T00:00:00Z|session=s|name=W-STILL-GOING|state=UNMET|acked=no|detail=x
+V
+expect_eq "a MET row whose tree still stands is one overrun line" \
+  "${O}/.worktrees/l-root	W-L-ROOT" "$(worktree_lease_overruns "$O" "$VERDICTS")"
+expect_eq "the line is path TAB row-id" "2" \
+  "$(worktree_lease_overruns "$O" "$VERDICTS" | awk -F'\t' '{print NF}')"
+expect_eq "an UNMET row's tree is NOT an overrun (the arm discriminates)" "0" \
+  "$(worktree_lease_overruns "$O" "$VERDICTS" | grep -c 'still-going')"
+
+# The other two spellings of discharge, each on its own.
+cat > "$VERDICTS" <<'V'
+landing-verdict/v1|at=2026-09-02T00:00:00Z|session=s|name=W-ADOPT|state=UNMET|acked=yes|detail=x
+V
+expect_eq "an ACKED row discharges too" "${O}/.worktrees/adopt	W-ADOPT" \
+  "$(worktree_lease_overruns "$O" "$VERDICTS")"
+cat > "$VERDICTS" <<'V'
+roster-state/v1|status=CLOSED|session=s|name=W-ADOPT|deliverable=x
+V
+expect_eq "a CLOSED roster row discharges too" "${O}/.worktrees/adopt	W-ADOPT" \
+  "$(worktree_lease_overruns "$O" "$VERDICTS")"
+
+# Two at once, and a discharged row whose tree is already gone stays silent —
+# that row's lease ended correctly and has nothing to report.
+cat > "$VERDICTS" <<'V'
+landing-verdict/v1|at=2026-09-02T00:00:00Z|session=s|name=W-L-ROOT|state=MET|acked=no|detail=x
+landing-verdict/v1|at=2026-09-02T00:00:00Z|session=s|name=W-ADOPT|state=WAIVED|acked=no|detail=x
+landing-verdict/v1|at=2026-09-02T00:00:00Z|session=s|name=W-LONG-GONE|state=MET|acked=no|detail=x
+V
+expect_eq "two standing trees, two lines" "2" "$(worktree_lease_overruns "$O" "$VERDICTS" | grep -c .)"
+expect_eq "a discharged row with no tree reports nothing" "0" \
+  "$(worktree_lease_overruns "$O" "$VERDICTS" | grep -c 'long-gone')"
+expect_eq "a missing verdict file is not an error, just silence" "" \
+  "$(worktree_lease_overruns "$O" "$TMP/no-such-file")"
+expect_eq "the function removes nothing" "3" \
+  "$(ls "${O}/.worktrees" | grep -c .)"
 
 echo ""
 echo "========================================"

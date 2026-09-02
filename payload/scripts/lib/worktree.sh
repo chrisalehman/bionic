@@ -212,3 +212,85 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
   _wt_say "LANDED branch=${branch} merge=${merge_sha} removed=${wt_abs}"
   return 0
 }
+
+# ---------------------------------------------------------------------------
+# Lease overruns — a tree still standing after its row was discharged.
+#
+# C1's tick finding, and only a finding: this function lands nothing and
+# removes nothing. A tree whose lease has ended is a slot counted against the
+# worktree budget that nobody holds, and the Patrol's job is to say so.
+#
+# THE WALK STARTS AT THE TREES, not at the rows: what is being reported is disk
+# that outlived a contract, so a discharged row with no tree is silent (its
+# lease ended correctly) and a tree with no discharged row is silent (its lease
+# is still running).
+#
+# THE MAPPING IS BY CONVENTION, and it has to be: the roster carries a row's
+# name, its deliverable and its addresses, but no worktree path — nothing writes
+# one. A tree at `.worktrees/<dir>` belongs to the row named `W-<DIR>`
+# uppercased, which is the spelling every wave in this repo has dispatched
+# under; the bare `<dir>` is accepted too, for a caller that names its rows
+# without the prefix.
+
+# One `|`-delimited field, BY KEY. Position would read the wrong value on a line
+# whose schema gained a field, which is the same reason every other reader in
+# this repo does it this way.
+_wt_field() {  # <line> <key>
+  local f
+  while IFS= read -r f; do
+    case "$f" in "${2}="*) printf '%s' "${f#"${2}="}"; return 0 ;; esac
+  done <<EOF
+$(printf '%s' "${1:-}" | tr '|' '\n')
+EOF
+  printf ''
+}
+
+# The discharge set, spelled the way hooks/stop-orders.sh and hooks/stop-guard.sh
+# spell it: an ack, or a WAIVED contract, or a MET one. `status=` is read as well
+# as `state=` so a roster row that records its own closure is understood by the
+# same predicate as a sweeper verdict line.
+_wt_discharged() {  # <line>
+  local v
+  [ "$(_wt_field "$1" acked)" = "yes" ] && return 0
+  v="$(_wt_field "$1" state)"
+  case "$v" in MET|CLOSED|WAIVED) return 0 ;; esac
+  v="$(_wt_field "$1" status)"
+  case "$v" in MET|CLOSED|WAIVED) return 0 ;; esac
+  return 1
+}
+
+_wt_row_discharged() {  # <file> <row name>
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ -n "$line" ] || continue
+    case "$line" in '#'*) continue ;; esac
+    [ "$(_wt_field "$line" name)" = "$2" ] || continue
+    _wt_discharged "$line" && return 0
+  done < "$1"
+  return 1
+}
+
+worktree_lease_overruns() {  # <main-root> <verdict-or-roster-file> -> <path>\t<row-id>
+  local root="" file="${2:-}" d base id
+  root="$(_wt_abs "${1:-}")" || return 0
+  [ -n "$root" ] || return 0
+  [ -f "$file" ] || return 0
+  [ -d "${root}/.worktrees" ] || return 0
+  for d in "${root}/.worktrees"/*; do
+    [ -d "$d" ] || continue
+    base="${d##*/}"
+    id="W-$(printf '%s' "$base" | tr '[:lower:]' '[:upper:]')"
+    if _wt_row_discharged "$file" "$id"; then
+      printf '%s\t%s\n' "$d" "$id"
+    elif _wt_row_discharged "$file" "$base"; then
+      printf '%s\t%s\n' "$d" "$base"
+    fi
+  done
+}
+
+# The tree a row holds, by that same convention. Exported because the standdown
+# call site needs the mapping and a second spelling of it there is a second
+# definition of which tree belongs to whom.
+worktree_for_row() {  # <main-root> <row name> -> path (whether or not it exists)
+  printf '%s/.worktrees/%s' "${1%/}" "$(printf '%s' "${2#W-}" | tr '[:upper:]' '[:lower:]')"
+}
