@@ -1051,6 +1051,59 @@ detect_reconverge_hint() {  # <lag|hooks> -> the whole sentence for that state, 
 # honest than no check at all, and it costs zero network round-trips.
 DETECT_MARKETPLACE_SOURCE_JQ='.plugins[]? | select(.name == $n) | .source // empty'
 
+# A SEMVER-SHAPED ORDERING PRIMITIVE (L-DETECT/4.2, bugfix, AC-19). `detect_
+# plugin_latest` below used to decide "current" or "lag" by STRING inequality —
+# `[ "$installed" = "$latest" ]`, unconditionally else `lag` — so an installed
+# build NEWER than the marketplace's cached clone (a developer's own tree,
+# ahead of the last published release) was reported as behind it. Three
+# states, not two: `ahead`, `current`, `lag`.
+#
+# THREE INTEGERS, LEXICAL DRIFT REFUSED. String comparison would rank `1.10.0`
+# behind `1.9.0` — `"1"` ties, then `"1"` (from "10") sorts before `"9"` — which
+# is exactly the class of bug this primitive exists to retire. Each side is
+# read as major.minor.patch and compared numerically, most-significant field
+# first.
+#
+# A PRERELEASE SUFFIX COMPARES BY ITS RELEASE NUMBERS. `9.9.9-rc.1` and
+# `10.0.0` differ from their first non-digit-non-dot character onward; the
+# suffix is dropped for ordering purposes rather than parsed, the same
+# tolerance `detect_plugin_latest`'s shape guard already extends to a version
+# carrying letters and dashes.
+#
+# MISSING OR NON-NUMERIC FIELDS READ AS ZERO. Neither caller today hands this
+# anything but a validated, version-shaped token, but a partial one (`"1.4"`)
+# should order by what it has rather than fail outright — `1.4` vs `1.4.0` is
+# `current`, not a crash.
+version_compare() {  # <a> <b> -> ahead|current|lag
+  local a="${1:-}" b="${2:-}" a_rest b_rest a1 a2 a3 b1 b2 b3
+
+  a_rest="${a%%[!0-9.]*}"
+  b_rest="${b%%[!0-9.]*}"
+  a1="${a_rest%%.*}"; a_rest="${a_rest#*.}"
+  a2="${a_rest%%.*}"; a_rest="${a_rest#*.}"
+  a3="${a_rest%%.*}"
+  b1="${b_rest%%.*}"; b_rest="${b_rest#*.}"
+  b2="${b_rest%%.*}"; b_rest="${b_rest#*.}"
+  b3="${b_rest%%.*}"
+
+  case "$a1" in ''|*[!0-9]*) a1=0 ;; esac
+  case "$a2" in ''|*[!0-9]*) a2=0 ;; esac
+  case "$a3" in ''|*[!0-9]*) a3=0 ;; esac
+  case "$b1" in ''|*[!0-9]*) b1=0 ;; esac
+  case "$b2" in ''|*[!0-9]*) b2=0 ;; esac
+  case "$b3" in ''|*[!0-9]*) b3=0 ;; esac
+
+  if   [ "$a1" -gt "$b1" ]; then printf 'ahead\n'
+  elif [ "$a1" -lt "$b1" ]; then printf 'lag\n'
+  elif [ "$a2" -gt "$b2" ]; then printf 'ahead\n'
+  elif [ "$a2" -lt "$b2" ]; then printf 'lag\n'
+  elif [ "$a3" -gt "$b3" ]; then printf 'ahead\n'
+  elif [ "$a3" -lt "$b3" ]; then printf 'lag\n'
+  else printf 'current\n'
+  fi
+  return 0
+}
+
 detect_plugin_latest() {  # -> one line, always exit 0
   local mp loc mp_json source_field plugin_json latest fact installed
 
@@ -1127,11 +1180,7 @@ detect_plugin_latest() {  # -> one line, always exit 0
       return 0 ;;
   esac
 
-  if [ "$installed" = "$latest" ]; then
-    echo "plugin:latest state=current installed=${installed} latest=${latest} cause=-"
-  else
-    echo "plugin:latest state=lag installed=${installed} latest=${latest} cause=-"
-  fi
+  echo "plugin:latest state=$(version_compare "$installed" "$latest") installed=${installed} latest=${latest} cause=-"
   return 0
 }
 
