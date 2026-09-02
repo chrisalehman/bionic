@@ -437,7 +437,24 @@ SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
 HOOK_FILES_FACT="$(detect_legacy_hook_files)"
 HOOK_FILES_COUNT="${HOOK_FILES_FACT#*count=}"; HOOK_FILES_COUNT="${HOOK_FILES_COUNT%% *}"
 HOOK_FILES_CAUSE="${HOOK_FILES_FACT##*cause=}"
-REG_SHA_FACT="$(detect_registry_sha_lag)"
+# THE TREE THE REGISTRY NAMES, NOT THE ONE THE USER IS STANDING IN (AC-20,
+# handoff 4.3). `detect_registry_sha_lag` defaults its repo directory to `$PWD`,
+# and doctor used to call it bare — so the commit in the header above and the
+# whole directory-feed version row below were facts about the caller's cwd
+# rather than about the plugin the CLI is running. Run from an unrelated
+# repository, doctor compared the registry's recorded sha against THAT
+# repository's HEAD and reported `not-in-repo` about a build nobody had asked
+# it about. `installPath` is the CLI's own record of where the install landed,
+# which is the only directory the comparison means anything against.
+#
+# THE FALLBACK IS THE SAME ANSWER BY THE OTHER ROUTE, never the cwd:
+# `_detect_plugin_root` honours BIONIC_PLUGIN_ROOT / CLAUDE_PLUGIN_ROOT and
+# otherwise resolves from this script's own location. A registry that names no
+# installPath at all is a registry `detect_registry_sha_lag` will answer
+# `unknown` about anyway, so nothing is lost and nothing is guessed.
+DOCTOR_INSTALL_PATH="$(detect_plugin_install_path bionic 2>/dev/null)" || DOCTOR_INSTALL_PATH=""
+[ -n "$DOCTOR_INSTALL_PATH" ] || DOCTOR_INSTALL_PATH="$(_detect_plugin_root)"
+REG_SHA_FACT="$(detect_registry_sha_lag "$DOCTOR_INSTALL_PATH")"
 REG_SHA_STATE="${REG_SHA_FACT#*state=}"; REG_SHA_STATE="${REG_SHA_STATE%% *}"
 REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
 REG_SHA_REPO="${REG_SHA_FACT#*repo=}";    REG_SHA_REPO="${REG_SHA_REPO%% *}"
@@ -1295,6 +1312,16 @@ case "$FEED_KIND" in
       lag)
         _doctor_native_row "$DOCTOR_BAD" "version" "$LATEST_INSTALLED" \
           "${LATEST_LATEST} available" " → claude plugin update bionic@bionic" ;;
+      ahead)
+        # NEWER THAN THE THING AN UPDATE WOULD FETCH (AC-19). Before
+        # `version_compare` landed this compare was a string inequality, which
+        # lumped ahead in with lag: doctor printed "0.0.1 available" and an
+        # update command at a machine running 1.4.0, and taking that advice
+        # would have moved it BACKWARDS. It is `–` and not ✗ for the reason the
+        # symbol rules give — true, and not actionable — so no FIX line pairs
+        # with it and none should.
+        _doctor_native_row "$DOCTOR_NIL" "version" "$LATEST_INSTALLED" \
+          "newer than the marketplace copy (${LATEST_LATEST}) — no action" ;;
       *)
         _doctor_native_row "$DOCTOR_NIL" "version" "?" "unknown — ${LATEST_CAUSE}" ;;
     esac ;;
