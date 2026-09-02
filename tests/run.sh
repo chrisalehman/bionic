@@ -304,6 +304,13 @@ run "doctor-version.test.sh" bash tests/doctor-version.test.sh
 run "git-argv.test.sh" bash tests/git-argv.test.sh
 run "cmd-class.test.sh" bash tests/cmd-class.test.sh
 run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice L-LOADER, spec AC-16) — the one loader
+# idiom. payload/scripts/lib/loader.sh carries the canonical text between
+# `# --- bionic-loader/v2 BEGIN` / `# --- bionic-loader/v2 END`; this suite pastes that
+# text into throwaway hooks under its own mktemp root and drives the three candidate
+# classes, the two fail policies and the four-command repair allowlist. Hermetic: HOME
+# and BIONIC_PLUGINS_DIR are overridden per run, so the real ~/.claude is never read.
+run "loader.test.sh" bash tests/loader.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
