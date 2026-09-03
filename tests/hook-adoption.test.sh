@@ -198,7 +198,7 @@ echo "=== 3 — one session id: every reader asks the library ==="
 # over the record, which is the divergence R-1 measured. So: every hook that
 # derives a session id calls `session_id`, and the payload read that remains is
 # the ARGUMENT to that call, never the answer.
-SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder'
+SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start'
 for name in $SID_READERS; do
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
@@ -208,6 +208,18 @@ for name in $SID_READERS; do
     no "$name takes its session id from the library" "no session_id call in $f"
   fi
 done
+
+# THE LIST IS COMPLETE, not just each named member correct (auditor A-1, AC-2): a static
+# list can omit a real reader forever and every row above still passes silently.
+# session-start.sh was exactly that member — the wave's own twelfth session_id caller,
+# unpinned by this list until the line above — so the roster is now also DERIVED from the
+# tree and compared to the hand-written one, byte for byte, the same technique used above
+# for the private-resolver family (`ADOPTED`/no-stragglers, §1).
+SID_ACTUAL=$(grep -l 'session_id "' "$HOOKS"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+SID_EXPECTED=$(printf '%s\n' $SID_READERS | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the session-id reader roster names every hook that calls session_id, and no other" \
+  "$SID_EXPECTED" "$SID_ACTUAL"
 
 # ============================================================
 echo ""
