@@ -731,17 +731,24 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
 # 2026-08-30), and DISARM now requires the RUN to say it is delivered rather than the roster
 # merely being quiet. Everything else the plan holds is none of the tick's business.
 #
-# THE READ IS THE EVIDENCE GATE'S, NOT A NEW ONE. `has_sdlc_state()`, `resolve_docs_root()`,
-# `normalize_newlines()` and the newest-plan selection inside `newest_sdlc_plan()` are copies
-# of hooks/canonical-sdlc-evidence-gate.sh's, held body-for-body by
-# tests/cross-gate-agreement.test.sh §S. Copied rather than approximated because the
-# UNFILTERED read is a measured incident: on 2026-08-15 a marker-less *.md that happened to
-# be newest under plans/ won the newest race, `current:` parsed empty, and every wall reading
-# it passed silently for ~15 minutes
+# THE READ IS THE LIBRARY'S, AND THERE IS NO SECOND ONE (POKER/2, ratified 2026-09-03).
+# `docs_root` and `active_plan` in payload/scripts/lib/run.sh answer "which *.md answers for
+# this run" for the whole fleet; this file used to carry a private copy of that walk —
+# `has_sdlc_state()`, `resolve_docs_root()`, `normalize_newlines()`'s selection loop inside
+# `newest_sdlc_plan()` — bounded at depth 2 and fence-aware, while the library walked 3.
+# tests/cross-gate-agreement.test.sh §S.3d pinned that disagreement rather than papering over
+# it, and slice SCHED closed it by moving the library to depth 2 and deleting the copy. Two
+# plan readers with different bounds is the exact drift this wave exists to end.
+#
+# WHAT THE COPY WAS PROTECTING IS UNCHANGED, because the library carries it: the candidate
+# filter is the unfenced `## SDLC State` marker, and the read translates line endings rather
+# than deleting them. The UNFILTERED read is a measured incident — on 2026-08-15 a
+# marker-less *.md that happened to be newest under plans/ won the newest race, `current:`
+# parsed empty, and every wall reading it passed silently for ~15 minutes
 # (.bionic/docs/record/session-20260815-landing-supervision/t8-forensic-read.md). A tick
 # reading the plan that way would DISARM off a scrap file. hooks/patrol-revive.sh:64-70
-# refused a plan read outright for that reason; the `## SDLC State` filter is what makes the
-# read safe to take here, which is why it is pinned rather than merely reused.
+# refused a plan read outright for that reason; the marker filter is what makes the read safe
+# to take here, and it now lives in one file instead of six.
 #
 # FAIL DIRECTION IS `open`, without exception. No project root, no docs root, no plan, an
 # unreadable plan, a plan whose `current:` will not parse, a `current: 9` with no
@@ -751,67 +758,12 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
 # one `disarm` ends; a wrong `delivered` costs the silent, terminal end of supervision over a
 # live wave, which nothing recovers. The asymmetry is the whole design.
 
-# Per-project docs root: `docs-root:` in .bionic/config.yaml if set, else
-# <project>/.bionic/docs. [PIN: tests/cross-gate-agreement.test.sh §S]
-resolve_docs_root() {
-  local proj="$1"
-  local config="$proj/.bionic/config.yaml"
-  if [ -f "$config" ]; then
-    local override
-    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
-      | head -1 \
-      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
-      | sed -E "s/^['\"]//;s/['\"]\$//" \
-      | sed -E 's/[[:space:]]+$//')
-    if [ -n "$override" ]; then
-      case "$override" in
-        /*) echo "$override" ;;
-        *)  echo "$proj/$override" ;;
-      esac
-      return
-    fi
-  fi
-  echo "$proj/.bionic/docs"
-}
-
 # CRLF and CR-only line endings TRANSLATED, never deleted: a deleted CR would join two
-# lines into one and hand `current:` a value that was never written.
-# [PIN: tests/cross-gate-agreement.test.sh §S]
+# lines into one and hand `current:` a value that was never written. This is a TEXT utility,
+# not a plan reader — the plan reader is the library's — and it survives the POKER/2
+# unification because the section read below still has to see real newlines.
 normalize_newlines() {
   awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
-}
-
-# A CANDIDATE IS A PLAN ONLY IF IT CARRIES AN UNFENCED `## SDLC State` HEADING — the
-# newest-race filter described above. Fence-aware, because a schema example is documentation
-# and not a run. [PIN: tests/cross-gate-agreement.test.sh §S]
-has_sdlc_state() {
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { found = 1 }
-    END { exit !found }'
-}
-
-# The newest such plan across this project's two plan directories, or empty. Depth 2 covers
-# the directory-per-epic layout (<docs-root>/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md) as
-# well as the flat one. The loop body below is the gate's, line for line — including the
-# STRICT `-nt` ordering, which is what makes "newest" a total answer rather than one that
-# depends on find's directory order. [PIN: tests/cross-gate-agreement.test.sh §S]
-newest_sdlc_plan() {  # <docs root> -> path on stdout, empty if there is no plan
-  local DOCS_ROOT="$1"
-  local PLAN_DIRS d f PLAN
-  PLAN_DIRS=( "${DOCS_ROOT}/plans" "${DOCS_ROOT}/incidents" )
-  PLAN=""
-  for d in "${PLAN_DIRS[@]}"; do
-    [ -d "$d" ] || continue
-    while IFS= read -r -d '' f; do
-      if [ -z "$PLAN" ] || [ "$f" -nt "$PLAN" ]; then
-        has_sdlc_state "$f" || continue
-        PLAN="$f"
-      fi
-    done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
-  done
-  printf '%s' "$PLAN"
 }
 
 # THE TWO FIELDS, AND NOTHING ELSE. `current:` and the `Step 9:` line are read out of the
@@ -822,15 +774,17 @@ newest_sdlc_plan() {  # <docs root> -> path on stdout, empty if there is no plan
 # tick that says "no open row, but the run is not delivered" and stops there tells its reader
 # nothing they can act on, and the reader is a model deciding whether the Patrol is broken.
 run_state() {  # <project root> <arming-record path, may be empty> -> "delivered|<why>" or "open|<why>"
-  local repo="$1" armed="${2:-}" docs_root plan section current line
+  local repo="$1" armed="${2:-}" droot plan section current line
   if [ -z "$repo" ] || [ ! -d "$repo" ]; then
     printf 'open|no project root resolved, so no plan could be read'
     return 0
   fi
-  docs_root="$(resolve_docs_root "$repo")"
-  plan="$(newest_sdlc_plan "$docs_root")"
+  # ONE CALL EACH, AND NEITHER IS RESTATED HERE. `docs_root` is asked only so the refusal
+  # below can name the directory it searched; `active_plan` is the selection itself.
+  droot="$(docs_root "$repo")"
+  plan="$(active_plan "$repo")" || plan=""
   if [ -z "$plan" ]; then
-    printf 'open|no plan carrying an unfenced "## SDLC State" under %s/{plans,incidents}' "$docs_root"
+    printf 'open|no plan carrying an unfenced "## SDLC State" under %s/{plans,incidents}' "$droot"
     return 0
   fi
   section="$(normalize_newlines "$plan" | awk '

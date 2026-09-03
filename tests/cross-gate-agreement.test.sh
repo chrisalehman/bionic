@@ -501,7 +501,7 @@ marker-less-newest-loses|yes|4
 fenced-only-newest-loses|yes|4
 only-marker-less-files|no|-
 nested-two-deep|yes|4
-nested-three-deep|yes|4
+nested-three-deep|no|-
 incidents-dir|yes|4
 current-8b|yes|8b
 current-placeholder|no|-
@@ -631,11 +631,14 @@ build_fixture() {  # <name> -> repo path
     nested-two-deep)
       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
     nested-three-deep)
-      # DEPTH 3 IS IN REACH SINCE bionic 1.4.0. The five hand-copies bounded the walk at
-      # 2, which is the bionic layout's own depth (plans/<epic>/<wave>.plan.md); the
-      # library reaches one level further, which is a superset — more plans found means
-      # more sessions with their walls armed, and that is the safe direction for every
-      # reader here. A plan a wall cannot see is a wall that passes a live wave.
+      # DEPTH 3 IS OUT OF THE BOUND, and this fixture is where that is decided for the whole
+      # fleet. Two depths were live during bionic 1.4.0 — the hand-copies and the evidence
+      # gate walked 2, which is the bionic layout's own depth (plans/<epic>/<wave>.plan.md),
+      # and L-RUN shipped 3 — and §S.3d pinned the disagreement rather than papering over it.
+      # POKER/2's unification (ratified 2026-09-03) resolves it AT 2: the descend-2 read is
+      # the one §S holds body-for-body, anything deeper under plans/ is notes rather than a
+      # plan, and a bound nobody can state from the layout is a bound that drifts again. All
+      # five parties read the library, so all five must agree it is not a run.
       write_plan "$repo/.bionic/docs/plans/epic-99/sub/wave-01.md" "current: 4" ;;
     incidents-dir)
       write_plan "$repo/.bionic/docs/incidents/inc-01/incident.md" "current: 4" ;;
@@ -773,8 +776,8 @@ mutate_lib() {
       awk '{ i=index($0,"gsub(/\\r/, \"\\n\"); ");
              while (i>0) { $0=substr($0,1,i-1) substr($0,i+20); i=index($0,"gsub(/\\r/, \"\\n\"); ") }
              print }' "$src" > "$dst" ;;
-    depth-1)               # plan search two levels shallower
-      awk '{ i=index($0,"-maxdepth 3 -type f -name '"'"'*.md'"'"'");
+    depth-1)               # plan search one level shallower
+      awk '{ i=index($0,"-maxdepth 2 -type f -name '"'"'*.md'"'"'");
              if (i>0) { $0=substr($0,1,i-1) "-maxdepth 1 -type f -name '"'"'*.md'"'"'" substr($0,i+33) }
              print }' "$src" > "$dst" ;;
     fence-blind)           # stop skipping fenced content
@@ -3550,7 +3553,7 @@ expect_eq "…and with the fold flipped to first-row-wins, the SAME contract pas
 
 # ============================================================
 echo ""
-echo "=== Q — has_sdlc_state() is down to ONE carrier, and it is named ==="
+echo "=== Q — has_sdlc_state() has NO carrier left: the library is the only reader ==="
 # ============================================================
 #
 # It was a five-copy family: the evidence gate held the origin (the file documenting the
@@ -3561,14 +3564,18 @@ echo "=== Q — has_sdlc_state() is down to ONE carrier, and it is named ==="
 #
 # It could be removed (bionic 1.4.0, slice ADOPT). The predicate is `lib/run.sh`'s
 # `active_plan`, every one of the five asks for it, and §A2 above proves the asking is
-# real by mutating the library and watching all five answers move. What is left to pin
-# here is the RESIDUE: hooks/session-poker.sh still carries its own copy, because slice
-# POKER owns that file and converts it. Naming the straggler is what keeps "one reader"
-# from quietly becoming "one reader and a copy nobody looked at again".
+# real by mutating the library and watching all five answers move. One straggler survived
+# that slice — hooks/session-poker.sh, whose tick carried its own copy — and this section
+# NAMED it rather than excusing it. Slice SCHED deleted it (POKER/2, ratified 2026-09-03),
+# so the count this pin asserts is now ZERO. An empty answer is a weak assertion on its
+# own, which is why the two rows below it are the ones with teeth: the library defines the
+# predicate, and the tick reaches it by CALLING that function rather than by restating it.
 Q_CARRIERS=$(/usr/bin/grep -ln '^has_sdlc_state()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
   | while IFS= read -r _f; do basename "$_f"; done | sort | tr '\n' ' ' | sed 's/ $//')
-expect_eq "session-poker.sh is the only hook still defining has_sdlc_state()" \
-  "session-poker.sh" "$Q_CARRIERS"
+expect_eq "NO hook defines has_sdlc_state() any more — the family is gone, not shrunk" \
+  "" "$Q_CARRIERS"
+expect_eq "…and the tick, the last carrier, asks the library by name instead" "yes" \
+  "$(/usr/bin/grep -q 'active_plan "' "$BIONIC_HOOKS_DIR/session-poker.sh" && echo yes || echo no)"
 expect_eq "…and the evidence gate, which held the origin, no longer carries one" "" \
   "$(fn_body "$PARTY_EG" has_sdlc_state)"
 expect_eq "…while the library defines the predicate it replaced them with" "yes" \
@@ -3920,25 +3927,39 @@ PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 # `normalize_newlines`, and the selection block — lived in the evidence gate as the
 # designated origin and in the tick as copies. The gate's are gone (bionic 1.4.0, slice
 # ADOPT): it asks `lib/run.sh` now, and §A2 proves the asking is real by mutating the
-# library and watching every party's answer move. The tick has not been converted yet —
-# slice POKER owns hooks/session-poker.sh — so what §S can still pin about the TEXT is
-# that the tick is the last carrier, and the tick's own copy is still correct on the two
-# properties that matter.
+# library and watching every party's answer move. The tick's are gone too (slice SCHED,
+# POKER/2 ratified 2026-09-03) — so there is no longer a text COMPARISON to make here,
+# and pretending otherwise would leave a section comparing a body against nothing and
+# calling it agreement. What §S pins about the TEXT now is the absence itself, in both
+# directions: no party carries a private plan reader, and the tick names the library's
+# functions where its own used to be.
 expect_eq "the evidence gate carries no private has_sdlc_state() any more" "" \
   "$(fn_body "$PARTY_EG" has_sdlc_state)"
-expect_eq "…and the tick is the one file that still does (slice POKER converts it)" "yes" \
-  "$([ -n "$(fn_body "$PARTY_PK_S" has_sdlc_state)" ] && echo yes || echo no)"
-expect_eq "…and that body is the marker predicate, not some other function" "yes" \
-  "$(case "$(fn_body "$PARTY_PK_S" has_sdlc_state)" in *'## SDLC State'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "…and neither does the tick, the last file that did (SCHED converted it)" "" \
+  "$(fn_body "$PARTY_PK_S" has_sdlc_state)"
+expect_eq "…nor a private newest-plan selection beside it" "" \
+  "$(fn_body "$PARTY_PK_S" newest_sdlc_plan)"
+expect_eq "…nor a private docs-root resolver" "" \
+  "$(fn_body "$PARTY_PK_S" resolve_docs_root)"
+expect_eq "…and the tick calls the library's plan reader by name" "yes" \
+  "$(/usr/bin/grep -q 'active_plan "' "$PARTY_PK_S" && echo yes || echo no)"
 
-# ---- S.2 the tick's selection block, pinned on its own -------------------
+# ---- S.2 the ONE selection block, pinned where it now lives -------------
 #
-# The gate held this at file scope and the tick holds it inside `newest_sdlc_plan()`,
-# because a tick that ran a find on every invocation would charge `arm`, `disarm` and
-# `interval` for a read only `tick` takes. With no second copy to compare against, what is
-# pinned is the block's two load-bearing properties: the depth bound the layout needs, and
-# the STRICT `-nt` ordering that makes "newest" total rather than find-order dependent.
-sel_block() {  # <file> -> the newest-SDLC-State-plan selection, indentation- and comment-normalized
+# It used to live twice: at file scope in the evidence gate, and inside the tick's
+# `newest_sdlc_plan()`. Both copies are gone and the block is `lib/run.sh:active_plan`, so
+# what is pinned is the LIBRARY's block on its two load-bearing properties — the depth
+# bound the layout needs, and the STRICT `-nt` ordering that makes "newest" a total answer
+# rather than one that depends on find's directory order.
+#
+# THE BOUND IS 2 AND IT IS ASSERTED AS A NUMBER, not merely as "a bound exists". Two depths
+# were live during this wave and §S.3d pinned the disagreement; POKER/2 resolved it at 2,
+# which is the bionic layout's own depth. A number is what makes a silent drift back to 3
+# fail here rather than somewhere downstream.
+# The RETIRED extractor, kept for one job only: proving the tick's copy is really gone.
+# It is the exact reader this section used against `newest_sdlc_plan()`, so an empty answer
+# means the block it looked for is absent rather than merely renamed out of reach.
+sel_block_pk() {  # <file> -> the tick's old selection block, or empty
   awk '
     !f && index($0, "PLAN_DIRS=(") { f = 1 }
     f {
@@ -3951,24 +3972,28 @@ sel_block() {  # <file> -> the newest-SDLC-State-plan selection, indentation- an
   ' "$1"
 }
 
-S_PK_SEL="$(sel_block "$PARTY_PK_S")"
-expect_eq "the extractor pulls a real selection block out of the tick" "yes" \
-  "$([ -n "$S_PK_SEL" ] && echo yes || echo no)"
-expect_eq "…carrying a depth bound at all" "yes" \
-  "$(case "$S_PK_SEL" in *'-maxdepth '*) echo yes ;; *) echo no ;; esac)"
+S_RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
+[ -r "$S_RUN_LIB" ] || S_RUN_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/run.sh"
+S_LIB_SEL="$(fn_body "$S_RUN_LIB" active_plan)"
+expect_eq "the extractor pulls a real selection block out of the library" "yes" \
+  "$([ -n "$S_LIB_SEL" ] && echo yes || echo no)"
+expect_eq "…bounded at depth 2, the bionic layout's own depth" "yes" \
+  "$(case "$S_LIB_SEL" in *'-maxdepth 2 -type f'*) echo yes ;; *) echo no ;; esac)"
 expect_eq "…and the STRICT newest test, not a >= that depends on find order" "yes" \
-  "$(case "$S_PK_SEL" in *'-nt "$PLAN"'*) echo yes ;; *) echo no ;; esac)"
+  "$(case "$S_LIB_SEL" in *'-nt "$plan"'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "…and the tick carries no selection block of its own to disagree with it" "" \
+  "$(sel_block_pk "$PARTY_PK_S")"
 
 # THE DISCRIMINATOR. Without it the checks above prove only that a file exists: an
-# extractor that stopped matching would return an empty string and the `-nt` test would
-# read "no" — so the mutation is applied to a COPY and the extraction must MOVE. The
-# shipped file is never touched.
+# extractor that stopped matching would return an empty string and every `case` would read
+# "no" — so the mutation is applied to a COPY and the extraction must MOVE. The shipped
+# file is never touched.
 S_MUT_DIR="$SANDBOX/runstate-mutant"; mkdir -p "$S_MUT_DIR"
-sed 's/\[ "\$f" -nt "\$PLAN" \]/[ "$f" = "$f" ]/' "$PARTY_PK_S" > "$S_MUT_DIR/session-poker.sh"
+sed 's/\[ "\$f" -nt "\$plan" \]/[ "$f" = "$f" ]/' "$S_RUN_LIB" > "$S_MUT_DIR/run.sh"
 expect_eq "the mutation applies (the code has not moved out from under this proof)" "no" \
-  "$(cmp -s "$PARTY_PK_S" "$S_MUT_DIR/session-poker.sh" && echo yes || echo no)"
+  "$(cmp -s "$S_RUN_LIB" "$S_MUT_DIR/run.sh" && echo yes || echo no)"
 expect_eq "…and with the strict-newest test flipped, the block CHANGES (§S discriminates)" "no" \
-  "$([ "$S_PK_SEL" = "$(sel_block "$S_MUT_DIR/session-poker.sh")" ] && echo yes || echo no)"
+  "$([ "$S_LIB_SEL" = "$(fn_body "$S_MUT_DIR/run.sh" active_plan)" ] && echo yes || echo no)"
 
 # ---- S.3 the round trip: one repository, two readers, one answer ---------
 #
@@ -4045,19 +4070,20 @@ S_EG=$(s_eg_read "$S_R3"); S_PK=$(s_pk_read "$S_R3")
 expect_eq "a fenced-only heading is not a plan to the gate" "none" "$S_EG"
 expect_eq "…and is not a plan to the tick either" "none" "$S_PK"
 
-# S.3d — THE BOUND MOVED TO 3 (bionic 1.4.0, lib/run.sh's active_plan). The gate's own
-# walk stopped at 2, which is the bionic layout's depth; the library reaches one deeper.
-# That is a superset and the safe direction — a plan a wall cannot see is a wall that
-# passes a live wave — but the tick still carries the OLD bound, so the two readers now
-# genuinely disagree at depth 3 and the disagreement is pinned rather than papered over.
-# It closes when slice POKER puts the tick on the library too.
+# S.3d — ONE BOUND, AND IT IS 2. This case used to pin a DISAGREEMENT: L-RUN shipped
+# `active_plan` at depth 3 while the tick's private copy walked 2, and the honest thing a
+# suite could do about two readers with different bounds was to state it. POKER/2's
+# unification (ratified 2026-09-03) ended it — the tick has no reader of its own, the
+# library is depth 2, and both parties answer from the same walk.
+#
+# BOTH DIRECTIONS, because the deep half alone would pass on a reader with no bound and the
+# shallow half alone on one that finds nothing: a plan at depth 3 is invisible to BOTH, and
+# the SAME content at depth 2 is seen by BOTH.
 S_R4=$(new_repo "s-depth")
 write_plan "$S_R4/.bionic/docs/plans/epic-99/wave-01/too-deep.plan.md" "current: 4"
 S_EG=$(s_eg_read "$S_R4"); S_PK=$(s_pk_read "$S_R4")
-expect_eq "a plan at depth 3 is now VISIBLE to the gate, through the library" \
-  "$S_R4/.bionic/docs/plans/epic-99/wave-01/too-deep.plan.md|4" "$S_EG"
-expect_eq "…and still invisible to the tick, which has not adopted the library yet (POKER)" \
-  "none" "$S_PK"
+expect_eq "a plan at depth 3 is out of the bound for the gate" "none" "$S_EG"
+expect_eq "…and out of it for the tick, which now reads the same library" "none" "$S_PK"
 write_plan "$S_R4/.bionic/docs/plans/epic-99/wave-01.plan.md" "current: 4"
 S_EG=$(s_eg_read "$S_R4"); S_PK=$(s_pk_read "$S_R4")
 expect_eq "…and the SAME content at depth 2 is seen by the gate (the bound is pinned)" \
