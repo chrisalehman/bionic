@@ -3091,7 +3091,7 @@ done
 
 # THE LIST IS COMPLETE, not just each named member correct (auditor A-1, AC-2): a static
 # list can omit a real reader forever and every row above still passes silently.
-# session-start.sh was exactly that member — the wave's own twelfth session_id caller,
+# session-start.sh was exactly that member — a session_id caller this wave added,
 # unpinned by this list until the line above. Derived from the tree and compared to the
 # hand-written list, byte for byte — the same technique N_STRAGGLERS above uses for the
 # private-resolver family.
@@ -3100,6 +3100,95 @@ N_SID_ACTUAL=$(/usr/bin/grep -l 'session_id "' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/n
 N_SID_EXPECTED=$(printf '%s\n' $N_SID_READERS | sort | tr '\n' ' ' | sed 's/ $//')
 expect_eq "the session-id reader roster names every hook that calls session_id, and no other" \
   "$N_SID_EXPECTED" "$N_SID_ACTUAL"
+
+
+# ------------------------------------------------ §P‴ THE ENGAGEMENT-GUARD ROSTER, complete
+#
+# step-6 review R-7. The ownership table promised "guard line byte-identical across the
+# roster" and nothing built it: the behavioural battery at §M covers four hooks of the
+# fifteen, so a NEW hook shipped without the guard would deny, nudge or audit in a session
+# that never invoked canonical-sdlc, and every suite would stay green. That is the same
+# silent-omission class §P′ closes for the session-id readers, and it is closed the same
+# way — derive the set from the tree, compare it to a hand-written roster, fail on drift in
+# EITHER direction.
+#
+# WHY THE SHAPE AND NOT THE BYTES. The promise as written was never satisfiable: the
+# fourteen guard lines legitimately differ in the root variable name (REPO, PM_REPO,
+# DB_REPO, BSG_REPO, PROJECT_DIR, PROJECT_ROOT_FROM_PATH, ROOT — seven of them) and in the
+# sid name, because each hook has already resolved both under its own local convention by
+# the time it reaches the guard. What has to agree is the DECISION, so what is pinned here
+# is the call shape — `engaged_session "$<root>" "$<sid>" || exit 0` at column 0, the
+# hook's first scoping decision — not the characters.
+#
+# TWO ROSTERS, because two hooks read the predicate without exiting on it: session-start.sh
+# uses it to choose WHICH notice to print (its whole job is to speak to a bystander) and
+# session-poker.sh consults it inside the tick and adopt verbs. Their membership is pinned
+# too; what they are exempt from is the `|| exit 0` shape.
+N_ENGAGED_READERS='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
+canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
+farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
+protect-main stop-guard'
+N_ENGAGED_DATA='session-poker session-start'
+
+# derive_engaged <hooks-dir> -> sorted, space-joined basenames of every hook calling the predicate
+derive_engaged() {
+  /usr/bin/grep -l 'engaged_session ' "$1"/*.sh 2>/dev/null \
+    | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//'
+}
+
+N_ENG_EXPECTED=$(printf '%s\n' $N_ENGAGED_READERS $N_ENGAGED_DATA | sort | tr '\n' ' ' | sed 's/ $//')
+N_ENG_ACTUAL=$(derive_engaged "$BIONIC_HOOKS_DIR")
+expect_eq "the engagement roster names every hook that calls engaged_session, and no other" \
+  "$N_ENG_EXPECTED" "$N_ENG_ACTUAL"
+
+# NOT VACUOUS: the derived set is non-empty and large enough to be the real roster.
+expect_ne "…and the derivation actually found hooks (this row is not vacuous)" "" "$N_ENG_ACTUAL"
+
+# THE CALL SHAPE, per guard member. The first `engaged_session` line in the file must be
+# the guard itself, at column 0, with two `"$VAR"` arguments and `|| exit 0` — the hook's
+# first scoping decision. A guard that resolved a literal, swallowed the result or exited
+# non-zero would still satisfy the roster row above and fail here.
+for _h in $N_ENGAGED_READERS; do
+  _line=$(/usr/bin/grep -m1 'engaged_session ' "$BIONIC_HOOKS_DIR/$_h.sh" 2>/dev/null)
+  case "$_line" in
+    'engaged_session "$'*'" "$'*'" || exit 0') ok "$_h.sh guards on the canonical call shape" ;;
+    *) no "$_h.sh guards on the canonical call shape" "first engaged_session line was: [$_line]" ;;
+  esac
+done
+
+# THE DATA READERS are members of the roster and are NOT held to that shape — pinned so a
+# future reader does not "fix" them into an exit.
+for _h in $N_ENGAGED_DATA; do
+  expect_eq "$_h.sh reads the predicate (as data, exempt from the guard shape)" "yes" \
+    "$(/usr/bin/grep -q 'engaged_session ' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
+done
+
+# MUTATION, both directions. A completeness row that never moves is a comment. Two doctored
+# copies of the hooks directory: one with a guard DELETED (a hook silently leaves the
+# roster) and one with a guard ADDED to a file the roster does not name (a new hook ships
+# guarded and unlisted). The row above must disagree with the declared roster in both.
+N_ENG_MUT="$SANDBOX/fx/engaged-roster"
+mkdir -p "$N_ENG_MUT/drop" "$N_ENG_MUT/add"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$N_ENG_MUT/drop/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$N_ENG_MUT/add/" 2>/dev/null
+grep -v 'engaged_session ' "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$N_ENG_MUT/drop/landing-gate.sh"
+if /usr/bin/grep -q 'engaged_session ' "$N_ENG_MUT/drop/landing-gate.sh"; then
+  no "the drop-a-guard mutation applies at all" "landing-gate.sh still calls the predicate"
+else
+  ok "the drop-a-guard mutation applies at all"
+  expect_ne "…and a hook that quietly loses its guard makes the roster row RED" \
+    "$N_ENG_EXPECTED" "$(derive_engaged "$N_ENG_MUT/drop")"
+fi
+printf 'engaged_session "$X" "$Y" || exit 0\n' > "$N_ENG_MUT/add/zz-new-wall.sh"
+expect_ne "…and an unlisted NEW hook carrying the guard makes it RED too" \
+  "$N_ENG_EXPECTED" "$(derive_engaged "$N_ENG_MUT/add")"
+
+# THE PAIRED POSITIVE: the same copying, unmutated, still agrees — or both reds above are
+# the `cp` and not the mutation.
+mkdir -p "$N_ENG_MUT/clean"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$N_ENG_MUT/clean/" 2>/dev/null
+expect_eq "control: an UNMUTATED copy of the hooks directory still matches the roster" \
+  "$N_ENG_EXPECTED" "$(derive_engaged "$N_ENG_MUT/clean")"
 
 # ------------------------------------------------ §P″ THE DIVERGENT-CHANNEL FIXTURE, two
 # real hooks, one filename (auditor A-1, AC-2's other half)

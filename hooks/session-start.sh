@@ -236,7 +236,7 @@ fi
 
 # The current session id, through the one function every other reader calls. Its
 # stderr warning on a divergent payload is deliberately NOT suppressed: that line
-# is the L-SESSION contract, and this hook is one of the twelve readers.
+# is the L-SESSION contract, and this hook is one of the twenty readers.
 CUR="$(session_id "$PAYLOAD_SID")" || CUR=""
 
 # ---------------------------------------------------------------- engagement
