@@ -155,6 +155,13 @@ make_world() {
   git -C "$repo" add README.md
   git -C "$repo" commit -qm seed 2>/dev/null
   if [ "$wave" = "yes" ]; then
+    # ENGAGED (task-engaged-session). Since this wave the hook asks `engaged_session`
+    # before anything else, so a fixture without the marker is silent for a reason that has
+    # nothing to do with the wall under test. Planted for both fixture sessions, beside the
+    # plan, because an engaged session is what a live wave IS.
+    mkdir -p "$repo/.bionic/tmp"
+    : > "$repo/.bionic/tmp/engaged-$SID_A.state"
+    : > "$repo/.bionic/tmp/engaged-$SID_B.state"
     mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
     cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
 ---
@@ -321,7 +328,10 @@ expect_status "the Agent tool is not this gate's business" 0 "$GUARD_ST"
 # defect was cost, which behavior alone cannot detect). The relevance test is now
 # the tool-name check itself.
 _rel_line=$(grep -n 'TOOL_NAME" = "TaskStop" \] || exit 0' "$GUARD" | head -1 | cut -d: -f1)
-_walk_line=$(grep -nE '^[[:space:]]*(PLAN=|find )' "$GUARD" | head -1 | cut -d: -f1)
+# The expensive work used to begin at the plan walk; since task-engaged-session this gate
+# reads no plan at all, and the first thing it pays for is resolving the project root — the
+# ancestor walk `engaged_session` and every state path below it are built on.
+_walk_line=$(grep -nE '^[[:space:]]*(REPO=\$\(project_root|PLAN=|find )' "$GUARD" | head -1 | cut -d: -f1)
 if [ -n "$_rel_line" ] && [ -n "$_walk_line" ] && [ "$_rel_line" -lt "$_walk_line" ]; then
   ok "relevance check precedes the plan walk in source order"
 else
@@ -383,16 +393,46 @@ run_guard "$(jq -n --arg c "$N_REPO" '{cwd:$c, hook_event_name:"PreToolUse", too
 expect_status "no active wave + no session key: still open (pre-verdict)" 0 "$GUARD_ST"
 expect_empty "no active wave + no session key: still silent" "$GUARD_ERR"
 
-# A plan that exists but names no step is not a run in progress. This is the
-# rung BELOW "no plan at all", and it needs its own case: a gate that treated
-# any plan file as an active wave would wall every repo that has ever held one.
+# A plan that exists but names no step is not a run in progress — AND SINCE
+# task-engaged-session THAT IS NO LONGER THIS GATE'S QUESTION. What scopes it is
+# ENGAGEMENT: a stop is policed because this session entered bionic, not because the repo
+# holds a plan at a particular step. The roster row this gate answers for outlives the run
+# that created it, and a run's Step 0 precedes its own plan, so a gate that read the step
+# would go quiet at exactly the two moments a landing contract still exists. The fixture is
+# kept and its expectation inverted: an ENGAGED session is policed here whatever the plan
+# says, and the paired negative below is the marker, not the step.
 IFS='|' read -r P_REPO P_TR P_SUB <<< "$(make_world plannostep yes)"
 plant_agent "$P_SUB" "aidle-4444444444444444" "idle"
+roster_row "$P_REPO" "$SID_A" "idle" "aidle-4444444444444444"
 sed -i.bak 's/^current: 4$/current: pending/' "$P_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
 rm -f "$P_REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md.bak"
 run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
-expect_status "a plan with no valid current step is not an active wave: open" 0 "$GUARD_ST"
-expect_empty "a plan with no valid current step: silent" "$GUARD_ERR"
+expect_status "an engaged session is policed whatever the plan's step says: REFUSED" 2 "$GUARD_ST"
+P_REFUSAL="$GUARD_ERR"
+
+rm -f "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
+run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
+expect_status "…and the same stop unengaged is open" 0 "$GUARD_ST"
+expect_empty "…and silent" "$GUARD_ERR"
+
+# a SYMLINK at the marker path reads as ABSENT, never followed.
+P_DECOY="$SANDBOX/plannostep-decoy-marker"; printf 'plan=none\n' > "$P_DECOY"
+ln -s "$P_DECOY" "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
+run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
+expect_status "a symlink at the marker path is not an engagement: open" 0 "$GUARD_ST"
+expect_empty "…and silent" "$GUARD_ERR"
+rm -f "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
+
+# ANOTHER session's marker is not this session's.
+: > "$P_REPO/.bionic/tmp/engaged-$SID_B.state"
+run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
+expect_status "another session's marker is not this session's engagement: open" 0 "$GUARD_ST"
+rm -f "$P_REPO/.bionic/tmp/engaged-$SID_B.state"
+
+# restored, the refusal returns byte for byte.
+: > "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
+run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
+expect_eq "re-engaged: the refusal is byte-identical" "$P_REFUSAL" "$GUARD_ERR"
 
 # --- after the verdict: CLOSED and LOUD ---
 IFS='|' read -r W4_REPO W4_TR W4_SUB <<< "$(make_world w4 yes)"
@@ -402,9 +442,27 @@ roster_row "$W4_REPO" "$SID_A" "quiet-reviewer" "aquiet-reviewer-deadbeefdeadbee
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "quiet-reviewer")"
 expect_status "active wave + no observation: REFUSED" 2 "$GUARD_ST"
 
-run_guard "$(jq -n --arg c "$W4_REPO" --arg t "$W4_TR" \
-  '{transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"TaskStop", tool_input:{task_id:"quiet-reviewer"}}')"
+# §7's stop=closed row, and since task-engaged-session it has to be driven on the channel
+# that actually carries identity. The gate asks `engaged_session` first, keyed to the
+# LIBRARY's session id (env primary, payload witness) — so a payload with no key still
+# resolves to a session whenever the environment carries one, which on the machine it
+# always does. What §7 pins is unchanged: once this session is known to be engaged, an
+# identity the gate cannot read out of its own payload is refused, not waved through.
+W4_NOKEY=$(jq -n --arg c "$W4_REPO" --arg t "$W4_TR" \
+  '{transcript_path:$t, cwd:$c, hook_event_name:"PreToolUse", tool_name:"TaskStop", tool_input:{task_id:"quiet-reviewer"}}')
+GUARD_OUT=$(printf '%s' "$W4_NOKEY" | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
+GUARD_ERR=$(cat "$SANDBOX/.err")
 expect_status "active wave + payload missing its session key: REFUSED (closed)" 2 "$GUARD_ST"
+
+# AND THE ROW BELOW IT, new with the switch: a payload with no key AND no key in the
+# environment cannot be shown to belong to an engaged session at all. Engagement is
+# open-by-absence by design — the one artifact whose PRESENCE opens walls — so this is
+# silent rather than refused, and it is the only direction consistent with a bystander
+# session never seeing a refusal it did not consent to.
+GUARD_OUT=$(printf '%s' "$W4_NOKEY" | env -u CLAUDE_CODE_SESSION_ID bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
+GUARD_ERR=$(cat "$SANDBOX/.err")
+expect_status "…and with no session key on EITHER channel: open, engagement unprovable" 0 "$GUARD_ST"
+expect_empty "…and silent" "$GUARD_ERR"
 
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "")"
 expect_status "active wave + empty task_id: REFUSED" 2 "$GUARD_ST"
@@ -647,7 +705,10 @@ plant_agent "$C3_SUB" "aunconsumable-5555555555555555" "unconsumable"
 roster_row "$C3_REPO" "$SID_A" "unconsumable" "aunconsumable-5555555555555555"
 observe "$SID_A" "$C3_TR" "$C3_REPO" "unconsumable"
 C3_PAYLOAD=$(mk_stop_payload "$SID_A" "$C3_TR" "$C3_REPO" "unconsumable")
-C3_ERR=$(printf '%s' "$C3_PAYLOAD" | bash "$MUTANT" 2>&1 >/dev/null)
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, as run_guard does: the gate reads its
+# engagement marker under the LIBRARY's session id, so a driver that left the runner's own
+# id here would exit at the switch and prove nothing about the consume.
+C3_ERR=$(printf '%s' "$C3_PAYLOAD" | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MUTANT" 2>&1 >/dev/null)
 C3_ST=$?
 expect_status "a consume that cannot complete REFUSES the stop (C3)" 2 "$C3_ST"
 if [ -d "$C3_REPO/.bionic/tmp/.stop-check.lock" ]; then
@@ -664,8 +725,11 @@ fi
 # that never returns renders no verdict at all, which §7's table has no row for.
 # The writer's half of this row is in tests/execution-recorder.test.sh §8.
 run_bounded() {  # <label> <secs> <payload> -> sets BOUNDED_ST (137 = killed)
-  local secs="$2" payload="$3" waited=0 pid
-  printf '%s' "$payload" | bash "$GUARD" >"$SANDBOX/.bout" 2>"$SANDBOX/.berr" &
+  local secs="$2" payload="$3" waited=0 pid _sid
+  # The environment agrees with the payload, as run_guard does — the gate reads its
+  # engagement marker under the library's session id (task-engaged-session).
+  _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  printf '%s' "$payload" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$GUARD" >"$SANDBOX/.bout" 2>"$SANDBOX/.berr" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$secs" ]; do
     sleep 1; waited=$((waited + 1))
@@ -721,7 +785,17 @@ IFS='|' read -r S2_REPO S2_TR S2_SUB <<< "$(make_world sec2 yes)"
 plant_agent "$S2_SUB" "avictim-ffffffffffffffff" "victim"
 OUTSIDE_DIR="$SANDBOX/sec2-outside-dir"
 mkdir -p "$OUTSIDE_DIR" "$S2_REPO/.bionic"
+# make_world plants a real .bionic/tmp (the engagement marker lives there); it has to GO,
+# or `ln -s` lands the link INSIDE it and the hostile shape under test never exists — the
+# same trap tests/dispatch-preflight.test.sh records at its own directory-symlink case.
+rm -rf "$S2_REPO/.bionic/tmp"
 ln -s "$OUTSIDE_DIR" "$S2_REPO/.bionic/tmp"
+# The engagement marker travels to the far side with everything else this case redirects
+# (task-engaged-session): the gate asks `engaged_session` first and its path runs through
+# the redirected directory, so without it the gate would exit at the switch and the claim
+# under test — that the state path is not read THROUGH a directory symlink — would be
+# proven by an exit that never reached the state path.
+: > "$OUTSIDE_DIR/engaged-$SID_A.state"
 observe "$SID_A" "$S2_TR" "$S2_REPO" "victim"
 run_guard "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "victim")"
 expect_status "a symlinked state DIRECTORY refuses the stop too" 2 "$GUARD_ST"

@@ -167,6 +167,13 @@ make_world() {
   git -C "$repo" add README.md
   git -C "$repo" commit -qm seed 2>/dev/null
   if [ "$wave" = "yes" ]; then
+    # ENGAGED (task-engaged-session). Since this wave the hook asks `engaged_session`
+    # before anything else, so a fixture without the marker is silent for a reason that has
+    # nothing to do with the wall under test. Planted for both fixture sessions, beside the
+    # plan, because an engaged session is what a live wave IS.
+    mkdir -p "$repo/.bionic/tmp"
+    : > "$repo/.bionic/tmp/engaged-$SID_A.state"
+    : > "$repo/.bionic/tmp/engaged-$SID_B.state"
     mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
     cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
 ---
@@ -1341,6 +1348,66 @@ run_rec "$(mk_agent_post "$SID_A" "$RC2_TR" "$RC2_REPO" "$RC_NAME" "$RC_AID" "to
 RC2_LAST_CONFIRMED=$(grep 'status=confirmed' "$RC2_ROSTER" 2>/dev/null | tail -1)
 expect_contains "ARM 2 alone pins the resume's completion to the original launch reference" \
   "launched_at=$RC_T0" "$RC2_LAST_CONFIRMED"
+
+# ============================================================
+echo ""
+echo "=== Section 12: THE ENGAGEMENT SWITCH (AC-6) ==="
+# ============================================================
+#
+# Since task-engaged-session this recorder asks `engaged_session` before it asks anything
+# else, and it asks NOTHING about the plan: roster journalling is what the dispatch wall's
+# `intended` row is waiting for, and that fact is true before a run has a plan and still
+# true after the run closes. Every silence below is paired with the write the same fixture
+# produces once the marker is back, so neither half can be true by accident.
+
+E_TUID="toolu_01ENGAGEMENTSWITCH00000"
+E_AID="aengage-1111111111111111"
+IFS='|' read -r E_REPO E_TR E_SUB E_CFG <<< "$(make_world engage yes)"
+E_ROSTER="$E_REPO/.bionic/tmp/roster-${SID_A}.state"
+
+# (a) ENGAGED — the positive: the intended row is completed.
+seed_roster "$E_REPO" "$SID_A" "w99-engage" "$E_TUID"
+run_rec "$(mk_agent_post "$SID_A" "$E_TR" "$E_REPO" "w99-engage" "$E_AID" "$E_TUID")"
+expect_status "12a engaged: the dispatch is confirmed" "0" "$REC_ST"
+expect_contains "12a …with a confirmed row on the roster" "status=confirmed" "$(cat "$E_ROSTER")"
+
+# (b) THE SAME payload, the SAME roster, the marker removed -> nothing is written.
+seed_roster "$E_REPO" "$SID_A" "w99-engage" "$E_TUID"
+rm -f "$E_REPO/.bionic/tmp/engaged-$SID_A.state"
+run_rec "$(mk_agent_post "$SID_A" "$E_TR" "$E_REPO" "w99-engage" "$E_AID" "$E_TUID")"
+expect_status "12b unengaged: the same dispatch exits 0" "0" "$REC_ST"
+expect_empty "12b …with no stdout" "$REC_OUT"
+expect_empty "12b …and no stderr" "$REC_ERR"
+expect_absent "12b …and the roster is untouched" "status=confirmed" "$(cat "$E_ROSTER")"
+
+# (c) a SYMLINK at the marker path reads as ABSENT, never followed.
+E_DECOY="$SANDBOX/engage-decoy-marker"; printf 'plan=none\n' > "$E_DECOY"
+ln -s "$E_DECOY" "$E_REPO/.bionic/tmp/engaged-$SID_A.state"
+run_rec "$(mk_agent_post "$SID_A" "$E_TR" "$E_REPO" "w99-engage" "$E_AID" "$E_TUID")"
+expect_absent "12c a symlink at the marker path is not an engagement" "status=confirmed" "$(cat "$E_ROSTER")"
+rm -f "$E_REPO/.bionic/tmp/engaged-$SID_A.state"
+
+# (d) ANOTHER session's marker is not this session's.
+: > "$E_REPO/.bionic/tmp/engaged-$SID_B.state"
+run_rec "$(mk_agent_post "$SID_A" "$E_TR" "$E_REPO" "w99-engage" "$E_AID" "$E_TUID")"
+expect_absent "12d another session's marker is not this session's engagement" "status=confirmed" "$(cat "$E_ROSTER")"
+rm -f "$E_REPO/.bionic/tmp/engaged-$SID_B.state"
+
+# (e) restored, the write happens exactly as in (a).
+: > "$E_REPO/.bionic/tmp/engaged-$SID_A.state"
+run_rec "$(mk_agent_post "$SID_A" "$E_TR" "$E_REPO" "w99-engage" "$E_AID" "$E_TUID")"
+expect_contains "12e re-engaged: the row is confirmed again" "status=confirmed" "$(cat "$E_ROSTER")"
+
+# (f) NO PLAN ON DISK, marker present: roster journalling is plan-free (AC-23). A run's
+# Step 0 dispatches before it writes its plan, and a recorder that waited for one would
+# leave the dispatch wall writing `intended` rows nothing ever confirms.
+IFS='|' read -r E2_REPO E2_TR E2_SUB E2_CFG <<< "$(make_world engage-noplan yes)"
+rm -rf "$E2_REPO/.bionic/docs"
+seed_roster "$E2_REPO" "$SID_A" "w99-noplan" "$E_TUID"
+: > "$E2_REPO/.bionic/tmp/engaged-$SID_A.state"
+run_rec "$(mk_agent_post "$SID_A" "$E2_TR" "$E2_REPO" "w99-noplan" "$E_AID" "$E_TUID")"
+expect_contains "12f engaged with no plan on disk: the row is still confirmed" \
+  "status=confirmed" "$(cat "$E2_REPO/.bionic/tmp/roster-${SID_A}.state")"
 
 # ============================================================
 echo ""

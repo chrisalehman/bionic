@@ -228,6 +228,12 @@ make_repo() {
       printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" > "$repo/.bionic/tmp/patrol-$_psid.state"
       chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+      # A LIVE WAVE HAS AN ENGAGED SESSION (task-engaged-session). The gate asks
+      # `engaged_session` before it asks anything else, so a fixture without this marker is
+      # silent for a reason that has nothing to do with the wall under test — every
+      # assertion in this file would pass over a hook that exits at its first line. The
+      # marker is exactly what hooks/engage.sh writes when canonical-sdlc is invoked.
+      : > "$repo/.bionic/tmp/engaged-$_psid.state"
     done
     mkdir -p "$repo/.bionic/docs/plans/epic-99-test"
     cat > "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
@@ -364,6 +370,12 @@ expect_empty "no plan directory produces no stdout" "$GATE_OUT"
 expect_empty "no plan directory produces no stderr" "$GATE_ERR"
 
 REPO_NOWAVE2=$(make_repo r3b yes)
+# UNENGAGED, DELIBERATELY (task-engaged-session). make_repo plants the engagement marker
+# with the Patrol stamp, and since this wave an ENGAGED session is walled whether or not a
+# plan is on disk (AC-23, driven in S24 below). What this block claims is the older, and
+# still true, half: a session that never invoked canonical-sdlc sees nothing at all. Removing
+# the marker is what keeps the claim about the run predicate rather than about engagement.
+rm -f "$REPO_NOWAVE2/.bionic/tmp/engaged-$SID_A.state"
 # overwrite with a plan that has no ## SDLC State at all
 cat > "$REPO_NOWAVE2/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" <<'PLAN'
 ---
@@ -552,6 +564,14 @@ for _lvl in .bionic/tmp .bionic; do
   mkdir -p "$ELSEWHERE"
   printf 'session_id=%s\nversion=1\nkind=preflight-attestation\n' "$SID_A" \
     > "$ELSEWHERE/preflight-$SID_A.state"
+  # THE HOSTILE DIRECTORY CARRIES THE ENGAGEMENT MARKER AS WELL (task-engaged-session).
+  # The gate asks `engaged_session` first, and its path runs through the very directory
+  # this case redirects — so without a marker on the far side the gate would exit at the
+  # switch and the S1 claim (the attestation is not read THROUGH a directory symlink)
+  # would be proven by an exit that never reached the attestation at all. Planting it is
+  # also the honest shape: engagement is the one artifact whose PRESENCE opens a wall, so
+  # a repo that can arrange it can only ever ARM these walls against itself.
+  : > "$ELSEWHERE/engaged-$SID_A.state"
   if [ "$_lvl" = ".bionic/tmp" ]; then
     mkdir -p "$REPO/.bionic"
     # make_repo plants a real .bionic/tmp (the Patrol stamp lives there); it has to GO,
@@ -2756,6 +2776,103 @@ expect_status "r23c the same dispatch in an agent context (BIONIC_HOOK_CHANNEL) 
 S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" | jq '. + {agent_type:"senior-implementor"}')
 run_gate "$S23_AGENT_PAYLOAD"
 expect_status "r23d …and so is one whose payload carries agent_type" "0" "$GATE_ST"
+
+# ============================================================
+echo ""
+echo "=== S24 — THE ENGAGEMENT SWITCH (AC-5, AC-13, AC-14, AC-23) ==="
+# ============================================================
+#
+# The switch this wave adds, driven in both directions on ONE fixture so neither half can
+# be true by accident. Every silence below sits beside the positive it is the negation of:
+# the same repo, the same payload, the marker the only difference.
+
+S24_REPO=$(make_repo r24 yes)
+S24_MARK="$S24_REPO/.bionic/tmp/engaged-$SID_A.state"
+
+# (a) ENGAGED — the positive. A dispatch whose brief carries no deliverable is refused
+# exactly as it was before this wave existed.
+S24_BARE='Go and do the thing. No contract fields at all.'
+run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
+expect_status "r24a engaged: a dispatch with no deliverable is REFUSED" "2" "$GATE_ST"
+expect_contains "…at the absent-deliverable wall" "Expected artifact" "$GATE_ERR"
+S24_REFUSAL="$GATE_ERR"
+
+# (b) THE SAME payload, the SAME repo, the marker removed -> nothing at all (AC-5).
+rm -f "$S24_MARK"
+run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
+expect_status "r24b unengaged: the same dispatch exits 0" "0" "$GATE_ST"
+expect_empty "r24b …with no stdout" "$GATE_OUT"
+expect_empty "r24b …and no stderr" "$GATE_ERR"
+
+# (c) A SYMLINK at the marker path reads as ABSENT, never followed (AC-4's direction, at
+# this gate). The link points at a real regular file, so only the -L refusal in
+# `engaged_session` can produce this silence.
+S24_DECOY="$SANDBOX/r24-decoy-marker"
+printf 'plan=none\n' > "$S24_DECOY"
+ln -s "$S24_DECOY" "$S24_MARK"
+run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
+expect_status "r24c a SYMLINK at the marker path exits 0" "0" "$GATE_ST"
+expect_empty "r24c …with no stdout" "$GATE_OUT"
+expect_empty "r24c …and no stderr" "$GATE_ERR"
+rm -f "$S24_MARK"
+
+# (d) A FOREIGN session's marker is not this session's (AC-4).
+: > "$S24_REPO/.bionic/tmp/engaged-$SID_B.state"
+run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
+expect_status "r24d another session's marker exits 0" "0" "$GATE_ST"
+expect_empty "r24d …and says nothing" "$GATE_ERR"
+rm -f "$S24_REPO/.bionic/tmp/engaged-$SID_B.state"
+
+# (e) THE REFUSAL TEXT IS BYTE-UNCHANGED for an engaged session (AC-13, AC-14). Restoring
+# the marker must reproduce (a) exactly — not merely refuse, but refuse in the same words.
+: > "$S24_MARK"
+run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
+expect_eq "r24e re-engaged: the refusal is byte-identical to r24a" "$S24_REFUSAL" "$GATE_ERR"
+
+# ---------- ENGAGED WITH NO PLAN ON DISK (AC-23) ----------
+#
+# The half of the ruling that is not "silence": engagement decides WHETHER a hook acts,
+# the plan decides WHAT. A run's Step 0 precedes its own plan, and the walls that need no
+# plan are owed from the first dispatch.
+S24_NOPLAN=$(make_repo r24np yes)
+rm -rf "$S24_NOPLAN/.bionic/docs"
+
+# the Patrol checkpoint is plan-free: no stamp, no dispatch.
+rm -f "$S24_NOPLAN/.bionic/tmp/patrol-$SID_A.state"
+run_gate "$(mk_agent_payload "$SID_A" "$S24_NOPLAN")"
+expect_status "r24f engaged, no plan, no stamp -> REFUSED at the Patrol checkpoint" "2" "$GATE_ST"
+expect_contains "…naming the Patrol" "Patrol" "$GATE_ERR"
+
+# the deliverable wall is plan-free too: stamp back, brief stripped.
+printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID_A" > "$S24_NOPLAN/.bionic/tmp/patrol-$SID_A.state"
+run_gate "$(mk_agent_payload "$SID_A" "$S24_NOPLAN" "$S24_BARE")"
+expect_status "r24g engaged, no plan, no deliverable -> REFUSED" "2" "$GATE_ST"
+expect_contains "…at the absent-deliverable wall" "Expected artifact" "$GATE_ERR"
+
+# the BUDGET wall is plan-bound: it measures against a ceiling only a plan can declare,
+# so with no plan it says nothing. Driven with a contract-complete brief so the walls
+# above have nothing to say, and the silence is the budget wall's own.
+run_gate "$(mk_agent_payload "$SID_A" "$S24_NOPLAN")"
+expect_status "r24h engaged, no plan, a complete brief -> passes" "0" "$GATE_ST"
+expect_absent "r24h …and the budget wall stays silent" "parallel-budget" "$GATE_ERR"
+
+# THE PAIRED POSITIVE, so r24h is not silence-by-vacuity: the same dispatch against a plan
+# whose ceiling is already full IS refused by that wall.
+S24_BUDGET=$(make_repo r24bw yes)
+S24_PLAN="$S24_BUDGET/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+awk 'NR==2 { print "parallel-budget: writers=0 suites=4 worktrees=32 test_jobs=8 source=probe" } { print }' \
+  "$S24_PLAN" > "$S24_PLAN.tmp" && mv "$S24_PLAN.tmp" "$S24_PLAN"
+run_gate "$(mk_agent_payload "$SID_A" "$S24_BUDGET")"
+expect_status "r24i the same brief against a FULL budget is REFUSED" "2" "$GATE_ST"
+expect_contains "…by the budget wall" "writers" "$GATE_ERR"
+
+# and the same full budget with NO plan-free failure and NO marker is silent.
+rm -f "$S24_BUDGET/.bionic/tmp/engaged-$SID_A.state"
+run_gate "$(mk_agent_payload "$SID_A" "$S24_BUDGET")"
+expect_status "r24j …and unengaged, that same full budget decides nothing" "0" "$GATE_ST"
+expect_empty "r24j …silently" "$GATE_ERR"
+
 echo ""
 echo "----------------------------------------"
 echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"

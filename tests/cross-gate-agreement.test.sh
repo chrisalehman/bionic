@@ -381,7 +381,13 @@ verdict_sg() {  # <repo> -> yes|no|other:<detail>
 # confirmation, and outside one it is inert. The row is re-seeded on every call so
 # the answer describes this run and not a previous one.
 verdict_er() {  # <repo> -> yes|no|other:<detail>
-  local repo="$1" out st roster="$repo/.bionic/tmp/roster-$SID_A.state"
+  # TWO STATEMENTS, NOT ONE — the trap this file records at `j_mutant` and `mk_root`.
+  # `local repo="$1" roster="$repo/…"` expands every word before it assigns any, so
+  # `$roster` was built from whatever `repo` happened to be in a CALLER's scope; inside the
+  # battery loop that was the right value by accident, and from anywhere else it is an
+  # unbound-variable abort under `set -u`.
+  local repo="$1" out st roster
+  roster="$repo/.bionic/tmp/roster-$SID_A.state"
   mkdir -p "$repo/.bionic/tmp"
   {
     printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
@@ -424,7 +430,13 @@ verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
 # call under $SID_LG, off verdict_er's $SID_A file — which also clears the sweep's own
 # idempotency marker, so every call is this row's first verdict.
 verdict_lg() {  # <repo> -> yes|no|other:<detail>
-  local repo="$1" out st roster="$repo/.bionic/tmp/roster-$SID_LG.state"
+  # TWO STATEMENTS, NOT ONE — the trap this file records at `j_mutant` and `mk_root`.
+  # `local repo="$1" roster="$repo/…"` expands every word before it assigns any, so
+  # `$roster` was built from whatever `repo` happened to be in a CALLER's scope; inside the
+  # battery loop that was the right value by accident, and from anywhere else it is an
+  # unbound-variable abort under `set -u`.
+  local repo="$1" out st roster
+  roster="$repo/.bionic/tmp/roster-$SID_LG.state"
   mkdir -p "$repo/.bionic/tmp"
   {
     printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
@@ -469,6 +481,13 @@ arm_patrol() {  # <repo> <session-id>...
     printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
       "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$sid" > "$repo/.bionic/tmp/patrol-$sid.state"
     chmod 600 "$repo/.bionic/tmp/patrol-$sid.state"
+    # …AND AN ENGAGED SESSION (task-engaged-session). Since this wave every gate this suite
+    # drives asks `engaged_session` before it asks anything else, so a fixture without the
+    # marker answers every question in this file the same way — silence — and the whole
+    # suite would be green over nothing. The marker travels with the stamp for the same
+    # reason the stamp travels with the plan: SKILL.md arms the Patrol AT engagement, so a
+    # world that has one has both.
+    : > "$repo/.bionic/tmp/engaged-$sid.state"
   done
 }
 
@@ -679,7 +698,7 @@ plant_hook_tree() {  # <tree root> -> echoes <tree root>/hooks
 # run_battery <mode>  — mode=assert emits one assertion per fixture;
 #                       mode=detect returns 1 at the FIRST disagreement.
 run_battery() {
-  local mode="$1" name want cur repo a b c d e cnorm cval want_sg
+  local mode="$1" name want cur repo a b c d e cnorm cval want_sg want_dp want_er want_lg
   while IFS='|' read -r name want cur; do
     [ -n "$name" ] || continue
     repo="$SANDBOX/fx/$name/repo"
@@ -695,11 +714,21 @@ run_battery() {
     # are unchanged by T4, so their comparisons still read "$want" directly.
     want_sg="$want"
     [ "$want" = "yes" ] && want_sg="other:pass-with-output"
+    # WHAT THE PARTIES AGREE ABOUT CHANGED AT task-engaged-session, and the change is the
+    # point of that wave. Four of the five no longer read the plan at all: they are scoped
+    # by ENGAGEMENT, and every fixture in this battery is engaged (see `arm_patrol`), so
+    # each of them answers the same thing on all 23 plan shapes. That constancy is the
+    # claim now — a party that still had a plan opinion of its own would break it — and it
+    # is asserted here rather than dropped, because "the plan does not move this gate" is
+    # exactly what a future edit could silently undo. The evidence gate is the one party
+    # that still derives the plan's `current:`, so it keeps the discriminating column and
+    # the derived-value check below.
+    want_dp="yes"; want_er="yes"; want_lg="yes"; want_sg="other:pass-with-output"
     if [ "$mode" = "assert" ]; then
-      if [ "$a" = "$want" ] && [ "$b" = "$want_sg" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want" ] && [ "$e" = "$want" ]; then
-        ok "all five parties agree on '$name': $want"
+      if [ "$a" = "$want_dp" ] && [ "$b" = "$want_sg" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want_er" ] && [ "$e" = "$want_lg" ]; then
+        ok "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want"
       else
-        no "all five parties agree on '$name': $want" \
+        no "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want" \
            "dispatch-preflight=$a stop-guard=$b evidence-gate=$c execution-recorder=$d landing-gate=$e"
       fi
       if [ "$want" = "yes" ]; then
@@ -708,7 +737,7 @@ run_battery() {
     else
       # Detect mode also compares the DERIVED VALUE, so a mutation that selects a
       # different plan without flipping the predicate is caught too.
-      if [ "$a" != "$want" ] || [ "$b" != "$want_sg" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want" ] || [ "$e" != "$want" ] \
+      if [ "$a" != "$want_dp" ] || [ "$b" != "$want_sg" ] || [ "$cnorm" != "$want" ] || [ "$d" != "$want_er" ] || [ "$e" != "$want_lg" ] \
          || { [ "$want" = "yes" ] && [ "$cval" != "$cur" ]; }; then
         printf 'disagreement on %s: want=%s/%s dp=%s sg=%s eg=%s er=%s lg=%s\n' "$name" "$want" "$cur" "$a" "$b" "$c" "$d" "$e"
         return 1
@@ -727,6 +756,20 @@ echo "=== A1 — N-way agreement on active-wave detection (AC-9, checklist A8/A9
 echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER") · $(basename "$PARTY_LG")"
 
 run_battery assert
+
+# THE OTHER DIRECTION OF THE SWITCH, once. The four constants above are worth nothing
+# unless the marker is what produces them: on the SAME fixture, with the marker removed,
+# every one of the five answers "no" and says nothing. The plan shape is irrelevant to
+# this claim — engagement is asked before the plan is read — so one fixture discharges it,
+# and tests/hook-adoption.test.sh §5c drives the same direction across the wider roster.
+UNENG="$SANDBOX/fx/baseline-active/repo"
+for _u in "$SID_A" "$SID_B" "$SID_LG"; do rm -f "$UNENG/.bionic/tmp/engaged-$_u.state"; done
+expect_eq "unengaged: the dispatch wall decides nothing"      "no" "$(verdict_dp "$UNENG")"
+expect_eq "unengaged: the stop gate decides nothing"          "no" "$(verdict_sg "$UNENG")"
+expect_eq "unengaged: the recorder journals nothing"          "no" "$(verdict_er "$UNENG")"
+expect_eq "unengaged: the landing gate takes no verdict"      "no" "$(verdict_lg "$UNENG")"
+arm_patrol "$UNENG" "$SID_A" "$SID_B" "$SID_LG"
+expect_eq "…and re-engaged, the dispatch wall decides again"  "yes" "$(verdict_dp "$UNENG")"
 
 # The origin is IN the test, not merely cited by it. Checklist A8's defect was
 # exactly this: three byte-identical copies, a 2-way agreement test, and the
@@ -927,6 +970,11 @@ expect_contains "the producer spells the identity key 'session_id='" "session_id
 OUT=$(mk_agent_payload "$SID_A" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
 expect_eq "start gate: the producer's own session passes" "0" "$ST"
 expect_eq "start gate: and passes in silence" "" "$OUT"
+# THE NEAR-MISS SESSION IS ENGAGED TOO (task-engaged-session). Both gates ask
+# `engaged_session` before anything else, keyed to the session in hand — so without a
+# marker for THIS spelling the gate would exit at the switch and the exact-compare claim
+# would be discharged by a silence that never reached the attestation.
+arm_patrol "$IREPO" "${SID_A%?}0"
 OUT=$(mk_agent_payload "${SID_A%?}0" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
 expect_eq "start gate: a one-character-different session is refused (exact compare)" "2" "$ST"
 OUT=$(mk_agent_payload "$SID_B" "$IREPO" | bash "$PARTY_DP" 2>&1); ST=$?
@@ -3007,7 +3055,7 @@ done
 # remains is the ARGUMENT to that call.
 N_SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check
 landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder
-session-start'
+session-start patrol-duties-gate stop-guard'
 for _h in $N_SID_READERS; do
   expect_eq "$_h.sh takes its session id from lib/session.sh" "yes" \
     "$(/usr/bin/grep -q 'session_id "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
