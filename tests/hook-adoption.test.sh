@@ -93,7 +93,7 @@ ADOPTED='
 protect-main|closed|no
 protect-database|open|no
 canonical-sdlc-evidence-gate|closed|yes
-farm-out-reminder|open|yes
+farm-out-reminder|open|no
 background-suite-guard|open|no
 dispatch-preflight|open|yes
 canonical-sdlc-governing-skill|open|yes
@@ -233,7 +233,7 @@ done
 
 # THE LIST IS COMPLETE, not just each named member correct (auditor A-1, AC-2): a static
 # list can omit a real reader forever and every row above still passes silently.
-# session-start.sh was exactly that member — the wave's own twelfth session_id caller,
+# session-start.sh was exactly that member — a session_id caller this wave added,
 # unpinned by this list until the line above — so the roster is now also DERIVED from the
 # tree and compared to the hand-written one, byte for byte, the same technique used above
 # for the private-resolver family (`ADOPTED`/no-stragglers, §1).
@@ -457,7 +457,12 @@ payload_for() {
 # or not a plan is on disk (AC-23), which is the change this wave exists to make. Their
 # scoping is driven in their own suites, on the switch that actually scopes them: marker
 # absent -> silent, marker present -> the same behaviour as today.
-RUN_SCOPED='canonical-sdlc-evidence-gate farm-out-reminder context-spend patrol-revive'
+# farm-out-reminder LEFT TOO, at step-6 review R-1. It had kept `active_run` below its new
+# engagement guard, which made the nudge plan-bound against a design that says the opposite:
+# knowing a suite command belongs in a subagent needs no plan, and the sessions most in need
+# of the reminder are the ones in Step 0 through Step 3 that have not written one. The
+# paired arms live in tests/cmd-class.test.sh §R-1.
+RUN_SCOPED='canonical-sdlc-evidence-gate context-spend patrol-revive'
 
 # unrun_mutant <hook> -> a copy of the hook with the run predicate neutralised
 #
