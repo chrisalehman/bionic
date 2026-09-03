@@ -205,6 +205,7 @@ run "preflight-probe.test.sh" bash tests/preflight-probe.test.sh
 run "protect-database.test.sh" bash tests/protect-database.test.sh
 run "protect-main.test.sh" bash tests/protect-main.test.sh
 run "session-poker.test.sh" bash tests/session-poker.test.sh
+run "session-start.test.sh" bash tests/session-start.test.sh
 run "session-sweeper.test.sh" bash tests/session-sweeper.test.sh
 run "stop-check.test.sh" bash tests/stop-check.test.sh
 run "stop-guard.test.sh" bash tests/stop-guard.test.sh
