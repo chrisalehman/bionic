@@ -1353,6 +1353,55 @@ if [ "$_doctor_link_n" -gt 0 ]; then
   fix "${_doctor_link_n} legacy .bionic $(_doctor_plural "$_doctor_link_n" symlink symlinks) under .worktrees/ → spawn-worktree.sh remove"
 fi
 
+# RESTART NEEDED (AC-37, fold-in ratified 2026-09-03; the dead-wall incident,
+# session b1a850c1 FINDING 2026-09-03T02:06Z, carried in the plan's
+# Assumptions). The CLI snapshots hooks.json once, at process start; a hook
+# file changing on disk after that moment registers nothing in the process
+# already running — every wall this wave built stays inert in that process
+# until it exits and a new one starts. This is the one residual way a wall can
+# be silently dead after this wave, and nothing else on this page detects it.
+#
+# THE SAME TREE THE VERSION ROW ALREADY RESOLVED (DOCTOR_INSTALL_PATH,
+# DOCTOR/5), never re-derived: the registry's recorded installPath, or the
+# plugin root, whichever is a git repository — that is the plugin tree the CLI
+# actually loads. A live CLI session in THIS project whose startedAt precedes
+# that tree's hooks.json mtime registered it as it stood before the file
+# changed.
+_doctor_hooks_json="${DOCTOR_INSTALL_PATH}/hooks/hooks.json"
+_doctor_hooks_mtime="$(_patrol_mtime "$_doctor_hooks_json" 2>/dev/null)"
+case "$_doctor_hooks_mtime" in ''|*[!0-9]*) _doctor_hooks_mtime="" ;; esac
+
+# UTC, SHORT. Everywhere else on this page an absolute time renders as a
+# relative age (`_doctor_file_age`) — this is the one row where which SIDE of
+# the restart a moment falls on is the fact, so the actual clock reads print
+# rather than an elapsed duration.
+_doctor_utc_short() {  # <epoch-seconds> -> "2026-09-03 02:06Z", or empty
+  local s="${1:-}"
+  case "$s" in ''|*[!0-9]*) return 1 ;; esac
+  date -u -r "$s" +'%Y-%m-%d %H:%MZ' 2>/dev/null || date -u -d "@${s}" +'%Y-%m-%d %H:%MZ' 2>/dev/null
+}
+
+if [ -n "$_doctor_hooks_mtime" ]; then
+  while IFS= read -r _rs_line; do
+    [ -n "$_rs_line" ] || continue
+    _rs_cwd="$(_doctor_pfield "$_rs_line" cwd)"
+    [ "$_rs_cwd" = "$DOCTOR_ROOT" ] || continue
+    _rs_pid="$(_doctor_pfield "$_rs_line" pid)"
+    _rs_sf="$(_patrol_claude_home)/sessions/${_rs_pid}.json"
+    _rs_started_ms="$(command -v jq >/dev/null 2>&1 && jq -r '.startedAt // empty' "$_rs_sf" 2>/dev/null)"
+    case "$_rs_started_ms" in ''|*[!0-9]*) continue ;; esac
+    _rs_started_sec=$(( _rs_started_ms / 1000 ))
+    [ "$_doctor_hooks_mtime" -gt "$_rs_started_sec" ] || continue
+    _rs_started_fmt="$(_doctor_utc_short "$_rs_started_sec")"
+    _rs_hooks_fmt="$(_doctor_utc_short "$_doctor_hooks_mtime")"
+    _run_add "$(_doctor_item "$DOCTOR_BAD" "restart needed" \
+      "pid ${_rs_pid} started ${_rs_started_fmt:-?} — hooks.json changed ${_rs_hooks_fmt:-?}")"
+    fix "pid ${_rs_pid} registered a stale hooks.json → exit claude and start it again — the running process registered hooks.json as it was at ${_rs_started_fmt:-$_rs_started_ms}"
+  done <<EOF
+$(patrol_live_sessions 2>/dev/null)
+EOF
+fi
+
 # ─── The machine, and the budget each live session recorded on it ────────────
 #
 # THE READER IS THE SCHEMA'S OWNER (AC-25, L-RESOURCES/1). The attestation format
