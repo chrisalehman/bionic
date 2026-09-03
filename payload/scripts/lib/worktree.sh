@@ -36,6 +36,33 @@ _wt_abs() {  # <dir>
   ( cd "$1" 2>/dev/null && pwd -P )
 }
 
+# Is this branch one no automated write may reach? THE LIST HAS ONE HOME:
+# `git_branch_protected` in the sibling git-argv.sh, which hooks/protect-main.sh
+# already sources for exactly the same question about a `git push`. That wall
+# reads push argv and never sees a merge, so `land` is the second reader of the
+# same list — and a second COPY of the list is how two walls come to disagree
+# about which branch is the branch.
+#
+# LOADED LAZILY, from this file's own directory, the way lib/detect.sh loads
+# lib/deps.sh: every caller of this library pays for git-argv.sh only if it
+# actually asks, and a caller that already sourced it pays nothing.
+#
+# FAIL CLOSED (design ledger S4). Exit 2 means "unknowable", not "not
+# protected": a wall that cannot read its own list must refuse rather than wave
+# the merge through.
+_wt_self_dir() { dirname "${BASH_SOURCE[0]:-$0}"; }
+_wt_branch_protected() {  # <branch> -> 0 protected, 1 not, 2 unknowable
+  local lib
+  if ! declare -f git_branch_protected >/dev/null 2>&1; then
+    lib="$( cd "$(_wt_self_dir)" 2>/dev/null && pwd -P )/git-argv.sh"
+    [ -r "$lib" ] || return 2
+    # shellcheck source=/dev/null
+    . "$lib" 2>/dev/null || return 2
+    declare -f git_branch_protected >/dev/null 2>&1 || return 2
+  fi
+  git_branch_protected "${1:-}"
+}
+
 # The MAIN checkout's root from anywhere inside the repository, including from
 # inside a linked worktree where --show-toplevel would answer with the linked
 # tree. Same resolution spawn-worktree.sh does, for the same reason.
@@ -153,6 +180,33 @@ _wt_busy_suite() {  # <main-root> -> session=... pid=... cwd=...
 # exception of a legacy `.bionic` link, which is deleted on the way in because
 # C2 retires it whatever the verdict.
 #
+# TWO BOUNDS ON THE POWER (security review F1). This function merges into the
+# main checkout's current branch and deletes a worktree; both of those are
+# irreversible enough that WHICH branch and WHICH tree cannot be left to the
+# caller's word for it.
+#
+#   PROTECTED BRANCH. The branch merged into is never `main`/`master`.
+#   hooks/protect-main.sh is the wall that keeps unreviewed work off those
+#   branches, and it reads `git push` argv — a local `git merge --no-ff` is
+#   invisible to it. Without this refusal a main checkout left on `main` (which
+#   is where every checkout starts) turned an ordinary `land` into an unwalled
+#   write to the protected branch, with the unmerged tree deleted in the same
+#   call. The list is `git_branch_protected`'s, not a second copy of it.
+#
+#   INSIDE THE FARM. The tree landed sits under `<main-root>/.worktrees/`,
+#   the only place this lease ever hands one out. `.git`-is-a-file proves the
+#   path is A linked worktree of this repository; it does not prove the lease
+#   issued it, and `spawn-worktree.sh land <path>` will take any path a caller
+#   names. Any other linked worktree is somebody else's and is refused rather
+#   than merged and removed.
+#
+# Both are checked before the legacy-link deletion above, so the deliberate
+# exception applies only to a tree this lease is actually entitled to touch.
+#
+# A CONSEQUENCE, stated rather than hidden: `spawn-worktree.sh create` honours
+# an absolute parent directory outside the checkout, and a tree created that way
+# is not landable by this verb. Remove it, or merge it by hand.
+#
 # THE BRANCH IS NEVER DELETED. Same contract as `remove`: the tree is the leased
 # resource, the branch is the work.
 _wt_say() { printf '%s: %s\n' "${WORKTREE_CONTRACT_PROG:-spawn-worktree}" "$*"; }
@@ -170,6 +224,25 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
   wt_abs="$(_wt_abs "$target")" || { _wt_refuse "no-such-worktree path=${target}"; return 2; }
   root="$(_wt_main_root "$wt_abs")" || { _wt_refuse "repo-root-unresolvable path=${wt_abs}"; return 2; }
   [ -n "$root" ] || { _wt_refuse "repo-root-unresolvable path=${wt_abs}"; return 2; }
+
+  # INSIDE THE FARM. Both sides are already physical absolute paths, so this is
+  # a path-SEGMENT test and not a string-prefix one: the trailing slash is what
+  # makes `<root>/.worktrees-decoy/x` a sibling rather than a member, and `?*`
+  # is what keeps `<root>/.worktrees/` itself — the farm, not a tree — out.
+  case "$wt_abs" in
+    "${root}/.worktrees/"?*) : ;;
+    *) _wt_refuse "outside-worktrees path=${wt_abs} root=${root}"; return 2 ;;
+  esac
+
+  # THE BRANCH MERGED INTO, read and judged before anything is touched.
+  main_branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+  [ -n "$main_branch" ] || { _wt_refuse "main-head-unreadable root=${root}"; return 2; }
+  _wt_branch_protected "$main_branch"
+  case $? in
+    0) _wt_refuse "protected-branch branch=${main_branch} root=${root}"; return 2 ;;
+    2) _wt_refuse "protected-branch-unknowable branch=${main_branch} root=${root}"; return 2 ;;
+  esac
+
   branch="$(git -C "$wt_abs" rev-parse --abbrev-ref HEAD 2>/dev/null)"
   [ -n "$branch" ] && [ "$branch" != "HEAD" ] || { _wt_refuse "worktree-head-unreadable path=${wt_abs}"; return 2; }
 
@@ -181,8 +254,6 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
     _wt_refuse "dirty-tree path=${wt_abs} branch=${branch}"; return 2
   fi
 
-  main_branch="$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)"
-  [ -n "$main_branch" ] || { _wt_refuse "main-head-unreadable root=${root}"; return 2; }
   ahead="$(git -C "$root" rev-list --count "HEAD..${branch}" 2>/dev/null)"
   case "$ahead" in ''|*[!0-9]*) _wt_refuse "branch-unreadable branch=${branch}"; return 2 ;; esac
   if [ "$ahead" -eq 0 ]; then
