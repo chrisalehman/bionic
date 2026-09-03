@@ -547,8 +547,23 @@ case "$HOOK_FILES_FACT" in *" cause="*) ;; *) HOOK_FILES_CAUSE="" ;; esac
 # otherwise resolves from this script's own location. A registry that names no
 # installPath at all is a registry `detect_registry_sha_lag` will answer
 # `unknown` about anyway, so nothing is lost and nothing is guessed.
+# AND THE CANDIDATE THAT IS A REPOSITORY WINS, measured rather than assumed.
+# On a GIT feed the registry's installPath is the cache the CLI loads, and the
+# comparison is meaningful there. On a DIRECTORY feed — every dogfood install —
+# the registry records the cache too, but the CLI reads the SOURCE TREE and never
+# opens that cache: comparing a recorded sha against a directory with no history
+# would answer `unknown` forever and take the header's commit down with it, on
+# exactly the machines this row is most useful. So the registry's answer is tried
+# first and the plugin root second, and the first one that is a git repository is
+# the one asked. Both are registry-derived; NEITHER is the cwd, which is the
+# whole point.
 DOCTOR_INSTALL_PATH="$(detect_plugin_install_path bionic 2>/dev/null)" || DOCTOR_INSTALL_PATH=""
-[ -n "$DOCTOR_INSTALL_PATH" ] || DOCTOR_INSTALL_PATH="$(_detect_plugin_root)"
+_doctor_is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
+if [ -z "$DOCTOR_INSTALL_PATH" ] || ! _doctor_is_repo "$DOCTOR_INSTALL_PATH"; then
+  _doctor_root_alt="$(_detect_plugin_root)"
+  if _doctor_is_repo "$_doctor_root_alt"; then DOCTOR_INSTALL_PATH="$_doctor_root_alt"; fi
+  [ -n "$DOCTOR_INSTALL_PATH" ] || DOCTOR_INSTALL_PATH="$_doctor_root_alt"
+fi
 REG_SHA_FACT="$(detect_registry_sha_lag "$DOCTOR_INSTALL_PATH")"
 REG_SHA_STATE="${REG_SHA_FACT#*state=}"; REG_SHA_STATE="${REG_SHA_STATE%% *}"
 REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
