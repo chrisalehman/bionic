@@ -27,8 +27,7 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
   rooted at `${CLAUDE_PLUGIN_ROOT}`. That suite was deleted at 8582861 (epic-18 wave-03) and
   nothing replaced either wall — both are logged debt now. Manual, and enforced by nothing: the suite's own `run`
   line in `tests/run.sh`. **Adding a hook = source file + `.test.sh` sibling + a registration
-  (`hooks/hooks.json` for an always-on wall, the skill's own frontmatter for an armed-session
-  one) + a `run "<name>.test.sh"` line in `tests/run.sh`.** Omit that last one and 4a still
+  (`hooks/hooks.json` — the only channel since bionic 1.4.0: every hook is registered there once and scopes itself by the on-disk open-run predicate `active_run`; the skill frontmatter carries no `hooks:` block any more, and a hook registered only there would arm nothing) + a `run "<name>.test.sh"` line in `tests/run.sh`.** Omit that last one and 4a still
   passes — the pairing exists — but the suite never executes and the gate stays green over
   nothing. Several suites defend themselves by grepping `tests/run.sh` for their own `run`
   line as an assertion (`tests/doctor.test.sh` used to carry the pattern to copy; it was
