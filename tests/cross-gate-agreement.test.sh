@@ -2683,8 +2683,14 @@ expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
 # re-reading either source: each channel's value set collapses to a single value if every
 # row in it agrees with its neighbors, so "one value, and it's 10" on each side plus "the two
 # single values match" is the whole agreement claim in three checks.
-L4B_SKILL_VALUES=$(printf '%s\n' "$SKILL_HOOKS_ROWS" | awk -F'|' '{print $4}' | sort -u)
-L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $4}' | sort -u)
+# $NF, NOT $4 (bionic 1.4.0, slice SSTART). A row is `event|matcher|command|timeout`, and
+# until the SessionStart detector arrived every matcher in this tree was a single tool name,
+# so the fourth field and the last field were the same field. `startup|clear|resume|compact`
+# is a matcher that CONTAINS the delimiter — the platform's own spelling for "all four
+# session sources" — and under `$4` that row's timeout read as `resume`. The timeout is
+# always the last field, so read it as the last field; a matcher may not be.
+L4B_SKILL_VALUES=$(printf '%s\n' "$SKILL_HOOKS_ROWS" | awk -F'|' '{print $NF}' | sort -u)
+L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $NF}' | sort -u)
 expect_eq "the skill-scoped channel renders exactly one timeout value across all its rows" \
   "10" "$L4B_SKILL_VALUES"
 expect_eq "the always-on channel renders exactly one timeout value across all its rows" \
@@ -2806,6 +2812,43 @@ expect_eq "…and in NO other file under tests/ — one owner, which is the whol
 # …and the shared implementation is not merely present, it is the one this suite calls:
 # every §L row above reads its rows through skill_hooks_rows, which only exists here
 # because line 47 sourced the parser.
+
+# --- L.8 THE SESSIONSTART DETECTOR: one event, one channel, one owner (AC-1, SSTART) ---
+#
+# hooks/session-start.sh reports what `/clear` left behind — predecessor rosters, stamps,
+# legacy `.bionic` links and the session-id triple — into the new conversation's context.
+# It is registered ALWAYS-ON by necessity: the state it reports is left by the conversation
+# that ENDED, so a registration that only binds while a skill is armed would be silent in
+# exactly the session that needs it. That makes the always-on channel the right one and the
+# ONLY one — a hook registered on both channels fires twice (R-2 §f), which for a detector
+# means the block is pasted into context twice and a reader cannot tell the copies apart.
+#
+# The row is pinned BY VALUE, ${CLAUDE_PLUGIN_ROOT} spelling included, for the reason §L.3
+# gives: the manifest is what the harness executes, and a command that reverted to a
+# machine-local path is a hook that cannot resolve inside an installed plugin.
+L8_ROWS=$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -F 'session-start.sh')
+expect_eq "session-start.sh is registered in hooks.json exactly once" \
+  "1" "$(printf '%s\n' "$L8_ROWS" | /usr/bin/grep -c .)"
+expect_eq "…on SessionStart, matching all four sources, bounded by a timeout" \
+  'SessionStart|startup|clear|resume|compact|${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh|10' \
+  "$L8_ROWS"
+# The other half of "nowhere else": the skill frontmatter must not carry it too. Read off
+# SKILL_HOOKS_ROWS, the same extractor L.1 pins the twelve armed-session rows with, so an
+# empty result here means "absent from a channel this suite can still read" rather than
+# "the extractor broke" — L.1's own row assertions above are what prove it still works.
+expect_eq "…and NOWHERE in the skill frontmatter, which would fire it a second time" \
+  "" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -F 'session-start.sh')"
+# ONE OWNER OF THE EVENT. A second SessionStart registration would print a second block
+# into the same context with no ordering guarantee between them (§L's founding finding F).
+expect_eq "SessionStart carries exactly one registration in hooks.json" \
+  "1" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '^SessionStart|')"
+# The hook the manifest names EXISTS and parses. §L.2's own header records that the
+# structural "every command names a file that exists" arm died with tests/scripts.test.sh
+# (8582861) and was never replaced; this row restores it for the one entry this slice adds,
+# so a renamed or deleted detector fails here instead of silently never firing.
+expect_eq "…and the file that row names exists and parses" "ok" \
+  "$( [ -f "$BIONIC_HOOKS_DIR/session-start.sh" ] \
+      && bash -n "$BIONIC_HOOKS_DIR/session-start.sh" 2>/dev/null && echo ok )"
 
 # ============================================================
 echo ""
