@@ -273,6 +273,70 @@ expect_no_match "17: a real .bionic directory is not" "*legacy .bionic symlink*b
 expect_match "18: and the row carries a repair" "*legacy .bionic symlink*1*" "$OUT7"
 
 echo ""
+echo "=== Section 6b: the attestation set is THIS PROJECT's, not the machine's ==="
+
+# THE DEFECT THIS SECTION OWNS (T3 finding 2, AC-35 drive, 2026-09-03). Doctor
+# printed `– no session · none has taken an attestation in this project` on a
+# machine where `<proj>/.bionic/tmp/preflight-4241a5cd….state` was on disk, in
+# that project, written forty minutes earlier by that project's own dispatch.
+# The claim was false about the one directory it names.
+#
+# WHY IT WAS FALSE. The loop was keyed on LIVE SESSIONS — every live CLI process
+# on the machine — and asked, for each, whether this project held an attestation
+# under that session's id. A `/clear` re-keys the session, so the session that
+# TOOK the attestation is routinely gone by the time anyone runs doctor, and its
+# record then belongs to no live id. Two wrong sets at once: sessions from other
+# projects were iterated (and only ever missed because their ids do not name a
+# file here), and this project's own records were dropped the moment their writer
+# exited.
+#
+# THE SET IS THE FILES. `${root}/.bionic/tmp/preflight-*.state` is what the
+# fallback line is a claim about, so it is what the loop reads — bounded to this
+# project by its own path, and indifferent to whether the writer is still running.
+
+GONE_ATT_SID="dddddddd-3333-4444-5555-666677778888"
+write_attestation_v2 "$GONE_ATT_SID"   # …and NO session file: its writer is gone
+
+# A second project on the same machine, with its own attestation, which must not
+# reach this page.
+OTHER="${TMP}/other-proj"
+mkdir -p "${OTHER}/.bionic/tmp"
+OTHER_SID="eeeeeeee-3333-4444-5555-666677778888"
+{
+  printf '# bionic environment attestation — machine-local, safe to delete\n'
+  printf 'version=2\nkind=preflight-attestation\n'
+  printf 'session_id=%s\n' "$OTHER_SID"
+  printf 'written_at=1788000000\nrepo=%s\n' "$OTHER"
+  printf 'cores=18\nmem_gb=128\ndisk_free_gb=1663\nload_1m=2.28\nos=darwin\n'
+  printf 'budget=writers=99 suites=99 worktrees=99 test_jobs=99 source=probe\n'
+} > "${OTHER}/.bionic/tmp/preflight-${OTHER_SID}.state"
+jq -nc --arg sid "$OTHER_SID" --arg cwd "$OTHER" --argjson pid "$LIVE_PID" \
+  '{pid:$pid, sessionId:$sid, cwd:$cwd, startedAt:1788000000000, status:"busy"}' \
+  > "${CHOME}/sessions/1003.json"
+
+OUT6B="$(run_doctor)"
+RES6B="$(section "$OUT6B" "RESOURCES")"
+
+expect_match "18b: an attestation whose writer has exited is still this project's record" \
+  "*${GONE_ATT_SID%%-*}*writers=22*" "$RES6B"
+expect_no_match "18c: another project's attestation never reaches this page" \
+  "*${OTHER_SID%%-*}*" "$RES6B"
+expect_no_match "18d: nor its budget numbers" "*writers=99*" "$RES6B"
+expect_no_match "18e: and the page does not claim the project has no attestation" \
+  "*none has taken an attestation*" "$RES6B"
+
+# THE POSITIVE THE FALLBACK LINE IS STILL TRUE FOR: a project holding no
+# attestation file at all, with the same live sessions on the machine.
+BARE="${TMP}/bare-proj"
+mkdir -p "${BARE}/.bionic/tmp"
+OUT6C="$( cd "$BARE" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
+  BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+  BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
+RES6C="$(section "$OUT6C" "RESOURCES")"
+expect_match "18f: a project with no attestation still says so" \
+  "*none has taken an attestation in this project*" "$RES6C"
+
+echo ""
 echo "=== Section 7: registration, and the column budget ==="
 
 expect_true "19: tests/run.sh names doctor-fleet.test.sh" \
@@ -284,7 +348,8 @@ too_wide() {
       gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
       if (length(s) > 100) print length(s) ": " $0 }'
 }
-_over="$(too_wide "$OUT7")"
+_over="$(too_wide "${OUT7}
+${OUT6B}")"
 if [ -z "$_over" ]; then ok "20: every line of the fullest run fits 100 columns"
 else no "20: a line exceeds 100 columns" "$_over"; fi
 
