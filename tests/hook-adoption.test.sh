@@ -70,6 +70,11 @@ expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "[$2] not found i
 # governance hook: it has nothing to say outside a run and must say nothing.
 # background-suite-guard runs only behind agent-context-guard, whose own roster
 # check already scopes it, so it loads the library without the run predicate.
+# engage.sh is the one `yes` that is not a gate. It calls `active_run` to fill the
+# marker's `plan=` field and writes the marker either way — engagement is what decides
+# WHETHER a wall acts, the plan only WHAT — so the third column here records that the
+# call is present, which is all this suite can see, and tests/engage.test.sh owns the
+# behaviour the column cannot express (AC-18: no plan on disk, marker still written).
 ADOPTED='
 protect-main|closed|no
 canonical-sdlc-evidence-gate|closed|yes
@@ -88,6 +93,7 @@ preflight-probe|open|no
 stop-orders|open|no
 session-sweeper|open|no
 stop-check|open|no
+engage|open|yes
 '
 
 # ============================================================
@@ -198,7 +204,7 @@ echo "=== 3 — one session id: every reader asks the library ==="
 # over the record, which is the divergence R-1 measured. So: every hook that
 # derives a session id calls `session_id`, and the payload read that remains is
 # the ARGUMENT to that call, never the answer.
-SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start'
+SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start engage'
 for name in $SID_READERS; do
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
