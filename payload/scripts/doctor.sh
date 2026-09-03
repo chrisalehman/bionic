@@ -279,6 +279,18 @@ EOF
   printf ''
 }
 
+# A PATH AS A PERSON WOULD TYPE IT. Home-relative, because that is both shorter
+# and the spelling a reader would put into a shell — and because the rows that
+# name a path under the claude-home have about forty columns to say it in, which
+# an absolute `/Users/<name>/…` spends a quarter of before it starts.
+_doctor_tilde() {  # <path>
+  local p="${1:-}"
+  case "$p" in
+    "${HOME:-/nonexistent}"/*) printf '~%s' "${p#"${HOME}"}" ;;
+    *)                         printf '%s' "$p" ;;
+  esac
+}
+
 _doctor_plural() {  # <count> <singular> <plural>
   if [ "${1:-0}" = "1" ]; then echo "$2"; else echo "$3"; fi
 }
@@ -293,9 +305,47 @@ _doctor_plural() {  # <count> <singular> <plural>
 # that a reader could act on: "the pnpm content-addressable store is a cache, not
 # an install surface" and "a cache, no presence surface" answer the same question,
 # and only one of them fits beside the fact it is about.
+# THE STORE HAS A SURFACE, SO THE CAUSE NAMES THE FILE (AC-23). "a cache, no
+# presence surface" stopped being true at the commit that taught the probe to
+# read pnpm's `index.db` — the store names every cached `<name>@<version>` — and
+# a reader told a cache cannot be read has nothing to check, while a reader told
+# which file could not be read does. `_dep_check_pnpm_store` answers `unknown` in
+# exactly three situations and this names all three, in the order that function
+# tests them.
+#
+# ASKED AT MOST ONCE. The dep sweep calls the cause up to three times per row
+# (the dependency row, the third-party row, the roster row), and `pnpm store
+# path` is a shell-out — so it is memoised, and it goes through the same bound
+# every other shell-out on this page does.
+_DOCTOR_PNPM_CAUSE=""
+_doctor_pnpm_cause() {
+  [ -z "$_DOCTOR_PNPM_CAUSE" ] || { printf '%s' "$_DOCTOR_PNPM_CAUSE"; return 0; }
+  local store idx
+  if ! command -v pnpm >/dev/null 2>&1; then
+    _DOCTOR_PNPM_CAUSE="pnpm is not on PATH"
+  else
+    store="${BIONIC_PNPM_STORE:-}"
+    [ -n "$store" ] || store="$(detect_bounded "$(detect_probe_seconds)" pnpm store path 2>/dev/null)"
+    store="${store%/}"
+    idx="${store}/index.db"
+    if [ -z "$store" ]; then
+      _DOCTOR_PNPM_CAUSE="pnpm store path did not answer"
+    elif [ ! -f "$idx" ]; then
+      _DOCTOR_PNPM_CAUSE="no store index at ${idx}"
+    elif [ ! -r "$idx" ]; then
+      _DOCTOR_PNPM_CAUSE="the store index at ${idx} is unreadable"
+    else
+      # Unreachable through the probe — a readable index answers yes or no, never
+      # unknown — and here so this function has no silent arm.
+      _DOCTOR_PNPM_CAUSE="the store index could not be searched"
+    fi
+  fi
+  printf '%s' "$_DOCTOR_PNPM_CAUSE"
+}
+
 _doctor_unknown_cause() {  # <kind> — the install mechanism the table names
   case "${1:-}" in
-    pnpm-store) echo "a cache, no presence surface" ;;
+    pnpm-store) _doctor_pnpm_cause; echo ;;
     native)
       if command -v jq >/dev/null 2>&1; then echo "the plugin registry could not be parsed"
       else echo "jq is not on PATH"; fi ;;
@@ -359,10 +409,15 @@ _doctor_third_row() {  # <symbol> <name> <version> <source> <state>
 # `KEY=value  state`. The left cell is one token on purpose — an environment
 # name and its value are a single fact, and splitting them into two columns made
 # a reader join them back up by eye on every row.
-_doctor_env_row() {  # <symbol> <key=value or label> <state>
+# The fourth argument is the instruction the cut may not eat — the same contract
+# `_doctor_env3` already has, and needed here from the moment these rows started
+# naming PATHS: a directory of unbounded length in the state cell would otherwise
+# push the `→ /bionic:setup` off the end and leave a row that states a problem and
+# withholds its cure (lib/width.sh's own worked example).
+_doctor_env_row() {  # <symbol> <key=value or label> <state> [<instruction>]
   local prefix
   prefix="  $1 $(_doctor_cell "$2" 42) "
-  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${3:-}")")"
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${3:-}" "${4:-}")")"
 }
 
 # WHICH MACHINERY PUT IT THERE, in the words a user would use for it. Keyed on
@@ -436,7 +491,12 @@ SKILL_COPY_STATE="${SKILL_COPY_FACT#*present=}"; SKILL_COPY_STATE="${SKILL_COPY_
 SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
 HOOK_FILES_FACT="$(detect_legacy_hook_files)"
 HOOK_FILES_COUNT="${HOOK_FILES_FACT#*count=}"; HOOK_FILES_COUNT="${HOOK_FILES_COUNT%% *}"
+HOOK_FILES_PATH="${HOOK_FILES_FACT#*path=}";   HOOK_FILES_PATH="${HOOK_FILES_PATH%% *}"
 HOOK_FILES_CAUSE="${HOOK_FILES_FACT##*cause=}"
+# `cause=` is present only on the unknown line, so on the ordinary line the
+# strip-longest above returns the whole record. Cleared here rather than parsed
+# twice, so the render below can test it for emptiness.
+case "$HOOK_FILES_FACT" in *" cause="*) ;; *) HOOK_FILES_CAUSE="" ;; esac
 # THE TREE THE REGISTRY NAMES, NOT THE ONE THE USER IS STANDING IN (AC-20,
 # handoff 4.3). `detect_registry_sha_lag` defaults its repo directory to `$PWD`,
 # and doctor used to call it bare — so the commit in the header above and the
@@ -663,6 +723,37 @@ fi
 # through the same `detect_bounded` the listing does, and a stalled read arrives
 # here as one more `dup=unknown` line with the seconds in its cause.
 DUP_LINES="$(detect_plugin_duplicates)"
+
+# ONE PLUGIN, REGISTERED TWICE — READ HERE, PRINTED IN TABLE 1 (AC-23). The scan
+# ran on every invocation and reached no reader at all. Two registrations of one
+# bare name means two payloads answering to the same id, and which of them a
+# session loads is the CLI's business rather than anything a user chose — so each
+# row names the ids and raises the exact consolidation command
+# `_detect_duplicate_fix` already computed. Silence is the healthy case; the probe
+# deliberately never stays silent when it could not LOOK, which arrives as a
+# `dup=unknown` line and prints as an honest `–` with its cause.
+#
+# THE ROWS ARE BUILT HERE AND PRINTED LATER, because `fix` is collected before
+# anything is printed — FIX is the second section on the page, and a fix raised
+# from inside a render is a fix the verdict has already gone past.
+DUP_ROWS=""
+while IFS= read -r _dup_line; do
+  [ -n "$_dup_line" ] || continue
+  _dup_bare="${_dup_line#dup=}";  _dup_bare="${_dup_bare%% *}"
+  if [ "$_dup_bare" = "unknown" ]; then
+    _dup_cause="${_dup_line##*cause=}"
+    DUP_ROWS="${DUP_ROWS}$(_doctor_native_row "$DOCTOR_NIL" "duplicates" "?" \
+      "unknown — ${_dup_cause}")"$'\n'
+  else
+    _dup_ids="${_dup_line#*ids=}";  _dup_ids="${_dup_ids%% *}"
+    _dup_fix="${_dup_line#*fix=}"
+    DUP_ROWS="${DUP_ROWS}$(_doctor_native_row "$DOCTOR_BAD" "duplicates" "$_dup_bare" \
+      "registered twice: ${_dup_ids//,/, }")"$'\n'
+    fix "${_dup_bare} is registered twice → ${_dup_fix}"
+  fi
+done <<EOF
+$DUP_LINES
+EOF
 
 # ─── The dependency sweep ────────────────────────────────────────────────────
 #
@@ -1144,6 +1235,18 @@ if [ "$HALF_STATE" = "yes" ]; then
   FIX_LINES="${FIX_LINES}      bash -c 'set -o pipefail; curl -fsSL ${BIONIC_REMOVE_RAW_URL} | bash'"$'\n'
 fi
 
+# THE RETIRED INSTALLER'S LEFTOVERS, raised HERE rather than beside the rows they
+# explain — this whole section runs before anything is printed, and a fix raised
+# from inside a render is a fix the verdict has already gone past (AC-23; the
+# rows themselves are in ENVIRONMENT, far below).
+case "$HOOK_FILES_COUNT" in
+  unknown|0) ;;
+  *) fix "${HOOK_FILES_COUNT} legacy hook $(_doctor_plural "$HOOK_FILES_COUNT" file files) in the claude-home → run /bionic:setup" ;;
+esac
+if [ "$INST_AGENT_STATE" = "present" ] && [ "$INST_AGENT_DRIFT" != "0" ]; then
+  fix "${INST_AGENT_DRIFT} installed agent $(_doctor_plural "$INST_AGENT_DRIFT" copy copies) differ from the payload → run /bionic:setup"
+fi
+
 # jq next: it gates several of the facts above, so acting on anything else while
 # the report is partly unreadable is acting on half a diagnosis.
 if [ "$HAVE_JQ" = "no" ]; then
@@ -1408,6 +1511,7 @@ case "$LOAD_STATE" in
 esac
 [ "$HALF_STATE" = "yes" ] && \
   _doctor_native_row "$DOCTOR_BAD" "install" "—" "half-uninstalled — the CLI no longer knows bionic"
+printf '%s' "$DUP_ROWS"
 
 # ─── Table 2 — what /bionic:setup put on this machine ────────────────────────
 echo ""
@@ -1492,9 +1596,42 @@ case "$LEGACY_HOOK_COUNT" in
   *) _doctor_env_row "$DOCTOR_BAD" "legacy-channel managed hooks" \
        "${LEGACY_HOOK_COUNT} in settings.json → /bionic:setup" ;;
 esac
+# HOOK FILES, WHICH ARE NOT THE SETTINGS ENTRIES ABOVE. The row above counts
+# managed-hook ENTRIES in settings.json; this one counts hook SCRIPTS the retired
+# installer copied into the claude-home, which the plugin now ships and which
+# shadow nothing but still sit there. Both were computed on every run; only the
+# first was printed. `detect_legacy_hook_files` also names the directory, which
+# is the one thing a reader needs to go look.
+case "$HOOK_FILES_COUNT" in
+  0) ;;
+  unknown)
+    _doctor_env_row "$DOCTOR_NIL" "legacy hook files" "unknown — ${HOOK_FILES_CAUSE}" ;;
+  *)
+    _doctor_env_row "$DOCTOR_BAD" "legacy hook files" \
+      "${HOOK_FILES_COUNT} in $(_doctor_tilde "$HOOK_FILES_PATH")" " → /bionic:setup" ;;
+esac
+# THE INSTALLED ROLE FILES, AND WHICH OF THEM NO LONGER MATCH THE PAYLOAD. The
+# probe compares every agent this payload ships against a same-named copy in the
+# claude-home and counts the ones that differ; nothing rendered either half. A
+# drifted copy is the actionable one — it is what a session will read instead of
+# the shipped role — so that is the row, and a clean set of copies stays silent
+# under format rule 4.
+case "$INST_AGENT_STATE" in
+  present)
+    if [ "$INST_AGENT_DRIFT" != "0" ]; then
+      _doctor_env_row "$DOCTOR_BAD" "legacy installed agent copies" \
+        "${INST_AGENT_DRIFT}/${INST_AGENT_TOTAL} differ (${INST_AGENT_NAMES//,/, })" " → /bionic:setup"
+    fi ;;
+  unknown)
+    _doctor_env_row "$DOCTOR_NIL" "legacy installed agent copies" \
+      "unknown — ${INST_AGENT_CAUSE}" ;;
+esac
+# AND THE SKILL COPY NAMES ITS DIRECTORY. The path was parsed and dropped; a row
+# that says a stale copy arms the same walls twice, without saying where it is,
+# leaves the reader to go find it.
 [ "$SKILL_COPY_STATE" = "yes" ] && \
   _doctor_env_row "$DOCTOR_BAD" "legacy installed skill copy" \
-    "arms the same walls twice → /bionic:setup"
+    "$(_doctor_tilde "$SKILL_COPY_PATH")" " → /bionic:setup"
 
 
 # ─── The Patrol ──────────────────────────────────────────────────────────────
