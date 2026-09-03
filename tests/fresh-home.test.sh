@@ -236,21 +236,33 @@ case "${1:-}" in
     esac
     exit 1 ;;
   sync)
-    # The `uv-project` kind (epic-18 T3's excalidraw-renderer row): the argv is
-    # `uv sync --project <dir>`, and what makes the row PRESENT is a real venv at
-    # `<dir>/.venv`, because `_dep_check_uv_project` is a filesystem test, not a
-    # call back into this binary. A recorder that only logged the call would leave
-    # the row permanently absent no matter how many times it "installed".
+    # The `uv-project` kind (epic-18 T3's excalidraw-renderer row; VENV slice,
+    # AC-17, epic-20 wave-bionic-1.4.0): the argv is `uv sync --project <dir>`,
+    # and what makes the row PRESENT is a real venv, because `_dep_check_uv_project`
+    # is a filesystem test, not a call back into this binary. A recorder that only
+    # logged the call would leave the row permanently absent no matter how many
+    # times it "installed".
+    #
+    # WHERE THE VENV LANDS IS `$UV_PROJECT_ENVIRONMENT`, NOT `<dir>/.venv` (AC-17).
+    # Real `uv sync` honours that env var when set, writing the venv there instead
+    # of the project-relative default — that is the whole mechanism `deps.sh` now
+    # relies on to keep the venv off the plugin's own (version-numbered, moving)
+    # tree. This shim records the value it was called with so the RED test can see
+    # whether `deps.sh` ever set it, and refuses to fall back to `<dir>/.venv` —
+    # a fallback here would let a suite pass while the real export never happened.
+    echo "UV_PROJECT_ENVIRONMENT=${UV_PROJECT_ENVIRONMENT:-<unset>}" >> "$BIONIC_TEST_CALLS"
     proj=""; prev=""
     for a in "$@"; do
       [ "$prev" = "--project" ] && proj="$a"
       prev="$a"
     done
-    if [ -n "$proj" ]; then
-      mkdir -p "${proj}/.venv/bin"
-      printf '#!/bin/bash\nexit 0\n' > "${proj}/.venv/bin/python"
-      chmod +x "${proj}/.venv/bin/python"
-      printf 'version = 9.9.9\n' > "${proj}/.venv/pyvenv.cfg"
+    [ -n "$proj" ] || exit 0
+    [ -f "${proj}/uv.lock" ] || exit 1
+    if [ -n "${UV_PROJECT_ENVIRONMENT:-}" ]; then
+      mkdir -p "${UV_PROJECT_ENVIRONMENT}/bin"
+      printf '#!/bin/bash\nexit 0\n' > "${UV_PROJECT_ENVIRONMENT}/bin/python"
+      chmod +x "${UV_PROJECT_ENVIRONMENT}/bin/python"
+      printf 'version = 9.9.9\n' > "${UV_PROJECT_ENVIRONMENT}/pyvenv.cfg"
     fi
     exit 0 ;;
 esac
@@ -1112,6 +1124,70 @@ expect_eq "doctor: the claude() shell proxy row agrees the block is on disk" \
 
 
 # ---------------------------------------------------------------------------
+# Group 4b — VENV slice: a stable, plugin-version-independent venv path, and a
+# stale uv.lock reads `stale`, not `absent` (AC-17, wave-bionic-1.4.0).
+# ---------------------------------------------------------------------------
+#
+# THE WHOLE POINT OF AC-17. Group 2's real `uv sync` ran with `BIONIC_PLUGIN_ROOT`
+# pointed at THIS repo's own payload — the same root every other row in this
+# suite installs against. If the venv `deps.sh` builds still lived inside that
+# tree (the pre-AC-17 shape: `<plugin-root>/skills/excalidraw-diagram/references/.venv`),
+# an in-place plugin upgrade — a new version directory, same machine — would
+# leave that venv behind and force a needless re-sync. So this group swaps
+# `BIONIC_PLUGIN_ROOT` out from under the probe entirely, twice, and the venv
+# must still read present: the path this checks is `$HOME`-anchored, never
+# plugin-root-anchored.
+
+echo ""
+echo "=== Group 4b: VENV — stable venv path, version-independent, stale-lock state (AC-17) ==="
+
+VENV_DIR="${HOME_FIX}/.local/share/bionic/excalidraw-venv"
+VENV_LOCK_HASH="${VENV_DIR}.lock.sha256"
+
+expect_true "VENV: the venv Group 2's sync built lives at the stable XDG path, not the plugin tree" \
+  test -x "${VENV_DIR}/bin/python"
+expect_true "VENV: a lock hash was written beside the venv at sync time" \
+  test -s "$VENV_LOCK_HASH"
+expect_eq "VENV: the sync argv carried UV_PROJECT_ENVIRONMENT set to the stable path (the fake uv recorded it)" \
+  "UV_PROJECT_ENVIRONMENT=${VENV_DIR}" \
+  "$(grep '^UV_PROJECT_ENVIRONMENT=' "$CALLS" | tail -1)"
+
+# A second (simulated) plugin version directory: same uv.lock content, a
+# completely different path. `$HOME` — and so the venv and its hash file —
+# does not move; only `BIONIC_PLUGIN_ROOT` does.
+V2_ROOT="$TMP/plugin-vnext"
+mkdir -p "${V2_ROOT}/skills/excalidraw-diagram/references"
+cp "${PAYLOAD}/skills/excalidraw-diagram/references/uv.lock" \
+   "${V2_ROOT}/skills/excalidraw-diagram/references/uv.lock"
+cp "${PAYLOAD}/skills/excalidraw-diagram/references/pyproject.toml" \
+   "${V2_ROOT}/skills/excalidraw-diagram/references/pyproject.toml"
+
+check_dep_root() {  # <plugin-root> — check_dep excalidraw-renderer under a chosen plugin root
+  env -i HOME="$HOME_FIX" PATH="$BIN" BIONIC_PLUGIN_ROOT="$1" \
+    bash -c '. "$1"; check_dep excalidraw-renderer' _ "${LIB_DIR}/deps.sh" 2>/dev/null
+}
+
+expect_match "VENV: the venv still reads present under a second (simulated) plugin version dir" \
+  'present=yes*' "$(check_dep_root "$V2_ROOT")"
+
+# A third version dir whose uv.lock changed since the venv was synced — the
+# hash beside the venv no longer matches, so the row must read `stale`, a
+# state distinct from both `yes` (nothing changed) and `no`/absent (never
+# synced at all). AC-17: "re-synced, not re-offered" starts with this
+# distinction existing at the probe.
+V3_ROOT="$TMP/plugin-vstale"
+mkdir -p "${V3_ROOT}/skills/excalidraw-diagram/references"
+cp "${PAYLOAD}/skills/excalidraw-diagram/references/uv.lock" \
+   "${V3_ROOT}/skills/excalidraw-diagram/references/uv.lock"
+cp "${PAYLOAD}/skills/excalidraw-diagram/references/pyproject.toml" \
+   "${V3_ROOT}/skills/excalidraw-diagram/references/pyproject.toml"
+echo "# a lock changed after the venv was synced" >> "${V3_ROOT}/skills/excalidraw-diagram/references/uv.lock"
+
+expect_match "VENV: a uv.lock that changed since sync reads present=stale, not absent" \
+  'present=stale*' "$(check_dep_root "$V3_ROOT")"
+
+
+# ---------------------------------------------------------------------------
 # Group 5 — remove --all undoes the manifest (AC-10, the second half).
 # ---------------------------------------------------------------------------
 
@@ -1123,6 +1199,7 @@ echo "=== Group 5: remove --all takes the manifest back off ==="
 # it was there after setup, AND it is gone after remove.
 CCS_WAS_THERE=no; [ -f "$CCS_CONFIG" ] && CCS_WAS_THERE=yes
 NB_WAS_THERE=no;  [ -f "$NB_SKILL" ]   && NB_WAS_THERE=yes
+VENV_WAS_THERE=no; [ -x "${VENV_DIR}/bin/python" ] && VENV_WAS_THERE=yes
 RC_BLOCK_WAS="$(yn "$(rc_block_lines "$RC_FILE_FIX")")"
 SL_WAS="$(yn "$(jqf '.statusLine.command // ""')")"
 ENV_NAMES_WAS="$(yn "$(settings_env_names "$SETTINGS")")"
@@ -1134,11 +1211,14 @@ expect_eq "remove exits 0" "0" "$REMOVE_RC"
 
 CCS_GONE=no; [ -e "$CCS_CONFIG" ] || CCS_GONE=yes
 NB_GONE=no;  [ -e "$NB_SKILL" ]   || NB_GONE=yes
+VENV_GONE=no; [ -e "$VENV_DIR" ] || VENV_GONE=yes
 
 expect_eq "remove: the ccstatusline layout was installed and is now gone [ccstatusline-config-missing]" \
   "yes yes" "${CCS_WAS_THERE} ${CCS_GONE}"
 expect_eq "remove: the notebooklm skill was installed and is now gone [notebooklm-skill-missing]" \
   "yes yes" "${NB_WAS_THERE} ${NB_GONE}"
+expect_eq "remove: the excalidraw-renderer venv was installed and is now gone from the stable path [venv-path]" \
+  "yes yes" "${VENV_WAS_THERE} ${VENV_GONE}"
 
 # EACH OF THESE IS A CONJUNCTION, never a bare absence. "Was it there" was read
 # before the teardown through the same extractor that reads "is it gone" after

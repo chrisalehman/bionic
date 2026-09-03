@@ -247,7 +247,23 @@ case_is suite "$HEREDOC_THEN_SUITE" "suite: a real command AFTER a heredoc still
 echo "=== C2/C3 — farm-out-reminder through the library (AC-15, AC-16) ==="
 # ============================================================
 FARM_REPO="$SANDBOX/farm/repo"
-mkdir -p "$FARM_REPO/.bionic/tmp"
+mkdir -p "$FARM_REPO/.bionic/tmp" "$FARM_REPO/.bionic/docs/plans"
+# THE WALL IS RUN-SCOPED SINCE bionic 1.4.0 (slice ADOPT, spec AC-7). The hook is
+# registered always-on now, so what scopes it is an on-disk fact rather than an armed
+# skill: `active_run` under the payload's project root. Every AC-16 arm below asks
+# whether the wall still refuses the real thing, and none of them would be asking
+# anything without an OPEN run here. The negative control is FARM_NORUN, further down.
+cat > "$FARM_REPO/.bionic/docs/plans/wave-01.plan.md" <<'FARMPLAN'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: implementation
+FARMPLAN
 
 mk_bash_payload() {  # <cwd> <command> [agent_id] [run_in_background:true|false|omit]
   local bg="${4:-omit}"
@@ -265,7 +281,19 @@ mk_bash_payload() {  # <cwd> <command> [agent_id] [run_in_background:true|false|
 OUT=""; ERR=""; ST=0
 run_hook() {  # <payload> <hook> [args...]
   local payload="$1"; shift
+  # BIONIC_PLUGINS_DIR is pointed at an empty sandbox for the same reason HOME is:
+  # since bionic 1.4.0 the loader HEALS before it fails, consulting the CLI's plugin
+  # registry and cache when the library is not beside the hook. Without this door
+  # closed, §C5's "library moved aside" fixture would quietly load THIS machine's
+  # installed bionic and prove nothing.
+  # THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2).
+  # hooks/agent-context-guard.sh builds the roster filename from lib/session.sh's answer,
+  # where the ENV value is primary — so a driver that left the runner's own session id in
+  # the environment would have the guard looking for a roster this fixture never wrote,
+  # and every wall behind it would read "unarmed".
+  local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   OUT=$(printf '%s' "$payload" | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
+          BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$_sid" \
           CLAUDE_PROJECT_DIR= bash "$@" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
@@ -276,6 +304,37 @@ farm_decision() {  # <command> -> "" when silent, else the deny/nudge class
   run_hook "$(mk_bash_payload "$FARM_REPO" "$1")" "$FARM_OUT"
   printf '%s' "$OUT"
 }
+
+# --- AC-7: the run predicate is what scopes the wall now ---
+#
+# The SAME command that denies above, from a project with no run: silent. Two fixtures
+# differing only in whether a plan with an open `## SDLC State` exists — which is the
+# whole of the "always-on registration is safe" claim. Until 1.4.0 this hook had no run
+# gate at all (R-2 finding 1), so registering it always-on would have denied `pytest`,
+# `npm test` and `bash tests/run.sh` in every project on this machine.
+FARM_NORUN="$SANDBOX/farm/norun"
+mkdir -p "$FARM_NORUN"
+run_hook "$(mk_bash_payload "$FARM_NORUN" 'bash tests/run.sh')" "$FARM_OUT"
+expect_empty "AC-7 farm-out is SILENT on a suite command in a project with no .bionic" "$OUT"
+expect_empty "AC-7 …and says nothing on stderr either" "$ERR"
+expect_eq "AC-7 …exiting 0" "0" "$ST"
+
+FARM_CLOSED="$SANDBOX/farm/closed"
+mkdir -p "$FARM_CLOSED/.bionic/docs/plans"
+cat > "$FARM_CLOSED/.bionic/docs/plans/wave-01.plan.md" <<'CLOSEDPLAN'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 9
+
+- Step 9: delivered: record/x.md
+CLOSEDPLAN
+run_hook "$(mk_bash_payload "$FARM_CLOSED" 'bash tests/run.sh')" "$FARM_OUT"
+expect_empty "AC-7 …silent for a run that CLOSED (current: 9 with a delivered line)" "$OUT"
+expect_eq "AC-7 …exiting 0" "0" "$ST"
 
 # --- AC-15: silent on prose, quoted strings and heredoc bodies ---
 expect_empty "AC-15 farm-out is SILENT on git commit -m \"make the row green\"" \
@@ -433,24 +492,53 @@ expect_eq "…positive control: that same payload refuses when driven straight i
 # ============================================================
 echo "=== C5 — FAIL-CLOSED sourcing: no library, no pass (AC-12 shape, D1) ==="
 # ============================================================
-# The library is moved aside for the length of this section and restored by the trap on
-# any exit path. Both hooks must REFUSE the suite-class case rather than allow it.
-LIB_HIDDEN="$SANDBOX/cmd-class.sh.hidden"
-restore_lib() { [ -f "$LIB_HIDDEN" ] && mv "$LIB_HIDDEN" "$LIB"; rm -rf "$SANDBOX"; }
-trap restore_lib EXIT
-mv "$LIB" "$LIB_HIDDEN"
+# HERMETIC, AND THAT IS A CORRECTION. This section used to `mv` the SHIPPED library aside
+# for its own length and restore it from a trap — a write outside its own mktemp root, and
+# the one thing tests/run.sh's parallel mode assumes no suite does. Every sibling suite
+# that reads payload/scripts/lib/cmd-class.sh (and since bionic 1.4.0 that is every suite
+# driving farm-out-reminder or the background-suite guard) saw the library vanish for a
+# few hundred milliseconds and went red for a reason that had nothing to do with it.
+# Measured: `BIONIC_TEST_JOBS=18 bash tests/run.sh` with hook-adoption.test.sh on the
+# roster, 13 failures here, zero when run alone.
+#
+# The copies live in a throwaway tree shaped like the shipped plugin — hooks/ beside
+# scripts/lib/, with the classifier simply absent — so what is under test is the same
+# resolution the shipped hooks perform, and nothing outside $SANDBOX is touched.
+C5_TREE="$SANDBOX/no-classifier"
+mkdir -p "$C5_TREE/hooks" "$C5_TREE/scripts/lib"
+for _c5_lib in "$(dirname "$LIB")"/*.sh; do
+  case "$(basename "$_c5_lib")" in cmd-class.sh) continue ;; esac
+  cp "$_c5_lib" "$C5_TREE/scripts/lib/"
+done
+cp "$FARM_OUT" "$C5_TREE/hooks/farm-out-reminder.sh"
+cp "$BG_GUARD" "$C5_TREE/hooks/background-suite-guard.sh"
+C5_SAVED_FARM="$FARM_OUT"; C5_SAVED_BG="$BG_GUARD"
+FARM_OUT="$C5_TREE/hooks/farm-out-reminder.sh"
+BG_GUARD="$C5_TREE/hooks/background-suite-guard.sh"
 
-D=$(farm_decision 'bash tests/run.sh')
-expect_contains "C5 farm-out DENIES when its classifier cannot load" '"deny"' "$D"
-expect_contains "C5 …naming the path it could not load" "cmd-class.sh" "$D"
+# BOTH OF THESE STEP ASIDE NOW (bionic 1.4.0, design ledger S4). They refused until
+# 1.4.0, on the reasoning the two irreversible-action walls still use — and that
+# reasoning does not reach here. farm-out guards where a command RUNS; this guard
+# prevents a suite whose output nobody reads. Both mistakes are reversible and cost a
+# re-run; refusing every Bash call in every session on the machine because one file is
+# missing is not. The direction is chosen by the cost of the mistake, per hook.
+# Driven through run_hook rather than farm_decision: the latter runs the hook inside a
+# command substitution, so $ST and $ERR would still describe whatever ran before it.
+run_hook "$(mk_bash_payload "$FARM_REPO" 'bash tests/run.sh')" "$FARM_OUT"
+expect_empty "C5 farm-out STEPS ASIDE when its classifier cannot load (fail open)" "$OUT"
+expect_eq "C5 …exiting 0" "0" "$ST"
+expect_contains "C5 …naming the file it could not load, once, on stderr" "cmd-class.sh" "$ERR"
+expect_eq "C5 …in exactly one line" "1" "$(printf '%s\n' "$ERR" | /usr/bin/grep -c .)"
+expect_contains "C5 …and pointing at the diagnosis" "/bionic:doctor" "$ERR"
 
 run_guarded "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
-expect_eq "C5 background-suite-guard REFUSES when its classifier cannot load" 2 "$ST"
-expect_contains "C5 …naming the path it could not load" "cmd-class.sh" "$ERR"
+expect_eq "C5 background-suite-guard STEPS ASIDE when its classifier cannot load" 0 "$ST"
+expect_contains "C5 …naming the file it could not load" "cmd-class.sh" "$ERR"
+expect_eq "C5 …in exactly one line" "1" "$(printf '%s\n' "$ERR" | /usr/bin/grep -c .)"
 
-mv "$LIB_HIDDEN" "$LIB"
-trap cleanup EXIT
-# The restore is the precondition of everything after this line, so prove it.
+FARM_OUT="$C5_SAVED_FARM"; BG_GUARD="$C5_SAVED_BG"
+# The shipped library was never touched, and everything after this line depends on that,
+# so prove it rather than assume it.
 expect_eq "C5 the library is back on disk" "suite" "$(class_of 'bash tests/run.sh')"
 
 # ============================================================
@@ -461,12 +549,24 @@ echo "=== C6 — every source in payload/hooks/*.sh resolves inside payload/ ===
 # so each literal is expanded under BOTH and the pin is: at least one expansion exists, and
 # every expansion that exists lies under <repo>/payload/.
 # Two literal shapes reach a sibling file from a hook: "$(dirname "$0")/<rel>.sh" (the
-# library source) and "$(cd "$(dirname "$0")" … && pwd)/<name>.sh" (the sweeper handoff
-# every stop hook uses). Both are collected.
+# handoff to a sibling SCRIPT) and "$(cd "$(dirname "$0")" … && pwd)/<name>.sh" (the
+# sweeper handoff every stop hook uses).
+#
+# THE LIBRARY IS NO LONGER ONE OF THEM, and that is the bionic 1.4.0 change (slice
+# ADOPT, spec AC-16): the two class-(1) candidate spellings live inside the shared
+# loader block, computed from a variable, so no `$(dirname "$0")/...` literal names a
+# library any more. They are collected here explicitly, from the block itself, so this
+# section still covers the reference that matters most — and covers BOTH spellings,
+# which the old extractor never did (it only ever saw whichever one a hook wrote first).
 SRC_LITERALS=$( { /usr/bin/grep -hoE '\$\(dirname "\$0"\)/[^"]*\.sh' "$PAYLOAD_HOOKS"/*.sh \
                     | sed 's|^\$(dirname "\$0")||'
                   /usr/bin/grep -hoE '&& pwd\)/[^"]*\.sh' "$PAYLOAD_HOOKS"/*.sh \
                     | sed 's|^&& pwd)||'
+                  # the loader's own class-(1) directories, one per wanted basename
+                  for _c6_want in $(/usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/*.sh \
+                                      | sed -E 's/^BIONIC_LIB_WANT="//; s/"$//' | tr ' ' '\n' | sort -u); do
+                    printf '/../scripts/lib/%s\n/../payload/scripts/lib/%s\n' "$_c6_want" "$_c6_want"
+                  done
                 } 2>/dev/null | sort -u)
 if [ -n "$SRC_LITERALS" ]; then ok "payload/hooks reaches sibling files by relative path"; else
   no "payload/hooks reaches sibling files by relative path" "found none to check"
@@ -497,6 +597,11 @@ SRC_BAD=""
 while IFS= read -r rel; do
   [ -n "$rel" ] || continue
   found=0
+  # `../payload/scripts/lib/...` is the REPO spelling of the same directory: it resolves
+  # only when payload/hooks is a symlink to <repo>/hooks, so under the installed-plugin
+  # reading it is expected to find nothing. Its twin covers that reading, and the pin
+  # below is per-basename, not per-spelling.
+  case "$rel" in /../payload/scripts/lib/*) continue ;; esac
   for cand in "$(lexnorm "$PAYLOAD_HOOKS$rel")" "$PAYLOAD_HOOKS$rel" "$PLAIN_HOOKS$rel"; do
     [ -f "$cand" ] || continue
     found=1

@@ -631,7 +631,14 @@ build_fixture() {  # <name> -> repo path
     nested-two-deep)
       write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4" ;;
     nested-three-deep)
-      # maxdepth 2 under plans/: this one is at depth 3 and is not found.
+      # DEPTH 3 IS OUT OF THE BOUND, and this fixture is where that is decided for the whole
+      # fleet. Two depths were live during bionic 1.4.0 — the hand-copies and the evidence
+      # gate walked 2, which is the bionic layout's own depth (plans/<epic>/<wave>.plan.md),
+      # and L-RUN shipped 3 — and §S.3d pinned the disagreement rather than papering over it.
+      # POKER/2's unification (ratified 2026-09-03) resolves it AT 2: the descend-2 read is
+      # the one §S holds body-for-body, anything deeper under plans/ is notes rather than a
+      # plan, and a bound nobody can state from the layout is a bound that drifts again. All
+      # five parties read the library, so all five must agree it is not a run.
       write_plan "$repo/.bionic/docs/plans/epic-99/sub/wave-01.md" "current: 4" ;;
     incidents-dir)
       write_plan "$repo/.bionic/docs/incidents/inc-01/incident.md" "current: 4" ;;
@@ -652,6 +659,22 @@ while IFS='|' read -r name want cur; do
 done <<EOF
 $(printf '%s' "$FIXTURES")
 EOF
+
+# A MUTANT NEEDS THE LIBRARY BESIDE IT (bionic 1.4.0). Every hook loads root.sh, run.sh
+# and session.sh through the shared loader idiom, whose first candidate is
+# `$(dirname "$0")/../scripts/lib`. A copy alone in a temp directory does not find it
+# there — and the loader's HEALING candidates then reach the plugin installed on this
+# machine, whose library predates this wave and does not carry the wanted basenames — so
+# the copy fails OPEN and every mutation arm below would be measuring the step-aside
+# instead of the mutation. `plant_hook_tree` builds the shipped shape around a mutant:
+# hooks/ beside scripts/lib/, holding this checkout's library.
+plant_hook_tree() {  # <tree root> -> echoes <tree root>/hooks
+  local root="$1" src="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+  [ -d "$src" ] || src="$BIONIC_HOOKS_DIR/../scripts/lib"
+  mkdir -p "$root/hooks" "$root/scripts/lib"
+  cp "$src"/*.sh "$root/scripts/lib/" 2>/dev/null || true
+  printf '%s' "$root/hooks"
+}
 
 # run_battery <mode>  — mode=assert emits one assertion per fixture;
 #                       mode=detect returns 1 at the FIRST disagreement.
@@ -713,33 +736,40 @@ run_battery assert
 
 # ============================================================
 echo ""
-echo "=== A2 — one-copy mutation goes RED (checklist A9, TDD §9) ==="
+echo "=== A2 — a LIBRARY mutation moves every party (checklist A9, TDD §9) ==="
 # ============================================================
 #
-# A9's proof that the discarded run's ~450 assertions did not discriminate was a
-# one-copy mutation that stayed GREEN. Each mutation below is applied to a COPY
-# of ONE party — the shipped files are never modified, and their checksums are
-# re-verified at the end — and the whole battery must then find a disagreement.
+# WHAT THIS SECTION USED TO PROVE, AND WHY THE PROOF MOVED. Until bionic 1.4.0 the
+# active-wave block was five hand-copies, and A9's finding was that a suite which cannot
+# tell them apart is decorative: the discriminator was mutating ONE copy and requiring the
+# battery to go red. There are no copies left. The block is `lib/run.sh` and the five
+# parties source it, so the honest discriminator inverts: mutate the LIBRARY, and EVERY
+# party must move. A party that had quietly kept its own answer — a leftover local
+# parse, a hook that reads the plan itself — would stay green here and nowhere else.
 #
-# Every mutation is a plausible drift, not damage: a maintainer editing one copy
-# and not the other two.
+# Each mutation is a plausible drift, not damage: a maintainer editing the one reader and
+# getting a rule subtly wrong. The shipped library is never modified; each mutant is a
+# copy inside a throwaway tree shaped like the shipped plugin (hooks/ beside scripts/lib/),
+# which is also what makes the parties load the mutant at all — the loader's first
+# candidate is `$(dirname "$0")/../scripts/lib`.
 
 CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" 2>/dev/null)
+RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
+[ -r "$RUN_LIB" ] || RUN_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/run.sh"
+LIB_DIR_SRC="$(dirname "$RUN_LIB")"
 MUTDIR="$SANDBOX/mutants"; mkdir -p "$MUTDIR"
-# A MUTATED landing gate still resolves its sweeper as a SIBLING, so one lives here for the
-# LG party below to find. The shipped sweeper is never touched — this is a copy.
-cp "$PARTY_SW" "$MUTDIR/session-sweeper.sh"
 
-# mutate <src> <dst> <kind>  — rc 1 if the mutation matched nothing
-mutate() {
-  local src="$1" dst="$2" kind="$3"
+expect_eq "the library under mutation is on disk (this section is not vacuous)" "yes" \
+  "$([ -r "$RUN_LIB" ] && echo yes || echo no)"
+
+# mutate_lib <kind> <dst>  — rc 1 if the mutation matched nothing
+mutate_lib() {
+  local kind="$1" dst="$2" src="$RUN_LIB"
   case "$kind" in
-    docs-root-last-wins)   # head -1 -> tail -1, first occurrence (resolve_docs_root)
+    docs-root-last-wins)   # head -1 -> tail -1 in docs_root
       awk 'BEGIN{d=0} !d && $0=="      | head -1 \\" {print "      | tail -1 \\"; d=1; next} {print}' \
         "$src" > "$dst" ;;
-    keep-quotes)           # drop the quote-stripping sed in resolve_docs_root
-      # `;s/[` is the second half of `s/^['"]//;s/['"]$//` and appears first, in
-      # every party, on exactly that line.
+    keep-quotes)           # drop the quote-stripping sed in docs_root
       awk 'BEGIN{d=0} !d && index($0,";s/[") {print "      | cat \\"; d=1; next} {print}' \
         "$src" > "$dst" ;;
     delete-cr)             # translate-CR -> delete-CR (the fail-dangerous shape)
@@ -753,9 +783,9 @@ mutate() {
     fence-blind)           # stop skipping fenced content
       awk '{ t=$0; sub(/^[ \t]+/,"",t); sub(/[ \t]+$/,"",t); if (t=="fence { next }") next; print }' \
         "$src" > "$dst" ;;
-    no-marker-skip)        # accept marker-less candidates again (revert the AC-10 skip)
+    no-marker-skip)        # accept marker-less candidates again
       awk '{ t=$0; sub(/^[ \t]+/,"",t); sub(/[ \t]+$/,"",t);
-             if (t=="has_sdlc_state \"$f\" || continue") next; print }' "$src" > "$dst" ;;
+             if (t=="END { exit !found }'"'"' || continue") next; print }' "$src" > "$dst" ;;
     anchor-current)        # lose the leading-whitespace tolerance on `current:`
       awk '{ i=index($0,"'"'"'^[[:space:]]*current[[:space:]]*:'"'"'");
              if (i>0) { $0=substr($0,1,i-1) "'"'"'^current:'"'"'" substr($0,i+38) }
@@ -768,46 +798,58 @@ mutate() {
 
 MUTATIONS="docs-root-last-wins keep-quotes delete-cr depth-1 fence-blind anchor-current no-marker-skip"
 
-# LG is the landing gate's active-wave copy (Step-6 critic D-1): every mutation below is an
-# active-wave-detection drift, and the gate holds a byte-identical copy of that block, so the
-# same six drifts must move its answer too or its copy is uncovered. ER is
-# execution-recorder's copy (t6-review.md F-1's sibling finding, F-4): §A1 drives all five
-# parties over the fixture matrix, but until now this loop asserted only DP/SG/EG/LG — ER's
-# copy was held by shared-fixture agreement alone, never by a demonstration that drifting it
-# turns the battery red the way it does for the other four.
-for party in DP SG EG ER LG; do
-  case "$party" in
-    DP) src="$PARTY_DP" ;;
-    SG) src="$PARTY_SG" ;;
-    EG) src="$PARTY_EG" ;;
-    ER) src="$PARTY_ER" ;;
-    LG) src="$PARTY_LG" ;;
-  esac
-  for m in $MUTATIONS; do
-    dst="$MUTDIR/$party-$m.sh"
-    if ! mutate "$src" "$dst" "$m"; then
-      # A mutation that matches nothing is not a passing test — it means the
-      # code moved and this proof has gone vacuous (fixtures-can-pin-away-the-test).
-      no "mutation '$m' applies to $(basename "$src")" "the awk target matched nothing — the code moved"
-      continue
-    fi
-    saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"; saved_er="$PARTY_ER"; saved_lg="$PARTY_LG"
-    case "$party" in
-      DP) PARTY_DP="$dst" ;;
-      SG) PARTY_SG="$dst" ;;
-      EG) PARTY_EG="$dst" ;;
-      ER) PARTY_ER="$dst" ;;
-      LG) PARTY_LG="$dst" ;;
-    esac
-    if detail=$(run_battery detect); then
-         "the battery stayed green with one copy mutated — it does not discriminate"
-    else
-      ok "one-copy mutation '$m' in $party makes the battery RED"
-    fi
-    PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"; PARTY_ER="$saved_er"; PARTY_LG="$saved_lg"
+for m in $MUTATIONS; do
+  tree="$MUTDIR/$m"
+  mkdir -p "$tree/hooks" "$tree/scripts/lib"
+  cp "$LIB_DIR_SRC"/*.sh "$tree/scripts/lib/" 2>/dev/null
+  if ! mutate_lib "$m" "$tree/scripts/lib/run.sh"; then
+    # A mutation that matches nothing is not a passing test — it means the code moved
+    # and this proof has gone vacuous (fixtures-can-pin-away-the-test).
+    no "mutation '$m' applies to lib/run.sh" "the awk target matched nothing — the library moved"
+    continue
+  fi
+  for _pf in "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" "$PARTY_SW"; do
+    cp "$_pf" "$tree/hooks/$(basename "$_pf")"
   done
+  saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"
+  saved_er="$PARTY_ER"; saved_lg="$PARTY_LG"
+  PARTY_DP="$tree/hooks/$(basename "$saved_dp")"
+  PARTY_SG="$tree/hooks/$(basename "$saved_sg")"
+  PARTY_EG="$tree/hooks/$(basename "$saved_eg")"
+  PARTY_ER="$tree/hooks/$(basename "$saved_er")"
+  PARTY_LG="$tree/hooks/$(basename "$saved_lg")"
+  if detail=$(run_battery detect); then
+    no "library mutation '$m' makes the battery RED" \
+       "the battery stayed green with the one reader mutated — it does not discriminate"
+  else
+    ok "library mutation '$m' makes the battery RED"
+  fi
+  PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"
+  PARTY_ER="$saved_er"; PARTY_LG="$saved_lg"
 done
 
+# THE PAIRED POSITIVE: the same throwaway tree with an UNMUTATED library must be green,
+# or every red above is the copying and not the mutation.
+ctrl="$MUTDIR/control"
+mkdir -p "$ctrl/hooks" "$ctrl/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$ctrl/scripts/lib/" 2>/dev/null
+for _pf in "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" "$PARTY_SW"; do
+  cp "$_pf" "$ctrl/hooks/$(basename "$_pf")"
+done
+saved_dp="$PARTY_DP"; saved_sg="$PARTY_SG"; saved_eg="$PARTY_EG"
+saved_er="$PARTY_ER"; saved_lg="$PARTY_LG"
+PARTY_DP="$ctrl/hooks/$(basename "$saved_dp")"
+PARTY_SG="$ctrl/hooks/$(basename "$saved_sg")"
+PARTY_EG="$ctrl/hooks/$(basename "$saved_eg")"
+PARTY_ER="$ctrl/hooks/$(basename "$saved_er")"
+PARTY_LG="$ctrl/hooks/$(basename "$saved_lg")"
+if detail=$(run_battery detect); then
+  ok "control: the same tree with an UNMUTATED library is green"
+else
+  no "control: the same tree with an UNMUTATED library is green" "$detail"
+fi
+PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"
+PARTY_ER="$saved_er"; PARTY_LG="$saved_lg"
 
 # ============================================================
 echo ""
@@ -1212,7 +1254,7 @@ done
 # temp names. The instrumentation is applied to a COPY (§9's technique) so the
 # shipped script carries no fault-injection seam; the original is re-checksummed.
 ER_SUM_BEFORE=$(shasum "$PARTY_ER")
-SGI="$MUTDIR/execution-recorder-showtmp.sh"
+SGI="$(plant_hook_tree "$SANDBOX/er-showtmp")/execution-recorder-showtmp.sh"
 awk '{ print }
      /^  tmp=\$\(mktemp "\$STATE_DIR\/\.stop-check\.XXXXXX" 2>\/dev\/null\)/ {
        print "  printf \"TMPNAME=%s\\n\" \"$tmp\" >&2" }' "$PARTY_ER" > "$SGI"
@@ -2010,8 +2052,8 @@ j_mutant() {  # <kind> -> path to a mutant gate with a sibling sweeper, or empty
   # Two statements, not one: `local a=1 b="$a"` expands every word BEFORE it
   # assigns any of them, so under `set -u` the second reference is unbound.
   local kind="$1"
-  local d="$JMUT/$kind"
-  mkdir -p "$d"
+  local d
+  d="$(plant_hook_tree "$JMUT/$kind")"
   cp "$PARTY_SW" "$d/session-sweeper.sh"
   case "$kind" in
     # THE LANDED/LIVE DISCRIMINATION DROPPED. `background_tasks[]` is the payload's
@@ -2067,8 +2109,7 @@ echo "=== J.3 — a PREDICATE change moves BOTH answers, never one (the single o
 # coincidence, it is what "the gate owns no predicate" means in operation, and it
 # is the reason the two can never be caught telling different people different
 # things about one contract.
-JP="$JMUT/predicate"
-mkdir -p "$JP"
+JP="$(plant_hook_tree "$JMUT/predicate")"
 cp "$PARTY_LG" "$JP/landing-gate.sh"
 awk '{ sub(/\[ ! -s "[$]p" \]/, "[ ! -e \"$p\" ]"); print }' "$PARTY_SW" > "$JP/session-sweeper.sh"
 j_saved_lg="$PARTY_LG"; j_saved_sw="$PARTY_SW"
@@ -2424,7 +2465,7 @@ cp "$K_ROSTER_FULL" "$KROSTER"
 # The mutation is the plausible one: an identification arm that writes a fresh row
 # instead of copying the joined row forward. It is applied to a COPY of the recorder
 # and driven over a SECOND chain, so the chain above is untouched.
-KMUT="$SANDBOX/recorder-mutant.sh"
+KMUT="$(plant_hook_tree "$SANDBOX/recorder-mutant")/execution-recorder.sh"
 awk '{ print; if (index($0, "if (f ~ /^status=/)")) print "      if (f ~ /^deliverable=/) f = \"deliverable=\"" }' \
   "$PARTY_ER" > "$KMUT"
 if cmp -s "$PARTY_ER" "$KMUT"; then
@@ -2455,33 +2496,35 @@ else
 fi
 
 # ============================================================
+# ============================================================
 echo ""
-echo "=== L — the WIRING: registration is three-sided (frontmatter, absence, presence) ==="
+echo "=== L — the WIRING: one hook, one registration, one manifest ==="
 # ============================================================
 #
 # A hook that reads an event nobody registered it for is inert, and inert in the
 # quietest possible way: it is installed, it is syntactically fine, its own suite is
-# green, and it never runs. The registration surface this repo SHIPS is two payload
-# manifests, and only those two:
+# green, and it never runs.
 #
-#   the SKILL-SCOPED channel — the `hooks:` frontmatter block of
-#     skills/canonical-sdlc/SKILL.md, carrying the nine sdlc hook scripts' twelve
-#     event/matcher registrations, which bind only in sessions that actually invoke
-#     the skill (epic-16 wave-2 R1).
-#   the ALWAYS-ON channel — hooks/hooks.json, the plugin hook manifest, carrying the
-#     six walls that must bind in every session no matter what skill is armed.
+# THERE IS ONE REGISTRATION SURFACE NOW (bionic 1.4.0, slice ADOPT, spec AC-7):
+# hooks/hooks.json. Until this wave there were two, and the split was not laziness —
+# it was a partition. Skill-frontmatter hooks bind only in sessions that invoke the
+# skill, which is what kept the sdlc walls off every unrelated project on the machine;
+# settings-channel hooks are the only ones an AGENT-context event can reach, which is
+# what got the same walls into teammate contexts. Three hooks were therefore registered
+# on both channels, each entry covering the half the other could not.
 #
-# Three sides have to agree or the partition is silently wrong in one of three ways:
-# the frontmatter could name the wrong shape, a skill-scoped script could linger in
-# the always-on manifest (firing in EVERY session, defeating R1), or a script that
-# has to stay global could get swept out by mistake.
+# THE PARTITION IS WHAT BROKE. A skill's registrations are looked up per session, so a
+# `/clear`, a continue or a `/reload-plugins` left every wall installed and not running
+# — silently, while dispatches kept launching unrostered. The scope the frontmatter was
+# buying is now bought by an ON-DISK fact instead: each hook asks `active_run` under the
+# payload's project root and does nothing where there is no run. That is a better
+# partition than the channel ever was, because it survives the conversation.
 #
-# THIS SECTION READS PAYLOAD FILES ONLY (epic-17 wave-02 S3, AC-1). Every assertion
-# that used to derive its expected shape from the condemned installer script's own
-# registration array lived in tests/plugin-hooks.test.sh — the designated transitional
-# home, which retired whole with the installer at W5 (4/6). hooks/hooks.json is the only
-# always-on surface left, so an assertion made here against it binds the whole channel
-# with nothing left to cross-check it against.
+# THE THREE WAYS THIS CAN STILL BE SILENTLY WRONG, one assertion each below: the
+# frontmatter could keep an entry (the hook then fires TWICE per event — the CLI does
+# not deduplicate across the plugin/skill boundary), a hook could be missing from the
+# manifest (inert), or a hook could be named twice within it (two refusals, two journal
+# rows for one dispatch).
 SKILL_SRC="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
 HOOKS_JSON_SRC="$BIONIC_HOOKS_DIR/hooks.json"
 
@@ -2492,320 +2535,210 @@ expect_absent_ug() {
   if /usr/bin/grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi
 }
 
-# --- L.1 frontmatter <-> script: the eleven sdlc-scoped registrations live in
-# SKILL.md's `hooks:` frontmatter block, in the same event/matcher/command shape the
-# always-on channel uses, each entry bounded by the same timeout: 10 the Step-6 review
-# demanded.
-# farm-out-reminder.sh joined this block at session-20260815 T5 — it guards a
-# workflow preference, not irreversible damage, so it binds only in armed sessions
-# now, sharing the PreToolUse|Bash matcher entry with the evidence gate (two
-# commands under one matcher, same shape the Stop event already uses for its two
-# no-matcher hooks).
-# Line-anchored extraction of the pinned shape — pin the span, not the label.
-# Shared with installer-behavior.test.sh and scripts.test.sh via
-# tests/lib/frontmatter-parser.sh (epic-17 W4 AC-12 dedupe — see §L.7 below).
+# --- L.1 THE FRONTMATTER REGISTERS NOTHING ---
+#
+# Not "registers less" — nothing. The `hooks:` key is gone from SKILL.md's frontmatter
+# entirely, and that is the half of the change that makes the other half safe: a hook
+# named in both manifests fires twice per event, which for the landing sweep means two
+# markers journalled per turn and for a wall means one refusal printed twice. The
+# avoidance pattern this replaces is documented in the shipped file's own history —
+# landing-gate was deliberately split across Stop (skill) and SubagentStop (settings)
+# precisely so it would never be registered twice on one event.
 SKILL_HOOKS_ROWS=$(skill_hooks_rows "$SKILL_SRC")
+expect_eq "SKILL.md's frontmatter registers NOTHING — the hooks: block is gone" \
+  "" "$SKILL_HOOKS_ROWS"
+expect_eq "…and the key itself is absent, not merely empty" "0" \
+  "$(awk 'NR==1 && $0=="---" {f=1; next} f && $0=="---" {exit} f' "$SKILL_SRC" \
+     | /usr/bin/grep -c '^hooks:')"
+# ANTI-VACUITY. An empty row set is what a BROKEN extractor also produces, so the
+# extractor is proved against a fixture that does carry a block.
+L1_FIX="$SANDBOX/fx-skill-with-hooks.md"
+cat > "$L1_FIX" <<'L1EOF'
+---
+name: fixture
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: ${CLAUDE_PLUGIN_ROOT}/hooks/x.sh
+          timeout: 10
+---
+body
+L1EOF
+expect_contains "…and the extractor can still find one when there IS one (not vacuous)" \
+  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/x.sh|10' "$(skill_hooks_rows "$L1_FIX")"
 
-expect_contains "frontmatter registers the evidence gate on PreToolUse|Bash, timeout 10" \
-  "PreToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…and farm-out-reminder on PreToolUse|Bash, timeout 10 (session-20260815 T5)" \
-  "PreToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…the stop guard on PreToolUse|TaskStop, timeout 10" \
-  "PreToolUse|TaskStop|\${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…dispatch-preflight on PreToolUse|Agent, timeout 10" \
-  "PreToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…the governing-skill gate on PreToolUse|Write, timeout 10" \
-  "PreToolUse|Write|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…and on PreToolUse|Edit, timeout 10" \
-  "PreToolUse|Edit|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…the recorder's observation arm on PostToolUse|Bash, timeout 10" \
-  "PostToolUse|Bash|\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…its completion arm on PostToolUse|Agent, timeout 10" \
-  "PostToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…its identification arm on SubagentStart (no matcher), timeout 10" \
-  "SubagentStart||\${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10" "$SKILL_HOOKS_ROWS"
-expect_contains "…context-spend on Stop (no matcher), timeout 10" \
-  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh|10" "$SKILL_HOOKS_ROWS"
-# THE LANDING SWEEP MOVED TO Stop (epic-16 wave-03, T4c). SubagentStop is dispatched in the
-# SUBAGENT's context, and skill-frontmatter hooks are looked up by SESSION id — so no
-# subagent-context event can ever reach this channel (T4b §3, from the shipped binary). A
-# registration left on SubagentStop is a wall that is installed, syntactically fine, green in
-# its own suite, and never runs.
-expect_contains "…and the landing sweep on Stop (no matcher), timeout 10" \
-  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|10" "$SKILL_HOOKS_ROWS"
-# THE PATROL-DUTIES WALL joined the Stop channel at task-dispatch-wall-channel-loss T5. It is
-# the third no-matcher Stop hook, and it is registered HERE rather than in hooks/hooks.json for
-# the reason the D1 partition states: it binds a duty of the governing skill's own Patrol, so it
-# must be live exactly while that skill is and dead otherwise.
-expect_contains "…and the Patrol-duties wall on Stop (no matcher), timeout 10" \
-  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh|10" "$SKILL_HOOKS_ROWS"
-# THE PATROL SELF-HEAL joined the same channel at epic-19 w1 (AC-F6). Stop is the only
-# recurring orchestrator event there is, and a Patrol that dies mid-run is invisible until
-# somebody attempts a dispatch or runs doctor by hand — so the turn's end is where the
-# looking has to happen. Registered here for the D1 reason again: the fact it reads is the
-# governing skill's own Patrol stamp, so it must be live exactly while that skill is.
-expect_contains "…and the Patrol self-heal on Stop (no matcher), timeout 10" \
-  "Stop||\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh|10" "$SKILL_HOOKS_ROWS"
-expect_eq "…exactly thirteen registrations in the frontmatter block, nothing extra" \
-  "13" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -c '|')"
-
-# THE EVENT NAMES THE GATE ANSWERS TO, pinned as the SPAN that decides them rather than as a
-# literal comparison that a refactor can move: the relevance hoist is one `case` over
-# `$EVENT`, and a registration whose event name is absent from these arms is a wall that
-# exits before it reads anything (session-20260815 T2 turned the two `[ ]` tests into this
-# case when the second arm arrived).
-LG_EVENT_ARMS=$(awk '/^case "\$EVENT" in$/{f=1} f{print} f&&/^esac$/{exit}' "$PARTY_LG")
-# THE SECOND ARM (session-20260815 T2). The gate answers SubagentStop again — but through
-# the SETTINGS channel behind the partition guard, never through this frontmatter block, and
-# for teammate rows alone. Both halves are asserted, because either one alone is a wall in
-# the wrong place: a frontmatter registration on SubagentStop is inert (it can never be
-# delivered), and a script that stopped reading the event would leave the settings entry
-# pointing at an arm that exits at its relevance hoist.
-
-# --- L.5 THE EVENT-NAME WHITELIST: one bad key voids the WHOLE block, silently ---
-#
-# T4b §5, bisected over four single-variable fixture skills: a `hooks:` block naming an
-# event the harness does not know disarms EVERY registration in that skill — including the
-# valid ones — with no error, no warning in `--output-format stream-json`, and no stderr.
-# The skill still loads and its slash command still resolves. `TaskStop` is the proven case
-# (it is a valid PreToolUse MATCHER, which is exactly why a hand would reach for it as an
-# event key), and nothing else in this repo would notice: every other assertion in §L reads
-# the file rather than the harness, so a voided block passes all of them.
-#
-# This test is therefore the only detector, and it is a WHITELIST rather than a blacklist:
-# the failure is silent, so the safe default for an unrecognised key is red.
-VALID_HOOK_EVENTS="PreToolUse PostToolUse Notification UserPromptSubmit Stop SubagentStop SubagentStart PreCompact SessionStart SessionEnd"
-# epic-17 W4 S9 A5 fold: this hand-copied the 4-line hooks: prologue as the fifth
-# call site (skill_hooks_rows itself, skill_block_count, installer-behavior.test.sh's
-# _skill_frontmatter_has, and scripts.test.sh's two inline checks were the four AC-12
-# named) — now shares tests/lib/frontmatter-parser.sh's skill_hooks_event_keys, which
-# is the same prologue+key-line logic, not skill_hooks_rows (that helper only emits a
-# key once a FULL event/matcher/command/timeout chain follows it, which would silently
-# under-detect an incomplete malformed entry under a bad key — the exact silent-miss
-# this test exists to make impossible).
-SKILL_EVENT_KEYS=$(skill_hooks_event_keys "$SKILL_SRC")
-expect_eq "the frontmatter block declares at least one event key (this test is not vacuous)" \
-  "yes" "$([ -n "$SKILL_EVENT_KEYS" ] && echo yes || echo no)"
-L5_BAD=""
-for k in $SKILL_EVENT_KEYS; do
-  case " $VALID_HOOK_EVENTS " in
-    *" $k "*) : ;;
-    *) L5_BAD="${L5_BAD}${L5_BAD:+, }$k" ;;
-  esac
-done
-
-# THE ALWAYS-ON MANIFEST, flattened to the SAME event|matcher|command|timeout row shape
-# L.1 extracts from the frontmatter block, so the two channels are read the same way and
-# compared without translation. The plugin format makes both `matcher` and `timeout`
-# optional at the group/leaf level; an absent key yields an empty field rather than a
-# missing column, so a row is always four fields wide.
+# THE ALWAYS-ON MANIFEST, flattened to event|matcher|command|timeout rows. The plugin
+# format makes both `matcher` and `timeout` optional, and an absent key yields an empty
+# field rather than a missing column, so a row is always four fields wide.
 HOOKS_JSON_ROWS=$(jq -r '
   .hooks | to_entries[] | .key as $ev | .value[]
   | (.matcher // "") as $mt
   | .hooks[] | "\($ev)|\($mt)|\(.command)|\(.timeout // "")"
 ' "$HOOKS_JSON_SRC" 2>/dev/null)
 
-# --- L.2 ALWAYS-ON ABSENCE: none of the four sdlc scripts that stayed skill-only
-# appears ANYWHERE in hooks/hooks.json — a lingering entry would fire the wall in every
-# session, defeating R1 even after the frontmatter side is right.
-# THE THREE WALLS THAT CAME BACK (session-20260815 T6, then T2) are a conditional
-# absence, not an absence: they are named in this manifest again, and every occurrence
-# must sit behind hooks/agent-context-guard.sh. A bare entry would be the R1
-# regression this section was written to catch — the wall firing in every session on
-# the machine — wearing the new registration's clothes, and §L.6 below (which asserts
-# the guarded form is PRESENT) would still pass beside it. The landing gate joined
-# them when teammates got their landing verdict: its Stop arm stays skill-scoped, and
-# only the SubagentStop arm needs the channel that reaches an agent context.
-# background-suite-guard.sh joined them at bionic 1.3.2 (B-9): it refuses a subagent's
-# BACKGROUNDED suite, so like the other four it is meaningless on the main thread and
-# ruinous if it fires in every session on the machine. Added here by review-b B-2, which
-# measured the gap by mutating hooks.json to register it UNGUARDED and watching this
-# suite stay 415/415.
-L2_UNGUARDED=$(printf '%s\n' "$HOOKS_JSON_ROWS" \
-  | /usr/bin/grep -E 'dispatch-preflight\.sh|canonical-sdlc-governing-skill\.sh|landing-gate\.sh|background-suite-guard\.sh' \
-  | /usr/bin/grep -v 'agent-context-guard\.sh')
-expect_eq "…and the four walls that returned are never named UNGUARDED" "" "$L2_UNGUARDED"
-# The landing gate is the one wall registered on TWO events across the two channels, so
-# its always-on entry must not drift onto the event the skill channel already owns: a
-# second Stop registration would sweep twice per turn and journal two markers.
-
-# --- L.3 ALWAYS-ON PRESENCE: the two irreversible-damage guards are untouched
-# by the move (R2: guard-set parity for the hooks that stay global no matter what)
-# — exact set, not just "still there somewhere among leftovers."
+# --- L.2 EVERY HOOK ON THE SPINE IS REGISTERED, ON THE EVENTS IT READS ---
 #
 # Pinned BY VALUE including the ${CLAUDE_PLUGIN_ROOT} spelling, because the manifest is
 # what the harness executes: a command that reverted to a machine-local ~ path is a wall
 # that cannot resolve inside an installed plugin, and it fails in the quiet direction.
-# farm-out-reminder.sh moved OUT of the always-on set at session-20260815 T5 (AC-6):
-# unlike the three walls above it, it guards a workflow preference rather than
-# irreversible damage, so it now binds only in armed sessions, registered once
-# through the skill frontmatter (pinned in L.1) with no agent-context twin here.
+L2_EXPECTED='
+PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh|10
+PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-database.sh|10
+PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh|10
+PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh|10
+PreToolUse|TaskStop|${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10
+PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10
+PreToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
+PreToolUse|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
+PostToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
+PostToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
+SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
+Stop||${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh|10
+Stop||${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|10
+Stop||${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh|10
+Stop||${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh|10
+'
+while IFS= read -r _row; do
+  [ -n "$_row" ] || continue
+  expect_contains "the manifest registers ${_row%%|*} $(printf '%s' "$_row" | cut -d'|' -f3 | sed 's|.*/||')" \
+    "$_row" "$HOOKS_JSON_ROWS"
+done <<L2EOF
+$L2_EXPECTED
+L2EOF
+
+# --- L.3 EXACTLY ONCE PER (hook, event, matcher) ---
+#
+# The CLI does not deduplicate. A hook named twice on one event refuses twice, journals
+# twice, or sweeps twice — which is why the two-channel arrangement this replaces went
+# to such lengths to keep landing-gate's two registrations on DIFFERENT events.
+# THE COMMAND IS THE SECOND-TO-LAST FIELD, never the third — the same reason §L.4b reads
+# the timeout as the last field. `startup|clear|resume|compact` is a matcher that contains
+# the row delimiter, so a positional read counted from the left lands mid-matcher on that
+# row and the SessionStart detector would drop out of this check entirely.
+L3_DUPES=$(printf '%s\n' "$HOOKS_JSON_ROWS" \
+  | awk -F'|' '{ n=split($(NF-1), parts, "/"); print $1 "|" $2 "|" parts[n] }' \
+  | sort | uniq -d)
+expect_eq "no hook is registered twice on one event+matcher" "" "$L3_DUPES"
+# The exact-set claim, over the rows this section names. Two entries are counted elsewhere
+# and excluded here by name rather than by accident: the two guarded pairs belong to §L.5,
+# and the SessionStart detector to §L.8, which pins its whole row by value.
+expect_eq "…and the manifest carries exactly the rows this section names, and no others" \
+  "$(printf '%s' "$L2_EXPECTED" | /usr/bin/grep -c '|')" \
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" \
+     | /usr/bin/grep -vc -e 'agent-context-guard\.sh' -e 'session-start\.sh')"
 
 # --- L.4 EVERY registration is bounded by a timeout ---
 #
-# The Step-6 review's C-4: the settings writer attached `"timeout": 10` only on the
-# matcher branch, so the two events that wave added — the ones that carry no matcher —
-# registered with no ceiling at all, and the platform default was the only thing in front
-# of the landing gate's verdict subprocess. A timeout is the safe direction here precisely
-# because the gate is fail-open: a hook that is killed lets the stop through.
-#
-# SKILL-SCOPED CHANNEL: already exhaustively pinned by L.1 — each of the twelve literal
-# rows carries `|10` (2653-2679 above) and the total-row-count assertion (2682-2683) catches
-# a stripped `timeout:` line the same way a dedicated pairing arm would: that row's
-# extractor only emits once it reaches a `timeout:` line, so a stripped bound drops the
-# whole row out of SKILL_HOOKS_ROWS, failing BOTH the per-command literal and the total
-# count. No separate arm needed here for that channel. (The `skill_block_count` leftover
-# this section used to point at was retired at §L.7 below, epic-17 W4 AC-12 dedupe.)
-#
-# ALWAYS-ON CHANNEL — RE-DERIVED epic-17 wave-03 S4, closing the gap wave-02's A13/A17
-# flagged (`.bionic/docs/record/epic-17-w3/probe-hooks-timeout.md`, VERDICT: HONORED at
-# hook-object/entry level — the plugin-channel field is enforced identically to the
-# settings-channel field: silent kill at the declared ceiling, tool call proceeds, no error
-# surfaced). `hooks/hooks.json` now carries `"timeout": 10` on all six entries. Asserted
-# structurally over the parsed JSON, not over HOOKS_JSON_ROWS' flattened text — the same
-# anti-vacuity reasoning the retired skill-side arm used: a leaf missing its `timeout` key
-# must fail a presence count taken over ALL leaves, not just the ones that happen to render
-# one.
+# The Step-6 review's C-4: a registration with no ceiling leaves the platform default in
+# front of a gate's verdict subprocess. A timeout is the safe direction here precisely
+# because these gates fail open — a hook that is killed lets the turn through. Asserted
+# structurally over the parsed JSON rather than over the flattened text, so a leaf
+# missing its `timeout` key fails a presence count taken over ALL leaves.
 L4_HJ_TOTAL=$(jq '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$HOOKS_JSON_SRC")
 L4_HJ_TIMED=$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(has("timeout"))] | length' "$HOOKS_JSON_SRC")
-expect_eq "the always-on manifest: EVERY hook entry carries a timeout key — none unbounded" \
+expect_eq "the manifest: EVERY hook entry carries a timeout key — none unbounded" \
   "$L4_HJ_TOTAL" "$L4_HJ_TIMED"
 expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
   "$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(.timeout != 10)] | length' "$HOOKS_JSON_SRC")"
 
-# --- L.4b CROSS-CHANNEL RENDERING AGREEMENT (S4, logged call) ---
+# --- L.5 THE GUARD SURVIVES WHERE ITS PURPOSE SURVIVES ---
 #
-# Both channels now render a timeout for every registration they carry. The dispatch brief's
-# scope note invited this specific check: if the two channels both state 10, pin their
-# agreement rather than leaving it coincidental — a future edit to one channel's ceiling
-# without the other should go red, not silently fork the value. Computed off the
-# already-extracted row sets (L.1's SKILL_HOOKS_ROWS, L.2/L.3's HOOKS_JSON_ROWS) rather than
-# re-reading either source: each channel's value set collapses to a single value if every
-# row in it agrees with its neighbors, so "one value, and it's 10" on each side plus "the two
-# single values match" is the whole agreement claim in three checks.
-L4B_SKILL_VALUES=$(printf '%s\n' "$SKILL_HOOKS_ROWS" | awk -F'|' '{print $4}' | sort -u)
-L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $4}' | sort -u)
-expect_eq "the skill-scoped channel renders exactly one timeout value across all its rows" \
-  "10" "$L4B_SKILL_VALUES"
-expect_eq "the always-on channel renders exactly one timeout value across all its rows" \
+# --- L.4b THE TIMEOUT IS THE LAST FIELD, NEVER THE FOURTH ---
+#
+# $NF, not $4 (bionic 1.4.0, slice SSTART). A row is `event|matcher|command|timeout`, and
+# until the SessionStart detector arrived every matcher in this tree was a single tool
+# name, so the fourth field and the last field were the same field.
+# `startup|clear|resume|compact` is a matcher that CONTAINS the delimiter — the platform's
+# own spelling for "all four session sources" — and under `$4` that row's timeout read as
+# `resume`. The timeout is always the last field, so read it as the last field; a matcher
+# may not be. The cross-CHANNEL half of this check retired with the frontmatter block:
+# there is one channel now, and §L.1 asserts the other is empty.
+L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $NF}' | sort -u)
+expect_eq "the manifest renders exactly one timeout value across all its rows" \
   "10" "$L4B_HJ_VALUES"
-expect_eq "…and the two channels AGREE on that ceiling" "$L4B_SKILL_VALUES" "$L4B_HJ_VALUES"
-# The ceiling the installer used to write into settings.json was driven end to end in
-# tests/plugin-hooks.test.sh, which retired with the installer at W5 (4/6).
 
-# --- L.6 THE AGENT-CONTEXT CHANNEL: one wall, two channels, one partition ---
-# (session-20260815-landing-supervision T6; design D1, plan AC-7/AC-8.)
+# hooks/agent-context-guard.sh runs the wall behind it only for a payload carrying a
+# top-level agent_id in a session that has a roster on disk. It fronted four entries,
+# and for three of them — the dispatch wall on Agent, the artifact wall on Write and
+# Edit — its ONLY job was the channel partition: restrict the settings registration to
+# agent contexts, because the skill channel already covered the main thread. With one
+# channel there is no partition to keep, and keeping the guard there would be worse than
+# redundant: it would restrict those walls to agent contexts and leave the MAIN THREAD
+# uncovered, which is the reverse of what the guard was ever for.
 #
-# A tool-class event raised inside a teammate or subagent context is dispatched under
-# the AGENT key and never reaches a skill-frontmatter registration (t1-probe-report.md
-# §3, both directions, main-thread positive control in the same session). So the
-# dispatch wall and the artifact wall are registered a SECOND time, through settings —
-# the channel that is alive there — behind hooks/agent-context-guard.sh, which runs the
-# named wall only for a payload carrying a top-level agent_id in a session that has a
-# roster on disk.
-#
-# THE TOPOLOGY IS THE THING THIS SECTION OWNS, and it has three ways to be silently
-# wrong, one per assertion below: the always-on entry could point straight at a wall
-# (that wall then fires in every session on the machine — L.2 above), the guard could
-# ALSO be registered on the skill channel (both channels live on one event, so a
-# main-thread refusal prints twice and a dispatch journals twice), or the two channels
-# could drift onto different events (a wall covering the main thread on one event and
-# agent contexts on another, which reads as coverage and is not).
-#
-# The four guarded entries are pinned as WHOLE ROWS, which asserts two things at once:
-# that the guard fronts the wall, and that the pair is ONE command string carrying both
-# paths — the shape a shell executes and the shape that hands the guard its argument. In
-# the plugin manifest that shape is the stored form, so it is read, not driven.
-ACG_PATH="$BIONIC_HOOKS_DIR/agent-context-guard.sh"
-expect_contains "the always-on manifest registers the DISPATCH wall for agent contexts, behind the guard" \
-  'PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|' \
-  "$HOOKS_JSON_ROWS"
-expect_contains "…the ARTIFACT wall on Write, behind the guard" \
-  'PreToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|' \
-  "$HOOKS_JSON_ROWS"
-expect_contains "…and on Edit, behind the guard" \
-  'PreToolUse|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|' \
-  "$HOOKS_JSON_ROWS"
-expect_contains "…and the LANDING verdict on SubagentStop, behind the guard, with no matcher" \
-  'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|' \
-  "$HOOKS_JSON_ROWS"
-# The FIFTH guarded entry (bionic 1.3.2, B-9): the backgrounded-suite wall on Bash. It
-# has no skill-channel twin by design — like SubagentStop it only means anything inside
-# an agent context, so the guarded always-on entry is the whole of its coverage, and the
-# pairing loop below deliberately does not include it.
-expect_contains "…and the BACKGROUNDED-SUITE wall on Bash, behind the guard" \
+# It survives on the two entries where the scope is real rather than channel-shaped:
+#   background-suite-guard — refuses a subagent's BACKGROUNDED suite. It has no
+#     main-thread meaning at all (farm-out-reminder already refuses a suite there), so
+#     the guarded entry is the whole of its coverage.
+#   landing-gate on SubagentStop — the teammate landing verdict. SubagentStop only ever
+#     fires in an agent context, and the roster half of the guard is real arming.
+expect_contains "the guard still fronts the BACKGROUNDED-SUITE wall on Bash" \
   'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/background-suite-guard.sh|' \
   "$HOOKS_JSON_ROWS"
-
-# The two channels cover the SAME three events: for each guarded always-on entry there is
-# a frontmatter row registering the same wall on the same event/matcher, straight (that
-# is the main-thread half, asserted by value in L.1 and re-read here as a pair).
-for _pair in "PreToolUse|Agent|\${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10" \
-             "PreToolUse|Write|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10" \
-             "PreToolUse|Edit|\${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10"; do
-  expect_contains "the skill channel still covers the main thread for ${_pair%%|*}|$(echo "$_pair" | cut -d'|' -f2)" \
-    "$_pair" "$SKILL_HOOKS_ROWS"
+expect_contains "…and the LANDING verdict on SubagentStop, with no matcher" \
+  'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|' \
+  "$HOOKS_JSON_ROWS"
+for _unguarded in dispatch-preflight canonical-sdlc-governing-skill; do
+  expect_absent_ug "…and no longer fronts ${_unguarded}.sh, whose only reason was the partition" \
+    "agent-context-guard.sh \${CLAUDE_PLUGIN_ROOT}/hooks/${_unguarded}.sh" "$HOOKS_JSON_ROWS"
 done
-
-# SubagentStop IS THE ONE EXCEPTION TO THAT PAIRING, and it is not a gap. The other three
-# events exist on both sides of the depth line — a Write happens on the main thread and
-# inside an agent — so each needs a channel for each. SubagentStop only ever fires in an
-# agent context: there is no main-thread half to cover, and a frontmatter row for it would
-# be a registration that can never be delivered (asserted absent in L.1). The always-on
-# entry is therefore the whole of that event's coverage, which is why the guarded form
-# above is pinned by value.
-
-# The wall behind the guard is the one that skips its JOURNAL in an agent context —
-# the reader and the writer of BIONIC_HOOK_CHANNEL are one pair across two files, and a
+# The wall behind the guard is the one that skips its JOURNAL in an agent context — the
+# reader and the writer of BIONIC_HOOK_CHANNEL are one pair across two files, and a
 # rename on either side silently restores nested rostering.
 expect_contains "the guard sets the channel marker the dispatch wall reads" \
-  'BIONIC_HOOK_CHANNEL=agent-context' "$(cat "$ACG_PATH")"
+  'BIONIC_HOOK_CHANNEL=agent-context' "$(cat "$BIONIC_HOOKS_DIR/agent-context-guard.sh")"
 
-# --- L.7 the frontmatter PARSER, deduplicated (epic-17 W4, AC-12) ---
+# --- L.6 THE EVENT NAMES THE LANDING GATE ANSWERS TO ---
 #
-# Formerly three pinned copies plus a known-unpinned fourth (t6-review.md F-5, W2 review
-# DO-NOW 7, W3 close disposition #9): this file's own L.1 row-extractor, a dead
-# `skill_block_count` left over from the retired §L.4 pairing arm (defined, never called),
-# installer-behavior.test.sh's `_skill_frontmatter_has`, and scripts.test.sh's two inline
-# checks all hand-copied the same `hooks:` block entry/exit state machine before diverging
-# into their own caller's shape.
+# Pinned as the SPAN that decides them rather than as a literal comparison a refactor can
+# move: the relevance hoist is one `case` over `$EVENT`, and a registration whose event
+# name is absent from these arms is a wall that exits before it reads anything. The gate
+# now answers BOTH Stop (the orchestrator's own rows, straight) and SubagentStop (a
+# teammate's, behind the guard), so both arms must be present in the script.
+LG_EVENT_ARMS=$(awk '/^case "\$EVENT" in$/{f=1} f{print} f&&/^esac$/{exit}' "$PARTY_LG")
+expect_eq "the landing gate's event case extracts at all (not vacuous)" "yes" \
+  "$([ -n "$LG_EVENT_ARMS" ] && echo yes || echo no)"
+expect_contains "…and answers Stop" "Stop" "$LG_EVENT_ARMS"
+expect_contains "…and SubagentStop" "SubagentStop" "$LG_EVENT_ARMS"
+
+# --- L.8 THE SESSIONSTART DETECTOR: one event, one channel, one owner (AC-1, SSTART) ---
 #
-# AC-12 collapses all four into ONE shared implementation — tests/lib/frontmatter-parser.sh's
-# `skill_hooks_rows`/`skill_hooks_has`, sourced by this file, installer-behavior.test.sh and
-# scripts.test.sh (design D5, wave-04-content-moves.spec.md's ownership table: "dedupe removes
-# the plurality"). There is no second copy left to drift out of step with a first, so the
-# byte-identity span pin this section used to carry has nothing left to compare — extending it
-# instead (the W2-preferred fallback: parameterise the span extractor by occurrence and add a
-# fourth comparison arm) would have kept four hand-copies alive under one more layer of
-# machinery, exactly the fragility R9 forbids extending. What is asserted instead is the
-# dedupe holding at exactly the four sites AC-12 named — not the unrelated §L.5
-# SKILL_EVENT_KEYS extractor above, which shares the same block-entry prologue but was never
-# one of the tracked four and stays out of this wave's scope (flagged, not folded in blind).
-# TWO of AC-12's four sites are now DELETED: installer-behavior.test.sh went at
-# epic-17 W5 (4/6) with claude-bootstrap.sh, and scripts.test.sh went at epic-18
-# W3 (8582861) with the MEDIUM/LOW reliability tier. A dedupe claim about a file
-# that does not exist is not a weaker claim, it is an unfalsifiable one, so those
-# arms are gone rather than kept passing vacuously — and the `grep -c` against
-# the missing scripts.test.sh was not even passing vacuously: it printed nothing
-# where the row expected "0" and stood RED at 8582861, the one thing between this
-# roster and a green tests/run.sh (epic-18 W3 s1-probe-report F1).
+# hooks/session-start.sh reports what `/clear` left behind — predecessor rosters, stamps,
+# legacy `.bionic` links and the session-id triple — into the new conversation's context.
+# It is registered ALWAYS-ON by necessity: the state it reports is left by the conversation
+# that ENDED, so a registration that only binds while a skill is armed would be silent in
+# exactly the session that needs it. That makes the always-on channel the right one and the
+# ONLY one — a hook registered on both channels fires twice (R-2 §f), which for a detector
+# means the block is pasted into context twice and a reader cannot tell the copies apart.
 #
-# What is left of AC-12 that a test can still falsify is the property the dedupe
-# was FOR: the `hooks:` block state machine has exactly ONE implementation in this
-# tree. That is what is asserted now — the POSITIVE (the shared parser is where it
-# lives) beside the NEGATIVE (nowhere else does), off ONE extractor and ONE
-# fixture, so the negative cannot pass by the extractor coming back empty. Both
-# rows go red together when tests/lib/frontmatter-parser.sh's walker is mutated.
-# The retired rows' subjects — a second and third hand-copy — are now guaranteed
-# absent by the absence of the files that held them.
-_FM_SITES="$(cd "$REPO_ROOT" && /usr/bin/grep -rl '/\^hooks:\$/ { active=1; next }' tests/ | sort)"
-expect_contains "the hooks: block state machine is implemented in the shared parser" \
-  "tests/lib/frontmatter-parser.sh" "$_FM_SITES"
-expect_eq "…and in NO other file under tests/ — one owner, which is the whole of AC-12" \
-  "1" "$(printf '%s\n' "$_FM_SITES" | /usr/bin/grep -c .)"
-# …and the shared implementation is not merely present, it is the one this suite calls:
-# every §L row above reads its rows through skill_hooks_rows, which only exists here
-# because line 47 sourced the parser.
+# The row is pinned BY VALUE, ${CLAUDE_PLUGIN_ROOT} spelling included, for the reason §L.3
+# gives: the manifest is what the harness executes, and a command that reverted to a
+# machine-local path is a hook that cannot resolve inside an installed plugin.
+L8_ROWS=$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -F 'session-start.sh')
+expect_eq "session-start.sh is registered in hooks.json exactly once" \
+  "1" "$(printf '%s\n' "$L8_ROWS" | /usr/bin/grep -c .)"
+expect_eq "…on SessionStart, matching all four sources, bounded by a timeout" \
+  'SessionStart|startup|clear|resume|compact|${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh|10' \
+  "$L8_ROWS"
+# The other half of "nowhere else": the skill frontmatter must not carry it too. Read off
+# SKILL_HOOKS_ROWS, the same extractor L.1 pins the twelve armed-session rows with, so an
+# empty result here means "absent from a channel this suite can still read" rather than
+# "the extractor broke" — L.1's own row assertions above are what prove it still works.
+expect_eq "…and NOWHERE in the skill frontmatter, which would fire it a second time" \
+  "" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -F 'session-start.sh')"
+# ONE OWNER OF THE EVENT. A second SessionStart registration would print a second block
+# into the same context with no ordering guarantee between them (§L's founding finding F).
+expect_eq "SessionStart carries exactly one registration in hooks.json" \
+  "1" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '^SessionStart|')"
+# The hook the manifest names EXISTS and parses. §L.2's own header records that the
+# structural "every command names a file that exists" arm died with tests/scripts.test.sh
+# (8582861) and was never replaced; this row restores it for the one entry this slice adds,
+# so a renamed or deleted detector fails here instead of silently never firing.
+expect_eq "…and the file that row names exists and parses" "ok" \
+  "$( [ -f "$BIONIC_HOOKS_DIR/session-start.sh" ] \
+      && bash -n "$BIONIC_HOOKS_DIR/session-start.sh" 2>/dev/null && echo ok )"
 
 # ============================================================
 echo ""
@@ -2928,8 +2861,7 @@ expect_contains "…addressed the way the stop primitive takes it" \
 # The mutant is installed in its own directory beside the gates, which is how bootstrap's
 # flat `hooks/*.sh` install lets each of them find its sibling — the production resolution,
 # not a test seam.
-MMUT="$SANDBOX/ack-mutant"
-mkdir -p "$MMUT"
+MMUT="$(plant_hook_tree "$SANDBOX/ack-mutant")"
 cp "$SG_M" "$MMUT/stop-guard.sh"
 cp "$LG_M" "$MMUT/landing-gate.sh"
 cp "$SO_M" "$MMUT/stop-orders.sh"
@@ -2999,52 +2931,204 @@ echo "=== N — the wave-02 facts: one root, one vocabulary, one launch referenc
 # a resume looks like in that mode, which is the fixture-fidelity failure the header forbids.
 # The async half of the same property IS driven, at §N.6.
 
-# -------------------------------------------------------------- N.1 eight bodies, one root
+# ------------------------------------------------ N.1 one loader idiom, one root, one id
 #
-# `resolve_project_root()` is an EIGHT-copy family: FOUR since S4+S5 (w2-s45 §5 call 7) — the
-# governing-skill hook is the origin, the evidence gate its long-standing twin, and the
-# dispatch wall and the probe took copies when R5 made the wall run the probe inline — plus
-# TWO MORE from epic-16 w2 Step-6 remediation R3 (ap review A-1): the poker and stop-orders
-# used to answer `git rev-parse --show-toplevel`, which names a worktree's own root rather
-# than the main repository the roster lives under, and DISARM is terminal by doctrine once
-# a tick takes that wrong answer. Extending this loop rather than adding a second one is
-# what keeps D-2's "exactly four copies, no fifth" pin from failing on this wave's own fix
-# — the critic named the trap by number (remediation-trap analysis #4): a resolver swap
-# that does not extend the agreement test manufactures a fresh duplication finding in the
-# act of closing A-1. The SEVENTH joined for the same reason as the sixth
-# (session-20260815-landing-supervision T6): hooks/agent-context-guard.sh decides whether
-# a session is armed by stating a roster under the project root, and a guard that rooted a
-# worktree at its own tree would answer "unarmed" for every agent context inside a worktree
-# of an armed session — a wall that goes quiet exactly where it was added to bind.
+# `resolve_project_root()` WAS an eight-copy family: the governing-skill hook held the
+# origin, the evidence gate its long-standing twin, the dispatch wall and the probe took
+# copies when the wall ran the probe inline, the poker and stop-orders when answering
+# `--show-toplevel` was found to name a worktree's own root, the agent-context guard when
+# a guard that rooted a worktree at its own tree answered "unarmed" for every agent
+# context inside one, and patrol-revive when the same reasoning reached the Patrol stamp.
+# Eight files, one algorithm, held together by a body-for-body pin that could only ever
+# prove they had not drifted YET.
+#
+# THEY ARE GONE (bionic 1.4.0, slice ADOPT, spec AC-10). What is pinned instead is the
+# convention that replaced them, and it has three parts, each with its own way of going
+# quietly wrong: the loader block that finds the library must be ONE text in every hook
+# (a hand edit to one copy), every reader must ASK for the root rather than restate it
+# (a straggler keeps its own answer), and every reader must ask for the SESSION ID the
+# same way (two spellings of one session make two rosters).
+# The shipped paths §N's later subsections read. They named the eight resolver carriers
+# before this wave; the ones that survive are the ones those subsections still drive.
 DP_N="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
-PB_N="$BIONIC_HOOKS_DIR/preflight-probe.sh"
-GS_N="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
-EG_N="$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh"
-SP_N="$BIONIC_HOOKS_DIR/session-poker.sh"
-SO_N="$BIONIC_HOOKS_DIR/stop-orders.sh"
-ACG_N="$BIONIC_HOOKS_DIR/agent-context-guard.sh"
-# The EIGHTH is hooks/patrol-revive.sh (epic-19 w1, AC-F6): it reads the Patrol stamp at the
-# main repository's root to decide whether the run's clock died, so a copy that rooted a
-# worktree at its own tree would find no stamp and stay silent for every turn a run spends
-# inside one — the same inert-where-it-binds failure the seventh was added against.
-PR_N="$BIONIC_HOOKS_DIR/patrol-revive.sh"
 
-expect_eq "the root resolver extracts at all (this section is not vacuous)" "yes" \
-  "$([ -n "$(fn_body "$GS_N" resolve_project_root)" ] && echo yes || echo no)"
-for _n in "$DP_N" "$PB_N" "$EG_N" "$SP_N" "$SO_N" "$ACG_N" "$PR_N"; do
-  expect_eq "$(basename "$_n")'s resolve_project_root() is the origin's, body for body" \
-    "$(fn_body "$GS_N" resolve_project_root)" "$(fn_body "$_n" resolve_project_root)"
+# expect_ne — asserted the other way round: the value must have MOVED.
+expect_ne() { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected anything but [$2], got it"; fi; }
+
+N_LOADER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/loader.sh"
+[ -r "$N_LOADER_LIB" ] || N_LOADER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/loader.sh"
+N_BLOCK="$( . "$N_LOADER_LIB" && bionic_loader_pin )"
+expect_eq "the canonical loader block extracts from lib/loader.sh (not vacuous)" "yes" \
+  "$([ "$(printf '%s\n' "$N_BLOCK" | wc -l | tr -d ' ')" -gt 50 ] && echo yes || echo no)"
+
+n_block_of() {  # <file> -> the marker-delimited span, markers inclusive
+  awk '/^# --- bionic-loader\/v2 BEGIN$/{f=1} f{print} f&&/^# --- bionic-loader\/v2 END$/{exit}' "$1"
+}
+
+# THE ADOPTED SET, named rather than globbed: a glob would silently shrink to nothing if
+# the marker were renamed, and this section would pass over air. session-poker.sh (the
+# eighteenth hook off resolve_project_root, converted by slice POKER) and session-start.sh
+# (added by slice SSTART) both carry the idiom too — verified live, byte for byte, against
+# this section's own $N_BLOCK extraction — and both resolve their root through the library
+# the same way every other member of this set does, so they belong in the SAME list rather
+# than a sibling one (Step-6 duplication review, record/wave-1.4.0/review-duplication.md,
+# ownership row 6: neither was pinned anywhere, so nothing would catch drift in either).
+N_ADOPTED='protect-main canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard
+dispatch-preflight canonical-sdlc-governing-skill landing-gate execution-recorder stop-guard
+context-spend patrol-duties-gate patrol-revive agent-context-guard preflight-probe stop-orders
+session-sweeper stop-check session-poker session-start'
+for _h in $N_ADOPTED; do
+  expect_eq "$_h.sh carries the canonical loader block, byte for byte" \
+    "$N_BLOCK" "$(n_block_of "$BIONIC_HOOKS_DIR/$_h.sh")"
 done
 
-# -------------------------------------------------------------- N.2 eight ANSWERS, one root
+# NO PRIVATE RESOLVER SURVIVES — none, not one. ADOPT converted seventeen hooks and slice
+# POKER the eighteenth, so the eight-copy family is empty and this row is what keeps a
+# nineteenth from being written by hand.
+N_STRAGGLERS=$(/usr/bin/grep -ln '^resolve_project_root()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | while IFS= read -r _f; do basename "$_f"; done | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "no hook defines a private resolve_project_root any more" "" "$N_STRAGGLERS"
+
+# EVERY READER ASKS. protect-main and background-suite-guard read no root — they classify
+# a command and nothing else — so they are excluded by name, not by accident.
+for _h in $N_ADOPTED; do
+  case "$_h" in protect-main|background-suite-guard) continue ;; esac
+  expect_eq "$_h.sh resolves its root through the library" "yes" \
+    "$(/usr/bin/grep -q 'project_root "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
+done
+
+# ------------------------------------------------ §P′ THE SESSION-ID SOURCE, bound
 #
-# Bodies being equal is a claim about the text. This is the claim about the ANSWER, taken
+# The environment value is primary and the payload is a witness (design §1, R-1). A hook
+# that reads `.session_id` straight out of its payload has silently chosen the witness
+# over the record — and every roster, stamp and stop address is keyed on the answer, so
+# two hooks choosing differently give one session two of each. What is pinned is the
+# SOURCE, not the value: every reader calls `session_id`, and any payload read that
+# remains is the ARGUMENT to that call.
+N_SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check
+landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder
+session-start'
+for _h in $N_SID_READERS; do
+  expect_eq "$_h.sh takes its session id from lib/session.sh" "yes" \
+    "$(/usr/bin/grep -q 'session_id "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
+done
+
+# THE LIST IS COMPLETE, not just each named member correct (auditor A-1, AC-2): a static
+# list can omit a real reader forever and every row above still passes silently.
+# session-start.sh was exactly that member — the wave's own twelfth session_id caller,
+# unpinned by this list until the line above. Derived from the tree and compared to the
+# hand-written list, byte for byte — the same technique N_STRAGGLERS above uses for the
+# private-resolver family.
+N_SID_ACTUAL=$(/usr/bin/grep -l 'session_id "' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+N_SID_EXPECTED=$(printf '%s\n' $N_SID_READERS | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the session-id reader roster names every hook that calls session_id, and no other" \
+  "$N_SID_EXPECTED" "$N_SID_ACTUAL"
+
+# ------------------------------------------------ §P″ THE DIVERGENT-CHANNEL FIXTURE, two
+# real hooks, one filename (auditor A-1, AC-2's other half)
+#
+# §P′ above pins the SOURCE by static grep (every reader's call site names `session_id`),
+# which the revert-and-watch capture in record/wave-1.4.0/revert-and-watch.md proved
+# insensitive to a change INSIDE session_id's own body — a hook that silently switched to
+# preferring the payload would still grep-match `session_id "` and every §P′ row would stay
+# green. Nothing before this section drives a real hook end to end with env != payload and
+# checks what filename it actually touched. This does, with two independent readers over the
+# SAME repo under the SAME divergence: hooks/dispatch-preflight.sh, which builds
+# `patrol-<sid>.state` / `roster-<sid>.state` by interpolating session_id's resolved value
+# (its `PAYLOAD_SID` variable is that resolved value, not a raw payload read — see its own
+# header comment), and hooks/session-start.sh, which excludes ITS OWN roster/stamp from the
+# predecessor lists it prints because they are its own. If the two disagreed about which
+# session this is, they would disagree about which file is "mine" — session-start would
+# print a file dispatch-preflight had just written to as though it were a stranger's.
+#
+# session-poker.sh was considered as the second party and rejected: its `arm` verb calls
+# `session_id` with NO payload argument at all (hooks/session-poker.sh, every `SESSION_ID=
+# "$(session_id)"` site) — it never reads a payload session id, so there is no divergence
+# for a fixture to drive it with. Recorded here rather than left for the next reader to
+# rediscover.
+P2_REPO=$(new_repo "sid-divergence")
+# new_repo arms SID_A, SID_B and SID_LG together (arm_patrol) — re-armed here for SID_A
+# ONLY, so a reader that wrongly resolved the payload session (SID_B) hits the loud
+# "never armed" refusal instead of quietly finding a stamp under the wrong name too.
+rm -f "$P2_REPO/.bionic/tmp/patrol-$SID_A.state" "$P2_REPO/.bionic/tmp/patrol-$SID_B.state" \
+      "$P2_REPO/.bionic/tmp/patrol-$SID_LG.state"
+arm_patrol "$P2_REPO" "$SID_A"
+write_plan "$P2_REPO/.bionic/docs/plans/epic-p2/wave-01.md" "current: 4"
+{
+  printf '# bionic environment attestation — machine-local, safe to delete\n'
+  printf 'version=1\nkind=preflight-attestation\n'
+  printf 'session_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID_A" "$P2_REPO"
+} > "$P2_REPO/.bionic/tmp/preflight-$SID_A.state"
+
+# READER 1 — the dispatch wall, driven with env=A / payload=B. Its OWN call site
+# suppresses session_id's stderr (`session_id "$(_jq '.session_id')" 2>/dev/null`,
+# hooks/dispatch-preflight.sh) — deliberately, per plan Assumption ADOPT/3: every hook
+# but session-start.sh silences the divergence line so it does not land on every tool
+# call of a divergent session, and session-start's SessionStart block is the one place
+# it is designed to surface. So the wall's own stderr must stay silent about it; reader
+# 2 below is where the line is expected.
+P2_ERR=$(mk_agent_payload "$SID_B" "$P2_REPO" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" 2>&1 >/dev/null); P2_ST=$?
+expect_eq "P2 the dispatch wall passes a well-formed dispatch under a divergent session" \
+  "0" "$P2_ST"
+expect_absent "P2 …its own call site suppresses the divergence line (ADOPT/3), by design" \
+  "session-id:" "$P2_ERR"
+expect_eq "P2 reader 1 (the dispatch wall) journalled the launch under the ENV session's roster" \
+  "yes" "$([ -f "$P2_REPO/.bionic/tmp/roster-$SID_A.state" ] && echo yes || echo no)"
+expect_eq "P2 …never under the payload session's" \
+  "no" "$([ -e "$P2_REPO/.bionic/tmp/roster-$SID_B.state" ] && echo yes || echo no)"
+
+# READER 2 — session-start, driven with the SAME env=A / payload=B, over the SAME repo.
+# It never prints its own roster/stamp filename; it EXCLUDES them from the predecessor
+# lists it prints, because they are its own. `roster-A.state` is a real file now (reader 1
+# just wrote it) and carries one open row, so agreement means session-start does NOT list
+# it as a predecessor — disagreement means it would, with an open-row count attached.
+P2_SS_OUT=$(printf '{"session_id":"%s","transcript_path":"/irrelevant.jsonl","cwd":"%s","hook_event_name":"SessionStart","source":"resume"}' \
+    "$SID_B" "$P2_REPO" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$BIONIC_HOOKS_DIR/session-start.sh" 2>&1)
+expect_absent "P2 reader 2 (session-start) treats roster-A as ITS OWN, not a predecessor" \
+  "roster-$SID_A.state" "$P2_SS_OUT"
+expect_contains "P2 …and its own printed triple names the ENV value as CUR, agreeing with reader 1" \
+  "env=$SID_A" "$P2_SS_OUT"
+expect_contains "P2 …session-start is the ONE reader that does not suppress the divergence line" \
+  "session-id: payload $SID_B" "$P2_SS_OUT"
+
+# DIFFERENTIAL CONTROL — env UNSET: both readers fall back to the payload (design §1's
+# second clause), and must now agree on B instead of A. Without this arm the two checks
+# above could pass for a reader that always answers "the env value" as a constant, never
+# actually reading either channel.
+P2C_REPO=$(new_repo "sid-divergence-ctrl")
+rm -f "$P2C_REPO/.bionic/tmp/patrol-$SID_A.state" "$P2C_REPO/.bionic/tmp/patrol-$SID_B.state" \
+      "$P2C_REPO/.bionic/tmp/patrol-$SID_LG.state"
+arm_patrol "$P2C_REPO" "$SID_B"
+write_plan "$P2C_REPO/.bionic/docs/plans/epic-p2c/wave-01.md" "current: 4"
+{
+  printf '# bionic environment attestation — machine-local, safe to delete\n'
+  printf 'version=1\nkind=preflight-attestation\n'
+  printf 'session_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID_B" "$P2C_REPO"
+} > "$P2C_REPO/.bionic/tmp/preflight-$SID_B.state"
+P2C_ST=$(mk_agent_payload "$SID_B" "$P2C_REPO" \
+  | env CLAUDE_CODE_SESSION_ID="" bash "$PARTY_DP" >/dev/null 2>&1; echo $?)
+expect_eq "P2c control: env unset, the wall falls back to the payload session" \
+  "0" "$P2C_ST"
+expect_eq "P2c …and journals it under the PAYLOAD session's roster this time" \
+  "yes" "$([ -f "$P2C_REPO/.bionic/tmp/roster-$SID_B.state" ] && echo yes || echo no)"
+P2C_SS_OUT=$(printf '{"session_id":"%s","transcript_path":"/irrelevant.jsonl","cwd":"%s","hook_event_name":"SessionStart","source":"resume"}' \
+    "$SID_B" "$P2C_REPO" \
+  | env CLAUDE_CODE_SESSION_ID="" bash "$BIONIC_HOOKS_DIR/session-start.sh" 2>&1)
+expect_absent "P2c reader 2 also treats roster-B as ITS OWN under the fallback" \
+  "roster-$SID_B.state" "$P2C_SS_OUT"
+
+# --------------------------------------------------- N.2 one root, one ANSWER, on disk
+#
+# Bodies being equal was a claim about text. This is the claim about the ANSWER, taken
 # where the field case took it: inside a real `git worktree add`, which is the input that
-# separates a resolver that maps a worktree onto its main repository from one that does not.
-# Each function is extracted from its own shipped file and run in its own subshell, so four
-# definitions of one name cannot shadow each other.
+# separates a resolver that maps a worktree onto its main repository from one that does
+# not. There is one implementation now, so what this drives is the library itself —
+# and §N.1 above is what ties every hook to it.
 NREPO="$SANDBOX/fx/nroot/repo"
-mkdir -p "$NREPO"
+mkdir -p "$NREPO/.bionic"
 git -C "$NREPO" init -q 2>/dev/null
 git -C "$NREPO" config user.email t@example.com
 git -C "$NREPO" config user.name "T"
@@ -3053,84 +3137,67 @@ git -C "$NREPO" add README.md >/dev/null 2>&1
 git -C "$NREPO" commit -qm seed >/dev/null 2>&1
 NWT="$SANDBOX/fx/nroot/wt"
 git -C "$NREPO" worktree add -q -b n-root-wt "$NWT" >/dev/null 2>&1
+NMAIN=$(cd "$NREPO" && pwd -P)
 
-root_via() {  # <file> <path-inside-the-tree> [fallback] -> that file's answer
-  local f="$1" p="$2" fb="${3:-}"
-  ( eval "$(awk '/^resolve_project_root\(\)/,/^\}/' "$f")"
-    resolve_project_root "$p" "$fb" ) 2>/dev/null
+N_ROOT_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/root.sh"
+[ -r "$N_ROOT_LIB" ] || N_ROOT_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/root.sh"
+root_at() {  # <cwd> -> project_root's answer from inside that directory
+  ( . "$N_ROOT_LIB" || exit 1; cd "$1" 2>/dev/null || exit 1; project_root ) 2>/dev/null
+}
+root_at_path() {  # <path, which need not exist> -> project_root's answer for it
+  ( . "$N_ROOT_LIB" || exit 1; project_root "$1" ) 2>/dev/null
 }
 
-NMAIN=$(cd "$NREPO" && pwd -P)
-# Deep inside the worktree AND deep inside a directory that does not exist yet — a
-# PreToolUse gate meets the second shape on the first artifact write into a project, and
-# the climb-to-the-nearest-existing-ancestor is the part of the resolver that handles it.
-for _p in "$NWT/.bionic/docs/record/x.md" "$NWT/deep/not/created/yet/x.md"; do
-  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N" "$PR_N"; do
-    expect_eq "$(basename "$_n") roots '${_p#$NWT/}' at the MAIN repository, not the worktree" \
-      "$NMAIN" "$(cd "$NWT" && root_via "$_n" "$_p")"
-  done
-done
-# The paired negative: outside any repository all eight fall back, and to the SAME fallback.
-# Without it the eight could agree by having all stopped resolving anything.
+expect_eq "a linked worktree cwd roots at the MAIN repository" "$NMAIN" "$(root_at "$NWT")"
+expect_eq "…and the main repository roots at itself" "$NMAIN" "$(root_at "$NREPO")"
+# DEEP INSIDE A DIRECTORY THAT DOES NOT EXIST YET — the shape a PreToolUse gate meets on
+# the first artifact write into a project, where the climb to the nearest existing
+# ancestor is the part of the resolver that has to answer.
+expect_eq "…and so does a path deep inside the worktree that has not been created yet" \
+  "$NMAIN" "$(root_at_path "$NWT/deep/not/created/yet")"
+
+# THE PAIRED NEGATIVE, and a precondition it depends on. Outside any repository and with no
+# `.bionic` anywhere above, the answer is the path itself. That second half is a fact about
+# the MACHINE, not the code: $SANDBOX lives under $TMPDIR, which every bionic suite on this
+# machine shares, and the walk climbs to `/` looking for a `.bionic`. Measured 2026-08-23: a
+# stray `$TMPDIR/.bionic/` left by a SIBLING suite turned this battery red 7-of-7, naming
+# neither the leak nor the leaker. This row measures the precondition first and says which
+# directory is dirty — it cannot make the battery immune, but it turns mysterious diffs into
+# one legible line.
 NOUT="$SANDBOX/fx/nroot/notarepo"
 mkdir -p "$NOUT"
-# HERMETICITY PRECONDITION (epic-18 W3, slice 4/3). The eight rows below assert what
-# resolve_project_root answers when there is no git repository AND no `.bionic/` anywhere
-# above the target — only then does the supplied fallback win. That second half is a fact
-# about the MACHINE, not about the code: $SANDBOX lives under $TMPDIR, which every other
-# bionic suite on this machine shares, and the resolver's no-git arm walks all the way up
-# to `/` looking for a directory carrying `.bionic/`.
-#
-# Measured 2026-08-23: a stray `$TMPDIR/.bionic/tmp/preflight-<sid>.state`, left there by a
-# SIBLING suite's run (this suite creates no such thing — proven by a full solo run that
-# left $TMPDIR clean), turned this battery red 7-of-7 with `expected '<sandbox>/fx/nroot/
-# notarepo', got '/private/var/.../T'` — seven failures naming neither the leak nor the
-# leaker, on a tree whose code under test had not been touched. Removing that one directory
-# took the suite from 564/7 back to 571/0.
-#
-# This row measures the precondition FIRST and names the offending ancestor. It cannot make
-# the battery immune — nothing here can stop another process writing into a shared $TMPDIR —
-# but it turns "seven mysterious diffs" into one row that says which directory is dirty.
 NOUT_DIRTY=""
 _anc="$NOUT"
 while [ -n "$_anc" ] && [ "$_anc" != "/" ] && [ "$_anc" != "." ]; do
   if [ -d "$_anc/.bionic" ]; then NOUT_DIRTY="$_anc"; fi
   _anc=$(dirname "$_anc")
 done
-for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N" "$PR_N"; do
-  expect_eq "$(basename "$_n") falls back outside any repository" \
-    "$NOUT" "$(cd "$NOUT" && root_via "$_n" "$NOUT/x.md" "$NOUT")"
-done
+expect_eq "no ancestor of the fallback fixture carries a stray .bionic (shared \$TMPDIR)" \
+  "" "$NOUT_DIRTY"
+expect_eq "outside any repository, with no .bionic above, the answer is the path itself" \
+  "$(cd "$NOUT" && pwd -P)" "$(root_at "$NOUT")"
 
-# --------------------------------------- N.2b no-git fallback follows the TARGET, not the shell
-#
-# session-20260812-bionic-root-pin: outside any git repository, the fallback used to answer
-# `pwd` unconditionally — the pin followed the SHELL's cwd, not the project the target path
-# actually named (live repro: .bionic/docs/record/session-20260812-bionic-root-pin/
-# ac1-red-live.md). The fix walks up from the nearest existing ancestor of the target path
-# for the nearest directory that already carries a `.bionic/` tree and answers there; only
-# when none exists does the supplied fallback remain. NBWS is a non-git workspace carrying a
-# real `.bionic/` — never `git init`'d, which is the point: this is the arm the two
-# git-derived checks above never reach.
+# THE NO-GIT ARM, which the two git-derived checks above never reach. NBWS is a workspace
+# carrying a real `.bionic/` that was never `git init`'d — the shape a repo nested under a
+# workspace makes, and the one the old resolvers got wrong by answering the git root.
 NBWS="$SANDBOX/fx/nroot/bws"
-mkdir -p "$NBWS/.bionic/docs/record"
-mkdir -p "$NBWS/sub"
-# Asked from $NOUT — a directory unrelated to NBWS and itself outside any repository, so a
-# resolver that answered `pwd` (the old bug) would land on $NOUT, not $NBWS.
-for _p in "$NBWS/.bionic/docs/record/x.md" "$NBWS/sub/deep/not/created/yet/x.md"; do
-  for _n in "$GS_N" "$EG_N" "$DP_N" "$PB_N" "$SP_N" "$SO_N" "$ACG_N" "$PR_N"; do
-    expect_eq "$(basename "$_n") roots '${_p#$NBWS/}' at NBWS from an unrelated cwd, not the fallback" \
-      "$NBWS" "$(cd "$NOUT" && root_via "$_n" "$_p" "$NOUT")"
-  done
-done
+mkdir -p "$NBWS/.bionic/docs/record" "$NBWS/sub/deep"
+expect_eq "a non-git workspace holding .bionic roots at the workspace" "$(cd "$NBWS" && pwd -P)" \
+  "$(root_at "$NBWS/sub/deep")"
 
-# ONE-COPY MUTATION GOES RED, the §A2 discipline applied to this family: drop the
-# `--git-common-dir` half from a copy of the wall's resolver and it answers the WORKTREE —
-# the pre-R9 behaviour, and the one that made a worktree its own address space.
-N_MUT_ROOT="$SANDBOX/fx/rootless-preflight.sh"
-awk '{ if (index($0, "--path-format=absolute --git-common-dir") > 0 || index($0, "--git-common-dir 2") > 0)
-         sub(/--git-common-dir/, "--show-toplevel")
-       print }' "$DP_N" > "$N_MUT_ROOT"
+# MUTATION, the discriminator: drop the worktree mapping from a copy of the library and
+# the worktree answers itself — the pre-R9 behaviour, and the one that made a worktree its
+# own address space. Without this the section proves only that a function exists.
+N_MUT_ROOT="$SANDBOX/fx/rootless-root.sh"
+awk '{ if (index($0, "--git-common-dir") > 0) sub(/--git-common-dir/, "--git-dir"); print }' \
+  "$N_ROOT_LIB" > "$N_MUT_ROOT"
+if cmp -s "$N_ROOT_LIB" "$N_MUT_ROOT"; then
+  no "the worktree-mapping mutation applies at all" "the awk target matched nothing — the library moved"
+else
+  ok "the worktree-mapping mutation applies at all"
+  N_MUT_ANSWER=$( ( . "$N_MUT_ROOT" || exit 1; cd "$NWT" 2>/dev/null || exit 1; project_root ) 2>/dev/null )
+  expect_ne "…and the mutated library no longer answers the main repository" "$NMAIN" "$N_MUT_ANSWER"
+fi
 
 # ------------------------------------------- N.3 producer and consumer, one attestation path
 #
@@ -3161,7 +3228,17 @@ expect_eq "…and leaves no phantom .bionic in the worktree (R9: one address spa
 # THE CONSUMER, from the same worktree cwd. It must FIND that record — the observable is the
 # absence of the auto-probe announce line, which the wall prints only when it had to take an
 # attestation of its own. A wall that looked in the worktree would announce every time.
-N_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
+#
+# THE PAYLOAD IS AN AGENT'S (bionic 1.4.0, spec AC-14, slice WALLS). This section's subject is
+# the ADDRESS SPACE — producer and consumer resolving one root from a worktree cwd — and the
+# dispatch that legitimately happens there is a dispatched writer's, working in the tree it was
+# given. A MAIN-THREAD dispatch from a worktree is now the refusal N.3b drives below, so the
+# drives here carry `agent_type`, the spelling the harness puts in a dispatched agent's own
+# payload. Deliberately not BIONIC_HOOK_CHANNEL, which is the other spelling of the same fact
+# and additionally stops the ledger at depth one — the roster assertion two lines down is what
+# this section came for.
+N_AGENT_PAYLOAD() { mk_agent_payload "$SID_A" "$NWT" | jq '. + {agent_type:"implementor"}'; }
+N_OUT=$(N_AGENT_PAYLOAD | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
 expect_eq "the CONSUMER, from the same worktree, passes the dispatch" "0" "$N_ST"
 expect_eq "…and its roster row landed under the main repository too" "yes" \
   "$([ -f "$NREPO/.bionic/tmp/roster-$SID_A.state" ] && echo yes || echo no)"
@@ -3171,10 +3248,23 @@ expect_eq "…with no phantom .bionic in the worktree from the gate either" "no"
 # THE DISCRIMINATING HALF: remove the record and the same dispatch announces. Without it the
 # assertions above would pass over a wall that had simply stopped announcing anything.
 rm -f "$NATT"
-N_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
+N_OUT=$(N_AGENT_PAYLOAD | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
 expect_eq "with the record gone the dispatch still passes (R5: attestation never blocks)" "0" "$N_ST"
 expect_eq "…writing it back to the same path the consumer reads" "yes" \
   "$([ -f "$NATT" ] && echo yes || echo no)"
+
+# ------------------------------------------- N.3b the lease wall, on the same one address space
+#
+# Spec AC-14, slice WALLS. Everything above proves that a worktree cwd and the main checkout
+# resolve to ONE address space; this is what the gate now does with that fact. A main-thread
+# dispatch made from inside a linked worktree is refused and NAMES the main checkout — the
+# same root N.1 measured — while the agent payload three lines up passes through the same
+# wall. Asserted here rather than only in tests/dispatch-preflight.test.sh because the root
+# in the refusal is the library's answer, which is this suite's whole subject.
+N_LEASE_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_LEASE_ST=$?
+expect_eq "a MAIN-THREAD dispatch from the same worktree is refused (AC-14)" "2" "$N_LEASE_ST"
+expect_contains "…naming the main checkout the library already resolves to" \
+  "main checkout: $NMAIN" "$N_LEASE_OUT"
 
 # --------------------------------------------------- N.4 source=: one word, and one reader
 #
@@ -3577,23 +3667,37 @@ expect_eq "…and with the fold flipped to first-row-wins, the SAME contract pas
 
 # ============================================================
 echo ""
-echo "=== Q — has_sdlc_state() is a five-copy family, held by a wall (session-20260815-landing-cleanup T2) ==="
+echo "=== Q — has_sdlc_state() has NO carrier left: the library is the only reader ==="
 # ============================================================
 #
-# §A2's active-wave-detection loop above pins CALL SITES: the `no-marker-skip`
-# mutation proves each of DP/SG/EG/ER/LG breaks if its `has_sdlc_state "$f" ||
-# continue` guard is deleted. It never asks whether the PREDICATE itself — the
-# function body every call site invokes — is still the same text in all five
-# files. This section closes exactly that gap, mirroring §N.1's body-for-body
-# method: `canonical-sdlc-evidence-gate.sh` is the designated origin (the file
-# that documents the fence-aware, CR-normalizing contract at its definition
-# site), one non-vacuity check proves the extractor pulls a real body from it,
-# then the other four carriers are compared against that origin, body for body.
-
+# It was a five-copy family: the evidence gate held the origin (the file documenting the
+# fence-aware, CR-normalizing contract at its definition site) and the dispatch wall,
+# stop-guard, execution-recorder and the landing gate each carried a byte-identical twin.
+# This section compared them body for body, which is the strongest thing a suite can do
+# about a duplication it cannot remove.
+#
+# It could be removed (bionic 1.4.0, slice ADOPT). The predicate is `lib/run.sh`'s
+# `active_plan`, every one of the five asks for it, and §A2 above proves the asking is
+# real by mutating the library and watching all five answers move. One straggler survived
+# that slice — hooks/session-poker.sh, whose tick carried its own copy — and this section
+# NAMED it rather than excusing it. Slice SCHED deleted it (POKER/2, ratified 2026-09-03),
+# so the count this pin asserts is now ZERO. An empty answer is a weak assertion on its
+# own, which is why the two rows below it are the ones with teeth: the library defines the
+# predicate, and the tick reaches it by CALLING that function rather than by restating it.
+Q_CARRIERS=$(/usr/bin/grep -ln '^has_sdlc_state()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | while IFS= read -r _f; do basename "$_f"; done | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "NO hook defines has_sdlc_state() any more — the family is gone, not shrunk" \
+  "" "$Q_CARRIERS"
+expect_eq "…and the tick, the last carrier, asks the library by name instead" "yes" \
+  "$(/usr/bin/grep -q 'active_plan "' "$BIONIC_HOOKS_DIR/session-poker.sh" && echo yes || echo no)"
+expect_eq "…and the evidence gate, which held the origin, no longer carries one" "" \
+  "$(fn_body "$PARTY_EG" has_sdlc_state)"
+expect_eq "…while the library defines the predicate it replaced them with" "yes" \
+  "$(/usr/bin/grep -q '^active_plan()' "$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh" && echo yes || echo no)"
 
 # ============================================================
 echo ""
-echo "=== R — where a contracted path resolves: three copies, one rule (epic-17 W6 S15) ==="
+echo "=== R — where a contracted path resolves: four copies, one rule (epic-17 W6 S15) ==="
 # ============================================================
 #
 # THE DISAGREEMENT THIS ENDS, measured on this epic's own dispatches. A brief writes
@@ -3612,27 +3716,79 @@ echo "=== R — where a contracted path resolves: three copies, one rule (epic-1
 # §Q's method, and this is the same shape: `canonical-sdlc-evidence-gate.sh` is the
 # designated ORIGIN (the copy that documents the rule at its definition site), one
 # non-vacuity check proves the extractor pulls a real body from it, then each carrier is
-# compared against it. A per-hook suite cannot see this drift: each of the three is green
-# while all three disagree.
+# compared against it. A per-hook suite cannot see this drift: each carrier is green in its
+# own suite while all four disagree.
 #
 # TWO FAMILIES, both duplicated for the same reason:
 #   resolve_docs_root()   <docs-root:> in .bionic/config.yaml, else <project>/.bionic/docs
 #   the resolver itself   absolute stands · record/-led is docs-root-relative · else project
 # The resolver is named `resolve_walk_path` in the gate (its caller asks about a walk
 # artifact) and `abs_path` in the two hooks (theirs ask about a roster path). Same body,
-# different name — the `clean()`/`mline_value()` precedent in §N.1 above.
+# different name — the `clean()`/`mline_value()` precedent in §N.1 above. Only the FIRST
+# family — `resolve_docs_root()` — is pinned below; the resolver-itself family and
+# canonical-sdlc-governing-skill.sh's own, deliberately WIDER `resolve_design_path()` (it
+# adds specs/plans/adrs/incidents/ leaders on top of `record/`, by design — see that hook's
+# own comment at the call site) are unchanged by this fix.
+#
+# THE FOURTH COPY (Step-6 duplication review, record/wave-1.4.0/review-duplication.md,
+# 05:55Z finding). ADOPT/4's assumption counted THREE `resolve_docs_root()` carriers — the
+# gate, the sweeper, stop-check — and named this section as the test that pins them. It
+# never was: this section built a mutant and asserted nothing (dead code — `R_MUT_DIR` was
+# read nowhere). A FOURTH live copy sits at canonical-sdlc-governing-skill.sh:150,
+# pre-dating this wave and never counted. What follows pins all FOUR: which files define
+# the function (a fifth or a missing one goes red), that their bodies agree with the
+# origin's, and that a doctored copy is caught.
 
+R_ORIGIN="$PARTY_EG"
+R_CARRIERS='canonical-sdlc-evidence-gate session-sweeper stop-check canonical-sdlc-governing-skill'
 
+# (a) THE COUNT. Exactly these four hooks define resolve_docs_root() — named, not globbed,
+# for the same reason §N.1's N_ADOPTED is named: a glob shrinks silently to nothing if the
+# marker moves, and this row would pass over air.
+R_DEFINERS=$(/usr/bin/grep -ln '^resolve_docs_root()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | while IFS= read -r _f; do basename "$_f" .sh; done | sort | tr '\n' ' ' | sed 's/ $//')
+R_EXPECT=$(printf '%s\n' $R_CARRIERS | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "exactly four hooks define resolve_docs_root (a fifth or a missing one goes red)" \
+  "$R_EXPECT" "$R_DEFINERS"
 
-# THE BODY IS NOT ENOUGH ON ITS OWN: it reads two globals, and a carrier that defines
-# neither would be byte-identical and still resolve everything to `/record/...`. So each
-# carrier is asked whether it binds them, unconditionally — these hooks run under `set -u`
-# and a conditionally-bound global is the recorded recurrence in this repo.
+# (b) THE BODY. canonical-sdlc-evidence-gate.sh is the designated origin (it documents the
+# rule at its definition site); a non-vacuity check first proves the extractor pulls a real
+# body from it, then each of the other three carriers is compared against it, body for body.
+expect_eq "the origin's resolve_docs_root is non-vacuous (extractor pulls a real body)" "yes" \
+  "$([ "$(fn_body "$R_ORIGIN" resolve_docs_root | wc -l | tr -d ' ')" -gt 3 ] && echo yes || echo no)"
 
-# MUTATION, the discriminator: flip ONE copy's rule back to the repo-root-only form it had
-# and the wall must go red. Without this the section proves only that three files exist.
+R_ORIGIN_BODY="$(fn_body "$R_ORIGIN" resolve_docs_root)"
+for _h in session-sweeper stop-check canonical-sdlc-governing-skill; do
+  expect_eq "$_h.sh's resolve_docs_root is the gate's, body for body" \
+    "$R_ORIGIN_BODY" "$(fn_body "$BIONIC_HOOKS_DIR/$_h.sh" resolve_docs_root)"
+done
+
+# (c) MUTATION, the discriminator: doctor ONE copy back to the repo-root-only form the
+# family had before the config.yaml override existed — the shipped file is never touched —
+# and the (b) comparison above must be provably able to catch it. Without this, (a) and (b)
+# together prove only that four files exist and currently agree, not that disagreement is
+# detectable.
 R_MUT_DIR="$SANDBOX/resolver-mutant"; mkdir -p "$R_MUT_DIR"
-sed 's|record/\*) printf .%s/%s\\n. "$DOCS_ROOT" "$1" ;;||' "$SWEEPER" > "$R_MUT_DIR/session-sweeper.sh"
+awk '
+  /^resolve_docs_root\(\) \{$/ {
+    print
+    print "  local proj=\"$1\""
+    print "  echo \"$proj/.bionic/docs\""
+    print "}"
+    skip = 1
+    next
+  }
+  skip { if ($0 == "}") skip = 0; next }
+  { print }
+' "$SWEEPER" > "$R_MUT_DIR/session-sweeper.sh"
+
+if cmp -s "$SWEEPER" "$R_MUT_DIR/session-sweeper.sh"; then
+  no "the resolve_docs_root mutation applies at all" "the awk target matched nothing — the function moved"
+else
+  ok "the resolve_docs_root mutation applies at all"
+  expect_ne "…and the mutated copy no longer agrees with the origin, body for body" \
+    "$R_ORIGIN_BODY" "$(fn_body "$R_MUT_DIR/session-sweeper.sh" resolve_docs_root)"
+fi
 
 
 # ============================================================
@@ -3860,15 +4016,16 @@ write_plan "$RREPO_AD/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-4444444444444444|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lands.md|source=declared|duration=|progress=|claims=|cadence=10 minutes|absent=|waiver=|tool_use_id=toolu_01FIXTURE\n' \
   "$SID_A" >> "$RREPO_AD/.bionic/tmp/roster-$SID_A.state"
 
-# SITE 1 — the poker prints the address, and it is the successor session that is named.
+# SITE 1 — the poker prints the address, and it is the session that LAUNCHED the agent that
+# is named (T3 FINDING 1, live 2026-09-03: the harness's teammate table keeps the launching
+# session's eight across a `/clear`, and refused the adopting session's outright).
 R_AD_OUT=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SPO" adopt 2>&1 )
-# The FIRST address on the line. adopt prints the alternate spelling beside it — the
-# launching session's, since which of the two the platform keys on is unproven — and both
-# resolve to the same row at both gates; this section drives the one adopt leads with.
+# The suffixed address, off the `stop` line. The bare name is printed beneath it on its own
+# continuation line, which this grep does not reach.
 R_AD_ADDR=$(printf '%s\n' "$R_AD_OUT" | grep -F 'stop        : TaskStop ' | head -1 \
             | sed 's/.*TaskStop //' | awk '{print $1}')
-expect_eq "adopt prints the addressing form, built from the ADOPTING session" \
-  "adoptee@session-$(printf '%s' "$SID_B" | cut -c1-8)" "$R_AD_ADDR"
+expect_eq "adopt prints the addressing form, built from the LAUNCHING session" \
+  "adoptee@session-$(printf '%s' "$SID_A" | cut -c1-8)" "$R_AD_ADDR"
 
 # SITE 2 — the observation answers to that exact string, and says why it is ours.
 R_AD_CHECK=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$OBSERVE" "$R_AD_ADDR" 2>&1 )
@@ -3931,32 +4088,45 @@ echo "=== S — which plan answers for the run: the tick reads what the gate rea
 
 PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 
-# ---- S.1 the four bodies -------------------------------------------------
-
-# Non-vacuity FIRST, on the origin: an extractor that silently returns nothing would make
-# every comparison below trivially true, which is exactly how this class of wall dies.
-for _fn in has_sdlc_state resolve_docs_root normalize_newlines; do
-  expect_eq "the extractor pulls a real ${_fn}() body out of the evidence gate" "yes" \
-    "$([ -n "$(fn_body "$PARTY_EG" "$_fn")" ] && echo yes || echo no)"
-done
-expect_eq "…and that body is the marker predicate, not some other function" "yes" \
-  "$(case "$(fn_body "$PARTY_EG" has_sdlc_state)" in *'## SDLC State'*) echo yes ;; *) echo no ;; esac)"
-
-for _fn in has_sdlc_state resolve_docs_root normalize_newlines; do
-  expect_eq "the poker's ${_fn}() is the evidence gate's, body for body" \
-    "$(fn_body "$PARTY_EG" "$_fn")" "$(fn_body "$PARTY_PK_S" "$_fn")"
-done
-
-# ---- S.2 the selection block ---------------------------------------------
+# ---- S.1 the family is down to one carrier, and it is this one -----------
 #
-# The gate holds this at file scope; the poker holds it inside `newest_sdlc_plan()`, because
-# a tick that ran a find on every invocation would charge `arm`, `disarm` and `interval` for
-# a read only `tick` takes. So the comparison normalizes INDENTATION and drops comment-only
-# lines — the same allowance `fn_code()` above makes for the same reason — and what remains
-# is executable text, compared line for line. Every drift that matters is inside it: the
-# `-maxdepth 2` bound, the STRICT `-nt` ordering that makes "newest" total rather than
-# find-order dependent, the two plan directories, and the `has_sdlc_state` guard itself.
-sel_block() {  # <file> -> the newest-SDLC-State-plan selection, indentation- and comment-normalized
+# The four bodies this section used to compare — `has_sdlc_state`, `resolve_docs_root`,
+# `normalize_newlines`, and the selection block — lived in the evidence gate as the
+# designated origin and in the tick as copies. The gate's are gone (bionic 1.4.0, slice
+# ADOPT): it asks `lib/run.sh` now, and §A2 proves the asking is real by mutating the
+# library and watching every party's answer move. The tick's are gone too (slice SCHED,
+# POKER/2 ratified 2026-09-03) — so there is no longer a text COMPARISON to make here,
+# and pretending otherwise would leave a section comparing a body against nothing and
+# calling it agreement. What §S pins about the TEXT now is the absence itself, in both
+# directions: no party carries a private plan reader, and the tick names the library's
+# functions where its own used to be.
+expect_eq "the evidence gate carries no private has_sdlc_state() any more" "" \
+  "$(fn_body "$PARTY_EG" has_sdlc_state)"
+expect_eq "…and neither does the tick, the last file that did (SCHED converted it)" "" \
+  "$(fn_body "$PARTY_PK_S" has_sdlc_state)"
+expect_eq "…nor a private newest-plan selection beside it" "" \
+  "$(fn_body "$PARTY_PK_S" newest_sdlc_plan)"
+expect_eq "…nor a private docs-root resolver" "" \
+  "$(fn_body "$PARTY_PK_S" resolve_docs_root)"
+expect_eq "…and the tick calls the library's plan reader by name" "yes" \
+  "$(/usr/bin/grep -q 'active_plan "' "$PARTY_PK_S" && echo yes || echo no)"
+
+# ---- S.2 the ONE selection block, pinned where it now lives -------------
+#
+# It used to live twice: at file scope in the evidence gate, and inside the tick's
+# `newest_sdlc_plan()`. Both copies are gone and the block is `lib/run.sh:active_plan`, so
+# what is pinned is the LIBRARY's block on its two load-bearing properties — the depth
+# bound the layout needs, and the STRICT `-nt` ordering that makes "newest" a total answer
+# rather than one that depends on find's directory order.
+#
+# THE BOUND IS 2 AND IT IS ASSERTED AS A NUMBER, not merely as "a bound exists". Two depths
+# were live during this wave and §S.3d pinned the disagreement; POKER/2 resolved it at 2,
+# which is the bionic layout's own depth. A number is what makes a silent drift back to 3
+# fail here rather than somewhere downstream.
+# The RETIRED extractor, kept for one job only: proving the tick's copy is really gone.
+# It is the exact reader this section used against `newest_sdlc_plan()`, so an empty answer
+# means the block it looked for is absent rather than merely renamed out of reach.
+sel_block_pk() {  # <file> -> the tick's old selection block, or empty
   awk '
     !f && index($0, "PLAN_DIRS=(") { f = 1 }
     f {
@@ -3969,26 +4139,28 @@ sel_block() {  # <file> -> the newest-SDLC-State-plan selection, indentation- an
   ' "$1"
 }
 
-S_EG_SEL="$(sel_block "$PARTY_EG")"
-expect_eq "the extractor pulls a real selection block out of the evidence gate" "yes" \
-  "$([ -n "$S_EG_SEL" ] && echo yes || echo no)"
-expect_eq "…carrying the depth bound the layout needs" "yes" \
-  "$(case "$S_EG_SEL" in *'-maxdepth 2'*) echo yes ;; *) echo no ;; esac)"
+S_RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
+[ -r "$S_RUN_LIB" ] || S_RUN_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/run.sh"
+S_LIB_SEL="$(fn_body "$S_RUN_LIB" active_plan)"
+expect_eq "the extractor pulls a real selection block out of the library" "yes" \
+  "$([ -n "$S_LIB_SEL" ] && echo yes || echo no)"
+expect_eq "…bounded at depth 2, the bionic layout's own depth" "yes" \
+  "$(case "$S_LIB_SEL" in *'-maxdepth 2 -type f'*) echo yes ;; *) echo no ;; esac)"
 expect_eq "…and the STRICT newest test, not a >= that depends on find order" "yes" \
-  "$(case "$S_EG_SEL" in *'-nt "$PLAN"'*) echo yes ;; *) echo no ;; esac)"
-expect_eq "the poker's newest-plan selection is the evidence gate's, line for line" \
-  "$S_EG_SEL" "$(sel_block "$PARTY_PK_S")"
+  "$(case "$S_LIB_SEL" in *'-nt "$plan"'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "…and the tick carries no selection block of its own to disagree with it" "" \
+  "$(sel_block_pk "$PARTY_PK_S")"
 
-# THE DISCRIMINATOR. Without this the comparison above proves only that two files exist: a
-# `sel_block` that stopped matching would return two empty strings and pass. One plausible
-# drift — the strict `-nt` relaxed so the FIRST candidate wins the tie — is applied to a
-# COPY of the poker, and the same comparison must go red. The shipped file is never touched.
+# THE DISCRIMINATOR. Without it the checks above prove only that a file exists: an
+# extractor that stopped matching would return an empty string and every `case` would read
+# "no" — so the mutation is applied to a COPY and the extraction must MOVE. The shipped
+# file is never touched.
 S_MUT_DIR="$SANDBOX/runstate-mutant"; mkdir -p "$S_MUT_DIR"
-sed 's/\[ "\$f" -nt "\$PLAN" \]/[ "$f" = "$f" ]/' "$PARTY_PK_S" > "$S_MUT_DIR/session-poker.sh"
+sed 's/\[ "\$f" -nt "\$plan" \]/[ "$f" = "$f" ]/' "$S_RUN_LIB" > "$S_MUT_DIR/run.sh"
 expect_eq "the mutation applies (the code has not moved out from under this proof)" "no" \
-  "$(cmp -s "$PARTY_PK_S" "$S_MUT_DIR/session-poker.sh" && echo yes || echo no)"
-expect_eq "…and with the strict-newest test flipped, the copies SPLIT (§S discriminates)" "no" \
-  "$([ "$S_EG_SEL" = "$(sel_block "$S_MUT_DIR/session-poker.sh")" ] && echo yes || echo no)"
+  "$(cmp -s "$S_RUN_LIB" "$S_MUT_DIR/run.sh" && echo yes || echo no)"
+expect_eq "…and with the strict-newest test flipped, the block CHANGES (§S discriminates)" "no" \
+  "$([ "$S_LIB_SEL" = "$(fn_body "$S_MUT_DIR/run.sh" active_plan)" ] && echo yes || echo no)"
 
 # ---- S.3 the round trip: one repository, two readers, one answer ---------
 #
@@ -4065,13 +4237,20 @@ S_EG=$(s_eg_read "$S_R3"); S_PK=$(s_pk_read "$S_R3")
 expect_eq "a fenced-only heading is not a plan to the gate" "none" "$S_EG"
 expect_eq "…and is not a plan to the tick either" "none" "$S_PK"
 
-# S.3d — depth 3 is out of reach for both. Paired with the same content at depth 2, so what
-# is pinned is the bound rather than a mistyped fixture.
+# S.3d — ONE BOUND, AND IT IS 2. This case used to pin a DISAGREEMENT: L-RUN shipped
+# `active_plan` at depth 3 while the tick's private copy walked 2, and the honest thing a
+# suite could do about two readers with different bounds was to state it. POKER/2's
+# unification (ratified 2026-09-03) ended it — the tick has no reader of its own, the
+# library is depth 2, and both parties answer from the same walk.
+#
+# BOTH DIRECTIONS, because the deep half alone would pass on a reader with no bound and the
+# shallow half alone on one that finds nothing: a plan at depth 3 is invisible to BOTH, and
+# the SAME content at depth 2 is seen by BOTH.
 S_R4=$(new_repo "s-depth")
 write_plan "$S_R4/.bionic/docs/plans/epic-99/wave-01/too-deep.plan.md" "current: 4"
 S_EG=$(s_eg_read "$S_R4"); S_PK=$(s_pk_read "$S_R4")
-expect_eq "a plan at depth 3 is invisible to the gate" "none" "$S_EG"
-expect_eq "…and invisible to the tick" "none" "$S_PK"
+expect_eq "a plan at depth 3 is out of the bound for the gate" "none" "$S_EG"
+expect_eq "…and out of it for the tick, which now reads the same library" "none" "$S_PK"
 write_plan "$S_R4/.bionic/docs/plans/epic-99/wave-01.plan.md" "current: 4"
 S_EG=$(s_eg_read "$S_R4"); S_PK=$(s_pk_read "$S_R4")
 expect_eq "…and the SAME content at depth 2 is seen by the gate (the bound is pinned)" \

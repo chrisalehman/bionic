@@ -171,6 +171,41 @@ _dep_excalidraw_refs() {
   echo "${root}/skills/excalidraw-diagram/references"
 }
 
+# THE VENV'S OWN STABLE PATH (VENV slice, spec AC-17). `_dep_excalidraw_refs`
+# above names the SOURCE tree `uv sync --project` reads `pyproject.toml` and
+# `uv.lock` from, and that tree is plugin-root-relative — it moves to a new,
+# version-numbered directory every time bionic updates. Before AC-17 the venv
+# `uv sync` built lived INSIDE that moving tree (`<refs>/.venv`), so an
+# in-place plugin upgrade orphaned a perfectly good venv and forced a re-sync
+# question on every single update. This path never moves: it is anchored to
+# `$HOME` (via the XDG data dir), not to whichever plugin-version directory
+# happens to be current, so an upgrade leaves a live renderer behind it.
+_dep_excalidraw_venv_dir() {
+  echo "${XDG_DATA_HOME:-$HOME/.local/share}/bionic/excalidraw-venv"
+}
+
+# The hash of the `uv.lock` this venv was synced against, written BESIDE the
+# venv directory — a SIBLING file, never nested inside it. `uv sync` owns
+# everything under the venv path and may rebuild it; a marker planted inside
+# would not be guaranteed to survive that, so it lives next to it instead.
+_dep_excalidraw_lock_hash_file() { echo "$(_dep_excalidraw_venv_dir).lock.sha256"; }
+
+# A minimal sha256, in the same tool-fallback order `detect.sh`'s own
+# `_detect_sha256` uses (macOS ships `shasum`, not `sha256sum`) — duplicated
+# here rather than sourced, because deps.sh does not otherwise depend on
+# detect.sh and one three-line probe is not worth introducing that edge for.
+# Empty output, never a nonzero exit read as a hash, when neither tool is on
+# PATH: a hash comparison against "" can only ever mismatch, which is the
+# same honest "cannot confirm it's current" a probe gives for any other
+# unreadable fact, never a false "yes" and never a crash.
+_dep_sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" 2>/dev/null | awk '{print $1}'
+  fi
+}
+
 # ─── The settings values bionic offers ───────────────────────────────────────
 #
 # THE DEFAULT PERMISSION MODE, OWNED HERE BECAUSE TWO SCRIPTS MUST AGREE ON IT
@@ -737,25 +772,52 @@ _dep_check_playwright_browser() {
 # whether `uv` is on PATH — that is the `uv` row's question, and answering this row with it
 # would report a renderer as ready on a machine that has never synced the project.
 #
-# The version reported is the venv's own interpreter, read out of `pyvenv.cfg`, because that
-# is the only version this mechanism HAS: there is no package and no release to name. The
-# constraint is `any`, so nothing is judged on it — it is there so the report says something
-# true rather than `unknown` about a directory it can plainly read.
+# THE VENV LIVES AT THE STABLE PATH NOW, NOT `<refs>/.venv` (VENV slice, AC-17). `refs` still
+# names the SOURCE tree — where `pyproject.toml` and `uv.lock` are read from — but the venv
+# itself is checked at `_dep_excalidraw_venv_dir`, which does not move when the plugin
+# updates. `refs` is still needed here for exactly one thing: reading the SHIPPED `uv.lock`
+# this venv should currently match.
+#
+# The version reported is the renderer's own driver, not the venv's interpreter — see the
+# note at the read below. The constraint is `any`, so nothing is judged on it; it is there so
+# the report says something true rather than `unknown` about a directory it can plainly read.
 #
 # `unknown` when the project directory cannot be located at all (neither plugin-root name is
 # set), with the cause doctor renders beside it. A `no` there would be a confident answer
 # about a path nobody resolved.
+#
+# STALE IS ITS OWN STATE, NOT `no` (AC-17: "a venv stale against uv.lock is re-synced, not
+# re-offered"). A venv that exists but was built against a DIFFERENT `uv.lock` than the one
+# now shipped is not the same fact as a venv that was never built — collapsing the two into
+# one `no` would tell setup to ask the "not installed, install now?" question over a machine
+# that plainly has a working renderer sitting on it, one lockfile update behind. The
+# comparison is skippable-safe: no hash file (an upgrade from before this slice, or a tool
+# lookup failure) or no shipped lock to compare against both fall through to `yes` rather than
+# manufacturing a mismatch neither side can actually support.
 _dep_check_uv_project() {
-  local refs ver
+  local refs venv ver shipped_lock hash_file current_hash stored_hash
   refs="$(_dep_excalidraw_refs)"
   [ -n "$refs" ] || { echo "unknown|unknown"; return 0; }
-  [ -x "${refs}/.venv/bin/python" ] || { echo "no|unknown"; return 0; }
+  venv="$(_dep_excalidraw_venv_dir)"
+  [ -x "${venv}/bin/python" ] || { echo "no|unknown"; return 0; }
   # The version that means something here is the renderer's driver — the
   # playwright the sync pinned — not the venv's interpreter (Chris 2026-08-22:
   # the row read "records no version" while a real one sat in the venv).
-  ver="$(cat "${refs}"/.venv/lib/python*/site-packages/playwright-*.dist-info/METADATA 2>/dev/null \
+  ver="$(cat "${venv}"/lib/python*/site-packages/playwright-*.dist-info/METADATA 2>/dev/null \
          | /usr/bin/grep -m1 '^Version:' | sed 's/^Version:[[:space:]]*//' | tr -d '[:space:]')"
-  echo "yes|${ver:-unknown}"
+  ver="${ver:-unknown}"
+
+  shipped_lock="${refs}/uv.lock"
+  hash_file="$(_dep_excalidraw_lock_hash_file)"
+  if [ -f "$shipped_lock" ] && [ -f "$hash_file" ]; then
+    current_hash="$(_dep_sha256 "$shipped_lock")"
+    stored_hash="$(cat "$hash_file" 2>/dev/null)"
+    if [ -n "$current_hash" ] && [ "$current_hash" != "$stored_hash" ]; then
+      echo "stale|${ver}"
+      return 0
+    fi
+  fi
+  echo "yes|${ver}"
 }
 
 # TWO HALVES, ONE ANSWER (epic-18 T1, AC-2). `present=yes` used to mean only
@@ -1224,6 +1286,14 @@ install_dep() {  # <name>
   # file; the user sees one line per item. stderr stays, so a failure still
   # shows its reason.
   local quiet_log="${BIONIC_INSTALL_LOG:-${TMPDIR:-/tmp}/bionic-install.log}"
+  # VENV slice, AC-17: `uv sync` is told where to put the venv by an
+  # environment variable, not by the directory it is pointed `--project` at —
+  # so it has to be EXPORTED here, into this shell, before the argv runs
+  # (a `_dep_install_argv` line cannot export into its caller; it runs in a
+  # process-substitution subshell). Scoped to the one mechanism this applies
+  # to, so no other row's install picks up an env var that means nothing to it.
+  [ "$(dep_field "$name" install_fn_or_check)" = "uv-project" ] && \
+    export UV_PROJECT_ENVIRONMENT="$(_dep_excalidraw_venv_dir)"
   if [ "${#argv[@]}" -gt 0 ]; then
     if "${argv[@]}" >>"$quiet_log" 2>&1; then
       if [ "$name" = "notebooklm" ]; then
@@ -1231,6 +1301,22 @@ install_dep() {  # <name>
           echo "$(_dep_indent)installed, but 'notebooklm skill install' failed." >&2
           return 1
         }
+      fi
+      if [ "$(dep_field "$name" install_fn_or_check)" = "uv-project" ]; then
+        # THE HASH THE NEXT PROBE COMPARES AGAINST (AC-17). Written beside the
+        # venv, never inside it — see `_dep_excalidraw_lock_hash_file`. A sync
+        # that ran without a readable `uv.lock` or a working hash tool leaves
+        # no hash file behind, which `_dep_check_uv_project` already treats as
+        # "cannot judge staleness" rather than as a false positive.
+        local _xr_refs _xr_hash
+        _xr_refs="$(_dep_excalidraw_refs)"
+        if [ -n "$_xr_refs" ] && [ -f "${_xr_refs}/uv.lock" ]; then
+          _xr_hash="$(_dep_sha256 "${_xr_refs}/uv.lock")"
+          if [ -n "$_xr_hash" ]; then
+            mkdir -p "$(dirname "$(_dep_excalidraw_lock_hash_file)")" 2>/dev/null
+            printf '%s\n' "$_xr_hash" > "$(_dep_excalidraw_lock_hash_file)"
+          fi
+        fi
       fi
       [ "${SETUP_ALL:-0}" = "1" ] || echo "$(_dep_indent)installed."
       return 0
@@ -1520,11 +1606,13 @@ remove_dep() {  # <name>
     playwright-browser)
       plan="rm -rf $(_dep_playwright_cache)"
       ;;
-    # THE VENV AND NOTHING ELSE. The skill's own files ship inside the plugin, so they leave
-    # when the plugin does; what a teardown has to account for here is the tree `uv sync`
-    # wrote into the plugin's copy, which no plugin uninstall knows about.
+    # THE VENV AND ITS HASH FILE, AND NOTHING ELSE. The skill's own files ship inside
+    # the plugin, so they leave when the plugin does; what a teardown has to account
+    # for here is the stable-path venv `uv sync` built (VENV slice, AC-17 — it is no
+    # longer inside the plugin's own tree, so no plugin uninstall knows about it
+    # either) and the lock-hash file written beside it.
     uv-project)
-      plan="rm -rf $(_dep_excalidraw_refs)/.venv"
+      plan="rm -rf $(_dep_excalidraw_venv_dir) $(_dep_excalidraw_lock_hash_file)"
       ;;
     pnpm-store)
       echo "$(_dep_indent)${name}: lives in the shared pnpm store — removing it would evict a cache other projects hard-link from; leaving it."
@@ -1560,9 +1648,7 @@ remove_dep() {  # <name>
     case "$(dep_field "$name" install_fn_or_check)" in
       playwright-browser) rm -rf "$(_dep_playwright_cache)" ;;
       uv-project)
-        local _xr_refs
-        _xr_refs="$(_dep_excalidraw_refs)"
-        [ -n "$_xr_refs" ] && rm -rf "${_xr_refs}/.venv"
+        rm -rf "$(_dep_excalidraw_venv_dir)" "$(_dep_excalidraw_lock_hash_file)"
         ;;
       statusline)
         # BOTH HALVES (AC-3). The settings-clear used to `return 0` the

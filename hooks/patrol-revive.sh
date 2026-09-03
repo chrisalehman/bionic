@@ -53,21 +53,44 @@
 #   stale   -> THE NOTICE. Something armed a Patrol on THIS session and the clock
 #              has stopped.
 #
-# SCOPE — WHAT "AN ACTIVE RUN" IS HERE, and the alternative that was rejected. Two
-# conditions, and no third. First, this hook is registered in
-# skills/canonical-sdlc/SKILL.md's own frontmatter, so it is live exactly while the
-# governing skill is armed — the same self-limiting scope hooks/patrol-duties-gate.sh
-# relies on. Second, a stamp EXISTS for this session, which by doctrine
-# (SKILL.md §Dispatch) happens at the Step-0 confirmation of a new run or the resume
-# ritual of an open one, and at no other moment. An armed-then-stale stamp is
-# therefore already the statement "a run engaged on this session and its clock died".
-# REJECTED: also reading the newest plan's `## SDLC State` `current:`, the way
-# hooks/dispatch-preflight.sh scopes its own walls. It would add a fifth copy of
-# that block for no verdict this hook would change, and it would import a MEASURED
-# silent-inert mode — a marker-less `*.md` winning the newest-file race disarmed the
-# dispatch wall repo-wide for ~15 minutes on 2026-08-15
-# (record/session-20260815-landing-supervision/t8-forensic-read.md). A monitor whose
-# job is to notice silence must not acquire a new way to go silent.
+# SCOPE — WHAT "AN ACTIVE RUN" IS HERE. Two conditions, and no third. First, this
+# project has an OPEN RUN: `active_run` under the payload's project root, the same
+# fact every other governance hook is scoped by since bionic 1.4.0. Second, a stamp
+# EXISTS for this session, which by doctrine (SKILL.md §Dispatch) happens at the
+# Step-0 confirmation of a new run or the resume ritual of an open one, and at no
+# other moment. An armed-then-stale stamp is therefore already the statement "a run
+# engaged on this session and its clock died".
+#
+# THE FIRST CONDITION USED TO BE "the governing skill is armed", and reading the plan
+# was REJECTED on two grounds. Both are answered now. It would have been a fifth
+# hand-copy of the active-wave block — there is one reader, `lib/run.sh`, and no copy
+# to drift. And it would have imported a measured silent-inert mode: a marker-less
+# `*.md` winning the newest-file race disarmed the dispatch wall repo-wide for ~15
+# minutes on 2026-08-15 (record/session-20260815-landing-supervision/
+# t8-forensic-read.md). That mode lived in the copies' selection rule, not in the
+# question; `active_plan` requires an unfenced `## SDLC State` heading, which is
+# exactly the filter whose absence caused it. A monitor whose job is to notice
+# silence must not acquire a new way to go silent — and the alternative it now
+# replaces was a worse one, because a skill registration goes quiet without leaving
+# anything on disk to notice.
+#
+# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan slice STOPGATES): ONE CLOCK
+# PER RUN. This session having a stamp of its own says a Patrol was armed here; a
+# second FRESH `patrol-<other-sid>.state` in the SAME project's `.bionic/tmp` says
+# another one is ALSO alive right now — the duplicate-clock shape S5's ritual
+# exists to prevent, caught here even when it happens without a /clear or resume in
+# between (a stray `CronCreate` run twice, or two sessions racing an `arm`). This is
+# a FINDING, not a block: it is a stderr diagnostic line, exactly `loader_fail_open`'s
+# voice, because a sibling's live clock is not this session's stop to refuse — only
+# its own dead one is. Read AFTER the threshold is known (so it shares the same
+# staleness measurement) and BEFORE this session's own stale/fresh decision, so it
+# fires whichever way that decision goes.
+#   - the other stamp is this session's own                    -> not counted
+#   - the other stamp is a symlink                              -> not counted, never followed
+#   - the other stamp's mtime is unreadable                     -> not counted
+#   - the other stamp is STALE (past the same 2x limit)          -> not counted, silent
+#   - the other stamp is FRESH                                   -> one stderr finding line, naming its session
+#   - exactly one live stamp (this session's own, no others)     -> silent on this arm
 #
 # FAIL DIRECTIONS (pinned by tests/patrol-revive.test.sh):
 #   - jq absent                                       -> pass, silent
@@ -102,19 +125,21 @@
 # is silent here by design. WHAT REMAINS is a disarm that FORGOT the verb — a
 # `CronDelete` with no `disarm` beside it — which still reads as a death; its cost
 # is one re-armed clock on a run that was nearly over, against a fleet nobody is
-# waiting on for the opposite error. Third, THIS HOOK SHARES THE FAILURE MODE IT MONITORS.
-# It is registered in skills/canonical-sdlc/SKILL.md's own frontmatter, so it is
-# live exactly while the governing skill is armed — and a skill's hooks die with
-# the conversation that armed them (SKILL.md §Dispatch). Three of the four events
-# that kill the Patrol — a session continue, a `/clear`+resume, a `/reload-plugins`
-# — also deregister this hook itself, silently and at the same moment. The resume
-# ritual's re-invoke of the governing skill is the standing cure for those three,
-# re-arming this hook along with everything else it re-arms; a `claude plugin
-# update` mid-session, which leaves the skill armed and the hook alone stale, is
-# this hook's real coverage.
+# waiting on for the opposite error.
 #
-# Registered on the Stop channel in skills/canonical-sdlc/SKILL.md; live only while
-# that skill is armed.
+# Third, THIS HOOK NO LONGER SHARES THE FAILURE MODE IT MONITORS — and that reversal
+# is the point of bionic 1.4.0's always-on registration. It used to be registered in
+# the governing skill's own frontmatter, where a skill's hooks die with the
+# conversation that armed them: three of the four events that kill a Patrol — a
+# session continue, a `/clear` + resume, a `/reload-plugins` — deregistered this hook
+# itself, silently and at the same moment, so the monitor died with the thing it
+# monitors and its real coverage was the one remaining event, a `claude plugin update`
+# mid-session. It is registered once in hooks/hooks.json now and survives all four.
+# What remains outside its reach is narrower and structural: an event that stops the
+# CLI from delivering `Stop` at all.
+#
+# Registered once on the Stop channel in hooks/hooks.json, always on, and scoped by
+# `active_run` plus this session's own stamp — both facts on disk.
 # [WALL: tests/patrol-revive.test.sh]
 
 set -uo pipefail
@@ -154,66 +179,169 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # the directory the guards are about. Session ids are harness-minted UUIDs, so
 # this refuses nothing real; it is the same belt hooks/dispatch-preflight.sh wears
 # on the same value, taken in the same direction: pass, silent.
-SID=$(_jq '.session_id')
-[ -n "$SID" ] || exit 0
-case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+PAYLOAD_SID=$(_jq '.session_id')
 
 CWD=$(_jq '.cwd')
 [ -n "$CWD" ] && [ -d "$CWD" ] || exit 0
-
-# ---------- the pinned root ----------
+# ---------- the library ----------
 #
-# DELIBERATELY DUPLICATED, byte for byte, from hooks/dispatch-preflight.sh's copy
-# (the origin is hooks/canonical-sdlc-governing-skill.sh; the family is compared
-# copy-for-copy and answer-for-answer by tests/cross-gate-agreement.test.sh
-# §N.1/§N.2, which this file joins as the eighth member). The fleet's no-shared-lib
-# rule is why it is a copy rather than a source (TDD §9: a sourced file the
-# installer misses is a silently inert wall).
+# One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: a monitor
+# that refused a stop because a file was missing would be a worse outage than the one
+# it watches for.
+BIONIC_LIB_WANT="root.sh run.sh session.sh"
+# --- bionic-loader/v2 BEGIN
+# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
+# library cannot load itself, so the duplication is the design and
+# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
+# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
 #
-# IT IS LOAD-BEARING HERE FOR THE SAME REASON IT WAS ADDED TO THE POKER. The stamp
-# is written at the MAIN repository's root, mapped there through `--git-common-dir`,
-# so a reader that rooted a worktree at its own tree would find no stamp and go
-# silent for every turn a run spends inside one — a monitor inert exactly where the
-# parallel-writer phases put it.
-resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
-  local d common root
-  d=$(dirname "$1")
-  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
-    d=$(dirname "$d")
-  done
-  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-    dirname "$common"
-    return
-  fi
-  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
-    case "$common" in
-      /*) root=$(dirname "$common") ;;
-      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
-    esac
-    if [ -n "$root" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-  fi
-  # NO-GIT FALLBACK: the pin follows the TARGET, never the shell. Outside any
-  # repository, walk up from the nearest existing ancestor of the target for
-  # the nearest directory already carrying a `.bionic/` tree and answer there;
-  # only when none exists does the supplied fallback (default pwd) win — which
-  # preserves the first-write-into-a-fresh-project path and changes nothing
-  # inside a git repository, where the arms above always answer first.
-  root="$d"
-  while [ -n "$root" ] && [ "$root" != "/" ] && [ "$root" != "." ]; do
-    if [ -d "$root/.bionic" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-    root=$(dirname "$root")
-  done
-  printf '%s\n' "${2:-$(pwd)}"
+# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
+# on a line above this block. Afterwards exactly one of these is non-empty:
+#   BIONIC_LIB          a readable directory holding every wanted basename
+#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
+# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
+#
+# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
+# healthy hook pays nothing for the healing path — not a jq, not a registry read.
+#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
+#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
+#      siblings, and the repo, where payload/hooks is a symlink to the top-level
+#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
+#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
+#      would find nothing in a directory-source session.
+#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
+#      plugin was installed from; that marketplace's source.path in
+#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
+#      a fork installs under its own name.
+#  (3) the newest version directory in that marketplace's plugin cache, by
+#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
+# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
+# upstream-broken publish breaks every location equally and is not covered.
+#
+# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
+# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
+_bl_dir="$(dirname "$0")"
+_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_try() {
+  [ -n "${1:-}" ] || return 1
+  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
+  [ -d "$1" ] || return 1
+  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
+  BIONIC_LIB="$1"
 }
+if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
+  _bl_mk=""
+  if [ -r "$_bl_pd/installed_plugins.json" ]; then
+    # First key only, and the prefix stripped by parameter expansion rather than
+    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
+    # `jq` runs with its stderr closed, so a machine missing jq degrades to
+    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
+    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
+    _bl_mk="${_bl_keys%%
+*}"
+    _bl_mk="${_bl_mk#bionic@}"
+  fi
+  if [ -n "$_bl_mk" ]; then
+    _bl_src=""
+    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
+      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
+    fi
+    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
+    if [ -z "$BIONIC_LIB" ]; then
+      _bl_best=""; _bl_bestk=""
+      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
+        [ -d "$_bl_v" ] || continue
+        _bl_n="${_bl_v##*/}"
+        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
+        _bl_x1=""; _bl_x2=""; _bl_x3=""
+        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
+$_bl_n
+BIONIC_LOADER_VER
+        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
+        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
+      done
+      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
+    fi
+  fi
+fi
+if [ -z "$BIONIC_LIB" ]; then
+  # The name in the message is the first library this hook asked for. A candidate
+  # directory qualifies only when it holds ALL of them, so with none qualifying the
+  # first wanted name is the honest thing to hand the reader.
+  BIONIC_LIB_MISSING="${_bl_want%% *}"
+  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
+fi
+# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
+# stand aside. Blocking reversible work because a file is missing buys no safety and
+# costs the session.
+loader_fail_open() {
+  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+  exit 0
+}
+# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
+# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
+# here, before the hook sources anything. Whole-string and not prefix, so
+# `claude plugin update bionic@bionic; git push origin main` is refused like any
+# other push. There is no env-var override: a variable an agent turn can set on
+# itself is not a wall.
+loader_fail_closed() {
+  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
+  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
+  case "${2:-}" in
+    "claude plugin update bionic@bionic"|\
+    "claude plugin install bionic@bionic"|\
+    "bash $_bl_root/scripts/doctor.sh"|\
+    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
+  esac
+  cat >&2 <<BIONIC_LOADER_REFUSE
+BLOCKED: $1 cannot load its library (${BIONIC_LIB_MISSING:-the bionic library}), so it
+cannot read this command. A wall that cannot read a command refuses it rather than
+waving it through.
 
-REPO=$(resolve_project_root "$CWD/." "$CWD")
+Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
+
+Until the plugin is whole again this wall permits exactly four commands, each matched
+as a whole string:
+
+    claude plugin update bionic@bionic
+    claude plugin install bionic@bionic
+    bash $_bl_root/scripts/doctor.sh
+    bash $_bl_root/scripts/setup.sh
+
+Anything else is refused, including one of those four with another command chained
+after it. Run one of them, or act from your own terminal.
+BIONIC_LOADER_REFUSE
+  exit 2
+}
+# --- bionic-loader/v2 END
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "patrol-revive"; fi
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/root.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/run.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/session.sh"
+
+REPO=$(project_root "$CWD")
 [ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
+
+# THE SESSION KEY, from the library (design §1): env primary, payload witness. The stamp
+# filename is built from it and hooks/session-poker.sh writes that filename from its own
+# reading, so the two have to ask one reader or this monitor watches a file nothing
+# writes. Session ids are harness-minted UUIDs, so the shape check below refuses nothing
+# real; it is the same belt hooks/dispatch-preflight.sh wears on the same value, taken in
+# the same direction: pass, silent.
+SID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || SID=""
+[ -n "$SID" ] || exit 0
+case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+
+# ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
+#
+# The first of this hook's two scope conditions (see SCOPE in the header). No open run,
+# no Patrol to be dead, and nothing for a monitor to say.
+active_run "$REPO" >/dev/null || exit 0
 
 # ---------- was a Patrol ever armed on this session ----------
 #
@@ -256,6 +384,28 @@ fi
 # 2x, exactly as the arming wall measures it: a Patrol firing on its interval is,
 # at any random instant, up to one whole interval stale while perfectly healthy.
 LIMIT=$(( INTERVAL * 2 ))
+
+# ---------- the second-stamp finding (AC-3): one clock per run ----------
+#
+# Every OTHER patrol-*.state beside this session's own, in the same .bionic/tmp,
+# judged against the SAME limit — a fresh one is a live duplicate clock, worth a
+# finding whether or not THIS session's own clock turns out to be stale or fine.
+_rival_now="$(date -u +%s 2>/dev/null || echo 0)"
+for _rival_sf in "$REPO"/.bionic/tmp/patrol-*.state; do
+  [ -e "$_rival_sf" ] || [ -L "$_rival_sf" ] || continue
+  [ "$_rival_sf" = "$STAMP_FILE" ] && continue
+  [ -L "$_rival_sf" ] && continue
+  _rival_sid="${_rival_sf##*/}"; _rival_sid="${_rival_sid#patrol-}"; _rival_sid="${_rival_sid%.state}"
+  [ -n "$_rival_sid" ] || continue
+  [ "$_rival_sid" = "$SID" ] && continue
+  _rival_mt=$(stat -f %m "$_rival_sf" 2>/dev/null || stat -c %Y "$_rival_sf" 2>/dev/null)
+  case "$_rival_mt" in ''|*[!0-9]*) continue ;; esac
+  _rival_age=$(( _rival_now - _rival_mt ))
+  [ "$_rival_age" -lt 0 ] && _rival_age=0
+  if [ "$_rival_age" -le "$LIMIT" ]; then
+    echo "patrol-revive: a second live Patrol stamp for session $(printf '%.8s' "$_rival_sid") exists here — one clock per run; delete the stray job and stamp" >&2
+  fi
+done
 
 MTIME=$(stat -f %m "$STAMP_FILE" 2>/dev/null || stat -c %Y "$STAMP_FILE" 2>/dev/null)
 case "$MTIME" in ''|*[!0-9]*) exit 0 ;; esac

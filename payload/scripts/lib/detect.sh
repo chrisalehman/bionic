@@ -93,6 +93,17 @@ if ! declare -F rc_get >/dev/null 2>&1; then
   . "$(cd "$(_detect_self_dir)" && pwd -P)/env.sh"
 fi
 
+# shell.sh, THE SAME SOFT SOURCE, FOR `shell_rc_file` — the one rc-file resolver
+# (L-DETECT/4.4, spec AC-21). `_detect_shell_rc` below used to carry its own copy
+# of the zsh/bashrc case split; remove.sh's `_rm_shell_rc` carried a second,
+# byte-identical one. Two owners of one answer is the duplication this file's own
+# header forbids for every other fact it holds, so this fact gets the same
+# single-source treatment as `rc_get`/`rc_file` just above.
+if ! declare -F shell_rc_file >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$(cd "$(_detect_self_dir)" && pwd -P)/shell.sh"
+fi
+
 _detect_plugin_root() {
   if [ -n "${BIONIC_PLUGIN_ROOT:-}" ]; then echo "$BIONIC_PLUGIN_ROOT"; return; fi
   if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then echo "$CLAUDE_PLUGIN_ROOT"; return; fi
@@ -100,13 +111,9 @@ _detect_plugin_root() {
   ( cd "$(_detect_self_dir)/../.." && pwd -P )
 }
 
+# A thin caller of shell.sh's one resolver — see the source guard above.
 _detect_shell_rc() {
-  if [ -n "${BIONIC_SHELL_RC:-}" ]; then echo "$BIONIC_SHELL_RC"; return; fi
-  local shell_name="${SHELL:-/bin/bash}"
-  case "${shell_name##*/}" in
-    zsh) echo "$HOME/.zshrc" ;;
-    *)   echo "$HOME/.bashrc" ;;
-  esac
+  shell_rc_file
 }
 
 # ─── Plugin integrity ────────────────────────────────────────────────────────
@@ -622,28 +629,62 @@ _detect_installed_plugins_file() {
 }
 
 # The marketplace REGISTRATION file, a sibling of the plugin one above and named the
-# same way. `known_marketplaces.json` is keyed by marketplace name — bionic's own
-# marketplace manifest (`.claude-plugin/marketplace.json`) fixes that name to `bionic`,
-# so the lookup below is not a guess — and each entry's `source.source` is the CLI's own
-# record of how that feed was registered: `"directory"` for a local checkout (what a
-# dogfood install is) or a git kind (`"github"`, `"url"`, …) for anything fetched from a
-# repo. `detect_reconverge_hint` below is the one caller.
+# same way. `known_marketplaces.json` is keyed by marketplace NAME, and that name is
+# not fixed to the literal `bionic` — it is whatever marketplace this particular
+# install's feed was registered under, which `_detect_marketplace_name` below reads
+# out of the plugin registry rather than assuming. Each entry's `source.source` is the
+# CLI's own record of how that feed was registered: `"directory"` for a local checkout
+# (what a dogfood install is) or a git kind (`"github"`, `"url"`, …) for anything
+# fetched from a repo. `detect_reconverge_hint` below is the one caller.
 _detect_known_marketplaces_file() {
   printf '%s' "${BIONIC_KNOWN_MARKETPLACES_FILE:-${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/plugins/known_marketplaces.json}"
 }
 
+# THE MARKETPLACE NAME THIS INSTALL ACTUALLY CAME FROM (L-DETECT/4.1, AC-18). Bugfix:
+# `detect_marketplace_feed_kind` used to key `known_marketplaces.json` on the literal
+# string `bionic`, which is merely bionic's OWN marketplace's usual name — a fork
+# registered under any other name (`bionic@my-fork`) has no `bionic` entry in that
+# file at all and read `unknown` forever, on a machine whose registry carries every
+# fact needed to answer correctly.
+#
+# THE ORACLE IS installed_plugins.json, the same file `_detect_registry_install_path`
+# reads: its keys are `<plugin-name>@<marketplace-name>`, so the marketplace name for
+# THIS install is the suffix of whichever key's plugin-name half is `bionic` — the
+# same `split("@")` shape `DETECT_PLUGIN_ROOT_JQ` already keys on, one field over.
+#
+# `bionic` IS STILL THE FALLBACK, not a magic string. When the registry is missing,
+# unparsable, or names no `bionic` entry, this returns the literal `bionic` rather
+# than propagating a failure into the feed-kind lookup — that is the CLI's documented
+# public marketplace name (README.md) and the correct guess for the overwhelmingly
+# common case, exactly the same "unknown defaults to the safer common case" posture
+# `detect_reconverge_hint` already documents for the neighboring question.
+DETECT_MARKETPLACE_NAME_JQ='.plugins // {} | keys[] | select(split("@")[0] == "bionic") | split("@")[1] // empty'
+
+_detect_marketplace_name() {
+  local reg name
+  reg="$(_detect_installed_plugins_file)"
+  [ -f "$reg" ] || { printf 'bionic\n'; return 0; }
+  command -v jq >/dev/null 2>&1 || { printf 'bionic\n'; return 0; }
+  name="$(jq -r "$DETECT_MARKETPLACE_NAME_JQ" "$reg" 2>/dev/null | head -1)"
+  case "$name" in ''|null) printf 'bionic\n' ;; *) printf '%s\n' "$name" ;; esac
+  return 0
+}
+
 # WHICH FEED BIONIC CAME FROM, answered the same oracle-not-guess way as the install
 # path above: the file the CLI itself wrote when the marketplace was registered, read
-# once, here. `directory` on a local-checkout feed, `git` on anything fetched from a
-# repo, `unknown` when the file is missing, unparsable, or names no `bionic` entry —
-# `jq`-less machines get `unknown` too rather than a hand-rolled second reading, since
-# this only feeds an advisory hint and a wrong guess there is worse than an honest one.
+# once, here, under the marketplace name THIS install is actually registered under
+# (`_detect_marketplace_name`, immediately above — not a literal). `directory` on a
+# local-checkout feed, `git` on anything fetched from a repo, `unknown` when the file
+# is missing, unparsable, or names no entry for that marketplace — `jq`-less machines
+# get `unknown` too rather than a hand-rolled second reading, since this only feeds an
+# advisory hint and a wrong guess there is worse than an honest one.
 detect_marketplace_feed_kind() {
-  local mp kind
+  local mp name kind
   mp="$(_detect_known_marketplaces_file)"
   [ -f "$mp" ] || { printf 'unknown\n'; return 0; }
   command -v jq >/dev/null 2>&1 || { printf 'unknown\n'; return 0; }
-  kind="$(jq -r '.bionic.source.source // empty' "$mp" 2>/dev/null)"
+  name="$(_detect_marketplace_name)"
+  kind="$(jq -r --arg n "$name" '.[$n].source.source // empty' "$mp" 2>/dev/null)"
   case "$kind" in
     directory) printf 'directory\n' ;;
     ''|null)   printf 'unknown\n' ;;
@@ -1010,6 +1051,59 @@ detect_reconverge_hint() {  # <lag|hooks> -> the whole sentence for that state, 
 # honest than no check at all, and it costs zero network round-trips.
 DETECT_MARKETPLACE_SOURCE_JQ='.plugins[]? | select(.name == $n) | .source // empty'
 
+# A SEMVER-SHAPED ORDERING PRIMITIVE (L-DETECT/4.2, bugfix, AC-19). `detect_
+# plugin_latest` below used to decide "current" or "lag" by STRING inequality —
+# `[ "$installed" = "$latest" ]`, unconditionally else `lag` — so an installed
+# build NEWER than the marketplace's cached clone (a developer's own tree,
+# ahead of the last published release) was reported as behind it. Three
+# states, not two: `ahead`, `current`, `lag`.
+#
+# THREE INTEGERS, LEXICAL DRIFT REFUSED. String comparison would rank `1.10.0`
+# behind `1.9.0` — `"1"` ties, then `"1"` (from "10") sorts before `"9"` — which
+# is exactly the class of bug this primitive exists to retire. Each side is
+# read as major.minor.patch and compared numerically, most-significant field
+# first.
+#
+# A PRERELEASE SUFFIX COMPARES BY ITS RELEASE NUMBERS. `9.9.9-rc.1` and
+# `10.0.0` differ from their first non-digit-non-dot character onward; the
+# suffix is dropped for ordering purposes rather than parsed, the same
+# tolerance `detect_plugin_latest`'s shape guard already extends to a version
+# carrying letters and dashes.
+#
+# MISSING OR NON-NUMERIC FIELDS READ AS ZERO. Neither caller today hands this
+# anything but a validated, version-shaped token, but a partial one (`"1.4"`)
+# should order by what it has rather than fail outright — `1.4` vs `1.4.0` is
+# `current`, not a crash.
+version_compare() {  # <a> <b> -> ahead|current|lag
+  local a="${1:-}" b="${2:-}" a_rest b_rest a1 a2 a3 b1 b2 b3
+
+  a_rest="${a%%[!0-9.]*}"
+  b_rest="${b%%[!0-9.]*}"
+  a1="${a_rest%%.*}"; a_rest="${a_rest#*.}"
+  a2="${a_rest%%.*}"; a_rest="${a_rest#*.}"
+  a3="${a_rest%%.*}"
+  b1="${b_rest%%.*}"; b_rest="${b_rest#*.}"
+  b2="${b_rest%%.*}"; b_rest="${b_rest#*.}"
+  b3="${b_rest%%.*}"
+
+  case "$a1" in ''|*[!0-9]*) a1=0 ;; esac
+  case "$a2" in ''|*[!0-9]*) a2=0 ;; esac
+  case "$a3" in ''|*[!0-9]*) a3=0 ;; esac
+  case "$b1" in ''|*[!0-9]*) b1=0 ;; esac
+  case "$b2" in ''|*[!0-9]*) b2=0 ;; esac
+  case "$b3" in ''|*[!0-9]*) b3=0 ;; esac
+
+  if   [ "$a1" -gt "$b1" ]; then printf 'ahead\n'
+  elif [ "$a1" -lt "$b1" ]; then printf 'lag\n'
+  elif [ "$a2" -gt "$b2" ]; then printf 'ahead\n'
+  elif [ "$a2" -lt "$b2" ]; then printf 'lag\n'
+  elif [ "$a3" -gt "$b3" ]; then printf 'ahead\n'
+  elif [ "$a3" -lt "$b3" ]; then printf 'lag\n'
+  else printf 'current\n'
+  fi
+  return 0
+}
+
 detect_plugin_latest() {  # -> one line, always exit 0
   local mp loc mp_json source_field plugin_json latest fact installed
 
@@ -1086,11 +1180,7 @@ detect_plugin_latest() {  # -> one line, always exit 0
       return 0 ;;
   esac
 
-  if [ "$installed" = "$latest" ]; then
-    echo "plugin:latest state=current installed=${installed} latest=${latest} cause=-"
-  else
-    echo "plugin:latest state=lag installed=${installed} latest=${latest} cause=-"
-  fi
+  echo "plugin:latest state=$(version_compare "$installed" "$latest") installed=${installed} latest=${latest} cause=-"
   return 0
 }
 

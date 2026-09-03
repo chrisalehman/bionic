@@ -299,13 +299,25 @@ fire_raw "$d" "$(jq -nc --arg c "$d" '{session_id:"s",cwd:$c,hook_event_name:"St
 d=$(make_env); u_tick "$d"; junk "$d"; a_tool "$d" ListAgents; junk "$d"; a_tool "$d" TaskList
 fire "$d"; expect_allow "20: malformed transcript lines do not break the read"
 
-# 21: no plan file at all — the TaskList duty is still satisfiable, and an empty
-# plan name must never match every write.
-d=$(make_env_planless); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" TaskList
-fire "$d"; expect_allow "21: a project with no plans dir still passes on TaskList"
-
+# 21/22: NO PLAN, NO RUN, NO DUTY (bionic 1.4.0, spec AC-7). The gate is registered
+# always-on now, so it is delivered on every Stop in every project on the machine, and
+# what scopes it is `active_run`. A project with no plan has no run, no Patrol and
+# therefore no Patrol duties — the gate says nothing, and it says nothing before it
+# parses the transcript at all, which is where its whole cost lives.
 d=$(make_env_planless); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
-fire "$d"; expect_block "22: with no plan file, an unrelated Edit satisfies nothing" "$TL_MISSING" "$LA_MISSING"
+fire "$d"; expect_allow "21: a project with no plan is silent even with both duties skipped"
+
+# THE PAIRED POSITIVE, and it is what keeps 21 from passing vacuously: the SAME
+# transcript, in a project that does have an open run, refuses. Nothing separates the
+# two but the plan file.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
+fire "$d"; expect_block "22: …and with a plan, that same unrelated Edit satisfies nothing" "$TL_MISSING" "$LA_MISSING"
+
+# 22b: the plan's basename must never be an EMPTY needle — an empty one would make
+# every write in the turn discharge the task-list duty. Driven by an Edit whose path
+# shares no component with the plan's name.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/unrelated-file.txt"
+fire "$d"; expect_block "22b: an Edit that does not name the plan leaves the task-list duty owed" "$TL_MISSING" "$LA_MISSING"
 
 # 23: THE GATE WRITES NOTHING. It is a gate, and gates only read (TDD §3.2).
 d=$(make_env); u_tick "$d"
@@ -334,12 +346,27 @@ fi
 # 25: THE GATE IS REGISTERED ON THE STOP CHANNEL. A hook with a suite, a run line
 # and no registration is the exact shape the landing sweep spent a wave being:
 # installed, syntactically fine, green in its own suite, and never fired.
+# A hook with a suite, a run line and no registration is installed, green in its own
+# suite, and never fired. THE CHANNEL MOVED (bionic 1.4.0, slice ADOPT, spec AC-7): this
+# gate was registered in the governing skill's frontmatter so it would be live exactly
+# while that skill was, and that coupling is the defect — a `/clear`, a compaction or a
+# session the skill was never invoked in left the wall installed and not running, while
+# the duty it binds went on existing. Both halves are asserted, because either alone is a
+# wall in the wrong place: a lingering frontmatter entry fires it twice per turn (the CLI
+# does not deduplicate across the two manifests), and a missing manifest entry not at all.
 TOTAL=$((TOTAL + 1))
-if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh' \
-     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
-  pass "25: SKILL.md registers the gate on the Stop channel"
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
+     "${BIONIC_HOOKS_DIR}/hooks.json"; then
+  pass "25: hooks/hooks.json registers the gate on the Stop channel, always on"
 else
-  fail "25: the gate is not registered in SKILL.md — it would never fire"
+  fail "25: the gate is not registered in hooks/hooks.json — it would never fire"
+fi
+TOTAL=$((TOTAL + 1))
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
+     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
+  fail "25b: SKILL.md still registers the gate — a second registration fires it twice per turn"
+else
+  pass "25b: …and SKILL.md's frontmatter does not, so it fires exactly once"
 fi
 
 # 26/26b: THE HEADER'S OWN HONESTY ABOUT ITS BACKSTOP. This file used to cite the
@@ -364,6 +391,367 @@ else
   pass "26b: …and no longer claims that backstop as its own"
 fi
 
+echo ""
+echo "=== Section 4: the resume/clear ritual arm (bionic 1.4.0, AC-3) ==="
+#
+# A /clear rewrites the session id in place but does NOT kill a predecessor's cron
+# job (A-probe-4: it survives and keeps firing into the new conversation). The
+# probe's own new transcript begins with the literal `<command-name>/clear</command-name>`
+# turn (record/wave-1.4.0-probe.md); a resume is announced the same way this gate's
+# SessionStart sibling (hooks/session-start.sh) prints it: the literal substring
+# `source: resume` inside its title line. Either marker means a CronCreate that is
+# not preceded by a CronList SINCE that marker would leave two clocks on one
+# project — the wall refuses once, naming the resume ritual.
+
+# A user-role entry shaped exactly like the probe's own new-transcript first turn.
+u_clear_marker() { u_prompt "$1" "<command-name>/clear</command-name>"; }
+
+# The marker is type-agnostic by design (a SessionStart report is not a user
+# prompt), so this is driven as a "system"-typed entry — proving the scan reads
+# raw transcript text, not one JSON shape.
+u_resume_marker() {
+  jq -nc '{type:"system",isSidechain:false,
+           message:{content:"bionic session-start (source: resume) — state the previous conversation left on this project."}}' \
+    >> "$1/transcript.jsonl"
+}
+
+RITUAL_CRONLIST="CronList"
+RITUAL_JOB="bionic-patrol session="
+RITUAL_CRONCREATE="CronCreate"
+RITUAL_ARM="session-poker.sh arm"
+RITUAL_ADOPT="adopt"
+
+# 27: a clear marker, then a CronCreate with no CronList since it -> block, naming
+# every step of the ritual.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"
+expect_block "27: CronCreate with no prior CronList after a clear marker blocks" "$RITUAL_CRONLIST"
+TOTAL=$((TOTAL + 1))
+r=$(reason_of)
+case "$r" in
+  *"$RITUAL_CRONLIST"*"$RITUAL_JOB"*"$RITUAL_CRONCREATE"*"$RITUAL_ARM"*"$RITUAL_ADOPT"*)
+    pass "28: the reason states the ritual in order — CronList, delete the stray job, CronCreate, arm, adopt" ;;
+  *) fail "28: the reason does not state the ritual in order" "$r" ;;
+esac
+
+# 29: the same marker, but CronList precedes the CronCreate -> passes.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronList; a_tool "$d" CronCreate
+fire "$d"; expect_allow "29: CronList before CronCreate after a clear marker passes"
+
+# 30: no marker at all -> the arm is inert, whatever the Cron calls did.
+d=$(make_env); a_tool "$d" CronCreate
+fire "$d"; expect_allow "30: no marker in the transcript — the arm is inert"
+
+# 31: the resume spelling blocks the same way.
+d=$(make_env); u_resume_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "31: a resume marker with no prior CronList blocks" "$RITUAL_CRONLIST"
+
+# 32: BLOCKS ONCE. The re-entry with stop_hook_active true always passes, exactly
+# the mechanism the tick-duties arm already uses — nothing new to enforce it.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d" Stop true
+expect_allow "32: stop_hook_active true passes the same unresolved ritual — the refusal fires only once"
+
+# 33: ORDERING. A CronCreate that happened BEFORE the marker is not "since" it —
+# only a later marker starts the window this rule judges.
+d=$(make_env); a_tool "$d" CronCreate; u_clear_marker "$d"
+fire "$d"; expect_allow "33: a CronCreate before the marker does not count against it"
+
+# 34: a CronList satisfies the ritual with nothing else following it.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronList
+fire "$d"; expect_allow "34: a marker followed only by CronList passes — nothing to cure"
+
+# 35: agent-context calls are not the orchestrator's ritual, same exclusion as the
+# tick-duties arm's ListAgents/TaskList reads.
+d=$(make_env); u_clear_marker "$d"; a_tool_sidechain "$d" CronCreate
+fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the ritual"
+
+echo ""
+echo "=== Section 5: the third duty — a printed FILL is answered (AC-29) ==="
+
+# THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
+# the roster and name the slices that are ready, but it cannot dispatch — and a
+# recommendation nobody is obliged to answer is how this repo's own 1.4.0 wave ran six
+# writers against a budget of twenty-two. The turn's END is the only moment at which "the
+# FILL went unanswered" is a fact, so it is the moment this gate asks.
+#
+# ANSWERED = an `Agent` tool_use naming the slice, or an explicit `fill-declined: <reason>`
+# anywhere in the turn. The decline is the point, not a loophole: there are good reasons not
+# to fill and every one is worth one line in the record. What is refused is SILENCE.
+#
+# The FILL line reaches the transcript as the CONTENT of the tick's Bash tool result — a
+# `user`-typed entry that is deliberately NOT a prompt — so these fixtures carry it the way
+# a live transcript does.
+
+# A tool_result carrying the tick's output.
+u_tick_out() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"user",isSidechain:false,
+      message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_x",content:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+# One Agent dispatch, shaped as the harness sends it: the slice id may land in the name, the
+# description or the prompt, and this gate reads all of them.
+a_agent() {  # <dir> <name> [prompt]
+  jq -nc --arg n "$2" --arg p "${3:-}" \
+    '{type:"assistant",isSidechain:false,
+      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_9",name:"Agent",
+        input:{name:$n,prompt:$p,subagent_type:"implementor"}}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+a_agent_sidechain() {  # <dir> <name>
+  jq -nc --arg n "$2" \
+    '{type:"assistant",isSidechain:true,
+      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_9",name:"Agent",
+        input:{name:$n,prompt:"x",subagent_type:"implementor"}}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+# The orchestrator's own words, which is one of the places a decline may be written.
+a_text() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"assistant",isSidechain:false,
+      message:{role:"assistant",content:[{type:"text",text:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+both_duties() {  # <dir> — the two standing duties, so §5 measures the THIRD one alone
+  a_tool "$1" ListAgents; a_tool "$1" TaskList
+}
+
+FILL_MARK="fill unanswered"
+
+# 36: every named slice dispatched -> allow.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_agent "$d" "W-ALPHA" "Slice ALPHA, senior-implementor."
+a_agent "$d" "W-BETA" "Slice BETA, implementor."
+fire "$d"; expect_allow "36: a FILL whose every slice was dispatched passes"
+
+# 37: one of two dispatched -> block, naming the one that was not, and NOT the one that was.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_agent "$d" "W-ALPHA" "Slice ALPHA, senior-implementor."
+fire "$d"; expect_block "37: a half-answered FILL blocks, naming the slice left out" "BETA" "ALPHA"
+
+# 38: neither dispatched nor declined -> block, naming both.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+fire "$d"; expect_block "38a: an unanswered FILL blocks, naming the first slice" "ALPHA"
+fire "$d"; expect_block "38b: …and the second" "BETA"
+fire "$d"; expect_block "38c: …and says what would answer it" "fill-declined"
+
+# 39: the DECLINE answers it. Not a loophole — a reason in the record is the point.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_text "$d" "fill-declined: ADOPT has not merged, so neither slice can base off the wave head."
+fire "$d"; expect_allow "39: an explicit fill-declined line answers the FILL"
+
+# 40: the decline may be written anywhere the orchestrator writes — including a plan-ledger
+# line, which is where a run without the task tools keeps its record.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_tool "$d" Bash "printf '%s\\n' 'fill-declined: peers not idle (D1)' >> .bionic/docs/plans/$PLAN_NAME"
+fire "$d"; expect_allow "40: a decline written into the plan ledger answers it too"
+
+# 41: INERT with no FILL line. Every turn in every project whose tick prints none — which is
+# every project with no budget in its plan — must pass exactly as it did before.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET — 0 open row(s)"
+fire "$d"; expect_allow "41: a tick that printed no FILL is not asked about one"
+
+# 42: ORDERING. A FILL printed in an EARLIER turn is not this turn's to answer — the fold
+# resets at every user prompt, exactly as the duties fold does.
+d=$(make_env); u_tick "$d"; u_tick_out "$d" "poker: FILL ALPHA"; u_tick "$d"; both_duties "$d"
+fire "$d"; expect_allow "42: a FILL from a previous turn does not bind this one"
+
+# 43: an agent-context dispatch is not the orchestrator's. A subagent that dispatched
+# does not discharge the orchestrator's fill — the same exclusion every other arm makes.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_agent_sidechain "$d" "W-ALPHA"
+fire "$d"; expect_block "43: a sidechain Agent does not answer the orchestrator's FILL" "ALPHA"
+
+# 44: WORD BOUNDARY. A dispatch that merely CONTAINS the id inside a longer word has not
+# named it — the difference between matching `ONE` and matching `PHONE`.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ONE"
+a_agent "$d" "W-PHONE" "Slice PHONEBOOK, implementor."
+fire "$d"; expect_block "44: an id inside a longer word does not answer the FILL" "ONE"
+
+# 45: BLOCKS ONCE, through the existing stop_hook_active valve — no new bookkeeping.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+fire "$d" Stop true
+expect_allow "45: stop_hook_active true passes the same unanswered FILL"
+
+# 46: BOTH FAILURES AT ONCE are told at once. Blocking on the standing duty and staying
+# silent about the FILL would hide the second behind the one-shot: the next stop passes by
+# design, so a duty not named in the first refusal is a duty never named at all.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_tick_out "$d" "poker: FILL ALPHA"
+fire "$d"; expect_block "46a: a turn missing a standing duty AND a fill names the duty" "$TL_MISSING"
+fire "$d"; expect_block "46b: …and names the unanswered slice in the same refusal" "ALPHA"
+
+# 47: a non-tick turn is never asked, whatever its transcript contains.
+d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
+u_tick_out "$d" "poker: FILL ALPHA"
+fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
+
+
+echo ""
+echo "=== Section 6: marker scope — a file the agent merely READ is not a decline (review F2) ==="
+#
+# THE DEFECT. `fill-declined:` and the two clear/resume markers were read as a raw-text
+# substring of EVERY transcript record, tool results included. A tool result is how the
+# content of any file the agent reads enters the transcript, so a README, a fixture or a
+# code comment carrying the literal `fill-declined:` discharged the AC-29 fill duty that
+# nobody had declined — fail-open on the exact wall AC-29 exists to be. The mirror case is
+# friction rather than compromise: a file carrying the /clear or resume marker forced a
+# spurious resume-ritual refusal.
+#
+# THE SCOPE. These two markers are now read only off rows the ORCHESTRATOR authored: a
+# main-thread assistant record (its text and its tool_use inputs alike), a user record
+# whose content is a STRING — the CLI's own command records and the operator's own typing
+# — and any other record type, which is how a SessionStart report reaches the transcript.
+# Never the `tool_result` elements of a user record. STOPGATES/1's type-agnostic substring
+# read is kept WITHIN a qualifying row; what changed is which rows qualify. The `poker:
+# FILL` line itself is deliberately NOT scoped — it arrives as the content of the tick's
+# own Bash tool result, and a planted one costs a false BLOCK, the safe direction.
+
+# An assistant text row inside an agent context — a subagent's words, not the
+# orchestrator's.
+a_text_sidechain() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"assistant",isSidechain:true,
+      message:{role:"assistant",content:[{type:"text",text:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+# 48/49: THE PAIR. The same literal decline text, once as file content the agent read and
+# once as the orchestrator's own writing. Only the second answers.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+u_tick_out "$d" "README.md:4  Write a \"fill-declined: <reason>\" line when you decline a fill."
+fire "$d"; expect_block "48: a fill-declined: inside a tool result does not answer the FILL" "ALPHA"
+
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_text "$d" "fill-declined: peers not idle (D1)."
+fire "$d"; expect_allow "49: …and the same words in the orchestrator's own assistant row do"
+
+# 50/51: THE PAIR, ritual side. The /clear marker as file content the agent read is inert;
+# the CLI's own /clear record still arms the ritual.
+d=$(make_env)
+u_tick_out "$d" "record/wave-1.4.0-probe.md:12  the new transcript opens with <command-name>/clear</command-name> verbatim."
+a_tool "$d" CronCreate
+fire "$d"; expect_allow "50: a /clear marker inside a tool result does not arm the ritual"
+
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "51: …and the CLI's own /clear record still does" "$RITUAL_CRONLIST"
+
+# 52/53: the resume spelling, same pair. The system-typed record of §31 still arms it
+# (STOPGATES/1's type-agnostic read is untouched); the same words read out of a file do not.
+d=$(make_env)
+u_tick_out "$d" "hooks/session-start.sh:41  prints (source: resume) into its own title line."
+a_tool "$d" CronCreate
+fire "$d"; expect_allow "52: a resume marker inside a tool result does not arm the ritual"
+
+d=$(make_env); u_resume_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "53: …and a system-typed session-start report still does" "$RITUAL_CRONLIST"
+
+# 54: a SUBAGENT's decline is not the orchestrator's — the same agent-context exclusion
+# every other arm of this gate makes, now applied to the decline it never applied to.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_text_sidechain "$d" "fill-declined: the subagent decided not to."
+fire "$d"; expect_block "54: a sidechain assistant's decline does not answer the orchestrator's FILL" "ALPHA"
+
+# 55: THE FILL LINE ITSELF STAYS RAW. It reaches the transcript as the content of the
+# tick's own Bash tool result and nothing else carries it — scoping it the way the decline
+# is scoped would make the third duty unreachable. §36-§47 all rest on this; asserted here
+# so the F2 scoping cannot be widened onto it by a later edit without a red test.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_agent "$d" "W-ALPHA" "Slice ALPHA, implementor."
+fire "$d"; expect_block "55: the FILL line is still read out of the tick's tool result" "BETA" "ALPHA"
+
+echo ""
+echo "=== Section 7: a dot in a slice id is a dot, not a wildcard (review correctness F1) ==="
+#
+# THE DEFECT. The word-boundary test splices the slice id into a DYNAMIC awk regex:
+#   agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")
+# The validity filter one line above admits `.` as a legal slice-id character, and in a
+# regex `.` is not a dot — it matches any single character. So a FILL naming `a.b` was
+# answered by a dispatch that named `axb` and never named `a.b` at all. That is a FALSE
+# NEGATIVE on FILL_MISSING, which passes a turn this wall exists to refuse: the fail-open
+# direction. Latent in this wave — every id it dispatched is letters, digits and hyphens —
+# and reachable the moment anyone names a slice `4.2`, which the filter says is legal.
+#
+# `.` is the ONE extended-regex metacharacter reachable through `[A-Za-z0-9_.-]`: `-` is
+# special only inside a bracket expression and is spliced outside one here, and `_` is
+# never special. So the pair below is the whole class.
+
+# 56: THE BUG'S OWN SHAPE. `a.b` against a dispatch naming `axb` — same length, differing
+# only where the dot is. Answered under a wildcard read; unanswered under a literal one.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-AXB" "Slice axb, implementor."
+fire "$d"; expect_block "56: a dispatch naming axb does not answer a FILL for a.b" "a.b"
+
+# 57: THE PAIRED POSITIVE, which is what keeps 56 from passing by over-escaping: the same
+# id, named literally, still answers.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-AB" "Slice a.b, implementor."
+fire "$d"; expect_allow "57: …and a dispatch naming a.b does answer it"
+
+# 58: the word boundary still holds around a dotted id — `a.b` is not found inside
+# `xa.by`, exactly as §44's `ONE` is not found inside `PHONE`.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-XABY" "Slice xa.by, implementor."
+fire "$d"; expect_block "58: a dotted id inside a longer word does not answer the FILL" "a.b"
+
+# 59: a hyphen in an id is a literal too, and the id is echoed back verbatim in the reason.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL W-FIX.GATE"
+fire "$d"; expect_block "59: an unanswered id carrying both a dot and a hyphen is named verbatim" "W-FIX.GATE"
+
+echo ""
+echo "=== Section 8: the scan is windowed (review performance, finding 1) ==="
+#
+# THE DEFECT. This gate read the WHOLE transcript through one jq pass on every Stop of an
+# open run — from byte zero, ~85 ms of CPU per MB, measured 4.3 s over the 50 MB a long
+# wave session reaches, and rising monotonically for the life of the run: worst exactly
+# when the run is oldest and busiest. hooks/context-spend.sh, in this same wave, already
+# bounds the same class of read with `tail -n 400`.
+#
+# THE WINDOW. Every fact this scan needs is a "since the most recent X" fact — the last
+# user prompt, the last clear/resume marker, the last FILL line — so a window suffices
+# provided it holds a whole orchestrator turn. It does: the largest single turn in this
+# repo's own two busiest wave transcripts is 264 records (measured 2026-09-03 over
+# 494cf1b6 and b1a850c1), and the window is 2000.
+#
+# WHAT SCROLLING OUT COSTS, pinned here rather than left to be discovered: a marker older
+# than the window reads as NO MARKER, so the ritual arm goes INERT — it does not refuse.
+# That is FAIL-OPEN, and it is the right direction for a marker whose whole purpose is to
+# catch the FIRST stop after a resume; by the time 2000 records have gone by the ritual is
+# either long done or long moot.
+
+# N benign padding records — a main-thread Read, which satisfies no duty, answers no FILL
+# and names no plan. Written by awk rather than a shell loop: these fixtures are 20k lines.
+pad() {  # <dir> <n>
+  local line
+  line=$(jq -nc '{type:"assistant",isSidechain:false,
+                  message:{role:"assistant",content:[{type:"tool_use",id:"toolu_p",name:"Read",
+                    input:{file_path:"/tmp/pad.txt"}}]}}')
+  awk -v n="$2" -v l="$line" 'BEGIN{ for (i = 0; i < n; i++) print l }' >> "$1/transcript.jsonl"
+}
+
+# 60: 20k records of history BEFORE the marker change nothing — the marker and the
+# CronCreate are both inside the window, and the refusal fires exactly as in §27.
+d=$(make_env); pad "$d" 20000; u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "60: a marker inside the window is still found under 20k records of history" "$RITUAL_CRONLIST"
+
+# 61: THE DOCUMENTED LIMIT. The same marker with 20k records AFTER it has scrolled out of
+# the window, and the arm reads "no marker" — inert, not a refusal. Fail-open, stated.
+d=$(make_env); u_clear_marker "$d"; pad "$d" 20000; a_tool "$d" CronCreate
+fire "$d"; expect_allow "61: a marker beyond the window reads as no marker — the arm goes inert"
+
+# 62: THE BOUND IS NAMED AND IS A CONSTANT. A window that regresses to an unbounded read
+# is invisible in every behavioural test above — 60 and 61 both still pass without a
+# `tail` if the whole file is small. This is the assertion that the bound exists at all.
+TOTAL=$((TOTAL + 1))
+if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK" && grep -q 'tail -n "\$SCAN_WINDOW_LINES"' "$HOOK"; then
+  pass "62: the transcript scan is bounded by a named SCAN_WINDOW_LINES constant"
+else
+  fail "62: the transcript scan has no named line bound — it reads from byte zero"
+fi
 echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"

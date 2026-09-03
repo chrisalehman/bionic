@@ -196,9 +196,18 @@ plant_agent_dispatch() {  # <transcript> <tool_use_id>
 
 # ---------- driving doctor ----------
 
-run_doctor() {  # <claude-home>
-  BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
-    bash "$DOCTOR_SH" < /dev/null 2>&1
+# DOCTOR IS ALWAYS RUN FROM INSIDE THE PROJECT IT IS DIAGNOSING, because that is
+# the only thing that makes its answer addressable: `project_root "$PWD"` is
+# doctor's `DOCTOR_ROOT`, and the Patrol section reports on the sessions belonging
+# to THAT root. Before Section 11 this helper took the claude-home alone and let
+# doctor inherit the test runner's own cwd — this checkout — while every fixture
+# session named a `/var/folders/...` project. The sections passed because doctor
+# filtered on nothing at all; a session from any project on the machine printed
+# here. The cwd is now an argument, and it is the fixture repo the session under
+# test actually lives in.
+run_doctor() {  # <claude-home> <project-cwd>
+  ( cd "$2" && BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
 # The PATROL section alone — from its bare header to end of output, which is
@@ -210,7 +219,8 @@ patrol_block() {  # <full-output>
 echo "=== Section 1: no live Patrol anywhere ==="
 
 EMPTY_HOME="$(make_empty_claude_home)"
-OUT1="$(run_doctor "$EMPTY_HOME")"
+EMPTY_PROJ="$(make_repo_without_roster)"
+OUT1="$(run_doctor "$EMPTY_HOME" "$EMPTY_PROJ")"
 PB1="$(patrol_block "$OUT1")"
 
 expect_match    "1: the fallback line prints" "*none running*" "$PB1"
@@ -234,7 +244,7 @@ plant_patrol_job "$TR2" "toolu_1" "abc12345"
 # below are the same fixture with the stamp stale and with it absent.
 plant_patrol_stamp "$REPO2" "$SID2"
 
-OUT2="$(run_doctor "$HOME2")"
+OUT2="$(run_doctor "$HOME2" "$REPO2")"
 PB2="$(patrol_block "$OUT2")"
 
 expect_match "3: the running Patrol prints session · singular open dispatch" \
@@ -273,7 +283,7 @@ plant_patrol_job "$TR3" "toolu_1" "old11111"
 plant_patrol_job "$TR3" "toolu_2" "new22222"
 plant_patrol_stamp "$REPO3" "$SID3"
 
-OUT3="$(run_doctor "$HOME3")"
+OUT3="$(run_doctor "$HOME3" "$REPO3")"
 PB3="$(patrol_block "$OUT3")"
 
 expect_match "12: the running Patrol still prints, 0 open dispatches (plural)" \
@@ -306,7 +316,7 @@ TR4="$(transcript_of "$HOME4" "$SID4")"
 plant_patrol_job "$TR4" "toolu_1" "abc12345"
 plant_patrol_stamp "$REPO4" "$SID4" 3
 
-OUT4="$(run_doctor "$HOME4")"
+OUT4="$(run_doctor "$HOME4" "$REPO4")"
 PB4="$(patrol_block "$OUT4")"
 
 expect_no_match "17: a dead Patrol prints no running line" "*✓ session ${SHORT4}*" "$PB4"
@@ -338,7 +348,7 @@ HOME5="$(make_claude_home "$SID5" "$PID5" "$REPO5")"
 TR5="$(transcript_of "$HOME5" "$SID5")"
 plant_patrol_job "$TR5" "toolu_1" "abc12345"
 
-OUT5="$(run_doctor "$HOME5")"
+OUT5="$(run_doctor "$HOME5" "$REPO5")"
 PB5="$(patrol_block "$OUT5")"
 
 expect_no_match "23: a never-armed session prints no running line" "*session ${SHORT5}*" "$PB5"
@@ -386,7 +396,7 @@ plant_agent_dispatch "$TR7" "toolu_a2"
 plant_agent_dispatch "$TR7" "toolu_a3"
 plant_patrol_stamp "$REPO7" "$SID7"
 
-OUT7="$(run_doctor "$HOME7")"
+OUT7="$(run_doctor "$HOME7" "$REPO7")"
 PB7="$(patrol_block "$OUT7")"
 
 expect_match "27: an absent roster is rendered as absent, not as a count" \
@@ -419,7 +429,7 @@ plant_agent_dispatch "$TR8" "toolu_a2"
 plant_agent_dispatch "$TR8" "toolu_a3"
 plant_patrol_stamp "$REPO8" "$SID8"
 
-OUT8="$(run_doctor "$HOME8")"
+OUT8="$(run_doctor "$HOME8" "$REPO8")"
 PB8="$(patrol_block "$OUT8")"
 
 expect_match "30: a present roster still prints its own open count, unchanged" \
@@ -432,12 +442,18 @@ expect_match "32: the fix line reports only the launches the roster never saw" \
 echo ""
 echo "=== Section 9: one cure, two surfaces — and the column budget ==="
 
-# ONE CURE, SPELLED ONCE. hooks/session-poker.sh decides `wall-blind` at tick
-# time and names the repair; doctor names the same repair from the same fact
-# hours later, off the same `patrol-wall/v1` record. Two spellings of one cure
-# is two answers, so the literal is pinned from BOTH files rather than from
-# either alone — the shape tests/cross-gate-agreement.test.sh uses wherever two
-# readers have to agree.
+# ONE CURE, ONE SURFACE NOW (bionic 1.4.0, slice ADOPT). This used to be a two-reader
+# agreement: hooks/session-poker.sh decided `wall-blind` at tick time and named the
+# repair, and doctor named the same repair hours later off the same `patrol-wall/v1`
+# record. The tick's decision is retired — it inferred a dead dispatch wall from
+# dispatches outnumbering roster rows, and always-on registration removes the condition
+# that made that inference worth drawing — so there is no second speller left to agree
+# with, and a pin against a deleted line would be a pin over air.
+#
+# What remains is worth pinning on its own: the cure doctor prints and the row it prints
+# it beside come from ONE record, `patrol-wall/v1`, whose schema token lives in
+# lib/patrol.sh. Both halves are asserted, so a doctor that stopped reading that record
+# or a library that renamed it goes red.
 lines_matching() {  # <text> <glob> -> the matching lines
   local line out=""
   while IFS= read -r line || [ -n "$line" ]; do
@@ -448,20 +464,17 @@ lines_matching() {  # <text> <glob> -> the matching lines
 }
 
 CURE='re-invoke /bionic:canonical-sdlc'
-POKER_TEXT="$(cat "${PAYLOAD}/hooks/session-poker.sh")"
+PATROL_LIB_TEXT="$(cat "${PAYLOAD}/scripts/lib/patrol.sh")"
 DOCTOR_TEXT="$(cat "$DOCTOR_SH")"
-# PINNED TO THE DECISION THAT AGREES, not to the file that contains it. The
-# phrase occurs three times in hooks/session-poker.sh and only one of them is
-# the cure doctor is echoing — the `check=wall-blind` decision record; another
-# is the unrelated predecessor-row message inside the roster detail block. A
-# glob over the whole file stays green if the wall-blind cure alone is reworded
-# or deleted, which is the exact drift this pin exists to catch, so the match is
-# made against that ONE line. An extraction that found nothing fails the match
-# rather than passing it, which is what keeps this from becoming a pin over air.
-POKER_WALL_LINE="$(lines_matching "$POKER_TEXT" '*check=wall-blind*')"
-expect_match "33: session-poker.sh spells the cure on its wall-blind decision" \
-  "*check=wall-blind*cure=${CURE}*" "$POKER_WALL_LINE"
-expect_match "34: payload/scripts/doctor.sh spells it identically" "*${CURE}*" "$DOCTOR_TEXT"
+# PINNED TO THE RECORD DOCTOR READS, not merely to the file that contains the phrase.
+# An extraction that found nothing fails the match rather than passing it, which is what
+# keeps this from becoming a pin over air.
+DOCTOR_WALL_LINE="$(lines_matching "$DOCTOR_TEXT" '*patrol-wall/v1*')"
+expect_match "33: payload/scripts/doctor.sh reads the patrol-wall/v1 record" \
+  "*patrol-wall/v1*" "$DOCTOR_WALL_LINE"
+expect_match "33b: …and lib/patrol.sh is where that schema token is defined" \
+  "*PATROL_WALL_SCHEMA=\"patrol-wall/v1\"*" "$PATROL_LIB_TEXT"
+expect_match "34: payload/scripts/doctor.sh spells the cure" "*${CURE}*" "$DOCTOR_TEXT"
 
 # THE BUDGET, MEASURED WITH THE PRODUCT'S OWN RULER rather than by eye
 # (lib/width.sh — `bionic_cols` counts COLUMNS, and every glyph on these rows is
@@ -538,7 +551,7 @@ plant_patrol_job "$TR10" "toolu_1" "abc12345"
 # No plant_agent_dispatch call — the absence IS the variable under test.
 plant_patrol_stamp "$REPO10" "$SID10"
 
-OUT10="$(run_doctor "$HOME10")"
+OUT10="$(run_doctor "$HOME10" "$REPO10")"
 PB10="$(patrol_block "$OUT10")"
 
 expect_match "37: a session that dispatched nothing keeps its true zero" \
@@ -547,6 +560,141 @@ expect_no_match "38: and is never described as a missing record" \
   "*roster absent*" "$PB10"
 expect_no_match "39: nor earns an unrostered-launch fix line it cannot have" \
   "*session ${SHORT10}: * unrostered*" "$OUT10"
+
+echo ""
+echo "=== Section 11: two projects on one machine — doctor answers about ONE ==="
+
+# THE DEFECT THIS SECTION OWNS (T3 finding 1, AC-35 drive, 2026-09-03). Doctor
+# was driven cold in a session whose cwd was a probe project and printed a PATROL
+# section naming `b1a850c1` (cwd this checkout) and `6c4fe341` (cwd a synthesis
+# repo) — two sessions belonging to two OTHER projects — while the `active run`
+# row three lines below it resolved the probe project's own plan. Both facts came
+# off the same page, so the page contradicted itself about which machine it was
+# describing.
+#
+# WHERE IT CAME FROM. `patrol_report` (lib/patrol.sh) walks every live session on
+# the machine, and already computes for each one whether its repo is the caller's
+# — it emits `here=yes|no` and has since it was written. doctor.sh's parse loop
+# read `session=`, `open=`, `present=`, `blind=` and `state=`, and never `here=`
+# or `cwd=`: the filter was not wrong, it was absent.
+#
+# THE ADDRESS IS `project_root`, NOT A STRING COMPARE. `lib/root.sh` is the SSoT
+# every reader in this payload resolves a cwd through, and a session's recorded
+# cwd is routinely a SUBDIRECTORY of its project — so session A below stands in
+# `${REPO_A}/sub/deeper`, which only resolves onto the project doctor is
+# diagnosing if the comparison goes through the library. A literal `cwd = root`
+# test passes every other case in this file and fails this one.
+
+SID_A="11111111-aaaa-2222-3333-444455556666"
+SHORT_A="${SID_A%%-*}"
+SID_B="22222222-bbbb-2222-3333-444455556666"
+SHORT_B="${SID_B%%-*}"
+
+spawn_live_pid; PID_A="$LIVE_PID"
+spawn_live_pid; PID_B="$LIVE_PID"
+
+# Project A — the one doctor is pointed at. One open dispatch, and the session
+# sits two directories below the root.
+REPO_A="$(make_repo_with_roster "$SID_A" beta -- alpha)"
+mkdir -p "${REPO_A}/sub/deeper"
+HOME_AB="$(make_claude_home "$SID_A" "$PID_A" "${REPO_A}/sub/deeper")"
+TR_A="$(transcript_of "$HOME_AB" "$SID_A")"
+plant_patrol_job "$TR_A" "toolu_a" "aaa11111"
+plant_patrol_stamp "$REPO_A" "$SID_A"
+
+# Project B — a second, entirely unrelated project on the same machine, with its
+# own live session, its own firing Patrol, its own roster, and TWO Patrol jobs so
+# that it would also emit a duplicate-Patrol fix line if doctor were listening.
+REPO_B="$(make_repo_with_roster "$SID_B" gamma delta)"
+jq -nc --arg sid "$SID_B" --argjson pid "$PID_B" --arg cwd "$REPO_B" \
+  '{sessionId:$sid,pid:$pid,cwd:$cwd}' > "${HOME_AB}/sessions/${SID_B}.json"
+: > "${HOME_AB}/projects/-fixture-proj/${SID_B}.jsonl"
+TR_B="$(transcript_of "$HOME_AB" "$SID_B")"
+plant_patrol_job "$TR_B" "toolu_b1" "bbb11111"
+plant_patrol_job "$TR_B" "toolu_b2" "bbb22222"
+plant_patrol_stamp "$REPO_B" "$SID_B"
+
+OUT11="$(run_doctor "$HOME_AB" "$REPO_A")"
+PB11="$(patrol_block "$OUT11")"
+
+expect_match "40: the session belonging to THIS project prints, resolved from a subdirectory" \
+  "*✓ session ${SHORT_A} · 1 open dispatch*" "$PB11"
+expect_no_match "41: the other project's live session is not listed here" \
+  "*session ${SHORT_B}*" "$PB11"
+expect_no_match "42: nor does its duplicate-Patrol fix line reach this page" \
+  "*CronDelete*bbb11111*" "$OUT11"
+expect_no_match "43: and no row is attributed to the other project's roster" \
+  "*2 open dispatches*" "$PB11"
+
+echo ""
+echo "=== Section 13: a NESTED .bionic below a git root — roster must resolve through project_root ==="
+# ============================================================
+# FIX-PATROL-ROOT (wave.plan.md Assumptions, FIX-DOCTOR/5). lib/patrol.sh's
+# _patrol_repo_root asked git for --git-common-dir FIRST and walked for a
+# nested `.bionic` only when no repository existed at all — the ordering
+# lib/root.sh's own header names as the bug the other eight copies shared
+# before this wave. A git repo holding a `.bionic` BELOW its root (spec AC-10,
+# tests/root.test.sh §3) writes its roster under the nested `.bionic/tmp`
+# while this resolver answered with the git toplevel — the roster read as
+# absent and the session as blind. The session's own repo and doctor's
+# `here_repo` both go through the same (buggy) resolver, so the "here" gate
+# still agreed; what broke was finding the roster file at all.
+SID13="ffffffff-1111-2222-3333-444455556666"
+SHORT13="${SID13%%-*}"
+spawn_live_pid; PID13="$LIVE_PID"
+
+GITROOT13="$(mktemp -d -p "$TMP")"
+git -c init.defaultBranch=main init -q "$GITROOT13" >/dev/null 2>&1
+NESTED13="$GITROOT13/apps/inner"
+mkdir -p "$NESTED13/.bionic/tmp"
+printf 'roster-state/v1|status=intended|name=beta|ts=2026-08-27T00:00:00Z\n' \
+  > "$NESTED13/.bionic/tmp/roster-${SID13}.state"
+
+HOME13="$(make_claude_home "$SID13" "$PID13" "$NESTED13")"
+TR13="$(transcript_of "$HOME13" "$SID13")"
+plant_patrol_job "$TR13" "toolu_13" "fff13131"
+plant_patrol_stamp "$NESTED13" "$SID13"
+
+OUT13="$(run_doctor "$HOME13" "$NESTED13")"
+PB13="$(patrol_block "$OUT13")"
+
+expect_match "46: a nested .bionic below the git root still finds its roster" \
+  "*✓ session ${SHORT13} · 1 open dispatch*" "$PB13"
+
+# ---- differential control: .bionic AT the git root resolves the same way ----
+# Same shape, .bionic planted at the repo root instead of nested below it — the
+# git root and project_root's answer already coincide here, so this passed
+# before the fix too. Proves 46 is not vacuous: the harness can find a roster
+# through this path, and the nested case above is what specifically breaks.
+GITROOT13B="$(mktemp -d -p "$TMP")"
+git -c init.defaultBranch=main init -q "$GITROOT13B" >/dev/null 2>&1
+mkdir -p "$GITROOT13B/.bionic/tmp"
+SID13B="00000000-1111-2222-3333-444455556666"
+SHORT13B="${SID13B%%-*}"
+spawn_live_pid; PID13B="$LIVE_PID"
+printf 'roster-state/v1|status=intended|name=beta|ts=2026-08-27T00:00:00Z\n' \
+  > "$GITROOT13B/.bionic/tmp/roster-${SID13B}.state"
+HOME13B="$(make_claude_home "$SID13B" "$PID13B" "$GITROOT13B")"
+TR13B="$(transcript_of "$HOME13B" "$SID13B")"
+plant_patrol_job "$TR13B" "toolu_13b" "fff13132"
+plant_patrol_stamp "$GITROOT13B" "$SID13B"
+
+OUT13B="$(run_doctor "$HOME13B" "$GITROOT13B")"
+PB13B="$(patrol_block "$OUT13B")"
+
+expect_match "47: control — .bionic AT the git root still resolves" \
+  "*✓ session ${SHORT13B} · 1 open dispatch*" "$PB13B"
+
+# THE CONTROL, so 41-43 are not three negatives over an empty section. Pointed at
+# project B, the same claude-home, the same two sessions, doctor answers about B
+# and says nothing about A.
+OUT12="$(run_doctor "$HOME_AB" "$REPO_B")"
+PB12="$(patrol_block "$OUT12")"
+
+expect_match "44: pointed at the other project, that project's session prints" \
+  "*✓ session ${SHORT_B} · 2 open dispatches*" "$PB12"
+expect_no_match "45: and the first project's session is now the one absent" \
+  "*session ${SHORT_A}*" "$PB12"
 
 echo ""
 echo "========================================"

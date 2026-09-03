@@ -652,7 +652,8 @@ jq -n --arg s "$OWN8" --arg c "$R8" --arg p "$BRIEF_G" \
     tool_input:{description:"the claimed-process case", subagent_type:"implementor",
                 prompt:$p, name:"ours-claims", model:"opus", run_in_background:true},
     tool_use_id:"toolu_01W8G"}' \
-  | ( cd "$R8" && HOME="$H8" CLAUDE_CONFIG_DIR="$H8/.claude" bash "$WRITER" >/dev/null 2>&1 )
+  | ( cd "$R8" && HOME="$H8" CLAUDE_CONFIG_DIR="$H8/.claude" \
+        CLAUDE_CODE_SESSION_ID="$OWN8" bash "$WRITER" >/dev/null 2>&1 )
 
 W8G_ROW=$(grep -v '^#' "$R8/.bionic/tmp/roster-${OWN8}.state" 2>/dev/null | grep 'name=ours-claims' | tail -1)
 expect_contains "the real start gate journalled the dispatch this case reads" \
@@ -882,9 +883,9 @@ expect_contains "C-2 regression: the contract still comes from the unconfirmed r
 ADOPTED10="10101010-0000-0000-0000-000000000003"
 make_agent "$H10" "$S10" "$ADOPTED10" "aadoptee-3030303030303030" "adoptee" "still working" >/dev/null
 printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-3030303030303030|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=adopted|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=|teammate_id=adoptee@session-%s|adopted_from=%s\n' \
-  "$OWN10" "${OWN10:0:8}" "$ADOPTED10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+  "$OWN10" "${ADOPTED10:0:8}" "$ADOPTED10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 
-OUT10F=$(run_check_as "$OWN10" "$H10" "$R10" "adoptee@session-${OWN10:0:8}")
+OUT10F=$(run_check_as "$OWN10" "$H10" "$R10" "adoptee@session-${ADOPTED10:0:8}")
 M10F=$(printf '%s\n' "$OUT10F" | grep '^stop-check-observation/')
 expect_contains "an ADOPTED row makes a predecessor's agent OURS" \
   "Classification: OURS" "$OUT10F"
@@ -893,20 +894,14 @@ expect_contains "…and the reason names the adoption, not a launch we never mad
 expect_contains "…while the machine line still reports it classification=ours" \
   "|classification=ours|" "$M10F"
 
-# BOTH SPELLINGS, ONE ROW (follow-up, 2026-08-30). The addressing form the platform hands
-# back carries the LAUNCHING session's eight characters — the PREDECESSOR's, for an adopted
-# agent — while the row this session wrote carries its own. This command resolves on the
-# base name and establishes ownership from the id, so neither spelling changes its answer;
-# pinned here because a reader who only saw the assertions above could reasonably conclude
-# the suffix was load-bearing, and an operator who types the other one must not be told a
-# different story about the same agent.
-OUT10G=$(run_check_as "$OWN10" "$H10" "$R10" "adoptee@session-${ADOPTED10:0:8}")
-expect_contains "the PREDECESSOR's spelling of an adopted row is OURS too" \
-  "Classification: OURS" "$OUT10G"
-expect_contains "…naming the same session it was adopted from" \
-  "adopted_from=$ADOPTED10" "$OUT10G"
-expect_contains "…and resolving to the same agent id" \
-  "aadoptee-3030303030303030" "$OUT10G"
+# ONE SPELLING, AND IT IS THE LAUNCHING SESSION'S (T3 FINDING 1, live 2026-09-03). Both
+# spellings were driven here for as long as `session-poker.sh adopt` printed both and
+# neither was proven; the probe then picked the ADOPTING session's, reasoning that a
+# `/clear` re-keys the session id. The live harness refused that string and named the
+# launching session's in its place (`Running teammates: PROBE-AGENT@session-<launching 8>`),
+# so adopt prints and records that one (tests/session-poker.test.sh §8a) and the fixture
+# above carries it. This command's answer never depended on the suffix: it resolves on the
+# base name and establishes ownership from the id, which is what the row above already pins.
 
 # THE PAIRED NEGATIVE, without which the two assertions above pass over a fixture that
 # would say OURS for any reason at all: the same by-id ownership with NO adoption on the

@@ -134,6 +134,26 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 # and the copy nothing walled (this one) was the one that broke.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/width.sh"
+# loader.sh, which is a CARRIER and not a loader: sourcing it defines
+# `bionic_loader_pin` and nothing else. Doctor wants it for one job — the
+# `walls` row below drives the canonical idiom text against each wall hook's own
+# path instead of re-implementing the candidate list a third time. A row that
+# re-derived "where would this hook look" could disagree with where the hook
+# actually looks, which is the whole failure the row exists to catch.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/loader.sh"
+# root.sh, run.sh and resources.sh — the library spine this page reports on
+# (bionic 1.4.0). `project_root` is the SSoT for which project this cwd is in, so
+# the run-scoped rows below read the same address space every hook does;
+# `active_run` is the predicate those hooks gate their own work behind, printed
+# here rather than re-derived; `resources_probe` is the machine the fleet is
+# about to run on. All three are pure functions of disk and none of them writes.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/root.sh"
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/run.sh"
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/resources.sh"
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
@@ -248,10 +268,14 @@ fix() {  # <problem> → <command>
 }
 
 # yes/no/unknown as the words a person reads in a report.
-_doctor_word() {  # <yes|no|unknown>
+_doctor_word() {  # <yes|no|stale|unknown>
   case "${1:-}" in
     yes)     echo "present" ;;
     no)      echo "absent" ;;
+    # THE FOURTH ANSWER (AC-17). A venv built against a different `uv.lock` than
+    # the one now shipped is neither present-and-correct nor absent, and calling
+    # it either would send a reader to the wrong repair.
+    stale)   echo "stale" ;;
     unknown) echo "unknown" ;;
     *)       echo "${1:-unknown}" ;;
   esac
@@ -271,6 +295,37 @@ EOF
   printf ''
 }
 
+# A PATH AS A PERSON WOULD TYPE IT. Home-relative, because that is both shorter
+# and the spelling a reader would put into a shell — and because the rows that
+# name a path under the claude-home have about forty columns to say it in, which
+# an absolute `/Users/<name>/…` spends a quarter of before it starts.
+_doctor_tilde() {  # <path>
+  local p="${1:-}"
+  case "$p" in
+    "${HOME:-/nonexistent}"/*) printf '~%s' "${p#"${HOME}"}" ;;
+    *)                         printf '%s' "$p" ;;
+  esac
+}
+
+# HOW LONG AGO, IN ONE TOKEN. The mtime read is lib/patrol.sh's (`_patrol_mtime`
+# — BSD `stat -f` then GNU `stat -c`, whichever answers), so there is no second
+# spelling of a portability workaround on this page. A file whose age cannot be
+# taken says so rather than reporting zero, which would read as "touched just
+# now" — the confident wrong answer this report is not allowed to give.
+_doctor_file_age() {  # <file> -> "12m old" | "3h old" | "2d old" | "age unknown"
+  local mt now delta
+  mt="$(_patrol_mtime "${1:-}")" || mt=""
+  case "$mt" in ''|*[!0-9]*) echo "age unknown"; return 0 ;; esac
+  now="$(date -u +%s 2>/dev/null)"
+  case "$now" in ''|*[!0-9]*) echo "age unknown"; return 0 ;; esac
+  delta=$(( now - mt ))
+  [ "$delta" -ge 0 ] || delta=0
+  if   [ "$delta" -lt 3600 ];  then echo "$(( delta / 60 ))m old"
+  elif [ "$delta" -lt 86400 ]; then echo "$(( delta / 3600 ))h old"
+  else                              echo "$(( delta / 86400 ))d old"
+  fi
+}
+
 _doctor_plural() {  # <count> <singular> <plural>
   if [ "${1:-0}" = "1" ]; then echo "$2"; else echo "$3"; fi
 }
@@ -285,9 +340,47 @@ _doctor_plural() {  # <count> <singular> <plural>
 # that a reader could act on: "the pnpm content-addressable store is a cache, not
 # an install surface" and "a cache, no presence surface" answer the same question,
 # and only one of them fits beside the fact it is about.
+# THE STORE HAS A SURFACE, SO THE CAUSE NAMES THE FILE (AC-23). "a cache, no
+# presence surface" stopped being true at the commit that taught the probe to
+# read pnpm's `index.db` — the store names every cached `<name>@<version>` — and
+# a reader told a cache cannot be read has nothing to check, while a reader told
+# which file could not be read does. `_dep_check_pnpm_store` answers `unknown` in
+# exactly three situations and this names all three, in the order that function
+# tests them.
+#
+# ASKED AT MOST ONCE. The dep sweep calls the cause up to three times per row
+# (the dependency row, the third-party row, the roster row), and `pnpm store
+# path` is a shell-out — so it is memoised, and it goes through the same bound
+# every other shell-out on this page does.
+_DOCTOR_PNPM_CAUSE=""
+_doctor_pnpm_cause() {
+  [ -z "$_DOCTOR_PNPM_CAUSE" ] || { printf '%s' "$_DOCTOR_PNPM_CAUSE"; return 0; }
+  local store idx
+  if ! command -v pnpm >/dev/null 2>&1; then
+    _DOCTOR_PNPM_CAUSE="pnpm is not on PATH"
+  else
+    store="${BIONIC_PNPM_STORE:-}"
+    [ -n "$store" ] || store="$(detect_bounded "$(detect_probe_seconds)" pnpm store path 2>/dev/null)"
+    store="${store%/}"
+    idx="${store}/index.db"
+    if [ -z "$store" ]; then
+      _DOCTOR_PNPM_CAUSE="pnpm store path did not answer"
+    elif [ ! -f "$idx" ]; then
+      _DOCTOR_PNPM_CAUSE="no store index at ${idx}"
+    elif [ ! -r "$idx" ]; then
+      _DOCTOR_PNPM_CAUSE="the store index at ${idx} is unreadable"
+    else
+      # Unreachable through the probe — a readable index answers yes or no, never
+      # unknown — and here so this function has no silent arm.
+      _DOCTOR_PNPM_CAUSE="the store index could not be searched"
+    fi
+  fi
+  printf '%s' "$_DOCTOR_PNPM_CAUSE"
+}
+
 _doctor_unknown_cause() {  # <kind> — the install mechanism the table names
   case "${1:-}" in
-    pnpm-store) echo "a cache, no presence surface" ;;
+    pnpm-store) _doctor_pnpm_cause; echo ;;
     native)
       if command -v jq >/dev/null 2>&1; then echo "the plugin registry could not be parsed"
       else echo "jq is not on PATH"; fi ;;
@@ -351,10 +444,15 @@ _doctor_third_row() {  # <symbol> <name> <version> <source> <state>
 # `KEY=value  state`. The left cell is one token on purpose — an environment
 # name and its value are a single fact, and splitting them into two columns made
 # a reader join them back up by eye on every row.
-_doctor_env_row() {  # <symbol> <key=value or label> <state>
+# The fourth argument is the instruction the cut may not eat — the same contract
+# `_doctor_env3` already has, and needed here from the moment these rows started
+# naming PATHS: a directory of unbounded length in the state cell would otherwise
+# push the `→ /bionic:setup` off the end and leave a row that states a problem and
+# withholds its cure (lib/width.sh's own worked example).
+_doctor_env_row() {  # <symbol> <key=value or label> <state> [<instruction>]
   local prefix
   prefix="  $1 $(_doctor_cell "$2" 42) "
-  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${3:-}")")"
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${3:-}" "${4:-}")")"
 }
 
 # WHICH MACHINERY PUT IT THERE, in the words a user would use for it. Keyed on
@@ -428,8 +526,45 @@ SKILL_COPY_STATE="${SKILL_COPY_FACT#*present=}"; SKILL_COPY_STATE="${SKILL_COPY_
 SKILL_COPY_PATH="${SKILL_COPY_FACT##*path=}"
 HOOK_FILES_FACT="$(detect_legacy_hook_files)"
 HOOK_FILES_COUNT="${HOOK_FILES_FACT#*count=}"; HOOK_FILES_COUNT="${HOOK_FILES_COUNT%% *}"
+HOOK_FILES_PATH="${HOOK_FILES_FACT#*path=}";   HOOK_FILES_PATH="${HOOK_FILES_PATH%% *}"
 HOOK_FILES_CAUSE="${HOOK_FILES_FACT##*cause=}"
-REG_SHA_FACT="$(detect_registry_sha_lag)"
+# `cause=` is present only on the unknown line, so on the ordinary line the
+# strip-longest above returns the whole record. Cleared here rather than parsed
+# twice, so the render below can test it for emptiness.
+case "$HOOK_FILES_FACT" in *" cause="*) ;; *) HOOK_FILES_CAUSE="" ;; esac
+# THE TREE THE REGISTRY NAMES, NOT THE ONE THE USER IS STANDING IN (AC-20,
+# handoff 4.3). `detect_registry_sha_lag` defaults its repo directory to `$PWD`,
+# and doctor used to call it bare — so the commit in the header above and the
+# whole directory-feed version row below were facts about the caller's cwd
+# rather than about the plugin the CLI is running. Run from an unrelated
+# repository, doctor compared the registry's recorded sha against THAT
+# repository's HEAD and reported `not-in-repo` about a build nobody had asked
+# it about. `installPath` is the CLI's own record of where the install landed,
+# which is the only directory the comparison means anything against.
+#
+# THE FALLBACK IS THE SAME ANSWER BY THE OTHER ROUTE, never the cwd:
+# `_detect_plugin_root` honours BIONIC_PLUGIN_ROOT / CLAUDE_PLUGIN_ROOT and
+# otherwise resolves from this script's own location. A registry that names no
+# installPath at all is a registry `detect_registry_sha_lag` will answer
+# `unknown` about anyway, so nothing is lost and nothing is guessed.
+# AND THE CANDIDATE THAT IS A REPOSITORY WINS, measured rather than assumed.
+# On a GIT feed the registry's installPath is the cache the CLI loads, and the
+# comparison is meaningful there. On a DIRECTORY feed — every dogfood install —
+# the registry records the cache too, but the CLI reads the SOURCE TREE and never
+# opens that cache: comparing a recorded sha against a directory with no history
+# would answer `unknown` forever and take the header's commit down with it, on
+# exactly the machines this row is most useful. So the registry's answer is tried
+# first and the plugin root second, and the first one that is a git repository is
+# the one asked. Both are registry-derived; NEITHER is the cwd, which is the
+# whole point.
+DOCTOR_INSTALL_PATH="$(detect_plugin_install_path bionic 2>/dev/null)" || DOCTOR_INSTALL_PATH=""
+_doctor_is_repo() { ( cd "${1:-/nonexistent}" 2>/dev/null && git rev-parse --git-dir >/dev/null 2>&1 ); }
+if [ -z "$DOCTOR_INSTALL_PATH" ] || ! _doctor_is_repo "$DOCTOR_INSTALL_PATH"; then
+  _doctor_root_alt="$(_detect_plugin_root)"
+  if _doctor_is_repo "$_doctor_root_alt"; then DOCTOR_INSTALL_PATH="$_doctor_root_alt"; fi
+  [ -n "$DOCTOR_INSTALL_PATH" ] || DOCTOR_INSTALL_PATH="$_doctor_root_alt"
+fi
+REG_SHA_FACT="$(detect_registry_sha_lag "$DOCTOR_INSTALL_PATH")"
 REG_SHA_STATE="${REG_SHA_FACT#*state=}"; REG_SHA_STATE="${REG_SHA_STATE%% *}"
 REG_SHA_REG="${REG_SHA_FACT#*registry=}"; REG_SHA_REG="${REG_SHA_REG%% *}"
 REG_SHA_REPO="${REG_SHA_FACT#*repo=}";    REG_SHA_REPO="${REG_SHA_REPO%% *}"
@@ -511,6 +646,89 @@ for _cm in "$_doctor_payload_root"/commands/*.md; do
   [ -s "$_cm" ] && COMMANDS_OK=$((COMMANDS_OK + 1))
 done
 
+# ─── The walls, and whether they can still read a command ────────────────────
+#
+# THE ONE FACT THIS REPORT GATHERS BY RUNNING SOMEBODY ELSE'S CODE (AC-15,
+# handoff 3.1). Four hooks stand over actions that cannot be taken back or
+# cannot be re-classified — protect-main and the evidence gate refuse a command
+# they cannot read, farm-out-reminder and background-suite-guard classify one —
+# and each of them finds its library through the loader idiom
+# (payload/scripts/lib/loader.sh, spec AC-16). A wall whose library has gone
+# missing is the lockout this whole wave is named for: the wall fires, cannot
+# read, and refuses everything including the command that would repair it.
+#
+# ASKED THROUGH THE IDIOM ITSELF, never through a copy of it. `bionic_loader_pin`
+# prints the canonical block; it runs here in a child shell whose `$0` is the
+# HOOK'S OWN PATH, which is the single input the block's candidate list is a
+# function of. So this row cannot drift from what the hook will do when it
+# fires — a re-implementation of "beside the hook, then the marketplace source,
+# then the newest cache version" would be a fourth copy of the thing the pin
+# exists to keep at one.
+#
+# READ-ONLY, LIKE EVERYTHING ELSE HERE. The block sets three variables and
+# defines two functions; it executes neither `loader_fail_open` nor
+# `loader_fail_closed`, so nothing refuses and nothing exits on doctor's behalf.
+#
+# THE WANTED BASENAMES COME FROM THE HOOK, not from a list kept here. A hook
+# that adopts the idiom declares them on a `BIONIC_LIB_WANT=` line above the
+# block; one that has not yet adopted it names its library in the `lib/<name>.sh`
+# path it sources. Either way the answer is the hook's own, so this row keeps
+# telling the truth across the slice that rewrites the hooks.
+BIONIC_WALL_HOOKS="protect-main canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard"
+
+_doctor_wall_want() {  # <hook-file> -> space-separated library basenames
+  local f="${1:-}" want=""
+  want="$(grep -m1 '^[[:space:]]*BIONIC_LIB_WANT=' "$f" 2>/dev/null \
+          | sed -e 's/^[[:space:]]*BIONIC_LIB_WANT=//' -e 's/^["'"'"']//' -e 's/["'"'"']$//')"
+  if [ -z "$want" ]; then
+    # No declaration: read the library out of the source path itself, from the
+    # CODE lines only — a prose mention in a header comment is not a dependency.
+    want="$(grep -v '^[[:space:]]*#' "$f" 2>/dev/null \
+            | grep -oE 'lib/[A-Za-z0-9_.-]+\.sh' \
+            | sed 's|^lib/||' | sort -u | tr '\n' ' ')"
+  fi
+  printf '%s' "$want"
+}
+
+# The idiom, plus one line that reports what it concluded. Built once: the pin is
+# a heredoc `cat`, and paying for it per wall would be four subshells for one
+# constant string.
+_DOCTOR_LOADER_BLOCK="$(bionic_loader_pin 2>/dev/null)"
+_DOCTOR_LOADER_PROBE="${_DOCTOR_LOADER_BLOCK}
+printf 'lib=%s|missing=%s|cands=%s\\n' \"\$BIONIC_LIB\" \"\$BIONIC_LIB_MISSING\" \"\$BIONIC_LIB_CANDS\""
+
+_doctor_wall_probe() {  # <hook-file> <wanted basenames> -> lib=…|missing=…|cands=…
+  BIONIC_LIB_WANT="${2:-}" bash -c "$_DOCTOR_LOADER_PROBE" "$1" 2>/dev/null
+}
+
+WALLS_TOTAL=0; WALLS_OK=0; WALL_ROWS=""
+for _wall in $BIONIC_WALL_HOOKS; do
+  WALLS_TOTAL=$((WALLS_TOTAL + 1))
+  _wall_file="${_doctor_payload_root}/hooks/${_wall}.sh"
+  if [ ! -r "$_wall_file" ]; then
+    WALL_ROWS="${WALL_ROWS}$(_doctor_native_row "$DOCTOR_BAD" "wall" "—" \
+      "${_wall} is not in this payload — reinstall the plugin")"$'\n'
+    fix "the ${_wall} wall is missing from the payload → run /bionic:setup — repair"
+    continue
+  fi
+  _wall_want="$(_doctor_wall_want "$_wall_file")"
+  _wall_probe="$(_doctor_wall_probe "$_wall_file" "$_wall_want")"
+  _wall_lib="$(_doctor_pfield "$_wall_probe" lib)"
+  if [ -n "$_wall_lib" ]; then
+    WALLS_OK=$((WALLS_OK + 1))
+    continue
+  fi
+  # `missing` is the first basename the hook asked for and did not get; with an
+  # empty probe (no bash, no pin) fall back to what the hook declared, so the row
+  # names a library either way rather than an empty string.
+  _wall_missing="$(_doctor_pfield "$_wall_probe" missing)"
+  [ -n "$_wall_missing" ] || _wall_missing="${_wall_want%% *}"
+  [ -n "$_wall_missing" ] || _wall_missing="the bionic library"
+  WALL_ROWS="${WALL_ROWS}$(_doctor_native_row "$DOCTOR_BAD" "wall" "—" \
+    "${_wall} cannot load ${_wall_missing}")"$'\n'
+  fix "the ${_wall} wall cannot load ${_wall_missing} → run /bionic:setup — repair"
+done
+
 INST_AGENT_FACT="$(detect_installed_agent_copies)"
 INST_AGENT_STATE="${INST_AGENT_FACT#*state=}"; INST_AGENT_STATE="${INST_AGENT_STATE%% *}"
 INST_AGENT_TOTAL="${INST_AGENT_FACT#*total=}"; INST_AGENT_TOTAL="${INST_AGENT_TOTAL%% *}"
@@ -555,6 +773,37 @@ fi
 # through the same `detect_bounded` the listing does, and a stalled read arrives
 # here as one more `dup=unknown` line with the seconds in its cause.
 DUP_LINES="$(detect_plugin_duplicates)"
+
+# ONE PLUGIN, REGISTERED TWICE — READ HERE, PRINTED IN TABLE 1 (AC-23). The scan
+# ran on every invocation and reached no reader at all. Two registrations of one
+# bare name means two payloads answering to the same id, and which of them a
+# session loads is the CLI's business rather than anything a user chose — so each
+# row names the ids and raises the exact consolidation command
+# `_detect_duplicate_fix` already computed. Silence is the healthy case; the probe
+# deliberately never stays silent when it could not LOOK, which arrives as a
+# `dup=unknown` line and prints as an honest `–` with its cause.
+#
+# THE ROWS ARE BUILT HERE AND PRINTED LATER, because `fix` is collected before
+# anything is printed — FIX is the second section on the page, and a fix raised
+# from inside a render is a fix the verdict has already gone past.
+DUP_ROWS=""
+while IFS= read -r _dup_line; do
+  [ -n "$_dup_line" ] || continue
+  _dup_bare="${_dup_line#dup=}";  _dup_bare="${_dup_bare%% *}"
+  if [ "$_dup_bare" = "unknown" ]; then
+    _dup_cause="${_dup_line##*cause=}"
+    DUP_ROWS="${DUP_ROWS}$(_doctor_native_row "$DOCTOR_NIL" "duplicates" "?" \
+      "unknown — ${_dup_cause}")"$'\n'
+  else
+    _dup_ids="${_dup_line#*ids=}";  _dup_ids="${_dup_ids%% *}"
+    _dup_fix="${_dup_line#*fix=}"
+    DUP_ROWS="${DUP_ROWS}$(_doctor_native_row "$DOCTOR_BAD" "duplicates" "$_dup_bare" \
+      "registered twice: ${_dup_ids//,/, }")"$'\n'
+    fix "${_dup_bare} is registered twice → ${_dup_fix}"
+  fi
+done <<EOF
+$DUP_LINES
+EOF
 
 # ─── The dependency sweep ────────────────────────────────────────────────────
 #
@@ -643,6 +892,12 @@ while IFS= read -r dep_name; do
     no)  dep_tail=""
          if [ "$dep_class" = "when-needed" ]; then dep_sym="$DOCTOR_NIL"; dep_tail="installs on first use"
          else dep_sym="$DOCTOR_BAD"; fi ;;
+    # STALE IS A REPAIR, NOT AN ABSENCE (AC-17). It reached this file folded into
+    # the catch-all below, so a venv one lockfile behind rendered as `unknown`
+    # beside a cause about a mechanism with no presence surface — and setup, on
+    # the same reading, would have offered to install a renderer plainly sitting
+    # on the machine. The ✗ is matched by the FIX line raised in the tallies.
+    stale) dep_sym="$DOCTOR_BAD"; dep_tail="stale against the shipped uv.lock" ;;
     *)   dep_tail="$(_doctor_unknown_cause "$kind")"
          # A cache with no presence surface is never a ✗: nothing can make it
          # readable, so marking it broken would keep doctor from ever saying
@@ -702,6 +957,8 @@ while IFS= read -r dep_name; do
     no)
       if [ "$dep_class" = "when-needed" ]; then third_state="installs on demand"
       else third_state="not installed → /bionic:setup"; fi ;;
+    stale)
+      third_state="stale against uv.lock — re-sync with /bionic:setup" ;;
     *)
       third_state="$(_doctor_unknown_cause "$kind")"
       case "${dep_class}/${kind}" in
@@ -778,6 +1035,12 @@ while IFS= read -r dep_name; do
         esac
       fi
       ;;
+    stale)
+      # Counted with the violations rather than the absences: the thing is there
+      # and it is wrong, which is what a violation is. The fix names a re-sync so
+      # the reader is not told to install what they already have.
+      N_VIOLATION=$((N_VIOLATION + 1))
+      fix "${dep_name} is stale against the shipped uv.lock → run /bionic:setup" ;;
     no)
       N_ABSENT=$((N_ABSENT + 1))
       case "$dep_class" in
@@ -819,6 +1082,56 @@ while IFS= read -r dep_name; do
   esac
 done < <(dep_names)
 
+# ─── The one address this page is about ──────────────────────────────────────
+#
+# THE ONE ADDRESS EVERY READER MUST AGREE ON. `project_root` (lib/root.sh) is the
+# SSoT: the nearest ancestor holding a REAL `.bionic/` directory, after a linked
+# worktree has been mapped onto its main repository. Every project-scoped row on
+# this page reads the same address space the hooks do, which is the whole point
+# of there being one function — a doctor answering about a different root than
+# the wall it is diagnosing would be worse than a doctor that stayed quiet.
+#
+# RESOLVED HERE, BEFORE THE PATROL SECTION, and not where the run rows begin
+# (FIX-DOCTOR/1). It used to be computed a hundred lines further down, which is
+# how the Patrol section came to have no project filter at all: the address it
+# would have had to filter on did not exist yet at the point it renders.
+DOCTOR_ROOT="$(project_root "$PWD" 2>/dev/null)"
+[ -n "$DOCTOR_ROOT" ] || DOCTOR_ROOT="$PWD"
+
+# DOES THIS SESSION BELONG TO THE PROJECT BEING DIAGNOSED (T3 finding 1,
+# 2026-09-03). Driven cold from a probe project, doctor printed a PATROL section
+# naming two sessions from two OTHER projects while the `active run` row three
+# lines below resolved the probe project's own plan — one page, two answers about
+# which machine it was describing. Every live-session reader on this page now
+# passes through here.
+#
+# THROUGH THE LIBRARY, NEVER A STRING COMPARE. A session records the cwd the CLI
+# was started in, which is routinely a SUBDIRECTORY of its project, and on macOS
+# routinely the /tmp spelling of a /private/tmp path. `project_root` resolves
+# both — it canonicalises with `pwd -P` and walks for the `.bionic` — so the
+# comparison is between two answers from the same function rather than between
+# two spellings of a path. The `restart needed` row below did compare literally
+# (`_rs_cwd = DOCTOR_ROOT`) and silently missed every session standing one
+# directory in; it reads this instead.
+#
+# THE ANSWER IS MEMOISED because `project_root` shells out to git twice per call
+# and this page asks about the same handful of cwds from three separate loops.
+_DOCTOR_HERE_MEMO=""
+_doctor_session_here() {  # <session cwd> -> 0 when it resolves onto DOCTOR_ROOT
+  local cwd="${1:-}" line root
+  [ -n "$cwd" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "${cwd}"$'\t'*) [ "${line#*$'\t'}" = "$DOCTOR_ROOT" ] && return 0; return 1 ;;
+    esac
+  done <<EOF
+$_DOCTOR_HERE_MEMO
+EOF
+  root="$(project_root "$cwd" 2>/dev/null)" || root=""
+  _DOCTOR_HERE_MEMO="${_DOCTOR_HERE_MEMO}${cwd}"$'\t'"${root}"$'\n'
+  [ -n "$root" ] && [ "$root" = "$DOCTOR_ROOT" ]
+}
+
 # ─── The Patrol, gathered and rendered before the fix accounting ─────────────
 #
 # RUNNING PATROLS OR NOTHING (F3, epic-19 wave-01 — design ledger ratification
@@ -847,6 +1160,7 @@ PATROL_LIVE=0
 PATROL_LINES="$(patrol_report 2>/dev/null)"
 
 _p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""
+_p_here=""
 
 # WHY THE JOB COUNT ALONE CANNOT ANSWER "IS IT RUNNING" (Step-6 correctness C1,
 # a FAIL against AC-F3). The jobs on this page are RECONSTRUCTED FROM THE
@@ -877,6 +1191,14 @@ _p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_
 #                 already does for a machine with no Patrol at all.
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
+  # THIS PROJECT'S SESSIONS ONLY (T3 finding 1). lib/patrol.sh walks every live
+  # CLI process on the machine — that is its job, and hooks/session-poker.sh
+  # wants the whole fleet — so the narrowing belongs to the renderer. Set from
+  # the session's own recorded cwd, resolved through `project_root`; a session
+  # belonging to another project is dropped whole, its rows and its fix lines
+  # together, because a repair addressed to a project the reader is not standing
+  # in is not a repair they can make.
+  [ "$_p_here" = "yes" ] || return 0
   [ "$_p_n_patrol" -gt 0 ] || return 0
   local short="${_p_sid%%-*}" j id extras="" n open=0 blind="${_p_blind}"
   case "$blind" in ''|*[!0-9]*) blind=0 ;; esac
@@ -918,13 +1240,13 @@ _patrol_flush() {
       else
         _patrol_add "  ${DOCTOR_OK} session ${short} · roster absent — launches unrecorded"
       fi
-      # THE COUNT IS THE ACTIONABLE HALF, and it is the same fact
-      # hooks/session-poker.sh raises as `NOTIFY wall-blind` at tick time — same
-      # record, same subtraction, and deliberately THE SAME CURE STRING, because
-      # two spellings of one repair read as two repairs
-      # (tests/doctor-patrol.test.sh §9 pins the literal from both files). It is
-      # printed for a present-but-incomplete roster too: the row's open count
-      # stays true, and this line says what it does not cover.
+      # THE COUNT IS THE ACTIONABLE HALF. Doctor is now the ONE surface for this
+      # fact — the tick's `NOTIFY wall-blind` diagnosis was deleted in 1.4.0
+      # (slice ADOPT; it had no "no active run" branch and false-fired pre-plan),
+      # so there is no second speller to agree with; tests/doctor-patrol.test.sh
+      # §9 pins the `patrol-wall/v1` record this reads and the library that
+      # defines it. It is printed for a present-but-incomplete roster too: the
+      # row's open count stays true, and this line says what it does not cover.
       #
       # THE LINE ENDS IN THE COMMAND and carries no cause clause, which is
       # doctor's first format rule meeting lib/width.sh's 100 columns — the
@@ -965,7 +1287,9 @@ while IFS= read -r _p_line; do
     "patrol-session/v1|"*)
       _patrol_flush
       _p_sid="$(_doctor_pfield "$_p_line" session)"
-      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind="" ;;
+      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""
+      _p_here=no
+      if _doctor_session_here "$(_doctor_pfield "$_p_line" cwd)"; then _p_here=yes; fi ;;
     "patrol-job/v1|"*)
       if [ "$(_doctor_pfield "$_p_line" kind)" = "patrol" ]; then
         _p_n_patrol=$((_p_n_patrol + 1))
@@ -991,6 +1315,220 @@ done <<EOF
 $PATROL_LINES
 EOF
 _patrol_flush
+
+# ─── This project: the run, its predecessors, and the machine ────────────────
+#
+# `DOCTOR_ROOT` and `_doctor_session_here` are resolved ABOVE the Patrol section
+# now — that section is the page's first project-scoped reader, and it cannot
+# scope itself to an address that has not been computed yet (FIX-DOCTOR/1).
+
+RUN_ROWS=""
+_run_add() { RUN_ROWS="${RUN_ROWS}$1"$'\n'; }
+
+# THE ACTIVE RUN, AS THE WALLS SEE IT (AC-8). `active_run` is the predicate every
+# always-on hook gates its own work behind; printed here rather than re-derived,
+# so a person can tell a machine whose walls are armed from one whose walls are
+# inert. The path is home-relative for the same reason every other path on this
+# page is — it is what fits, and it is what a person would type.
+#
+# THE AGE IS THE PLAN'S OWN mtime, which is what "is anyone still working on
+# this" actually turns on. A `current:` alone says a run was opened; a `current:`
+# next to a fortnight of silence says something else.
+_doctor_run_plan="$(active_run "$DOCTOR_ROOT" 2>/dev/null)" || _doctor_run_plan=""
+if [ -n "$_doctor_run_plan" ]; then
+  _doctor_run_step="$(grep -m1 '^current:' "$_doctor_run_plan" 2>/dev/null \
+                      | sed -e 's/^current:[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  _doctor_run_age="$(_doctor_file_age "$_doctor_run_plan")"
+  # PROJECT-RELATIVE, not home-relative: every plan path starts
+  # `<root>/.bionic/docs/plans/`, and the segment that identifies WHICH run is at
+  # the far end — exactly where a truncation bites. Dropping the root is what
+  # buys that end enough room to survive.
+  _doctor_run_rel="${_doctor_run_plan#"${DOCTOR_ROOT}/"}"
+  # AND THE STEP AND THE AGE ARE WHAT MUST SURVIVE THE CUT. They are the two
+  # facts a reader acts on — armed or not, and still moving or not — so they go
+  # in as the protected tail and the path absorbs the whole shortfall.
+  _run_add "$(_doctor_rtrim "$(bionic_line \
+    "$(printf '  %s %-30s ' "$DOCTOR_OK" "active run")" \
+    "$_doctor_run_rel" " · current: ${_doctor_run_step:-?} · ${_doctor_run_age}")")"
+else
+  _run_add "$(_doctor_item "$DOCTOR_NIL" "active run" "none — no open plan under this root")"
+fi
+
+# PREDECESSOR ROSTERS (AC-4's doctor line). A `/clear` re-keys the session — the
+# env and the hook payload both (probe A-probe-1/2) — and leaves the previous
+# session's roster on disk with rows nobody will ever close. Those rows are the
+# agents that outlived the conversation that launched them.
+#
+# COUNTED HERE, THROUGH THE LIBRARY, AND NEVER THROUGH THE TICK'S ADOPT VERB.
+# `patrol_roster_state` is lib/patrol.sh's own reader — the same subtraction the
+# Patrol section above already trusts — and doctor stays a rendering surface that
+# runs nothing which could write. A roster whose session is LIVE is the Patrol
+# section's subject, not this one's; only the ones whose owner is gone are listed.
+_doctor_live_sids=""
+while IFS= read -r _live_line; do
+  [ -n "$_live_line" ] || continue
+  _doctor_live_sids="${_doctor_live_sids} $(_doctor_pfield "$_live_line" session) "
+done <<EOF
+$(patrol_live_sessions 2>/dev/null)
+EOF
+for _roster in "${DOCTOR_ROOT}/.bionic/tmp/"roster-*.state; do
+  [ -f "$_roster" ] || continue
+  _r_sid="${_roster##*/roster-}"; _r_sid="${_r_sid%.state}"
+  case "$_doctor_live_sids" in *" ${_r_sid} "*) continue ;; esac
+  _r_state="$(patrol_roster_state "$DOCTOR_ROOT" "$_r_sid" 2>/dev/null)"
+  _r_open="$(_doctor_pfield "$_r_state" open)"
+  case "$_r_open" in ''|*[!0-9]*) _r_open=0 ;; esac
+  [ "$_r_open" -gt 0 ] || continue
+  _run_add "$(_doctor_item "$DOCTOR_NIL" "predecessor ${_r_sid%%-*}" \
+    "${_r_open} open $(_doctor_plural "$_r_open" row rows) — a /clear left them unclosed")"
+done
+
+# LEGACY `.bionic` SYMLINKS (AC-11). spawn-worktree.sh used to plant
+# `<wt>/.bionic -> <main>/.bionic`. lib/root.sh now steps OVER such a link and
+# never roots on it (design-ledger C2), so one left on disk is a second path to
+# the same state that nothing reads and nobody expects. Listed by name; the
+# worktree verb that deletes them is the repair, and it is named on the row.
+#
+# `-L` BEFORE `-d`, because a symlink to a directory satisfies both — the same
+# order lib/root.sh's own walk tests them in.
+_doctor_links=""; _doctor_link_n=0
+for _wt in "${DOCTOR_ROOT}/.worktrees/"*; do
+  [ -d "$_wt" ] || continue
+  [ -L "${_wt}/.bionic" ] || continue
+  _doctor_link_n=$((_doctor_link_n + 1))
+  _wt_name="${_wt##*/}"
+  _doctor_links="${_doctor_links}${_doctor_links:+, }${_wt_name}"
+done
+if [ "$_doctor_link_n" -gt 0 ]; then
+  _run_add "$(_doctor_item "$DOCTOR_BAD" "legacy .bionic symlinks" \
+    "${_doctor_link_n} under .worktrees/ (${_doctor_links})")"
+  # THE NAMES STAY ON THE ROW, NOT ON THIS LINE. A fix line in FIX_LINES_OTHER is
+  # printed whole and unbounded — the one place on this page a long string can
+  # actually break the column rule — so it carries the count and the command and
+  # nothing else, and the row above carries the list.
+  fix "${_doctor_link_n} legacy .bionic $(_doctor_plural "$_doctor_link_n" symlink symlinks) under .worktrees/ → spawn-worktree.sh remove"
+fi
+
+# RESTART NEEDED (AC-37, fold-in ratified 2026-09-03; the dead-wall incident,
+# session b1a850c1 FINDING 2026-09-03T02:06Z, carried in the plan's
+# Assumptions). The CLI snapshots hooks.json once, at process start; a hook
+# file changing on disk after that moment registers nothing in the process
+# already running — every wall this wave built stays inert in that process
+# until it exits and a new one starts. This is the one residual way a wall can
+# be silently dead after this wave, and nothing else on this page detects it.
+#
+# THE SAME TREE THE VERSION ROW ALREADY RESOLVED (DOCTOR_INSTALL_PATH,
+# DOCTOR/5), never re-derived: the registry's recorded installPath, or the
+# plugin root, whichever is a git repository — that is the plugin tree the CLI
+# actually loads. A live CLI session in THIS project whose startedAt precedes
+# that tree's hooks.json mtime registered it as it stood before the file
+# changed.
+_doctor_hooks_json="${DOCTOR_INSTALL_PATH}/hooks/hooks.json"
+_doctor_hooks_mtime="$(_patrol_mtime "$_doctor_hooks_json" 2>/dev/null)"
+case "$_doctor_hooks_mtime" in ''|*[!0-9]*) _doctor_hooks_mtime="" ;; esac
+
+# UTC, SHORT. Everywhere else on this page an absolute time renders as a
+# relative age (`_doctor_file_age`) — this is the one row where which SIDE of
+# the restart a moment falls on is the fact, so the actual clock reads print
+# rather than an elapsed duration.
+_doctor_utc_short() {  # <epoch-seconds> -> "2026-09-03 02:06Z", or empty
+  local s="${1:-}"
+  case "$s" in ''|*[!0-9]*) return 1 ;; esac
+  date -u -r "$s" +'%Y-%m-%d %H:%MZ' 2>/dev/null || date -u -d "@${s}" +'%Y-%m-%d %H:%MZ' 2>/dev/null
+}
+
+if [ -n "$_doctor_hooks_mtime" ]; then
+  while IFS= read -r _rs_line; do
+    [ -n "$_rs_line" ] || continue
+    # RESOLVED, NOT COMPARED (FIX-DOCTOR/2). A session standing one directory
+    # inside this project records that subdirectory as its cwd, and the literal
+    # equality this line used to be silently skipped it — a stale registration
+    # in the very session the reader is sitting in, never reported.
+    _rs_cwd="$(_doctor_pfield "$_rs_line" cwd)"
+    _doctor_session_here "$_rs_cwd" || continue
+    _rs_pid="$(_doctor_pfield "$_rs_line" pid)"
+    _rs_sf="$(_patrol_claude_home)/sessions/${_rs_pid}.json"
+    _rs_started_ms="$(command -v jq >/dev/null 2>&1 && jq -r '.startedAt // empty' "$_rs_sf" 2>/dev/null)"
+    case "$_rs_started_ms" in ''|*[!0-9]*) continue ;; esac
+    _rs_started_sec=$(( _rs_started_ms / 1000 ))
+    [ "$_doctor_hooks_mtime" -gt "$_rs_started_sec" ] || continue
+    _rs_started_fmt="$(_doctor_utc_short "$_rs_started_sec")"
+    _rs_hooks_fmt="$(_doctor_utc_short "$_doctor_hooks_mtime")"
+    _run_add "$(_doctor_item "$DOCTOR_BAD" "restart needed" \
+      "pid ${_rs_pid} started ${_rs_started_fmt:-?} — hooks.json changed ${_rs_hooks_fmt:-?}")"
+    fix "pid ${_rs_pid} registered a stale hooks.json → exit claude and start it again — the running process registered hooks.json as it was at ${_rs_started_fmt:-$_rs_started_ms}"
+  done <<EOF
+$(patrol_live_sessions 2>/dev/null)
+EOF
+fi
+
+# ─── The machine, and the budget each live session recorded on it ────────────
+#
+# THE READER IS THE SCHEMA'S OWNER (AC-25, L-RESOURCES/1). The attestation format
+# lives in hooks/preflight-probe.sh, so "which versions are readable" belongs
+# beside the writer that produces them rather than copied into doctor, the Step-0
+# display and the tick. `--read` is strictly read-only: no lock, no prune, no
+# session key, and exit 5 for anything it does not recognise.
+#
+# A VERSION-1 RECORD IS NOT A FAILURE. preflight-probe loads its resources
+# library FAIL-OPEN — resources are a context probe, never a blocking one — so a
+# machine whose library could not be read still attests, at version 1, with no
+# budget in it. "no budget recorded" is the honest rendering of that; five empty
+# fields dressed as a budget would not be.
+RESOURCES_ROWS=""
+_res_add() { RESOURCES_ROWS="${RESOURCES_ROWS}$1"$'\n'; }
+
+_doctor_probe_line="$(resources_probe 2>/dev/null)"
+if [ -n "$_doctor_probe_line" ]; then
+  _p_get() { printf '%s' "$_doctor_probe_line" | tr ' ' '\n' | grep "^$1=" | head -1 | cut -d= -f2-; }
+  _res_add "$(_doctor_item "$DOCTOR_NIL" "machine" \
+    "$(_p_get cores) cores · $(_p_get mem_gb) GB · $(_p_get disk_free_gb) GB free · load $(_p_get load_1m) · $(_p_get os)")"
+else
+  _res_add "$(_doctor_item "$DOCTOR_NIL" "machine" "unknown — the resources probe did not answer")"
+fi
+
+# THE SET IS THE FILES IN THIS PROJECT, NOT THE MACHINE'S LIVE SESSIONS
+# (FIX-DOCTOR/3, T3 finding 2). This loop was keyed on `patrol_live_sessions` —
+# every live CLI process anywhere on the machine — and asked of each whether an
+# attestation under ITS id existed here. Two wrong sets in one predicate: other
+# projects' sessions were iterated at all, and this project's own records were
+# dropped the instant their writer exited. A `/clear` re-keys the session, so the
+# session that TOOK the attestation is routinely gone by the time anyone runs
+# doctor; the driven page said `none has taken an attestation in this project`
+# with `preflight-4241a5cd….state` sitting in the directory it was naming.
+#
+# `<root>/.bionic/tmp/preflight-*.state` IS WHAT THE FALLBACK LINE IS A CLAIM
+# ABOUT, so it is what gets read. The path bounds the set to this project by
+# construction — no cwd resolution needed, and no other project can contribute a
+# row — and liveness stops being part of the question, which is right: an
+# attestation is a record of a measurement that happened, not a property of a
+# process that is still running.
+#
+# A GLOB, THE SAME WAY THE PREDECESSOR-ROSTER LOOP ABOVE READS ITS OWN FILES —
+# bash sorts a pathname expansion, so the page is stable across runs without
+# spending `ls` or `sort` on it. Doctor's header rule is that a diagnosis must
+# not need coreutils to run on the broken machine it exists for.
+_doctor_probe_sh="${_doctor_payload_root}/hooks/preflight-probe.sh"
+_doctor_budgets=0
+for _l_att in "${DOCTOR_ROOT}/.bionic/tmp/"preflight-*.state; do
+  [ -f "$_l_att" ] || continue
+  _l_sid="${_l_att##*/preflight-}"; _l_sid="${_l_sid%.state}"
+  [ -n "$_l_sid" ] || continue
+  _doctor_budgets=$((_doctor_budgets + 1))
+  if ! _l_rec="$(bash "$_doctor_probe_sh" --read "$_l_att" 2>/dev/null)"; then
+    _res_add "$(_doctor_item "$DOCTOR_NIL" "session ${_l_sid%%-*}" \
+      "its attestation is not one this build can read")"
+    continue
+  fi
+  _l_budget="$(printf '%s\n' "$_l_rec" | grep -m1 '^budget=' | cut -d= -f2-)"
+  if [ -n "$_l_budget" ]; then
+    _res_add "$(_doctor_item "$DOCTOR_OK" "session ${_l_sid%%-*}" "$_l_budget")"
+  else
+    _res_add "$(_doctor_item "$DOCTOR_NIL" "session ${_l_sid%%-*}" "no budget recorded")"
+  fi
+done
+[ "$_doctor_budgets" -gt 0 ] || \
+  _res_add "$(_doctor_item "$DOCTOR_NIL" "no session" "none has taken an attestation in this project")"
 
 # ─── What is left to fix ─────────────────────────────────────────────────────
 #
@@ -1034,6 +1572,18 @@ if [ "$HALF_STATE" = "yes" ]; then
   # the user pasted it into. `-S` inside `-fsSL` is what puts curl's own error
   # on the terminal; the wrapper is what stops the pipe from swallowing it.
   FIX_LINES="${FIX_LINES}      bash -c 'set -o pipefail; curl -fsSL ${BIONIC_REMOVE_RAW_URL} | bash'"$'\n'
+fi
+
+# THE RETIRED INSTALLER'S LEFTOVERS, raised HERE rather than beside the rows they
+# explain — this whole section runs before anything is printed, and a fix raised
+# from inside a render is a fix the verdict has already gone past (AC-23; the
+# rows themselves are in ENVIRONMENT, far below).
+case "$HOOK_FILES_COUNT" in
+  unknown|0) ;;
+  *) fix "${HOOK_FILES_COUNT} legacy hook $(_doctor_plural "$HOOK_FILES_COUNT" file files) in the claude-home → run /bionic:setup" ;;
+esac
+if [ "$INST_AGENT_STATE" = "present" ] && [ "$INST_AGENT_DRIFT" != "0" ]; then
+  fix "${INST_AGENT_DRIFT} installed agent $(_doctor_plural "$INST_AGENT_DRIFT" copy copies) differ from the payload → run /bionic:setup"
 fi
 
 # jq next: it gates several of the facts above, so acting on anything else while
@@ -1204,6 +1754,16 @@ case "$FEED_KIND" in
       lag)
         _doctor_native_row "$DOCTOR_BAD" "version" "$LATEST_INSTALLED" \
           "${LATEST_LATEST} available" " → claude plugin update bionic@bionic" ;;
+      ahead)
+        # NEWER THAN THE THING AN UPDATE WOULD FETCH (AC-19). Before
+        # `version_compare` landed this compare was a string inequality, which
+        # lumped ahead in with lag: doctor printed "0.0.1 available" and an
+        # update command at a machine running 1.4.0, and taking that advice
+        # would have moved it BACKWARDS. It is `–` and not ✗ for the reason the
+        # symbol rules give — true, and not actionable — so no FIX line pairs
+        # with it and none should.
+        _doctor_native_row "$DOCTOR_NIL" "version" "$LATEST_INSTALLED" \
+          "newer than the marketplace copy (${LATEST_LATEST}) — no action" ;;
       *)
         _doctor_native_row "$DOCTOR_NIL" "version" "?" "unknown — ${LATEST_CAUSE}" ;;
     esac ;;
@@ -1253,6 +1813,19 @@ case "$PLUGIN_HOOKS" in
     _doctor_native_row "$DOCTOR_BAD" "hooks" "${HOOK_RESOLVING}/${HOOK_TOTAL}" \
       "$(detect_reconverge_hint hooks)" ;;
 esac
+# THE WALLS ROW (AC-15). One row when everything resolves — four healthy walls
+# are four lines about nothing, which is format rule 4 — and one row per wall
+# that cannot, named, when any of them fails. `intact → clean` is the spec's own
+# word for the healthy case, and the ✗ here is matched by the FIX line gathered
+# beside the probe, which is the invariant these symbols are worth anything under.
+if [ "$WALLS_OK" = "$WALLS_TOTAL" ] && [ "$WALLS_TOTAL" -gt 0 ]; then
+  _doctor_native_row "$DOCTOR_OK" "walls" "${WALLS_OK}/${WALLS_TOTAL}" \
+    "every wall resolves its library"
+else
+  _doctor_native_row "$DOCTOR_BAD" "walls" "${WALLS_OK}/${WALLS_TOTAL}" \
+    "a wall that cannot read a command refuses it"
+  printf '%s' "$WALL_ROWS"
+fi
 if [ "$COMMANDS_OK" = "$COMMANDS_TOTAL" ] && [ "$COMMANDS_TOTAL" -gt 0 ]; then
   _doctor_native_row "$DOCTOR_OK" "commands" "${COMMANDS_OK}/${COMMANDS_TOTAL}" "$COMMAND_NAMES"
 else
@@ -1277,6 +1850,7 @@ case "$LOAD_STATE" in
 esac
 [ "$HALF_STATE" = "yes" ] && \
   _doctor_native_row "$DOCTOR_BAD" "install" "—" "half-uninstalled — the CLI no longer knows bionic"
+printf '%s' "$DUP_ROWS"
 
 # ─── Table 2 — what /bionic:setup put on this machine ────────────────────────
 echo ""
@@ -1361,10 +1935,61 @@ case "$LEGACY_HOOK_COUNT" in
   *) _doctor_env_row "$DOCTOR_BAD" "legacy-channel managed hooks" \
        "${LEGACY_HOOK_COUNT} in settings.json → /bionic:setup" ;;
 esac
+# HOOK FILES, WHICH ARE NOT THE SETTINGS ENTRIES ABOVE. The row above counts
+# managed-hook ENTRIES in settings.json; this one counts hook SCRIPTS the retired
+# installer copied into the claude-home, which the plugin now ships and which
+# shadow nothing but still sit there. Both were computed on every run; only the
+# first was printed. `detect_legacy_hook_files` also names the directory, which
+# is the one thing a reader needs to go look.
+case "$HOOK_FILES_COUNT" in
+  0) ;;
+  unknown)
+    _doctor_env_row "$DOCTOR_NIL" "legacy hook files" "unknown — ${HOOK_FILES_CAUSE}" ;;
+  *)
+    _doctor_env_row "$DOCTOR_BAD" "legacy hook files" \
+      "${HOOK_FILES_COUNT} in $(_doctor_tilde "$HOOK_FILES_PATH")" " → /bionic:setup" ;;
+esac
+# THE INSTALLED ROLE FILES, AND WHICH OF THEM NO LONGER MATCH THE PAYLOAD. The
+# probe compares every agent this payload ships against a same-named copy in the
+# claude-home and counts the ones that differ; nothing rendered either half. A
+# drifted copy is the actionable one — it is what a session will read instead of
+# the shipped role — so that is the row, and a clean set of copies stays silent
+# under format rule 4.
+case "$INST_AGENT_STATE" in
+  present)
+    if [ "$INST_AGENT_DRIFT" != "0" ]; then
+      _doctor_env_row "$DOCTOR_BAD" "legacy installed agent copies" \
+        "${INST_AGENT_DRIFT}/${INST_AGENT_TOTAL} differ (${INST_AGENT_NAMES//,/, })" " → /bionic:setup"
+    fi ;;
+  unknown)
+    _doctor_env_row "$DOCTOR_NIL" "legacy installed agent copies" \
+      "unknown — ${INST_AGENT_CAUSE}" ;;
+esac
+# AND THE SKILL COPY NAMES ITS DIRECTORY. The path was parsed and dropped; a row
+# that says a stale copy arms the same walls twice, without saying where it is,
+# leaves the reader to go find it.
 [ "$SKILL_COPY_STATE" = "yes" ] && \
   _doctor_env_row "$DOCTOR_BAD" "legacy installed skill copy" \
-    "arms the same walls twice → /bionic:setup"
+    "$(_doctor_tilde "$SKILL_COPY_PATH")" " → /bionic:setup"
 
+
+# ─── The resources the fleet is running on ───────────────────────────────────
+#
+# TWO KINDS OF FACT, AND THEY ARE NOT THE SAME FACT (AC-27). The first line is
+# what this machine IS, probed now. The lines under it are what each live session
+# DECIDED, read back out of the attestation that session wrote before its first
+# dispatch — and a budget is a decision, taken once, that every wall and every
+# brief then quotes. Printing only the probe would invite a reader to re-derive a
+# budget in their head and get a different number than the one the fleet is
+# actually running under; printing only the attestations would hide the machine
+# that has changed under them since.
+#
+# THE BUDGET IS QUOTED, NEVER RECOMPUTED. It is one string in the attestation, in
+# exactly the shape the plan header's `parallel-budget:` carries (L-RESOURCES/2),
+# so this page reads a string and no formula lives here.
+echo ""
+echo "RESOURCES"
+printf '%s' "$RESOURCES_ROWS"
 
 # ─── The Patrol ──────────────────────────────────────────────────────────────
 #
@@ -1372,6 +1997,11 @@ esac
 # rationale; this is just its render. Doctor still changes nothing here — a
 # `CronDelete` fix line is PRINTED, never run, and running it is the reader's
 # act in the session that owns the job.
+#
+# AND IT STAYS THE LAST SECTION OF A DEFAULT RUN. RESOURCES was placed above it
+# rather than below for that reason: the Patrol block is read from its header to
+# end of output by more than one caller, and a section appended after it would
+# arrive inside everything that reads it.
 echo ""
 echo "PATROL"
 if [ "$PATROL_LIVE" = "0" ]; then
@@ -1379,6 +2009,11 @@ if [ "$PATROL_LIVE" = "0" ]; then
 else
   printf '%s' "$PATROL_ROWS"
 fi
+# THE RUN, THE PREDECESSORS AND THE LEGACY LINKS — the three rows that are about
+# this PROJECT rather than about this machine, printed under the Patrol because
+# the Patrol is what acts on them.
+printf '%s' "$RUN_ROWS"
+
 
 # ─── The one question, and the section it appends ────────────────────────────
 #
