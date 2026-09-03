@@ -393,6 +393,12 @@ run "width.test.sh" bash tests/width.test.sh
 # probe that ran for nobody, and the allow-list there names what this slice deliberately
 # left alone.
 run "doctor-reads.test.sh" bash tests/doctor-reads.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR-RESTART, fold-in spec AC-37):
+# doctor's "restart needed" row — the CLI snapshots hooks.json once at process start, so
+# a live session whose startedAt precedes that file's mtime in the plugin tree the CLI
+# loads (DOCTOR_INSTALL_PATH, reused from the version row) is running a stale hook
+# registration. Alphabetical among the doctor-*.test.sh suites.
+run "doctor-restart.test.sh" bash tests/doctor-restart.test.sh
 # bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 5.3 and 1.4; spec AC-27,
 # AC-4's doctor line, AC-8, AC-11): doctor's RESOURCES section — the live probe, and per
 # live session the budget its preflight attestation recorded (version 1 → "no budget
