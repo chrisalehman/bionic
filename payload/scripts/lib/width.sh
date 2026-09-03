@@ -56,6 +56,18 @@ _bionic_cols_into() {  # <string> — sets BIONIC_COLS; no subshell, for the loo
   local s="${1:-}"
   s="${s//✓/.}"; s="${s//✗/.}"; s="${s//–/.}"; s="${s//—/.}"
   s="${s//≥/.}"; s="${s//…/.}"; s="${s//·/.}"
+  # THE ARROW AND THE BULLET, ADDED AT bionic 1.4.0 (spec AC-23). The arrow is
+  # the most-printed non-ASCII glyph bionic has — it opens every FIX line and it
+  # is the first character of the instruction `bionic_line` is asked to protect
+  # from a truncation — and it was not in this list. `_setup_print_plan`'s `  • `
+  # row prefix was outside it too. Both were measured three columns wide, so
+  # every budget computed from a prefix carrying one came out two columns short:
+  # the row pads short, the table steps left, and the tail is cut two characters
+  # earlier than the budget says. Found by tests/width.test.sh, which measures
+  # under `LC_ALL=C` — the locale this substitution exists for, and the one a
+  # stripped environment hands a hook. (Under a UTF-8 locale `${#s}` already
+  # counts characters, which is why nothing noticed.)
+  s="${s//→/.}"; s="${s//•/.}"
   BIONIC_COLS="${#s}"
 }
 

@@ -363,6 +363,38 @@ run "resources.test.sh" bash tests/resources.test.sh
 #     before it was deleted below; WALLS and SCHED append their own numbered sections
 #     to this same file in later slices of this wave rather than each owning a suite.
 run "docs-pins.test.sh" bash tests/docs-pins.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 3.1, spec AC-15): doctor's
+# `walls` row. The four hooks the loader idiom replaced are asked, through the idiom itself
+# (`bionic_loader_pin` driven with $0 set to each hook's own path), whether the library they
+# source still resolves; a copied payload tree with one library deleted is the fixture.
+# Hermetic: HOME and BIONIC_PLUGINS_DIR are overridden per run, so the healing candidates
+# cannot reach this machine's real registry and quietly repair the damage.
+run "doctor-walls.test.sh" bash tests/doctor-walls.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 4.6, spec AC-23):
+# scripts/lib/width.sh's closed glyph set, measured under `LC_ALL=C` — the locale the
+# substitution exists for, and the only one where the assertion is not vacuous. Section 2
+# is differential: it sweeps the glyphs doctor.sh and setup.sh actually put into a bounded
+# row and requires each to measure one column, so the next glyph someone reaches for is
+# caught here rather than by a crooked table on somebody's terminal.
+run "width.test.sh" bash tests/width.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 4.6, spec AC-23): the facts
+# doctor gathered on every invocation and printed for nobody — the installed agent copies
+# and their drift, the legacy hook FILES on disk, the duplicate-registry scan, the legacy
+# skill copy's path — plus the pnpm-store diagnosis, which used to answer three different
+# unreadable-store situations with one sentence about a cache having no surface. §7 is
+# structural: a top-level assignment in doctor.sh that nothing else in the file reads is a
+# probe that ran for nobody, and the allow-list there names what this slice deliberately
+# left alone.
+run "doctor-reads.test.sh" bash tests/doctor-reads.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 5.3 and 1.4; spec AC-27,
+# AC-4's doctor line, AC-8, AC-11): doctor's RESOURCES section — the live probe, and per
+# live session the budget its preflight attestation recorded (version 1 → "no budget
+# recorded", the honest reading of a fail-open resources load) — plus the three run-scoped
+# rows: the active run as `active_run` sees it, the predecessor rosters a /clear left with
+# open dispatches, and the legacy `.bionic` symlinks under .worktrees/. Hermetic: doctor is
+# run with its cwd inside a fixture project holding its own .bionic/, and the "live"
+# sessions name the suite's own pid.
+run "doctor-fleet.test.sh" bash tests/doctor-fleet.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
