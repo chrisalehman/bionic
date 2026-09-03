@@ -27,6 +27,13 @@
 # by whole-string match so a broken publish cannot lock the user out of the repair.
 # Every other hook prints one line and steps aside. §6 drives both classes.
 #
+# DIRECTION IS NOT REACH, and §6b drives the difference. protect-main is armed in every
+# project on the machine, so it refuses everywhere it cannot read a command. The
+# evidence gate is run-scoped: outside a run it has nothing to say, and a library it
+# cannot load does not give it something to say. A fail-closed wall must therefore know
+# whether it is armed BEFORE it refuses — from an on-disk fact, since the library that
+# would have told it is the thing that is missing.
+#
 # HERMETIC. Every fixture lives under one `mktemp -d`; HOME and BIONIC_PLUGINS_DIR are
 # overridden into it for every driven call, so nothing here reads the real ~/.claude.
 #
@@ -529,14 +536,32 @@ drive_broken() {  # <hook> <payload>
   DRV_ERR=$(cat "$SANDBOX/.err")
   return 0
 }
-bash_payload() {  # <command>
-  jq -n --arg s "$SID" --arg c "$SANDBOX" --arg m "$1" \
+bash_payload_at() {  # <command> <cwd>
+  jq -n --arg s "$SID" --arg c "$2" --arg m "$1" \
     '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$m}}'
+}
+
+# THE CLOSED CLASS IS TWO WALLS WITH DIFFERENT REACH, and each is driven where it is
+# armed. hooks/protect-main.sh guards a push in EVERY project on the machine, wave or
+# no wave, so its closed arm is driven from a cwd with no `.bionic` at all — exactly
+# where it must still refuse. hooks/canonical-sdlc-evidence-gate.sh is RUN-SCOPED: it
+# has nothing to say outside a run, and a library it cannot load does not give it
+# something to say. Its closed arm is therefore driven from a cwd where a run COULD
+# exist — a real `.bionic` above it. §6b drives the other side of that line, which is
+# the case this wave got wrong.
+GATEPROJ="$SANDBOX/gate-with-bionic"
+mkdir -p "$GATEPROJ/.bionic"
+closed_cwd() {  # <hook> -> the cwd at which that wall's closed arm is armed
+  case "$1" in
+    canonical-sdlc-evidence-gate) printf '%s\n' "$GATEPROJ" ;;
+    *) printf '%s\n' "$SANDBOX" ;;
+  esac
 }
 
 # CLOSED CLASS, refusing: a push the wall can no longer read.
 for h in protect-main canonical-sdlc-evidence-gate; do
-  drive_broken "$h" "$(bash_payload 'git push origin main')"
+  CCWD="$(closed_cwd "$h")"
+  drive_broken "$h" "$(bash_payload_at 'git push origin main' "$CCWD")"
   expect_eq "$h with no library refuses a push (exit 2)" "2" "$DRV_ST"
   expect_contains "…naming the repair verb" "claude plugin update bionic@bionic" "$DRV_ERR"
   expect_contains "…and the install verb" "claude plugin install bionic@bionic" "$DRV_ERR"
@@ -544,12 +569,12 @@ for h in protect-main canonical-sdlc-evidence-gate; do
   expect_contains "…and setup" "bash $BROKEN_REAL/scripts/setup.sh" "$DRV_ERR"
 
   # CLOSED CLASS, permitting: the repair itself, whole-string matched.
-  drive_broken "$h" "$(bash_payload "bash $BROKEN_REAL/scripts/doctor.sh")"
+  drive_broken "$h" "$(bash_payload_at "bash $BROKEN_REAL/scripts/doctor.sh" "$CCWD")"
   expect_eq "$h with no library PERMITS the doctor repair (exit 0)" "0" "$DRV_ST"
   expect_empty "…silently" "$DRV_ERR"
 
   # …and only as a whole string: a repair with a push chained after it is a push.
-  drive_broken "$h" "$(bash_payload "bash $BROKEN_REAL/scripts/doctor.sh; git push origin main")"
+  drive_broken "$h" "$(bash_payload_at "bash $BROKEN_REAL/scripts/doctor.sh; git push origin main" "$CCWD")"
   expect_eq "$h refuses the repair with a command chained after it" "2" "$DRV_ST"
 done
 
@@ -561,6 +586,86 @@ expect_empty "…writing nothing to stdout" "$DRV_OUT"
 expect_eq "…and exactly one line on stderr" "1" "$(printf '%s\n' "$DRV_ERR" | grep -c .)"
 expect_contains "…naming what it could not find" "library" "$DRV_ERR"
 expect_contains "…and where to go next" "/bionic:doctor" "$DRV_ERR"
+
+# ============================================================
+echo ""
+echo "=== 6b — a closed wall's REACH: a gate with nothing to say says nothing ==="
+# ============================================================
+#
+# THE BUG THIS PINS (Step-6 critic, finding 1, 2026-09-03). The evidence gate became
+# always-on this wave (AC-7) and is fail-CLOSED (AC-16). The two properties met at a
+# line the design did not anticipate: `loader_fail_closed` is called at LOAD time, and
+# `active_run` — the question "is this a bionic project at all?" — is answered by the
+# library that just failed to load, hundreds of lines later. So one half-updated plugin
+# refused `ls`, `npm test` and `git commit` in EVERY project on the machine, including
+# projects carrying no `.bionic` and no run. §6 above pinned only `git push origin
+# main`, which the armed gate refuses anyway, so the fixture agreed with the bug in
+# both directions.
+#
+# THE RULE. Before it refuses, the gate reads the one on-disk fact that needs no
+# library: could a run exist HERE? A run lives in a `.bionic` directory at or above the
+# payload cwd. None → exit 0, silently, saying nothing about a project it would never
+# have gated. One → the wall closes exactly as §6 drives it, repair allowlist and all.
+# Rules 3 and 4 of lib/root.sh carry over to the inline walk: a SYMLINKED `.bionic` is
+# not one, and `$HOME` and above are never inspected.
+FH="$SANDBOX/fakehome"
+mkdir -p "$FH/plain/deep" "$FH/proj/.bionic" "$FH/proj/sub" "$FH/symproj" "$FH/store"
+ln -s "$FH/store" "$FH/symproj/.bionic"
+# A `.bionic` AT $HOME. Rule 4 says $HOME and above are never inspected, so this one is
+# invisible to every walk below — and it is planted precisely so that "no .bionic
+# anywhere" is proven by the RULE rather than by an empty disk.
+mkdir -p "$FH/.bionic"
+
+drive_broken_home() {  # <hook> <home> <payload>
+  DRV_OUT=$(printf '%s' "$3" | env HOME="$2" \
+      BIONIC_PLUGINS_DIR="$SANDBOX/plugins-empty" CLAUDE_CODE_SESSION_ID="$SID" \
+      bash "$BROKEN/hooks/$1.sh" 2>"$SANDBOX/.err")
+  DRV_ST=$?
+  DRV_ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+
+# NO `.bionic` ON THE WALK: the user loses nothing, not even `ls`. The push is in this
+# list on purpose — this gate is not protect-main, and protect-main is separately
+# always-on and still refuses it (the control at the end of this section).
+for c in 'ls' 'npm test' 'git commit -m x' 'git push origin main'; do
+  drive_broken_home canonical-sdlc-evidence-gate "$FH" "$(bash_payload_at "$c" "$FH/plain/deep")"
+  expect_eq "evidence gate, no library, no .bionic: [$c] passes (exit 0)" "0" "$DRV_ST"
+  expect_empty "…saying nothing on stderr — [$c]" "$DRV_ERR"
+  expect_empty "…and nothing on stdout — [$c]" "$DRV_OUT"
+done
+
+# RULE 4, driven from $HOME ITSELF: the `.bionic` planted there is not a root.
+drive_broken_home canonical-sdlc-evidence-gate "$FH" "$(bash_payload_at 'ls' "$FH")"
+expect_eq "evidence gate, no library, a .bionic AT \$HOME: [ls] passes (exit 0)" "0" "$DRV_ST"
+expect_empty "…silently" "$DRV_ERR"
+
+# RULE 3: a `.bionic` SYMLINK is not a `.bionic` directory (user, 2026-09-02:
+# "symlinks to .bionic have been problematic"), so it does not arm the wall either.
+drive_broken_home canonical-sdlc-evidence-gate "$FH" "$(bash_payload_at 'ls' "$FH/symproj")"
+expect_eq "evidence gate, no library, SYMLINKED .bionic: [ls] passes (exit 0)" "0" "$DRV_ST"
+expect_empty "…silently" "$DRV_ERR"
+
+# THE ANTI-VACUITY CONTROL. A hook that exited 0 at line 1 would pass everything above.
+# A real `.bionic` ABOVE the cwd arms the wall, and then even `ls` is refused — the
+# unchanged fail-closed behaviour, named repair commands and all.
+drive_broken_home canonical-sdlc-evidence-gate "$FH" "$(bash_payload_at 'ls' "$FH/proj/sub")"
+expect_eq "evidence gate, no library, real .bionic above the cwd: [ls] REFUSED (exit 2)" "2" "$DRV_ST"
+expect_contains "…naming the repair verb" "claude plugin update bionic@bionic" "$DRV_ERR"
+expect_contains "…and doctor" "bash $BROKEN_REAL/scripts/doctor.sh" "$DRV_ERR"
+# …and the repair allowlist still fires from inside such a project.
+drive_broken_home canonical-sdlc-evidence-gate "$FH" \
+  "$(bash_payload_at "bash $BROKEN_REAL/scripts/doctor.sh" "$FH/proj/sub")"
+expect_eq "…and the doctor repair is still PERMITTED there (exit 0)" "0" "$DRV_ST"
+expect_empty "…silently" "$DRV_ERR"
+
+# THE DIFFERENTIAL CONTROL: protect-main's reach is deliberately every-project, so the
+# same cwd that makes the gate silent leaves protect-main refusing. If this row ever
+# goes green-by-exit-0 the walk was copied into the wrong wall.
+drive_broken_home protect-main "$FH" "$(bash_payload_at 'git push origin main' "$FH/plain/deep")"
+expect_eq "protect-main keeps its every-project reach: push refused with no .bionic (exit 2)" "2" "$DRV_ST"
+drive_broken_home protect-main "$FH" "$(bash_payload_at 'ls' "$FH/plain/deep")"
+expect_eq "…and refuses [ls] there too — it cannot read the command it must classify" "2" "$DRV_ST"
 
 # ---------------------------------------------------------------------------
 # §EXEC — every command hooks.json registers is EXECUTABLE (T3 re-drive finding 3,
