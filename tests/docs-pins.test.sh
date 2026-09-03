@@ -19,7 +19,7 @@
 # (render.sh --check's five other unrelated agreement classes are not this section's
 # concern; assertion 7 below calls it directly rather than re-implementing it).
 #
-# ANTI-VACUITY, per tests/diagrams.test.sh's differential-control pattern (that
+# ANTI-VACUITY, per tests/cross-gate-agreement.test.sh §N.1's differential-control pattern (that
 # suite's §G): a pin that only ever reads two already-agreeing files could be
 # vacuously true by extractor bug (e.g. a regex that always reports "match"). So
 # this section also re-runs its own extractors against DOCTORED copies — a help.md
