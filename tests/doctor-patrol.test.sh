@@ -697,6 +697,87 @@ expect_no_match "45: and the first project's session is now the one absent" \
   "*session ${SHORT_A}*" "$PB12"
 
 echo ""
+echo "=== Section 14: the engagement field — report only (T4/AC-16) ==="
+# THE SAME SWITCH EVERY RUN-SCOPED HOOK READS FIRST (lib/run.sh
+# `engaged_session`) — doctor's row says which side of it this session's
+# marker is on, and changes nothing on disk: the `find | sort` fingerprint
+# below is taken AFTER the fixture is fully built and BEFORE doctor runs, so
+# any write doctor itself made would show up as a mismatch.
+
+SID14="33333333-cccc-2222-3333-444455556666"
+SHORT14="${SID14%%-*}"
+spawn_live_pid; PID14="$LIVE_PID"
+REPO14="$(make_repo_with_roster "$SID14" beta -- alpha)"
+HOME14="$(make_claude_home "$SID14" "$PID14" "$REPO14")"
+TR14="$(transcript_of "$HOME14" "$SID14")"
+plant_patrol_job "$TR14" "toolu_14" "eee14141"
+plant_patrol_stamp "$REPO14" "$SID14"
+mkdir -p "$REPO14/.bionic/tmp"
+: > "$REPO14/.bionic/tmp/engaged-${SID14}.state"
+BEFORE14="$(find "$REPO14/.bionic" | sort)"
+
+OUT14="$(run_doctor "$HOME14" "$REPO14")"
+PB14="$(patrol_block "$OUT14")"
+
+expect_match "48: an engaged session's row says so" \
+  "*✓ session ${SHORT14} · 1 open dispatch · engaged*" "$PB14"
+if [ "$BEFORE14" = "$(find "$REPO14/.bionic" | sort)" ]; then
+  ok "49: doctor changed nothing on disk for an engaged session"
+else
+  no "49: doctor changed nothing on disk for an engaged session"
+fi
+
+SID15="44444444-dddd-2222-3333-444455556666"
+SHORT15="${SID15%%-*}"
+spawn_live_pid; PID15="$LIVE_PID"
+REPO15="$(make_repo_with_roster "$SID15" beta -- alpha)"
+HOME15="$(make_claude_home "$SID15" "$PID15" "$REPO15")"
+TR15="$(transcript_of "$HOME15" "$SID15")"
+plant_patrol_job "$TR15" "toolu_15" "eee15151"
+plant_patrol_stamp "$REPO15" "$SID15"
+BEFORE15="$(find "$REPO15/.bionic" | sort)"
+
+OUT15="$(run_doctor "$HOME15" "$REPO15")"
+PB15="$(patrol_block "$OUT15")"
+
+expect_match "50: a session with no marker reads not engaged" \
+  "*✓ session ${SHORT15} · 1 open dispatch · not engaged*" "$PB15"
+if [ "$BEFORE15" = "$(find "$REPO15/.bionic" | sort)" ]; then
+  ok "51: doctor changed nothing on disk for a not-engaged session"
+else
+  no "51: doctor changed nothing on disk for a not-engaged session"
+fi
+
+# The roster-absent row carries the field too — the two _patrol_add call
+# sites under `firing)` share the one computed value, so neither can drift.
+SID16="55555555-eeee-2222-3333-444455556666"
+spawn_live_pid; PID16="$LIVE_PID"
+REPO16="$(make_repo_without_roster)"
+HOME16="$(make_claude_home "$SID16" "$PID16" "$REPO16")"
+TR16="$(transcript_of "$HOME16" "$SID16")"
+plant_patrol_job "$TR16" "toolu_16" "eee16161"
+plant_agent_dispatch "$TR16" "toolu_a16"
+plant_patrol_stamp "$REPO16" "$SID16"
+
+OUT16="$(run_doctor "$HOME16" "$REPO16")"
+PB16="$(patrol_block "$OUT16")"
+
+expect_match "52: the roster-absent row carries the field too" \
+  "*roster absent — launches unrecorded · not engaged*" "$PB16"
+
+# THE COLUMN BUDGET, same ruler as Section 9 — bionic_cols/first_over_budget/
+# BIONIC_LINE_WIDTH are already sourced above.
+WIDE_ENG="$(first_over_budget "${PB14}
+${PB15}
+${PB16}")"
+if [ -z "$WIDE_ENG" ]; then
+  ok "53: every engaged/not-engaged row fits the ${BIONIC_LINE_WIDTH}-column budget"
+else
+  no "53: every engaged/not-engaged row fits the ${BIONIC_LINE_WIDTH}-column budget" \
+    "line is $(bionic_cols "$WIDE_ENG") columns: $WIDE_ENG"
+fi
+
+echo ""
 echo "========================================"
 echo "doctor-patrol: $PASS/$TOTAL passed"
 echo "========================================"

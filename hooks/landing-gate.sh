@@ -383,6 +383,17 @@ SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || SID=""
 # every other payload value on this path is sanitized and this one was not (Step-6 S-4).
 case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 
+# ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
+#
+# task-engaged-session: bionic's walls are the RUN's, not the repo's, and a run is entered
+# by invoking canonical-sdlc. A session that never did is a bystander here and must not see
+# a refusal, an advisory, or a state write from this hook. `engaged_session` (lib/run.sh) is
+# true only for a REGULAR file at `.bionic/tmp/engaged-<sid>.state`; every unreadable state —
+# absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
+# direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
+# (1.3.2 close-out ruling — the arming partition IS the consent boundary).
+engaged_session "$REPO" "$SID" || exit 0
+
 ROSTER_FILE="$REPO/.bionic/tmp/roster-${SID}.state"
 # Existence first, so a session that has dispatched nothing costs one stat. The symlink
 # guard is the write half of TDD §8: a repo controls its own .bionic/, and a link at any
@@ -392,20 +403,25 @@ ROSTER_FILE="$REPO/.bionic/tmp/roster-${SID}.state"
 [ -L "$REPO/.bionic/tmp" ] && exit 0
 [ -L "$ROSTER_FILE" ] && exit 0
 
-# ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
+# ---------- THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK (task-engaged-session) --
 #
-# One reader for "is there a run to protect": lib/run.sh's `active_run`, true while the
-# newest plan carrying `## SDLC State` has `current:` below 9, or 9 with no `delivered:`
-# Step-9 line, and no `abandoned:` frontmatter line. This was a hand-copied block —
-# resolve_docs_root, has_sdlc_state, a newest-.md walk and a `current:` parse — restated
-# in five hooks and held together by an agreement suite that could only prove they had
-# not drifted YET. A marker-less .md winning the newest race disarmed the dispatch wall
-# repo-wide for ~15 minutes on 2026-08-15; one owner is what ends that class
-# (record/session-20260815-landing-supervision/t8-forensic-read.md).
-PLAN=$(active_run "$REPO") || exit 0
-[ -n "$PLAN" ] && [ -f "$PLAN" ] || exit 0
+# It used to take the run predicate here — `PLAN=$(active_run <repo>)`, exit 0 on false —
+# and nothing below ever consulted
+# the value: the contract this gate enforces is a roster row this
+# session's own dispatch wall wrote, and the verdict is hooks/session-sweeper.sh's.
+# The plan answered WHETHER, which is now engagement's question and is answered above.
+#
+# WHY THIS HOOK MOVES WITH THE DISPATCH WALL RATHER THAN KEEPING A RUN GATE. The four
+# members of the roster lifecycle — hooks/dispatch-preflight.sh writes an `intended` row,
+# this family confirms it, the landing gate takes its verdict, the stop gate polices the
+# stop — have to share one scope or the lifecycle splits: the dispatch wall runs for an
+# engaged session with no plan yet (AC-23, a fresh run's Step 0 precedes its plan), and a
+# recorder or a gate that stayed silent for want of a plan would leave rows nothing ever
+# answers for. A landing contract also OUTLIVES the run that created it — engagement does
+# not end when `current:` reaches 9 (plan §Lifecycle) — and a verdict owed on an agent this
+# session launched is owed after the run closes too.
 
-# ---------- a wave is active: sweep ----------
+# ---------- this session is engaged: sweep ----------
 
 # The sweeper is this script's SIBLING — the payload ships every hooks/*.sh in one
 # directory, so the same resolution holds in the repo and under the mounted plugin's

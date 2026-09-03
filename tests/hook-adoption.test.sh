@@ -65,21 +65,41 @@ expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "[$2] not found i
 #   name | fail class (closed|open) | run-scoped (yes|no)
 #
 # RUN-SCOPED IS NOT THE SAME AS ADOPTED. hooks/protect-main.sh and
-# hooks/protect-database.sh guard damage that is wrong in every project on the
-# machine, wave or no wave, so they never consult the run. Everything else is a
+# hooks/protect-database.sh guard damage that is wrong in every project the session
+# ENGAGED bionic in, wave or no wave, so they never consult the run. (Machine-wide is what
+# they were until 2026-09-03; Chris's ruling put every wall behind the engagement marker,
+# which is why protect-database now carries a loader at all — the predicate lives in the
+# library. Its direction is OPEN: a wall whose scope it cannot read must not bind a
+# session that never consented.) Everything else is a
 # governance hook: it has nothing to say outside a run and must say nothing.
 # background-suite-guard runs only behind agent-context-guard, whose own roster
 # check already scopes it, so it loads the library without the run predicate.
+# engage.sh is the one `yes` that is not a gate. It calls `active_run` to fill the
+# marker's `plan=` field and writes the marker either way — engagement is what decides
+# WHETHER a wall acts, the plan only WHAT — so the third column here records that the
+# call is present, which is all this suite can see, and tests/engage.test.sh owns the
+# behaviour the column cannot express (AC-18: no plan on disk, marker still written).
+#
+# THE THIRD COLUMN IS NARROWER SINCE task-engaged-session, and the change is a change of
+# SUBJECT, not of coverage. What scopes a hook now is ENGAGEMENT — this session having
+# invoked canonical-sdlc, `engaged_session` in lib/run.sh — and the run predicate is left
+# only where a hook reads the plan for DATA: dispatch-preflight for the budget ceiling,
+# context-spend for the step boundary, patrol-duties-gate for the plan basename,
+# patrol-revive for the run its Patrol serves. landing-gate, execution-recorder and
+# stop-guard read nothing out of the plan: they are the roster lifecycle, which begins
+# before a plan exists (a run's Step 0 precedes its plan) and outlives the run that
+# created it, so their `active_run` reads are gone and their rows say `no`.
 ADOPTED='
 protect-main|closed|no
+protect-database|open|no
 canonical-sdlc-evidence-gate|closed|yes
-farm-out-reminder|open|yes
+farm-out-reminder|open|no
 background-suite-guard|open|no
 dispatch-preflight|open|yes
 canonical-sdlc-governing-skill|open|yes
-landing-gate|open|yes
-execution-recorder|open|yes
-stop-guard|open|yes
+landing-gate|open|no
+execution-recorder|open|no
+stop-guard|open|no
 context-spend|open|yes
 patrol-duties-gate|open|yes
 patrol-revive|open|yes
@@ -88,6 +108,7 @@ preflight-probe|open|no
 stop-orders|open|no
 session-sweeper|open|no
 stop-check|open|no
+engage|open|yes
 '
 
 # ============================================================
@@ -198,7 +219,8 @@ echo "=== 3 — one session id: every reader asks the library ==="
 # over the record, which is the divergence R-1 measured. So: every hook that
 # derives a session id calls `session_id`, and the payload read that remains is
 # the ARGUMENT to that call, never the answer.
-SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start'
+SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start engage patrol-duties-gate stop-guard
+canonical-sdlc-evidence-gate canonical-sdlc-governing-skill protect-main protect-database background-suite-guard'
 for name in $SID_READERS; do
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
@@ -211,7 +233,7 @@ done
 
 # THE LIST IS COMPLETE, not just each named member correct (auditor A-1, AC-2): a static
 # list can omit a real reader forever and every row above still passes silently.
-# session-start.sh was exactly that member — the wave's own twelfth session_id caller,
+# session-start.sh was exactly that member — a session_id caller this wave added,
 # unpinned by this list until the line above — so the roster is now also DERIVED from the
 # tree and compared to the hand-written one, byte for byte, the same technique used above
 # for the private-resolver family (`ADOPTED`/no-stragglers, §1).
@@ -275,8 +297,18 @@ mk_root() {
   local name="$1" state="$2"
   local root="$SANDBOX/roots/$name"
   mkdir -p "$root"
+  # `none` STAYS UNENGAGED, and cannot be otherwise: engagement's marker lives in
+  # `.bionic/tmp`, so a project with no `.bionic` at all is by construction a project this
+  # session never triggered bionic in. That is what the `none` arms below now assert, and
+  # it is the same silence they always asserted.
   [ "$state" = "none" ] && { printf '%s' "$root"; return 0; }
   mkdir -p "$root/.bionic/docs/plans/epic-99" "$root/.bionic/tmp"
+  # ENGAGED (task-engaged-session, 2026-09-03): every hook in this file asks whether the
+  # session invoked the canonical-sdlc skill before it asks anything else, so a fixture
+  # meant to exercise the RUN predicate has to get past that question first. Without this
+  # line every silence assertion below would hold for the wrong reason and the §5
+  # anti-vacuity control would have nothing left to discriminate.
+  : > "$root/.bionic/tmp/engaged-$SID.state"
   local cur="4" step9="- Step 9: (pending)"
   case "$state" in
     closed) cur="9"; step9="- Step 9: delivered: record/x.md" ;;
@@ -317,6 +349,14 @@ PLAN
 # skipped them would make every silence below unfalsifiable.
 seed_hook() {  # <hook> <root>
   local hook="$1" root="$2" ts
+  # ENGAGEMENT IS NOW A PRECONDITION OF REACHING THE RUN PREDICATE AT ALL
+  # (task-engaged-session). Every hook below asks `engaged_session` before it asks
+  # `active_run`, so without this marker each fixture would be silent for the wrong reason
+  # and §5's silence assertions — and the control that discriminates them — would prove
+  # nothing about the predicate they are named for. Planted here rather than in mk_root so
+  # the `none` fixture, which deliberately has no .bionic at all, keeps its meaning.
+  mkdir -p "$root/.bionic/tmp" 2>/dev/null || true
+  : > "$root/.bionic/tmp/engaged-$SID.state"
   case "$hook" in
     landing-gate|execution-recorder|stop-guard)
       {
@@ -356,8 +396,13 @@ mkdir -p "$SANDBOX/home" "$SANDBOX/plugins"
 # A transcript the Stop-channel hooks can parse: one user prompt that IS a Patrol
 # tick, and no duties after it — the shape patrol-duties-gate refuses.
 TICK_TR="$SANDBOX/tick.jsonl"
+# THE PATROL MARKER LEADS THE ROW (task-engaged-session T6, AC-22). A tick used to be any
+# USER row containing `session-poker.sh tick`, which the injected canonical-sdlc SKILL.md
+# body also contains; it is now a row whose FIRST TOKEN is `bionic-patrol session=<sid8>`
+# for this session. hooks/patrol-duties-gate.sh reads no other shape, so a fixture carrying
+# the old one leaves this hook inert and every assertion about it vacuous.
 printf '%s\n' \
-  '{"type":"user","message":{"role":"user","content":"bash hooks/session-poker.sh tick"}}' \
+  "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"bionic-patrol session=${SID:0:8} — Patrol tick. Run: bash hooks/session-poker.sh tick\"}}" \
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"file_path":"/x"}}],"usage":{"input_tokens":1000}}}' \
   > "$TICK_TR"
 
@@ -405,7 +450,19 @@ payload_for() {
 # that CREATES a run — a wave's plan, written into a project that has no plan yet — so
 # `active_run` is false at the exact moment the frontmatter contract must bind. It is
 # armed by the PROJECT instead, and §5b drives that rule on its own terms.
-RUN_SCOPED='canonical-sdlc-evidence-gate farm-out-reminder stop-guard execution-recorder context-spend patrol-duties-gate patrol-revive landing-gate dispatch-preflight'
+# NARROWED AT task-engaged-session, for the reason §4's preamble gives: a hook is scoped by
+# ENGAGEMENT now, and only a hook that still reads the plan for data can be silent because
+# the run is closed. dispatch-preflight, landing-gate, execution-recorder, stop-guard and
+# patrol-duties-gate left this loop — every one of them acts for an ENGAGED session whether
+# or not a plan is on disk (AC-23), which is the change this wave exists to make. Their
+# scoping is driven in their own suites, on the switch that actually scopes them: marker
+# absent -> silent, marker present -> the same behaviour as today.
+# farm-out-reminder LEFT TOO, at step-6 review R-1. It had kept `active_run` below its new
+# engagement guard, which made the nudge plan-bound against a design that says the opposite:
+# knowing a suite command belongs in a subagent needs no plan, and the sessions most in need
+# of the reminder are the ones in Step 0 through Step 3 that have not written one. The
+# paired arms live in tests/cmd-class.test.sh §R-1.
+RUN_SCOPED='canonical-sdlc-evidence-gate context-spend patrol-revive'
 
 # unrun_mutant <hook> -> a copy of the hook with the run predicate neutralised
 #
@@ -479,6 +536,58 @@ done
 
 # ============================================================
 echo ""
+echo "=== 5c — THE ENGAGEMENT SWITCH gates every hook, uniformly (task-engaged-session) ==="
+# ============================================================
+#
+# §5 above asks whether a hook is silent when the RUN is closed. This asks the question
+# that scopes every hook now: is it silent when THIS SESSION never invoked canonical-sdlc?
+# It is the uniformity claim §5 used to carry for the five hooks that left its loop — each
+# of them is driven in its own suite too, but a per-hook suite cannot show that the roster
+# agrees, and a switch that one hook spells differently is a hook that stays armed for a
+# bystander.
+#
+# The pairing is the same shape §5 uses: the silence is worthless without the demonstration
+# that THIS payload, in THIS fixture, produces something once the marker is there.
+# The roster is the seven hooks task-engaged-session T2 moved behind the switch.
+# canonical-sdlc-evidence-gate, canonical-sdlc-governing-skill and farm-out-reminder are
+# T3's and join this list with their own guard, in their own commit.
+ENGAGEMENT_SCOPED='dispatch-preflight landing-gate execution-recorder stop-guard patrol-duties-gate patrol-revive context-spend'
+
+for hook in $ENGAGEMENT_SCOPED; do
+  # an OPEN run, every precondition seeded, and the marker deliberately removed
+  r_eng=$(mk_root "$hook-eng" open)
+  seed_hook "$hook" "$r_eng"
+  rm -f "$r_eng/.bionic/tmp/engaged-$SID.state"
+  drive "$hook" "$(payload_for "$hook" "$r_eng")"
+  expect_eq "$hook: open run, NO engagement marker -> exit 0" "0" "$DRV_ST"
+  expect_empty "$hook: open run, NO engagement marker -> no stdout" "$DRV_OUT"
+  expect_empty "$hook: open run, NO engagement marker -> no stderr" "$DRV_ERR"
+
+  # ANTI-VACUITY: the same payload, the same fixture, the marker restored.
+  : > "$r_eng/.bionic/tmp/engaged-$SID.state"
+  drive "$hook" "$(payload_for "$hook" "$r_eng")"
+  wrote=""
+  [ -n "$(ls -A "$r_eng/.bionic/tmp" 2>/dev/null | /usr/bin/grep -v "^patrol-\|^roster-\|^engaged-" || true)" ] && wrote="state"
+  /usr/bin/grep -q 'status=identified\|status=confirmed\|landing-swept' "$r_eng/.bionic/tmp/roster-$SID.state" 2>/dev/null && wrote="roster"
+  if [ "$DRV_ST" -ne 0 ] || [ -n "$DRV_OUT" ] || [ -n "$DRV_ERR" ] || [ -n "$wrote" ]; then
+    ok "$hook: with the marker restored the SAME payload is not silent (control)"
+  else
+    no "$hook: with the marker restored the SAME payload is not silent (control)" \
+       "exit $DRV_ST, no output, no state — the silence assertions above prove nothing"
+  fi
+
+  # a SYMLINK at the marker path reads as ABSENT, never followed — the one shape a repo
+  # controls that must not be able to OPEN a wall.
+  rm -f "$r_eng/.bionic/tmp/engaged-$SID.state"
+  ln -s "$SANDBOX/eng-decoy" "$r_eng/.bionic/tmp/engaged-$SID.state"
+  printf 'plan=none\n' > "$SANDBOX/eng-decoy"
+  drive "$hook" "$(payload_for "$hook" "$r_eng")"
+  expect_eq "$hook: a SYMLINK at the marker path is not an engagement" "0" "$DRV_ST"
+  expect_empty "$hook: …and it says nothing" "$DRV_ERR"
+done
+
+# ============================================================
+echo ""
 echo "=== 5b — the artifact wall is armed by the PROJECT, not by the run (ADOPT/5) ==="
 # ============================================================
 #
@@ -493,7 +602,13 @@ echo "=== 5b — the artifact wall is armed by the PROJECT, not by the run (ADOP
 # project is gated even with no run; the same write in a project that has nothing to do
 # with this lifecycle, claiming nothing, is not this gate's business.
 GS_UNRELATED="$SANDBOX/roots/gs-unrelated"
-mkdir -p "$GS_UNRELATED/docs/plans"
+mkdir -p "$GS_UNRELATED/docs/plans" "$GS_UNRELATED/.bionic/tmp"
+# ENGAGED, and that is what makes these two rows a discrimination rather than a pair of
+# silences. The clause under test is the CONTENT clause — a file that calls itself a
+# canonical-sdlc artifact is one wherever it lands — and it can only be reached in a
+# session bionic was triggered in. "Unrelated" here means the artifact is unrelated, not
+# the project.
+: > "$GS_UNRELATED/.bionic/tmp/engaged-$SID.state"
 drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_UNRELATED" \
   --arg p "$GS_UNRELATED/docs/plans/deploy.plan.md" \
   '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Write",
@@ -508,7 +623,12 @@ drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_UNRELA
     tool_input:{file_path:$p,content:"---\ncanonical_sdlc_version: 14\n---\n\n# deploy\n"}}')"
 expect_eq "…but the same write DECLARING canonical_sdlc_version is refused as misplaced" "2" "$DRV_ST"
 
+# The first-artifact clause, in a project whose `.bionic` does not exist yet — except for
+# the one directory engagement itself created, which is exactly the state a real first
+# artifact is written in.
 GS_FIRST=$(mk_root gs-first none)
+mkdir -p "$GS_FIRST/.bionic/tmp"
+: > "$GS_FIRST/.bionic/tmp/engaged-$SID.state"
 drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_FIRST" \
   --arg p "$GS_FIRST/.bionic/docs/plans/epic-01/wave-01.plan.md" \
   '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Write",

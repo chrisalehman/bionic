@@ -204,6 +204,17 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
 }
 
+# ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
+#
+# task-engaged-session: bionic's walls are the RUN's, not the repo's, and a run is entered
+# by invoking canonical-sdlc. A session that never did is a bystander here and must not see
+# a refusal, an advisory, or a state write from this hook. `engaged_session` (lib/run.sh) is
+# true only for a REGULAR file at `.bionic/tmp/engaged-<sid>.state`; every unreadable state —
+# absent, symlink, foreign sid, and the `unknown` fallback this hook substitutes above —
+# reads as NOT engaged. Silent, exit 0: the direction §7 gives every start-side ambiguity,
+# and here it is the consent boundary itself (1.3.2 close-out ruling).
+engaged_session "$PROJECT_DIR" "$SESSION_ID" || exit 0
+
 # ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
 #
 # The plan AND the arming question, from one reader. This hook used to answer "which
@@ -211,7 +222,14 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
 # five hooks were each answering differently, and the one that ignored the
 # `## SDLC State` marker entirely, so any newest .md under plans/ could become the file
 # it attributed a step boundary to.
-PLAN=$(active_run "$PROJECT_DIR") || exit 0
+#
+# PLAN-BOUND, WHOLLY (task-engaged-session). Engagement decides WHETHER this hook acts and
+# has decided yes above; what remains is the plan deciding WHAT, and every line below
+# measures against it — the step boundary comes from the plan's `current:`, the state file
+# is keyed by (plan, session), and the audit line names the plan. An engaged session with no
+# plan on disk has no step boundary to record, so this arm skips rather than the hook being
+# out of scope. The exit is an arm skip now, not the scoping decision it used to be.
+PLAN=$(active_run "$PROJECT_DIR") || PLAN=""
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || exit 0
 
 # current: from ## SDLC State — CR-normalized, fence-aware (the evidence-gate

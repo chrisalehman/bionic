@@ -63,6 +63,20 @@ call_active_run() {  # <root> -> sets AR_OUT, AR_ST
   AR_OUT=$(bash -c '. "$1" || exit 1; active_run "$2"' _ "$LIB" "$1" 2>"$SANDBOX/.err")
   AR_ST=$?
 }
+# call_active_run_pf <root> -> sets AR_OUT, AR_ST, from a child bash with `set -uo
+# pipefail` ENABLED IN THAT CHILD. `set -o` options are shell-local, not inherited by a
+# nested `bash -c` merely because the parent process has them set (verified: SHELLOPTS
+# does not carry pipefail across this bash's own `bash -c` boundary on this machine) — so
+# call_active_run above, run under this suite's own top-of-file `set -uo pipefail`,
+# NEVER actually exercises active_run under pipefail; every hook that calls this library
+# sources it directly in ITS OWN shell, where its own `set -uo pipefail` (dispatch-preflight
+# .sh:66 et al.) is genuinely in effect. This helper re-states the option inside the child
+# so the R4 fixtures below test the real production condition, not an inherited illusion
+# of it (AC-21).
+call_active_run_pf() {
+  AR_OUT=$(bash -c 'set -uo pipefail; . "$1" || exit 1; active_run "$2"' _ "$LIB" "$1" 2>"$SANDBOX/.err")
+  AR_ST=$?
+}
 AP_OUT=""; AP_ST=0
 call_active_plan() {  # <root> -> sets AP_OUT, AP_ST
   AP_OUT=$(bash -c '. "$1" || exit 1; active_plan "$2"' _ "$LIB" "$1" 2>"$SANDBOX/.err")
@@ -213,6 +227,147 @@ mv "$R/.bionic/docs/plans/epic-99/sub/wave-01.plan.md" "$R/.bionic/docs/plans/ep
 call_active_plan "$R"
 expect_eq "…while the same file at depth 2 is found (the fixture measures depth)" \
   "$R/.bionic/docs/plans/epic-99/wave-01.plan.md" "$AP_OUT"
+
+# ============================================================
+echo
+echo "=== R4 — SIGPIPE-under-pipefail does not flip a >64 KB plan's verdict (AC-21) ==="
+# ============================================================
+#
+# WHY THIS SECTION EXISTS AND R0-R3 DID NOT CATCH IT (research-refusal.md VERDICT,
+# 2026-09-03). `active_run` decides Step 9 by `_run_lines "$plan" | grep -qE
+# '…delivered:'`. `grep -q`/`-m1` exit at their FIRST match; the awk feeding them is
+# still writing when a match sits well before end-of-file, awk takes SIGPIPE and reports
+# 141, and this whole suite runs under `set -uo pipefail` (line 24) — same as every hook
+# that calls this library — so the PIPELINE's status becomes 141, not the grep's own 0.
+# `if pipeline; then return 1; fi` reads that as false: a CLOSED run (current: 9,
+# `delivered:` present) falls through to the Step-9-open arm and reads OPEN. Every fixture
+# in R0-R3 is a handful of lines, so `awk` always finishes writing before `grep` even
+# looks — too small to reach the SIGPIPE window at all. This section is the one place in
+# the suite where the fixture is deliberately padded PAST that window, on this shell's own
+# options, so a regression here is caught by size rather than only by content.
+#
+# THE MEASURED THRESHOLD (research-refusal.md INSTRUMENT §threshold table, this machine):
+# 16 167 bytes never flips, 20 214 bytes flips 5/5. 64 KB is the plan's own AC-21 floor —
+# comfortably past the measured knee — so every fixture below pads to that literal target,
+# and each one asserts its own size to keep the premise visible if the target ever drifts.
+
+mk_filler() {  # <min-bytes> -> that many-or-more bytes of inert filler lines on stdout
+  local target="$1" n=0
+  while [ "$n" -lt "$target" ]; do
+    echo "filler filler filler filler filler filler filler filler filler filler"
+    n=$((n + 72))
+  done
+}
+FILLER_TARGET=70000   # > 64 KB (65536) with margin
+
+# --- Step 9 delivered:, filler AFTER the state block, > 64 KB -> CLOSED ---
+R="$SANDBOX/r4a"; mkdir -p "$R/.bionic/docs/plans"
+F="$R/.bionic/docs/plans/wave.plan.md"
+{
+  echo "---"
+  echo "governing-skill: superpowers:writing-plans"
+  echo "sdlc-step: 9"
+  echo "---"
+  echo
+  echo "# fixture plan"
+  echo
+  echo "## SDLC State"
+  echo
+  echo "integration-branch: main"
+  echo "current: 9"
+  echo "- Step 9: report record/x.md, delivered: 2026-09-02"
+  echo
+  echo "## Notes"
+  echo
+  mk_filler "$FILLER_TARGET"
+} > "$F"
+SZ=$(wc -c < "$F" | tr -d '[:space:]')
+expect_eq "r4a fixture is actually past 64 KB (size=$SZ)" "yes" "$([ "$SZ" -gt 65536 ] && echo yes || echo no)"
+call_active_run_pf "$R"
+expect_eq "Step 9 delivered:, filler AFTER state, >64 KB -> active_run exits 1 (closed)" 1 "$AR_ST"
+expect_empty "…and prints nothing" "$AR_OUT"
+
+# --- Step 9 delivered:, filler BEFORE the state block, > 64 KB -> CLOSED ---
+R="$SANDBOX/r4b"; mkdir -p "$R/.bionic/docs/plans"
+F="$R/.bionic/docs/plans/wave.plan.md"
+{
+  echo "---"
+  echo "governing-skill: superpowers:writing-plans"
+  echo "sdlc-step: 9"
+  echo "---"
+  echo
+  echo "# fixture plan"
+  echo
+  echo "## Notes"
+  echo
+  mk_filler "$FILLER_TARGET"
+  echo
+  echo "## SDLC State"
+  echo
+  echo "integration-branch: main"
+  echo "current: 9"
+  echo "- Step 9: report record/x.md, delivered: 2026-09-02"
+} > "$F"
+SZ=$(wc -c < "$F" | tr -d '[:space:]')
+expect_eq "r4b fixture is actually past 64 KB (size=$SZ)" "yes" "$([ "$SZ" -gt 65536 ] && echo yes || echo no)"
+call_active_run_pf "$R"
+expect_eq "Step 9 delivered:, filler BEFORE state, >64 KB -> active_run exits 1 (closed)" 1 "$AR_ST"
+expect_empty "…and prints nothing" "$AR_OUT"
+
+# --- paired positive: current: 4, > 64 KB -> stays OPEN ---
+R="$SANDBOX/r4c"; mkdir -p "$R/.bionic/docs/plans"
+F="$R/.bionic/docs/plans/wave.plan.md"
+{
+  echo "---"
+  echo "governing-skill: superpowers:writing-plans"
+  echo "sdlc-step: 4"
+  echo "---"
+  echo
+  echo "# fixture plan"
+  echo
+  echo "## SDLC State"
+  echo
+  echo "integration-branch: main"
+  echo "current: 4"
+  echo "- Step 4: in progress"
+  echo
+  echo "## Notes"
+  echo
+  mk_filler "$FILLER_TARGET"
+} > "$F"
+SZ=$(wc -c < "$F" | tr -d '[:space:]')
+expect_eq "r4c fixture is actually past 64 KB (size=$SZ)" "yes" "$([ "$SZ" -gt 65536 ] && echo yes || echo no)"
+call_active_run_pf "$R"
+expect_eq "current: 4, >64 KB -> active_run exits 0 (open, paired positive)" 0 "$AR_ST"
+expect_eq "…and prints the plan path" "$F" "$AR_OUT"
+
+# --- paired positive: frontmatter abandoned:, > 64 KB -> CLOSED ---
+R="$SANDBOX/r4d"; mkdir -p "$R/.bionic/docs/plans"
+F="$R/.bionic/docs/plans/wave.plan.md"
+{
+  echo "---"
+  echo "governing-skill: superpowers:writing-plans"
+  echo "sdlc-step: 4"
+  echo "abandoned: chris 2026-09-03"
+  echo "---"
+  echo
+  echo "# fixture plan"
+  echo
+  echo "## SDLC State"
+  echo
+  echo "integration-branch: main"
+  echo "current: 4"
+  echo "- Step 4: in progress"
+  echo
+  echo "## Notes"
+  echo
+  mk_filler "$FILLER_TARGET"
+} > "$F"
+SZ=$(wc -c < "$F" | tr -d '[:space:]')
+expect_eq "r4d fixture is actually past 64 KB (size=$SZ)" "yes" "$([ "$SZ" -gt 65536 ] && echo yes || echo no)"
+call_active_run_pf "$R"
+expect_eq "frontmatter abandoned:, >64 KB -> active_run exits 1 (closed, paired positive)" 1 "$AR_ST"
+expect_empty "…and prints nothing" "$AR_OUT"
 
 # ============================================================
 echo

@@ -55,7 +55,7 @@ COMMAND=$(_jq '.tool_input.command')
 # cheap next to refusing every backgrounded command in every session on the machine
 # because one file is missing. The failure directions in this repo are chosen by the
 # cost of the mistake, never uniformly.
-BIONIC_LIB_WANT="cmd-class.sh"
+BIONIC_LIB_WANT="cmd-class.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -186,6 +186,38 @@ BIONIC_LOADER_REFUSE
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "background-suite-guard"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/cmd-class.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/root.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/run.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/session.sh"
+
+# ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
+#
+# FIRST, above every other scoping question this hook asks. Chris, 2026-09-03: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
+# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A session that
+# never invoked it is one this hook has nothing to say to, and it says nothing: exit 0,
+# no stdout, no stderr.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The marker is the one artifact whose
+# PRESENCE opens a wall, so the fail direction is inverted here on purpose: the arming
+# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
+# which never consented is the defect this guard exists to remove.
+# [WALL: tests/cmd-class.test.sh]
+#
+# ASKED HERE TOO, though hooks/agent-context-guard.sh in front asks the same question:
+# that guard owns the agent context and the roster, this one is driven straight by its
+# own suite, and a wall whose scope depends on a caller remembering to check it is a
+# wall with no scope of its own.
+BSG_CWD=$(_jq '.cwd')
+[ -n "$BSG_CWD" ] || BSG_CWD=$(pwd)
+BSG_REPO=$(project_root "$BSG_CWD")
+BSG_SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || BSG_SID=""
+engaged_session "$BSG_REPO" "$BSG_SID" || exit 0
 
 [ "$(cmd_class "$COMMAND")" = "suite" ] || exit 0
 

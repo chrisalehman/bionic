@@ -210,6 +210,12 @@ roster_of() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "${2:-$SID}"; }
 new_roster() {  # <repo> [sid]
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
     > "$(roster_of "$1" "${2:-$SID}")"
+  # THE ROSTER AND THE ENGAGEMENT MARKER TRAVEL TOGETHER (task-engaged-session): a roster
+  # exists because an engaged session dispatched, and this gate asks `engaged_session`
+  # before it looks for a roster at all. Without the marker every assertion in this file
+  # would be satisfied by a hook that exits at its first line. §E drives the other
+  # direction, on the same fixtures.
+  : > "$1/.bionic/tmp/engaged-${2:-$SID}.state"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -504,14 +510,54 @@ expect_eq "4i-mut: …and nothing is marked — the row was dropped by the blank
   "0" "$(swept_count "$R4I_MUT")"
 
 # ================================================================= Section 5
-section "Section 5: no active wave — nothing to hold anyone to"
+section "Section 5: ENGAGEMENT, not the plan, is what holds anyone to anything"
+
+# THE SUBJECT OF THIS SECTION CHANGED AT task-engaged-session. It used to be "no active
+# wave — nothing to hold anyone to", scoping the gate by `active_run`. That is the defect
+# this wave fixes from the other side: the plan gated every SESSION in the repo, including
+# ones that never entered bionic, while a landing contract is owed by the session that
+# LAUNCHED the agent — a fact that predates the plan (a run's Step 0 writes the roster
+# before it writes the plan) and outlives it (engagement does not end when `current:`
+# reaches 9). So the gate reads no plan at all now, and the fixtures below keep their
+# shapes with their expectations moved onto the switch that actually scopes them.
 
 R5="$(make_repo r5)"
 new_roster "$R5"
 add_row "$R5" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R5" "$SID" false)"
-expect_status "5a: no plan at all — the same unmet roster passes" "0" "$RC"
+expect_status "5a: no plan at all — an ENGAGED session still owes its verdict" "2" "$RC"
+R5_REFUSAL="$OUT_STDERR"
+
+rm -f "$R5/.bionic/tmp/engaged-$SID.state"
+run_gate "$GATE" "$(stop_payload "$R5" "$SID" false)"
+expect_status "5a-neg: the same unmet roster, unengaged, passes" "0" "$RC"
+expect_empty "5a-neg: …silently" "$OUT_STDERR"
+
+# a SYMLINK at the marker path reads as ABSENT, never followed.
+R5_DECOY="$SANDBOX/r5-decoy-marker"; printf 'plan=none\n' > "$R5_DECOY"
+ln -s "$R5_DECOY" "$R5/.bionic/tmp/engaged-$SID.state"
+run_gate "$GATE" "$(stop_payload "$R5" "$SID" false)"
+expect_status "5a-sym: a symlink at the marker path is not an engagement" "0" "$RC"
+expect_empty "5a-sym: …silently" "$OUT_STDERR"
+rm -f "$R5/.bionic/tmp/engaged-$SID.state"
+
+# ANOTHER session's marker is not this session's.
+: > "$R5/.bionic/tmp/engaged-$SID_B.state"
+run_gate "$GATE" "$(stop_payload "$R5" "$SID" false)"
+expect_status "5a-foreign: another session's marker is not this session's engagement" "0" "$RC"
+rm -f "$R5/.bionic/tmp/engaged-$SID_B.state"
+
+# restored, the refusal returns byte for byte. ON A FRESH ROSTER, because this gate blocks
+# ONCE per row: the first refusal above journalled its own `landing-swept/v1|` marker, and
+# re-driving the same file would compare the refusal against the silence that marker is
+# supposed to produce.
+R5BACK="$(make_repo r5back)"
+new_roster "$R5BACK"
+add_row "$R5BACK" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
+  launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(stop_payload "$R5BACK" "$SID" false)"
+expect_eq "5a-back: engaged with no plan, the refusal is byte-identical to 5a" "$R5_REFUSAL" "$OUT_STDERR"
 
 R5B="$(make_repo r5b)"
 plan_fenced_only "$R5B"
@@ -519,7 +565,7 @@ new_roster "$R5B"
 add_row "$R5B" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$R5B" "$SID" false)"
-expect_status "5b: a fenced-only SDLC State is documentation, not a live wave — pass" "0" "$RC"
+expect_status "5b: a fenced-only SDLC State changes nothing either way — the roster decides" "2" "$RC"
 
 # ================================================================= Section 6
 section "Section 6: fail-open — every way the verdict can fail to answer"
@@ -783,7 +829,13 @@ new_roster "$R12H"
 add_row "$R12H" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
   deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(substop_payload "$R12H" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
-expect_status "12h: no active wave — a teammate is held to nothing" "0" "$RC"
+expect_status "12h: no plan — an engaged session's teammate is still held to its contract" "2" "$RC"
+
+# and the same teammate, unengaged, is held to nothing at all.
+rm -f "$R12H/.bionic/tmp/engaged-$SID.state"
+run_gate "$GATE" "$(substop_payload "$R12H" "$SID" "$TEAM_AID" w2mate false "$TEAM_BG")"
+expect_status "12h-neg: …and unengaged, held to nothing" "0" "$RC"
+expect_empty "12h-neg: …silently" "$OUT_STDERR"
 
 R12I="$(make_wave_repo r12i)"
 add_row "$R12I" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
