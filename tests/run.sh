@@ -362,6 +362,15 @@ run "doctor-walls.test.sh" bash tests/doctor-walls.test.sh
 # row and requires each to measure one column, so the next glyph someone reaches for is
 # caught here rather than by a crooked table on somebody's terminal.
 run "width.test.sh" bash tests/width.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 4.6, spec AC-23): the facts
+# doctor gathered on every invocation and printed for nobody — the installed agent copies
+# and their drift, the legacy hook FILES on disk, the duplicate-registry scan, the legacy
+# skill copy's path — plus the pnpm-store diagnosis, which used to answer three different
+# unreadable-store situations with one sentence about a cache having no surface. §7 is
+# structural: a top-level assignment in doctor.sh that nothing else in the file reads is a
+# probe that ran for nobody, and the allow-list there names what this slice deliberately
+# left alone.
+run "doctor-reads.test.sh" bash tests/doctor-reads.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
