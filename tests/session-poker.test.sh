@@ -1471,6 +1471,388 @@ expect_absent "…never DISARM off a delivery it cannot place in time" "decision
 expect_contains "…naming the missing arming record as the reason" "arming record" "$OUT"
 
 # ============================================================
+section "Section 11: pressure — HOLD, NARROW, EMERGENCY (AC-30, S7)"
+# ============================================================
+#
+# WHAT THESE CASES OWN. The tick reads `resources_pressure` before it considers a single
+# fill, because filling a machine that is already starving is the one scheduling mistake
+# that costs WORK rather than time: the measured failure is a kernel SIGKILL, seven
+# concurrent suites on an 8 GB machine driving free memory to ~188 MB and a suite dying
+# mid-run (tests/run.sh:63-68).
+#
+# CLOCK AND MACHINE DISCIPLINE, the same house rule the rest of this suite keeps: nothing
+# here waits for the machine to get into trouble, and nothing reads this machine at all.
+# `resources_pressure` takes both of its readings through `BIONIC_PROBE_FREE_MB` /
+# `BIONIC_PROBE_LOAD_1M` (lib/resources.sh's own seams, exercised the same way by
+# tests/resources.test.sh), so every threshold below is fixture DATA.
+
+# A plan carrying BOTH halves the scheduler reads: the frontmatter `parallel-budget:` line
+# and the machine-readable slice table. Written as one builder because a fixture that
+# carried only one of them would be testing a plan shape the wave never produces.
+#
+# The budget line's shape is byte-identical to what Step 0 writes and to what
+# hooks/dispatch-preflight.sh's budget arm reads (L-RESOURCES/2): one string, four fields.
+wave_plan() {  # <repo> <budget line body, or "-" for none> <table row>...
+  local repo="$1" budget="$2"; shift 2
+  local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")"
+  {
+    printf -- '---\n'
+    printf 'governing-skill: superpowers:writing-plans\n'
+    [ "$budget" = "-" ] || printf 'parallel-budget: %s\n' "$budget"
+    printf -- '---\n\n'
+    printf '# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '## Slices (machine-readable)\n\n'
+    printf '| id | deps | complexity | status |\n|---|---|---|---|\n'
+    local row
+    for row in "$@"; do printf '%s\n' "$row"; done
+  } > "$f"
+  touch "$f"
+}
+
+# The poker under an injected pressure reading. The two knobs are exported for exactly one
+# invocation and unset afterwards, so no case can leak a reading into the next.
+poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
+  local repo="$1" free="$2" load="$3"; shift 3
+  BIONIC_PROBE_FREE_MB="$free" BIONIC_PROBE_LOAD_1M="$load" poke "$repo" "$@"
+}
+
+# ---------- 11a: a HOLD prints its measurement and fills nothing ----------
+#
+# The fixture has ready work AND a gap, so a tick that filled would fill. That is the whole
+# discriminator: "no FILL under pressure" is only a claim if a FILL was available.
+R11A="$(make_repo s11-hold)"; new_roster "$R11A"
+wave_plan "$R11A" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| DONE | — | standard | landed |" \
+  "| NEXT | DONE | complex | pending |"
+poke_pressure "$R11A" 512 1.0 tick
+expect_eq "a tick under memory pressure still exits 0 — HOLD is a decision, not a failure" \
+  "0" "$RC"
+expect_contains "…and prints HOLD with the free-memory reading" "poker: HOLD free_mb=512" "$OUT"
+expect_contains "…and the load reading beside it" "load_1m=1.0" "$OUT"
+expect_contains "…saying plainly that nothing is being filled" "no fills" "$OUT"
+expect_absent "…and fills nothing, though a ready slice and a gap both exist" "poker: FILL" "$OUT"
+
+# The paired positive: the SAME repo, the SAME plan, with the machine reading healthy.
+# Without it, 11a passes on a tick that can never fill anything.
+poke_pressure "$R11A" 8192 1.0 tick
+expect_contains "the same fixture with memory to spare DOES fill (11a discriminates)" \
+  "poker: FILL NEXT" "$OUT"
+expect_absent "…and prints no HOLD" "poker: HOLD" "$OUT"
+
+# ---------- 11b: NARROW on the SECOND consecutive hold, not the first ----------
+#
+# One hold is a burst — a suite starting, a build finishing — and halving the fleet's width
+# off a burst is a wave that runs at half speed for the rest of the day. The counter is a
+# sibling of the Patrol stamp, session-scoped, and it is what makes "sustained" a fact about
+# two firings rather than an adjective.
+R11B="$(make_repo s11-narrow)"; new_roster "$R11B"
+wave_plan "$R11B" "writers=4 suites=2 worktrees=8 test_jobs=18 source=probe" \
+  "| A | — | standard | landed |"
+poke_pressure "$R11B" 512 1.0 tick
+expect_contains "the first hold prints HOLD" "poker: HOLD" "$OUT"
+expect_absent "…and NOT NARROW: one hold is a burst" "poker: NARROW" "$OUT"
+poke_pressure "$R11B" 512 1.0 tick
+expect_contains "the second consecutive hold prints NARROW" "poker: NARROW test_jobs=9" "$OUT"
+expect_contains "…alongside the HOLD it is narrowing from" "poker: HOLD" "$OUT"
+
+# The counter CLEARS on a healthy tick, so "two consecutive" means consecutive. Without
+# this, NARROW is inevitable on any wave long enough to see two holds an hour apart.
+poke_pressure "$R11B" 8192 1.0 tick
+expect_absent "a healthy tick prints no NARROW" "poker: NARROW" "$OUT"
+poke_pressure "$R11B" 512 1.0 tick
+expect_contains "…and the hold after it is a FIRST hold again" "poker: HOLD" "$OUT"
+expect_absent "…so NARROW does not fire (the counter cleared)" "poker: NARROW" "$OUT"
+
+# The halving reads the plan's own `test_jobs`, never a constant of its own.
+R11C="$(make_repo s11-narrow-half)"; new_roster "$R11C"
+wave_plan "$R11C" "writers=4 suites=2 worktrees=8 test_jobs=6 source=probe" \
+  "| A | — | standard | landed |"
+poke_pressure "$R11C" 512 1.0 tick
+poke_pressure "$R11C" 512 1.0 tick
+expect_contains "NARROW halves the plan's OWN test_jobs (6 -> 3), never a constant" \
+  "poker: NARROW test_jobs=3" "$OUT"
+
+# ---------- 11d: EMERGENCY names the youngest suite-running writer ----------
+#
+# The kill floor. The tick NAMES a writer and stops nothing itself — stopping a writer
+# destroys work, and an irreversible act taken by a hook off one reading is what this design
+# refuses. The address it prints is the one both stop gates accept (POKER/8).
+#
+# "SUITE-RUNNING" IS READ OFF THE LEDGER (WALLS/3): an open row whose `claims=` is non-empty
+# declared a subprocess claim and spends a suite. YOUNGEST, because the youngest writer has
+# the least work to lose.
+R11D="$(make_repo s11-emergency)"; new_roster "$R11D"
+wave_plan "$R11D" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | standard | landed |" \
+  "| B | — | standard | pending |"
+# `status=intended` is the dispatch record — the row hooks/dispatch-preflight.sh appends
+# when it admits a dispatch, carrying that brief's declared `claims=`. It is the predicate
+# lib/patrol.sh's `patrol_roster_state` and the dispatch wall's own budget arm both count
+# on (WALLS/2, WALLS/3), and the roster is append-only, so later `identified`/`confirmed`
+# rows for the same name are transitions rather than second dispatches.
+add_row "$R11D" status=intended name=old-suite-runner deliverable=a.md duration="4 hours" \
+  claims="bash tests/run.sh" launched_at="$(iso_ago 3600)"
+add_row "$R11D" status=intended name=young-suite-runner deliverable=b.md duration="4 hours" \
+  claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
+add_row "$R11D" status=intended name=no-claim-writer deliverable=c.md duration="4 hours" \
+  launched_at="$(iso_ago 10)"
+poke_pressure "$R11D" 100 1.0 tick
+expect_contains "at the kill floor the tick prints EMERGENCY with the reading" \
+  "poker: EMERGENCY free_mb=100" "$OUT"
+expect_contains "…naming the YOUNGEST suite-running writer, at the stop address" \
+  "stop youngest suite-running writer young-suite-runner@session-$(printf '%s' "$SID" | cut -c1-8)" "$OUT"
+expect_absent "…never the older one" "old-suite-runner@" "$OUT"
+expect_absent "…and never a writer that claimed no suite" "no-claim-writer@" "$OUT"
+expect_absent "…and fills nothing at the kill floor" "poker: FILL" "$OUT"
+
+# A roster with no suite-claiming row says so rather than naming a writer at random: the
+# pressure is real and it is not this session's to relieve.
+R11E="$(make_repo s11-emergency-noclaim)"; new_roster "$R11E"
+wave_plan "$R11E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | standard | landed |"
+add_row "$R11E" status=intended name=quiet-writer deliverable=a.md duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+poke_pressure "$R11E" 100 1.0 tick
+expect_contains "an EMERGENCY with no suite-running writer names no one" \
+  "no suite-running writer on this roster to stop" "$OUT"
+
+# ---------- 11f: an unreadable reading is ZERO FREE MEMORY, and that is the kill floor ----
+#
+# lib/resources.sh answers a SAFE fact rather than an empty field when it cannot read one
+# ("A probe that cannot read a fact answers a SAFE fact, never an empty field"), so a
+# garbage `free_mb` reads as 0 — below the emergency floor. This case pins the direction
+# that fall takes rather than assuming it: a broken probe stops the wave from GROWING, it
+# never silently widens it, and the tick still exits 0 because EMERGENCY is a decision.
+R11F="$(make_repo s11-probe-junk)"; new_roster "$R11F"
+wave_plan "$R11F" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | standard | pending |"
+poke_pressure "$R11F" "not-a-number" "not-a-load" tick
+expect_eq "an unparseable pressure reading still exits 0" "0" "$RC"
+expect_contains "…and reads as zero free memory: the safe fact, not an empty field" \
+  "poker: EMERGENCY free_mb=0" "$OUT"
+expect_absent "…so the wave is never widened off a reading nobody could take" "poker: FILL" "$OUT"
+
+# ============================================================
+section "Section 12: FILL — gap, readiness, and table order (AC-29, S7)"
+# ============================================================
+#
+# gap = `writers` from the plan header's `parallel-budget:` MINUS the rows already open on
+# this session's roster; ready = the slice table's `pending` rows whose every dependency is
+# `landed`. The tick prints min(gap, |ready|) ids in TABLE ORDER — the plan's own dependency
+# ordering, maintained by the orchestrator, never an ordering this hook invents.
+
+# ---------- 12a: three ready, gap two -> exactly two, in table order ----------
+R12A="$(make_repo s12-fill-two)"; new_roster "$R12A"
+wave_plan "$R12A" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| BASE | — | complex | landed |" \
+  "| ONE | BASE | complex | pending |" \
+  "| TWO | BASE | standard | pending |" \
+  "| THREE | — | standard | pending |"
+poke_pressure "$R12A" 8192 1.0 tick
+expect_eq "a filling tick exits 0" "0" "$RC"
+expect_contains "three ready and a gap of two fills exactly two, in table order" \
+  "poker: FILL ONE TWO" "$OUT"
+expect_absent "…and does not reach the third" "THREE" "$OUT"
+
+# ---------- 12b: the gap closes as rows open ----------
+#
+# The same plan, one open row on the roster: writers=2 minus one open row is a gap of one.
+R12B="$(make_repo s12-fill-gap-one)"; new_roster "$R12B"
+wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| BASE | — | complex | landed |" \
+  "| ONE | BASE | complex | pending |" \
+  "| TWO | BASE | standard | pending |"
+add_row "$R12B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R12B" 8192 1.0 tick
+expect_contains "one open row against writers=2 leaves a gap of one" "poker: FILL ONE" "$OUT"
+expect_absent "…and the second ready slice waits" "TWO" "$OUT"
+
+# ---------- 12c: gap zero -> no FILL, and the reason is the budget ----------
+R12C="$(make_repo s12-fill-full)"; new_roster "$R12C"
+wave_plan "$R12C" "writers=1 suites=1 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | — | complex | pending |"
+add_row "$R12C" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R12C" 8192 1.0 tick
+expect_absent "a full budget fills nothing" "poker: FILL" "$OUT"
+expect_contains "…and says which number closed the gap" "writers=1 and 1 open row(s): the budget is full" "$OUT"
+
+# ---------- 12d: no parallel-budget line -> inert, and it says why ----------
+#
+# Every plan written before this wave, and every project that never ran Step 0's probe, has
+# no such line. A budget is a ceiling a run OPTS INTO, so the absence is inert rather than
+# an error — but a scheduler that went silent about it would be indistinguishable from one
+# that was broken.
+R12D="$(make_repo s12-no-budget)"; new_roster "$R12D"
+wave_plan "$R12D" "-" \
+  "| ONE | — | complex | pending |"
+poke_pressure "$R12D" 8192 1.0 tick
+expect_eq "a plan with no parallel-budget line still ticks cleanly (exit 0)" "0" "$RC"
+expect_absent "…and fills nothing" "poker: FILL" "$OUT"
+expect_contains "…naming the missing field as the reason" "no readable parallel-budget: writers field" "$OUT"
+
+# ---------- 12e: a pending slice with an unlanded dependency is not ready ----------
+R12E="$(make_repo s12-unlanded-dep)"; new_roster "$R12E"
+wave_plan "$R12E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| BASE | — | complex | pending |" \
+  "| DEPENDENT | BASE | complex | pending |" \
+  "| FREE | — | standard | pending |"
+poke_pressure "$R12E" 8192 1.0 tick
+expect_contains "a pending slice with an unlanded dep is held back" "poker: FILL BASE FREE" "$OUT"
+expect_absent "…and DEPENDENT is not named" "DEPENDENT" "$OUT"
+
+# Several deps, one of them unlanded: ALL of them must be landed, not any.
+R12F="$(make_repo s12-multi-dep)"; new_roster "$R12F"
+wave_plan "$R12F" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | complex | landed |" \
+  "| B | — | complex | pending |" \
+  "| C | A,B | complex | pending |"
+poke_pressure "$R12F" 8192 1.0 tick
+expect_contains "a slice whose deps are landed AND pending is not ready" "poker: FILL B" "$OUT"
+expect_absent "…so C waits for every one of them" " C" "$OUT"
+
+# A dependency the table does not carry at all is not confirmable, and an unconfirmable
+# dependency holds its slice back — a slice held costs a batch, a slice dispatched onto an
+# unlanded dependency costs the writer's whole run.
+R12G="$(make_repo s12-unknown-dep)"; new_roster "$R12G"
+wave_plan "$R12G" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ORPHAN | NOT-IN-THIS-TABLE | complex | pending |" \
+  "| FINE | — | standard | pending |"
+poke_pressure "$R12G" 8192 1.0 tick
+expect_contains "an unknown dependency holds its slice back" "poker: FILL FINE" "$OUT"
+expect_absent "…and ORPHAN is not filled" "ORPHAN" "$OUT"
+
+# ---------- 12h: the table is read BY HEADER NAME, not by column position ----------
+#
+# The shipped table is four columns; the SCHED brief's own prose assumed three. A reader
+# keyed on position would have been wrong about one of them and silently wrong about the
+# next column anyone inserts.
+R12H="$(make_repo s12-column-order)"; new_roster "$R12H"
+f12h="$R12H/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+mkdir -p "$(dirname "$f12h")"
+{
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+  printf '## Slices\n\n'
+  printf '| status | owner | id | complexity | deps |\n|---|---|---|---|---|\n'
+  printf '| landed | ada | BASE | complex | — |\n'
+  printf '| pending | grace | LATER | standard | BASE |\n'
+} > "$f12h"
+touch "$f12h"
+poke_pressure "$R12H" 8192 1.0 tick
+expect_contains "a reordered, wider table is read by column NAME" "poker: FILL LATER" "$OUT"
+
+# ---------- 12i: a FENCED table is documentation, not a schedule ----------
+#
+# The same rule the plan READ has taken since the 2026-08-15 newest-race incident: a
+# schema example inside a ``` fence describes the table, it is not the table.
+R12I="$(make_repo s12-fenced-table)"; new_roster "$R12I"
+f12i="$R12I/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+mkdir -p "$(dirname "$f12i")"
+{
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+  printf 'The slice table looks like this:\n\n'
+  printf '```\n| id | deps | complexity | status |\n|---|---|---|---|\n'
+  printf '| EXAMPLE | — | complex | pending |\n```\n'
+} > "$f12i"
+touch "$f12i"
+poke_pressure "$R12I" 8192 1.0 tick
+expect_absent "a fenced slice table is documentation, and fills nothing" "poker: FILL" "$OUT"
+expect_contains "…and the tick says the table gave it nothing ready" \
+  "no pending slice has all its dependencies landed" "$OUT"
+
+# ---------- 12j: a DELIVERED run is never filled ----------
+#
+# DISARM is terminal and exits above the scheduler: there is nothing left to fill in a run
+# that has closed, and a FILL line under a DISARM would be an instruction to dispatch into
+# a finished wave.
+R12J="$(make_repo s12-delivered)"; new_roster "$R12J"
+f12j="$R12J/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+mkdir -p "$(dirname "$f12j")"
+{
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 9\n\n'
+  printf -- '- Step 9: delivered: bionic 9.9.9; report: record/fixture/close-out.md\n\n'
+  printf '## Slices\n\n| id | deps | complexity | status |\n|---|---|---|---|\n'
+  printf '| LEFTOVER | — | complex | pending |\n'
+} > "$f12j"
+touch "$f12j"
+armed_ago "$R12J" 7200
+touch "$f12j"
+poke_pressure "$R12J" 8192 1.0 tick
+expect_contains "a delivered run DISARMs" "decision=DISARM" "$OUT"
+expect_absent "…and is never filled" "poker: FILL" "$OUT"
+
+# ============================================================
+section "Section 13: the absent roster splits — QUIET before the first dispatch (AC-38)"
+# ============================================================
+#
+# WHAT THIS FIXES, measured on this wave's own Patrol tick #1 (session b1a850c1,
+# 2026-09-03). "No roster" was ONE refusal covering two states that deserve opposite
+# answers. An orchestrator that had armed at engagement, was standing in the right project,
+# and had simply not dispatched anything yet got REFUSED — with a wall of candidate paths
+# describing a root that was perfectly correct. Arming precedes dispatch BY DESIGN
+# (SKILL.md §Dispatch: "arm at engagement"), so the first tick of every run reaches that
+# line, and answering it with a refusal is how a reader learns to ignore the one message
+# that also reports a genuinely mis-resolved root.
+#
+# THE SPLIT: armed here AND the walk chose a real `.bionic` -> QUIET, exit 0, stamp kept,
+# one line, no candidate walk. Anything else -> the refusal, unchanged.
+
+# ---------- 13a: armed, real .bionic, nothing dispatched -> QUIET ----------
+R13A="$(make_repo s13-armed-quiet)"
+# Deliberately NO new_roster: this IS the pre-dispatch state, and it is the only state in
+# which the roster file does not exist at all.
+poke "$R13A" arm
+poke "$R13A" tick
+expect_eq "an armed session with nothing dispatched ticks quietly (exit 0)" "0" "$RC"
+expect_contains "…and says so in one line the reader can act on" \
+  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_contains "…with a decision line a machine can read" "decision=QUIET" "$OUT"
+expect_absent "…and never REFUSED" "REFUSED" "$OUT"
+expect_absent "…and prints no candidate walk: the root is not in doubt" "chosen" "$OUT"
+expect_eq "…and the stamp is kept, so the first dispatch of this run is not refused" "yes" \
+  "$([ -f "$(stamp_of "$R13A")" ] && echo yes || echo no)"
+
+# ---------- 13b: the SAME repo, never armed -> the refusal survives ----------
+#
+# The paired negative, and the one that keeps 13a from being "the tick stopped refusing".
+# The arming record is written only by `arm`, and its path resolves against the same root
+# the roster's does — so a tick that resolved the wrong root finds no record there either.
+R13B="$(make_repo s13-unarmed)"
+poke "$R13B" tick
+expect_eq "an UNARMED session with no roster still REFUSES (exit 2)" "2" "$RC"
+expect_contains "…naming the arming that never happened" "the Patrol never armed here" "$OUT"
+expect_absent "…and takes no QUIET decision" "decision=QUIET" "$OUT"
+
+# The discriminator on the other side: arm the same repo and the same tick goes QUIET.
+poke "$R13B" arm
+poke "$R13B" tick
+expect_eq "…and arming that same repo flips it to QUIET (13b discriminates)" "0" "$RC"
+expect_contains "…with the armed line" "armed, nothing dispatched yet" "$OUT"
+
+# ---------- 13c: no real .bionic anywhere -> REFUSED, with the walk ----------
+#
+# The wrong-root case, which is the only thing the refusal is for now. The walk is read
+# BEFORE the stamp is written, because `write_patrol_stamp` mkdir -p's `.bionic/tmp` under
+# whatever root it resolved — a walk taken afterwards reports the directory the tick just
+# manufactured as `chosen` and tells the operator nothing.
+R13C="$TMPROOT/s13-no-bionic"
+mkdir -p "$R13C"
+( cd "$R13C" && git init -q . ) >/dev/null 2>&1
+poke "$R13C" tick
+expect_eq "a cwd with no .bionic above it REFUSES (exit 2)" "2" "$RC"
+expect_contains "…and prints the walk it took" "$R13C" "$OUT"
+R13C_LAST="$(printf '%s\n' "$OUT" | grep -F "$R13C" | tail -1)"
+expect_contains "…whose terminal line is a FALLBACK, not a chosen root" \
+  "fallback" "$R13C_LAST"
+expect_absent "…and no QUIET is taken on a root the walk never chose" "decision=QUIET" "$OUT"
+
+# ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'session-poker: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
 [ "$FAIL" -eq 0 ]

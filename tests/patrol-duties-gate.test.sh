@@ -467,6 +467,130 @@ d=$(make_env); u_clear_marker "$d"; a_tool_sidechain "$d" CronCreate
 fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the ritual"
 
 echo ""
+echo "=== Section 5: the third duty — a printed FILL is answered (AC-29) ==="
+
+# THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
+# the roster and name the slices that are ready, but it cannot dispatch — and a
+# recommendation nobody is obliged to answer is how this repo's own 1.4.0 wave ran six
+# writers against a budget of twenty-two. The turn's END is the only moment at which "the
+# FILL went unanswered" is a fact, so it is the moment this gate asks.
+#
+# ANSWERED = an `Agent` tool_use naming the slice, or an explicit `fill-declined: <reason>`
+# anywhere in the turn. The decline is the point, not a loophole: there are good reasons not
+# to fill and every one is worth one line in the record. What is refused is SILENCE.
+#
+# The FILL line reaches the transcript as the CONTENT of the tick's Bash tool result — a
+# `user`-typed entry that is deliberately NOT a prompt — so these fixtures carry it the way
+# a live transcript does.
+
+# A tool_result carrying the tick's output.
+u_tick_out() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"user",isSidechain:false,
+      message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_x",content:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+# One Agent dispatch, shaped as the harness sends it: the slice id may land in the name, the
+# description or the prompt, and this gate reads all of them.
+a_agent() {  # <dir> <name> [prompt]
+  jq -nc --arg n "$2" --arg p "${3:-}" \
+    '{type:"assistant",isSidechain:false,
+      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_9",name:"Agent",
+        input:{name:$n,prompt:$p,subagent_type:"implementor"}}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+a_agent_sidechain() {  # <dir> <name>
+  jq -nc --arg n "$2" \
+    '{type:"assistant",isSidechain:true,
+      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_9",name:"Agent",
+        input:{name:$n,prompt:"x",subagent_type:"implementor"}}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+# The orchestrator's own words, which is one of the places a decline may be written.
+a_text() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"assistant",isSidechain:false,
+      message:{role:"assistant",content:[{type:"text",text:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+both_duties() {  # <dir> — the two standing duties, so §5 measures the THIRD one alone
+  a_tool "$1" ListAgents; a_tool "$1" TaskList
+}
+
+FILL_MARK="fill unanswered"
+
+# 36: every named slice dispatched -> allow.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_agent "$d" "W-ALPHA" "Slice ALPHA, senior-implementor."
+a_agent "$d" "W-BETA" "Slice BETA, implementor."
+fire "$d"; expect_allow "36: a FILL whose every slice was dispatched passes"
+
+# 37: one of two dispatched -> block, naming the one that was not, and NOT the one that was.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_agent "$d" "W-ALPHA" "Slice ALPHA, senior-implementor."
+fire "$d"; expect_block "37: a half-answered FILL blocks, naming the slice left out" "BETA" "ALPHA"
+
+# 38: neither dispatched nor declined -> block, naming both.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+fire "$d"; expect_block "38a: an unanswered FILL blocks, naming the first slice" "ALPHA"
+fire "$d"; expect_block "38b: …and the second" "BETA"
+fire "$d"; expect_block "38c: …and says what would answer it" "fill-declined"
+
+# 39: the DECLINE answers it. Not a loophole — a reason in the record is the point.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_text "$d" "fill-declined: ADOPT has not merged, so neither slice can base off the wave head."
+fire "$d"; expect_allow "39: an explicit fill-declined line answers the FILL"
+
+# 40: the decline may be written anywhere the orchestrator writes — including a plan-ledger
+# line, which is where a run without the task tools keeps its record.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_tool "$d" Bash "printf '%s\\n' 'fill-declined: peers not idle (D1)' >> .bionic/docs/plans/$PLAN_NAME"
+fire "$d"; expect_allow "40: a decline written into the plan ledger answers it too"
+
+# 41: INERT with no FILL line. Every turn in every project whose tick prints none — which is
+# every project with no budget in its plan — must pass exactly as it did before.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET — 0 open row(s)"
+fire "$d"; expect_allow "41: a tick that printed no FILL is not asked about one"
+
+# 42: ORDERING. A FILL printed in an EARLIER turn is not this turn's to answer — the fold
+# resets at every user prompt, exactly as the duties fold does.
+d=$(make_env); u_tick "$d"; u_tick_out "$d" "poker: FILL ALPHA"; u_tick "$d"; both_duties "$d"
+fire "$d"; expect_allow "42: a FILL from a previous turn does not bind this one"
+
+# 43: an agent-context dispatch is not the orchestrator's. A subagent that dispatched
+# does not discharge the orchestrator's fill — the same exclusion every other arm makes.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_agent_sidechain "$d" "W-ALPHA"
+fire "$d"; expect_block "43: a sidechain Agent does not answer the orchestrator's FILL" "ALPHA"
+
+# 44: WORD BOUNDARY. A dispatch that merely CONTAINS the id inside a longer word has not
+# named it — the difference between matching `ONE` and matching `PHONE`.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ONE"
+a_agent "$d" "W-PHONE" "Slice PHONEBOOK, implementor."
+fire "$d"; expect_block "44: an id inside a longer word does not answer the FILL" "ONE"
+
+# 45: BLOCKS ONCE, through the existing stop_hook_active valve — no new bookkeeping.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+fire "$d" Stop true
+expect_allow "45: stop_hook_active true passes the same unanswered FILL"
+
+# 46: BOTH FAILURES AT ONCE are told at once. Blocking on the standing duty and staying
+# silent about the FILL would hide the second behind the one-shot: the next stop passes by
+# design, so a duty not named in the first refusal is a duty never named at all.
+d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_tick_out "$d" "poker: FILL ALPHA"
+fire "$d"; expect_block "46a: a turn missing a standing duty AND a fill names the duty" "$TL_MISSING"
+fire "$d"; expect_block "46b: …and names the unanswered slice in the same refusal" "ALPHA"
+
+# 47: a non-tick turn is never asked, whatever its transcript contains.
+d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
+u_tick_out "$d" "poker: FILL ALPHA"
+fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
+
+echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"
 echo "========================================"
