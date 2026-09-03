@@ -485,7 +485,8 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" '
 # the reason says which. An id is matched on a WORD BOUNDARY inside the dispatch's own
 # fields — its name, description, subagent_type and prompt — so `ONE` is not found inside
 # `PHONE`, and only ids shaped like slice ids (letters, digits, `_`, `.`, `-`) are ever
-# echoed back into the refusal.
+# echoed back into the refusal. A `.` in an id is a LITERAL dot in that boundary test, not
+# the regex wildcard it would otherwise be — see the escape in the fold below.
 #
 # Folded over the same stream, resetting at every user PROMPT exactly as the duties fold
 # above it does, and inert on every turn with no FILL line in it — which is every turn in
@@ -509,7 +510,15 @@ FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' '
     for (i = 1; i <= n; i++) {
       id = ids[i]
       if (id !~ /^[A-Za-z0-9_.-]+$/) continue
-      if (agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")) continue
+      # THE ID IS DATA, THE PATTERN IS CODE. The boundary test below is a DYNAMIC regex
+      # and the id is spliced into it, so every metacharacter the validity filter above
+      # admits has to be neutralised first or it reads as syntax. `.` is the whole class:
+      # `-` is special only inside a bracket expression and is spliced outside one, `_`
+      # is never special. Unescaped, a FILL for `a.b` was answered by a dispatch naming
+      # `axb` — a false negative on the wall, the fail-open direction (review F1).
+      pat = id
+      gsub(/\./, "[.]", pat)
+      if (agents ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
       missing = missing (missing == "" ? "" : " ") id
     }
     if (missing != "") print missing
