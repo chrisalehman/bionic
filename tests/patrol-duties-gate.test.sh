@@ -590,6 +590,168 @@ d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
 u_tick_out "$d" "poker: FILL ALPHA"
 fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
 
+
+echo ""
+echo "=== Section 6: marker scope — a file the agent merely READ is not a decline (review F2) ==="
+#
+# THE DEFECT. `fill-declined:` and the two clear/resume markers were read as a raw-text
+# substring of EVERY transcript record, tool results included. A tool result is how the
+# content of any file the agent reads enters the transcript, so a README, a fixture or a
+# code comment carrying the literal `fill-declined:` discharged the AC-29 fill duty that
+# nobody had declined — fail-open on the exact wall AC-29 exists to be. The mirror case is
+# friction rather than compromise: a file carrying the /clear or resume marker forced a
+# spurious resume-ritual refusal.
+#
+# THE SCOPE. These two markers are now read only off rows the ORCHESTRATOR authored: a
+# main-thread assistant record (its text and its tool_use inputs alike), a user record
+# whose content is a STRING — the CLI's own command records and the operator's own typing
+# — and any other record type, which is how a SessionStart report reaches the transcript.
+# Never the `tool_result` elements of a user record. STOPGATES/1's type-agnostic substring
+# read is kept WITHIN a qualifying row; what changed is which rows qualify. The `poker:
+# FILL` line itself is deliberately NOT scoped — it arrives as the content of the tick's
+# own Bash tool result, and a planted one costs a false BLOCK, the safe direction.
+
+# An assistant text row inside an agent context — a subagent's words, not the
+# orchestrator's.
+a_text_sidechain() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"assistant",isSidechain:true,
+      message:{role:"assistant",content:[{type:"text",text:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+# 48/49: THE PAIR. The same literal decline text, once as file content the agent read and
+# once as the orchestrator's own writing. Only the second answers.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+u_tick_out "$d" "README.md:4  Write a \"fill-declined: <reason>\" line when you decline a fill."
+fire "$d"; expect_block "48: a fill-declined: inside a tool result does not answer the FILL" "ALPHA"
+
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_text "$d" "fill-declined: peers not idle (D1)."
+fire "$d"; expect_allow "49: …and the same words in the orchestrator's own assistant row do"
+
+# 50/51: THE PAIR, ritual side. The /clear marker as file content the agent read is inert;
+# the CLI's own /clear record still arms the ritual.
+d=$(make_env)
+u_tick_out "$d" "record/wave-1.4.0-probe.md:12  the new transcript opens with <command-name>/clear</command-name> verbatim."
+a_tool "$d" CronCreate
+fire "$d"; expect_allow "50: a /clear marker inside a tool result does not arm the ritual"
+
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "51: …and the CLI's own /clear record still does" "$RITUAL_CRONLIST"
+
+# 52/53: the resume spelling, same pair. The system-typed record of §31 still arms it
+# (STOPGATES/1's type-agnostic read is untouched); the same words read out of a file do not.
+d=$(make_env)
+u_tick_out "$d" "hooks/session-start.sh:41  prints (source: resume) into its own title line."
+a_tool "$d" CronCreate
+fire "$d"; expect_allow "52: a resume marker inside a tool result does not arm the ritual"
+
+d=$(make_env); u_resume_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "53: …and a system-typed session-start report still does" "$RITUAL_CRONLIST"
+
+# 54: a SUBAGENT's decline is not the orchestrator's — the same agent-context exclusion
+# every other arm of this gate makes, now applied to the decline it never applied to.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_text_sidechain "$d" "fill-declined: the subagent decided not to."
+fire "$d"; expect_block "54: a sidechain assistant's decline does not answer the orchestrator's FILL" "ALPHA"
+
+# 55: THE FILL LINE ITSELF STAYS RAW. It reaches the transcript as the content of the
+# tick's own Bash tool result and nothing else carries it — scoping it the way the decline
+# is scoped would make the third duty unreachable. §36-§47 all rest on this; asserted here
+# so the F2 scoping cannot be widened onto it by a later edit without a red test.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_agent "$d" "W-ALPHA" "Slice ALPHA, implementor."
+fire "$d"; expect_block "55: the FILL line is still read out of the tick's tool result" "BETA" "ALPHA"
+
+echo ""
+echo "=== Section 7: a dot in a slice id is a dot, not a wildcard (review correctness F1) ==="
+#
+# THE DEFECT. The word-boundary test splices the slice id into a DYNAMIC awk regex:
+#   agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")
+# The validity filter one line above admits `.` as a legal slice-id character, and in a
+# regex `.` is not a dot — it matches any single character. So a FILL naming `a.b` was
+# answered by a dispatch that named `axb` and never named `a.b` at all. That is a FALSE
+# NEGATIVE on FILL_MISSING, which passes a turn this wall exists to refuse: the fail-open
+# direction. Latent in this wave — every id it dispatched is letters, digits and hyphens —
+# and reachable the moment anyone names a slice `4.2`, which the filter says is legal.
+#
+# `.` is the ONE extended-regex metacharacter reachable through `[A-Za-z0-9_.-]`: `-` is
+# special only inside a bracket expression and is spliced outside one here, and `_` is
+# never special. So the pair below is the whole class.
+
+# 56: THE BUG'S OWN SHAPE. `a.b` against a dispatch naming `axb` — same length, differing
+# only where the dot is. Answered under a wildcard read; unanswered under a literal one.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-AXB" "Slice axb, implementor."
+fire "$d"; expect_block "56: a dispatch naming axb does not answer a FILL for a.b" "a.b"
+
+# 57: THE PAIRED POSITIVE, which is what keeps 56 from passing by over-escaping: the same
+# id, named literally, still answers.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-AB" "Slice a.b, implementor."
+fire "$d"; expect_allow "57: …and a dispatch naming a.b does answer it"
+
+# 58: the word boundary still holds around a dotted id — `a.b` is not found inside
+# `xa.by`, exactly as §44's `ONE` is not found inside `PHONE`.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-XABY" "Slice xa.by, implementor."
+fire "$d"; expect_block "58: a dotted id inside a longer word does not answer the FILL" "a.b"
+
+# 59: a hyphen in an id is a literal too, and the id is echoed back verbatim in the reason.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL W-FIX.GATE"
+fire "$d"; expect_block "59: an unanswered id carrying both a dot and a hyphen is named verbatim" "W-FIX.GATE"
+
+echo ""
+echo "=== Section 8: the scan is windowed (review performance, finding 1) ==="
+#
+# THE DEFECT. This gate read the WHOLE transcript through one jq pass on every Stop of an
+# open run — from byte zero, ~85 ms of CPU per MB, measured 4.3 s over the 50 MB a long
+# wave session reaches, and rising monotonically for the life of the run: worst exactly
+# when the run is oldest and busiest. hooks/context-spend.sh, in this same wave, already
+# bounds the same class of read with `tail -n 400`.
+#
+# THE WINDOW. Every fact this scan needs is a "since the most recent X" fact — the last
+# user prompt, the last clear/resume marker, the last FILL line — so a window suffices
+# provided it holds a whole orchestrator turn. It does: the largest single turn in this
+# repo's own two busiest wave transcripts is 264 records (measured 2026-09-03 over
+# 494cf1b6 and b1a850c1), and the window is 2000.
+#
+# WHAT SCROLLING OUT COSTS, pinned here rather than left to be discovered: a marker older
+# than the window reads as NO MARKER, so the ritual arm goes INERT — it does not refuse.
+# That is FAIL-OPEN, and it is the right direction for a marker whose whole purpose is to
+# catch the FIRST stop after a resume; by the time 2000 records have gone by the ritual is
+# either long done or long moot.
+
+# N benign padding records — a main-thread Read, which satisfies no duty, answers no FILL
+# and names no plan. Written by awk rather than a shell loop: these fixtures are 20k lines.
+pad() {  # <dir> <n>
+  local line
+  line=$(jq -nc '{type:"assistant",isSidechain:false,
+                  message:{role:"assistant",content:[{type:"tool_use",id:"toolu_p",name:"Read",
+                    input:{file_path:"/tmp/pad.txt"}}]}}')
+  awk -v n="$2" -v l="$line" 'BEGIN{ for (i = 0; i < n; i++) print l }' >> "$1/transcript.jsonl"
+}
+
+# 60: 20k records of history BEFORE the marker change nothing — the marker and the
+# CronCreate are both inside the window, and the refusal fires exactly as in §27.
+d=$(make_env); pad "$d" 20000; u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "60: a marker inside the window is still found under 20k records of history" "$RITUAL_CRONLIST"
+
+# 61: THE DOCUMENTED LIMIT. The same marker with 20k records AFTER it has scrolled out of
+# the window, and the arm reads "no marker" — inert, not a refusal. Fail-open, stated.
+d=$(make_env); u_clear_marker "$d"; pad "$d" 20000; a_tool "$d" CronCreate
+fire "$d"; expect_allow "61: a marker beyond the window reads as no marker — the arm goes inert"
+
+# 62: THE BOUND IS NAMED AND IS A CONSTANT. A window that regresses to an unbounded read
+# is invisible in every behavioural test above — 60 and 61 both still pass without a
+# `tail` if the whole file is small. This is the assertion that the bound exists at all.
+TOTAL=$((TOTAL + 1))
+if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK" && grep -q 'tail -n "\$SCAN_WINDOW_LINES"' "$HOOK"; then
+  pass "62: the transcript scan is bounded by a named SCAN_WINDOW_LINES constant"
+else
+  fail "62: the transcript scan has no named line bound — it reads from byte zero"
+fi
 echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"
