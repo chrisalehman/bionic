@@ -2,10 +2,12 @@
 # THE PATROL-DUTIES WALL — task-dispatch-wall-channel-loss, T5.
 #
 # Stop. On every orchestrator turn end: if the turn was started by a PATROL TICK,
-# refuse the stop once unless the tick's two standing duties were performed
-# inside it — a subagent-panel refresh (`ListAgents`) and a task-list refresh
-# (`TaskList`, or a write naming the active plan file). Any other turn passes
-# untouched, as does any ambiguity along the way.
+# refuse the stop once unless the tick's THREE standing duties were performed
+# inside it — a subagent-panel refresh (`ListAgents`), a task-list refresh
+# (`TaskList`, or a write naming the active plan file), and an ANSWER to any
+# `poker: FILL` line the tick printed (the named dispatches, or an explicit
+# `fill-declined: <reason>`). Any other turn passes untouched, as does any
+# ambiguity along the way.
 #
 # WHY A WALL AND NOT BETTER WORDING. The duties live in the Patrol prompt today,
 # and a prompt is text: it asks. Every rule in this repo that actually binds is a
@@ -81,6 +83,9 @@
 #   - the last user prompt is not a Patrol tick           -> pass, silent
 #   - both duties done since that prompt                  -> pass, silent
 #   - either duty missing                                 -> REFUSE, naming which
+#   - no `poker: FILL` line in the turn                   -> pass, silent (fill arm inert)
+#   - every named slice dispatched, or a decline present  -> pass, silent
+#   - a named slice neither dispatched nor declined       -> REFUSE, naming that slice
 #   - no clear/resume marker anywhere in the transcript   -> pass, silent (ritual arm inert)
 #   - CronList precedes any CronCreate since the marker   -> pass, silent (ritual arm inert)
 #   - a CronCreate since the marker with no prior CronList-> REFUSE, naming the ritual
@@ -324,10 +329,25 @@ PLAN_NAME=""
 # it — independent of the USER/TOOL typing below, and independent of whether the
 # line even parses as JSON, because the marker is a literal substring search over
 # "a transcript record whose content contains" it, not a field read.
+#
+# TWO MORE RAW-TEXT RECORDS, for the fill duty (AC-29). The tick's `poker: FILL <ids>` line
+# arrives as the CONTENT of a Bash tool result — a `user`-typed entry whose content is an
+# array, which the prompt rule below deliberately does not treat as a prompt — so it is read
+# the way the clear/resume markers are: as a literal substring of the raw record, not a
+# field. `fill-declined:` is read the same way, because the decline may be typed anywhere
+# the orchestrator writes: its own text, a plan-ledger line, a shell command.
+#
+# The ids are cut at the first `\n` or `"` in the RAW line, which are the escaped newline and
+# the closing quote of the JSON string the line is embedded in — so the record carries the
+# FILL line and nothing that followed it.
 STREAM=$(jq -Rr '
   . as $line
   | (if ($line | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
     (if ($line | contains("source: resume")) then "MARK\tresume" else empty end),
+    (if ($line | contains("poker: FILL ")) then
+       "FILL\t" + (($line | split("poker: FILL ")[1] | split("\\n")[0] | split("\"")[0]))
+     else empty end),
+    (if ($line | contains("fill-declined:")) then "DECLINE\t1" else empty end),
     (
       ($line | fromjson?) as $r
       | ($r // empty)
@@ -344,6 +364,8 @@ STREAM=$(jq -Rr '
           | select(.type == "tool_use")
           | "TOOL\t" + (.name // "")
             + "\t" + (((.input.file_path // .input.path // .input.command // "") | tostring) | gsub("[\n\t\r]"; " "))
+            + "\t" + (([.input.name?, .input.description?, .input.subagent_type?, .input.prompt?]
+                       | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " "))
         else empty
         end
     )
@@ -406,17 +428,81 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" '
   }
 ')
 
-[ "$VERDICT" = "quiet" ] && exit 0
-[ -n "$VERDICT" ] || exit 0
+# ---------- THE THIRD DUTY: a printed FILL is answered before the turn ends (AC-29) ----
+#
+# WHY THIS IS A WALL AND NOT A LINE IN THE PROMPT. The tick can compute the gap between the
+# budget and the roster, and it can name the slices that are ready — but it cannot dispatch,
+# and a recommendation nobody is obliged to answer is how this repo's own 1.4.0 wave ran six
+# writers against a budget of twenty-two. The turn's END is the only moment at which
+# "the FILL went unanswered" is a fact, so it is the moment this asks.
+#
+# ANSWERED MEANS EITHER: an `Agent` tool_use naming the slice, or an explicit
+# `fill-declined: <reason>` anywhere in the turn. The decline is not a loophole — it is the
+# point. There are good reasons not to fill (a dependency landing this minute, peers not yet
+# idle, a merge in flight), and every one of them is worth one line in the record. What is
+# refused is SILENCE.
+#
+# NAMED, not counted: a turn that dispatched two of three named slices is missing one, and
+# the reason says which. An id is matched on a WORD BOUNDARY inside the dispatch's own
+# fields — its name, description, subagent_type and prompt — so `ONE` is not found inside
+# `PHONE`, and only ids shaped like slice ids (letters, digits, `_`, `.`, `-`) are ever
+# echoed back into the refusal.
+#
+# Folded over the same stream, resetting at every user PROMPT exactly as the duties fold
+# above it does, and inert on every turn with no FILL line in it — which is every turn in
+# every project whose tick prints none.
+FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' '
+  $1 == "USER" {
+    tick = (index($0, "session-poker.sh tick") > 0)
+    fills = ""; declined = 0; agents = " "
+    next
+  }
+  $1 == "FILL"    { fills = $2; next }
+  $1 == "DECLINE" { declined = 1; next }
+  $1 == "TOOL" {
+    if ($2 == "Agent") agents = agents $3 " " $4 " "
+    next
+  }
+  END {
+    if (!tick || fills == "" || declined) exit
+    n = split(fills, ids, /[ \t]+/)
+    missing = ""
+    for (i = 1; i <= n; i++) {
+      id = ids[i]
+      if (id !~ /^[A-Za-z0-9_.-]+$/) continue
+      if (agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")) continue
+      missing = missing (missing == "" ? "" : " ") id
+    }
+    if (missing != "") print missing
+  }
+')
+
+if [ -n "$FILL_MISSING" ]; then
+  FILL_REASON="Patrol fill unanswered: the tick printed FILL and this turn neither dispatched nor declined ${FILL_MISSING}. Dispatch each named slice, or write a line \"fill-declined: <reason>\" saying why not, then stop again — this gate blocks once."
+else
+  FILL_REASON=""
+fi
+
+# The two folds are judged TOGETHER, so a turn that skipped a duty AND left a FILL
+# unanswered is told both things once. Blocking on one and staying silent about the other
+# would hide the second behind the one-shot: the next stop passes by design.
+if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
+  if [ -n "$FILL_REASON" ]; then
+    jq -nc --arg r "$FILL_REASON" '{decision:"block",reason:$r}'
+  fi
+  exit 0
+fi
 
 # ---------- the refusal ----------
 #
 # THE REASON NAMES WHAT IS MISSING AND NOTHING ELSE. A reason that recites both
 # duties whichever one was skipped makes the reader re-derive the answer the gate
 # already knows, and a gate that fires on every tick with the same paragraph is
-# read as noise inside two ticks. Each string is a LITERAL: no payload value and
-# no path is interpolated into it, so there is no JSON-quoting surface here at
-# all.
+# read as noise inside two ticks. The three duty strings are LITERALS: no payload
+# value and no path is interpolated into them. The fill clause is the one
+# exception and it carries slice ids read out of the transcript — filtered in the
+# fold above to `[A-Za-z0-9_.-]+` and handed to jq through `--arg`, so neither a
+# shell nor a JSON quoting surface is opened by them.
 case "$VERDICT" in
   both)
     REASON='Patrol duties incomplete: no ListAgents call, and no task-list refresh — TaskList or a plan-ledger write. Do both, then stop again — this gate blocks once.' ;;
@@ -427,6 +513,7 @@ case "$VERDICT" in
   *)
     exit 0 ;;
 esac
+[ -n "$FILL_REASON" ] && REASON="$REASON $FILL_REASON"
 
 # The JSON decision payload on STDOUT with exit 0, the form Design (T5) names.
 # (hooks/landing-gate.sh refuses through exit 2 + stderr instead; both are live

@@ -3,8 +3,8 @@
 # WHAT IT OWNS (L-RUN, wave-bionic-1.4.0-update, spec AC-8; design-ledger S1). Three pure
 # functions of disk, no writes:
 #   docs_root <root>   -> <root>/<docs-root from .bionic/config.yaml, default .bionic/docs>
-#   active_plan <root> -> the newest *.md (by mtime) under <docs_root>/plans (depth <= 3)
-#                         and <docs_root>/incidents (depth <= 3) that carries a flush-left
+#   active_plan <root> -> the newest *.md (by mtime) under <docs_root>/plans (depth <= 2)
+#                         and <docs_root>/incidents (depth <= 2) that carries a flush-left
 #                         `## SDLC State` heading; exit 1 and silent if none.
 #   active_run <root>  -> exit 0 + the plan path iff active_plan exists AND its flush-left
 #                         `current:` value is 0-8, or 9 with no `- Step 9:` line carrying
@@ -66,8 +66,18 @@ docs_root() {
 }
 
 # active_plan <root> -> the newest *.md by mtime under <docs_root>/plans and
-# <docs_root>/incidents (each walked to depth <= 3) that contains a flush-left
+# <docs_root>/incidents (each walked to depth <= 2) that contains a flush-left
 # `## SDLC State` line; exit 1 and print nothing when no candidate qualifies.
+#
+# DEPTH 2, AND IT IS THE FLEET'S ONLY BOUND (POKER/2, ratified 2026-09-03). This function
+# shipped at 3 and the readers it replaced walked 2, which is the bionic layout's own depth:
+# `plans/<epic>/<wave>.plan.md`. For one wave the two bounds ran side by side and
+# tests/cross-gate-agreement.test.sh §S.3d PINNED the disagreement rather than papering over
+# it. It is resolved here, at 2, on the layout's own terms — a file three levels down under
+# plans/ is a note, a fixture or a scratch draft, and admitting it re-opens the newest-race
+# the `## SDLC State` filter exists to close. Every hook reads this one walk now, so the
+# bound is stated once and pinned by number in three suites (run-predicate §R3,
+# cross-gate §S.2, and the fixture battery's `nested-three-deep`).
 active_plan() {
   local root="$1"
   local droot
@@ -94,7 +104,7 @@ active_plan() {
       if [ -z "$plan" ] || [ "$f" -nt "$plan" ]; then
         plan="$f"
       fi
-    done < <(find "$d" -maxdepth 3 -type f -name '*.md' -print0 2>/dev/null)
+    done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
   done
   [ -n "$plan" ] || return 1
   printf '%s\n' "$plan"
