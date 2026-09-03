@@ -3111,7 +3111,17 @@ expect_eq "…and leaves no phantom .bionic in the worktree (R9: one address spa
 # THE CONSUMER, from the same worktree cwd. It must FIND that record — the observable is the
 # absence of the auto-probe announce line, which the wall prints only when it had to take an
 # attestation of its own. A wall that looked in the worktree would announce every time.
-N_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
+#
+# THE PAYLOAD IS AN AGENT'S (bionic 1.4.0, spec AC-14, slice WALLS). This section's subject is
+# the ADDRESS SPACE — producer and consumer resolving one root from a worktree cwd — and the
+# dispatch that legitimately happens there is a dispatched writer's, working in the tree it was
+# given. A MAIN-THREAD dispatch from a worktree is now the refusal N.3b drives below, so the
+# drives here carry `agent_type`, the spelling the harness puts in a dispatched agent's own
+# payload. Deliberately not BIONIC_HOOK_CHANNEL, which is the other spelling of the same fact
+# and additionally stops the ledger at depth one — the roster assertion two lines down is what
+# this section came for.
+N_AGENT_PAYLOAD() { mk_agent_payload "$SID_A" "$NWT" | jq '. + {agent_type:"implementor"}'; }
+N_OUT=$(N_AGENT_PAYLOAD | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
 expect_eq "the CONSUMER, from the same worktree, passes the dispatch" "0" "$N_ST"
 expect_eq "…and its roster row landed under the main repository too" "yes" \
   "$([ -f "$NREPO/.bionic/tmp/roster-$SID_A.state" ] && echo yes || echo no)"
@@ -3121,10 +3131,23 @@ expect_eq "…with no phantom .bionic in the worktree from the gate either" "no"
 # THE DISCRIMINATING HALF: remove the record and the same dispatch announces. Without it the
 # assertions above would pass over a wall that had simply stopped announcing anything.
 rm -f "$NATT"
-N_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
+N_OUT=$(N_AGENT_PAYLOAD | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
 expect_eq "with the record gone the dispatch still passes (R5: attestation never blocks)" "0" "$N_ST"
 expect_eq "…writing it back to the same path the consumer reads" "yes" \
   "$([ -f "$NATT" ] && echo yes || echo no)"
+
+# ------------------------------------------- N.3b the lease wall, on the same one address space
+#
+# Spec AC-14, slice WALLS. Everything above proves that a worktree cwd and the main checkout
+# resolve to ONE address space; this is what the gate now does with that fact. A main-thread
+# dispatch made from inside a linked worktree is refused and NAMES the main checkout — the
+# same root N.1 measured — while the agent payload three lines up passes through the same
+# wall. Asserted here rather than only in tests/dispatch-preflight.test.sh because the root
+# in the refusal is the library's answer, which is this suite's whole subject.
+N_LEASE_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_LEASE_ST=$?
+expect_eq "a MAIN-THREAD dispatch from the same worktree is refused (AC-14)" "2" "$N_LEASE_ST"
+expect_contains "…naming the main checkout the library already resolves to" \
+  "main checkout: $NMAIN" "$N_LEASE_OUT"
 
 # --------------------------------------------------- N.4 source=: one word, and one reader
 #
