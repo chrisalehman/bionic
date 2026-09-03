@@ -172,6 +172,74 @@ expect_match "12: with the consolidation command the probe computed" \
   "*claude plugin uninstall bionic@my-fork*" "$OUT6"
 
 echo ""
+echo "=== Section 6b: a renderer venv stale against uv.lock renders as a re-sync ==="
+
+# THE VENV FINDING (wave assumptions, 22:30Z). `_dep_check_uv_project` gained a
+# third state — `stale`, a venv built against a DIFFERENT `uv.lock` than the one
+# now shipped — and doctor's three `case "$present"` sites folded it into their
+# catch-all, so a stale venv rendered like `unknown` with a cause about a
+# mechanism that keeps no presence surface. AC-17's whole point is that this state
+# is REPAIRED and not re-offered, which it cannot be while nothing names it.
+#
+# The fixture is the shape the probe reads: a venv at the stable machine-local
+# path with a python in it, a shipped `uv.lock` beside the references, and a
+# recorded hash that does not match it.
+VENV_DIR="${TMP}/.local/share/bionic/excalidraw-venv"
+mkdir -p "${VENV_DIR}/bin"
+printf '#!/bin/sh\nexit 0\n' > "${VENV_DIR}/bin/python"
+chmod +x "${VENV_DIR}/bin/python"
+REFS="${TMP}/refs"
+mkdir -p "$REFS"
+printf 'version = 1\n' > "${REFS}/uv.lock"
+printf 'not-the-hash-of-that-lockfile\n' > "${VENV_DIR}.lock.sha256"
+
+OUT6B="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}")"
+ROW6B="$(printf '%s\n' "$OUT6B" | awk '/excalidraw-renderer/')"
+
+expect_match "12b1: the row says the venv is stale" "*excalidraw-renderer*stale*" "$ROW6B"
+expect_match "12b2: and names a re-sync" "*excalidraw-renderer*re-sync*" "$ROW6B"
+expect_no_match "12b3: never the no-presence-surface catch-all" \
+  "*excalidraw-renderer*no presence surface*" "$ROW6B"
+expect_no_match "12b4: and never 'not installed', which is a different machine" \
+  "*excalidraw-renderer*not installed*" "$ROW6B"
+
+# A matching hash is not stale, and says nothing extra.
+if command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1; then
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "${REFS}/uv.lock" | awk '{print $1}' > "${VENV_DIR}.lock.sha256"
+  else
+    sha256sum "${REFS}/uv.lock" | awk '{print $1}' > "${VENV_DIR}.lock.sha256"
+  fi
+  OUT6C="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}")"
+  ROW6C="$(printf '%s\n' "$OUT6C" | awk '/excalidraw-renderer/')"
+  expect_no_match "12b5: a matching lock hash is not reported stale" "*stale*" "$ROW6C"
+else
+  no "12b5: neither shasum nor sha256sum is on PATH"
+fi
+
+echo ""
+echo "=== Section 6c: setup treats stale as a re-sync, never as a fresh offer ==="
+
+# STRUCTURAL, AND PINNED TO THE MECHANISM RATHER THAN TO A SENTENCE. AC-17 says a
+# stale venv is "re-synced, not re-offered", and the thing that decides whether a
+# question is asked is `SETUP_ALL` — `install_dep` skips its `_dep_consent` call
+# under it. So the assertion is that `_setup_install_class` has a `stale` arm and
+# that the arm raises SETUP_ALL around the install rather than falling into the
+# catch-all that offers the row like a fresh one.
+SETUP_SH="${PAYLOAD}/scripts/setup.sh"
+STALE_ARM="$(awk '/^_setup_install_class\(\)/{f=1} f' "$SETUP_SH" | awk '/^}/{exit} {print}' | awk '/stale\)/{f=1} f' | awk '/;;/{print; exit} {print}')"
+if [ -n "$STALE_ARM" ]; then ok "12c1: _setup_install_class has a stale arm"
+else no "12c1: _setup_install_class has no stale arm — stale falls into the catch-all"; fi
+case "$STALE_ARM" in
+  *SETUP_ALL=1*) ok "12c2: the arm suppresses the install question" ;;
+  *) no "12c2: the stale arm would ask the install question again" "$(printf '%.300s' "$STALE_ARM")" ;;
+esac
+case "$STALE_ARM" in
+  *_setup_install_one*) ok "12c3: and it actually runs the sync" ;;
+  *) no "12c3: the stale arm names no installer" ;;
+esac
+
+echo ""
 echo "=== Section 7: nothing this file gathers is left unrendered ==="
 
 # THE STRUCTURAL HALF, and it is the one that keeps this class of defect from

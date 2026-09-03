@@ -268,10 +268,14 @@ fix() {  # <problem> → <command>
 }
 
 # yes/no/unknown as the words a person reads in a report.
-_doctor_word() {  # <yes|no|unknown>
+_doctor_word() {  # <yes|no|stale|unknown>
   case "${1:-}" in
     yes)     echo "present" ;;
     no)      echo "absent" ;;
+    # THE FOURTH ANSWER (AC-17). A venv built against a different `uv.lock` than
+    # the one now shipped is neither present-and-correct nor absent, and calling
+    # it either would send a reader to the wrong repair.
+    stale)   echo "stale" ;;
     unknown) echo "unknown" ;;
     *)       echo "${1:-unknown}" ;;
   esac
@@ -873,6 +877,12 @@ while IFS= read -r dep_name; do
     no)  dep_tail=""
          if [ "$dep_class" = "when-needed" ]; then dep_sym="$DOCTOR_NIL"; dep_tail="installs on first use"
          else dep_sym="$DOCTOR_BAD"; fi ;;
+    # STALE IS A REPAIR, NOT AN ABSENCE (AC-17). It reached this file folded into
+    # the catch-all below, so a venv one lockfile behind rendered as `unknown`
+    # beside a cause about a mechanism with no presence surface — and setup, on
+    # the same reading, would have offered to install a renderer plainly sitting
+    # on the machine. The ✗ is matched by the FIX line raised in the tallies.
+    stale) dep_sym="$DOCTOR_BAD"; dep_tail="stale against the shipped uv.lock" ;;
     *)   dep_tail="$(_doctor_unknown_cause "$kind")"
          # A cache with no presence surface is never a ✗: nothing can make it
          # readable, so marking it broken would keep doctor from ever saying
@@ -932,6 +942,8 @@ while IFS= read -r dep_name; do
     no)
       if [ "$dep_class" = "when-needed" ]; then third_state="installs on demand"
       else third_state="not installed → /bionic:setup"; fi ;;
+    stale)
+      third_state="stale against uv.lock — re-sync with /bionic:setup" ;;
     *)
       third_state="$(_doctor_unknown_cause "$kind")"
       case "${dep_class}/${kind}" in
@@ -1008,6 +1020,12 @@ while IFS= read -r dep_name; do
         esac
       fi
       ;;
+    stale)
+      # Counted with the violations rather than the absences: the thing is there
+      # and it is wrong, which is what a violation is. The fix names a re-sync so
+      # the reader is not told to install what they already have.
+      N_VIOLATION=$((N_VIOLATION + 1))
+      fix "${dep_name} is stale against the shipped uv.lock → run /bionic:setup" ;;
     no)
       N_ABSENT=$((N_ABSENT + 1))
       case "$dep_class" in
