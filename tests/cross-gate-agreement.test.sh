@@ -472,11 +472,25 @@ arm_patrol() {  # <repo> <session-id>...
   done
 }
 
+# ENGAGEMENT (task-engaged-session, 2026-09-03). Every party in this battery asks whether
+# the session invoked the canonical-sdlc skill before it asks whether a run is open, so a
+# fixture built to make the five parties agree about the RUN has to clear that question
+# first — for each session key any party is driven under. Without it every party would
+# answer "no run" for a reason that has nothing to do with the plan on disk, and the whole
+# battery would agree vacuously.
+engage_sids() {  # <repo> <sid>...
+  local r="$1"; shift
+  mkdir -p "$r/.bionic/tmp"
+  local s
+  for s in "$@"; do : > "$r/.bionic/tmp/engaged-$s.state"; done
+}
+
 new_repo() {  # <name> -> path
   local r="$SANDBOX/fx/$1/repo"
   mkdir -p "$r/.bionic/tmp"
   git -C "$r" init -q 2>/dev/null
   arm_patrol "$r" "$SID_A" "$SID_B" "$SID_LG"
+  engage_sids "$r" "$SID_A" "$SID_B" "$SID_LG"
   printf '%s' "$r"
 }
 
@@ -2984,7 +2998,7 @@ n_block_of() {  # <file> -> the marker-delimited span, markers inclusive
 # the same way every other member of this set does, so they belong in the SAME list rather
 # than a sibling one (Step-6 duplication review, record/wave-1.4.0/review-duplication.md,
 # ownership row 6: neither was pinned anywhere, so nothing would catch drift in either).
-N_ADOPTED='protect-main canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard
+N_ADOPTED='protect-main protect-database canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard
 dispatch-preflight canonical-sdlc-governing-skill landing-gate execution-recorder stop-guard
 context-spend patrol-duties-gate patrol-revive agent-context-guard preflight-probe stop-orders
 session-sweeper stop-check session-poker session-start engage'
@@ -3000,10 +3014,11 @@ N_STRAGGLERS=$(/usr/bin/grep -ln '^resolve_project_root()' "$BIONIC_HOOKS_DIR"/*
   | while IFS= read -r _f; do basename "$_f"; done | sort | tr '\n' ' ' | sed 's/ $//')
 expect_eq "no hook defines a private resolve_project_root any more" "" "$N_STRAGGLERS"
 
-# EVERY READER ASKS. protect-main and background-suite-guard read no root — they classify
-# a command and nothing else — so they are excluded by name, not by accident.
+# EVERY READER ASKS, and since task-engaged-session that is every member without exception.
+# protect-main and background-suite-guard used to be excluded here — they classified a
+# command and read no root at all — but the engagement marker lives UNDER a root, so both
+# now resolve one through the library like everyone else and the carve-out is gone.
 for _h in $N_ADOPTED; do
-  case "$_h" in protect-main|background-suite-guard) continue ;; esac
   expect_eq "$_h.sh resolves its root through the library" "yes" \
     "$(/usr/bin/grep -q 'project_root "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
 done
@@ -3018,7 +3033,9 @@ done
 # remains is the ARGUMENT to that call.
 N_SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check
 landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder
-session-start engage'
+session-start engage
+canonical-sdlc-evidence-gate canonical-sdlc-governing-skill protect-main protect-database
+background-suite-guard'
 for _h in $N_SID_READERS; do
   expect_eq "$_h.sh takes its session id from lib/session.sh" "yes" \
     "$(/usr/bin/grep -q 'session_id "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"

@@ -23,7 +23,7 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
 # command must not wave it through. `loader_fail_closed` permits exactly four repair
 # commands by whole-string match first, so a broken publish can still be repaired —
 # the lockout R-1 §(5) measured and this wave is named for.
-BIONIC_LIB_WANT="git-argv.sh"
+BIONIC_LIB_WANT="git-argv.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -154,6 +154,38 @@ BIONIC_LOADER_REFUSE
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "protect-main" "$COMMAND"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/git-argv.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/root.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/run.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/session.sh"
+
+# ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
+#
+# FIRST, above every other scoping question this hook asks. Chris, 2026-09-03: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
+# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A session that
+# never invoked it is one this hook has nothing to say to, and it says nothing: exit 0,
+# no stdout, no stderr.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The marker is the one artifact whose
+# PRESENCE opens a wall, so the fail direction is inverted here on purpose: the arming
+# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
+# which never consented is the defect this guard exists to remove.
+# [WALL: tests/protect-main.test.sh]
+#
+# THE LOADER REFUSAL ABOVE IS NOT SCOPED BY THIS and cannot be: the predicate lives in
+# the library that just failed to load. A broken plugin still refuses a push in any
+# session, engaged or not — the one place this wall outruns the ruling, and the price of
+# a fail-closed wall that cannot read its own scope.
+PM_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+[ -n "$PM_CWD" ] || PM_CWD=$(pwd)
+PM_REPO=$(project_root "$PM_CWD")
+PM_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || PM_SID=""
+engaged_session "$PM_REPO" "$PM_SID" || exit 0
 
 # Read every segment. A segment is a push only when git is argv[0] (after
 # leading VAR=value assignments, shell openers, command-taking prefixes and
