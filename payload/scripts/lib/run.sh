@@ -117,14 +117,32 @@ active_run() {
   local plan
   plan=$(active_plan "$root") || return 1
 
+  # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
+  # variable via a here-string, never a live pipe fed by _run_lines/awk. `grep -q`
+  # (and `-m1`) exit at their FIRST match; piped directly to a still-writing producer,
+  # that early exit closes the read end while the producer is mid-write, the producer
+  # takes SIGPIPE and reports 141, and every caller of this file runs under
+  # `set -o pipefail`, which promotes that 141 to the whole pipeline's own status. An
+  # `if pipeline; then return 1; fi` guarded that way reads 141 as false: a plan that
+  # DOES carry `delivered:` (or `abandoned:`) falls through as if it did not, and a
+  # closed run reads open — the fail-dangerous direction. A here-string is fully
+  # written by the shell before the reader ever starts, so there is no live writer left
+  # to signal, regardless of match position or file size (measured: a `delivered:` line
+  # near the top of a file past ~16-20 KB with pipefail on reproduces this at the
+  # `_run_lines "$plan" | grep -qE …` shape; tests/run-predicate.test.sh §R4, AC-21;
+  # sibling note tests/cross-gate-agreement.test.sh:1502, `producer | grep -q` under
+  # pipefail exits 141 on large files).
+  local lines
+  lines=$(_run_lines "$plan")
+
   # Frontmatter close: a plan explicitly abandoned is never active, regardless of `current:`.
   local frontmatter
-  frontmatter=$(_run_lines "$plan" | awk '
+  frontmatter=$(awk '
     NR == 1 && $0 == "---" { f = 1; next }
     f && $0 == "---" { exit }
     f { print }
-  ')
-  if printf '%s\n' "$frontmatter" | grep -q '^abandoned:'; then
+  ' <<< "$lines")
+  if grep -q '^abandoned:' <<< "$frontmatter"; then
     return 1
   fi
 
@@ -132,17 +150,19 @@ active_run() {
   # the same reason the marker test above is: this is the exact tolerance the five
   # hand-copies in hooks/ carried, and a predicate that is stricter than the walls it
   # replaces goes silently inert on a plan those walls read perfectly well.
-  local current
-  current=$(_run_lines "$plan" | awk '
+  local body
+  body=$(awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
-    { print }' | grep -m1 -E '^[[:space:]]*current[[:space:]]*:' \
+    { print }' <<< "$lines")
+  local current
+  current=$(grep -m1 -E '^[[:space:]]*current[[:space:]]*:' <<< "$body" \
     | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
     | tr -d '[:space:]')
   [ -n "$current" ] || return 1
 
   # Task-scale: current: T<n> is always active (no numbered close).
-  if printf '%s' "$current" | grep -qE '^T[0-9]+$'; then
+  if grep -qE '^T[0-9]+$' <<< "$current"; then
     printf '%s\n' "$plan"
     return 0
   fi
@@ -165,7 +185,7 @@ active_run() {
   # Step 9: open unless a Step-9 evidence line records delivery. Anything past 9 is not a
   # step this lifecycle has, and an unrecognised state is not an open run.
   if [ "$((10#$step))" -eq 9 ]; then
-    if _run_lines "$plan" | grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:'; then
+    if grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"; then
       return 1
     fi
     printf '%s\n' "$plan"
