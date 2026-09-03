@@ -127,6 +127,153 @@ else
   no "8: tests/run.sh names docs-pins.test.sh"
 fi
 
+# ── SECTION 2 — WALLS (spec AC-14/AC-26, `.bionic/docs/plans/wave-bionic-1.4.0-update/`).
+#
+# WHAT THIS SECTION OWNS. Four instruction-surface sentences that no hook can check,
+# each of which a machine downstream depends on:
+#
+#   (a) Step 0's probe act in `payload/skills/canonical-sdlc/SKILL.md` — the run's
+#       `parallel-budget:` comes from `resources_probe`/`resources_budget` and is
+#       recorded verbatim, never re-derived. hooks/dispatch-preflight.sh's budget arm
+#       reads that one string; a Step 0 that stopped writing it makes the arm inert.
+#   (b) the "fill the budget" dispatch rule in the same file — the sentence that turns
+#       a budget from a ceiling into an instruction.
+#   (c) the `BIONIC_TEST_JOBS=<test_jobs>` sentence in `agents-src/blocks/survival.md`,
+#       which must reach every dispatched writer — so it is asserted in the BLOCK and
+#       again in all six rendered `agents/*.md`, which is what proves the render ran.
+#   (d) the `/clear` paragraph, which lives in TWO channels by design (a rules file
+#       lands on the next read, a role file on the next session — CLAUDE.md §Path-scoped
+#       rules). Two copies of a paragraph is exactly the drift a pin exists for, so the
+#       two are compared BYTE FOR BYTE rather than each being spot-checked.
+#
+# ANTI-VACUITY, same discriminate-a-doctored-copy pattern §1 uses: every extractor here
+# is re-run against a mutated copy and must report the mutation.
+#
+# HERMETIC. Reads committed files by path; doctored copies live under $TMP.
+
+echo ""
+echo "=== Section 2: the WALLS instruction-surface pins (AC-14, AC-26) ==="
+
+SKILL_MD="${REPO}/payload/skills/canonical-sdlc/SKILL.md"
+SURVIVAL_BLOCK="${REPO}/agents-src/blocks/survival.md"
+AGENT_RULES="${REPO}/.claude/rules/agent-discipline.md"
+
+# The four pinned strings, spelled here exactly as they must appear on disk.
+PIN_PROBE='`resources_probe` and `resources_budget` from `<plugin-root>/scripts/lib/resources.sh` yield the run'"'"'s `parallel-budget:` — one string, recorded verbatim in plan frontmatter, printed in the display, and never re-derived downstream.'
+PIN_FILL='every slice with no unmet dependency dispatches in one batch up to `writers`; sequence only for shared state or when the batch would exceed the budget'
+PIN_JOBS='**Your brief names `BIONIC_TEST_JOBS=<test_jobs>`** — the run'"'"'s per-suite share of the parallel budget. Export it for the suite command your brief names; never raise it on your own judgment, and never invent one when the brief carries none.'
+
+# has_pin <file> <string> -> 0 when the file carries the string.
+#
+# WHITESPACE-NORMALIZED, and that is the only latitude given: the file is folded to one
+# line with every run of whitespace collapsed to a single space before the match, so a
+# sentence that wraps across two source lines — which every one of these does in at least
+# one of its homes — still matches, while a changed word, a changed backtick or a changed
+# punctuation mark does not. `tr` + `sed` rather than a regex, so the needle is compared
+# literally by `grep -F`.
+_flatten() { tr '\n' ' ' < "$1" 2>/dev/null | sed 's/[[:space:]][[:space:]]*/ /g'; }
+has_pin() { _flatten "$1" | grep -qF -- "$2"; }
+
+if has_pin "$SKILL_MD" "$PIN_PROBE"; then
+  ok "9: SKILL.md Step 0 carries the resources-probe sentence verbatim"
+else
+  no "9: SKILL.md Step 0 carries the resources-probe sentence verbatim" "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_FILL"; then
+  ok "10: SKILL.md carries the 'fill the budget' dispatch rule verbatim"
+else
+  no "10: SKILL.md carries the 'fill the budget' dispatch rule verbatim" "file: $SKILL_MD"
+fi
+
+if has_pin "$SURVIVAL_BLOCK" "$PIN_JOBS"; then
+  ok "11: agents-src/blocks/survival.md carries the BIONIC_TEST_JOBS sentence verbatim"
+else
+  no "11: agents-src/blocks/survival.md carries the BIONIC_TEST_JOBS sentence verbatim" \
+     "file: $SURVIVAL_BLOCK"
+fi
+
+# The render is the delivery mechanism; asserting the block alone would pass on a repo
+# whose agents/ was never re-rendered, which is the state a dispatched writer meets.
+PINS_JOBS_MISSING=""
+for role in auditor critic implementor researcher senior-implementor test-runner; do
+  has_pin "${REPO}/agents/${role}.md" "$PIN_JOBS" || PINS_JOBS_MISSING="${PINS_JOBS_MISSING} ${role}"
+done
+if [ -z "$PINS_JOBS_MISSING" ]; then
+  ok "12: all six rendered agents/*.md carry the BIONIC_TEST_JOBS sentence (render is current)"
+else
+  no "12: all six rendered agents/*.md carry the BIONIC_TEST_JOBS sentence (render is current)" \
+     "missing in:${PINS_JOBS_MISSING} — run 'bash agents-src/render.sh'"
+fi
+
+# clear_paragraph <file> -> the one paragraph opening with the `/clear` marker, verbatim.
+# Paragraph-scoped rather than line-scoped: a difference in how the two channels wrap the
+# same words IS a difference, and this pin is for byte identity, not for gist. It ends at a
+# blank line or at the render's own `<!-- SURVIVAL-END -->` marker, which agents-src/render.sh
+# writes immediately after the last injected line with no blank between them.
+clear_paragraph() {
+  awk '
+    /^\*\*`\/clear` does not kill agents\.\*\*/ { inp = 1 }
+    inp && /^[[:space:]]*$/ { exit }
+    inp && /^<!--/ { exit }
+    inp { print }
+  ' "$1" 2>/dev/null
+}
+
+CLEAR_BLOCK="$(clear_paragraph "$SURVIVAL_BLOCK")"
+CLEAR_RULES="$(clear_paragraph "$AGENT_RULES")"
+
+if [ -n "$CLEAR_BLOCK" ]; then
+  ok "13: agents-src/blocks/survival.md carries the '/clear does not kill agents' paragraph"
+else
+  no "13: agents-src/blocks/survival.md carries the '/clear does not kill agents' paragraph" \
+     "file: $SURVIVAL_BLOCK"
+fi
+if [ -n "$CLEAR_RULES" ]; then
+  ok "14: .claude/rules/agent-discipline.md carries the same paragraph"
+else
+  no "14: .claude/rules/agent-discipline.md carries the same paragraph" "file: $AGENT_RULES"
+fi
+expect_eq "15: the two copies of the '/clear' paragraph are byte-identical" \
+  "$CLEAR_BLOCK" "$CLEAR_RULES"
+
+PINS_CLEAR_MISSING=""
+for role in auditor critic implementor researcher senior-implementor test-runner; do
+  [ "$(clear_paragraph "${REPO}/agents/${role}.md")" = "$CLEAR_BLOCK" ] \
+    || PINS_CLEAR_MISSING="${PINS_CLEAR_MISSING} ${role}"
+done
+if [ -z "$PINS_CLEAR_MISSING" ]; then
+  ok "16: all six rendered agents/*.md carry that paragraph byte-identically"
+else
+  no "16: all six rendered agents/*.md carry that paragraph byte-identically" \
+     "differs or missing in:${PINS_CLEAR_MISSING} — run 'bash agents-src/render.sh'"
+fi
+
+# --- Anti-vacuity: the same extractors must report a mutation ---
+
+DOCTORED_SKILL="$TMP/skill-mutated.md"
+sed 's/never re-derived downstream/re-derived wherever convenient/' "$SKILL_MD" > "$DOCTORED_SKILL"
+if has_pin "$DOCTORED_SKILL" "$PIN_PROBE"; then
+  no "17: a doctored SKILL.md fails the probe pin (pin discriminates)" \
+     "the mutated copy still matched — the pin is vacuous"
+else
+  ok "17: a doctored SKILL.md fails the probe pin (pin discriminates)"
+fi
+
+DOCTORED_BLOCK="$TMP/survival-mutated.md"
+sed 's/never raise it on your own judgment/raise it whenever you like/' "$SURVIVAL_BLOCK" > "$DOCTORED_BLOCK"
+if has_pin "$DOCTORED_BLOCK" "$PIN_JOBS"; then
+  no "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)" \
+     "the mutated copy still matched — the pin is vacuous"
+else
+  ok "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)"
+fi
+
+DOCTORED_RULES="$TMP/rules-mutated.md"
+sed 's/the address that survives/the address that dies/' "$AGENT_RULES" > "$DOCTORED_RULES"
+expect_ne "19: a doctored agent-discipline.md reads as a different paragraph (pin discriminates)" \
+  "$CLEAR_BLOCK" "$(clear_paragraph "$DOCTORED_RULES")"
+
 echo ""
 echo "========================================"
 echo "docs-pins: $PASS/$TOTAL passed"

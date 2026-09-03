@@ -597,6 +597,218 @@ ROSTER_SUFFIX=".state"
 # STATE_DIR is set above, at the arming wall — the first thing on this path to need it.
 ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${PAYLOAD_SID}${ROSTER_SUFFIX}"
 
+# ============================================ THE LEASE WALL AND THE BUDGET WALL
+# (spec AC-14 and AC-26; plan slice WALLS; assumptions WALLS/2, WALLS/3, WALLS/4, WALLS/6.)
+#
+# TWO REFUSALS BELOW THE LEDGER'S HEADER, and the section comment above is written for
+# the append rather than for these: both sit here because both read the roster path or
+# refuse before the row is written, and neither is a journalling failure. Everything
+# from `warn()` down is still the fail-open ledger that comment describes.
+#
+# An agent context passes both. Two spellings mark one, and either is enough: the
+# settings-channel guard hands this script BIONIC_HOOK_CHANNEL=agent-context, and the
+# harness puts `agent_type` in a dispatched agent's own payload. The two walls reach
+# this file through different channels and neither spelling is present on both, so
+# reading only one of them would refuse the arrangement this wave is built on — a
+# writer dispatched INTO a tree works there by construction.
+is_agent_context() {
+  [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && return 0
+  [ -n "$(_jq '.agent_type')" ] && return 0
+  return 1
+}
+
+# ---------- the lease wall: an orchestrator dispatching from a writer's tree ----------
+#
+# A spawned worktree is LEASED to the writer it was spawned for (design ledger C1). The
+# roster this dispatch would be journalled to hangs off the MAIN checkout — project_root
+# maps a linked worktree back onto its main repository, which is the whole reason the
+# attestation and the ledger land in one address space — so a main-thread dispatch made
+# from inside a tree is ledgered in one place by an author working in another, and the
+# tree's own lease has no row that accounts for the orchestrator sitting in it.
+#
+# THE TEST FOR "LINKED WORKTREE" IS THE ONE scripts/lib/worktree.sh's land verb USES: a
+# linked worktree's `.git` is a FILE pointing into the shared repository, the main
+# checkout's is a directory. One spelling of that distinction, not two.
+#
+# AMBIGUITY PASSES, per §7. If the tree's main repository cannot be resolved, or the
+# project root is the tree itself (a tree carrying its own `.bionic` is its own project,
+# not a lease of this one), this wall has no main checkout to name and says nothing.
+if ! is_agent_context; then
+  LEASE_TOP=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null) || LEASE_TOP=""
+  if [ -n "$LEASE_TOP" ] && [ -f "$LEASE_TOP/.git" ]; then
+    LEASE_TOP=$( cd "$LEASE_TOP" 2>/dev/null && pwd -P ) || LEASE_TOP=""
+  else
+    LEASE_TOP=""
+  fi
+  if [ -n "$LEASE_TOP" ] && [ "$LEASE_TOP" != "$REPO" ]; then
+    # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
+    # answer against the tree, exactly as lib/root.sh's own walk does.
+    LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || LEASE_COMMON=""
+    if [ -z "$LEASE_COMMON" ]; then
+      LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --git-common-dir 2>/dev/null) || LEASE_COMMON=""
+      case "$LEASE_COMMON" in ""|/*) ;; *) LEASE_COMMON="$LEASE_TOP/$LEASE_COMMON" ;; esac
+    fi
+    LEASE_MAIN=""
+    [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
+    if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
+      cat >&2 <<LEASE_REFUSE
+BLOCKED: this dispatch was made from inside a linked worktree.
+
+    cwd:           ${CWD}
+    worktree:      ${LEASE_TOP}
+    main checkout: ${LEASE_MAIN}
+
+A spawned tree is leased to the writer it was spawned for, and dispatch authority sits
+with the main checkout: the roster this dispatch would be journalled to hangs off
+${LEASE_MAIN}, so a dispatch made here is recorded in one address space by an author
+working in another, and the tree's lease carries no row accounting for the orchestrator.
+
+Fix: dispatch from ${LEASE_MAIN}. A dispatched agent working in its own tree may dispatch
+from there — this refusal is the main thread's alone.
+LEASE_REFUSE
+      exit 2
+    fi
+  fi
+fi
+
+# ---------- the budget wall: the run's parallel ceiling ----------
+#
+# Step 0 probes the machine and writes ONE string into the plan's frontmatter —
+# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=…` — byte-identical
+# to the `budget=` value the preflight attestation records (L-RESOURCES/2). This wall
+# reads that string and never re-derives it: there is one owner of the numbers and it is
+# not here.
+#
+# INERT WITHOUT THE LINE, which is the property that matters most: every plan written
+# before this wave, and every project that never ran Step 0's probe, dispatches exactly
+# as it did. A budget is a ceiling a run OPTS INTO.
+#
+# THE LEADING FRONTMATTER BLOCK ONLY. A `parallel-budget:` inside the plan body is prose
+# — this wave's own plan quotes the header in a slice description — and a wall that read
+# it would take a quotation for configuration.
+PARALLEL_BUDGET=$(awk '
+  NR == 1 && $0 != "---" { exit }
+  NR == 1 { next }
+  $0 == "---" { exit }
+  /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
+' "$PLAN" 2>/dev/null) || PARALLEL_BUDGET=""
+
+if [ -n "$PARALLEL_BUDGET" ]; then
+  # One field out of the one string, by key. A field that is absent or not an integer
+  # leaves its own arm unmeasured rather than refusing on a question this wall cannot
+  # answer — the §7 direction every start-side ambiguity takes — and says so once.
+  budget_field() {  # <key> -> a non-negative integer, or empty
+    local v
+    v=$(printf '%s' "$PARALLEL_BUDGET" | tr ' ' '\n' | sed -n "s/^$1=//p" | head -1)
+    case "$v" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
+  }
+
+  # OPEN ROWS AND THE SUITES THEY CLAIM, in one pass over the roster.
+  #
+  # "Open" is the predicate lib/patrol.sh's `patrol_roster_state` uses for its own
+  # `open=`: the file is append-only and a row is appended per status transition, so
+  # dispatches are counted as DISTINCT `status=intended` names, and a name carrying a
+  # `landing-swept/v1` marker is closed. It is restated here rather than called because
+  # this wall needs the `claims=` count off the SAME rows and a second pass to get it
+  # would be the drift, not the saving; tests/dispatch-preflight.test.sh r22g pins the
+  # two counts against each other on one fixture so a second definition cannot appear
+  # silently.
+  #
+  # A CLAIM IS READ OFF THE LEDGER, never off the process table (WALLS/3): a row whose
+  # brief declared a subprocess claim spends a suite. Asking `pgrep` per row would be
+  # truer to the word "running" and would put a process spawn per row on the dispatch
+  # path; the ledger is the artifact this gate already owns.
+  budget_roster_counts() {  # <roster file> -> "<open> <claimed>"
+    local f="$1" line nm claims swept seen open=0 claimed=0
+    if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
+    # CAPTURED, THEN MATCHED — never `grep | grep -q`: under `pipefail` a `-q` consumer
+    # closes the pipe and the producer dies of SIGPIPE, which reads as a failed search.
+    swept="$(grep "^landing-swept/${ROSTER_VERSION}|" "$f" 2>/dev/null || true)"
+    seen="|"
+    while IFS= read -r line || [ -n "$line" ]; do
+      case "$line" in "roster-state/${ROSTER_VERSION}|status=intended|"*) ;; *) continue ;; esac
+      nm=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^name=//p' | head -1)
+      [ -n "$nm" ] || continue
+      case "$seen" in *"|${nm}|"*) continue ;; esac
+      seen="${seen}${nm}|"
+      case "$swept" in *"|name=${nm}|"*) continue ;; esac
+      open=$(( open + 1 ))
+      claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
+      [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+    done < "$f"
+    printf '%s %s' "$open" "$claimed"
+  }
+
+  # LIVE LEASES ON DISK. A directory under `.worktrees` whose `.git` is a FILE is a
+  # linked worktree; anything else there is a leftover, not a lease (WALLS/4).
+  budget_live_trees() {  # <project root> -> count
+    local root="$1" d n=0
+    [ -d "$root/.worktrees" ] || { printf '0'; return 0; }
+    for d in "$root"/.worktrees/*; do
+      [ -d "$d" ] || continue
+      [ -f "$d/.git" ] || continue
+      n=$(( n + 1 ))
+    done
+    printf '%s' "$n"
+  }
+
+  budget_deny() {  # <the one line naming the resource, its ceiling and its count>
+    cat >&2 <<BUDGET_REFUSE
+BLOCKED: this dispatch would put the run past its parallel budget.
+
+    $1
+
+budget: ${PARALLEL_BUDGET}
+  declared by ${PLAN}
+
+That string is derived once, at Step 0, from this machine's own resources probe, and
+recorded verbatim — nothing re-derives it here, and raising it is a Step-0 act.
+
+Fix: land or stand down an open row first (\`bash <plugin-root>/hooks/stop-orders.sh
+standdown\` computes the batch), or re-run Step 0's probe and raise the line if the
+machine genuinely has the room.
+BUDGET_REFUSE
+    exit 2
+  }
+
+  BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE")
+  BUDGET_OPEN="${BUDGET_COUNTS%% *}"
+  BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
+  BUDGET_UNMEASURED=""
+
+  B_WRITERS=$(budget_field writers)
+  if [ -n "$B_WRITERS" ]; then
+    [ $(( BUDGET_OPEN + 1 )) -gt "$B_WRITERS" ] && budget_deny \
+      "writers: budget=${B_WRITERS} open=${BUDGET_OPEN} with-this-dispatch=$(( BUDGET_OPEN + 1 ))"
+  else
+    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} writers"
+  fi
+
+  B_SUITES=$(budget_field suites)
+  if [ -n "$B_SUITES" ]; then
+    [ $(( BUDGET_CLAIMED + 1 )) -gt "$B_SUITES" ] && budget_deny \
+      "suites: budget=${B_SUITES} claimed=${BUDGET_CLAIMED} with-this-dispatch=$(( BUDGET_CLAIMED + 1 ))"
+  else
+    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} suites"
+  fi
+
+  B_TREES=$(budget_field worktrees)
+  if [ -n "$B_TREES" ]; then
+    BUDGET_LIVE=$(budget_live_trees "$REPO")
+    [ $(( BUDGET_LIVE + 1 )) -gt "$B_TREES" ] && budget_deny \
+      "worktrees: budget=${B_TREES} live=${BUDGET_LIVE} with-this-dispatch=$(( BUDGET_LIVE + 1 ))"
+  else
+    BUDGET_UNMEASURED="${BUDGET_UNMEASURED} worktrees"
+  fi
+
+  # Said once, on the pass path, and only when a field the line should have carried was
+  # unreadable: a wall that could not measure an arm must never go quiet about it.
+  if [ -n "$BUDGET_UNMEASURED" ]; then
+    printf 'dispatch-preflight: WARN the plan'"'"'s parallel-budget line carries no readable%s field; %s unmeasured. Line: %s\n' \
+      "$BUDGET_UNMEASURED" "${BUDGET_UNMEASURED# }" "$PARALLEL_BUDGET" >&2
+  fi
+fi
+
 warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
 
 # Values are pipe-delimited on one line, so a field carrying a newline or a `|`

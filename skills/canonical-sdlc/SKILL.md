@@ -154,7 +154,7 @@ Committing is a cross-cutting rhythm (~once per step), not a numbered step. Upda
 
 ### Step 0 — Configure
 
-1. **Pre-flight.** `.bionic/` exists; `docs-root:` read from `.bionic/config.yaml` (default `.bionic/docs`) with `{specs,plans,adrs,incidents}/` present; `mkdir -p .bionic/tmp/`; both hooks installed and executable (if not, warn and record in `## Assumptions`).
+1. **Pre-flight.** `.bionic/` exists; `docs-root:` read from `.bionic/config.yaml` (default `.bionic/docs`) with `{specs,plans,adrs,incidents}/` present; `mkdir -p .bionic/tmp/`; both hooks installed and executable (if not, warn and record in `## Assumptions`). Then probe the machine: `resources_probe` and `resources_budget` from `<plugin-root>/scripts/lib/resources.sh` yield the run's `parallel-budget:` — one string, recorded verbatim in plan frontmatter, printed in the display, and never re-derived downstream. The preflight attestation records the same string as its `budget=` field, so the wall, the tick and `/bionic:doctor` all read one value rather than four numbers and a formula. A machine the probe cannot read yields no line, and every budget-aware wall is inert without one.
 2. **Classify the triple silently.** Infer from the request's verbs and named artifacts. Do NOT interrogate. Interview by exception only, 1–3 questions, on exactly three conditions: a genuine intent collision the classification rules do not resolve (the standing gray zones are **mechanism-swap** and **reference-content**); a suspected but unconfirmed security/privacy surface; or a scale that could be one session or several.
 3. **Infer the flags.** `language` from repo files; `surface_type`/`has_ui` from the request; `multi_agent` defaults **true** (infer `false` only when there is genuinely nothing to offload — never key it off an installed plugin catalog, which silently disables the dispatched-task ledger guard); `deploy_target` **defaults to `n/a` and is never inferred** — a live surface exists only where the user names one, in the request or at this step's confirmation, and deploy-shaped signals in the repo are not that naming; `cleanup_on_finish` true; `use_worktree` false; `integration_branch` from the epic plan, else the current mainline, else `main` — print it as `unknown` rather than dropping it; `model_plan` is mechanical, never invented or recalled from memory: the orchestrator tier is the detected session model, and every other tier (implementor, senior-implementor, researcher, test-runner, auditor, critic) is read verbatim from that role's `model:` + `effort:` frontmatter in the rendered role files — `agents/*.md` in this repo, or `${CLAUDE_PLUGIN_ROOT}/agents/*.md` for an installed run.
 4. **Derive the walk requirement.** From the declared surface flags: a surface an agent can open and drive → `walk: required`; nothing drivable → `walk: exempt`. It prints in the confirmation display and is recorded as plan-frontmatter `walk:`. **Exemptions derive from declared configuration and are ratified at Step 0, never invented mid-run** — there is no mid-run `n/a`, and the Verify gate reads an absent or unrecognized key as `required`, so an omission never becomes an exemption.
@@ -180,6 +180,10 @@ Triple:                          [the run's shaping decision]
                      · epic floor <v> → effective <v> = MAX
 
 integration-branch: <name>       [<source: epic plan | current mainline | main> — Step 8 merges here]
+
+resources:                       [probed at this step — the ceiling every dispatch batch is measured against]
+  cores: <n>  mem_gb: <n>  disk_free_gb: <n>  load_1m: <f>  os: <macos | linux>
+  parallel-budget: writers=<n> suites=<n> worktrees=<n> test_jobs=<n> source=<probe | override>
 
 Discriminator flags:
   surface_type:    <value>      [inferred: <evidence>]
@@ -244,7 +248,7 @@ The list is the user's visible progress surface. Nothing enforces this — no ho
 
 **Override DSL.** `set <axis|flag>=<value>` and `set verify(<AC>)=<tier>`, comma-separated, ending in `confirm`. `explain [axis]` renders the axis tables and never counts as confirmation; a free-text question about the display is treated as `explain`, never as a parse error. A rigor override BELOW a derivable floor is **accepted, never refused** — no code refuses it, and neither does this skill. Before locking, name the binding floor, the evidence class it was buying ("audited adds the independent critic; without it, silent wrong assumptions are caught only by self-review"), and what specifically is given up; then proceed with the user's value and record `rigor-override: <user> <date> derived=<v> chosen=<v>` in frontmatter, so every later reader sees a decision rather than a derivation error. The floor checks read that marker and log `user-overridden` instead of a violation. Advisory strength scales with the floor's reason — the security/privacy flag floor gets the strongest language here — but there are **no carve-outs**: every floor accepts the override.
 
-**Evidence:** `Step 0: configured at <ISO> via <reply>; model_plan=<tiers>; integration-branch=<name>`
+**Evidence:** `Step 0: configured at <ISO> via <reply>; model_plan=<tiers>; integration-branch=<name>; parallel-budget=<writers=N suites=N worktrees=N test_jobs=N source=…>`
 
 ### Step 2 — Design
 
@@ -299,7 +303,7 @@ rigor: <rigor>
 scale: <scale>
 current: <N>
 
-- Step 0: <evidence>
+- Step 0: <evidence, ending in the run's parallel-budget string>
 - Step 1: (pending)
 ```
 
@@ -509,6 +513,8 @@ That expression is `detect_plugin_root`'s own, held byte-identical to the copy i
 **Fresh by default; fork only** when hand-feeding context would cost more than the fork's inheritance — a fork re-pays the whole main-thread context AND the orchestrator's effort, and ignores `model`. Never fork a mechanical task, and never fork to reach a cheaper model. **Dispatch is always background when `multi_agent: true`** — attended or not. A synchronous dispatch freezes the session, and a user who cannot type cannot steer. Serialize dependent units by dispatching the next one on the previous one's completion notification, never by blocking. Synchronous main-thread execution exists only under `multi_agent: false`, where there are no subagents at all.
 
 **Parallel by default, justify sequential** — but dispatch serially when units share state (one local DB, a shared reset, count-based assertions).
+
+**Fill the budget.** The plan's `parallel-budget:` is a ceiling, and a ceiling nobody reaches is a wave running one writer at a time by accident: every slice with no unmet dependency dispatches in one batch up to `writers`; sequence only for shared state or when the batch would exceed the budget. `hooks/dispatch-preflight.sh` refuses the dispatch that would cross the line — naming the budget and the count — so the batch is sized by reading the plan, never by testing the wall. Each brief in the batch carries `BIONIC_TEST_JOBS=<test_jobs>` from that same line.
 
 **Parallel writers work in spawned worktrees.** Whoever dispatches a parallel writer creates that writer's tree first: creation authority follows dispatch authority at every level, orchestrator included — during a parallel-writer phase an orchestrator that writes tracked files takes a tree of its own, and `.bionic` plan and ledger writes remain a file-ownership question rather than an exemption from this one. The tree comes from `${CLAUDE_PLUGIN_ROOT}/scripts/spawn-worktree.sh`, which verifies what it built and attests it in a single line; that path is written the way the CLI substitutes it inside a registered command file, so a model running the script from its own shell — where `${CLAUDE_PLUGIN_ROOT}` is unset — uses the root already resolved at Patrol arming (above); the dispatcher quotes that line into the unit's ledger row, so what the row claims about a base commit is something the machine measured rather than something the brief asked for. Teardown is never automatic — the merge decision is the dispatcher's, taken later. The harness `isolation: worktree` param is retired from bionic briefs at every level: it creates trees no ledger row can account for.
 
