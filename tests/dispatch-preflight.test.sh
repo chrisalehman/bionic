@@ -2731,13 +2731,19 @@ REPO=$(make_repo r23a yes)
 write_attestation "$REPO" "$SID_A"
 git -C "$REPO" worktree add -q -b wt/one "$REPO/.worktrees/one" >/dev/null 2>&1
 S23_TREE="$REPO/.worktrees/one"
+# PHYSICAL, because every root this gate prints is: project_root resolves with `pwd -P`
+# and the sandbox sits under macOS's /var -> /private/var link. Comparing the refusal's
+# main-checkout line against the LOGICAL fixture path would fail on the link alone,
+# which is the same trap tests/canonical-sdlc-governing-skill.test.sh's make_project
+# documents.
+S23_MAIN=$( cd "$REPO" && pwd -P )
 
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r23a a dispatch from the MAIN checkout passes (the control)" "0" "$GATE_ST"
 
 run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE")"
 expect_status "r23b the same dispatch from inside the linked worktree is REFUSED" "2" "$GATE_ST"
-expect_contains "…naming the main checkout" "main checkout: $REPO" "$GATE_ERR"
+expect_contains "…naming the main checkout" "main checkout: $S23_MAIN" "$GATE_ERR"
 expect_contains "…and the tree it was made from" "$S23_TREE" "$GATE_ERR"
 
 # The settings-channel spelling of an agent context.
