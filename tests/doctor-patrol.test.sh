@@ -626,6 +626,65 @@ expect_no_match "42: nor does its duplicate-Patrol fix line reach this page" \
 expect_no_match "43: and no row is attributed to the other project's roster" \
   "*2 open dispatches*" "$PB11"
 
+echo ""
+echo "=== Section 13: a NESTED .bionic below a git root — roster must resolve through project_root ==="
+# ============================================================
+# FIX-PATROL-ROOT (wave.plan.md Assumptions, FIX-DOCTOR/5). lib/patrol.sh's
+# _patrol_repo_root asked git for --git-common-dir FIRST and walked for a
+# nested `.bionic` only when no repository existed at all — the ordering
+# lib/root.sh's own header names as the bug the other eight copies shared
+# before this wave. A git repo holding a `.bionic` BELOW its root (spec AC-10,
+# tests/root.test.sh §3) writes its roster under the nested `.bionic/tmp`
+# while this resolver answered with the git toplevel — the roster read as
+# absent and the session as blind. The session's own repo and doctor's
+# `here_repo` both go through the same (buggy) resolver, so the "here" gate
+# still agreed; what broke was finding the roster file at all.
+SID13="ffffffff-1111-2222-3333-444455556666"
+SHORT13="${SID13%%-*}"
+spawn_live_pid; PID13="$LIVE_PID"
+
+GITROOT13="$(mktemp -d -p "$TMP")"
+git -c init.defaultBranch=main init -q "$GITROOT13" >/dev/null 2>&1
+NESTED13="$GITROOT13/apps/inner"
+mkdir -p "$NESTED13/.bionic/tmp"
+printf 'roster-state/v1|status=intended|name=beta|ts=2026-08-27T00:00:00Z\n' \
+  > "$NESTED13/.bionic/tmp/roster-${SID13}.state"
+
+HOME13="$(make_claude_home "$SID13" "$PID13" "$NESTED13")"
+TR13="$(transcript_of "$HOME13" "$SID13")"
+plant_patrol_job "$TR13" "toolu_13" "fff13131"
+plant_patrol_stamp "$NESTED13" "$SID13"
+
+OUT13="$(run_doctor "$HOME13" "$NESTED13")"
+PB13="$(patrol_block "$OUT13")"
+
+expect_match "46: a nested .bionic below the git root still finds its roster" \
+  "*✓ session ${SHORT13} · 1 open dispatch*" "$PB13"
+
+# ---- differential control: .bionic AT the git root resolves the same way ----
+# Same shape, .bionic planted at the repo root instead of nested below it — the
+# git root and project_root's answer already coincide here, so this passed
+# before the fix too. Proves 46 is not vacuous: the harness can find a roster
+# through this path, and the nested case above is what specifically breaks.
+GITROOT13B="$(mktemp -d -p "$TMP")"
+git -c init.defaultBranch=main init -q "$GITROOT13B" >/dev/null 2>&1
+mkdir -p "$GITROOT13B/.bionic/tmp"
+SID13B="00000000-1111-2222-3333-444455556666"
+SHORT13B="${SID13B%%-*}"
+spawn_live_pid; PID13B="$LIVE_PID"
+printf 'roster-state/v1|status=intended|name=beta|ts=2026-08-27T00:00:00Z\n' \
+  > "$GITROOT13B/.bionic/tmp/roster-${SID13B}.state"
+HOME13B="$(make_claude_home "$SID13B" "$PID13B" "$GITROOT13B")"
+TR13B="$(transcript_of "$HOME13B" "$SID13B")"
+plant_patrol_job "$TR13B" "toolu_13b" "fff13132"
+plant_patrol_stamp "$GITROOT13B" "$SID13B"
+
+OUT13B="$(run_doctor "$HOME13B" "$GITROOT13B")"
+PB13B="$(patrol_block "$OUT13B")"
+
+expect_match "47: control — .bionic AT the git root still resolves" \
+  "*✓ session ${SHORT13B} · 1 open dispatch*" "$PB13B"
+
 # THE CONTROL, so 41-43 are not three negatives over an empty section. Pointed at
 # project B, the same claude-home, the same two sessions, doctor answers about B
 # and says nothing about A.
