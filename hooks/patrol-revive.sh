@@ -74,6 +74,24 @@
 # replaces was a worse one, because a skill registration goes quiet without leaving
 # anything on disk to notice.
 #
+# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan slice STOPGATES): ONE CLOCK
+# PER RUN. This session having a stamp of its own says a Patrol was armed here; a
+# second FRESH `patrol-<other-sid>.state` in the SAME project's `.bionic/tmp` says
+# another one is ALSO alive right now — the duplicate-clock shape S5's ritual
+# exists to prevent, caught here even when it happens without a /clear or resume in
+# between (a stray `CronCreate` run twice, or two sessions racing an `arm`). This is
+# a FINDING, not a block: it is a stderr diagnostic line, exactly `loader_fail_open`'s
+# voice, because a sibling's live clock is not this session's stop to refuse — only
+# its own dead one is. Read AFTER the threshold is known (so it shares the same
+# staleness measurement) and BEFORE this session's own stale/fresh decision, so it
+# fires whichever way that decision goes.
+#   - the other stamp is this session's own                    -> not counted
+#   - the other stamp is a symlink                              -> not counted, never followed
+#   - the other stamp's mtime is unreadable                     -> not counted
+#   - the other stamp is STALE (past the same 2x limit)          -> not counted, silent
+#   - the other stamp is FRESH                                   -> one stderr finding line, naming its session
+#   - exactly one live stamp (this session's own, no others)     -> silent on this arm
+#
 # FAIL DIRECTIONS (pinned by tests/patrol-revive.test.sh):
 #   - jq absent                                       -> pass, silent
 #   - not a Stop payload (SubagentStop included)      -> pass, silent
@@ -366,6 +384,28 @@ fi
 # 2x, exactly as the arming wall measures it: a Patrol firing on its interval is,
 # at any random instant, up to one whole interval stale while perfectly healthy.
 LIMIT=$(( INTERVAL * 2 ))
+
+# ---------- the second-stamp finding (AC-3): one clock per run ----------
+#
+# Every OTHER patrol-*.state beside this session's own, in the same .bionic/tmp,
+# judged against the SAME limit — a fresh one is a live duplicate clock, worth a
+# finding whether or not THIS session's own clock turns out to be stale or fine.
+_rival_now="$(date -u +%s 2>/dev/null || echo 0)"
+for _rival_sf in "$REPO"/.bionic/tmp/patrol-*.state; do
+  [ -e "$_rival_sf" ] || [ -L "$_rival_sf" ] || continue
+  [ "$_rival_sf" = "$STAMP_FILE" ] && continue
+  [ -L "$_rival_sf" ] && continue
+  _rival_sid="${_rival_sf##*/}"; _rival_sid="${_rival_sid#patrol-}"; _rival_sid="${_rival_sid%.state}"
+  [ -n "$_rival_sid" ] || continue
+  [ "$_rival_sid" = "$SID" ] && continue
+  _rival_mt=$(stat -f %m "$_rival_sf" 2>/dev/null || stat -c %Y "$_rival_sf" 2>/dev/null)
+  case "$_rival_mt" in ''|*[!0-9]*) continue ;; esac
+  _rival_age=$(( _rival_now - _rival_mt ))
+  [ "$_rival_age" -lt 0 ] && _rival_age=0
+  if [ "$_rival_age" -le "$LIMIT" ]; then
+    echo "patrol-revive: a second live Patrol stamp for session $(printf '%.8s' "$_rival_sid") exists here — one clock per run; delete the stray job and stamp" >&2
+  fi
+done
 
 MTIME=$(stat -f %m "$STAMP_FILE" 2>/dev/null || stat -c %Y "$STAMP_FILE" 2>/dev/null)
 case "$MTIME" in ''|*[!0-9]*) exit 0 ;; esac
