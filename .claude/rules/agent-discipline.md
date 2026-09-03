@@ -151,3 +151,12 @@ at session start, so AC-2 is unaffected. The cost is ~8 KB whenever a matching f
   re-install either without re-running the research + updating this rule. Sibling skills like
   `animate`, `polish`, `audit`, `critique`, `bolder` are part of the impeccable pack, not
   frontend-design.
+
+**`/clear` does not kill agents.** A cleared session loses its own memory of a fleet, never
+the fleet: the agents keep running, their rosters stay on disk, and
+`bash <plugin-root>/hooks/session-poker.sh adopt` is what reads them back. The bare teammate
+name is the address that survives — `SendMessage` to `<name>` still reaches a live teammate
+across the clear, while the long transcript id is the observe address and never a delivery
+one. Re-dispatch waits for adopt's verdict: a name adopt reports as still running is a
+teammate to message, not a slot to refill, and dispatching over it is how one task ends up
+with two writers and one of them unledgered.
