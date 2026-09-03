@@ -51,6 +51,26 @@
 # NotebookEdit/Bash tool_use whose input names the active plan file discharges
 # the same duty.
 #
+# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan slice STOPGATES). A `/clear`
+# rewrites the session id in place but does not kill a predecessor's cron job — it
+# survives and keeps firing into the new conversation (probe A-probe-4). The new
+# transcript's very first turn is the literal `<command-name>/clear</command-name>`
+# (record/wave-1.4.0-probe.md); a resume is announced the same way, by the literal
+# substring `source: resume` this gate's SessionStart sibling
+# (hooks/session-start.sh) prints into the title line of its own report, which the
+# model reads as context. Either is "a transcript record whose content contains" the
+# marker — read as RAW TEXT, not one JSON shape, so this arm does not care whether
+# the marker lands on a user prompt, a system entry, or anything else.
+#
+# THE RULE: since the MOST RECENT such marker, a `CronCreate` tool_use must be
+# preceded by a `CronList` tool_use, or the turn refuses — creating a job before
+# listing and deleting the stray one leaves two clocks on one project (S5, the
+# resume ritual). The scan resets at every marker, so only the ritual for the
+# LATEST clear/resume is judged; a Cron call before the marker is not "since" it.
+# Agent-context tool_uses are excluded, the same exclusion the tick-duties arm
+# already makes, for the same reason. BLOCKS ONCE: this reuses the exact
+# `stop_hook_active` mechanism above, unchanged — no new bookkeeping for it.
+#
 # FAIL DIRECTIONS (pinned by tests/patrol-duties-gate.test.sh):
 #   - jq absent                                          -> pass, silent
 #   - not a Stop payload (SubagentStop included)          -> pass, silent
@@ -61,6 +81,9 @@
 #   - the last user prompt is not a Patrol tick           -> pass, silent
 #   - both duties done since that prompt                  -> pass, silent
 #   - either duty missing                                 -> REFUSE, naming which
+#   - no clear/resume marker anywhere in the transcript   -> pass, silent (ritual arm inert)
+#   - CronList precedes any CronCreate since the marker   -> pass, silent (ritual arm inert)
+#   - a CronCreate since the marker with no prior CronList-> REFUSE, naming the ritual
 #
 # TWO ACCEPTED LIMITS, both a false BLOCK rather than a false silence, and both
 # cheap because the refusal is once-only (stop again and the turn ends). First,
@@ -110,6 +133,12 @@ _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 TRANSCRIPT=$(_jq '.transcript_path')
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] && [ ! -L "$TRANSCRIPT" ] || exit 0
+
+# THIS SCRIPT'S OWN DIRECTORY, so the poker the ritual message names is the same
+# file a model would actually run — resolved the way hooks/patrol-revive.sh
+# resolves its sibling, never through PATH and never a placeholder.
+HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
 
 CWD="${CLAUDE_PROJECT_DIR:-}"
 [ -n "$CWD" ] || CWD=$(_jq '.cwd')
@@ -291,25 +320,67 @@ PLAN_NAME=""
 # line-and-tab delimited; a prompt is many lines long and would otherwise forge
 # records. Nothing downstream reads a value except by substring, so squashing
 # costs no fidelity.
+# A MARK line is emitted for EITHER marker on any record whose raw text contains
+# it — independent of the USER/TOOL typing below, and independent of whether the
+# line even parses as JSON, because the marker is a literal substring search over
+# "a transcript record whose content contains" it, not a field read.
 STREAM=$(jq -Rr '
-  fromjson?
-  | select((.isSidechain // false) != true)
-  | select((((.agentId // .agent_id) // "") | tostring) == "")
-  | if .type == "user" then
-      ( if (.message.content | type) == "string" then .message.content
-        else ([.message.content[]? | select(.type == "text") | .text] | join(" "))
-        end ) as $t
-      | select(($t // "") != "")
-      | "USER\t" + ($t | gsub("[\n\t\r]"; " "))
-    elif .type == "assistant" then
-      .message.content[]?
-      | select(.type == "tool_use")
-      | "TOOL\t" + (.name // "")
-        + "\t" + (((.input.file_path // .input.path // .input.command // "") | tostring) | gsub("[\n\t\r]"; " "))
-    else empty
-    end
+  . as $line
+  | (if ($line | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
+    (if ($line | contains("source: resume")) then "MARK\tresume" else empty end),
+    (
+      ($line | fromjson?) as $r
+      | ($r // empty)
+      | select((.isSidechain // false) != true)
+      | select((((.agentId // .agent_id) // "") | tostring) == "")
+      | if .type == "user" then
+          ( if (.message.content | type) == "string" then .message.content
+            else ([.message.content[]? | select(.type == "text") | .text] | join(" "))
+            end ) as $t
+          | select(($t // "") != "")
+          | "USER\t" + ($t | gsub("[\n\t\r]"; " "))
+        elif .type == "assistant" then
+          .message.content[]?
+          | select(.type == "tool_use")
+          | "TOOL\t" + (.name // "")
+            + "\t" + (((.input.file_path // .input.path // .input.command // "") | tostring) | gsub("[\n\t\r]"; " "))
+        else empty
+        end
+    )
 ' "$TRANSCRIPT" 2>/dev/null) || STREAM=""
 [ -n "$STREAM" ] || exit 0
+
+# ---------- THE RESUME/CLEAR RITUAL (AC-3), judged FIRST ----------
+#
+# Folded over the same stream, resetting at every marker so only the ritual for
+# the LATEST clear/resume is judged — a Cron call before the marker is not "since"
+# it. TOOL rows here are already main-thread-only (the select() above excludes
+# sidechain and agentId-carrying entries), the same exclusion the tick-duties fold
+# below relies on.
+RITUAL=$(printf '%s\n' "$STREAM" | awk -F'\t' '
+  BEGIN { marker = 0; listed = 0; violated = 0 }
+  $1 == "MARK" { marker = 1; listed = 0; violated = 0; next }
+  $1 == "TOOL" {
+    if (!marker) next
+    if ($2 == "CronList") { listed = 1; next }
+    if ($2 == "CronCreate" && !listed) { violated = 1; next }
+    next
+  }
+  END { if (marker && violated) print "block"; else print "quiet" }
+')
+
+if [ "$RITUAL" = "block" ]; then
+  RITUAL_REASON="This is the first Stop after a /clear or a resume, and the transcript shows a CronCreate with no CronList before it since then. A predecessor Patrol cron survives a /clear and keeps firing into the new conversation — creating a job before listing and deleting the stray one leaves two clocks on one project.
+
+Do the resume ritual, in order, then stop again — this gate blocks once:
+  1. CronList
+  2. delete every bionic-patrol session=<other> job it lists
+  3. CronCreate
+  4. bash ${HOOK_DIR}/session-poker.sh arm
+  5. … adopt"
+  jq -nc --arg r "$RITUAL_REASON" '{decision:"block",reason:$r}'
+  exit 0
+fi
 
 # TICK / LISTAGENTS / TASKLIST, folded over the last turn.
 VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" '
