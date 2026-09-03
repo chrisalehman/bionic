@@ -562,6 +562,28 @@ expect_eq "…and exactly one line on stderr" "1" "$(printf '%s\n' "$DRV_ERR" | 
 expect_contains "…naming what it could not find" "library" "$DRV_ERR"
 expect_contains "…and where to go next" "/bionic:doctor" "$DRV_ERR"
 
+# ---------------------------------------------------------------------------
+# §EXEC — every command hooks.json registers is EXECUTABLE (T3 re-drive finding 3,
+# 2026-09-03). The CLI runs a registered command as a bare path with no interpreter
+# prefix, so a hook whose exec bit is lost is not a hook that degrades — it is
+# `Permission denied` on every event it is registered for, and the wall it was is
+# silently gone. FIX-GATE's rewrite of patrol-duties-gate.sh dropped the bit
+# (100755 → 100644 at 24d0ddd) and nothing here noticed until a live drive did.
+echo ""
+echo "=== §EXEC — every hooks.json command file carries the exec bit ==="
+EXEC_MISSING=""
+EXEC_N=0
+while IFS= read -r cmdpath; do
+  [ -n "$cmdpath" ] || continue
+  EXEC_N=$((EXEC_N + 1))
+  f="$HOOKS/$(basename "$cmdpath")"
+  [ -x "$f" ] || EXEC_MISSING="$EXEC_MISSING $(basename "$cmdpath")"
+done <<EOF_CMDS
+$(grep -o '"command": *"[^"]*"' "$REPO/hooks/hooks.json" | sed 's/.*"command": *"//; s/"$//' | awk '{print $NF}' | sort -u)
+EOF_CMDS
+expect_eq "hooks.json registers a non-empty command set" "1" "$([ "$EXEC_N" -gt 0 ] && echo 1 || echo 0)"
+expect_empty "every registered command file is executable (missing:$EXEC_MISSING)" "$EXEC_MISSING"
+
 echo ""
 echo "========================================"
 echo "hook-adoption: $PASS/$TOTAL passed"
