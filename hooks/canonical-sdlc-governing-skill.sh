@@ -776,6 +776,85 @@ if [ -n "$EPIC" ] && [ -r "$DOCS_ROOT/plans/$EPIC/epic.plan.md" ]; then
   fi
 fi
 
+# ---------- the lease wall: a plan write issued from inside a linked worktree ----------
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+# (spec AC-14; plan slice WALLS; assumption WALLS/6.)
+#
+# The other half of AC-14's pair — hooks/dispatch-preflight.sh carries the dispatch half.
+# A plan is the RUN's artifact and it lives under the main checkout; a plan write issued
+# from inside a leased tree is an orchestrator that has moved into a writer's workspace,
+# and the tree's branch is where that edit would land. The plan then exists on a branch
+# nobody merges until the lease ends, while every hook that reads `active_run` reads the
+# main checkout's copy.
+#
+# PLAN-SCOPED. A spec, an ADR, a record note — those are ordinary artifacts and a writer
+# in a tree produces them there by design. Only the file the run is steered by is refused.
+#
+# AN AGENT CONTEXT IS ALLOWED. Two spellings mark one and either is enough: the payload's
+# own `agent_type`, which the harness sets for a dispatched agent, and the settings-channel
+# guard's BIONIC_HOOK_CHANNEL. This hook is registered directly on Write|Edit rather than
+# behind the guard, so `agent_type` is the spelling that answers here — the other is read
+# anyway, because a partition maintained by hand is one edit away from covering neither.
+#
+# AMBIGUITY PASSES. No cwd in the payload, a cwd outside any repository, a tree whose main
+# repository cannot be resolved: this wall has no main checkout to name and says nothing.
+case "$BASENAME" in
+  *.plan.md)
+    LEASE_AGENT=0
+    [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && LEASE_AGENT=1
+    [ -n "$(echo "$INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
+    LEASE_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+    if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ]; then
+      # A linked worktree's `.git` is a FILE pointing into the shared repository; the main
+      # checkout's is a directory. Same test scripts/lib/worktree.sh's land verb uses.
+      LEASE_TOP=$(git -C "$LEASE_CWD" rev-parse --show-toplevel 2>/dev/null) || LEASE_TOP=""
+      if [ -n "$LEASE_TOP" ] && [ -f "$LEASE_TOP/.git" ]; then
+        LEASE_TOP=$( cd "$LEASE_TOP" 2>/dev/null && pwd -P ) || LEASE_TOP=""
+      else
+        LEASE_TOP=""
+      fi
+      if [ -n "$LEASE_TOP" ]; then
+        # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
+        # answer against the tree, as lib/root.sh's own walk does.
+        LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || LEASE_COMMON=""
+        if [ -z "$LEASE_COMMON" ]; then
+          LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --git-common-dir 2>/dev/null) || LEASE_COMMON=""
+          case "$LEASE_COMMON" in ""|/*) ;; *) LEASE_COMMON="$LEASE_TOP/$LEASE_COMMON" ;; esac
+        fi
+        LEASE_MAIN=""
+        [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
+        if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
+          echo "BLOCKED: canonical-sdlc plan '$BASENAME' is being written from inside a linked worktree." >&2
+          echo "" >&2
+          echo "    cwd:           $LEASE_CWD" >&2
+          echo "    worktree:      $LEASE_TOP" >&2
+          echo "    main checkout: $LEASE_MAIN" >&2
+          echo "" >&2
+          echo "The plan is the run's own artifact and it lives in the main checkout: written here" >&2
+          echo "it lands on the tree's branch, where every hook that reads the active run cannot" >&2
+          echo "see it until the lease ends." >&2
+          echo "" >&2
+          echo "Fix: write the plan from $LEASE_MAIN. A dispatched agent working in its own tree" >&2
+          echo "may write there — this refusal is the main thread's alone." >&2
+          exit 2
+        fi
+      fi
+    fi
+    ;;
+esac
+
+# ---------- `parallel-budget:` is ACCEPTED, and deliberately not validated ----------
+# (spec AC-26; assumption WALLS/5.)
+#
+# Step 0 writes the run's resource ceiling into plan frontmatter as one string —
+# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=probe|override` —
+# byte-identical to the `budget=` value the preflight attestation records. It is optional:
+# a plan with it and a plan without it both write, which is what keeps every plan predating
+# the line writable. This hook does not parse it. Its only consumer is the budget arm in
+# hooks/dispatch-preflight.sh, which is where a budget can actually refuse something and
+# which already declines to act on a field it cannot read; a second opinion about the same
+# string here would be a second place for that reading to drift.
+
 # ---------- required frontmatter flags + model_plan ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 REQUIRED_OPT_IN=("cleanup_on_finish" "use_worktree")

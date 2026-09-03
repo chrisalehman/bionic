@@ -2558,6 +2558,204 @@ expect_contains "…saying which half did not run, and why" \
   "staleness half" "$GATE_ERR"
 GATE="$S21_SAVED_GATE"; GATE_CONFIG_DIR="$S21_SAVED_CONFIG"
 
+# ================================================== S22: THE PARALLEL-BUDGET ARM
+# (spec AC-26; plan slice WALLS; assumptions WALLS/2, WALLS/3, WALLS/4.)
+#
+# The active plan's frontmatter may carry ONE budget string —
+# `parallel-budget: writers=N suites=N worktrees=N test_jobs=N source=…` — written at
+# Step 0 from the resources probe and byte-identical to the attestation's `budget=`
+# value (L-RESOURCES/2). With that line present the gate refuses a dispatch that would
+# push any of the three counted resources past its ceiling; WITHOUT it the gate is
+# inert, which is what keeps every plan written before this wave dispatching normally.
+#
+# The three counts and where each comes from:
+#   writers   — OPEN roster rows for this session (a `status=intended` row whose name
+#               carries no `landing-swept/v1` marker). Same predicate lib/patrol.sh's
+#               patrol_roster_state uses for its own `open=`, and r22g pins the two
+#               against each other on one fixture so the wall and the Patrol can never
+#               disagree about how many writers are out.
+#   suites    — those same open rows carrying a non-empty `claims=` (the subprocess
+#               claim a suite-running brief declares).
+#   worktrees — live linked trees under `<project root>/.worktrees` — a directory whose
+#               `.git` is a FILE, which is exactly how scripts/lib/worktree.sh tells a
+#               linked worktree from the main checkout.
+# Each arm adds 1 for the dispatch about to happen, per the plan's literal text.
+
+# s22_set_budget <repo> <budget value> — insert `parallel-budget:` into the plan's
+# leading frontmatter block (the plan fixture's first line is the opening `---`).
+s22_set_budget() {
+  local plan="$1/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" val="$2"
+  awk -v v="$val" 'NR == 1 && $0 == "---" { print; print "parallel-budget: " v; next } { print }' \
+    "$plan" > "$plan.tmp" && mv "$plan.tmp" "$plan"
+}
+
+# s22_roster_row <repo> <sid> <name> [claims] — one launch row in the shipped schema.
+s22_roster_row() {
+  local f; f="$(roster_path "$1" "$2")"
+  mkdir -p "$(dirname "$f")"
+  printf 'roster-state/v1|status=intended|session=%s|name=%s|agent_id=|launched_at=2026-09-02T00:00:00Z|subagent_type=implementor|model=|deliverable=/tmp/d-%s|source=declared|duration=~10 minutes|progress=|claims=%s|cadence=|absent=|waiver=|tool_use_id=t-%s\n' \
+    "$2" "$3" "$3" "${4:-}" "$3" >> "$f"
+}
+
+# s22_sweep <repo> <sid> <name> — the landing marker that closes a row.
+s22_sweep() {
+  printf 'landing-swept/v1|at=2026-09-02T00:00:00Z|name=%s|state=MET\n' "$3" >> "$(roster_path "$1" "$2")"
+}
+
+# s22_fake_tree <repo> <dir> — a linked worktree's on-disk signature: a `.git` FILE.
+s22_fake_tree() {
+  mkdir -p "$1/.worktrees/$2"
+  printf 'gitdir: %s/.git/worktrees/%s\n' "$1" "$2" > "$1/.worktrees/$2/.git"
+}
+
+echo ""
+echo "---------- S22: the parallel-budget arm ----------"
+
+# --- writers: at the ceiling, refuse; one under it, pass.
+REPO=$(make_repo r22a yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_roster_row "$REPO" "$SID_A" "W-TWO"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22a two open rows against writers=2 → the third dispatch is REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the budget line verbatim" \
+  "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe" "$GATE_ERR"
+expect_contains "…and the count that broke it" "writers: budget=2 open=2 with-this-dispatch=3" "$GATE_ERR"
+expect_contains "…naming the plan the budget came from" "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "$GATE_ERR"
+
+REPO=$(make_repo r22b yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22b one open row against writers=2 → the second dispatch passes" "0" "$GATE_ST"
+expect_absent "…and says nothing about a budget on the pass path" "parallel budget" "$GATE_ERR"
+
+# --- inert without the line. The same roster that refused above dispatches freely
+#     when the plan declares no budget, which is every plan written before this wave.
+REPO=$(make_repo r22c yes)
+write_attestation "$REPO" "$SID_A"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_roster_row "$REPO" "$SID_A" "W-TWO"
+s22_roster_row "$REPO" "$SID_A" "W-THREE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22c no parallel-budget: in the plan → the arm is inert, three rows notwithstanding" "0" "$GATE_ST"
+expect_absent "…and prints nothing about a budget it was never given" "parallel budget" "$GATE_ERR"
+
+# --- a SWEPT row is not an open one (the anti-vacuity control: the same fixture
+#     refuses while the marker is absent).
+REPO=$(make_repo r22d yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22d one UNSWEPT row against writers=1 → refused (the control)" "2" "$GATE_ST"
+s22_sweep "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "…and the same row, once landing-swept, no longer counts → passes" "0" "$GATE_ST"
+
+# --- suites: an open row carrying a subprocess claim.
+REPO=$(make_repo r22e yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE" "bash tests/run.sh"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22e one claimed suite against suites=1 → REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the suite count" "suites: budget=1 claimed=1 with-this-dispatch=2" "$GATE_ERR"
+
+REPO=$(make_repo r22f yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22f the same row with NO claim does not spend a suite → passes" "0" "$GATE_ST"
+
+# --- worktrees: live linked trees on disk.
+REPO=$(make_repo r22h yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=1 test_jobs=4 source=probe"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22h worktrees=1 with no tree standing → passes (the control)" "0" "$GATE_ST"
+s22_fake_tree "$REPO" "one"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "…one live tree against worktrees=1 → REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the tree count" "worktrees: budget=1 live=1 with-this-dispatch=2" "$GATE_ERR"
+# A plain directory under .worktrees is not a leased tree — only a linked one is.
+REPO=$(make_repo r22i yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=1 test_jobs=4 source=probe"
+mkdir -p "$REPO/.worktrees/not-a-tree"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22i a bare directory under .worktrees is not a lease → passes" "0" "$GATE_ST"
+
+# --- r22g: the wall and the Patrol count the same open rows. A second definition of
+#     "open" is the drift this pins shut (spec ownership table, `active run` row).
+REPO=$(make_repo r22g yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"
+s22_roster_row "$REPO" "$SID_A" "W-TWO"
+s22_roster_row "$REPO" "$SID_A" "W-THREE"
+s22_roster_row "$REPO" "$SID_A" "W-FOUR"
+s22_sweep "$REPO" "$SID_A" "W-FOUR"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r22g three open rows and one swept, against writers=3 → REFUSED" "2" "$GATE_ST"
+expect_contains "…the wall counts three open" "writers: budget=3 open=3 with-this-dispatch=4" "$GATE_ERR"
+# shellcheck source=/dev/null
+( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/patrol.sh" 2>/dev/null \
+  && patrol_roster_state "$REPO" "$SID_A" ) > "$SANDBOX/.r22g" 2>/dev/null
+expect_contains "…and so does lib/patrol.sh's patrol_roster_state, on the same file" \
+  "open=3" "$(cat "$SANDBOX/.r22g")"
+
+# ============================================ S23: THE ORCHESTRATOR-IN-WORKTREE ARM
+# (spec AC-14; handoff 2.5.)
+#
+# A worktree is LEASED to the writer it was spawned for. A main-thread dispatch made
+# from inside one is an orchestrator that has moved into a writer's tree — the roster
+# it appends to hangs off the MAIN checkout (project_root maps the worktree back), so
+# the dispatch is journalled in one address space while its author works in another,
+# and the tree's own lease has no row that accounts for the orchestrator. The refusal
+# names the main checkout, which is where dispatch authority sits.
+#
+# AN AGENT CONTEXT IS ALLOWED, and that is the whole point of the arm: a writer
+# dispatched INTO a tree works there by construction, and refusing it would refuse the
+# arrangement the wave is built on. Two spellings mark an agent context — the guard's
+# BIONIC_HOOK_CHANNEL on the settings channel, and the payload's own `agent_type`,
+# which the harness sets for a dispatched agent — and either one is enough.
+
+echo ""
+echo "---------- S23: a main-thread dispatch from inside a linked worktree ----------"
+
+REPO=$(make_repo r23a yes)
+write_attestation "$REPO" "$SID_A"
+git -C "$REPO" worktree add -q -b wt/one "$REPO/.worktrees/one" >/dev/null 2>&1
+S23_TREE="$REPO/.worktrees/one"
+# PHYSICAL, because every root this gate prints is: project_root resolves with `pwd -P`
+# and the sandbox sits under macOS's /var -> /private/var link. Comparing the refusal's
+# main-checkout line against the LOGICAL fixture path would fail on the link alone,
+# which is the same trap tests/canonical-sdlc-governing-skill.test.sh's make_project
+# documents.
+S23_MAIN=$( cd "$REPO" && pwd -P )
+
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "r23a a dispatch from the MAIN checkout passes (the control)" "0" "$GATE_ST"
+
+run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE")"
+expect_status "r23b the same dispatch from inside the linked worktree is REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the main checkout" "main checkout: $S23_MAIN" "$GATE_ERR"
+expect_contains "…and the tree it was made from" "$S23_TREE" "$GATE_ERR"
+
+# The settings-channel spelling of an agent context.
+GATE_ENV="$GATE_ENV BIONIC_HOOK_CHANNEL=agent-context"
+run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE")"
+GATE_ENV="${GATE_ENV% BIONIC_HOOK_CHANNEL=agent-context}"
+expect_status "r23c the same dispatch in an agent context (BIONIC_HOOK_CHANNEL) is allowed" "0" "$GATE_ST"
+
+# The payload spelling.
+S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" | jq '. + {agent_type:"senior-implementor"}')
+run_gate "$S23_AGENT_PAYLOAD"
+expect_status "r23d …and so is one whose payload carries agent_type" "0" "$GATE_ST"
 echo ""
 echo "----------------------------------------"
 echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"
