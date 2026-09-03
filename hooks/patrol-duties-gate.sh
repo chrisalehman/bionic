@@ -62,7 +62,10 @@
 # (hooks/session-start.sh) prints into the title line of its own report, which the
 # model reads as context. Either is "a transcript record whose content contains" the
 # marker — read as RAW TEXT, not one JSON shape, so this arm does not care whether
-# the marker lands on a user prompt, a system entry, or anything else.
+# the marker lands on a user prompt, a system entry, or anything else. It does care
+# WHO WROTE THE ROW: a `tool_result` is how the content of every file the agent reads
+# enters the transcript, and a file is not the CLI announcing a resume, so the marker
+# is read off the orchestrator's own rows only (review F2, see $auth below).
 #
 # THE RULE: since the MOST RECENT such marker, a `CronCreate` tool_use must be
 # preceded by a `CronList` tool_use, or the turn refuses — creating a job before
@@ -79,6 +82,7 @@
 #   - stop_hook_active true                               -> pass, silent (blocks ONCE)
 #   - no cwd, or it is not a directory                    -> pass, silent
 #   - no transcript_path, or no file there, or a symlink  -> pass, silent
+#   - a marker older than the scan window (2000 records)  -> pass, silent (fail-open, below)
 #   - no user prompt in the transcript at all             -> pass, silent
 #   - the last user prompt is not a Patrol tick           -> pass, silent
 #   - both duties done since that prompt                  -> pass, silent
@@ -86,6 +90,7 @@
 #   - no `poker: FILL` line in the turn                   -> pass, silent (fill arm inert)
 #   - every named slice dispatched, or a decline present  -> pass, silent
 #   - a named slice neither dispatched nor declined       -> REFUSE, naming that slice
+#   - a marker or a decline read out of a TOOL RESULT      -> ignored (not the orchestrator's)
 #   - no clear/resume marker anywhere in the transcript   -> pass, silent (ritual arm inert)
 #   - CronList precedes any CronCreate since the marker   -> pass, silent (ritual arm inert)
 #   - a CronCreate since the marker with no prior CronList-> REFUSE, naming the ritual
@@ -325,32 +330,85 @@ PLAN_NAME=""
 # line-and-tab delimited; a prompt is many lines long and would otherwise forge
 # records. Nothing downstream reads a value except by substring, so squashing
 # costs no fidelity.
-# A MARK line is emitted for EITHER marker on any record whose raw text contains
-# it — independent of the USER/TOOL typing below, and independent of whether the
-# line even parses as JSON, because the marker is a literal substring search over
-# "a transcript record whose content contains" it, not a field read.
+# A MARK line is emitted for EITHER marker, and a DECLINE line for the fill duty's
+# explicit decline, on any record the ORCHESTRATOR AUTHORED whose text contains it —
+# independent of the USER/TOOL typing below, and independent of the record's `type`,
+# because the marker is a literal substring search over "a transcript record whose
+# content contains" it, not a field read (STOPGATES/1).
 #
-# TWO MORE RAW-TEXT RECORDS, for the fill duty (AC-29). The tick's `poker: FILL <ids>` line
-# arrives as the CONTENT of a Bash tool result — a `user`-typed entry whose content is an
-# array, which the prompt rule below deliberately does not treat as a prompt — so it is read
-# the way the clear/resume markers are: as a literal substring of the raw record, not a
-# field. `fill-declined:` is read the same way, because the decline may be typed anywhere
-# the orchestrator writes: its own text, a plan-ledger line, a shell command.
+# WHICH ROWS ARE THE ORCHESTRATOR'S (review F2). Every file the agent reads enters the
+# transcript as a `tool_result` element of a `user` record. Read raw, that made a README,
+# a fixture or a code comment carrying the literal `fill-declined:` discharge the AC-29
+# fill duty nobody had declined — fail-open on the exact wall AC-29 is — and made a file
+# carrying the /clear or resume marker force a spurious ritual refusal. So `$auth` below
+# is the row's AUTHORED text and these two markers are read only out of it:
+#   assistant, or any other type   -> the whole raw line. An assistant record's content is
+#                                     the model's own — text, thinking, tool_use inputs —
+#                                     and no other type carries a tool result. A
+#                                     SessionStart report reaches the transcript as one of
+#                                     those other types, which is how `source: resume`
+#                                     still arrives (pinned by tests §53).
+#   user                           -> the content when it is a STRING (the CLI's own
+#                                     command records, the operator's own typing), else
+#                                     ONLY the `text` elements of the array. Never a
+#                                     `tool_result` element.
+#   sidechain / agent-context      -> nothing. A subagent's decline is not the
+#                                     orchestrator's, the same exclusion every other arm
+#                                     of this gate makes.
+#   unparsable                     -> nothing. A line that is not JSON has no author.
+# The type-agnostic substring read is unchanged WITHIN a qualifying row; what is scoped is
+# which rows qualify.
+#
+# ONE MORE RAW-TEXT RECORD, DELIBERATELY NOT SCOPED, for the fill duty (AC-29). The tick's
+# `poker: FILL <ids>` line arrives as the CONTENT of a Bash tool result — a `user`-typed
+# entry whose content is an array, which the prompt rule below deliberately does not treat
+# as a prompt, and which the scoping above excludes — so it is read off the RAW line. That
+# is the one direction where a planted marker costs a false BLOCK rather than a false
+# silence, and this gate blocks once.
 #
 # The ids are cut at the first `\n` or `"` in the RAW line, which are the escaped newline and
 # the closing quote of the JSON string the line is embedded in — so the record carries the
 # FILL line and nothing that followed it.
-STREAM=$(jq -Rr '
+#
+# THE WINDOW (review, performance finding 1). This used to read the whole transcript on
+# every Stop of an open run — one jq pass from byte zero, ~85 ms of CPU per MB, 4.3 s over
+# the 50 MB a long wave session reaches, rising monotonically for the life of the run. Every
+# fact this scan needs is a "since the most recent X" fact — the last user prompt, the last
+# clear/resume marker, the last FILL line — so a window suffices provided it holds a whole
+# orchestrator turn. 2000 lines does: the largest single turn in this repo's own two busiest
+# wave transcripts (494cf1b6, b1a850c1, measured 2026-09-03) is 264 records, so the window
+# carries ~7.5x the worst turn observed, and 5x hooks/context-spend.sh's `tail -n 400` for a
+# scan that must reach further back than that hook's does.
+#
+# WHAT SCROLLING OUT COSTS, named rather than left to be discovered: when the clear/resume
+# marker is older than the window, the ritual arm reads "no marker" and goes INERT — it does
+# not refuse. That is FAIL-OPEN, and it is the right direction for a marker whose whole
+# purpose is to catch the FIRST stop after a resume: by the time 2000 records have gone by,
+# the ritual is either long done or long moot. Same for the tick-duties and fill arms, which
+# reset at the last user prompt anyway and can only lose a turn that is 2000 records old.
+SCAN_WINDOW_LINES=2000
+STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$TRANSCRIPT" 2>/dev/null | jq -Rr '
   . as $line
-  | (if ($line | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
-    (if ($line | contains("source: resume")) then "MARK\tresume" else empty end),
+  | (($line | fromjson?) // null) as $r
+  | (
+      if $r == null then ""
+      elif (($r.isSidechain // false) == true) then ""
+      elif (((($r.agentId // $r.agent_id) // "") | tostring) != "") then ""
+      elif $r.type == "user" then
+        ( if ($r.message.content | type) == "string" then $r.message.content
+          else ([$r.message.content[]? | select(.type == "text") | .text] | join(" "))
+          end )
+      else $line
+      end
+    ) as $auth
+  | (if (($auth // "") | contains("<command-name>/clear</command-name>")) then "MARK\tclear" else empty end),
+    (if (($auth // "") | contains("source: resume")) then "MARK\tresume" else empty end),
     (if ($line | contains("poker: FILL ")) then
        "FILL\t" + (($line | split("poker: FILL ")[1] | split("\\n")[0] | split("\"")[0]))
      else empty end),
-    (if ($line | contains("fill-declined:")) then "DECLINE\t1" else empty end),
+    (if (($auth // "") | contains("fill-declined:")) then "DECLINE\t1" else empty end),
     (
-      ($line | fromjson?) as $r
-      | ($r // empty)
+      ($r // empty)
       | select((.isSidechain // false) != true)
       | select((((.agentId // .agent_id) // "") | tostring) == "")
       | if .type == "user" then
@@ -369,7 +427,7 @@ STREAM=$(jq -Rr '
         else empty
         end
     )
-' "$TRANSCRIPT" 2>/dev/null) || STREAM=""
+' 2>/dev/null) || STREAM=""
 [ -n "$STREAM" ] || exit 0
 
 # ---------- THE RESUME/CLEAR RITUAL (AC-3), judged FIRST ----------
@@ -446,7 +504,8 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" '
 # the reason says which. An id is matched on a WORD BOUNDARY inside the dispatch's own
 # fields — its name, description, subagent_type and prompt — so `ONE` is not found inside
 # `PHONE`, and only ids shaped like slice ids (letters, digits, `_`, `.`, `-`) are ever
-# echoed back into the refusal.
+# echoed back into the refusal. A `.` in an id is a LITERAL dot in that boundary test, not
+# the regex wildcard it would otherwise be — see the escape in the fold below.
 #
 # Folded over the same stream, resetting at every user PROMPT exactly as the duties fold
 # above it does, and inert on every turn with no FILL line in it — which is every turn in
@@ -470,7 +529,15 @@ FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' '
     for (i = 1; i <= n; i++) {
       id = ids[i]
       if (id !~ /^[A-Za-z0-9_.-]+$/) continue
-      if (agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")) continue
+      # THE ID IS DATA, THE PATTERN IS CODE. The boundary test below is a DYNAMIC regex
+      # and the id is spliced into it, so every metacharacter the validity filter above
+      # admits has to be neutralised first or it reads as syntax. `.` is the whole class:
+      # `-` is special only inside a bracket expression and is spliced outside one, `_`
+      # is never special. Unescaped, a FILL for `a.b` was answered by a dispatch naming
+      # `axb` — a false negative on the wall, the fail-open direction (review F1).
+      pat = id
+      gsub(/\./, "[.]", pat)
+      if (agents ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
       missing = missing (missing == "" ? "" : " ") id
     }
     if (missing != "") print missing
