@@ -3850,15 +3850,16 @@ write_plan "$RREPO_AD/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-4444444444444444|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lands.md|source=declared|duration=|progress=|claims=|cadence=10 minutes|absent=|waiver=|tool_use_id=toolu_01FIXTURE\n' \
   "$SID_A" >> "$RREPO_AD/.bionic/tmp/roster-$SID_A.state"
 
-# SITE 1 — the poker prints the address, and it is the successor session that is named.
+# SITE 1 — the poker prints the address, and it is the session that LAUNCHED the agent that
+# is named (T3 FINDING 1, live 2026-09-03: the harness's teammate table keeps the launching
+# session's eight across a `/clear`, and refused the adopting session's outright).
 R_AD_OUT=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SPO" adopt 2>&1 )
-# The FIRST address on the line. adopt prints the alternate spelling beside it — the
-# launching session's, since which of the two the platform keys on is unproven — and both
-# resolve to the same row at both gates; this section drives the one adopt leads with.
+# The suffixed address, off the `stop` line. The bare name is printed beneath it on its own
+# continuation line, which this grep does not reach.
 R_AD_ADDR=$(printf '%s\n' "$R_AD_OUT" | grep -F 'stop        : TaskStop ' | head -1 \
             | sed 's/.*TaskStop //' | awk '{print $1}')
-expect_eq "adopt prints the addressing form, built from the ADOPTING session" \
-  "adoptee@session-$(printf '%s' "$SID_B" | cut -c1-8)" "$R_AD_ADDR"
+expect_eq "adopt prints the addressing form, built from the LAUNCHING session" \
+  "adoptee@session-$(printf '%s' "$SID_A" | cut -c1-8)" "$R_AD_ADDR"
 
 # SITE 2 — the observation answers to that exact string, and says why it is ours.
 R_AD_CHECK=$( cd "$RREPO_AD" && CLAUDE_CODE_SESSION_ID="$SID_B" bash "$OBSERVE" "$R_AD_ADDR" 2>&1 )

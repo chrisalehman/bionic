@@ -863,26 +863,33 @@ expect_contains "the message address is a SendMessage by id" "SendMessage to:$ID
 # `adopt` reads off the roster is the TRANSCRIPT form (`aname-<hex>`); the stop primitive
 # takes `<name>@session-<id8>` for a teammate (capture
 # record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), and printing
-# the other one handed the operator a line they could not type. The session named is the
-# ADOPTING one, because the row `adopt` writes into THIS session's roster is what makes
-# hooks/stop-guard.sh accept that spelling as an identity (§8g, and tests/stop-guard.test.sh
-# §14).
-expect_contains "the stop address is the form the stop primitive accepts" \
-  "TaskStop landed-one@session-${SID:0:8}" "$OUT"
+# the other one handed the operator a line they could not type.
+#
+# THE SESSION NAMED IS THE ONE THAT LAUNCHED THE AGENT (T3 FINDING 1, live 2026-09-03). The
+# suffix used to be the ADOPTING session's, on the probe's reading that a `/clear` re-keys
+# `CLAUDE_CODE_SESSION_ID` and therefore re-keys the address with it. The live harness says
+# otherwise: driven through a real `/clear`, `TaskStop PROBE-AGENT@session-<adopting 8>`
+# came back `No task found with ID: … Running teammates: PROBE-AGENT@session-<launching 8>`.
+# The teammate table keys on the session that made the `Agent` call and the roll-over does
+# not move it, so the address is built from the row's OWN `session=` field — the session it
+# is filed under — and never from ours.
+expect_contains "the stop address names the session that LAUNCHED the agent" \
+  "TaskStop landed-one@session-${ADOPT_A:0:8}" "$OUT"
 expect_absent "…never the transcript-form id, which the platform rejects for a teammate" \
   "TaskStop $ID_LANDED" "$OUT"
-# ONE SPELLING, AND IT IS THE SURVIVING SESSION'S (1.5, AC-5). The alternate —
-# `<name>@session-<the PREDECESSOR's eight>` — was printed in a clause beside it for as long
-# as it was unknown which session's characters the platform keys on. The probe settled it:
-# a plain `/clear` RE-KEYS `CLAUDE_CODE_SESSION_ID` in the env and in every hook payload
-# (plan §Assumptions, A-probe-1), so the address that still resolves after the roll-over is
-# the one built from the key that survived it, which is this session's. Two spellings in the
-# terminal asked the operator to choose between them on evidence they do not have, at the one
-# moment they are trying to reach an agent.
-expect_absent "…and the launching session's spelling is NOT offered beside it" \
-  "landed-one@session-${ADOPT_A:0:8}" "$OUT"
-expect_absent "…nor the clause that used to offer it" \
-  "keys on the launching session" "$OUT"
+expect_absent "…and never the ADOPTING session's eight, which the harness answered nothing to" \
+  "landed-one@session-${SID:0:8}" "$OUT"
+# THE BARE NAME IS PRINTED BESIDE IT, because it is the one spelling that survived every
+# step of the live drive: `TaskStop PROBE-AGENT` reached the stop wall before the `/clear`
+# and after it, and it is what finally stopped the adopted agent. A suffixed address is a
+# guess about which session the harness keys on; the bare name is not.
+expect_contains "…with the bare name beside it, as the address that always survives" \
+  "TaskStop landed-one — the bare name" "$OUT"
+# THE MACHINE LINE CARRIES BOTH, so a reader that parses rather than greps gets the address
+# without re-deriving it from two other fields.
+expect_contains "the machine line carries the stop address" \
+  "|address=landed-one@session-${ADOPT_A:0:8}|" "$OUT"
+expect_contains "…beside the bare name it was built from" "|name=landed-one|" "$OUT"
 expect_contains "the row names the predecessor session it came from" "from=$ADOPT_A" "$OUT"
 expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
 
@@ -943,7 +950,13 @@ expect_contains "the adopted row is status=identified — the id is known" \
 expect_contains "…filed under the ADOPTING session's key" "|session=$SID|" "$ADOPTED_ROW"
 expect_contains "…carrying the transcript-form agent id the predecessor recorded" \
   "|agent_id=$ID_LANDED|" "$ADOPTED_ROW"
-expect_contains "…and the address form the stop primitive takes, built for THIS session" \
+# THE ADDRESS FORM THE STOP PRIMITIVE TAKES, built from the session that LAUNCHED the
+# agent (T3 FINDING 1). hooks/stop-guard.sh prefers this recorded address over the one it
+# would construct, so a row carrying the adopting session's eight would put the address the
+# live harness rejects into every refusal the gate prints.
+expect_contains "…and the address form the stop primitive takes, built from the LAUNCHING session" \
+  "|teammate_id=landed-one@session-${ADOPT_A:0:8}|" "$ADOPTED_ROW"
+expect_absent "…never this session's eight, which the teammate table answers nothing to" \
   "|teammate_id=landed-one@session-${SID:0:8}|" "$ADOPTED_ROW"
 expect_contains "…the contracted deliverable, copied forward" \
   "|deliverable=$R8/.bionic/docs/record/landed-one.md|" "$ADOPTED_ROW"

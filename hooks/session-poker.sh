@@ -1197,10 +1197,17 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 #   its successor"). A `landing-swept` marker reading UNMET closes NOTHING here: an answered
 #   failure is exactly the row a resumed session most needs to see.
 #
+# THE ORIGIN IS CARRIED OUT WITH THE ROW, and it is what the stop address is built from
+# (T3 FINDING 1). `adopted_from=` wins over `session=` when the row has one: a row that was
+# itself adopted is filed under the session that TOOK it, while the harness's teammate table
+# keeps naming the session that made the `Agent` call, and `adopted_from` is the only field
+# on the row that still points there. Absent both, the caller falls back to the roster
+# file's own session — the invariant every roster writer keeps.
+#
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at
+adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at|origin
   awk -v ackfile="$2" '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
@@ -1231,6 +1238,8 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
       v = kv($0, "progress");      if (v != "") prog[n]  = v
       v = kv($0, "cadence");       if (v != "") cad[n]   = v
       v = kv($0, "launched_at");   if (v != "") launch[n] = v
+      v = kv($0, "session");       if (v != "") sess[n]   = v
+      v = kv($0, "adopted_from");  if (v != "") afrom[n]  = v
       st = kv($0, "status")
       if (st == "identified" || st == "confirmed") {
         v = kv($0, "agent_id"); if (v != "") id[n] = v
@@ -1247,7 +1256,8 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
         n = order[i]
         if (n in met) continue
         if (n in acked) continue
-        printf "%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], launch[n]
+        printf "%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+               launch[n], ((n in afrom) ? afrom[n] : sess[n])
       }
     }
   ' "$1" 2>/dev/null
@@ -1261,10 +1271,14 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 #                       says less: the id is known, which is exactly what `identified` means.
 #   agent_id=           the TRANSCRIPT form, the only form either gate resolves a target to.
 #   teammate_id=        the ADDRESSING form `<name>@session-<id8>`, the only spelling the
-#                       platform's stop primitive takes for a teammate — built for THIS
-#                       session, because this session is the one that now holds the row and
-#                       hooks/stop-guard.sh reads the recorded address before it constructs
-#                       one. A predecessor's row may carry no teammate_id at all.
+#                       platform's stop primitive takes for a teammate — built from the
+#                       session that LAUNCHED the agent, never from ours (T3 FINDING 1). The
+#                       teammate table keys on the session that made the `Agent` call and a
+#                       `/clear` does not move it; hooks/stop-guard.sh reads this recorded
+#                       address before it constructs one, so a row carrying our own eight
+#                       would put the string the harness rejects into every refusal it
+#                       prints. The caller hands it in already built, for the same reason
+#                       the address is printed from there: one construction, one origin.
 #   adopted_from=       provenance. The agent is still filed under the predecessor's own
 #                       subagents directory, and that directory is what hooks/stop-guard.sh
 #                       must widen its resolution to; without this field it cannot know
@@ -1288,9 +1302,9 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 # A ROW WITH NO ID IS NEVER WRITTEN. That is the UNADDRESSABLE verdict's whole content —
 # there is no identity to file — and a row carrying `agent_id=` empty would be inert at
 # every by-id reader while looking like an adoption on disk.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
-  local launch="$9" osid="${10}" d
+  local launch="$9" osid="${10}" addr="${11}" d
   [ -n "$id" ] || return 1
   [ -n "$sid" ] || return 1
   d="${f%/*}"
@@ -1309,7 +1323,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=|teammate_id=%s|adopted_from=%s|tool_use_id=\n' \
     "$sid" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
     "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" \
-    "$(clean "$name")@session-$(printf '%s' "$sid" | cut -c1-8)" "$(clean "$osid")" \
+    "$(clean "$addr")" "$(clean "$osid")" \
     >> "$f" 2>/dev/null || return 1
   return 0
 }
@@ -1450,9 +1464,28 @@ case "$VERB" in
       # every agent that session launched.
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
-      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH; do
+      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG; do
         [ -n "$RNAME" ] || continue
         ADOPT_ROWS=$((ADOPT_ROWS + 1))
+
+        # ---- THE STOP ADDRESS, BUILT FROM THE SESSION THAT LAUNCHED THE AGENT
+        #
+        # T3 FINDING 1, live 2026-09-03. This was the ADOPTING session's eight until a real
+        # `/clear` was driven against a real harness: `TaskStop PROBE-AGENT@session-<adopting
+        # 8>` came back `No task found with ID: … Running teammates:
+        # PROBE-AGENT@session-<launching 8>`. The probe that argued for the adopting session
+        # was right about the env — `CLAUDE_CODE_SESSION_ID` does re-key — and wrong about
+        # the teammate table, which keys on the session that made the `Agent` call and does
+        # not re-key with it. So the suffix comes off the ROW (its `adopted_from=`, else its
+        # own `session=`, else the roster file's session), never off ours.
+        #
+        # EMPTY WITHOUT AN ID, because the address is only ever offered beside one: a row
+        # with no identity has no stop line to carry it, and a machine field that named an
+        # address the UNADDRESSABLE branch refuses to print would contradict its own row.
+        ADOPT_ADDR_SID="${RORIG:-$OSID}"
+        ADOPT_ADDR=""
+        [ -n "$RID" ] \
+          && ADOPT_ADDR="$(clean "$RNAME")@session-$(printf '%s' "$ADOPT_ADDR_SID" | cut -c1-8)"
 
         # ---- the deliverable, on disk or not
         RDELIV_ABS="$(adopt_abs "$RDELIV" "$REPO_REAL")"
@@ -1526,9 +1559,9 @@ case "$VERB" in
           VERDICT=SILENT
         fi
 
-        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s|transcript_age=%s\n' \
+        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|address=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s|transcript_age=%s\n' \
           "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$OSID" "$(clean "$RNAME")" "$VERDICT" \
-          "$RID" "$(clean "$RTYPE")" "$(clean "$RDELIV_ABS")" "$DELIV_PRESENT" \
+          "$RID" "$ADOPT_ADDR" "$(clean "$RTYPE")" "$(clean "$RDELIV_ABS")" "$DELIV_PRESENT" \
           "$(clean "$RPROG_ABS")" "${PROG_AGE:-unknown}" "${CAD_S:-unknown}" \
           "$(clean "$TX")" "$TX_PRESENT" "${TX_AGE:-unknown}"
 
@@ -1556,7 +1589,7 @@ case "$VERB" in
           ROW_JOURNALLED=yes
         elif [ -n "$RID" ]; then
           if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
-               "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID"; then
+               "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR"; then
             ROW_JOURNALLED=yes
           else
             die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
@@ -1575,20 +1608,21 @@ case "$VERB" in
           # record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), so
           # printing the id cost the operator a refusal they could not clear.
           #
-          # ONE SPELLING, AND IT IS THIS SESSION'S EIGHT CHARACTERS (1.5, AC-5). A second
-          # spelling — the same name against the PREDECESSOR's eight — was printed in a
-          # trailing clause for as long as it was unknown which session the platform keys
-          # on for an agent handed to a successor. The probe answered it: a plain `/clear`
-          # RE-KEYS `CLAUDE_CODE_SESSION_ID`, in the env and in the hook payload alike
-          # (A-probe-1), so the session that is still here is the only one whose key can
-          # address anything, and its eight characters are what the row written above
-          # carries. Neither stop gate ever keyed on the suffix — each resolves on the base
-          # name and takes ownership from the id on this session's roster
-          # (tests/stop-guard.test.sh §14, tests/stop-check.test.sh §10(d)) — so the second
-          # spelling bought no reach and cost the operator a choice they had no evidence to
-          # make.
-          printf '  stop        : TaskStop %s@session-%s\n' \
-            "$(clean "$RNAME")" "$(printf '%s' "$SESSION_ID" | cut -c1-8)"
+          # ONE SUFFIXED SPELLING, AND IT IS THE LAUNCHING SESSION'S (T3 FINDING 1). The
+          # alternate — this session's eight — was printed here until a live `/clear` drive
+          # refused it by name and the harness named the launching session's in its place.
+          # See the construction above for what the row is read for.
+          #
+          # AND THE BARE NAME BENEATH IT, because it is the one address that survived every
+          # step of that drive: it reached the stop wall before the `/clear` and after it,
+          # and it is what finally stopped the adopted agent when the suffixed form did not
+          # resolve. Neither stop gate keys on the suffix — each resolves on the base name
+          # and takes ownership from the id on this session's roster
+          # (tests/stop-guard.test.sh §14, tests/stop-check.test.sh §10(d)) — so offering
+          # both costs the operator nothing and covers the case where the suffix is stale.
+          printf '  stop        : TaskStop %s\n' "$ADOPT_ADDR"
+          printf '                TaskStop %s — the bare name, the address that always survives\n' \
+            "$(clean "$RNAME")"
         elif [ -n "$RID" ]; then
           # ADDRESSABLE FOR EVERYTHING BUT THE STOP. The id is real and the transcript and
           # the message address do not depend on this session's roster — only ownership
