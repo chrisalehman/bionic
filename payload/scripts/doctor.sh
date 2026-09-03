@@ -1181,13 +1181,13 @@ _patrol_flush() {
       else
         _patrol_add "  ${DOCTOR_OK} session ${short} · roster absent — launches unrecorded"
       fi
-      # THE COUNT IS THE ACTIONABLE HALF, and it is the same fact
-      # hooks/session-poker.sh raises as `NOTIFY wall-blind` at tick time — same
-      # record, same subtraction, and deliberately THE SAME CURE STRING, because
-      # two spellings of one repair read as two repairs
-      # (tests/doctor-patrol.test.sh §9 pins the literal from both files). It is
-      # printed for a present-but-incomplete roster too: the row's open count
-      # stays true, and this line says what it does not cover.
+      # THE COUNT IS THE ACTIONABLE HALF. Doctor is now the ONE surface for this
+      # fact — the tick's `NOTIFY wall-blind` diagnosis was deleted in 1.4.0
+      # (slice ADOPT; it had no "no active run" branch and false-fired pre-plan),
+      # so there is no second speller to agree with; tests/doctor-patrol.test.sh
+      # §9 pins the `patrol-wall/v1` record this reads and the library that
+      # defines it. It is printed for a present-but-incomplete roster too: the
+      # row's open count stays true, and this line says what it does not cover.
       #
       # THE LINE ENDS IN THE COMMAND and carries no cause clause, which is
       # doctor's first format rule meeting lib/width.sh's 100 columns — the
