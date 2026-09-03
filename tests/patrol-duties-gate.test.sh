@@ -701,6 +701,57 @@ fire "$d"; expect_block "58: a dotted id inside a longer word does not answer th
 # 59: a hyphen in an id is a literal too, and the id is echoed back verbatim in the reason.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL W-FIX.GATE"
 fire "$d"; expect_block "59: an unanswered id carrying both a dot and a hyphen is named verbatim" "W-FIX.GATE"
+
+echo ""
+echo "=== Section 8: the scan is windowed (review performance, finding 1) ==="
+#
+# THE DEFECT. This gate read the WHOLE transcript through one jq pass on every Stop of an
+# open run — from byte zero, ~85 ms of CPU per MB, measured 4.3 s over the 50 MB a long
+# wave session reaches, and rising monotonically for the life of the run: worst exactly
+# when the run is oldest and busiest. hooks/context-spend.sh, in this same wave, already
+# bounds the same class of read with `tail -n 400`.
+#
+# THE WINDOW. Every fact this scan needs is a "since the most recent X" fact — the last
+# user prompt, the last clear/resume marker, the last FILL line — so a window suffices
+# provided it holds a whole orchestrator turn. It does: the largest single turn in this
+# repo's own two busiest wave transcripts is 264 records (measured 2026-09-03 over
+# 494cf1b6 and b1a850c1), and the window is 2000.
+#
+# WHAT SCROLLING OUT COSTS, pinned here rather than left to be discovered: a marker older
+# than the window reads as NO MARKER, so the ritual arm goes INERT — it does not refuse.
+# That is FAIL-OPEN, and it is the right direction for a marker whose whole purpose is to
+# catch the FIRST stop after a resume; by the time 2000 records have gone by the ritual is
+# either long done or long moot.
+
+# N benign padding records — a main-thread Read, which satisfies no duty, answers no FILL
+# and names no plan. Written by awk rather than a shell loop: these fixtures are 20k lines.
+pad() {  # <dir> <n>
+  local line
+  line=$(jq -nc '{type:"assistant",isSidechain:false,
+                  message:{role:"assistant",content:[{type:"tool_use",id:"toolu_p",name:"Read",
+                    input:{file_path:"/tmp/pad.txt"}}]}}')
+  awk -v n="$2" -v l="$line" 'BEGIN{ for (i = 0; i < n; i++) print l }' >> "$1/transcript.jsonl"
+}
+
+# 60: 20k records of history BEFORE the marker change nothing — the marker and the
+# CronCreate are both inside the window, and the refusal fires exactly as in §27.
+d=$(make_env); pad "$d" 20000; u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "60: a marker inside the window is still found under 20k records of history" "$RITUAL_CRONLIST"
+
+# 61: THE DOCUMENTED LIMIT. The same marker with 20k records AFTER it has scrolled out of
+# the window, and the arm reads "no marker" — inert, not a refusal. Fail-open, stated.
+d=$(make_env); u_clear_marker "$d"; pad "$d" 20000; a_tool "$d" CronCreate
+fire "$d"; expect_allow "61: a marker beyond the window reads as no marker — the arm goes inert"
+
+# 62: THE BOUND IS NAMED AND IS A CONSTANT. A window that regresses to an unbounded read
+# is invisible in every behavioural test above — 60 and 61 both still pass without a
+# `tail` if the whole file is small. This is the assertion that the bound exists at all.
+TOTAL=$((TOTAL + 1))
+if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK" && grep -q 'tail -n "\$SCAN_WINDOW_LINES"' "$HOOK"; then
+  pass "62: the transcript scan is bounded by a named SCAN_WINDOW_LINES constant"
+else
+  fail "62: the transcript scan has no named line bound — it reads from byte zero"
+fi
 echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"

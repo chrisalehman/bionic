@@ -82,6 +82,7 @@
 #   - stop_hook_active true                               -> pass, silent (blocks ONCE)
 #   - no cwd, or it is not a directory                    -> pass, silent
 #   - no transcript_path, or no file there, or a symlink  -> pass, silent
+#   - a marker older than the scan window (2000 records)  -> pass, silent (fail-open, below)
 #   - no user prompt in the transcript at all             -> pass, silent
 #   - the last user prompt is not a Patrol tick           -> pass, silent
 #   - both duties done since that prompt                  -> pass, silent
@@ -368,7 +369,25 @@ PLAN_NAME=""
 # The ids are cut at the first `\n` or `"` in the RAW line, which are the escaped newline and
 # the closing quote of the JSON string the line is embedded in — so the record carries the
 # FILL line and nothing that followed it.
-STREAM=$(jq -Rr '
+#
+# THE WINDOW (review, performance finding 1). This used to read the whole transcript on
+# every Stop of an open run — one jq pass from byte zero, ~85 ms of CPU per MB, 4.3 s over
+# the 50 MB a long wave session reaches, rising monotonically for the life of the run. Every
+# fact this scan needs is a "since the most recent X" fact — the last user prompt, the last
+# clear/resume marker, the last FILL line — so a window suffices provided it holds a whole
+# orchestrator turn. 2000 lines does: the largest single turn in this repo's own two busiest
+# wave transcripts (494cf1b6, b1a850c1, measured 2026-09-03) is 264 records, so the window
+# carries ~7.5x the worst turn observed, and 5x hooks/context-spend.sh's `tail -n 400` for a
+# scan that must reach further back than that hook's does.
+#
+# WHAT SCROLLING OUT COSTS, named rather than left to be discovered: when the clear/resume
+# marker is older than the window, the ritual arm reads "no marker" and goes INERT — it does
+# not refuse. That is FAIL-OPEN, and it is the right direction for a marker whose whole
+# purpose is to catch the FIRST stop after a resume: by the time 2000 records have gone by,
+# the ritual is either long done or long moot. Same for the tick-duties and fill arms, which
+# reset at the last user prompt anyway and can only lose a turn that is 2000 records old.
+SCAN_WINDOW_LINES=2000
+STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$TRANSCRIPT" 2>/dev/null | jq -Rr '
   . as $line
   | (($line | fromjson?) // null) as $r
   | (
@@ -408,7 +427,7 @@ STREAM=$(jq -Rr '
         else empty
         end
     )
-' "$TRANSCRIPT" 2>/dev/null) || STREAM=""
+' 2>/dev/null) || STREAM=""
 [ -n "$STREAM" ] || exit 0
 
 # ---------- THE RESUME/CLEAR RITUAL (AC-3), judged FIRST ----------
