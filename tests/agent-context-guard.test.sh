@@ -110,6 +110,11 @@ PLAN
   printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$repo/.bionic/tmp/patrol-$SID.state"
   chmod 600 "$repo/.bionic/tmp/patrol-$SID.state"
+  # …AND AN ENGAGED SESSION (task-engaged-session). The dispatch wall this guard stands in
+  # front of asks `engaged_session` before anything else, so without the marker every
+  # positive control in this file would be discharged by a wall that exits at its first
+  # line — the same reason the Patrol stamp above is planted.
+  : > "$repo/.bionic/tmp/engaged-$SID.state"
   printf '%s' "$repo"
 }
 

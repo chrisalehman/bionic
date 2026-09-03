@@ -42,13 +42,25 @@ command -v jq >/dev/null 2>&1 || { echo "patrol-duties-gate: jq absent — suite
 PLAN_REL="task-fixture.plan.md"
 PLAN_NAME="$PLAN_REL"
 
+# THE FIXTURE SESSION. Spelled once now that two things are built from it: the payload the
+# driver ships, and — since task-engaged-session — the engagement marker every fixture
+# plants and the `bionic-patrol session=<sid[0:8]>` token that makes a USER row a TICK.
+SID="11111111-2222-3333-4444-555555555555"
+SID8="${SID:0:8}"
+
 # ---------- fixture builders ----------
 
 # A scratch project with a docs-root plans dir holding ONE plan file, and an
 # empty transcript ready to be appended to.
+#
+# ENGAGED BY DEFAULT since task-engaged-session: this gate asks `engaged_session` before it
+# reads a byte of the transcript, so a fixture without the marker would be silent for a
+# reason that has nothing to do with the duties under test. The unengaged direction is
+# driven deliberately in Group 25, on the same fixtures.
 make_env() {  # -> project dir on stdout
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
+  : > "$dir/.bionic/tmp/engaged-$SID.state"
   cat > "$dir/.bionic/docs/plans/$PLAN_REL" <<'EOF'
 ---
 governing-skill: canonical-sdlc
@@ -65,6 +77,7 @@ EOF
 make_env_planless() {
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/tmp"
+  : > "$dir/.bionic/tmp/engaged-$SID.state"
   : > "$dir/transcript.jsonl"
   printf '%s' "$dir"
 }
@@ -76,10 +89,18 @@ u_prompt() {  # <dir> <text>
                         message:{role:"user",content:$t}}' >> "$1/transcript.jsonl"
 }
 
-# The tick itself, verbatim in shape: the marker is the poker command inside a
-# longer composed prompt, never the prompt's wording (T2 judgment call (b)).
+# The tick itself, verbatim in shape: the patrol prompt leads with the marker
+# `bionic-patrol session=<session-id[0:8]>` (skills/canonical-sdlc/SKILL.md §The patrol
+# prompt) and the rest of the prompt follows it.
+#
+# RESHAPED AT task-engaged-session (T6, AC-22). It used to lead with prose and be
+# recognised by the substring `session-poker.sh tick` anywhere in the row — a test the
+# injected canonical-sdlc SKILL.md body passes, because that body contains the literal.
+# Invoking the skill was therefore a Patrol tick as far as this gate could tell, and the
+# gate refused the invoking turn for duties no tick had asked for. What identifies a tick
+# is the marker the prompt was designed to carry, at the front, naming THIS session.
 u_tick() {  # <dir>
-  u_prompt "$1" "Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row; QUIET/DISARM = no-op. Then continue toward the goal until a wall."
+  u_prompt "$1" "bionic-patrol session=$SID8 — Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row; QUIET/DISARM = no-op. Then continue toward the goal until a wall."
 }
 
 # A tool_result carrier: a `user`-typed entry that is NOT a prompt. It must not
@@ -135,18 +156,27 @@ junk() { printf 'not json at all {{{\n' >> "$1/transcript.jsonl"; }
 # ---------- driving the hook ----------
 
 stdin_for() {  # <project> <transcript-path> [event] [stop_hook_active]
-  jq -nc --arg t "$2" --arg c "$1" --arg e "${3:-Stop}" --argjson a "${4:-false}" \
-    '{session_id:"11111111-2222-3333-4444-555555555555",transcript_path:$t,cwd:$c,
+  jq -nc --arg t "$2" --arg c "$1" --arg e "${3:-Stop}" --argjson a "${4:-false}" --arg s "$SID" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,
       hook_event_name:$e,stop_hook_active:$a}'
 }
 
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2).
+# NEW AT task-engaged-session: this gate now takes its session key from lib/session.sh,
+# where the ENV value is primary and the payload a witness — so a driver that left the
+# RUNNER's own CLAUDE_CODE_SESSION_ID in the environment would drive every fixture under the
+# operator's real session id, find no marker under it, and pass every case in silence. The
+# same mirroring hooks/stop-guard.sh's and dispatch-preflight's suites already do.
 fire() {  # <project> [event] [stop_hook_active]
-  HOOK_OUT=$(bash "$HOOK" <<< "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-Stop}" "${3:-false}")" 2>/dev/null)
+  HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" <<< "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-Stop}" "${3:-false}")" 2>/dev/null)
   HOOK_RC=$?
 }
 
+# The raw driver takes the id OUT OF THE PAYLOAD it was handed, so a case that ships a
+# deliberately odd session key still drives the gate with that key on both channels.
 fire_raw() {  # <project> <stdin-json>
-  HOOK_OUT=$(bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_RC=$?
+  local _sid; _sid=$(printf '%s' "$2" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$2" 2>/dev/null); HOOK_RC=$?
 }
 
 reason_of() { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
@@ -299,13 +329,22 @@ fire_raw "$d" "$(jq -nc --arg c "$d" '{session_id:"s",cwd:$c,hook_event_name:"St
 d=$(make_env); u_tick "$d"; junk "$d"; a_tool "$d" ListAgents; junk "$d"; a_tool "$d" TaskList
 fire "$d"; expect_allow "20: malformed transcript lines do not break the read"
 
-# 21/22: NO PLAN, NO RUN, NO DUTY (bionic 1.4.0, spec AC-7). The gate is registered
-# always-on now, so it is delivered on every Stop in every project on the machine, and
-# what scopes it is `active_run`. A project with no plan has no run, no Patrol and
-# therefore no Patrol duties — the gate says nothing, and it says nothing before it
-# parses the transcript at all, which is where its whole cost lives.
+# 21/22: NO PLAN, BUT A TICK IS STILL A TICK (task-engaged-session, AC-23). What scopes
+# this gate is ENGAGEMENT, not the plan: bionic 1.4.0 scoped it by `active_run`, and that
+# walled every session in a repo that merely held an open plan while leaving an engaged
+# session at Step 0 — whose plan does not exist yet — unpoliced. Both duties are owed to
+# the TICK, and a tick fires as soon as the Patrol is armed, which is at engagement. So a
+# plan-less project with an engaged session and a skipped duty is refused; what the missing
+# plan costs is only the ALTERNATIVE way to discharge the task-list duty (a write to the
+# plan file), which is why the refusal below names the task list and not the panel.
 d=$(make_env_planless); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
-fire "$d"; expect_allow "21: a project with no plan is silent even with both duties skipped"
+fire "$d"; expect_block "21: an engaged session with no plan still owes the tick its duties" "$TL_MISSING" "$LA_MISSING"
+
+# 21b: THE SAME transcript, the SAME plan-less project, the marker removed. A bystander
+# session is not policed at all — the pairing that makes 21 a statement about engagement
+# rather than about the transcript.
+rm -f "$d/.bionic/tmp/engaged-$SID.state"
+fire "$d"; expect_allow "21b: …and with no engagement marker it is silent"
 
 # THE PAIRED POSITIVE, and it is what keeps 21 from passing vacuously: the SAME
 # transcript, in a project that does have an open run, refuses. Nothing separates the
@@ -752,6 +791,74 @@ if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK" && grep -q 'tail -n "\$SCAN
 else
   fail "62: the transcript scan has no named line bound — it reads from byte zero"
 fi
+# ---------- Group 25: THE ENGAGEMENT SWITCH (AC-8) ----------
+#
+# The switch is asked before the transcript is read at all, so each silence below is paired
+# with the refusal the same fixture produces once the marker is back.
+
+# 63: the ordinary refusing fixture, engaged -> blocks.
+d=$(make_env); u_tick "$d"
+fire "$d"; expect_block "63: engaged: a tick with neither duty blocks" "$LA_MISSING"
+
+# 64: the SAME fixture with the marker removed -> nothing at all.
+rm -f "$d/.bionic/tmp/engaged-$SID.state"
+fire "$d"; expect_allow "64: the same fixture unengaged is silent"
+
+# 65: a SYMLINK at the marker path reads as absent, never followed.
+DECOY_MARK=$(mktemp); printf 'plan=none\n' > "$DECOY_MARK"
+ln -s "$DECOY_MARK" "$d/.bionic/tmp/engaged-$SID.state"
+fire "$d"; expect_allow "65: a symlink at the marker path is not an engagement"
+rm -f "$d/.bionic/tmp/engaged-$SID.state"
+
+# 66: ANOTHER session's marker is not this session's.
+: > "$d/.bionic/tmp/engaged-99999999-8888-7777-6666-555555555555.state"
+fire "$d"; expect_allow "66: another session's marker is not this session's engagement"
+
+# 67: restoring this session's marker restores the refusal, word for word.
+: > "$d/.bionic/tmp/engaged-$SID.state"
+fire "$d"; expect_block "67: re-engaged, the refusal returns unchanged" "$LA_MISSING"
+
+# ---------- Group 26: WHAT COUNTS AS A TICK (T6, AC-22) ----------
+#
+# The defect this replaces: the gate called a turn a tick when the last USER row CONTAINED
+# `session-poker.sh tick`, and the canonical-sdlc SKILL.md body — injected into the
+# transcript as a USER row — contains exactly that literal. Invoking the skill was a tick.
+
+# 68: a USER row that merely CONTAINS the tick command is not a tick.
+d=$(make_env)
+u_prompt "$d" "Base directory for this skill: /x/skills/canonical-sdlc
+
+# Canonical SDLC
+
+... **Tick the poker.** \`bash <plugin-root>/hooks/session-poker.sh tick\` is the decision brain — the prompt gathers, the poker decides, per row. ..."
+fire "$d"; expect_allow "68: the injected SKILL.md body is not a Patrol tick"
+
+# 69: THE PAIRED POSITIVE, so 68 is not silence-by-vacuity: the same fixture with the real
+# marker at the front of the row refuses.
+d=$(make_env); u_tick "$d"
+fire "$d"; expect_block "69: …while a row led by the patrol marker is" "$LA_MISSING"
+
+# 70: ANOTHER session's marker leads the row -> a predecessor's cron firing into this
+# conversation after a /clear is not this session's tick.
+d=$(make_env)
+u_prompt "$d" "bionic-patrol session=deadbeef — Patrol tick. Run: bash /abs/hooks/session-poker.sh tick"
+fire "$d"; expect_allow "70: a row led by ANOTHER session's patrol marker is not a tick"
+
+# 71: the marker must LEAD the row, not merely appear in it.
+d=$(make_env)
+u_prompt "$d" "Here is what the cron job carries: bionic-patrol session=$SID8 — and that is all I wanted to show you."
+fire "$d"; expect_allow "71: the marker mid-row is not a tick — it must be the first token"
+
+# 72: the FILL duty reads the same marker. A tick that printed FILL and a turn that
+# neither dispatched nor declined is refused; the SKILL.md body carrying the literal is not.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL S3 S4"
+fire "$d"; expect_block "72: an unanswered FILL after a real tick blocks" "S3"
+
+d=$(make_env)
+u_prompt "$d" "... \`bash <plugin-root>/hooks/session-poker.sh tick\` is the decision brain ..."
+both_duties "$d"; u_tick_out "$d" "poker: FILL S3 S4"
+fire "$d"; expect_allow "73: …and the same FILL line after a non-tick row is not a duty"
+
 echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"
