@@ -373,7 +373,13 @@ section "G — a missing library degrades the attestation to v1, never blocks th
 DEG="$TMPROOT/degraded"
 mkdir -p "$DEG/hooks" "$DEG/scripts/lib"
 cp "$PROBE" "$DEG/hooks/preflight-probe.sh"
-# every OTHER lib is present; only resources.sh is missing
+# every OTHER lib is present; only resources.sh is missing (mirrors hooks/ + scripts/lib,
+# the pattern POKER/4 and ADOPT/9 use for a hook copied out of the shipped tree — without
+# this, the loader idiom's own required libs (root.sh, session.sh) are ALSO absent, the
+# probe never resolves a project root or session key, and no attestation is written at
+# all: the degraded-attestation path is never reached).
+cp "$REPO_ROOT/payload/scripts/lib/"*.sh "$DEG/scripts/lib/"
+rm -f "$DEG/scripts/lib/resources.sh"
 mkdir -p "$DEG/home/.claude/projects/proj" "$DEG/repo"
 ( cd "$DEG/repo" && git init -q . ) >/dev/null 2>&1
 : > "$DEG/home/.claude/projects/proj/$SESSION_A.jsonl"
@@ -389,6 +395,23 @@ expect_true "an attestation was still written" [ -f "$DATT" ]
 expect_eq "the degraded attestation declares version 1" "1" \
   "$(grep -m1 '^version=' "$DATT" 2>/dev/null | cut -d= -f2-)"
 expect_false "the degraded attestation carries no budget line" \
+  grep -q '^budget=' "$DATT"
+
+# Differential control: put resources.sh BACK into the same tree and re-run against the
+# same session id (same DATT path, so a real flip overwrites the v1 record). This proves
+# the v1 result above is caused by the missing library, not by some other defect in the
+# fixture that would yield v1 regardless — the anti-vacuity pattern L-ROOT/7 names.
+cp "$REPO_ROOT/payload/scripts/lib/resources.sh" "$DEG/scripts/lib/resources.sh"
+( cd "$DEG/repo" && \
+  HOME="$DEG/home" CLAUDE_CONFIG_DIR="$DEG/home/.claude" \
+  ANTHROPIC_API_KEY=fixture-not-a-real-key \
+  CLAUDE_CODE_SESSION_ID="$SESSION_A" \
+  bash "$DEG/hooks/preflight-probe.sh" ) >"$TMPROOT/undeg.out" 2>"$TMPROOT/undeg.err"
+URC=$?
+expect_true "the probe still exits 0 with the library restored" [ "$URC" -eq 0 ]
+expect_eq "restoring resources.sh flips the same attestation to version 2" "2" \
+  "$(grep -m1 '^version=' "$DATT" 2>/dev/null | cut -d= -f2-)"
+expect_true "the restored attestation carries a budget line" \
   grep -q '^budget=' "$DATT"
 
 # ════════════════════════════════════════════════════════════ report
