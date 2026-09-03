@@ -103,8 +103,53 @@ write_attestation_v1() {  # <session-id>
   } > "${PROJ}/.bionic/tmp/preflight-$1.state"
 }
 
+# ─── The bin dir: real tools doctor legitimately needs, and nothing else ─────
+#
+# WHY PATH IS REPLACED, AND WHY THIS SUITE IS THE ONE THAT NEEDS IT. Doctor's
+# THIRD PARTY table asks the machine's package managers what is installed —
+# `brew`, `npm ls -g`, `npx`, `pnpm store path`, `uv tool list` — and those
+# shell-outs are NOT under `BIONIC_DOCTOR_PROBE_SECONDS`, which bounds the
+# plugin-registry probe and patrol, not the dependency roster. Measured on this
+# machine with the full PATH: 32 seconds per run, 28 of them inside those five
+# probes, times the SEVEN runs below. That is where "doctor-fleet hangs past
+# five minutes" came from — not a blocked read but a real-machine roster walk
+# that grows with whatever the machine happens to have installed, and grows
+# again under load. Nothing in this file asserts a dependency row.
+#
+# So the fixture describes a machine carrying only base tools. Every package
+# manager is off PATH, every dependency probe answers "not on PATH" immediately,
+# and the run time stops being a function of this machine's software. The
+# pattern and its reasoning are tests/fresh-home.test.sh's, which replaces PATH
+# with a shim dir for the same reason.
+#
+# THE LIST IS THE COMPLETE SET OF PROGRAMS DOCTOR CAN REACH. `sleep` earns its
+# place because `detect_bounded` degrades to an unbounded wait without it;
+# `sysctl`, `vm_stat`, `df` and `id` because `resources_probe` is what Section 1
+# asserts; `ps` because `patrol_live_sessions` asks whether a pid answers; `git`
+# because the version row resolves a feed with it.
+#
+# `claude` IS ON THE LIST, and it is the one entry that is not free — the CLI's
+# plugin listing leaves the process. It stays because dropping it changes the
+# machine under test rather than the machine's speed: with the CLI absent, four
+# rows turn into "the claude CLI is not on PATH", and one of the FIX lines that
+# renders from that cause measures 105 columns, breaking case 20. That is a real
+# width defect in `FIX_LINES_OTHER` — the one printer on the page with no column
+# bound, already surfaced as DOCTOR/13 — and it belongs to whoever closes
+# DOCTOR/13, not to this fixture. A bionic machine has the CLI by construction;
+# manufacturing one that does not, in a suite about resources and rosters, would
+# be testing somebody else's row. The listing is bounded by
+# `BIONIC_DOCTOR_PROBE_SECONDS`, which is why it costs a second and not a hang.
+BIN="$TMP/bin"
+mkdir -p "$BIN"
+for _real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail \
+             sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf \
+             true false sleep dirname basename realpath id ps df sysctl vm_stat nproc git \
+             claude; do
+  _p="$(command -v "$_real" 2>/dev/null)" && ln -sf "$_p" "${BIN}/${_real}" 2>/dev/null
+done
+
 run_doctor() {
-  ( cd "$PROJ" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+  ( cd "$PROJ" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
       BIONIC_DOCTOR_PROBE_SECONDS=3 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
