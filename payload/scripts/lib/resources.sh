@@ -59,11 +59,15 @@ MEM_PER_SUITE_GB=1.2   # datum: 8 GB, 7 concurrent suites, ~188 MB free, kernel 
                        # tests/run.sh:63-68 — (8 − 2) GB across 7 suites is ~0.86 GB each
                        # with nothing left; 1.2 GB is that measurement with headroom.
 
-# What one concurrent suite costs in cores. THE SOFT TERM: unmeasured, so it degenerates to
-# one core per suite, which makes the compute term equal `cores` and lets memory bind alone.
-CORES_PER_SUITE=1      # measured: pending — AC-32 replaces this line with
-                       # `CORES_PER_SUITE=<f>  # measured 2026-09-0X at BIONIC_TEST_JOBS=18,
-                       # user+sys/wall` from the full suite run at the wave head.
+# What one concurrent suite costs in cores. THE SOFT TERM, measured once at the wave head
+# (AC-32): the whole `tests/run.sh` at 18 jobs, alone on an 18-core M5 Max, averaged 1.61
+# cores over its 8m07s wall (user 279.27 s + sys 505.57 s over real 487.38 s) — the runner
+# is spawn- and sleep-bound, not CPU-bound. Read as the per-suite constant the formula
+# names, it makes the compute term floor(18/1.61) = 11 concurrent full suites here, which
+# is the conservative side of the Batch-0 datum (six concurrent full suites starved).
+CORES_PER_SUITE=1.61   # measured 2026-09-03 at BIONIC_TEST_JOBS=18, user+sys/wall over
+                       # tests/run.sh at 97afec9: 784.84 s / 487.38 s
+                       # (record/wave-1.4.0/step5-full-suite-report.md)
 
 # Disk a checked-out worktree costs. Trees are cheap; this term only binds on a full disk.
 DISK_PER_TREE_GB=0.5   # datum: 2026-09-02, this repo — a `git worktree add` checkout of
