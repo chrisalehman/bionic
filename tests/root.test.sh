@@ -377,7 +377,76 @@ assert_agrees "7" "$SANDBOX/t7/plain/deep" "$HOME_DEFAULT"
 
 # ============================================================
 echo ""
-echo "=== 8 — the tag vocabulary is closed, and every tag in it is reachable ==="
+echo "=== 8 — a WORKTREE OF A BARE REPOSITORY: the checkout is the only working tree ==="
+# ============================================================
+# critic-findings.md issue 2 (MEDIUM). Rule 1 maps a linked worktree onto
+# dirname(--git-common-dir); for a worktree of a NON-bare repo that is the main
+# working root, but for a worktree of a BARE repo --git-common-dir is the bare
+# repo's own directory (…/bare.git), and dirname() of THAT is just the folder
+# holding bare.git — a path with no relationship to the checkout. The checkout's
+# own .bionic was never a candidate, so a bare-repo worktree walk landed on
+# cwd-fallback (or worse, adopted an unrelated sibling .bionic beside bare.git),
+# tripping session-poker.sh's `TICK_ROOT_TAG = chosen`-only QUIET guard and
+# reproducing the tick-#1 REFUSED wall AC-38 exists to prevent.
+gitinit_bare() { git -c init.defaultBranch=main init -q --bare "$1"; }
+
+mkdir -p "$SANDBOX/t8"
+gitinit_bare "$SANDBOX/t8/bare.git"
+git -C "$SANDBOX/t8/bare.git" worktree add -q -b t8-wt "$SANDBOX/t8/wt-of-bare" >/dev/null 2>&1
+mkdir -p "$SANDBOX/t8/wt-of-bare/.bionic/docs"
+mkdir -p "$SANDBOX/t8/wt-of-bare/sub"
+T8_WT="$SANDBOX/t8/wt-of-bare"
+
+if [ -d "$T8_WT" ]; then ok "8: the bare-repo worktree fixture built"; else
+  no "8: the bare-repo worktree fixture built" "git worktree add produced no $T8_WT"
+fi
+
+expect_eq "8: from inside the checkout, the checkout's OWN .bionic is the root" \
+  "$T8_WT" "$(root_at "$SANDBOX/t8/wt-of-bare/sub" "$HOME_DEFAULT")"
+
+t8_rep="$(cands_at "$SANDBOX/t8/wt-of-bare/sub" "$HOME_DEFAULT")"
+expect_eq "8: the report BEGINS at the checkout, not at dirname(bare.git)" \
+  "$SANDBOX/t8/wt-of-bare/sub${TAB}candidate" "$(printf '%s\n' "$t8_rep" | head -1)"
+expect_eq "8: the checkout itself carries the chosen tag" "chosen" "$(tag_of "$t8_rep" "$T8_WT")"
+expect_eq "8: dirname(bare.git) — the folder holding the bare repo — is never even considered" \
+  "" "$(tag_of "$t8_rep" "$SANDBOX/t8")"
+assert_agrees "8" "$SANDBOX/t8/wt-of-bare/sub" "$HOME_DEFAULT"
+
+# ---- 8b differential: a sibling .bionic beside bare.git must NOT win ----
+# The nearest-.bionic rule still applies once the walk starts in the right place: a real
+# .bionic that happens to sit beside bare.git (same shape as an ordinary sibling workspace)
+# is farther away than the checkout's own and must lose to it.
+mkdir -p "$SANDBOX/t8/.bionic/docs"
+expect_eq "8b: a sibling .bionic beside bare.git does not win — the checkout's own is nearer" \
+  "$T8_WT" "$(root_at "$SANDBOX/t8/wt-of-bare/sub" "$HOME_DEFAULT")"
+t8b_rep="$(cands_at "$SANDBOX/t8/wt-of-bare/sub" "$HOME_DEFAULT")"
+expect_eq "8b: the sibling directory is never reached — the walk already stopped at the checkout" \
+  "" "$(tag_of "$t8b_rep" "$SANDBOX/t8")"
+
+# ---- 8b-2: remove the checkout's own .bionic, the sibling beside bare.git must now win ----
+# Proves the fix genuinely WALKS upward from the checkout (nearest-.bionic still governs)
+# rather than hard-pinning the answer to cwd unconditionally.
+rm -rf "$SANDBOX/t8/wt-of-bare/.bionic"
+expect_eq "8b-2: with the checkout's own .bionic gone, the sibling beside bare.git is chosen" \
+  "$SANDBOX/t8" "$(root_at "$SANDBOX/t8/wt-of-bare/sub" "$HOME_DEFAULT")"
+mkdir -p "$SANDBOX/t8/wt-of-bare/.bionic/docs"  # restore for tidiness; not reused below
+
+# ---- 8c control: the NON-bare linked-worktree case (§2) is unaffected by the bare check ----
+mkdir -p "$SANDBOX/t8c"
+gitinit "$SANDBOX/t8c/main"
+gitcommit "$SANDBOX/t8c/main"
+mkdir -p "$SANDBOX/t8c/main/.bionic/docs"
+git -C "$SANDBOX/t8c/main" worktree add -q -b t8c-wt "$SANDBOX/t8c/wt" >/dev/null 2>&1
+mkdir -p "$SANDBOX/t8c/wt/sub"
+expect_eq "8c: a worktree of a NON-bare main repo still maps onto the main working root" \
+  "$SANDBOX/t8c/main" "$(root_at "$SANDBOX/t8c/wt/sub" "$HOME_DEFAULT")"
+t8c_rep="$(cands_at "$SANDBOX/t8c/wt/sub" "$HOME_DEFAULT")"
+expect_eq "8c: the report still begins at the main repo, not the worktree cwd" \
+  "$SANDBOX/t8c/main${TAB}chosen" "$(printf '%s\n' "$t8c_rep" | head -1)"
+
+# ============================================================
+echo ""
+echo "=== 9 — the tag vocabulary is closed, and every tag in it is reachable ==="
 # ============================================================
 # Two halves of one claim: the reports emitted nothing outside the vocabulary
 # (a typo'd tag is a silent contract break for the tick's listing, 2.4), and no
