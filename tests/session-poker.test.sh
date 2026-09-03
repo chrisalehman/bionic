@@ -922,14 +922,18 @@ expect_contains "the stop address is the form the stop primitive accepts" \
   "TaskStop landed-one@session-${SID:0:8}" "$OUT"
 expect_absent "…never the transcript-form id, which the platform rejects for a teammate" \
   "TaskStop $ID_LANDED" "$OUT"
-# BOTH SPELLINGS ARE OFFERED, because only one of them is proven (follow-up, 2026-08-30).
-# The captured payload says the addressing form carries the LAUNCHING session's eight
-# characters, which for an adopted agent is the PREDECESSOR's; the row this verb writes
-# carries this session's. Both resolve to the same row at both stop gates, so the cost of
-# printing the alternate is one clause and the cost of printing only the wrong one is a
-# refusal the operator cannot clear.
-expect_contains "…and the alternate spelling is offered beside it" \
-  "(or landed-one@session-${ADOPT_A:0:8} if the platform keys on the launching session)" "$OUT"
+# ONE SPELLING, AND IT IS THE SURVIVING SESSION'S (1.5, AC-5). The alternate —
+# `<name>@session-<the PREDECESSOR's eight>` — was printed in a clause beside it for as long
+# as it was unknown which session's characters the platform keys on. The probe settled it:
+# a plain `/clear` RE-KEYS `CLAUDE_CODE_SESSION_ID` in the env and in every hook payload
+# (plan §Assumptions, A-probe-1), so the address that still resolves after the roll-over is
+# the one built from the key that survived it, which is this session's. Two spellings in the
+# terminal asked the operator to choose between them on evidence they do not have, at the one
+# moment they are trying to reach an agent.
+expect_absent "…and the launching session's spelling is NOT offered beside it" \
+  "landed-one@session-${ADOPT_A:0:8}" "$OUT"
+expect_absent "…nor the clause that used to offer it" \
+  "keys on the launching session" "$OUT"
 expect_contains "the row names the predecessor session it came from" "from=$ADOPT_A" "$OUT"
 expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
 

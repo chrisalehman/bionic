@@ -1366,19 +1366,20 @@ case "$VERB" in
           # record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), so
           # printing the id cost the operator a refusal they could not clear.
           #
-          # BOTH SPELLINGS, because only one of them is proven and it is not known which.
-          # That capture shows the eight characters belong to the session that LAUNCHED the
-          # agent — the PREDECESSOR's, here — while the row written above carries THIS
-          # session's, which is what makes the successor's spelling resolve at both stop
-          # gates. Neither gate can tell them apart: each resolves on the base name and
-          # takes ownership from the id on this session's roster, so the two are one row
-          # with two names and are permitted or refused together (tests/stop-guard.test.sh
-          # §14, tests/stop-check.test.sh §10(d)). The cost of naming the alternate is one
-          # clause; the cost of naming only the wrong one is a refusal the operator cannot
-          # clear, which is the defect this whole verb is being repaired for.
-          printf '  stop        : TaskStop %s@session-%s  (or %s@session-%s if the platform keys on the launching session)\n' \
-            "$(clean "$RNAME")" "$(printf '%s' "$SESSION_ID" | cut -c1-8)" \
-            "$(clean "$RNAME")" "$(printf '%s' "$OSID" | cut -c1-8)"
+          # ONE SPELLING, AND IT IS THIS SESSION'S EIGHT CHARACTERS (1.5, AC-5). A second
+          # spelling — the same name against the PREDECESSOR's eight — was printed in a
+          # trailing clause for as long as it was unknown which session the platform keys
+          # on for an agent handed to a successor. The probe answered it: a plain `/clear`
+          # RE-KEYS `CLAUDE_CODE_SESSION_ID`, in the env and in the hook payload alike
+          # (A-probe-1), so the session that is still here is the only one whose key can
+          # address anything, and its eight characters are what the row written above
+          # carries. Neither stop gate ever keyed on the suffix — each resolves on the base
+          # name and takes ownership from the id on this session's roster
+          # (tests/stop-guard.test.sh §14, tests/stop-check.test.sh §10(d)) — so the second
+          # spelling bought no reach and cost the operator a choice they had no evidence to
+          # make.
+          printf '  stop        : TaskStop %s@session-%s\n' \
+            "$(clean "$RNAME")" "$(printf '%s' "$SESSION_ID" | cut -c1-8)"
         elif [ -n "$RID" ]; then
           # ADDRESSABLE FOR EVERYTHING BUT THE STOP. The id is real and the transcript and
           # the message address do not depend on this session's roster — only ownership
