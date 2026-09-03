@@ -663,6 +663,44 @@ fire "$d"; expect_block "54: a sidechain assistant's decline does not answer the
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
 a_agent "$d" "W-ALPHA" "Slice ALPHA, implementor."
 fire "$d"; expect_block "55: the FILL line is still read out of the tick's tool result" "BETA" "ALPHA"
+
+echo ""
+echo "=== Section 7: a dot in a slice id is a dot, not a wildcard (review correctness F1) ==="
+#
+# THE DEFECT. The word-boundary test splices the slice id into a DYNAMIC awk regex:
+#   agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")
+# The validity filter one line above admits `.` as a legal slice-id character, and in a
+# regex `.` is not a dot — it matches any single character. So a FILL naming `a.b` was
+# answered by a dispatch that named `axb` and never named `a.b` at all. That is a FALSE
+# NEGATIVE on FILL_MISSING, which passes a turn this wall exists to refuse: the fail-open
+# direction. Latent in this wave — every id it dispatched is letters, digits and hyphens —
+# and reachable the moment anyone names a slice `4.2`, which the filter says is legal.
+#
+# `.` is the ONE extended-regex metacharacter reachable through `[A-Za-z0-9_.-]`: `-` is
+# special only inside a bracket expression and is spliced outside one here, and `_` is
+# never special. So the pair below is the whole class.
+
+# 56: THE BUG'S OWN SHAPE. `a.b` against a dispatch naming `axb` — same length, differing
+# only where the dot is. Answered under a wildcard read; unanswered under a literal one.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-AXB" "Slice axb, implementor."
+fire "$d"; expect_block "56: a dispatch naming axb does not answer a FILL for a.b" "a.b"
+
+# 57: THE PAIRED POSITIVE, which is what keeps 56 from passing by over-escaping: the same
+# id, named literally, still answers.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-AB" "Slice a.b, implementor."
+fire "$d"; expect_allow "57: …and a dispatch naming a.b does answer it"
+
+# 58: the word boundary still holds around a dotted id — `a.b` is not found inside
+# `xa.by`, exactly as §44's `ONE` is not found inside `PHONE`.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
+a_agent "$d" "W-XABY" "Slice xa.by, implementor."
+fire "$d"; expect_block "58: a dotted id inside a longer word does not answer the FILL" "a.b"
+
+# 59: a hyphen in an id is a literal too, and the id is echoed back verbatim in the reason.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL W-FIX.GATE"
+fire "$d"; expect_block "59: an unanswered id carrying both a dot and a hyphen is named verbatim" "W-FIX.GATE"
 echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"
