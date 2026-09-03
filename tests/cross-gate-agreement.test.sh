@@ -2966,11 +2966,17 @@ n_block_of() {  # <file> -> the marker-delimited span, markers inclusive
 }
 
 # THE ADOPTED SET, named rather than globbed: a glob would silently shrink to nothing if
-# the marker were renamed, and this section would pass over air.
+# the marker were renamed, and this section would pass over air. session-poker.sh (the
+# eighteenth hook off resolve_project_root, converted by slice POKER) and session-start.sh
+# (added by slice SSTART) both carry the idiom too — verified live, byte for byte, against
+# this section's own $N_BLOCK extraction — and both resolve their root through the library
+# the same way every other member of this set does, so they belong in the SAME list rather
+# than a sibling one (Step-6 duplication review, record/wave-1.4.0/review-duplication.md,
+# ownership row 6: neither was pinned anywhere, so nothing would catch drift in either).
 N_ADOPTED='protect-main canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard
 dispatch-preflight canonical-sdlc-governing-skill landing-gate execution-recorder stop-guard
 context-spend patrol-duties-gate patrol-revive agent-context-guard preflight-probe stop-orders
-session-sweeper stop-check'
+session-sweeper stop-check session-poker session-start'
 for _h in $N_ADOPTED; do
   expect_eq "$_h.sh carries the canonical loader block, byte for byte" \
     "$N_BLOCK" "$(n_block_of "$BIONIC_HOOKS_DIR/$_h.sh")"
@@ -3583,7 +3589,7 @@ expect_eq "…while the library defines the predicate it replaced them with" "ye
 
 # ============================================================
 echo ""
-echo "=== R — where a contracted path resolves: three copies, one rule (epic-17 W6 S15) ==="
+echo "=== R — where a contracted path resolves: four copies, one rule (epic-17 W6 S15) ==="
 # ============================================================
 #
 # THE DISAGREEMENT THIS ENDS, measured on this epic's own dispatches. A brief writes
@@ -3602,27 +3608,79 @@ echo "=== R — where a contracted path resolves: three copies, one rule (epic-1
 # §Q's method, and this is the same shape: `canonical-sdlc-evidence-gate.sh` is the
 # designated ORIGIN (the copy that documents the rule at its definition site), one
 # non-vacuity check proves the extractor pulls a real body from it, then each carrier is
-# compared against it. A per-hook suite cannot see this drift: each of the three is green
-# while all three disagree.
+# compared against it. A per-hook suite cannot see this drift: each carrier is green in its
+# own suite while all four disagree.
 #
 # TWO FAMILIES, both duplicated for the same reason:
 #   resolve_docs_root()   <docs-root:> in .bionic/config.yaml, else <project>/.bionic/docs
 #   the resolver itself   absolute stands · record/-led is docs-root-relative · else project
 # The resolver is named `resolve_walk_path` in the gate (its caller asks about a walk
 # artifact) and `abs_path` in the two hooks (theirs ask about a roster path). Same body,
-# different name — the `clean()`/`mline_value()` precedent in §N.1 above.
+# different name — the `clean()`/`mline_value()` precedent in §N.1 above. Only the FIRST
+# family — `resolve_docs_root()` — is pinned below; the resolver-itself family and
+# canonical-sdlc-governing-skill.sh's own, deliberately WIDER `resolve_design_path()` (it
+# adds specs/plans/adrs/incidents/ leaders on top of `record/`, by design — see that hook's
+# own comment at the call site) are unchanged by this fix.
+#
+# THE FOURTH COPY (Step-6 duplication review, record/wave-1.4.0/review-duplication.md,
+# 05:55Z finding). ADOPT/4's assumption counted THREE `resolve_docs_root()` carriers — the
+# gate, the sweeper, stop-check — and named this section as the test that pins them. It
+# never was: this section built a mutant and asserted nothing (dead code — `R_MUT_DIR` was
+# read nowhere). A FOURTH live copy sits at canonical-sdlc-governing-skill.sh:150,
+# pre-dating this wave and never counted. What follows pins all FOUR: which files define
+# the function (a fifth or a missing one goes red), that their bodies agree with the
+# origin's, and that a doctored copy is caught.
 
+R_ORIGIN="$PARTY_EG"
+R_CARRIERS='canonical-sdlc-evidence-gate session-sweeper stop-check canonical-sdlc-governing-skill'
 
+# (a) THE COUNT. Exactly these four hooks define resolve_docs_root() — named, not globbed,
+# for the same reason §N.1's N_ADOPTED is named: a glob shrinks silently to nothing if the
+# marker moves, and this row would pass over air.
+R_DEFINERS=$(/usr/bin/grep -ln '^resolve_docs_root()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | while IFS= read -r _f; do basename "$_f" .sh; done | sort | tr '\n' ' ' | sed 's/ $//')
+R_EXPECT=$(printf '%s\n' $R_CARRIERS | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "exactly four hooks define resolve_docs_root (a fifth or a missing one goes red)" \
+  "$R_EXPECT" "$R_DEFINERS"
 
-# THE BODY IS NOT ENOUGH ON ITS OWN: it reads two globals, and a carrier that defines
-# neither would be byte-identical and still resolve everything to `/record/...`. So each
-# carrier is asked whether it binds them, unconditionally — these hooks run under `set -u`
-# and a conditionally-bound global is the recorded recurrence in this repo.
+# (b) THE BODY. canonical-sdlc-evidence-gate.sh is the designated origin (it documents the
+# rule at its definition site); a non-vacuity check first proves the extractor pulls a real
+# body from it, then each of the other three carriers is compared against it, body for body.
+expect_eq "the origin's resolve_docs_root is non-vacuous (extractor pulls a real body)" "yes" \
+  "$([ "$(fn_body "$R_ORIGIN" resolve_docs_root | wc -l | tr -d ' ')" -gt 3 ] && echo yes || echo no)"
 
-# MUTATION, the discriminator: flip ONE copy's rule back to the repo-root-only form it had
-# and the wall must go red. Without this the section proves only that three files exist.
+R_ORIGIN_BODY="$(fn_body "$R_ORIGIN" resolve_docs_root)"
+for _h in session-sweeper stop-check canonical-sdlc-governing-skill; do
+  expect_eq "$_h.sh's resolve_docs_root is the gate's, body for body" \
+    "$R_ORIGIN_BODY" "$(fn_body "$BIONIC_HOOKS_DIR/$_h.sh" resolve_docs_root)"
+done
+
+# (c) MUTATION, the discriminator: doctor ONE copy back to the repo-root-only form the
+# family had before the config.yaml override existed — the shipped file is never touched —
+# and the (b) comparison above must be provably able to catch it. Without this, (a) and (b)
+# together prove only that four files exist and currently agree, not that disagreement is
+# detectable.
 R_MUT_DIR="$SANDBOX/resolver-mutant"; mkdir -p "$R_MUT_DIR"
-sed 's|record/\*) printf .%s/%s\\n. "$DOCS_ROOT" "$1" ;;||' "$SWEEPER" > "$R_MUT_DIR/session-sweeper.sh"
+awk '
+  /^resolve_docs_root\(\) \{$/ {
+    print
+    print "  local proj=\"$1\""
+    print "  echo \"$proj/.bionic/docs\""
+    print "}"
+    skip = 1
+    next
+  }
+  skip { if ($0 == "}") skip = 0; next }
+  { print }
+' "$SWEEPER" > "$R_MUT_DIR/session-sweeper.sh"
+
+if cmp -s "$SWEEPER" "$R_MUT_DIR/session-sweeper.sh"; then
+  no "the resolve_docs_root mutation applies at all" "the awk target matched nothing — the function moved"
+else
+  ok "the resolve_docs_root mutation applies at all"
+  expect_ne "…and the mutated copy no longer agrees with the origin, body for body" \
+    "$R_ORIGIN_BODY" "$(fn_body "$R_MUT_DIR/session-sweeper.sh" resolve_docs_root)"
+fi
 
 
 # ============================================================
