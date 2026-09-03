@@ -1150,6 +1150,11 @@ if [ -d "$AC14_REPO/.bionic/docs" ]; then
   ac14_stray=$(find "$AC14_REPO/.bionic/docs" -type f -name 'context.md' \
                ! -path "$AC14_REPO/.bionic/docs/record/context.md" 2>/dev/null)
 fi
+if [ -z "$ac14_stray" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  ac14_a no stray context.md under .bionic/docs (outside the exempt record)\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac14_a stray context.md found outside the exempt record:\n%s\n' "$ac14_stray"
+fi
 
 echo "AC-14 b: no shipped surface instructs anything to write a session-state context.md"
 # Shipped surfaces = what claude-bootstrap.sh installs into ~/.claude/ (hooks,
@@ -1608,6 +1613,95 @@ run_write "$ac14_ws/sub/.bionic/docs/record/ac14-phantom.md" "$ac14_record_body"
 cd "$ac14_orig_pwd"
 assert_contains "ac14_phantom names the pinned root (the real workspace tree)" \
   "Pinned root: $ac14_ws/.bionic" "$HOOK_STDERR"
+
+# ============================================ WALLS: parallel-budget + worktree cwd
+# (spec AC-14 and AC-26; plan slice WALLS.)
+#
+# TWO FACTS, one about the header this hook validates and one about where the write
+# was made from.
+#
+# `parallel-budget:` is Step 0's resource ceiling, written into the plan's frontmatter
+# from the same probe the preflight attestation records (L-RESOURCES/2). This hook
+# neither requires it nor parses it — a plan with it and a plan without it both write.
+# The line is READ by hooks/dispatch-preflight.sh, which is where a budget can actually
+# refuse something; validating it here would put a second opinion about the same string
+# in a second file (assumption WALLS/5).
+#
+# The worktree arm is the other half of AC-14's pair. A plan is the run's own artifact
+# and it lives under the MAIN checkout; a plan write issued from inside a leased tree is
+# an orchestrator that has moved into a writer's workspace, and the tree's branch is
+# where that edit would land. Refused, naming the main checkout. An agent context is
+# allowed — a writer in its own tree that touches the plan is a different question, and
+# the ledger discipline, not this wall, is what governs it.
+
+echo
+echo "--- WALLS: parallel-budget in the header, and the worktree-cwd arm ---"
+
+# run_write_from <file_path> <content> <cwd> [agent_type] — a Write payload carrying the
+# `cwd` field the harness sends, and optionally the `agent_type` a dispatched agent's
+# payload carries.
+run_write_from() {
+  local file_path="$1" content="$2" cwd="$3" atype="${4:-}"
+  local input
+  input=$(jq -n --arg p "$file_path" --arg c "$content" --arg d "$cwd" --arg a "$atype" \
+    '{tool_name: "Write", cwd: $d, tool_input: {file_path: $p, content: $c}}
+     + (if $a == "" then {} else {agent_type: $a} end)')
+  local tmp_err
+  tmp_err=$(mktemp)
+  if HOME="$FAKE_HOME" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+    HOOK_EXIT=0
+  else
+    HOOK_EXIT=$?
+  fi
+  HOOK_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+}
+
+# A fixture project with a real linked worktree under `.worktrees/`. `git worktree add`
+# needs a commit to point at, which make_project's bare `git init` does not leave.
+walls_project=$(make_project)
+git -C "$walls_project" config user.email t@example.com
+git -C "$walls_project" config user.name "T"
+echo seed > "$walls_project/README.md"
+git -C "$walls_project" add README.md
+git -C "$walls_project" commit -qm seed
+git -C "$walls_project" worktree add -q -b wt/walls-fixture "$walls_project/.worktrees/one" >/dev/null 2>&1
+walls_tree="$walls_project/.worktrees/one"
+walls_plan="$walls_project/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
+
+# The header, with and without the budget line. Inserted after the opening `---`, which
+# is how Step 0 writes it.
+WALLS_PLAN_WITH_BUDGET=$(printf '%s' "$VALID_FRONTMATTER" | awk '
+  NR == 1 && $0 == "---" { print; print "parallel-budget: writers=22 suites=18 worktrees=32 test_jobs=18 source=probe"; next }
+  { print }')
+
+echo "Write: plan header WITHOUT parallel-budget: → allow (unchanged)"
+run_write "$walls_plan" "$VALID_FRONTMATTER"
+assert_eq "walls-1 a plan with no parallel-budget: writes" 0 "$HOOK_EXIT"
+
+echo "Write: plan header WITH parallel-budget: → allow"
+run_write "$walls_plan" "$WALLS_PLAN_WITH_BUDGET"
+assert_eq "walls-2 a plan carrying parallel-budget: writes" 0 "$HOOK_EXIT"
+assert_eq "walls-2b …and the hook says nothing about it" "" "$HOOK_STDERR"
+
+echo "Write: plan write with the main checkout as cwd → allow (the control)"
+run_write_from "$walls_plan" "$WALLS_PLAN_WITH_BUDGET" "$walls_project"
+assert_eq "walls-3 a plan write from the main checkout passes" 0 "$HOOK_EXIT"
+
+echo "Write: plan write whose cwd is inside the linked worktree → block"
+run_write_from "$walls_plan" "$WALLS_PLAN_WITH_BUDGET" "$walls_tree"
+assert_eq "walls-4 a plan write from inside a linked worktree is refused" 2 "$HOOK_EXIT"
+assert_contains "walls-4b …naming the main checkout" "main checkout: $walls_project" "$HOOK_STDERR"
+assert_contains "walls-4c …and the tree it came from" "$walls_tree" "$HOOK_STDERR"
+
+echo "Write: the same write from an agent context → allow"
+run_write_from "$walls_plan" "$WALLS_PLAN_WITH_BUDGET" "$walls_tree" "senior-implementor"
+assert_eq "walls-5 an agent context writing from its own tree is allowed" 0 "$HOOK_EXIT"
+
+echo "Write: a non-plan artifact from a worktree cwd → allow (the arm is plan-scoped)"
+run_write_from "$walls_project/.bionic/docs/specs/epic-01-demo/wave-01-x.spec.md" \
+  "$VALID_SPEC_FRONTMATTER" "$walls_tree"
+assert_eq "walls-6 a spec write from a worktree cwd is not this arm's business" 0 "$HOOK_EXIT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

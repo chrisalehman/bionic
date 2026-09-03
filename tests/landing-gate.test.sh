@@ -295,10 +295,18 @@ deliver() {  # <repo> <relative path> — a real artifact, written now (after la
 #
 # Sets OUT_STDOUT / OUT_STDERR / RC. Bounded: a gate that hangs inside a Stop hook is a
 # defect, and a suite that hangs on it would wedge `bash tests/run.sh`.
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2: a
+# plain /clear re-keys env, payload and pid file together). Since bionic 1.4.0 the hook
+# takes its session id from lib/session.sh, where the env value is primary — so a driver
+# that left the runner's own CLAUDE_CODE_SESSION_ID in the environment would be driving a
+# DIVERGENCE, not a session, and every roster filename below would be built from the
+# wrong key. A payload with no session key exports an empty one, which is what keeps the
+# no-session-key arms reaching the fail direction they pin.
 run_gate() {  # <gate path> <payload json>
   local gate="$1" json="$2"
+  local _sid; _sid=$(printf '%s' "$json" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   printf '%s' "$json" > "$SANDBOX/payload.json"
-  ( exec bash "$gate" < "$SANDBOX/payload.json" ) \
+  ( exec env CLAUDE_CODE_SESSION_ID="$_sid" bash "$gate" < "$SANDBOX/payload.json" ) \
     > "$SANDBOX/gate.out" 2> "$SANDBOX/gate.err" &
   local pid=$!
   BG_PIDS="$BG_PIDS $pid"
@@ -849,7 +857,11 @@ done
 PAYLOAD14="$SANDBOX/payload14.json"
 stop_payload "$R14" "$SID" false > "$PAYLOAD14"
 
-( exec bash "$GATE" < "$PAYLOAD14" ) > "$SANDBOX/gate14.out" 2> "$SANDBOX/gate14.err" &
+# The session key travels in the environment here for the same reason run_gate puts it
+# there: the gate takes it from lib/session.sh, env first, and the roster this section
+# kills a sweep over is named after it.
+( exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$GATE" < "$PAYLOAD14" ) \
+  > "$SANDBOX/gate14.out" 2> "$SANDBOX/gate14.err" &
 GATE14_PID=$!
 BG_PIDS="$BG_PIDS $GATE14_PID"
 

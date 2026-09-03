@@ -110,7 +110,17 @@ _rm_claude_home()      { echo "${BIONIC_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/
 _rm_settings_file()    { echo "${BIONIC_SETTINGS_FILE:-$(_rm_claude_home)/settings.json}"; }
 _rm_plugin_data_dir()  { echo "${BIONIC_PLUGIN_DATA_DIR:-$(_rm_claude_home)/plugins/data}"; }
 
+# A thin caller of shell.sh's `shell_rc_file` (L-DETECT/4.4, spec AC-21) when the
+# payload's lib/ is beside this script — the ─── Mode ─── section below sources it
+# there, the same way it sources env.sh. The standalone door (this script curled
+# to a machine with no lib/ at all — see this file's header) carries its own copy
+# of the identical case statement, because the whole reason that door exists is
+# to work when nothing beside it does.
 _rm_shell_rc() {
+  if declare -F shell_rc_file >/dev/null 2>&1; then
+    shell_rc_file
+    return
+  fi
   if [ -n "${BIONIC_SHELL_RC:-}" ]; then echo "$BIONIC_SHELL_RC"; return; fi
   local shell_name="${SHELL:-/bin/bash}"
   case "${shell_name##*/}" in
@@ -257,6 +267,12 @@ fi
 if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/env.sh" ]; then
   # shellcheck source=/dev/null
   . "${RM_LIB_DIR}/env.sh"
+fi
+# shell.sh, when it is there. `_rm_shell_rc` above delegates to its
+# `shell_rc_file` in payload mode and falls back to its own copy standalone.
+if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/shell.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${RM_LIB_DIR}/shell.sh"
 fi
 
 # ─── Outcome records ─────────────────────────────────────────────────────────

@@ -34,3 +34,17 @@ about doing the job well; they are about still being alive to report it.
   a Monitor on the file's `EXIT=` line. **Otherwise stay in the foreground and do not stop** — a
   foreground agent's final response ENDS the command, so the fallback would kill the work it
   exists to protect. Never arm a watcher and go idle yourself.
+- **Your brief names `BIONIC_TEST_JOBS=<test_jobs>`** — the run's per-suite share of the parallel
+  budget. Export it for the suite command your brief names; never raise it on your own judgment,
+  and never invent one when the brief carries none. The number comes from the plan's
+  `parallel-budget:` line, which was probed once from this machine and is shared with every other
+  writer running right now.
+
+**`/clear` does not kill agents.** A cleared session loses its own memory of a fleet, never
+the fleet: the agents keep running, their rosters stay on disk, and
+`bash <plugin-root>/hooks/session-poker.sh adopt` is what reads them back. The bare teammate
+name is the address that survives — `SendMessage` to `<name>` still reaches a live teammate
+across the clear, while the long transcript id is the observe address and never a delivery
+one. Re-dispatch waits for adopt's verdict: a name adopt reports as still running is a
+teammate to message, not a slot to refill, and dispatching over it is how one task ends up
+with two writers and one of them unledgered.

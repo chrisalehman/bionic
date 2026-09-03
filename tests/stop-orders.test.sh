@@ -44,6 +44,11 @@ make_repo() {  # <name> -> repo path
   local repo="$SANDBOX/$1"
   mkdir -p "$repo/.bionic/tmp" "$repo/.bionic/docs/record"
   git -C "$repo" init -q 2>/dev/null
+  # The initial branch is NAMED here rather than inherited from the machine's
+  # init.defaultBranch: `land` refuses to merge into a protected branch (F1), so
+  # a fixture whose branch depends on the operator's git config would land on
+  # one machine and refuse on the next.
+  git -C "$repo" symbolic-ref HEAD refs/heads/wave/fixture 2>/dev/null
   git -C "$repo" config user.email t@example.com
   git -C "$repo" config user.name "T"
   printf '%s\n' "$repo"
@@ -243,6 +248,120 @@ expect_status "from the WORKTREE cwd, the SAME session's standdown still reads t
 expect_contains "…still names the open row through the worktree cwd" "live-worker" "$OUT"
 
 git -C "$R7" worktree remove --force "$R7WT" >/dev/null 2>&1
+
+# ============================================================
+echo ""
+echo "=== Section 6: standdown LANDS the trees it stands down (AC-28, C1) ==="
+# ============================================================
+#
+# C1: a worktree is a leased slot bound to its ledger row, and standing an agent
+# down is where the lease ends. standdown does not stop anybody — stopping is
+# the harness's — but the tree is disk, and giving it back is this script's to
+# do. The act itself is payload/scripts/lib/worktree.sh's `worktree_land`; what
+# is asserted here is that standdown calls it once per DISCHARGED row and
+# reports every answer, refusals included.
+#
+# A row is matched to its tree by the convention the whole repo uses: a row
+# named `<x>` (or `W-<X>`) holds `.worktrees/<x>`.
+
+R8="$(make_repo standdown-lands)"
+echo seed > "$R8/README.md"
+git -C "$R8" add README.md >/dev/null 2>&1
+git -C "$R8" commit -qm seed >/dev/null 2>&1
+
+# Three trees, each a branch with a commit of its own so there is something to
+# land; the third is left dirty so its landing must refuse.
+for t in land-a land-b land-c; do
+  git -C "$R8" worktree add -q -b "$t" "$R8/.worktrees/$t" >/dev/null 2>&1
+  echo "$t" > "$R8/.worktrees/$t/$t.txt"
+  git -C "$R8/.worktrees/$t" add -A >/dev/null 2>&1
+  git -C "$R8/.worktrees/$t" commit -qm "$t work" >/dev/null 2>&1
+done
+echo "unsaved" >> "$R8/.worktrees/land-c/land-c.txt"
+
+# A fourth row that is NOT discharged, holding a tree that must survive: the
+# point of the operation is that it touches only what has landed.
+# It carries a commit of its own on purpose: a branch with nothing beyond the
+# main checkout is "merged" trivially, and the not-merged assertion below would
+# pass without proving anything.
+git -C "$R8" worktree add -q -b still-working "$R8/.worktrees/still-working" >/dev/null 2>&1
+echo working > "$R8/.worktrees/still-working/wip.txt"
+git -C "$R8/.worktrees/still-working" add -A >/dev/null 2>&1
+git -C "$R8/.worktrees/still-working" commit -qm "wip" >/dev/null 2>&1
+
+for n in land-a land-b land-c; do
+  echo "$n" > "$R8/.bionic/docs/record/$n.md"
+  roster_row "$R8" "$n" ".bionic/docs/record/$n.md" "" "$n@session-6c85684c"
+done
+roster_row "$R8" "still-working" ".bionic/docs/record/nothing.md" "" "still-working@session-6c85684c"
+
+run_orders "$R8" standdown
+expect_status "standdown with trees exits clean" 0 "$ST"
+
+expect_contains "the first discharged row's tree is reported LANDED" \
+  "LANDED branch=land-a" "$OUT"
+expect_contains "…and so is the second" "LANDED branch=land-b" "$OUT"
+expect_contains "the dirty tree is reported REFUSED, naming why" \
+  "REFUSED reason=dirty-tree" "$OUT"
+expect_contains "…and the refusal is attributable to its row" "land-c" "$OUT"
+
+# READ BACK FROM DISK, not from the report: a line claiming a landing is not a
+# landing.
+if [ ! -d "$R8/.worktrees/land-a" ]; then ok "the landed tree is gone"; else no "the landed tree is gone"; fi
+if [ ! -d "$R8/.worktrees/land-b" ]; then ok "…and so is the second"; else no "…and so is the second"; fi
+if [ -d "$R8/.worktrees/land-c" ]; then ok "the refused tree is still there"; else no "the refused tree is still there"; fi
+if [ -d "$R8/.worktrees/still-working" ]; then
+  ok "the tree of a row that has NOT landed is untouched"
+else
+  no "the tree of a row that has NOT landed is untouched"
+fi
+if git -C "$R8" rev-list --count "HEAD..land-a" 2>/dev/null | grep -qx 0; then
+  ok "land-a's work is merged into the main checkout"
+else
+  no "land-a's work is merged into the main checkout"
+fi
+if git -C "$R8" show-ref --verify --quiet refs/heads/land-a; then
+  ok "and its BRANCH survives the landing"
+else
+  no "and its BRANCH survives the landing"
+fi
+if git -C "$R8" rev-list --count "HEAD..still-working" 2>/dev/null | grep -qx 0; then
+  no "the unlanded row's branch was merged" "standdown merged a row it should have left alone"
+else
+  ok "the unlanded row's branch was NOT merged"
+fi
+
+# A REFUSAL THE OPERATOR MUST SEE. `land` refuses to merge into a protected
+# branch (security F1), and standdown reports that refusal the way it reports a
+# dirty tree — it is not a special case here, and the tree stays standing.
+R9="$(make_repo standdown-protected)"
+echo seed > "$R9/README.md"
+git -C "$R9" add README.md >/dev/null 2>&1
+git -C "$R9" commit -qm seed >/dev/null 2>&1
+git -C "$R9" worktree add -q -b land-p "$R9/.worktrees/land-p" >/dev/null 2>&1
+echo p > "$R9/.worktrees/land-p/land-p.txt"
+git -C "$R9/.worktrees/land-p" add -A >/dev/null 2>&1
+git -C "$R9/.worktrees/land-p" commit -qm "land-p work" >/dev/null 2>&1
+git -C "$R9" checkout -q -b main
+echo land-p > "$R9/.bionic/docs/record/land-p.md"
+roster_row "$R9" "land-p" ".bionic/docs/record/land-p.md" "" "land-p@session-6c85684c"
+
+run_orders "$R9" standdown
+expect_status "standdown on a protected checkout still exits clean" 0 "$ST"
+expect_contains "the land onto main is reported REFUSED, naming the branch" \
+  "REFUSED reason=protected-branch branch=main" "$OUT"
+if [ -d "$R9/.worktrees/land-p" ]; then ok "the tree of the refused land is still there"; else no "the tree of the refused land is still there"; fi
+if git -C "$R9" rev-list --count "HEAD..land-p" 2>/dev/null | grep -qx 0; then
+  no "main was merged into" "standdown merged unreviewed work into main"
+else
+  ok "main was NOT merged into"
+fi
+
+# A roster with no trees at all must behave exactly as it did before this
+# feature: the landing report is additive, never a precondition.
+run_orders "$R4" standdown
+expect_status "a session with no trees stands down unchanged" 0 "$ST"
+expect_absent "…and reports no landings" "LANDED branch=" "$OUT"
 
 # ============================================================
 echo ""

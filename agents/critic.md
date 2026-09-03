@@ -39,8 +39,15 @@ that exists only there is a report nobody receives. Send it, then stop.
 <!-- AXIS-BEGIN: canonical copy of skills/canonical-sdlc/SKILL.md §Step 6 duplication-axis + agreement-test paragraphs -->
 > **Duplication axis — one implementation site per concept.** The design's ownership table is the anchor: its owner column already says where each concept lives, so the axis is a comparison, not a hunt. A second site computing or deciding the same thing is a FLAG; a concept the table gives two owners is a FAIL; a concept the wave introduced and the table never named is a FLAG against the design, not against the code.
 
-> **Agreement tests.** Each shared-truth pair in the ownership table — one concept, more than one rendering surface — names one hermetic test that fails when the surfaces disagree. The standing exemplar is the `SUPPORTED_SDLC_VERSION` pin-sync rows in `tests/scripts.test.sh`: one logical constant, two rendering sites pinned — the two hooks — and a test that goes red the moment either moves alone. The same constant's four diagram renderings — three in `diagrams/hook-chain.svg`, one in `diagrams/lifecycle.svg`'s title — are pinned the same way in `tests/diagrams.test.sh`, which reads the value out of the hook rather than restating it; composing those pictures as text is what moved them out of the unpinnable set, and a picture is worth pinning precisely because nobody re-reads it. It is also the honest limit: the version paragraph in `SKILL.md` and the version-history bullet in `operational-rules.md` are rendering sites *outside* both tuples, and they drift silently — the prose-drift class this axis exists to catch, in the exemplar named to teach it. A listed pair with no named test is a FLAG, and "the suite covers it" is not a named test.
-<!-- AXIS-END -->
+> **Agreement tests.** Each shared-truth pair in the ownership table — one concept, more than one
+> rendering surface — names one hermetic test that fails when the surfaces disagree. The standing
+> exemplar is `tests/cross-gate-agreement.test.sh` §N.1: one logical text, the loader idiom, rendered
+> into nineteen hooks, pinned byte-for-byte against `bionic_loader_pin`'s live output, with a mutation
+> arm that doctors one copy and proves the pin goes red. §R does the same for the four-copy
+> `resolve_docs_root` family — and it is also the honest limit: until wave 1.4.0 that section built
+> its mutant and asserted nothing, and two documents cited it as the safety net anyway. A pin nobody
+> has watched fail is prose wearing a test. A listed pair with no named test is a FLAG, and "the suite
+> covers it" is not a named test.
 
 Neither is a wall: no hook sees the duplication axis or the agreement-test obligation. You carry both by judgment.
 
@@ -90,4 +97,18 @@ about doing the job well; they are about still being alive to report it.
   a Monitor on the file's `EXIT=` line. **Otherwise stay in the foreground and do not stop** — a
   foreground agent's final response ENDS the command, so the fallback would kill the work it
   exists to protect. Never arm a watcher and go idle yourself.
+- **Your brief names `BIONIC_TEST_JOBS=<test_jobs>`** — the run's per-suite share of the parallel
+  budget. Export it for the suite command your brief names; never raise it on your own judgment,
+  and never invent one when the brief carries none. The number comes from the plan's
+  `parallel-budget:` line, which was probed once from this machine and is shared with every other
+  writer running right now.
+
+**`/clear` does not kill agents.** A cleared session loses its own memory of a fleet, never
+the fleet: the agents keep running, their rosters stay on disk, and
+`bash <plugin-root>/hooks/session-poker.sh adopt` is what reads them back. The bare teammate
+name is the address that survives — `SendMessage` to `<name>` still reaches a live teammate
+across the clear, while the long transcript id is the observe address and never a delivery
+one. Re-dispatch waits for adopt's verdict: a name adopt reports as still running is a
+teammate to message, not a slot to refill, and dispatching over it is how one task ends up
+with two writers and one of them unledgered.
 <!-- SURVIVAL-END -->

@@ -55,6 +55,17 @@ PATROL_WALL_SCHEMA="patrol-wall/v1"
 # built-in — because two copies of a constant drift the first time either moves.
 PATROL_INTERVAL_LAST_RESORT=1800
 
+# HOW STALE IS STALE (L-DETECT/4.5, improvement, spec AC-22). "The stamp is
+# stale past twice the poker interval" is a judgment call three sites in this
+# payload each carry as their own inline arithmetic: this file's own
+# `patrol_stamp_state` below, `hooks/session-poker.sh` and `hooks/dispatch-
+# preflight.sh`. One exported constant is the single owner of the multiplier;
+# `patrol_stamp_state` reads it a few lines down, and `session-poker.sh` reads
+# it for `adopt`'s liveness window (slice POKER, 1.6). `dispatch-preflight.sh`
+# keeps its own inline `* 2` until slice ADOPT switches it; the three are held
+# in agreement on the VALUE by tests/patrol-stale.test.sh §4 in the meantime.
+export PATROL_STALE_MULTIPLIER=2
+
 # The CLI's config directory, through the same override chain every other
 # library here reads, so a fixture machine redirects this one with the knob it
 # already uses for the rest.
@@ -89,40 +100,34 @@ EOF
 }
 
 # THE PROJECT ROOT A SESSION'S STATE FILES LIVE UNDER, resolved from that
-# session's cwd exactly the way hooks/session-poker.sh resolves it from its own:
-# git's common dir first (so a worktree answers with the MAIN repository, which
-# is where the roster and the stamp are written), then the nearest ancestor
-# carrying a `.bionic/` tree, then the cwd itself. Duplicated from the hook
-# rather than shared with it because scripts/ and hooks/ are two lanes with no
-# sourcing path between them; if that ever changes this is the copy to delete.
-# ALWAYS THE PHYSICAL PATH. Two answers about the same directory that disagree
-# only in their symlinks are two answers: on macOS a session records `/tmp/x`
-# while the process that reads it stands in `/private/tmp/x`, and a comparison
-# of those strings reports every local session as somebody else's. `pwd -P` is
-# also what hooks/session-poker.sh resolves through before it writes the stamp,
-# so this is the spelling the state files are actually named in.
-_patrol_real() {  # <path>
-  local r
-  r="$(cd "${1:-}" 2>/dev/null && pwd -P)"
-  printf '%s' "${r:-${1:-}}"
-}
+# session's cwd through lib/root.sh's `project_root` — the SAME SSoT eleven
+# hooks and scripts, doctor, and the Patrol tick's own candidate listing all
+# render from (lib/root.sh header, spec §3). This used to be a ninth
+# byte-identical copy of the pre-1.4.0 shape `project_root` replaced: git's
+# common dir asked FIRST, and a `.bionic` ancestor walked only when no
+# repository existed at all. That ordering privileges the git root, so a git
+# repo holding a `.bionic` BELOW its root (design-ledger S3, tests/root.test.sh
+# §3) had its roster written under the nested `.bionic/tmp` while this
+# resolver answered with the git toplevel — the session read as blind
+# (FIX-PATROL-ROOT). `project_root` inverts that order: the nearest `.bionic`
+# decides, and git is used only to map a linked worktree onto its main
+# checkout. LAZILY SOURCED, the way lib/worktree.sh loads its sibling
+# git-argv.sh: scripts/lib CAN source across files in the same directory (both
+# worktree.sh and doctor.sh already do), so a caller that has not already
+# pulled in lib/root.sh pays for it exactly once, here, on first use.
+_patrol_self_dir() { dirname "${BASH_SOURCE[0]:-$0}"; }
 
-_patrol_repo_root() {  # <cwd>
-  local d="${1:-}" common root
+_patrol_repo_root() {  # <cwd> -> project_root's answer for that cwd
+  local d="${1:-}" lib
   [ -n "$d" ] || return 1
-  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-    if [ -n "$common" ]; then
-      _patrol_real "${common%/*}"
-      return 0
-    fi
+  if ! declare -f project_root >/dev/null 2>&1; then
+    lib="$( cd "$(_patrol_self_dir)" 2>/dev/null && pwd -P )/root.sh"
+    [ -r "$lib" ] || { printf '%s' "$d"; return 0; }
+    # shellcheck source=/dev/null
+    . "$lib" 2>/dev/null || { printf '%s' "$d"; return 0; }
+    declare -f project_root >/dev/null 2>&1 || { printf '%s' "$d"; return 0; }
   fi
-  root="$d"
-  while [ -n "$root" ] && [ "$root" != "/" ] && [ "$root" != "." ]; do
-    if [ -d "$root/.bionic" ]; then _patrol_real "$root"; return 0; fi
-    root="${root%/*}"
-    [ -n "$root" ] || root="/"
-  done
-  _patrol_real "$d"
+  project_root "$d"
 }
 
 # Every live CLI process, from the session files it keeps. `kind`/`status` are
@@ -300,7 +305,7 @@ patrol_stamp_state() {  # <repo-root> <sid> -> state=…|age=…|limit=…|inter
   local repo="${1:-}" sid="${2:-}" f iv secs src mt age limit state
   f="${repo}/.bionic/tmp/patrol-${sid}.state"
   iv="$(patrol_interval "$repo")"; secs="${iv%% *}"; src="${iv##* }"
-  limit=$(( secs * 2 ))
+  limit=$(( secs * PATROL_STALE_MULTIPLIER ))
   if [ -L "$f" ] || [ ! -f "$f" ]; then
     state="never-armed"; age=""
   else

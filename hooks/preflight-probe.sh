@@ -35,11 +35,35 @@
 # BY KEY and never by position (checklist A6). A version line is always present so a
 # future field addition is a readable change rather than a silent parse break.
 #
-#     version=1                       kind=preflight-attestation
+#     version=2                       kind=preflight-attestation
 #     session_id=<session key>        written_at=<epoch>   written_at_iso=<UTC>
 #     repo=<resolved repo root>       git_branch= git_head= git_dirty=
 #     credential_source=<where the credential was found, never the credential>
 #     other_sessions=<count seen by the warn-only scan>
+#     cores= mem_gb= disk_free_gb= load_1m= os=        (v2, AC-24's five probe fields)
+#     budget=writers=N suites=N worktrees=N test_jobs=N source=probe    (v2)
+#
+# VERSION 2 (AC-25, wave-bionic-1.4.0-update). The attestation is the only record written
+# once per session, before any dispatch, keyed to the session and to the repo — which makes
+# it the right place for the machine the fleet is about to run on and the parallel budget
+# derived from it. The five probe fields and the budget line come from
+# payload/scripts/lib/resources.sh; nothing here re-derives them.
+#
+#   * The budget VALUE is deliberately the whole `parallel-budget:` string the plan header
+#     carries, so Step 0, the dispatch wall and doctor read one string instead of four
+#     fields and a formula. `source=probe` distinguishes it from a hand-set override.
+#   * A machine where the library cannot be read still takes an attestation, and it is a
+#     VERSION 1 one. Resources are a context probe, never a blocking one (§4): a missing
+#     library must not stop a dispatch, and an empty-fielded v2 would be a lie about a
+#     machine nobody measured. v1 is the honest record of "no budget recorded", which is
+#     exactly what doctor prints for it (AC-27).
+#
+# READING an attestation (`--read <file>`, AC-25). Versions 1 AND 2 are accepted: a v1
+# record on disk when a v2 writer lands is the ordinary mid-upgrade state, and refusing it
+# would block every session until each repo took a fresh attestation. An UNRECOGNISED
+# version is refused, because a record whose schema this script does not know cannot be
+# read by key with any confidence. The dispatch wall does not use this path and still reads
+# only the record's existence and session key (its own comment at :265 explains why).
 #
 # The key is spelled `session_id` deliberately: it is the payload field name the reading
 # gate receives, and it is what the CURRENTLY INSTALLED old-name gate greps for. Until
@@ -66,6 +90,9 @@
 #   exit 2 — refused or could not complete; no attestation on disk (prior one deleted)
 #   exit 3 — no session key; REFUSED, state left untouched
 #   exit 4 — the state lock is held by another writer; state left untouched
+#   exit 5 — `--read <file>` only: the named file is not a readable attestation this
+#            script's reader recognises (absent, a symlink, no version line, or a version
+#            outside the supported set). Nothing is ever written on this path.
 #
 # Hostile-repo posture (design §8): a repo controls its own .bionic/ contents, so every
 # path this script writes is checked for symlink redirection first and the record is
@@ -83,7 +110,10 @@ set -u
 HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
 
-ATTESTATION_VERSION=1
+# The version a fresh attestation is written AS, and the set a reader ACCEPTS. They differ
+# on purpose: a writer emits one schema, a reader must tolerate every schema still on disk.
+ATTESTATION_VERSION=2
+ATTESTATION_VERSIONS_SUPPORTED="1 2"
 # D-3 payload-shape canary (w3 slice 4/4): the same-actor wall in hooks/stop-guard.sh reads
 # observer identity from the undocumented top-level `agent_id` field on subagent-invoked
 # PostToolUse|Bash payloads (validated .bionic/docs/record/w3-slice1-posttooluse-probe.md,
@@ -110,9 +140,228 @@ say()  { printf 'preflight: %s\n' "$1"; }
 warn() { printf 'preflight: WARN %s\n' "$1"; }
 die()  { printf 'preflight: %s\n' "$1" >&2; }
 
+# ---------------------------------------------------------------- read mode (AC-25)
+#
+# `bash preflight-probe.sh --read <file>` validates an attestation and echoes its record
+# lines (comments stripped) on stdout. STRICTLY READ-ONLY: it takes no lock, prunes
+# nothing, writes nothing, and needs no session key — which is why it is handled here,
+# before the session-key refusal and every path below it.
+#
+# It exists because the schema lives in THIS file (ownership table), so the acceptance
+# rule "versions 1 and 2" belongs beside the writer that produces them, not copied into
+# each of doctor, the Step 0 display and the tick.
+#
+# A symlink is not followed, for the same reason no other path here follows one: the
+# attestation sits inside a repo, and a repo controls its own `.bionic/` contents.
+attestation_version_supported() {  # <version string>
+  local v
+  for v in $ATTESTATION_VERSIONS_SUPPORTED; do
+    [ "$v" = "${1:-}" ] && return 0
+  done
+  return 1
+}
+
+if [ "${1:-}" = "--read" ]; then
+  _read_target="${2:-}"
+  if [ -z "$_read_target" ]; then
+    die "REFUSED — --read needs a file path."
+    exit 5
+  fi
+  if [ -L "$_read_target" ]; then
+    die "REFUSED — $_read_target is a symbolic link; an attestation is never read through one."
+    exit 5
+  fi
+  if [ ! -f "$_read_target" ] || [ ! -r "$_read_target" ]; then
+    die "REFUSED — no readable attestation at $_read_target."
+    exit 5
+  fi
+  # By key, never by position (checklist A6).
+  _read_version="$(grep -m1 '^version=' "$_read_target" 2>/dev/null | cut -d= -f2-)"
+  if [ -z "$_read_version" ]; then
+    die "REFUSED — $_read_target carries no version= line; it is not an attestation record."
+    exit 5
+  fi
+  if ! attestation_version_supported "$_read_version"; then
+    die "REFUSED — attestation version $_read_version is not one this reader knows"
+    die "(supported: $ATTESTATION_VERSIONS_SUPPORTED). Re-take the attestation with a"
+    die "matching build: bash ${HOOK_DIR}/preflight-probe.sh"
+    exit 5
+  fi
+  grep -v '^#' "$_read_target" 2>/dev/null | grep -E '^[A-Za-z_][A-Za-z0-9_]*='
+  exit 0
+fi
+
+# ---------------------------------------------------------------- the resources library
+#
+# FAIL-OPEN, deliberately, and the only load in this script that is (design D1 fail-closed
+# applies to WALLS, not to context probes). A machine whose library is missing must still
+# be able to attest and dispatch; what it loses is the budget line, and the record says so
+# by staying at version 1 rather than carrying five empty fields.
+#
+# TWO SPELLINGS OF ONE DIRECTORY, the same pair hooks/farm-out-reminder.sh resolves:
+# payload/hooks is a symlink to <repo>/hooks and `$0` is textual, so "../scripts/lib"
+# resolves only when this file was reached through ${CLAUDE_PLUGIN_ROOT}/hooks/; the repo
+# spelling is the second candidate. -r, not -f: readability is what predicts whether `.`
+# succeeds.
+RESOURCES_LIB=""
+for _cand in "$HOOK_DIR/../scripts/lib/resources.sh" \
+             "$HOOK_DIR/../payload/scripts/lib/resources.sh"; do
+  [ -r "$_cand" ] && { RESOURCES_LIB="$_cand"; break; }
+done
+PROBE_CORES=""; PROBE_MEM_GB=""; PROBE_DISK_GB=""; PROBE_LOAD_1M=""; PROBE_OS=""
+PROBE_BUDGET=""
+if [ -n "$RESOURCES_LIB" ]; then
+  # shellcheck disable=SC1090
+  . "$RESOURCES_LIB" 2>/dev/null || RESOURCES_LIB=""
+fi
+
 # ---------------------------------------------------------------- session key (design §7)
 
-SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+# ---------- the library ----------
+#
+# One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
+# payload/scripts/lib/loader.sh. FAIL OPEN: nothing this script does is irreversible,
+# and a reporting verb that refused because a file was missing would take the
+# diagnosis down with the thing being diagnosed.
+BIONIC_LIB_WANT="root.sh session.sh"
+# --- bionic-loader/v2 BEGIN
+# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
+# library cannot load itself, so the duplication is the design and
+# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
+# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
+#
+# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
+# on a line above this block. Afterwards exactly one of these is non-empty:
+#   BIONIC_LIB          a readable directory holding every wanted basename
+#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
+# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
+#
+# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
+# healthy hook pays nothing for the healing path — not a jq, not a registry read.
+#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
+#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
+#      siblings, and the repo, where payload/hooks is a symlink to the top-level
+#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
+#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
+#      would find nothing in a directory-source session.
+#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
+#      plugin was installed from; that marketplace's source.path in
+#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
+#      a fork installs under its own name.
+#  (3) the newest version directory in that marketplace's plugin cache, by
+#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
+# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
+# upstream-broken publish breaks every location equally and is not covered.
+#
+# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
+# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
+_bl_dir="$(dirname "$0")"
+_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_try() {
+  [ -n "${1:-}" ] || return 1
+  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
+  [ -d "$1" ] || return 1
+  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
+  BIONIC_LIB="$1"
+}
+if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
+  _bl_mk=""
+  if [ -r "$_bl_pd/installed_plugins.json" ]; then
+    # First key only, and the prefix stripped by parameter expansion rather than
+    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
+    # `jq` runs with its stderr closed, so a machine missing jq degrades to
+    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
+    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
+    _bl_mk="${_bl_keys%%
+*}"
+    _bl_mk="${_bl_mk#bionic@}"
+  fi
+  if [ -n "$_bl_mk" ]; then
+    _bl_src=""
+    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
+      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
+    fi
+    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
+    if [ -z "$BIONIC_LIB" ]; then
+      _bl_best=""; _bl_bestk=""
+      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
+        [ -d "$_bl_v" ] || continue
+        _bl_n="${_bl_v##*/}"
+        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
+        _bl_x1=""; _bl_x2=""; _bl_x3=""
+        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
+$_bl_n
+BIONIC_LOADER_VER
+        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
+        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
+      done
+      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
+    fi
+  fi
+fi
+if [ -z "$BIONIC_LIB" ]; then
+  # The name in the message is the first library this hook asked for. A candidate
+  # directory qualifies only when it holds ALL of them, so with none qualifying the
+  # first wanted name is the honest thing to hand the reader.
+  BIONIC_LIB_MISSING="${_bl_want%% *}"
+  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
+fi
+# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
+# stand aside. Blocking reversible work because a file is missing buys no safety and
+# costs the session.
+loader_fail_open() {
+  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+  exit 0
+}
+# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
+# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
+# here, before the hook sources anything. Whole-string and not prefix, so
+# `claude plugin update bionic@bionic; git push origin main` is refused like any
+# other push. There is no env-var override: a variable an agent turn can set on
+# itself is not a wall.
+loader_fail_closed() {
+  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
+  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
+  case "${2:-}" in
+    "claude plugin update bionic@bionic"|\
+    "claude plugin install bionic@bionic"|\
+    "bash $_bl_root/scripts/doctor.sh"|\
+    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
+  esac
+  cat >&2 <<BIONIC_LOADER_REFUSE
+BLOCKED: $1 cannot load its library (${BIONIC_LIB_MISSING:-the bionic library}), so it
+cannot read this command. A wall that cannot read a command refuses it rather than
+waving it through.
+
+Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
+
+Until the plugin is whole again this wall permits exactly four commands, each matched
+as a whole string:
+
+    claude plugin update bionic@bionic
+    claude plugin install bionic@bionic
+    bash $_bl_root/scripts/doctor.sh
+    bash $_bl_root/scripts/setup.sh
+
+Anything else is refused, including one of those four with another command chained
+after it. Run one of them, or act from your own terminal.
+BIONIC_LOADER_REFUSE
+  exit 2
+}
+# --- bionic-loader/v2 END
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "preflight-probe"; fi
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/root.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/session.sh"
+
+# THE SESSION KEY, from the library (design §1): the environment value is primary. The
+# attestation filename is built from it and the dispatch wall reconstructs that filename
+# from its own reading, so both sides have to ask the same reader or the wall re-takes an
+# attestation that was already good.
+SESSION_ID=$(session_id "" 2>/dev/null) || SESSION_ID=""
 if [ -z "$SESSION_ID" ]; then
   die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
   die "An unkeyed attestation validates nothing, so none is written and existing state is"
@@ -129,58 +378,14 @@ CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 # THE PINNED ROOT (epic-16 wave-02, R5/AC-4).
 #
 # DELIBERATELY DUPLICATED, byte for byte, from hooks/canonical-sdlc-governing-skill.sh —
-# which holds the origin, with twins in the evidence gate and (as of this wave) the
-# dispatch wall. Same reason every other cross-script copy in hooks/ exists (TDD §9): a
-# sourced library the installer misses is a silently inert consumer, and this script is
-# installed on its own.
-#
-# WHY IT REPLACED `rev-parse --show-toplevel`. That answers with whatever tree the SHELL
-# happens to stand in, and the attestation is a per-repo fact whose filename the dispatch
-# wall then reconstructs from ITS root. Inside a git worktree the two disagree: the probe
-# writes into the worktree's own `.bionic`, the wall looks in the main repository's, finds
-# nothing, and the operator re-takes an attestation that was already good — the Synthesis
-# field case, verbatim ("attestation redone because root derived from shell CWD").
-# `--git-common-dir` maps a worktree back onto the main repository, so both sides land on
-# one address space (R9). From a SUBDIRECTORY the two already agreed; that half is
-# unchanged and is pinned so it stays that way.
-resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
-  local d common root
-  d=$(dirname "$1")
-  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
-    d=$(dirname "$d")
-  done
-  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-    dirname "$common"
-    return
-  fi
-  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
-    case "$common" in
-      /*) root=$(dirname "$common") ;;
-      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
-    esac
-    if [ -n "$root" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-  fi
-  # NO-GIT FALLBACK: the pin follows the TARGET, never the shell. Outside any
-  # repository, walk up from the nearest existing ancestor of the target for
-  # the nearest directory already carrying a `.bionic/` tree and answer there;
-  # only when none exists does the supplied fallback (default pwd) win — which
-  # preserves the first-write-into-a-fresh-project path and changes nothing
-  # inside a git repository, where the arms above always answer first.
-  root="$d"
-  while [ -n "$root" ] && [ "$root" != "/" ] && [ "$root" != "." ]; do
-    if [ -d "$root/.bionic" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-    root=$(dirname "$root")
-  done
-  printf '%s\n' "${2:-$(pwd)}"
-}
 
-REPO="$(resolve_project_root "$PWD/." "$PWD")"
+# THE ROOT (spec AC-10, lib/root.sh). `rev-parse --show-toplevel` answers with whatever
+# tree the SHELL stands in; inside a linked worktree that is not where the state lives,
+# and the reader and the writer then disagree about which `.bionic` is real. This was a
+# byte-identical private copy — one of eight — held together by an agreement suite;
+# there is one answer now, and it maps a worktree onto its main repository before it
+# walks for the nearest real `.bionic`.
+REPO="$(project_root "$PWD")"
 [ -n "$REPO" ] || REPO="$PWD"
 REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
 if [ -z "$REPO_REAL" ]; then
@@ -377,6 +582,31 @@ else
   say "session roster: this session's transcript directory was not found (context only)"
 fi
 
+# The machine, and the budget derived from it (AC-24, AC-25). A CONTEXT probe: it records,
+# it never blocks. The probe runs FROM THE REPO ROOT because its disk term bounds worktrees
+# and worktrees are cut beside the repo, not beside whatever directory the operator stood in.
+if [ -n "$RESOURCES_LIB" ]; then
+  _probe_line="$( cd "$REPO_REAL" 2>/dev/null && resources_probe 2>/dev/null )"
+  # Read by key, never by position — the same rule the attestation itself is read under.
+  _pf() { printf '%s\n' "$_probe_line" | tr ' ' '\n' | grep "^$1=" | head -1 | cut -d= -f2-; }
+  PROBE_CORES="$(_pf cores)"; PROBE_MEM_GB="$(_pf mem_gb)"
+  PROBE_DISK_GB="$(_pf disk_free_gb)"; PROBE_LOAD_1M="$(_pf load_1m)"; PROBE_OS="$(_pf os)"
+  if [ -n "$PROBE_CORES" ] && [ -n "$PROBE_MEM_GB" ] && [ -n "$PROBE_DISK_GB" ] &&
+     [ -n "$PROBE_LOAD_1M" ] && [ -n "$PROBE_OS" ]; then
+    _budget="$(resources_budget "$PROBE_CORES" "$PROBE_MEM_GB" "$PROBE_DISK_GB" 2>/dev/null)"
+    if [ -n "$_budget" ]; then
+      PROBE_BUDGET="$_budget source=probe"
+      say "machine: ${PROBE_CORES}c, ${PROBE_MEM_GB} GB, ${PROBE_DISK_GB} GB free, load ${PROBE_LOAD_1M} (${PROBE_OS})"
+      say "budget: $PROBE_BUDGET"
+    fi
+  fi
+  # Any gap in the five fields or the budget leaves PROBE_BUDGET empty, and the write below
+  # falls back to a version 1 record rather than attesting to a half-measured machine.
+  [ -n "$PROBE_BUDGET" ] || say "resources: not measured on this run (attestation stays at version 1)"
+else
+  say "resources: library not found beside this script (attestation stays at version 1)"
+fi
+
 # D-3 payload-shape canary (w3 slice 4/4): compare the pinned validated CLI version against
 # what's actually installed. Warn only — never blocking, never written into the attestation —
 # because the last-known-good behavior (the discriminator holding) is what the pin records,
@@ -483,9 +713,18 @@ tmp="$(mktemp "$STATE_FILE.XXXXXX" 2>/dev/null)"
 [ -n "$tmp" ] && [ -f "$tmp" ] || abort_write "could not create a temporary file in $STATE_DIR"
 chmod 600 "$tmp" 2>/dev/null || abort_write "could not restrict permissions on the temporary file"
 
+# A record is version 2 only when it can actually carry what version 2 promises. With no
+# budget measured, the honest record is the version 1 schema — which the reader above still
+# accepts and doctor renders as "no budget recorded" (AC-27).
+if [ -n "$PROBE_BUDGET" ]; then
+  RECORD_VERSION="$ATTESTATION_VERSION"
+else
+  RECORD_VERSION=1
+fi
+
 {
   printf '# bionic environment attestation — machine-local, safe to delete\n'
-  printf 'version=%s\n'      "$ATTESTATION_VERSION"
+  printf 'version=%s\n'      "$RECORD_VERSION"
   printf 'kind=%s\n'         "preflight-attestation"
   printf 'session_id=%s\n'   "$SESSION_ID"
   printf 'written_at=%s\n'   "$(date -u +%s)"
@@ -496,6 +735,17 @@ chmod 600 "$tmp" 2>/dev/null || abort_write "could not restrict permissions on t
   printf 'git_dirty=%s\n'    "$GIT_DIRTY"
   printf 'credential_source=%s\n' "$CRED_SOURCE"
   printf 'other_sessions=%s\n'    "$OTHER_SESSIONS"
+  if [ "$RECORD_VERSION" -ge 2 ]; then
+    # The five probe fields (AC-24), then the budget as ONE string in exactly the shape the
+    # plan header's `parallel-budget:` carries, so every reader takes a string rather than
+    # re-deriving a formula (spec Design §3, ownership table).
+    printf 'cores=%s\n'        "$PROBE_CORES"
+    printf 'mem_gb=%s\n'       "$PROBE_MEM_GB"
+    printf 'disk_free_gb=%s\n' "$PROBE_DISK_GB"
+    printf 'load_1m=%s\n'      "$PROBE_LOAD_1M"
+    printf 'os=%s\n'           "$PROBE_OS"
+    printf 'budget=%s\n'       "$PROBE_BUDGET"
+  fi
 } > "$tmp" 2>/dev/null || abort_write "could not write the attestation record"
 
 mv -f "$tmp" "$STATE_FILE" 2>/dev/null || abort_write "could not install the attestation at $STATE_FILE"

@@ -205,6 +205,7 @@ run "preflight-probe.test.sh" bash tests/preflight-probe.test.sh
 run "protect-database.test.sh" bash tests/protect-database.test.sh
 run "protect-main.test.sh" bash tests/protect-main.test.sh
 run "session-poker.test.sh" bash tests/session-poker.test.sh
+run "session-start.test.sh" bash tests/session-start.test.sh
 run "session-sweeper.test.sh" bash tests/session-sweeper.test.sh
 run "stop-check.test.sh" bash tests/stop-check.test.sh
 run "stop-guard.test.sh" bash tests/stop-guard.test.sh
@@ -245,6 +246,15 @@ run "detect-probes.test.sh" bash tests/detect-probes.test.sh
 # different fixture regime — and so, like every suite outside hooks/, hand-listed here or
 # it never runs.
 run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
+# The worktree LEASE (bionic 1.4.0 wave, spec AC-11/AC-28, plan slice WORKTREE):
+# payload/scripts/lib/worktree.sh — the land verb (merge --no-ff, remove,
+# prune, and the four refusals around it), the legacy `.bionic` links C2
+# retired, and the lease overruns the Patrol tick reports. Its own suite rather
+# than a group in spawn-worktree.test.sh: that one drives an EXECUTED script
+# against a scratch repo, this one sources a library and calls functions, and
+# the fixture regimes differ (a fixture claude-home for the D1 predicate).
+# Hand-listed like every suite outside hooks/.
+run "worktree.test.sh" bash tests/worktree.test.sh
 # The JIT / degradation contract (epic-17 W3 S10, spec AC-5): payload/scripts/lib/jit.sh's
 # jit_check + jit_offer, driven against a fixture PATH, proving jit_offer calls install_dep
 # BY NAME (the ownership-table agreement) and mutates nothing on decline. Hand-listed like
@@ -255,6 +265,11 @@ run "jit.test.sh" bash tests/jit.test.sh
 # name without touching the rest of the file, and the difference between a value the FILE
 # carries and a value THIS PROCESS has. Hand-listed like every suite outside hooks/.
 run "env.test.sh" bash tests/env.test.sh
+# The session-id function (bionic 1.4.0 wave, spec AC-2, plan slice L-SESSION):
+# payload/scripts/lib/session.sh's session_id — env is primary, a payload sid
+# is a witness only; divergence prints once and env still wins. Hand-listed
+# like every suite outside hooks/.
+run "session.test.sh" bash tests/session.test.sh
 # The rc item (epic-18 wave-03 slice 4/7, spec R6 / AC-5, AC-6): the `claude()`
 # shell function as a setup-managed item — env.sh's roster and rc write/read/delete,
 # the consented step in setup.sh, doctor's row, and remove.sh's strip through both
@@ -304,6 +319,95 @@ run "doctor-version.test.sh" bash tests/doctor-version.test.sh
 run "git-argv.test.sh" bash tests/git-argv.test.sh
 run "cmd-class.test.sh" bash tests/cmd-class.test.sh
 run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, L-RUN slice, spec AC-8): the one library function
+# `active_run` — docs_root, active_plan, active_run — that every always-on hook gates its
+# own work behind. Hand-listed like every suite outside hooks/.
+run "run-predicate.test.sh" bash tests/run-predicate.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice L-LOADER, spec AC-16) — the one loader
+# idiom. payload/scripts/lib/loader.sh carries the canonical text between
+# `# --- bionic-loader/v2 BEGIN` / `# --- bionic-loader/v2 END`; this suite pastes that
+# text into throwaway hooks under its own mktemp root and drives the three candidate
+# classes, the two fail policies and the four-command repair allowlist. Hermetic: HOME
+# and BIONIC_PLUGINS_DIR are overridden per run, so the real ~/.claude is never read.
+run "loader.test.sh" bash tests/loader.test.sh
+# ── bionic 1.4.0, the library spine (wave-bionic-1.4.0-update) ────────────────
+#   - root.test.sh: scripts/lib/root.sh — `project_root` / `project_root_candidates`,
+#     seven real on-disk topologies (nested repo under a .bionic workspace, linked
+#     worktree, phantom nested .bionic, symlinked .bionic, .bionic inside $HOME,
+#     unrelated repo, no-git/no-.bionic) each paired with a differential control
+run "root.test.sh" bash tests/root.test.sh
+# bionic 1.4.0 (L-DETECT/4.4, spec AC-21): scripts/lib/shell.sh's shell_rc_file, the one
+# rc-file resolver detect.sh's and remove.sh's shell-rc functions now both delegate to,
+# pinned structurally (thin caller, no hand-rolled case split) and by cross-file agreement
+# across zsh/bash/fish/unrecognized $SHELL.
+run "shell-rc.test.sh" bash tests/shell-rc.test.sh
+# bionic 1.4.0 (L-DETECT/4.2, spec AC-19): scripts/lib/detect.sh's version_compare, a
+# semver-shaped three-int ordering primitive replacing the string-inequality compare in
+# detect_plugin_latest, which gains a real `ahead` state for an installed build newer
+# than the marketplace's cached clone.
+run "version-compare.test.sh" bash tests/version-compare.test.sh
+# bionic 1.4.0 (L-DETECT/4.5, spec AC-22): scripts/lib/patrol.sh's PATROL_STALE_MULTIPLIER,
+# one exported staleness constant replacing the inline "twice the poker interval" literal in
+# patrol_stamp_state's own reader (session-poker.sh and dispatch-preflight.sh switch to it in
+# later slices).
+run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh
+# bionic 1.4.0 (slice ADOPT, spec AC-7/AC-8/AC-9/AC-12/AC-16): the CONVENTION every hook
+# now carries — one loader block byte for byte under its own BIONIC_LIB_WANT line, the
+# root/session/run facts asked of the library rather than restated, and the run predicate
+# DRIVEN over real fixtures (no .bionic, a closed run, an open run) so a hook that calls
+# `active_run` and ignores the answer cannot pass. Both missing-library fail classes drive
+# too: the repair allowlist that ends the lockout, and the one-line step-aside.
+run "hook-adoption.test.sh" bash tests/hook-adoption.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, 2026-09-02) — the library spine's unit suites, one
+# per fact, hand-listed like every suite outside hooks/:
+#   - resources.test.sh: scripts/lib/resources.sh (probe / budget / pressure — the parallel
+#     budget as a function of the machine instead of a number a human guessed) and the
+#     version-2 preflight attestation that records it. The kill datum this suite's memory
+#     term is built on is the one written at :63-68 of this file.
+run "resources.test.sh" bash tests/resources.test.sh
+#   - docs-pins.test.sh: doc-text agreement pins with no other home. §1 (RELEASE, spec
+#     AC-36) is the help version pair — replaces the coverage version-ssot.test.sh had
+#     before it was deleted below; WALLS and SCHED append their own numbered sections
+#     to this same file in later slices of this wave rather than each owning a suite.
+run "docs-pins.test.sh" bash tests/docs-pins.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 3.1, spec AC-15): doctor's
+# `walls` row. The four hooks the loader idiom replaced are asked, through the idiom itself
+# (`bionic_loader_pin` driven with $0 set to each hook's own path), whether the library they
+# source still resolves; a copied payload tree with one library deleted is the fixture.
+# Hermetic: HOME and BIONIC_PLUGINS_DIR are overridden per run, so the healing candidates
+# cannot reach this machine's real registry and quietly repair the damage.
+run "doctor-walls.test.sh" bash tests/doctor-walls.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 4.6, spec AC-23):
+# scripts/lib/width.sh's closed glyph set, measured under `LC_ALL=C` — the locale the
+# substitution exists for, and the only one where the assertion is not vacuous. Section 2
+# is differential: it sweeps the glyphs doctor.sh and setup.sh actually put into a bounded
+# row and requires each to measure one column, so the next glyph someone reaches for is
+# caught here rather than by a crooked table on somebody's terminal.
+run "width.test.sh" bash tests/width.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 4.6, spec AC-23): the facts
+# doctor gathered on every invocation and printed for nobody — the installed agent copies
+# and their drift, the legacy hook FILES on disk, the duplicate-registry scan, the legacy
+# skill copy's path — plus the pnpm-store diagnosis, which used to answer three different
+# unreadable-store situations with one sentence about a cache having no surface. §7 is
+# structural: a top-level assignment in doctor.sh that nothing else in the file reads is a
+# probe that ran for nobody, and the allow-list there names what this slice deliberately
+# left alone.
+run "doctor-reads.test.sh" bash tests/doctor-reads.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR-RESTART, fold-in spec AC-37):
+# doctor's "restart needed" row — the CLI snapshots hooks.json once at process start, so
+# a live session whose startedAt precedes that file's mtime in the plugin tree the CLI
+# loads (DOCTOR_INSTALL_PATH, reused from the version row) is running a stale hook
+# registration. Alphabetical among the doctor-*.test.sh suites.
+run "doctor-restart.test.sh" bash tests/doctor-restart.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 5.3 and 1.4; spec AC-27,
+# AC-4's doctor line, AC-8, AC-11): doctor's RESOURCES section — the live probe, and per
+# live session the budget its preflight attestation recorded (version 1 → "no budget
+# recorded", the honest reading of a fail-open resources load) — plus the three run-scoped
+# rows: the active run as `active_run` sees it, the predecessor rosters a /clear left with
+# open dispatches, and the legacy `.bionic` symlinks under .worktrees/. Hermetic: doctor is
+# run with its cwd inside a fixture project holding its own .bionic/, and the "live"
+# sessions name the suite's own pid.
+run "doctor-fleet.test.sh" bash tests/doctor-fleet.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions

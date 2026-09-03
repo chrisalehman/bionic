@@ -376,7 +376,18 @@ _setup_item_verb() {  # <name>
     plugin)             say "install the bionic plugin (claude plugin install)" ;;
     duplicate:*)        say "settle the two copies of ${1#duplicate:} installed from different catalogs" ;;
     dependency:*)       say "enable the plugin ${1#dependency:}, which is installed but switched off" ;;
-    tool:*)             say "install ${1#tool:}" ;;
+    tool:*)
+      # A STALE ROW IS A RE-SYNC IN THE PLAN TOO (AC-17). The page a user consents
+      # from is where "not re-offered" is first visible, and "install X" over a
+      # renderer already on the machine is the offer the spec rules out.
+      _setup_verb_present="$(check_dep "${1#tool:}" 2>/dev/null)" || _setup_verb_present=""
+      _setup_verb_present="${_setup_verb_present#present=}"
+      _setup_verb_present="${_setup_verb_present%%|*}"
+      if [ "$_setup_verb_present" = "stale" ]; then
+        say "re-sync ${1#tool:}, which is stale against the shipped lockfile"
+      else
+        say "install ${1#tool:}"
+      fi ;;
     environment)        say "write bionic's environment settings to $(_dep_settings_file)" ;;
     claude-proxy)       say "add bionic's claude() shell function to $(rc_file 2>/dev/null || echo 'the shell rc')" ;;
     legacy-alias)       say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
@@ -970,7 +981,7 @@ _setup_install_one() {  # <name>
 }
 
 _setup_install_class() {  # <class>
-  local name raw present
+  local name raw present _setup_prev_all
   # fd 3, not stdin — see the note in setup_dep_enable_verify. install_dep
   # prompts, so this loop must leave stdin alone.
   while IFS= read -r name <&3; do
@@ -987,6 +998,30 @@ _setup_install_class() {  # <class>
     case "$present" in
       yes)
         item "$SETUP_OK" "$name" "present"
+        ;;
+      stale)
+        # RE-SYNCED, NOT RE-OFFERED (AC-17). A venv built against a different
+        # `uv.lock` than the one now shipped is a machine that plainly HAS the
+        # renderer, one lockfile behind. Asking "install it now?" over that is the
+        # question the spec forbids: the user already said yes to this item, and
+        # what is owed them is the repair, not the offer again.
+        #
+        # SETUP_ALL IS RAISED AND PUT BACK, because it is the flag `install_dep`
+        # reads to skip its consent call, and this arm is the one place in the
+        # per-item pass that legitimately does not ask. Saved and restored by hand
+        # rather than set as a command prefix: in bash a prefix assignment on a
+        # FUNCTION call does not reliably unset afterwards, and a SETUP_ALL left
+        # raised would answer yes to every remaining row in this loop.
+        item "$SETUP_NIL" "$name" "stale against the shipped uv.lock — re-syncing"
+        _setup_prev_all="$SETUP_ALL"
+        SETUP_ALL=1
+        if _setup_install_one "$name"; then
+          SETUP_ALL="$_setup_prev_all"
+          item "$SETUP_OK" "$name" "re-synced"
+        else
+          SETUP_ALL="$_setup_prev_all"
+          action "re-sync ${name} by hand: $(_jit_fix_line "$name")"
+        fi
         ;;
       unknown)
         [ "$SETUP_ALL" = "1" ] || item "$SETUP_NIL" "$name" "presence unknown — bionic cannot read whether this one is here"
@@ -1036,7 +1071,7 @@ _setup_extra_why() {  # <name>
     playwright-chromium) echo "the headless Chromium build the diagram renderer drives; without it, diagrams cannot be rendered." ;;
     motion)          echo "an animation library pre-warmed into the pnpm store so design work does not stop to fetch it." ;;
     impeccable)      echo "the design skill pack every UI route uses; without it, design work runs on defaults." ;;
-    excalidraw-renderer) echo "the synced uv project that renders excalidraw diagrams to PNG; without it, diagrams cannot be rendered." ;;
+    excalidraw-renderer) echo "the synced uv project that renders excalidraw diagrams to PNG, kept at a stable machine-local path that survives a plugin update; without it, diagrams cannot be rendered." ;;
     humanizer)       echo "a skill that rewrites text so it stops reading as though a model wrote it." ;;
     document-skills) echo "skills for reading and writing Word, Excel, PowerPoint and PDF files." ;;
     example-skills)  echo "Anthropic's own example skills — art, canvas design, brand guidelines and more." ;;

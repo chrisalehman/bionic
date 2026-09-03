@@ -282,11 +282,23 @@ eq "-C <dir> does not hide --force" "1" "$(force_of 'git -C /tmp/r push --force 
 echo ""
 echo "=== Section 2: a hook whose library is missing REFUSES ==="
 
+# HERMETIC, and since bionic 1.4.0 that is load-bearing rather than tidy. The loader
+# these hooks share HEALS before it fails: when the library is not beside the hook it
+# consults the CLI's plugin registry and the plugin cache, so a copied tree whose
+# library has been renamed away still finds THIS machine's installed bionic and loads
+# it. The refusal arm below would then test nothing at all. HOME and
+# BIONIC_PLUGINS_DIR are the only doors to those candidates, and both are pointed
+# into an empty sandbox here, so "renamed away" means what the section says it means.
+GA_SANDBOX=$(mktemp -d); cleanup_dirs+=("$GA_SANDBOX")
+mkdir -p "$GA_SANDBOX/home" "$GA_SANDBOX/plugins"
+
 run_hook_at() {  # <hook path> <command> -> sets RC and ERRTXT
   local hook="$1" cmd="$2" input tmp_err
   input=$(jq -n --arg c "$cmd" '{tool_input: {command: $c}}')
   tmp_err=$(mktemp)
-  if printf '%s' "$input" | bash "$hook" >/dev/null 2>"$tmp_err"; then RC=0; else RC=$?; fi
+  if printf '%s' "$input" | env HOME="$GA_SANDBOX/home" \
+       BIONIC_PLUGINS_DIR="$GA_SANDBOX/plugins" \
+       bash "$hook" >/dev/null 2>"$tmp_err"; then RC=0; else RC=$?; fi
   ERRTXT=$(cat "$tmp_err"); rm -f "$tmp_err"
 }
 
@@ -305,6 +317,11 @@ make_layout() {  # <style: installed|payload> -> echoes the tree root
   fi
   mkdir -p "$libdir"
   cp "$LIB" "$libdir/git-argv.sh"
+  # The evidence gate wants root.sh and run.sh too, and the loader qualifies a
+  # directory only when it holds EVERY wanted basename (BIONIC_LIB_WANT).
+  for _ga_extra in root.sh run.sh; do
+    cp "$(dirname "$LIB")/$_ga_extra" "$libdir/$_ga_extra" 2>/dev/null || true
+  done
   echo "$root"
 }
 
@@ -532,6 +549,44 @@ eq "R-12 prose is still not a push"         "no"  "$(has_push 'echo "sudo git pu
 eq "R-12 find without -exec is not a push"  "no"  "$(has_push "find . -name 'git'")"
 eq "R-12 a heredoc body is still not a push" "no" "$(has_push "$HD_PUSH")"
 eq "R-12 command substitution stays OUT of scope" "no" "$(has_push 'echo $(git push origin main)')"
+
+# ============================================================
+# Section 5: git_branch_protected — ONE list of protected branches (F1)
+# ============================================================
+#
+# Two walls refuse writes to the same branches: hooks/protect-main.sh over a
+# `git push`, and payload/scripts/lib/worktree.sh's `land` over a `git merge`
+# into the main checkout. Naming `main` and `master` in each of them is how two
+# walls come to disagree about which branch is the branch, so the list lives
+# here and both walls ask it.
+
+echo ""
+echo "=== Section 5: git_branch_protected ==="
+
+protected_says() { if git_branch_protected "${1:-}"; then echo yes; else echo no; fi; }
+
+eq "main is protected"    "yes" "$(protected_says main)"
+eq "master is protected"  "yes" "$(protected_says master)"
+
+# WHOLE NAME, never a prefix or a substring: each of these is somebody's own
+# branch and landing onto it is ordinary work.
+eq "topic/main is not protected"   "no" "$(protected_says topic/main)"
+eq "main-fixes is not protected"   "no" "$(protected_says main-fixes)"
+eq "mastermind is not protected"   "no" "$(protected_says mastermind)"
+eq "remotes/origin/main is not it" "no" "$(protected_says remotes/origin/main)"
+eq "a wave branch is not protected" "no" "$(protected_says wave/bionic-1.4.0-update)"
+eq "the empty name is not protected" "no" "$(protected_says '')"
+eq "no argument at all is not protected" "no" "$(protected_says)"
+
+# The wall that already had these two words must now be reading THIS list and
+# not a second copy of it. Both spellings protect-main.sh checks — the push
+# destination and the branch it is standing on — go through the predicate.
+eq "protect-main.sh asks the library, at both of its checks" "1" \
+  "$([ "$(grep -c 'git_branch_protected' "$PROTECT_MAIN")" -ge 2 ] && echo 1 || echo 0)"
+# ...and no longer compares a branch name against a quoted literal of its own.
+# The words may still appear in its prose; a TEST against them may not.
+eq "protect-main.sh compares against no quoted branch literal" "0" \
+  "$(grep -c '= "main"\|= "master"' "$PROTECT_MAIN")"
 
 # ============================================================
 # Results

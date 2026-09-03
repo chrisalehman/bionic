@@ -32,6 +32,16 @@ POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 TMPROOT="$(mktemp -d)"
 PASS=0; FAIL=0; TOTAL=0
 
+# THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
+# library through the shared loader idiom, whose candidates (2) and (3) read the CLI's
+# plugin registry under `$BIONIC_PLUGINS_DIR` (default `$HOME/.claude/plugins`). Every
+# invocation in this suite runs the shipped file, whose sibling `scripts/lib` answers at
+# candidate (1) — so a run that ever reached the registry would be a run that failed to
+# find the library beside the script, and pointing the knob at an empty directory turns
+# that into a visible failure instead of a silent read of this machine's real install.
+export BIONIC_PLUGINS_DIR="$TMPROOT/no-plugins"
+mkdir -p "$BIONIC_PLUGINS_DIR"
+
 cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
@@ -273,7 +283,16 @@ expect_eq "…while interval, on the same repo, still reads that override (5m = 
 # The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
 # POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
 # literal 1800 would answer 1800 here.
-POKER_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")/session-poker.sh"
+# THE DOCTORED COPY LIVES IN A TREE, not in a bare temp directory (bionic 1.4.0). The poker
+# loads its library through the shared idiom, whose first candidate is `<dirname $0>/../
+# scripts/lib` — the shape the installed plugin ships. A copy dropped anywhere else finds no
+# library and fails open, which would make this mutation prove nothing. The library is
+# LINKED, never duplicated: the copy under test must read the same functions the shipped
+# script does.
+POKER_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")"
+mkdir -p "$POKER_MUT_ROOT/hooks" "$POKER_MUT_ROOT/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$POKER_MUT_ROOT/scripts/lib"
+POKER_MUT="$POKER_MUT_ROOT/hooks/session-poker.sh"
 sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
 OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT" interval-default 2>&1 )"; RC=$?
 expect_eq "the verb answers from the CONSTANT, not from a literal (doctored 7m = 420s)" "420" "$OUT"
@@ -548,6 +567,35 @@ poke "$R5B" tick
 expect_eq "an ABSENT roster REFUSES rather than silently DISARMing (exit 2)" "2" "$RC"
 expect_absent "…never prints a decision line for a roster it never found" "decision=" "$OUT"
 
+# ---------- the refusal SHOWS ITS WALK (2.4, AC-13) ----------
+#
+# The refusal above has always said "an absent roster usually means the wrong project root
+# was resolved" and then left the reader to re-derive the walk by hand — which is the one
+# question they cannot answer from the message, because the answer is a property of the
+# filesystem above their cwd. `project_root_candidates` is that walk, one line per ancestor
+# with the reason it was passed over, and the chosen one marked.
+#
+# THE TOPOLOGY THAT MAKES IT MATTER is a git repo nested inside a plain workspace that holds
+# the `.bionic` tree — the shape the eight old resolvers got wrong by asking git first and
+# so answering the nested repo, which owns no roster and never will. Here the walk starts at
+# the cwd, passes the repo as a candidate, and chooses the workspace above it: two lines,
+# and the operator can see which one their roster should be under.
+R5C="$TMPROOT/s5-candidates"
+mkdir -p "$R5C/.bionic/tmp"
+R5CN="$R5C/nested-repo"
+mkdir -p "$R5CN"
+( cd "$R5CN" && git init -q . ) >/dev/null 2>&1
+poke "$R5CN" tick
+expect_eq "the nested-repo topology still REFUSES on an absent roster (exit 2)" "2" "$RC"
+expect_contains "…and prints the walk it took" "$R5CN" "$OUT"
+R5C_CHOSEN="$(printf '%s\n' "$OUT" | grep -F "chosen")"
+expect_contains "…marking the workspace that holds the .bionic tree as the chosen root" \
+  "$R5C	chosen" "$R5C_CHOSEN"
+R5C_NESTED="$(printf '%s\n' "$OUT" | grep -F "$R5CN")"
+expect_contains "…while the nested repo appears as an ancestor that was considered" \
+  "candidate" "$R5C_NESTED"
+expect_absent "…and the walk is not mistaken for a decision" "decision=" "$OUT"
+
 
 # ============================================================
 section "Section 6: the Patrol stamp — the arm verb, and stamp-before-decide on every tick"
@@ -663,115 +711,35 @@ else
 fi
 
 # ============================================================
-section "Section 7: the blind dispatch wall — the tick sees what the roster missed"
+# Section 7 — THE BLIND-WALL DETECTOR, RETIRED (bionic 1.4.0, slice ADOPT, spec AC-7)
 # ============================================================
 #
-# The wall (hooks/dispatch-preflight.sh) is registered on the SKILL channel, in
-# skills/canonical-sdlc/SKILL.md's frontmatter, and that registration does not survive a
-# session continue, a `/clear`+resume, or `/reload-plugins`. When it is gone the failure is
-# SILENT: dispatches launch, nothing rosters them, and the first symptom is a tick refusing
-# with "no roster" — which reads as "nothing dispatched yet". These cases pin the detector
-# that names the real cause instead. Fixture transcripts only; nothing here reads the real
-# ~/.claude.
-
+# It compared main-thread `Agent` tool_uses in the transcript against rows on the roster
+# and raised a NOTIFY when dispatches outnumbered them. The condition it looked for was
+# real: the dispatch wall lived in the governing skill's frontmatter, and a skill's
+# registrations do not survive a session continue, a `/clear` + resume or a
+# `/reload-plugins` — so the wall went silently absent and dispatches launched unrostered.
+#
+# Every wall is registered in hooks/hooks.json now and survives all three, so that
+# condition cannot arise the way it did. What could still arise was the detector's own
+# false positive: it had no "no active run" branch, so a session that had simply not
+# engaged a run — no roster, because nothing was dispatched — read as a session whose wall
+# had died. That fired for real on 2026-09-02 at 20:07Z, against this wave's own
+# orchestrator, which is how it came to be in scope.
+#
+# The registration is pinned instead, in tests/hook-adoption.test.sh and
+# tests/cross-gate-agreement.test.sh §L: every hook named once in hooks.json, none in the
+# frontmatter. That is a claim about a file on disk rather than an inference from a
+# transcript, and it goes red when the wiring changes rather than when a session is idle.
+#
+# ONE HELPER SURVIVES THE RETIREMENT: `fake_config_dir`. Section 8 builds a predecessor's
+# subagent transcript under it, and `adopt` resolves the observe address through
+# CLAUDE_CONFIG_DIR — so without it that section would read the real ~/.claude.
 fake_config_dir() {  # <label> -> a CLAUDE_CONFIG_DIR with a projects/ tree
   local c="$TMPROOT/$1-config"
   mkdir -p "$c/projects/-fixture-project"
   printf '%s' "$c"
 }
-
-# One assistant entry carrying <count> main-thread `Agent` tool_uses, exactly the shape the
-# CLI writes: compact JSON, `isSidechain` false, no agent key.
-tx_dispatch() {  # <count>
-  local n="$1" i=1 blocks=""
-  while [ "$i" -le "$n" ]; do
-    blocks="${blocks}${blocks:+,}{\"type\":\"tool_use\",\"id\":\"toolu_0$i\",\"name\":\"Agent\",\"input\":{\"subagent_type\":\"bionic:implementor\",\"prompt\":\"go\"}}"
-    i=$((i+1))
-  done
-  printf '{"type":"assistant","isSidechain":false,"sessionId":"%s","message":{"role":"assistant","content":[%s]}}\n' \
-    "$SID" "$blocks"
-}
-
-# A dispatch made from INSIDE an agent context. Two spellings, because the CLI has used
-# both: a sidechain flag on the entry, and an explicit agent key. Neither is a main-thread
-# dispatch and neither may be counted — a teammate's dispatch never reaches this wall at all
-# (record session-20260814…/min-interactive-agent-hook.md §5a), so counting it would make a
-# live wall look blind.
-tx_sidechain() {
-  printf '{"type":"assistant","isSidechain":true,"sessionId":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_sc","name":"Agent","input":{"prompt":"nested"}}]}}\n' "$SID"
-}
-tx_agent_context() {
-  printf '{"type":"assistant","agentId":"agent-inner-1","sessionId":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_ag","name":"Agent","input":{"prompt":"nested"}}]}}\n' "$SID"
-}
-
-# A dispatch the wall REFUSED. The tool_use is in the transcript exactly as a launched one
-# is, so without this the wall doing its job would read as the wall being absent.
-tx_refusal() {
-  printf '{"type":"user","isSidechain":false,"sessionId":"%s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"PreToolUse:Agent hook error: [${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh]: patrol checkpoint: this dispatch is refused."}]}}\n' "$SID"
-}
-
-write_transcript() {  # <config dir> <sid> — body on stdin
-  cat > "$1/projects/-fixture-project/$2.jsonl"
-}
-
-# ---------- 7a: more dispatches than rows -> NOTIFY names the count and the cure ----------
-R7A="$(make_repo s7-blind)"; new_roster "$R7A"
-add_row "$R7A" name=rostered-one status=intended deliverable=out.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-C7A="$(fake_config_dir s7a)"
-{ tx_dispatch 2; tx_sidechain; tx_dispatch 1; tx_agent_context; } | write_transcript "$C7A" "$SID"
-export CLAUDE_CONFIG_DIR="$C7A"
-poke "$R7A" tick
-expect_contains "a blind wall is named: the verdict carries wall-blind" "wall-blind" "$OUT"
-expect_contains "the count of main-thread dispatches is stated (3)" "dispatches=3" "$OUT"
-expect_contains "the count of rostered rows is stated (1)" "rostered=1" "$OUT"
-expect_contains "the cure is literal, not described" "re-invoke /bionic:canonical-sdlc" "$OUT"
-expect_contains "the wall-blind line is a NOTIFY decision" "decision=NOTIFY" "$OUT"
-expect_eq "a blind wall exits in the NOTIFY band" 1 "$RC"
-
-# ---------- 7b: every dispatch rostered -> silence ----------
-R7B="$(make_repo s7-live)"; new_roster "$R7B"
-add_row "$R7B" name=row-one status=intended deliverable=a.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-add_row "$R7B" name=row-two status=intended deliverable=b.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-C7B="$(fake_config_dir s7b)"
-{ tx_dispatch 2; tx_sidechain; } | write_transcript "$C7B" "$SID"
-export CLAUDE_CONFIG_DIR="$C7B"
-poke "$R7B" tick
-expect_absent "a live wall says nothing about blindness" "wall-blind" "$OUT"
-
-# ---------- 7c: no transcript to read -> silence, never a guessed alarm ----------
-R7C="$(make_repo s7-notx)"; new_roster "$R7C"
-add_row "$R7C" name=row-one status=intended deliverable=a.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-C7C="$(fake_config_dir s7c)"
-export CLAUDE_CONFIG_DIR="$C7C"
-poke "$R7C" tick
-expect_eq "an unresolvable transcript leaves the decision's exit code alone" 0 "$RC"
-
-# ---------- 7d: a REFUSED dispatch is a wall doing its job, not a missing wall ----------
-R7D="$(make_repo s7-refused)"; new_roster "$R7D"
-add_row "$R7D" name=row-one status=intended deliverable=a.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-C7D="$(fake_config_dir s7d)"
-{ tx_dispatch 1; tx_dispatch 1; tx_refusal; } | write_transcript "$C7D" "$SID"
-export CLAUDE_CONFIG_DIR="$C7D"
-poke "$R7D" tick
-expect_absent "a refused dispatch is not counted as an unwalled one" "wall-blind" "$OUT"
-
-# ---------- 7e: the reported symptom — no roster at all, dispatches in the transcript ----
-# This is the live case that opened the task: the tick refused with "no roster", which reads
-# as "nothing has been dispatched yet" and is the opposite of what happened. The refusal
-# still stands (it is about the read, not about the wall) but it no longer travels alone.
-R7E="$(make_repo s7-noroster)"
-C7E="$(fake_config_dir s7e)"
-tx_dispatch 2 | write_transcript "$C7E" "$SID"
-export CLAUDE_CONFIG_DIR="$C7E"
-poke "$R7E" tick
-expect_contains "an absent roster with dispatches behind it is diagnosed, not just refused" \
-  "wall-blind" "$OUT"
-expect_contains "the absent-roster refusal still stands" "REFUSED" "$OUT"
 
 # ============================================================
 section "Section 8: adopt — the agents a predecessor session left behind"
@@ -895,22 +863,33 @@ expect_contains "the message address is a SendMessage by id" "SendMessage to:$ID
 # `adopt` reads off the roster is the TRANSCRIPT form (`aname-<hex>`); the stop primitive
 # takes `<name>@session-<id8>` for a teammate (capture
 # record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), and printing
-# the other one handed the operator a line they could not type. The session named is the
-# ADOPTING one, because the row `adopt` writes into THIS session's roster is what makes
-# hooks/stop-guard.sh accept that spelling as an identity (§8g, and tests/stop-guard.test.sh
-# §14).
-expect_contains "the stop address is the form the stop primitive accepts" \
-  "TaskStop landed-one@session-${SID:0:8}" "$OUT"
+# the other one handed the operator a line they could not type.
+#
+# THE SESSION NAMED IS THE ONE THAT LAUNCHED THE AGENT (T3 FINDING 1, live 2026-09-03). The
+# suffix used to be the ADOPTING session's, on the probe's reading that a `/clear` re-keys
+# `CLAUDE_CODE_SESSION_ID` and therefore re-keys the address with it. The live harness says
+# otherwise: driven through a real `/clear`, `TaskStop PROBE-AGENT@session-<adopting 8>`
+# came back `No task found with ID: … Running teammates: PROBE-AGENT@session-<launching 8>`.
+# The teammate table keys on the session that made the `Agent` call and the roll-over does
+# not move it, so the address is built from the row's OWN `session=` field — the session it
+# is filed under — and never from ours.
+expect_contains "the stop address names the session that LAUNCHED the agent" \
+  "TaskStop landed-one@session-${ADOPT_A:0:8}" "$OUT"
 expect_absent "…never the transcript-form id, which the platform rejects for a teammate" \
   "TaskStop $ID_LANDED" "$OUT"
-# BOTH SPELLINGS ARE OFFERED, because only one of them is proven (follow-up, 2026-08-30).
-# The captured payload says the addressing form carries the LAUNCHING session's eight
-# characters, which for an adopted agent is the PREDECESSOR's; the row this verb writes
-# carries this session's. Both resolve to the same row at both stop gates, so the cost of
-# printing the alternate is one clause and the cost of printing only the wrong one is a
-# refusal the operator cannot clear.
-expect_contains "…and the alternate spelling is offered beside it" \
-  "(or landed-one@session-${ADOPT_A:0:8} if the platform keys on the launching session)" "$OUT"
+expect_absent "…and never the ADOPTING session's eight, which the harness answered nothing to" \
+  "landed-one@session-${SID:0:8}" "$OUT"
+# THE BARE NAME IS PRINTED BESIDE IT, because it is the one spelling that survived every
+# step of the live drive: `TaskStop PROBE-AGENT` reached the stop wall before the `/clear`
+# and after it, and it is what finally stopped the adopted agent. A suffixed address is a
+# guess about which session the harness keys on; the bare name is not.
+expect_contains "…with the bare name beside it, as the address that always survives" \
+  "TaskStop landed-one — the bare name" "$OUT"
+# THE MACHINE LINE CARRIES BOTH, so a reader that parses rather than greps gets the address
+# without re-deriving it from two other fields.
+expect_contains "the machine line carries the stop address" \
+  "|address=landed-one@session-${ADOPT_A:0:8}|" "$OUT"
+expect_contains "…beside the bare name it was built from" "|name=landed-one|" "$OUT"
 expect_contains "the row names the predecessor session it came from" "from=$ADOPT_A" "$OUT"
 expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
 
@@ -971,7 +950,13 @@ expect_contains "the adopted row is status=identified — the id is known" \
 expect_contains "…filed under the ADOPTING session's key" "|session=$SID|" "$ADOPTED_ROW"
 expect_contains "…carrying the transcript-form agent id the predecessor recorded" \
   "|agent_id=$ID_LANDED|" "$ADOPTED_ROW"
-expect_contains "…and the address form the stop primitive takes, built for THIS session" \
+# THE ADDRESS FORM THE STOP PRIMITIVE TAKES, built from the session that LAUNCHED the
+# agent (T3 FINDING 1). hooks/stop-guard.sh prefers this recorded address over the one it
+# would construct, so a row carrying the adopting session's eight would put the address the
+# live harness rejects into every refusal the gate prints.
+expect_contains "…and the address form the stop primitive takes, built from the LAUNCHING session" \
+  "|teammate_id=landed-one@session-${ADOPT_A:0:8}|" "$ADOPTED_ROW"
+expect_absent "…never this session's eight, which the teammate table answers nothing to" \
   "|teammate_id=landed-one@session-${SID:0:8}|" "$ADOPTED_ROW"
 expect_contains "…the contracted deliverable, copied forward" \
   "|deliverable=$R8/.bionic/docs/record/landed-one.md|" "$ADOPTED_ROW"
@@ -1047,6 +1032,146 @@ expect_eq "…and the verb still exits 1: the found-rows signal, not a refusal" 
 # against a verb that had simply stopped printing addresses at all.
 expect_contains "the writable-roster fixture still offers the stop address (§8a's row)" \
   "TaskStop landed-one@session-" "$ADOPT_OUT"
+
+# ---------- 8i: --report-only reads without writing (1.4, AC-4) ----------
+#
+# THE SessionStart BLOCK RUNS THIS ONE. `adopt` is the right verb for a model that has
+# decided to take the predecessor's rows over; it is the wrong verb for a hook that fires
+# on every resume, because a session that merely STARTED in this project would file rows
+# for agents it may have no business holding. `--report-only` is the same read with the
+# write removed, so the block can print the truth and leave the taking to the operator.
+#
+# The two halves are pinned separately, because either alone is passable by a verb that
+# does the wrong thing: "writes nothing" is satisfied by a verb that prints nothing, and
+# "prints the same rows" is satisfied by a verb that writes anyway.
+R8R="$(make_repo s8-report-only)"; new_roster "$R8R"
+mkdir -p "$R8R/.bionic/docs/record"
+add_row_to "$R8R" "$ADOPT_A" name=landed-three status=identified \
+  agent_id=alanded-three-88888888888888 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8R/.bionic/docs/record/landed-three.md"
+printf 'the report\n' > "$R8R/.bionic/docs/record/landed-three.md"
+
+_ro_pred_before="$(cd "$R8R/.bionic/tmp" && cksum "roster-$ADOPT_A.state")"
+_ro_own_before="$(cksum < "$(roster_of "$R8R")")"
+poke "$R8R" adopt --report-only
+RO_OUT="$OUT"; RO_RC="$RC"
+_ro_pred_after="$(cd "$R8R/.bionic/tmp" && cksum "roster-$ADOPT_A.state")"
+_ro_own_after="$(cksum < "$(roster_of "$R8R")")"
+
+expect_eq "--report-only leaves the predecessor roster byte-identical" \
+  "$_ro_pred_before" "$_ro_pred_after"
+expect_eq "--report-only leaves THIS session's roster byte-identical" \
+  "$_ro_own_before" "$_ro_own_after"
+expect_absent "…so the previewed row is NOT filed" "name=landed-three|" \
+  "$(cat "$(roster_of "$R8R")")"
+expect_contains "…and the verb says which mode it ran in" "report-only" "$RO_OUT"
+expect_eq "…while the found-rows signal is unchanged (exit 1)" "1" "$RO_RC"
+
+# THE ROWS ARE THE WRITING VERB'S ROWS. Compared with the wall-clock `at=` stamps
+# normalised — the one field that legitimately differs between two runs a second apart —
+# and with the mode line itself removed, since that line is the only thing that may differ.
+# This is what makes the SessionStart block's output trustworthy: the operator reads the
+# report, and `adopt` then files exactly what they were shown.
+ro_rows() { printf '%s\n' "$1" | grep -v 'report-only' | sed -E 's/\|at=[^|]*\|/|at=X|/'; }
+poke "$R8R" adopt
+expect_eq "--report-only's rendering is the writing verb's, line for line" \
+  "$(ro_rows "$RO_OUT")" "$(ro_rows "$OUT")"
+expect_contains "…and the writing verb DID file the row that was previewed" \
+  "|name=landed-three|" "$(cat "$(roster_of "$R8R")")"
+expect_contains "…including the stop address the preview printed" \
+  "TaskStop landed-three@session-" "$RO_OUT"
+
+# Nothing to adopt, in report-only: the same silence and the same exit 0.
+R8RB="$(make_repo s8-report-only-alone)"; new_roster "$R8RB"
+poke "$R8RB" adopt --report-only
+expect_eq "--report-only with no predecessor roster exits 0" "0" "$RC"
+expect_contains "…and says so" "nothing to adopt" "$OUT"
+
+# The flag is the ONLY second argument any verb takes; anything else is still a usage error.
+poke "$R8R" adopt --bogus
+expect_eq "an unknown flag after adopt is a usage error (exit 2)" "2" "$RC"
+poke "$R8R" tick --report-only
+expect_eq "…and --report-only is not a flag the tick takes" "2" "$RC"
+
+# ---------- 8j: liveness reads the TRANSCRIPT too (1.6, AC-6) ----------
+#
+# THE DEFECT. A row was RUNNING only while its PROGRESS FILE was fresh, and a progress file
+# is a promise the agent keeps by hand — the first thing a working agent drops when the work
+# gets absorbing, and the one artifact a role without Write cannot produce at all. The agent
+# is nevertheless observable: its transcript is appended to by the harness on every turn,
+# under `<config>/projects/<slug>/<launching sid>/subagents/agent-<id>.jsonl`, which is the
+# same file this verb already prints as the observe address. So liveness is now the OR of
+# the two mtimes, and SILENT means both of them are stale — an agent that has neither
+# written a line nor taken a turn inside the window its own row declared.
+#
+# THE WINDOW is `PATROL_STALE_MULTIPLIER × cadence`, read from payload/scripts/lib/patrol.sh
+# rather than from an inline `* 2` (spec AC-22: one constant, three readers). The mutation
+# at the end of this block is what proves the reader is the constant.
+R8L="$(make_repo s8-liveness)"; new_roster "$R8L"
+mkdir -p "$R8L/.bionic/docs/record"
+ID_TXFRESH="atxfresh-one-9999999999999999"
+ID_TXSTALE="atxstale-one-aaaaaaaaaaaaaaaa"
+SUB8="$C8/projects/-fixture-project/$ADOPT_A/subagents"
+
+for _pair in "tx-fresh $ID_TXFRESH" "tx-stale $ID_TXSTALE"; do
+  set -- $_pair
+  add_row_to "$R8L" "$ADOPT_A" name="$1" status=identified agent_id="$2" \
+    subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+    deliverable="$R8L/.bionic/docs/record/$1.md" \
+    progress="$R8L/.bionic/tmp/progress-$1.md"
+  # The progress half is stale for BOTH rows: this block is about the other input, and a
+  # fresh progress file would answer RUNNING without the transcript ever being stat'd.
+  printf 'progress\n' > "$R8L/.bionic/tmp/progress-$1.md"
+  backdate "$R8L/.bionic/tmp/progress-$1.md" 5400
+  : > "$SUB8/agent-$2.jsonl"
+done
+# …and the transcripts differ: one written just now, one as old as the progress files.
+backdate "$SUB8/agent-$ID_TXSTALE.jsonl" 5400
+
+poke "$R8L" adopt --report-only
+expect_contains "a stale progress file with a FRESH transcript still reads RUNNING" \
+  "name=tx-fresh|verdict=RUNNING" "$OUT"
+expect_contains "…and both mtimes stale reads SILENT" \
+  "name=tx-stale|verdict=SILENT" "$OUT"
+expect_contains "…the transcript's age is printed, so the verdict can be checked" \
+  "transcript_age=" "$OUT"
+
+# THE THRESHOLD IS THE LIBRARY'S CONSTANT, NOT A LITERAL 2 — proven by mutation, the same
+# way §2 proves the interval default is read from POKER_INTERVAL_DEFAULT. A row whose only
+# fresh-ish input sits BETWEEN one cadence and two is RUNNING while the multiplier is 2 and
+# SILENT the moment it is 1, so a poker carrying its own `* 2` answers RUNNING on both runs.
+# The doctored tree is the shape the plugin ships (hooks/ beside scripts/lib) and its library
+# is a COPY, because this is the one fixture that must not read the shipped constant.
+MULT_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-mult-mut.XXXXXX")"
+mkdir -p "$MULT_MUT_ROOT/hooks" "$MULT_MUT_ROOT/scripts"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MULT_MUT_ROOT/scripts/lib"
+sed -i.bak 's/^export PATROL_STALE_MULTIPLIER=2$/export PATROL_STALE_MULTIPLIER=1/' \
+  "$MULT_MUT_ROOT/scripts/lib/patrol.sh"
+cp "$POKER" "$MULT_MUT_ROOT/hooks/session-poker.sh"
+if grep -qF 'export PATROL_STALE_MULTIPLIER=1' "$MULT_MUT_ROOT/scripts/lib/patrol.sh"; then
+  ok "8j meta: the doctored multiplier landed (the sed anchor still matches)"
+else
+  bad "8j meta: the doctored multiplier did NOT land — the pair below proves nothing"
+fi
+
+R8M="$(make_repo s8-multiplier)"; new_roster "$R8M"
+mkdir -p "$R8M/.bionic/docs/record"
+add_row_to "$R8M" "$ADOPT_A" name=between status=identified \
+  agent_id=abetween-one-bbbbbbbbbbbbbbbb subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8M/.bionic/docs/record/between.md" \
+  progress="$R8M/.bionic/tmp/progress-between.md"
+printf 'progress\n' > "$R8M/.bionic/tmp/progress-between.md"
+backdate "$R8M/.bionic/tmp/progress-between.md" 900   # > one cadence, < two
+
+poke "$R8M" adopt --report-only
+expect_contains "at 1.5x the cadence the shipped multiplier (2) still reads RUNNING" \
+  "name=between|verdict=RUNNING" "$OUT"
+OUT="$( cd "$R8M" && env CLAUDE_CODE_SESSION_ID="$SID" \
+        bash "$MULT_MUT_ROOT/hooks/session-poker.sh" adopt --report-only 2>&1 )"
+expect_contains "…and the SAME row reads SILENT against a library whose multiplier is 1" \
+  "name=between|verdict=SILENT" "$OUT"
 
 unset CLAUDE_CONFIG_DIR
 
@@ -1134,24 +1259,15 @@ expect_contains "a roster with open work decides QUIET" "decision=QUIET" "$OUT"
 expect_eq "…and that tick KEEPS the stamp" "yes" \
   "$([ -f "$(stamp_of "$R9D")" ] && echo yes || echo no)"
 
-# ---------- a blind wall outranks the DISARM, and the stamp stays with it ----------
+# ---------- the blind-wall precedence, retired with the detector ----------
 #
-# SKILL.md §Dispatch states the precedence for the model: a `wall-blind` NOTIFY on the same
-# tick outranks the DISARM line, because an empty roster is exactly what a session whose
-# dispatch wall died looks like. The stamp follows that precedence rather than the decision
-# line — stopping the clock on the one tick that says "your wall is gone" would take the
-# monitor down with it.
-R9E="$(make_repo s9-blind)"; new_roster "$R9E"; armed_ago "$R9E"; delivered_plan "$R9E"
-C9E="$(fake_config_dir s9e)"
-tx_dispatch 2 | write_transcript "$C9E" "$SID"
-export CLAUDE_CONFIG_DIR="$C9E"
-poke "$R9E" tick
-expect_contains "an empty roster under a blind wall still prints its DISARM line" \
-  "decision=DISARM" "$OUT"
-expect_contains "…beside the wall-blind NOTIFY that outranks it" "wall-blind" "$OUT"
-expect_eq "…and the stamp STAYS: the run is not over, the wall is" "yes" \
-  "$([ -f "$(stamp_of "$R9E")" ] && echo yes || echo no)"
-unset CLAUDE_CONFIG_DIR
+# A `wall-blind` NOTIFY used to outrank the DISARM decision and keep the stamp: an empty
+# roster was exactly what a session whose dispatch wall had died looked like, so stopping
+# the clock on that tick would have taken the monitor down with the thing it monitors.
+# The wall cannot die that way any more — every hook is registered in hooks/hooks.json and
+# survives a continue, a `/clear` + resume and a `/reload-plugins` — so the detector, the
+# precedence and this fixture go together. What replaces the guarantee is the registration
+# pin itself (tests/hook-adoption.test.sh, cross-gate §L).
 
 # ---------- disarm follows the PINNED root, exactly as arm does ----------
 # The mirror of Section 6's worktree case: a disarm that removed a stamp under the worktree
@@ -1366,6 +1482,490 @@ expect_contains "…and decides QUIET — there is nothing to date the delivery 
   "decision=QUIET" "$OUT"
 expect_absent "…never DISARM off a delivery it cannot place in time" "decision=DISARM" "$OUT"
 expect_contains "…naming the missing arming record as the reason" "arming record" "$OUT"
+
+# ============================================================
+section "Section 11: pressure — HOLD, NARROW, EMERGENCY (AC-30, S7)"
+# ============================================================
+#
+# WHAT THESE CASES OWN. The tick reads `resources_pressure` before it considers a single
+# fill, because filling a machine that is already starving is the one scheduling mistake
+# that costs WORK rather than time: the measured failure is a kernel SIGKILL, seven
+# concurrent suites on an 8 GB machine driving free memory to ~188 MB and a suite dying
+# mid-run (tests/run.sh:63-68).
+#
+# CLOCK AND MACHINE DISCIPLINE, the same house rule the rest of this suite keeps: nothing
+# here waits for the machine to get into trouble, and nothing reads this machine at all.
+# `resources_pressure` takes both of its readings through `BIONIC_PROBE_FREE_MB` /
+# `BIONIC_PROBE_LOAD_1M` (lib/resources.sh's own seams, exercised the same way by
+# tests/resources.test.sh), so every threshold below is fixture DATA.
+
+# A plan carrying BOTH halves the scheduler reads: the frontmatter `parallel-budget:` line
+# and the machine-readable slice table. Written as one builder because a fixture that
+# carried only one of them would be testing a plan shape the wave never produces.
+#
+# The budget line's shape is byte-identical to what Step 0 writes and to what
+# hooks/dispatch-preflight.sh's budget arm reads (L-RESOURCES/2): one string, four fields.
+wave_plan() {  # <repo> <budget line body, or "-" for none> <table row>...
+  local repo="$1" budget="$2"; shift 2
+  local f="$repo/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")"
+  {
+    printf -- '---\n'
+    printf 'governing-skill: superpowers:writing-plans\n'
+    [ "$budget" = "-" ] || printf 'parallel-budget: %s\n' "$budget"
+    printf -- '---\n\n'
+    printf '# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '## Slices (machine-readable)\n\n'
+    printf '| id | deps | complexity | status |\n|---|---|---|---|\n'
+    local row
+    for row in "$@"; do printf '%s\n' "$row"; done
+  } > "$f"
+  touch "$f"
+}
+
+# The poker under an injected pressure reading. The two knobs are exported for exactly one
+# invocation and unset afterwards, so no case can leak a reading into the next.
+poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
+  local repo="$1" free="$2" load="$3"; shift 3
+  BIONIC_PROBE_FREE_MB="$free" BIONIC_PROBE_LOAD_1M="$load" poke "$repo" "$@"
+}
+
+# ---------- 11a: a HOLD prints its measurement and fills nothing ----------
+#
+# The fixture has ready work AND a gap, so a tick that filled would fill. That is the whole
+# discriminator: "no FILL under pressure" is only a claim if a FILL was available.
+R11A="$(make_repo s11-hold)"; new_roster "$R11A"
+wave_plan "$R11A" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| DONE | — | standard | landed |" \
+  "| NEXT | DONE | complex | pending |"
+poke_pressure "$R11A" 512 1.0 tick
+expect_eq "a tick under memory pressure still exits 0 — HOLD is a decision, not a failure" \
+  "0" "$RC"
+expect_contains "…and prints HOLD with the free-memory reading" "poker: HOLD free_mb=512" "$OUT"
+expect_contains "…and the load reading beside it" "load_1m=1.0" "$OUT"
+expect_contains "…saying plainly that nothing is being filled" "no fills" "$OUT"
+expect_absent "…and fills nothing, though a ready slice and a gap both exist" "poker: FILL" "$OUT"
+
+# The paired positive: the SAME repo, the SAME plan, with the machine reading healthy.
+# Without it, 11a passes on a tick that can never fill anything.
+poke_pressure "$R11A" 8192 1.0 tick
+expect_contains "the same fixture with memory to spare DOES fill (11a discriminates)" \
+  "poker: FILL NEXT" "$OUT"
+expect_absent "…and prints no HOLD" "poker: HOLD" "$OUT"
+
+# ---------- 11b: NARROW on the SECOND consecutive hold, not the first ----------
+#
+# One hold is a burst — a suite starting, a build finishing — and halving the fleet's width
+# off a burst is a wave that runs at half speed for the rest of the day. The counter is a
+# sibling of the Patrol stamp, session-scoped, and it is what makes "sustained" a fact about
+# two firings rather than an adjective.
+R11B="$(make_repo s11-narrow)"; new_roster "$R11B"
+wave_plan "$R11B" "writers=4 suites=2 worktrees=8 test_jobs=18 source=probe" \
+  "| A | — | standard | landed |"
+poke_pressure "$R11B" 512 1.0 tick
+expect_contains "the first hold prints HOLD" "poker: HOLD" "$OUT"
+expect_absent "…and NOT NARROW: one hold is a burst" "poker: NARROW" "$OUT"
+poke_pressure "$R11B" 512 1.0 tick
+expect_contains "the second consecutive hold prints NARROW" "poker: NARROW test_jobs=9" "$OUT"
+expect_contains "…alongside the HOLD it is narrowing from" "poker: HOLD" "$OUT"
+
+# The counter CLEARS on a healthy tick, so "two consecutive" means consecutive. Without
+# this, NARROW is inevitable on any wave long enough to see two holds an hour apart.
+poke_pressure "$R11B" 8192 1.0 tick
+expect_absent "a healthy tick prints no NARROW" "poker: NARROW" "$OUT"
+poke_pressure "$R11B" 512 1.0 tick
+expect_contains "…and the hold after it is a FIRST hold again" "poker: HOLD" "$OUT"
+expect_absent "…so NARROW does not fire (the counter cleared)" "poker: NARROW" "$OUT"
+
+# The halving reads the plan's own `test_jobs`, never a constant of its own.
+R11C="$(make_repo s11-narrow-half)"; new_roster "$R11C"
+wave_plan "$R11C" "writers=4 suites=2 worktrees=8 test_jobs=6 source=probe" \
+  "| A | — | standard | landed |"
+poke_pressure "$R11C" 512 1.0 tick
+poke_pressure "$R11C" 512 1.0 tick
+expect_contains "NARROW halves the plan's OWN test_jobs (6 -> 3), never a constant" \
+  "poker: NARROW test_jobs=3" "$OUT"
+
+# ---------- 11d: EMERGENCY names the youngest suite-running writer ----------
+#
+# The kill floor. The tick NAMES a writer and stops nothing itself — stopping a writer
+# destroys work, and an irreversible act taken by a hook off one reading is what this design
+# refuses. The address it prints is the one both stop gates accept (POKER/8).
+#
+# "SUITE-RUNNING" IS READ OFF THE LEDGER (WALLS/3): an open row whose `claims=` is non-empty
+# declared a subprocess claim and spends a suite. YOUNGEST, because the youngest writer has
+# the least work to lose.
+R11D="$(make_repo s11-emergency)"; new_roster "$R11D"
+wave_plan "$R11D" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | standard | landed |" \
+  "| B | — | standard | pending |"
+# `status=intended` is the dispatch record — the row hooks/dispatch-preflight.sh appends
+# when it admits a dispatch, carrying that brief's declared `claims=`. It is the predicate
+# lib/patrol.sh's `patrol_roster_state` and the dispatch wall's own budget arm both count
+# on (WALLS/2, WALLS/3), and the roster is append-only, so later `identified`/`confirmed`
+# rows for the same name are transitions rather than second dispatches.
+add_row "$R11D" status=intended name=old-suite-runner deliverable=a.md duration="4 hours" \
+  claims="bash tests/run.sh" launched_at="$(iso_ago 3600)"
+add_row "$R11D" status=intended name=young-suite-runner deliverable=b.md duration="4 hours" \
+  claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
+add_row "$R11D" status=intended name=no-claim-writer deliverable=c.md duration="4 hours" \
+  launched_at="$(iso_ago 10)"
+poke_pressure "$R11D" 100 1.0 tick
+expect_contains "at the kill floor the tick prints EMERGENCY with the reading" \
+  "poker: EMERGENCY free_mb=100" "$OUT"
+expect_contains "…naming the YOUNGEST suite-running writer, at the stop address" \
+  "stop youngest suite-running writer young-suite-runner@session-$(printf '%s' "$SID" | cut -c1-8)" "$OUT"
+expect_absent "…never the older one" "old-suite-runner@" "$OUT"
+expect_absent "…and never a writer that claimed no suite" "no-claim-writer@" "$OUT"
+expect_absent "…and fills nothing at the kill floor" "poker: FILL" "$OUT"
+
+# A roster with no suite-claiming row says so rather than naming a writer at random: the
+# pressure is real and it is not this session's to relieve.
+R11E="$(make_repo s11-emergency-noclaim)"; new_roster "$R11E"
+wave_plan "$R11E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | standard | landed |"
+add_row "$R11E" status=intended name=quiet-writer deliverable=a.md duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+poke_pressure "$R11E" 100 1.0 tick
+expect_contains "an EMERGENCY with no suite-running writer names no one" \
+  "no suite-running writer on this roster to stop" "$OUT"
+
+# ---------- 11f: an unreadable reading is ZERO FREE MEMORY, and that is the kill floor ----
+#
+# lib/resources.sh answers a SAFE fact rather than an empty field when it cannot read one
+# ("A probe that cannot read a fact answers a SAFE fact, never an empty field"), so a
+# garbage `free_mb` reads as 0 — below the emergency floor. This case pins the direction
+# that fall takes rather than assuming it: a broken probe stops the wave from GROWING, it
+# never silently widens it, and the tick still exits 0 because EMERGENCY is a decision.
+R11F="$(make_repo s11-probe-junk)"; new_roster "$R11F"
+wave_plan "$R11F" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | standard | pending |"
+poke_pressure "$R11F" "not-a-number" "not-a-load" tick
+expect_eq "an unparseable pressure reading still exits 0" "0" "$RC"
+expect_contains "…and reads as zero free memory: the safe fact, not an empty field" \
+  "poker: EMERGENCY free_mb=0" "$OUT"
+expect_absent "…so the wave is never widened off a reading nobody could take" "poker: FILL" "$OUT"
+
+# ============================================================
+section "Section 12: FILL — gap, readiness, and table order (AC-29, S7)"
+# ============================================================
+#
+# gap = `writers` from the plan header's `parallel-budget:` MINUS the rows already open on
+# this session's roster; ready = the slice table's `pending` rows whose every dependency is
+# `landed`. The tick prints min(gap, |ready|) ids in TABLE ORDER — the plan's own dependency
+# ordering, maintained by the orchestrator, never an ordering this hook invents.
+
+# ---------- 12a: three ready, gap two -> exactly two, in table order ----------
+R12A="$(make_repo s12-fill-two)"; new_roster "$R12A"
+wave_plan "$R12A" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| BASE | — | complex | landed |" \
+  "| ONE | BASE | complex | pending |" \
+  "| TWO | BASE | standard | pending |" \
+  "| THREE | — | standard | pending |"
+poke_pressure "$R12A" 8192 1.0 tick
+expect_eq "a filling tick exits 0" "0" "$RC"
+expect_contains "three ready and a gap of two fills exactly two, in table order" \
+  "poker: FILL ONE TWO" "$OUT"
+expect_absent "…and does not reach the third" "THREE" "$OUT"
+
+# ---------- 12b: the gap closes as rows open ----------
+#
+# The same plan, one open row on the roster: writers=2 minus one open row is a gap of one.
+R12B="$(make_repo s12-fill-gap-one)"; new_roster "$R12B"
+wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| BASE | — | complex | landed |" \
+  "| ONE | BASE | complex | pending |" \
+  "| TWO | BASE | standard | pending |"
+add_row "$R12B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R12B" 8192 1.0 tick
+expect_contains "one open row against writers=2 leaves a gap of one" "poker: FILL ONE" "$OUT"
+expect_absent "…and the second ready slice waits" "TWO" "$OUT"
+
+# ---------- 12c: gap zero -> no FILL, and the reason is the budget ----------
+R12C="$(make_repo s12-fill-full)"; new_roster "$R12C"
+wave_plan "$R12C" "writers=1 suites=1 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | — | complex | pending |"
+add_row "$R12C" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R12C" 8192 1.0 tick
+expect_absent "a full budget fills nothing" "poker: FILL" "$OUT"
+expect_contains "…and says which number closed the gap" "writers=1 and 1 open row(s): the budget is full" "$OUT"
+
+# ---------- 12d: no parallel-budget line -> inert, and it says why ----------
+#
+# Every plan written before this wave, and every project that never ran Step 0's probe, has
+# no such line. A budget is a ceiling a run OPTS INTO, so the absence is inert rather than
+# an error — but a scheduler that went silent about it would be indistinguishable from one
+# that was broken.
+R12D="$(make_repo s12-no-budget)"; new_roster "$R12D"
+wave_plan "$R12D" "-" \
+  "| ONE | — | complex | pending |"
+poke_pressure "$R12D" 8192 1.0 tick
+expect_eq "a plan with no parallel-budget line still ticks cleanly (exit 0)" "0" "$RC"
+expect_absent "…and fills nothing" "poker: FILL" "$OUT"
+expect_contains "…naming the missing field as the reason" "no readable parallel-budget: writers field" "$OUT"
+
+# ---------- 12e: a pending slice with an unlanded dependency is not ready ----------
+R12E="$(make_repo s12-unlanded-dep)"; new_roster "$R12E"
+wave_plan "$R12E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| BASE | — | complex | pending |" \
+  "| DEPENDENT | BASE | complex | pending |" \
+  "| FREE | — | standard | pending |"
+poke_pressure "$R12E" 8192 1.0 tick
+expect_contains "a pending slice with an unlanded dep is held back" "poker: FILL BASE FREE" "$OUT"
+expect_absent "…and DEPENDENT is not named" "DEPENDENT" "$OUT"
+
+# Several deps, one of them unlanded: ALL of them must be landed, not any.
+R12F="$(make_repo s12-multi-dep)"; new_roster "$R12F"
+wave_plan "$R12F" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | complex | landed |" \
+  "| B | — | complex | pending |" \
+  "| C | A,B | complex | pending |"
+poke_pressure "$R12F" 8192 1.0 tick
+expect_contains "a slice whose deps are landed AND pending is not ready" "poker: FILL B" "$OUT"
+expect_absent "…so C waits for every one of them" " C" "$OUT"
+
+# A dependency the table does not carry at all is not confirmable, and an unconfirmable
+# dependency holds its slice back — a slice held costs a batch, a slice dispatched onto an
+# unlanded dependency costs the writer's whole run.
+R12G="$(make_repo s12-unknown-dep)"; new_roster "$R12G"
+wave_plan "$R12G" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ORPHAN | NOT-IN-THIS-TABLE | complex | pending |" \
+  "| FINE | — | standard | pending |"
+poke_pressure "$R12G" 8192 1.0 tick
+expect_contains "an unknown dependency holds its slice back" "poker: FILL FINE" "$OUT"
+expect_absent "…and ORPHAN is not filled" "ORPHAN" "$OUT"
+
+# ---------- 12h: the table is read BY HEADER NAME, not by column position ----------
+#
+# The shipped table is four columns; the SCHED brief's own prose assumed three. A reader
+# keyed on position would have been wrong about one of them and silently wrong about the
+# next column anyone inserts.
+R12H="$(make_repo s12-column-order)"; new_roster "$R12H"
+f12h="$R12H/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+mkdir -p "$(dirname "$f12h")"
+{
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+  printf '## Slices\n\n'
+  printf '| status | owner | id | complexity | deps |\n|---|---|---|---|---|\n'
+  printf '| landed | ada | BASE | complex | — |\n'
+  printf '| pending | grace | LATER | standard | BASE |\n'
+} > "$f12h"
+touch "$f12h"
+poke_pressure "$R12H" 8192 1.0 tick
+expect_contains "a reordered, wider table is read by column NAME" "poker: FILL LATER" "$OUT"
+
+# ---------- 12i: a FENCED table is documentation, not a schedule ----------
+#
+# The same rule the plan READ has taken since the 2026-08-15 newest-race incident: a
+# schema example inside a ``` fence describes the table, it is not the table.
+R12I="$(make_repo s12-fenced-table)"; new_roster "$R12I"
+f12i="$R12I/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+mkdir -p "$(dirname "$f12i")"
+{
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+  printf 'The slice table looks like this:\n\n'
+  printf '```\n| id | deps | complexity | status |\n|---|---|---|---|\n'
+  printf '| EXAMPLE | — | complex | pending |\n```\n'
+} > "$f12i"
+touch "$f12i"
+poke_pressure "$R12I" 8192 1.0 tick
+expect_absent "a fenced slice table is documentation, and fills nothing" "poker: FILL" "$OUT"
+expect_contains "…and the tick says the table gave it nothing ready" \
+  "no pending slice has all its dependencies landed" "$OUT"
+
+# ---------- 12j: a DELIVERED run is never filled ----------
+#
+# DISARM is terminal and exits above the scheduler: there is nothing left to fill in a run
+# that has closed, and a FILL line under a DISARM would be an instruction to dispatch into
+# a finished wave.
+R12J="$(make_repo s12-delivered)"; new_roster "$R12J"
+f12j="$R12J/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+mkdir -p "$(dirname "$f12j")"
+{
+  printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+  printf 'parallel-budget: writers=8 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+  printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 9\n\n'
+  printf -- '- Step 9: delivered: bionic 9.9.9; report: record/fixture/close-out.md\n\n'
+  printf '## Slices\n\n| id | deps | complexity | status |\n|---|---|---|---|\n'
+  printf '| LEFTOVER | — | complex | pending |\n'
+} > "$f12j"
+touch "$f12j"
+armed_ago "$R12J" 7200
+touch "$f12j"
+poke_pressure "$R12J" 8192 1.0 tick
+expect_contains "a delivered run DISARMs" "decision=DISARM" "$OUT"
+expect_absent "…and is never filled" "poker: FILL" "$OUT"
+
+# ============================================================
+section "Section 13: the absent roster splits — QUIET before the first dispatch (AC-38)"
+# ============================================================
+#
+# WHAT THIS FIXES, measured on this wave's own Patrol tick #1 (session b1a850c1,
+# 2026-09-03). "No roster" was ONE refusal covering two states that deserve opposite
+# answers. An orchestrator that had armed at engagement, was standing in the right project,
+# and had simply not dispatched anything yet got REFUSED — with a wall of candidate paths
+# describing a root that was perfectly correct. Arming precedes dispatch BY DESIGN
+# (SKILL.md §Dispatch: "arm at engagement"), so the first tick of every run reaches that
+# line, and answering it with a refusal is how a reader learns to ignore the one message
+# that also reports a genuinely mis-resolved root.
+#
+# THE SPLIT: armed here AND the walk chose a real `.bionic` -> QUIET, exit 0, stamp kept,
+# one line, no candidate walk. Anything else -> the refusal, unchanged.
+
+# ---------- 13a: armed, real .bionic, nothing dispatched -> QUIET ----------
+R13A="$(make_repo s13-armed-quiet)"
+# Deliberately NO new_roster: this IS the pre-dispatch state, and it is the only state in
+# which the roster file does not exist at all.
+poke "$R13A" arm
+poke "$R13A" tick
+expect_eq "an armed session with nothing dispatched ticks quietly (exit 0)" "0" "$RC"
+expect_contains "…and says so in one line the reader can act on" \
+  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_contains "…with a decision line a machine can read" "decision=QUIET" "$OUT"
+expect_absent "…and never REFUSED" "REFUSED" "$OUT"
+expect_absent "…and prints no candidate walk: the root is not in doubt" "chosen" "$OUT"
+expect_eq "…and the stamp is kept, so the first dispatch of this run is not refused" "yes" \
+  "$([ -f "$(stamp_of "$R13A")" ] && echo yes || echo no)"
+
+# ---------- 13b: the SAME repo, never armed -> the refusal survives ----------
+#
+# The paired negative, and the one that keeps 13a from being "the tick stopped refusing".
+# The arming record is written only by `arm`, and its path resolves against the same root
+# the roster's does — so a tick that resolved the wrong root finds no record there either.
+R13B="$(make_repo s13-unarmed)"
+poke "$R13B" tick
+expect_eq "an UNARMED session with no roster still REFUSES (exit 2)" "2" "$RC"
+expect_contains "…naming the arming that never happened" "the Patrol never armed here" "$OUT"
+expect_absent "…and takes no QUIET decision" "decision=QUIET" "$OUT"
+
+# The discriminator on the other side: arm the same repo and the same tick goes QUIET.
+poke "$R13B" arm
+poke "$R13B" tick
+expect_eq "…and arming that same repo flips it to QUIET (13b discriminates)" "0" "$RC"
+expect_contains "…with the armed line" "armed, nothing dispatched yet" "$OUT"
+
+# ---------- 13c: no real .bionic anywhere -> REFUSED, with the walk ----------
+#
+# The wrong-root case, which is the only thing the refusal is for now. The walk is read
+# BEFORE the stamp is written, because `write_patrol_stamp` mkdir -p's `.bionic/tmp` under
+# whatever root it resolved — a walk taken afterwards reports the directory the tick just
+# manufactured as `chosen` and tells the operator nothing.
+R13C="$TMPROOT/s13-no-bionic"
+mkdir -p "$R13C"
+( cd "$R13C" && git init -q . ) >/dev/null 2>&1
+poke "$R13C" tick
+expect_eq "a cwd with no .bionic above it REFUSES (exit 2)" "2" "$RC"
+expect_contains "…and prints the walk it took" "$R13C" "$OUT"
+R13C_LAST="$(printf '%s\n' "$OUT" | grep -F "$R13C" | tail -1)"
+expect_contains "…whose terminal line is a FALLBACK, not a chosen root" \
+  "fallback" "$R13C_LAST"
+expect_absent "…and no QUIET is taken on a root the walk never chose" "decision=QUIET" "$OUT"
+
+# ---------- 13d: a WORKTREE OF A BARE REPOSITORY reads chosen, not cwd-fallback (FIX-BARE) ----------
+#
+# critic-findings.md wave-1.4.0 issue 2 (MEDIUM). `_bionic_root_start` used to map every
+# linked worktree to dirname(--git-common-dir); for a worktree of a BARE repo that is the
+# directory HOLDING bare.git, not a working tree, so the checkout's own `.bionic` was never
+# a candidate and the walk landed on cwd-fallback — tripping this file's own TICK_ROOT_TAG =
+# "chosen"-only QUIET guard (session-poker.sh ~:1845) and reproducing the tick-#1 REFUSED
+# wall AC-38 (Section 13 above) exists to prevent. Real `git init --bare` + a real
+# `git worktree add`, never mocked.
+R13D_DIR="$TMPROOT/s13d-bare"
+mkdir -p "$R13D_DIR"
+( cd "$R13D_DIR" && git init -q --bare bare.git ) >/dev/null 2>&1
+R13DWT="$R13D_DIR/wt-of-bare"
+( cd "$R13D_DIR/bare.git" && git worktree add -q -b s13d-wt "$R13DWT" ) >/dev/null 2>&1
+mkdir -p "$R13DWT/.bionic/tmp"
+
+poke "$R13DWT" arm
+poke "$R13DWT" tick
+expect_eq "a bare-repo worktree with its own .bionic ticks quietly, not REFUSED (exit 0)" \
+  "0" "$RC"
+expect_contains "…the checkout's own .bionic is the chosen root, so the AC-38 guard fires QUIET" \
+  "decision=QUIET" "$OUT"
+expect_absent "…and never the candidate-wall refusal the bug used to reproduce" "REFUSED" "$OUT"
+expect_eq "…and the stamp lands under the checkout, not under dirname(bare.git)" "yes" \
+  "$([ -f "$(stamp_of "$R13DWT")" ] && echo yes || echo no)"
+
+# ============================================================
+echo ""
+echo "=== Section 14: the LEASE OVERRUN — a worktree outliving its row (AC-28) ==="
+# ============================================================
+#
+# A spawned worktree is a leased slot bound to the ledger row that dispatched its writer,
+# and the lease ends when that row is fact-discharged. A tree still standing afterwards is
+# a slot counted against the worktree budget that nobody holds — invisible, because nothing
+# in the fleet walks `.worktrees` against the roster. AC-28 gave the walk to the Patrol
+# tick; payload/scripts/lib/worktree.sh shipped `worktree_lease_overruns` and the tick never
+# called it, so the acceptance criterion was discharged on the library suite alone
+# (architecture finding, 05:50Z). This section is the call site.
+#
+# THE INPUT IS THE VERDICT READ THE TICK ALREADY TAKES — one `session-sweeper.sh verdict`
+# over the whole roster — because that is where the discharge vocabulary lives: `state=MET`,
+# `state=WAIVED`, and the `acked=` the sweeper folds in from its own ledger. The mapping to
+# a tree is by convention (`.worktrees/<dir>` belongs to row `W-<DIR>`), the library's, not
+# a second one here.
+#
+# THE TICK REMOVES NOTHING. It says the tree is standing; landing it is
+# `spawn-worktree.sh land`, which the orchestrator runs.
+
+# --- a discharged row whose tree still stands -> one NOTIFY line naming both ---
+# No delivered plan, so DISARM cannot fire and the tick reaches its decision the long way.
+R14="$(make_repo s14-overrun)"; new_roster "$R14"
+mkdir -p "$R14/.worktrees/foo" "$R14/.bionic/docs/record"
+add_row "$R14" name=W-FOO deliverable="$R14/.bionic/docs/record/w-foo.md" duration="4 hours"
+printf 'the report\n' > "$R14/.bionic/docs/record/w-foo.md"   # the fact that discharges it
+poke "$R14" tick
+# The PHYSICAL path, because the tick resolves its root with `pwd -P` and the temporary
+# directory this suite builds in is reached through a symlink on macOS.
+R14P="$(cd "$R14" && pwd -P)"
+expect_contains "a discharged row whose tree still stands is one lease-overrun line" \
+  "NOTIFY lease-overrun $R14P/.worktrees/foo row=W-FOO" "$OUT"
+expect_eq "…and the tick takes the NOTIFY band (exit 1)" "1" "$RC"
+expect_contains "…with a decision line a machine can read" "decision=NOTIFY" "$OUT"
+expect_contains "…naming the row the lease was bound to" "W-FOO" "$OUT"
+expect_absent "…never QUIET on the same tick" "decision=QUIET" "$OUT"
+expect_eq "…and the tree is not removed: the tick lands nothing" "1" \
+  "$(ls "$R14/.worktrees" | grep -c .)"
+
+# --- THE DISCRIMINATOR. A tree whose row is NOT discharged is a live lease, and silent.
+# Without this the case above passes over a tick that reports every tree it can see.
+R14B="$(make_repo s14-live-lease)"; new_roster "$R14B"
+mkdir -p "$R14B/.worktrees/bar"
+add_row "$R14B" name=W-BAR deliverable="$R14B/.bionic/docs/record/w-bar.md" duration="4 hours"
+poke "$R14B" tick
+expect_absent "an UNMET row's tree is a live lease, not an overrun" "lease-overrun" "$OUT"
+expect_eq "…and the tick is QUIET (exit 0)" "0" "$RC"
+
+# --- the other half of the discriminator: a discharged row whose tree is already gone.
+# That lease ended correctly and has nothing to report.
+R14C="$(make_repo s14-landed)"; new_roster "$R14C"
+mkdir -p "$R14C/.worktrees" "$R14C/.bionic/docs/record"
+add_row "$R14C" name=W-GONE deliverable="$R14C/.bionic/docs/record/w-gone.md" duration="4 hours"
+printf 'the report\n' > "$R14C/.bionic/docs/record/w-gone.md"
+poke "$R14C" tick
+expect_absent "a discharged row whose tree is gone reports nothing" "lease-overrun" "$OUT"
+
+# --- a project with no .worktrees at all is silent, and cheap ---
+R14D="$(make_repo s14-no-trees)"; new_roster "$R14D"
+mkdir -p "$R14D/.bionic/docs/record"
+add_row "$R14D" name=W-NONE deliverable="$R14D/.bionic/docs/record/w-none.md" duration="4 hours"
+printf 'the report\n' > "$R14D/.bionic/docs/record/w-none.md"
+poke "$R14D" tick
+expect_absent "no .worktrees directory, no walk and no line" "lease-overrun" "$OUT"
+
+# --- THE LIBRARY IS THE ONE DEFINITION. The tick declares worktree.sh and sources it;
+# a private copy of "discharged" or of the tree-to-row convention here would be the third.
+expect_eq "the poker wants worktree.sh from the library" "1" \
+  "$(grep -c '^BIONIC_LIB_WANT=".*worktree\.sh' "$POKER")"
+expect_eq "…and sources it out of BIONIC_LIB" "1" \
+  "$(grep -c '^\. "\$BIONIC_LIB/worktree\.sh"' "$POKER")"
+expect_eq "…and calls the library's walk rather than restating it" "1" \
+  "$(grep -c 'worktree_lease_overruns "' "$POKER")"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

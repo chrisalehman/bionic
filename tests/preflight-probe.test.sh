@@ -514,8 +514,20 @@ section "S7 — mutation-and-restore proofs (design §9, checklist A5/A2)"
 
 ORIG_SUM="$(shasum "$PROBE" | awk '{print $1}')"
 
+# A MUTANT NEEDS THE LIBRARY BESIDE IT (bionic 1.4.0). The probe loads root.sh and
+# session.sh through the shared loader idiom, whose first candidate is
+# `$(dirname "$0")/../scripts/lib`; a copy alone in the temp root finds nothing there,
+# steps aside, and every arm below would be measuring the fail-open rather than the
+# mutation. So the mutants live in a tree shaped like the shipped one.
+PP_MUT_TREE="$TMPROOT/mutants"
+mkdir -p "$PP_MUT_TREE/hooks" "$PP_MUT_TREE/scripts/lib"
+for _pp_lib in root.sh session.sh; do
+  cp "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$_pp_lib" "$PP_MUT_TREE/scripts/lib/$_pp_lib" 2>/dev/null \
+    || cp "${BIONIC_HOOKS_DIR}/../scripts/lib/$_pp_lib" "$PP_MUT_TREE/scripts/lib/$_pp_lib" 2>/dev/null || true
+done
+
 mutate() {  # <label> <awk-or-sed marker> — echoes path of a mutated COPY, or empty on no-op
-  local out="$TMPROOT/mutant-$1.sh"
+  local out="$PP_MUT_TREE/hooks/mutant-$1.sh"
   case "$1" in
     failmv)   sed 's|^\( *\)mv -f "\$tmp"|\1false "$tmp"|' "$PROBE" > "$out" ;;
     showtmp)  awk '{print} /tmp="\$\(mktemp/ {print "  printf \"TMPNAME=%s\\n\" \"$tmp\" >&2"}' "$PROBE" > "$out" ;;
@@ -752,6 +764,60 @@ expect_true "…attesting against the working directory, as it always has" \
 # inside a refusal, so any advice left here reaches an operator through a second surface.
 expect_eq "the probe's print-only advice names no deleted machinery" "0" \
   "$(grep -cE 'preflight: .*(arm|watcher|retire)' "$PROBE" | tr -d ' ')"
+
+# ============================================================
+section "S10 — attestation version 2 and its reader (AC-25, wave-bionic-1.4.0-update)"
+# ============================================================
+#
+# THE SCHEMA LIVES IN THIS SCRIPT (spec Design §3, ownership table), so the writer's version
+# and the set the reader accepts are pinned HERE. The behaviour of the five probe fields and
+# the budget line is driven end to end by tests/resources.test.sh §E/§F, which owns the
+# library that produces them; what this section adds is the schema-owner's own contract —
+# the two constants, their doc/code agreement, and the read path being inert.
+
+expect_true "the script declares the version it writes" \
+  grep -qE '^ATTESTATION_VERSION=2$' "$PROBE"
+expect_true "the script declares the versions its reader accepts" \
+  grep -qE '^ATTESTATION_VERSIONS_SUPPORTED="1 2"$' "$PROBE"
+
+# A writer that emits a version its own reader would refuse is the mid-upgrade deadlock
+# this pair exists to prevent, so assert the containment rather than trusting the literals.
+_wv="$(grep -m1 -oE '^ATTESTATION_VERSION=[0-9]+' "$PROBE" | cut -d= -f2)"
+_sv="$(grep -m1 -oE '^ATTESTATION_VERSIONS_SUPPORTED="[^"]*"' "$PROBE" | cut -d'"' -f2)"
+_contained=1
+for _v in $_sv; do [ "$_v" = "$_wv" ] && _contained=0; done
+expect_eq "the written version is inside the accepted set" "0" "$_contained"
+
+# The documented schema block must name the version the code writes (the A5 doc/behaviour
+# split rule this suite already enforces for exit codes).
+expect_true "the documented schema block shows version=$_wv" \
+  grep -qE "^#[[:space:]]+version=$_wv[[:space:]]" "$PROBE"
+
+# A healthy sandbox writes exactly that version, with the budget line beside it.
+SBX="$(mk_sandbox)"
+rc="$(run_probe "$SBX")"
+expect_eq "clean environment still exits 0 with the resources probe in the path" "0" "$rc"
+ATT10="$SBX/repo/$STATE_REL"
+expect_match "the attestation declares version $_wv" "^version=$_wv\$" "$ATT10"
+expect_match "the attestation carries the budget as one parallel-budget string" \
+  '^budget=writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+ source=probe$' "$ATT10"
+
+# READ MODE IS READ-ONLY. It takes no lock, needs no session key, and must leave the state
+# directory byte-identical — a reader that mutates is a reader doctor cannot safely call.
+_before="$(ls "$SBX/repo/.bionic/tmp" | sort | tr '\n' ' ')"
+_att_before="$(cat "$ATT10")"
+CLAUDE_CODE_SESSION_ID= bash "$PROBE" --read "$ATT10" >"$OUT" 2>"$ERR"
+expect_eq "--read accepts the record just written, with no session key set" "0" "$?"
+expect_eq "--read leaves the state directory unchanged" \
+  "$_before" "$(ls "$SBX/repo/.bionic/tmp" | sort | tr '\n' ' ')"
+expect_eq "--read leaves the attestation byte-identical" "$_att_before" "$(cat "$ATT10")"
+expect_true "--read echoes the record's key=value lines" grep -q '^session_id=' "$OUT"
+expect_true "--read strips the comment line" [ "$(grep -c '^#' "$OUT" | tr -d ' ')" = "0" ]
+
+bash "$PROBE" --read "$SBX/repo/.bionic/tmp/no-such-file.state" >"$OUT" 2>"$ERR"
+expect_eq "--read on an absent file exits 5" "5" "$?"
+bash "$PROBE" --read >"$OUT" 2>"$ERR"
+expect_eq "--read with no path exits 5" "5" "$?"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'

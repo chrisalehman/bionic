@@ -97,9 +97,7 @@
 #            for" as no rows existing, so all read DISARM (S2 design decision plus epic-16
 #            w2 Step-6 remediation R4, both logged to the plan). A DISARM tick REMOVES this
 #            session's stamp as its last act — the decision is terminal, so the disk record
-#            that a Patrol runs here has to stop saying so — except on a tick that also
-#            found the dispatch wall blind, where the wall-blind NOTIFY outranks the DISARM
-#            and the stamp stays.
+#            that a Patrol runs here has to stop saying so.
 #   NOTIFY   at least one UNACKED UNMET row's elapsed time (now − launched_at) exceeds its own
 #            declared `duration=`, read by the same parser `verdict` uses for `cadence=`
 #            (hooks/session-sweeper.sh's parse_seconds, duplicated below — see that file's
@@ -133,6 +131,156 @@ set -u
 HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
 
+# ---------------------------------------------------------------- the library
+#
+# THE SPINE (bionic 1.4.0, spec AC-16, design §2). Four facts this script used to derive
+# from its own copies or its own literals — which project this cwd belongs to, which session
+# is asking, whether the run is still open, and how far past a declared interval counts as
+# stale — have one owner each in payload/scripts/lib, and the block
+# below is the ONE idiom that finds them. It is pasted byte-identically out of
+# `bionic_loader_pin` (payload/scripts/lib/loader.sh) into every hook on the spine, because
+# a library cannot load itself; tests/cross-gate-agreement.test.sh re-derives each copy from
+# that function, so a drifted paste goes red rather than quiet.
+#
+# FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
+# authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
+# irreversible action taken blind. It says so in one line and steps aside.
+BIONIC_LIB_WANT="root.sh session.sh run.sh patrol.sh resources.sh worktree.sh"
+# --- bionic-loader/v2 BEGIN
+# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
+# library cannot load itself, so the duplication is the design and
+# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
+# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
+#
+# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
+# on a line above this block. Afterwards exactly one of these is non-empty:
+#   BIONIC_LIB          a readable directory holding every wanted basename
+#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
+# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
+#
+# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
+# healthy hook pays nothing for the healing path — not a jq, not a registry read.
+#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
+#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
+#      siblings, and the repo, where payload/hooks is a symlink to the top-level
+#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
+#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
+#      would find nothing in a directory-source session.
+#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
+#      plugin was installed from; that marketplace's source.path in
+#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
+#      a fork installs under its own name.
+#  (3) the newest version directory in that marketplace's plugin cache, by
+#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
+# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
+# upstream-broken publish breaks every location equally and is not covered.
+#
+# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
+# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
+_bl_dir="$(dirname "$0")"
+_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_try() {
+  [ -n "${1:-}" ] || return 1
+  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
+  [ -d "$1" ] || return 1
+  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
+  BIONIC_LIB="$1"
+}
+if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
+  _bl_mk=""
+  if [ -r "$_bl_pd/installed_plugins.json" ]; then
+    # First key only, and the prefix stripped by parameter expansion rather than
+    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
+    # `jq` runs with its stderr closed, so a machine missing jq degrades to
+    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
+    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
+    _bl_mk="${_bl_keys%%
+*}"
+    _bl_mk="${_bl_mk#bionic@}"
+  fi
+  if [ -n "$_bl_mk" ]; then
+    _bl_src=""
+    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
+      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
+    fi
+    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
+    if [ -z "$BIONIC_LIB" ]; then
+      _bl_best=""; _bl_bestk=""
+      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
+        [ -d "$_bl_v" ] || continue
+        _bl_n="${_bl_v##*/}"
+        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
+        _bl_x1=""; _bl_x2=""; _bl_x3=""
+        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
+$_bl_n
+BIONIC_LOADER_VER
+        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
+        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
+      done
+      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
+    fi
+  fi
+fi
+if [ -z "$BIONIC_LIB" ]; then
+  # The name in the message is the first library this hook asked for. A candidate
+  # directory qualifies only when it holds ALL of them, so with none qualifying the
+  # first wanted name is the honest thing to hand the reader.
+  BIONIC_LIB_MISSING="${_bl_want%% *}"
+  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
+fi
+# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
+# stand aside. Blocking reversible work because a file is missing buys no safety and
+# costs the session.
+loader_fail_open() {
+  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+  exit 0
+}
+# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
+# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
+# here, before the hook sources anything. Whole-string and not prefix, so
+# `claude plugin update bionic@bionic; git push origin main` is refused like any
+# other push. There is no env-var override: a variable an agent turn can set on
+# itself is not a wall.
+loader_fail_closed() {
+  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
+  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
+  case "${2:-}" in
+    "claude plugin update bionic@bionic"|\
+    "claude plugin install bionic@bionic"|\
+    "bash $_bl_root/scripts/doctor.sh"|\
+    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
+  esac
+  cat >&2 <<BIONIC_LOADER_REFUSE
+BLOCKED: $1 cannot load its library (${BIONIC_LIB_MISSING:-the bionic library}), so it
+cannot read this command. A wall that cannot read a command refuses it rather than
+waving it through.
+
+Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
+
+Until the plugin is whole again this wall permits exactly four commands, each matched
+as a whole string:
+
+    claude plugin update bionic@bionic
+    claude plugin install bionic@bionic
+    bash $_bl_root/scripts/doctor.sh
+    bash $_bl_root/scripts/setup.sh
+
+Anything else is refused, including one of those four with another command chained
+after it. Run one of them, or act from your own terminal.
+BIONIC_LOADER_REFUSE
+  exit 2
+}
+# --- bionic-loader/v2 END
+[ -n "$BIONIC_LIB" ] || loader_fail_open "session-poker"
+. "$BIONIC_LIB/root.sh"
+. "$BIONIC_LIB/session.sh"
+. "$BIONIC_LIB/run.sh"
+. "$BIONIC_LIB/patrol.sh"
+. "$BIONIC_LIB/resources.sh"
+. "$BIONIC_LIB/worktree.sh"
+
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="30m"
 
@@ -160,6 +308,22 @@ PATROL_STAMP_SUFFIX=".state"
 PATROL_ARMED_SCHEMA="patrol-armed/v1"
 PATROL_ARMED_SUFFIX=".armed"
 
+# THE HOLD COUNTER — the third sibling of the stamp, and the ONLY state the scheduler keeps
+# across ticks. NARROW fires on a hold that SURVIVES a tick (AC-30), which is a fact about
+# two firings and therefore cannot be read off either one of them alone.
+#
+# IT IS NOT IN THE PLAN, and that is a boundary rather than a convenience. The plan header's
+# `parallel-budget:` is written by Step 0 and by the orchestrator; a tick that edited it
+# would make the ceiling a function of live readings, which is the exact drift
+# lib/resources.sh was written to remove ("THE BUDGET IS A CEILING, NOT A CONTROLLER"). The
+# tick reads pressure to THROTTLE, never to re-derive the budget — so what it carries is a
+# count of consecutive holds in its own session-scoped file, and the NARROW it prints is a
+# RECOMMENDATION the orchestrator acts on by writing the plan.
+#
+# Session-scoped like the stamp it sits beside: a hold counted in one session says nothing
+# about another, and it dies with the stamp at DISARM.
+PATROL_HOLDS_SUFFIX=".holds"
+
 # `adopt`'s own schema, and the two numbers its report tail is cut with. The floor is what
 # separates a REPORT from the one-line sign-offs that usually follow it in an agent's
 # transcript ("done", "no task tools here"); the cap is what keeps a 40 KB report out of a
@@ -180,14 +344,30 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh disarm     remove that stamp at run close — this Patrol was ended on purpose"
   die "  bash ${HOOK_DIR}/session-poker.sh interval    the configured Patrol interval, in seconds"
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
-  die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters (read-only)"
+  die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters"
+  die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
   exit 2
 }
 
-[ $# -eq 1 ] || usage "exactly one verb required."
-VERB="$1"
+[ $# -ge 1 ] || usage "a verb is required."
+VERB="$1"; shift
+
+# `adopt` is the ONE verb that takes a flag, and `--report-only` is the ONE flag. Everything
+# else keeps the old surface exactly — one word, nothing after it — so a stray argument is
+# still the usage error it always was rather than something silently ignored.
+ADOPT_REPORT_ONLY=no
 case "$VERB" in
-  tick|arm|disarm|interval|interval-default|adopt) : ;;
+  adopt)
+    if [ $# -eq 1 ]; then
+      [ "$1" = "--report-only" ] || usage "unknown flag for adopt: $1"
+      ADOPT_REPORT_ONLY=yes
+    elif [ $# -gt 1 ]; then
+      usage "adopt takes at most one flag."
+    fi
+    ;;
+  tick|arm|disarm|interval|interval-default)
+    [ $# -eq 0 ] || usage "$VERB takes no arguments."
+    ;;
   *) usage "unknown verb: $VERB" ;;
 esac
 
@@ -261,51 +441,15 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
 
 # ---------------------------------------------------------------- the pinned root
 #
-# DELIBERATELY DUPLICATED, byte for byte, from hooks/dispatch-preflight.sh's copy
-# (the origin is hooks/canonical-sdlc-governing-skill.sh; tests/cross-gate-agreement.test.sh
-# §N.1/§N.2 compare six copies now, this one included). epic-16 w2 Step-6 remediation R3,
-# closing ap review A-1: this script used to answer `git rev-parse --show-toplevel`, which
-# names the WORKTREE root. A worktree cwd would then poll a roster file that only ever
-# existed under the MAIN repository, read it as empty, and DISARM — silently and
-# permanently, since DISARM ends the Patrol for the rest of the session (doctrine,
-# skills/canonical-sdlc/SKILL.md §Dispatch). `--git-common-dir` maps a worktree back onto its
-# main repository, so both this script and the roster's writer land on one address space.
-resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
-  local d common root
-  d=$(dirname "$1")
-  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
-    d=$(dirname "$d")
-  done
-  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-    dirname "$common"
-    return
-  fi
-  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
-    case "$common" in
-      /*) root=$(dirname "$common") ;;
-      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
-    esac
-    if [ -n "$root" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-  fi
-  # NO-GIT FALLBACK: the pin follows the TARGET, never the shell. Outside any
-  # repository, walk up from the nearest existing ancestor of the target for
-  # the nearest directory already carrying a `.bionic/` tree and answer there;
-  # only when none exists does the supplied fallback (default pwd) win — which
-  # preserves the first-write-into-a-fresh-project path and changes nothing
-  # inside a git repository, where the arms above always answer first.
-  root="$d"
-  while [ -n "$root" ] && [ "$root" != "/" ] && [ "$root" != "." ]; do
-    if [ -d "$root/.bionic" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-    root=$(dirname "$root")
-  done
-  printf '%s\n' "${2:-$(pwd)}"
-}
+# THE COPY IS GONE (bionic 1.4.0, spec AC-10). This script used to carry one of eight
+# byte-identical resolvers that asked git FIRST and walked for a `.bionic` ancestor only
+# when no repository existed at all — so a git repo nested inside the workspace that holds
+# the `.bionic` tree resolved to ITSELF, and the roster the tick polled was not the roster
+# the wall wrote. `project_root` in payload/scripts/lib/root.sh inverts that order and maps
+# a linked worktree onto its main repository, which is the property epic-16 w2's remediation
+# R3 added the copy for in the first place (a worktree cwd must not read an empty roster and
+# then DISARM, terminally). Every call site below passes "$PWD" and takes the library's
+# answer; nothing here re-derives it.
 
 # ---------------------------------------------------------------- the interval knob
 #
@@ -320,7 +464,7 @@ resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default p
 # everywhere else a prose value is read (parse_seconds itself, the two hooks above).
 poker_interval_seconds() {
   local repo cfg raw ov
-  repo="$(resolve_project_root "$PWD/." "$PWD")"
+  repo="$(project_root "$PWD")"
   cfg="$repo/.bionic/config.yaml"
   raw="$POKER_INTERVAL_DEFAULT"
   if [ -f "$cfg" ] && [ ! -L "$cfg" ]; then
@@ -350,7 +494,7 @@ poker_interval_seconds() {
 # it aims.
 patrol_stamp_file() {  # <session-id> -> absolute path, or empty
   local repo real
-  repo="$(resolve_project_root "$PWD/." "$PWD")"
+  repo="$(project_root "$PWD")"
   real="$(cd "$repo" 2>/dev/null && pwd -P)"
   [ -n "$real" ] || return 1
   printf '%s/.bionic/tmp/%s%s%s' "$real" "$PATROL_STAMP_PREFIX" "$1" "$PATROL_STAMP_SUFFIX"
@@ -383,6 +527,41 @@ patrol_armed_file() {  # <session-id> -> absolute path, or empty
   f="$(patrol_stamp_file "$1")" || return 1
   [ -n "$f" ] || return 1
   printf '%s%s' "$f" "$PATROL_ARMED_SUFFIX"
+}
+
+# The hold counter's path — the stamp's, plus one suffix, same construction and the same
+# reason as the arming record above.
+patrol_holds_file() {  # <session-id> -> absolute path, or empty
+  local f
+  f="$(patrol_stamp_file "$1")" || return 1
+  [ -n "$f" ] || return 1
+  printf '%s%s' "$f" "$PATROL_HOLDS_SUFFIX"
+}
+
+# read_holds / write_holds — the consecutive-hold count, as a bare integer.
+#
+# UNREADABLE READS ZERO, and that is the safe direction here: NARROW is an ADVISORY line,
+# so a lost count costs one tick's recommendation, where a fabricated count would tell an
+# orchestrator to halve a width the machine never asked it to halve.
+read_holds() {  # <session-id> -> integer on stdout (0 when absent or unreadable)
+  local f v
+  f="$(patrol_holds_file "$1")" || { printf '0'; return 0; }
+  [ -n "$f" ] && [ -f "$f" ] && [ ! -L "$f" ] || { printf '0'; return 0; }
+  v="$(head -1 "$f" 2>/dev/null | tr -dc '0-9')"
+  case "${v:-}" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$v" ;; esac
+}
+
+write_holds() {  # <session-id> <count> -> 0 written, 1 not. Never fatal to a tick.
+  local sid="$1" n="$2" f d
+  f="$(patrol_holds_file "$sid")" || return 1
+  [ -n "$f" ] || return 1
+  d="${f%/*}"
+  tmp_dir_ok "$d" || return 1
+  mkdir -p "$d" 2>/dev/null || return 1
+  [ -L "$f" ] && return 1
+  printf '%s\n' "$n" > "$f" 2>/dev/null || return 1
+  chmod 600 "$f" 2>/dev/null
+  return 0
 }
 
 # WRITTEN BY `arm` AND BY NOTHING ELSE. Its content is for a human reading .bionic/tmp; the
@@ -446,6 +625,8 @@ remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 c
   # it, so a survivor claims nothing — where a surviving STAMP claims a live clock, which
   # is why that one decides the return code.
   a="$(patrol_armed_file "$sid")" || a=""
+  if [ -n "$a" ] && [ ! -L "$a" ] && [ -e "$a" ]; then rm -f "$a" 2>/dev/null; fi
+  a="$(patrol_holds_file "$sid")" || a=""
   if [ -n "$a" ] && [ ! -L "$a" ] && [ -e "$a" ]; then rm -f "$a" 2>/dev/null; fi
   [ -L "$f" ] && return 0
   [ -e "$f" ] || return 0
@@ -605,17 +786,24 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
 # 2026-08-30), and DISARM now requires the RUN to say it is delivered rather than the roster
 # merely being quiet. Everything else the plan holds is none of the tick's business.
 #
-# THE READ IS THE EVIDENCE GATE'S, NOT A NEW ONE. `has_sdlc_state()`, `resolve_docs_root()`,
-# `normalize_newlines()` and the newest-plan selection inside `newest_sdlc_plan()` are copies
-# of hooks/canonical-sdlc-evidence-gate.sh's, held body-for-body by
-# tests/cross-gate-agreement.test.sh §S. Copied rather than approximated because the
-# UNFILTERED read is a measured incident: on 2026-08-15 a marker-less *.md that happened to
-# be newest under plans/ won the newest race, `current:` parsed empty, and every wall reading
-# it passed silently for ~15 minutes
+# THE READ IS THE LIBRARY'S, AND THERE IS NO SECOND ONE (POKER/2, ratified 2026-09-03).
+# `docs_root` and `active_plan` in payload/scripts/lib/run.sh answer "which *.md answers for
+# this run" for the whole fleet; this file used to carry a private copy of that walk —
+# `has_sdlc_state()`, `resolve_docs_root()`, `normalize_newlines()`'s selection loop inside
+# `newest_sdlc_plan()` — bounded at depth 2 and fence-aware, while the library walked 3.
+# tests/cross-gate-agreement.test.sh §S.3d pinned that disagreement rather than papering over
+# it, and slice SCHED closed it by moving the library to depth 2 and deleting the copy. Two
+# plan readers with different bounds is the exact drift this wave exists to end.
+#
+# WHAT THE COPY WAS PROTECTING IS UNCHANGED, because the library carries it: the candidate
+# filter is the unfenced `## SDLC State` marker, and the read translates line endings rather
+# than deleting them. The UNFILTERED read is a measured incident — on 2026-08-15 a
+# marker-less *.md that happened to be newest under plans/ won the newest race, `current:`
+# parsed empty, and every wall reading it passed silently for ~15 minutes
 # (.bionic/docs/record/session-20260815-landing-supervision/t8-forensic-read.md). A tick
 # reading the plan that way would DISARM off a scrap file. hooks/patrol-revive.sh:64-70
-# refused a plan read outright for that reason; the `## SDLC State` filter is what makes the
-# read safe to take here, which is why it is pinned rather than merely reused.
+# refused a plan read outright for that reason; the marker filter is what makes the read safe
+# to take here, and it now lives in one file instead of six.
 #
 # FAIL DIRECTION IS `open`, without exception. No project root, no docs root, no plan, an
 # unreadable plan, a plan whose `current:` will not parse, a `current: 9` with no
@@ -625,67 +813,12 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
 # one `disarm` ends; a wrong `delivered` costs the silent, terminal end of supervision over a
 # live wave, which nothing recovers. The asymmetry is the whole design.
 
-# Per-project docs root: `docs-root:` in .bionic/config.yaml if set, else
-# <project>/.bionic/docs. [PIN: tests/cross-gate-agreement.test.sh §S]
-resolve_docs_root() {
-  local proj="$1"
-  local config="$proj/.bionic/config.yaml"
-  if [ -f "$config" ]; then
-    local override
-    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
-      | head -1 \
-      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
-      | sed -E "s/^['\"]//;s/['\"]\$//" \
-      | sed -E 's/[[:space:]]+$//')
-    if [ -n "$override" ]; then
-      case "$override" in
-        /*) echo "$override" ;;
-        *)  echo "$proj/$override" ;;
-      esac
-      return
-    fi
-  fi
-  echo "$proj/.bionic/docs"
-}
-
 # CRLF and CR-only line endings TRANSLATED, never deleted: a deleted CR would join two
-# lines into one and hand `current:` a value that was never written.
-# [PIN: tests/cross-gate-agreement.test.sh §S]
+# lines into one and hand `current:` a value that was never written. This is a TEXT utility,
+# not a plan reader — the plan reader is the library's — and it survives the POKER/2
+# unification because the section read below still has to see real newlines.
 normalize_newlines() {
   awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
-}
-
-# A CANDIDATE IS A PLAN ONLY IF IT CARRIES AN UNFENCED `## SDLC State` HEADING — the
-# newest-race filter described above. Fence-aware, because a schema example is documentation
-# and not a run. [PIN: tests/cross-gate-agreement.test.sh §S]
-has_sdlc_state() {
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { found = 1 }
-    END { exit !found }'
-}
-
-# The newest such plan across this project's two plan directories, or empty. Depth 2 covers
-# the directory-per-epic layout (<docs-root>/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md) as
-# well as the flat one. The loop body below is the gate's, line for line — including the
-# STRICT `-nt` ordering, which is what makes "newest" a total answer rather than one that
-# depends on find's directory order. [PIN: tests/cross-gate-agreement.test.sh §S]
-newest_sdlc_plan() {  # <docs root> -> path on stdout, empty if there is no plan
-  local DOCS_ROOT="$1"
-  local PLAN_DIRS d f PLAN
-  PLAN_DIRS=( "${DOCS_ROOT}/plans" "${DOCS_ROOT}/incidents" )
-  PLAN=""
-  for d in "${PLAN_DIRS[@]}"; do
-    [ -d "$d" ] || continue
-    while IFS= read -r -d '' f; do
-      if [ -z "$PLAN" ] || [ "$f" -nt "$PLAN" ]; then
-        has_sdlc_state "$f" || continue
-        PLAN="$f"
-      fi
-    done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
-  done
-  printf '%s' "$PLAN"
 }
 
 # THE TWO FIELDS, AND NOTHING ELSE. `current:` and the `Step 9:` line are read out of the
@@ -696,15 +829,17 @@ newest_sdlc_plan() {  # <docs root> -> path on stdout, empty if there is no plan
 # tick that says "no open row, but the run is not delivered" and stops there tells its reader
 # nothing they can act on, and the reader is a model deciding whether the Patrol is broken.
 run_state() {  # <project root> <arming-record path, may be empty> -> "delivered|<why>" or "open|<why>"
-  local repo="$1" armed="${2:-}" docs_root plan section current line
+  local repo="$1" armed="${2:-}" droot plan section current line
   if [ -z "$repo" ] || [ ! -d "$repo" ]; then
     printf 'open|no project root resolved, so no plan could be read'
     return 0
   fi
-  docs_root="$(resolve_docs_root "$repo")"
-  plan="$(newest_sdlc_plan "$docs_root")"
+  # ONE CALL EACH, AND NEITHER IS RESTATED HERE. `docs_root` is asked only so the refusal
+  # below can name the directory it searched; `active_plan` is the selection itself.
+  droot="$(docs_root "$repo")"
+  plan="$(active_plan "$repo")" || plan=""
   if [ -z "$plan" ]; then
-    printf 'open|no plan carrying an unfenced "## SDLC State" under %s/{plans,incidents}' "$docs_root"
+    printf 'open|no plan carrying an unfenced "## SDLC State" under %s/{plans,incidents}' "$droot"
     return 0
   fi
   section="$(normalize_newlines "$plan" | awk '
@@ -759,7 +894,196 @@ run_state() {  # <project root> <arming-record path, may be empty> -> "delivered
     printf 'open|%s records delivered:, but it was delivered before this Patrol armed — that is the previous run' "$plan"
     return 0
   fi
+  # THE LIBRARY'S SECOND OPINION, as a CONJUNCT and never as a replacement. `active_run`
+  # (payload/scripts/lib/run.sh) is the SSoT for "is this run open" (spec §3, ownership
+  # table) and it reads more plans than the block above does — depth 3, and no fence
+  # filter. The read above is the evidence gate's, held body-for-body by
+  # tests/cross-gate-agreement.test.sh §S, and it is the STRICTER of the two: a fenced
+  # `## SDLC State` is documentation here and a run there. So the two are ANDed in the one
+  # direction that cannot cost anything — where the library still calls the run open,
+  # `open` wins. That is this function's fail direction everywhere else, applied to the
+  # one reader that can see a plan this one cannot.
+  if active_run "$repo" >/dev/null 2>&1; then
+    printf 'open|%s records delivered:, but lib/run.sh:active_run still reads this run as open' "$plan"
+    return 0
+  fi
   printf 'delivered|%s is at current: 9 and its Step 9 line records delivered:' "$plan"
+}
+
+# ---------------------------------------------------------------- the scheduler
+#
+# FILL / HOLD / NARROW / EMERGENCY (spec AC-29, AC-30, AC-31; design-ledger S7).
+#
+# THE PROBLEM. A wave's width was a number in a brief, and a ceiling nobody reaches is a
+# wave running one writer at a time by accident: this repo's own 1.4.0 wave dispatched six
+# trees against a budget of twenty-two and then went quiet for a batch at a time. Nothing
+# on the machine was watching for the gap, because the only thing that fires on its own is
+# the Patrol tick — and the tick had no opinion about width.
+#
+# THE FOUR DECISIONS, and the ONE rule that orders them. Pressure is read FIRST, every tick,
+# before a single fill is considered: filling a machine that is already starving is the one
+# mistake that costs work rather than time (lib/resources.sh, "MEMORY IS HARD, COMPUTE IS
+# SOFT" — the measured failure is a kernel SIGKILL mid-suite).
+#
+#   EMERGENCY  free memory under the kill floor -> name the youngest suite-running writer
+#              for the orchestrator to stop through the stopping standard. Nothing is
+#              filled, and the tick does not stop anything itself.
+#   HOLD       free memory or load past the warning line -> no fills this tick, with the
+#              measurement printed beside the verdict (a HOLD with no number is
+#              indistinguishable from a bug).
+#   NARROW     a hold that SURVIVES a tick -> recommend halving the test-runner width
+#              carried in new briefs.
+#   FILL       otherwise -> the ready slices, up to the gap between the budget's `writers`
+#              and the rows already open on this session's roster.
+#
+# THE TICK READS PRESSURE TO THROTTLE, NEVER TO RE-DERIVE THE BUDGET. `resources_budget` is
+# a pure function of machine FACTS and is written once, into the plan header, by Step 0. A
+# tick that lowered `writers` because the machine was briefly busy would make the ceiling a
+# function of the weather, which is the drift lib/resources.sh exists to remove. Everything
+# here either reads that string or refuses to act; nothing here writes it.
+#
+# EVERY DECISION IS ADVISORY. The tick prints; the orchestrator dispatches, stops and edits
+# the plan. hooks/patrol-duties-gate.sh is what makes a printed FILL binding — the tick's
+# turn may not end until the named dispatches or an explicit decline appear — and that is a
+# wall on the ORCHESTRATOR, not an action taken here. A hook that dispatched agents or
+# stopped them would be a hook taking irreversible action off a reading it cannot confirm.
+
+# One field out of a space-separated `key=value` record (resources_probe's shape, and the
+# plan header's `parallel-budget:` value), BY KEY and never by position.
+space_field() {  # <record> <key> -> value on stdout, empty if absent
+  printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -1
+}
+
+# The plan header's `parallel-budget:` value, or empty.
+#
+# THE LEADING FRONTMATTER BLOCK ONLY, byte-for-byte the read hooks/dispatch-preflight.sh's
+# budget arm takes: a `parallel-budget:` inside the plan BODY is prose — this wave's own
+# plan quotes the header in a slice description — and a reader that took a quotation for
+# configuration would fill against a number nobody set.
+plan_budget_line() {  # <plan> -> the value after `parallel-budget:`, or empty
+  awk '
+    NR == 1 && $0 != "---" { exit }
+    NR == 1 { next }
+    $0 == "---" { exit }
+    /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
+  ' "$1" 2>/dev/null
+}
+
+# One integer field out of that value. NOT AN INTEGER IS ABSENT: an arm this cannot measure
+# goes unmeasured and says so, exactly as the dispatch wall's own budget_field does.
+budget_int() {  # <budget line> <key> -> a non-negative integer, or empty
+  local v
+  v="$(space_field "$1" "$2")"
+  case "${v:-}" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
+}
+
+# THE SLICE TABLE, read out of the active plan.
+#
+# WHAT IT LOOKS FOR is a table HEADER row naming `id`, `deps` and `status`, not a heading
+# and not a column count. The plan's `## Slices (machine-readable …)` section is where it
+# lives today and its shipped shape is four columns — `| id | deps | complexity | status |`
+# — but a reader keyed on position breaks the first time a column is inserted, and a reader
+# keyed on the heading breaks on a plan that words it differently. Column INDICES are taken
+# from the header row by name, so both stay ordinary edits.
+#
+# FENCE-AWARE, for the reason every other plan read in this file is: a table inside a ```
+# example is documentation about the schema, and filling a wave off a documented example is
+# the newest-race incident in a new costume.
+#
+# Emits one `id<TAB>deps<TAB>status` record per row, in TABLE ORDER, which is the order the
+# FILL line prints in — the plan's own dependency ordering, maintained by the orchestrator,
+# rather than an ordering this hook invents.
+slice_table() {  # <plan> -> id<TAB>deps<TAB>status, one per row
+  normalize_newlines "$1" 2>/dev/null | awk '
+    function trim(v) { sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); return v }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    !intable {
+      if ($0 !~ /^[[:space:]]*\|/) next
+      n = split($0, c, "|")
+      idc = 0; depc = 0; stc = 0
+      for (i = 1; i <= n; i++) {
+        t = trim(c[i])
+        if (t == "id") idc = i
+        else if (t == "deps") depc = i
+        else if (t == "status") stc = i
+      }
+      if (idc && depc && stc) intable = 1
+      next
+    }
+    {
+      if ($0 !~ /^[[:space:]]*\|/) exit
+      n = split($0, c, "|")
+      id = trim(c[idc])
+      # The |---|---| separator row, and any row whose id cell is empty or punctuation.
+      if (id == "" || id ~ /^[-: ]+$/) next
+      printf "%s\t%s\t%s\n", id, trim(c[depc]), trim(c[stc])
+    }'
+}
+
+# READY = a `pending` row whose EVERY dependency is `landed`.
+#
+# A dependency cell is a comma-separated list of ids, or an em dash / hyphen / empty cell
+# for "none". An id this table does not carry is NOT ready: an unresolvable dependency is a
+# dependency this reader cannot confirm landed, and the fill direction here is the cautious
+# one — a slice held back costs a batch, a slice dispatched onto an unlanded dependency
+# costs the writer's whole run.
+slice_ready() {  # <table> -> the ready ids, one per line, in table order
+  # ONE PASS TO REMEMBER, one to decide, over the same stream: a dependency may be named
+  # before or after the row that depends on it, so nothing can be answered until the whole
+  # table has been read. Table order is preserved by indexing on NR.
+  printf '%s\n' "$1" | awk -F'\t' '
+    $1 == "" { next }
+    { n = n + 1; id[n] = $1; dep[n] = $2; st[$1] = $3 }
+    END {
+      for (i = 1; i <= n; i++) {
+        if (st[id[i]] != "pending") continue
+        deps = dep[i]
+        gsub(/[[:space:]]/, "", deps)
+        # A cell with no alphanumeric character names no dependency: the empty cell, the
+        # hyphen and the em dash the plan actually uses are all spelled this one way, and
+        # matching the dash byte-for-byte would put a Unicode literal in a bash 3.2 awk
+        # program for no gain.
+        if (deps !~ /[A-Za-z0-9]/) { print id[i]; continue }
+        m = split(deps, d, ",")
+        ready = 1
+        for (j = 1; j <= m; j++) {
+          if (d[j] == "" || d[j] !~ /[A-Za-z0-9]/) continue
+          if (st[d[j]] != "landed") { ready = 0; break }
+        }
+        if (ready) print id[i]
+      }
+    }'
+}
+
+# THE YOUNGEST SUITE-RUNNING WRITER on this session's roster, as the address the stopping
+# standard takes — `<name>@session-<id8>`, the one spelling both stop gates accept
+# (POKER/8). Empty when there is none.
+#
+# "SUITE-RUNNING" IS READ OFF THE LEDGER, never off the process table (WALLS/3): an open row
+# whose `claims=` field is non-empty declared a subprocess claim and therefore spends a
+# suite. A `pgrep` per row would be truer to the word "running" and would put a process
+# spawn per row inside a Patrol tick.
+#
+# "OPEN" is the roster's own predicate — a `status=intended` row whose name carries no
+# `landing-swept/v1` marker — the same one lib/patrol.sh's `patrol_roster_state` uses.
+#
+# YOUNGEST, because the rung is a kill floor and the youngest writer has the least work to
+# lose. `launched_at` is an ISO-8601 Z stamp, so a lexical max IS a chronological max.
+youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
+  local roster="$1" sid="$2" swept name
+  [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
+  swept="$(grep '^landing-swept/v1|' "$roster" 2>/dev/null || true)"
+  name="$(grep '^roster-state/v1|status=intended|' "$roster" 2>/dev/null \
+    | while IFS= read -r RL; do
+        [ -n "$(line_field "$RL" claims)" ] || continue
+        RN="$(line_field "$RL" name)"
+        [ -n "$RN" ] || continue
+        case "$swept" in *"|name=${RN}|"*) continue ;; esac
+        printf '%s\t%s\n' "$(line_field "$RL" launched_at)" "$RN"
+      done | sort | tail -1 | cut -f2-)"
+  [ -n "$name" ] || return 0
+  printf '%s@session-%s' "$(clean "$name")" "$(printf '%s' "$sid" | cut -c1-8)"
 }
 
 # ---------------------------------------------------------------- adoption
@@ -874,10 +1198,17 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 #   its successor"). A `landing-swept` marker reading UNMET closes NOTHING here: an answered
 #   failure is exactly the row a resumed session most needs to see.
 #
+# THE ORIGIN IS CARRIED OUT WITH THE ROW, and it is what the stop address is built from
+# (T3 FINDING 1). `adopted_from=` wins over `session=` when the row has one: a row that was
+# itself adopted is filed under the session that TOOK it, while the harness's teammate table
+# keeps naming the session that made the `Agent` call, and `adopted_from` is the only field
+# on the row that still points there. Absent both, the caller falls back to the roster
+# file's own session — the invariant every roster writer keeps.
+#
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at
+adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at|origin
   awk -v ackfile="$2" '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
@@ -908,6 +1239,8 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
       v = kv($0, "progress");      if (v != "") prog[n]  = v
       v = kv($0, "cadence");       if (v != "") cad[n]   = v
       v = kv($0, "launched_at");   if (v != "") launch[n] = v
+      v = kv($0, "session");       if (v != "") sess[n]   = v
+      v = kv($0, "adopted_from");  if (v != "") afrom[n]  = v
       st = kv($0, "status")
       if (st == "identified" || st == "confirmed") {
         v = kv($0, "agent_id"); if (v != "") id[n] = v
@@ -924,7 +1257,8 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
         n = order[i]
         if (n in met) continue
         if (n in acked) continue
-        printf "%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], launch[n]
+        printf "%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+               launch[n], ((n in afrom) ? afrom[n] : sess[n])
       }
     }
   ' "$1" 2>/dev/null
@@ -938,10 +1272,14 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 #                       says less: the id is known, which is exactly what `identified` means.
 #   agent_id=           the TRANSCRIPT form, the only form either gate resolves a target to.
 #   teammate_id=        the ADDRESSING form `<name>@session-<id8>`, the only spelling the
-#                       platform's stop primitive takes for a teammate — built for THIS
-#                       session, because this session is the one that now holds the row and
-#                       hooks/stop-guard.sh reads the recorded address before it constructs
-#                       one. A predecessor's row may carry no teammate_id at all.
+#                       platform's stop primitive takes for a teammate — built from the
+#                       session that LAUNCHED the agent, never from ours (T3 FINDING 1). The
+#                       teammate table keys on the session that made the `Agent` call and a
+#                       `/clear` does not move it; hooks/stop-guard.sh reads this recorded
+#                       address before it constructs one, so a row carrying our own eight
+#                       would put the string the harness rejects into every refusal it
+#                       prints. The caller hands it in already built, for the same reason
+#                       the address is printed from there: one construction, one origin.
 #   adopted_from=       provenance. The agent is still filed under the predecessor's own
 #                       subagents directory, and that directory is what hooks/stop-guard.sh
 #                       must widen its resolution to; without this field it cannot know
@@ -965,9 +1303,9 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 # A ROW WITH NO ID IS NEVER WRITTEN. That is the UNADDRESSABLE verdict's whole content —
 # there is no identity to file — and a row carrying `agent_id=` empty would be inert at
 # every by-id reader while looking like an adoption on disk.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
-  local launch="$9" osid="${10}" d
+  local launch="$9" osid="${10}" addr="${11}" d
   [ -n "$id" ] || return 1
   [ -n "$sid" ] || return 1
   d="${f%/*}"
@@ -986,7 +1324,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=|teammate_id=%s|adopted_from=%s|tool_use_id=\n' \
     "$sid" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
     "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" \
-    "$(clean "$name")@session-$(printf '%s' "$sid" | cut -c1-8)" "$(clean "$osid")" \
+    "$(clean "$addr")" "$(clean "$osid")" \
     >> "$f" 2>/dev/null || return 1
   return 0
 }
@@ -1034,7 +1372,7 @@ case "$VERB" in
     ;;
 
   arm)
-    SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+    SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
       die "A Patrol stamp answers for ONE session, so without the key there is nothing to write."
@@ -1065,7 +1403,7 @@ case "$VERB" in
   # it was — a no-op reported as a failure is a line the operator has to stop and interpret
   # at exactly the moment the run is trying to end.
   disarm)
-    SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+    SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
       die "A Patrol stamp answers for ONE session, so without the key there is nothing to remove."
@@ -1087,7 +1425,7 @@ case "$VERB" in
     ;;
 
   adopt)
-    SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+    SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
       die "adopt answers 'what did the OTHER sessions launch here', and without this session's"
@@ -1095,7 +1433,7 @@ case "$VERB" in
       exit 3
     fi
 
-    REPO="$(resolve_project_root "$PWD/." "$PWD")"
+    REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
     if [ -z "$REPO_REAL" ]; then
       die "REFUSED — cannot resolve the working directory."
@@ -1127,9 +1465,28 @@ case "$VERB" in
       # every agent that session launched.
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
-      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH; do
+      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG; do
         [ -n "$RNAME" ] || continue
         ADOPT_ROWS=$((ADOPT_ROWS + 1))
+
+        # ---- THE STOP ADDRESS, BUILT FROM THE SESSION THAT LAUNCHED THE AGENT
+        #
+        # T3 FINDING 1, live 2026-09-03. This was the ADOPTING session's eight until a real
+        # `/clear` was driven against a real harness: `TaskStop PROBE-AGENT@session-<adopting
+        # 8>` came back `No task found with ID: … Running teammates:
+        # PROBE-AGENT@session-<launching 8>`. The probe that argued for the adopting session
+        # was right about the env — `CLAUDE_CODE_SESSION_ID` does re-key — and wrong about
+        # the teammate table, which keys on the session that made the `Agent` call and does
+        # not re-key with it. So the suffix comes off the ROW (its `adopted_from=`, else its
+        # own `session=`, else the roster file's session), never off ours.
+        #
+        # EMPTY WITHOUT AN ID, because the address is only ever offered beside one: a row
+        # with no identity has no stop line to carry it, and a machine field that named an
+        # address the UNADDRESSABLE branch refuses to print would contradict its own row.
+        ADOPT_ADDR_SID="${RORIG:-$OSID}"
+        ADOPT_ADDR=""
+        [ -n "$RID" ] \
+          && ADOPT_ADDR="$(clean "$RNAME")@session-$(printf '%s' "$ADOPT_ADDR_SID" | cut -c1-8)"
 
         # ---- the deliverable, on disk or not
         RDELIV_ABS="$(adopt_abs "$RDELIV" "$REPO_REAL")"
@@ -1146,10 +1503,17 @@ case "$VERB" in
         # ---- the three addresses, all of them derived from the one id
         TX=""
         TX_PRESENT=no
+        TX_AGE=""
         if [ -n "$RID" ]; then
           if [ -n "$OSUB" ]; then
             TX="$OSUB/agent-${RID}.jsonl"
-            [ -f "$TX" ] && TX_PRESENT=yes
+            if [ -f "$TX" ]; then
+              TX_PRESENT=yes
+              # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
+              # the agent takes, so its mtime is a fact about the agent rather than a
+              # promise the agent has to remember to keep.
+              TX_AGE=$(( ADOPT_NOW - $(file_mtime "$TX") ))
+            fi
           else
             # The slug could not be resolved — say where to look rather than inventing a
             # path that would read as a fact.
@@ -1164,25 +1528,43 @@ case "$VERB" in
         # stopped whatever its artifacts say, and the cure is prospective (it fixes the NEXT
         # dispatch, not this row). The deliverable's state is still printed underneath, so
         # nothing is hidden by the ordering.
+        # LIVE ON EITHER MTIME, STALE ONLY ON BOTH (1.6, AC-6). The progress file is a
+        # promise the agent keeps by hand — the first thing to lapse when the work gets
+        # absorbing, and impossible for a role with no Write tool — so reading it alone
+        # called working agents SILENT. The transcript is the harness's own record of the
+        # agent taking a turn, at the very path this verb already prints as the observe
+        # address, so it costs one stat and answers the question the progress file was
+        # standing in for. SILENT now means neither a written line nor a turn taken inside
+        # the window, which is a state worth waking someone for.
+        #
+        # THE WINDOW is `PATROL_STALE_MULTIPLIER × cadence`, out of the library
+        # (payload/scripts/lib/patrol.sh) rather than an inline `* 2` — one constant, three
+        # readers, spec AC-22. It is more than one cadence because a row promising a line
+        # every 10 minutes is, at any random instant, up to 10 minutes stale while perfectly
+        # healthy; a threshold at the cadence itself would call half the live fleet SILENT.
+        # Same slack hooks/dispatch-preflight.sh allows the Patrol stamp.
+        LIVE=no
+        if [ -n "$CAD_S" ]; then
+          STALE_LIMIT=$(( CAD_S * PATROL_STALE_MULTIPLIER ))
+          [ -n "$PROG_AGE" ] && [ "$PROG_AGE" -le "$STALE_LIMIT" ] && LIVE=yes
+          [ -n "$TX_AGE" ] && [ "$TX_AGE" -le "$STALE_LIMIT" ] && LIVE=yes
+        fi
+
         if [ -z "$RID" ]; then
           VERDICT=UNADDRESSABLE
         elif [ "$DELIV_PRESENT" = yes ]; then
           VERDICT=LANDED
-        elif [ -n "$PROG_AGE" ] && [ -n "$CAD_S" ] && [ "$PROG_AGE" -le $(( CAD_S * 2 )) ]; then
-          # TWICE the cadence, not once. A row promising a line every 10 minutes is, at any
-          # random instant, up to 10 minutes stale while perfectly healthy; a threshold set
-          # at the cadence itself would call half the live fleet SILENT. Twice the declared
-          # interval is the same slack hooks/dispatch-preflight.sh allows the Patrol stamp.
+        elif [ "$LIVE" = yes ]; then
           VERDICT=RUNNING
         else
           VERDICT=SILENT
         fi
 
-        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s\n' \
+        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|address=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s|transcript_age=%s\n' \
           "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$OSID" "$(clean "$RNAME")" "$VERDICT" \
-          "$RID" "$(clean "$RTYPE")" "$(clean "$RDELIV_ABS")" "$DELIV_PRESENT" \
+          "$RID" "$ADOPT_ADDR" "$(clean "$RTYPE")" "$(clean "$RDELIV_ABS")" "$DELIV_PRESENT" \
           "$(clean "$RPROG_ABS")" "${PROG_AGE:-unknown}" "${CAD_S:-unknown}" \
-          "$(clean "$TX")" "$TX_PRESENT"
+          "$(clean "$TX")" "$TX_PRESENT" "${TX_AGE:-unknown}"
 
         # ---- the adoption itself, written before it is printed
         #
@@ -1196,10 +1578,19 @@ case "$VERB" in
         # block below would hand the operator a `TaskStop` line that both stop gates refuse
         # as FOREIGN, since ownership is taken from the row that was just NOT written
         # (review-a C-3). So the row's own state decides which rendering it gets.
+        #
+        # `--report-only` TAKES THE SAME ROW AND DOES NOT FILE IT. The rendering below is
+        # unchanged — same verdict, same addresses, same tail — because the whole point of
+        # the flag is that the operator reads exactly what `adopt` would then write. The
+        # stop address it prints is the address the write MAKES true, so it is printed as
+        # the instruction it is: run `adopt`, and this line works. AC-4's "identical rows"
+        # is pinned in tests/session-poker.test.sh §8i by comparing the two renderings.
         ROW_JOURNALLED=no
-        if [ -n "$RID" ]; then
+        if [ -n "$RID" ] && [ "$ADOPT_REPORT_ONLY" = yes ]; then
+          ROW_JOURNALLED=yes
+        elif [ -n "$RID" ]; then
           if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
-               "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID"; then
+               "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR"; then
             ROW_JOURNALLED=yes
           else
             die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
@@ -1218,19 +1609,21 @@ case "$VERB" in
           # record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), so
           # printing the id cost the operator a refusal they could not clear.
           #
-          # BOTH SPELLINGS, because only one of them is proven and it is not known which.
-          # That capture shows the eight characters belong to the session that LAUNCHED the
-          # agent — the PREDECESSOR's, here — while the row written above carries THIS
-          # session's, which is what makes the successor's spelling resolve at both stop
-          # gates. Neither gate can tell them apart: each resolves on the base name and
-          # takes ownership from the id on this session's roster, so the two are one row
-          # with two names and are permitted or refused together (tests/stop-guard.test.sh
-          # §14, tests/stop-check.test.sh §10(d)). The cost of naming the alternate is one
-          # clause; the cost of naming only the wrong one is a refusal the operator cannot
-          # clear, which is the defect this whole verb is being repaired for.
-          printf '  stop        : TaskStop %s@session-%s  (or %s@session-%s if the platform keys on the launching session)\n' \
-            "$(clean "$RNAME")" "$(printf '%s' "$SESSION_ID" | cut -c1-8)" \
-            "$(clean "$RNAME")" "$(printf '%s' "$OSID" | cut -c1-8)"
+          # ONE SUFFIXED SPELLING, AND IT IS THE LAUNCHING SESSION'S (T3 FINDING 1). The
+          # alternate — this session's eight — was printed here until a live `/clear` drive
+          # refused it by name and the harness named the launching session's in its place.
+          # See the construction above for what the row is read for.
+          #
+          # AND THE BARE NAME BENEATH IT, because it is the one address that survived every
+          # step of that drive: it reached the stop wall before the `/clear` and after it,
+          # and it is what finally stopped the adopted agent when the suffixed form did not
+          # resolve. Neither stop gate keys on the suffix — each resolves on the base name
+          # and takes ownership from the id on this session's roster
+          # (tests/stop-guard.test.sh §14, tests/stop-check.test.sh §10(d)) — so offering
+          # both costs the operator nothing and covers the case where the suffix is stale.
+          printf '  stop        : TaskStop %s\n' "$ADOPT_ADDR"
+          printf '                TaskStop %s — the bare name, the address that always survives\n' \
+            "$(clean "$RNAME")"
         elif [ -n "$RID" ]; then
           # ADDRESSABLE FOR EVERYTHING BUT THE STOP. The id is real and the transcript and
           # the message address do not depend on this session's roster — only ownership
@@ -1282,16 +1675,29 @@ EOF
       exit 0
     fi
     say "$ADOPT_ROWS open row(s) from $ADOPT_SESSIONS predecessor session(s) — ledger every one BY AGENT ID before dispatching anything new."
+    # ONE EXTRA LINE, and the rows above untouched: the mode is stated where it changes what
+    # the reader should do next, not woven through a rendering that has to stay comparable.
+    [ "$ADOPT_REPORT_ONLY" = yes ] \
+      && say "report-only: nothing was written — run 'adopt' to take these rows onto this session's roster."
     exit 1
     ;;
 
   tick)
-    SESSION_ID="${CLAUDE_CODE_SESSION_ID:-}"
+    SESSION_ID="$(session_id)" || SESSION_ID=""
     if [ -z "$SESSION_ID" ]; then
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
       die "A tick answers for ONE session's roster, so without the key there is nothing to read."
       exit 3
     fi
+
+    # THE WALK, TAKEN BEFORE THE STAMP IS WRITTEN, and that ordering is load-bearing.
+    # `write_patrol_stamp` mkdir -p's `<resolved root>/.bionic/tmp`, so a tick that resolved
+    # the WRONG root creates a `.bionic` there as its first act — and every walk taken after
+    # that point reports the root it just manufactured as `chosen`. Read here, the walk still
+    # describes the filesystem the tick actually arrived in, which is the only version of it
+    # an operator can act on and the one AC-38's two arms are told apart by.
+    TICK_ROOT_WALK="$(project_root_candidates "$PWD")"
+    TICK_ROOT_TAG="$(printf '%s\n' "$TICK_ROOT_WALK" | tail -1 | awk -F'\t' '{ print $2 }')"
 
     # STAMP FIRST, BEFORE ANYTHING IS READ OR DECIDED. Every line below this one can end in
     # a refusal, and each of those refusals is a HEALTHY Patrol firing into a state it has
@@ -1307,7 +1713,7 @@ EOF
       exit 2
     fi
 
-    REPO="$(resolve_project_root "$PWD/." "$PWD")"
+    REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
     if [ -z "$REPO_REAL" ]; then
       die "REFUSED — cannot resolve the working directory."
@@ -1315,36 +1721,16 @@ EOF
     fi
     ROSTER_FILE="$REPO_REAL/.bionic/tmp/roster-${SESSION_ID}.state"
 
-    # ---------- THE BLIND-WALL CHECK, BEFORE ANYTHING IS DECIDED FROM THE ROSTER ----------
-    #
-    # It runs here, ahead of the read, because the loudest symptom of a blind wall is the
-    # absent-roster REFUSAL at the bottom of this verb — a message that names the wrong
-    # cause ("nothing has been dispatched yet") for the one state where the diagnosis
-    # matters most. Emitting first means the diagnosis travels WITH that refusal instead of
-    # being lost behind it. It decides nothing else: the roster's own verdict is untouched,
-    # and a session whose transcript cannot be resolved is silent rather than alarmed.
-    WALL_BLIND=0
-    TRANSCRIPT="$(session_transcript "$SESSION_ID")" || TRANSCRIPT=""
-    if [ -n "$TRANSCRIPT" ]; then
-      TX_DISPATCHES="$(count_main_thread_dispatches "$TRANSCRIPT")"
-      TX_REFUSED="$(count_refused_dispatches "$TRANSCRIPT")"
-      ROSTERED="$(count_rostered_dispatches "$ROSTER_FILE" "$SESSION_ID")"
-      [ -n "$TX_DISPATCHES" ] || TX_DISPATCHES=0
-      [ -n "$TX_REFUSED" ]    || TX_REFUSED=0
-      [ -n "$ROSTERED" ]      || ROSTERED=0
-      case "${TX_DISPATCHES}${TX_REFUSED}${ROSTERED}" in
-        *[!0-9]*) : ;;   # an unreadable count is no count — refuse rather than guess
-        *)
-          if [ "$TX_DISPATCHES" -gt "$(( ROSTERED + TX_REFUSED ))" ]; then
-            WALL_BLIND=1
-            printf '%s|at=%s|session=%s|decision=NOTIFY|check=wall-blind|dispatches=%s|rostered=%s|refused=%s|cure=re-invoke /bionic:canonical-sdlc\n' \
-              "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" \
-              "$TX_DISPATCHES" "$ROSTERED" "$TX_REFUSED"
-            say "NOTIFY wall-blind: ${TX_DISPATCHES} dispatches, ${ROSTERED} rostered — re-invoke /bionic:canonical-sdlc (hooks do not survive continue, /clear+resume, or /reload-plugins)"
-          fi
-          ;;
-      esac
-    fi
+    # THE BLIND-WALL CHECK IS GONE (bionic 1.4.0, spec AC-7). It compared main-thread
+    # `Agent` tool_uses in the transcript against rows on the roster and raised a NOTIFY
+    # when dispatches outnumbered them, on the reasoning that the dispatch wall lived in
+    # the governing skill's frontmatter and therefore died with a `/clear`, a continue or
+    # a `/reload-plugins`. Every wall is registered in hooks/hooks.json now and survives
+    # all three, so the condition it detected cannot arise the way it did — while its
+    # false positive could and did: the check had no "no active run" branch, so a session
+    # that had simply not engaged a run read as a session whose wall had died (observed
+    # 20:07Z, 2026-09-02). A diagnosis for a failure mode the registration change removes,
+    # firing on sessions that have nothing wrong with them, is worth less than nothing.
 
     # EXACTLY ONE verdict read over the whole roster (no name argument), run from the repo
     # root exactly as landing-gate.sh runs it. `|| exit 9` keeps a failed `cd` out of the
@@ -1434,10 +1820,51 @@ EOF
     # Patrol"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
     # file exists, so OPEN=0-with-TOTAL>0 can never be the absent-file case.
     if [ "$TOTAL" -eq 0 ] && [ ! -e "$ROSTER_FILE" ]; then
+      # AC-38 (fold-in ratified 2026-09-03): THE ARM SPLITS. "No roster" was one refusal
+      # covering two states that deserve opposite answers, and the wrong one was observed on
+      # this wave's own Patrol tick #1 — an orchestrator that had armed at engagement, was
+      # standing in the right project, and had simply not dispatched anything yet got
+      # REFUSED with a wall of candidate paths describing a root that was perfectly correct.
+      # Arming precedes dispatch by design (SKILL.md §Dispatch: "arm at engagement"), so the
+      # first tick of every run reaches this line, and answering it with a refusal teaches
+      # the reader to ignore the one message that also reports a mis-resolved root.
+      #
+      # THE TWO STATES, and the fact that tells them apart:
+      #   armed here, and the walk CHOSE a real `.bionic`  -> QUIET. The Patrol is doing its
+      #     job; there is simply nothing on the roster yet. Exit 0, stamp kept (it was
+      #     written above), one line, and no candidate walk — the root is not in doubt.
+      #   anything else                                     -> the refusal below, unchanged.
+      #
+      # THE ARMING RECORD IS THE LOAD-BEARING HALF. It is written only by `arm`, and its
+      # path is resolved against the SAME root the roster's is, so a tick that resolved the
+      # wrong root finds no arming record there either and refuses — which is exactly the
+      # failure the refusal exists to report. The root tag is the second guard, and it is
+      # read off the walk taken ABOVE the stamp write for the reason given there.
+      TICK_ARMED="$(patrol_armed_file "$SESSION_ID")" || TICK_ARMED=""
+      if [ -n "$TICK_ARMED" ] && [ -f "$TICK_ARMED" ] && [ ! -L "$TICK_ARMED" ] \
+         && [ "$TICK_ROOT_TAG" = "chosen" ]; then
+        printf '%s|at=%s|session=%s|decision=QUIET|total=%s|open=%s\n' \
+          "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
+        say "QUIET — armed, nothing dispatched yet on this session"
+        exit 0
+      fi
       die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
-      die "An absent roster usually means the wrong project root was resolved, or nothing has"
-      die "been dispatched yet on this session — either way, nothing was read to decide DISARM"
-      die "from, and DISARM ends the Patrol for the rest of this session."
+      die "An armed session with nothing dispatched yet is QUIET, and was answered above — so"
+      die "reaching this line means the Patrol never armed here, or the wrong project root was"
+      die "resolved. Either way nothing was read to decide DISARM from, and DISARM ends the"
+      die "Patrol for the rest of this session."
+      # THE WALK, SHOWN (2.4, AC-13). The sentence above names the likely cause and then
+      # leaves the reader with the one question they cannot answer from a message: WHICH
+      # ancestor was taken, and what was passed over to get there. That answer is a property
+      # of the filesystem above their cwd, so it is printed rather than described —
+      # `project_root_candidates` is the same walk `project_root` just took, one line per
+      # ancestor with the reason it was rejected, and the chosen one marked. A phantom
+      # `.bionic` nested under a project, a symlinked one, a `.bionic` that only exists
+      # inside $HOME: each shows up as its own line with its own tag.
+      die "The root came from this walk over the ancestors of $PWD (path, then verdict):"
+      printf '%s\n' "$TICK_ROOT_WALK" | while IFS= read -r ROOT_CAND; do
+        die "  $ROOT_CAND"
+      done
       exit 2
     fi
 
@@ -1470,19 +1897,6 @@ EOF
       printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
-      # A blind wall outranks a quiet roster on the EXIT CODE alone — the decision line
-      # above still says what the roster says. Silence here would be the detector's own
-      # failure mode: the roster of a session whose wall is blind is exactly the roster
-      # that looks finished.
-      #
-      # AND IT OUTRANKS THE STAMP REMOVAL OUTRIGHT, which is the one place the precedence
-      # is more than an exit code. An empty roster under a blind wall is not a finished
-      # run, it is a run whose dispatches stopped being recorded — so the clock is the last
-      # thing that should stop, and the stamp stays exactly where the re-invoke the NOTIFY
-      # names will need it. SKILL.md §Dispatch states this order for the model; this is the
-      # same order taken on disk.
-      [ "$WALL_BLIND" -eq 1 ] && exit 1
-
       # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
       # so the stamp this very tick wrote before it decided has to stop claiming a live
       # clock, or hooks/patrol-revive.sh reads the stop this line just chose as a death and
@@ -1495,11 +1909,173 @@ EOF
       exit 0
     fi
 
-    if [ -n "$NOTIFY_ROWS" ]; then
+    # ─────────────────────────────────────── the lease overrun (spec AC-28)
+    #
+    # A spawned worktree is a leased slot bound to the ledger row that dispatched its
+    # writer, and the lease ends when that row is fact-discharged (design ledger C1). A tree
+    # still standing after that is a slot counted against the worktree budget that nobody
+    # holds — and nothing else in the fleet walks `.worktrees` against the roster, so it
+    # stays invisible until someone runs out of budget.
+    #
+    # READ OFF THE VERDICT THIS TICK ALREADY TOOK. `$VERDICT_OUT` is one
+    # `session-sweeper.sh verdict` over the whole roster, and it is where the discharge
+    # vocabulary lives: `state=MET`/`WAIVED`, and the `acked=` the sweeper folds in from its
+    # own ledger. A roster read on its own would miss every acked row. The library takes a
+    # FILE, so the lines this tick is already holding are spilled to a temporary one and
+    # removed again — never into `.bionic/tmp`, which is state the operator reads.
+    #
+    # THE CONVENTION AND THE PREDICATE ARE THE LIBRARY'S, not a second copy here:
+    # `.worktrees/<dir>` belongs to the row named `W-<DIR>` uppercased, and "discharged"
+    # means acked or MET/CLOSED/WAIVED. Three callers share that definition
+    # (payload/scripts/lib/worktree.sh's header names them); this is the third.
+    #
+    # PLACED AFTER DISARM, BEFORE THE SCHEDULER. A run that has DELIVERED exits above, and
+    # its standing trees are the integration step's assertion to make rather than a Patrol
+    # line nobody is left to read.
+    #
+    # IT REMOVES NOTHING. `spawn-worktree.sh land` is the act and the orchestrator runs it;
+    # the tick says the tree is standing and stops there.
+    LEASE_ROWS=""; LEASE_DETAIL=""
+    LEASE_FILE="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-verdict.XXXXXX" 2>/dev/null)" || LEASE_FILE=""
+    if [ -n "$LEASE_FILE" ]; then
+      printf '%s\n' "$VERDICT_OUT" > "$LEASE_FILE" 2>/dev/null
+      while IFS= read -r LEASE_LINE; do
+        [ -n "$LEASE_LINE" ] || continue
+        LEASE_PATH="$(printf '%s' "$LEASE_LINE" | cut -f1)"
+        LEASE_ROW="$(printf '%s' "$LEASE_LINE" | cut -f2)"
+        [ -n "$LEASE_PATH" ] && [ -n "$LEASE_ROW" ] || continue
+        say "NOTIFY lease-overrun $LEASE_PATH row=$LEASE_ROW"
+        LEASE_ROWS="${LEASE_ROWS}${LEASE_ROWS:+,}$(clean "$LEASE_ROW")"
+        LEASE_DETAIL="${LEASE_DETAIL}${LEASE_DETAIL:+; }$(clean "$LEASE_ROW"): lease-overrun, $(clean "$LEASE_PATH") still stands after the row was discharged"
+      done <<EOF
+$(worktree_lease_overruns "$REPO_REAL" "$LEASE_FILE")
+EOF
+      rm -f "$LEASE_FILE" 2>/dev/null || :
+    else
+      die "WARN — no temporary file for the lease walk; standing worktrees were not checked."
+    fi
+
+    # ─────────────────────────────────────── the scheduler: pressure, then fills
+    #
+    # PLACED HERE, after DISARM and before NOTIFY/QUIET, and the placement is the contract.
+    # DISARM exits above: a run that has DELIVERED gets no fills, because there is nothing
+    # left to fill. Everything else — a live wave, a lull between batches, a roster with an
+    # overdue row — gets both the pressure reading and the fill decision, and then the
+    # decision line it was already going to get. A tick that filled instead of notifying
+    # would trade a report the operator asked for against one they did not.
+    #
+    # PRESSURE FIRST, ALWAYS. See the block comment above `space_field` for why the order is
+    # not negotiable and why nothing here re-derives the budget.
+    SCHED_CORES="$(space_field "$(resources_probe)" cores)"
+    case "${SCHED_CORES:-}" in ''|*[!0-9]*) SCHED_CORES=1 ;; esac
+    [ "$SCHED_CORES" -ge 1 ] || SCHED_CORES=1
+    SCHED_PRESSURE="$(resources_pressure "$SCHED_CORES" 2>/dev/null)" || SCHED_PRESSURE=""
+    SCHED_STATE="$(space_field "$SCHED_PRESSURE" state)"
+    SCHED_FREE="$(space_field "$SCHED_PRESSURE" free_mb)"
+    SCHED_LOAD="$(space_field "$SCHED_PRESSURE" load_1m)"
+    # A pressure read that will not parse is not an emergency and not a hold: it is a
+    # reading this tick does not have, and the fill decision proceeds on the budget alone.
+    # Refusing to fill on an unreadable probe would let one broken `vm_stat` stall a wave.
+    case "${SCHED_STATE:-}" in ok|hold|emergency) : ;; *) SCHED_STATE=ok ;; esac
+
+    # The plan and its budget, read once. Both may be absent — a project with no plan, or a
+    # plan written before Step 0 ever probed — and absence is INERT: the tick says why it is
+    # not filling and fills nothing, exactly as the dispatch wall's budget arm goes inert on
+    # the same missing line. A budget is a ceiling a run opts into.
+    SCHED_PLAN="$(active_plan "$REPO_REAL")" || SCHED_PLAN=""
+    SCHED_BUDGET=""
+    [ -n "$SCHED_PLAN" ] && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
+    SCHED_WRITERS="$(budget_int "$SCHED_BUDGET" writers)"
+    SCHED_JOBS="$(budget_int "$SCHED_BUDGET" test_jobs)"
+
+    if [ "$SCHED_STATE" = emergency ]; then
+      # THE KILL FLOOR. The tick NAMES the writer and stops nothing itself: stopping a
+      # writer destroys work, and an irreversible act taken by a hook off a single reading
+      # is the one thing this design refuses (design-ledger S7). The orchestrator executes
+      # it through the stopping standard, which is why the line carries the address that
+      # standard takes rather than a name.
+      SCHED_TARGET="$(youngest_suite_writer "$ROSTER_FILE" "$SESSION_ID")"
+      if [ -n "$SCHED_TARGET" ]; then
+        say "EMERGENCY free_mb=${SCHED_FREE} — stop youngest suite-running writer ${SCHED_TARGET}"
+      else
+        say "EMERGENCY free_mb=${SCHED_FREE} — no suite-running writer on this roster to stop; the pressure is not this session's to relieve"
+      fi
+    fi
+
+    if [ "$SCHED_STATE" = hold ] || [ "$SCHED_STATE" = emergency ]; then
+      SCHED_HOLDS=$(( $(read_holds "$SESSION_ID") + 1 ))
+      write_holds "$SESSION_ID" "$SCHED_HOLDS" \
+        || die "WARN — the hold counter could not be written; NARROW will not fire on the next tick."
+      [ "$SCHED_STATE" = hold ] && \
+        say "HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD} — no fills"
+      # NARROW ON THE SECOND CONSECUTIVE HOLD, and on every one after it. One hold is a
+      # burst — a suite starting, a build finishing — and halving the fleet's width off a
+      # burst is a wave that runs at half speed for the rest of the day. A hold that
+      # survives a whole interval is sustained, and that is what the counter measures.
+      #
+      # THE HALVING IS A RECOMMENDATION, not an edit. `test_jobs` lives in the plan header
+      # and the orchestrator owns that line; a tick that wrote it would be a controller.
+      # Floored at 1 because a width of zero is not a width.
+      if [ "$SCHED_HOLDS" -ge 2 ] && [ -n "$SCHED_JOBS" ]; then
+        SCHED_HALF=$(( SCHED_JOBS / 2 ))
+        [ "$SCHED_HALF" -ge 1 ] || SCHED_HALF=1
+        say "NARROW test_jobs=${SCHED_HALF}"
+      fi
+    else
+      # OK CLEARS THE COUNTER, so "two consecutive" means consecutive. A counter that only
+      # ever rose would make NARROW inevitable on a long enough wave.
+      [ "$(read_holds "$SESSION_ID")" = "0" ] || write_holds "$SESSION_ID" 0 || :
+
+      # ── FILL. gap = writers − RUNNING, ready = pending slices whose deps all landed.
+      #
+      # RUNNING IS `open` (WALLS/2): the rows already counted above, on THIS session's
+      # roster — a `status=intended` row with no `landing-swept/v1` marker and no ack. It is
+      # the loop's own count rather than a second walk, because two definitions of "running"
+      # in one file is the drift the count exists to prevent.
+      if [ -z "$SCHED_WRITERS" ]; then
+        if [ -z "$SCHED_PLAN" ]; then
+          say "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a slice table from."
+        else
+          say "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
+        fi
+      else
+        SCHED_GAP=$(( SCHED_WRITERS - OPEN ))
+        [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
+        if [ "$SCHED_GAP" -eq 0 ]; then
+          say "no FILL — writers=${SCHED_WRITERS} and ${OPEN} open row(s): the budget is full."
+        else
+          SCHED_READY="$(slice_ready "$(slice_table "$SCHED_PLAN")")"
+          SCHED_IDS=""; SCHED_N=0
+          while IFS= read -r SLICE_ID; do
+            [ -n "$SLICE_ID" ] || continue
+            [ "$SCHED_N" -lt "$SCHED_GAP" ] || break
+            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(clean "$SLICE_ID")"
+            SCHED_N=$((SCHED_N + 1))
+          done <<EOF
+$SCHED_READY
+EOF
+          if [ "$SCHED_N" -gt 0 ]; then
+            say "FILL ${SCHED_IDS}"
+          else
+            say "no FILL — writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending slice has all its dependencies landed."
+          fi
+        fi
+      fi
+    fi
+
+    # ONE NOTIFY BAND, TWO CONTRIBUTORS. An overdue row and a standing lease are both
+    # "something needs surfacing", and the exit-1 band is what the Patrol's prompt reads;
+    # a lease overrun that decided QUIET would print a line and then tell the reader
+    # nothing was wrong. The rows and the details are concatenated rather than given a
+    # field of their own, so no consumer of this schema has to learn a new key to see them.
+    if [ -n "$NOTIFY_ROWS" ] || [ -n "$LEASE_ROWS" ]; then
       printf '%s|at=%s|session=%s|decision=NOTIFY|total=%s|open=%s|rows=%s|detail=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN" \
-        "$NOTIFY_ROWS" "$(clean "$NOTIFY_DETAIL")"
-      say "NOTIFY — past declared duration: $NOTIFY_DETAIL"
+        "${NOTIFY_ROWS}${NOTIFY_ROWS:+${LEASE_ROWS:+,}}${LEASE_ROWS}" \
+        "$(clean "${NOTIFY_DETAIL}${NOTIFY_DETAIL:+${LEASE_DETAIL:+; }}${LEASE_DETAIL}")"
+      # The lease lines were said where they were found; only the duration half needs a
+      # sentence here, and a tick that has only the other half must not print an empty one.
+      [ -n "$NOTIFY_DETAIL" ] && say "NOTIFY — past declared duration: $NOTIFY_DETAIL"
       exit 1
     fi
 
@@ -1515,7 +2091,6 @@ EOF
     else
       say "QUIET — $OPEN open row(s) on this roster, none past their declared duration."
     fi
-    [ "$WALL_BLIND" -eq 1 ] && exit 1
     exit 0
     ;;
 esac
