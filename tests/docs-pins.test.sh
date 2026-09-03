@@ -161,10 +161,18 @@ AGENT_RULES="${REPO}/.claude/rules/agent-discipline.md"
 # The four pinned strings, spelled here exactly as they must appear on disk.
 PIN_PROBE='`resources_probe` and `resources_budget` from `<plugin-root>/scripts/lib/resources.sh` yield the run'"'"'s `parallel-budget:` — one string, recorded verbatim in plan frontmatter, printed in the display, and never re-derived downstream.'
 PIN_FILL='every slice with no unmet dependency dispatches in one batch up to `writers`; sequence only for shared state or when the batch would exceed the budget'
-PIN_JOBS='Your brief names `BIONIC_TEST_JOBS=<test_jobs>` — the run'"'"'s per-suite share of the parallel budget. Export it for the suite command your brief names; never raise it on your own judgment, and never invent one when the brief carries none.'
+PIN_JOBS='**Your brief names `BIONIC_TEST_JOBS=<test_jobs>`** — the run'"'"'s per-suite share of the parallel budget. Export it for the suite command your brief names; never raise it on your own judgment, and never invent one when the brief carries none.'
 
-# has_pin <file> <string> -> 0 when the file carries the string verbatim.
-has_pin() { grep -qF -- "$2" "$1" 2>/dev/null; }
+# has_pin <file> <string> -> 0 when the file carries the string.
+#
+# WHITESPACE-NORMALIZED, and that is the only latitude given: the file is folded to one
+# line with every run of whitespace collapsed to a single space before the match, so a
+# sentence that wraps across two source lines — which every one of these does in at least
+# one of its homes — still matches, while a changed word, a changed backtick or a changed
+# punctuation mark does not. `tr` + `sed` rather than a regex, so the needle is compared
+# literally by `grep -F`.
+_flatten() { tr '\n' ' ' < "$1" 2>/dev/null | sed 's/[[:space:]][[:space:]]*/ /g'; }
+has_pin() { _flatten "$1" | grep -qF -- "$2"; }
 
 if has_pin "$SKILL_MD" "$PIN_PROBE"; then
   ok "9: SKILL.md Step 0 carries the resources-probe sentence verbatim"
@@ -199,12 +207,15 @@ else
 fi
 
 # clear_paragraph <file> -> the one paragraph opening with the `/clear` marker, verbatim.
-# Paragraph-scoped rather than line-scoped: the two channels wrap at different widths
-# would be a real difference, and this pin is for byte identity, not for gist.
+# Paragraph-scoped rather than line-scoped: a difference in how the two channels wrap the
+# same words IS a difference, and this pin is for byte identity, not for gist. It ends at a
+# blank line or at the render's own `<!-- SURVIVAL-END -->` marker, which agents-src/render.sh
+# writes immediately after the last injected line with no blank between them.
 clear_paragraph() {
   awk '
     /^\*\*`\/clear` does not kill agents\.\*\*/ { inp = 1 }
     inp && /^[[:space:]]*$/ { exit }
+    inp && /^<!--/ { exit }
     inp { print }
   ' "$1" 2>/dev/null
 }
