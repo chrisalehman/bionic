@@ -1313,10 +1313,11 @@ AD_SUB_B="${AD_TR_B%.jsonl}/subagents"
 
 # The adopted agent: filed under the PREDECESSOR ($SID_B), rostered by the ADOPTING session
 # ($SID_A) with the row `adopt` writes — `identified`, the transcript-form id, the
-# addressing form built for THIS session, and the provenance.
+# addressing form built from the session that LAUNCHED it ($SID_B, T3 FINDING 1), and the
+# provenance.
 plant_agent "$AD_SUB_B" "aadoptee-1111111111111111" "adoptee"
 roster_row "$AD_REPO" "$SID_A" "adoptee" "aadoptee-1111111111111111" "" "identified" "" "" \
-  "adoptee@session-${SID_A:0:8}" "$SID_B"
+  "adoptee@session-${SID_B:0:8}" "$SID_B"
 
 # The payload is the ADOPTING session's own: its session key and its own transcript. That
 # is the configuration the field hit, and the one §13 does not cover — §13 hands the gate
@@ -1325,7 +1326,7 @@ roster_row "$AD_REPO" "$SID_A" "adoptee" "aadoptee-1111111111111111" "" "identif
 printf 'DEBUG-OBS>>%s<<\n' "$( cd "$AD_REPO" && CLAUDE_CONFIG_DIR="${AD_TR%/projects/*}" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" "aadoptee-1111111111111111" 2>&1 | tail -20 )"
 observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-1111111111111111"
 printf 'DEBUG-STATE>>%s<<\n' "$(cat "$AD_REPO/$STATE_REL" 2>&1)"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee@session-${SID_A:0:8}")"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee@session-${SID_B:0:8}")"
 printf 'DEBUG-ADOPT-ERR>>%s<<\n' "$GUARD_ERR"
 expect_status "an observed ADOPTED agent is stoppable at the address adopt prints" 0 "$GUARD_ST"
 expect_absent "…and the unresolved refusal is gone" \
@@ -1337,8 +1338,8 @@ expect_absent "…and the unresolved refusal is gone" \
 # defect (both exit 2).
 plant_agent "$AD_SUB_B" "aadoptee-2222222222222222" "adoptee2"
 roster_row "$AD_REPO" "$SID_A" "adoptee2" "aadoptee-2222222222222222" "" "identified" "" "" \
-  "adoptee2@session-${SID_A:0:8}" "$SID_B"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee2@session-${SID_A:0:8}")"
+  "adoptee2@session-${SID_B:0:8}" "$SID_B"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee2@session-${SID_B:0:8}")"
 expect_status "an UNOBSERVED adopted agent is still refused" 2 "$GUARD_ST"
 expect_contains "…and the refusal is the observation demand, not the unresolved one" \
   "No observation" "$GUARD_ERR"
@@ -1351,15 +1352,17 @@ observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-2222222222222222"
 run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-2222222222222222")"
 expect_status "the transcript-form id of an adopted agent resolves as well" 0 "$GUARD_ST"
 
-# ONE SPELLING (1.5, AC-5). This section used to drive the same adopted row under BOTH
-# `<name>@session-<this session's eight>` and `<name>@session-<the predecessor's eight>`,
-# because which one the platform keys on for a handed-over agent was unknown and `adopt`
-# printed both. The probe settled it — a plain `/clear` re-keys the session id, so the
-# surviving address is built from the surviving key — and `adopt` now prints exactly that
-# one (tests/session-poker.test.sh §8a). What this gate does is unchanged: it resolves on
-# the base name and takes ownership from the id on this session's roster, so no suffix was
-# ever load-bearing here. The pin follows the printed spelling rather than pinning a second
-# one no reader is handed.
+# ONE SPELLING, AND IT IS THE LAUNCHING SESSION'S (T3 FINDING 1, live 2026-09-03). This
+# section used to drive the adopted row under `<name>@session-<the ADOPTING session's
+# eight>`, on the probe's reading that a `/clear` re-keys the session id and re-keys the
+# address with it. The live harness refused exactly that string — `No task found with ID:
+# PROBE-AGENT@session-<adopting 8>. Running teammates: PROBE-AGENT@session-<launching 8>` —
+# so the teammate table keys on the session that made the `Agent` call and the roll-over
+# does not move it. `adopt` prints that one now (tests/session-poker.test.sh §8a) and writes
+# it onto the row, so the pins here follow the printed spelling. What this gate does is
+# unchanged: it resolves on the base name and takes ownership from the id on this session's
+# roster, and the suffix reaches `typed_is_identity` either as the recorded address or as
+# the owning session's own eight — both of which this spelling satisfies.
 
 # WHAT THE WIDENING IS AND IS NOT. It restores RESOLUTION for the sessions this roster
 # names — a directory at a time, since that is the grain a row can name — and it grants no
