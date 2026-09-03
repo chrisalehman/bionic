@@ -351,6 +351,13 @@ run "version-compare.test.sh" bash tests/version-compare.test.sh
 # patrol_stamp_state's own reader (session-poker.sh and dispatch-preflight.sh switch to it in
 # later slices).
 run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh
+# bionic 1.4.0 (slice ADOPT, spec AC-7/AC-8/AC-9/AC-12/AC-16): the CONVENTION every hook
+# now carries — one loader block byte for byte under its own BIONIC_LIB_WANT line, the
+# root/session/run facts asked of the library rather than restated, and the run predicate
+# DRIVEN over real fixtures (no .bionic, a closed run, an open run) so a hook that calls
+# `active_run` and ignores the answer cannot pass. Both missing-library fail classes drive
+# too: the repair allowlist that ends the lockout, and the one-line step-aside.
+run "hook-adoption.test.sh" bash tests/hook-adoption.test.sh
 # bionic 1.4.0 (wave-bionic-1.4.0-update, 2026-09-02) — the library spine's unit suites, one
 # per fact, hand-listed like every suite outside hooks/:
 #   - resources.test.sh: scripts/lib/resources.sh (probe / budget / pressure — the parallel

@@ -176,9 +176,17 @@ mkdir -p "$FAKE_HOME/.claude/projects/-sandbox"
 : > "$FAKE_HOME/.claude/projects/-sandbox/$SID.jsonl"
 
 OUT=""; ERR=""; ST=0
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2:
+# a plain /clear re-keys both together). Since bionic 1.4.0 the guard takes its session
+# id from lib/session.sh, where the env value is primary and the payload is a witness,
+# so a driver that left the runner's own CLAUDE_CODE_SESSION_ID in the environment
+# would be driving a divergence rather than a session — and every roster filename below
+# would be built from the wrong key.
 run_guard() {  # <payload> <target...>
   local payload="$1"; shift
+  local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   OUT=$(printf '%s' "$payload" | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
+          CLAUDE_CODE_SESSION_ID="$_sid" \
           ANTHROPIC_API_KEY=sk-fixture-marker bash "$GUARD" "$@" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
@@ -187,7 +195,9 @@ run_guard() {  # <payload> <target...>
 
 run_wall() {  # <payload> <wall> — the positive control: straight in, no guard
   local payload="$1" wall="$2"
+  local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   OUT=$(printf '%s' "$payload" | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
+          CLAUDE_CODE_SESSION_ID="$_sid" \
           ANTHROPIC_API_KEY=sk-fixture-marker bash "$wall" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
@@ -332,15 +342,19 @@ expect_eq "G5.3 …and DOES journal exactly one row" \
 echo "=== G6 — one guard, one root: the resolver is the shared copy ==="
 # ============================================================
 #
-# The guard stats a path under the project root, so it joins the resolve_project_root
-# family rather than inventing a seventh answer. Body-for-body agreement across the
-# whole family is pinned in tests/cross-gate-agreement.test.sh §N.1; this is the
-# local, non-vacuous half — that the function is here at all and that this guard
-# maps a WORKTREE onto its main repository, which is the property the whole family
-# exists for.
-GUARD_RESOLVER=$(awk '/^resolve_project_root\(\)/,/^\}/' "$GUARD")
-expect_eq "G6.1 the guard carries resolve_project_root()" "yes" \
-  "$([ -n "$GUARD_RESOLVER" ] && echo yes || echo no)"
+# The guard stats a path under the project root, so it has to land on the SAME root
+# the dispatch wall wrote the roster into. Until bionic 1.4.0 that was arranged by
+# carrying a byte-identical copy of `resolve_project_root` — one of eight, held
+# together by an agreement suite. The copies are gone: there is one answer now,
+# lib/root.sh's `project_root`, and what this section pins locally is that the guard
+# ASKS for it and that the answer maps a WORKTREE onto its main repository, which is
+# the property the family existed for.
+expect_eq "G6.1 the guard has no private root resolver left" "" \
+  "$(awk '/^resolve_project_root\(\)/,/^\}/' "$GUARD")"
+expect_eq "G6.2 …and asks the library instead" "yes" \
+  "$(grep -q 'project_root "\$CWD"' "$GUARD" && echo yes || echo no)"
+GUARD_ROOT_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/root.sh"
+[ -r "$GUARD_ROOT_LIB" ] || GUARD_ROOT_LIB="${BIONIC_HOOKS_DIR}/../scripts/lib/root.sh"
 WT_MAIN="$SANDBOX/wt/repo"
 mkdir -p "$WT_MAIN"
 git -C "$WT_MAIN" init -q 2>/dev/null
@@ -352,9 +366,10 @@ git -C "$WT_MAIN" commit -qm seed 2>/dev/null
 WT_LINK="$SANDBOX/wt/linked"
 git -C "$WT_MAIN" worktree add -q -b t6-wt "$WT_LINK" >/dev/null 2>&1
 # (fixture sanity check removed epic-18 W3 4/6: no production subject -- see ledger-agent-context-guard.md)
+mkdir -p "$WT_MAIN/.bionic"
 expect_eq "G6.3 the guard roots a worktree path at the MAIN repository" \
   "$(cd "$WT_MAIN" && pwd -P)" \
-  "$( ( eval "$GUARD_RESOLVER"; cd "$WT_LINK" && resolve_project_root "$WT_LINK/.bionic/x" "$WT_LINK" ) 2>/dev/null)"
+  "$( ( . "$GUARD_ROOT_LIB"; cd "$WT_LINK" && project_root "$WT_LINK" ) 2>/dev/null)"
 
 # ============================================================
 echo "=== G7 — the mutation loop: each half of the partition is load-bearing ==="
@@ -366,9 +381,22 @@ echo "=== G7 — the mutation loop: each half of the partition is load-bearing =
 # on the one cell that half owns. A mutation that changes nothing means the
 # assertion above was never testing anything.
 MUTANT=""
+# A MUTANT NEEDS THE LIBRARY BESIDE IT (bionic 1.4.0). The guard loads root.sh and
+# session.sh through the shared loader idiom, whose first candidate is
+# `$(dirname "$0")/../scripts/lib`; a copy alone in the sandbox root finds nothing
+# there, fails OPEN, and every mutation arm below would be measuring the step-aside
+# instead of the deleted predicate. So the mutants live in a tree shaped like the
+# shipped one: hooks/ beside scripts/lib/.
+MUTANT_TREE="$SANDBOX/mutants"
+mkdir -p "$MUTANT_TREE/hooks" "$MUTANT_TREE/scripts/lib"
+for _acg_lib in root.sh session.sh; do
+  cp "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$_acg_lib" "$MUTANT_TREE/scripts/lib/$_acg_lib" 2>/dev/null \
+    || cp "${BIONIC_HOOKS_DIR}/../scripts/lib/$_acg_lib" "$MUTANT_TREE/scripts/lib/$_acg_lib" 2>/dev/null || true
+done
+
 mutate_guard() {  # <name> <sed expression> -> sets MUTANT. Never echoes the path: the
                   # assertions below print, and a captured stdout would swallow them.
-  MUTANT="$SANDBOX/mutant-$1.sh"
+  MUTANT="$MUTANT_TREE/hooks/mutant-$1.sh"
   sed "$2" "$GUARD" > "$MUTANT"
   if cmp -s "$GUARD" "$MUTANT"; then
     no "the $1 mutation applies at all" "the mutation target matched nothing — this proof is vacuous"
@@ -378,7 +406,9 @@ mutate_guard() {  # <name> <sed expression> -> sets MUTANT. Never echoes the pat
 }
 
 run_mutant() {  # <mutant> <payload> <target>
+  local _sid; _sid=$(printf '%s' "$2" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   OUT=$(printf '%s' "$2" | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
+          CLAUDE_CODE_SESSION_ID="$_sid" \
           ANTHROPIC_API_KEY=sk-fixture-marker bash "$1" "$3" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")

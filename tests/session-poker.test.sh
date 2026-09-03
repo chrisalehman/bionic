@@ -711,115 +711,35 @@ else
 fi
 
 # ============================================================
-section "Section 7: the blind dispatch wall — the tick sees what the roster missed"
+# Section 7 — THE BLIND-WALL DETECTOR, RETIRED (bionic 1.4.0, slice ADOPT, spec AC-7)
 # ============================================================
 #
-# The wall (hooks/dispatch-preflight.sh) is registered on the SKILL channel, in
-# skills/canonical-sdlc/SKILL.md's frontmatter, and that registration does not survive a
-# session continue, a `/clear`+resume, or `/reload-plugins`. When it is gone the failure is
-# SILENT: dispatches launch, nothing rosters them, and the first symptom is a tick refusing
-# with "no roster" — which reads as "nothing dispatched yet". These cases pin the detector
-# that names the real cause instead. Fixture transcripts only; nothing here reads the real
-# ~/.claude.
-
+# It compared main-thread `Agent` tool_uses in the transcript against rows on the roster
+# and raised a NOTIFY when dispatches outnumbered them. The condition it looked for was
+# real: the dispatch wall lived in the governing skill's frontmatter, and a skill's
+# registrations do not survive a session continue, a `/clear` + resume or a
+# `/reload-plugins` — so the wall went silently absent and dispatches launched unrostered.
+#
+# Every wall is registered in hooks/hooks.json now and survives all three, so that
+# condition cannot arise the way it did. What could still arise was the detector's own
+# false positive: it had no "no active run" branch, so a session that had simply not
+# engaged a run — no roster, because nothing was dispatched — read as a session whose wall
+# had died. That fired for real on 2026-09-02 at 20:07Z, against this wave's own
+# orchestrator, which is how it came to be in scope.
+#
+# The registration is pinned instead, in tests/hook-adoption.test.sh and
+# tests/cross-gate-agreement.test.sh §L: every hook named once in hooks.json, none in the
+# frontmatter. That is a claim about a file on disk rather than an inference from a
+# transcript, and it goes red when the wiring changes rather than when a session is idle.
+#
+# ONE HELPER SURVIVES THE RETIREMENT: `fake_config_dir`. Section 8 builds a predecessor's
+# subagent transcript under it, and `adopt` resolves the observe address through
+# CLAUDE_CONFIG_DIR — so without it that section would read the real ~/.claude.
 fake_config_dir() {  # <label> -> a CLAUDE_CONFIG_DIR with a projects/ tree
   local c="$TMPROOT/$1-config"
   mkdir -p "$c/projects/-fixture-project"
   printf '%s' "$c"
 }
-
-# One assistant entry carrying <count> main-thread `Agent` tool_uses, exactly the shape the
-# CLI writes: compact JSON, `isSidechain` false, no agent key.
-tx_dispatch() {  # <count>
-  local n="$1" i=1 blocks=""
-  while [ "$i" -le "$n" ]; do
-    blocks="${blocks}${blocks:+,}{\"type\":\"tool_use\",\"id\":\"toolu_0$i\",\"name\":\"Agent\",\"input\":{\"subagent_type\":\"bionic:implementor\",\"prompt\":\"go\"}}"
-    i=$((i+1))
-  done
-  printf '{"type":"assistant","isSidechain":false,"sessionId":"%s","message":{"role":"assistant","content":[%s]}}\n' \
-    "$SID" "$blocks"
-}
-
-# A dispatch made from INSIDE an agent context. Two spellings, because the CLI has used
-# both: a sidechain flag on the entry, and an explicit agent key. Neither is a main-thread
-# dispatch and neither may be counted — a teammate's dispatch never reaches this wall at all
-# (record session-20260814…/min-interactive-agent-hook.md §5a), so counting it would make a
-# live wall look blind.
-tx_sidechain() {
-  printf '{"type":"assistant","isSidechain":true,"sessionId":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_sc","name":"Agent","input":{"prompt":"nested"}}]}}\n' "$SID"
-}
-tx_agent_context() {
-  printf '{"type":"assistant","agentId":"agent-inner-1","sessionId":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_ag","name":"Agent","input":{"prompt":"nested"}}]}}\n' "$SID"
-}
-
-# A dispatch the wall REFUSED. The tool_use is in the transcript exactly as a launched one
-# is, so without this the wall doing its job would read as the wall being absent.
-tx_refusal() {
-  printf '{"type":"user","isSidechain":false,"sessionId":"%s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"PreToolUse:Agent hook error: [${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh]: patrol checkpoint: this dispatch is refused."}]}}\n' "$SID"
-}
-
-write_transcript() {  # <config dir> <sid> — body on stdin
-  cat > "$1/projects/-fixture-project/$2.jsonl"
-}
-
-# ---------- 7a: more dispatches than rows -> NOTIFY names the count and the cure ----------
-R7A="$(make_repo s7-blind)"; new_roster "$R7A"
-add_row "$R7A" name=rostered-one status=intended deliverable=out.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-C7A="$(fake_config_dir s7a)"
-{ tx_dispatch 2; tx_sidechain; tx_dispatch 1; tx_agent_context; } | write_transcript "$C7A" "$SID"
-export CLAUDE_CONFIG_DIR="$C7A"
-poke "$R7A" tick
-expect_contains "a blind wall is named: the verdict carries wall-blind" "wall-blind" "$OUT"
-expect_contains "the count of main-thread dispatches is stated (3)" "dispatches=3" "$OUT"
-expect_contains "the count of rostered rows is stated (1)" "rostered=1" "$OUT"
-expect_contains "the cure is literal, not described" "re-invoke /bionic:canonical-sdlc" "$OUT"
-expect_contains "the wall-blind line is a NOTIFY decision" "decision=NOTIFY" "$OUT"
-expect_eq "a blind wall exits in the NOTIFY band" 1 "$RC"
-
-# ---------- 7b: every dispatch rostered -> silence ----------
-R7B="$(make_repo s7-live)"; new_roster "$R7B"
-add_row "$R7B" name=row-one status=intended deliverable=a.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-add_row "$R7B" name=row-two status=intended deliverable=b.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-C7B="$(fake_config_dir s7b)"
-{ tx_dispatch 2; tx_sidechain; } | write_transcript "$C7B" "$SID"
-export CLAUDE_CONFIG_DIR="$C7B"
-poke "$R7B" tick
-expect_absent "a live wall says nothing about blindness" "wall-blind" "$OUT"
-
-# ---------- 7c: no transcript to read -> silence, never a guessed alarm ----------
-R7C="$(make_repo s7-notx)"; new_roster "$R7C"
-add_row "$R7C" name=row-one status=intended deliverable=a.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-C7C="$(fake_config_dir s7c)"
-export CLAUDE_CONFIG_DIR="$C7C"
-poke "$R7C" tick
-expect_eq "an unresolvable transcript leaves the decision's exit code alone" 0 "$RC"
-
-# ---------- 7d: a REFUSED dispatch is a wall doing its job, not a missing wall ----------
-R7D="$(make_repo s7-refused)"; new_roster "$R7D"
-add_row "$R7D" name=row-one status=intended deliverable=a.md duration="30 minutes" \
-  launched_at="$(iso_ago 60)"
-C7D="$(fake_config_dir s7d)"
-{ tx_dispatch 1; tx_dispatch 1; tx_refusal; } | write_transcript "$C7D" "$SID"
-export CLAUDE_CONFIG_DIR="$C7D"
-poke "$R7D" tick
-expect_absent "a refused dispatch is not counted as an unwalled one" "wall-blind" "$OUT"
-
-# ---------- 7e: the reported symptom — no roster at all, dispatches in the transcript ----
-# This is the live case that opened the task: the tick refused with "no roster", which reads
-# as "nothing has been dispatched yet" and is the opposite of what happened. The refusal
-# still stands (it is about the read, not about the wall) but it no longer travels alone.
-R7E="$(make_repo s7-noroster)"
-C7E="$(fake_config_dir s7e)"
-tx_dispatch 2 | write_transcript "$C7E" "$SID"
-export CLAUDE_CONFIG_DIR="$C7E"
-poke "$R7E" tick
-expect_contains "an absent roster with dispatches behind it is diagnosed, not just refused" \
-  "wall-blind" "$OUT"
-expect_contains "the absent-roster refusal still stands" "REFUSED" "$OUT"
 
 # ============================================================
 section "Section 8: adopt — the agents a predecessor session left behind"
@@ -1326,24 +1246,15 @@ expect_contains "a roster with open work decides QUIET" "decision=QUIET" "$OUT"
 expect_eq "…and that tick KEEPS the stamp" "yes" \
   "$([ -f "$(stamp_of "$R9D")" ] && echo yes || echo no)"
 
-# ---------- a blind wall outranks the DISARM, and the stamp stays with it ----------
+# ---------- the blind-wall precedence, retired with the detector ----------
 #
-# SKILL.md §Dispatch states the precedence for the model: a `wall-blind` NOTIFY on the same
-# tick outranks the DISARM line, because an empty roster is exactly what a session whose
-# dispatch wall died looks like. The stamp follows that precedence rather than the decision
-# line — stopping the clock on the one tick that says "your wall is gone" would take the
-# monitor down with it.
-R9E="$(make_repo s9-blind)"; new_roster "$R9E"; armed_ago "$R9E"; delivered_plan "$R9E"
-C9E="$(fake_config_dir s9e)"
-tx_dispatch 2 | write_transcript "$C9E" "$SID"
-export CLAUDE_CONFIG_DIR="$C9E"
-poke "$R9E" tick
-expect_contains "an empty roster under a blind wall still prints its DISARM line" \
-  "decision=DISARM" "$OUT"
-expect_contains "…beside the wall-blind NOTIFY that outranks it" "wall-blind" "$OUT"
-expect_eq "…and the stamp STAYS: the run is not over, the wall is" "yes" \
-  "$([ -f "$(stamp_of "$R9E")" ] && echo yes || echo no)"
-unset CLAUDE_CONFIG_DIR
+# A `wall-blind` NOTIFY used to outrank the DISARM decision and keep the stamp: an empty
+# roster was exactly what a session whose dispatch wall had died looked like, so stopping
+# the clock on that tick would have taken the monitor down with the thing it monitors.
+# The wall cannot die that way any more — every hook is registered in hooks/hooks.json and
+# survives a continue, a `/clear` + resume and a `/reload-plugins` — so the detector, the
+# precedence and this fixture go together. What replaces the guarantee is the registration
+# pin itself (tests/hook-adoption.test.sh, cross-gate §L).
 
 # ---------- disarm follows the PINNED root, exactly as arm does ----------
 # The mirror of Section 6's worktree case: a disarm that removed a stamp under the worktree

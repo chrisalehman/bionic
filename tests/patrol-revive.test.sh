@@ -61,12 +61,29 @@ OTHER_SID="99999999-8888-7777-6666-555555555555"
 
 # A scratch project carrying a .bionic/tmp and a TINY poker-interval, so 2x the
 # interval is two seconds and a backdated stamp is decisively stale without any
-# wait. No git repository is created: resolve_project_root's no-git arm answers at
-# the nearest ancestor carrying `.bionic/`, which is this directory itself.
+# wait. No git repository is created: `project_root` answers at the nearest ancestor
+# carrying `.bionic/`, which is this directory itself.
+#
+# AND AN OPEN RUN (bionic 1.4.0, spec AC-7). The hook is registered always-on now, so it
+# is delivered on every Stop in every project on the machine, and its first scope
+# condition is `active_run` — there is no Patrol to be dead where there is no run. Every
+# fixture that expects this monitor to SPEAK therefore needs a plan; §11 below drives the
+# paired negative, where the plan is the only thing missing.
 make_env() {  # [interval] -> project dir on stdout
   local dir; dir=$(mktemp -d)
-  mkdir -p "$dir/.bionic/tmp"
+  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
   printf 'poker-interval: %s\n' "${1:-1s}" > "$dir/.bionic/config.yaml"
+  cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<'PRPLAN'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: slices in flight
+PRPLAN
   printf '%s' "$dir"
 }
 
@@ -101,13 +118,19 @@ stdin_for() {  # <cwd> [session] [event] [stop_hook_active]
       hook_event_name:$e,stop_hook_active:$a}'
 }
 
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2).
+# The hook takes its session key from lib/session.sh, env first, and the stamp filename
+# is built from it — so a driver that left the runner's own id in the environment would
+# have this monitor watching a file the fixture never wrote.
 fire() {  # <cwd> [session] [event] [stop_hook_active]
-  HOOK_OUT=$(bash "$HOOK" <<< "$(stdin_for "$1" "${2:-$SID}" "${3:-Stop}" "${4:-false}")" 2>/dev/null)
+  HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="${2:-$SID}" bash "$HOOK" \
+    <<< "$(stdin_for "$1" "${2:-$SID}" "${3:-Stop}" "${4:-false}")" 2>/dev/null)
   HOOK_RC=$?
 }
 
 fire_raw() {  # <stdin-json>
-  HOOK_OUT=$(bash "$HOOK" <<< "$1" 2>/dev/null); HOOK_RC=$?
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$_sid" bash "$HOOK" <<< "$1" 2>/dev/null); HOOK_RC=$?
 }
 
 reason_of()   { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
@@ -268,8 +291,27 @@ git -C "$WTREPO" config user.name "T"
 echo seed > "$WTREPO/README.md"
 git -C "$WTREPO" add README.md >/dev/null 2>&1
 git -C "$WTREPO" commit -qm seed >/dev/null 2>&1
-mkdir -p "$WTREPO/.bionic/tmp"
-printf 'poker-interval: 1s\n' > "$WTREPO/.bionic/config.yaml"
+mkdir -p "$WTREPO/.bionic/tmp" "$WTREPO/.bionic/docs/plans"
+# A 300s interval, not the 1s the other groups use. Group 3 has a FRESH stamp on one side
+# of every pair, and "fresh" against a 2s limit is a race with the machine: under a
+# parallel suite run the stamp this fixture writes can be three seconds old before the
+# hook reads it, and assertion 17 then blocks for a reason that is not the one under test.
+# Staleness here is an mtime backdated by ten minutes against a two-minute limit, so both
+# sides clear the boundary by an order of magnitude rather than by a second.
+printf 'poker-interval: 60s\n' > "$WTREPO/.bionic/config.yaml"
+# The open run this monitor is scoped by lives at the MAIN repository too — same
+# mapping, same reason: a reader rooted at the worktree would find neither.
+cat > "$WTREPO/.bionic/docs/plans/wave-01.plan.md" <<'PRWTPLAN'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: slices in flight
+PRWTPLAN
 WT="$WTBASE/wt"
 git -C "$WTREPO" worktree add -q -b pr-wt "$WT" >/dev/null 2>&1
 
@@ -377,15 +419,33 @@ fi
 
 # A hook with a suite, a run line and no registration is installed, green in its
 # own suite, and never fired.
+#
+# THE CHANNEL MOVED (bionic 1.4.0, slice ADOPT, spec AC-7). It was registered in the
+# governing skill's frontmatter, which is what made this monitor share the failure mode
+# it monitors: three of the four events that kill a Patrol also deregistered the hook,
+# silently and at the same moment. It is in hooks/hooks.json now and survives all four —
+# so BOTH halves are asserted, because either alone is a wall in the wrong place: a
+# lingering frontmatter entry would fire it twice per turn (the CLI does not deduplicate
+# across the two manifests), and a missing manifest entry would not fire it at all.
 TOTAL=$((TOTAL + 1))
 if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh' \
-     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
-  pass "28: SKILL.md registers the hook on the Stop channel"
+     "${BIONIC_HOOKS_DIR}/hooks.json"; then
+  pass "28: hooks/hooks.json registers the hook, always on"
 else
-  fail "28: the hook is not registered in SKILL.md — it would never fire"
+  fail "28: the hook is not registered in hooks/hooks.json — it would never fire"
+fi
+TOTAL=$((TOTAL + 1))
+# The REGISTRATION spelling, not any mention: the Patrol section names this hook in prose
+# (it is what reports a Patrol death, and the disarm ritual exists because of it), and a
+# grep for the bare filename would forbid the documentation along with the duplicate.
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive\.sh' \
+     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
+  fail "28b: SKILL.md still registers the hook — a second registration fires it twice per turn"
+else
+  pass "28b: …and SKILL.md's frontmatter does not, so it fires exactly once"
 fi
 
-# 29: THE ASSERTION THAT WOULD HAVE CAUGHT THIS. SKILL.md's frontmatter registers
+# 29: THE ASSERTION THAT WOULD HAVE CAUGHT THIS. The manifest registers
 # this hook as a BARE PATH — `command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh`,
 # no interpreter — and that is exactly how the CLI's own hook runner invokes it: a
 # shell handed the literal path as the command, which requires the tracked file
@@ -401,7 +461,7 @@ REGISTERED_RC=$?
 if [ "$REGISTERED_RC" -ne 126 ]; then
   pass "29: the hook runs when invoked exactly as registered (bare path via sh -c, rc=$REGISTERED_RC)"
 else
-  fail "29: rc=126 (Permission denied) invoking the hook as SKILL.md registers it — the tracked file lost its execute bit"
+  fail "29: rc=126 (Permission denied) invoking the hook as the manifest registers it — the tracked file lost its execute bit"
 fi
 
 echo ""
