@@ -173,17 +173,26 @@ while IFS= read -r segment; do
   IS_PUSH=1
   git_push_targets
 
-  # Block 1: this push writes to main/master. GIT_DESTS is US-separated, so
-  # bracketing it with separators makes an exact whole-word membership test —
-  # `topic/main` and `main-fixes` are their own branches and stay allowed.
+  # Block 1: this push writes to a protected branch. GIT_DESTS is US-separated;
+  # each destination is asked of git_branch_protected, which is the ONE place
+  # `main` and `master` are named — payload/scripts/lib/worktree.sh's land wall
+  # asks the same function about the branch it is about to merge into, and a
+  # second copy of the list here is how the two would drift apart.
+  # The split is pure parameter expansion: no subshell on the hot path of a hook
+  # that runs on every Bash call. `topic/main` and `main-fixes` are their own
+  # branches and stay allowed, because the predicate matches the whole name.
   # [WALL: tests/protect-main.test.sh]
-  case "$GIT_ARGV_US$GIT_DESTS$GIT_ARGV_US" in
-    *"${GIT_ARGV_US}main${GIT_ARGV_US}"*|*"${GIT_ARGV_US}master${GIT_ARGV_US}"*)
+  rest="$GIT_DESTS"
+  while [ -n "$rest" ]; do
+    dest="${rest%%"$GIT_ARGV_US"*}"
+    if [ "$dest" = "$rest" ]; then rest=""; else rest="${rest#*"$GIT_ARGV_US"}"; fi
+    [ -n "$dest" ] || continue
+    if git_branch_protected "$dest"; then
       echo "BLOCKED: Pushing to main/master is not allowed from Claude Code." >&2
       echo "Push to main must be done manually by the user." >&2
       exit 2
-      ;;
-  esac
+    fi
+  done
 
   # Block 2: force pushes (always dangerous) [WALL: tests/protect-main.test.sh]
   if [ "$GIT_FORCE" -eq 1 ]; then
@@ -201,7 +210,7 @@ fi
 # like "git push origin", "git push origin HEAD", bare "git push")
 # [WALL: tests/protect-main.test.sh]
 CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
-if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+if [ -n "$CURRENT_BRANCH" ] && git_branch_protected "$CURRENT_BRANCH"; then
   echo "BLOCKED: Cannot push while on '$CURRENT_BRANCH' branch from Claude Code." >&2
   echo "Switch to a feature branch or push manually from your terminal." >&2
   exit 2
