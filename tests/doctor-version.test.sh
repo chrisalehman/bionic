@@ -431,6 +431,100 @@ expect_no_match "33: no marketplace-latest language leaks in for the fork's feed
   "*available*claude plugin update*" "$ROW9"
 
 echo ""
+echo "=== Section 9: the version row reads the registry installPath, never the cwd (AC-20) ==="
+
+# THE DEFECT (handoff 4.3). doctor called `detect_registry_sha_lag` with NO
+# argument, and that function defaults its repo directory to `$PWD` — so the
+# commit in doctor's own header, and the whole directory-feed version row, were
+# facts about WHEREVER THE USER HAPPENED TO BE STANDING rather than about the
+# plugin tree the CLI is running. Run from an unrelated repository, doctor
+# compared the registry's recorded sha against that repository's HEAD and
+# reported `not-in-repo` about a build it had never been asked about.
+#
+# THE FIX IS THE REGISTRY'S OWN ANSWER. `installPath` is where the CLI recorded
+# the install; that directory is what the sha is compared against, and the cwd
+# is not consulted at all. The proof is a differential: the SAME registry, read
+# from two different working directories, must produce the same row.
+
+UNRELATED="${TMP}/unrelated-repo"
+mkdir -p "$UNRELATED"
+( cd "$UNRELATED" && git init -q . && git -c user.email=t@t -c user.name=t \
+    commit -q --allow-empty -m "an unrelated history" ) >/dev/null 2>&1
+
+# A directory feed whose installPath is THIS repo, exactly as Section 3 built it.
+HOME10="$(make_registry_home)"
+write_known_marketplaces "$HOME10" '{"source":"directory","path":"'"$REPO"'"}' "$REPO"
+write_installed_plugins_sha "$HOME10" "$REPO" "$REPO_HEAD"
+
+# The same run, from the unrelated repository. `run_doctor` cd's to $REPO, so
+# this case spells its own cd — that is the variable under test.
+OUT10="$( cd "$UNRELATED" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+    BIONIC_CLAUDE_HOME="$HOME10" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+    bash "$DOCTOR_SH" < /dev/null 2>&1 )"
+ROW10="$(version_row "$OUT10")"
+
+expect_match "34: from an unrelated cwd the row still reads the plugin tree" \
+  "*✓ version*${REAL_VERSION}*tree matches the registered cache*" "$ROW10"
+expect_no_match "35: the unrelated repository's history never reaches the row" \
+  "*registered build not in this tree*" "$ROW10"
+
+# And the header's commit is the plugin tree's, not the unrelated repo's.
+REPO_HEAD8="$(printf '%.8s' "$REPO_HEAD")"
+UNREL_HEAD8="$( cd "$UNRELATED" && git rev-parse HEAD 2>/dev/null | cut -c1-8 )"
+expect_match "36: the header names the plugin tree's commit" "*@ ${REPO_HEAD8}*" "$OUT10"
+
+# THE CANDIDATE THAT IS A REPOSITORY IS THE ONE ASKED. On a directory feed the
+# CLI records the CACHE as installPath and then reads the source tree instead, so
+# a registry answer with no git history behind it must fall through to the plugin
+# root rather than settle for `unknown` — measured on this machine, where the
+# registry's installPath is the 1.3.2 cache directory. The fallback is still a
+# registry-derived path and still never the cwd, which is what §9 is about.
+NOREPO="${TMP}/registry-names-a-non-repo"
+mkdir -p "$NOREPO"
+HOME12="$(make_registry_home)"
+write_known_marketplaces "$HOME12" '{"source":"directory","path":"'"$REPO"'"}' "$REPO"
+write_installed_plugins_sha "$HOME12" "$NOREPO" "$REPO_HEAD"
+
+OUT12="$( cd "$UNRELATED" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+    BIONIC_CLAUDE_HOME="$HOME12" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+    bash "$DOCTOR_SH" < /dev/null 2>&1 )"
+ROW12="$(version_row "$OUT12")"
+
+expect_match "37b: a registry path with no history falls through to the plugin root" \
+  "*✓ version*${REAL_VERSION}*tree matches the registered cache*" "$ROW12"
+expect_no_match "37c: and still never reaches the cwd's history" \
+  "*registered build not in this tree*" "$ROW12"
+if [ -n "$UNREL_HEAD8" ]; then
+  expect_no_match "37: the header never names the cwd's commit" "*@ ${UNREL_HEAD8}*" "$OUT10"
+else
+  no "37: the unrelated fixture repo has no HEAD to compare against"
+fi
+
+echo ""
+echo "=== Section 10: a git feed whose installed build is AHEAD of the marketplace (AC-19) ==="
+
+# `version_compare` (L-DETECT/4.2) gave detect_plugin_latest a real `ahead`
+# state; before it, a string inequality lumped ahead in with lag and doctor
+# printed "N available" plus an update command for a machine that was NEWER
+# than the copy it would have been updated to. The row must now say so, and
+# must not name a repair for a state that has none.
+CLONE11="$(make_git_marketplace_clone "0.0.1")"
+HOME11="$(make_registry_home)"
+write_known_marketplaces "$HOME11" '{"source":"github","repo":"example/bionic"}' "$CLONE11"
+
+OUT11="$(run_doctor "$HOME11")"
+ROW11="$(version_row "$OUT11")"
+
+expect_match "38: an ahead install is stated as newer than the marketplace copy" \
+  "*version*${REAL_VERSION}*newer than the marketplace copy*" "$ROW11"
+expect_match "39: and says there is nothing to do" "*no action*" "$ROW11"
+expect_no_match "40: no update command rides an ahead row" \
+  "*claude plugin update*" "$ROW11"
+expect_no_match "41: an ahead install raises no verdict line" \
+  "*claude plugin update bionic@bionic*" "$OUT11"
+expect_no_match "42: an ahead install is not marked broken" "*✗ version*" "$ROW11"
+
+echo ""
 echo "========================================"
 echo "doctor-version: $PASS/$TOTAL passed"
 echo "========================================"
