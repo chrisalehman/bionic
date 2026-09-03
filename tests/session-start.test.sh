@@ -105,6 +105,31 @@ write_stamp() {  # <project> <sid>
     > "$1/.bionic/tmp/patrol-$2.state"
 }
 
+# An OPEN RUN, in the shape lib/run.sh's active_plan/active_run read: a
+# flush-left `## SDLC State` heading under `.bionic/docs/plans/`, and a
+# `current:` step below 9. This is the T4 gate's own precondition (AC-11/
+# AC-12) — no earlier section in this suite plants one, so the engagement
+# gate is a complete no-op for every fixture above.
+write_open_plan() {  # <project> -> plan path on stdout
+  local dir="$1/.bionic/docs/plans/fixture" f
+  mkdir -p "$dir"
+  f="$dir/fixture.plan.md"
+  {
+    printf -- '---\n'
+    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+    printf 'intent: bugfix\nrigor: tested\nscale: task\n'
+    printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\ncurrent: 3\n'
+  } > "$f"
+  printf '%s' "$f"
+}
+
+# The engagement marker itself (lib/run.sh `engaged_session`) — a REGULAR file
+# at this exact path is the whole contract; content is never read here.
+plant_engaged() {  # <project> <sid>
+  mkdir -p "$1/.bionic/tmp"
+  : > "$1/.bionic/tmp/engaged-$2.state"
+}
+
 # Every path under .bionic with its mtime — the "wrote nothing" fingerprint.
 snap() {  # <project>
   find "$1/.bionic" 2>/dev/null | sort | while read -r f; do
@@ -276,6 +301,73 @@ eq "7.1 empty payload, no session key: exit 0" "0" "$?"
 eq "7.2 …and still wrote nothing" "$S7_BEFORE" "$(snap "$P7")"
 OUT=$( cd "$P7" && printf 'not json at all' | CLAUDE_CODE_SESSION_ID="$CUR_SID" BIONIC_CLAUDE_HOME="$WORK/nohome" bash "$HOOK" 2>/dev/null )
 eq "7.3 unparsable payload: exit 0" "0" "$?"
+
+echo ""
+echo "=== 8 — an open run, no engagement marker: one line, nothing else (AC-11) ==="
+# A predecessor roster and stamp are seeded too — the positive control that
+# proves the gate, not an empty fixture, is what silences the block: under
+# today's rules (no open run) this exact disk state would have printed both.
+P8=$(make_env 1s)
+PLAN8="$(write_open_plan "$P8")"
+roster_rows "$P8/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-DELTA"
+write_stamp "$P8" "$OLD_SID"
+S8_BEFORE=$(snap "$P8")
+OUT=$(drive "$P8" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "8.1 exit 0" "0" "$(rc)"
+has   "8.2 the one-line notice names the plan path" "$PLAN8" "$OUT"
+has   "8.3 …and names the skill to invoke" "/bionic:canonical-sdlc" "$OUT"
+eq    "8.4 exactly one line of output" "1" "$(printf '%s\n' "$OUT" | grep -c .)"
+hasnt "8.5 no re-arm instruction" "re-arm" "$OUT"
+hasnt "8.6 no adopt instruction" "adopt" "$OUT"
+hasnt "8.7 no predecessor roster line" "roster-$OLD_SID.state" "$OUT"
+hasnt "8.8 no predecessor stamps section" "predecessor stamps:" "$OUT"
+eq    "8.9 the hook wrote nothing under .bionic" "$S8_BEFORE" "$(snap "$P8")"
+
+echo ""
+echo "=== 9 — an open run + the engagement marker: today's block, unchanged (AC-12) ==="
+P9=$(make_env 1s)
+write_open_plan "$P9" >/dev/null
+roster_rows "$P9/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-DELTA"
+plant_engaged "$P9" "$CUR_SID"
+S9_BEFORE=$(snap "$P9")
+OUT=$(drive "$P9" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "9.1 exit 0" "0" "$(rc)"
+has   "9.2 the predecessor roster is listed, exactly as with no run open" \
+  "roster-$OLD_SID.state" "$OUT"
+has   "9.3 the re-arm sequence still prints: CronList first" "re-arm: CronList" "$OUT"
+has   "9.4 …through adopt" "adopt" "$OUT"
+hasnt "9.5 the bystander notice does not also print" \
+  "invoke /bionic:canonical-sdlc to engage it" "$OUT"
+eq    "9.6 the hook wrote nothing under .bionic" "$S9_BEFORE" "$(snap "$P9")"
+
+echo ""
+echo "=== 10 — a symlink at the marker path reads as absent, same as no marker (AC-4) ==="
+P10=$(make_env 1s)
+PLAN10="$(write_open_plan "$P10")"
+mkdir -p "$P10/.bionic/tmp"
+: > "$P10/.bionic/tmp/real-engaged-file"
+ln -s "$P10/.bionic/tmp/real-engaged-file" "$P10/.bionic/tmp/engaged-$CUR_SID.state"
+OUT=$(drive "$P10" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "10.1 exit 0" "0" "$(rc)"
+has   "10.2 a symlinked marker reads not-engaged: the notice prints" \
+  "invoke /bionic:canonical-sdlc to engage it" "$OUT"
+has   "10.3 …naming the plan path" "$PLAN10" "$OUT"
+hasnt "10.4 …and not the re-arm block" "re-arm" "$OUT"
+
+echo ""
+echo "=== 11 — no open run at all: the marker's presence or absence changes nothing (AC-11 pair) ==="
+# The paired control the design calls for: no plan on disk, marker absent —
+# today's behaviour, silence over a clean fixture. Marker presence must not
+# matter either, since the gate above is conditioned on PLAN being non-empty.
+P11=$(make_env 1s)
+OUT=$(drive "$P11" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq "11.1 exit 0" "0" "$(rc)"
+eq "11.2 nothing on stdout" "" "$OUT"
+P11b=$(make_env 1s)
+plant_engaged "$P11b" "$CUR_SID"
+OUT=$(drive "$P11b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq "11.3 exit 0 with the marker present too" "0" "$(rc)"
+eq "11.4 still nothing on stdout — no run, no notice, no block" "" "$OUT"
 
 echo ""
 echo "──────────────────────────────────────────────"
