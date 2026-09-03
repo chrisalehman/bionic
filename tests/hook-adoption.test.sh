@@ -209,11 +209,19 @@ echo "=== 4 — one run predicate: no hook restates it, the run-scoped ones call
 #
 # has_sdlc_state() was a five-copy family plus one merged reimplementation, and every
 # one of them answered "is there a run" by restating the algorithm. The library answers
-# it once. session-poker.sh is the last carrier and is named, not excused: slice POKER
-# converts it, and this row is what notices if that never happens.
+# it once. session-poker.sh was the last carrier — named here rather than excused — and
+# slice SCHED deleted its copy (POKER/2, ratified 2026-09-03), so the family is now EMPTY.
+# The second row is the one with teeth: an empty grep also describes a fleet that lost the
+# predicate altogether, so the tick is asked to name the library function it calls instead.
 HS_CARRIERS=$(grep -ln '^has_sdlc_state()' "$HOOKS"/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
-expect_eq "session-poker.sh is the only hook still defining has_sdlc_state" \
-  "session-poker.sh" "$HS_CARRIERS"
+expect_eq "NO hook defines has_sdlc_state any more — the family is gone, not shrunk" \
+  "" "$HS_CARRIERS"
+if grep -q 'active_plan "' "$HOOKS/session-poker.sh" 2>/dev/null; then
+  ok "…and the tick, the last carrier, calls lib/run.sh:active_plan instead"
+else
+  no "…and the tick, the last carrier, calls lib/run.sh:active_plan instead" \
+     "no active_plan call in $HOOKS/session-poker.sh"
+fi
 
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
