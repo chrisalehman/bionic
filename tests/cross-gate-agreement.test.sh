@@ -2583,6 +2583,15 @@ HOOKS_JSON_ROWS=$(jq -r '
 # Pinned BY VALUE including the ${CLAUDE_PLUGIN_ROOT} spelling, because the manifest is
 # what the harness executes: a command that reverted to a machine-local ~ path is a wall
 # that cannot resolve inside an installed plugin, and it fails in the quiet direction.
+#
+# ENGAGE.SH IS THE ONE ROW WITH AN EMPTY MATCHER BY CHOICE RATHER THAN BY EVENT SHAPE
+# (task-engaged-session, T1). UserPromptExpansion does support a matcher, on the command
+# name — the docs' own matcher table says so — but the exact spelling `command_name`
+# carries for a plugin-qualified typed command (with the leading slash? without?) was
+# measured only from the CLI binary, never from a live payload. A matcher that misses is a
+# trigger that never fires and a session that stays unengaged forever, so the name is
+# filtered INSIDE the hook, where both spellings and the leading slash are all accepted and
+# tests/engage.test.sh drives each one.
 L2_EXPECTED='
 PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh|10
 PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-database.sh|10
@@ -2599,6 +2608,8 @@ Stop||${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh|10
 Stop||${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh|10
+PreToolUse|Skill|${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
+UserPromptExpansion||${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 '
 while IFS= read -r _row; do
   [ -n "$_row" ] || continue
@@ -2976,7 +2987,7 @@ n_block_of() {  # <file> -> the marker-delimited span, markers inclusive
 N_ADOPTED='protect-main canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard
 dispatch-preflight canonical-sdlc-governing-skill landing-gate execution-recorder stop-guard
 context-spend patrol-duties-gate patrol-revive agent-context-guard preflight-probe stop-orders
-session-sweeper stop-check session-poker session-start'
+session-sweeper stop-check session-poker session-start engage'
 for _h in $N_ADOPTED; do
   expect_eq "$_h.sh carries the canonical loader block, byte for byte" \
     "$N_BLOCK" "$(n_block_of "$BIONIC_HOOKS_DIR/$_h.sh")"
@@ -3007,7 +3018,7 @@ done
 # remains is the ARGUMENT to that call.
 N_SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check
 landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder
-session-start'
+session-start engage'
 for _h in $N_SID_READERS; do
   expect_eq "$_h.sh takes its session id from lib/session.sh" "yes" \
     "$(/usr/bin/grep -q 'session_id "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
