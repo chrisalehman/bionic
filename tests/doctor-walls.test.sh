@@ -89,8 +89,15 @@ run_doctor() {  # -> doctor's whole output
 }
 mkdir -p "$TMP/claude-home/plugins"
 
+# LOCALE-SAFE BY CONSTRUCTION. The glyph that opens every row is three BYTES and
+# one column, and awk's `.` matches a CHARACTER only under a UTF-8 locale. Under
+# `LC_ALL=C` — the locale scripts/lib/width.sh exists for, and the one a stripped
+# environment hands a hook — `/^  . wall/` matched nothing, this function returned
+# the empty string, and all seven row assertions below failed as "no match … in: ''"
+# while the FIX-line assertions kept passing. `[^ ]+` counts bytes or characters
+# indifferently, so the filter now says the same thing in either locale.
 walls_rows() {  # <full-output> -> the walls summary row and any per-wall rows
-  printf '%s\n' "$1" | awk '/^  . wall/'
+  printf '%s\n' "$1" | awk '/^  [^ ]+ wall/'
 }
 
 echo "=== Section 1: an intact tree — every wall's library resolves ==="
