@@ -60,9 +60,10 @@ PATROL_INTERVAL_LAST_RESORT=1800
 # payload each carry as their own inline arithmetic: this file's own
 # `patrol_stamp_state` below, `hooks/session-poker.sh` and `hooks/dispatch-
 # preflight.sh`. One exported constant is the single owner of the multiplier;
-# `patrol_stamp_state` reads it a few lines down. `session-poker.sh` and
-# `dispatch-preflight.sh` keep their own inline `* 2` for now — switching
-# those two readers to this constant is later slices' work, not this one's.
+# `patrol_stamp_state` reads it a few lines down, and `session-poker.sh` reads
+# it for `adopt`'s liveness window (slice POKER, 1.6). `dispatch-preflight.sh`
+# keeps its own inline `* 2` until slice ADOPT switches it; the three are held
+# in agreement on the VALUE by tests/patrol-stale.test.sh §4 in the meantime.
 export PATROL_STALE_MULTIPLIER=2
 
 # The CLI's config directory, through the same override chain every other

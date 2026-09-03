@@ -135,9 +135,10 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 
 # ---------------------------------------------------------------- the library
 #
-# THE SPINE (bionic 1.4.0, spec AC-16, design §2). Three facts this script used to derive
-# from its own copies — which project this cwd belongs to, which session is asking, and
-# whether the run is still open — have one owner each in payload/scripts/lib, and the block
+# THE SPINE (bionic 1.4.0, spec AC-16, design §2). Four facts this script used to derive
+# from its own copies or its own literals — which project this cwd belongs to, which session
+# is asking, whether the run is still open, and how far past a declared interval counts as
+# stale — have one owner each in payload/scripts/lib, and the block
 # below is the ONE idiom that finds them. It is pasted byte-identically out of
 # `bionic_loader_pin` (payload/scripts/lib/loader.sh) into every hook on the spine, because
 # a library cannot load itself; tests/cross-gate-agreement.test.sh re-derives each copy from
@@ -146,7 +147,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh patrol.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -278,6 +279,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/root.sh"
 . "$BIONIC_LIB/session.sh"
 . "$BIONIC_LIB/run.sh"
+. "$BIONIC_LIB/patrol.sh"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="30m"
@@ -1285,10 +1287,17 @@ case "$VERB" in
         # ---- the three addresses, all of them derived from the one id
         TX=""
         TX_PRESENT=no
+        TX_AGE=""
         if [ -n "$RID" ]; then
           if [ -n "$OSUB" ]; then
             TX="$OSUB/agent-${RID}.jsonl"
-            [ -f "$TX" ] && TX_PRESENT=yes
+            if [ -f "$TX" ]; then
+              TX_PRESENT=yes
+              # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
+              # the agent takes, so its mtime is a fact about the agent rather than a
+              # promise the agent has to remember to keep.
+              TX_AGE=$(( ADOPT_NOW - $(file_mtime "$TX") ))
+            fi
           else
             # The slug could not be resolved — say where to look rather than inventing a
             # path that would read as a fact.
@@ -1303,25 +1312,43 @@ case "$VERB" in
         # stopped whatever its artifacts say, and the cure is prospective (it fixes the NEXT
         # dispatch, not this row). The deliverable's state is still printed underneath, so
         # nothing is hidden by the ordering.
+        # LIVE ON EITHER MTIME, STALE ONLY ON BOTH (1.6, AC-6). The progress file is a
+        # promise the agent keeps by hand — the first thing to lapse when the work gets
+        # absorbing, and impossible for a role with no Write tool — so reading it alone
+        # called working agents SILENT. The transcript is the harness's own record of the
+        # agent taking a turn, at the very path this verb already prints as the observe
+        # address, so it costs one stat and answers the question the progress file was
+        # standing in for. SILENT now means neither a written line nor a turn taken inside
+        # the window, which is a state worth waking someone for.
+        #
+        # THE WINDOW is `PATROL_STALE_MULTIPLIER × cadence`, out of the library
+        # (payload/scripts/lib/patrol.sh) rather than an inline `* 2` — one constant, three
+        # readers, spec AC-22. It is more than one cadence because a row promising a line
+        # every 10 minutes is, at any random instant, up to 10 minutes stale while perfectly
+        # healthy; a threshold at the cadence itself would call half the live fleet SILENT.
+        # Same slack hooks/dispatch-preflight.sh allows the Patrol stamp.
+        LIVE=no
+        if [ -n "$CAD_S" ]; then
+          STALE_LIMIT=$(( CAD_S * PATROL_STALE_MULTIPLIER ))
+          [ -n "$PROG_AGE" ] && [ "$PROG_AGE" -le "$STALE_LIMIT" ] && LIVE=yes
+          [ -n "$TX_AGE" ] && [ "$TX_AGE" -le "$STALE_LIMIT" ] && LIVE=yes
+        fi
+
         if [ -z "$RID" ]; then
           VERDICT=UNADDRESSABLE
         elif [ "$DELIV_PRESENT" = yes ]; then
           VERDICT=LANDED
-        elif [ -n "$PROG_AGE" ] && [ -n "$CAD_S" ] && [ "$PROG_AGE" -le $(( CAD_S * 2 )) ]; then
-          # TWICE the cadence, not once. A row promising a line every 10 minutes is, at any
-          # random instant, up to 10 minutes stale while perfectly healthy; a threshold set
-          # at the cadence itself would call half the live fleet SILENT. Twice the declared
-          # interval is the same slack hooks/dispatch-preflight.sh allows the Patrol stamp.
+        elif [ "$LIVE" = yes ]; then
           VERDICT=RUNNING
         else
           VERDICT=SILENT
         fi
 
-        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s\n' \
+        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s|transcript_age=%s\n' \
           "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$OSID" "$(clean "$RNAME")" "$VERDICT" \
           "$RID" "$(clean "$RTYPE")" "$(clean "$RDELIV_ABS")" "$DELIV_PRESENT" \
           "$(clean "$RPROG_ABS")" "${PROG_AGE:-unknown}" "${CAD_S:-unknown}" \
-          "$(clean "$TX")" "$TX_PRESENT"
+          "$(clean "$TX")" "$TX_PRESENT" "${TX_AGE:-unknown}"
 
         # ---- the adoption itself, written before it is printed
         #

@@ -1132,6 +1132,85 @@ expect_eq "an unknown flag after adopt is a usage error (exit 2)" "2" "$RC"
 poke "$R8R" tick --report-only
 expect_eq "…and --report-only is not a flag the tick takes" "2" "$RC"
 
+# ---------- 8j: liveness reads the TRANSCRIPT too (1.6, AC-6) ----------
+#
+# THE DEFECT. A row was RUNNING only while its PROGRESS FILE was fresh, and a progress file
+# is a promise the agent keeps by hand — the first thing a working agent drops when the work
+# gets absorbing, and the one artifact a role without Write cannot produce at all. The agent
+# is nevertheless observable: its transcript is appended to by the harness on every turn,
+# under `<config>/projects/<slug>/<launching sid>/subagents/agent-<id>.jsonl`, which is the
+# same file this verb already prints as the observe address. So liveness is now the OR of
+# the two mtimes, and SILENT means both of them are stale — an agent that has neither
+# written a line nor taken a turn inside the window its own row declared.
+#
+# THE WINDOW is `PATROL_STALE_MULTIPLIER × cadence`, read from payload/scripts/lib/patrol.sh
+# rather than from an inline `* 2` (spec AC-22: one constant, three readers). The mutation
+# at the end of this block is what proves the reader is the constant.
+R8L="$(make_repo s8-liveness)"; new_roster "$R8L"
+mkdir -p "$R8L/.bionic/docs/record"
+ID_TXFRESH="atxfresh-one-9999999999999999"
+ID_TXSTALE="atxstale-one-aaaaaaaaaaaaaaaa"
+SUB8="$C8/projects/-fixture-project/$ADOPT_A/subagents"
+
+for _pair in "tx-fresh $ID_TXFRESH" "tx-stale $ID_TXSTALE"; do
+  set -- $_pair
+  add_row_to "$R8L" "$ADOPT_A" name="$1" status=identified agent_id="$2" \
+    subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+    deliverable="$R8L/.bionic/docs/record/$1.md" \
+    progress="$R8L/.bionic/tmp/progress-$1.md"
+  # The progress half is stale for BOTH rows: this block is about the other input, and a
+  # fresh progress file would answer RUNNING without the transcript ever being stat'd.
+  printf 'progress\n' > "$R8L/.bionic/tmp/progress-$1.md"
+  backdate "$R8L/.bionic/tmp/progress-$1.md" 5400
+  : > "$SUB8/agent-$2.jsonl"
+done
+# …and the transcripts differ: one written just now, one as old as the progress files.
+backdate "$SUB8/agent-$ID_TXSTALE.jsonl" 5400
+
+poke "$R8L" adopt --report-only
+expect_contains "a stale progress file with a FRESH transcript still reads RUNNING" \
+  "name=tx-fresh|verdict=RUNNING" "$OUT"
+expect_contains "…and both mtimes stale reads SILENT" \
+  "name=tx-stale|verdict=SILENT" "$OUT"
+expect_contains "…the transcript's age is printed, so the verdict can be checked" \
+  "transcript_age=" "$OUT"
+
+# THE THRESHOLD IS THE LIBRARY'S CONSTANT, NOT A LITERAL 2 — proven by mutation, the same
+# way §2 proves the interval default is read from POKER_INTERVAL_DEFAULT. A row whose only
+# fresh-ish input sits BETWEEN one cadence and two is RUNNING while the multiplier is 2 and
+# SILENT the moment it is 1, so a poker carrying its own `* 2` answers RUNNING on both runs.
+# The doctored tree is the shape the plugin ships (hooks/ beside scripts/lib) and its library
+# is a COPY, because this is the one fixture that must not read the shipped constant.
+MULT_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-mult-mut.XXXXXX")"
+mkdir -p "$MULT_MUT_ROOT/hooks" "$MULT_MUT_ROOT/scripts"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MULT_MUT_ROOT/scripts/lib"
+sed -i.bak 's/^export PATROL_STALE_MULTIPLIER=2$/export PATROL_STALE_MULTIPLIER=1/' \
+  "$MULT_MUT_ROOT/scripts/lib/patrol.sh"
+cp "$POKER" "$MULT_MUT_ROOT/hooks/session-poker.sh"
+if grep -qF 'export PATROL_STALE_MULTIPLIER=1' "$MULT_MUT_ROOT/scripts/lib/patrol.sh"; then
+  ok "8j meta: the doctored multiplier landed (the sed anchor still matches)"
+else
+  bad "8j meta: the doctored multiplier did NOT land — the pair below proves nothing"
+fi
+
+R8M="$(make_repo s8-multiplier)"; new_roster "$R8M"
+mkdir -p "$R8M/.bionic/docs/record"
+add_row_to "$R8M" "$ADOPT_A" name=between status=identified \
+  agent_id=abetween-one-bbbbbbbbbbbbbbbb subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8M/.bionic/docs/record/between.md" \
+  progress="$R8M/.bionic/tmp/progress-between.md"
+printf 'progress\n' > "$R8M/.bionic/tmp/progress-between.md"
+backdate "$R8M/.bionic/tmp/progress-between.md" 900   # > one cadence, < two
+
+poke "$R8M" adopt --report-only
+expect_contains "at 1.5x the cadence the shipped multiplier (2) still reads RUNNING" \
+  "name=between|verdict=RUNNING" "$OUT"
+OUT="$( cd "$R8M" && env CLAUDE_CODE_SESSION_ID="$SID" \
+        bash "$MULT_MUT_ROOT/hooks/session-poker.sh" adopt --report-only 2>&1 )"
+expect_contains "…and the SAME row reads SILENT against a library whose multiplier is 1" \
+  "name=between|verdict=SILENT" "$OUT"
+
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================
