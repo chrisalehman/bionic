@@ -1205,6 +1205,14 @@ _patrol_flush() {
   case "$_p_stamp" in
     firing)
       PATROL_LIVE=$((PATROL_LIVE + 1))
+      # ENGAGED / NOT ENGAGED — report only (T4/AC-16). `engaged_session` is
+      # the same single switch every run-scoped hook reads first (lib/run.sh);
+      # doctor changes nothing on disk, it only says which side of it this
+      # session's marker is on. Computed once, read by both rows below, so a
+      # bystander session (no marker) reads the same whether or not its
+      # roster is present.
+      local _p_engaged="not engaged"
+      engaged_session "$DOCTOR_ROOT" "$_p_sid" && _p_engaged="engaged"
       # AN ABSENT ROSTER IS NOT A ZERO, and printing it as one is the defect
       # this arm exists to end (Chris 2026-08-29, on 1.3.0: `✓ session 61be8dc9 ·
       # 0 open dispatches` on a machine running two agents). The launch-time
@@ -1236,9 +1244,9 @@ _patrol_flush() {
       # dispatches` is what 1.3.0 printed and was TRUE.
       if [ "$_p_present" = "yes" ] || [ "$blind" -eq 0 ]; then
         open="$_p_open"
-        _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches)"
+        _patrol_add "  ${DOCTOR_OK} session ${short} · ${open} open $(_doctor_plural "$open" dispatch dispatches) · ${_p_engaged}"
       else
-        _patrol_add "  ${DOCTOR_OK} session ${short} · roster absent — launches unrecorded"
+        _patrol_add "  ${DOCTOR_OK} session ${short} · roster absent — launches unrecorded · ${_p_engaged}"
       fi
       # THE COUNT IS THE ACTIONABLE HALF. Doctor is now the ONE surface for this
       # fact — the tick's `NOTIFY wall-blind` diagnosis was deleted in 1.4.0
