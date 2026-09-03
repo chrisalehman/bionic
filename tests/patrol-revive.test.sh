@@ -597,6 +597,70 @@ else
 fi
 
 echo ""
+echo "=== Group 8: the second-stamp finding (bionic 1.4.0, AC-3) ==="
+#
+# THE CONTRACT UNDER TEST. One clock per run: a second FRESH `patrol-<sid>.state`
+# belonging to ANOTHER session in this project's .bionic/tmp means two Patrol crons
+# are both alive over the same project at once. This is a FINDING — a plain stderr
+# line naming the stray session — not a block: the primary decision above is about
+# THIS session's own dead clock, and a sibling's live clock is not this session's
+# stop to refuse. One live stamp (this session's own) is silent on this arm.
+
+# Captures stderr SEPARATELY, unlike fire() above (which discards it) — the finding
+# is a diagnostic line, and this is the only way to read it.
+fire_stderr() {  # <cwd> [session] [event] [stop_hook_active]
+  HOOK_ERR=$(env CLAUDE_CODE_SESSION_ID="${2:-$SID}" bash "$HOOK" \
+    <<< "$(stdin_for "$1" "${2:-$SID}" "${3:-Stop}" "${4:-false}")" 2>&1 >/dev/null)
+  HOOK_RC=$?
+}
+
+FINDING_TEXT="a second live Patrol stamp for session"
+
+# 40: TWO fresh stamps — this session's own, and another's — is a finding naming
+# the other session's first 8 characters.
+D=$(make_env); write_stamp "$D" "$SID"; write_stamp "$D" "$OTHER_SID"
+fire_stderr "$D"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"patrol-revive: $FINDING_TEXT ${OTHER_SID:0:8}"*"one clock per run"*"delete the stray job and stamp"*)
+    pass "40: two fresh stamps produce the finding line, naming the other session's first 8 chars" ;;
+  *) fail "40: no finding for a second fresh stamp" "$HOOK_ERR" ;;
+esac
+
+# 41: ONE stamp (this session's own alone) — silent on this arm.
+D=$(make_env); write_stamp "$D" "$SID"
+fire_stderr "$D"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"$FINDING_TEXT"*) fail "41: a lone stamp wrongly produced the second-stamp finding" "$HOOK_ERR" ;;
+  *) pass "41: one stamp — silent on the second-stamp arm" ;;
+esac
+
+# 42: the other stamp is STALE, not fresh — a dead predecessor is not "a second
+# LIVE Patrol stamp"; this arm speaks only about a live duplicate clock.
+D=$(make_env); write_stamp "$D" "$SID"; write_stamp "$D" "$OTHER_SID"
+backdate "$(stamp_path "$D" "$OTHER_SID")" 600
+fire_stderr "$D"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"$FINDING_TEXT"*) fail "42: a STALE second stamp wrongly produced the finding" "$HOOK_ERR" ;;
+  *) pass "42: a stale second stamp is silent — only a fresh duplicate is a finding" ;;
+esac
+
+# 43: a symlinked second stamp is not a stamp, same posture as this session's own
+# (never followed — a hostile repo can close this arm and never open one).
+D=$(make_env); write_stamp "$D" "$SID"
+OTHERD=$(make_env); write_stamp "$OTHERD" "$OTHER_SID"
+ln -s "$(stamp_path "$OTHERD" "$OTHER_SID")" "$(stamp_path "$D" "$OTHER_SID")"
+fire_stderr "$D"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"$FINDING_TEXT"*) fail "43: a symlinked second stamp wrongly produced the finding" "$HOOK_ERR" ;;
+  *) pass "43: a symlinked second stamp is silent, never followed" ;;
+esac
+rm -rf "$OTHERD"
+
+echo ""
 echo "========================================"
 echo "patrol-revive: $PASS/$TOTAL passed"
 echo "========================================"
