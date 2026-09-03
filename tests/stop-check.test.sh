@@ -894,20 +894,13 @@ expect_contains "…and the reason names the adoption, not a launch we never mad
 expect_contains "…while the machine line still reports it classification=ours" \
   "|classification=ours|" "$M10F"
 
-# BOTH SPELLINGS, ONE ROW (follow-up, 2026-08-30). The addressing form the platform hands
-# back carries the LAUNCHING session's eight characters — the PREDECESSOR's, for an adopted
-# agent — while the row this session wrote carries its own. This command resolves on the
-# base name and establishes ownership from the id, so neither spelling changes its answer;
-# pinned here because a reader who only saw the assertions above could reasonably conclude
-# the suffix was load-bearing, and an operator who types the other one must not be told a
-# different story about the same agent.
-OUT10G=$(run_check_as "$OWN10" "$H10" "$R10" "adoptee@session-${ADOPTED10:0:8}")
-expect_contains "the PREDECESSOR's spelling of an adopted row is OURS too" \
-  "Classification: OURS" "$OUT10G"
-expect_contains "…naming the same session it was adopted from" \
-  "adopted_from=$ADOPTED10" "$OUT10G"
-expect_contains "…and resolving to the same agent id" \
-  "aadoptee-3030303030303030" "$OUT10G"
+# ONE SPELLING (1.5, AC-5). The predecessor's spelling of the same row was driven here for
+# as long as `session-poker.sh adopt` printed both and neither was proven. The probe settled
+# it — a plain `/clear` re-keys the session id, so the address that survives the roll-over
+# carries the SURVIVING session's eight characters — and adopt now prints that one alone
+# (tests/session-poker.test.sh §8a). This command's answer never depended on the suffix: it
+# resolves on the base name and establishes ownership from the id, which is what the row
+# above already pins.
 
 # THE PAIRED NEGATIVE, without which the two assertions above pass over a fixture that
 # would say OURS for any reason at all: the same by-id ownership with NO adoption on the

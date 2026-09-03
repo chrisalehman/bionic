@@ -2491,23 +2491,24 @@ expect_contains "…naming the armed-but-dead state" "stopped firing" "$GATE_ERR
 # by MUTATION: change POKER_INTERVAL_DEFAULT on a doctored copy of the poker tree and the
 # threshold the gate measures against has to move with it. A gate carrying its own 1800
 # would pass this fixture unchanged.
-# A COPIED GATE NEEDS A LIBRARY BESIDE IT (bionic 1.4.0). The gate loads root.sh,
-# run.sh, session.sh and patrol.sh through the shared loader idiom, whose first
-# candidate is `$(dirname "$0")/../scripts/lib`. A gate alone in a temp dir finds
-# nothing there, fails OPEN, and every arm below would then be measuring the
-# step-aside rather than the threshold. So the copies get the shipped shape around
-# them: hooks/ beside scripts/lib/.
-s21_plant() {  # <tree root> -> plants hooks/ + scripts/lib/ and echoes the hooks dir
-  local root="$1" lib
-  mkdir -p "$root/hooks" "$root/scripts/lib"
-  for lib in root.sh run.sh session.sh patrol.sh; do
-    cp "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$lib" "$root/scripts/lib/$lib" 2>/dev/null \
-      || cp "${BIONIC_HOOKS_DIR}/../scripts/lib/$lib" "$root/scripts/lib/$lib" 2>/dev/null || true
-  done
+# A COPIED HOOK NEEDS THE LIBRARY BESIDE IT — the shape the plugin ships, `hooks/`
+# beside `scripts/lib` (bionic 1.4.0). Both the gate and the poker load through the
+# shared loader idiom, whose first candidate is `$(dirname "$0")/../scripts/lib`; a copy
+# dropped into a bare temp directory finds none, fails open, and every arm below would be
+# measuring the step-aside rather than the threshold. The library is LINKED rather than
+# copied, so the tree under test reads exactly the functions the shipped scripts read —
+# and linking the whole directory means a hook that later wants one more basename does not
+# silently fall off the end of a hand-listed set.
+s21_plant() {  # <tree root> -> plants hooks/ + scripts/lib and echoes the hooks dir
+  local root="$1"
+  mkdir -p "$root/hooks" "$root/scripts"
+  ln -s "$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)" "$root/scripts/lib" 2>/dev/null \
+    || ln -s "$(cd "${BIONIC_HOOKS_DIR}/../scripts/lib" && pwd -P)" "$root/scripts/lib" 2>/dev/null || true
   printf '%s' "$root/hooks"
 }
-S21_TREE=$(mktemp -d "${TMPDIR:-/tmp}/s21-poker-tree.XXXXXX")
-S21_TREE_HOOKS=$(s21_plant "$S21_TREE")
+S21_TREE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/s21-poker-tree.XXXXXX")
+S21_TREE_HOOKS=$(s21_plant "$S21_TREE_ROOT")
+S21_TREE="$S21_TREE_HOOKS"   # POKER's spelling; both names address one directory
 cp "$GATE" "$S21_TREE_HOOKS/dispatch-preflight.sh"
 sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="10s"/' \
   "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$S21_TREE_HOOKS/session-poker.sh"

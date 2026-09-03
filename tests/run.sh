@@ -205,6 +205,7 @@ run "preflight-probe.test.sh" bash tests/preflight-probe.test.sh
 run "protect-database.test.sh" bash tests/protect-database.test.sh
 run "protect-main.test.sh" bash tests/protect-main.test.sh
 run "session-poker.test.sh" bash tests/session-poker.test.sh
+run "session-start.test.sh" bash tests/session-start.test.sh
 run "session-sweeper.test.sh" bash tests/session-sweeper.test.sh
 run "stop-check.test.sh" bash tests/stop-check.test.sh
 run "stop-guard.test.sh" bash tests/stop-guard.test.sh
@@ -245,6 +246,15 @@ run "detect-probes.test.sh" bash tests/detect-probes.test.sh
 # different fixture regime — and so, like every suite outside hooks/, hand-listed here or
 # it never runs.
 run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh
+# The worktree LEASE (bionic 1.4.0 wave, spec AC-11/AC-28, plan slice WORKTREE):
+# payload/scripts/lib/worktree.sh — the land verb (merge --no-ff, remove,
+# prune, and the four refusals around it), the legacy `.bionic` links C2
+# retired, and the lease overruns the Patrol tick reports. Its own suite rather
+# than a group in spawn-worktree.test.sh: that one drives an EXECUTED script
+# against a scratch repo, this one sources a library and calls functions, and
+# the fixture regimes differ (a fixture claude-home for the D1 predicate).
+# Hand-listed like every suite outside hooks/.
+run "worktree.test.sh" bash tests/worktree.test.sh
 # The JIT / degradation contract (epic-17 W3 S10, spec AC-5): payload/scripts/lib/jit.sh's
 # jit_check + jit_offer, driven against a fixture PATH, proving jit_offer calls install_dep
 # BY NAME (the ownership-table agreement) and mutates nothing on decline. Hand-listed like
@@ -348,6 +358,18 @@ run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh
 # `active_run` and ignores the answer cannot pass. Both missing-library fail classes drive
 # too: the repair allowlist that ends the lockout, and the one-line step-aside.
 run "hook-adoption.test.sh" bash tests/hook-adoption.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, 2026-09-02) — the library spine's unit suites, one
+# per fact, hand-listed like every suite outside hooks/:
+#   - resources.test.sh: scripts/lib/resources.sh (probe / budget / pressure — the parallel
+#     budget as a function of the machine instead of a number a human guessed) and the
+#     version-2 preflight attestation that records it. The kill datum this suite's memory
+#     term is built on is the one written at :63-68 of this file.
+run "resources.test.sh" bash tests/resources.test.sh
+#   - docs-pins.test.sh: doc-text agreement pins with no other home. §1 (RELEASE, spec
+#     AC-36) is the help version pair — replaces the coverage version-ssot.test.sh had
+#     before it was deleted below; WALLS and SCHED append their own numbered sections
+#     to this same file in later slices of this wave rather than each owning a suite.
+run "docs-pins.test.sh" bash tests/docs-pins.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions

@@ -2610,13 +2610,21 @@ L2EOF
 # The CLI does not deduplicate. A hook named twice on one event refuses twice, journals
 # twice, or sweeps twice — which is why the two-channel arrangement this replaces went
 # to such lengths to keep landing-gate's two registrations on DIFFERENT events.
+# THE COMMAND IS THE SECOND-TO-LAST FIELD, never the third — the same reason §L.4b reads
+# the timeout as the last field. `startup|clear|resume|compact` is a matcher that contains
+# the row delimiter, so a positional read counted from the left lands mid-matcher on that
+# row and the SessionStart detector would drop out of this check entirely.
 L3_DUPES=$(printf '%s\n' "$HOOKS_JSON_ROWS" \
-  | awk -F'|' '{ n=split($3, parts, "/"); print $1 "|" $2 "|" parts[n] }' \
+  | awk -F'|' '{ n=split($(NF-1), parts, "/"); print $1 "|" $2 "|" parts[n] }' \
   | sort | uniq -d)
-expect_eq "no hook is registered twice on one event/matcher" "" "$L3_DUPES"
+expect_eq "no hook is registered twice on one event+matcher" "" "$L3_DUPES"
+# The exact-set claim, over the rows this section names. Two entries are counted elsewhere
+# and excluded here by name rather than by accident: the two guarded pairs belong to §L.5,
+# and the SessionStart detector to §L.8, which pins its whole row by value.
 expect_eq "…and the manifest carries exactly the rows this section names, and no others" \
   "$(printf '%s' "$L2_EXPECTED" | /usr/bin/grep -c '|')" \
-  "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -vc 'agent-context-guard\.sh')"
+  "$(printf '%s\n' "$HOOKS_JSON_ROWS" \
+     | /usr/bin/grep -vc -e 'agent-context-guard\.sh' -e 'session-start\.sh')"
 
 # --- L.4 EVERY registration is bounded by a timeout ---
 #
@@ -2634,6 +2642,20 @@ expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
 
 # --- L.5 THE GUARD SURVIVES WHERE ITS PURPOSE SURVIVES ---
 #
+# --- L.4b THE TIMEOUT IS THE LAST FIELD, NEVER THE FOURTH ---
+#
+# $NF, not $4 (bionic 1.4.0, slice SSTART). A row is `event|matcher|command|timeout`, and
+# until the SessionStart detector arrived every matcher in this tree was a single tool
+# name, so the fourth field and the last field were the same field.
+# `startup|clear|resume|compact` is a matcher that CONTAINS the delimiter — the platform's
+# own spelling for "all four session sources" — and under `$4` that row's timeout read as
+# `resume`. The timeout is always the last field, so read it as the last field; a matcher
+# may not be. The cross-CHANNEL half of this check retired with the frontmatter block:
+# there is one channel now, and §L.1 asserts the other is empty.
+L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $NF}' | sort -u)
+expect_eq "the manifest renders exactly one timeout value across all its rows" \
+  "10" "$L4B_HJ_VALUES"
+
 # hooks/agent-context-guard.sh runs the wall behind it only for a payload carrying a
 # top-level agent_id in a session that has a roster on disk. It fronted four entries,
 # and for three of them — the dispatch wall on Agent, the artifact wall on Write and
@@ -2678,6 +2700,44 @@ expect_eq "the landing gate's event case extracts at all (not vacuous)" "yes" \
 expect_contains "…and answers Stop" "Stop" "$LG_EVENT_ARMS"
 expect_contains "…and SubagentStop" "SubagentStop" "$LG_EVENT_ARMS"
 
+# --- L.8 THE SESSIONSTART DETECTOR: one event, one channel, one owner (AC-1, SSTART) ---
+#
+# hooks/session-start.sh reports what `/clear` left behind — predecessor rosters, stamps,
+# legacy `.bionic` links and the session-id triple — into the new conversation's context.
+# It is registered ALWAYS-ON by necessity: the state it reports is left by the conversation
+# that ENDED, so a registration that only binds while a skill is armed would be silent in
+# exactly the session that needs it. That makes the always-on channel the right one and the
+# ONLY one — a hook registered on both channels fires twice (R-2 §f), which for a detector
+# means the block is pasted into context twice and a reader cannot tell the copies apart.
+#
+# The row is pinned BY VALUE, ${CLAUDE_PLUGIN_ROOT} spelling included, for the reason §L.3
+# gives: the manifest is what the harness executes, and a command that reverted to a
+# machine-local path is a hook that cannot resolve inside an installed plugin.
+L8_ROWS=$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -F 'session-start.sh')
+expect_eq "session-start.sh is registered in hooks.json exactly once" \
+  "1" "$(printf '%s\n' "$L8_ROWS" | /usr/bin/grep -c .)"
+expect_eq "…on SessionStart, matching all four sources, bounded by a timeout" \
+  'SessionStart|startup|clear|resume|compact|${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh|10' \
+  "$L8_ROWS"
+# The other half of "nowhere else": the skill frontmatter must not carry it too. Read off
+# SKILL_HOOKS_ROWS, the same extractor L.1 pins the twelve armed-session rows with, so an
+# empty result here means "absent from a channel this suite can still read" rather than
+# "the extractor broke" — L.1's own row assertions above are what prove it still works.
+expect_eq "…and NOWHERE in the skill frontmatter, which would fire it a second time" \
+  "" "$(printf '%s\n' "$SKILL_HOOKS_ROWS" | /usr/bin/grep -F 'session-start.sh')"
+# ONE OWNER OF THE EVENT. A second SessionStart registration would print a second block
+# into the same context with no ordering guarantee between them (§L's founding finding F).
+expect_eq "SessionStart carries exactly one registration in hooks.json" \
+  "1" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '^SessionStart|')"
+# The hook the manifest names EXISTS and parses. §L.2's own header records that the
+# structural "every command names a file that exists" arm died with tests/scripts.test.sh
+# (8582861) and was never replaced; this row restores it for the one entry this slice adds,
+# so a renamed or deleted detector fails here instead of silently never firing.
+expect_eq "…and the file that row names exists and parses" "ok" \
+  "$( [ -f "$BIONIC_HOOKS_DIR/session-start.sh" ] \
+      && bash -n "$BIONIC_HOOKS_DIR/session-start.sh" 2>/dev/null && echo ok )"
+
+# ============================================================
 echo ""
 echo "=== M — THE ACK, and the stop order: ONE owner, three consumers (epic-16 w2 S3/S9) ==="
 # ============================================================
@@ -2913,12 +2973,12 @@ for _h in $N_ADOPTED; do
     "$N_BLOCK" "$(n_block_of "$BIONIC_HOOKS_DIR/$_h.sh")"
 done
 
-# NO PRIVATE RESOLVER SURVIVES, with the one straggler NAMED rather than excused: slice
-# POKER converts hooks/session-poker.sh, and this row is what notices if it never does.
+# NO PRIVATE RESOLVER SURVIVES — none, not one. ADOPT converted seventeen hooks and slice
+# POKER the eighteenth, so the eight-copy family is empty and this row is what keeps a
+# nineteenth from being written by hand.
 N_STRAGGLERS=$(/usr/bin/grep -ln '^resolve_project_root()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
   | while IFS= read -r _f; do basename "$_f"; done | sort | tr '\n' ' ' | sed 's/ $//')
-expect_eq "session-poker.sh is the only hook still defining resolve_project_root" \
-  "session-poker.sh" "$N_STRAGGLERS"
+expect_eq "no hook defines a private resolve_project_root any more" "" "$N_STRAGGLERS"
 
 # EVERY READER ASKS. protect-main and background-suite-guard read no root — they classify
 # a command and nothing else — so they are excluded by name, not by accident.
@@ -2967,9 +3027,38 @@ N_ROOT_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/root.sh"
 root_at() {  # <cwd> -> project_root's answer from inside that directory
   ( . "$N_ROOT_LIB" || exit 1; cd "$1" 2>/dev/null || exit 1; project_root ) 2>/dev/null
 }
+root_at_path() {  # <path, which need not exist> -> project_root's answer for it
+  ( . "$N_ROOT_LIB" || exit 1; project_root "$1" ) 2>/dev/null
+}
 
 expect_eq "a linked worktree cwd roots at the MAIN repository" "$NMAIN" "$(root_at "$NWT")"
 expect_eq "…and the main repository roots at itself" "$NMAIN" "$(root_at "$NREPO")"
+# DEEP INSIDE A DIRECTORY THAT DOES NOT EXIST YET — the shape a PreToolUse gate meets on
+# the first artifact write into a project, where the climb to the nearest existing
+# ancestor is the part of the resolver that has to answer.
+expect_eq "…and so does a path deep inside the worktree that has not been created yet" \
+  "$NMAIN" "$(root_at_path "$NWT/deep/not/created/yet")"
+
+# THE PAIRED NEGATIVE, and a precondition it depends on. Outside any repository and with no
+# `.bionic` anywhere above, the answer is the path itself. That second half is a fact about
+# the MACHINE, not the code: $SANDBOX lives under $TMPDIR, which every bionic suite on this
+# machine shares, and the walk climbs to `/` looking for a `.bionic`. Measured 2026-08-23: a
+# stray `$TMPDIR/.bionic/` left by a SIBLING suite turned this battery red 7-of-7, naming
+# neither the leak nor the leaker. This row measures the precondition first and says which
+# directory is dirty — it cannot make the battery immune, but it turns mysterious diffs into
+# one legible line.
+NOUT="$SANDBOX/fx/nroot/notarepo"
+mkdir -p "$NOUT"
+NOUT_DIRTY=""
+_anc="$NOUT"
+while [ -n "$_anc" ] && [ "$_anc" != "/" ] && [ "$_anc" != "." ]; do
+  if [ -d "$_anc/.bionic" ]; then NOUT_DIRTY="$_anc"; fi
+  _anc=$(dirname "$_anc")
+done
+expect_eq "no ancestor of the fallback fixture carries a stray .bionic (shared \$TMPDIR)" \
+  "" "$NOUT_DIRTY"
+expect_eq "outside any repository, with no .bionic above, the answer is the path itself" \
+  "$(cd "$NOUT" && pwd -P)" "$(root_at "$NOUT")"
 
 # THE NO-GIT ARM, which the two git-derived checks above never reach. NBWS is a workspace
 # carrying a real `.bionic/` that was never `git init`'d — the shape a repo nested under a

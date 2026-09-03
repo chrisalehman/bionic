@@ -158,13 +158,12 @@ echo "=== 2 — one root: no hook restates the walk ==="
 # ============================================================
 #
 # The eight `resolve_project_root` copies this replaces were byte-identical by
-# assertion and divergent by history; the library ends the family. session-poker.sh
-# is the ONE remaining carrier and it is named here rather than excused silently —
-# slice POKER converts it, and this assertion is what will notice if that never
-# happens.
+# assertion and divergent by history; the library ends the family. Slice POKER
+# converted the last carrier (session-poker.sh) in parallel with this slice, so the
+# family is empty; this assertion is what notices a copy creeping back.
 STRAGGLERS=$(grep -ln '^resolve_project_root()' "$HOOKS"/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
-expect_eq "session-poker.sh is the only hook still defining resolve_project_root" \
-  "session-poker.sh" "$STRAGGLERS"
+expect_eq "no hook still defines a private resolve_project_root (POKER landed the poker on the spine)" \
+  "" "$STRAGGLERS"
 
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue

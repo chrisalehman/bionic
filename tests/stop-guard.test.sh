@@ -1351,36 +1351,15 @@ observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-2222222222222222"
 run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-2222222222222222")"
 expect_status "the transcript-form id of an adopted agent resolves as well" 0 "$GUARD_ST"
 
-# BOTH SPELLINGS OF THE SAME ROW (follow-up, 2026-08-30). The captured payload says the
-# addressing form carries the LAUNCHING session's eight characters — for an adopted agent
-# that is the PREDECESSOR — while the row this session wrote carries its own. Which one the
-# platform keys on for an agent it handed to a successor is unknown, and this gate does not
-# need to know: BOTH resolve to the same row, take the same fresh-observation requirement,
-# and are permitted or refused together. What establishes ownership here is the id on this
-# session's roster, and neither spelling changes which id the target resolves to.
-plant_agent "$AD_SUB_B" "aadoptee-5555555555555555" "adoptee3"
-roster_row "$AD_REPO" "$SID_A" "adoptee3" "aadoptee-5555555555555555" "" "identified" "" "" \
-  "adoptee3@session-${SID_A:0:8}" "$SID_B"
-
-# Unobserved first, in the PREDECESSOR's spelling: the ceremony is the same one, so the
-# refusal is the observation demand and never the unresolved refusal.
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee3@session-${SID_B:0:8}")"
-expect_status "the predecessor's spelling of an adopted row is refused unobserved, like the other" \
-  2 "$GUARD_ST"
-expect_contains "…with the observation demand" "No observation" "$GUARD_ERR"
-expect_absent "…never the unresolved refusal" \
-  "no agent in THIS session's metadata" "$GUARD_ERR"
-
-# …and observed, it permits — the same verdict the adopting session's spelling gets.
-observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-5555555555555555"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee3@session-${SID_B:0:8}")"
-expect_status "an observed adopted agent stops under the PREDECESSOR's spelling too" 0 "$GUARD_ST"
-
-# The pair, proven to be one row rather than two lucky paths: the same agent, observed once
-# more, stops under the ADOPTING session's spelling. Two spellings, one contract.
-observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-5555555555555555"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee3@session-${SID_A:0:8}")"
-expect_status "…and under the ADOPTING session's spelling, identically" 0 "$GUARD_ST"
+# ONE SPELLING (1.5, AC-5). This section used to drive the same adopted row under BOTH
+# `<name>@session-<this session's eight>` and `<name>@session-<the predecessor's eight>`,
+# because which one the platform keys on for a handed-over agent was unknown and `adopt`
+# printed both. The probe settled it — a plain `/clear` re-keys the session id, so the
+# surviving address is built from the surviving key — and `adopt` now prints exactly that
+# one (tests/session-poker.test.sh §8a). What this gate does is unchanged: it resolves on
+# the base name and takes ownership from the id on this session's roster, so no suffix was
+# ever load-bearing here. The pin follows the printed spelling rather than pinning a second
+# one no reader is handed.
 
 # WHAT THE WIDENING IS AND IS NOT. It restores RESOLUTION for the sessions this roster
 # names — a directory at a time, since that is the grain a row can name — and it grants no

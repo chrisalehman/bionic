@@ -97,7 +97,7 @@ new_repo() {  # <dir> -> echoes the physical absolute path
   git -C "$d" symbolic-ref HEAD refs/heads/main
   mkdir -p "$d/.bionic/docs"
   echo "state" > "$d/.bionic/docs/note.md"
-  printf '.bionic/\n.worktrees/\n' > "$d/.gitignore"
+  printf '.bionic\n.bionic/\n.worktrees/\n' > "$d/.gitignore"
   echo "one" > "$d/file.txt"
   git -C "$d" add .gitignore file.txt
   git -C "$d" commit --quiet -m "c1"
@@ -150,14 +150,15 @@ expect_true "the worktree directory exists"            test -d "${R1}/.worktrees
 expect_eq   "the worktree HEAD is the requested base"  "$SHA1" "$(sha_of "${R1}/.worktrees/feat-alpha")"
 expect_eq   "the branch was created at the base"       "$SHA1" "$(git -C "$R1" rev-parse refs/heads/feat-alpha)"
 expect_eq   "the worktree is ON that branch"           "feat-alpha" "$(git -C "${R1}/.worktrees/feat-alpha" rev-parse --abbrev-ref HEAD)"
-expect_true "the .bionic entry is a symlink"           test -L "${R1}/.worktrees/feat-alpha/.bionic"
-expect_eq   "the symlink resolves to the repo root's .bionic" \
-  "${R1}/.bionic" "$( cd "${R1}/.worktrees/feat-alpha/.bionic" && pwd -P )"
-expect_true "content written through the symlink lands in the repo root's .bionic" \
-  test -f "${R1}/.worktrees/feat-alpha/.bionic/docs/note.md"
-# The W1 ruling: ONE symlink, nothing else. No .claude/rules affordance.
-expect_eq "the plant adds exactly one entry to the worktree tree" \
-  ".bionic" "$(cd "${R1}/.worktrees/feat-alpha" && ls -A | grep -v -e '^\.git$' -e '^file.txt$' -e '^\.gitignore$')"
+# C2 (bionic 1.4.0): the `.bionic` symlink is RETIRED. A writer in a spawned
+# tree reaches the state directory through project_root's git-common-dir
+# mapping instead, so nothing is planted and nothing is attested about a plant.
+expect_false "no .bionic symlink is planted"           test -L "${R1}/.worktrees/feat-alpha/.bionic"
+expect_false "no .bionic entry of any kind is planted" test -e "${R1}/.worktrees/feat-alpha/.bionic"
+expect_eq "create adds NOTHING to the worktree tree beyond the checkout" \
+  "" "$(cd "${R1}/.worktrees/feat-alpha" && ls -A | grep -v -e '^\.git$' -e '^file.txt$' -e '^\.gitignore$')"
+expect_eq "the attestation carries no bionic-symlink field" "0" \
+  "$(printf '%s\n' "$(spawn_out "$R1" create "$SHA1" feat-alpha-3)" | grep -c 'bionic-symlink')"
 
 echo ""
 echo "=== Group 4: create — base resolution and the older-commit arm ==="
@@ -211,8 +212,8 @@ echo "=== Group 6: create — spawning from INSIDE a linked worktree ==="
 #
 # The nesting accident this repo actually suffered. A dispatcher running inside
 # a worktree must produce a SIBLING under the main checkout, not a worktree
-# inside a worktree, and its .bionic symlink must reach the main root's state
-# directory rather than a worktree's own symlink.
+# inside a worktree. Since C2 there is no symlink to get wrong; what remains is
+# the sibling rule itself, and the absence of a plant in the child too.
 
 R4="$(new_repo "$TMP/r4")"
 SHA4="$(sha_of "$R4")"
@@ -220,8 +221,8 @@ spawn_out "$R4" create "$SHA4" first >/dev/null
 OUT4="$(spawn_out "${R4}/.worktrees/first" create "$SHA4" second)"
 expect_match "a worktree spawned from inside a worktree is a SIBLING" \
   "*path=${R4}/.worktrees/second *" "$OUT4"
-expect_match "its .bionic symlink targets the MAIN root's state dir" \
-  "*bionic-symlink=${R4}/.bionic" "$OUT4"
+expect_false "the sibling carries no .bionic entry either" \
+  test -e "${R4}/.worktrees/second/.bionic"
 expect_false "no nested .worktrees directory was created" test -d "${R4}/.worktrees/first/.worktrees"
 
 echo ""
@@ -284,13 +285,14 @@ expect_match "the same repo is accepted once .bionic exists (the arm discriminat
   "spawn-worktree: OK *" "$(spawn_out "$NB" create "$NBSHA" nostate)"
 
 echo ""
-echo "=== Group 8: create — failed self-verification cleans up completely ==="
+echo "=== Group 8: create — a tracked .bionic in the branch is no longer a refusal ==="
 #
-# Triggered WITHOUT doctoring the script: a repo whose tracked tree already
-# carries a `.bionic` path. `git worktree add` checks that content out, so the
-# plant target is occupied by a real directory — and `ln -s` into a directory
-# would silently create `.bionic/.bionic` and attest a link that leads
-# somewhere else entirely. The contract says: verify, undo, refuse.
+# Until C2 this fixture was the self-verification failure: `git worktree add`
+# checks the tracked `.bionic` out, the plant target is occupied, and the
+# contract verified-undid-refused. With no plant there is no target and no
+# conflict — the tree simply carries its own `.bionic`, which is the branch's
+# content and none of this script's business. The cleanup-on-failure behaviour
+# that fixture used to drive is proven by Group 10's mutation 3 instead.
 
 R6="$TMP/r6"; mkdir -p "$R6/.bionic"
 git -C "$R6" init --quiet
@@ -301,19 +303,16 @@ git -C "$R6" add .bionic/tracked.md f
 git -C "$R6" commit --quiet -m "c1 with a tracked .bionic"
 R6="$(cd "$R6" && pwd -P)"
 SHA6="$(sha_of "$R6")"
-OUT6="$(spawn_out "$R6" create "$SHA6" doomed)"
-RC6="$(spawn_rc "$R6" create "$SHA6" doomed2)"
+OUT6="$(spawn_out "$R6" create "$SHA6" tracked-state)"
 
-expect_match "an occupied plant target fails the attestation" "spawn-worktree: FAIL reason=*" "$OUT6"
-expect_eq   "the failure exits nonzero" "1" "$RC6"
-expect_false "the worktree directory was removed"  test -d "${R6}/.worktrees/doomed"
-expect_false "the branch it created was deleted"   git -C "$R6" show-ref --verify --quiet refs/heads/doomed
-expect_eq   "git's worktree registry is clean afterwards" "1" \
-  "$(git -C "$R6" worktree list | grep -c .)"
-expect_eq   "no OK line was printed alongside the failure" "0" \
-  "$(printf '%s\n' "$OUT6" | grep -c 'OK')"
+expect_match "a branch carrying a tracked .bionic is attested" "spawn-worktree: OK *" "$OUT6"
+expect_true  "the worktree exists"       test -d "${R6}/.worktrees/tracked-state"
+expect_true  "its .bionic is the branch's own DIRECTORY, not a link" \
+  test -d "${R6}/.worktrees/tracked-state/.bionic"
+expect_false "and it is not a symlink"   test -L "${R6}/.worktrees/tracked-state/.bionic"
+expect_eq    "the branch's own state file is what is there" "tracked state" \
+  "$(cat "${R6}/.worktrees/tracked-state/.bionic/tracked.md")"
 
-echo ""
 echo "=== Group 9: remove — the companion verb ==="
 #
 # Teardown is never automatic and never deletes the branch: the merge decision
@@ -332,7 +331,17 @@ expect_eq    "the branch still points at the base it was created from" \
   "$SHA7" "$(git -C "$R7" rev-parse refs/heads/temp-work)"
 expect_eq    "git's worktree registry no longer lists it" "1" \
   "$(git -C "$R7" worktree list | grep -c .)"
-expect_true  "the repo root's .bionic survived (the symlink was followed, never chased)" \
+expect_true  "the repo root's .bionic survived" test -f "${R7}/.bionic/docs/note.md"
+
+# C2's teardown clause: `remove` deletes a LEGACY link — one an older bionic
+# planted — rather than leaving git to refuse the removal over it. The link is
+# removed by the verb, and what it pointed at is untouched.
+spawn_out "$R7" create "$SHA7" legacy-work >/dev/null
+ln -s "${R7}/.bionic" "${R7}/.worktrees/legacy-work/.bionic"
+OUT7L="$(spawn_out "$R7" remove "${R7}/.worktrees/legacy-work")"
+expect_match "remove succeeds over a legacy link" "spawn-worktree: REMOVED *" "$OUT7L"
+expect_false "the tree carrying a legacy link is gone" test -d "${R7}/.worktrees/legacy-work"
+expect_true  "the state directory the legacy link pointed at is intact" \
   test -f "${R7}/.bionic/docs/note.md"
 
 # Removal is a git operation with git's own safety: uncommitted work refuses.
@@ -341,8 +350,7 @@ echo "unsaved" >> "${R7}/.worktrees/dirty-work/file.txt"
 expect_match "a worktree with uncommitted changes is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$R7" remove "${R7}/.worktrees/dirty-work")"
 expect_true "the refused worktree is still there" test -d "${R7}/.worktrees/dirty-work"
-expect_true "its .bionic symlink was put back after the refusal" \
-  test -L "${R7}/.worktrees/dirty-work/.bionic"
+
 
 expect_match "removing a path that is not a worktree is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$R7" remove "${R7}/.worktrees/never-existed")"
@@ -412,32 +420,40 @@ verify_head_check() {  # <script> -> refused | attested-blindly
   esac
 }
 
-# Mutation 2 — the symlink plant. A worktree with no `.bionic` link is a writer
-# with no plan directory; the contract says such a tree is never attested.
-verify_plant() {  # <script> -> planted | unplanted
+# Mutation 2 — the legacy-link deletion in `remove`. C2 retired the plant, so
+# what is left to prove is the teardown half: a tree an OLDER bionic left a link
+# in must still come away cleanly, and the link must not survive the verb.
+# The link must be UNTRACKED for this arm to discriminate: git's own removal
+# refuses over an untracked file, which is why the verb takes the link away
+# first. A fixture that gitignores `.bionic` would let `git worktree remove`
+# delete the whole tree regardless, and the mutation would prove nothing.
+verify_legacy_removal() {  # <script> -> deleted | survived
   local script="$1"
   local rr; rr="$(new_repo "$TMP/mut2-$RANDOM")"
+  printf '.worktrees/\n' > "$rr/.gitignore"
+  git -C "$rr" commit --quiet -am "no .bionic ignore"
   local sha; sha="$(git -C "$rr" rev-parse HEAD)"
-  local out; out="$(spawn_out_with "$script" "$rr" create "$sha" m2)"
-  if [ -L "$rr/.worktrees/m2/.bionic" ] && [[ "$out" == "spawn-worktree: OK "* ]]; then
-    echo "planted"
+  spawn_out_with "$script" "$rr" create "$sha" m2 >/dev/null
+  ln -s "$rr/.bionic" "$rr/.worktrees/m2/.bionic"
+  spawn_out_with "$script" "$rr" remove "$rr/.worktrees/m2" >/dev/null
+  if [ -d "$rr/.worktrees/m2" ] || [ -L "$rr/.worktrees/m2/.bionic" ]; then
+    echo "survived"
   else
-    echo "unplanted"
+    echo "deleted"
   fi
 }
 
-# Mutation 3 — the cleanup on failed verification. Driven by the Group 8
-# fixture (tracked `.bionic` occupies the plant target). With cleanup gone, an
-# unattested worktree and its branch survive the refusal.
+# Mutation 3 — the cleanup on failed verification. Its old driver (a tracked
+# `.bionic` occupying the plant target) died with the plant, so the failure is
+# induced the way mutation 1 induces one: the fake git that ignores the
+# requested base, which fails the HEAD readback and takes the abort path. With
+# cleanup gone, an unattested worktree and its branch survive the refusal.
 verify_cleanup() {  # <script> -> cleaned | residue
   local script="$1"
-  local rr="$TMP/mut3-$RANDOM"; mkdir -p "$rr/.bionic"
-  git -C "$rr" init --quiet 2>/dev/null
-  echo s > "$rr/.bionic/tracked.md"; echo x > "$rr/f"
-  git -C "$rr" add .bionic/tracked.md f; git -C "$rr" commit --quiet -m c1
-  rr="$(cd "$rr" && pwd -P)"
-  local sha; sha="$(git -C "$rr" rev-parse HEAD)"
-  spawn_out_with "$script" "$rr" create "$sha" m3 >/dev/null
+  local rr; rr="$(new_repo "$TMP/mut3-$RANDOM")"
+  echo "three" >> "$rr/file.txt"; git -C "$rr" commit --quiet -am c2
+  local old; old="$(git -C "$rr" rev-parse HEAD~1)"
+  ( cd "$rr" && PATH="${FAKEBIN}:$PATH" bash "$script" create "$old" m3 >/dev/null 2>&1 )
   if [ -d "$rr/.worktrees/m3" ] || git -C "$rr" show-ref --verify --quiet refs/heads/m3; then
     echo "residue"
   else
@@ -448,15 +464,15 @@ verify_cleanup() {  # <script> -> cleaned | residue
 # Sanity first: against the REAL script every verifier reports the healthy
 # verdict. Without this the mutation arms could be passing for the wrong reason.
 expect_eq "live build: an unhonored base is refused"    "refused" "$(verify_head_check "$SPAWN")"
-expect_eq "live build: the symlink is planted"          "planted" "$(verify_plant "$SPAWN")"
+expect_eq "live build: a legacy link is deleted by remove" "deleted" "$(verify_legacy_removal "$SPAWN")"
 expect_eq "live build: a failed verification cleans up" "cleaned" "$(verify_cleanup "$SPAWN")"
 
 mutate_check "mutation: head taken from the argument instead of the tree is caught" \
   's|head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"|head="$base_sha"|' \
   verify_head_check "attested-blindly"
-mutate_check "mutation: the symlink plant removed is caught" \
-  's|^  ln -s |  : ln -s |' \
-  verify_plant "unplanted"
+mutate_check "mutation: the legacy-link deletion removed is caught" \
+  's|^    rm -f "${wt_abs}/.bionic"$|    :|' \
+  verify_legacy_removal "survived"
 mutate_check "mutation: the cleanup on failed verification removed is caught" \
   's|^  cleanup_partial$|  :|' \
   verify_cleanup "residue"
