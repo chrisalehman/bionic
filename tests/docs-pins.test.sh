@@ -274,6 +274,86 @@ sed 's/the address that survives/the address that dies/' "$AGENT_RULES" > "$DOCT
 expect_ne "19: a doctored agent-discipline.md reads as a different paragraph (pin discriminates)" \
   "$CLEAR_BLOCK" "$(clear_paragraph "$DOCTORED_RULES")"
 
+# ── SECTION 3 — SCHED (spec AC-29/AC-30/AC-31/AC-38, `.bionic/docs/plans/wave-bionic-1.4.0-update/`).
+#
+# WHAT THIS SECTION OWNS. Two instruction-surface sentences in
+# `payload/skills/canonical-sdlc/SKILL.md`'s Patrol section that no hook can check, and that
+# a machine downstream depends on being read as written:
+#
+#   (e) "the tick reads pressure to throttle, never to re-derive the budget" — the boundary
+#       between lib/resources.sh's CEILING (a pure function of machine facts, written once
+#       into the plan header by Step 0) and its live PRESSURE reading. An orchestrator that
+#       read the second as licence to rewrite the first would make fan-out width a function
+#       of the weather, which is the drift the library exists to remove; the sentence is the
+#       only thing standing between the two, because the tick cannot enforce it — the tick
+#       does not write plans.
+#   (f) the AC-38 QUIET line — "an armed session that has dispatched nothing yet decides
+#       QUIET, never REFUSED". The tick implements it, but the SENTENCE is what stops the
+#       next reader from re-adding the refusal on the reasoning that an empty roster is
+#       suspicious. It was measured suspicious exactly once, on this wave's own tick #1,
+#       and it was the reader that was wrong.
+#
+# BYTE-LEVEL, whitespace-normalized, through §2's own `has_pin` — the same latitude and no
+# more: a sentence that wraps differently still matches, a changed word does not.
+#
+# ANTI-VACUITY, same discriminate-a-doctored-copy pattern §1 and §2 use.
+#
+# APPENDED, NEVER REWRITTEN: §1 is RELEASE's and §2 is WALLS's, and a slice that edited
+# another slice's pins would be a slice deciding what that slice owns.
+
+echo ""
+echo "=== Section 3: the SCHED Patrol-text pins (AC-30, AC-38) ==="
+
+PIN_THROTTLE='**the tick reads pressure to throttle, never to re-derive the budget** — the ceiling is the plan header'"'"'s `parallel-budget:`, written once by Step 0 from the probe, and no live reading ever raises or lowers it.'
+PIN_QUIET='**An armed session that has dispatched nothing yet decides QUIET, never REFUSED** — `poker: QUIET — armed, nothing dispatched yet on this session`, stamp kept — because arming precedes dispatch by design'
+
+if has_pin "$SKILL_MD" "$PIN_THROTTLE"; then
+  ok "20: SKILL.md carries the pressure-throttles-never-re-derives sentence verbatim"
+else
+  no "20: SKILL.md carries the pressure-throttles-never-re-derives sentence verbatim" \
+     "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_QUIET"; then
+  ok "21: SKILL.md carries the AC-38 QUIET sentence verbatim"
+else
+  no "21: SKILL.md carries the AC-38 QUIET sentence verbatim" "file: $SKILL_MD"
+fi
+
+# The three rungs and the fill duty are named in the same section — asserted as presence
+# rather than byte-for-byte, because their wording is prose the next editor may improve
+# while the two sentences above are contracts.
+PINS_RUNGS_MISSING=""
+for token in 'EMERGENCY' 'HOLD' 'NARROW' 'FILL <ids>' 'fill-declined: <reason>'; do
+  has_pin "$SKILL_MD" "$token" || PINS_RUNGS_MISSING="${PINS_RUNGS_MISSING} ${token}"
+done
+if [ -z "$PINS_RUNGS_MISSING" ]; then
+  ok "22: SKILL.md's Patrol section names all three rungs, the FILL line and the decline"
+else
+  no "22: SKILL.md's Patrol section names all three rungs, the FILL line and the decline" \
+     "missing:${PINS_RUNGS_MISSING}"
+fi
+
+# --- Anti-vacuity: the same extractor must report a mutation ---
+
+DOCTORED_SCHED="$TMP/skill-sched-mutated.md"
+sed 's/never to re-derive the budget/and to re-derive the budget/' "$SKILL_MD" > "$DOCTORED_SCHED"
+if has_pin "$DOCTORED_SCHED" "$PIN_THROTTLE"; then
+  no "23: a doctored SKILL.md fails the throttle pin (pin discriminates)" \
+     "the mutated copy still matched — the pin is vacuous"
+else
+  ok "23: a doctored SKILL.md fails the throttle pin (pin discriminates)"
+fi
+
+DOCTORED_SCHED2="$TMP/skill-sched-mutated-2.md"
+sed 's/decides QUIET, never REFUSED/is REFUSED/' "$SKILL_MD" > "$DOCTORED_SCHED2"
+if has_pin "$DOCTORED_SCHED2" "$PIN_QUIET"; then
+  no "24: a doctored SKILL.md fails the QUIET pin (pin discriminates)" \
+     "the mutated copy still matched — the pin is vacuous"
+else
+  ok "24: a doctored SKILL.md fails the QUIET pin (pin discriminates)"
+fi
+
 echo ""
 echo "========================================"
 echo "docs-pins: $PASS/$TOTAL passed"
