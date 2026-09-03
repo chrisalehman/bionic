@@ -2,7 +2,7 @@
 # wave, spec AC-2, plan slice L-SESSION; design-ledger S2).
 #
 # THE RULE. The environment value (`$CLAUDE_CODE_SESSION_ID`) is primary,
-# every payload `session_id` field is a witness only. All twelve readers call
+# every payload `session_id` field is a witness only. All twenty readers call
 # this one function so a divergence is reported once, never silently chosen
 # per-reader.
 #

@@ -321,24 +321,40 @@ farm_decision() {  # <command> -> "" when silent, else the deny/nudge class
   printf '%s' "$OUT"
 }
 
-# --- AC-7: the run predicate is what scopes the wall now ---
+# --- AC-6/R-1: the nudge is PLAN-FREE — engagement alone scopes it ---
 #
-# The SAME command that denies above, from a project with no run: silent. Two fixtures
-# differing only in whether a plan with an open `## SDLC State` exists — which is the
-# whole of the "always-on registration is safe" claim. Until 1.4.0 this hook had no run
-# gate at all (R-2 finding 1), so registering it always-on would have denied `pytest`,
-# `npm test` and `bash tests/run.sh` in every project on this machine.
-# "NO .bionic" IS NO LONGER A WORLD THIS ARM CAN DESCRIBE, and the change is forced by
-# the design rather than chosen: engagement writes its marker into `.bionic/tmp`, so a
-# project an engaged session works in always has the directory. What the control still
-# isolates — and the only thing it ever needed to — is the RUN: a tree with no plan in it.
+# THE DEFECT (step-6 review R-1). Until this fix the hook carried
+# `active_run "$ROOT" >/dev/null || exit 0` below its engagement guard, so an engaged
+# session that had not yet written a plan — the whole of Step 0 through Step 3 — ran its
+# suites with no nudge at all. The ratified design says otherwise: engagement decides
+# WHETHER a bionic wall speaks, and the farm-out nudge needs no plan to know that a suite
+# command belongs in a subagent. The run predicate stayed behind after the 1.4.0 guard
+# landed above it; it is gone now.
+#
+# THE PAIR. Two fixtures with NO plan on disk, differing only in the engagement marker.
+# Engaged → the same suite command that denies above denies here. Unengaged → silence on
+# both channels. Neither row can pass on a hook that had simply stopped working, because
+# the other row proves it still fires.
 FARM_NORUN="$SANDBOX/farm/norun"
 mkdir -p "$FARM_NORUN"
 engage "$FARM_NORUN"
 run_hook "$(mk_bash_payload "$FARM_NORUN" 'bash tests/run.sh')" "$FARM_OUT"
-expect_empty "AC-7 farm-out is SILENT on a suite command in a project with no run" "$OUT"
-expect_empty "AC-7 …and says nothing on stderr either" "$ERR"
-expect_eq "AC-7 …exiting 0" "0" "$ST"
+expect_contains "R-1 farm-out DENIES a suite command with NO plan on disk (nudge is plan-free)" \
+  '"deny"' "$OUT"
+expect_eq "R-1 …exiting 0" "0" "$ST"
+
+# The tier-2 nudge, same world: no plan, engaged, still spoken.
+run_hook "$(mk_bash_payload "$FARM_NORUN" 'npx create-react-app x')" "$FARM_OUT"
+expect_contains "R-1 …the tier-2 nudge also fires with no plan on disk" \
+  'additionalContext' "$OUT"
+
+# THE PAIRED SILENCE: same tree, same commands, marker removed.
+unengage "$FARM_NORUN"
+run_hook "$(mk_bash_payload "$FARM_NORUN" 'bash tests/run.sh')" "$FARM_OUT"
+expect_empty "R-1 …and with no marker and no plan it is SILENT on stdout" "$OUT"
+expect_empty "R-1 …and silent on stderr" "$ERR"
+expect_eq "R-1 …exiting 0" "0" "$ST"
+engage "$FARM_NORUN"
 
 FARM_CLOSED="$SANDBOX/farm/closed"
 mkdir -p "$FARM_CLOSED/.bionic/docs/plans"
@@ -355,8 +371,8 @@ current: 9
 - Step 9: delivered: record/x.md
 CLOSEDPLAN
 run_hook "$(mk_bash_payload "$FARM_CLOSED" 'bash tests/run.sh')" "$FARM_OUT"
-expect_empty "AC-7 …silent for a run that CLOSED (current: 9 with a delivered line)" "$OUT"
-expect_eq "AC-7 …exiting 0" "0" "$ST"
+expect_contains "R-1 …a CLOSED run does not silence it either (current: 9)" '"deny"' "$OUT"
+expect_eq "R-1 …exiting 0" "0" "$ST"
 
 # --- AC-15: silent on prose, quoted strings and heredoc bodies ---
 expect_empty "AC-15 farm-out is SILENT on git commit -m \"make the row green\"" \

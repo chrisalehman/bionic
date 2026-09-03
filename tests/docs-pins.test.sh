@@ -355,6 +355,93 @@ else
 fi
 
 echo ""
+echo "--- SECTION 4 — the Patrol tick literal, one string in two files (step-6 review R-8) ---"
+#
+# WHAT THIS SECTION OWNS. The armed cron job's prompt begins with the token
+# `bionic-patrol session=<session-id[0:8]>`. SKILL.md is where the operator is told to
+# write it (§The patrol prompt) and where the resume ritual is told to match on it;
+# hooks/patrol-duties-gate.sh REBUILDS it — `TICK_MARK="bionic-patrol session=${SID:0:8}"`
+# — and scans the transcript for it to decide whether a tick happened. The two are one
+# contract with no shared definition between them.
+#
+# THE FAILURE THIS CLOSES. The ownership table for "a Patrol tick happened" promised
+# "docs-pins: the literal pinned in both files" and `/usr/bin/grep -n bionic-patrol
+# tests/docs-pins.test.sh` returned nothing. Fixtures exercise the hook's own copy
+# (patrol-duties-gate, hook-adoption) with the literal spelled INSIDE the fixture, so
+# rewording the SKILL.md sentence breaks the tick match on real transcripts with every
+# suite green — the exact silent-drift class AC-22 exists to prevent.
+#
+# READ FROM BOTH FILES, not asserted against a constant twice. Each extractor pulls the
+# prefix out of its own file and the two are compared; a constant on both sides would
+# pass on two files that had drifted together away from what the cron actually carries.
+# Assertion 25 additionally pins the extracted value, so an extractor that returned empty
+# on both sides could not agree its way to green.
+
+TICK_GATE="${REPO}/hooks/patrol-duties-gate.sh"
+
+# tick_literal_doc <SKILL.md> -> the prefix as documented, placeholder stripped.
+# Fails LOUD rather than empty: an unmatched sed leaves the whole line, which no
+# comparison below can mistake for agreement.
+tick_literal_doc() {
+  /usr/bin/grep -m1 '^\*\*The patrol prompt\.\*\*' "$1" 2>/dev/null \
+    | sed 's/.*its first token `\([^`]*\)`.*/\1/' \
+    | sed 's/<session-id\[0:8\]>$//'
+}
+# tick_literal_code <patrol-duties-gate.sh> -> the prefix the hook builds.
+tick_literal_code() {
+  /usr/bin/grep -m1 '^TICK_MARK=' "$1" 2>/dev/null \
+    | sed 's/^TICK_MARK="//' \
+    | sed 's/\${SID:0:8}"$//'
+}
+
+TICK_DOC=$(tick_literal_doc "$SKILL_MD")
+TICK_CODE=$(tick_literal_code "$TICK_GATE")
+
+expect_eq "25: SKILL.md's patrol-prompt token is the tick prefix the cron carries" \
+  'bionic-patrol session=' "$TICK_DOC"
+expect_eq "26: patrol-duties-gate.sh rebuilds the SAME prefix SKILL.md documents" \
+  "$TICK_DOC" "$TICK_CODE"
+
+# The resume ritual matches on the same literal to delete a predecessor's clock. If that
+# sentence drifts, an operator deletes nothing and two clocks run side by side.
+# CAPTURED, THEN MATCHED — never `_flatten | grep -q`. SKILL.md is past the 64 KiB pipe
+# buffer, so under this file's `set -o pipefail` an early-exiting `grep -q` SIGPIPEs the
+# producer and the pipeline returns 141: a real match reported as a miss, intermittently.
+TICK_RESUME_NEEDLE='delete every job whose prompt begins with the patrol marker `bionic-patrol session=`'
+TICK_FLAT=$(_flatten "$SKILL_MD")
+case "$TICK_FLAT" in
+  *"$TICK_RESUME_NEEDLE"*)
+    ok "27: SKILL.md's resume ritual names the same marker it tells the prompt to carry" ;;
+  *)
+    no "27: SKILL.md's resume ritual names the same marker it tells the prompt to carry" \
+       "file: $SKILL_MD" ;;
+esac
+
+# --- Anti-vacuity: the same extractors must report a mutation, from either side ---
+
+DOCTORED_TICK_DOC="$TMP/skill-tick-mutated.md"
+sed 's/its first token `bionic-patrol session=/its first token `bionic patrol session=/' \
+  "$SKILL_MD" > "$DOCTORED_TICK_DOC"
+if cmp -s "$SKILL_MD" "$DOCTORED_TICK_DOC"; then
+  no "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+else
+  expect_ne "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
+    "$TICK_CODE" "$(tick_literal_doc "$DOCTORED_TICK_DOC")"
+fi
+
+DOCTORED_TICK_CODE="$TMP/patrol-duties-gate-mutated.sh"
+sed 's/^TICK_MARK="bionic-patrol session=/TICK_MARK="bionic-patrol sid=/' \
+  "$TICK_GATE" > "$DOCTORED_TICK_CODE"
+if cmp -s "$TICK_GATE" "$DOCTORED_TICK_CODE"; then
+  no "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
+     "the sed target matched nothing — the assignment moved"
+else
+  expect_ne "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
+    "$TICK_DOC" "$(tick_literal_code "$DOCTORED_TICK_CODE")"
+fi
+
+echo ""
 echo "========================================"
 echo "docs-pins: $PASS/$TOTAL passed"
 echo "========================================"
