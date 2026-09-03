@@ -253,7 +253,7 @@ observe() {  # <sid> <transcript> <repo> <target> [observer-agent-id]
                      isImage:false, noOutputExpected:false},
       tool_use_id:"toolu_01HQV9JAFdKC15TLMDKt2QgF", duration_ms:117}
      + (if $a == "" then {} else {agent_id:$a, agent_type:"general-purpose"} end)' \
-    | bash "$RECORDER" >/dev/null 2>&1
+    | env CLAUDE_CODE_SESSION_ID="$1" bash "$RECORDER" >/dev/null 2>&1
   return 0
 }
 observe "$SID_A" "$O_TR" "$O_REPO" "worker"
@@ -340,6 +340,26 @@ plant_agent "$U_SUB" "aworker-1111111111111111" "worker"
 mkdir -p "$U_REPO/.bionic/tmp"
 chmod 500 "$U_REPO/.bionic/tmp"
 
+# A2 (spec AC-12): a scratch directory INSIDE the active project, outside any git tree.
+# The dispatch wall used to require a git toplevel and exited silently without one, so a
+# dispatch from here disarmed arming, containment and rostering at once. `project_root`
+# walks for the nearest real `.bionic` instead, and this row is the far side of that line.
+A2_ROOT="$SANDBOX/a2"
+mkdir -p "$A2_ROOT/.bionic/tmp" "$A2_ROOT/.bionic/docs/plans/epic-99"
+cat > "$A2_ROOT/.bionic/docs/plans/epic-99/wave-01.plan.md" <<'A2PLAN'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: slices in flight
+A2PLAN
+A2_SCRATCH="$A2_ROOT/scratch/deep"
+mkdir -p "$A2_SCRATCH"
+
 # ---------------------------------------------------------------- the driver
 
 DRV_ST=0; DRV_OUT=""; DRV_ERR=""
@@ -349,7 +369,11 @@ drive() {  # <condition>
     # --- start gate ---------------------------------------------------------
     start:irrelevant-tool)  p=$(payload Bash "$SID_A" "$A_TR" "$A_REPO" "echo hi") ;;
     start:empty-cwd)        p=$(payload Agent "$SID_A" "$A_TR" "" -) ;;
-    start:non-git-cwd)      p=$(payload Agent "$SID_A" "$A_TR" "$SANDBOX/plain" -) ;;
+    # A2 (spec AC-12): a non-git cwd is no longer the question — whether there is a
+    # PROJECT is. The two rows differ by a `.bionic` directory above the cwd and nothing
+    # else, which is the whole of what Decision A2 changed.
+    start:non-git-cwd-no-bionic) p=$(payload Agent "$SID_A" "$A_TR" "$SANDBOX/plain" -) ;;
+    start:non-git-cwd-with-bionic) p=$(payload Agent "$SID_A" "$A_TR" "$A2_SCRATCH" -) ;;
     start:no-plan)          p=$(payload Agent "$SID_A" "$I_TR" "$I_REPO" -) ;;
     start:plan-names-no-step) p=$(payload Agent "$SID_A" "$N_TR" "$N_REPO" -) ;;
     start:no-session-key)   p=$(payload Agent - "$A_TR" "$A_REPO" -) ;;
@@ -383,9 +407,16 @@ drive() {  # <condition>
     stop:foreign-by-full-id) p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" abb20f616-7777777777777) ;;
     *) echo "unknown condition $1" >&2; return 9 ;;
   esac
+  # THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2: a
+  # plain /clear re-keys env, payload and pid file together). Since bionic 1.4.0 both gates
+  # take the session key from lib/session.sh, where the ENV value is primary — so a driver
+  # that left the runner's own CLAUDE_CODE_SESSION_ID in the environment would be driving a
+  # DIVERGENCE, not a session, and the `no-session-key` rows would stop testing what they
+  # name. A payload with no key exports an empty one, which is what keeps those rows honest.
+  local _sid; _sid=$(printf '%s' "$p" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   case "$1" in
-    start:*) DRV_OUT=$(printf '%s' "$p" | bash "$START_GATE" 2>"$SANDBOX/.err") ;;
-    stop:*)  DRV_OUT=$(printf '%s' "$p" | bash "$STOP_GATE"  2>"$SANDBOX/.err") ;;
+    start:*) DRV_OUT=$(printf '%s' "$p" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$START_GATE" 2>"$SANDBOX/.err") ;;
+    stop:*)  DRV_OUT=$(printf '%s' "$p" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$STOP_GATE"  2>"$SANDBOX/.err") ;;
   esac
   DRV_ST=$?
   DRV_ERR=$(cat "$SANDBOX/.err")
@@ -408,7 +439,8 @@ drive() {  # <condition>
 TABLE='
 start|irrelevant-tool|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|empty-cwd|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
-start|non-git-cwd|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
+start|non-git-cwd-no-bionic|0|silent|Start gate — A2: a non-git cwd with no .bionic above it is not a project, so there is nothing to protect: OPEN, silent
+start|non-git-cwd-with-bionic|2|loud|Start gate — A2: the same non-git cwd INSIDE a project with an open run reaches the arming wall, which the old git-toplevel precondition hid entirely
 start|no-plan|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|plan-names-no-step|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|no-session-key|0|silent|Payload missing its session key — start: OPEN
