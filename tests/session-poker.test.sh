@@ -1865,6 +1865,32 @@ expect_contains "…whose terminal line is a FALLBACK, not a chosen root" \
   "fallback" "$R13C_LAST"
 expect_absent "…and no QUIET is taken on a root the walk never chose" "decision=QUIET" "$OUT"
 
+# ---------- 13d: a WORKTREE OF A BARE REPOSITORY reads chosen, not cwd-fallback (FIX-BARE) ----------
+#
+# critic-findings.md wave-1.4.0 issue 2 (MEDIUM). `_bionic_root_start` used to map every
+# linked worktree to dirname(--git-common-dir); for a worktree of a BARE repo that is the
+# directory HOLDING bare.git, not a working tree, so the checkout's own `.bionic` was never
+# a candidate and the walk landed on cwd-fallback — tripping this file's own TICK_ROOT_TAG =
+# "chosen"-only QUIET guard (session-poker.sh ~:1845) and reproducing the tick-#1 REFUSED
+# wall AC-38 (Section 13 above) exists to prevent. Real `git init --bare` + a real
+# `git worktree add`, never mocked.
+R13D_DIR="$TMPROOT/s13d-bare"
+mkdir -p "$R13D_DIR"
+( cd "$R13D_DIR" && git init -q --bare bare.git ) >/dev/null 2>&1
+R13DWT="$R13D_DIR/wt-of-bare"
+( cd "$R13D_DIR/bare.git" && git worktree add -q -b s13d-wt "$R13DWT" ) >/dev/null 2>&1
+mkdir -p "$R13DWT/.bionic/tmp"
+
+poke "$R13DWT" arm
+poke "$R13DWT" tick
+expect_eq "a bare-repo worktree with its own .bionic ticks quietly, not REFUSED (exit 0)" \
+  "0" "$RC"
+expect_contains "…the checkout's own .bionic is the chosen root, so the AC-38 guard fires QUIET" \
+  "decision=QUIET" "$OUT"
+expect_absent "…and never the candidate-wall refusal the bug used to reproduce" "REFUSED" "$OUT"
+expect_eq "…and the stamp lands under the checkout, not under dirname(bare.git)" "yes" \
+  "$([ -f "$(stamp_of "$R13DWT")" ] && echo yes || echo no)"
+
 # ============================================================
 echo ""
 echo "=== Section 14: the LEASE OVERRUN — a worktree outliving its row (AC-28) ==="
