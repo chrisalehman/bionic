@@ -1082,6 +1082,56 @@ while IFS= read -r dep_name; do
   esac
 done < <(dep_names)
 
+# ─── The one address this page is about ──────────────────────────────────────
+#
+# THE ONE ADDRESS EVERY READER MUST AGREE ON. `project_root` (lib/root.sh) is the
+# SSoT: the nearest ancestor holding a REAL `.bionic/` directory, after a linked
+# worktree has been mapped onto its main repository. Every project-scoped row on
+# this page reads the same address space the hooks do, which is the whole point
+# of there being one function — a doctor answering about a different root than
+# the wall it is diagnosing would be worse than a doctor that stayed quiet.
+#
+# RESOLVED HERE, BEFORE THE PATROL SECTION, and not where the run rows begin
+# (FIX-DOCTOR/1). It used to be computed a hundred lines further down, which is
+# how the Patrol section came to have no project filter at all: the address it
+# would have had to filter on did not exist yet at the point it renders.
+DOCTOR_ROOT="$(project_root "$PWD" 2>/dev/null)"
+[ -n "$DOCTOR_ROOT" ] || DOCTOR_ROOT="$PWD"
+
+# DOES THIS SESSION BELONG TO THE PROJECT BEING DIAGNOSED (T3 finding 1,
+# 2026-09-03). Driven cold from a probe project, doctor printed a PATROL section
+# naming two sessions from two OTHER projects while the `active run` row three
+# lines below resolved the probe project's own plan — one page, two answers about
+# which machine it was describing. Every live-session reader on this page now
+# passes through here.
+#
+# THROUGH THE LIBRARY, NEVER A STRING COMPARE. A session records the cwd the CLI
+# was started in, which is routinely a SUBDIRECTORY of its project, and on macOS
+# routinely the /tmp spelling of a /private/tmp path. `project_root` resolves
+# both — it canonicalises with `pwd -P` and walks for the `.bionic` — so the
+# comparison is between two answers from the same function rather than between
+# two spellings of a path. The `restart needed` row below did compare literally
+# (`_rs_cwd = DOCTOR_ROOT`) and silently missed every session standing one
+# directory in; it reads this instead.
+#
+# THE ANSWER IS MEMOISED because `project_root` shells out to git twice per call
+# and this page asks about the same handful of cwds from three separate loops.
+_DOCTOR_HERE_MEMO=""
+_doctor_session_here() {  # <session cwd> -> 0 when it resolves onto DOCTOR_ROOT
+  local cwd="${1:-}" line root
+  [ -n "$cwd" ] || return 1
+  while IFS= read -r line; do
+    case "$line" in
+      "${cwd}"$'\t'*) [ "${line#*$'\t'}" = "$DOCTOR_ROOT" ] && return 0; return 1 ;;
+    esac
+  done <<EOF
+$_DOCTOR_HERE_MEMO
+EOF
+  root="$(project_root "$cwd" 2>/dev/null)" || root=""
+  _DOCTOR_HERE_MEMO="${_DOCTOR_HERE_MEMO}${cwd}"$'\t'"${root}"$'\n'
+  [ -n "$root" ] && [ "$root" = "$DOCTOR_ROOT" ]
+}
+
 # ─── The Patrol, gathered and rendered before the fix accounting ─────────────
 #
 # RUNNING PATROLS OR NOTHING (F3, epic-19 wave-01 — design ledger ratification
@@ -1110,6 +1160,7 @@ PATROL_LIVE=0
 PATROL_LINES="$(patrol_report 2>/dev/null)"
 
 _p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""
+_p_here=""
 
 # WHY THE JOB COUNT ALONE CANNOT ANSWER "IS IT RUNNING" (Step-6 correctness C1,
 # a FAIL against AC-F3). The jobs on this page are RECONSTRUCTED FROM THE
@@ -1140,6 +1191,14 @@ _p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_
 #                 already does for a machine with no Patrol at all.
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
+  # THIS PROJECT'S SESSIONS ONLY (T3 finding 1). lib/patrol.sh walks every live
+  # CLI process on the machine — that is its job, and hooks/session-poker.sh
+  # wants the whole fleet — so the narrowing belongs to the renderer. Set from
+  # the session's own recorded cwd, resolved through `project_root`; a session
+  # belonging to another project is dropped whole, its rows and its fix lines
+  # together, because a repair addressed to a project the reader is not standing
+  # in is not a repair they can make.
+  [ "$_p_here" = "yes" ] || return 0
   [ "$_p_n_patrol" -gt 0 ] || return 0
   local short="${_p_sid%%-*}" j id extras="" n open=0 blind="${_p_blind}"
   case "$blind" in ''|*[!0-9]*) blind=0 ;; esac
@@ -1228,7 +1287,9 @@ while IFS= read -r _p_line; do
     "patrol-session/v1|"*)
       _patrol_flush
       _p_sid="$(_doctor_pfield "$_p_line" session)"
-      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind="" ;;
+      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""
+      _p_here=no
+      if _doctor_session_here "$(_doctor_pfield "$_p_line" cwd)"; then _p_here=yes; fi ;;
     "patrol-job/v1|"*)
       if [ "$(_doctor_pfield "$_p_line" kind)" = "patrol" ]; then
         _p_n_patrol=$((_p_n_patrol + 1))
@@ -1257,14 +1318,9 @@ _patrol_flush
 
 # ─── This project: the run, its predecessors, and the machine ────────────────
 #
-# THE ONE ADDRESS EVERY READER MUST AGREE ON. `project_root` (lib/root.sh) is the
-# SSoT: the nearest ancestor holding a REAL `.bionic/` directory, after a linked
-# worktree has been mapped onto its main repository. The rows below read the same
-# address space the hooks do, which is the whole point of there being one
-# function — a doctor answering about a different root than the wall it is
-# diagnosing would be worse than a doctor that stayed quiet.
-DOCTOR_ROOT="$(project_root "$PWD" 2>/dev/null)"
-[ -n "$DOCTOR_ROOT" ] || DOCTOR_ROOT="$PWD"
+# `DOCTOR_ROOT` and `_doctor_session_here` are resolved ABOVE the Patrol section
+# now — that section is the page's first project-scoped reader, and it cannot
+# scope itself to an address that has not been computed yet (FIX-DOCTOR/1).
 
 RUN_ROWS=""
 _run_add() { RUN_ROWS="${RUN_ROWS}$1"$'\n'; }
@@ -1384,8 +1440,12 @@ _doctor_utc_short() {  # <epoch-seconds> -> "2026-09-03 02:06Z", or empty
 if [ -n "$_doctor_hooks_mtime" ]; then
   while IFS= read -r _rs_line; do
     [ -n "$_rs_line" ] || continue
+    # RESOLVED, NOT COMPARED (FIX-DOCTOR/2). A session standing one directory
+    # inside this project records that subdirectory as its cwd, and the literal
+    # equality this line used to be silently skipped it — a stale registration
+    # in the very session the reader is sitting in, never reported.
     _rs_cwd="$(_doctor_pfield "$_rs_line" cwd)"
-    [ "$_rs_cwd" = "$DOCTOR_ROOT" ] || continue
+    _doctor_session_here "$_rs_cwd" || continue
     _rs_pid="$(_doctor_pfield "$_rs_line" pid)"
     _rs_sf="$(_patrol_claude_home)/sessions/${_rs_pid}.json"
     _rs_started_ms="$(command -v jq >/dev/null 2>&1 && jq -r '.startedAt // empty' "$_rs_sf" 2>/dev/null)"
@@ -1427,14 +1487,33 @@ else
   _res_add "$(_doctor_item "$DOCTOR_NIL" "machine" "unknown — the resources probe did not answer")"
 fi
 
+# THE SET IS THE FILES IN THIS PROJECT, NOT THE MACHINE'S LIVE SESSIONS
+# (FIX-DOCTOR/3, T3 finding 2). This loop was keyed on `patrol_live_sessions` —
+# every live CLI process anywhere on the machine — and asked of each whether an
+# attestation under ITS id existed here. Two wrong sets in one predicate: other
+# projects' sessions were iterated at all, and this project's own records were
+# dropped the instant their writer exited. A `/clear` re-keys the session, so the
+# session that TOOK the attestation is routinely gone by the time anyone runs
+# doctor; the driven page said `none has taken an attestation in this project`
+# with `preflight-4241a5cd….state` sitting in the directory it was naming.
+#
+# `<root>/.bionic/tmp/preflight-*.state` IS WHAT THE FALLBACK LINE IS A CLAIM
+# ABOUT, so it is what gets read. The path bounds the set to this project by
+# construction — no cwd resolution needed, and no other project can contribute a
+# row — and liveness stops being part of the question, which is right: an
+# attestation is a record of a measurement that happened, not a property of a
+# process that is still running.
+#
+# A GLOB, THE SAME WAY THE PREDECESSOR-ROSTER LOOP ABOVE READS ITS OWN FILES —
+# bash sorts a pathname expansion, so the page is stable across runs without
+# spending `ls` or `sort` on it. Doctor's header rule is that a diagnosis must
+# not need coreutils to run on the broken machine it exists for.
 _doctor_probe_sh="${_doctor_payload_root}/hooks/preflight-probe.sh"
 _doctor_budgets=0
-while IFS= read -r _live_line; do
-  [ -n "$_live_line" ] || continue
-  _l_sid="$(_doctor_pfield "$_live_line" session)"
-  [ -n "$_l_sid" ] || continue
-  _l_att="${DOCTOR_ROOT}/.bionic/tmp/preflight-${_l_sid}.state"
+for _l_att in "${DOCTOR_ROOT}/.bionic/tmp/"preflight-*.state; do
   [ -f "$_l_att" ] || continue
+  _l_sid="${_l_att##*/preflight-}"; _l_sid="${_l_sid%.state}"
+  [ -n "$_l_sid" ] || continue
   _doctor_budgets=$((_doctor_budgets + 1))
   if ! _l_rec="$(bash "$_doctor_probe_sh" --read "$_l_att" 2>/dev/null)"; then
     _res_add "$(_doctor_item "$DOCTOR_NIL" "session ${_l_sid%%-*}" \
@@ -1447,9 +1526,7 @@ while IFS= read -r _live_line; do
   else
     _res_add "$(_doctor_item "$DOCTOR_NIL" "session ${_l_sid%%-*}" "no budget recorded")"
   fi
-done <<EOF
-$(patrol_live_sessions 2>/dev/null)
-EOF
+done
 [ "$_doctor_budgets" -gt 0 ] || \
   _res_add "$(_doctor_item "$DOCTOR_NIL" "no session" "none has taken an attestation in this project")"
 
