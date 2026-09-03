@@ -119,6 +119,14 @@ _bionic_root_is_home_or_above() {
 # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
 # answer against the cwd for anything older. A repository is a linked worktree
 # exactly when its git dir and its common git dir differ.
+#
+# BARE EXCEPTION (critic-findings.md wave-1.4.0 issue 2). `dirname(common)` is the
+# main repo's working root only when the main repo HAS a working tree. When the
+# common dir belongs to a BARE repository, it names a directory holding a `.git`-
+# equivalent tree (e.g. `.../bare.git`) with no working tree at all — dirname of
+# THAT is just the folder the bare repo happens to sit in, unrelated to any
+# checkout. In that case the linked worktree IS the only working tree there is, so
+# the walk starts at the cwd instead, exactly as it would with no mapping applied.
 _bionic_root_start() {
   local cwd="$1" common gitdir
   common="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
@@ -133,8 +141,10 @@ _bionic_root_start() {
     common="$(_bionic_root_abs "$common")"
     gitdir="$(_bionic_root_abs "$gitdir")"
     if [ "$common" != "$gitdir" ]; then
-      printf '%s\n' "$(dirname "$common")"
-      return 0
+      if [ "$(git -C "$common" rev-parse --is-bare-repository 2>/dev/null)" != "true" ]; then
+        printf '%s\n' "$(dirname "$common")"
+        return 0
+      fi
     fi
   fi
   printf '%s\n' "$cwd"
