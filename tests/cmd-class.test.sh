@@ -246,8 +246,24 @@ case_is suite "$HEREDOC_THEN_SUITE" "suite: a real command AFTER a heredoc still
 # ============================================================
 echo "=== C2/C3 — farm-out-reminder through the library (AC-15, AC-16) ==="
 # ============================================================
+# ---------- engagement (task-engaged-session, AC-6 / AC-20) ----------
+#
+# Since 2026-09-03 both hooks this section drives ask one question before any other: did
+# this session invoke the canonical-sdlc skill? (Chris: "all guardrails imposed by bionic
+# should only apply when exercising bionic. Nothing should apply until bionic is
+# triggered.") hooks/engage.sh answers it by writing `.bionic/tmp/engaged-<sid>.state`
+# under the project root, creating the directory where there is none.
+#
+# EVERY FIXTURE BELOW IS ENGAGED, including the negative controls — otherwise the run
+# predicate and the classifier, which are what those controls are about, would never be
+# reached and each would pass for the wrong reason. §C6 at the bottom is the unengaged
+# world, and it is the only place the marker is absent.
+engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$SID.state"; }
+unengage() { rm -f "$1/.bionic/tmp/engaged-$SID.state"; }
+
 FARM_REPO="$SANDBOX/farm/repo"
 mkdir -p "$FARM_REPO/.bionic/tmp" "$FARM_REPO/.bionic/docs/plans"
+engage "$FARM_REPO"
 # THE WALL IS RUN-SCOPED SINCE bionic 1.4.0 (slice ADOPT, spec AC-7). The hook is
 # registered always-on now, so what scopes it is an on-disk fact rather than an armed
 # skill: `active_run` under the payload's project root. Every AC-16 arm below asks
@@ -312,15 +328,21 @@ farm_decision() {  # <command> -> "" when silent, else the deny/nudge class
 # whole of the "always-on registration is safe" claim. Until 1.4.0 this hook had no run
 # gate at all (R-2 finding 1), so registering it always-on would have denied `pytest`,
 # `npm test` and `bash tests/run.sh` in every project on this machine.
+# "NO .bionic" IS NO LONGER A WORLD THIS ARM CAN DESCRIBE, and the change is forced by
+# the design rather than chosen: engagement writes its marker into `.bionic/tmp`, so a
+# project an engaged session works in always has the directory. What the control still
+# isolates — and the only thing it ever needed to — is the RUN: a tree with no plan in it.
 FARM_NORUN="$SANDBOX/farm/norun"
 mkdir -p "$FARM_NORUN"
+engage "$FARM_NORUN"
 run_hook "$(mk_bash_payload "$FARM_NORUN" 'bash tests/run.sh')" "$FARM_OUT"
-expect_empty "AC-7 farm-out is SILENT on a suite command in a project with no .bionic" "$OUT"
+expect_empty "AC-7 farm-out is SILENT on a suite command in a project with no run" "$OUT"
 expect_empty "AC-7 …and says nothing on stderr either" "$ERR"
 expect_eq "AC-7 …exiting 0" "0" "$ST"
 
 FARM_CLOSED="$SANDBOX/farm/closed"
 mkdir -p "$FARM_CLOSED/.bionic/docs/plans"
+engage "$FARM_CLOSED"
 cat > "$FARM_CLOSED/.bionic/docs/plans/wave-01.plan.md" <<'CLOSEDPLAN'
 ---
 canonical_sdlc_version: 14
@@ -424,9 +446,13 @@ rm -f "$FARM_REPO/.bionic/config.yaml"
 # ============================================================
 echo "=== C4 — background-suite-guard behind agent-context-guard (AC-23, AC-24) ==="
 # ============================================================
-make_repo() {  # <name> -> an armed repo
+make_repo() {  # <name> -> an armed repo of an ENGAGED session
   local repo="$SANDBOX/$1/repo"
   mkdir -p "$repo/.bionic/tmp"
+  # ENGAGED: hooks/agent-context-guard.sh in front, and the wall behind it, both step
+  # aside for a session that never invoked the skill. The arming roster below is a
+  # different fact and the cells here are about that one.
+  : > "$repo/.bionic/tmp/engaged-$SID.state"
   git -C "$repo" init -q 2>/dev/null
   git -C "$repo" config user.email t@example.com
   git -C "$repo" config user.name "T"
@@ -624,6 +650,68 @@ expect_eq "the installed-plugin reading of the cmd-class source lands on the shi
 # ANTI-VACUITY: the extractor must actually see both shapes it claims to cover.
 expect_contains "…and the extractor sees the cmd-class library (shape A)" "cmd-class.sh" "$SRC_LITERALS"
 expect_contains "…and the sweeper handoff (shape B)" "session-sweeper.sh" "$SRC_LITERALS"
+
+# ============================================================
+echo
+echo "=== C6 — the session never invoked the skill: neither hook is there (AC-6, AC-20) ==="
+# ============================================================
+#
+# THE PAIRED WORLD for C2/C3 and C4. Chris, 2026-09-03: "all guardrails imposed by bionic
+# should only apply when exercising bionic. Nothing should apply until bionic is
+# triggered." Both hooks read `.bionic/tmp/engaged-<sid>.state` before anything else, so
+# with the marker removed the suite commands every arm above denies pass in silence: exit
+# 0, nothing on stdout, nothing on stderr.
+#
+# Each fixture here is one an arm above REFUSES, unengaged and then re-engaged, so no row
+# can pass on a hook that had simply stopped working.
+
+# --- farm-out-reminder: the deny and the nudge both go quiet (AC-6) ---
+unengage "$FARM_REPO"
+run_hook "$(mk_bash_payload "$FARM_REPO" 'bash tests/run.sh')" "$FARM_OUT"
+expect_empty "AC-6 farm-out is SILENT on a suite command in an unengaged session" "$OUT"
+expect_empty "AC-6 …and says nothing on stderr either" "$ERR"
+expect_eq "AC-6 …exiting 0" "0" "$ST"
+
+run_hook "$(mk_bash_payload "$FARM_REPO" 'npx create-react-app x')" "$FARM_OUT"
+expect_empty "AC-6 …the tier-2 nudge is silent too" "$OUT$ERR"
+
+# THE OVERRIDE IS NOT CONSULTED, because there is nothing to override: an audit line
+# recording a bypass of a wall that was never going to fire is noise in the one stream
+# that has to stay readable.
+run_hook "$(mk_bash_payload "$FARM_REPO" 'FARM_OUT_ALLOW=1 bash tests/run.sh')" "$FARM_OUT"
+expect_empty "AC-6 …and an explicit override is silent rather than audited" "$OUT$ERR"
+
+# A SYMLINK at the marker path is not a marker (lib/run.sh refuses `-L` before following
+# it), and neither is another session's.
+ln -s "$FARM_CLOSED/.bionic/tmp" "$FARM_REPO/.bionic/tmp/engaged-$SID.state" 2>/dev/null
+run_hook "$(mk_bash_payload "$FARM_REPO" 'bash tests/run.sh')" "$FARM_OUT"
+expect_empty "AC-6 …a SYMLINK at the marker path is not engagement" "$OUT$ERR"
+rm -f "$FARM_REPO/.bionic/tmp/engaged-$SID.state"
+: > "$FARM_REPO/.bionic/tmp/engaged-00000000-1111-2222-3333-444444444444.state"
+run_hook "$(mk_bash_payload "$FARM_REPO" 'bash tests/run.sh')" "$FARM_OUT"
+expect_empty "AC-6 …another session's marker is not engagement" "$OUT$ERR"
+
+# CONTROL: restore the marker and the identical command denies again.
+engage "$FARM_REPO"
+expect_contains "AC-6 control: with the marker back, the same suite command DENIES" \
+  '"deny"' "$(farm_decision 'bash tests/run.sh')"
+
+# --- background-suite-guard: the same, behind its own guard and driven straight (AC-20) ---
+unengage "$GREPO"
+run_guarded "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
+expect_eq "AC-20 a backgrounded suite passes an unengaged session (through the guard)" "0" "$ST"
+expect_empty "AC-20 …silently" "$OUT$ERR"
+
+# STRAIGHT INTO THE WALL, bypassing hooks/agent-context-guard.sh entirely: the wall has
+# its own scope and does not depend on the guard in front remembering to check.
+run_hook "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)" "$BG_GUARD"
+expect_eq "AC-20 …and driven straight into the wall, still exit 0" "0" "$ST"
+expect_empty "AC-20 …still silently" "$OUT$ERR"
+
+# CONTROL: the marker back, the same payload straight into the wall refuses again.
+engage "$GREPO"
+run_hook "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)" "$BG_GUARD"
+expect_eq "AC-20 control: with the marker back, the wall REFUSES again" "2" "$ST"
 
 # ============================================================
 echo

@@ -55,21 +55,48 @@ make_project() {
   mkdir -p "$dir/.bionic/docs/specs/epic-01-demo"
   mkdir -p "$dir/.bionic/docs/adrs/epic-01-demo"
   git -C "$dir" init -q .
+  engage "$dir"
   cleanup_dirs+=("$dir")
   echo "$dir"
 }
+
+# ---------- engagement (task-engaged-session, AC-7) ----------
+#
+# Since 2026-09-03 this hook asks one question before the four-clause project
+# disjunction below it: did this session invoke the canonical-sdlc skill? (Chris: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered.") hooks/engage.sh answers it by writing
+# `.bionic/tmp/engaged-<sid>.state` under the project root — and, in a project that has
+# no `.bionic/` yet, by creating the directory to hold it.
+#
+# EVERY FIXTURE IN THIS FILE IS AN ENGAGED SESSION, because every assertion in it is
+# about what this wall does to an artifact written during a canonical-sdlc run. The
+# unengaged world is the section at the bottom, which drives every clause of the
+# disjunction with the marker removed.
+#
+# THE MARKER GOES UNDER THE ARTIFACT'S ROOT, never the runner's cwd: this hook resolves
+# `PROJECT_ROOT_FROM_PATH` from the target path and reads the marker there, so a fixture
+# whose artifact lives in another tree engages THAT tree.
+GS_SID="5e4d3c2b-1a09-4876-9b5c-4d3e2f1a0b9c"
+engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$GS_SID.state"; }
+unengage() { rm -f "$1/.bionic/tmp/engaged-$GS_SID.state"; }
 
 # Runs hook with a synthetic Write payload for $FILE with $CONTENT.
 run_write() {
   local file_path="$1" content="$2"
   local input
+  # THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does: lib/session.sh
+  # takes the env value as primary and the payload as a witness, so a runner leaving the
+  # real session id in the environment would send this hook looking for a marker no
+  # fixture here ever wrote.
   input=$(jq -n \
     --arg p "$file_path" \
     --arg c "$content" \
-    '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
+    --arg s "$GS_SID" \
+    '{session_id: $s, tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
   local tmp_err
   tmp_err=$(mktemp)
-  if HOME="$FAKE_HOME" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -85,10 +112,11 @@ run_edit() {
     --arg p "$file_path" \
     --arg o "$old_str" \
     --arg n "$new_str" \
-    '{tool_name: "Edit", tool_input: {file_path: $p, old_string: $o, new_string: $n}}')
+    --arg s "$GS_SID" \
+    '{session_id: $s, tool_name: "Edit", tool_input: {file_path: $p, old_string: $o, new_string: $n}}')
   local tmp_err
   tmp_err=$(mktemp)
-  if HOME="$FAKE_HOME" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -703,6 +731,11 @@ ac10_wt="$ac10_tmp/wt"
 mkdir -p "$ac10_wt/.bionic/docs/plans/epic-01-demo"
 ac10_nb="$ac10_tmp/nobionic"; mkdir -p "$ac10_nb"; git -C "$ac10_nb" init -q .
 ac10_out="$ac10_tmp/outside"; mkdir -p "$ac10_out"
+# Engaged on every root this section drives an artifact into. `ac10_out` has no repo and
+# no `.bionic` above it at all, which is the arm that stays unengaged by construction —
+# see the c5 assertion, which expects silence there for both reasons at once.
+engage "$ac10_main"
+engage "$ac10_nb"
 
 # 1 — from the repo root, the repo root.
 
@@ -795,10 +828,10 @@ assert_contains "ac10_e2e_worktree_pair finding keyed on the main repo" "spike-c
 echo "e2e: git < 2.31 → a correctly-placed artifact is still correctly placed"
 run_write_oldgit() {  # like run_write, with the old-git shim first on PATH and cwd elsewhere
   local file_path="$1" content="$2" input tmp_err
-  input=$(jq -n --arg p "$file_path" --arg c "$content" \
-    '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
+  input=$(jq -n --arg p "$file_path" --arg c "$content" --arg s "$GS_SID" \
+    '{session_id: $s, tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
   tmp_err=$(mktemp)
-  if (cd "$ac10_out" && HOME="$FAKE_HOME" PATH="$ac10_oldgit:$PATH" bash "$HOOK" <<< "$input") \
+  if (cd "$ac10_out" && HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" PATH="$ac10_oldgit:$PATH" bash "$HOOK" <<< "$input") \
        >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
@@ -808,6 +841,7 @@ run_write_oldgit() {  # like run_write, with the old-git shim first on PATH and 
   rm -f "$tmp_err"
 }
 ac10_og="$ac10_tmp/oldgit"; mkdir -p "$ac10_og"; git -C "$ac10_og" init -q .
+engage "$ac10_og"
 run_write_oldgit "$ac10_og/.bionic/docs/plans/epic-01-demo/oldgit.plan.md" "$(build_plan)"
 assert_eq "ac10_e2e_oldgit valid artifact allowed" 0 "$HOOK_EXIT"
 # ...and misplacement still BLOCKS under old git, naming the artifact's OWN
@@ -839,6 +873,12 @@ make_bare_project() {
   local dir
   dir=$(cd "$(mktemp -d)" && pwd -P)
   git -C "$dir" init -q .
+  # "BARE" NOW MEANS "no docs tree", not "no .bionic at all", and the change is forced by
+  # the design rather than chosen: hooks/engage.sh creates `.bionic/tmp` in a project that
+  # has none, so `.bionic/tmp` exists in EVERY engaged session by the time this wall runs.
+  # What AC-11 still owns, and what the assertions below still measure, is the docs
+  # subtree — specs/, plans/, adrs/, incidents/ — none of which engagement creates.
+  engage "$dir"
   cleanup_dirs+=("$dir")
   echo "$dir"
 }
@@ -910,13 +950,19 @@ assert_eq "ac11_c4c write blocked" 2 "$HOOK_EXIT"
 # Ruling (orchestrator, Step 6): the tree is created only for an artifact that
 # passes the ENTIRE contract, not merely one carrying a version marker. So the
 # three later gates each get an arm here.
+#
+# THE PROBE MOVED DOWN ONE LEVEL (task-engaged-session, 2026-09-03) and the claim did
+# not: `.bionic/tmp` now exists in every engaged session because hooks/engage.sh made it
+# at invocation, so the absence this AC owns is the DOCS tree — specs/, plans/, adrs/,
+# incidents/ and the .gitignore beside them, none of which engagement creates and all of
+# which a refused write must still leave unmade.
 # [WALL: hooks/canonical-sdlc-governing-skill.sh]
 echo "AC-11 c4d: blocked on the VERSION gate (wrong number) -> no tree"
 ac11_p6=$(make_bare_project)
 run_write "$ac11_p6/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan version=3)"
 assert_eq "ac11_c4d write blocked" 2 "$HOOK_EXIT"
 TOTAL=$((TOTAL + 1))
-if [ -d "$ac11_p6/.bionic" ]; then
+if [ -d "$ac11_p6/.bionic/docs" ]; then
   FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4d no .bionic/ created for a wrong-version artifact (found %s/.bionic)\n' "$ac11_p6"
 else
   PASS=$((PASS + 1)); printf '  PASS  ac11_c4d no .bionic/ created for a wrong-version artifact\n'
@@ -927,7 +973,7 @@ ac11_p7=$(make_bare_project)
 run_write "$ac11_p7/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan intent=definitely-not-an-intent)"
 assert_eq "ac11_c4e write blocked" 2 "$HOOK_EXIT"
 TOTAL=$((TOTAL + 1))
-if [ -d "$ac11_p7/.bionic" ]; then
+if [ -d "$ac11_p7/.bionic/docs" ]; then
   FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4e no .bionic/ created for an invalid-triple artifact (found %s/.bionic)\n' "$ac11_p7"
 else
   PASS=$((PASS + 1)); printf '  PASS  ac11_c4e no .bionic/ created for an invalid-triple artifact\n'
@@ -938,7 +984,7 @@ ac11_p8=$(make_bare_project)
 run_write "$ac11_p8/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan omit=has_ui)"
 assert_eq "ac11_c4f write blocked" 2 "$HOOK_EXIT"
 TOTAL=$((TOTAL + 1))
-if [ -d "$ac11_p8/.bionic" ]; then
+if [ -d "$ac11_p8/.bionic/docs" ]; then
   FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4f no .bionic/ created for a flag-missing artifact (found %s/.bionic)\n' "$ac11_p8"
 else
   PASS=$((PASS + 1)); printf '  PASS  ac11_c4f no .bionic/ created for a flag-missing artifact\n'
@@ -949,7 +995,7 @@ ac11_p9=$(make_bare_project)
 run_write "$ac11_p9/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan matrix=no)"
 assert_eq "ac11_c4g write blocked" 2 "$HOOK_EXIT"
 TOTAL=$((TOTAL + 1))
-if [ -d "$ac11_p9/.bionic" ]; then
+if [ -d "$ac11_p9/.bionic/docs" ]; then
   FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4g no .bionic/ created for a matrix-less step-3 plan (found %s/.bionic)\n' "$ac11_p9"
 else
   PASS=$((PASS + 1)); printf '  PASS  ac11_c4g no .bionic/ created for a matrix-less step-3 plan\n'
@@ -975,15 +1021,20 @@ ac12_after_hash=$(shasum -a 256 "$ac12_p4/.gitignore" | awk '{print $1}')
 # 2>/dev/null` above it IS correctly silenced, which is why the asymmetry reads
 # as unintended rather than as a choice.
 #
-# Fixture: `.bionic` present as a REGULAR FILE at the project root, so the
-# redirect fails with ENOTDIR. A hook is a tool-call gate — stderr on an ALLOWED
-# call is noise the agent has to interpret.
+# Fixture: a DIRECTORY standing where `.bionic/.gitignore` must be written, so the
+# redirect fails with EISDIR. It used to be `.bionic` itself as a regular file (ENOTDIR),
+# which task-engaged-session made unreachable rather than merely inconvenient: an engaged
+# session's marker lives at `.bionic/tmp/engaged-<sid>.state`, so in every session this
+# wall now runs in, `.bionic` is a directory. The failing WRITE is the subject either way.
+# A hook is a tool-call gate — stderr on an ALLOWED call is noise the agent has to
+# interpret.
 # [WALL: hooks/canonical-sdlc-governing-skill.sh]
 echo "AC-12 c4 (C4): an unwritable .gitignore path leaks nothing on stderr"
 ac12_p5=$(make_bare_project)
-: > "$ac12_p5/.bionic"
+mkdir -p "$ac12_p5/.bionic/.gitignore"
 run_write "$ac12_p5/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan)"
 assert_eq "ac12_c4 write still allowed" 0 "$HOOK_EXIT"
+assert_eq "ac12_c4 ...and says nothing on stderr" "" "$HOOK_STDERR"
 
 # ============================================================
 # AC-13: misplacement blocks; absence never does
@@ -1112,6 +1163,7 @@ echo "AC-13 c10: a project reached through a SYMLINK is the same project"
 ac13_sym=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac13_sym")
 mkdir -p "$ac13_sym/real/.bionic/docs/plans/epic-01-demo"
 git -C "$ac13_sym/real" init -q .
+engage "$ac13_sym/real"
 ln -s "$ac13_sym/real" "$ac13_sym/link"
 run_write "$ac13_sym/link/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_FRONTMATTER"
 assert_eq "ac13_c10 correctly-placed artifact via a symlinked path exit 0" 0 "$HOOK_EXIT"
@@ -1482,6 +1534,7 @@ ac13_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac13_tmp")
 ac13_main="$ac13_tmp/main"
 mkdir -p "$ac13_main/.bionic/docs/record" "$ac13_main/subdir"
 git -C "$ac13_main" init -q .
+engage "$ac13_main"
 git -C "$ac13_main" commit -q --allow-empty -m init
 # Absolute worktree path from the repo root, per .claude/rules/git-worktree-
 # docs.md — `git worktree add` resolves relative paths against pwd, not the
@@ -1542,6 +1595,14 @@ assert_contains "ac13_traversal_missing names the pinned root" \
   "Pinned root: $ac13_main/.bionic" "$HOOK_STDERR"
 
 echo "ac13-7: the same escape through EXISTING segments (control) still blocks"
+# ENGAGED ON THE ENCLOSING TEMP DIRECTORY, because that is the root this path resolves to.
+# Every segment on the way out exists, so `..` folds the whole thing down to
+# `$ac13_tmp/other/...`, and the nearest real `.bionic` above THAT is none — project_root
+# answers `$ac13_tmp`. The marker has to live where the hook will look for it, which is
+# the resolved root and never the root the path was written relative to. ac13-6 above
+# needs no such line: its missing segment stops the fold at `$ac13_main`, which
+# make_project already engaged.
+engage "$ac13_tmp"
 # The control the cs review used to prove the first case was about resolution, not about
 # escaping: identical destination, every segment on the way there real.
 run_write "$ac13_main/.bionic/docs/../../../other/.bionic/docs/record/w2-r4-esc2.md" \
@@ -1596,6 +1657,7 @@ echo "=== AC-14: no-git fallback walks up from the TARGET, not the shell ==="
 ac14_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac14_tmp")
 ac14_ws="$ac14_tmp/ws"
 mkdir -p "$ac14_ws/.bionic/docs/record"
+engage "$ac14_ws"
 ac14_unrelated="$ac14_tmp/unrelated"
 mkdir -p "$ac14_unrelated"
 ac14_record_body='# operational artifact — no canonical-sdlc frontmatter at all'
@@ -1643,12 +1705,12 @@ echo "--- WALLS: parallel-budget in the header, and the worktree-cwd arm ---"
 run_write_from() {
   local file_path="$1" content="$2" cwd="$3" atype="${4:-}"
   local input
-  input=$(jq -n --arg p "$file_path" --arg c "$content" --arg d "$cwd" --arg a "$atype" \
-    '{tool_name: "Write", cwd: $d, tool_input: {file_path: $p, content: $c}}
+  input=$(jq -n --arg p "$file_path" --arg c "$content" --arg d "$cwd" --arg a "$atype" --arg s "$GS_SID" \
+    '{session_id: $s, tool_name: "Write", cwd: $d, tool_input: {file_path: $p, content: $c}}
      + (if $a == "" then {} else {agent_type: $a} end)')
   local tmp_err
   tmp_err=$(mktemp)
-  if HOME="$FAKE_HOME" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -1702,6 +1764,116 @@ echo "Write: a non-plan artifact from a worktree cwd → allow (the arm is plan-
 run_write_from "$walls_project/.bionic/docs/specs/epic-01-demo/wave-01-x.spec.md" \
   "$VALID_SPEC_FRONTMATTER" "$walls_tree"
 assert_eq "walls-6 a spec write from a worktree cwd is not this arm's business" 0 "$HOOK_EXIT"
+
+# ============================================================
+# AC-7: the session never invoked the skill — every clause of the disjunction
+# ============================================================
+#
+# Chris, 2026-09-03: "all guardrails imposed by bionic should only apply when exercising
+# bionic. Nothing should apply until bionic is triggered." This wall is armed by the
+# PROJECT rather than by a run, through a four-clause disjunction — an open run under the
+# root, a `.bionic/` tree at the root, a target path inside one, or content declaring
+# `canonical_sdlc_version:` outside the docs root. Every one of those can be true in a
+# session that never invoked the skill; a bystander editing a plan in a repo where
+# somebody else ran a wave was the reproduction. So engagement is asked FIRST and each
+# clause below is driven twice: without the marker, and with it.
+#
+# WHAT THE TWO HALVES PROVE, precisely. The marker-less half isolates a clause: the
+# fixture is built so that clause is what would arm the wall, and the wall says nothing.
+# The marker-present half is a CONTROL on the same fixture, and it does not isolate
+# anything — planting the marker creates `.bionic/tmp`, so clause 2 is true in every
+# engaged project by construction. That is the design, not a fixture accident: engagement
+# creates the tree it records itself in, and the disjunction's later clauses only ever
+# mattered for a project that had none.
+
+echo
+echo "=== AC-7: no engagement marker → silent on every clause of the project disjunction ==="
+
+AC7_BAD_PLAN=$(build_plan intent=definitely-not-an-intent)
+
+ac7_silent() {  # <label> — asserts on the last run_write
+  TOTAL=$((TOTAL + 1))
+  if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+    PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"
+  else
+    FAIL=$((FAIL + 1)); printf '  FAIL  %s (exit=%s stderr=%q)\n' "$1" "$HOOK_EXIT" "$HOOK_STDERR"
+  fi
+}
+
+ac7_refused() {  # <label> — the control on the same fixture, marker restored
+  TOTAL=$((TOTAL + 1))
+  if [ "$HOOK_EXIT" -eq 2 ]; then
+    PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"
+  else
+    FAIL=$((FAIL + 1)); printf '  FAIL  %s (expected exit 2, got %s)\n' "$1" "$HOOK_EXIT"
+  fi
+}
+
+# --- clause 1: an OPEN RUN under this root ---
+ac7_p1=$(make_project)
+mkdir -p "$ac7_p1/.bionic/docs/plans/epic-01-demo"
+printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n' \
+  > "$ac7_p1/.bionic/docs/plans/epic-01-demo/open.plan.md"
+unengage "$ac7_p1"
+run_write "$ac7_p1/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
+ac7_silent "ac7 clause 1 (open run): an invalid triple passes an unengaged session"
+engage "$ac7_p1"
+run_write "$ac7_p1/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
+ac7_refused "ac7 clause 1 control: the same write, marker restored, is REFUSED"
+
+# --- clause 2: a `.bionic/` TREE at this root, and no run in it ---
+ac7_p2=$(make_project)
+unengage "$ac7_p2"
+run_write "$ac7_p2/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
+ac7_silent "ac7 clause 2 (.bionic tree, no run): an invalid triple passes an unengaged session"
+engage "$ac7_p2"
+run_write "$ac7_p2/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
+ac7_refused "ac7 clause 2 control: the same write, marker restored, is REFUSED"
+
+# --- clause 3: the FIRST-ARTIFACT case — the target is inside a `.bionic/` that does
+# not exist yet, which is the one clause that arms this wall in a project with no tree.
+ac7_p3=$(make_bare_project)
+unengage "$ac7_p3"
+rm -rf "$ac7_p3/.bionic"
+run_write "$ac7_p3/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
+ac7_silent "ac7 clause 3 (path inside a .bionic that does not exist): passes an unengaged session"
+TOTAL=$((TOTAL + 1))
+if [ -d "$ac7_p3/.bionic" ]; then
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac7 clause 3 ...and creates no tree on the way past\n'
+else
+  PASS=$((PASS + 1)); printf '  PASS  ac7 clause 3 ...and creates no tree on the way past\n'
+fi
+engage "$ac7_p3"
+run_write "$ac7_p3/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
+ac7_refused "ac7 clause 3 control: the same write, marker planted, is REFUSED"
+
+# --- clause 4: SELF-DECLARING CONTENT outside the docs root — the misplacement wall ---
+ac7_p4=$(make_bare_project)
+unengage "$ac7_p4"
+rm -rf "$ac7_p4/.bionic"
+mkdir -p "$ac7_p4/notes"
+run_write "$ac7_p4/notes/rogue.plan.md" "$(build_plan)"
+ac7_silent "ac7 clause 4 (canonical_sdlc_version: outside the docs root): passes an unengaged session"
+engage "$ac7_p4"
+run_write "$ac7_p4/notes/rogue.plan.md" "$(build_plan)"
+ac7_refused "ac7 clause 4 control: the same write, marker planted, is REFUSED as misplaced"
+
+# --- the shapes that are NOT engagement, on a fixture that otherwise refuses ---
+ac7_p5=$(make_project)
+unengage "$ac7_p5"
+ln -s "$ac7_p1/.bionic/tmp/engaged-$GS_SID.state" "$ac7_p5/.bionic/tmp/engaged-$GS_SID.state"
+run_write "$ac7_p5/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
+ac7_silent "ac7 a SYMLINK at the marker path is not engagement"
+rm -f "$ac7_p5/.bionic/tmp/engaged-$GS_SID.state"
+
+: > "$ac7_p5/.bionic/tmp/engaged-deadbeef-0000-0000-0000-000000000000.state"
+run_write "$ac7_p5/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
+ac7_silent "ac7 another session's marker is not engagement"
+
+# THE MARKER IS READ UNDER THE ARTIFACT'S ROOT, not the invoking session's cwd. Engaging
+# a DIFFERENT project does not arm this wall over ac7_p5's artifact.
+run_write_from "$ac7_p5/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN" "$ac7_p1"
+ac7_silent "ac7 engagement in the cwd's project does not arm the wall over another project's artifact"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

@@ -65,13 +65,18 @@ expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "[$2] not found i
 #   name | fail class (closed|open) | run-scoped (yes|no)
 #
 # RUN-SCOPED IS NOT THE SAME AS ADOPTED. hooks/protect-main.sh and
-# hooks/protect-database.sh guard damage that is wrong in every project on the
-# machine, wave or no wave, so they never consult the run. Everything else is a
+# hooks/protect-database.sh guard damage that is wrong in every project the session
+# ENGAGED bionic in, wave or no wave, so they never consult the run. (Machine-wide is what
+# they were until 2026-09-03; Chris's ruling put every wall behind the engagement marker,
+# which is why protect-database now carries a loader at all — the predicate lives in the
+# library. Its direction is OPEN: a wall whose scope it cannot read must not bind a
+# session that never consented.) Everything else is a
 # governance hook: it has nothing to say outside a run and must say nothing.
 # background-suite-guard runs only behind agent-context-guard, whose own roster
 # check already scopes it, so it loads the library without the run predicate.
 ADOPTED='
 protect-main|closed|no
+protect-database|open|no
 canonical-sdlc-evidence-gate|closed|yes
 farm-out-reminder|open|yes
 background-suite-guard|open|no
@@ -198,7 +203,8 @@ echo "=== 3 — one session id: every reader asks the library ==="
 # over the record, which is the divergence R-1 measured. So: every hook that
 # derives a session id calls `session_id`, and the payload read that remains is
 # the ARGUMENT to that call, never the answer.
-SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start'
+SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start
+canonical-sdlc-evidence-gate canonical-sdlc-governing-skill protect-main protect-database background-suite-guard'
 for name in $SID_READERS; do
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
@@ -275,8 +281,18 @@ mk_root() {
   local name="$1" state="$2"
   local root="$SANDBOX/roots/$name"
   mkdir -p "$root"
+  # `none` STAYS UNENGAGED, and cannot be otherwise: engagement's marker lives in
+  # `.bionic/tmp`, so a project with no `.bionic` at all is by construction a project this
+  # session never triggered bionic in. That is what the `none` arms below now assert, and
+  # it is the same silence they always asserted.
   [ "$state" = "none" ] && { printf '%s' "$root"; return 0; }
   mkdir -p "$root/.bionic/docs/plans/epic-99" "$root/.bionic/tmp"
+  # ENGAGED (task-engaged-session, 2026-09-03): every hook in this file asks whether the
+  # session invoked the canonical-sdlc skill before it asks anything else, so a fixture
+  # meant to exercise the RUN predicate has to get past that question first. Without this
+  # line every silence assertion below would hold for the wrong reason and the §5
+  # anti-vacuity control would have nothing left to discriminate.
+  : > "$root/.bionic/tmp/engaged-$SID.state"
   local cur="4" step9="- Step 9: (pending)"
   case "$state" in
     closed) cur="9"; step9="- Step 9: delivered: record/x.md" ;;
@@ -493,7 +509,13 @@ echo "=== 5b — the artifact wall is armed by the PROJECT, not by the run (ADOP
 # project is gated even with no run; the same write in a project that has nothing to do
 # with this lifecycle, claiming nothing, is not this gate's business.
 GS_UNRELATED="$SANDBOX/roots/gs-unrelated"
-mkdir -p "$GS_UNRELATED/docs/plans"
+mkdir -p "$GS_UNRELATED/docs/plans" "$GS_UNRELATED/.bionic/tmp"
+# ENGAGED, and that is what makes these two rows a discrimination rather than a pair of
+# silences. The clause under test is the CONTENT clause — a file that calls itself a
+# canonical-sdlc artifact is one wherever it lands — and it can only be reached in a
+# session bionic was triggered in. "Unrelated" here means the artifact is unrelated, not
+# the project.
+: > "$GS_UNRELATED/.bionic/tmp/engaged-$SID.state"
 drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_UNRELATED" \
   --arg p "$GS_UNRELATED/docs/plans/deploy.plan.md" \
   '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Write",
@@ -508,7 +530,12 @@ drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_UNRELA
     tool_input:{file_path:$p,content:"---\ncanonical_sdlc_version: 14\n---\n\n# deploy\n"}}')"
 expect_eq "…but the same write DECLARING canonical_sdlc_version is refused as misplaced" "2" "$DRV_ST"
 
+# The first-artifact clause, in a project whose `.bionic` does not exist yet — except for
+# the one directory engagement itself created, which is exactly the state a real first
+# artifact is written in.
 GS_FIRST=$(mk_root gs-first none)
+mkdir -p "$GS_FIRST/.bionic/tmp"
+: > "$GS_FIRST/.bionic/tmp/engaged-$SID.state"
 drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_FIRST" \
   --arg p "$GS_FIRST/.bionic/docs/plans/epic-01/wave-01.plan.md" \
   '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Write",

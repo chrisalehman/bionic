@@ -62,9 +62,27 @@ make_home() {
   local dir
   dir=$(mktemp -d)
   mkdir -p "$dir/.claude/plans" "$dir/.bionic/docs/plans"
+  engage "$dir"
   cleanup_dirs+=("$dir")
   echo "$dir"
 }
+
+# ---------- engagement (task-engaged-session, AC-6) ----------
+#
+# Since 2026-09-03 this gate asks one question before it asks anything else: did this
+# session invoke the canonical-sdlc skill? (Chris: "all guardrails imposed by bionic
+# should only apply when exercising bionic. Nothing should apply until bionic is
+# triggered.") hooks/engage.sh answers it by writing `.bionic/tmp/engaged-<sid>.state`
+# under the project root at the instant of invocation, and lib/run.sh's `engaged_session`
+# is the only reader.
+#
+# EVERY FIXTURE BELOW IS AN ENGAGED SESSION, because every assertion below is about what
+# this gate does to a commit inside a canonical-sdlc run — which is a run somebody
+# invoked. The unengaged world is its own section at the bottom of the file, driven on
+# the same plans and the same commands, and it is where the marker's absence is proved.
+EG_SID="4c3b2a19-8e7d-4f65-9a0b-1c2d3e4f5061"
+engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$EG_SID.state"; }
+unengage() { rm -f "$1/.bionic/tmp/engaged-$EG_SID.state"; }
 
 # Creates an isolated project dir with .bionic/docs/plans/ ready to receive
 # plan files. Returned path plays the CLAUDE_PROJECT_DIR role.
@@ -72,6 +90,7 @@ make_project() {
   local dir
   dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/docs/plans"
+  engage "$dir"
   cleanup_dirs+=("$dir")
   echo "$dir"
 }
@@ -121,12 +140,17 @@ run_hook() {
   # documented input-cwd path instead of falling through to the runner's real
   # pwd — otherwise the suite's verdicts would depend on whatever plan files
   # live under the ambient working directory (a hermeticity leak).
-  input=$(jq -n --arg c "$command" --arg cwd "$home_dir" '{tool_input: {command: $c}, cwd: $cwd}')
+  # THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does. lib/session.sh
+  # takes the env value as primary and the payload as a witness, so a runner that left the
+  # real session id in the environment would have the gate looking for an engagement marker
+  # no fixture here ever wrote — and every allow below would pass for the wrong reason.
+  input=$(jq -n --arg c "$command" --arg cwd "$home_dir" --arg s "$EG_SID" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   local tmp_err
   tmp_err=$(mktemp)
   # Capture exit code without letting errexit kill the test runner, and
   # without the `|| true` trick (which replaces $? with 0).
-  if HOME="$home_dir" CLAUDE_PROJECT_DIR="" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$home_dir" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -143,10 +167,11 @@ run_hook_with_project() {
   # CLAUDE_PROJECT_DIR (set below) already wins over cwd in the hook's
   # resolution, but pin cwd to the project sandbox anyway so the input is
   # hermetic and never consults the runner's real pwd.
-  input=$(jq -n --arg c "$command" --arg cwd "$project_dir" '{tool_input: {command: $c}, cwd: $cwd}')
+  input=$(jq -n --arg c "$command" --arg cwd "$project_dir" --arg s "$EG_SID" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   local tmp_err
   tmp_err=$(mktemp)
-  if HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -2102,10 +2127,11 @@ echo "=== Section 21: audit dir follows the plan's project (strategy alignment) 
 run_hook_project_elsewhere_cwd() {
   local home_dir="$1" project_dir="$2" elsewhere_dir="$3" command="$4"
   local input
-  input=$(jq -n --arg c "$command" --arg cwd "$elsewhere_dir" '{tool_input: {command: $c}, cwd: $cwd}')
+  input=$(jq -n --arg c "$command" --arg cwd "$elsewhere_dir" --arg s "$EG_SID" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   local tmp_err
   tmp_err=$(mktemp)
-  if (cd "$elsewhere_dir" && HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"); then
+  if (cd "$elsewhere_dir" && HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"); then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -2186,6 +2212,9 @@ git -C "$ac10_main" init -q .
 git -C "$ac10_main" commit -q --allow-empty -m init
 git -C "$ac10_main" worktree add -q "$ac10_tmp/wt" -b ac10-wt
 ac10_wt="$ac10_tmp/wt"
+# ENGAGED, on the MAIN repo: every linked worktree of one repo resolves to one root, so
+# that is the one root the engagement marker can live under and the one this gate reads.
+engage "$ac10_main"
 mkdir -p "$ac10_wt/.bionic/docs/plans"
 h21c=$(make_home)
 printf '%s\n' "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" \
@@ -3412,6 +3441,10 @@ echo "-- c2: MISPLACEMENT blocks, naming the correct path --"
 s24_h2=$(make_home)
 s24_p2=$(mktemp -d); cleanup_dirs+=("$s24_p2")
 mkdir -p "$s24_p2/docs/bionic/plans/epic-01-demo"
+# ENGAGED, and the misplacement is untouched by it: the marker lives in `.bionic/tmp`,
+# the docs root this gate names is `.bionic/docs`, and creating one does not create the
+# other. hooks/engage.sh makes the tmp directory in exactly this shape of project.
+engage "$s24_p2"
 s24_marked_plan > "$s24_p2/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
 TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h2" "$s24_p2" 'git commit -m "x"'
@@ -3494,6 +3527,7 @@ s24_h7=$(make_home)
 s24_p7=$(mktemp -d); cleanup_dirs+=("$s24_p7")
 mkdir -p "$s24_p7/.bionic" "$s24_p7/.bionic/docs/plans/epic-01-demo"
 printf 'docs-root: custom/docs\n' > "$s24_p7/.bionic/config.yaml"
+engage "$s24_p7"
 s24_marked_plan > "$s24_p7/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
 TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h7" "$s24_p7" 'git commit -m "x"'
@@ -3531,6 +3565,7 @@ s24_h9=$(make_home)
 printf '# just a note\n' > "$s24_h9/.claude/plans/stray.md"
 s24_p9=$(mktemp -d); cleanup_dirs+=("$s24_p9")
 mkdir -p "$s24_p9/docs/bionic/plans/epic-01-demo"
+engage "$s24_p9"
 s24_marked_plan > "$s24_p9/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
 TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h9" "$s24_p9" 'git commit -m "x"'
@@ -3618,6 +3653,7 @@ git -C "$s25_main" init -q .
 git -C "$s25_main" commit -q --allow-empty -m init
 git -C "$s25_main" worktree add -q "$s25_tmp/wt" -b s25-wt
 s25_wt="$s25_tmp/wt"
+engage "$s25_main"
 s25_plan > "$s25_main/.bionic/docs/plans/wave-01-x.plan.md"
 
 echo "-- 25a: a commit FROM the worktree is gated against the main repo's plan --"
@@ -3659,6 +3695,7 @@ git -C "$s25_main2" init -q .
 git -C "$s25_main2" commit -q --allow-empty -m init
 git -C "$s25_main2" worktree add -q "$s25_tmp2/wt" -b s25-wt2
 s25_wt2="$s25_tmp2/wt"
+engage "$s25_main2"
 s25_marked_plan_body() {
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
   printf -- 'canonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n'
@@ -3696,10 +3733,12 @@ s25_gov_hook="$(dirname "$HOOK")/canonical-sdlc-governing-skill.sh"
 s25_gov_home=$(make_home)   # keeps the governing hook's audit writes off the real ~/.claude
 s25_run_write() {  # $1=file path, $2=content → S25_GOV_EXIT / S25_GOV_STDERR
   local input tmp_err
-  input=$(jq -n --arg p "$1" --arg c "$2" \
-    '{tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
+  # The governing hook is engagement-scoped too, and it looks for the marker under the
+  # ARTIFACT's root — which for both arms of 25e is the main repo (engaged above).
+  input=$(jq -n --arg p "$1" --arg c "$2" --arg s "$EG_SID" \
+    '{session_id: $s, tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
   tmp_err=$(mktemp)
-  if HOME="$s25_gov_home" bash "$s25_gov_hook" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$s25_gov_home" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$s25_gov_hook" <<< "$input" >/dev/null 2>"$tmp_err"; then
     S25_GOV_EXIT=0
   else
     S25_GOV_EXIT=$?
@@ -4579,7 +4618,7 @@ mkdir -p "$h30g_dir/hooks" "$h30g_dir/scripts/lib"
 # root and run facts — and the loader qualifies a directory only when it holds all
 # of them (BIONIC_LIB_WANT). A fixture that plants one of the three is a fixture
 # that refuses everything for the wrong reason.
-for _h30g_lib in git-argv.sh root.sh run.sh; do
+for _h30g_lib in git-argv.sh root.sh run.sh session.sh; do
   for _h30g_cand in "${BIONIC_HOOKS_DIR}/../scripts/lib/$_h30g_lib" \
                     "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$_h30g_lib"; do
     if [ -r "$_h30g_cand" ]; then
@@ -4963,6 +5002,142 @@ h33d=$(make_home)
 write_plan "$h33d" "$(plan 6 "$step6_body" "$m33_waived_prov")" > /dev/null
 expect_block "33d control: a waived row still meets the provenance arm above it" \
   "$h33d" 'git commit -m "x"' "provenance: implementation"
+
+# ============================================================
+# Section 34: the session never invoked the skill (AC-6)
+# ============================================================
+#
+# THE PAIRED WORLD for every section above. Chris, 2026-09-03: "all guardrails imposed
+# by bionic should only apply when exercising bionic. Nothing should apply until bionic
+# is triggered." The trigger is the canonical-sdlc skill and the record of it is
+# `.bionic/tmp/engaged-<sid>.state` under the project root; every fixture above carries
+# one because every fixture above describes a run somebody started. Take it away and this
+# gate is not quieter, it is absent: exit 0, nothing on stdout, nothing on stderr.
+#
+# EACH ARM IS A COMMIT THIS GATE REFUSES TWO LINES LATER, on the identical fixture with
+# the marker restored — the control is what stops the whole section passing on a gate
+# that had simply stopped working.
+#
+# THE ORDERING CONTRACT IS UNCHANGED BY THIS. Plan hygiene still sits above the run
+# predicate, so an ENGAGED session committing against a malformed plan is still refused
+# whether or not a run is open (34b's control). What the guard adds is prior to both
+# questions, not a fourth clause inside either.
+
+echo ""
+echo "=== Section 34: no engagement marker — the gate is not there at all ==="
+
+# Captures stdout as well as stderr and the exit code: "silent" here means all three.
+run_hook_full() {  # <home> <command> -> S34_EXIT / S34_OUT / S34_ERR
+  local home_dir="$1" command="$2" input tmp_err tmp_out
+  input=$(jq -n --arg c "$command" --arg cwd "$home_dir" --arg s "$EG_SID" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
+  tmp_err=$(mktemp); tmp_out=$(mktemp)
+  if HOME="$home_dir" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$EG_SID" \
+       bash "$HOOK" <<< "$input" >"$tmp_out" 2>"$tmp_err"; then
+    S34_EXIT=0
+  else
+    S34_EXIT=$?
+  fi
+  S34_OUT=$(cat "$tmp_out"); S34_ERR=$(cat "$tmp_err")
+  rm -f "$tmp_err" "$tmp_out"
+}
+
+expect_silent() {  # <label> — asserts on the last run_hook_full
+  TOTAL=$((TOTAL + 1))
+  if [ "$S34_EXIT" -eq 0 ] && [ -z "$S34_OUT" ] && [ -z "$S34_ERR" ]; then
+    echo "PASS: $1"; PASS=$((PASS + 1))
+  else
+    echo "FAIL (expected exit 0 and total silence): $1"
+    echo "  exit=$S34_EXIT stdout='$S34_OUT' stderr='$S34_ERR'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+expect_refused() {  # <label> — the control: the SAME fixture, marker restored
+  TOTAL=$((TOTAL + 1))
+  if [ "$S34_EXIT" -eq 2 ]; then
+    echo "PASS: $1"; PASS=$((PASS + 1))
+  else
+    echo "FAIL (expected exit 2): $1"
+    echo "  exit=$S34_EXIT stderr='$S34_ERR'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# --- 34a: an open run whose current step has no evidence — the gate's core refusal ---
+h34a=$(make_home)
+write_plan "$h34a" "$(plan 5 "" "$matrix_complete")" > /dev/null
+unengage "$h34a"
+run_hook_full "$h34a" 'git commit -m "x"'
+expect_silent "34a an empty Step 5 line passes an unengaged session"
+engage "$h34a"
+run_hook_full "$h34a" 'git commit -m "x"'
+expect_refused "34a control: the same commit, marker restored, is REFUSED"
+
+# --- 34b: PLAN HYGIENE, the half that sits ABOVE the run predicate ---
+# A plan with no readable `current:` is refused whether or not a run is open, because a
+# plan that lies is a defect in every state. That refusal is owed to an ENGAGED session
+# and to nobody else.
+h34b=$(make_home)
+printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n\n## SDLC State\ncurrent: banana\n' \
+  > "$h34b/.bionic/docs/plans/active.md"
+touch "$h34b/.bionic/docs/plans/active.md"
+unengage "$h34b"
+run_hook_full "$h34b" 'git commit -m "x"'
+expect_silent "34b a malformed 'current:' passes an unengaged session"
+engage "$h34b"
+run_hook_full "$h34b" 'git commit -m "x"'
+expect_refused "34b control: plan hygiene still refuses the ENGAGED session"
+
+# --- 34c: the misplacement sweep, which needs no open run either ---
+h34c=$(make_home)
+p34c=$(mktemp -d); cleanup_dirs+=("$p34c")
+mkdir -p "$p34c/docs/bionic/plans/epic-01-demo"
+s24_marked_plan > "$p34c/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$h34c" "$p34c" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  echo "PASS: 34c the misplacement sweep does not fire in an unengaged session"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected allow): 34c misplacement sweep in an unengaged session"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+engage "$p34c"
+TOTAL=$((TOTAL + 1))
+run_hook_with_project "$h34c" "$p34c" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -q "misplaced"; then
+  echo "PASS: 34c control: the same tree, marker planted, is REFUSED as misplaced"
+  PASS=$((PASS + 1))
+else
+  echo "FAIL (expected block): 34c control with the marker planted"
+  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+  FAIL=$((FAIL + 1))
+fi
+
+# --- 34d: the shapes that are NOT engagement, on a fixture that otherwise refuses ---
+h34d=$(make_home)
+write_plan "$h34d" "$(plan 5 "" "$matrix_complete")" > /dev/null
+
+# A SYMLINK at the marker path is refused before it is followed (lib/run.sh), so a link
+# into an engaged tree cannot open this gate from outside it.
+unengage "$h34d"
+ln -s "$h34a/.bionic/tmp/engaged-$EG_SID.state" "$h34d/.bionic/tmp/engaged-$EG_SID.state"
+run_hook_full "$h34d" 'git commit -m "x"'
+expect_silent "34d a SYMLINK at the marker path is not engagement"
+rm -f "$h34d/.bionic/tmp/engaged-$EG_SID.state"
+
+# ANOTHER SESSION'S marker is not this session's: the path interpolates the key.
+: > "$h34d/.bionic/tmp/engaged-99999999-8888-7777-6666-555555555555.state"
+run_hook_full "$h34d" 'git commit -m "x"'
+expect_silent "34d another session's marker is not engagement"
+
+# A DIRECTORY at the marker path is not a regular file.
+mkdir -p "$h34d/.bionic/tmp/engaged-$EG_SID.state"
+run_hook_full "$h34d" 'git commit -m "x"'
+expect_silent "34d a DIRECTORY at the marker path is not engagement"
+rmdir "$h34d/.bionic/tmp/engaged-$EG_SID.state"
 
 # ============================================================
 # Summary

@@ -14,11 +14,43 @@ PASS=0
 FAIL=0
 TOTAL=0
 
+# ---------- the engaged fixture (task-engaged-session, AC-20) ----------
+#
+# Since 2026-09-03 this wall only speaks in a session that invoked the canonical-sdlc
+# skill (Chris: "Nothing should apply until bionic is triggered"). The marker that
+# records the invocation is `.bionic/tmp/engaged-<sid>.state` under the payload's project
+# root, so every arm below now runs from a repo that has one — the world in which the
+# question "does this wall still block the destructive statements" is the question
+# anyone means.
+#
+# The unengaged world is not left untested; §8 at the bottom is that world, on the same
+# commands, and it is what the marker's absence is proved against.
+SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/pdb.XXXXXX")" && pwd -P)"
+trap 'rm -rf "$SANDBOX"' EXIT
+SID="0f1e2d3c-4b5a-4968-8877-665544332211"
+ENGAGED_REPO="$SANDBOX/engaged"
+PLAIN_REPO="$SANDBOX/plain"
+mkdir -p "$ENGAGED_REPO/.bionic/tmp" "$PLAIN_REPO/.bionic/tmp"
+: > "$ENGAGED_REPO/.bionic/tmp/engaged-$SID.state"
+export HOME="$SANDBOX/home"
+mkdir -p "$HOME"
+
 # ---------- helpers ----------
+
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD. lib/session.sh takes the env value as primary
+# and the payload as a witness, so a driver that left the RUNNER's own session id in the
+# environment would have the hook looking for a marker this fixture never wrote — and
+# every row below would pass for the wrong reason.
+pdb_payload() {  # <cwd> <command>
+  jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" \
+    '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:$cmd}}'
+}
 
 run_hook() {
   local cmd="$1"
-  echo "{\"tool_input\":{\"command\":\"$cmd\"}}" | bash "$HOOK" 2>/dev/null
+  pdb_payload "$ENGAGED_REPO" "$cmd" \
+    | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" 2>/dev/null
 }
 
 expect_block() {
@@ -139,6 +171,54 @@ expect_allow "non-database command"         "ls -la"
 expect_allow "echo with DROP in string"     "echo 'The table was dropped yesterday'"
 expect_allow "git command"                  "git status"
 expect_allow "npm install"                  "npm install express"
+
+# ============================================================
+# SECTION 8: the unengaged session — the wall is not there at all (AC-20)
+# ============================================================
+#
+# THE PAIR, on the same fixture and the same commands sections 1-6 refuse. Chris,
+# 2026-09-03: "all guardrails imposed by bionic should only apply when exercising
+# bionic. Nothing should apply until bionic is triggered." A session that never invoked
+# the skill leaves no `.bionic/tmp/engaged-<sid>.state`, and this wall is then silent —
+# not quieter, absent: exit 0, nothing on stdout, nothing on stderr.
+#
+# Every assertion here sits beside its positive twin above, on the same hook and the same
+# command text, so neither half can pass by being vacuous.
+
+echo ""
+echo "=== Section 8: no engagement marker — silent on the very commands 1-6 block ==="
+
+unengaged() {  # <label> <command> — expect exit 0, empty stdout, empty stderr
+  local label="$1" cmd="$2" out err st=0
+  out=$(pdb_payload "$PLAIN_REPO" "$cmd" \
+          | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" 2>"$SANDBOX/.err") || st=$?
+  err=$(cat "$SANDBOX/.err")
+  TOTAL=$((TOTAL + 1))
+  if [ "$st" = "0" ] && [ -z "$out" ] && [ -z "$err" ]; then
+    echo "PASS: $label"; PASS=$((PASS + 1))
+  else
+    echo "FAIL: $label"; echo "      exit=$st stdout=[$out] stderr=[$err]"; FAIL=$((FAIL + 1))
+  fi
+}
+
+unengaged "AC-20 the DROP arm of section 1 passes an unengaged session" "psql -c 'DROP TABLE users'"
+unengaged "AC-20 ...the TRUNCATE arm of section 2 passes"               "psql -c 'TRUNCATE users'"
+unengaged "AC-20 ...the unqualified DELETE arm of section 3 passes"     "psql -c 'DELETE FROM users'"
+unengaged "AC-20 ...the ALTER arm of section 4 passes"                  "psql -c 'ALTER TABLE users DROP COLUMN age'"
+unengaged "AC-20 ...the mongo arm of section 5 passes"                  "mongosh --eval 'db.dropDatabase()'"
+unengaged "AC-20 ...the piped-SQL arm of section 6 passes"              "echo 'DROP TABLE users' | psql"
+
+# A MARKER THAT IS A SYMLINK IS NOT A MARKER (lib/run.sh: `-L` is refused before it is
+# followed). Planted here rather than reasoned about: it is the one shape something could
+# create inside a repo to open every wall on the machine from outside it.
+ln -s "$ENGAGED_REPO/.bionic/tmp/engaged-$SID.state" "$PLAIN_REPO/.bionic/tmp/engaged-$SID.state"
+unengaged "AC-20 ...a SYMLINK at the marker path is not engagement" "psql -c 'DROP TABLE users'"
+rm -f "$PLAIN_REPO/.bionic/tmp/engaged-$SID.state"
+
+# A FOREIGN SESSION'S MARKER IS NOT THIS SESSION'S. The path interpolates the key, so
+# that file is simply never looked at — asserted rather than assumed.
+: > "$PLAIN_REPO/.bionic/tmp/engaged-11111111-2222-3333-4444-555555555555.state"
+unengaged "AC-20 ...another session's marker is not engagement" "psql -c 'DROP TABLE users'"
 
 # ============================================================
 # Results

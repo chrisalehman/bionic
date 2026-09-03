@@ -527,6 +527,11 @@ mkdir -p "$D/.bionic/docs/plans/epic-99"
 # delivery that POSTDATES the arming — which is what the tick now requires before it will
 # DISARM (R-13, critic C-4). A hand-written stamp alone leaves the session with no arming
 # record at all, and the tick QUIETs rather than reaching the decision this case is about.
+# ENGAGED (task-engaged-session, 2026-09-03): the poker's `tick` decides nothing in a
+# session that never invoked the canonical-sdlc skill, so the one case in this file that
+# drives a real tick has to say the session did. `arm`, on the line below, is deliberately
+# not guarded and needs no marker.
+: > "$D/.bionic/tmp/engaged-$SID.state"
 ( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_FOR_DISARM" arm ) >/dev/null 2>&1
 backdate "$(armed_path "$D" "$SID")" 600
 backdate "$(stamp_path "$D" "$SID")" 600

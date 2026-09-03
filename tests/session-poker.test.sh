@@ -60,12 +60,27 @@ section()         { printf '\n=== %s ===\n' "$1"; }
 
 # ---------- sandbox + fixture builders (mirrors tests/session-sweeper.test.sh) ----------
 
-make_repo() {  # <label> -> repo path
+make_repo() {  # <label> -> repo path, in a session that has ENGAGED bionic
   local r="$TMPROOT/$1"
   mkdir -p "$r/.bionic/tmp"
   ( cd "$r" && git init -q . 2>/dev/null )
+  engage "$r"
   printf '%s' "$r"
 }
+
+# ---------- engagement (task-engaged-session, AC-10, AC-15) ----------
+#
+# Since 2026-09-03 `tick` and `adopt` decide nothing in a session that never invoked the
+# canonical-sdlc skill (Chris: "Nothing should apply until bionic is triggered"). The
+# record of the invocation is `.bionic/tmp/engaged-<sid>.state` under the repo root, and
+# every fixture in this file carries one because every assertion in it is about what the
+# Patrol does inside a run somebody started. Section 11 is the unengaged world.
+#
+# `arm` and `disarm` are deliberately NOT guarded: writing or removing a stamp for a
+# session that asked for one is harmless, and disarm must leave this marker in place —
+# a session that invoked the skill is bionic's for its whole life (AC-15).
+engage()   { mkdir -p "$1/.bionic/tmp" && : > "$1/.bionic/tmp/engaged-$SID.state"; }
+unengage() { rm -f "$1/.bionic/tmp/engaged-$SID.state"; }
 
 roster_of() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "${2:-$SID}"; }
 
@@ -582,6 +597,7 @@ expect_absent "…never prints a decision line for a roster it never found" "dec
 # and the operator can see which one their roster should be under.
 R5C="$TMPROOT/s5-candidates"
 mkdir -p "$R5C/.bionic/tmp"
+engage "$R5C"
 R5CN="$R5C/nested-repo"
 mkdir -p "$R5CN"
 ( cd "$R5CN" && git init -q . ) >/dev/null 2>&1
@@ -668,9 +684,14 @@ expect_contains "the refused tick's stamp records the verb that wrote it" "verb=
 R6C="$(make_repo s6-nokey)"
 OUT="$( cd "$R6C" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" tick 2>&1 )"; RC=$?
 expect_eq "a keyless tick refuses (exit 3)" "3" "$RC"
-if [ -n "$(ls "$R6C/.bionic/tmp/" 2>/dev/null)" ]; then
+# THE PROBE NAMES THE STAMP rather than counting files: `.bionic/tmp` is not empty before
+# the tick runs any more, because the engagement marker lives there. What the assertion
+# always meant — no session-keyed file was written by a run that had no session key — is
+# what it now asks.
+R6C_WROTE="$(ls "$R6C/.bionic/tmp/" 2>/dev/null | /usr/bin/grep -v "^engaged-$SID.state$" || true)"
+if [ -n "$R6C_WROTE" ]; then
   bad "…and writes no stamp: a session-keyed file needs a session key" \
-      "wrote: $(ls "$R6C/.bionic/tmp/")"
+      "wrote: $R6C_WROTE"
 else
   ok "…and writes no stamp: a session-keyed file needs a session key"
 fi
@@ -1848,22 +1869,32 @@ poke "$R13B" tick
 expect_eq "…and arming that same repo flips it to QUIET (13b discriminates)" "0" "$RC"
 expect_contains "…with the armed line" "armed, nothing dispatched yet" "$OUT"
 
-# ---------- 13c: no real .bionic anywhere -> REFUSED, with the walk ----------
+# ---------- 13c: no real .bionic anywhere -> NOT-ENGAGED, one line, exit 0 ----------
 #
-# The wrong-root case, which is the only thing the refusal is for now. The walk is read
-# BEFORE the stamp is written, because `write_patrol_stamp` mkdir -p's `.bionic/tmp` under
-# whatever root it resolved — a walk taken afterwards reports the directory the tick just
-# manufactured as `chosen` and tells the operator nothing.
+# THIS ARM CHANGED ITS ANSWER AT task-engaged-session, and the change is the ruling rather
+# than a regression. It used to REFUSE with the root walk printed, on the reading that a
+# tick landing where no `.bionic` exists has resolved the wrong root. Engagement is read
+# from that same resolved root, so a cwd with no `.bionic` above it is, necessarily, a
+# session that never invoked the skill — and Chris's ruling is that bionic says nothing
+# at all to those. One line, exit 0, no stamp.
+#
+# WHAT THE OLD ARM PROVED IS NOT LOST. The root walk is still printed on a refusal that
+# CAN still happen — Section 5's nested-repo topology, where a real `.bionic` sits above
+# the cwd, the session is engaged, and the roster is absent. That case asserts both the
+# exit 2 and the walk.
 R13C="$TMPROOT/s13-no-bionic"
 mkdir -p "$R13C"
 ( cd "$R13C" && git init -q . ) >/dev/null 2>&1
 poke "$R13C" tick
-expect_eq "a cwd with no .bionic above it REFUSES (exit 2)" "2" "$RC"
-expect_contains "…and prints the walk it took" "$R13C" "$OUT"
-R13C_LAST="$(printf '%s\n' "$OUT" | grep -F "$R13C" | tail -1)"
-expect_contains "…whose terminal line is a FALLBACK, not a chosen root" \
-  "fallback" "$R13C_LAST"
-expect_absent "…and no QUIET is taken on a root the walk never chose" "decision=QUIET" "$OUT"
+expect_eq "a cwd with no .bionic above it is NOT-ENGAGED, not refused (exit 0)" "0" "$RC"
+expect_eq "…saying so in exactly one line" "poker: NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided" "$OUT"
+expect_absent "…and no QUIET is taken on a session it decided nothing about" "decision=QUIET" "$OUT"
+if [ -z "$(ls "$R13C/.bionic/tmp/" 2>/dev/null)" ]; then
+  ok "…and no stamp, no .bionic/tmp manufactured under the wrong root"
+else
+  bad "…and no stamp, no .bionic/tmp manufactured under the wrong root" \
+      "found: $(ls "$R13C/.bionic/tmp/")"
+fi
 
 # ---------- 13d: a WORKTREE OF A BARE REPOSITORY reads chosen, not cwd-fallback (FIX-BARE) ----------
 #
@@ -1880,6 +1911,7 @@ mkdir -p "$R13D_DIR"
 R13DWT="$R13D_DIR/wt-of-bare"
 ( cd "$R13D_DIR/bare.git" && git worktree add -q -b s13d-wt "$R13DWT" ) >/dev/null 2>&1
 mkdir -p "$R13DWT/.bionic/tmp"
+engage "$R13DWT"
 
 poke "$R13DWT" arm
 poke "$R13DWT" tick
@@ -1966,6 +1998,94 @@ expect_eq "…and sources it out of BIONIC_LIB" "1" \
   "$(grep -c '^\. "\$BIONIC_LIB/worktree\.sh"' "$POKER")"
 expect_eq "…and calls the library's walk rather than restating it" "1" \
   "$(grep -c 'worktree_lease_overruns "' "$POKER")"
+
+# ============================================================
+section "Section 15: the unengaged session — tick and adopt decide nothing (AC-10, AC-15)"
+# ============================================================
+#
+# Chris, 2026-09-03: "all guardrails imposed by bionic should only apply when exercising
+# bionic. Nothing should apply until bionic is triggered." The Patrol prompt runs `tick`
+# every interval, and a Patrol a predecessor left behind can fire in a session that never
+# invoked the skill. It must then decide nothing about that session rather than deciding
+# wrongly — one line, exit 0, and nothing written.
+#
+# `arm` and `disarm` are NOT guarded, for opposite reasons. `arm` writes a stamp for a
+# session that explicitly asked for one, which is harmless. `disarm` removes that stamp
+# and MUST leave the engagement marker exactly where it is: a session that invoked the
+# skill is bionic's for its whole life, so every wall is still in force afterwards.
+
+# ---------- tick ----------
+R15T="$(make_repo s15-tick)"; new_roster "$R15T"
+mkdir -p "$R15T/.bionic/docs/record"
+add_row "$R15T" name=W-1 deliverable="$R15T/.bionic/docs/record/w1.md" duration="4 hours" cadence="10 minutes"
+unengage "$R15T"
+poke "$R15T" tick
+expect_eq "AC-10 an unengaged tick exits 0" "0" "$RC"
+expect_eq "AC-10 …printing exactly the one not-engaged line" \
+  "poker: NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided" "$OUT"
+expect_eq "AC-10 …and writing no Patrol stamp" "no" \
+  "$([ -f "$(stamp_of "$R15T")" ] && echo yes || echo no)"
+expect_absent "AC-10 …no verdict, no decision record" "decision=" "$OUT"
+
+# CONTROL, on the same fixture: the marker back, and the tick decides again. Without this
+# row every assertion above would also pass on a poker that had stopped working.
+engage "$R15T"
+poke "$R15T" tick
+expect_contains "AC-10 control: with the marker back, the same tick decides" "decision=" "$OUT"
+expect_eq "AC-10 …and stamps" "yes" "$([ -f "$(stamp_of "$R15T")" ] && echo yes || echo no)"
+
+# ---------- adopt ----------
+#
+# The predecessor's roster is real and adoptable; only the marker is missing.
+R15A="$(make_repo s15-adopt)"
+R15A_OTHER="33333333-aaaa-4bbb-8ccc-000000000003"
+mkdir -p "$R15A/.bionic/docs/record"
+add_row_to "$R15A" "$R15A_OTHER" name=W-OLD status=identified agent_id=aold-one-6666666666666666 \
+  subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R15A/.bionic/docs/record/old.md"
+unengage "$R15A"
+poke "$R15A" adopt
+expect_eq "AC-10 an unengaged adopt exits 0" "0" "$RC"
+expect_eq "AC-10 …printing exactly the one not-engaged line" \
+  "poker: NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided" "$OUT"
+expect_eq "AC-10 …and adopting nothing: no roster for this session" "no" \
+  "$([ -f "$(roster_of "$R15A")" ] && echo yes || echo no)"
+
+engage "$R15A"
+poke "$R15A" adopt
+expect_contains "AC-10 control: with the marker back, adopt reads the predecessor's rows" \
+  "W-OLD" "$OUT"
+
+# ---------- AC-15: disarm removes the stamp and LEAVES the marker ----------
+R15D="$(make_repo s15-disarm)"; new_roster "$R15D"
+poke "$R15D" arm
+expect_eq "AC-15 arm writes the stamp" "yes" "$([ -f "$(stamp_of "$R15D")" ] && echo yes || echo no)"
+poke "$R15D" disarm
+expect_eq "AC-15 disarm exits 0" "0" "$RC"
+expect_eq "AC-15 …the Patrol stamp is gone" "no" \
+  "$([ -f "$(stamp_of "$R15D")" ] && echo yes || echo no)"
+expect_eq "AC-15 …and the engagement marker is STILL THERE" "yes" \
+  "$([ -f "$R15D/.bionic/tmp/engaged-$SID.state" ] && echo yes || echo no)"
+
+# ...AND A HOOK STILL BINDS AFTERWARDS, which is the half that matters: the claim is not
+# about a file surviving, it is about the walls staying in force for the rest of the
+# session. Driven through the hook Chris's own reproduction named — the wall that refuses
+# a push to main — on this repo, after the disarm.
+R15D_PUSH=$(jq -n --arg s "$SID" --arg c "$R15D" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"git push --force origin main"}}' \
+  | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+      bash "$(dirname "$POKER")/protect-main.sh" 2>&1 >/dev/null; echo "rc=$?")
+expect_contains "AC-15 …so a wall still refuses after the disarm" "rc=2" "$R15D_PUSH"
+
+# ...and the paired negative: remove the marker too and that same push passes.
+unengage "$R15D"
+R15D_PUSH2=$(jq -n --arg s "$SID" --arg c "$R15D" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"git push --force origin main"}}' \
+  | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+      bash "$(dirname "$POKER")/protect-main.sh" 2>&1 >/dev/null; echo "rc=$?")
+expect_contains "AC-15 …and with the marker gone, it does not" "rc=0" "$R15D_PUSH2"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'
