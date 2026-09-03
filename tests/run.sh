@@ -323,6 +323,12 @@ run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
 # `active_run` — docs_root, active_plan, active_run — that every always-on hook gates its
 # own work behind. Hand-listed like every suite outside hooks/.
 run "run-predicate.test.sh" bash tests/run-predicate.test.sh
+# task-engaged-session (T1, matrix AC-1..4, AC-17, AC-18): hooks/engage.sh, the ENGAGEMENT
+# trigger — the one act that puts a session inside bionic. Both invocation paths (a Skill
+# tool call and a typed slash command's UserPromptExpansion), the marker it writes, and
+# lib/run.sh's `engaged_session` predicate every wall reads before it reads anything else.
+# Hand-listed like every suite outside hooks/.
+run "engage.test.sh" bash tests/engage.test.sh
 # bionic 1.4.0 (wave-bionic-1.4.0-update, slice L-LOADER, spec AC-16) — the one loader
 # idiom. payload/scripts/lib/loader.sh carries the canonical text between
 # `# --- bionic-loader/v2 BEGIN` / `# --- bionic-loader/v2 END`; this suite pastes that
