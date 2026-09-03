@@ -292,7 +292,13 @@ echo seed > "$WTREPO/README.md"
 git -C "$WTREPO" add README.md >/dev/null 2>&1
 git -C "$WTREPO" commit -qm seed >/dev/null 2>&1
 mkdir -p "$WTREPO/.bionic/tmp" "$WTREPO/.bionic/docs/plans"
-printf 'poker-interval: 1s\n' > "$WTREPO/.bionic/config.yaml"
+# A 300s interval, not the 1s the other groups use. Group 3 has a FRESH stamp on one side
+# of every pair, and "fresh" against a 2s limit is a race with the machine: under a
+# parallel suite run the stamp this fixture writes can be three seconds old before the
+# hook reads it, and assertion 17 then blocks for a reason that is not the one under test.
+# Staleness here is an mtime backdated by ten minutes against a two-minute limit, so both
+# sides clear the boundary by an order of magnitude rather than by a second.
+printf 'poker-interval: 60s\n' > "$WTREPO/.bionic/config.yaml"
 # The open run this monitor is scoped by lives at the MAIN repository too — same
 # mapping, same reason: a reader rooted at the worktree would find neither.
 cat > "$WTREPO/.bionic/docs/plans/wave-01.plan.md" <<'PRWTPLAN'

@@ -286,8 +286,14 @@ run_hook() {  # <payload> <hook> [args...]
   # registry and cache when the library is not beside the hook. Without this door
   # closed, §C5's "library moved aside" fixture would quietly load THIS machine's
   # installed bionic and prove nothing.
+  # THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2).
+  # hooks/agent-context-guard.sh builds the roster filename from lib/session.sh's answer,
+  # where the ENV value is primary — so a driver that left the runner's own session id in
+  # the environment would have the guard looking for a roster this fixture never wrote,
+  # and every wall behind it would read "unarmed".
+  local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   OUT=$(printf '%s' "$payload" | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
-          BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+          BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$_sid" \
           CLAUDE_PROJECT_DIR= bash "$@" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
@@ -486,12 +492,29 @@ expect_eq "…positive control: that same payload refuses when driven straight i
 # ============================================================
 echo "=== C5 — FAIL-CLOSED sourcing: no library, no pass (AC-12 shape, D1) ==="
 # ============================================================
-# The library is moved aside for the length of this section and restored by the trap on
-# any exit path. Both hooks must REFUSE the suite-class case rather than allow it.
-LIB_HIDDEN="$SANDBOX/cmd-class.sh.hidden"
-restore_lib() { [ -f "$LIB_HIDDEN" ] && mv "$LIB_HIDDEN" "$LIB"; rm -rf "$SANDBOX"; }
-trap restore_lib EXIT
-mv "$LIB" "$LIB_HIDDEN"
+# HERMETIC, AND THAT IS A CORRECTION. This section used to `mv` the SHIPPED library aside
+# for its own length and restore it from a trap — a write outside its own mktemp root, and
+# the one thing tests/run.sh's parallel mode assumes no suite does. Every sibling suite
+# that reads payload/scripts/lib/cmd-class.sh (and since bionic 1.4.0 that is every suite
+# driving farm-out-reminder or the background-suite guard) saw the library vanish for a
+# few hundred milliseconds and went red for a reason that had nothing to do with it.
+# Measured: `BIONIC_TEST_JOBS=18 bash tests/run.sh` with hook-adoption.test.sh on the
+# roster, 13 failures here, zero when run alone.
+#
+# The copies live in a throwaway tree shaped like the shipped plugin — hooks/ beside
+# scripts/lib/, with the classifier simply absent — so what is under test is the same
+# resolution the shipped hooks perform, and nothing outside $SANDBOX is touched.
+C5_TREE="$SANDBOX/no-classifier"
+mkdir -p "$C5_TREE/hooks" "$C5_TREE/scripts/lib"
+for _c5_lib in "$(dirname "$LIB")"/*.sh; do
+  case "$(basename "$_c5_lib")" in cmd-class.sh) continue ;; esac
+  cp "$_c5_lib" "$C5_TREE/scripts/lib/"
+done
+cp "$FARM_OUT" "$C5_TREE/hooks/farm-out-reminder.sh"
+cp "$BG_GUARD" "$C5_TREE/hooks/background-suite-guard.sh"
+C5_SAVED_FARM="$FARM_OUT"; C5_SAVED_BG="$BG_GUARD"
+FARM_OUT="$C5_TREE/hooks/farm-out-reminder.sh"
+BG_GUARD="$C5_TREE/hooks/background-suite-guard.sh"
 
 # BOTH OF THESE STEP ASIDE NOW (bionic 1.4.0, design ledger S4). They refused until
 # 1.4.0, on the reasoning the two irreversible-action walls still use — and that
@@ -513,9 +536,9 @@ expect_eq "C5 background-suite-guard STEPS ASIDE when its classifier cannot load
 expect_contains "C5 …naming the file it could not load" "cmd-class.sh" "$ERR"
 expect_eq "C5 …in exactly one line" "1" "$(printf '%s\n' "$ERR" | /usr/bin/grep -c .)"
 
-mv "$LIB_HIDDEN" "$LIB"
-trap cleanup EXIT
-# The restore is the precondition of everything after this line, so prove it.
+FARM_OUT="$C5_SAVED_FARM"; BG_GUARD="$C5_SAVED_BG"
+# The shipped library was never touched, and everything after this line depends on that,
+# so prove it rather than assume it.
 expect_eq "C5 the library is back on disk" "suite" "$(class_of 'bash tests/run.sh')"
 
 # ============================================================
