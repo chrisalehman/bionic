@@ -472,6 +472,28 @@ expect_no_match "35: the unrelated repository's history never reaches the row" \
 REPO_HEAD8="$(printf '%.8s' "$REPO_HEAD")"
 UNREL_HEAD8="$( cd "$UNRELATED" && git rev-parse HEAD 2>/dev/null | cut -c1-8 )"
 expect_match "36: the header names the plugin tree's commit" "*@ ${REPO_HEAD8}*" "$OUT10"
+
+# THE CANDIDATE THAT IS A REPOSITORY IS THE ONE ASKED. On a directory feed the
+# CLI records the CACHE as installPath and then reads the source tree instead, so
+# a registry answer with no git history behind it must fall through to the plugin
+# root rather than settle for `unknown` — measured on this machine, where the
+# registry's installPath is the 1.3.2 cache directory. The fallback is still a
+# registry-derived path and still never the cwd, which is what §9 is about.
+NOREPO="${TMP}/registry-names-a-non-repo"
+mkdir -p "$NOREPO"
+HOME12="$(make_registry_home)"
+write_known_marketplaces "$HOME12" '{"source":"directory","path":"'"$REPO"'"}' "$REPO"
+write_installed_plugins_sha "$HOME12" "$NOREPO" "$REPO_HEAD"
+
+OUT12="$( cd "$UNRELATED" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+    BIONIC_CLAUDE_HOME="$HOME12" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+    bash "$DOCTOR_SH" < /dev/null 2>&1 )"
+ROW12="$(version_row "$OUT12")"
+
+expect_match "37b: a registry path with no history falls through to the plugin root" \
+  "*✓ version*${REAL_VERSION}*tree matches the registered cache*" "$ROW12"
+expect_no_match "37c: and still never reaches the cwd's history" \
+  "*registered build not in this tree*" "$ROW12"
 if [ -n "$UNREL_HEAD8" ]; then
   expect_no_match "37: the header never names the cwd's commit" "*@ ${UNREL_HEAD8}*" "$OUT10"
 else
