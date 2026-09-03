@@ -175,7 +175,7 @@ resolve_docs_root() {
 # a mistake a person can move, and the evidence gate's own misplacement sweep catches
 # the consequential half of it at commit time. Refusing every Write and Edit on the
 # machine because a file is missing is not recoverable at that price.
-BIONIC_LIB_WANT="root.sh run.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -308,6 +308,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/session.sh"
 
 # THE ROOT THAT OWNS THE ARTIFACT — the artifact's own, not the invoking session's.
 PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
@@ -317,6 +319,31 @@ if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
   # the UNDER_DOCS_ROOT verdict.
   exit 0
 fi
+
+# ---------- THE ENGAGEMENT GUARD (AC-7): is this session bionic's at all? ----------
+#
+# FIRST, above the four-clause project disjunction below. Chris, 2026-09-03: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
+# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked.
+#
+# IT SUPERSEDES THE DISJUNCTION WITHOUT REPLACING IT. Those four clauses answer "is this
+# artifact one this lifecycle owns" — an open run, a `.bionic/` tree, a path inside one,
+# or content declaring `canonical_sdlc_version:`. Every one of them can be true in a
+# session that never invoked the skill: a bystander editing a plan file in a repo where
+# somebody else ran a wave was exactly the reproduction. So this asks the prior question
+# and the disjunction keeps asking its own, unchanged, for engaged sessions.
+#
+# THE MARKER IS LOOKED FOR UNDER THE ARTIFACT'S ROOT, not the invoking session's cwd —
+# the same root every clause below uses. A hook that scoped itself by one root and
+# enforced against another would go quiet exactly where it was added to bind.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The arming partition is the consent
+# boundary (1.3.2 close-out).
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+GS_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || GS_SID=""
+engaged_session "$PROJECT_ROOT_FROM_PATH" "$GS_SID" || exit 0
 
 # ---------- WHAT ARMS THIS WALL (AC-7, and one deviation from it) ----------
 #

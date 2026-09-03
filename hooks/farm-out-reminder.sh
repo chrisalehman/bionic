@@ -196,6 +196,27 @@ ROOT=$(project_root "$CWD")
 SESSION_ID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || SESSION_ID=""
 [ -n "$SESSION_ID" ] || SESSION_ID="unknown"
 
+# ---------- THE ENGAGEMENT GUARD (AC-6): is this session bionic's at all? ----------
+#
+# FIRST, above the run predicate and above the FARM_OUT_ALLOW override both. Chris,
+# 2026-09-03: "all guardrails imposed by bionic should only apply when exercising
+# bionic. Nothing should apply until bionic is triggered" — and the trigger is the
+# canonical-sdlc skill, which writes `.bionic/tmp/engaged-<sid>.state` at the instant it
+# is invoked. A session that never invoked it gets no nudge, no deny and no audit line:
+# exit 0, no stdout, no stderr.
+#
+# ABOVE THE OVERRIDE for the same reason the run predicate is: FARM_OUT_ALLOW=1 exists
+# to bypass a wall that is binding, and where the wall is inert there is nothing to
+# bypass. An audit line recording an "override" of a wall that was never going to fire
+# is noise in the one stream that has to stay readable.
+#
+# `unknown` IS NOT A SESSION. The fallback two lines up is a display value; the
+# predicate refuses it by name, along with an absent marker, a symlink at the path and a
+# foreign or unshaped key. Every unreadable state reads as NOT engaged, because the
+# arming partition is the consent boundary (1.3.2 close-out).
+# [WALL: tests/cmd-class.test.sh]
+engaged_session "$ROOT" "$SESSION_ID" || exit 0
+
 # ── THE RUN PREDICATE (AC-7): no open run, nothing to say ────────────────────
 #
 # BEFORE the override check below, deliberately. FARM_OUT_ALLOW=1 exists to bypass a

@@ -56,7 +56,7 @@ fi
 # FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): this is a wall over an
 # IRREVERSIBLE action, so it refuses rather than waving a command through it cannot
 # read — after permitting the four repair commands by whole-string match.
-BIONIC_LIB_WANT="git-argv.sh root.sh run.sh"
+BIONIC_LIB_WANT="git-argv.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -248,6 +248,8 @@ fi
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/session.sh"
 
 # Is any segment of the command a `git commit`? The library answers by argv
 # position: git must be argv[0] (after leading VAR=value assignments and git's
@@ -310,6 +312,31 @@ fi
 # resolves to ONE root and therefore one audit file, one docs root, one plan. Obeying
 # the governing hook and the gate at once was impossible before that mapping existed.
 PROJECT_DIR=$(project_root "$PROJECT_DIR")
+
+# ---------- THE ENGAGEMENT GUARD (AC-6): is this session bionic's at all? ----------
+#
+# FIRST, above everything this gate decides — above the plan hygiene below, above the
+# misplacement sweep, above the run predicate. Chris, 2026-09-03: "all guardrails
+# imposed by bionic should only apply when exercising bionic. Nothing should apply until
+# bionic is triggered" — and the trigger is the canonical-sdlc skill, which writes
+# `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A commit from a session
+# that never invoked it is not this gate's business: exit 0, no stdout, no stderr.
+#
+# THE ORDERING CONTRACT BELOW IS UNCHANGED, and this guard does not join it. Plan hygiene
+# still sits ABOVE the run predicate, so an engaged session committing against a
+# malformed plan is still refused whether or not a run is open — the question this line
+# asks is not "is there a run" but "is this session bionic's at all", and it is prior to
+# both.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The marker is the one artifact whose
+# PRESENCE opens a wall, so the fail direction is inverted here on purpose, and it is
+# inverted against this file's own fail-CLOSED posture on the library: the arming
+# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
+# which never consented is the defect this guard exists to remove.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+EG_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || EG_SID=""
+engaged_session "$PROJECT_DIR" "$EG_SID" || exit 0
 
 # Resolve the per-project docs root: <project>/.bionic/config.yaml's
 # `docs-root:` if set, else default <project>/.bionic/docs. See
