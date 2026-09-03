@@ -71,6 +71,12 @@ unset GIT_DIR GIT_WORK_TREE 2>/dev/null || true
 CLAUDE_HOME="$TMP/claude-home"; mkdir -p "$CLAUDE_HOME/sessions"
 export BIONIC_CLAUDE_HOME="$CLAUDE_HOME"
 
+# The fixture is a repository that HAS a `main` — so a test can check it out and
+# watch the wall refuse — but that is not SITTING on it. A wave's main checkout
+# sits on the wave branch, which since F1 is the only state in which a land is
+# allowed at all; a fixture left on `main` would be a fixture in a permanently
+# refused state and every landing assertion below would pass for the wrong
+# reason.
 new_repo() {  # <dir> -> echoes the physical absolute path
   local d="$1"
   mkdir -p "$d"
@@ -82,6 +88,7 @@ new_repo() {  # <dir> -> echoes the physical absolute path
   echo "one" > "$d/file.txt"
   git -C "$d" add .gitignore file.txt
   git -C "$d" commit --quiet -m "c1"
+  git -C "$d" checkout --quiet -b wave/fixture
   ( cd "$d" && pwd -P )
 }
 
@@ -216,6 +223,100 @@ expect_match "a path that is no worktree at all is refused" "spawn-worktree: REF
   "$(worktree_land "${D}/.worktrees/never-existed")"
 expect_match "no path at all is refused" "spawn-worktree: REFUSED reason=no-such-worktree*" \
   "$(worktree_land)"
+
+echo ""
+echo "=== Group 4b: worktree_land — the two SCOPE refusals (security F1) ==="
+#
+# `land` merges into whatever branch the main checkout is on and removes
+# whatever linked worktree it is handed. Two facts bound that power, and both
+# are checked BEFORE anything is touched — before even the legacy-link deletion
+# Group 6 covers, which is the one mutation the refusal order otherwise lets
+# through.
+#
+#   1. The branch merged INTO is never a protected branch. hooks/protect-main.sh
+#      reads `git push` argv and never sees a merge, so a land onto `main` was
+#      the one way unreviewed work reached that branch with no wall in the path.
+#   2. The tree landed is under `<main-root>/.worktrees/`. That is the only
+#      place this lease ever hands one out, so any other linked worktree of the
+#      same repository is somebody else's and is refused rather than merged and
+#      deleted.
+
+P="$(new_repo "$TMP/land-scope")"
+
+# --- 1. the protected branch ---------------------------------------------
+PT="$(new_tree "$P" onto-main)"
+git -C "$P" checkout --quiet main
+PBEFORE="$(git -C "$P" rev-parse HEAD)"
+OUTP="$(worktree_land "$PT")"; RCP=$?
+expect_match "landing while the main checkout is on main is refused, naming the branch" \
+  "spawn-worktree: REFUSED reason=protected-branch branch=main*" "$OUTP"
+expect_eq   "that refusal exits 2"          "2" "$RCP"
+expect_true "the tree survives the refusal" test -d "$PT"
+expect_eq   "main did not move"             "$PBEFORE" "$(git -C "$P" rev-parse HEAD)"
+expect_eq   "nothing was merged"            "1" "$(git -C "$P" rev-list --count HEAD..onto-main)"
+# `main` here is still the fixture's root commit, so a parent count of 0 is
+# both "it did not move" said a second way and "it is not a merge commit".
+expect_eq   "the protected branch's HEAD is not a merge commit" "0" \
+  "$(git -C "$P" rev-list --parents -n1 HEAD | wc -w | tr -d ' ' | awk '{print $1-1}')"
+
+# master is the same branch under its other name.
+git -C "$P" checkout --quiet -b master
+expect_match "master is refused too" "spawn-worktree: REFUSED reason=protected-branch branch=master*" \
+  "$(worktree_land "$PT")"
+
+# THE ARM DISCRIMINATES: the same tree, the same call, a wave branch checked out.
+git -C "$P" checkout --quiet wave/fixture
+expect_match "the same tree lands once the checkout is off the protected branch" \
+  "spawn-worktree: LANDED branch=onto-main *" "$(worktree_land "$PT")"
+
+# A branch whose NAME merely contains the word is its own branch and is landable:
+# the list is matched whole, exactly as hooks/protect-main.sh matches it.
+git -C "$P" checkout --quiet -b topic/main
+PT2="$(new_tree "$P" near-miss)"
+expect_match "a branch named topic/main is not protected" "spawn-worktree: LANDED branch=near-miss *" \
+  "$(worktree_land "$PT2")"
+git -C "$P" checkout --quiet wave/fixture
+
+# --- 2. the tree outside .worktrees/ --------------------------------------
+# A linked worktree of the SAME repository, parked somewhere else entirely —
+# which `spawn-worktree.sh create` will make when handed an absolute parent, and
+# which the lease never hands out.
+OUTSIDE="$TMP/outside-trees"; mkdir -p "$OUTSIDE"; OUTSIDE="$(cd "$OUTSIDE" && pwd -P)"
+git -C "$P" worktree add --quiet -b stranger "${OUTSIDE}/stranger" HEAD >/dev/null 2>&1
+echo work > "${OUTSIDE}/stranger/stranger.txt"
+git -C "${OUTSIDE}/stranger" add -A >/dev/null 2>&1
+git -C "${OUTSIDE}/stranger" commit --quiet -m "stranger work"
+
+XBEFORE="$(git -C "$P" rev-parse HEAD)"
+OUTX="$(worktree_land "${OUTSIDE}/stranger")"; RCX=$?
+expect_match "a tree outside <root>/.worktrees/ is refused, naming the path and the root" \
+  "spawn-worktree: REFUSED reason=outside-worktrees path=${OUTSIDE}/stranger root=${P}" "$OUTX"
+expect_eq   "that refusal exits 2"             "2" "$RCX"
+expect_true "the outside tree survives"        test -d "${OUTSIDE}/stranger"
+expect_eq   "the main checkout did not move"   "$XBEFORE" "$(git -C "$P" rev-parse HEAD)"
+expect_eq   "its branch was not merged"        "1" "$(git -C "$P" rev-list --count HEAD..stranger)"
+
+# THE ARM DISCRIMINATES: an otherwise identical tree, under .worktrees/.
+PT3="$(new_tree "$P" insider)"
+expect_match "the same shape of tree lands when it is under .worktrees/" \
+  "spawn-worktree: LANDED branch=insider *" "$(worktree_land "$PT3")"
+
+# A directory whose name merely STARTS with the farm's is a sibling, not a tree
+# of the lease: the test is on the path SEGMENT, not on the prefix string.
+mkdir -p "${P}/.worktrees-decoy"
+git -C "$P" worktree add --quiet -b decoy "${P}/.worktrees-decoy/decoy" HEAD >/dev/null 2>&1
+echo d > "${P}/.worktrees-decoy/decoy/d.txt"
+git -C "${P}/.worktrees-decoy/decoy" add -A >/dev/null 2>&1
+git -C "${P}/.worktrees-decoy/decoy" commit --quiet -m "decoy work"
+expect_match "a sibling directory sharing the prefix is outside too" \
+  "spawn-worktree: REFUSED reason=outside-worktrees*" "$(worktree_land "${P}/.worktrees-decoy/decoy")"
+
+# The scope refusal comes BEFORE the legacy-link deletion, so a refused land
+# leaves an out-of-scope tree exactly as it found it — link included.
+ln -s "${P}/.bionic" "${OUTSIDE}/stranger/.bionic"
+worktree_land "${OUTSIDE}/stranger" >/dev/null
+expect_true "a refused out-of-scope land does not even drop the legacy link" \
+  test -L "${OUTSIDE}/stranger/.bionic"
 
 echo ""
 echo "=== Group 5: worktree_land — D1, never land under a running suite ==="

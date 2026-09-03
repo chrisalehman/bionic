@@ -44,6 +44,11 @@ make_repo() {  # <name> -> repo path
   local repo="$SANDBOX/$1"
   mkdir -p "$repo/.bionic/tmp" "$repo/.bionic/docs/record"
   git -C "$repo" init -q 2>/dev/null
+  # The initial branch is NAMED here rather than inherited from the machine's
+  # init.defaultBranch: `land` refuses to merge into a protected branch (F1), so
+  # a fixture whose branch depends on the operator's git config would land on
+  # one machine and refuse on the next.
+  git -C "$repo" symbolic-ref HEAD refs/heads/wave/fixture 2>/dev/null
   git -C "$repo" config user.email t@example.com
   git -C "$repo" config user.name "T"
   printf '%s\n' "$repo"
@@ -324,6 +329,32 @@ if git -C "$R8" rev-list --count "HEAD..still-working" 2>/dev/null | grep -qx 0;
   no "the unlanded row's branch was merged" "standdown merged a row it should have left alone"
 else
   ok "the unlanded row's branch was NOT merged"
+fi
+
+# A REFUSAL THE OPERATOR MUST SEE. `land` refuses to merge into a protected
+# branch (security F1), and standdown reports that refusal the way it reports a
+# dirty tree — it is not a special case here, and the tree stays standing.
+R9="$(make_repo standdown-protected)"
+echo seed > "$R9/README.md"
+git -C "$R9" add README.md >/dev/null 2>&1
+git -C "$R9" commit -qm seed >/dev/null 2>&1
+git -C "$R9" worktree add -q -b land-p "$R9/.worktrees/land-p" >/dev/null 2>&1
+echo p > "$R9/.worktrees/land-p/land-p.txt"
+git -C "$R9/.worktrees/land-p" add -A >/dev/null 2>&1
+git -C "$R9/.worktrees/land-p" commit -qm "land-p work" >/dev/null 2>&1
+git -C "$R9" checkout -q -b main
+echo land-p > "$R9/.bionic/docs/record/land-p.md"
+roster_row "$R9" "land-p" ".bionic/docs/record/land-p.md" "" "land-p@session-6c85684c"
+
+run_orders "$R9" standdown
+expect_status "standdown on a protected checkout still exits clean" 0 "$ST"
+expect_contains "the land onto main is reported REFUSED, naming the branch" \
+  "REFUSED reason=protected-branch branch=main" "$OUT"
+if [ -d "$R9/.worktrees/land-p" ]; then ok "the tree of the refused land is still there"; else no "the tree of the refused land is still there"; fi
+if git -C "$R9" rev-list --count "HEAD..land-p" 2>/dev/null | grep -qx 0; then
+  no "main was merged into" "standdown merged unreviewed work into main"
+else
+  ok "main was NOT merged into"
 fi
 
 # A roster with no trees at all must behave exactly as it did before this
