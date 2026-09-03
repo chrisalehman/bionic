@@ -650,3 +650,28 @@ git_push_targets() {
     _n=$((_n + 1))
   done
 }
+
+# git_branch_protected <branch name>
+#
+# THE ONE LIST of branches no automated write may reach: `main` and `master`.
+# Two walls ask it. hooks/protect-main.sh asks about a `git push` — both the
+# destinations a refspec resolves to and the branch the caller is standing on.
+# payload/scripts/lib/worktree.sh's `land` asks about the branch a lease is
+# about to be merged INTO, which protect-main.sh never sees: it reads `git push`
+# argv and a `git merge` is not a push. Spelling these two words in each wall is
+# how two walls come to disagree about which branch is the branch, so they are
+# spelled here and nowhere else.
+#
+# WHOLE NAME, never a prefix and never a substring. `topic/main`, `main-fixes`
+# and `mastermind` are their own branches and stay allowed; a wall that refused
+# them would be a wall the operator learns to route around.
+#
+# The name is taken as given. Stripping `refs/heads/` is the caller's job —
+# git_push_targets already does it — because a caller that has NOT stripped is
+# asking about a ref, not a branch, and should not get a branch's answer.
+git_branch_protected() {  # <branch name> -> 0 protected, 1 not
+  case "${1:-}" in
+    main|master) return 0 ;;
+  esac
+  return 1
+}
