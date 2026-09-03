@@ -508,7 +508,22 @@ case "$VERB" in
     # or empty verdict costs nothing at all.
     fold_roster
 
-    _ready=""; _held=""; _nready=0; _nheld=0
+    # THE LEASE ENDS HERE (bionic 1.4.0, spec AC-28, design ledger C1). A
+    # discharged row's worktree is a leased slot nobody holds any more, and
+    # standing the agent down is the moment to give the disk back. The act — a
+    # --no-ff merge, a removal, a prune, and the refusals around them — belongs
+    # to payload/scripts/lib/worktree.sh, which the Patrol tick and
+    # spawn-worktree.sh's `land` verb call too; this is a call site and not a
+    # second copy of the judgment. Two spellings of the library path because
+    # the repo ships payload/hooks as a symlink to hooks/ and `$0` is textual.
+    # A missing library costs nothing: the stand-down report is what this verb
+    # owes, and the landing is additive to it.
+    _wt_lib="${HOOK_DIR}/../payload/scripts/lib/worktree.sh"
+    [ -f "$_wt_lib" ] || _wt_lib="${HOOK_DIR}/../scripts/lib/worktree.sh"
+    # shellcheck source=/dev/null
+    [ -f "$_wt_lib" ] && . "$_wt_lib"
+
+    _ready=""; _held=""; _nready=0; _nheld=0; _landed=""
     while IFS= read -r _l; do
       [ -n "$_l" ] || continue
       _name=$(line_field "$_l" name)
@@ -538,6 +553,13 @@ case "$VERB" in
         _nready=$((_nready + 1))
         _ready="${_ready}  $(stop_address "$_row" "$_name")   ($_why — $_name)
 "
+        # LANDED or REFUSED, one line per tree, reported either way: a lease
+        # this verb could not end is exactly what the operator needs told.
+        if declare -f worktree_land >/dev/null 2>&1; then
+          _tree="$(worktree_for_row "$REPO_REAL" "$_name")"
+          [ -d "$_tree" ] && _landed="${_landed}  $(WORKTREE_CONTRACT_PROG=spawn-worktree worktree_land "$_tree")   ($_name)
+"
+        fi
       else
         _nheld=$((_nheld + 1))
         _held="${_held}  $_name   ($_state — $_detail)
@@ -552,6 +574,10 @@ EOF
       printf '%s' "$_ready"
     else
       say "nothing has landed; there is nobody to stand down."
+    fi
+    if [ -n "$_landed" ]; then
+      say "LEASES ENDED — the worktree of each row above, landed or refused:"
+      printf '%s' "$_landed"
     fi
     if [ "$_nheld" -gt 0 ]; then
       # NAMED, NEVER TARGETED. A row still working or not yet landed is left alone by this

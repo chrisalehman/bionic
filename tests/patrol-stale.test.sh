@@ -4,11 +4,12 @@
 # WHAT THIS SUITE OWNS. `payload/scripts/lib/patrol.sh`'s `PATROL_STALE_
 # MULTIPLIER` — "the stamp is stale past twice the poker interval" as one
 # exported constant instead of an inline literal, and `patrol_stamp_state`'s
-# own reader of it. `session-poker.sh` and `hooks/dispatch-preflight.sh` carry
-# the SAME "twice the interval" arithmetic today; switching those two readers
-# to this constant is other slices' work, out of scope here (this slice's
-# brief names them explicitly as not-touched) — this suite pins only the one
-# reader this slice owns.
+# own reader of it. `hooks/session-poker.sh` switched its own
+# copy of that arithmetic to this constant at slice POKER (1.6, spec AC-22),
+# and Section 4 below holds the two together; `hooks/dispatch-preflight.sh`
+# still carries the literal the constant was extracted from, and its switch
+# belongs to slice ADOPT. Section 4 asserts agreement on the VALUE rather than
+# on a spelling, so it holds before that switch and after it, unedited.
 #
 # SOURCED, DIRECTLY (patrol.sh's own header: "Sourced, never executed" — no
 # top-level code runs on source, only assignments and function definitions,
@@ -83,6 +84,35 @@ if grep -q 'run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh' "${BIONI
 else
   no "6: tests/run.sh names patrol-stale.test.sh"
 fi
+
+echo ""
+echo "=== Section 4: the constant's three readers agree (spec AC-22) ==="
+#
+# THREE READERS BY DESIGN (ownership table, spec §3): patrol.sh's own
+# `patrol_stamp_state` (Section 2), the poker's `adopt` liveness window, and the
+# dispatch wall's Patrol-stamp staleness arm. Only the first two name the
+# constant today. Rather than pin a spelling the wall has not adopted yet — a row
+# that would be red for a whole wave and then need editing on the day it goes
+# green — this section reads whichever multiplier the wall actually uses and
+# asserts it equals the exported one. It goes red the day the two diverge, which
+# is the agreement AC-22 asks for, and it survives the wall's switch untouched.
+SP="${BIONIC_HOOKS_DIR}/session-poker.sh"
+DP="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
+
+expect_eq "7: the poker's liveness window reads the constant, not its own literal" "yes" \
+  "$(grep -qF 'CAD_S * PATROL_STALE_MULTIPLIER' "$SP" && echo yes || echo no)"
+expect_eq "8: …and it loads the library that owns the constant" "yes" \
+  "$(grep -qF 'BIONIC_LIB/patrol.sh' "$SP" && echo yes || echo no)"
+
+# The wall's arithmetic, in whichever of the two spellings it is written.
+DP_MULT_TOKEN="$(grep -E 'PATROL_MAX_AGE=\$\(\(' "$DP" | head -1 \
+  | sed -E 's/.*PATROL_INTERVAL[[:space:]]*\*[[:space:]]*([A-Za-z_0-9]+).*/\1/')"
+case "$DP_MULT_TOKEN" in
+  PATROL_STALE_MULTIPLIER) DP_MULT="$MULT" ;;
+  *)                       DP_MULT="$DP_MULT_TOKEN" ;;
+esac
+expect_eq "9: the dispatch wall measures staleness with the same multiplier" \
+  "$MULT" "$DP_MULT"
 
 echo ""
 echo "========================================"

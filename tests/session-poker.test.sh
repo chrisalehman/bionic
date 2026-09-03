@@ -32,6 +32,16 @@ POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 TMPROOT="$(mktemp -d)"
 PASS=0; FAIL=0; TOTAL=0
 
+# THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
+# library through the shared loader idiom, whose candidates (2) and (3) read the CLI's
+# plugin registry under `$BIONIC_PLUGINS_DIR` (default `$HOME/.claude/plugins`). Every
+# invocation in this suite runs the shipped file, whose sibling `scripts/lib` answers at
+# candidate (1) — so a run that ever reached the registry would be a run that failed to
+# find the library beside the script, and pointing the knob at an empty directory turns
+# that into a visible failure instead of a silent read of this machine's real install.
+export BIONIC_PLUGINS_DIR="$TMPROOT/no-plugins"
+mkdir -p "$BIONIC_PLUGINS_DIR"
+
 cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
@@ -273,7 +283,16 @@ expect_eq "…while interval, on the same repo, still reads that override (5m = 
 # The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
 # POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
 # literal 1800 would answer 1800 here.
-POKER_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")/session-poker.sh"
+# THE DOCTORED COPY LIVES IN A TREE, not in a bare temp directory (bionic 1.4.0). The poker
+# loads its library through the shared idiom, whose first candidate is `<dirname $0>/../
+# scripts/lib` — the shape the installed plugin ships. A copy dropped anywhere else finds no
+# library and fails open, which would make this mutation prove nothing. The library is
+# LINKED, never duplicated: the copy under test must read the same functions the shipped
+# script does.
+POKER_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")"
+mkdir -p "$POKER_MUT_ROOT/hooks" "$POKER_MUT_ROOT/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$POKER_MUT_ROOT/scripts/lib"
+POKER_MUT="$POKER_MUT_ROOT/hooks/session-poker.sh"
 sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
 OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT" interval-default 2>&1 )"; RC=$?
 expect_eq "the verb answers from the CONSTANT, not from a literal (doctored 7m = 420s)" "420" "$OUT"
@@ -547,6 +566,35 @@ R5B="$(make_repo s5-no-roster)"
 poke "$R5B" tick
 expect_eq "an ABSENT roster REFUSES rather than silently DISARMing (exit 2)" "2" "$RC"
 expect_absent "…never prints a decision line for a roster it never found" "decision=" "$OUT"
+
+# ---------- the refusal SHOWS ITS WALK (2.4, AC-13) ----------
+#
+# The refusal above has always said "an absent roster usually means the wrong project root
+# was resolved" and then left the reader to re-derive the walk by hand — which is the one
+# question they cannot answer from the message, because the answer is a property of the
+# filesystem above their cwd. `project_root_candidates` is that walk, one line per ancestor
+# with the reason it was passed over, and the chosen one marked.
+#
+# THE TOPOLOGY THAT MAKES IT MATTER is a git repo nested inside a plain workspace that holds
+# the `.bionic` tree — the shape the eight old resolvers got wrong by asking git first and
+# so answering the nested repo, which owns no roster and never will. Here the walk starts at
+# the cwd, passes the repo as a candidate, and chooses the workspace above it: two lines,
+# and the operator can see which one their roster should be under.
+R5C="$TMPROOT/s5-candidates"
+mkdir -p "$R5C/.bionic/tmp"
+R5CN="$R5C/nested-repo"
+mkdir -p "$R5CN"
+( cd "$R5CN" && git init -q . ) >/dev/null 2>&1
+poke "$R5CN" tick
+expect_eq "the nested-repo topology still REFUSES on an absent roster (exit 2)" "2" "$RC"
+expect_contains "…and prints the walk it took" "$R5CN" "$OUT"
+R5C_CHOSEN="$(printf '%s\n' "$OUT" | grep -F "chosen")"
+expect_contains "…marking the workspace that holds the .bionic tree as the chosen root" \
+  "$R5C	chosen" "$R5C_CHOSEN"
+R5C_NESTED="$(printf '%s\n' "$OUT" | grep -F "$R5CN")"
+expect_contains "…while the nested repo appears as an ancestor that was considered" \
+  "candidate" "$R5C_NESTED"
+expect_absent "…and the walk is not mistaken for a decision" "decision=" "$OUT"
 
 
 # ============================================================
@@ -823,14 +871,18 @@ expect_contains "the stop address is the form the stop primitive accepts" \
   "TaskStop landed-one@session-${SID:0:8}" "$OUT"
 expect_absent "…never the transcript-form id, which the platform rejects for a teammate" \
   "TaskStop $ID_LANDED" "$OUT"
-# BOTH SPELLINGS ARE OFFERED, because only one of them is proven (follow-up, 2026-08-30).
-# The captured payload says the addressing form carries the LAUNCHING session's eight
-# characters, which for an adopted agent is the PREDECESSOR's; the row this verb writes
-# carries this session's. Both resolve to the same row at both stop gates, so the cost of
-# printing the alternate is one clause and the cost of printing only the wrong one is a
-# refusal the operator cannot clear.
-expect_contains "…and the alternate spelling is offered beside it" \
-  "(or landed-one@session-${ADOPT_A:0:8} if the platform keys on the launching session)" "$OUT"
+# ONE SPELLING, AND IT IS THE SURVIVING SESSION'S (1.5, AC-5). The alternate —
+# `<name>@session-<the PREDECESSOR's eight>` — was printed in a clause beside it for as long
+# as it was unknown which session's characters the platform keys on. The probe settled it:
+# a plain `/clear` RE-KEYS `CLAUDE_CODE_SESSION_ID` in the env and in every hook payload
+# (plan §Assumptions, A-probe-1), so the address that still resolves after the roll-over is
+# the one built from the key that survived it, which is this session's. Two spellings in the
+# terminal asked the operator to choose between them on evidence they do not have, at the one
+# moment they are trying to reach an agent.
+expect_absent "…and the launching session's spelling is NOT offered beside it" \
+  "landed-one@session-${ADOPT_A:0:8}" "$OUT"
+expect_absent "…nor the clause that used to offer it" \
+  "keys on the launching session" "$OUT"
 expect_contains "the row names the predecessor session it came from" "from=$ADOPT_A" "$OUT"
 expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
 
@@ -967,6 +1019,146 @@ expect_eq "…and the verb still exits 1: the found-rows signal, not a refusal" 
 # against a verb that had simply stopped printing addresses at all.
 expect_contains "the writable-roster fixture still offers the stop address (§8a's row)" \
   "TaskStop landed-one@session-" "$ADOPT_OUT"
+
+# ---------- 8i: --report-only reads without writing (1.4, AC-4) ----------
+#
+# THE SessionStart BLOCK RUNS THIS ONE. `adopt` is the right verb for a model that has
+# decided to take the predecessor's rows over; it is the wrong verb for a hook that fires
+# on every resume, because a session that merely STARTED in this project would file rows
+# for agents it may have no business holding. `--report-only` is the same read with the
+# write removed, so the block can print the truth and leave the taking to the operator.
+#
+# The two halves are pinned separately, because either alone is passable by a verb that
+# does the wrong thing: "writes nothing" is satisfied by a verb that prints nothing, and
+# "prints the same rows" is satisfied by a verb that writes anyway.
+R8R="$(make_repo s8-report-only)"; new_roster "$R8R"
+mkdir -p "$R8R/.bionic/docs/record"
+add_row_to "$R8R" "$ADOPT_A" name=landed-three status=identified \
+  agent_id=alanded-three-88888888888888 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8R/.bionic/docs/record/landed-three.md"
+printf 'the report\n' > "$R8R/.bionic/docs/record/landed-three.md"
+
+_ro_pred_before="$(cd "$R8R/.bionic/tmp" && cksum "roster-$ADOPT_A.state")"
+_ro_own_before="$(cksum < "$(roster_of "$R8R")")"
+poke "$R8R" adopt --report-only
+RO_OUT="$OUT"; RO_RC="$RC"
+_ro_pred_after="$(cd "$R8R/.bionic/tmp" && cksum "roster-$ADOPT_A.state")"
+_ro_own_after="$(cksum < "$(roster_of "$R8R")")"
+
+expect_eq "--report-only leaves the predecessor roster byte-identical" \
+  "$_ro_pred_before" "$_ro_pred_after"
+expect_eq "--report-only leaves THIS session's roster byte-identical" \
+  "$_ro_own_before" "$_ro_own_after"
+expect_absent "…so the previewed row is NOT filed" "name=landed-three|" \
+  "$(cat "$(roster_of "$R8R")")"
+expect_contains "…and the verb says which mode it ran in" "report-only" "$RO_OUT"
+expect_eq "…while the found-rows signal is unchanged (exit 1)" "1" "$RO_RC"
+
+# THE ROWS ARE THE WRITING VERB'S ROWS. Compared with the wall-clock `at=` stamps
+# normalised — the one field that legitimately differs between two runs a second apart —
+# and with the mode line itself removed, since that line is the only thing that may differ.
+# This is what makes the SessionStart block's output trustworthy: the operator reads the
+# report, and `adopt` then files exactly what they were shown.
+ro_rows() { printf '%s\n' "$1" | grep -v 'report-only' | sed -E 's/\|at=[^|]*\|/|at=X|/'; }
+poke "$R8R" adopt
+expect_eq "--report-only's rendering is the writing verb's, line for line" \
+  "$(ro_rows "$RO_OUT")" "$(ro_rows "$OUT")"
+expect_contains "…and the writing verb DID file the row that was previewed" \
+  "|name=landed-three|" "$(cat "$(roster_of "$R8R")")"
+expect_contains "…including the stop address the preview printed" \
+  "TaskStop landed-three@session-" "$RO_OUT"
+
+# Nothing to adopt, in report-only: the same silence and the same exit 0.
+R8RB="$(make_repo s8-report-only-alone)"; new_roster "$R8RB"
+poke "$R8RB" adopt --report-only
+expect_eq "--report-only with no predecessor roster exits 0" "0" "$RC"
+expect_contains "…and says so" "nothing to adopt" "$OUT"
+
+# The flag is the ONLY second argument any verb takes; anything else is still a usage error.
+poke "$R8R" adopt --bogus
+expect_eq "an unknown flag after adopt is a usage error (exit 2)" "2" "$RC"
+poke "$R8R" tick --report-only
+expect_eq "…and --report-only is not a flag the tick takes" "2" "$RC"
+
+# ---------- 8j: liveness reads the TRANSCRIPT too (1.6, AC-6) ----------
+#
+# THE DEFECT. A row was RUNNING only while its PROGRESS FILE was fresh, and a progress file
+# is a promise the agent keeps by hand — the first thing a working agent drops when the work
+# gets absorbing, and the one artifact a role without Write cannot produce at all. The agent
+# is nevertheless observable: its transcript is appended to by the harness on every turn,
+# under `<config>/projects/<slug>/<launching sid>/subagents/agent-<id>.jsonl`, which is the
+# same file this verb already prints as the observe address. So liveness is now the OR of
+# the two mtimes, and SILENT means both of them are stale — an agent that has neither
+# written a line nor taken a turn inside the window its own row declared.
+#
+# THE WINDOW is `PATROL_STALE_MULTIPLIER × cadence`, read from payload/scripts/lib/patrol.sh
+# rather than from an inline `* 2` (spec AC-22: one constant, three readers). The mutation
+# at the end of this block is what proves the reader is the constant.
+R8L="$(make_repo s8-liveness)"; new_roster "$R8L"
+mkdir -p "$R8L/.bionic/docs/record"
+ID_TXFRESH="atxfresh-one-9999999999999999"
+ID_TXSTALE="atxstale-one-aaaaaaaaaaaaaaaa"
+SUB8="$C8/projects/-fixture-project/$ADOPT_A/subagents"
+
+for _pair in "tx-fresh $ID_TXFRESH" "tx-stale $ID_TXSTALE"; do
+  set -- $_pair
+  add_row_to "$R8L" "$ADOPT_A" name="$1" status=identified agent_id="$2" \
+    subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+    deliverable="$R8L/.bionic/docs/record/$1.md" \
+    progress="$R8L/.bionic/tmp/progress-$1.md"
+  # The progress half is stale for BOTH rows: this block is about the other input, and a
+  # fresh progress file would answer RUNNING without the transcript ever being stat'd.
+  printf 'progress\n' > "$R8L/.bionic/tmp/progress-$1.md"
+  backdate "$R8L/.bionic/tmp/progress-$1.md" 5400
+  : > "$SUB8/agent-$2.jsonl"
+done
+# …and the transcripts differ: one written just now, one as old as the progress files.
+backdate "$SUB8/agent-$ID_TXSTALE.jsonl" 5400
+
+poke "$R8L" adopt --report-only
+expect_contains "a stale progress file with a FRESH transcript still reads RUNNING" \
+  "name=tx-fresh|verdict=RUNNING" "$OUT"
+expect_contains "…and both mtimes stale reads SILENT" \
+  "name=tx-stale|verdict=SILENT" "$OUT"
+expect_contains "…the transcript's age is printed, so the verdict can be checked" \
+  "transcript_age=" "$OUT"
+
+# THE THRESHOLD IS THE LIBRARY'S CONSTANT, NOT A LITERAL 2 — proven by mutation, the same
+# way §2 proves the interval default is read from POKER_INTERVAL_DEFAULT. A row whose only
+# fresh-ish input sits BETWEEN one cadence and two is RUNNING while the multiplier is 2 and
+# SILENT the moment it is 1, so a poker carrying its own `* 2` answers RUNNING on both runs.
+# The doctored tree is the shape the plugin ships (hooks/ beside scripts/lib) and its library
+# is a COPY, because this is the one fixture that must not read the shipped constant.
+MULT_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-mult-mut.XXXXXX")"
+mkdir -p "$MULT_MUT_ROOT/hooks" "$MULT_MUT_ROOT/scripts"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MULT_MUT_ROOT/scripts/lib"
+sed -i.bak 's/^export PATROL_STALE_MULTIPLIER=2$/export PATROL_STALE_MULTIPLIER=1/' \
+  "$MULT_MUT_ROOT/scripts/lib/patrol.sh"
+cp "$POKER" "$MULT_MUT_ROOT/hooks/session-poker.sh"
+if grep -qF 'export PATROL_STALE_MULTIPLIER=1' "$MULT_MUT_ROOT/scripts/lib/patrol.sh"; then
+  ok "8j meta: the doctored multiplier landed (the sed anchor still matches)"
+else
+  bad "8j meta: the doctored multiplier did NOT land — the pair below proves nothing"
+fi
+
+R8M="$(make_repo s8-multiplier)"; new_roster "$R8M"
+mkdir -p "$R8M/.bionic/docs/record"
+add_row_to "$R8M" "$ADOPT_A" name=between status=identified \
+  agent_id=abetween-one-bbbbbbbbbbbbbbbb subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8M/.bionic/docs/record/between.md" \
+  progress="$R8M/.bionic/tmp/progress-between.md"
+printf 'progress\n' > "$R8M/.bionic/tmp/progress-between.md"
+backdate "$R8M/.bionic/tmp/progress-between.md" 900   # > one cadence, < two
+
+poke "$R8M" adopt --report-only
+expect_contains "at 1.5x the cadence the shipped multiplier (2) still reads RUNNING" \
+  "name=between|verdict=RUNNING" "$OUT"
+OUT="$( cd "$R8M" && env CLAUDE_CODE_SESSION_ID="$SID" \
+        bash "$MULT_MUT_ROOT/hooks/session-poker.sh" adopt --report-only 2>&1 )"
+expect_contains "…and the SAME row reads SILENT against a library whose multiplier is 1" \
+  "name=between|verdict=SILENT" "$OUT"
 
 unset CLAUDE_CONFIG_DIR
 
