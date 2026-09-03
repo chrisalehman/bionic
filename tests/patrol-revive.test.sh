@@ -413,15 +413,33 @@ fi
 
 # A hook with a suite, a run line and no registration is installed, green in its
 # own suite, and never fired.
+#
+# THE CHANNEL MOVED (bionic 1.4.0, slice ADOPT, spec AC-7). It was registered in the
+# governing skill's frontmatter, which is what made this monitor share the failure mode
+# it monitors: three of the four events that kill a Patrol also deregistered the hook,
+# silently and at the same moment. It is in hooks/hooks.json now and survives all four —
+# so BOTH halves are asserted, because either alone is a wall in the wrong place: a
+# lingering frontmatter entry would fire it twice per turn (the CLI does not deduplicate
+# across the two manifests), and a missing manifest entry would not fire it at all.
 TOTAL=$((TOTAL + 1))
 if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh' \
-     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
-  pass "28: SKILL.md registers the hook on the Stop channel"
+     "${BIONIC_HOOKS_DIR}/hooks.json"; then
+  pass "28: hooks/hooks.json registers the hook, always on"
 else
-  fail "28: the hook is not registered in SKILL.md — it would never fire"
+  fail "28: the hook is not registered in hooks/hooks.json — it would never fire"
+fi
+TOTAL=$((TOTAL + 1))
+# The REGISTRATION spelling, not any mention: the Patrol section names this hook in prose
+# (it is what reports a Patrol death, and the disarm ritual exists because of it), and a
+# grep for the bare filename would forbid the documentation along with the duplicate.
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive\.sh' \
+     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
+  fail "28b: SKILL.md still registers the hook — a second registration fires it twice per turn"
+else
+  pass "28b: …and SKILL.md's frontmatter does not, so it fires exactly once"
 fi
 
-# 29: THE ASSERTION THAT WOULD HAVE CAUGHT THIS. SKILL.md's frontmatter registers
+# 29: THE ASSERTION THAT WOULD HAVE CAUGHT THIS. The manifest registers
 # this hook as a BARE PATH — `command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh`,
 # no interpreter — and that is exactly how the CLI's own hook runner invokes it: a
 # shell handed the literal path as the command, which requires the tracked file
@@ -437,7 +455,7 @@ REGISTERED_RC=$?
 if [ "$REGISTERED_RC" -ne 126 ]; then
   pass "29: the hook runs when invoked exactly as registered (bare path via sh -c, rc=$REGISTERED_RC)"
 else
-  fail "29: rc=126 (Permission denied) invoking the hook as SKILL.md registers it — the tracked file lost its execute bit"
+  fail "29: rc=126 (Permission denied) invoking the hook as the manifest registers it — the tracked file lost its execute bit"
 fi
 
 echo ""

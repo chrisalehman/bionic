@@ -432,12 +432,18 @@ expect_match "32: the fix line reports only the launches the roster never saw" \
 echo ""
 echo "=== Section 9: one cure, two surfaces — and the column budget ==="
 
-# ONE CURE, SPELLED ONCE. hooks/session-poker.sh decides `wall-blind` at tick
-# time and names the repair; doctor names the same repair from the same fact
-# hours later, off the same `patrol-wall/v1` record. Two spellings of one cure
-# is two answers, so the literal is pinned from BOTH files rather than from
-# either alone — the shape tests/cross-gate-agreement.test.sh uses wherever two
-# readers have to agree.
+# ONE CURE, ONE SURFACE NOW (bionic 1.4.0, slice ADOPT). This used to be a two-reader
+# agreement: hooks/session-poker.sh decided `wall-blind` at tick time and named the
+# repair, and doctor named the same repair hours later off the same `patrol-wall/v1`
+# record. The tick's decision is retired — it inferred a dead dispatch wall from
+# dispatches outnumbering roster rows, and always-on registration removes the condition
+# that made that inference worth drawing — so there is no second speller left to agree
+# with, and a pin against a deleted line would be a pin over air.
+#
+# What remains is worth pinning on its own: the cure doctor prints and the row it prints
+# it beside come from ONE record, `patrol-wall/v1`, whose schema token lives in
+# lib/patrol.sh. Both halves are asserted, so a doctor that stopped reading that record
+# or a library that renamed it goes red.
 lines_matching() {  # <text> <glob> -> the matching lines
   local line out=""
   while IFS= read -r line || [ -n "$line" ]; do
@@ -448,20 +454,17 @@ lines_matching() {  # <text> <glob> -> the matching lines
 }
 
 CURE='re-invoke /bionic:canonical-sdlc'
-POKER_TEXT="$(cat "${PAYLOAD}/hooks/session-poker.sh")"
+PATROL_LIB_TEXT="$(cat "${PAYLOAD}/scripts/lib/patrol.sh")"
 DOCTOR_TEXT="$(cat "$DOCTOR_SH")"
-# PINNED TO THE DECISION THAT AGREES, not to the file that contains it. The
-# phrase occurs three times in hooks/session-poker.sh and only one of them is
-# the cure doctor is echoing — the `check=wall-blind` decision record; another
-# is the unrelated predecessor-row message inside the roster detail block. A
-# glob over the whole file stays green if the wall-blind cure alone is reworded
-# or deleted, which is the exact drift this pin exists to catch, so the match is
-# made against that ONE line. An extraction that found nothing fails the match
-# rather than passing it, which is what keeps this from becoming a pin over air.
-POKER_WALL_LINE="$(lines_matching "$POKER_TEXT" '*check=wall-blind*')"
-expect_match "33: session-poker.sh spells the cure on its wall-blind decision" \
-  "*check=wall-blind*cure=${CURE}*" "$POKER_WALL_LINE"
-expect_match "34: payload/scripts/doctor.sh spells it identically" "*${CURE}*" "$DOCTOR_TEXT"
+# PINNED TO THE RECORD DOCTOR READS, not merely to the file that contains the phrase.
+# An extraction that found nothing fails the match rather than passing it, which is what
+# keeps this from becoming a pin over air.
+DOCTOR_WALL_LINE="$(lines_matching "$DOCTOR_TEXT" '*patrol-wall/v1*')"
+expect_match "33: payload/scripts/doctor.sh reads the patrol-wall/v1 record" \
+  "*patrol-wall/v1*" "$DOCTOR_WALL_LINE"
+expect_match "33b: …and lib/patrol.sh is where that schema token is defined" \
+  "*PATROL_WALL_SCHEMA=\"patrol-wall/v1\"*" "$PATROL_LIB_TEXT"
+expect_match "34: payload/scripts/doctor.sh spells the cure" "*${CURE}*" "$DOCTOR_TEXT"
 
 # THE BUDGET, MEASURED WITH THE PRODUCT'S OWN RULER rather than by eye
 # (lib/width.sh — `bionic_cols` counts COLUMNS, and every glyph on these rows is

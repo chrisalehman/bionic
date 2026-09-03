@@ -346,12 +346,27 @@ fi
 # 25: THE GATE IS REGISTERED ON THE STOP CHANNEL. A hook with a suite, a run line
 # and no registration is the exact shape the landing sweep spent a wave being:
 # installed, syntactically fine, green in its own suite, and never fired.
+# A hook with a suite, a run line and no registration is installed, green in its own
+# suite, and never fired. THE CHANNEL MOVED (bionic 1.4.0, slice ADOPT, spec AC-7): this
+# gate was registered in the governing skill's frontmatter so it would be live exactly
+# while that skill was, and that coupling is the defect — a `/clear`, a compaction or a
+# session the skill was never invoked in left the wall installed and not running, while
+# the duty it binds went on existing. Both halves are asserted, because either alone is a
+# wall in the wrong place: a lingering frontmatter entry fires it twice per turn (the CLI
+# does not deduplicate across the two manifests), and a missing manifest entry not at all.
 TOTAL=$((TOTAL + 1))
-if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh' \
-     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
-  pass "25: SKILL.md registers the gate on the Stop channel"
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
+     "${BIONIC_HOOKS_DIR}/hooks.json"; then
+  pass "25: hooks/hooks.json registers the gate on the Stop channel, always on"
 else
-  fail "25: the gate is not registered in SKILL.md — it would never fire"
+  fail "25: the gate is not registered in hooks/hooks.json — it would never fire"
+fi
+TOTAL=$((TOTAL + 1))
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
+     "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
+  fail "25b: SKILL.md still registers the gate — a second registration fires it twice per turn"
+else
+  pass "25b: …and SKILL.md's frontmatter does not, so it fires exactly once"
 fi
 
 # 26/26b: THE HEADER'S OWN HONESTY ABOUT ITS BACKSTOP. This file used to cite the
