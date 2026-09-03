@@ -117,8 +117,9 @@
 # stamp: this is a gate, and gates may only read (TDD §3.2). It takes no view on
 # whether the tick's WORK was right, only on whether the two duties happened.
 #
-# Registered once on the Stop channel in hooks/hooks.json, always on, and scoped by
-# `active_run` rather than by whether a skill is armed.
+# Registered once on the Stop channel in hooks/hooks.json, and scoped by ENGAGEMENT — this
+# session having invoked canonical-sdlc — not by the repo merely holding an open plan
+# (task-engaged-session). The plan still answers "which plan", never "whether".
 # [WALL: tests/patrol-duties-gate.test.sh]
 
 set -uo pipefail
@@ -158,7 +159,7 @@ CWD="${CLAUDE_PROJECT_DIR:-}"
 #
 # One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: this gate
 # refuses a STOP, and a stop refused for a missing file is a turn nobody can end.
-BIONIC_LIB_WANT="root.sh run.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -291,8 +292,36 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "patrol-duties-gate"; fi
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/session.sh"
 
 PROJECT_DIR=$(project_root "$CWD")
+
+# ---------- THE SESSION KEY ----------
+#
+# NEW AT task-engaged-session. This gate carried no session id at all — it read the
+# transcript and nothing session-keyed — and the engagement switch below is keyed to one.
+# Derived exactly as hooks/dispatch-preflight.sh derives it: from the library (design §1,
+# env primary and payload witness) so the marker's writer and this reader spell one session
+# one way, empty is silent-pass, and the shape is checked before the value is ever
+# interpolated into a path. The divergence line is silenced because a bystander session must
+# produce no output at all. It serves the tick marker below (AC-22) as well.
+SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || SID=""
+[ -n "$SID" ] || exit 0
+case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+
+# ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
+#
+# task-engaged-session: bionic's walls are the RUN's, not the repo's, and a run is entered
+# by invoking canonical-sdlc. A session that never did is a bystander here and must not see
+# a refusal, an advisory, or a state write from this hook. `engaged_session` (lib/run.sh) is
+# true only for a REGULAR file at `.bionic/tmp/engaged-<sid>.state`; every unreadable state —
+# absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
+# direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
+# (1.3.2 close-out ruling — the arming partition IS the consent boundary). It is also what
+# ends this gate's largest cost on a bystander turn: the full-transcript jq pass below never
+# starts.
+engaged_session "$PROJECT_DIR" "$SID" || exit 0
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
 #
@@ -304,7 +333,15 @@ PROJECT_DIR=$(project_root "$CWD")
 #
 # It also answers "which plan" — the same reader, so this gate and the tick it polices
 # cannot disagree about which file the duty is owed against.
-PLAN=$(active_run "$PROJECT_DIR") || exit 0
+#
+# IT NO LONGER DECIDES WHETHER THIS GATE ACTS — engagement does (above). Both of this
+# gate's duties are owed to a TICK, not to a plan: the ritual arm reads clear/resume
+# markers, and the duties and FILL arms fold the tick's own output out of the transcript.
+# The plan contributes one thing, a basename that lets a write to the plan file count as
+# the task-list refresh, and the fold below already treats an empty name as matching
+# nothing. So an engaged session with no plan is policed exactly as one with a plan, minus
+# that one alternative way to discharge the refresh.
+PLAN=$(active_run "$PROJECT_DIR") || PLAN=""
 PLAN_NAME=""
 [ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="$(basename "$PLAN")"
 
@@ -462,10 +499,27 @@ Do the resume ritual, in order, then stop again — this gate blocks once:
   exit 0
 fi
 
+# ---------- WHAT COUNTS AS A TICK (AC-22) ----------
+#
+# THE MARKER, NOT THE COMMAND. This gate used to call a turn a tick when the last USER row
+# CONTAINED the substring `session-poker.sh tick`. The canonical-sdlc SKILL.md body contains
+# that literal (it is the line telling the reader to run it), and the body is injected into
+# the transcript as a USER row — so invoking the skill WAS a Patrol tick as far as this gate
+# could tell, and the gate then refused the invoking turn for duties no tick had asked for
+# (observed twice on session 14dcbee3, 2026-09-03; research-refusal.md §sibling defect).
+#
+# A tick is now what the patrol prompt was designed to announce: a USER row whose FIRST
+# TOKEN is `bionic-patrol session=<session-id[0:8]>` (SKILL.md §The patrol prompt), for THIS
+# session. That makes the test positional and session-scoped rather than a substring search,
+# so a row that merely quotes the tick command is not a tick, and a predecessor's job still
+# firing into this conversation after a /clear is not this session's tick either.
+TICK_MARK="bionic-patrol session=${SID:0:8}"
+
 # TICK / LISTAGENTS / TASKLIST, folded over the last turn.
-VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" '
+VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" '
   $1 == "USER" {
-    tick = (index($0, "session-poker.sh tick") > 0)
+    t = $2; sub(/^[ \t]+/, "", t)
+    tick = (index(t, mark) == 1)
     la = 0; tl = 0
     next
   }
@@ -510,9 +564,10 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" '
 # Folded over the same stream, resetting at every user PROMPT exactly as the duties fold
 # above it does, and inert on every turn with no FILL line in it — which is every turn in
 # every project whose tick prints none.
-FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' '
+FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
   $1 == "USER" {
-    tick = (index($0, "session-poker.sh tick") > 0)
+    t = $2; sub(/^[ \t]+/, "", t)
+    tick = (index(t, mark) == 1)
     fills = ""; declined = 0; agents = " "
     next
   }

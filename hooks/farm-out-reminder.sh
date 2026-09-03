@@ -17,11 +17,11 @@
 # Thread discrimination (epic-08 Q1 spike + hooks docs): agent_type
 # non-empty → subagent → silent. Missing keys classify as MAIN THREAD.
 # Registered once in hooks/hooks.json, always on — and gated on an ON-DISK fact
-# rather than on whether a skill happens to be armed: the hook asks `active_run`
-# whether this project has an open canonical-sdlc run and exits silently when it does
-# not. That gate is not cosmetic. Until bionic 1.4.0 this hook had NO run gate at all
-# (R-2 finding 1), so always-on registration would have denied tier-1 Bash commands in
-# every project on the machine, wave or no wave.
+# rather than on whether a skill happens to be armed: the hook asks `engaged_session`
+# whether THIS session invoked canonical-sdlc in this tree and exits silently when it
+# did not. That gate is not cosmetic: always-on registration without it would deny
+# tier-1 Bash commands in every project on the machine, wave or no wave. Engagement is
+# the whole of the scope — no plan is consulted (step-6 review R-1).
 
 set -u
 
@@ -196,13 +196,36 @@ ROOT=$(project_root "$CWD")
 SESSION_ID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || SESSION_ID=""
 [ -n "$SESSION_ID" ] || SESSION_ID="unknown"
 
-# ── THE RUN PREDICATE (AC-7): no open run, nothing to say ────────────────────
+# ---------- THE ENGAGEMENT GUARD (AC-6): is this session bionic's at all? ----------
 #
-# BEFORE the override check below, deliberately. FARM_OUT_ALLOW=1 exists to bypass a
-# wall that is binding; where the wall is inert there is nothing to bypass, and an
-# audit line recording an "override" of a wall that was never going to fire is noise
-# in the one stream that has to stay readable.
-active_run "$ROOT" >/dev/null || exit 0
+# FIRST, above the run predicate and above the FARM_OUT_ALLOW override both. Chris,
+# 2026-09-03: "all guardrails imposed by bionic should only apply when exercising
+# bionic. Nothing should apply until bionic is triggered" — and the trigger is the
+# canonical-sdlc skill, which writes `.bionic/tmp/engaged-<sid>.state` at the instant it
+# is invoked. A session that never invoked it gets no nudge, no deny and no audit line:
+# exit 0, no stdout, no stderr.
+#
+# ABOVE THE OVERRIDE for the same reason the run predicate is: FARM_OUT_ALLOW=1 exists
+# to bypass a wall that is binding, and where the wall is inert there is nothing to
+# bypass. An audit line recording an "override" of a wall that was never going to fire
+# is noise in the one stream that has to stay readable.
+#
+# `unknown` IS NOT A SESSION. The fallback two lines up is a display value; the
+# predicate refuses it by name, along with an absent marker, a symlink at the path and a
+# foreign or unshaped key. Every unreadable state reads as NOT engaged, because the
+# arming partition is the consent boundary (1.3.2 close-out).
+# [WALL: tests/cmd-class.test.sh]
+engaged_session "$ROOT" "$SESSION_ID" || exit 0
+
+# ── NO RUN PREDICATE HERE, DELIBERATELY (step-6 review R-1) ──────────────────
+#
+# This hook used to ask `active_run` for an open canonical-sdlc run and exit silently
+# without one. That gate is gone. The nudge is PLAN-FREE: engagement decides whether a
+# bionic wall speaks at all, and knowing that a suite command belongs in a subagent
+# needs no plan — the sessions most in need of the reminder are the ones in Step 0
+# through Step 3, which have not written one yet. Adding the predicate back would
+# re-open the hole R-1 named.
+# [WALL: tests/cmd-class.test.sh]
 
 PROJECT_DIR="$ROOT"
 

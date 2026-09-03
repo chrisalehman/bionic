@@ -53,7 +53,7 @@
 
 set -u
 
-BIONIC_LIB_WANT="root.sh session.sh patrol.sh"
+BIONIC_LIB_WANT="root.sh session.sh patrol.sh run.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -188,6 +188,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/root.sh"    || exit 0   # project_root
 . "$BIONIC_LIB/session.sh" || exit 0   # session_id, and its one divergence warning
 . "$BIONIC_LIB/patrol.sh"  || exit 0   # PATROL_STALE_MULTIPLIER, _patrol_claude_home
+. "$BIONIC_LIB/run.sh"     || exit 0   # active_run, engaged_session
 
 # The tree this hook was launched from — printed absolute in the re-arm line, and
 # the tree whose poker is asked for the interval. `$(dirname "$0")/..` and `pwd -P`
@@ -235,8 +236,23 @@ fi
 
 # The current session id, through the one function every other reader calls. Its
 # stderr warning on a divergent payload is deliberately NOT suppressed: that line
-# is the L-SESSION contract, and this hook is one of the twelve readers.
+# is the L-SESSION contract, and this hook is one of the twenty readers.
 CUR="$(session_id "$PAYLOAD_SID")" || CUR=""
+
+# ---------------------------------------------------------------- engagement
+#
+# An open run gates the whole roster/stamp/re-arm block behind this session's
+# own consent to enter bionic (lib/run.sh `engaged_session`, T4/AC-11/AC-12).
+# A session that never invoked canonical-sdlc gets exactly one line naming the
+# plan and the skill — no roster dump, no stamp report, no re-arm instruction
+# — because none of that operational detail is addressed to a bystander. A sid
+# this hook cannot read is, like every other unreadable state here, NOT
+# engaged: the safe direction is the quieter one.
+PLAN="$(active_run "$ROOT")" || PLAN=""
+if [ -n "$PLAN" ] && [ -f "$PLAN" ] && ! engaged_session "$ROOT" "$CUR"; then
+  printf 'bionic: an open run exists here (%s) — invoke /bionic:canonical-sdlc to engage it\n' "$PLAN"
+  exit 0
+fi
 
 AGREE="agree"
 _first=""

@@ -25,7 +25,35 @@ run_hook() {
   # hand-built JSON mangles both. Same idiom as
   # tests/canonical-sdlc-evidence-gate.test.sh:run_hook.
   local cmd="$1"
-  jq -n --arg c "$cmd" '{tool_input: {command: $c}}' | bash "$HOOK" 2>/dev/null
+  pm_payload "$ENGAGED_REPO" "$cmd" \
+    | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" 2>/dev/null
+}
+
+# ---------- the engaged fixture (task-engaged-session, AC-20) ----------
+#
+# Since 2026-09-03 this wall only speaks in a session that invoked the canonical-sdlc
+# skill (Chris: "Nothing should apply until bionic is triggered"). The marker recording
+# the invocation is `.bionic/tmp/engaged-<sid>.state` under the payload's project root,
+# so every arm below runs from a repo that has one — the world in which "does this wall
+# still refuse a push to main" is the question anyone means. The unengaged world is the
+# section at the bottom, driven on the same commands.
+#
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does: lib/session.sh
+# takes the env value as primary and the payload as a witness, so a driver that left the
+# RUNNER's own session id in the environment would have the hook looking for a marker
+# this fixture never wrote, and every row would pass for the wrong reason.
+PM_SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/pmain.XXXXXX")" && pwd -P)"
+SID="7a6b5c4d-3e2f-4109-8877-665544332211"
+ENGAGED_REPO="$PM_SANDBOX/engaged"
+PLAIN_REPO="$PM_SANDBOX/plain"
+mkdir -p "$ENGAGED_REPO/.bionic/tmp" "$PLAIN_REPO/.bionic/tmp" "$PM_SANDBOX/home"
+: > "$ENGAGED_REPO/.bionic/tmp/engaged-$SID.state"
+export HOME="$PM_SANDBOX/home"
+
+pm_payload() {  # <cwd> <command>
+  jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" \
+    '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:$cmd}}'
 }
 
 expect_block() {
@@ -333,6 +361,65 @@ expect_block "B-1 …single-quoted too" \
 # PAIRED POSITIVE: a real unquoted opener still hides its body.
 expect_allow "B-1 an UNQUOTED heredoc body is still ignored" \
   "$(printf 'cat > /tmp/n.txt <<EOF\ngit push origin main\nEOF\n')"
+
+# ============================================================
+# The unengaged session: this wall is not there at all (AC-20)
+# ============================================================
+#
+# THE PAIR, on the same commands every block row above refuses. Chris, 2026-09-03: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered." A session that never invoked the skill leaves no
+# `.bionic/tmp/engaged-<sid>.state` and this wall says nothing at all: exit 0, empty
+# stdout, empty stderr — not a quieter refusal, no refusal.
+#
+# The branch stays `main` throughout, so the third block (any push while ON main) is
+# live for every row here and each one is a command that WOULD be refused two lines up.
+
+echo ""
+echo "=== the unengaged session: silent on the pushes every section above blocks ==="
+
+export FAKE_BRANCH=main
+
+pm_unengaged() {  # <label> <command> — expect exit 0, empty stdout, empty stderr
+  local label="$1" cmd="$2" out err st=0
+  out=$(pm_payload "$PLAIN_REPO" "$cmd" \
+          | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" 2>"$PM_SANDBOX/.err") || st=$?
+  err=$(cat "$PM_SANDBOX/.err")
+  TOTAL=$((TOTAL + 1))
+  if [ "$st" = "0" ] && [ -z "$out" ] && [ -z "$err" ]; then
+    echo "PASS: $label"; PASS=$((PASS + 1))
+  else
+    echo "FAIL: $label"; echo "      exit=$st stdout=[$out] stderr=[$err]"; FAIL=$((FAIL + 1))
+  fi
+}
+
+pm_unengaged "AC-20 a push to main passes an unengaged session"  "git push origin main"
+pm_unengaged "AC-20 ...a FORCE push to main passes"              "git push --force origin main"
+pm_unengaged "AC-20 ...a force push to a feature branch passes"  "git push --force origin feature/x"
+pm_unengaged "AC-20 ...a bare push while ON main passes"         "git push"
+pm_unengaged "AC-20 ...git -C <dir> push origin master passes"   "git -C /tmp/r push origin master"
+
+# A SYMLINK AT THE MARKER PATH IS NOT A MARKER (lib/run.sh refuses `-L` before following
+# it): the one shape that could otherwise open every wall on the machine from outside the
+# repo it points into.
+ln -s "$ENGAGED_REPO/.bionic/tmp/engaged-$SID.state" "$PLAIN_REPO/.bionic/tmp/engaged-$SID.state"
+pm_unengaged "AC-20 ...a SYMLINK at the marker path is not engagement" "git push --force origin main"
+rm -f "$PLAIN_REPO/.bionic/tmp/engaged-$SID.state"
+
+# ...AND THE POSITIVE CONTROL FOR THIS SECTION'S OWN MACHINERY: the identical driver,
+# pointed at the ENGAGED repo, still refuses. Without it every row above would also pass
+# on a hook that had simply stopped working.
+TOTAL=$((TOTAL + 1))
+if pm_payload "$ENGAGED_REPO" "git push --force origin main" \
+     | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" >/dev/null 2>&1; then
+  echo "FAIL: AC-20 control — the same driver on the ENGAGED repo still BLOCKS"
+  FAIL=$((FAIL + 1))
+else
+  echo "PASS: AC-20 control — the same driver on the ENGAGED repo still BLOCKS"
+  PASS=$((PASS + 1))
+fi
+
+rm -rf "$PM_SANDBOX"
 
 # ============================================================
 # Results

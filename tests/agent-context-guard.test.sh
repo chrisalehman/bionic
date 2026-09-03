@@ -110,8 +110,18 @@ PLAN
   printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID" > "$repo/.bionic/tmp/patrol-$SID.state"
   chmod 600 "$repo/.bionic/tmp/patrol-$SID.state"
+  # A LIVE WAVE IS AN ENGAGED SESSION (task-engaged-session, 2026-09-03). Since Chris's
+  # ruling that "nothing should apply until bionic is triggered", this guard — and every
+  # wall behind it — asks first whether the session invoked the canonical-sdlc skill. The
+  # marker is what the skill writes at that instant, so a fixture describing a session
+  # mid-wave carries one; without it the cells below would all be silent for a reason
+  # that has nothing to do with what they measure. §G8 is the paired world with no marker.
+  : > "$repo/.bionic/tmp/engaged-$SID.state"
+  chmod 600 "$repo/.bionic/tmp/engaged-$SID.state"
   printf '%s' "$repo"
 }
+
+unengage() { rm -f "$1/.bionic/tmp/engaged-$SID.state"; }
 
 arm_roster() {  # <repo> — the fact that proves this session is armed
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
@@ -382,14 +392,15 @@ echo "=== G7 — the mutation loop: each half of the partition is load-bearing =
 # assertion above was never testing anything.
 MUTANT=""
 # A MUTANT NEEDS THE LIBRARY BESIDE IT (bionic 1.4.0). The guard loads root.sh and
-# session.sh through the shared loader idiom, whose first candidate is
+# session.sh (and, since task-engaged-session, run.sh for `engaged_session`) through the
+# shared loader idiom, whose first candidate is
 # `$(dirname "$0")/../scripts/lib`; a copy alone in the sandbox root finds nothing
 # there, fails OPEN, and every mutation arm below would be measuring the step-aside
 # instead of the deleted predicate. So the mutants live in a tree shaped like the
 # shipped one: hooks/ beside scripts/lib/.
 MUTANT_TREE="$SANDBOX/mutants"
 mkdir -p "$MUTANT_TREE/hooks" "$MUTANT_TREE/scripts/lib"
-for _acg_lib in root.sh session.sh; do
+for _acg_lib in root.sh run.sh session.sh; do
   cp "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$_acg_lib" "$MUTANT_TREE/scripts/lib/$_acg_lib" 2>/dev/null \
     || cp "${BIONIC_HOOKS_DIR}/../scripts/lib/$_acg_lib" "$MUTANT_TREE/scripts/lib/$_acg_lib" 2>/dev/null || true
 done
@@ -436,6 +447,42 @@ run_mutant "$MUTANT" "$(mk_agent_payload "$REPO_M" yes)" "$DISPATCH_WALL"
 expect_status "G7.2 without the roster test the guard fires in an UNARMED session" 2 "$ST"
 run_guard "$(mk_agent_payload "$REPO_M" yes)" "$DISPATCH_WALL"
 expect_status "G7.2 …and the shipped guard does not" 0 "$ST"
+
+# ============================================================
+echo ""
+echo "=== G8 — the session never invoked the skill: the guard is not there (AC-20) ==="
+# ============================================================
+#
+# THE PAIRED WORLD. Every cell above runs in a repo carrying
+# `.bionic/tmp/engaged-<sid>.state`, the marker hooks/engage.sh writes the instant the
+# canonical-sdlc skill is invoked. Chris, 2026-09-03: "all guardrails imposed by bionic
+# should only apply when exercising bionic. Nothing should apply until bionic is
+# triggered." Remove the marker and this guard hands nothing to any wall — the same
+# payload, the same agent_id, the same roster, and silence.
+#
+# The rows are the exact inputs G1 and G2 refuse, so the difference between the two
+# sections is one file and nothing else.
+
+REPO_U="$(make_repo unengaged)"
+arm_roster "$REPO_U"
+unengage "$REPO_U"
+
+run_guard "$(mk_agent_payload "$REPO_U" yes)" "$DISPATCH_WALL"
+expect_eq "G8.1 an unengaged session: the dispatch wall is never reached (exit 0)" "0" "$ST"
+expect_eq "G8.1 ...nothing on stdout" "" "$OUT"
+expect_eq "G8.1 ...nothing on stderr" "" "$ERR"
+
+run_guard "$(mk_write_payload "$REPO_U" "$REPO_U/.bionic/docs/plans/epic-99-test/new.plan.md" yes)" "$ARTIFACT_WALL"
+expect_eq "G8.2 an unengaged session: the artifact wall is never reached (exit 0)" "0" "$ST"
+expect_eq "G8.2 ...nothing on stdout" "" "$OUT"
+expect_eq "G8.2 ...nothing on stderr" "" "$ERR"
+
+# NON-VACUITY, on this very fixture: put the marker back and the same two payloads are
+# refused again. Without this row G8 would also pass on a guard that had simply died.
+: > "$REPO_U/.bionic/tmp/engaged-$SID.state"
+run_guard "$(mk_agent_payload "$REPO_U" yes)" "$DISPATCH_WALL"
+expect_eq "G8.3 control: restore the marker and the dispatch wall REFUSES again" "2" "$ST"
+
 
 # ============================================================
 echo ""

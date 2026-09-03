@@ -72,6 +72,12 @@ OTHER_SID="99999999-8888-7777-6666-555555555555"
 make_env() {  # [interval] -> project dir on stdout
   local dir; dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
+  # ENGAGED (task-engaged-session). This monitor asks `engaged_session` before it asks
+  # anything else, so a fixture without the marker is silent for a reason that has nothing
+  # to do with the stamp under test. An armed Patrol implies an engaged session anyway —
+  # SKILL.md arms the Patrol AT engagement — so the marker travels with the stamp in
+  # write_stamp below as well. §12 drives the unengaged direction deliberately.
+  : > "$dir/.bionic/tmp/engaged-$SID.state"
   printf 'poker-interval: %s\n' "${1:-1s}" > "$dir/.bionic/config.yaml"
   cat > "$dir/.bionic/docs/plans/wave-01.plan.md" <<'PRPLAN'
 ---
@@ -98,6 +104,9 @@ armed_path() { printf '%s.armed' "$(stamp_path "$1" "$2")"; }
 write_stamp() {  # <project> <session>
   printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$2" \
     > "$(stamp_path "$1" "$2")"
+  # The engagement marker for the SAME session: a Patrol is armed at engagement, so a
+  # stamp without a marker is a state the machine does not produce (task-engaged-session).
+  : > "$1/.bionic/tmp/engaged-$2.state"
 }
 
 # The `s21_backdate` idiom of tests/dispatch-preflight.test.sh, verbatim in
@@ -527,6 +536,11 @@ mkdir -p "$D/.bionic/docs/plans/epic-99"
 # delivery that POSTDATES the arming — which is what the tick now requires before it will
 # DISARM (R-13, critic C-4). A hand-written stamp alone leaves the session with no arming
 # record at all, and the tick QUIETs rather than reaching the decision this case is about.
+# ENGAGED (task-engaged-session, 2026-09-03): the poker's `tick` decides nothing in a
+# session that never invoked the canonical-sdlc skill, so the one case in this file that
+# drives a real tick has to say the session did. `arm`, on the line below, is deliberately
+# not guarded and needs no marker.
+: > "$D/.bionic/tmp/engaged-$SID.state"
 ( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_FOR_DISARM" arm ) >/dev/null 2>&1
 backdate "$(armed_path "$D" "$SID")" 600
 backdate "$(stamp_path "$D" "$SID")" 600
@@ -659,6 +673,58 @@ case "$HOOK_ERR" in
   *) pass "43: a symlinked second stamp is silent, never followed" ;;
 esac
 rm -rf "$OTHERD"
+
+# ---------- Group 12: THE ENGAGEMENT SWITCH (AC-8) ----------
+#
+# Asked before the stamp is read at all, and each silence is paired with the finding the
+# same fixture produces once the marker is back.
+
+E=$(make_env 1s)
+write_stamp "$E" "$SID"; backdate "$(stamp_path "$E" "$SID")" 600
+fire "$E"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_OUT" in
+  *"Patrol"*) pass "44: engaged: a stale stamp is reported" ;;
+  *) fail "44: engaged: a stale stamp is reported" "out=<$HOOK_OUT>" ;;
+esac
+E_FINDING="$HOOK_OUT"
+
+rm -f "$E/.bionic/tmp/engaged-$SID.state"
+fire "$E"
+TOTAL=$((TOTAL + 1))
+if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
+  pass "45: the same stale stamp unengaged says nothing"
+else
+  fail "45: the same stale stamp unengaged says nothing" "rc=$HOOK_RC out=<$HOOK_OUT>"
+fi
+
+# a SYMLINK at the marker path reads as absent, never followed.
+E_DECOY=$(mktemp); printf 'plan=none\n' > "$E_DECOY"
+ln -s "$E_DECOY" "$E/.bionic/tmp/engaged-$SID.state"
+fire "$E"
+TOTAL=$((TOTAL + 1))
+if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
+  pass "46: a symlink at the marker path is not an engagement"
+else
+  fail "46: a symlink at the marker path is not an engagement" "rc=$HOOK_RC out=<$HOOK_OUT>"
+fi
+rm -f "$E/.bionic/tmp/engaged-$SID.state" "$E_DECOY"
+
+# and restoring it restores the finding, word for word — with the one number that is a
+# CLOCK normalised out of both sides. The notice quotes the stamp's age in seconds, so two
+# drives a second apart differ by a digit for a reason that has nothing to do with the
+# switch, and pinning it would make this assertion fail on a slow machine and nowhere else.
+: > "$E/.bionic/tmp/engaged-$SID.state"
+fire "$E"
+TOTAL=$((TOTAL + 1))
+E_FINDING_N=$(printf '%s' "$E_FINDING" | sed -E 's/stamp is [0-9]+s old/stamp is Ns old/')
+HOOK_OUT_N=$(printf '%s' "$HOOK_OUT" | sed -E 's/stamp is [0-9]+s old/stamp is Ns old/')
+E_FINDING="$E_FINDING_N"; HOOK_OUT="$HOOK_OUT_N"
+if [ "$HOOK_OUT" = "$E_FINDING" ]; then
+  pass "47: re-engaged, the finding is byte-identical"
+else
+  fail "47: re-engaged, the finding is byte-identical" "was <$E_FINDING> now <$HOOK_OUT>"
+fi
 
 echo ""
 echo "========================================"

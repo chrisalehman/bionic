@@ -117,14 +117,32 @@ active_run() {
   local plan
   plan=$(active_plan "$root") || return 1
 
+  # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
+  # variable via a here-string, never a live pipe fed by _run_lines/awk. `grep -q`
+  # (and `-m1`) exit at their FIRST match; piped directly to a still-writing producer,
+  # that early exit closes the read end while the producer is mid-write, the producer
+  # takes SIGPIPE and reports 141, and every caller of this file runs under
+  # `set -o pipefail`, which promotes that 141 to the whole pipeline's own status. An
+  # `if pipeline; then return 1; fi` guarded that way reads 141 as false: a plan that
+  # DOES carry `delivered:` (or `abandoned:`) falls through as if it did not, and a
+  # closed run reads open — the fail-dangerous direction. A here-string is fully
+  # written by the shell before the reader ever starts, so there is no live writer left
+  # to signal, regardless of match position or file size (measured: a `delivered:` line
+  # near the top of a file past ~16-20 KB with pipefail on reproduces this at the
+  # `_run_lines "$plan" | grep -qE …` shape; tests/run-predicate.test.sh §R4, AC-21;
+  # sibling note tests/cross-gate-agreement.test.sh:1502, `producer | grep -q` under
+  # pipefail exits 141 on large files).
+  local lines
+  lines=$(_run_lines "$plan")
+
   # Frontmatter close: a plan explicitly abandoned is never active, regardless of `current:`.
   local frontmatter
-  frontmatter=$(_run_lines "$plan" | awk '
+  frontmatter=$(awk '
     NR == 1 && $0 == "---" { f = 1; next }
     f && $0 == "---" { exit }
     f { print }
-  ')
-  if printf '%s\n' "$frontmatter" | grep -q '^abandoned:'; then
+  ' <<< "$lines")
+  if grep -q '^abandoned:' <<< "$frontmatter"; then
     return 1
   fi
 
@@ -132,17 +150,19 @@ active_run() {
   # the same reason the marker test above is: this is the exact tolerance the five
   # hand-copies in hooks/ carried, and a predicate that is stricter than the walls it
   # replaces goes silently inert on a plan those walls read perfectly well.
-  local current
-  current=$(_run_lines "$plan" | awk '
+  local body
+  body=$(awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
-    { print }' | grep -m1 -E '^[[:space:]]*current[[:space:]]*:' \
+    { print }' <<< "$lines")
+  local current
+  current=$(grep -m1 -E '^[[:space:]]*current[[:space:]]*:' <<< "$body" \
     | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
     | tr -d '[:space:]')
   [ -n "$current" ] || return 1
 
   # Task-scale: current: T<n> is always active (no numbered close).
-  if printf '%s' "$current" | grep -qE '^T[0-9]+$'; then
+  if grep -qE '^T[0-9]+$' <<< "$current"; then
     printf '%s\n' "$plan"
     return 0
   fi
@@ -165,7 +185,7 @@ active_run() {
   # Step 9: open unless a Step-9 evidence line records delivery. Anything past 9 is not a
   # step this lifecycle has, and an unrecognised state is not an open run.
   if [ "$((10#$step))" -eq 9 ]; then
-    if _run_lines "$plan" | grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:'; then
+    if grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"; then
       return 1
     fi
     printf '%s\n' "$plan"
@@ -174,4 +194,41 @@ active_run() {
 
   # Anything else (out-of-range current:, malformed) is not a recognized open state.
   return 1
+}
+
+# ---------- ENGAGEMENT: the single switch every bionic hook reads FIRST ----------
+#
+# task-engaged-session (Chris, 2026-09-03): "all guardrails imposed by bionic should only
+# apply when exercising bionic. Nothing should apply until bionic is triggered" — and the
+# trigger is the canonical-sdlc skill, nothing else. `hooks/engage.sh` writes the marker at
+# the instant of invocation; every hook asks this before it asks anything else, and exits
+# silently when it is false. Engagement decides WHETHER a hook acts; the plan (`active_run`,
+# above) decides WHAT — a hook that finds the marker and no plan runs its plan-free walls
+# and skips the plan-bound ones. The marker is never removed during the session: `disarm`
+# removes the Patrol stamp only, and a session that invoked the skill is bionic's for its
+# whole life.
+#
+# FAIL DIRECTION IS INVERTED HERE, deliberately: this is the one artifact whose PRESENCE
+# opens walls. Every unreadable state — absent, symlink, foreign sid, empty sid, the
+# `unknown` fallback two advisories use — reads as NOT engaged, because the arming
+# partition is the consent boundary (1.3.2 close-out ruling) and a wall that binds a
+# session which never consented is the bug this exists to fix.
+
+# engaged_marker_path <root> <sid> -> the marker path, or exit 1 on a sid that is empty,
+# `unknown`, or carries any character outside [A-Za-z0-9_-] (the stamp's own shape rule).
+engaged_marker_path() {
+  local root="$1" sid="$2"
+  [ -n "$root" ] && [ -n "$sid" ] || return 1
+  [ "$sid" = "unknown" ] && return 1
+  case "$sid" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  printf '%s/.bionic/tmp/engaged-%s.state\n' "$root" "$sid"
+}
+
+# engaged_session <root> <sid> -> exit 0 iff a REGULAR file exists at the marker path. A
+# symlink there is refused before it is followed, matching the stamp guard. Silent both ways.
+engaged_session() {
+  local f
+  f=$(engaged_marker_path "$1" "$2") || return 1
+  [ -L "$f" ] && return 1
+  [ -f "$f" ]
 }
