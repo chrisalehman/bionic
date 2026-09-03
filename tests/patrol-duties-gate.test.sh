@@ -392,6 +392,81 @@ else
 fi
 
 echo ""
+echo "=== Section 4: the resume/clear ritual arm (bionic 1.4.0, AC-3) ==="
+#
+# A /clear rewrites the session id in place but does NOT kill a predecessor's cron
+# job (A-probe-4: it survives and keeps firing into the new conversation). The
+# probe's own new transcript begins with the literal `<command-name>/clear</command-name>`
+# turn (record/wave-1.4.0-probe.md); a resume is announced the same way this gate's
+# SessionStart sibling (hooks/session-start.sh) prints it: the literal substring
+# `source: resume` inside its title line. Either marker means a CronCreate that is
+# not preceded by a CronList SINCE that marker would leave two clocks on one
+# project — the wall refuses once, naming the resume ritual.
+
+# A user-role entry shaped exactly like the probe's own new-transcript first turn.
+u_clear_marker() { u_prompt "$1" "<command-name>/clear</command-name>"; }
+
+# The marker is type-agnostic by design (a SessionStart report is not a user
+# prompt), so this is driven as a "system"-typed entry — proving the scan reads
+# raw transcript text, not one JSON shape.
+u_resume_marker() {
+  jq -nc '{type:"system",isSidechain:false,
+           message:{content:"bionic session-start (source: resume) — state the previous conversation left on this project."}}' \
+    >> "$1/transcript.jsonl"
+}
+
+RITUAL_CRONLIST="CronList"
+RITUAL_JOB="bionic-patrol session="
+RITUAL_CRONCREATE="CronCreate"
+RITUAL_ARM="session-poker.sh arm"
+RITUAL_ADOPT="adopt"
+
+# 27: a clear marker, then a CronCreate with no CronList since it -> block, naming
+# every step of the ritual.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"
+expect_block "27: CronCreate with no prior CronList after a clear marker blocks" "$RITUAL_CRONLIST"
+TOTAL=$((TOTAL + 1))
+r=$(reason_of)
+case "$r" in
+  *"$RITUAL_CRONLIST"*"$RITUAL_JOB"*"$RITUAL_CRONCREATE"*"$RITUAL_ARM"*"$RITUAL_ADOPT"*)
+    pass "28: the reason states the ritual in order — CronList, delete the stray job, CronCreate, arm, adopt" ;;
+  *) fail "28: the reason does not state the ritual in order" "$r" ;;
+esac
+
+# 29: the same marker, but CronList precedes the CronCreate -> passes.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronList; a_tool "$d" CronCreate
+fire "$d"; expect_allow "29: CronList before CronCreate after a clear marker passes"
+
+# 30: no marker at all -> the arm is inert, whatever the Cron calls did.
+d=$(make_env); a_tool "$d" CronCreate
+fire "$d"; expect_allow "30: no marker in the transcript — the arm is inert"
+
+# 31: the resume spelling blocks the same way.
+d=$(make_env); u_resume_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "31: a resume marker with no prior CronList blocks" "$RITUAL_CRONLIST"
+
+# 32: BLOCKS ONCE. The re-entry with stop_hook_active true always passes, exactly
+# the mechanism the tick-duties arm already uses — nothing new to enforce it.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d" Stop true
+expect_allow "32: stop_hook_active true passes the same unresolved ritual — the refusal fires only once"
+
+# 33: ORDERING. A CronCreate that happened BEFORE the marker is not "since" it —
+# only a later marker starts the window this rule judges.
+d=$(make_env); a_tool "$d" CronCreate; u_clear_marker "$d"
+fire "$d"; expect_allow "33: a CronCreate before the marker does not count against it"
+
+# 34: a CronList satisfies the ritual with nothing else following it.
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronList
+fire "$d"; expect_allow "34: a marker followed only by CronList passes — nothing to cure"
+
+# 35: agent-context calls are not the orchestrator's ritual, same exclusion as the
+# tick-duties arm's ListAgents/TaskList reads.
+d=$(make_env); u_clear_marker "$d"; a_tool_sidechain "$d" CronCreate
+fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the ritual"
+
+echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"
 echo "========================================"
