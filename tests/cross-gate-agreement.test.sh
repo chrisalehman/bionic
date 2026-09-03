@@ -3006,11 +3006,119 @@ done
 # SOURCE, not the value: every reader calls `session_id`, and any payload read that
 # remains is the ARGUMENT to that call.
 N_SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check
-landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder'
+landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder
+session-start'
 for _h in $N_SID_READERS; do
   expect_eq "$_h.sh takes its session id from lib/session.sh" "yes" \
     "$(/usr/bin/grep -q 'session_id "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
 done
+
+# THE LIST IS COMPLETE, not just each named member correct (auditor A-1, AC-2): a static
+# list can omit a real reader forever and every row above still passes silently.
+# session-start.sh was exactly that member — the wave's own twelfth session_id caller,
+# unpinned by this list until the line above. Derived from the tree and compared to the
+# hand-written list, byte for byte — the same technique N_STRAGGLERS above uses for the
+# private-resolver family.
+N_SID_ACTUAL=$(/usr/bin/grep -l 'session_id "' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+N_SID_EXPECTED=$(printf '%s\n' $N_SID_READERS | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the session-id reader roster names every hook that calls session_id, and no other" \
+  "$N_SID_EXPECTED" "$N_SID_ACTUAL"
+
+# ------------------------------------------------ §P″ THE DIVERGENT-CHANNEL FIXTURE, two
+# real hooks, one filename (auditor A-1, AC-2's other half)
+#
+# §P′ above pins the SOURCE by static grep (every reader's call site names `session_id`),
+# which the revert-and-watch capture in record/wave-1.4.0/revert-and-watch.md proved
+# insensitive to a change INSIDE session_id's own body — a hook that silently switched to
+# preferring the payload would still grep-match `session_id "` and every §P′ row would stay
+# green. Nothing before this section drives a real hook end to end with env != payload and
+# checks what filename it actually touched. This does, with two independent readers over the
+# SAME repo under the SAME divergence: hooks/dispatch-preflight.sh, which builds
+# `patrol-<sid>.state` / `roster-<sid>.state` by interpolating session_id's resolved value
+# (its `PAYLOAD_SID` variable is that resolved value, not a raw payload read — see its own
+# header comment), and hooks/session-start.sh, which excludes ITS OWN roster/stamp from the
+# predecessor lists it prints because they are its own. If the two disagreed about which
+# session this is, they would disagree about which file is "mine" — session-start would
+# print a file dispatch-preflight had just written to as though it were a stranger's.
+#
+# session-poker.sh was considered as the second party and rejected: its `arm` verb calls
+# `session_id` with NO payload argument at all (hooks/session-poker.sh, every `SESSION_ID=
+# "$(session_id)"` site) — it never reads a payload session id, so there is no divergence
+# for a fixture to drive it with. Recorded here rather than left for the next reader to
+# rediscover.
+P2_REPO=$(new_repo "sid-divergence")
+# new_repo arms SID_A, SID_B and SID_LG together (arm_patrol) — re-armed here for SID_A
+# ONLY, so a reader that wrongly resolved the payload session (SID_B) hits the loud
+# "never armed" refusal instead of quietly finding a stamp under the wrong name too.
+rm -f "$P2_REPO/.bionic/tmp/patrol-$SID_A.state" "$P2_REPO/.bionic/tmp/patrol-$SID_B.state" \
+      "$P2_REPO/.bionic/tmp/patrol-$SID_LG.state"
+arm_patrol "$P2_REPO" "$SID_A"
+write_plan "$P2_REPO/.bionic/docs/plans/epic-p2/wave-01.md" "current: 4"
+{
+  printf '# bionic environment attestation — machine-local, safe to delete\n'
+  printf 'version=1\nkind=preflight-attestation\n'
+  printf 'session_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID_A" "$P2_REPO"
+} > "$P2_REPO/.bionic/tmp/preflight-$SID_A.state"
+
+# READER 1 — the dispatch wall, driven with env=A / payload=B. Its OWN call site
+# suppresses session_id's stderr (`session_id "$(_jq '.session_id')" 2>/dev/null`,
+# hooks/dispatch-preflight.sh) — deliberately, per plan Assumption ADOPT/3: every hook
+# but session-start.sh silences the divergence line so it does not land on every tool
+# call of a divergent session, and session-start's SessionStart block is the one place
+# it is designed to surface. So the wall's own stderr must stay silent about it; reader
+# 2 below is where the line is expected.
+P2_ERR=$(mk_agent_payload "$SID_B" "$P2_REPO" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" 2>&1 >/dev/null); P2_ST=$?
+expect_eq "P2 the dispatch wall passes a well-formed dispatch under a divergent session" \
+  "0" "$P2_ST"
+expect_absent "P2 …its own call site suppresses the divergence line (ADOPT/3), by design" \
+  "session-id:" "$P2_ERR"
+expect_eq "P2 reader 1 (the dispatch wall) journalled the launch under the ENV session's roster" \
+  "yes" "$([ -f "$P2_REPO/.bionic/tmp/roster-$SID_A.state" ] && echo yes || echo no)"
+expect_eq "P2 …never under the payload session's" \
+  "no" "$([ -e "$P2_REPO/.bionic/tmp/roster-$SID_B.state" ] && echo yes || echo no)"
+
+# READER 2 — session-start, driven with the SAME env=A / payload=B, over the SAME repo.
+# It never prints its own roster/stamp filename; it EXCLUDES them from the predecessor
+# lists it prints, because they are its own. `roster-A.state` is a real file now (reader 1
+# just wrote it) and carries one open row, so agreement means session-start does NOT list
+# it as a predecessor — disagreement means it would, with an open-row count attached.
+P2_SS_OUT=$(printf '{"session_id":"%s","transcript_path":"/irrelevant.jsonl","cwd":"%s","hook_event_name":"SessionStart","source":"resume"}' \
+    "$SID_B" "$P2_REPO" \
+  | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$BIONIC_HOOKS_DIR/session-start.sh" 2>&1)
+expect_absent "P2 reader 2 (session-start) treats roster-A as ITS OWN, not a predecessor" \
+  "roster-$SID_A.state" "$P2_SS_OUT"
+expect_contains "P2 …and its own printed triple names the ENV value as CUR, agreeing with reader 1" \
+  "env=$SID_A" "$P2_SS_OUT"
+expect_contains "P2 …session-start is the ONE reader that does not suppress the divergence line" \
+  "session-id: payload $SID_B" "$P2_SS_OUT"
+
+# DIFFERENTIAL CONTROL — env UNSET: both readers fall back to the payload (design §1's
+# second clause), and must now agree on B instead of A. Without this arm the two checks
+# above could pass for a reader that always answers "the env value" as a constant, never
+# actually reading either channel.
+P2C_REPO=$(new_repo "sid-divergence-ctrl")
+rm -f "$P2C_REPO/.bionic/tmp/patrol-$SID_A.state" "$P2C_REPO/.bionic/tmp/patrol-$SID_B.state" \
+      "$P2C_REPO/.bionic/tmp/patrol-$SID_LG.state"
+arm_patrol "$P2C_REPO" "$SID_B"
+write_plan "$P2C_REPO/.bionic/docs/plans/epic-p2c/wave-01.md" "current: 4"
+{
+  printf '# bionic environment attestation — machine-local, safe to delete\n'
+  printf 'version=1\nkind=preflight-attestation\n'
+  printf 'session_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID_B" "$P2C_REPO"
+} > "$P2C_REPO/.bionic/tmp/preflight-$SID_B.state"
+P2C_ST=$(mk_agent_payload "$SID_B" "$P2C_REPO" \
+  | env CLAUDE_CODE_SESSION_ID="" bash "$PARTY_DP" >/dev/null 2>&1; echo $?)
+expect_eq "P2c control: env unset, the wall falls back to the payload session" \
+  "0" "$P2C_ST"
+expect_eq "P2c …and journals it under the PAYLOAD session's roster this time" \
+  "yes" "$([ -f "$P2C_REPO/.bionic/tmp/roster-$SID_B.state" ] && echo yes || echo no)"
+P2C_SS_OUT=$(printf '{"session_id":"%s","transcript_path":"/irrelevant.jsonl","cwd":"%s","hook_event_name":"SessionStart","source":"resume"}' \
+    "$SID_B" "$P2C_REPO" \
+  | env CLAUDE_CODE_SESSION_ID="" bash "$BIONIC_HOOKS_DIR/session-start.sh" 2>&1)
+expect_absent "P2c reader 2 also treats roster-B as ITS OWN under the fallback" \
+  "roster-$SID_B.state" "$P2C_SS_OUT"
 
 # --------------------------------------------------- N.2 one root, one ANSWER, on disk
 #
