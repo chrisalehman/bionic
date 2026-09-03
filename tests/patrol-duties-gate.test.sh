@@ -590,6 +590,79 @@ d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
 u_tick_out "$d" "poker: FILL ALPHA"
 fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
 
+
+echo ""
+echo "=== Section 6: marker scope — a file the agent merely READ is not a decline (review F2) ==="
+#
+# THE DEFECT. `fill-declined:` and the two clear/resume markers were read as a raw-text
+# substring of EVERY transcript record, tool results included. A tool result is how the
+# content of any file the agent reads enters the transcript, so a README, a fixture or a
+# code comment carrying the literal `fill-declined:` discharged the AC-29 fill duty that
+# nobody had declined — fail-open on the exact wall AC-29 exists to be. The mirror case is
+# friction rather than compromise: a file carrying the /clear or resume marker forced a
+# spurious resume-ritual refusal.
+#
+# THE SCOPE. These two markers are now read only off rows the ORCHESTRATOR authored: a
+# main-thread assistant record (its text and its tool_use inputs alike), a user record
+# whose content is a STRING — the CLI's own command records and the operator's own typing
+# — and any other record type, which is how a SessionStart report reaches the transcript.
+# Never the `tool_result` elements of a user record. STOPGATES/1's type-agnostic substring
+# read is kept WITHIN a qualifying row; what changed is which rows qualify. The `poker:
+# FILL` line itself is deliberately NOT scoped — it arrives as the content of the tick's
+# own Bash tool result, and a planted one costs a false BLOCK, the safe direction.
+
+# An assistant text row inside an agent context — a subagent's words, not the
+# orchestrator's.
+a_text_sidechain() {  # <dir> <text>
+  jq -nc --arg t "$2" \
+    '{type:"assistant",isSidechain:true,
+      message:{role:"assistant",content:[{type:"text",text:$t}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+# 48/49: THE PAIR. The same literal decline text, once as file content the agent read and
+# once as the orchestrator's own writing. Only the second answers.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+u_tick_out "$d" "README.md:4  Write a \"fill-declined: <reason>\" line when you decline a fill."
+fire "$d"; expect_block "48: a fill-declined: inside a tool result does not answer the FILL" "ALPHA"
+
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_text "$d" "fill-declined: peers not idle (D1)."
+fire "$d"; expect_allow "49: …and the same words in the orchestrator's own assistant row do"
+
+# 50/51: THE PAIR, ritual side. The /clear marker as file content the agent read is inert;
+# the CLI's own /clear record still arms the ritual.
+d=$(make_env)
+u_tick_out "$d" "record/wave-1.4.0-probe.md:12  the new transcript opens with <command-name>/clear</command-name> verbatim."
+a_tool "$d" CronCreate
+fire "$d"; expect_allow "50: a /clear marker inside a tool result does not arm the ritual"
+
+d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "51: …and the CLI's own /clear record still does" "$RITUAL_CRONLIST"
+
+# 52/53: the resume spelling, same pair. The system-typed record of §31 still arms it
+# (STOPGATES/1's type-agnostic read is untouched); the same words read out of a file do not.
+d=$(make_env)
+u_tick_out "$d" "hooks/session-start.sh:41  prints (source: resume) into its own title line."
+a_tool "$d" CronCreate
+fire "$d"; expect_allow "52: a resume marker inside a tool result does not arm the ritual"
+
+d=$(make_env); u_resume_marker "$d"; a_tool "$d" CronCreate
+fire "$d"; expect_block "53: …and a system-typed session-start report still does" "$RITUAL_CRONLIST"
+
+# 54: a SUBAGENT's decline is not the orchestrator's — the same agent-context exclusion
+# every other arm of this gate makes, now applied to the decline it never applied to.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA"
+a_text_sidechain "$d" "fill-declined: the subagent decided not to."
+fire "$d"; expect_block "54: a sidechain assistant's decline does not answer the orchestrator's FILL" "ALPHA"
+
+# 55: THE FILL LINE ITSELF STAYS RAW. It reaches the transcript as the content of the
+# tick's own Bash tool result and nothing else carries it — scoping it the way the decline
+# is scoped would make the third duty unreachable. §36-§47 all rest on this; asserted here
+# so the F2 scoping cannot be widened onto it by a later edit without a red test.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
+a_agent "$d" "W-ALPHA" "Slice ALPHA, implementor."
+fire "$d"; expect_block "55: the FILL line is still read out of the tick's tool result" "BETA" "ALPHA"
 echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"
