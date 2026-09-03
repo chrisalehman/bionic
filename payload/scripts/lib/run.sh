@@ -175,3 +175,40 @@ active_run() {
   # Anything else (out-of-range current:, malformed) is not a recognized open state.
   return 1
 }
+
+# ---------- ENGAGEMENT: the single switch every bionic hook reads FIRST ----------
+#
+# task-engaged-session (Chris, 2026-09-03): "all guardrails imposed by bionic should only
+# apply when exercising bionic. Nothing should apply until bionic is triggered" — and the
+# trigger is the canonical-sdlc skill, nothing else. `hooks/engage.sh` writes the marker at
+# the instant of invocation; every hook asks this before it asks anything else, and exits
+# silently when it is false. Engagement decides WHETHER a hook acts; the plan (`active_run`,
+# above) decides WHAT — a hook that finds the marker and no plan runs its plan-free walls
+# and skips the plan-bound ones. The marker is never removed during the session: `disarm`
+# removes the Patrol stamp only, and a session that invoked the skill is bionic's for its
+# whole life.
+#
+# FAIL DIRECTION IS INVERTED HERE, deliberately: this is the one artifact whose PRESENCE
+# opens walls. Every unreadable state — absent, symlink, foreign sid, empty sid, the
+# `unknown` fallback two advisories use — reads as NOT engaged, because the arming
+# partition is the consent boundary (1.3.2 close-out ruling) and a wall that binds a
+# session which never consented is the bug this exists to fix.
+
+# engaged_marker_path <root> <sid> -> the marker path, or exit 1 on a sid that is empty,
+# `unknown`, or carries any character outside [A-Za-z0-9_-] (the stamp's own shape rule).
+engaged_marker_path() {
+  local root="$1" sid="$2"
+  [ -n "$root" ] && [ -n "$sid" ] || return 1
+  [ "$sid" = "unknown" ] && return 1
+  case "$sid" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  printf '%s/.bionic/tmp/engaged-%s.state\n' "$root" "$sid"
+}
+
+# engaged_session <root> <sid> -> exit 0 iff a REGULAR file exists at the marker path. A
+# symlink there is refused before it is followed, matching the stamp guard. Silent both ways.
+engaged_session() {
+  local f
+  f=$(engaged_marker_path "$1" "$2") || return 1
+  [ -L "$f" ] && return 1
+  [ -f "$f" ]
+}
