@@ -292,12 +292,23 @@ echo "=== Section 2: a hook whose library is missing REFUSES ==="
 GA_SANDBOX=$(mktemp -d); cleanup_dirs+=("$GA_SANDBOX")
 mkdir -p "$GA_SANDBOX/home" "$GA_SANDBOX/plugins"
 
+# THE PAYLOAD NAMES AN ENGAGED PROJECT (task-engaged-session, 2026-09-03). Both hooks
+# driven here ask whether the session invoked the canonical-sdlc skill before they read a
+# command for meaning, so a payload with no cwd and no session key exercises the guard
+# rather than the library resolution this section is about.
+GA_SID="6d5c4b3a-2019-4f8e-9d7c-6b5a49382716"
+GA_REPO="$GA_SANDBOX/repo"
+mkdir -p "$GA_REPO/.bionic/tmp"
+: > "$GA_REPO/.bionic/tmp/engaged-$GA_SID.state"
+
 run_hook_at() {  # <hook path> <command> -> sets RC and ERRTXT
   local hook="$1" cmd="$2" input tmp_err
-  input=$(jq -n --arg c "$cmd" '{tool_input: {command: $c}}')
+  input=$(jq -n --arg c "$cmd" --arg d "$GA_REPO" --arg s "$GA_SID" \
+            '{session_id: $s, cwd: $d, tool_input: {command: $c}}')
   tmp_err=$(mktemp)
   if printf '%s' "$input" | env HOME="$GA_SANDBOX/home" \
        BIONIC_PLUGINS_DIR="$GA_SANDBOX/plugins" \
+       CLAUDE_CODE_SESSION_ID="$GA_SID" CLAUDE_PROJECT_DIR= \
        bash "$hook" >/dev/null 2>"$tmp_err"; then RC=0; else RC=$?; fi
   ERRTXT=$(cat "$tmp_err"); rm -f "$tmp_err"
 }
@@ -317,9 +328,11 @@ make_layout() {  # <style: installed|payload> -> echoes the tree root
   fi
   mkdir -p "$libdir"
   cp "$LIB" "$libdir/git-argv.sh"
-  # The evidence gate wants root.sh and run.sh too, and the loader qualifies a
-  # directory only when it holds EVERY wanted basename (BIONIC_LIB_WANT).
-  for _ga_extra in root.sh run.sh; do
+  # The evidence gate wants root.sh, run.sh and session.sh too, and the loader qualifies
+  # a directory only when it holds EVERY wanted basename (BIONIC_LIB_WANT). session.sh
+  # joined the list at task-engaged-session: the gate reads the session key to ask whether
+  # this session engaged bionic at all, before it asks anything about the plan.
+  for _ga_extra in root.sh run.sh session.sh; do
     cp "$(dirname "$LIB")/$_ga_extra" "$libdir/$_ga_extra" 2>/dev/null || true
   done
   echo "$root"
@@ -443,7 +456,13 @@ has_ui: false
 ---'
 
 EG_HOME=$(mktemp -d); cleanup_dirs+=("$EG_HOME")
-mkdir -p "$EG_HOME/.claude/plans" "$EG_HOME/.bionic/docs/plans"
+mkdir -p "$EG_HOME/.claude/plans" "$EG_HOME/.bionic/docs/plans" "$EG_HOME/.bionic/tmp"
+# THE FIXTURE IS AN ENGAGED SESSION (task-engaged-session, 2026-09-03). This gate asks
+# whether the session invoked the canonical-sdlc skill before it reads a plan at all, so
+# without the marker every row below would be silent for a reason that has nothing to do
+# with how a git command line is parsed — which is the whole subject of this section.
+EG_SID="2b7c9d10-4e5f-4a6b-8c9d-0e1f2a3b4c5d"
+: > "$EG_HOME/.bionic/tmp/engaged-$EG_SID.state"
 printf '%s\n' "$FM
 ## SDLC State
 current: 5
@@ -451,9 +470,10 @@ Step 5: TODO" > "$EG_HOME/.bionic/docs/plans/active.md"
 
 run_gate() {  # <command>
   local input tmp_err
-  input=$(jq -n --arg c "$1" --arg cwd "$EG_HOME" '{tool_input: {command: $c}, cwd: $cwd}')
+  input=$(jq -n --arg c "$1" --arg cwd "$EG_HOME" --arg s "$EG_SID" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
   tmp_err=$(mktemp)
-  if HOME="$EG_HOME" CLAUDE_PROJECT_DIR="" bash "$EVIDENCE_GATE" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$EG_HOME" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$EVIDENCE_GATE" <<< "$input" >/dev/null 2>"$tmp_err"; then
     RC=0
   else
     RC=$?

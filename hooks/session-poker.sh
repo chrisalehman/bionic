@@ -1433,6 +1433,27 @@ case "$VERB" in
       exit 3
     fi
 
+    # ---------- THE ENGAGEMENT GUARD (AC-10): is this session bionic's at all? ----------
+    #
+    # BEFORE ANYTHING IS READ, DECIDED OR WRITTEN — above the stamp, above the roster,
+    # above the sweeper. Chris, 2026-09-03: "all guardrails imposed by bionic should only
+    # apply when exercising bionic. Nothing should apply until bionic is triggered" — and
+    # the trigger is the canonical-sdlc skill, which writes
+    # `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. The Patrol prompt
+    # runs this verb, and a Patrol inherited by a session that never invoked the skill
+    # must decide nothing about it rather than deciding wrongly.
+    #
+    # ONE LINE, EXIT 0, and not a refusal: the tick fired correctly and found nothing it
+    # is entitled to judge. `arm` is deliberately not guarded (writing a stamp for a
+    # session that asked for one is harmless) and neither is `disarm`, which removes the
+    # stamp and leaves this marker exactly where it is — a session that invoked the skill
+    # is bionic's for its whole life, so every hook still binds after a disarm (AC-15).
+    # [WALL: tests/session-poker.test.sh]
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
     if [ -z "$REPO_REAL" ]; then
@@ -1688,6 +1709,27 @@ EOF
       die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
       die "A tick answers for ONE session's roster, so without the key there is nothing to read."
       exit 3
+    fi
+
+    # ---------- THE ENGAGEMENT GUARD (AC-10): is this session bionic's at all? ----------
+    #
+    # BEFORE ANYTHING IS READ, DECIDED OR WRITTEN — above the stamp, above the roster,
+    # above the sweeper. Chris, 2026-09-03: "all guardrails imposed by bionic should only
+    # apply when exercising bionic. Nothing should apply until bionic is triggered" — and
+    # the trigger is the canonical-sdlc skill, which writes
+    # `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. The Patrol prompt
+    # runs this verb, and a Patrol inherited by a session that never invoked the skill
+    # must decide nothing about it rather than deciding wrongly.
+    #
+    # ONE LINE, EXIT 0, and not a refusal: the tick fired correctly and found nothing it
+    # is entitled to judge. `arm` is deliberately not guarded (writing a stamp for a
+    # session that asked for one is harmless) and neither is `disarm`, which removes the
+    # stamp and leaves this marker exactly where it is — a session that invoked the skill
+    # is bionic's for its whole life, so every hook still binds after a disarm (AC-15).
+    # [WALL: tests/session-poker.test.sh]
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
     fi
 
     # THE WALK, TAKEN BEFORE THE STAMP IS WRITTEN, and that ordering is load-bearing.

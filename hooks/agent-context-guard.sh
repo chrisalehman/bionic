@@ -98,7 +98,7 @@ CWD=$(_jq '.cwd')
 # One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: this guard
 # decides whether a wall RUNS, and a guard that refused when it could not load would
 # take every wall behind it down with it in every session on the machine.
-BIONIC_LIB_WANT="root.sh session.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -230,6 +230,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "agent-context-guard"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/run.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
 
 # THE SESSION ID (design §1): the environment value is primary, the payload a witness.
@@ -248,6 +250,23 @@ case "$PAYLOAD_SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # a wall that goes quiet exactly where it was added to bind.
 REPO=$(project_root "$CWD")
 [ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
+
+# ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
+#
+# FIRST, above every other scoping question this hook asks. Chris, 2026-09-03: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
+# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A session that
+# never invoked it is one this hook has nothing to say to, and it says nothing: exit 0,
+# no stdout, no stderr.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The marker is the one artifact whose
+# PRESENCE opens a wall, so the fail direction is inverted here on purpose: the arming
+# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
+# which never consented is the defect this guard exists to remove.
+# [WALL: tests/agent-context-guard.test.sh]
+engaged_session "$REPO" "$PAYLOAD_SID" || exit 0
 
 # A symlink anywhere on the arming path is not followed, the same three levels the
 # attestation gets in hooks/dispatch-preflight.sh. The stakes are lower here — the
