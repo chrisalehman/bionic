@@ -43,7 +43,17 @@ trap cleanup EXIT
 slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
                             "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
 # $1 = sandbox HOME, $2 = the audit_root the hook resolved (the plan's project).
-audit_file_for() { printf '%s/.claude/logs/%s/sdlc-audit.md' "$1" "$(slug_for "$2")"; }
+# THE SLUG IS TAKEN OVER THE CANONICAL PATH (bionic 1.4.0, slice ADOPT). The hook
+# now resolves its root through lib/root.sh's `project_root`, which answers with
+# `pwd -P` — so on a machine where the fixture root sits under a symlinked prefix
+# (macOS: /var/folders -> /private/var/folders, which mktemp -d hands back
+# unresolved) the hook's cksum and this helper's cksum are taken over two spellings
+# of one directory, and every audit-file assertion looks for a file that was
+# written one slug over.
+audit_file_for() {
+  local proj; proj=$(cd "$2" 2>/dev/null && pwd -P) || proj="$2"
+  printf '%s/.claude/logs/%s/sdlc-audit.md' "$1" "$(slug_for "$proj")"
+}
 
 # Creates an isolated $HOME-equivalent that is ALSO usable as the project the
 # single-argument runners gate against: an empty ~/.claude/plans/ (never
@@ -4565,12 +4575,18 @@ h30g_dir=$(mktemp -d); cleanup_dirs+=("$h30g_dir")
 # in a bare temp dir therefore refuses everything for the wrong reason, so the
 # copy gets the shipped layout around it: hooks/ beside scripts/lib/.
 mkdir -p "$h30g_dir/hooks" "$h30g_dir/scripts/lib"
-for _h30g_cand in "${BIONIC_HOOKS_DIR}/../scripts/lib/git-argv.sh" \
-                  "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/git-argv.sh"; do
-  if [ -r "$_h30g_cand" ]; then
-    cp "$_h30g_cand" "$h30g_dir/scripts/lib/git-argv.sh"
-    break
-  fi
+# Since bionic 1.4.0 the gate wants THREE libraries — the command reader plus the
+# root and run facts — and the loader qualifies a directory only when it holds all
+# of them (BIONIC_LIB_WANT). A fixture that plants one of the three is a fixture
+# that refuses everything for the wrong reason.
+for _h30g_lib in git-argv.sh root.sh run.sh; do
+  for _h30g_cand in "${BIONIC_HOOKS_DIR}/../scripts/lib/$_h30g_lib" \
+                    "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$_h30g_lib"; do
+    if [ -r "$_h30g_cand" ]; then
+      cp "$_h30g_cand" "$h30g_dir/scripts/lib/$_h30g_lib"
+      break
+    fi
+  done
 done
 DOCTORED_HOOK="$h30g_dir/hooks/loose-gate.sh"
 sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \

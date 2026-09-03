@@ -126,8 +126,13 @@ mk_bash_post_as() {  # <sid> <transcript> <cwd> <command> <stdout> <invoking-age
 }
 
 GUARD_OUT=""; GUARD_ERR=""; GUARD_ST=0
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2).
+# The gate's siblings — the sweeper, stop-check — take the session key from the
+# environment, and since bionic 1.4.0 so does the gate, so a driver that left the
+# runner's own id there would split one fixture session into two.
 run_guard() {  # <payload-json>
-  GUARD_OUT=$(printf '%s' "$1" | bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  GUARD_OUT=$(printf '%s' "$1" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
   GUARD_ERR=$(cat "$SANDBOX/.err")
   return 0
 }
@@ -218,7 +223,10 @@ observe_as() {  # <observer-agent-id|""> <sid> <transcript> <repo> <typed-target
     payload=$(mk_bash_post "$sid" "$tr" "$repo" \
       "bash ~/.claude/hooks/stop-check.sh $*" "$out")
   fi
-  printf '%s' "$payload" | bash "$RECORDER" >/dev/null 2>&1
+  # The recorder takes its session key from the environment now (lib/session.sh, env
+  # primary), so the fixture session travels with the payload rather than beside it —
+  # otherwise the record lands under whatever session is running this suite.
+  printf '%s' "$payload" | env CLAUDE_CODE_SESSION_ID="$sid" bash "$RECORDER" >/dev/null 2>&1
   return 0
 }
 
@@ -231,7 +239,8 @@ observe_nosid() {  # <sid> <transcript> <repo> <typed-target> [args…]
   out=$( cd "$repo" && env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$cfg" \
          bash "$OBSERVE" "$@" 2>/dev/null )
   printf '%s' "$(mk_bash_post "$sid" "$tr" "$repo" \
-    "bash ~/.claude/hooks/stop-check.sh $*" "$out")" | bash "$RECORDER" >/dev/null 2>&1
+    "bash ~/.claude/hooks/stop-check.sh $*" "$out")" \
+    | env CLAUDE_CODE_SESSION_ID="$sid" bash "$RECORDER" >/dev/null 2>&1
   return 0
 }
 

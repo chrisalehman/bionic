@@ -15,12 +15,18 @@
 # and nothing has been skipped yet. So the predicate is retrospective by
 # construction, and Stop is the one channel that can ask it.
 #
-# WHY THE SKILL CHANNEL. `Stop` is delivered to skill-frontmatter hooks keyed by
-# SESSION id, fires once per orchestrator turn, and keeps firing on turns the
-# skill was not re-invoked on — the same three properties hooks/landing-gate.sh
-# depends on and documents at length. This gate is registered beside it in
-# payload/skills/canonical-sdlc/SKILL.md, so it is live exactly while the
-# governing skill is.
+# WHY ALWAYS-ON, AND WHAT SCOPES IT INSTEAD. This gate was registered in the governing
+# skill's frontmatter so that it would be live exactly while that skill was — the duty
+# it binds is the skill's own Patrol's. That coupling was the defect, not the design:
+# a skill's registrations are looked up per session, so a `/clear`, a compaction or a
+# session the skill was never invoked in left the wall installed, green in its own
+# suite, and not running. The duty did not stop existing in those sessions; only the
+# wall did.
+#
+# It is registered once in hooks/hooks.json now, on `Stop` — which still fires once per
+# orchestrator turn and keeps firing on turns nothing was re-invoked. What scopes it is
+# an ON-DISK fact: `active_run` under the payload's project root. A run is active while
+# its plan says so, and that is the same fact that says a Patrol should be ticking.
 #
 # WHAT A "PATROL TICK" IS, STRUCTURALLY. The tick prompt is composed per session
 # by a model and its wording is therefore not a fact anything may key on. What IS
@@ -78,8 +84,8 @@
 # stamp: this is a gate, and gates may only read (TDD §3.2). It takes no view on
 # whether the tick's WORK was right, only on whether the two duties happened.
 #
-# Registered on the Stop channel in payload/skills/canonical-sdlc/SKILL.md; live
-# only while that skill is armed.
+# Registered once on the Stop channel in hooks/hooks.json, always on, and scoped by
+# `active_run` rather than by whether a skill is armed.
 # [WALL: tests/patrol-duties-gate.test.sh]
 
 set -uo pipefail
@@ -105,36 +111,170 @@ _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 TRANSCRIPT=$(_jq '.transcript_path')
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] && [ ! -L "$TRANSCRIPT" ] || exit 0
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
-[ -n "$PROJECT_DIR" ] || PROJECT_DIR=$(_jq '.cwd')
-[ -n "$PROJECT_DIR" ] && [ -d "$PROJECT_DIR" ] || exit 0
+CWD="${CLAUDE_PROJECT_DIR:-}"
+[ -n "$CWD" ] || CWD=$(_jq '.cwd')
+[ -n "$CWD" ] && [ -d "$CWD" ] || exit 0
 
-# ---------- the active plan file ----------
+# ---------- the library ----------
 #
-# DELIBERATELY DUPLICATED from hooks/context-spend.sh, which mirrors
-# hooks/canonical-sdlc-evidence-gate.sh's own discovery — three copies of one
-# question ("which plan is the active one"), held together by the fleet's
-# no-shared-lib rule (TDD §9: a sourced file the installer misses is a silently
-# inert wall). If these are ever bridged, context-spend.sh's copy and this one
-# go together; the evidence gate's is the original.
+# One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: this gate
+# refuses a STOP, and a stop refused for a missing file is a turn nobody can end.
+BIONIC_LIB_WANT="root.sh run.sh"
+# --- bionic-loader/v2 BEGIN
+# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
+# library cannot load itself, so the duplication is the design and
+# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
+# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
 #
-# Only the plan's BASENAME is kept. The path a tool_use carries may be absolute,
-# repo-relative or cwd-relative depending on which tool wrote it, and the
-# basename is the one form all three contain. An empty name matches nothing —
-# guarded at the awk boundary, because an empty needle would otherwise make
-# every write in the turn discharge the duty.
-DOCS_ROOT=".bionic/docs"
-if [ -f "$PROJECT_DIR/.bionic/config.yaml" ]; then
-  _cfg=$(grep -E '^docs-root:' "$PROJECT_DIR/.bionic/config.yaml" 2>/dev/null | head -1 \
-         | sed 's/^docs-root:[[:space:]]*//' | tr -d '\r' | sed 's/[[:space:]]*$//')
-  [ -n "$_cfg" ] && DOCS_ROOT="$_cfg"
+# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
+# on a line above this block. Afterwards exactly one of these is non-empty:
+#   BIONIC_LIB          a readable directory holding every wanted basename
+#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
+# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
+#
+# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
+# healthy hook pays nothing for the healing path — not a jq, not a registry read.
+#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
+#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
+#      siblings, and the repo, where payload/hooks is a symlink to the top-level
+#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
+#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
+#      would find nothing in a directory-source session.
+#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
+#      plugin was installed from; that marketplace's source.path in
+#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
+#      a fork installs under its own name.
+#  (3) the newest version directory in that marketplace's plugin cache, by
+#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
+# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
+# upstream-broken publish breaks every location equally and is not covered.
+#
+# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
+# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
+_bl_dir="$(dirname "$0")"
+_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_try() {
+  [ -n "${1:-}" ] || return 1
+  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
+  [ -d "$1" ] || return 1
+  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
+  BIONIC_LIB="$1"
+}
+if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
+  _bl_mk=""
+  if [ -r "$_bl_pd/installed_plugins.json" ]; then
+    # First key only, and the prefix stripped by parameter expansion rather than
+    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
+    # `jq` runs with its stderr closed, so a machine missing jq degrades to
+    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
+    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
+    _bl_mk="${_bl_keys%%
+*}"
+    _bl_mk="${_bl_mk#bionic@}"
+  fi
+  if [ -n "$_bl_mk" ]; then
+    _bl_src=""
+    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
+      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
+    fi
+    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
+    if [ -z "$BIONIC_LIB" ]; then
+      _bl_best=""; _bl_bestk=""
+      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
+        [ -d "$_bl_v" ] || continue
+        _bl_n="${_bl_v##*/}"
+        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
+        _bl_x1=""; _bl_x2=""; _bl_x3=""
+        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
+$_bl_n
+BIONIC_LOADER_VER
+        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
+        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
+      done
+      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
+    fi
+  fi
 fi
-PLANS_DIR="$PROJECT_DIR/$DOCS_ROOT/plans"
+if [ -z "$BIONIC_LIB" ]; then
+  # The name in the message is the first library this hook asked for. A candidate
+  # directory qualifies only when it holds ALL of them, so with none qualifying the
+  # first wanted name is the honest thing to hand the reader.
+  BIONIC_LIB_MISSING="${_bl_want%% *}"
+  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
+fi
+# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
+# stand aside. Blocking reversible work because a file is missing buys no safety and
+# costs the session.
+loader_fail_open() {
+  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+  exit 0
+}
+# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
+# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
+# here, before the hook sources anything. Whole-string and not prefix, so
+# `claude plugin update bionic@bionic; git push origin main` is refused like any
+# other push. There is no env-var override: a variable an agent turn can set on
+# itself is not a wall.
+loader_fail_closed() {
+  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
+  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
+  case "${2:-}" in
+    "claude plugin update bionic@bionic"|\
+    "claude plugin install bionic@bionic"|\
+    "bash $_bl_root/scripts/doctor.sh"|\
+    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
+  esac
+  cat >&2 <<BIONIC_LOADER_REFUSE
+BLOCKED: $1 cannot load its library (${BIONIC_LIB_MISSING:-the bionic library}), so it
+cannot read this command. A wall that cannot read a command refuses it rather than
+waving it through.
+
+Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
+
+Until the plugin is whole again this wall permits exactly four commands, each matched
+as a whole string:
+
+    claude plugin update bionic@bionic
+    claude plugin install bionic@bionic
+    bash $_bl_root/scripts/doctor.sh
+    bash $_bl_root/scripts/setup.sh
+
+Anything else is refused, including one of those four with another command chained
+after it. Run one of them, or act from your own terminal.
+BIONIC_LOADER_REFUSE
+  exit 2
+}
+# --- bionic-loader/v2 END
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "patrol-duties-gate"; fi
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/root.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/run.sh"
+
+PROJECT_DIR=$(project_root "$CWD")
+
+# ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
+#
+# Before the transcript is parsed, and that placement is the point. The full-transcript
+# jq pass below is this hook's whole cost, and it used to run on every Stop in every
+# session on the machine — 32.5ms with no transcript, 44.7ms over a 601-line one, scaling
+# with the transcript, to answer a question that is only ever asked inside a run (R-2
+# §(c)). Now a project with no open run pays one directory walk.
+#
+# It also answers "which plan" — the same reader, so this gate and the tick it polices
+# cannot disagree about which file the duty is owed against.
+PLAN=$(active_run "$PROJECT_DIR") || exit 0
 PLAN_NAME=""
-if [ -d "$PLANS_DIR" ]; then
-  _plan=$(ls -t "$PLANS_DIR"/*.plan.md "$PLANS_DIR"/*/*.plan.md "$PLANS_DIR"/*/*/*.plan.md 2>/dev/null | head -1)
-  [ -n "$_plan" ] && [ -f "$_plan" ] && PLAN_NAME="$(basename "$_plan")"
-fi
+[ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="$(basename "$PLAN")"
+
+# ---------- the plan's BASENAME ----------
+#
+# Only the basename is kept. The path a tool_use carries may be absolute, repo-relative
+# or cwd-relative depending on which tool wrote it, and the basename is the one form all
+# three contain. An empty name matches nothing — guarded at the awk boundary, because an
+# empty needle would otherwise make every write in the turn discharge the duty.
 
 # ---------- reading the turn ----------
 #

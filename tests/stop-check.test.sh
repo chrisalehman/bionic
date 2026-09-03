@@ -652,7 +652,8 @@ jq -n --arg s "$OWN8" --arg c "$R8" --arg p "$BRIEF_G" \
     tool_input:{description:"the claimed-process case", subagent_type:"implementor",
                 prompt:$p, name:"ours-claims", model:"opus", run_in_background:true},
     tool_use_id:"toolu_01W8G"}' \
-  | ( cd "$R8" && HOME="$H8" CLAUDE_CONFIG_DIR="$H8/.claude" bash "$WRITER" >/dev/null 2>&1 )
+  | ( cd "$R8" && HOME="$H8" CLAUDE_CONFIG_DIR="$H8/.claude" \
+        CLAUDE_CODE_SESSION_ID="$OWN8" bash "$WRITER" >/dev/null 2>&1 )
 
 W8G_ROW=$(grep -v '^#' "$R8/.bionic/tmp/roster-${OWN8}.state" 2>/dev/null | grep 'name=ours-claims' | tail -1)
 expect_contains "the real start gate journalled the dispatch this case reads" \

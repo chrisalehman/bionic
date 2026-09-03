@@ -30,6 +30,16 @@
 #
 # [WALL: tests/run-predicate.test.sh]
 
+# _run_lines <file> -> the file with its line endings TRANSLATED to \n, never deleted.
+# A trailing \r is stripped from each record (CRLF) and any remaining lone \r becomes a
+# real newline (classic-Mac CR-only). Every read in this file is line-anchored, so it
+# must see real newlines: `tr -d '\r'` would collapse a CR-only plan to one line, every
+# match would miss, and the run would read as CLOSED while it was live — the
+# fail-dangerous direction (.claude/rules/hook-authoring.md).
+_run_lines() {
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null
+}
+
 # docs_root <root> -> the absolute docs root for <root>: its .bionic/config.yaml's
 # `docs-root:` value if set (relative values are joined onto <root>; absolute values pass
 # through unchanged), else <root>/.bionic/docs. Byte-identical convention to
@@ -66,7 +76,21 @@ active_plan() {
   for d in "$droot/plans" "$droot/incidents"; do
     [ -d "$d" ] || continue
     while IFS= read -r -d '' f; do
-      grep -q '^## SDLC State' "$f" 2>/dev/null || continue
+      # FENCE-AWARE, and line endings TRANSLATED rather than deleted. Two failure modes,
+      # opposite directions, both recorded:
+      #   - a `## SDLC State` heading that appears only inside a ``` fenced example is
+      #     DOCUMENTATION. Counting it makes a page about the lifecycle look like a live
+      #     run, and every always-on hook then binds in a project that has none.
+      #   - `tr -d '\r'` collapses a CR-only (classic-Mac) file to a single line, every
+      #     line-anchored match misses, and a real plan becomes invisible to the whole
+      #     fleet while a wave is live (.claude/rules/hook-authoring.md).
+      # awk splits on \n, so a CR-only file arrives as one record that gsub re-splits
+      # into real lines. The evidence gate carries the same reading at its own parse.
+      _run_lines "$f" | awk '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^## SDLC State/ { found = 1 }
+        END { exit !found }' || continue
       if [ -z "$plan" ] || [ "$f" -nt "$plan" ]; then
         plan="$f"
       fi
@@ -85,20 +109,25 @@ active_run() {
 
   # Frontmatter close: a plan explicitly abandoned is never active, regardless of `current:`.
   local frontmatter
-  frontmatter=$(awk '
+  frontmatter=$(_run_lines "$plan" | awk '
     NR == 1 && $0 == "---" { f = 1; next }
     f && $0 == "---" { exit }
     f { print }
-  ' "$plan")
+  ')
   if printf '%s\n' "$frontmatter" | grep -q '^abandoned:'; then
     return 1
   fi
 
-  # Flush-left current: line — the only place this key appears in the plan's own convention
-  # (frontmatter never carries it; it lives in ## SDLC State).
+  # The `current:` line. LEADING WHITESPACE IS TOLERATED and the read is fence-aware, for
+  # the same reason the marker test above is: this is the exact tolerance the five
+  # hand-copies in hooks/ carried, and a predicate that is stricter than the walls it
+  # replaces goes silently inert on a plan those walls read perfectly well.
   local current
-  current=$(grep -m1 '^current:' "$plan" \
-    | sed -E 's/^current:[[:space:]]*//' \
+  current=$(_run_lines "$plan" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    { print }' | grep -m1 -E '^[[:space:]]*current[[:space:]]*:' \
+    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
     | tr -d '[:space:]')
   [ -n "$current" ] || return 1
 
@@ -108,15 +137,25 @@ active_run() {
     return 0
   fi
 
+  # THE STEP NUMBER MAY CARRY A SUB-STEP LETTER — `8a`, `8b` — which the lifecycle uses
+  # and every wall this replaces accepted (`^[0-9]+[ab]?$`). A predicate that read `8b`
+  # as malformed would call a live run closed for the whole of step 8, which is where
+  # implementation happens. The letter is stripped; what decides is the number.
+  local step="${current%[ab]}"
+  case "$step" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+
   # Steps 0-8: open by definition.
-  if printf '%s' "$current" | grep -qE '^[0-8]$'; then
+  if [ "$((10#$step))" -lt 9 ]; then
     printf '%s\n' "$plan"
     return 0
   fi
 
-  # Step 9: open unless a Step-9 evidence line records delivery.
-  if [ "$current" = "9" ]; then
-    if grep -qE '^- Step 9:.*delivered:' "$plan"; then
+  # Step 9: open unless a Step-9 evidence line records delivery. Anything past 9 is not a
+  # step this lifecycle has, and an unrecognised state is not an open run.
+  if [ "$((10#$step))" -eq 9 ]; then
+    if _run_lines "$plan" | grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:'; then
       return 1
     fi
     printf '%s\n' "$plan"

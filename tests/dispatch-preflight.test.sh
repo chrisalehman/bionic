@@ -145,7 +145,18 @@ GATE_CONFIG_DIR=""
 # the probe reads a credential and a config dir out of the environment — which must be the
 # SANDBOX's, never the operator's.
 GATE_ENV=""
+# THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does. Since
+# bionic 1.4.0 the wall takes its session id from lib/session.sh, where the ENV value
+# is primary and the payload is a witness (design §1, R-1) — so a driver that shipped
+# a fixture id in the payload while the runner's own CLAUDE_CODE_SESSION_ID sat in the
+# environment would be driving a DIVERGENCE, not a session. The probe that settled
+# this measured the two agreeing on a plain /clear (A-probe-2), and every fixture here
+# is a session, so the driver mirrors the payload into the environment. A payload with
+# no session key exports an empty one, which is what makes the no-session-key arms
+# still reach the fail direction they pin.
 run_gate() {  # <payload-json>
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  GATE_ENV="$GATE_ENV CLAUDE_CODE_SESSION_ID=$_sid"
   if [ -n "$GATE_CONFIG_DIR" ]; then
     # shellcheck disable=SC2086
     GATE_OUT=$(printf '%s' "$1" | env $GATE_ENV CLAUDE_CONFIG_DIR="$GATE_CONFIG_DIR" bash "$GATE" 2>"$SANDBOX/.err")
@@ -155,6 +166,7 @@ run_gate() {  # <payload-json>
   fi
   GATE_ST=$?
   GATE_ERR=$(cat "$SANDBOX/.err")
+  GATE_ENV="${GATE_ENV% CLAUDE_CODE_SESSION_ID=*}"
   return 0
 }
 
@@ -293,7 +305,10 @@ expect_empty "irrelevant tool produces no stderr" "$GATE_ERR"
 # active-wave machinery (resolve_docs_root / the plan-directory find) — this
 # is the textual half of A7's hoist proof; the behavioral half is above.
 TOOL_LINE=$(grep -n '\[ "\$TOOL_NAME" = "Agent" \]' "$GATE" | head -1 | cut -d: -f1)
-WALK_LINE=$(grep -n 'resolve_docs_root()' "$GATE" | head -1 | cut -d: -f1)
+# The plan-directory walk is the library's now (lib/run.sh's active_run); what this
+# pins is unchanged — the cheap relevance check comes first, before anything touches
+# disk.
+WALK_LINE=$(grep -n 'active_run "\$REPO"' "$GATE" | head -1 | cut -d: -f1)
 if [ -n "$TOOL_LINE" ] && [ -n "$WALK_LINE" ] && [ "$TOOL_LINE" -lt "$WALK_LINE" ]; then
   ok "relevance check (line $TOOL_LINE) precedes the plan-directory walk (line $WALK_LINE)"
 else
@@ -309,11 +324,34 @@ expect_status "empty cwd exits 0" "0" "$GATE_ST"
 expect_empty "empty cwd produces no stdout" "$GATE_OUT"
 expect_empty "empty cwd produces no stderr" "$GATE_ERR"
 
+# A NON-GIT CWD IS NOT THE QUESTION ANY MORE (bionic 1.4.0, spec AC-12, Decision A2).
+# It used to be the whole precondition: `git rev-parse --show-toplevel` had to succeed
+# or the wall exited silently, which made the wall's coverage a property of the SHELL's
+# cwd rather than of the project. A dispatch from a scratch directory that nonetheless
+# sat under a real `.bionic` root disarmed arming, containment and rostering at once.
+#
+# The question now is whether there is a PROJECT: `project_root` walks for the nearest
+# real `.bionic` ancestor and `active_run` asks whether its run is open. The two rows
+# below are the same non-git cwd on either side of that line, and nothing separates
+# them but a `.bionic` directory above.
 NONGIT="$SANDBOX/not-a-repo"; mkdir -p "$NONGIT"
 run_gate "$(mk_agent_payload "$SID_A" "$NONGIT")"
-expect_status "non-git cwd exits 0" "0" "$GATE_ST"
-expect_empty "non-git cwd produces no stdout" "$GATE_OUT"
-expect_empty "non-git cwd produces no stderr" "$GATE_ERR"
+expect_status "A2 non-git cwd with NO .bionic above it exits 0" "0" "$GATE_ST"
+expect_empty "A2 …producing no stdout" "$GATE_OUT"
+expect_empty "A2 …and no stderr" "$GATE_ERR"
+
+# The other side: a non-git cwd INSIDE a project with an open run. The wall runs, and
+# with no Patrol stamp for this session it refuses at the arming wall — the refusal
+# that was unreachable from here before A2.
+A2_ROOT=$(make_repo a2root yes)
+rm -rf "$A2_ROOT/.git"
+rm -f "$A2_ROOT/.bionic/tmp/patrol-$SID_A.state"   # unarmed: the refusal this row drives
+A2_SCRATCH="$A2_ROOT/scratch/deep"; mkdir -p "$A2_SCRATCH"
+write_attestation "$A2_ROOT" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$A2_SCRATCH")"
+expect_status "A2 non-git cwd WITH a .bionic root above it reaches the wall (exit 2)" "2" "$GATE_ST"
+expect_contains "A2 …refusing at the arming wall, which is what the old precondition hid" \
+  "Patrol" "$GATE_ERR"
 
 # ============================================================
 echo "=== S3 — no active wave -> inert, nothing to decide ==="
@@ -2453,20 +2491,28 @@ expect_contains "…naming the armed-but-dead state" "stopped firing" "$GATE_ERR
 # by MUTATION: change POKER_INTERVAL_DEFAULT on a doctored copy of the poker tree and the
 # threshold the gate measures against has to move with it. A gate carrying its own 1800
 # would pass this fixture unchanged.
-# THE DOCTORED TREE HAS THE SHAPE THE PLUGIN SHIPS — `hooks/` beside `scripts/lib`
-# (bionic 1.4.0). The poker loads its library through the shared loader idiom, whose first
-# candidate is `<dirname $0>/../scripts/lib`; a copy dropped into a bare temp directory
-# finds none and fails open, and this mutation would then measure a poker that never ran.
-# The library is LINKED rather than duplicated, so the copy under test reads exactly the
-# functions the shipped script reads.
+# A COPIED HOOK NEEDS THE LIBRARY BESIDE IT — the shape the plugin ships, `hooks/`
+# beside `scripts/lib` (bionic 1.4.0). Both the gate and the poker load through the
+# shared loader idiom, whose first candidate is `$(dirname "$0")/../scripts/lib`; a copy
+# dropped into a bare temp directory finds none, fails open, and every arm below would be
+# measuring the step-aside rather than the threshold. The library is LINKED rather than
+# copied, so the tree under test reads exactly the functions the shipped scripts read —
+# and linking the whole directory means a hook that later wants one more basename does not
+# silently fall off the end of a hand-listed set.
+s21_plant() {  # <tree root> -> plants hooks/ + scripts/lib and echoes the hooks dir
+  local root="$1"
+  mkdir -p "$root/hooks" "$root/scripts"
+  ln -s "$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)" "$root/scripts/lib" 2>/dev/null \
+    || ln -s "$(cd "${BIONIC_HOOKS_DIR}/../scripts/lib" && pwd -P)" "$root/scripts/lib" 2>/dev/null || true
+  printf '%s' "$root/hooks"
+}
 S21_TREE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/s21-poker-tree.XXXXXX")
-S21_TREE="$S21_TREE_ROOT/hooks"
-mkdir -p "$S21_TREE" "$S21_TREE_ROOT/scripts"
-ln -s "$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)" "$S21_TREE_ROOT/scripts/lib"
-cp "$GATE" "$S21_TREE/dispatch-preflight.sh"
+S21_TREE_HOOKS=$(s21_plant "$S21_TREE_ROOT")
+S21_TREE="$S21_TREE_HOOKS"   # POKER's spelling; both names address one directory
+cp "$GATE" "$S21_TREE_HOOKS/dispatch-preflight.sh"
 sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="10s"/' \
-  "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$S21_TREE/session-poker.sh"
-if grep -qF 'POKER_INTERVAL_DEFAULT="10s"' "$S21_TREE/session-poker.sh"; then
+  "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$S21_TREE_HOOKS/session-poker.sh"
+if grep -qF 'POKER_INTERVAL_DEFAULT="10s"' "$S21_TREE_HOOKS/session-poker.sh"; then
   ok "r21l meta: the doctored poker default landed (the sed anchor still matches)"
 else
   no "r21l meta: the doctored poker default did NOT land — the arm below proves nothing"
@@ -2475,7 +2521,7 @@ REPO=$(make_repo r21l yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
 s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100   # fresh at 1800s, ancient at 10s
-S21_SAVED_GATE="$GATE"; GATE="$S21_TREE/dispatch-preflight.sh"
+S21_SAVED_GATE="$GATE"; GATE="$S21_TREE_HOOKS/dispatch-preflight.sh"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r21l the fallback threshold moves with the POKER's constant, not the gate's" \
   "2" "$GATE_ST"
@@ -2490,13 +2536,14 @@ GATE="$S21_SAVED_GATE"
 # refuses, and the staleness half says out loud that it did not run. What must never happen
 # is the whole wall going quiet, which is what a teardown would otherwise have bought.
 S21_LONE=$(mktemp -d "${TMPDIR:-/tmp}/s21-lone-gate.XXXXXX")
-cp "$GATE" "$S21_LONE/dispatch-preflight.sh"
+S21_LONE_HOOKS=$(s21_plant "$S21_LONE")
+cp "$GATE" "$S21_LONE_HOOKS/dispatch-preflight.sh"
 S21_EMPTY_CONFIG=$(mktemp -d "${TMPDIR:-/tmp}/s21-empty-config.XXXXXX")
 REPO=$(make_repo r21m yes)
 write_attestation "$REPO" "$SID_A"
 rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
 S21_SAVED_GATE="$GATE"; S21_SAVED_CONFIG="$GATE_CONFIG_DIR"
-GATE="$S21_LONE/dispatch-preflight.sh"; GATE_CONFIG_DIR="$S21_EMPTY_CONFIG"
+GATE="$S21_LONE_HOOKS/dispatch-preflight.sh"; GATE_CONFIG_DIR="$S21_EMPTY_CONFIG"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r21m with NO poker on either lane, the unarmed session is still refused" \
   "2" "$GATE_ST"

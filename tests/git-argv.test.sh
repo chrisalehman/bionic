@@ -282,11 +282,23 @@ eq "-C <dir> does not hide --force" "1" "$(force_of 'git -C /tmp/r push --force 
 echo ""
 echo "=== Section 2: a hook whose library is missing REFUSES ==="
 
+# HERMETIC, and since bionic 1.4.0 that is load-bearing rather than tidy. The loader
+# these hooks share HEALS before it fails: when the library is not beside the hook it
+# consults the CLI's plugin registry and the plugin cache, so a copied tree whose
+# library has been renamed away still finds THIS machine's installed bionic and loads
+# it. The refusal arm below would then test nothing at all. HOME and
+# BIONIC_PLUGINS_DIR are the only doors to those candidates, and both are pointed
+# into an empty sandbox here, so "renamed away" means what the section says it means.
+GA_SANDBOX=$(mktemp -d); cleanup_dirs+=("$GA_SANDBOX")
+mkdir -p "$GA_SANDBOX/home" "$GA_SANDBOX/plugins"
+
 run_hook_at() {  # <hook path> <command> -> sets RC and ERRTXT
   local hook="$1" cmd="$2" input tmp_err
   input=$(jq -n --arg c "$cmd" '{tool_input: {command: $c}}')
   tmp_err=$(mktemp)
-  if printf '%s' "$input" | bash "$hook" >/dev/null 2>"$tmp_err"; then RC=0; else RC=$?; fi
+  if printf '%s' "$input" | env HOME="$GA_SANDBOX/home" \
+       BIONIC_PLUGINS_DIR="$GA_SANDBOX/plugins" \
+       bash "$hook" >/dev/null 2>"$tmp_err"; then RC=0; else RC=$?; fi
   ERRTXT=$(cat "$tmp_err"); rm -f "$tmp_err"
 }
 
@@ -305,6 +317,11 @@ make_layout() {  # <style: installed|payload> -> echoes the tree root
   fi
   mkdir -p "$libdir"
   cp "$LIB" "$libdir/git-argv.sh"
+  # The evidence gate wants root.sh and run.sh too, and the loader qualifies a
+  # directory only when it holds EVERY wanted basename (BIONIC_LIB_WANT).
+  for _ga_extra in root.sh run.sh; do
+    cp "$(dirname "$LIB")/$_ga_extra" "$libdir/$_ga_extra" 2>/dev/null || true
+  done
   echo "$root"
 }
 

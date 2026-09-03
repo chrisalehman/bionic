@@ -514,8 +514,20 @@ section "S7 — mutation-and-restore proofs (design §9, checklist A5/A2)"
 
 ORIG_SUM="$(shasum "$PROBE" | awk '{print $1}')"
 
+# A MUTANT NEEDS THE LIBRARY BESIDE IT (bionic 1.4.0). The probe loads root.sh and
+# session.sh through the shared loader idiom, whose first candidate is
+# `$(dirname "$0")/../scripts/lib`; a copy alone in the temp root finds nothing there,
+# steps aside, and every arm below would be measuring the fail-open rather than the
+# mutation. So the mutants live in a tree shaped like the shipped one.
+PP_MUT_TREE="$TMPROOT/mutants"
+mkdir -p "$PP_MUT_TREE/hooks" "$PP_MUT_TREE/scripts/lib"
+for _pp_lib in root.sh session.sh; do
+  cp "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$_pp_lib" "$PP_MUT_TREE/scripts/lib/$_pp_lib" 2>/dev/null \
+    || cp "${BIONIC_HOOKS_DIR}/../scripts/lib/$_pp_lib" "$PP_MUT_TREE/scripts/lib/$_pp_lib" 2>/dev/null || true
+done
+
 mutate() {  # <label> <awk-or-sed marker> — echoes path of a mutated COPY, or empty on no-op
-  local out="$TMPROOT/mutant-$1.sh"
+  local out="$PP_MUT_TREE/hooks/mutant-$1.sh"
   case "$1" in
     failmv)   sed 's|^\( *\)mv -f "\$tmp"|\1false "$tmp"|' "$PROBE" > "$out" ;;
     showtmp)  awk '{print} /tmp="\$\(mktemp/ {print "  printf \"TMPNAME=%s\\n\" \"$tmp\" >&2"}' "$PROBE" > "$out" ;;

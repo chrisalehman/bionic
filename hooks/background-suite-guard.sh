@@ -42,35 +42,150 @@ _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null || printf ''; }
 COMMAND=$(_jq '.tool_input.command')
 [ -n "$COMMAND" ] || exit 0
 
-# ---------- the command reader, sourced FAIL-CLOSED (design D1) ----------
+# ---------- the command reader ----------
 #
-# A wall that cannot classify refuses rather than waving work through. The refusal is
-# bounded to this arm's own precondition — a call that is not backgrounded left above,
-# unread — so a missing library costs backgrounded commands, not every command.
+# One loader idiom, byte-identical in every hook; its source of truth is
+# payload/scripts/lib/loader.sh, and tests/hook-adoption.test.sh pins this copy
+# against it. The idiom heals before it fails: a library damaged beside this hook is
+# still found in the marketplace source tree or the newest plugin-cache version.
 #
-# TWO SPELLINGS OF ONE DIRECTORY. payload/hooks is a symlink to <repo>/hooks and `$0` is
-# textual, so "../scripts/lib" resolves only when the harness reached this file through
-# ${CLAUDE_PLUGIN_ROOT}/hooks/. The repo spelling is the second candidate. Both land on
-# payload/scripts/lib/cmd-class.sh — tests/cmd-class.test.sh §C6 pins that.
-CMD_CLASS_LIB_WANT="$(dirname "$0")/../scripts/lib/cmd-class.sh"
-CMD_CLASS_LIB=""
-for _cand in "$CMD_CLASS_LIB_WANT" "$(dirname "$0")/../payload/scripts/lib/cmd-class.sh"; do
-  # -r, not -f (review-b B-4c): readability is what predicts whether `.` succeeds.
-  [ -r "$_cand" ] && { CMD_CLASS_LIB="$_cand"; break; }
-done
-if [ -z "$CMD_CLASS_LIB" ] || ! . "$CMD_CLASS_LIB"; then
-  cat >&2 <<EOF
-BLOCKED: background-suite-guard cannot read this command — its classifier failed to load
-($CMD_CLASS_LIB_WANT). A wall that cannot classify refuses rather than waving a
-backgrounded command through.
-
-Fix: restore payload/scripts/lib/cmd-class.sh, or re-install the plugin. Meanwhile run the
-command in the FOREGROUND, bounded by the Bash tool's own timeout parameter:
-
-    <command> 2>&1 | tee <evidence log>
-EOF
-  exit 2
+# FAIL OPEN (design ledger S4, bionic 1.4.0). It refused until 1.4.0, on the reasoning
+# the two irreversible-action walls still use. It is not one of them: what this guard
+# prevents is a suite whose OUTPUT nobody reads, which costs a re-run — reversible, and
+# cheap next to refusing every backgrounded command in every session on the machine
+# because one file is missing. The failure directions in this repo are chosen by the
+# cost of the mistake, never uniformly.
+BIONIC_LIB_WANT="cmd-class.sh"
+# --- bionic-loader/v2 BEGIN
+# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
+# library cannot load itself, so the duplication is the design and
+# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
+# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
+#
+# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
+# on a line above this block. Afterwards exactly one of these is non-empty:
+#   BIONIC_LIB          a readable directory holding every wanted basename
+#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
+# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
+#
+# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
+# healthy hook pays nothing for the healing path — not a jq, not a registry read.
+#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
+#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
+#      siblings, and the repo, where payload/hooks is a symlink to the top-level
+#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
+#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
+#      would find nothing in a directory-source session.
+#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
+#      plugin was installed from; that marketplace's source.path in
+#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
+#      a fork installs under its own name.
+#  (3) the newest version directory in that marketplace's plugin cache, by
+#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
+# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
+# upstream-broken publish breaks every location equally and is not covered.
+#
+# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
+# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
+_bl_dir="$(dirname "$0")"
+_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_try() {
+  [ -n "${1:-}" ] || return 1
+  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
+  [ -d "$1" ] || return 1
+  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
+  BIONIC_LIB="$1"
+}
+if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
+  _bl_mk=""
+  if [ -r "$_bl_pd/installed_plugins.json" ]; then
+    # First key only, and the prefix stripped by parameter expansion rather than
+    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
+    # `jq` runs with its stderr closed, so a machine missing jq degrades to
+    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
+    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
+    _bl_mk="${_bl_keys%%
+*}"
+    _bl_mk="${_bl_mk#bionic@}"
+  fi
+  if [ -n "$_bl_mk" ]; then
+    _bl_src=""
+    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
+      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
+    fi
+    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
+    if [ -z "$BIONIC_LIB" ]; then
+      _bl_best=""; _bl_bestk=""
+      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
+        [ -d "$_bl_v" ] || continue
+        _bl_n="${_bl_v##*/}"
+        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
+        _bl_x1=""; _bl_x2=""; _bl_x3=""
+        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
+$_bl_n
+BIONIC_LOADER_VER
+        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
+        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
+      done
+      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
+    fi
+  fi
 fi
+if [ -z "$BIONIC_LIB" ]; then
+  # The name in the message is the first library this hook asked for. A candidate
+  # directory qualifies only when it holds ALL of them, so with none qualifying the
+  # first wanted name is the honest thing to hand the reader.
+  BIONIC_LIB_MISSING="${_bl_want%% *}"
+  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
+fi
+# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
+# stand aside. Blocking reversible work because a file is missing buys no safety and
+# costs the session.
+loader_fail_open() {
+  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+  exit 0
+}
+# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
+# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
+# here, before the hook sources anything. Whole-string and not prefix, so
+# `claude plugin update bionic@bionic; git push origin main` is refused like any
+# other push. There is no env-var override: a variable an agent turn can set on
+# itself is not a wall.
+loader_fail_closed() {
+  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
+  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
+  case "${2:-}" in
+    "claude plugin update bionic@bionic"|\
+    "claude plugin install bionic@bionic"|\
+    "bash $_bl_root/scripts/doctor.sh"|\
+    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
+  esac
+  cat >&2 <<BIONIC_LOADER_REFUSE
+BLOCKED: $1 cannot load its library (${BIONIC_LIB_MISSING:-the bionic library}), so it
+cannot read this command. A wall that cannot read a command refuses it rather than
+waving it through.
+
+Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
+
+Until the plugin is whole again this wall permits exactly four commands, each matched
+as a whole string:
+
+    claude plugin update bionic@bionic
+    claude plugin install bionic@bionic
+    bash $_bl_root/scripts/doctor.sh
+    bash $_bl_root/scripts/setup.sh
+
+Anything else is refused, including one of those four with another command chained
+after it. Run one of them, or act from your own terminal.
+BIONIC_LOADER_REFUSE
+  exit 2
+}
+# --- bionic-loader/v2 END
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "background-suite-guard"; fi
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/cmd-class.sh"
 
 [ "$(cmd_class "$COMMAND")" = "suite" ] || exit 0
 

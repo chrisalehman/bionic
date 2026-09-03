@@ -47,14 +47,21 @@
 #     the repo root (the containment wall, review S-2)        path and where it lands
 #
 # TWO ROOTS THIS FILE NEVER RE-DERIVES (epic-16 wave-02 R9): the project root comes
-# from `resolve_project_root` (the main repository, never a worktree or the shell's
-# cwd), and every state path hangs off it — so the probe on the other side of the
+# from the library's `project_root` (the nearest real `.bionic` ancestor, with a linked
+# worktree mapped onto its main repository first — never the worktree or the shell's
+# cwd), and every state path hangs off it, so the probe on the other side of the
 # combined preflight writes where this gate reads.
 #
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 # [WALL: tests/dispatch-preflight.test.sh]
 #
-# Registered on both channels: hooks/hooks.json (agent contexts, behind agent-context-guard.sh) and skills/canonical-sdlc/SKILL.md frontmatter (main thread).
+# Registered ONCE, in hooks/hooks.json, for both the main thread and agent contexts.
+# It used to be registered twice — once here and once in the governing skill's
+# frontmatter — because the skill channel is the only one a main-thread payload
+# reaches and the settings channel the only one an agent context reaches, so the pair
+# was a partition rather than a duplicate. What scopes it now is an on-disk fact:
+# `active_run` under the payload's project root. A partition maintained by hand was
+# one edit away from covering one channel twice and the other not at all.
 
 set -uo pipefail
 
@@ -82,147 +89,191 @@ TOOL_NAME=$(_jq '.tool_name')
 # ---------- ambiguity: cannot even locate the repo -> OPEN, silent ----------
 CWD=$(_jq '.cwd')
 [ -n "$CWD" ] || exit 0
-git -C "$CWD" rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
 
-# ---------- the PINNED root (epic-16 wave-02, R5/R9) ----------
+# A GIT TOPLEVEL IS NO LONGER THE PRECONDITION (bionic 1.4.0, spec AC-12, Decision A2).
+# It used to be: `git rev-parse --show-toplevel` had to succeed or the wall exited
+# silently. That made the wall's coverage a property of the SHELL's cwd rather than of
+# the project — dispatch from a non-git directory that nonetheless sits under a real
+# `.bionic` root and every wall in this file went quiet, arming and containment
+# included. The precondition is now the project itself: `project_root` finds the
+# nearest real `.bionic` ancestor (mapping a linked worktree onto its main repository
+# first), and `active_run` decides whether there is anything to protect.
+
+# ---------- the library ----------
 #
-# DELIBERATELY DUPLICATED, byte for byte, from hooks/canonical-sdlc-governing-skill.sh —
-# which holds the origin, with a second twin in the evidence gate. Same reason as
-# resolve_docs_root below: a sourced library the installer misses is a silently inert
-# wall, so these hooks carry copies and an agreement suite holds them together.
+# One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
+# payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
+# dispatch that should have been refused can be stopped and re-run — refusing every
+# Agent call on the machine because a file is missing cannot be undone as cheaply.
+BIONIC_LIB_WANT="root.sh run.sh session.sh patrol.sh"
+# --- bionic-loader/v2 BEGIN
+# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
+# library cannot load itself, so the duplication is the design and
+# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
+# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
 #
-# WHY IT REPLACED `rev-parse --show-toplevel` HERE. That answers with the WORKTREE root,
-# and every path this gate owns hangs off the answer: the attestation it reads, the
-# roster it appends, the containment wall it measures deliverables against. The probe on
-# the other side of the combined preflight below resolves its root the same way, and two
-# scripts that disagree about which `.bionic` is real produce the exact failure R9 names
-# — a probe writing an attestation the gate then cannot find, and a roster that dies with
-# the worktree. `--git-common-dir` maps a worktree back onto the main repository, so both
-# sides land on one address space. On an ordinary checkout the two answers are identical,
-# which is why nothing outside a worktree changes.
-resolve_project_root() {  # $1=a path whose repo we want; $2=fallback (default pwd)
-  local d common root
-  d=$(dirname "$1")
-  while [ ! -d "$d" ] && [ "$d" != "/" ] && [ "$d" != "." ] && [ -n "$d" ]; do
-    d=$(dirname "$d")
-  done
-  if common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-    dirname "$common"
-    return
-  fi
-  if common=$(git -C "$d" rev-parse --git-common-dir 2>/dev/null); then
-    case "$common" in
-      /*) root=$(dirname "$common") ;;
-      *)  root=$(cd "$d" 2>/dev/null && cd "$(dirname "$common")" 2>/dev/null && pwd -P) ;;
-    esac
-    if [ -n "$root" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-  fi
-  # NO-GIT FALLBACK: the pin follows the TARGET, never the shell. Outside any
-  # repository, walk up from the nearest existing ancestor of the target for
-  # the nearest directory already carrying a `.bionic/` tree and answer there;
-  # only when none exists does the supplied fallback (default pwd) win — which
-  # preserves the first-write-into-a-fresh-project path and changes nothing
-  # inside a git repository, where the arms above always answer first.
-  root="$d"
-  while [ -n "$root" ] && [ "$root" != "/" ] && [ "$root" != "." ]; do
-    if [ -d "$root/.bionic" ]; then
-      printf '%s\n' "$root"
-      return
-    fi
-    root=$(dirname "$root")
-  done
-  printf '%s\n' "${2:-$(pwd)}"
+# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
+# on a line above this block. Afterwards exactly one of these is non-empty:
+#   BIONIC_LIB          a readable directory holding every wanted basename
+#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
+# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
+#
+# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
+# healthy hook pays nothing for the healing path — not a jq, not a registry read.
+#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
+#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
+#      siblings, and the repo, where payload/hooks is a symlink to the top-level
+#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
+#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
+#      would find nothing in a directory-source session.
+#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
+#      plugin was installed from; that marketplace's source.path in
+#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
+#      a fork installs under its own name.
+#  (3) the newest version directory in that marketplace's plugin cache, by
+#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
+# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
+# upstream-broken publish breaks every location equally and is not covered.
+#
+# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
+# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
+_bl_dir="$(dirname "$0")"
+_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_try() {
+  [ -n "${1:-}" ] || return 1
+  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
+  [ -d "$1" ] || return 1
+  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
+  BIONIC_LIB="$1"
 }
+if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
+  _bl_mk=""
+  if [ -r "$_bl_pd/installed_plugins.json" ]; then
+    # First key only, and the prefix stripped by parameter expansion rather than
+    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
+    # `jq` runs with its stderr closed, so a machine missing jq degrades to
+    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
+    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
+    _bl_mk="${_bl_keys%%
+*}"
+    _bl_mk="${_bl_mk#bionic@}"
+  fi
+  if [ -n "$_bl_mk" ]; then
+    _bl_src=""
+    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
+      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
+    fi
+    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
+    if [ -z "$BIONIC_LIB" ]; then
+      _bl_best=""; _bl_bestk=""
+      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
+        [ -d "$_bl_v" ] || continue
+        _bl_n="${_bl_v##*/}"
+        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
+        _bl_x1=""; _bl_x2=""; _bl_x3=""
+        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
+$_bl_n
+BIONIC_LOADER_VER
+        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
+        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
+      done
+      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
+    fi
+  fi
+fi
+if [ -z "$BIONIC_LIB" ]; then
+  # The name in the message is the first library this hook asked for. A candidate
+  # directory qualifies only when it holds ALL of them, so with none qualifying the
+  # first wanted name is the honest thing to hand the reader.
+  BIONIC_LIB_MISSING="${_bl_want%% *}"
+  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
+fi
+# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
+# stand aside. Blocking reversible work because a file is missing buys no safety and
+# costs the session.
+loader_fail_open() {
+  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+  exit 0
+}
+# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
+# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
+# here, before the hook sources anything. Whole-string and not prefix, so
+# `claude plugin update bionic@bionic; git push origin main` is refused like any
+# other push. There is no env-var override: a variable an agent turn can set on
+# itself is not a wall.
+loader_fail_closed() {
+  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
+  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
+  case "${2:-}" in
+    "claude plugin update bionic@bionic"|\
+    "claude plugin install bionic@bionic"|\
+    "bash $_bl_root/scripts/doctor.sh"|\
+    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
+  esac
+  cat >&2 <<BIONIC_LOADER_REFUSE
+BLOCKED: $1 cannot load its library (${BIONIC_LIB_MISSING:-the bionic library}), so it
+cannot read this command. A wall that cannot read a command refuses it rather than
+waving it through.
 
-REPO=$(resolve_project_root "$CWD/." "$CWD")
+Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
+
+Until the plugin is whole again this wall permits exactly four commands, each matched
+as a whole string:
+
+    claude plugin update bionic@bionic
+    claude plugin install bionic@bionic
+    bash $_bl_root/scripts/doctor.sh
+    bash $_bl_root/scripts/setup.sh
+
+Anything else is refused, including one of those four with another command chained
+after it. Run one of them, or act from your own terminal.
+BIONIC_LOADER_REFUSE
+  exit 2
+}
+# --- bionic-loader/v2 END
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/root.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/run.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/session.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/patrol.sh"
+
+# THE ROOT (spec AC-10). Every path this gate owns hangs off the answer: the
+# attestation it reads, the roster it appends, the containment wall it measures
+# deliverables against. A worktree that answered with its own tree would write an
+# attestation the probe on the other side of the combined preflight then could not
+# find — `project_root` maps a linked worktree back onto its main repository, so both
+# sides land in one address space. On an ordinary checkout nothing changes.
+REPO=$(project_root "$CWD")
 [ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
 
-# ---------- active-wave detection ----------
-# DELIBERATELY DUPLICATED, byte for byte where the logic overlaps, from
-# hooks/stop-guard.sh's copy (stop-guard and the evidence gate hold the
-# others). A shared library is rejected by design (TDD §9): a sourced file
-# the installer misses is a silently inert wall. The copies are held
-# together by the N-way agreement suite (slice 4/6), which drives all three
-# including the evidence gate as the origin.
-resolve_docs_root() {
-  local proj="$1" config="$1/.bionic/config.yaml" override
-  if [ -f "$config" ]; then
-    override=$(grep -E '^[[:space:]]*docs-root[[:space:]]*:' "$config" 2>/dev/null \
-      | head -1 \
-      | sed -E 's/^[[:space:]]*docs-root[[:space:]]*:[[:space:]]*//' \
-      | sed -E "s/^['\"]//;s/['\"]\$//" \
-      | sed -E 's/[[:space:]]+$//')
-    if [ -n "$override" ]; then
-      case "$override" in
-        /*) echo "$override" ;;
-        *)  echo "$proj/$override" ;;
-      esac
-      return
-    fi
-  fi
-  echo "$proj/.bionic/docs"
-}
 
-# A CANDIDATE IS A PLAN ONLY IF IT CARRIES AN UNFENCED `## SDLC State` HEADING.
-# Without this filter a stray marker-less *.md that happens to be newest under
-# plans/ — a continuation note, a Step-9 artifact, a probe scrap — WINS the
-# newest race, `current:` parses empty, and every wall reading this block passes
-# silently while a wave is live. That is measured, not hypothetical: it disarmed
-# the dispatch wall repo-wide for ~15 minutes on 2026-08-15, and again in the
-# probe that investigated it, neither time on purpose
+# ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
+#
+# One reader for "is there a run to protect": lib/run.sh's `active_run`, true while the
+# newest plan carrying `## SDLC State` has `current:` below 9, or 9 with no `delivered:`
+# Step-9 line, and no `abandoned:` frontmatter line. This was a hand-copied block —
+# resolve_docs_root, has_sdlc_state, a newest-.md walk and a `current:` parse — restated
+# in five hooks and held together by an agreement suite that could only prove they had
+# not drifted YET. One of them drifting was not hypothetical: a marker-less .md winning
+# the newest race disarmed this very wall repo-wide for ~15 minutes on 2026-08-15
 # (record/session-20260815-landing-supervision/t8-forensic-read.md).
-# Fence-aware, because the read it feeds is: a schema example is documentation,
-# not a run. Line endings TRANSLATED, never deleted, for the reason spelled out
-# at the `current:` read. A file that cannot be read is not a candidate — falling
-# back to an older real plan keeps the walls armed, the safe direction. Skipping
-# EVERY candidate lands where finding none lands: no wave, pass, silent.
-has_sdlc_state() {
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { found = 1 }
-    END { exit !found }'
-}
-
-DOCS_ROOT=$(resolve_docs_root "$REPO")
-PLAN=""
-for d in "$DOCS_ROOT/plans" "$DOCS_ROOT/incidents"; do
-  [ -d "$d" ] || continue
-  while IFS= read -r -d '' f; do
-    if [ -z "$PLAN" ] || [ "$f" -nt "$PLAN" ]; then
-      has_sdlc_state "$f" || continue
-      PLAN="$f"
-    fi
-  done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
-done
+#
+# PLAN is kept because the refusals below quote it.
+PLAN=$(active_run "$REPO") || exit 0
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || exit 0
-
-# The run-state marker, read exactly as the evidence gate and stop-guard read
-# it: the fence-aware ## SDLC State section, then its `current:` value.
-# Line endings TRANSLATED, never deleted — see .claude/rules/hook-authoring.md
-# (a CR-only file deleted by `tr -d '\r'` collapses to one line and every
-# line-anchored match misses, going silently inert with a wave live).
-CURRENT=$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$PLAN" 2>/dev/null | awk '
-  /^[[:space:]]*```/ { fence = !fence; next }
-  fence { next }
-  /^## SDLC State/ { flag=1; next }
-  /^## / { flag=0 }
-  flag' \
-  | grep -E '^[[:space:]]*current[[:space:]]*:' \
-  | head -1 \
-  | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-  | tr -d '[:space:]')
-echo "$CURRENT" | grep -qE '^([0-9]+[ab]?|T[0-9]+)$' || exit 0
 
 # ---------- a wave is active: this IS a decision ----------
 
 # Payload missing its session key: the §7 fail-direction table names this
 # exact ambiguity and pins the start-side direction as open, silent — we
 # cannot prove whose dispatch this is, so we cannot refuse it as foreign.
-PAYLOAD_SID=$(_jq '.session_id')
+PAYLOAD_SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || PAYLOAD_SID=""
 [ -n "$PAYLOAD_SID" ] || exit 0
 
 # ...and the same direction for a session key that is not SHAPED like one. Every
@@ -478,7 +529,10 @@ fi
 if [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
   echo "dispatch-preflight: no Patrol interval could be obtained (${POKER_SCRIPT} is not readable on either lane); the staleness half of the arming wall did not run, though the never-armed half did." >&2
 else
-  PATROL_MAX_AGE=$(( PATROL_INTERVAL * 2 ))
+  # THE MULTIPLIER IS THE LIBRARY'S (spec AC-22). "Twice the interval" was a literal 2
+  # written out at three sites; lib/patrol.sh exports PATROL_STALE_MULTIPLIER and its own
+  # reader uses it, so a change to the judgment moves all of them at once.
+  PATROL_MAX_AGE=$(( PATROL_INTERVAL * PATROL_STALE_MULTIPLIER ))
   case "$PATROL_INTERVAL_SOURCE" in
     default) PATROL_INTERVAL_WORDS="the poker's ${PATROL_INTERVAL}s default interval (this project's configured value could not be read)" ;;
     *)       PATROL_INTERVAL_WORDS="the ${PATROL_INTERVAL}s poker-interval this project configures" ;;

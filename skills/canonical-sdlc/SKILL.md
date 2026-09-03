@@ -1,66 +1,6 @@
 ---
 name: canonical-sdlc
 description: Use when starting a large-scale development effort (new feature, architectural change, multi-day project) or when picking the skill for the current SDLC step. Routes to the canonical skill per step and gates every commit on the current step's evidence.
-hooks:
-  PreToolUse:
-    - matcher: "Bash"
-      hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh
-          timeout: 10
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh
-          timeout: 10
-    - matcher: "TaskStop"
-      hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh
-          timeout: 10
-    - matcher: "Agent"
-      hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh
-          timeout: 10
-    - matcher: "Write"
-      hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh
-          timeout: 10
-    - matcher: "Edit"
-      hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh
-          timeout: 10
-  PostToolUse:
-    - matcher: "Bash"
-      hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
-          timeout: 10
-    - matcher: "Agent"
-      hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
-          timeout: 10
-  SubagentStart:
-    - hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh
-          timeout: 10
-  Stop:
-    - hooks:
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh
-          timeout: 10
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh
-          timeout: 10
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh
-          timeout: 10
-        - type: command
-          command: ${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh
-          timeout: 10
 layer: governance
 needs:
   - agent-skills:context-engineering
@@ -535,7 +475,7 @@ Roles, by `subagent_type`: `researcher` and `test-runner` for exploration and me
 
 **Liveness fields.** The progress-artifact path carries a `cadence` alongside it — how often the task is expected to write there, extending the 15-minute rule by one number: "too quiet" means quieter than the author's own declaration, not a fixed clock. A subprocess claim — a process pattern plus its output file — is conditional-required: declared only when the task backgrounds a long-running command. While the claimed process exists, quiescence is irrelevant; its absence with no deliverable is what the landing verdict reads as a broken contract. No shape label rides beside these fields — shape emerges from which are present: no progress path is short/turns, progress-plus-cadence is long in-agent, adding a subprocess claim is a delegated command.
 
-**The Patrol.** One clock per run, and only one. **Arm it at engagement** — the Step-0 confirmation of a new run, or the resume ritual of an open one, in every session of that run — as a session-scoped cron job (`CronCreate`) at the interval `bash <plugin-root>/hooks/session-poker.sh interval` reports (config knob `poker-interval:` in `.bionic/config.yaml`, default 30m), and stamp it alive in the same breath with `bash <plugin-root>/hooks/session-poker.sh arm`. Arming is not conditional on having dispatched anything: the Patrol carries the run, not the roster, and a session that waits for a subagent to exist has no pulse for every stretch it works alone. Never an OS cron, never a resident process — the job is session-scoped, dies with the session, and the roster on disk is the record that survives it; its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm. **At run close, stop it on both sides: `CronDelete` the job AND `bash <plugin-root>/hooks/session-poker.sh disarm`, which removes this session's stamp.** The stamp is the only record on disk that a Patrol is running here, so a `CronDelete` without the `disarm` leaves a deliberate stop that reads exactly like a Patrol a plugin update killed — and `hooks/patrol-revive.sh`, which cannot tell the two apart, then reports the stop you chose as a death on every remaining turn of the session. **Subagents stay timerless:** a dispatched agent arms nothing — it holds its turn and polls its own output, and the one Patrol lives in the session that dispatched it. The manual `/loop` poke ritual is retired with the old poker duty it carried: its work is the patrol prompt's now, and a second timer is a second answer to "what should I be doing right now." **A skill's hooks die with the conversation that armed them** — the main-thread dispatch wall among them — so a session continue, a `/clear`+resume or a `/reload-plugins` leaves them silently unregistered while dispatches keep launching unrostered, which is why the resume ritual re-invokes `/bionic:canonical-sdlc` before it arms anything. The 30-second proof is a throwaway dispatch carrying no deliverable: it must come back REFUSED, and a launch means the wall is gone. The tick's `wall-blind` NOTIFY — main-thread `Agent` tool_uses in the transcript against rows on the roster — is what catches the sessions nobody proved. **The resume ritual is CronList-first:** `CronList`, delete every job whose prompt begins with the patrol marker `bionic-patrol session=` (a predecessor's clock that survived the `/clear`, not the new session's own), and only then `CronCreate` the fresh one — so a resume never runs two clocks side by side the way "one clock per run" forbids. The patrol prompt carries `bionic-patrol session=<session-id[0:8]>` as its first token for exactly this: a stray job's owning session is legible straight off `CronList` output, never guessed. **The resume ritual also runs `bash <plugin-root>/hooks/session-poker.sh adopt` before its first dispatch:** what a `/clear` destroys is the completion message and the in-memory ledger, never the agents a predecessor session left running here, and `adopt` reads every open row off the other sessions' rosters with the one thing the new session cannot re-derive — the agent id, and the observe/message/stop addresses built from it. Ledger every row it prints, by agent id, into the plan's dispatch ledger; a row it reports UNADDRESSABLE is a predecessor that dispatched through a dead wall, and re-invoking the skill is what stops this session from adding another.
+**The Patrol.** One clock per run, and only one. **Arm it at engagement** — the Step-0 confirmation of a new run, or the resume ritual of an open one, in every session of that run — as a session-scoped cron job (`CronCreate`) at the interval `bash <plugin-root>/hooks/session-poker.sh interval` reports (config knob `poker-interval:` in `.bionic/config.yaml`, default 30m), and stamp it alive in the same breath with `bash <plugin-root>/hooks/session-poker.sh arm`. Arming is not conditional on having dispatched anything: the Patrol carries the run, not the roster, and a session that waits for a subagent to exist has no pulse for every stretch it works alone. Never an OS cron, never a resident process — the job is session-scoped, dies with the session, and the roster on disk is the record that survives it; its 7-day auto-expiry is the forgotten-disarm backstop, not the disarm. **At run close, stop it on both sides: `CronDelete` the job AND `bash <plugin-root>/hooks/session-poker.sh disarm`, which removes this session's stamp.** The stamp is the only record on disk that a Patrol is running here, so a `CronDelete` without the `disarm` leaves a deliberate stop that reads exactly like a Patrol a plugin update killed — and `hooks/patrol-revive.sh`, which cannot tell the two apart, then reports the stop you chose as a death on every remaining turn of the session. **Subagents stay timerless:** a dispatched agent arms nothing — it holds its turn and polls its own output, and the one Patrol lives in the session that dispatched it. The manual `/loop` poke ritual is retired with the old poker duty it carried: its work is the patrol prompt's now, and a second timer is a second answer to "what should I be doing right now." **The walls no longer die with the conversation** (bionic 1.4.0). Every hook is registered once in `hooks/hooks.json`, so a session continue, a `/clear`+resume and a `/reload-plugins` all leave them exactly where they were — the failure this ritual used to exist to repair. What scopes them instead is an on-disk fact: each hook asks whether this project has an OPEN RUN (the newest plan under the docs root with a `## SDLC State` heading, `current:` below 9 or 9 without a `delivered:` Step-9 line, and no `abandoned:` frontmatter line) and does nothing at all when it does not. So the resume ritual no longer re-invokes this skill to restore the walls; it re-invokes it to restore the PROMPT, and the walls are the run's, not the conversation's. The 30-second proof still costs nothing and still tells you the truth: a throwaway dispatch carrying no deliverable must come back REFUSED. **The resume ritual is CronList-first:** `CronList`, delete every job whose prompt begins with the patrol marker `bionic-patrol session=` (a predecessor's clock that survived the `/clear`, not the new session's own), and only then `CronCreate` the fresh one — so a resume never runs two clocks side by side the way "one clock per run" forbids. The patrol prompt carries `bionic-patrol session=<session-id[0:8]>` as its first token for exactly this: a stray job's owning session is legible straight off `CronList` output, never guessed. **The resume ritual also runs `bash <plugin-root>/hooks/session-poker.sh adopt` before its first dispatch:** what a `/clear` destroys is the completion message and the in-memory ledger, never the agents a predecessor session left running here, and `adopt` reads every open row off the other sessions' rosters with the one thing the new session cannot re-derive — the agent id, and the observe/message/stop addresses built from it. Ledger every row it prints, by agent id, into the plan's dispatch ledger; a row it reports UNADDRESSABLE is a predecessor that dispatched through a dead wall, and re-invoking the skill is what stops this session from adding another.
 
 **The arming wall.** `arm` is not bookkeeping. Every Patrol firing stamps a session-keyed file beside the roster before the poker decides anything, and during an active run `dispatch-preflight` REFUSES a dispatch whose stamp is absent (never armed) or older than twice the poker-interval (armed, then silently stopped firing) — a dispatch with no Patrol behind it is an agent nobody is waiting on. The refusal names both halves of the fix. What the stamp attests is that firings are landing; it cannot see the CLI's cron table, so a job deleted moments ago still looks alive for up to one stale window. An absent stamp is now two facts rather than one — never armed, or armed and then deliberately disarmed — and the wall says the same thing to both, which is the right thing to say: a run that stopped its own clock and then dispatches again arms first.
 
@@ -552,7 +492,7 @@ That expression is `detect_plugin_root`'s own, held byte-identical to the copy i
 
 **The patrol prompt.** The armed job carries ONE prompt, its first token `bionic-patrol session=<session-id[0:8]>` so a stray job's prompt names its own session, idempotent by construction so that firing at an awkward moment costs a no-op rather than a duplicate action, and it ends by continuing the run rather than by reporting on it. Four reads, then the work:
 
-- **Tick the poker.** `bash <plugin-root>/hooks/session-poker.sh tick` is the decision brain — the prompt gathers, the poker decides, per row. The tick stamps the Patrol alive before it decides, so a tick that finds nothing to say has still done that job. A QUIET decision is a no-op. A DISARM decision ends the Patrol, and the tick removes this session's stamp as its own last act — so `CronDelete` the job to match, and the Patrol is stopped on both sides rather than half-stopped in the direction that lies. DISARM fires only when the run has reached `current: 9` with a `delivered:` Step-9 line — an empty roster mid-run is QUIET, stamp kept, never DISARM. A `wall-blind` NOTIFY printed on the same tick OUTRANKS that DISARM line — the tick prints its blind-wall diagnosis before it reads the roster, and an empty roster is what a session whose wall died looks like, so on such a tick the stamp is deliberately KEPT and you re-invoke the skill and re-arm rather than disarming on the second line. A NOTIFY decision surfaces the named row through the non-response procedure below — the poker only decides, it never stops or messages on its own.
+- **Tick the poker.** `bash <plugin-root>/hooks/session-poker.sh tick` is the decision brain — the prompt gathers, the poker decides, per row. The tick stamps the Patrol alive before it decides, so a tick that finds nothing to say has still done that job. A QUIET decision is a no-op. A DISARM decision ends the Patrol, and the tick removes this session's stamp as its own last act — so `CronDelete` the job to match, and the Patrol is stopped on both sides rather than half-stopped in the direction that lies. DISARM fires only when the run has reached `current: 9` with a `delivered:` Step-9 line — an empty roster mid-run is QUIET, stamp kept, never DISARM. A NOTIFY decision surfaces the named row through the non-response procedure below — the poker only decides, it never stops or messages on its own.
 - **Read liveness against the contracted cadence,** never against the tick interval: a row is quiet when it is quieter than the `cadence` its own brief declared (Liveness fields, above), so a tick that finds every progress file inside its declared cadence has found nothing and says nothing.
 - **Keep the panel and the task list honest.** Both duties are TOOL-GROUNDED, never judgment-worded, and they are WALLED: `hooks/patrol-duties-gate.sh` refuses the end of a tick's turn — once — until the transcript shows both since the tick fired, naming whichever is missing.
   - *Panel refresh* = ListAgents, then TaskStop on each listed lineage whose ledger row is fact-discharged (CLOSED / MET / acked). A listed agent with NO ledger row is surfaced as a duplicate-session tell, never silently stopped.
