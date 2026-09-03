@@ -1788,6 +1788,71 @@ expect_contains "a delivered run DISARMs" "decision=DISARM" "$OUT"
 expect_absent "…and is never filled" "poker: FILL" "$OUT"
 
 # ============================================================
+section "Section 13: the absent roster splits — QUIET before the first dispatch (AC-38)"
+# ============================================================
+#
+# WHAT THIS FIXES, measured on this wave's own Patrol tick #1 (session b1a850c1,
+# 2026-09-03). "No roster" was ONE refusal covering two states that deserve opposite
+# answers. An orchestrator that had armed at engagement, was standing in the right project,
+# and had simply not dispatched anything yet got REFUSED — with a wall of candidate paths
+# describing a root that was perfectly correct. Arming precedes dispatch BY DESIGN
+# (SKILL.md §Dispatch: "arm at engagement"), so the first tick of every run reaches that
+# line, and answering it with a refusal is how a reader learns to ignore the one message
+# that also reports a genuinely mis-resolved root.
+#
+# THE SPLIT: armed here AND the walk chose a real `.bionic` -> QUIET, exit 0, stamp kept,
+# one line, no candidate walk. Anything else -> the refusal, unchanged.
+
+# ---------- 13a: armed, real .bionic, nothing dispatched -> QUIET ----------
+R13A="$(make_repo s13-armed-quiet)"
+# Deliberately NO new_roster: this IS the pre-dispatch state, and it is the only state in
+# which the roster file does not exist at all.
+poke "$R13A" arm
+poke "$R13A" tick
+expect_eq "an armed session with nothing dispatched ticks quietly (exit 0)" "0" "$RC"
+expect_contains "…and says so in one line the reader can act on" \
+  "poker: QUIET — armed, nothing dispatched yet on this session" "$OUT"
+expect_contains "…with a decision line a machine can read" "decision=QUIET" "$OUT"
+expect_absent "…and never REFUSED" "REFUSED" "$OUT"
+expect_absent "…and prints no candidate walk: the root is not in doubt" "chosen" "$OUT"
+expect_eq "…and the stamp is kept, so the first dispatch of this run is not refused" "yes" \
+  "$([ -f "$(stamp_of "$R13A")" ] && echo yes || echo no)"
+
+# ---------- 13b: the SAME repo, never armed -> the refusal survives ----------
+#
+# The paired negative, and the one that keeps 13a from being "the tick stopped refusing".
+# The arming record is written only by `arm`, and its path resolves against the same root
+# the roster's does — so a tick that resolved the wrong root finds no record there either.
+R13B="$(make_repo s13-unarmed)"
+poke "$R13B" tick
+expect_eq "an UNARMED session with no roster still REFUSES (exit 2)" "2" "$RC"
+expect_contains "…naming the arming that never happened" "the Patrol never armed here" "$OUT"
+expect_absent "…and takes no QUIET decision" "decision=QUIET" "$OUT"
+
+# The discriminator on the other side: arm the same repo and the same tick goes QUIET.
+poke "$R13B" arm
+poke "$R13B" tick
+expect_eq "…and arming that same repo flips it to QUIET (13b discriminates)" "0" "$RC"
+expect_contains "…with the armed line" "armed, nothing dispatched yet" "$OUT"
+
+# ---------- 13c: no real .bionic anywhere -> REFUSED, with the walk ----------
+#
+# The wrong-root case, which is the only thing the refusal is for now. The walk is read
+# BEFORE the stamp is written, because `write_patrol_stamp` mkdir -p's `.bionic/tmp` under
+# whatever root it resolved — a walk taken afterwards reports the directory the tick just
+# manufactured as `chosen` and tells the operator nothing.
+R13C="$TMPROOT/s13-no-bionic"
+mkdir -p "$R13C"
+( cd "$R13C" && git init -q . ) >/dev/null 2>&1
+poke "$R13C" tick
+expect_eq "a cwd with no .bionic above it REFUSES (exit 2)" "2" "$RC"
+expect_contains "…and prints the walk it took" "$R13C" "$OUT"
+R13C_LAST="$(printf '%s\n' "$OUT" | grep -F "$R13C" | tail -1)"
+expect_contains "…whose terminal line is a FALLBACK, not a chosen root" \
+  "fallback" "$R13C_LAST"
+expect_absent "…and no QUIET is taken on a root the walk never chose" "decision=QUIET" "$OUT"
+
+# ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'session-poker: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
 [ "$FAIL" -eq 0 ]

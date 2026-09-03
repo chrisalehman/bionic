@@ -1655,6 +1655,15 @@ EOF
       exit 3
     fi
 
+    # THE WALK, TAKEN BEFORE THE STAMP IS WRITTEN, and that ordering is load-bearing.
+    # `write_patrol_stamp` mkdir -p's `<resolved root>/.bionic/tmp`, so a tick that resolved
+    # the WRONG root creates a `.bionic` there as its first act — and every walk taken after
+    # that point reports the root it just manufactured as `chosen`. Read here, the walk still
+    # describes the filesystem the tick actually arrived in, which is the only version of it
+    # an operator can act on and the one AC-38's two arms are told apart by.
+    TICK_ROOT_WALK="$(project_root_candidates "$PWD")"
+    TICK_ROOT_TAG="$(printf '%s\n' "$TICK_ROOT_WALK" | tail -1 | awk -F'\t' '{ print $2 }')"
+
     # STAMP FIRST, BEFORE ANYTHING IS READ OR DECIDED. Every line below this one can end in
     # a refusal, and each of those refusals is a HEALTHY Patrol firing into a state it has
     # nothing to say about. What the stamp attests is the firing, so it is taken here — the
@@ -1776,10 +1785,39 @@ EOF
     # Patrol"). Checked only on the TOTAL=0 path: any row at all on the roster proves the
     # file exists, so OPEN=0-with-TOTAL>0 can never be the absent-file case.
     if [ "$TOTAL" -eq 0 ] && [ ! -e "$ROSTER_FILE" ]; then
+      # AC-38 (fold-in ratified 2026-09-03): THE ARM SPLITS. "No roster" was one refusal
+      # covering two states that deserve opposite answers, and the wrong one was observed on
+      # this wave's own Patrol tick #1 — an orchestrator that had armed at engagement, was
+      # standing in the right project, and had simply not dispatched anything yet got
+      # REFUSED with a wall of candidate paths describing a root that was perfectly correct.
+      # Arming precedes dispatch by design (SKILL.md §Dispatch: "arm at engagement"), so the
+      # first tick of every run reaches this line, and answering it with a refusal teaches
+      # the reader to ignore the one message that also reports a mis-resolved root.
+      #
+      # THE TWO STATES, and the fact that tells them apart:
+      #   armed here, and the walk CHOSE a real `.bionic`  -> QUIET. The Patrol is doing its
+      #     job; there is simply nothing on the roster yet. Exit 0, stamp kept (it was
+      #     written above), one line, and no candidate walk — the root is not in doubt.
+      #   anything else                                     -> the refusal below, unchanged.
+      #
+      # THE ARMING RECORD IS THE LOAD-BEARING HALF. It is written only by `arm`, and its
+      # path is resolved against the SAME root the roster's is, so a tick that resolved the
+      # wrong root finds no arming record there either and refuses — which is exactly the
+      # failure the refusal exists to report. The root tag is the second guard, and it is
+      # read off the walk taken ABOVE the stamp write for the reason given there.
+      TICK_ARMED="$(patrol_armed_file "$SESSION_ID")" || TICK_ARMED=""
+      if [ -n "$TICK_ARMED" ] && [ -f "$TICK_ARMED" ] && [ ! -L "$TICK_ARMED" ] \
+         && [ "$TICK_ROOT_TAG" = "chosen" ]; then
+        printf '%s|at=%s|session=%s|decision=QUIET|total=%s|open=%s\n' \
+          "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
+        say "QUIET — armed, nothing dispatched yet on this session"
+        exit 0
+      fi
       die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
-      die "An absent roster usually means the wrong project root was resolved, or nothing has"
-      die "been dispatched yet on this session — either way, nothing was read to decide DISARM"
-      die "from, and DISARM ends the Patrol for the rest of this session."
+      die "An armed session with nothing dispatched yet is QUIET, and was answered above — so"
+      die "reaching this line means the Patrol never armed here, or the wrong project root was"
+      die "resolved. Either way nothing was read to decide DISARM from, and DISARM ends the"
+      die "Patrol for the rest of this session."
       # THE WALK, SHOWN (2.4, AC-13). The sentence above names the likely cause and then
       # leaves the reader with the one question they cannot answer from a message: WHICH
       # ancestor was taken, and what was passed over to get there. That answer is a property
@@ -1789,7 +1827,7 @@ EOF
       # `.bionic` nested under a project, a symlinked one, a `.bionic` that only exists
       # inside $HOME: each shows up as its own line with its own tag.
       die "The root came from this walk over the ancestors of $PWD (path, then verdict):"
-      project_root_candidates "$PWD" | while IFS= read -r ROOT_CAND; do
+      printf '%s\n' "$TICK_ROOT_WALK" | while IFS= read -r ROOT_CAND; do
         die "  $ROOT_CAND"
       done
       exit 2
