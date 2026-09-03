@@ -145,7 +145,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh patrol.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh patrol.sh resources.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -278,6 +278,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/session.sh"
 . "$BIONIC_LIB/run.sh"
 . "$BIONIC_LIB/patrol.sh"
+. "$BIONIC_LIB/resources.sh"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="30m"
@@ -305,6 +306,22 @@ PATROL_STAMP_SUFFIX=".state"
 # untouched.
 PATROL_ARMED_SCHEMA="patrol-armed/v1"
 PATROL_ARMED_SUFFIX=".armed"
+
+# THE HOLD COUNTER — the third sibling of the stamp, and the ONLY state the scheduler keeps
+# across ticks. NARROW fires on a hold that SURVIVES a tick (AC-30), which is a fact about
+# two firings and therefore cannot be read off either one of them alone.
+#
+# IT IS NOT IN THE PLAN, and that is a boundary rather than a convenience. The plan header's
+# `parallel-budget:` is written by Step 0 and by the orchestrator; a tick that edited it
+# would make the ceiling a function of live readings, which is the exact drift
+# lib/resources.sh was written to remove ("THE BUDGET IS A CEILING, NOT A CONTROLLER"). The
+# tick reads pressure to THROTTLE, never to re-derive the budget — so what it carries is a
+# count of consecutive holds in its own session-scoped file, and the NARROW it prints is a
+# RECOMMENDATION the orchestrator acts on by writing the plan.
+#
+# Session-scoped like the stamp it sits beside: a hold counted in one session says nothing
+# about another, and it dies with the stamp at DISARM.
+PATROL_HOLDS_SUFFIX=".holds"
 
 # `adopt`'s own schema, and the two numbers its report tail is cut with. The floor is what
 # separates a REPORT from the one-line sign-offs that usually follow it in an agent's
@@ -511,6 +528,41 @@ patrol_armed_file() {  # <session-id> -> absolute path, or empty
   printf '%s%s' "$f" "$PATROL_ARMED_SUFFIX"
 }
 
+# The hold counter's path — the stamp's, plus one suffix, same construction and the same
+# reason as the arming record above.
+patrol_holds_file() {  # <session-id> -> absolute path, or empty
+  local f
+  f="$(patrol_stamp_file "$1")" || return 1
+  [ -n "$f" ] || return 1
+  printf '%s%s' "$f" "$PATROL_HOLDS_SUFFIX"
+}
+
+# read_holds / write_holds — the consecutive-hold count, as a bare integer.
+#
+# UNREADABLE READS ZERO, and that is the safe direction here: NARROW is an ADVISORY line,
+# so a lost count costs one tick's recommendation, where a fabricated count would tell an
+# orchestrator to halve a width the machine never asked it to halve.
+read_holds() {  # <session-id> -> integer on stdout (0 when absent or unreadable)
+  local f v
+  f="$(patrol_holds_file "$1")" || { printf '0'; return 0; }
+  [ -n "$f" ] && [ -f "$f" ] && [ ! -L "$f" ] || { printf '0'; return 0; }
+  v="$(head -1 "$f" 2>/dev/null | tr -dc '0-9')"
+  case "${v:-}" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$v" ;; esac
+}
+
+write_holds() {  # <session-id> <count> -> 0 written, 1 not. Never fatal to a tick.
+  local sid="$1" n="$2" f d
+  f="$(patrol_holds_file "$sid")" || return 1
+  [ -n "$f" ] || return 1
+  d="${f%/*}"
+  tmp_dir_ok "$d" || return 1
+  mkdir -p "$d" 2>/dev/null || return 1
+  [ -L "$f" ] && return 1
+  printf '%s\n' "$n" > "$f" 2>/dev/null || return 1
+  chmod 600 "$f" 2>/dev/null
+  return 0
+}
+
 # WRITTEN BY `arm` AND BY NOTHING ELSE. Its content is for a human reading .bionic/tmp; the
 # fact the tick reads is its mtime. A failure here is NOT fatal to arming: the stamp is what
 # the arming wall reads, and a session armed without a marker simply never auto-DISARMs —
@@ -572,6 +624,8 @@ remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 c
   # it, so a survivor claims nothing — where a surviving STAMP claims a live clock, which
   # is why that one decides the return code.
   a="$(patrol_armed_file "$sid")" || a=""
+  if [ -n "$a" ] && [ ! -L "$a" ] && [ -e "$a" ]; then rm -f "$a" 2>/dev/null; fi
+  a="$(patrol_holds_file "$sid")" || a=""
   if [ -n "$a" ] && [ ! -L "$a" ] && [ -e "$a" ]; then rm -f "$a" 2>/dev/null; fi
   [ -L "$f" ] && return 0
   [ -e "$f" ] || return 0
@@ -853,6 +907,182 @@ run_state() {  # <project root> <arming-record path, may be empty> -> "delivered
     return 0
   fi
   printf 'delivered|%s is at current: 9 and its Step 9 line records delivered:' "$plan"
+}
+
+# ---------------------------------------------------------------- the scheduler
+#
+# FILL / HOLD / NARROW / EMERGENCY (spec AC-29, AC-30, AC-31; design-ledger S7).
+#
+# THE PROBLEM. A wave's width was a number in a brief, and a ceiling nobody reaches is a
+# wave running one writer at a time by accident: this repo's own 1.4.0 wave dispatched six
+# trees against a budget of twenty-two and then went quiet for a batch at a time. Nothing
+# on the machine was watching for the gap, because the only thing that fires on its own is
+# the Patrol tick — and the tick had no opinion about width.
+#
+# THE FOUR DECISIONS, and the ONE rule that orders them. Pressure is read FIRST, every tick,
+# before a single fill is considered: filling a machine that is already starving is the one
+# mistake that costs work rather than time (lib/resources.sh, "MEMORY IS HARD, COMPUTE IS
+# SOFT" — the measured failure is a kernel SIGKILL mid-suite).
+#
+#   EMERGENCY  free memory under the kill floor -> name the youngest suite-running writer
+#              for the orchestrator to stop through the stopping standard. Nothing is
+#              filled, and the tick does not stop anything itself.
+#   HOLD       free memory or load past the warning line -> no fills this tick, with the
+#              measurement printed beside the verdict (a HOLD with no number is
+#              indistinguishable from a bug).
+#   NARROW     a hold that SURVIVES a tick -> recommend halving the test-runner width
+#              carried in new briefs.
+#   FILL       otherwise -> the ready slices, up to the gap between the budget's `writers`
+#              and the rows already open on this session's roster.
+#
+# THE TICK READS PRESSURE TO THROTTLE, NEVER TO RE-DERIVE THE BUDGET. `resources_budget` is
+# a pure function of machine FACTS and is written once, into the plan header, by Step 0. A
+# tick that lowered `writers` because the machine was briefly busy would make the ceiling a
+# function of the weather, which is the drift lib/resources.sh exists to remove. Everything
+# here either reads that string or refuses to act; nothing here writes it.
+#
+# EVERY DECISION IS ADVISORY. The tick prints; the orchestrator dispatches, stops and edits
+# the plan. hooks/patrol-duties-gate.sh is what makes a printed FILL binding — the tick's
+# turn may not end until the named dispatches or an explicit decline appear — and that is a
+# wall on the ORCHESTRATOR, not an action taken here. A hook that dispatched agents or
+# stopped them would be a hook taking irreversible action off a reading it cannot confirm.
+
+# One field out of a space-separated `key=value` record (resources_probe's shape, and the
+# plan header's `parallel-budget:` value), BY KEY and never by position.
+space_field() {  # <record> <key> -> value on stdout, empty if absent
+  printf '%s' "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -1
+}
+
+# The plan header's `parallel-budget:` value, or empty.
+#
+# THE LEADING FRONTMATTER BLOCK ONLY, byte-for-byte the read hooks/dispatch-preflight.sh's
+# budget arm takes: a `parallel-budget:` inside the plan BODY is prose — this wave's own
+# plan quotes the header in a slice description — and a reader that took a quotation for
+# configuration would fill against a number nobody set.
+plan_budget_line() {  # <plan> -> the value after `parallel-budget:`, or empty
+  awk '
+    NR == 1 && $0 != "---" { exit }
+    NR == 1 { next }
+    $0 == "---" { exit }
+    /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
+  ' "$1" 2>/dev/null
+}
+
+# One integer field out of that value. NOT AN INTEGER IS ABSENT: an arm this cannot measure
+# goes unmeasured and says so, exactly as the dispatch wall's own budget_field does.
+budget_int() {  # <budget line> <key> -> a non-negative integer, or empty
+  local v
+  v="$(space_field "$1" "$2")"
+  case "${v:-}" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
+}
+
+# THE SLICE TABLE, read out of the active plan.
+#
+# WHAT IT LOOKS FOR is a table HEADER row naming `id`, `deps` and `status`, not a heading
+# and not a column count. The plan's `## Slices (machine-readable …)` section is where it
+# lives today and its shipped shape is four columns — `| id | deps | complexity | status |`
+# — but a reader keyed on position breaks the first time a column is inserted, and a reader
+# keyed on the heading breaks on a plan that words it differently. Column INDICES are taken
+# from the header row by name, so both stay ordinary edits.
+#
+# FENCE-AWARE, for the reason every other plan read in this file is: a table inside a ```
+# example is documentation about the schema, and filling a wave off a documented example is
+# the newest-race incident in a new costume.
+#
+# Emits one `id<TAB>deps<TAB>status` record per row, in TABLE ORDER, which is the order the
+# FILL line prints in — the plan's own dependency ordering, maintained by the orchestrator,
+# rather than an ordering this hook invents.
+slice_table() {  # <plan> -> id<TAB>deps<TAB>status, one per row
+  normalize_newlines "$1" 2>/dev/null | awk '
+    function trim(v) { sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); return v }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    !intable {
+      if ($0 !~ /^[[:space:]]*\|/) next
+      n = split($0, c, "|")
+      idc = 0; depc = 0; stc = 0
+      for (i = 1; i <= n; i++) {
+        t = trim(c[i])
+        if (t == "id") idc = i
+        else if (t == "deps") depc = i
+        else if (t == "status") stc = i
+      }
+      if (idc && depc && stc) intable = 1
+      next
+    }
+    {
+      if ($0 !~ /^[[:space:]]*\|/) exit
+      n = split($0, c, "|")
+      id = trim(c[idc])
+      # The |---|---| separator row, and any row whose id cell is empty or punctuation.
+      if (id == "" || id ~ /^[-: ]+$/) next
+      printf "%s\t%s\t%s\n", id, trim(c[depc]), trim(c[stc])
+    }'
+}
+
+# READY = a `pending` row whose EVERY dependency is `landed`.
+#
+# A dependency cell is a comma-separated list of ids, or an em dash / hyphen / empty cell
+# for "none". An id this table does not carry is NOT ready: an unresolvable dependency is a
+# dependency this reader cannot confirm landed, and the fill direction here is the cautious
+# one — a slice held back costs a batch, a slice dispatched onto an unlanded dependency
+# costs the writer's whole run.
+slice_ready() {  # <table> -> the ready ids, one per line, in table order
+  # ONE PASS TO REMEMBER, one to decide, over the same stream: a dependency may be named
+  # before or after the row that depends on it, so nothing can be answered until the whole
+  # table has been read. Table order is preserved by indexing on NR.
+  printf '%s\n' "$1" | awk -F'\t' '
+    $1 == "" { next }
+    { n = n + 1; id[n] = $1; dep[n] = $2; st[$1] = $3 }
+    END {
+      for (i = 1; i <= n; i++) {
+        if (st[id[i]] != "pending") continue
+        deps = dep[i]
+        gsub(/[[:space:]]/, "", deps)
+        # A cell with no alphanumeric character names no dependency: the empty cell, the
+        # hyphen and the em dash the plan actually uses are all spelled this one way, and
+        # matching the dash byte-for-byte would put a Unicode literal in a bash 3.2 awk
+        # program for no gain.
+        if (deps !~ /[A-Za-z0-9]/) { print id[i]; continue }
+        m = split(deps, d, ",")
+        ready = 1
+        for (j = 1; j <= m; j++) {
+          if (d[j] == "" || d[j] !~ /[A-Za-z0-9]/) continue
+          if (st[d[j]] != "landed") { ready = 0; break }
+        }
+        if (ready) print id[i]
+      }
+    }'
+}
+
+# THE YOUNGEST SUITE-RUNNING WRITER on this session's roster, as the address the stopping
+# standard takes — `<name>@session-<id8>`, the one spelling both stop gates accept
+# (POKER/8). Empty when there is none.
+#
+# "SUITE-RUNNING" IS READ OFF THE LEDGER, never off the process table (WALLS/3): an open row
+# whose `claims=` field is non-empty declared a subprocess claim and therefore spends a
+# suite. A `pgrep` per row would be truer to the word "running" and would put a process
+# spawn per row inside a Patrol tick.
+#
+# "OPEN" is the roster's own predicate — a `status=intended` row whose name carries no
+# `landing-swept/v1` marker — the same one lib/patrol.sh's `patrol_roster_state` uses.
+#
+# YOUNGEST, because the rung is a kill floor and the youngest writer has the least work to
+# lose. `launched_at` is an ISO-8601 Z stamp, so a lexical max IS a chronological max.
+youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
+  local roster="$1" sid="$2" swept name
+  [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
+  swept="$(grep '^landing-swept/v1|' "$roster" 2>/dev/null || true)"
+  name="$(grep '^roster-state/v1|status=intended|' "$roster" 2>/dev/null \
+    | while IFS= read -r RL; do
+        [ -n "$(line_field "$RL" claims)" ] || continue
+        RN="$(line_field "$RL" name)"
+        [ -n "$RN" ] || continue
+        case "$swept" in *"|name=${RN}|"*) continue ;; esac
+        printf '%s\t%s\n' "$(line_field "$RL" launched_at)" "$RN"
+      done | sort | tail -1 | cut -f2-)"
+  [ -n "$name" ] || return 0
+  printf '%s@session-%s' "$(clean "$name")" "$(printf '%s' "$sid" | cut -c1-8)"
 }
 
 # ---------------------------------------------------------------- adoption
@@ -1604,6 +1834,114 @@ EOF
       remove_patrol_stamp "$SESSION_ID" \
         || die "WARN — the Patrol stamp could not be removed; the death notice may fire on later turns."
       exit 0
+    fi
+
+    # ─────────────────────────────────────── the scheduler: pressure, then fills
+    #
+    # PLACED HERE, after DISARM and before NOTIFY/QUIET, and the placement is the contract.
+    # DISARM exits above: a run that has DELIVERED gets no fills, because there is nothing
+    # left to fill. Everything else — a live wave, a lull between batches, a roster with an
+    # overdue row — gets both the pressure reading and the fill decision, and then the
+    # decision line it was already going to get. A tick that filled instead of notifying
+    # would trade a report the operator asked for against one they did not.
+    #
+    # PRESSURE FIRST, ALWAYS. See the block comment above `space_field` for why the order is
+    # not negotiable and why nothing here re-derives the budget.
+    SCHED_CORES="$(space_field "$(resources_probe)" cores)"
+    case "${SCHED_CORES:-}" in ''|*[!0-9]*) SCHED_CORES=1 ;; esac
+    [ "$SCHED_CORES" -ge 1 ] || SCHED_CORES=1
+    SCHED_PRESSURE="$(resources_pressure "$SCHED_CORES" 2>/dev/null)" || SCHED_PRESSURE=""
+    SCHED_STATE="$(space_field "$SCHED_PRESSURE" state)"
+    SCHED_FREE="$(space_field "$SCHED_PRESSURE" free_mb)"
+    SCHED_LOAD="$(space_field "$SCHED_PRESSURE" load_1m)"
+    # A pressure read that will not parse is not an emergency and not a hold: it is a
+    # reading this tick does not have, and the fill decision proceeds on the budget alone.
+    # Refusing to fill on an unreadable probe would let one broken `vm_stat` stall a wave.
+    case "${SCHED_STATE:-}" in ok|hold|emergency) : ;; *) SCHED_STATE=ok ;; esac
+
+    # The plan and its budget, read once. Both may be absent — a project with no plan, or a
+    # plan written before Step 0 ever probed — and absence is INERT: the tick says why it is
+    # not filling and fills nothing, exactly as the dispatch wall's budget arm goes inert on
+    # the same missing line. A budget is a ceiling a run opts into.
+    SCHED_PLAN="$(active_plan "$REPO_REAL")" || SCHED_PLAN=""
+    SCHED_BUDGET=""
+    [ -n "$SCHED_PLAN" ] && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
+    SCHED_WRITERS="$(budget_int "$SCHED_BUDGET" writers)"
+    SCHED_JOBS="$(budget_int "$SCHED_BUDGET" test_jobs)"
+
+    if [ "$SCHED_STATE" = emergency ]; then
+      # THE KILL FLOOR. The tick NAMES the writer and stops nothing itself: stopping a
+      # writer destroys work, and an irreversible act taken by a hook off a single reading
+      # is the one thing this design refuses (design-ledger S7). The orchestrator executes
+      # it through the stopping standard, which is why the line carries the address that
+      # standard takes rather than a name.
+      SCHED_TARGET="$(youngest_suite_writer "$ROSTER_FILE" "$SESSION_ID")"
+      if [ -n "$SCHED_TARGET" ]; then
+        say "EMERGENCY free_mb=${SCHED_FREE} — stop youngest suite-running writer ${SCHED_TARGET}"
+      else
+        say "EMERGENCY free_mb=${SCHED_FREE} — no suite-running writer on this roster to stop; the pressure is not this session's to relieve"
+      fi
+    fi
+
+    if [ "$SCHED_STATE" = hold ] || [ "$SCHED_STATE" = emergency ]; then
+      SCHED_HOLDS=$(( $(read_holds "$SESSION_ID") + 1 ))
+      write_holds "$SESSION_ID" "$SCHED_HOLDS" \
+        || die "WARN — the hold counter could not be written; NARROW will not fire on the next tick."
+      [ "$SCHED_STATE" = hold ] && \
+        say "HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD} — no fills"
+      # NARROW ON THE SECOND CONSECUTIVE HOLD, and on every one after it. One hold is a
+      # burst — a suite starting, a build finishing — and halving the fleet's width off a
+      # burst is a wave that runs at half speed for the rest of the day. A hold that
+      # survives a whole interval is sustained, and that is what the counter measures.
+      #
+      # THE HALVING IS A RECOMMENDATION, not an edit. `test_jobs` lives in the plan header
+      # and the orchestrator owns that line; a tick that wrote it would be a controller.
+      # Floored at 1 because a width of zero is not a width.
+      if [ "$SCHED_HOLDS" -ge 2 ] && [ -n "$SCHED_JOBS" ]; then
+        SCHED_HALF=$(( SCHED_JOBS / 2 ))
+        [ "$SCHED_HALF" -ge 1 ] || SCHED_HALF=1
+        say "NARROW test_jobs=${SCHED_HALF}"
+      fi
+    else
+      # OK CLEARS THE COUNTER, so "two consecutive" means consecutive. A counter that only
+      # ever rose would make NARROW inevitable on a long enough wave.
+      [ "$(read_holds "$SESSION_ID")" = "0" ] || write_holds "$SESSION_ID" 0 || :
+
+      # ── FILL. gap = writers − RUNNING, ready = pending slices whose deps all landed.
+      #
+      # RUNNING IS `open` (WALLS/2): the rows already counted above, on THIS session's
+      # roster — a `status=intended` row with no `landing-swept/v1` marker and no ack. It is
+      # the loop's own count rather than a second walk, because two definitions of "running"
+      # in one file is the drift the count exists to prevent.
+      if [ -z "$SCHED_WRITERS" ]; then
+        if [ -z "$SCHED_PLAN" ]; then
+          say "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a slice table from."
+        else
+          say "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
+        fi
+      else
+        SCHED_GAP=$(( SCHED_WRITERS - OPEN ))
+        [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
+        if [ "$SCHED_GAP" -eq 0 ]; then
+          say "no FILL — writers=${SCHED_WRITERS} and ${OPEN} open row(s): the budget is full."
+        else
+          SCHED_READY="$(slice_ready "$(slice_table "$SCHED_PLAN")")"
+          SCHED_IDS=""; SCHED_N=0
+          while IFS= read -r SLICE_ID; do
+            [ -n "$SLICE_ID" ] || continue
+            [ "$SCHED_N" -lt "$SCHED_GAP" ] || break
+            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(clean "$SLICE_ID")"
+            SCHED_N=$((SCHED_N + 1))
+          done <<EOF
+$SCHED_READY
+EOF
+          if [ "$SCHED_N" -gt 0 ]; then
+            say "FILL ${SCHED_IDS}"
+          else
+            say "no FILL — writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending slice has all its dependencies landed."
+          fi
+        fi
+      fi
     fi
 
     if [ -n "$NOTIFY_ROWS" ]; then
