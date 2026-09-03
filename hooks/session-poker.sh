@@ -1618,6 +1618,18 @@ EOF
       die "An absent roster usually means the wrong project root was resolved, or nothing has"
       die "been dispatched yet on this session — either way, nothing was read to decide DISARM"
       die "from, and DISARM ends the Patrol for the rest of this session."
+      # THE WALK, SHOWN (2.4, AC-13). The sentence above names the likely cause and then
+      # leaves the reader with the one question they cannot answer from a message: WHICH
+      # ancestor was taken, and what was passed over to get there. That answer is a property
+      # of the filesystem above their cwd, so it is printed rather than described —
+      # `project_root_candidates` is the same walk `project_root` just took, one line per
+      # ancestor with the reason it was rejected, and the chosen one marked. A phantom
+      # `.bionic` nested under a project, a symlinked one, a `.bionic` that only exists
+      # inside $HOME: each shows up as its own line with its own tag.
+      die "The root came from this walk over the ancestors of $PWD (path, then verdict):"
+      project_root_candidates "$PWD" | while IFS= read -r ROOT_CAND; do
+        die "  $ROOT_CAND"
+      done
       exit 2
     fi
 
