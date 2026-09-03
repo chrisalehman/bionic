@@ -1150,6 +1150,11 @@ if [ -d "$AC14_REPO/.bionic/docs" ]; then
   ac14_stray=$(find "$AC14_REPO/.bionic/docs" -type f -name 'context.md' \
                ! -path "$AC14_REPO/.bionic/docs/record/context.md" 2>/dev/null)
 fi
+if [ -z "$ac14_stray" ]; then
+  PASS=$((PASS + 1)); printf '  PASS  ac14_a no stray context.md under .bionic/docs (outside the exempt record)\n'
+else
+  FAIL=$((FAIL + 1)); printf '  FAIL  ac14_a stray context.md found outside the exempt record:\n%s\n' "$ac14_stray"
+fi
 
 echo "AC-14 b: no shipped surface instructs anything to write a session-state context.md"
 # Shipped surfaces = what claude-bootstrap.sh installs into ~/.claude/ (hooks,
