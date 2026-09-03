@@ -567,6 +567,35 @@ poke "$R5B" tick
 expect_eq "an ABSENT roster REFUSES rather than silently DISARMing (exit 2)" "2" "$RC"
 expect_absent "…never prints a decision line for a roster it never found" "decision=" "$OUT"
 
+# ---------- the refusal SHOWS ITS WALK (2.4, AC-13) ----------
+#
+# The refusal above has always said "an absent roster usually means the wrong project root
+# was resolved" and then left the reader to re-derive the walk by hand — which is the one
+# question they cannot answer from the message, because the answer is a property of the
+# filesystem above their cwd. `project_root_candidates` is that walk, one line per ancestor
+# with the reason it was passed over, and the chosen one marked.
+#
+# THE TOPOLOGY THAT MAKES IT MATTER is a git repo nested inside a plain workspace that holds
+# the `.bionic` tree — the shape the eight old resolvers got wrong by asking git first and
+# so answering the nested repo, which owns no roster and never will. Here the walk starts at
+# the cwd, passes the repo as a candidate, and chooses the workspace above it: two lines,
+# and the operator can see which one their roster should be under.
+R5C="$TMPROOT/s5-candidates"
+mkdir -p "$R5C/.bionic/tmp"
+R5CN="$R5C/nested-repo"
+mkdir -p "$R5CN"
+( cd "$R5CN" && git init -q . ) >/dev/null 2>&1
+poke "$R5CN" tick
+expect_eq "the nested-repo topology still REFUSES on an absent roster (exit 2)" "2" "$RC"
+expect_contains "…and prints the walk it took" "$R5CN" "$OUT"
+R5C_CHOSEN="$(printf '%s\n' "$OUT" | grep -F "chosen")"
+expect_contains "…marking the workspace that holds the .bionic tree as the chosen root" \
+  "$R5C	chosen" "$R5C_CHOSEN"
+R5C_NESTED="$(printf '%s\n' "$OUT" | grep -F "$R5CN")"
+expect_contains "…while the nested repo appears as an ancestor that was considered" \
+  "candidate" "$R5C_NESTED"
+expect_absent "…and the walk is not mistaken for a decision" "decision=" "$OUT"
+
 
 # ============================================================
 section "Section 6: the Patrol stamp — the arm verb, and stamp-before-decide on every tick"
