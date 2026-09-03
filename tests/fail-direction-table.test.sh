@@ -128,6 +128,12 @@ make_world() {
                    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_psid" \
                    > "$repo/.bionic/tmp/patrol-$_psid.state"
                  chmod 600 "$repo/.bionic/tmp/patrol-$_psid.state"
+                 # A LIVE WAVE HAS AN ENGAGED SESSION (task-engaged-session). Both gates
+                 # ask `engaged_session` before anything else, so an unmarked world would
+                 # rewrite this whole table to one answer — open, silent — exactly the way
+                 # an unarmed Patrol would have. The unengaged direction is a row of its
+                 # own below, never the table's default.
+                 : > "$repo/.bionic/tmp/engaged-$_psid.state"
                done ;;
     nocurrent) write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: pending" ;;
     no)        mkdir -p "$repo/.bionic/docs" ;;
@@ -357,6 +363,10 @@ current: 4
 
 - Step 4: slices in flight
 A2PLAN
+# Its own project root, so it needs its own engagement marker — `make_world` planted none
+# here (task-engaged-session). NO Patrol stamp, deliberately: this row's refusal IS the
+# arming wall, and a stamp would make it pass.
+: > "$A2_ROOT/.bionic/tmp/engaged-$SID_A.state"
 A2_SCRATCH="$A2_ROOT/scratch/deep"
 mkdir -p "$A2_SCRATCH"
 
@@ -390,6 +400,7 @@ drive() {  # <condition>
     stop:plan-names-no-step) p=$(payload TaskStop "$SID_A" "$N_TR" "$N_REPO" worker) ;;
     stop:no-session-key-inert) p=$(payload TaskStop - "$I_TR" "$I_REPO" worker) ;;
     stop:no-session-key)    p=$(payload TaskStop - "$A_TR" "$A_REPO" worker) ;;
+    stop:no-session-key-anywhere) p=$(payload TaskStop - "$A_TR" "$A_REPO" worker) ;;
     stop:empty-target)      p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" "") ;;
     stop:no-transcript)     p=$(payload TaskStop "$SID_A" - "$A_REPO" worker) ;;
     stop:unresolvable)      p=$(payload TaskStop "$SID_A" "$A_TR" "$A_REPO" ghost) ;;
@@ -414,6 +425,16 @@ drive() {  # <condition>
   # DIVERGENCE, not a session, and the `no-session-key` rows would stop testing what they
   # name. A payload with no key exports an empty one, which is what keeps those rows honest.
   local _sid; _sid=$(printf '%s' "$p" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  # THE ONE ROW WHERE THE TWO CHANNELS DIVERGE ON PURPOSE (task-engaged-session). §7's
+  # stop=closed claim is about an identity the gate cannot read out of its OWN PAYLOAD
+  # while it is inside an engaged session. Engagement is keyed to the library's session id,
+  # where the environment is primary — so this row carries the key in the environment and
+  # withholds it from the payload, which is the shape the claim is actually about. The row
+  # below it, `no-session-key-anywhere`, drives the case where neither channel has one:
+  # engagement is then unprovable and the switch is open by absence, by design.
+  case "$1" in
+    stop:no-session-key) _sid="$SID_A" ;;
+  esac
   case "$1" in
     start:*) DRV_OUT=$(printf '%s' "$p" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$START_GATE" 2>"$SANDBOX/.err") ;;
     stop:*)  DRV_OUT=$(printf '%s' "$p" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$STOP_GATE"  2>"$SANDBOX/.err") ;;
@@ -455,7 +476,8 @@ stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, si
 stop|no-plan|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|plan-names-no-step|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|no-session-key-inert|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
-stop|no-session-key|2|loud|Payload missing its session key — stop: CLOSED
+stop|no-session-key|2|loud|Payload missing its session key, environment carries it — stop: CLOSED
+stop|no-session-key-anywhere|0|silent|No session key on EITHER channel — engagement unprovable, so the switch is open by absence (task-engaged-session)
 stop|empty-target|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|no-transcript|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|unresolvable|0|passthrough|Stop gate — T4 carve: an unresolved target wearing no agent-address shape passes through, OPEN

@@ -337,10 +337,27 @@ SID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || SID=""
 [ -n "$SID" ] || exit 0
 case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 
+# ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
+#
+# task-engaged-session: bionic's walls are the RUN's, not the repo's, and a run is entered
+# by invoking canonical-sdlc. A session that never did is a bystander here and must not see
+# a refusal, an advisory, or a state write from this hook. `engaged_session` (lib/run.sh) is
+# true only for a REGULAR file at `.bionic/tmp/engaged-<sid>.state`; every unreadable state —
+# absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
+# direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
+# (1.3.2 close-out ruling — the arming partition IS the consent boundary).
+engaged_session "$REPO" "$SID" || exit 0
+
 # ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
 #
 # The first of this hook's two scope conditions (see SCOPE in the header). No open run,
 # no Patrol to be dead, and nothing for a monitor to say.
+#
+# PLAN-BOUND AND KEPT (task-engaged-session). This hook has exactly one arm and its whole
+# subject is a Patrol serving a run: the duties a revived Patrol would resume — FILL, the
+# task-list refresh, the roster read — are the run's, so a session engaged with no plan yet
+# has nothing for this monitor to be about. Engagement decides WHETHER; here the plan still
+# decides WHAT, and there is only the one thing.
 active_run "$REPO" >/dev/null || exit 0
 
 # ---------- was a Patrol ever armed on this session ----------

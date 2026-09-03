@@ -253,23 +253,12 @@ REPO=$(project_root "$CWD")
 [ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
 
 
-# ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
+# ---------- THE SESSION KEY ----------
 #
-# One reader for "is there a run to protect": lib/run.sh's `active_run`, true while the
-# newest plan carrying `## SDLC State` has `current:` below 9, or 9 with no `delivered:`
-# Step-9 line, and no `abandoned:` frontmatter line. This was a hand-copied block —
-# resolve_docs_root, has_sdlc_state, a newest-.md walk and a `current:` parse — restated
-# in five hooks and held together by an agreement suite that could only prove they had
-# not drifted YET. One of them drifting was not hypothetical: a marker-less .md winning
-# the newest race disarmed this very wall repo-wide for ~15 minutes on 2026-08-15
-# (record/session-20260815-landing-supervision/t8-forensic-read.md).
+# ABOVE THE RUN PREDICATE SINCE task-engaged-session, because the engagement switch below
+# is keyed to it and that switch is now this gate's FIRST scoping decision. Nothing about
+# the derivation moved with it.
 #
-# PLAN is kept because the refusals below quote it.
-PLAN=$(active_run "$REPO") || exit 0
-[ -n "$PLAN" ] && [ -f "$PLAN" ] || exit 0
-
-# ---------- a wave is active: this IS a decision ----------
-
 # Payload missing its session key: the §7 fail-direction table names this
 # exact ambiguity and pins the start-side direction as open, silent — we
 # cannot prove whose dispatch this is, so we cannot refuse it as foreign.
@@ -285,6 +274,39 @@ PAYLOAD_SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || PAYLOAD_SID=""
 # belt every other payload value on these paths already wears via sanitize(),
 # taken in the one direction §7 assigns an unreadable session key — pass, silent.
 case "$PAYLOAD_SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+
+# ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
+#
+# task-engaged-session: bionic's walls are the RUN's, not the repo's, and a run is entered
+# by invoking canonical-sdlc. A session that never did is a bystander here and must not see
+# a refusal, an advisory, or a state write from this hook. `engaged_session` (lib/run.sh) is
+# true only for a REGULAR file at `.bionic/tmp/engaged-<sid>.state`; every unreadable state —
+# absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
+# direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
+# (1.3.2 close-out ruling — the arming partition IS the consent boundary).
+engaged_session "$REPO" "$PAYLOAD_SID" || exit 0
+
+# ---------- THE RUN PREDICATE (AC-7, AC-8) — now DATA, not scope ----------
+#
+# One reader for "is there a run to protect": lib/run.sh's `active_run`, true while the
+# newest plan carrying `## SDLC State` has `current:` below 9, or 9 with no `delivered:`
+# Step-9 line, and no `abandoned:` frontmatter line. This was a hand-copied block —
+# resolve_docs_root, has_sdlc_state, a newest-.md walk and a `current:` parse — restated
+# in five hooks and held together by an agreement suite that could only prove they had
+# not drifted YET. One of them drifting was not hypothetical: a marker-less .md winning
+# the newest race disarmed this very wall repo-wide for ~15 minutes on 2026-08-15
+# (record/session-20260815-landing-supervision/t8-forensic-read.md).
+#
+# IT NO LONGER DECIDES WHETHER THIS GATE ACTS — engagement does (above). An engaged
+# session's Step 0 precedes its plan, and its walls are owed from the first dispatch, so an
+# empty PLAN skips only the arms that MEASURE against a plan. Exactly one does: the budget
+# wall, which reads `parallel-budget:` out of this file. Every other wall here — the
+# attestation, the Patrol checkpoint, the lease, the ambiguity/containment/absent-deliverable
+# trio, the roster — is plan-free and runs unchanged (AC-23).
+PLAN=$(active_run "$REPO") || PLAN=""
+[ -n "$PLAN" ] && [ -f "$PLAN" ] || PLAN=""
+
+# ---------- this session is engaged: this IS a decision ----------
 
 deny() {  # <reason line>...
   echo "BLOCKED: this subagent start needs a working environment — a wave is active." >&2
@@ -686,12 +708,21 @@ fi
 # THE LEADING FRONTMATTER BLOCK ONLY. A `parallel-budget:` inside the plan body is prose
 # — this wave's own plan quotes the header in a slice description — and a wall that read
 # it would take a quotation for configuration.
-PARALLEL_BUDGET=$(awk '
-  NR == 1 && $0 != "---" { exit }
-  NR == 1 { next }
-  $0 == "---" { exit }
-  /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
-' "$PLAN" 2>/dev/null) || PARALLEL_BUDGET=""
+#
+# THE ONE PLAN-BOUND ARM OF THIS GATE (task-engaged-session, AC-23). The ceiling is a
+# property of the run, declared in its plan, so an engaged session with no plan on disk
+# yet has no ceiling to be over and this wall stays silent — while every plan-free wall
+# above and below it fires. The read is guarded rather than left to awk's empty-filename
+# error, so the skip is a decision this file states, not a side effect of a failed open.
+PARALLEL_BUDGET=""
+if [ -n "$PLAN" ]; then
+  PARALLEL_BUDGET=$(awk '
+    NR == 1 && $0 != "---" { exit }
+    NR == 1 { next }
+    $0 == "---" { exit }
+    /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
+  ' "$PLAN" 2>/dev/null) || PARALLEL_BUDGET=""
+fi
 
 if [ -n "$PARALLEL_BUDGET" ]; then
   # One field out of the one string, by key. A field that is absent or not an integer
