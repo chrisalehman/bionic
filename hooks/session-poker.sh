@@ -145,7 +145,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh patrol.sh resources.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh patrol.sh resources.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -279,6 +279,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/run.sh"
 . "$BIONIC_LIB/patrol.sh"
 . "$BIONIC_LIB/resources.sh"
+. "$BIONIC_LIB/worktree.sh"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="30m"
@@ -1908,6 +1909,52 @@ EOF
       exit 0
     fi
 
+    # ─────────────────────────────────────── the lease overrun (spec AC-28)
+    #
+    # A spawned worktree is a leased slot bound to the ledger row that dispatched its
+    # writer, and the lease ends when that row is fact-discharged (design ledger C1). A tree
+    # still standing after that is a slot counted against the worktree budget that nobody
+    # holds — and nothing else in the fleet walks `.worktrees` against the roster, so it
+    # stays invisible until someone runs out of budget.
+    #
+    # READ OFF THE VERDICT THIS TICK ALREADY TOOK. `$VERDICT_OUT` is one
+    # `session-sweeper.sh verdict` over the whole roster, and it is where the discharge
+    # vocabulary lives: `state=MET`/`WAIVED`, and the `acked=` the sweeper folds in from its
+    # own ledger. A roster read on its own would miss every acked row. The library takes a
+    # FILE, so the lines this tick is already holding are spilled to a temporary one and
+    # removed again — never into `.bionic/tmp`, which is state the operator reads.
+    #
+    # THE CONVENTION AND THE PREDICATE ARE THE LIBRARY'S, not a second copy here:
+    # `.worktrees/<dir>` belongs to the row named `W-<DIR>` uppercased, and "discharged"
+    # means acked or MET/CLOSED/WAIVED. Three callers share that definition
+    # (payload/scripts/lib/worktree.sh's header names them); this is the third.
+    #
+    # PLACED AFTER DISARM, BEFORE THE SCHEDULER. A run that has DELIVERED exits above, and
+    # its standing trees are the integration step's assertion to make rather than a Patrol
+    # line nobody is left to read.
+    #
+    # IT REMOVES NOTHING. `spawn-worktree.sh land` is the act and the orchestrator runs it;
+    # the tick says the tree is standing and stops there.
+    LEASE_ROWS=""; LEASE_DETAIL=""
+    LEASE_FILE="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-verdict.XXXXXX" 2>/dev/null)" || LEASE_FILE=""
+    if [ -n "$LEASE_FILE" ]; then
+      printf '%s\n' "$VERDICT_OUT" > "$LEASE_FILE" 2>/dev/null
+      while IFS= read -r LEASE_LINE; do
+        [ -n "$LEASE_LINE" ] || continue
+        LEASE_PATH="$(printf '%s' "$LEASE_LINE" | cut -f1)"
+        LEASE_ROW="$(printf '%s' "$LEASE_LINE" | cut -f2)"
+        [ -n "$LEASE_PATH" ] && [ -n "$LEASE_ROW" ] || continue
+        say "NOTIFY lease-overrun $LEASE_PATH row=$LEASE_ROW"
+        LEASE_ROWS="${LEASE_ROWS}${LEASE_ROWS:+,}$(clean "$LEASE_ROW")"
+        LEASE_DETAIL="${LEASE_DETAIL}${LEASE_DETAIL:+; }$(clean "$LEASE_ROW"): lease-overrun, $(clean "$LEASE_PATH") still stands after the row was discharged"
+      done <<EOF
+$(worktree_lease_overruns "$REPO_REAL" "$LEASE_FILE")
+EOF
+      rm -f "$LEASE_FILE" 2>/dev/null || :
+    else
+      die "WARN — no temporary file for the lease walk; standing worktrees were not checked."
+    fi
+
     # ─────────────────────────────────────── the scheduler: pressure, then fills
     #
     # PLACED HERE, after DISARM and before NOTIFY/QUIET, and the placement is the contract.
@@ -2016,11 +2063,19 @@ EOF
       fi
     fi
 
-    if [ -n "$NOTIFY_ROWS" ]; then
+    # ONE NOTIFY BAND, TWO CONTRIBUTORS. An overdue row and a standing lease are both
+    # "something needs surfacing", and the exit-1 band is what the Patrol's prompt reads;
+    # a lease overrun that decided QUIET would print a line and then tell the reader
+    # nothing was wrong. The rows and the details are concatenated rather than given a
+    # field of their own, so no consumer of this schema has to learn a new key to see them.
+    if [ -n "$NOTIFY_ROWS" ] || [ -n "$LEASE_ROWS" ]; then
       printf '%s|at=%s|session=%s|decision=NOTIFY|total=%s|open=%s|rows=%s|detail=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN" \
-        "$NOTIFY_ROWS" "$(clean "$NOTIFY_DETAIL")"
-      say "NOTIFY — past declared duration: $NOTIFY_DETAIL"
+        "${NOTIFY_ROWS}${NOTIFY_ROWS:+${LEASE_ROWS:+,}}${LEASE_ROWS}" \
+        "$(clean "${NOTIFY_DETAIL}${NOTIFY_DETAIL:+${LEASE_DETAIL:+; }}${LEASE_DETAIL}")"
+      # The lease lines were said where they were found; only the duration half needs a
+      # sentence here, and a tick that has only the other half must not print an empty one.
+      [ -n "$NOTIFY_DETAIL" ] && say "NOTIFY — past declared duration: $NOTIFY_DETAIL"
       exit 1
     fi
 
