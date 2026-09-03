@@ -85,7 +85,7 @@ section "A — constants carry their datum (AC-24: 'every constant carries its d
 
 expect_eq   "MEM_RESERVE_GB"    "2"    "${MEM_RESERVE_GB:-unset}"
 expect_eq   "MEM_PER_SUITE_GB"  "1.2"  "${MEM_PER_SUITE_GB:-unset}"
-expect_eq   "CORES_PER_SUITE"   "1"    "${CORES_PER_SUITE:-unset}"
+expect_eq   "CORES_PER_SUITE"   "1.61" "${CORES_PER_SUITE:-unset}"
 expect_eq   "DISK_PER_TREE_GB"  "0.5"  "${DISK_PER_TREE_GB:-unset}"
 expect_eq   "WRITERS_EXTRA"     "4"    "${WRITERS_EXTRA:-unset}"
 expect_eq   "TEST_JOBS_MIN"     "4"    "${TEST_JOBS_MIN:-unset}"
@@ -110,9 +110,12 @@ for _c in MEM_RESERVE_GB MEM_PER_SUITE_GB CORES_PER_SUITE DISK_PER_TREE_GB WRITE
   fi
 done
 
-# AC-24 names this literal string, and AC-32 replaces this exact line at the wave head.
-expect_true "CORES_PER_SUITE is marked 'measured: pending — AC-32'" \
-  grep -q 'measured: pending — AC-32' "$LIB"
+# AC-32 replaced AC-24's 'measured: pending' line at the wave head with the measurement
+# and its provenance: date, job count, the sha it was taken at, and the record path.
+expect_true "CORES_PER_SUITE carries its AC-32 measurement (date, jobs, sha, record)" \
+  grep -q 'measured 2026-09-03 at BIONIC_TEST_JOBS=18' "$LIB"
+expect_true "CORES_PER_SUITE names the full-suite record it was measured from" \
+  grep -q 'record/wave-1.4.0/step5-full-suite-report.md' "$LIB"
 # The 8 GB kernel-SIGKILL measurement is the memory term's whole justification.
 expect_true "MEM_PER_SUITE_GB cites the tests/run.sh:63-68 kill datum" \
   grep -q 'tests/run.sh:63-68' "$LIB"
@@ -128,14 +131,14 @@ section "B — resources_budget: memory hard, compute soft, disk for trees (AC-2
 #   writers   = clamp(suites + 4, 2, 32)
 
 B1="$(resources_budget 8 8 100)"
-expect_eq "8c/8GB/100GB → suites 5 (memory binds: floor(6/1.2))" "5" "$(field "$B1" suites)"
-expect_eq "8c/8GB/100GB → writers 9"                             "9" "$(field "$B1" writers)"
+expect_eq "8c/8GB/100GB → suites 4 (compute binds: floor(8/1.61)=4 < floor(6/1.2)=5)" "4" "$(field "$B1" suites)"
+expect_eq "8c/8GB/100GB → writers 8"                             "8" "$(field "$B1" writers)"
 expect_eq "8c/8GB/100GB → test_jobs 8"                           "8" "$(field "$B1" test_jobs)"
 expect_eq "8c/8GB/100GB → worktrees 32 (disk term clamped)"      "32" "$(field "$B1" worktrees)"
 
 B2="$(resources_budget 32 128 1000)"
-expect_eq "32c/128GB/1000GB → suites 32 (compute binds)" "32" "$(field "$B2" suites)"
-expect_eq "32c/128GB/1000GB → writers 32 (clamped)"      "32" "$(field "$B2" writers)"
+expect_eq "32c/128GB/1000GB → suites 19 (compute binds: floor(32/1.61))" "19" "$(field "$B2" suites)"
+expect_eq "32c/128GB/1000GB → writers 23 (19 + 4)"       "23" "$(field "$B2" writers)"
 expect_eq "32c/128GB/1000GB → test_jobs 24 (clamped)"    "24" "$(field "$B2" test_jobs)"
 
 B3="$(resources_budget 2 4 10)"
@@ -144,11 +147,12 @@ expect_eq "2c/4GB/10GB → writers 5"                             "5"  "$(field 
 expect_eq "2c/4GB/10GB → test_jobs 4 (clamped up)"              "4"  "$(field "$B3" test_jobs)"
 expect_eq "2c/4GB/10GB → worktrees 20 (disk binds)"             "20" "$(field "$B3" worktrees)"
 
-# fixture-fidelity: THIS machine, measured 2026-09-02. Its answer is the budget the wave
-# is already running under, hand-derived; the library reproducing it retires the hand step.
+# fixture-fidelity: THIS machine, probed 2026-09-02; CORES_PER_SUITE measured on it 2026-09-03
+# (AC-32). Its answer is narrower than the hand-derived budget the wave ran under (suites 18,
+# writers 22) — the measurement moved the compute term from `cores` to floor(18/1.61) = 11.
 B4="$(resources_budget 18 128 1700)"
-expect_eq "18c/128GB/1700GB (this machine) → suites 18"    "18" "$(field "$B4" suites)"
-expect_eq "18c/128GB/1700GB (this machine) → writers 22"   "22" "$(field "$B4" writers)"
+expect_eq "18c/128GB/1700GB (this machine) → suites 11 (floor(18/1.61))" "11" "$(field "$B4" suites)"
+expect_eq "18c/128GB/1700GB (this machine) → writers 15"   "15" "$(field "$B4" writers)"
 expect_eq "18c/128GB/1700GB (this machine) → worktrees 32" "32" "$(field "$B4" worktrees)"
 expect_eq "18c/128GB/1700GB (this machine) → test_jobs 18" "18" "$(field "$B4" test_jobs)"
 
