@@ -27,6 +27,10 @@
 # Registered once in hooks/hooks.json, always on. It is not scoped by whether a skill
 # is armed — an on-disk fact is: the hook loads the library, asks `active_run` whether
 # this project has an open run, and exits silently when it does not.
+#
+# WHEN THE LIBRARY DOES NOT LOAD, that order inverts: the scope question has to be
+# answered BEFORE the fail-closed refusal, and answered without the library. See the
+# ancestor walk just below the loader block.
 
 set -u
 
@@ -180,7 +184,64 @@ BIONIC_LOADER_REFUSE
   exit 2
 }
 # --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "canonical-sdlc-evidence-gate" "$COMMAND"; fi
+
+# ARMED BEFORE REFUSING. This wall is fail-CLOSED, and the decision is taken HERE — at
+# load time, hundreds of lines before `active_run` gets asked whether this project has
+# a run, because `active_run` lives in the library that just failed to load. Left at
+# that, a half-updated plugin refuses every Bash command in EVERY project on the
+# machine, `ls` included, in repositories that carry no `.bionic` and never had a run.
+# That is not the wall being cautious; it is the wall firing outside its own reach.
+# [WALL: tests/hook-adoption.test.sh §6b]
+#
+# So the cheapest fact that needs no library is read first: COULD a run exist here? A
+# run lives in a `.bionic` directory at or above the payload cwd. None → exit 0 in
+# silence. One → the fail-closed path below, repair allowlist and all, unchanged.
+#
+# The walk is lib/root.sh's rules 3 and 4 restated by hand, which is the one place in
+# this repo that duplication is the design: the file that owns those rules is exactly
+# what cannot be sourced. A `.bionic` SYMLINK is not a `.bionic` (rule 3); `$HOME` and
+# above are never inspected (rule 4). Canonicalisation is `cd … && pwd -P` — stock
+# macOS ships no `realpath`. The walk is bounded three ways: `/`, `$HOME`, 64 levels.
+#
+# hooks/protect-main.sh deliberately carries NO such pre-check. It guards a push in
+# every project on the machine, wave or no wave, so its reach IS every project.
+_bionic_gate_abs() {  # <path> -> absolute, symlink-resolved, nearest existing ancestor
+  _bga_p="${1:-}"
+  [ -n "$_bga_p" ] || _bga_p="$PWD"
+  case "$_bga_p" in /*) ;; *) _bga_p="$PWD/$_bga_p" ;; esac
+  while [ -n "$_bga_p" ] && [ "$_bga_p" != "/" ] && [ ! -d "$_bga_p" ]; do
+    _bga_p="$(dirname "$_bga_p")"
+  done
+  ( cd "$_bga_p" 2>/dev/null && pwd -P ) || printf '%s\n' "$_bga_p"
+}
+_bionic_gate_run_possible() {  # <cwd> -> 0 when a real `.bionic` sits at or above it
+  _bgr_p="$(_bionic_gate_abs "${1:-}")"
+  _bgr_home=""
+  [ -n "${HOME:-}" ] && _bgr_home="$(_bionic_gate_abs "$HOME")"
+  _bgr_n=0
+  while [ -n "$_bgr_p" ] && [ "$_bgr_p" != "/" ] && [ "$_bgr_n" -lt 64 ]; do
+    if [ -n "$_bgr_home" ]; then
+      # $HOME itself, or any ancestor of it. Walking further up only finds more
+      # ancestors of $HOME, so stopping here is the whole of rule 4.
+      [ "$_bgr_p" = "$_bgr_home" ] && return 1
+      case "$_bgr_home/" in "$_bgr_p/"*) return 1 ;; esac
+    fi
+    if [ ! -L "$_bgr_p/.bionic" ] && [ -d "$_bgr_p/.bionic" ]; then return 0; fi
+    _bgr_p="$(dirname "$_bgr_p")"
+    _bgr_n=$((_bgr_n + 1))
+  done
+  return 1
+}
+if [ -n "$BIONIC_LIB_MISSING" ]; then
+  # The same cwd this hook resolves its project from below (CLAUDE_PROJECT_DIR, then
+  # the payload, then $PWD), read here without the library because the answer decides
+  # whether the library's absence is this gate's business at all.
+  _BG_CWD="${CLAUDE_PROJECT_DIR:-}"
+  [ -n "$_BG_CWD" ] || _BG_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+  [ -n "$_BG_CWD" ] || _BG_CWD="$PWD"
+  _bionic_gate_run_possible "$_BG_CWD" || exit 0
+  loader_fail_closed "canonical-sdlc-evidence-gate" "$COMMAND"
+fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/git-argv.sh"
 # shellcheck source=/dev/null
