@@ -118,14 +118,16 @@ active_run() {
     return 1
   fi
 
-  # Flush-left current: line — the only place this key appears in the plan's own convention
-  # (frontmatter never carries it; it lives in ## SDLC State).
+  # The `current:` line. LEADING WHITESPACE IS TOLERATED and the read is fence-aware, for
+  # the same reason the marker test above is: this is the exact tolerance the five
+  # hand-copies in hooks/ carried, and a predicate that is stricter than the walls it
+  # replaces goes silently inert on a plan those walls read perfectly well.
   local current
   current=$(_run_lines "$plan" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
-    { print }' | grep -m1 '^current:' \
-    | sed -E 's/^current:[[:space:]]*//' \
+    { print }' | grep -m1 -E '^[[:space:]]*current[[:space:]]*:' \
+    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
     | tr -d '[:space:]')
   [ -n "$current" ] || return 1
 
@@ -135,15 +137,25 @@ active_run() {
     return 0
   fi
 
+  # THE STEP NUMBER MAY CARRY A SUB-STEP LETTER — `8a`, `8b` — which the lifecycle uses
+  # and every wall this replaces accepted (`^[0-9]+[ab]?$`). A predicate that read `8b`
+  # as malformed would call a live run closed for the whole of step 8, which is where
+  # implementation happens. The letter is stripped; what decides is the number.
+  local step="${current%[ab]}"
+  case "$step" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+
   # Steps 0-8: open by definition.
-  if printf '%s' "$current" | grep -qE '^[0-8]$'; then
+  if [ "$((10#$step))" -lt 9 ]; then
     printf '%s\n' "$plan"
     return 0
   fi
 
-  # Step 9: open unless a Step-9 evidence line records delivery.
-  if [ "$current" = "9" ]; then
-    if _run_lines "$plan" | grep -qE '^- Step 9:.*delivered:'; then
+  # Step 9: open unless a Step-9 evidence line records delivery. Anything past 9 is not a
+  # step this lifecycle has, and an unrecognised state is not an open run.
+  if [ "$((10#$step))" -eq 9 ]; then
+    if _run_lines "$plan" | grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:'; then
       return 1
     fi
     printf '%s\n' "$plan"
