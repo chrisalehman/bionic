@@ -148,8 +148,15 @@ run_doctor() {  # <claude-home> [shell-rc]
 # The version row alone — the one line in BIONIC NATIVE beginning with one of
 # the three status glyphs followed by "version". Read to EOF (no `grep -q`
 # early close, per assert-helper-race.test.sh).
+#
+# `[^ ]+`, NOT `.`. The status glyph is three bytes and one column, and awk's `.`
+# matches a CHARACTER only under a UTF-8 locale. Under `LC_ALL=C` — the locale
+# scripts/lib/width.sh exists for — `/^  . version /` matched nothing, this
+# helper returned the empty string, and thirteen cases below failed as "no match
+# … in: ''" against a doctor that was printing the row correctly. Same defect
+# and same repair as tests/doctor-walls.test.sh's `walls_rows`.
 version_row() {  # <full-output>
-  printf '%s\n' "$1" | awk '/^  . version /'
+  printf '%s\n' "$1" | awk '/^  [^ ]+ version /'
 }
 
 echo "=== Section 1: git feed, installed == marketplace latest ==="
