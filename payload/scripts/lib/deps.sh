@@ -141,6 +141,24 @@ _dep_ccstatusline_config_dir() {
 # PATH beside the one every writer path already needs.
 _dep_files_match() { [ -f "${1:-}" ] && [ -f "${2:-}" ] && diff -q "$1" "$2" >/dev/null 2>&1; }
 
+# THE LAYOUT MATCH IGNORES THE SCHEMA VERSION (Chris 2026-09-03: "Why the hell
+# is ccstatusline not installing?? I just installed it!"). ccstatusline
+# migrates its own settings file in place the first time it renders — 2.2.29
+# rewrote bionic's version-3 layout as version 4 and changed nothing else — so
+# a byte-identical probe flipped to "not installed" the moment the status line
+# drew, and every later setup re-copied the shipped file only for ccstatusline
+# to migrate it again. Same layout at a different schema version IS installed.
+# Falls back to the byte comparison only where jq is missing, which the
+# statusline probe already reports as unknown before it gets here.
+_dep_ccstatusline_layout_match() {  # <shipped> <installed>
+  local a b
+  [ -f "${1:-}" ] && [ -f "${2:-}" ] || return 1
+  _dep_have jq || { diff -q "$1" "$2" >/dev/null 2>&1; return; }
+  a="$(jq -S 'del(.version)' "$1" 2>/dev/null)" || return 1
+  b="$(jq -S 'del(.version)' "$2" 2>/dev/null)" || return 1
+  [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
 # The catalogs this machine has registered. Read-only here, and read for exactly
 # one question: does an install from a foreign catalog need a `marketplace add`
 # in front of it (see `install_plugin_native`).
@@ -853,7 +871,7 @@ _dep_check_statusline() {
     cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
     case "$cmd" in *ccstatusline*) cmd_ok=yes ;; esac
   fi
-  _dep_files_match "$(_dep_ccstatusline_config_source)" "$(_dep_ccstatusline_config_target)" \
+  _dep_ccstatusline_layout_match "$(_dep_ccstatusline_config_source)" "$(_dep_ccstatusline_config_target)" \
     && cfg_ok=yes
 
   if [ "$cmd_ok" = "yes" ] && [ "$cfg_ok" = "yes" ]; then
@@ -1223,7 +1241,7 @@ _dep_install_statusline() {
     echo "$(_dep_indent)shipped ccstatusline layout missing at ${source} — the statusline command is set but its config was not copied." >&2
     return 1
   fi
-  _dep_files_match "$source" "$target" && return 0
+  _dep_ccstatusline_layout_match "$source" "$target" && return 0
   mkdir -p "$(_dep_ccstatusline_config_dir)" && cp "$source" "$target"
 }
 
@@ -1249,7 +1267,7 @@ install_dep() {  # <name>
     local cfg_source cfg_target cfg_note=""
     cfg_source="$(_dep_ccstatusline_config_source)"
     cfg_target="$(_dep_ccstatusline_config_target)"
-    if [ -f "$cfg_target" ] && ! _dep_files_match "$cfg_source" "$cfg_target"; then
+    if [ -f "$cfg_target" ] && ! _dep_ccstatusline_layout_match "$cfg_source" "$cfg_target"; then
       cfg_note=" (a config file already there differs from the shipped layout and would be overwritten)"
     fi
     plan="record 'npx $(_dep_locator_target "$(dep_field "$name" source_url)")' as the statusline in $(_dep_settings_file), and copy ${cfg_source} to ${cfg_target}${cfg_note}"

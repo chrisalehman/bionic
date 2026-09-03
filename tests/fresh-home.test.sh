@@ -1188,6 +1188,36 @@ expect_match "VENV: a uv.lock that changed since sync reads present=stale, not a
 
 
 # ---------------------------------------------------------------------------
+# Group 4c — ccstatusline migrated its own layout file; doctor and setup must
+# both still read that as installed (Chris 2026-09-03). ccstatusline rewrites
+# ~/.config/ccstatusline/settings.json in place on first render, bumping the
+# schema `version` and nothing else. Before this fix the byte-identical probe
+# reported the row absent and the next setup --all re-copied the shipped file
+# — a loop the status line's own migration re-entered every session.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 4c: a ccstatusline-migrated layout still reads as installed ==="
+
+CCS_MIGRATED="$TMP/ccs-migrated.json"
+jq '.version += 1' "$CCS_CONFIG" > "$CCS_MIGRATED" && cp "$CCS_MIGRATED" "$CCS_CONFIG"
+expect_true "4c precondition: the migrated layout differs from the shipped one byte-for-byte" \
+  test "$(cmp -s "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"; echo $?)" != 0
+
+DOC1C="$TMP/doctor-after-migration.txt"
+run_payload "$DOCTOR_SH" < /dev/null > "$DOC1C" 2>&1
+expect_eq "4c doctor: ccstatusline row still reports present=yes after ccstatusline bumped the schema version" \
+  "yes" "$(dep_present "$DOC1C" ccstatusline)"
+
+SETUP_OUT_C="$TMP/setup-after-migration.txt"
+printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT_C" 2>&1
+expect_true "4c setup --all: leaves the migrated layout alone instead of re-copying the shipped file" \
+  cmp -s "$CCS_MIGRATED" "$CCS_CONFIG"
+expect_no_match "4c setup --all: does not offer to install ccstatusline again" \
+  '*install ccstatusline*' "$(cat "$SETUP_OUT_C")"
+
+
+# ---------------------------------------------------------------------------
 # Group 5 — remove --all undoes the manifest (AC-10, the second half).
 # ---------------------------------------------------------------------------
 
