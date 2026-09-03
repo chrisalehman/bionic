@@ -863,26 +863,33 @@ expect_contains "the message address is a SendMessage by id" "SendMessage to:$ID
 # `adopt` reads off the roster is the TRANSCRIPT form (`aname-<hex>`); the stop primitive
 # takes `<name>@session-<id8>` for a teammate (capture
 # record/session-20260814-wave-detector-terminal-state/min/logs/A-p3.jsonl:9), and printing
-# the other one handed the operator a line they could not type. The session named is the
-# ADOPTING one, because the row `adopt` writes into THIS session's roster is what makes
-# hooks/stop-guard.sh accept that spelling as an identity (§8g, and tests/stop-guard.test.sh
-# §14).
-expect_contains "the stop address is the form the stop primitive accepts" \
-  "TaskStop landed-one@session-${SID:0:8}" "$OUT"
+# the other one handed the operator a line they could not type.
+#
+# THE SESSION NAMED IS THE ONE THAT LAUNCHED THE AGENT (T3 FINDING 1, live 2026-09-03). The
+# suffix used to be the ADOPTING session's, on the probe's reading that a `/clear` re-keys
+# `CLAUDE_CODE_SESSION_ID` and therefore re-keys the address with it. The live harness says
+# otherwise: driven through a real `/clear`, `TaskStop PROBE-AGENT@session-<adopting 8>`
+# came back `No task found with ID: … Running teammates: PROBE-AGENT@session-<launching 8>`.
+# The teammate table keys on the session that made the `Agent` call and the roll-over does
+# not move it, so the address is built from the row's OWN `session=` field — the session it
+# is filed under — and never from ours.
+expect_contains "the stop address names the session that LAUNCHED the agent" \
+  "TaskStop landed-one@session-${ADOPT_A:0:8}" "$OUT"
 expect_absent "…never the transcript-form id, which the platform rejects for a teammate" \
   "TaskStop $ID_LANDED" "$OUT"
-# ONE SPELLING, AND IT IS THE SURVIVING SESSION'S (1.5, AC-5). The alternate —
-# `<name>@session-<the PREDECESSOR's eight>` — was printed in a clause beside it for as long
-# as it was unknown which session's characters the platform keys on. The probe settled it:
-# a plain `/clear` RE-KEYS `CLAUDE_CODE_SESSION_ID` in the env and in every hook payload
-# (plan §Assumptions, A-probe-1), so the address that still resolves after the roll-over is
-# the one built from the key that survived it, which is this session's. Two spellings in the
-# terminal asked the operator to choose between them on evidence they do not have, at the one
-# moment they are trying to reach an agent.
-expect_absent "…and the launching session's spelling is NOT offered beside it" \
-  "landed-one@session-${ADOPT_A:0:8}" "$OUT"
-expect_absent "…nor the clause that used to offer it" \
-  "keys on the launching session" "$OUT"
+expect_absent "…and never the ADOPTING session's eight, which the harness answered nothing to" \
+  "landed-one@session-${SID:0:8}" "$OUT"
+# THE BARE NAME IS PRINTED BESIDE IT, because it is the one spelling that survived every
+# step of the live drive: `TaskStop PROBE-AGENT` reached the stop wall before the `/clear`
+# and after it, and it is what finally stopped the adopted agent. A suffixed address is a
+# guess about which session the harness keys on; the bare name is not.
+expect_contains "…with the bare name beside it, as the address that always survives" \
+  "TaskStop landed-one — the bare name" "$OUT"
+# THE MACHINE LINE CARRIES BOTH, so a reader that parses rather than greps gets the address
+# without re-deriving it from two other fields.
+expect_contains "the machine line carries the stop address" \
+  "|address=landed-one@session-${ADOPT_A:0:8}|" "$OUT"
+expect_contains "…beside the bare name it was built from" "|name=landed-one|" "$OUT"
 expect_contains "the row names the predecessor session it came from" "from=$ADOPT_A" "$OUT"
 expect_contains "the row carries its subagent_type" "bionic:senior-implementor" "$OUT"
 
@@ -943,7 +950,13 @@ expect_contains "the adopted row is status=identified — the id is known" \
 expect_contains "…filed under the ADOPTING session's key" "|session=$SID|" "$ADOPTED_ROW"
 expect_contains "…carrying the transcript-form agent id the predecessor recorded" \
   "|agent_id=$ID_LANDED|" "$ADOPTED_ROW"
-expect_contains "…and the address form the stop primitive takes, built for THIS session" \
+# THE ADDRESS FORM THE STOP PRIMITIVE TAKES, built from the session that LAUNCHED the
+# agent (T3 FINDING 1). hooks/stop-guard.sh prefers this recorded address over the one it
+# would construct, so a row carrying the adopting session's eight would put the address the
+# live harness rejects into every refusal the gate prints.
+expect_contains "…and the address form the stop primitive takes, built from the LAUNCHING session" \
+  "|teammate_id=landed-one@session-${ADOPT_A:0:8}|" "$ADOPTED_ROW"
+expect_absent "…never this session's eight, which the teammate table answers nothing to" \
   "|teammate_id=landed-one@session-${SID:0:8}|" "$ADOPTED_ROW"
 expect_contains "…the contracted deliverable, copied forward" \
   "|deliverable=$R8/.bionic/docs/record/landed-one.md|" "$ADOPTED_ROW"
@@ -1851,6 +1864,82 @@ R13C_LAST="$(printf '%s\n' "$OUT" | grep -F "$R13C" | tail -1)"
 expect_contains "…whose terminal line is a FALLBACK, not a chosen root" \
   "fallback" "$R13C_LAST"
 expect_absent "…and no QUIET is taken on a root the walk never chose" "decision=QUIET" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 14: the LEASE OVERRUN — a worktree outliving its row (AC-28) ==="
+# ============================================================
+#
+# A spawned worktree is a leased slot bound to the ledger row that dispatched its writer,
+# and the lease ends when that row is fact-discharged. A tree still standing afterwards is
+# a slot counted against the worktree budget that nobody holds — invisible, because nothing
+# in the fleet walks `.worktrees` against the roster. AC-28 gave the walk to the Patrol
+# tick; payload/scripts/lib/worktree.sh shipped `worktree_lease_overruns` and the tick never
+# called it, so the acceptance criterion was discharged on the library suite alone
+# (architecture finding, 05:50Z). This section is the call site.
+#
+# THE INPUT IS THE VERDICT READ THE TICK ALREADY TAKES — one `session-sweeper.sh verdict`
+# over the whole roster — because that is where the discharge vocabulary lives: `state=MET`,
+# `state=WAIVED`, and the `acked=` the sweeper folds in from its own ledger. The mapping to
+# a tree is by convention (`.worktrees/<dir>` belongs to row `W-<DIR>`), the library's, not
+# a second one here.
+#
+# THE TICK REMOVES NOTHING. It says the tree is standing; landing it is
+# `spawn-worktree.sh land`, which the orchestrator runs.
+
+# --- a discharged row whose tree still stands -> one NOTIFY line naming both ---
+# No delivered plan, so DISARM cannot fire and the tick reaches its decision the long way.
+R14="$(make_repo s14-overrun)"; new_roster "$R14"
+mkdir -p "$R14/.worktrees/foo" "$R14/.bionic/docs/record"
+add_row "$R14" name=W-FOO deliverable="$R14/.bionic/docs/record/w-foo.md" duration="4 hours"
+printf 'the report\n' > "$R14/.bionic/docs/record/w-foo.md"   # the fact that discharges it
+poke "$R14" tick
+# The PHYSICAL path, because the tick resolves its root with `pwd -P` and the temporary
+# directory this suite builds in is reached through a symlink on macOS.
+R14P="$(cd "$R14" && pwd -P)"
+expect_contains "a discharged row whose tree still stands is one lease-overrun line" \
+  "NOTIFY lease-overrun $R14P/.worktrees/foo row=W-FOO" "$OUT"
+expect_eq "…and the tick takes the NOTIFY band (exit 1)" "1" "$RC"
+expect_contains "…with a decision line a machine can read" "decision=NOTIFY" "$OUT"
+expect_contains "…naming the row the lease was bound to" "W-FOO" "$OUT"
+expect_absent "…never QUIET on the same tick" "decision=QUIET" "$OUT"
+expect_eq "…and the tree is not removed: the tick lands nothing" "1" \
+  "$(ls "$R14/.worktrees" | grep -c .)"
+
+# --- THE DISCRIMINATOR. A tree whose row is NOT discharged is a live lease, and silent.
+# Without this the case above passes over a tick that reports every tree it can see.
+R14B="$(make_repo s14-live-lease)"; new_roster "$R14B"
+mkdir -p "$R14B/.worktrees/bar"
+add_row "$R14B" name=W-BAR deliverable="$R14B/.bionic/docs/record/w-bar.md" duration="4 hours"
+poke "$R14B" tick
+expect_absent "an UNMET row's tree is a live lease, not an overrun" "lease-overrun" "$OUT"
+expect_eq "…and the tick is QUIET (exit 0)" "0" "$RC"
+
+# --- the other half of the discriminator: a discharged row whose tree is already gone.
+# That lease ended correctly and has nothing to report.
+R14C="$(make_repo s14-landed)"; new_roster "$R14C"
+mkdir -p "$R14C/.worktrees" "$R14C/.bionic/docs/record"
+add_row "$R14C" name=W-GONE deliverable="$R14C/.bionic/docs/record/w-gone.md" duration="4 hours"
+printf 'the report\n' > "$R14C/.bionic/docs/record/w-gone.md"
+poke "$R14C" tick
+expect_absent "a discharged row whose tree is gone reports nothing" "lease-overrun" "$OUT"
+
+# --- a project with no .worktrees at all is silent, and cheap ---
+R14D="$(make_repo s14-no-trees)"; new_roster "$R14D"
+mkdir -p "$R14D/.bionic/docs/record"
+add_row "$R14D" name=W-NONE deliverable="$R14D/.bionic/docs/record/w-none.md" duration="4 hours"
+printf 'the report\n' > "$R14D/.bionic/docs/record/w-none.md"
+poke "$R14D" tick
+expect_absent "no .worktrees directory, no walk and no line" "lease-overrun" "$OUT"
+
+# --- THE LIBRARY IS THE ONE DEFINITION. The tick declares worktree.sh and sources it;
+# a private copy of "discharged" or of the tree-to-row convention here would be the third.
+expect_eq "the poker wants worktree.sh from the library" "1" \
+  "$(grep -c '^BIONIC_LIB_WANT=".*worktree\.sh' "$POKER")"
+expect_eq "…and sources it out of BIONIC_LIB" "1" \
+  "$(grep -c '^\. "\$BIONIC_LIB/worktree\.sh"' "$POKER")"
+expect_eq "…and calls the library's walk rather than restating it" "1" \
+  "$(grep -c 'worktree_lease_overruns "' "$POKER")"
 
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'
