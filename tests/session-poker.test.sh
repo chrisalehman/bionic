@@ -32,6 +32,16 @@ POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 TMPROOT="$(mktemp -d)"
 PASS=0; FAIL=0; TOTAL=0
 
+# THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
+# library through the shared loader idiom, whose candidates (2) and (3) read the CLI's
+# plugin registry under `$BIONIC_PLUGINS_DIR` (default `$HOME/.claude/plugins`). Every
+# invocation in this suite runs the shipped file, whose sibling `scripts/lib` answers at
+# candidate (1) — so a run that ever reached the registry would be a run that failed to
+# find the library beside the script, and pointing the knob at an empty directory turns
+# that into a visible failure instead of a silent read of this machine's real install.
+export BIONIC_PLUGINS_DIR="$TMPROOT/no-plugins"
+mkdir -p "$BIONIC_PLUGINS_DIR"
+
 cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
@@ -273,7 +283,16 @@ expect_eq "…while interval, on the same repo, still reads that override (5m = 
 # The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
 # POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
 # literal 1800 would answer 1800 here.
-POKER_MUT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")/session-poker.sh"
+# THE DOCTORED COPY LIVES IN A TREE, not in a bare temp directory (bionic 1.4.0). The poker
+# loads its library through the shared idiom, whose first candidate is `<dirname $0>/../
+# scripts/lib` — the shape the installed plugin ships. A copy dropped anywhere else finds no
+# library and fails open, which would make this mutation prove nothing. The library is
+# LINKED, never duplicated: the copy under test must read the same functions the shipped
+# script does.
+POKER_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")"
+mkdir -p "$POKER_MUT_ROOT/hooks" "$POKER_MUT_ROOT/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$POKER_MUT_ROOT/scripts/lib"
+POKER_MUT="$POKER_MUT_ROOT/hooks/session-poker.sh"
 sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
 OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT" interval-default 2>&1 )"; RC=$?
 expect_eq "the verb answers from the CONSTANT, not from a literal (doctored 7m = 420s)" "420" "$OUT"
@@ -1047,6 +1066,67 @@ expect_eq "…and the verb still exits 1: the found-rows signal, not a refusal" 
 # against a verb that had simply stopped printing addresses at all.
 expect_contains "the writable-roster fixture still offers the stop address (§8a's row)" \
   "TaskStop landed-one@session-" "$ADOPT_OUT"
+
+# ---------- 8i: --report-only reads without writing (1.4, AC-4) ----------
+#
+# THE SessionStart BLOCK RUNS THIS ONE. `adopt` is the right verb for a model that has
+# decided to take the predecessor's rows over; it is the wrong verb for a hook that fires
+# on every resume, because a session that merely STARTED in this project would file rows
+# for agents it may have no business holding. `--report-only` is the same read with the
+# write removed, so the block can print the truth and leave the taking to the operator.
+#
+# The two halves are pinned separately, because either alone is passable by a verb that
+# does the wrong thing: "writes nothing" is satisfied by a verb that prints nothing, and
+# "prints the same rows" is satisfied by a verb that writes anyway.
+R8R="$(make_repo s8-report-only)"; new_roster "$R8R"
+mkdir -p "$R8R/.bionic/docs/record"
+add_row_to "$R8R" "$ADOPT_A" name=landed-three status=identified \
+  agent_id=alanded-three-88888888888888 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8R/.bionic/docs/record/landed-three.md"
+printf 'the report\n' > "$R8R/.bionic/docs/record/landed-three.md"
+
+_ro_pred_before="$(cd "$R8R/.bionic/tmp" && cksum "roster-$ADOPT_A.state")"
+_ro_own_before="$(cksum < "$(roster_of "$R8R")")"
+poke "$R8R" adopt --report-only
+RO_OUT="$OUT"; RO_RC="$RC"
+_ro_pred_after="$(cd "$R8R/.bionic/tmp" && cksum "roster-$ADOPT_A.state")"
+_ro_own_after="$(cksum < "$(roster_of "$R8R")")"
+
+expect_eq "--report-only leaves the predecessor roster byte-identical" \
+  "$_ro_pred_before" "$_ro_pred_after"
+expect_eq "--report-only leaves THIS session's roster byte-identical" \
+  "$_ro_own_before" "$_ro_own_after"
+expect_absent "…so the previewed row is NOT filed" "name=landed-three|" \
+  "$(cat "$(roster_of "$R8R")")"
+expect_contains "…and the verb says which mode it ran in" "report-only" "$RO_OUT"
+expect_eq "…while the found-rows signal is unchanged (exit 1)" "1" "$RO_RC"
+
+# THE ROWS ARE THE WRITING VERB'S ROWS. Compared with the wall-clock `at=` stamps
+# normalised — the one field that legitimately differs between two runs a second apart —
+# and with the mode line itself removed, since that line is the only thing that may differ.
+# This is what makes the SessionStart block's output trustworthy: the operator reads the
+# report, and `adopt` then files exactly what they were shown.
+ro_rows() { printf '%s\n' "$1" | grep -v 'report-only' | sed -E 's/\|at=[^|]*\|/|at=X|/'; }
+poke "$R8R" adopt
+expect_eq "--report-only's rendering is the writing verb's, line for line" \
+  "$(ro_rows "$RO_OUT")" "$(ro_rows "$OUT")"
+expect_contains "…and the writing verb DID file the row that was previewed" \
+  "|name=landed-three|" "$(cat "$(roster_of "$R8R")")"
+expect_contains "…including the stop address the preview printed" \
+  "TaskStop landed-three@session-" "$RO_OUT"
+
+# Nothing to adopt, in report-only: the same silence and the same exit 0.
+R8RB="$(make_repo s8-report-only-alone)"; new_roster "$R8RB"
+poke "$R8RB" adopt --report-only
+expect_eq "--report-only with no predecessor roster exits 0" "0" "$RC"
+expect_contains "…and says so" "nothing to adopt" "$OUT"
+
+# The flag is the ONLY second argument any verb takes; anything else is still a usage error.
+poke "$R8R" adopt --bogus
+expect_eq "an unknown flag after adopt is a usage error (exit 2)" "2" "$RC"
+poke "$R8R" tick --report-only
+expect_eq "…and --report-only is not a flag the tick takes" "2" "$RC"
 
 unset CLAUDE_CONFIG_DIR
 

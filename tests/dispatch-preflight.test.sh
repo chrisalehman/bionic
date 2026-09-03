@@ -2453,7 +2453,16 @@ expect_contains "…naming the armed-but-dead state" "stopped firing" "$GATE_ERR
 # by MUTATION: change POKER_INTERVAL_DEFAULT on a doctored copy of the poker tree and the
 # threshold the gate measures against has to move with it. A gate carrying its own 1800
 # would pass this fixture unchanged.
-S21_TREE=$(mktemp -d "${TMPDIR:-/tmp}/s21-poker-tree.XXXXXX")
+# THE DOCTORED TREE HAS THE SHAPE THE PLUGIN SHIPS — `hooks/` beside `scripts/lib`
+# (bionic 1.4.0). The poker loads its library through the shared loader idiom, whose first
+# candidate is `<dirname $0>/../scripts/lib`; a copy dropped into a bare temp directory
+# finds none and fails open, and this mutation would then measure a poker that never ran.
+# The library is LINKED rather than duplicated, so the copy under test reads exactly the
+# functions the shipped script reads.
+S21_TREE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/s21-poker-tree.XXXXXX")
+S21_TREE="$S21_TREE_ROOT/hooks"
+mkdir -p "$S21_TREE" "$S21_TREE_ROOT/scripts"
+ln -s "$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)" "$S21_TREE_ROOT/scripts/lib"
 cp "$GATE" "$S21_TREE/dispatch-preflight.sh"
 sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="10s"/' \
   "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$S21_TREE/session-poker.sh"
