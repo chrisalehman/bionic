@@ -371,6 +371,15 @@ run "width.test.sh" bash tests/width.test.sh
 # probe that ran for nobody, and the allow-list there names what this slice deliberately
 # left alone.
 run "doctor-reads.test.sh" bash tests/doctor-reads.test.sh
+# bionic 1.4.0 (wave-bionic-1.4.0-update, slice DOCTOR handoff 5.3 and 1.4; spec AC-27,
+# AC-4's doctor line, AC-8, AC-11): doctor's RESOURCES section — the live probe, and per
+# live session the budget its preflight attestation recorded (version 1 → "no budget
+# recorded", the honest reading of a fail-open resources load) — plus the three run-scoped
+# rows: the active run as `active_run` sees it, the predecessor rosters a /clear left with
+# open dispatches, and the legacy `.bionic` symlinks under .worktrees/. Hermetic: doctor is
+# run with its cwd inside a fixture project holding its own .bionic/, and the "live"
+# sessions name the suite's own pid.
+run "doctor-fleet.test.sh" bash tests/doctor-fleet.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions

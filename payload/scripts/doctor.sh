@@ -142,6 +142,18 @@ DOCTOR_LIB="$(cd "$(_doctor_self_dir)" && pwd -P)/lib"
 # actually looks, which is the whole failure the row exists to catch.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/loader.sh"
+# root.sh, run.sh and resources.sh — the library spine this page reports on
+# (bionic 1.4.0). `project_root` is the SSoT for which project this cwd is in, so
+# the run-scoped rows below read the same address space every hook does;
+# `active_run` is the predicate those hooks gate their own work behind, printed
+# here rather than re-derived; `resources_probe` is the machine the fleet is
+# about to run on. All three are pure functions of disk and none of them writes.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/root.sh"
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/run.sh"
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/resources.sh"
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
@@ -289,6 +301,25 @@ _doctor_tilde() {  # <path>
     "${HOME:-/nonexistent}"/*) printf '~%s' "${p#"${HOME}"}" ;;
     *)                         printf '%s' "$p" ;;
   esac
+}
+
+# HOW LONG AGO, IN ONE TOKEN. The mtime read is lib/patrol.sh's (`_patrol_mtime`
+# — BSD `stat -f` then GNU `stat -c`, whichever answers), so there is no second
+# spelling of a portability workaround on this page. A file whose age cannot be
+# taken says so rather than reporting zero, which would read as "touched just
+# now" — the confident wrong answer this report is not allowed to give.
+_doctor_file_age() {  # <file> -> "12m old" | "3h old" | "2d old" | "age unknown"
+  local mt now delta
+  mt="$(_patrol_mtime "${1:-}")" || mt=""
+  case "$mt" in ''|*[!0-9]*) echo "age unknown"; return 0 ;; esac
+  now="$(date -u +%s 2>/dev/null)"
+  case "$now" in ''|*[!0-9]*) echo "age unknown"; return 0 ;; esac
+  delta=$(( now - mt ))
+  [ "$delta" -ge 0 ] || delta=0
+  if   [ "$delta" -lt 3600 ];  then echo "$(( delta / 60 ))m old"
+  elif [ "$delta" -lt 86400 ]; then echo "$(( delta / 3600 ))h old"
+  else                              echo "$(( delta / 86400 ))d old"
+  fi
 }
 
 _doctor_plural() {  # <count> <singular> <plural>
@@ -1191,6 +1222,155 @@ $PATROL_LINES
 EOF
 _patrol_flush
 
+# ─── This project: the run, its predecessors, and the machine ────────────────
+#
+# THE ONE ADDRESS EVERY READER MUST AGREE ON. `project_root` (lib/root.sh) is the
+# SSoT: the nearest ancestor holding a REAL `.bionic/` directory, after a linked
+# worktree has been mapped onto its main repository. The rows below read the same
+# address space the hooks do, which is the whole point of there being one
+# function — a doctor answering about a different root than the wall it is
+# diagnosing would be worse than a doctor that stayed quiet.
+DOCTOR_ROOT="$(project_root "$PWD" 2>/dev/null)"
+[ -n "$DOCTOR_ROOT" ] || DOCTOR_ROOT="$PWD"
+
+RUN_ROWS=""
+_run_add() { RUN_ROWS="${RUN_ROWS}$1"$'\n'; }
+
+# THE ACTIVE RUN, AS THE WALLS SEE IT (AC-8). `active_run` is the predicate every
+# always-on hook gates its own work behind; printed here rather than re-derived,
+# so a person can tell a machine whose walls are armed from one whose walls are
+# inert. The path is home-relative for the same reason every other path on this
+# page is — it is what fits, and it is what a person would type.
+#
+# THE AGE IS THE PLAN'S OWN mtime, which is what "is anyone still working on
+# this" actually turns on. A `current:` alone says a run was opened; a `current:`
+# next to a fortnight of silence says something else.
+_doctor_run_plan="$(active_run "$DOCTOR_ROOT" 2>/dev/null)" || _doctor_run_plan=""
+if [ -n "$_doctor_run_plan" ]; then
+  _doctor_run_step="$(grep -m1 '^current:' "$_doctor_run_plan" 2>/dev/null \
+                      | sed -e 's/^current:[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  _doctor_run_age="$(_doctor_file_age "$_doctor_run_plan")"
+  # PROJECT-RELATIVE, not home-relative: every plan path starts
+  # `<root>/.bionic/docs/plans/`, and the segment that identifies WHICH run is at
+  # the far end — exactly where a truncation bites. Dropping the root is what
+  # buys that end enough room to survive.
+  _doctor_run_rel="${_doctor_run_plan#"${DOCTOR_ROOT}/"}"
+  # AND THE STEP AND THE AGE ARE WHAT MUST SURVIVE THE CUT. They are the two
+  # facts a reader acts on — armed or not, and still moving or not — so they go
+  # in as the protected tail and the path absorbs the whole shortfall.
+  _run_add "$(_doctor_rtrim "$(bionic_line \
+    "$(printf '  %s %-30s ' "$DOCTOR_OK" "active run")" \
+    "$_doctor_run_rel" " · current: ${_doctor_run_step:-?} · ${_doctor_run_age}")")"
+else
+  _run_add "$(_doctor_item "$DOCTOR_NIL" "active run" "none — no open plan under this root")"
+fi
+
+# PREDECESSOR ROSTERS (AC-4's doctor line). A `/clear` re-keys the session — the
+# env and the hook payload both (probe A-probe-1/2) — and leaves the previous
+# session's roster on disk with rows nobody will ever close. Those rows are the
+# agents that outlived the conversation that launched them.
+#
+# COUNTED HERE, THROUGH THE LIBRARY, AND NEVER THROUGH THE TICK'S ADOPT VERB.
+# `patrol_roster_state` is lib/patrol.sh's own reader — the same subtraction the
+# Patrol section above already trusts — and doctor stays a rendering surface that
+# runs nothing which could write. A roster whose session is LIVE is the Patrol
+# section's subject, not this one's; only the ones whose owner is gone are listed.
+_doctor_live_sids=""
+while IFS= read -r _live_line; do
+  [ -n "$_live_line" ] || continue
+  _doctor_live_sids="${_doctor_live_sids} $(_doctor_pfield "$_live_line" session) "
+done <<EOF
+$(patrol_live_sessions 2>/dev/null)
+EOF
+for _roster in "${DOCTOR_ROOT}/.bionic/tmp/"roster-*.state; do
+  [ -f "$_roster" ] || continue
+  _r_sid="${_roster##*/roster-}"; _r_sid="${_r_sid%.state}"
+  case "$_doctor_live_sids" in *" ${_r_sid} "*) continue ;; esac
+  _r_state="$(patrol_roster_state "$DOCTOR_ROOT" "$_r_sid" 2>/dev/null)"
+  _r_open="$(_doctor_pfield "$_r_state" open)"
+  case "$_r_open" in ''|*[!0-9]*) _r_open=0 ;; esac
+  [ "$_r_open" -gt 0 ] || continue
+  _run_add "$(_doctor_item "$DOCTOR_NIL" "predecessor ${_r_sid%%-*}" \
+    "${_r_open} open $(_doctor_plural "$_r_open" row rows) — a /clear left them unclosed")"
+done
+
+# LEGACY `.bionic` SYMLINKS (AC-11). spawn-worktree.sh used to plant
+# `<wt>/.bionic -> <main>/.bionic`. lib/root.sh now steps OVER such a link and
+# never roots on it (design-ledger C2), so one left on disk is a second path to
+# the same state that nothing reads and nobody expects. Listed by name; the
+# worktree verb that deletes them is the repair, and it is named on the row.
+#
+# `-L` BEFORE `-d`, because a symlink to a directory satisfies both — the same
+# order lib/root.sh's own walk tests them in.
+_doctor_links=""; _doctor_link_n=0
+for _wt in "${DOCTOR_ROOT}/.worktrees/"*; do
+  [ -d "$_wt" ] || continue
+  [ -L "${_wt}/.bionic" ] || continue
+  _doctor_link_n=$((_doctor_link_n + 1))
+  _wt_name="${_wt##*/}"
+  _doctor_links="${_doctor_links}${_doctor_links:+, }${_wt_name}"
+done
+if [ "$_doctor_link_n" -gt 0 ]; then
+  _run_add "$(_doctor_item "$DOCTOR_BAD" "legacy .bionic symlinks" \
+    "${_doctor_link_n} under .worktrees/ (${_doctor_links})")"
+  # THE NAMES STAY ON THE ROW, NOT ON THIS LINE. A fix line in FIX_LINES_OTHER is
+  # printed whole and unbounded — the one place on this page a long string can
+  # actually break the column rule — so it carries the count and the command and
+  # nothing else, and the row above carries the list.
+  fix "${_doctor_link_n} legacy .bionic $(_doctor_plural "$_doctor_link_n" symlink symlinks) under .worktrees/ → spawn-worktree.sh remove"
+fi
+
+# ─── The machine, and the budget each live session recorded on it ────────────
+#
+# THE READER IS THE SCHEMA'S OWNER (AC-25, L-RESOURCES/1). The attestation format
+# lives in hooks/preflight-probe.sh, so "which versions are readable" belongs
+# beside the writer that produces them rather than copied into doctor, the Step-0
+# display and the tick. `--read` is strictly read-only: no lock, no prune, no
+# session key, and exit 5 for anything it does not recognise.
+#
+# A VERSION-1 RECORD IS NOT A FAILURE. preflight-probe loads its resources
+# library FAIL-OPEN — resources are a context probe, never a blocking one — so a
+# machine whose library could not be read still attests, at version 1, with no
+# budget in it. "no budget recorded" is the honest rendering of that; five empty
+# fields dressed as a budget would not be.
+RESOURCES_ROWS=""
+_res_add() { RESOURCES_ROWS="${RESOURCES_ROWS}$1"$'\n'; }
+
+_doctor_probe_line="$(resources_probe 2>/dev/null)"
+if [ -n "$_doctor_probe_line" ]; then
+  _p_get() { printf '%s' "$_doctor_probe_line" | tr ' ' '\n' | grep "^$1=" | head -1 | cut -d= -f2-; }
+  _res_add "$(_doctor_item "$DOCTOR_NIL" "machine" \
+    "$(_p_get cores) cores · $(_p_get mem_gb) GB · $(_p_get disk_free_gb) GB free · load $(_p_get load_1m) · $(_p_get os)")"
+else
+  _res_add "$(_doctor_item "$DOCTOR_NIL" "machine" "unknown — the resources probe did not answer")"
+fi
+
+_doctor_probe_sh="${_doctor_payload_root}/hooks/preflight-probe.sh"
+_doctor_budgets=0
+while IFS= read -r _live_line; do
+  [ -n "$_live_line" ] || continue
+  _l_sid="$(_doctor_pfield "$_live_line" session)"
+  [ -n "$_l_sid" ] || continue
+  _l_att="${DOCTOR_ROOT}/.bionic/tmp/preflight-${_l_sid}.state"
+  [ -f "$_l_att" ] || continue
+  _doctor_budgets=$((_doctor_budgets + 1))
+  if ! _l_rec="$(bash "$_doctor_probe_sh" --read "$_l_att" 2>/dev/null)"; then
+    _res_add "$(_doctor_item "$DOCTOR_NIL" "session ${_l_sid%%-*}" \
+      "its attestation is not one this build can read")"
+    continue
+  fi
+  _l_budget="$(printf '%s\n' "$_l_rec" | grep -m1 '^budget=' | cut -d= -f2-)"
+  if [ -n "$_l_budget" ]; then
+    _res_add "$(_doctor_item "$DOCTOR_OK" "session ${_l_sid%%-*}" "$_l_budget")"
+  else
+    _res_add "$(_doctor_item "$DOCTOR_NIL" "session ${_l_sid%%-*}" "no budget recorded")"
+  fi
+done <<EOF
+$(patrol_live_sessions 2>/dev/null)
+EOF
+[ "$_doctor_budgets" -gt 0 ] || \
+  _res_add "$(_doctor_item "$DOCTOR_NIL" "no session" "none has taken an attestation in this project")"
+
 # ─── What is left to fix ─────────────────────────────────────────────────────
 #
 # COLLECTED BEFORE ANYTHING IS PRINTED, because FIX is the second section on the
@@ -1634,12 +1814,35 @@ esac
     "$(_doctor_tilde "$SKILL_COPY_PATH")" " → /bionic:setup"
 
 
+# ─── The resources the fleet is running on ───────────────────────────────────
+#
+# TWO KINDS OF FACT, AND THEY ARE NOT THE SAME FACT (AC-27). The first line is
+# what this machine IS, probed now. The lines under it are what each live session
+# DECIDED, read back out of the attestation that session wrote before its first
+# dispatch — and a budget is a decision, taken once, that every wall and every
+# brief then quotes. Printing only the probe would invite a reader to re-derive a
+# budget in their head and get a different number than the one the fleet is
+# actually running under; printing only the attestations would hide the machine
+# that has changed under them since.
+#
+# THE BUDGET IS QUOTED, NEVER RECOMPUTED. It is one string in the attestation, in
+# exactly the shape the plan header's `parallel-budget:` carries (L-RESOURCES/2),
+# so this page reads a string and no formula lives here.
+echo ""
+echo "RESOURCES"
+printf '%s' "$RESOURCES_ROWS"
+
 # ─── The Patrol ──────────────────────────────────────────────────────────────
 #
 # RUNNING PATROLS OR NOTHING. See the gathering comment above for the full
 # rationale; this is just its render. Doctor still changes nothing here — a
 # `CronDelete` fix line is PRINTED, never run, and running it is the reader's
 # act in the session that owns the job.
+#
+# AND IT STAYS THE LAST SECTION OF A DEFAULT RUN. RESOURCES was placed above it
+# rather than below for that reason: the Patrol block is read from its header to
+# end of output by more than one caller, and a section appended after it would
+# arrive inside everything that reads it.
 echo ""
 echo "PATROL"
 if [ "$PATROL_LIVE" = "0" ]; then
@@ -1647,6 +1850,11 @@ if [ "$PATROL_LIVE" = "0" ]; then
 else
   printf '%s' "$PATROL_ROWS"
 fi
+# THE RUN, THE PREDECESSORS AND THE LEGACY LINKS — the three rows that are about
+# this PROJECT rather than about this machine, printed under the Patrol because
+# the Patrol is what acts on them.
+printf '%s' "$RUN_ROWS"
+
 
 # ─── The one question, and the section it appends ────────────────────────────
 #
