@@ -110,10 +110,10 @@ write_stamp() {  # <project> <sid>
 # `current:` step below 9. This is the T4 gate's own precondition (AC-11/
 # AC-12) — no earlier section in this suite plants one, so the engagement
 # gate is a complete no-op for every fixture above.
-write_open_plan() {  # <project> -> plan path on stdout
-  local dir="$1/.bionic/docs/plans/fixture" f
+write_open_plan() {  # <project> [name] -> plan path on stdout
+  local dir="$1/.bionic/docs/plans/fixture" f name="${2:-fixture}"
   mkdir -p "$dir"
-  f="$dir/fixture.plan.md"
+  f="$dir/$name.plan.md"
   {
     printf -- '---\n'
     printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
@@ -121,6 +121,32 @@ write_open_plan() {  # <project> -> plan path on stdout
     printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\ncurrent: 3\n'
   } > "$f"
   printf '%s' "$f"
+}
+
+# A CLOSED run (delivered) — same shape, `current: 9` and a Step-9 evidence line
+# carrying `delivered:` (lib/run.sh `run_open`'s own close condition). This is the
+# negative fixture for §12: a member of `active_plan`'s candidate walk that
+# `open_runs` must never include.
+write_delivered_plan() {  # <project> [name] -> plan path on stdout
+  local dir="$1/.bionic/docs/plans/fixture" f name="${2:-delivered}"
+  mkdir -p "$dir"
+  f="$dir/$name.plan.md"
+  {
+    printf -- '---\n'
+    printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+    printf 'intent: bugfix\nrigor: tested\nscale: task\n'
+    printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: delivered: 2026-09-02\n'
+  } > "$f"
+  printf '%s' "$f"
+}
+
+# A BOUND marker (lib/binding.sh's shape, S1/S2 contract): `plan=<path>` naming a
+# member of the open-run set, plus `engaged_at=`. Distinct from `plant_engaged`,
+# which writes an empty (unbound) marker.
+plant_bound() {  # <project> <sid> <plan-path>
+  mkdir -p "$1/.bionic/tmp"
+  printf 'plan=%s\nengaged_at=2026-09-02T20:00:00Z\n' "$3" > "$1/.bionic/tmp/engaged-$2.state"
+  chmod 600 "$1/.bionic/tmp/engaged-$2.state"
 }
 
 # The engagement marker itself (lib/run.sh `engaged_session`) — a REGULAR file
@@ -368,6 +394,81 @@ plant_engaged "$P11b" "$CUR_SID"
 OUT=$(drive "$P11b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq "11.3 exit 0 with the marker present too" "0" "$(rc)"
 eq "11.4 still nothing on stdout — no run, no notice, no block" "" "$OUT"
+
+echo ""
+echo "=== 12 — two or more open runs (AC-5, S7) ==="
+
+echo "--- 12a: two open plans, not engaged: the listing block, and nothing else ---"
+P12=$(make_env 1s)
+PLAN12A="$(write_open_plan "$P12" alpha)"
+PLAN12B="$(write_open_plan "$P12" beta)"
+PLAN12C="$(write_delivered_plan "$P12" gamma)"
+roster_rows "$P12/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-EPSILON"
+write_stamp "$P12" "$OLD_SID"
+S12_BEFORE=$(snap "$P12")
+OUT=$(drive "$P12" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "12a.1 exit 0" "0" "$(rc)"
+has   "12a.2 the header names the count" "bionic: 2 open runs exist here" "$OUT"
+has   "12a.3 …and the engage instruction" "invoke /bionic:canonical-sdlc" "$OUT"
+has   "12a.4 …and the bind instruction" "session-poker.sh bind <plan>" "$OUT"
+has   "12a.5 the first open plan's path is listed" "$PLAN12A" "$OUT"
+has   "12a.6 the second open plan's path is listed" "$PLAN12B" "$OUT"
+eq    "12a.6b both listed paths are indented two spaces" "2" \
+  "$(printf '%s\n' "$OUT" | grep -cE '^  .*\.plan\.md$')"
+hasnt "12a.7 the CLOSED plan's path is absent" "$(basename "$PLAN12C")" "$OUT"
+hasnt "12a.8 no roster text — the listing is the whole block" "predecessor rosters:" "$OUT"
+hasnt "12a.9 …and no re-arm sequence either" "re-arm" "$OUT"
+eq    "12a.10 wrote nothing" "$S12_BEFORE" "$(snap "$P12")"
+
+echo ""
+echo "--- 12b: one open plan, not engaged: today's singular line, byte-identical to §8 ---"
+P12b=$(make_env 1s)
+PLAN12b="$(write_open_plan "$P12b")"
+S12b_BEFORE=$(snap "$P12b")
+OUT=$(drive "$P12b" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "12b.1 exit 0" "0" "$(rc)"
+has   "12b.2 the one-line notice names the plan path, exactly as §8.2 pins" "$PLAN12b" "$OUT"
+has   "12b.3 …and names the skill to invoke, exactly as §8.3 pins" "/bionic:canonical-sdlc" "$OUT"
+eq    "12b.4 exactly one line of output, exactly as §8.4 pins" "1" "$(printf '%s\n' "$OUT" | grep -c .)"
+hasnt "12b.5 no count-style header" "open runs exist here" "$OUT"
+eq    "12b.6 wrote nothing" "$S12b_BEFORE" "$(snap "$P12b")"
+
+echo ""
+echo "--- 12c: two open plans, engaged and bound-open to one: today's engaged block, no listing ---"
+P12c=$(make_env 1s)
+PLAN12cA="$(write_open_plan "$P12c" alpha)"
+PLAN12cB="$(write_open_plan "$P12c" beta)"
+roster_rows "$P12c/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-ZETA"
+plant_bound "$P12c" "$CUR_SID" "$PLAN12cA"
+S12c_BEFORE=$(snap "$P12c")
+OUT=$(drive "$P12c" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "12c.1 exit 0" "0" "$(rc)"
+has   "12c.2 the predecessor roster is listed, exactly as an engaged session sees it" \
+  "roster-$OLD_SID.state" "$OUT"
+has   "12c.3 the re-arm sequence still prints" "re-arm: CronList" "$OUT"
+hasnt "12c.4 no count-style listing" "open runs exist here" "$OUT"
+hasnt "12c.5 the sibling (unbound) plan is not named" "$PLAN12cB" "$OUT"
+eq    "12c.6 wrote nothing" "$S12c_BEFORE" "$(snap "$P12c")"
+
+echo ""
+echo "--- 12d: two open plans, engaged with an EMPTY (unbound) marker: the listing, then today's engaged block ---"
+P12d=$(make_env 1s)
+PLAN12dA="$(write_open_plan "$P12d" alpha)"
+PLAN12dB="$(write_open_plan "$P12d" beta)"
+roster_rows "$P12d/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-ETA"
+plant_engaged "$P12d" "$CUR_SID"   # empty marker: engaged, unbound
+S12d_BEFORE=$(snap "$P12d")
+OUT=$(drive "$P12d" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "12d.1 exit 0" "0" "$(rc)"
+has   "12d.2 the not-bound header names the count" \
+  "bionic: 2 open runs exist here and this session is not bound to one" "$OUT"
+has   "12d.3 …and the bind instruction" "session-poker.sh bind <plan>" "$OUT"
+has   "12d.4 the first open plan's path is listed" "$PLAN12dA" "$OUT"
+has   "12d.5 the second open plan's path is listed" "$PLAN12dB" "$OUT"
+has   "12d.6 today's engaged roster block still follows — no early exit" \
+  "roster-$OLD_SID.state" "$OUT"
+has   "12d.7 …through the re-arm sequence" "re-arm: CronList" "$OUT"
+eq    "12d.8 wrote nothing" "$S12d_BEFORE" "$(snap "$P12d")"
 
 echo ""
 echo "──────────────────────────────────────────────"
