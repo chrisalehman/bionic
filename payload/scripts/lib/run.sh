@@ -1,15 +1,27 @@
-# payload/scripts/lib/run.sh — ONE READER FOR "is there a run to protect".
+# payload/scripts/lib/run.sh — ONE READER FOR "is there a run to protect", and for
+# "WHICH run answers for THIS session".
 #
-# WHAT IT OWNS (L-RUN, wave-bionic-1.4.0-update, spec AC-8; design-ledger S1). Three pure
+# WHAT IT OWNS (L-RUN, wave-bionic-1.4.0-update, spec AC-8; design-ledger S1). Pure
 # functions of disk, no writes:
 #   docs_root <root>   -> <root>/<docs-root from .bionic/config.yaml, default .bionic/docs>
 #   active_plan <root> -> the newest *.md (by mtime) under <docs_root>/plans (depth <= 2)
 #                         and <docs_root>/incidents (depth <= 2) that carries a flush-left
 #                         `## SDLC State` heading; exit 1 and silent if none.
-#   active_run <root>  -> exit 0 + the plan path iff active_plan exists AND its flush-left
+#   run_open <plan>    -> exit 0 iff THAT ONE FILE reads as an open run: its flush-left
 #                         `current:` value is 0-8, or 9 with no `- Step 9:` line carrying
-#                         `delivered:`, or a task-scale `current: T<n>` — AND the plan's own
-#                         frontmatter carries no `abandoned:` line; else exit 1, silent.
+#                         `delivered:`, or a task-scale `current: T<n>` — AND its own
+#                         frontmatter carries no `abandoned:` line; else exit 1. Silent
+#                         both ways: the caller already holds the path.
+#   active_run <root>  -> exit 0 + the plan path iff active_plan finds a file and run_open
+#                         holds on it; else exit 1, silent.
+#   open_runs <root>   -> every file active_plan's walk finds for which run_open holds, one
+#                         absolute path per line, NEWEST MTIME FIRST; exit 1 if none.
+#
+# AND, SINCE wave-session-bound-run (2026-09-04, spec AC-1/AC-3/AC-6), the session's own
+# answer — see the ENGAGEMENT section below for why the root-keyed answer was not enough:
+#   session_plan <root> <sid> -> the marker's `plan=` value; exit 1 when there is no binding.
+#   session_run <root> <sid>  -> one of `bound-open <p>` (0), `bound-closed <p>` (2),
+#                                `fallback <p>` (0), `none` (1).
 #
 # WHY A DEDICATED FUNCTION (design-ledger S1, rejecting a time-bounded or stamp-keyed
 # "active"). A run stays active until CLOSED (current: 9 with delivered:) or ABANDONED
@@ -110,12 +122,27 @@ active_plan() {
   printf '%s\n' "$plan"
 }
 
-# active_run <root> -> exit 0 + the plan path iff active_plan succeeds and the plan's state
-# is open (see file header); else exit 1, silent.
-active_run() {
-  local root="$1"
-  local plan
-  plan=$(active_plan "$root") || return 1
+# run_open <plan-path> -> exit 0 iff THAT ONE FILE reads as an open run. Silent both ways.
+#
+# THE VERDICT MOVED HERE, UNCHANGED (wave-session-bound-run S1, 2026-09-04). Until this wave
+# the open/closed decision was reachable only through `active_run <root>`, which picks the
+# file for you: the newest plan in the root. Two engaged sessions in one repository therefore
+# shared one run identity — the bug this wave exists to fix. A session bound to a plan needs
+# the verdict on THAT file, and `open_runs` needs it on every candidate, so the body below is
+# lifted out of `active_run` row for row and `active_run` is now `active_plan` + `run_open`.
+# tests/run-predicate.test.sh R5 pins every row of the table AND the agreement between the
+# two, so a verdict that drifted in either direction goes red on both sides.
+#
+# A PATH THAT IS NOT A READABLE FILE IS NOT AN OPEN RUN. `active_run` never asked, because
+# `active_plan` only ever hands it a file `find -type f` just produced; `session_run` asks
+# constantly, because a binding outlives the file it names (the plan is deleted, moved, or
+# was written into a worktree that is now gone). Closed is the right answer there and the
+# safe one: a session whose bound plan has vanished has no run to protect, and AC-6 forbids
+# falling through to somebody else's.
+run_open() {
+  local plan="$1"
+  [ -n "$plan" ] || return 1
+  [ -f "$plan" ] || return 1
 
   # THE WHOLE FILE, READ ONCE, HELD IN A VARIABLE — every match below tests this
   # variable via a here-string, never a live pipe fed by _run_lines/awk. `grep -q`
@@ -163,7 +190,6 @@ active_run() {
 
   # Task-scale: current: T<n> is always active (no numbered close).
   if grep -qE '^T[0-9]+$' <<< "$current"; then
-    printf '%s\n' "$plan"
     return 0
   fi
 
@@ -178,7 +204,6 @@ active_run() {
 
   # Steps 0-8: open by definition.
   if [ "$((10#$step))" -lt 9 ]; then
-    printf '%s\n' "$plan"
     return 0
   fi
 
@@ -188,12 +213,89 @@ active_run() {
     if grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$lines"; then
       return 1
     fi
-    printf '%s\n' "$plan"
     return 0
   fi
 
   # Anything else (out-of-range current:, malformed) is not a recognized open state.
   return 1
+}
+
+# active_run <root> -> exit 0 + the plan path iff active_plan succeeds and that plan's state
+# is open; else exit 1, silent. Its verdict is run_open's, byte for byte — this function now
+# only chooses WHICH file the verdict is asked about.
+active_run() {
+  local root="$1"
+  local plan
+  plan=$(active_plan "$root") || return 1
+  run_open "$plan" || return 1
+  printf '%s\n' "$plan"
+}
+
+# open_runs <root> -> every candidate of active_plan's walk for which run_open holds, one
+# absolute path per line, NEWEST MTIME FIRST; exit 1 and silent when the set is empty.
+#
+# WHY A SET AND NOT A WINNER (wave-session-bound-run, spec §Design "Open-run set"). Three
+# callers need the whole set, and none of them can be served by `active_run`'s single
+# answer: engagement binds a session only when the set has exactly one member, session-start
+# lists every member when it has several, and poker's `bind` verb refuses a plan that is not
+# a member. Nothing in the fleet could name the set before this wave.
+#
+# LINE 1 IS active_run's ANSWER whenever active_run has one. Ordering is newest-mtime-first
+# with ties keeping discovery order, which is exactly `active_plan`'s own `-nt` tie-break, so
+# the two agree by construction. They part company in one case and it is deliberate: when the
+# NEWEST plan is closed, `active_run` has no answer at all while the set is non-empty. That
+# is the state a session-keyed reader exists to survive — the run that just closed is still
+# the newest file in the root (run-predicate R6d).
+#
+# THE WALK IS RESTATED, NOT SHARED, AND THAT IS ON PURPOSE. Factoring the find/filter out of
+# `active_plan` into a private helper would empty the body that
+# tests/cross-gate-agreement.test.sh §S extracts and pins by substring (`-maxdepth 2 -type f`
+# and `-nt "$plan"`, at :4309-4315), and §S is not this slice's to edit. The copy is held to
+# the original behaviourally instead, by run-predicate R6e: the same two trees, the same
+# depth bound of 2, the same fence-aware `## SDLC State` filter, all three driven through
+# `open_runs` and checked against `active_plan`'s answer on one fixture. §A2's library
+# mutations (`depth-1`, `fence-blind`, `no-marker-skip`) are line-oriented and hit both
+# copies, so neither can drift under a mutation the battery already runs.
+open_runs() {
+  local root="$1"
+  local droot
+  droot=$(docs_root "$root")
+  local f d i j
+  local cnt=0
+  local -a ord
+  for d in "$droot/plans" "$droot/incidents"; do
+    [ -d "$d" ] || continue
+    while IFS= read -r -d '' f; do
+      _run_lines "$f" | awk '
+        /^[[:space:]]*```/ { fence = !fence; next }
+        fence { next }
+        /^## SDLC State/ { found = 1 }
+        END { exit !found }' || continue
+      run_open "$f" || continue
+      # INSERTION SORT, newest first. Bash 3.2: element-wise reads and writes only — no
+      # `"${ord[@]}"` expansion, which is an unbound-variable error on an empty array under
+      # the `set -u` every calling hook runs with.
+      i=0
+      while [ "$i" -lt "$cnt" ]; do
+        [ "$f" -nt "${ord[$i]}" ] && break
+        i=$((i + 1))
+      done
+      j="$cnt"
+      while [ "$j" -gt "$i" ]; do
+        ord[$j]="${ord[$((j - 1))]}"
+        j=$((j - 1))
+      done
+      ord[$i]="$f"
+      cnt=$((cnt + 1))
+    done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
+  done
+  [ "$cnt" -gt 0 ] || return 1
+  i=0
+  while [ "$i" -lt "$cnt" ]; do
+    printf '%s\n' "${ord[$i]}"
+    i=$((i + 1))
+  done
+  return 0
 }
 
 # ---------- ENGAGEMENT: the single switch every bionic hook reads FIRST ----------
@@ -202,11 +304,31 @@ active_run() {
 # apply when exercising bionic. Nothing should apply until bionic is triggered" — and the
 # trigger is the canonical-sdlc skill, nothing else. `hooks/engage.sh` writes the marker at
 # the instant of invocation; every hook asks this before it asks anything else, and exits
-# silently when it is false. Engagement decides WHETHER a hook acts; the plan (`active_run`,
-# above) decides WHAT — a hook that finds the marker and no plan runs its plan-free walls
-# and skips the plan-bound ones. The marker is never removed during the session: `disarm`
-# removes the Patrol stamp only, and a session that invoked the skill is bionic's for its
-# whole life.
+# silently when it is false. Engagement decides WHETHER a hook acts; a hook that finds the
+# marker and no run at all runs its plan-free walls and skips the plan-bound ones. The
+# marker is never removed during the session: `disarm` removes the Patrol stamp only, and a
+# session that invoked the skill is bionic's for its whole life.
+#
+# WHAT DECIDES *WHAT* CHANGED IN wave-session-bound-run (2026-09-04, spec AC-1/AC-3/AC-6).
+# This header used to read "the plan (`active_run`, above) decides WHAT", and that sentence
+# was the bug in the codebase's own words: WHETHER was session-keyed and WHAT was
+# ROOT-keyed. Two engaged sessions in one repository shared one run identity, so the
+# evidence gate validated the wrong plan, `adopt` offered another run's agents, and
+# session-start steered a new session at the existing run. The rule now:
+#
+#   THE SESSION'S BINDING DECIDES WHAT. `engaged-<sid>.state` has carried a `plan=` field
+#   since 1.4.1 and nothing read it; `session_plan` reads it and `session_run` rules on it.
+#   A bound session gets its OWN plan's verdict and never another's — a binding whose plan
+#   is delivered, abandoned or gone answers `bound-closed`, which is engaged-with-no-run,
+#   NOT a licence to fall through to whatever is newest (AC-6: a binding is a commitment).
+#
+#   NEWEST-PLAN IS THE ANNOUNCED FALLBACK, not the default. A session with no binding —
+#   never engaged, or `plan=none`, which is what engagement writes when the root holds zero
+#   or several open runs — resolves exactly as it did before this wave, by `active_run`, and
+#   every consumer says `fallback` out loud so the resolution it used is visible (AC-3).
+#
+# The marker is still never written from here: this file reads disk and nothing else. The
+# one writer is `payload/scripts/lib/binding.sh`.
 #
 # FAIL DIRECTION IS INVERTED HERE, deliberately: this is the one artifact whose PRESENCE
 # opens walls. Every unreadable state — absent, symlink, foreign sid, empty sid, the
@@ -231,4 +353,79 @@ engaged_session() {
   f=$(engaged_marker_path "$1" "$2") || return 1
   [ -L "$f" ] && return 1
   [ -f "$f" ]
+}
+
+# ---------- THE SESSION'S OWN RUN ----------
+
+# session_plan <root> <sid> -> the marker's `plan=` value on stdout, exit 0; exit 1 and
+# silent when there is no binding to report.
+#
+# NOT A VERDICT, DELIBERATELY. It reports what the marker says and stops; `session_run`
+# decides what that means. FOUR SHAPES ARE "NO BINDING", and all four are states the fleet
+# actually produces: the file is ABSENT (a session that never engaged), EMPTY (which is what
+# tests/session-poker.test.sh:82 plants — `: > .../engaged-$SID.state` — so a reader that
+# treated it as anything else would break that suite's entire fixture set), carries no
+# `plan=` line, or carries the literal `plan=none`, which is what engagement writes when the
+# root holds zero or several open runs.
+#
+# THE MARKER-PATH GUARDS ARE `engaged_session`'s, RESTATED: the sid shape rule via
+# `engaged_marker_path`, and a symlink refused BEFORE it is followed, so a planted link
+# cannot make a session read its `plan=` out of a file outside the tree.
+#
+# LINE ENDINGS TRANSLATED, NEVER DELETED — `_run_lines`, for the reason stated at its
+# definition. A marker written through a CRLF-normalising tool must not yield a plan path
+# with a trailing CR: every consumer compares that value against a path.
+session_plan() {
+  local root="$1" sid="$2"
+  local f
+  f=$(engaged_marker_path "$root" "$sid") || return 1
+  [ -L "$f" ] && return 1
+  [ -f "$f" ] || return 1
+  local lines val
+  lines=$(_run_lines "$f")
+  val=$(grep -m1 -E '^plan=' <<< "$lines" | sed -E 's/^plan=//')
+  case "$val" in
+    ''|none) return 1 ;;
+  esac
+  printf '%s\n' "$val"
+}
+
+# session_run <root> <sid> -> ONE line naming the verdict, and an exit status per verdict:
+#
+#   bound-open <path>    0   the session's own plan, and it is open
+#   bound-closed <path>  2   the session's own plan: delivered, abandoned, or gone
+#   fallback <path>      0   no binding; today's root-keyed answer, said out loud
+#   none                 1   no binding and no open run in the root
+#
+# THE INVARIANT (spec §Design "Run verdict"; AC-6): A BOUND SESSION NEVER YIELDS `fallback`.
+# `bound-closed` is a terminal answer, not a miss to recover from — the moment a run closes
+# is exactly the moment a scan would hand its session somebody else's run, which is the
+# failure this wave was opened on. Consumers take `bound-closed` and `none` through the same
+# engaged-with-no-run branch they already have.
+#
+# IT DOES NOT ASK WHETHER THE SESSION IS ENGAGED. An unengaged caller is simply unbound and
+# gets the fallback; `engaged_session` answers the other question, and every hook asks it
+# first and separately. Two readers, two questions, no coupling.
+#
+# EXIT 2 IS A THIRD VALUE ON PURPOSE. `bound-closed` is neither "here is your run" (0) nor
+# "this root has none" (1), and a consumer that only ever tests `if session_run …` would
+# read a 2 as false and land in the no-run branch — which is the correct branch. The
+# distinct status is there for the consumers that print the reason.
+session_run() {
+  local root="$1" sid="$2"
+  local plan
+  if plan=$(session_plan "$root" "$sid"); then
+    if run_open "$plan"; then
+      printf 'bound-open %s\n' "$plan"
+      return 0
+    fi
+    printf 'bound-closed %s\n' "$plan"
+    return 2
+  fi
+  if plan=$(active_run "$root"); then
+    printf 'fallback %s\n' "$plan"
+    return 0
+  fi
+  printf 'none\n'
+  return 1
 }
