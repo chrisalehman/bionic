@@ -4525,8 +4525,18 @@ echo "=== S.4 — THE RUN VERDICT: one root, two sessions, every consumer answer
 #                      UNBOUND session in a root with two or more. Which is itself the claim,
 #                      and S.4d asserts it in both directions.
 
+# THE TWO SENTENCES, EACH PINNED IN FULL. Seven hooks carry a literal copy of each and the
+# ownership table names no owner for the wording — row 2 licenses seven RENDERINGS of the
+# verdict and says nothing about them being the same string — so these two regexes are the
+# single authority for what the fleet says, and the loops below drive all seven against them.
+#
+# THE CLOSED SENTENCE INCLUDES ITS TAIL (S10a, review D6). It used to be pinned to its prefix
+# alone, so the `; this session has no open run` half — the clause that tells the operator
+# what the closed binding MEANS rather than merely that it exists — could be dropped by six of
+# the seven and stay green. The fallback sentence was already pinned whole; this is the other
+# half brought up to it. `.*` spans the path, which each row asserts separately.
 S4_FALLBACK_RE='run resolved by newest-plan fallback \(session unbound\) — '
-S4_CLOSED_RE='bound plan closed — '
+S4_CLOSED_RE='bound plan closed — .*; this session has no open run'
 
 # ---- the fixture world ------------------------------------------------
 #
