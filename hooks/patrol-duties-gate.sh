@@ -27,7 +27,8 @@
 #
 # It is registered once in hooks/hooks.json now, on `Stop` — which still fires once per
 # orchestrator turn and keeps firing on turns nothing was re-invoked. What scopes it is
-# an ON-DISK fact: `active_run` under the payload's project root. A run is active while
+# an ON-DISK fact: `session_run` (which was `active_run` until wave-session-bound-run made
+# run identity per-session) under the payload's project root. A run is active while
 # its plan says so, and that is the same fact that says a Patrol should be ticking.
 #
 # WHAT A "PATROL TICK" IS, STRUCTURALLY. The tick prompt is composed per session

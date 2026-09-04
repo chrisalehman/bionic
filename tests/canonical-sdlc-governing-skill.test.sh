@@ -1905,19 +1905,24 @@ echo "=== AC-9: bind-on-write, and the run verdict this hook now reads ==="
 # recent session transcripts) shows Write reporting `type: "create"` or `type: "update"`
 # and Edit reporting no `type` key at all. NONE drives the field-absent fallback.
 HOOK_STDOUT=""
-run_post() {  # <tool> <file-path> <tool_response.type|NONE>
-  local tool="$1" file_path="$2" rtype="$3"
+# THE FOURTH ARGUMENT IS THE DEPTH. An agent-context payload carries a top-level `agent_id`
+# alongside the DISPATCHING session's `session_id` (hooks/agent-context-guard.sh's partition
+# rests on exactly that); a main-thread payload has no such key. Empty means main thread.
+run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id]
+  local tool="$1" file_path="$2" rtype="$3" agent="${4:-}"
   local input
   input=$(jq -n \
     --arg p "$file_path" \
     --arg s "$GS_SID" \
     --arg t "$tool" \
     --arg r "$rtype" \
+    --arg a "$agent" \
     '{session_id: $s,
       hook_event_name: "PostToolUse",
       tool_name: $t,
       tool_input: {file_path: $p, content: ""},
-      tool_response: (if $r == "NONE" then {filePath: $p} else {type: $r, filePath: $p} end)}')
+      tool_response: (if $r == "NONE" then {filePath: $p} else {type: $r, filePath: $p} end)}
+     + (if $a == "" then {} else {agent_id: $a} end)')
   local tmp_err tmp_out
   tmp_err=$(mktemp); tmp_out=$(mktemp)
   if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" <<< "$input" >"$tmp_out" 2>"$tmp_err"; then
@@ -2066,6 +2071,36 @@ b_np="$b_ov/.bionic/docs/plans/epic-01-demo/notes.md"
 printf '# just notes\n\ncurrent: 4\n' > "$b_np"
 run_post Write "$b_np" create
 assert_eq "b11 a plans/ file with no ## SDLC State does not bind" "$b_ov_plan" "$(marker_plan "$b_ov")"
+
+# --- b13: a DISPATCHED AGENT's Write never moves its dispatcher's binding (S10a, A-2/F5) ---
+#
+# An agent-context payload carries the ORCHESTRATOR's `session_id`, which is the only key
+# this arm ever read — so a subagent drafting the next wave's plan, or a Step-9 close-out
+# writer, silently re-pointed the live orchestrator at the file it had just created, and the
+# orchestrator's evidence gate then gated its commits on that plan. T4 ratified rebinding for
+# the main thread; nothing extended it to depth two, and the roster's own rule is that only
+# depth-one dispatches are recorded.
+#
+# THE TWO CALLS DIFFER BY ONE FIELD. Same project, same plan, same `create` — so a pass here
+# cannot come from the fixture failing to be bindable in the first place.
+b_ag=$(make_project)
+b_ag_plan="$b_ag/.bionic/docs/plans/epic-01-demo/wave-01-agent.plan.md"
+plant_plan "$b_ag_plan" open
+run_post Write "$b_ag_plan" create "agent_01ABCdefGHIjklMNOpqrs"
+assert_eq "b13 a payload carrying agent_id does not bind" "" "$(marker_plan "$b_ag")"
+assert_eq "b13 ...and creates no marker at all" 0 "$(marker_lines "$b_ag")"
+assert_eq "b13 ...exit 0" 0 "$HOOK_EXIT"
+assert_eq "b13 ...silent" "" "$HOOK_STDERR"
+run_post Write "$b_ag_plan" create
+assert_eq "b13 paired: the same Write from the main thread DOES bind" "$b_ag_plan" "$(marker_plan "$b_ag")"
+assert_contains "b13 paired: ...and says so" "session bound to $b_ag_plan" "$HOOK_STDERR"
+# ...and an agent's Write cannot MOVE a binding that already exists either, which is the
+# harmful case: the orchestrator is mid-run and the subagent writes the NEXT wave's plan.
+b_ag2="$b_ag/.bionic/docs/plans/epic-01-demo/wave-02-next.plan.md"
+plant_plan "$b_ag2" open
+run_post Write "$b_ag2" create "agent_01ABCdefGHIjklMNOpqrs"
+assert_eq "b13 an agent writing a SECOND plan leaves the live binding where it was" \
+  "$b_ag_plan" "$(marker_plan "$b_ag")"
 
 # --- b12: a file the Write did not actually leave on disk does not bind ---
 b_gone="$b_ov/.bionic/docs/plans/epic-01-demo/wave-99-gone.plan.md"

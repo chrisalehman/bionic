@@ -25,8 +25,9 @@
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 #
 # Registered once in hooks/hooks.json, always on. It is not scoped by whether a skill
-# is armed — an on-disk fact is: the hook loads the library, asks `active_run` whether
-# this project has an open run, and exits silently when it does not.
+# is armed — an on-disk fact is: the hook loads the library, asks `session_run` (which was
+# `active_run` until wave-session-bound-run made run identity per-session) whether THIS
+# SESSION has an open run, and exits silently when it does not.
 #
 # WHEN THE LIBRARY DOES NOT LOAD, that order inverts: the scope question has to be
 # answered BEFORE the fail-closed refusal, and answered without the library. See the

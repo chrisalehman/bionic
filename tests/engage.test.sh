@@ -710,6 +710,51 @@ call_bind "$R10" "$SID" "$P10A"
 expect_eq "…paired: with the link removed the same call WRITES (exit 0)" "0" "$BIND_ST"
 expect_eq "…paired: and the marker is a real file naming the plan" "$P10A" "$(plan_of "$M10")"
 
+# (g2) A SYMLINK ON THE MARKER'S *DIRECTORY* IS REFUSED TOO (S10a, review SEC F1). The leaf
+# test in (g) answered "is the marker a link" and left "is the marker's directory a link"
+# unasked, so a tree shipping `.bionic/tmp` — or `.bionic` — as a symlink had the writer
+# create a file outside the root with every other guard satisfied. Two arms, one per
+# ancestor, each paired with the same call after the link is undone. The assertion is not
+# only the exit status: it is that NOTHING landed at the link's target, which is the actual
+# harm.
+for depth in tmp bionic; do
+  R10G="$(make_repo "e8g2$depth")"
+  P10G="$R10G/.bionic/docs/plans/wave-01.plan.md"
+  case "$depth" in
+    tmp)    LINKED="$R10G/.bionic/tmp"; ELSEWHERE="$SANDBOX/e8g2-outside-tmp";    LABEL=".bionic/tmp" ;;
+    bionic) LINKED="$R10G/.bionic";     ELSEWHERE="$SANDBOX/e8g2-outside-bionic"; LABEL=".bionic" ;;
+  esac
+  mv "$LINKED" "$ELSEWHERE"
+  ln -s "$ELSEWHERE" "$LINKED"
+  expect_eq "the $depth fixture really is a symlink (non-vacuity)" "yes" \
+    "$([ -L "$LINKED" ] && echo yes || echo no)"
+  expect_eq "…and the plan is still reachable through it (non-vacuity)" "yes" \
+    "$([ -f "$P10G" ] && echo yes || echo no)"
+  call_bind "$R10G" "$SID" "$P10G"
+  expect_eq "bind_plan refuses a symlinked $LABEL directory (exit 1)" "1" "$BIND_ST"
+  expect_empty "…and prints nothing" "$BIND_OUT"
+  expect_eq "…and NOTHING was written outside the root through the link" "0" \
+    "$(find "$ELSEWHERE" -name 'engaged-*.state' 2>/dev/null | wc -l | tr -d ' ')"
+  # the pair: undo the link, leave everything else identical, and the same call writes
+  rm -f "$LINKED"
+  mv "$ELSEWHERE" "$LINKED"
+  call_bind "$R10G" "$SID" "$P10G"
+  expect_eq "…paired: with the link undone the same call WRITES (exit 0)" "0" "$BIND_ST"
+  expect_eq "…paired: and the marker names the plan" "$P10G" \
+    "$(plan_of "$(marker_path "$R10G" "$SID")")"
+done
+
+# (j) THE MARKER HOLDS THE CANONICAL SPELLING, NOT THE ARGUMENT (S10a, review SEC's
+# correctness note). `bind_plan` validated a resolved path and then wrote the raw one, so a
+# caller spelling the plan with a `..` left a marker whose text does not share the docs-root
+# prefix it was just checked against. The value written is `_bind_resolve`'s.
+rm -f "$M10"
+call_bind "$R10" "$SID" "$R10/.bionic/docs/plans/../plans/wave-01.plan.md"
+expect_eq "a dot-dot spelling that lands back inside is still ACCEPTED (exit 0)" "0" "$BIND_ST"
+expect_eq "…and the marker holds the CANONICAL path, not the argument" "$P10A" "$(plan_of "$M10")"
+call_bind "$R10" "$SID" "none"
+expect_eq "…and the literal none is still stored verbatim, never resolved" "none" "$(plan_of "$M10")"
+
 # (h) THE SID SHAPE RULE IS `engaged_marker_path`'s, NOT RESTATED. A sid the reader
 # refuses must be a sid the writer refuses, or the fleet grows a file nobody reads.
 for bad_sid in "" "unknown" "../../../escape" "a b"; do
@@ -739,16 +784,24 @@ echo ""
 echo "=== E9 (AC-7) — engagement binds the SOLE open run, and a binding survives ==="
 # ============================================================
 #
-# THE RULE THIS SUITE NOW OWNS (wave-session-bound-run, spec §Design "Session binding"):
+# THE RULE THIS SUITE NOW OWNS (wave-session-bound-run, spec §Design "Session binding";
+# amended at S10a, review C-1):
 #
-#   marker present AND `session_run` says bound-open   -> re-bind to that SAME plan
-#   otherwise, exactly one open run in the root        -> bind to it
-#   otherwise (zero, or two and up)                    -> bind to `none`
+#   the marker already names a plan            -> LEAVE IT, open or closed
+#   otherwise, exactly one open run in the root -> bind to it
+#   otherwise (zero, or two and up)             -> bind to `none`
 #
 # The old hook bound `active_run` unconditionally, which is the NEWEST open plan. Both
 # halves of the change are asserted below and neither passes under the old rule: a
 # second, newer plan must NOT steal a live binding, and two open plans must produce no
 # binding at all rather than a coin-flip on mtime.
+#
+# THE CLOSED CASE MOVED (S10a). Until S10a a `bound-closed` session fell through to the
+# count rule, and (e) below pinned that as correct. It is not: when the root holds exactly
+# one open run, that run belongs to ANOTHER SESSION, so a session whose own wave had just
+# closed was silently re-pointed at the neighbour's plan by the act of re-invoking the
+# skill. (e) now pins the preservation and pairs it with the count rule firing for a
+# session that is genuinely unbound on the same root, one line apart.
 
 # (a) Exactly one open run: the marker names it, exactly.
 R11="$(make_repo e9a)"
@@ -815,21 +868,81 @@ case "$(cat "$M13" 2>/dev/null)" in
 esac
 expect_eq "…and engaged_at is unchanged across re-engagement" "$AT13" "$(engat_of "$M13")"
 
-# (e) A binding whose plan has CLOSED is NOT preserved — `bound-closed` is not
-# `bound-open`, so re-engagement falls back to the count rule. The paired half of (d):
-# without it, (d) would pass on a hook that never re-reads anything.
+# (e) A binding whose plan has CLOSED IS STILL PRESERVED (S10a, review C-1). This is the
+# exact shape of the bug the wave was opened on, reached through the engagement door: the
+# session's own wave is delivered, ONE other run is open in the root, and that run is
+# somebody else's. Falling to the count rule here hands this session the neighbour's plan
+# and its evidence gate then gates on it.
+#
+# THE PAIR IS ON THE SAME ROOT, one field apart: a session with NO binding at all engages
+# against the identical tree and the count rule fires normally. Without it this row would
+# pass on a hook that had stopped writing markers at all.
 R14="$(make_repo e9e)"
 M14="$(marker_path "$R14" "$SID")"
 P14A="$R14/.bionic/docs/plans/wave-01.plan.md"
 fire "$SID" "$(skill_payload "$SID" "$R14" "bionic:canonical-sdlc")"
 expect_eq "the session binds to its plan while it is open (non-vacuity)" "$P14A" "$(plan_of "$M14")"
+AT14=$(engat_of "$M14")
 mk_closed_plan "$R14" "wave-01.plan.md" >/dev/null
 P14B="$(mk_open_plan "$R14" "wave-02.plan.md")"
 call_open_runs "$R14"
 expect_eq "…and after delivery the root holds exactly one open run, the new one" "$P14B" "$OR_OUT"
 fire "$SID" "$(skill_payload "$SID" "$R14" "bionic:canonical-sdlc")"
 expect_eq "re-engaging a session bound to a DELIVERED plan exits 0" "0" "$HOOK_RC"
-expect_eq "…and the dead binding is NOT preserved: the count rule rebinds" "$P14B" "$(plan_of "$M14")"
+expect_eq "…and the dead binding is PRESERVED, not swapped for the root's sole open run" \
+  "$P14A" "$(plan_of "$M14")"
+case "$(cat "$M14" 2>/dev/null)" in
+  *"$P14B"*) no "…and the neighbour's plan appears nowhere in the marker" "it does" ;;
+  *) ok "…and the neighbour's plan appears nowhere in the marker" ;;
+esac
+expect_eq "…and engaged_at is untouched by the refused rewrite" "$AT14" "$(engat_of "$M14")"
+# the pair: an UNBOUND session on the SAME tree still gets the count rule
+M14B="$(marker_path "$R14" "$OTHER_SID")"
+rm -f "$M14B"
+fire "$OTHER_SID" "$(skill_payload "$OTHER_SID" "$R14" "bionic:canonical-sdlc")"
+expect_eq "…paired: a session with no binding on the same root binds to the sole open run" \
+  "$P14B" "$(plan_of "$M14B")"
+expect_eq "…paired: and the first session's marker is still its own closed plan" \
+  "$P14A" "$(plan_of "$M14")"
+
+# (e2) A REFUSED BIND ON THE UNBOUND ARM STILL LEAVES A MARKER (S10a, review C-4). `PLAN` is
+# chosen from a walk that has finished; `bind_plan` walks AGAIN for its own membership check,
+# so a run closing inside that window made the one write refuse and the session engaged with
+# no marker at all — unengaged, and therefore unwalled, which is the direction this hook's
+# own fail-direction argument forbids.
+#
+# THE RACE IS FORCED, NOT WAITED FOR. A throwaway plugin tree (hooks/ beside scripts/lib/,
+# the shape the loader's first candidate finds — the pattern
+# tests/cross-gate-agreement.test.sh §A2 uses) carries a `bind_plan` doctored to refuse every
+# argument but `none`, which is exactly what the losing side of the race sees. The shipped
+# library is not touched. The seam is the writer, and the writer is not what is under test
+# here: what is under test is whether the HOOK still leaves a marker when the writer says no.
+E9F_TREE="$SANDBOX/e9f-tree"
+mkdir -p "$E9F_TREE/hooks" "$E9F_TREE/scripts/lib"
+cp "$REPO_ROOT"/payload/scripts/lib/*.sh "$E9F_TREE/scripts/lib/"
+cp "$HOOK" "$E9F_TREE/hooks/engage.sh"
+cat >> "$E9F_TREE/scripts/lib/binding.sh" <<'REFUSER'
+
+# S10a test double: the losing side of the bind_plan TOCTOU. Everything but `none` refuses.
+bind_plan() {
+  [ "$3" = "none" ] || return 1
+  local p; p=$(engaged_marker_path "$1" "$2") || return 1
+  ( umask 077; printf 'plan=none\nengaged_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$p" )
+}
+REFUSER
+R15="$(make_repo e9f)"
+M15="$(marker_path "$R15" "$SID")"
+rm -f "$M15"
+call_open_runs "$R15"
+expect_eq "the e9f fixture holds exactly one open run, so the hook picks a PATH (non-vacuity)" "1" \
+  "$(printf '%s\n' "$OR_OUT" | grep -c . )"
+HOOK_OUT=$(env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SID" \
+  bash "$E9F_TREE/hooks/engage.sh" <<< "$(skill_payload "$SID" "$R15" "bionic:canonical-sdlc")" \
+  2>"$SANDBOX/.err")
+expect_eq "a bind refused mid-race still exits 0" "0" "$?"
+if [ -f "$M15" ]; then ok "…and a marker EXISTS: the session is engaged, not silently unwalled"; else
+  no "…and a marker EXISTS: the session is engaged, not silently unwalled" "no file at $M15"; fi
+expect_eq "…and it says plan=none, the answer the count rule would have given" "none" "$(plan_of "$M15")"
 
 # (f) The hook writes through the one writer, and nowhere else. A second `>` onto the
 # marker path anywhere in the hook is the regression this pins.
