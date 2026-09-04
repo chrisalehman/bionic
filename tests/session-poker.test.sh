@@ -2234,15 +2234,29 @@ expect_contains "…refused as not an open run — the reason is positional" \
   "poker: REFUSED — not an open run" "$OUT"
 
 # ---------- 16g: a missing argument, and too many ----------
+#
+# EXIT 2, THIS FILE'S ONE CODE FOR AN ARGUMENT ERROR. S6 shipped a 3 here through a
+# `USAGE_EXIT` variable only `bind` ever set, reasoning that a missing operand is the same
+# class as the missing session key the verb refuses ten lines on. S8 reverted it: the session
+# key is an ENVIRONMENT fact the caller cannot type — which is what 3 means everywhere else
+# in this file — while an operand left off the command line is the usage error every other
+# verb here already exits 2 for. The paired row below pins the OTHER code on the OTHER
+# cause, so the two are told apart by this suite rather than merged by it.
 poke "$R16" bind
-expect_eq       "bind with no argument exits 3" "3" "$RC"
+expect_eq       "bind with no argument exits 2, this file's one argument-error code" "2" "$RC"
 expect_contains "…and prints the usage" "Usage:" "$OUT"
 expect_contains "…which lists bind among the verbs" "session-poker.sh bind" "$OUT"
 expect_eq       "…and nothing was written" "$_m16_before" "$(cksum < "$M16")"
 
 poke "$R16" bind "$P16A" "$P16B"
-expect_eq       "bind with two arguments is a usage error" "3" "$RC"
+expect_eq       "bind with two arguments is the same usage error, same code" "2" "$RC"
 expect_eq       "…and nothing was written" "$_m16_before" "$(cksum < "$M16")"
+
+# THE PAIRED NEGATIVE — 2 is not what this verb says about everything. The missing SESSION
+# KEY is an environment fault and still exits 3, so the revert above narrowed one code
+# rather than collapsing two into one.
+( cd "$R16" && env -u CLAUDE_CODE_SESSION_ID bash "$POKER" bind "$P16A" ) >/dev/null 2>&1
+expect_eq       "…while a missing session key is still the environment fault, exit 3" "3" "$?"
 
 # ---------- 16h: the engagement guard is above everything (AC-10) ----------
 R16U="$(make_repo s16-unengaged)"
@@ -2354,6 +2368,16 @@ expect_contains "…and the unattributed rows under theirs" "$UNATTR_HEADING" "$
 # this is what the stop gates will read tomorrow.
 expect_contains "…this session's roster gains the A row" "name=a-writer" "$ROSTER17A"
 expect_contains "…by id, which is what ownership is established from" "$ID_A17" "$ROSTER17A"
+# ATTRIBUTED LIKE A DISPATCHED ROW, in the same trailing field hooks/dispatch-preflight.sh
+# writes (S8; spec §Ownership table "roster attribution"). Before this the adopted row was
+# the one row on any roster with no `plan=` at all, so a THIRD session bound to this same
+# plan read this session's own adoption as `unattributed` and declined to re-adopt it. The
+# value is the ADOPTER's binding: the launching session is recorded separately, in
+# `adopted_from=`, and both are on the row.
+expect_contains "…carrying THIS session's binding in the same trailing plan= field a dispatched row uses" \
+  "|plan=$A17A" "$(printf '%s\n' "$ROSTER17A" | grep "name=a-writer")"
+expect_contains "…beside the launching session it was adopted from" \
+  "|adopted_from=$PRED_A17|" "$(printf '%s\n' "$ROSTER17A" | grep "name=a-writer")"
 expect_absent   "…and NEVER the other run's row" "name=b-writer" "$ROSTER17A"
 expect_absent   "…nor its id" "$ID_B17" "$ROSTER17A"
 expect_absent   "…nor the unattributed row" "name=n-writer" "$ROSTER17A"
@@ -2376,6 +2400,8 @@ expect_contains "bound to B: B's row is now the own one" \
 expect_contains "…and A's is the other one" \
   "partition=other" "$(adopt_line a-writer "$OUT17B")"
 expect_contains "…this session's roster gains the B row" "name=b-writer" "$ROSTER17B"
+expect_contains "…attributed to B, the plan THIS caller is bound to — the opposite answer on the same fixture" \
+  "|plan=$B17B" "$(printf '%s\n' "$ROSTER17B" | grep "name=b-writer")"
 expect_absent   "…and never the A row — the same fixture, the opposite answer" \
   "name=a-writer" "$ROSTER17B"
 expect_absent   "…nor A's id" "$ID_A17" "$ROSTER17B"
@@ -2392,6 +2418,13 @@ OUT17U="$OUT"
 ROSTER17U="$(cat "$(roster_of "$R17U")")"
 
 expect_contains "unbound: the A row is adopted" "$ID_A17" "$ROSTER17U"
+# AN UNBOUND ADOPTER WRITES `plan=none`, the same literal hooks/dispatch-preflight.sh writes
+# for an unbound dispatcher — never the plan the row it took happened to name. Adoption does
+# not create a binding; `bind` does.
+expect_contains "…and the row it wrote says plan=none, because THIS session has no binding" \
+  "|plan=none" "$(printf '%s\n' "$ROSTER17U" | grep "name=a-writer")"
+expect_absent   "…never the plan the adopted row itself named" \
+  "|plan=$R17U/.bionic/docs/plans/epic-17/run-a.plan.md" "$(printf '%s\n' "$ROSTER17U" | grep "name=a-writer")"
 expect_contains "…the B row is adopted" "$ID_B17" "$ROSTER17U"
 expect_contains "…and so is the unattributed one" "$ID_N17" "$ROSTER17U"
 expect_contains "…every line says the partition it did NOT take" \

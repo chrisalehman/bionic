@@ -442,6 +442,125 @@ else
 fi
 
 echo ""
+echo "--- SECTION 5 — the session-bound run, and the bind step in the resume ritual (wave-session-bound-run, A4/AC-5/AC-8) ---"
+#
+# WHAT THIS SECTION OWNS. Two sentences in `payload/skills/canonical-sdlc/SKILL.md`'s Patrol
+# paragraph that no hook can check, and that decide whether a resumed session works its own
+# run or its neighbour's:
+#
+#   (g) THE RULE. "Which run" moved from the PROJECT to the SESSION at bionic 1.4.2: the open
+#       run is the plan the session's own engagement marker names, and only an UNBOUND session
+#       falls back to the newest plan. The hooks enforce it; the SENTENCE is what stops the
+#       next reader from re-deriving the old project-keyed rule from the fallback they
+#       happened to observe — which is exactly what an unbound session sees, every time.
+#   (h) THE STEP. Engagement binds only a SOLE open run (AC-7), so a session resuming into a
+#       root with several is unbound, and `adopt` partitions on the binding (AC-2). Without
+#       the bind step the resume ritual reads as complete while leaving the session gated on
+#       another run's plan and offered another run's agents — the two symptoms the wave was
+#       opened for. No hook can require this: binding is an act the model takes, and the only
+#       surface that can ask for it is this paragraph.
+#
+# BYTE-LEVEL, whitespace-normalized, through §2's own `has_pin` — the same latitude and no
+# more. ANTI-VACUITY by the discriminate-a-doctored-copy pattern §1-§4 use.
+#
+# ASSERTION 32 IS THE ONE WITH TEETH ACROSS FILES: the verb this paragraph tells the operator
+# to type is read out of SKILL.md and compared to the verb `hooks/session-poker.sh` puts in
+# its own usage block. A rename on either side splits them here rather than in a session that
+# types a command the tool does not have.
+#
+# APPENDED, NEVER REWRITTEN: §1-§4 belong to earlier slices.
+
+echo ""
+echo "=== Section 5: the session-bound run and the resume-ritual bind step ==="
+
+PIN_BOUND_RUN='**Which run is a property of the SESSION, not of the project** (bionic 1.4.2): the open run is the plan this session is BOUND to, recorded as the `plan=` line of its own engagement marker'
+PIN_FALLBACK='Only an UNBOUND session falls back to the newest plan under the docs root'
+PIN_BIND_STEP='**The resume ritual binds its run before it adopts anything:** if session-start listed more than one open run — or this session is otherwise unbound in a root that holds several — run `bash <plugin-root>/hooks/session-poker.sh bind <plan>` for the plan this session means, immediately after engaging and before the first dispatch.'
+
+if has_pin "$SKILL_MD" "$PIN_BOUND_RUN"; then
+  ok "30: SKILL.md states that the run is a property of the session, verbatim"
+else
+  no "30: SKILL.md states that the run is a property of the session, verbatim" "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_FALLBACK"; then
+  ok "31: …and that ONLY an unbound session takes the newest-plan fallback"
+else
+  no "31: …and that ONLY an unbound session takes the newest-plan fallback" "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_BIND_STEP"; then
+  ok "32: SKILL.md's resume ritual carries the bind step verbatim (A4: exactly one added step)"
+else
+  no "32: SKILL.md's resume ritual carries the bind step verbatim (A4: exactly one added step)" \
+     "file: $SKILL_MD"
+fi
+
+# --- 33: the verb the paragraph types is the verb the tool offers ---
+#
+# READ FROM BOTH FILES, never asserted against a constant twice — §4's rule. The doc side is
+# the operand-carrying spelling inside the bind sentence; the code side is the poker's own
+# usage line. An extractor that returned empty on both sides could not agree its way to
+# green, because assertion 34 pins the extracted value.
+POKER_SH="${REPO}/hooks/session-poker.sh"
+
+# bind_verb_doc <SKILL.md> -> `session-poker.sh bind <plan>` as the ritual spells it
+bind_verb_doc() {
+  _flatten "$1" \
+    | sed -n 's/.*run `bash <plugin-root>\/hooks\/\(session-poker\.sh bind <plan>\)` for the plan.*/\1/p'
+}
+# bind_verb_code <session-poker.sh> -> the same phrase out of the usage block
+bind_verb_code() {
+  /usr/bin/grep -m1 'session-poker\.sh bind <plan>' "$1" 2>/dev/null \
+    | sed -n 's/.*\(session-poker\.sh bind <plan>\).*/\1/p'
+}
+
+BIND_DOC=$(bind_verb_doc "$SKILL_MD")
+BIND_CODE=$(bind_verb_code "$POKER_SH")
+
+expect_eq "33: SKILL.md tells the operator to type the verb the poker publishes" \
+  "$BIND_CODE" "$BIND_DOC"
+expect_eq "34: …and the verb both sides name is 'session-poker.sh bind <plan>'" \
+  'session-poker.sh bind <plan>' "$BIND_DOC"
+
+# --- Anti-vacuity: the same extractors and pins must report a mutation ---
+
+DOCTORED_BOUND="$TMP/skill-bound-run-mutated.md"
+sed 's/Only an UNBOUND session falls back/Every session falls back/' "$SKILL_MD" > "$DOCTORED_BOUND"
+if cmp -s "$SKILL_MD" "$DOCTORED_BOUND"; then
+  no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_BOUND" "$PIN_FALLBACK"; then
+  no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "35: a doctored SKILL.md fails the fallback pin (pin discriminates)"
+fi
+
+DOCTORED_BIND="$TMP/skill-bind-step-mutated.md"
+sed 's/binds its run before it adopts anything/adopts before it binds anything/' \
+  "$SKILL_MD" > "$DOCTORED_BIND"
+if cmp -s "$SKILL_MD" "$DOCTORED_BIND"; then
+  no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_BIND" "$PIN_BIND_STEP"; then
+  no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
+     "the pin matched a copy that puts adopt first"
+else
+  ok "36: a reordered resume ritual fails the bind-step pin (pin discriminates)"
+fi
+
+DOCTORED_BIND_VERB="$TMP/session-poker-verb-mutated.sh"
+sed 's/session-poker\.sh bind <plan>/session-poker.sh bindrun <plan>/' "$POKER_SH" > "$DOCTORED_BIND_VERB"
+if cmp -s "$POKER_SH" "$DOCTORED_BIND_VERB"; then
+  no "37: a renamed poker verb splits from the doc (pin discriminates)" \
+     "the sed target matched nothing — the usage line moved"
+else
+  expect_ne "37: a renamed poker verb splits from the doc (pin discriminates)" \
+    "$BIND_DOC" "$(bind_verb_code "$DOCTORED_BIND_VERB")"
+fi
+
+echo ""
 echo "========================================"
 echo "docs-pins: $PASS/$TOTAL passed"
 echo "========================================"
