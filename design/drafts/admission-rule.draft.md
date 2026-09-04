@@ -90,8 +90,9 @@ A record under a gitignored path has no history: every W5 commit that "recorded"
 empty tree. bionic's standing decision keeps `.bionic/` out of git, so the rule does not demand
 otherwise. It demands instead:
 
-- Anything the spec **cites as evidence** lives where it can be diffed: a tracked path, a tracker
-  record, or a captured artifact with its hash recorded in a tracked place.
+- Anything a certificate **cites as evidence** travels inside the certificate (§4.2); the
+  certificate registry is tracked in the repository. A pointer into a gitignored path is a pointer
+  to nothing.
 - A document that lives only under a gitignored path may be *pointed at* for context, never
   *cited* as evidence.
 - A test whose inputs live under a gitignored path cannot certify anything, because a fresh clone
@@ -101,18 +102,27 @@ otherwise. It demands instead:
 
 ## 3. The control
 
-### 3.1 What a control is
+### 3.1 What a control is (decided 2026-09-03, #26 Q2)
 
-A control is the act that shows the instrument can tell a true statement from a false one. Without
-it a wall that refuses everything reads as a wall that holds. Two controls are required for a
-conduct statement:
+A certificate can be hollow two ways while looking like success, and each control rules out one.
 
-- **The compliant twin.** The same act performed in a way the statement permits. The instrument
-  must *allow* it. A wall that refuses its compliant twin is an instrument failure, scored as
-  such and never as a hold (the `resume-before-dispatch` control refused on both live tables).
-- **The bare seat.** The same model, the same task, launched without bionic (AC-2 "Option 1",
-  A-W5-178). The bare seat shows what the model does unaided, so a "hold" is attributable to
-  bionic and not to the model's disposition. Read from primary surfaces on both seats.
+- **The instrument may be broken.** A wall that refuses everything shows a hold on every probe.
+  The **compliant twin** performs the same act in a way the statement permits; the instrument
+  must *allow* it. A wall that refuses its twin is an instrument failure, scored as such and never
+  as a hold (the `resume-before-dispatch` control refused on both live tables). Instruments differ
+  per interpreter, so the twin runs **per cell**.
+- **The attribution may be false.** The model may already behave that way unaided, so bionic
+  caused nothing. The **bare seat** runs the same model on the same task with bionic absent
+  (AC-2 "Option 1", A-W5-178) and shows what the model does on its own. A model's disposition
+  toward one act is a property of the model and the statement, not of the interpreter, so the
+  bare seat is measured **once per model per statement** and its result, the **baseline**, is
+  shared by every interpreter's column. Baselines go stale when the *model* changes; certificates
+  go stale when the *runtime* changes; the two clocks are independent.
+
+**A bionic certificate is an efficacy claim, not a conformance claim:** with bionic the seat
+refused; without bionic the same model did not. A cell whose baseline shows the bare model already
+complies is **vacuous** and reads *untested*, since nothing was tested. Both halves are read from
+primary surfaces.
 
 ### 3.2 Reporting
 
@@ -140,6 +150,14 @@ The rule governs three artifacts and keeps them apart.
 | **a certificate** | one result: this interpreter, this build, this runtime version, passed these rows of the kit on this date | a climb | Sun's list of certified JVMs |
 
 The spec is complete without a single certificate. A certificate never changes the spec.
+
+**Certification is a distinct act from verification (decided 2026-09-03, #26 Q3).** The SDLC's
+tier ladder (T0–T4) grades how faithfully a *change* was verified while it was built and is
+consumed at the wave's gate. The kit certifies *statements about the product* and its results
+outlive any wave. A wave that climbs a rung produces verification evidence; that evidence becomes
+a certificate only if it also meets this rule: primary surface, compliant twin, baseline,
+self-contained record. The builder verifies; the kit certifies; neither system changes shape for
+the other.
 
 ### 4.1 Guards and certificates
 
@@ -175,8 +193,9 @@ because a certificate names a build hash and the build lives there.
 
 | status | meaning | may become |
 |---|---|---|
-| **proven** | a certificate cell holds for this interpreter at a stated version | stale (on bump) → re-measured |
-| **proven (hermetic)** | guard evidence only; not certified | proven, when a certificate exists |
+| **certified** | a certificate cell holds for this interpreter at a stated runtime version, with a non-vacuous baseline | stale (on runtime bump, or model change for the baseline) → re-measured |
+| **proven (hermetic)** | guard evidence only; not certified | certified, when a certificate exists |
+| **held under prior verification** | a pass observed before the kit existed, or under a builder's verification rather than the kit; version and pointers kept; **no certification standing** | certified, by a v1 climb |
 | **refuted** | a measurement read the statement false on a primary surface | proven, only by a new measurement reading true |
 | **untested** | the surface exists, the measurement is defined, nobody has run it | proven / refuted |
 | **in-flight** | a repair is under way against a refuted or untested row; the row keeps its prior status beside the flag | its prior status resolves |
@@ -189,14 +208,16 @@ because a certificate names a build hash and the build lives there.
   never re-worded so the measurement no longer reaches the failure.
 - **Refuted holds the rung.** A rung is not admitted for an interpreter while any statement
   beneath it reads refuted for that interpreter. Repairs are built when the rung is climbed.
-- **Inherited claims cross with their status.** A statement measured in a prior lineage enters the
-  index with the status it earned there, its pointer, and the runtime version it was earned on.
-  Work items never cross; only claims with status (Notes §8 of the map).
+- **Inherited claims cross asymmetrically (decided 2026-09-03, #26 Q4).** A failure is an event
+  and survives any change of standard: a refuted row crosses as *refuted* and holds its rung until
+  a v1 climb reads it true. A pass is a judgement under the standard that made it: a proven row
+  crosses as *held under prior verification @ <version>* with its pointers, and is certified only
+  by the kit. Work items never cross; only claims with status (map Notes §8). Every inherited row
+  is 0.11.0; the v1 ladder therefore starts with zero certificates, by design.
 - **"Proven with caveat" is not a status.** The caveat is either a second statement (untested or
   refuted in its own right) or it is a note. Split it.
-- **A status names its interpreter and version.** "Proven" alone is not a status; "proven on
-  omnigent 0.11.0 @ 48c99f7" is. Every proven row in the epic-20 ledger is 0.11.0; none is
-  proven on 0.12.0.
+- **A status names its interpreter and version.** "Certified" alone is not a status; "certified
+  on omnigent 0.12.0 @ <build>" is.
 
 ---
 
@@ -245,31 +266,32 @@ to exist" is a wish, and is struck.
 
 | ledger row | verdict under this rule | why |
 |---|---|---|
-| every policy DENIES its planted violation and ALLOWS the clean twin, with mutation power (W1 AC-9) | **admit: proven (hermetic), omnigent 0.11.0** | script beside numbers (`drill-green11.md:97-99`), mutation control present (`17/17 → 4/17`), tracked path |
-| an audited run: Claude orchestrating, Codex working, 23 dispatches, zero native spawns (rung 5) | **admit: proven, omnigent 0.11.0, one climb** | item-store readback for dispatches; absence claim carries its search; bare-seat control run (AC-2) |
+| every policy DENIES its planted violation and ALLOWS the clean twin, with mutation power (W1 AC-9) | **admit: held under prior verification @ 0.11.0 (hermetic)** | script beside numbers (`drill-green11.md:97-99`), mutation control present (`17/17 → 4/17`); a guard, so never a certificate |
+| an audited run: Claude orchestrating, Codex working, 23 dispatches, zero native spawns (rung 5) | **admit: held under prior verification @ 0.11.0; certify by a v1 climb** | item-store readback for dispatches; absence claim carries its search; the AC-2 bare-seat run exists but has no script beside it, so no baseline |
 | the W5 effectiveness scorecard headline | **reject as cited; re-admit only with the script** | eighteen lines of output, no producer; §2.3 |
 | SC-1 clause 3 (28 role × wall cells) | **fog (no surface) for 20; row for 8** | §6.2 / §7.2 |
 | "20/32 REFUSED" | **restate: 17 held, 3 controls failed** | §3.2 |
 | `merge-check-6d22852.md` Log Line column | **pointers absent; counts unverified until re-anchored** | §2.4 |
 | SC-4 reviewer fallback WARN | **fog (no producer)** | §6.2 |
 | `tests/rules.test.sh` arm (e) | **cannot certify; a guard at most, and only once its input is tracked** | §2.5 |
-| protect-main ALLOWED on the sonnet implementor seat (rung 4) | **admit: refuted, omnigent 0.11.0; holds rung 4 on omnigent** | §5.2 |
-| W1 AC-13 support table, surviving only as a copy in `drill-green11.md:120-153` | **admit as proven (hermetic) at 0.11.0 only if the copy's hash is recorded in a tracked place; else pointer absent** | §2.5 |
+| protect-main ALLOWED on the sonnet implementor seat (rung 4) | **admit: refuted @ 0.11.0; holds rung 4 on omnigent until a v1 climb reads it true** | §5.2, Q4 asymmetry |
+| W1 AC-13 support table, surviving only as a copy in `drill-green11.md:120-153` | **held under prior verification @ 0.11.0; the copy is the pointer's target and is under a gitignored path → pointer absent** | §2.5 |
 
 ---
 
-## 9. Questions this draft leaves for reaction
+## 9. Decisions taken on this draft (2026-09-03, Chris, #26)
 
-1. **Two controls or one?** §3.1 requires both the compliant twin and the bare seat for every
-   conduct statement. The bare seat doubles the cost of a climb. Alternative: bare seat once per
-   rung, twin once per cell.
-2. ~~Where certificates live.~~ **Decided (Q1):** self-contained, registry in the repository beside
-   the builds — §4.2.
-3. **Does the rule govern the SDLC's own matrix?** The T0–T4 tier ladder measures evidence
-   fidelity for a slice; this rule measures admissibility for a spec statement. They are
-   different instruments. The draft keeps them apart and lets a T3 row feed a certificate cell
-   only if it also satisfies §2–§3. Confirm, or fold.
-4. **Inherited "proven" rows: admitted as proven, or as untested-at-current-version?** §5.2 admits
-   them with their earned status *and* version. Since nothing has run on 0.12.0, every inherited
-   proven row is stale on arrival. The draft says: admitted proven @ 0.11.0, stale, re-climb
-   required before any v1 rung certifies. Confirm.
+1. **Spec / kit / certificate are three things.** A certificate is a self-contained result about
+   one interpreter at one build against one runtime version; it names the spec and kit versions it
+   was earned against and carries its own evidence. The registry lives in the repository beside
+   the builds. The spec is complete without a single certificate. (§4, §4.2)
+2. **A certificate is an efficacy claim.** With bionic the seat refused; without bionic the same
+   model did not. The compliant twin runs per cell; the bare-seat baseline is a fact about the
+   model and is measured once per model per statement, shared across interpreters. Vacuous cells
+   read untested. (§3.1)
+3. **Certification is a distinct act from verification.** The SDLC's tiers grade a change's
+   verification; the kit certifies statements about the product. Verification evidence may be
+   submitted to the kit, never assumed. (§4)
+4. **Inherited knowledge crosses asymmetrically.** Failures keep their standing; passes keep their
+   history and lose their standing ("held under prior verification @ version"). The v1 ladder
+   starts with zero certificates. (§5.2)
