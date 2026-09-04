@@ -673,3 +673,14 @@ decision 2 retired that wall for lease, budget and transitive kill; the rows fol
 quoted as ratified. (b) Map Notes §8's "a rung is not admitted while a claim under it reads refuted"
 is subsumed by #24 decision 5; §4.5 follows #24. (c) The ledger's *keep* on A2 to A5 versus #25
 decision 2: Q1 above.
+
+## 11. Answers to §10 (2026-09-03, Chris via the working session)
+
+1. **Worker-containment keeps (A2–A5).** Follows #25 decision 2: not adopted; the four rows are consumed as dropped; 22 keeps port. *(derived)*
+2. **Per-role tool grants (ML R12).** Constitution content certified at rung 2 ("a seat wakes with its role's tool grants"), read from the seat's first-turn configuration. Not a wall: a read-only role's write is undoable, so by #25 decision 1 it has no ground. *(derived)*
+3. **Epic name and folder.** `epic-21-v1-ladder`, `.bionic/docs/specs/epic-21-v1-ladder/`, branch `epic/21-v1-ladder`, waves 0 / K / 1–5 accepted as the proposal canonical-sdlc Step 0 starts from. *(decided, reversible)*
+4. **Baseline model set: the roster's population.** The baseline table covers exactly the model × role pairs the roster names; a model outside the roster is never seated, so nothing about it is unread; a roster change pays its baseline column before the model's first run. *(Chris, Q2 of the reaction)* Rejected: every seatable model (a universe larger than the product); a hand-picked subset (a certified run could seat an unmeasured model).
+5. **The plugin's opening act.** The person invoking the method in a hand-opened session is the plugin's opening act (provenance with a human originator, #23 decision 3); arming the Patrol is the resident's birth on Claude Code. The plugin gains no opening command. *(derived)*
+6. **Transfer across adapters: not in v1.** Independence in v1 is at the **steward layer** — the chair changes occupant, possibly to another vendor's model, under the same governor; R5.1's coverage says so. Governor-layer (harness) independence is a different promise with no inherited evidence and no preparing rung; it is a fresh map if ever wanted, recorded under Out of scope. *(Chris, Q1 of the reaction)*
+
+Consequential edits to make when this draft becomes the ratified set: R5.1 coverage line; Rung 2 gains a row for tool grants (from Rung 2 fog); §8 Wave K names the roster as the baseline population; the conflicts noted at the end of §10 are resolved in favour of #25.
