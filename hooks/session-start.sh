@@ -248,10 +248,46 @@ CUR="$(session_id "$PAYLOAD_SID")" || CUR=""
 # — because none of that operational detail is addressed to a bystander. A sid
 # this hook cannot read is, like every other unreadable state here, NOT
 # engaged: the safe direction is the quieter one.
-PLAN="$(active_run "$ROOT")" || PLAN=""
-if [ -n "$PLAN" ] && [ -f "$PLAN" ] && ! engaged_session "$ROOT" "$CUR"; then
-  printf 'bionic: an open run exists here (%s) — invoke /bionic:canonical-sdlc to engage it\n' "$PLAN"
-  exit 0
+#
+# THE OPEN-RUN SET, not the single newest file (wave-session-bound-run S7,
+# AC-5). `RUNS`/`N` decide the shape below: N=0/1 reproduce today's behaviour
+# exactly — a lone open run is unambiguous, bound or not. N>=2 means a scan
+# can no longer guess which run a session means, so a bystander gets every
+# path plus the bind verb instead of one path picked by mtime, and an engaged
+# session whose own binding does not resolve to one of them (unbound, or
+# bound to a run that has since closed) gets the same listing prepended to
+# today's engaged block rather than a silent guess — it is not exited early,
+# because the roster/stamp/re-arm report still belongs to an engaged reader.
+RUNS="$(open_runs "$ROOT")" || RUNS=""
+N=$(printf '%s\n' "$RUNS" | grep -c '.')
+
+if [ "$N" -eq 1 ]; then
+  PLAN="$RUNS"
+  if ! engaged_session "$ROOT" "$CUR"; then
+    printf 'bionic: an open run exists here (%s) — invoke /bionic:canonical-sdlc to engage it\n' "$PLAN"
+    exit 0
+  fi
+elif [ "$N" -ge 2 ]; then
+  if ! engaged_session "$ROOT" "$CUR"; then
+    printf 'bionic: %s open runs exist here — invoke /bionic:canonical-sdlc, then bind the one you mean with: bash %s/hooks/session-poker.sh bind <plan>\n' \
+      "$N" "$HOOK_ROOT"
+    printf '%s\n' "$RUNS" | while IFS= read -r _RUN_PATH; do
+      [ -n "$_RUN_PATH" ] && printf '  %s\n' "$_RUN_PATH"
+    done
+    exit 0
+  else
+    VERDICT="$(session_run "$ROOT" "$CUR" 2>/dev/null)"
+    case "$VERDICT" in
+      bound-open\ *) : ;;
+      *)
+        printf 'bionic: %s open runs exist here and this session is not bound to one — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
+          "$N" "$HOOK_ROOT"
+        printf '%s\n' "$RUNS" | while IFS= read -r _RUN_PATH; do
+          [ -n "$_RUN_PATH" ] && printf '  %s\n' "$_RUN_PATH"
+        done
+        ;;
+    esac
+  fi
 fi
 
 AGREE="agree"
