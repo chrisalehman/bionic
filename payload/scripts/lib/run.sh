@@ -256,11 +256,20 @@ active_run() {
 # `open_runs` and checked against `active_plan`'s answer on one fixture. §A2's library
 # mutations (`depth-1`, `fence-blind`, `no-marker-skip`) are line-oriented and hit both
 # copies, so neither can drift under a mutation the battery already runs.
+#
+# EACH CANDIDATE IS READ TWICE AND THAT WAS MEASURED, NOT ASSUMED (S10a, review P2a). The
+# `## SDLC State` filter and `run_open` each run `_run_lines` on the same file. Collapsing
+# them — capture once, hand the text to the verdict — was built and timed against this tree
+# and is NOT taken: it moves 500 small plans from 8.4s to 8.1s and moves THIS repository's
+# 104 candidates from 1.33s to 1.45s, because bash copies a 46 KB plan through the capture,
+# the argument and the callee's local where the streamed pipe copies it none. The read that
+# is actually worth removing is the one inside `run_open`, which reads its own text four
+# more times through here-strings; that is the awk-rewrite promoted out of this slice.
 open_runs() {
   local root="$1"
   local droot
   droot=$(docs_root "$root")
-  local f d i j
+  local f d i j lo hi mid
   local cnt=0
   local -a ord
   for d in "$droot/plans" "$droot/incidents"; do
@@ -272,24 +281,53 @@ open_runs() {
         /^## SDLC State/ { found = 1 }
         END { exit !found }' || continue
       run_open "$f" || continue
-      # INSERTION SORT, newest first. Bash 3.2: element-wise reads and writes only — no
-      # `"${ord[@]}"` expansion, which is an unbound-variable error on an empty array under
-      # the `set -u` every calling hook runs with.
-      i=0
-      while [ "$i" -lt "$cnt" ]; do
-        [ "$f" -nt "${ord[$i]}" ] && break
-        i=$((i + 1))
+      # BINARY INSERTION, newest first (S10a, review P2c). The comparator is `-nt`, which is
+      # `active_plan`'s own and the whole reason this is not a `stat`-and-`sort` pass — see
+      # the block below the loop. What changed is only HOW MANY times it is asked: the linear
+      # scan this replaces did one compare per element already placed — 125,000 stat pairs at
+      # 500 open runs, measured at 1.15s standalone — and the binary search does ~9.
+      #
+      # IT FINDS THE SAME INDEX THE LINEAR SCAN DID, so the output is unchanged byte for byte.
+      # `ord` is ordered newest-first, so `[ "$f" -nt "${ord[$i]}" ]` is FALSE for a prefix
+      # and TRUE for the rest — monotone in `i` — and the boundary is exactly where the
+      # linear scan broke. Ties keep discovery order, because `-nt` is STRICTLY newer.
+      #
+      # Bash 3.2: element-wise reads and writes only — `"${ord[@]}"` is an unbound-variable
+      # error on an EMPTY array under the `set -u` every calling hook runs with.
+      lo=0; hi="$cnt"
+      while [ "$lo" -lt "$hi" ]; do
+        mid=$(( (lo + hi) / 2 ))
+        if [ "$f" -nt "${ord[$mid]}" ]; then hi="$mid"; else lo=$((mid + 1)); fi
       done
       j="$cnt"
-      while [ "$j" -gt "$i" ]; do
+      while [ "$j" -gt "$lo" ]; do
         ord[$j]="${ord[$((j - 1))]}"
         j=$((j - 1))
       done
-      ord[$i]="$f"
+      ord[$lo]="$f"
       cnt=$((cnt + 1))
     done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
   done
   [ "$cnt" -gt 0 ] || return 1
+
+  # WHY NOT ONE `stat` AND ONE `sort`, which is the obvious O(n log n) rewrite and was
+  # BUILT AND MEASURED BEFORE IT WAS REJECTED (S10a, review P2c). Keying on `stat`'s
+  # nanosecond mtime and sorting once takes 500 open runs from 10.3s to 8.3s, against 9.2s
+  # for the binary insertion above — and it silently breaks the one invariant this function
+  # is held to.
+  #
+  # `-nt` IS NOT A TIMESTAMP COMPARISON, IT IS THE SHELL'S. Measured on this machine: bash
+  # 3.2 (`/bin/bash` on macOS, the interpreter the hooks are written for) compares WHOLE
+  # SECONDS, while bash 5.3 compares the full timespec. `active_plan` selects with `-nt`, so
+  # any key of our own that is finer or coarser than the running shell's disagrees with it
+  # for candidates sharing a second — and "LINE 1 IS active_run's ANSWER" is exactly what
+  # run-predicate R6 and cross-gate §OR.1 pin. The disagreement is invisible to every fixture
+  # that sets mtimes with `touch -t`, and it showed up only on a 500-plan tree built in one
+  # burst: identical SET, 21 lines in a different order.
+  #
+  # So the comparator stays the shell's. The cost that was actually worth removing is the
+  # NUMBER of comparisons, which the binary search takes from O(n²) to O(n log n) without
+  # introducing a second opinion about which of two files is newer.
   i=0
   while [ "$i" -lt "$cnt" ]; do
     printf '%s\n' "${ord[$i]}"
@@ -325,7 +363,10 @@ open_runs() {
 #   NEWEST-PLAN IS THE ANNOUNCED FALLBACK, not the default. A session with no binding —
 #   never engaged, or `plan=none`, which is what engagement writes when the root holds zero
 #   or several open runs — resolves exactly as it did before this wave, by `active_run`, and
-#   every consumer says `fallback` out loud so the resolution it used is visible (AC-3).
+#   every consumer THAT ACTS ON THE RESOLUTION says `fallback` out loud, so the resolution
+#   it used is visible (AC-3). Two callers announce nothing and are right not to:
+#   `hooks/engage.sh` is deciding a binding rather than acting on a verdict, and
+#   `hooks/session-start.sh` prints its own listing instead.
 #
 # The marker is still never written from here: this file reads disk and nothing else. The
 # one writer is `payload/scripts/lib/binding.sh`.

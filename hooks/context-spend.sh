@@ -16,8 +16,9 @@
 # [INSTRUMENT]
 #
 # Registered once in hooks/hooks.json, always on, and scoped by an on-disk fact rather
-# than by whether a skill is armed: it asks `active_run` whether this project has an open
-# run and exits silently when it does not.
+# than by whether a skill is armed: it asks `session_run` (which was `active_run` until
+# wave-session-bound-run made run identity per-session) whether THIS SESSION has an open run
+# and exits silently when it does not.
 
 set -u
 

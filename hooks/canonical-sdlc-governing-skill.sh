@@ -392,6 +392,24 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # An Edit never binds (AC-9). It changes a plan; it does not create a run.
   [ "$TOOL" = "Write" ] || exit 0
 
+  # A DISPATCHED AGENT'S WRITE NEVER MOVES ITS DISPATCHER'S BINDING (S10a, review A-2/F5).
+  # An agent-context payload carries a top-level `agent_id` AND the DISPATCHING session's
+  # `session_id` — that is the documented basis of the partition guard
+  # (hooks/agent-context-guard.sh:37-40: "the payload carries a top-level `agent_id` … this
+  # is an agent context. Main-thread payloads have no such field"). This arm reads
+  # `.session_id`, so without this test a subagent drafting the NEXT wave's plan, or a
+  # Step-9 close-out writer, silently rebinds the LIVE ORCHESTRATOR — after which the
+  # orchestrator's evidence gate gates its commits on the new plan. That is the
+  # least-privileged context on the machine redirecting every wall in the fleet.
+  #
+  # T4 RATIFIED REBINDING FOR THE MAIN THREAD and nothing extended it to depth two. It also
+  # sits crosswise to the precedent ADR's "No nested tracking … the roster records only
+  # depth-one dispatches": binding is identity state, and a depth-two act must not mutate
+  # depth-one identity.
+  case "$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)" in
+    ?*) exit 0 ;;
+  esac
+
   # A WRITE THAT OVERWROTE AN EXISTING FILE IS NOT A NEW RUN. PostToolUse cannot see the
   # pre-state, so the distinction comes from the payload: Claude Code reports `create` or
   # `update` in `tool_response.type` for Write (measured on this machine, 2026-09-04: 17
@@ -442,54 +460,35 @@ case "$GS_RUN" in
     echo "governing-skill: bound plan closed — ${GS_RUN#bound-closed }; this session has no open run" >&2 ;;
 esac
 
-# ---------- WHAT ARMS THIS WALL (AC-7, and one deviation from it) ----------
+# ---------- WHAT ARMS THIS WALL (AC-7) ----------
 #
-# Always-on registration means this hook is delivered on every Write and Edit in every
-# project on the machine, so what scopes it has to be an on-disk fact rather than a
-# skill somebody armed. For nine of the ten governance hooks that fact is the session's
-# run and nothing else. This one needs two more clauses, and the reason is structural
-# rather than defensive.
+# ENGAGEMENT ARMS IT. Full stop. The guard above exits unless
+# `<root>/.bionic/tmp/engaged-<sid>.state` is a regular file under the ARTIFACT's own root,
+# so every line from here down runs for a session that invoked `/bionic:canonical-sdlc` in
+# the project being written to, and for no other.
 #
-# THE ARTIFACT THIS GATE EXISTS FOR IS THE ONE THAT CREATES THE RUN. A wave's plan is
-# written at Step 3, into a project that has no plan yet — so the run verdict is `none`
-# at the exact moment the frontmatter contract most needs to bind, and a run-scoped-only
-# gate would pass the write that establishes `canonical_sdlc_version`, the triple and
-# the flags every later wall reads. Measured, not reasoned: 46 assertions in
-# tests/canonical-sdlc-governing-skill.test.sh go red under the bare predicate, and
-# every one of them is a project's first artifact.
+# THERE USED TO BE THREE MORE CLAUSES AND THEY WERE ALREADY DEAD (S10a, review A-1). The
+# wall was described as armed by the PROJECT "shown one of three ways" — a `.bionic/` tree
+# at the root, a target inside a `.bionic/` tree, or content declaring
+# `canonical_sdlc_version:` — implemented as an early exit guarded by
+# `[ ! -d "$PROJECT_ROOT_FROM_PATH/.bionic" ]`. That test can never be true here: a REGULAR
+# FILE at `<root>/.bionic/tmp/engaged-<sid>.state` entails a directory at `<root>/.bionic`,
+# `PROJECT_ROOT_FROM_PATH` is assigned once and never reassigned, and the engagement guard
+# sits above. b2dbb14 said so in its own commit message when it deleted the block's other
+# conjunct, and left the corpse; the seventeen lines and their `jq | awk | awk | grep`
+# content scan are gone now, with the explanation that outlived them.
 #
-# So the wall is armed by the PROJECT, shown one of three ways. The session's run is NOT
-# a clause: the engagement guard above requires `<root>/.bionic/tmp/engaged-<sid>.state`,
-# so a `.bionic/` tree exists for every session that reaches this line, and a run clause
-# here could never decide anything (deleted on Chris's ruling, wave-session-bound-run,
-# 2026-09-04; the verdict is still announced above, because AC-3/AC-6 want it said).
-#   - a `.bionic/` tree already at this root, or
-#   - a target path inside a `.bionic/` tree — the first-artifact case, where the
-#     directory does not exist yet and this write is what creates it, or
-#   - CONTENT that declares `canonical_sdlc_version:` — a file that calls itself a
-#     canonical-sdlc artifact is one wherever it lands, and catching it OUTSIDE the
-#     docs root is the whole of the AC-13 misplacement wall.
-# Anything else is a Write in a project that has nothing to do with this lifecycle and
-# passes in silence. A `deploy.plan.md` in an unrelated repository that claims nothing
-# is not this gate's business, and under always-on registration that has to be true by
-# construction rather than by which skill happened to be armed.
-if [ ! -d "$PROJECT_ROOT_FROM_PATH/.bionic" ]; then
-  case "$FILE_PATH" in
-    */.bionic/*) : ;;
-    *)
-      # The leading frontmatter block only — the same reading the evidence gate's
-      # misplacement sweep uses, so a fenced example inside a documentation page
-      # cannot arm a wall by quoting one.
-      if ! echo "$INPUT" \
-           | jq -r '(.tool_input.content // .tool_input.new_string // "")' 2>/dev/null \
-           | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' \
-           | awk 'NR == 1 && $0 == "---" { f = 1; next } f && $0 == "---" { exit } f' \
-           | grep -qE '^[[:space:]]*canonical_sdlc_version[[:space:]]*:'; then
-        exit 0
-      fi
-      ;;
-  esac
-fi
+# WHY THE OLD CLAUSES EXISTED, kept because it explains what still has to hold. The artifact
+# this gate exists for is the one that CREATES the run: a wave's plan is written at Step 3
+# into a project whose run verdict is `none`, so the frontmatter contract has to bind before
+# there is any run to scope by. That is why the run is not a clause and never was one — the
+# verdict is announced above for AC-3/AC-6 and decides nothing here. Engagement, not the
+# run, is what makes the write this hook's business.
+#
+# AND WHY A WRITE IN AN UNRELATED PROJECT STILL PASSES IN SILENCE: engagement is per-root.
+# A `deploy.plan.md` in a repository this session never engaged in finds no marker under
+# that repository and leaves at the guard, which is the same answer the deleted clauses
+# gave, reached one test earlier.
 
 DOCS_ROOT=$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")
 

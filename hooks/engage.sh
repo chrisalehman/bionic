@@ -284,17 +284,26 @@ fi
 # "Session binding"; AC-7). This used to be `active_run` — the NEWEST open plan in the root
 # — written unconditionally on every invocation, and that was the bug: two sessions in one
 # repository got one run identity, and a plan landing mid-session silently moved a live
-# session onto it. The rule now, in three lines:
+# session onto it. The rule now, in two lines:
 #
-#   the marker exists AND `session_run` says bound-open  -> re-bind to that SAME plan
-#   otherwise, EXACTLY ONE open run in the root          -> bind to it
-#   otherwise (zero open runs, or two and more)          -> bind to `none`
+#   the marker already names a plan  -> LEAVE IT. Re-engagement decides nothing.
+#   otherwise, EXACTLY ONE open run  -> bind to it; anything else -> bind to `none`
 #
-# A BOUND-OPEN BINDING SURVIVES RE-ENGAGEMENT. A session that has committed to a run keeps
-# it however many times the skill is invoked and however many newer plans land beside it;
-# a binding is a commitment (AC-6), and `engaged_at` rides through with it. A binding whose
-# plan has been DELIVERED or ABANDONED reports `bound-closed`, not `bound-open`, and falls
-# to the count rule below — a dead commitment is not one.
+# A BINDING SURVIVES RE-ENGAGEMENT WHETHER OR NOT ITS PLAN IS STILL OPEN (S10a, review C-1).
+# It used to survive only while `session_run` said `bound-open`; a `bound-closed` binding
+# fell to the count rule, and when the root held exactly one open run that run belonged to
+# ANOTHER SESSION. A session whose own wave had just closed re-invoked the skill and was
+# silently moved onto the neighbour's plan, after which its evidence gate gated on that
+# plan — symptom 1 of the bug this wave was opened on, reached through the engagement door
+# instead of the scan. A binding is a commitment (AC-6) and a dead commitment is still not
+# somebody else's: the operator ends it with `session-poker.sh bind <plan>`, not the hook.
+#
+# SO THE VERDICT IS NOT ASKED FOR HERE, ONLY THE FIELD. `session_plan` reads two lines off
+# disk and answers "is this session bound"; `session_run` would additionally rule on whether
+# the plan is open, and on an UNBOUND session it walks the whole tree through `active_run` to
+# produce a `fallback` this hook then discards. That walk was one of three (review P1): a
+# bound session now does NONE, and an unbound one does the two `open_runs` walks the count
+# rule and the writer's own membership check each need.
 #
 # SEVERAL OPEN RUNS BINDS NOTHING, deliberately. Picking the newest would be the old bug
 # with extra steps; the session is left unbound, session-start lists every candidate, and
@@ -305,23 +314,34 @@ fi
 # shape, mode 600, the symlink refusal and open-run membership are its invariants, shared
 # with poker's `bind` verb and the governing skill's bind-on-first-write. This hook only
 # decides WHICH plan, and never blocks on the answer: every path below exits 0.
-PLAN="none"
-VERDICT=""
-if [ -f "$MARKER" ]; then
-  VERDICT=$(session_run "$REPO" "$SID" 2>/dev/null) || :
+BOUND=0
+if PLAN=$(session_plan "$REPO" "$SID" 2>/dev/null); then
+  BOUND=1
+else
+  PLAN="none"
+  RUNS=$(open_runs "$REPO" 2>/dev/null) || RUNS=""
+  if [ -n "$RUNS" ] && [ "$(printf '%s\n' "$RUNS" | wc -l | tr -d ' ')" = "1" ]; then
+    PLAN="$RUNS"
+  fi
 fi
-case "$VERDICT" in
-  "bound-open "*)
-    PLAN="${VERDICT#bound-open }"
-    ;;
-  *)
-    RUNS=$(open_runs "$REPO" 2>/dev/null) || RUNS=""
-    if [ -n "$RUNS" ] && [ "$(printf '%s\n' "$RUNS" | wc -l | tr -d ' ')" = "1" ]; then
-      PLAN="$RUNS"
-    fi
-    ;;
-esac
 
-bind_plan "$REPO" "$SID" "$PLAN" || :
+# ONE WRITE STATEMENT, AND THE RETRY RIDES IT. Read left to right: write the binding; if the
+# writer refuses and this session was ALREADY BOUND, that refusal is the right answer and the
+# marker stands (the bound plan has closed — a commitment is not somebody else's to reassign,
+# AC-6); if it refuses and the session was UNBOUND, fall to `none`.
+#
+# THE UNBOUND RETRY IS NOT DEFENSIVE PADDING (S10a, review C-4). `PLAN` comes off a walk that
+# has already finished and `bind_plan` walks AGAIN for its own membership check, so a run
+# closing inside that window made the single write refuse and left the session with NO MARKER
+# AT ALL — unengaged, and therefore unwalled, which is the one direction this hook's own
+# fail-direction argument forbids. `none` is what the count rule would have said had the walk
+# seen the close.
+#
+# ONE LINE, DELIBERATELY. tests/cross-gate-agreement.test.sh §B2 proves this hook writes
+# through the single writer by replacing this call site with an inline redirect and requiring
+# the marker's SHAPE to change; a second `bind_plan` statement on another line would leave
+# that mutation replacing a call the fixture never reaches, and the proof would pass on the
+# unmutated path. The shape of the code is holding the shape of the proof.
+bind_plan "$REPO" "$SID" "$PLAN" || [ "$BOUND" = 1 ] || bind_plan "$REPO" "$SID" none || :
 
 exit 0

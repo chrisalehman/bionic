@@ -25,8 +25,9 @@
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 #
 # Registered once in hooks/hooks.json, always on. It is not scoped by whether a skill
-# is armed — an on-disk fact is: the hook loads the library, asks `active_run` whether
-# this project has an open run, and exits silently when it does not.
+# is armed — an on-disk fact is: the hook loads the library, asks `session_run` (which was
+# `active_run` until wave-session-bound-run made run identity per-session) whether THIS
+# SESSION has an open run, and exits silently when it does not.
 #
 # WHEN THE LIBRARY DOES NOT LOAD, that order inverts: the scope question has to be
 # answered BEFORE the fail-closed refusal, and answered without the library. See the
@@ -474,9 +475,23 @@ esac
 #     <docs-root>/spikes/ and <docs-root>/record/ hold real artifacts carrying
 #     this frontmatter, and the governing-skill hook treats them as placed too.
 #   - Bounded walk: `.git` and `node_modules` pruned, depth 5, filename match
-#     first. It runs only when no plan was found, so a project in an active
-#     canonical-sdlc run never pays for it.
-if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
+#     first. It runs only when no plan was found at all, so a project in an
+#     active canonical-sdlc run never pays for it.
+#
+# THE GUARD IS `[ -z "$PLAN" ]` AND NOTHING ELSE (S10a, critic C-1). It read
+# `[ -z "$PLAN" ] || [ ! -f "$PLAN" ]` until this wave made the second half
+# reachable. Before the wave `PLAN` came from `active_plan`, which reports only
+# files `find -type f` had just produced, so a non-empty `PLAN` naming a missing
+# file did not exist and the two conditions were one. A BINDING OUTLIVES THE FILE
+# IT NAMES: `session_run` answers `bound-closed <p>` when the bound plan has been
+# deleted, moved into another epic directory, or restored away, and that path is
+# taken as `PLAN` above. It walked in here and turned this sweep — six hundred
+# lines above the `bound-closed → exit 0` escape — into a live commit blocker for
+# a session whose own plan is simply gone, naming an unrelated stray file and
+# telling the operator to move it. The two conditions are different questions now
+# and they get different answers: NO PLAN AT ALL is the sweep's question, and a
+# bound plan that is not on disk is the arm below it.
+if [ -z "$PLAN" ]; then
   MISPLACED_PLAN=""
   if [ -d "$PROJECT_DIR" ]; then
     while IFS= read -r -d '' f; do
@@ -511,6 +526,26 @@ if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
   # on its own until 2026-07-28, when the sweep's guard was the narrower
   # PROJECT_PLAN and the two conditions could differ; on one guard they cannot,
   # so the sweep and its fall-through are one block.
+  exit 0
+fi
+
+# THE PLAN IS NAMED BUT NOT ON DISK (S10a, critic C-1). Reachable only through a
+# binding — see the guard above for why. This is engaged-with-no-run, the same
+# state `bound-closed` reaches at the enforcement gate below, so the answer is the
+# same: allow, and say why. It cannot be the misplacement sweep's answer, because
+# nothing is misplaced; and it cannot be the hygiene refusals' answer either,
+# because every one of them reads a file that is not there.
+#
+# THE RECOVERY IS NAMED, because it is not guessable and it is not what it was.
+# Re-invoking the skill USED to rewrite a `bound-closed` marker by the count rule;
+# since S10a a binding survives re-engagement open or closed (review C-1), so the
+# only route back is the operator naming a live run. `poker bind` refuses a plan
+# that is not an open run of this root, which is exactly what makes it the right
+# instrument here: it cannot re-create this state.
+if [ ! -f "$PLAN" ]; then
+  echo "evidence-gate: the plan this session is bound to is not on disk — $PLAN" >&2
+  echo "  Nothing is validated for this commit. Name a live run for this session with:" >&2
+  echo "    bash $(dirname "$0")/session-poker.sh bind <plan>" >&2
   exit 0
 fi
 
