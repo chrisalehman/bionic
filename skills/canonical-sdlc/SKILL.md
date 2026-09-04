@@ -104,7 +104,9 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
                                   # closed-wave handoffs, inert audits. Survives Step 8.
 <docs-root>/ideas/                # deferred-work briefs awaiting a wave to adopt them
 .bionic/tests/                    # validation protocols re-run by hand, not by tests/run.sh
-.bionic/tmp/                      # ephemera only, wiped at Step 8 — NOT a home for evidence
+.bionic/tmp/                      # ephemera only, wiped at Step 8 — NOT a home for evidence.
+                                  # Session-keyed state (engaged-/roster-/patrol-/preflight-/
+                                  # sweeper-*.state) is NOT ephemera and survives that wipe
 .bionic/.gitignore                # literally `*` — written on tree creation; this is what
                                   # keeps the whole tree out of git, not the project .gitignore
 .bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default
@@ -119,7 +121,8 @@ this tree: growth in the gated dirs is governed, growth in the operational ones 
 **Anything the matrix cites as evidence goes in `record/`, never `tmp/`.** Auditor reports,
 critic findings, review-axis artifacts, test-run captures — the matrix names them by path, so
 they must outlive the run that produced them. `tmp/` is wiped at Step 8 and takes its contents
-with it. Learned the expensive way: a wave dispatched every agent to write its report into
+with it — everything, that is, except the session-keyed state the wipe spares by name, which is
+live fleet state and not evidence either. Learned the expensive way: a wave dispatched every agent to write its report into
 `tmp/`, then discharged 14 matrix rows citing those paths, and Step 8's cleanup destroyed 28
 artifacts that the plan pointed at. The reasoning survived in the plan's own prose; the primary
 evidence did not, which turns an audited record into testimony. Give an agent a `record/` path
@@ -141,7 +144,7 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 5 Verify | `superpowers:verification-before-completion` | Walk artifact in `record/`; tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
 | 6 Review | `agent-skills:code-review-and-quality` | Every axis has a verdict; independent critic attached |
 | 7 Document | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |
-| 8 Integrate | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp wiped |
+| 8 Integrate | `superpowers:finishing-a-development-branch` | Wave reachable from the integration branch; worktree removed; tmp ephemera wiped |
 | 9 Close-out | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
 
 Committing is a cross-cutting rhythm (~once per step), not a numbered step. Update `## SDLC State` **before staging** — the gate reads the file, not the diff. Do not add a `commit:` field; the SHA lives in git.
@@ -410,7 +413,7 @@ This test used to live in the always-loaded global config, which is where a prec
 
 ### Step 8 — Integrate & close
 
-Atomic, one task. Merge the wave into the declared integration branch (local merge; pushing is the user's gate) and remove the worktree. Default is merge — parking requires an explicit `## Wake Note`. Then, when `cleanup_on_finish: true`: skip if frontmatter already has `cleaned:`; wipe `.bionic/tmp/*`; assert zero non-completed tasks; strip stray `continuation-checkpoint.md`/`handoff-*.md`; set `cleaned: <today>`.
+Atomic, one task. Merge the wave into the declared integration branch (local merge; pushing is the user's gate) and remove the worktree. Default is merge — parking requires an explicit `## Wake Note`. Then, when `cleanup_on_finish: true`: skip if frontmatter already has `cleaned:`; wipe `.bionic/tmp/` EPHEMERA ONLY, sparing every session-keyed file — `engaged-*.state`, `roster-*.state`, `patrol-*.state*`, `preflight-*.state`, `sweeper-*.state` — because one root can hold another session's live run, and a blanket wipe takes that session's engagement marker, roster and Patrol stamp with it, un-engaging a conversation mid-run and contradicting this file's own rule that the marker is never removed during the session; assert zero non-completed tasks; strip stray `continuation-checkpoint.md`/`handoff-*.md`; set `cleaned: <today>`.
 
 ### Step 9 — Close-out
 
