@@ -229,7 +229,30 @@ engaged_session "$PROJECT_DIR" "$SESSION_ID" || exit 0
 # is keyed by (plan, session), and the audit line names the plan. An engaged session with no
 # plan on disk has no step boundary to record, so this arm skips rather than the hook being
 # out of scope. The exit is an arm skip now, not the scoping decision it used to be.
-PLAN=$(active_run "$PROJECT_DIR") || PLAN=""
+#
+# wave-session-bound-run S5: `active_run` (no session input) is now `session_run`
+# (lib/run.sh) — a session BOUND to a plan is attributed against THAT plan alone,
+# whatever else is open in the root (AC-1); UNBOUND falls back to the newest plan
+# exactly as before, and this hook says so once on its advisory channel (stderr —
+# this hook NEVER writes stdout, see the header) (AC-3); bound to a plan that has
+# since closed takes exactly this line's existing branch — the hard exit — after
+# announcing the closure (AC-6).
+_RUN_VERDICT=$(session_run "$PROJECT_DIR" "$SESSION_ID")
+_RUN_WORD="${_RUN_VERDICT%% *}"
+PLAN="${_RUN_VERDICT#* }"
+case "$_RUN_WORD" in
+  bound-open) : ;;
+  fallback)
+    echo "context-spend: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
+    ;;
+  bound-closed)
+    echo "context-spend: bound plan closed — $PLAN; this session has no open run" >&2
+    exit 0
+    ;;
+  none|*)
+    exit 0
+    ;;
+esac
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || exit 0
 
 # current: from ## SDLC State — CR-normalized, fence-aware (the evidence-gate
