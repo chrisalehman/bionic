@@ -23,9 +23,11 @@ date and the effort that adopted it.
 - **canon** — the method itself as a set of statements: what a seat is, what it may never do,
   how work moves through gates. bionic's identity lives here, not in any artifact.
   *(adopted 2026-09-03, rung zero #23)*
-- **interpreter** — one way of running the canon on a harness (the Claude plugin, the omnigent
-  piece). Complete in itself, obtained as one thing, never depending on another interpreter
-  being installed. Certified by conformance. Refines *adapter*. *(adopted 2026-09-03, #23)*
+- **adapter** *(primary term; alias: interpreter)* — one way of running the canon on a harness
+  (the Claude plugin, the omnigent adapter). Complete in itself, obtained as one thing, never
+  depending on another adapter being installed; the governor of every seat it creates. Certified
+  by conformance. The runtime (Claude Code, omnigent) is the ground it stands on, not the adapter.
+  *(adopted 2026-09-03, #23; "adapter" made primary at #25)*
 - **conformance** — the proof shape for an interpreter: for each statement, does this
   interpreter honour it. *(adopted 2026-09-03, #23)*
 - **provenance (of a session)** — the fact that governs a session: it belongs to whatever
@@ -83,3 +85,22 @@ date and the effort that adopted it.
   certified only when the kit including its probes passes. *(adopted 2026-09-03, #24)*
 - **certified / not certified** — the only two values a cell takes; history rides as notes.
   "Proven", "refuted", "untested" are retired as statuses. *(adopted 2026-09-03, #24)*
+- **wall / instruction / instrument / resident duty** — the four kinds of rule. A wall refuses an
+  act that cannot be undone or seen afterward (door: between seats; room: inside one); an
+  instruction tells and trusts; an instrument records (never refuses); a resident duty is what the
+  per-run presence does. *(adopted 2026-09-03, #25)*
+- **wall with a declared override** — refused by default, permitted when the actor declares the
+  exception and the loss; the declaration is recorded and is a primary surface.
+  *(adopted 2026-09-03, #25)*
+- **lease** — ground of one's own (a worktree, a writer boundary). A mind may add minds within its
+  lease and budget; a new lease is the steward's to grant. *(adopted 2026-09-03, #25)*
+- **transitive kill** — every mind is in one tree rooted at the steward; killing a node kills its
+  subtree. A lifecycle promise the adapter guarantees on every route a mind can be added by.
+  *(adopted 2026-09-03, #25)*
+- **resident** — the adapter's per-run presence: born with the run, gone with it; holds the clock,
+  the consent delegate, the kill cascade, preflight. *(adopted 2026-09-03, #25)*
+- **delegate** — the resident's answer to a runtime's consent prompt for an act about to pass the
+  door; as wide as the policy and no wider. *(adopted 2026-09-03, #25)*
+- **mind / seat** — a mind is an actor with judgement; a seat is a mind with a session and a lease
+  of its own, added through the roster. Native sub-agents are minds within their parent's seat.
+  *(adopted 2026-09-03, #25)*
