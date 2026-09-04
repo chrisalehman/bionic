@@ -341,7 +341,29 @@ engaged_session "$PROJECT_DIR" "$SID" || exit 0
 # the task-list refresh, and the fold below already treats an empty name as matching
 # nothing. So an engaged session with no plan is policed exactly as one with a plan, minus
 # that one alternative way to discharge the refresh.
-PLAN=$(active_run "$PROJECT_DIR") || PLAN=""
+#
+# wave-session-bound-run S5: `active_run` (no session input) is now `session_run`
+# (lib/run.sh) — a session BOUND to a plan is policed against THAT plan's basename
+# alone, whatever else is open in the root (AC-1); UNBOUND falls back to the
+# newest plan exactly as before, and this gate says so once on stderr (AC-3);
+# bound to a plan that has since closed is policed exactly as engaged-with-no-plan
+# (AC-6) — the basename discharge is the only thing a missing plan costs.
+_RUN_VERDICT=$(session_run "$PROJECT_DIR" "$SID")
+_RUN_WORD="${_RUN_VERDICT%% *}"
+PLAN="${_RUN_VERDICT#* }"
+case "$_RUN_WORD" in
+  bound-open) : ;;
+  fallback)
+    echo "patrol-duties-gate: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
+    ;;
+  bound-closed)
+    echo "patrol-duties-gate: bound plan closed — $PLAN; this session has no open run" >&2
+    PLAN=""
+    ;;
+  none|*)
+    PLAN=""
+    ;;
+esac
 PLAN_NAME=""
 [ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="$(basename "$PLAN")"
 

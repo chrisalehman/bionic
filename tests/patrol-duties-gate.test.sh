@@ -860,6 +860,153 @@ both_duties "$d"; u_tick_out "$d" "poker: FILL S3 S4"
 fire "$d"; expect_allow "73: …and the same FILL line after a non-tick row is not a duty"
 
 echo ""
+echo "=== Section S5: active_run -> session_run (wave-session-bound-run S5) ==="
+#
+# THE CONTRACT UNDER TEST (design ledger AC-1/AC-3/AC-6). `PLAN` — and so
+# `PLAN_NAME`, the basename that discharges the task-list duty — used to come
+# from `active_run "$PROJECT_DIR"`: the newest open plan in the root, with no
+# session input at all. It now comes from `session_run "$PROJECT_DIR" "$SID"`: a
+# session BOUND to a plan is policed against that plan's basename alone, whatever
+# else is open in the root; UNBOUND (the marker empty, as make_env's own marker
+# is) it falls back to the newest plan exactly as before, and says so on stderr;
+# bound to a plan that has since closed, it is policed exactly as an engaged
+# session with no plan at all (no basename can ever discharge the duty), and
+# that closure is announced too.
+
+# Captures stderr SEPARATELY from fire() (which discards it) — the advisory is a
+# diagnostic line, and this is the only way to read it. Mirrors
+# tests/patrol-revive.test.sh's own fire_stderr.
+fire_stderr() {  # <project> [event] [stop_hook_active]
+  HOOK_ERR=$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" \
+    <<< "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-Stop}" "${3:-false}")" 2>&1 >/dev/null)
+}
+
+PLAN_A_REL="plan-a.plan.md"
+PLAN_B_REL="plan-b.plan.md"
+
+# make_env_two_plans -> project dir on stdout. Two OPEN plans under one docs
+# root, ages controlled by touch so the newest (B) is decisively the fallback
+# target. ENGAGED, UNBOUND by default (make_env's own convention) — s5_bind
+# below overwrites the marker for the bound cases.
+make_env_two_plans() {
+  local dir; dir=$(mktemp -d)
+  mkdir -p "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
+  : > "$dir/.bionic/tmp/engaged-$SID.state"
+  cat > "$dir/.bionic/docs/plans/$PLAN_A_REL" <<'EOF'
+---
+governing-skill: canonical-sdlc
+---
+## SDLC State
+
+current: T5
+EOF
+  cat > "$dir/.bionic/docs/plans/$PLAN_B_REL" <<'EOF'
+---
+governing-skill: canonical-sdlc
+---
+## SDLC State
+
+current: T5
+EOF
+  touch -t 202601010000 "$dir/.bionic/docs/plans/$PLAN_A_REL"
+  touch -t 202602010000 "$dir/.bionic/docs/plans/$PLAN_B_REL"
+  : > "$dir/transcript.jsonl"
+  printf '%s' "$dir"
+}
+
+# s5_bind <project> <plan-rel-under-docs-plans>
+s5_bind() {
+  { printf 'plan=%s/.bionic/docs/plans/%s\n' "$1" "$2"
+    printf 'engaged_at=2026-09-04T00:00:00Z\n'
+  } > "$1/.bionic/tmp/engaged-$SID.state"
+  chmod 600 "$1/.bionic/tmp/engaged-$SID.state"
+}
+
+# s5_deliver <plan-abs-path> — closes a T-scale plan by replacing it with a
+# closed numeric-scale one (task scale, per lib/run.sh's own table, is always
+# open — there is no "delivered" state to give it).
+s5_deliver() {
+  cat > "$1" <<'EOF'
+---
+governing-skill: canonical-sdlc
+---
+## SDLC State
+
+current: 9
+
+- Step 9: report record/x.md, delivered: 2026-09-04
+EOF
+}
+
+echo ""
+echo "---------- 24: bound-open — only the BOUND plan's basename discharges the duty ----------"
+
+d=$(make_env_two_plans); s5_bind "$d" "$PLAN_A_REL"
+u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_A_REL"
+fire "$d"; expect_allow "24a: bound to A, an Edit naming A satisfies the task-list duty"
+
+d=$(make_env_two_plans); s5_bind "$d" "$PLAN_A_REL"
+u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_B_REL"
+fire "$d"; expect_block "24b: bound to A, an Edit naming B (unrelated to A) does not satisfy it" \
+  "$TL_MISSING" "$LA_MISSING"
+fire_stderr "$d"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"run resolved by newest-plan fallback"*) fail "24c: bound to A prints no fallback line" "$HOOK_ERR" ;;
+  *) pass "24c: bound to A prints no fallback line" ;;
+esac
+
+echo ""
+echo "---------- 25: fallback — unbound resolves to the newest plan (B), and says so ----------"
+
+d=$(make_env_two_plans)
+# PHYSICAL, because the fallback path comes off active_plan's own resolution —
+# `project_root` calls `pwd -P` internally (payload/scripts/lib/root.sh) — while
+# `$d` is `mktemp -d`'s raw (logical) answer. The two differ under macOS's
+# /var -> /private/var link; this assertion pins an exact adjacency ("— "
+# immediately followed by the path), so — unlike a bare path-substring check —
+# it needs the physical form the hook itself prints.
+d_phys=$(cd "$d" && pwd -P)
+u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_B_REL"
+fire "$d"; expect_allow "25a: unbound, an Edit naming B (the newest) satisfies the duty"
+fire_stderr "$d"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"patrol-duties-gate: run resolved by newest-plan fallback (session unbound) — $d_phys/.bionic/docs/plans/$PLAN_B_REL"*)
+    pass "25b: unbound prints the fallback line, naming B verbatim" ;;
+  *) fail "25b: unbound prints the fallback line, naming B verbatim" "$HOOK_ERR" ;;
+esac
+
+# THE PAIRED NEGATIVE: unbound, A's name (the OLDER plan, not the fallback
+# target) does not satisfy the duty.
+d=$(make_env_two_plans)
+u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_A_REL"
+fire "$d"; expect_block "25c: unbound, an Edit naming A (not the fallback target) does not satisfy it" \
+  "$TL_MISSING" "$LA_MISSING"
+
+echo ""
+echo "---------- 26: bound-closed — a plan that closed is no open run at all ----------"
+
+d=$(make_env_two_plans)
+s5_deliver "$d/.bionic/docs/plans/$PLAN_A_REL"
+s5_bind "$d" "$PLAN_A_REL"
+u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_B_REL"
+fire "$d"; expect_block "26a: bound to a CLOSED A, an Edit naming open B satisfies nothing" \
+  "$TL_MISSING" "$LA_MISSING"
+fire_stderr "$d"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"patrol-duties-gate: bound plan closed — $d/.bionic/docs/plans/$PLAN_A_REL; this session has no open run"*)
+    pass "26b: the closed-plan advisory names A, verbatim" ;;
+  *) fail "26b: the closed-plan advisory names A, verbatim" "$HOOK_ERR" ;;
+esac
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"$PLAN_B_REL"*) fail "26c: B's path (the still-open plan) appears nowhere in the output" "$HOOK_ERR" ;;
+  *) pass "26c: B's path (the still-open plan) appears nowhere in the output" ;;
+esac
+
+echo ""
 echo "========================================"
 echo "patrol-duties-gate: $PASS/$TOTAL passed"
 echo "========================================"
