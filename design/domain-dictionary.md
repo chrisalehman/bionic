@@ -49,3 +49,25 @@ date and the effort that adopted it.
 - **reproduction** — rung zero's certifying measurement: each interpreter rebuilt from the
   repository alone matches what ships exactly; the build has no other input.
   *(adopted 2026-09-03, #23)*
+- **spec / kit / certificate** — three things, kept apart: the spec is the contract (canon + the
+  admission rule); the kit is the spec-controlled battery (statement index + climb runners); a
+  certificate is one *result* about one interpreter at one build against one runtime version. The
+  spec is complete without a single certificate. *(adopted 2026-09-03, #26)*
+- **certificate** *(refined)* — a self-contained result: names the spec and kit versions it was
+  earned against, the interpreter build, the runtime version and date, and carries its own
+  evidence. An **efficacy** claim: with bionic the seat refused, without bionic the same model did
+  not. Registry lives in the repository beside the builds. *(refined 2026-09-03, #26)*
+- **compliant twin** — the control that tests the instrument: the same act performed in a way the
+  statement permits, which the wall must allow. Runs per cell, per interpreter.
+  *(adopted 2026-09-03, #26)*
+- **baseline** — the control that tests attribution: the same model, same task, bionic absent.
+  A fact about the model and the statement, measured once per model per statement and shared
+  across interpreters; stale on model change. *(adopted 2026-09-03, #26)*
+- **vacuous cell** — a certificate cell whose baseline shows the bare model already complies;
+  nothing was tested, so it reads untested. *(adopted 2026-09-03, #26)*
+- **held under prior verification** — the status of a pass observed before the kit existed or
+  under a builder's verification: version and pointers kept, no certification standing.
+  Failures, by contrast, cross as refuted. *(adopted 2026-09-03, #26)*
+- **verification vs certification** — the builder verifies a change (SDLC tiers, consumed at the
+  wave gate); the kit certifies a statement about the product (outlives any wave). One may feed
+  the other; neither is the other. *(adopted 2026-09-03, #26)*
