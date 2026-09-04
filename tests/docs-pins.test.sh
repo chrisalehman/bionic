@@ -473,6 +473,15 @@ echo "--- SECTION 5 — the session-bound run, and the bind step in the resume r
 echo ""
 echo "=== Section 5: the session-bound run and the resume-ritual bind step ==="
 
+# THE PARAGRAPH STATES ONE RULE, ONCE (review readability F1, S10b). Before this pin the
+# Patrol paragraph carried the PRE-wave rule as a fact — "whether this PROJECT has an OPEN
+# run … the open run decides WHAT it enforces" — and then the post-wave correction ~120
+# words later in the same paragraph. `payload/scripts/lib/run.sh:313` calls that first
+# sentence the defect in the codebase's own words; the doc kept its copy and appended the
+# fix after it. The sentence below REPLACED it, so the paragraph no longer teaches the rule
+# this wave exists to delete. Pinned as a pair: the new clause present, the old one gone.
+PIN_SCOPE_PAIR='whether this SESSION is engaged, and which run this SESSION is bound to. Engagement decides WHETHER a hook acts at all; the bound run decides WHAT it enforces.'
+PIN_SCOPE_OLD='whether this PROJECT has an OPEN run'
 PIN_BOUND_RUN='**Which run is a property of the SESSION, not of the project** (bionic 1.4.2): the open run is the plan this session is BOUND to, recorded as the `plan=` line of its own engagement marker'
 PIN_FALLBACK='Only an UNBOUND session falls back to the newest plan under the docs root'
 PIN_BIND_STEP='**The resume ritual binds its run before it adopts anything:** if session-start listed more than one open run — or this session is otherwise unbound in a root that holds several — run `bash <plugin-root>/hooks/session-poker.sh bind <plan>` for the plan this session means, immediately after engaging and before the first dispatch.'
@@ -558,6 +567,34 @@ if cmp -s "$POKER_SH" "$DOCTORED_BIND_VERB"; then
 else
   expect_ne "37: a renamed poker verb splits from the doc (pin discriminates)" \
     "$BIND_DOC" "$(bind_verb_code "$DOCTORED_BIND_VERB")"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_SCOPE_PAIR"; then
+  ok "38: SKILL.md's two-facts sentence names the SESSION's bound run, not the project's"
+else
+  no "38: SKILL.md's two-facts sentence names the SESSION's bound run, not the project's" \
+     "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_SCOPE_OLD"; then
+  no "39: …and the pre-wave project-scoped clause is gone from the paragraph" \
+     "SKILL.md still states the rule this wave deleted: '$PIN_SCOPE_OLD'"
+else
+  ok "39: …and the pre-wave project-scoped clause is gone from the paragraph"
+fi
+
+# Anti-vacuity for 38, same pattern as 35/36: the extractor must report a doctored copy.
+DOCTORED_SCOPE="$TMP/skill-scope-mutated.md"
+sed 's/which run this SESSION is bound to/whether this PROJECT has an OPEN run/' \
+  "$SKILL_MD" > "$DOCTORED_SCOPE"
+if cmp -s "$SKILL_MD" "$DOCTORED_SCOPE"; then
+  no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_SCOPE" "$PIN_SCOPE_PAIR"; then
+  no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "40: a doctored SKILL.md fails the scope pin (pin discriminates)"
 fi
 
 echo ""
