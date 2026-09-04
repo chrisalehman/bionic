@@ -2199,6 +2199,38 @@ expect_contains "…and is reported as the absolute path it resolved to" "poker:
 expect_contains "…the marker now names B" "plan=$P16B_REAL" "$(cat "$M16")"
 expect_absent   "…and no longer names A: bind REBINDS" "plan=$P16A" "$(cat "$M16")"
 
+# ---------- 16b2: a DOCS-ROOT-relative path binds too — the spelling session-start prints ----------
+# THE PASTE-BACK GAP THIS CLOSES (S10b phase 2, from review P3's relative-path listing).
+# session-start prints the open-run listing relative to the DOCS root (`plans/…`), because
+# every absolute path there shares one long prefix. An operator who copies a listed line
+# into `bind` hands over `plans/epic-16/wave-a.plan.md`, which resolved against the PROJECT
+# root is `<repo>/plans/…` — a path that does not exist, and a refusal that reads as if the
+# plan were wrong. Both spellings now bind. The project root is still tried FIRST, so every
+# operand that worked before resolves to exactly what it resolved to before.
+P16A_REAL="$(real_path_of "$P16A")"
+poke "$R16" bind 'plans/epic-16/wave-a.plan.md'
+expect_eq       "a docs-root-relative path binds (exit 0)" "0" "$RC"
+expect_contains "…and is reported as the absolute path it resolved to" "poker: bound $P16A_REAL" "$OUT"
+expect_contains "…the marker names A, reached by the listing's own spelling" "plan=$P16A_REAL" "$(cat "$M16")"
+# THE PAIRED NEGATIVE: widening resolution must not invent a plan. An operand that is
+# neither project-root-relative nor docs-root-relative is still refused, and the refusal
+# names the PROJECT-root spelling — the one an operator typing a repo path would expect.
+poke "$R16" bind 'plans/epic-16/no-such-plan.md'
+expect_eq       "a relative operand matching neither root is still refused" "1" "$RC"
+expect_contains "…and the refusal names the project-root spelling" \
+  "$R16/plans/epic-16/no-such-plan.md" "$OUT"
+# AND THE PRECEDENCE ROW: with a file at BOTH spellings, the project root wins, which is
+# today's behaviour unchanged. Without this row the fallback could silently reorder the two.
+mkdir -p "$R16/plans/epic-16"
+printf '%s' "$(plan_body 3)" > "$R16/plans/epic-16/wave-a.plan.md"
+poke "$R16" bind 'plans/epic-16/wave-a.plan.md'
+expect_contains "with a file at both spellings the PROJECT root still wins" \
+  "$R16/plans/epic-16/wave-a.plan.md" "$OUT"
+rm -rf "$R16/plans"
+# Restore the binding §16c-§16f expect to find: B, by its absolute path.
+poke "$R16" bind "$P16B_REAL"
+expect_eq       "…and the fixture is back on B for the refusal cases below" "0" "$RC"
+
 # ---------- 16c: a delivered plan is refused — it is not an OPEN run ----------
 _m16_before="$(cksum < "$M16")"
 poke "$R16" bind "$P16D"

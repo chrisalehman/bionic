@@ -2010,9 +2010,27 @@ EOF
     # taken against the PROJECT ROOT rather than `$PWD`: the plan path an operator has to
     # hand is the one their editor shows, which is project-relative, and a worktree cwd would
     # otherwise resolve it against a tree that does not hold the run.
+    #
+    # AND AGAINST THE DOCS ROOT WHEN THAT MISSES (S10b phase 2). hooks/session-start.sh
+    # prints the open-run listing DOCS-root-relative — `plans/<epic>/<wave>.md` — because
+    # every absolute path in that listing shares one long prefix. An operator who copies a
+    # listed line straight into this verb was handing over a project-relative path that does
+    # not exist, and getting a refusal that reads as if the PLAN were wrong rather than the
+    # spelling. Both spellings now bind.
+    #
+    # THE PROJECT ROOT IS TRIED FIRST AND WINS TIES, so every operand that resolved before
+    # resolves to exactly the same file now: the docs root is reached only when the
+    # project-relative spelling is not a regular file, which is the case that used to refuse.
+    # A miss under both leaves `BIND_PATH` at the project-root spelling, so the refusal names
+    # the path an operator typing a repo path would expect to see.
     case "$BIND_ARG" in
       /*) BIND_PATH="$BIND_ARG" ;;
-      *)  BIND_PATH="$REPO/$BIND_ARG" ;;
+      *)
+        BIND_PATH="$REPO/$BIND_ARG"
+        if [ ! -f "$BIND_PATH" ]; then
+          BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG"
+          [ -f "$BIND_DOCS_TRY" ] && BIND_PATH="$BIND_DOCS_TRY"
+        fi ;;
     esac
 
     BIND_RC=0

@@ -277,10 +277,12 @@ N=$(printf '%s\n' "$RUNS" | grep -c '.')
 # call still names the true count, so the cap never understates what is here.
 #
 # PATHS ARE RELATIVE TO THE DOCS ROOT. Every one of them shares the same long prefix (47
-# characters here) and the bind instruction beside the listing already says where they
-# resolve — `bind` resolves a relative operand against the project root, so the spelling
-# printed here is one an operator can paste back. If the docs root cannot be read the paths
-# are printed whole rather than mangled by a prefix strip that would eat a leading slash.
+# characters here), and a listed line PASTES STRAIGHT INTO THE BIND VERB named on the header
+# line above it: `bind` takes an operand that is absolute, project-root-relative or
+# docs-root-relative, trying the project root first and the docs root when that misses
+# (hooks/session-poker.sh, the `bind` arm, S10b phase 2). If the docs root cannot be read the
+# paths are printed whole rather than mangled by a prefix strip that would eat a leading
+# slash.
 RUN_LIST_CAP=8
 DOCS="$(docs_root "$ROOT" 2>/dev/null)" || DOCS=""
 print_runs() {  # <newline-separated runs> -> the capped, docs-root-relative listing

@@ -649,6 +649,46 @@ else
 fi
 
 echo ""
+echo "=== Section 7: bind's operand takes the spelling session-start prints ==="
+#
+# THE PAIR THIS PINS (S10b phase 2). hooks/session-start.sh prints the open-run listing
+# DOCS-root-relative, so an operator copies `plans/<epic>/<wave>.md` out of it. That is the
+# one spelling `bind` used to reject, because a relative operand was resolved against the
+# PROJECT root only. The verb now tries the docs root when the project-relative spelling is
+# not a regular file, and this section is the doc half of that agreement: the paragraph a
+# reader learns the verb from must name all three spellings the verb accepts.
+PIN_BIND_OPERAND='its operand may be absolute, project-root-relative, or docs-root-relative — the spelling session-start'"'"'s own listing prints'
+
+if has_pin "$SKILL_MD" "$PIN_BIND_OPERAND"; then
+  ok "45: SKILL.md names all three spellings bind accepts"
+else
+  no "45: SKILL.md names all three spellings bind accepts" "file: $SKILL_MD"
+fi
+
+# THE CODE HALF, read from the poker rather than asserted against a constant (§4's rule):
+# the docs-root fallback must actually be in the verb, not only in the prose.
+if /usr/bin/grep -q 'BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG"' "$POKER_SH"; then
+  ok "46: …and session-poker.sh really does try the docs root for a relative operand"
+else
+  no "46: …and session-poker.sh really does try the docs root for a relative operand" \
+     "file: $POKER_SH"
+fi
+
+# Anti-vacuity, same pattern as 35/36/40/44.
+DOCTORED_OPERAND="$TMP/skill-bind-operand-mutated.md"
+sed 's/its operand may be absolute, project-root-relative, or docs-root-relative/its operand must be absolute/' \
+  "$SKILL_MD" > "$DOCTORED_OPERAND"
+if cmp -s "$SKILL_MD" "$DOCTORED_OPERAND"; then
+  no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_OPERAND" "$PIN_BIND_OPERAND"; then
+  no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "47: a doctored SKILL.md fails the operand pin (pin discriminates)"
+fi
+
+echo ""
 echo "========================================"
 echo "docs-pins: $PASS/$TOTAL passed"
 echo "========================================"
