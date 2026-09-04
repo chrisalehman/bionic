@@ -1,6 +1,6 @@
 # bionic v1 — spec set (DRAFT for ratification)
 
-**Status: prototype.** Written 2026-09-03 for wayfinder ticket #27 (map #19). This is the first
+**Status: RATIFIED by Chris, 2026-09-03 (map #19 closed). Draft-to-ratified edits listed at §11 apply when the epic's Step 0 moves this to its tracked home.** Was: prototype. Written 2026-09-03 for wayfinder ticket #27 (map #19). This is the first
 whole draft of the v1 spec set, for the owner to react to. Nothing here decides anything new: every
 row, rung, and rule is transcribed from a closed ticket's resolution or a research ledger, and each
 carries its citation. Where two sources disagreed, the later ticket's decision stands and the
