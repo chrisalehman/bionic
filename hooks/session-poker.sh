@@ -114,6 +114,14 @@
 #   2 — usage error, or a refusal (propagated from the sweeper read, or raised here)
 #   3 — no session key
 #
+# `bind` IS THE ONE VERB THIS TABLE DOES NOT DESCRIBE, and it is listed rather than left to
+# be inferred (review readability F6). It answers about a WRITE, not about a roster, so its
+# 1 is a refusal and not a NOTIFY:
+#   0 — bound, or NOT-ENGAGED (nothing decided, and that is not a fault)
+#   1 — REFUSED: the operand is not a member of this root's open-run set
+#   2 — the marker write failed, or a usage error (this file's one argument-error code)
+#   3 — no session key, exactly as above
+#
 # Session key: CLAUDE_CODE_SESSION_ID, exactly as hooks/session-sweeper.sh takes it.
 #
 # THE SWEEPER IS THIS SCRIPT'S SIBLING, resolved exactly as hooks/landing-gate.sh resolves
@@ -881,6 +889,13 @@ normalize_newlines() {
 POKER_RUN_PLAN=""
 POKER_RUN_OPEN=no
 POKER_RUN_RESOLVED=no
+# ANSWERS ONCE PER PROCESS, AND THE ARGUMENTS OF EVERY LATER CALL ARE IGNORED — not keyed
+# on them, discarded (review readability F7). The guard below returns before `$1` and `$2`
+# are ever read, so this is a latch and not a memo table: a second call naming a DIFFERENT
+# root would silently receive the first root's answer. It is safe because both call sites
+# pass the same pair — `run_state` (below) and the FILL scheduler — and a poker process
+# serves exactly one project root and one session key for its whole life. A third caller
+# with a different pair would have to key the latch rather than reuse it.
 resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RUN_OPEN
   [ "$POKER_RUN_RESOLVED" = yes ] && return 0
   POKER_RUN_RESOLVED=yes
@@ -1995,9 +2010,27 @@ EOF
     # taken against the PROJECT ROOT rather than `$PWD`: the plan path an operator has to
     # hand is the one their editor shows, which is project-relative, and a worktree cwd would
     # otherwise resolve it against a tree that does not hold the run.
+    #
+    # AND AGAINST THE DOCS ROOT WHEN THAT MISSES (S10b phase 2). hooks/session-start.sh
+    # prints the open-run listing DOCS-root-relative — `plans/<epic>/<wave>.md` — because
+    # every absolute path in that listing shares one long prefix. An operator who copies a
+    # listed line straight into this verb was handing over a project-relative path that does
+    # not exist, and getting a refusal that reads as if the PLAN were wrong rather than the
+    # spelling. Both spellings now bind.
+    #
+    # THE PROJECT ROOT IS TRIED FIRST AND WINS TIES, so every operand that resolved before
+    # resolves to exactly the same file now: the docs root is reached only when the
+    # project-relative spelling is not a regular file, which is the case that used to refuse.
+    # A miss under both leaves `BIND_PATH` at the project-root spelling, so the refusal names
+    # the path an operator typing a repo path would expect to see.
     case "$BIND_ARG" in
       /*) BIND_PATH="$BIND_ARG" ;;
-      *)  BIND_PATH="$REPO/$BIND_ARG" ;;
+      *)
+        BIND_PATH="$REPO/$BIND_ARG"
+        if [ ! -f "$BIND_PATH" ]; then
+          BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG"
+          [ -f "$BIND_DOCS_TRY" ] && BIND_PATH="$BIND_DOCS_TRY"
+        fi ;;
     esac
 
     BIND_RC=0
@@ -2027,14 +2060,29 @@ EOF
       if [ -n "$BIND_MARKER" ] && [ -L "$BIND_MARKER" ]; then
         BIND_WHY="marker is a symlink"
       else
+        # THE SAME DEPTH BOUND THE SET IS BUILT WITH (review D8c, S10b). `open_runs` walks
+        # `find <plans|incidents> -maxdepth 2`, so `plans/<a>/<b>/x.md` is not a candidate
+        # at all. A `case` glob matches across `/`, so the location test used to call that
+        # file a plan of this root and blame its CONTENT ("not an open run") for a miss the
+        # walk decided before ever opening it. `BIND_TAIL` is the path below `plans/` or
+        # `incidents/`: no slash is depth 1, one slash is depth 2, two or more is outside.
+        BIND_TAIL=""
         case "$BIND_REAL" in
           "$BIND_DOCS"/plans/*|"$BIND_DOCS"/incidents/*)
+            BIND_TAIL="${BIND_REAL#"$BIND_DOCS"/}"
+            BIND_TAIL="${BIND_TAIL#*/}" ;;
+        esac
+        case "$BIND_TAIL" in
+          ''|*/*/*)
+            # Outside the walk: not under a plan directory of this root, or nested deeper
+            # than the walk reaches.
+            BIND_WHY="not a plan under this root" ;;
+          *)
             if [ -f "$BIND_PATH" ]; then
               BIND_WHY="not an open run"
             else
               BIND_WHY="not a plan under this root"
             fi ;;
-          *) BIND_WHY="not a plan under this root" ;;
         esac
       fi
       die "REFUSED — $BIND_WHY: $BIND_PATH"

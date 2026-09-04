@@ -2199,6 +2199,38 @@ expect_contains "…and is reported as the absolute path it resolved to" "poker:
 expect_contains "…the marker now names B" "plan=$P16B_REAL" "$(cat "$M16")"
 expect_absent   "…and no longer names A: bind REBINDS" "plan=$P16A" "$(cat "$M16")"
 
+# ---------- 16b2: a DOCS-ROOT-relative path binds too — the spelling session-start prints ----------
+# THE PASTE-BACK GAP THIS CLOSES (S10b phase 2, from review P3's relative-path listing).
+# session-start prints the open-run listing relative to the DOCS root (`plans/…`), because
+# every absolute path there shares one long prefix. An operator who copies a listed line
+# into `bind` hands over `plans/epic-16/wave-a.plan.md`, which resolved against the PROJECT
+# root is `<repo>/plans/…` — a path that does not exist, and a refusal that reads as if the
+# plan were wrong. Both spellings now bind. The project root is still tried FIRST, so every
+# operand that worked before resolves to exactly what it resolved to before.
+P16A_REAL="$(real_path_of "$P16A")"
+poke "$R16" bind 'plans/epic-16/wave-a.plan.md'
+expect_eq       "a docs-root-relative path binds (exit 0)" "0" "$RC"
+expect_contains "…and is reported as the absolute path it resolved to" "poker: bound $P16A_REAL" "$OUT"
+expect_contains "…the marker names A, reached by the listing's own spelling" "plan=$P16A_REAL" "$(cat "$M16")"
+# THE PAIRED NEGATIVE: widening resolution must not invent a plan. An operand that is
+# neither project-root-relative nor docs-root-relative is still refused, and the refusal
+# names the PROJECT-root spelling — the one an operator typing a repo path would expect.
+poke "$R16" bind 'plans/epic-16/no-such-plan.md'
+expect_eq       "a relative operand matching neither root is still refused" "1" "$RC"
+expect_contains "…and the refusal names the project-root spelling" \
+  "$R16/plans/epic-16/no-such-plan.md" "$OUT"
+# AND THE PRECEDENCE ROW: with a file at BOTH spellings, the project root wins, which is
+# today's behaviour unchanged. Without this row the fallback could silently reorder the two.
+mkdir -p "$R16/plans/epic-16"
+printf '%s' "$(plan_body 3)" > "$R16/plans/epic-16/wave-a.plan.md"
+poke "$R16" bind 'plans/epic-16/wave-a.plan.md'
+expect_contains "with a file at both spellings the PROJECT root still wins" \
+  "$R16/plans/epic-16/wave-a.plan.md" "$OUT"
+rm -rf "$R16/plans"
+# Restore the binding §16c-§16f expect to find: B, by its absolute path.
+poke "$R16" bind "$P16B_REAL"
+expect_eq       "…and the fixture is back on B for the refusal cases below" "0" "$RC"
+
 # ---------- 16c: a delivered plan is refused — it is not an OPEN run ----------
 _m16_before="$(cksum < "$M16")"
 poke "$R16" bind "$P16D"
@@ -2231,6 +2263,27 @@ printf 'just a note, no SDLC State here\n' > "$R16/.bionic/docs/plans/epic-16/no
 poke "$R16" bind "$R16/.bionic/docs/plans/epic-16/notes.md"
 expect_eq       "a non-plan file UNDER plans/ exits 1" "1" "$RC"
 expect_contains "…refused as not an open run — the reason is positional" \
+  "poker: REFUSED — not an open run" "$OUT"
+
+# ---------- 16f2: a plan THREE levels under plans/ is outside the walk, and says so ----------
+# The positional test has to use the SAME depth bound the open-run set is built with
+# (review D8c, S10b). `open_runs` walks `find -maxdepth 2`, so `plans/<a>/<b>/x.md` is
+# never a candidate — telling its author "not an open run" points them at the plan's
+# CONTENT when the truth is that the walk never reached the file. Bounded here to the two
+# depths the walk covers: `plans/x.md` and `plans/<dir>/x.md`.
+mkdir -p "$R16/.bionic/docs/plans/epic-16/deeper"
+printf '%s' "$(plan_body 3)" > "$R16/.bionic/docs/plans/epic-16/deeper/too-deep.plan.md"
+poke "$R16" bind "$R16/.bionic/docs/plans/epic-16/deeper/too-deep.plan.md"
+expect_eq       "a depth-3 plan under plans/ exits 1" "1" "$RC"
+expect_contains "…refused as NOT A PLAN UNDER THIS ROOT — the walk never reached it" \
+  "poker: REFUSED — not a plan under this root" "$OUT"
+expect_absent   "…and not as an open-run failure, which would blame its content" \
+  "poker: REFUSED — not an open run" "$OUT"
+# THE PAIRED POSITIVE, same tree, one level up: depth 2 IS inside the walk, so an
+# open-but-not-open-run file there still gets the content-shaped reason. Without this row
+# the bound above could be a blanket "everything nested is outside the root".
+poke "$R16" bind "$R16/.bionic/docs/plans/epic-16/notes.md"
+expect_contains "…while its depth-2 sibling is still judged on content" \
   "poker: REFUSED — not an open run" "$OUT"
 
 # ---------- 16g: a missing argument, and too many ----------
