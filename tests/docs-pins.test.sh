@@ -598,6 +598,57 @@ else
 fi
 
 echo ""
+echo "=== Section 6: Step 8's tmp wipe spares session-keyed state ==="
+#
+# THE DEFECT THIS PINS (critic C-2, remediated at S10b). Step 8 said `wipe .bionic/tmp/*`,
+# unqualified. `.bionic/tmp/` is where EVERY session in the root keeps its engagement
+# marker, its roster, its Patrol stamp, its preflight attestation and its sweeper state —
+# all keyed by session id. A blanket wipe therefore destroys the live state of every OTHER
+# session working that root, which is precisely the two-run scenario this wave exists for,
+# and it contradicts the same file's own sentence that "the marker is never removed during
+# the session once written". The Step 8 line now names what it spares.
+#
+# THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
+# evidence key the gate parses, not prose; renaming it would be an interface change and is
+# not what the finding asked for.
+PIN_TMP_SPARE='sparing every session-keyed file — `engaged-*.state`, `roster-*.state`, `patrol-*.state*`, `preflight-*.state`, `sweeper-*.state`'
+PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
+
+if has_pin "$SKILL_MD" "$PIN_TMP_SPARE"; then
+  ok "41: SKILL.md's Step 8 names the session-keyed files its wipe spares"
+else
+  no "41: SKILL.md's Step 8 names the session-keyed files its wipe spares" "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_TMP_BLANKET"; then
+  no "42: …and no longer instructs the blanket wipe that destroyed them" \
+     "SKILL.md still says: $PIN_TMP_BLANKET"
+else
+  ok "42: …and no longer instructs the blanket wipe that destroyed them"
+fi
+
+# The evidence key the gate reads is unchanged — the repair is prose, not interface.
+if has_pin "$SKILL_MD" 'tmp-wiped:'; then
+  ok "43: …while the Step-8 evidence key 'tmp-wiped:' is untouched"
+else
+  no "43: …while the Step-8 evidence key 'tmp-wiped:' is untouched" \
+     "the gate parses this key; the S10b repair must not have renamed it"
+fi
+
+# Anti-vacuity, same pattern as 35/36/40.
+DOCTORED_TMP="$TMP/skill-tmp-wipe-mutated.md"
+sed 's/sparing every session-keyed file/taking every file/' "$SKILL_MD" > "$DOCTORED_TMP"
+if cmp -s "$SKILL_MD" "$DOCTORED_TMP"; then
+  no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
+  no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)"
+fi
+
+echo ""
 echo "========================================"
 echo "docs-pins: $PASS/$TOTAL passed"
 echo "========================================"
