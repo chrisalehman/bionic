@@ -41,6 +41,7 @@ node_modules/
 # .bionic as a SYMLINK to the main checkout's dir, and the dir-only `.bionic/`
 # pattern misses it (flagged by two W4 slices)
 .bionic
+.mattpocock
 
 # playwright
 .playwright-cli
