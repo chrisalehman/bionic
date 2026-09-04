@@ -303,7 +303,30 @@ engaged_session "$REPO" "$PAYLOAD_SID" || exit 0
 # wall, which reads `parallel-budget:` out of this file. Every other wall here — the
 # attestation, the Patrol checkpoint, the lease, the ambiguity/containment/absent-deliverable
 # trio, the roster — is plan-free and runs unchanged (AC-23).
-PLAN=$(active_run "$REPO") || PLAN=""
+#
+# wave-session-bound-run S5: `active_run` (no session input, newest-plan only) is now
+# `session_run` (lib/run.sh) — the caller's OWN bound plan when one exists, the same
+# newest-plan fallback when it does not. A BOUND session is gated on that plan alone,
+# whatever else is open in the root (AC-1); UNBOUND behaves exactly as before, and this
+# gate says so once on its advisory channel (AC-3); bound to a plan that has since
+# closed is treated as having no open run at all (AC-6) — the same PLAN="" arm this
+# code already took for "no run".
+_RUN_VERDICT=$(session_run "$REPO" "$PAYLOAD_SID")
+_RUN_WORD="${_RUN_VERDICT%% *}"
+PLAN="${_RUN_VERDICT#* }"
+case "$_RUN_WORD" in
+  bound-open) : ;;
+  fallback)
+    echo "dispatch-preflight: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
+    ;;
+  bound-closed)
+    echo "dispatch-preflight: bound plan closed — $PLAN; this session has no open run" >&2
+    PLAN=""
+    ;;
+  none|*)
+    PLAN=""
+    ;;
+esac
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || PLAN=""
 
 # ---------- this session is engaged: this IS a decision ----------
@@ -612,6 +635,13 @@ fi
 # mirroring the observation record in hooks/stop-guard.sh so both machine
 # artifacts in .bionic/tmp/ parse the same way. Per-session filename from birth
 # (D-5): .bionic/tmp/roster-<session_id>.state.
+#
+# wave-session-bound-run S5 (spec §Roster attribution, AC-2): the row's LAST
+# field is `plan=<the dispatching session's bound plan>` or the literal
+# `plan=none` when unbound. This is the BINDING (lib/run.sh's `session_plan`),
+# never the fallback-resolved run above — a session bound to a since-closed
+# plan still gets `plan=<that plan>` here, so `adopt`'s partition (S6) can tell
+# "this session's own run" from "no binding at all" without re-deriving either.
 
 ROSTER_VERSION="v1"
 ROSTER_PREFIX="roster-"
@@ -1668,7 +1698,9 @@ if [ -n "$C_DELIVERABLE" ]; then
   done
 fi
 
-ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|source=${C_SOURCE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}"
+ROSTER_PLAN=$(session_plan "$REPO" "$PAYLOAD_SID") || ROSTER_PLAN="none"
+
+ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|source=${C_SOURCE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}|plan=${ROSTER_PLAN}"
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then
