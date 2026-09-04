@@ -78,7 +78,7 @@ fi
 # invocation it exists to record would be worse than one that misses it. A missed
 # engagement leaves the session unwalled, which is exactly the state it was in a moment
 # ago; a refused `/canonical-sdlc` is a broken front door.
-BIONIC_LIB_WANT="root.sh run.sh session.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh binding.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -213,6 +213,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "engage"; fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/binding.sh"
 
 # ---------- ROOT, SESSION ID, MARKER PATH — the three facts, each from its one owner ----
 #
@@ -274,19 +276,52 @@ fi
 # performs at the invocation the user just typed.
 [ -L "$MARKER" ] && exit 0
 
-# The plan is a FIELD, not a precondition. Step 0 of a new run precedes its plan file, and
-# engagement is what decides WHETHER a hook acts while the plan decides WHAT — so a marker
-# written before any plan exists is the normal opening state, not a degraded one.
-PLAN=$(active_run "$REPO" 2>/dev/null) || PLAN=""
-[ -n "$PLAN" ] || PLAN="none"
+# THE PLAN IS A FIELD, NOT A PRECONDITION. Step 0 of a new run precedes its plan file, and
+# engagement is what decides WHETHER a hook acts while the binding decides WHAT — so a
+# marker written before any plan exists is the normal opening state, not a degraded one.
+#
+# WHICH plan the field names changed in wave-session-bound-run (2026-09-04, spec §Design
+# "Session binding"; AC-7). This used to be `active_run` — the NEWEST open plan in the root
+# — written unconditionally on every invocation, and that was the bug: two sessions in one
+# repository got one run identity, and a plan landing mid-session silently moved a live
+# session onto it. The rule now, in three lines:
+#
+#   the marker exists AND `session_run` says bound-open  -> re-bind to that SAME plan
+#   otherwise, EXACTLY ONE open run in the root          -> bind to it
+#   otherwise (zero open runs, or two and more)          -> bind to `none`
+#
+# A BOUND-OPEN BINDING SURVIVES RE-ENGAGEMENT. A session that has committed to a run keeps
+# it however many times the skill is invoked and however many newer plans land beside it;
+# a binding is a commitment (AC-6), and `engaged_at` rides through with it. A binding whose
+# plan has been DELIVERED or ABANDONED reports `bound-closed`, not `bound-open`, and falls
+# to the count rule below — a dead commitment is not one.
+#
+# SEVERAL OPEN RUNS BINDS NOTHING, deliberately. Picking the newest would be the old bug
+# with extra steps; the session is left unbound, session-start lists every candidate, and
+# the operator chooses with `session-poker.sh bind <plan>`. An unbound session still
+# resolves by `active_run`, out loud, as `fallback`.
+#
+# THE WRITE ITSELF IS NOT HERE. `payload/scripts/lib/binding.sh` is the single writer —
+# shape, mode 600, the symlink refusal and open-run membership are its invariants, shared
+# with poker's `bind` verb and the governing skill's bind-on-first-write. This hook only
+# decides WHICH plan, and never blocks on the answer: every path below exits 0.
+PLAN="none"
+VERDICT=""
+if [ -f "$MARKER" ]; then
+  VERDICT=$(session_run "$REPO" "$SID" 2>/dev/null) || :
+fi
+case "$VERDICT" in
+  "bound-open "*)
+    PLAN="${VERDICT#bound-open }"
+    ;;
+  *)
+    RUNS=$(open_runs "$REPO" 2>/dev/null) || RUNS=""
+    if [ -n "$RUNS" ] && [ "$(printf '%s\n' "$RUNS" | wc -l | tr -d ' ')" = "1" ]; then
+      PLAN="$RUNS"
+    fi
+    ;;
+esac
 
-NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || NOW=""
-[ -n "$NOW" ] || exit 0
-
-umask 077
-printf 'plan=%s\nengaged_at=%s\n' "$PLAN" "$NOW" > "$MARKER" 2>/dev/null || exit 0
-# Overwrite keeps the existing mode, so the umask above is not enough on its own: a marker
-# first written under a looser umask stays loose forever without this.
-chmod 600 "$MARKER" 2>/dev/null || :
+bind_plan "$REPO" "$SID" "$PLAN" || :
 
 exit 0
