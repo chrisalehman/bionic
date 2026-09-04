@@ -433,12 +433,8 @@ fi
 # a session whose bound plan has closed to be told that rather than handed another run's.
 # Neither line blocks anything.
 GS_RUN=$(session_run "$PROJECT_ROOT_FROM_PATH" "$GS_SID" 2>/dev/null) || :
-GS_RUN_ACTIVE=0
 case "$GS_RUN" in
-  bound-open\ *)
-    GS_RUN_ACTIVE=1 ;;
   fallback\ *)
-    GS_RUN_ACTIVE=1
     echo "governing-skill: run resolved by newest-plan fallback (session unbound) — ${GS_RUN#fallback }" >&2 ;;
   bound-closed\ *)
     # A BINDING IS A COMMITMENT (AC-6). Not active, and deliberately not re-scanned: the
@@ -462,9 +458,11 @@ esac
 # tests/canonical-sdlc-governing-skill.test.sh go red under the bare predicate, and
 # every one of them is a project's first artifact.
 #
-# So the wall is armed by the PROJECT, with the run as one of three ways to show one:
-#   - an open run FOR THIS SESSION under this root (`bound-open`, or the announced
-#     newest-plan `fallback` when the session is unbound), or
+# So the wall is armed by the PROJECT, shown one of three ways. The session's run is NOT
+# a clause: the engagement guard above requires `<root>/.bionic/tmp/engaged-<sid>.state`,
+# so a `.bionic/` tree exists for every session that reaches this line, and a run clause
+# here could never decide anything (deleted on Chris's ruling, wave-session-bound-run,
+# 2026-09-04; the verdict is still announced above, because AC-3/AC-6 want it said).
 #   - a `.bionic/` tree already at this root, or
 #   - a target path inside a `.bionic/` tree — the first-artifact case, where the
 #     directory does not exist yet and this write is what creates it, or
@@ -475,8 +473,7 @@ esac
 # passes in silence. A `deploy.plan.md` in an unrelated repository that claims nothing
 # is not this gate's business, and under always-on registration that has to be true by
 # construction rather than by which skill happened to be armed.
-if [ "$GS_RUN_ACTIVE" -eq 0 ] \
-   && [ ! -d "$PROJECT_ROOT_FROM_PATH/.bionic" ]; then
+if [ ! -d "$PROJECT_ROOT_FROM_PATH/.bionic" ]; then
   case "$FILE_PATH" in
     */.bionic/*) : ;;
     *)
