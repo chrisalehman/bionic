@@ -314,7 +314,7 @@ TOOL_LINE=$(grep -n '\[ "\$TOOL_NAME" = "Agent" \]' "$GATE" | head -1 | cut -d: 
 # The plan-directory walk is the library's now (lib/run.sh's active_run); what this
 # pins is unchanged — the cheap relevance check comes first, before anything touches
 # disk.
-WALK_LINE=$(grep -n 'active_run "\$REPO"' "$GATE" | head -1 | cut -d: -f1)
+WALK_LINE=$(grep -n 'session_run "\$REPO"' "$GATE" | head -1 | cut -d: -f1)
 if [ -n "$TOOL_LINE" ] && [ -n "$WALK_LINE" ] && [ "$TOOL_LINE" -lt "$WALK_LINE" ]; then
   ok "relevance check (line $TOOL_LINE) precedes the plan-directory walk (line $WALK_LINE)"
 else
@@ -1264,7 +1264,11 @@ REPO=$(make_repo r11a yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "no-ledger dispatch passes" "0" "$GATE_ST"
-expect_empty "…in silence: there is no sweeper state left to nag about" "$GATE_ERR"
+# expect_absent, not expect_empty (wave-session-bound-run S5): an unbound engaged
+# session now gets ONE unrelated advisory line here too (the newest-plan fallback
+# notice, S25) — this fixture's own claim was always about the sweeper, never
+# about the channel being empty outright.
+expect_absent "…in silence: there is no sweeper state left to nag about" "sweeper" "$GATE_ERR"
 
 # ---- a ledger present but naming no live anything: still silent ----
 #
@@ -1280,7 +1284,8 @@ mkdir -p "$REPO/.bionic/tmp"
 } > "$REPO/.bionic/tmp/sweeper-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "a dispatch over an ack-only ledger passes" "0" "$GATE_ST"
-expect_empty "…and still says nothing about it" "$GATE_ERR"
+# expect_absent, not expect_empty — see r11a's note just above (S5).
+expect_absent "…and still says nothing about it" "sweeper" "$GATE_ERR"
 
 # ---- the gate never names the deleted verbs, and never invokes the sweeper at all ----
 GATE_SRC="$(cat "$GATE")"
@@ -2872,6 +2877,233 @@ rm -f "$S24_BUDGET/.bionic/tmp/engaged-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$S24_BUDGET")"
 expect_status "r24j …and unengaged, that same full budget decides nothing" "0" "$GATE_ST"
 expect_empty "r24j …silently" "$GATE_ERR"
+
+# ============================================================
+echo ""
+echo "=== S25 — active_run -> session_run (wave-session-bound-run S5) ==="
+# ============================================================
+#
+# THE CONTRACT UNDER TEST (design ledger AC-1/AC-3/AC-6). `PLAN` used to come from
+# `active_run "$REPO"` — the newest open plan in the root, with no session input at
+# all. It now comes from `session_run "$REPO" "$PAYLOAD_SID"`: a session BOUND to a
+# plan (`.bionic/tmp/engaged-<sid>.state` carrying `plan=<path>`) is gated on that
+# plan and that plan alone, whatever else is open in the root; an UNBOUND session
+# (the marker empty, as make_repo's own engaged-* fixtures are) resolves by
+# newest-plan exactly as before, and says so on stderr; a session bound to a plan
+# that has since closed is treated as having no open run at all, and says that too.
+#
+# s25_bind <repo> <sid> <plan-abs-path> — overwrites the marker make_repo already
+# planted (empty = unbound) with a real binding, under the same two-line shape
+# hooks/engage.sh writes (spec §Session binding).
+s25_bind() {
+  local mark="$1/.bionic/tmp/engaged-$2.state"
+  mkdir -p "$(dirname "$mark")"
+  { printf 'plan=%s\n' "$3"; printf 'engaged_at=2026-09-04T00:00:00Z\n'; } > "$mark"
+  chmod 600 "$mark"
+}
+
+# s25_repo <name> <budget-a> <budget-b> -> sets the globals S25_REPO / S25_PLAN_A
+# / S25_PLAN_B (a plain call, never `$(...)` — a command substitution runs in a
+# subshell, and every assignment here would be lost the instant it returned). A
+# and B are the ONLY open plans in the root — make_repo's own default plan is
+# removed — and A is older by mtime, so an UNBOUND session's fallback is
+# decisively B.
+s25_repo() {
+  local name="$1" budget_a="$2" budget_b="$3"
+  local repo; repo=$(make_repo "$name" yes)
+  rm -f "$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  S25_REPO="$repo"
+  S25_PLAN_A="$repo/.bionic/docs/plans/epic-99-test/plan-a.plan.md"
+  S25_PLAN_B="$repo/.bionic/docs/plans/epic-99-test/plan-b.plan.md"
+  cat > "$S25_PLAN_A" <<PLANA
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+parallel-budget: $budget_a
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: plan A in flight
+PLANA
+  cat > "$S25_PLAN_B" <<PLANB
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+parallel-budget: $budget_b
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: plan B in flight
+PLANB
+  touch -t 202601010000 "$S25_PLAN_A"
+  touch -t 202602010000 "$S25_PLAN_B"
+}
+
+# s25_deliver <plan-abs-path> — closes a plan (Step 9, delivered).
+s25_deliver() {
+  cat > "$1" <<'PLANDONE'
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 9
+
+- Step 9: report record/x.md, delivered: 2026-09-04
+PLANDONE
+}
+
+echo ""
+echo "---------- S25a: bound-open — the caller's OWN plan is the ceiling ----------"
+
+# A's budget is tight (writers=1, already at the ceiling with one open row); B's is
+# loose (writers=99). Bound to A, the dispatch is refused by A's ceiling — proof
+# that a second open plan in the same root (B, newer, looser) is never consulted.
+s25_repo r25a "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe" \
+              "writers=99 suites=9 worktrees=9 test_jobs=4 source=probe"
+write_attestation "$S25_REPO" "$SID_A"
+s25_bind "$S25_REPO" "$SID_A" "$S25_PLAN_A"
+s22_roster_row "$S25_REPO" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO")"
+expect_status "25a1: bound to A (tight budget), the dispatch is REFUSED by A's ceiling" "2" "$GATE_ST"
+expect_contains "25a2: …naming A as the plan the budget came from" "$S25_PLAN_A" "$GATE_ERR"
+expect_absent "25a3: …and B's path is never named" "$S25_PLAN_B" "$GATE_ERR"
+expect_absent "25a4: bound: no fallback line is printed" \
+  "run resolved by newest-plan fallback" "$GATE_ERR"
+
+echo ""
+echo "---------- S25b: fallback — unbound resolves to the newest plan, and says so ----------"
+
+# The SAME shape, a fresh repo, budgets swapped so B (the newest, and now the
+# fallback target) is the tight one. Left UNBOUND (make_repo's own empty marker,
+# untouched), the dispatch is refused by B's ceiling, not A's — and the gate
+# prints the fallback advisory naming B. The positive (line present, B used) sits
+# beside its negative (line absent once bound) on the same fixture.
+s25_repo r25b "writers=99 suites=9 worktrees=9 test_jobs=4 source=probe" \
+              "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+S25_REPO2="$S25_REPO"
+# PHYSICAL, because the fallback path comes off active_plan's own resolution —
+# `project_root` calls `pwd -P` internally (payload/scripts/lib/root.sh) — while
+# $S25_PLAN_B is built from the SANDBOX's logical path (plain `pwd`, no `-P`, in
+# this file's own SANDBOX= line). The two differ under macOS's /var -> /private/var
+# link, and unlike a bare path-substring check (25b2/25b3, which match anywhere
+# in GATE_ERR), this assertion pins an exact adjacency — "— " immediately
+# followed by the path — so it needs the SAME physical form the hook itself
+# prints. Mirrors tests/dispatch-preflight.test.sh S23's own S23_MAIN idiom.
+S25_PLAN_B_PHYS="$(cd "$S25_REPO2" && pwd -P)/.bionic/docs/plans/epic-99-test/plan-b.plan.md"
+write_attestation "$S25_REPO2" "$SID_A"
+s22_roster_row "$S25_REPO2" "$SID_A" "W-ONE"
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO2")"
+expect_status "25b1: unbound, the dispatch is REFUSED by B's (newest) ceiling" "2" "$GATE_ST"
+expect_contains "25b2: …naming B as the plan the budget came from" "$S25_PLAN_B" "$GATE_ERR"
+expect_absent "25b3: …and A's path is never named" "$S25_PLAN_A" "$GATE_ERR"
+expect_contains "25b4: …and the fallback advisory names B, verbatim" \
+  "dispatch-preflight: run resolved by newest-plan fallback (session unbound) — $S25_PLAN_B_PHYS" \
+  "$GATE_ERR"
+
+# THE NEGATIVE, same repo, same payload, only the binding added: once bound to A
+# the fallback line disappears (A's loose budget also lets the dispatch through).
+s25_bind "$S25_REPO2" "$SID_A" "$S25_PLAN_A"
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO2")"
+expect_status "25b5: the SAME repo, now bound to A (loose budget), passes" "0" "$GATE_ST"
+expect_absent "25b6: …and the fallback advisory is gone" \
+  "run resolved by newest-plan fallback" "$GATE_ERR"
+
+echo ""
+echo "---------- S25c: bound-closed — a plan that closed is no open run at all ----------"
+
+# A is delivered (closed); B stays open, with a ceiling of zero — so if B were
+# consulted at all, ANY dispatch would refuse. Bound to closed A, the dispatch
+# passes (the budget wall is inert, as it is for any engaged-with-no-plan
+# session) and the closed-plan advisory names A; B's path is nowhere in the
+# output, proving B was never the fallback here.
+s25_repo r25c "suites=9 worktrees=9 test_jobs=4 source=probe" \
+              "writers=0 suites=9 worktrees=9 test_jobs=4 source=probe"
+S25_REPO3="$S25_REPO"
+s25_deliver "$S25_PLAN_A"
+write_attestation "$S25_REPO3" "$SID_A"
+s25_bind "$S25_REPO3" "$SID_A" "$S25_PLAN_A"
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO3")"
+expect_status "25c1: bound to a CLOSED plan (A), the dispatch passes — the budget wall is inert" \
+  "0" "$GATE_ST"
+expect_contains "25c2: …and the closed-plan advisory names A, verbatim" \
+  "dispatch-preflight: bound plan closed — $S25_PLAN_A; this session has no open run" \
+  "$GATE_ERR"
+expect_absent "25c3: …B's path (the still-open plan) appears nowhere" "$S25_PLAN_B" "$GATE_ERR"
+expect_absent "25c4: …nor does the writers=0 budget line B carries" "writers=0" "$GATE_ERR"
+
+echo ""
+echo "---------- S25d: the roster row's plan= field (AC-2, §Roster attribution) ----------"
+
+# Roster attribution is the BINDING, not the resolved run: a session bound to A
+# gets plan=A on its row even though the budget/fallback logic above resolves
+# differently case by case. An unbound session's row carries the literal "none".
+s25_repo r25d "suites=9 worktrees=9 test_jobs=4 source=probe" \
+              "suites=9 worktrees=9 test_jobs=4 source=probe"
+S25_REPO4="$S25_REPO"
+write_attestation "$S25_REPO4" "$SID_A"
+s25_bind "$S25_REPO4" "$SID_A" "$S25_PLAN_A"
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO4")"
+expect_status "25d1: bound dispatch passes" "0" "$GATE_ST"
+S25_ROW=$(roster_row "$(roster_path "$S25_REPO4" "$SID_A")" 1)
+expect_status "25d2: the row's plan= field is A's path, verbatim" "$S25_PLAN_A" \
+  "$(roster_field "$S25_ROW" plan)"
+
+s25_repo r25e "suites=9 worktrees=9 test_jobs=4 source=probe" \
+              "suites=9 worktrees=9 test_jobs=4 source=probe"
+S25_REPO5="$S25_REPO"
+write_attestation "$S25_REPO5" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO5")"
+expect_status "25d3: unbound dispatch passes" "0" "$GATE_ST"
+S25_ROW2=$(roster_row "$(roster_path "$S25_REPO5" "$SID_A")" 1)
+expect_status "25d4: the row's plan= field is the literal 'none'" "none" \
+  "$(roster_field "$S25_ROW2" plan)"
+
+# --- S25d5: a plan path carrying a `|` cannot forge a row (S10a, review SEC F3) ---
+#
+# THE ROW IS PIPE-DELIMITED ON ONE LINE, which is why `sanitize()` exists and why every
+# other interpolated value on it goes through that filter first. `plan=` is the field this
+# wave added and was the one field that skipped it, while the parallel writer in
+# `session-poker.sh adopt` filtered the same value through `clean()` — so the two writers
+# disagreed about whether the field was trusted.
+#
+# THE FIXTURE IS A REAL FILE. A plan named `wave-99|status=landed|name=ghost.plan.md` is a
+# legal filename on every filesystem bionic runs on, so no part of this is hypothetical.
+#
+# WHAT IS ASSERTED IS THE ROW'S SHAPE, not just the field's text: a forged `status=landed`
+# would lose to the real one at `line_field`'s `head -1` today, which makes a value-only
+# assertion pass for a reason that could evaporate under any reader change. The field COUNT
+# is what says no segment was injected.
+s25_repo r25f "suites=9 worktrees=9 test_jobs=4 source=probe" \
+              "suites=9 worktrees=9 test_jobs=4 source=probe"
+S25_REPO6="$S25_REPO"
+write_attestation "$S25_REPO6" "$SID_A"
+S25_EVIL="$S25_REPO6/.bionic/docs/plans/epic-99-test/wave-99|status=landed|name=ghost.plan.md"
+cp "$S25_PLAN_A" "$S25_EVIL"
+expect_status "25d5a: the pipe-bearing plan file really exists (non-vacuity)" "yes" \
+  "$([ -f "$S25_EVIL" ] && echo yes || echo no)"
+s25_bind "$S25_REPO6" "$SID_A" "$S25_EVIL"
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO6")"
+expect_status "25d5b: the dispatch still passes" "0" "$GATE_ST"
+S25_ROW3=$(roster_row "$(roster_path "$S25_REPO6" "$SID_A")" 1)
+S25_ROW_CLEAN=$(roster_row "$(roster_path "$S25_REPO4" "$SID_A")" 1)
+expect_status "25d5c: the row has exactly as many pipe-delimited fields as a clean row" \
+  "$(printf '%s' "$S25_ROW_CLEAN" | tr -cd '|' | wc -c | tr -d ' ')" \
+  "$(printf '%s' "$S25_ROW3" | tr -cd '|' | wc -c | tr -d ' ')"
+expect_status "25d5d: status is still the writer's own value, not the injected one" "intended" \
+  "$(roster_field "$S25_ROW3" status)"
+expect_status "25d5e: name is still the dispatched agent's, not the injected one" \
+  "$(roster_field "$S25_ROW_CLEAN" name)" "$(roster_field "$S25_ROW3" name)"
+expect_status "25d5f: and plan= holds the path with its pipes neutralised" \
+  "$(printf '%s' "$S25_EVIL" | tr '|' ' ')" "$(roster_field "$S25_ROW3" plan)"
 
 echo ""
 echo "----------------------------------------"

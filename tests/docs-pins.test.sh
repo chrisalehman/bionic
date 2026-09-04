@@ -442,6 +442,253 @@ else
 fi
 
 echo ""
+echo "--- SECTION 5 — the session-bound run, and the bind step in the resume ritual (wave-session-bound-run, A4/AC-5/AC-8) ---"
+#
+# WHAT THIS SECTION OWNS. Two sentences in `payload/skills/canonical-sdlc/SKILL.md`'s Patrol
+# paragraph that no hook can check, and that decide whether a resumed session works its own
+# run or its neighbour's:
+#
+#   (g) THE RULE. "Which run" moved from the PROJECT to the SESSION at bionic 1.4.2: the open
+#       run is the plan the session's own engagement marker names, and only an UNBOUND session
+#       falls back to the newest plan. The hooks enforce it; the SENTENCE is what stops the
+#       next reader from re-deriving the old project-keyed rule from the fallback they
+#       happened to observe — which is exactly what an unbound session sees, every time.
+#   (h) THE STEP. Engagement binds only a SOLE open run (AC-7), so a session resuming into a
+#       root with several is unbound, and `adopt` partitions on the binding (AC-2). Without
+#       the bind step the resume ritual reads as complete while leaving the session gated on
+#       another run's plan and offered another run's agents — the two symptoms the wave was
+#       opened for. No hook can require this: binding is an act the model takes, and the only
+#       surface that can ask for it is this paragraph.
+#
+# BYTE-LEVEL, whitespace-normalized, through §2's own `has_pin` — the same latitude and no
+# more. ANTI-VACUITY by the discriminate-a-doctored-copy pattern §1-§4 use.
+#
+# ASSERTION 32 IS THE ONE WITH TEETH ACROSS FILES: the verb this paragraph tells the operator
+# to type is read out of SKILL.md and compared to the verb `hooks/session-poker.sh` puts in
+# its own usage block. A rename on either side splits them here rather than in a session that
+# types a command the tool does not have.
+#
+# APPENDED, NEVER REWRITTEN: §1-§4 belong to earlier slices.
+
+echo ""
+echo "=== Section 5: the session-bound run and the resume-ritual bind step ==="
+
+# THE PARAGRAPH STATES ONE RULE, ONCE (review readability F1, S10b). Before this pin the
+# Patrol paragraph carried the PRE-wave rule as a fact — "whether this PROJECT has an OPEN
+# run … the open run decides WHAT it enforces" — and then the post-wave correction ~120
+# words later in the same paragraph. `payload/scripts/lib/run.sh:313` calls that first
+# sentence the defect in the codebase's own words; the doc kept its copy and appended the
+# fix after it. The sentence below REPLACED it, so the paragraph no longer teaches the rule
+# this wave exists to delete. Pinned as a pair: the new clause present, the old one gone.
+PIN_SCOPE_PAIR='whether this SESSION is engaged, and which run this SESSION is bound to. Engagement decides WHETHER a hook acts at all; the bound run decides WHAT it enforces.'
+PIN_SCOPE_OLD='whether this PROJECT has an OPEN run'
+PIN_BOUND_RUN='**Which run is a property of the SESSION, not of the project** (bionic 1.4.2): the open run is the plan this session is BOUND to, recorded as the `plan=` line of its own engagement marker'
+PIN_FALLBACK='Only an UNBOUND session falls back to the newest plan under the docs root'
+PIN_BIND_STEP='**The resume ritual binds its run before it adopts anything:** if session-start listed more than one open run — or this session is otherwise unbound in a root that holds several — run `bash <plugin-root>/hooks/session-poker.sh bind <plan>` for the plan this session means, immediately after engaging and before the first dispatch.'
+
+if has_pin "$SKILL_MD" "$PIN_BOUND_RUN"; then
+  ok "30: SKILL.md states that the run is a property of the session, verbatim"
+else
+  no "30: SKILL.md states that the run is a property of the session, verbatim" "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_FALLBACK"; then
+  ok "31: …and that ONLY an unbound session takes the newest-plan fallback"
+else
+  no "31: …and that ONLY an unbound session takes the newest-plan fallback" "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_BIND_STEP"; then
+  ok "32: SKILL.md's resume ritual carries the bind step verbatim (A4: exactly one added step)"
+else
+  no "32: SKILL.md's resume ritual carries the bind step verbatim (A4: exactly one added step)" \
+     "file: $SKILL_MD"
+fi
+
+# --- 33: the verb the paragraph types is the verb the tool offers ---
+#
+# READ FROM BOTH FILES, never asserted against a constant twice — §4's rule. The doc side is
+# the operand-carrying spelling inside the bind sentence; the code side is the poker's own
+# usage line. An extractor that returned empty on both sides could not agree its way to
+# green, because assertion 34 pins the extracted value.
+POKER_SH="${REPO}/hooks/session-poker.sh"
+
+# bind_verb_doc <SKILL.md> -> `session-poker.sh bind <plan>` as the ritual spells it
+bind_verb_doc() {
+  _flatten "$1" \
+    | sed -n 's/.*run `bash <plugin-root>\/hooks\/\(session-poker\.sh bind <plan>\)` for the plan.*/\1/p'
+}
+# bind_verb_code <session-poker.sh> -> the same phrase out of the usage block
+bind_verb_code() {
+  /usr/bin/grep -m1 'session-poker\.sh bind <plan>' "$1" 2>/dev/null \
+    | sed -n 's/.*\(session-poker\.sh bind <plan>\).*/\1/p'
+}
+
+BIND_DOC=$(bind_verb_doc "$SKILL_MD")
+BIND_CODE=$(bind_verb_code "$POKER_SH")
+
+expect_eq "33: SKILL.md tells the operator to type the verb the poker publishes" \
+  "$BIND_CODE" "$BIND_DOC"
+expect_eq "34: …and the verb both sides name is 'session-poker.sh bind <plan>'" \
+  'session-poker.sh bind <plan>' "$BIND_DOC"
+
+# --- Anti-vacuity: the same extractors and pins must report a mutation ---
+
+DOCTORED_BOUND="$TMP/skill-bound-run-mutated.md"
+sed 's/Only an UNBOUND session falls back/Every session falls back/' "$SKILL_MD" > "$DOCTORED_BOUND"
+if cmp -s "$SKILL_MD" "$DOCTORED_BOUND"; then
+  no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_BOUND" "$PIN_FALLBACK"; then
+  no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "35: a doctored SKILL.md fails the fallback pin (pin discriminates)"
+fi
+
+DOCTORED_BIND="$TMP/skill-bind-step-mutated.md"
+sed 's/binds its run before it adopts anything/adopts before it binds anything/' \
+  "$SKILL_MD" > "$DOCTORED_BIND"
+if cmp -s "$SKILL_MD" "$DOCTORED_BIND"; then
+  no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_BIND" "$PIN_BIND_STEP"; then
+  no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
+     "the pin matched a copy that puts adopt first"
+else
+  ok "36: a reordered resume ritual fails the bind-step pin (pin discriminates)"
+fi
+
+DOCTORED_BIND_VERB="$TMP/session-poker-verb-mutated.sh"
+sed 's/session-poker\.sh bind <plan>/session-poker.sh bindrun <plan>/' "$POKER_SH" > "$DOCTORED_BIND_VERB"
+if cmp -s "$POKER_SH" "$DOCTORED_BIND_VERB"; then
+  no "37: a renamed poker verb splits from the doc (pin discriminates)" \
+     "the sed target matched nothing — the usage line moved"
+else
+  expect_ne "37: a renamed poker verb splits from the doc (pin discriminates)" \
+    "$BIND_DOC" "$(bind_verb_code "$DOCTORED_BIND_VERB")"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_SCOPE_PAIR"; then
+  ok "38: SKILL.md's two-facts sentence names the SESSION's bound run, not the project's"
+else
+  no "38: SKILL.md's two-facts sentence names the SESSION's bound run, not the project's" \
+     "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_SCOPE_OLD"; then
+  no "39: …and the pre-wave project-scoped clause is gone from the paragraph" \
+     "SKILL.md still states the rule this wave deleted: '$PIN_SCOPE_OLD'"
+else
+  ok "39: …and the pre-wave project-scoped clause is gone from the paragraph"
+fi
+
+# Anti-vacuity for 38, same pattern as 35/36: the extractor must report a doctored copy.
+DOCTORED_SCOPE="$TMP/skill-scope-mutated.md"
+sed 's/which run this SESSION is bound to/whether this PROJECT has an OPEN run/' \
+  "$SKILL_MD" > "$DOCTORED_SCOPE"
+if cmp -s "$SKILL_MD" "$DOCTORED_SCOPE"; then
+  no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_SCOPE" "$PIN_SCOPE_PAIR"; then
+  no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "40: a doctored SKILL.md fails the scope pin (pin discriminates)"
+fi
+
+echo ""
+echo "=== Section 6: Step 8's tmp wipe spares session-keyed state ==="
+#
+# THE DEFECT THIS PINS (critic C-2, remediated at S10b). Step 8 said `wipe .bionic/tmp/*`,
+# unqualified. `.bionic/tmp/` is where EVERY session in the root keeps its engagement
+# marker, its roster, its Patrol stamp, its preflight attestation and its sweeper state —
+# all keyed by session id. A blanket wipe therefore destroys the live state of every OTHER
+# session working that root, which is precisely the two-run scenario this wave exists for,
+# and it contradicts the same file's own sentence that "the marker is never removed during
+# the session once written". The Step 8 line now names what it spares.
+#
+# THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
+# evidence key the gate parses, not prose; renaming it would be an interface change and is
+# not what the finding asked for.
+PIN_TMP_SPARE='sparing every session-keyed file — `engaged-*.state`, `roster-*.state`, `patrol-*.state*`, `preflight-*.state`, `sweeper-*.state`'
+PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
+
+if has_pin "$SKILL_MD" "$PIN_TMP_SPARE"; then
+  ok "41: SKILL.md's Step 8 names the session-keyed files its wipe spares"
+else
+  no "41: SKILL.md's Step 8 names the session-keyed files its wipe spares" "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_TMP_BLANKET"; then
+  no "42: …and no longer instructs the blanket wipe that destroyed them" \
+     "SKILL.md still says: $PIN_TMP_BLANKET"
+else
+  ok "42: …and no longer instructs the blanket wipe that destroyed them"
+fi
+
+# The evidence key the gate reads is unchanged — the repair is prose, not interface.
+if has_pin "$SKILL_MD" 'tmp-wiped:'; then
+  ok "43: …while the Step-8 evidence key 'tmp-wiped:' is untouched"
+else
+  no "43: …while the Step-8 evidence key 'tmp-wiped:' is untouched" \
+     "the gate parses this key; the S10b repair must not have renamed it"
+fi
+
+# Anti-vacuity, same pattern as 35/36/40.
+DOCTORED_TMP="$TMP/skill-tmp-wipe-mutated.md"
+sed 's/sparing every session-keyed file/taking every file/' "$SKILL_MD" > "$DOCTORED_TMP"
+if cmp -s "$SKILL_MD" "$DOCTORED_TMP"; then
+  no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
+  no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)"
+fi
+
+echo ""
+echo "=== Section 7: bind's operand takes the spelling session-start prints ==="
+#
+# THE PAIR THIS PINS (S10b phase 2). hooks/session-start.sh prints the open-run listing
+# DOCS-root-relative, so an operator copies `plans/<epic>/<wave>.md` out of it. That is the
+# one spelling `bind` used to reject, because a relative operand was resolved against the
+# PROJECT root only. The verb now tries the docs root when the project-relative spelling is
+# not a regular file, and this section is the doc half of that agreement: the paragraph a
+# reader learns the verb from must name all three spellings the verb accepts.
+PIN_BIND_OPERAND='its operand may be absolute, project-root-relative, or docs-root-relative — the spelling session-start'"'"'s own listing prints'
+
+if has_pin "$SKILL_MD" "$PIN_BIND_OPERAND"; then
+  ok "45: SKILL.md names all three spellings bind accepts"
+else
+  no "45: SKILL.md names all three spellings bind accepts" "file: $SKILL_MD"
+fi
+
+# THE CODE HALF, read from the poker rather than asserted against a constant (§4's rule):
+# the docs-root fallback must actually be in the verb, not only in the prose.
+if /usr/bin/grep -q 'BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG"' "$POKER_SH"; then
+  ok "46: …and session-poker.sh really does try the docs root for a relative operand"
+else
+  no "46: …and session-poker.sh really does try the docs root for a relative operand" \
+     "file: $POKER_SH"
+fi
+
+# Anti-vacuity, same pattern as 35/36/40/44.
+DOCTORED_OPERAND="$TMP/skill-bind-operand-mutated.md"
+sed 's/its operand may be absolute, project-root-relative, or docs-root-relative/its operand must be absolute/' \
+  "$SKILL_MD" > "$DOCTORED_OPERAND"
+if cmp -s "$SKILL_MD" "$DOCTORED_OPERAND"; then
+  no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_OPERAND" "$PIN_BIND_OPERAND"; then
+  no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "47: a doctored SKILL.md fails the operand pin (pin discriminates)"
+fi
+
+echo ""
 echo "========================================"
 echo "docs-pins: $PASS/$TOTAL passed"
 echo "========================================"

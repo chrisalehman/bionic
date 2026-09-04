@@ -114,6 +114,14 @@
 #   2 — usage error, or a refusal (propagated from the sweeper read, or raised here)
 #   3 — no session key
 #
+# `bind` IS THE ONE VERB THIS TABLE DOES NOT DESCRIBE, and it is listed rather than left to
+# be inferred (review readability F6). It answers about a WRITE, not about a roster, so its
+# 1 is a refusal and not a NOTIFY:
+#   0 — bound, or NOT-ENGAGED (nothing decided, and that is not a fault)
+#   1 — REFUSED: the operand is not a member of this root's open-run set
+#   2 — the marker write failed, or a usage error (this file's one argument-error code)
+#   3 — no session key, exactly as above
+#
 # Session key: CLAUDE_CODE_SESSION_ID, exactly as hooks/session-sweeper.sh takes it.
 #
 # THE SWEEPER IS THIS SCRIPT'S SIBLING, resolved exactly as hooks/landing-gate.sh resolves
@@ -145,7 +153,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh patrol.sh resources.sh worktree.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -277,6 +285,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/root.sh"
 . "$BIONIC_LIB/session.sh"
 . "$BIONIC_LIB/run.sh"
+. "$BIONIC_LIB/binding.sh"
 . "$BIONIC_LIB/patrol.sh"
 . "$BIONIC_LIB/resources.sh"
 . "$BIONIC_LIB/worktree.sh"
@@ -336,6 +345,14 @@ ADOPT_TAIL_CAP=2000
 say()  { printf 'poker: %s\n' "$1"; }
 die()  { printf 'poker: %s\n' "$1" >&2; }
 
+# ONE EXIT CODE FOR EVERY ARGUMENT ERROR IN THIS FILE, AND IT IS 2. `bind` briefly had a 3
+# of its own (wave-session-bound-run S6, on the reading that a missing operand is the same
+# class as the missing session key the verb refuses ten lines on). It is not: the session key
+# is an ENVIRONMENT fact the caller cannot type, and 3 is what this file says about the
+# environment; an operand the caller left off the command line is a usage error like every
+# other usage error here, and one verb spelling it differently is a surface the operator has
+# to learn per verb. Reverted at S8 with the `USAGE_EXIT` indirection deleted with it —
+# tests/session-poker.test.sh 16g asserts the 2.
 usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
@@ -346,16 +363,19 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh interval-default   this script's built-in default interval, in seconds (ignores config)"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
+  die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   exit 2
 }
 
 [ $# -ge 1 ] || usage "a verb is required."
 VERB="$1"; shift
 
-# `adopt` is the ONE verb that takes a flag, and `--report-only` is the ONE flag. Everything
-# else keeps the old surface exactly — one word, nothing after it — so a stray argument is
-# still the usage error it always was rather than something silently ignored.
+# `adopt` is the ONE verb that takes a flag, and `--report-only` is the ONE flag. `bind` is
+# the ONE verb that takes an operand, and it is required. Everything else keeps the old
+# surface exactly — one word, nothing after it — so a stray argument is still the usage error
+# it always was rather than something silently ignored.
 ADOPT_REPORT_ONLY=no
+BIND_ARG=""
 case "$VERB" in
   adopt)
     if [ $# -eq 1 ]; then
@@ -364,6 +384,16 @@ case "$VERB" in
     elif [ $# -gt 1 ]; then
       usage "adopt takes at most one flag."
     fi
+    ;;
+  bind)
+    # THE OPERAND IS THE WHOLE POINT OF THE VERB, so its absence is a refusal rather than a
+    # default. `bind` with no plan cannot mean "unbind" — engagement owns writing `plan=none`
+    # (AC-7) and a verb that also unbound would give the marker a second writer with a second
+    # rule. It exits 2, this file's one code for an argument error, like every other verb.
+    if [ $# -ne 1 ] || [ -z "$1" ]; then
+      usage "bind takes exactly one argument: the plan this session is working."
+    fi
+    BIND_ARG="$1"
     ;;
   tick|arm|disarm|interval|interval-default)
     [ $# -eq 0 ] || usage "$VERB takes no arguments."
@@ -828,18 +858,94 @@ normalize_newlines() {
 # The `why` half is not decoration: it is the whole content of the QUIET line this feeds. A
 # tick that says "no open row, but the run is not delivered" and stops there tells its reader
 # nothing they can act on, and the reader is a model deciding whether the Patrol is broken.
-run_state() {  # <project root> <arming-record path, may be empty> -> "delivered|<why>" or "open|<why>"
-  local repo="$1" armed="${2:-}" droot plan section current line
+# ---------------------------------------------------------------- whose run is this?
+#
+# THE TICK HAS TWO PLAN READERS — the run-state read below and the FILL scheduler's budget
+# and slice table — and before wave-session-bound-run both asked the ROOT: `active_plan`, the
+# newest plan carrying an unfenced `## SDLC State`. A root with two runs in it has one newest
+# plan and two sessions, so one of them was always reading the other's run: the session whose
+# run was mid-flight DISARMed off the neighbour's close-out, and the session whose run had
+# closed kept ticking off the neighbour's open plan (spec AC-1, AC-6).
+#
+# ONE RESOLUTION, TWO CONSUMERS, ONE ANNOUNCEMENT. Both readers call this and it answers
+# once — `session_run` is a find over the docs tree and the announcement is a fact about the
+# tick, not about the site that asked. Saying it twice would read as two resolutions.
+#
+# WHAT EACH VERDICT MEANS HERE (payload/scripts/lib/run.sh:414):
+#   bound-open <p>    this session's own run, and it is open        -> p, open
+#   fallback <p>      no binding; today's root-keyed answer, said out loud (AC-3) -> p, open
+#   bound-closed <p>  this session's own run, and it has closed     -> p, NOT open
+#   none              no binding and no open run in the root        -> today's newest plan,
+#                                                                      NOT open
+#
+# THE `none` ARM IS WHY THIS IS NOT A ONE-LINE SUBSTITUTION. `session_run` answers `none`
+# when there is no binding AND `active_run` has nothing — which is exactly the state a
+# DELIVERED run leaves behind, and exactly the state the tick has to read a plan in to decide
+# DISARM at all. Taking `none` as "no plan" would make DISARM unreachable for every unbound
+# session in the fleet, so the arm falls back to `active_plan` — the same call this function
+# made before the wave, on the one path where the wave has nothing to say. For an unbound
+# session the pair (plan, open) this sets is therefore identical to (`active_plan`,
+# `active_run` succeeded) at every input: today's behaviour, verbatim (AC-3).
+POKER_RUN_PLAN=""
+POKER_RUN_OPEN=no
+POKER_RUN_RESOLVED=no
+# ANSWERS ONCE PER PROCESS, AND THE ARGUMENTS OF EVERY LATER CALL ARE IGNORED — not keyed
+# on them, discarded (review readability F7). The guard below returns before `$1` and `$2`
+# are ever read, so this is a latch and not a memo table: a second call naming a DIFFERENT
+# root would silently receive the first root's answer. It is safe because both call sites
+# pass the same pair — `run_state` (below) and the FILL scheduler — and a poker process
+# serves exactly one project root and one session key for its whole life. A third caller
+# with a different pair would have to key the latch rather than reuse it.
+resolve_run() {  # <project root> <session id> -> sets POKER_RUN_PLAN / POKER_RUN_OPEN
+  [ "$POKER_RUN_RESOLVED" = yes ] && return 0
+  POKER_RUN_RESOLVED=yes
+  local repo="$1" sid="${2:-}" raw word path
+  raw="$(session_run "$repo" "$sid")" || :
+  word="${raw%% *}"
+  path="${raw#* }"
+  case "$word" in
+    bound-open)
+      POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=yes ;;
+    fallback)
+      POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=yes
+      die "run resolved by newest-plan fallback (session unbound) — $path" ;;
+    bound-closed)
+      # A BINDING IS A COMMITMENT (design ledger D2). The plan is carried through rather
+      # than dropped, because the 1.3.2 read below is what turns "closed" into a DISARM the
+      # operator can read — and it is carried WITHOUT the open verdict, so the library's
+      # second opinion cannot re-open a run this session already finished.
+      POKER_RUN_PLAN="$path"; POKER_RUN_OPEN=no
+      die "bound plan closed — $path; this session has no open run" ;;
+    *)
+      POKER_RUN_PLAN="$(active_plan "$repo")" || POKER_RUN_PLAN=""
+      POKER_RUN_OPEN=no ;;
+  esac
+  return 0
+}
+
+run_state() {  # <project root> <arming-record path, may be empty> <session id> -> "delivered|<why>" or "open|<why>"
+  local repo="$1" armed="${2:-}" sid="${3:-}" droot plan section current line
   if [ -z "$repo" ] || [ ! -d "$repo" ]; then
     printf 'open|no project root resolved, so no plan could be read'
     return 0
   fi
   # ONE CALL EACH, AND NEITHER IS RESTATED HERE. `docs_root` is asked only so the refusal
-  # below can name the directory it searched; `active_plan` is the selection itself.
+  # below can name the directory it searched; `resolve_run` is the selection itself, and it
+  # is THIS SESSION's rather than the root's (see its header).
   droot="$(docs_root "$repo")"
-  plan="$(active_plan "$repo")" || plan=""
+  resolve_run "$repo" "$sid"
+  plan="$POKER_RUN_PLAN"
   if [ -z "$plan" ]; then
     printf 'open|no plan carrying an unfenced "## SDLC State" under %s/{plans,incidents}' "$droot"
+    return 0
+  fi
+  # A BOUND PLAN THAT IS GONE. `session_run` reports a missing binding as `bound-closed`, so
+  # the path can name a file no longer on disk — and every read below would then be an awk
+  # error on stderr and an empty answer. DOUBT IS `open` (ADR-002 §3), which is the same
+  # answer the no-plan arm above gives, so the Patrol keeps its stamp rather than stopping
+  # on a file nobody can read.
+  if [ ! -f "$plan" ]; then
+    printf 'open|%s is this session'"'"'s bound plan and it is not on disk' "$plan"
     return 0
   fi
   section="$(normalize_newlines "$plan" | awk '
@@ -894,17 +1000,21 @@ run_state() {  # <project root> <arming-record path, may be empty> -> "delivered
     printf 'open|%s records delivered:, but it was delivered before this Patrol armed — that is the previous run' "$plan"
     return 0
   fi
-  # THE LIBRARY'S SECOND OPINION, as a CONJUNCT and never as a replacement. `active_run`
-  # (payload/scripts/lib/run.sh) is the SSoT for "is this run open" (spec §3, ownership
-  # table) and it reads more plans than the block above does — depth 3, and no fence
-  # filter. The read above is the evidence gate's, held body-for-body by
-  # tests/cross-gate-agreement.test.sh §S, and it is the STRICTER of the two: a fenced
-  # `## SDLC State` is documentation here and a run there. So the two are ANDed in the one
-  # direction that cannot cost anything — where the library still calls the run open,
-  # `open` wins. That is this function's fail direction everywhere else, applied to the
-  # one reader that can see a plan this one cannot.
-  if active_run "$repo" >/dev/null 2>&1; then
-    printf 'open|%s records delivered:, but lib/run.sh:active_run still reads this run as open' "$plan"
+  # THE LIBRARY'S SECOND OPINION, as a CONJUNCT and never as a replacement. `lib/run.sh` is
+  # the SSoT for "is this run open" (spec §3, ownership table) and it reads more plans than
+  # the block above does — depth 3, and no fence filter. The read above is the evidence
+  # gate's, held body-for-body by tests/cross-gate-agreement.test.sh §S, and it is the
+  # STRICTER of the two: a fenced `## SDLC State` is documentation here and a run there. So
+  # the two are ANDed in the one direction that cannot cost anything — where the library
+  # still calls the run open, `open` wins. That is this function's fail direction everywhere
+  # else, applied to the one reader that can see a plan this one cannot.
+  #
+  # THE OPINION IS NOW ABOUT THIS SESSION'S PLAN, not the root's newest (AC-6). It is
+  # `resolve_run`'s own verdict — `run_open` on the very file this function just read —
+  # rather than a second `active_run` call, which in a two-run root would answer for the
+  # neighbour and keep a finished Patrol alive forever.
+  if [ "$POKER_RUN_OPEN" = yes ]; then
+    printf 'open|%s records delivered:, but lib/run.sh still reads this run as open' "$plan"
     return 0
   fi
   printf 'delivered|%s is at current: 9 and its Step 9 line records delivered:' "$plan"
@@ -1208,7 +1318,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at|origin
+adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan
   awk -v ackfile="$2" '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
@@ -1241,6 +1351,13 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
       v = kv($0, "launched_at");   if (v != "") launch[n] = v
       v = kv($0, "session");       if (v != "") sess[n]   = v
       v = kv($0, "adopted_from");  if (v != "") afrom[n]  = v
+      # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
+      # plan of the session that dispatched the row, stamped at the instant the row was
+      # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
+      # field at all — a THIRD state, not an empty plan, and the caller partitions on the
+      # difference (spec AC-2, A2). An apostrophe cannot appear in this comment: the awk
+      # program is one single-quoted argument.
+      if (index($0, "|plan=") > 0) { plan[n] = kv($0, "plan"); hasplan[n] = 1 }
       st = kv($0, "status")
       if (st == "identified" || st == "confirmed") {
         v = kv($0, "agent_id"); if (v != "") id[n] = v
@@ -1257,8 +1374,9 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
         n = order[i]
         if (n in met) continue
         if (n in acked) continue
-        printf "%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
-               launch[n], ((n in afrom) ? afrom[n] : sess[n])
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+               launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
+               ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : "")
       }
     }
   ' "$1" 2>/dev/null
@@ -1303,9 +1421,19 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 # A ROW WITH NO ID IS NEVER WRITTEN. That is the UNADDRESSABLE verdict's whole content —
 # there is no identity to file — and a row carrying `agent_id=` empty would be inert at
 # every by-id reader while looking like an adoption on disk.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> -> 0 written/already there, 1 not
+#
+# THE ROW CARRIES THE ADOPTING SESSION'S BINDING, in the same trailing `plan=` field
+# hooks/dispatch-preflight.sh:1703 writes on the rows it creates — one field name, one
+# position, two writers (spec §Ownership table, "roster attribution"; cross-gate §RA).
+# Without it an adopted row was the one row on any roster with no attribution at all, so a
+# THIRD session bound to the same plan re-read this session's own adoption as
+# `unattributed` and declined to take it: the partition would quietly stop working exactly
+# where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
+# the adopter is now the session that owns the row — the launching session is already
+# recorded, separately, in `adopted_from=`.
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
-  local launch="$9" osid="${10}" addr="${11}" d
+  local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" d
   [ -n "$id" ] || return 1
   [ -n "$sid" ] || return 1
   d="${f%/*}"
@@ -1321,12 +1449,38 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
       >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
   fi
-  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=|teammate_id=%s|adopted_from=%s|tool_use_id=\n' \
+  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=|teammate_id=%s|adopted_from=%s|tool_use_id=|plan=%s\n' \
     "$sid" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
     "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" \
-    "$(clean "$addr")" "$(clean "$osid")" \
+    "$(clean "$addr")" "$(clean "$osid")" "$(clean "$plan")" \
     >> "$f" 2>/dev/null || return 1
   return 0
+}
+
+# TWO PLAN PATHS ARE THE SAME PLAN when they name the same file, and the two sides of the
+# comparison come from different writers: the caller's marker holds whatever `bind_plan` was
+# given, while a roster row holds whatever `session_plan` returned in the session that
+# dispatched it. A worktree cwd, a `/tmp` that is really `/private/tmp`, a `.`/`..` in the
+# middle — each of those makes two spellings of one file, and a string compare would call the
+# row another run's and refuse to adopt this session's own agent.
+#
+# THE DIRECTORY IS RESOLVED AND THE LEAF IS NOT, which is `_bind_resolve`'s rule in
+# payload/scripts/lib/binding.sh for the reason stated there: `find` does not resolve leaves
+# either, so resolving this one would make a plan reached through a symlink compare unequal
+# to the same plan as `open_runs` reports it.
+#
+# IT NEVER FAILS. An unresolvable directory — a plan whose tree has since been removed —
+# degrades to the raw string, which still compares equal to an identical raw string. A
+# comparison that errored here would silently turn every row unattributable.
+adopt_plan_key() {  # <plan path> -> a comparable spelling of it
+  local d b
+  case "$1" in
+    */*) d="${1%/*}"; b="${1##*/}" ;;
+    *)   printf '%s' "$1"; return 0 ;;
+  esac
+  [ -n "$d" ] || d="/"
+  d="$(cd "$d" 2>/dev/null && pwd -P)" || { printf '%s' "$1"; return 0; }
+  printf '%s/%s' "$d" "$b"
 }
 
 # A roster path is absolute or project-relative, exactly as the row's writer left it.
@@ -1468,6 +1622,33 @@ case "$VERB" in
     ADOPT_SESSIONS=0
     ADOPT_NOW="$(now_epoch)"
 
+    # ---------- THE PARTITION (spec AC-2; design ledger T2) ----------
+    #
+    # THE BUG THIS CLOSES is symptom 2 of the report: this loop walked every roster in the
+    # project and offered every open row on every one of them, filtered by nothing but the
+    # filename. Two runs sharing a root meant each session was handed the other run's agents
+    # to ledger, message and stop.
+    #
+    # ATTRIBUTION, NOT A SECOND SCAN. hooks/dispatch-preflight.sh stamps the dispatching
+    # session's bound plan onto every row it writes, and a BOUND caller compares that field
+    # against its own binding: same plan is its own work, a different plan is another run in
+    # this root, no field at all is a roster written before this wave (A2). Only the first is
+    # written to this session's roster; the other two are LISTED, because a predecessor's
+    # agent that is invisible is exactly the failure `adopt` exists to prevent — the operator
+    # still needs to see that something is running here, even when taking it is not theirs.
+    #
+    # AN UNBOUND CALLER HAS NOTHING TO COMPARE AGAINST and gets today's behaviour verbatim:
+    # every row, adopted, `partition=all` (AC-3). `session_plan` is the RAW binding rather
+    # than `session_run`'s resolution, deliberately — a session bound to a plan that has
+    # since closed still owns the rows it dispatched under it, and the fallback plan of an
+    # unbound session was never anyone's attribution.
+    ADOPT_OWN_PLAN="$(session_plan "$REPO_REAL" "$SESSION_ID")" || ADOPT_OWN_PLAN=""
+    ADOPT_OWN_KEY=""
+    [ -n "$ADOPT_OWN_PLAN" ] && ADOPT_OWN_KEY="$(adopt_plan_key "$ADOPT_OWN_PLAN")"
+    ADOPT_ADOPTED=0
+    ADOPT_LISTED=0
+    ADOPT_LAST_PART=""
+
     for ADOPT_RF in "$ADOPT_DIR"/roster-*.state; do
       [ -f "$ADOPT_RF" ] || continue
       # Symlinks are not followed, the same posture every other .bionic/tmp reader takes.
@@ -1486,7 +1667,7 @@ case "$VERB" in
       # every agent that session launched.
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
-      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG; do
+      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN; do
         [ -n "$RNAME" ] || continue
         ADOPT_ROWS=$((ADOPT_ROWS + 1))
 
@@ -1581,11 +1762,51 @@ case "$VERB" in
           VERDICT=SILENT
         fi
 
-        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|address=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s|transcript_age=%s\n' \
+        # ---- WHOSE RUN IS THIS ROW? (AC-2)
+        #
+        # `plan=none` READS AS UNATTRIBUTED, not as another run. `none` is the marker's own
+        # word for "this session had no binding" (payload/scripts/lib/run.sh:378), so a row
+        # carrying it names no run at all — and calling it "another run in this root" would
+        # assert a run that does not exist. Both answers are un-adoptable, so the choice
+        # only decides which heading the operator reads it under.
+        if [ -z "$ADOPT_OWN_KEY" ]; then
+          PARTITION=all
+        elif [ -z "$RPLAN" ] || [ "$RPLAN" = none ]; then
+          PARTITION=unattributed
+        elif [ "$(adopt_plan_key "$RPLAN")" = "$ADOPT_OWN_KEY" ]; then
+          PARTITION=own
+        else
+          PARTITION=other
+        fi
+        case "$PARTITION" in
+          own|all) ADOPT_ADOPTED=$((ADOPT_ADOPTED + 1)) ;;
+          *)       ADOPT_LISTED=$((ADOPT_LISTED + 1)) ;;
+        esac
+
+        # THE HEADING IS A GROUP SEPARATOR, printed when the partition CHANGES rather than
+        # once for the whole report. Rows arrive in roster order and a predecessor session
+        # dispatched under one binding, so in practice each kind is one contiguous run and
+        # gets exactly one heading; a session that rebound mid-flight interleaves them and
+        # gets the heading again, which is right — a heading standing over rows of another
+        # kind would be worse than a repeated one. An unbound caller sees neither line.
+        if [ "$PARTITION" != "$ADOPT_LAST_PART" ]; then
+          case "$PARTITION" in
+            other)        say "other runs in this root — listed, never adopted" ;;
+            unattributed) say "unattributed rows (pre-wave rosters) — listed, never adopted" ;;
+          esac
+        fi
+        ADOPT_LAST_PART="$PARTITION"
+
+        # THE TWO NEW FIELDS ARE TRAILING, so every existing field keeps its position for a
+        # reader that counts rather than looks up by key. `plan=` is the row's own
+        # attribution (`none` when it carried none) and `partition=` is what this caller
+        # decided about it.
+        printf '%s|at=%s|session=%s|from=%s|name=%s|verdict=%s|agent_id=%s|address=%s|subagent_type=%s|deliverable=%s|deliverable_present=%s|progress=%s|progress_age=%s|cadence=%s|transcript=%s|transcript_present=%s|transcript_age=%s|plan=%s|partition=%s\n' \
           "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$OSID" "$(clean "$RNAME")" "$VERDICT" \
           "$RID" "$ADOPT_ADDR" "$(clean "$RTYPE")" "$(clean "$RDELIV_ABS")" "$DELIV_PRESENT" \
           "$(clean "$RPROG_ABS")" "${PROG_AGE:-unknown}" "${CAD_S:-unknown}" \
-          "$(clean "$TX")" "$TX_PRESENT" "${TX_AGE:-unknown}"
+          "$(clean "$TX")" "$TX_PRESENT" "${TX_AGE:-unknown}" \
+          "$(clean "${RPLAN:-none}")" "$PARTITION"
 
         # ---- the adoption itself, written before it is printed
         #
@@ -1606,17 +1827,29 @@ case "$VERB" in
         # stop address it prints is the address the write MAKES true, so it is printed as
         # the instruction it is: run `adopt`, and this line works. AC-4's "identical rows"
         # is pinned in tests/session-poker.test.sh §8i by comparing the two renderings.
+        #
+        # AND THE PARTITION DECIDES WHETHER IT IS FILED AT ALL (AC-2). A row belonging to
+        # another run in this root is never written to this session's roster: the write is
+        # what makes the stop address true, so writing it would take ownership of an agent
+        # this session did not launch and is not steering — the exact harm the partition
+        # exists to prevent. It is still printed, one arm down.
         ROW_JOURNALLED=no
-        if [ -n "$RID" ] && [ "$ADOPT_REPORT_ONLY" = yes ]; then
-          ROW_JOURNALLED=yes
-        elif [ -n "$RID" ]; then
-          if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
-               "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR"; then
-            ROW_JOURNALLED=yes
-          else
-            die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
-          fi
-        fi
+        ROW_LISTED_ONLY=no
+        case "$PARTITION" in
+          own|all)
+            if [ -n "$RID" ] && [ "$ADOPT_REPORT_ONLY" = yes ]; then
+              ROW_JOURNALLED=yes
+            elif [ -n "$RID" ]; then
+              if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
+                   "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
+                   "${ADOPT_OWN_PLAN:-none}"; then
+                ROW_JOURNALLED=yes
+              else
+                die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
+              fi
+            fi ;;
+          *) ROW_LISTED_ONLY=yes ;;
+        esac
 
         say "$(clean "$RNAME") ($(clean "$RTYPE")) from session $OSID — $VERDICT"
         if [ -n "$RID" ] && [ "$ROW_JOURNALLED" = yes ]; then
@@ -1645,6 +1878,25 @@ case "$VERB" in
           printf '  stop        : TaskStop %s\n' "$ADOPT_ADDR"
           printf '                TaskStop %s — the bare name, the address that always survives\n' \
             "$(clean "$RNAME")"
+        elif [ "$ROW_LISTED_ONLY" = yes ] && [ -n "$RID" ]; then
+          # LISTED, NOT ADOPTED. Everything that does not depend on this session's roster is
+          # still printed — the id, the observe address, the message address all belong to
+          # the agent rather than to us — and the one line that would be a lie is replaced by
+          # the reason it is missing. The operator can still SEE and MESSAGE an agent of the
+          # other run; taking ownership of it is what they may not do, and the cure is the
+          # other session, not a retry here.
+          printf '  agent id    : %s\n' "$RID"
+          printf '  observe     : %s (%s)\n' "$TX" \
+            "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
+          printf '  message     : SendMessage to:%s\n' "$RID"
+          if [ "$PARTITION" = other ]; then
+            printf '  stop        : not adopted — this row belongs to another run in this root\n'
+            printf '                (%s), and ownership stays with the session working it.\n' "${RPLAN:-none}"
+          else
+            printf '  stop        : not adopted — this row carries no plan= attribution\n'
+            printf '                (a roster written before session-bound runs existed), so it\n'
+            printf '                cannot be told from another run in this root.\n'
+          fi
         elif [ -n "$RID" ]; then
           # ADDRESSABLE FOR EVERYTHING BUT THE STOP. The id is real and the transcript and
           # the message address do not depend on this session's roster — only ownership
@@ -1689,18 +1941,155 @@ $ADOPT_OUT
 EOF
     done
 
-    printf '%s|at=%s|session=%s|scanned=%s|open=%s\n' \
-      "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$ADOPT_SESSIONS" "$ADOPT_ROWS"
+    printf '%s|at=%s|session=%s|scanned=%s|open=%s|adopted=%s|listed=%s\n' \
+      "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$ADOPT_SESSIONS" "$ADOPT_ROWS" \
+      "$ADOPT_ADOPTED" "$ADOPT_LISTED"
     if [ "$ADOPT_ROWS" -eq 0 ]; then
       say "nothing to adopt — no other session has an open row on this project's rosters."
       exit 0
     fi
     say "$ADOPT_ROWS open row(s) from $ADOPT_SESSIONS predecessor session(s) — ledger every one BY AGENT ID before dispatching anything new."
+    # THE SECOND LINE EXISTS ONLY WHEN IT SAYS SOMETHING. A caller that adopted everything it
+    # found is the case this verb has always described, and a count of zero listed rows would
+    # be a line the operator has to read to learn nothing.
+    [ "$ADOPT_LISTED" -gt 0 ] \
+      && say "$ADOPT_ADOPTED adopted onto this session's roster, $ADOPT_LISTED listed only — a row belonging to another run in this root is never adopted."
     # ONE EXTRA LINE, and the rows above untouched: the mode is stated where it changes what
     # the reader should do next, not woven through a rendering that has to stay comparable.
     [ "$ADOPT_REPORT_ONLY" = yes ] \
       && say "report-only: nothing was written — run 'adopt' to take these rows onto this session's roster."
     exit 1
+    ;;
+
+  # ---------------------------------------------------------------- bind
+  #
+  # THE ACT THAT NAMES THIS SESSION'S RUN (spec AC-8; design ledger D1). Identity is
+  # DECLARED, never inferred by a scan: engagement binds a session when the root holds
+  # exactly one open run and writes `plan=none` when it holds several (AC-7), so a session
+  # resumed into a two-run root is deliberately left unbound until it says which run is its
+  # own. This verb is how it says so.
+  #
+  # AND IT IS THE ONLY WAY A BINDING CHANGES AFTER ENGAGEMENT, besides the governing skill's
+  # bind-on-first-write (hooks/canonical-sdlc-governing-skill.sh, AC-9). D1 rejected both
+  # alternatives on the record: an argument on the engage hook turns a hook into a command,
+  # and a hand-edited marker abandons the one-writer invariants that make the file readable
+  # at all. Nothing else in this file writes the marker.
+  #
+  # THE INVARIANTS ARE THE LIBRARY'S, NOT A SECOND COPY. `bind_plan`
+  # (payload/scripts/lib/binding.sh) owns the two-line shape, mode 600, the symlink refusal
+  # and — the one that matters here — MEMBERSHIP in `open_runs`, the same set `session_run`
+  # will later rule on. This verb's own work is to say WHICH refusal happened, because
+  # `bind_plan` answers 0/1/2 and an operator handed a bare "refused" cannot tell a typo
+  # from a closed run.
+  bind)
+    SESSION_ID="$(session_id)" || SESSION_ID=""
+    if [ -z "$SESSION_ID" ]; then
+      die "REFUSED — no session key (CLAUDE_CODE_SESSION_ID is unset or empty)."
+      die "A binding answers for ONE session, so without the key there is nothing to write."
+      exit 3
+    fi
+
+    # THE ENGAGEMENT GUARD, above everything, for `adopt`'s reason verbatim (AC-10): nothing
+    # bionic does applies until the session invoked the skill. Note that this guard also
+    # answers the planted-symlink case — `engaged_session` refuses a symlink at the marker
+    # path before it is followed (payload/scripts/lib/run.sh:351) — so the link's target is
+    # never written through, one line before `bind_plan` would have refused it too.
+    if ! engaged_session "$(project_root "$PWD")" "$SESSION_ID"; then
+      say "NOT-ENGAGED — this session has not invoked /bionic:canonical-sdlc; nothing decided"
+      exit 0
+    fi
+
+    REPO="$(project_root "$PWD")"
+    REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
+    if [ -z "$REPO_REAL" ]; then
+      die "REFUSED — cannot resolve the working directory."
+      exit 2
+    fi
+
+    # ABSOLUTE, BECAUSE THE MARKER IS READ FROM EVERY CWD IN THE FLEET. A relative operand is
+    # taken against the PROJECT ROOT rather than `$PWD`: the plan path an operator has to
+    # hand is the one their editor shows, which is project-relative, and a worktree cwd would
+    # otherwise resolve it against a tree that does not hold the run.
+    #
+    # AND AGAINST THE DOCS ROOT WHEN THAT MISSES (S10b phase 2). hooks/session-start.sh
+    # prints the open-run listing DOCS-root-relative — `plans/<epic>/<wave>.md` — because
+    # every absolute path in that listing shares one long prefix. An operator who copies a
+    # listed line straight into this verb was handing over a project-relative path that does
+    # not exist, and getting a refusal that reads as if the PLAN were wrong rather than the
+    # spelling. Both spellings now bind.
+    #
+    # THE PROJECT ROOT IS TRIED FIRST AND WINS TIES, so every operand that resolved before
+    # resolves to exactly the same file now: the docs root is reached only when the
+    # project-relative spelling is not a regular file, which is the case that used to refuse.
+    # A miss under both leaves `BIND_PATH` at the project-root spelling, so the refusal names
+    # the path an operator typing a repo path would expect to see.
+    case "$BIND_ARG" in
+      /*) BIND_PATH="$BIND_ARG" ;;
+      *)
+        BIND_PATH="$REPO/$BIND_ARG"
+        if [ ! -f "$BIND_PATH" ]; then
+          BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG"
+          [ -f "$BIND_DOCS_TRY" ] && BIND_PATH="$BIND_DOCS_TRY"
+        fi ;;
+    esac
+
+    BIND_RC=0
+    bind_plan "$REPO_REAL" "$SESSION_ID" "$BIND_PATH" || BIND_RC=$?
+    if [ "$BIND_RC" -eq 0 ]; then
+      say "bound $BIND_PATH"
+      exit 0
+    else
+      if [ "$BIND_RC" -ge 2 ]; then
+        die "REFUSED — marker write failed"
+        die "The binding was valid; the marker could not be written. Check that"
+        die "$REPO_REAL/.bionic/tmp is a writable real directory."
+        exit 2
+      fi
+      # WHICH REFUSAL, decided POSITIONALLY. `bind_plan` returns one code for every invalid
+      # binding, so the reason is re-derived here from where the path is: a regular file in a
+      # plan directory of this root is a plan that is not OPEN (delivered, abandoned, or
+      # carrying no readable `## SDLC State`), and anything else is not a plan of this root
+      # at all. The marker-symlink case is listed for completeness — the guard above answers
+      # it first — so that every 1 from the library leaves this verb with something to say.
+      BIND_MARKER="$(engaged_marker_path "$REPO_REAL" "$SESSION_ID")" || BIND_MARKER=""
+      BIND_DOCS="$(docs_root "$REPO_REAL")"
+      BIND_DIR="${BIND_PATH%/*}"
+      BIND_REAL=""
+      BIND_DIR_REAL="$(cd "$BIND_DIR" 2>/dev/null && pwd -P)" \
+        && BIND_REAL="$BIND_DIR_REAL/${BIND_PATH##*/}"
+      if [ -n "$BIND_MARKER" ] && [ -L "$BIND_MARKER" ]; then
+        BIND_WHY="marker is a symlink"
+      else
+        # THE SAME DEPTH BOUND THE SET IS BUILT WITH (review D8c, S10b). `open_runs` walks
+        # `find <plans|incidents> -maxdepth 2`, so `plans/<a>/<b>/x.md` is not a candidate
+        # at all. A `case` glob matches across `/`, so the location test used to call that
+        # file a plan of this root and blame its CONTENT ("not an open run") for a miss the
+        # walk decided before ever opening it. `BIND_TAIL` is the path below `plans/` or
+        # `incidents/`: no slash is depth 1, one slash is depth 2, two or more is outside.
+        BIND_TAIL=""
+        case "$BIND_REAL" in
+          "$BIND_DOCS"/plans/*|"$BIND_DOCS"/incidents/*)
+            BIND_TAIL="${BIND_REAL#"$BIND_DOCS"/}"
+            BIND_TAIL="${BIND_TAIL#*/}" ;;
+        esac
+        case "$BIND_TAIL" in
+          ''|*/*/*)
+            # Outside the walk: not under a plan directory of this root, or nested deeper
+            # than the walk reaches.
+            BIND_WHY="not a plan under this root" ;;
+          *)
+            if [ -f "$BIND_PATH" ]; then
+              BIND_WHY="not an open run"
+            else
+              BIND_WHY="not a plan under this root"
+            fi ;;
+        esac
+      fi
+      die "REFUSED — $BIND_WHY: $BIND_PATH"
+      die "A binding names a member of this root's OPEN-RUN SET — a plan under"
+      die "$BIND_DOCS/{plans,incidents} whose run is still open. This session's binding is unchanged."
+      exit 1
+    fi
     ;;
 
   tick)
@@ -1917,7 +2306,7 @@ EOF
     RUN_STATE=open
     RUN_STATE_WHY="the roster still carries open work"
     if [ "$OPEN" -eq 0 ]; then
-      RUN_STATE_RAW="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")")"
+      RUN_STATE_RAW="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID")"
       RUN_STATE="${RUN_STATE_RAW%%|*}"
       RUN_STATE_WHY="${RUN_STATE_RAW#*|}"
     fi
@@ -2024,7 +2413,13 @@ EOF
     # plan written before Step 0 ever probed — and absence is INERT: the tick says why it is
     # not filling and fills nothing, exactly as the dispatch wall's budget arm goes inert on
     # the same missing line. A budget is a ceiling a run opts into.
-    SCHED_PLAN="$(active_plan "$REPO_REAL")" || SCHED_PLAN=""
+    #
+    # THE SAME RUN THE DECISION ABOVE WAS TAKEN ON. `resolve_run` answers once per tick, so
+    # a session bound to its own plan fills from its own slice table and quotes its own
+    # ceiling — a tick that stood its ground correctly and then filled the neighbour's
+    # slices would be worse than either failure alone (AC-1).
+    resolve_run "$REPO_REAL" "$SESSION_ID"
+    SCHED_PLAN="$POKER_RUN_PLAN"
     SCHED_BUDGET=""
     [ -n "$SCHED_PLAN" ] && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
     SCHED_WRITERS="$(budget_int "$SCHED_BUDGET" writers)"

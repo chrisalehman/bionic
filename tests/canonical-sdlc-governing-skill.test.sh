@@ -1550,6 +1550,12 @@ assert_contains "ac13_wt_write names the pinned root" "Pinned root: $ac13_main/.
 
 echo "ac13-2: paired positive — the IDENTICAL write to the pinned root passes"
 run_write "$ac13_main/.bionic/docs/record/w2-s8-ac13.md" "$ac13_record_body"
+# AC-4 (wave-session-bound-run): the refusal above was only ever half a wall. Asserted
+# here so a hook that learned to refuse EVERYTHING under a `.bionic/` — the regression a
+# session-scoped rewrite of this file could plausibly introduce — cannot pass this suite
+# on the strength of the negative alone.
+assert_eq "ac13-2 (AC-4) the identical write to the PINNED root passes" 0 "$HOOK_EXIT"
+assert_eq "ac13-2 (AC-4) ...and says nothing about it" "" "$HOOK_STDERR"
 
 echo "ac13-3: plain cd-into-subdir — a stray .bionic a level down in the SAME repo (no worktree) → block, names pinned root"
 # NOT a subshell: run_write sets HOOK_EXIT/HOOK_STDERR as globals the assert
@@ -1874,6 +1880,269 @@ ac7_silent "ac7 another session's marker is not engagement"
 # a DIFFERENT project does not arm this wall over ac7_p5's artifact.
 run_write_from "$ac7_p5/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN" "$ac7_p1"
 ac7_silent "ac7 engagement in the cwd's project does not arm the wall over another project's artifact"
+
+echo
+echo "=== AC-9: bind-on-write, and the run verdict this hook now reads ==="
+
+# WHY THIS SECTION EXISTS (wave-session-bound-run, 2026-09-04). Until this wave every
+# hook answered "which run am I in" by scanning the project root for the newest plan, so
+# two engaged sessions in one repository shared one run identity. The binding is what
+# separates them, and the act that CREATES a run is the first Write of its plan file —
+# which this hook is already delivered on. So this hook gained a second event: at
+# PostToolUse it binds the writing session to the plan it just created, and at
+# PreToolUse it reads the session's own verdict rather than the root's.
+#
+# THE BIND ARM RUNS AT PostToolUse, NOT PreToolUse, and the reason is a hard one: at
+# PreToolUse the plan file does not exist yet, `open_runs` cannot list it, and
+# `bind_plan` — which refuses any path that is not a member of the open-run set at the
+# instant of the write — would refuse every binding this arm exists to make. The
+# invariant "a bound path is a member of the open-run set at write time" is only
+# satisfiable after the tool has run.
+
+# A PostToolUse payload. `tool_response` is the field that distinguishes a Write that
+# CREATED a file from one that overwrote an existing one: transcript evidence on this
+# machine (2026-09-04, 17 Write results joined to their tool_use ids across the six most
+# recent session transcripts) shows Write reporting `type: "create"` or `type: "update"`
+# and Edit reporting no `type` key at all. NONE drives the field-absent fallback.
+HOOK_STDOUT=""
+# THE FOURTH ARGUMENT IS THE DEPTH. An agent-context payload carries a top-level `agent_id`
+# alongside the DISPATCHING session's `session_id` (hooks/agent-context-guard.sh's partition
+# rests on exactly that); a main-thread payload has no such key. Empty means main thread.
+run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id]
+  local tool="$1" file_path="$2" rtype="$3" agent="${4:-}"
+  local input
+  input=$(jq -n \
+    --arg p "$file_path" \
+    --arg s "$GS_SID" \
+    --arg t "$tool" \
+    --arg r "$rtype" \
+    --arg a "$agent" \
+    '{session_id: $s,
+      hook_event_name: "PostToolUse",
+      tool_name: $t,
+      tool_input: {file_path: $p, content: ""},
+      tool_response: (if $r == "NONE" then {filePath: $p} else {type: $r, filePath: $p} end)}
+     + (if $a == "" then {} else {agent_id: $a} end)')
+  local tmp_err tmp_out
+  tmp_err=$(mktemp); tmp_out=$(mktemp)
+  if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" <<< "$input" >"$tmp_out" 2>"$tmp_err"; then
+    HOOK_EXIT=0
+  else
+    HOOK_EXIT=$?
+  fi
+  HOOK_STDOUT=$(cat "$tmp_out")
+  HOOK_STDERR=$(cat "$tmp_err")
+  rm -f "$tmp_out" "$tmp_err"
+}
+
+marker_plan() {  # <project> → the marker's `plan=` value; empty when absent or unbound
+  local f="$1/.bionic/tmp/engaged-$GS_SID.state"
+  [ -f "$f" ] || return 0
+  sed -n 's/^plan=//p' "$f" | head -1
+}
+
+marker_lines() {  # <project> → the marker's line count; 0 when absent
+  local f="$1/.bionic/tmp/engaged-$GS_SID.state"
+  [ -f "$f" ] || { echo 0; return 0; }
+  wc -l < "$f" | tr -d ' '
+}
+
+# An OPEN run: Step 4, nothing delivered. A CLOSED one: Step 9 with the delivery line
+# `run_open` reads. Both carry the flush-left `## SDLC State` heading that makes a file a
+# plan to the whole fleet.
+open_plan_body()   { printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in flight\n'; }
+closed_plan_body() { printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 9\n\n- Step 9: close-out delivered: yes\n'; }
+
+# plant_plan <abs-path> <open|closed> — the file the tool would have left behind.
+plant_plan() {
+  mkdir -p "$(dirname "$1")"
+  if [ "$2" = open ]; then open_plan_body > "$1"; else closed_plan_body > "$1"; fi
+}
+
+# --- b1: an unbound engaged session's Write of a new open plan binds ---
+b_p=$(make_project)
+b_plans="$b_p/.bionic/docs/plans/epic-01-demo"
+b_a="$b_plans/wave-01-a.plan.md"
+plant_plan "$b_a" open
+run_post Write "$b_a" create
+assert_eq "b1 an unbound session binds to the plan it just wrote" "$b_a" "$(marker_plan "$b_p")"
+assert_eq "b1 ...exit 0" 0 "$HOOK_EXIT"
+assert_eq "b1 ...no decision JSON on stdout" "" "$HOOK_STDOUT"
+assert_contains "b1 ...and says so" "governing-skill: session bound to $b_a" "$HOOK_STDERR"
+assert_eq "b1 ...marker keeps its two-line shape" 2 "$(marker_lines "$b_p")"
+
+# --- b2 (T4): a session bound to an OLDER open plan REBINDS to the new one ---
+b_b="$b_plans/wave-02-b.plan.md"
+plant_plan "$b_b" open
+run_post Write "$b_b" create
+assert_eq "b2 (T4) a bound session rebinds to a newly written open plan" "$b_b" "$(marker_plan "$b_p")"
+assert_contains "b2 ...and names the new path" "session bound to $b_b" "$HOOK_STDERR"
+
+# --- b3: a session bound to a DELIVERED plan binds to the new one ---
+# The stale binding is planted by hand: `bind_plan` refuses a closed plan, so this state
+# is only reachable the way it happens in the field — a plan that was open when the
+# session bound to it and has since been delivered.
+b_done="$b_plans/wave-00-done.plan.md"
+plant_plan "$b_done" closed
+printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$b_done" > "$b_p/.bionic/tmp/engaged-$GS_SID.state"
+b_c="$b_plans/wave-03-c.plan.md"
+plant_plan "$b_c" open
+run_post Write "$b_c" create
+assert_eq "b3 a session bound to a delivered plan binds to the new open one" "$b_c" "$(marker_plan "$b_p")"
+
+# --- b4: a Write of a plan that reads CLOSED leaves the binding alone ---
+b_closed="$b_plans/wave-04-closed.plan.md"
+plant_plan "$b_closed" closed
+run_post Write "$b_closed" create
+assert_eq "b4 a plan that reads closed does not become a binding" "$b_c" "$(marker_plan "$b_p")"
+assert_eq "b4 ...and the refusal is silent" "" "$HOOK_STDERR"
+assert_eq "b4 ...exit 0" 0 "$HOOK_EXIT"
+
+# --- b5: an Edit is never a bind trigger ---
+run_post Edit "$b_a" NONE
+assert_eq "b5 an Edit of an open plan leaves the binding alone" "$b_c" "$(marker_plan "$b_p")"
+assert_eq "b5 ...exit 0" 0 "$HOOK_EXIT"
+
+# --- b6: only plans/ and incidents/ bind; record/ and specs/ do not ---
+b_rec="$b_p/.bionic/docs/record/wave-01/notes.md"
+plant_plan "$b_rec" open
+run_post Write "$b_rec" create
+assert_eq "b6 a record/ file carrying ## SDLC State does not bind" "$b_c" "$(marker_plan "$b_p")"
+b_spec="$b_p/.bionic/docs/specs/epic-01-demo/wave-01.spec.md"
+plant_plan "$b_spec" open
+run_post Write "$b_spec" create
+assert_eq "b6 a specs/ file carrying ## SDLC State does not bind" "$b_c" "$(marker_plan "$b_p")"
+
+# --- b6b: incidents/ binds, on the same footing as plans/ ---
+b_inc="$b_p/.bionic/docs/incidents/0002-thing/incident.plan.md"
+plant_plan "$b_inc" open
+run_post Write "$b_inc" create
+assert_eq "b6b an incidents/ plan binds" "$b_inc" "$(marker_plan "$b_p")"
+
+# --- b7: an UNENGAGED session neither binds nor leaves a marker behind ---
+b_u=$(make_project)
+b_u_plan="$b_u/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
+plant_plan "$b_u_plan" open
+unengage "$b_u"
+run_post Write "$b_u_plan" create
+assert_eq "b7 an unengaged session does not bind" "" "$(marker_plan "$b_u")"
+assert_eq "b7 ...and no marker is created" 0 "$(marker_lines "$b_u")"
+assert_eq "b7 ...exit 0" 0 "$HOOK_EXIT"
+assert_eq "b7 ...silent" "" "$HOOK_STDERR"
+
+# --- b8: PostToolUse NEVER blocks, not even on a plan this hook would refuse ---
+# The same content at PreToolUse is exit 2 (invalid `intent:`), which is the control
+# below. PostToolUse cannot block — the tool has already run — so the arm reports by
+# binding and nothing else.
+b_bad=$(make_project)
+b_bad_plan="$b_bad/.bionic/docs/plans/epic-01-demo/wave-01-bad.plan.md"
+# A plan the PreToolUse wall refuses (invalid `intent:`) that is nonetheless a real open
+# run — the `## SDLC State` block is what `open_runs` reads, and the frontmatter is what
+# the wall reads. The two questions are independent, and this case is where that shows.
+b_bad_body="$(build_plan intent=definitely-not-an-intent)
+## SDLC State
+
+current: 4
+
+- Step 4: in flight"
+mkdir -p "$(dirname "$b_bad_plan")"
+printf '%s\n' "$b_bad_body" > "$b_bad_plan"
+run_post Write "$b_bad_plan" create
+assert_eq "b8 PostToolUse never blocks, even on a plan the wall would refuse" 0 "$HOOK_EXIT"
+assert_eq "b8 ...no decision JSON on stdout" "" "$HOOK_STDOUT"
+assert_eq "b8 ...and it still binds" "$b_bad_plan" "$(marker_plan "$b_bad")"
+run_write "$b_bad_plan" "$b_bad_body"
+assert_eq "b8 control: the same content at PreToolUse is still refused" 2 "$HOOK_EXIT"
+
+# --- b9: an OVERWRITE (tool_response.type = update) is not a new run ---
+b_ov=$(make_project)
+b_ov_plan="$b_ov/.bionic/docs/plans/epic-01-demo/wave-01-ov.plan.md"
+plant_plan "$b_ov_plan" open
+run_post Write "$b_ov_plan" update
+assert_eq "b9 a Write that overwrote an existing file does not bind" "" "$(marker_plan "$b_ov")"
+assert_eq "b9 ...silent" "" "$HOOK_STDERR"
+
+# --- b10: a payload with no `type` at all still binds (the documented fallback) ---
+run_post Write "$b_ov_plan" NONE
+assert_eq "b10 a tool_response with no type field binds" "$b_ov_plan" "$(marker_plan "$b_ov")"
+
+# --- b11: a path under plans/ that is NOT a plan (no ## SDLC State) does not bind ---
+b_np="$b_ov/.bionic/docs/plans/epic-01-demo/notes.md"
+printf '# just notes\n\ncurrent: 4\n' > "$b_np"
+run_post Write "$b_np" create
+assert_eq "b11 a plans/ file with no ## SDLC State does not bind" "$b_ov_plan" "$(marker_plan "$b_ov")"
+
+# --- b13: a DISPATCHED AGENT's Write never moves its dispatcher's binding (S10a, A-2/F5) ---
+#
+# An agent-context payload carries the ORCHESTRATOR's `session_id`, which is the only key
+# this arm ever read — so a subagent drafting the next wave's plan, or a Step-9 close-out
+# writer, silently re-pointed the live orchestrator at the file it had just created, and the
+# orchestrator's evidence gate then gated its commits on that plan. T4 ratified rebinding for
+# the main thread; nothing extended it to depth two, and the roster's own rule is that only
+# depth-one dispatches are recorded.
+#
+# THE TWO CALLS DIFFER BY ONE FIELD. Same project, same plan, same `create` — so a pass here
+# cannot come from the fixture failing to be bindable in the first place.
+b_ag=$(make_project)
+b_ag_plan="$b_ag/.bionic/docs/plans/epic-01-demo/wave-01-agent.plan.md"
+plant_plan "$b_ag_plan" open
+run_post Write "$b_ag_plan" create "agent_01ABCdefGHIjklMNOpqrs"
+assert_eq "b13 a payload carrying agent_id does not bind" "" "$(marker_plan "$b_ag")"
+assert_eq "b13 ...and creates no marker at all" 0 "$(marker_lines "$b_ag")"
+assert_eq "b13 ...exit 0" 0 "$HOOK_EXIT"
+assert_eq "b13 ...silent" "" "$HOOK_STDERR"
+run_post Write "$b_ag_plan" create
+assert_eq "b13 paired: the same Write from the main thread DOES bind" "$b_ag_plan" "$(marker_plan "$b_ag")"
+assert_contains "b13 paired: ...and says so" "session bound to $b_ag_plan" "$HOOK_STDERR"
+# ...and an agent's Write cannot MOVE a binding that already exists either, which is the
+# harmful case: the orchestrator is mid-run and the subagent writes the NEXT wave's plan.
+b_ag2="$b_ag/.bionic/docs/plans/epic-01-demo/wave-02-next.plan.md"
+plant_plan "$b_ag2" open
+run_post Write "$b_ag2" create "agent_01ABCdefGHIjklMNOpqrs"
+assert_eq "b13 an agent writing a SECOND plan leaves the live binding where it was" \
+  "$b_ag_plan" "$(marker_plan "$b_ag")"
+
+# --- b12: a file the Write did not actually leave on disk does not bind ---
+b_gone="$b_ov/.bionic/docs/plans/epic-01-demo/wave-99-gone.plan.md"
+run_post Write "$b_gone" create
+assert_eq "b12 a target that does not exist on disk does not bind" "$b_ov_plan" "$(marker_plan "$b_ov")"
+
+echo
+echo "--- the PreToolUse verdict: fallback, bound, and bound-closed ---"
+
+# AC-3: an unbound session still resolves by newest plan, and SAYS which resolution it
+# used. Two open plans, distinct mtimes, so the newest is not a coin toss.
+v_p=$(make_project)
+v_plans="$v_p/.bionic/docs/plans/epic-01-demo"
+plant_plan "$v_plans/wave-01-old.plan.md" open
+plant_plan "$v_plans/wave-02-new.plan.md" open
+touch -t 202601010000 "$v_plans/wave-01-old.plan.md"
+touch -t 202602010000 "$v_plans/wave-02-new.plan.md"
+v_probe="$v_p/.bionic/docs/record/probe.md"
+run_write "$v_probe" '# operational note'
+assert_contains "v1 an unbound session announces the newest-plan fallback" \
+  "governing-skill: run resolved by newest-plan fallback (session unbound) — $v_plans/wave-02-new.plan.md" \
+  "$HOOK_STDERR"
+assert_eq "v1 ...and passes" 0 "$HOOK_EXIT"
+
+printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$v_plans/wave-01-old.plan.md" \
+  > "$v_p/.bionic/tmp/engaged-$GS_SID.state"
+run_write "$v_probe" '# operational note'
+TOTAL=$((TOTAL + 1))
+case "$HOOK_STDERR" in
+  *fallback*) FAIL=$((FAIL + 1)); printf '  FAIL  %s (stderr=%q)\n' "v2 a BOUND session never announces a fallback" "$HOOK_STDERR" ;;
+  *)          PASS=$((PASS + 1)); printf '  PASS  %s\n' "v2 a BOUND session never announces a fallback" ;;
+esac
+
+# AC-6: a binding is a commitment. The bound plan is delivered and the OTHER plan in this
+# root is wide open — the session still has no run, and is told why rather than being
+# handed somebody else's.
+plant_plan "$v_plans/wave-01-old.plan.md" closed
+run_write "$v_probe" '# operational note'
+assert_contains "v3 a session bound to a closed plan is told, and never falls through" \
+  "governing-skill: bound plan closed — $v_plans/wave-01-old.plan.md; this session has no open run" \
+  "$HOOK_STDERR"
+assert_eq "v3 ...and still passes" 0 "$HOOK_EXIT"
 
 echo
 printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"

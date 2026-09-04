@@ -54,8 +54,9 @@
 #              has stopped.
 #
 # SCOPE — WHAT "AN ACTIVE RUN" IS HERE. Two conditions, and no third. First, this
-# project has an OPEN RUN: `active_run` under the payload's project root, the same
-# fact every other governance hook is scoped by since bionic 1.4.0. Second, a stamp
+# project has an OPEN RUN: `session_run` (which was `active_run` until
+# wave-session-bound-run made run identity per-session) under the payload's project root,
+# the same fact every other governance hook is scoped by since bionic 1.4.0. Second, a stamp
 # EXISTS for this session, which by doctrine (SKILL.md §Dispatch) happens at the
 # Step-0 confirmation of a new run or the resume ritual of an open one, and at no
 # other moment. An armed-then-stale stamp is therefore already the statement "a run
@@ -139,7 +140,8 @@
 # CLI from delivering `Stop` at all.
 #
 # Registered once on the Stop channel in hooks/hooks.json, always on, and scoped by
-# `active_run` plus this session's own stamp — both facts on disk.
+# `session_run` (which was `active_run` until wave-session-bound-run made run identity
+# per-session) plus this session's own stamp — both facts on disk.
 # [WALL: tests/patrol-revive.test.sh]
 
 set -uo pipefail
@@ -358,7 +360,29 @@ engaged_session "$REPO" "$SID" || exit 0
 # task-list refresh, the roster read — are the run's, so a session engaged with no plan yet
 # has nothing for this monitor to be about. Engagement decides WHETHER; here the plan still
 # decides WHAT, and there is only the one thing.
-active_run "$REPO" >/dev/null || exit 0
+#
+# wave-session-bound-run S5: `active_run` (no session input) is now `session_run`
+# (lib/run.sh) — a session BOUND to a plan proceeds on THAT plan alone, whatever
+# else is open in the root (AC-1); UNBOUND falls back to the newest plan exactly
+# as before, and this hook says so once on stderr (AC-3); bound to a plan that
+# has since closed takes exactly this line's existing branch — exit 0 — after
+# announcing the closure (AC-6).
+_RUN_VERDICT=$(session_run "$REPO" "$SID")
+_RUN_WORD="${_RUN_VERDICT%% *}"
+_RUN_PLAN="${_RUN_VERDICT#* }"
+case "$_RUN_WORD" in
+  bound-open) : ;;
+  fallback)
+    echo "patrol-revive: run resolved by newest-plan fallback (session unbound) — $_RUN_PLAN" >&2
+    ;;
+  bound-closed)
+    echo "patrol-revive: bound plan closed — $_RUN_PLAN; this session has no open run" >&2
+    exit 0
+    ;;
+  none|*)
+    exit 0
+    ;;
+esac
 
 # ---------- was a Patrol ever armed on this session ----------
 #
