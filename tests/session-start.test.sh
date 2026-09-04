@@ -411,8 +411,16 @@ eq    "12a.1 exit 0" "0" "$(rc)"
 has   "12a.2 the header names the count" "bionic: 2 open runs exist here" "$OUT"
 has   "12a.3 …and the engage instruction" "invoke /bionic:canonical-sdlc" "$OUT"
 has   "12a.4 …and the bind instruction" "session-poker.sh bind <plan>" "$OUT"
-has   "12a.5 the first open plan's path is listed" "$PLAN12A" "$OUT"
-has   "12a.6 the second open plan's path is listed" "$PLAN12B" "$OUT"
+# DOCS-ROOT-RELATIVE, not absolute (review P3 / security F4, S10b). Every path in the
+# listing shares one long prefix, and the instruction beside it already says where the
+# paths resolve — `bind` takes either spelling. The absolute row is pinned ABSENT beside
+# each relative row, because the relative string is a substring of the absolute one and a
+# `has` on it alone would pass over an unchanged hook.
+has   "12a.5 the first open plan is listed relative to the docs root" \
+  "  ${PLAN12A#$P12/.bionic/docs/}" "$OUT"
+hasnt "12a.5b …and not as an absolute path" "$P12/.bionic/docs/" "$OUT"
+has   "12a.6 the second open plan is listed relative to the docs root" \
+  "  ${PLAN12B#$P12/.bionic/docs/}" "$OUT"
 eq    "12a.6b both listed paths are indented two spaces" "2" \
   "$(printf '%s\n' "$OUT" | grep -cE '^  .*\.plan\.md$')"
 hasnt "12a.7 the CLOSED plan's path is absent" "$(basename "$PLAN12C")" "$OUT"
@@ -463,12 +471,59 @@ eq    "12d.1 exit 0" "0" "$(rc)"
 has   "12d.2 the not-bound header names the count" \
   "bionic: 2 open runs exist here and this session is not bound to one" "$OUT"
 has   "12d.3 …and the bind instruction" "session-poker.sh bind <plan>" "$OUT"
-has   "12d.4 the first open plan's path is listed" "$PLAN12dA" "$OUT"
-has   "12d.5 the second open plan's path is listed" "$PLAN12dB" "$OUT"
+has   "12d.4 the first open plan is listed relative to the docs root" \
+  "  ${PLAN12dA#$P12d/.bionic/docs/}" "$OUT"
+hasnt "12d.4b …and not as an absolute path" "$P12d/.bionic/docs/" "$OUT"
+has   "12d.5 the second open plan is listed relative to the docs root" \
+  "  ${PLAN12dB#$P12d/.bionic/docs/}" "$OUT"
 has   "12d.6 today's engaged roster block still follows — no early exit" \
   "roster-$OLD_SID.state" "$OUT"
 has   "12d.7 …through the re-arm sequence" "re-arm: CronList" "$OUT"
 eq    "12d.8 wrote nothing" "$S12d_BEFORE" "$(snap "$P12d")"
+
+echo ""
+echo "--- 12e: ten open plans: the listing is CAPPED at 8, with a trailer naming the rest ---"
+# WHY A CAP (review P3, security F4 — S10b). A SessionStart hook's stdout is context the
+# model pays for on `startup`, `clear`, `resume` AND `compact`. This repository's own tree
+# already renders 60 paths (~6.8 KB, ~1,700 tokens) that a reader acts on at most one line
+# of. `open_runs` itself stays uncapped — it is a membership predicate with three callers —
+# so what is bounded here is the DISPLAY only, and the header still names the true count.
+P12e=$(make_env 1s)
+_i=1
+while [ "$_i" -le 10 ]; do
+  write_open_plan "$P12e" "p$_i" >/dev/null
+  _i=$((_i + 1))
+done
+S12e_BEFORE=$(snap "$P12e")
+OUT=$(drive "$P12e" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "12e.1 exit 0" "0" "$(rc)"
+has   "12e.2 the header names the TRUE count, not the capped one" \
+  "bionic: 10 open runs exist here" "$OUT"
+eq    "12e.3 exactly 8 plan lines are listed" "8" \
+  "$(printf '%s\n' "$OUT" | grep -cE '^  .*\.plan\.md$')"
+has   "12e.4 …and one trailer line names the remainder" \
+  "  … and 2 more — bind names any open plan" "$OUT"
+hasnt "12e.5 no absolute path anywhere in the block" "$P12e/.bionic/docs/" "$OUT"
+eq    "12e.6 wrote nothing" "$S12e_BEFORE" "$(snap "$P12e")"
+
+echo ""
+echo "--- 12f: three open plans: all three listed, and NO trailer ---"
+# The paired negative for 12e: below the cap the trailer must not appear at all. Without
+# this row a hook that printed "and 0 more" unconditionally would pass 12e.
+P12f=$(make_env 1s)
+_i=1
+while [ "$_i" -le 3 ]; do
+  write_open_plan "$P12f" "q$_i" >/dev/null
+  _i=$((_i + 1))
+done
+S12f_BEFORE=$(snap "$P12f")
+OUT=$(drive "$P12f" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "12f.1 exit 0" "0" "$(rc)"
+has   "12f.2 the header names the count" "bionic: 3 open runs exist here" "$OUT"
+eq    "12f.3 all three plan lines are listed" "3" \
+  "$(printf '%s\n' "$OUT" | grep -cE '^  .*\.plan\.md$')"
+hasnt "12f.4 …and no trailer line" "more — bind names any open plan" "$OUT"
+eq    "12f.5 wrote nothing" "$S12f_BEFORE" "$(snap "$P12f")"
 
 echo ""
 echo "──────────────────────────────────────────────"
