@@ -60,7 +60,8 @@
 # frontmatter — because the skill channel is the only one a main-thread payload
 # reaches and the settings channel the only one an agent context reaches, so the pair
 # was a partition rather than a duplicate. What scopes it now is an on-disk fact:
-# `active_run` under the payload's project root. A partition maintained by hand was
+# `session_run` (which was `active_run` until wave-session-bound-run made run identity
+# per-session) under the payload's project root. A partition maintained by hand was
 # one edit away from covering one channel twice and the other not at all.
 
 set -uo pipefail
@@ -97,7 +98,8 @@ CWD=$(_jq '.cwd')
 # `.bionic` root and every wall in this file went quiet, arming and containment
 # included. The precondition is now the project itself: `project_root` finds the
 # nearest real `.bionic` ancestor (mapping a linked worktree onto its main repository
-# first), and `active_run` decides whether there is anything to protect.
+# first), and `session_run` (which was `active_run` until wave-session-bound-run made run
+# identity per-session) decides whether there is anything to protect.
 
 # ---------- the library ----------
 #
@@ -288,9 +290,11 @@ engaged_session "$REPO" "$PAYLOAD_SID" || exit 0
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8) — now DATA, not scope ----------
 #
-# One reader for "is there a run to protect": lib/run.sh's `active_run`, true while the
-# newest plan carrying `## SDLC State` has `current:` below 9, or 9 with no `delivered:`
-# Step-9 line, and no `abandoned:` frontmatter line. This was a hand-copied block —
+# One reader for "is there a run to protect": lib/run.sh's `session_run` (which was
+# `active_run` until wave-session-bound-run made run identity per-session), true while the
+# plan THIS SESSION is bound to — or, unbound, the newest plan carrying `## SDLC State` —
+# has `current:` below 9, or 9 with no `delivered:` Step-9 line, and no `abandoned:`
+# frontmatter line. This was a hand-copied block —
 # resolve_docs_root, has_sdlc_state, a newest-.md walk and a `current:` parse — restated
 # in five hooks and held together by an agreement suite that could only prove they had
 # not drifted YET. One of them drifting was not hypothetical: a marker-less .md winning
@@ -303,7 +307,30 @@ engaged_session "$REPO" "$PAYLOAD_SID" || exit 0
 # wall, which reads `parallel-budget:` out of this file. Every other wall here — the
 # attestation, the Patrol checkpoint, the lease, the ambiguity/containment/absent-deliverable
 # trio, the roster — is plan-free and runs unchanged (AC-23).
-PLAN=$(active_run "$REPO") || PLAN=""
+#
+# wave-session-bound-run S5: `active_run` (no session input, newest-plan only) is now
+# `session_run` (lib/run.sh) — the caller's OWN bound plan when one exists, the same
+# newest-plan fallback when it does not. A BOUND session is gated on that plan alone,
+# whatever else is open in the root (AC-1); UNBOUND behaves exactly as before, and this
+# gate says so once on its advisory channel (AC-3); bound to a plan that has since
+# closed is treated as having no open run at all (AC-6) — the same PLAN="" arm this
+# code already took for "no run".
+_RUN_VERDICT=$(session_run "$REPO" "$PAYLOAD_SID")
+_RUN_WORD="${_RUN_VERDICT%% *}"
+PLAN="${_RUN_VERDICT#* }"
+case "$_RUN_WORD" in
+  bound-open) : ;;
+  fallback)
+    echo "dispatch-preflight: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
+    ;;
+  bound-closed)
+    echo "dispatch-preflight: bound plan closed — $PLAN; this session has no open run" >&2
+    PLAN=""
+    ;;
+  none|*)
+    PLAN=""
+    ;;
+esac
 [ -n "$PLAN" ] && [ -f "$PLAN" ] || PLAN=""
 
 # ---------- this session is engaged: this IS a decision ----------
@@ -612,6 +639,13 @@ fi
 # mirroring the observation record in hooks/stop-guard.sh so both machine
 # artifacts in .bionic/tmp/ parse the same way. Per-session filename from birth
 # (D-5): .bionic/tmp/roster-<session_id>.state.
+#
+# wave-session-bound-run S5 (spec §Roster attribution, AC-2): the row's LAST
+# field is `plan=<the dispatching session's bound plan>` or the literal
+# `plan=none` when unbound. This is the BINDING (lib/run.sh's `session_plan`),
+# never the fallback-resolved run above — a session bound to a since-closed
+# plan still gets `plan=<that plan>` here, so `adopt`'s partition (S6) can tell
+# "this session's own run" from "no binding at all" without re-deriving either.
 
 ROSTER_VERSION="v1"
 ROSTER_PREFIX="roster-"
@@ -1668,7 +1702,17 @@ if [ -n "$C_DELIVERABLE" ]; then
   done
 fi
 
-ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|source=${C_SOURCE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}"
+# THROUGH THE FILE'S OWN FILTER, like every other interpolated field (S10a, review SEC F3).
+# A plan path is a FILENAME the operator chose, so it is as untrusted as any other value on
+# this row: `sanitize` exists because the row is pipe-delimited on one line and a value
+# carrying a `|` or a newline forges a segment. This was the one field the wave added and
+# the one field that skipped it — while the parallel writer in `session-poker.sh adopt`
+# filtered the same value through `clean()`, so the asymmetry between the two writers was
+# itself the defect. 400 chars matches what `adopt` allows.
+ROSTER_PLAN=$(sanitize "$(session_plan "$REPO" "$PAYLOAD_SID")" 400)
+[ -n "$ROSTER_PLAN" ] || ROSTER_PLAN="none"
+
+ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|source=${C_SOURCE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}|plan=${ROSTER_PLAN}"
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then

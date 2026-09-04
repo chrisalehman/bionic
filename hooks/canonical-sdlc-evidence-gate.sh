@@ -25,8 +25,9 @@
 # Exit code 2 = block the tool call entirely in Claude Code hooks.
 #
 # Registered once in hooks/hooks.json, always on. It is not scoped by whether a skill
-# is armed — an on-disk fact is: the hook loads the library, asks `active_run` whether
-# this project has an open run, and exits silently when it does not.
+# is armed — an on-disk fact is: the hook loads the library, asks `session_run` (which was
+# `active_run` until wave-session-bound-run made run identity per-session) whether THIS
+# SESSION has an open run, and exits silently when it does not.
 #
 # WHEN THE LIBRARY DOES NOT LOAD, that order inverts: the scope question has to be
 # answered BEFORE the fail-closed refusal, and answered without the library. See the
@@ -382,7 +383,58 @@ DOCS_ROOT=$(resolve_docs_root "$PROJECT_DIR")
 # live. That is measured, not hypothetical: it disarmed the dispatch wall repo-wide
 # for ~15 minutes on 2026-08-15 (record/session-20260815-landing-supervision/
 # t8-forensic-read.md). The filter lives in `active_plan` now.
-PLAN=$(active_plan "$PROJECT_DIR") || PLAN=""
+#
+# WHICH plan, THOUGH, IS THE SESSION'S OWN QUESTION SINCE wave-session-bound-run
+# (2026-09-04, spec AC-1/AC-3/AC-6). `active_plan` answers a ROOT: the newest plan under
+# this project's docs root. Engagement is keyed to a SESSION. Two engaged sessions in one
+# repository therefore shared one run identity, and this gate — whose whole subject is the
+# plan a commit is measured against — measured both sessions' commits against whichever
+# plan was newest. `session_run` is the reader that asks the session's own marker first;
+# its verdict is taken ONCE here and consumed at both of this hook's resolution sites, so
+# the file that gets validated and the run that decides whether to enforce can never
+# disagree about which run this session is in.
+#
+#   bound-open <p>    this session's own plan, open      -> <p> is THE plan; enforce
+#   bound-closed <p>  its own plan, delivered/gone       -> <p> is THE plan; do not enforce
+#   fallback <p>      no binding: today's newest-plan    -> announced, then today's path
+#   none              no binding and no open run         -> today's path, unchanged
+#
+# A BOUND SESSION NEVER FALLS THROUGH TO ANOTHER PLAN (AC-6). `bound-closed` is a terminal
+# answer, not a miss to recover from: the moment a run closes is exactly the moment a scan
+# would hand its session somebody else's run, which is the failure this wave was opened on.
+# So the closed plan stays THE plan here — the hygiene refusals below still judge it,
+# because a plan that lies is a defect in every state and this hook's ordering contract
+# says so — and nothing else in the root is read to replace it.
+EG_RUN=$(session_run "$PROJECT_DIR" "$EG_SID")
+EG_VERDICT="${EG_RUN%% *}"
+EG_VPATH=""
+case "$EG_RUN" in *' '*) EG_VPATH="${EG_RUN#* }" ;; esac
+
+case "$EG_VERDICT" in
+  bound-open|bound-closed)
+    PLAN="$EG_VPATH"
+    ;;
+  *)
+    # UNBOUND: today's line, untouched, and reached by exactly the same code that
+    # reached it before this wave. `fallback` and `none` both mean "no binding", and
+    # AC-3's promise is that such a session behaves EXACTLY as it did — so the promise is
+    # kept by running the old path rather than by a new one that agrees with it.
+    PLAN=$(active_plan "$PROJECT_DIR") || PLAN=""
+    ;;
+esac
+
+# THE ANNOUNCEMENT, ONCE PER INVOCATION AND NOT ONCE PER SITE (AC-3, AC-6). It is emitted
+# where the resolution happens, not where each site consumes it, because the fact being
+# reported is the resolution and there is only one of those. Both lines are reports on the
+# hook's only channel — never a refusal, and never an exit.
+case "$EG_VERDICT" in
+  fallback)
+    echo "evidence-gate: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
+    ;;
+  bound-closed)
+    echo "evidence-gate: bound plan closed — $PLAN; this session has no open run" >&2
+    ;;
+esac
 
 # ---------- AC-13: misplacement blocks; absence never does ----------
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -423,9 +475,23 @@ PLAN=$(active_plan "$PROJECT_DIR") || PLAN=""
 #     <docs-root>/spikes/ and <docs-root>/record/ hold real artifacts carrying
 #     this frontmatter, and the governing-skill hook treats them as placed too.
 #   - Bounded walk: `.git` and `node_modules` pruned, depth 5, filename match
-#     first. It runs only when no plan was found, so a project in an active
-#     canonical-sdlc run never pays for it.
-if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
+#     first. It runs only when no plan was found at all, so a project in an
+#     active canonical-sdlc run never pays for it.
+#
+# THE GUARD IS `[ -z "$PLAN" ]` AND NOTHING ELSE (S10a, critic C-1). It read
+# `[ -z "$PLAN" ] || [ ! -f "$PLAN" ]` until this wave made the second half
+# reachable. Before the wave `PLAN` came from `active_plan`, which reports only
+# files `find -type f` had just produced, so a non-empty `PLAN` naming a missing
+# file did not exist and the two conditions were one. A BINDING OUTLIVES THE FILE
+# IT NAMES: `session_run` answers `bound-closed <p>` when the bound plan has been
+# deleted, moved into another epic directory, or restored away, and that path is
+# taken as `PLAN` above. It walked in here and turned this sweep — six hundred
+# lines above the `bound-closed → exit 0` escape — into a live commit blocker for
+# a session whose own plan is simply gone, naming an unrelated stray file and
+# telling the operator to move it. The two conditions are different questions now
+# and they get different answers: NO PLAN AT ALL is the sweep's question, and a
+# bound plan that is not on disk is the arm below it.
+if [ -z "$PLAN" ]; then
   MISPLACED_PLAN=""
   if [ -d "$PROJECT_DIR" ]; then
     while IFS= read -r -d '' f; do
@@ -460,6 +526,26 @@ if [ -z "$PLAN" ] || [ ! -f "$PLAN" ]; then
   # on its own until 2026-07-28, when the sweep's guard was the narrower
   # PROJECT_PLAN and the two conditions could differ; on one guard they cannot,
   # so the sweep and its fall-through are one block.
+  exit 0
+fi
+
+# THE PLAN IS NAMED BUT NOT ON DISK (S10a, critic C-1). Reachable only through a
+# binding — see the guard above for why. This is engaged-with-no-run, the same
+# state `bound-closed` reaches at the enforcement gate below, so the answer is the
+# same: allow, and say why. It cannot be the misplacement sweep's answer, because
+# nothing is misplaced; and it cannot be the hygiene refusals' answer either,
+# because every one of them reads a file that is not there.
+#
+# THE RECOVERY IS NAMED, because it is not guessable and it is not what it was.
+# Re-invoking the skill USED to rewrite a `bound-closed` marker by the count rule;
+# since S10a a binding survives re-engagement open or closed (review C-1), so the
+# only route back is the operator naming a live run. `poker bind` refuses a plan
+# that is not an open run of this root, which is exactly what makes it the right
+# instrument here: it cannot re-create this state.
+if [ ! -f "$PLAN" ]; then
+  echo "evidence-gate: the plan this session is bound to is not on disk — $PLAN" >&2
+  echo "  Nothing is validated for this commit. Name a live run for this session with:" >&2
+  echo "    bash $(dirname "$0")/session-poker.sh bind <plan>" >&2
   exit 0
 fi
 
@@ -1008,9 +1094,19 @@ fi
 # STEP, which is owed only while the run is open. Move this line up and a project
 # whose plan is merely malformed goes ungated; move it down and a shipped wave keeps
 # refusing commits forever.
-if ! active_run "$PROJECT_DIR" >/dev/null; then
-  exit 0
-fi
+#
+# THE VERDICT IS THE SESSION'S, taken at the top with the plan it names
+# (wave-session-bound-run, AC-1/AC-3/AC-6): a bound session enforces against its OWN open
+# run and against nothing else, and `bound-closed` — its plan delivered, abandoned or gone
+# — takes this same exit, the engaged-with-no-run branch, rather than resolving a second
+# time and landing on somebody else's wave. The unbound arm still asks `active_run` here,
+# in this position, exactly as it did before the wave: that is AC-3's "behaves exactly as
+# today", kept by running the old predicate rather than by trusting a new one to agree.
+case "$EG_VERDICT" in
+  bound-open)   : ;;
+  bound-closed) exit 0 ;;
+  *)            active_run "$PROJECT_DIR" >/dev/null || exit 0 ;;
+esac
 
 # Find the evidence line for the current step: a "Step N:" line, with or
 # without a leading list marker.

@@ -210,6 +210,24 @@ IFS='|' read -r T_REPO T_TR T_SUB <<< "$(make_world attested yes)"
 mkdir -p "$T_REPO/.bionic/tmp"
 printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
   > "$T_REPO/.bionic/tmp/preflight-$SID_A.state"
+# THE POSITIVE PAIR IS BOUND (wave-session-bound-run, AC-3/AC-7). `make_world` plants an
+# EMPTY engagement marker — an unbound session — and since that wave every run-scoped
+# consumer announces the newest-plan fallback it takes for an unbound session, on stderr,
+# without blocking. A silent positive pair therefore needs the session BOUND to the
+# world's plan, which is what a real session is after Step 0 writes its plan. The unbound
+# shape gets its own row (start|attested-unbound) below, as SILENT-WITH-ANNOUNCE.
+printf 'plan=%s\nengaged_at=%s\n' \
+  "$(cd "$T_REPO" && pwd -P)/.bionic/docs/plans/epic-99/wave-01.md" \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$T_REPO/.bionic/tmp/engaged-$SID_A.state"
+chmod 600 "$T_REPO/.bionic/tmp/engaged-$SID_A.state"
+
+# An attested active world whose session is engaged but UNBOUND — the marker `make_world`
+# plants, untouched. The wall lets the dispatch through and says which plan it fell back
+# to (AC-3): one operator-facing line, exit 0. Distinct from the auto-probe's announce.
+IFS='|' read -r TU_REPO TU_TR TU_SUB <<< "$(make_world attested-unbound yes)"
+mkdir -p "$TU_REPO/.bionic/tmp"
+printf '# attestation\nversion=1\nkind=preflight-attestation\nsession_id=%s\n' "$SID_A" \
+  > "$TU_REPO/.bionic/tmp/preflight-$SID_A.state"
 
 # WORLD ISOLATION (w2-s45-wallfacts.md §7 diagnosis): `make_world` gives this world its
 # OWN CLAUDE_CONFIG_DIR under $T_REPO/../cfg, but `drive()` runs the gate under the ONE
@@ -390,6 +408,7 @@ drive() {  # <condition>
     start:unattested)       p=$(payload Agent "$SID_A" "$A_TR" "$A_REPO" -) ;;
     start:foreign-attestation) p=$(payload Agent "$SID_B" "$T_TR" "$T_REPO" -) ;;
     start:attested)         p=$(payload Agent "$SID_A" "$T_TR" "$T_REPO" -) ;;
+    start:attested-unbound) p=$(payload Agent "$SID_A" "$TU_TR" "$TU_REPO" -) ;;
     start:probe-refuses)    p=$(payload Agent "$SID_A" "$U_TR" "$U_REPO" -) ;;
     start:patrol-unarmed)   p=$(payload Agent "$SID_A" "$Q_TR" "$Q_REPO" -) ;;
     # --- stop gate ----------------------------------------------------------
@@ -468,6 +487,7 @@ start|no-session-key|0|silent|Payload missing its session key — start: OPEN
 start|unattested|0|silent-with-announce|Start gate — R5 attestation never blocks: the wall auto-runs the probe, the probe succeeds, and the dispatch proceeds with one announce line
 start|foreign-attestation|0|silent-with-announce|Start gate — R5 attestation never blocks: a foreign-only attestation does not belong to this session, so the wall auto-probes exactly as unattested does and proceeds
 start|attested|0|silent|Start gate — the positive pair: pass in silence
+start|attested-unbound|0|silent-with-announce|Start gate — engaged but UNBOUND session: the dispatch proceeds and the wall announces the newest-plan fallback it took (wave-session-bound-run AC-3), one line on stderr, exit 0
 start|probe-refuses|2|loud|Start gate — one of two surviving refusals under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
 start|patrol-unarmed|2|loud|Start gate — the arming wall: environment sound, brief well-formed, but no Patrol has stamped this session, so nothing would notice the dispatched agent dying — REFUSED with both re-arm commands named
 stop|irrelevant-tool|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
