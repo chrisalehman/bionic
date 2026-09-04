@@ -337,12 +337,14 @@ ADOPT_TAIL_CAP=2000
 say()  { printf 'poker: %s\n' "$1"; }
 die()  { printf 'poker: %s\n' "$1" >&2; }
 
-# THE EXIT CODE IS A VARIABLE FOR ONE CALLER. Every argument error in this file has always
-# been a 2, and every one of them still is — except `bind`'s missing argument, which the
-# wave-session-bound-run contract fixes at 3 alongside the missing-session-key refusal that
-# stops the same verb one line later. A caller that wants that spelling sets `USAGE_EXIT`
-# immediately before the call and nothing else in the file ever reads it.
-USAGE_EXIT=2
+# ONE EXIT CODE FOR EVERY ARGUMENT ERROR IN THIS FILE, AND IT IS 2. `bind` briefly had a 3
+# of its own (wave-session-bound-run S6, on the reading that a missing operand is the same
+# class as the missing session key the verb refuses ten lines on). It is not: the session key
+# is an ENVIRONMENT fact the caller cannot type, and 3 is what this file says about the
+# environment; an operand the caller left off the command line is a usage error like every
+# other usage error here, and one verb spelling it differently is a surface the operator has
+# to learn per verb. Reverted at S8 with the `USAGE_EXIT` indirection deleted with it —
+# tests/session-poker.test.sh 16g asserts the 2.
 usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
@@ -354,7 +356,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh adopt      every open row a PREDECESSOR session left on this project's rosters"
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
-  exit "$USAGE_EXIT"
+  exit 2
 }
 
 [ $# -ge 1 ] || usage "a verb is required."
@@ -379,10 +381,8 @@ case "$VERB" in
     # THE OPERAND IS THE WHOLE POINT OF THE VERB, so its absence is a refusal rather than a
     # default. `bind` with no plan cannot mean "unbind" — engagement owns writing `plan=none`
     # (AC-7) and a verb that also unbound would give the marker a second writer with a second
-    # rule. Exit 3 rather than the file's usual 2: it is the same class as the missing session
-    # key this verb refuses ten lines on — an input the caller has to supply and did not.
+    # rule. It exits 2, this file's one code for an argument error, like every other verb.
     if [ $# -ne 1 ] || [ -z "$1" ]; then
-      USAGE_EXIT=3
       usage "bind takes exactly one argument: the plan this session is working."
     fi
     BIND_ARG="$1"
@@ -1406,9 +1406,19 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 # A ROW WITH NO ID IS NEVER WRITTEN. That is the UNADDRESSABLE verdict's whole content —
 # there is no identity to file — and a row carrying `agent_id=` empty would be inert at
 # every by-id reader while looking like an adoption on disk.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> -> 0 written/already there, 1 not
+#
+# THE ROW CARRIES THE ADOPTING SESSION'S BINDING, in the same trailing `plan=` field
+# hooks/dispatch-preflight.sh:1703 writes on the rows it creates — one field name, one
+# position, two writers (spec §Ownership table, "roster attribution"; cross-gate §RA).
+# Without it an adopted row was the one row on any roster with no attribution at all, so a
+# THIRD session bound to the same plan re-read this session's own adoption as
+# `unattributed` and declined to take it: the partition would quietly stop working exactly
+# where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
+# the adopter is now the session that owns the row — the launching session is already
+# recorded, separately, in `adopted_from=`.
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
-  local launch="$9" osid="${10}" addr="${11}" d
+  local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" d
   [ -n "$id" ] || return 1
   [ -n "$sid" ] || return 1
   d="${f%/*}"
@@ -1424,10 +1434,10 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
       >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
   fi
-  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=|teammate_id=%s|adopted_from=%s|tool_use_id=\n' \
+  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=|teammate_id=%s|adopted_from=%s|tool_use_id=|plan=%s\n' \
     "$sid" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
     "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" \
-    "$(clean "$addr")" "$(clean "$osid")" \
+    "$(clean "$addr")" "$(clean "$osid")" "$(clean "$plan")" \
     >> "$f" 2>/dev/null || return 1
   return 0
 }
@@ -1816,7 +1826,8 @@ case "$VERB" in
               ROW_JOURNALLED=yes
             elif [ -n "$RID" ]; then
               if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
-                   "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR"; then
+                   "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
+                   "${ADOPT_OWN_PLAN:-none}"; then
                 ROW_JOURNALLED=yes
               else
                 die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
