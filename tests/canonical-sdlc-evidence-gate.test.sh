@@ -133,6 +133,28 @@ write_global_note() {
 # Runs hook with HOME set to $1 and the given bash-tool-call command $2.
 # Sets globals HOOK_EXIT and HOOK_STDERR. The hook is stderr-only on block,
 # silent on allow — no need to capture stdout.
+# THE RESOLUTION ANNOUNCEMENT IS ITS OWN CHANNEL (wave-session-bound-run, AC-3/AC-6).
+# The gate now says out loud which run it resolved and how — one line when an unbound
+# session fell back to the newest plan, one when a bound session's plan is closed. Those
+# lines are a REPORT, not a refusal, and they ride the only channel a hook has, so every
+# `expect_allow` in this file (which asserts stderr is empty) would fail on a fixture
+# whose marker carries no binding — which is every fixture above, because `engage` plants
+# an empty marker.
+#
+# So the runners split the stream instead of loosening the assertion: HOOK_RESOLUTION
+# holds the announcements and HOOK_STDERR holds EVERYTHING ELSE, still asserted empty on
+# an allow. Section 35 reads the announcements on a whole stream of its own (`s35_run`),
+# so nothing here can hide a line that was never printed: the pairing is a positive
+# assertion that the line IS there for an unbound session and a negative that it is NOT
+# for a bound one.
+EG_RESOLUTION_RE='^evidence-gate: (run resolved by newest-plan fallback|bound plan closed)'
+split_stderr() {  # <file> -> HOOK_RESOLUTION + HOOK_STDERR
+  local raw
+  raw=$(cat "$1")
+  HOOK_RESOLUTION=$(printf '%s\n' "$raw" | grep -E "$EG_RESOLUTION_RE" || true)
+  HOOK_STDERR=$(printf '%s\n' "$raw" | grep -v -E "$EG_RESOLUTION_RE" || true)
+}
+
 run_hook() {
   local home_dir="$1" command="$2"
   local input
@@ -155,7 +177,7 @@ run_hook() {
   else
     HOOK_EXIT=$?
   fi
-  HOOK_STDERR=$(cat "$tmp_err")
+  split_stderr "$tmp_err"
   rm -f "$tmp_err"
 }
 
@@ -176,7 +198,7 @@ run_hook_with_project() {
   else
     HOOK_EXIT=$?
   fi
-  HOOK_STDERR=$(cat "$tmp_err")
+  split_stderr "$tmp_err"
   rm -f "$tmp_err"
 }
 
@@ -2136,7 +2158,7 @@ run_hook_project_elsewhere_cwd() {
   else
     HOOK_EXIT=$?
   fi
-  HOOK_STDERR=$(cat "$tmp_err")
+  split_stderr "$tmp_err"
   rm -f "$tmp_err"
 }
 
@@ -5138,6 +5160,238 @@ mkdir -p "$h34d/.bionic/tmp/engaged-$EG_SID.state"
 run_hook_full "$h34d" 'git commit -m "x"'
 expect_silent "34d a DIRECTORY at the marker path is not engagement"
 rmdir "$h34d/.bionic/tmp/engaged-$EG_SID.state"
+
+# ============================================================
+# Section 35: THE SESSION'S OWN RUN (wave-session-bound-run, AC-1/AC-3/AC-6)
+# ============================================================
+#
+# Until 2026-09-04 this gate answered "which run am I in" by scanning the project root
+# for the newest plan carrying `## SDLC State`. Two engaged sessions in one repository
+# therefore shared one run identity: a commit from EITHER was measured against whichever
+# plan was newest, so the second session's own evidence was never the evidence checked.
+# The resolution is session-keyed now — lib/run.sh's `session_run` reads the `plan=`
+# field hooks/engage.sh has written into `engaged-<sid>.state` since 1.4.1 and nothing
+# read — and both of this hook's resolution sites take its verdict.
+#
+# EVERY FIXTURE HERE IS ONE ROOT WITH TWO OPEN PLANS, and that is the point: it is the
+# only shape in which the old rule and the new one disagree. A one-plan root cannot tell
+# them apart, so a section built on one would pass under either and prove nothing.
+#
+# THE TWO DIRECTIONS ARE BOTH DRIVEN (35a and 35b). "The bound session is gated on its
+# own plan" is only half an assertion if the bound plan is also the newest one — the old
+# rule agrees there. 35b swaps which plan carries the evidence, so the bound session
+# blocks on the OLDER plan while the newest one is clean, which the old rule cannot do.
+
+echo ""
+echo "=== Section 35: two sessions, two plans, one root ==="
+
+S35_SID_A="a1111111-2222-3333-4444-555555555555"
+S35_SID_B="b6666666-7777-8888-9999-000000000000"
+
+# A root that doubles as the sandbox HOME, the same trick make_home plays: the runner
+# posts cwd=<root>, so PROJECT_DIR resolves there and the docs root is <root>/.bionic/docs.
+s35_root() {
+  local dir
+  dir=$(mktemp -d)
+  cleanup_dirs+=("$dir")
+  # CANONICALISED, for the reason audit_file_for records: the hook resolves its root
+  # through lib/root.sh, which answers with `pwd -P`, while macOS hands `mktemp -d` back a
+  # path under the /var -> /private/var symlink unresolved. Every assertion below matches
+  # an announced path CHARACTER FOR CHARACTER, so a fixture holding the other spelling of
+  # one directory would fail on the prefix and pass on any substring — which is exactly
+  # what a `/var/...` needle does against a `/private/var/...` haystack.
+  dir=$(cd "$dir" && pwd -P)
+  mkdir -p "$dir/.claude/plans" "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
+  echo "$dir"
+}
+
+# THE MARKER'S EXACT TWO-LINE SHAPE, hooks/engage.sh:287 — `plan=<path>` then
+# `engaged_at=<iso>`, mode 600. A fixture that invented a one-line marker would be
+# testing a file no writer in the fleet produces.
+s35_bind() {  # <root> <sid> <plan path>
+  local f="$1/.bionic/tmp/engaged-$2.state"
+  printf 'plan=%s\nengaged_at=%s\n' "$3" "2026-09-04T00:00:00Z" > "$f"
+  chmod 600 "$f"
+}
+
+# The three shapes that are NOT a binding, all of which the fleet really produces: an
+# EMPTY marker (tests/session-poker.test.sh:82 plants one, and every `engage` in THIS
+# suite writes one), the literal `plan=none` (what engagement writes when the root holds
+# zero or several open runs), and a marker carrying no `plan=` line at all.
+s35_unbind() {  # <root> <sid> [empty|none|nofield]
+  local f="$1/.bionic/tmp/engaged-$2.state"
+  case "${3:-empty}" in
+    none)    printf 'plan=none\nengaged_at=2026-09-04T00:00:00Z\n' > "$f" ;;
+    nofield) printf 'engaged_at=2026-09-04T00:00:00Z\n' > "$f" ;;
+    *)       : > "$f" ;;
+  esac
+  chmod 600 "$f"
+}
+
+# Two open plans, structurally identical except for WHICH ONE carries the current step's
+# evidence — the one variable this section turns. Sets S35_A and S35_B.
+s35_two_plans() {  # <root> <a|b: which plan carries the evidence>
+  local root="$1" with="$2" a_body="" b_body=""
+  case "$with" in
+    a) a_body="$step6_body" ;;
+    b) b_body="$step6_body" ;;
+  esac
+  S35_A="$root/.bionic/docs/plans/wave-a.plan.md"
+  S35_B="$root/.bionic/docs/plans/wave-b.plan.md"
+  printf '%s\n' "$(plan 6 "$a_body" "$matrix_complete")" > "$S35_A"
+  printf '%s\n' "$(plan 6 "$b_body" "$matrix_complete")" > "$S35_B"
+  # B IS THE NEWEST, by an hour rather than a filesystem tick: `active_plan` orders by
+  # mtime, and two plans written in the same second make the OLD rule's answer a coin
+  # toss — which would make every fallback assertion below flap instead of fail.
+  touch -t 202609040000 "$S35_A"
+  touch -t 202609040100 "$S35_B"
+}
+
+# Runs the hook AS a named session. Unlike run_hook this keeps stderr WHOLE: the
+# resolution announcements are this section's subject, not noise to filter past.
+s35_run() {  # <root> <sid> <command> -> S35_EXIT / S35_ERR
+  local root="$1" sid="$2" command="$3" input tmp_err
+  input=$(jq -n --arg c "$command" --arg cwd "$root" --arg s "$sid" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
+  tmp_err=$(mktemp)
+  if HOME="$root" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$sid" \
+       bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+    S35_EXIT=0
+  else
+    S35_EXIT=$?
+  fi
+  S35_ERR=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+}
+
+# <label> <expected exit> <substring stderr MUST carry, or -> <substring it must NOT, or ->
+s35_assert() {
+  local label="$1" want="$2" yes="$3" nope="$4" why=""
+  TOTAL=$((TOTAL + 1))
+  [ "$S35_EXIT" = "$want" ] || why="exit=$S35_EXIT want=$want"
+  if [ -z "$why" ] && [ "$yes" != "-" ] && ! grep -qF -- "$yes" <<< "$S35_ERR"; then
+    why="stderr is missing '$yes'"
+  fi
+  if [ -z "$why" ] && [ "$nope" != "-" ] && grep -qF -- "$nope" <<< "$S35_ERR"; then
+    why="stderr carries '$nope' and must not"
+  fi
+  if [ -z "$why" ]; then
+    echo "PASS: $label"; PASS=$((PASS + 1))
+  else
+    echo "FAIL: $label"
+    echo "  $why"
+    echo "  stderr='$S35_ERR'"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+# --- 35a AC-1: each session is gated on its OWN plan (the evidence is on A) ---
+r35a=$(s35_root)
+s35_two_plans "$r35a" a
+s35_bind "$r35a" "$S35_SID_A" "$S35_A"
+s35_bind "$r35a" "$S35_SID_B" "$S35_B"
+
+s35_run "$r35a" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35a session A, bound to the plan that carries its evidence → allow" 0 - "BLOCKED"
+
+s35_run "$r35a" "$S35_SID_B" 'git commit -m "x"'
+s35_assert "35a session B, same tree same commit, bound to the plan with none → BLOCKED on B" \
+  2 "$S35_B" "$S35_A"
+
+# --- 35b AC-1, THE INVERSE: swap which plan carries the evidence ---
+# The old newest-plan rule allows session A's commit here (the newest plan is clean) and
+# blocks session B's (its own plan is not the one read). Both rows below are its mirror.
+r35b=$(s35_root)
+s35_two_plans "$r35b" b
+s35_bind "$r35b" "$S35_SID_A" "$S35_A"
+s35_bind "$r35b" "$S35_SID_B" "$S35_B"
+
+s35_run "$r35b" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35b inverse: session A blocks on its OWN older plan while the newest is clean" \
+  2 "$S35_A" "$S35_B"
+
+s35_run "$r35b" "$S35_SID_B" 'git commit -m "x"'
+s35_assert "35b inverse: session B, bound to the newest plan that carries its evidence → allow" \
+  0 - "BLOCKED"
+
+# --- 35c AC-3: no binding → newest-plan exactly as today, and the hook says so ---
+for s35_shape in empty none nofield; do
+  r35c=$(s35_root)
+  s35_two_plans "$r35c" a          # the evidence is on A, so the NEWEST plan has none
+  s35_unbind "$r35c" "$S35_SID_A" "$s35_shape"
+  s35_run "$r35c" "$S35_SID_A" 'git commit -m "x"'
+  s35_assert "35c unbound ($s35_shape) → gated on the NEWEST plan, exactly as today" \
+    2 "$S35_B" "$S35_A"
+  s35_assert "35c unbound ($s35_shape) → and the fallback resolution is announced" \
+    2 "evidence-gate: run resolved by newest-plan fallback (session unbound) — $S35_B" -
+done
+
+# THE NEGATIVE BESIDE THE POSITIVE: a BOUND session announces no fallback, because it
+# did not use one. Without this row the announcement could be unconditional and every
+# assertion above would still pass.
+r35c2=$(s35_root)
+s35_two_plans "$r35c2" a
+s35_bind "$r35c2" "$S35_SID_A" "$S35_A"
+s35_run "$r35c2" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35c control: a BOUND session announces no fallback" 0 - "newest-plan fallback"
+
+# --- 35d AC-6: a binding to a CLOSED plan is engaged-with-no-run, never a fall-through ---
+r35d=$(s35_root)
+s35_two_plans "$r35d" a            # B is newest, open, and carries no evidence
+S35_D="$r35d/.bionic/docs/plans/wave-delivered.plan.md"
+printf '%s\n## SDLC State\ncurrent: 9\n- Step 9: delivered: .bionic/docs/record/x.md\n\n%s\n' \
+  "$(matrix_frontmatter true)" "$matrix_complete" > "$S35_D"
+touch -t 202609040030 "$S35_D"
+s35_bind "$r35d" "$S35_SID_A" "$S35_D"
+s35_run "$r35d" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35d bound to a DELIVERED plan → this session has no open run: allow" 0 - "BLOCKED"
+s35_assert "35d …and the reason is named, with the closed plan's own path" \
+  0 "evidence-gate: bound plan closed — $S35_D; this session has no open run" -
+s35_assert "35d …and the OPEN plan beside it is never read" 0 - "$S35_B"
+
+# The control: the same tree and the same commit from an UNBOUND session IS gated on the
+# newest open plan. Without it 35d's silence could be a gate that had simply stopped.
+s35_unbind "$r35d" "$S35_SID_B" empty
+s35_run "$r35d" "$S35_SID_B" 'git commit -m "x"'
+s35_assert "35d control: the same tree, an UNBOUND session, is gated on the newest open plan" \
+  2 "$S35_B" -
+
+# --- 35f AC-1 at the OTHER site: the run predicate is the session's too ---
+# 35a and 35b turn the site that picks the file to VALIDATE; both of their plans are open,
+# so the site that decides whether a run is live agrees under either rule and is not under
+# test there. Here the session's own plan is open and the root's NEWEST plan is delivered,
+# which is the shape where the two sites disagree: the old root-keyed predicate reads the
+# root as having no run at all and waves the commit through, while the session in fact has
+# an open run with no evidence for its current step.
+r35f=$(s35_root)
+S35_FO="$r35f/.bionic/docs/plans/wave-open.plan.md"
+S35_FD="$r35f/.bionic/docs/plans/wave-shipped.plan.md"
+printf '%s\n' "$(plan 6 "" "$matrix_complete")" > "$S35_FO"
+printf '%s\n## SDLC State\ncurrent: 9\n- Step 9: delivered: .bionic/docs/record/x.md\n\n%s\n' \
+  "$(matrix_frontmatter true)" "$matrix_complete" > "$S35_FD"
+touch -t 202609040000 "$S35_FO"
+touch -t 202609040100 "$S35_FD"
+s35_bind "$r35f" "$S35_SID_A" "$S35_FO"
+s35_run "$r35f" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35f bound to an OPEN plan under a DELIVERED newest one → the session's run is live: BLOCKED" \
+  2 "$S35_FO" "$S35_FD"
+
+# The control, and it is the old rule stated as a fact: over the same tree a session with
+# no binding sees a root whose newest plan is delivered, so there is no run to enforce.
+s35_unbind "$r35f" "$S35_SID_B" empty
+s35_run "$r35f" "$S35_SID_B" 'git commit -m "x"'
+s35_assert "35f control: unbound over the same tree reads the root as closed and allows" \
+  0 - "BLOCKED"
+
+# --- 35e AC-6, the vanished plan: a binding outlives the file it names ---
+r35e=$(s35_root)
+s35_two_plans "$r35e" a
+S35_GONE="$r35e/.bionic/docs/plans/wave-gone.plan.md"
+s35_bind "$r35e" "$S35_SID_A" "$S35_GONE"
+s35_run "$r35e" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35e bound to a plan that no longer exists → closed, not a fall-through" \
+  0 "evidence-gate: bound plan closed — $S35_GONE" -
+s35_assert "35e …and the OPEN plan beside it is never read" 0 - "$S35_B"
 
 # ============================================================
 # Summary
