@@ -2174,7 +2174,8 @@ expect_eq       "bind to an open plan exits 0" "0" "$RC"
 expect_contains "…and says what it bound" "poker: bound $P16A" "$OUT"
 expect_eq       "…the marker is the two-line shape, and only two lines" "2" \
   "$(wc -l < "$M16" | tr -d ' ')"
-expect_contains "…its plan= line names the plan that was bound" "plan=$P16A" "$(cat "$M16")"
+# bind_plan stores the CANONICAL spelling (Step-6 SEC note, S10a): compare the resolved path.
+expect_contains "…its plan= line names the plan that was bound" "plan=$P16A_REAL" "$(cat "$M16")"
 expect_contains "…and engaged_at is carried, not dropped" "engaged_at=" "$(cat "$M16")"
 expect_eq       "…written 600, as every marker in the fleet is" "600" "$(file_mode "$M16")"
 # THE PAIRED NEGATIVE, on the same marker: binding A is also not binding B. Without this a
@@ -2197,7 +2198,7 @@ poke "$R16" bind '.bionic/docs/plans/epic-16/wave-b.plan.md'
 expect_eq       "a project-relative path binds (exit 0)" "0" "$RC"
 expect_contains "…and is reported as the absolute path it resolved to" "poker: bound $P16B_REAL" "$OUT"
 expect_contains "…the marker now names B" "plan=$P16B_REAL" "$(cat "$M16")"
-expect_absent   "…and no longer names A: bind REBINDS" "plan=$P16A" "$(cat "$M16")"
+expect_absent   "…and no longer names A: bind REBINDS" "plan=$P16A_REAL" "$(cat "$M16")"
 
 # ---------- 16b2: a DOCS-ROOT-relative path binds too — the spelling session-start prints ----------
 # THE PASTE-BACK GAP THIS CLOSES (S10b phase 2, from review P3's relative-path listing).
