@@ -189,35 +189,41 @@ because a certificate names a build hash and the build lives there.
 
 ## 5. Status
 
-### 5.1 Vocabulary
+### 5.1 Vocabulary (amended 2026-09-03, #24 decision 5)
 
-| status | meaning | may become |
-|---|---|---|
-| **certified** | a certificate cell holds for this interpreter at a stated runtime version, with a non-vacuous baseline | stale (on runtime bump, or model change for the baseline) → re-measured |
-| **proven (hermetic)** | guard evidence only; not certified | certified, when a certificate exists |
-| **held under prior verification** | a pass observed before the kit existed, or under a builder's verification rather than the kit; version and pointers kept; **no certification standing** | certified, by a v1 climb |
-| **refuted** | a measurement read the statement false on a primary surface | proven, only by a new measurement reading true |
-| **untested** | the surface exists, the measurement is defined, nobody has run it | proven / refuted |
-| **in-flight** | a repair is under way against a refuted or untested row; the row keeps its prior status beside the flag | its prior status resolves |
-| **fog** | the row cannot be completed (§6) | a row, when its missing field can be filled |
+A cell has **two values**: **certified**, or **not**. The kit is not passed until it is passed;
+"not certified" is the floor for every cell on day one, and nothing lowers a floor already at the
+bottom.
+
+History rides as a **note** on the cell, never as a status and never as a gate:
+
+| note | meaning |
+|---|---|
+| *held under prior verification @ \<version\>* | a pass observed before the kit existed, or under a builder's verification; pointers kept |
+| *observed failing @ \<version\>* | a failure observed on a primary surface; **also entered in the kit as a named probe** (§5.2) |
+| *hermetic guard passing* | guard evidence exists; says nothing about certification |
+| *in-flight* | a repair is under way; the cell stays not-certified until the kit passes |
+| *fog* | the row cannot be completed (§6); recorded in Not yet specified, not as a cell |
+
+"Proven", "refuted", "untested" are retired as statuses; the words may appear in notes.
 
 ### 5.2 Rules
 
-- **Refuted is a status, not fog.** A refuted statement has a surface and a measurement; it is a
-  complete row that read false. It is never downgraded to fog, never deleted to tidy a rung, and
-  never re-worded so the measurement no longer reaches the failure.
-- **Refuted holds the rung.** A rung is not admitted for an interpreter while any statement
-  beneath it reads refuted for that interpreter. Repairs are built when the rung is climbed.
-- **Inherited claims cross asymmetrically (decided 2026-09-03, #26 Q4).** A failure is an event
-  and survives any change of standard: a refuted row crosses as *refuted* and holds its rung until
-  a v1 climb reads it true. A pass is a judgement under the standard that made it: a proven row
-  crosses as *held under prior verification @ <version>* with its pointers, and is certified only
-  by the kit. Work items never cross; only claims with status (map Notes §8). Every inherited row
-  is 0.11.0; the v1 ladder therefore starts with zero certificates, by design.
+- **Known failures become probes.** A past refutation is knowledge of a way the wall actually
+  failed — the most valuable probe a kit can have. Every observed failure enters the kit as a
+  named provocation; the wall is certified only when the kit, including those probes, passes. The
+  failure is never dropped from the kit, and the statement is never re-worded so the probe no
+  longer reaches it. (Supersedes the earlier "refuted holds the rung": nothing is admitted until
+  certified, and the kit carries the failures — map Notes §8 subsumed.)
+- **Inherited knowledge crosses as notes and probes.** Passes from a prior lineage or standard
+  cross as *held under prior verification @ version* notes; failures cross as *observed failing*
+  notes **and** kit probes. Work items never cross; only knowledge (map Notes §8). Every inherited
+  row is 0.11.0; the v1 ladder starts with zero certificates, by design.
 - **"Proven with caveat" is not a status.** The caveat is either a second statement (untested or
   refuted in its own right) or it is a note. Split it.
-- **A status names its interpreter and version.** "Certified" alone is not a status; "certified
-  on omnigent 0.12.0 @ <build>" is.
+- **A certificate names its interpreter, version, and coverage.** "Certified" alone is not a
+  status; "certified on omnigent 0.12.0 @ <build>, for Claude seats; unreadable for Codex seats on
+  statement X, cure Y" is (#24 decision 4).
 
 ---
 
@@ -295,3 +301,12 @@ to exist" is a wish, and is struck.
 4. **Inherited knowledge crosses asymmetrically.** Failures keep their standing; passes keep their
    history and lose their standing ("held under prior verification @ version"). The v1 ladder
    starts with zero certificates. (§5.2)
+
+## 10. Amendments from The ladder, ratified (2026-09-03, #24)
+
+- **Status is two-valued** (certified / not); history is notes; observed failures are kit probes
+  (§5.1, §5.2). Supersedes #26 Q4's "held under prior verification" *status* — now a note.
+- **A certificate states its coverage**: what was read, what could not be, and what would have to
+  exist to read it. Never quoted without its scope (§5.2).
+- **The subject of a certificate is the interpreter**; model and role are conditions it covers.
+- **A run has one steward**, set at opening, transferable by an explicit recorded act.
