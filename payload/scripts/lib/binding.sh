@@ -11,8 +11,9 @@
 # and before this wave the invariants lived inline in engage.sh, where the other two could
 # not reach them. A marker is what points every wall in the fleet at a PARTICULAR plan, so
 # three spellings of the write is three chances to produce a marker that reads wrong. The
-# invariants are asserted once, here: the two-line shape, mode 600, the symlink refusal,
-# and membership in `open_runs` at the instant of the write.
+# invariants are asserted once, here: the two-line shape, mode 600, the symlink refusal on
+# the marker path AND its two directories, the CANONICAL spelling of the plan, and membership
+# in `open_runs` at the instant of the write.
 #
 # IT REFUSES RATHER THAN GUESSES. A bound plan must be an absolute path that `open_runs`
 # lists for THIS root, checked with both sides resolved. Not "a file that exists", not "a
@@ -26,8 +27,9 @@
 # It is minted only when the existing marker has no stamp to carry forward.
 #
 # FAIL DIRECTION. This is the write behind the one artifact whose PRESENCE opens walls, so
-# every doubt resolves to NOT writing: a misshapen sid, a symlink on the path, a plan that
-# is not an open run. Refusal is silent and returns 1; the caller decides what to say. A
+# every doubt resolves to NOT writing: a misshapen sid, a symlink anywhere on the marker's
+# own path, a plan that is not an open run. Refusal is silent and returns 1; the caller
+# decides what to say. A
 # tree that cannot take the write is a different answer — 2 — because a refusal is the
 # caller's fault and a broken tree is not.
 #
@@ -65,22 +67,44 @@ _bind_resolve() {
 
 # bind_plan <root> <sid> <plan|none> -> write the session's binding.
 #
-#   0  written: the marker is exactly `plan=<value>\nengaged_at=<iso>\n`, mode 600
-#   1  refused: the sid is misshapen, the marker path is a symlink, or the plan is not an
-#      absolute path that `open_runs "$root"` lists
+#   0  written: the marker is exactly `plan=<value>\nengaged_at=<iso>\n`, mode 600, and
+#      <value> is the plan's CANONICAL spelling (`_bind_resolve`'s) or the literal `none`
+#   1  refused: the sid is misshapen, the marker path or either of its two directories is a
+#      symlink, or the plan is not an absolute path that `open_runs "$root"` lists
 #   2  the write itself failed (unwritable tree, a directory in the way, no clock)
 bind_plan() {
   local root="$1" sid="$2" plan="$3"
   local path
   path=$(engaged_marker_path "$root" "$sid") || return 1
 
+  # THE WHOLE MARKER PATH, NOT JUST ITS LEAF (S10a, review SEC F1). A leaf-only `-L` test
+  # answers "is the marker a link" and leaves "is the marker's DIRECTORY a link" unasked, so
+  # a tree shipping `.bionic/tmp` — or `.bionic` — as a symlink had this function create a
+  # file outside the root while every check passed. Both ancestors are derived from `$path`
+  # rather than rebuilt from `$root`, because `engaged_marker_path` owns that spelling and a
+  # second copy of it here is a second place for the layout to drift.
+  local mtmp mbio
+  mtmp=$(dirname "$path")
+  mbio=$(dirname "$mtmp")
+  if [ -L "$mtmp" ] || [ -L "$mbio" ]; then return 1; fi
+
   # Refused BEFORE it is followed, and before anything is read out of it: a planted link
-  # would otherwise have this function clobber a file outside the tree on the one write
-  # bionic performs at the invocation the user just typed.
+  # would otherwise have this function read a stamp out of, and then clobber, a file outside
+  # the tree on the one write bionic performs at the invocation the user just typed. It is
+  # tested AGAIN immediately before the write — see there for why once is not enough.
   [ -L "$path" ] && return 1
 
   # MEMBERSHIP, not existence. `open_runs` is the same set `session_run` rules on, so a
   # binding this accepts is one the reader will honour.
+  #
+  # `want` IS WHAT GETS STORED (S10a, review SEC "one correctness note"). This validated a
+  # RESOLVED spelling and then wrote the RAW argument, so a caller passing
+  # `<docs>/plans/../plans/p.md` — or reaching the root through a symlinked alias — left a
+  # marker whose text does not share the docs-root prefix it was checked against. Nothing
+  # compares on that prefix today; the point is that the next thing to try would be wrong,
+  # and the one site that already compares two spellings (`adopt_plan_key`) has to normalize
+  # at compare time to work around it. Storing the canonical spelling costs nothing.
+  local value="$plan"
   if [ "$plan" != "none" ]; then
     local want runs cand c found=0
     want=$(_bind_resolve "$plan") || return 1
@@ -91,6 +115,7 @@ bind_plan() {
       if [ "$c" = "$want" ]; then found=1; break; fi
     done <<< "$runs"
     [ "$found" -eq 1 ] || return 1
+    value="$want"
   fi
 
   # ENGAGED_AT: carried forward from whatever is on disk, minted only when there is
@@ -108,11 +133,21 @@ bind_plan() {
     [ -n "$stamp" ] || return 2
   fi
 
+  # THE LEAF IS TESTED AGAIN, HERE, AND THAT IS THE ONE THAT MATTERS (S10a, review SEC F2).
+  # Between the first `-L` above and this write sit `_bind_resolve`, the WHOLE `open_runs`
+  # walk — seconds, not microseconds, at a few hundred open plans — and the `engaged_at`
+  # read. A `>` redirect follows a link planted inside that window, and `umask`/`chmod`
+  # govern the MODE of whatever the write lands on, not what it lands on. Re-testing
+  # immediately before the redirect shrinks the window to the gap between two adjacent
+  # commands, at the cost of one `test`. The earlier check is not redundant: it is what keeps
+  # the `engaged_at` read above from following a link out of the tree in the first place.
+  [ -L "$path" ] && return 1
+
   # `umask` is shell-global, so the write runs in a subshell rather than leaking a
   # tightened mask back to a hook that has other files to create. The explicit chmod is
   # NOT redundant with it: `>` onto an existing file keeps that file's mode, so a marker
   # first written under a looser umask would stay loose forever without this.
-  ( umask 077; printf 'plan=%s\nengaged_at=%s\n' "$plan" "$stamp" > "$path" ) 2>/dev/null || return 2
+  ( umask 077; printf 'plan=%s\nengaged_at=%s\n' "$value" "$stamp" > "$path" ) 2>/dev/null || return 2
   chmod 600 "$path" 2>/dev/null || :
   return 0
 }

@@ -630,6 +630,39 @@ expect_eq "open_runs: …a fenced ## SDLC State is documentation, not a run" "no
 call_active_plan "$R"
 expect_eq "…and active_plan agrees on which file is newest-and-real" "$EPLAN" "$AP_OUT"
 
+# --- R6g: the ORDER is the mtime's, and no path ever enters the sort (S10a, review P2c) ---
+#
+# WHY THIS ROW EXISTS. R6a–R6f measure membership; every one of them would stay green with
+# the order reversed, because a re-keyed sort still prints every member. S10a rewrote the
+# ordering pass (linear insertion → binary insertion, review P2c) and that is exactly the
+# class of change whose failure mode is a set that is right and an order that is not — the
+# first attempt at it, keyed on `stat`'s nanoseconds instead of the shell's own `-nt`,
+# reordered 21 of 500 members on a tree built in one burst and every existing row stayed
+# green, because they all set their mtimes with `touch -t`.
+#
+# THREE mtimes, NONE of them in the walk's own order, so no accident — neither "print in the
+# order found" nor "print it backwards" — lands on the expected answer.
+#
+# THE PATHS CARRY SPACES, deliberately. The ordering keys are the mtime and the discovery
+# index and the paths stay in a bash array, so a path that word-split would surface here as a
+# member in the wrong slot or a member that vanished.
+R="$SANDBOX/r6g"; mkdir -p "$R/.bionic"
+G_MID=$(mk_plan "$R" "a walked one.plan.md" "4" "- Step 4: in progress")
+G_OLD=$(mk_plan "$R" "b walked two.plan.md" "4" "- Step 4: in progress")
+G_NEW=$(mk_plan "$R" "c walked three.plan.md" "4" "- Step 4: in progress")
+touch -t 202602010000 "$G_MID"
+touch -t 202601010000 "$G_OLD"
+touch -t 202603010000 "$G_NEW"
+call_open_runs "$R"
+expect_eq "open_runs: three open plans -> exit 0" 0 "$OR_ST"
+expect_eq "open_runs: …exactly three lines (the ordering dropped no member)" \
+  3 "$(line_count "$OR_OUT")"
+expect_eq "open_runs: …newest mtime first, oldest last, whatever order the walk found them" \
+  "$(printf '%s\n%s\n%s' "$G_NEW" "$G_MID" "$G_OLD")" "$OR_OUT"
+call_active_plan "$R"
+expect_eq "open_runs line 1 == active_plan's answer, with spaces in every path" \
+  "$G_NEW" "$AP_OUT"
+
 # --- R6f: no docs tree at all ---
 R="$SANDBOX/r6f"; mkdir -p "$R/.bionic"
 call_open_runs "$R"

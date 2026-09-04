@@ -108,7 +108,7 @@ preflight-probe|open|no
 stop-orders|open|no
 session-sweeper|open|no
 stop-check|open|no
-engage|open|yes
+engage|open|no
 '
 
 # ============================================================
@@ -312,6 +312,29 @@ AR_CALLERS=$(grep -l 'active_run "' "$HOOKS"/*.sh 2>/dev/null \
   | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
 expect_eq "canonical-sdlc-evidence-gate is the ONLY hook still calling active_run, and it is the AC-3 fallback arm" \
   "canonical-sdlc-evidence-gate" "$AR_CALLERS"
+
+# THE SAME PIN FOR `active_plan`, WHICH HAD NONE (S10a, review D3). `active_run` is one of
+# TWO project-keyed readers this wave left standing, and only one of them was held to a set.
+# `active_plan` has exactly two callers and each is a named exception: the evidence gate
+# re-derives the fallback plan through the pre-wave path on purpose (AC-3 fidelity), and the
+# tick keeps it for `resolve_run`'s `none` arm, where an unbound session over a closed run
+# still needs a plan to read DISARM out of. Three separate pins name the tick's call by hand
+# and nothing named the gate's, so a THIRD hook picking up the project-keyed selector — the
+# exact regression this section exists to catch for `active_run` — showed up nowhere.
+AP_CALLERS=$(grep -l 'active_plan "' "$HOOKS"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "active_plan has exactly TWO callers, and both are named exceptions" \
+  "canonical-sdlc-evidence-gate session-poker" "$AP_CALLERS"
+
+# ENGAGE IS THE WRITER, NOT A CONSUMER, and the roster's `no` above must not be read as
+# "engage ignores the session". It reads the marker's `plan=` FIELD through `session_plan` to
+# answer "is this session already bound"; it does not ask for a verdict, because a binding is
+# preserved whether or not its plan is still open (S10a, review C-1) and because asking would
+# put an `active_run` walk on the unbound path for an answer the hook discards (review P1).
+expect_eq "engage reads the binding FIELD (session_plan), which is what the writer needs" "yes" \
+  "$(grep -q 'session_plan "' "$HOOKS/engage.sh" && echo yes || echo no)"
+expect_eq "…and asks for no run VERDICT: neither session_run nor active_run" "no" \
+  "$(grep -qE 'session_run "|active_run "' "$HOOKS/engage.sh" && echo yes || echo no)"
 
 # ============================================================
 echo ""

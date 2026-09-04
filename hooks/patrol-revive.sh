@@ -54,8 +54,9 @@
 #              has stopped.
 #
 # SCOPE — WHAT "AN ACTIVE RUN" IS HERE. Two conditions, and no third. First, this
-# project has an OPEN RUN: `active_run` under the payload's project root, the same
-# fact every other governance hook is scoped by since bionic 1.4.0. Second, a stamp
+# project has an OPEN RUN: `session_run` (which was `active_run` until
+# wave-session-bound-run made run identity per-session) under the payload's project root,
+# the same fact every other governance hook is scoped by since bionic 1.4.0. Second, a stamp
 # EXISTS for this session, which by doctrine (SKILL.md §Dispatch) happens at the
 # Step-0 confirmation of a new run or the resume ritual of an open one, and at no
 # other moment. An armed-then-stale stamp is therefore already the statement "a run
@@ -139,7 +140,8 @@
 # CLI from delivering `Stop` at all.
 #
 # Registered once on the Stop channel in hooks/hooks.json, always on, and scoped by
-# `active_run` plus this session's own stamp — both facts on disk.
+# `session_run` (which was `active_run` until wave-session-bound-run made run identity
+# per-session) plus this session's own stamp — both facts on disk.
 # [WALL: tests/patrol-revive.test.sh]
 
 set -uo pipefail

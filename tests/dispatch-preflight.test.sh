@@ -3067,6 +3067,44 @@ S25_ROW2=$(roster_row "$(roster_path "$S25_REPO5" "$SID_A")" 1)
 expect_status "25d4: the row's plan= field is the literal 'none'" "none" \
   "$(roster_field "$S25_ROW2" plan)"
 
+# --- S25d5: a plan path carrying a `|` cannot forge a row (S10a, review SEC F3) ---
+#
+# THE ROW IS PIPE-DELIMITED ON ONE LINE, which is why `sanitize()` exists and why every
+# other interpolated value on it goes through that filter first. `plan=` is the field this
+# wave added and was the one field that skipped it, while the parallel writer in
+# `session-poker.sh adopt` filtered the same value through `clean()` — so the two writers
+# disagreed about whether the field was trusted.
+#
+# THE FIXTURE IS A REAL FILE. A plan named `wave-99|status=landed|name=ghost.plan.md` is a
+# legal filename on every filesystem bionic runs on, so no part of this is hypothetical.
+#
+# WHAT IS ASSERTED IS THE ROW'S SHAPE, not just the field's text: a forged `status=landed`
+# would lose to the real one at `line_field`'s `head -1` today, which makes a value-only
+# assertion pass for a reason that could evaporate under any reader change. The field COUNT
+# is what says no segment was injected.
+s25_repo r25f "suites=9 worktrees=9 test_jobs=4 source=probe" \
+              "suites=9 worktrees=9 test_jobs=4 source=probe"
+S25_REPO6="$S25_REPO"
+write_attestation "$S25_REPO6" "$SID_A"
+S25_EVIL="$S25_REPO6/.bionic/docs/plans/epic-99-test/wave-99|status=landed|name=ghost.plan.md"
+cp "$S25_PLAN_A" "$S25_EVIL"
+expect_status "25d5a: the pipe-bearing plan file really exists (non-vacuity)" "yes" \
+  "$([ -f "$S25_EVIL" ] && echo yes || echo no)"
+s25_bind "$S25_REPO6" "$SID_A" "$S25_EVIL"
+run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO6")"
+expect_status "25d5b: the dispatch still passes" "0" "$GATE_ST"
+S25_ROW3=$(roster_row "$(roster_path "$S25_REPO6" "$SID_A")" 1)
+S25_ROW_CLEAN=$(roster_row "$(roster_path "$S25_REPO4" "$SID_A")" 1)
+expect_status "25d5c: the row has exactly as many pipe-delimited fields as a clean row" \
+  "$(printf '%s' "$S25_ROW_CLEAN" | tr -cd '|' | wc -c | tr -d ' ')" \
+  "$(printf '%s' "$S25_ROW3" | tr -cd '|' | wc -c | tr -d ' ')"
+expect_status "25d5d: status is still the writer's own value, not the injected one" "intended" \
+  "$(roster_field "$S25_ROW3" status)"
+expect_status "25d5e: name is still the dispatched agent's, not the injected one" \
+  "$(roster_field "$S25_ROW_CLEAN" name)" "$(roster_field "$S25_ROW3" name)"
+expect_status "25d5f: and plan= holds the path with its pipes neutralised" \
+  "$(printf '%s' "$S25_EVIL" | tr '|' ' ')" "$(roster_field "$S25_ROW3" plan)"
+
 echo ""
 echo "----------------------------------------"
 echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"
