@@ -65,9 +65,21 @@ date and the effort that adopted it.
   across interpreters; stale on model change. *(adopted 2026-09-03, #26)*
 - **vacuous cell** — a certificate cell whose baseline shows the bare model already complies;
   nothing was tested, so it reads untested. *(adopted 2026-09-03, #26)*
-- **held under prior verification** — the status of a pass observed before the kit existed or
-  under a builder's verification: version and pointers kept, no certification standing.
-  Failures, by contrast, cross as refuted. *(adopted 2026-09-03, #26)*
+- **held under prior verification** — a *note* (not a status) on a cell: a pass observed before
+  the kit existed or under a builder's verification; version and pointers kept; no standing.
+  *(adopted 2026-09-03, #26; demoted to a note by #24)*
 - **verification vs certification** — the builder verifies a change (SDLC tiers, consumed at the
   wave gate); the kit certifies a statement about the product (outlives any wave). One may feed
   the other; neither is the other. *(adopted 2026-09-03, #26)*
+- **rung** — a set of statements about the product at one depth of the certification-dependency
+  relation (a rung sits below another when the higher rung's measurement presupposes the lower
+  holds). Unbuilt things are **prerequisites** (kit or build), never rungs. *(adopted 2026-09-03, #24)*
+- **coverage** — the models and roles an interpreter's certificate has been read for; a certificate
+  states its coverage and names what could not be read, with the cure. *(adopted 2026-09-03, #24)*
+- **steward (of a run)** — the one interpreter that governs a run, set when the run opens,
+  transferable by an explicit recorded act; other governors may read, never act. The mid-run swap
+  is the transfer. *(adopted 2026-09-03, #24)*
+- **probe** — a named provocation in the kit. Every observed failure becomes one; the wall is
+  certified only when the kit including its probes passes. *(adopted 2026-09-03, #24)*
+- **certified / not certified** — the only two values a cell takes; history rides as notes.
+  "Proven", "refuted", "untested" are retired as statuses. *(adopted 2026-09-03, #24)*
