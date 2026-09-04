@@ -34,12 +34,26 @@
 # Registered ONCE, in hooks/hooks.json, for both the main thread and agent contexts.
 # The two-channel partition it used to need — skill frontmatter for the main thread,
 # settings for agent contexts — is gone: what scopes the wall now is an on-disk fact,
-# `active_run` under the artifact's own project root.
+# the calling session's own run under the artifact's own project root (`session_run`,
+# which was `active_run` until wave-session-bound-run made run identity per-session).
 
 set -u
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
+
+# THIS HOOK ANSWERS ON TWO EVENTS (wave-session-bound-run, 2026-09-04). PreToolUse is the
+# wall, unchanged. PostToolUse|Write is the BIND ARM, and it exists because of a hard
+# ordering fact: the artifact that creates a run is its plan file, and at PreToolUse that
+# file does not exist yet — `open_runs` cannot list it, so `bind_plan`, which refuses any
+# path that is not a member of the open-run set at the instant of the write, would refuse
+# every binding the arm exists to make. The invariant "a bound path is a member of the
+# open-run set at write time" is only satisfiable after the tool has run.
+#
+# The event is absent on nothing this hook is registered for, but `// empty` keeps a
+# payload without it reading as the wall rather than as the bind arm — the direction that
+# preserves today's behaviour.
+EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
 
 # Only Write and Edit need checking. Other tools pass through.
 case "$TOOL" in
@@ -175,7 +189,7 @@ resolve_docs_root() {
 # a mistake a person can move, and the evidence gate's own misplacement sweep catches
 # the consequential half of it at commit time. Refusing every Write and Edit on the
 # machine because a file is missing is not recoverable at that price.
-BIONIC_LIB_WANT="root.sh run.sh session.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh binding.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -310,6 +324,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# binding.sh AFTER run.sh, which owns the marker path, the open-run set and the
+# line-ending translation it is written in terms of.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/binding.sh"
 
 # THE ROOT THAT OWNS THE ARTIFACT — the artifact's own, not the invoking session's.
 PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
@@ -345,24 +363,108 @@ fi
 GS_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || GS_SID=""
 engaged_session "$PROJECT_ROOT_FROM_PATH" "$GS_SID" || exit 0
 
+# ---------- THE BIND ARM (AC-9): a new run's plan claims the session that wrote it ----------
+#
+# PostToolUse ONLY, and it does nothing else. The tool has already run, so this arm cannot
+# block and must not try: every path below leaves through `exit 0`, prints no decision
+# JSON, and the one thing it can change is the session's own marker.
+#
+# WHY THE WRITE OF A PLAN IS THE RIGHT MOMENT. A run's identity has to attach to a session
+# at the act that CREATES the relationship, and that act is the first write of the plan
+# file (spec §Design D0, T4). Engagement is too early — at `/bionic:canonical-sdlc` the run
+# may not exist yet — and the first commit is far too late, which is the window the bug
+# report opened on: a resumed session that engaged, wrote its plan and committed was gated
+# on whichever plan in the root happened to be newest.
+#
+# IT REBINDS WITHOUT ASKING (T4). A session that writes a second run's plan has moved to
+# that run; the previous binding is not a claim to defend. The one binding this arm cannot
+# make is one `bind_plan` refuses — a file that is not a member of the open-run set — and
+# there the marker is left exactly as it was, silently, because a Write under `plans/` that
+# is not an open run is an ordinary file and not an event.
+#
+# WHAT MAKES A FILE A PLAN IS NOT ASKED HERE. `bind_plan` refuses any path `open_runs` does
+# not list, and `open_runs` owns the whole rule — the depth-2 walk, the fence-aware
+# flush-left `## SDLC State` filter, and the open/closed verdict. Spelling that filter a
+# second time inside this hook would give the fleet two readings of "is this a plan", which
+# is the class of drift `lib/run.sh` was extracted to end (spec §Ownership table).
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+if [ "$EVENT" = "PostToolUse" ]; then
+  # An Edit never binds (AC-9). It changes a plan; it does not create a run.
+  [ "$TOOL" = "Write" ] || exit 0
+
+  # A WRITE THAT OVERWROTE AN EXISTING FILE IS NOT A NEW RUN. PostToolUse cannot see the
+  # pre-state, so the distinction comes from the payload: Claude Code reports `create` or
+  # `update` in `tool_response.type` for Write (measured on this machine, 2026-09-04: 17
+  # Write results joined to their tool_use ids across six session transcripts gave 14
+  # `create` and 3 `update`; Edit results carry no `type` key at all). An ABSENT field
+  # falls through to binding rather than to silence — a missing distinction must not cost
+  # AC-9 the case it exists for, and a redundant rebind to a plan the session is already
+  # working in is the harmless direction.
+  case "$(echo "$INPUT" | jq -r '.tool_response.type // empty' 2>/dev/null)" in
+    update) exit 0 ;;
+  esac
+
+  # The file the tool left behind, and where it landed. Both sides physicalized before
+  # comparing, for the reason the wall below states at greater length: a project reached
+  # through a symlink otherwise disagrees with itself about its own prefix.
+  [ -f "$FILE_PATH" ] || exit 0
+  GS_BIND_TARGET=$(physicalize "$FILE_PATH")
+  GS_BIND_DOCS=$(physicalize "$(resolve_docs_root "$PROJECT_ROOT_FROM_PATH")")
+  case "$GS_BIND_TARGET" in
+    "$GS_BIND_DOCS"/plans/*|"$GS_BIND_DOCS"/incidents/*) ;;
+    *) exit 0 ;;
+  esac
+
+  if bind_plan "$PROJECT_ROOT_FROM_PATH" "$GS_SID" "$GS_BIND_TARGET"; then
+    echo "governing-skill: session bound to $GS_BIND_TARGET" >&2
+  fi
+  exit 0
+fi
+
+# ---------- THE SESSION'S RUN, NOT THE ROOT'S (AC-1, AC-3, AC-6) ----------
+#
+# `active_run` answered "is there a run in this project" — one answer per repository, which
+# is exactly the bug: two engaged sessions in one root shared a run identity and each was
+# gated on whichever plan was newest. `session_run` answers per session, and says which
+# resolution it used.
+#
+# THE VERDICT IS SPOKEN ALOUD, on stderr, beside every other note this hook makes. AC-3
+# requires an unbound session to be TOLD it fell back to the newest plan, and AC-6 requires
+# a session whose bound plan has closed to be told that rather than handed another run's.
+# Neither line blocks anything.
+GS_RUN=$(session_run "$PROJECT_ROOT_FROM_PATH" "$GS_SID" 2>/dev/null) || :
+GS_RUN_ACTIVE=0
+case "$GS_RUN" in
+  bound-open\ *)
+    GS_RUN_ACTIVE=1 ;;
+  fallback\ *)
+    GS_RUN_ACTIVE=1
+    echo "governing-skill: run resolved by newest-plan fallback (session unbound) — ${GS_RUN#fallback }" >&2 ;;
+  bound-closed\ *)
+    # A BINDING IS A COMMITMENT (AC-6). Not active, and deliberately not re-scanned: the
+    # moment a run closes is the moment a scan would hand its session somebody else's.
+    echo "governing-skill: bound plan closed — ${GS_RUN#bound-closed }; this session has no open run" >&2 ;;
+esac
+
 # ---------- WHAT ARMS THIS WALL (AC-7, and one deviation from it) ----------
 #
 # Always-on registration means this hook is delivered on every Write and Edit in every
 # project on the machine, so what scopes it has to be an on-disk fact rather than a
-# skill somebody armed. For nine of the ten governance hooks that fact is `active_run`
-# and nothing else. This one needs two more clauses, and the reason is structural
+# skill somebody armed. For nine of the ten governance hooks that fact is the session's
+# run and nothing else. This one needs two more clauses, and the reason is structural
 # rather than defensive.
 #
 # THE ARTIFACT THIS GATE EXISTS FOR IS THE ONE THAT CREATES THE RUN. A wave's plan is
-# written at Step 3, into a project that has no plan yet — so `active_run` is false at
-# the exact moment the frontmatter contract most needs to bind, and a run-scoped-only
+# written at Step 3, into a project that has no plan yet — so the run verdict is `none`
+# at the exact moment the frontmatter contract most needs to bind, and a run-scoped-only
 # gate would pass the write that establishes `canonical_sdlc_version`, the triple and
 # the flags every later wall reads. Measured, not reasoned: 46 assertions in
 # tests/canonical-sdlc-governing-skill.test.sh go red under the bare predicate, and
 # every one of them is a project's first artifact.
 #
 # So the wall is armed by the PROJECT, with the run as one of three ways to show one:
-#   - an open run under this root, or
+#   - an open run FOR THIS SESSION under this root (`bound-open`, or the announced
+#     newest-plan `fallback` when the session is unbound), or
 #   - a `.bionic/` tree already at this root, or
 #   - a target path inside a `.bionic/` tree — the first-artifact case, where the
 #     directory does not exist yet and this write is what creates it, or
@@ -373,7 +475,7 @@ engaged_session "$PROJECT_ROOT_FROM_PATH" "$GS_SID" || exit 0
 # passes in silence. A `deploy.plan.md` in an unrelated repository that claims nothing
 # is not this gate's business, and under always-on registration that has to be true by
 # construction rather than by which skill happened to be armed.
-if ! active_run "$PROJECT_ROOT_FROM_PATH" >/dev/null \
+if [ "$GS_RUN_ACTIVE" -eq 0 ] \
    && [ ! -d "$PROJECT_ROOT_FROM_PATH/.bionic" ]; then
   case "$FILE_PATH" in
     */.bionic/*) : ;;
