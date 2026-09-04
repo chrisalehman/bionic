@@ -129,7 +129,19 @@ single hand edit to a rendering; the rebuild must fail to match.
 
 ---
 
-## 4. Guards and certificates
+## 4. Spec, kit, certificate — three things, not one
+
+The rule governs three artifacts and keeps them apart.
+
+| | what it is | who changes it | analogy |
+|---|---|---|---|
+| **the spec** | the canon's statements plus this rule: what any interpreter must do | the canon, by decision | the Java Virtual Machine Specification |
+| **the kit** | the statement index and the climb runner: what to provoke, what counts, what the controls are; shipped with the spec, changes only when the spec does | the spec | the Technology Compatibility Kit |
+| **a certificate** | one result: this interpreter, this build, this runtime version, passed these rows of the kit on this date | a climb | Sun's list of certified JVMs |
+
+The spec is complete without a single certificate. A certificate never changes the spec.
+
+### 4.1 Guards and certificates
 
 A row's evidence is one of two kinds, and the kinds never share a cell.
 
@@ -138,13 +150,22 @@ A row's evidence is one of two kinds, and the kinds never share a cell.
 | **claims** | this change broke nothing | this interpreter honours this statement in reality |
 | **runs** | on every change, anywhere, unconditionally | deliberately, as a climb |
 | **needs** | nothing but the repository | the real runtime at a stated version |
-| **records** | pass/fail in the gate | a dated record: runtime version, build hash, script, output, pointers |
+| **records** | pass/fail in the gate | a self-contained result (§4.2) |
 | **ages** | never | goes stale by design on a runtime bump; the column empties |
 | **certifies** | nothing | one cell of one column |
 
 A statement with only guard evidence is **proven (hermetic)**, never **certified**. Certification
 requires a certificate cell for that interpreter. The gate refuses to contain a certificate-maker
 (a suite that needs a daemon, a login, or a server is not a guard, whatever it is named).
+
+### 4.2 What a certificate carries (decided 2026-09-03, #26 Q1)
+
+A certificate is **self-contained**: a stranger checks it with nothing but the certificate and the
+repository. It names the spec version and kit version it was earned against, the interpreter
+build hash, the runtime version, and the date; it carries its own evidence, the script, the
+output, and the pointers, with it. Nothing about it depends on a machine or a second system being
+reachable. The registry of certificates lives in the repository beside the builds it describes,
+because a certificate names a build hash and the build lives there.
 
 ---
 
@@ -242,10 +263,8 @@ to exist" is a wish, and is struck.
 1. **Two controls or one?** §3.1 requires both the compliant twin and the bare seat for every
    conduct statement. The bare seat doubles the cost of a climb. Alternative: bare seat once per
    rung, twin once per cell.
-2. **Where certificates live.** §2.5 says cited evidence must be diffable, and `.bionic/` stays
-   out of git. The draft's answer is "a tracked path or a hash recorded in a tracked place." That
-   is a new tracked directory for climb records. Is that the right trade, or does the record stay
-   machine-local with hashes only?
+2. ~~Where certificates live.~~ **Decided (Q1):** self-contained, registry in the repository beside
+   the builds — §4.2.
 3. **Does the rule govern the SDLC's own matrix?** The T0–T4 tier ladder measures evidence
    fidelity for a slice; this rule measures admissibility for a spec statement. They are
    different instruments. The draft keeps them apart and lets a T3 row feed a certificate cell
