@@ -455,6 +455,15 @@ expect_allow "echo only, no real commit" "$h6b" 'echo "we will git commit later"
 
 echo ""
 echo "=== Section 7: Newest plan file is the one enforced ==="
+#
+# THIS SECTION IS THE FALLBACK ARM, and since wave-session-bound-run that is a scope rather
+# than a description of the whole rule. "Which plan answers for the run" is now a property of
+# the SESSION: `session_run` reads the binding out of this session's engagement marker, and
+# only a session with NO binding falls back to the newest plan — which is what every fixture
+# below is, because `make_home` plants an empty marker (AC-3, and spec assumption A7: this
+# pin remains true of the unbound arm and is re-scoped rather than deleted). Section 35 owns
+# the bound arm, where the older of two open plans governs its own session and the newest
+# governs nobody's.
 
 h7=$(make_home)
 # Older plan with valid state
