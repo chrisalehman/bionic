@@ -4803,9 +4803,11 @@ expect_absent "session-start does not list the open runs to a session that is al
 expect_absent "…and names neither run's path at it" "$S4_PB" "$S4_SS_BOUND"
 expect_absent "…not even its own" "$S4_PA" "$S4_SS_BOUND"
 S4_SS_UNBOUND=$(s4_ss "$S4_R3" "$SID_A")
-expect_contains "…and lists both open runs to one that is not" "$S4_R3B" "$S4_SS_UNBOUND"
+# Step-6 P3 (S10b): the listing prints paths RELATIVE to the docs root, so the set is
+# asserted by its relative spellings — the absolute form is what the wave stopped printing.
+expect_contains "…and lists both open runs to one that is not" "plans/epic-99/run-b.md" "$S4_SS_UNBOUND"
 expect_contains "…naming A's too — the listing is the SET, not a verdict" \
-  "$S4_R3/.bionic/docs/plans/epic-99/run-a.md" "$S4_SS_UNBOUND"
+  "plans/epic-99/run-a.md" "$S4_SS_UNBOUND"
 expect_contains "…and names the verb that ends the ambiguity" \
   "session-poker.sh bind" "$S4_SS_UNBOUND"
 
