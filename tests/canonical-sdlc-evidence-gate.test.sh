@@ -5402,6 +5402,70 @@ s35_assert "35e bound to a plan that no longer exists → closed, not a fall-thr
   0 "evidence-gate: bound plan closed — $S35_GONE" -
 s35_assert "35e …and the OPEN plan beside it is never read" 0 - "$S35_B"
 
+# --- 35g the vanished plan meets the MISPLACEMENT SWEEP (S10a, critic C-1) ---
+#
+# 35e above proves a binding to a deleted plan reads as closed and allows. It passes on a
+# root that happens to hold no stray `*.plan.md`, and that is the whole of the defect: the
+# sweep's guard was `[ -z "$PLAN" ] || [ ! -f "$PLAN" ]`, so a bound-but-missing plan walked
+# into the depth-5 project-wide sweep six hundred lines before the `bound-closed → exit 0`
+# escape, and any unrelated stray plan in the project turned every commit from that session
+# into a block naming a file that has nothing to do with it.
+#
+# PRE-WAVE THIS WAS UNREACHABLE. `PLAN` came from `active_plan`, which reports only files
+# `find -type f` just produced, so `[ ! -f "$PLAN" ]` could not be true with `$PLAN` set. A
+# bound path is the first `PLAN` in this hook's history that can name a file that is not
+# there while the docs root holds a perfectly good plan.
+#
+# THREE SESSIONS, ONE TREE, and the tree is the point: the ONLY difference between them is
+# the marker. A fix that simply disabled the sweep would fail 35g3.
+#
+# THE EVIDENCE SITS ON B, the newest, so both control arms resolve to a plan that is clean:
+# `s35_two_plans "$r35g" a` would have the unbound fallback land on B and block for a reason
+# that has nothing to do with this row (that is 35b's subject), and a control that blocks for
+# the wrong reason proves nothing about the sweep.
+r35g=$(s35_root)
+s35_two_plans "$r35g" b
+S35_GONE2="$r35g/.bionic/docs/plans/wave-gone.plan.md"
+mkdir -p "$r35g/notes"
+S35_STRAY="$r35g/notes/stray.plan.md"
+printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 3\n' > "$S35_STRAY"
+
+# NON-VACUITY: the stray really is a plan this sweep would name, proved by the state the
+# sweep is FOR — a session with no plan at all in the root.
+r35g0=$(s35_root)
+mkdir -p "$r35g0/notes"
+cp "$S35_STRAY" "$r35g0/notes/stray.plan.md"
+s35_unbind "$r35g0" "$S35_SID_A" empty
+s35_run "$r35g0" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35g0 non-vacuity: with NO plan in the root the sweep still blocks on the stray" \
+  2 "$r35g0/notes/stray.plan.md" -
+
+# 35g1 THE DEFECT: bound to a plan that is gone, with a stray somewhere in the project.
+s35_bind "$r35g" "$S35_SID_A" "$S35_GONE2"
+s35_run "$r35g" "$S35_SID_A" 'git commit -m "x"'
+s35_assert "35g1 bound to a DELETED plan beside a stray plan → allowed, not blocked" \
+  0 "evidence-gate: bound plan closed — $S35_GONE2" "BLOCKED"
+s35_assert "35g1 …and the stray is never named: it is not this session's business" \
+  0 - "$S35_STRAY"
+s35_assert "35g1 …and the operator is told the bound plan is not on disk" \
+  0 "is not on disk" -
+s35_assert "35g1 …and told how to get back to a live run" \
+  0 "session-poker.sh bind" -
+
+# 35g2 UNBOUND over the identical tree: today's behaviour, and it is the AC-3 baseline the
+# bound answer regressed against. `active_plan` finds the live plan, so no sweep.
+s35_unbind "$r35g" "$S35_SID_B" empty
+s35_run "$r35g" "$S35_SID_B" 'git commit -m "x"'
+s35_assert "35g2 unbound over the same tree resolves by fallback and is not blocked" \
+  0 "newest-plan fallback" "BLOCKED"
+
+# 35g3 BOUND TO A LIVE PLAN over the identical tree: the control that keeps 35g1 from
+# passing on a hook that had stopped sweeping altogether.
+s35_bind "$r35g" "$S35_SID_B" "$S35_B"
+s35_run "$r35g" "$S35_SID_B" 'git commit -m "x"'
+s35_assert "35g3 bound to a LIVE plan over the same tree is gated on it, not on the stray" \
+  0 - "$S35_STRAY"
+
 # ============================================================
 # Summary
 # ============================================================
