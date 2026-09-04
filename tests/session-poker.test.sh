@@ -2233,6 +2233,27 @@ expect_eq       "a non-plan file UNDER plans/ exits 1" "1" "$RC"
 expect_contains "…refused as not an open run — the reason is positional" \
   "poker: REFUSED — not an open run" "$OUT"
 
+# ---------- 16f2: a plan THREE levels under plans/ is outside the walk, and says so ----------
+# The positional test has to use the SAME depth bound the open-run set is built with
+# (review D8c, S10b). `open_runs` walks `find -maxdepth 2`, so `plans/<a>/<b>/x.md` is
+# never a candidate — telling its author "not an open run" points them at the plan's
+# CONTENT when the truth is that the walk never reached the file. Bounded here to the two
+# depths the walk covers: `plans/x.md` and `plans/<dir>/x.md`.
+mkdir -p "$R16/.bionic/docs/plans/epic-16/deeper"
+printf '%s' "$(plan_body 3)" > "$R16/.bionic/docs/plans/epic-16/deeper/too-deep.plan.md"
+poke "$R16" bind "$R16/.bionic/docs/plans/epic-16/deeper/too-deep.plan.md"
+expect_eq       "a depth-3 plan under plans/ exits 1" "1" "$RC"
+expect_contains "…refused as NOT A PLAN UNDER THIS ROOT — the walk never reached it" \
+  "poker: REFUSED — not a plan under this root" "$OUT"
+expect_absent   "…and not as an open-run failure, which would blame its content" \
+  "poker: REFUSED — not an open run" "$OUT"
+# THE PAIRED POSITIVE, same tree, one level up: depth 2 IS inside the walk, so an
+# open-but-not-open-run file there still gets the content-shaped reason. Without this row
+# the bound above could be a blanket "everything nested is outside the root".
+poke "$R16" bind "$R16/.bionic/docs/plans/epic-16/notes.md"
+expect_contains "…while its depth-2 sibling is still judged on content" \
+  "poker: REFUSED — not an open run" "$OUT"
+
 # ---------- 16g: a missing argument, and too many ----------
 #
 # EXIT 2, THIS FILE'S ONE CODE FOR AN ARGUMENT ERROR. S6 shipped a 3 here through a
