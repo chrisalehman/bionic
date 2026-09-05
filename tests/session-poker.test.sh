@@ -24,6 +24,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 # Overridable exactly as tests/session-sweeper.test.sh offers, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -238,8 +239,7 @@ marker_of() { printf '%s/.bionic/tmp/engaged-%s.state' "$1" "${2:-$SID}"; }
 # ordinary case: engagement bound it, or the governing skill did) and do not depend on the
 # verb §16 is testing.
 bind_marker() {  # <repo> <plan path|none> [sid]
-  printf 'plan=%s\nengaged_at=%s\n' "$2" "$(iso_ago 600)" > "$(marker_of "$1" "${3:-$SID}")"
-  chmod 600 "$(marker_of "$1" "${3:-$SID}")"
+  bound_marker "$1" "${3:-$SID}" "$2"
 }
 
 # THE PHYSICAL SPELLING OF A PATH. `$TMPROOT` comes from `mktemp -d`, which on macOS hands
@@ -2686,6 +2686,7 @@ UNATTR_HEADING="poker: unattributed rows (pre-wave rosters) — listed, never ad
 R17A="$(mk_partition_repo s17-bound-a)"
 A17A="$R17A/.bionic/docs/plans/epic-17/run-a.plan.md"
 B17A="$R17A/.bionic/docs/plans/epic-17/run-b.plan.md"
+A17A_REAL="$(real_path_of "$A17A")"   # canonical spelling — what bind_marker's real writer stores (S11)
 bind_marker "$R17A" "$A17A"
 poke "$R17A" adopt
 OUT17A="$OUT"
@@ -2715,7 +2716,7 @@ expect_contains "…by id, which is what ownership is established from" "$ID_A17
 # value is the ADOPTER's binding: the launching session is recorded separately, in
 # `adopted_from=`, and both are on the row.
 expect_contains "…carrying THIS session's binding in the same trailing plan= field a dispatched row uses" \
-  "|plan=$A17A" "$(printf '%s\n' "$ROSTER17A" | grep "name=a-writer")"
+  "|plan=$A17A_REAL" "$(printf '%s\n' "$ROSTER17A" | grep "name=a-writer")"
 expect_contains "…beside the launching session it was adopted from" \
   "|adopted_from=$PRED_A17|" "$(printf '%s\n' "$ROSTER17A" | grep "name=a-writer")"
 expect_absent   "…and NEVER the other run's row" "name=b-writer" "$ROSTER17A"
@@ -2730,6 +2731,7 @@ expect_contains "…and so is the unattributed one" "n-writer" "$OUT17A"
 R17B="$(mk_partition_repo s17-bound-b)"
 A17B="$R17B/.bionic/docs/plans/epic-17/run-a.plan.md"
 B17B="$R17B/.bionic/docs/plans/epic-17/run-b.plan.md"
+B17B_REAL="$(real_path_of "$B17B")"   # canonical spelling — what bind_marker's real writer stores (S11)
 bind_marker "$R17B" "$B17B"
 poke "$R17B" adopt
 OUT17B="$OUT"
@@ -2741,7 +2743,7 @@ expect_contains "…and A's is the other one" \
   "partition=other" "$(adopt_line a-writer "$OUT17B")"
 expect_contains "…this session's roster gains the B row" "name=b-writer" "$ROSTER17B"
 expect_contains "…attributed to B, the plan THIS caller is bound to — the opposite answer on the same fixture" \
-  "|plan=$B17B" "$(printf '%s\n' "$ROSTER17B" | grep "name=b-writer")"
+  "|plan=$B17B_REAL" "$(printf '%s\n' "$ROSTER17B" | grep "name=b-writer")"
 expect_absent   "…and never the A row — the same fixture, the opposite answer" \
   "name=a-writer" "$ROSTER17B"
 expect_absent   "…nor A's id" "$ID_A17" "$ROSTER17B"

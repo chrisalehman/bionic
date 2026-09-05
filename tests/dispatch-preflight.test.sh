@@ -19,6 +19,8 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
@@ -45,19 +47,17 @@ expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exi
 expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
 expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 
 # HELPER-PRESENCE GUARD (spec AC-25). This file runs under `set -uo pipefail` — NO
 # `-e` — so a call to an assertion helper that was never defined here is a silent
 # "command not found" on stderr: the row asserts nothing and the suite's own
 # pass/total never notices (r24e was exactly this defect: `expect_eq` was called at
 # :2835 with no definition anywhere in this file, caught by research-code-map §6.2).
-# Every helper this file calls, checked to exist as a function before the first test
-# runs, so a future undefined call fails the whole suite loudly instead of vanishing.
-for _h in ok no expect_status expect_contains expect_absent expect_empty expect_eq; do
-  type -t "$_h" >/dev/null 2>&1 || { echo "helper missing: $_h"; exit 1; }
-done
-unset _h
+# `expect_eq` itself and `require_helpers` now come from tests/lib/assert.sh (S11) —
+# every helper this file calls is checked to exist as a function before the first
+# test runs, so a future undefined call fails the whole suite loudly instead of
+# vanishing.
+require_helpers ok no expect_status expect_contains expect_absent expect_empty expect_eq
 
 # ---------- fixtures ----------
 #
@@ -3090,12 +3090,10 @@ echo "=== S25 — active_run -> session_run (wave-session-bound-run S5) ==="
 #
 # s25_bind <repo> <sid> <plan-abs-path> — overwrites the marker make_repo already
 # planted (empty = unbound) with a real binding, under the same two-line shape
-# hooks/engage.sh writes (spec §Session binding).
+# hooks/engage.sh writes (spec §Session binding), via the real `bind_plan` (S11,
+# tests/lib/bound-marker.sh).
 s25_bind() {
-  local mark="$1/.bionic/tmp/engaged-$2.state"
-  mkdir -p "$(dirname "$mark")"
-  { printf 'plan=%s\n' "$3"; printf 'engaged_at=2026-09-04T00:00:00Z\n'; } > "$mark"
-  chmod 600 "$mark"
+  bound_marker "$1" "$2" "$3"
 }
 
 # s25_repo <name> <budget-a> <budget-b> -> sets the globals S25_REPO / S25_PLAN_A
@@ -3245,12 +3243,15 @@ echo "---------- S25d: the roster row's plan= field (AC-2, §Roster attribution)
 s25_repo r25d "suites=9 worktrees=9 test_jobs=4 source=probe" \
               "suites=9 worktrees=9 test_jobs=4 source=probe"
 S25_REPO4="$S25_REPO"
+# PHYSICAL, same reason as S25_PLAN_B_PHYS above: s25_bind (S11) writes through the real
+# bind_plan, which stores the CANONICAL directory (`pwd -P`), not the sandbox's logical one.
+S25_PLAN_A_PHYS="$(cd "$S25_REPO4" && pwd -P)/.bionic/docs/plans/epic-99-test/plan-a.plan.md"
 write_attestation "$S25_REPO4" "$SID_A"
 s25_bind "$S25_REPO4" "$SID_A" "$S25_PLAN_A"
 run_gate "$(mk_agent_payload "$SID_A" "$S25_REPO4")"
 expect_status "25d1: bound dispatch passes" "0" "$GATE_ST"
 S25_ROW=$(roster_row "$(roster_path "$S25_REPO4" "$SID_A")" 1)
-expect_status "25d2: the row's plan= field is A's path, verbatim" "$S25_PLAN_A" \
+expect_status "25d2: the row's plan= field is A's path, verbatim" "$S25_PLAN_A_PHYS" \
   "$(roster_field "$S25_ROW" plan)"
 
 s25_repo r25e "suites=9 worktrees=9 test_jobs=4 source=probe" \
@@ -3284,6 +3285,11 @@ S25_REPO6="$S25_REPO"
 write_attestation "$S25_REPO6" "$SID_A"
 S25_EVIL="$S25_REPO6/.bionic/docs/plans/epic-99-test/wave-99|status=landed|name=ghost.plan.md"
 cp "$S25_PLAN_A" "$S25_EVIL"
+# PHYSICAL, same reason as S25_PLAN_B_PHYS above: s25_bind (S11) now writes through the
+# real bind_plan, which resolves the marker's DIRECTORY with `pwd -P` and leaves the leaf
+# (the pipe-bearing filename) untouched — so the roster row's plan= field carries this
+# physical directory spelling, not the logical $S25_EVIL one.
+S25_EVIL_PHYS="$(cd "$(dirname "$S25_EVIL")" && pwd -P)/$(basename "$S25_EVIL")"
 expect_status "25d5a: the pipe-bearing plan file really exists (non-vacuity)" "yes" \
   "$([ -f "$S25_EVIL" ] && echo yes || echo no)"
 s25_bind "$S25_REPO6" "$SID_A" "$S25_EVIL"
@@ -3299,7 +3305,7 @@ expect_status "25d5d: status is still the writer's own value, not the injected o
 expect_status "25d5e: name is still the dispatched agent's, not the injected one" \
   "$(roster_field "$S25_ROW_CLEAN" name)" "$(roster_field "$S25_ROW3" name)"
 expect_status "25d5f: and plan= holds the path with its pipes neutralised" \
-  "$(printf '%s' "$S25_EVIL" | tr '|' ' ')" "$(roster_field "$S25_ROW3" plan)"
+  "$(printf '%s' "$S25_EVIL_PHYS" | tr '|' ' ')" "$(roster_field "$S25_ROW3" plan)"
 
 echo ""
 echo "----------------------------------------"
