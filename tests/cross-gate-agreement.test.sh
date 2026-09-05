@@ -44,6 +44,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
@@ -4777,12 +4778,15 @@ s4_close() {  # <path> — the same plan, delivered
   write_plan "$1" "current: 9"
   printf -- '- Step 9: delivered: 2026-09-04\n' >> "$1"
 }
+# THE MARKER'S EXACT TWO-LINE SHAPE, hooks/engage.sh:287 — `plan=<path>` then
+# `engaged_at=<iso>`, mode 600, written by the real `bind_plan` (S11,
+# tests/lib/bound-marker.sh; spec AC-24). A fixture that invented a one-line marker
+# would be testing a file no writer in the fleet produces.
 s4_bind() {  # <repo> <sid> <plan>
-  printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$3" > "$1/.bionic/tmp/engaged-$2.state"
-  chmod 600 "$1/.bionic/tmp/engaged-$2.state"
+  bound_marker "$1" "$2" "$3"
 }
 s4_unbind() {  # <repo> <sid> — engaged, no binding (the shape engage_sids plants)
-  : > "$1/.bionic/tmp/engaged-$2.state"
+  unbound_marker "$1" "$2" empty
 }
 # WITHOUT AN ATTESTATION THE DISPATCH WALL RUNS THE REAL ENVIRONMENT PROBE INLINE, which
 # reads a credential and a config root off the machine this suite happens to be on — so the
