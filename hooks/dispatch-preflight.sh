@@ -107,7 +107,7 @@ CWD=$(_jq '.cwd')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-BIONIC_LIB_WANT="root.sh run.sh session.sh patrol.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh patrol.sh agents.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -244,6 +244,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 . "$BIONIC_LIB/session.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/patrol.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/agents.sh"
 
 # THE ROOT (spec AC-10). Every path this gate owns hangs off the answer: the
 # attestation it reads, the roster it appends, the containment wall it measures
@@ -768,27 +770,61 @@ if [ -n "$PARALLEL_BUDGET" ]; then
     case "$v" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
   }
 
-  # OPEN ROWS AND THE SUITES THEY CLAIM, in one pass over the roster.
+  # OPEN ROWS AND THE SUITES THEY CLAIM, in one pass over the roster (spec AC-7).
   #
-  # "Open" is the predicate lib/patrol.sh's `patrol_roster_state` uses for its own
-  # `open=`: the file is append-only and a row is appended per status transition, so
-  # dispatches are counted as DISTINCT `status=intended` names, and a name carrying a
-  # `landing-swept/v1` marker is closed. It is restated here rather than called because
-  # this wall needs the `claims=` count off the SAME rows and a second pass to get it
-  # would be the drift, not the saving; tests/dispatch-preflight.test.sh r22g pins the
-  # two counts against each other on one fixture so a second definition cannot appear
-  # silently.
+  # "Open" no longer asks the roster whether a row was ever closed — it asks THIS
+  # TURN'S ListAgents answer whether the row's agent is STILL WORKING. A dispatch row
+  # starts life `status=intended` and never transitions on this file (D0: nothing
+  # here owns a liveness fact, so nothing here writes one); `live_row_open` is one
+  # question asked of the one reader of the harness's own recorded answer
+  # (payload/scripts/lib/agents.sh). `landing-swept/v1` is NOT consulted any more — a
+  # row can go un-swept forever and still close the moment its agent stops working.
+  #
+  # PRESENCE IS NOT THE PREDICATE, AND NEITHER IS THE WORD `running` (spec R2, AC-27;
+  # S19). R2 names two ways an agent goes — "delivered and stopped, or finished and never
+  # stopped" — and the harness KEEPS LISTING the second kind, with status `idle`, because
+  # it stays addressable: a SendMessage would resume it. A budget that counted on presence
+  # would hold a writer slot for an agent that finished an hour ago until somebody
+  # remembered to stop it, which is the stuck-slot defect this wall was built to end.
+  #
+  # The rule is OPEN UNLESS THE HARNESS SAID `idle`, and it lives in `live_row_open`
+  # (payload/scripts/lib/agents.sh) rather than here, because the Patrol tick asks the same
+  # question and two spellings of it are two answers. That function's header says why the
+  # rule is an inversion and what it rests on; this comment does not repeat it.
+  #
+  # THE STOP GUARD DELIBERATELY DOES NOT FOLLOW THIS. It resolves on PRESENCE
+  # (`live_agents_has`), because an idle agent is exactly the one a stop is for. Both
+  # questions are answered from ONE parse of ONE recorded answer, so the two can never
+  # disagree about who is listed — only about what the status means, which is the whole
+  # point of asking two questions (tests/cross-gate-agreement.test.sh §LA.5).
   #
   # A CLAIM IS READ OFF THE LEDGER, never off the process table (WALLS/3): a row whose
   # brief declared a subprocess claim spends a suite. Asking `pgrep` per row would be
   # truer to the word "running" and would put a process spawn per row on the dispatch
-  # path; the ledger is the artifact this gate already owns.
-  budget_roster_counts() {  # <roster file> -> "<open> <claimed>"
-    local f="$1" line nm claims swept seen open=0 claimed=0
+  # path; the ledger is the artifact this gate already owns. A claim only spends a
+  # suite while its row is OPEN — a finished agent's old claim costs nothing.
+  #
+  # AMBIGUOUS COUNTS AS OPEN (the name present more than once) — folded into the
+  # predicate's own exit 0, so this function never sees it as a separate case. The safe
+  # direction is to spend a slot on a name that MIGHT still be working rather than hand
+  # out budget on a reading the reader itself could not resolve (rule
+  # fail-closed-constants). It is the same direction the unknown-status arm takes, for
+  # the same reason: an UNRESOLVABLE row and an UNRECOGNISED status are both readings
+  # nobody has taken, while an `idle` row is a reading the harness made and this wall
+  # believes.
+  #
+  # ON A STALE OR MISSING ANSWER (exit 3/4) this function refuses to answer at all —
+  # printing `<state> <age>` instead of `<open> <claimed>` and returning that same
+  # exit code — because every remaining row would read the same way (freshness is a
+  # property of the TRANSCRIPT, not of any one name), and the CALLER turns that into
+  # AC-8's whole-dispatch refusal before any budget arm is measured. An EMPTY roster
+  # (no `status=intended` row at all) never calls the reader and can never hit this:
+  # there is nothing whose openness a stale answer would leave in doubt.
+  budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
+                            #   or "<stale|none> <age|none>" (exit 3/4, not fresh)
+    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed=""
+    local la_out la_rc la_rest la_state la_age
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
-    # CAPTURED, THEN MATCHED — never `grep | grep -q`: under `pipefail` a `-q` consumer
-    # closes the pipe and the producer dies of SIGPIPE, which reads as a failed search.
-    swept="$(grep "^landing-swept/${ROSTER_VERSION}|" "$f" 2>/dev/null || true)"
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
       case "$line" in "roster-state/${ROSTER_VERSION}|status=intended|"*) ;; *) continue ;; esac
@@ -796,10 +832,46 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       [ -n "$nm" ] || continue
       case "$seen" in *"|${nm}|"*) continue ;; esac
       seen="${seen}${nm}|"
-      case "$swept" in *"|name=${nm}|"*) continue ;; esac
-      open=$(( open + 1 ))
-      claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
-      [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+
+      # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
+      # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
+      # size and mtime — but the per-row call below runs inside a command substitution, and
+      # a subshell INHERITS its parent's variables while its own writes die with it. So the
+      # first row would warm a cache nobody sees and every row would pay a full parse: two
+      # whole-file jq passes and nine spawns, 1.22 s for twelve rows on a 4.1 MB transcript.
+      # One call here, in the shell the loop actually runs in, warms it for every subshell
+      # that follows. It is done lazily rather than before the loop so a roster with no
+      # `status=intended` row still reads the transcript zero times. Its own answer is
+      # discarded: this line is a cache fill, and the row's verdict is the predicate's.
+      if [ -z "$primed" ]; then
+        primed=1
+        live_agents "$transcript" >/dev/null 2>&1 || :
+      fi
+
+      # THE PREDICATE IS NOT SPELLED HERE. It is `live_row_open`
+      # (payload/scripts/lib/agents.sh), and its header says why the rule is an inversion.
+      #
+      # The reader's own stderr passes through here unchanged — one line,
+      # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the
+      # STALE/NONE case below can hand its pieces to the caller verbatim. The predicate
+      # prints nothing on stdout, so this capture is that line and nothing else.
+      la_rc=0
+      la_out=$( { live_row_open "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
+      case "$la_rc" in
+        0)
+          open=$(( open + 1 ))
+          claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
+          [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+          ;;
+        1) : ;;
+        3|4)
+          la_rest="${la_out#live-agents: }"
+          la_state="${la_rest%% *}"
+          la_age="${la_rest#*age=}"
+          printf '%s %s' "$la_state" "$la_age"
+          return "$la_rc"
+          ;;
+      esac
     done < "$f"
     printf '%s %s' "$open" "$claimed"
   }
@@ -836,7 +908,42 @@ BUDGET_REFUSE
     exit 2
   }
 
-  BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE")
+  # WHOSE TRANSCRIPT IS IT (F-2 ruling, 2026-09-05). The harness writes a dispatched
+  # agent's own transcript to `<session-uuid>/subagents/agent-<name>-<hash>.jsonl`, beside
+  # the orchestrator's `<session-uuid>.jsonl`. Both the directory and the filename are
+  # required: a file merely named `agent-*.jsonl` somewhere else is a session's, not a
+  # subagent's.
+  budget_is_subagent() {  # <transcript path> -> 0 when the path is a dispatched agent's own
+    case "$1" in
+      */subagents/agent-*.jsonl) return 0 ;;
+      *)                         return 1 ;;
+    esac
+  }
+
+  # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
+  # field every other liveness reader in this wave keys off (context-spend.sh,
+  # execution-recorder.sh, patrol-duties-gate.sh, stop-guard.sh).
+  BUDGET_TRANSCRIPT=$(_jq '.transcript_path')
+
+  BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE" "$BUDGET_TRANSCRIPT")
+  BUDGET_RC=$?
+  if [ "$BUDGET_RC" -eq 3 ] || [ "$BUDGET_RC" -eq 4 ]; then
+    # A STALE or NONE answer means no roster row's openness can be trusted either
+    # way — refuse the WHOLE dispatch and name the fix, rather than guess (AC-8).
+    #
+    # WHICH fix depends on who is dispatching. Dispatch is an AUTHORITY the orchestrator
+    # holds alone, not a capability gated by freshness (F-2 ruling, 2026-09-05): a
+    # dispatched agent never dispatches, it asks. Telling one to "call ListAgents" names a
+    # tool that is not in its roster — no act available to it can ever satisfy the
+    # precondition — so it is told what it CAN do. The `live-agents:` prefix and the
+    # state/age fields are the same on both branches, because every consumer parses those.
+    if budget_is_subagent "$BUDGET_TRANSCRIPT"; then
+      echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — subagents do not dispatch; dispatch is the orchestrator's authority — SendMessage the orchestrator (to: main) naming what you need" >&2
+    else
+      echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — call ListAgents, then dispatch" >&2
+    fi
+    exit 2
+  fi
   BUDGET_OPEN="${BUDGET_COUNTS%% *}"
   BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
   BUDGET_UNMEASURED=""

@@ -14,8 +14,22 @@
 #                         both ways: the caller already holds the path.
 #   active_run <root>  -> exit 0 + the plan path iff active_plan finds a file and run_open
 #                         holds on it; else exit 1, silent.
-#   open_runs <root>   -> every file active_plan's walk finds for which run_open holds, one
+#   open_runs <root>   -> every file _run_candidates finds for which run_open holds, one
 #                         absolute path per line, NEWEST MTIME FIRST; exit 1 if none.
+#
+# AND, SINCE wave-roster-lifecycle (2026-09-05, spec AC-1/AC-22), the candidate walk both
+# readers share and the LIVE subset engagement binds on:
+#   _run_candidates <droot> -> every qualifying candidate under <droot>, NUL-separated, in
+#                         walk order. The ONE fence-aware walk; active_plan and open_runs
+#                         are now a selection and a filter over it and nothing else.
+#   config_value <root> <key> <default>
+#                      -> the first `<key>:` value in <root>/.bionic/config.yaml, trimmed
+#                         and unquoted; <default> when the file, the key or the value is
+#                         missing.
+#   live_runs <root>   -> the subset of open_runs whose plan mtime is within the
+#                         `live-window:` config value (default 7d) of now, same order.
+#                         `BIONIC_NOW_EPOCH` overrides now, so a suite can backdate a plan
+#                         without touching the clock.
 #
 # AND, SINCE wave-session-bound-run (2026-09-04, spec AC-1/AC-3/AC-6), the session's own
 # answer — see the ENGAGEMENT section below for why the root-keyed answer was not enough:
@@ -77,12 +91,64 @@ docs_root() {
   printf '%s\n' "$root/.bionic/docs"
 }
 
-# active_plan <root> -> the newest *.md by mtime under <docs_root>/plans and
-# <docs_root>/incidents (each walked to depth <= 2) that contains a flush-left
-# `## SDLC State` line; exit 1 and print nothing when no candidate qualifies.
+# config_value <root> <key> <default> -> the FIRST `<key>:` value in <root>/.bionic/config.yaml
+# with surrounding whitespace and one layer of quotes removed; <default> when the file does
+# not exist, does not carry the key, or carries it with an empty value.
 #
-# DEPTH 2, AND IT IS THE FLEET'S ONLY BOUND (POKER/2, ratified 2026-09-03). This function
-# shipped at 3 and the readers it replaced walked 2, which is the bionic layout's own depth:
+# ONE READER FOR A SECOND KEY (wave-roster-lifecycle, spec §Design §2). `live-window:` is the
+# second key this library needs out of that file. `docs_root` above reads the first one
+# inline, and a second inline copy is exactly the duplication this wave exists to stop — so
+# the general reader lands here and `live_runs` is its only caller. `docs_root` is NOT
+# converted onto it in this wave (the spec pins the conversion out: "only this key uses it in
+# this wave"), which is why the pipeline below is deliberately the SAME SHAPE as the one
+# above rather than a tidier parser: the two readings of one file agree about indentation,
+# quoting, trailing space and duplicate lines because they are the same six lines, and
+# run-predicate R9 holds this copy to the battery §A2 already runs against that one.
+#
+# THE §A2 MUTATIONS STILL LAND ON `docs_root` (tests/cross-gate-agreement.test.sh:823-853).
+# `docs-root-last-wins` and `keep-quotes` are `!d`-guarded awk edits that take the FIRST
+# matching line in the file, and `docs_root` is defined above this function — so they mutate
+# its copy, which is the one their fixtures read. A future slice that moves this function
+# ABOVE `docs_root` moves those mutations onto a reader those fixtures never call, and §A2
+# would go quietly vacuous rather than red.
+config_value() {
+  local root="$1" key="$2" default="$3"
+  local config="$root/.bionic/config.yaml"
+  local value=""
+  if [ -f "$config" ]; then
+    value=$(grep -E "^[[:space:]]*${key}[[:space:]]*:" "$config" 2>/dev/null \
+      | head -1 \
+      | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" \
+      | sed -E "s/^['\"]//;s/['\"]\$//" \
+      | sed -E 's/[[:space:]]+$//')
+  fi
+  if [ -n "$value" ]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  printf '%s\n' "$default"
+}
+
+# _run_candidates <droot> -> every file under <droot>/plans and <droot>/incidents (each
+# walked to depth <= 2) that carries a flush-left `## SDLC State`, NUL-separated, in walk
+# order: plans/ then incidents/, and within each whatever order `find` produced. Prints
+# nothing and exits 0 when there is no candidate; the caller counts.
+#
+# ONE WALK, TWO READERS (wave-roster-lifecycle S1, spec AC-22, R7 "one site per concept").
+# This block ran twice — once inside `active_plan`, once inside `open_runs` — and the copy
+# was deliberate for exactly one wave, because tests/cross-gate-agreement.test.sh §S.2
+# pinned `active_plan`'s body BY SUBSTRING and factoring the walk out would have emptied
+# the pins rather than failed them. §S.2 is behavioural now (it drives both readers over one
+# fixture and raises the depth bound on a copy to prove it discriminates), so the copy has
+# no reason left to exist. `active_plan` is a SELECTION over this list and `open_runs` is a
+# FILTER over it; neither carries a walk of its own any more, and neither can drift from the
+# other because there is nothing left to drift.
+#
+# NUL-SEPARATED, because a plan path may contain anything but NUL — run-predicate R6g builds
+# its fixtures with spaces in every filename for this reason.
+#
+# DEPTH 2, AND IT IS THE FLEET'S ONLY BOUND (POKER/2, ratified 2026-09-03). This walk shipped
+# at 3 and the readers it replaced walked 2, which is the bionic layout's own depth:
 # `plans/<epic>/<wave>.plan.md`. For one wave the two bounds ran side by side and
 # tests/cross-gate-agreement.test.sh §S.3d PINNED the disagreement rather than papering over
 # it. It is resolved here, at 2, on the layout's own terms — a file three levels down under
@@ -90,11 +156,9 @@ docs_root() {
 # the `## SDLC State` filter exists to close. Every hook reads this one walk now, so the
 # bound is stated once and pinned by number in three suites (run-predicate §R3,
 # cross-gate §S.2, and the fixture battery's `nested-three-deep`).
-active_plan() {
-  local root="$1"
-  local droot
-  droot=$(docs_root "$root")
-  local plan="" f d
+_run_candidates() {
+  local droot="$1"
+  local f d
   for d in "$droot/plans" "$droot/incidents"; do
     [ -d "$d" ] || continue
     while IFS= read -r -d '' f; do
@@ -113,11 +177,29 @@ active_plan() {
         fence { next }
         /^## SDLC State/ { found = 1 }
         END { exit !found }' || continue
-      if [ -z "$plan" ] || [ "$f" -nt "$plan" ]; then
-        plan="$f"
-      fi
+      printf '%s\0' "$f"
     done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
   done
+}
+
+# active_plan <root> -> the newest *.md by mtime under <docs_root>/plans and
+# <docs_root>/incidents (each walked to depth <= 2) that contains a flush-left
+# `## SDLC State` line; exit 1 and print nothing when no candidate qualifies.
+#
+# The walk, its depth bound and the reasons for both are `_run_candidates`' (above). This
+# function walks nothing: it is a SELECTION over that list. The paragraph used to be copied
+# here in full and, once the walk moved, argued with its own code — "this function shipped at
+# 3", "every hook reads this one walk now" — about a body that no longer contains a `find`.
+active_plan() {
+  local root="$1"
+  local droot
+  droot=$(docs_root "$root")
+  local plan="" f
+  while IFS= read -r -d '' f; do
+    if [ -z "$plan" ] || [ "$f" -nt "$plan" ]; then
+      plan="$f"
+    fi
+  done < <(_run_candidates "$droot")
   [ -n "$plan" ] || return 1
   printf '%s\n' "$plan"
 }
@@ -247,15 +329,14 @@ active_run() {
 # is the state a session-keyed reader exists to survive — the run that just closed is still
 # the newest file in the root (run-predicate R6d).
 #
-# THE WALK IS RESTATED, NOT SHARED, AND THAT IS ON PURPOSE. Factoring the find/filter out of
-# `active_plan` into a private helper would empty the body that
-# tests/cross-gate-agreement.test.sh §S extracts and pins by substring (`-maxdepth 2 -type f`
-# and `-nt "$plan"`, at :4309-4315), and §S is not this slice's to edit. The copy is held to
-# the original behaviourally instead, by run-predicate R6e: the same two trees, the same
-# depth bound of 2, the same fence-aware `## SDLC State` filter, all three driven through
-# `open_runs` and checked against `active_plan`'s answer on one fixture. §A2's library
-# mutations (`depth-1`, `fence-blind`, `no-marker-skip`) are line-oriented and hit both
-# copies, so neither can drift under a mutation the battery already runs.
+# THE WALK IS SHARED NOW (wave-roster-lifecycle S1, spec AC-22). It was restated here for one
+# wave, because tests/cross-gate-agreement.test.sh §S.2 pinned `active_plan`'s body by
+# substring and the extraction would have emptied those pins rather than failed them. §S.2 is
+# behavioural as of this slice, so `_run_candidates` above is the only walk in this file and
+# this function is a filter over its output. run-predicate R6e still drives the three
+# properties — two trees, depth 2, fence-aware — through `open_runs` and checks the answer
+# against `active_plan`'s, which is now an agreement between two callers of one walk rather
+# than between two copies of one block.
 #
 # EACH CANDIDATE IS READ TWICE AND THAT WAS MEASURED, NOT ASSUMED (S10a, review P2a). The
 # `## SDLC State` filter and `run_open` each run `_run_lines` on the same file. Collapsing
@@ -269,45 +350,37 @@ open_runs() {
   local root="$1"
   local droot
   droot=$(docs_root "$root")
-  local f d i j lo hi mid
+  local f i j lo hi mid
   local cnt=0
   local -a ord
-  for d in "$droot/plans" "$droot/incidents"; do
-    [ -d "$d" ] || continue
-    while IFS= read -r -d '' f; do
-      _run_lines "$f" | awk '
-        /^[[:space:]]*```/ { fence = !fence; next }
-        fence { next }
-        /^## SDLC State/ { found = 1 }
-        END { exit !found }' || continue
-      run_open "$f" || continue
-      # BINARY INSERTION, newest first (S10a, review P2c). The comparator is `-nt`, which is
-      # `active_plan`'s own and the whole reason this is not a `stat`-and-`sort` pass — see
-      # the block below the loop. What changed is only HOW MANY times it is asked: the linear
-      # scan this replaces did one compare per element already placed — 125,000 stat pairs at
-      # 500 open runs, measured at 1.15s standalone — and the binary search does ~9.
-      #
-      # IT FINDS THE SAME INDEX THE LINEAR SCAN DID, so the output is unchanged byte for byte.
-      # `ord` is ordered newest-first, so `[ "$f" -nt "${ord[$i]}" ]` is FALSE for a prefix
-      # and TRUE for the rest — monotone in `i` — and the boundary is exactly where the
-      # linear scan broke. Ties keep discovery order, because `-nt` is STRICTLY newer.
-      #
-      # Bash 3.2: element-wise reads and writes only — `"${ord[@]}"` is an unbound-variable
-      # error on an EMPTY array under the `set -u` every calling hook runs with.
-      lo=0; hi="$cnt"
-      while [ "$lo" -lt "$hi" ]; do
-        mid=$(( (lo + hi) / 2 ))
-        if [ "$f" -nt "${ord[$mid]}" ]; then hi="$mid"; else lo=$((mid + 1)); fi
-      done
-      j="$cnt"
-      while [ "$j" -gt "$lo" ]; do
-        ord[$j]="${ord[$((j - 1))]}"
-        j=$((j - 1))
-      done
-      ord[$lo]="$f"
-      cnt=$((cnt + 1))
-    done < <(find "$d" -maxdepth 2 -type f -name '*.md' -print0 2>/dev/null)
-  done
+  while IFS= read -r -d '' f; do
+    run_open "$f" || continue
+    # BINARY INSERTION, newest first (S10a, review P2c). The comparator is `-nt`, which is
+    # `active_plan`'s own and the whole reason this is not a `stat`-and-`sort` pass — see
+    # the block below the loop. What changed is only HOW MANY times it is asked: the linear
+    # scan this replaces did one compare per element already placed — 125,000 stat pairs at
+    # 500 open runs, measured at 1.15s standalone — and the binary search does ~9.
+    #
+    # IT FINDS THE SAME INDEX THE LINEAR SCAN DID, so the output is unchanged byte for byte.
+    # `ord` is ordered newest-first, so `[ "$f" -nt "${ord[$i]}" ]` is FALSE for a prefix
+    # and TRUE for the rest — monotone in `i` — and the boundary is exactly where the
+    # linear scan broke. Ties keep discovery order, because `-nt` is STRICTLY newer.
+    #
+    # Bash 3.2: element-wise reads and writes only — `"${ord[@]}"` is an unbound-variable
+    # error on an EMPTY array under the `set -u` every calling hook runs with.
+    lo=0; hi="$cnt"
+    while [ "$lo" -lt "$hi" ]; do
+      mid=$(( (lo + hi) / 2 ))
+      if [ "$f" -nt "${ord[$mid]}" ]; then hi="$mid"; else lo=$((mid + 1)); fi
+    done
+    j="$cnt"
+    while [ "$j" -gt "$lo" ]; do
+      ord[$j]="${ord[$((j - 1))]}"
+      j=$((j - 1))
+    done
+    ord[$lo]="$f"
+    cnt=$((cnt + 1))
+  done < <(_run_candidates "$droot")
   [ "$cnt" -gt 0 ] || return 1
 
   # WHY NOT ONE `stat` AND ONE `sort`, which is the obvious O(n log n) rewrite and was
@@ -333,6 +406,91 @@ open_runs() {
     printf '%s\n' "${ord[$i]}"
     i=$((i + 1))
   done
+  return 0
+}
+
+# live_runs <root> -> the subset of `open_runs <root>` whose plan mtime is within the
+# `live-window:` config value of now, one absolute path per line, in open_runs' own
+# newest-first order; exit 1 and print nothing when the subset is empty.
+#
+# LIVE ⊆ OPEN, ALWAYS (spec AC-1, R1; design §1 "Run"). This is a FILTER over `open_runs`'
+# answer, not a second walk with a second predicate. That is the whole safety property: no
+# gate that measures against the open rule can be loosened by anything decided here, because
+# a file that is not open never reaches this function. `open_runs` is unchanged and no gate
+# calls this one — `engage.sh` binds on it and `session-start.sh` counts the difference.
+#
+# WHY THE DISTINCTION EXISTS AT ALL. `open_runs` answers "not finished", and a repository
+# accumulates those: a wave abandoned in spirit but never marked, a plan parked for a month
+# behind the one being worked. Engagement needs "not finished AND being worked" so it can
+# bind when exactly one run answers that, and session-start needs the difference so it can
+# COUNT the quiet ones instead of listing them. Neither question is answerable from the open
+# set alone, and neither is a good enough reason to start writing a liveness fact down.
+#
+# THE CLOCK IS AN INPUT. `BIONIC_NOW_EPOCH` overrides "now" so a suite can put a plan eight
+# days in the past with `touch -t` and read the window from a fixed instant, rather than
+# racing the machine's date (fixtures go inert by env pin — resources.sh's `BIONIC_PROBE_*`
+# idiom). An empty or non-numeric pin is ignored rather than trusted: the wall-clock read is
+# the safe default, and a fixture that meant to set it will fail loudly on its own assertion.
+#
+# THE WINDOW IS PROSE, AND AN UNREADABLE ONE IS THE DEFAULT RATHER THAN A GUESS. The grammar
+# is the poker's `parse_seconds` widened by one unit — `Nd|Nh|Nm|Ns` — because days are what
+# the key is written in and the unit that grammar lacks. It is restated here rather than
+# shared because `parse_seconds` lives in two HOOKS (session-poker.sh:445,
+# session-sweeper.sh:439) and a library cannot source a hook; §O already holds those two
+# copies to each other. Both failure directions are silent if guessed at — a window of zero
+# empties the live set and an unbounded one makes `live` mean `open` — so an unparseable
+# value falls back to the same default an absent one gets.
+live_runs() {
+  local root="$1"
+  local open_set raw try n u mult secs="" now cutoff f mt cnt=0
+  local window_default="7d"
+
+  open_set=$(open_runs "$root") || return 1
+
+  raw=$(config_value "$root" "live-window" "$window_default")
+  for try in "$raw" "$window_default"; do
+    n="${try%[dhms]}"
+    u="${try#"$n"}"
+    case "$n" in ''|*[!0-9]*) continue ;; esac
+    case "$u" in
+      d) mult=86400 ;;
+      h) mult=3600 ;;
+      m) mult=60 ;;
+      s) mult=1 ;;
+      *) continue ;;
+    esac
+    # BASE 10 EXPLICITLY: bash reads a leading zero as octal, so an `08d` window would be an
+    # arithmetic error and `07d` would silently work for the wrong reason.
+    secs=$(( 10#$n * mult ))
+    break
+  done
+  [ -n "$secs" ] || return 1
+
+  now="${BIONIC_NOW_EPOCH:-}"
+  case "$now" in ''|*[!0-9]*) now=$(date +%s) ;; esac
+  cutoff=$(( now - secs ))
+
+  # THE MTIME READ IS THE FLEET'S (hooks/session-poker.sh:422 et al.): BSD `stat -f` first,
+  # GNU `stat -c` second. A path this cannot stat is NOT live — the fail-closed direction,
+  # because the cost of dropping it is `plan=none` and a bind the model makes by hand, while
+  # the cost of admitting it is a session bound to a file nothing can read.
+  #
+  # WHOLE SECONDS, AND THAT IS FINE HERE. `open_runs` ORDERS with the shell's own `-nt`
+  # precisely because a stat-derived key disagrees with it for candidates sharing a second;
+  # this function does not order anything, it compares each mtime against a cutoff days away,
+  # and it preserves the order it was handed line for line.
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    mt=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null) || mt=""
+    case "$mt" in ''|*[!0-9]*) continue ;; esac
+    [ "$mt" -ge "$cutoff" ] || continue
+    printf '%s\n' "$f"
+    cnt=$((cnt + 1))
+    # A HERE-STRING, NOT A HERE-DOC: `<<EOF` would expand `$` and backticks in a plan PATH,
+    # and a pipe would put `cnt` in a subshell where the count never comes back.
+  done <<<"$open_set"
+
+  [ "$cnt" -gt 0 ] || return 1
   return 0
 }
 

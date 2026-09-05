@@ -319,7 +319,12 @@ if PLAN=$(session_plan "$REPO" "$SID" 2>/dev/null); then
   BOUND=1
 else
   PLAN="none"
-  RUNS=$(open_runs "$REPO" 2>/dev/null) || RUNS=""
+  # wave-roster-lifecycle S2 (spec AC-2; design §2 "engage.sh"): the count rule counts
+  # LIVE runs, not merely open ones — an open-but-quiet run is not "being worked", and
+  # binding to it reproduces this hook's own bug one layer down. `live_runs ⊆ open_runs`
+  # always (run.sh), so this is strictly narrower than the old open-run set; the `= "1"`
+  # rule and the single `bind_plan` call site below are unchanged.
+  RUNS=$(live_runs "$REPO" 2>/dev/null) || RUNS=""
   if [ -n "$RUNS" ] && [ "$(printf '%s\n' "$RUNS" | wc -l | tr -d ' ')" = "1" ]; then
     PLAN="$RUNS"
   fi
