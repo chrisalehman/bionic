@@ -6917,6 +6917,123 @@ expect_contains "DS.6 …the scan sees the planted row" "$DS_INVENTED" "$DS_MUT_
 
 # ============================================================
 echo ""
+echo "=== CG — the current: GRAMMAR: sched_plan_current agrees with run_state's step-read (epic-21 T6) ==="
+# ============================================================
+#
+# TWO READERS OF ONE FIELD, deliberately duplicated rather than shared (hooks/session-poker.sh
+# names the reason at sched_plan_current's definition: folding the FILL gate's read into
+# run_state would couple the DISARM decision to the FILL decision). Duplication without an
+# agreement test is exactly the shape review-b's finding (c) describes: `run_state` (this
+# file's RUN_LIB, function `run_open`) strips a trailing a/b sub-step letter before reading
+# digits; `sched_plan_current` used to reject that same letter outright, so `current: 3b`
+# read as UNREADABLE to the gate and fell through to a FILL — the bug T6 fixes. This section
+# is the smaller of T6's two remediation choices (share one function vs. bind the two readers
+# with a test): the callers answer genuinely different questions off genuinely different
+# inputs (a session's roster vs. a plan path alone), so a shared function would be an
+# awkward abstraction over two unrelated call shapes. An agreement test is the fit.
+#
+# Both parties are called FOR REAL, not compared as text — sched_plan_current's own body
+# calls _sched_plan_current_field and normalize_newlines, so all three are extracted and
+# eval'd together (§I.1's precedent, `q_poker` above); run_open is sourced from RUN_LIB
+# exactly as §PC below sources it.
+cg_extract_fn() {  # <fn-name> -> that function's body text, from session-poker.sh (PARTY_PK)
+  awk -v n="$1" '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$PARTY_PK"
+}
+cg_sched_current() {  # <plan path> -> sched_plan_current's real answer, called for real
+  ( eval "$(cg_extract_fn normalize_newlines)"
+    eval "$(cg_extract_fn _sched_plan_current_field)"
+    eval "$(cg_extract_fn sched_plan_current)"
+    sched_plan_current "$1" ) 2>/dev/null
+}
+cg_run_open() {  # <plan path> -> "0" (open) or "1" (not a recognized open state), run_open
+                 # called for real off RUN_LIB
+  ( . "$RUN_LIB" >/dev/null 2>&1; run_open "$1" ) >/dev/null 2>&1
+  printf '%s' "$?"
+}
+cg_plan() {  # <current: value, or "" for none> -> a fixture plan path carrying it
+  local cur="$1"
+  local safe; safe="$(printf '%s' "${cur:-none}" | tr -c 'A-Za-z0-9' '_')"
+  local f="$SANDBOX/fx/cg/current-${safe}.plan.md"
+  mkdir -p "$(dirname "$f")"
+  {
+    printf '# cg fixture plan\n\n## SDLC State\n\n'
+    [ -n "$cur" ] && printf 'current: %s\n\n' "$cur"
+    printf -- '- Step %s: in progress\n' "${cur:-0}"
+  } > "$f"
+  printf '%s' "$f"
+}
+
+# ── CG.1 the a/b sub-step letter: both readers strip it and land on the SAME numbered step ──
+for CG_STEP in 3 4 8; do
+  for CG_LETTER in '' a b; do
+    CG_VAL="${CG_STEP}${CG_LETTER}"
+    CG_PLAN="$(cg_plan "$CG_VAL")"
+    expect_eq "CG.1 sched_plan_current(current: $CG_VAL) reads the step, letter stripped" \
+      "$CG_STEP" "$(cg_sched_current "$CG_PLAN")"
+    expect_eq "CG.1 …and run_state's run_open agrees this is a live, in-range step" \
+      "0" "$(cg_run_open "$CG_PLAN")"
+  done
+done
+
+# ── CG.2 an unparseable current: is never mistaken for an active step by EITHER reader ──
+for CG_BAD in "abc" "3 (Step-3 review)" "3c"; do
+  CG_PLAN="$(cg_plan "$CG_BAD")"
+  expect_eq "CG.2 sched_plan_current withholds on '$CG_BAD'" "" "$(cg_sched_current "$CG_PLAN")"
+  expect_eq "CG.2 …and run_state's run_open agrees this plan is not a recognized open state" \
+    "1" "$(cg_run_open "$CG_PLAN")"
+done
+# no current: line at all — same non-agreement: both give up on the field, neither fills it in
+CG_NOLINE="$SANDBOX/fx/cg/no-current.plan.md"
+mkdir -p "$(dirname "$CG_NOLINE")"
+printf '# cg fixture plan\n\n## SDLC State\n\n- Step 3: in progress\n' > "$CG_NOLINE"
+expect_eq "CG.2 no current: line at all — sched_plan_current withholds" \
+  "" "$(cg_sched_current "$CG_NOLINE")"
+expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)" \
+  "1" "$(cg_run_open "$CG_NOLINE")"
+
+# ── CG.3 the DOCUMENTED divergence: task-scale current: T<n> — pinned, not silent ──
+# run_state's OTHER `current:` shape: `T<n>` is always an open run (no numbered close — the
+# session/task-scale plans this repo also carries, including the plan governing this very
+# slice). It has no numbered step to compare against 4, so the FILL gate cannot read "T1" as
+# either approved or pending and withholds by design (T6 brief; review-a C-5; review-b N-2).
+# This is pinned as a DIVERGENCE, not an agreement: the two readers answer a DIFFERENT
+# question about the same value ON PURPOSE. A change that made them agree — teaching
+# run_open to reject T<n>, or teaching the gate to treat any T<n> as approved — is exactly
+# the kind of silent drift this section exists to catch, so it must turn this red.
+for CG_T in T1 T5 T23; do
+  CG_PLAN="$(cg_plan "$CG_T")"
+  expect_eq "CG.3 sched_plan_current withholds on task-scale '$CG_T' (no numbered step)" \
+    "" "$(cg_sched_current "$CG_PLAN")"
+  expect_eq "CG.3 …while run_state's run_open still calls a task-scale plan an OPEN run" \
+    "0" "$(cg_run_open "$CG_PLAN")"
+done
+
+# ── CG.4 the discriminator: reverting the letter-strip splits the pair (proves CG.1 can go red) ──
+# The pre-fix bug, planted. A copy of session-poker.sh with ONLY the a/b-strip line reverted
+# to a bare assignment — the exact shape this section would have caught before T6.
+CG_MUT="$SANDBOX/fx/cg/session-poker-nostrip.sh"
+LC_ALL=C awk '{
+  if ($0 == "  step=\"${current%[ab]}\"") { print "  step=\"$current\"" } else { print }
+}' "$PARTY_PK" > "$CG_MUT"
+expect_eq "CG.4 the mutant differs from the shipped file by exactly the strip line" \
+  "1" "$(diff "$PARTY_PK" "$CG_MUT" | grep -c '^< ')"
+cg_sched_current_mut() {  # <plan path> -> sched_plan_current's answer off the MUTANT copy
+  ( eval "$(awk -v n=normalize_newlines \
+      '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
+    eval "$(awk -v n=_sched_plan_current_field \
+      '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
+    eval "$(awk -v n=sched_plan_current \
+      '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
+    sched_plan_current "$1" ) 2>/dev/null
+}
+CG_PLAN_3B="$(cg_plan 3b)"
+expect_eq "CG.4 …the mutant copy rejects current: 3b as unreadable (the pre-fix bug)" \
+  "" "$(cg_sched_current_mut "$CG_PLAN_3B")"
+expect_eq "CG.4 …while the shipped file still reads it as step 3 — CG.1 discriminates" \
+  "3" "$(cg_sched_current "$CG_PLAN_3B")"
+
+# ============================================================
+echo ""
 echo "──────────────────────────────────────────────"
 echo "cross-gate-agreement: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
 [ "$FAIL" -eq 0 ]
