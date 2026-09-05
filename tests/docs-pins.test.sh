@@ -187,9 +187,9 @@ else
 fi
 
 if has_pin "$SURVIVAL_BLOCK" "$PIN_JOBS"; then
-  ok "11: agents-src/blocks/survival.md carries the BIONIC_TEST_JOBS sentence verbatim"
+  ok "11: agents-src/blocks/survival.md carries the rung-pointer sentence verbatim (AC-18)"
 else
-  no "11: agents-src/blocks/survival.md carries the BIONIC_TEST_JOBS sentence verbatim" \
+  no "11: agents-src/blocks/survival.md carries the rung-pointer sentence verbatim (AC-18)" \
      "file: $SURVIVAL_BLOCK"
 fi
 
@@ -200,9 +200,9 @@ for role in auditor critic implementor researcher senior-implementor test-runner
   has_pin "${REPO}/agents/${role}.md" "$PIN_JOBS" || PINS_JOBS_MISSING="${PINS_JOBS_MISSING} ${role}"
 done
 if [ -z "$PINS_JOBS_MISSING" ]; then
-  ok "12: all six rendered agents/*.md carry the BIONIC_TEST_JOBS sentence (render is current)"
+  ok "12: all six rendered agents/*.md carry the rung-pointer sentence (render is current, AC-18)"
 else
-  no "12: all six rendered agents/*.md carry the BIONIC_TEST_JOBS sentence (render is current)" \
+  no "12: all six rendered agents/*.md carry the rung-pointer sentence (render is current, AC-18)" \
      "missing in:${PINS_JOBS_MISSING} — run 'bash agents-src/render.sh'"
 fi
 
@@ -760,6 +760,40 @@ elif /usr/bin/grep -Eq "$BIND_DOCS_FALLBACK_RE" "$DOCTORED_POKER_NO_FALLBACK"; t
      "the regex matched a copy with the fallback line removed"
 else
   ok "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)"
+fi
+
+echo ""
+echo "=== Section 8: SKILL.md carries its OWN copy of the rung-pointer sentence (AC-18) ==="
+#
+# THE GAP THE READBACK NAMED. Assertions 11/12 pin the rendered role files against
+# `PIN_JOBS`, but nothing here had ever checked SKILL.md's own restatement of the same
+# sentence in its "Fill the budget" paragraph — so a hand-edit to SKILL.md's copy could
+# drift from the briefs' copy with no suite ever noticing.
+#
+# THE ONE REAL DIFFERENCE: SKILL.md's copy is prose inside a running paragraph, never
+# bolded, where `agents-src/blocks/survival.md`'s copy leads a bulleted brief and IS bolded
+# (`**Each brief…**`). `PIN_JOBS` encodes that bold form, so it is the wrong needle for
+# SKILL.md; this pins the same words in the form SKILL.md actually carries them.
+PIN_JOBS_SKILL='Each brief in the batch points the writer at the rung: `take your test width from pressure_level at suite start; the ceiling is this header'"'"'s test_jobs`.'
+
+if has_pin "$SKILL_MD" "$PIN_JOBS_SKILL"; then
+  ok "53: SKILL.md carries its own copy of the rung-pointer sentence (AC-18)"
+else
+  no "53: SKILL.md carries its own copy of the rung-pointer sentence (AC-18)" "file: $SKILL_MD"
+fi
+
+# Anti-vacuity, same 47-style shape: a doctored SKILL.md must fail the pin above.
+DOCTORED_SKILL_JOBS="$TMP/skill-jobs-mutated.md"
+sed 's/Each brief in the batch points the writer at the rung/Each brief in the batch reads the frozen literal/' \
+  "$SKILL_MD" > "$DOCTORED_SKILL_JOBS"
+if cmp -s "$SKILL_MD" "$DOCTORED_SKILL_JOBS"; then
+  no "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"; then
+  no "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)" \
+     "the pin matched a copy that says the opposite"
+else
+  ok "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)"
 fi
 
 echo ""
