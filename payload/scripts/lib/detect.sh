@@ -526,6 +526,32 @@ detect_legacy_hook_files() {
   return 0
 }
 
+# ─── The statusLine command still naming npx ─────────────────────────────────
+#
+# THE NETWORK-PER-RENDER DEFECT (epic-21, bug-ccstatusline-npx-per-render.md).
+# `/bionic:setup` used to write `"command": "npx ccstatusline@latest"` into
+# settings.json — a command Claude Code runs on EVERY status-line render, and
+# `npx pkg@latest` resolves the version over the network before it can print
+# anything (measured stalling 73s per render on a network with TLS
+# interception). The fix installs the binary once and records its bare name,
+# but nothing on a machine rewrites settings.json on its own — only a person
+# re-running setup does — so a machine that ran setup before this fix stays
+# broken until doctor names it.
+#
+# A READ, NEVER A REPAIR. This only reports the leading token of the recorded
+# command; it never edits settings.json, the same rule every other detector in
+# this file follows.
+detect_statusline_npx_command() {
+  local settings cmd present=no
+  settings="$(_dep_settings_file)"
+  if [ -f "$settings" ] && _dep_have jq; then
+    cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
+    case "$cmd" in npx\ *) present=yes ;; esac
+  fi
+  echo "env:statusline-npx-command present=${present}"
+  return 0
+}
+
 # ─── The legacy installed agent role files ───────────────────────────────────
 #
 # The same installer copied the six rendered role files into the CLI's own
