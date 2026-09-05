@@ -3645,6 +3645,83 @@ expect_contains "…and still says the budget is full, not the approval line" \
   "the budget is full" "$OUT"
 expect_absent "…never the approval-pending wording" "Step-3 approval pending" "$OUT"
 
+# ---------- 22e/22f: the sub-step letter — the ONE grammar this repo already has ----------
+#
+# payload/scripts/lib/run.sh's run_state strips a trailing a/b sub-step letter before
+# comparing the step number (`local step="${current%[ab]}"`) — `current: 3b` and `current:
+# 4b` are recognized, in-repo forms, not malformed values. Before this fix,
+# sched_plan_current rejected the letter outright (`*[!0-9]*` matched the trailing `b`),
+# which made `3b` UNREADABLE rather than 3 — and an unreadable current: fell straight
+# through to the readiness/budget checks below the gate, so a plan sitting at `current: 3b`
+# with ready slices and room on the roster FILLed exactly as `t144-review-b` finding (c)
+# and review-a's C-5 describe. `4b` mirrors `4`.
+R22E="$(make_repo s22-current-3b)"; new_roster "$R22E"
+s22_plan_at_current "$R22E" 3b >/dev/null
+poke_pressure "$R22E" 8192 1.0 tick
+expect_eq "current: 3b still ticks cleanly (exit 0)" "0" "$RC"
+expect_absent "current: 3b is current: 3 with a sub-step letter — no FILL" "poker: FILL" "$OUT"
+expect_contains "…and the pending line names the STEP, letter stripped, mirroring run_state" \
+  "no FILL — plan at current: 3, Step-3 approval pending" "$OUT"
+
+R22F="$(make_repo s22-current-4b)"; new_roster "$R22F"
+s22_plan_at_current "$R22F" 4b >/dev/null
+poke_pressure "$R22F" 8192 1.0 tick
+expect_eq "current: 4b still ticks cleanly (exit 0)" "0" "$RC"
+expect_contains "current: 4b is current: 4 with a sub-step letter — fills all eight" \
+  "poker: FILL S1 S2 S3 S4 S12 S14 S15 S16" "$OUT"
+expect_absent "…and the approval-pending line is gone" "Step-3 approval pending" "$OUT"
+
+# ---------- 22g: current: T1 — task-scale, never a numbered step to gate on ----------
+#
+# `T<n>` is this repo's OTHER `current:` shape (run_state's task-scale arm: always an open
+# run, no numbered close) — used by session/task plans, not wave plans with a Step-3 gate.
+# It carries no numbered step to compare against 4, so the approval gate cannot read it as
+# either "approved" or "pending" — it WITHHOLDS, unconditionally, rather than falling
+# through to the readiness/budget checks and risking a FILL the gate exists to prevent
+# (review-a C-5, review-b N-2: this exact shape used to fill).
+R22G="$(make_repo s22-current-T1)"; new_roster "$R22G"
+s22_plan_at_current "$R22G" T1 >/dev/null
+poke_pressure "$R22G" 8192 1.0 tick
+expect_eq "current: T1 still ticks cleanly (exit 0)" "0" "$RC"
+expect_absent "current: T1 is task-scale, not a numbered step — no FILL" "poker: FILL" "$OUT"
+expect_contains "…named as unreadable, not silently swallowed" \
+  "no FILL — plan current: unreadable (T1)" "$OUT"
+expect_absent "…never the numbered-step pending wording (there is no step number)" \
+  "Step-3 approval pending" "$OUT"
+
+# ---------- 22h: no `current:` line at all — unreadable, not DOUBT-then-FILL ----------
+#
+# A plan carrying an unfenced "## SDLC State" section but no `current:` line inside it —
+# section extraction succeeds, the field itself does not exist. Same withholding as T1: the
+# gate cannot tell whether Step 3 passed, so it never guesses FILL.
+s22_plan_no_current() {  # <repo> -> the path, the 22-fixture shape with no current: line
+  local repo="$1"
+  local f="$repo/.bionic/docs/plans/epic-21-v1-ladder/wave-01-fixture.plan.md"
+  mkdir -p "$(dirname "$f")"
+  {
+    printf -- '---\n'
+    printf 'governing-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan (mirrors the observed wave-01 shape, minus current:)\n\n'
+    printf '## SDLC State\n\n- Step 3: in progress\n\n'
+    printf '## Slices (machine-readable)\n\n'
+    printf '| id | deps | complexity | status |\n|---|---|---|---|\n'
+    local id
+    for id in S1 S2 S3 S4 S12 S14 S15 S16; do
+      printf '| %s | — | standard | pending |\n' "$id"
+    done
+  } > "$f"
+  touch "$f"
+  printf '%s' "$f"
+}
+R22H="$(make_repo s22-current-missing)"; new_roster "$R22H"
+s22_plan_no_current "$R22H" >/dev/null
+poke_pressure "$R22H" 8192 1.0 tick
+expect_eq "a plan with no current: line still ticks cleanly (exit 0)" "0" "$RC"
+expect_absent "no current: line at all — no FILL" "poker: FILL" "$OUT"
+expect_contains "…named as unreadable, with an empty value" \
+  "no FILL — plan current: unreadable (none)" "$OUT"
+
 # ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'session-poker: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
