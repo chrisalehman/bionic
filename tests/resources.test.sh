@@ -646,27 +646,115 @@ expect_eq "three appends inside the window keep three lines" "3" "$(wc -l < "$RI
 expect_eq "the samples are kept oldest first" "1000 1001 1002" \
   "$(cut -d'|' -f1 < "$RING" | tr '\n' ' ' | sed 's/ $//')"
 
+# THE WINDOW IS A READ-SIDE RULE, AND SINCE THE C-1 = S-3 REPAIR IT IS ONLY A READ-SIDE
+# RULE. The sample path used to rewrite the whole ring from a filtered read on EVERY
+# append, and that rewrite is what lost concurrent samples (§J.3). What AC-14 and AC-16
+# need is that what a CONSUMER reads is the window — `_pressure_window_lines` is the one
+# owner of that question and both the reader and the prune call it. The file itself may
+# carry more, and is rewritten only when it grows past PRESSURE_RING_MAX_LINES (§J.2).
+# These rows moved from asserting the FILE's length to asserting the WINDOW's, which is
+# the property the rung actually rests on.
+window_ts() {  # <ring> <now> -> the in-window timestamps, space separated
+  _pressure_window_lines "$1" "$2" | cut -d'|' -f1 | tr '\n' ' ' | sed 's/ $//'
+}
+
 sample 1402 >/dev/null 2>&1
-expect_eq "a sample 400 s later prunes the three that fell out of the window" "1" \
+expect_eq "a sample 400 s later is APPENDED — the sample path rewrites nothing" "4" \
   "$(wc -l < "$RING" | tr -d ' ')"
-expect_eq "and the survivor is the new one" "1402" "$(cut -d'|' -f1 < "$RING")"
+expect_eq "and the window a consumer reads holds only the new one" "1402" \
+  "$(window_ts "$RING" 1402)"
 
 # The boundary: exactly PRESSURE_WINDOW_S old is still in the window.
 rm -f "$RING"
 sample 2000 >/dev/null 2>&1
 sample 2300 >/dev/null 2>&1
-expect_eq "a sample exactly 300 s old survives the prune" "2" "$(wc -l < "$RING" | tr -d ' ')"
+expect_eq "a sample exactly 300 s old is inside the window" "2000 2300" \
+  "$(window_ts "$RING" 2300)"
 sample 2301 >/dev/null 2>&1
-expect_eq "at 301 s it is gone" "2" "$(wc -l < "$RING" | tr -d ' ')"
-expect_eq "leaving the two inside the window" "2300 2301" \
-  "$(cut -d'|' -f1 < "$RING" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "at 301 s it drops out of the window" "2300 2301" "$(window_ts "$RING" 2301)"
+expect_eq "the file still carries all three — extra lines are harmless, missing ones are not" \
+  "3" "$(wc -l < "$RING" | tr -d ' ')"
 
-# Garbage in the file is dropped by the same prune, not carried.
+# Garbage in the file is dropped by the same reader, not carried into the median.
 printf 'not-a-sample\n' >> "$RING"
-sample 2302 >/dev/null 2>&1
-expect_eq "a malformed line is pruned away with the stale ones" "3" "$(wc -l < "$RING" | tr -d ' ')"
-expect_true "and nothing malformed survives" \
-  [ "$(grep -c '^[0-9]*|' "$RING")" = "3" ]
+expect_eq "a malformed line is not a sample and never enters the window" "2300 2301" \
+  "$(window_ts "$RING" 2301)"
+
+# --- §J.2 — THE PRUNE: rare, mktemp-named, and it keeps every in-window line ----------
+#
+# It fires only above PRESSURE_RING_MAX_LINES, which is why the appends above rewrote
+# nothing. Planted: 600 stale lines (well outside the window) plus three inside it.
+expect_eq "PRESSURE_RING_MAX_LINES is the rewrite threshold, not the window" \
+  "512" "${PRESSURE_RING_MAX_LINES:-unset}"
+
+PRING="$TMPROOT/ring-prune/pressure.ring"
+mkdir -p "$(dirname "$PRING")"
+: > "$PRING"
+pi=1; while [ $pi -le 600 ]; do printf '1000|44|69|1.6|8\n' >> "$PRING"; pi=$((pi + 1)); done
+printf '9000|44|69|1.6|8\n9100|20|69|1.6|8\n9200|44|69|1.6|8\n' >> "$PRING"
+expect_eq "the planted ring is over the threshold" "603" "$(wc -l < "$PRING" | tr -d ' ')"
+
+BIONIC_PRESSURE_RING="$PRING" BIONIC_NOW_EPOCH=9300 \
+  BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+  pressure_sample 8 >/dev/null 2>&1
+
+expect_eq "over the threshold the prune fires and drops the stale lines" "4" \
+  "$(wc -l < "$PRING" | tr -d ' ')"
+expect_eq "the prune keeps EVERY line inside the 300 s window, and the new one" \
+  "9000 9100 9200 9300" "$(cut -d'|' -f1 < "$PRING" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "and it leaves no temp file behind in the ring's directory" "0" \
+  "$(find "$(dirname "$PRING")" -name 'pressure.ring.prune.*' | grep -c .)"
+
+# --- §J.3 — CONCURRENCY: no sampler loses another sampler's line (review C-1) ---------
+#
+# The defect: `${ring}.tmp.$$` is the PARENT shell's pid, so every background subshell of
+# one shell wrote and renamed ONE temp path. Measured pre-fix: 12 concurrent samplers left
+# 0 lines, and 12 separate processes left 3-6 of 12.
+CRING="$TMPROOT/ring-conc/pressure.ring"
+mkdir -p "$(dirname "$CRING")"
+: > "$CRING"
+ci=1; while [ $ci -le 12 ]; do
+  ( BIONIC_PRESSURE_RING="$CRING" BIONIC_NOW_EPOCH=$((7000 + ci)) \
+    BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    pressure_sample 8 >/dev/null 2>&1 ) &
+  ci=$((ci + 1))
+done
+wait
+expect_eq "12 concurrent samplers as subshells of ONE shell leave 12 lines" "12" \
+  "$(wc -l < "$CRING" | tr -d ' ')"
+
+PRING2="$TMPROOT/ring-conc2/pressure.ring"
+mkdir -p "$(dirname "$PRING2")"
+: > "$PRING2"
+pj=1; while [ $pj -le 12 ]; do
+  BIONIC_PRESSURE_RING="$PRING2" BIONIC_NOW_EPOCH=$((7000 + pj)) \
+  BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    bash -c '. "$1"; pressure_sample 8' _ "$LIB" >/dev/null 2>&1 &
+  pj=$((pj + 1))
+done
+wait
+expect_eq "12 samplers in 12 SEPARATE processes leave 12 lines" "12" \
+  "$(wc -l < "$PRING2" | tr -d ' ')"
+
+# --- §J.4 — the old predictable temp path is not written through ---------------------
+#
+# `>` follows a symlink and truncates its target, and `${ring}.tmp.$$` was fully
+# predictable. Nothing writes that name any more.
+SRING="$TMPROOT/ring-sym/pressure.ring"
+mkdir -p "$(dirname "$SRING")"
+: > "$SRING"
+printf 'PRECIOUS\n' > "$TMPROOT/ring-sym/victim.txt"
+( BIONIC_PRESSURE_RING="$SRING" BIONIC_NOW_EPOCH=8000 \
+  BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+  bash -c '
+    . "$1"
+    ln -sfn "$2" "${BIONIC_PRESSURE_RING}.tmp.$$"
+    pressure_sample 8
+  ' _ "$LIB" "$TMPROOT/ring-sym/victim.txt" ) >/dev/null 2>&1
+expect_eq "a symlink pre-planted at the old temp path is not followed" "PRECIOUS" \
+  "$(cat "$TMPROOT/ring-sym/victim.txt")"
+expect_eq "and the sample still landed on the ring" "1" \
+  "$(wc -l < "$SRING" | tr -d ' ')"
 
 # The default path is machine-scoped under the config dir (AC-16, D4).
 RHOME="$TMPROOT/ringhome"
@@ -813,6 +901,99 @@ BIONIC_PRESSURE_RING="$LRING" pressure_level >/dev/null 2>&1
 expect_eq "a missing ceiling refuses with 2" "2" "$?"
 BIONIC_PRESSURE_RING="$LRING" pressure_level nine >/dev/null 2>&1
 expect_eq "a non-numeric ceiling refuses with 2" "2" "$?"
+
+# --- §K.2 — the inlined banding and `pressure_band` answer identically ---------------
+#
+# Step-6 review P-3. `pressure_level` used to fork `pressure_band` once per sample in the
+# window, and the window holds whatever the sample RATE put there — 144 samples measured
+# 0.20 s of pure fork, and a busier machine makes its own rung read slower. The banding is
+# now inlined into the same awk that filters the window: 0.20 s -> 0.02 s at 144 samples.
+#
+# TWO TRANSCRIPTIONS CAN DRIFT, so this is the row that forbids it. Each sample below is
+# driven BOTH ways — through `pressure_band` directly, and through `pressure_level` over a
+# ring holding exactly that one sample, where the median of one IS that sample's band. A
+# threshold edited in one place and not the other splits this table.
+K2_RING="$TMPROOT/k2/pressure.ring"
+mkdir -p "$(dirname "$K2_RING")"
+K2_NOW=9000000
+
+k2_level_band() {  # <free> <swap> <load> <cores> -> the band pressure_level reports
+  printf '%s|%s|%s|%s|%s\n' "$K2_NOW" "$1" "$2" "$3" "$4" > "$K2_RING"
+  BIONIC_PRESSURE_RING="$K2_RING" BIONIC_NOW_EPOCH="$K2_NOW" pressure_level 8 2>&1 >/dev/null \
+    | sed -n 's/.*band=\([a-z]*\).*/\1/p'
+}
+k2_level_samples() {  # <free> <swap> <load> <cores> -> the sample COUNT it counted
+  printf '%s|%s|%s|%s|%s\n' "$K2_NOW" "$1" "$2" "$3" "$4" > "$K2_RING"
+  BIONIC_PRESSURE_RING="$K2_RING" BIONIC_NOW_EPOCH="$K2_NOW" pressure_level 8 2>&1 >/dev/null \
+    | sed -n 's/.*samples=\([0-9]*\).*/\1/p'
+}
+
+# Every row of §I's table, plus the -1 arms and the load term, driven both ways.
+K2_ROWS='44|69|1.6|8
+25|69|1.6|8
+24|69|1.6|8
+12|69|1.6|8
+11|69|1.6|8
+5|69|1.6|8
+4|69|1.6|8
+44|79|1.6|8
+44|80|1.6|8
+44|92|1.6|8
+44|69|12.1|8
+44|69|12.0|8
+-1|69|1.6|8
+44|-1|1.6|8
+-1|-1|1.6|8
+-1|-1|20|8
+0|0|0|1'
+K2_DISAGREE=""
+while IFS='|' read -r k2f k2s k2l k2c; do
+  [ -n "${k2f:-}" ] || continue
+  k2_direct="$(pressure_band "$k2f" "$k2s" "$k2l" "$k2c" 2>/dev/null)" || k2_direct="REFUSED"
+  k2_via="$(k2_level_band "$k2f" "$k2s" "$k2l" "$k2c")"
+  [ "$k2_direct" = "$k2_via" ] || \
+    K2_DISAGREE="${K2_DISAGREE}${k2f}|${k2s}|${k2l}|${k2c}: band=${k2_direct} level=${k2_via}
+"
+done <<EOF
+$K2_ROWS
+EOF
+expect_eq "every sample bands identically through pressure_band and through pressure_level" \
+  "" "$K2_DISAGREE"
+# Non-vacuity: the table really does exercise all four bands.
+K2_SEEN=""
+while IFS='|' read -r k2f k2s k2l k2c; do
+  [ -n "${k2f:-}" ] || continue
+  K2_SEEN="${K2_SEEN}$(pressure_band "$k2f" "$k2s" "$k2l" "$k2c" 2>/dev/null) "
+done <<EOF
+$K2_ROWS
+EOF
+for k2b in clear warning critical emergency; do
+  expect_match "…and the table reaches the $k2b band" "$K2_SEEN" "(^| )$k2b( |$)"
+done
+
+# THE REFUSALS AGREE TOO: a sample `pressure_band` will not band is a sample
+# `pressure_level` does not count. Its own window filter already drops NF != 5 and a
+# non-numeric timestamp, so these are the field-level refusals only.
+K2_BAD='xx|69|1.6|8
+44|yy|1.6|8
+44|69|zz|8
+44|69|1.6|0
+44|69|1.6|nine'
+K2_BAD_DISAGREE=""
+while IFS='|' read -r k2f k2s k2l k2c; do
+  [ -n "${k2f:-}" ] || continue
+  pressure_band "$k2f" "$k2s" "$k2l" "$k2c" >/dev/null 2>&1 && k2_rc=0 || k2_rc=$?
+  k2_n="$(k2_level_samples "$k2f" "$k2s" "$k2l" "$k2c")"
+  # pressure_band refuses (rc 2) <=> pressure_level counts zero samples.
+  if [ "$k2_rc" -eq 2 ] && [ "${k2_n:-}" = "0" ]; then :; else
+    K2_BAD_DISAGREE="${K2_BAD_DISAGREE}${k2f}|${k2s}|${k2l}|${k2c}: band_rc=${k2_rc} samples=${k2_n}
+"
+  fi
+done <<EOF
+$K2_BAD
+EOF
+expect_eq "a sample pressure_band refuses is a sample pressure_level does not count" \
+  "" "$K2_BAD_DISAGREE"
 
 # ════════════════════════════════════════════════════════════ report
 

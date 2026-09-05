@@ -787,11 +787,10 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # would hold a writer slot for an agent that finished an hour ago until somebody
   # remembered to stop it, which is the stuck-slot defect this wall was built to end.
   #
-  # S16 wrote the cure as "open iff `running`", and that overshot: an unrecognised status
-  # word then read as CLOSED and freed a slot, which is the fail-OPEN direction. The rule
-  # is now OPEN UNLESS THE HARNESS SAID `idle` — one measured word against everything
-  # else — and it lives in `live_row_open` rather than here, because the Patrol tick asks
-  # the same question and two spellings of it are two answers.
+  # The rule is OPEN UNLESS THE HARNESS SAID `idle`, and it lives in `live_row_open`
+  # (payload/scripts/lib/agents.sh) rather than here, because the Patrol tick asks the same
+  # question and two spellings of it are two answers. That function's header says why the
+  # rule is an inversion and what it rests on; this comment does not repeat it.
   #
   # THE STOP GUARD DELIBERATELY DOES NOT FOLLOW THIS. It resolves on PRESENCE
   # (`live_agents_has`), because an idle agent is exactly the one a stop is for. Both
@@ -823,7 +822,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # there is nothing whose openness a stale answer would leave in doubt.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
                             #   or "<stale|none> <age|none>" (exit 3/4, not fresh)
-    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0
+    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed=""
     local la_out la_rc la_rest la_state la_age
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
@@ -834,13 +833,23 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       case "$seen" in *"|${nm}|"*) continue ;; esac
       seen="${seen}${nm}|"
 
-      # THE PREDICATE IS NOT SPELLED HERE (S19, auditor F-13). It was: S16 wrote
-      # `status = running` inline, which read every OTHER word — a renamed status, a
-      # third one — as CLOSED and handed out a slot, fail-OPEN inside the same function
-      # whose ambiguity arm below deliberately spends one. `live_row_open`
-      # (payload/scripts/lib/agents.sh) owns the rule now, inverted to fail closed: a row
-      # is open unless the harness said `idle`. The Patrol tick asks the SAME function,
-      # which is what stops the wall and the tick from disagreeing about one row.
+      # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
+      # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
+      # size and mtime — but the per-row call below runs inside a command substitution, and
+      # a subshell INHERITS its parent's variables while its own writes die with it. So the
+      # first row would warm a cache nobody sees and every row would pay a full parse: two
+      # whole-file jq passes and nine spawns, 1.22 s for twelve rows on a 4.1 MB transcript.
+      # One call here, in the shell the loop actually runs in, warms it for every subshell
+      # that follows. It is done lazily rather than before the loop so a roster with no
+      # `status=intended` row still reads the transcript zero times. Its own answer is
+      # discarded: this line is a cache fill, and the row's verdict is the predicate's.
+      if [ -z "$primed" ]; then
+        primed=1
+        live_agents "$transcript" >/dev/null 2>&1 || :
+      fi
+
+      # THE PREDICATE IS NOT SPELLED HERE. It is `live_row_open`
+      # (payload/scripts/lib/agents.sh), and its header says why the rule is an inversion.
       #
       # The reader's own stderr passes through here unchanged — one line,
       # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the
