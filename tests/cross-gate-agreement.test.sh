@@ -5900,6 +5900,120 @@ expect_eq "restored: the wall answers the idle fixture as it did before both mut
   "$LA_B5" "$(la_budget)"
 expect_eq "…and so does the guard" "$LA_G5" "$(la_guard la-target)"
 
+# --- LA.6 ONE PREDICATE, TWO CONSUMERS: the budget and the tick count the same (S19) ---
+#
+# THE OWNERSHIP-TABLE ROW names `session-poker.sh tick` a rendering surface of the live
+# agent set. Until S19 it was not one: the tick counted roster rows by sweeper verdict and
+# never read the harness's answer, so the Patrol could print a FILL the dispatch wall was
+# about to refuse — a finished-but-unstopped teammate is not open to the budget and WAS
+# open to the tick. LA.5 proves the budget and the guard ask DIFFERENT questions off one
+# parse. LA.6 is the other shape of the same claim: two consumers asking the SAME question
+# must get the same answer, and they do because there is one predicate — `live_row_open`.
+#
+# THE OBSERVABLE IS A NUMBER EACH SIDE PRINTS ITSELF: `open=` in the wall's refusal and
+# `open=` in the tick's decision line. Neither is computed by this suite.
+#
+# ONE ROSTER, ONE ANSWER, TWO ROWS: an idle teammate beside a running one. Every consumer
+# below reads the same two files; only the tree they are loaded from ever changes.
+
+# A SESSION ID OF ITS OWN, and that is not fixture hygiene — it is the contract. The tick
+# finds its transcript by walking CLAUDE_CONFIG_DIR/projects/*/<session-id>.jsonl and takes
+# the first match, so two fixtures sharing one id would hand it a NEIGHBOUR'S answer. The
+# budget is handed its transcript in the hook payload and would not notice. This suite
+# already plants `$SID_A.jsonl` under two other project directories, so on the shared id the
+# two consumers would be reading two different files — and an agreement row measured that
+# way proves nothing about either.
+LA6_SID="7d31be55-2c48-4f90-b1a7-63e0c4a91d55"
+LA6_REPO=$(new_repo "la-one-predicate")
+arm_patrol "$LA6_REPO" "$LA6_SID"
+LA6_PLAN="$LA6_REPO/.bionic/docs/plans/epic-99/la6-run.md"
+s4_plan "$LA6_PLAN" 4 1
+s4_bind "$LA6_REPO" "$LA6_SID" "$LA6_PLAN"
+s4_attest "$LA6_REPO" "$LA6_SID"
+
+LA6_SLUG=$(printf '%s' "$LA6_REPO" | sed 's/[^a-zA-Z0-9]/-/g')
+LA6_PROJ="$CLAUDE_CONFIG_DIR/projects/$LA6_SLUG"
+mkdir -p "$LA6_PROJ"
+LA6_TR="$LA6_PROJ/$LA6_SID.jsonl"
+cg_live "$LA6_TR" "la6-idle:idle" "la6-live:running"
+# NOT SHARED WITH ANY OTHER FIXTURE: the id resolves to exactly this file.
+expect_eq "LA.6 meta: this session's id names exactly one transcript on the whole machine" "1" \
+  "$(ls "$CLAUDE_CONFIG_DIR"/projects/*/"$LA6_SID.jsonl" 2>/dev/null | wc -l | tr -d ' ')"
+
+# THE ROWS CARRY A DELIVERABLE THAT DOES NOT EXIST, so the sweeper calls both contracts
+# UNMET and the tick has two candidate-open rows to narrow. A row declaring nothing stats
+# MET for want of anything to hold it to, and would make the tick's count zero for a reason
+# that has nothing to do with the live set.
+la6_row() {  # <name>
+  printf 'roster-state/v1|status=intended|session=%s|name=%s|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s/never-written-%s.md|source=declared|duration=4 hours|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01LA6%s\n' \
+    "$LA6_SID" "$1" "$LA6_REPO" "$1" "$1" >> "$LA6_REPO/.bionic/tmp/roster-$LA6_SID.state"
+}
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  > "$LA6_REPO/.bionic/tmp/roster-$LA6_SID.state"
+la6_row "la6-idle"
+la6_row "la6-live"
+
+la6_budget() {  # -> the dispatch wall's whole channel, out of $LA_TREE
+  mk_agent_payload "$LA6_SID" "$LA6_REPO" \
+    | jq -c --arg t "$LA6_TR" '.transcript_path = $t' \
+    | env CLAUDE_CODE_SESSION_ID="$LA6_SID" bash "$LA_TREE/hooks/dispatch-preflight.sh" 2>&1
+  return 0
+}
+la6_tick() {  # -> the Patrol tick's whole channel, out of $LA_TREE
+  ( cd "$LA6_REPO" && env CLAUDE_CODE_SESSION_ID="$LA6_SID" \
+      BIONIC_PROBE_FREE_MB=8192 BIONIC_PROBE_LOAD_1M=1.0 \
+      bash "$LA_TREE/hooks/session-poker.sh" tick 2>&1 )
+  return 0
+}
+la6_open_budget() { printf '%s\n' "$1" | sed -n 's/.*writers: budget=[0-9]* open=\([0-9]*\) .*/\1/p' | head -1; }
+la6_open_tick()   { printf '%s\n' "$1" | sed -n 's/.*decision=[A-Z]*|total=[0-9]*|open=\([0-9]*\).*/\1/p' | head -1; }
+
+LA6_B=$(la6_budget); LA6_T=$(la6_tick)
+LA6_BN=$(la6_open_budget "$LA6_B"); LA6_TN=$(la6_open_tick "$LA6_T")
+
+# NON-VACUITY FIRST: both consumers really did print a number, and it is the one the
+# fixture predicts — two roster rows, one of them finished, so exactly one is open.
+expect_eq "LA.6 the dispatch wall counts one open row on this roster" "1" "$LA6_BN"
+expect_eq "LA.6 the Patrol tick counts one open row on the SAME roster" "1" "$LA6_TN"
+expect_eq "…so the two consumers agree" "$LA6_BN" "$LA6_TN"
+# And the tick really did consult the live set rather than land on 1 by luck: its own
+# roster carries TWO unmet rows, which is what a tick that read no answer would print.
+expect_contains "…while the tick's own roster carries two rows (the narrowing is real)" \
+  "total=2" "$LA6_T"
+
+# THE MUTATION: ONE LINE of the shared predicate, and BOTH consumers move together. That
+# is the whole point of one owner — a rule spelled twice would move one of them.
+LA6_MUT="$SANDBOX/la-mutant-predicate"
+mkdir -p "$LA6_MUT/hooks" "$LA6_MUT/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$LA6_MUT/scripts/lib/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$LA6_MUT/hooks/" 2>/dev/null
+sed 's/_LA_ROW_CLOSED_STATUS="idle"/_LA_ROW_CLOSED_STATUS="no-such-status"/' \
+  "$LIB_DIR_SRC/agents.sh" > "$LA6_MUT/scripts/lib/agents.sh"
+expect_eq "LA.6 mutation applies (the predicate's one word has not moved)" "no" \
+  "$(cmp -s "$LIB_DIR_SRC/agents.sh" "$LA6_MUT/scripts/lib/agents.sh" && echo yes || echo no)"
+# …and the mutant is still a predicate: it now calls the idle row OPEN rather than
+# returning nothing at all.
+LA6_MUT_RC=0
+( . "$LA6_MUT/scripts/lib/agents.sh" >/dev/null 2>&1; live_row_open "$LA6_TR" "la6-idle" ) 2>/dev/null \
+  || LA6_MUT_RC=$?
+expect_eq "…and the doctored predicate now calls the idle row OPEN" "0" "$LA6_MUT_RC"
+
+LA_TREE="$LA6_MUT"
+LA6_BM=$(la6_budget); LA6_TM=$(la6_tick)
+LA_TREE="$BIONIC_HOOKS_DIR/.."
+[ -d "$LA_TREE/scripts/lib" ] || LA_TREE="$BIONIC_HOOKS_DIR/../payload"
+
+expect_eq "mutated predicate: the dispatch wall now counts BOTH rows open" "2" \
+  "$(la6_open_budget "$LA6_BM")"
+expect_eq "…and the tick moves with it, off the same one line" "2" \
+  "$(la6_open_tick "$LA6_TM")"
+expect_eq "…so they still agree — one owner, moved once, moves both" \
+  "$(la6_open_budget "$LA6_BM")" "$(la6_open_tick "$LA6_TM")"
+
+# RESTORED: the shipped tree answers as it did before the mutation, on both surfaces.
+expect_eq "restored: the wall counts one open row again" "1" "$(la6_open_budget "$(la6_budget)")"
+expect_eq "…and so does the tick" "1" "$(la6_open_tick "$(la6_tick)")"
+
 # ============================================================
 echo ""
 echo "=== PC — THE PLAN PATH's CANONICAL FORM: one canonicalizer, three sites ==="
