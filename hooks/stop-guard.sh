@@ -563,7 +563,12 @@ case "$LIVE_RC" in
     # TWO LIVE TEAMMATES OF ONE NAME. The alias cannot rescue this: it must resolve to the
     # same SINGLE entry as the bare name (D2′), so there is no spelling of this target the
     # gate can accept. Both entries are printed as the harness reported them.
-    LIVE_DUPES=$(live_agents "$TRANSCRIPT" 2>/dev/null | grep "^${BASE}|") || LIVE_DUPES=""
+    #
+    # MATCHED BY FIELD EQUALITY, never as a regular expression (Step-6 security review S-5,
+    # third instance — stop-orders.sh and stop-check.sh carry the same fix). `BASE` is the
+    # operator's typed target; a `.`, `*` or `[` in it would over-match and this refusal
+    # would report a count and a listing that are not the ambiguity it actually found.
+    LIVE_DUPES=$(live_agents "$TRANSCRIPT" 2>/dev/null | awk -F'|' -v want="$BASE" '$1 == want') || LIVE_DUPES=""
     LIVE_N=0
     [ -n "$LIVE_DUPES" ] && LIVE_N=$(printf '%s\n' "$LIVE_DUPES" | grep -c .)
     deny "Target '${RAW}' is ambiguous: ${LIVE_N} live agents answer to '${BASE}'." \
