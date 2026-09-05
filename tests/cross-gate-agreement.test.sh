@@ -6682,9 +6682,26 @@ mkdir -p "$DS_DIR"
 # ONE FILE IN EACH DIRECTORY IS NOT BIONIC'S, and it is the whole point of planting them: both
 # detectors match payload-side names only, both removals must too, and a machine's own hook or
 # its own agent is not bionic's leftover to delete.
+# AND THE STATUS LINE THE FIELD MACHINE ACTUALLY HAD (epic-21 1.4.4 T5). Every machine
+# that ran setup before this patch carries `npx ccstatusline@latest` in settings.json AND
+# the shipped layout under ~/.config/ccstatusline — the two halves `_dep_check_statusline`
+# reads. Planting only the first would leave the row absent for the layout's sake and prove
+# nothing about the command; planting both is the pre-1.4.4 shape, where the ONLY thing
+# wrong is the recorded command. That is the state doctor's `statusLine command` row fires
+# on, so it is the state this scan has to see it in.
 ds_plant() {  # <home> <hooks:yes|no> <agents:yes|no>
   local h="$1" want_hooks="$2" want_agents="$3" f n=0
   rm -rf "$h"; mkdir -p "$h/.claude"
+  cat > "$h/.claude/settings.json" <<'DSJSON'
+{
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest"
+  }
+}
+DSJSON
+  mkdir -p "$h/.config/ccstatusline"
+  cp "$DS_PAYLOAD/ccstatusline/settings.json" "$h/.config/ccstatusline/settings.json"
   if [ "$want_hooks" = "yes" ]; then
     mkdir -p "$h/.claude/hooks"
     for f in "$DS_PAYLOAD"/hooks/*.sh; do
@@ -6771,6 +6788,11 @@ ds_item_for() {  # <doctor row label> -> the setup item that clears it
     "legacy hook files")              printf 'legacy-hook-files' ;;
     "legacy installed agent copies")  printf 'legacy-agent-copies' ;;
     "legacy installed skill copy")    printf 'legacy-skill-copy' ;;
+    # The dependency row is the item that clears the status-line row: the recorded command
+    # is one of the two halves `_dep_check_statusline` reads, so the machine whose command
+    # still says `npx` is a machine where ccstatusline is not installed the way setup
+    # installs it, and `--only tool:ccstatusline` is the run that rewrites it.
+    "statusLine command")             printf 'tool:ccstatusline' ;;
     *) return 1 ;;
   esac
   return 0

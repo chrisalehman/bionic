@@ -69,8 +69,16 @@ _jit_fix_line() {  # <dep-name>
   local name="$1" mech line
   local -a argv=()
   mech="$(dep_field "$name" install_fn_or_check 2>/dev/null)" || { echo "see /bionic:setup"; return 0; }
+  # THE ADVICE CHANNEL MUST NOT UNDO THE FIX (1.4.4 T5, review-a C-2). This line
+  # is what a user is told to do BY HAND when they decline the offer, and it told
+  # them to write the exact `npx` string epic-21 removed — a command Claude Code
+  # re-resolves over the network on every render (73s measured, the bug report's
+  # table) — while omitting the install that makes the fixed form work at all.
+  # Both halves now, in the order they have to happen, and the recorded command is
+  # the executable name rather than the locator (which may carry a pin).
   if [ "$mech" = "statusline" ]; then
-    echo "record 'npx $(_dep_locator_target "$(dep_field "$name" source_url)")' as the statusline"
+    local sl_pkg; sl_pkg="$(_dep_locator_target "$(dep_field "$name" source_url)")"
+    echo "npm install -g ${sl_pkg}, then record '$(_dep_pkg_unversioned "$sl_pkg")' as the statusline"
     return 0
   fi
   # A native row has no argv of bionic's, but it does have a command the USER can

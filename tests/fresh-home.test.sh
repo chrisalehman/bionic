@@ -605,8 +605,8 @@ run_payload() {  # <script> [args...] — stdin carries the answers
     BIONIC_TEST_BIN="$BIN" \
     BIONIC_TEST_SHIMSRC="$SHIMSRC" \
     BIONIC_TEST_PKG_MAP="$PKG_MAP" \
-    BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-    CLAUDE_PLUGIN_ROOT="$PAYLOAD" \
+    BIONIC_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
+    CLAUDE_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     BIONIC_PLAYWRIGHT_CACHE="${HOME_FIX}/.cache/ms-playwright" \
     BIONIC_DOCTOR_PROBE_SECONDS=5 \
     bash "$script" "$@" 2>&1
@@ -1317,6 +1317,222 @@ expect_eq "remove: the user's own shell rc survives the teardown" "yes" \
 expect_eq "remove: ~/.claude/CLAUDE.md is still not a file this plugin touches (AC-7)" \
   "no" "$(path_exists "$GLOBAL_MEMORY")"
 
+
+# ---------------------------------------------------------------------------
+# Group 6 — the statusLine WRITE itself: what it preserves, and what it records
+# (1.4.4 T5; review-a C-3, review-b N-1).
+#
+# TWO CLAIMS ABOUT ONE jq LINE. `_dep_install_statusline` sets `.statusLine` in a
+# settings.json the USER owns, and both defects live in that one assignment:
+# replacing the whole object throws away any sibling key the user put beside
+# `command`, and writing the locator target verbatim records `ccstatusline@2.2.29`
+# — not an executable — the moment anyone adopts the pin the deps.sh docblock
+# holds in reserve. Neither is reachable from the Group 2-5 sequence: that fixture
+# starts with no settings.json and runs the unpinned locator, so both defects are
+# invisible to it and stayed invisible through two reviews.
+#
+# THESE GROUPS OWN THEIR OWN FIXTURE. Each calls `fresh_home` first — which also
+# clears the npm shim's global state and the call log — so the row is genuinely
+# pending and setup genuinely runs the install arm rather than reporting
+# "present" and writing nothing. Nothing after this group reads the fixture.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 6a: the statusLine write MERGES into the user's object ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest",
+    "padding": 0
+  }
+}
+JSON
+expect_eq "6a precondition: the planted settings.json carries a sibling field under .statusLine" \
+  "0" "$(jqf '.statusLine.padding')"
+
+G6A_OUT="$TMP/setup-statusline-merge.txt"
+printf 'y\ny\ny\n' | run_payload "$SETUP_SH" --only tool:ccstatusline > "$G6A_OUT" 2>&1
+
+# The anti-vacuity control: if the item had reported "present" and written nothing, the
+# padding below would survive for the wrong reason entirely.
+expect_eq "6a: setup rewrote the npx command to the installed binary" \
+  "ccstatusline" "$(jqf '.statusLine.command // ""')"
+expect_eq "6a: …and the user's own field beside it is still there" \
+  "0" "$(jqf '.statusLine.padding')"
+expect_eq "6a: …and so is the rest of the file" \
+  "opus" "$(jqf '.model // ""')"
+
+echo ""
+echo "=== Group 6b: a PINNED locator still records an executable name ==="
+
+# The pin the deps.sh docblock argues against adopting today, adopted here so the write can
+# be measured under it. A copy of the whole payload — setup.sh refuses to run without its
+# libraries beside it — with one locator changed and nothing else.
+fresh_home
+# The claude home exists on any machine that has the CLI, and bionic is a plugin of it —
+# `_dep_install_statusline` writes settings.json into that directory and does not create it,
+# so a fixture without it measures a machine shape that cannot happen.
+mkdir -p "${HOME_FIX}/.claude"
+G6B_PAYLOAD="$TMP/payload-pinned"
+rm -rf "$G6B_PAYLOAD"
+cp -R "$PAYLOAD" "$G6B_PAYLOAD"
+LC_ALL=C sed 's#npm:ccstatusline|#npm:ccstatusline@2.2.29|#' \
+  "$PAYLOAD/scripts/lib/deps.sh" > "$G6B_PAYLOAD/scripts/lib/deps.sh"
+expect_eq "6b: the pinned payload differs from the shipped one by exactly the locator" \
+  "1" "$(diff "$PAYLOAD/scripts/lib/deps.sh" "$G6B_PAYLOAD/scripts/lib/deps.sh" | grep -c '^< ')"
+
+G6B_OUT="$TMP/setup-statusline-pinned.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G6B_PAYLOAD" \
+  run_payload "$G6B_PAYLOAD/scripts/setup.sh" --only tool:ccstatusline > "$G6B_OUT" 2>&1
+
+# The pin reached the installer — without this the row below could pass on a run where the
+# locator change never took effect at all.
+expect_match "6b: the install ran against the pinned package" \
+  '*npm install -g ccstatusline@2.2.29*' "$(cat "$CALLS")"
+expect_eq "6b: …and the command recorded in settings.json is the executable, not the pin" \
+  "ccstatusline" "$(jqf '.statusLine.command // ""')"
+
+# ---------------------------------------------------------------------------
+# Group 7 — the teardown asks a DIFFERENT question from the report (1.4.4 T5,
+# t5-report.md R-1).
+#
+# A teardown wants to know whether this machine carries anything bionic wrote.
+# It used to ask `check_dep`, which answers whether the row is in the HEALTHY
+# state setup leaves it in — a different question, and on the pre-1.4.4 machine
+# the two answers point opposite ways. Once the presence check stopped calling
+# `npx ccstatusline@latest` healthy, `/bionic:remove` started calling that same
+# machine "already clean" and walking away from the command in the user's
+# settings.json and the config directory bionic itself copied in. Every machine
+# 1.4.4 exists for is in exactly that state.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 7: remove takes bionic's statusline state off a pre-1.4.4 machine ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest"
+  }
+}
+JSON
+cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+expect_eq "7 precondition: the fixture is the pre-1.4.4 machine — npx command recorded" \
+  "npx ccstatusline@latest" "$(jqf '.statusLine.command // ""')"
+expect_true "7 precondition: …and the layout bionic copied is on disk" test -f "$CCS_CONFIG"
+
+G7_OUT="$TMP/remove-statusline-pre144.txt"
+printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G7_OUT" 2>&1
+
+# LINE-SCOPED ON PURPOSE. A glob over the whole report would pair "ccstatusline" on one
+# line with "already clean" on another and answer about neither, so the claim is made
+# against the ccstatusline row itself.
+g7_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is clean
+  grep 'ccstatusline' "$1" 2>/dev/null | grep 'already clean' 2>/dev/null
+  return 0
+}
+expect_eq "7: no ccstatusline row calls a machine carrying bionic's statusline state clean" \
+  "" "$(g7_clean_rows "$G7_OUT")"
+expect_eq "7: the statusLine bionic wrote is gone from settings.json" \
+  "" "$(jqf '.statusLine.command // ""')"
+expect_true "7: …and the config directory bionic copied in is gone" \
+  test ! -d "${HOME_FIX}/.config/ccstatusline"
+# AC-7's rule, on this item too: what was not bionic's is still where the user left it.
+expect_eq "7: …and the rest of the user's settings.json is untouched" \
+  "opus" "$(jqf '.model // ""')"
+
+# The other direction, so the rows above are a measurement and not a constant: a machine
+# with no statusline state of bionic's IS clean, and the run says so.
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+echo '{"model":"opus"}' > "$SETTINGS"
+G7_CLEAN_OUT="$TMP/remove-statusline-clean.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G7_CLEAN_OUT" 2>&1
+expect_ne "7: a machine with none of it DOES read already clean, on the same extractor" \
+  "" "$(g7_clean_rows "$G7_CLEAN_OUT")"
+
+# ---------------------------------------------------------------------------
+# Group 8 — /bionic:remove takes the leftovers /bionic:setup now removes
+# (1.4.4 T5 extension, plan A-8).
+#
+# T1 gave setup two items for the pre-plugin hook files under ~/.claude/hooks and
+# the drifted role copies under ~/.claude/agents. The teardown door had neither,
+# so a full consented `/bionic:remove` left behind an older build of every wall
+# bionic ships and a set of role files a dispatched agent still reads. Same
+# detectors, same payload-side names discipline, same consent shape.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 8: remove takes the legacy hook files and drifted agent copies ==="
+
+# The claude-home the field machine had, built the way cross-gate's `ds_plant` builds it:
+# payload-named files two builds behind, plus ONE file in each directory that is not
+# bionic's and must survive.
+g8_plant() {
+  local f n=0
+  rm -rf "${HOME_FIX}/.claude/hooks" "${HOME_FIX}/.claude/agents"
+  mkdir -p "${HOME_FIX}/.claude/hooks" "${HOME_FIX}/.claude/agents"
+  for f in "$PAYLOAD"/hooks/*.sh; do
+    [ -f "$f" ] || continue
+    [ "$n" -lt 16 ] || break
+    printf '#!/bin/bash\n# an older build of %s\n' "${f##*/}" > "${HOME_FIX}/.claude/hooks/${f##*/}"
+    n=$((n + 1))
+  done
+  printf '#!/bin/bash\n# the machine owner wrote this one\n' > "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+  for f in "$PAYLOAD"/agents/*.md; do
+    [ -f "$f" ] || continue
+    printf -- '---\nname: %s\n---\nan older build of this role.\n' "${f##*/}" \
+      > "${HOME_FIX}/.claude/agents/${f##*/}"
+  done
+  printf -- '---\nname: not-bionics\n---\nthe machine owner wrote this one.\n' \
+    > "${HOME_FIX}/.claude/agents/not-bionics.md"
+}
+
+g8_count() {  # <dir> <glob>
+  local n=0 f
+  for f in "$1"/$2; do [ -e "$f" ] && n=$((n + 1)); done
+  printf '%s' "$n"
+}
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+g8_plant
+expect_eq "8 precondition: seventeen files in the hooks directory, one of them not bionic's" \
+  "17" "$(g8_count "${HOME_FIX}/.claude/hooks" '*.sh')"
+
+G8_LIST="$(run_payload "$REMOVE_SH" --list 2>&1)"
+expect_match "8: legacy-hook-files is a name the teardown takes" \
+  '*legacy-hook-files*' "$G8_LIST"
+expect_match "8: legacy-agent-copies is a name the teardown takes" \
+  '*legacy-agent-copies*' "$G8_LIST"
+
+G8_HOOKS="$(printf 'y\ny\n' | run_payload "$REMOVE_SH" --only legacy-hook-files 2>&1)"
+expect_eq "8: the consented removal leaves exactly the machine's own hook behind" \
+  "1" "$(g8_count "${HOME_FIX}/.claude/hooks" '*.sh')"
+expect_true "8: …and that survivor is the one the payload does not ship" \
+  test -f "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+expect_match "8: …and the run reports what it removed" '*✓*hook file*' "$G8_HOOKS"
+
+G8_AGENTS="$(printf 'y\ny\n' | run_payload "$REMOVE_SH" --only legacy-agent-copies 2>&1)"
+expect_eq "8: the consented removal leaves exactly the machine's own agent behind" \
+  "1" "$(g8_count "${HOME_FIX}/.claude/agents" '*.md')"
+expect_true "8: …and that survivor is the one the payload does not ship" \
+  test -f "${HOME_FIX}/.claude/agents/not-bionics.md"
+expect_match "8: …and the run reports what it removed" '*✓*agent*' "$G8_AGENTS"
+
+# The negative twin on the same extractors: with the leftovers gone both items read clean,
+# so the rows above measure the removal rather than restating the fixture.
+expect_match "8: a second pass over the same machine reads already clean" \
+  '*already clean*' "$(printf 'y\n' | run_payload "$REMOVE_SH" --only legacy-hook-files 2>&1)"
 
 # ---------------------------------------------------------------------------
 # Results
