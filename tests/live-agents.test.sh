@@ -1202,6 +1202,60 @@ T_GROW_OUT="$(bash -c '
   ' _ "$LIB" "$T_GROW" "$T_APPEND")"
 expect_eq "§T.3 the first read sees one teammate, and the read after an append sees two" \
   "$(printf 'research-code-map|bionic:researcher|running\n2')" "$T_GROW_OUT"
+# ============================================================
+echo
+echo "=== §U — the reducer compares NORMALISED timestamps (Step-6 review C-4) ==="
+# ============================================================
+#
+# Lexicographic order is chronological for UTC ISO-8601 only once the fractional part has
+# a fixed width: `…:23.45Z` sorts BELOW `…:23.4Z` as a raw string, because `5` < `Z`. That
+# is why `_la_norm_ts` exists for the fresh/stale test — and the reducer that decides WHICH
+# answer is newest, and WHICH prompt is last, did the raw compare the normaliser was
+# written to prevent. The harness writes fixed 3-digit milliseconds today, so this was
+# latent; it stops being latent the day it writes anything else.
+
+# --- §U.1 — the NEWER answer wins even when its fraction is longer -------------
+U_ANS="$SANDBOX/u-answer.jsonl"
+{
+  entry_prompt      "2026-09-05T00:50:00.000Z" "go"
+  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01UOLD"
+  entry_tool_result "2026-09-05T00:52:23.4Z"   "toolu_01UOLD" "$BODY_RUNNING"
+  entry_tool_use    "2026-09-05T00:52:23.000Z" "ListAgents" "toolu_01UNEW"
+  entry_tool_result "2026-09-05T00:52:23.45Z"  "toolu_01UNEW" "$BODY_TWO"
+} > "$U_ANS"
+call_live_agents "$U_ANS"
+expect_eq "§U.1 the answer 50 ms later wins, though its fraction has one more digit" \
+  "$(printf 'research-code-map|bionic:researcher|running\ns1-run-library|bionic:senior-implementor|running')" \
+  "$OUT"
+
+# The control: with the SAME two answers written the other way round in time, the other
+# one wins — so §U.1 is about the timestamps, not about file order.
+U_CTRL="$SANDBOX/u-control.jsonl"
+{
+  entry_prompt      "2026-09-05T00:50:00.000Z" "go"
+  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01UNEW"
+  entry_tool_result "2026-09-05T00:52:23.45Z"  "toolu_01UNEW" "$BODY_TWO"
+  entry_tool_use    "2026-09-05T00:52:23.000Z" "ListAgents" "toolu_01UOLD"
+  entry_tool_result "2026-09-05T00:52:23.5Z"   "toolu_01UOLD" "$BODY_RUNNING"
+} > "$U_CTRL"
+call_live_agents "$U_CTRL"
+expect_eq "§U.1 control: at .5Z the single-teammate answer is the newest and wins" \
+  "research-code-map|bionic:researcher|running" "$OUT"
+
+# --- §U.2 — the LAST PROMPT is picked the same way -----------------------------
+# Two prompts, the later one carrying the longer fraction, and an answer between them.
+# Raw string order would call the earlier one last and read the answer FRESH.
+U_PROMPT="$SANDBOX/u-prompt.jsonl"
+{
+  entry_prompt      "2026-09-05T00:52:20.5Z"  "first"
+  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01UP"
+  entry_tool_result "2026-09-05T00:52:23.000Z" "toolu_01UP" "$BODY_RUNNING"
+  entry_prompt      "2026-09-05T00:52:24.45Z" "second"
+} > "$U_PROMPT"
+call_live_agents "$U_PROMPT"
+expect_eq "§U.2 a later prompt with a longer fraction is still the last prompt -> STALE" \
+  3 "$ST"
+
 
 
 
