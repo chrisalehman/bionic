@@ -532,6 +532,18 @@ mkdir -p "$D/.bionic/docs/plans/epic-99"
   printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 9\n\n'
   printf -- '- Step 9: delivered: fixture run closed; report: record/fixture/close-out.md\n'
 } > "$D/.bionic/docs/plans/epic-99/wave-01.plan.md"
+# AND THE ORDERING IS STATED, NOT LEFT TO THE CLOCK. `make_env` plants a second plan at
+# `plans/wave-01.plan.md` reading `current: 4`, and which of the two the tick resolves is
+# `active_plan`'s newest-by-mtime pick. Both files are written inside the same second, so
+# the pick comes down to how `[ "$f" -nt "$plan" ]` breaks a tie — and that is an
+# INTERPRETER-DEPENDENT answer: bash 5 compares st_mtimespec to the nanosecond and calls the
+# epic-99 plan newer, while bash 3.2 — the /bin/bash macOS ships — compares whole seconds,
+# finds neither newer, and keeps the first candidate the walk produced. Measured, two files
+# 61µs apart: 3.2.57 says `b -nt a` is FALSE, 5.3.15 says TRUE. Under the system interpreter
+# this case therefore resolved the `current: 4` plan, the tick QUIETed on an undelivered run,
+# and cases 33 and 34 failed for a reason that has nothing to do with DISARM. Backdating the
+# other plan puts five whole seconds between them, which every interpreter agrees about.
+backdate "$D/.bionic/docs/plans/wave-01.plan.md" 5
 # ARMED THROUGH THE REAL VERB, and dated back, so the plan written a moment ago is a
 # delivery that POSTDATES the arming — which is what the tick now requires before it will
 # DISARM (R-13, critic C-4). A hand-written stamp alone leaves the session with no arming
@@ -725,6 +737,139 @@ if [ "$HOOK_OUT" = "$E_FINDING" ]; then
 else
   fail "47: re-engaged, the finding is byte-identical" "was <$E_FINDING> now <$HOOK_OUT>"
 fi
+
+echo ""
+echo "=== Group 9: active_run -> session_run (wave-session-bound-run S5) ==="
+#
+# THE CONTRACT UNDER TEST (design ledger AC-1/AC-3/AC-6). The run predicate at
+# `:361` used to be `active_run "$REPO" >/dev/null || exit 0` — the newest open
+# plan in the root, with no session input. It is now `session_run "$REPO" "$SID"`:
+# a session BOUND to a plan proceeds (to the stamp check) on THAT plan alone,
+# whatever else is open in the root; UNBOUND it falls back to the newest plan
+# exactly as before, and says so on stderr; bound to a plan that has since
+# closed, the hook takes exactly the branch it takes today when there is no open
+# run at all — silent, exit 0 — and announces the closure first.
+
+PLAN_A_REL="plan-a.plan.md"
+PLAN_B_REL="plan-b.plan.md"
+
+# make_env_two_plans [interval] -> project dir on stdout. Two OPEN plans, ages
+# controlled by touch so B is decisively the newest-plan fallback target.
+# ENGAGED, UNBOUND by default (make_env's own convention).
+make_env_two_plans() {
+  local dir; dir=$(mktemp -d)
+  mkdir -p "$dir/.bionic/tmp" "$dir/.bionic/docs/plans"
+  : > "$dir/.bionic/tmp/engaged-$SID.state"
+  printf 'poker-interval: %s\n' "${1:-1s}" > "$dir/.bionic/config.yaml"
+  cat > "$dir/.bionic/docs/plans/$PLAN_A_REL" <<'EOF'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: plan A in flight
+EOF
+  cat > "$dir/.bionic/docs/plans/$PLAN_B_REL" <<'EOF'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 4
+
+- Step 4: plan B in flight
+EOF
+  touch -t 202601010000 "$dir/.bionic/docs/plans/$PLAN_A_REL"
+  touch -t 202602010000 "$dir/.bionic/docs/plans/$PLAN_B_REL"
+  printf '%s' "$dir"
+}
+
+# s5_bind <project> <plan-rel-under-docs-plans> — MUST run after write_stamp,
+# which (by design, task-engaged-session) resets the marker to empty/unbound.
+s5_bind() {
+  { printf 'plan=%s/.bionic/docs/plans/%s\n' "$1" "$2"
+    printf 'engaged_at=2026-09-04T00:00:00Z\n'
+  } > "$1/.bionic/tmp/engaged-$SID.state"
+  chmod 600 "$1/.bionic/tmp/engaged-$SID.state"
+}
+
+# s5_deliver <plan-abs-path> — closes a plan (Step 9, delivered).
+s5_deliver() {
+  cat > "$1" <<'EOF'
+---
+canonical_sdlc_version: 14
+---
+
+## SDLC State
+
+current: 9
+
+- Step 9: report record/x.md, delivered: 2026-09-04
+EOF
+}
+
+echo ""
+echo "---------- 48: bound-open — proceeds (a stale stamp still blocks), no fallback line ----------"
+
+D=$(make_env_two_plans); write_stamp "$D" "$SID"; s5_bind "$D" "$PLAN_A_REL"
+backdate "$(stamp_path "$D" "$SID")" 600
+fire "$D"; expect_block "48a: bound to A, a stale stamp still blocks (the predicate did not exit early)"
+fire_stderr "$D"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"run resolved by newest-plan fallback"*) fail "48b: bound to A prints no fallback line" "$HOOK_ERR" ;;
+  *) pass "48b: bound to A prints no fallback line" ;;
+esac
+
+echo ""
+echo "---------- 49: fallback — unbound resolves to the newest plan (B), and says so ----------"
+
+D=$(make_env_two_plans); write_stamp "$D" "$SID"
+backdate "$(stamp_path "$D" "$SID")" 600
+# PHYSICAL, because the fallback path comes off active_plan's own resolution —
+# `project_root` calls `pwd -P` internally — while `$D` is `mktemp -d`'s raw
+# (logical) answer; see patrol-duties-gate.test.sh's own note on this (S5).
+D_PHYS=$(cd "$D" && pwd -P)
+fire "$D"; expect_block "49a: unbound, a stale stamp still blocks (the predicate did not exit early)"
+fire_stderr "$D"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"patrol-revive: run resolved by newest-plan fallback (session unbound) — $D_PHYS/.bionic/docs/plans/$PLAN_B_REL"*)
+    pass "49b: unbound prints the fallback line, naming B (the newest) verbatim" ;;
+  *) fail "49b: unbound prints the fallback line, naming B (the newest) verbatim" "$HOOK_ERR" ;;
+esac
+
+echo ""
+echo "---------- 50: bound-closed — a plan that closed is no open run at all ----------"
+
+D=$(make_env_two_plans); write_stamp "$D" "$SID"
+s5_deliver "$D/.bionic/docs/plans/$PLAN_A_REL"
+s5_bind "$D" "$PLAN_A_REL"
+backdate "$(stamp_path "$D" "$SID")" 600
+fire "$D"
+TOTAL=$((TOTAL + 1))
+if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
+  pass "50a: bound to a CLOSED plan (A), the hook is silent — same branch as no open run"
+else
+  fail "50a: bound to a CLOSED plan (A), the hook is silent — same branch as no open run" \
+    "rc=$HOOK_RC out=<$HOOK_OUT>"
+fi
+fire_stderr "$D"
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"patrol-revive: bound plan closed — $D/.bionic/docs/plans/$PLAN_A_REL; this session has no open run"*)
+    pass "50b: the closed-plan advisory names A, verbatim" ;;
+  *) fail "50b: the closed-plan advisory names A, verbatim" "$HOOK_ERR" ;;
+esac
+TOTAL=$((TOTAL + 1))
+case "$HOOK_ERR" in
+  *"$PLAN_B_REL"*) fail "50c: B's path (the still-open plan) appears nowhere in the output" "$HOOK_ERR" ;;
+  *) pass "50c: B's path (the still-open plan) appears nowhere in the output" ;;
+esac
 
 echo ""
 echo "========================================"
