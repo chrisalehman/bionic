@@ -218,6 +218,43 @@ expect_status "an empty roster answers cleanly" 0 "$ST"
 
 # ============================================================
 echo ""
+echo "=== Section 3b: standdown on an ADOPTED WAIVED row survives /clear (S17, AC-12) ==="
+# ============================================================
+#
+# THE CROSS-SCRIPT PROOF. §3 above plants a waived row by hand with `roster_row`; this plants
+# it on a PREDECESSOR's roster and runs the real hooks/session-poker.sh `adopt` verb to carry
+# it onto THIS session's own roster, exactly the shape a user-run `/clear` leaves behind
+# (ac12-t4-walk-2.md). `standdown` never reads the marker or re-derives anything of its own —
+# it asks `session-sweeper.sh verdict`, which reads `waiver=` straight off the row — so this
+# is a pin on the CARRY, not on standdown's own logic.
+R3B="$(make_repo adopted-waived)"
+mkdir -p "$R3B/.bionic/docs/record"
+ADOPT3B_PRED="9f1e2d3c-4b5a-6978-8899-aabbccddeeff"
+ADOPT3B_ID="aadoptedwaived00000000000000000"
+ADOPT3B_ROSTER="$R3B/.bionic/tmp/roster-$ADOPT3B_PRED.state"
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  > "$ADOPT3B_ROSTER"
+printf 'roster-state/v1|status=identified|session=%s|name=adopted-waived-row|agent_id=%s|launched_at=%s|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=|progress=|claims=|cadence=10 minutes|absent=|waiver=%s|tool_use_id=toolu_01S17FIX\n' \
+  "$ADOPT3B_PRED" "$ADOPT3B_ID" "2026-08-05T00:00:00Z" \
+  "probe only — a throwaway read-only agent for the standdown/adopt walk" \
+  >> "$ADOPT3B_ROSTER"
+
+# `adopt` decides nothing in a session that never engaged bionic (AC-10) — the same guard
+# session-poker.test.sh's fixtures carry, planted by hand here since this suite has no
+# engagement helper of its own.
+: > "$R3B/.bionic/tmp/engaged-$SID.state"
+( cd "$R3B" && CLAUDE_CODE_SESSION_ID="$SID" bash "$HERE/session-poker.sh" adopt ) >/dev/null 2>&1
+
+run_orders "$R3B" standdown
+expect_status "standdown over a freshly-adopted roster reports and exits clean" 0 "$ST"
+SD3B_BLOCK=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
+expect_contains "the adopted row is in the stand-down batch" \
+  "adopted-waived-row" "$SD3B_BLOCK"
+expect_contains "…because its CARRIED waiver, not an ack or a fresh MET" \
+  "waived — adopted-waived-row" "$SD3B_BLOCK"
+
+# ============================================================
+echo ""
 echo "=== Section 4: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1) ==="
 # ============================================================
 #

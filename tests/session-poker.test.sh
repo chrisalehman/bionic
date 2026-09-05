@@ -849,6 +849,8 @@ ID_LANDED="alanded-one-1111111111111111"
 ID_RUNNING="arunning-one-222222222222222a"
 ID_SILENT="asilent-one-3333333333333333"
 ID_CLOSED="aclosed-one-4444444444444444"
+ID_WAIVED="awaived-one-5555555555555556"
+ID_RECHECK="arecheck-one-666666666666666"
 
 R8="$(make_repo s8-adopt)"; new_roster "$R8"
 mkdir -p "$R8/.bionic/docs/record"
@@ -882,6 +884,30 @@ add_row_to "$R8" "$ADOPT_A" name=closed-one status=identified agent_id="$ID_CLOS
 # marker's writer is a Stop hook with a whole payload contract, and the shape is one line.
 printf 'landing-swept/v1|at=%s|session=%s|name=closed-one|agent_id=%s|state=MET\n' \
   "$(iso_ago 300)" "$ADOPT_A" "$ID_CLOSED" >> "$(roster_of "$R8" "$ADOPT_A")"
+
+# ---- predecessor A: a Deliverable-waiver row (S17, AC-12 attempt 2) ----
+#
+# THE FIELD `adopt_write_row` USED TO DROP. This row declares no deliverable and carries a
+# waiver instead — hooks/session-sweeper.sh's `verdict_row` reads `waiver=` straight off the
+# row (no marker involved) and calls this WAIVED before it ever asks about a deliverable, so
+# an adopted copy that lost the field verdicted as an unmet SILENT row for a contract that
+# was never open (the live T4 walk this slice repairs, ac12-t4-walk-2.md).
+add_row_to "$R8" "$ADOPT_A" name=waived-one status=identified agent_id="$ID_WAIVED" \
+  subagent_type=bionic:researcher duration="20 minutes" cadence="10 minutes" \
+  waiver="probe only — a throwaway read-only agent, S17 fixture"
+
+# ---- predecessor A: a row with a NON-MET landing-swept history (S17 marker carry) ----
+#
+# A prior stop attempt in the PREDECESSOR session left an UNMET marker on ITS roster before
+# the `/clear` — hooks/landing-gate.sh's own recheck arm reads exactly this shape to decide
+# "recheck" instead of "first verdict" the next time this name is swept. A MET marker can
+# never coexist with an adopted row (a MET name is filtered out of the fold entirely, never
+# offered — §8d's `closed-one`), so the only history worth carrying forward is a non-MET one.
+add_row_to "$R8" "$ADOPT_A" name=recheck-one status=identified agent_id="$ID_RECHECK" \
+  subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8/.bionic/docs/record/recheck-one.md"
+printf 'landing-swept/v1|at=%s|session=%s|name=recheck-one|agent_id=%s|state=UNMET\n' \
+  "$(iso_ago 200)" "$ADOPT_A" "$ID_RECHECK" >> "$(roster_of "$R8" "$ADOPT_A")"
 
 printf 'the report\n' > "$R8/.bionic/docs/record/landed-one.md"
 printf 'progress\n'   > "$R8/.bionic/tmp/progress-landed.md"
@@ -992,6 +1018,17 @@ expect_contains "an id on an intended row is no identity — that row is UNADDRE
 expect_absent "…and its id is never handed out as an address" \
   "TaskStop aphantom-id-7777777777777777" "$OUT"
 
+# ---------- 8b′: the carried waiver, S17 (AC-12 attempt 2) ----------
+#
+# A row with no declared deliverable used to read SILENT — the same rendering as a row that
+# never delivered anything and never will. The carried `waiver=` field is what tells the two
+# apart, and it must outrank the deliverable/liveness checks: a waived contract is not "quiet
+# for now", it was never open.
+expect_contains "a carried waiver reads WAIVED, not SILENT" \
+  "name=waived-one|verdict=WAIVED" "$OUT"
+expect_absent "…never the misleading SILENT this row used to print" \
+  "name=waived-one|verdict=SILENT" "$OUT"
+
 # ---------- 8c: the report tail, extracted from the transcript ----------
 expect_contains "the landed agent's report tail is printed" "ADOPT-FIXTURE-REPORT-TAIL" "$OUT"
 expect_absent "…the LAST long block, not an earlier one" "EARLIER-LONG-BLOCK" "$OUT"
@@ -1053,6 +1090,31 @@ expect_contains "…and the provenance of the adoption" "|adopted_from=$ADOPT_A|
 expect_contains "the roster file carries its schema header" "roster-state/v1" \
   "$(head -1 "$OWN_ROSTER")"
 
+# ---------- 8g′: the carried waiver and the copied marker (S17, AC-12 attempt 2) ----------
+#
+# THE WAIVER. `adopt_write_row` used to hard-code `waiver=` empty on every adopted row —
+# the one contract field this fold read off the source and then threw away. Carried
+# forward here exactly as the other contract fields are (deliverable/progress/cadence).
+WAIVED_ROW="$(grep -F "|name=waived-one|" "$OWN_ROSTER" | tail -1)"
+expect_contains "the adopted row carries the source's waiver, not an empty field" \
+  "|waiver=probe only — a throwaway read-only agent, S17 fixture|" "$WAIVED_ROW"
+
+# THE MARKER. `hooks/landing-gate.sh` is the schema's one writer today (its own comment,
+# :561-563, calls a second writer "not a live path" — this makes it one, deliberately, by
+# COPYING a line that writer already produced, never originating a new verdict). Copied so
+# that `hooks/session-start.sh`'s `open_rows` and this file's own `youngest_suite_writer` —
+# both of which read a `landing-swept/v1` line straight off the SAME roster file as ground
+# truth, with no re-derivation — see the same history on the successor roster that stood on
+# the predecessor's.
+RECHECK_MARKERS="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -F '|name=recheck-one|')"
+expect_contains "the source's non-MET marker is copied onto the successor roster" \
+  "state=UNMET" "$RECHECK_MARKERS"
+expect_eq "…verbatim, exactly once" "1" "$(printf '%s\n' "$RECHECK_MARKERS" | grep -c .)"
+# A MET marker can never reach this path — closed-one (§8d) proves the fold excludes it
+# from adoption entirely, so there is no row here for a MET marker to attach to.
+expect_absent "a MET marker is never copied — there is no adopted row it could attach to" \
+  "name=closed-one" "$(grep -F 'landing-swept/v1|' "$OWN_ROSTER")"
+
 # A ROW WITH NO ID BUYS NOTHING, so none is written. UNADDRESSABLE is the whole point of
 # that verdict: there is no identity to file, and a row carrying an empty `agent_id=` would
 # be inert at every by-id reader while looking like an adoption on disk.
@@ -1065,9 +1127,12 @@ expect_absent "…nor is the phantom id on an intended row" \
 # next resume; an append per run would grow the roster without adding a fact, and every
 # reader would re-read the same contract N times.
 _dup_before="$(grep -c -F "|name=landed-one|" "$OWN_ROSTER")"
+_marker_dup_before="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
 poke "$R8" adopt
 _dup_after="$(grep -c -F "|name=landed-one|" "$OWN_ROSTER")"
+_marker_dup_after="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
 expect_eq "a second adopt appends no second row for the same agent" "$_dup_before" "$_dup_after"
+expect_eq "…nor a second copy of the carried marker" "$_marker_dup_before" "$_marker_dup_after"
 
 # ---------- 8f: nothing to adopt, and no session key ----------
 R8B="$(make_repo s8-alone)"; new_roster "$R8B"
