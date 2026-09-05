@@ -1,6 +1,8 @@
 # bionic v1 — spec set (DRAFT for ratification)
 
-**Status: RATIFIED by Chris, 2026-09-03 (map #19 closed). Draft-to-ratified edits listed at §11 apply when the epic's Step 0 moves this to its tracked home.** Was: prototype. Written 2026-09-03 for wayfinder ticket #27 (map #19). This is the first
+**Status: RATIFIED by Chris, 2026-09-03 (map #19 closed); moved to its tracked home 2026-09-05 at
+epic-21-v1-ladder Step 2, with §11's consequential edits applied in place and the two drafts
+deleted in that commit.** Written 2026-09-03 for wayfinder ticket #27 (map #19). This is the first
 whole draft of the v1 spec set, for the owner to react to. Nothing here decides anything new: every
 row, rung, and rule is transcribed from a closed ticket's resolution or a research ledger, and each
 carries its citation. Where two sources disagreed, the later ticket's decision stands and the
@@ -13,8 +15,8 @@ stands today (nowhere, by design). §8 is the build order handed to canonical-sd
 list of things only the owner can settle. Vocabulary is `design/domain-dictionary.md`; "adapter" is
 the primary term and "interpreter" its alias, used once below and never again.
 
-**This file is superseded when the ratified set lands.** It and `design/drafts/admission-rule.draft.md`
-are deleted at that point (#26 resolution, "the draft file dies then").
+This file's own draft and `design/drafts/admission-rule.draft.md` were deleted in the commit that
+moved this file to its tracked home (#26 resolution, "the draft file dies then").
 
 Citation forms: `#NN` = the resolution comment of GitHub issue NN; `ML <row>` = `design/research/migration-ledger.md`
 by row id; `PL <rung> <row gist>` = `design/research/proven-ledger.md`; `OS <seam>` = `design/research/omnigent-seams.md`;
@@ -107,10 +109,9 @@ orchestrator channel". Certifying measurement: first-turn surface per seat × mo
 | R2.1 | A seat wakes knowing its role, delivered by its governor, exactly once | lifecycle promise | the seat's first-turn surface: argv `--append-system-prompt` on Claude Code, `developer_instructions` on Codex (OS Headline 1, S9); first-turn transcript | role text absent from the surface, or present twice | one cell per seat × model × role | twin: a seat launched with no role wakes plain (#24 table); baseline per model: does a bare model claim a role unprompted (vacuous cells expected) | double injection on 0.12.0: omnigent's copy plus the shim's compose (OS Headline 1; PL rung 2 "lands twice", predicted not observed); announcement claimed but not printed (PL rung 5 "announcement", A-W5-175) | the orchestrator is the seventh role and wakes by the same channel: SKILL.md on the plugin, bundle `instructions:` on omnigent (#25 §"The orchestrator channel"; OS §5 item 3) |
 | R2.2 | A seat wakes with its room walls placed by its governor at birth | lifecycle promise | the seat's settings and argv at birth (OS S13 `--settings`, `--disallowedTools`); the plugin's `hooks/hooks.json` armed by the CLI | a seat whose room walls are absent from its birth surface | one cell per seat × model | twin: a seat the governor did not create carries none of the governor's walls | `tools_denied` on Codex assurance seats has no enforcement point (PL rung 2 R12 codex, A-W5-171; OS §5 item 8) | Codex rooms unreadable, cure: enforcement point |
 | R2.3 | Room walls never assume who placed them | shape | the room-wall source, one copy, carried by both adapters | a room wall that reads a governor-specific fact (a plugin path, a bundle key) to decide | one source per wall | defect: a wall edited to read a governor fact must break the shared-source match | none | shared source (#23 decision 4) |
+| R2.4 | A seat wakes with its role's tool grants | constitution content (lifecycle promise) | the seat's first-turn configuration | a read-only role's first-turn configuration carries a write tool | one cell per seat × model × role | twin: a writer role's configuration carries write tools | ML R12 refuted on Codex | Claude seats proven @0.11.0, Codex unread (§11, applied 2026-09-05) |
 
-**Rung 2 fog.** *Per-role tool grants* (a read-only role has no write tools; PL rung 2 R12 rows) is
-not placed by #25's table as wall, instruction, or constitution content. It is rowed nowhere above
-and raised in §10 Q2. What would have to exist: a placement decision.
+**Rung 2 fog.** None — tool grants rowed as R2.4 (§11 Q2). (§11, applied 2026-09-05)
 
 ### Rung 3: Walls
 
@@ -192,7 +193,7 @@ the run record; a WARN on a primary surface.
 
 | id | statement | kind | proving surface | falsifying measurement | unit | control | known probes | coverage notes |
 |---|---|---|---|---|---|---|---|---|
-| R5.1 | Stewardship transfers mid-run by an explicit recorded act; run id and record continue; the former steward is silent | lifecycle promise | the transfer act in the run record; post-transfer acts attributable to the new steward; the former steward's acts after transfer, with the empty search | the former steward acts after the transfer, the run id changes, or the record restarts | one transfer per run | twin: the new steward's first act after transfer is accepted | none (untested @0.11.0: never attempted, PL rung 9 SC-3) | omnigent's `switch-agent` route is built-in agents only, so the transfer is relaunch plus cold resume (PL rung 9 F7, 0.11.0 read; 0.12.0 untested) |
+| R5.1 | Stewardship transfers mid-run by an explicit recorded act; run id and record continue; the former steward is silent | lifecycle promise | the transfer act in the run record; post-transfer acts attributable to the new steward; the former steward's acts after transfer, with the empty search | the former steward acts after the transfer, the run id changes, or the record restarts | one transfer per run | twin: the new steward's first act after transfer is accepted | none (untested @0.11.0: never attempted, PL rung 9 SC-3) | omnigent's `switch-agent` route is built-in agents only, so the transfer is relaunch plus cold resume (PL rung 9 F7, 0.11.0 read; 0.12.0 untested); independence in v1 is at the **steward layer** — the chair changes occupant, possibly to another vendor's model, under the same governor; governor-layer (harness) transfer is out of scope (§11, applied 2026-09-05) |
 | R5.2 | When a reviewer's primary is unavailable, the run proceeds on the fallback and a WARN naming the collapse is written to a primary surface | instrument (the WARN) + lifecycle promise (the fallback) | the WARN line in the run record or the plan's registry row | the fallback proceeds and no WARN exists | one collapse per run | twin: primary available, no WARN written | none (untested: nothing writes a WARN, `omni:bundle/rules.yaml:189-195` is `layer: prompt`; PL rung 10) | prerequisite: the WARN producer (build, §8 wave 5) |
 
 **Rung 5 fog.** None. Both rows are untested with a named prerequisite, not fog.
@@ -238,8 +239,8 @@ certificate measures bionic's piece, never an omnigent seam (#24 §"Interpreter-
 
 ## 4. The admission rule
 
-The text of `design/drafts/admission-rule.draft.md` @ b270514, amended per its own §9 and §10 so it
-reads as one rule. Clause numbers follow the draft.
+The admission rule as drafted for #26 (b270514), whose amended text is this §4, amended per its own
+§9 and §10 so it reads as one rule. Clause numbers follow the draft.
 
 > **A statement enters the spec only with the surface that proves it and the measurement that
 > would falsify it. Everything else is fog.**
@@ -542,7 +543,8 @@ resolution, and the assumptions in §10.
 - **Certifies.** Nothing (kit is never certified; it certifies).
 - **Prerequisites.** Wave 0 (the index has to have one home).
 - **Work.** The statement index with the §2 rows. The baseline table, per model per statement,
-  script beside the numbers, for every model the adapters seat (§10 Q4). The Claude climb runner.
+  script beside the numbers, for exactly the model × role pairs the roster names — the roster's
+  population, not every model the adapters seat (§11 Q4; §11, applied 2026-09-05). The Claude climb runner.
   The four rung-3 probes plus the others in §7 as named rows in each runner. The certificate
   registry beside the builds. The gate that runs every guard and refuses certificate-makers.
 - **Ledger rows consumed.** ML B4 (the drill, as omnigent's runner), B9 (the fixture-repo
@@ -668,17 +670,18 @@ Genuine decisions only. Nothing the resolutions already decided is re-asked.
    a plugin-stewarded run to omnigent (or back) in v1, or is v1's transfer only between seats of
    the same adapter (relaunch plus cold resume)? Rung 5's coverage statement depends on it.
 
-**Conflicts noted, later decision kept.** (a) #24's rung-3 gist says "no native spawns"; #25
-decision 2 retired that wall for lease, budget and transitive kill; the rows follow #25, the gist is
-quoted as ratified. (b) Map Notes §8's "a rung is not admitted while a claim under it reads refuted"
-is subsumed by #24 decision 5; §4.5 follows #24. (c) The ledger's *keep* on A2 to A5 versus #25
-decision 2: Q1 above.
+**Conflicts noted, later decision kept — each resolved by §11.** (a) #24's rung-3 gist says "no
+native spawns"; #25 decision 2 retired that wall for lease, budget and transitive kill; the rows
+follow #25, the gist is quoted as ratified, resolved in favour of #25. (b) Map Notes §8's "a rung is
+not admitted while a claim under it reads refuted" is subsumed by #24 decision 5; §4.5 follows #24,
+resolved in favour of #24. (c) The ledger's *keep* on A2 to A5 versus #25 decision 2: resolved in
+favour of #25 decision 2, per §11 item 1. (§11, applied 2026-09-05)
 
 ## 11. Answers to §10 (2026-09-03, Chris via the working session)
 
 1. **Worker-containment keeps (A2–A5).** Follows #25 decision 2: not adopted; the four rows are consumed as dropped; 22 keeps port. *(derived)*
 2. **Per-role tool grants (ML R12).** Constitution content certified at rung 2 ("a seat wakes with its role's tool grants"), read from the seat's first-turn configuration. Not a wall: a read-only role's write is undoable, so by #25 decision 1 it has no ground. *(derived)*
-3. **Epic name and folder.** `epic-21-v1-ladder`, `.bionic/docs/specs/epic-21-v1-ladder/`, branch `epic/21-v1-ladder`, waves 0 / K / 1–5 accepted as the proposal canonical-sdlc Step 0 starts from. *(decided, reversible)*
+3. **Epic name and folder.** `epic-21-v1-ladder`, `.bionic/docs/specs/epic-21-v1-ladder/`, branch `epic/21-v1-ladder`, waves 0 / K / 1–5 accepted as the proposal canonical-sdlc Step 0 starts from. *(decided, reversible)* The epic name and folder are now in use: `epic-21-v1-ladder`, this file's home. (§11, applied 2026-09-05)
 4. **Baseline model set: the roster's population.** The baseline table covers exactly the model × role pairs the roster names; a model outside the roster is never seated, so nothing about it is unread; a roster change pays its baseline column before the model's first run. *(Chris, Q2 of the reaction)* Rejected: every seatable model (a universe larger than the product); a hand-picked subset (a certified run could seat an unmeasured model).
 5. **The plugin's opening act.** The person invoking the method in a hand-opened session is the plugin's opening act (provenance with a human originator, #23 decision 3); arming the Patrol is the resident's birth on Claude Code. The plugin gains no opening command. *(derived)*
 6. **Transfer across adapters: not in v1.** Independence in v1 is at the **steward layer** — the chair changes occupant, possibly to another vendor's model, under the same governor; R5.1's coverage says so. Governor-layer (harness) independence is a different promise with no inherited evidence and no preparing rung; it is a fresh map if ever wanted, recorded under Out of scope. *(Chris, Q1 of the reaction)*
