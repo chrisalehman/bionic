@@ -47,6 +47,19 @@ TOTAL=0
 ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
 no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
 expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
+
+# SUBSTRING, AS A FUNCTION. Nine rows below asked this with a one-line `case` inside a
+# command substitution. Under bash 3.2 — what `/bin/bash` is on macOS, and what this
+# file's own shebang names — that shape PARSES and then truncates the substitution at the
+# first `)` at run time, so the assertion compared against the tail of its own source text
+# instead of an answer. `bash -n` cannot see it; tests/cross-gate-agreement.test.sh §BP
+# greps for it. Step-6 review C-2.
+rp_contains() {  # <haystack> <needle> -> yes|no
+  case "$1" in
+    *"$2"*) printf 'yes' ;;
+    *)      printf 'no'  ;;
+  esac
+}
 expect_empty() { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
 
 # ============================================================
@@ -584,7 +597,7 @@ expect_eq "open_runs: …exactly two lines" 2 "$(line_count "$OR_OUT")"
 expect_eq "open_runs: …newest open first, older open second" \
   "$(printf '%s\n%s' "$NEWOPEN" "$OLDOPEN")" "$OR_OUT"
 expect_eq "open_runs: …the CLOSED plan is not in the set" "no" \
-  "$(case "$OR_OUT" in *"$MIDSHUT"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$OR_OUT" "$MIDSHUT")"
 call_active_run "$R"
 expect_eq "open_runs line 1 == active_run's answer (two open runs)" "$AR_OUT" "$(first_line "$OR_OUT")"
 
@@ -624,9 +637,9 @@ expect_eq "open_runs: plans/ and incidents/ are both walked -> exit 0" 0 "$OR_ST
 expect_eq "open_runs: …two members, plans/ newest first" \
   "$(printf '%s\n%s' "$EPLAN" "$EINC")" "$OR_OUT"
 expect_eq "open_runs: …a plan at depth 3 is OUT of the bound even though it is newest" "no" \
-  "$(case "$OR_OUT" in *"$EDEEP"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$OR_OUT" "$EDEEP")"
 expect_eq "open_runs: …a fenced ## SDLC State is documentation, not a run" "no" \
-  "$(case "$OR_OUT" in *"$EFENCE"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$OR_OUT" "$EFENCE")"
 call_active_plan "$R"
 expect_eq "…and active_plan agrees on which file is newest-and-real" "$EPLAN" "$AP_OUT"
 
@@ -836,7 +849,7 @@ expect_eq "session_run: bound to an OLDER open plan -> exit 0" 0 "$SR_ST"
 expect_eq "session_run: …'bound-open <alpha>' — the binding beats the newest-plan scan" \
   "bound-open $ALPHA" "$SR_OUT"
 expect_eq "session_run: …and beta is nowhere in the answer" "no" \
-  "$(case "$SR_OUT" in *"$BETA"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$SR_OUT" "$BETA")"
 
 # --- R8d/e/f: the three closed bindings, each beside an open beta in the same root ---
 mk_marker "$R8" "b-gamma" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$GAMMA")"
@@ -844,7 +857,7 @@ call_session_run "$R8" "b-gamma"
 expect_eq "session_run: bound to a DELIVERED plan -> exit 2" 2 "$SR_ST"
 expect_eq "session_run: …'bound-closed <gamma>'" "bound-closed $GAMMA" "$SR_OUT"
 expect_eq "session_run: …it NEVER falls through to the other open plan in the root" "no" \
-  "$(case "$SR_OUT" in *"$BETA"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$SR_OUT" "$BETA")"
 
 mk_marker "$R8" "b-delta" "$(printf 'plan=%s\nengaged_at=2026-09-04T10:00:00Z\n' "$DELTA")"
 call_session_run "$R8" "b-delta"
@@ -857,7 +870,7 @@ expect_eq "session_run: bound to a MISSING path -> exit 2" 2 "$SR_ST"
 expect_eq "session_run: …'bound-closed <ghost>', the path it was promised" \
   "bound-closed $GHOST" "$SR_OUT"
 expect_eq "session_run: …and not the newest plan in the root" "no" \
-  "$(case "$SR_OUT" in *"$BETA"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$SR_OUT" "$BETA")"
 
 # --- R8g: line endings on the marker ---
 printf 'plan=%s\r\nengaged_at=2026-09-04T10:00:00Z\r\n' "$ALPHA" \
@@ -1028,7 +1041,7 @@ expect_eq "live_runs: default 7d window -> exit 0" 0 "$LR_ST"
 expect_eq "live_runs: …exactly the plan touched an hour ago" "$LR_FRESH" "$LR_OUT"
 expect_eq "live_runs: …exactly one line" 1 "$(line_count "$LR_OUT")"
 expect_eq "live_runs: …the 8-day-old open plan is NOT live" "no" \
-  "$(case "$LR_OUT" in *"$LR_STALE"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$LR_OUT" "$LR_STALE")"
 
 # --- R10b: the SAME tree with live-window: 30d -> both ---
 printf 'live-window: 30d\n' > "$R/.bionic/config.yaml"
@@ -1102,9 +1115,9 @@ lr_age "$D_SHUT" 1
 call_open_runs "$R"
 call_live_runs "$R" "$LR_NOW"
 expect_eq "live_runs: a delivered plan touched a second ago is not OPEN" "no" \
-  "$(case "$OR_OUT" in *"$D_SHUT"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$OR_OUT" "$D_SHUT")"
 expect_eq "live_runs: …and therefore not LIVE either, however warm" "no" \
-  "$(case "$LR_OUT" in *"$D_SHUT"*) echo yes ;; *) echo no ;; esac)"
+  "$(rp_contains "$LR_OUT" "$D_SHUT")"
 expect_eq "live_runs: …while the open one beside it IS live" "$D_OPEN" "$LR_OUT"
 
 # --- R10e: no open runs at all -> exit 1, silent (open_runs' own answer, unchanged) ---
