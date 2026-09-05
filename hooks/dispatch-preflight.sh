@@ -773,13 +773,26 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # OPEN ROWS AND THE SUITES THEY CLAIM, in one pass over the roster (spec AC-7).
   #
   # "Open" no longer asks the roster whether a row was ever closed — it asks THIS
-  # TURN'S ListAgents answer whether the row's agent is still alive. A dispatch row
+  # TURN'S ListAgents answer whether the row's agent is STILL WORKING. A dispatch row
   # starts life `status=intended` and never transitions on this file (D0: nothing
-  # here owns a liveness fact, so nothing here writes one); `live_agents_has` is the
-  # one reader of the harness's own recorded answer (payload/scripts/lib/agents.sh),
-  # and a name it reports FRESH-and-present is open. `landing-swept/v1` is NOT
-  # consulted any more — a row can go un-swept forever and still close the moment
-  # the agent it names is not among the teammates ListAgents reports.
+  # here owns a liveness fact, so nothing here writes one); `live_agents_status` is a
+  # view of the one reader of the harness's own recorded answer
+  # (payload/scripts/lib/agents.sh). `landing-swept/v1` is NOT consulted any more — a
+  # row can go un-swept forever and still close the moment its agent stops working.
+  #
+  # PRESENCE IS NOT THE PREDICATE; `running` IS (spec R2, AC-27). R2 names two ways an
+  # agent goes — "delivered and stopped, or finished and never stopped" — and the
+  # harness KEEPS LISTING the second kind, with status `idle`, because it stays
+  # addressable: a SendMessage would resume it. A budget that counted on presence would
+  # hold a writer slot for an agent that finished an hour ago until somebody remembered
+  # to stop it, which is the stuck-slot defect this wall was built to end. So a row
+  # counts OPEN only while its name is present with status `running`.
+  #
+  # THE STOP GUARD DELIBERATELY DOES NOT FOLLOW THIS. It resolves on PRESENCE
+  # (`live_agents_has`), because an idle agent is exactly the one a stop is for. Both
+  # questions are answered from ONE parse of ONE recorded answer, so the two can never
+  # disagree about who is listed — only about what the status means, which is the whole
+  # point of asking two questions (tests/cross-gate-agreement.test.sh §LA.5).
   #
   # A CLAIM IS READ OFF THE LEDGER, never off the process table (WALLS/3): a row whose
   # brief declared a subprocess claim spends a suite. Asking `pgrep` per row would be
@@ -787,10 +800,12 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # path; the ledger is the artifact this gate already owns. A claim only spends a
   # suite while its row is OPEN — a finished agent's old claim costs nothing.
   #
-  # AMBIGUOUS COUNTS AS OPEN (`live_agents_has` exit 2, the name present more than
-  # once): the safe direction is to spend a slot on a name that MIGHT still be live
-  # rather than hand out budget on a reading the reader itself could not resolve
-  # (rule fail-closed-constants).
+  # AMBIGUOUS COUNTS AS OPEN (exit 2, the name present more than once): the safe
+  # direction is to spend a slot on a name that MIGHT still be working rather than hand
+  # out budget on a reading the reader itself could not resolve (rule
+  # fail-closed-constants). Note the asymmetry with the `running` test above and that it
+  # is deliberate: an UNRESOLVABLE row is a reading nobody could make, while an `idle`
+  # row is a reading the harness made and this wall believes.
   #
   # ON A STALE OR MISSING ANSWER (exit 3/4) this function refuses to answer at all —
   # printing `<state> <age>` instead of `<open> <claimed>` and returning that same
@@ -802,7 +817,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
                             #   or "<stale|none> <age|none>" (exit 3/4, not fresh)
     local f="$1" transcript="$2" line nm claims seen open=0 claimed=0
-    local la_out la_rc la_rest la_state la_age
+    local la_all la_out la_st la_rc la_rest la_state la_age row_open
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -812,16 +827,28 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       case "$seen" in *"|${nm}|"*) continue ;; esac
       seen="${seen}${nm}|"
 
-      # `live_agents_has`'s own stderr passes through here unchanged — one line,
+      # The reader's own stderr passes through here unchanged — one line,
       # `live-agents: <state> age=<n|none>` — captured rather than left to leak so
-      # the STALE/NONE case below can hand its pieces to the caller verbatim.
+      # the STALE/NONE case below can hand its pieces to the caller verbatim. Its
+      # STDOUT, on the `running`/`idle` path, is the status word. Both arrive in one
+      # capture and are told apart by the contract line's own prefix rather than by
+      # the order they were written in, so nothing here depends on interleaving.
       la_rc=0
-      la_out=$( { live_agents_has "$transcript" "$nm" >/dev/null; } 2>&1 ) || la_rc=$?
+      la_all=$( { live_agents_status "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
+      la_out=$(printf '%s\n' "$la_all" | sed -n 's/^\(live-agents: .*\)$/\1/p' | head -1) || la_out=""
+      la_st=$(printf '%s\n' "$la_all" | sed -n '/^live-agents: /!p' | head -1) || la_st=""
       case "$la_rc" in
         0|2)
-          open=$(( open + 1 ))
-          claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
-          [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+          # Exit 0 is one row and `la_st` is its status: a writer only while `running`.
+          # Exit 2 is unresolvable and always open (see AMBIGUOUS above).
+          row_open=no
+          [ "$la_rc" -eq 2 ] && row_open=yes
+          [ "$la_rc" -eq 0 ] && [ "$la_st" = "running" ] && row_open=yes
+          if [ "$row_open" = "yes" ]; then
+            open=$(( open + 1 ))
+            claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
+            [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+          fi
           ;;
         1) : ;;
         3|4)

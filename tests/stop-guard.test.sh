@@ -213,11 +213,18 @@ PLAN
 # fresh clone.
 LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
 
-la_body() {  # <name>... -> one real-shaped ListAgents answer body
-  local n
+la_body() {  # <name[:status]>... -> one real-shaped ListAgents answer body
+  local n nm st
   printf '%s\n\nTeammates (%d):\n' "$LA_SELF" "$#"
   for n in "$@"; do
-    printf '  %s [8895ce]  ·  bionic:senior-implementor  ·  running  ·  started 7m ago\n' "$n"
+    # A bare name is `running`, which every fixture written before S16 meant. `name:idle`
+    # writes the harness's other status: a teammate that finished its turn and was never
+    # stopped stays listed, because it stays addressable. Section 16 is where that matters.
+    case "$n" in
+      *:*) nm="${n%%:*}"; st="${n##*:}" ;;
+      *)   nm="$n";       st="running"  ;;
+    esac
+    printf '  %s [8895ce]  ·  bionic:senior-implementor  ·  %s  ·  started 7m ago\n' "$nm" "$st"
   done
 }
 
@@ -1475,6 +1482,64 @@ expect_contains "…with the same named fix" "call ListAgents" "$GUARD_ERR"
 plant_live "$FR_TR" fresh "worker"
 run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
 expect_status "…and with the answer restored the same stop is PERMITTED again" 0 "$GUARD_ST"
+
+# ============================================================
+echo ""
+echo "=== Section 16: an IDLE agent is exactly the one you stop (spec R2, AC-27; S16) ==="
+# ============================================================
+#
+# S16 splits the two questions the live set is asked. The DISPATCH BUDGET stops counting a
+# row once its agent reads `idle` — a teammate that finished its turn and was never stopped
+# is not a writer, and holding a slot for it is B-1's stuck slot in a new coat. THE STOP
+# GUARD must not follow it there. It resolves on PRESENCE, and an idle agent is precisely
+# the target a stop exists for: the harness still lists it because it is still addressable,
+# and somebody has to close it. A guard that read the budget's rule would refuse to stop
+# the very agents the budget just stopped counting, and the finished agent would be
+# unstoppable AND uncounted.
+#
+# One positive, one control. Both drive the shipped guard end to end, by bare name.
+
+IFS='|' read -r I_REPO I_TR I_SUB <<< "$(make_world idlestop yes)"
+mkdir -p "$I_REPO/.bionic/docs/record"
+
+plant_agent "$I_SUB" "aidle-7777777777777777" "finished-writer"
+echo "the delivered artifact" > "$I_REPO/.bionic/docs/record/finished-writer.md"
+roster_row "$I_REPO" "$SID_A" "finished-writer" "aidle-7777777777777777" "" "confirmed" \
+  ".bionic/docs/record/finished-writer.md"
+
+# The answer now names it IDLE — plant_agent wrote it running, which is the control below.
+plant_live "$I_TR" fresh "finished-writer:idle"
+expect_contains "meta: the planted answer really does say idle, not running" \
+  "finished-writer [8895ce]  ·  bionic:senior-implementor  ·  idle" "$(cat "$I_TR")"
+
+run_guard "$(mk_stop_payload "$SID_A" "$I_TR" "$I_REPO" "finished-writer")"
+expect_status "an IDLE agent with a MET contract is still stoppable BY BARE NAME" 0 "$GUARD_ST"
+expect_empty "…and silently, exactly as the running case does" "$GUARD_ERR"
+
+# THE CONTROL, on the same world and the same name: running instead of idle. If this
+# differed, the row above would be reporting the status and not the resolution.
+plant_live "$I_TR" fresh "finished-writer"
+run_guard "$(mk_stop_payload "$SID_A" "$I_TR" "$I_REPO" "finished-writer")"
+expect_status "…the same stop with the same name RUNNING also passes (status is not the gate)" \
+  0 "$GUARD_ST"
+
+# AND THE PAIRED NEGATIVE that keeps both of those from passing vacuously: absent from the
+# newest answer is still unresolvable, idle or not. Only presence resolves.
+plant_live "$I_TR" fresh "somebody-else"
+run_guard "$(mk_stop_payload "$SID_A" "$I_TR" "$I_REPO" "finished-writer")"
+expect_status "…while a name ABSENT from the newest answer still does not resolve: REFUSED" \
+  2 "$GUARD_ST"
+
+# An idle agent whose contract is UNMET keeps the whole ceremony. Being finished is not a
+# discharge — the artifact is, or the ack is — so `idle` must not become a third one.
+plant_agent "$I_SUB" "aidle-8888888888888888" "idle-slacker"
+roster_row "$I_REPO" "$SID_A" "idle-slacker" "aidle-8888888888888888" "" "confirmed" \
+  ".bionic/docs/record/never-delivered.md"
+plant_live "$I_TR" fresh "idle-slacker:idle"
+run_guard "$(mk_stop_payload "$SID_A" "$I_TR" "$I_REPO" "idle-slacker")"
+expect_status "an IDLE agent with an UNMET contract still meets the ceremony: REFUSED" 2 "$GUARD_ST"
+expect_contains "…with the observation refusal, not a resolution one" \
+  "No observation has been recorded" "$GUARD_ERR"
 
 # ============================================================
 echo ""

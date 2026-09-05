@@ -237,6 +237,52 @@ live_agents() {  # <transcript.jsonl>
   return 3
 }
 
+# THE STATUS OF ONE NAME, off the SAME parse `live_agents_has` reads (spec R2, AC-27).
+#
+# R2 names two ways an agent goes: "delivered and stopped, or finished and never stopped".
+# The harness keeps LISTING the second kind — status `idle` — because it stays addressable:
+# a SendMessage would resume it. So presence answers "is this name still on the roster the
+# harness prints", and it is the right question for a STOP (an idle agent is exactly the one
+# you stop). It is the wrong question for a BUDGET, which wants to know whether the row is
+# still a writer. That is a question about the status, and this is where it is answered —
+# from one `live_agents` call, so the two consumers can never disagree about who is listed.
+#
+# Same exit codes as `live_agents_has`, deliberately: a caller that switches between them
+# branches identically, and only the stdout differs.
+#
+#   exit 0  the name is present exactly once   — its status word on stdout
+#   exit 1  the name is absent (or empty)      — no stdout
+#   exit 2  the name is present more than once — no stdout, nothing to report
+#   exit 3/4 propagated from live_agents unchanged
+live_agents_status() {  # <transcript.jsonl> <name>
+  local transcript="${1:-}" want="${2:-}" set_out rc pair count st
+
+  rc=0
+  set_out="$(live_agents "$transcript")" || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+
+  [ -n "$want" ] || return 1
+
+  # Count and status in ONE pass, on two lines. The counting predicate is character for
+  # character `live_agents_has`'s, so the two can never disagree about WHO is listed — only
+  # about what the status means. Two lines rather than one joined field because a status is
+  # whatever the harness printed between two middots: never assume it holds no separator,
+  # and never make a tab in this file's source load-bearing.
+  pair="$(printf '%s\n' "$set_out" | LC_ALL=C awk -F'|' -v want="$want" '
+    NF >= 1 && $1 == want { n++; st = $3 }
+    END { print n + 0; print st }
+  ')" || pair=""
+
+  count="$(printf '%s\n' "$pair" | sed -n '1p')" || count=""
+  st="$(printf '%s\n' "$pair" | sed -n '2p')" || st=""
+
+  case "$count" in
+    0|"") return 1 ;;
+    1)     printf '%s\n' "$st"; return 0 ;;
+    *)     return 2 ;;
+  esac
+}
+
 live_agents_has() {  # <transcript.jsonl> <name>
   local transcript="${1:-}" want="${2:-}" set_out rc count
 

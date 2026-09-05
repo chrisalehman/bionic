@@ -23,6 +23,10 @@
 #       exit 2  FRESH and the name appears more than once
 #       exit 3/4 propagated from live_agents unchanged
 #
+#   live_agents_status <transcript.jsonl> <name>          (S16)
+#       stdout  the status word of a name present exactly once (`running`, `idle`, …)
+#       exit    the same 0/1/2/3/4 as live_agents_has, off the same parse
+#
 # WHY THE ID JOIN IS THE CONTRACT, NOT THE BODY TEXT. A ListAgents answer is located by
 # joining a `tool_result`'s `tool_use_id` back to the assistant `tool_use` block whose
 # `.name` is `ListAgents`. Content sniffing would let any tool that happened to echo the
@@ -44,8 +48,11 @@
 # results; the one timestamped 2026-09-05T00:52:23.349Z carries the `Teammates (1):`
 # block naming the researcher `research-code-map` running, the earlier ones carry none).
 # They are inlined here rather than read from that path because `.bionic/` is gitignored
-# — a suite that read it would pass on this machine and fail in a fresh clone. The
-# surrounding transcript entries are composed from the real entry shapes: an assistant
+# — a suite that read it would pass on this machine and fail in a fresh clone.
+#
+# §P adds three more captured bodies, from the same session's 26-answer corpus, and they
+# are the first in this suite to carry a status other than `running` — see its own header.
+# The surrounding transcript entries are composed from the real entry shapes: an assistant
 # entry whose `.message.content[]` holds `{type:"tool_use", name:"ListAgents", id:…}`, a
 # user entry whose `.message.content[]` holds `{type:"tool_result", tool_use_id:…,
 # content:…}` with content a string OR an array of `{type:"text",text}`, a user PROMPT
@@ -611,6 +618,240 @@ has_errexit_probe "$T_STALE" "research-code-map"
 expect_eq "set -e caller: live_agents_has STALE -> 3" "3" "$HERC"
 has_errexit_probe "$T_GARBAGE" "research-code-map"
 expect_eq "set -e caller: live_agents_has unparseable -> 4" "4" "$HERC"
+
+# ============================================================
+echo "=== §P — live_agents_status: the status of a name, and idle is not running ==="
+# ============================================================
+# WHY THIS SECTION EXISTS (spec R2, AC-6/AC-27; the Step-5 auditor's F-1). R2 names TWO
+# departure modes — "delivered and stopped, or finished and never stopped" — and until
+# this section the whole fixture corpus held one status, `running`. The harness KEEPS
+# listing a teammate that finished its turn and was never TaskStop'd, with status `idle`,
+# because it stays addressable: a SendMessage would resume it. So presence alone cannot
+# answer "is this a writer", and a budget that counts on presence hands a finished agent
+# a slot forever — the B-1 defect in a new coat.
+#
+# THE SPLIT (design D1′/D0 — one owner per liveness truth; two consumers, two questions).
+# The reader keeps emitting EVERY listed teammate with the status it parsed: the stop
+# guard needs the idle row, because an idle agent is exactly the one you stop. What the
+# BUDGET needs is narrower — is this row a writer — and that is a question about the
+# status, not about presence. `live_agents_status` answers it from the same single parse,
+# so no consumer re-reads the transcript and the two can never disagree about who is
+# listed.
+#
+#   live_agents_status <transcript.jsonl> <name>
+#       stdout  the status word of a name present EXACTLY ONCE (`running`, `idle`, …)
+#       exit 0  FRESH and the name appears exactly once  (status on stdout)
+#       exit 1  FRESH and the name is absent             (no stdout)
+#       exit 2  FRESH and the name appears more than once (no stdout — unresolvable)
+#       exit 3/4 propagated from live_agents unchanged   (no stdout)
+#
+# FIXTURE FIDELITY. The three answer bodies below are REAL, captured verbatim by
+# `jq -r 'select(.ts==…)|.content'` from
+# `.bionic/docs/record/wave-roster-lifecycle/fixtures/listagents-results-all.jsonl`
+# (26 results from this project's own orchestrator session). Their `Peer sessions (15):`
+# block and self-line are byte-identical to $PEERS and $SELFLINE above, verified by diff,
+# so reusing those constants leaves each body byte-for-byte the captured answer:
+#
+#   2026-09-05T02:52:27.857Z  s6-stop-resolution RUNNING, s5-dispatch-budget running
+#   2026-09-05T03:07:41.801Z  s6-stop-resolution IDLE,    s5-dispatch-budget running
+#   2026-09-05T03:09:13.259Z  s6-stop-resolution ABSENT,  s5-dispatch-budget idle
+#
+# Those three are consecutive real answers around one real stop, and §P.4 drives them as
+# the AC-6 chain: the transcript that recorded them also recorded
+# `TaskStop {"task_id":"s6-stop-resolution"}` at 2026-09-05T03:07:46.215Z answered
+# `Successfully stopped task: tql0f7z5e` at 03:07:46.928Z — between the IDLE answer and
+# the ABSENT one. The window from s6's delivery (~02:5x) to that stop is the defect this
+# slice closes: a finished agent, still listed, still counted.
+
+BODY_S6_RUNNING="$SELFLINE
+
+Teammates (2):
+  s6-stop-resolution [864238]  ·  bionic:senior-implementor  ·  running  ·  started 1h ago
+  s5-dispatch-budget [d34f18]  ·  bionic:implementor  ·  running  ·  started 19m ago
+
+$PEERS"
+
+BODY_S6_IDLE="$SELFLINE
+
+Teammates (2):
+  s6-stop-resolution [864238]  ·  bionic:senior-implementor  ·  idle  ·  started 1h ago
+  s5-dispatch-budget [d34f18]  ·  bionic:implementor  ·  running  ·  started 34m ago
+
+$PEERS"
+
+BODY_S6_GONE="$SELFLINE
+
+Teammates (1):
+  s5-dispatch-budget [d34f18]  ·  bionic:implementor  ·  idle  ·  started 36m ago
+
+$PEERS"
+
+call_live_agents_status() {  # <transcript> <name> -> SOUT, SST, SERR
+  SOUT="$(bash -c 'set -u; . "$1"; live_agents_status "$2" "$3"' _ "$LIB" "$1" "$2" 2>"$SANDBOX/.serr")"
+  SST=$?
+  SERR="$(cat "$SANDBOX/.serr" 2>/dev/null)"
+}
+
+DEFS_S="$(bash -c 'set -u; . "$1"; type -t live_agents_status' _ "$LIB" 2>/dev/null)"
+expect_eq "defines live_agents_status as a function" "function" "$DEFS_S"
+
+# ------------------------------------------------------------
+# §P.1 — the real idle-beside-running answer.
+# ------------------------------------------------------------
+T_IDLE="$SANDBOX/idle-beside-running.jsonl"
+{
+  entry_prompt      "2026-09-05T03:07:30.000Z" "land S6"
+  entry_tool_use    "2026-09-05T03:07:40.000Z" "ListAgents" "toolu_01Amv2QjVrsFDp5uVfKEowty"
+  entry_tool_result "2026-09-05T03:07:41.801Z" "toolu_01Amv2QjVrsFDp5uVfKEowty" "$BODY_S6_IDLE"
+} > "$T_IDLE"
+
+# The READER is unchanged: it still emits the idle teammate, with its status, because the
+# stop guard resolves its target from exactly these lines.
+call_live_agents "$T_IDLE"
+expect_eq "the reader still emits BOTH teammates of the real idle answer" \
+  "$(printf 's6-stop-resolution|bionic:senior-implementor|idle\ns5-dispatch-budget|bionic:implementor|running')" \
+  "$OUT"
+expect_eq "…FRESH" "0" "$ST"
+
+call_live_agents_has "$T_IDLE" "s6-stop-resolution"
+expect_eq "live_agents_has still resolves the idle teammate (the stop guard's contract)" "0" "$HST"
+
+call_live_agents_status "$T_IDLE" "s6-stop-resolution"
+expect_eq "live_agents_status: the finished-and-unstopped teammate reads idle" "idle" "$SOUT"
+expect_eq "…exit 0, it is present exactly once" "0" "$SST"
+
+call_live_agents_status "$T_IDLE" "s5-dispatch-budget"
+expect_eq "live_agents_status: its still-working sibling reads running" "running" "$SOUT"
+expect_eq "…exit 0" "0" "$SST"
+
+# ANTI-VACUITY. The two rows above come off ONE answer and read DIFFERENTLY, so a helper
+# that hard-coded either word — or that read the type column — fails one of them.
+
+call_live_agents_status "$T_IDLE" "s1-run-library"
+expect_eq "live_agents_status: an absent name is exit 1" "1" "$SST"
+expect_empty "…and prints nothing" "$SOUT"
+
+call_live_agents_status "$T_IDLE" ""
+expect_eq "live_agents_status: an empty name is exit 1" "1" "$SST"
+
+expect_match "live_agents_status writes the one contract line and nothing else" "$SERR" \
+  '^live-agents: fresh age=[0-9]+$'
+
+# ------------------------------------------------------------
+# §P.2 — the exit codes track live_agents_has exactly, so the budget and the guard can
+#         never disagree about WHO is listed, only about what the status means.
+# ------------------------------------------------------------
+call_live_agents_status "$T_DUP" "research-code-map"
+expect_eq "live_agents_status: a name listed twice is exit 2, unresolvable" "2" "$SST"
+expect_empty "…and prints no status, because there are two" "$SOUT"
+
+call_live_agents_status "$T_STALE" "research-code-map"
+expect_eq "live_agents_status: STALE propagates 3" "3" "$SST"
+expect_empty "…printing no status" "$SOUT"
+
+call_live_agents_status "$T_NONE" "research-code-map"
+expect_eq "live_agents_status: NONE propagates 4" "4" "$SST"
+
+call_live_agents_status "$T_GARBAGE" "research-code-map"
+expect_eq "live_agents_status: an unparseable body propagates 4" "4" "$SST"
+
+# The pair below is the "one parse, two questions" claim as an assertion: for every name
+# on one fresh answer, `has` and `status` return the SAME exit code.
+AGREE=""
+for _n in s6-stop-resolution s5-dispatch-budget s1-run-library; do
+  call_live_agents_has "$T_IDLE" "$_n"
+  call_live_agents_status "$T_IDLE" "$_n"
+  [ "$HST" = "$SST" ] || AGREE="${AGREE}${_n}(has=$HST status=$SST) "
+done
+expect_empty "has and status return the same exit code for every name on one answer" "$AGREE"
+
+# ------------------------------------------------------------
+# §P.3 — a doctored parser that drops the status column takes the status reader with it.
+#         Without this, §P's rows would pass against a `status` helper that answered from
+#         somewhere other than the one parse the guard reads.
+# ------------------------------------------------------------
+DOCTORED_LIB="$SANDBOX/agents-nostatus.sh"
+sed 's/print name "|" type "|" status/print name "|" type "|" "running"/' "$LIB" > "$DOCTORED_LIB"
+expect_match "the doctored copy differs from the library in exactly one line" \
+  "$(diff "$LIB" "$DOCTORED_LIB" | grep -c '^[<>]')" '^2$'
+DOCT_OUT="$(bash -c 'set -u; . "$1"; live_agents_status "$2" "$3"' _ "$DOCTORED_LIB" "$T_IDLE" "s6-stop-resolution" 2>/dev/null)"
+expect_eq "a parser doctored to write 'running' into every row moves live_agents_status" \
+  "running" "$DOCT_OUT"
+call_live_agents_status "$T_IDLE" "s6-stop-resolution"
+expect_eq "…while the honest library still reads idle, so the mutation discriminates" \
+  "idle" "$SOUT"
+
+# ------------------------------------------------------------
+# §P.4 — AC-6, the whole departure, on three consecutive REAL answers.
+#         running (02:52:27.857Z) -> idle (03:07:41.801Z) -> absent (03:09:13.259Z),
+#         with the real TaskStop recorded at 03:07:46.215Z between the last two.
+# ------------------------------------------------------------
+mk_chain() {  # <n answers> -> a transcript carrying the first n of the three real answers
+  local n="$1" f="$SANDBOX/ac6-chain-$1.jsonl"
+  {
+    entry_prompt      "2026-09-05T02:50:00.000Z" "status of the wave"
+    entry_tool_use    "2026-09-05T02:52:26.000Z" "ListAgents" "toolu_01ReEMDaU9DHmtNzwvGQcZPH"
+    entry_tool_result "2026-09-05T02:52:27.857Z" "toolu_01ReEMDaU9DHmtNzwvGQcZPH" "$BODY_S6_RUNNING"
+    if [ "$n" -ge 2 ]; then
+      entry_tool_use    "2026-09-05T03:07:40.000Z" "ListAgents" "toolu_01Amv2QjVrsFDp5uVfKEowty"
+      entry_tool_result "2026-09-05T03:07:41.801Z" "toolu_01Amv2QjVrsFDp5uVfKEowty" "$BODY_S6_IDLE"
+    fi
+    if [ "$n" -ge 3 ]; then
+      entry_tool_use    "2026-09-05T03:09:12.000Z" "ListAgents" "toolu_014Hk3hy97HJeygpSkNgNiXp"
+      entry_tool_result "2026-09-05T03:09:13.259Z" "toolu_014Hk3hy97HJeygpSkNgNiXp" "$BODY_S6_GONE"
+    fi
+  } > "$f"
+  printf '%s' "$f"
+}
+
+CHAIN1="$(mk_chain 1)"
+CHAIN2="$(mk_chain 2)"
+CHAIN3="$(mk_chain 3)"
+
+call_live_agents_status "$CHAIN1" "s6-stop-resolution"
+expect_eq "AC-6 chain (1/3) at 02:52:27.857Z the writer is running" "running" "$SOUT"
+expect_eq "…exit 0" "0" "$SST"
+
+call_live_agents_status "$CHAIN2" "s6-stop-resolution"
+expect_eq "AC-6 chain (2/3) at 03:07:41.801Z it has FINISHED and is idle, still listed" \
+  "idle" "$SOUT"
+call_live_agents_has "$CHAIN2" "s6-stop-resolution"
+expect_eq "…and still resolvable, which is why the stop at 03:07:46.215Z could name it" \
+  "0" "$HST"
+
+call_live_agents_status "$CHAIN3" "s6-stop-resolution"
+expect_eq "AC-6 chain (3/3) after the recorded stop it is ABSENT from the newest answer" \
+  "1" "$SST"
+call_live_agents_has "$CHAIN3" "s6-stop-resolution"
+expect_eq "…and live_agents_has agrees it is gone" "1" "$HST"
+
+# The sibling is the control: it is on all three answers, so the chain above is a
+# statement about s6's departure and not about the newest answer being empty.
+call_live_agents_status "$CHAIN3" "s5-dispatch-budget"
+expect_eq "…while its sibling is still listed on the newest answer, now idle itself" \
+  "idle" "$SOUT"
+
+# ------------------------------------------------------------
+# §P.5 — errexit, for the same reason §N exists.
+# ------------------------------------------------------------
+status_errexit_probe() {  # <transcript> <name> -> SERC
+  bash -c '
+    set -euo pipefail
+    . "$1"
+    live_agents_status "$2" "$3"
+  ' _ "$LIB" "$1" "$2" >/dev/null 2>&1
+  SERC=$?
+}
+status_errexit_probe "$T_IDLE" "s6-stop-resolution"
+expect_eq "set -e caller: live_agents_status present -> 0" "0" "$SERC"
+status_errexit_probe "$T_IDLE" "s1-run-library"
+expect_eq "set -e caller: live_agents_status absent -> 1" "1" "$SERC"
+status_errexit_probe "$T_DUP" "research-code-map"
+expect_eq "set -e caller: live_agents_status ambiguous -> 2" "2" "$SERC"
+status_errexit_probe "$T_STALE" "research-code-map"
+expect_eq "set -e caller: live_agents_status STALE -> 3" "3" "$SERC"
+status_errexit_probe "$T_GARBAGE" "research-code-map"
+expect_eq "set -e caller: live_agents_status unparseable -> 4" "4" "$SERC"
 
 # ============================================================
 echo
