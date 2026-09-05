@@ -2495,6 +2495,23 @@ EOF
         TICK_LIVE_STATE="none"
       else
         TICK_OPEN_LIVE=0
+        # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-4, the
+        # tick half of the finding the budget wall's loop already answers). `live_agents`
+        # memoizes its parse in shell variables keyed on the transcript's path, size and
+        # mtime — but the per-row call below runs inside a command substitution, and a
+        # subshell INHERITS its parent's variables while its own writes die with it. So the
+        # first row would warm a cache nobody sees and every open row would pay a full
+        # parse: two whole-file `jq` passes and nine spawns. Measured on this machine, one
+        # tick over twelve open rows and a 4.1 MB transcript ran jq 24 times.
+        #
+        # IT ALSO WARMS `youngest_suite_writer` (the EMERGENCY arm below), which asks the
+        # same predicate per candidate row inside its own substitution — a subshell of this
+        # one, so it inherits what is cached here and adds no parse of its own.
+        #
+        # LAZILY, INSIDE THE `OPEN_ROSTER > 0` ARM, for the same reason the wall does it
+        # lazily: a roster with nothing open reads the transcript zero times. Its answer is
+        # discarded — this line is a cache fill, and every row's verdict is the predicate's.
+        live_agents "$TICK_TR" >/dev/null 2>&1 || :
         while IFS= read -r TICK_NAME; do
           [ -n "$TICK_NAME" ] || continue
           # The predicate prints nothing on stdout, so this capture is the reader's one
