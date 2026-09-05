@@ -1182,7 +1182,7 @@ _sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed)
 }
 
 # THE ONE GRAMMAR THIS REPO ALREADY HAS (Step-6 review-a C-5, review-b finding (c)/N-2).
-# payload/scripts/lib/run.sh's run_state strips a trailing a/b sub-step letter before it
+# payload/scripts/lib/run.sh's run_open strips a trailing a/b sub-step letter before it
 # ever looks at digits (`local step="${current%[ab]}"`) — `current: 3b` and `current: 4b`
 # are recognized, in-repo forms, not malformed ones. This mirrors exactly that: strip the
 # same optional letter, then require what remains to be all-digits. A task-scale `current:

@@ -6939,7 +6939,7 @@ expect_contains "DS.6 …the scan sees the planted row" "$DS_INVENTED" "$DS_MUT_
 
 # ============================================================
 echo ""
-echo "=== CG — the current: GRAMMAR: sched_plan_current agrees with run_state's step-read (epic-21 T6) ==="
+echo "=== CG — the current: GRAMMAR: sched_plan_current agrees with run.sh's run_open step-read (epic-21 T6) ==="
 # ============================================================
 #
 # TWO READERS OF ONE FIELD, deliberately duplicated rather than shared (hooks/session-poker.sh
@@ -6992,7 +6992,7 @@ for CG_STEP in 3 4 8; do
     CG_PLAN="$(cg_plan "$CG_VAL")"
     expect_eq "CG.1 sched_plan_current(current: $CG_VAL) reads the step, letter stripped" \
       "$CG_STEP" "$(cg_sched_current "$CG_PLAN")"
-    expect_eq "CG.1 …and run_state's run_open agrees this is a live, in-range step" \
+    expect_eq "CG.1 …and run.sh's run_open agrees this is a live, in-range step" \
       "0" "$(cg_run_open "$CG_PLAN")"
   done
 done
@@ -7001,7 +7001,7 @@ done
 for CG_BAD in "abc" "3 (Step-3 review)" "3c"; do
   CG_PLAN="$(cg_plan "$CG_BAD")"
   expect_eq "CG.2 sched_plan_current withholds on '$CG_BAD'" "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.2 …and run_state's run_open agrees this plan is not a recognized open state" \
+  expect_eq "CG.2 …and run.sh's run_open agrees this plan is not a recognized open state" \
     "1" "$(cg_run_open "$CG_PLAN")"
 done
 # no current: line at all — same non-agreement: both give up on the field, neither fills it in
@@ -7026,7 +7026,7 @@ for CG_T in T1 T5 T23; do
   CG_PLAN="$(cg_plan "$CG_T")"
   expect_eq "CG.3 sched_plan_current withholds on task-scale '$CG_T' (no numbered step)" \
     "" "$(cg_sched_current "$CG_PLAN")"
-  expect_eq "CG.3 …while run_state's run_open still calls a task-scale plan an OPEN run" \
+  expect_eq "CG.3 …while run.sh's run_open still calls a task-scale plan an OPEN run" \
     "0" "$(cg_run_open "$CG_PLAN")"
 done
 
