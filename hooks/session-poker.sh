@@ -1281,7 +1281,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan
+adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver
   awk -v ackfile="$2" '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
@@ -1314,6 +1314,15 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
       v = kv($0, "launched_at");   if (v != "") launch[n] = v
       v = kv($0, "session");       if (v != "") sess[n]   = v
       v = kv($0, "adopted_from");  if (v != "") afrom[n]  = v
+      # THE WAIVER, carried forward the same way the contract fields are (S17, AC-12 attempt
+      # 2). Before this fix it was the one field this fold read off the source row and then
+      # dropped: `adopt_write_row` hard-coded `waiver=` empty on every adopted row, so a
+      # dispatch this session waived at launch came out the far side of a clear looking like
+      # one that never was — the `verdict_row` function in hooks/session-sweeper.sh reads
+      # `waiver=` straight off the row (no marker involved) and calls a non-empty one WAIVED
+      # before it ever asks about a deliverable, so an empty copy verdicted as an unmet
+      # SILENT row instead.
+      v = kv($0, "waiver");        if (v != "") waiv[n]   = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
@@ -1337,9 +1346,9 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
         n = order[i]
         if (n in met) continue
         if (n in acked) continue
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
-               ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : "")
+               ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n]
       }
     }
   ' "$1" 2>/dev/null
@@ -1369,6 +1378,11 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 #   the contract        deliverable/progress/cadence, copied forward unchanged — the same
 #                       forward-copy every roster writer in the fleet performs, so the
 #                       successor's readers see the contract the predecessor declared.
+#   waiver=             S17 (AC-12 attempt 2). Copied forward for the same reason: it is a
+#                       contract field, and `hooks/session-sweeper.sh verdict_row` reads it
+#                       directly off THIS row (no marker involved) to decide WAIVED before it
+#                       ever looks at a deliverable. A row with a real waiver and an empty
+#                       copy of it verdicts as if the waiver had never been declared.
 #
 # THE APPEND IDIOM IS hooks/dispatch-preflight.sh's (:1339-1347), copied deliberately:
 # header-if-absent, `chmod 600`, ONE `printf` of one line, NO LOCK. A single O_APPEND write
@@ -1394,9 +1408,9 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
-  local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" d
+  local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
   [ -n "$id" ] || return 1
   [ -n "$sid" ] || return 1
   d="${f%/*}"
@@ -1412,11 +1426,46 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
       >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
   fi
-  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=|teammate_id=%s|adopted_from=%s|tool_use_id=|plan=%s\n' \
+  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|teammate_id=%s|adopted_from=%s|tool_use_id=|plan=%s\n' \
     "$sid" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
-    "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" \
+    "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" "$(clean "$waiver")" \
     "$(clean "$addr")" "$(clean "$osid")" "$(clean "$plan")" \
     >> "$f" 2>/dev/null || return 1
+  return 0
+}
+
+# THE MARKER COPY (S17, AC-12 attempt 2) — the other half of the contract-verdict fix beside
+# the waiver above. `adopt_write_row` puts the row on this session's roster; this puts the
+# SOURCE roster's own landing verdict for that name beside it, verbatim, so a reader that
+# trusts the marker rather than re-deriving from disk (`hooks/session-start.sh`'s
+# `open_rows`, this file's own `youngest_suite_writer`, both scanning the roster they were
+# handed for a `landing-swept/v1|…|name=<X>|` line) sees the same answer on the successor
+# that stood on the predecessor.
+#
+# hooks/landing-gate.sh IS THE ONE WRITER of this schema today — its own comment (:561-563)
+# already anticipates a second and calls it "not a live path". This call site is that second
+# writer, made deliberately narrow: it never COMPUTES a verdict, it only APPENDS a line that
+# writer already produced, byte for byte, off the source roster this verb is only ever
+# permitted to read (never write — the row above is still the one file this verb writes to).
+#
+# THE LATEST LINE, because the marker stream is append-only the same way the roster is: a
+# name can be superseded (UNMET -> MET) and the last line wins. A MET line can never be the
+# one found here — `adopt_fold`'s `met[]` filter above excludes any name carrying one from
+# the fold entirely, so a name that reaches this call was never offered one to adopt in the
+# first place, and the only history left to find is non-MET.
+#
+# IDEMPOTENT BY EXACT-LINE PRESENCE, the same posture `adopt_write_row` takes: the source
+# session is the one and only writer of ITS OWN marker lines, so a line copied once from it
+# never changes shape on a later read, and comparing the verbatim text is enough to know this
+# adopt already carried it.
+adopt_copy_marker() {  # <source roster> <own roster> <name> -> 0 copied/already there, 1 nothing to copy
+  local src="$1" own="$2" name="$3" line
+  [ -n "$name" ] && [ -f "$src" ] && [ ! -L "$src" ] || return 1
+  line="$(grep '^landing-swept/v1|' "$src" 2>/dev/null | grep -F "|name=${name}|" | tail -1)"
+  [ -n "$line" ] || return 1
+  grep -qF "$line" "$own" 2>/dev/null && return 0
+  [ -f "$own" ] && [ ! -L "$own" ] || return 1
+  printf '%s\n' "$line" >> "$own" 2>/dev/null || return 1
   return 0
 }
 
@@ -1641,7 +1690,7 @@ case "$VERB" in
       # every agent that session launched.
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
-      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN; do
+      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER; do
         [ -n "$RNAME" ] || continue
         ADOPT_ROWS=$((ADOPT_ROWS + 1))
 
@@ -1704,6 +1753,13 @@ case "$VERB" in
         # stopped whatever its artifacts say, and the cure is prospective (it fixes the NEXT
         # dispatch, not this row). The deliverable's state is still printed underneath, so
         # nothing is hidden by the ordering.
+        #
+        # WAIVED IS NEXT (S17, AC-12 attempt 2), ahead of LANDED/RUNNING/SILENT, and for the
+        # same reason `session-sweeper.sh verdict_row` puts it first: a carried `waiver=` is
+        # an explicit designation that this row's contract is not held, so its deliverable's
+        # absence is not "quiet for now" — it was never open. Printing SILENT for such a row,
+        # which is what happened before the field was carried at all, read as an unmet
+        # contract for one that was closed at dispatch (the live T4 walk this fixes).
         # LIVE ON EITHER MTIME, STALE ONLY ON BOTH (1.6, AC-6). The progress file is a
         # promise the agent keeps by hand — the first thing to lapse when the work gets
         # absorbing, and impossible for a role with no Write tool — so reading it alone
@@ -1728,6 +1784,8 @@ case "$VERB" in
 
         if [ -z "$RID" ]; then
           VERDICT=UNADDRESSABLE
+        elif [ -n "$RWAIVER" ]; then
+          VERDICT=WAIVED
         elif [ "$DELIV_PRESENT" = yes ]; then
           VERDICT=LANDED
         elif [ "$LIVE" = yes ]; then
@@ -1816,8 +1874,21 @@ case "$VERB" in
             elif [ -n "$RID" ]; then
               if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
                    "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
-                   "${ADOPT_OWN_PLAN:-none}"; then
+                   "${ADOPT_OWN_PLAN:-none}" "$RWAIVER"; then
                 ROW_JOURNALLED=yes
+                # THE MARKER COPY (S17, AC-12 attempt 2). `hooks/landing-gate.sh` is this
+                # schema's one writer today — its own comment at :561-563 calls a second
+                # writer "not a live path". This makes it one, deliberately: adopt never
+                # ORIGINATES a `landing-swept/v1` verdict, it only COPIES a line that writer
+                # already produced onto the roster this session is now the owner of, so
+                # `hooks/session-start.sh`'s `open_rows` and this file's own
+                # `youngest_suite_writer` — both of which read a marker straight off the
+                # SAME roster file as ground truth, with no re-derivation — see the same
+                # history on the successor that stood on the predecessor. A MET marker can
+                # never reach here: `adopt_fold`'s own `met[]` filter (above) excludes any
+                # name carrying one from the fold entirely, so only a non-MET history
+                # (UNMET/STILL-LIVE/AMBIGUOUS) is ever offered to copy.
+                adopt_copy_marker "$ADOPT_RF" "$ADOPT_OWN_ROSTER" "$(clean "$RNAME")"
               else
                 die "WARN — this row could not be journalled to $ADOPT_OWN_ROSTER; the stop gate will not treat $RNAME as ours."
               fi
