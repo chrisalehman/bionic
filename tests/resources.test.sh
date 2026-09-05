@@ -217,8 +217,8 @@ pressure() {  # <free_mb> <load_1m> <cores>
 
 R="$(pressure 8000 2.0 18)"
 expect_eq "ample memory, load well under cores×1.5 → ok" "ok" "$(field "$R" state)"
-expect_match "pressure prints all three keys in order" "$R" \
-  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)?$'
+expect_match "pressure prints the three original keys, in order and first" "$R" \
+  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? '
 expect_eq "pressure echoes the free reading it judged"  "8000" "$(field "$R" free_mb)"
 expect_eq "pressure echoes the load reading it judged"  "2.0"  "$(field "$R" load_1m)"
 
@@ -255,7 +255,7 @@ expect_eq "free 100 MB with a calm load is still emergency" "emergency" \
 # With no overrides it must read the live machine and still answer one of the three states.
 R_LIVE="$(resources_pressure "$P_CORES")"
 expect_match "live pressure answers a legal state" "$R_LIVE" \
-  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)?$'
+  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? '
 
 # ════════════════════════════════════════════════════════════ §E — attestation v2
 
@@ -417,6 +417,402 @@ expect_eq "restoring resources.sh flips the same attestation to version 2" "2" \
   "$(grep -m1 '^version=' "$DATT" 2>/dev/null | cut -d= -f2-)"
 expect_true "the restored attestation carries a budget line" \
   grep -q '^budget=' "$DATT"
+
+# ════════════════════════════════════════════ §H — the percentage sensors (AC-13)
+
+section "H — resources_pressure reads free % and swap %, behind env pins (AC-13)"
+
+# FIXTURE FIDELITY. The two stubs below reproduce THIS machine's raw output verbatim
+# (research-code-map §2.5, measured 2026-09-04): `memory_pressure` ends in
+# `System-wide memory free percentage: 44%` after a stats block whose shape varies, and
+# `sysctl vm.swapusage` reports total = 3072.00M used = 2132.44M — 69 % consumed. The
+# assertions below are the numbers that machine produces, so the parse is pinned against
+# the real surface and never against a convenient constant.
+STUBS="$TMPROOT/stubs"
+mkdir -p "$STUBS"
+
+cat > "$STUBS/memory_pressure" <<'STUB'
+#!/bin/bash
+cat <<'OUT'
+The system has 8589934592 (524288 pages with a page size of 16384).
+
+Stats:
+Pages free: 5837
+Pages purgeable: 1929
+Pages purged: 3520941
+
+Swap I/O:
+Swapins: 616876
+Swapouts: 910136
+
+Page Q counts:
+Pages active: 107807
+Pages inactive: 105366
+Pages speculative: 2097
+Pages throttled: 0
+Pages wired down: 117511
+
+Compressor Stats:
+Pages used by compressor: 153455
+
+File I/O:
+Pageins: 13004722
+Pageouts: 394999
+
+System-wide memory free percentage: 44%
+OUT
+STUB
+
+cat > "$STUBS/sysctl" <<'STUB'
+#!/bin/bash
+case "$*" in
+  "vm.swapusage")    echo "vm.swapusage: total = 3072.00M  used = 2132.44M  free = 939.56M  (encrypted)" ;;
+  "-n vm.swapusage") echo "total = 3072.00M  used = 2132.44M  free = 939.56M  (encrypted)" ;;
+  "-n vm.loadavg")   echo "{ 1.60 1.20 1.10 }" ;;
+  "-n hw.ncpu")      echo "8" ;;
+  "-n hw.memsize")   echo "8589934592" ;;
+  *) exit 1 ;;
+esac
+STUB
+
+# A machine with swap configured but nothing in it — the divide-by-total guard.
+cat > "$STUBS/sysctl-noswap" <<'STUB'
+#!/bin/bash
+case "$*" in
+  "vm.swapusage")    echo "vm.swapusage: total = 0.00M  used = 0.00M  free = 0.00M  (encrypted)" ;;
+  *) exit 1 ;;
+esac
+STUB
+
+# A sensor that is simply not there (the AC-13 "unreadable input" case).
+cat > "$STUBS/memory_pressure-broken" <<'STUB'
+#!/bin/bash
+exit 1
+STUB
+chmod +x "$STUBS/memory_pressure" "$STUBS/sysctl" "$STUBS/sysctl-noswap" "$STUBS/memory_pressure-broken"
+
+# The new fields are appended, so the record's shape assertion moves with them.
+R="$(BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 pressure 8000 2.0 18)"
+expect_match "pressure prints all five keys in order" "$R" \
+  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? free_pct=-?[0-9]+ swap_pct=-?[0-9]+$'
+expect_eq "the existing three fields are unchanged by the two new ones" \
+  "ok 8000 2.0" "$(field "$R" state) $(field "$R" free_mb) $(field "$R" load_1m)"
+
+expect_eq "BIONIC_PROBE_FREE_PCT pins the free percentage" "44" "$(field "$R" free_pct)"
+expect_eq "BIONIC_PROBE_SWAP_PCT pins the swap percentage" "69" "$(field "$R" swap_pct)"
+
+# ── the Darwin sensor against this machine's own raw output.
+if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+  RS="$(PATH="$STUBS:$PATH" BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 resources_pressure 8)"
+  expect_eq "Darwin: memory_pressure's LAST line gives free_pct 44" "44" "$(field "$RS" free_pct)"
+  expect_eq "Darwin: sysctl vm.swapusage used/total gives swap_pct 69" "69" "$(field "$RS" swap_pct)"
+  expect_eq "Darwin: the stats block above the percentage line does not confuse the parse" \
+    "state=ok free_mb=8000 load_1m=1.6 free_pct=44 swap_pct=69" "$RS"
+
+  # SYNTHETIC FIXTURE, declared: a `memory_pressure` whose stats block carries an EARLIER
+  # line matching the same phrase. Real output has one such line, at the end; this pins the
+  # documented rule — the LAST match wins — so a new section appearing above the percentage
+  # in a future macOS release cannot silently change the reading.
+  mkdir -p "$TMPROOT/stub-double"
+  cat > "$TMPROOT/stub-double/memory_pressure" <<'STUB'
+#!/bin/bash
+cat <<'OUT'
+The system has 8589934592 (524288 pages with a page size of 16384).
+
+Historic:
+System-wide memory free percentage: 99%
+
+Stats:
+Pages free: 5837
+
+System-wide memory free percentage: 44%
+OUT
+STUB
+  cp "$STUBS/sysctl" "$TMPROOT/stub-double/sysctl"
+  chmod +x "$TMPROOT/stub-double/memory_pressure" "$TMPROOT/stub-double/sysctl"
+  RD="$(PATH="$TMPROOT/stub-double:$PATH" BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 \
+        resources_pressure 8)"
+  expect_eq "Darwin: the LAST matching percentage line is the reading" "44" "$(field "$RD" free_pct)"
+
+  # The env pins outrank the sensor: same stubs, pinned answers.
+  RP="$(PATH="$STUBS:$PATH" BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 \
+        BIONIC_PROBE_FREE_PCT=7 BIONIC_PROBE_SWAP_PCT=91 resources_pressure 8)"
+  expect_eq "Darwin: the free-% pin overrides the live sensor" "7"  "$(field "$RP" free_pct)"
+  expect_eq "Darwin: the swap-% pin overrides the live sensor" "91" "$(field "$RP" swap_pct)"
+
+  # Swap with a zero total is 0 % used, not a division fault.
+  mkdir -p "$TMPROOT/stub-noswap"
+  cp "$STUBS/sysctl-noswap" "$TMPROOT/stub-noswap/sysctl"
+  cp "$STUBS/memory_pressure" "$TMPROOT/stub-noswap/memory_pressure"
+  chmod +x "$TMPROOT/stub-noswap/sysctl" "$TMPROOT/stub-noswap/memory_pressure"
+  RZ="$(PATH="$TMPROOT/stub-noswap:$PATH" BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 \
+        resources_pressure 8)"
+  expect_eq "Darwin: a zero swap total reads 0 %, never a divide fault" "0" "$(field "$RZ" swap_pct)"
+  expect_eq "Darwin: the free-% read still lands beside the zero swap" "44" "$(field "$RZ" free_pct)"
+
+  # An unreadable sensor degrades to -1 — a field the band ignores, never a hold (AC-13).
+  mkdir -p "$TMPROOT/stub-broken"
+  cp "$STUBS/memory_pressure-broken" "$TMPROOT/stub-broken/memory_pressure"
+  cp "$STUBS/sysctl" "$TMPROOT/stub-broken/sysctl"
+  chmod +x "$TMPROOT/stub-broken/memory_pressure" "$TMPROOT/stub-broken/sysctl"
+  RB="$(PATH="$TMPROOT/stub-broken:$PATH" BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 \
+        resources_pressure 8)"
+  expect_eq "Darwin: an unreadable free-% sensor reads -1"        "-1" "$(field "$RB" free_pct)"
+  expect_eq "Darwin: the readable swap sensor beside it still answers" "69" "$(field "$RB" swap_pct)"
+  expect_eq "Darwin: an unreadable sensor does not move state off ok" "ok" "$(field "$RB" state)"
+else
+  # Not Darwin: the same three claims are made against the live Linux sensor, by shape.
+  RL="$(BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 resources_pressure 8)"
+  expect_match "non-Darwin: free_pct is a percentage or the -1 degrade" "$(field "$RL" free_pct)" \
+    '^(-1|100|[0-9]{1,2})$'
+  expect_match "non-Darwin: swap_pct is a percentage or the -1 degrade" "$(field "$RL" swap_pct)" \
+    '^(-1|100|[0-9]{1,2})$'
+  expect_eq "non-Darwin: an unreadable sensor does not move state off ok" "ok" "$(field "$RL" state)"
+fi
+
+# The live machine, no stubs and no pins: shape and range only (the §C convention).
+R_LIVE_PCT="$(resources_pressure "$P_CORES")"
+expect_match "live pressure carries both percentages in range" "$R_LIVE_PCT" \
+  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? free_pct=(-1|100|[0-9]{1,2}) swap_pct=(-1|100|[0-9]{1,2})$'
+
+# ════════════════════════════════════════════════ §I — pressure_band (AC-13, AC-14)
+
+section "I — pressure_band: the four bands and their exact edges (AC-14)"
+
+band() { pressure_band "$1" "$2" "$3" "$4"; }
+
+# The plan's table, verbatim. 8 cores → the load line is 12.0.
+expect_eq "(44,69,1.6,8) — this machine at design time → clear" "clear"     "$(band 44 69 1.6 8)"
+expect_eq "(20,69,1.6,8) — free under 25 → warning"             "warning"   "$(band 20 69 1.6 8)"
+expect_eq "(44,85,1.6,8) — swap at 85 → warning"                "warning"   "$(band 44 85 1.6 8)"
+expect_eq "(44,69,13,8)  — load 13 over 8×1.5 → warning"        "warning"   "$(band 44 69 13 8)"
+expect_eq "(10,50,1,8)   — free under 12 → critical"            "critical"  "$(band 10 50 1 8)"
+expect_eq "(30,95,1,8)   — swap at 95 → critical"               "critical"  "$(band 30 95 1 8)"
+expect_eq "(4,0,0,8)     — free under 5 → emergency"            "emergency" "$(band 4 0 0 8)"
+
+# Every threshold is a half-open interval; the edge itself belongs to the calmer band.
+expect_eq "free exactly 5 is critical, not emergency" "critical" "$(band 5 0 1 8)"
+expect_eq "free exactly 12 is warning, not critical"  "warning"  "$(band 12 0 1 8)"
+expect_eq "free exactly 25 is clear, not warning"     "clear"    "$(band 25 0 1 8)"
+expect_eq "swap exactly 80 is warning"                "warning"  "$(band 44 80 1 8)"
+expect_eq "swap exactly 79 is clear"                  "clear"    "$(band 44 79 1 8)"
+expect_eq "swap exactly 92 is critical"               "critical" "$(band 44 92 1 8)"
+expect_eq "swap exactly 91 is warning, not critical"  "warning"  "$(band 44 91 1 8)"
+expect_eq "load exactly 12.0 on 8 cores is clear (strictly above)" "clear" "$(band 44 0 12.0 8)"
+expect_eq "load 12.1 on 8 cores is warning"           "warning"  "$(band 44 0 12.1 8)"
+# Per-core, like the HOLD arm it shares HOLD_LOAD_FACTOR with.
+expect_eq "load 4.0 on 2 cores is warning"            "warning"  "$(band 44 0 4.0 2)"
+expect_eq "load 4.0 on 18 cores is clear"             "clear"    "$(band 44 0 4.0 18)"
+
+# An unreadable reading is -1, and the band IGNORES it rather than treating it as 0 %.
+expect_eq "free_pct -1 is ignored, the rest still decides"   "clear"   "$(band -1 69 1.6 8)"
+expect_eq "swap_pct -1 is ignored, the rest still decides"   "clear"   "$(band 44 -1 1.6 8)"
+expect_eq "both percentages unreadable → load alone decides" "warning" "$(band -1 -1 20 8)"
+expect_eq "both percentages unreadable and a calm load → clear" "clear" "$(band -1 -1 1 8)"
+expect_eq "free_pct -1 does not mask a critical swap"        "critical" "$(band -1 95 1 8)"
+
+# Precedence: the scarcer resource decides, exactly as the state= arm does.
+expect_eq "free 4 with a clean swap is emergency, not critical" "emergency" "$(band 4 10 1 8)"
+expect_eq "free 4 with a critical swap is still emergency"      "emergency" "$(band 4 99 1 8)"
+expect_eq "critical outranks warning when both fire"            "critical"  "$(band 10 85 20 8)"
+
+# Bad arguments refuse rather than answer.
+pressure_band 44 69 1.6 0 >/dev/null 2>&1; expect_eq "cores 0 refuses with 2" "2" "$?"
+pressure_band 44 69 1.6 >/dev/null 2>&1;   expect_eq "a missing argument refuses with 2" "2" "$?"
+pressure_band xx 69 1.6 8 >/dev/null 2>&1; expect_eq "a non-numeric percentage refuses with 2" "2" "$?"
+
+# ═════════════════════════════════════════════════════ §J — the ring (AC-16)
+
+section "J — pressure_sample appends one line and prunes to the window (AC-16)"
+
+RING="$TMPROOT/ring/pressure.ring"
+sample() {  # <epoch> [<cores>]
+  BIONIC_PRESSURE_RING="$RING" BIONIC_NOW_EPOCH="$1" \
+  BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    pressure_sample "${2:-8}"
+}
+
+expect_eq "PRESSURE_WINDOW_S is the five-minute smoothing window" "300" "${PRESSURE_WINDOW_S:-unset}"
+
+sample 1000 >/dev/null 2>&1
+expect_true "the first sample creates the ring and its parent directory" [ -f "$RING" ]
+expect_eq   "one append, one line" "1" "$(wc -l < "$RING" | tr -d ' ')"
+expect_match "the line is epoch|free|swap|load|cores" "$(head -1 "$RING")" \
+  '^1000\|44\|69\|1\.6\|8$'
+
+sample 1001 >/dev/null 2>&1
+sample 1002 >/dev/null 2>&1
+expect_eq "three appends inside the window keep three lines" "3" "$(wc -l < "$RING" | tr -d ' ')"
+expect_eq "the samples are kept oldest first" "1000 1001 1002" \
+  "$(cut -d'|' -f1 < "$RING" | tr '\n' ' ' | sed 's/ $//')"
+
+sample 1402 >/dev/null 2>&1
+expect_eq "a sample 400 s later prunes the three that fell out of the window" "1" \
+  "$(wc -l < "$RING" | tr -d ' ')"
+expect_eq "and the survivor is the new one" "1402" "$(cut -d'|' -f1 < "$RING")"
+
+# The boundary: exactly PRESSURE_WINDOW_S old is still in the window.
+rm -f "$RING"
+sample 2000 >/dev/null 2>&1
+sample 2300 >/dev/null 2>&1
+expect_eq "a sample exactly 300 s old survives the prune" "2" "$(wc -l < "$RING" | tr -d ' ')"
+sample 2301 >/dev/null 2>&1
+expect_eq "at 301 s it is gone" "2" "$(wc -l < "$RING" | tr -d ' ')"
+expect_eq "leaving the two inside the window" "2300 2301" \
+  "$(cut -d'|' -f1 < "$RING" | tr '\n' ' ' | sed 's/ $//')"
+
+# Garbage in the file is dropped by the same prune, not carried.
+printf 'not-a-sample\n' >> "$RING"
+sample 2302 >/dev/null 2>&1
+expect_eq "a malformed line is pruned away with the stale ones" "3" "$(wc -l < "$RING" | tr -d ' ')"
+expect_true "and nothing malformed survives" \
+  [ "$(grep -c '^[0-9]*|' "$RING")" = "3" ]
+
+# The default path is machine-scoped under the config dir (AC-16, D4).
+RHOME="$TMPROOT/ringhome"
+mkdir -p "$RHOME"
+( unset BIONIC_PRESSURE_RING
+  CLAUDE_CONFIG_DIR="$RHOME/cfg" BIONIC_NOW_EPOCH=3000 BIONIC_PROBE_FREE_PCT=44 \
+  BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 pressure_sample 8 ) >/dev/null 2>&1
+expect_true "with no override the ring lands under CLAUDE_CONFIG_DIR/bionic/pressure.ring" \
+  [ -f "$RHOME/cfg/bionic/pressure.ring" ]
+( unset BIONIC_PRESSURE_RING CLAUDE_CONFIG_DIR
+  HOME="$RHOME/hm" BIONIC_NOW_EPOCH=3000 BIONIC_PROBE_FREE_PCT=44 \
+  BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 pressure_sample 8 ) >/dev/null 2>&1
+expect_true "and with no config dir either, under \$HOME/.claude/bionic/pressure.ring" \
+  [ -f "$RHOME/hm/.claude/bionic/pressure.ring" ]
+
+# Two rings are independent; two project roots on ONE ring path share it (AC-16).
+RA="$TMPROOT/ring-a/pressure.ring"
+RB="$TMPROOT/ring-b/pressure.ring"
+BIONIC_PRESSURE_RING="$RA" BIONIC_NOW_EPOCH=4000 BIONIC_PROBE_FREE_PCT=44 \
+  BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 pressure_sample 8 >/dev/null 2>&1
+BIONIC_PRESSURE_RING="$RB" BIONIC_NOW_EPOCH=4000 BIONIC_PROBE_FREE_PCT=10 \
+  BIONIC_PROBE_SWAP_PCT=50 BIONIC_PROBE_LOAD_1M=1.0 pressure_sample 8 >/dev/null 2>&1
+expect_eq "two ring paths hold their own samples — A" "4000|44|69|1.6|8" "$(cat "$RA")"
+expect_eq "two ring paths hold their own samples — B" "4000|10|50|1.0|8" "$(cat "$RB")"
+
+mkdir -p "$TMPROOT/root-one" "$TMPROOT/root-two"
+RSHARED="$TMPROOT/ring-shared/pressure.ring"
+( cd "$TMPROOT/root-one" && BIONIC_PRESSURE_RING="$RSHARED" BIONIC_NOW_EPOCH=5000 \
+    BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    pressure_sample 8 ) >/dev/null 2>&1
+( cd "$TMPROOT/root-two" && BIONIC_PRESSURE_RING="$RSHARED" BIONIC_NOW_EPOCH=5001 \
+    BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    pressure_sample 8 ) >/dev/null 2>&1
+expect_eq "two project roots on one machine write the SAME ring" "2" \
+  "$(wc -l < "$RSHARED" | tr -d ' ')"
+
+# ═══════════════════════════════════════════ §K — pressure_level, the rung (AC-14)
+
+section "K — pressure_level: median band over the ring → a rung inside the ceiling (AC-14)"
+
+# Sample lines whose band is known by §I: the four rows of the plan's table.
+S_CLEAR='44|69|1.6|8'
+S_WARN='20|69|1.6|8'
+S_CRIT='10|50|1|8'
+S_EMERG='4|0|0|8'
+
+LRING="$TMPROOT/level/pressure.ring"
+mkdir -p "$(dirname "$LRING")"
+ring_of() {  # <epoch-base> <sample>... — rewrite the ring with one line per sample
+  local t="$1"; shift
+  : > "$LRING"
+  local s
+  for s in "$@"; do printf '%s|%s\n' "$t" "$s" >> "$LRING"; t=$((t + 1)); done
+}
+level() { BIONIC_PRESSURE_RING="$LRING" BIONIC_NOW_EPOCH="${LNOW:-6000}" pressure_level "$1"; }
+level_err() { BIONIC_PRESSURE_RING="$LRING" BIONIC_NOW_EPOCH="${LNOW:-6000}" pressure_level "$1" 2>&1 >/dev/null; }
+
+LNOW=6000
+# AC-14's sequence, ceiling 8: clear → warning → critical → clear yields 8 → 4 → 2 → 8.
+ring_of 6000 "$S_CLEAR" "$S_CLEAR" "$S_CLEAR"
+expect_eq "a clear ring runs at the full ceiling"      "8" "$(level 8)"
+ring_of 6000 "$S_WARN" "$S_WARN" "$S_WARN"
+expect_eq "a warning ring halves it"                   "4" "$(level 8)"
+ring_of 6000 "$S_CRIT" "$S_CRIT" "$S_CRIT"
+expect_eq "a critical ring quarters it"                "2" "$(level 8)"
+ring_of 6000 "$S_CLEAR" "$S_CLEAR" "$S_CLEAR"
+expect_eq "and a ring that clears returns to the ceiling" "8" "$(level 8)"
+ring_of 6000 "$S_EMERG" "$S_EMERG" "$S_EMERG"
+expect_eq "an emergency ring floors at 1"              "1" "$(level 8)"
+
+# The ceiling is never exceeded and the floor is never breached.
+ring_of 6000 "$S_CLEAR" "$S_CLEAR" "$S_CLEAR"
+expect_eq "ceiling 1, clear ring → 1"     "1" "$(level 1)"
+ring_of 6000 "$S_WARN" "$S_WARN" "$S_WARN"
+expect_eq "ceiling 1, warning ring → 1"   "1" "$(level 1)"
+ring_of 6000 "$S_CRIT" "$S_CRIT" "$S_CRIT"
+expect_eq "ceiling 1, critical ring → 1"  "1" "$(level 1)"
+ring_of 6000 "$S_EMERG" "$S_EMERG" "$S_EMERG"
+expect_eq "ceiling 1, emergency ring → 1" "1" "$(level 1)"
+
+# The halves round UP, so a rung is never rounded to zero work.
+ring_of 6000 "$S_WARN" "$S_WARN" "$S_WARN"
+expect_eq "ceiling 3, warning → ceil(3/2) = 2"  "2" "$(level 3)"
+ring_of 6000 "$S_CRIT" "$S_CRIT" "$S_CRIT"
+expect_eq "ceiling 3, critical → ceil(3/4) = 1" "1" "$(level 3)"
+ring_of 6000 "$S_WARN" "$S_WARN" "$S_WARN"
+expect_eq "ceiling 6, warning → 3"  "3" "$(level 6)"
+ring_of 6000 "$S_CRIT" "$S_CRIT" "$S_CRIT"
+expect_eq "ceiling 6, critical → ceil(6/4) = 2" "2" "$(level 6)"
+
+# It is a MEDIAN, not the worst reading and not the latest one.
+ring_of 6000 "$S_CLEAR" "$S_CLEAR" "$S_CRIT"
+expect_eq "one critical spike among two clears does not move the rung" "8" "$(level 8)"
+ring_of 6000 "$S_CLEAR" "$S_CRIT" "$S_CRIT"
+expect_eq "two criticals against one clear do move it" "2" "$(level 8)"
+ring_of 6000 "$S_CRIT" "$S_CLEAR" "$S_CLEAR"
+expect_eq "the newest sample does not decide on its own" "8" "$(level 8)"
+# An even count takes the higher of the two middles — the pessimistic side.
+ring_of 6000 "$S_CLEAR" "$S_WARN"
+expect_eq "an even split resolves to the worse band" "4" "$(level 8)"
+
+# Stale samples are outside the window and do not vote.
+: > "$LRING"
+printf '%s|%s\n' 5000 "$S_CRIT" >> "$LRING"
+printf '%s|%s\n' 5001 "$S_CRIT" >> "$LRING"
+printf '%s|%s\n' 5990 "$S_CLEAR" >> "$LRING"
+expect_eq "samples older than the window do not vote" "8" "$(level 8)"
+
+# The stderr line names the rung, the ceiling, the band and the sample count.
+ring_of 6000 "$S_WARN" "$S_WARN" "$S_WARN"
+expect_eq "the stderr line reports rung, ceiling, band and count" \
+  "rung=4/8 band=warning samples=3" "$(level_err 8)"
+ring_of 6000 "$S_CLEAR" "$S_CLEAR" "$S_CLEAR"
+expect_eq "…and follows the band it computed" \
+  "rung=8/8 band=clear samples=3" "$(level_err 8)"
+expect_eq "the answer on stdout is the rung alone" "8" "$(level 8)"
+
+# PURE: two calls agree and the ring is untouched (AC-14 'nothing stores a current level').
+ring_of 6000 "$S_WARN" "$S_WARN" "$S_WARN"
+BEFORE="$(cat "$LRING")"
+L1="$(level 8)"; L2="$(level 8)"
+expect_eq "two calls over one ring return one answer, and it is the warning rung" \
+  "4 4" "$L1 $L2"
+expect_eq "pressure_level writes nothing to the ring" "$BEFORE" "$(cat "$LRING")"
+expect_eq "no file records a 'current level' beside the ring" "1" \
+  "$(ls "$(dirname "$LRING")" | wc -l | tr -d ' ')"
+
+# An empty ring takes one fresh sample first, then answers from it.
+ERING="$TMPROOT/level-empty/pressure.ring"
+EL="$(BIONIC_PRESSURE_RING="$ERING" BIONIC_NOW_EPOCH=7000 BIONIC_PROBE_FREE_PCT=44 \
+      BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 pressure_level 8 2>/dev/null)"
+expect_eq   "an empty ring answers from one fresh sample" "8" "$EL"
+expect_true "…and that sample is now in the ring" [ -f "$ERING" ]
+expect_eq   "…exactly one of them" "1" "$(wc -l < "$ERING" | tr -d ' ')"
+EE="$(BIONIC_PRESSURE_RING="$TMPROOT/level-empty2/pressure.ring" BIONIC_NOW_EPOCH=7000 \
+      BIONIC_PROBE_FREE_PCT=10 BIONIC_PROBE_SWAP_PCT=50 BIONIC_PROBE_LOAD_1M=1.0 \
+      pressure_level 8 2>&1 >/dev/null)"
+expect_eq "the fresh sample is the one that decides" "rung=2/8 band=critical samples=1" "$EE"
+
+# Bad arguments refuse rather than answer.
+BIONIC_PRESSURE_RING="$LRING" pressure_level 0 >/dev/null 2>&1
+expect_eq "ceiling 0 refuses with 2" "2" "$?"
+BIONIC_PRESSURE_RING="$LRING" pressure_level >/dev/null 2>&1
+expect_eq "a missing ceiling refuses with 2" "2" "$?"
+BIONIC_PRESSURE_RING="$LRING" pressure_level nine >/dev/null 2>&1
+expect_eq "a non-numeric ceiling refuses with 2" "2" "$?"
 
 # ════════════════════════════════════════════════════════════ report
 
