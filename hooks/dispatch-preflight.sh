@@ -823,7 +823,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # there is nothing whose openness a stale answer would leave in doubt.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
                             #   or "<stale|none> <age|none>" (exit 3/4, not fresh)
-    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0
+    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed=""
     local la_out la_rc la_rest la_state la_age
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
@@ -833,6 +833,21 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       [ -n "$nm" ] || continue
       case "$seen" in *"|${nm}|"*) continue ;; esac
       seen="${seen}${nm}|"
+
+      # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
+      # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
+      # size and mtime — but the per-row call below runs inside a command substitution, and
+      # a subshell INHERITS its parent's variables while its own writes die with it. So the
+      # first row would warm a cache nobody sees and every row would pay a full parse: two
+      # whole-file jq passes and nine spawns, 1.22 s for twelve rows on a 4.1 MB transcript.
+      # One call here, in the shell the loop actually runs in, warms it for every subshell
+      # that follows. It is done lazily rather than before the loop so a roster with no
+      # `status=intended` row still reads the transcript zero times. Its own answer is
+      # discarded: this line is a cache fill, and the row's verdict is the predicate's.
+      if [ -z "$primed" ]; then
+        primed=1
+        live_agents "$transcript" >/dev/null 2>&1 || :
+      fi
 
       # THE PREDICATE IS NOT SPELLED HERE (S19, auditor F-13). It was: S16 wrote
       # `status = running` inline, which read every OTHER word — a renamed status, a
