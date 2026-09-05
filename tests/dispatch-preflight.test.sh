@@ -2941,6 +2941,74 @@ expect_contains "…and the doctored body now DOES carry the token (the pin abov
   "landing-swept" "$BUDGET_FN_BODY_MUT"
 rm -rf "$GATE_MUT_ROOT"
 
+# ============================ S22b2: WHOSE TRANSCRIPT IT IS DECIDES THE FIX NAMED
+# (F-2 ruling, Chris 2026-09-05: dispatch is an AUTHORITY the orchestrator holds alone,
+# not a capability gated by freshness.)
+#
+# WHEN the refusal fires is unchanged — every arm in S22b above still refuses on exactly
+# the same freshness reading. What changes is the FIX it names when the dispatching
+# transcript is a SUBAGENT's own: "call ListAgents, then dispatch" is advice a dispatched
+# agent cannot follow, because ListAgents is not in its tool roster. The Step-5 auditor hit
+# precisely that, live and unplanned (auditor-report.md F-2). It is now told the thing it
+# CAN do instead: ask the orchestrator.
+#
+# A subagent's transcript is the harness's own shape — `<session-uuid>/subagents/agent-<name>-<hash>.jsonl`
+# beside the orchestrator's `<session-uuid>.jsonl`.
+#
+# THE PAIR IS THE POINT. Both halves below use the same repo shape, the same budget, the
+# same roster row and the same STALE answer. Only the transcript's own PATH differs, so
+# nothing but the path can be what moves the text.
+#
+# MUTATION NOTE: make the subagent branch of the refusal in hooks/dispatch-preflight.sh
+# print the orchestrator line again (delete the branch, keep one echo) and r22jf's two
+# text arms go red while every r22jg arm stays green. Captured in s18-mutation.log.
+
+echo ""
+echo "---------- S22b2: a subagent is told to ask, not to call a tool it lacks ----------"
+
+REPO=$(make_repo r22jf yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+mkdir -p "$SANDBOX/.r22jf/subagents"
+R22JF_SUB="$SANDBOX/.r22jf/subagents/agent-w99-impl-9b70c3a4dc62ba69.jsonl"
+mk_transcript "$R22JF_SUB" stale r1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JF_SUB")"
+expect_status "r22jf a SUBAGENT own transcript, same STALE answer -> still REFUSED" "2" "$GATE_ST"
+expect_contains "...keeping the live-agents prefix with the state and age every consumer parses" \
+  "live-agents: stale age=" "$GATE_ERR"
+expect_contains "...but the fix names the authority, not the tool call" \
+  "subagents do not dispatch; dispatch is the orchestrator's authority — SendMessage the orchestrator (to: main) naming what you need" \
+  "$GATE_ERR"
+expect_absent "...and never names a tool a subagent does not hold" \
+  "call ListAgents, then dispatch" "$GATE_ERR"
+
+# The orchestrator half of the pair: same staleness, a session-level transcript path, and
+# the text is the one every existing arm above already pins, byte for byte.
+REPO=$(make_repo r22jg yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+R22JG_MAIN="$SANDBOX/.r22jg-session.jsonl"
+mk_transcript "$R22JG_MAIN" stale r1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JG_MAIN")"
+expect_status "r22jg the orchestrator own transcript, same STALE answer -> REFUSED" "2" "$GATE_ST"
+expect_contains "...naming the state and age the same way" "live-agents: stale age=" "$GATE_ERR"
+expect_contains "...and the orchestrator fix unchanged" "call ListAgents, then dispatch" "$GATE_ERR"
+expect_absent "...saying nothing about subagents" "subagents do not dispatch" "$GATE_ERR"
+
+# THE DISCRIMINATOR. The `subagents/` directory is what the harness uses; a file that
+# merely happens to be named `agent-*.jsonl` somewhere else is not a subagent transcript,
+# and must still get the orchestrator text. Without this arm a match on the basename alone
+# would pass the two arms above.
+mkdir -p "$SANDBOX/.r22jg-lookalike"
+R22JG_LOOKALIKE="$SANDBOX/.r22jg-lookalike/agent-not-under-subagents.jsonl"
+mk_transcript "$R22JG_LOOKALIKE" stale r1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JG_LOOKALIKE")"
+expect_status "r22jg an agent-*.jsonl NOT under subagents/ is not a subagent -> REFUSED" "2" "$GATE_ST"
+expect_contains "...with the orchestrator fix, not the subagent one" \
+  "call ListAgents, then dispatch" "$GATE_ERR"
+
 # ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
 # (spec R2, AC-27; slice S16, closing the Step-5 auditor's F-1.)
 #
