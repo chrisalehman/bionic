@@ -1111,6 +1111,98 @@ Q_TRA="$SANDBOX/q-toolresult-array.jsonl"
 } > "$Q_TRA"
 call_live_agents "$Q_TRA"
 expect_eq "§Q.4 an array-content tool_result is not a prompt either (exit 0)" 0 "$ST"
+# ============================================================
+echo
+echo "=== §T — ONE parse per process per file state (Step-6 review P-1 = P-4) ==="
+# ============================================================
+#
+# THE COST THIS SECTION BOUNDS. `live_row_open` -> `live_agents_status` -> `live_agents`
+# runs `_la_scan` and `_la_body` over the WHOLE transcript, twice. Every consumer that
+# asks about more than one name paid that per name: the budget wall once per roster row,
+# the Patrol tick once per open row. Measured before the memo, 12 rows against a 4.1 MB
+# transcript: 1.22 s, over the ~1 s budget for a hook that fronts every dispatch. After:
+# 0.31 s. At 32 rows — the largest real roster on this machine — 3.58 s -> 0.66 s.
+#
+# HOW IT IS COUNTED. A `jq` shim on PATH records one line per invocation that names the
+# transcript, then execs the real jq. Counting invocations rather than timing is what
+# makes this a pin: a future edit that reintroduces a per-row parse moves the count, and
+# the count is 2 (one `_la_scan`, one `_la_body`) no matter how many names are asked.
+
+T_SHIM="$SANDBOX/shim"
+mkdir -p "$T_SHIM"
+T_REAL_JQ="$(command -v jq)"
+T_COUNT="$SANDBOX/jq-calls"
+cat > "$T_SHIM/jq" <<SHIMEOF
+#!/bin/bash
+# Records one line per invocation whose argv names the transcript under test.
+for _a in "\$@"; do
+  case "\$_a" in *"\$LA_COUNT_TRANSCRIPT") printf '%s\n' "\$_a" >> "\$LA_COUNT_FILE" ;; esac
+done
+exec "$T_REAL_JQ" "\$@"
+SHIMEOF
+chmod +x "$T_SHIM/jq"
+
+T_MANY="$SANDBOX/t-many.jsonl"
+{
+  entry_prompt      "2026-09-05T00:50:00.000Z" "dispatch twelve"
+  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01TMANY"
+  entry_tool_result "2026-09-05T00:52:23.349Z" "toolu_01TMANY" "$BODY_TWO"
+} > "$T_MANY"
+
+# --- §T.1 — twelve questions in ONE process cost ONE parse -------------------
+: > "$T_COUNT"
+T_OUT1="$(PATH="$T_SHIM:$PATH" LA_COUNT_FILE="$T_COUNT" LA_COUNT_TRANSCRIPT="$T_MANY" \
+  bash -c '
+    set -u
+    . "$1"
+    n=1
+    while [ $n -le 12 ]; do
+      live_row_open "$2" "row$n" >/dev/null 2>&1; printf "%s" "$?"
+      n=$((n + 1))
+    done
+  ' _ "$LIB" "$T_MANY")"
+expect_eq "§T.1 twelve live_row_open calls in one process run jq exactly twice" "2" \
+  "$(grep -c . "$T_COUNT" | tr -d ' ')"
+expect_eq "§T.1 …and every one of the twelve absent names still answers NOT OPEN" \
+  "111111111111" "$T_OUT1"
+
+# --- §T.2 — the answers are identical to an uncached read --------------------
+# The memo must be invisible: same set, same exit, same stderr, cached or not.
+: > "$T_COUNT"
+T_A="$(bash -c 'set -u; . "$1"; live_agents "$2"; printf "rc=%s" "$?"' _ "$LIB" "$T_MANY" 2>"$SANDBOX/.terr")"
+T_AE="$(cat "$SANDBOX/.terr")"
+T_B="$(bash -c 'set -u; . "$1"; live_agents "$2" >/dev/null 2>&1; live_agents "$2"; printf "rc=%s" "$?"' \
+  _ "$LIB" "$T_MANY" 2>"$SANDBOX/.terr2")"
+T_BE="$(cat "$SANDBOX/.terr2")"
+expect_eq "§T.2 a second call in the same process returns the same stdout" "$T_A" "$T_B"
+expect_eq "§T.2 …and the same single stderr line" "$T_AE" "$T_BE"
+
+# --- §T.3 — an APPEND re-parses: the key is path + size + mtime --------------
+# The stop path reads the transcript twice in one process on purpose, and the transcript
+# is written live. A cache that ignored the file's state would answer the second question
+# from the first question's file. This is the row that keeps that window open.
+T_GROW="$SANDBOX/t-grow.jsonl"
+{
+  entry_prompt      "2026-09-05T00:50:00.000Z" "go"
+  entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01TGROW"
+  entry_tool_result "2026-09-05T00:52:23.349Z" "toolu_01TGROW" "$BODY_RUNNING"
+} > "$T_GROW"
+T_APPEND="$SANDBOX/t-append.jsonl"
+{
+  entry_tool_use    "2026-09-05T00:53:00.000Z" "ListAgents" "toolu_01TGROW2"
+  entry_tool_result "2026-09-05T00:53:01.000Z" "toolu_01TGROW2" "$BODY_TWO"
+} > "$T_APPEND"
+
+T_GROW_OUT="$(bash -c '
+    set -u
+    . "$1"
+    live_agents "$2" 2>/dev/null | head -1
+    cat "$3" >> "$2"
+    live_agents "$2" 2>/dev/null | wc -l | tr -d " "
+  ' _ "$LIB" "$T_GROW" "$T_APPEND")"
+expect_eq "§T.3 the first read sees one teammate, and the read after an append sees two" \
+  "$(printf 'research-code-map|bionic:researcher|running\n2')" "$T_GROW_OUT"
+
 
 
 # ============================================================

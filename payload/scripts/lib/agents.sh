@@ -197,13 +197,77 @@ _la_parse_teammates() {
   '
 }
 
+# ONE PARSE PER PROCESS, PER FILE STATE (Step-6 review P-1 = P-4). Every consumer that
+# asks about more than one name paid a full parse per question: the budget wall calls
+# `live_row_open` once per roster row and the Patrol tick once per open row, and each of
+# those is two whole-file `jq` passes plus nine process spawns. Measured on a 4.1 MB
+# transcript and 12 rows: 1.22 s, over the ~1 s budget for a hook that fronts every
+# dispatch, and the row count grows for the life of a session while the transcript does
+# too. The answer is memoized here rather than in either caller, because both callers ask
+# the same question of the same file and a cache in one of them would leave the other slow.
+#
+# THE KEY IS PATH + SIZE + MTIME, WHICH IS WHY THIS IS NOT A BEHAVIOUR CHANGE. Transcripts
+# are appended to live, so a file that grew between two calls has a different size and
+# re-parses. The stop path deliberately reads the transcript twice in one process
+# (`live_agents_has`, then `live_agents` again for the duplicate count) and that pair still
+# sees any append that landed between them — the perf reviewer's critic note asked for
+# exactly this to be preserved rather than smuggled shut.
+#
+# ONE SLOT, AND IT LIVES FOR ONE PROCESS. bash 3.2 has no associative arrays and one
+# invocation reads one transcript, so a single slot is enough. It is NEVER written to disk
+# and never shared between invocations: a cross-invocation cache would answer a later hook
+# from an earlier hook's reading of a file that has since moved, which is the one thing
+# this reader exists not to do.
+_LA_CACHE_KEY=""
+_LA_CACHE_OUT=""
+_LA_CACHE_ERR=""
+_LA_CACHE_RC=0
+
+_la_cache_key() {  # <transcript> -> path|bytes|mtime, empty when the file cannot be read
+  local f="${1:-}" fact
+  [ -n "$f" ] && [ -r "$f" ] || return 0
+  # ONE spawn, not two: BSD stat first, GNU stat as the fallback, the same idiom
+  # payload/scripts/lib/run.sh uses for mtime.
+  fact="$(stat -f '%z|%m' "$f" 2>/dev/null || stat -c '%s|%Y' "$f" 2>/dev/null)" || fact=""
+  case "$fact" in ''|*'|') return 0 ;; esac
+  printf '%s|%s' "$f" "$fact"
+}
+
+# THE CACHE FILL, AND IT MUST NOT RUN IN A SUBSHELL. `_la_read` below does the work and
+# answers into the three cache variables instead of into stdout/stderr, so one parse can be
+# replayed to every caller in one process. Every consumer therefore goes through THIS
+# function rather than through `$(live_agents …)`: a command substitution forks, and a
+# subshell's cache write dies with it — the reason `live_agents_status` reads
+# `$_LA_CACHE_OUT` directly below instead of capturing `live_agents`'s stdout the way it
+# used to. It emits the one stderr line and returns the reader's own exit code.
+_la_ensure() {  # <transcript.jsonl>
+  local key
+  key="$(_la_cache_key "${1:-}")" || key=""
+  if [ -z "$key" ] || [ "$key" != "$_LA_CACHE_KEY" ]; then
+    _la_read "${1:-}"
+    _LA_CACHE_KEY="$key"
+  fi
+  printf '%s\n' "$_LA_CACHE_ERR" >&2
+  return "$_LA_CACHE_RC"
+}
+
 live_agents() {  # <transcript.jsonl>
+  local rc=0
+  _la_ensure "${1:-}" || rc=$?
+  [ -z "$_LA_CACHE_OUT" ] || printf '%s\n' "$_LA_CACHE_OUT"
+  return "$rc"
+}
+
+_la_read() {  # <transcript.jsonl> -> sets _LA_CACHE_OUT / _LA_CACHE_ERR / _LA_CACHE_RC
   local transcript="${1:-}"
   local scan index ans_id ans_ts last_prompt body set_out state age epoch now prc
 
+  _LA_CACHE_OUT=""
+  _LA_CACHE_ERR="live-agents: none age=none"
+  _LA_CACHE_RC=4
+
   if [ -z "$transcript" ] || [ ! -r "$transcript" ]; then
-    echo "live-agents: none age=none" >&2
-    return 4
+    return 0
   fi
 
   scan="$(_la_scan "$transcript")" || scan=""
@@ -221,8 +285,7 @@ live_agents() {  # <transcript.jsonl>
   last_prompt="$(printf '%s' "$index" | cut -f3)" || last_prompt=""
 
   if [ -z "$ans_id" ]; then
-    echo "live-agents: none age=none" >&2
-    return 4
+    return 0
   fi
 
   # EVERY command substitution below is guarded with `|| var=…`. A hook may run
@@ -234,8 +297,7 @@ live_agents() {  # <transcript.jsonl>
   set_out="$(printf '%s\n' "$body" | _la_parse_teammates)" || prc=$?
   if [ "$prc" -ne 0 ]; then
     # Recognisably not an answer: refuse rather than report an empty roster.
-    echo "live-agents: none age=none" >&2
-    return 4
+    return 0
   fi
 
   now="$(_la_now_epoch)" || now=""
@@ -253,13 +315,14 @@ live_agents() {  # <transcript.jsonl>
     state="stale"
   fi
 
-  echo "live-agents: ${state} age=${age}" >&2
-  [ -z "$set_out" ] || printf '%s\n' "$set_out"
-
+  _LA_CACHE_ERR="live-agents: ${state} age=${age}"
+  _LA_CACHE_OUT="$set_out"
   if [ "$state" = "fresh" ]; then
-    return 0
+    _LA_CACHE_RC=0
+  else
+    _LA_CACHE_RC=3
   fi
-  return 3
+  return 0
 }
 
 # THE STATUS OF ONE NAME, off the SAME parse `live_agents_has` reads (spec R2, AC-27).
@@ -279,12 +342,20 @@ live_agents() {  # <transcript.jsonl>
 #   exit 1  the name is absent (or empty)      — no stdout
 #   exit 2  the name is present more than once — no stdout, nothing to report
 #   exit 3/4 propagated from live_agents unchanged
+# `_LA_STATUS_WORD` carries the status word to a caller in the SAME process, beside the
+# stdout copy. `live_row_open` reads it rather than `$(live_agents_status …)` for the
+# reason `_la_ensure` exists: a command substitution forks, and the fork would leave the
+# parse cache cold for every row after the first.
+_LA_STATUS_WORD=""
+
 live_agents_status() {  # <transcript.jsonl> <name>
   local transcript="${1:-}" want="${2:-}" set_out rc pair count st
 
+  _LA_STATUS_WORD=""
   rc=0
-  set_out="$(live_agents "$transcript")" || rc=$?
+  _la_ensure "$transcript" || rc=$?
   [ "$rc" -eq 0 ] || return "$rc"
+  set_out="$_LA_CACHE_OUT"
 
   [ -n "$want" ] || return 1
 
@@ -303,7 +374,7 @@ live_agents_status() {  # <transcript.jsonl> <name>
 
   case "$count" in
     0|"") return 1 ;;
-    1)     printf '%s\n' "$st"; return 0 ;;
+    1)     _LA_STATUS_WORD="$st"; printf '%s\n' "$st"; return 0 ;;
     *)     return 2 ;;
   esac
 }
@@ -312,8 +383,9 @@ live_agents_has() {  # <transcript.jsonl> <name>
   local transcript="${1:-}" want="${2:-}" set_out rc count
 
   rc=0
-  set_out="$(live_agents "$transcript")" || rc=$?
+  _la_ensure "$transcript" || rc=$?
   [ "$rc" -eq 0 ] || return "$rc"
+  set_out="$_LA_CACHE_OUT"
 
   [ -n "$want" ] || return 1
 
@@ -369,13 +441,16 @@ live_agents_has() {  # <transcript.jsonl> <name>
 _LA_ROW_CLOSED_STATUS="idle"
 
 live_row_open() {  # <transcript.jsonl> <name>
-  local st rc
+  local rc
   rc=0
-  st="$(live_agents_status "$1" "${2:-}")" || rc=$?
+  # NOT `$(live_agents_status …)`: the substitution would fork, and the parse cache the
+  # fork fills dies with it — which is the whole of P-1 for a caller asking about N rows.
+  # The status word comes back in `_LA_STATUS_WORD`, set on the same arm that prints it.
+  live_agents_status "$1" "${2:-}" >/dev/null || rc=$?
   case "$rc" in
     0)
       # Present exactly once. Only the one observed closed word closes the row.
-      if [ "$st" = "$_LA_ROW_CLOSED_STATUS" ]; then return 1; fi
+      if [ "$_LA_STATUS_WORD" = "$_LA_ROW_CLOSED_STATUS" ]; then return 1; fi
       return 0
       ;;
     1) return 1 ;;
