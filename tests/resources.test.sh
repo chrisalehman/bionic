@@ -509,6 +509,31 @@ if [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
   expect_eq "Darwin: the stats block above the percentage line does not confuse the parse" \
     "state=ok free_mb=8000 load_1m=1.6 free_pct=44 swap_pct=69" "$RS"
 
+  # SYNTHETIC FIXTURE, declared: a `memory_pressure` whose stats block carries an EARLIER
+  # line matching the same phrase. Real output has one such line, at the end; this pins the
+  # documented rule — the LAST match wins — so a new section appearing above the percentage
+  # in a future macOS release cannot silently change the reading.
+  mkdir -p "$TMPROOT/stub-double"
+  cat > "$TMPROOT/stub-double/memory_pressure" <<'STUB'
+#!/bin/bash
+cat <<'OUT'
+The system has 8589934592 (524288 pages with a page size of 16384).
+
+Historic:
+System-wide memory free percentage: 99%
+
+Stats:
+Pages free: 5837
+
+System-wide memory free percentage: 44%
+OUT
+STUB
+  cp "$STUBS/sysctl" "$TMPROOT/stub-double/sysctl"
+  chmod +x "$TMPROOT/stub-double/memory_pressure" "$TMPROOT/stub-double/sysctl"
+  RD="$(PATH="$TMPROOT/stub-double:$PATH" BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 \
+        resources_pressure 8)"
+  expect_eq "Darwin: the LAST matching percentage line is the reading" "44" "$(field "$RD" free_pct)"
+
   # The env pins outrank the sensor: same stubs, pinned answers.
   RP="$(PATH="$STUBS:$PATH" BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 \
         BIONIC_PROBE_FREE_PCT=7 BIONIC_PROBE_SWAP_PCT=91 resources_pressure 8)"
