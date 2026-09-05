@@ -194,6 +194,17 @@ mk_nonplan() {  # <root> <relname> -> abs path on stdout
 plan_of()   { grep -m1 '^plan=' "$1" 2>/dev/null | sed 's/^plan=//'; }
 engat_of()  { grep -m1 '^engaged_at=' "$1" 2>/dev/null | sed 's/^engaged_at=//'; }
 
+# rel_stamp <seconds ago> -> a `touch -t` stamp for "seconds ago" from the REAL wall clock
+# (BSD `date -r` first, GNU `date -d @…` second — both render LOCAL time, which is what
+# `touch -t` reads). Used where a fixture needs one open plan OLDER than another WHILE BOTH
+# STAY LIVE (wave-roster-lifecycle S2: `live_runs` filters real mtime against real "now" in
+# every fixture below that does not pin `BIONIC_NOW_EPOCH`), rather than a fixed calendar
+# date that drifts more than a `live-window:` out of date as real time passes it by.
+rel_stamp() {
+  local at=$(( $(date +%s) - $1 ))
+  date -r "$at" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$at" +%Y%m%d%H%M.%S
+}
+
 # ---------- driving the binding writer ----------
 #
 # `set -u` inside the driver on purpose: every caller of bind_plan is a hook that runs
@@ -816,8 +827,11 @@ expect_eq "…and the marker's plan field is exactly that plan" "$P11" "$(plan_o
 expect_eq "…and the marker is exactly two lines" "2" "$(wc -l < "$M11" | tr -d ' ')"
 
 # (b) TWO open runs: no binding at all. Under the old rule this bound the newer one.
-P11B="$(mk_open_plan "$R11" "wave-02.plan.md" 202602020202)"
-touch -t 202601010101 "$P11"
+# Both stamps are RELATIVE to real "now" (S2: `live_runs` reads real mtime-vs-now here,
+# no `BIONIC_NOW_EPOCH` pin), one hour apart, so each plan stays inside the default
+# live-window while `-nt` ordering between them is unchanged.
+P11B="$(mk_open_plan "$R11" "wave-02.plan.md" "$(rel_stamp 60)")"
+touch -t "$(rel_stamp 3600)" "$P11"
 call_open_runs "$R11"
 expect_eq "the two-run fixture really holds two open runs (non-vacuity)" "2" \
   "$(printf '%s\n' "$OR_OUT" | grep -c . )"
@@ -851,11 +865,13 @@ expect_eq "engaging a planless root writes plan=none" "none" "$(plan_of "$M12")"
 R13="$(make_repo e9d)"
 M13="$(marker_path "$R13" "$SID")"
 P13A="$R13/.bionic/docs/plans/wave-01.plan.md"
-touch -t 202601010101 "$P13A"
+# RELATIVE to real "now" (S2: `live_runs` reads real mtime-vs-now here, no
+# `BIONIC_NOW_EPOCH` pin), so the first engagement still finds it live.
+touch -t "$(rel_stamp 7200)" "$P13A"
 fire "$SID" "$(skill_payload "$SID" "$R13" "bionic:canonical-sdlc")"
 expect_eq "the session binds to the only plan there is (non-vacuity)" "$P13A" "$(plan_of "$M13")"
 AT13=$(engat_of "$M13")
-P13B="$(mk_open_plan "$R13" "wave-02.plan.md" 202603030303)"
+P13B="$(mk_open_plan "$R13" "wave-02.plan.md" "$(rel_stamp 60)")"
 call_open_runs "$R13"
 expect_eq "a NEWER open plan is now the root's newest (non-vacuity)" "$P13B" \
   "$(printf '%s\n' "$OR_OUT" | head -1)"
@@ -952,6 +968,109 @@ expect_eq "engage.sh performs no marker write of its own" "0" \
   "$(/usr/bin/grep -c '> *"\$MARKER"' "$HOOK")"
 expect_eq "engage.sh wants binding.sh from the loader" "1" \
   "$(/usr/bin/grep -c '^BIONIC_LIB_WANT=".*binding\.sh' "$HOOK")"
+
+# ============================================================
+echo ""
+echo "=== E10 (AC-2, wave-roster-lifecycle S2) — the count rule counts LIVE runs, not merely open ones ==="
+# ============================================================
+#
+# S2 (spec AC-2; design §2 "engage.sh"). `RUNS=$(open_runs "$REPO")` becomes
+# `RUNS=$(live_runs "$REPO")`; the `= "1"` count rule and the single `bind_plan` call site
+# are unchanged (that call site is load-bearing for cross-gate §B2 — S1's report, and the
+# comment above it in engage.sh, both say so). LIVE ⊆ OPEN always, so every E9 case above is
+# unaffected by fixtures where the sole/newest open plan is also fresh; this section adds the
+# cases where open and live now disagree — a plan that is open but QUIET.
+#
+# THE CLOCK IS AN INPUT, same idiom as run-predicate.test.sh R10: `BIONIC_NOW_EPOCH` pins
+# "now" for `live_runs`, and each plan's mtime is set with `touch -t` relative to it, so the
+# rows measure the live-window rather than how long the suite took to reach them. The pin is
+# exported around `fire` (not baked into it) because `fire`'s own `env -u … VAR=… bash …`
+# invocation inherits the rest of the calling shell's exported environment.
+
+E10_NOW=1789000000
+e10_age() {  # <file> <seconds before E10_NOW>
+  local at=$(( E10_NOW - $2 ))
+  touch -t "$(date -r "$at" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$at" +%Y%m%d%H%M.%S)" "$1"
+}
+E10_DAY=86400
+
+# (a) THREE open plans, exactly one fresh (within the default 7d window): the marker names
+# the FRESH one. Under the old open-count rule this fixture bound nothing at all (three
+# open runs); under the live rule it binds because exactly one is live.
+R20="$(make_repo_planless)"
+M20="$(marker_path "$R20" "$SID")"
+P20FRESH="$(mk_open_plan "$R20" "fresh.plan.md")"
+P20Q1="$(mk_open_plan "$R20" "quiet-1.plan.md")"
+P20Q2="$(mk_open_plan "$R20" "quiet-2.plan.md")"
+e10_age "$P20FRESH" 3600
+e10_age "$P20Q1" $(( 8 * E10_DAY ))
+e10_age "$P20Q2" $(( 20 * E10_DAY ))
+call_open_runs "$R20"
+expect_eq "the three-plan fixture really holds three OPEN runs (non-vacuity)" "3" \
+  "$(printf '%s\n' "$OR_OUT" | grep -c .)"
+export BIONIC_NOW_EPOCH="$E10_NOW"
+fire "$SID" "$(skill_payload "$SID" "$R20" "bionic:canonical-sdlc")"
+unset BIONIC_NOW_EPOCH
+expect_eq "engaging three open plans, exactly one LIVE, exits 0" "0" "$HOOK_RC"
+expect_eq "…and the marker names the LIVE plan, not merely a member of the open set" \
+  "$P20FRESH" "$(plan_of "$M20")"
+
+# (b) TWO fresh plans (both live): the live count is not one, so no binding at all — the
+# same "several agree" refusal E9(b) pins for open, now pinned for live.
+R21="$(make_repo_planless)"
+M21="$(marker_path "$R21" "$SID")"
+P21A="$(mk_open_plan "$R21" "fresh-a.plan.md")"
+P21B="$(mk_open_plan "$R21" "fresh-b.plan.md")"
+e10_age "$P21A" 3600
+e10_age "$P21B" 7200
+call_open_runs "$R21"
+expect_eq "the two-fresh fixture holds two OPEN runs (non-vacuity)" "2" \
+  "$(printf '%s\n' "$OR_OUT" | grep -c .)"
+export BIONIC_NOW_EPOCH="$E10_NOW"
+fire "$SID" "$(skill_payload "$SID" "$R21" "bionic:canonical-sdlc")"
+unset BIONIC_NOW_EPOCH
+expect_eq "engaging two LIVE open plans exits 0" "0" "$HOOK_RC"
+expect_eq "…and binds NOTHING: plan=none" "none" "$(plan_of "$M21")"
+case "$(cat "$M21" 2>/dev/null)" in
+  *"$P21A"*|*"$P21B"*) no "…and neither plan's path appears in the marker" "one does" ;;
+  *) ok "…and neither plan's path appears in the marker" ;;
+esac
+
+# (c) ONE open plan, but QUIET (backdated past the default 7d window): the OPEN count is
+# one — the exact shape E9(a) binds under the old rule — but the LIVE count is zero, so
+# plan=none. This is S2's headline case: an open-but-quiet solo run must NOT bind.
+R22="$(make_repo_planless)"
+M22="$(marker_path "$R22" "$SID")"
+P22="$(mk_open_plan "$R22" "quiet-solo.plan.md")"
+e10_age "$P22" $(( 8 * E10_DAY ))
+call_open_runs "$R22"
+expect_eq "the quiet-solo fixture still holds exactly one OPEN run (non-vacuity)" "1" \
+  "$(printf '%s\n' "$OR_OUT" | grep -c .)"
+export BIONIC_NOW_EPOCH="$E10_NOW"
+fire "$SID" "$(skill_payload "$SID" "$R22" "bionic:canonical-sdlc")"
+unset BIONIC_NOW_EPOCH
+expect_eq "engaging a root whose sole open run is quiet exits 0" "0" "$HOOK_RC"
+expect_eq "…and binds NOTHING: plan=none, though the OPEN count said one" "none" "$(plan_of "$M22")"
+case "$(cat "$M22" 2>/dev/null)" in
+  *"$P22"*) no "…and the quiet plan's path appears nowhere in the marker" "it does" ;;
+  *) ok "…and the quiet plan's path appears nowhere in the marker" ;;
+esac
+# the pair: the SAME plan while still fresh binds normally, so the row above measured
+# liveness and not some other property of this fixture.
+R22B="$(make_repo_planless)"
+M22B="$(marker_path "$R22B" "$SID")"
+P22B="$(mk_open_plan "$R22B" "quiet-solo.plan.md")"
+e10_age "$P22B" 3600
+export BIONIC_NOW_EPOCH="$E10_NOW"
+fire "$SID" "$(skill_payload "$SID" "$R22B" "bionic:canonical-sdlc")"
+unset BIONIC_NOW_EPOCH
+expect_eq "…paired: the identically-shaped plan while still FRESH binds" "$P22B" "$(plan_of "$M22B")"
+
+# (d) AN EXISTING BOUND-OPEN BINDING SURVIVES RE-ENGAGEMENT, unaffected by the live/open
+# swap. This is E9(d)/E9(e)'s own claim (S2's plan names it explicitly as a case that must
+# stay green rather than a new assertion): a session's binding decides WHAT, and the live
+# count — like the open count before it — is a rule for the UNBOUND only. No new fixture is
+# built here; E9(d) and E9(e) above are the proof, re-affirmed for the record.
 
 # ============================================================
 echo ""

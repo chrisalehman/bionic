@@ -174,7 +174,18 @@ elif [ "$TOOL_NAME" = "Bash" ]; then
   # mistake: forging one means typing the schema token, the resolved agent id and
   # that agent's current log mtime and size, all of which the gate re-checks
   # against the live file before it discharges anything.
-  [ -n "$MLINES" ] || exit 0
+  #
+  # THE EARLY EXIT MOVED, IT DID NOT GO (wave-roster-lifecycle S9, then Step-6
+  # review P-2). It used to `exit 0` right here — the cheapest possible test,
+  # before any git resolution, for the overwhelming majority of Bash calls that
+  # never ran stop-check.sh. S9 needed a pressure sample on every ENGAGED Bash
+  # call, which is a fact about this call having happened rather than about what
+  # it printed, and the engagement switch is below the loader — so the exit had
+  # to move below the sample rather than stay above it. It was deleted instead,
+  # and this hook is PostToolUse on every Bash call: 0.01 s became 0.10 s. The
+  # exit now sits immediately after the sample (search: THE EARLY EXIT,
+  # RESTORED), which is the first line at which the sample has landed and
+  # nothing below it has any work to do for an empty MLINES.
 else
   # TWO SPELLINGS, ONE FACT (AC-10). The dispatch modes name the same field
   # differently: an async task launch returns `tool_response.agentId` (camel),
@@ -210,7 +221,7 @@ CWD=$(_jq '.cwd')
 # payload/scripts/lib/loader.sh. FAIL OPEN: the roster row is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="root.sh run.sh session.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh resources.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -345,6 +356,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/resources.sh"
 
 # THE ROOT (spec AC-10, lib/root.sh). `git rev-parse --show-toplevel` answered with the
 # WORKTREE's own root, so a stop raised from a linked worktree looked for the roster
@@ -378,6 +391,34 @@ case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
 engaged_session "$REPO" "$SID" || exit 0
+
+# ---------- THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15, R4) ----------
+#
+# One sample per engaged Bash call, appended to the ring resources.sh owns. The
+# consumers sample (D3 amendment): plugin hooks were not observed firing inside
+# subagents, so this arm cannot be the ONLY sampler — but it IS reliable for the
+# orchestrator's own calls, which is what this gives the ring: frequent readings
+# between the sparser ones tests/run.sh and the Patrol tick take. Bash-only —
+# ARM 2 (a dispatch confirming) and ARM 3 (an agent starting) are not "time
+# passed at the machine", and sampling on those too would count a dispatch
+# twice against the calls that produced it. FAILURE-TOLERANT like every write in
+# this file: a lost sample costs `pressure_level`'s median one input, never a
+# hook failure, so its result is discarded and its failure swallowed.
+if [ "$TOOL_NAME" = "Bash" ]; then
+  pressure_sample >/dev/null 2>&1 || :
+fi
+
+# ---------- THE EARLY EXIT, RESTORED (Step-6 review P-2) ----------
+#
+# A Bash call that printed no machine line has nothing for any arm below: ARM 1 is the
+# only Bash consumer and its `<<<"$MLINES"` loop writes nothing on an empty value. The
+# sample above has already landed, so this exit costs the ring nothing — and it saves the
+# state-path resolution, the symlink guards and the roster read on the overwhelming
+# majority of Bash calls in a session. Measured on one synthetic PostToolUse Bash payload
+# with an empty MLINES: 0.10 s before, 0.02 s after.
+if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ] && [ -z "$MLINES" ]; then
+  exit 0
+fi
 
 # ---------- THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK (task-engaged-session) --
 #

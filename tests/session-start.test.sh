@@ -37,6 +37,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_SESSION_START_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-start.sh}"
 PASS=0; FAIL=0; TOTAL=0
@@ -142,11 +143,12 @@ write_delivered_plan() {  # <project> [name] -> plan path on stdout
 
 # A BOUND marker (lib/binding.sh's shape, S1/S2 contract): `plan=<path>` naming a
 # member of the open-run set, plus `engaged_at=`. Distinct from `plant_engaged`,
-# which writes an empty (unbound) marker.
+# which writes an empty (unbound) marker. S11: this now calls the real `bind_plan`
+# (tests/lib/bound-marker.sh), which stores the CANONICAL spelling itself — the
+# `realplan()` workaround this suite used to need at every call site that asserts
+# the plan's exact text is gone; the real writer canonicalises for us.
 plant_bound() {  # <project> <sid> <plan-path>
-  mkdir -p "$1/.bionic/tmp"
-  printf 'plan=%s\nengaged_at=2026-09-02T20:00:00Z\n' "$3" > "$1/.bionic/tmp/engaged-$2.state"
-  chmod 600 "$1/.bionic/tmp/engaged-$2.state"
+  bound_marker "$1" "$2" "$3"
 }
 
 # The engagement marker itself (lib/run.sh `engaged_session`) — a REGULAR file
@@ -524,6 +526,109 @@ eq    "12f.3 all three plan lines are listed" "3" \
   "$(printf '%s\n' "$OUT" | grep -cE '^  .*\.plan\.md$')"
 hasnt "12f.4 …and no trailer line" "more — bind names any open plan" "$OUT"
 eq    "12f.5 wrote nothing" "$S12f_BEFORE" "$(snap "$P12f")"
+
+# Eight days ago: past the default 7d `live-window`, so `live_runs` excludes it while
+# `open_runs` still counts it. No BIONIC_NOW_EPOCH pin needed — `backdate` moves the
+# file's mtime itself, so the wall clock's real "now" already sees it as stale.
+QUIET_AGO=$((8 * 86400))
+
+echo ""
+echo "=== 13 — live vs open: the quiet-count line replaces the quiet listing (AC-3, S3) ==="
+
+echo "--- 13a: 3 open, 1 live, not engaged: only the live plan is listed, plus a quiet-count line ---"
+P13=$(make_env 1s)
+PLAN13A="$(write_open_plan "$P13" alpha)"
+PLAN13B="$(write_open_plan "$P13" beta)"
+PLAN13C="$(write_open_plan "$P13" gamma)"
+backdate "$PLAN13B" "$QUIET_AGO"
+backdate "$PLAN13C" "$QUIET_AGO"
+S13_BEFORE=$(snap "$P13")
+OUT=$(drive "$P13" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "13a.1 exit 0" "0" "$(rc)"
+has   "13a.2 the header still names the true OPEN count" "bionic: 3 open runs exist here" "$OUT"
+has   "13a.3 the live plan is listed relative to the docs root" \
+  "  ${PLAN13A#$P13/.bionic/docs/}" "$OUT"
+hasnt "13a.4 the first quiet plan is NOT listed" "$(basename "$PLAN13B")" "$OUT"
+hasnt "13a.5 the second quiet plan is NOT listed" "$(basename "$PLAN13C")" "$OUT"
+has   "13a.6 one quiet-count line names the two quiet runs" \
+  "bionic: 2 quiet open run(s) — bind names any of them" "$OUT"
+eq    "13a.7 wrote nothing" "$S13_BEFORE" "$(snap "$P13")"
+
+echo ""
+echo "--- 13b: same shape, engaged and NOT bound: the quiet-count line still appears ---"
+P13b=$(make_env 1s)
+PLAN13bA="$(write_open_plan "$P13b" alpha)"
+PLAN13bB="$(write_open_plan "$P13b" beta)"
+backdate "$PLAN13bB" "$QUIET_AGO"
+plant_engaged "$P13b" "$CUR_SID"
+OUT=$(drive "$P13b" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq  "13b.1 exit 0" "0" "$(rc)"
+has "13b.2 the not-bound header still fires" \
+  "bionic: 2 open runs exist here and this session is not bound to one" "$OUT"
+has "13b.3 the live plan is listed" "  ${PLAN13bA#$P13b/.bionic/docs/}" "$OUT"
+hasnt "13b.4 the quiet plan is not listed" "$(basename "$PLAN13bB")" "$OUT"
+has "13b.5 one quiet-count line" "bionic: 1 quiet open run(s) — bind names any of them" "$OUT"
+
+echo ""
+echo "--- 13c: all open runs live: no quiet-count line at all (anti-vacuity) ---"
+P13c=$(make_env 1s)
+write_open_plan "$P13c" alpha >/dev/null
+write_open_plan "$P13c" beta >/dev/null
+OUT=$(drive "$P13c" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+hasnt "13c.1 no quiet-count line when nothing is quiet" "quiet open run(s)" "$OUT"
+
+echo ""
+echo "=== 14 — engaged and bound: the bound-run line names the plan and its step (AC-21, S3) ==="
+
+echo "--- 14a: exactly one open run, engaged and bound to it: one line, nothing else ---"
+P14=$(make_env 1s)
+PLAN14="$(write_open_plan "$P14")"
+plant_bound "$P14" "$CUR_SID" "$PLAN14"
+S14_BEFORE=$(snap "$P14")
+OUT=$(drive "$P14" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq  "14a.1 exit 0" "0" "$(rc)"
+has "14a.2 the bound line names the docs-root-relative plan and its current step" \
+  "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 3" "$OUT"
+eq  "14a.3 exactly one line of output — no predecessor state to also report" \
+  "1" "$(printf '%s\n' "$OUT" | grep -c .)"
+eq  "14a.4 wrote nothing" "$S14_BEFORE" "$(snap "$P14")"
+
+echo ""
+echo "--- 14b: the same fixture on resume and on compact: the bound line fires on every source ---"
+for BSRC in resume compact; do
+  OUT=$(drive "$P14" "$BSRC" "$CUR_SID" "$CUR_SID" "$CUR_SID")
+  has "14b.$BSRC the bound line fires on source=$BSRC" \
+    "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 3" "$OUT"
+done
+
+echo ""
+echo "--- 14c: two open runs, engaged and bound to one: the bound line, no listing, roster unaffected ---"
+P14c=$(make_env 1s)
+PLAN14cA="$(write_open_plan "$P14c" alpha)"
+PLAN14cB="$(write_open_plan "$P14c" beta)"
+roster_rows "$P14c/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-THETA"
+plant_bound "$P14c" "$CUR_SID" "$PLAN14cA"
+OUT=$(drive "$P14c" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "14c.1 exit 0" "0" "$(rc)"
+has   "14c.2 the bound line names the bound plan" \
+  "bionic: bound to ${PLAN14cA#$P14c/.bionic/docs/} — current: 3" "$OUT"
+hasnt "14c.3 the sibling (unbound) plan is not named" "$(basename "$PLAN14cB")" "$OUT"
+hasnt "14c.4 no count-style listing" "open runs exist here" "$OUT"
+has   "14c.5 the predecessor roster still prints alongside it" "roster-$OLD_SID.state" "$OUT"
+
+echo ""
+echo "=== 15 — engaged, one live run, unbound: unchanged (regression control, S3 scope (c)) ==="
+P15=$(make_env 1s)
+write_open_plan "$P15" >/dev/null
+roster_rows "$P15/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-IOTA"
+plant_engaged "$P15" "$CUR_SID"
+S15_BEFORE=$(snap "$P15")
+OUT=$(drive "$P15" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+eq    "15.1 exit 0" "0" "$(rc)"
+hasnt "15.2 no bound line — this session never bound" "bionic: bound to" "$OUT"
+hasnt "15.3 no quiet-count line — nothing is quiet" "quiet open run(s)" "$OUT"
+has   "15.4 the predecessor roster still prints, exactly as today" "roster-$OLD_SID.state" "$OUT"
+eq    "15.5 wrote nothing" "$S15_BEFORE" "$(snap "$P15")"
 
 echo ""
 echo "──────────────────────────────────────────────"

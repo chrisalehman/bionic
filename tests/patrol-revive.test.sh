@@ -532,6 +532,18 @@ mkdir -p "$D/.bionic/docs/plans/epic-99"
   printf '# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 9\n\n'
   printf -- '- Step 9: delivered: fixture run closed; report: record/fixture/close-out.md\n'
 } > "$D/.bionic/docs/plans/epic-99/wave-01.plan.md"
+# AND THE ORDERING IS STATED, NOT LEFT TO THE CLOCK. `make_env` plants a second plan at
+# `plans/wave-01.plan.md` reading `current: 4`, and which of the two the tick resolves is
+# `active_plan`'s newest-by-mtime pick. Both files are written inside the same second, so
+# the pick comes down to how `[ "$f" -nt "$plan" ]` breaks a tie — and that is an
+# INTERPRETER-DEPENDENT answer: bash 5 compares st_mtimespec to the nanosecond and calls the
+# epic-99 plan newer, while bash 3.2 — the /bin/bash macOS ships — compares whole seconds,
+# finds neither newer, and keeps the first candidate the walk produced. Measured, two files
+# 61µs apart: 3.2.57 says `b -nt a` is FALSE, 5.3.15 says TRUE. Under the system interpreter
+# this case therefore resolved the `current: 4` plan, the tick QUIETed on an undelivered run,
+# and cases 33 and 34 failed for a reason that has nothing to do with DISARM. Backdating the
+# other plan puts five whole seconds between them, which every interpreter agrees about.
+backdate "$D/.bionic/docs/plans/wave-01.plan.md" 5
 # ARMED THROUGH THE REAL VERB, and dated back, so the plan written a moment ago is a
 # delivery that POSTDATES the arming — which is what the tick now requires before it will
 # DISARM (R-13, critic C-4). A hand-written stamp alone leaves the session with no arming

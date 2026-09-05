@@ -218,6 +218,43 @@ expect_status "an empty roster answers cleanly" 0 "$ST"
 
 # ============================================================
 echo ""
+echo "=== Section 3b: standdown on an ADOPTED WAIVED row survives /clear (S17, AC-12) ==="
+# ============================================================
+#
+# THE CROSS-SCRIPT PROOF. §3 above plants a waived row by hand with `roster_row`; this plants
+# it on a PREDECESSOR's roster and runs the real hooks/session-poker.sh `adopt` verb to carry
+# it onto THIS session's own roster, exactly the shape a user-run `/clear` leaves behind
+# (ac12-t4-walk-2.md). `standdown` never reads the marker or re-derives anything of its own —
+# it asks `session-sweeper.sh verdict`, which reads `waiver=` straight off the row — so this
+# is a pin on the CARRY, not on standdown's own logic.
+R3B="$(make_repo adopted-waived)"
+mkdir -p "$R3B/.bionic/docs/record"
+ADOPT3B_PRED="9f1e2d3c-4b5a-6978-8899-aabbccddeeff"
+ADOPT3B_ID="aadoptedwaived00000000000000000"
+ADOPT3B_ROSTER="$R3B/.bionic/tmp/roster-$ADOPT3B_PRED.state"
+printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  > "$ADOPT3B_ROSTER"
+printf 'roster-state/v1|status=identified|session=%s|name=adopted-waived-row|agent_id=%s|launched_at=%s|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=|progress=|claims=|cadence=10 minutes|absent=|waiver=%s|tool_use_id=toolu_01S17FIX\n' \
+  "$ADOPT3B_PRED" "$ADOPT3B_ID" "2026-08-05T00:00:00Z" \
+  "probe only — a throwaway read-only agent for the standdown/adopt walk" \
+  >> "$ADOPT3B_ROSTER"
+
+# `adopt` decides nothing in a session that never engaged bionic (AC-10) — the same guard
+# session-poker.test.sh's fixtures carry, planted by hand here since this suite has no
+# engagement helper of its own.
+: > "$R3B/.bionic/tmp/engaged-$SID.state"
+( cd "$R3B" && CLAUDE_CODE_SESSION_ID="$SID" bash "$HERE/session-poker.sh" adopt ) >/dev/null 2>&1
+
+run_orders "$R3B" standdown
+expect_status "standdown over a freshly-adopted roster reports and exits clean" 0 "$ST"
+SD3B_BLOCK=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
+expect_contains "the adopted row is in the stand-down batch" \
+  "adopted-waived-row" "$SD3B_BLOCK"
+expect_contains "…because its CARRIED waiver, not an ack or a fresh MET" \
+  "waived — adopted-waived-row" "$SD3B_BLOCK"
+
+# ============================================================
+echo ""
 echo "=== Section 4: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1) ==="
 # ============================================================
 #
@@ -362,6 +399,127 @@ fi
 run_orders "$R4" standdown
 expect_status "a session with no trees stands down unchanged" 0 "$ST"
 expect_absent "…and reports no landings" "LANDED branch=" "$OUT"
+
+# ============================================================
+echo ""
+echo "=== Section 7: standdown reports LIVENESS beside a held row, and still writes nothing (S6) ==="
+# ============================================================
+#
+# WHAT THE ROSTER CANNOT SAY. A row whose contract has not landed is held either way, and
+# `UNMET` reads the same whether the agent is still working on it or finished without
+# delivering — the second is the reported defect (B-2), and it is the state an operator most
+# needs to see. Since S6 the harness's own answer can say which, so the LEFT ALONE block says
+# it. Nothing else about this verb moves: it reports, it decides nothing, and it writes
+# nothing to the roster.
+
+R8="$(make_repo liveness)"
+R8CFG="$SANDBOX/liveness-cfg"
+R8SLUG=$(printf '%s' "$R8" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R8SLUG"
+R8TR="$R8CFG/projects/$R8SLUG/$SID.jsonl"
+
+# The recorded ListAgents answer, in the harness's real shape (bodies byte-verbatim in
+# tests/live-agents.test.sh; the separator is U+00B7 and `[8895ce]` is the ref suffix the
+# reader strips). FRESH because the answer postdates the last user prompt.
+plant_live() {  # <transcript> <fresh|stale> <name>...
+  local tr="$1" freshness="$2"; shift 2
+  local body n
+  body=$(
+    printf 'This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nTeammates (%d):\n' "$#"
+    for n in "$@"; do
+      printf '  %s [8895ce]  ·  bionic:implementor  ·  running  ·  started 7m ago\n' "$n"
+    done
+  )
+  {
+    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
+    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01FIXTURELISTAGENTS",name:"ListAgents",input:{}}]}}'
+    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01FIXTURELISTAGENTS",content:$b}]}}'
+    if [ "$freshness" = "stale" ]; then
+      jq -nc --arg ts "2026-09-05T00:53:00.000Z" \
+        '{type:"user",timestamp:$ts,message:{role:"user",content:"a later turn"}}'
+    fi
+  } > "$tr"
+  return 0
+}
+
+run_orders_cfg() {  # <repo> <args…> — like run_orders, with the metadata root pinned
+  local repo="$1"; shift
+  OUT=$( cd "$repo" && CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$R8CFG" \
+         bash "$ORDERS" "$@" 2>"$SANDBOX/.err" ); ST=$?
+  ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+
+echo landed > "$R8/.bionic/docs/record/landed.md"
+roster_row "$R8" "met-row"   ".bionic/docs/record/landed.md"  "" "met-row@session-6c85684c"
+roster_row "$R8" "still-at-it" ".bionic/docs/record/nope.md"  "" "still-at-it@session-6c85684c"
+roster_row "$R8" "walked-off"  ".bionic/docs/record/nope2.md" "" "walked-off@session-6c85684c"
+plant_live "$R8TR" fresh "still-at-it"
+
+R8_BEFORE=$(cat "$R8/.bionic/tmp/roster-$SID.state")
+run_orders_cfg "$R8" standdown
+expect_status "standdown reports and exits clean" 0 "$ST"
+
+R8_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
+R8_LA=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
+expect_contains "the MET row is stood down, unchanged by any of this" "met-row" "$R8_SD"
+expect_contains "…and named as met" "met" "$R8_SD"
+expect_contains "the row whose agent the harness still names is marked live" \
+  "still-at-it   (UNMET" "$R8_LA"
+expect_contains "…with the liveness the roster alone cannot express" "[live]" "$R8_LA"
+expect_contains "the row whose agent the harness does NOT name is marked not live" \
+  "walked-off" "$R8_LA"
+expect_contains "…which is the finished-but-unstopped state (B-2)" "[not live]" "$R8_LA"
+
+# AND IT WROTE NOTHING. The roster is byte-identical after the report, which is the whole
+# contract of this verb — reading the live set added a sentence, not a side effect.
+if [ "$R8_BEFORE" = "$(cat "$R8/.bionic/tmp/roster-$SID.state")" ]; then
+  ok "standdown wrote nothing to the roster"
+else
+  no "standdown wrote nothing to the roster" "the roster changed"
+fi
+
+# A STALE ANSWER EARNS NO ANNOTATION. The reader still prints a stale set — only its exit
+# status says "do not act" — so a caller that branched on the set rather than the status
+# would label a departed agent live. The report says nothing rather than something wrong.
+plant_live "$R8TR" stale "still-at-it"
+run_orders_cfg "$R8" standdown
+R8_LA2=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
+expect_contains "a stale answer still leaves the held rows reported" "still-at-it" "$R8_LA2"
+expect_absent "…but with no liveness claim on them" "[live]" "$R8_LA2"
+expect_absent "…and none the other way either" "[not live]" "$R8_LA2"
+
+# …and with no answer at all, the same silence. The paired positive is the fresh run above.
+: > "$R8TR"
+run_orders_cfg "$R8" standdown
+R8_LA3=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
+expect_contains "with no answer at all the held rows are still reported" "walked-off" "$R8_LA3"
+expect_absent "…and still carry no liveness claim" "[not live]" "$R8_LA3"
+
+
+# A NAME IS NOT A PATTERN (S-5). `_is_live` dropped the roster's name straight into a basic
+# regular expression, so a `.`, `*` or `[` in it over-matched — and the name is the operator's
+# typed target or a value lifted off a row, neither of which the fleet charset-guards. The row
+# below answers to nothing in the live set and would be annotated `[live]` off its neighbour's
+# name alone. Diagnostic-only, and the annotation is the entire point of this block.
+roster_row "$R8" "s.ill-at-it" ".bionic/docs/record/nope3.md" "" "s.ill-at-it@session-6c85684c"
+plant_live "$R8TR" fresh "still-at-it"
+run_orders_cfg "$R8" standdown
+R8_LA4=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
+R8_META=$(printf '%s\n' "$R8_LA4" | grep -F 's.ill-at-it')
+expect_contains "the metacharacter row is still reported (the arm is not vacuous)" \
+  "s.ill-at-it" "$R8_META"
+expect_contains "…and a name carrying a regex metacharacter is matched LITERALLY: not live" \
+  "[not live]" "$R8_META"
+expect_absent "…never annotated live off the neighbour its pattern would have matched" \
+  "  [live]" "$R8_META"
+# The paired positive on the same run: the neighbour it would have matched IS live, so the
+# row above is a statement about the match and not about a live set that had gone empty.
+expect_contains "…while the real still-at-it beside it is still live" "[live]" \
+  "$(printf '%s\n' "$R8_LA4" | grep -F 'still-at-it   (UNMET')"
 
 # ============================================================
 echo ""
