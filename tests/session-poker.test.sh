@@ -1647,6 +1647,17 @@ poke_rung() {  # <repo> <free_pct> <swap_pct> <args...>
     poke "$repo" "$@"
 }
 
+# A READING ALREADY IN THE RING, taken through the REAL writer. `pressure_sample` is the one
+# writer of that file (S7), so seeding by hand would pin this suite to a private idea of the
+# ring's line shape rather than to the one the library actually keeps — and the case below
+# turns on the SAMPLE COUNT, which is exactly what a hand-written line would fake.
+RESOURCES_LIB="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" && pwd -P)/resources.sh"
+seed_ring() {  # <ring> <free_pct> <swap_pct>
+  BIONIC_PRESSURE_RING="$1" BIONIC_PROBE_FREE_PCT="$2" BIONIC_PROBE_SWAP_PCT="$3" \
+  BIONIC_PROBE_LOAD_1M=1.0 \
+    bash -c '. "$1"; pressure_sample 8' _ "$RESOURCES_LIB" >/dev/null 2>&1
+}
+
 # How many times a line appears in an output — "exactly one rung line per tick" is a claim
 # about a COUNT, and `expect_contains` cannot make it.
 count_lines_matching() {  # <needle> <output> -> integer
@@ -1811,6 +1822,37 @@ expect_eq       "…and no .holds sibling of the stamp was ever written" "" \
   "$(ls "$R11C7/.bionic/tmp/" 2>/dev/null | /usr/bin/grep '\.holds$' || true)"
 expect_eq       "the script carries no NARROW at all — not in code, not in a comment" "0" \
   "$(/usr/bin/grep -c 'NARROW' "$POKER" || true)"
+
+# ---------- 11c4: the tick SAMPLES before it reads (AC-15, the Patrol's half) ----------
+#
+# WHY THIS CASE HAS TO SEED THE RING. `pressure_level` takes a single sample of its own when
+# the ring is EMPTY — a first consumer on a cold machine must have something to answer from —
+# so every case above would read the right band whether the tick sampled or not. The
+# consumers-sample rule (D3 amendment: plugin hooks were not observed firing inside
+# subagents, so nothing else fills the ring while writers run) is only observable against a
+# ring that already holds a reading of ANOTHER band.
+#
+# THE ARITHMETIC THAT MAKES IT A DISCRIMINATOR. One CLEAR reading is already in the window.
+# The machine now reads CRITICAL. A tick that samples leaves two readings, and an even split
+# resolves to the worse band (S7) — critical, a rung of 2. A tick that only READ would see
+# the clear reading alone and report the full ceiling of 8.
+R11C8="$(mk_rung_repo s11-tick-samples)"
+RING8="$TMPROOT/ring-tick-samples.ring"; rm -f "$RING8"
+seed_ring "$RING8" 60 0
+expect_eq "the seeded ring holds exactly one CLEAR reading" "1" \
+  "$(wc -l < "$RING8" | tr -d ' ')"
+BIONIC_PRESSURE_RING="$RING8" BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 poke "$R11C8" tick
+expect_contains "the tick's OWN reading is in the median it answers from" "poker: rung=2/8" "$OUT"
+expect_eq       "…because it appended one, leaving two readings in the ring" "2" \
+  "$(wc -l < "$RING8" | tr -d ' ')"
+# THE PAIRED NEGATIVE, same seeded ring shape, machine still CLEAR: sampling is not a way of
+# always reading critical. Two clear readings stay clear and the ceiling is untouched.
+R11C9="$(mk_rung_repo s11-tick-samples-clear)"
+RING9="$TMPROOT/ring-tick-samples-clear.ring"; rm -f "$RING9"
+seed_ring "$RING9" 60 0
+BIONIC_PRESSURE_RING="$RING9" BIONIC_PROBE_FREE_PCT=60 BIONIC_PROBE_SWAP_PCT=0 poke "$R11C9" tick
+expect_contains "a tick that samples a CLEAR machine onto a clear ring stays at the ceiling" \
+  "poker: rung=8/8" "$OUT"
 
 # ---------- 11d: EMERGENCY names the youngest suite-running writer ----------
 #
