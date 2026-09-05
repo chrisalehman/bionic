@@ -1502,7 +1502,7 @@ setup_legacy_hook_files() {
   _setup_wants legacy-hook-files || return 0
   say ""
   say "10. Legacy installed hook files"
-  local line count dir names name left removed=0
+  local line count dir names left removed=0
   line="$(detect_legacy_hook_files)"
   count="${line#*count=}"; count="${count%% *}"
   dir="${line#*path=}";    dir="${dir%% *}"
@@ -1527,19 +1527,12 @@ setup_legacy_hook_files() {
     return 0
   fi
 
-  # ONE NAME AT A TIME, AND ONLY FROM THE LIST. `set --` re-splits the detector's own
-  # comma-separated list into this function's positional parameters, which is a split that
-  # cannot leak past the `return` the way a changed IFS would.
-  local setup_hf_ifs="$IFS"
-  IFS=','
-  # shellcheck disable=SC2086  # the split IS the point, on a list this script's own library built
-  set -- $names
-  IFS="$setup_hf_ifs"
-  for name in "$@"; do
-    [ -n "$name" ] || continue
-    [ -f "${dir}/${name}" ] || continue
-    rm -f "${dir}/${name}" 2>/dev/null && removed=$((removed + 1))
-  done
+  # ONE NAME AT A TIME, AND ONLY FROM THE LIST. `_dep_rm_named_files` (deps.sh) re-splits
+  # the detector's own comma-separated list into positional parameters under a `set -f`
+  # guard, so a glob character in a payload filename cannot expand against this process's
+  # $PWD on the way through — the same guard every one of the four teardown call sites now
+  # shares (review-d D-2).
+  removed="$(_dep_rm_named_files "$dir" "$names")"
 
   # THE VERDICT IS RE-MEASURED, NOT ASSUMED. The same fact function that decided to ask is
   # asked again; a file that would not delete is then a `✗` with a by-hand action, never a
@@ -1576,7 +1569,7 @@ setup_legacy_agent_copies() {
   _setup_wants legacy-agent-copies || return 0
   say ""
   say "11. Legacy installed agent copies"
-  local line state total drift names dir name left removed=0
+  local line state total drift names dir left removed=0
   line="$(detect_installed_agent_copies)"
   state="${line#*state=}"; state="${state%% *}"
   total="${line#*total=}"; total="${total%% *}"
@@ -1606,16 +1599,8 @@ setup_legacy_agent_copies() {
     return 0
   fi
 
-  local setup_ac_ifs="$IFS"
-  IFS=','
-  # shellcheck disable=SC2086  # the split IS the point, on a list this script's own library built
-  set -- $names
-  IFS="$setup_ac_ifs"
-  for name in "$@"; do
-    [ -n "$name" ] || continue
-    [ -f "${dir}/${name}" ] || continue
-    rm -f "${dir}/${name}" 2>/dev/null && removed=$((removed + 1))
-  done
+  # Same guard, same helper (review-d D-2) — see step 10 above.
+  removed="$(_dep_rm_named_files "$dir" "$names")"
 
   line="$(detect_installed_agent_copies)"; left="${line#*drift=}"; left="${left%% *}"
   if [ "$left" = "0" ]; then

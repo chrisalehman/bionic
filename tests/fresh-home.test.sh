@@ -1535,6 +1535,168 @@ expect_match "8: a second pass over the same machine reads already clean" \
   '*already clean*' "$(printf 'y\n' | run_payload "$REMOVE_SH" --only legacy-hook-files 2>&1)"
 
 # ---------------------------------------------------------------------------
+# Group 9 — the statusline teardown clears .statusLine ONLY when it names
+# ccstatusline (1.4.4 T7, review-d D-1).
+#
+# `dep_teardown_state`'s presence predicate is a UNION over three facts — the
+# recorded command names ccstatusline, OR the config directory exists, OR the
+# global package is installed — because the config directory and the package
+# are bionic's to remove even once the command has moved on. The removal body
+# used to treat that same union as licence to delete all three, including a
+# `.statusLine` the union only asked about because of the OTHER two facts. A
+# machine where the user has since pointed the status line at their OWN
+# renderer, but never cleaned up the config directory bionic copied in (or the
+# package bionic installed), is a real, reachable machine: use bionic, adopt a
+# different renderer, then run /bionic:remove. Two shapes below, matching
+# review-d's matrix rows 6 and 7 — the "new harm" rows, run beside Group 7's
+# existing positive twin so this is a measurement against the same extractor,
+# not a new one.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 9: remove clears .statusLine only when it names ccstatusline ==="
+
+# Shape one (matrix row 6): the user's own renderer, PLUS the config directory
+# bionic copied in and never cleaned up. The row is still pending — the config
+# directory alone makes it so — and the run must still take the directory
+# while leaving the key alone.
+fresh_home
+mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "my-renderer"
+  }
+}
+JSON
+cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+expect_eq "9a precondition: the fixture's statusLine names the user's own renderer" \
+  "my-renderer" "$(jqf '.statusLine.command // ""')"
+
+G9A_OUT="$TMP/remove-statusline-user-owned-cfgdir.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G9A_OUT" 2>&1
+
+g9_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is clean
+  grep 'ccstatusline' "$1" 2>/dev/null | grep 'already clean' 2>/dev/null
+  return 0
+}
+expect_eq "9a: the row is still offered — the config directory is bionic's, so the union still fires" \
+  "" "$(g9_clean_rows "$G9A_OUT")"
+expect_eq "9a: the user's own .statusLine SURVIVES a consented teardown" \
+  "my-renderer" "$(jqf '.statusLine.command // ""')"
+expect_true "9a: …and the config directory bionic copied in is still gone" \
+  test ! -d "${HOME_FIX}/.config/ccstatusline"
+expect_eq "9a: …and the rest of the user's settings.json is untouched" \
+  "opus" "$(jqf '.model // ""')"
+
+# Shape two (matrix row 7): the user's own renderer, PLUS the global package
+# bionic installed and never uninstalled — no config directory this time, so
+# the package is the only other fact making the row pending.
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "my-renderer"
+  }
+}
+JSON
+printf 'ccstatusline\n' > "${STATE}/npm-global"
+expect_eq "9b precondition: the fixture's statusLine names the user's own renderer" \
+  "my-renderer" "$(jqf '.statusLine.command // ""')"
+
+G9B_OUT="$TMP/remove-statusline-user-owned-pkg.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G9B_OUT" 2>&1
+
+expect_eq "9b: the row is still offered — the installed package is bionic's, so the union still fires" \
+  "" "$(g9_clean_rows "$G9B_OUT")"
+expect_eq "9b: the user's own .statusLine SURVIVES a consented teardown" \
+  "my-renderer" "$(jqf '.statusLine.command // ""')"
+expect_match "9b: …and the package bionic installed is uninstalled" \
+  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+expect_eq "9b: …and the rest of the user's settings.json is untouched" \
+  "opus" "$(jqf '.model // ""')"
+
+# The positive control, on the same two extractors: a command that DOES name
+# ccstatusline is exactly what Group 7 already measures — not repeated here.
+
+# ---------------------------------------------------------------------------
+# Group 10 — the four teardown removal loops are glob-safe against $PWD
+# (1.4.4 T7, review-d D-2).
+#
+# `set -- $names` re-splits a detector's comma-separated list into positional
+# parameters; unquoted, that is a pathname expansion, and two of the four
+# call sites (setup's) ran it with no `set -f` guard. A payload shipping a
+# hook literally named `n*.sh`, beside a machine owner's own file, with a
+# decoy in the CALLING PROCESS's $PWD that happens to match that glob, turns
+# the split's one "name" into whatever the decoy is — deleting the owner's
+# file and leaving the payload's own leftover in place. This is the exact
+# shape review-d's D-2 demonstrated against setup.sh; the same fixture proves
+# remove.sh's twins were already safe and stay that way.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 10: the split loops do not glob against \$PWD ==="
+
+# A fixture payload whose only shipped hook is literally named n*.sh — a
+# filename no real commit would carry, chosen because it is the one the
+# review's demonstration used: harmless as a literal, dangerous as a pattern.
+G10_PAYLOAD="$TMP/payload-glob"
+rm -rf "$G10_PAYLOAD"
+cp -R "$PAYLOAD" "$G10_PAYLOAD"
+# payload/hooks is a symlink to the repo's own hooks/ (`ls -la payload/`) — cp -R
+# copies the LINK, not a directory, so it has to come off before this fixture can
+# carry a hook roster of its own instead of the real one's.
+rm -f "$G10_PAYLOAD/hooks"
+mkdir -p "$G10_PAYLOAD/hooks"
+printf '#!/bin/bash\n# the payload'"'"'s one hook, named to double as a glob\n' \
+  > "$G10_PAYLOAD/hooks/n*.sh"
+
+g10_plant() {  # -> builds the fixture home + a decoy $PWD, fresh each time
+  fresh_home
+  mkdir -p "${HOME_FIX}/.claude/hooks"
+  cp "$G10_PAYLOAD/hooks/n*.sh" "${HOME_FIX}/.claude/hooks/n*.sh"
+  printf '#!/bin/bash\n# the machine owner wrote this one\n' \
+    > "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+
+  G10_PWD="$TMP/cwd-with-decoy"
+  rm -rf "$G10_PWD"; mkdir -p "$G10_PWD"
+  # The decoy: a file that has nothing to do with bionic, sitting in the
+  # CALLER's cwd, whose name happens to glob-match the payload's one hook name.
+  printf 'decoy\n' > "$G10_PWD/not-bionics.sh"
+}
+
+# <script-basename> <label> — runs that script's legacy-hook-files item with the
+# CALLING PROCESS cd'd into the decoy directory, exactly the shape D-2 describes.
+g10_run() {
+  local script="$1" label="$2"
+  G10_OUT="$TMP/${label}.txt"
+  ( cd "$G10_PWD" && printf 'y\ny\n' | FH_PAYLOAD="$G10_PAYLOAD" \
+      run_payload "$G10_PAYLOAD/scripts/${script}.sh" --only legacy-hook-files ) \
+    > "$G10_OUT" 2>&1
+}
+
+g10_plant
+g10_run setup setup-glob-guard-setup
+expect_true "10 setup: the payload-named leftover is gone" \
+  test ! -e "${HOME_FIX}/.claude/hooks/n*.sh"
+expect_true "10 setup: the machine owner's file survives a glob-matching decoy in \$PWD" \
+  test -f "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+expect_match "10 setup: the run reports the removal, not a leftover" \
+  '*removed*' "$(cat "$G10_OUT")"
+
+g10_plant
+g10_run remove setup-glob-guard-remove
+expect_true "10 remove: the payload-named leftover is gone" \
+  test ! -e "${HOME_FIX}/.claude/hooks/n*.sh"
+expect_true "10 remove: the machine owner's file survives a glob-matching decoy in \$PWD" \
+  test -f "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+
+# ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
 
