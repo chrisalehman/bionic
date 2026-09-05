@@ -3256,6 +3256,103 @@ poke_pressure "$R19H" 8192 1.0 tick
 expect_contains "…while a genuinely MET roster still DISARMs on the same idle answer" \
   "decision=DISARM" "$OUT"
 
+# ============================================================
+section "Section 20: the kill-floor target reads the ONE openness predicate, and only MET closes a row"
+# ============================================================
+#
+# TWO DEFINITIONS OF "OPEN" LIVED IN THIS FILE after S19. The tick's `open=` moved onto
+# `live_row_open` — the one predicate, payload/scripts/lib/agents.sh — while
+# `youngest_suite_writer`, the arm that names an agent for the orchestrator to STOP at the
+# kill floor, kept the pre-S19 roster spelling. The least consequential number the tick
+# prints asked the live set; the most consequential NAME it prints did not, and so could
+# name a writer the harness had already finished with (Step-6 correctness review, out-of-axis
+# note on `youngest_suite_writer`).
+#
+# AND THE MARKER READ WAS STATE-BLIND. `hooks/session-start.sh`'s `open_rows` and the poker's
+# own `adopt_fold` both require `state=MET` before a `landing-swept/v1` line closes a row;
+# this arm and lib/patrol.sh's `patrol_roster_state` took ANY marker. S17's
+# `adopt_copy_marker` is a second writer that puts non-MET markers on a successor's roster BY
+# DESIGN, so the two readers that ignored `state=` are exactly the two that now meet them
+# (Step-6 security review, out-of-axis note 2).
+#
+# THE FALLBACK IS THE TICK'S OWN, unchanged: STALE and NONE mean the roster spelling stands,
+# because the Patrol's prompt runs before any ListAgents and a kill-floor arm that went silent
+# on a first tick would be a wall firing on the healthy path.
+
+swept_marker() {  # <repo> <name> <state>
+  printf 'landing-swept/v1|at=%s|session=%s|name=%s|agent_id=a000|state=%s\n' \
+    "$(iso_ago 30)" "$SID" "$2" "$3" >> "$(roster_of "$1")"
+}
+
+s20_repo() {  # <label> -> a repo with ONE intended, suite-claiming row named `suite-writer`
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| A | — | standard | landed |"
+  add_row "$r" status=intended name=suite-writer deliverable=a.md duration="4 hours" \
+    claims="bash tests/run.sh" launched_at="$(iso_ago 60)"
+  printf '%s' "$r"
+}
+S20_TARGET="stop youngest suite-running writer suite-writer@session-$(printf '%s' "$SID" | cut -c1-8)"
+S20_NONE="no suite-running writer on this roster to stop"
+
+# ---------- 20a: an UNMET marker does NOT close the row ----------
+#
+# The state S17 made ordinary: a predecessor's verdict copied verbatim onto this roster,
+# saying the contract was NOT met. The row is still open work, and a kill floor that read it
+# as closed would report there is nobody to stop while the machine is dying.
+R20A="$(s20_repo s20-unmet-marker)"
+swept_marker "$R20A" suite-writer UNMET
+s19_answer fresh "suite-writer:running"
+poke_pressure "$R20A" 100 1.0 tick
+expect_contains "an UNMET landing-swept marker leaves the row open, so the kill floor names it" \
+  "$S20_TARGET" "$OUT"
+
+# ---------- 20b: the paired positive — a MET marker DOES close it ----------
+R20B="$(s20_repo s20-met-marker)"
+swept_marker "$R20B" suite-writer MET
+s19_answer fresh "suite-writer:running"
+poke_pressure "$R20B" 100 1.0 tick
+expect_contains "…while a MET marker closes it, and the kill floor names no one (20a discriminates)" \
+  "$S20_NONE" "$OUT"
+expect_absent "…and never the swept writer's address" "suite-writer@" "$OUT"
+
+# ---------- 20c: an IDLE agent is not a writer to stop ----------
+#
+# Finished and unstopped. The roster still carries the row — the tick writes nothing — but
+# the harness has already let the agent go, so stopping it destroys nothing and the address
+# is noise at the one moment the operator needs a real one.
+R20C="$(s20_repo s20-live-idle)"
+s19_answer fresh "suite-writer:idle"
+poke_pressure "$R20C" 100 1.0 tick
+expect_contains "an IDLE agent is not named at the kill floor" "$S20_NONE" "$OUT"
+expect_absent "…so the orchestrator is never handed a stop address for an agent already gone" \
+  "suite-writer@" "$OUT"
+
+# ---------- 20d: the control — the same row, still running ----------
+R20D="$(s20_repo s20-live-running)"
+s19_answer fresh "suite-writer:running"
+poke_pressure "$R20D" 100 1.0 tick
+expect_contains "…while the same row with a RUNNING agent IS named (20c discriminates)" \
+  "$S20_TARGET" "$OUT"
+
+# ---------- 20e/20f: STALE and NONE fall back to the roster spelling ----------
+#
+# The same fallback `open=` takes twenty lines above, for the same reason: freshness is a
+# property of the transcript, not of any one name, and the tick holds no authority. A
+# fallback that went silent would make the kill floor useless on precisely the tick that runs
+# before the session's first ListAgents.
+R20E="$(s20_repo s20-live-stale)"
+s19_answer stale "suite-writer:idle"
+poke_pressure "$R20E" 100 1.0 tick
+expect_contains "a STALE answer falls back to the roster and still names the writer" \
+  "$S20_TARGET" "$OUT"
+
+R20F="$(s20_repo s20-live-none)"
+s19_answer none
+poke_pressure "$R20F" 100 1.0 tick
+expect_contains "…and so does an answer the transcript does not carry at all" \
+  "$S20_TARGET" "$OUT"
+
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================
