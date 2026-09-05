@@ -902,6 +902,99 @@ expect_eq "a missing ceiling refuses with 2" "2" "$?"
 BIONIC_PRESSURE_RING="$LRING" pressure_level nine >/dev/null 2>&1
 expect_eq "a non-numeric ceiling refuses with 2" "2" "$?"
 
+# --- §K.2 — the inlined banding and `pressure_band` answer identically ---------------
+#
+# Step-6 review P-3. `pressure_level` used to fork `pressure_band` once per sample in the
+# window, and the window holds whatever the sample RATE put there — 144 samples measured
+# 0.20 s of pure fork, and a busier machine makes its own rung read slower. The banding is
+# now inlined into the same awk that filters the window: 0.20 s -> 0.02 s at 144 samples.
+#
+# TWO TRANSCRIPTIONS CAN DRIFT, so this is the row that forbids it. Each sample below is
+# driven BOTH ways — through `pressure_band` directly, and through `pressure_level` over a
+# ring holding exactly that one sample, where the median of one IS that sample's band. A
+# threshold edited in one place and not the other splits this table.
+K2_RING="$TMPROOT/k2/pressure.ring"
+mkdir -p "$(dirname "$K2_RING")"
+K2_NOW=9000000
+
+k2_level_band() {  # <free> <swap> <load> <cores> -> the band pressure_level reports
+  printf '%s|%s|%s|%s|%s\n' "$K2_NOW" "$1" "$2" "$3" "$4" > "$K2_RING"
+  BIONIC_PRESSURE_RING="$K2_RING" BIONIC_NOW_EPOCH="$K2_NOW" pressure_level 8 2>&1 >/dev/null \
+    | sed -n 's/.*band=\([a-z]*\).*/\1/p'
+}
+k2_level_samples() {  # <free> <swap> <load> <cores> -> the sample COUNT it counted
+  printf '%s|%s|%s|%s|%s\n' "$K2_NOW" "$1" "$2" "$3" "$4" > "$K2_RING"
+  BIONIC_PRESSURE_RING="$K2_RING" BIONIC_NOW_EPOCH="$K2_NOW" pressure_level 8 2>&1 >/dev/null \
+    | sed -n 's/.*samples=\([0-9]*\).*/\1/p'
+}
+
+# Every row of §I's table, plus the -1 arms and the load term, driven both ways.
+K2_ROWS='44|69|1.6|8
+25|69|1.6|8
+24|69|1.6|8
+12|69|1.6|8
+11|69|1.6|8
+5|69|1.6|8
+4|69|1.6|8
+44|79|1.6|8
+44|80|1.6|8
+44|92|1.6|8
+44|69|12.1|8
+44|69|12.0|8
+-1|69|1.6|8
+44|-1|1.6|8
+-1|-1|1.6|8
+-1|-1|20|8
+0|0|0|1'
+K2_DISAGREE=""
+while IFS='|' read -r k2f k2s k2l k2c; do
+  [ -n "${k2f:-}" ] || continue
+  k2_direct="$(pressure_band "$k2f" "$k2s" "$k2l" "$k2c" 2>/dev/null)" || k2_direct="REFUSED"
+  k2_via="$(k2_level_band "$k2f" "$k2s" "$k2l" "$k2c")"
+  [ "$k2_direct" = "$k2_via" ] || \
+    K2_DISAGREE="${K2_DISAGREE}${k2f}|${k2s}|${k2l}|${k2c}: band=${k2_direct} level=${k2_via}
+"
+done <<EOF
+$K2_ROWS
+EOF
+expect_eq "every sample bands identically through pressure_band and through pressure_level" \
+  "" "$K2_DISAGREE"
+# Non-vacuity: the table really does exercise all four bands.
+K2_SEEN=""
+while IFS='|' read -r k2f k2s k2l k2c; do
+  [ -n "${k2f:-}" ] || continue
+  K2_SEEN="${K2_SEEN}$(pressure_band "$k2f" "$k2s" "$k2l" "$k2c" 2>/dev/null) "
+done <<EOF
+$K2_ROWS
+EOF
+for k2b in clear warning critical emergency; do
+  expect_match "…and the table reaches the $k2b band" "$K2_SEEN" "(^| )$k2b( |$)"
+done
+
+# THE REFUSALS AGREE TOO: a sample `pressure_band` will not band is a sample
+# `pressure_level` does not count. Its own window filter already drops NF != 5 and a
+# non-numeric timestamp, so these are the field-level refusals only.
+K2_BAD='xx|69|1.6|8
+44|yy|1.6|8
+44|69|zz|8
+44|69|1.6|0
+44|69|1.6|nine'
+K2_BAD_DISAGREE=""
+while IFS='|' read -r k2f k2s k2l k2c; do
+  [ -n "${k2f:-}" ] || continue
+  pressure_band "$k2f" "$k2s" "$k2l" "$k2c" >/dev/null 2>&1 && k2_rc=0 || k2_rc=$?
+  k2_n="$(k2_level_samples "$k2f" "$k2s" "$k2l" "$k2c")"
+  # pressure_band refuses (rc 2) <=> pressure_level counts zero samples.
+  if [ "$k2_rc" -eq 2 ] && [ "${k2_n:-}" = "0" ]; then :; else
+    K2_BAD_DISAGREE="${K2_BAD_DISAGREE}${k2f}|${k2s}|${k2l}|${k2c}: band_rc=${k2_rc} samples=${k2_n}
+"
+  fi
+done <<EOF
+$K2_BAD
+EOF
+expect_eq "a sample pressure_band refuses is a sample pressure_level does not count" \
+  "" "$K2_BAD_DISAGREE"
+
 # ════════════════════════════════════════════════════════════ report
 
 echo
