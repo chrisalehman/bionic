@@ -471,7 +471,7 @@ ROSTER_PATH=""
 if [ -n "$REPO_ROOT" ] && [ -n "$OWN_SESSION_ID" ]; then
   ROSTER_PATH="$REPO_ROOT/.bionic/tmp/roster-${OWN_SESSION_ID}.state"
 fi
-ROSTER_ROW=""; ROSTER_ID_MATCH=""
+ROSTER_ROW=""
 ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
 # TWO ROWS CAN CARRY ONE AGENT — the dispatch writes the CONTRACT, the recorder writes the id
 # one state later — so the id and the contract are collected separately rather than read off
@@ -503,7 +503,6 @@ if [ -n "$ROW_BY_ID" ]; then
   roster_walk "$TARGET_BASE"
 fi
 ROSTER_ROW="$ROW_BY_NAME"
-ROSTER_ID_MATCH="$ROW_WITH_ID"
 
 # ---------- resolution against the live set ----------
 #
@@ -555,7 +554,11 @@ case "$LIVE_RC" in
     exit 1
     ;;
   2)
-    LIVE_DUPES=$(live_agents "$OWN_TRANSCRIPT" 2>/dev/null | grep "^${TARGET_BASE}|") || LIVE_DUPES=""
+    # MATCHED BY FIELD EQUALITY, never as a regular expression (Step-6 security review S-5).
+    # `TARGET_BASE` is the operator's typed target; a `.`, `*` or `[` in it would over-match
+    # and this refusal would report a count that is not the ambiguity it actually found.
+    LIVE_DUPES=$(live_agents "$OWN_TRANSCRIPT" 2>/dev/null \
+                 | awk -F'|' -v want="$TARGET_BASE" '$1 == want') || LIVE_DUPES=""
     LIVE_N=0
     [ -n "$LIVE_DUPES" ] && LIVE_N=$(printf '%s\n' "$LIVE_DUPES" | grep -c .)
     echo "Resolved:      ambiguous — ${LIVE_N} live agents answer to '${TARGET_BASE}':"

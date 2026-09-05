@@ -1130,6 +1130,78 @@ slice_ready() {  # <table> -> the ready ids, one per line, in table order
     }'
 }
 
+# ---------------------------------------------------------------- the rung report
+#
+# THE CEILINGS THIS RUN OPTED INTO, read once. Both may be absent — a project with no plan,
+# or a plan written before Step 0 ever probed — and absence is INERT: the caller says why it
+# is not filling and fills nothing, exactly as the dispatch wall's budget arm goes inert on
+# the same missing line. A budget is a ceiling a run opts into.
+#
+# THE SAME RUN EVERY OTHER DECISION THIS TICK WAS TAKEN ON. `resolve_run` answers once per
+# process and memoizes, so calling this twice on one tick costs one `plan_budget_line` and
+# nothing else — which is what lets the report below be reached from three exit paths
+# without any of them re-deciding which run they are in.
+sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BUDGET/SCHED_WRITERS/SCHED_JOBS
+  resolve_run "$1" "${2:-}"
+  SCHED_PLAN="$POKER_RUN_PLAN"
+  SCHED_BUDGET=""
+  [ -n "$SCHED_PLAN" ] && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
+  SCHED_WRITERS="$(budget_int "$SCHED_BUDGET" writers)"
+  SCHED_JOBS="$(budget_int "$SCHED_BUDGET" test_jobs)"
+}
+
+# ── THE RUNG, SAMPLED AND REPORTED (AC-17). One sample appended to the machine-scoped ring,
+# then the rung read back off it — the order the design names, because a consumer that read
+# without sampling would answer from other sessions' readings alone and a first consumer on
+# a cold machine would answer from nothing at all.
+#
+# ONE FRACTION, BOTH CEILINGS (D3). `pressure_level` is a pure function of (ring, ceiling):
+# the median band inside the smoothing window picks the fraction, and the fraction is applied
+# to `writers` and to `test_jobs` separately because they are different ceilings, not because
+# they are different judgments. Nothing is stored; two ticks a second apart over one ring
+# compute one answer.
+#
+# A MISSING CEILING IS REPORTED AS MISSING. A plan that opts into no budget offers nothing to
+# take a fraction OF, and inventing a ceiling here is the one thing this arm may never do —
+# so the fields read `-` and the line is still printed. "The tick said nothing" and "the tick
+# said there is no ceiling" are different facts, and only the second one is true.
+#
+# ON EVERY TICK, WHICH MEANS FROM EVERY EXIT PATH (Step-6 review C-5). AC-17 reads "prints
+# the current rung as one line of its output on every tick", and this report used to sit in
+# the scheduler block — below the pre-dispatch QUIET arm and below DISARM, both of which
+# `exit 0` above it. The first tick of every run takes the pre-dispatch arm, by design (arming
+# precedes dispatch), so the tick where "what width will this machine carry" is most useful
+# was the one tick that never answered it. A FUNCTION rather than a hoisted block, because the
+# two early arms exit before the scheduler has read a budget and this is the only place that
+# read may live without being taken twice.
+rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUNG, says one line
+  local cores
+  sched_budget_read "$1" "${2:-}"
+  # THE CORE COUNT, TAKEN HERE ONLY IF THE CALLER HAS NOT TAKEN IT. The scheduler block reads
+  # `resources_probe` for its HOLD/EMERGENCY arm and leaves the answer in `SCHED_CORES`; the
+  # two early arms have no such reading, and `pressure_sample` needs one to band a load
+  # average. A bad or missing value is 1 rather than a refusal: an unsampled ring is a rung
+  # this tick does not have, and that is a worse answer than a conservative core count.
+  cores="${SCHED_CORES:-}"
+  case "$cores" in ''|*[!0-9]*) cores="$(space_field "$(resources_probe)" cores)" ;; esac
+  case "$cores" in ''|*[!0-9]*) cores=1 ;; esac
+  [ "$cores" -ge 1 ] || cores=1
+  pressure_sample "$cores" >/dev/null 2>&1 || :
+  SCHED_RUNG=""
+  SCHED_JOBS_RUNG=""
+  case "${SCHED_WRITERS:-}" in
+    ''|0) : ;;
+    *) SCHED_RUNG="$(pressure_level "$SCHED_WRITERS" 2>/dev/null)" || SCHED_RUNG="" ;;
+  esac
+  case "${SCHED_JOBS:-}" in
+    ''|0) : ;;
+    *) SCHED_JOBS_RUNG="$(pressure_level "$SCHED_JOBS" 2>/dev/null)" || SCHED_JOBS_RUNG="" ;;
+  esac
+  case "${SCHED_RUNG:-}" in ''|*[!0-9]*) SCHED_RUNG="" ;; esac
+  case "${SCHED_JOBS_RUNG:-}" in ''|*[!0-9]*) SCHED_JOBS_RUNG="" ;; esac
+  say "rung=${SCHED_RUNG:--}/${SCHED_WRITERS:--} writers=${SCHED_RUNG:--} test_jobs=${SCHED_JOBS_RUNG:--}"
+}
+
 # THE YOUNGEST SUITE-RUNNING WRITER on this session's roster, as the address the stopping
 # standard takes — `<name>@session-<id8>`, the one spelling both stop gates accept
 # (POKER/8). Empty when there is none.
@@ -1139,23 +1211,82 @@ slice_ready() {  # <table> -> the ready ids, one per line, in table order
 # suite. A `pgrep` per row would be truer to the word "running" and would put a process
 # spawn per row inside a Patrol tick.
 #
-# "OPEN" is the roster's own predicate — a `status=intended` row whose name carries no
-# `landing-swept/v1` marker — the same one lib/patrol.sh's `patrol_roster_state` uses.
+# "OPEN" IS THE ONE PREDICATE THE REST OF THE TICK USES (S19; Step-6 correctness review,
+# out-of-axis note). A `status=intended` row survives the roster pass if no `landing-swept/v1`
+# marker has CLOSED it, and it survives the live pass if `live_row_open` — the fleet's single
+# row-openness predicate, payload/scripts/lib/agents.sh — still calls its agent live on this
+# session's transcript. Before this fix the arm stopped at the roster pass, so the tick's
+# advisory `open=` asked the live set while the one NAME it prints for the operator to act on
+# did not: the kill floor could hand back a stop address for an agent the harness had already
+# let go.
+#
+# CLOSED MEANS `state=MET`, not "a marker exists". `hooks/session-start.sh`'s `open_rows` and
+# `adopt_fold` below both require it; this arm and lib/patrol.sh's `patrol_roster_state` did
+# not, and S17's `adopt_copy_marker` is a second writer that copies a predecessor's UNMET
+# verdict verbatim onto a successor's roster BY DESIGN. An UNMET contract is open work by
+# every other reader in the fleet.
+#
+# STALE AND NONE KEEP THE ROSTER SPELLING, the same fallback and the same reason as the
+# tick's `open=` below: the Patrol's prompt runs before any ListAgents, so an arm that went
+# silent on an unusable answer would go silent on the first tick of every session — and a
+# kill floor that says nothing while the machine dies is worse than one that names a writer
+# who has already finished. Freshness is a property of the TRANSCRIPT, so the first unusable
+# answer abandons the whole live pass rather than one row of it.
 #
 # YOUNGEST, because the rung is a kill floor and the youngest writer has the least work to
 # lose. `launched_at` is an ISO-8601 Z stamp, so a lexical max IS a chronological max.
 youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
-  local roster="$1" sid="$2" swept name
+  local roster="$1" sid="$2" swept cands live_cands live_ok tr lrc name tab RL RN CL
   [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
-  swept="$(grep '^landing-swept/v1|' "$roster" 2>/dev/null || true)"
-  name="$(grep '^roster-state/v1|status=intended|' "$roster" 2>/dev/null \
-    | while IFS= read -r RL; do
-        [ -n "$(line_field "$RL" claims)" ] || continue
-        RN="$(line_field "$RL" name)"
-        [ -n "$RN" ] || continue
-        case "$swept" in *"|name=${RN}|"*) continue ;; esac
-        printf '%s\t%s\n' "$(line_field "$RL" launched_at)" "$RN"
-      done | sort | tail -1 | cut -f2-)"
+  tab="$(printf '\t')"
+
+  # THE CLOSING MARKERS, BY FIELD EQUALITY rather than by substring: `state=` is last in the
+  # originator's printf today and a future field appended after it must not turn every marker
+  # into a non-closing one.
+  swept="$(grep '^landing-swept/v1|' "$roster" 2>/dev/null \
+    | awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i == "state=MET") { print; break } }' || true)"
+
+  # PASS ONE — THE ROSTER. Kept in the current shell rather than a pipeline subshell, because
+  # the live pass below carries a decision ACROSS rows (the first STALE abandons all of them)
+  # and a subshell would drop it on the floor.
+  cands=""
+  while IFS= read -r RL; do
+    [ -n "$RL" ] || continue
+    [ -n "$(line_field "$RL" claims)" ] || continue
+    RN="$(line_field "$RL" name)"
+    [ -n "$RN" ] || continue
+    case "$swept" in *"|name=${RN}|"*) continue ;; esac
+    cands="${cands}$(line_field "$RL" launched_at)${tab}${RN}
+"
+  done <<ROSTER_ROWS
+$(grep '^roster-state/v1|status=intended|' "$roster" 2>/dev/null || true)
+ROSTER_ROWS
+  [ -n "$cands" ] || return 0
+
+  # PASS TWO — THE LIVE SET. The reader's one stderr line is dropped here rather than
+  # reported: this function's stdout IS the stop address, and the tick already says out loud
+  # when its own live read fell back (`live set <state> — …`) above the report.
+  tr="$(session_transcript "$sid")" || tr=""
+  if [ -n "$tr" ]; then
+    live_cands=""; live_ok=yes
+    while IFS= read -r CL; do
+      [ -n "$CL" ] || continue
+      lrc=0
+      { live_row_open "$tr" "${CL##*"$tab"}"; } >/dev/null 2>&1 || lrc=$?
+      case "$lrc" in
+        0) live_cands="${live_cands}${CL}
+" ;;
+        1) : ;;
+        *) live_ok=no; break ;;
+      esac
+    done <<ROSTER_CANDS
+$cands
+ROSTER_CANDS
+    [ "$live_ok" = yes ] && cands="$live_cands"
+  fi
+  [ -n "$cands" ] || return 0
+
+  name="$(printf '%s' "$cands" | sort | tail -1 | cut -f2-)"
   [ -n "$name" ] || return 0
   printf '%s@session-%s' "$(clean "$name")" "$(printf '%s' "$sid" | cut -c1-8)"
 }
@@ -1249,7 +1380,15 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
         length($0) - 2 >= min { last = $0 }
         END { if (last != "") print last; else if (any != "") print any }')"
   [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -r '.' 2>/dev/null | tr -d '\000-\010\013-\037\177' | head -c "$ADOPT_TAIL_CAP"
+  # THE C1 BLOCK GOES TOO (Step-6 security review S-6). `tr -d '\000-\010\013-\037\177'`
+  # removes ESC and DEL and leaves `U+0080`–`U+009F` — of which `U+009B` is CSI, a control
+  # sequence introducer that needs no ESC in front of it on a terminal that honours C1. Those
+  # arrive as the two UTF-8 bytes `0xC2 0x80`–`0xC2 0x9F`, which a byte-oriented `tr` cannot
+  # name, so the pair is deleted by `sed` before the byte-wise strip runs. Ordered first
+  # because the byte strip would otherwise leave a bare `0xC2` behind.
+  printf '%s' "$raw" | jq -r '.' 2>/dev/null \
+    | LC_ALL=C sed 's/'"$(printf '\302')"'['"$(printf '\200')"'-'"$(printf '\237')"']//g' \
+    | tr -d '\000-\010\013-\037\177' | head -c "$ADOPT_TAIL_CAP"
 }
 
 # ONE FOLD PER PREDECESSOR ROSTER, and the same rule the fleet's other three folds keep: the
@@ -1427,8 +1566,17 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
       >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
   fi
+  # EVERY FIELD THROUGH `clean()`, `session=` INCLUDED (Step-6 security review S-4). It was
+  # the one interpolation of the thirteen that took its value raw, which is character for
+  # character the defect this wave fixed on the other row writer one slice earlier
+  # (hooks/dispatch-preflight.sh: "a value carrying a `|` or a newline forges a segment …
+  # the asymmetry between the two writers was itself the defect"). Every by-key reader in
+  # the fleet takes the FIRST match, so a forged `name=` ahead of the real one wins outright.
+  # Unreachable today — `engaged_marker_path` refuses a session id outside `[A-Za-z0-9_-]`
+  # before any verb decides anything — and that is a guard in another file for another
+  # reason, not this writer's own.
   printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|teammate_id=%s|adopted_from=%s|tool_use_id=|plan=%s\n' \
-    "$sid" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
+    "$(clean "$sid")" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
     "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" "$(clean "$waiver")" \
     "$(clean "$addr")" "$(clean "$osid")" "$(clean "$plan")" \
     >> "$f" 2>/dev/null || return 1
@@ -2347,6 +2495,23 @@ EOF
         TICK_LIVE_STATE="none"
       else
         TICK_OPEN_LIVE=0
+        # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-4, the
+        # tick half of the finding the budget wall's loop already answers). `live_agents`
+        # memoizes its parse in shell variables keyed on the transcript's path, size and
+        # mtime — but the per-row call below runs inside a command substitution, and a
+        # subshell INHERITS its parent's variables while its own writes die with it. So the
+        # first row would warm a cache nobody sees and every open row would pay a full
+        # parse: two whole-file `jq` passes and nine spawns. Measured on this machine, one
+        # tick over twelve open rows and a 4.1 MB transcript ran jq 24 times.
+        #
+        # IT ALSO WARMS `youngest_suite_writer` (the EMERGENCY arm below), which asks the
+        # same predicate per candidate row inside its own substitution — a subshell of this
+        # one, so it inherits what is cached here and adds no parse of its own.
+        #
+        # LAZILY, INSIDE THE `OPEN_ROSTER > 0` ARM, for the same reason the wall does it
+        # lazily: a roster with nothing open reads the transcript zero times. Its answer is
+        # discarded — this line is a cache fill, and every row's verdict is the predicate's.
+        live_agents "$TICK_TR" >/dev/null 2>&1 || :
         while IFS= read -r TICK_NAME; do
           [ -n "$TICK_NAME" ] || continue
           # The predicate prints nothing on stdout, so this capture is the reader's one
@@ -2409,6 +2574,11 @@ EOF
       TICK_ARMED="$(patrol_armed_file "$SESSION_ID")" || TICK_ARMED=""
       if [ -n "$TICK_ARMED" ] && [ -f "$TICK_ARMED" ] && [ ! -L "$TICK_ARMED" ] \
          && [ "$TICK_ROOT_TAG" = "chosen" ]; then
+        # THE RUNG, BEFORE THE DECISION LINE, exactly as the scheduler block prints it below
+        # (AC-17: on EVERY tick). This is the first tick of every run — arming precedes
+        # dispatch by design — so it is also the tick where the width the machine will carry
+        # is most worth knowing, right before the batch that has not been sent yet.
+        rung_report "$REPO_REAL" "$SESSION_ID"
         printf '%s|at=%s|session=%s|decision=QUIET|total=%s|open=%s\n' \
           "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
         say "QUIET — armed, nothing dispatched yet on this session"
@@ -2465,6 +2635,11 @@ EOF
     # KEEPS THE STAMP — which is the half that matters on disk. The clock keeps running, the
     # arming wall stays satisfied, and hooks/patrol-revive.sh has nothing to report.
     if [ "$OPEN_ROSTER" -eq 0 ] && [ "$RUN_STATE" = delivered ]; then
+      # THE RUNG ON THE TERMINAL TICK TOO (AC-17). The number is moot to a Patrol that is
+      # stopping, and that is not the point: the acceptance criterion is that every tick
+      # reports it, and an operator reading the last tick of a run in a transcript should not
+      # have to know which arm printed the line and which did not.
+      rung_report "$REPO_REAL" "$SESSION_ID"
       printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
@@ -2558,12 +2733,7 @@ EOF
     # a session bound to its own plan fills from its own slice table and quotes its own
     # ceiling — a tick that stood its ground correctly and then filled the neighbour's
     # slices would be worse than either failure alone (AC-1).
-    resolve_run "$REPO_REAL" "$SESSION_ID"
-    SCHED_PLAN="$POKER_RUN_PLAN"
-    SCHED_BUDGET=""
-    [ -n "$SCHED_PLAN" ] && SCHED_BUDGET="$(plan_budget_line "$SCHED_PLAN")"
-    SCHED_WRITERS="$(budget_int "$SCHED_BUDGET" writers)"
-    SCHED_JOBS="$(budget_int "$SCHED_BUDGET" test_jobs)"
+    sched_budget_read "$REPO_REAL" "$SESSION_ID"
 
     if [ "$SCHED_STATE" = emergency ]; then
       # THE KILL FLOOR. The tick NAMES the writer and stops nothing itself: stopping a
@@ -2579,36 +2749,10 @@ EOF
       fi
     fi
 
-    # ── THE RUNG, SAMPLED AND REPORTED (AC-17). One sample appended to the machine-scoped
-    # ring, then the rung read back off it — the order the design names, because a consumer
-    # that read without sampling would answer from other sessions' readings alone and a
-    # first consumer on a cold machine would answer from nothing at all.
-    #
-    # ONE FRACTION, BOTH CEILINGS (D3). `pressure_level` is a pure function of (ring,
-    # ceiling): the median band inside the smoothing window picks the fraction, and the
-    # fraction is applied to `writers` and to `test_jobs` separately because they are
-    # different ceilings, not because they are different judgments. Nothing is stored; two
-    # ticks a second apart over one ring compute one answer.
-    #
-    # A MISSING CEILING IS REPORTED AS MISSING. A plan that opts into no budget offers
-    # nothing to take a fraction OF, and inventing a ceiling here is the one thing this arm
-    # may never do — so the fields read `-` and the line is still printed. "The tick said
-    # nothing" and "the tick said there is no ceiling" are different facts, and only the
-    # second one is true.
-    pressure_sample "$SCHED_CORES" >/dev/null 2>&1 || :
-    SCHED_RUNG=""
-    SCHED_JOBS_RUNG=""
-    case "${SCHED_WRITERS:-}" in
-      ''|0) : ;;
-      *) SCHED_RUNG="$(pressure_level "$SCHED_WRITERS" 2>/dev/null)" || SCHED_RUNG="" ;;
-    esac
-    case "${SCHED_JOBS:-}" in
-      ''|0) : ;;
-      *) SCHED_JOBS_RUNG="$(pressure_level "$SCHED_JOBS" 2>/dev/null)" || SCHED_JOBS_RUNG="" ;;
-    esac
-    case "${SCHED_RUNG:-}" in ''|*[!0-9]*) SCHED_RUNG="" ;; esac
-    case "${SCHED_JOBS_RUNG:-}" in ''|*[!0-9]*) SCHED_JOBS_RUNG="" ;; esac
-    say "rung=${SCHED_RUNG:--}/${SCHED_WRITERS:--} writers=${SCHED_RUNG:--} test_jobs=${SCHED_JOBS_RUNG:--}"
+    # THE REPORT, AND THE CEILINGS IT IS TAKEN AGAINST — both in `rung_report` above, which
+    # the two arms that exit ABOVE this block call for themselves (AC-17, Step-6 review C-5).
+    # The budget read is memoized, so reaching it a second time here costs one plan read.
+    rung_report "$REPO_REAL" "$SESSION_ID"
 
     if [ "$SCHED_STATE" = hold ] || [ "$SCHED_STATE" = emergency ]; then
       # HOLD AND EMERGENCY ARE ADVICE TO THE MODEL, and that is all they have ever been.
