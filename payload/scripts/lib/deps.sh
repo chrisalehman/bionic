@@ -600,6 +600,22 @@ _dep_locator_target() {  # brew:ripgrep -> ripgrep ; https://... -> unchanged
   esac
 }
 
+# THE PACKAGE WITHOUT ITS PIN. An npm locator target is a package name that may
+# carry `@version`, and the two are not interchangeable: `npm install -g` takes
+# the pinned form, while anything that has to be EXECUTED — the status line's
+# recorded command — takes the bare name. Writing the pinned form where an
+# executable was meant is a defect the reviewers caught latent rather than live
+# (review-a C-3): the locator is unpinned today, so `ccstatusline@2.2.29` only
+# reaches settings.json the moment someone adopts the pin the docblock below
+# holds in reserve, and the failure then is a status line that silently renders
+# nothing. A leading `@` is a SCOPE, not a version, so it survives: the split is
+# on the first `@` after the first character.
+_dep_pkg_unversioned() {  # ccstatusline@2.2.29 -> ccstatusline ; @scope/x@1 -> @scope/x
+  local pkg="${1:-}" lead="" rest="${1:-}"
+  case "$pkg" in @*) lead="@"; rest="${pkg#@}" ;; esac
+  printf '%s%s\n' "$lead" "${rest%%@*}"
+}
+
 _dep_have() { command -v "${1:-}" >/dev/null 2>&1; }
 
 # First semver-looking token in a `--version` line. Tools disagree about
@@ -855,34 +871,58 @@ _dep_check_github_skill() {
   if [ -f "$(_dep_skills_dir)/${name}/SKILL.md" ]; then echo "yes|unknown"; else echo "no|unknown"; fi
 }
 
-# TWO HALVES, ONE ANSWER (epic-18 T1, AC-2). `present=yes` used to mean only
-# "the command is set" — the probe-contract violation that let a machine
-# report healthy while ccstatusline rendered its own stock default (handoff
-# §3.1). Now it means both: the command AND the layout file the command
-# reads. The second field carries WHICH half is missing when it is not
-# `yes`, so doctor's degradation line can name it rather than repeat the
-# generic "is absent" sentence over a dependency that is half there.
-# (T5's probe audit deferred this row to T1's landing — satisfied above.)
+# THREE HALVES, ONE ANSWER (epic-18 T1 AC-2; epic-21 1.4.4 T5). `present=yes`
+# used to mean only "the command is set" — the probe-contract violation that let
+# a machine report healthy while ccstatusline rendered its own stock default
+# (handoff §3.1) — and then "the command AND the layout file the command reads".
+# It now means all three: an executable that IS installed, a recorded command
+# that will exec it without a network round trip, and the layout it renders
+# from. The second field carries WHICH parts are missing when the answer is not
+# `yes`, plus-joined, so a caller that wants to name the gap can.
+#
+# WHY THE npx FORM IS AN ABSENCE, NOT A PRESENCE (review-a C-1, review-b F-1).
+# The old glob accepted `npx ccstatusline@latest` as proof the dependency was
+# there, which is the string this release exists to remove: doctor's ENVIRONMENT
+# table flagged it and sent the reader to `/bionic:setup`, setup asked this
+# function, was told the row was fine, and reported "nothing left to do" with the
+# ✗ still on the screen. That is the field defect of
+# `bug-doctor-setup-ownership.md` verbatim, one release later, and every machine
+# that ran setup before 1.4.4 is in exactly that state. Rejecting the npx form
+# here is what puts a real item behind the hint: the row goes pending on those
+# machines, `--all` offers the repair, and the existing install arm rewrites the
+# command. The glob needs the trailing space, so a command merely CONTAINING
+# "npx" is not caught.
+#
+# AND "RECORDED" IS NOT "INSTALLED" (review-a C-4). The command being set says
+# nothing about whether `npm install -g ccstatusline` ever succeeded — the
+# interim hand patch in the bug report applied the settings.json edit alone, and
+# a failed or offline install leaves the same shape. Doctor rendered `✓
+# ccstatusline … command set, layout file in place` over a machine with a blank
+# status line. The binary is probed exactly the way every other npm row's is, so
+# "installed" means one thing across the roster. An UNREADABLE answer (no npm on
+# the machine) is not a missing one: reporting the row absent there would send
+# the reader to a repair that cannot run, since the installer needs the same npm.
 _dep_check_statusline() {
-  local settings cmd cmd_ok=no cfg_ok=no
+  local name="${1:-ccstatusline}" settings cmd bin missing=""
+  local cmd_ok=no cfg_ok=no bin_ok=yes
   settings="$(_dep_settings_file)"
   _dep_have jq || { echo "unknown|unknown"; return 0; }
   if [ -f "$settings" ]; then
     cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
-    case "$cmd" in *ccstatusline*) cmd_ok=yes ;; esac
+    case "$cmd" in
+      "npx "*)        cmd_ok=no ;;
+      *ccstatusline*) cmd_ok=yes ;;
+    esac
   fi
   _dep_ccstatusline_layout_match "$(_dep_ccstatusline_config_source)" "$(_dep_ccstatusline_config_target)" \
     && cfg_ok=yes
+  bin="$(_dep_check_npm_global "$name")"
+  [ "${bin%%|*}" = "no" ] && bin_ok=no
 
-  if [ "$cmd_ok" = "yes" ] && [ "$cfg_ok" = "yes" ]; then
-    echo "yes|ok"
-  elif [ "$cmd_ok" = "yes" ]; then
-    echo "no|config-missing"
-  elif [ "$cfg_ok" = "yes" ]; then
-    echo "no|command-missing"
-  else
-    echo "no|both-missing"
-  fi
+  [ "$bin_ok" = "yes" ] || missing="binary"
+  [ "$cmd_ok" = "yes" ] || missing="${missing:+${missing}+}command"
+  [ "$cfg_ok" = "yes" ] || missing="${missing:+${missing}+}config"
+  if [ -z "$missing" ]; then echo "yes|ok"; else echo "no|${missing}-missing"; fi
 }
 
 # ─── check_dep ───────────────────────────────────────────────────────────────
@@ -1240,10 +1280,24 @@ bionic_strip_permission_block() {  # [settings-file]
 # ~/.config/ccstatusline/settings.json exactly as claude-bootstrap.sh's
 # ccstatusline-config step did. Skipped when already byte-identical, ported
 # from that same step's `diff -q` short-circuit.
+#
+# THE WRITE IS A MERGE, AND THE COMMAND IS NOT THE LOCATOR (1.4.4 T5, review-a
+# C-3 / review-b N-1). Two facts about the one jq assignment below:
+#   • `.statusLine` is an object the USER may already own. Replacing it whole
+#     threw away every sibling key beside `command` — ccstatusline's own
+#     `padding`, anything a future Claude Code release adds — on a file bionic is
+#     a guest in. Merging into what is there writes the two keys this function
+#     is responsible for and leaves the rest alone.
+#   • The command has to be EXECUTABLE. It used to be the locator target
+#     verbatim, so the pin the docblock above holds in reserve would have
+#     recorded `ccstatusline@2.2.29` — a string no shell can run — and the status
+#     line would have gone blank with nothing on screen to say why. The install
+#     still takes the pinned form; only the recorded command is stripped.
 _dep_install_statusline() {
-  local settings pkg source target
+  local settings pkg cmd source target
   settings="$(_dep_settings_file)"
   pkg="$(_dep_locator_target "$(dep_field ccstatusline source_url)")"
+  cmd="$(_dep_pkg_unversioned "$pkg")"
   _dep_have jq  || { echo "$(_dep_indent)jq is not installed — cannot edit ${settings}" >&2; return 1; }
   _dep_have npm || { echo "$(_dep_indent)npm is not installed — cannot install ${pkg}" >&2; return 1; }
   npm install -g "$pkg" --silent || { echo "$(_dep_indent)npm install -g ${pkg} failed" >&2; return 1; }
@@ -1253,7 +1307,8 @@ _dep_install_statusline() {
   # is a different decision, and not this fold's to make.
   [ -f "$settings" ] || echo '{}' > "$settings"
   _dep_settings_write_jq "$settings" \
-    '.statusLine = {"type": "command", "command": $c}' --arg c "$pkg" || return 1
+    '.statusLine = ((.statusLine // {}) + {"type": "command", "command": $c})' \
+    --arg c "$cmd" || return 1
 
   source="$(_dep_ccstatusline_config_source)"
   target="$(_dep_ccstatusline_config_target)"
@@ -1290,8 +1345,11 @@ install_dep() {  # <name>
     if [ -f "$cfg_target" ] && ! _dep_ccstatusline_layout_match "$cfg_source" "$cfg_target"; then
       cfg_note=" (a config file already there differs from the shipped layout and would be overwritten)"
     fi
+    # THE PLAN NAMES WHAT THE WRITE WILL WRITE. Two different strings under a pin —
+    # the package installed, and the bare command recorded — so the sentence a user
+    # consents to reads them separately rather than printing the locator twice.
     local sl_pkg; sl_pkg="$(_dep_locator_target "$(dep_field "$name" source_url)")"
-    plan="npm install -g ${sl_pkg}, record '${sl_pkg}' as the statusline in $(_dep_settings_file), and copy ${cfg_source} to ${cfg_target}${cfg_note}"
+    plan="npm install -g ${sl_pkg}, record '$(_dep_pkg_unversioned "$sl_pkg")' as the statusline in $(_dep_settings_file), and copy ${cfg_source} to ${cfg_target}${cfg_note}"
   else
     while IFS= read -r line; do argv+=("$line"); done < <(_dep_install_argv "$name") || true
     [ "${#argv[@]}" -gt 0 ] || { echo "deps.sh: no install mechanism for ${name}" >&2; return 1; }
