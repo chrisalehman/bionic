@@ -166,7 +166,12 @@ PIN_PROBE='`resources_probe` and `resources_budget` from `<plugin-root>/scripts/
 # pin follows the sentence it is a pin FOR: when the doctrine is corrected the needle moves
 # with it, or the test outlives the thing it was protecting.
 PIN_FILL='every slice with no unmet dependency dispatches in one batch sized by the rung the tick prints — `poker: rung=<n>/<ceiling>`, the machine'"'"'s answer to how wide it will carry right now — with `writers` as the ceiling that rung is taken against and the only number the wall enforces'
-PIN_JOBS='**Each brief in the batch points the writer at the rung:** `take your test width from pressure_level at suite start; the ceiling is this header'"'"'s test_jobs`.'
+# RE-POINTED, WRITER-FACING (Step-6 readability R-8). The old needle held a sentence that
+# was correct in SKILL.md — where it addresses the DISPATCHER, and where PIN_JOBS_SKILL still
+# holds it — and had been pasted verbatim into a block every other bullet of which is
+# second-person to the writer. It also named a fix no writer can execute: `pressure_level` is
+# a function in a sourced library, not a command on PATH, and tests/run.sh already calls it.
+PIN_JOBS='**You do not set your test width.** `tests/run.sh` samples the machine and reads its own width off the pressure rung at suite start, so there is nothing here for you to compute, export, or call — `pressure_level` is a shell function in a sourced library, not a command you can run. Set `BIONIC_TEST_JOBS_CEILING` only when your brief names a ceiling, and never above the one it names.'
 
 # has_pin <file> <string> -> 0 when the file carries the string.
 #
@@ -266,7 +271,7 @@ else
 fi
 
 DOCTORED_BLOCK="$TMP/survival-mutated.md"
-sed 's/the ceiling is this header'"'"'s test_jobs/the ceiling is a number pinned once/' \
+sed 's/only when your brief names a ceiling/whenever you feel the machine is busy/' \
   "$SURVIVAL_BLOCK" > "$DOCTORED_BLOCK"
 if cmp -s "$SURVIVAL_BLOCK" "$DOCTORED_BLOCK"; then
   no "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)" \
