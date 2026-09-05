@@ -646,27 +646,115 @@ expect_eq "three appends inside the window keep three lines" "3" "$(wc -l < "$RI
 expect_eq "the samples are kept oldest first" "1000 1001 1002" \
   "$(cut -d'|' -f1 < "$RING" | tr '\n' ' ' | sed 's/ $//')"
 
+# THE WINDOW IS A READ-SIDE RULE, AND SINCE THE C-1 = S-3 REPAIR IT IS ONLY A READ-SIDE
+# RULE. The sample path used to rewrite the whole ring from a filtered read on EVERY
+# append, and that rewrite is what lost concurrent samples (§J.3). What AC-14 and AC-16
+# need is that what a CONSUMER reads is the window — `_pressure_window_lines` is the one
+# owner of that question and both the reader and the prune call it. The file itself may
+# carry more, and is rewritten only when it grows past PRESSURE_RING_MAX_LINES (§J.2).
+# These rows moved from asserting the FILE's length to asserting the WINDOW's, which is
+# the property the rung actually rests on.
+window_ts() {  # <ring> <now> -> the in-window timestamps, space separated
+  _pressure_window_lines "$1" "$2" | cut -d'|' -f1 | tr '\n' ' ' | sed 's/ $//'
+}
+
 sample 1402 >/dev/null 2>&1
-expect_eq "a sample 400 s later prunes the three that fell out of the window" "1" \
+expect_eq "a sample 400 s later is APPENDED — the sample path rewrites nothing" "4" \
   "$(wc -l < "$RING" | tr -d ' ')"
-expect_eq "and the survivor is the new one" "1402" "$(cut -d'|' -f1 < "$RING")"
+expect_eq "and the window a consumer reads holds only the new one" "1402" \
+  "$(window_ts "$RING" 1402)"
 
 # The boundary: exactly PRESSURE_WINDOW_S old is still in the window.
 rm -f "$RING"
 sample 2000 >/dev/null 2>&1
 sample 2300 >/dev/null 2>&1
-expect_eq "a sample exactly 300 s old survives the prune" "2" "$(wc -l < "$RING" | tr -d ' ')"
+expect_eq "a sample exactly 300 s old is inside the window" "2000 2300" \
+  "$(window_ts "$RING" 2300)"
 sample 2301 >/dev/null 2>&1
-expect_eq "at 301 s it is gone" "2" "$(wc -l < "$RING" | tr -d ' ')"
-expect_eq "leaving the two inside the window" "2300 2301" \
-  "$(cut -d'|' -f1 < "$RING" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "at 301 s it drops out of the window" "2300 2301" "$(window_ts "$RING" 2301)"
+expect_eq "the file still carries all three — extra lines are harmless, missing ones are not" \
+  "3" "$(wc -l < "$RING" | tr -d ' ')"
 
-# Garbage in the file is dropped by the same prune, not carried.
+# Garbage in the file is dropped by the same reader, not carried into the median.
 printf 'not-a-sample\n' >> "$RING"
-sample 2302 >/dev/null 2>&1
-expect_eq "a malformed line is pruned away with the stale ones" "3" "$(wc -l < "$RING" | tr -d ' ')"
-expect_true "and nothing malformed survives" \
-  [ "$(grep -c '^[0-9]*|' "$RING")" = "3" ]
+expect_eq "a malformed line is not a sample and never enters the window" "2300 2301" \
+  "$(window_ts "$RING" 2301)"
+
+# --- §J.2 — THE PRUNE: rare, mktemp-named, and it keeps every in-window line ----------
+#
+# It fires only above PRESSURE_RING_MAX_LINES, which is why the appends above rewrote
+# nothing. Planted: 600 stale lines (well outside the window) plus three inside it.
+expect_eq "PRESSURE_RING_MAX_LINES is the rewrite threshold, not the window" \
+  "512" "${PRESSURE_RING_MAX_LINES:-unset}"
+
+PRING="$TMPROOT/ring-prune/pressure.ring"
+mkdir -p "$(dirname "$PRING")"
+: > "$PRING"
+pi=1; while [ $pi -le 600 ]; do printf '1000|44|69|1.6|8\n' >> "$PRING"; pi=$((pi + 1)); done
+printf '9000|44|69|1.6|8\n9100|20|69|1.6|8\n9200|44|69|1.6|8\n' >> "$PRING"
+expect_eq "the planted ring is over the threshold" "603" "$(wc -l < "$PRING" | tr -d ' ')"
+
+BIONIC_PRESSURE_RING="$PRING" BIONIC_NOW_EPOCH=9300 \
+  BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+  pressure_sample 8 >/dev/null 2>&1
+
+expect_eq "over the threshold the prune fires and drops the stale lines" "4" \
+  "$(wc -l < "$PRING" | tr -d ' ')"
+expect_eq "the prune keeps EVERY line inside the 300 s window, and the new one" \
+  "9000 9100 9200 9300" "$(cut -d'|' -f1 < "$PRING" | tr '\n' ' ' | sed 's/ $//')"
+expect_eq "and it leaves no temp file behind in the ring's directory" "0" \
+  "$(find "$(dirname "$PRING")" -name 'pressure.ring.prune.*' | grep -c .)"
+
+# --- §J.3 — CONCURRENCY: no sampler loses another sampler's line (review C-1) ---------
+#
+# The defect: `${ring}.tmp.$$` is the PARENT shell's pid, so every background subshell of
+# one shell wrote and renamed ONE temp path. Measured pre-fix: 12 concurrent samplers left
+# 0 lines, and 12 separate processes left 3-6 of 12.
+CRING="$TMPROOT/ring-conc/pressure.ring"
+mkdir -p "$(dirname "$CRING")"
+: > "$CRING"
+ci=1; while [ $ci -le 12 ]; do
+  ( BIONIC_PRESSURE_RING="$CRING" BIONIC_NOW_EPOCH=$((7000 + ci)) \
+    BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    pressure_sample 8 >/dev/null 2>&1 ) &
+  ci=$((ci + 1))
+done
+wait
+expect_eq "12 concurrent samplers as subshells of ONE shell leave 12 lines" "12" \
+  "$(wc -l < "$CRING" | tr -d ' ')"
+
+PRING2="$TMPROOT/ring-conc2/pressure.ring"
+mkdir -p "$(dirname "$PRING2")"
+: > "$PRING2"
+pj=1; while [ $pj -le 12 ]; do
+  BIONIC_PRESSURE_RING="$PRING2" BIONIC_NOW_EPOCH=$((7000 + pj)) \
+  BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    bash -c '. "$1"; pressure_sample 8' _ "$LIB" >/dev/null 2>&1 &
+  pj=$((pj + 1))
+done
+wait
+expect_eq "12 samplers in 12 SEPARATE processes leave 12 lines" "12" \
+  "$(wc -l < "$PRING2" | tr -d ' ')"
+
+# --- §J.4 — the old predictable temp path is not written through ---------------------
+#
+# `>` follows a symlink and truncates its target, and `${ring}.tmp.$$` was fully
+# predictable. Nothing writes that name any more.
+SRING="$TMPROOT/ring-sym/pressure.ring"
+mkdir -p "$(dirname "$SRING")"
+: > "$SRING"
+printf 'PRECIOUS\n' > "$TMPROOT/ring-sym/victim.txt"
+( BIONIC_PRESSURE_RING="$SRING" BIONIC_NOW_EPOCH=8000 \
+  BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+  bash -c '
+    . "$1"
+    ln -sfn "$2" "${BIONIC_PRESSURE_RING}.tmp.$$"
+    pressure_sample 8
+  ' _ "$LIB" "$TMPROOT/ring-sym/victim.txt" ) >/dev/null 2>&1
+expect_eq "a symlink pre-planted at the old temp path is not followed" "PRECIOUS" \
+  "$(cat "$TMPROOT/ring-sym/victim.txt")"
+expect_eq "and the sample still landed on the ring" "1" \
+  "$(wc -l < "$SRING" | tr -d ' ')"
 
 # The default path is machine-scoped under the config dir (AC-16, D4).
 RHOME="$TMPROOT/ringhome"

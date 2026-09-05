@@ -137,6 +137,14 @@ BAND_SWAP_WARNING_PCT=80    # datum: charter B-3 — "swap at 84 % was the real 
 PRESSURE_WINDOW_S=300       # datum: design-ledger D3 — "median of the readings in the last
                             # few minutes"; five minutes is the smoothing window ratified there.
 
+# HOW LARGE THE FILE MAY GET BEFORE IT IS REWRITTEN — not how far back the rung looks. The
+# two are different bounds and only the first one costs a rewrite. Measured: the live ring
+# on this machine held 184 samples inside its 300 s window while the recorder sampled on
+# every Bash call, so the steady state is a couple of hundred lines; 512 is that with
+# headroom, and a ring of 512 lines is under 13 KB. It is deliberately far ABOVE the window
+# so that the overwhelming majority of appends rewrite nothing at all — see pressure_sample.
+PRESSURE_RING_MAX_LINES=512
+
 # ─────────────────────────────────────────────────────────── integer arithmetic helpers
 
 # bash has no floats. Every non-integer constant above is converted here to HUNDREDTHS, and
@@ -608,6 +616,16 @@ _pressure_window_lines() {
   ' "$ring" 2>/dev/null
 }
 
+# _pressure_ring_lines <ring> — the ring's line count as a plain integer, 0 when it cannot
+# be read. `wc -l` pads on BSD and prints nothing on a missing file, so both go through
+# arithmetic before any caller compares them.
+_pressure_ring_lines() {
+  local n
+  n="$(wc -l < "$1" 2>/dev/null)" || n=0
+  case "${n:-}" in ''|*[!0-9\ \	]*) n=0 ;; esac
+  printf '%s' "$(( n + 0 ))"
+}
+
 # pressure_sample [<cores>] — THE ONE WRITER. Takes a reading, appends it, prunes the ring.
 #
 # The consumers sample (D3 amendment): plugin hooks were not observed firing inside
@@ -615,8 +633,26 @@ _pressure_window_lines() {
 # A suite start, a fill and the orchestrator's own recorder each append one reading, and all
 # three read the same evidence back.
 #
-# The prune is an append then a TEMP-FILE RENAME, so a reader never sees a half-rewritten
-# ring: the worst a concurrent reader can see is the file before or the file after.
+# THE APPEND IS THE SAMPLE PATH AND IT IS ONE `printf >>`, NOTHING ELSE (Step-6 review
+# C-1 = S-3). It used to append and then REWRITE the whole ring from a filtered read on
+# every single call, through a temp file named `${ring}.tmp.$$`. Two defects lived in that:
+# `$$` is the PARENT shell's pid, so every background subshell of one shell wrote and
+# renamed ONE temp path and they truncated each other (measured: 12 concurrent samplers
+# left 0 lines); and even with distinct pids the read-then-rename discards any append that
+# landed between them (12 separate processes left 3–6 of 12). The ring is the evidence
+# AC-14's median smooths, so losing samples silently turns the median into the bare fresh
+# reading D3 rejected. A sample is now appended with a single O_APPEND write and nothing on
+# the sample path ever rewrites the file.
+#
+# THE PRUNE IS RARE, AND IT FAILS TOWARD EXTRA LINES. It fires only when the file exceeds
+# PRESSURE_RING_MAX_LINES — far above the window's steady state, so almost every call skips
+# it — writes through a `mktemp` name in the ring's own directory (the old predictable path
+# was followed through a pre-planted symlink and truncated its target), and renames only if
+# the ring's line count is unchanged since the count that triggered the prune. A lost race
+# therefore leaves the ring LONGER than the window, never shorter: `_pressure_window_lines`
+# filters on the READ side too, so extra lines cost nothing but bytes while a missing line
+# is evidence that no longer exists. The residual is one syscall wide — an append landing
+# between the recount and the rename — and it is reachable only on the rare prune.
 pressure_sample() {
   local cores="${1:-}"
   [ -n "$cores" ] || cores="$(_res_cores)"
@@ -650,9 +686,23 @@ pressure_sample() {
     return 2
   }
 
-  tmp="${ring}.tmp.$$"
+  # The opportunistic prune, per the header. `wc -l` pads its output on BSD, so the count
+  # goes through arithmetic rather than a string compare.
+  local n1 n2
+  n1="$(_pressure_ring_lines "$ring")"
+  [ "$n1" -gt "$PRESSURE_RING_MAX_LINES" ] || return 0
+
+  tmp="$(mktemp "${dir}/pressure.ring.prune.XXXXXX" 2>/dev/null)" || return 0
+  [ -n "$tmp" ] || return 0
   if _pressure_window_lines "$ring" "$now" > "$tmp" 2>/dev/null; then
-    mv -f "$tmp" "$ring" 2>/dev/null || rm -f "$tmp"
+    n2="$(_pressure_ring_lines "$ring")"
+    if [ "$n2" -eq "$n1" ]; then
+      mv -f "$tmp" "$ring" 2>/dev/null || rm -f "$tmp"
+    else
+      # Somebody appended while we were reading. Leave the ring alone: too long is
+      # harmless, too short is lost evidence.
+      rm -f "$tmp"
+    fi
   else
     rm -f "$tmp"
   fi
