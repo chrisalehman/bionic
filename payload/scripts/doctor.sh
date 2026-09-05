@@ -1638,12 +1638,17 @@ case "$LEGACY_HOOK_COUNT" in
   unknown|0) ;;
   *) fix "${LEGACY_HOOK_COUNT} legacy-channel managed-hook $(_doctor_plural "$LEGACY_HOOK_COUNT" entry entries) in settings.json → run /bionic:setup" ;;
 esac
-# The skill copy, and NOT the hook files beside it. Setup step 7 owns the consented removal,
-# so there is a real thing to offer; and unlike the files, this copy is doing something —
-# arming eleven registrations a second time. The asymmetry is the point.
-# tests/doctor.test.sh Group 14 used to pin it from the other side with a machine whose only
-# leftover is hook files and whose summary still reads "nothing to do"; that suite was
-# deleted at 8582861 (epic-18 wave-03) and nothing replaced the pin.
+# The skill copy, and the hook files and agent copies beside it — all three now have a
+# consented removal in setup (steps 9, 10 and 11), so all three fix lines name a command that
+# has something to do. Until 1.4.4 only this one did, and the two above it ended `→ run
+# /bionic:setup` over a run that then reported "nothing left to do — this machine is set up."
+# (.bionic/docs/ideas/bug-doctor-setup-ownership.md). The asymmetry that used to be the point
+# here is gone; what remains is that this copy is also DOING something, arming eleven
+# registrations a second time, where the files beside it are inert.
+# tests/doctor.test.sh Group 14 used to pin the other side — a machine whose only leftover is
+# hook files and whose setup summary still reads "nothing to do" — and was deleted at 8582861
+# (epic-18 wave-03) with nothing to replace it. The pin is back, in
+# tests/cross-gate-agreement.test.sh §DS, on the side that can go red.
 [ "$SKILL_COPY_STATE" = "yes" ] && fix "a legacy skill copy is installed, arming the same walls twice → run /bionic:setup"
 
 if [ "$PLUGIN_HOOKS" = "degraded" ] || [ "$PLUGIN_HOOKS" = "absent" ]; then
