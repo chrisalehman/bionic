@@ -4819,7 +4819,16 @@ s4_gs() {  # <repo> <sid> — the PreToolUse WALL arm: no hook_event_name key, p
   return 0
 }
 s4_dp() {  # <repo> <sid>
-  mk_agent_payload "$2" "$1" | env CLAUDE_CODE_SESSION_ID="$2" bash "$PARTY_DP" 2>&1
+  # The transcript is REDIRECTED onto this world's file. `mk_agent_payload` pins
+  # `transcript_path:"/irrelevant.jsonl"`, which was true of the dispatch wall until S5: the
+  # budget used to count `intended` rows against a landing-swept marker and never opened a
+  # transcript. It now counts them against `live_agents_has`, so a payload pointing at a file
+  # that does not exist reads NONE and the wall refuses with "call ListAgents, then dispatch"
+  # BEFORE it ever computes a ceiling — no plan is named and §S.4a's two `expect_contains`
+  # rows go missing. Pointing at the world's own transcript restores what the section asks.
+  mk_agent_payload "$2" "$1" \
+    | jq -c --arg t "$1/s4-transcript.jsonl" '.transcript_path = $t' \
+    | env CLAUDE_CODE_SESSION_ID="$2" bash "$PARTY_DP" 2>&1
   return 0
 }
 s4_stop_payload() {  # <repo> <sid> <transcript>
@@ -4918,6 +4927,14 @@ expect_eq "…and session B's for session B" "$S4_PB|6" "$(s_pk_read "$S4_R1" "$
 # `status=intended` IS WHAT THE CEILING COUNTS. `budget_roster_counts` walks only the
 # intended rows — a confirmed row is an agent that already reported in, not an open seat —
 # so a confirmed fixture row leaves the wall inert and this pair of assertions vacuous.
+#
+# AND THE ROW MUST BE LIVE. Since S5 the ceiling counts an `intended` row only while
+# `live_agents_has` finds its name in the session transcript — the landing-swept marker it
+# used to consult is gone. The `{}` transcript s4_world writes reads NONE, every row counts
+# closed, the wall stays inert and both `expect_contains` rows below go missing. Seed the
+# same transcript with a fresh ListAgents answer naming both dispatched agents; that is the
+# only reason this file names s4a/s4b at all.
+cg_live "$S4_R1/s4-transcript.jsonl" "s4a" "s4b"
 roster_row "$S4_R1" "$SID_A" "s4a" "as4a-1111111111111111" "" "intended"
 roster_row "$S4_R1" "$SID_B" "s4b" "as4b-2222222222222222" "" "intended"
 S4_DP_A=$(s4_dp "$S4_R1" "$SID_A")
@@ -5415,6 +5432,709 @@ expect_eq "…and a doctored adopt writer leaves the row unattributed (§RA disc
 expect_contains "…while still writing the row, so the difference is the FIELD" \
   "$RA_PRED_ID" "$RA_ADOPT_M"
 
+
+# ============================================================
+echo ""
+echo "=== LR — THE LIVE-RUN SET: live_runs is always a subset of open_runs ==="
+# ============================================================
+#
+# THE OWNERSHIP-TABLE ROW (spec §Design §3): "run is live · owning module `live_runs`
+# (run.sh) · rendering surfaces: engage (bind), session-start (list + quiet count) ·
+# agreement test: cross-gate new row: live ⊆ open; mutate `run_open`, both move; anti-vacuity
+# arm". AC-5 words the obligation directly.
+#
+# WHY THE RELATION AND NOT THE SET. `tests/run-predicate.test.sh` owns what `live_runs`
+# answers over 0/1/2-member fixtures; it cannot see the thing this file exists for. Two
+# surfaces decide from the LIVE set (engage binds when exactly one run is live;
+# session-start lists the live ones and counts the rest as quiet) while every gate in the
+# fleet still rules on the OPEN set — so a live run that was not open would be a binding
+# `session_run` then refuses, and `run_open` is the one predicate that can put it there.
+# §OR above holds `active_run` to the same set from the other side.
+#
+# THE SUBSET CLAIM IS ONLY WORTH ASSERTING WHERE THE TWO SETS DIFFER. A fixture where every
+# open run is also live makes `live ⊆ open` true by equality, which is the vacuous reading of
+# it — so this world carries all three shapes at once: a FRESH open plan (live), a BACKDATED
+# open plan (open, outside the `live-window:`, not live) and a DELIVERED plan (neither).
+
+LR_LIB_SRC="$RUN_LIB"
+
+# The status rides back inside the string for the reason §OR's `or_ask` gives: `$( … )` is a
+# subshell and a status assigned inside it dies at the closing paren.
+lr_ask() {  # <root> <function> -> sets LR_OUT and LR_ST
+  local root="$1"; shift
+  local raw
+  raw=$( . "$LR_LIB_SRC" >/dev/null 2>&1; "$@" "$root" 2>/dev/null; printf '\037%s' "$?" )
+  LR_ST="${raw##*$'\037'}"
+  LR_OUT="${raw%$'\037'*}"
+  LR_OUT="${LR_OUT%$'\n'}"
+  printf '%s' "$LR_OUT"
+}
+
+# THE RELATION ITSELF, COMPUTED — never eyeballed from two printed sets. Returns how many
+# lines of <live> are absent from <open>; zero IS the subset claim, and any other number is
+# the counterexample named.
+lr_missing() {  # <live> <open> -> count of live lines that are not open lines
+  local l n=0
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    grep -qxF -- "$l" <<<"$2" || n=$((n + 1))
+  done <<<"$1"
+  printf '%s' "$n"
+}
+
+# A plan older than the default 7-day `live-window:`. `s_backdate`'s hour is what makes one
+# plan lose an ORDERING; days are what put a plan outside the WINDOW, and those are different
+# fixture facts even though both are a `touch`.
+lr_backdate_days() {  # <file> <days>
+  touch -t "$(date -v-"$2"d +%Y%m%d%H%M.%S 2>/dev/null \
+              || date -d "-$2 days" +%Y%m%d%H%M.%S)" "$1"
+}
+
+LR_R=$(new_repo "lr-live-subset")
+LR_FRESH="$LR_R/.bionic/docs/plans/epic-99/lr-fresh.md"
+LR_STALE="$LR_R/.bionic/docs/plans/epic-99/lr-backdated.md"
+LR_DONE="$LR_R/.bionic/docs/plans/epic-99/lr-delivered.md"
+write_plan "$LR_FRESH" "current: 4"
+write_plan "$LR_STALE" "current: 6"
+s4_close "$LR_DONE"
+lr_backdate_days "$LR_STALE" 30
+
+lr_ask "$LR_R" open_runs >/dev/null; LR_OPEN="$LR_OUT"; LR_OPEN_ST="$LR_ST"
+lr_ask "$LR_R" live_runs >/dev/null; LR_LIVE="$LR_OUT"; LR_LIVE_ST="$LR_ST"
+
+# --- LR.1 the fixture really carries all three shapes (non-vacuity) -------------
+expect_eq "open_runs answers here" "0" "$LR_OPEN_ST"
+expect_eq "live_runs answers here" "0" "$LR_LIVE_ST"
+expect_eq "the open set holds BOTH open plans, fresh and backdated" "2" \
+  "$(printf '%s\n' "$LR_OPEN" | grep -c '\.md$')"
+expect_eq "…while the live set holds exactly one: the two sets are NOT equal here" "1" \
+  "$(printf '%s\n' "$LR_LIVE" | grep -c '\.md$')"
+expect_contains "the fresh plan is live" "lr-fresh.md" "$LR_LIVE"
+expect_absent "…and the backdated plan is not, though it IS open" "lr-backdated.md" "$LR_LIVE"
+expect_contains "…which is what makes the subset claim below a real one" \
+  "lr-backdated.md" "$LR_OPEN"
+
+# --- LR.2 THE RELATION: live ⊆ open, and the delivered plan is in neither -------
+expect_eq "every live run is an open run (AC-5)" "0" "$(lr_missing "$LR_LIVE" "$LR_OPEN")"
+expect_absent "the delivered plan is not open" "lr-delivered.md" "$LR_OPEN"
+expect_absent "…and not live either" "lr-delivered.md" "$LR_LIVE"
+
+# --- LR.3 THE SHARED PREDICATE: mutate run_open and BOTH readers move ----------
+#
+# `run_open` is the one predicate `open_runs` walks and `live_runs` inherits by calling it.
+# Force it open and the DELIVERED plan — whose mtime is fresh, so the window admits it —
+# joins the open set AND the live set in one step. A mutation that moved only one of them
+# would mean `live_runs` had a second opinion about openness, which is the defect this row
+# exists to catch. The shipped library is never touched: a copy is mutated in the sandbox.
+LR_MUT_OPEN="$SANDBOX/lr-mutant-run-open.sh"
+awk '
+  /^run_open\(\) \{/ && !d { print; print "  [ -f \"$1\" ] && return 0"; d = 1; next }
+  { print }
+' "$RUN_LIB" > "$LR_MUT_OPEN"
+expect_eq "the run_open mutation applies (the function has not moved)" "no" \
+  "$(cmp -s "$RUN_LIB" "$LR_MUT_OPEN" && echo yes || echo no)"
+
+LR_LIB_SRC="$LR_MUT_OPEN"
+lr_ask "$LR_R" open_runs >/dev/null; LR_OPEN_M="$LR_OUT"
+lr_ask "$LR_R" live_runs >/dev/null; LR_LIVE_M="$LR_OUT"
+LR_LIB_SRC="$RUN_LIB"
+
+expect_eq "mutated run_open: the open set gains the delivered plan" "3" \
+  "$(printf '%s\n' "$LR_OPEN_M" | grep -c '\.md$')"
+expect_eq "…and the LIVE set gains it too, in the same step" "2" \
+  "$(printf '%s\n' "$LR_LIVE_M" | grep -c '\.md$')"
+expect_contains "…by name, on the open side" "lr-delivered.md" "$LR_OPEN_M"
+expect_contains "…and by name on the live side" "lr-delivered.md" "$LR_LIVE_M"
+expect_eq "…and the subset relation still holds under the mutation" "0" \
+  "$(lr_missing "$LR_LIVE_M" "$LR_OPEN_M")"
+# The backdated plan is STILL not live under the mutation — the window is a second,
+# independent rule, and forcing openness did not quietly widen it.
+expect_absent "…while the backdated plan is still not live: the window is its own rule" \
+  "lr-backdated.md" "$LR_LIVE_M"
+
+# --- LR.4 THE ANTI-VACUITY ARM: prove the subset assertion can go RED ----------
+#
+# LR.2 asserts a count of zero. A count of zero is also what a broken comparison, an empty
+# live set or a helper that never ran would produce, so the assertion is worth nothing until
+# it has been SEEN to fail. Here `live_runs` is doctored to emit one path `open_runs` does
+# not list — the exact defect the row is written against — and the same helper, over the same
+# fixture, must report the counterexample.
+LR_MUT_SUB="$SANDBOX/lr-mutant-live-extra.sh"
+awk '
+  /^live_runs\(\) \{/ && !d { print; print "  printf '"'"'%s\\n'"'"' \"/nonexistent/ghost-run.md\""; d = 1; next }
+  { print }
+' "$RUN_LIB" > "$LR_MUT_SUB"
+expect_eq "the live_runs mutation applies (the function has not moved)" "no" \
+  "$(cmp -s "$RUN_LIB" "$LR_MUT_SUB" && echo yes || echo no)"
+
+LR_LIB_SRC="$LR_MUT_SUB"
+lr_ask "$LR_R" live_runs >/dev/null; LR_LIVE_G="$LR_OUT"
+LR_LIB_SRC="$RUN_LIB"
+expect_contains "the doctored live_runs really did emit the ghost" \
+  "/nonexistent/ghost-run.md" "$LR_LIVE_G"
+expect_eq "…and LR.2's own check reports it as NOT a member of the open set (the arm goes red)" \
+  "1" "$(lr_missing "$LR_LIVE_G" "$LR_OPEN")"
+# NOT DISCRIMINATED BY EMPTINESS: the doctored reader still returned the real live run too,
+# so what the check caught is the EXTRA member, not a vanished set.
+expect_contains "…while still returning the real live run, so the difference is the MEMBER" \
+  "lr-fresh.md" "$LR_LIVE_G"
+
+lr_ask "$LR_R" live_runs >/dev/null
+expect_eq "restored: the shipped library answers as it did before the mutations" \
+  "$LR_LIVE" "$LR_OUT"
+
+# ============================================================
+echo ""
+echo "=== LA — THE LIVE-AGENT SET: one parser, three readers ==="
+# ============================================================
+#
+# THE OWNERSHIP-TABLE ROW (spec §Design §3): "live agent set · owning module `live_agents`
+# (agents.sh) · rendering surfaces: dispatch-preflight budget, stop-guard, stop-check,
+# standdown, poker tick · agreement test: cross-gate new row: one parser; mutate it, every
+# reader moves". AC-10 words the stop half of it directly.
+#
+# WHY THIS ROW EXISTS. Liveness used to be answered three ways — a `landing-swept` marker for
+# the budget, a directory walk for the observation, a roster read for the gate — and the
+# whole wave is the claim that there is now ONE answer, the harness's own recorded
+# `ListAgents`, parsed in ONE place. That claim is not visible in any single suite:
+# `tests/live-agents.test.sh` owns what the parser returns, and each hook's own suite owns
+# what that hook does with it. What is only visible HERE is that the three hooks are reading
+# the SAME parser — which is proved by breaking it once and watching all three answers move.
+#
+# THE THREE READERS ARE ASKED THROUGH THEIR OWN SURFACES, never by calling the library:
+#   · dispatch-preflight — its budget refusal, which counts the roster's open rows against
+#     the live set (`open=` in the BLOCKED line)
+#   · stop-guard          — its resolution of a typed target on the Stop path
+#   · stop-check          — the operator's listing, whose `Resolved:` line is the answer
+#
+# TWO NAMES, ONE ROSTER, FOR A REASON. The budget walks `status=intended` rows and
+# resolution needs an `identified` row carrying an agent id, and the row-dedupe keeps the
+# LAST row for a name — so one name cannot be both. `la-budget` is the open seat the ceiling
+# counts; `la-target` is the identified agent the other two resolve. Both are named in the
+# one recorded answer, which is the point: one parser, two questions.
+
+LA_REPO=$(new_repo "la-one-parser")
+LA_PLAN="$LA_REPO/.bionic/docs/plans/epic-99/la-run.md"
+s4_plan "$LA_PLAN" 4 1
+s4_bind "$LA_REPO" "$SID_A" "$LA_PLAN"
+s4_attest "$LA_REPO" "$SID_A"
+
+LA_SLUG=$(printf '%s' "$LA_REPO" | sed 's/[^a-zA-Z0-9]/-/g')
+LA_PROJ="$CLAUDE_CONFIG_DIR/projects/$LA_SLUG"
+mkdir -p "$LA_PROJ/$SID_A/subagents"
+LA_TR="$LA_PROJ/$SID_A.jsonl"
+LA_TID="alat-9999999999999999"
+
+# THE ONE RECORDED ANSWER both questions are asked against — the harness's `ListAgents`
+# result, in the shape `tests/live-agents.test.sh` establishes and the S6 `cg_live` helper
+# above builds.
+cg_live "$LA_TR" "la-budget" "la-target"
+
+# the open seat (budget) and the identified agent (resolution)
+roster_row "$LA_REPO" "$SID_A" "la-budget" "alab-8888888888888888" "" "intended"
+printf '{"name":"la-target","agentType":"implementor","description":"fixture","model":"opus"}' \
+  > "$LA_PROJ/$SID_A/subagents/agent-$LA_TID.meta.json"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
+  > "$LA_PROJ/$SID_A/subagents/agent-$LA_TID.jsonl"
+roster_identify "$LA_REPO" "$SID_A" "la-target" "$LA_TID"
+
+# ---- the three questions, each asked of the REAL hook, out of a NAMED TREE ----
+#
+# The tree is a parameter because that is how the mutation is taken: every driver loads its
+# hook from `$LA_TREE/hooks`, whose `../scripts/lib` is the library those hooks resolve
+# first, so pointing `LA_TREE` at a doctored copy swaps the PARSER under all three at once
+# without the shipped files being touched.
+la_budget() {  # -> the dispatch wall's whole channel
+  mk_agent_payload "$SID_A" "$LA_REPO" \
+    | jq -c --arg t "$LA_TR" '.transcript_path = $t' \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$LA_TREE/hooks/dispatch-preflight.sh" 2>&1
+  return 0
+}
+la_guard() {  # <typed> -> the stop guard's whole channel
+  mk_stop_payload "$SID_A" "$LA_TR" "$LA_REPO" "$1" \
+    | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$LA_TREE/hooks/stop-guard.sh" 2>&1
+  return 0
+}
+la_check() {  # <typed> -> the observation's whole channel
+  ( cd "$LA_REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" \
+      bash "$LA_TREE/hooks/stop-check.sh" "$1" 2>&1 )
+  return 0
+}
+
+LA_TREE="$BIONIC_HOOKS_DIR/.."
+[ -d "$LA_TREE/scripts/lib" ] || LA_TREE="$BIONIC_HOOKS_DIR/../payload"
+expect_eq "the shipped tree this section drives really holds the parser (not vacuous)" "yes" \
+  "$([ -r "$LA_TREE/scripts/lib/agents.sh" ] && echo yes || echo no)"
+
+LA_B0=$(la_budget)
+LA_G0=$(la_guard la-target)
+LA_C0=$(la_check la-target)
+
+# --- LA.1 all three read the live set, and each SAYS what it read --------------
+expect_contains "the dispatch wall counts the live open seat against the ceiling" \
+  "open=1" "$LA_B0"
+expect_contains "…and refuses on it, which is the answer the count produces" \
+  "BLOCKED" "$LA_B0"
+expect_absent "…rather than refusing because it could not read the answer at all" \
+  "call ListAgents" "$LA_B0"
+expect_contains "the observation resolves a live target to its agent id" "$LA_TID" "$LA_C0"
+expect_absent "…and does not report it as absent from the live set" "not live" "$LA_C0"
+# THE GUARD SPEAKS ITS RESOLUTION AS A VERDICT, not as an id: a target it finds in the live
+# set is one it has standing to guard, so it BLOCKS the stop and names the observation to
+# take; a target it does not find is not this gate's business and PASSES THROUGH. Those two
+# words ARE the resolution, and they are what moves when the parser does.
+expect_contains "the stop guard has standing over the same target: it blocks the stop" \
+  "BLOCKED" "$LA_G0"
+expect_contains "…naming that very target in the observation it asks for" \
+  "stop-check.sh la-target" "$LA_G0"
+expect_absent "…rather than passing it through as no agent of this session" \
+  "PASSTHROUGH" "$LA_G0"
+# THE LIVE READING IS A SENTENCE IN THE REFUSAL, and it is the half that moves. Standing is
+# broader than liveness — a roster row or an agent-address shape also earns it — so BLOCKED
+# alone would still be printed by a guard that had stopped consulting the live set entirely.
+# What only a live target gets is a refusal that does NOT say it is absent from the answer.
+expect_absent "…and it does not call the target absent from the recorded answer" \
+  "is not live" "$LA_G0"
+
+# --- LA.2 a name the recorded answer does NOT carry is refused by both readers --
+#
+# The negative direction, on the SAME transcript: what separates `la-target` from `la-ghost`
+# is one line of the harness's answer and nothing else, so a reader that resolved both would
+# be resolving from something other than the live set.
+LA_CG=$(la_check la-ghost)
+LA_GG=$(la_guard la-ghost)
+expect_contains "a name the live set does not carry is NOT live to the observation" \
+  "not live" "$LA_CG"
+expect_absent "…and carries no agent id with it" "$LA_TID" "$LA_CG"
+expect_contains "…and the stop guard passes it through, having no standing over it" \
+  "PASSTHROUGH" "$LA_GG"
+expect_contains "…saying so in the live set's own words" \
+  "names no live agent of this session" "$LA_GG"
+
+# --- LA.3 THE DISCRIMINATOR: mutate the parser's awk, all three answers move ----
+#
+# The mutation removes ONE line of `_la_parse_teammates` — the `sub()` that drops the
+# harness's `[ref]` suffix off the name. It is the smallest plausible regression in that awk
+# and it leaves the parser working: the set still has two entries, they are just spelled
+# `la-target [8895ce]`. So no reader can find its name, and none of them can blame an empty
+# answer for it — which is exactly the failure a second, private parser would produce and a
+# shared one cannot.
+LA_MUT="$SANDBOX/la-mutant"
+mkdir -p "$LA_MUT/hooks" "$LA_MUT/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$LA_MUT/scripts/lib/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT/hooks/" 2>/dev/null
+grep -v 'drop the harness ref suffix' "$LIB_DIR_SRC/agents.sh" > "$LA_MUT/scripts/lib/agents.sh"
+expect_eq "the agents.sh mutation applies (the suffix strip has not moved)" "no" \
+  "$(cmp -s "$LIB_DIR_SRC/agents.sh" "$LA_MUT/scripts/lib/agents.sh" && echo yes || echo no)"
+# …AND THE MUTANT IS STILL A PARSER. If it returned nothing the three readers would move for
+# a reason that proves nothing about sharing — every one of them refuses an unreadable answer
+# already. The set is asked for directly, once, to pin that it is non-empty and merely WRONG.
+LA_MUT_SET=$( . "$LA_MUT/scripts/lib/agents.sh" >/dev/null 2>&1; live_agents "$LA_TR" 2>/dev/null )
+expect_contains "…and the doctored parser still returns a live set" "la-target [" "$LA_MUT_SET"
+expect_absent "…which simply spells the name wrong" "la-target|" "$LA_MUT_SET"
+
+LA_TREE="$LA_MUT"
+LA_B1=$(la_budget)
+LA_G1=$(la_guard la-target)
+LA_C1=$(la_check la-target)
+LA_TREE="$BIONIC_HOOKS_DIR/.."
+[ -d "$LA_TREE/scripts/lib" ] || LA_TREE="$BIONIC_HOOKS_DIR/../payload"
+
+expect_absent "mutated parser: the dispatch wall no longer counts the seat as open" \
+  "open=1" "$LA_B1"
+expect_absent "mutated parser: the observation no longer resolves the target" "$LA_TID" "$LA_C1"
+expect_contains "…it reports it as absent from the live set instead" "not live" "$LA_C1"
+expect_contains "mutated parser: the stop guard now calls the same target not live" \
+  "Target 'la-target' is not live" "$LA_G1"
+expect_contains "…in the parser's own terms: the answer names no such teammate" \
+  "names no teammate 'la-target'" "$LA_G1"
+
+# --- LA.4 restored: the shipped tree answers as it did before the mutation ------
+# The observation prints an AGE, which moves by a second between two runs of the same
+# fixture — so the compare is on the `Resolved:` line, which is the answer this section is
+# about, rather than on a whole channel that carries a clock reading.
+la_resolved() { printf '%s\n' "$1" | sed -n 's/^Resolved: *//p' | head -1; }
+expect_eq "restored: the wall's answer is the one it gave before" "$LA_B0" "$(la_budget)"
+expect_eq "…and the observation resolves what it resolved before" \
+  "$(la_resolved "$LA_C0")" "$(la_resolved "$(la_check la-target)")"
+expect_eq "…which is the agent id, not an empty line (the restore is not vacuous)" \
+  "$LA_TID" "$(la_resolved "$LA_C0")"
+
+# ============================================================
+echo ""
+echo "=== PC — THE PLAN PATH's CANONICAL FORM: one canonicalizer, three sites ==="
+# ============================================================
+#
+# THE OWNERSHIP-TABLE ROW (spec §Design §3): "plan path canonical form · owning module
+# `_bind_resolve` (binding.sh) · rendering surfaces: bind_plan, poker adopt, poker bind ·
+# agreement test: cross-gate new row: relative path + trailing slash, three sites agree".
+# AC-23 is its wording.
+#
+# THE DEFECT THE ROW IS WRITTEN AGAINST. Before S8 each of the three sites spelled the
+# canonical form its own way: `bind_plan` resolved through `_bind_resolve`, `adopt_plan_key`
+# carried an inline normalizer of its own, and `bind`'s refusal arm carried a third. Two
+# spellings of one plan then produced two bindings — and `adopt`, comparing a roster row's
+# `plan=` against this session's, read its own run as somebody else's.
+#
+# THE TWO SPELLINGS ARE THE ONES AN OPERATOR ACTUALLY PRODUCES. `./plans/…` is what a shell
+# leaves when the path is completed from the docs root, and `plans/…/` is what completion
+# leaves on a directory-looking path the operator was still typing. Neither is exotic and
+# both name one file.
+#
+# EACH SITE IS ASKED IN THE FORM IT ACCEPTS, which is not a weakening of the row — it is what
+# the row is about. `bind_plan` is a library function contracted to take an ABSOLUTE path, so
+# its odd spellings are absolute ones; the `bind` verb takes what the operator types, so its
+# are docs-root-relative; `adopt` never takes a path at all — it READS one off a foreign
+# roster row — so its odd spelling is planted in that row. Three interfaces, one answer.
+
+PC_REPO=$(new_repo "pc-canonical")
+PC_DOCS="$PC_REPO/.bionic/docs"
+PC_PLAN="$PC_DOCS/plans/epic-99/pc-run.md"
+write_plan "$PC_PLAN" "current: 4"
+# THE CANONICAL SPELLING IS THE LIBRARY'S OWN ANSWER, not a string built here. A hand-written
+# expectation would pass on a tree whose sandbox path is itself a symlink (macOS `/tmp` is),
+# and would be pinning this suite's idea of canonical rather than `_bind_resolve`'s.
+PC_CANON=$( . "$RUN_LIB" >/dev/null 2>&1; . "$LIB_DIR_SRC/binding.sh" >/dev/null 2>&1
+            _bind_resolve "$PC_PLAN" )
+expect_contains "the canonicalizer answers for the fixture plan at all (not vacuous)" \
+  "pc-run.md" "$PC_CANON"
+
+pc_marker() {  # <sid> -> the plan= value on that session's marker, or empty
+  sed -n 's/^plan=//p' "$PC_REPO/.bionic/tmp/engaged-$1.state" 2>/dev/null | head -1
+}
+pc_bind_lib() {  # <sid> <plan spelling> -> drive the LIBRARY's writer directly
+  rm -f "$PC_REPO/.bionic/tmp/engaged-$1.state"
+  : > "$PC_REPO/.bionic/tmp/engaged-$1.state"
+  ( . "$PC_LIB_RUN" >/dev/null 2>&1; . "$PC_LIB_BIND" >/dev/null 2>&1
+    bind_plan "$PC_REPO" "$1" "$2" ) >/dev/null 2>&1
+  pc_marker "$1"
+}
+pc_bind_verb() {  # <sid> <operand> -> drive the poker's `bind` verb
+  rm -f "$PC_REPO/.bionic/tmp/engaged-$1.state"
+  : > "$PC_REPO/.bionic/tmp/engaged-$1.state"
+  ( cd "$PC_REPO" && env CLAUDE_CODE_SESSION_ID="$1" bash "$PC_SPO" bind "$2" ) >/dev/null 2>&1
+  pc_marker "$1"
+}
+
+PC_LIB_RUN="$RUN_LIB"
+PC_LIB_BIND="$LIB_DIR_SRC/binding.sh"
+PC_SPO="$SPO"
+
+# --- PC.1 the library's writer: three absolute spellings, one stored value -----
+PC_DOT="$PC_DOCS/./plans/epic-99/pc-run.md"
+PC_SLASH="$PC_PLAN/"
+expect_eq "bind_plan stores the canonical spelling for the plain path" \
+  "$PC_CANON" "$(pc_bind_lib "$SID_A" "$PC_PLAN")"
+expect_eq "…the same value for the ./ spelling" \
+  "$PC_CANON" "$(pc_bind_lib "$SID_A" "$PC_DOT")"
+expect_eq "…and the same value for the trailing-slash spelling" \
+  "$PC_CANON" "$(pc_bind_lib "$SID_A" "$PC_SLASH")"
+
+# --- PC.2 the poker's `bind` verb: the two operands an operator types ----------
+#
+# DOCS-ROOT-RELATIVE, because that is the spelling hooks/session-start.sh prints in its
+# open-run listing and therefore the one an operator copies (S8b).
+expect_eq "poker bind stores the same canonical spelling for ./plans/…" \
+  "$PC_CANON" "$(pc_bind_verb "$SID_B" "./plans/epic-99/pc-run.md")"
+expect_eq "…and for plans/…/ with the slash completion left on it" \
+  "$PC_CANON" "$(pc_bind_verb "$SID_B" "plans/epic-99/pc-run.md/")"
+
+# --- PC.3 the poker's `adopt`: the key it compares a foreign row's plan= by -----
+#
+# `adopt` produces no `plan=` of its own from a spelling — it READS one off a predecessor's
+# roster row and asks whether that row belongs to THIS session's run. The canonical form is
+# what makes that question answerable, so the observable is the PARTITION: a foreign row
+# whose `plan=` is one of the odd spellings must land under this session's own run, and one
+# naming a genuinely different plan must not.
+PC_PRED="9a9a9a9a-1111-4bbb-8ccc-0000000000c1"
+PC_OTHER="$PC_DOCS/plans/epic-99/pc-other.md"
+write_plan "$PC_OTHER" "current: 6"
+mkdir -p "$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$PC_REPO" | sed 's/[^a-zA-Z0-9]/-/g')/$PC_PRED/subagents"
+
+pc_adopt() {  # <foreign plan= spelling> -> the adopt listing
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+    > "$PC_REPO/.bionic/tmp/roster-$PC_PRED.state"
+  printf 'roster-state/v1|status=identified|session=%s|name=pc-agent|agent_id=apc-1111111111111111|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01PCFIX|plan=%s\n' \
+    "$PC_PRED" "$1" >> "$PC_REPO/.bionic/tmp/roster-$PC_PRED.state"
+  s4_bind "$PC_REPO" "$SID_A" "$PC_PLAN"
+  ( cd "$PC_REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PC_SPO" adopt 2>&1 )
+  return 0
+}
+
+PC_A_ABS=$(pc_adopt "$PC_CANON")
+PC_A_DOT=$(pc_adopt "./.bionic/docs/plans/epic-99/pc-run.md")
+PC_A_SLASH=$(pc_adopt ".bionic/docs/plans/epic-99/pc-run.md/")
+PC_A_OTHER=$(pc_adopt "$PC_OTHER")
+
+# NON-VACUITY FIRST: the listing must actually be about the planted row, or every `grep`
+# below is asking a question of an empty answer.
+expect_contains "adopt listed the planted predecessor row" "pc-agent" "$PC_A_ABS"
+expect_absent "…and did NOT file it under another run when the spelling is canonical" \
+  "another run" "$PC_A_ABS"
+expect_absent "…nor when the row spells it ./…" "another run" "$PC_A_DOT"
+expect_absent "…nor when the row spells it with a trailing slash" "another run" "$PC_A_SLASH"
+# THE OTHER DIRECTION, WHICH IS WHAT MAKES THE THREE ABOVE MEAN SOMETHING: a row naming a
+# genuinely different plan of the same root IS filed under another run. Without this the
+# three absences would also be produced by a partition that had stopped comparing at all.
+expect_contains "…while a row naming a DIFFERENT plan is filed under another run" \
+  "another run" "$PC_A_OTHER"
+
+# --- PC.4 THE DISCRIMINATOR: doctor _bind_resolve, all three sites move --------
+#
+# The mutation removes the directory resolution — `pwd -P` — and leaves the function
+# returning what it was handed. That is precisely the pre-S8 inline normalizer's behaviour on
+# these spellings, so it is a regression the codebase has actually shipped rather than
+# invented damage. The shipped library is never touched: a mutant plugin tree is built
+# alongside it and the three sites are driven out of THAT.
+PC_MUT="$SANDBOX/pc-mutant"
+mkdir -p "$PC_MUT/hooks" "$PC_MUT/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$PC_MUT/scripts/lib/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$PC_MUT/hooks/" 2>/dev/null
+awk '
+  /^_bind_resolve\(\) \{/ && !d { print; print "  printf '"'"'%s\\n'"'"' \"$1\"; return 0"; d = 1; next }
+  { print }
+' "$LIB_DIR_SRC/binding.sh" > "$PC_MUT/scripts/lib/binding.sh"
+expect_eq "the _bind_resolve mutation applies (the function has not moved)" "no" \
+  "$(cmp -s "$LIB_DIR_SRC/binding.sh" "$PC_MUT/scripts/lib/binding.sh" && echo yes || echo no)"
+
+PC_LIB_BIND="$PC_MUT/scripts/lib/binding.sh"
+PC_SPO="$PC_MUT/hooks/session-poker.sh"
+PC_M_DOT=$(pc_bind_lib "$SID_A" "$PC_DOT")
+PC_M_PLAIN=$(pc_bind_lib "$SID_A" "$PC_PLAN")
+PC_M_VERB=$(pc_bind_verb "$SID_B" "./plans/epic-99/pc-run.md")
+PC_M_ADOPT=$(pc_adopt "./.bionic/docs/plans/epic-99/pc-run.md")
+PC_LIB_BIND="$LIB_DIR_SRC/binding.sh"
+PC_SPO="$SPO"
+
+expect_eq "doctored canonicalizer: bind_plan no longer answers canonically for ./…" \
+  "no" "$([ "$PC_M_DOT" = "$PC_CANON" ] && echo yes || echo no)"
+expect_eq "doctored canonicalizer: the bind VERB moves with it" \
+  "no" "$([ "$PC_M_VERB" = "$PC_CANON" ] && echo yes || echo no)"
+expect_contains "doctored canonicalizer: adopt files this session's own row under another run" \
+  "another run" "$PC_M_ADOPT"
+# NOT DISCRIMINATED BY BREAKING EVERYTHING. The mutant still binds the ALREADY-canonical
+# spelling correctly, so what the three rows above caught is the missing canonicalization,
+# not a writer that stopped writing.
+expect_eq "…while the mutant still binds the already-canonical spelling (the arm is precise)" \
+  "$PC_CANON" "$PC_M_PLAIN"
+
+# --- PC.5 restored ------------------------------------------------------------
+expect_eq "restored: bind_plan answers canonically again for ./…" \
+  "$PC_CANON" "$(pc_bind_lib "$SID_A" "$PC_DOT")"
+
+# ============================================================
+echo ""
+echo "=== RG — THE PRESSURE RUNG: two consumers, one ring, one rung ==="
+# ============================================================
+#
+# THE OWNERSHIP-TABLE ROW (spec §Design §3): "machine pressure level · owning module
+# `pressure_level` (resources.sh) over the ring · rendering surfaces: poker fill,
+# tests/run.sh, tick report line · agreement test: new row: two consumers over one ring
+# compute one rung; band mutation moves both". AC-14 states the function's own contract and
+# AC-15 states the consumers' obligation to SAMPLE before they read.
+#
+# THE TWO CONSUMERS ARE UNRELATED PROGRAMS. `tests/run.sh` sets a suite's job width;
+# `session-poker.sh tick` reports the rung and fills writers by it. They share nothing but
+# the library and the ring — which is the design (D4: pressure describes the machine, so the
+# ring is machine-scoped) and therefore the thing to hold. Every ring in this section lives
+# under the sandbox via `BIONIC_PRESSURE_RING`; the machine's own ring is never read or
+# written.
+#
+# THE CLOCK AND THE SENSORS ARE PINNED, or this section would be a weather report.
+# `BIONIC_NOW_EPOCH` fixes the smoothing window's `now` and `BIONIC_PROBE_FREE_PCT` /
+# `_SWAP_PCT` / `_LOAD_1M` fix the reading a sample takes. The load pin is not optional
+# housekeeping: `pressure_band`'s load term compares the real one-minute average against
+# 1.5 × cores, and this suite runs inside a parallel test run, so an unpinned drive would
+# read `warning` on a busy runner and `clear` on an idle one.
+
+RG_CEIL=8
+RG_NOW=1757030000
+RG_RING="$SANDBOX/rg/pressure.ring"
+mkdir -p "$SANDBOX/rg"
+# CLEAR and CRITICAL as the sensors see them: 80 % free is above every band threshold;
+# 8 % free is below BAND_FREE_CRITICAL_PCT (12) and above BAND_FREE_EMERGENCY_PCT (5).
+RG_CLEAR_ENV="BIONIC_PROBE_FREE_PCT=80 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1"
+RG_CRIT_ENV="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=0.1"
+
+# ONE CLEAR READING, WRITTEN BY THE REAL WRITER — not a hand-built ring file. The line's
+# shape is `pressure_sample`'s to own, and a fixture that wrote it by hand would keep passing
+# after the writer changed it.
+rg_seed_clear() {  # the ring, reset to exactly one clear sample
+  rm -f "$RG_RING"
+  ( eval "export $RG_CLEAR_ENV"
+    export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW"
+    . "$RG_LIB_RES" >/dev/null 2>&1
+    pressure_sample "$RG_CEIL" ) >/dev/null 2>&1
+}
+
+# ---- the fixture world the tick needs ----------------------------------------
+#
+# The tick reaches its scheduler — and therefore its rung line — only with a roster carrying
+# at least one row; above that it exits on `armed, nothing dispatched yet` and reports no
+# rung at all. The plan carries the ceiling both consumers read against, so the two answers
+# are comparable numbers rather than two scales.
+RG_REPO=$(new_repo "rg-one-ring")
+RG_PLAN="$RG_REPO/.bionic/docs/plans/epic-99/rg-run.md"
+mkdir -p "$(dirname "$RG_PLAN")"
+{
+  printf -- '---\n'
+  printf 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+  printf 'intent: build\nrigor: audited\nscale: wave\n'
+  printf 'parallel-budget: writers=%s test_jobs=%s model=opus\n' "$RG_CEIL" "$RG_CEIL"
+  printf -- '---\n\n# Fixture plan\n\n## SDLC State\n\nintegration-branch: main\n'
+  printf 'current: 4\n\n- Step 3: prior evidence\n'
+} > "$RG_PLAN"
+s4_bind "$RG_REPO" "$SID_A" "$RG_PLAN"
+roster_row "$RG_REPO" "$SID_A" "rg-writer" "arg-1111111111111111" "" "identified"
+
+# ---- the two consumers, each asked through its own surface -------------------
+rg_runner() {  # -> the width tests/run.sh would run at, under the pinned environment
+  ( eval "export $1"
+    export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW" \
+           BIONIC_TEST_JOBS_CEILING="$RG_CEIL"
+    bash "$RG_TREE_RUNNER/tests/run.sh" --dry-run 2>/dev/null ) \
+    | sed -n 's/^JOBS=//p' | head -1
+}
+rg_tick() {  # -> the rung field of the tick's report line, under the same environment
+  ( cd "$RG_REPO"
+    eval "export $1"
+    export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW" \
+           CLAUDE_CODE_SESSION_ID="$SID_A" CLAUDE_CONFIG_DIR="$RG_REPO/no-such-config"
+    bash "$RG_TREE_POKER/hooks/session-poker.sh" tick 2>&1 ) \
+    | sed -n 's/.*rung=\([0-9-]*\)\/.*/\1/p' | head -1
+}
+
+RG_LIB_RES="$LIB_DIR_SRC/resources.sh"
+RG_TREE_RUNNER="$REPO_ROOT"
+RG_TREE_POKER="$BIONIC_HOOKS_DIR/.."
+[ -d "$RG_TREE_POKER/scripts/lib" ] || RG_TREE_POKER="$BIONIC_HOOKS_DIR/../payload"
+
+expect_eq "the runner this section drives is on disk (not vacuous)" "yes" \
+  "$([ -r "$RG_TREE_RUNNER/tests/run.sh" ] && echo yes || echo no)"
+
+# --- RG.1 one ring, one rung: a CLEAR machine gives both consumers the ceiling --
+rg_seed_clear; RG_RUN_CLEAR=$(rg_runner "$RG_CLEAR_ENV")
+rg_seed_clear; RG_TICK_CLEAR=$(rg_tick "$RG_CLEAR_ENV")
+expect_eq "a clear machine gives the runner the whole ceiling" "$RG_CEIL" "$RG_RUN_CLEAR"
+expect_eq "…and gives the tick the same number" "$RG_CEIL" "$RG_TICK_CLEAR"
+
+# --- RG.2 …and a CRITICAL machine quarters it for both, identically ------------
+rg_seed_clear; RG_RUN_CRIT=$(rg_runner "$RG_CRIT_ENV")
+rg_seed_clear; RG_TICK_CRIT=$(rg_tick "$RG_CRIT_ENV")
+expect_eq "a critical machine quarters the runner's width" "2" "$RG_RUN_CRIT"
+expect_eq "…and quarters the tick's rung to the same number" "2" "$RG_TICK_CRIT"
+expect_eq "the two consumers computed ONE rung, not two" "$RG_RUN_CRIT" "$RG_TICK_CRIT"
+# NON-VACUITY: the two numbers differ between RG.1 and RG.2, so the equality above is not
+# two constants agreeing.
+expect_eq "…and it is not the clear answer wearing a different name" "no" \
+  "$([ "$RG_RUN_CRIT" = "$RG_RUN_CLEAR" ] && echo yes || echo no)"
+
+# --- RG.3 THE BAND MUTATION: move one threshold, both consumers move -----------
+#
+# `BAND_FREE_CRITICAL_PCT` is the constant that decides whether 8 % free is critical. Moved
+# to 1, the same reading falls through to the WARNING arm (8 < 25) and the fraction becomes a
+# half instead of a quarter — so both consumers must read 4 where they read 2. A mutation
+# that moved only one of them would mean one consumer had its own copy of the band table.
+#
+# ONE MUTANT TREE SERVES BOTH, in the two layouts the two consumers resolve: the poker finds
+# its library at `$(dirname "$0")/../scripts/lib`, and `tests/run.sh` sources
+# `$REPO/payload/scripts/lib`. The shipped files are never touched.
+RG_MUT="$SANDBOX/rg-mutant"
+mkdir -p "$RG_MUT/hooks" "$RG_MUT/scripts/lib" "$RG_MUT/tests" "$RG_MUT/payload/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$RG_MUT/scripts/lib/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$RG_MUT/hooks/" 2>/dev/null
+cp "$REPO_ROOT/tests/run.sh" "$RG_MUT/tests/run.sh"
+sed 's/^BAND_FREE_CRITICAL_PCT=12/BAND_FREE_CRITICAL_PCT=1/' \
+  "$RG_LIB_RES" > "$RG_MUT/scripts/lib/resources.sh"
+cp "$RG_MUT/scripts/lib"/*.sh "$RG_MUT/payload/scripts/lib/" 2>/dev/null
+expect_eq "the band-threshold mutation applies (the constant has not moved)" "no" \
+  "$(cmp -s "$RG_LIB_RES" "$RG_MUT/scripts/lib/resources.sh" && echo yes || echo no)"
+
+RG_TREE_RUNNER="$RG_MUT"; RG_TREE_POKER="$RG_MUT"
+rg_seed_clear; RG_RUN_BAND=$(rg_runner "$RG_CRIT_ENV")
+rg_seed_clear; RG_TICK_BAND=$(rg_tick "$RG_CRIT_ENV")
+RG_TREE_RUNNER="$REPO_ROOT"; RG_TREE_POKER="$BIONIC_HOOKS_DIR/.."
+[ -d "$RG_TREE_POKER/scripts/lib" ] || RG_TREE_POKER="$BIONIC_HOOKS_DIR/../payload"
+
+expect_eq "moved band threshold: the runner halves instead of quartering" "4" "$RG_RUN_BAND"
+expect_eq "…and the tick moves with it, to the same number" "4" "$RG_TICK_BAND"
+expect_eq "…so one threshold change moved BOTH consumers" "$RG_RUN_BAND" "$RG_TICK_BAND"
+
+# --- RG.4 THE SAMPLING PROBE (S8's uncaught-probe finding) --------------------
+#
+# THE FINDING. S8 observed that every rung fixture in the fleet starts from an EMPTY ring —
+# and over an empty ring `pressure_level` takes a sample of its own before answering. So a
+# consumer that had stopped sampling would still read the right number, and deleting
+# `pressure_sample` from either consumer was a change no suite could catch. AC-15 is exactly
+# the obligation that hole hid.
+#
+# THE PROBE. Seed the ring with ONE clear reading through the real writer, then put the
+# sensors in critical. The ring is no longer empty, so `pressure_level` takes no sample of
+# its own — and the two consumers now separate:
+#   · a consumer that SAMPLES appends the critical reading, medians clear+critical to
+#     critical (an even count resolves to the higher band) and reads the QUARTER: 2.
+#   · a consumer that only READS sees one clear sample and reports the whole CEILING: 8.
+# Each consumer is doctored separately, so each removal is caught on its own.
+RG_NOSAMP="$SANDBOX/rg-nosample"
+mkdir -p "$RG_NOSAMP/hooks" "$RG_NOSAMP/scripts/lib" "$RG_NOSAMP/tests" "$RG_NOSAMP/payload/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$RG_NOSAMP/scripts/lib/" "$RG_NOSAMP/payload/scripts/lib/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$RG_NOSAMP/hooks/" 2>/dev/null
+# the runner with its `pressure_sample` line removed, and nothing else changed
+grep -v '^pressure_sample >/dev/null 2>&1 || :$' "$REPO_ROOT/tests/run.sh" \
+  > "$RG_NOSAMP/tests/run.sh"
+# the tick with ITS `pressure_sample` line removed, and nothing else changed
+grep -v '^    pressure_sample "\$SCHED_CORES" >/dev/null 2>&1 || :$' "$SPO" \
+  > "$RG_NOSAMP/hooks/session-poker.sh"
+expect_eq "the runner's sample line was really removed (the anchor has not moved)" "1" \
+  "$(( $(grep -c 'pressure_sample' "$REPO_ROOT/tests/run.sh") \
+       - $(grep -c 'pressure_sample' "$RG_NOSAMP/tests/run.sh") ))"
+expect_eq "the tick's sample line was really removed (the anchor has not moved)" "1" \
+  "$(( $(grep -c 'pressure_sample' "$SPO") \
+       - $(grep -c 'pressure_sample' "$RG_NOSAMP/hooks/session-poker.sh") ))"
+
+# the shipped consumers, over the SEEDED ring — each samples, so each reads the quarter
+rg_seed_clear; RG_RUN_SEEDED=$(rg_runner "$RG_CRIT_ENV")
+rg_seed_clear; RG_TICK_SEEDED=$(rg_tick "$RG_CRIT_ENV")
+expect_eq "over a seeded ring the shipped runner still reads the critical quarter" "2" \
+  "$RG_RUN_SEEDED"
+expect_eq "…and so does the shipped tick" "2" "$RG_TICK_SEEDED"
+
+RG_TREE_RUNNER="$RG_NOSAMP"
+rg_seed_clear; RG_RUN_NOSAMP=$(rg_runner "$RG_CRIT_ENV")
+RG_TREE_RUNNER="$REPO_ROOT"
+RG_TREE_POKER="$RG_NOSAMP"
+rg_seed_clear; RG_TICK_NOSAMP=$(rg_tick "$RG_CRIT_ENV")
+RG_TREE_POKER="$BIONIC_HOOKS_DIR/.."
+[ -d "$RG_TREE_POKER/scripts/lib" ] || RG_TREE_POKER="$BIONIC_HOOKS_DIR/../payload"
+
+expect_eq "a runner that stopped sampling reports the WHOLE ceiling on a critical machine" \
+  "$RG_CEIL" "$RG_RUN_NOSAMP"
+expect_eq "…which is not what the shipped runner reports: the removal is CAUGHT" "no" \
+  "$([ "$RG_RUN_NOSAMP" = "$RG_RUN_SEEDED" ] && echo yes || echo no)"
+expect_eq "a tick that stopped sampling reports the whole ceiling too" \
+  "$RG_CEIL" "$RG_TICK_NOSAMP"
+expect_eq "…which is not what the shipped tick reports: that removal is CAUGHT as well" "no" \
+  "$([ "$RG_TICK_NOSAMP" = "$RG_TICK_SEEDED" ] && echo yes || echo no)"
+
+# --- RG.5 the pin is honoured: this section's readings are on this section's ring ---
+#
+# Asserted rather than trusted. Every drive above ran with `BIONIC_PRESSURE_RING` set, and a
+# consumer that ignored the pin would append to the DEFAULT ring under
+# `${CLAUDE_CONFIG_DIR}/bionic/` instead. Both paths are inside the sandbox — the suite
+# redirects `CLAUDE_CONFIG_DIR` in its header, which is what keeps the machine's own ring out
+# of reach of every section in this file — so the question is not whether a default ring
+# exists (other sections in this file drive the tick without a pin and create one), but
+# whether any reading STAMPED WITH THIS SECTION'S PINNED CLOCK landed on it.
+rg_ring_count() {  # <ring file> -> how many of this section's samples it holds
+  [ -f "$1" ] || { printf '0'; return 0; }
+  LC_ALL=C awk -F'|' -v n="$RG_NOW" '$1 == n { c++ } END { print c + 0 }' "$1" 2>/dev/null
+}
+expect_eq "the sandbox ring holds this section's readings" "yes" \
+  "$([ "$(rg_ring_count "$RG_RING")" -gt 0 ] && echo yes || echo no)"
+expect_eq "…and the default ring holds none of them: the pin was honoured by every consumer" \
+  "0" "$(rg_ring_count "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring")"
+expect_contains "…and that default ring is itself inside the sandbox, never the machine's" \
+  "$SANDBOX" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring"
 # ============================================================
 echo ""
 echo "──────────────────────────────────────────────"
