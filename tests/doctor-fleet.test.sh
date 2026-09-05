@@ -238,20 +238,54 @@ expect_no_match "12: and does not quote a step" "*active run*current: 9*" "$OUT5
 echo ""
 echo "=== Section 5: predecessor rosters with open rows ==="
 
-# A roster belonging to a session that is NOT live: two dispatches intended, one
-# swept closed by the landing gate, one still open.
+# A roster belonging to a session that is NOT live: three dispatches intended,
+# one swept closed by the landing gate, one never answered for, and one answered
+# with a FAILED contract.
+#
+# THE MARKERS ARE THE ORIGINATOR'S EXACT SHAPE, and this is load-bearing rather
+# than cosmetic. hooks/landing-gate.sh writes them from one printf —
+# `landing-swept/v1|at=…|session=…|name=…|agent_id=…|state=…` — and
+# `patrol_roster_state` decides closure by matching the `state=MET` FIELD, so a
+# fixture marker missing `state=` is a line no writer in the fleet produces and
+# no reader is obliged to honour. This fixture carried exactly that shape from
+# the 1.4.0 doctor work; it read as "closed" only while the predicate ignored
+# `state=`, and S21 (`6775c7d`) made `state=MET` the requirement at every reader
+# at once. The suite then failed on the fixture, not on the code.
+#
+# THE UNMET ROW IS THE DISCRIMINATOR. With one MET, one unanswered and one UNMET
+# the expected count is 2: a reader that ignored the MET marker would say 3, and
+# one that closed on any marker at all would say 1. The count alone therefore
+# pins both halves of the rule on the predecessor path, which renders through
+# doctor's `_run_add` rather than through the live PATROL block that
+# doctor-patrol.test.sh Section 15 covers.
 {
   printf '# bionic session roster — schema roster-state/v1\n'
   printf 'roster-state/v1|status=intended|session=%s|name=W-ALPHA|agent_id=|launched_at=x\n' "$GONE_SID"
   printf 'roster-state/v1|status=intended|session=%s|name=W-BETA|agent_id=|launched_at=x\n' "$GONE_SID"
-  printf 'landing-swept/v1|session=%s|name=W-ALPHA|\n' "$GONE_SID"
+  printf 'roster-state/v1|status=intended|session=%s|name=W-GAMMA|agent_id=|launched_at=x\n' "$GONE_SID"
+  printf 'landing-swept/v1|at=2026-09-02T00:00:01Z|session=%s|name=W-ALPHA|agent_id=a000|state=MET\n' "$GONE_SID"
+  printf 'landing-swept/v1|at=2026-09-02T00:00:02Z|session=%s|name=W-GAMMA|agent_id=a001|state=UNMET\n' "$GONE_SID"
 } > "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state"
 
 OUT6="$(run_doctor)"
 
 expect_match "13: the predecessor roster is listed by its short id" \
   "*predecessor*${GONE_SID%%-*}*" "$OUT6"
-expect_match "14: with the count of rows nobody closed" "*predecessor*1 open*" "$OUT6"
+expect_match "14: with the count of rows nobody closed — the MET row is not among them" \
+  "*predecessor*2 open*" "$OUT6"
+# THE PAIRED HALF, on the same roster: flip the UNMET verdict to MET and the
+# count falls to 1. Without it, "2 open" above is equally consistent with a
+# reader that had stopped closing rows altogether.
+sed 's/|name=W-GAMMA|agent_id=a001|state=UNMET$/|name=W-GAMMA|agent_id=a001|state=MET/' \
+  "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state" > "${PROJ}/.bionic/tmp/roster.met" \
+  && mv "${PROJ}/.bionic/tmp/roster.met" "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state"
+OUT6B="$(run_doctor)"
+expect_match "14b: …and flipping that same marker to MET closes it (14 discriminates)" \
+  "*predecessor*1 open row*" "$OUT6B"
+# Restored to the two-open state the rest of the section reads.
+sed 's/|name=W-GAMMA|agent_id=a001|state=MET$/|name=W-GAMMA|agent_id=a001|state=UNMET/' \
+  "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state" > "${PROJ}/.bionic/tmp/roster.unmet" \
+  && mv "${PROJ}/.bionic/tmp/roster.unmet" "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state"
 # MATCHED PER LINE. A whole-output glob would happily span from the predecessor
 # row down to the RESOURCES section, where a live session's short id legitimately
 # appears — and pass or fail for the wrong reason.
