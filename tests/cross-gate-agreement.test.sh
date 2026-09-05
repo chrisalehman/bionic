@@ -5587,6 +5587,41 @@ lr_ask "$LR_R" live_runs >/dev/null
 expect_eq "restored: the shipped library answers as it did before the mutations" \
   "$LR_LIVE" "$LR_OUT"
 
+# --- LR.5 EVERY GATE KEEPS THE STRICT OPEN RULE: NO GATE CONSULTS live_runs (AC-4) -------
+#
+# THE HALF OF AC-4 THE READBACK FLAGGED AS UNPROVEN. LR.1-LR.4 prove the SUBSET relation
+# between the two readers; none of them says, in words, that a gate never reads the live
+# reader at all. `bind` succeeding on a quiet-but-open plan (session-poker's own suite) is
+# only "every gate keeps the strict open rule" if the gates really do stay off `live_runs` —
+# so this row greps the two callers this wave gave `live_runs` and the eight gates a
+# dispatch/stop/evidence/landing decision runs through, and pins the split directly.
+LR_LIVE_CALLERS="engage.sh session-start.sh"
+LR_GATES="canonical-sdlc-evidence-gate.sh canonical-sdlc-governing-skill.sh dispatch-preflight.sh stop-guard.sh patrol-duties-gate.sh patrol-revive.sh context-spend.sh landing-gate.sh"
+
+for f in $LR_LIVE_CALLERS; do
+  expect_eq "…$f (a live_runs caller) really does reference it (non-vacuity)" "1" \
+    "$( [ "$(/usr/bin/grep -c 'live_runs' "$BIONIC_HOOKS_DIR/$f")" -ge 1 ] && echo 1 || echo 0 )"
+done
+
+for f in $LR_GATES; do
+  expect_eq "…$f carries zero references to live_runs" "0" \
+    "$(/usr/bin/grep -c 'live_runs' "$BIONIC_HOOKS_DIR/$f")"
+done
+
+# THE ANTI-VACUITY ARM. A doctored copy of one gate (stop-guard.sh) with a live_runs call
+# inserted must fail the pin above — proving the grep is a real check on this gate's
+# content, not a path that always reads zero regardless of what the file says.
+LR_GATE_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/lr-gate-live-runs-mut.XXXXXX")"
+LR_GATE_MUT="$LR_GATE_MUT_ROOT/stop-guard.sh"
+{ printf '# doctored: %s\n' 'RUNS=$(live_runs "$REPO_REAL" 2>/dev/null) || RUNS=""'
+  cat "$BIONIC_HOOKS_DIR/stop-guard.sh"
+} > "$LR_GATE_MUT"
+expect_eq "gate-mut meta: the doctored live_runs call landed (the file is not the original)" "no" \
+  "$(cmp -s "$BIONIC_HOOKS_DIR/stop-guard.sh" "$LR_GATE_MUT" && echo yes || echo no)"
+expect_eq "…and the doctored gate now fails the very pin above (the arm goes red)" "1" \
+  "$(/usr/bin/grep -c 'live_runs' "$LR_GATE_MUT")"
+rm -rf "$LR_GATE_MUT_ROOT"
+
 # ============================================================
 echo ""
 echo "=== LA — THE LIVE-AGENT SET: one parser, three readers ==="

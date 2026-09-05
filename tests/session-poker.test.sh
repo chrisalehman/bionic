@@ -1722,6 +1722,7 @@ R11B2="$(make_repo s11-rung-fill)"; new_roster "$R11B2"
 wave_plan "$R11B2" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
   "| A | — | standard | landed |" \
   "| NEXT | A | standard | pending |"
+PLAN_R11B2="$R11B2/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
 poke_rung "$R11B2" 60 0 tick
 expect_contains "a FILLING tick prints the rung too" \
   "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
@@ -1733,6 +1734,61 @@ expect_eq       "…still exactly one rung line" "1" "$(count_lines_matching 'po
 BIONIC_PROBE_FREE_MB=512 poke_rung "$R11B2" 60 0 tick
 expect_contains "a HELD tick prints the rung as well" "poker: rung=8/8" "$OUT"
 expect_contains "…alongside the HOLD" "poker: HOLD" "$OUT"
+
+# ---------- 11b3: the tick never edits the plan (AC-17's third clause) ----------
+#
+# THE CLAUSE THE READBACK NAMED AS UNPINNED. The rung line and the FILL line are both console
+# output; neither is a claim about the file on disk. A tick that decided to fill by rewriting
+# the plan's own header — instead of only PRINTING what it decided — would still pass every
+# case above. The plan is the one artifact every other reader (active_plan, open_runs, the
+# bound marker) trusts to describe what a run intends, so a tick that edited it would be a
+# second writer of state the rest of the wave assumes only Step 4 authorship touches.
+#
+# A REAL TICK THAT BOTH PRINTS THE RUNG AND FILLS — reusing R11B2's already-filling fixture —
+# so the claim is proven on the same kind of tick that has something to write, not on an idle
+# one that never reaches the fill path at all.
+CKSUM_11B3_BEFORE="$(cksum < "$PLAN_R11B2")"
+MTIME_11B3_BEFORE="$(stat -f %m "$PLAN_R11B2" 2>/dev/null || stat -c %Y "$PLAN_R11B2")"
+poke_rung "$R11B2" 60 0 tick
+expect_contains "the same FILLING tick, run again, still prints the rung" \
+  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
+expect_eq "…and the plan's bytes are byte-identical after the tick" "$CKSUM_11B3_BEFORE" \
+  "$(cksum < "$PLAN_R11B2")"
+expect_eq "…and the plan's mtime is untouched by the tick" "$MTIME_11B3_BEFORE" \
+  "$(stat -f %m "$PLAN_R11B2" 2>/dev/null || stat -c %Y "$PLAN_R11B2")"
+
+# THE ANTI-VACUITY ARM. A doctored copy of the poker appends one byte to the plan right where
+# the real tick only READS it (`SCHED_PLAN="$POKER_RUN_PLAN"`), so the pin above is proven to
+# discriminate a tick that DOES edit the plan from one that does not.
+POKER_MUT_PLANEDIT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-planedit-mut.XXXXXX")"
+mkdir -p "$POKER_MUT_PLANEDIT_ROOT/hooks" "$POKER_MUT_PLANEDIT_ROOT/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" \
+  "$POKER_MUT_PLANEDIT_ROOT/scripts/lib"
+# EVERY OTHER SIBLING HOOK, LINKED IN — `tick` refuses outright with no sibling
+# hooks/session-sweeper.sh on disk, which a hooks/-plus-scripts/lib copy (the shape the
+# 20m-default mutant above uses) does not provide because that mutant never runs `tick`.
+for _sib in "$(dirname "$POKER")"/*; do
+  _sibname="$(basename "$_sib")"
+  [ "$_sibname" = "session-poker.sh" ] && continue
+  ln -s "$_sib" "$POKER_MUT_PLANEDIT_ROOT/hooks/$_sibname"
+done
+POKER_MUT_PLANEDIT="$POKER_MUT_PLANEDIT_ROOT/hooks/session-poker.sh"
+sed 's/^    SCHED_PLAN="\$POKER_RUN_PLAN"$/    SCHED_PLAN="$POKER_RUN_PLAN"; [ -n "$SCHED_PLAN" ] \&\& printf x >> "$SCHED_PLAN"/' \
+  "$POKER" > "$POKER_MUT_PLANEDIT"
+expect_eq "planedit meta: the sed anchor landed exactly once (the doctor took)" "1" \
+  "$(diff "$POKER" "$POKER_MUT_PLANEDIT" | /usr/bin/grep -c '^>')"
+CKSUM_11B3_MUT_BEFORE="$(cksum < "$PLAN_R11B2")"
+POKER_REAL_11B3="$POKER"; POKER="$POKER_MUT_PLANEDIT"
+poke_rung "$R11B2" 60 0 tick
+POKER="$POKER_REAL_11B3"
+expect_contains "the doctored tick still fills (the mutation is only in the plan-touch path)" \
+  "poker: FILL NEXT" "$OUT"
+if [ "$CKSUM_11B3_MUT_BEFORE" = "$(cksum < "$PLAN_R11B2")" ]; then
+  bad "planedit: the doctored tick's plan edit did NOT change the plan's bytes (the arm proves nothing)"
+else
+  ok "planedit: the doctored tick DID change the plan's bytes — the byte-identity pin above discriminates"
+fi
+rm -rf "$POKER_MUT_PLANEDIT_ROOT"
 
 # ---------- 11c: the rung IS the band, and the FILL is sized by it (AC-17, AC-14) ----------
 #

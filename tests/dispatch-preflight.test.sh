@@ -2904,6 +2904,34 @@ expect_status "r22jd an empty roster needs no live reading -> the same STALE tra
   "0" "$GATE_ST"
 expect_absent "…and says nothing about live-agents" "live-agents:" "$GATE_ERR"
 
+# (e) THE TOKEN ITSELF IS GONE, NOT MERELY UNCONSULTED (AC-7 "no landing-swept marker is
+# consulted"). r22ja/r22jb pin the BEHAVIOUR — presence in the fresh live set is what
+# opens or closes a row — but nothing above pins the IMPLEMENTATION: that the retired
+# marker cannot quietly become a second, competing signal inside this same function on
+# some future edit. A token pin on the function's own body is the only way to close that.
+BUDGET_FN_BODY="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE")"
+expect_eq "…and the extracted span is non-empty (the pin is not vacuously true)" "1" \
+  "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'budget_roster_counts() {' || true)"
+expect_eq "budget_roster_counts's own body carries no landing-swept token" "0" \
+  "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'landing-swept' || true)"
+
+# THE ANTI-VACUITY ARM: a doctored copy that re-adds the token inside the SAME function
+# body must fail the pin above. The doctor inserts one inert statement right after the
+# function's own opening line — not a comment change to the signature, which would move
+# the extractor's own anchor and prove nothing.
+GATE_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-swept-mut.XXXXXX")"
+GATE_MUT="$GATE_MUT_ROOT/dispatch-preflight.sh"
+awk '
+  { print }
+  /^  budget_roster_counts\(\) \{  #/ { print "    : # landing-swept/v1 reintroduced by mutation (test-only)" }
+' "$GATE" > "$GATE_MUT"
+expect_eq "swept-mut meta: the doctor's re-added line landed (the anchor still matches)" "1" \
+  "$(/usr/bin/grep -c 'reintroduced by mutation' "$GATE_MUT")"
+BUDGET_FN_BODY_MUT="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE_MUT")"
+expect_contains "…and the doctored body now DOES carry the token (the pin above discriminates)" \
+  "landing-swept" "$BUDGET_FN_BODY_MUT"
+rm -rf "$GATE_MUT_ROOT"
+
 # ============================================ S23: THE ORCHESTRATOR-IN-WORKTREE ARM
 # (spec AC-14; handoff 2.5.)
 #
