@@ -144,19 +144,28 @@ entry_tool_result() {  # <ts> <tool_use_id> <body>
     "$1" "$2" "$(json_str "$3")"
 }
 
-# la_body <name> ... -> a real `Teammates (N):` block naming each as running (or, with
-# no names, a recognisable answer carrying no Teammates block at all — AC-6's "zero
-# lines" case, per the real harness shape tests/live-agents.test.sh documents).
+# la_body <name[:status]> ... -> a real `Teammates (N):` block (or, with no names, a
+# recognisable answer carrying no Teammates block at all — AC-6's "zero lines" case, per
+# the real harness shape tests/live-agents.test.sh documents).
+#
+# A bare name is `running`, which is what every fixture written before S16 meant and
+# still means. `name:idle` writes the OTHER status the real harness emits: a teammate
+# that finished its turn and was never TaskStop'd stays listed, because it stays
+# addressable, and S22c is where that costs a writer slot or does not.
 la_body() {
   local out='This session is bionic-s5 [aabbcc] — the name other sessions use to message it.'
   if [ "$#" -gt 0 ]; then
     out="$out
 
 Teammates ($#):"
-    local n
+    local n nm st
     for n in "$@"; do
+      case "$n" in
+        *:*) nm="${n%%:*}"; st="${n##*:}" ;;
+        *)   nm="$n";       st="running"  ;;
+      esac
       out="$out
-  ${n} [000000]  ·  bionic:implementor  ·  running  ·  started 3m ago"
+  ${nm} [000000]  ·  bionic:implementor  ·  ${st}  ·  started 3m ago"
     done
   fi
   printf '%s' "$out"
@@ -2931,6 +2940,149 @@ BUDGET_FN_BODY_MUT="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE_MUT
 expect_contains "…and the doctored body now DOES carry the token (the pin above discriminates)" \
   "landing-swept" "$BUDGET_FN_BODY_MUT"
 rm -rf "$GATE_MUT_ROOT"
+
+# ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
+# (spec R2, AC-27; slice S16, closing the Step-5 auditor's F-1.)
+#
+# R2 names two departure modes — "delivered and stopped, or finished and never stopped".
+# S22b counts a row open on PRESENCE, which discharges the first and misses the second:
+# the harness keeps listing a teammate that finished its turn and was never TaskStop'd,
+# with status `idle`, because it stays addressable (a SendMessage would resume it). Under
+# presence-counting that finished agent holds a writer slot until somebody stops it —
+# B-1's stuck-slot defect wearing a new coat.
+#
+# THE RULE. A roster row counts OPEN only when its name is present in the fresh answer
+# with status `running`. Presence is still what the STOP GUARD resolves on (an idle agent
+# is exactly the one you stop), and both consumers read the one parse — the budget
+# through `live_agents_status`, the guard through `live_agents_has` — so they cannot
+# disagree about who is listed, only about what the status means. AMBIGUITY (a name
+# listed twice, exit 2) still counts OPEN: the reader could not resolve it, and spending
+# a slot beats handing one out on a reading nobody could make.
+#
+# Every arm below holds the roster, the repo and the budget fixed and moves ONLY the
+# status in the answer, so nothing but the status can explain the verdict.
+
+echo ""
+echo "---------- S22c: an idle (finished, unstopped) teammate does not count open ----------"
+
+# (a) THE HEADLINE. Byte-for-byte r22jb's fixture — one row `r1`, writers=1, r1 named in
+# a fresh answer — with `running` changed to `idle`. r22jb REFUSES. This must pass.
+REPO=$(make_repo r22ka yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+R22KA_T="$SANDBOX/.r22ka.jsonl"
+mk_transcript "$R22KA_T" fresh "r1:idle"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KA_T")"
+expect_status "r22ka an idle (finished, unstopped) teammate does NOT count open" "0" "$GATE_ST"
+expect_absent "…so no writers refusal is printed at all" "writers:" "$GATE_ERR"
+expect_absent "…and the dispatch is not blocked" "BLOCKED" "$GATE_ERR"
+
+# The meta-row: the fixture really did say idle. Without it, a builder that silently
+# dropped the status and wrote nothing would make (a) pass for the wrong reason.
+expect_contains "r22ka meta: the answer body names r1 idle, not running" \
+  "r1 [000000]  ·  bionic:implementor  ·  idle" "$(cat "$R22KA_T")"
+
+# (b) THE DISCRIMINATING PAIR, on one answer. Two rows, one idle and one running,
+# against writers=1: the count is 1, not 2 and not 0. A rule that ignored status would
+# say 2; a rule that stopped counting altogether would say 0 and let this through.
+REPO=$(make_repo r22kb yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+s22_roster_row "$REPO" "$SID_A" "r2"
+R22KB_T="$SANDBOX/.r22kb.jsonl"
+mk_transcript "$R22KB_T" fresh "r1:idle" "r2:running"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KB_T")"
+expect_status "r22kb one idle row and one running row against writers=1 -> REFUSED" "2" "$GATE_ST"
+expect_contains "…counting the running one ONLY: open=1, not open=2" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_ERR"
+
+# (c) AMBIGUITY IS STILL OPEN, and it is the arm that keeps (a) from being read as
+# "anything the reader cannot call running is free". The same name twice — two sessions
+# in one root launching same-named agents — is unresolvable, so the slot is spent.
+REPO=$(make_repo r22kc yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+R22KC_T="$SANDBOX/.r22kc.jsonl"
+mk_transcript "$R22KC_T" fresh "r1:idle" "r1:idle"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KC_T")"
+expect_status "r22kc the same name listed TWICE is unresolvable -> still counted open" \
+  "2" "$GATE_ST"
+expect_contains "…open=1 on the safe direction, even though neither copy reads running" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_ERR"
+
+# (d) FRESHNESS STILL COMES FIRST. A STALE answer refuses the whole dispatch before any
+# status is consulted — an idle row on a stale answer says nothing about now.
+REPO=$(make_repo r22kd yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+R22KD_T="$SANDBOX/.r22kd.jsonl"
+mk_transcript "$R22KD_T" stale "r1:idle"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KD_T")"
+expect_status "r22kd a STALE answer refuses before the status is read" "2" "$GATE_ST"
+expect_contains "…naming the state and the fix" "call ListAgents, then dispatch" "$GATE_ERR"
+
+# (e) THE REAL ANSWER, byte-verbatim. Everything above is synthesised from the harness's
+# shape; this arm drives the shipped hook against a body captured from this project's own
+# orchestrator session at 2026-09-05T03:07:41.801Z — `s6-stop-resolution` idle beside
+# `s5-dispatch-budget` running, the moment S6 had delivered its report and had not yet
+# been stopped (the stop is recorded at 03:07:46.215Z, five seconds later). Both names
+# are on the roster and the budget is two: presence-counting fills it and refuses; the
+# rule under test counts the one running writer and lets the dispatch through.
+REPO=$(make_repo r22ke yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "s6-stop-resolution"
+s22_roster_row "$REPO" "$SID_A" "s5-dispatch-budget"
+R22KE_BODY='This session is bionic-02 [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).
+
+Teammates (2):
+  s6-stop-resolution [864238]  ·  bionic:senior-implementor  ·  idle  ·  started 1h ago
+  s5-dispatch-budget [d34f18]  ·  bionic:implementor  ·  running  ·  started 34m ago'
+R22KE_T="$SANDBOX/.r22ke.jsonl"
+{
+  entry_prompt      "2026-09-05T03:07:30.000Z" "land S6"
+  entry_tool_use    "2026-09-05T03:07:40.000Z" "ListAgents" "toolu_01Amv2QjVrsFDp5uVfKEowty"
+  entry_tool_result "2026-09-05T03:07:41.801Z" "toolu_01Amv2QjVrsFDp5uVfKEowty" "$R22KE_BODY"
+} > "$R22KE_T"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KE_T")"
+expect_status "r22ke the real 03:07:41.801Z answer: one finished writer, one working -> allowed at writers=2" \
+  "0" "$GATE_ST"
+expect_absent "…no writers refusal, because open=1 and not 2" "writers:" "$GATE_ERR"
+
+# The paired direction on the SAME real body: at writers=1 the one genuinely running
+# writer fills the budget, and the refusal names open=1. This is what keeps (e) from
+# passing against a gate that had simply stopped counting.
+REPO=$(make_repo r22kf yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "s6-stop-resolution"
+s22_roster_row "$REPO" "$SID_A" "s5-dispatch-budget"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KE_T")"
+expect_status "r22kf …and at writers=1 the still-running one alone fills it -> REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "…open=1, the finished agent uncounted" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_ERR"
+
+# (f) THE CLAIMED (suites) COUNT RIDES THE SAME PREDICATE. A `claims=` row whose agent
+# has finished must not hold a suite allowance either — otherwise the two ceilings would
+# disagree about the same departed agent.
+REPO=$(make_repo r22kg yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1" "live-agents"
+R22KG_T="$SANDBOX/.r22kg.jsonl"
+mk_transcript "$R22KG_T" fresh "r1:running"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KG_T")"
+expect_status "r22kg meta: a RUNNING claimant fills suites=1 (the control)" "2" "$GATE_ST"
+expect_contains "…naming the claimed count" "suites: budget=1 claimed=1 with-this-dispatch=2" "$GATE_ERR"
+mk_transcript "$R22KG_T" fresh "r1:idle"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KG_T")"
+expect_status "r22kg the SAME claimant, now idle, releases its suite allowance" "0" "$GATE_ST"
+expect_absent "…no suites refusal" "suites:" "$GATE_ERR"
 
 # ============================================ S23: THE ORCHESTRATOR-IN-WORKTREE ARM
 # (spec AC-14; handoff 2.5.)

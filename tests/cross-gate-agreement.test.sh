@@ -348,16 +348,23 @@ roster_identify() {  # <repo> <sid> <name> <agent-id>
 
 CG_LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
 
-cg_live() {  # <transcript> <name>...
+cg_live() {  # <transcript> <name[:status]>...
   local tr="$1"; shift
-  local f="${tr%.jsonl}.names" names=() n body
+  local f="${tr%.jsonl}.names" names=() n nm st body
   mkdir -p "$(dirname "$tr")"
   for n in "$@"; do printf '%s\n' "$n" >> "$f"; done
   while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < "$f"
   body=$(
     printf '%s\n\nTeammates (%d):\n' "$CG_LA_SELF" "${#names[@]}"
     for n in "${names[@]}"; do
-      printf '  %s [8895ce]  ·  bionic:implementor  ·  running  ·  started 7m ago\n' "$n"
+      # A bare name is `running`. `name:idle` writes the harness's other status — the
+      # teammate that finished its turn and was never stopped, which LA.5 turns into the
+      # discriminator between the two questions the one parse now answers.
+      case "$n" in
+        *:*) nm="${n%%:*}"; st="${n##*:}" ;;
+        *)   nm="$n";       st="running"  ;;
+      esac
+      printf '  %s [8895ce]  ·  bionic:implementor  ·  %s  ·  started 7m ago\n' "$nm" "$st"
     done
   )
   {
@@ -5798,6 +5805,100 @@ expect_eq "…and the observation resolves what it resolved before" \
   "$(la_resolved "$LA_C0")" "$(la_resolved "$(la_check la-target)")"
 expect_eq "…which is the agent id, not an empty line (the restore is not vacuous)" \
   "$LA_TID" "$(la_resolved "$LA_C0")"
+
+# --- LA.5 ONE PARSE, TWO QUESTIONS: the status column (spec R2, AC-27; S16) ----
+#
+# S16 gives the budget a NARROWER question than the guard. The budget stops counting a row
+# whose agent reads `idle` — a teammate that finished its turn and was never stopped is not
+# a writer. The guard keeps resolving on PRESENCE, because an idle agent is exactly the one
+# a stop is for. Both answers come off the SAME parse (`live_agents_status` and
+# `live_agents_has` are two views of one `live_agents` call), and that is what this block
+# proves: two one-line doctorings of that single parser, each moving exactly the consumer
+# whose question it changes, on one fixture neither consumer can otherwise tell apart.
+#
+# LA.3 already moves all three readers by breaking the NAME. LA.5 is the other half — the
+# STATUS is read from that same parse, by one of them.
+
+rm -f "${LA_TR%.jsonl}.names"
+cg_live "$LA_TR" "la-budget:idle" "la-target:idle"
+expect_contains "LA.5 meta: the one answer now names both teammates idle" \
+  "la-budget [8895ce]  ·  bionic:implementor  ·  idle" "$(cat "$LA_TR")"
+
+LA_B5=$(la_budget)
+LA_G5=$(la_guard la-target)
+expect_absent "idle open seat: the dispatch wall stops counting it" "open=1" "$LA_B5"
+expect_absent "…and prints no writers refusal at all" "writers:" "$LA_B5"
+expect_contains "…while the SAME answer still gives the stop guard standing over its target" \
+  "BLOCKED" "$LA_G5"
+expect_absent "…which it does not call absent from the recorded answer" "is not live" "$LA_G5"
+
+# MUTATION A — the parser writes `running` into every row. The status the BUDGET reads is
+# gone; the presence the GUARD reads is untouched. Exactly one consumer moves.
+LA_MUT_S="$SANDBOX/la-mutant-status"
+mkdir -p "$LA_MUT_S/hooks" "$LA_MUT_S/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$LA_MUT_S/scripts/lib/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT_S/hooks/" 2>/dev/null
+sed 's/print name "|" type "|" status/print name "|" type "|" "running"/' \
+  "$LIB_DIR_SRC/agents.sh" > "$LA_MUT_S/scripts/lib/agents.sh"
+expect_eq "mutation A applies (the parser's print line has not moved)" "no" \
+  "$(cmp -s "$LIB_DIR_SRC/agents.sh" "$LA_MUT_S/scripts/lib/agents.sh" && echo yes || echo no)"
+LA_MUTS_SET=$( . "$LA_MUT_S/scripts/lib/agents.sh" >/dev/null 2>&1; live_agents "$LA_TR" 2>/dev/null )
+expect_contains "…and the mutant is still a parser: the set is intact, only the status lies" \
+  "la-budget|bionic:implementor|running" "$LA_MUTS_SET"
+
+LA_TREE="$LA_MUT_S"
+LA_B5A=$(la_budget)
+LA_G5A=$(la_guard la-target)
+LA_TREE="$BIONIC_HOOKS_DIR/.."
+[ -d "$LA_TREE/scripts/lib" ] || LA_TREE="$BIONIC_HOOKS_DIR/../payload"
+
+expect_contains "mutation A: the wall counts the finished agent open again — the budget moved" \
+  "open=1" "$LA_B5A"
+expect_contains "…and refuses on it" "BLOCKED" "$LA_B5A"
+# The guard's channel quotes the tree it was loaded from in its `Fix:` lines, so the
+# compare normalises that one path away and is byte-exact on everything else — including
+# the verdict, which is the thing under test.
+la_norm() { printf '%s\n' "$1" | sed 's#/[^ ]*/hooks/#TREE/#g'; }
+expect_eq "…while the guard's whole channel is otherwise unchanged — presence never moved" \
+  "$(la_norm "$LA_G5")" "$(la_norm "$LA_G5A")"
+expect_contains "…and the normaliser really did rewrite that path (not comparing raw text)" \
+  "TREE/stop-check.sh" "$(la_norm "$LA_G5")"
+expect_contains "…and that channel is a real refusal, not an empty string (not vacuous)" \
+  "BLOCKED" "$LA_G5A"
+
+# MUTATION B — the parser drops every row that is not `running`. This is the WRONG place to
+# put S16's rule: filtering in the reader rather than in the budget. Now the GUARD moves and
+# the budget does not, which is why the rule lives where it does.
+LA_MUT_F="$SANDBOX/la-mutant-filter"
+mkdir -p "$LA_MUT_F/hooks" "$LA_MUT_F/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$LA_MUT_F/scripts/lib/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$LA_MUT_F/hooks/" 2>/dev/null
+sed 's/if (name != "") print name "|" type "|" status/if (name != "" \&\& status == "running") print name "|" type "|" status/' \
+  "$LIB_DIR_SRC/agents.sh" > "$LA_MUT_F/scripts/lib/agents.sh"
+expect_eq "mutation B applies" "no" \
+  "$(cmp -s "$LIB_DIR_SRC/agents.sh" "$LA_MUT_F/scripts/lib/agents.sh" && echo yes || echo no)"
+LA_MUTF_SET=$( . "$LA_MUT_F/scripts/lib/agents.sh" >/dev/null 2>&1; live_agents "$LA_TR" 2>/dev/null )
+expect_empty "…and it really does drop the idle rows from the set" "$LA_MUTF_SET"
+
+LA_TREE="$LA_MUT_F"
+LA_G5B=$(la_guard la-target)
+LA_B5B=$(la_budget)
+LA_TREE="$BIONIC_HOOKS_DIR/.."
+[ -d "$LA_TREE/scripts/lib" ] || LA_TREE="$BIONIC_HOOKS_DIR/../payload"
+
+expect_contains "mutation B: the guard loses the finished agent it exists to stop" \
+  "names no teammate 'la-target'" "$LA_G5B"
+# Standing is broader than liveness (LA.1) — the identified roster row alone earns a
+# BLOCK — so what moves here is the REASON, and the shipped parser never gives it.
+expect_absent "…a sentence the shipped parser never said of the same target" \
+  "names no teammate" "$LA_G5"
+expect_absent "mutation B: the wall's count is unchanged — it read idle as closed already" \
+  "open=1" "$LA_B5B"
+
+# RESTORED, on the idle fixture: neither mutation left anything behind.
+expect_eq "restored: the wall answers the idle fixture as it did before both mutations" \
+  "$LA_B5" "$(la_budget)"
+expect_eq "…and so does the guard" "$LA_G5" "$(la_guard la-target)"
 
 # ============================================================
 echo ""
