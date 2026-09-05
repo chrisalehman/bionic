@@ -787,11 +787,10 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # would hold a writer slot for an agent that finished an hour ago until somebody
   # remembered to stop it, which is the stuck-slot defect this wall was built to end.
   #
-  # S16 wrote the cure as "open iff `running`", and that overshot: an unrecognised status
-  # word then read as CLOSED and freed a slot, which is the fail-OPEN direction. The rule
-  # is now OPEN UNLESS THE HARNESS SAID `idle` — one measured word against everything
-  # else — and it lives in `live_row_open` rather than here, because the Patrol tick asks
-  # the same question and two spellings of it are two answers.
+  # The rule is OPEN UNLESS THE HARNESS SAID `idle`, and it lives in `live_row_open`
+  # (payload/scripts/lib/agents.sh) rather than here, because the Patrol tick asks the same
+  # question and two spellings of it are two answers. That function's header says why the
+  # rule is an inversion and what it rests on; this comment does not repeat it.
   #
   # THE STOP GUARD DELIBERATELY DOES NOT FOLLOW THIS. It resolves on PRESENCE
   # (`live_agents_has`), because an idle agent is exactly the one a stop is for. Both
@@ -849,13 +848,8 @@ if [ -n "$PARALLEL_BUDGET" ]; then
         live_agents "$transcript" >/dev/null 2>&1 || :
       fi
 
-      # THE PREDICATE IS NOT SPELLED HERE (S19, auditor F-13). It was: S16 wrote
-      # `status = running` inline, which read every OTHER word — a renamed status, a
-      # third one — as CLOSED and handed out a slot, fail-OPEN inside the same function
-      # whose ambiguity arm below deliberately spends one. `live_row_open`
-      # (payload/scripts/lib/agents.sh) owns the rule now, inverted to fail closed: a row
-      # is open unless the harness said `idle`. The Patrol tick asks the SAME function,
-      # which is what stops the wall and the tick from disagreeing about one row.
+      # THE PREDICATE IS NOT SPELLED HERE. It is `live_row_open`
+      # (payload/scripts/lib/agents.sh), and its header says why the rule is an inversion.
       #
       # The reader's own stderr passes through here unchanged — one line,
       # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the

@@ -5466,6 +5466,62 @@ expect_eq "…and a doctored adopt writer leaves the row unattributed (§RA disc
 expect_contains "…while still writing the row, so the difference is the FIELD" \
   "$RA_PRED_ID" "$RA_ADOPT_M"
 
+# --- §RA.2 — the two writers of roster-state/v1 carry the SAME KEY SET -------------
+#
+# Step-6 review D-8. The row has two producers that share no builder:
+# `hooks/dispatch-preflight.sh` writes `status=intended` and `hooks/session-poker.sh`'s
+# `adopt_write_row` writes `status=identified`. §RA above proves the two AGREE on the value
+# of one field, `plan=` — and this wave widened the pair, adding `waiver=` to the adopt
+# writer, with no cross-writer pin on it at all. Readers extract by key, so field ORDER
+# cannot break them; a field present on ONE writer and absent from the other is exactly
+# what breaks them, and that is what this row forbids.
+#
+# THE ADOPT-ONLY KEYS ARE PINNED BY NAME, not waved through. `teammate_id` and
+# `adopted_from` exist only on a row that came from a predecessor session; adding a third
+# adopt-only key is a deliberate act that has to be written down here.
+ra2_keys() {  # <file> <literal anchor> -> the row's key names, one per line, in order
+  LC_ALL=C grep -F -- "$2" "$1" 2>/dev/null | head -1 \
+    | sed 's/^.*roster-state\///' \
+    | tr '|' '\n' \
+    | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*$/\1/p'
+}
+RA2_ADOPT_ONLY='teammate_id
+adopted_from'
+
+ra2_compare() {  # <dispatch-preflight path> <session-poker path> -> "" when they agree
+  local dp="$1" pk="$2" a b
+  a="$(ra2_keys "$dp" 'ROW="roster-state/')"
+  b="$(ra2_keys "$pk" "printf 'roster-state/v1|status=identified" \
+       | LC_ALL=C grep -v -x -F -f <(printf '%s\n' "$RA2_ADOPT_ONLY"))"
+  [ "$a" = "$b" ] && return 0
+  printf 'dispatch-preflight:\n%s\nsession-poker (adopt-only keys removed):\n%s\n' "$a" "$b"
+}
+
+RA2_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+RA2_PK="$BIONIC_HOOKS_DIR/session-poker.sh"
+expect_eq "the two roster-state/v1 writers emit the same keys in the same order" "" \
+  "$(ra2_compare "$RA2_DP" "$RA2_PK")"
+# Non-vacuity: the extraction really found a row, and it is the row this wave widened.
+RA2_DP_KEYS="$(ra2_keys "$RA2_DP" 'ROW="roster-state/')"
+expect_contains "…the extraction is not empty (it names status)"  "status"  "$RA2_DP_KEYS"
+expect_contains "…and it names the field this wave added to the other writer" \
+  "waiver" "$RA2_DP_KEYS"
+expect_eq "…and the adopt writer's extra keys are exactly the two adopt-only ones" \
+  "$RA2_ADOPT_ONLY" \
+  "$(ra2_keys "$RA2_PK" "printf 'roster-state/v1|status=identified" \
+     | LC_ALL=C grep -v -x -F -f <(printf '%s\n' "$RA2_DP_KEYS"))"
+
+# THE MUTATION ARM: drop `waiver=` from the adopt writer in a COPY and require the
+# comparison to name it. This is the exact drift D-8 found unpinned.
+RA2_MUT="$SANDBOX/ra2-mutant"
+mkdir -p "$RA2_MUT"
+sed 's/|waiver=%s|teammate_id=/|teammate_id=/' "$RA2_PK" > "$RA2_MUT/session-poker.sh"
+expect_eq "the mutation arm really removed waiver= from the adopt row" "yes" \
+  "$([ "$(ra2_keys "$RA2_MUT/session-poker.sh" "printf 'roster-state/v1|status=identified" \
+      | LC_ALL=C grep -c -x waiver | tr -d ' ')" = "0" ] && echo yes || echo no)"
+expect_contains "…and the key-set comparison goes red on it" "waiver" \
+  "$(ra2_compare "$RA2_DP" "$RA2_MUT/session-poker.sh")"
+
 
 # ============================================================
 echo ""
