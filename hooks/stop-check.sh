@@ -471,7 +471,7 @@ ROSTER_PATH=""
 if [ -n "$REPO_ROOT" ] && [ -n "$OWN_SESSION_ID" ]; then
   ROSTER_PATH="$REPO_ROOT/.bionic/tmp/roster-${OWN_SESSION_ID}.state"
 fi
-ROSTER_ROW=""; ROSTER_ID_MATCH=""
+ROSTER_ROW=""
 ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
 # TWO ROWS CAN CARRY ONE AGENT — the dispatch writes the CONTRACT, the recorder writes the id
 # one state later — so the id and the contract are collected separately rather than read off
@@ -503,7 +503,6 @@ if [ -n "$ROW_BY_ID" ]; then
   roster_walk "$TARGET_BASE"
 fi
 ROSTER_ROW="$ROW_BY_NAME"
-ROSTER_ID_MATCH="$ROW_WITH_ID"
 
 # ---------- resolution against the live set ----------
 #
