@@ -3256,6 +3256,95 @@ poke_pressure "$R19H" 8192 1.0 tick
 expect_contains "…while a genuinely MET roster still DISARMs on the same idle answer" \
   "decision=DISARM" "$OUT"
 
+# ---------- 19i: ONE transcript parse per tick, whatever the open-row count (P-4) ----------
+#
+# THE COST. `live_row_open` -> `live_agents_status` -> `live_agents` runs two whole-file `jq`
+# passes. The loop above asks it once per open row INSIDE a command substitution, and a
+# subshell inherits its parent's variables while its own writes die with it — so the
+# library's per-process memo (payload/scripts/lib/agents.sh, S20's P-1) was being filled in a
+# subshell and thrown away, and every row paid a full parse. Measured on this machine, one
+# tick over twelve open rows and a 4.1 MB transcript ran jq 24 times and took 2.98 s; with
+# the parse primed once in the tick's own shell, 2 times and 1.83 s. At 32 rows, 64 -> 2.
+#
+# COUNTED, NOT TIMED. A `jq` shim on PATH records one line per invocation whose argv names
+# THIS transcript, then execs the real jq — the seam tests/live-agents.test.sh §T uses. A
+# count is a pin and a duration is not: a future edit that reintroduces a per-row parse moves
+# the count on any machine, and the count is 2 (one `_la_scan`, one `_la_body`) however many
+# rows are open.
+S19I_SHIM="$TMPROOT/s19i-shim"
+mkdir -p "$S19I_SHIM"
+S19I_REAL_JQ="$(command -v jq)"
+S19I_COUNT="$TMPROOT/s19i-jq-calls"
+cat > "$S19I_SHIM/jq" <<SHIMEOF
+#!/bin/bash
+for _a in "\$@"; do
+  case "\$_a" in *"\$S19I_TRANSCRIPT") printf '%s\n' "\$_a" >> "\$S19I_COUNT_FILE" ;; esac
+done
+exec "$S19I_REAL_JQ" "\$@"
+SHIMEOF
+chmod +x "$S19I_SHIM/jq"
+
+s19_open() {  # <the tick's whole channel> -> the open= field of its decision line
+  printf '%s\n' "$1" | sed -n 's/.*|open=\([0-9][0-9]*\).*/\1/p' | head -1
+}
+
+# The tick under a pinned PATH. `poke` cannot carry one, and the shim has to be ahead of the
+# real jq for the whole process tree the tick spawns.
+poke_counted() {  # <repo> <args...> -> sets OUT, RC; appends to $S19I_COUNT
+  local repo="$1"; shift
+  OUT=$( cd "$repo" && env PATH="$S19I_SHIM:$PATH" \
+           CLAUDE_CODE_SESSION_ID="$SID" \
+           S19I_TRANSCRIPT="$S19I_TR" S19I_COUNT_FILE="$S19I_COUNT" \
+           bash "$POKER" "$@" 2>&1 ); RC=$?
+}
+
+R19I="$(make_repo s19-one-parse)"; new_roster "$R19I"
+wave_plan "$R19I" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| A | — | standard | landed |"
+S19I_NAMES=""
+S19I_N=1
+while [ "$S19I_N" -le 6 ]; do
+  add_row "$R19I" name="parse-row-$S19I_N" deliverable="d$S19I_N.md" duration="4 hours" \
+    launched_at="$(iso_ago 60)"
+  S19I_NAMES="$S19I_NAMES parse-row-$S19I_N:running"
+  S19I_N=$((S19I_N + 1))
+done
+# shellcheck disable=SC2086
+s19_answer fresh $S19I_NAMES
+S19I_TR="$S19_CFG/projects/-fixture-project/$SID.jsonl"
+
+: > "$S19I_COUNT"
+poke_counted "$R19I" tick
+expect_eq "six open rows are all counted live (19i is not vacuous)" "6" "$(s19_open "$OUT")"
+expect_eq "…and the tick parsed the transcript exactly twice, not twice per row" "2" \
+  "$(/usr/bin/grep -c . "$S19I_COUNT" | tr -d ' ')"
+
+# THE ANTI-VACUITY ARM. A doctored copy with the priming line removed — and nothing else
+# changed — must pay a parse per row. Without it, "2" above is consistent with a tick that
+# had stopped reading the transcript at all, which is exactly what 19f already forbids but
+# not what this row is about.
+S19I_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-parse-mut.XXXXXX")"
+mkdir -p "$S19I_MUT_ROOT/hooks" "$S19I_MUT_ROOT/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$S19I_MUT_ROOT/scripts/lib"
+for _sib in "$(dirname "$POKER")"/*; do
+  _sibname="$(basename "$_sib")"
+  [ "$_sibname" = "session-poker.sh" ] && continue
+  ln -s "$_sib" "$S19I_MUT_ROOT/hooks/$_sibname"
+done
+S19I_MUT="$S19I_MUT_ROOT/hooks/session-poker.sh"
+sed 's@^        live_agents "\$TICK_TR" >/dev/null 2>&1 || :$@        : # priming removed@' \
+  "$POKER" > "$S19I_MUT"
+expect_eq "19i meta: the sed anchor landed exactly once (the doctor took)" "1" \
+  "$(diff "$POKER" "$S19I_MUT" | /usr/bin/grep -c '^>')"
+: > "$S19I_COUNT"
+S19I_POKER_REAL="$POKER"; POKER="$S19I_MUT"
+poke_counted "$R19I" tick
+POKER="$S19I_POKER_REAL"
+expect_eq "…the doctored tick still counts the same six rows" "6" "$(s19_open "$OUT")"
+expect_eq "…and pays a full parse per row: twelve, not two (19i discriminates)" "12" \
+  "$(/usr/bin/grep -c . "$S19I_COUNT" | tr -d ' ')"
+rm -rf "$S19I_MUT_ROOT"
+
 # ============================================================
 section "Section 20: the kill-floor target reads the ONE openness predicate, and only MET closes a row"
 # ============================================================
