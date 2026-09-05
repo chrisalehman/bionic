@@ -240,6 +240,45 @@ case "$STALE_ARM" in
 esac
 
 echo ""
+echo "=== Section 6d: a settings.json still naming npx flags a defect (epic-21 AC-3) ==="
+
+# THE NETWORK-PER-RENDER DEFECT (bug-ccstatusline-npx-per-render.md, Fix step 5). A
+# `statusLine.command` that still starts with `npx ` is the pre-fix shape: Claude Code
+# runs that command on every render, and `npx pkg@latest` resolves a registry lookup
+# before it can print anything. Nothing rewrites settings.json on its own, so a machine
+# written before this fix stays broken until a person re-runs setup — which is exactly
+# what doctor has to tell them.
+cat > "${CHOME}/settings.json" <<'JSON'
+{
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest"
+  }
+}
+JSON
+
+OUT6D="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
+
+expect_match "12d1: the npx statusLine command is flagged as a defect" \
+  "*statusLine command*npx*" "$OUT6D"
+expect_match "12d2: and the row names re-running setup" \
+  "*statusLine command*npx*/bionic:setup*" "$OUT6D"
+
+# THE FIXED FORM MUST NOT BE FLAGGED — a bare binary name never blocks on the
+# network, so this is not a defect and the row must stay silent (format rule 4).
+cat > "${CHOME}/settings.json" <<'JSON'
+{
+  "statusLine": {
+    "type": "command",
+    "command": "ccstatusline"
+  }
+}
+JSON
+OUT6E="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
+expect_no_match "12d3: the installed-binary command form is never flagged" \
+  "*statusLine command*npx*" "$OUT6E"
+
+echo ""
 echo "=== Section 7: nothing this file gathers is left unrendered ==="
 
 # THE STRUCTURAL HALF, and it is the one that keeps this class of defect from

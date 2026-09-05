@@ -473,7 +473,7 @@ _doctor_source_of() {  # <name> -> one of the source words
     npm-global)         echo "npm -g" ;;
     uv-tool)            echo "uv tool" ;;
     mcp-server)         echo "MCP" ;;
-    statusline)         echo "npx" ;;
+    statusline)         echo "npm -g" ;;
     playwright-browser) echo "playwright cache" ;;
     pnpm-store)         echo "pnpm" ;;
     *)
@@ -495,7 +495,7 @@ _doctor_source_of() {  # <name> -> one of the source words
 _doctor_no_version_reason() {  # <kind>
   case "${1:-}" in
     mcp-server) echo "an MCP registration records no version" ;;
-    statusline) echo "npx resolves at run time; nothing cached to read" ;;
+    statusline) echo "npm has no global record of it" ;;
     pnpm-store) echo "a content-addressable cache, no version surface" ;;
     *)          echo "this mechanism records no version" ;;
   esac
@@ -532,6 +532,8 @@ HOOK_FILES_CAUSE="${HOOK_FILES_FACT##*cause=}"
 # strip-longest above returns the whole record. Cleared here rather than parsed
 # twice, so the render below can test it for emptiness.
 case "$HOOK_FILES_FACT" in *" cause="*) ;; *) HOOK_FILES_CAUSE="" ;; esac
+STATUSLINE_NPX_FACT="$(detect_statusline_npx_command)"
+STATUSLINE_NPX_STATE="${STATUSLINE_NPX_FACT##*present=}"
 # THE TREE THE REGISTRY NAMES, NOT THE ONE THE USER IS STANDING IN (AC-20,
 # handoff 4.3). `detect_registry_sha_lag` defaults its repo directory to `$PWD`,
 # and doctor used to call it bare — so the commit in the header above and the
@@ -935,7 +937,11 @@ while IFS= read -r dep_name; do
   if [ "$present" = "yes" ]; then
     case "$kind" in
       statusline)
-        third_version="$(dep_npx_version "$(_dep_locator_target "$(dep_field "$dep_name" source_url)")")"
+        # A REAL GLOBAL INSTALL NOW (epic-21 AC-3): ccstatusline installs
+        # through `npm install -g`, not `npx`, so its version is read the
+        # same way every other npm-global row's is — `npm list -g` — rather
+        # than a cache that nothing writes into any more.
+        third_version="$(_dep_check_npm_global "$dep_name")"; third_version="${third_version##*|}"
         third_state="command set, layout file in place" ;;
       mcp-server)
         [ "$third_version" = "unknown" ] && \
@@ -1979,6 +1985,12 @@ esac
 [ "$SKILL_COPY_STATE" = "yes" ] && \
   _doctor_env_row "$DOCTOR_BAD" "legacy installed skill copy" \
     "$(_doctor_tilde "$SKILL_COPY_PATH")" " → /bionic:setup"
+# THE NPX STATUSLINE COMMAND (epic-21 AC-3, Fix step 5). A machine that ran
+# setup before the fix still has `npx ccstatusline@latest` recorded, and
+# nothing rewrites it but a person re-running setup.
+[ "$STATUSLINE_NPX_STATE" = "yes" ] && \
+  _doctor_env_row "$DOCTOR_BAD" "statusLine command" \
+    "still uses npx — blocks on a network lookup every render" " → /bionic:setup"
 
 
 # ─── The resources the fleet is running on ───────────────────────────────────

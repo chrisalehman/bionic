@@ -325,7 +325,7 @@ excalidraw-renderer|extra|payload/skills/excalidraw-diagram/SKILL.md|uv:sync|any
 chrome-devtools|extra|skills/browser-verify/SKILL.md|npm:chrome-devtools-mcp@latest|any|mcp-server|remove-on-consent
 playwright-chromium|extra|payload/skills/excalidraw-diagram/SKILL.md|npx:playwright@latest|any|playwright-browser|remove-on-consent
 motion|extra|extra|pnpm:motion|any|pnpm-store|remove-on-consent
-ccstatusline|extra|extra|npx:ccstatusline@latest|any|statusline|remove-on-consent
+ccstatusline|extra|extra|npm:ccstatusline|any|statusline|remove-on-consent
 notebooklm|extra|extra|uv:notebooklm-py|any|uv-tool|remove-on-consent
 context7|extra|extra|npm:@upstash/context7-mcp@latest|any|mcp-server|remove-on-consent
 @pencil.dev/cli|extra|extra|npm:@pencil.dev/cli|any|npm-global|remove-on-consent
@@ -1209,31 +1209,51 @@ bionic_strip_permission_block() {  # [settings-file]
   _dep_settings_write_jq "$settings" "$BIONIC_PERMISSION_BLOCK_STRIP_JQ"
 }
 
-# The statusline is a settings.json edit, not a package install: `npx
-# ccstatusline@latest` is the command Claude Code runs to RENDER the line, and
-# installing it means recording that command. Ported from
-# claude-bootstrap.sh's do_set_statusline.
+# ccstatusline is a REAL package install now, not only a settings.json edit
+# (epic-21, bug-ccstatusline-npx-per-render.md). Claude Code runs the recorded
+# `.statusLine.command` on EVERY render, and the command used to be `npx
+# ccstatusline@latest` — a registry lookup to resolve `latest` before the
+# first byte of the status line could print, measured stalling 73s per render
+# on a network with TLS interception (the bug report's table). The fix
+# installs the binary once, the same `npm install -g` mechanism the
+# `npm-global` kind runs (see `_dep_install_argv`'s `npm-global` case), and
+# records the bare command name so every later render just execs it — nothing
+# left to resolve. Ported from claude-bootstrap.sh's do_set_statusline, which
+# this now goes beyond: that installer never ran `npm install` either, and
+# relied on `npx` to fetch on demand — the exact behavior being removed.
 #
-# BOTH HALVES (epic-18 T1, AC-1). Recording the command alone leaves
-# ccstatusline rendering its own stock default — handoff §3.1's incident —
-# because the LAYOUT (colors, field order) lives in a second file this
-# function now also copies: the payload's own
+# UNPINNED, BY MEASUREMENT (the bug report leaves this call to the writer).
+# `npm:ccstatusline@2.2.29` would guard against the shipped layout's schema
+# drifting out from under a newer ccstatusline release. It is not needed:
+# `_dep_ccstatusline_layout_match` (above) already strips `.version` before
+# comparing, added 2026-09-03 for exactly this — ccstatusline 2.2.29 rewrote
+# bionic's layout from schema version 3 to 4 in place and changed nothing else
+# — so the one schema bump on record was already absorbed without a pin.
+# Pinning would freeze ccstatusline's own upstream bugfixes for no schema
+# benefit this repo can see today, so the locator stays `any`/unpinned.
+#
+# BOTH HALVES (epic-18 T1, AC-1) STILL STAND. Recording the command alone
+# leaves ccstatusline rendering its own stock default — handoff §3.1's
+# incident — because the LAYOUT (colors, field order) lives in a second file
+# this function also copies: the payload's own
 # ${CLAUDE_PLUGIN_ROOT}/ccstatusline/settings.json, published to
 # ~/.config/ccstatusline/settings.json exactly as claude-bootstrap.sh's
 # ccstatusline-config step did. Skipped when already byte-identical, ported
 # from that same step's `diff -q` short-circuit.
 _dep_install_statusline() {
-  local settings cmd source target
+  local settings pkg source target
   settings="$(_dep_settings_file)"
-  cmd="npx $(_dep_locator_target "$(dep_field ccstatusline source_url)")"
-  _dep_have jq || { echo "$(_dep_indent)jq is not installed — cannot edit ${settings}" >&2; return 1; }
+  pkg="$(_dep_locator_target "$(dep_field ccstatusline source_url)")"
+  _dep_have jq  || { echo "$(_dep_indent)jq is not installed — cannot edit ${settings}" >&2; return 1; }
+  _dep_have npm || { echo "$(_dep_indent)npm is not installed — cannot install ${pkg}" >&2; return 1; }
+  npm install -g "$pkg" --silent || { echo "$(_dep_indent)npm install -g ${pkg} failed" >&2; return 1; }
   # Deliberately NOT under `umask 077`: the defect being fixed is widening a mode
   # the USER chose, and a file that does not exist yet carries no such choice.
   # bionic creating settings.json at 0600 where the CLI would have made it 0644
   # is a different decision, and not this fold's to make.
   [ -f "$settings" ] || echo '{}' > "$settings"
   _dep_settings_write_jq "$settings" \
-    '.statusLine = {"type": "command", "command": $c}' --arg c "$cmd" || return 1
+    '.statusLine = {"type": "command", "command": $c}' --arg c "$pkg" || return 1
 
   source="$(_dep_ccstatusline_config_source)"
   target="$(_dep_ccstatusline_config_target)"
@@ -1270,7 +1290,8 @@ install_dep() {  # <name>
     if [ -f "$cfg_target" ] && ! _dep_ccstatusline_layout_match "$cfg_source" "$cfg_target"; then
       cfg_note=" (a config file already there differs from the shipped layout and would be overwritten)"
     fi
-    plan="record 'npx $(_dep_locator_target "$(dep_field "$name" source_url)")' as the statusline in $(_dep_settings_file), and copy ${cfg_source} to ${cfg_target}${cfg_note}"
+    local sl_pkg; sl_pkg="$(_dep_locator_target "$(dep_field "$name" source_url)")"
+    plan="npm install -g ${sl_pkg}, record '${sl_pkg}' as the statusline in $(_dep_settings_file), and copy ${cfg_source} to ${cfg_target}${cfg_note}"
   else
     while IFS= read -r line; do argv+=("$line"); done < <(_dep_install_argv "$name") || true
     [ "${#argv[@]}" -gt 0 ] || { echo "deps.sh: no install mechanism for ${name}" >&2; return 1; }
@@ -1637,7 +1658,10 @@ remove_dep() {  # <name>
       return 0
       ;;
     statusline)
-      plan="clear .statusLine from $(_dep_settings_file), and remove $(_dep_ccstatusline_config_dir)"
+      # Fix step 3 (bug-ccstatusline-npx-per-render.md): the install arm now
+      # runs a real `npm install -g`, so the removal plan says so too — a
+      # settings.json clear alone would leave the global package on disk.
+      plan="npm uninstall -g $(_dep_locator_target "$(dep_field "$name" source_url)"), clear .statusLine from $(_dep_settings_file), and remove $(_dep_ccstatusline_config_dir)"
       ;;
     *)
       while IFS= read -r line; do argv+=("$line"); done < <(_dep_remove_argv "$name") || true
@@ -1675,7 +1699,13 @@ remove_dep() {  # <name>
         # shape a machine with the config directory but no `.statusLine` key
         # is in. The two removals are independent now: an absent settings
         # file is nothing to clear, not a reason to stop.
-        local settings dir
+        local settings dir pkg
+        # THE GLOBAL PACKAGE, THIRD (epic-21 Fix step 3). Best-effort: npm
+        # missing or the uninstall failing is not a reason to abandon the two
+        # removals below it — a package that never installed cleanly is not
+        # made worse by a settings.json this still clears.
+        pkg="$(_dep_locator_target "$(dep_field "$name" source_url)")"
+        _dep_have npm && npm uninstall -g "$pkg" >/dev/null 2>&1
         settings="$(_dep_settings_file)"
         if [ -f "$settings" ]; then
           _dep_have jq || return 1
