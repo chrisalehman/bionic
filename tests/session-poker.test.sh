@@ -3647,7 +3647,7 @@ expect_absent "…never the approval-pending wording" "Step-3 approval pending" 
 
 # ---------- 22e/22f: the sub-step letter — the ONE grammar this repo already has ----------
 #
-# payload/scripts/lib/run.sh's run_state strips a trailing a/b sub-step letter before
+# payload/scripts/lib/run.sh's run_open strips a trailing a/b sub-step letter before
 # comparing the step number (`local step="${current%[ab]}"`) — `current: 3b` and `current:
 # 4b` are recognized, in-repo forms, not malformed values. Before this fix,
 # sched_plan_current rejected the letter outright (`*[!0-9]*` matched the trailing `b`),
@@ -3660,7 +3660,7 @@ s22_plan_at_current "$R22E" 3b >/dev/null
 poke_pressure "$R22E" 8192 1.0 tick
 expect_eq "current: 3b still ticks cleanly (exit 0)" "0" "$RC"
 expect_absent "current: 3b is current: 3 with a sub-step letter — no FILL" "poker: FILL" "$OUT"
-expect_contains "…and the pending line names the STEP, letter stripped, mirroring run_state" \
+expect_contains "…and the pending line names the STEP, letter stripped, mirroring run.sh's run_open" \
   "no FILL — plan at current: 3, Step-3 approval pending" "$OUT"
 
 R22F="$(make_repo s22-current-4b)"; new_roster "$R22F"
