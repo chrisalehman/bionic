@@ -1211,23 +1211,82 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 # suite. A `pgrep` per row would be truer to the word "running" and would put a process
 # spawn per row inside a Patrol tick.
 #
-# "OPEN" is the roster's own predicate — a `status=intended` row whose name carries no
-# `landing-swept/v1` marker — the same one lib/patrol.sh's `patrol_roster_state` uses.
+# "OPEN" IS THE ONE PREDICATE THE REST OF THE TICK USES (S19; Step-6 correctness review,
+# out-of-axis note). A `status=intended` row survives the roster pass if no `landing-swept/v1`
+# marker has CLOSED it, and it survives the live pass if `live_row_open` — the fleet's single
+# row-openness predicate, payload/scripts/lib/agents.sh — still calls its agent live on this
+# session's transcript. Before this fix the arm stopped at the roster pass, so the tick's
+# advisory `open=` asked the live set while the one NAME it prints for the operator to act on
+# did not: the kill floor could hand back a stop address for an agent the harness had already
+# let go.
+#
+# CLOSED MEANS `state=MET`, not "a marker exists". `hooks/session-start.sh`'s `open_rows` and
+# `adopt_fold` below both require it; this arm and lib/patrol.sh's `patrol_roster_state` did
+# not, and S17's `adopt_copy_marker` is a second writer that copies a predecessor's UNMET
+# verdict verbatim onto a successor's roster BY DESIGN. An UNMET contract is open work by
+# every other reader in the fleet.
+#
+# STALE AND NONE KEEP THE ROSTER SPELLING, the same fallback and the same reason as the
+# tick's `open=` below: the Patrol's prompt runs before any ListAgents, so an arm that went
+# silent on an unusable answer would go silent on the first tick of every session — and a
+# kill floor that says nothing while the machine dies is worse than one that names a writer
+# who has already finished. Freshness is a property of the TRANSCRIPT, so the first unusable
+# answer abandons the whole live pass rather than one row of it.
 #
 # YOUNGEST, because the rung is a kill floor and the youngest writer has the least work to
 # lose. `launched_at` is an ISO-8601 Z stamp, so a lexical max IS a chronological max.
 youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
-  local roster="$1" sid="$2" swept name
+  local roster="$1" sid="$2" swept cands live_cands live_ok tr lrc name tab RL RN CL
   [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
-  swept="$(grep '^landing-swept/v1|' "$roster" 2>/dev/null || true)"
-  name="$(grep '^roster-state/v1|status=intended|' "$roster" 2>/dev/null \
-    | while IFS= read -r RL; do
-        [ -n "$(line_field "$RL" claims)" ] || continue
-        RN="$(line_field "$RL" name)"
-        [ -n "$RN" ] || continue
-        case "$swept" in *"|name=${RN}|"*) continue ;; esac
-        printf '%s\t%s\n' "$(line_field "$RL" launched_at)" "$RN"
-      done | sort | tail -1 | cut -f2-)"
+  tab="$(printf '\t')"
+
+  # THE CLOSING MARKERS, BY FIELD EQUALITY rather than by substring: `state=` is last in the
+  # originator's printf today and a future field appended after it must not turn every marker
+  # into a non-closing one.
+  swept="$(grep '^landing-swept/v1|' "$roster" 2>/dev/null \
+    | awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i == "state=MET") { print; break } }' || true)"
+
+  # PASS ONE — THE ROSTER. Kept in the current shell rather than a pipeline subshell, because
+  # the live pass below carries a decision ACROSS rows (the first STALE abandons all of them)
+  # and a subshell would drop it on the floor.
+  cands=""
+  while IFS= read -r RL; do
+    [ -n "$RL" ] || continue
+    [ -n "$(line_field "$RL" claims)" ] || continue
+    RN="$(line_field "$RL" name)"
+    [ -n "$RN" ] || continue
+    case "$swept" in *"|name=${RN}|"*) continue ;; esac
+    cands="${cands}$(line_field "$RL" launched_at)${tab}${RN}
+"
+  done <<ROSTER_ROWS
+$(grep '^roster-state/v1|status=intended|' "$roster" 2>/dev/null || true)
+ROSTER_ROWS
+  [ -n "$cands" ] || return 0
+
+  # PASS TWO — THE LIVE SET. The reader's one stderr line is dropped here rather than
+  # reported: this function's stdout IS the stop address, and the tick already says out loud
+  # when its own live read fell back (`live set <state> — …`) above the report.
+  tr="$(session_transcript "$sid")" || tr=""
+  if [ -n "$tr" ]; then
+    live_cands=""; live_ok=yes
+    while IFS= read -r CL; do
+      [ -n "$CL" ] || continue
+      lrc=0
+      { live_row_open "$tr" "${CL##*"$tab"}"; } >/dev/null 2>&1 || lrc=$?
+      case "$lrc" in
+        0) live_cands="${live_cands}${CL}
+" ;;
+        1) : ;;
+        *) live_ok=no; break ;;
+      esac
+    done <<ROSTER_CANDS
+$cands
+ROSTER_CANDS
+    [ "$live_ok" = yes ] && cands="$live_cands"
+  fi
+  [ -n "$cands" ] || return 0
+
+  name="$(printf '%s' "$cands" | sort | tail -1 | cut -f2-)"
   [ -n "$name" ] || return 0
   printf '%s@session-%s' "$(clean "$name")" "$(printf '%s' "$sid" | cut -c1-8)"
 }

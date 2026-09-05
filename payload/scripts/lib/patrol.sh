@@ -327,7 +327,17 @@ patrol_stamp_state() {  # <repo-root> <sid> -> state=…|age=…|limit=…|inter
 # then `identified` — so the number of DISPATCHES the wall saw is the number of
 # `status=intended` rows, and counting rows outright would multiply every
 # dispatch by however far it got. A dispatch is CLOSED when hooks/landing-gate.sh
-# has journalled a `landing-swept/v1` marker for its name; anything else is open.
+# has journalled a `landing-swept/v1` marker for its name SAYING `state=MET`;
+# anything else — no marker, or a marker carrying any other verdict — is open.
+#
+# `state=` IS LOAD-BEARING, and this reader used to ignore it (Step-6 security
+# review, out-of-axis note 2). hooks/session-start.sh's `open_rows` and the
+# poker's `adopt_fold` have always required MET; this function and the poker's
+# `youngest_suite_writer` took ANY marker, so four readers of one schema held
+# two rules. S17's `adopt_copy_marker` then became a second WRITER that copies a
+# predecessor's verdict — UNMET included — verbatim onto a successor's roster,
+# which is how a non-MET marker reaches a roster this function reads. Reporting
+# an UNMET contract as closed is reporting a wave as finished.
 patrol_roster_state() {  # <repo-root> <sid> -> rows=…|open=…|closed=…|names=…|path=…
   local repo="${1:-}" sid="${2:-}" f rows names closed open swept nm
   f="${repo}/.bionic/tmp/roster-${sid}.state"
@@ -343,7 +353,12 @@ patrol_roster_state() {  # <repo-root> <sid> -> rows=…|open=…|closed=…|nam
   # `-q` consumer closes the pipe on its first hit and the producer dies of
   # SIGPIPE with status 141, which a caller reads as a failed search rather than
   # a successful one.
-  swept="$(grep '^landing-swept/v1|' "$f" 2>/dev/null || true)"
+  # MATCHED BY FIELD EQUALITY, never by substring: `state=` is last in the
+  # originator's printf today, and a field appended after it must not silently
+  # turn every marker in the fleet into a non-closing one.
+  swept="$(grep '^landing-swept/v1|' "$f" 2>/dev/null \
+           | awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i == "state=MET") { print; break } }' \
+           || true)"
   closed=0; open=0
   while IFS= read -r nm; do
     [ -n "$nm" ] || continue

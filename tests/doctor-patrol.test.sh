@@ -135,7 +135,14 @@ make_repo_with_roster() {  # <sid> <open-names...> -- <closed-names...> -> repo 
   for nm in "$@"; do
     if [ "$nm" = "--" ]; then mode=closed; continue; fi
     printf 'roster-state/v1|status=intended|name=%s|ts=2026-08-27T00:00:00Z\n' "$nm" >> "$f"
-    [ "$mode" = "closed" ] && printf 'landing-swept/v1|name=%s|ts=2026-08-27T00:00:01Z\n' "$nm" >> "$f"
+    # THE MARKER IN THE SHAPE ITS ONE ORIGINATOR WRITES IT, `state=` and all
+    # (hooks/landing-gate.sh's `SWEPT_SCHEMA` printf). A closing marker says
+    # `state=MET`; a marker that says anything else is a contract the sweep
+    # judged UNMET, and since S17 those travel — `adopt_copy_marker` copies a
+    # predecessor's verdict verbatim onto a successor's roster. A fixture that
+    # wrote no `state=` at all could not tell the two apart, which is precisely
+    # the distinction `patrol_roster_state` now makes.
+    [ "$mode" = "closed" ] && printf 'landing-swept/v1|at=2026-08-27T00:00:01Z|session=%s|name=%s|agent_id=a000|state=MET\n' "$sid" "$nm" >> "$f"
   done
   printf '%s' "$dir"
 }
@@ -776,6 +783,51 @@ else
   no "53: every engaged/not-engaged row fits the ${BIONIC_LINE_WIDTH}-column budget" \
     "line is $(bionic_cols "$WIDE_ENG") columns: $WIDE_ENG"
 fi
+
+echo ""
+echo "=== Section 15: only a MET marker closes a row (Step-6 security review, out-of-axis 2) ==="
+
+# FOUR READERS OF ONE SCHEMA DISAGREED ABOUT WHETHER `state=` MATTERS.
+# hooks/session-start.sh's `open_rows` and the poker's `adopt_fold` require
+# `state=MET` before a `landing-swept/v1` line closes a row; `patrol_roster_state`
+# here and `youngest_suite_writer` in the poker took ANY marker at all. S17's
+# `adopt_copy_marker` is a second writer that copies a predecessor's verdict —
+# UNMET included — verbatim onto a successor's roster, so the two state-blind
+# readers are exactly the two that now meet those markers. A row whose contract
+# the sweep judged UNMET is open work by every other reader in the fleet, and
+# doctor reporting it as closed is doctor reporting a wave as finished.
+
+SID17="ffffffff-7777-2222-3333-444455556666"
+SHORT17="${SID17%%-*}"
+spawn_live_pid; PID17="$LIVE_PID"
+REPO17="$(make_repo_with_roster "$SID17" -- closed-met)"
+# The UNMET row, appended in the originator's exact shape beside the MET one.
+ROSTER17="$REPO17/.bionic/tmp/roster-${SID17}.state"
+printf 'roster-state/v1|status=intended|name=unmet-row|ts=2026-08-27T00:00:00Z\n' >> "$ROSTER17"
+printf 'landing-swept/v1|at=2026-08-27T00:00:01Z|session=%s|name=unmet-row|agent_id=a000|state=UNMET\n' \
+  "$SID17" >> "$ROSTER17"
+HOME17="$(make_claude_home "$SID17" "$PID17" "$REPO17")"
+TR17="$(transcript_of "$HOME17" "$SID17")"
+plant_patrol_job "$TR17" "toolu_1" "abc17777"
+plant_patrol_stamp "$REPO17" "$SID17"
+
+OUT17="$(run_doctor "$HOME17" "$REPO17")"
+PB17="$(patrol_block "$OUT17")"
+
+expect_match "54: an UNMET marker leaves its row OPEN — one open dispatch, not zero" \
+  "*✓ session ${SHORT17} · 1 open dispatch*" "$PB17"
+expect_no_match "55: …and the MET row beside it is still closed (the count is 1, never 2)" \
+  "*2 open dispatches*" "$PB17"
+
+# THE PAIRED POSITIVE, on the same two-row roster: flip the UNMET marker to MET
+# and the count falls to zero. Without it, "1 open" above is consistent with a
+# reader that had simply stopped closing rows at all.
+sed 's/|name=unmet-row|agent_id=a000|state=UNMET$/|name=unmet-row|agent_id=a000|state=MET/' \
+  "$ROSTER17" > "$ROSTER17.met" && mv "$ROSTER17.met" "$ROSTER17"
+OUT17B="$(run_doctor "$HOME17" "$REPO17")"
+PB17B="$(patrol_block "$OUT17B")"
+expect_match "56: …and flipping that same marker to MET closes it (54 discriminates)" \
+  "*✓ session ${SHORT17} · 0 open dispatches*" "$PB17B"
 
 echo ""
 echo "========================================"
