@@ -6415,8 +6415,17 @@ cp "$BIONIC_HOOKS_DIR"/*.sh "$RG_NOSAMP/hooks/" 2>/dev/null
 # the runner with its `pressure_sample` line removed, and nothing else changed
 grep -v '^pressure_sample >/dev/null 2>&1 || :$' "$REPO_ROOT/tests/run.sh" \
   > "$RG_NOSAMP/tests/run.sh"
-# the tick with ITS `pressure_sample` line removed, and nothing else changed
-grep -v '^    pressure_sample "\$SCHED_CORES" >/dev/null 2>&1 || :$' "$SPO" \
+# the tick with ITS `pressure_sample` line removed, and nothing else changed.
+#
+# ANCHORED ON THE CALL'S STABLE TOKENS, NOT ON ITS INDENTATION OR ITS VARIABLE NAME (critic
+# K-1). The prior anchor pinned both — four leading spaces and the literal `$SCHED_CORES` —
+# and S21 (`61b8ca8`) moved the call into `sched_budget_read`, re-indenting it to two spaces
+# and renaming the local to `$cores`; the anchor then matched nothing, the "doctored" copy
+# was byte-identical to the shipped one, and this section's own meta-check row (below) is what
+# caught it. `pressure_sample`, the `>/dev/null 2>&1 || :` suffix and the one-line shape are the
+# part of this call that is actually load-bearing; a future reindent or a rename of the local
+# holding the core count should not be able to silently disarm this probe again.
+grep -vE '^[[:space:]]*pressure_sample "\$[A-Za-z_][A-Za-z0-9_]*" >/dev/null 2>&1 \|\| :$' "$SPO" \
   > "$RG_NOSAMP/hooks/session-poker.sh"
 expect_eq "the runner's sample line was really removed (the anchor has not moved)" "1" \
   "$(( $(grep -c 'pressure_sample' "$REPO_ROOT/tests/run.sh") \
