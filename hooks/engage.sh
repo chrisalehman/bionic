@@ -78,7 +78,7 @@ fi
 # invocation it exists to record would be worse than one that misses it. A missed
 # engagement leaves the session unwalled, which is exactly the state it was in a moment
 # ago; a refused `/canonical-sdlc` is a broken front door.
-BIONIC_LIB_WANT="root.sh run.sh session.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh binding.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -213,6 +213,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "engage"; fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/binding.sh"
 
 # ---------- ROOT, SESSION ID, MARKER PATH — the three facts, each from its one owner ----
 #
@@ -274,19 +276,77 @@ fi
 # performs at the invocation the user just typed.
 [ -L "$MARKER" ] && exit 0
 
-# The plan is a FIELD, not a precondition. Step 0 of a new run precedes its plan file, and
-# engagement is what decides WHETHER a hook acts while the plan decides WHAT — so a marker
-# written before any plan exists is the normal opening state, not a degraded one.
-PLAN=$(active_run "$REPO" 2>/dev/null) || PLAN=""
-[ -n "$PLAN" ] || PLAN="none"
+# THE PLAN IS A FIELD, NOT A PRECONDITION. Step 0 of a new run precedes its plan file, and
+# engagement is what decides WHETHER a hook acts while the binding decides WHAT — so a
+# marker written before any plan exists is the normal opening state, not a degraded one.
+#
+# WHICH plan the field names changed in wave-session-bound-run (2026-09-04, spec §Design
+# "Session binding"; AC-7). This used to be `active_run` — the NEWEST open plan in the root
+# — written unconditionally on every invocation, and that was the bug: two sessions in one
+# repository got one run identity, and a plan landing mid-session silently moved a live
+# session onto it. The rule now, in two lines:
+#
+#   the marker already names a plan  -> LEAVE IT. Re-engagement decides nothing.
+#   otherwise, EXACTLY ONE open run  -> bind to it; anything else -> bind to `none`
+#
+# A BINDING SURVIVES RE-ENGAGEMENT WHETHER OR NOT ITS PLAN IS STILL OPEN (S10a, review C-1).
+# It used to survive only while `session_run` said `bound-open`; a `bound-closed` binding
+# fell to the count rule, and when the root held exactly one open run that run belonged to
+# ANOTHER SESSION. A session whose own wave had just closed re-invoked the skill and was
+# silently moved onto the neighbour's plan, after which its evidence gate gated on that
+# plan — symptom 1 of the bug this wave was opened on, reached through the engagement door
+# instead of the scan. A binding is a commitment (AC-6) and a dead commitment is still not
+# somebody else's: the operator ends it with `session-poker.sh bind <plan>`, not the hook.
+#
+# SO THE VERDICT IS NOT ASKED FOR HERE, ONLY THE FIELD. `session_plan` reads two lines off
+# disk and answers "is this session bound"; `session_run` would additionally rule on whether
+# the plan is open, and on an UNBOUND session it walks the whole tree through `active_run` to
+# produce a `fallback` this hook then discards. That walk was one of three (review P1): a
+# bound session now does NONE, and an unbound one does the two `open_runs` walks the count
+# rule and the writer's own membership check each need.
+#
+# SEVERAL OPEN RUNS BINDS NOTHING, deliberately. Picking the newest would be the old bug
+# with extra steps; the session is left unbound, session-start lists every candidate, and
+# the operator chooses with `session-poker.sh bind <plan>`. An unbound session still
+# resolves by `active_run`, out loud, as `fallback`.
+#
+# THE WRITE ITSELF IS NOT HERE. `payload/scripts/lib/binding.sh` is the single writer —
+# shape, mode 600, the symlink refusal and open-run membership are its invariants, shared
+# with poker's `bind` verb and the governing skill's bind-on-first-write. This hook only
+# decides WHICH plan, and never blocks on the answer: every path below exits 0.
+BOUND=0
+if PLAN=$(session_plan "$REPO" "$SID" 2>/dev/null); then
+  BOUND=1
+else
+  PLAN="none"
+  # wave-roster-lifecycle S2 (spec AC-2; design §2 "engage.sh"): the count rule counts
+  # LIVE runs, not merely open ones — an open-but-quiet run is not "being worked", and
+  # binding to it reproduces this hook's own bug one layer down. `live_runs ⊆ open_runs`
+  # always (run.sh), so this is strictly narrower than the old open-run set; the `= "1"`
+  # rule and the single `bind_plan` call site below are unchanged.
+  RUNS=$(live_runs "$REPO" 2>/dev/null) || RUNS=""
+  if [ -n "$RUNS" ] && [ "$(printf '%s\n' "$RUNS" | wc -l | tr -d ' ')" = "1" ]; then
+    PLAN="$RUNS"
+  fi
+fi
 
-NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || NOW=""
-[ -n "$NOW" ] || exit 0
-
-umask 077
-printf 'plan=%s\nengaged_at=%s\n' "$PLAN" "$NOW" > "$MARKER" 2>/dev/null || exit 0
-# Overwrite keeps the existing mode, so the umask above is not enough on its own: a marker
-# first written under a looser umask stays loose forever without this.
-chmod 600 "$MARKER" 2>/dev/null || :
+# ONE WRITE STATEMENT, AND THE RETRY RIDES IT. Read left to right: write the binding; if the
+# writer refuses and this session was ALREADY BOUND, that refusal is the right answer and the
+# marker stands (the bound plan has closed — a commitment is not somebody else's to reassign,
+# AC-6); if it refuses and the session was UNBOUND, fall to `none`.
+#
+# THE UNBOUND RETRY IS NOT DEFENSIVE PADDING (S10a, review C-4). `PLAN` comes off a walk that
+# has already finished and `bind_plan` walks AGAIN for its own membership check, so a run
+# closing inside that window made the single write refuse and left the session with NO MARKER
+# AT ALL — unengaged, and therefore unwalled, which is the one direction this hook's own
+# fail-direction argument forbids. `none` is what the count rule would have said had the walk
+# seen the close.
+#
+# ONE LINE, DELIBERATELY. tests/cross-gate-agreement.test.sh §B2 proves this hook writes
+# through the single writer by replacing this call site with an inline redirect and requiring
+# the marker's SHAPE to change; a second `bind_plan` statement on another line would leave
+# that mutation replacing a call the fixture never reaches, and the proof would pass on the
+# unmutated path. The shape of the code is holding the shape of the proof.
+bind_plan "$REPO" "$SID" "$PLAN" || [ "$BOUND" = 1 ] || bind_plan "$REPO" "$SID" none || :
 
 exit 0

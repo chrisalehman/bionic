@@ -197,21 +197,17 @@ PROJECTS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 TARGET_BASE="${TARGET%@*}"
 [ -n "$TARGET_BASE" ] || TARGET_BASE="$TARGET"
 
-scan_subagent_dirs() {  # <typed> <dir>...  -> "<agent-id>|<meta>|<subagents-dir>" per match
-  local typed="$1"; shift
-  local sub meta base id name
-  for sub in "$@"; do
-    [ -d "$sub" ] || continue
-    for meta in "$sub"/agent-*.meta.json; do
-      [ -f "$meta" ] || continue
-      base="${meta##*/}"; base="${base%.meta.json}"; id="${base#agent-}"
-      name=$(jq -r '.name // empty' "$meta" 2>/dev/null)
-      if [ "$id" = "$typed" ] || { [ -n "$name" ] && [ "$name" = "$typed" ]; }; then
-        printf '%s|%s|%s\n' "$id" "$meta" "$sub"
-      fi
-    done
-  done
-}
+# RESOLUTION IS NO LONGER A DIRECTORY SCAN (wave-roster-lifecycle S6, D2/D2′). This script
+# used to carry `scan_subagent_dirs` — a walk of every `agent-*.meta.json` in the project,
+# matching a typed reference against the filename's id or the file's `.name` — byte-identical
+# to a copy in hooks/stop-guard.sh, the two held together by an agreement suite. It answered
+# "which agent is this" from RECORDS, and records outlive agents: after a `/clear` the same
+# agent's metadata is filed under two session directories at once (proven on this machine,
+# research-code-map §4.4), which the walk reported as two agents.
+#
+# What decides now is `live_agents_has` on the session's own transcript — the newest recorded
+# ListAgents answer, the harness's own statement about which teammates exist this turn. One
+# function, called by this script and by the gate, so a change to the reader moves both.
 
 # Candidate project slugs, in order: the cwd, then the enclosing repo root.
 # Claude Code names a project directory by slugifying its path — every
@@ -222,7 +218,7 @@ scan_subagent_dirs() {  # <typed> <dir>...  -> "<agent-id>|<meta>|<subagents-dir
 # One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: this script
 # reports, it does not refuse, and a diagnosis that died with the thing being diagnosed
 # would be worth nothing.
-BIONIC_LIB_WANT="root.sh session.sh"
+BIONIC_LIB_WANT="root.sh session.sh agents.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -355,6 +351,11 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-check"; fi
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# THE ONE READER OF THE LIVE SET (wave-roster-lifecycle S4/S6, D1′). hooks/stop-guard.sh
+# calls the SAME function on the SAME transcript, which is what makes the observation and the
+# gate resolve one candidate set (AC-10) — where before they carried one loop in two copies.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/agents.sh"
 
 CWD="$(pwd)"
 # THE ROOT (spec AC-10, lib/root.sh). `rev-parse --show-toplevel` answers with whatever
@@ -423,230 +424,221 @@ abs_path() {  # <path, as the roster spells it> -> absolute
   esac
 }
 
-IN_PROJECT_DIRS=""
-while IFS= read -r slug; do
-  [ -n "$slug" ] || continue
-  for d in "$PROJECTS/$slug"/*/subagents; do
-    [ -d "$d" ] && IN_PROJECT_DIRS="${IN_PROJECT_DIRS}${d}
-"
-  done
-done <<< "$SLUGS"
-
-OUT_OF_PROJECT=0
-MATCHES=""
-if [ -n "$IN_PROJECT_DIRS" ]; then
-  # shellcheck disable=SC2086
-  MATCHES=$(scan_subagent_dirs "$TARGET_BASE" $IN_PROJECT_DIRS)
-fi
-
-# Fallback: the fix command must work from ANY cwd (checklist A1), including
-# one outside the project whose agents are being observed. A match found this
-# way is reported with an explicit out-of-project note — never silently.
-if [ -z "$MATCHES" ]; then
-  ALL_DIRS=""
-  for d in "$PROJECTS"/*/*/subagents; do
-    [ -d "$d" ] && ALL_DIRS="${ALL_DIRS}${d}
-"
-  done
-  if [ -n "$ALL_DIRS" ]; then
-    # shellcheck disable=SC2086
-    MATCHES=$(scan_subagent_dirs "$TARGET_BASE" $ALL_DIRS)
-    [ -n "$MATCHES" ] && OUT_OF_PROJECT=1
-  fi
-fi
-
-# ONE LOGICAL AGENT IS NOT AN AMBIGUITY (epic-16 wave-02 slice S3, field data 2026-08-11).
-# The scan above walks EVERY session directory of the project, and one agent's metadata can
-# be filed under more than one of them — the launching session's record and the agent's own
-# runtime session are two rows about the same agent. Refusing that as "two agents answer to
-# this name" sent the operator round an ambiguity loop over a target that was never
-# ambiguous: an AGENT ID identifies an agent, so two matches carrying one id are one match.
-# Only distinct ids are candidates.
+# ---------- THIS SESSION'S OWN id, and the transcript the live set is read from ----------
 #
-# WHICH COPY SURVIVES: the one whose working log was written most recently. The log is the
-# evidence this whole command exists to print, and the freshest copy is the live one — the
-# stale copy is a record of the same agent, not a different one, so choosing between them
-# by anything else would print older evidence about the very same target.
-if [ -n "$MATCHES" ]; then
-  MATCHES=$(
-    printf '%s\n' "$MATCHES" | while IFS='|' read -r m_id m_meta m_sub; do
-      [ -n "$m_id" ] || continue
-      printf '%s|%s|%s|%s\n' "$(file_mtime "$m_sub/agent-${m_id}.jsonl")" "$m_id" "$m_meta" "$m_sub"
-    done | sort -t'|' -k1,1nr | awk -F'|' '!seen[$2]++ { print $2 "|" $3 "|" $4 }'
-  )
-fi
-
-MATCH_COUNT=0
-[ -n "$MATCHES" ] && MATCH_COUNT=$(printf '%s\n' "$MATCHES" | grep -c .)
-
-echo "OBSERVATION — target as typed: ${TARGET}"
-
-if [ "$MATCH_COUNT" -eq 0 ]; then
-  echo "Resolved:      unresolved — no agent metadata under ${PROJECTS} answers to '${TARGET_BASE}'."
-  echo ""
-  echo "An unresolved target is not evidence of anything: the agent may never have"
-  echo "existed, or the name may be misspelled. Check the name you launched it under."
-  echo "This command decides nothing."
-  exit 1
-fi
-
-if [ "$MATCH_COUNT" -gt 1 ]; then
-  echo "Resolved:      ambiguous — ${MATCH_COUNT} agents answer to '${TARGET_BASE}':"
-  while IFS='|' read -r id meta sub; do
-    [ -n "$id" ] || continue
-    sid="${sub%/subagents}"; sid="${sid##*/}"
-    # BOTH FORMS, because the two readers of this list need different ones. The
-    # transcript-form id is what this command and hooks/stop-guard.sh resolve against; the
-    # `name@session-xxxxxxxx` form is what the platform's stop primitive takes for a
-    # teammate, and it is the only one an operator who is about to stop this agent can
-    # actually type (capture probe §3-D/§5). Printing only the id is what turned one stop
-    # into four calls and an ambiguity round on 2026-08-11.
-    cand_name=$(jq -r '.name // empty' "$meta" 2>/dev/null)
-    echo "  ${id}   (session ${sid})"
-    [ -n "$cand_name" ] \
-      && echo "      stop it as: ${cand_name}@session-$(printf '%s' "$sid" | cut -c1-8)"
-  done <<< "$MATCHES"
-  echo ""
-  echo "Name the agent by an id above — observe it by the long id, stop it by the"
-  echo "name@session form. This command decides nothing."
-  exit 1
-fi
-
-IFS='|' read -r AGENT_ID META SUBDIR <<< "$MATCHES"
-SESSION_DIR="${SUBDIR%/subagents}"
-SESSION_ID="${SESSION_DIR##*/}"
-LOG="$SUBDIR/agent-${AGENT_ID}.jsonl"
-
-AGENT_NAME=$(jq -r '.name // "—"' "$META" 2>/dev/null)
-AGENT_TYPE=$(jq -r '.customAgentType // .agentType // "—"' "$META" 2>/dev/null)
-AGENT_MODEL=$(jq -r '.model // "—"' "$META" 2>/dev/null)
-AGENT_DESC=$(jq -r '.description // "—"' "$META" 2>/dev/null)
-
-# ---------- classification against the session roster (slice 4/5, AC-6) ----------
-#
-# THIS SESSION'S OWN id, for a script with no payload to carry one — the same
-# resolution hooks/preflight-probe.sh already makes (CLAUDE_CODE_SESSION_ID,
-# exported into every Bash subprocess Claude Code runs). Empty when this command
-# runs outside a Claude Code session, or the variable is otherwise unset;
-# classification then reports UNKNOWN rather than guessing.
+# THE KEY. This script has no hook payload to carry a session key, so it reads the one the
+# harness exports into every Bash subprocess — the same resolution hooks/preflight-probe.sh
+# makes. Empty when the command runs outside a Claude Code session; the live set is then
+# unreadable and this command says so rather than guessing.
 ROSTER_VERSION="v1"
-# From the library (design §1): env primary, and there is no payload here to witness it.
-# Asking the one reader is what keeps this script's roster path and the walls' identical.
 OWN_SESSION_ID=$(session_id "" 2>/dev/null) || OWN_SESSION_ID=""
+
+# THE TRANSCRIPT. hooks/stop-guard.sh is handed one in its payload; this script has to find
+# the same file. The harness names it `<projects>/<slug>/<session-id>.jsonl`, so the slugs
+# above are tried first and a keyed walk of the project directories covers the one case that
+# breaks them: a worktree cwd files its session under a different slug from the repo it is
+# reading. Exactly the same two-step `adopted_subagent_dirs` used before this slice deleted it.
+own_transcript() {  # -> the transcript file of THIS session, or nothing
+  local slug d
+  [ -n "$OWN_SESSION_ID" ] || return 1
+  while IFS= read -r slug; do
+    [ -n "$slug" ] || continue
+    if [ -f "$PROJECTS/$slug/$OWN_SESSION_ID.jsonl" ]; then
+      printf '%s\n' "$PROJECTS/$slug/$OWN_SESSION_ID.jsonl"; return 0
+    fi
+  done <<< "$SLUGS"
+  for d in "$PROJECTS"/*/"$OWN_SESSION_ID.jsonl"; do
+    [ -f "$d" ] && { printf '%s\n' "$d"; return 0; }
+  done
+  return 1
+}
+OWN_TRANSCRIPT=$(own_transcript) || OWN_TRANSCRIPT=""
+
+# ---------- the session roster, read BY BOTH KEYS before resolution ----------
+#
+# The roster is read first because the transcript-form agent id is a spelling only it can
+# translate: the harness's answer lists teammates by NAME, so an id has to become a name
+# before the live set can be asked about it. And because the id is what the WORKING LOG is
+# filed under — `<session>/subagents/agent-<id>.jsonl` — which the deleted scan used to
+# supply and nothing else knows.
+#
+# `confirmed` or `identified`, never `intended`: the id on an unconfirmed row is a claim
+# about a launch that has not been observed to happen (Step-6 review C-2). `identified` is
+# the state that makes the clause reachable for a teammate at all — a confirmed teammate
+# row's `agent_id=` is EMPTY by design, because the launch response knows only the addressing
+# form `name@session-xxxx`, and the transcript-form id first appears on SubagentStart.
 ROSTER_PATH=""
 if [ -n "$REPO_ROOT" ] && [ -n "$OWN_SESSION_ID" ]; then
   ROSTER_PATH="$REPO_ROOT/.bionic/tmp/roster-${OWN_SESSION_ID}.state"
 fi
-
-# OWNERSHIP IS THE METADATA'S OWN FILING (slice 4/9). An agent whose metadata
-# sits under <session>/subagents/ was launched by <session> — the platform files
-# it there and nothing else writes that directory. Slice 4/5 keyed this on ROSTER
-# MEMBERSHIP instead, and live operation broke both arms of that key:
-#
-#   * The NAME arm handed ownership away. Every row in a session that has not
-#     restarted since the recorder shipped is `status=intended` with an EMPTY
-#     `agent_id=`, so the name arm was the only one live — and a name is not an
-#     identity. A three-day-dead agent of another session, answering to a name
-#     this session's roster happened to carry, classified OURS and was then shown
-#     with THIS session's contracted progress path.
-#   * The absence of a row refused our own agents. Anything dispatched before the
-#     roster hook shipped has no row at all and classified foreign, of an agent
-#     sitting in this session's own subagents directory.
-#
-# So the directory decides, and the roster keeps the job it can actually do: it
-# is the CONTRACT source for a target already established as ours, and ownership
-# by id is established by a `confirmed` OR `identified` row carrying a NON-EMPTY
-# `agent_id` — an id is unambiguous by construction. In teammate mode the
-# transcript-form id arrives on the `identified` row while the `confirmed` row's
-# `agent_id=` is EMPTY by design (the detail below and execution-recorder.sh's
-# ARM 2 say why), so `identified` is what makes the by-id clause reachable for an
-# interactive dispatch at all. It is never consulted as a name-oracle again.
 ROSTER_ROW=""
-ROSTER_ID_MATCH=""
-if [ -n "$ROSTER_PATH" ] && [ -f "$ROSTER_PATH" ] && [ ! -L "$ROSTER_PATH" ]; then
-  ROW_BY_ID=""; ROW_BY_NAME=""
+ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
+# TWO ROWS CAN CARRY ONE AGENT — the dispatch writes the CONTRACT, the recorder writes the id
+# one state later — so the id and the contract are collected separately rather than read off
+# one chosen row. Same walk as hooks/stop-guard.sh's, deliberately duplicated per TDD §9.
+roster_walk() {  # <key>
+  local key="$1" rline rid rname
+  ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
+  [ -n "$ROSTER_PATH" ] || return 0
+  [ -f "$ROSTER_PATH" ] || return 0
+  [ -L "$ROSTER_PATH" ] && return 0
   while IFS= read -r rline; do
     case "$rline" in '#'*|'') continue ;; esac
     case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
     rid=$(line_field "$rline" agent_id)
     rname=$(line_field "$rline" name)
-    # `confirmed` or `identified`, never merely non-empty: the id on an
-    # UNCONFIRMED row is a claim about a launch that has not been observed to
-    # happen. What kept the weaker test safe was a property of a different file —
-    # hooks/dispatch-preflight.sh emits `agent_id=` empty on every `intended` row
-    # — and an invariant enforced elsewhere is exactly what slice 4/9 was
-    # remediating (Step-6 review C-2). Costs the pre-restart world nothing: its
-    # rows carry no id at all, so this clause never fired for them, and their
-    # CONTRACT still comes from the row by name below.
-    #
-    # `identified` joins the set in epic-16 wave-01 slice 1, and is the state
-    # that makes the clause reachable at all for a teammate. A confirmed teammate
-    # row's `agent_id=` is EMPTY by design — the launch response knows only the
-    # addressing form `name@session-xxxx`, and writing that into the id field
-    # would make every by-id reader's input wrong rather than unknown. The
-    # transcript-form id, which is what this script resolves a target to, first
-    # appears on SubagentStart and lands on the `identified` row.
-    if [ -n "$rid" ] && [ "$rid" = "$AGENT_ID" ]; then
-      case "$(line_field "$rline" status)" in
-        confirmed|identified) ROW_BY_ID="$rline" ;;
-      esac
-    fi
-    [ -n "$rname" ] && [ "$rname" = "$AGENT_NAME" ] && ROW_BY_NAME="$rline"
+    case "$(line_field "$rline" status)" in
+      confirmed|identified)
+        [ -n "$rid" ] && [ "$rid" = "$key" ] && ROW_BY_ID="$rline"
+        [ -n "$rid" ] && [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_WITH_ID="$rline"
+        ;;
+    esac
+    [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_BY_NAME="$rline"
   done < "$ROSTER_PATH"
-  ROSTER_ID_MATCH="$ROW_BY_ID"
-  ROSTER_ROW="${ROW_BY_ID:-$ROW_BY_NAME}"
+  return 0
+}
+roster_walk "$TARGET_BASE"
+if [ -n "$ROW_BY_ID" ]; then
+  TARGET_BASE=$(line_field "$ROW_BY_ID" name)
+  roster_walk "$TARGET_BASE"
 fi
+ROSTER_ROW="$ROW_BY_NAME"
 
-# Not OURS: FOREIGN or DEAD HISTORY, by the owning session's transcript — the
-# same existence check hooks/preflight-probe.sh and hooks/dispatch-preflight.sh
-# already make (session_transcript_exists / roster_session_live), duplicated here
-# for the same TDD §9 reason as the file-facts functions above.
+# ---------- resolution against the live set ----------
 #
-# WHAT THIS ANSWERS, stated exactly because the old name overstated it: whether
-# the owning session's transcript FILE EXISTS. Transcripts are not deleted when a
-# session ends — measured on this machine, all 57 sessions with subagent metadata
-# under this project satisfy it, including sessions that finished days ago. So it
-# separates "there is still a session on disk accounting for this agent" from the
-# bb20f616 shape, "metadata answering to a live-looking name, from a session whose
-# own transcript is gone". It says nothing whatever about whether the AGENT is
-# running, which is why the label no longer says `live`; the working log's age,
-# printed below, is the only evidence of that this command has.
-owning_session_on_disk() {  # <session id>
-  local sid="$1" d
-  [ -n "$sid" ] || return 1
-  [ -d "$PROJECTS" ] || return 1
-  for d in "$PROJECTS"/*/; do
-    [ -f "${d}${sid}.jsonl" ] && return 0
+# Same function, same exit codes, same transcript the gate reads (AC-10). This command
+# DECIDES NOTHING, so every unresolved shape below prints what it saw, exits 1, and — the
+# half the whole C6 closure rests on — prints no machine line, because an operator who was
+# shown no evidence tier must leave the recorder nothing to copy.
+echo "OBSERVATION — target as typed: ${TARGET}"
+
+LIVE_LINE=""; LIVE_RC=0
+if [ -n "$OWN_TRANSCRIPT" ]; then
+  LIVE_LINE=$(live_agents_has "$OWN_TRANSCRIPT" "$TARGET_BASE" 2>&1 >/dev/null) || LIVE_RC=$?
+else
+  LIVE_RC=4
+  LIVE_LINE="live-agents: none age=none"
+fi
+LIVE_STATE="${LIVE_LINE#live-agents: }"; LIVE_STATE="${LIVE_STATE%% *}"
+LIVE_AGE="${LIVE_LINE##*age=}"
+case "$LIVE_STATE" in fresh|stale|none) : ;; *) LIVE_STATE="none" ;; esac
+case "$LIVE_AGE" in ''|*[!0-9]*) LIVE_AGE="none" ;; esac
+
+# EVERY ROSTER IN THIS REPO THAT CARRIES THIS NAME, as the addresses the platform's stop
+# primitive takes. This is the one spelling hooks/stop-guard.sh accepts as an alias and
+# `session-poker.sh adopt` prints for an adopted row (cross-gate Section R).
+accepted_addresses() {  # -> one "    <name>@session-xxxxxxxx" line per launcher roster
+  local f b out="" dir
+  dir="${ROSTER_PATH%/*}"
+  [ -n "$ROSTER_PATH" ] || return 0
+  for f in "$dir"/roster-*.state; do
+    [ -f "$f" ] || continue
+    [ -L "$f" ] && continue
+    grep -qF "|name=${TARGET_BASE}|" "$f" || continue
+    b="${f##*/roster-}"; b="${b%.state}"
+    out="${out}    stop it as: ${TARGET_BASE}@session-$(printf '%s' "$b" | cut -c1-8)
+"
   done
-  return 1
+  printf '%s' "$out"
 }
 
-CLASSIFICATION="unknown"
-OURS_BECAUSE=""
-if [ -z "$OWN_SESSION_ID" ]; then
-  CLASSIFICATION="unknown"
-elif [ "$SESSION_ID" = "$OWN_SESSION_ID" ]; then
-  CLASSIFICATION="ours"
-  OURS_BECAUSE="its metadata is filed under this session's own subagents directory"
-elif [ -n "$ROSTER_ID_MATCH" ]; then
-  CLASSIFICATION="ours"
-  OURS_BECAUSE="this session's roster confirms it by agent id (roster-${OWN_SESSION_ID}.state)"
+case "$LIVE_RC" in
+  3|4)
+    echo "Resolved:      unresolved — no fresh ListAgents answer for this session."
+    echo "               newest answer: ${LIVE_STATE}   ·   age: ${LIVE_AGE}"
+    echo ""
+    echo "The live set belongs to the harness and only the model can ask for it (D1′), so"
+    echo "this command reads the recorded answer rather than walking metadata on disk —"
+    echo "which outlives the agents that wrote it. call ListAgents, then observe again."
+    echo "This command decides nothing."
+    exit 1
+    ;;
+  2)
+    # MATCHED BY FIELD EQUALITY, never as a regular expression (Step-6 security review S-5).
+    # `TARGET_BASE` is the operator's typed target; a `.`, `*` or `[` in it would over-match
+    # and this refusal would report a count that is not the ambiguity it actually found.
+    LIVE_DUPES=$(live_agents "$OWN_TRANSCRIPT" 2>/dev/null \
+                 | awk -F'|' -v want="$TARGET_BASE" '$1 == want') || LIVE_DUPES=""
+    LIVE_N=0
+    [ -n "$LIVE_DUPES" ] && LIVE_N=$(printf '%s\n' "$LIVE_DUPES" | grep -c .)
+    echo "Resolved:      ambiguous — ${LIVE_N} live agents answer to '${TARGET_BASE}':"
+    printf '%s\n' "$LIVE_DUPES" | sed 's/^/  /'
+    accepted_addresses | sed 's/^ *//;s/^/  /'
+    echo ""
+    echo "A name is not an identity, and the @session- alias cannot separate these either —"
+    echo "hooks/stop-guard.sh accepts it only when the bare name resolves to exactly ONE live"
+    echo "entry. This command decides nothing."
+    exit 1
+    ;;
+  1)
+    echo "Resolved:      not live — the fresh ListAgents answer names no teammate '${TARGET_BASE}'."
+    echo ""
+    echo "An agent that is not in the answer is not evidence of anything: it may have finished,"
+    echo "or the name may be misspelled. Metadata on disk is not consulted — it outlives the"
+    echo "agents that wrote it, which is the defect this replaced. This command decides nothing."
+    exit 1
+    ;;
+esac
+
+# ---------- resolved: the id, the session it is filed under, and its files ----------
+#
+# The id and the owning session both come from the ROSTER ROW, the only record that ever knew
+# them. `adopted_from` names the session that LAUNCHED an agent this one took over after a
+# `/clear`: the working log stays filed there, and the row is where `adopt` wrote that down.
+AGENT_NAME="$TARGET_BASE"
+AGENT_ID=$(line_field "$ROW_WITH_ID" agent_id)
+ADOPTED_FROM=$(line_field "$ROSTER_ROW" adopted_from)
+case "$ADOPTED_FROM" in *[!A-Za-z0-9-]*) ADOPTED_FROM="" ;; esac
+
+if [ -z "$AGENT_ID" ]; then
+  echo "Resolved:      live, but no agent id — this session's roster carries no \`confirmed\` or"
+  echo "               \`identified\` row with an agent id for '${AGENT_NAME}'."
+  echo ""
+  echo "A working log is filed under an agent's id, and a dispatch records that id on its"
+  echo "roster row when the agent starts. Without it there is no evidence tier to print."
+  echo "This command decides nothing."
+  exit 1
+fi
+
+SESSION_ID="${ADOPTED_FROM:-$OWN_SESSION_ID}"
+SESSION_DIR="${OWN_TRANSCRIPT%.jsonl}"
+[ -n "$ADOPTED_FROM" ] && SESSION_DIR="${OWN_TRANSCRIPT%/*}/$ADOPTED_FROM"
+SUBDIR="$SESSION_DIR/subagents"
+LOG="$SUBDIR/agent-${AGENT_ID}.jsonl"
+META="$SUBDIR/agent-${AGENT_ID}.meta.json"
+
+# The type comes from the live set — it is what the harness reported for this teammate — and
+# the model and the description from the agent's own metadata, read at the ONE path the id
+# names. Reading a known path is not a scan: nothing is matched, nothing is searched.
+AGENT_TYPE=$(live_agents "$OWN_TRANSCRIPT" 2>/dev/null | awk -F'|' -v n="$AGENT_NAME" '$1==n {print $2; exit}')
+[ -n "$AGENT_TYPE" ] || AGENT_TYPE="—"
+AGENT_MODEL=$(jq -r '.model // "—"' "$META" 2>/dev/null)
+[ -n "$AGENT_MODEL" ] || AGENT_MODEL="—"
+AGENT_DESC=$(jq -r '.description // "—"' "$META" 2>/dev/null)
+[ -n "$AGENT_DESC" ] || AGENT_DESC="—"
+
+# ---------- classification (slice 4/5, AC-6; re-keyed on the live set at S6) ----------
+#
+# WHAT THIS USED TO ASK, and why it no longer can. It asked whether the agent's metadata was
+# filed under this session's own `subagents/` directory, and answered FOREIGN or DEAD HISTORY
+# when it was not. That question was about RECORDS, and records outlive agents: it is why a
+# `/clear` left a live agent classified foreign by its own successor.
+#
+# The live set has already answered the only version of it that means anything: an agent the
+# harness reports as THIS session's teammate is ours. What is left to say is HOW — whether by
+# an ordinary dispatch or by adoption after a `/clear`, which is what tells the operator
+# whose directory the working log below is filed under. It is reported, never judged (§4:
+# this command decides nothing). `unknown` survives for the one degraded case that is real:
+# a run with no session key at all, which cannot reach a live set and never gets this far.
+CLASSIFICATION="ours"
+OURS_BECAUSE="the harness reports it as a teammate of this session (roster-${OWN_SESSION_ID}.state carries its row)"
+if [ -n "$ADOPTED_FROM" ]; then
   # OURS BY ADOPTION, said out loud. A row carrying `adopted_from=` is one
   # hooks/session-poker.sh's `adopt` wrote after a `/clear`+resume: the agent is still the
-  # predecessor's — same process, same subagents directory — and this session took the
-  # contract over. The by-id clause above already answers OURS for it, and answering MUTELY
-  # is what this adds to: the operator is reading OURS about an agent filed under a session
-  # they are not in, and the provenance is what tells them which session's directory the
-  # observe address below names, and which one hooks/stop-guard.sh widened its resolution to.
-  # It is reported, never judged (§4: this command decides nothing).
-  ADOPTED_FROM=$(line_field "$ROSTER_ID_MATCH" adopted_from)
-  if [ -n "$ADOPTED_FROM" ]; then
-    OURS_BECAUSE="this session ADOPTED it (adopted_from=${ADOPTED_FROM}) and its roster confirms it by agent id (roster-${OWN_SESSION_ID}.state)"
-  fi
-elif owning_session_on_disk "$SESSION_ID"; then
-  CLASSIFICATION="foreign"
-else
-  CLASSIFICATION="dead-history"
+  # predecessor's process, its working log still filed under the predecessor's directory,
+  # and this session took the contract over. Answering OURS mutely would leave the operator
+  # reading about an agent filed under a session they are not in with nothing to explain it.
+  OURS_BECAUSE="this session ADOPTED it (adopted_from=${ADOPTED_FROM}); the harness reports it as a teammate and its working log is still filed under the session that launched it"
 fi
 
 # ---------- contract state: roster-sourced when OURS, CLI always overrides ----------
@@ -656,7 +648,7 @@ fi
 # differs from what the roster recorded, that is printed, never judged (§4: this
 # command decides nothing).
 ROSTER_DELIVERABLE=""; ROSTER_PROGRESS=""; ROSTER_CLAIMS=""; ROSTER_CADENCE=""
-if [ "$CLASSIFICATION" = "ours" ] && [ -n "$ROSTER_ROW" ]; then
+if [ -n "$ROSTER_ROW" ]; then
   ROSTER_DELIVERABLE=$(line_field "$ROSTER_ROW" deliverable)
   ROSTER_PROGRESS=$(line_field "$ROSTER_ROW" progress)
   ROSTER_CLAIMS=$(line_field "$ROSTER_ROW" claims)
@@ -716,22 +708,15 @@ echo "Resolved:      ${AGENT_ID}"
 echo "               name: ${AGENT_NAME} · type: ${AGENT_TYPE} · model: ${AGENT_MODEL}"
 echo "               task: ${AGENT_DESC}"
 echo "Session:       ${SESSION_ID}"
-case "$CLASSIFICATION" in
-  ours)
-    echo "Classification: OURS — ${OURS_BECAUSE}." ;;
-  foreign)
-    echo "Classification: FOREIGN — owned by session ${SESSION_ID}; that session's transcript is still on disk, but this session did not launch it."
-    echo "               (A transcript on disk does not mean the agent is still running — the working log's age below is the only evidence of that.)" ;;
-  dead-history)
-    echo "Classification: DEAD HISTORY — owned by session ${SESSION_ID}; that session's transcript is gone, so nothing on disk still accounts for it." ;;
-  unknown)
-    echo "Classification: UNKNOWN — this session's own id is unavailable (CLAUDE_CODE_SESSION_ID unset), so ownership could not be established." ;;
-esac
-if [ "$CLASSIFICATION" = "ours" ]; then
-  echo "Contract (roster):  deliverables=${ROSTER_DELIVERABLE:-(none recorded)}  progress=${ROSTER_PROGRESS:-(none recorded)}"
-fi
-if [ "$OUT_OF_PROJECT" -eq 1 ]; then
-  echo "Note:          this agent was found outside this project's own directory."
+# FOREIGN and DEAD HISTORY are gone with the directory scan that produced them (S6). Both
+# were verdicts about where an agent's METADATA sat, and a target that reaches this line has
+# been named by the harness as a teammate of this session — which is the only sense in which
+# an agent is ours. `unknown` is unreachable for the same reason: a session with no key of
+# its own cannot read a live set and refuses above, before anything is resolved.
+echo "Classification: OURS — ${OURS_BECAUSE}."
+echo "Contract (roster):  deliverables=${ROSTER_DELIVERABLE:-(none recorded)}  progress=${ROSTER_PROGRESS:-(none recorded)}"
+if [ -n "$ADOPTED_FROM" ]; then
+  echo "Note:          its working log is filed under the session that launched it (${ADOPTED_FROM})."
 fi
 echo ""
 

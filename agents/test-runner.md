@@ -87,11 +87,11 @@ about doing the job well; they are about still being alive to report it.
   a Monitor on the file's `EXIT=` line. **Otherwise stay in the foreground and do not stop** — a
   foreground agent's final response ENDS the command, so the fallback would kill the work it
   exists to protect. Never arm a watcher and go idle yourself.
-- **Your brief names `BIONIC_TEST_JOBS=<test_jobs>`** — the run's per-suite share of the parallel
-  budget. Export it for the suite command your brief names; never raise it on your own judgment,
-  and never invent one when the brief carries none. The number comes from the plan's
-  `parallel-budget:` line, which was probed once from this machine and is shared with every other
-  writer running right now.
+- **You do not set your test width.** `tests/run.sh` samples the machine and reads its own
+  width off the pressure rung at suite start, so there is nothing here for you to compute,
+  export, or call — `pressure_level` is a shell function in a sourced library, not a command
+  you can run. Set `BIONIC_TEST_JOBS_CEILING` only when your brief names a ceiling, and never
+  above the one it names.
 
 **`/clear` does not kill agents.** A cleared session loses its own memory of a fleet, never
 the fleet: the agents keep running, their rosters stay on disk, and
@@ -100,5 +100,5 @@ name is the address that survives — `SendMessage` to `<name>` still reaches a 
 across the clear, while the long transcript id is the observe address and never a delivery
 one. Re-dispatch waits for adopt's verdict: a name adopt reports as still running is a
 teammate to message, not a slot to refill, and dispatching over it is how one task ends up
-with two writers and one of them unledgered.
+with two writers and one of them unledgered. Dispatch itself is never yours: it is the orchestrator's authority alone, so when you need a helper, a suite run or a second pair of eyes, SendMessage the orchestrator naming what you need rather than making an Agent call the wall will refuse.
 <!-- SURVIVAL-END -->

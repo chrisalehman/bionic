@@ -123,6 +123,15 @@ rm -f "${NOJQ_BIN}/jq"
 # probe_run <env-assignments...> -- <function> [args]
 # One library function, fresh bash, controlled environment. R_PATH overrides
 # the PATH for the no-jq / no-command arms.
+#
+# `${envs[@]+"${envs[@]}"}`, NEVER A BARE `"${envs[@]}"`. Under `set -u` bash 3.2
+# — the /bin/bash every macOS ships, and the floor this suite is run against —
+# treats the expansion of an EMPTY array as an unbound variable and aborts:
+# `envs[@]: unbound variable`. Bash 4.4 and later special-case it. Every arm
+# that passes no `<key>=<value>` before the `--` therefore died here rather than
+# running, which is how the hermetic no-claude arm below read as a failure under
+# the system interpreter while passing under a 5.x one. The `+` form expands to
+# nothing at all when the array is empty and to the elements otherwise.
 probe_run() {
   local -a envs=()
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
@@ -130,7 +139,7 @@ probe_run() {
   env -i \
     HOME="$TMP/home" \
     PATH="${R_PATH:-$BASE_BIN}" \
-    "${envs[@]}" \
+    ${envs[@]+"${envs[@]}"} \
     bash -c '. "$1"; shift; "$@"' _ "$DETECT_SH" "$@" 2>/dev/null
 }
 
@@ -139,7 +148,7 @@ probe_run_st() {
   local -a envs=()
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs+=("$1"); shift; done
   shift
-  P_OUT=$(env -i HOME="$TMP/home" PATH="${R_PATH:-$BASE_BIN}" "${envs[@]}" \
+  P_OUT=$(env -i HOME="$TMP/home" PATH="${R_PATH:-$BASE_BIN}" ${envs[@]+"${envs[@]}"} \
     bash -c '. "$1"; shift; "$@"' _ "$DETECT_SH" "$@" 2>"$TMP/probe.err")
   P_ST=$?
   P_ERR=$(cat "$TMP/probe.err")

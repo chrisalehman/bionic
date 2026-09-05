@@ -74,10 +74,10 @@ expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "[$2] not found i
 # governance hook: it has nothing to say outside a run and must say nothing.
 # background-suite-guard runs only behind agent-context-guard, whose own roster
 # check already scopes it, so it loads the library without the run predicate.
-# engage.sh is the one `yes` that is not a gate. It calls `active_run` to fill the
-# marker's `plan=` field and writes the marker either way — engagement is what decides
-# WHETHER a wall acts, the plan only WHAT — so the third column here records that the
-# call is present, which is all this suite can see, and tests/engage.test.sh owns the
+# engage.sh is the one `yes` that is not a gate. It reads the run to decide what to write
+# into the marker's `plan=` field and writes the marker either way — engagement is what
+# decides WHETHER a wall acts, the plan only WHAT — so the third column here records that
+# the call is present, which is all this suite can see, and tests/engage.test.sh owns the
 # behaviour the column cannot express (AC-18: no plan on disk, marker still written).
 #
 # THE THIRD COLUMN IS NARROWER SINCE task-engaged-session, and the change is a change of
@@ -108,7 +108,7 @@ preflight-probe|open|no
 stop-orders|open|no
 session-sweeper|open|no
 stop-check|open|no
-engage|open|yes
+engage|open|no
 '
 
 # ============================================================
@@ -253,29 +253,88 @@ echo "=== 4 — one run predicate: no hook restates it, the run-scoped ones call
 # it once. session-poker.sh was the last carrier — named here rather than excused — and
 # slice SCHED deleted its copy (POKER/2, ratified 2026-09-03), so the family is now EMPTY.
 # The second row is the one with teeth: an empty grep also describes a fleet that lost the
-# predicate altogether, so the tick is asked to name the library function it calls instead.
+# predicate altogether, so the tick is asked to name the library functions it calls instead.
 HS_CARRIERS=$(grep -ln '^has_sdlc_state()' "$HOOKS"/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
 expect_eq "NO hook defines has_sdlc_state any more — the family is gone, not shrunk" \
   "" "$HS_CARRIERS"
-if grep -q 'active_plan "' "$HOOKS/session-poker.sh" 2>/dev/null; then
-  ok "…and the tick, the last carrier, calls lib/run.sh:active_plan instead"
+# THE TICK NAMES TWO LIBRARY FUNCTIONS NOW, and which one is which matters.
+# wave-session-bound-run moved the tick's own question from `active_plan` to `session_run`;
+# the surviving `active_plan` call is `resolve_run`'s `none` arm, which is what keeps DISARM
+# reachable for an unbound session whose run has already closed (S6 finding A). Asserting
+# only `active_plan` would now pass a tick that never asked whose run it was in, so both are
+# named and each says which arm it stands for.
+if grep -q 'session_run "' "$HOOKS/session-poker.sh" 2>/dev/null; then
+  ok "…and the tick asks lib/run.sh:session_run whose run this session is in"
 else
-  no "…and the tick, the last carrier, calls lib/run.sh:active_plan instead" \
+  no "…and the tick asks lib/run.sh:session_run whose run this session is in" \
+     "no session_run call in $HOOKS/session-poker.sh"
+fi
+if grep -q 'active_plan "' "$HOOKS/session-poker.sh" 2>/dev/null; then
+  ok "…and still reaches active_plan for the unbound-and-closed arm DISARM needs"
+else
+  no "…and still reaches active_plan for the unbound-and-closed arm DISARM needs" \
      "no active_plan call in $HOOKS/session-poker.sh"
 fi
 
+# THE THIRD COLUMN'S PREDICATE IS `session_run`, NOT `active_run` (wave-session-bound-run).
+# `active_run "$ROOT"` answered "is there a run in this PROJECT" — one answer per repository,
+# which is the bug the wave was opened for: two engaged sessions in one root shared a run
+# identity. `session_run "$ROOT" "$SID"` answers per session. Every hook this roster marks
+# run-scoped was converted, so the proxy grep moved with them; a hook that reverted to the
+# project-keyed reader fails the `yes` row here rather than passing on a call that no longer
+# answers the question the column names.
+#
+# THE `no` ROWS ARE STRICTER THAN THEY WERE: a hook that is not run-scoped must call NEITHER
+# reader. Under the old text a non-run-scoped hook could have picked up `session_run` and
+# stayed green, which is exactly the direction this wave made reachable.
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || continue
-  if grep -q 'active_run "' "$f"; then found=yes; else found=no; fi
+  if grep -q 'session_run "' "$f"; then found=yes; else found=no; fi
+  if grep -qE 'active_run "|session_run "' "$f"; then found_any=yes; else found_any=no; fi
   case "$scoped" in
-    yes) expect_eq "$name gates on active_run" "yes" "$found" ;;
-    no)  expect_eq "$name is NOT run-scoped and does not gate on active_run" "no" "$found" ;;
+    yes) expect_eq "$name gates on session_run, the session-keyed predicate" "yes" "$found" ;;
+    no)  expect_eq "$name is NOT run-scoped and reads neither run predicate" "no" "$found_any" ;;
   esac
 done <<EOF
 $ADOPTED
 EOF
+
+# THE ONE SURVIVING `active_run` CALLER, NAMED RATHER THAN EXCUSED. The evidence gate keeps
+# `active_run "$PROJECT_DIR"` on its unbound arm on purpose (S3 assumption 3): the fallback
+# path is not a NEW path that agrees with the old one, it IS the old one, re-asked through
+# the same function every pre-wave session used. That is the strongest form of AC-3, and it
+# is also the thing a reader would delete as redundant — so the roster of hooks still
+# calling the project-keyed reader is derived from the tree and pinned by value. A second
+# hook picking the call back up shows here.
+AR_CALLERS=$(grep -l 'active_run "' "$HOOKS"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "canonical-sdlc-evidence-gate is the ONLY hook still calling active_run, and it is the AC-3 fallback arm" \
+  "canonical-sdlc-evidence-gate" "$AR_CALLERS"
+
+# THE SAME PIN FOR `active_plan`, WHICH HAD NONE (S10a, review D3). `active_run` is one of
+# TWO project-keyed readers this wave left standing, and only one of them was held to a set.
+# `active_plan` has exactly two callers and each is a named exception: the evidence gate
+# re-derives the fallback plan through the pre-wave path on purpose (AC-3 fidelity), and the
+# tick keeps it for `resolve_run`'s `none` arm, where an unbound session over a closed run
+# still needs a plan to read DISARM out of. Three separate pins name the tick's call by hand
+# and nothing named the gate's, so a THIRD hook picking up the project-keyed selector — the
+# exact regression this section exists to catch for `active_run` — showed up nowhere.
+AP_CALLERS=$(grep -l 'active_plan "' "$HOOKS"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "active_plan has exactly TWO callers, and both are named exceptions" \
+  "canonical-sdlc-evidence-gate session-poker" "$AP_CALLERS"
+
+# ENGAGE IS THE WRITER, NOT A CONSUMER, and the roster's `no` above must not be read as
+# "engage ignores the session". It reads the marker's `plan=` FIELD through `session_plan` to
+# answer "is this session already bound"; it does not ask for a verdict, because a binding is
+# preserved whether or not its plan is still open (S10a, review C-1) and because asking would
+# put an `active_run` walk on the unbound path for an answer the hook discards (review P1).
+expect_eq "engage reads the binding FIELD (session_plan), which is what the writer needs" "yes" \
+  "$(grep -q 'session_plan "' "$HOOKS/engage.sh" && echo yes || echo no)"
+expect_eq "…and asks for no run VERDICT: neither session_run nor active_run" "no" \
+  "$(grep -qE 'session_run "|active_run "' "$HOOKS/engage.sh" && echo yes || echo no)"
 
 # ============================================================
 echo ""

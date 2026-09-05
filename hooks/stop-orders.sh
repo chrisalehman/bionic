@@ -121,7 +121,7 @@ esac
 # payload/scripts/lib/loader.sh. FAIL OPEN: nothing this script does is irreversible,
 # and a reporting verb that refused because a file was missing would take the
 # diagnosis down with the thing being diagnosed.
-BIONIC_LIB_WANT="root.sh session.sh"
+BIONIC_LIB_WANT="root.sh session.sh agents.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -254,6 +254,13 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-orders"; fi
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# THE ONE READER OF THE LIVE SET (wave-roster-lifecycle S4/S6, D1′). `standdown` REPORTS; it
+# writes nothing to the roster and decides nothing, and the live set is read for one purpose
+# only — to say, beside a row it is leaving alone, whether the agent it names still exists.
+# A row that is still working and a row whose agent finished without landing look identical
+# on the roster, and the operator reading LEFT ALONE is the one who has to tell them apart.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/agents.sh"
 
 # THE SESSION KEY, from the library (design §1): env primary. Both verbs answer for ONE
 # session's roster, and the roster filename is built from this value — so it has to be
@@ -295,6 +302,25 @@ for _component in "$BIONIC_DIR" "$STATE_DIR"; do
     exit 2
   fi
 done
+
+# THIS SESSION'S TRANSCRIPT, where the harness records its ListAgents answers. This script
+# has no hook payload to carry one, so the file is found the way hooks/stop-check.sh finds
+# it: `<projects>/<slug>/<session-id>.jsonl`, with a keyed walk of the project directories
+# behind the slug — a worktree cwd files its session under a different slug from the repo it
+# is reading. Empty when nothing answers, which simply leaves the annotation off.
+own_transcript() {  # -> the transcript file of THIS session, or nothing
+  local projects slug d
+  projects="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
+  for slug in "$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')" \
+              "$(printf '%s' "$REPO_REAL" | sed 's/[^a-zA-Z0-9]/-/g')"; do
+    [ -f "$projects/$slug/$SESSION_ID.jsonl" ] || continue
+    printf '%s\n' "$projects/$slug/$SESSION_ID.jsonl"; return 0
+  done
+  for d in "$projects"/*/"$SESSION_ID.jsonl"; do
+    [ -f "$d" ] && { printf '%s\n' "$d"; return 0; }
+  done
+  return 1
+}
 
 ROSTER_FILE="$STATE_DIR/roster-${SESSION_ID}.state"
 ORDERS_FILE="$STATE_DIR/stop-orders-${SESSION_ID}.state"
@@ -523,6 +549,26 @@ case "$VERB" in
     # shellcheck source=/dev/null
     [ -f "$_wt_lib" ] && . "$_wt_lib"
 
+    # THE LIVE SET, read ONCE for the whole batch and only for the LEFT ALONE reason text.
+    # A stale or absent answer leaves `_live` empty and `_live_ok` at 0, and every held row
+    # is then reported exactly as it was before this slice: this verb owes a report, and an
+    # annotation it cannot justify is worse than none.
+    _live=""; _live_ok=0
+    _own_tr=$(own_transcript) || _own_tr=""
+    if [ -n "$_own_tr" ]; then
+      if _live=$(live_agents "$_own_tr" 2>/dev/null); then _live_ok=1; else _live=""; fi
+    fi
+    # A NAME IS NOT A PATTERN (Step-6 security review S-5). The name is a value lifted off a
+    # roster row — the operator's typed target one step upstream — and nothing in the fleet
+    # charset-guards it, so a `.`, `*` or `[` dropped into a basic regular expression
+    # over-matches and annotates a departed row `[live]` off a neighbour's name. Field
+    # equality, which is the spelling `live_agents_has` already uses two functions away.
+    _is_live() {  # <name> -> 0 iff the fresh answer names it
+      [ "$_live_ok" -eq 1 ] || return 1
+      printf '%s\n' "$_live" \
+        | awk -F'|' -v want="$1" '$1 == want { found = 1 } END { exit found ? 0 : 1 }'
+    }
+
     _ready=""; _held=""; _nready=0; _nheld=0; _landed=""
     while IFS= read -r _l; do
       [ -n "$_l" ] || continue
@@ -562,7 +608,14 @@ case "$VERB" in
         fi
       else
         _nheld=$((_nheld + 1))
-        _held="${_held}  $_name   ($_state — $_detail)
+        # WHY THE ROW IS STILL HELD, and — where the harness can say so — whether anyone is
+        # still working on it. `not live` on an unlanded row is the finished-but-unstopped
+        # state the roster alone cannot express, which is the whole reported defect.
+        _liveness=""
+        if [ "$_live_ok" -eq 1 ]; then
+          if _is_live "$_name"; then _liveness="   [live]"; else _liveness="   [not live]"; fi
+        fi
+        _held="${_held}  $_name   ($_state — $_detail)${_liveness}
 "
       fi
     done <<EOF
