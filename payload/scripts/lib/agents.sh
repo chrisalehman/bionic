@@ -360,15 +360,16 @@ _la_read() {  # <transcript.jsonl> -> sets _LA_CACHE_OUT / _LA_CACHE_ERR / _LA_C
   return 0
 }
 
-# THE STATUS OF ONE NAME, off the SAME parse `live_agents_has` reads (spec R2, AC-27).
+# THE STATUS OF ONE NAME, and `live_agents_has` IS this function (spec R2, AC-27).
 #
 # R2 names two ways an agent goes: "delivered and stopped, or finished and never stopped".
 # The harness keeps LISTING the second kind — status `idle` — because it stays addressable:
 # a SendMessage would resume it. So presence answers "is this name still on the roster the
 # harness prints", and it is the right question for a STOP (an idle agent is exactly the one
 # you stop). It is the wrong question for a BUDGET, which wants to know whether the row is
-# still a writer. That is a question about the status, and this is where it is answered —
-# from one `live_agents` call, so the two consumers can never disagree about who is listed.
+# still a writer. That is a question about the status, and this is where it is answered.
+# `live_agents_has` calls this function and throws the word away, so "the two consumers
+# read one parse and one predicate" is structural rather than a claim about two copies.
 #
 # Same exit codes as `live_agents_has`, deliberately: a caller that switches between them
 # branches identically, and only the stdout differs.
@@ -394,8 +395,9 @@ live_agents_status() {  # <transcript.jsonl> <name>
 
   [ -n "$want" ] || return 1
 
-  # Count and status in ONE pass, on two lines. The counting predicate is character for
-  # character `live_agents_has`'s, so the two can never disagree about WHO is listed — only
+  # Count and status in ONE pass, on two lines. `live_agents_has` is this function with
+  # the word discarded (see below), so the counting predicate is not merely the same
+  # spelling — it is the same code, and the two cannot disagree about WHO is listed, only
   # about what the status means. Two lines rather than one joined field because a status is
   # whatever the harness printed between two middots: never assume it holds no separator,
   # and never make a tab in this file's source load-bearing.
@@ -415,24 +417,12 @@ live_agents_status() {  # <transcript.jsonl> <name>
 }
 
 live_agents_has() {  # <transcript.jsonl> <name>
-  local transcript="${1:-}" want="${2:-}" set_out rc count
-
-  rc=0
-  _la_ensure "$transcript" || rc=$?
-  [ "$rc" -eq 0 ] || return "$rc"
-  set_out="$_LA_CACHE_OUT"
-
-  [ -n "$want" ] || return 1
-
-  count="$(printf '%s\n' "$set_out" | LC_ALL=C awk -F'|' -v want="$want" '
-    NF >= 1 && $1 == want { n++ } END { print n + 0 }
-  ')" || count=""
-
-  case "$count" in
-    0|"") return 1 ;;
-    1)     return 0 ;;
-    *)     return 2 ;;
-  esac
+  # ONE IMPLEMENTATION, BY CONSTRUCTION (Step-6 review R-11). The header above used to
+  # claim these two shared a counting predicate "character for character" — and they did,
+  # as two copies of one awk that nothing compared. `has` is `status` with the word
+  # discarded: the exit codes were already identical on purpose, and now they cannot
+  # drift, because there is only one of them. The stderr line passes through unchanged.
+  live_agents_status "${1:-}" "${2:-}" >/dev/null
 }
 
 # ROW-OPENNESS: THE ONE PREDICATE, AND IT FAILS CLOSED (spec R2, AC-27; S19, closing the
