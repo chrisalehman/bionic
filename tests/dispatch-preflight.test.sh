@@ -45,6 +45,19 @@ expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exi
 expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
 expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
+expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+
+# HELPER-PRESENCE GUARD (spec AC-25). This file runs under `set -uo pipefail` — NO
+# `-e` — so a call to an assertion helper that was never defined here is a silent
+# "command not found" on stderr: the row asserts nothing and the suite's own
+# pass/total never notices (r24e was exactly this defect: `expect_eq` was called at
+# :2835 with no definition anywhere in this file, caught by research-code-map §6.2).
+# Every helper this file calls, checked to exist as a function before the first test
+# runs, so a future undefined call fails the whole suite loudly instead of vanishing.
+for _h in ok no expect_status expect_contains expect_absent expect_empty expect_eq; do
+  type -t "$_h" >/dev/null 2>&1 || { echo "helper missing: $_h"; exit 1; }
+done
+unset _h
 
 # ---------- fixtures ----------
 #
@@ -107,14 +120,94 @@ Exit condition: the artifact exists and the paired suite is green.
 Expected duration: ~25 minutes.
 Progress artifact: .bionic/tmp/w99-widget.progress'
 
-# mk_agent_payload <sid> <cwd> [prompt] [name] [model]
+# ---------- live_agents transcript fixtures (spec AC-6/AC-7/AC-8; slice S5) ----------
+#
+# Entry-shape helpers, copied from tests/live-agents.test.sh — the one file that owns
+# the real transcript entry shapes (assistant tool_use / user tool_result / user
+# plain-string prompt), per this slice's brief ("build transcript fixtures by copying
+# the fixture helpers' shapes from tests/live-agents.test.sh").
+
+json_str() { printf '%s' "$1" | jq -Rs .; }
+
+entry_prompt() {  # <ts> <text> -> a user PROMPT entry (.message.content a plain string)
+  printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":%s}}\n' \
+    "$1" "$(json_str "$2")"
+}
+
+entry_tool_use() {  # <ts> <tool-name> <tool_use_id>
+  printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"%s","name":"%s","input":{}}]}}\n' \
+    "$1" "$3" "$2"
+}
+
+entry_tool_result() {  # <ts> <tool_use_id> <body>
+  printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"%s","content":%s}]}}\n' \
+    "$1" "$2" "$(json_str "$3")"
+}
+
+# la_body <name> ... -> a real `Teammates (N):` block naming each as running (or, with
+# no names, a recognisable answer carrying no Teammates block at all — AC-6's "zero
+# lines" case, per the real harness shape tests/live-agents.test.sh documents).
+la_body() {
+  local out='This session is bionic-s5 [aabbcc] — the name other sessions use to message it.'
+  if [ "$#" -gt 0 ]; then
+    out="$out
+
+Teammates ($#):"
+    local n
+    for n in "$@"; do
+      out="$out
+  ${n} [000000]  ·  bionic:implementor  ·  running  ·  started 3m ago"
+    done
+  fi
+  printf '%s' "$out"
+}
+
+# mk_transcript <path> <fresh|stale|none> [name] ... — writes a jsonl transcript at
+# <path>. fresh/stale both carry one ListAgents answer naming the given teammates (zero
+# or more); stale adds a LATER prompt so the answer no longer postdates the last one;
+# none carries no ListAgents call at all. Fixed 2026-09-05 timestamps throughout, same
+# idiom the rest of this file's fixtures use — freshness is a comparison between two
+# entries in the file, never against wall-clock "now" (only `age=` is, and no assertion
+# below pins its value).
+_S5_TID=0
+mk_transcript() {
+  local path="$1" state="$2" tid body
+  shift 2
+  if [ "$state" = "none" ]; then
+    entry_prompt "2026-09-05T00:50:00.000Z" "who is running" > "$path"
+    return 0
+  fi
+  _S5_TID=$((_S5_TID + 1))
+  tid="toolu_s5_${_S5_TID}"
+  body="$(la_body "$@")"
+  {
+    entry_prompt      "2026-09-05T00:50:00.000Z" "who is running"
+    entry_tool_use    "2026-09-05T00:52:22.000Z" "ListAgents" "$tid"
+    entry_tool_result "2026-09-05T00:52:23.349Z" "$tid" "$body"
+    [ "$state" = "stale" ] && entry_prompt "2026-09-05T00:55:00.000Z" "anything else?"
+  } > "$path"
+}
+
+# THE DEFAULT for every dispatch payload below (mk_agent_payload's 6th argument): a
+# FRESH answer naming every roster-row name this file's pre-existing S22/S25 fixtures
+# use (W-ONE..W-FOUR), so a row that is not otherwise made absent still reads as the
+# live agent it always represented — the one adaptation existing budget fixtures need
+# now that AC-7 retires the `landing-swept` marker as the closing signal. Tests that
+# need a name ABSENT, or a STALE/NONE answer, build and pass their own transcript.
+S5_LIVE_TRANSCRIPT="$SANDBOX/.s5-live-default.jsonl"
+mk_transcript "$S5_LIVE_TRANSCRIPT" fresh W-ONE W-TWO W-THREE W-FOUR
+
+# mk_agent_payload <sid> <cwd> [prompt] [name] [model] [transcript]
 #
 # prompt/name/model default to the contract-complete brief; pass "-" for name or
-# model to omit the field from tool_input entirely (the absence cases).
+# model to omit the field from tool_input entirely (the absence cases). transcript
+# defaults to $S5_LIVE_TRANSCRIPT (fresh, names every W-* fixture row live).
 mk_agent_payload() {
-  local prompt="${3-$BRIEF_FULL}" name="${4-w99-impl}" model="${5-claude-sonnet-5}"
+  local prompt="${3-$BRIEF_FULL}" name="${4-w99-impl}" model="${5-claude-sonnet-5}" \
+        transcript="${6-$S5_LIVE_TRANSCRIPT}"
   jq -n --arg s "$1" --arg c "$2" --arg p "$prompt" --arg n "$name" --arg m "$model" \
-    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+        --arg t "$transcript" \
+    '{session_id:$s, transcript_path:$t, cwd:$c,
       prompt_id:"f3cd7d62-305d-47ed-9eaf-46fb12d4f4ed",
       permission_mode:"bypassPermissions", effort:{level:"high"},
       hook_event_name:"PreToolUse", tool_name:"Agent",
@@ -2668,17 +2761,21 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r22c no parallel-budget: in the plan → the arm is inert, three rows notwithstanding" "0" "$GATE_ST"
 expect_absent "…and prints nothing about a budget it was never given" "parallel budget" "$GATE_ERR"
 
-# --- a SWEPT row is not an open one (the anti-vacuity control: the same fixture
-#     refuses while the marker is absent).
+# --- a row absent from the fresh live set is not an open one (AC-7; the
+#     anti-vacuity control: the same fixture refuses while the row is live).
+#     `landing-swept` is no longer consulted at all — the row's own PRESENCE in
+#     THIS TURN's ListAgents answer is the only thing that opens or closes it.
 REPO=$(make_repo r22d yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
 s22_roster_row "$REPO" "$SID_A" "W-ONE"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22d one UNSWEPT row against writers=1 → refused (the control)" "2" "$GATE_ST"
-s22_sweep "$REPO" "$SID_A" "W-ONE"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "…and the same row, once landing-swept, no longer counts → passes" "0" "$GATE_ST"
+expect_status "r22d one LIVE row against writers=1 → refused (the control)" "2" "$GATE_ST"
+R22D_ABSENT="$SANDBOX/.r22d-absent.jsonl"
+mk_transcript "$R22D_ABSENT" fresh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22D_ABSENT")"
+expect_status "…and the same row, absent from a fresh answer, no longer counts → passes" \
+  "0" "$GATE_ST"
 
 # --- suites: an open row carrying a subprocess claim.
 REPO=$(make_repo r22e yes)
@@ -2714,8 +2811,11 @@ mkdir -p "$REPO/.worktrees/not-a-tree"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r22i a bare directory under .worktrees is not a lease → passes" "0" "$GATE_ST"
 
-# --- r22g: the wall and the Patrol count the same open rows. A second definition of
-#     "open" is the drift this pins shut (spec ownership table, `active run` row).
+# --- r22g: the wall and the Patrol count the same open rows on THIS fixture. AC-7
+#     retires `landing-swept` as the wall's own signal — W-FOUR is left off the fresh
+#     transcript instead — but lib/patrol.sh's `patrol_roster_state` is untouched by
+#     this slice and still reads the swept marker, so both are kept: one closes
+#     W-FOUR for the Patrol's own count, the other closes it for the wall's.
 REPO=$(make_repo r22g yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
@@ -2724,14 +2824,85 @@ s22_roster_row "$REPO" "$SID_A" "W-TWO"
 s22_roster_row "$REPO" "$SID_A" "W-THREE"
 s22_roster_row "$REPO" "$SID_A" "W-FOUR"
 s22_sweep "$REPO" "$SID_A" "W-FOUR"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "r22g three open rows and one swept, against writers=3 → REFUSED" "2" "$GATE_ST"
+R22G_TRANSCRIPT="$SANDBOX/.r22g-live.jsonl"
+mk_transcript "$R22G_TRANSCRIPT" fresh W-ONE W-TWO W-THREE
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22G_TRANSCRIPT")"
+expect_status "r22g three live rows and one absent, against writers=3 → REFUSED" "2" "$GATE_ST"
 expect_contains "…the wall counts three open" "writers: budget=3 open=3 with-this-dispatch=4" "$GATE_ERR"
 # shellcheck source=/dev/null
 ( . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/patrol.sh" 2>/dev/null \
   && patrol_roster_state "$REPO" "$SID_A" ) > "$SANDBOX/.r22g" 2>/dev/null
 expect_contains "…and so does lib/patrol.sh's patrol_roster_state, on the same file" \
   "open=3" "$(cat "$SANDBOX/.r22g")"
+
+# ================================== S22b: LIVE-AGENTS FRESHNESS GATES THE COUNT
+# (spec AC-7, AC-8; slice S5.)
+#
+# The predicate itself, isolated from every other S22 arm: one `status=intended` row,
+# writers budget tight enough that whether it counts open decides pass vs refuse.
+
+echo ""
+echo "---------- S22b: the budget count is read off the fresh live set ----------"
+
+# (a) the row's agent is ABSENT from a FRESH answer -> open=0, and the dispatch that
+# would have been the SECOND writer (budget=1, one row not counted) is allowed.
+REPO=$(make_repo r22ja yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+R22JA_T="$SANDBOX/.r22ja.jsonl"
+mk_transcript "$R22JA_T" fresh W-OTHER
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JA_T")"
+expect_status "r22ja r1 absent from a fresh answer -> open=0, dispatch allowed at budget=1" \
+  "0" "$GATE_ST"
+expect_absent "…and no budget refusal, live-agents or otherwise" "BLOCKED" "$GATE_ERR"
+expect_absent "…specifically no writers count printed" "writers:" "$GATE_ERR"
+
+# (b) the SAME roster, repo and budget; only the answer changes to name r1 itself ->
+# open=1, and the same dispatch is now the second writer against a budget of one.
+REPO=$(make_repo r22jb yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+R22JB_T="$SANDBOX/.r22jb.jsonl"
+mk_transcript "$R22JB_T" fresh r1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JB_T")"
+expect_status "r22jb r1 present in the fresh answer -> open=1, REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the count" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_ERR"
+
+# (c) no FRESH answer this turn — STALE and NONE both — REFUSES the whole dispatch,
+# naming the fix, before the budget arm is ever consulted (AC-8). Same roster/budget
+# as (a)/(b) so the only variable is the transcript.
+REPO=$(make_repo r22jc yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+R22JC_STALE="$SANDBOX/.r22jc-stale.jsonl"
+mk_transcript "$R22JC_STALE" stale r1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_STALE")"
+expect_status "r22jc a STALE answer REFUSES the dispatch" "2" "$GATE_ST"
+expect_contains "…naming the state and the fix" \
+  "live-agents: stale age=" "$GATE_ERR"
+expect_contains "…the fix" "call ListAgents, then dispatch" "$GATE_ERR"
+
+R22JC_NONE="$SANDBOX/.r22jc-none.jsonl"
+mk_transcript "$R22JC_NONE" none
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_NONE")"
+expect_status "r22jc …and NONE (no ListAgents answer at all) REFUSES the same way" "2" "$GATE_ST"
+expect_contains "…naming the state" "live-agents: none age=none" "$GATE_ERR"
+expect_contains "…and the fix" "call ListAgents, then dispatch" "$GATE_ERR"
+
+# The paired negative: an EMPTY roster (no `status=intended` rows at all) needs no
+# live reading, so the same STALE transcript decides nothing — no roster row's
+# openness is in question, and refusing every dispatch on an unrelated repo would be
+# refusing dispatches that have nothing to do with the budget wall at all.
+REPO=$(make_repo r22jd yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_STALE")"
+expect_status "r22jd an empty roster needs no live reading -> the same STALE transcript passes" \
+  "0" "$GATE_ST"
+expect_absent "…and says nothing about live-agents" "live-agents:" "$GATE_ERR"
 
 # ============================================ S23: THE ORCHESTRATOR-IN-WORKTREE ARM
 # (spec AC-14; handoff 2.5.)
@@ -2792,6 +2963,14 @@ echo "=== S24 — THE ENGAGEMENT SWITCH (AC-5, AC-13, AC-14, AC-23) ==="
 # the same repo, the same payload, the marker the only difference.
 
 S24_REPO=$(make_repo r24 yes)
+# An attestation up front (AC-25 / r24e): without one, r24a's dispatch auto-probes and
+# WRITES it as a side effect, adding a one-time "environment check was run
+# automatically" advisory line that r24e's later re-dispatch — now that the
+# attestation already exists — does not repeat. That made the two refusals differ
+# for a reason that had nothing to do with engagement, the thing r24e is testing;
+# writing it up front, as every other fixture in this file does, removes the
+# confound so "byte-identical" tests only the engagement switch.
+write_attestation "$S24_REPO" "$SID_A"
 S24_MARK="$S24_REPO/.bionic/tmp/engaged-$SID_A.state"
 
 # (a) ENGAGED — the positive. A dispatch whose brief carries no deliverable is refused
@@ -2833,6 +3012,23 @@ rm -f "$S24_REPO/.bionic/tmp/engaged-$SID_B.state"
 : > "$S24_MARK"
 run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
 expect_eq "r24e re-engaged: the refusal is byte-identical to r24a" "$S24_REFUSAL" "$GATE_ERR"
+
+# META (spec AC-25): r24e must not be vacuous the way it was before this slice — a
+# DOCTORED refusal (one byte changed) has to make it FAIL. Run in a subshell so the
+# probe's own local ok/no/PASS/FAIL shadow the real ones and never touch this suite's
+# actual counts; only the verdict below is a real assertion.
+(
+  PASS=0; FAIL=0; TOTAL=0
+  ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); }
+  no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); }
+  expect_eq "probe" "$S24_REFUSAL" "${S24_REFUSAL}Z"
+  exit "$FAIL"
+)
+if [ $? -ne 0 ]; then
+  ok "r24e meta: a doctored refusal (one byte changed) makes expect_eq report a failure"
+else
+  no "r24e meta: a doctored refusal did NOT make expect_eq fail — the assertion is vacuous"
+fi
 
 # ---------- ENGAGED WITH NO PLAN ON DISK (AC-23) ----------
 #
