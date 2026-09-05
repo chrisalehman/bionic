@@ -57,9 +57,12 @@ echo ""
 echo "=== Section 2: patrol_stamp_state's limit follows the constant ==="
 
 # No hooks/session-poker.sh beside this fixture repo, so patrol_interval falls
-# back to its own last-resort default (1800s, "30m") — the same fixture
-# doctor-patrol.test.sh's header already documents as "30m default → a 3600s
-# limit". This suite does not hardcode 3600: it reads limit=<n> back and
+# back to its own last-resort default (1800s) — a number lib/patrol.sh quotes
+# from the poker and which S8's move to a 20m default has left behind
+# (PATROL_INTERVAL_LAST_RESORT, lib/patrol.sh:56; outside S8's file scope, and
+# reported for disposition). Where the poker IS reachable the default is 20m
+# and the limit 2400s, which is what doctor-patrol.test.sh's header documents.
+# This suite does not hardcode either number: it reads limit=<n> back and
 # checks it equals secs * PATROL_STALE_MULTIPLIER, so a change to either the
 # last-resort default or the multiplier is still caught in agreement.
 STAMP_OUT="$(sourced patrol_stamp_state "$REPO_FIX" "fixture-session")"
