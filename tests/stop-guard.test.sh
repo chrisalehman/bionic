@@ -1125,6 +1125,24 @@ run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin@session-${SID_A:
 expect_status "…and the alias spelling of an ambiguous name is refused too" 2 "$GUARD_ST"
 expect_contains "…for the ambiguity, not for the alias" "2 live agents answer to 'twin'" "$GUARD_ERR"
 
+# (c2) A NAME CARRYING A REGEX METACHARACTER must count and list ONLY its own two entries,
+# never a bystander name that merely LOOKS like it under BRE matching (Step-6 security review
+# S-5, third instance). `a.b`'s `.` would match any single character, so an unfixed reader
+# widens both the count and the listing to include `axb` — a name nobody asked about.
+IFS='|' read -r RX_REPO RX_TR RX_SUB <<< "$(make_world regexambig yes)"
+plant_agent "$RX_SUB" "arxa-1111111111111111" "a.b"
+plant_agent "$RX_SUB" "arxb-2222222222222222" "a.b"
+plant_agent "$RX_SUB" "arxc-3333333333333333" "axb"
+roster_row "$RX_REPO" "$SID_A" "a.b" "arxa-1111111111111111"
+run_guard "$(mk_stop_payload "$SID_A" "$RX_TR" "$RX_REPO" "a.b")"
+expect_status "a name with a regex metacharacter, two live entries: REFUSED" 2 "$GUARD_ST"
+expect_contains "…the refusal counts exactly the two of that exact name" \
+  "2 live agents answer to 'a.b'" "$GUARD_ERR"
+expect_matches "…and prints both entries as the harness reported them" \
+  'a\.b\|bionic:senior-implementor\|running' "$GUARD_ERR"
+expect_absent "…never widened to the bystander name the dot happens to match" \
+  "axb" "$GUARD_ERR"
+
 # (d) A LIVE AGENT THIS SESSION'S ROSTER CARRIES NO ID FOR cannot be observed — the working
 # log is `<session>/subagents/agent-<id>.jsonl` and the roster row is the only thing that
 # knows the id once the directory scan is gone. It is refused, and the refusal says which
