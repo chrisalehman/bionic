@@ -173,9 +173,19 @@ _la_body() {  # <transcript> <tool_use_id>
 # body with any invalid sequence in it cannot abort the parse.
 _la_parse_teammates() {
   LC_ALL=C awk '
-    BEGIN { inblk = 0; recog = 0 }
+    BEGIN { inblk = 0; recog = 0; seen = 0 }
     /^This session is / { recog = 1 }
-    /^Teammates \([0-9]+\):[ \t]*$/    { recog = 1; inblk = 1; next }
+    # ANCHORED ON THE FIRST HEADER (Step-6 review S-2). This used to re-open the block on
+    # ANY flush-left `Teammates (N):` line, anywhere in the body, including after
+    # `Peer sessions`. The body carries free-form operator-visible text — the session name
+    # and the peer titles — and a newline embedded in either produces a flush-left line, so
+    # a second header could forge a teammate into the live set. The format the harness
+    # writes was the only thing keeping the parser honest. One block per answer, the first.
+    /^Teammates \([0-9]+\):[ \t]*$/ {
+      recog = 1
+      if (!seen) { seen = 1; inblk = 1 } else { inblk = 0 }
+      next
+    }
     /^Peer sessions \([0-9]+\):[ \t]*$/ { recog = 1; inblk = 0; next }
     {
       if (!inblk) next
