@@ -174,7 +174,16 @@ elif [ "$TOOL_NAME" = "Bash" ]; then
   # mistake: forging one means typing the schema token, the resolved agent id and
   # that agent's current log mtime and size, all of which the gate re-checks
   # against the live file before it discharges anything.
-  [ -n "$MLINES" ] || exit 0
+  #
+  # NO EARLY EXIT ON AN EMPTY MLINES (wave-roster-lifecycle S9, spec AC-15). This
+  # used to `exit 0` here — the cheapest possible test, before any git resolution
+  # or plan walk, for the overwhelming majority of Bash calls that never ran
+  # stop-check.sh. Since S9 this arm also takes a pressure sample on every
+  # engaged Bash call (below, after the engagement check), which is a fact about
+  # THIS call having happened rather than about what it printed — so it must
+  # reach that line even when MLINES is empty. ARM 1 further down still writes
+  # nothing when MLINES is empty (its `<<<"$MLINES"` loop skips the one blank
+  # line an empty here-string produces); only the early exit is gone.
 else
   # TWO SPELLINGS, ONE FACT (AC-10). The dispatch modes name the same field
   # differently: an async task launch returns `tool_response.agentId` (camel),
@@ -210,7 +219,7 @@ CWD=$(_jq '.cwd')
 # payload/scripts/lib/loader.sh. FAIL OPEN: the roster row is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="root.sh run.sh session.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh resources.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -345,6 +354,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/resources.sh"
 
 # THE ROOT (spec AC-10, lib/root.sh). `git rev-parse --show-toplevel` answered with the
 # WORKTREE's own root, so a stop raised from a linked worktree looked for the roster
@@ -378,6 +389,22 @@ case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
 engaged_session "$REPO" "$SID" || exit 0
+
+# ---------- THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15, R4) ----------
+#
+# One sample per engaged Bash call, appended to the ring resources.sh owns. The
+# consumers sample (D3 amendment): plugin hooks were not observed firing inside
+# subagents, so this arm cannot be the ONLY sampler — but it IS reliable for the
+# orchestrator's own calls, which is what this gives the ring: frequent readings
+# between the sparser ones tests/run.sh and the Patrol tick take. Bash-only —
+# ARM 2 (a dispatch confirming) and ARM 3 (an agent starting) are not "time
+# passed at the machine", and sampling on those too would count a dispatch
+# twice against the calls that produced it. FAILURE-TOLERANT like every write in
+# this file: a lost sample costs `pressure_level`'s median one input, never a
+# hook failure, so its result is discarded and its failure swallowed.
+if [ "$TOOL_NAME" = "Bash" ]; then
+  pressure_sample >/dev/null 2>&1 || :
+fi
 
 # ---------- THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK (task-engaged-session) --
 #

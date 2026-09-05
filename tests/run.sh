@@ -24,9 +24,10 @@
 #
 # ── TWO MODES, ONE ROSTER (epic-17 W7 S10, spec AC-16) ───────────────────────
 #
-#   bash tests/run.sh              eight suites at a time (the default)
+#   bash tests/run.sh              width from the machine's own pressure rung
 #   bash tests/run.sh --serial     one at a time, in roster order
-#   BIONIC_TEST_JOBS=8 bash tests/run.sh      a different width
+#   bash tests/run.sh --dry-run    print the job width and exit, run nothing
+#   BIONIC_TEST_JOBS_CEILING=8 bash tests/run.sh   the ceiling the rung reads against
 #   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
 #
 # The `run` lines below are the roster in BOTH modes — they are the only place a
@@ -35,6 +36,16 @@
 # xargs -P, and the results print afterwards in roster order. Same labels, same
 # captured-output blocks, same `Gating:` line, same exit status: a mode is a
 # scheduling choice and nothing else.
+#
+# THE WIDTH IS READ, NOT SET (wave-roster-lifecycle S9, spec AC-15, R4). A run
+# samples the machine's pressure once and reads `pressure_level` (resources.sh)
+# over the ring against a ceiling — `BIONIC_TEST_JOBS_CEILING`, falling back to
+# the old default of 8 — so a run started while the machine is under strain gets
+# a narrower width automatically instead of a human having to notice and set
+# `BIONIC_TEST_JOBS` by hand. `BIONIC_TEST_JOBS` is retired as an input for
+# exactly that reason: a literal a caller fixes cannot answer "how busy is the
+# machine right now". A caller who still sets it is told once, on stderr, and
+# ignored rather than silently overridden.
 #
 # WHY IT IS SAFE TO RUN THEM AT ONCE. Not by assumption — by audit. Epic-17 W7 S8
 # read every suite in this roster for fixture root, every write outside it and every
@@ -109,25 +120,46 @@ fi
 # `bash tests/run.sh --serial` ran the whole roster and looked like it had
 # honoured a flag it had never heard of.
 SERIAL=0
+DRY_RUN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --serial) SERIAL=1 ;;
+    --dry-run) DRY_RUN=1 ;;
     -h|--help)
-      echo "usage: bash tests/run.sh [--serial]"
+      echo "usage: bash tests/run.sh [--serial] [--dry-run]"
       echo "  --serial            one suite at a time, in roster order"
-      echo "  BIONIC_TEST_JOBS    how many at a time otherwise (default 8)"
+      echo "  --dry-run           print the job width and exit; run nothing"
+      echo "  BIONIC_TEST_JOBS_CEILING  the ceiling the pressure rung reads against (default 8)"
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
       exit 0
       ;;
     *)
       echo "tests/run.sh: unknown option: $1" >&2
-      echo "usage: bash tests/run.sh [--serial]" >&2
+      echo "usage: bash tests/run.sh [--serial] [--dry-run]" >&2
       exit 2
       ;;
   esac
   shift
 done
-JOBS="${BIONIC_TEST_JOBS:-8}"
+
+# ── job width from the machine's own pressure rung (S9, spec AC-15, R4) ──────
+# Sample now, then read the median-smoothed rung over the ceiling Step 0 derived
+# (BIONIC_TEST_JOBS_CEILING; the old literal default of 8 is the fallback for a
+# caller that never named one). BIONIC_TEST_JOBS is retired as an input — see the
+# header note above — so a caller who still sets it is told once, on stderr,
+# and the value is ignored rather than silently honoured or silently dropped.
+if [ -n "${BIONIC_TEST_JOBS:-}" ]; then
+  echo "tests/run.sh: BIONIC_TEST_JOBS is retired — width now comes from the machine's pressure rung; set BIONIC_TEST_JOBS_CEILING to change the ceiling it reads against. The value you set (${BIONIC_TEST_JOBS}) is ignored." >&2
+fi
+# shellcheck source=/dev/null
+. "$REPO/payload/scripts/lib/resources.sh"
+pressure_sample >/dev/null 2>&1 || :
+JOBS="$(pressure_level "${BIONIC_TEST_JOBS_CEILING:-8}")"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "JOBS=$JOBS"
+  exit 0
+fi
 
 ( . tests/lib/resolve-roots.sh
   printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
@@ -376,6 +408,10 @@ run "hook-adoption.test.sh" bash tests/hook-adoption.test.sh
 #     version-2 preflight attestation that records it. The kill datum this suite's memory
 #     term is built on is the one written at :63-68 of this file.
 run "resources.test.sh" bash tests/resources.test.sh
+# wave-roster-lifecycle S9 (spec AC-15): this file's own job width — pressure_sample then
+# pressure_level over BIONIC_TEST_JOBS_CEILING, and --dry-run, the flag that makes the width
+# observable without running the whole roster. Hand-listed like every suite outside hooks/.
+run "runner-width.test.sh" bash tests/runner-width.test.sh
 #   - docs-pins.test.sh: doc-text agreement pins with no other home. §1 (RELEASE, spec
 #     AC-36) is the help version pair — replaces the coverage version-ssot.test.sh had
 #     before it was deleted below; WALLS and SCHED append their own numbered sections
