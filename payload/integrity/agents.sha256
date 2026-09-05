@@ -2,9 +2,9 @@
 # Written by agents-src/render.sh alongside the finals themselves; regenerate with
 # `bash agents-src/render.sh`. /bionic:doctor reads it to report whether an installed
 # machine's role files are stock or locally modified.
-2cdb3ad0fbfae272da4c9e72196692476b058c70e1da1fbceb2b874b611970b5  agents/auditor.md
-a4e74f9175c01ec0440bd249a631c003bb58c793cfe906e4f73a26a9aa0da05f  agents/critic.md
-69f67f4086733798331252a57e81f953a6f924def4834f25036fee9c1bb8e50c  agents/implementor.md
-6ef683487819b43dd65ad71a0d0921165627e9534d28bd47464d866a1302c2aa  agents/researcher.md
-c82ca7237316f3eedaaaffd5e207a43b1235d8b40359066896beece5942e434d  agents/senior-implementor.md
-ec43f0b13373d7d3b31b06699a8a3adb725a07aaf991857a6a2e721354ca2111  agents/test-runner.md
+08996df95ba5e6afe5515189b9a31fbb911f46d170f4317c7d692909643c2cc7  agents/auditor.md
+d282a267e493a55ac7e873265f3973bb939996f1b64feb4cfe245cd16007f09a  agents/critic.md
+6da9ad80ee0ef87c821cc346e831a57e0ebf5f179bbcd676d09fb56f17242859  agents/implementor.md
+73f9fb143d5dc0cd5dc432438da3a34100f1d8a38b15d92ffec869296e2e30a4  agents/researcher.md
+ea5392af12acbc7e0e8a943b8c7637879b316dcad9ac900982c545e474e839ea  agents/senior-implementor.md
+41576f9b2947fff751f04352ceb95f361a079eab88273093ce4732edccc57bb5  agents/test-runner.md

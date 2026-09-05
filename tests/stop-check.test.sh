@@ -286,6 +286,22 @@ expect_matches "…and both entries are printed as the harness reported them" \
 expect_contains "…beside an address the stop primitive accepts" \
   "w1r-slice-4-3@session-11111111" "$OUT"
 
+# A NAME IS NOT A PATTERN (Step-6 security review S-5). The ambiguity arm counts the live
+# entries by dropping the typed target into a basic regular expression, so a `.`, `*` or `[`
+# in it over-matches and the refusal reports a count that is not the ambiguity it found. The
+# target below genuinely answers to two live agents; the four `w1r-slice-4-3` entries beside
+# it are what its `.` would have swallowed.
+make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
+  "a111dotted111111a" "w1r.slice-4-3" "dotted one" >/dev/null
+make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
+  "a222dotted222222b" "w1r.slice-4-3" "dotted two" >/dev/null
+OUT=$(run_check "$H1" "$R1" "w1r.slice-4-3"); ST=$?
+expect_status "a metacharacter target is still resolved as ambiguous" 1 "$ST"
+expect_contains "…and counted LITERALLY: two, not the four its pattern would have matched" \
+  "2 live agents answer to 'w1r.slice-4-3'" "$OUT"
+expect_absent "…so the neighbour the `.` would have swallowed is never listed under it" \
+  "w1r-slice-4-3 " "$OUT"
+
 # A NAME THE ANSWER DOES NOT CARRY is not live, whatever is on disk. `departed` has a full
 # set of metadata and a working log; the harness does not name it, so it does not resolve.
 MK_AGENT_ROW=yes make_agent "$H1" "$S1" "33333333-3333-3333-3333-333333333333" \

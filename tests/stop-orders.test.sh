@@ -499,6 +499,28 @@ R8_LA3=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
 expect_contains "with no answer at all the held rows are still reported" "walked-off" "$R8_LA3"
 expect_absent "…and still carry no liveness claim" "[not live]" "$R8_LA3"
 
+
+# A NAME IS NOT A PATTERN (S-5). `_is_live` dropped the roster's name straight into a basic
+# regular expression, so a `.`, `*` or `[` in it over-matched — and the name is the operator's
+# typed target or a value lifted off a row, neither of which the fleet charset-guards. The row
+# below answers to nothing in the live set and would be annotated `[live]` off its neighbour's
+# name alone. Diagnostic-only, and the annotation is the entire point of this block.
+roster_row "$R8" "s.ill-at-it" ".bionic/docs/record/nope3.md" "" "s.ill-at-it@session-6c85684c"
+plant_live "$R8TR" fresh "still-at-it"
+run_orders_cfg "$R8" standdown
+R8_LA4=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
+R8_META=$(printf '%s\n' "$R8_LA4" | grep -F 's.ill-at-it')
+expect_contains "the metacharacter row is still reported (the arm is not vacuous)" \
+  "s.ill-at-it" "$R8_META"
+expect_contains "…and a name carrying a regex metacharacter is matched LITERALLY: not live" \
+  "[not live]" "$R8_META"
+expect_absent "…never annotated live off the neighbour its pattern would have matched" \
+  "  [live]" "$R8_META"
+# The paired positive on the same run: the neighbour it would have matched IS live, so the
+# row above is a statement about the match and not about a live set that had gone empty.
+expect_contains "…while the real still-at-it beside it is still live" "[live]" \
+  "$(printf '%s\n' "$R8_LA4" | grep -F 'still-at-it   (UNMET')"
+
 # ============================================================
 echo ""
 echo "──────────────────────────────────────────────"

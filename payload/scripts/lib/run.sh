@@ -186,15 +186,10 @@ _run_candidates() {
 # <docs_root>/incidents (each walked to depth <= 2) that contains a flush-left
 # `## SDLC State` line; exit 1 and print nothing when no candidate qualifies.
 #
-# DEPTH 2, AND IT IS THE FLEET'S ONLY BOUND (POKER/2, ratified 2026-09-03). This function
-# shipped at 3 and the readers it replaced walked 2, which is the bionic layout's own depth:
-# `plans/<epic>/<wave>.plan.md`. For one wave the two bounds ran side by side and
-# tests/cross-gate-agreement.test.sh §S.3d PINNED the disagreement rather than papering over
-# it. It is resolved here, at 2, on the layout's own terms — a file three levels down under
-# plans/ is a note, a fixture or a scratch draft, and admitting it re-opens the newest-race
-# the `## SDLC State` filter exists to close. Every hook reads this one walk now, so the
-# bound is stated once and pinned by number in three suites (run-predicate §R3,
-# cross-gate §S.2, and the fixture battery's `nested-three-deep`).
+# The walk, its depth bound and the reasons for both are `_run_candidates`' (above). This
+# function walks nothing: it is a SELECTION over that list. The paragraph used to be copied
+# here in full and, once the walk moved, argued with its own code — "this function shipped at
+# 3", "every hook reads this one walk now" — about a body that no longer contains a `find`.
 active_plan() {
   local root="$1"
   local droot

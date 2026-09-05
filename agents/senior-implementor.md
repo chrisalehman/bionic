@@ -83,8 +83,11 @@ about doing the job well; they are about still being alive to report it.
   a Monitor on the file's `EXIT=` line. **Otherwise stay in the foreground and do not stop** — a
   foreground agent's final response ENDS the command, so the fallback would kill the work it
   exists to protect. Never arm a watcher and go idle yourself.
-- **Each brief in the batch points the writer at the rung:** `take your test width from
-  pressure_level at suite start; the ceiling is this header's test_jobs`.
+- **You do not set your test width.** `tests/run.sh` samples the machine and reads its own
+  width off the pressure rung at suite start, so there is nothing here for you to compute,
+  export, or call — `pressure_level` is a shell function in a sourced library, not a command
+  you can run. Set `BIONIC_TEST_JOBS_CEILING` only when your brief names a ceiling, and never
+  above the one it names.
 
 **`/clear` does not kill agents.** A cleared session loses its own memory of a fleet, never
 the fleet: the agents keep running, their rosters stay on disk, and

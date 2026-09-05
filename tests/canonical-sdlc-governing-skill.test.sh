@@ -11,6 +11,11 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+# THE ONE BOUND-MARKER BUILDER (AC-24). Two hand-written markers in this file survived that
+# consolidation — they happened to match `bind_plan`'s output byte for byte, which is exactly
+# the agreement a shared builder makes true by construction instead of by luck (Step-6
+# duplication review D-6).
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
 PASS=0
@@ -1984,7 +1989,7 @@ assert_contains "b2 ...and names the new path" "session bound to $b_b" "$HOOK_ST
 # session bound to it and has since been delivered.
 b_done="$b_plans/wave-00-done.plan.md"
 plant_plan "$b_done" closed
-printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$b_done" > "$b_p/.bionic/tmp/engaged-$GS_SID.state"
+bound_marker "$b_p" "$GS_SID" "$b_done"
 b_c="$b_plans/wave-03-c.plan.md"
 plant_plan "$b_c" open
 run_post Write "$b_c" create
@@ -2125,8 +2130,7 @@ assert_contains "v1 an unbound session announces the newest-plan fallback" \
   "$HOOK_STDERR"
 assert_eq "v1 ...and passes" 0 "$HOOK_EXIT"
 
-printf 'plan=%s\nengaged_at=2026-09-04T00:00:00Z\n' "$v_plans/wave-01-old.plan.md" \
-  > "$v_p/.bionic/tmp/engaged-$GS_SID.state"
+bound_marker "$v_p" "$GS_SID" "$v_plans/wave-01-old.plan.md"
 run_write "$v_probe" '# operational note'
 TOTAL=$((TOTAL + 1))
 case "$HOOK_STDERR" in
