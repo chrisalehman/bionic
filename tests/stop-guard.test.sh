@@ -185,7 +185,57 @@ PLAN
   printf '%s|%s|%s\n' "$repo" "$proj/$SID_A.jsonl" "$proj/$SID_A/subagents"
 }
 
+# ---------- THE RECORDED ListAgents ANSWER — the live set (S6, D1′) ----------
+#
+# Since this slice the two stop scripts resolve a target against the newest recorded
+# ListAgents answer in the session transcript, not against agent-*.meta.json on disk. So a
+# fixture world's transcript is no longer an empty file: it carries a prompt, the assistant's
+# ListAgents call and the harness's answer, in that order, which is what makes the answer
+# FRESH (recorded after the last user prompt).
+#
+# THE ANSWER BODY'S SHAPE IS THE REAL ONE, copied from tests/live-agents.test.sh, whose two
+# bodies are byte-verbatim captures of this project's own transcript (the separator is
+# U+00B7, and the `[8895ce]` ref suffix is what the reader strips off a name). Composing a
+# body here rather than reading that suite's is the same call S4 made about the fixture file:
+# `.bionic/` is gitignored, so anything read from it passes on this machine and fails in a
+# fresh clone.
+LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
+
+la_body() {  # <name>... -> one real-shaped ListAgents answer body
+  local n
+  printf '%s\n\nTeammates (%d):\n' "$LA_SELF" "$#"
+  for n in "$@"; do
+    printf '  %s [8895ce]  ·  bionic:senior-implementor  ·  running  ·  started 7m ago\n' "$n"
+  done
+}
+
+# plant_live <transcript> <fresh|stale> <name>...  — rewrite a transcript so its newest
+# ListAgents answer names exactly these teammates. `stale` appends one more user prompt
+# AFTER the answer, which is the whole of what STALE means (D1′).
+plant_live() {
+  local tr="$1" freshness="$2"; shift 2
+  local body; body=$(la_body "$@")
+  {
+    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
+    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01FIXTURELISTAGENTS",name:"ListAgents",input:{}}]}}'
+    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01FIXTURELISTAGENTS",content:$b}]}}'
+    if [ "$freshness" = "stale" ]; then
+      jq -nc --arg ts "2026-09-05T00:53:00.000Z" \
+        '{type:"user",timestamp:$ts,message:{role:"user",content:"a later turn"}}'
+    fi
+  } > "$tr"
+  return 0
+}
+
 # plant_agent <subagents-dir> <agent-id> <name> [mtime-touch]
+#
+# Plants the working log the observation reads AND adds the name to its session's live set,
+# because after S6 an agent that is not in the newest ListAgents answer does not resolve at
+# all. The name list is accumulated in a sidecar so a second call adds to the answer rather
+# than replacing it.
 plant_agent() {
   local dir="$1" aid="$2" aname="$3" touchts="${4:-}"
   printf '{"agentType":"general-purpose","description":"a test agent","name":"%s","toolUseId":"toolu_01TEST","spawnDepth":0,"model":"opus","taskKind":"in_process_teammate"}\n' \
@@ -193,6 +243,10 @@ plant_agent() {
   printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
     > "$dir/agent-$aid.jsonl"
   [ -n "$touchts" ] && touch -t "$touchts" "$dir/agent-$aid.jsonl"
+  local tr="${dir%/subagents}.jsonl" names=() n
+  printf '%s\n' "$aname" >> "${dir%/subagents}.names"
+  while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < "${dir%/subagents}.names"
+  plant_live "$tr" fresh "${names[@]}"
   return 0
 }
 
@@ -209,8 +263,9 @@ STATE_REL=".bionic/tmp/stop-check.state"
 # real Claude Code session, which exports a real value — unpinned, every call
 # below would classify against whatever session happens to be running the suite
 # rather than against the fixture, and the suite's HERMETIC claim would be
-# quietly false. Pinned to the fixture session here; `observe_nosid` opts out
-# explicitly, where the missing key is the fact under test.
+# quietly false. Pinned to the fixture session here — and since S6 there is no keyless
+# variant to opt out with: hooks/stop-check.sh cannot reach a live set without a session key,
+# so a keyless look produces no record at all rather than an incomplete one.
 observe() {  # <sid> <transcript> <repo> <typed-target> [args…]
   observe_as "" "$@"
 }
@@ -234,20 +289,6 @@ observe_as() {  # <observer-agent-id|""> <sid> <transcript> <repo> <typed-target
   # primary), so the fixture session travels with the payload rather than beside it —
   # otherwise the record lands under whatever session is running this suite.
   printf '%s' "$payload" | env CLAUDE_CODE_SESSION_ID="$sid" bash "$RECORDER" >/dev/null 2>&1
-  return 0
-}
-
-# An observation run with NO own-session key — the degraded case slice 4/5 named
-# (classification `unknown`, roster invisible), driven here because it is the one
-# way a contracted progress artifact can go unlooked-at.
-observe_nosid() {  # <sid> <transcript> <repo> <typed-target> [args…]
-  local sid="$1" tr="$2" repo="$3"; shift 3
-  local cfg="${tr%/projects/*}" out
-  out=$( cd "$repo" && env -u CLAUDE_CODE_SESSION_ID CLAUDE_CONFIG_DIR="$cfg" \
-         bash "$OBSERVE" "$@" 2>/dev/null )
-  printf '%s' "$(mk_bash_post "$sid" "$tr" "$repo" \
-    "bash ~/.claude/hooks/stop-check.sh $*" "$out")" \
-    | env CLAUDE_CODE_SESSION_ID="$sid" bash "$RECORDER" >/dev/null 2>&1
   return 0
 }
 
@@ -471,11 +512,13 @@ run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "no-such-agent")"
 expect_status "active wave + unresolvable name (not address-shaped): PASSES THROUGH (T4)" 0 "$GUARD_ST"
 expect_matches "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
 
-# Ambiguity: two live agents answering to the same name in one session.
+# Ambiguity: two live agents answering to the same name — two lines in the Teammates block,
+# which is what two sessions in one root launching same-named agents looks like (D2′).
 plant_agent "$W4_SUB" "adouble-5555555555555555" "twin"
 plant_agent "$W4_SUB" "adouble-6666666666666666" "twin"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "twin")"
 expect_status "active wave + ambiguous name: REFUSED" 2 "$GUARD_ST"
+expect_contains "…and the refusal says how many answer to it" "2 live agents answer to 'twin'" "$GUARD_ERR"
 
 # A plan with CR-only line endings is still a plan. `tr -d` on those separators
 # collapses the file to one line, the run-state marker goes unseen, and the gate
@@ -804,12 +847,11 @@ expect_contains "…for the symlink reason specifically, not a fallback missing-
 
 # The ROSTER is repo-controlled state too, so a symlink at its own level would let
 # a repo choose which file answers a question the gate asks — the OPEN direction §8
-# forbids a repo from reaching. Since slice 4/9 the roster answers ownership for
-# exactly one case, a `confirmed` row keyed on AGENT ID reaching a target outside
-# this session's own directory, and that is the case driven here: a planted roster
-# claiming a foreign-filed agent as ours. Refusing to read through the link leaves
-# the claim unmade, which is the closed side. (A same-directory target needs no
-# roster at all now, so a repo has nothing to gain by pointing this file anywhere.)
+# forbids a repo from reaching. Since S6 the roster is where the agent ID comes from,
+# which is what the observation channel is keyed on, so a planted roster is a repo
+# naming the log a look would be compared against. Refusing to read through the link
+# leaves the id unestablished, which is the closed side: the target resolves as live
+# and the stop is refused for want of the one fact only a real row could supply.
 IFS='|' read -r SR_REPO SR_TR SR_SUB <<< "$(make_world secroster yes)"
 SR_TR_B="${SR_TR%/*}/$SID_B.jsonl"
 plant_agent "${SR_TR_B%.jsonl}/subagents" "avictim-1818181818181818" "victim"
@@ -819,8 +861,8 @@ ln -s "$SANDBOX/plantedroster/.bionic/tmp/roster-$SID_A.state" \
   "$SR_REPO/.bionic/tmp/roster-$SID_A.state"
 run_guard "$(mk_stop_payload "$SID_A" "$SR_TR_B" "$SR_REPO" "victim")"
 expect_status "a symlinked roster refuses the stop" 2 "$GUARD_ST"
-expect_contains "…because it was not read through: the ownership claim is never made" \
-  "was not launched by this session" "$GUARD_ERR"
+expect_contains "…because it was not read through: the id claim is never made" \
+  "no agent id" "$GUARD_ERR"
 
 # Unpredictable temp names: mktemp with an X-template, and no PID-based name.
 expect_matches "temp files use an mktemp X-template" 'mktemp.*XXXXXX' "$(cat "$GUARD")"
@@ -952,208 +994,156 @@ printf 'unrelated\n' > "$PN_REPO/$PROG_REL"
 run_guard "$(mk_stop_payload "$SID_A" "$PN_TR" "$PN_REPO" "runner")"
 expect_status "no progress contract: an unrelated file's write changes nothing" 0 "$GUARD_ST"
 
-# A CONTRACTED channel the look never opened. The observation ran without its own
-# session key (slice 4/5's `unknown` case), so it never saw the roster and never
-# looked at the progress artifact — and an artifact nobody looked at can never go
-# stale, which would make the check above unreachable by simply looking wrong.
+# A CONTRACTED channel the look never opened. An artifact nobody looked at can never go
+# stale, so without this clause the check above is dodgeable by simply looking wrong.
+#
+# HOW THE LOOK MISSES IT, since S6. It used to be an observation run with no session key at
+# all — the `unknown` classification of slice 4/5, which saw no roster and so no contracted
+# path. That state is gone: with no session key there is no transcript, no live set, and
+# hooks/stop-check.sh refuses before it resolves anything, so a keyless look now produces no
+# record rather than an incomplete one. What still produces one is ORDER: the look ran while
+# the row named no progress artifact, and the contract that names one was recorded after it.
 IFS='|' read -r PU_REPO PU_TR PU_SUB <<< "$(make_world progressunseen yes)"
 plant_agent "$PU_SUB" "arunner-1515151515151515" "runner"
-roster_row "$PU_REPO" "$SID_A" "runner" "arunner-1515151515151515" "$PROG_REL"
+roster_row "$PU_REPO" "$SID_A" "runner" "arunner-1515151515151515"
 mkdir -p "$PU_REPO/.bionic/tmp"
 printf 'stage 1\n' > "$PU_REPO/$PROG_REL"
-observe_nosid "$SID_A" "$PU_TR" "$PU_REPO" "runner"
+observe "$SID_A" "$PU_TR" "$PU_REPO" "runner"
+roster_row "$PU_REPO" "$SID_A" "runner" "arunner-1515151515151515" "$PROG_REL"
 run_guard "$(mk_stop_payload "$SID_A" "$PU_TR" "$PU_REPO" "runner")"
 expect_status "a look that skipped the contracted channel discharges nothing" 2 "$GUARD_ST"
+expect_contains "…and the refusal names the channel the look never opened" \
+  "$PROG_REL" "$GUARD_ERR"
 # Following the fix as printed clears the refusal — the loop has a stated exit.
-observe_nosid "$SID_A" "$PU_TR" "$PU_REPO" "runner" "--progress" "$PROG_REL"
+observe "$SID_A" "$PU_TR" "$PU_REPO" "runner" "--progress" "$PROG_REL"
 run_guard "$(mk_stop_payload "$SID_A" "$PU_TR" "$PU_REPO" "runner")"
 expect_status "observing the contracted channel as instructed re-arms the stop" 0 "$GUARD_ST"
 
 # ============================================================
 echo ""
-echo "=== Section 10: AC-6 — what this session did not launch, it does not stop BY NAME ==="
+echo "=== Section 10: AC-9 — resolution IS the live set, and the double file is not an ambiguity ==="
 # ============================================================
 #
-# THE bb20f616 EXHIBIT. A previous epic's dead fleet left agent metadata on disk
-# answering to names a live session was still using; a stop by name resolved to
-# whichever one the scan found first. A name is not an identity. The escape hatch
-# is the full agent id, which is unambiguous by construction and is how the
-# documented zombie-predecessor cleanup is done; it buys no relief from the
-# observation requirements.
+# WHAT THIS SECTION USED TO BE, and why it is gone. It drove the OWNING-DIRECTORY rule: an
+# agent whose `agent-<id>.meta.json` sat under another session's `subagents/` was FOREIGN and
+# a stop of it by name was refused. That rule answered "is this agent mine" from RECORDS on
+# disk, and the records outlive the agents — which is how a `/clear` produced the field defect
+# this wave exists to fix (report §B-2): the same agent's metadata filed under two session
+# directories, MATCH_COUNT=2, and every spelling of a bare name refused as ambiguous while the
+# agent was still running and its contract had landed.
 #
-# WHAT IDENTITY IS, corrected in slice 4/9 after live operation: the metadata's
-# own filing. An agent under <session>/subagents/ was launched by <session>. Slice
-# 4/6 keyed this on ROSTER MEMBERSHIP instead and both arms failed live —
-# unconfirmed rows (the standing state until a session restarts) matched by NAME
-# and handed ownership to another session's corpse, while every agent dispatched
-# before the roster hook shipped had no row and was refused as foreign. The roster
-# is still read for the CONTRACT, and a `confirmed` row still establishes
-# ownership BY AGENT ID; it is never a name-oracle again.
-#
-# Agent id shape SYNTHESIZED after the exhibit named in continuation.md; the
-# session ids and names are fixtures, as everywhere else in this suite.
+# WHAT REPLACES IT (D1′/D2′). The live set: the newest recorded ListAgents answer, which is
+# the harness's own statement about which teammates exist right now. An agent it names is one
+# this session can address; one it does not name is not stoppable here whatever is on disk.
+# Ownership by id and the contract still come from the session roster row, which is the only
+# thing that ever knew them.
 
-# The corpse collision AT THE GATE: an UNCONFIRMED row of ours (agent_id empty)
-# naming `reviewer`, and a `reviewer` filed under ANOTHER session's directory.
-# Reaching it needs a stop whose transcript path and session key disagree, which
-# is the only way a target outside this session's own directory ever resolves
-# here — and it is exactly the disagreement the owning-directory key detects.
-IFS='|' read -r FG_REPO FG_TR FG_SUB <<< "$(make_world foreignstop yes)"
-FG_TR_B="${FG_TR%/*}/$SID_B.jsonl"
-FG_SUB_B="${FG_TR_B%.jsonl}/subagents"
-plant_agent "$FG_SUB_B" "abb20f616-7777777777777" "reviewer"
-roster_row "$FG_REPO" "$SID_A" "reviewer" "" "" "intended"
+IFS='|' read -r LV_REPO LV_TR LV_SUB <<< "$(make_world liveset yes)"
+mkdir -p "$LV_REPO/.bionic/docs/record"
+LV_TR_B="${LV_TR%/*}/$SID_B.jsonl"
+LV_SUB_B="${LV_TR_B%.jsonl}/subagents"
 
-# A fresh, well-formed observation first, so that what is asserted below is the
-# OWNERSHIP refusal and not the ordinary missing-observation one — without it every
-# assertion here would pass on a fixture that never reached the rule under test.
-# Before slice 4/9 this pair PERMITTED the stop: the name matched an unconfirmed
-# row, so the corpse was treated as ours and its record spent.
-observe "$SID_A" "$FG_TR_B" "$FG_REPO" "abb20f616-7777777777777"
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR_B" "$FG_REPO" "reviewer")"
-expect_status "a target filed under ANOTHER session, matched only by an unconfirmed row's NAME: REFUSED" \
-  2 "$GUARD_ST"
-expect_absent "…and it is not the missing-observation refusal — a fresh record exists" \
+# (a) THE DOUBLE FILE, the fixture research-code-map §4.4 proved on this machine: ONE agent,
+# ONE name, its meta.json BYTE-IDENTICAL in two session directories, its working log in both.
+# The live set names it once, so it is one agent — and with a MET contract the stop passes
+# with no observation at all (AC-9).
+plant_agent "$LV_SUB" "aw1-rc-e0886335875ba2d1" "w1-rc"
+cp "$LV_SUB/agent-aw1-rc-e0886335875ba2d1.meta.json" "$LV_SUB_B/agent-aw1-rc-e0886335875ba2d1.meta.json"
+cp "$LV_SUB/agent-aw1-rc-e0886335875ba2d1.jsonl"     "$LV_SUB_B/agent-aw1-rc-e0886335875ba2d1.jsonl"
+if cmp -s "$LV_SUB/agent-aw1-rc-e0886335875ba2d1.meta.json" \
+          "$LV_SUB_B/agent-aw1-rc-e0886335875ba2d1.meta.json"; then
+  ok "the double-file fixture is byte-identical in both session directories"
+else
+  no "the double-file fixture is byte-identical in both session directories"
+fi
+echo "the delivered artifact" > "$LV_REPO/.bionic/docs/record/w1-rc.md"
+# `adopted_from` is what put BOTH directories in scope for the old scan — the successor
+# session took the row over after a /clear — and it is what made the double file a
+# MATCH_COUNT=2 ambiguity there. It stays on the row: after this slice it is read only for
+# the session the working log is filed under, never for resolution.
+roster_row "$LV_REPO" "$SID_A" "w1-rc" "aw1-rc-e0886335875ba2d1" "" "confirmed" \
+  ".bionic/docs/record/w1-rc.md" "" "" "$SID_B"
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "w1-rc")"
+expect_status "the double-filed agent, MET, stopped by BARE NAME: PASSES with no observation" \
+  0 "$GUARD_ST"
+expect_empty "…and the gate is silent — no ambiguity refusal anywhere" "$GUARD_ERR"
+
+# …and the same double file with an UNMET contract meets the ordinary ceremony, not an
+# ambiguity refusal. Without this pair the pass above is equally green on a gate that has
+# stopped deciding anything.
+plant_agent "$LV_SUB" "aw2-rc-e0886335875ba2d2" "w2-rc"
+cp "$LV_SUB/agent-aw2-rc-e0886335875ba2d2.meta.json" "$LV_SUB_B/agent-aw2-rc-e0886335875ba2d2.meta.json"
+cp "$LV_SUB/agent-aw2-rc-e0886335875ba2d2.jsonl"     "$LV_SUB_B/agent-aw2-rc-e0886335875ba2d2.jsonl"
+roster_row "$LV_REPO" "$SID_A" "w2-rc" "aw2-rc-e0886335875ba2d2" "" "confirmed" \
+  ".bionic/docs/record/w2-rc.md" "" "" "$SID_B"
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "w2-rc")"
+expect_status "the same double file, contract UNMET: the ceremony survives — REFUSED" 2 "$GUARD_ST"
+expect_contains "…and it is the observation demand, not an ambiguity" \
   "No observation" "$GUARD_ERR"
-expect_contains "the refusal names the directory it keyed on" "filed under session" "$GUARD_ERR"
-expect_contains "the refusal names the classification" "FOREIGN" "$GUARD_ERR"
+expect_absent "…nothing calls the double file ambiguous" "ambiguous" "$GUARD_ERR"
 
-# THE OTHER DIRECTION, and the one that broke live operation: an agent this
-# session really launched, with NO roster row at all — the standing state for
-# everything dispatched before the roster hook shipped. Slice 4/6 refused these.
-IFS='|' read -r UO_REPO UO_TR UO_SUB <<< "$(make_world unrosteredours yes)"
-plant_agent "$UO_SUB" "asibling-1818181818181818" "sibling"
-run_guard "$(mk_stop_payload "$SID_A" "$UO_TR" "$UO_REPO" "sibling")"
-expect_status "an unrostered agent under THIS session's own directory is not refused as foreign" \
-  2 "$GUARD_ST"
-expect_absent "…the refusal is the ordinary missing-observation one, not a foreign one" \
-  "FOREIGN" "$GUARD_ERR"
-observe "$SID_A" "$UO_TR" "$UO_REPO" "sibling"
-run_guard "$(mk_stop_payload "$SID_A" "$UO_TR" "$UO_REPO" "sibling")"
-expect_status "…and its fresh observation discharges the stop BY NAME" 0 "$GUARD_ST"
-expect_empty "…permitted in silence" "$GUARD_ERR"
+# (b) A NAME THE ANSWER DOES NOT CARRY is not live, and the refusal says so. `ghost` is on
+# disk in this world's other session directory and in nobody's live set.
+plant_agent "$LV_SUB_B" "aghost-9999999999999999" "ghost"
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "ghost@session-${SID_B:0:8}")"
+expect_status "a target absent from the live set: REFUSED" 2 "$GUARD_ST"
+expect_contains "…and the refusal says it is not live" "is not live" "$GUARD_ERR"
+expect_absent "…and never calls it foreign — that rule is gone" "FOREIGN" "$GUARD_ERR"
 
-# `name@team` is still a name (P5: the platform hands the gate the string as typed).
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR_B" "$FG_REPO" "reviewer@team")"
-expect_status "name@team is a name: REFUSED" 2 "$GUARD_ST"
+# (c) TWO LIVE ENTRIES OF ONE NAME. The refusal names both, and it does NOT offer the
+# `@session-` alias as a way out: an alias must resolve to the same SINGLE entry (AC-11), so
+# there is no spelling of this target the gate can accept.
+IFS='|' read -r TW_REPO TW_TR TW_SUB <<< "$(make_world twolaunchers yes)"
+plant_agent "$TW_SUB" "atwin-1111111111111111" "twin"
+plant_agent "$TW_SUB" "atwin-2222222222222222" "twin"
+roster_row "$TW_REPO" "$SID_A" "twin" "atwin-1111111111111111"
+run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin")"
+expect_status "a name the live set carries twice: REFUSED" 2 "$GUARD_ST"
+expect_contains "…the refusal counts them" "2 live agents answer to 'twin'" "$GUARD_ERR"
+expect_matches "…and prints both entries as the harness reported them" \
+  'twin\|bionic:senior-implementor\|running' "$GUARD_ERR"
+run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin@session-${SID_A:0:8}")"
+expect_status "…and the alias spelling of an ambiguous name is refused too" 2 "$GUARD_ST"
+expect_contains "…for the ambiguity, not for the alias" "2 live agents answer to 'twin'" "$GUARD_ERR"
 
-# The escape hatch, spending the very record the by-name attempts left behind.
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR_B" "$FG_REPO" "abb20f616-7777777777777")"
-expect_status "the same target addressed by FULL AGENT ID: PERMITTED" 0 "$GUARD_ST"
+# (d) A LIVE AGENT THIS SESSION'S ROSTER CARRIES NO ID FOR cannot be observed — the working
+# log is `<session>/subagents/agent-<id>.jsonl` and the roster row is the only thing that
+# knows the id once the directory scan is gone. It is refused, and the refusal says which
+# fact is missing rather than demanding a look that cannot be taken.
+plant_agent "$LV_SUB" "aunrostered-8888888888888888" "unrostered"
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "unrostered")"
+expect_status "a live agent with no confirmed id on the roster: REFUSED" 2 "$GUARD_ST"
+expect_contains "…and the refusal names the missing fact" "no agent id" "$GUARD_ERR"
+
+# …and an `intended` row is still not an ownership claim: its id is a claim about a launch
+# nothing has observed. Unchanged from slice 4/9, on the channel that now carries it.
+roster_row "$LV_REPO" "$SID_A" "unrostered" "aunrostered-8888888888888888" "" "intended"
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "unrostered")"
+expect_status "an INTENDED row's id establishes nothing: still REFUSED" 2 "$GUARD_ST"
+expect_contains "…for the same missing fact" "no agent id" "$GUARD_ERR"
+
+# …and the paired positive: the same row `identified` carries the id, and the ordinary
+# ceremony resumes.
+roster_row "$LV_REPO" "$SID_A" "unrostered" "aunrostered-8888888888888888" "" "identified"
+observe "$SID_A" "$LV_TR" "$LV_REPO" "unrostered"
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "unrostered")"
+expect_status "an IDENTIFIED row's id makes the target observable: PERMITTED" 0 "$GUARD_ST"
 expect_empty "…and permitted in silence" "$GUARD_ERR"
 
-# The hatch is not a bypass: by-id still needs a fresh look of its own (D-2 spent
-# the record above).
-run_guard "$(mk_stop_payload "$SID_A" "$FG_TR_B" "$FG_REPO" "abb20f616-7777777777777")"
-expect_status "by full id with no observation left: still REFUSED" 2 "$GUARD_ST"
-expect_contains "…refused for the ordinary reason, not the foreign one" \
-  "No observation" "$GUARD_ERR"
+# (e) THE TRANSCRIPT-FORM ID still addresses an agent, by way of the roster row that carries
+# it — this slice moved where the id comes from, it did not retire the spelling.
+observe "$SID_A" "$LV_TR" "$LV_REPO" "unrostered"
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "aunrostered-8888888888888888")"
+expect_status "the transcript-form id resolves through the roster row: PERMITTED" 0 "$GUARD_ST"
 
-# THE `identified` STATE (epic-16 wave-01 slice 1). The by-id clause above keyed
-# on `confirmed` alone, and in teammate mode a confirmed row can never carry a
-# matchable id: the launch half only ever learns the ADDRESSING form, so
-# `agent_id=` is written EMPTY there by design (capture probe §3 conclusion 3,
-# recorder ARM 2). The transcript-form id arrives one state later, on
-# SubagentStart, as an `identified` row — so under the old accepted set the
-# ownership rule was unreachable for every teammate this repo dispatches, and
-# widening it to `confirmed|identified` is what makes it reachable at all.
-#
-# Reaching the rule at all needs a target whose OWNING directory disagrees with
-# the stopping session — the same construction the corpse-collision case above
-# uses, and the only path on which ROSTER_ID_MATCH is consulted.
-IFS='|' read -r ID_REPO ID_TR ID_SUB <<< "$(make_world identifiedrow yes)"
-ID_TR_B="${ID_TR%/*}/$SID_B.jsonl"
-ID_SUB_B="${ID_TR_B%.jsonl}/subagents"
-plant_agent "$ID_SUB_B" "aroamer-5555555555555555" "roamer"
-roster_row "$ID_REPO" "$SID_A" "roamer" "aroamer-5555555555555555" "" "identified"
-observe "$SID_A" "$ID_TR_B" "$ID_REPO" "roamer"
-run_guard "$(mk_stop_payload "$SID_A" "$ID_TR_B" "$ID_REPO" "roamer")"
-expect_status "an IDENTIFIED row's id establishes ownership just as a confirmed one does" \
-  0 "$GUARD_ST"
-expect_empty "…and the stop is permitted in silence" "$GUARD_ERR"
+# …and an id NO row carries resolves to nothing, address-shaped, so it is refused.
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "anobody-0000000000000000")"
+expect_status "a transcript-form id no roster row carries: REFUSED" 2 "$GUARD_ST"
 
-# The tightening slice 4/9 bought is untouched: `intended` is still not an
-# ownership claim, because the id on an unconfirmed row is a claim about a launch
-# nothing has observed.
-IFS='|' read -r II_REPO II_TR II_SUB <<< "$(make_world intendedrow yes)"
-II_TR_B="${II_TR%/*}/$SID_B.jsonl"
-II_SUB_B="${II_TR_B%.jsonl}/subagents"
-plant_agent "$II_SUB_B" "adrifter-6666666666666666" "drifter"
-roster_row "$II_REPO" "$SID_A" "drifter" "adrifter-6666666666666666" "" "intended"
-observe "$SID_A" "$II_TR_B" "$II_REPO" "drifter"
-run_guard "$(mk_stop_payload "$SID_A" "$II_TR_B" "$II_REPO" "drifter")"
-expect_status "an INTENDED row's id still establishes nothing: REFUSED" 2 "$GUARD_ST"
-expect_contains "…as FOREIGN, by the owning directory" "FOREIGN" "$GUARD_ERR"
-
-# DEAD HISTORY: the same rule, and the refusal says which case it is. The
-# distinction is the OWNING session's transcript — the check
-# hooks/stop-check.sh and hooks/preflight-probe.sh already make.
-IFS='|' read -r DH_REPO DH_TR DH_SUB <<< "$(make_world deadhistory yes)"
-DH_TR_B="${DH_TR%/*}/$SID_B.jsonl"
-plant_agent "${DH_TR_B%.jsonl}/subagents" "abb20f616-8888888888888" "reviewer"
-rm -f "$DH_TR_B"
-run_guard "$(mk_stop_payload "$SID_A" "$DH_TR_B" "$DH_REPO" "reviewer")"
-expect_status "a dead-history target addressed by name: REFUSED" 2 "$GUARD_ST"
-expect_contains "…and the refusal says the owning session's transcript is gone" \
-  "DEAD HISTORY" "$GUARD_ERR"
-
-# The `intended` row — written at dispatch, before any agent id exists (slice
-# 4/3) — is no longer what makes a target ours; the directory is. What it still
-# does is carry the CONTRACT, which is the one thing the record cannot supply.
-IFS='|' read -r OI_REPO OI_TR OI_SUB <<< "$(make_world oursintended yes)"
-plant_agent "$OI_SUB" "aworker-1616161616161616" "worker"
-mkdir -p "$OI_REPO/.bionic/tmp"
-roster_row "$OI_REPO" "$SID_A" "worker" "" "$PROG_REL" "intended"
-printf 'stage 1\n' > "$OI_REPO/$PROG_REL"
-observe "$SID_A" "$OI_TR" "$OI_REPO" "worker"
-run_guard "$(mk_stop_payload "$SID_A" "$OI_TR" "$OI_REPO" "worker")"
-expect_status "…and the stop of an agent in this session's own directory is permitted" 0 "$GUARD_ST"
-
-# A roster belonging to ANOTHER session proves nothing about this one: the file
-# is per-session by name (D-5), so this session simply never reads it — and the
-# directory it names is not this session's either.
-IFS='|' read -r XR_REPO XR_TR XR_SUB <<< "$(make_world foreignroster yes)"
-XR_TR_B="${XR_TR%/*}/$SID_B.jsonl"
-plant_agent "${XR_TR_B%.jsonl}/subagents" "aworker-1717171717171717" "worker"
-roster_row "$XR_REPO" "$SID_B" "worker" "aworker-1717171717171717"
-observe "$SID_A" "$XR_TR_B" "$XR_REPO" "worker"
-run_guard "$(mk_stop_payload "$SID_A" "$XR_TR_B" "$XR_REPO" "worker")"
-expect_status "another session's roster does not make a target ours" 2 "$GUARD_ST"
-
-# C-2 (Step-6 six-axis review). The by-id ownership clause is keyed on a
-# CONFIRMED row, not merely on a non-empty `agent_id=`. The comment beside it
-# always stated the invariant that way; the code checked only non-emptiness and
-# leaned on a property of a DIFFERENT file — hooks/dispatch-preflight.sh emits
-# `agent_id=` empty on every `intended` row — to keep that true. An invariant
-# enforced somewhere else is the shape slice 4/9 existed to remediate, and here
-# it opens the wall: an `intended` row carrying an id is enough to walk the
-# corpse past the foreign rule, and with a fresh record of its own the stop is
-# PERMITTED.
-IFS='|' read -r IR_REPO IR_TR IR_SUB <<< "$(make_world intendedid yes)"
-IR_TR_B="${IR_TR%/*}/$SID_B.jsonl"
-IR_SUB_B="${IR_TR_B%.jsonl}/subagents"
-plant_agent "$IR_SUB_B" "aintended-1919191919191" "stranger"
-roster_row "$IR_REPO" "$SID_A" "some-other-name" "aintended-1919191919191" "" "intended"
-observe "$SID_A" "$IR_TR_B" "$IR_REPO" "aintended-1919191919191"
-run_guard "$(mk_stop_payload "$SID_A" "$IR_TR_B" "$IR_REPO" "stranger")"
-expect_status "an INTENDED row's id does not make a foreign target ours: REFUSED" 2 "$GUARD_ST"
-expect_contains "…and it is the OWNERSHIP refusal, not the missing-observation one" \
-  "filed under session" "$GUARD_ERR"
-expect_absent "…which is what a fresh record of its own would otherwise have spent" \
-  "No observation" "$GUARD_ERR"
-
-# The other half of the same invariant, unchanged: a CONFIRMED row's id still
-# establishes ownership. Slice 4/9 kept that on purpose — an id is unambiguous
-# by construction and a confirmed row is this session's own record of its own
-# launch — so the tightening above must not take it away.
-IFS='|' read -r CR_REPO CR_TR CR_SUB <<< "$(make_world confirmedid yes)"
-CR_TR_B="${CR_TR%/*}/$SID_B.jsonl"
-CR_SUB_B="${CR_TR_B%.jsonl}/subagents"
-plant_agent "$CR_SUB_B" "aconfirmed-2121212121212" "stranger"
-roster_row "$CR_REPO" "$SID_A" "some-other-name" "aconfirmed-2121212121212" "" "confirmed"
-observe "$SID_A" "$CR_TR_B" "$CR_REPO" "aconfirmed-2121212121212"
-run_guard "$(mk_stop_payload "$SID_A" "$CR_TR_B" "$CR_REPO" "stranger")"
-expect_status "a CONFIRMED row's id still establishes ownership: PERMITTED" 0 "$GUARD_ST"
+# (f) `name@team` is not an address form this gate accepts — the suffix must name a session.
+run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "unrostered@team")"
+expect_status "name@team is not an accepted alias: REFUSED" 2 "$GUARD_ST"
+expect_contains "…and the refusal names the accepted form" "@session-" "$GUARD_ERR"
 
 # ============================================================
 echo ""
@@ -1321,148 +1311,158 @@ expect_status "an EXPIRED order does not discharge: REFUSED" 2 "$GUARD_ST"
 
 # ============================================================
 echo ""
-echo "=== Section 13: an id form the STOPPER CAN ACTUALLY USE (field data 2026-08-11) ==="
+echo "=== Section 13: name@session-<launcher> is an ALIAS, checked against that roster (AC-11) ==="
 # ============================================================
 #
-# The by-id escape hatch was unreachable in the field. The gate hands back the
-# TRANSCRIPT-form id (`aname-<hex>`), the platform's stop primitive addresses a
-# teammate as `name@session-xxxxxxxx`, and nothing bridged the two — so the
-# refusal named a way out that the operator could not type. A refusal that cannot
-# be cleared is a refusal that costs four calls and an ambiguity round, which is
-# what it cost on 2026-08-11.
+# The suffix is the spelling the platform's stop primitive takes for a teammate, and it is
+# the one an operator can actually type (field data 2026-08-11). It is NOT a second way to
+# resolve: D2′ keeps it only as an alias that must land on the same single live entry the
+# bare name lands on. What the suffix is checked against is the named LAUNCHER's roster —
+# `roster-<sid>*.state` carrying `|name=<base>|` — because a suffix naming a session that
+# never launched anything of that name is a guess wearing an id's shape.
 
-IFS='|' read -r I_REPO I_TR I_SUB <<< "$(make_world idforms yes)"
-I_TR_B="${I_TR%/*}/$SID_B.jsonl"
-I_SUB_B="${I_TR_B%.jsonl}/subagents"
-plant_agent "$I_SUB_B" "aforeigner-11111111111" "foreigner"
-roster_row "$I_REPO" "$SID_A" "foreigner" "" "" "confirmed" "" "" "foreigner@session-${SID_B:0:8}"
+IFS='|' read -r AL_REPO AL_TR AL_SUB <<< "$(make_world aliasform yes)"
+plant_agent "$AL_SUB" "aroamer-1111111111111111" "roamer"
+# The LAUNCHER's roster — another session's file, in this repo's own state directory.
+roster_row "$AL_REPO" "$SID_B" "roamer" "aroamer-1111111111111111" "" "identified"
+# Ours is what carries the id and the contract for the row we answer for.
+roster_row "$AL_REPO" "$SID_A" "roamer" "aroamer-1111111111111111" "" "identified"
 
-# The refusal still fires for a bare NAME — a name is not an identity, unchanged.
-observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-11111111111"
-run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "foreigner")"
-expect_status "a bare name for a foreign-filed agent: still REFUSED" 2 "$GUARD_ST"
+# The BARE NAME resolves — that is the B-2 fix, and it is the ordinary path.
+observe "$SID_A" "$AL_TR" "$AL_REPO" "roamer"
+run_guard "$(mk_stop_payload "$SID_A" "$AL_TR" "$AL_REPO" "roamer")"
+expect_status "the bare name of a single live entry: PERMITTED" 0 "$GUARD_ST"
 
-# …and the addressing form the platform actually hands the operator RESOLVES as
-# an identity. It is unambiguous by construction in exactly the way the raw id
-# is: it carries the launching session.
-observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-11111111111"
-run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "foreigner@session-${SID_B:0:8}")"
-expect_status "the name@session form is an IDENTITY, not a name: PERMITTED" 0 "$GUARD_ST"
+# The ALIAS resolves to the same entry, and buys no relief from the ceremony.
+observe "$SID_A" "$AL_TR" "$AL_REPO" "roamer"
+run_guard "$(mk_stop_payload "$SID_A" "$AL_TR" "$AL_REPO" "roamer@session-${SID_B:0:8}")"
+expect_status "the alias whose launcher roster carries the base name: PERMITTED" 0 "$GUARD_ST"
+expect_empty "…and permitted in silence" "$GUARD_ERR"
 
-# The raw transcript id keeps working — this adds a form, it does not swap one.
-plant_agent "$I_SUB_B" "aforeigner-22222222222" "foreigner2"
-observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-22222222222"
-run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-22222222222")"
-expect_status "the transcript-form id still resolves: PERMITTED" 0 "$GUARD_ST"
+# A suffix naming a launcher whose roster does NOT carry the name is refused — and the
+# refusal prints the spellings this gate does accept, which is the one spelling
+# hooks/stop-check.sh prints for a candidate and `session-poker.sh adopt` prints for an
+# adopted row (cross-gate Section R).
+observe "$SID_A" "$AL_TR" "$AL_REPO" "roamer"
+run_guard "$(mk_stop_payload "$SID_A" "$AL_TR" "$AL_REPO" "roamer@session-deadbeef")"
+expect_status "an alias naming a launcher with no such row: REFUSED" 2 "$GUARD_ST"
+expect_contains "…and the refusal says the launcher's roster does not carry the name" \
+  "does not carry" "$GUARD_ERR"
+expect_contains "…and prints an accepted spelling" "roamer@session-${SID_B:0:8}" "$GUARD_ERR"
+expect_contains "…including this session's own" "roamer@session-${SID_A:0:8}" "$GUARD_ERR"
 
-# A `name@session-` form whose session is NOT the one the agent is filed under is
-# a guess that happens to be shaped like an id. It stays a name.
-plant_agent "$I_SUB_B" "aforeigner-33333333333" "foreigner3"
-observe "$SID_A" "$I_TR_B" "$I_REPO" "aforeigner-33333333333"
-run_guard "$(mk_stop_payload "$SID_A" "$I_TR_B" "$I_REPO" "foreigner3@session-deadbeef")"
-expect_status "a name@session naming the WRONG session is not an identity: REFUSED" 2 "$GUARD_ST"
+# The refusal above did NOT spend the observation: a refused stop consumes nothing (D-2),
+# so the very next well-spelled stop still has its evidence.
+run_guard "$(mk_stop_payload "$SID_A" "$AL_TR" "$AL_REPO" "roamer@session-${SID_A:0:8}")"
+expect_status "the alias naming THIS session, whose roster carries the name: PERMITTED" 0 "$GUARD_ST"
 
 # ============================================================
 echo ""
-echo "=== Section 14: an ADOPTED agent is stoppable by the session that took it over ==="
+echo "=== Section 14: an ADOPTED agent is stoppable BY BARE NAME (the /clear defect, B-2) ==="
 # ============================================================
 #
-# THE DEFECT, from the field (epic-20 W1, 2026-08-30). After a `/clear`+resume the agents a
-# predecessor session launched are still running, and `session-poker.sh adopt` reads their
-# ids back off the predecessor's roster — but every stop of one was refused as
-# "unresolved: no agent in THIS session's metadata answers to it". Resolution here is
-# `${transcript}/subagents` and nothing else, so a predecessor's agent — filed under the
-# PREDECESSOR's directory — was MATCH_COUNT=0 for every spelling, bare name, addressing form
-# and transcript id alike. The refusal fired before the roster was read at all, which is why
-# writing an adopted row is necessary and not sufficient: the ownership clause it feeds is
-# downstream of a resolution that never happened.
+# THE DEFECT, from the field (epic-20 W1, 2026-08-30; re-diagnosed for this wave as B-2).
+# After a `/clear`+resume the agents a predecessor launched are still running — the same
+# processes, still listed as this session's teammates by the harness — but their metadata is
+# filed under the PREDECESSOR's directory, and one of them had its meta.json in two
+# directories at once. Resolution walked directories, so a bare name was either unresolved
+# or ambiguous, and the operator could not stop a finished, verified agent at all.
 #
-# The widening is keyed on the ADOPTED ROW, never on a project-wide walk: this session may
-# resolve targets in exactly those sessions it has taken a row from, and in no others. The
-# discriminator at the end of this section is what proves that distinction is real.
+# With resolution taken from the live set the bare name simply works. What the roster row
+# still supplies is the id and the session the working log is filed under (`adopted_from`),
+# which no scan is needed to learn.
 
 IFS='|' read -r AD_REPO AD_TR AD_SUB <<< "$(make_world adoptstop yes)"
 AD_TR_B="${AD_TR%/*}/$SID_B.jsonl"
 AD_SUB_B="${AD_TR_B%.jsonl}/subagents"
 
-# The adopted agent: filed under the PREDECESSOR ($SID_B), rostered by the ADOPTING session
-# ($SID_A) with the row `adopt` writes — `identified`, the transcript-form id, the
-# addressing form built from the session that LAUNCHED it ($SID_B, T3 FINDING 1), and the
-# provenance.
+# The agent is filed under the PREDECESSOR ($SID_B) and named in the SUCCESSOR's live set.
 plant_agent "$AD_SUB_B" "aadoptee-1111111111111111" "adoptee"
+plant_live "$AD_TR" fresh "adoptee"
 roster_row "$AD_REPO" "$SID_A" "adoptee" "aadoptee-1111111111111111" "" "identified" "" "" \
   "adoptee@session-${SID_B:0:8}" "$SID_B"
 
-# The payload is the ADOPTING session's own: its session key and its own transcript. That
-# is the configuration the field hit, and the one §13 does not cover — §13 hands the gate
-# the PREDECESSOR's transcript, which makes resolution succeed for a reason a resumed
-# session cannot reproduce.
-printf 'DEBUG-OBS>>%s<<\n' "$( cd "$AD_REPO" && CLAUDE_CONFIG_DIR="${AD_TR%/projects/*}" CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" "aadoptee-1111111111111111" 2>&1 | tail -20 )"
-observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-1111111111111111"
-printf 'DEBUG-STATE>>%s<<\n' "$(cat "$AD_REPO/$STATE_REL" 2>&1)"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee@session-${SID_B:0:8}")"
-printf 'DEBUG-ADOPT-ERR>>%s<<\n' "$GUARD_ERR"
-expect_status "an observed ADOPTED agent is stoppable at the address adopt prints" 0 "$GUARD_ST"
-expect_absent "…and the unresolved refusal is gone" \
-  "no agent in THIS session's metadata" "$GUARD_ERR"
+observe "$SID_A" "$AD_TR" "$AD_REPO" "adoptee"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee")"
+expect_status "an observed ADOPTED agent is stoppable BY BARE NAME after a /clear" 0 "$GUARD_ST"
+expect_empty "…and permitted in silence" "$GUARD_ERR"
 
-# THE CEREMONY IS UNCHANGED for an adopted row: what the fix restores is resolution, not a
-# free pass. A second adopted agent, never looked at, is refused — and refused for the
-# RIGHT reason, which is the half a status assertion alone cannot tell apart from the
-# defect (both exit 2).
+# The address `adopt` prints for the same row resolves as well, through the recorded
+# teammate address on the row itself.
+observe "$SID_A" "$AD_TR" "$AD_REPO" "adoptee"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee@session-${SID_B:0:8}")"
+expect_status "…and so does the address adopt prints for it" 0 "$GUARD_ST"
+
+# THE CEREMONY IS UNCHANGED: a second adopted agent, never looked at, is refused — and for
+# the observation, which is the half a status assertion alone cannot tell from the defect.
 plant_agent "$AD_SUB_B" "aadoptee-2222222222222222" "adoptee2"
+plant_live "$AD_TR" fresh "adoptee" "adoptee2"
 roster_row "$AD_REPO" "$SID_A" "adoptee2" "aadoptee-2222222222222222" "" "identified" "" "" \
   "adoptee2@session-${SID_B:0:8}" "$SID_B"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee2@session-${SID_B:0:8}")"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "adoptee2")"
 expect_status "an UNOBSERVED adopted agent is still refused" 2 "$GUARD_ST"
-expect_contains "…and the refusal is the observation demand, not the unresolved one" \
+expect_contains "…and the refusal is the observation demand, not an unresolved one" \
   "No observation" "$GUARD_ERR"
-expect_absent "…the unresolved refusal does not fire for a rostered adopted row" \
-  "no agent in THIS session's metadata" "$GUARD_ERR"
 
-# The transcript-form id resolves through the widened scan too — this adds a way IN to
-# resolution, it does not swap one address form for another.
-observe "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-2222222222222222"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "aadoptee-2222222222222222")"
-expect_status "the transcript-form id of an adopted agent resolves as well" 0 "$GUARD_ST"
+# THE DISCRIMINATOR. An agent sitting in the predecessor's directory that this session's
+# live set does not name stays invisible — the scope is the harness's statement, not the
+# disk, so no widening by directory can creep back in.
+plant_agent "$AD_SUB_B" "astranger-4444444444444444" "stranger"
+plant_live "$AD_TR" fresh "adoptee" "adoptee2"
+roster_row "$AD_REPO" "$SID_A" "stranger" "astranger-4444444444444444" "" "identified"
+run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "stranger@session-${SID_B:0:8}")"
+expect_status "an agent on disk but absent from the live set: REFUSED" 2 "$GUARD_ST"
+expect_contains "…because it is not live, whatever the disk says" "is not live" "$GUARD_ERR"
 
-# ONE SPELLING, AND IT IS THE LAUNCHING SESSION'S (T3 FINDING 1, live 2026-09-03). This
-# section used to drive the adopted row under `<name>@session-<the ADOPTING session's
-# eight>`, on the probe's reading that a `/clear` re-keys the session id and re-keys the
-# address with it. The live harness refused exactly that string — `No task found with ID:
-# PROBE-AGENT@session-<adopting 8>. Running teammates: PROBE-AGENT@session-<launching 8>` —
-# so the teammate table keys on the session that made the `Agent` call and the roll-over
-# does not move it. `adopt` prints that one now (tests/session-poker.test.sh §8a) and writes
-# it onto the row, so the pins here follow the printed spelling. What this gate does is
-# unchanged: it resolves on the base name and takes ownership from the id on this session's
-# roster, and the suffix reaches `typed_is_identity` either as the recorded address or as
-# the owning session's own eight — both of which this spelling satisfies.
+# ============================================================
+echo ""
+echo "=== Section 15: the answer must be FRESH, and a refusal names the fix (AC-9, D1′) ==="
+# ============================================================
+#
+# The live set is only a statement about NOW if it was recorded this turn. A stale answer
+# still prints its teammates — S4's reader says so deliberately — so this gate must branch on
+# the exit STATUS and never on an empty set. What a stale or absent answer earns is a refusal
+# that names the fix and prints the newest answer's age, because the model is the only thing
+# that can ask the question again.
 
-# WHAT THE WIDENING IS AND IS NOT. It restores RESOLUTION for the sessions this roster
-# names — a directory at a time, since that is the grain a row can name — and it grants no
-# ownership whatever. An agent sitting in the adopted directory that this session holds NO
-# row for resolves and is then refused by the rule that has always refused it: its metadata
-# is filed under another session and no row of ours carries its id.
-plant_agent "$AD_SUB_B" "aneveradopted-333333333333" "neveradopted"
-observe "$SID_A" "$AD_TR" "$AD_REPO" "aneveradopted-333333333333"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "neveradopted@session-${SID_A:0:8}")"
-expect_status "an unadopted agent in the adopted directory: still REFUSED" 2 "$GUARD_ST"
-expect_contains "…as FOREIGN, by the ownership rule rather than by failing to resolve" \
-  "was not launched by this session" "$GUARD_ERR"
+IFS='|' read -r FR_REPO FR_TR FR_SUB <<< "$(make_world freshness yes)"
+plant_agent "$FR_SUB" "aworker-1111111111111111" "worker"
+roster_row "$FR_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 
-# THE DISCRIMINATOR. A THIRD session, adopted from by nobody, stays exactly as invisible as
-# it was: the scan widened by the sessions the roster names and not to the project. Without
-# this the passes above would be equally green under a blind project-wide walk — which is
-# the name-oracle slice 4/9 removed, and the one thing this fix must not reintroduce.
-AD_SID_C="cccccccc-3333-4444-5555-666666666666"
-AD_SUB_C="${AD_TR%/*}/$AD_SID_C/subagents"
-mkdir -p "$AD_SUB_C"
-: > "${AD_TR%/*}/$AD_SID_C.jsonl"
-plant_agent "$AD_SUB_C" "astranger-4444444444444444" "stranger"
-run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "stranger@session-${SID_A:0:8}")"
-expect_status "an agent in a session this roster never adopted from: REFUSED" 2 "$GUARD_ST"
-expect_contains "…with the unresolved refusal, unchanged" \
-  "no agent in THIS session's metadata" "$GUARD_ERR"
+# FRESH — the positive this section's negatives are measured against.
+observe "$SID_A" "$FR_TR" "$FR_REPO" "worker"
+run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
+expect_status "a fresh answer naming the target: PERMITTED" 0 "$GUARD_ST"
+
+# STALE — the same world, the same answer, one more user prompt after it.
+observe "$SID_A" "$FR_TR" "$FR_REPO" "worker"
+plant_live "$FR_TR" stale "worker"
+run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
+expect_status "a STALE answer refuses the stop even though the target is in it" 2 "$GUARD_ST"
+expect_contains "…and the refusal names the fix" "call ListAgents" "$GUARD_ERR"
+expect_contains "…and says the answer is stale" "stale" "$GUARD_ERR"
+expect_matches "…and prints the newest answer's age" 'age' "$GUARD_ERR"
+
+# NONE — no ListAgents answer in the transcript at all.
+: > "$FR_TR"
+run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
+expect_status "no answer at all refuses the stop" 2 "$GUARD_ST"
+expect_contains "…and names the same fix" "call ListAgents" "$GUARD_ERR"
+expect_contains "…reporting no answer was found" "none" "$GUARD_ERR"
+
+# A GARBLED newest answer is `none`, never "all gone" (S4 §F): the reader recognises no
+# section marker, so the gate refuses rather than reading an empty roster out of it.
+plant_live "$FR_TR" fresh "worker"
+sed -i.bak 's/Teammates (1):/Tea mates (1):/; s/This session is /Thus session is /' "$FR_TR"
+rm -f "$FR_TR.bak"
+run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
+expect_status "a garbled newest answer refuses the stop, it does not read as an empty set" 2 "$GUARD_ST"
+expect_contains "…with the same named fix" "call ListAgents" "$GUARD_ERR"
+
+# The paired positive, restored: the fixture is not simply broken.
+plant_live "$FR_TR" fresh "worker"
+run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
+expect_status "…and with the answer restored the same stop is PERMITTED again" 0 "$GUARD_ST"
 
 # ============================================================
 echo ""
