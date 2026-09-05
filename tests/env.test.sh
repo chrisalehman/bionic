@@ -94,7 +94,7 @@ plant_settings_populated() {
   },
   "statusLine": {
     "type": "command",
-    "command": "npx ccstatusline@latest"
+    "command": "ccstatusline"
   }
 }
 JSON

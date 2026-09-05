@@ -934,13 +934,23 @@ echo ""
 echo "=== Group 3: the manifest setup is supposed to leave ==="
 
 # ── ccstatusline: both halves ──
+#
+# THE COMMAND IS THE INSTALLED BINARY, NEVER npx (epic-21 bug-ccstatusline-npx-per-render.md,
+# Fix steps 1-2). `npx ccstatusline@latest` resolves a registry lookup on every render —
+# this is the exact string an EXACT match pins, not a substring, so a regression back to
+# the npx form (even wrapped, e.g. "npx ccstatusline") would fail this the same way a bare
+# substring match on '*ccstatusline*' never could.
 expect_true "manifest: settings.json exists" test -f "$SETTINGS"
-expect_match "manifest: settings.json records the ccstatusline statusLine command" \
-  '*ccstatusline*' "$(jqf '.statusLine.command // ""')"
+expect_eq "manifest: settings.json records the installed-binary statusLine command, never npx" \
+  "ccstatusline" "$(jqf '.statusLine.command // ""')"
 expect_true "manifest: ~/.config/ccstatusline/settings.json exists [ccstatusline-config-missing]" \
   test -f "$CCS_CONFIG"
 expect_true "manifest: ~/.config/ccstatusline/settings.json matches the shipped layout [ccstatusline-config-missing]" \
   cmp -s "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+expect_match "manifest: the ccstatusline install reached npm, not npx (AC-3)" \
+  '*npm install -g ccstatusline*' "$(cat "$CALLS")"
+expect_no_match "manifest: the ccstatusline install never resolves a package over npx" \
+  '*npx ccstatusline*' "$(cat "$CALLS")"
 
 # ── notebooklm: both halves ──
 expect_match "manifest: the notebooklm CLI install reached uv" \
@@ -1258,6 +1268,13 @@ expect_eq "remove: settings.json carried a statusLine command and no longer does
   "yes no" "${SL_WAS} $(yn "$(jqf '.statusLine.command // ""')")"
 expect_eq "remove: settings.json carried bionic's environment names and no longer does" \
   "yes no" "${ENV_NAMES_WAS} $(yn "$(settings_env_names "$SETTINGS")")"
+
+# THE GLOBAL PACKAGE COMES OFF TOO (Fix step 3, AC-3). Clearing `.statusLine` and the
+# config dir used to be the whole removal; now ccstatusline is a real global npm
+# install, and leaving it on disk after `/bionic:remove` is exactly the "clean
+# machine" promise that removal exists to keep.
+expect_match "remove: the ccstatusline uninstall reached npm" \
+  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
 
 # DELETED AT THE REVIVE (epic-18 wave-03): a row asserting that no
 # `bionic-profile-` permission rule survived the teardown. Group 3 asserts setup
