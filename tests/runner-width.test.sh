@@ -135,6 +135,28 @@ dry_run "$RING_F" "$S_CLEAR" 8
 expect_absent "3c no notice when BIONIC_TEST_JOBS was never set" "BIONIC_TEST_JOBS is retired" "$DRY_ERR"
 
 echo
+echo "=== Section 5: a garbage ceiling falls back, it does not kill the run (C-6) ==="
+
+# `pressure_level` refuses a ceiling that is not a positive integer with exit 2 and prints
+# nothing on stdout. `:-8` covers UNSET and nothing else, so `JOBS` came out empty and
+# `xargs -P ""` aborted the whole run — and the wave's own briefs instruct agents to set
+# this variable, so a typo is the likely way to meet it.
+RING_G="$TMPROOT/g/pressure.ring"
+for BAD_CEIL in 0 eight -1 "3 4"; do
+  ring_of "$RING_G" "$NOW" "$S_CLEAR" "$S_CLEAR"
+  dry_run "$RING_G" "$S_CLEAR" "$BAD_CEIL"
+  expect_eq "5 ceiling [$BAD_CEIL]: the runner still exits 0" "0" "$DRY_ST"
+  expect_contains "5 ceiling [$BAD_CEIL]: falls back to the default width" "JOBS=8" "$DRY_OUT"
+  expect_contains "5 ceiling [$BAD_CEIL]: and the refusal is on stderr to explain it" \
+    "pressure_level: need <ceiling> as a positive integer" "$DRY_ERR"
+done
+
+# The fallback is a FALLBACK, not a floor: a VALID ceiling still decides the width.
+ring_of "$RING_G" "$NOW" "$S_CLEAR" "$S_CLEAR"
+dry_run "$RING_G" "$S_CLEAR" 3
+expect_contains "5 a valid ceiling of 3 is still honoured (not replaced by 8)" "JOBS=3" "$DRY_OUT"
+
+echo
 echo "=== Section 4: registration (hook-authoring convention) ==="
 
 # THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner — an unregistered

@@ -273,10 +273,35 @@ _la_read() {  # <transcript.jsonl> -> sets _LA_CACHE_OUT / _LA_CACHE_ERR / _LA_C
   scan="$(_la_scan "$transcript")" || scan=""
 
   # Newest ListAgents answer, and the last user prompt, in one pass over the index.
+  #
+  # BOTH COMPARISONS ARE ON THE NORMALISED TIMESTAMP (Step-6 review C-4). Lexicographic
+  # order IS chronological for UTC ISO-8601, but only once the fractional part has a fixed
+  # width: `…:23.45Z` sorts BELOW `…:23.4Z` as a raw string, because `5` < `Z`. That is
+  # precisely why `_la_norm_ts` exists for the fresh/stale test 60 lines below — and this
+  # reducer, which decides WHICH answer is newest and WHICH prompt is last, did the raw
+  # compare the normaliser was written to prevent. `nts` here is `_la_norm_ts` transcribed
+  # into awk; the raw value is what is emitted, so the age arithmetic still reads the
+  # timestamp the harness wrote.
   index="$(printf '%s\n' "$scan" | LC_ALL=C awk -F'\t' '
+    function nts(t,   i, base, frac) {
+      if (t == "") return ""
+      i = index(t, ".")
+      if (i > 0) { base = substr(t, 1, i - 1); frac = substr(t, i + 1) }
+      else       { base = t;                   frac = "" }
+      sub(/Z$/, "", base)
+      sub(/Z$/, "", frac)
+      frac = frac "000"
+      return base "." substr(frac, 1, 3)
+    }
     $1 == "U" { ids[$2] = 1; next }
-    $1 == "R" { if (($2 in ids) && $3 != "" && $3 >= ans_ts) { ans_ts = $3; ans_id = $2 } next }
-    $1 == "P" { if ($2 > last_p) last_p = $2; next }
+    $1 == "R" {
+      if (($2 in ids) && $3 != "") {
+        k = nts($3)
+        if (k >= ans_k) { ans_k = k; ans_ts = $3; ans_id = $2 }
+      }
+      next
+    }
+    $1 == "P" { k = nts($2); if (k > last_k) { last_k = k; last_p = $2 } next }
     END { printf "%s\t%s\t%s\n", ans_id, ans_ts, last_p }
   ')" || index=""
 
