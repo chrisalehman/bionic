@@ -82,13 +82,12 @@ trap cleanup EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
 mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
-# Since slice 4/5, hooks/stop-check.sh reads CLAUDE_CODE_SESSION_ID to classify a
-# target against ITS OWN session's roster. This suite runs inside a real Claude
-# Code session, which exports a real one; unpinned, every bare `bash "$OBSERVE"`
-# call below would silently classify against WHATEVER session happens to be
-# running the suite instead of UNKNOWN, the always-reachable answer none of
-# these fixtures set a roster up for. Section E opts back in explicitly, per call,
-# exactly where OURS is the fact under test.
+# Since slice 4/5, hooks/stop-check.sh reads CLAUDE_CODE_SESSION_ID; since S6 it reads it to
+# find the session TRANSCRIPT the live set is recorded in, which is the whole of resolution.
+# This suite runs inside a real Claude Code session, which exports a real one, and an
+# unpinned call would read THAT session's live set — the suite's hermetic claim quietly false.
+# So it is unset here and pinned per call, to the fixture session, everywhere a party has to
+# resolve anything.
 unset CLAUDE_CODE_SESSION_ID
 
 PASS=0; FAIL=0; TOTAL=0
@@ -298,7 +297,9 @@ mk_substop_payload() {  # <cwd> <sid> <agent-id> <agent-type> <stop_hook_active 
 # also what makes the two halves one fact rather than two parsers (F-1).
 run_pair() {  # <repo> <transcript> <sid> <args…> -> recorder's exit status; sets PAIR_OUT
   local repo="$1" tr="$2" sid="$3"; shift 3
-  PAIR_OUT=$( cd "$repo" && bash "$OBSERVE" "$@" 2>/dev/null )
+  # The sid is pinned on the observation too, not only stamped into the payload: since S6 it
+  # is how hooks/stop-check.sh finds the transcript carrying the live set.
+  PAIR_OUT=$( cd "$repo" && env CLAUDE_CODE_SESSION_ID="$sid" bash "$OBSERVE" "$@" 2>/dev/null )
   mk_bash_post "$sid" "$tr" "$repo" "bash ~/.claude/hooks/stop-check.sh $*" "$PAIR_OUT" \
     | bash "$PARTY_ER" >/dev/null 2>&1
 }
@@ -315,6 +316,57 @@ roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
   [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
   printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
     "$status" "$sid" "$name" "$aid" "$prog" >> "$f"
+  return 0
+}
+
+# THE RECORDED ListAgents ANSWER — the live set (S6, D1′). Since this slice both stop
+# scripts resolve a target against the newest recorded ListAgents answer in a session's
+# transcript, so a fixture transcript is no longer an empty file. The body's shape is the
+# real one, copied from tests/live-agents.test.sh, whose bodies are byte-verbatim captures:
+# the separator is U+00B7 and `[8895ce]` is the harness ref suffix the reader strips.
+# Accumulated in a sidecar so a second call ADDS a teammate rather than replacing the answer.
+# THE RECORDER UPDATES A ROW, IT DOES NOT APPEND ONE. `intended → confirmed → identified` is
+# one row moving through three states carrying one contract (§K), so a fixture that appended a
+# second row of the same name would leave the CONTRACT on the first and the AGENT ID on the
+# second — a shape no writer produces, and one that would make the readers below look broken
+# for a reason nothing in production can reach.
+roster_identify() {  # <repo> <sid> <name> <agent-id>
+  local f="$1/.bionic/tmp/roster-$2.state" prev
+  prev=$(grep -F "|name=$3|" "$f" 2>/dev/null | tail -1) || prev=""
+  if [ -n "$prev" ]; then
+    # FORWARD-COPIED, not rewritten: the identification arm carries the whole row forward with
+    # its contract intact (§K), and the earlier state's row stays on the file exactly as the
+    # real writers leave it — which is what lets a later section still find an `intended` row
+    # to complete. Only the two fields the identification owns are replaced.
+    printf '%s\n' "$prev" \
+      | sed -e 's/|status=[^|]*|/|status=identified|/' -e "s/|agent_id=[^|]*|/|agent_id=$4|/" >> "$f"
+    return 0
+  fi
+  roster_row "$1" "$2" "$3" "$4" "" "identified"
+}
+
+CG_LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
+
+cg_live() {  # <transcript> <name>...
+  local tr="$1"; shift
+  local f="${tr%.jsonl}.names" names=() n body
+  mkdir -p "$(dirname "$tr")"
+  for n in "$@"; do printf '%s\n' "$n" >> "$f"; done
+  while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < "$f"
+  body=$(
+    printf '%s\n\nTeammates (%d):\n' "$CG_LA_SELF" "${#names[@]}"
+    for n in "${names[@]}"; do
+      printf '  %s [8895ce]  ·  bionic:implementor  ·  running  ·  started 7m ago\n' "$n"
+    done
+  )
+  {
+    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
+    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01FIXTURELISTAGENTS",name:"ListAgents",input:{}}]}}'
+    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01FIXTURELISTAGENTS",content:$b}]}}'
+  } > "$tr"
   return 0
 }
 
@@ -957,6 +1009,10 @@ ITR="$IPROJ/$SID_A.jsonl"
 printf '{}\n' > "$ITR"
 printf '{"name":"worker","agentType":"implementor"}' > "$ISUB/agent-aworker-1111111111111111.meta.json"
 printf '{}\n' > "$ISUB/agent-aworker-1111111111111111.jsonl"
+# …and the two facts S6 added to "reachable by both parties": a line in this session's live
+# set, and a roster row carrying the agent id the working log is filed under.
+cg_live "$ITR" "worker"
+roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111" "" "identified"
 write_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # The producer, run for real, with the session key on the channel it actually
@@ -1071,20 +1127,31 @@ printf '{}\n' > "$RPROJ/$SID_A.jsonl"
 printf '{}\n' > "$RPROJ/$SID_B.jsonl"
 RTR="$RPROJ/$SID_A.jsonl"
 
-plant() {  # <subagents-dir> <agent-id> <name>
+# Since S6 a target needs two more facts to resolve at all: a line in its session's LIVE SET
+# (the recorded ListAgents answer), and a roster row carrying its agent id — which is what
+# the working log is filed under, and what the deleted directory scan used to supply.
+plant() {  # <subagents-dir> <agent-id> <name> [repo, default $RREPO]
   printf '{"name":"%s","agentType":"implementor","description":"fixture","model":"opus"}' "$3" \
     > "$1/agent-$2.meta.json"
   printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
     > "$1/agent-$2.jsonl"
+  cg_live "${1%/subagents}.jsonl" "$3"
+  roster_identify "${4:-$RREPO}" "$SID_A" "$3" "$2"
 }
 
 # The three questions, each asked of the REAL party.
 q_observation() {  # <typed> -> resolved|ambiguous|unresolved
   local out
-  out=$( cd "$RREPO" && bash "$OBSERVE" "$1" 2>&1 )
+  out=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" "$1" 2>&1 )
   case "$out" in
     *"Resolved:      ambiguous"*)  echo ambiguous ;;
     *"Resolved:      unresolved"*) echo unresolved ;;
+    # S6 spells the no-evidence-tier answer two ways where it used to spell it one: a target
+    # the live set does not name is `not live`, and a session with no readable answer at all
+    # is still `unresolved`. Both mean the same thing to the operator and to the recorder —
+    # no evidence tier was shown, so no machine line is printed — so both map here.
+    *"Resolved:      not live"*)   echo unresolved ;;
+    *"Resolved:      live, but no agent id"*) echo unresolved ;;
     *"Resolved:      a"*)          echo resolved ;;
     *) echo "other" ;;
   esac
@@ -1113,10 +1180,12 @@ expect_eq "C1 observation resolves a uniquely-named agent" "resolved" "$(q_obser
 expect_eq "C1 recorder records the same agent" "recorded" "$(q_recorder solo)"
 expect_eq "C1 gate discharges the stop on that record" "permitted" "$(q_gate solo)"
 
-# --- case 2: the same name in two sessions of this project. The operator is
-# shown a candidate list and NO evidence tier, so nothing may be dischargeable. ---
+# --- case 2: TWO LIVE TEAMMATES answering to one name — which is what "the same name in two
+# sessions of this project" became at S6, because the count comes from the harness's answer
+# and not from a directory walk. The operator is shown a candidate list and NO evidence tier,
+# so nothing may be dischargeable. ---
 plant "$RPROJ/$SID_A/subagents" "adup-2222222222222222" "dup"
-plant "$RPROJ/$SID_B/subagents" "adup-3333333333333333" "dup"
+plant "$RPROJ/$SID_A/subagents" "adup-3333333333333333" "dup"
 expect_eq "C2 observation reports the cross-session name as AMBIGUOUS" \
   "ambiguous" "$(q_observation dup)"
 expect_eq "C2 gate refuses it" "refused" "$(q_gate dup)"
@@ -1131,7 +1200,13 @@ expect_eq "C2 gate refuses it" "refused" "$(q_gate dup)"
 # agent-address shape, so MATCH_COUNT=0 now passes it through instead of
 # refusing — a ratified divergence (design ¶T4), never silent (one logged
 # passthrough line names why it did not refuse). ---
+# At S6 the shape of this case changes with the key: a teammate the harness names for THIS
+# session is resolvable by both parties wherever its working log happens to be filed, and one
+# it does not name is resolvable by neither. What stays is the leg the divergence was about —
+# the observation shows, the gate decides — driven here on an agent whose log sits under
+# another session's directory while this session's answer names it, which is the /clear shape.
 plant "$RPROJ/$SID_B/subagents" "aforeign-4444444444444444" "foreign"
+cg_live "$RTR" "foreign"
 expect_eq "C3 observation can still SHOW another session's agent" \
   "resolved" "$(q_observation foreign)"
 
@@ -1186,7 +1261,7 @@ mkdir -p "$RREPO/.bionic/tmp"; printf 'step 1\n' > "$GPROG"
 
 g_observation() {  # <args…> -> the agent id the OBSERVATION resolved, or "refused"
   local out st
-  out=$( cd "$RREPO" && bash "$OBSERVE" "$@" 2>&1 ); st=$?
+  out=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" "$@" 2>&1 ); st=$?
   if [ "$st" -ne 0 ] && printf '%s' "$out" | grep -qF 'Usage:'; then echo refused; return; fi
   printf '%s' "$out" | grep -E '^Resolved:' | grep -oE 'a[a-z0-9-]*-[0-9a-f]{16}' | head -1
 }
@@ -1256,7 +1331,7 @@ done
 # working log's size is what the recorder writes down as the activity level. Two
 # computations of one truth, previously untested together (D2).
 plant "$RPROJ/$SID_A/subagents" "afacts-5555555555555555" "facts"
-OBS_OUT=$( cd "$RREPO" && bash "$OBSERVE" facts 2>&1 )
+OBS_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" facts 2>&1 )
 OBS_SIZE=$(printf '%s' "$OBS_OUT" | grep -E '^  size:' | grep -oE '[0-9]+' | head -1)
 q_recorder facts >/dev/null
 REC_SIZE=$(grep -F 'target=afacts-5555555555555555' "$RREPO/.bionic/tmp/stop-check.state" \
@@ -1288,10 +1363,12 @@ STR="$SPROJ/$SID_A.jsonl"; printf '{}\n' > "$STR"
 SSUB="$SPROJ/$SID_A/subagents"
 printf '{"name":"worker"}' > "$SSUB/agent-aworker-2222222222222222.meta.json"
 printf '{}\n' > "$SSUB/agent-aworker-2222222222222222.jsonl"
+cg_live "$STR" "worker"
+roster_row "$SREPO" "$SID_A" "worker" "aworker-2222222222222222" "" "identified"
 write_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # 1. the recorder, with the secret in the command line beside a real run
-SOUT=$( cd "$SREPO" && bash "$OBSERVE" worker 2>/dev/null )
+SOUT=$( cd "$SREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" worker 2>/dev/null )
 mk_bash_post "$SID_A" "$STR" "$SREPO" \
   "export TOKEN=$SECRET && bash ~/.claude/hooks/stop-check.sh worker" "$SOUT" \
   | bash "$PARTY_ER" >/dev/null 2>&1
@@ -1307,7 +1384,7 @@ mk_stop_payload "$SID_A" "$STR" "$SREPO" "$SECRET" | bash "$PARTY_SG" >/dev/null
     HOME="$SANDBOX/home" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
     bash "$PROBE" >/dev/null 2>&1 )
 # 5. the observation, with the secret as the target it fails to resolve
-( cd "$SREPO" && bash "$OBSERVE" "$SECRET" >/dev/null 2>&1 )
+( cd "$SREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" "$SECRET" >/dev/null 2>&1 )
 
 LEAKS=$(grep -rlF "$SECRET" "$SREPO" "$SANDBOX/home" 2>/dev/null | grep -c . | tr -d ' ')
 
@@ -1390,7 +1467,7 @@ expect_eq "the start gate writes ONLY the attestation, the roster row and their 
 # The observation stays read-only ABSOLUTELY — zero footprint, no sanctioned set at
 # all. Compared against the POST-start listing rather than the pre-start one, so it
 # answers for its own writes instead of inheriting the start gate's.
-( cd "$QREPO" && bash "$OBSERVE" nobody >/dev/null 2>&1 )
+( cd "$QREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" nobody >/dev/null 2>&1 )
 
 # ============================================================
 echo ""
@@ -1442,35 +1519,37 @@ E3_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
 expect_contains "the recorder forwards that classification into the record" \
   "|classification=ours|" "$E3_STATE"
 
-# --- and the not-ours direction, on the shape that really produced it: a target
-# filed under ANOTHER session's directory, carrying a name this session's roster
-# also carries on an UNCONFIRMED row. The row must grant nothing, and whatever the
-# producer decides must reach the record verbatim — this suite's whole subject.
-# Recording it needs a payload whose transcript names that other session, which is
-# the only way the recorder resolves outside this session's own directory. ---
+# --- and the not-ours direction, on the shape that really produced it: a target filed under
+# ANOTHER session's directory, carrying a name this session's roster also carries on an
+# UNCONFIRMED row. The row must grant nothing — and since S6 neither does the directory. The
+# answer is no longer a CLASSIFICATION that rides into the record; it is a refusal, so the
+# thing this suite pins is that the producer showed no evidence tier and the recorder
+# therefore has nothing to copy. That is a stronger agreement than a shared label: there is
+# no second reading of it to drift. ---
 plant "$RPROJ/$SID_B/subagents" "acorpse-aaaaaaaaaaaaaaaa" "corpse"
 roster_row "$RREPO" "$SID_A" "corpse" "" "" intended
 E5_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" corpse 2>&1 )
 E5_MLINE=$(printf '%s\n' "$E5_OUT" | grep '^stop-check-observation/')
 expect_contains "an unconfirmed row's NAME does not make another session's agent ours" \
-  "|classification=foreign|" "$E5_MLINE"
-mk_bash_post "$SID_A" "$RPROJ/$SID_B.jsonl" "$RREPO" \
-  "bash ~/.claude/hooks/stop-check.sh corpse" "$E5_OUT" | bash "$PARTY_ER" >/dev/null 2>&1
-E5_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
-expect_contains "the recorder forwards a non-ours classification into the record too" \
-  "|classification=foreign|" "$E5_STATE"
+  "Resolved:      not live" "$E5_OUT"
+expect_eq "the recorder is given nothing to forward, because no tier was shown" \
+  "" "$E5_MLINE"
 
-# --- with no own session id at all, the producer says UNKNOWN and the recorder
-# copies that verbatim rather than defaulting to any other label ---
+# --- with no own session id at all there is no transcript, so no live set: the producer
+# refuses instead of labelling, and the recorder still copies exactly what it was given. The
+# `unknown` classification this pair used to assert was the label for "ownership could not be
+# established", and ownership is no longer a thing this command decides. ---
 E4_OUT=$( cd "$RREPO" && env -u CLAUDE_CODE_SESSION_ID bash "$OBSERVE" worker 2>&1 )
 E4_MLINE=$(printf '%s\n' "$E4_OUT" | grep '^stop-check-observation/')
-expect_contains "with no own session id the machine line carries classification=unknown" \
-  "classification=unknown" "$E4_MLINE"
+expect_contains "with no own session id the producer refuses, naming the fix" \
+  "call ListAgents" "$E4_OUT"
+expect_eq "…and prints no machine line at all" "" "$E4_MLINE"
+rm -f "$RREPO/.bionic/tmp/stop-check.state"
 mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh worker" "$E4_OUT" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 E4_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
-expect_contains "the recorded observation agrees: classification=unknown" \
-  "classification=unknown" "$E4_STATE"
+expect_absent "the recorder writes no record for a run that showed no evidence" \
+  "typed=worker|log=" "$E4_STATE"
 
 # ============================================================
 echo ""
@@ -1499,7 +1578,7 @@ expect_contains "…carrying the progress path lifted from the brief" \
 # The agent that row describes, now spawned. Its id is what a confirmed row would
 # carry; the row itself is still `intended`, which is the mid-dispatch state the
 # NAME fallback exists for.
-plant "$ISUB" "aw99impl-8888888888888888" "w99-impl"
+plant "$ISUB" "aw99impl-8888888888888888" "w99-impl" "$IREPO"
 printf 'stage 1\n' > "$IREPO/.bionic/tmp/w99.progress"
 
 F_OUT=$( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-impl 2>&1 )
@@ -1669,26 +1748,35 @@ g_progress_source() {
 expect_eq "the observation takes its contract from the canonical roster" \
   "roster" "$(g_progress_source)"
 mv "$G_ROSTER" "$G_MUTANT"
-expect_eq "…and finds no contract when the roster is named anything else" \
-  "none" "$(g_progress_source)"
+# At any other name the observation shows NOTHING — a stronger form of the same pin than the
+# `progress_source=none` it used to print. Since S6 the roster is also where the agent id
+# comes from, so a roster the reader cannot find leaves it without a working log to look at,
+# and a run that shows no evidence tier prints no machine line at all.
+expect_eq "…and finds no contract, and nothing else either, when the roster is named anything else" \
+  "" "$(g_progress_source)"
 mv "$G_MUTANT" "$G_ROSTER"
 
-# READER 3 — the stop gate. An observation that never opened the contracted
-# progress channel is refused BECAUSE the roster names one (D-6); with the roster
-# at any other name the gate cannot know a channel exists, and the stop stands.
-g_stop_unnamed() {  # -> the gate's exit status for a channel-blind observation
+# READER 3 — the stop gate, over the same rename. With the roster at its canonical name the
+# whole chain closes: the look resolves through the row, the recorder stores it and the gate
+# spends it. At any other name neither party can identify the target, and the gate refuses.
+# (The D-6 channel-blind refusal this leg used to drive lives in tests/stop-guard.test.sh §9,
+# where a look taken BEFORE the contract was recorded is what makes a look channel-blind now
+# — an observation with no session key cannot reach a live set and produces no record at all.)
+g_stop_reason() {  # -> which refusal the gate reaches for an unobserved target
   local out
-  out=$( cd "$IREPO" && env CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$OBSERVE" w99-impl 2>&1 )
-  mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$out" \
-    | bash "$PARTY_ER" >/dev/null 2>&1
-  mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" >/dev/null 2>&1
-  echo $?
+  rm -f "$IREPO/.bionic/tmp/stop-check.state"
+  out=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1)
+  case "$out" in
+    *"carries no agent id"*) echo unidentified ;;
+    *"No observation"*)      echo identified ;;
+    *)                       echo "other" ;;
+  esac
 }
-expect_eq "the stop gate reads the contracted channel out of the canonical roster" \
-  "2" "$(g_stop_unnamed)"
+expect_eq "the stop gate identifies its target through the canonical roster" \
+  "identified" "$(g_stop_reason)"
 mv "$G_ROSTER" "$G_MUTANT"
-expect_eq "…and knows of no channel when the roster is named anything else" \
-  "0" "$(g_stop_unnamed)"
+expect_eq "…and cannot identify it at all when the roster is named anything else" \
+  "unidentified" "$(g_stop_reason)"
 mv "$G_MUTANT" "$G_ROSTER"
 
 # READER 4 — the probe's roster coverage, which scans OTHER live sessions' roster
@@ -1847,7 +1935,7 @@ DSLUG=$(printf '%s' "$DREPO" | sed 's/[^a-zA-Z0-9]/-/g')
 DPROJ="$CLAUDE_CONFIG_DIR/projects/$DSLUG"
 mkdir -p "$DPROJ/$SID_A/subagents"
 printf '{}\n' > "$DPROJ/$SID_A.jsonl"
-plant "$DPROJ/$SID_A/subagents" "adeliv-2222222222222222" "deliv"
+plant "$DPROJ/$SID_A/subagents" "adeliv-2222222222222222" "deliv" "$DREPO"
 
 DFX="$DREPO/deliv"
 mkdir -p "$DFX/empty-dir" "$DFX/full-dir"
@@ -1865,6 +1953,10 @@ D_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 DROSTER="$DREPO/.bionic/tmp/roster-$SID_A.state"
 mkdir -p "$DREPO/.bionic/tmp"
 printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$DROSTER"
+# The agent's own row, re-planted because the header write above truncates the file: since S6
+# the observation takes the agent id — and therefore the working log — off this row, and every
+# `d_row` below is a CONTRACT row named for its case rather than for the agent.
+roster_identify "$DREPO" "$SID_A" "deliv" "adeliv-2222222222222222"
 d_row() {  # <name> <deliverable value>
   printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=adeliv-2222222222222222|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=1 minute|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01%s\n' \
     "$SID_A" "$1" "$D_LAUNCHED" "$2" "$1" >> "$DROSTER"
@@ -2490,7 +2582,7 @@ expect_eq "…and the same contract as every row before it" \
 # ownership rule under test.
 mkdir -p "$SANDBOX/k-own-meta"
 mv "$KSUB/agent-$KID.meta.json" "$KSUB/agent-$KID.jsonl" "$SANDBOX/k-own-meta/"
-plant "$KSUB_B" "$KID" "w16-chain"
+plant "$KSUB_B" "$KID" "w16-chain" "$KREPO"
 K_ROSTER_NOID="$SANDBOX/k-roster-without-identified.state"
 grep -v 'status=identified' "$KROSTER" | sed -e "s/|agent_id=$KID|/|agent_id=|/" > "$K_ROSTER_NOID"
 K_ROSTER_FULL="$SANDBOX/k-roster-full.state"
@@ -2521,7 +2613,11 @@ k_stop_gate_says() {  # -> foreign | ours
     | bash "$PARTY_ER" >/dev/null 2>&1
   out=$(mk_stop_payload "$SID_A" "$KTR_B" "$KREPO" "w16-chain" | bash "$PARTY_SG" 2>&1)
   case "$out" in
-    *"was not launched by this session"*) echo foreign ;;
+    # One refusal replaces the other: the gate no longer asks whose DIRECTORY the metadata
+    # sits in, it asks whether this session's roster names an id for the target. Both are the
+    # same row flipping, which is what this section pins.
+    *"carries no agent id"*) echo foreign ;;
+    *"is not live"*)         echo foreign ;;
     *) echo ours ;;
   esac
 }
@@ -2530,8 +2626,20 @@ expect_eq "with the identified row, the observation vouches for a cross-session 
 expect_eq "…and the stop gate's foreign wall stands down over the same row" \
   "ours" "$(k_stop_gate_says)"
 cp "$K_ROSTER_NOID" "$KROSTER"
-expect_eq "without the transcript id anywhere on the roster, the observation calls it foreign" \
-  "foreign" "$(k_observation_says)"
+# Without the transcript id anywhere on the roster there is no working log either reader can
+# name — the id is what it is filed under — so both refuse, and they refuse on the same row.
+# The verdict used to be `foreign`, an answer about which session's DIRECTORY held the
+# metadata; the row's job in the chain is unchanged, only what depends on it is narrower.
+expect_eq "without the transcript id anywhere on the roster, the observation shows nothing" \
+  "other" "$(k_observation_says)"
+# The GATE's half needs one more thing said out loud than it used to. A LANDED contract
+# discharges a stop before the gate ever asks where the working log is (epic-16 wave-02 R2),
+# and the row under test here has one — so the id gap is invisible on that path, correctly.
+# Strip the declared deliverable and nothing discharges any more; the gate then reaches the
+# question the row answers, and refuses because no id on it can name a log to look at.
+K_ROSTER_NOID_NOCONTRACT="$SANDBOX/k-roster-noid-nocontract.state"
+sed 's/|deliverable=[^|]*|/|deliverable=|/' "$K_ROSTER_NOID" > "$K_ROSTER_NOID_NOCONTRACT"
+cp "$K_ROSTER_NOID_NOCONTRACT" "$KROSTER"
 expect_eq "…and the stop gate refuses it, both readers flipping on the same row" \
   "foreign" "$(k_stop_gate_says)"
 cp "$K_ROSTER_FULL" "$KROSTER"
@@ -4204,7 +4312,20 @@ RSUB_AD="$RPROJ_AD/$SID_A/subagents"
 mkdir -p "$RSUB_AD" "$RPROJ_AD/$SID_B/subagents" "$RREPO_AD/.bionic/tmp"
 printf '{}\n' > "$RPROJ_AD/$SID_A.jsonl"
 printf '{}\n' > "$RPROJ_AD/$SID_B.jsonl"
-plant "$RSUB_AD" "aadoptee-4444444444444444" "adoptee"
+# The agent's files, planted by hand rather than through `plant()`: this section wants the
+# predecessor's roster to carry exactly ONE row for the agent — the one the printf below
+# writes — because `adopt` renders what it reads and a second row of the same name would
+# render twice.
+printf '{"name":"adoptee","agentType":"implementor","description":"fixture","model":"opus"}' \
+  > "$RSUB_AD/agent-aadoptee-4444444444444444.meta.json"
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
+  > "$RSUB_AD/agent-aadoptee-4444444444444444.jsonl"
+# AND IT IS LIVE IN THE SUCCESSOR'S SET (S6, D1′). That is what a `/clear`+resume leaves
+# behind and what the whole adopted address is for: the same process, still listed as a
+# teammate by the harness, its working log still filed under the session that LAUNCHED it.
+# Both transcripts carry the answer, because both sessions are looking at the same agent.
+cg_live "$RPROJ_AD/$SID_A.jsonl" "adoptee"
+cg_live "$RPROJ_AD/$SID_B.jsonl" "adoptee"
 write_plan "$RREPO_AD/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # THE PREDECESSOR'S ROW, as hooks/execution-recorder.sh left it when that session died:
@@ -4243,6 +4364,10 @@ expect_contains "the observation resolves the address adopt printed" \
 expect_contains "…and classifies it OURS by the adoption the poker wrote" \
   "Classification: OURS" "$R_AD_CHECK"
 expect_contains "…naming the session it was adopted from" "adopted_from=$SID_A" "$R_AD_CHECK"
+# …and the working log it reads is the one filed under the LAUNCHING session, which is the
+# fact `adopted_from=` exists to carry now that no directory scan goes looking for it.
+expect_contains "…and reads the working log filed under that session" \
+  "$SID_A/subagents/agent-aadoptee-4444444444444444.jsonl" "$R_AD_CHECK"
 
 # SITE 3 — the stop gate resolves the same string and accepts it as an IDENTITY. The
 # paired negative first: resolution succeeding is not the ceremony being skipped.

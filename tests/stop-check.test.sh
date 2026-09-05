@@ -111,12 +111,81 @@ make_world() {
   printf '%s|%s|%s\n' "$home" "$repo" "$(slugify "$repo")"
 }
 
+# ---------- THE RECORDED ListAgents ANSWER — the live set (S6, D1′) ----------
+#
+# Since this slice a target resolves against the newest recorded ListAgents answer in the
+# OBSERVING session's transcript, not against agent-*.meta.json on disk. So every world needs
+# a transcript carrying a prompt, the assistant's ListAgents call and the harness's answer, in
+# that order — the order is what makes the answer FRESH.
+#
+# THE BODY'S SHAPE IS THE REAL ONE, copied from tests/live-agents.test.sh, whose bodies are
+# byte-verbatim captures of this project's own transcript: the separator is U+00B7 and the
+# `[8895ce]` ref suffix is what the reader strips off a name.
+LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
+
+la_body() {  # <name>... -> one real-shaped ListAgents answer body
+  local n
+  printf '%s\n\nTeammates (%d):\n' "$LA_SELF" "$#"
+  for n in "$@"; do
+    printf '  %s [8895ce]  ·  bionic:senior-implementor  ·  running  ·  started 7m ago\n' "$n"
+  done
+}
+
+# plant_live <transcript> <fresh|stale> <name>...
+plant_live() {
+  local tr="$1" freshness="$2"; shift 2
+  local body; body=$(la_body "$@")
+  {
+    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
+    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01FIXTURELISTAGENTS",name:"ListAgents",input:{}}]}}'
+    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01FIXTURELISTAGENTS",content:$b}]}}'
+    if [ "$freshness" = "stale" ]; then
+      jq -nc --arg ts "2026-09-05T00:53:00.000Z" \
+        '{type:"user",timestamp:$ts,message:{role:"user",content:"a later turn"}}'
+    fi
+  } > "$tr"
+  return 0
+}
+
+# add_live <home> <slug> <session-id> <name>...  — add teammates to that session's live set,
+# accumulating in a sidecar so a later call adds to the answer rather than replacing it.
+add_live() {
+  local home="$1" slug="$2" sid="$3"; shift 3
+  local f="$home/.claude/projects/$slug/$sid.names" names=() n
+  mkdir -p "$home/.claude/projects/$slug"
+  for n in "$@"; do printf '%s\n' "$n" >> "$f"; done
+  while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < "$f"
+  plant_live "$home/.claude/projects/$slug/$sid.jsonl" fresh "${names[@]}"
+  return 0
+}
+
 # make_agent <home> <slug> <session-id> <agent-id> <name> <last-text> [meta-extra-json]
+#
+# `MK_AGENT_ROW=no` plants everything EXCEPT the roster row, for the cases whose whole point
+# is a row of some other shape (or none).
+#
+# Plants the working log and metadata as before, AND the two facts a target now needs to
+# resolve at all: a line in the session's live set, and a roster row carrying the agent id
+# (which is what the working log is filed under, and which the deleted directory scan used to
+# supply). The first session a world plants under is its PRIMARY session — the one run_check
+# observes as — recorded in a sidecar so every existing call site keeps working unchanged.
 make_agent() {
   local home="$1" slug="$2" sid="$3" aid="$4" aname="$5" text="$6" extra="${7:-}"
   local dir="$home/.claude/projects/$slug/$sid/subagents"
+  local repo="${home%/home}/repo"
   mkdir -p "$dir"
-  : > "$home/.claude/projects/$slug/$sid.jsonl"
+  [ -f "$home/.fixture-sid" ] || printf '%s\n' "$sid" > "$home/.fixture-sid"
+  add_live "$home" "$slug" "$sid" "$aname"
+  if [ "${MK_AGENT_ROW:-yes}" = "yes" ]; then
+    mkdir -p "$repo/.bionic/tmp"
+    local rf="$repo/.bionic/tmp/roster-$sid.state"
+    [ -f "$rf" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$rf"
+    printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|absent=|waiver=|teammate_id=|adopted_from=|tool_use_id=toolu_01FIXTURE\n' \
+      "$sid" "$aname" "$aid" >> "$rf"
+  fi
   # meta.json — field set per §2.8 plus the live named-teammate fields.
   if [ -n "$extra" ]; then
     printf '{"agentType":"general-purpose","description":"a test agent","name":"%s","toolUseId":"toolu_01TEST","spawnDepth":0,%s}\n' \
@@ -142,9 +211,16 @@ make_agent() {
 # suite that redirected only HOME would read the REAL metadata root. It is
 # pointed at "$home/.claude", the same directory make_agent plants under, so the
 # derivation under test is unchanged; nothing here injects a projects path.
+#
+# THE SESSION KEY IS THE WORLD'S PRIMARY SESSION since S6. This used to pin it EMPTY, because
+# resolution walked the project's directories and needed no session of its own; now the live
+# set is read from this session's transcript, so a keyless run resolves nothing at all. It is
+# still pinned rather than inherited — this suite runs inside a real Claude Code session which
+# exports a real value, and an unpinned test would read that session's live set.
 run_check() {
   local home="$1" repo="$2"; shift 2
-  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" CLAUDE_CODE_SESSION_ID= \
+  local sid; sid=$(cat "$home/.fixture-sid" 2>/dev/null) || sid=""
+  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" CLAUDE_CODE_SESSION_ID="$sid" \
       bash "$CHECK" "$@" 2>&1 )
 }
 
@@ -156,6 +232,14 @@ run_check() {
 # suite is run inside a real Claude Code session, which exports its own real
 # CLAUDE_CODE_SESSION_ID, and an unpinned test would silently vary its
 # classification verdict with whatever session happens to be running it.
+# run_check_nosid — the degraded case: no session key on either channel. Since S6 there is
+# no live set without one, so this is a refusal rather than a classification.
+run_check_nosid() {
+  local home="$1" repo="$2"; shift 2
+  ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" \
+      env -u CLAUDE_CODE_SESSION_ID bash "$CHECK" "$@" 2>&1 )
+}
+
 run_check_as() {
   local sid="$1" home="$2" repo="$3"; shift 3
   ( cd "$repo" && HOME="$home" CLAUDE_CONFIG_DIR="$home/.claude" CLAUDE_CODE_SESSION_ID="$sid" \
@@ -189,13 +273,26 @@ expect_contains "resolves a target typed as name@team" "aw1r-slice-4-3-3202dd476
 OUT=$(run_check "$H1" "$R1" "no-such-agent"); ST=$?
 expect_status "unresolvable target exits 1" 1 "$ST"
 
-# Ambiguity: the same NAME in two different sessions of the same project.
-make_agent "$H1" "$S1" "22222222-2222-2222-2222-222222222222" \
+# Ambiguity: one name, TWO live teammates — two lines in the Teammates block, which is what
+# two sessions in one root launching same-named agents looks like to the harness (D2′).
+make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
   "a567bd5c6d1e03d67" "w1r-slice-4-3" "older run" >/dev/null
 OUT=$(run_check "$H1" "$R1" "w1r-slice-4-3"); ST=$?
 expect_status "ambiguous target exits 1" 1 "$ST"
-expect_contains "ambiguous target lists candidate 1" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
-expect_contains "ambiguous target lists candidate 2" "a567bd5c6d1e03d67" "$OUT"
+expect_contains "the ambiguity is counted out of the live set" \
+  "2 live agents answer to 'w1r-slice-4-3'" "$OUT"
+expect_matches "…and both entries are printed as the harness reported them" \
+  'w1r-slice-4-3\|bionic:senior-implementor\|running' "$OUT"
+expect_contains "…beside an address the stop primitive accepts" \
+  "w1r-slice-4-3@session-11111111" "$OUT"
+
+# A NAME THE ANSWER DOES NOT CARRY is not live, whatever is on disk. `departed` has a full
+# set of metadata and a working log; the harness does not name it, so it does not resolve.
+MK_AGENT_ROW=yes make_agent "$H1" "$S1" "33333333-3333-3333-3333-333333333333" \
+  "adeparted-4444444444444444" "departed" "finished long ago" >/dev/null
+OUT=$(run_check "$H1" "$R1" "departed"); ST=$?
+expect_status "an agent on disk but absent from the live set exits 1" 1 "$ST"
+expect_contains "…and says it is not live" "not live" "$OUT"
 
 # ============================================================
 echo ""
@@ -239,11 +336,16 @@ make_agent "$H4" "$(slugify "$SANDBOX/some-other-project")" \
 OUT=$(run_check "$H4" "$R4" "foreign"); ST=$?
 expect_status "an agent found only outside this project still resolves" 0 "$ST"
 
-# And the positive pair: an agent under THIS repo's slug resolves with no note.
-make_agent "$H4" "$S4" "55555555-5555-5555-5555-555555555555" \
+# And the positive pair: a session filed under THIS repo's slug resolves through the slug
+# itself rather than through the keyed walk above. Its own world, because a world's primary
+# session is the one the observation runs as and there is exactly one of those.
+IFS='|' read -r H4B R4B S4B <<< "$(make_world w4b)"
+make_agent "$H4B" "$S4B" "55555555-5555-5555-5555-555555555555" \
   "alocal-1234567890abcdef" "local" "hi" >/dev/null
-OUT=$(run_check "$H4" "$R4" "local"); ST=$?
+OUT=$(run_check "$H4B" "$R4B" "local"); ST=$?
 expect_status "an agent under this project's slug resolves" 0 "$ST"
+expect_contains "…and its transcript was found under this project's own slug" \
+  "$S4B/55555555-5555-5555-5555-555555555555/subagents" "$OUT"
 
 # ============================================================
 echo ""
@@ -257,12 +359,18 @@ expect_status "no target argument exits 1" 1 "$ST"
 OUT=$(run_check "$H2" "$R2" '*'); ST=$?
 expect_status "a glob target does not resolve" 1 "$ST"
 
-# Run from OUTSIDE any git repo (checklist A1: the fix command must be runnable
-# from any cwd). Resolution is rooted at the configured metadata directory, not
-# at the cwd, so it still works; repo activity is simply reported as
-# unavailable.
-OUT=$( cd "$SANDBOX" && HOME="$H2" CLAUDE_CONFIG_DIR="$H2/.claude" bash "$CHECK" "quiet-reviewer" 2>&1 ); ST=$?
-expect_status "runs from a non-repo cwd without crashing" 0 "$ST"
+# Run from OUTSIDE any git repo (checklist A1: the fix command must be runnable from any
+# cwd). It still runs, and it still resolves against the live set — which is rooted at the
+# configured metadata directory, not at the cwd. What it can no longer do from there is print
+# an evidence tier: since S6 the agent id comes from the session roster, the roster lives in
+# the repo, and outside one there is no roster to read. It says which fact is missing rather
+# than crashing or guessing, which is the A1 property that mattered.
+OUT=$( cd "$SANDBOX" && HOME="$H2" CLAUDE_CONFIG_DIR="$H2/.claude" \
+       CLAUDE_CODE_SESSION_ID="$(cat "$H2/.fixture-sid")" bash "$CHECK" "quiet-reviewer" 2>&1 ); ST=$?
+expect_status "runs from a non-repo cwd without crashing" 1 "$ST"
+expect_contains "…resolving the target against the live set all the same" \
+  "OBSERVATION — target as typed: quiet-reviewer" "$OUT"
+expect_contains "…and naming the fact a cwd outside the repo cannot supply" "no agent id" "$OUT"
 
 # ============================================================
 echo ""
@@ -562,26 +670,34 @@ M8B=$(printf '%s\n' "$OUT8B" | grep '^stop-check-observation/')
 expect_contains "OURS+override: machine line carries deliverable_source=args" "deliverable_source=args" "$M8B"
 expect_contains "OURS+override: machine line carries progress_source=args" "progress_source=args" "$M8B"
 
-# --- (c) FOREIGN: metadata filed under another session, whose transcript is on disk.
-# Labelled `foreign-live` until slice 4/9, which is a liveness the existence check
-# never established — see Section 9 (d). ---
+# --- (c) NOT LIVE: metadata filed under another session, whose transcript is on disk.
+# Called FOREIGN until S6 — a verdict about where RECORDS sat. What the operator needs to
+# know is whether the agent EXISTS, and the harness's answer is the only thing that says so.
 make_agent "$H8" "$S8" "$FOREIGN8" "aforeign8-2222222222222222" "foreign-target" "hi" >/dev/null
-OUT8C=$(run_check_as "$OWN8" "$H8" "$R8" "foreign-target")
-M8C=$(printf '%s\n' "$OUT8C" | grep '^stop-check-observation/')
-expect_contains "FOREIGN: machine line carries classification=foreign" "|classification=foreign|" "$M8C"
+OUT8C=$(run_check_as "$OWN8" "$H8" "$R8" "foreign-target"); ST=$?
+expect_status "another session's agent does not resolve here: exits 1" 1 "$ST"
+expect_contains "…and says what was actually looked at: the live set" "not live" "$OUT8C"
+expect_absent "…and prints no machine line, so the recorder has nothing to copy" \
+  "stop-check-observation/" "$OUT8C"
 
-# --- (d) DEAD HISTORY: the bb20f616 shape — metadata answering to a live-looking
-# name, from a session whose own transcript is gone. ---
+# --- (d) The bb20f616 shape — metadata answering to a live-looking name from a session
+# whose own transcript is gone — is the SAME answer now, and that is the improvement: the
+# distinction between `foreign` and `dead-history` was about which records survived, and
+# neither was evidence that an agent was running.
 make_agent "$H8" "$S8" "$DEAD8" "adead8-3333333333333333" "dead-target" "old run" >/dev/null
 rm -f "$H8/.claude/projects/$S8/$DEAD8.jsonl"
-OUT8D=$(run_check_as "$OWN8" "$H8" "$R8" "dead-target")
-M8D=$(printf '%s\n' "$OUT8D" | grep '^stop-check-observation/')
-expect_contains "DEAD HISTORY: machine line carries classification=dead-history" "classification=dead-history" "$M8D"
+OUT8D=$(run_check_as "$OWN8" "$H8" "$R8" "dead-target"); ST=$?
+expect_status "a dead session's agent does not resolve either: exits 1" 1 "$ST"
+expect_contains "…for the same stated reason" "not live" "$OUT8D"
 
-# --- (e) UNKNOWN: no own session id at all — classification never guesses ---
-OUT8E=$(run_check "$H8" "$R8" "foreign-target")
-M8E=$(printf '%s\n' "$OUT8E" | grep '^stop-check-observation/')
-expect_contains "UNKNOWN: machine line carries classification=unknown" "classification=unknown" "$M8E"
+# --- (e) NO OWN SESSION ID at all: there is no transcript to read, so there is no live set
+# and nothing is guessed. Classification used to report UNKNOWN and carry on; now the run
+# refuses before it resolves anything, which is the honest answer to "whose teammates?".
+OUT8E=$(run_check_nosid "$H8" "$R8" "ours-target"); ST=$?
+expect_status "with no session key of its own the observation exits 1" 1 "$ST"
+expect_contains "…naming the fix the model is the only one that can apply" \
+  "call ListAgents" "$OUT8E"
+expect_absent "…and printing no machine line" "stop-check-observation/" "$OUT8E"
 
 # --- (f) P2: claimed-process liveness via an explicit --claims pattern, a REAL process ---
 MARKER="$H8/claims-marker-w8"
@@ -681,104 +797,91 @@ expect_status "a second --claims exits 1" 1 "$ST"
 
 # ============================================================
 echo ""
-echo "=== Section 9: ownership is the OWNING SESSION DIRECTORY (slice 4/9, AC-6) ==="
+echo "=== Section 9: what is OURS is what the harness names (S6, AC-9/AC-10) ==="
 # ============================================================
 #
-# Three defects that only live operation could produce, each reproduced here on
-# the shape it really took (plan §"Step-5 live findings", record/w3-walk.md §2).
+# Three defects that only live operation could produce, each still driven here, on the key
+# that replaced the one that produced them.
 #
-# What slice 4/5 keyed ownership on was ROSTER MEMBERSHIP: a row matched by
-# `agent_id=`, falling back to `name=`. Both arms failed live and in opposite
-# directions.
+#   D1 (false OURS). Slice 4/5 keyed ownership on ROSTER MEMBERSHIP, falling back to `name=`.
+#      Every row in a session that had not restarted since the recorder shipped was
+#      `status=intended` with an EMPTY `agent_id=`, so the name arm was the only one live —
+#      and a three-day-dead agent of another session, answering to a name this session's
+#      roster carried, classified OURS and was shown THIS session's contracted progress path.
 #
-#   D1 (false OURS). Every roster row in a session that has not restarted since
-#      the recorder shipped is `status=intended` with an EMPTY `agent_id=`, so the
-#      id arm never matches and the NAME arm is the only one live. A name is not
-#      an identity — it is reused across waves — so a three-day-dead agent from
-#      another session was called OURS off this session's unconfirmed row, and the
-#      display then handed it THIS session's contracted progress path.
+#   D2 (false FOREIGN). An agent this session really launched, dispatched before the roster
+#      hook existed, had no row and classified foreign.
 #
-#   D2 (false FOREIGN). An agent this session really did launch, dispatched before
-#      the roster hook existed, has no row at all and classified FOREIGN-LIVE with
-#      "this session never launched it" — of an agent sitting in this session's own
-#      subagents directory. (The observation was run from inside a subagent, which
-#      changes nothing: CLAUDE_CODE_SESSION_ID inside a subagent is measured
-#      identical to the orchestrator's own id, so the observer's identity was never
-#      what this keyed on. WHO looked is recorded by the recorder's `observer=`.)
+#   D3 (false LIVE). `foreign-live` claimed a liveness its check never established: it asked
+#      whether the owning session's TRANSCRIPT FILE existed, and transcripts are never
+#      deleted — measured, all 57 sessions with subagents under this project satisfied it,
+#      including sessions finished days ago.
 #
-# The key is the metadata's own filing: an agent under <session>/subagents/ was
-# launched by <session>. The roster stays the CONTRACT source for a target already
-# established as ours, and a `confirmed` row still establishes ownership BY AGENT
-# ID — an id is unambiguous by construction. It is never a name-oracle again.
-#
-#   D3 (false LIVE). `foreign-live` claimed a liveness the check never established:
-#      it tests whether the owning session's transcript FILE EXISTS, and transcripts
-#      are never deleted — measured, all 57 sessions with subagents under this
-#      project read "live", including sessions finished days ago. The label is now
-#      `foreign`, and it says what was actually looked at.
+# Slice 4/9 re-keyed all three on the metadata's own FILING, which is a fact about records,
+# and records outlive agents: after a `/clear` the successor read its own live agent as
+# foreign, and one agent's metadata filed under two directories as an ambiguity (B-2). The
+# key now is the harness's own answer. D3 is the reason it has to be: a file on disk was
+# never evidence that anything was running, and the ListAgents answer is exactly that
+# evidence and nothing else.
 
 IFS='|' read -r H9 R9 S9 <<< "$(make_world w9)"
 OWN9="99999999-0000-0000-0000-000000000001"
 OTHER9="99999999-0000-0000-0000-000000000002"
-GONE9="99999999-0000-0000-0000-000000000003"
 mkdir -p "$R9/.bionic/tmp"
 echo "our progress" > "$R9/prog-9.progress"
 
-# --- (a) D1, the corpse collision: an UNCONFIRMED row (agent_id empty) and a
-# same-NAME agent under ANOTHER session's directory. The row must grant nothing. ---
-make_agent "$H9" "$S9" "$OTHER9" "acorpse-1111111111111111" "walker" "three days ago" >/dev/null
+# --- (a) D1, the corpse collision: an UNCONFIRMED row of OURS naming `walker`, and a
+# same-NAME agent under ANOTHER session's directory. The row grants nothing, and neither
+# does the metadata — this session's live set does not name it. ---
 {
   printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
   printf 'roster-state/v1|status=intended|session=%s|name=walker|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=researcher|model=|deliverable=|duration=|progress=%s|absent=deliverable|tool_use_id=toolu_W\n' \
     "$OWN9" "$R9/prog-9.progress"
 } > "$R9/.bionic/tmp/roster-${OWN9}.state"
-
-OUT9A=$(run_check_as "$OWN9" "$H9" "$R9" "walker")
-M9A=$(printf '%s\n' "$OUT9A" | grep '^stop-check-observation/')
-expect_contains "D1: machine line carries classification=foreign" "|classification=foreign|" "$M9A"
-expect_contains "D1: the display never hands it THIS session's contracted progress path" \
-  "progress_source=none" "$M9A"
-expect_absent "D1: …and the progress path itself never reaches the machine line" \
-  "prog-9.progress" "$M9A"
-
-# --- (b) D2: an agent under THIS session's own subagents directory, with NO roster
-# row at all — the standing state for anything dispatched before the roster shipped. ---
+MK_AGENT_ROW=no make_agent "$H9" "$S9" "$OTHER9" "acorpse-1111111111111111" "walker" "three days ago" >/dev/null
+# The world's primary session is $OWN9, and it is the one the observation reads. Planted
+# AFTER the roster above, whose `>` would otherwise wipe the row carrying this agent's id.
 make_agent "$H9" "$S9" "$OWN9" "asibling-2222222222222222" "sibling" "stopped a while back" >/dev/null
+
+OUT9A=$(run_check_as "$OWN9" "$H9" "$R9" "walker"); ST=$?
+expect_status "D1: a corpse answering to a rostered name does not resolve" 1 "$ST"
+expect_absent "D1: …and no machine line carries it into the durable record" \
+  "stop-check-observation/" "$OUT9A"
+expect_absent "D1: the display never hands it THIS session's contracted progress path" \
+  "prog-9.progress" "$OUT9A"
+
+# --- (b) D2: an agent this session launched, whose row carries its id — the ordinary case,
+# and the paired positive without which every assertion above passes on a dead command. ---
 OUT9B=$(run_check_as "$OWN9" "$H9" "$R9" "sibling")
 M9B=$(printf '%s\n' "$OUT9B" | grep '^stop-check-observation/')
-expect_contains "D2: machine line carries classification=ours" "|classification=ours|" "$M9B"
+expect_contains "D2: this session's own live agent resolves OURS" "|classification=ours|" "$M9B"
+expect_contains "D2: …and the reason names the harness's answer, not a directory" \
+  "the harness reports it as a teammate" "$OUT9B"
 
-# --- (c) the roster still establishes ownership BY AGENT ID, across directories:
-# a CONFIRMED row is a fact this session wrote about its own launch. ---
-make_agent "$H9" "$S9" "$OTHER9" "aconfirmed-3333333333333333" "elsewhere" "hi" >/dev/null
+# --- (c) the roster is the CONTRACT source for a target the live set has already named. It
+# is no longer an ownership oracle of any kind — that is the whole of what D1 cost. ---
+make_agent "$H9" "$S9" "$OWN9" "aconfirmed-3333333333333333" "elsewhere" "hi" >/dev/null
 printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|agent_id=aconfirmed-3333333333333333|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_C\n' \
   "$OWN9" "$R9/prog-9.progress" >> "$R9/.bionic/tmp/roster-${OWN9}.state"
 OUT9C=$(run_check_as "$OWN9" "$H9" "$R9" "elsewhere")
 M9C=$(printf '%s\n' "$OUT9C" | grep '^stop-check-observation/')
-expect_contains "a CONFIRMED row keyed on agent id still establishes OURS" \
-  "Classification: OURS" "$OUT9C"
+expect_contains "a live target with a CONFIRMED row resolves OURS" "Classification: OURS" "$OUT9C"
 expect_contains "…and its contract is sourced from that row" "progress_source=roster" "$M9C"
 
-# --- (d) D3: the liveness label says what was looked at. Driven on its OWN target,
-# foreign under the old rule AND the new one — no roster row of any kind names it,
-# and it sits under another session's directory. Asserting this on (a) instead would
-# be a fixture pinning away its own test: (a) resolves OURS before the fix, so every
-# absence below would pass for the wrong reason. ---
-make_agent "$H9" "$S9" "$OTHER9" "astranger-5555555555555555" "stranger" "hi" >/dev/null
-OUT9D=$(run_check_as "$OWN9" "$H9" "$R9" "stranger")
-M9D=$(printf '%s\n' "$OUT9D" | grep '^stop-check-observation/')
-expect_contains "D3: the target is not ours under either rule" "Classification: FOREIGN" "$OUT9D"
-expect_absent "D3: the retired token 'foreign-live' is gone from the machine line" \
-  "foreign-live" "$M9D"
-
-# --- (e) DEAD HISTORY is unchanged in meaning: the owning session's transcript is
-# GONE, so nothing on disk still accounts for the agent. ---
-make_agent "$H9" "$S9" "$GONE9" "aghost-4444444444444444" "ghost" "old run" >/dev/null
-rm -f "$H9/.claude/projects/$S9/$GONE9.jsonl"
-OUT9E=$(run_check_as "$OWN9" "$H9" "$R9" "ghost")
-M9E=$(printf '%s\n' "$OUT9E" | grep '^stop-check-observation/')
-expect_contains "…and the machine line carries classification=dead-history" \
-  "|classification=dead-history|" "$M9E"
+# --- (d) D3, driven where it belongs now: an agent whose session transcript is still on
+# disk, whose metadata is intact, and whose working log is readable — and which the harness
+# does not name. Every record D3's old check consulted says "here"; the answer says gone. ---
+MK_AGENT_ROW=no make_agent "$H9" "$S9" "$OTHER9" "astranger-5555555555555555" "stranger" "hi" >/dev/null
+if [ -f "$H9/.claude/projects/$S9/$OTHER9/subagents/agent-astranger-5555555555555555.jsonl" ] \
+   && [ -f "$H9/.claude/projects/$S9/$OTHER9.jsonl" ]; then
+  ok "D3: the fixture really does leave every on-disk record in place"
+else
+  no "D3: the fixture really does leave every on-disk record in place"
+fi
+OUT9D=$(run_check_as "$OWN9" "$H9" "$R9" "stranger"); ST=$?
+expect_status "D3: records on disk are not evidence that an agent is running" 1 "$ST"
+expect_absent "D3: the retired token 'foreign-live' is gone" "foreign-live" "$OUT9D"
+expect_absent "D3: …and so is the verdict that replaced it" "FOREIGN" "$OUT9D"
 
 # ============================================================
 echo ""
@@ -826,19 +929,21 @@ expect_absent "C-1: no cwd file rides into the durable record as a deliverable" 
 # DIFFERENT file — hooks/dispatch-preflight.sh always emits `agent_id=` empty on
 # `intended` rows. The stated invariant and the enforced one differing is the
 # exact shape slice 4/9 was remediating, so it is enforced here.
-make_agent "$H10" "$S10" "$FOREIGN10" "aforeign-1010101010101010" "id-target" "working" >/dev/null
-printf 'roster-state/v1|status=intended|session=%s|name=other-name|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
+MK_AGENT_ROW=no make_agent "$H10" "$S10" "$OWN10" "aforeign-1010101010101010" "id-target" "working" >/dev/null
+printf 'roster-state/v1|status=intended|session=%s|name=id-target|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
   "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
-OUT10B=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
-expect_contains "C-2: an INTENDED row's id does not make a foreign agent ours" \
-  "Classification: FOREIGN" "$OUT10B"
+OUT10B=$(run_check_as "$OWN10" "$H10" "$R10" "id-target"); ST=$?
+expect_status "C-2: an INTENDED row's id supplies nothing, so there is no evidence tier" 1 "$ST"
+expect_contains "C-2: …and the run says which fact is missing" "no agent id" "$OUT10B"
 
-# …while a CONFIRMED row's id still does, which is the invariant slice 4/9 kept.
-printf 'roster-state/v1|status=confirmed|session=%s|name=other-name|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
+# …while a CONFIRMED row's id still supplies it, which is the invariant slice 4/9 kept and
+# this slice moved rather than removed: the id is what the working log is filed under.
+printf 'roster-state/v1|status=confirmed|session=%s|name=id-target|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
   "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 OUT10C=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
-expect_contains "C-2: a CONFIRMED row's id still establishes OURS" \
+expect_contains "C-2: a CONFIRMED row's id still establishes the evidence tier" \
   "Classification: OURS" "$OUT10C"
+expect_contains "…on the log that id names" "agent-aforeign-1010101010101010.jsonl" "$OUT10C"
 
 # …and so does an IDENTIFIED row's (epic-16 wave-01 slice 1). `confirmed` alone
 # was an accepted set no teammate row could ever satisfy BY ID: the launch half
@@ -848,11 +953,11 @@ expect_contains "C-2: a CONFIRMED row's id still establishes OURS" \
 # carries — arrives one state later, on SubagentStart. Refusing it here would
 # leave this rule dead for every teammate dispatch while looking alive in the
 # suite, because every fixture predating the wave was async-shaped.
-make_agent "$H10" "$S10" "$FOREIGN10" "aforeign-2020202020202020" "id-target-2" "working" >/dev/null
-printf 'roster-state/v1|status=identified|session=%s|name=started-name|agent_id=aforeign-2020202020202020|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_J\n' \
+MK_AGENT_ROW=no make_agent "$H10" "$S10" "$OWN10" "aforeign-2020202020202020" "id-target-2" "working" >/dev/null
+printf 'roster-state/v1|status=identified|session=%s|name=id-target-2|agent_id=aforeign-2020202020202020|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_J\n' \
   "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 OUT10E=$(run_check_as "$OWN10" "$H10" "$R10" "id-target-2")
-expect_contains "an IDENTIFIED row's id establishes OURS — the state teammate ids arrive in" \
+expect_contains "an IDENTIFIED row's id establishes the evidence tier — the state teammate ids arrive in" \
   "Classification: OURS" "$OUT10E"
 
 # --- (c) C-2 regression guard: the PRE-RESTART world is untouched ---
@@ -868,8 +973,11 @@ printf 'roster-state/v1|status=intended|session=%s|name=prerestart|agent_id=|lau
   "$OWN10" "$R10/deliv-pre.md" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 OUT10D=$(run_check_as "$OWN10" "$H10" "$R10" "prerestart")
 M10D=$(printf '%s\n' "$OUT10D" | grep '^stop-check-observation/')
-expect_contains "C-2 regression: an unconfirmed row's own agent is still OURS by its directory" \
+expect_contains "C-2 regression: an unconfirmed row's own live agent still resolves" \
   "Classification: OURS" "$OUT10D"
+# The LAST row of a name is the current statement about the contract, and the id may sit on
+# an earlier one — a dispatch writes the contract and the recorder writes the id one state
+# later. Reading both off a single chosen row loses whichever came second.
 expect_contains "C-2 regression: the contract still comes from the unconfirmed row" \
   "deliverable_source=roster" "$M10D"
 
@@ -886,7 +994,11 @@ expect_contains "C-2 regression: the contract still comes from the unconfirmed r
 # sitting in another session's directory needs the reason on the same line — the provenance
 # is what tells them which session's transcript the observe address will name.
 ADOPTED10="10101010-0000-0000-0000-000000000003"
-make_agent "$H10" "$S10" "$ADOPTED10" "aadoptee-3030303030303030" "adoptee" "still working" >/dev/null
+# Filed under the PREDECESSOR, and named in the SUCCESSOR's live set — which is exactly what
+# a `/clear`+resume leaves behind: the same process, still a teammate, its log still filed
+# where it was launched.
+MK_AGENT_ROW=no make_agent "$H10" "$S10" "$ADOPTED10" "aadoptee-3030303030303030" "adoptee" "still working" >/dev/null
+add_live "$H10" "$S10" "$OWN10" "adoptee"
 printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-3030303030303030|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=adopted|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=|teammate_id=adoptee@session-%s|adopted_from=%s\n' \
   "$OWN10" "${ADOPTED10:0:8}" "$ADOPTED10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 
@@ -919,39 +1031,55 @@ echo ""
 echo "=== Section 11: one logical agent is not an ambiguity (epic-16 w2 S3, field 2026-08-11) ==="
 # ============================================================
 #
-# The scan walks every session directory of the project, and one agent's metadata can be
-# filed under more than one — the launching session's record and the agent's own runtime
-# session are two rows about the SAME agent. Refusing that as an ambiguity sent the
-# operator round a loop over a target that was never ambiguous. Two matches carrying one
-# agent id are one match; only distinct ids are candidates.
+# WHY THIS SECTION EXISTED. The scan walked every session directory of the project, and one
+# agent's metadata can be filed under more than one — the launching session's record and the
+# agent's own runtime session are two records about the SAME agent. Refusing that as "two
+# agents answer to this name" sent the operator round an ambiguity loop over a target that
+# was never ambiguous, and after a `/clear` it was the standing state (research-code-map
+# §4.4 proves the double file on this machine).
+#
+# WHY IT CANNOT RECUR. The count comes from the harness's answer, which lists AGENTS, not
+# files: one agent is one line however many directories hold a record of it. The section
+# keeps its shape — the double file is still planted, byte for byte — because what it pins
+# is that the double file changes nothing.
 
 IFS='|' read -r H11 R11 S11 <<< "$(make_world w11)"
 LAUNCHER11="aaaaaaaa-1111-1111-1111-111111111111"
 OWNRUN11="bbbbbbbb-2222-2222-2222-222222222222"
-make_agent "$H11" "$S11" "$LAUNCHER11" "atwinned-1111111111111111" "twinned" "older copy" >/dev/null
+# The RUNTIME session is the world's primary one — it is where the observation runs — and the
+# LAUNCHER's copy is the second file, carrying no live set and no row of its own.
 make_agent "$H11" "$S11" "$OWNRUN11"  "atwinned-1111111111111111" "twinned" "the live copy" >/dev/null
-# The launch record is the older of the two — stamped so, because a fixture whose two
-# copies share a timestamp would leave "the freshest wins" untested while looking green.
+MK_AGENT_ROW=no make_agent "$H11" "$S11" "$LAUNCHER11" "atwinned-1111111111111111" "twinned" "older copy" >/dev/null
 touch -t 202608010000 \
   "$H11/.claude/projects/$S11/$LAUNCHER11/subagents/agent-atwinned-1111111111111111.jsonl"
+if cmp -s "$H11/.claude/projects/$S11/$LAUNCHER11/subagents/agent-atwinned-1111111111111111.meta.json" \
+          "$H11/.claude/projects/$S11/$OWNRUN11/subagents/agent-atwinned-1111111111111111.meta.json"; then
+  ok "the double file really is one agent's metadata in two session directories"
+else
+  no "the double file really is one agent's metadata in two session directories"
+fi
 
 OUT11=$(run_check "$H11" "$R11" "twinned"); ST11=$?
 expect_status "one agent filed under two sessions RESOLVES, it does not refuse" 0 "$ST11"
 expect_contains "…it is the same id either way" "atwinned-1111111111111111" "$OUT11"
-# The surviving copy is the freshest log — the stale copy is a record of the same agent,
-# and printing its evidence would be printing older facts about the very same target.
+# The copy the evidence comes from is the one this session's roster row names — the log
+# filed under the session the observation is running as, which is the running copy.
 expect_contains "…and the evidence printed is the LIVE copy's" "the live copy" "$OUT11"
+expect_absent "…nothing calls the double file ambiguous" "ambiguous" "$OUT11"
 
-# THE PAIRED NEGATIVE: two DISTINCT ids under one name is a real ambiguity and still
-# refuses. Nothing here widens what resolves; it narrows what counts as two agents.
-make_agent "$H11" "$S11" "$LAUNCHER11" "areal-2222222222222222" "genuine" "one" >/dev/null
-make_agent "$H11" "$S11" "$OWNRUN11"  "areal-3333333333333333" "genuine" "two" >/dev/null
+# THE PAIRED NEGATIVE: two DISTINCT live agents under one name is a real ambiguity and still
+# refuses. Nothing here widens what resolves; the count simply comes from the answer.
+make_agent "$H11" "$S11" "$OWNRUN11" "areal-2222222222222222" "genuine" "one" >/dev/null
+make_agent "$H11" "$S11" "$OWNRUN11" "areal-3333333333333333" "genuine" "two" >/dev/null
 OUT11B=$(run_check "$H11" "$R11" "genuine"); ST11B=$?
 expect_status "two DIFFERENT agents under one name still refuse" 1 "$ST11B"
-# And the candidate list now names an address the stopper can actually use.
+expect_contains "…counted out of the live set" "2 live agents answer to 'genuine'" "$OUT11B"
+# And the candidate list names an address the stopper can actually use — the one spelling
+# hooks/stop-guard.sh accepts as an alias and `session-poker.sh adopt` prints (Section R).
 expect_contains "…listing an address the stop primitive accepts" \
-  "genuine@session-aaaaaaaa" "$OUT11B"
-expect_contains "…for every candidate" "genuine@session-bbbbbbbb" "$OUT11B"
+  "genuine@session-bbbbbbbb" "$OUT11B"
+expect_absent "…and no machine line, because no evidence tier was shown" \
+  "stop-check-observation/" "$OUT11B"
 
 # ============================================================
 echo ""
