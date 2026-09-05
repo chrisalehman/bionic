@@ -721,8 +721,13 @@ else
 fi
 
 # THE CODE HALF, read from the poker rather than asserted against a constant (§4's rule):
-# the docs-root fallback must actually be in the verb, not only in the prose.
-if /usr/bin/grep -q 'BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG"' "$POKER_SH"; then
+# the docs-root fallback must actually be in the verb, not only in the prose. Matched by
+# SHAPE (the docs_root("$REPO") interpolation feeding a BIND_DOCS_TRY assignment) rather than
+# by the exact operand variable name, so a rename of that operand (as S8 did, BIND_ARG ->
+# BIND_ARG_P, for the trailing-slash strip) does not stale this pin the way a literal-string
+# grep did.
+BIND_DOCS_FALLBACK_RE='BIND_DOCS_TRY="\$\(docs_root "\$REPO"\)/\$[A-Za-z_][A-Za-z_0-9]*"'
+if /usr/bin/grep -Eq "$BIND_DOCS_FALLBACK_RE" "$POKER_SH"; then
   ok "46: …and session-poker.sh really does try the docs root for a relative operand"
 else
   no "46: …and session-poker.sh really does try the docs root for a relative operand" \
@@ -741,6 +746,20 @@ elif has_pin "$DOCTORED_OPERAND" "$PIN_BIND_OPERAND"; then
      "the pin matched a copy that says the opposite"
 else
   ok "47: a doctored SKILL.md fails the operand pin (pin discriminates)"
+fi
+
+# Anti-vacuity for 46: a poker with the fallback line deleted must fail the same regex, so
+# assertion 46 is proven to discriminate rather than matching everything by accident.
+DOCTORED_POKER_NO_FALLBACK="$TMP/session-poker-no-docs-fallback.sh"
+/usr/bin/grep -v 'BIND_DOCS_TRY=' "$POKER_SH" > "$DOCTORED_POKER_NO_FALLBACK"
+if cmp -s "$POKER_SH" "$DOCTORED_POKER_NO_FALLBACK"; then
+  no "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)" \
+     "the grep -v target matched nothing — the fallback line moved"
+elif /usr/bin/grep -Eq "$BIND_DOCS_FALLBACK_RE" "$DOCTORED_POKER_NO_FALLBACK"; then
+  no "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)" \
+     "the regex matched a copy with the fallback line removed"
+else
+  ok "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)"
 fi
 
 echo ""
