@@ -109,6 +109,19 @@ expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2
 # there too; that suite was deleted at 8582861 (epic-18 wave-03) and nothing
 # replaced either pin.
 expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
+
+# SUBSTRING, AS A FUNCTION RATHER THAN A `case` INSIDE `$( … )`. bash 3.2 — what
+# `/bin/bash` is on macOS, and what this file's shebang names — mis-parses a `case` inside
+# a command substitution: the multi-line form is a hard syntax error, and the ONE-LINE form
+# is worse, because it parses and then evaluates to the tail of its own source text
+# (measured: `expected 'no', got ' echo yes ;; *) echo no ;; esac)'`). §BP below sweeps for
+# both shapes. Step-6 review C-2.
+cg_contains() {  # <haystack> <needle> -> yes|no
+  case "$1" in
+    *"$2"*) printf 'yes' ;;
+    *)      printf 'no'  ;;
+  esac
+}
 expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 # expect_true/expect_false take a COMMAND as the assertion. Added epic-18 W3 slice 4/3:
 # §L.7 called both against a helper that was never defined in this file, so under the
@@ -348,6 +361,25 @@ roster_identify() {  # <repo> <sid> <name> <agent-id>
 
 CG_LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
 
+# ONE TEAMMATE LINE. Hoisted out of the command substitution in `cg_live` below, and it
+# has to stay hoisted: bash 3.2 — which is what `/bin/bash` is on macOS, and what this
+# file's own shebang names — cannot parse a `case` statement inside `$( … )`; it trips on
+# the `)` that closes a case pattern (Step-6 review C-2). The suite ran anyway only
+# because this machine's PATH resolves `bash` to a 5.x build. §BP below sweeps the whole
+# tree so the next one is caught here rather than on somebody's laptop.
+#
+# A bare name is `running`. `name:idle` writes the harness's other status — the teammate
+# that finished its turn and was never stopped, which LA.5 turns into the discriminator
+# between the two questions the one parse now answers.
+cg_la_row() {  # <name[:status]> -> one teammate line of a ListAgents answer body
+  local n="$1" nm st
+  case "$n" in
+    *:*) nm="${n%%:*}"; st="${n##*:}" ;;
+    *)   nm="$n";       st="running"  ;;
+  esac
+  printf '  %s [8895ce]  ·  bionic:implementor  ·  %s  ·  started 7m ago\n' "$nm" "$st"
+}
+
 cg_live() {  # <transcript> <name[:status]>...
   local tr="$1"; shift
   local f="${tr%.jsonl}.names" names=() n nm st body
@@ -356,16 +388,7 @@ cg_live() {  # <transcript> <name[:status]>...
   while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < "$f"
   body=$(
     printf '%s\n\nTeammates (%d):\n' "$CG_LA_SELF" "${#names[@]}"
-    for n in "${names[@]}"; do
-      # A bare name is `running`. `name:idle` writes the harness's other status — the
-      # teammate that finished its turn and was never stopped, which LA.5 turns into the
-      # discriminator between the two questions the one parse now answers.
-      case "$n" in
-        *:*) nm="${n%%:*}"; st="${n##*:}" ;;
-        *)   nm="$n";       st="running"  ;;
-      esac
-      printf '  %s [8895ce]  ·  bionic:implementor  ·  %s  ·  started 7m ago\n' "$nm" "$st"
-    done
+    for n in "${names[@]}"; do cg_la_row "$n"; done
   )
   {
     jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
@@ -4559,9 +4582,9 @@ expect_eq "open_runs has an answer too" "0" "$S2_SET_ST"
 expect_eq "…and it is the two in-bound plans, newest first" \
   "$(printf '%s\n%s' "$S2_REAL" "$S2_OLDER")" "$S2_SET"
 expect_eq "…so the selection is bounded at depth 2: the NEWER depth-3 plan is in neither" "no" \
-  "$(case "$S2_AP$S2_SET" in *"$S2_DEEP"*) echo yes ;; *) echo no ;; esac)"
+  "$(cg_contains "$S2_AP$S2_SET" "$S2_DEEP")"
 expect_eq "…and fence-aware: the NEWEST file, whose ## SDLC State is fenced, is in neither" "no" \
-  "$(case "$S2_AP$S2_SET" in *"$S2_FENCED"*) echo yes ;; *) echo no ;; esac)"
+  "$(cg_contains "$S2_AP$S2_SET" "$S2_FENCED")"
 expect_eq "…and the two readers agree: active_plan's answer IS line 1 of the set" \
   "$S2_AP" "$(printf '%s\n' "$S2_SET" | head -1)"
 
@@ -6389,6 +6412,102 @@ expect_eq "…and the default ring holds none of them: the pin was honoured by e
   "0" "$(rg_ring_count "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring")"
 expect_contains "…and that default ring is itself inside the sandbox, never the machine's" \
   "$SANDBOX" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring"
+# ============================================================
+echo ""
+echo "=== BP — every shell file in the tree parses under the SYSTEM interpreter ==="
+# ============================================================
+#
+# WHY THIS SECTION EXISTS. `tests/cross-gate-agreement.test.sh` shipped a `case` inside a
+# `$( … )` at slice S19. Its own shebang says `#!/bin/bash`, which on macOS is bash 3.2,
+# and 3.2's parser cannot read that construct — so the file that holds every one-owner
+# agreement row this wave added was unparseable by the interpreter it names. It ran green
+# for days because this machine's PATH resolves `bash` to a Homebrew 5.x build, and the
+# runner invokes `bash tests/…`, never `/bin/bash tests/…` (Step-6 review C-2). Nothing in
+# the tree checked parseability under the system interpreter; this does.
+#
+# IT IS A PARSE CHECK, NOT A RUN. `-n` reads and parses and executes nothing, so this
+# sweep touches no state, spawns no hook and cannot depend on any fixture — it is the
+# cheapest possible whole-tree assertion and the only one in this file that reads the
+# shipped tree rather than a sandbox copy.
+BP_SH="$(cd "$BIONIC_SCRIPTS_DIR" && find hooks payload/scripts payload/hooks tests \
+  -name '*.sh' -type f 2>/dev/null | LC_ALL=C sort)"
+expect_eq "the sweep found shell files to check" "yes" \
+  "$([ -n "$BP_SH" ] && echo yes || echo no)"
+
+bp_sweep() {  # <root> <newline-separated relative paths> -> one `FAIL <path>: <msg>` per
+              # file that does not parse
+  local root="$1" list="$2" f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    /bin/bash -n "$root/$f" 2>&1 | sed "s|^|FAIL $f: |"
+  done <<EOF
+$list
+EOF
+  return 0
+}
+
+BP_OUT="$(bp_sweep "$BIONIC_SCRIPTS_DIR" "$BP_SH")"
+expect_eq "every *.sh under hooks, payload/scripts, payload/hooks and tests parses under /bin/bash" \
+  "" "$BP_OUT"
+expect_eq "…and the system interpreter this asserts against is the one the shebangs name" \
+  "yes" "$([ -x /bin/bash ] && echo yes || echo no)"
+
+# THE MUTATION ARM. A sweep that cannot go red is a sweep that proves nothing. Plant the
+# exact construct C-2 found — a `case` inside a command substitution — in a COPY of a real
+# file under the sandbox, and require the sweep to name that file.
+BP_MUT="$SANDBOX/bp-mutant"
+mkdir -p "$BP_MUT/tests"
+cat > "$BP_MUT/tests/bp-planted.test.sh" <<'BPEOF'
+#!/bin/bash
+# A copy carrying the bash-3.2 defect C-2 found, for the mutation arm of §BP.
+planted() {
+  local n="$1"
+  body=$(
+    for x in $n; do
+      case "$x" in
+        *:*) echo "${x%%:*}" ;;
+        *)   echo "$x" ;;
+      esac
+    done
+  )
+  printf '%s\n' "$body"
+}
+BPEOF
+BP_MUT_OUT="$(/bin/bash -n "$BP_MUT/tests/bp-planted.test.sh" 2>&1)"
+expect_eq "the mutation arm: the planted construct does NOT parse under /bin/bash" "yes" \
+  "$([ -n "$BP_MUT_OUT" ] && echo yes || echo no)"
+expect_contains "…and the failure names the case pattern that closes it" ";;" "$BP_MUT_OUT"
+BP_SWEPT="$(bp_sweep "$BP_MUT" "tests/bp-planted.test.sh")"
+expect_contains "…and the sweep reports it as a FAIL row naming the file" \
+  "FAIL tests/bp-planted.test.sh" "$BP_SWEPT"
+
+# THE OTHER SHAPE, WHICH `-n` CANNOT SEE. A ONE-LINE `case` inside a command substitution
+# PARSES under 3.2 and then evaluates to the tail of its own source text — two rows of §S2
+# in this very file read `expected 'no', got ' echo yes ;; *) echo no ;; esac)'` under
+# /bin/bash while `-n` said the file was fine. So the sweep above is necessary and not
+# sufficient, and this row covers the gap by forbidding the idiom outright.
+# The pattern is written in bracket classes so that this file's own source does not match
+# the rule it enforces.
+BP_RE='[$][(]case '
+BP_INLINE="$(cd "$BIONIC_SCRIPTS_DIR" && LC_ALL=C grep -nE "$BP_RE" \
+  $(printf '%s\n' "$BP_SH" | tr '\n' ' ') 2>/dev/null)"
+expect_eq "no file opens a \`case\` inside a command substitution on one line" "" "$BP_INLINE"
+
+# The mutation arm, and it is the QUOTED shape on purpose: unquoted, 3.2 refuses to parse
+# and `-n` catches it; inside double quotes it parses clean and then truncates the
+# substitution at the first `)` at RUN time, leaking the rest as literal text. That is the
+# shape `-n` cannot see, and the one this grep exists for.
+BP_INLINE_MUT="$SANDBOX/bp-inline.sh"
+BP_DOL='$'
+printf '#!/bin/bash\nx="%s(case "%s1" in *a*) echo yes ;; *) echo no ;; esac)"\nprintf "%%s" "%sx"\n' \
+  "$BP_DOL" "$BP_DOL" "$BP_DOL" > "$BP_INLINE_MUT"
+expect_eq "the mutation arm: the quoted one-line shape PARSES, so -n cannot catch it" "0" \
+  "$(/bin/bash -n "$BP_INLINE_MUT" >/dev/null 2>&1; echo $?)"
+expect_contains "…and at run time it leaks its own source text instead of answering" \
+  "esac)" "$(/bin/bash "$BP_INLINE_MUT" abc 2>/dev/null)"
+expect_eq "…but the grep catches it" "yes" \
+  "$([ -n "$(LC_ALL=C grep -nE "$BP_RE" "$BP_INLINE_MUT")" ] && echo yes || echo no)"
+
 # ============================================================
 echo ""
 echo "──────────────────────────────────────────────"
