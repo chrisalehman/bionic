@@ -740,24 +740,43 @@ pressure_level() {
     lines="$(_pressure_window_lines "$ring" "$now")"
   fi
 
-  local n=0 ranks='' ts f s l c b
+  # ONE AWK, NOT ONE SUBSHELL PER SAMPLE (Step-6 review P-3). This loop used to call
+  # `pressure_band` in a command substitution once per line in the window, and the window
+  # holds whatever the sample RATE put there — the recorder samples on every engaged Bash
+  # call, so a busy session measured 144 samples and 0.36 s of pure fork here, and the
+  # busier the machine the slower its own rung read. The banding is arithmetic on four
+  # fields; awk does it in the same pass that already reads them.
+  #
+  # `pressure_band` REMAINS THE OWNER of the thresholds and is still the function every
+  # other caller uses; this is its rules transcribed into the one place that needs them at
+  # volume. Two transcriptions can drift, so tests/resources.test.sh §K.2 drives both over
+  # the same table of samples and requires identical answers on every row, including the
+  # refusals — that agreement row is what makes this an optimisation rather than a second
+  # opinion.
+  local n=0 ranks=''
   if [ -n "$lines" ]; then
-    while IFS='|' read -r ts f s l c; do
-      [ -n "${ts:-}" ] || continue
-      b="$(pressure_band "${f:-}" "${s:-}" "${l:-}" "${c:-}" 2>/dev/null)" || continue
-      case "$b" in
-        clear)     b=0 ;;
-        warning)   b=1 ;;
-        critical)  b=2 ;;
-        emergency) b=3 ;;
-        *)         continue ;;
-      esac
-      ranks="${ranks}${b}
-"
-      n=$((n + 1))
-    done <<EOF
-$lines
-EOF
+    ranks="$(printf '%s\n' "$lines" | LC_ALL=C awk -F'|' \
+      -v fe="$BAND_FREE_EMERGENCY_PCT" -v fc="$BAND_FREE_CRITICAL_PCT" \
+      -v fw="$BAND_FREE_WARNING_PCT"   -v sc="$BAND_SWAP_CRITICAL_PCT" \
+      -v sw="$BAND_SWAP_WARNING_PCT"   -v lf="$HOLD_LOAD_FACTOR" '
+      # `-1` is UNREADABLE, not zero, so every percentage test is guarded on >= 0 first
+      # and a missing sensor drops out of the decision instead of driving it (AC-13).
+      function ispct(v) { return (v == "-1") || (v ~ /^[0-9]+$/) }
+      $0 == "" { next }
+      # The same refusals pressure_band makes, and a refused sample is not counted.
+      !ispct($2) || !ispct($3) { next }
+      $4 == "" || $4 !~ /^[0-9.]+$/ { next }
+      $5 !~ /^[0-9]+$/ || ($5 + 0) < 1 { next }
+      {
+        f = $2 + 0; s = $3 + 0; l = $4 + 0; c = $5 + 0
+        if (f >= 0 && f < fe)                                  { print 3; next }
+        if ((f >= 0 && f < fc) || (s >= 0 && s >= sc))         { print 2; next }
+        if ((f >= 0 && f < fw) || (s >= 0 && s >= sw) || (l > c * lf)) { print 1; next }
+        print 0
+      }
+    ')" || ranks=""
+    n="$(printf '%s' "$ranks" | grep -c . 2>/dev/null)" || n=0
+    case "${n:-}" in ''|*[!0-9]*) n=0 ;; esac
   fi
 
   # No evidence is not an emergency. A ring that could not be read or held nothing usable
