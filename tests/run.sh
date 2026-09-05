@@ -323,6 +323,11 @@ run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
 # `active_run` — docs_root, active_plan, active_run — that every always-on hook gates its
 # own work behind. Hand-listed like every suite outside hooks/.
 run "run-predicate.test.sh" bash tests/run-predicate.test.sh
+# wave-roster-lifecycle (S4, spec AC-6): payload/scripts/lib/agents.sh — the one reader of
+# the harness's newest recorded ListAgents answer, which the dispatch budget, both stop
+# gates, standdown and the Patrol tick all resolve liveness through. Hand-listed like every
+# suite outside hooks/.
+run "live-agents.test.sh" bash tests/live-agents.test.sh
 # task-engaged-session (T1, matrix AC-1..4, AC-17, AC-18): hooks/engage.sh, the ENGAGEMENT
 # trigger — the one act that puts a session inside bionic. Both invocation paths (a Skill
 # tool call and a typed slash command's UserPromptExpansion), the marker it writes, and
