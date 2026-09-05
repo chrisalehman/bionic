@@ -3616,6 +3616,56 @@ expect_status "25d5e: name is still the dispatched agent's, not the injected one
 expect_status "25d5f: and plan= holds the path with its pipes neutralised" \
   "$(printf '%s' "$S25_EVIL_PHYS" | tr '|' ' ')" "$(roster_field "$S25_ROW3" plan)"
 
+# ================================================== S26: ONE TRANSCRIPT PARSE PER GATE
+#
+# Step-6 review P-1. The budget loop asks `live_row_open` once per unique `status=intended`
+# name, and each ask used to run two whole-file `jq` passes over the transcript. Twelve
+# rows against a 4.1 MB transcript measured 1.22 s — over the ~1 s budget for a hook that
+# fronts every dispatch — and the row count grows for the life of a session while the
+# transcript grows too. `live_agents` now memoizes its parse per process, and the loop
+# primes that cache once in the shell the loop runs in, because the per-row call is a
+# command substitution and a subshell's cache write dies with it.
+#
+# THE COUNT IS THE PIN, not the timing. A `jq` shim on PATH records one line per
+# invocation whose argv names the transcript; the answer must be 2 (one `_la_scan`, one
+# `_la_body`) no matter how many rows the roster carries.
+echo ""
+echo "---------- S26: the budget parses the transcript once, not once per row ----------"
+
+S26_SHIM="$SANDBOX/s26shim"
+mkdir -p "$S26_SHIM"
+S26_REAL_JQ="$(command -v jq)"
+S26_COUNT="$SANDBOX/.s26-jq-calls"
+cat > "$S26_SHIM/jq" <<S26EOF
+#!/bin/bash
+for _a in "\$@"; do
+  case "\$_a" in *"\$LA_COUNT_TRANSCRIPT") printf '%s\n' "\$_a" >> "\$LA_COUNT_FILE" ;; esac
+done
+exec "$S26_REAL_JQ" "\$@"
+S26EOF
+chmod +x "$S26_SHIM/jq"
+
+REPO=$(make_repo r26 yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=99 suites=9 worktrees=9 test_jobs=4 source=probe"
+S26_N=1
+while [ "$S26_N" -le 12 ]; do
+  s22_roster_row "$REPO" "$SID_A" "r26-$S26_N"
+  S26_N=$((S26_N + 1))
+done
+S26_T="$SANDBOX/.r26.jsonl"
+mk_transcript "$S26_T" fresh W-OTHER
+
+: > "$S26_COUNT"
+S26_SAVED_ENV="$GATE_ENV"
+GATE_ENV="$GATE_ENV PATH=$S26_SHIM:$PATH LA_COUNT_FILE=$S26_COUNT LA_COUNT_TRANSCRIPT=$S26_T"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w26-impl" "claude-sonnet-5" "$S26_T")"
+GATE_ENV="$S26_SAVED_ENV"
+
+expect_status "26a twelve intended rows and the gate still passes at writers=99" "0" "$GATE_ST"
+expect_status "26b …and the transcript was parsed exactly twice — once per jq pass, not once per row" \
+  "2" "$(grep -c . "$S26_COUNT" | tr -d ' ')"
+
 echo ""
 echo "----------------------------------------"
 echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"

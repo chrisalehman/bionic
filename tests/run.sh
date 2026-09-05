@@ -155,6 +155,13 @@ fi
 . "$REPO/payload/scripts/lib/resources.sh"
 pressure_sample >/dev/null 2>&1 || :
 JOBS="$(pressure_level "${BIONIC_TEST_JOBS_CEILING:-8}")"
+# A GARBAGE CEILING FALLS BACK, IT DOES NOT KILL THE RUN (Step-6 review C-6). The `:-8`
+# above covers an UNSET variable and nothing else: `pressure_level` refuses a ceiling that
+# is not a positive integer with exit 2 and prints nothing on stdout, so `JOBS` came out
+# empty and `xargs -P ""` aborted the whole run. This file runs under `set -uo pipefail`
+# with no `-e`, so the refusal was silent apart from `pressure_level`'s own stderr line —
+# which is still printed, and is the explanation for this fallback.
+case "$JOBS" in ''|*[!0-9]*) JOBS=8 ;; esac
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "JOBS=$JOBS"

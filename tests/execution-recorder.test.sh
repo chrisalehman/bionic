@@ -1551,6 +1551,56 @@ run_rec_pressure_blocked "$(mk_agent_post "$SID_A" "$P_TR" "$P_REPO" "w99-pressu
 expect_status   "13e an unwritable ring path still exits 0" "0" "$REC_ST"
 expect_contains "13e …and the rest of the hook's work still happens" "status=confirmed" "$(cat "$P_ROSTER")"
 
+# (f) THE EARLY EXIT, RESTORED (Step-6 review P-2). This hook is PostToolUse on EVERY
+# Bash call, and the overwhelming majority carry no machine line. S9 deleted the early
+# exit that used to fire on an empty MLINES, because the pressure sample above sits below
+# the loader and the engagement switch and had to be reachable. The exit is back,
+# immediately after the sample: nothing below it has any work to do for an empty MLINES,
+# and ARM 1's `<<<"$MLINES"` loop already wrote nothing there.
+#
+# THE OBSERVABLE IS THE SPAWN COUNT, because the empty-MLINES path writes no file either
+# way — the difference is work not done. A `jq` shim counts every invocation the hook
+# makes: four with the exit, six without (the two the transcript/subagents resolution
+# below it costs). Timing measured on one synthetic payload: 0.10 s -> 0.09 s wall, of
+# which ~0.03 s is `project_root`'s git resolution and ~0.04 s is the sample itself —
+# both above the exit by necessity, and both named in s20-report.md.
+P_SHIM="$SANDBOX/pressure/shim"
+mkdir -p "$P_SHIM"
+P_REAL_JQ="$(command -v jq)"
+P_JQC="$SANDBOX/pressure/.jq-calls"
+cat > "$P_SHIM/jq" <<PSHIMEOF
+#!/bin/bash
+printf 'x' >> "\$REC_JQ_COUNT"
+exec "$P_REAL_JQ" "\$@"
+PSHIMEOF
+chmod +x "$P_SHIM/jq"
+
+run_rec_counted() {  # <payload-json> — run_rec_pressure with a counting jq on PATH
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  REC_OUT=$(printf '%s' "$1" | env PATH="$P_SHIM:$PATH" REC_JQ_COUNT="$P_JQC" \
+    CLAUDE_CODE_SESSION_ID="$_sid" \
+    BIONIC_PRESSURE_RING="$P_RING" BIONIC_NOW_EPOCH="$P_NOW" \
+    BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    bash "$REC" 2>"$SANDBOX/.err"); REC_ST=$?
+  REC_ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+
+: > "$P_JQC"
+run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo four" "four")"
+expect_status "13f an ordinary Bash call still exits 0" "0" "$REC_ST"
+expect_eq "13f …and the sample still landed on it" "3" "$(wc -l < "$P_RING" | tr -d ' ')"
+expect_eq "13f …and the hook stopped right after the sample: four payload reads, not six" \
+  "4" "$(wc -c < "$P_JQC" | tr -d ' ')"
+
+# The other direction: a Bash call that DOES carry a machine line must not take the exit.
+P_MLINE="stop-check-observation/v1|agent=w99-none|log=$SANDBOX/pressure/nolog|mtime=1|size=1"
+: > "$P_JQC"
+run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "bash stop-check.sh" "$P_MLINE")"
+expect_status "13f a Bash call carrying a machine line still exits 0" "0" "$REC_ST"
+expect_eq "13f …and it does NOT take the early exit — the arms below it run" "yes" \
+  "$([ "$(wc -c < "$P_JQC" | tr -d ' ')" -gt 4 ] && echo yes || echo no)"
+
 # ============================================================
 echo ""
 echo "──────────────────────────────────────────────"
