@@ -749,7 +749,16 @@ _rm_item_verb() {  # <id>
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
-    tool:*)                echo "remove ${1#tool:}" ;;
+    tool:*)
+      case "${1#tool:}" in
+        # review-d D-1: the ONLY tool row whose removal touches a settings.json key the
+        # user could have repointed at their own value, so it is the only one whose
+        # bullet says the clear is conditional — every other row's uninstall is
+        # unconditional once this page is consented to.
+        ccstatusline)
+          echo "remove ccstatusline (uninstalls the package; clears .statusLine only if it still names ccstatusline)" ;;
+        *) echo "remove ${1#tool:}" ;;
+      esac ;;
     *)                     return 1 ;;
   esac
   return 0
@@ -1340,7 +1349,7 @@ _rm_item_legacy_hook_files() {
   _rm_wants legacy-hook-files || return 0
   _rm_have_detectors || return 0
   echo "legacy installed hook files:"
-  local line count dir names name left removed=0 rm_hf_ifs
+  local line count dir names left removed=0
   line="$(detect_legacy_hook_files)"
   count="${line#*count=}"; count="${count%% *}"
   dir="${line#*path=}";    dir="${dir%% *}"
@@ -1359,22 +1368,11 @@ _rm_item_legacy_hook_files() {
   echo "  They fire nothing while the plugin channel is live, and they are an older build of"
   echo "  every wall bionic ships, under a path the retired installer told people to invoke."
   if _rm_consent "Remove those ${count} file(s) from ${dir}?"; then
-    # `set --` re-splits the detector's own comma-separated list into this function's
-    # positional parameters — a split that cannot leak past the return the way a
-    # changed IFS would, and `set -f` keeps a glob character in a filename from
-    # expanding against $PWD on the way through.
-    rm_hf_ifs="$IFS"
-    set -f
-    IFS=','
-    # shellcheck disable=SC2086  # the split IS the point, on a list this script's own library built
-    set -- $names
-    IFS="$rm_hf_ifs"
-    set +f
-    for name in "$@"; do
-      [ -n "$name" ] || continue
-      [ -f "${dir}/${name}" ] || continue
-      rm -f "${dir}/${name}" 2>/dev/null && removed=$((removed + 1))
-    done
+    # `_dep_rm_named_files` (deps.sh) re-splits the detector's own comma-separated list
+    # into positional parameters under a `set -f` guard, so a glob character in a
+    # payload filename cannot expand against this process's $PWD on the way through —
+    # the same guard every one of the four teardown call sites now shares (review-d D-2).
+    removed="$(_dep_rm_named_files "$dir" "$names")"
     line="$(detect_legacy_hook_files)"; left="${line#*count=}"; left="${left%% *}"
     if [ "$left" = "0" ]; then
       _rm_removed "${removed} legacy hook file(s) from ${dir}"
@@ -1401,7 +1399,7 @@ _rm_item_legacy_agent_copies() {
   _rm_wants legacy-agent-copies || return 0
   _rm_have_detectors || return 0
   echo "legacy installed agent copies:"
-  local line state total drift names dir name left removed=0 rm_ac_ifs
+  local line state total drift names dir left removed=0
   line="$(detect_installed_agent_copies)"
   state="${line#*state=}"; state="${state%% *}"
   total="${line#*total=}"; total="${total%% *}"
@@ -1425,18 +1423,8 @@ _rm_item_legacy_agent_copies() {
   echo "  ${drift} of the ${total} role file(s) in ${dir} no longer match the ones this payload"
   echo "  ships. A dispatched agent reads the installed copy, so the stale one is what runs."
   if _rm_consent "Remove those ${drift} file(s) from ${dir}?"; then
-    rm_ac_ifs="$IFS"
-    set -f
-    IFS=','
-    # shellcheck disable=SC2086  # the split IS the point, on a list this script's own library built
-    set -- $names
-    IFS="$rm_ac_ifs"
-    set +f
-    for name in "$@"; do
-      [ -n "$name" ] || continue
-      [ -f "${dir}/${name}" ] || continue
-      rm -f "${dir}/${name}" 2>/dev/null && removed=$((removed + 1))
-    done
+    # Same guard, same helper (review-d D-2) — see legacy-hook-files above.
+    removed="$(_dep_rm_named_files "$dir" "$names")"
     line="$(detect_installed_agent_copies)"; left="${line#*drift=}"; left="${left%% *}"
     if [ "$left" = "0" ]; then
       _rm_removed "${removed} drifted agent role file(s) from ${dir}"
