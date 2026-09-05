@@ -340,7 +340,7 @@ fi
 # list at S10 (S8's report: "docs-pins.test.sh:327 still pins the token in SKILL.md and is
 # S10's to retire" — NARROW is gone from hooks/session-poker.sh entirely).
 PINS_RUNGS_MISSING=""
-for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'fill-declined: <reason>'; do
+for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'fill-declined: <reason>' 'Step-3 approval pending'; do
   has_pin "$SKILL_MD" "$token" || PINS_RUNGS_MISSING="${PINS_RUNGS_MISSING} ${token}"
 done
 if [ -z "$PINS_RUNGS_MISSING" ]; then
