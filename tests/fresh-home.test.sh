@@ -1697,6 +1697,144 @@ expect_true "10 remove: the machine owner's file survives a glob-matching decoy 
   test -f "${HOME_FIX}/.claude/hooks/not-bionics.sh"
 
 # ---------------------------------------------------------------------------
+# Group 11 — the statusline teardown's jq predicate is TOTAL over
+# `.statusLine`'s type (1.4.4 T8, review-e E-1).
+#
+# The T7 predicate, `(.statusLine.command // "") | test("ccstatusline")`, reads
+# fine the moment `.statusLine` is an object and `.command` a string — every
+# shape bionic itself ever writes — but a settings.json is not bionic's file,
+# and `.statusLine` is a Claude Code key the CLI's own schema also accepts as a
+# bare string. Indexing a string with `.command` is a jq TYPE error, not a
+# missing-key null, so `// ""` never reaches it: jq exits non-zero,
+# `_dep_settings_write_jq` turns that into `return 1`, and `remove_dep` returns
+# from the statusline arm before the config-directory purge below it ever
+# runs — on a machine carrying all three leftovers, a consented teardown then
+# leaves the config directory in place, leaks a raw `jq:` line to the
+# terminal, and reports the row `skipped by you` to a user who answered yes.
+# The fix makes both the index and the value optional so a malformed key is
+# read as "no match" instead of raised as an error.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 11: the jq predicate is total over .statusLine's type ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": "my-renderer"
+}
+JSON
+cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+printf 'ccstatusline\n' > "${STATE}/npm-global"
+
+expect_eq "11 precondition: the fixture's .statusLine is a malformed (string) value" \
+  "my-renderer" "$(jqf '.statusLine')"
+
+G11_OUT="$TMP/remove-statusline-malformed-key.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G11_OUT" 2>&1
+
+expect_eq "11: a malformed .statusLine value survives (not bionic's shape to touch)" \
+  "my-renderer" "$(jqf '.statusLine')"
+expect_true "11: …and the config directory bionic copied in is still gone" \
+  test ! -d "${HOME_FIX}/.config/ccstatusline"
+expect_match "11: …and the package bionic installed is uninstalled" \
+  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+expect_no_match "11: …and no raw jq error reaches the output" \
+  '*jq:*' "$(cat "$G11_OUT")"
+expect_match "11: …and the run reports it removed, not skipped by you" \
+  '*1 removed*0 already clean*0 skipped by you*' "$(cat "$G11_OUT")"
+
+# The other two `.statusLine.command` readers (health probe, teardown-state
+# union) already fail safe on this same malformed input — each swallows jq's
+# stderr and never checks its exit code, so the raised type error was already
+# invisible and the readers already answer "no match". Nothing here
+# distinguishes their behaviour before and after aligning their jq totality,
+# so — good-tests doctrine — nothing is pinned for them; the alignment is a
+# robustness fix for the NEXT caller, not a behaviour change on this one.
+
+# ---------------------------------------------------------------------------
+# Group 12 — the consent-moment sentence matches what the clear actually does
+# (1.4.4 T8, review-e E-2).
+#
+# `_rm_item_verb`'s `--all` page bullet already says the clear is conditional
+# ("clears .statusLine only if it still names ccstatusline" — 1.4.4 T7,
+# review-d D-1). The sentence printed immediately above the consent question
+# itself, built in deps.sh's `remove_dep` and shown on BOTH the `--all` and
+# `--only tool:ccstatusline` doors, still promised an unconditional clear.
+# `--only` never renders the page bullet at all, so that door had no accurate
+# sentence anywhere. One string, read from both doors here.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 12: the consent sentence says the clear is conditional ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "ccstatusline"
+  }
+}
+JSON
+printf 'ccstatusline\n' > "${STATE}/npm-global"
+
+G12_ALL_OUT="$TMP/remove-statusline-consent-all.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G12_ALL_OUT" 2>&1
+expect_match "12 --all: the consent-moment sentence says the clear is conditional" \
+  '*clear .statusLine*only if it still names ccstatusline*' "$(cat "$G12_ALL_OUT")"
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "ccstatusline"
+  }
+}
+JSON
+printf 'ccstatusline\n' > "${STATE}/npm-global"
+
+G12_ONLY_OUT="$TMP/remove-statusline-consent-only.txt"
+printf 'n\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G12_ONLY_OUT" 2>&1
+expect_match "12 --only: the (only) consent sentence this door shows says the clear is conditional" \
+  '*clear .statusLine*only if it still names ccstatusline*' "$(cat "$G12_ONLY_OUT")"
+
+# ---------------------------------------------------------------------------
+# Group 13 — `_dep_rm_named_files` restores `set -f` to the CALLER's prior
+# state, not unconditionally to off (1.4.4 T8, review-e E-3).
+#
+# Harmless at today's four call sites (every one reads the helper back through
+# a command substitution, so the mutation dies in the subshell), but the
+# consolidation moved the guard from two private script bodies into a public
+# library function any future caller can invoke directly — exactly the moment
+# an unconditional `set +f` stops being a detail nobody can observe.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 13: _dep_rm_named_files restores set -f to the caller's state ==="
+
+e13_setf_after() {  # <on|off> -> the shell's OWN set -f state after a direct call
+  env -i HOME="$HOME_FIX" PATH="$BIN" bash -c '
+    . "$1"
+    if [ "$2" = "on" ]; then set -f; else set +f; fi
+    _dep_rm_named_files "'"$TMP"'/g13-nonexistent-dir" "a,b,c" >/dev/null
+    case $- in *f*) echo on ;; *) echo off ;; esac
+  ' _ "${LIB_DIR}/deps.sh" "$1"
+}
+
+expect_eq "13: caller's set -f ON survives a direct call" \
+  "on" "$(e13_setf_after on)"
+expect_eq "13: caller's set -f OFF survives a direct call" \
+  "off" "$(e13_setf_after off)"
+
+# ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
 

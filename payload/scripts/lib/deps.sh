@@ -631,14 +631,21 @@ _dep_pkg_unversioned() {  # ccstatusline@2.2.29 -> ccstatusline ; @scope/x@1 -> 
 # feeds exist to prevent. The guard now lives once, here, so all four call
 # sites are consistent by construction instead of by four authors remembering.
 _dep_rm_named_files() {  # <dir> <comma-separated-names> -> echoes the count actually removed
-  local dir="${1:-}" names="${2:-}" name removed=0 ifs_save
+  local dir="${1:-}" names="${2:-}" name removed=0 ifs_save noglob_was_on=no
   ifs_save="$IFS"
+  # review-e E-3: restore to the CALLER's prior state, not unconditionally to
+  # off. Every call site today reads this back through a command substitution,
+  # so an unconditional `set +f` has never been observable — but this is now a
+  # public library function any future caller can invoke directly, and the
+  # instant one does without a subshell between it and its own `set -f`, an
+  # unconditional restore would turn its globbing back on behind its back.
+  case $- in *f*) noglob_was_on=yes ;; esac
   set -f
   IFS=','
   # shellcheck disable=SC2086  # the split IS the point, on a list this script's own library built
   set -- $names
   IFS="$ifs_save"
-  set +f
+  [ "$noglob_was_on" = yes ] || set +f
   for name in "$@"; do
     [ -n "$name" ] || continue
     [ -f "${dir}/${name}" ] || continue
@@ -939,7 +946,7 @@ _dep_check_statusline() {
   settings="$(_dep_settings_file)"
   _dep_have jq || { echo "unknown|unknown"; return 0; }
   if [ -f "$settings" ]; then
-    cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
+    cmd="$(jq -r '.statusLine?.command? // "" | tostring' "$settings" 2>/dev/null)"
     case "$cmd" in
       "npx "*)        cmd_ok=no ;;
       *ccstatusline*) cmd_ok=yes ;;
@@ -1690,7 +1697,7 @@ _dep_statusline_leftovers() {  # <name> -> 0 when this machine carries statuslin
   local name="${1:-ccstatusline}" settings cmd
   settings="$(_dep_settings_file)"
   if [ -f "$settings" ] && _dep_have jq; then
-    cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
+    cmd="$(jq -r '.statusLine?.command? // "" | tostring' "$settings" 2>/dev/null)"
     # THE NAME, NOT THE KEY. A `.statusLine` pointing at the user's own renderer
     # is not bionic's to remove and must survive a teardown; every string bionic
     # has ever written there names ccstatusline, the npx form included.
@@ -1791,7 +1798,13 @@ remove_dep() {  # <name>
       # Fix step 3 (bug-ccstatusline-npx-per-render.md): the install arm now
       # runs a real `npm install -g`, so the removal plan says so too — a
       # settings.json clear alone would leave the global package on disk.
-      plan="npm uninstall -g $(_dep_locator_target "$(dep_field "$name" source_url)"), clear .statusLine from $(_dep_settings_file), and remove $(_dep_ccstatusline_config_dir)"
+      # review-e E-2: this is the sentence printed at the moment of consent,
+      # on BOTH the `--all` and `--only tool:ccstatusline` doors — `--only`
+      # never shows the page bullet `_rm_item_verb` builds, so this is the
+      # only place that door's user reads what the clear will do. It has to
+      # say the same conditional thing that bullet does (review-d D-1):
+      # `.statusLine` is cleared only if it still names ccstatusline.
+      plan="npm uninstall -g $(_dep_locator_target "$(dep_field "$name" source_url)"), clear .statusLine from $(_dep_settings_file) only if it still names ccstatusline, and remove $(_dep_ccstatusline_config_dir)"
       ;;
     *)
       while IFS= read -r line; do argv+=("$line"); done < <(_dep_remove_argv "$name") || true
@@ -1850,7 +1863,7 @@ remove_dep() {  # <name>
         if [ -f "$settings" ]; then
           _dep_have jq || return 1
           _dep_settings_write_jq "$settings" \
-            'if ((.statusLine.command // "") | test("ccstatusline")) then del(.statusLine) else . end' \
+            'if ((.statusLine?.command? // "") | tostring | test("ccstatusline")) then del(.statusLine) else . end' \
             || return 1
         fi
         # THE SAME NEVER-LIST remove.sh's `_rm_purge_dir` enforces, its own
