@@ -1398,6 +1398,143 @@ expect_eq "6b: …and the command recorded in settings.json is the executable, n
   "ccstatusline" "$(jqf '.statusLine.command // ""')"
 
 # ---------------------------------------------------------------------------
+# Group 7 — the teardown asks a DIFFERENT question from the report (1.4.4 T5,
+# t5-report.md R-1).
+#
+# A teardown wants to know whether this machine carries anything bionic wrote.
+# It used to ask `check_dep`, which answers whether the row is in the HEALTHY
+# state setup leaves it in — a different question, and on the pre-1.4.4 machine
+# the two answers point opposite ways. Once the presence check stopped calling
+# `npx ccstatusline@latest` healthy, `/bionic:remove` started calling that same
+# machine "already clean" and walking away from the command in the user's
+# settings.json and the config directory bionic itself copied in. Every machine
+# 1.4.4 exists for is in exactly that state.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 7: remove takes bionic's statusline state off a pre-1.4.4 machine ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest"
+  }
+}
+JSON
+cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+expect_eq "7 precondition: the fixture is the pre-1.4.4 machine — npx command recorded" \
+  "npx ccstatusline@latest" "$(jqf '.statusLine.command // ""')"
+expect_true "7 precondition: …and the layout bionic copied is on disk" test -f "$CCS_CONFIG"
+
+G7_OUT="$TMP/remove-statusline-pre144.txt"
+printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G7_OUT" 2>&1
+
+# LINE-SCOPED ON PURPOSE. A glob over the whole report would pair "ccstatusline" on one
+# line with "already clean" on another and answer about neither, so the claim is made
+# against the ccstatusline row itself.
+g7_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is clean
+  grep 'ccstatusline' "$1" 2>/dev/null | grep 'already clean' 2>/dev/null
+  return 0
+}
+expect_eq "7: no ccstatusline row calls a machine carrying bionic's statusline state clean" \
+  "" "$(g7_clean_rows "$G7_OUT")"
+expect_eq "7: the statusLine bionic wrote is gone from settings.json" \
+  "" "$(jqf '.statusLine.command // ""')"
+expect_true "7: …and the config directory bionic copied in is gone" \
+  test ! -d "${HOME_FIX}/.config/ccstatusline"
+# AC-7's rule, on this item too: what was not bionic's is still where the user left it.
+expect_eq "7: …and the rest of the user's settings.json is untouched" \
+  "opus" "$(jqf '.model // ""')"
+
+# The other direction, so the rows above are a measurement and not a constant: a machine
+# with no statusline state of bionic's IS clean, and the run says so.
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+echo '{"model":"opus"}' > "$SETTINGS"
+G7_CLEAN_OUT="$TMP/remove-statusline-clean.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G7_CLEAN_OUT" 2>&1
+expect_ne "7: a machine with none of it DOES read already clean, on the same extractor" \
+  "" "$(g7_clean_rows "$G7_CLEAN_OUT")"
+
+# ---------------------------------------------------------------------------
+# Group 8 — /bionic:remove takes the leftovers /bionic:setup now removes
+# (1.4.4 T5 extension, plan A-8).
+#
+# T1 gave setup two items for the pre-plugin hook files under ~/.claude/hooks and
+# the drifted role copies under ~/.claude/agents. The teardown door had neither,
+# so a full consented `/bionic:remove` left behind an older build of every wall
+# bionic ships and a set of role files a dispatched agent still reads. Same
+# detectors, same payload-side names discipline, same consent shape.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 8: remove takes the legacy hook files and drifted agent copies ==="
+
+# The claude-home the field machine had, built the way cross-gate's `ds_plant` builds it:
+# payload-named files two builds behind, plus ONE file in each directory that is not
+# bionic's and must survive.
+g8_plant() {
+  local f n=0
+  rm -rf "${HOME_FIX}/.claude/hooks" "${HOME_FIX}/.claude/agents"
+  mkdir -p "${HOME_FIX}/.claude/hooks" "${HOME_FIX}/.claude/agents"
+  for f in "$PAYLOAD"/hooks/*.sh; do
+    [ -f "$f" ] || continue
+    [ "$n" -lt 16 ] || break
+    printf '#!/bin/bash\n# an older build of %s\n' "${f##*/}" > "${HOME_FIX}/.claude/hooks/${f##*/}"
+    n=$((n + 1))
+  done
+  printf '#!/bin/bash\n# the machine owner wrote this one\n' > "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+  for f in "$PAYLOAD"/agents/*.md; do
+    [ -f "$f" ] || continue
+    printf -- '---\nname: %s\n---\nan older build of this role.\n' "${f##*/}" \
+      > "${HOME_FIX}/.claude/agents/${f##*/}"
+  done
+  printf -- '---\nname: not-bionics\n---\nthe machine owner wrote this one.\n' \
+    > "${HOME_FIX}/.claude/agents/not-bionics.md"
+}
+
+g8_count() {  # <dir> <glob>
+  local n=0 f
+  for f in "$1"/$2; do [ -e "$f" ] && n=$((n + 1)); done
+  printf '%s' "$n"
+}
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+g8_plant
+expect_eq "8 precondition: seventeen files in the hooks directory, one of them not bionic's" \
+  "17" "$(g8_count "${HOME_FIX}/.claude/hooks" '*.sh')"
+
+G8_LIST="$(run_payload "$REMOVE_SH" --list 2>&1)"
+expect_match "8: legacy-hook-files is a name the teardown takes" \
+  '*legacy-hook-files*' "$G8_LIST"
+expect_match "8: legacy-agent-copies is a name the teardown takes" \
+  '*legacy-agent-copies*' "$G8_LIST"
+
+G8_HOOKS="$(printf 'y\ny\n' | run_payload "$REMOVE_SH" --only legacy-hook-files 2>&1)"
+expect_eq "8: the consented removal leaves exactly the machine's own hook behind" \
+  "1" "$(g8_count "${HOME_FIX}/.claude/hooks" '*.sh')"
+expect_true "8: …and that survivor is the one the payload does not ship" \
+  test -f "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+expect_match "8: …and the run reports what it removed" '*✓*hook file*' "$G8_HOOKS"
+
+G8_AGENTS="$(printf 'y\ny\n' | run_payload "$REMOVE_SH" --only legacy-agent-copies 2>&1)"
+expect_eq "8: the consented removal leaves exactly the machine's own agent behind" \
+  "1" "$(g8_count "${HOME_FIX}/.claude/agents" '*.md')"
+expect_true "8: …and that survivor is the one the payload does not ship" \
+  test -f "${HOME_FIX}/.claude/agents/not-bionics.md"
+expect_match "8: …and the run reports what it removed" '*✓*agent*' "$G8_AGENTS"
+
+# The negative twin on the same extractors: with the leftovers gone both items read clean,
+# so the rows above measure the removal rather than restating the fixture.
+expect_match "8: a second pass over the same machine reads already clean" \
+  '*already clean*' "$(printf 'y\n' | run_payload "$REMOVE_SH" --only legacy-hook-files 2>&1)"
+
+# ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
 
