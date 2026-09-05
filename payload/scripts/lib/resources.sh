@@ -113,6 +113,30 @@ EMERGENCY_FREE_MB=256  # datum: kill at ~188 MB (tests/run.sh:63-68) — the flo
                        # above the measured kernel SIGKILL point, so the tick acts before
                        # the kernel does.
 
+# ── pressure BANDS (AC-13, AC-14, design-ledger D3). These decide the RUNG — how much of
+# the Step-0 ceiling a consumer may use right now. They are constants beside the sensor and
+# NOT a config knob: a threshold a project could move is a threshold no wave can reason
+# about (D3, rejected alternatives). They are calibrated against the 8 GB / 8-core machine
+# this wave was designed on, which read free 44 % / swap 69 % while `free_mb` said ok — the
+# divergence B-3 exists to catch (research-code-map §2.5). A 128 GB machine reads clear
+# almost always, which is the correct answer for it.
+
+BAND_FREE_EMERGENCY_PCT=5   # datum: 2026-09-04 charter B-3 — under 5 % free the machine is
+                            # already swapping to stay alive; one writer is all that is safe.
+BAND_FREE_CRITICAL_PCT=12   # datum: 2026-09-04 charter B-3 — the level at which the design
+                            # machine's swap climbed while free_mb still read ok.
+BAND_FREE_WARNING_PCT=25    # datum: 2026-09-04 charter B-3 — a quarter of memory is the
+                            # nearest round line above the 44 % this machine idles at.
+BAND_SWAP_CRITICAL_PCT=92   # datum: 2026-09-04 charter B-3 — swap nearly full is the state
+                            # that preceded the measured kernel SIGKILL.
+BAND_SWAP_WARNING_PCT=80    # datum: charter B-3 — "swap at 84 % was the real signal" while
+                            # the free-MB sensor read healthy; 80 is that reading rounded down.
+
+# How far back the rung looks. The median over this window is what stops a one-second spike
+# from setting a whole suite's width (D3, "a bare fresh reading" rejected).
+PRESSURE_WINDOW_S=300       # datum: design-ledger D3 — "median of the readings in the last
+                            # few minutes"; five minutes is the smoothing window ratified there.
+
 # ─────────────────────────────────────────────────────────── integer arithmetic helpers
 
 # bash has no floats. Every non-integer constant above is converted here to HUNDREDTHS, and
@@ -196,6 +220,135 @@ _res_load_1m() {  # one-minute load average
     Linux)  awk '{ print $1 }' /proc/loadavg 2>/dev/null ;;
     *)      printf '0' ;;
   esac
+}
+
+# _res_free_pct / _res_swap_pct — the two readings `free_mb` alone could not give (AC-13).
+#
+# WHY THEY EXIST. `_res_free_mb` answers "how many MB are reclaimable", and on the machine
+# this wave was designed on that number read healthy (1767 MB, above HOLD_FREE_MB) while
+# swap sat at 69 % consumed — the charter's B-3 divergence exactly. A percentage is also
+# the only reading that means the same thing on an 8 GB machine and a 128 GB one, which is
+# what lets ONE band table serve both.
+#
+# UNREADABLE IS -1, NEVER 0. A sensor that cannot be read must not read as "nothing free":
+# that would be an emergency invented out of a missing command. `pressure_band` ignores a
+# -1 term outright, so an absent sensor degrades to the other terms — AC-13's "an
+# unreadable input degrades to today's reading, never to a hold".
+#
+# BOTH HONOUR AN ENV PIN, the BIONIC_PROBE_* idiom the other two readings already use
+# (resources.sh:154), so tests/resources.test.sh drives the bands without waiting for a
+# machine to get into trouble, and without a convenient constant inside the sensor.
+
+_res_free_pct() {  # system-wide free memory as a percentage, or -1 if unreadable
+  if [ -n "${BIONIC_PROBE_FREE_PCT:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_FREE_PCT}"
+    return 0
+  fi
+  local v=''
+  case "$(uname -s 2>/dev/null)" in
+    Darwin)
+      # `memory_pressure`'s PARSEABLE line is its LAST one — everything above it is a stats
+      # block whose sections vary by release (research-code-map §2.5). Matching the phrase
+      # and keeping the last match is what makes this robust to a new section appearing.
+      v="$(memory_pressure 2>/dev/null | awk '
+        /System-wide memory free percentage:/ { line = $0 }
+        END {
+          if (line == "") exit 1
+          sub(/.*percentage:[ \t]*/, "", line)
+          sub(/%.*/, "", line)
+          if (line !~ /^[0-9]+$/) exit 1
+          printf "%d", line + 0
+        }')" || v=''
+      ;;
+    Linux)
+      # MemAvailable over MemTotal — the kernel's own answer, the same reading `_res_free_mb`
+      # prefers, expressed as the share of the machine rather than an absolute.
+      v="$(awk '
+        /^MemTotal:/     { total = $2 }
+        /^MemAvailable:/ { avail = $2 }
+        END {
+          if (total == "" || total + 0 == 0 || avail == "") exit 1
+          printf "%d", (avail * 100) / total
+        }' /proc/meminfo 2>/dev/null)" || v=''
+      ;;
+  esac
+  _res_is_uint "$v" || v=-1
+  printf '%s' "$v"
+}
+
+_res_swap_pct() {  # swap in use as a percentage of swap configured, or -1 if unreadable
+  if [ -n "${BIONIC_PROBE_SWAP_PCT:-}" ]; then
+    printf '%s' "${BIONIC_PROBE_SWAP_PCT}"
+    return 0
+  fi
+  local v=''
+  case "$(uname -s 2>/dev/null)" in
+    Darwin)
+      # `sysctl vm.swapusage` → `total = 3072.00M  used = 2132.44M  free = 939.56M`. The
+      # values are read BY KEYWORD and their unit suffix is parsed, never assumed: macOS
+      # prints G once swap grows past a gigabyte, and a unit read as a bare number would put
+      # the ratio out by 1024.
+      v="$(sysctl vm.swapusage 2>/dev/null | awk '
+        function mb(s,   n, u) {
+          n = s; sub(/[A-Za-z]+$/, "", n)
+          u = s; sub(/^[0-9.]+/, "", u)
+          if (u ~ /^[Gg]/) return (n + 0) * 1024
+          if (u ~ /^[Kk]/) return (n + 0) / 1024
+          return n + 0
+        }
+        {
+          for (i = 1; i <= NF; i++) {
+            if ($i == "total" && $(i + 1) == "=") total = mb($(i + 2))
+            if ($i == "used"  && $(i + 1) == "=") used  = mb($(i + 2))
+          }
+        }
+        END {
+          if (total == "") exit 1
+          # No swap configured is 0 % used, not a division fault and not an unknown.
+          if (total + 0 == 0) { printf "0"; exit 0 }
+          if (used == "") exit 1
+          printf "%d", (used * 100) / total
+        }')" || v=''
+      ;;
+    Linux)
+      v="$(awk '
+        /^SwapTotal:/ { total = $2 }
+        /^SwapFree:/  { free = $2 }
+        END {
+          if (total == "" || free == "") exit 1
+          if (total + 0 == 0) { printf "0"; exit 0 }
+          printf "%d", ((total - free) * 100) / total
+        }' /proc/meminfo 2>/dev/null)" || v=''
+      ;;
+  esac
+  _res_is_uint "$v" || v=-1
+  printf '%s' "$v"
+}
+
+_res_is_pct() {  # a percentage reading: a non-negative integer, or the -1 "unreadable"
+  case "${1:-}" in
+    -1)          return 0 ;;
+    ''|*[!0-9]*) return 1 ;;
+    *)           return 0 ;;
+  esac
+}
+
+_res_cores() {  # this machine's core count, floored at 1 — pressure_sample's default
+  local c=''
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) c="$(sysctl -n hw.ncpu 2>/dev/null)" ;;
+    Linux)  c="$(nproc 2>/dev/null)" ;;
+  esac
+  if ! _res_is_uint "$c" || [ "$c" -lt 1 ]; then c=1; fi
+  printf '%s' "$c"
+}
+
+_res_now() {  # the epoch second this call is happening at
+  if [ -n "${BIONIC_NOW_EPOCH:-}" ]; then
+    printf '%s' "${BIONIC_NOW_EPOCH}"
+    return 0
+  fi
+  date +%s 2>/dev/null
 }
 
 # resources_probe — the five machine facts, one line, `key=value` space-separated.
@@ -321,7 +474,7 @@ resources_budget() {
 
 # resources_pressure <cores> — the live reading, one line:
 #
-#   state=<ok|hold|emergency> free_mb=<n> load_1m=<f>
+#   state=<ok|hold|emergency> free_mb=<n> load_1m=<f> free_pct=<n> swap_pct=<n>
 #
 # The two readings are echoed alongside the state so a caller can PRINT THE MEASUREMENT
 # rather than the verdict alone — AC-30 requires `HOLD <measurement>`, because a HOLD with
@@ -340,13 +493,20 @@ resources_pressure() {
     return 2
   fi
 
-  local free_mb load_1m state
+  local free_mb load_1m free_pct swap_pct state
   free_mb="$(_res_free_mb)"
   load_1m="$(_res_load_1m)"
   _res_is_uint "$free_mb" || free_mb=0
   case "${load_1m:-}" in
     ''|*[!0-9.]*) load_1m=0 ;;
   esac
+  # The two percentage readings are REPORTED, not judged here: `state=` keeps its exact
+  # HOLD/EMERGENCY meaning (the tick still reads it as advice to the model), and the bands
+  # that do read the percentages live in `pressure_band` below.
+  free_pct="$(_res_free_pct)"
+  swap_pct="$(_res_swap_pct)"
+  _res_is_pct "$free_pct" || free_pct=-1
+  _res_is_pct "$swap_pct" || swap_pct=-1
 
   state=ok
   if [ "$free_mb" -lt "$EMERGENCY_FREE_MB" ]; then
@@ -358,5 +518,218 @@ resources_pressure() {
     state=hold
   fi
 
-  printf 'state=%s free_mb=%s load_1m=%s\n' "$state" "$free_mb" "$load_1m"
+  printf 'state=%s free_mb=%s load_1m=%s free_pct=%s swap_pct=%s\n' \
+    "$state" "$free_mb" "$load_1m" "$free_pct" "$swap_pct"
 }
+
+# ──────────────────────────────────────────────────── the band, the ring and the rung
+
+# WHAT THIS SECTION ADDS (spec R4; AC-13, AC-14, AC-16; design-ledger D3, D4).
+#
+#   pressure_band <free%> <swap%> <load> <cores>   one reading  -> clear|warning|critical|emergency
+#   pressure_sample [<cores>]                      take a reading and append it to the ring
+#   pressure_level <ceiling>                       the ring + the ceiling -> a rung in [1, ceiling]
+#
+# WHY A RING AND A MEDIAN. A bare fresh reading lets one second of noise set a whole suite's
+# width, and a controller that remembers its last decision stores a fact it does not own
+# (D3, both rejected). The cure is a short window of readings on disk and a MEDIAN over it:
+# every consumer that samples adds to the same evidence, and the level is recomputed from
+# that evidence at the moment of use. NOTHING STORES A CURRENT LEVEL — `pressure_level`
+# writes nothing (the one exception is an empty ring, where it takes a single reading so it
+# has something to answer from), so two consumers at one moment compute one answer.
+#
+# WHY THE RING IS MACHINE-SCOPED (D4). Pressure describes the machine, so the ring lives at
+# the machine's scope — one file under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/, written
+# and read by every bionic session in every project. A per-root ring would partition one
+# machine's readings by directory and let two roots starve each other while each read clear.
+# No run owns it and Step 8 does not wipe it; every append prunes it, so it bounds itself.
+#
+# THE RUNG IS A FRACTION OF THE STEP-0 CEILING, NEVER A NUMBER OF ITS OWN: clear = ceiling,
+# warning = half, critical = a quarter, emergency = 1. Both halvings round UP, so a small
+# ceiling degrades to 1 rather than to 0. The ceiling itself is never exceeded and never
+# re-derived here — the same rule the budget block above lives under.
+
+pressure_band() {  # <free_pct> <swap_pct> <load_1m> <cores> -> clear|warning|critical|emergency
+  local free_pct="${1:-}" swap_pct="${2:-}" load_1m="${3:-}" cores="${4:-}"
+
+  if ! _res_is_pct "$free_pct" || ! _res_is_pct "$swap_pct"; then
+    printf 'pressure_band: need <free_pct> <swap_pct> as integers or -1, got: %s %s\n' \
+      "${1:-}" "${2:-}" >&2
+    return 2
+  fi
+  case "${load_1m:-}" in
+    ''|*[!0-9.]*)
+      printf 'pressure_band: need <load_1m> as a non-negative number, got: %s\n' "${3:-}" >&2
+      return 2 ;;
+  esac
+  if ! _res_is_uint "$cores" || [ "$cores" -lt 1 ]; then
+    printf 'pressure_band: need <cores> as a positive integer, got: %s\n' "${4:-}" >&2
+    return 2
+  fi
+
+  # A -1 term is UNREADABLE, not zero: every test below is guarded on `>= 0` first, so a
+  # missing sensor drops out of the decision instead of driving it (AC-13).
+  if [ "$free_pct" -ge 0 ] && [ "$free_pct" -lt "$BAND_FREE_EMERGENCY_PCT" ]; then
+    printf 'emergency\n'; return 0
+  fi
+  if { [ "$free_pct" -ge 0 ] && [ "$free_pct" -lt "$BAND_FREE_CRITICAL_PCT" ]; } ||
+     { [ "$swap_pct" -ge 0 ] && [ "$swap_pct" -ge "$BAND_SWAP_CRITICAL_PCT" ]; }; then
+    printf 'critical\n'; return 0
+  fi
+  # The load term shares HOLD_LOAD_FACTOR with the `state=` arm above — one owner for "how
+  # much queueing is normal" — and is the one float comparison here, so it is done in awk.
+  if { [ "$free_pct" -ge 0 ] && [ "$free_pct" -lt "$BAND_FREE_WARNING_PCT" ]; } ||
+     { [ "$swap_pct" -ge 0 ] && [ "$swap_pct" -ge "$BAND_SWAP_WARNING_PCT" ]; } ||
+     awk -v l="$load_1m" -v c="$cores" -v f="$HOLD_LOAD_FACTOR" \
+       'BEGIN { exit !(l + 0 > c * f) }'; then
+    printf 'warning\n'; return 0
+  fi
+  printf 'clear\n'
+}
+
+_pressure_ring_path() {  # the one machine-scoped ring (D4); BIONIC_PRESSURE_RING overrides
+  if [ -n "${BIONIC_PRESSURE_RING:-}" ]; then
+    printf '%s' "${BIONIC_PRESSURE_RING}"
+    return 0
+  fi
+  printf '%s/bionic/pressure.ring' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+}
+
+# _pressure_window_lines <ring> <now> — the well-formed samples inside the smoothing window.
+# ONE OWNER for "what counts as in-window": the prune on append and the read in
+# pressure_level both call this, so a sample can never be pruned by one rule and counted by
+# another. A line the parser does not recognise is not a sample and is dropped on the next
+# append rather than defaulting to some band.
+_pressure_window_lines() {
+  local ring="$1" now="$2"
+  [ -r "$ring" ] || return 0
+  awk -F'|' -v now="$now" -v w="$PRESSURE_WINDOW_S" '
+    NF == 5 && $1 ~ /^[0-9]+$/ && ($1 + 0) >= (now - w) && ($1 + 0) <= (now + w) { print }
+  ' "$ring" 2>/dev/null
+}
+
+# pressure_sample [<cores>] — THE ONE WRITER. Takes a reading, appends it, prunes the ring.
+#
+# The consumers sample (D3 amendment): plugin hooks were not observed firing inside
+# subagents, so "activity writes the ring" would starve it exactly when writers are running.
+# A suite start, a fill and the orchestrator's own recorder each append one reading, and all
+# three read the same evidence back.
+#
+# The prune is an append then a TEMP-FILE RENAME, so a reader never sees a half-rewritten
+# ring: the worst a concurrent reader can see is the file before or the file after.
+pressure_sample() {
+  local cores="${1:-}"
+  [ -n "$cores" ] || cores="$(_res_cores)"
+  if ! _res_is_uint "$cores" || [ "$cores" -lt 1 ]; then
+    printf 'pressure_sample: need <cores> as a positive integer, got: %s\n' "${1:-}" >&2
+    return 2
+  fi
+
+  local ring now free_pct swap_pct load_1m dir tmp
+  ring="$(_pressure_ring_path)"
+  now="$(_res_now)"
+  if ! _res_is_uint "$now"; then
+    printf 'pressure_sample: unreadable clock, got: %s\n' "${now:-}" >&2
+    return 2
+  fi
+
+  free_pct="$(_res_free_pct)"
+  swap_pct="$(_res_swap_pct)"
+  load_1m="$(_res_load_1m)"
+  _res_is_pct "$free_pct" || free_pct=-1
+  _res_is_pct "$swap_pct" || swap_pct=-1
+  case "${load_1m:-}" in ''|*[!0-9.]*) load_1m=0 ;; esac
+
+  dir="$(dirname "$ring")"
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    printf 'pressure_sample: cannot create the ring directory %s\n' "$dir" >&2
+    return 2
+  fi
+  printf '%s|%s|%s|%s|%s\n' "$now" "$free_pct" "$swap_pct" "$load_1m" "$cores" >> "$ring" || {
+    printf 'pressure_sample: cannot append to %s\n' "$ring" >&2
+    return 2
+  }
+
+  tmp="${ring}.tmp.$$"
+  if _pressure_window_lines "$ring" "$now" > "$tmp" 2>/dev/null; then
+    mv -f "$tmp" "$ring" 2>/dev/null || rm -f "$tmp"
+  else
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
+# pressure_level <ceiling> — the rung, on stdout; `rung=<n>/<ceiling> band=<b> samples=<k>`
+# on stderr so a caller can print the reasoning beside the number (the same rule the
+# HOLD line above lives under: a verdict with no measurement is indistinguishable from a bug).
+#
+# PURE, with one stated exception: it reads the ring and writes nothing, so two consumers at
+# one moment agree and calling it twice cannot move the answer. The exception is an EMPTY
+# ring, where it takes a single sample first — a first consumer on a cold machine must have
+# something to answer from, and answering from no evidence at all is the failure mode.
+#
+# An even number of samples resolves to the HIGHER of the two middle bands. Pressure is
+# asymmetric: reading calm when the machine is not costs work, reading busy when it is calm
+# costs wall time (the file's opening rule — memory is hard, compute is soft).
+pressure_level() {
+  local ceiling="${1:-}"
+  if ! _res_is_uint "$ceiling" || [ "$ceiling" -lt 1 ]; then
+    printf 'pressure_level: need <ceiling> as a positive integer, got: %s\n' "${1:-}" >&2
+    return 2
+  fi
+
+  local ring now lines
+  ring="$(_pressure_ring_path)"
+  now="$(_res_now)"
+  _res_is_uint "$now" || now=0
+  lines="$(_pressure_window_lines "$ring" "$now")"
+  if [ -z "$lines" ]; then
+    pressure_sample >/dev/null 2>&1
+    now="$(_res_now)"
+    _res_is_uint "$now" || now=0
+    lines="$(_pressure_window_lines "$ring" "$now")"
+  fi
+
+  local n=0 ranks='' ts f s l c b
+  if [ -n "$lines" ]; then
+    while IFS='|' read -r ts f s l c; do
+      [ -n "${ts:-}" ] || continue
+      b="$(pressure_band "${f:-}" "${s:-}" "${l:-}" "${c:-}" 2>/dev/null)" || continue
+      case "$b" in
+        clear)     b=0 ;;
+        warning)   b=1 ;;
+        critical)  b=2 ;;
+        emergency) b=3 ;;
+        *)         continue ;;
+      esac
+      ranks="${ranks}${b}
+"
+      n=$((n + 1))
+    done <<EOF
+$lines
+EOF
+  fi
+
+  # No evidence is not an emergency. A ring that could not be read or held nothing usable
+  # degrades to clear — the ceiling Step 0 already derived from the machine's facts — for
+  # the same reason an unreadable sensor never becomes a hold (AC-13).
+  local rank=0
+  if [ "$n" -gt 0 ]; then
+    rank="$(printf '%s' "$ranks" | sort -n | awk -v k="$n" 'NR == int(k / 2) + 1 { print; exit }')"
+  fi
+  case "${rank:-0}" in 0|1|2|3) : ;; *) rank=0 ;; esac
+
+  local band rung
+  case "$rank" in
+    3) band=emergency; rung=1 ;;
+    2) band=critical;  rung=$(( (ceiling + 3) / 4 )) ;;
+    1) band=warning;   rung=$(( (ceiling + 1) / 2 )) ;;
+    *) band=clear;     rung="$ceiling" ;;
+  esac
+  if [ "$rung" -lt 1 ]; then rung=1; fi
+  if [ "$rung" -gt "$ceiling" ]; then rung="$ceiling"; fi
+
+  printf 'rung=%s/%s band=%s samples=%s\n' "$rung" "$ceiling" "$band" "$n" >&2
+  printf '%s\n' "$rung"
+}
+
