@@ -53,7 +53,7 @@ PATROL_WALL_SCHEMA="patrol-wall/v1"
 # itself cannot be reached to be asked. Where the script exists it is asked —
 # `interval` for the project's configured value and `interval-default` for its
 # built-in — because two copies of a constant drift the first time either moves.
-PATROL_INTERVAL_LAST_RESORT=1800
+PATROL_INTERVAL_LAST_RESORT=1200
 
 # HOW STALE IS STALE (L-DETECT/4.5, improvement, spec AC-22). "The stamp is
 # stale past twice the poker interval" is a judgment call three sites in this
