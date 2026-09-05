@@ -162,6 +162,39 @@ roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
   return 0
 }
 
+# THE RECORDED ListAgents ANSWER — the live set (wave-roster-lifecycle S6, design ledger
+# D1′). Since that slice BOTH stop scripts resolve a target against the newest recorded
+# ListAgents answer in a session's transcript, and the session-directory scan that used to
+# do it is gone. A fixture transcript is therefore no longer `{}`: a world whose transcript
+# carries no answer cannot resolve ANY target, so every stop row driven against it would
+# land on one refusal — "no fresh ListAgents answer" — instead of the branch it names.
+#
+# The body's shape is the real one, copied from tests/live-agents.test.sh, whose bodies are
+# byte-verbatim captures: the separator is U+00B7 and `[8895ce]` is the harness ref suffix
+# payload/scripts/lib/agents.sh strips. A name passed TWICE is two lines of one answer,
+# which is what `live_agents_has` counts as the D2′ ambiguity.
+FD_LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
+fd_live() {  # <transcript> <name>...
+  local tr="$1"; shift
+  local n body
+  mkdir -p "$(dirname "$tr")"
+  body=$(
+    printf '%s\n\nTeammates (%d):\n' "$FD_LA_SELF" "$#"
+    for n in "$@"; do
+      printf '  %s [8895ce]  ·  bionic:implementor  ·  running  ·  started 7m ago\n' "$n"
+    done
+  )
+  {
+    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
+    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01FIXTURELISTAGENTS",name:"ListAgents",input:{}}]}}'
+    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01FIXTURELISTAGENTS",content:$b}]}}'
+  } > "$tr"
+  return 0
+}
+
 payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
   local tool="$1" sid="$2" tr="$3" cwd="$4" arg="$5"
   local input='{}'
@@ -196,6 +229,12 @@ plant_agent "$A_SUB" "aworker-1111111111111111" "worker"
 plant_agent "$A_SUB" "atwin-2222222222222222" "twin"
 plant_agent "$A_SUB" "atwin-3333333333333333" "twin"
 roster_row "$A_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+# THE AMBIGUITY IS IN THE ANSWER, NOT ON DISK (S6, D2′). Two `agent-<id>.meta.json` files of
+# one name used to make `twin` ambiguous because the resolver scanned the session directory;
+# it no longer scans anything, so the ambiguity this world exists to drive has to be what it
+# now is — one name appearing more than once in the recorded ListAgents answer. `worker` is
+# in the same answer because every other stop row driven against this world resolves it.
+fd_live "$A_TR" worker twin twin
 
 IFS='|' read -r I_REPO I_TR I_SUB <<< "$(make_world inert no)"
 plant_agent "$I_SUB" "aworker-1111111111111111" "worker"
@@ -258,6 +297,9 @@ printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$T_SLUG/$SID_A.jsonl"
 IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world observed yes)"
 plant_agent "$O_SUB" "aworker-1111111111111111" "worker"
 roster_row "$O_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+# Both halves of the pair resolve through the live set (S6): the PRODUCER needs it to reach
+# an evidence tier at all, and the gate needs it to reach the observation record.
+fd_live "$O_TR" worker
 # <observer> is the agent id of whoever RAN the observation — empty for the
 # orchestrator, which is how the platform renders it (the payload field is simply
 # absent). The producer's own session key travels on CLAUDE_CODE_SESSION_ID: it
@@ -286,6 +328,7 @@ observe "$SID_A" "$O_TR" "$O_REPO" "worker"
 IFS='|' read -r S_REPO S_TR S_SUB <<< "$(make_world stale yes)"
 plant_agent "$S_SUB" "aworker-1111111111111111" "worker"
 roster_row "$S_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_live "$S_TR" worker
 observe "$SID_A" "$S_TR" "$S_REPO" "worker"
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more work"}]}}\n' \
   >> "$S_SUB/agent-aworker-1111111111111111.jsonl"
@@ -294,17 +337,42 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more wo
 IFS='|' read -r F_REPO F_TR F_SUB <<< "$(make_world foreign yes)"
 plant_agent "$F_SUB" "aworker-1111111111111111" "worker"
 roster_row "$F_REPO" "$SID_A" "worker" "aworker-1111111111111111"
-observe "$SID_B" "$F_TR" "$F_REPO" "worker"
+# THE LOOK IS SESSION B'S, so session B is the one that has to resolve the target: the
+# producer runs under B's key, reads B's transcript for the live set and B's roster for the
+# agent id. Session A needs its own answer too, or the gate would refuse for want of one and
+# never reach the foreign-observation verdict this row names.
+F_TR_B="${F_TR%/*}/$SID_B.jsonl"
+plant_agent "${F_TR_B%.jsonl}/subagents" "aworker-1111111111111111" "worker"
+roster_row "$F_REPO" "$SID_B" "worker" "aworker-1111111111111111"
+fd_live "$F_TR" worker
+fd_live "$F_TR_B" worker
+# The look is driven ENTIRELY inside session B — B's transcript, B's roster, B's copy of the
+# agent — because the record is B's or it is nothing: hooks/execution-recorder.sh stores an
+# observation only when the log it names sits under the subagents directory of the session in
+# the payload it was handed. Driven through A's transcript the look would be discarded at the
+# door and this row would refuse for want of ANY record, which is the row above it.
+observe "$SID_B" "$F_TR_B" "$F_REPO" "worker"
 
-# Not ours at all (slice 4/6, AC-6; re-keyed in slice 4/9): an agent filed under
-# ANOTHER session's directory, which this session's roster nonetheless names on an
-# unconfirmed row — the corpse collision that fired in live operation. By NAME it
-# is refused; by FULL AGENT ID it is the documented zombie-predecessor cleanup and
-# passes on its own fresh observation.
+# A NAME THIS SESSION HOLDS NO AGENT ID FOR (S6, and the successor to the retired FOREIGN
+# verdict). The world is the corpse collision that fired in live operation: an agent whose
+# records sit under ANOTHER session's directory, which this session's roster names only on an
+# unconfirmed `intended` row. Which directory holds the records no longer decides anything —
+# records outlive agents, and that was the defect. What decides now is the id: an `intended`
+# row's `agent_id` is empty, so no working log can be named, so no observation of this target
+# can be taken at all. Both rows below are that one fact from two spellings.
 IFS='|' read -r X_REPO X_TR X_SUB <<< "$(make_world foreignowned yes)"
 X_TR_B="${X_TR%/*}/$SID_B.jsonl"
-plant_agent "${X_TR_B%.jsonl}/subagents" "abb20f616-7777777777777" "worker"
+# A REAL TRANSCRIPT-FORM ID. The old spelling `abb20f616-7777777777777` carries thirteen hex
+# digits after the dash and matches neither limb of `is_address_shaped` — under the scan it
+# resolved anyway, by being a filename; under the live-set rule an id is only ever a spelling
+# to be translated, so a target that wears no address shape and appears on no roster row is
+# one the gate has no standing over and waves through. Pinning that would pin
+# `stop|unresolvable` a second time. The id below is what the platform actually emits.
+X_FULL_ID="abb20f6167777777777777"
+plant_agent "${X_TR_B%.jsonl}/subagents" "$X_FULL_ID" "worker"
 roster_row "$X_REPO" "$SID_A" "worker" "" "" intended
+fd_live "$X_TR" worker
+fd_live "$X_TR_B" worker
 observe "$SID_A" "$X_TR_B" "$X_REPO" "worker"
 
 # A look taken by somebody else (slice 4/6, D-3): the record is fresh, this
@@ -312,6 +380,7 @@ observe "$SID_A" "$X_TR_B" "$X_REPO" "worker"
 IFS='|' read -r B_REPO B_TR B_SUB <<< "$(make_world borrowedlook yes)"
 plant_agent "$B_SUB" "aworker-1111111111111111" "worker"
 roster_row "$B_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_live "$B_TR" worker
 observe "$SID_A" "$B_TR" "$B_REPO" "worker" "asubagent-2020202020202020"
 
 # The contracted progress artifact written after the look (slice 4/6, D-6): the
@@ -319,6 +388,7 @@ observe "$SID_A" "$B_TR" "$B_REPO" "worker" "asubagent-2020202020202020"
 IFS='|' read -r G_REPO G_TR G_SUB <<< "$(make_world progressstale yes)"
 plant_agent "$G_SUB" "aworker-1111111111111111" "worker"
 roster_row "$G_REPO" "$SID_A" "worker" "aworker-1111111111111111" ".bionic/tmp/w99.progress"
+fd_live "$G_TR" worker
 printf 'stage 1\n' > "$G_REPO/.bionic/tmp/w99.progress"
 observe "$SID_A" "$G_TR" "$G_REPO" "worker"
 sleep 1
@@ -328,6 +398,7 @@ printf 'stage 2\n' >> "$G_REPO/.bionic/tmp/w99.progress"
 IFS='|' read -r V_REPO V_TR V_SUB <<< "$(make_world badversion yes)"
 plant_agent "$V_SUB" "aworker-1111111111111111" "worker"
 roster_row "$V_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_live "$V_TR" worker
 mkdir -p "$V_REPO/.bionic/tmp"
 printf 'v9|session=%s|target=%s|typed=worker|log=%s|mtime=1|size=1\n' \
   "$SID_A" "aworker-1111111111111111" "$V_SUB/agent-aworker-1111111111111111.jsonl" \
@@ -336,6 +407,8 @@ printf 'v9|session=%s|target=%s|typed=worker|log=%s|mtime=1|size=1\n' \
 # A symlinked state path — a hostile repo may CLOSE the wall, never open it (§8).
 IFS='|' read -r L_REPO L_TR L_SUB <<< "$(make_world symlinked yes)"
 plant_agent "$L_SUB" "aworker-1111111111111111" "worker"
+roster_row "$L_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_live "$L_TR" worker
 mkdir -p "$L_REPO/.bionic/tmp"
 ln -s "$SANDBOX/elsewhere.state" "$L_REPO/.bionic/tmp/stop-check.state"
 
@@ -430,11 +503,11 @@ drive() {  # <condition>
     stop:unknown-schema)    p=$(payload TaskStop "$SID_A" "$V_TR" "$V_REPO" worker) ;;
     stop:stale-observation) p=$(payload TaskStop "$SID_A" "$S_TR" "$S_REPO" worker) ;;
     stop:symlinked-state)   p=$(payload TaskStop "$SID_A" "$L_TR" "$L_REPO" worker) ;;
-    stop:foreign-by-name)   p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" worker) ;;
+    stop:unidentified-by-name) p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" worker) ;;
     stop:borrowed-look)     p=$(payload TaskStop "$SID_A" "$B_TR" "$B_REPO" worker) ;;
     stop:progress-stale)    p=$(payload TaskStop "$SID_A" "$G_TR" "$G_REPO" worker) ;;
     stop:observed)          p=$(payload TaskStop "$SID_A" "$O_TR" "$O_REPO" worker) ;;
-    stop:foreign-by-full-id) p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" abb20f616-7777777777777) ;;
+    stop:unrostered-full-id) p=$(payload TaskStop "$SID_A" "$X_TR_B" "$X_REPO" "$X_FULL_ID") ;;
     *) echo "unknown condition $1" >&2; return 9 ;;
   esac
   # THE ENVIRONMENT AGREES WITH THE PAYLOAD, because on the machine it does (A-probe-2: a
@@ -508,11 +581,11 @@ stop|foreign-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|unknown-schema|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|stale-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|symlinked-state|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|foreign-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
+stop|unidentified-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|borrowed-look|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|progress-stale|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|observed|0|silent|Stop gate — the positive pair: a fresh observation permits
-stop|foreign-by-full-id|0|silent|Stop gate — the positive pair: a fresh observation permits
+stop|unrostered-full-id|2|loud|Stop gate — after the verdict: CLOSED, loud
 '
 
 echo "=== §7 rows driven as behaviour (AC-10) ==="
