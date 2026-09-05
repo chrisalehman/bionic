@@ -550,7 +550,10 @@ resources_pressure() {
 # the machine's scope — one file under ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/, written
 # and read by every bionic session in every project. A per-root ring would partition one
 # machine's readings by directory and let two roots starve each other while each read clear.
-# No run owns it and Step 8 does not wipe it; every append prunes it, so it bounds itself.
+# No run owns it and Step 8 does not wipe it. Appends are single O_APPEND writes and never
+# rewrite the file; a prune runs only once the file passes PRESSURE_RING_MAX_LINES, through a
+# mktemp-named copy, so it never grows without bound — while every READER sees only the samples
+# inside the smoothing window, which is where the window guarantee lives (S20 C-1; auditor F-20).
 #
 # THE RUNG IS A FRACTION OF THE STEP-0 CEILING, NEVER A NUMBER OF ITS OWN: clear = ceiling,
 # warning = half, critical = a quarter, emergency = 1. Both halvings round UP, so a small
