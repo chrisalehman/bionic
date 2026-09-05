@@ -3007,6 +3007,213 @@ expect_absent   "…and never from the newest plan, which belongs to another run
   "THEIRS-SLICE" "$OUT"
 
 # ============================================================
+section "Section 19: the tick sizes open= and FILL from the LIVE SET (S19; auditor F-14)"
+# ============================================================
+#
+# THE DEFECT. The spec's ownership table names `session-poker.sh tick` as a rendering
+# surface of the LIVE AGENT SET, and the shipped tick read no such thing: it counted roster
+# rows by sweeper verdict alone. Since S16 the dispatch wall counts a row open only while
+# the harness still calls its agent live, so the two could disagree about the same row — a
+# finished-but-unstopped teammate is NOT open to the budget and WAS open to the tick. The
+# Patrol would then print a fill the dispatch wall was about to refuse, or withhold one it
+# would have allowed. Same question, two answers, which is the one thing this wave exists
+# to remove.
+#
+# THE RULE. A row whose sweeper verdict is STILL-LIVE/UNMET/AMBIGUOUS is counted open only
+# if `live_row_open` — the ONE predicate, payload/scripts/lib/agents.sh — says so on THIS
+# session's own transcript. The tick DECIDES with it and never writes: no roster row, no
+# marker and no verdict moves, which is why an idle row still appears on the roster and
+# still notifies when it is overdue.
+#
+# THE FALLBACK IS THE ROSTER, and it is deliberate. The Patrol's prompt runs this tick
+# BEFORE any ListAgents, so a tick that refused on a stale or missing answer would refuse
+# every first tick of every session. The tick holds no authority (ADR-003): it prints a
+# line. The wall at dispatch is the enforcement, and it is the one that refuses on a stale
+# read — so here the roster count stands and the tick says, in one line, that it did.
+
+# THE LIVE ANSWER, planted where `session_transcript` looks for it: any project directory
+# of CLAUDE_CONFIG_DIR, file `<session-id>.jsonl`. Same body shape as
+# tests/live-agents.test.sh's fixtures and tests/cross-gate-agreement.test.sh's `cg_live`.
+S19_CFG="$TMPROOT/s19-config"
+mkdir -p "$S19_CFG/projects/-fixture-project"
+
+s19_answer() {  # <state: fresh|stale|none> <name[:status]>... -> plants this session's transcript
+  local state="$1"; shift
+  local tr="$S19_CFG/projects/-fixture-project/$SID.jsonl" body n nm st
+  if [ "$state" = "none" ]; then
+    printf '{"type":"user","timestamp":"2026-09-05T00:50:00.000Z","message":{"role":"user","content":"go"}}\n' \
+      > "$tr"
+    return 0
+  fi
+  body="This session is bionic-fixture [fc3e2d] — the name other sessions use to message it."
+  if [ "$#" -gt 0 ]; then
+    body="$body
+
+Teammates ($#):"
+    for n in "$@"; do
+      case "$n" in
+        *:*) nm="${n%%:*}"; st="${n##*:}" ;;
+        *)   nm="$n";       st="running"  ;;
+      esac
+      body="$body
+  ${nm} [000000]  ·  bionic:implementor  ·  ${st}  ·  started 7m ago"
+    done
+  fi
+  {
+    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
+    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S19LISTAGENTS",name:"ListAgents",input:{}}]}}'
+    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S19LISTAGENTS",content:$b}]}}'
+    [ "$state" = "stale" ] && jq -nc --arg ts "2026-09-05T00:55:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"anything else?"}}'
+  } > "$tr"
+  return 0
+}
+
+# THE FILL IS COMPARED EXACTLY, never with a substring. `poker: FILL ONE` is a PREFIX of
+# `poker: FILL ONE TWO`, so a contains-assertion on the smaller fill passes on the larger
+# one and the arm that is supposed to detect over-filling detects nothing. Found by
+# mutation (a) of this slice's own battery, which moved the gap from one to two and left
+# the row green.
+s19_fill() {  # <the tick's whole channel> -> the ids it filled, or empty
+  printf '%s\n' "$1" | sed -n 's/^poker: FILL //p' | head -1
+}
+
+s19_plan() {  # <repo> — writers=2, one landed base and two pending slices
+  wave_plan "$1" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+    "| BASE | — | complex | landed |" \
+    "| ONE | BASE | complex | pending |" \
+    "| TWO | BASE | standard | pending |"
+}
+
+export CLAUDE_CONFIG_DIR="$S19_CFG"
+
+# ---------- 19a: the CONTROL — a running row is counted, exactly as before ----------
+#
+# This is the row that keeps every arm below from passing against a tick that had simply
+# stopped counting. Same repo, same plan, same roster: only the STATUS WORD moves.
+R19A="$(make_repo s19-running)"; new_roster "$R19A"
+s19_plan "$R19A"
+add_row "$R19A" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "live-writer:running"
+poke_pressure "$R19A" 8192 1.0 tick
+expect_eq "a RUNNING row is open: writers=2 minus one leaves a gap of one" \
+  "ONE" "$(s19_fill "$OUT")"
+expect_contains "…and the decision line counts it" "|open=1" "$OUT"
+
+# ---------- 19b: THE DEFECT — an idle (finished, unstopped) agent frees the slot ----------
+#
+# Byte-for-byte 19a's fixture with `running` changed to `idle`. The roster row is untouched
+# and still says `confirmed`; what changed is the harness's own answer about its agent.
+R19B="$(make_repo s19-idle)"; new_roster "$R19B"
+s19_plan "$R19B"
+add_row "$R19B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "live-writer:idle"
+poke_pressure "$R19B" 8192 1.0 tick
+expect_eq "an IDLE row is not open: the whole gap of two is filled" \
+  "ONE TWO" "$(s19_fill "$OUT")"
+expect_contains "…and the decision line agrees with the dispatch wall's count" "|open=0" "$OUT"
+# THE ROW ITSELF IS UNTOUCHED. The tick decides; it never writes. A tick that had closed the
+# roster row to make its own arithmetic true would break every other reader of that file.
+expect_contains "…while the roster row it did not count is still on the roster, unchanged" \
+  "name=live-writer" "$(cat "$(roster_of "$R19B")")"
+expect_absent "…and no landing marker was written for it" \
+  "landing-swept" "$(cat "$(roster_of "$R19B")")"
+
+# ---------- 19c: FAIL-CLOSED — an unknown status word keeps the slot ----------
+R19C="$(make_repo s19-third)"; new_roster "$R19C"
+s19_plan "$R19C"
+add_row "$R19C" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "live-writer:starting"
+poke_pressure "$R19C" 8192 1.0 tick
+expect_eq "an UNKNOWN status word keeps the row open — the gap stays one" \
+  "ONE" "$(s19_fill "$OUT")"
+
+# ---------- 19d: a row the answer does not carry at all is not open ----------
+R19D="$(make_repo s19-absent)"; new_roster "$R19D"
+s19_plan "$R19D"
+add_row "$R19D" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "somebody-else:running"
+poke_pressure "$R19D" 8192 1.0 tick
+expect_eq "a row absent from the fresh answer is not open: the gap is two" \
+  "ONE TWO" "$(s19_fill "$OUT")"
+
+# ---------- 19e: STALE — the roster count stands, and the tick says so ----------
+#
+# The Patrol prompt runs the tick BEFORE ListAgents, so refusing here would refuse every
+# tick. The line names the state and points at the gate that DOES refuse.
+R19E="$(make_repo s19-stale)"; new_roster "$R19E"
+s19_plan "$R19E"
+add_row "$R19E" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer stale "live-writer:idle"
+poke_pressure "$R19E" 8192 1.0 tick
+expect_eq "a STALE answer falls back to the roster count" "ONE" "$(s19_fill "$OUT")"
+expect_contains "…and names the state in one line" \
+  "poker: live set stale — open= counted from the roster; ListAgents before any dispatch" "$OUT"
+expect_eq "…and the tick still exits 0 rather than refusing" "0" "$RC"
+
+# ---------- 19f: NONE — no usable answer in the transcript ----------
+R19F="$(make_repo s19-none)"; new_roster "$R19F"
+s19_plan "$R19F"
+add_row "$R19F" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer none
+poke_pressure "$R19F" 8192 1.0 tick
+expect_eq "an unreadable live set falls back to the roster count too" "ONE" "$(s19_fill "$OUT")"
+expect_contains "…naming that state instead" \
+  "poker: live set none — open= counted from the roster; ListAgents before any dispatch" "$OUT"
+
+# THE SAME, with no transcript for this session at all — the ordinary first tick of a
+# session, and the case that must not become a refusal.
+rm -f "$S19_CFG/projects/-fixture-project/$SID.jsonl"
+R19F2="$(make_repo s19-no-transcript)"; new_roster "$R19F2"
+s19_plan "$R19F2"
+add_row "$R19F2" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R19F2" 8192 1.0 tick
+expect_eq "no transcript at all: the roster count stands" "ONE" "$(s19_fill "$OUT")"
+expect_contains "…with the same one line" "poker: live set none" "$OUT"
+expect_eq "…and exit 0" "0" "$RC"
+
+# ---------- 19g: a QUIET tick with nothing open says nothing about the live set ----------
+#
+# The reader is consulted only when the roster HAS a row whose openness could move. An empty
+# roster has nothing for a live answer to narrow, and printing the fallback line on every
+# quiet tick of every session would be noise the reader learns to skip.
+R19G="$(make_repo s19-quiet)"; new_roster "$R19G"
+s19_plan "$R19G"
+poke_pressure "$R19G" 8192 1.0 tick
+expect_absent "an empty roster consults no live set and says nothing about one" \
+  "poker: live set" "$OUT"
+
+# ---------- 19h: DISARM IS NEVER REACHED OFF A LIVENESS READING ----------
+#
+# DISARM is terminal — it removes the stamp and ends the Patrol for the rest of the session
+# — and its precondition is "no open row". A row whose contract is UNMET and whose agent has
+# finished without delivering is precisely the state that most needs a Patrol, so the
+# terminal decision keeps the ROSTER's count and only the advisory arithmetic (open= and the
+# fill) moves with the live set. Delivered run + an unmet roster row + an idle agent.
+R19H="$(make_repo s19-disarm)"; new_roster "$R19H"; armed_ago "$R19H"; delivered_plan "$R19H"
+R19H_DEL="$R19H/delivered.md"
+add_row "$R19H" name=live-writer deliverable="$R19H_DEL" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+s19_answer fresh "live-writer:idle"
+poke_pressure "$R19H" 8192 1.0 tick
+expect_absent "an idle agent on an UNMET roster row does NOT unlock DISARM" "decision=DISARM" "$OUT"
+expect_absent "…and the Patrol is not told it may stop" "the Patrol may stop" "$OUT"
+expect_eq "…and the stamp is kept, which is what the arming wall actually reads" "yes" \
+  "$([ -f "$(stamp_of "$R19H")" ] && echo yes || echo no)"
+# The paired positive: the SAME repo, the SAME idle answer, with the contract genuinely MET
+# — so the arm above is a statement about the liveness reading and not about a decision
+# this fixture could never have reached.
+echo "done" > "$R19H_DEL"
+poke_pressure "$R19H" 8192 1.0 tick
+expect_contains "…while a genuinely MET roster still DISARMs on the same idle answer" \
+  "decision=DISARM" "$OUT"
+
+unset CLAUDE_CONFIG_DIR
+
+# ============================================================
 printf '\n──────────────────────────────────────────────\n'
 printf 'session-poker: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
 [ "$FAIL" -eq 0 ]

@@ -6,9 +6,14 @@
 # the model calls ListAgents and the harness records the answer in the session
 # transcript every hook is handed; this library is the ONE parser of that recording.
 # `dispatch-preflight.sh` (budget count), `stop-guard.sh` and `stop-check.sh`
-# (resolution), `stop-orders.sh standdown` (report) and `session-poker.sh tick` all
-# call these two functions. None of them re-reads a transcript itself, so a change to
-# the harness's output format moves every reader at once.
+# (resolution), `stop-orders.sh standdown` (report) and `session-poker.sh tick` (the
+# fill it prints) all call these functions. None of them re-reads a transcript itself,
+# so a change to the harness's output format moves every reader at once.
+#
+# ONE LEVEL UP FROM THE READER there is one DERIVED question, and it has one owner too:
+# `live_row_open` (bottom of this file), which answers "does this roster row still hold
+# a writer slot". The budget wall and the Patrol tick both ask it, and S19 exists because
+# they used to answer it separately.
 #
 # WHY NOT THE ROSTER, THE Stop PAYLOAD, OR A MARKER. The roster records that a
 # dispatch happened, never that an agent is alive. The Stop payload's
@@ -300,5 +305,61 @@ live_agents_has() {  # <transcript.jsonl> <name>
     0|"") return 1 ;;
     1)     return 0 ;;
     *)     return 2 ;;
+  esac
+}
+
+# ROW-OPENNESS: THE ONE PREDICATE, AND IT FAILS CLOSED (spec R2, AC-27; S19, closing the
+# Step-5 auditor's F-13/F-14).
+#
+# THE QUESTION. "Does this roster row still hold a writer slot?" Two consumers ask it —
+# hooks/dispatch-preflight.sh's budget wall, which refuses a dispatch on the answer, and
+# hooks/session-poker.sh's tick, which sizes the FILL it prints. They asked it in two
+# places until S19, and a disagreement between them is a Patrol advertising a dispatch the
+# wall is about to refuse. One owner, here.
+#
+# THE RULE IS AN INVERSION, and the inversion is the fix. S16 wrote "open iff the status is
+# exactly `running`", inline in the budget. That is fail-OPEN: a status word this parser has
+# never seen — a renamed one, a third one the harness starts printing — read as CLOSED and
+# handed out a writer slot, in the same function whose ambiguity arm deliberately spends one.
+# So the rule is now "open unless the harness said `idle`".
+#
+# THE CORPUS THE RULE RESTS ON. 26 real ListAgents answers captured from this project's own
+# orchestrator session carry 44 teammate rows and exactly two status words — 33 `running`,
+# 11 `idle` (Step-5 auditor pass 2, Level 1; the capture is
+# `.bionic/docs/record/wave-roster-lifecycle/fixtures/listagents-results-all.jsonl`). `idle`
+# is the ONE word the harness has been observed to use for "finished its turn, still
+# addressable", so it is the one word this predicate is entitled to read as closed.
+# Everything else is a reading nobody has taken, and spending a slot on it costs a dispatch
+# that waits; freeing one costs a wave that over-dispatches past its own ceiling.
+#
+# AMBIGUITY IS OPEN, for the same asymmetry `live_agents_status` already documents: a name
+# the reader could not resolve is not a name it called finished.
+#
+# STALE AND NONE PROPAGATE VERBATIM (3/4), never collapsing into "not open". Freshness is a
+# property of the transcript, not of any one name, and each caller owns what it does about
+# it — the wall refuses the whole dispatch, the tick falls back to its roster and says so.
+#
+#   live_row_open <transcript.jsonl> <name>
+#     exit 0  OPEN     — present exactly once with a status that is NOT `idle`, or present
+#                        more than once (unresolvable)
+#     exit 1  NOT OPEN — absent, empty name, or present exactly once with status `idle`
+#     exit 3  STALE    — propagated from live_agents unchanged
+#     exit 4  NONE     — propagated from live_agents unchanged
+#     prints nothing on stdout; live_agents' one stderr line passes through.
+_LA_ROW_CLOSED_STATUS="idle"
+
+live_row_open() {  # <transcript.jsonl> <name>
+  local st rc
+  rc=0
+  st="$(live_agents_status "$1" "${2:-}")" || rc=$?
+  case "$rc" in
+    0)
+      # Present exactly once. Only the one observed closed word closes the row.
+      if [ "$st" = "$_LA_ROW_CLOSED_STATUS" ]; then return 1; fi
+      return 0
+      ;;
+    1) return 1 ;;
+    2) return 0 ;;
+    *) return "$rc" ;;
   esac
 }
