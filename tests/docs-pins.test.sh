@@ -160,7 +160,12 @@ AGENT_RULES="${REPO}/.claude/rules/agent-discipline.md"
 
 # The four pinned strings, spelled here exactly as they must appear on disk.
 PIN_PROBE='`resources_probe` and `resources_budget` from `<plugin-root>/scripts/lib/resources.sh` yield the run'"'"'s `parallel-budget:` — one string, recorded verbatim in plan frontmatter, printed in the display, and never re-derived downstream.'
-PIN_FILL='every slice with no unmet dependency dispatches in one batch up to `writers`; sequence only for shared state or when the batch would exceed the budget'
+# RE-POINTED AT THE CORRECTED DOCTRINE (Step-6 architecture A-2). The old needle pinned
+# `dispatches in one batch up to `writers`` — the ceiling, unregulated — while the tick fills
+# to the RUNG off a live-trimmed open count, so the pin was holding a contradiction green. A
+# pin follows the sentence it is a pin FOR: when the doctrine is corrected the needle moves
+# with it, or the test outlives the thing it was protecting.
+PIN_FILL='every slice with no unmet dependency dispatches in one batch sized by the rung the tick prints — `poker: rung=<n>/<ceiling>`, the machine'"'"'s answer to how wide it will carry right now — with `writers` as the ceiling that rung is taken against and the only number the wall enforces'
 PIN_JOBS='**Each brief in the batch points the writer at the rung:** `take your test width from pressure_level at suite start; the ceiling is this header'"'"'s test_jobs`.'
 
 # has_pin <file> <string> -> 0 when the file carries the string.
@@ -612,7 +617,11 @@ fi
 # test.sh:327 still pins the token in SKILL.md and is S10's to retire" — Section 3's token
 # list above no longer names NARROW, and this is the positive sentence that replaced it).
 PIN_TASKLIST='**The resume ritual rebuilds the task list after it binds:** run `TaskList`; if it is empty and the bound plan has `## SDLC State`, recreate one entry per step (and per slice at the current step) from the plan, statuses from the step lines.'
-PIN_RUNG='The tick prints the current rung as one line, `poker: rung=<n>/<ceiling>`; NARROW and RELAX are retired — regulation is the rung'"'"'s, read by every consumer at the moment of use, never a tick'"'"'s advice.'
+# RE-POINTED at the sentence that separates the rung from the two HOLDS (Step-6 readability
+# R-5/R-6). The prompt used to say "Three rungs, in order:" and then list two, and used the
+# word `rung` for the advisory pair AND for `pressure_level`'s integer eleven words apart.
+# The pin still holds the NARROW/RELAX retirement, which is what it was for.
+PIN_RUNG='The rung is the separate thing they are often confused with: `pressure_level`'"'"'s integer, printed on every tick as `poker: rung=<n>/<ceiling>`, and it is the number a fill is sized by. NARROW and RELAX are retired — regulation is the rung'"'"'s, read by every consumer at the moment of use, never a tick'"'"'s advice.'
 
 if has_pin "$SKILL_MD" "$PIN_TASKLIST"; then
   ok "48: SKILL.md's resume ritual rebuilds the task list after it binds, verbatim"
@@ -794,6 +803,60 @@ elif has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"; then
      "the pin matched a copy that says the opposite"
 else
   ok "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)"
+fi
+
+
+echo ""
+echo "=== Section 8: the tick interval, in every place it is written down (D-3) ==="
+#
+# THE GAP THIS CLOSES. The design ledger's tick-interval row named "docs-pins holds the
+# sentence" as its agreement test, and docs-pins held no such thing: `grep -n '20m'
+# tests/docs-pins.test.sh` returned nothing, and either SKILL.md sentence could have been
+# reverted to 30m with the whole suite green. AC-19 states the sentences as a deliverable and
+# names no pin for them (Step-6 duplication review D-3).
+#
+# FOUR SITES, ONE DEFAULT. Two SKILL.md sentences carry it as prose — the config knob and the
+# cron-job cadence — hooks/session-poker.sh carries it as `POKER_INTERVAL_DEFAULT`, and
+# lib/patrol.sh carries it a FOURTH time as `PATROL_INTERVAL_LAST_RESORT=1200`, a deliberate
+# commented copy used only when the poker cannot be reached. That copy shipped stale once
+# already (S8 fixed a 1800 in it), which is exactly the drift its own comment predicts, so
+# the seconds are compared against the poker's own answer rather than asserted twice.
+PIN_INTERVAL_KNOB='config knob `poker-interval:` in `.bionic/config.yaml`, default 20m'
+PIN_INTERVAL_CRON='fires into a `command not found` every 20 minutes and reports nothing'
+PATROL_LIB="${REPO}/payload/scripts/lib/patrol.sh"
+
+if has_pin "$SKILL_MD" "$PIN_INTERVAL_KNOB"; then
+  ok "55: SKILL.md names the poker-interval default as 20m, verbatim"
+else
+  no "55: SKILL.md names the poker-interval default as 20m, verbatim" "file: $SKILL_MD"
+fi
+if has_pin "$SKILL_MD" "$PIN_INTERVAL_CRON"; then
+  ok "56: SKILL.md's cron sentence names the same cadence in minutes, verbatim"
+else
+  no "56: SKILL.md's cron sentence names the same cadence in minutes, verbatim" "file: $SKILL_MD"
+fi
+
+# THE TWO CONSTANTS AGREE, and the poker's own verb is what says so — `interval-default`
+# ignores config by contract, so this is the built-in against the last resort and not one
+# machine's `.bionic/config.yaml` against another's.
+POKER_DEFAULT_SECS="$(bash "$POKER_SH" interval-default 2>/dev/null)"
+PATROL_LAST_RESORT="$(sed -n 's/^PATROL_INTERVAL_LAST_RESORT=\([0-9][0-9]*\).*/\1/p' "$PATROL_LIB" | head -1)"
+expect_eq "57: lib/patrol.sh's last-resort interval equals the poker's built-in default" \
+  "$POKER_DEFAULT_SECS" "$PATROL_LAST_RESORT"
+expect_eq "58: …and that default really is 20 minutes, in seconds" "1200" "$POKER_DEFAULT_SECS"
+
+# ANTI-VACUITY, the same doctored-copy shape as 50/51/54: a SKILL.md whose interval was
+# reverted to the pre-wave 30m must fail both prose pins.
+DOCTORED_INTERVAL="$TMP/skill-interval-mutated.md"
+sed 's/default 20m/default 30m/; s/every 20 minutes/every 30 minutes/' "$SKILL_MD" > "$DOCTORED_INTERVAL"
+if cmp -s "$SKILL_MD" "$DOCTORED_INTERVAL"; then
+  no "59: a doctored SKILL.md fails both interval pins (they discriminate)" \
+     "the sed targets matched nothing — the sentences moved"
+elif has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_KNOB" || has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_CRON"; then
+  no "59: a doctored SKILL.md fails both interval pins (they discriminate)" \
+     "a pin matched a copy carrying the pre-wave 30m"
+else
+  ok "59: a doctored SKILL.md fails both interval pins (they discriminate)"
 fi
 
 echo ""
