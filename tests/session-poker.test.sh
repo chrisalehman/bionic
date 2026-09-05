@@ -42,6 +42,24 @@ PASS=0; FAIL=0; TOTAL=0
 export BIONIC_PLUGINS_DIR="$TMPROOT/no-plugins"
 mkdir -p "$BIONIC_PLUGINS_DIR"
 
+# THE MACHINE IS FIXTURE DATA HERE, WITHOUT EXCEPTION (S8). The tick now samples the
+# pressure ring and takes its fill width from `pressure_level`, so two readings that used
+# to reach only the advisory HOLD line now decide how many slices a FILL names. Left
+# unpinned, this suite would read THIS machine — and a suite that happens to run while the
+# fleet is busy would see a critical band, a quartered rung and a FILL of one where the case
+# asked for two. Every one of these is a seam lib/resources.sh already owns
+# (`BIONIC_PROBE_*`, resources.sh:154 and :242/:279) plus the ring path S7 added; pinning
+# them here is the same discipline §11's preamble already declares for free_mb and load.
+#
+# THE RING GOES UNDER $TMPROOT, so nothing in this file can read or write the machine-scoped
+# ring at ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring. Cases that need a
+# particular BAND override the two percentages and take a ring of their own (`poke_rung`).
+export BIONIC_PRESSURE_RING="$TMPROOT/pressure.ring"
+export BIONIC_PROBE_FREE_MB=8192
+export BIONIC_PROBE_LOAD_1M=1.0
+export BIONIC_PROBE_FREE_PCT=60
+export BIONIC_PROBE_SWAP_PCT=0
+
 cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
@@ -301,8 +319,8 @@ section "Section 2: interval — the config knob"
 R2="$(make_repo s2)"
 
 poke "$R2" interval
-expect_eq "no config.yaml: the default (30m = 1800s) is used" "0" "$RC"
-expect_eq "…printed as bare seconds" "1800" "$OUT"
+expect_eq "no config.yaml: the default (20m = 1200s) is used" "0" "$RC"
+expect_eq "…printed as bare seconds" "1200" "$OUT"
 
 mkdir -p "$R2/.bionic"
 printf 'poker-interval: 5m\n' > "$R2/.bionic/config.yaml"
@@ -327,24 +345,24 @@ expect_eq "a malformed override REFUSES rather than silently defaulting (exit 2)
 # malformed override — that is this repo's posture everywhere a prose value is read. But
 # hooks/dispatch-preflight.sh has to measure staleness even then, because `.bionic/config.yaml`
 # is machine-local and agent-writable and one bad line there must not be able to disarm a
-# wall. Rather than retype 1800 in the gate — two copies of a constant that drift the first
+# wall. Rather than retype 1200 in the gate — two copies of a constant that drift the first
 # time either moves — the gate asks this verb.
 #
 # THE PROPERTY THAT MATTERS TO ITS CALLER is that the config cannot change the answer, so
 # every arm below is driven ON TOP of a config the `interval` verb refuses or overrides.
 poke "$R2" interval-default
 expect_eq "interval-default answers 0 even though the live config is malformed" "0" "$RC"
-expect_eq "…with this script's own default, in seconds (30m = 1800s)" "1800" "$OUT"
+expect_eq "…with this script's own default, in seconds (20m = 1200s)" "1200" "$OUT"
 
 printf 'poker-interval: 5m\n' > "$R2/.bionic/config.yaml"
 poke "$R2" interval-default
-expect_eq "…and a perfectly VALID override does not move it either" "1800" "$OUT"
+expect_eq "…and a perfectly VALID override does not move it either" "1200" "$OUT"
 poke "$R2" interval
 expect_eq "…while interval, on the same repo, still reads that override (5m = 300s)" "300" "$OUT"
 
 # The gate's fallback is only worth having if it tracks the constant. Mutation-proof: move
 # POKER_INTERVAL_DEFAULT on a copy and the verb has to move with it — a verb that printed a
-# literal 1800 would answer 1800 here.
+# literal 1200 would answer 1200 here.
 # THE DOCTORED COPY LIVES IN A TREE, not in a bare temp directory (bionic 1.4.0). The poker
 # loads its library through the shared idiom, whose first candidate is `<dirname $0>/../
 # scripts/lib` — the shape the installed plugin ships. A copy dropped anywhere else finds no
@@ -355,7 +373,7 @@ POKER_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-default-mut.XXXXXX")"
 mkdir -p "$POKER_MUT_ROOT/hooks" "$POKER_MUT_ROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$POKER_MUT_ROOT/scripts/lib"
 POKER_MUT="$POKER_MUT_ROOT/hooks/session-poker.sh"
-sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
+sed 's/^POKER_INTERVAL_DEFAULT="20m"$/POKER_INTERVAL_DEFAULT="7m"/' "$POKER" > "$POKER_MUT"
 OUT="$( cd "$R2" && CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_MUT" interval-default 2>&1 )"; RC=$?
 expect_eq "the verb answers from the CONSTANT, not from a literal (doctored 7m = 420s)" "420" "$OUT"
 
@@ -1552,7 +1570,7 @@ expect_absent "…never DISARM off a delivery it cannot place in time" "decision
 expect_contains "…naming the missing arming record as the reason" "arming record" "$OUT"
 
 # ============================================================
-section "Section 11: pressure — HOLD, NARROW, EMERGENCY (AC-30, S7)"
+section "Section 11: pressure — HOLD, EMERGENCY, and the RUNG (AC-17, AC-30, S8)"
 # ============================================================
 #
 # WHAT THESE CASES OWN. The tick reads `resources_pressure` before it considers a single
@@ -1608,6 +1626,36 @@ poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
   BIONIC_PROBE_FREE_MB="$free" BIONIC_PROBE_LOAD_1M="$load" poke "$repo" "$@"
 }
 
+# THE SAME, FOR THE BAND THE RUNG IS COMPUTED FROM (S8). `free_mb`/`load_1m` decide the
+# advisory `state=` arm (HOLD/EMERGENCY); the BAND behind `pressure_level` is decided by the
+# free and swap PERCENTAGES, which are a different pair of readings on the same record
+# (lib/resources.sh `pressure_band`). Both seams are pinned, so a case can put the machine in
+# one state and the ring in another band — which is exactly the separation the design asks
+# for: HOLD is advice to the model, the rung is regulation.
+#
+# A RING PER CASE, always empty at entry. `pressure_level` medians every sample inside the
+# smoothing window, so a ring shared between cases would let an earlier case's band decide a
+# later case's fill width. The tick takes its own sample, so an empty ring plus these two
+# pins is a ring holding exactly one reading of the band the case named.
+RUNG_N=0
+poke_rung() {  # <repo> <free_pct> <swap_pct> <args...>
+  local repo="$1" fp="$2" sp="$3"; shift 3
+  RUNG_N=$((RUNG_N + 1))
+  local ring="$TMPROOT/ring-$RUNG_N.ring"
+  rm -f "$ring"
+  BIONIC_PRESSURE_RING="$ring" BIONIC_PROBE_FREE_PCT="$fp" BIONIC_PROBE_SWAP_PCT="$sp" \
+    poke "$repo" "$@"
+}
+
+# How many times a line appears in an output — "exactly one rung line per tick" is a claim
+# about a COUNT, and `expect_contains` cannot make it.
+count_lines_matching() {  # <needle> <output> -> integer
+  local n
+  n="$(printf '%s\n' "$2" | /usr/bin/grep -c -- "$1" 2>/dev/null)" || n=0
+  case "${n:-}" in ''|*[!0-9]*) n=0 ;; esac
+  printf '%s' "$n"
+}
+
 # ---------- 11a: a HOLD prints its measurement and fills nothing ----------
 #
 # The fixture has ready work AND a gap, so a tick that filled would fill. That is the whole
@@ -1631,38 +1679,138 @@ expect_contains "the same fixture with memory to spare DOES fill (11a discrimina
   "poker: FILL NEXT" "$OUT"
 expect_absent "…and prints no HOLD" "poker: HOLD" "$OUT"
 
-# ---------- 11b: NARROW on the SECOND consecutive hold, not the first ----------
+# ---------- 11b: ONE rung line per tick, on QUIET and on FILL alike (AC-17) ----------
 #
-# One hold is a burst — a suite starting, a build finishing — and halving the fleet's width
-# off a burst is a wave that runs at half speed for the rest of the day. The counter is a
-# sibling of the Patrol stamp, session-scoped, and it is what makes "sustained" a fact about
-# two firings rather than an adjective.
-R11B="$(make_repo s11-narrow)"; new_roster "$R11B"
-wave_plan "$R11B" "writers=4 suites=2 worktrees=8 test_jobs=18 source=probe" \
+# WHAT REPLACED NARROW. NARROW was advice computed from a COUNT the tick carried across
+# firings in a sibling file — a stored fact about the machine, owned by a hook that only
+# wakes every twenty minutes. The rung is the same judgment taken as a pure function of the
+# ring at the moment of use, so it needs no counter, no sibling file and no second firing;
+# what the tick owes the operator is therefore a REPORT, not a recommendation, and it owes
+# it on every tick rather than on the second consecutive hold.
+#
+# THE LINE IS THE CONTRACT, and it is one line: `rung=<n>/<ceiling>` is the fill width and
+# the ceiling it was taken against, `writers=` and `test_jobs=` are that same band applied to
+# the two numbers the plan header carries (D3: "one fraction applied to both").
+R11B="$(make_repo s11-rung-quiet)"; new_roster "$R11B"
+wave_plan "$R11B" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
   "| A | — | standard | landed |"
-poke_pressure "$R11B" 512 1.0 tick
-expect_contains "the first hold prints HOLD" "poker: HOLD" "$OUT"
-expect_absent "…and NOT NARROW: one hold is a burst" "poker: NARROW" "$OUT"
-poke_pressure "$R11B" 512 1.0 tick
-expect_contains "the second consecutive hold prints NARROW" "poker: NARROW test_jobs=9" "$OUT"
-expect_contains "…alongside the HOLD it is narrowing from" "poker: HOLD" "$OUT"
+# One open row, well inside its declared duration: the decision is QUIET and there is no
+# pending slice to fill, so this tick prints no FILL at all.
+add_row "$R11B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_rung "$R11B" 60 0 tick
+expect_eq "a QUIET tick exits 0" "0" "$RC"
+expect_contains "…decides QUIET" "decision=QUIET" "$OUT"
+expect_absent   "…fills nothing" "poker: FILL" "$OUT"
+expect_contains "…and STILL prints the rung, on a clear ring at the full ceiling" \
+  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
+expect_eq       "…exactly once, not once per arm" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
 
-# The counter CLEARS on a healthy tick, so "two consecutive" means consecutive. Without
-# this, NARROW is inevitable on any wave long enough to see two holds an hour apart.
-poke_pressure "$R11B" 8192 1.0 tick
-expect_absent "a healthy tick prints no NARROW" "poker: NARROW" "$OUT"
-poke_pressure "$R11B" 512 1.0 tick
-expect_contains "…and the hold after it is a FIRST hold again" "poker: HOLD" "$OUT"
-expect_absent "…so NARROW does not fire (the counter cleared)" "poker: NARROW" "$OUT"
+# THE PAIRED POSITIVE: the same shape on a tick that FILLS. Without it, "on every tick" is a
+# claim proven on one kind of tick.
+R11B2="$(make_repo s11-rung-fill)"; new_roster "$R11B2"
+wave_plan "$R11B2" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
+  "| A | — | standard | landed |" \
+  "| NEXT | A | standard | pending |"
+poke_rung "$R11B2" 60 0 tick
+expect_contains "a FILLING tick prints the rung too" \
+  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
+expect_contains "…beside the fill it decided" "poker: FILL NEXT" "$OUT"
+expect_eq       "…still exactly one rung line" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
 
-# The halving reads the plan's own `test_jobs`, never a constant of its own.
-R11C="$(make_repo s11-narrow-half)"; new_roster "$R11C"
-wave_plan "$R11C" "writers=4 suites=2 worktrees=8 test_jobs=6 source=probe" \
-  "| A | — | standard | landed |"
-poke_pressure "$R11C" 512 1.0 tick
-poke_pressure "$R11C" 512 1.0 tick
-expect_contains "NARROW halves the plan's OWN test_jobs (6 -> 3), never a constant" \
-  "poker: NARROW test_jobs=3" "$OUT"
+# AND UNDER A HOLD, where no fill happens at all: the report is unconditional, so an operator
+# reading a held tick still learns what width the machine would allow if it were not held.
+BIONIC_PROBE_FREE_MB=512 poke_rung "$R11B2" 60 0 tick
+expect_contains "a HELD tick prints the rung as well" "poker: rung=8/8" "$OUT"
+expect_contains "…alongside the HOLD" "poker: HOLD" "$OUT"
+
+# ---------- 11c: the rung IS the band, and the FILL is sized by it (AC-17, AC-14) ----------
+#
+# THE DISCRIMINATOR. Four ready slices and a writers ceiling of eight means a clear machine
+# fills all four; the same fixture on a critical ring must fill exactly the quarter-ceiling.
+# A test that only ever ran clear would pass against a tick that ignored the ring entirely.
+mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready slices
+  local r; r="$(make_repo "$1")"; new_roster "$r"
+  wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
+    "| BASE | — | standard | landed |" \
+    "| ONE | BASE | standard | pending |" \
+    "| TWO | BASE | standard | pending |" \
+    "| THREE | BASE | standard | pending |" \
+    "| FOUR | BASE | standard | pending |"
+  printf '%s' "$r"
+}
+
+R11C="$(mk_rung_repo s11-rung-clear)"
+poke_rung "$R11C" 60 0 tick
+expect_contains "a CLEAR ring reports the full ceiling" \
+  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
+expect_contains "…and fills the whole gap" "poker: FILL ONE TWO THREE FOUR" "$OUT"
+
+R11C2="$(mk_rung_repo s11-rung-warning)"
+poke_rung "$R11C2" 20 0 tick
+expect_contains "a WARNING ring halves both numbers" \
+  "poker: rung=4/8 writers=4 test_jobs=9" "$OUT"
+expect_contains "…and the fill is still under the halved rung" "poker: FILL ONE TWO THREE FOUR" "$OUT"
+
+R11C3="$(mk_rung_repo s11-rung-critical)"
+poke_rung "$R11C3" 8 0 tick
+expect_contains "a CRITICAL ring quarters both numbers" \
+  "poker: rung=2/8 writers=2 test_jobs=5" "$OUT"
+expect_contains "…and the fill names ONLY the quarter-ceiling, in table order" \
+  "poker: FILL ONE TWO" "$OUT"
+expect_absent   "…never the third ready slice" "THREE" "$OUT"
+
+# SWAP REACHES THE SAME BAND BY THE OTHER TERM, so the rung is not a free-percentage
+# thermometer wearing a band's name.
+R11C4="$(mk_rung_repo s11-rung-critical-swap)"
+poke_rung "$R11C4" 60 95 tick
+expect_contains "swap past the critical line quarters it too, on a healthy free percentage" \
+  "poker: rung=2/8 writers=2 test_jobs=5" "$OUT"
+
+# THE OPEN ROWS COME OFF THE RUNG, NOT OFF THE CEILING. This is the whole point of sizing
+# the fill by the rung: two open rows against a quartered rung of 2 is a gap of ZERO, where
+# against the ceiling of 8 it would still be a gap of six.
+R11C5="$(mk_rung_repo s11-rung-critical-open)"
+add_row "$R11C5" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_rung "$R11C5" 8 0 tick
+expect_contains "one open row against a rung of 2 leaves a gap of one" "poker: FILL ONE" "$OUT"
+expect_absent   "…and the second ready slice waits on the machine, not on the budget" "TWO" "$OUT"
+add_row "$R11C5" name=w2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_rung "$R11C5" 8 0 tick
+expect_absent   "two open rows against a rung of 2 fill nothing" "poker: FILL" "$OUT"
+expect_contains "…and say which number closed the gap — the RUNG, named beside its ceiling" \
+  "rung=2 of writers=8" "$OUT"
+
+# ---------- 11c2: no plan budget, and the line still prints ----------
+#
+# The rung is a function of (ring, CEILING) and a plan that opts into no budget offers no
+# ceiling. The honest report is the line with its fields empty rather than a number invented
+# from somewhere else — and the line is still printed, because "the tick reported nothing"
+# and "the tick reported no ceiling" are different facts.
+R11C6="$(make_repo s11-rung-nobudget)"; new_roster "$R11C6"
+wave_plan "$R11C6" "-" "| A | — | standard | pending |"
+poke_rung "$R11C6" 60 0 tick
+expect_contains "a plan with no parallel-budget still prints the rung line" \
+  "poker: rung=-/- writers=- test_jobs=-" "$OUT"
+expect_contains "…and says why it is not filling" "no readable parallel-budget" "$OUT"
+
+# ---------- 11c3: NARROW and its counter file are GONE (AC-17) ----------
+#
+# TWO ASSERTIONS, BECAUSE THEY FAIL DIFFERENTLY. The first is about the script: a NARROW that
+# survived anywhere in it — in a comment, in a dead branch — is a second answer to "how wide
+# should this wave run" living beside the rung. The second is about the DISK: `.holds` was
+# the only cross-tick state the scheduler kept, and a tick that still wrote it would be
+# storing a liveness fact it no longer owns (D0). Three consecutive holds is what used to
+# make the counter reach 2 and fire.
+R11C7="$(mk_rung_repo s11-no-holds)"
+BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
+BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
+BIONIC_PROBE_FREE_MB=512 poke_rung "$R11C7" 60 0 tick
+expect_contains "the third consecutive hold is still just a HOLD" "poker: HOLD" "$OUT"
+expect_absent   "…and never recommends a width" "NARROW" "$OUT"
+expect_eq       "…and no .holds sibling of the stamp was ever written" "" \
+  "$(ls "$R11C7/.bionic/tmp/" 2>/dev/null | /usr/bin/grep '\.holds$' || true)"
+expect_eq       "the script carries no NARROW at all — not in code, not in a comment" "0" \
+  "$(/usr/bin/grep -c 'NARROW' "$POKER" || true)"
 
 # ---------- 11d: EMERGENCY names the youngest suite-running writer ----------
 #
@@ -2345,6 +2493,101 @@ expect_absent   "…and no binding is claimed" "poker: bound" "$OUT"
 # ---------- 16j: the verb is on the surface ----------
 poke "$R16" nosuchverb
 expect_contains "the usage lists bind beside the other verbs" "session-poker.sh bind" "$OUT"
+
+# ---------- 16k: a QUIET open run still binds (AC-4) ----------
+#
+# THE RULE THIS PINS, before the thing that could break it exists. This wave adds a LIVE
+# subset of the open runs — open AND touched inside `live-window:` — and gives it to
+# `engage` and to `session-start`'s listing. Every GATE, this verb included, keeps measuring
+# against the strict OPEN set: a run somebody left alone for a week is still that session's
+# run to name, and a bind that consulted liveness would refuse the one operand an operator
+# reaches for precisely because the automatic binding did not happen.
+P16Q="$(plan_at "$R16" 'epic-16/wave-quiet.plan.md' "$(plan_body 3)")"
+P16Q_REAL="$(real_path_of "$P16Q")"
+backdate "$P16Q" 691200   # eight days — well past any live window this wave will carry
+poke "$R16" bind "$P16Q"
+expect_eq       "a plan untouched for eight days, but still OPEN, binds (exit 0)" "0" "$RC"
+expect_contains "…and the marker names it" "plan=$P16Q_REAL" "$(cat "$M16")"
+# THE PAIRED NEGATIVE, on the same fixture: age is not what makes a run bindable. A plan
+# equally old whose run is DELIVERED is still refused, so 16k proves "openness decides",
+# not "everything binds".
+P16QD="$(plan_at "$R16" 'epic-16/wave-quiet-done.plan.md' \
+  "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')")"
+backdate "$P16QD" 691200
+poke "$R16" bind "$P16QD"
+expect_eq       "…while an equally old DELIVERED run is still refused" "1" "$RC"
+expect_contains "…as not an open run" "poker: REFUSED — not an open run" "$OUT"
+
+# ---------- 16l: one canonicalizer — two spellings, one plan= (AC-23) ----------
+#
+# THREE SITES USED TO ANSWER "the comparable spelling of a plan path" and they disagreed at
+# the edges: `_bind_resolve` (lib/binding.sh) refuses a relative path, `adopt_plan_key`
+# degraded to the raw string, and bind's own inline `BIND_DIR_REAL` degraded to EMPTY. The
+# divergence was latent only because `bind_plan` stores the canonical spelling; the first
+# comparison to be added on either side would have been wrong. There is one site now, and
+# these rows are what says so.
+#
+# THE TWO SPELLINGS ARE THE ONES AN OPERATOR ACTUALLY TYPES: a `./` prefix from tab
+# completion, and a trailing slash from completing a directory-shaped path.
+poke "$R16" bind './plans/epic-16/wave-a.plan.md'
+expect_eq       "a ./-prefixed operand binds" "0" "$RC"
+_m16l_dot="$(/usr/bin/grep '^plan=' "$M16")"
+# REBOUND AWAY IN BETWEEN, so the equality below cannot be satisfied by a second bind that
+# did nothing at all. Without this row the marker would still hold the `./` result and the
+# two reads would match whether the trailing-slash operand bound or was refused.
+poke "$R16" bind "$P16B_REAL"
+expect_eq       "…the marker is moved off A before the second spelling is tried" "0" "$RC"
+expect_contains "…and now names B" "plan=$P16B_REAL" "$(cat "$M16")"
+poke "$R16" bind 'plans/epic-16/wave-a.plan.md/'
+expect_eq       "…and so does the same path with a trailing slash" "0" "$RC"
+_m16l_slash="$(/usr/bin/grep '^plan=' "$M16")"
+expect_eq       "…both leave the IDENTICAL plan= spelling in the marker" \
+  "$_m16l_dot" "$_m16l_slash"
+expect_eq       "…and it is the spelling _bind_resolve produces" \
+  "plan=$P16A_REAL" "$_m16l_slash"
+
+# ---------- 16m: a directory that does not resolve is named, not swallowed ----------
+#
+# The inline canonicalizer left `BIND_REAL` EMPTY when its directory would not resolve, and
+# the refusal then fell through the location `case` to "not a plan under this root" — a
+# sentence about the WRONG thing: the path may well be under this root, it is the directory
+# above it that is missing. The reason now says which of the two happened, and names the
+# path either way.
+poke "$R16" bind "$TMPROOT/no-such-dir-16m/wave.plan.md"
+expect_eq       "a path whose directory does not exist is refused" "1" "$RC"
+expect_contains "…naming what could not be resolved, and the path" \
+  "poker: REFUSED — its directory does not resolve: $TMPROOT/no-such-dir-16m/wave.plan.md" "$OUT"
+
+# ---------- 16n: adopt compares on the SAME spelling bind stores (AC-23) ----------
+#
+# THE OTHER HALF OF THE ONE-SITE CLAIM, asserted through behaviour rather than by reading the
+# function: a row whose `plan=` is the bound plan with a trailing slash is THIS session's
+# row. Under the old `adopt_plan_key` the trailing slash made `cd` fail on a regular file and
+# the whole key degraded to the raw string, so the row read as another run's and was listed
+# instead of adopted — the partition failing open in the one direction that loses an agent.
+R16N="$(make_repo s16-adopt-canon)"; new_roster "$R16N"
+P16N="$(plan_at "$R16N" 'epic-16/run-n.plan.md' "$(plan_body 3)")"
+P16N_REAL="$(real_path_of "$P16N")"
+PRED_16N="d6d6d6d6-4444-4bbb-8ccc-000000000044"
+bind_marker "$R16N" "$P16N_REAL"
+add_row_to "$R16N" "$PRED_16N" name=canon-writer status=identified agent_id=canonwriter1111111111 \
+  subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" plan="$P16N_REAL/"
+poke "$R16N" adopt
+expect_contains "a row naming the bound plan with a trailing slash is THIS session's row" \
+  "partition=own" "$(printf '%s\n' "$OUT" | /usr/bin/grep 'name=canon-writer' | head -1)"
+expect_contains "…so it lands on this session's roster" "name=canon-writer" \
+  "$(cat "$(roster_of "$R16N")")"
+# THE PAIRED NEGATIVE: canonicalising is not "call everything ours". A row naming a DIFFERENT
+# plan in the same root, trailing slash and all, is still another run's.
+P16N2="$(plan_at "$R16N" 'epic-16/run-n2.plan.md' "$(plan_body 4)")"
+add_row_to "$R16N" "$PRED_16N" name=other-writer status=identified agent_id=otherwriter222222222 \
+  subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+  plan="$(real_path_of "$P16N2")/"
+poke "$R16N" adopt
+expect_contains "…while a different plan, equally slashed, is still another run's" \
+  "partition=other" "$(printf '%s\n' "$OUT" | /usr/bin/grep 'name=other-writer' | head -1)"
+expect_absent   "…and never reaches this session's roster" "name=other-writer" \
+  "$(cat "$(roster_of "$R16N")")"
 
 # ============================================================
 section "Section 17: adopt partitions the fleet's rows on plan= (AC-2, T2)"

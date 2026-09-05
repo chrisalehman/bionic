@@ -291,7 +291,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/worktree.sh"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
-POKER_INTERVAL_DEFAULT="30m"
+POKER_INTERVAL_DEFAULT="20m"
 
 # The Patrol stamp — schema, and the two halves of its per-session filename. Read back by
 # hooks/dispatch-preflight.sh's arming wall; the two spellings are held together by
@@ -317,21 +317,14 @@ PATROL_STAMP_SUFFIX=".state"
 PATROL_ARMED_SCHEMA="patrol-armed/v1"
 PATROL_ARMED_SUFFIX=".armed"
 
-# THE HOLD COUNTER — the third sibling of the stamp, and the ONLY state the scheduler keeps
-# across ticks. NARROW fires on a hold that SURVIVES a tick (AC-30), which is a fact about
-# two firings and therefore cannot be read off either one of them alone.
-#
-# IT IS NOT IN THE PLAN, and that is a boundary rather than a convenience. The plan header's
-# `parallel-budget:` is written by Step 0 and by the orchestrator; a tick that edited it
-# would make the ceiling a function of live readings, which is the exact drift
-# lib/resources.sh was written to remove ("THE BUDGET IS A CEILING, NOT A CONTROLLER"). The
-# tick reads pressure to THROTTLE, never to re-derive the budget — so what it carries is a
-# count of consecutive holds in its own session-scoped file, and the NARROW it prints is a
-# RECOMMENDATION the orchestrator acts on by writing the plan.
-#
-# Session-scoped like the stamp it sits beside: a hold counted in one session says nothing
-# about another, and it dies with the stamp at DISARM.
-PATROL_HOLDS_SUFFIX=".holds"
+# THE SCHEDULER KEEPS NO STATE ACROSS TICKS (S8). There used to be a third sibling of the
+# stamp here — a `.holds` counter of consecutive holds, the one fact the tick carried from
+# one firing to the next, and the input to a halve-the-width recommendation that fired on
+# the second of them. Both are gone. Width is now a pure function of the pressure ring and the plan's
+# ceiling, read at the moment of use (`pressure_level`, lib/resources.sh), so "sustained"
+# is a property of the ring's own smoothing window rather than of two firings twenty minutes
+# apart — and a fact nobody stores is a fact that cannot go stale. What the tick owes the
+# operator is therefore a REPORT of the rung, printed every tick, not advice to act on.
 
 # `adopt`'s own schema, and the two numbers its report tail is cut with. The floor is what
 # separates a REPORT from the one-line sign-offs that usually follow it in an agent's
@@ -488,7 +481,7 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
 # (`docs-root:`, `rigor-floor:`) already use: a project-scoped key, grep'd and sed-stripped,
 # never a YAML parser. ASSUMPTION (logged to the plan, S2): this is the first CONSUMER of
 # that convention outside canonical-sdlc's own hooks; no config.yaml ships by default, so an
-# absent file or an absent key both read as the documented default, 30m — a knob nobody has
+# absent file or an absent key both read as the documented default, 20m — a knob nobody has
 # touched behaves as if it were never added. A malformed override REFUSES rather than
 # silently falling back to the default, matching this repo's "refuse, never guess" posture
 # everywhere else a prose value is read (parse_seconds itself, the two hooks above).
@@ -559,41 +552,6 @@ patrol_armed_file() {  # <session-id> -> absolute path, or empty
   printf '%s%s' "$f" "$PATROL_ARMED_SUFFIX"
 }
 
-# The hold counter's path — the stamp's, plus one suffix, same construction and the same
-# reason as the arming record above.
-patrol_holds_file() {  # <session-id> -> absolute path, or empty
-  local f
-  f="$(patrol_stamp_file "$1")" || return 1
-  [ -n "$f" ] || return 1
-  printf '%s%s' "$f" "$PATROL_HOLDS_SUFFIX"
-}
-
-# read_holds / write_holds — the consecutive-hold count, as a bare integer.
-#
-# UNREADABLE READS ZERO, and that is the safe direction here: NARROW is an ADVISORY line,
-# so a lost count costs one tick's recommendation, where a fabricated count would tell an
-# orchestrator to halve a width the machine never asked it to halve.
-read_holds() {  # <session-id> -> integer on stdout (0 when absent or unreadable)
-  local f v
-  f="$(patrol_holds_file "$1")" || { printf '0'; return 0; }
-  [ -n "$f" ] && [ -f "$f" ] && [ ! -L "$f" ] || { printf '0'; return 0; }
-  v="$(head -1 "$f" 2>/dev/null | tr -dc '0-9')"
-  case "${v:-}" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$v" ;; esac
-}
-
-write_holds() {  # <session-id> <count> -> 0 written, 1 not. Never fatal to a tick.
-  local sid="$1" n="$2" f d
-  f="$(patrol_holds_file "$sid")" || return 1
-  [ -n "$f" ] || return 1
-  d="${f%/*}"
-  tmp_dir_ok "$d" || return 1
-  mkdir -p "$d" 2>/dev/null || return 1
-  [ -L "$f" ] && return 1
-  printf '%s\n' "$n" > "$f" 2>/dev/null || return 1
-  chmod 600 "$f" 2>/dev/null
-  return 0
-}
-
 # WRITTEN BY `arm` AND BY NOTHING ELSE. Its content is for a human reading .bionic/tmp; the
 # fact the tick reads is its mtime. A failure here is NOT fatal to arming: the stamp is what
 # the arming wall reads, and a session armed without a marker simply never auto-DISARMs —
@@ -655,8 +613,6 @@ remove_patrol_stamp() {  # <session-id> -> 0 gone (removed, or never there), 1 c
   # it, so a survivor claims nothing — where a surviving STAMP claims a live clock, which
   # is why that one decides the return code.
   a="$(patrol_armed_file "$sid")" || a=""
-  if [ -n "$a" ] && [ ! -L "$a" ] && [ -e "$a" ]; then rm -f "$a" 2>/dev/null; fi
-  a="$(patrol_holds_file "$sid")" || a=""
   if [ -n "$a" ] && [ ! -L "$a" ] && [ -e "$a" ]; then rm -f "$a" 2>/dev/null; fi
   [ -L "$f" ] && return 0
   [ -e "$f" ] || return 0
@@ -1022,7 +978,7 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
 
 # ---------------------------------------------------------------- the scheduler
 #
-# FILL / HOLD / NARROW / EMERGENCY (spec AC-29, AC-30, AC-31; design-ledger S7).
+# FILL / HOLD / EMERGENCY, and the RUNG (spec AC-17, AC-29, AC-31; design-ledger D3).
 #
 # THE PROBLEM. A wave's width was a number in a brief, and a ceiling nobody reaches is a
 # wave running one writer at a time by accident: this repo's own 1.4.0 wave dispatched six
@@ -1041,10 +997,17 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
 #   HOLD       free memory or load past the warning line -> no fills this tick, with the
 #              measurement printed beside the verdict (a HOLD with no number is
 #              indistinguishable from a bug).
-#   NARROW     a hold that SURVIVES a tick -> recommend halving the test-runner width
-#              carried in new briefs.
-#   FILL       otherwise -> the ready slices, up to the gap between the budget's `writers`
-#              and the rows already open on this session's roster.
+#   FILL       otherwise -> the ready slices, up to the gap between the RUNG and the rows
+#              already open on this session's roster.
+#
+# AND ONE REPORT, ON EVERY TICK: `rung=<n>/<ceiling> writers=<w> test_jobs=<j>`. The rung is
+# `pressure_level`'s answer over the machine-scoped pressure ring — the median band of the
+# last few minutes turned into a fraction of the Step-0 ceiling (ceiling, half, quarter,
+# floor of one) — and the one fraction is applied to BOTH numbers the header carries (D3).
+# It replaces the retired halve-the-width recommendation, which halved `test_jobs` on the
+# second consecutive hold and needed a counter file to know what "second" meant. Nothing is stored now: two
+# consumers reading one ring at one moment compute one answer, and a plan header nobody
+# edits stays the ceiling it was written as.
 #
 # THE TICK READS PRESSURE TO THROTTLE, NEVER TO RE-DERIVE THE BUDGET. `resources_budget` is
 # a pure function of machine FACTS and is written once, into the plan header, by Step 0. A
@@ -1464,23 +1427,34 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 # middle — each of those makes two spellings of one file, and a string compare would call the
 # row another run's and refuse to adopt this session's own agent.
 #
-# THE DIRECTORY IS RESOLVED AND THE LEAF IS NOT, which is `_bind_resolve`'s rule in
-# payload/scripts/lib/binding.sh for the reason stated there: `find` does not resolve leaves
-# either, so resolving this one would make a plan reached through a symlink compare unequal
-# to the same plan as `open_runs` reports it.
+# ONE SITE, AND IT IS `_bind_resolve` (AC-23). This function used to carry its own copy of
+# the "resolve the directory, leave the leaf" rule, and `bind` carried a third — three
+# canonicalizers that agreed in the middle and disagreed at every edge: `_bind_resolve`
+# refuses a relative path, this one degraded to the raw string, bind's degraded to EMPTY.
+# The divergence was latent only because `bind_plan` stores the canonical spelling, so
+# nothing yet compared two spellings that had been through different resolvers. The next
+# comparison added on either side would have been the bug.
+#
+# THE DIRECTORY IS RESOLVED AND THE LEAF IS NOT — the rule's reason is stated at
+# payload/scripts/lib/binding.sh: `find` does not resolve leaves either, so resolving this
+# one would make a plan reached through a symlink compare unequal to the same plan as
+# `open_runs` reports it. A trailing slash is stripped by that function's `dirname`/
+# `basename` split, which is why `<p>/a.md` and `<p>/a.md/` land on one spelling here.
+#
+# RELATIVE IS MADE ABSOLUTE FIRST, because `_bind_resolve` refuses a relative operand
+# outright (binding.sh:57) and a roster row may carry either. The base is the CALLER'S cwd,
+# which is what this function resolved against before — a change of base would silently
+# re-attribute rows written by a session standing somewhere else.
 #
 # IT NEVER FAILS. An unresolvable directory — a plan whose tree has since been removed —
 # degrades to the raw string, which still compares equal to an identical raw string. A
 # comparison that errored here would silently turn every row unattributable.
 adopt_plan_key() {  # <plan path> -> a comparable spelling of it
-  local d b
-  case "$1" in
-    */*) d="${1%/*}"; b="${1##*/}" ;;
-    *)   printf '%s' "$1"; return 0 ;;
-  esac
-  [ -n "$d" ] || d="/"
-  d="$(cd "$d" 2>/dev/null && pwd -P)" || { printf '%s' "$1"; return 0; }
-  printf '%s/%s' "$d" "$b"
+  local p="$1" out
+  [ -n "$p" ] || { printf ''; return 0; }
+  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
+  out="$(_bind_resolve "$p")" || { printf '%s' "$1"; return 0; }
+  printf '%s' "$out"
 }
 
 # A roster path is absolute or project-relative, exactly as the row's writer left it.
@@ -2023,12 +1997,22 @@ EOF
     # project-relative spelling is not a regular file, which is the case that used to refuse.
     # A miss under both leaves `BIND_PATH` at the project-root spelling, so the refusal names
     # the path an operator typing a repo path would expect to see.
-    case "$BIND_ARG" in
-      /*) BIND_PATH="$BIND_ARG" ;;
+    # A TRAILING SLASH IS NOT A DIFFERENT PLAN (S8). Shell completion on a path an operator
+    # is still typing leaves one behind, and `[ -f "<file>/" ]` is FALSE — so the docs-root
+    # fallback below used to miss on the one spelling and hit on the other, and the two
+    # operands that name one file bound to two different things. The canonicalizer strips it
+    # anyway (`dirname`/`basename`); stripping it here is what lets both spellings reach the
+    # same probe. `/` keeps its slash: it is the path, not a decoration on one.
+    BIND_ARG_P="$BIND_ARG"
+    while [ ${#BIND_ARG_P} -gt 1 ]; do
+      case "$BIND_ARG_P" in */) BIND_ARG_P="${BIND_ARG_P%/}" ;; *) break ;; esac
+    done
+    case "$BIND_ARG_P" in
+      /*) BIND_PATH="$BIND_ARG_P" ;;
       *)
-        BIND_PATH="$REPO/$BIND_ARG"
+        BIND_PATH="$REPO/$BIND_ARG_P"
         if [ ! -f "$BIND_PATH" ]; then
-          BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG"
+          BIND_DOCS_TRY="$(docs_root "$REPO")/$BIND_ARG_P"
           [ -f "$BIND_DOCS_TRY" ] && BIND_PATH="$BIND_DOCS_TRY"
         fi ;;
     esac
@@ -2053,12 +2037,19 @@ EOF
       # it first — so that every 1 from the library leaves this verb with something to say.
       BIND_MARKER="$(engaged_marker_path "$REPO_REAL" "$SESSION_ID")" || BIND_MARKER=""
       BIND_DOCS="$(docs_root "$REPO_REAL")"
-      BIND_DIR="${BIND_PATH%/*}"
+      # THE SAME CANONICALIZER `bind_plan` JUST USED (AC-23). This arm carried its own copy
+      # of the resolve-the-directory rule and degraded to an EMPTY `BIND_REAL` when the
+      # directory would not resolve — which then fell through the location `case` below and
+      # was reported as "not a plan under this root", a sentence about the wrong thing: the
+      # path may well be under this root, it is the directory above it that is missing.
+      # `BIND_PATH` is absolute by construction above, which is what `_bind_resolve` requires.
       BIND_REAL=""
-      BIND_DIR_REAL="$(cd "$BIND_DIR" 2>/dev/null && pwd -P)" \
-        && BIND_REAL="$BIND_DIR_REAL/${BIND_PATH##*/}"
+      BIND_RESOLVED=yes
+      BIND_REAL="$(_bind_resolve "$BIND_PATH")" || { BIND_REAL=""; BIND_RESOLVED=no; }
       if [ -n "$BIND_MARKER" ] && [ -L "$BIND_MARKER" ]; then
         BIND_WHY="marker is a symlink"
+      elif [ "$BIND_RESOLVED" = no ]; then
+        BIND_WHY="its directory does not resolve"
       else
         # THE SAME DEPTH BOUND THE SET IS BUILT WITH (review D8c, S10b). `open_runs` walks
         # `find <plans|incidents> -maxdepth 2`, so `plans/<a>/<b>/x.md` is not a candidate
@@ -2439,31 +2430,47 @@ EOF
       fi
     fi
 
+    # ── THE RUNG, SAMPLED AND REPORTED (AC-17). One sample appended to the machine-scoped
+    # ring, then the rung read back off it — the order the design names, because a consumer
+    # that read without sampling would answer from other sessions' readings alone and a
+    # first consumer on a cold machine would answer from nothing at all.
+    #
+    # ONE FRACTION, BOTH CEILINGS (D3). `pressure_level` is a pure function of (ring,
+    # ceiling): the median band inside the smoothing window picks the fraction, and the
+    # fraction is applied to `writers` and to `test_jobs` separately because they are
+    # different ceilings, not because they are different judgments. Nothing is stored; two
+    # ticks a second apart over one ring compute one answer.
+    #
+    # A MISSING CEILING IS REPORTED AS MISSING. A plan that opts into no budget offers
+    # nothing to take a fraction OF, and inventing a ceiling here is the one thing this arm
+    # may never do — so the fields read `-` and the line is still printed. "The tick said
+    # nothing" and "the tick said there is no ceiling" are different facts, and only the
+    # second one is true.
+    pressure_sample "$SCHED_CORES" >/dev/null 2>&1 || :
+    SCHED_RUNG=""
+    SCHED_JOBS_RUNG=""
+    case "${SCHED_WRITERS:-}" in
+      ''|0) : ;;
+      *) SCHED_RUNG="$(pressure_level "$SCHED_WRITERS" 2>/dev/null)" || SCHED_RUNG="" ;;
+    esac
+    case "${SCHED_JOBS:-}" in
+      ''|0) : ;;
+      *) SCHED_JOBS_RUNG="$(pressure_level "$SCHED_JOBS" 2>/dev/null)" || SCHED_JOBS_RUNG="" ;;
+    esac
+    case "${SCHED_RUNG:-}" in ''|*[!0-9]*) SCHED_RUNG="" ;; esac
+    case "${SCHED_JOBS_RUNG:-}" in ''|*[!0-9]*) SCHED_JOBS_RUNG="" ;; esac
+    say "rung=${SCHED_RUNG:--}/${SCHED_WRITERS:--} writers=${SCHED_RUNG:--} test_jobs=${SCHED_JOBS_RUNG:--}"
+
     if [ "$SCHED_STATE" = hold ] || [ "$SCHED_STATE" = emergency ]; then
-      SCHED_HOLDS=$(( $(read_holds "$SESSION_ID") + 1 ))
-      write_holds "$SESSION_ID" "$SCHED_HOLDS" \
-        || die "WARN — the hold counter could not be written; NARROW will not fire on the next tick."
+      # HOLD AND EMERGENCY ARE ADVICE TO THE MODEL, and that is all they have ever been.
+      # They keep their meaning here: a measurement, a verdict, and no fills this tick.
+      # What they no longer do is accumulate — the counter that made a second consecutive
+      # hold mean something was the scheduler's only cross-tick state, and the rung above
+      # answers the width question from the ring instead.
       [ "$SCHED_STATE" = hold ] && \
         say "HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD} — no fills"
-      # NARROW ON THE SECOND CONSECUTIVE HOLD, and on every one after it. One hold is a
-      # burst — a suite starting, a build finishing — and halving the fleet's width off a
-      # burst is a wave that runs at half speed for the rest of the day. A hold that
-      # survives a whole interval is sustained, and that is what the counter measures.
-      #
-      # THE HALVING IS A RECOMMENDATION, not an edit. `test_jobs` lives in the plan header
-      # and the orchestrator owns that line; a tick that wrote it would be a controller.
-      # Floored at 1 because a width of zero is not a width.
-      if [ "$SCHED_HOLDS" -ge 2 ] && [ -n "$SCHED_JOBS" ]; then
-        SCHED_HALF=$(( SCHED_JOBS / 2 ))
-        [ "$SCHED_HALF" -ge 1 ] || SCHED_HALF=1
-        say "NARROW test_jobs=${SCHED_HALF}"
-      fi
     else
-      # OK CLEARS THE COUNTER, so "two consecutive" means consecutive. A counter that only
-      # ever rose would make NARROW inevitable on a long enough wave.
-      [ "$(read_holds "$SESSION_ID")" = "0" ] || write_holds "$SESSION_ID" 0 || :
-
-      # ── FILL. gap = writers − RUNNING, ready = pending slices whose deps all landed.
+      # ── FILL. gap = the RUNG − RUNNING, ready = pending slices whose deps all landed.
       #
       # RUNNING IS `open` (WALLS/2): the rows already counted above, on THIS session's
       # roster — a `status=intended` row with no `landing-swept/v1` marker and no ack. It is
@@ -2476,10 +2483,18 @@ EOF
           say "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
         fi
       else
-        SCHED_GAP=$(( SCHED_WRITERS - OPEN ))
+        # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
+        # the run may ever run at; the rung is what the machine will carry right now, and
+        # filling to the first while the second says otherwise is the mistake this whole arm
+        # exists to prevent. An unreadable rung falls back to the CEILING rather than to a
+        # floor — the same direction `pressure_level` itself takes when the ring holds no
+        # usable evidence, for the same reason: no reading is not a bad reading, and a wave
+        # that stalled on a missing probe would be worse than one that filled its budget.
+        SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"
+        SCHED_GAP=$(( SCHED_WIDTH - OPEN ))
         [ "$SCHED_GAP" -lt 0 ] && SCHED_GAP=0
         if [ "$SCHED_GAP" -eq 0 ]; then
-          say "no FILL — writers=${SCHED_WRITERS} and ${OPEN} open row(s): the budget is full."
+          say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${OPEN} open row(s): the budget is full."
         else
           SCHED_READY="$(slice_ready "$(slice_table "$SCHED_PLAN")")"
           SCHED_IDS=""; SCHED_N=0
@@ -2494,7 +2509,7 @@ EOF
           if [ "$SCHED_N" -gt 0 ]; then
             say "FILL ${SCHED_IDS}"
           else
-            say "no FILL — writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending slice has all its dependencies landed."
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending slice has all its dependencies landed."
           fi
         fi
       fi

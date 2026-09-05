@@ -142,7 +142,7 @@ make_repo_with_roster() {  # <sid> <open-names...> -- <closed-names...> -> repo 
 
 # THE STAMP hooks/session-poker.sh touches on every tick, and the ONE fact that
 # separates an armed Patrol from a dead one. `patrol_stamp_state` reads only its
-# mtime against 2x the poker interval (30m default → a 3600s limit), so a file
+# mtime against 2x the poker interval (20m default → a 2400s limit), so a file
 # written now is `firing` and one backdated past that is `not-firing`. Absent is
 # a third answer, `never-armed`, and it needs no builder — it is what every
 # fixture here had before this existed.
