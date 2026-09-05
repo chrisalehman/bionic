@@ -1800,6 +1800,50 @@ BIONIC_PROBE_FREE_MB=512 poke_rung "$R11B2" 60 0 tick
 expect_contains "a HELD tick prints the rung as well" "poker: rung=8/8" "$OUT"
 expect_contains "…alongside the HOLD" "poker: HOLD" "$OUT"
 
+# ---------- 11b2: the two exit paths ABOVE the report (Step-6 review C-5) ----------
+#
+# AC-17 reads "on every tick", and two arms exit before the scheduler block ever runs: the
+# pre-dispatch QUIET of §13a — no roster file at all, which is the FIRST tick of every run
+# by design, because arming precedes dispatch — and the terminal DISARM of §9c/§12j. The
+# §11b fixture above calls `new_roster`, so it exercises the roster-present arm that already
+# printed; these two are the ones that did not, and the first of them is the tick an
+# operator sees most: the one taken right before the first dispatch, where "what width will
+# this machine carry" is the whole question.
+R11B4="$(make_repo s11-rung-no-roster)"
+# Deliberately NO new_roster — §13a's pre-dispatch state — but WITH a budget to report.
+poke "$R11B4" arm
+wave_plan "$R11B4" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
+  "| A | — | standard | landed |"
+poke_rung "$R11B4" 60 0 tick
+expect_eq "the pre-dispatch (no-roster) QUIET tick exits 0" "0" "$RC"
+expect_contains "…decides QUIET" "decision=QUIET" "$OUT"
+expect_contains "…and says the pre-dispatch line" "armed, nothing dispatched yet" "$OUT"
+expect_contains "…and STILL prints the rung — this is the first tick of every run" \
+  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
+expect_eq "…exactly once, not once per arm" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+
+# THE DISARM ARM. `delivered_plan` carries no `parallel-budget:` frontmatter, so this row
+# also pins the missing-ceiling spelling the report's own comment promises: the line is
+# PRINTED with `-` rather than withheld, because "the tick said nothing" and "the tick said
+# there is no ceiling" are different facts and only the second one is true.
+R11B5="$(make_repo s11-rung-disarm)"; new_roster "$R11B5"; armed_ago "$R11B5"
+delivered_plan "$R11B5"
+poke_rung "$R11B5" 60 0 tick
+expect_eq "a DISARM tick exits 0" "0" "$RC"
+expect_contains "…decides DISARM" "decision=DISARM" "$OUT"
+expect_contains "…and STILL prints the rung, with the missing ceiling spelled out" \
+  "poker: rung=-/- writers=- test_jobs=-" "$OUT"
+expect_eq "…exactly once" "1" "$(count_lines_matching 'poker: rung=' "$OUT")"
+
+# THE PAIRED POSITIVE FOR THAT ARM: the same terminal decision over a plan that DOES carry a
+# budget, so the `-` above is proven to be the absent CEILING and not an absent report.
+R11B6="$(make_repo s11-rung-disarm-budget)"; new_roster "$R11B6"; armed_ago "$R11B6"
+write_plan "$R11B6" "$(printf -- '---\nparallel-budget: writers=8 suites=2 worktrees=8 test_jobs=18 source=probe\n---\n\n# fixture plan\n\n## SDLC State\n\nintegration-branch: main\ncurrent: 9\n\n- Step 9: delivered: bionic 9.9.9; report: record/fixture/close-out.md\n')"
+poke_rung "$R11B6" 60 0 tick
+expect_contains "a DISARM tick over a BUDGETED plan prints the real rung (11b5 discriminates)" \
+  "poker: rung=8/8 writers=8 test_jobs=18" "$OUT"
+expect_contains "…and still DISARMs" "decision=DISARM" "$OUT"
+
 # ---------- 11b3: the tick never edits the plan (AC-17's third clause) ----------
 #
 # THE CLAUSE THE READBACK NAMED AS UNPINNED. The rung line and the FILL line are both console
@@ -1823,8 +1867,9 @@ expect_eq "…and the plan's mtime is untouched by the tick" "$MTIME_11B3_BEFORE
   "$(stat -f %m "$PLAN_R11B2" 2>/dev/null || stat -c %Y "$PLAN_R11B2")"
 
 # THE ANTI-VACUITY ARM. A doctored copy of the poker appends one byte to the plan right where
-# the real tick only READS it (`SCHED_PLAN="$POKER_RUN_PLAN"`), so the pin above is proven to
-# discriminate a tick that DOES edit the plan from one that does not.
+# the real tick only READS it (`SCHED_PLAN="$POKER_RUN_PLAN"`, now inside `sched_budget_read`
+# and so indented two rather than four — the anchor follows the code, C-5), so the pin above
+# is proven to discriminate a tick that DOES edit the plan from one that does not.
 POKER_MUT_PLANEDIT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-planedit-mut.XXXXXX")"
 mkdir -p "$POKER_MUT_PLANEDIT_ROOT/hooks" "$POKER_MUT_PLANEDIT_ROOT/scripts"
 ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" \
@@ -1838,7 +1883,7 @@ for _sib in "$(dirname "$POKER")"/*; do
   ln -s "$_sib" "$POKER_MUT_PLANEDIT_ROOT/hooks/$_sibname"
 done
 POKER_MUT_PLANEDIT="$POKER_MUT_PLANEDIT_ROOT/hooks/session-poker.sh"
-sed 's/^    SCHED_PLAN="\$POKER_RUN_PLAN"$/    SCHED_PLAN="$POKER_RUN_PLAN"; [ -n "$SCHED_PLAN" ] \&\& printf x >> "$SCHED_PLAN"/' \
+sed 's/^  SCHED_PLAN="\$POKER_RUN_PLAN"$/  SCHED_PLAN="$POKER_RUN_PLAN"; [ -n "$SCHED_PLAN" ] \&\& printf x >> "$SCHED_PLAN"/' \
   "$POKER" > "$POKER_MUT_PLANEDIT"
 expect_eq "planedit meta: the sed anchor landed exactly once (the doctor took)" "1" \
   "$(diff "$POKER" "$POKER_MUT_PLANEDIT" | /usr/bin/grep -c '^>')"
