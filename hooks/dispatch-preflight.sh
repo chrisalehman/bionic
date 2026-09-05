@@ -895,6 +895,18 @@ BUDGET_REFUSE
     exit 2
   }
 
+  # WHOSE TRANSCRIPT IS IT (F-2 ruling, 2026-09-05). The harness writes a dispatched
+  # agent's own transcript to `<session-uuid>/subagents/agent-<name>-<hash>.jsonl`, beside
+  # the orchestrator's `<session-uuid>.jsonl`. Both the directory and the filename are
+  # required: a file merely named `agent-*.jsonl` somewhere else is a session's, not a
+  # subagent's.
+  budget_is_subagent() {  # <transcript path> -> 0 when the path is a dispatched agent's own
+    case "$1" in
+      */subagents/agent-*.jsonl) return 0 ;;
+      *)                         return 1 ;;
+    esac
+  }
+
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
   # field every other liveness reader in this wave keys off (context-spend.sh,
   # execution-recorder.sh, patrol-duties-gate.sh, stop-guard.sh).
@@ -905,7 +917,18 @@ BUDGET_REFUSE
   if [ "$BUDGET_RC" -eq 3 ] || [ "$BUDGET_RC" -eq 4 ]; then
     # A STALE or NONE answer means no roster row's openness can be trusted either
     # way — refuse the WHOLE dispatch and name the fix, rather than guess (AC-8).
-    echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — call ListAgents, then dispatch" >&2
+    #
+    # WHICH fix depends on who is dispatching. Dispatch is an AUTHORITY the orchestrator
+    # holds alone, not a capability gated by freshness (F-2 ruling, 2026-09-05): a
+    # dispatched agent never dispatches, it asks. Telling one to "call ListAgents" names a
+    # tool that is not in its roster — no act available to it can ever satisfy the
+    # precondition — so it is told what it CAN do. The `live-agents:` prefix and the
+    # state/age fields are the same on both branches, because every consumer parses those.
+    if budget_is_subagent "$BUDGET_TRANSCRIPT"; then
+      echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — subagents do not dispatch; dispatch is the orchestrator's authority — SendMessage the orchestrator (to: main) naming what you need" >&2
+    else
+      echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — call ListAgents, then dispatch" >&2
+    fi
     exit 2
   fi
   BUDGET_OPEN="${BUDGET_COUNTS%% *}"
