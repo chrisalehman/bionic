@@ -2409,7 +2409,7 @@ expect_status "…and journals nothing: a refused dispatch is not a launch" "0" 
 # ---------- stale stamp: armed, then died ----------
 REPO=$(make_repo r21b yes)
 write_attestation "$REPO" "$SID_A"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1800s default
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1200s default
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "a STALE Patrol stamp refuses the dispatch" "2" "$GATE_ST"
 expect_contains "…and names the armed-but-dead state, not the never-armed one" \
@@ -2506,7 +2506,7 @@ expect_contains "…the never-armed arm still fires" "never armed" "$GATE_ERR"
 REPO=$(make_repo r21k yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1800s default
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1200s default
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "a stale stamp under an unreadable interval refuses at the DEFAULT threshold" \
   "2" "$GATE_ST"
@@ -2514,7 +2514,7 @@ expect_contains "…naming the armed-but-dead state" "stopped firing" "$GATE_ERR
 
 # r21l — the fallback is the POKER'S constant, not a number retyped in the gate. Proven
 # by MUTATION: change POKER_INTERVAL_DEFAULT on a doctored copy of the poker tree and the
-# threshold the gate measures against has to move with it. A gate carrying its own 1800
+# threshold the gate measures against has to move with it. A gate carrying its own 1200
 # would pass this fixture unchanged.
 # A COPIED HOOK NEEDS THE LIBRARY BESIDE IT — the shape the plugin ships, `hooks/`
 # beside `scripts/lib` (bionic 1.4.0). Both the gate and the poker load through the
@@ -2535,7 +2535,7 @@ S21_TREE_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/s21-poker-tree.XXXXXX")
 S21_TREE_HOOKS=$(s21_plant "$S21_TREE_ROOT")
 S21_TREE="$S21_TREE_HOOKS"   # POKER's spelling; both names address one directory
 cp "$GATE" "$S21_TREE_HOOKS/dispatch-preflight.sh"
-sed 's/^POKER_INTERVAL_DEFAULT="30m"$/POKER_INTERVAL_DEFAULT="10s"/' \
+sed 's/^POKER_INTERVAL_DEFAULT="20m"$/POKER_INTERVAL_DEFAULT="10s"/' \
   "${BIONIC_HOOKS_DIR}/session-poker.sh" > "$S21_TREE_HOOKS/session-poker.sh"
 if grep -qF 'POKER_INTERVAL_DEFAULT="10s"' "$S21_TREE_HOOKS/session-poker.sh"; then
   ok "r21l meta: the doctored poker default landed (the sed anchor still matches)"
@@ -2545,7 +2545,7 @@ fi
 REPO=$(make_repo r21l yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100   # fresh at 1800s, ancient at 10s
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100   # fresh at 1200s, ancient at 10s
 S21_SAVED_GATE="$GATE"; GATE="$S21_TREE_HOOKS/dispatch-preflight.sh"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r21l the fallback threshold moves with the POKER's constant, not the gate's" \
