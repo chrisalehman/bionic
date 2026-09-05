@@ -23,6 +23,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 GUARD="$HERE/stop-guard.sh"
@@ -50,6 +51,17 @@ expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly pres
 expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
 expect_file()     { if [ -f "$2" ]; then ok "$1"; else no "$1" "no such file: $2"; fi; }
 expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2"; else ok "$1"; fi; }
+
+# HELPER-PRESENCE GUARD (S11, spec AC-25). `expect_eq` comes from tests/lib/assert.sh
+# and is not defined anywhere in this file — before this slice, its one call below
+# (":re-engaged: the refusal is byte-identical") ran under `set -uo pipefail` with no
+# `-e`, so an undefined `expect_eq` was a silent stderr line and the row asserted
+# nothing (the same class of defect r24e was in dispatch-preflight.test.sh,
+# research-code-map §6.2). Every helper this file calls is checked to exist as a
+# function before the first test runs, so a future undefined call fails the whole
+# suite loudly instead of vanishing.
+require_helpers ok no expect_status expect_contains expect_matches expect_absent \
+  expect_empty expect_file expect_no_file expect_eq
 
 # ---------- fixtures ----------
 #

@@ -37,6 +37,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_SESSION_START_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-start.sh}"
 PASS=0; FAIL=0; TOTAL=0
@@ -142,11 +143,12 @@ write_delivered_plan() {  # <project> [name] -> plan path on stdout
 
 # A BOUND marker (lib/binding.sh's shape, S1/S2 contract): `plan=<path>` naming a
 # member of the open-run set, plus `engaged_at=`. Distinct from `plant_engaged`,
-# which writes an empty (unbound) marker.
+# which writes an empty (unbound) marker. S11: this now calls the real `bind_plan`
+# (tests/lib/bound-marker.sh), which stores the CANONICAL spelling itself — the
+# `realplan()` workaround this suite used to need at every call site that asserts
+# the plan's exact text is gone; the real writer canonicalises for us.
 plant_bound() {  # <project> <sid> <plan-path>
-  mkdir -p "$1/.bionic/tmp"
-  printf 'plan=%s\nengaged_at=2026-09-02T20:00:00Z\n' "$3" > "$1/.bionic/tmp/engaged-$2.state"
-  chmod 600 "$1/.bionic/tmp/engaged-$2.state"
+  bound_marker "$1" "$2" "$3"
 }
 
 # The engagement marker itself (lib/run.sh `engaged_session`) — a REGULAR file
@@ -154,17 +156,6 @@ plant_bound() {  # <project> <sid> <plan-path>
 plant_engaged() {  # <project> <sid>
   mkdir -p "$1/.bionic/tmp"
   : > "$1/.bionic/tmp/engaged-$2.state"
-}
-
-# THE CANONICAL SPELLING (lib/binding.sh `_bind_resolve`): `bind_plan` never stores the
-# raw argument it is handed, it stores `cd "$(dirname "$p")" && pwd -P` plus the leaf —
-# so a real binding always agrees with `$ROOT`'s own resolved path (`project_root` runs
-# the same `pwd -P`). `plant_bound` below hand-writes the marker (S11 is what replaces
-# it with a call to the real `bind_plan`) and must store the SAME canonical form or a
-# temp directory reached through a resolved symlink (macOS `/var` -> `/private/var`)
-# makes the marker's plan value disagree with the hook's own docs-root prefix.
-realplan() {  # <raw plan path> -> the canonical spelling `_bind_resolve` would store
-  printf '%s/%s\n' "$(cd "$(dirname "$1")" && pwd -P)" "$(basename "$1")"
 }
 
 # Every path under .bionic with its mtime — the "wrote nothing" fingerprint.
@@ -592,7 +583,7 @@ echo "=== 14 — engaged and bound: the bound-run line names the plan and its st
 echo "--- 14a: exactly one open run, engaged and bound to it: one line, nothing else ---"
 P14=$(make_env 1s)
 PLAN14="$(write_open_plan "$P14")"
-plant_bound "$P14" "$CUR_SID" "$(realplan "$PLAN14")"
+plant_bound "$P14" "$CUR_SID" "$PLAN14"
 S14_BEFORE=$(snap "$P14")
 OUT=$(drive "$P14" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq  "14a.1 exit 0" "0" "$(rc)"
@@ -616,7 +607,7 @@ P14c=$(make_env 1s)
 PLAN14cA="$(write_open_plan "$P14c" alpha)"
 PLAN14cB="$(write_open_plan "$P14c" beta)"
 roster_rows "$P14c/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-THETA"
-plant_bound "$P14c" "$CUR_SID" "$(realplan "$PLAN14cA")"
+plant_bound "$P14c" "$CUR_SID" "$PLAN14cA"
 OUT=$(drive "$P14c" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq    "14c.1 exit 0" "0" "$(rc)"
 has   "14c.2 the bound line names the bound plan" \
