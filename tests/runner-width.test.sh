@@ -9,19 +9,26 @@
 # on stderr, and ignored.
 #
 # THE ONLY SAFE WAY TO DRIVE THIS is `tests/run.sh --dry-run` (added by this same slice):
-# it computes JOBS exactly as a real invocation would — sampling the ring, reading the
-# rung — and prints it, without launching the 40-plus-suite roster a real run would. Every
-# case below drives the REAL runner script this way; nothing here reimplements the width
-# computation.
+# it reads the rung the ring already carries and prints it, without launching the
+# 40-plus-suite roster a real run would. Every case below drives the REAL runner script
+# this way; nothing here reimplements the width computation.
+#
+# --dry-run SAMPLES NOTHING (S25, critic K-4 option 2: a dry run writes nothing to the
+# ring — Section 2 pins this). Every fixture below therefore pre-seeds the ring with
+# however many lines the case needs BEFORE calling `dry_run` — most seed the SAME
+# reading twice, which reads identically whether or not a live sample ever joins them,
+# so removing the runner's own dry-run sample changed none of these cases' answers.
+# `BIONIC_PROBE_FREE_PCT` / `_SWAP_PCT` / `_LOAD_1M` are still pinned on every call: they
+# no longer feed a dry-run sample, but Section 2's ordinary-path case (the one path that
+# still samples) reads them, and leaving them unset there would make that one case a
+# weather report.
 #
 # FIXTURE DISCIPLINE (Fail-closed constants idiom, resources.sh:154). `BIONIC_PRESSURE_RING`
 # always points under this suite's own mktemp root — never the real
 # `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring` — and `BIONIC_NOW_EPOCH` pins the
 # clock so every ring line this suite writes lands inside the smoothing window regardless of
-# wall-clock time. `BIONIC_PROBE_FREE_PCT` / `BIONIC_PROBE_SWAP_PCT` / `BIONIC_PROBE_LOAD_1M`
-# pin the reading `tests/run.sh`'s OWN internal `pressure_sample` call takes, so the fresh
-# line it appends agrees with the band the pre-seeded ring already carries — a case is not
-# left to the real, unpinned state of the machine running this suite.
+# wall-clock time. A case is not left to the real, unpinned state of the machine running
+# this suite.
 #
 # Usage: bash tests/runner-width.test.sh
 
@@ -102,14 +109,56 @@ expect_contains "1c …confirmed against a critical ring too (quarters 8, not an
   "JOBS=2" "$DRY_OUT"
 
 echo
-echo "=== Section 2: the run appends one sample to the ring ==="
+echo "=== Section 2: --dry-run writes NOTHING (S25, critic K-4 option 2) ==="
+#
+# RATIFIED: `tests/run.sh --dry-run` is a user-facing surface, and the obligation that
+# rides with it is that a dry run writes nothing. Before S25 the runner sampled the
+# machine's pressure UNCONDITIONALLY, before the --dry-run early exit, so every dry run
+# quietly appended one line to the ring documented at :131 as "print the job width and
+# exit; run nothing" — nothing meant nothing, except one write. §2a proves the ring is
+# byte-identical afterwards (count AND checksum — a rewrite that happened to keep the
+# same line count would slip past a bare `wc -l`). §2b is the paired POSITIVE: the
+# ORDINARY (non-dry) path this is an exception to must still sample exactly once, or the
+# exception would have quietly swallowed the rule (AC-15) along with the bug.
+
+ring_fingerprint() {  # <ring> -> "<byte count> <sha256>", cheap non-vacuity for "unchanged"
+  printf '%s %s' "$(wc -c < "$1" | tr -d ' ')" "$(shasum "$1" | awk '{print $1}')"
+}
 
 RING_D="$TMPROOT/d/pressure.ring"
 ring_of "$RING_D" "$NOW" "$S_CLEAR" "$S_CLEAR"
-BEFORE_LINES=$(wc -l < "$RING_D" | tr -d ' ')
+BEFORE_FP="$(ring_fingerprint "$RING_D")"
 dry_run "$RING_D" "$S_CLEAR" 8
-AFTER_LINES=$(wc -l < "$RING_D" | tr -d ' ')
-expect_eq "2 the ring gained exactly one line" "$((BEFORE_LINES + 1))" "$AFTER_LINES"
+AFTER_FP="$(ring_fingerprint "$RING_D")"
+expect_contains "2a --dry-run still prints the width" "JOBS=8" "$DRY_OUT"
+expect_eq "2a …a dry run leaves the ring byte-identical (bytes+sha unchanged)" \
+  "$BEFORE_FP" "$AFTER_FP"
+
+# §2b THE PAIRED POSITIVE. Driving the real (non-dry, non-serial) path directly would
+# launch this repo's whole roster — including this very suite, and cross-gate-agreement
+# and fresh-home, which also drive --dry-run — so instead this copies the REAL
+# tests/run.sh, byte for byte, into a scratch tree carrying no *.test.sh files at all.
+# Every queued `bash tests/<label>.test.sh` line then fails instantly (no such file):
+# the width computation runs — and samples — long before the queue is even built, so the
+# copy proves the same thing a real run would without paying for one.
+ORD_TREE="$TMPROOT/ordinary"
+mkdir -p "$ORD_TREE/tests/lib" "$ORD_TREE/payload/scripts/lib"
+cp "${BIONIC_SCRIPTS_DIR}/tests/run.sh" "$ORD_TREE/tests/run.sh"
+cp "${BIONIC_SCRIPTS_DIR}/tests/lib/resolve-roots.sh" "$ORD_TREE/tests/lib/resolve-roots.sh"
+cp "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/"*.sh "$ORD_TREE/payload/scripts/lib/" 2>/dev/null
+expect_eq "2b the scratch runner is the shipped one, byte for byte (not vacuous)" "yes" \
+  "$(cmp -s "${BIONIC_SCRIPTS_DIR}/tests/run.sh" "$ORD_TREE/tests/run.sh" && echo yes || echo no)"
+
+RING_D2="$TMPROOT/d2/pressure.ring"
+ring_of "$RING_D2" "$NOW" "$S_CLEAR"
+BEFORE_LINES2=$(wc -l < "$RING_D2" | tr -d ' ')
+( cd "$ORD_TREE" && env BIONIC_PRESSURE_RING="$RING_D2" BIONIC_NOW_EPOCH="$NOW" \
+      BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+      BIONIC_TEST_JOBS_CEILING=8 \
+      bash tests/run.sh >/dev/null 2>&1 )
+AFTER_LINES2=$(wc -l < "$RING_D2" | tr -d ' ')
+expect_eq "2b the ordinary path still appends exactly one sample (AC-15 intact)" \
+  "$((BEFORE_LINES2 + 1))" "$AFTER_LINES2"
 
 echo
 echo "=== Section 3: BIONIC_TEST_JOBS is retired ==="

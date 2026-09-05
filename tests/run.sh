@@ -148,12 +148,23 @@ done
 # caller that never named one). BIONIC_TEST_JOBS is retired as an input — see the
 # header note above — so a caller who still sets it is told once, on stderr,
 # and the value is ignored rather than silently honoured or silently dropped.
+#
+# A DRY RUN SAMPLES NOTHING (S25, critic K-4 option 2: `--dry-run` is ratified
+# user-facing surface, and the obligation that rides with that is that a dry run
+# writes nothing). Before this fix the sample below ran unconditionally, so
+# `--dry-run` — documented above and at `-h` as "print the job width and exit;
+# run nothing" — quietly appended one line to the machine's pressure ring on
+# every invocation. The real (non-dry) path below still samples first, exactly
+# as AC-15 requires of every consumer; only the dry-run path is exempted, and it
+# reads the rung the ring already carries instead.
 if [ -n "${BIONIC_TEST_JOBS:-}" ]; then
   echo "tests/run.sh: BIONIC_TEST_JOBS is retired — width now comes from the machine's pressure rung; set BIONIC_TEST_JOBS_CEILING to change the ceiling it reads against. The value you set (${BIONIC_TEST_JOBS}) is ignored." >&2
 fi
 # shellcheck source=/dev/null
 . "$REPO/payload/scripts/lib/resources.sh"
-pressure_sample >/dev/null 2>&1 || :
+if [ "$DRY_RUN" -eq 0 ]; then
+  pressure_sample >/dev/null 2>&1 || :
+fi
 JOBS="$(pressure_level "${BIONIC_TEST_JOBS_CEILING:-8}")"
 # A GARBAGE CEILING FALLS BACK, IT DOES NOT KILL THE RUN (Step-6 review C-6). The `:-8`
 # above covers an UNSET variable and nothing else: `pressure_level` refuses a ceiling that
@@ -417,7 +428,10 @@ run "hook-adoption.test.sh" bash tests/hook-adoption.test.sh
 run "resources.test.sh" bash tests/resources.test.sh
 # wave-roster-lifecycle S9 (spec AC-15): this file's own job width — pressure_sample then
 # pressure_level over BIONIC_TEST_JOBS_CEILING, and --dry-run, the flag that makes the width
-# observable without running the whole roster. Hand-listed like every suite outside hooks/.
+# observable without running the whole roster. S25 (K-4 option 2) made --dry-run the
+# EXCEPTION to AC-15's sample-before-you-read obligation: it reads the ring as it stands
+# and samples nothing, so it can observe the width without also mutating machine state.
+# Hand-listed like every suite outside hooks/.
 run "runner-width.test.sh" bash tests/runner-width.test.sh
 #   - docs-pins.test.sh: doc-text agreement pins with no other home. §1 (RELEASE, spec
 #     AC-36) is the help version pair — replaces the coverage version-ssot.test.sh had
