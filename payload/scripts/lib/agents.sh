@@ -111,7 +111,21 @@ _la_norm_ts() {
 #
 #   U <tool_use_id>            an assistant ListAgents call
 #   R <tool_use_id> <ts>       a tool_result entry, with its entry timestamp
-#   P <ts>                     a user PROMPT entry (.message.content a plain string)
+#   P <ts>                     a user PROMPT entry
+#
+# WHAT COUNTS AS A PROMPT, AND WHY IT IS NOT "content is a string" (Step-6 review
+# S-1 = C-3). It was exactly that, and the harness writes a prompt carrying a pasted
+# image as an ARRAY of content blocks — `{type:"text"}` beside `{type:"image"}`. Those
+# entries fell through both branches, so the freshness comparison at the bottom of
+# `live_agents` measured the answer against some OLDER prompt and called a stale answer
+# FRESH: the fail-OPEN direction, on the one rule AC-8's refusal and the stop guard's
+# resolution both rest on. A user entry is now a prompt when its content is a string,
+# OR when its content array carries at least one `text` block and NO `tool_result`
+# block. The `tool_result` exclusion is load-bearing: every tool result in the session
+# is a user entry with array content, and counting one as a prompt would stale every
+# answer the instant the next tool ran. Over-counting prompts — a skill injection, say,
+# which arrives as a bare `text` array — fails toward STALE, and STALE is the side that
+# refuses and names its own repair.
 _la_scan() {  # <transcript>
   jq -Rr '
     (fromjson? // empty) as $e
@@ -121,9 +135,15 @@ _la_scan() {  # <transcript>
         | select((.type? == "tool_use") and (.name? == "ListAgents"))
         | "U\t" + (.id // "")
       elif ($e.type? == "user") and (($e.message?.content? // null) | type == "array") then
-        $e.message.content[]
-        | select(.type? == "tool_result")
-        | "R\t" + (.tool_use_id // "") + "\t" + $ts
+        ($e.message.content) as $c
+        | if ([ $c[] | select(.type? == "tool_result") ] | length) > 0 then
+            $c[]
+            | select(.type? == "tool_result")
+            | "R\t" + (.tool_use_id // "") + "\t" + $ts
+          elif ([ $c[] | select(.type? == "text") ] | length) > 0 then
+            "P\t" + $ts
+          else empty
+          end
       elif ($e.type? == "user") and (($e.message?.content? // null) | type == "string") then
         "P\t" + $ts
       else empty

@@ -988,6 +988,130 @@ row_open_errexit_probe "$T_STALE" "research-code-map"
 expect_eq "set -e caller: live_row_open STALE -> 3" "3" "$RERC"
 row_open_errexit_probe "$T_GARBAGE" "research-code-map"
 expect_eq "set -e caller: live_row_open unparseable -> 4" "4" "$RERC"
+# ============================================================
+echo
+echo "=== §Q — an ARRAY-shaped user prompt is a prompt (Step-6 review S-1 = C-3) ==="
+# ============================================================
+#
+# THE DEFECT THIS SECTION EXISTS FOR. `_la_scan` recorded a user PROMPT only when
+# `.message.content` was a plain STRING. The harness writes a prompt that carries an
+# image — a pasted screenshot, a dragged file — as an ARRAY of content blocks
+# (`{type:"text"}` + `{type:"image"}`), and the tool_result branch above claimed every
+# array-content user entry, emitting nothing for a block that is not a `tool_result`.
+# So the prompt never entered `last_prompt`, an answer recorded BEFORE it compared
+# against some older prompt, and the reader said FRESH. That is the fail-OPEN direction
+# on the one rule AC-8 and the stop guard's resolution both rest on.
+#
+# THE RULE NOW. A user entry whose content is an array is a PROMPT when the array
+# carries at least one `text` block and NO `tool_result` block. Over-counting prompts
+# fails toward STALE, which is the safe side: a stale reading refuses a dispatch and
+# refuses a stop, and both refusals name their own repair.
+#
+# FIXTURE FIDELITY. The array shape below is the real one — measured in this project's
+# own transcripts, where user entries with array content and no tool_result block occur
+# as `text` alone (skill injections) and as `text,image` (a human prompt with a pasted
+# image). Both are prompts under this rule.
+
+# A user PROMPT entry whose content is an ARRAY of blocks. <ts> <text>
+entry_prompt_array() {
+  printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":[{"type":"text","text":%s}]}}\n' \
+    "$1" "$(json_str "$2")"
+}
+
+# The same with a pasted image beside the text — the `text,image` shape measured in the
+# wild. <ts> <text>
+entry_prompt_array_image() {
+  printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":[{"type":"text","text":%s},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}}]}}\n' \
+    "$1" "$(json_str "$2")"
+}
+
+# --- §Q.1 — THE PAIR. Two transcripts identical but for the SHAPE of the final
+# prompt. Both must read STALE: the answer at 00:52:23 predates the 00:55 prompt in
+# both, and the shape of the prompt is not allowed to change the verdict.
+Q_STRING="$SANDBOX/q-string.jsonl"
+{
+  entry_prompt        "2026-09-05T00:50:00.000Z" "dispatch the code-map researcher"
+  entry_tool_use      "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01QSTRING"
+  entry_tool_result   "2026-09-05T00:52:23.349Z" "toolu_01QSTRING" "$BODY_RUNNING"
+  entry_prompt        "2026-09-05T00:55:00.000Z" "now stop it"
+} > "$Q_STRING"
+
+Q_ARRAY="$SANDBOX/q-array.jsonl"
+{
+  entry_prompt        "2026-09-05T00:50:00.000Z" "dispatch the code-map researcher"
+  entry_tool_use      "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01QSTRING"
+  entry_tool_result   "2026-09-05T00:52:23.349Z" "toolu_01QSTRING" "$BODY_RUNNING"
+  entry_prompt_array_image "2026-09-05T00:55:00.000Z" "now stop it [Image #4]"
+} > "$Q_ARRAY"
+
+call_live_agents "$Q_STRING"
+expect_eq "§Q.1 string-shaped final prompt -> STALE (exit 3)" 3 "$ST"
+Q_STRING_ST="$ST"; Q_STRING_ERR="$ERR"
+call_live_agents "$Q_ARRAY"
+expect_eq "§Q.1 array-shaped final prompt (text+image) -> STALE (exit 3)" 3 "$ST"
+expect_eq "§Q.1 the two shapes agree on the exit status" "$Q_STRING_ST" "$ST"
+expect_eq "§Q.1 the two shapes agree on the stderr line" "$Q_STRING_ERR" "$ERR"
+# The set still prints on a stale answer — the asymmetry §C already pins.
+expect_eq "§Q.1 the stale array-prompt answer still prints its set" \
+  "research-code-map|bionic:researcher|running" "$OUT"
+
+# --- §Q.2 — a BARE `text` array is a prompt too. The measured corpus carries these
+# (skill injections); counting them fails toward STALE, and this suite pins the
+# direction rather than the taxonomy.
+Q_BARE="$SANDBOX/q-bare.jsonl"
+{
+  entry_prompt        "2026-09-05T00:50:00.000Z" "dispatch the code-map researcher"
+  entry_tool_use      "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01QBARE"
+  entry_tool_result   "2026-09-05T00:52:23.349Z" "toolu_01QBARE" "$BODY_RUNNING"
+  entry_prompt_array  "2026-09-05T00:55:00.000Z" "a text-only array entry"
+} > "$Q_BARE"
+call_live_agents "$Q_BARE"
+expect_eq "§Q.2 bare text-array user entry -> STALE (exit 3)" 3 "$ST"
+
+# --- §Q.3 — THE POSITIVE. An array-shaped prompt followed by a FRESH answer still
+# reads FRESH: the fix must not turn every array entry into a later prompt.
+Q_FRESH="$SANDBOX/q-fresh.jsonl"
+{
+  entry_prompt_array_image "2026-09-05T00:50:00.000Z" "here is the screenshot [Image #1]"
+  entry_tool_use      "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01QFRESH"
+  entry_tool_result   "2026-09-05T00:52:23.349Z" "toolu_01QFRESH" "$BODY_RUNNING"
+} > "$Q_FRESH"
+call_live_agents "$Q_FRESH"
+expect_eq "§Q.3 array prompt then a later answer -> FRESH (exit 0)" 0 "$ST"
+expect_eq "§Q.3 the fresh set is the running researcher" \
+  "research-code-map|bionic:researcher|running" "$OUT"
+expect_eq "§Q.3 stderr names fresh and the age" "live-agents: fresh age=457" "$ERR"
+
+# --- §Q.4 — A `tool_result`-BEARING ARRAY IS NOT A PROMPT. This is the whole reason
+# the rule is "text and no tool_result" rather than "any array": every tool result in
+# the session is a user entry with array content, and counting one as a prompt would
+# make EVERY answer stale the instant the next tool ran.
+Q_TR="$SANDBOX/q-toolresult.jsonl"
+{
+  entry_prompt        "2026-09-05T00:50:00.000Z" "dispatch the code-map researcher"
+  entry_tool_use      "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01QTR"
+  entry_tool_result   "2026-09-05T00:52:23.349Z" "toolu_01QTR" "$BODY_RUNNING"
+  entry_tool_use      "2026-09-05T00:56:00.000Z" "Bash" "toolu_01QTRBASH"
+  entry_tool_result   "2026-09-05T00:56:01.000Z" "toolu_01QTRBASH" "total 0"
+} > "$Q_TR"
+call_live_agents "$Q_TR"
+expect_eq "§Q.4 a later tool_result does not make the answer stale (exit 0)" 0 "$ST"
+expect_eq "§Q.4 the set is unchanged by the later tool_result" \
+  "research-code-map|bionic:researcher|running" "$OUT"
+
+# A tool_result whose content is an ARRAY of text blocks — the other real shape — is
+# still a result and still not a prompt.
+Q_TRA="$SANDBOX/q-toolresult-array.jsonl"
+{
+  entry_prompt        "2026-09-05T00:50:00.000Z" "dispatch the code-map researcher"
+  entry_tool_use      "2026-09-05T00:52:22.000Z" "ListAgents" "toolu_01QTRA"
+  entry_tool_result   "2026-09-05T00:52:23.349Z" "toolu_01QTRA" "$BODY_RUNNING"
+  entry_tool_use      "2026-09-05T00:56:00.000Z" "Bash" "toolu_01QTRABASH"
+  entry_tool_result_array "2026-09-05T00:56:01.000Z" "toolu_01QTRABASH" "total 0"
+} > "$Q_TRA"
+call_live_agents "$Q_TRA"
+expect_eq "§Q.4 an array-content tool_result is not a prompt either (exit 0)" 0 "$ST"
+
 
 # ============================================================
 echo
