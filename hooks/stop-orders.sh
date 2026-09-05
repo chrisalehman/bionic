@@ -558,9 +558,15 @@ case "$VERB" in
     if [ -n "$_own_tr" ]; then
       if _live=$(live_agents "$_own_tr" 2>/dev/null); then _live_ok=1; else _live=""; fi
     fi
+    # A NAME IS NOT A PATTERN (Step-6 security review S-5). The name is a value lifted off a
+    # roster row — the operator's typed target one step upstream — and nothing in the fleet
+    # charset-guards it, so a `.`, `*` or `[` dropped into a basic regular expression
+    # over-matches and annotates a departed row `[live]` off a neighbour's name. Field
+    # equality, which is the spelling `live_agents_has` already uses two functions away.
     _is_live() {  # <name> -> 0 iff the fresh answer names it
       [ "$_live_ok" -eq 1 ] || return 1
-      printf '%s\n' "$_live" | grep -q "^$1|"
+      printf '%s\n' "$_live" \
+        | awk -F'|' -v want="$1" '$1 == want { found = 1 } END { exit found ? 0 : 1 }'
     }
 
     _ready=""; _held=""; _nready=0; _nheld=0; _landed=""
