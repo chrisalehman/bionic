@@ -4328,21 +4328,33 @@ expect_eq "…and the tick asks the library WHOSE run this session is in, by nam
 expect_eq "…and still calls active_plan, for the unbound-and-closed arm and nothing else" "yes" \
   "$(/usr/bin/grep -q 'active_plan "' "$PARTY_PK_S" && echo yes || echo no)"
 
-# ---- S.2 the ONE selection block, pinned where it now lives -------------
+# ---- S.2 the ONE selection block, proven by what it SELECTS -------------
 #
 # It used to live twice: at file scope in the evidence gate, and inside the tick's
-# `newest_sdlc_plan()`. Both copies are gone and the block is `lib/run.sh:active_plan`, so
-# what is pinned is the LIBRARY's block on its two load-bearing properties — the depth
-# bound the layout needs, and the STRICT `-nt` ordering that makes "newest" a total answer
-# rather than one that depends on find's directory order.
+# `newest_sdlc_plan()`. Both copies are gone and the block is `lib/run.sh`'s, so what is
+# pinned here is the LIBRARY's selection on its three load-bearing properties — the DEPTH
+# bound the layout needs, the FENCE rule that keeps a page ABOUT the lifecycle out of the
+# set, and the STRICT newest ordering that makes `active_plan`'s answer a total one rather
+# than one that depends on find's directory order.
 #
-# THE BOUND IS 2 AND IT IS ASSERTED AS A NUMBER, not merely as "a bound exists". Two depths
-# were live during this wave and §S.3d pinned the disagreement; POKER/2 resolved it at 2,
-# which is the bionic layout's own depth. A number is what makes a silent drift back to 3
-# fail here rather than somewhere downstream.
+# PINNED BY BEHAVIOUR, NOT BY SUBSTRING (wave-roster-lifecycle S1, AC-22). Until this wave
+# the assertions below read `fn_body run.sh active_plan` and matched `-maxdepth 2 -type f`
+# and `-nt "$plan"` inside it. That pinned the block's TEXT to one function's body, so the
+# moment the walk moved into the `_run_candidates` helper the two readers now share, every
+# one of those matches emptied — and an empty extraction reads as a PASS on a `case` that
+# is looking for a substring, which is the failure mode this suite exists to refuse. The
+# properties are unchanged; they are asked of the ANSWER now, over one fixture repository
+# driven through both readers, so the walk can be refactored under them and only a change
+# in what it SELECTS goes red.
+#
+# BOTH READERS, ONE FIXTURE. `active_plan` picks one file and `open_runs` returns the set;
+# they walk the same candidates, so every exclusion below is asserted of BOTH answers. That
+# agreement is what this section owns, and the depth discriminator at the end moves both.
+
 # The RETIRED extractor, kept for one job only: proving the tick's copy is really gone.
 # It is the exact reader this section used against `newest_sdlc_plan()`, so an empty answer
-# means the block it looked for is absent rather than merely renamed out of reach.
+# means the block it looked for is absent rather than merely renamed out of reach. This one
+# reads the TICK, not the library, so the extraction below leaves it exactly as it was.
 sel_block_pk() {  # <file> -> the tick's old selection block, or empty
   awk '
     !f && index($0, "PLAN_DIRS=(") { f = 1 }
@@ -4358,26 +4370,101 @@ sel_block_pk() {  # <file> -> the tick's old selection block, or empty
 
 S_RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
 [ -r "$S_RUN_LIB" ] || S_RUN_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/run.sh"
-S_LIB_SEL="$(fn_body "$S_RUN_LIB" active_plan)"
-expect_eq "the extractor pulls a real selection block out of the library" "yes" \
-  "$([ -n "$S_LIB_SEL" ] && echo yes || echo no)"
-expect_eq "…bounded at depth 2, the bionic layout's own depth" "yes" \
-  "$(case "$S_LIB_SEL" in *'-maxdepth 2 -type f'*) echo yes ;; *) echo no ;; esac)"
-expect_eq "…and the STRICT newest test, not a >= that depends on find order" "yes" \
-  "$(case "$S_LIB_SEL" in *'-nt "$plan"'*) echo yes ;; *) echo no ;; esac)"
+expect_eq "the library under this section is on disk (§S.2 is not vacuous)" "yes" \
+  "$([ -r "$S_RUN_LIB" ] && echo yes || echo no)"
 expect_eq "…and the tick carries no selection block of its own to disagree with it" "" \
   "$(sel_block_pk "$PARTY_PK_S")"
 
-# THE DISCRIMINATOR. Without it the checks above prove only that a file exists: an
-# extractor that stopped matching would return an empty string and every `case` would read
-# "no" — so the mutation is applied to a COPY and the extraction must MOVE. The shipped
-# file is never touched.
-S_MUT_DIR="$SANDBOX/runstate-mutant"; mkdir -p "$S_MUT_DIR"
-sed 's/\[ "\$f" -nt "\$plan" \]/[ "$f" = "$f" ]/' "$S_RUN_LIB" > "$S_MUT_DIR/run.sh"
-expect_eq "the mutation applies (the code has not moved out from under this proof)" "no" \
-  "$(cmp -s "$S_RUN_LIB" "$S_MUT_DIR/run.sh" && echo yes || echo no)"
-expect_eq "…and with the strict-newest test flipped, the block CHANGES (§S discriminates)" "no" \
-  "$([ "$S_LIB_SEL" = "$(fn_body "$S_MUT_DIR/run.sh" active_plan)" ] && echo yes || echo no)"
+# THE ANSWER AND THE STATUS RIDE ONE CAPTURE, separated by a byte no path can contain —
+# `$?` read after a `$( … )` assignment under this file's `set -u` is the assignment's, not
+# the function's. §OR's `or_ask` takes the same reading against the same library.
+S2_OUT=""; S2_ST=0
+s2_ask() {  # <library> <root> <function> -> sets S2_OUT, S2_ST
+  local lib="$1" root="$2" fn="$3" raw
+  raw=$( . "$lib" >/dev/null 2>&1; "$fn" "$root" 2>/dev/null; printf '\037%s' "$?" )
+  S2_ST="${raw##*$'\037'}"
+  S2_OUT="${raw%$'\037'*}"
+  S2_OUT="${S2_OUT%$'\n'}"
+}
+
+# ONE FIXTURE, FOUR CANDIDATE FILES, EVERY EXCLUSION LOAD-BEARING. The mtimes are ordered so
+# that each file the walk must REFUSE is NEWER than the one it must return: a depth-3 plan
+# and a fenced example that were merely older would be excluded by the ordering and the
+# selection rules would never be asked. Driven straight at the library — no hook, no session,
+# no git repo — because the property under test is the walk, and `new_repo`'s patrol stamp
+# and engagement markers would only add ways for the fixture to answer for another reason.
+S2_R="$SANDBOX/s2-selection"
+S2_REAL="$S2_R/.bionic/docs/plans/wave.plan.md"
+S2_OLDER="$S2_R/.bionic/docs/plans/epic-99/older.plan.md"
+S2_DEEP="$S2_R/.bionic/docs/plans/epic-99/sub/deep.plan.md"
+S2_FENCED="$S2_R/.bionic/docs/plans/example.md"
+write_plan "$S2_REAL"  "current: 4"
+write_plan "$S2_OLDER" "current: 4"
+write_plan "$S2_DEEP"  "current: 4"
+mkdir -p "$(dirname "$S2_FENCED")"
+cat > "$S2_FENCED" <<'S2FENCE'
+# A page ABOUT the lifecycle, not a plan
+
+```
+## SDLC State
+
+integration-branch: main
+current: 4
+```
+S2FENCE
+touch -t 202601010000 "$S2_OLDER"
+touch -t 202602010000 "$S2_REAL"
+touch -t 202603010000 "$S2_DEEP"
+touch -t 202604010000 "$S2_FENCED"
+
+s2_ask "$S_RUN_LIB" "$S2_R" active_plan; S2_AP="$S2_OUT"; S2_AP_ST="$S2_ST"
+s2_ask "$S_RUN_LIB" "$S2_R" open_runs;   S2_SET="$S2_OUT"; S2_SET_ST="$S2_ST"
+
+expect_eq "active_plan has an answer on the fixture (non-vacuity)" "0" "$S2_AP_ST"
+expect_eq "…and it is the newest REAL plan inside the bound" "$S2_REAL" "$S2_AP"
+expect_eq "open_runs has an answer too" "0" "$S2_SET_ST"
+expect_eq "…and it is the two in-bound plans, newest first" \
+  "$(printf '%s\n%s' "$S2_REAL" "$S2_OLDER")" "$S2_SET"
+expect_eq "…so the selection is bounded at depth 2: the NEWER depth-3 plan is in neither" "no" \
+  "$(case "$S2_AP$S2_SET" in *"$S2_DEEP"*) echo yes ;; *) echo no ;; esac)"
+expect_eq "…and fence-aware: the NEWEST file, whose ## SDLC State is fenced, is in neither" "no" \
+  "$(case "$S2_AP$S2_SET" in *"$S2_FENCED"*) echo yes ;; *) echo no ;; esac)"
+expect_eq "…and the two readers agree: active_plan's answer IS line 1 of the set" \
+  "$S2_AP" "$(printf '%s\n' "$S2_SET" | head -1)"
+
+# THE DEPTH DISCRIMINATOR, AND IT MOVES BOTH READERS. Without it the exclusions above prove
+# only that two paths are absent from two strings, which is also what a walk that found
+# nothing at all would prove. The bound is raised to 3 on a COPY; the depth-3 plan is the
+# newest real plan in the tree, so `active_plan` must switch to it and the set must gain it.
+# The shipped file is never touched. One `sed` reaches every copy of the walk there is — two
+# before the `_run_candidates` extraction, one after — which is why this proof survives it.
+S2_MUT_DIR="$SANDBOX/runstate-mutant"; mkdir -p "$S2_MUT_DIR"
+sed 's/-maxdepth 2 -type f/-maxdepth 3 -type f/g' "$S_RUN_LIB" > "$S2_MUT_DIR/depth.sh"
+expect_eq "the depth mutation applies (the walk has not moved out from under this proof)" "no" \
+  "$(cmp -s "$S_RUN_LIB" "$S2_MUT_DIR/depth.sh" && echo yes || echo no)"
+s2_ask "$S2_MUT_DIR/depth.sh" "$S2_R" active_plan; S2_AP_M="$S2_OUT"
+s2_ask "$S2_MUT_DIR/depth.sh" "$S2_R" open_runs;   S2_SET_M="$S2_OUT"
+expect_eq "depth 3: active_plan switches to the deep plan (§S.2 discriminates)" \
+  "$S2_DEEP" "$S2_AP_M"
+expect_eq "…and the set gains it, newest first — BOTH readers moved on one mutation" \
+  "$(printf '%s\n%s\n%s' "$S2_DEEP" "$S2_REAL" "$S2_OLDER")" "$S2_SET_M"
+
+# THE ORDERING DISCRIMINATOR. Depth alone would stay green if `active_plan` stopped choosing
+# the newest and started choosing whatever `find` handed it last, so the comparator is
+# reversed on a second copy and the answer must become the OLDEST candidate. It is asserted
+# of `active_plan` only: `open_runs` keeps its own newest-first insertion, which §OR.1 and
+# run-predicate R6g pin, and a mutation that moved both would be measuring one of them twice.
+sed 's/\[ "\$f" -nt "\$plan" \]/[ "$plan" -nt "$f" ]/' "$S_RUN_LIB" > "$S2_MUT_DIR/order.sh"
+expect_eq "the ordering mutation applies (the strict-newest test is still there to reverse)" "no" \
+  "$(cmp -s "$S_RUN_LIB" "$S2_MUT_DIR/order.sh" && echo yes || echo no)"
+s2_ask "$S2_MUT_DIR/order.sh" "$S2_R" active_plan
+expect_eq "reversed comparator: active_plan answers with the OLDEST plan instead" \
+  "$S2_OLDER" "$S2_OUT"
+
+# RESTORED. The shipped library answers exactly as it did before either mutation, so the two
+# rows above measured the mutations and not a fixture that had drifted underneath them.
+s2_ask "$S_RUN_LIB" "$S2_R" active_plan
+expect_eq "restored: the shipped library still names the newest in-bound plan" "$S2_REAL" "$S2_OUT"
 
 # ---- S.3 the round trip: one repository, two readers, one answer ---------
 #
