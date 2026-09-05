@@ -1164,8 +1164,9 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 # DISARM decision to the FILL decision — two arms this wave's scope keeps apart. Sharing the
 # awk/grep/sed pipeline, not the caller, keeps the two readings from ever disagreeing about
 # what one `current:` line says.
-sched_plan_current() {  # <plan path> -> the current: value (digits only), or "" if unreadable
-  local plan="$1" section current
+_sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or "" if
+                               # no plan, no ## SDLC State section, or no current: line
+  local plan="$1" section
   [ -n "$plan" ] && [ -f "$plan" ] || { printf ''; return 0; }
   section="$(normalize_newlines "$plan" | awk '
     /^[[:space:]]*```/ { fence = !fence; next }
@@ -1173,12 +1174,26 @@ sched_plan_current() {  # <plan path> -> the current: value (digits only), or ""
     /^## SDLC State/ { flag=1; next }
     /^## / { flag=0 }
     flag')"
-  current="$(printf '%s\n' "$section" \
-             | grep -E '^[[:space:]]*current[[:space:]]*:' \
-             | head -1 \
-             | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-             | tr -d '[:space:]')"
-  case "$current" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$current" ;; esac
+  printf '%s\n' "$section" \
+    | grep -E '^[[:space:]]*current[[:space:]]*:' \
+    | head -1 \
+    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
+    | tr -d '[:space:]'
+}
+
+# THE ONE GRAMMAR THIS REPO ALREADY HAS (Step-6 review-a C-5, review-b finding (c)/N-2).
+# payload/scripts/lib/run.sh's run_state strips a trailing a/b sub-step letter before it
+# ever looks at digits (`local step="${current%[ab]}"`) — `current: 3b` and `current: 4b`
+# are recognized, in-repo forms, not malformed ones. This mirrors exactly that: strip the
+# same optional letter, then require what remains to be all-digits. A task-scale `current:
+# T<n>` needs no special case to land here — "T1" ends in neither `a` nor `b`, so the strip
+# is a no-op and the leftover `T` fails the digit test on its own, same as it always has.
+sched_plan_current() {  # <plan path> -> the current: value (digits only, sub-step letter
+                        # stripped), or "" if the raw value is unreadable
+  local plan="$1" current step
+  current="$(_sched_plan_current_field "$plan")"
+  step="${current%[ab]}"
+  case "$step" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$step" ;; esac
 }
 
 # ── THE RUNG, SAMPLED AND REPORTED (AC-17). One sample appended to the machine-scoped ring,
@@ -2804,13 +2819,23 @@ EOF
       # THE APPROVAL GATE COMES FIRST, ahead of the budget/readiness checks below (AC-5). A
       # plan below `current: 4` has not passed Step 3, and no reading of the budget or the
       # slice table changes that — so this is a wall in front of the rest of the arm, not one
-      # more branch beside them. An unreadable `current:` (no plan, no SDLC State section, a
-      # line that will not parse) is DOUBT and falls straight through to the existing checks
-      # below, exactly as an unreadable rung already falls back to the ceiling rather than to
-      # a refusal.
+      # more branch beside them.
+      #
+      # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
+      # review-b finding (c)/N-2). A task-scale `current: T<n>` (no numbered step to compare
+      # against 4), an empty field, or a line that will not parse are all cases where this
+      # gate cannot tell whether Step 3 has passed — and falling through to the
+      # readiness/budget checks below on THAT basis is DOUBT-then-FILL: the one shape this
+      # arm exists to prevent, measured live on a plan whose `current:` carried a sub-step
+      # letter (`3b`) that the old digit-only read rejected as unreadable and then filled
+      # anyway. So this differs from an unreadable RUNG, which falls back to the ceiling —
+      # there is no safe fallback for "did Step 3 pass," only "no."
       SCHED_CURRENT=""
       [ -n "$SCHED_PLAN" ] && SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
-      if [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
+      if [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_CURRENT" ]; then
+        SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
+        say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
+      elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
         say "no FILL — plan at current: ${SCHED_CURRENT}, Step-3 approval pending"
       elif [ -z "$SCHED_WRITERS" ]; then
         if [ -z "$SCHED_PLAN" ]; then
