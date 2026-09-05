@@ -900,6 +900,247 @@ expect_eq "session_run: …naming it" "fallback $SHUT" "$SR_OUT"
 
 # ============================================================
 echo
+echo "=== R9 — config_value <root> <key> <default>: one reader for .bionic/config.yaml ==="
+# ============================================================
+#
+# WHY (spec §Design §2, R1). `live-window:` is the second key this library needs out of
+# `.bionic/config.yaml`; `docs-root:` was the first and `docs_root` reads it inline. Rather
+# than a second inline grep/sed pair drifting away from the first, the read is one function
+# and R9 holds it to the conventions `docs_root` already established over its own fixture
+# battery: FIRST match wins, the value is trimmed, surrounding quotes come off, an indented
+# key still reads, and anything missing — the file, the key, or a value — is the default.
+#
+# THE DEFAULT IS AN ARGUMENT, NOT A CONSTANT. A library that baked `7d` in would put the
+# window in two places the moment a second caller wanted a different one, which is the
+# defect this wave is named for.
+
+call_config_value() {  # <root> <key> <default> -> stdout
+  bash -c '. "$1" || exit 1; config_value "$2" "$3" "$4"' _ "$LIB" "$1" "$2" "$3" 2>"$SANDBOX/.err"
+}
+
+# --- R9a: no config file at all -> the default ---
+R9="$SANDBOX/r9a"; mkdir -p "$R9/.bionic"
+expect_eq "config_value: no .bionic/config.yaml -> the default" "7d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+
+# --- R9b: the key is present -> its value, and the default is NOT consulted ---
+printf 'live-window: 30d\n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: the key is present -> its value" "30d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+
+# --- R9c: a file that exists but does not carry the key -> the default ---
+printf 'docs-root: .bionic/docs\n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: a config without the key -> the default" "7d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+
+# --- R9d: the four spellings docs_root already tolerates ---
+printf 'live-window:    12h   \n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: surrounding whitespace is trimmed" "12h" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+printf 'live-window: "3d"\n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: a double-quoted value comes back unquoted" "3d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+printf "live-window: '4d'\n" > "$R9/.bionic/config.yaml"
+expect_eq "config_value: a single-quoted value comes back unquoted" "4d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+printf '  live-window: 5d\n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: an indented key still reads" "5d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+
+# --- R9e: duplicate lines -> the FIRST wins, as docs_root's own head -1 does ---
+printf 'live-window: 1d\nlive-window: 99d\n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: duplicate keys -> the first match, not the last" "1d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+
+# --- R9f: a key with an EMPTY value is not a value ---
+printf 'live-window:\n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: the key present with no value -> the default" "7d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+
+# --- R9g: it is a general reader — docs_root's own key comes back through it too ---
+printf 'docs-root: .bionic/other-docs\nlive-window: 2d\n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: any key, not just this wave's" ".bionic/other-docs" \
+  "$(call_config_value "$R9" "docs-root" "")"
+expect_eq "config_value: …and the other one from the same file" "2d" \
+  "$(call_config_value "$R9" "live-window" "7d")"
+
+# --- R9h: the two readers of one file agree, edge for edge ---
+#
+# `docs_root` reads `docs-root:` inline and this function reads every other key; the spec
+# keeps them apart for one wave ("only this key uses it in this wave"), so what holds them
+# together until then is agreement on the same input. The row below is the sharpest case:
+# the quote-strip runs BEFORE the trailing-space trim in BOTH, so a quoted value with a
+# trailing space keeps its closing quote. That is a shared WART, and pinning it is what makes
+# a future slice that fixes one reader and not the other fail here rather than in a hook.
+printf 'docs-root: "d1" \nlive-window: "3d" \n' > "$R9/.bionic/config.yaml"
+expect_eq "config_value: a quoted value with a trailing space keeps its closing quote" '3d"' \
+  "$(call_config_value "$R9" "live-window" "7d")"
+expect_eq "…and docs_root reads its own key exactly the same way" "$R9/d1\"" \
+  "$(call_docs_root "$R9")"
+
+# ============================================================
+echo
+echo "=== R10 — live_runs <root>: the open runs whose plan is still WARM ==="
+# ============================================================
+#
+# WHY (spec AC-1, R1; design §1 "Run"). `open_runs` answers "not finished". A repository
+# accumulates those: a wave abandoned in spirit but never marked, a plan parked for a month.
+# Engagement needs "not finished AND recently touched" so it can bind when exactly one run
+# is actually being worked, and session-start needs the difference so it can COUNT the quiet
+# ones instead of listing them. LIVE ⊆ OPEN, always: this function filters open_runs' answer
+# and never widens it, so no gate that measures against the open rule can be loosened by it.
+#
+# THE CLOCK IS AN INPUT (`BIONIC_NOW_EPOCH`). Every fixture below backdates a plan with
+# `touch -t` and pins "now" to a constant, so the rows measure the WINDOW rather than how
+# long the suite took to reach them, and nothing here depends on the machine's date.
+#
+# THE WINDOW IS A DURATION IN PROSE, read through `config_value` with `7d` as the default and
+# parsed on the poker's `parse_seconds` grammar widened by one unit — `Nd|Nh|Nm|Ns`. Days are
+# the unit the key is written in and the one that grammar lacks.
+
+LR_OUT=""; LR_ST=0
+call_live_runs() {  # <root> <now-epoch> -> sets LR_OUT, LR_ST
+  LR_OUT=$(BIONIC_NOW_EPOCH="$2" bash -c '. "$1" || exit 1; live_runs "$2"' _ "$LIB" "$1" \
+           2>"$SANDBOX/.err")
+  LR_ST=$?
+}
+# lr_age <file> <seconds before LR_NOW> — portable epoch -> `touch -t` stamp. BSD `date -r`
+# and GNU `date -d @…` both render LOCAL time, which is the timezone `touch -t` reads, so the
+# round trip lands on the instant asked for on either platform.
+LR_NOW=1789000000
+lr_age() {
+  local at=$(( LR_NOW - $2 ))
+  touch -t "$(date -r "$at" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$at" +%Y%m%d%H%M.%S)" "$1"
+}
+LR_DAY=86400
+
+# --- R10a: two open plans, one backdated past the default window ---
+R="$SANDBOX/r10a"; mkdir -p "$R/.bionic"
+LR_FRESH=$(mk_plan "$R" "fresh.plan.md" "4" "- Step 4: in progress")
+LR_STALE=$(mk_plan "$R" "stale.plan.md" "4" "- Step 4: in progress")
+lr_age "$LR_FRESH" 3600
+lr_age "$LR_STALE" $(( 8 * LR_DAY ))
+call_open_runs "$R"
+expect_eq "live_runs fixture: BOTH plans are open (the filter has something to remove)" 2 \
+  "$(line_count "$OR_OUT")"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: default 7d window -> exit 0" 0 "$LR_ST"
+expect_eq "live_runs: …exactly the plan touched an hour ago" "$LR_FRESH" "$LR_OUT"
+expect_eq "live_runs: …exactly one line" 1 "$(line_count "$LR_OUT")"
+expect_eq "live_runs: …the 8-day-old open plan is NOT live" "no" \
+  "$(case "$LR_OUT" in *"$LR_STALE"*) echo yes ;; *) echo no ;; esac)"
+
+# --- R10b: the SAME tree with live-window: 30d -> both ---
+printf 'live-window: 30d\n' > "$R/.bionic/config.yaml"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: live-window: 30d on the same tree -> exit 0" 0 "$LR_ST"
+expect_eq "live_runs: …now BOTH are live, newest first" \
+  "$(printf '%s\n%s' "$LR_FRESH" "$LR_STALE")" "$LR_OUT"
+# …and back again on the same fixture, so the row above measured the config and not the tree.
+printf 'live-window: 30m\n' > "$R/.bionic/config.yaml"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: live-window: 30m -> the hour-old plan falls out too, exit 1" 1 "$LR_ST"
+expect_empty "live_runs: …and prints nothing" "$LR_OUT"
+# THE BOUNDARY IS INCLUSIVE, AND IT IS ASSERTED RATHER THAN INHERITED. "Within the window"
+# has to decide what happens at exactly the window's own age; a plan touched precisely one
+# hour ago under a 1h window is IN, and one second older is out. Left unpinned this is the
+# edge that moves silently under any rewrite of the comparison.
+printf 'live-window: 1h\n' > "$R/.bionic/config.yaml"
+lr_age "$LR_FRESH" 3600
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: a plan exactly one window old is INSIDE the window" "$LR_FRESH" "$LR_OUT"
+lr_age "$LR_FRESH" 3601
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: …and one second older is outside it, exit 1" 1 "$LR_ST"
+expect_empty "live_runs: …with no output" "$LR_OUT"
+lr_age "$LR_FRESH" 3600
+printf 'live-window: 90m\n' > "$R/.bionic/config.yaml"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: live-window: 90m -> the hour-old plan is back inside the window" \
+  "$LR_FRESH" "$LR_OUT"
+printf 'live-window: 4000s\n' > "$R/.bionic/config.yaml"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: …and seconds are a unit too" "$LR_FRESH" "$LR_OUT"
+rm -f "$R/.bionic/config.yaml"
+
+# --- R10c: live_runs ⊆ open_runs on a three-plan fixture ---
+#
+# THE SUBSET IS ASSERTED LINE BY LINE, not by counting: two sets of the same size can still
+# disagree about their members, and "live ⊆ open" is the invariant every gate depends on.
+R="$SANDBOX/r10c"; mkdir -p "$R/.bionic"
+S_NEW=$(mk_plan "$R" "one.plan.md" "4" "- Step 4: in progress")
+S_MID=$(mk_plan "$R" "two.plan.md" "6" "- Step 6: in progress")
+S_OLD=$(mk_plan "$R" "three.plan.md" "4" "- Step 4: in progress")
+lr_age "$S_NEW" 60
+lr_age "$S_MID" $(( 2 * LR_DAY ))
+lr_age "$S_OLD" $(( 40 * LR_DAY ))
+call_open_runs "$R"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live ⊆ open: the open set has all three" 3 "$(line_count "$OR_OUT")"
+expect_eq "live ⊆ open: …the live set has the two inside the window" 2 "$(line_count "$LR_OUT")"
+LR_MISSING=""
+while IFS= read -r lr_line; do
+  [ -n "$lr_line" ] || continue
+  grep -qxF -- "$lr_line" <<<"$OR_OUT" || LR_MISSING="$LR_MISSING$lr_line "
+done <<<"$LR_OUT"
+expect_eq "live ⊆ open: every live member is an open member" "" "$LR_MISSING"
+expect_eq "live ⊆ open: …and the order is open_runs' own, newest first" \
+  "$(printf '%s\n%s' "$S_NEW" "$S_MID")" "$LR_OUT"
+expect_eq "live ⊆ open: …the 40-day-old plan is open but not live" "yes" \
+  "$(grep -qxF -- "$S_OLD" <<<"$OR_OUT" && echo yes || echo no)"
+
+# --- R10d: a DELIVERED plan is in neither set, however fresh its mtime ---
+#
+# The filter narrows open_runs; it must never reach past it. A closed plan touched one second
+# ago is the case where a filter written against the WALK instead of against the SET would
+# show up as a live run that no gate considers open.
+R="$SANDBOX/r10d"; mkdir -p "$R/.bionic"
+D_OPEN=$(mk_plan "$R" "open.plan.md" "4" "- Step 4: in progress")
+D_SHUT=$(mk_plan "$R" "shut.plan.md" "9" "- Step 9: report record/x.md, delivered: 2026-09-02")
+lr_age "$D_OPEN" 7200
+lr_age "$D_SHUT" 1
+call_open_runs "$R"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: a delivered plan touched a second ago is not OPEN" "no" \
+  "$(case "$OR_OUT" in *"$D_SHUT"*) echo yes ;; *) echo no ;; esac)"
+expect_eq "live_runs: …and therefore not LIVE either, however warm" "no" \
+  "$(case "$LR_OUT" in *"$D_SHUT"*) echo yes ;; *) echo no ;; esac)"
+expect_eq "live_runs: …while the open one beside it IS live" "$D_OPEN" "$LR_OUT"
+
+# --- R10e: no open runs at all -> exit 1, silent (open_runs' own answer, unchanged) ---
+R="$SANDBOX/r10e"; mkdir -p "$R/.bionic"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: no docs tree -> exit 1" 1 "$LR_ST"
+expect_empty "live_runs: …and prints nothing" "$LR_OUT"
+
+# --- R10f: a malformed window is a REFUSAL to widen, not a guess ---
+#
+# `parse_seconds` refuses rather than guesses, and so does this. The safe direction when the
+# window cannot be read is the DEFAULT, because a window of zero would empty the live set and
+# an unbounded one would make `live` mean `open` — both silently.
+R="$SANDBOX/r10f"; mkdir -p "$R/.bionic"
+F_FRESH=$(mk_plan "$R" "fresh.plan.md" "4" "- Step 4: in progress")
+F_STALE=$(mk_plan "$R" "stale.plan.md" "4" "- Step 4: in progress")
+lr_age "$F_FRESH" 3600
+lr_age "$F_STALE" $(( 20 * LR_DAY ))
+printf 'live-window: soon\n' > "$R/.bionic/config.yaml"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: an unreadable window falls back to the 7d default, not to everything" \
+  "$F_FRESH" "$LR_OUT"
+
+# --- R10g: BIONIC_NOW_EPOCH is what "now" means, and the fixtures prove it moves ---
+#
+# Every row above pins the clock. This one moves it: the SAME tree, read from a moment 20
+# days later, has no live run at all — so the env pin is the input the rows depend on and not
+# a constant they ignore.
+rm -f "$R/.bionic/config.yaml"
+call_live_runs "$R" "$LR_NOW"
+expect_eq "live_runs: at LR_NOW the fresh plan is live" "$F_FRESH" "$LR_OUT"
+call_live_runs "$R" "$(( LR_NOW + 20 * LR_DAY ))"
+expect_eq "live_runs: …and 20 days later, on the same tree, nothing is" 1 "$LR_ST"
+expect_empty "live_runs: …with no output" "$LR_OUT"
+# ============================================================
+echo
 echo "=== run-predicate: $PASS/$TOTAL passed ==="
 [ "$FAIL" -eq 0 ] || echo "FAILURES: $FAIL"
 [ "$FAIL" -eq 0 ]
