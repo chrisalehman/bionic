@@ -175,15 +175,17 @@ elif [ "$TOOL_NAME" = "Bash" ]; then
   # that agent's current log mtime and size, all of which the gate re-checks
   # against the live file before it discharges anything.
   #
-  # NO EARLY EXIT ON AN EMPTY MLINES (wave-roster-lifecycle S9, spec AC-15). This
-  # used to `exit 0` here — the cheapest possible test, before any git resolution
-  # or plan walk, for the overwhelming majority of Bash calls that never ran
-  # stop-check.sh. Since S9 this arm also takes a pressure sample on every
-  # engaged Bash call (below, after the engagement check), which is a fact about
-  # THIS call having happened rather than about what it printed — so it must
-  # reach that line even when MLINES is empty. ARM 1 further down still writes
-  # nothing when MLINES is empty (its `<<<"$MLINES"` loop skips the one blank
-  # line an empty here-string produces); only the early exit is gone.
+  # THE EARLY EXIT MOVED, IT DID NOT GO (wave-roster-lifecycle S9, then Step-6
+  # review P-2). It used to `exit 0` right here — the cheapest possible test,
+  # before any git resolution, for the overwhelming majority of Bash calls that
+  # never ran stop-check.sh. S9 needed a pressure sample on every ENGAGED Bash
+  # call, which is a fact about this call having happened rather than about what
+  # it printed, and the engagement switch is below the loader — so the exit had
+  # to move below the sample rather than stay above it. It was deleted instead,
+  # and this hook is PostToolUse on every Bash call: 0.01 s became 0.10 s. The
+  # exit now sits immediately after the sample (search: THE EARLY EXIT,
+  # RESTORED), which is the first line at which the sample has landed and
+  # nothing below it has any work to do for an empty MLINES.
 else
   # TWO SPELLINGS, ONE FACT (AC-10). The dispatch modes name the same field
   # differently: an async task launch returns `tool_response.agentId` (camel),
@@ -404,6 +406,18 @@ engaged_session "$REPO" "$SID" || exit 0
 # hook failure, so its result is discarded and its failure swallowed.
 if [ "$TOOL_NAME" = "Bash" ]; then
   pressure_sample >/dev/null 2>&1 || :
+fi
+
+# ---------- THE EARLY EXIT, RESTORED (Step-6 review P-2) ----------
+#
+# A Bash call that printed no machine line has nothing for any arm below: ARM 1 is the
+# only Bash consumer and its `<<<"$MLINES"` loop writes nothing on an empty value. The
+# sample above has already landed, so this exit costs the ring nothing — and it saves the
+# state-path resolution, the symlink guards and the roster read on the overwhelming
+# majority of Bash calls in a session. Measured on one synthetic PostToolUse Bash payload
+# with an empty MLINES: 0.10 s before, 0.02 s after.
+if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ] && [ -z "$MLINES" ]; then
+  exit 0
 fi
 
 # ---------- THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK (task-engaged-session) --
