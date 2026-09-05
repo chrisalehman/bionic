@@ -6494,8 +6494,15 @@ echo "=== BP — every shell file in the tree parses under the SYSTEM interprete
 # sweep touches no state, spawns no hook and cannot depend on any fixture — it is the
 # cheapest possible whole-tree assertion and the only one in this file that reads the
 # shipped tree rather than a sandbox copy.
+#
+# THE ROSTER (critic K-6). Four directories cover almost everything, but two shipped
+# scripts sit outside all four: `agents-src/render.sh` (not incidental — it writes the
+# version half of AC-26 into `payload/commands/help.md`) and the root `wsl-setup.sh`.
+# Both are named directly rather than adding their parents wholesale, so a stray future
+# `*.sh` dropped elsewhere at the repo root still falls outside the sweep on purpose —
+# widen this list again if that ever needs to change.
 BP_SH="$(cd "$BIONIC_SCRIPTS_DIR" && find hooks payload/scripts payload/hooks tests \
-  -name '*.sh' -type f 2>/dev/null | LC_ALL=C sort)"
+  agents-src/render.sh wsl-setup.sh -name '*.sh' -type f 2>/dev/null | LC_ALL=C sort)"
 expect_eq "the sweep found shell files to check" "yes" \
   "$([ -n "$BP_SH" ] && echo yes || echo no)"
 
