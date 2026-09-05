@@ -616,6 +616,37 @@ _dep_pkg_unversioned() {  # ccstatusline@2.2.29 -> ccstatusline ; @scope/x@1 -> 
   printf '%s%s\n' "$lead" "${rest%%@*}"
 }
 
+# ─── The name-list removal loop, once ────────────────────────────────────────
+#
+# ONE SPLIT, ONE GLOB GUARD, ONE LOOP (epic-21 1.4.4 T7, review-d D-2). Four
+# call sites — setup's two legacy items, remove's two twins — fed the same
+# comma-separated, PAYLOAD-DERIVED name list through this exact shape: split on
+# comma into positional parameters, guard `[ -f ]`, `rm -f`, count. Two of the
+# four wrapped the split in `set -f`; two did not, and an unquoted
+# `set -- $names` is a pathname expansion the instant a file in the CALLER's
+# $PWD happens to match one of the names — demonstrated: a payload shipping a
+# hook literally named `n*.sh` beside the machine owner's own file, with a
+# decoy in $PWD matching that glob, deleted the owner's file and left the
+# payload's own leftover in place, the exact inversion both detectors this
+# feeds exist to prevent. The guard now lives once, here, so all four call
+# sites are consistent by construction instead of by four authors remembering.
+_dep_rm_named_files() {  # <dir> <comma-separated-names> -> echoes the count actually removed
+  local dir="${1:-}" names="${2:-}" name removed=0 ifs_save
+  ifs_save="$IFS"
+  set -f
+  IFS=','
+  # shellcheck disable=SC2086  # the split IS the point, on a list this script's own library built
+  set -- $names
+  IFS="$ifs_save"
+  set +f
+  for name in "$@"; do
+    [ -n "$name" ] || continue
+    [ -f "${dir}/${name}" ] || continue
+    rm -f "${dir}/${name}" 2>/dev/null && removed=$((removed + 1))
+  done
+  echo "$removed"
+}
+
 _dep_have() { command -v "${1:-}" >/dev/null 2>&1; }
 
 # First semver-looking token in a `--version` line. Tools disagree about
@@ -1805,10 +1836,22 @@ remove_dep() {  # <name>
         # made worse by a settings.json this still clears.
         pkg="$(_dep_locator_target "$(dep_field "$name" source_url)")"
         _dep_have npm && npm uninstall -g "$pkg" >/dev/null 2>&1
+        # THE NAME, NOT THE UNION (review-d D-1). `dep_teardown_state` asks
+        # whether ANY of three facts is true — the command names ccstatusline,
+        # OR the config directory exists, OR the package is installed —
+        # because the directory and the package are bionic's to remove even
+        # once the command has moved on. That union is licence to run this
+        # whole arm; it is not licence for what THIS clear does. A `.statusLine`
+        # pointing at the user's own renderer is not bionic's, and must survive
+        # this teardown even when it is reached because of the OTHER two
+        # facts — so the delete is conditional on the one fact that makes it
+        # bionic's, exactly like `_dep_statusline_leftovers`'s own command arm.
         settings="$(_dep_settings_file)"
         if [ -f "$settings" ]; then
           _dep_have jq || return 1
-          _dep_settings_write_jq "$settings" 'del(.statusLine)' || return 1
+          _dep_settings_write_jq "$settings" \
+            'if ((.statusLine.command // "") | test("ccstatusline")) then del(.statusLine) else . end' \
+            || return 1
         fi
         # THE SAME NEVER-LIST remove.sh's `_rm_purge_dir` enforces, its own
         # copy rather than a call across files — this library must stay
