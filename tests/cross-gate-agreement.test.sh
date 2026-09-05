@@ -6292,13 +6292,19 @@ RG_CRIT_ENV="BIONIC_PROBE_FREE_PCT=8 BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1
 # ONE CLEAR READING, WRITTEN BY THE REAL WRITER — not a hand-built ring file. The line's
 # shape is `pressure_sample`'s to own, and a fixture that wrote it by hand would keep passing
 # after the writer changed it.
-rg_seed_clear() {  # the ring, reset to exactly one clear sample
+rg_seed() {  # the ring, reset to exactly one sample under the given probe env — S25
+             # (critic K-4 option 2): `tests/run.sh --dry-run` stopped sampling (a dry
+             # run writes nothing), so a case that needs the RUNNER to read a specific
+             # band must put that reading in the ring directly rather than counting on
+             # the runner's own (now nonexistent) live sample under --dry-run.
+  local env="$1"
   rm -f "$RG_RING"
-  ( eval "export $RG_CLEAR_ENV"
+  ( eval "export $env"
     export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW"
     . "$RG_LIB_RES" >/dev/null 2>&1
     pressure_sample "$RG_CEIL" ) >/dev/null 2>&1
 }
+rg_seed_clear() { rg_seed "$RG_CLEAR_ENV"; }  # the ring, reset to exactly one clear sample
 
 # ---- the fixture world the tick needs ----------------------------------------
 #
@@ -6352,7 +6358,10 @@ expect_eq "a clear machine gives the runner the whole ceiling" "$RG_CEIL" "$RG_R
 expect_eq "…and gives the tick the same number" "$RG_CEIL" "$RG_TICK_CLEAR"
 
 # --- RG.2 …and a CRITICAL machine quarters it for both, identically ------------
-rg_seed_clear; RG_RUN_CRIT=$(rg_runner "$RG_CRIT_ENV")
+# The runner's half is seeded directly with the critical reading (S25: --dry-run only
+# reads the ring now, it does not sample), while the tick still takes its own live
+# sample under the same env — two different mechanisms landing on the same rung.
+rg_seed "$RG_CRIT_ENV"; RG_RUN_CRIT=$(rg_runner "$RG_CRIT_ENV")
 rg_seed_clear; RG_TICK_CRIT=$(rg_tick "$RG_CRIT_ENV")
 expect_eq "a critical machine quarters the runner's width" "2" "$RG_RUN_CRIT"
 expect_eq "…and quarters the tick's rung to the same number" "2" "$RG_TICK_CRIT"
@@ -6384,7 +6393,7 @@ expect_eq "the band-threshold mutation applies (the constant has not moved)" "no
   "$(cmp -s "$RG_LIB_RES" "$RG_MUT/scripts/lib/resources.sh" && echo yes || echo no)"
 
 RG_TREE_RUNNER="$RG_MUT"; RG_TREE_POKER="$RG_MUT"
-rg_seed_clear; RG_RUN_BAND=$(rg_runner "$RG_CRIT_ENV")
+rg_seed "$RG_CRIT_ENV"; RG_RUN_BAND=$(rg_runner "$RG_CRIT_ENV")
 rg_seed_clear; RG_TICK_BAND=$(rg_tick "$RG_CRIT_ENV")
 RG_TREE_RUNNER="$REPO_ROOT"; RG_TREE_POKER="$BIONIC_HOOKS_DIR/.."
 [ -d "$RG_TREE_POKER/scripts/lib" ] || RG_TREE_POKER="$BIONIC_HOOKS_DIR/../payload"
@@ -6401,19 +6410,35 @@ expect_eq "…so one threshold change moved BOTH consumers" "$RG_RUN_BAND" "$RG_
 # `pressure_sample` from either consumer was a change no suite could catch. AC-15 is exactly
 # the obligation that hole hid.
 #
-# THE PROBE. Seed the ring with ONE clear reading through the real writer, then put the
-# sensors in critical. The ring is no longer empty, so `pressure_level` takes no sample of
-# its own — and the two consumers now separate:
-#   · a consumer that SAMPLES appends the critical reading, medians clear+critical to
-#     critical (an even count resolves to the higher band) and reads the QUARTER: 2.
-#   · a consumer that only READS sees one clear sample and reports the whole CEILING: 8.
-# Each consumer is doctored separately, so each removal is caught on its own.
+# THE TICK HALF is unchanged since S9: seed the ring with ONE clear reading through the real
+# writer, then put the sensors in critical. The ring is no longer empty, so `pressure_level`
+# takes no sample of its own — a tick that SAMPLES appends the critical reading, medians
+# clear+critical to critical (an even count resolves to the higher band) and reads the
+# QUARTER: 2; a tick that only READS sees one clear sample and reports the whole CEILING: 8.
+#
+# THE RUNNER HALF IS RE-POINTED (S25, critic K-4 option 2). `tests/run.sh --dry-run`
+# legitimately stopped sampling — a dry run now writes nothing to the ring by design — so
+# the band trick above can no longer separate "removed the sample call" from "working as
+# specified": neither a shipped nor a doctored --dry-run touches the ring, so both would
+# read the same seeded band and this probe would go vacuous for the runner's half. AC-15
+# still binds the runner's ORDINARY (non-dry) path — the one that actually launches
+# suites — so that half of this probe now drives THAT path directly and checks the RING'S
+# OWN LINE COUNT, not a band read back through --dry-run. Both trees below carry no real
+# *.test.sh files, so every queued `bash tests/<label>.test.sh` line fails instantly (no
+# such file) and the run completes in well under a second — nothing here launches the real
+# suite roster, which would recurse into this very file.
 RG_NOSAMP="$SANDBOX/rg-nosample"
-mkdir -p "$RG_NOSAMP/hooks" "$RG_NOSAMP/scripts/lib" "$RG_NOSAMP/tests" "$RG_NOSAMP/payload/scripts/lib"
+mkdir -p "$RG_NOSAMP/hooks" "$RG_NOSAMP/scripts/lib" "$RG_NOSAMP/tests/lib" "$RG_NOSAMP/payload/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$RG_NOSAMP/scripts/lib/" "$RG_NOSAMP/payload/scripts/lib/" 2>/dev/null
 cp "$BIONIC_HOOKS_DIR"/*.sh "$RG_NOSAMP/hooks/" 2>/dev/null
-# the runner with its `pressure_sample` line removed, and nothing else changed
-grep -v '^pressure_sample >/dev/null 2>&1 || :$' "$REPO_ROOT/tests/run.sh" \
+cp "$REPO_ROOT/tests/lib/resolve-roots.sh" "$RG_NOSAMP/tests/lib/resolve-roots.sh"
+# the runner with its `pressure_sample` line removed, and nothing else changed.
+#
+# ANCHORED ON THE CALL'S STABLE TOKENS, NOT ON ITS INDENTATION (critic K-1 — the same
+# lesson the poker's own anchor just below already carries). S25 moved this call inside an
+# `if [ "$DRY_RUN" -eq 0 ]` guard, re-indenting it two spaces; `[[:space:]]*` absorbs that
+# reindent and any future one.
+grep -vE '^[[:space:]]*pressure_sample >/dev/null 2>&1 \|\| :$' "$REPO_ROOT/tests/run.sh" \
   > "$RG_NOSAMP/tests/run.sh"
 # the tick with ITS `pressure_sample` line removed, and nothing else changed.
 #
@@ -6434,25 +6459,49 @@ expect_eq "the tick's sample line was really removed (the anchor has not moved)"
   "$(( $(grep -c 'pressure_sample' "$SPO") \
        - $(grep -c 'pressure_sample' "$RG_NOSAMP/hooks/session-poker.sh") ))"
 
-# the shipped consumers, over the SEEDED ring — each samples, so each reads the quarter
-rg_seed_clear; RG_RUN_SEEDED=$(rg_runner "$RG_CRIT_ENV")
-rg_seed_clear; RG_TICK_SEEDED=$(rg_tick "$RG_CRIT_ENV")
-expect_eq "over a seeded ring the shipped runner still reads the critical quarter" "2" \
-  "$RG_RUN_SEEDED"
-expect_eq "…and so does the shipped tick" "2" "$RG_TICK_SEEDED"
+# THE SHIPPED CONTROL TREE for the runner half: the real tests/run.sh, byte for byte, in a
+# scratch tree with no real suite files — so "shipped" and "no-sample" differ ONLY in the
+# one line the grep above removed, never in which suites they would (fail to) run.
+RG_SHIPPED="$SANDBOX/rg-shipped"
+mkdir -p "$RG_SHIPPED/tests/lib" "$RG_SHIPPED/payload/scripts/lib"
+cp "$LIB_DIR_SRC"/*.sh "$RG_SHIPPED/payload/scripts/lib/" 2>/dev/null
+cp "$REPO_ROOT/tests/lib/resolve-roots.sh" "$RG_SHIPPED/tests/lib/resolve-roots.sh"
+cp "$REPO_ROOT/tests/run.sh" "$RG_SHIPPED/tests/run.sh"
+expect_eq "the shipped control tree carries the runner byte for byte (not vacuous)" "yes" \
+  "$(cmp -s "$REPO_ROOT/tests/run.sh" "$RG_SHIPPED/tests/run.sh" && echo yes || echo no)"
 
-RG_TREE_RUNNER="$RG_NOSAMP"
-rg_seed_clear; RG_RUN_NOSAMP=$(rg_runner "$RG_CRIT_ENV")
-RG_TREE_RUNNER="$REPO_ROOT"
+# rg_runner_samples <tree> -> "yes" if <tree>/tests/run.sh's ORDINARY (non-dry) path
+# appends exactly one line to a ring seeded with one clear sample; "no" otherwise.
+rg_runner_samples() {
+  local tree="$1" before after
+  rg_seed_clear
+  before="$(wc -l < "$RG_RING" | tr -d ' ')"
+  ( eval "export $RG_CRIT_ENV"
+    cd "$tree" &&
+    export BIONIC_PRESSURE_RING="$RG_RING" BIONIC_NOW_EPOCH="$RG_NOW" \
+           BIONIC_TEST_JOBS_CEILING="$RG_CEIL"
+    bash tests/run.sh >/dev/null 2>&1 )
+  after="$(wc -l < "$RG_RING" | tr -d ' ')"
+  [ "$after" -eq "$((before + 1))" ] && echo yes || echo no
+}
+
+RG_RUN_SHIPPED_SAMPLES=$(rg_runner_samples "$RG_SHIPPED")
+RG_RUN_NOSAMP_SAMPLES=$(rg_runner_samples "$RG_NOSAMP")
+expect_eq "the shipped runner's ordinary path samples once (AC-15)" "yes" \
+  "$RG_RUN_SHIPPED_SAMPLES"
+expect_eq "a runner that stopped sampling leaves the ring untouched: the removal is CAUGHT" \
+  "no" "$RG_RUN_NOSAMP_SAMPLES"
+
+# the shipped tick, over the SEEDED ring — it samples, so it reads the quarter
+rg_seed_clear; RG_TICK_SEEDED=$(rg_tick "$RG_CRIT_ENV")
+expect_eq "over a seeded ring the shipped tick still reads the critical quarter" "2" \
+  "$RG_TICK_SEEDED"
+
 RG_TREE_POKER="$RG_NOSAMP"
 rg_seed_clear; RG_TICK_NOSAMP=$(rg_tick "$RG_CRIT_ENV")
 RG_TREE_POKER="$BIONIC_HOOKS_DIR/.."
 [ -d "$RG_TREE_POKER/scripts/lib" ] || RG_TREE_POKER="$BIONIC_HOOKS_DIR/../payload"
 
-expect_eq "a runner that stopped sampling reports the WHOLE ceiling on a critical machine" \
-  "$RG_CEIL" "$RG_RUN_NOSAMP"
-expect_eq "…which is not what the shipped runner reports: the removal is CAUGHT" "no" \
-  "$([ "$RG_RUN_NOSAMP" = "$RG_RUN_SEEDED" ] && echo yes || echo no)"
 expect_eq "a tick that stopped sampling reports the whole ceiling too" \
   "$RG_CEIL" "$RG_TICK_NOSAMP"
 expect_eq "…which is not what the shipped tick reports: that removal is CAUGHT as well" "no" \
