@@ -262,6 +262,15 @@ CUR="$(session_id "$PAYLOAD_SID")" || CUR=""
 RUNS="$(open_runs "$ROOT")" || RUNS=""
 N=$(printf '%s\n' "$RUNS" | grep -c '.')
 
+# LIVE VS OPEN (spec AC-1/AC-3, S3). `live_runs` is a FILTER over `open_runs` — see
+# scripts/lib/run.sh — so the header above still names the true OPEN count (`$N`,
+# unchanged) while the listing itself shows only the LIVE subset; the quiet remainder is
+# reported as one count, not a second listing, because a bystander acts on a live plan by
+# name and on a quiet one only by knowing it exists at all.
+LIVE="$(live_runs "$ROOT")" || LIVE=""
+LIVE_N=$(printf '%s\n' "$LIVE" | grep -c '.')
+QUIET=$((N - LIVE_N))
+
 # ONE RENDERER FOR BOTH LISTINGS (review duplication D8b, S10b). The not-engaged block and
 # the engaged-but-unbound block below print the same set for the same reason, and they were
 # two copies of one `while read` loop inside one file — the shape that drifts.
@@ -306,26 +315,55 @@ EOF
   return 0
 }
 
+# THE QUIET-COUNT LINE (AC-3). Printed right after whichever listing just ran, and only
+# when the open/live difference is non-zero — a zero-quiet fixture must stay silent on
+# this line (anti-vacuity, §13c of the suite).
+print_quiet_line() {
+  [ "$QUIET" -gt 0 ] || return 0
+  printf 'bionic: %s quiet open run(s) — bind names any of them\n' "$QUIET"
+}
+
+# THE BOUND-RUN LINE (AC-21). `session_run` already resolved "this session's binding
+# is to an open plan"; this only formats it. The plan path comes off the marker
+# `session_run` read, not off `$RUNS`/`$LIVE`, because a bound plan is named by the
+# ONE binding fact regardless of how many other runs are open. `current:` is read the
+# same way the poker's own step display does — first match, digits and `T` only, so a
+# multi-digit or ISO-stamped value still comes through whole.
+print_bound_line() {  # <verdict "bound-open <plan>">
+  local verdict="$1" bplan step relplan
+  bplan="${verdict#bound-open }"
+  step="$(grep -m1 '^current:' "$bplan" 2>/dev/null | tr -dc '0-9T')"
+  if [ -n "$DOCS" ]; then relplan="${bplan#"$DOCS"/}"; else relplan="$bplan"; fi
+  printf 'bionic: bound to %s — current: %s\n' "$relplan" "$step"
+}
+
 if [ "$N" -eq 1 ]; then
   PLAN="$RUNS"
   if ! engaged_session "$ROOT" "$CUR"; then
     printf 'bionic: an open run exists here (%s) — invoke /bionic:canonical-sdlc to engage it\n' "$PLAN"
     exit 0
+  else
+    VERDICT="$(session_run "$ROOT" "$CUR" 2>/dev/null)"
+    case "$VERDICT" in
+      bound-open\ *) print_bound_line "$VERDICT" ;;
+    esac
   fi
 elif [ "$N" -ge 2 ]; then
   if ! engaged_session "$ROOT" "$CUR"; then
     printf 'bionic: %s open runs exist here — invoke /bionic:canonical-sdlc, then bind the one you mean with: bash %s/hooks/session-poker.sh bind <plan>\n' \
       "$N" "$HOOK_ROOT"
-    print_runs "$RUNS"
+    print_runs "$LIVE"
+    print_quiet_line
     exit 0
   else
     VERDICT="$(session_run "$ROOT" "$CUR" 2>/dev/null)"
     case "$VERDICT" in
-      bound-open\ *) : ;;
+      bound-open\ *) print_bound_line "$VERDICT" ;;
       *)
         printf 'bionic: %s open runs exist here and this session is not bound to one — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
           "$N" "$HOOK_ROOT"
-        print_runs "$RUNS"
+        print_runs "$LIVE"
+        print_quiet_line
         ;;
     esac
   fi
