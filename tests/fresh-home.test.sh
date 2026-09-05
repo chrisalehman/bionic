@@ -605,8 +605,8 @@ run_payload() {  # <script> [args...] — stdin carries the answers
     BIONIC_TEST_BIN="$BIN" \
     BIONIC_TEST_SHIMSRC="$SHIMSRC" \
     BIONIC_TEST_PKG_MAP="$PKG_MAP" \
-    BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-    CLAUDE_PLUGIN_ROOT="$PAYLOAD" \
+    BIONIC_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
+    CLAUDE_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     BIONIC_PLAYWRIGHT_CACHE="${HOME_FIX}/.cache/ms-playwright" \
     BIONIC_DOCTOR_PROBE_SECONDS=5 \
     bash "$script" "$@" 2>&1
@@ -1317,6 +1317,85 @@ expect_eq "remove: the user's own shell rc survives the teardown" "yes" \
 expect_eq "remove: ~/.claude/CLAUDE.md is still not a file this plugin touches (AC-7)" \
   "no" "$(path_exists "$GLOBAL_MEMORY")"
 
+
+# ---------------------------------------------------------------------------
+# Group 6 — the statusLine WRITE itself: what it preserves, and what it records
+# (1.4.4 T5; review-a C-3, review-b N-1).
+#
+# TWO CLAIMS ABOUT ONE jq LINE. `_dep_install_statusline` sets `.statusLine` in a
+# settings.json the USER owns, and both defects live in that one assignment:
+# replacing the whole object throws away any sibling key the user put beside
+# `command`, and writing the locator target verbatim records `ccstatusline@2.2.29`
+# — not an executable — the moment anyone adopts the pin the deps.sh docblock
+# holds in reserve. Neither is reachable from the Group 2-5 sequence: that fixture
+# starts with no settings.json and runs the unpinned locator, so both defects are
+# invisible to it and stayed invisible through two reviews.
+#
+# THESE GROUPS OWN THEIR OWN FIXTURE. Each calls `fresh_home` first — which also
+# clears the npm shim's global state and the call log — so the row is genuinely
+# pending and setup genuinely runs the install arm rather than reporting
+# "present" and writing nothing. Nothing after this group reads the fixture.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 6a: the statusLine write MERGES into the user's object ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest",
+    "padding": 0
+  }
+}
+JSON
+expect_eq "6a precondition: the planted settings.json carries a sibling field under .statusLine" \
+  "0" "$(jqf '.statusLine.padding')"
+
+G6A_OUT="$TMP/setup-statusline-merge.txt"
+printf 'y\ny\ny\n' | run_payload "$SETUP_SH" --only tool:ccstatusline > "$G6A_OUT" 2>&1
+
+# The anti-vacuity control: if the item had reported "present" and written nothing, the
+# padding below would survive for the wrong reason entirely.
+expect_eq "6a: setup rewrote the npx command to the installed binary" \
+  "ccstatusline" "$(jqf '.statusLine.command // ""')"
+expect_eq "6a: …and the user's own field beside it is still there" \
+  "0" "$(jqf '.statusLine.padding')"
+expect_eq "6a: …and so is the rest of the file" \
+  "opus" "$(jqf '.model // ""')"
+
+echo ""
+echo "=== Group 6b: a PINNED locator still records an executable name ==="
+
+# The pin the deps.sh docblock argues against adopting today, adopted here so the write can
+# be measured under it. A copy of the whole payload — setup.sh refuses to run without its
+# libraries beside it — with one locator changed and nothing else.
+fresh_home
+# The claude home exists on any machine that has the CLI, and bionic is a plugin of it —
+# `_dep_install_statusline` writes settings.json into that directory and does not create it,
+# so a fixture without it measures a machine shape that cannot happen.
+mkdir -p "${HOME_FIX}/.claude"
+G6B_PAYLOAD="$TMP/payload-pinned"
+rm -rf "$G6B_PAYLOAD"
+cp -R "$PAYLOAD" "$G6B_PAYLOAD"
+LC_ALL=C sed 's#npm:ccstatusline|#npm:ccstatusline@2.2.29|#' \
+  "$PAYLOAD/scripts/lib/deps.sh" > "$G6B_PAYLOAD/scripts/lib/deps.sh"
+expect_eq "6b: the pinned payload differs from the shipped one by exactly the locator" \
+  "1" "$(diff "$PAYLOAD/scripts/lib/deps.sh" "$G6B_PAYLOAD/scripts/lib/deps.sh" | grep -c '^< ')"
+
+G6B_OUT="$TMP/setup-statusline-pinned.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G6B_PAYLOAD" \
+  run_payload "$G6B_PAYLOAD/scripts/setup.sh" --only tool:ccstatusline > "$G6B_OUT" 2>&1
+
+# The pin reached the installer — without this the row below could pass on a run where the
+# locator change never took effect at all.
+expect_match "6b: the install ran against the pinned package" \
+  '*npm install -g ccstatusline@2.2.29*' "$(cat "$CALLS")"
+expect_eq "6b: …and the command recorded in settings.json is the executable, not the pin" \
+  "ccstatusline" "$(jqf '.statusLine.command // ""')"
 
 # ---------------------------------------------------------------------------
 # Results

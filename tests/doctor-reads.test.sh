@@ -257,12 +257,40 @@ cat > "${CHOME}/settings.json" <<'JSON'
 }
 JSON
 
+# THE WHOLE PRE-1.4.4 MACHINE, NOT HALF OF IT (1.4.4 T5). `_dep_check_statusline` reads two
+# halves — the recorded command and the layout file under ~/.config/ccstatusline — and a
+# fixture with only the first would report the row absent for the LAYOUT's sake, which is a
+# different fact from the one this section is about. Copying the shipped layout in makes the
+# recorded command the only thing wrong on this machine, which is the state every machine
+# that ran setup before 1.4.4 is actually in.
+mkdir -p "${TMP}/.config/ccstatusline"
+cp "${PAYLOAD}/ccstatusline/settings.json" "${TMP}/.config/ccstatusline/settings.json"
+
 OUT6D="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
 
 expect_match "12d1: the npx statusLine command is flagged as a defect" \
   "*statusLine command*npx*" "$OUT6D"
+# THE HINT IS A PROMISE, AND IT IS KEPT NOW (1.4.4 T5, review-b F-1). This row used to pin a
+# false promise: `_dep_check_statusline` accepted the npx string as proof the dependency was
+# present, so `tool:ccstatusline` was never pending and the setup run doctor names here
+# reported "nothing left to do" with the ✗ still on the screen. The presence check rejects
+# the npx form now, which is what puts an item behind the hint —
+# tests/cross-gate-agreement.test.sh §DS.2 is the row that proves setup actually offers it.
 expect_match "12d2: and the row names re-running setup" \
   "*statusLine command*npx*/bionic:setup*" "$OUT6D"
+
+# ONE MACHINE, ONE ANSWER (1.4.4 T5, review-a C-4). Doctor's THIRD PARTY table and its
+# ENVIRONMENT table are two renderings of the same machine, and on this fixture they used to
+# contradict each other seventeen lines apart: `✓ ccstatusline … command set, layout file in
+# place` above, `✗ statusLine command … still uses npx` below. A reader cannot act on a
+# report that says the thing is fine and broken at once.
+ROW6D="$(printf '%s\n' "$OUT6D" | grep -E '^  . +ccstatusline ' | head -1)"
+expect_true "12d4: doctor renders a THIRD PARTY row for ccstatusline (the two rows below are not vacuous)" \
+  test -n "$ROW6D"
+expect_no_match "12d5: the THIRD PARTY row does not call the npx machine's status line healthy" \
+  "*command set, layout file in place*" "$ROW6D"
+expect_match "12d6: it agrees with the ENVIRONMENT row and sends the reader to the same place" \
+  "*not installed → /bionic:setup*" "$ROW6D"
 
 # THE FIXED FORM MUST NOT BE FLAGGED — a bare binary name never blocks on the
 # network, so this is not a defect and the row must stay silent (format rule 4).
