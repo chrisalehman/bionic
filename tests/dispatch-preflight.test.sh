@@ -3152,6 +3152,67 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-s
 expect_status "r22kg the SAME claimant, now idle, releases its suite allowance" "0" "$GATE_ST"
 expect_absent "…no suites refusal" "suites:" "$GATE_ERR"
 
+# (g) FAIL-CLOSED ON AN UNKNOWN STATUS WORD (S19, Step-5 auditor F-13). S16 counted a row
+# open only on the exact word `running`, which made every OTHER word — a renamed status, a
+# third one the harness starts printing — read as CLOSED and hand out a writer slot. That is
+# fail-OPEN, and it sat inside the same function whose ambiguity arm (c) is deliberately
+# fail-CLOSED. The rule is now `open unless the harness said idle`, owned by
+# `live_row_open` in payload/scripts/lib/agents.sh, and these two arms are the inversion.
+#
+# `starting` is deliberately a word the measured corpus does NOT contain: 26 captured
+# answers, 44 teammate rows, two words only — 33 `running`, 11 `idle`. The predicate must
+# not depend on that staying true.
+REPO=$(make_repo r22kh yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1"
+R22KH_T="$SANDBOX/.r22kh.jsonl"
+mk_transcript "$R22KH_T" fresh "r1:starting"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KH_T")"
+expect_status "r22kh an UNKNOWN third status word still counts OPEN -> REFUSED" "2" "$GATE_ST"
+expect_contains "…open=1, the slot kept on a reading nobody has seen before" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_ERR"
+expect_contains "r22kh meta: the answer body really says starting, not running" \
+  "r1 [000000]  ·  bionic:implementor  ·  starting" "$(cat "$R22KH_T")"
+
+# THE DISCRIMINATING PAIR for (g), on one roster and one budget: the SAME row read `idle`
+# is let through. Without it, r22kh would pass against a gate that had gone back to
+# counting presence — and presence is exactly what S16 removed.
+mk_transcript "$R22KH_T" fresh "r1:idle"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KH_T")"
+expect_status "…while the SAME row read idle is still not open -> allowed" "0" "$GATE_ST"
+expect_absent "…and prints no writers refusal" "writers:" "$GATE_ERR"
+
+# (h) THE SUITE ALLOWANCE RIDES THE SAME PREDICATE, on the unknown word too. r22kg proved
+# `claims=` follows the running/idle split; this proves it follows the ONE predicate rather
+# than a second copy of the word `running` living in the claim arm.
+REPO=$(make_repo r22ki yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=1 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "r1" "live-agents"
+R22KI_T="$SANDBOX/.r22ki.jsonl"
+mk_transcript "$R22KI_T" fresh "r1:starting"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KI_T")"
+expect_status "r22ki an unknown-status claimant still HOLDS its suite allowance" "2" "$GATE_ST"
+expect_contains "…naming the claimed count" "suites: budget=1 claimed=1 with-this-dispatch=2" "$GATE_ERR"
+mk_transcript "$R22KI_T" fresh "r1:idle"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KI_T")"
+expect_status "…and the SAME claimant read idle releases it" "0" "$GATE_ST"
+expect_absent "…no suites refusal" "suites:" "$GATE_ERR"
+
+# (i) THE PREDICATE HAS ONE OWNER, and this gate is not a second copy of it. The inline
+# `status = running` test S16 wrote lived here; S19 deleted it. A grep is the honest
+# observable for "the rule is not spelled twice", and the anti-vacuity arm below proves the
+# grep can see the string it is looking for.
+expect_eq "the hook carries no inline status-word predicate of its own" "0" \
+  "$(/usr/bin/grep -c '"\$la_st" = "running"' "$GATE")"
+expect_eq "…and asks the library's one predicate by name instead" "1" \
+  "$( [ "$(/usr/bin/grep -c 'live_row_open' "$GATE")" -ge 1 ] && echo 1 || echo 0 )"
+S22K_MUT="$SANDBOX/.s22k-inline-mut.sh"
+{ printf '# doctored: %s\n' '[ "$la_st" = "running" ] && row_open=yes'; cat "$GATE"; } > "$S22K_MUT"
+expect_eq "…and the grep really can see that string when it is there (not vacuous)" "1" \
+  "$(/usr/bin/grep -c '"\$la_st" = "running"' "$S22K_MUT")"
+
 # ============================================ S23: THE ORCHESTRATOR-IN-WORKTREE ARM
 # (spec AC-14; handoff 2.5.)
 #

@@ -775,18 +775,23 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # "Open" no longer asks the roster whether a row was ever closed — it asks THIS
   # TURN'S ListAgents answer whether the row's agent is STILL WORKING. A dispatch row
   # starts life `status=intended` and never transitions on this file (D0: nothing
-  # here owns a liveness fact, so nothing here writes one); `live_agents_status` is a
-  # view of the one reader of the harness's own recorded answer
+  # here owns a liveness fact, so nothing here writes one); `live_row_open` is one
+  # question asked of the one reader of the harness's own recorded answer
   # (payload/scripts/lib/agents.sh). `landing-swept/v1` is NOT consulted any more — a
   # row can go un-swept forever and still close the moment its agent stops working.
   #
-  # PRESENCE IS NOT THE PREDICATE; `running` IS (spec R2, AC-27). R2 names two ways an
-  # agent goes — "delivered and stopped, or finished and never stopped" — and the
-  # harness KEEPS LISTING the second kind, with status `idle`, because it stays
-  # addressable: a SendMessage would resume it. A budget that counted on presence would
-  # hold a writer slot for an agent that finished an hour ago until somebody remembered
-  # to stop it, which is the stuck-slot defect this wall was built to end. So a row
-  # counts OPEN only while its name is present with status `running`.
+  # PRESENCE IS NOT THE PREDICATE, AND NEITHER IS THE WORD `running` (spec R2, AC-27;
+  # S19). R2 names two ways an agent goes — "delivered and stopped, or finished and never
+  # stopped" — and the harness KEEPS LISTING the second kind, with status `idle`, because
+  # it stays addressable: a SendMessage would resume it. A budget that counted on presence
+  # would hold a writer slot for an agent that finished an hour ago until somebody
+  # remembered to stop it, which is the stuck-slot defect this wall was built to end.
+  #
+  # S16 wrote the cure as "open iff `running`", and that overshot: an unrecognised status
+  # word then read as CLOSED and freed a slot, which is the fail-OPEN direction. The rule
+  # is now OPEN UNLESS THE HARNESS SAID `idle` — one measured word against everything
+  # else — and it lives in `live_row_open` rather than here, because the Patrol tick asks
+  # the same question and two spellings of it are two answers.
   #
   # THE STOP GUARD DELIBERATELY DOES NOT FOLLOW THIS. It resolves on PRESENCE
   # (`live_agents_has`), because an idle agent is exactly the one a stop is for. Both
@@ -800,12 +805,14 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # path; the ledger is the artifact this gate already owns. A claim only spends a
   # suite while its row is OPEN — a finished agent's old claim costs nothing.
   #
-  # AMBIGUOUS COUNTS AS OPEN (exit 2, the name present more than once): the safe
+  # AMBIGUOUS COUNTS AS OPEN (the name present more than once) — folded into the
+  # predicate's own exit 0, so this function never sees it as a separate case. The safe
   # direction is to spend a slot on a name that MIGHT still be working rather than hand
   # out budget on a reading the reader itself could not resolve (rule
-  # fail-closed-constants). Note the asymmetry with the `running` test above and that it
-  # is deliberate: an UNRESOLVABLE row is a reading nobody could make, while an `idle`
-  # row is a reading the harness made and this wall believes.
+  # fail-closed-constants). It is the same direction the unknown-status arm takes, for
+  # the same reason: an UNRESOLVABLE row and an UNRECOGNISED status are both readings
+  # nobody has taken, while an `idle` row is a reading the harness made and this wall
+  # believes.
   #
   # ON A STALE OR MISSING ANSWER (exit 3/4) this function refuses to answer at all —
   # printing `<state> <age>` instead of `<open> <claimed>` and returning that same
@@ -817,7 +824,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
                             #   or "<stale|none> <age|none>" (exit 3/4, not fresh)
     local f="$1" transcript="$2" line nm claims seen open=0 claimed=0
-    local la_all la_out la_st la_rc la_rest la_state la_age row_open
+    local la_out la_rc la_rest la_state la_age
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -827,28 +834,25 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       case "$seen" in *"|${nm}|"*) continue ;; esac
       seen="${seen}${nm}|"
 
+      # THE PREDICATE IS NOT SPELLED HERE (S19, auditor F-13). It was: S16 wrote
+      # `status = running` inline, which read every OTHER word — a renamed status, a
+      # third one — as CLOSED and handed out a slot, fail-OPEN inside the same function
+      # whose ambiguity arm below deliberately spends one. `live_row_open`
+      # (payload/scripts/lib/agents.sh) owns the rule now, inverted to fail closed: a row
+      # is open unless the harness said `idle`. The Patrol tick asks the SAME function,
+      # which is what stops the wall and the tick from disagreeing about one row.
+      #
       # The reader's own stderr passes through here unchanged — one line,
-      # `live-agents: <state> age=<n|none>` — captured rather than left to leak so
-      # the STALE/NONE case below can hand its pieces to the caller verbatim. Its
-      # STDOUT, on the `running`/`idle` path, is the status word. Both arrive in one
-      # capture and are told apart by the contract line's own prefix rather than by
-      # the order they were written in, so nothing here depends on interleaving.
+      # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the
+      # STALE/NONE case below can hand its pieces to the caller verbatim. The predicate
+      # prints nothing on stdout, so this capture is that line and nothing else.
       la_rc=0
-      la_all=$( { live_agents_status "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
-      la_out=$(printf '%s\n' "$la_all" | sed -n 's/^\(live-agents: .*\)$/\1/p' | head -1) || la_out=""
-      la_st=$(printf '%s\n' "$la_all" | sed -n '/^live-agents: /!p' | head -1) || la_st=""
+      la_out=$( { live_row_open "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
       case "$la_rc" in
-        0|2)
-          # Exit 0 is one row and `la_st` is its status: a writer only while `running`.
-          # Exit 2 is unresolvable and always open (see AMBIGUOUS above).
-          row_open=no
-          [ "$la_rc" -eq 2 ] && row_open=yes
-          [ "$la_rc" -eq 0 ] && [ "$la_st" = "running" ] && row_open=yes
-          if [ "$row_open" = "yes" ]; then
-            open=$(( open + 1 ))
-            claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
-            [ -n "$claims" ] && claimed=$(( claimed + 1 ))
-          fi
+        0)
+          open=$(( open + 1 ))
+          claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
+          [ -n "$claims" ] && claimed=$(( claimed + 1 ))
           ;;
         1) : ;;
         3|4)

@@ -853,6 +853,142 @@ expect_eq "set -e caller: live_agents_status STALE -> 3" "3" "$SERC"
 status_errexit_probe "$T_GARBAGE" "research-code-map"
 expect_eq "set -e caller: live_agents_status unparseable -> 4" "4" "$SERC"
 
+# ------------------------------------------------------------
+# §P.6 — `live_row_open`: THE ONE ROW-OPENNESS PREDICATE, and it FAILS CLOSED (S19).
+#
+# THE DEFECT THIS SECTION IS WRITTEN AGAINST (Step-5 auditor, F-13). S16 put the openness
+# rule inline in hooks/dispatch-preflight.sh as `status = running`, so a status word the
+# harness has never printed here — a renamed one, a third one — read as NOT open and
+# silently freed a writer slot. That is fail-OPEN, and it sits inside the same function
+# whose ambiguity arm is deliberately fail-CLOSED. The rule is inverted here and given one
+# owner: a row is open unless the harness said `idle`.
+#
+# THE MEASURED CORPUS the rule rests on: 26 real ListAgents answers captured from this
+# project's own orchestrator session carry 44 teammate rows, and exactly two status words —
+# 33 `running`, 11 `idle` (auditor pass 2, Level 1). `idle` is therefore the ONE word this
+# predicate is entitled to read as closed; everything else is a reading nobody has seen,
+# and spending a slot on it beats handing one out.
+#
+#   live_row_open <transcript.jsonl> <name>
+#       exit 0  OPEN     — present exactly once with a status that is NOT `idle`,
+#                          OR present more than once (ambiguous, unresolvable)
+#       exit 1  NOT OPEN — absent, or present exactly once with status `idle`
+#       exit 3  STALE    — propagated verbatim, so callers refuse the same way
+#       exit 4  NONE     — propagated verbatim
+#       stderr  live_agents' one contract line, passed through unchanged
+# ------------------------------------------------------------
+
+call_live_row_open() {  # <transcript> <name> -> ROUT, RST, RERR
+  ROUT="$(bash -c 'set -u; . "$1"; live_row_open "$2" "$3"' _ "$LIB" "$1" "$2" 2>"$SANDBOX/.rerr")"
+  RST=$?
+  RERR="$(cat "$SANDBOX/.rerr" 2>/dev/null)"
+}
+
+DEFS_R="$(bash -c 'set -u; . "$1"; type -t live_row_open' _ "$LIB" 2>/dev/null)"
+expect_eq "defines live_row_open as a function" "function" "$DEFS_R"
+
+# --- the two words the corpus actually carries, off the ONE real idle answer ---
+call_live_row_open "$T_IDLE" "s6-stop-resolution"
+expect_eq "live_row_open: the finished-and-unstopped teammate (idle) is NOT open" "1" "$RST"
+call_live_row_open "$T_IDLE" "s5-dispatch-budget"
+expect_eq "live_row_open: its still-working sibling (running) IS open" "0" "$RST"
+expect_empty "…and the predicate says so by exit code alone, printing nothing" "$ROUT"
+
+# ANTI-VACUITY. Both rows above come off ONE answer and answer DIFFERENTLY, so a predicate
+# that hard-coded either direction fails one of them.
+
+# --- THE FAIL-CLOSED ARM: a third status word keeps the slot ------------------
+#
+# `starting` is not a word this harness has been observed to print. That is the point: the
+# rule must not depend on the corpus staying two-valued. A renamed or added status reads as
+# open — the same direction the ambiguity arm takes, for the same reason.
+T_THIRD="$SANDBOX/third-status.jsonl"
+BODY_THIRD="$SELFLINE
+
+Teammates (2):
+  s6-stop-resolution [864238]  ·  bionic:senior-implementor  ·  starting  ·  started 1h ago
+  s5-dispatch-budget [d34f18]  ·  bionic:implementor  ·  idle  ·  started 34m ago
+
+$PEERS"
+{
+  entry_prompt      "2026-09-05T03:07:30.000Z" "land S6"
+  entry_tool_use    "2026-09-05T03:07:40.000Z" "ListAgents" "toolu_01Amv2QjVrsFDp5uVfKEowty"
+  entry_tool_result "2026-09-05T03:07:41.801Z" "toolu_01Amv2QjVrsFDp5uVfKEowty" "$BODY_THIRD"
+} > "$T_THIRD"
+
+# The meta-row first: the fixture really does carry a third word, and the reader really
+# does hand it out. Without it, the exit code below would pass against a parser that had
+# dropped the status entirely.
+call_live_agents_status "$T_THIRD" "s6-stop-resolution"
+expect_eq "meta: the reader hands out the unknown status word verbatim" "starting" "$SOUT"
+
+call_live_row_open "$T_THIRD" "s6-stop-resolution"
+expect_eq "live_row_open: an UNKNOWN third status word keeps the slot — fail-closed" "0" "$RST"
+# …and the same answer's `idle` row still closes, so the arm above is not "everything is
+# open now": one fixture, two names, opposite verdicts.
+call_live_row_open "$T_THIRD" "s5-dispatch-budget"
+expect_eq "…while the idle row on that SAME answer is still not open" "1" "$RST"
+
+# --- absence, ambiguity, and the two unreadable states ------------------------
+call_live_row_open "$T_IDLE" "s1-run-library"
+expect_eq "live_row_open: a name the answer does not carry is NOT open" "1" "$RST"
+
+call_live_row_open "$T_IDLE" ""
+expect_eq "live_row_open: an empty name is NOT open" "1" "$RST"
+
+call_live_row_open "$T_DUP" "research-code-map"
+expect_eq "live_row_open: a name listed TWICE is unresolvable and stays OPEN" "0" "$RST"
+
+call_live_row_open "$T_STALE" "research-code-map"
+expect_eq "live_row_open: STALE propagates 3 verbatim, so callers refuse the same way" "3" "$RST"
+
+call_live_row_open "$T_NONE" "research-code-map"
+expect_eq "live_row_open: NONE propagates 4" "4" "$RST"
+
+call_live_row_open "$T_GARBAGE" "research-code-map"
+expect_eq "live_row_open: an unparseable body propagates 4" "4" "$RST"
+
+expect_match "live_row_open passes the one contract line through unchanged" "$RERR" \
+  '^live-agents: none age=none$'
+
+# --- the predicate is a VIEW of the same parse, not a second reading ----------
+#
+# For every name on one fresh answer, `live_row_open` agrees with `live_agents_status`
+# about the unreadable/absent codes and differs ONLY where the status word decides.
+ROPEN_DISAGREE=""
+for _n in s6-stop-resolution s5-dispatch-budget s1-run-library; do
+  call_live_agents_status "$T_IDLE" "$_n"
+  call_live_row_open "$T_IDLE" "$_n"
+  case "$SST:$SOUT" in
+    0:idle) [ "$RST" = "1" ] || ROPEN_DISAGREE="${ROPEN_DISAGREE}${_n}(idle->$RST) " ;;
+    0:*)    [ "$RST" = "0" ] || ROPEN_DISAGREE="${ROPEN_DISAGREE}${_n}(live->$RST) " ;;
+    1:*)    [ "$RST" = "1" ] || ROPEN_DISAGREE="${ROPEN_DISAGREE}${_n}(absent->$RST) " ;;
+  esac
+done
+expect_empty "live_row_open is derivable from live_agents_status for every name" "$ROPEN_DISAGREE"
+
+# --- §P.6e — errexit, for the same reason §N and §P.5 exist -------------------
+row_open_errexit_probe() {  # <transcript> <name> -> RERC
+  bash -c '
+    set -euo pipefail
+    . "$1"
+    live_row_open "$2" "$3"
+  ' _ "$LIB" "$1" "$2" >/dev/null 2>&1
+  RERC=$?
+}
+row_open_errexit_probe "$T_IDLE" "s5-dispatch-budget"
+expect_eq "set -e caller: live_row_open running -> 0" "0" "$RERC"
+row_open_errexit_probe "$T_IDLE" "s6-stop-resolution"
+expect_eq "set -e caller: live_row_open idle -> 1" "1" "$RERC"
+row_open_errexit_probe "$T_THIRD" "s6-stop-resolution"
+expect_eq "set -e caller: live_row_open unknown status -> 0" "0" "$RERC"
+row_open_errexit_probe "$T_DUP" "research-code-map"
+expect_eq "set -e caller: live_row_open ambiguous -> 0" "0" "$RERC"
+row_open_errexit_probe "$T_STALE" "research-code-map"
+expect_eq "set -e caller: live_row_open STALE -> 3" "3" "$RERC"
+row_open_errexit_probe "$T_GARBAGE" "research-code-map"
+expect_eq "set -e caller: live_row_open unparseable -> 4" "4" "$RERC"
+
 # ============================================================
 echo
 echo "=== live-agents: $PASS/$TOTAL passed ==="

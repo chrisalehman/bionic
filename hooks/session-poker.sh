@@ -153,7 +153,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -289,6 +289,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/patrol.sh"
 . "$BIONIC_LIB/resources.sh"
 . "$BIONIC_LIB/worktree.sh"
+. "$BIONIC_LIB/agents.sh"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
@@ -2244,6 +2245,10 @@ EOF
     fi
 
     TOTAL=0; OPEN=0; NOTIFY_ROWS=""; NOTIFY_DETAIL=""
+    # The names of the rows the verdict leaves open, kept so the live set can trim them
+    # AFTER this walk rather than inside it: one transcript resolution per tick, not one
+    # per row, and the roster count survives as its own number (S19).
+    OPEN_NAMES=""
     while IFS= read -r LINE; do
       case "$LINE" in "landing-verdict/v1|"*) : ;; *) continue ;; esac
       TOTAL=$((TOTAL + 1))
@@ -2275,7 +2280,9 @@ EOF
 
       case "$RSTATE" in
         MET|WAIVED) : ;;                      # closed — not open
-        *)          OPEN=$((OPEN + 1)) ;;      # STILL-LIVE, UNMET, AMBIGUOUS — open
+        *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
+                    OPEN_NAMES="${OPEN_NAMES}${RNAME}
+" ;;
       esac
       [ "$RSTATE" = "UNMET" ] || continue
 
@@ -2303,6 +2310,72 @@ EOF
     done <<EOF
 $VERDICT_OUT
 EOF
+
+    # ---------- THE LIVE SET TRIMS `open=` AND THE FILL (S19, auditor F-14) ----------
+    #
+    # THE DEFECT. The spec's ownership table names this tick a rendering surface of the LIVE
+    # AGENT SET; it read no such thing. It counted roster rows by sweeper verdict, while the
+    # dispatch wall counts a row open only while the harness still calls its agent live
+    # (AC-27). One row, two answers: a finished-but-unstopped teammate is NOT open to the
+    # wall and WAS open here, so the Patrol could print a FILL the wall was about to refuse
+    # — or withhold one it would have allowed. The number below is now the wall's number,
+    # because both sides ask the same function.
+    #
+    # THE TICK DECIDES AND NEVER WRITES. No roster row, marker or verdict moves here: the
+    # row stays exactly as the sweeper left it, still counted in `total=`, still eligible to
+    # NOTIFY when it is overdue. Only the arithmetic this tick prints is trimmed. That is
+    # what keeps the roster readable by every other consumer (D0: one owner per liveness
+    # truth, and the ROSTER's owner is not this file).
+    #
+    # ONLY WHEN THERE IS SOMETHING TO TRIM. A roster with no open row has nothing whose
+    # openness a live answer could settle — the same reasoning the dispatch wall's empty-
+    # roster arm takes — so the reader is not called and no line is printed. A fallback
+    # sentence on every quiet tick of every session is noise a reader learns to skip.
+    #
+    # ON A STALE OR MISSING ANSWER THE ROSTER COUNT STANDS, and this is deliberately NOT
+    # the wall's refuse-and-name-the-fix behaviour. The Patrol's prompt runs this tick
+    # BEFORE any ListAgents, so a refusal here would refuse the first tick of every session
+    # — a wall that fires on the healthy path is not a wall. The tick holds no authority
+    # (ADR-003): it prints a line and the operator acts. The ENFORCEMENT is the dispatch
+    # wall, which does refuse on a stale read, so the honest thing here is to say which
+    # number this is and point at the gate that will insist.
+    OPEN_ROSTER="$OPEN"
+    TICK_LIVE_STATE=""
+    if [ "$OPEN_ROSTER" -gt 0 ]; then
+      TICK_TR="$(session_transcript "$SESSION_ID")" || TICK_TR=""
+      if [ -z "$TICK_TR" ]; then
+        TICK_LIVE_STATE="none"
+      else
+        TICK_OPEN_LIVE=0
+        while IFS= read -r TICK_NAME; do
+          [ -n "$TICK_NAME" ] || continue
+          # The predicate prints nothing on stdout, so this capture is the reader's one
+          # contract line — `live-agents: <state> age=<n|none>` — and nothing else.
+          TICK_LRC=0
+          TICK_LERR=$( { live_row_open "$TICK_TR" "$TICK_NAME"; } 2>&1 ) || TICK_LRC=$?
+          case "$TICK_LRC" in
+            0) TICK_OPEN_LIVE=$(( TICK_OPEN_LIVE + 1 )) ;;
+            1) : ;;
+            *) # 3 STALE / 4 NONE. Freshness is a property of the TRANSCRIPT, not of any
+               # one name, so every remaining row would read the same way: stop asking.
+               TICK_LIVE_STATE="${TICK_LERR#live-agents: }"
+               TICK_LIVE_STATE="${TICK_LIVE_STATE%% *}"
+               break ;;
+          esac
+        done <<EOF
+$OPEN_NAMES
+EOF
+        [ -n "$TICK_LIVE_STATE" ] || OPEN="$TICK_OPEN_LIVE"
+      fi
+      if [ -n "$TICK_LIVE_STATE" ]; then
+        say "live set $TICK_LIVE_STATE — open= counted from the roster; ListAgents before any dispatch"
+      elif [ "$OPEN" -ne "$OPEN_ROSTER" ]; then
+        # THE TRIM IS SAID OUT LOUD, or `open=0` over a roster carrying two unmet
+        # contracts is a number with no story. Only when it actually moved: a tick whose
+        # live set agrees with its roster has nothing to explain.
+        say "live set fresh — ${OPEN_ROSTER} open row(s) on this roster, ${OPEN} still live; open= and any fill are sized from the live set"
+      fi
+    fi
 
     # "No roster" and "empty roster" are different facts, and only the latter may DISARM
     # (ap review A-1, item 2). A roster with zero verdict lines because the file plain does
@@ -2367,7 +2440,12 @@ EOF
     # a find over the docs tree.
     RUN_STATE=open
     RUN_STATE_WHY="the roster still carries open work"
-    if [ "$OPEN" -eq 0 ]; then
+    # THE TERMINAL DECISION KEEPS THE ROSTER'S COUNT, never the live set's (S19). DISARM
+    # removes the stamp and ends the Patrol for the rest of the session, and the state it
+    # would fire on here is precisely the one that most needs supervising: a row whose
+    # contract is UNMET and whose agent has finished without delivering. `open=` and the
+    # fill are advisory arithmetic and may be trimmed; this may not.
+    if [ "$OPEN_ROSTER" -eq 0 ]; then
       RUN_STATE_RAW="$(run_state "$REPO_REAL" "$(patrol_armed_file "$SESSION_ID")" "$SESSION_ID")"
       RUN_STATE="${RUN_STATE_RAW%%|*}"
       RUN_STATE_WHY="${RUN_STATE_RAW#*|}"
@@ -2386,7 +2464,7 @@ EOF
     # An empty roster on a run that has not delivered falls through to QUIET below, and QUIET
     # KEEPS THE STAMP — which is the half that matters on disk. The clock keeps running, the
     # arming wall stays satisfied, and hooks/patrol-revive.sh has nothing to report.
-    if [ "$OPEN" -eq 0 ] && [ "$RUN_STATE" = delivered ]; then
+    if [ "$OPEN_ROSTER" -eq 0 ] && [ "$RUN_STATE" = delivered ]; then
       printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
         "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
@@ -2609,10 +2687,15 @@ EOF
     # over a mid-run lull says nothing about why the Patrol did not stop, and its reader is a
     # model deciding whether the Patrol is broken. So the empty-roster reading names the run
     # state it decided from — which plan, and where that plan says the run is.
-    if [ "$OPEN" -eq 0 ]; then
+    # KEYED ON THE ROSTER'S COUNT, not the live one (S19). `RUN_STATE_WHY` is read only on
+    # the empty-roster path above, and — more to the point — "no open row on this roster" is
+    # a statement about the roster, which a liveness reading does not get to make false. The
+    # live number is `open=` on the decision line, and the trim line above says so
+    # whenever the two differ.
+    if [ "$OPEN_ROSTER" -eq 0 ]; then
       say "QUIET — no open row on this roster, but the run is not delivered (${RUN_STATE_WHY}); the Patrol keeps its stamp and its clock."
     else
-      say "QUIET — $OPEN open row(s) on this roster, none past their declared duration."
+      say "QUIET — $OPEN_ROSTER open row(s) on this roster, none past their declared duration."
     fi
     exit 0
     ;;
