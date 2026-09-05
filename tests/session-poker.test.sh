@@ -3353,6 +3353,122 @@ poke_pressure "$R20F" 100 1.0 tick
 expect_contains "…and so does an answer the transcript does not carry at all" \
   "$S20_TARGET" "$OUT"
 
+# ============================================================
+section "Section 21: hardening — the one unfiltered field, and the tail that reaches a terminal"
+# ============================================================
+#
+# Both of these are LOW severity and neither is reachable through today's harness. They are
+# fixed because the reasons they are unreachable are somebody else's guarantees: the CLI
+# happens to mint UUID session ids, and `session_id` (payload/scripts/lib/session.sh) applies
+# no charset check to either the env or the payload spelling, so the whole guarantee rests
+# outside this repo.
+
+# ---------- 21a: `session=` is the one field adopt_write_row did not filter (S-4) ----------
+#
+# Twelve of the thirteen interpolated fields go through `clean()`; `session=%s` took `$sid`
+# raw. A value carrying a `|` forges a segment, and every by-key reader in the fleet takes
+# the FIRST match — so a forged `name=` ahead of the real one wins. This is character for
+# character the defect the wave fixed on the other writer one slice earlier
+# (hooks/dispatch-preflight.sh: "the asymmetry between the two writers was itself the defect").
+#
+# CALLED DIRECTLY, because the verb cannot be driven to it. `engaged_marker_path`
+# (payload/scripts/lib/run.sh) charset-guards the session id to `[A-Za-z0-9_-]` before the
+# engagement marker is even named, so a hostile id decides NOTHING — 21a2 below is that
+# guard, asserted rather than assumed. The writer is still fixed: the guard belongs to a
+# different file for a different reason, and a writer that is safe only because someone
+# else's wall happens to stand in front of it is the asymmetry this repo already ruled on.
+# The head of the script up to its verb dispatch is sourceable as a library, which is how
+# the function is reached without running a verb.
+# THE HEAD IS PLANTED IN A hooks/ OF ITS OWN, with the library linked in beside it — the
+# same shape §11b3's doctored copy uses, and for the same reason: the script resolves
+# `../scripts/lib` off its own directory and steps aside when it cannot find it.
+S21A_DIR="$TMPROOT/s21-poker-head"
+mkdir -p "$S21A_DIR/hooks" "$S21A_DIR/scripts"
+ln -s "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$S21A_DIR/scripts/lib"
+S21A_LIB="$S21A_DIR/hooks/session-poker-head.sh"
+sed -n '1,/^# ---------------------------------------------------------------- verbs$/p' "$POKER" \
+  | sed '$d' > "$S21A_LIB"
+# `$0` CARRIES THE PATH, not `$1`: the script resolves its library off `dirname "$0"`, so a
+# `bash -c … _ <lib>` invocation would look for it beside the caller's cwd and step aside.
+expect_eq "21a meta: the sourceable head really does define adopt_write_row" "function" \
+  "$(bash -c '. "$0" adopt >/dev/null 2>&1; type -t adopt_write_row' "$S21A_LIB" 2>/dev/null)"
+S21A_ROOT="$TMPROOT/s21-forged-sid"
+mkdir -p "$S21A_ROOT/.bionic/tmp"
+bash -c '
+  . "$0" adopt >/dev/null 2>&1
+  adopt_write_row "$1/.bionic/tmp/roster-forged.state" \
+    "forged|name=ghost|agent_id=deadbeefdeadbeefdeadbeef" \
+    pred-writer apred-writer-2121212121212121 bionic:implementor \
+    deliv.md prog.md "10 minutes" 2026-09-05T00:00:00Z osid addr none ""
+' "$S21A_LIB" "$S21A_ROOT" >/dev/null 2>&1
+S21A_ROW="$(grep '^roster-state/v1|' "$S21A_ROOT/.bionic/tmp/roster-forged.state" 2>/dev/null | head -1)"
+expect_contains "the row IS written (21a is not vacuous)" \
+  "agent_id=apred-writer-2121212121212121" "$S21A_ROW"
+expect_eq "…and the FIRST name= field a by-key reader sees is the real agent's" \
+  "name=pred-writer" \
+  "$(printf '%s' "$S21A_ROW" | tr '|' '\n' | grep '^name=' | head -1)"
+# `clean()` FOLDS, it does not delete: the `|` becomes a space, so the forged text survives
+# INSIDE the session field and is no longer a field of its own. That is the whole property —
+# a segment is what a by-key reader sees, and the assertions below are about segments.
+S21A_FIELDS="$(printf '%s' "$S21A_ROW" | tr '|' '\n')"
+s21_fields_named() {  # <key> -> how many fields of the row carry exactly this key=value
+  printf '%s\n' "$S21A_FIELDS" | grep -c "^$1\$" | tr -d ' '
+}
+expect_eq "…the forged name= is not a field of its own" "0" "$(s21_fields_named 'name=ghost')"
+expect_eq "…the real one is, exactly once" "1" "$(s21_fields_named 'name=pred-writer')"
+expect_eq "…the forged agent_id= is not a field either" "0" \
+  "$(s21_fields_named 'agent_id=deadbeefdeadbeefdeadbeef')"
+expect_eq "…and the whole forged value is ONE session= field, folded to spaces" "1" \
+  "$(printf '%s\n' "$S21A_FIELDS" | grep -c '^session=' | tr -d ' ')"
+
+# ---------- 21a2: and the verb cannot be driven there in the first place ----------
+#
+# The reachability half, asserted. `engaged_marker_path` refuses any session id outside
+# `[A-Za-z0-9_-]`, so an id carrying a `|` reads as a session that never engaged and every
+# verb says exactly that and decides nothing.
+S21_SID_REAL="$SID"
+SID='forged-sid|name=ghost|agent_id=deadbeefdeadbeefdeadbeef'
+R21A2="$(make_repo s21-forged-sid-verb)"; new_roster "$R21A2"
+S21_PRED="99999999-aaaa-4bbb-8ccc-000000000021"
+add_row_to "$R21A2" "$S21_PRED" name=pred-writer status=identified \
+  agent_id=apred-writer-2121212121212121 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R21A2/.bionic/docs/record/pred.md"
+poke "$R21A2" adopt
+expect_contains "a session id outside [A-Za-z0-9_-] never reaches a verb at all" \
+  "NOT-ENGAGED" "$OUT"
+expect_absent "…and adopts nothing" "adopted_from=" "$(cat "$(roster_of "$R21A2")")"
+SID="$S21_SID_REAL"
+
+# ---------- 21b: C1 control characters do not survive the adopt report tail (S-6) ----------
+#
+# The strip was `tr -d '\000-\010\013-\037\177'`, which removes ESC and DEL but not the C1
+# block as UTF-8 (`U+0080`–`U+009F`, i.e. `0xC2 0x80`–`0xC2 0x9F`). `U+009B` is CSI: on a
+# terminal that honours C1 it opens a control sequence with no ESC in sight. What is quoted
+# here is whatever an agent typed, printed into the operator's terminal by a verb they ran to
+# find out what a predecessor left behind — the same reason the ESC strip is already there.
+R21B="$(make_repo s21-c1-tail)"; new_roster "$R21B"
+S21B_PRED="88888888-aaaa-4bbb-8ccc-000000000021"
+S21B_ID="ac1tail-one-8888888888888888"
+add_row_to "$R21B" "$S21B_PRED" name=c1-writer status=identified agent_id="$S21B_ID" \
+  subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R21B/.bionic/docs/record/c1.md"
+C21="$(fake_config_dir s21)"
+mkdir -p "$C21/projects/-fixture-project/$S21B_PRED/subagents"
+S21B_CSI="$(printf '\302\233')"   # U+009B, CSI, as UTF-8
+S21B_BODY="C1-TAIL-MARKER ${S21B_CSI}2J done. $(printf 'padding %.0s' 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20)"
+printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":%s}]}}\n' \
+  "$(printf '%s' "$S21B_BODY" | jq -Rs .)" \
+  > "$C21/projects/-fixture-project/$S21B_PRED/subagents/agent-${S21B_ID}.jsonl"
+S21_CFG_REAL="${CLAUDE_CONFIG_DIR:-}"
+export CLAUDE_CONFIG_DIR="$C21"
+poke "$R21B" adopt
+if [ -n "$S21_CFG_REAL" ]; then export CLAUDE_CONFIG_DIR="$S21_CFG_REAL"; else unset CLAUDE_CONFIG_DIR; fi
+expect_contains "the report tail IS quoted (21b is not vacuous)" "C1-TAIL-MARKER" "$OUT"
+S21B_C1=$(printf '%s' "$OUT" | LC_ALL=C grep -c -- "$S21B_CSI") || S21B_C1=0
+expect_eq "…and the CSI byte pair does not survive it" "0" "$S21B_C1"
+expect_contains "…while the printable text beside the stripped byte survives" "2J done." "$OUT"
+
 unset CLAUDE_CONFIG_DIR
 
 # ============================================================

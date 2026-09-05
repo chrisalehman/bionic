@@ -1380,7 +1380,15 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
         length($0) - 2 >= min { last = $0 }
         END { if (last != "") print last; else if (any != "") print any }')"
   [ -n "$raw" ] || return 1
-  printf '%s' "$raw" | jq -r '.' 2>/dev/null | tr -d '\000-\010\013-\037\177' | head -c "$ADOPT_TAIL_CAP"
+  # THE C1 BLOCK GOES TOO (Step-6 security review S-6). `tr -d '\000-\010\013-\037\177'`
+  # removes ESC and DEL and leaves `U+0080`–`U+009F` — of which `U+009B` is CSI, a control
+  # sequence introducer that needs no ESC in front of it on a terminal that honours C1. Those
+  # arrive as the two UTF-8 bytes `0xC2 0x80`–`0xC2 0x9F`, which a byte-oriented `tr` cannot
+  # name, so the pair is deleted by `sed` before the byte-wise strip runs. Ordered first
+  # because the byte strip would otherwise leave a bare `0xC2` behind.
+  printf '%s' "$raw" | jq -r '.' 2>/dev/null \
+    | LC_ALL=C sed 's/'"$(printf '\302')"'['"$(printf '\200')"'-'"$(printf '\237')"']//g' \
+    | tr -d '\000-\010\013-\037\177' | head -c "$ADOPT_TAIL_CAP"
 }
 
 # ONE FOLD PER PREDECESSOR ROSTER, and the same rule the fleet's other three folds keep: the
@@ -1558,8 +1566,17 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
       >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
   fi
+  # EVERY FIELD THROUGH `clean()`, `session=` INCLUDED (Step-6 security review S-4). It was
+  # the one interpolation of the thirteen that took its value raw, which is character for
+  # character the defect this wave fixed on the other row writer one slice earlier
+  # (hooks/dispatch-preflight.sh: "a value carrying a `|` or a newline forges a segment …
+  # the asymmetry between the two writers was itself the defect"). Every by-key reader in
+  # the fleet takes the FIRST match, so a forged `name=` ahead of the real one wins outright.
+  # Unreachable today — `engaged_marker_path` refuses a session id outside `[A-Za-z0-9_-]`
+  # before any verb decides anything — and that is a guard in another file for another
+  # reason, not this writer's own.
   printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|teammate_id=%s|adopted_from=%s|tool_use_id=|plan=%s\n' \
-    "$sid" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
+    "$(clean "$sid")" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
     "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" "$(clean "$waiver")" \
     "$(clean "$addr")" "$(clean "$osid")" "$(clean "$plan")" \
     >> "$f" 2>/dev/null || return 1

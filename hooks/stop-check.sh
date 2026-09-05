@@ -555,7 +555,11 @@ case "$LIVE_RC" in
     exit 1
     ;;
   2)
-    LIVE_DUPES=$(live_agents "$OWN_TRANSCRIPT" 2>/dev/null | grep "^${TARGET_BASE}|") || LIVE_DUPES=""
+    # MATCHED BY FIELD EQUALITY, never as a regular expression (Step-6 security review S-5).
+    # `TARGET_BASE` is the operator's typed target; a `.`, `*` or `[` in it would over-match
+    # and this refusal would report a count that is not the ambiguity it actually found.
+    LIVE_DUPES=$(live_agents "$OWN_TRANSCRIPT" 2>/dev/null \
+                 | awk -F'|' -v want="$TARGET_BASE" '$1 == want') || LIVE_DUPES=""
     LIVE_N=0
     [ -n "$LIVE_DUPES" ] && LIVE_N=$(printf '%s\n' "$LIVE_DUPES" | grep -c .)
     echo "Resolved:      ambiguous — ${LIVE_N} live agents answer to '${TARGET_BASE}':"
