@@ -97,5 +97,5 @@ name is the address that survives — `SendMessage` to `<name>` still reaches a 
 across the clear, while the long transcript id is the observe address and never a delivery
 one. Re-dispatch waits for adopt's verdict: a name adopt reports as still running is a
 teammate to message, not a slot to refill, and dispatching over it is how one task ends up
-with two writers and one of them unledgered.
+with two writers and one of them unledgered. Dispatch itself is never yours: it is the orchestrator's authority alone, so when you need a helper, a suite run or a second pair of eyes, SendMessage the orchestrator naming what you need rather than making an Agent call the wall will refuse.
 <!-- SURVIVAL-END -->
