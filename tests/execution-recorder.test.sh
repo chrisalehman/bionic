@@ -44,6 +44,12 @@ no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" 
 
 expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
 expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+# Was undefined until wave-roster-lifecycle S9: Section 12b called it and bash's
+# "command not found" (no `set -e` in this file) silently dropped both calls
+# instead of counting them — a false green over two assertions this suite has
+# always claimed to make. Every sibling suite that uses this name defines it the
+# same way (tests/dispatch-preflight.test.sh, tests/stop-guard.test.sh, …).
+expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
 expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
 expect_matches()  { if grep -qE -- "$2" <<<"$3"; then ok "$1"; else no "$1" "no match: $2"; fi; }
 expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
@@ -1408,6 +1414,78 @@ seed_roster "$E2_REPO" "$SID_A" "w99-noplan" "$E_TUID"
 run_rec "$(mk_agent_post "$SID_A" "$E2_TR" "$E2_REPO" "w99-noplan" "$E_AID" "$E_TUID")"
 expect_contains "12f engaged with no plan on disk: the row is still confirmed" \
   "status=confirmed" "$(cat "$E2_REPO/.bionic/tmp/roster-${SID_A}.state")"
+
+# ============================================================
+echo ""
+echo "=== Section 13: THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15) ==="
+# ============================================================
+#
+# One `pressure_sample` call after the engagement check, on every engaged Bash
+# PostToolUse payload — not tied to whether that payload carries a stop-check
+# machine line, and not fired on the Agent or SubagentStart arms. Isolated with
+# its own ring (BIONIC_PRESSURE_RING) and clock (BIONIC_NOW_EPOCH) so this suite
+# never touches the real machine-scoped ring.
+
+P_RING="$SANDBOX/pressure/p13.ring"
+P_NOW=1700000000
+run_rec_pressure() {  # <payload-json> — like run_rec, with the pressure fixture pinned
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  REC_OUT=$(printf '%s' "$1" | env CLAUDE_CODE_SESSION_ID="$_sid" \
+    BIONIC_PRESSURE_RING="$P_RING" BIONIC_NOW_EPOCH="$P_NOW" \
+    BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 BIONIC_PROBE_LOAD_1M=1.6 \
+    bash "$REC" 2>"$SANDBOX/.err"); REC_ST=$?
+  REC_ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+
+IFS='|' read -r P_REPO P_TR P_SUB P_CFG <<< "$(make_world pressure yes)"
+
+# (a) an engaged Bash call carrying NO stop-check machine line still samples.
+# A plain, unremarkable command — the overwhelming majority of Bash calls in a
+# session — is exactly the case the old early exit on empty MLINES used to skip
+# before it ever reached the engagement check or this sample.
+rm -f "$P_RING"
+run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo hi" "hi")"
+expect_status "13a an ordinary Bash call still exits 0" "0" "$REC_ST"
+expect_file   "13a …and one ring line was appended" "$P_RING"
+expect_eq     "13a …exactly one" "1" "$(wc -l < "$P_RING" | tr -d ' ')"
+
+# (b) a second engaged Bash call samples again — the ring grows, it is not
+# replaced (pressure_sample's own append-then-prune, not this hook's business).
+run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo two" "two")"
+expect_eq "13b a second engaged call appends a second line" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
+
+# (c) UNENGAGED: the marker removed, the same shape of call samples nothing.
+rm -f "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
+run_rec_pressure "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo three" "three")"
+expect_status "13c unengaged: still exits 0" "0" "$REC_ST"
+expect_eq     "13c …and the ring is untouched" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
+: > "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
+
+# (d) the Agent arm (a dispatch confirming) does not sample — only Bash does.
+P_ROSTER="$P_REPO/.bionic/tmp/roster-${SID_A}.state"
+seed_roster "$P_REPO" "$SID_A" "w99-pressure" "toolu_01PRESSUREAGENT"
+run_rec_pressure "$(mk_agent_post "$SID_A" "$P_TR" "$P_REPO" "w99-pressure" "apressure-2222222222222222" "toolu_01PRESSUREAGENT")"
+expect_contains "13d the Agent call still confirms its roster row" "status=confirmed" "$(cat "$P_ROSTER")"
+expect_eq       "13d …but appends nothing to the ring" "2" "$(wc -l < "$P_RING" | tr -d ' ')"
+
+# (e) FAILURE-TOLERANT: an unwritable ring path does not crash the hook or block
+# the rest of its work — pressure_sample's own failure (return 2, a stderr line)
+# is swallowed, not propagated.
+P_BLOCKER="$SANDBOX/pressure/blocker-file"
+mkdir -p "$(dirname "$P_BLOCKER")"; : > "$P_BLOCKER"
+run_rec_pressure_blocked() {
+  local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  REC_OUT=$(printf '%s' "$1" | env CLAUDE_CODE_SESSION_ID="$_sid" \
+    BIONIC_PRESSURE_RING="$P_BLOCKER/pressure.ring" BIONIC_NOW_EPOCH="$P_NOW" \
+    bash "$REC" 2>"$SANDBOX/.err"); REC_ST=$?
+  REC_ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+seed_roster "$P_REPO" "$SID_A" "w99-pressure2" "toolu_01PRESSUREBLOCKED"
+run_rec_pressure_blocked "$(mk_agent_post "$SID_A" "$P_TR" "$P_REPO" "w99-pressure2" "apressure-3333333333333333" "toolu_01PRESSUREBLOCKED")"
+expect_status   "13e an unwritable ring path still exits 0" "0" "$REC_ST"
+expect_contains "13e …and the rest of the hook's work still happens" "status=confirmed" "$(cat "$P_ROSTER")"
 
 # ============================================================
 echo ""
