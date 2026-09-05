@@ -1640,6 +1640,47 @@ _dep_remove_argv() {  # <name> — one token per line
 #
 # The caller counts 0 and 2 as settled and 1 as outstanding; remove.sh's summary
 # is built on that split.
+# ─── What a teardown asks, which is not what a report asks ───────────────────
+#
+# A REPORT asks "is this row in the state setup leaves it in". A TEARDOWN asks
+# "is there anything of bionic's here to take off". For nearly every row those
+# are the same question and this function answers both with the same probe.
+#
+# THEY CAME APART ON THE STATUS LINE (1.4.4 T5, t5-report.md R-1). The moment
+# `_dep_check_statusline` stopped calling `npx ccstatusline@latest` healthy, the
+# pre-1.4.4 machine started reporting the row absent — while still carrying the
+# command bionic wrote into settings.json, the layout bionic copied into
+# ~/.config/ccstatusline, and possibly the package bionic installed. Asked the
+# HEALTH question, `/bionic:remove` called that machine "already clean" and
+# walked away from all three, on precisely the machines this release exists for.
+# A teardown keyed on health is a teardown that stops working the instant a
+# probe gets stricter, which is backwards.
+_dep_statusline_leftovers() {  # <name> -> 0 when this machine carries statusline state bionic wrote
+  local name="${1:-ccstatusline}" settings cmd
+  settings="$(_dep_settings_file)"
+  if [ -f "$settings" ] && _dep_have jq; then
+    cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
+    # THE NAME, NOT THE KEY. A `.statusLine` pointing at the user's own renderer
+    # is not bionic's to remove and must survive a teardown; every string bionic
+    # has ever written there names ccstatusline, the npx form included.
+    case "$cmd" in *ccstatusline*) return 0 ;; esac
+  fi
+  [ -d "$(_dep_ccstatusline_config_dir)" ] && return 0
+  case "$(_dep_check_npm_global "$name")" in "yes|"*) return 0 ;; esac
+  return 1
+}
+
+dep_teardown_state() {  # <name> -> yes | no | unknown
+  local name="${1:-}" raw
+  if [ "$(dep_field "$name" install_fn_or_check)" = "statusline" ]; then
+    if _dep_statusline_leftovers "$name"; then echo "yes"; else echo "no"; fi
+    return 0
+  fi
+  raw="$(check_dep "$name")" || return 1
+  raw="${raw#present=}"
+  echo "${raw%%|*}"
+}
+
 remove_dep() {  # <name>
   local name="${1:-}" behavior plan line rc
   local -a argv=()
