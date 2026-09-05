@@ -17,6 +17,7 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
 PASS=0
@@ -5215,12 +5216,11 @@ s35_root() {
 }
 
 # THE MARKER'S EXACT TWO-LINE SHAPE, hooks/engage.sh:287 — `plan=<path>` then
-# `engaged_at=<iso>`, mode 600. A fixture that invented a one-line marker would be
-# testing a file no writer in the fleet produces.
+# `engaged_at=<iso>`, mode 600, written by the real `bind_plan` (S11,
+# tests/lib/bound-marker.sh; spec AC-24). A fixture that invented a one-line marker
+# would be testing a file no writer in the fleet produces.
 s35_bind() {  # <root> <sid> <plan path>
-  local f="$1/.bionic/tmp/engaged-$2.state"
-  printf 'plan=%s\nengaged_at=%s\n' "$3" "2026-09-04T00:00:00Z" > "$f"
-  chmod 600 "$f"
+  bound_marker "$1" "$2" "$3"
 }
 
 # The three shapes that are NOT a binding, all of which the fleet really produces: an
@@ -5228,13 +5228,7 @@ s35_bind() {  # <root> <sid> <plan path>
 # suite writes one), the literal `plan=none` (what engagement writes when the root holds
 # zero or several open runs), and a marker carrying no `plan=` line at all.
 s35_unbind() {  # <root> <sid> [empty|none|nofield]
-  local f="$1/.bionic/tmp/engaged-$2.state"
-  case "${3:-empty}" in
-    none)    printf 'plan=none\nengaged_at=2026-09-04T00:00:00Z\n' > "$f" ;;
-    nofield) printf 'engaged_at=2026-09-04T00:00:00Z\n' > "$f" ;;
-    *)       : > "$f" ;;
-  esac
-  chmod 600 "$f"
+  unbound_marker "$1" "$2" "${3:-empty}"
 }
 
 # Two open plans, structurally identical except for WHICH ONE carries the current step's
