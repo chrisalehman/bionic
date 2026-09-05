@@ -161,7 +161,7 @@ AGENT_RULES="${REPO}/.claude/rules/agent-discipline.md"
 # The four pinned strings, spelled here exactly as they must appear on disk.
 PIN_PROBE='`resources_probe` and `resources_budget` from `<plugin-root>/scripts/lib/resources.sh` yield the run'"'"'s `parallel-budget:` — one string, recorded verbatim in plan frontmatter, printed in the display, and never re-derived downstream.'
 PIN_FILL='every slice with no unmet dependency dispatches in one batch up to `writers`; sequence only for shared state or when the batch would exceed the budget'
-PIN_JOBS='**Your brief names `BIONIC_TEST_JOBS=<test_jobs>`** — the run'"'"'s per-suite share of the parallel budget. Export it for the suite command your brief names; never raise it on your own judgment, and never invent one when the brief carries none.'
+PIN_JOBS='**Each brief in the batch points the writer at the rung:** `take your test width from pressure_level at suite start; the ceiling is this header'"'"'s test_jobs`.'
 
 # has_pin <file> <string> -> 0 when the file carries the string.
 #
@@ -261,8 +261,12 @@ else
 fi
 
 DOCTORED_BLOCK="$TMP/survival-mutated.md"
-sed 's/never raise it on your own judgment/raise it whenever you like/' "$SURVIVAL_BLOCK" > "$DOCTORED_BLOCK"
-if has_pin "$DOCTORED_BLOCK" "$PIN_JOBS"; then
+sed 's/the ceiling is this header'"'"'s test_jobs/the ceiling is a number pinned once/' \
+  "$SURVIVAL_BLOCK" > "$DOCTORED_BLOCK"
+if cmp -s "$SURVIVAL_BLOCK" "$DOCTORED_BLOCK"; then
+  no "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_BLOCK" "$PIN_JOBS"; then
   no "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)" \
      "the mutated copy still matched — the pin is vacuous"
 else
@@ -320,17 +324,19 @@ else
   no "21: SKILL.md carries the AC-38 QUIET sentence verbatim" "file: $SKILL_MD"
 fi
 
-# The three rungs and the fill duty are named in the same section — asserted as presence
-# rather than byte-for-byte, because their wording is prose the next editor may improve
-# while the two sentences above are contracts.
+# The two rungs, the tick's rung line and the fill duty are named in the same section —
+# asserted as presence rather than byte-for-byte, because their wording is prose the next
+# editor may improve while the two sentences above are contracts. NARROW retired from this
+# list at S10 (S8's report: "docs-pins.test.sh:327 still pins the token in SKILL.md and is
+# S10's to retire" — NARROW is gone from hooks/session-poker.sh entirely).
 PINS_RUNGS_MISSING=""
-for token in 'EMERGENCY' 'HOLD' 'NARROW' 'FILL <ids>' 'fill-declined: <reason>'; do
+for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'fill-declined: <reason>'; do
   has_pin "$SKILL_MD" "$token" || PINS_RUNGS_MISSING="${PINS_RUNGS_MISSING} ${token}"
 done
 if [ -z "$PINS_RUNGS_MISSING" ]; then
-  ok "22: SKILL.md's Patrol section names all three rungs, the FILL line and the decline"
+  ok "22: SKILL.md's Patrol section names both rungs, the tick's rung line, the FILL line and the decline"
 else
-  no "22: SKILL.md's Patrol section names all three rungs, the FILL line and the decline" \
+  no "22: SKILL.md's Patrol section names both rungs, the tick's rung line, the FILL line and the decline" \
      "missing:${PINS_RUNGS_MISSING}"
 fi
 
@@ -595,6 +601,55 @@ elif has_pin "$DOCTORED_SCOPE" "$PIN_SCOPE_PAIR"; then
      "the pin matched a copy that says the opposite"
 else
   ok "40: a doctored SKILL.md fails the scope pin (pin discriminates)"
+fi
+
+# --- S10 additions, same section, same shape as PIN_BIND_STEP above ---
+#
+# PIN_TASKLIST pins the resume-ritual step this wave adds immediately after the bind step:
+# a session that resumes into a bound run rebuilds its task list from the plan rather than
+# trusting whatever TaskList happens to still hold. PIN_RUNG pins the Patrol prompt's
+# replacement for the retired NARROW recommendation (AC-17/AC-19; S8's report: "docs-pins.
+# test.sh:327 still pins the token in SKILL.md and is S10's to retire" — Section 3's token
+# list above no longer names NARROW, and this is the positive sentence that replaced it).
+PIN_TASKLIST='**The resume ritual rebuilds the task list after it binds:** run `TaskList`; if it is empty and the bound plan has `## SDLC State`, recreate one entry per step (and per slice at the current step) from the plan, statuses from the step lines.'
+PIN_RUNG='The tick prints the current rung as one line, `poker: rung=<n>/<ceiling>`; NARROW and RELAX are retired — regulation is the rung'"'"'s, read by every consumer at the moment of use, never a tick'"'"'s advice.'
+
+if has_pin "$SKILL_MD" "$PIN_TASKLIST"; then
+  ok "48: SKILL.md's resume ritual rebuilds the task list after it binds, verbatim"
+else
+  no "48: SKILL.md's resume ritual rebuilds the task list after it binds, verbatim" \
+     "file: $SKILL_MD"
+fi
+
+if has_pin "$SKILL_MD" "$PIN_RUNG"; then
+  ok "49: SKILL.md's Patrol prompt names the rung line and retires NARROW/RELAX, verbatim"
+else
+  no "49: SKILL.md's Patrol prompt names the rung line and retires NARROW/RELAX, verbatim" \
+     "file: $SKILL_MD"
+fi
+
+DOCTORED_TASKLIST="$TMP/skill-tasklist-mutated.md"
+sed 's/recreate one entry per step/recreate one entry per slice only/' "$SKILL_MD" > "$DOCTORED_TASKLIST"
+if cmp -s "$SKILL_MD" "$DOCTORED_TASKLIST"; then
+  no "50: a doctored SKILL.md fails the task-list pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_TASKLIST" "$PIN_TASKLIST"; then
+  no "50: a doctored SKILL.md fails the task-list pin (pin discriminates)" \
+     "the pin matched a doctored copy"
+else
+  ok "50: a doctored SKILL.md fails the task-list pin (pin discriminates)"
+fi
+
+DOCTORED_RUNG="$TMP/skill-rung-mutated.md"
+sed 's/NARROW and RELAX are retired/NARROW and RELAX still apply/' "$SKILL_MD" > "$DOCTORED_RUNG"
+if cmp -s "$SKILL_MD" "$DOCTORED_RUNG"; then
+  no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_RUNG" "$PIN_RUNG"; then
+  no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
+     "the pin matched a doctored copy"
+else
+  ok "51: a doctored SKILL.md fails the rung pin (pin discriminates)"
 fi
 
 echo ""

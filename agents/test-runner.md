@@ -87,11 +87,8 @@ about doing the job well; they are about still being alive to report it.
   a Monitor on the file's `EXIT=` line. **Otherwise stay in the foreground and do not stop** — a
   foreground agent's final response ENDS the command, so the fallback would kill the work it
   exists to protect. Never arm a watcher and go idle yourself.
-- **Your brief names `BIONIC_TEST_JOBS=<test_jobs>`** — the run's per-suite share of the parallel
-  budget. Export it for the suite command your brief names; never raise it on your own judgment,
-  and never invent one when the brief carries none. The number comes from the plan's
-  `parallel-budget:` line, which was probed once from this machine and is shared with every other
-  writer running right now.
+- **Each brief in the batch points the writer at the rung:** `take your test width from
+  pressure_level at suite start; the ceiling is this header's test_jobs`.
 
 **`/clear` does not kill agents.** A cleared session loses its own memory of a fleet, never
 the fleet: the agents keep running, their rosters stay on disk, and

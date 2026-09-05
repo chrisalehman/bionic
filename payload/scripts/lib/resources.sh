@@ -25,14 +25,14 @@
 # PURE function of its three arguments — it opens no file, runs no command, reads no
 # environment variable. That is what makes it re-derivable and auditable: the same machine
 # facts always answer the same budget. `resources_pressure` is the separate live question,
-# and the only thing a caller may do with it is HOLD, NARROW, or (at the kill floor) stop
-# something. Pressure never raises or lowers the ceiling; a moving ceiling is precisely the
-# drift class this file was written to remove.
+# and the only thing a caller may do with it is HOLD, size down by the rung, or (at the kill
+# floor) stop something. Pressure never raises or lowers the ceiling; a moving ceiling is
+# precisely the drift class this file was written to remove.
 #
 # WHO READS IT. hooks/preflight-probe.sh (records probe + budget into the version-2
 # attestation), the canonical-sdlc Step 0 display and the plan header it writes, the
-# dispatch wall's budget arm, `session-poker.sh tick` (FILL/HOLD/NARROW/EMERGENCY), and
-# doctor's resources section. Every one of them READS; none of them re-derives.
+# dispatch wall's budget arm, `session-poker.sh tick` (FILL/HOLD/EMERGENCY, sized by the
+# rung), and doctor's resources section. Every one of them READS; none of them re-derives.
 #
 # BASH 3.2. No associative arrays, no `${var^^}`, no `mapfile`, and no floating-point
 # arithmetic — bash has none. The two non-integer constants (1.2 GB per suite, 0.5 GB per
