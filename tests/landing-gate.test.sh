@@ -1362,4 +1362,29 @@ run_gate "$GATE" "$(stop_payload "$R16H2" "$SID" false)"
 expect_absent "16h: control: on a branch the announcement is gone" "reconciliation is INERT" "$OUT_STDERR"
 expect_contains "16h: control: …and the diff outside Files: refuses" "undeclared/four.sh" "$OUT_STDERR"
 
+# --- 16j: `set -f` AROUND THE DIFF-PATH SPLIT (review-a A-11). `$LG_OUTSIDE` comes from
+# `git diff --name-only` and was expanded unquoted with no `set -f`, so a committed path
+# carrying a glob metacharacter was pathname-expanded against $REPO and the impact command
+# was handed files that were never in the diff. The sibling site in
+# hooks/dispatch-preflight.sh guards the identical construction. The main checkout below
+# holds two files the pattern matches, so an unguarded split has something to expand INTO.
+R16J="$(make_git_wave_repo r16j)"
+mkdir -p "$R16J/undeclared"
+: > "$R16J/undeclared/aX.sh"
+: > "$R16J/undeclared/aY.sh"
+WT16J=$(make_slice_tree "$R16J" slice16j)
+commit_files "$WT16J" "out of scope, with a metacharacter in the name" 'undeclared/a*.sh'
+ARGS16J="$SANDBOX/impact-args-16j.txt"
+STUB16J="$SANDBOX/impact-stub-16j.sh"
+printf '#!/bin/bash\nprintf "%%s\\n" "$@" > %s\nprintf "fake.test.sh\\tstub\\n"\n' "$ARGS16J" > "$STUB16J"
+chmod +x "$STUB16J"
+mkdir -p "$R16J/.bionic"
+printf 'impact-command: bash %s\n' "$STUB16J" > "$R16J/.bionic/config.yaml"
+add_row "$R16J" name=slice16j agent_id="$AID_A" deliverable=.bionic/docs/record/s16j.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16J" .bionic/docs/record/s16j.md
+run_gate "$GATE" "$(stop_payload "$R16J" "$SID" false)"
+expect_status "16j: a diff path carrying a glob metacharacter still refuses" "2" "$RC"
+expect_eq "16j: …and the impact command received the path from the DIFF, unexpanded" \
+  'undeclared/a*.sh' "$(cat "$ARGS16J" 2>/dev/null)"
 finish

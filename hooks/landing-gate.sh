@@ -823,9 +823,16 @@ LGDIFF
               LG_SUITES_NOTE=" (this sweep's ${LG_IMPACT_BOUND_S}s derivation budget was spent on earlier rows, so the suites these files imply are NOT named here — derive them by hand)"
             else
               LG_IMPACT_TMP="${TMPDIR:-/tmp}/bionic-lg-impact-$$-${RANDOM}.out"
+              # `set -f` AROUND THE SPLIT (review-a A-11). `$LG_OUTSIDE` is built from `git
+              # diff --name-only`, and a committed path carrying `*`, `?` or `[` would
+              # otherwise be pathname-expanded against $REPO and hand the command files
+              # that were never in the diff. The dispatch site guards the identical
+              # construction; this one did not.
+              set -f
               # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
               ( cd "$REPO" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE >"$LG_IMPACT_TMP" 2>/dev/null ) &
               LG_IMPACT_PID=$!
+              set +f
               LG_TICKS=0
               LG_OVERRAN=0
               while kill -0 "$LG_IMPACT_PID" 2>/dev/null; do
