@@ -42,6 +42,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HOOKS="$BIONIC_HOOKS_DIR"
 REPO="$BIONIC_SCRIPTS_DIR"
@@ -51,13 +52,9 @@ LOADER_LIB="$REPO/payload/scripts/lib/loader.sh"
 SANDBOX=$(mktemp -d "${TMPDIR:-/tmp}/bionic-adopt.XXXXXX") || exit 1
 trap 'rm -rf "$SANDBOX"' EXIT
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
-expect_empty() { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected empty, got [$2]"; fi; }
-expect_nonempty() { if [ -n "$2" ]; then ok "$1"; else no "$1" "expected something, got nothing"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "[$2] not found in: $3" ;; esac; }
+# expect_eq, expect_empty, expect_nonempty, expect_contains are the
+# framework's (tests/lib/assert.sh) — identical semantics to the private
+# definitions this suite carried (S7, AC-12).
 
 # ── THE ROSTER OF ADOPTED HOOKS ──────────────────────────────────────────────
 #
@@ -111,9 +108,7 @@ stop-check|open|no
 engage|open|no
 '
 
-# ============================================================
-echo "=== 0 — the carrier, the roster line, and non-vacuity ==="
-# ============================================================
+section "0 — the carrier, the roster line, and non-vacuity"
 
 if grep -q '^run "hook-adoption.test.sh" bash tests/hook-adoption.test.sh$' "$RUNNER"; then
   ok "tests/run.sh carries this suite's own run line"
@@ -139,10 +134,7 @@ want_line() {
   awk '/^# --- bionic-loader\/v2 BEGIN$/{print prev; exit} {prev=$0}' "$1"
 }
 
-# ============================================================
-echo ""
-echo "=== 1 — one idiom, byte for byte, under a WANT line that matches what is sourced ==="
-# ============================================================
+section "1 — one idiom, byte for byte, under a WANT line that matches what is sourced"
 
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
@@ -180,10 +172,7 @@ done <<EOF
 $ADOPTED
 EOF
 
-# ============================================================
-echo ""
-echo "=== 2 — one root: no hook restates the walk ==="
-# ============================================================
+section "2 — one root: no hook restates the walk"
 #
 # The eight `resolve_project_root` copies this replaces were byte-identical by
 # assertion and divergent by history; the library ends the family. Slice POKER
@@ -209,10 +198,7 @@ done <<EOF
 $ADOPTED
 EOF
 
-# ============================================================
-echo ""
-echo "=== 3 — one session id: every reader asks the library ==="
-# ============================================================
+section "3 — one session id: every reader asks the library"
 #
 # The env value is primary and the payload is a witness (design §1). A hook that
 # reads `.session_id` straight out of its payload has silently chosen the witness
@@ -243,10 +229,7 @@ SID_EXPECTED=$(printf '%s\n' $SID_READERS | sort | tr '\n' ' ' | sed 's/ $//')
 expect_eq "the session-id reader roster names every hook that calls session_id, and no other" \
   "$SID_EXPECTED" "$SID_ACTUAL"
 
-# ============================================================
-echo ""
-echo "=== 4 — one run predicate: no hook restates it, the run-scoped ones call it ==="
-# ============================================================
+section "4 — one run predicate: no hook restates it, the run-scoped ones call it"
 #
 # has_sdlc_state() was a five-copy family plus one merged reimplementation, and every
 # one of them answered "is there a run" by restating the algorithm. The library answers
@@ -336,10 +319,7 @@ expect_eq "engage reads the binding FIELD (session_plan), which is what the writ
 expect_eq "…and asks for no run VERDICT: neither session_run nor active_run" "no" \
   "$(grep -qE 'session_run "|active_run "' "$HOOKS/engage.sh" && echo yes || echo no)"
 
-# ============================================================
-echo ""
-echo "=== 5 — the predicate GATES: silent with no run, silent with a closed run, live with an open one ==="
-# ============================================================
+section "5 — the predicate GATES: silent with no run, silent with a closed run, live with an open one"
 
 SID="ad0pt111-2222-3333-4444-555555555555"
 
@@ -593,10 +573,7 @@ for hook in $RUN_SCOPED; do
   fi
 done
 
-# ============================================================
-echo ""
-echo "=== 5c — THE ENGAGEMENT SWITCH gates every hook, uniformly (task-engaged-session) ==="
-# ============================================================
+section "5c — THE ENGAGEMENT SWITCH gates every hook, uniformly (task-engaged-session)"
 #
 # §5 above asks whether a hook is silent when the RUN is closed. This asks the question
 # that scopes every hook now: is it silent when THIS SESSION never invoked canonical-sdlc?
@@ -645,10 +622,7 @@ for hook in $ENGAGEMENT_SCOPED; do
   expect_empty "$hook: …and it says nothing" "$DRV_ERR"
 done
 
-# ============================================================
-echo ""
-echo "=== 5b — the artifact wall is armed by the PROJECT, not by the run (ADOPT/5) ==="
-# ============================================================
+section "5b — the artifact wall is armed by the PROJECT, not by the run (ADOPT/5)"
 #
 # canonical-sdlc-governing-skill gates the frontmatter contract on a canonical-sdlc
 # artifact. The artifact it exists for is the one that CREATES a run, so `active_run` is
@@ -695,10 +669,7 @@ drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_FIRST"
 expect_eq "a project's FIRST artifact, written into .bionic before any run exists, is gated" \
   "2" "$DRV_ST"
 
-# ============================================================
-echo ""
-echo "=== 6 — a missing library: refused by cost, never by uniformity ==="
-# ============================================================
+section "6 — a missing library: refused by cost, never by uniformity"
 #
 # The lockout this wave is named for (R-1 §5): a wall that refused everything had no
 # way to permit the very commands that would repair it, so a broken publish locked
@@ -778,10 +749,7 @@ expect_eq "…and exactly one line on stderr" "1" "$(printf '%s\n' "$DRV_ERR" | 
 expect_contains "…naming what it could not find" "library" "$DRV_ERR"
 expect_contains "…and where to go next" "/bionic:doctor" "$DRV_ERR"
 
-# ============================================================
-echo ""
-echo "=== 6b — a closed wall's REACH: a gate with nothing to say says nothing ==="
-# ============================================================
+section "6b — a closed wall's REACH: a gate with nothing to say says nothing"
 #
 # THE BUG THIS PINS (Step-6 critic, finding 1, 2026-09-03). The evidence gate became
 # always-on this wave (AC-7) and is fail-CLOSED (AC-16). The two properties met at a
@@ -865,8 +833,7 @@ expect_eq "…and refuses [ls] there too — it cannot read the command it must 
 # `Permission denied` on every event it is registered for, and the wall it was is
 # silently gone. FIX-GATE's rewrite of patrol-duties-gate.sh dropped the bit
 # (100755 → 100644 at 24d0ddd) and nothing here noticed until a live drive did.
-echo ""
-echo "=== §EXEC — every hooks.json command file carries the exec bit ==="
+section "§EXEC — every hooks.json command file carries the exec bit"
 EXEC_MISSING=""
 EXEC_N=0
 while IFS= read -r cmdpath; do
@@ -880,8 +847,4 @@ EOF_CMDS
 expect_eq "hooks.json registers a non-empty command set" "1" "$([ "$EXEC_N" -gt 0 ] && echo 1 || echo 0)"
 expect_empty "every registered command file is executable (missing:$EXEC_MISSING)" "$EXEC_MISSING"
 
-echo ""
-echo "========================================"
-echo "hook-adoption: $PASS/$TOTAL passed"
-echo "========================================"
-[ "$FAIL" -eq 0 ]
+finish
