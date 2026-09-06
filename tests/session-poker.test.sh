@@ -28,6 +28,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
+. "$(dirname "$0")/lib/live-answer.sh"
 
 # Overridable exactly as tests/session-sweeper.test.sh offers, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -1152,14 +1153,14 @@ expect_contains "the adopted row carries the source's waiver, not an empty field
 # both of which read a `landing-swept/v1` line straight off the SAME roster file as ground
 # truth, with no re-derivation — see the same history on the successor roster that stood on
 # the predecessor's.
-RECHECK_MARKERS="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -F '|name=recheck-one|')"
+RECHECK_MARKERS="$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER" | grep -F '|name=recheck-one|')"
 expect_contains "the source's non-MET marker is copied onto the successor roster" \
   "state=UNMET" "$RECHECK_MARKERS"
 expect_eq "…verbatim, exactly once" "1" "$(printf '%s\n' "$RECHECK_MARKERS" | grep -c .)"
 # A MET marker can never reach this path — closed-one (§8d) proves the fold excludes it
 # from adoption entirely, so there is no row here for a MET marker to attach to.
 expect_absent "a MET marker is never copied — there is no adopted row it could attach to" \
-  "name=closed-one" "$(grep -F 'landing-swept/v1|' "$OWN_ROSTER")"
+  "name=closed-one" "$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER")"
 
 # A ROW WITH NO ID BUYS NOTHING, so none is written. UNADDRESSABLE is the whole point of
 # that verdict: there is no identity to file, and a row carrying an empty `agent_id=` would
@@ -1173,10 +1174,10 @@ expect_absent "…nor is the phantom id on an intended row" \
 # next resume; an append per run would grow the roster without adding a fact, and every
 # reader would re-read the same contract N times.
 _dup_before="$(grep -c -F "|name=landed-one|" "$OWN_ROSTER")"
-_marker_dup_before="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
+_marker_dup_before="$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
 poke "$R8" adopt
 _dup_after="$(grep -c -F "|name=landed-one|" "$OWN_ROSTER")"
-_marker_dup_after="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
+_marker_dup_after="$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
 expect_eq "a second adopt appends no second row for the same agent" "$_dup_before" "$_dup_after"
 expect_eq "…nor a second copy of the carried marker" "$_marker_dup_before" "$_marker_dup_after"
 
@@ -3129,26 +3130,13 @@ mkdir -p "$S19_CFG/projects/-fixture-project"
 
 s19_answer() {  # <state: fresh|stale|none> <name[:status]>... -> plants this session's transcript
   local state="$1"; shift
-  local tr="$S19_CFG/projects/-fixture-project/$SID.jsonl" body n nm st
+  local tr="$S19_CFG/projects/-fixture-project/$SID.jsonl" body
   if [ "$state" = "none" ]; then
     printf '{"type":"user","timestamp":"2026-09-05T00:50:00.000Z","message":{"role":"user","content":"go"}}\n' \
       > "$tr"
     return 0
   fi
-  body="This session is bionic-fixture [fc3e2d] — the name other sessions use to message it."
-  if [ "$#" -gt 0 ]; then
-    body="$body
-
-Teammates ($#):"
-    for n in "$@"; do
-      case "$n" in
-        *:*) nm="${n%%:*}"; st="${n##*:}" ;;
-        *)   nm="$n";       st="running"  ;;
-      esac
-      body="$body
-  ${nm} [000000]  ·  bionic:implementor  ·  ${st}  ·  started 7m ago"
-    done
-  fi
+  body="$(live_answer_body "$@")"
   {
     jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
       '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
@@ -3534,7 +3522,7 @@ bash -c '
     pred-writer apred-writer-2121212121212121 bionic:implementor \
     deliv.md prog.md "10 minutes" 2026-09-05T00:00:00Z osid addr none ""
 ' "$S21A_LIB" "$S21A_ROOT" >/dev/null 2>&1
-S21A_ROW="$(grep '^roster-state/v1|' "$S21A_ROOT/.bionic/tmp/roster-forged.state" 2>/dev/null | head -1)"
+S21A_ROW="$(grep "^${ROSTER_ROW_SCHEMA}|" "$S21A_ROOT/.bionic/tmp/roster-forged.state" 2>/dev/null | head -1)"
 expect_contains "the row IS written (21a is not vacuous)" \
   "agent_id=apred-writer-2121212121212121" "$S21A_ROW"
 expect_eq "…and the FIRST name= field a by-key reader sees is the real agent's" \

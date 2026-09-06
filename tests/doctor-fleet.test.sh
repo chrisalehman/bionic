@@ -38,6 +38,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -278,12 +280,12 @@ section "Section 5: predecessor rosters with open rows"
 # doctor's `_run_add` rather than through the live PATROL block that
 # doctor-patrol.test.sh Section 15 covers.
 {
-  printf '# bionic session roster — schema roster-state/v1\n'
-  printf 'roster-state/v1|status=intended|session=%s|name=W-ALPHA|agent_id=|launched_at=x\n' "$GONE_SID"
-  printf 'roster-state/v1|status=intended|session=%s|name=W-BETA|agent_id=|launched_at=x\n' "$GONE_SID"
-  printf 'roster-state/v1|status=intended|session=%s|name=W-GAMMA|agent_id=|launched_at=x\n' "$GONE_SID"
-  printf 'landing-swept/v1|at=2026-09-02T00:00:01Z|session=%s|name=W-ALPHA|agent_id=a000|state=MET\n' "$GONE_SID"
-  printf 'landing-swept/v1|at=2026-09-02T00:00:02Z|session=%s|name=W-GAMMA|agent_id=a001|state=UNMET\n' "$GONE_SID"
+  roster_header
+  roster_row_fixture status=intended session="$GONE_SID" name=W-ALPHA agent_id= launched_at=x
+  roster_row_fixture status=intended session="$GONE_SID" name=W-BETA  agent_id= launched_at=x
+  roster_row_fixture status=intended session="$GONE_SID" name=W-GAMMA agent_id= launched_at=x
+  swept_marker_write /dev/stdout 2026-09-02T00:00:01Z "$GONE_SID" W-ALPHA a000 MET
+  swept_marker_write /dev/stdout 2026-09-02T00:00:02Z "$GONE_SID" W-GAMMA a001 UNMET
 } > "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state"
 
 OUT6="$(run_doctor)"

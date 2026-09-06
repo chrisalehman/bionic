@@ -43,6 +43,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 HOOKS="$BIONIC_HOOKS_DIR"
 REPO="$BIONIC_SCRIPTS_DIR"
@@ -399,13 +400,17 @@ seed_hook() {  # <hook> <root>
   case "$hook" in
     landing-gate|execution-recorder|stop-guard)
       {
-        printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-        printf 'roster-state/v1|status=intended|session=%s|name=w1-impl|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=|deliverable=%s/.bionic/docs/record/never.md|duration=30 minutes|progress=|absent=|tool_use_id=toolu_ADOPT1\n' \
-          "$SID" "$root"
+        roster_header
+        roster_row_fixture status=intended session="$SID" name=w1-impl agent_id= \
+          launched_at=2026-08-05T00:00:00Z model= \
+          deliverable="$root/.bionic/docs/record/never.md" duration='30 minutes' \
+          tool_use_id=toolu_ADOPT1
         # …and the same row IDENTIFIED, which is what makes it addressable to the landing
         # sweep: a row with no agent id cannot be told apart from one still in flight.
-        printf 'roster-state/v1|status=identified|session=%s|name=w1-impl|agent_id=aw1impl-1111111111111111|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=|deliverable=%s/.bionic/docs/record/never.md|duration=30 minutes|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_ADOPT1\n' \
-          "$SID" "$root"
+        roster_row_fixture status=identified session="$SID" name=w1-impl \
+          agent_id=aw1impl-1111111111111111 launched_at=2026-08-05T00:00:00Z model= \
+          deliverable="$root/.bionic/docs/record/never.md" duration='30 minutes' \
+          tool_use_id=toolu_ADOPT1
       } > "$root/.bionic/tmp/roster-$SID.state"
       ;;
     patrol-revive)
