@@ -476,6 +476,12 @@ run "doctor-restart.test.sh" bash tests/doctor-restart.test.sh
 # run with its cwd inside a fixture project holding its own .bionic/, and the "live"
 # sessions name the suite's own pid.
 run "doctor-fleet.test.sh" bash tests/doctor-fleet.test.sh
+# wave-01-verification-cannot-lie S12 (spec AC-18, AC-19): the impacted-suite
+# derivation. Its §F planted-edit proof runs real suites against a mutated
+# scratch tree — minutes, not seconds — so it is behind BIONIC_IMPACT_PLANTED=1
+# and is NOT what this line runs; the committed record of that proof is at
+# .bionic/docs/record/wave-verification-cannot-lie/s12-planted-edits.log.
+run "impact.test.sh" bash tests/impact.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
