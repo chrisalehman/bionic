@@ -139,8 +139,67 @@ mkdir -p "$(dirname "$FIXTURE_RC")"
 # it costs nothing for the git-feed/unknown cases and removes any dependence
 # on how this suite itself was invoked, matching REPO's `git rev-parse HEAD`
 # to what a run through tests/run.sh (which itself `cd`s to $REPO) would see.
+
+# ─── THE TOOL DIRECTORY IS THE FIXTURE'S, NOT THE MACHINE'S (wave-01 S4, AC-7) ─
+#
+# WHAT THIS SUITE RENDERED USED TO DEPEND ON WHOSE LAPTOP RAN IT. doctor asks
+# `command -v` about the nine `brew-dep` rows of BIONIC_DEP_TABLE, and six of
+# them — node, gh, rg, uv, docker, aws — live under /opt/homebrew here and
+# nowhere on a stripped PATH. Under the ambient PATH those rows are present;
+# under `PATH=/usr/bin:/bin:/usr/sbin:/sbin` six more rows turn absent, the
+# dependency roster this file pins shifts by six names, and an assertion fails
+# on a page that is perfectly correct. `claude` is the same story one row over,
+# and the one that used to hurt: with the CLI off PATH four `mcp-server` rows
+# turn `unknown`.
+#
+# SO THE FIXTURE OWNS THE SET. Every program doctor RUNS is symlinked from the
+# real one; every program doctor only ASKS ABOUT is an inert stub answering
+# `--version`. PATH is REPLACED, never prepended, so nothing ambient is
+# reachable — and `claude` is present or absent because this file says so,
+# which is what makes the pair of directories below an experiment rather than
+# a reflection of the machine.
+_TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
+sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
+sleep dirname basename realpath id ps df sysctl vm_stat git strings"
+_TOOLS_STUB="node pnpm gh rg uv docker aws"
+
+make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT find
+  local d="$1" want="$2" t p missing=""
+  mkdir -p "$d"
+  for t in $_TOOLS_REAL; do
+    if p="$(command -v "$t" 2>/dev/null)"; then ln -sf "$p" "${d}/${t}"
+    else missing="${missing}${missing:+ }${t}"; fi
+  done
+  for t in $_TOOLS_STUB; do
+    printf '#!/bin/sh\ncase "$1" in --version) echo 1.0.0 ;; esac\nexit 0\n' > "${d}/${t}"
+    chmod +x "${d}/${t}"
+  done
+  # A CLI THAT ANSWERS "no such thing" to the one question doctor asks it —
+  # `claude mcp get <name>` — which is what a real CLI answers on a machine
+  # with no MCP server registered. Present-and-negative and absent are
+  # different renders, and telling them apart is this suite's AC-7 pair.
+  if [ "$want" = yes ]; then
+    printf '#!/bin/sh\nexit 1\n' > "${d}/claude"; chmod +x "${d}/claude"
+  else
+    rm -f "${d}/claude"
+  fi
+  printf '%s' "$missing"
+}
+
+BIN="${TMP}/toolbox"
+BIN_NO_CLAUDE="${TMP}/toolbox-no-claude"
+_TOOLS_MISSING="$(make_tool_dir "$BIN" yes)$(make_tool_dir "$BIN_NO_CLAUDE" no)"
+if [ -z "$_TOOLS_MISSING" ]; then ok "T0: the fixture's tool directory carries every program doctor runs"
+else no "T0: a program doctor runs is missing from the fixture's tool directory" "$_TOOLS_MISSING"; fi
+
 run_doctor() {  # <claude-home> [shell-rc]
-  ( cd "$REPO" && HOME="$TMP" BIONIC_SHELL_RC="${2:-$FIXTURE_RC}" \
+  ( cd "$REPO" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="${2:-$FIXTURE_RC}" \
+      BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      bash "$DOCTOR_SH" < /dev/null 2>&1 )
+}
+
+run_doctor_no_claude() {  # <claude-home> — the same page with the CLI off PATH
+  ( cd "$REPO" && HOME="$TMP" PATH="$BIN_NO_CLAUDE" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$1" BIONIC_PLUGIN_ROOT="$PAYLOAD" BIONIC_DOCTOR_PROBE_SECONDS=3 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
@@ -530,6 +589,27 @@ expect_no_match "40: no update command rides an ahead row" \
 expect_no_match "41: an ahead install raises no verdict line" \
   "*claude plugin update bionic@bionic*" "$OUT11"
 expect_no_match "42: an ahead install is not marked broken" "*✗ version*" "$ROW11"
+
+
+echo ""
+echo "=== Section 12: the claude CLI absent, and present, on one fixture (AC-7) ==="
+
+# THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
+# `claude` is the one program on the fixture's PATH whose presence changes what
+# this page says: the four `mcp-server` rows are checked with `claude mcp get`,
+# so with the CLI gone they turn from a plain absence into an UNKNOWN with a
+# cause, and one of the fix lines that renders from that cause measured 105
+# columns. Before the tool directory above, which half a run got was whatever
+# the runner's PATH happened to hold. Now the fixture says, and both halves are
+# asserted here — the absent render, and the present one that proves the absent
+# assertion is not matching everything.
+OUT_NOCLI="$(run_doctor_no_claude "$HOME1")"
+OUT_WITHCLI="$(run_doctor "$HOME1")"
+
+expect_match "43: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
+expect_no_match "44: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
+expect_match "45: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
+expect_all_lines_fit "46: the CLI-absent page still fits the budget" "$OUT_NOCLI"
 
 echo ""
 echo "========================================"

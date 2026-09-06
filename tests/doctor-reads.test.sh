@@ -82,16 +82,70 @@ mkdir -p "${CHOME}/plugins"
 FIXTURE_RC="${TMP}/dot.zshrc"
 : > "$FIXTURE_RC"
 
-# A pnpm that answers nothing: the store path comes from BIONIC_PNPM_STORE in
-# every case below, so the shim exists only to make `command -v pnpm` true.
-SHIMS="${TMP}/bin"
-mkdir -p "$SHIMS"
-printf '#!/bin/sh\nexit 0\n' > "${SHIMS}/pnpm"
-chmod +x "${SHIMS}/pnpm"
+
+# ─── THE TOOL DIRECTORY IS THE FIXTURE'S, NOT THE MACHINE'S (wave-01 S4, AC-7) ─
+#
+# WHAT THIS SUITE RENDERED USED TO DEPEND ON WHOSE LAPTOP RAN IT. doctor asks
+# `command -v` about the nine `brew-dep` rows of BIONIC_DEP_TABLE, and six of
+# them — node, gh, rg, uv, docker, aws — live under /opt/homebrew here and
+# nowhere on a stripped PATH. Under the ambient PATH those rows are present;
+# under `PATH=/usr/bin:/bin:/usr/sbin:/sbin` six more rows turn absent, the
+# dependency roster this file pins shifts by six names, and an assertion fails
+# on a page that is perfectly correct. `claude` is the same story one row over,
+# and the one that used to hurt: with the CLI off PATH four `mcp-server` rows
+# turn `unknown`.
+#
+# SO THE FIXTURE OWNS THE SET. Every program doctor RUNS is symlinked from the
+# real one; every program doctor only ASKS ABOUT is an inert stub answering
+# `--version`. PATH is REPLACED, never prepended, so nothing ambient is
+# reachable — and `claude` is present or absent because this file says so,
+# which is what makes the pair of directories below an experiment rather than
+# a reflection of the machine.
+_TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
+sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
+sleep dirname basename realpath id ps df sysctl vm_stat git strings"
+_TOOLS_STUB="node pnpm gh rg uv docker aws"
+
+make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT find
+  local d="$1" want="$2" t p missing=""
+  mkdir -p "$d"
+  for t in $_TOOLS_REAL; do
+    if p="$(command -v "$t" 2>/dev/null)"; then ln -sf "$p" "${d}/${t}"
+    else missing="${missing}${missing:+ }${t}"; fi
+  done
+  for t in $_TOOLS_STUB; do
+    printf '#!/bin/sh\ncase "$1" in --version) echo 1.0.0 ;; esac\nexit 0\n' > "${d}/${t}"
+    chmod +x "${d}/${t}"
+  done
+  # A CLI THAT ANSWERS "no such thing" to the one question doctor asks it —
+  # `claude mcp get <name>` — which is what a real CLI answers on a machine
+  # with no MCP server registered. Present-and-negative and absent are
+  # different renders, and telling them apart is this suite's AC-7 pair.
+  if [ "$want" = yes ]; then
+    printf '#!/bin/sh\nexit 1\n' > "${d}/claude"; chmod +x "${d}/claude"
+  else
+    rm -f "${d}/claude"
+  fi
+  printf '%s' "$missing"
+}
+
+BIN="${TMP}/toolbox"
+BIN_NO_CLAUDE="${TMP}/toolbox-no-claude"
+_TOOLS_MISSING="$(make_tool_dir "$BIN" yes)$(make_tool_dir "$BIN_NO_CLAUDE" no)"
+if [ -z "$_TOOLS_MISSING" ]; then ok "T0: the fixture's tool directory carries every program doctor runs"
+else no "T0: a program doctor runs is missing from the fixture's tool directory" "$_TOOLS_MISSING"; fi
 
 run_doctor() {  # [extra env assignments as NAME=VALUE ...]
   ( cd "$REPO" && env "$@" \
-      PATH="${SHIMS}:${PATH}" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      PATH="$BIN" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+      BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      bash "$DOCTOR_SH" < /dev/null 2>&1 )
+}
+
+run_doctor_no_claude() {  # [extra env assignments] — the CLI off PATH
+  ( cd "$REPO" && env "$@" \
+      PATH="$BIN_NO_CLAUDE" HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
       BIONIC_DOCTOR_PROBE_SECONDS=3 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
@@ -401,6 +455,12 @@ expect_match "12f6: the core absences get their own line, with the route on it" 
 d6f_problems() {  # <doctor report> -> the N in "→ N problems."
   sed -n 's/^→ \([0-9][0-9]*\) problem.*/\1/p' <<<"$1" | head -1
 }
+# EVERY ✗ ON THE PAGE, whichever table it is in — the unit doctor's own comment
+# says the headline is counted in ("THE PROBLEM COUNT IS ROWS, NOT CATEGORIES").
+page_bad_rows() {  # <doctor report> -> the count of ✗ rows anywhere in it
+  grep -c '^  ✗' <<<"$1" || true
+}
+
 d6f_bad_dep_rows() {  # <doctor report> -> the count of ✗ rows in the THIRD PARTY table
   awk '/^THIRD PARTY/ { i = 1; next }
        i && /^[A-Z][A-Z]/ { exit }
@@ -426,6 +486,24 @@ expect_match "12f9: both renders report a problem count" \
   "[0-9]*|[0-9]*" "${D6F_N_BAD}|${D6F_N_OK}"
 expect_eq "12f10: …and the core-absent machine carries exactly two more ✗ dependency rows" \
   "2" "$(( D6F_ROWS_BAD - D6F_ROWS_OK ))"
+# THE HEADLINE COUNT AGAINST THE ROWS IT STANDS FOR (1.4.4 A-10, folded in at
+# wave-01 S4 as this slice's one agreement assertion). The 1.4.4 walk measured a
+# machine whose headline said 21 while 24 ✗ rows were printed under it — the
+# collapse arithmetic subtracting one line per collapsed CLASS while the rows it
+# stood for were counted somewhere else. Two numbers on one page, disagreeing,
+# and nothing said so.
+#
+# THE GENERAL RULE IS `count >= rows`: every ✗ row is a problem, so the headline
+# can never be the smaller number, and the 1.4.4 defect is exactly that
+# inequality broken. ON THIS FIXTURE IT IS EQUALITY, which is the sharper pin
+# and the one taken here, because every problem this machine has renders as a
+# row — no stale proxy, no legacy block, no degraded plugin, none of the states
+# that earn a fix line without a table row. A fixture change that adds one of
+# those turns this into a legitimate inequality and this assertion into the
+# place to say so.
+expect_eq "12f18: the headline count agrees with the ✗ rows it stands for" \
+  "$(page_bad_rows "$OUT6F")" "$D6F_N_BAD"
+
 expect_eq "12f11: …so it reports exactly two more problems, not three" \
   "$(( D6F_ROWS_BAD - D6F_ROWS_OK ))" "$(( D6F_N_BAD - D6F_N_OK ))"
 
@@ -548,6 +626,29 @@ expect_true "14: tests/run.sh names doctor-reads.test.sh" \
 _over="$(too_wide "$OUT6")"
 if [ -z "$_over" ]; then ok "15: every line of the fullest run fits 100 columns"
 else no "15: a line exceeds 100 columns" "$_over"; fi
+
+
+echo ""
+echo "=== Section 9: the claude CLI absent, and present, on one fixture (AC-7) ==="
+
+# THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
+# `claude` is the one program on the fixture's PATH whose presence changes what
+# this page says: the four `mcp-server` rows are checked with `claude mcp get`,
+# so with the CLI gone they turn from a plain absence into an UNKNOWN with a
+# cause, and one of the fix lines that renders from that cause measured 105
+# columns. Before the tool directory above, which half a run got was whatever
+# the runner's PATH happened to hold. Now the fixture says, and both halves are
+# asserted here — the absent render, and the present one that proves the absent
+# assertion is not matching everything.
+OUT_NOCLI="$(run_doctor_no_claude "BIONIC_PNPM_STORE=${FULL_STORE}")"
+OUT_WITHCLI="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
+
+expect_match "16.1: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
+expect_no_match "16.2: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
+expect_match "16.3: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
+_over="$(too_wide "$OUT_NOCLI")"
+if [ -z "$_over" ]; then ok "16.4: the CLI-absent page still fits 100 columns"
+else no "16.4: a line of the CLI-absent page exceeds 100 columns" "$_over"; fi
 
 echo ""
 echo "========================================"
