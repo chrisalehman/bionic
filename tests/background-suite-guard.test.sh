@@ -327,4 +327,53 @@ guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" false
 expect_eq "B7c run_in_background false is not backgrounded, and on-budget passes" "0" "$ST"
 expect_empty "B7c …silently" "$OUT$ERR"
 
+section "B8 — the arm is scoped to THIS repo, and a mode that runs nothing spends nothing"
+# THE THREE FALSE REFUSALS (critic K-2, review-a A-7, the walk A-36a). The reading behind
+# this arm used to answer with a bare basename, so any file on the machine ending
+# `.test.sh` was judged against this row's budget, and `--dry-run` — documented as "run
+# nothing" — was refused on the same terms as a forty-minute run.
+
+guarded "$R1" 'bash tests/run.sh --dry-run'
+expect_eq "B8a the runner's --dry-run mode is ALLOWED against a narrow budget" "0" "$ST"
+expect_empty "B8a …silently" "$OUT$ERR"
+
+# CONTROL: the same command without the flag is the full tree, and still refused.
+guarded "$R1" 'bash tests/run.sh'
+expect_eq "B8b control: without the flag the full tree is still REFUSED" "2" "$ST"
+
+# A SUITE FILE THAT IS NOT THIS REPO'S is not this row's business either.
+guarded "$R1" 'bash /tmp/scratch-probe/probe2.test.sh'
+expect_eq "B8c an off-budget basename OUTSIDE the repo is allowed" "0" "$ST"
+expect_empty "B8c …silently" "$OUT$ERR"
+guarded "$R1" 'bash /some/other/tree/tests/run.sh'
+expect_eq "B8d …and so is a full tree that is not this one" "0" "$ST"
+
+# CONTROL: the same basename inside the repo is refused, so B8c is scoping and not silence.
+guarded "$R1" 'bash tests/probe2.test.sh'
+expect_eq "B8e control: the same basename INSIDE the repo is REFUSED" "2" "$ST"
+
+# THE SPLIT IS GUARDED. `bash tests/*.test.sh` names the literal `*.test.sh`, and the loop
+# that reads the targets runs with `set -f` — so the HOOK PROCESS'S OWN CWD cannot expand
+# that word into whatever files happen to sit there (review-a A-7b). The cwd below holds
+# `alpha.test.sh` and `beta.test.sh`, which are exactly this row's budget: without the
+# guard the word expands into two allowed names and the command passes.
+BSG_GLOBDIR="$SANDBOX/globcwd"
+mkdir -p "$BSG_GLOBDIR"
+: > "$BSG_GLOBDIR/alpha.test.sh"
+: > "$BSG_GLOBDIR/beta.test.sh"
+guarded_from() {  # <cwd for the hook process> <repo> <command>
+  local _dir="$1" _payload
+  _payload=$(mk_payload "$2" "$3" "$ACTOR" omit)
+  OUT=$(cd "$_dir" && printf '%s' "$_payload" | env HOME="$FAKE_HOME" \
+          CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+          CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+          bash "$CTX_GUARD" "$GUARD" 2>"$SANDBOX/.err")
+  ST=$?
+  ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+guarded_from "$BSG_GLOBDIR" "$R1" 'bash tests/*.test.sh'
+expect_eq "B8f a glob target is REFUSED by its literal name" "2" "$ST"
+expect_contains "B8f …naming the unexpanded word, not the files beside the hook" "*.test.sh" "$ERR"
+
 finish

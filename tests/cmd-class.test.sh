@@ -793,4 +793,69 @@ for fileless in 'pytest' 'npm test' 'go test ./...' 'make test' 'make check' 'ca
 done
 
 
+section "C8 — the SCOPED reading: which repo's suite, and a mode that runs nothing (K-2, A-7, A-36a)"
+# THE DEFECT. `cmd_suite_targets` answered with a BASENAME and nothing else, so the budget
+# arm judged any file on the machine named `*.test.sh` against THIS repository's roster.
+# Three false refusals were hit without trying (critic K-2): a scratch probe at
+# /tmp/critic-probe/probe2.test.sh, an unexpanded `$t.test.sh`, and `bash tests/run.sh
+# --dry-run`, a mode whose whole documented behaviour is to run nothing (the walk, A-36a).
+#
+# THE CURE, in two halves. (a) An optional SECOND argument names the repository the answer
+# is about; with it, a segment names a target only when the path it runs resolves to that
+# repo's `tests/<basename>`. (b) A suite-class segment carrying `--dry-run` names no target
+# at all — the runner's own "run nothing" mode is not an instrument spend.
+#
+# WHY SHAPE AND NOT EXISTENCE. The resolved path is compared to `<root>/tests/<basename>`;
+# it is NOT stat'd. A hook that refused only files it could see would allow a suite the
+# writer is about to create, and would make the wall's answer depend on the filesystem at
+# hook time rather than on the command. The class this closes is "a path somewhere else",
+# and the path says that on its own.
+
+targets_of_in() {  # <repo root> <command> -> the library's targets, scoped to that root
+  printf '%s' "$2" | bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_suite_targets "$(cat)" "$2"
+  ' _ "$LIB" "$1" 2>&1
+}
+
+C8_ROOT="$SANDBOX/c8repo"
+mkdir -p "$C8_ROOT/tests"
+
+targets_in_are() {  # <expected> <command>
+  expect_eq "C8 targets [$2] under the repo root" "$1" "$(targets_of_in "$C8_ROOT" "$2")"
+}
+
+# --- (a) this repo's tests/, and nothing else ---
+targets_in_are 'run.sh'          'bash tests/run.sh'
+targets_in_are 'run.sh'          './tests/run.sh'
+targets_in_are 'alpha.test.sh'   'bash tests/alpha.test.sh'
+targets_in_are 'alpha.test.sh'   "bash $C8_ROOT/tests/alpha.test.sh"
+# …and the same basename anywhere else on the machine is NOT this row's business.
+targets_in_are ''                'bash /tmp/critic-probe/probe2.test.sh'
+targets_in_are ''                'bash /some/other/tree/tests/run.sh'
+targets_in_are ''                'bash ../sibling/tests/alpha.test.sh'
+targets_in_are ''                'bash scratch/alpha.test.sh'
+
+# THE cd-LICENSED BASENAME FORM STAYS NAMED. `cd tests && bash run.sh` records no
+# directory to resolve against, so the reading cannot say which tree it is in — and the
+# full tree is the one act this arm fails CLOSED on. Named, therefore refusable.
+targets_in_are 'run.sh'          'cd tests && bash run.sh'
+
+# AN UNEXPANDED VARIABLE STAYS NAMED TOO, deliberately: the guard has a refusal written
+# for exactly this state (C-5), and it can only give it if the reading hands the token up.
+targets_in_are '$s.test.sh'      'bash "tests/$s.test.sh"'
+
+# --- (b) --dry-run runs nothing, so it spends nothing ---
+targets_in_are ''                'bash tests/run.sh --dry-run'
+targets_in_are ''                'bash tests/run.sh --dry-run 2>&1 | tee /tmp/d.log'
+expect_eq "C8 …and --dry-run is still suite-CLASS (the class arm is unchanged)" \
+  "suite" "$(class_of 'bash tests/run.sh --dry-run')"
+# The exemption is the flag, not the runner: a real run beside it is still named.
+targets_in_are 'run.sh'          'bash tests/run.sh --serial'
+
+# --- the unscoped call is unchanged: no root, the legacy basename answer ---
+expect_eq "C8 with no root the answer is the bare basename, as before" \
+  "probe2.test.sh" "$(targets_of 'bash /tmp/critic-probe/probe2.test.sh')"
+
 finish
