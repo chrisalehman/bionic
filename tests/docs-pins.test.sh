@@ -101,6 +101,7 @@ fi
 
 # --- Anti-vacuity: the same extractors must discriminate a real mismatch ---
 
+anchor "$HELP_MD" "bionic ${PLUGIN_VERSION} (installed)" 1
 DOCTORED_HELP="$TMP/help-mismatched.md"
 sed "s/^bionic ${PLUGIN_VERSION} (installed)\$/bionic 0.0.0-mismatch (installed)/" \
   "$HELP_MD" > "$DOCTORED_HELP"
@@ -108,6 +109,7 @@ DOCTORED_HELP_VERSION="$(help_version_of "$DOCTORED_HELP")"
 expect_ne "5: a doctored help.md with a different version reads as a different version (pin discriminates)" \
   "$PLUGIN_VERSION" "$DOCTORED_HELP_VERSION"
 
+anchor "$PLUGIN_JSON" '"version"' 1
 DOCTORED_PLUGIN="$TMP/plugin-mismatched.json"
 jq --arg v "0.0.0-mismatch" '.version = $v' "$PLUGIN_JSON" > "$DOCTORED_PLUGIN"
 DOCTORED_PLUGIN_VERSION="$(plugin_version_of "$DOCTORED_PLUGIN")"
@@ -400,6 +402,7 @@ fi
 
 # --- Anti-vacuity: the same extractors must report a mutation ---
 
+anchor "$SKILL_MD" 'never re-derived downstream' 1
 DOCTORED_SKILL="$TMP/skill-mutated.md"
 sed 's/never re-derived downstream/re-derived wherever convenient/' "$SKILL_MD" > "$DOCTORED_SKILL"
 if has_pin "$DOCTORED_SKILL" "$PIN_PROBE"; then
@@ -409,19 +412,18 @@ else
   ok "17: a doctored SKILL.md fails the probe pin (pin discriminates)"
 fi
 
+anchor "$SURVIVAL_BLOCK" 'only when your brief names a ceiling' 1
 DOCTORED_BLOCK="$TMP/survival-mutated.md"
 sed 's/only when your brief names a ceiling/whenever you feel the machine is busy/' \
   "$SURVIVAL_BLOCK" > "$DOCTORED_BLOCK"
-if cmp -s "$SURVIVAL_BLOCK" "$DOCTORED_BLOCK"; then
-  no "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_BLOCK" "$PIN_JOBS"; then
+if has_pin "$DOCTORED_BLOCK" "$PIN_JOBS"; then
   no "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)" \
      "the mutated copy still matched — the pin is vacuous"
 else
   ok "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)"
 fi
 
+anchor "$AGENT_RULES" 'the address that survives' 1
 DOCTORED_RULES="$TMP/rules-mutated.md"
 sed 's/the address that survives/the address that dies/' "$AGENT_RULES" > "$DOCTORED_RULES"
 expect_ne "19: a doctored agent-discipline.md reads as a different paragraph (pin discriminates)" \
@@ -490,6 +492,7 @@ fi
 
 # --- Anti-vacuity: the same extractor must report a mutation ---
 
+anchor "$SKILL_MD" 'never to re-derive the budget' 1
 DOCTORED_SCHED="$TMP/skill-sched-mutated.md"
 sed 's/never to re-derive the budget/and to re-derive the budget/' "$SKILL_MD" > "$DOCTORED_SCHED"
 if has_pin "$DOCTORED_SCHED" "$PIN_THROTTLE"; then
@@ -499,6 +502,7 @@ else
   ok "23: a doctored SKILL.md fails the throttle pin (pin discriminates)"
 fi
 
+anchor "$SKILL_MD" 'decides QUIET, never REFUSED' 1
 DOCTORED_SCHED2="$TMP/skill-sched-mutated-2.md"
 sed 's/decides QUIET, never REFUSED/is REFUSED/' "$SKILL_MD" > "$DOCTORED_SCHED2"
 if has_pin "$DOCTORED_SCHED2" "$PIN_QUIET"; then
@@ -572,27 +576,19 @@ esac
 
 # --- Anti-vacuity: the same extractors must report a mutation, from either side ---
 
+anchor "$SKILL_MD" 'its first token `bionic-patrol session=' 1
 DOCTORED_TICK_DOC="$TMP/skill-tick-mutated.md"
 sed 's/its first token `bionic-patrol session=/its first token `bionic patrol session=/' \
   "$SKILL_MD" > "$DOCTORED_TICK_DOC"
-if cmp -s "$SKILL_MD" "$DOCTORED_TICK_DOC"; then
-  no "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-else
-  expect_ne "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
-    "$TICK_CODE" "$(tick_literal_doc "$DOCTORED_TICK_DOC")"
-fi
+expect_ne "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
+  "$TICK_CODE" "$(tick_literal_doc "$DOCTORED_TICK_DOC")"
 
+anchor -E "$TICK_GATE" '^TICK_MARK="bionic-patrol session=' 1
 DOCTORED_TICK_CODE="$TMP/patrol-duties-gate-mutated.sh"
 sed 's/^TICK_MARK="bionic-patrol session=/TICK_MARK="bionic-patrol sid=/' \
   "$TICK_GATE" > "$DOCTORED_TICK_CODE"
-if cmp -s "$TICK_GATE" "$DOCTORED_TICK_CODE"; then
-  no "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
-     "the sed target matched nothing — the assignment moved"
-else
-  expect_ne "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
-    "$TICK_DOC" "$(tick_literal_code "$DOCTORED_TICK_CODE")"
-fi
+expect_ne "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
+  "$TICK_DOC" "$(tick_literal_code "$DOCTORED_TICK_CODE")"
 
 #
 # SECTION 5 — the session-bound run, and the bind step in the resume ritual (wave-session-bound-run, A4/AC-5/AC-8).
@@ -685,40 +681,32 @@ expect_eq "34: …and the verb both sides name is 'session-poker.sh bind <plan>'
 
 # --- Anti-vacuity: the same extractors and pins must report a mutation ---
 
+anchor "$SKILL_MD" 'Only an UNBOUND session falls back' 1
 DOCTORED_BOUND="$TMP/skill-bound-run-mutated.md"
 sed 's/Only an UNBOUND session falls back/Every session falls back/' "$SKILL_MD" > "$DOCTORED_BOUND"
-if cmp -s "$SKILL_MD" "$DOCTORED_BOUND"; then
-  no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_BOUND" "$PIN_FALLBACK"; then
+if has_pin "$DOCTORED_BOUND" "$PIN_FALLBACK"; then
   no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
   ok "35: a doctored SKILL.md fails the fallback pin (pin discriminates)"
 fi
 
+anchor "$SKILL_MD" 'binds its run before it adopts anything' 1
 DOCTORED_BIND="$TMP/skill-bind-step-mutated.md"
 sed 's/binds its run before it adopts anything/adopts before it binds anything/' \
   "$SKILL_MD" > "$DOCTORED_BIND"
-if cmp -s "$SKILL_MD" "$DOCTORED_BIND"; then
-  no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_BIND" "$PIN_BIND_STEP"; then
+if has_pin "$DOCTORED_BIND" "$PIN_BIND_STEP"; then
   no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
      "the pin matched a copy that puts adopt first"
 else
   ok "36: a reordered resume ritual fails the bind-step pin (pin discriminates)"
 fi
 
+anchor "$POKER_SH" 'session-poker.sh bind <plan>' 1
 DOCTORED_BIND_VERB="$TMP/session-poker-verb-mutated.sh"
 sed 's/session-poker\.sh bind <plan>/session-poker.sh bindrun <plan>/' "$POKER_SH" > "$DOCTORED_BIND_VERB"
-if cmp -s "$POKER_SH" "$DOCTORED_BIND_VERB"; then
-  no "37: a renamed poker verb splits from the doc (pin discriminates)" \
-     "the sed target matched nothing — the usage line moved"
-else
-  expect_ne "37: a renamed poker verb splits from the doc (pin discriminates)" \
-    "$BIND_DOC" "$(bind_verb_code "$DOCTORED_BIND_VERB")"
-fi
+expect_ne "37: a renamed poker verb splits from the doc (pin discriminates)" \
+  "$BIND_DOC" "$(bind_verb_code "$DOCTORED_BIND_VERB")"
 
 if has_pin "$SKILL_MD" "$PIN_SCOPE_PAIR"; then
   ok "38: SKILL.md's two-facts sentence names the SESSION's bound run, not the project's"
@@ -735,13 +723,11 @@ else
 fi
 
 # Anti-vacuity for 38, same pattern as 35/36: the extractor must report a doctored copy.
+anchor "$SKILL_MD" 'which run this SESSION is bound to' 1
 DOCTORED_SCOPE="$TMP/skill-scope-mutated.md"
 sed 's/which run this SESSION is bound to/whether this PROJECT has an OPEN run/' \
   "$SKILL_MD" > "$DOCTORED_SCOPE"
-if cmp -s "$SKILL_MD" "$DOCTORED_SCOPE"; then
-  no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_SCOPE" "$PIN_SCOPE_PAIR"; then
+if has_pin "$DOCTORED_SCOPE" "$PIN_SCOPE_PAIR"; then
   no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
@@ -777,24 +763,20 @@ else
      "file: $SKILL_MD"
 fi
 
+anchor "$SKILL_MD" 'recreate one entry per step' 1
 DOCTORED_TASKLIST="$TMP/skill-tasklist-mutated.md"
 sed 's/recreate one entry per step/recreate one entry per slice only/' "$SKILL_MD" > "$DOCTORED_TASKLIST"
-if cmp -s "$SKILL_MD" "$DOCTORED_TASKLIST"; then
-  no "50: a doctored SKILL.md fails the task-list pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_TASKLIST" "$PIN_TASKLIST"; then
+if has_pin "$DOCTORED_TASKLIST" "$PIN_TASKLIST"; then
   no "50: a doctored SKILL.md fails the task-list pin (pin discriminates)" \
      "the pin matched a doctored copy"
 else
   ok "50: a doctored SKILL.md fails the task-list pin (pin discriminates)"
 fi
 
+anchor "$SKILL_MD" 'NARROW and RELAX are retired' 1
 DOCTORED_RUNG="$TMP/skill-rung-mutated.md"
 sed 's/NARROW and RELAX are retired/NARROW and RELAX still apply/' "$SKILL_MD" > "$DOCTORED_RUNG"
-if cmp -s "$SKILL_MD" "$DOCTORED_RUNG"; then
-  no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_RUNG" "$PIN_RUNG"; then
+if has_pin "$DOCTORED_RUNG" "$PIN_RUNG"; then
   no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
      "the pin matched a doctored copy"
 else
@@ -839,12 +821,10 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40.
+anchor "$SKILL_MD" 'sparing every session-keyed file' 1
 DOCTORED_TMP="$TMP/skill-tmp-wipe-mutated.md"
 sed 's/sparing every session-keyed file/taking every file/' "$SKILL_MD" > "$DOCTORED_TMP"
-if cmp -s "$SKILL_MD" "$DOCTORED_TMP"; then
-  no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
+if has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
   no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
@@ -882,13 +862,11 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40/44.
+anchor "$SKILL_MD" 'its operand may be absolute, project-root-relative, or docs-root-relative' 1
 DOCTORED_OPERAND="$TMP/skill-bind-operand-mutated.md"
 sed 's/its operand may be absolute, project-root-relative, or docs-root-relative/its operand must be absolute/' \
   "$SKILL_MD" > "$DOCTORED_OPERAND"
-if cmp -s "$SKILL_MD" "$DOCTORED_OPERAND"; then
-  no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_OPERAND" "$PIN_BIND_OPERAND"; then
+if has_pin "$DOCTORED_OPERAND" "$PIN_BIND_OPERAND"; then
   no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
@@ -897,12 +875,10 @@ fi
 
 # Anti-vacuity for 46: a poker with the fallback line deleted must fail the same regex, so
 # assertion 46 is proven to discriminate rather than matching everything by accident.
+anchor "$POKER_SH" 'BIND_DOCS_TRY=' 1
 DOCTORED_POKER_NO_FALLBACK="$TMP/session-poker-no-docs-fallback.sh"
 /usr/bin/grep -v 'BIND_DOCS_TRY=' "$POKER_SH" > "$DOCTORED_POKER_NO_FALLBACK"
-if cmp -s "$POKER_SH" "$DOCTORED_POKER_NO_FALLBACK"; then
-  no "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)" \
-     "the grep -v target matched nothing — the fallback line moved"
-elif /usr/bin/grep -Eq "$BIND_DOCS_FALLBACK_RE" "$DOCTORED_POKER_NO_FALLBACK"; then
+if /usr/bin/grep -Eq "$BIND_DOCS_FALLBACK_RE" "$DOCTORED_POKER_NO_FALLBACK"; then
   no "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)" \
      "the regex matched a copy with the fallback line removed"
 else
@@ -929,13 +905,11 @@ else
 fi
 
 # Anti-vacuity, same 47-style shape: a doctored SKILL.md must fail the pin above.
+anchor "$SKILL_MD" 'Each brief in the batch points the writer at the rung' 1
 DOCTORED_SKILL_JOBS="$TMP/skill-jobs-mutated.md"
 sed 's/Each brief in the batch points the writer at the rung/Each brief in the batch reads the frozen literal/' \
   "$SKILL_MD" > "$DOCTORED_SKILL_JOBS"
-if cmp -s "$SKILL_MD" "$DOCTORED_SKILL_JOBS"; then
-  no "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"; then
+if has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"; then
   no "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
@@ -983,12 +957,11 @@ expect_eq "58: …and that default really is 20 minutes, in seconds" "1200" "$PO
 
 # ANTI-VACUITY, the same doctored-copy shape as 50/51/54: a SKILL.md whose interval was
 # reverted to the pre-wave 30m must fail both prose pins.
+anchor "$SKILL_MD" 'default 20m' 1
+anchor "$SKILL_MD" 'every 20 minutes' 1
 DOCTORED_INTERVAL="$TMP/skill-interval-mutated.md"
 sed 's/default 20m/default 30m/; s/every 20 minutes/every 30 minutes/' "$SKILL_MD" > "$DOCTORED_INTERVAL"
-if cmp -s "$SKILL_MD" "$DOCTORED_INTERVAL"; then
-  no "59: a doctored SKILL.md fails both interval pins (they discriminate)" \
-     "the sed targets matched nothing — the sentences moved"
-elif has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_KNOB" || has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_CRON"; then
+if has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_KNOB" || has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_CRON"; then
   no "59: a doctored SKILL.md fails both interval pins (they discriminate)" \
      "a pin matched a copy carrying the pre-wave 30m"
 else
@@ -1031,13 +1004,11 @@ for _p in FILES DERIVE DECLARE WAIVER NEITHER REGRESSION; do
   fi
 done
 
+anchor "$SKILL_MD" '`Files:` on a line of its own names the paths this slice will write' 1
 DOCTORED_S13="$TMP/skill-s13-mutated.md"
 sed 's/`Files:` on a line of its own names the paths this slice will write/the brief says what it likes/' \
   "$SKILL_MD" > "$DOCTORED_S13"
-if cmp -s "$SKILL_MD" "$DOCTORED_S13"; then
-  no "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_S13" "$PIN_S13_FILES"; then
+if has_pin "$DOCTORED_S13" "$PIN_S13_FILES"; then
   no "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)" \
      "the pin matched a copy with the sentence removed"
 else
