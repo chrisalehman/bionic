@@ -21,6 +21,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 # Overridable so the table can be driven against a MUTATED COPY without the
 # shipped file ever being modified — §9's mutation-and-restore proof, repeatable
@@ -68,11 +69,6 @@ chmod +x "$SANDBOX/stub/security"
 # DIFFERENT blocking probe (start:probe-refuses breaks the state-dir probe, per
 # w2-s45-wallfacts.md §5 judgment call 9: never an absent credential).
 printf '{}' > "$CLAUDE_CONFIG_DIR/.credentials.json"
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -588,7 +584,7 @@ stop|observed|0|silent|Stop gate — the positive pair: a fresh observation perm
 stop|unrostered-full-id|2|loud|Stop gate — after the verdict: CLOSED, loud
 '
 
-echo "=== §7 rows driven as behaviour (AC-10) ==="
+section "§7 rows driven as behaviour (AC-10)"
 while IFS='|' read -r surface cond want_exit want_loud row; do
   [ -n "$surface" ] || continue
   drive "$surface:$cond"
@@ -629,8 +625,7 @@ $(printf '%s' "$TABLE")
 EOF
 
 # ============================================================
-echo ""
-echo "=== the asymmetry itself: ONE missing field, TWO directions ==="
+section "the asymmetry itself: ONE missing field, TWO directions"
 # ============================================================
 #
 # Checklist A10's defect was not a wrong direction — it was that no test asserted
@@ -652,8 +647,7 @@ fi
 expect_eq "the open side stays silent about it" "" "$S_START_ERR"
 
 # ============================================================
-echo ""
-echo "=== the producer's two rows (§7 rows 4 and 5) ==="
+section "the producer's two rows (§7 rows 4 and 5)"
 # ============================================================
 
 P_REPO="$SANDBOX/w/producer/repo"; mkdir -p "$P_REPO/.bionic/tmp"
@@ -687,7 +681,5 @@ OUT=$( cd "$P_REPO" && env -u ANTHROPIC_API_KEY CLAUDE_CODE_SESSION_ID="$SID_A" 
 expect_eq "environment check with a failing blocking probe exits 1" "1" "$ST"
 expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR_A" ] && echo yes || echo no)"
 
-echo ""
-echo "──────────────────────────────────────────────"
-echo "fail-direction-table: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
+finish
 [ "$FAIL" -eq 0 ]
