@@ -798,9 +798,19 @@ setup_load_state() {
     failed)
       # A real error, so it is reported the way the contract requires: the CLI's
       # own words first, unedited, then one line naming what to do about them.
+      #
+      # THE FOURTH RENDERER OF ONE ROUTE (bionic 1.4.4 fixit, phase 2). This line
+      # used to spell the repair by hand — "reinstall bionic with: claude plugin
+      # install <id> --scope user --yes" — which is the wording A-1 refutes:
+      # bionic is installed and registered, and a dependency is missing. The verb
+      # coincides, the description does not. It comes from deps.sh now, like the
+      # three renderers beside it, so a machine that re-points bionic's catalog
+      # moves all four together. What did NOT change is the order: the CLI's own
+      # error is still printed first and unedited, and this is still one line
+      # under it. Pinned by tests/fresh-home.test.sh Group 14.
       say "   bionic is installed but did not load. The CLI reports:"
       say "   ${err}"
-      say "   Fix: install what the message names, then start a new session — or reinstall bionic with: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes"
+      say "   Fix: install what the message names, then start a new session — or re-resolve bionic's dependencies: $(dep_core_repair_route)"
       action "bionic did not load: ${err}"
       ;;
     absent)

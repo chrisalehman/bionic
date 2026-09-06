@@ -499,9 +499,21 @@ case "${1:-}" in
             printf ']\n'
             ;;
           *)
+            # THE STATE THIS SHIM COULD NOT REPORT until 1.4.4's fixit: a plugin the CLI
+            # KNOWS and refuses to LOAD. `enabled` and `failed to load` are different
+            # answers to different questions, and setup's load-state arm reads the second.
+            # A machine is put into it by naming the id in ${BIONIC_TEST_STATE}/load-broken;
+            # the block printed is the one epic-17 W5 F12 measured, character for character
+            # (tests/fixtures/plugin-list-dep-broken.txt carries the same text).
+            broken=""
+            [ -f "${BIONIC_TEST_STATE}/load-broken" ] && read -r broken < "${BIONIC_TEST_STATE}/load-broken"
             printf 'Installed plugins:\n\n'
             while read -r id en; do
               [ -n "$id" ] || continue
+              if [ -n "$broken" ] && [ "$id" = "$broken" ]; then
+                printf '  ❯ %s\n    Version: 1.0.0\n    Scope: user\n    Status: ✘ failed to load\n    Error: Dependency "superpowers@bionic" is not installed — run `claude plugin install superpowers@bionic`, …\n\n' "$id"
+                continue
+              fi
               if [ "$en" = "true" ]; then st='✔ enabled'; else st='✘ not enabled'; fi
               printf '  ❯ %s\n    Version: 1.0.0\n    Scope: user\n    Status: %s\n\n' "$id" "$st"
             done < "$STATE_FILE"
@@ -1837,6 +1849,65 @@ expect_eq "13: caller's set -f OFF survives a direct call" \
 # ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Group 14 — setup's LOAD-FAILURE arm names the repair route deps.sh owns
+# (bionic 1.4.4 fixit T1, phase 2).
+#
+# THE FOURTH RENDERER. The fixit gave one owner — `dep_core_repair_route` — three
+# renderers: doctor's THIRD PARTY row, doctor's headline core-absence line, and
+# setup's absent-dependency action line. This arm was the fourth site naming the
+# same repair and the last one still spelling it by hand, as "reinstall bionic
+# with: claude plugin install <id> --scope user --yes". That wording is the one
+# A-1 refutes: bionic is installed and registered, and a dependency is missing.
+# The verb coincides; the description does not.
+#
+# THE CLI'S OWN WORDS STAY FIRST, which is this arm's older contract and is not
+# what changed: the error is printed unedited, and the Fix line under it is what
+# now defers to the library.
+#
+# WHY THIS SUITE. It is the only one that drives setup.sh against a stubbed
+# listing on a fixture $HOME with PATH replaced, so the failed state can be put
+# in front of the production path without touching a real CLI. The shim above
+# gained the one status it could not previously report.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 14: setup's load-failure arm names the CLI's own repair route ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+
+# THE POSITIVE ARM FIRST, on the same fixture and the same extractor: a listing
+# that knows bionic and reports it healthy. Without it every assertion below
+# would pass on a setup run that had crashed before step 1 printed anything.
+printf 'bionic@bionic true\n' > "${STATE}/plugins"
+G14_OK="$TMP/setup-load-loaded.txt"
+run_payload "$SETUP_SH" < /dev/null > "$G14_OK" 2>&1
+expect_match "14: a healthy listing renders the loaded row" \
+  '*load state*loaded*' "$(cat "$G14_OK")"
+expect_no_match "14: …and a loaded machine is told nothing about a repair" \
+  '*did not load*' "$(cat "$G14_OK")"
+
+# The same machine, with the CLI answering the way it answers when a declared
+# dependency is missing (epic-17 W5 F12 §4.1).
+printf 'bionic@bionic\n' > "${STATE}/load-broken"
+G14_BAD="$TMP/setup-load-failed.txt"
+run_payload "$SETUP_SH" < /dev/null > "$G14_BAD" 2>&1
+
+expect_match "14: the failed arm reports the CLI's own error first, unedited" \
+  '*did not load. The CLI reports:*Dependency "superpowers@bionic" is not installed*' \
+  "$(cat "$G14_BAD")"
+# THE FIX LINE ALONE, not the whole run. Step 2's absent-dependency action line — the
+# third renderer, fixed in phase 1 — carries the same route further down the same output,
+# so a glob over the whole run would match it and this row would pass on an unfixed step 1.
+G14_FIX="$(grep -F 'Fix: install what the message names' "$G14_BAD" | head -1)"
+expect_true "14: …the failed arm prints a Fix line at all (the two rows below are not vacuous)" \
+  test -n "$G14_FIX"
+expect_match "14: …and the Fix line names the route deps.sh owns" \
+  "*re-resolve bionic's dependencies: claude plugin install bionic@bionic*" "$G14_FIX"
+expect_no_match "14: …and never \"reinstall bionic\", which misdescribes a machine whose only fault is a missing dependency" \
+  '*reinstall bionic*' "$G14_FIX"
 
 echo ""
 echo "========================================"
