@@ -7450,7 +7450,7 @@ expect_eq "S13.3 …over a set with something in it" "0" \
 # own, and the library must know all three keys. A hook that built the field into a
 # format string beside the call would pass §RA.2 (the captured rows carry none of the
 # three) and be invisible until a reader met a row with the key in the wrong place.
-for _s13_key in files suites_allowed suites-source; do
+for _s13_key in files suites_allowed suites_source; do
   expect_eq "S13.4 roster.sh knows the key [$_s13_key]" "1" \
     "$(awk '/^roster_row\(\)/,/^\}/' "$S13_ROSTER_LIB" | grep -cE "^ *${_s13_key}\)")"
 done

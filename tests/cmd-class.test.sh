@@ -486,7 +486,7 @@ make_repo() {  # <name> -> an armed repo of an ENGAGED session
     # wall they never meant to reach. The unbudgeted world is
     # tests/background-suite-guard.test.sh`s.
     roster_row_fixture "session=$SID" name=guarded "agent_id=$AGENT_ID" \
-      suites_allowed=run.sh suites-source=declared files=
+      suites_allowed=run.sh suites_source=declared files=
   } > "$repo/.bionic/tmp/roster-$SID.state"
   chmod 600 "$repo/.bionic/tmp/roster-$SID.state"
   printf '%s' "$repo"

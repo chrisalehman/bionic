@@ -1485,7 +1485,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites-source
+adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source
   awk -v ackfile="$2" '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
@@ -1534,7 +1534,7 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       # go quiet for exactly the agents a clear leaves running longest.
       v = kv($0, "files");          if (v != "") files[n]  = v
       v = kv($0, "suites_allowed"); if (v != "") sallow[n] = v
-      v = kv($0, "suites-source");  if (v != "") ssrc[n]   = v
+      v = kv($0, "suites_source");  if (v != "") ssrc[n]   = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
@@ -1621,7 +1621,7 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites-source> -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
   local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
   local files="${14:-}" sallow="${15:-}" ssrc="${16:-}"
@@ -1662,7 +1662,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   if [ -n "$files" ] || [ -n "$sallow" ] || [ -n "$ssrc" ]; then
     INSTRUMENT_FIELDS=("files=$(clean "$files")" \
                        "suites_allowed=$(clean "$sallow")" \
-                       "suites-source=$(clean "$ssrc")")
+                       "suites_source=$(clean "$ssrc")")
   fi
   # THE ROW IS BUILT BY `roster_row` (payload/scripts/lib/roster.sh), not by a format string
   # here (spec AC-25, ledger D3). The eleven fields this writer leaves EMPTY are still named

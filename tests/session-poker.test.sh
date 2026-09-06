@@ -158,7 +158,7 @@ mkrow() {  # <key=value>...
       waiver=*)      waiver="${kv#*=}" ;;
       files=*)          files="${kv#*=}";  instrument_set=yes ;;
       suites_allowed=*) sallow="${kv#*=}"; instrument_set=yes ;;
-      suites-source=*)  ssrc="${kv#*=}";   instrument_set=yes ;;
+      suites_source=*)  ssrc="${kv#*=}";   instrument_set=yes ;;
       *) printf 'mkrow: unknown key %s\n' "$kv" >&2; return 1 ;;
     esac
   done
@@ -172,7 +172,7 @@ mkrow() {  # <key=value>...
   [ "$plan_set" = yes ] || emit=roster_row_no_plan
   local -a instrument
   if [ "$instrument_set" = yes ]; then
-    instrument=("files=$files" "suites_allowed=$sallow" "suites-source=$ssrc")
+    instrument=("files=$files" "suites_allowed=$sallow" "suites_source=$ssrc")
   fi
   "$emit" \
     "status=$status" "session=$session" "name=$name" "agent_id=$agent_id" \
@@ -902,7 +902,7 @@ add_row_to "$R8" "$ADOPT_A" name=running-one status=identified agent_id="$ID_RUN
   deliverable="$R8/.bionic/docs/record/running-one.md" \
   progress="$R8/.bionic/tmp/progress-running.md" \
   files="payload/scripts/lib/widget.sh,hooks/widget-guard.sh" \
-  suites_allowed="alpha.test.sh beta.test.sh" suites-source=derived
+  suites_allowed="alpha.test.sh beta.test.sh" suites_source=derived
 add_row_to "$R8" "$ADOPT_A" name=silent-one status=identified agent_id="$ID_SILENT" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/silent-one.md" \
@@ -1122,7 +1122,7 @@ expect_contains "the roster file carries its schema header" "roster-state/v1" \
 # ---------- 8g″: the carried suite budget (S13, spec AC-20) ----------
 #
 # THREE FIELDS, CARRIED AS A GROUP. `files=` is what the brief declared it would touch,
-# `suites_allowed=` the set derived or declared from it, `suites-source=` which of the two
+# `suites_allowed=` the set derived or declared from it, `suites_source=` which of the two
 # it was. hooks/background-suite-guard.sh reads the second off the row belonging to the
 # calling agent`s id, and a /clear is exactly when it matters most: the agents that survive
 # one are the long-running writers, and a budget that evaporates at the resume leaves the
@@ -1133,7 +1133,7 @@ expect_contains "the adopted row carries the derived suite budget forward" \
 expect_contains "…the files the brief declared" \
   "|files=payload/scripts/lib/widget.sh,hooks/widget-guard.sh|" "$BUDGET_ROW"
 expect_contains "…and where the set came from, so no reader mistakes derived for declared" \
-  "|suites-source=derived|" "$BUDGET_ROW"
+  "|suites_source=derived|" "$BUDGET_ROW"
 
 # A PRE-WALL ROW ADOPTS WITHOUT MANUFACTURING ONE. Absent is a third state, distinct from
 # present-and-empty: the guard reads an empty `suites_allowed=` as "a budget was stated and
@@ -1142,7 +1142,7 @@ expect_contains "…and where the set came from, so no reader mistakes derived f
 NOBUDGET_ROW="$(grep -F "|name=waived-one|" "$OWN_ROSTER" | tail -1)"
 expect_absent "a source row with no budget adopts with no budget field at all" \
   "suites_allowed=" "$NOBUDGET_ROW"
-expect_absent "…nor a source for a set it does not carry" "suites-source=" "$NOBUDGET_ROW"
+expect_absent "…nor a source for a set it does not carry" "suites_source=" "$NOBUDGET_ROW"
 # NON-VACUITY: that row IS an adopted row, so the two absences above are the group being
 # withheld and not a row that failed to be written.
 expect_contains "…while still being a real adopted row" "|adopted_from=$ADOPT_A|" "$NOBUDGET_ROW"

@@ -523,7 +523,7 @@ arm_roster "$REPO_S"
 # field this fixture believes in that the writer stopped emitting fails loudly.
 . "$(dirname "$0")/lib/roster-row.sh"
 roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
-  suites_allowed=alpha.test.sh suites-source=declared files= \
+  suites_allowed=alpha.test.sh suites_source=declared files= \
   >> "$REPO_S/.bionic/tmp/roster-$SID.state"
 
 # CELL 1: agent context + armed -> the arm runs, and refuses the off-budget suite.
@@ -550,7 +550,7 @@ expect_eq "G9.3 agent context + unarmed: silent" "0" "$ST"
 expect_empty "G9.3 …silently" "$OUT$ERR"
 arm_roster "$REPO_S"
 roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
-  suites_allowed=alpha.test.sh suites-source=declared files= \
+  suites_allowed=alpha.test.sh suites_source=declared files= \
   >> "$REPO_S/.bionic/tmp/roster-$SID.state"
 run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
 expect_eq "G9.3 control: re-arm the roster and the same payload REFUSES again" "2" "$ST"

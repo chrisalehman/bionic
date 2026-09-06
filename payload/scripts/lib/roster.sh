@@ -55,7 +55,7 @@
 # adopted row" would break if the field vanished with its value.
 #
 # THE THREE INSTRUMENT FIELDS (wave-01 S13, spec AC-20) ARE OPTIONAL FOR THE SAME REASON.
-# `files=`, `suites_allowed=` and `suites-source=` say how wide the dispatched agent's
+# `files=`, `suites_allowed=` and `suites_source=` say how wide the dispatched agent's
 # instrument may be: the files its brief declared, the suite basenames it may run, and
 # whether that set was DERIVED from the tree by the configured impact command or DECLARED
 # by the brief. They are present-if-passed rather than always-emitted so that the captured
@@ -124,7 +124,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       adopted_from)  adopted_from="$val"; has_adopted_from=1 ;;
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
-      suites-source)  suites_source="$val";  has_suites_source=1 ;;
+      suites_source)  suites_source="$val";  has_suites_source=1 ;;
       *) return 2 ;;
     esac
   done
@@ -137,7 +137,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   out="$out|absent=$absent|waiver=$waiver"
   if [ "$has_files" -eq 1 ]; then          out="$out|files=$files"; fi
   if [ "$has_suites_allowed" -eq 1 ]; then out="$out|suites_allowed=$suites_allowed"; fi
-  if [ "$has_suites_source" -eq 1 ]; then  out="$out|suites-source=$suites_source"; fi
+  if [ "$has_suites_source" -eq 1 ]; then  out="$out|suites_source=$suites_source"; fi
   if [ "$has_teammate_id" -eq 1 ]; then out="$out|teammate_id=$teammate_id"; fi
   if [ "$has_adopted_from" -eq 1 ]; then out="$out|adopted_from=$adopted_from"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"

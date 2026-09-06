@@ -3795,7 +3795,7 @@ expect_status "27a …and the row records the declared paths verbatim" \
 expect_status "27a …the derived set is the impact command's answer, sorted and deduplicated" \
   "alpha.test.sh beta.test.sh" "$(roster_field "$ROW" suites_allowed)"
 expect_status "27a …and the row says the set was DERIVED, not declared" \
-  "derived" "$(roster_field "$ROW" suites-source)"
+  "derived" "$(roster_field "$ROW" suites_source)"
 # NON-VACUITY, both directions. The stub really ran, and it really received the paths the
 # brief declared — a wall that ignored the command and wrote a constant would pass every
 # assertion above.
@@ -3824,7 +3824,7 @@ ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "27a3 an impact command that derives nothing still PASSES the dispatch" "0" "$GATE_ST"
 expect_status "27a3 …with an empty budget on the row" "" "$(roster_field "$ROW" suites_allowed)"
 expect_status "27a3 …still marked derived, so no reader mistakes it for a declaration" \
-  "derived" "$(roster_field "$ROW" suites-source)"
+  "derived" "$(roster_field "$ROW" suites_source)"
 expect_contains "27a3 …and the operator is told at dispatch" "derived no suites" "$GATE_ERR"
 
 # --- S27b: Suites: -> the DECLARED row, normalised to basenames ---
@@ -3838,7 +3838,7 @@ expect_status "27b a declared Suites: line PASSES with no impact command configu
 expect_status "27b …recorded as BASENAMES, the same alphabet the derivation prints" \
   "one.test.sh two.test.sh" "$(roster_field "$ROW" suites_allowed)"
 expect_status "27b …and the row says the set was DECLARED" \
-  "declared" "$(roster_field "$ROW" suites-source)"
+  "declared" "$(roster_field "$ROW" suites_source)"
 expect_status "27b …with no files= value, because the brief declared none" \
   "" "$(roster_field "$ROW" files)"
 
@@ -3867,7 +3867,7 @@ expect_status "27d a Suites: none brief PASSES" "0" "$GATE_ST"
 expect_status "27d …and the waiver is on the row, where the writer-side guard reads it" \
   "none" "$(roster_field "$ROW" suites_allowed)"
 expect_status "27d …recorded as a declaration, because a human declared it" \
-  "declared" "$(roster_field "$ROW" suites-source)"
+  "declared" "$(roster_field "$ROW" suites_source)"
 
 # --- S27e: Files: with NO impact command -> refused, naming the two fixes ---
 #
@@ -3895,7 +3895,7 @@ Suites: tests/declared-only.test.sh' "w27-both")"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "27f a brief with both labels takes the DECLARED set" \
   "declared-only.test.sh" "$(roster_field "$ROW" suites_allowed)"
-expect_status "27f …and says so" "declared" "$(roster_field "$ROW" suites-source)"
+expect_status "27f …and says so" "declared" "$(roster_field "$ROW" suites_source)"
 expect_status "27f …while still recording the files the brief declared" \
   "payload/scripts/lib/widget.sh" "$(roster_field "$ROW" files)"
 # NON-VACUITY: the impact command that would have answered differently really was configured.
@@ -3912,7 +3912,7 @@ expect_status "27g the deliverable is unmoved by the three new fields" \
 expect_status "27g …and plan= is still the LAST field on the row" "0" \
   "$(printf '%s' "$ROW" | grep -qE '\|plan=[^|]*$' && echo 0 || echo 1)"
 expect_status "27g the three fields sit between waiver= and tool_use_id=" "0" \
-  "$(printf '%s' "$ROW" | grep -qE '\|waiver=[^|]*\|files=[^|]*\|suites_allowed=[^|]*\|suites-source=[^|]*\|tool_use_id=' && echo 0 || echo 1)"
+  "$(printf '%s' "$ROW" | grep -qE '\|waiver=[^|]*\|files=[^|]*\|suites_allowed=[^|]*\|suites_source=[^|]*\|tool_use_id=' && echo 0 || echo 1)"
 
 # --- S27h: SELF-CONSISTENCY — a brief following this wall's own Fix lines passes ---
 #
