@@ -325,7 +325,7 @@ excalidraw-renderer|extra|payload/skills/excalidraw-diagram/SKILL.md|uv:sync|any
 chrome-devtools|extra|skills/browser-verify/SKILL.md|npm:chrome-devtools-mcp@latest|any|mcp-server|remove-on-consent
 playwright-chromium|extra|payload/skills/excalidraw-diagram/SKILL.md|npx:playwright@latest|any|playwright-browser|remove-on-consent
 motion|extra|extra|pnpm:motion|any|pnpm-store|remove-on-consent
-ccstatusline|extra|extra|npx:ccstatusline@latest|any|statusline|remove-on-consent
+ccstatusline|extra|extra|npm:ccstatusline|any|statusline|remove-on-consent
 notebooklm|extra|extra|uv:notebooklm-py|any|uv-tool|remove-on-consent
 context7|extra|extra|npm:@upstash/context7-mcp@latest|any|mcp-server|remove-on-consent
 @pencil.dev/cli|extra|extra|npm:@pencil.dev/cli|any|npm-global|remove-on-consent
@@ -504,6 +504,60 @@ dep_names_marketplace() {  # <catalog>
   return 0
 }
 
+# THE ID THE CLI KNOWS BIONIC BY, and the one place it is composed (bionic
+# 1.4.4 fixit phase 4, review-b B-7). `<name>@<catalog>` is the key `claude
+# plugin list` prints and the argument an install command takes. Three files
+# needed it and each spelled the same expansion — this one, doctor.sh's
+# `BIONIC_PLUGIN_ID` and setup.sh's `SETUP_PLUGIN_ID` — and the derivation is the
+# one thing no suite could see, because nothing in the tree re-pointed the
+# catalog: any one of the three could have been edited back to the literal
+# `bionic@bionic` and every assertion still passed on its rendered default. A
+# machine that re-points the catalog has to move all three together, so they are
+# one function now, and doctor-reads §6f renders the report under a re-pointed
+# catalog so a copy that stopped moving goes red.
+#
+# THE ENVIRONMENT WINS OUTRIGHT. `BIONIC_PLUGIN_ID` names the whole id, so a
+# machine that sets it is not asked about a catalog at all; `BIONIC_DEP_MARKETPLACE`
+# names only the catalog half. Both read with `:-`, so an empty value falls back
+# the same way an unset one does.
+dep_plugin_id() {  # -> the <name>@<catalog> id this machine knows bionic by
+  echo "${BIONIC_PLUGIN_ID:-bionic@${BIONIC_DEP_MARKETPLACE:-bionic}}"
+}
+
+# THE REPAIR ROUTE FOR A MISSING CORE DEPENDENCY, and the one place it is
+# spelled (bionic 1.4.4 fixit, design "Option 1", Chris 2026-09-05).
+#
+# WHOSE REPAIR IT IS. A `core` row is not installed by anything in this file:
+# the CLI installs superpowers and agent-skills alongside bionic itself, because
+# `payload/.claude-plugin/plugin.json` declares them as bionic's dependencies and
+# the registry records them with `"auto": true`. D1 already rules that setup
+# never installs a native row, so `→ /bionic:setup` on such a row names a command
+# that plans nothing for it — the reader runs it, is told "nothing left to do",
+# and the ✗ is still there. The party that owns this repair is the CLI, and the
+# four surfaces that render the route (doctor's THIRD PARTY table, doctor's
+# headline absence line, setup's own absent arm, and setup's load-failure arm —
+# the Fix line under the CLI's own error) all defer to it from here.
+#
+# WHY THE RE-RUN AND NOT `claude plugin install <dep>@bionic`. Measured, CLI
+# 2.1.261, record/epic-21-v1-ladder/fixit-dep-repair-measurement.md: re-running
+# bionic's own install re-resolves EVERY declared dependency at once and
+# re-registers the restored one as bionic's (`"auto": true`), leaving the
+# registry byte-shaped like a clean install — which is what /bionic:remove's
+# teardown reads. Installing the dependency directly also repairs the machine but
+# registers it as a user-owned plugin, and `claude plugin update` does not repair
+# at all ("already at the latest version", nothing written).
+#
+# THE ID IS DERIVED, NEVER SPELLED, and it is `dep_plugin_id` above that derives
+# it — for this route, for doctor's `BIONIC_PLUGIN_ID` and for setup's
+# `SETUP_PLUGIN_ID` alike. This function used to expand the same fallback pair
+# inline and claim it matched setup's "character for character"; it matched
+# semantically and not textually (review-a A-3), which is the kind of claim that
+# stops being true without anything looking edited. One owner, so there is
+# nothing left to compare.
+dep_core_repair_route() {  # -> the command that re-resolves bionic's declared dependencies
+  echo "claude plugin install $(dep_plugin_id)"
+}
+
 # Reports any row whose field count is not exactly 7. Silence means the table
 # is well-formed; the suite asserts on the silence.
 dep_table_field_count_report() {
@@ -598,6 +652,60 @@ _dep_locator_target() {  # brew:ripgrep -> ripgrep ; https://... -> unchanged
     *:*)                printf '%s\n' "${loc#*:}" ;;
     *)                  printf '%s\n' "$loc" ;;
   esac
+}
+
+# THE PACKAGE WITHOUT ITS PIN. An npm locator target is a package name that may
+# carry `@version`, and the two are not interchangeable: `npm install -g` takes
+# the pinned form, while anything that has to be EXECUTED — the status line's
+# recorded command — takes the bare name. Writing the pinned form where an
+# executable was meant is a defect the reviewers caught latent rather than live
+# (review-a C-3): the locator is unpinned today, so `ccstatusline@2.2.29` only
+# reaches settings.json the moment someone adopts the pin the docblock below
+# holds in reserve, and the failure then is a status line that silently renders
+# nothing. A leading `@` is a SCOPE, not a version, so it survives: the split is
+# on the first `@` after the first character.
+_dep_pkg_unversioned() {  # ccstatusline@2.2.29 -> ccstatusline ; @scope/x@1 -> @scope/x
+  local pkg="${1:-}" lead="" rest="${1:-}"
+  case "$pkg" in @*) lead="@"; rest="${pkg#@}" ;; esac
+  printf '%s%s\n' "$lead" "${rest%%@*}"
+}
+
+# ─── The name-list removal loop, once ────────────────────────────────────────
+#
+# ONE SPLIT, ONE GLOB GUARD, ONE LOOP (epic-21 1.4.4 T7, review-d D-2). Four
+# call sites — setup's two legacy items, remove's two twins — fed the same
+# comma-separated, PAYLOAD-DERIVED name list through this exact shape: split on
+# comma into positional parameters, guard `[ -f ]`, `rm -f`, count. Two of the
+# four wrapped the split in `set -f`; two did not, and an unquoted
+# `set -- $names` is a pathname expansion the instant a file in the CALLER's
+# $PWD happens to match one of the names — demonstrated: a payload shipping a
+# hook literally named `n*.sh` beside the machine owner's own file, with a
+# decoy in $PWD matching that glob, deleted the owner's file and left the
+# payload's own leftover in place, the exact inversion both detectors this
+# feeds exist to prevent. The guard now lives once, here, so all four call
+# sites are consistent by construction instead of by four authors remembering.
+_dep_rm_named_files() {  # <dir> <comma-separated-names> -> echoes the count actually removed
+  local dir="${1:-}" names="${2:-}" name removed=0 ifs_save noglob_was_on=no
+  ifs_save="$IFS"
+  # review-e E-3: restore to the CALLER's prior state, not unconditionally to
+  # off. Every call site today reads this back through a command substitution,
+  # so an unconditional `set +f` has never been observable — but this is now a
+  # public library function any future caller can invoke directly, and the
+  # instant one does without a subshell between it and its own `set -f`, an
+  # unconditional restore would turn its globbing back on behind its back.
+  case $- in *f*) noglob_was_on=yes ;; esac
+  set -f
+  IFS=','
+  # shellcheck disable=SC2086  # the split IS the point, on a list this script's own library built
+  set -- $names
+  IFS="$ifs_save"
+  [ "$noglob_was_on" = yes ] || set +f
+  for name in "$@"; do
+    [ -n "$name" ] || continue
+    [ -f "${dir}/${name}" ] || continue
+    rm -f "${dir}/${name}" 2>/dev/null && removed=$((removed + 1))
+  done
+  echo "$removed"
 }
 
 _dep_have() { command -v "${1:-}" >/dev/null 2>&1; }
@@ -855,34 +963,58 @@ _dep_check_github_skill() {
   if [ -f "$(_dep_skills_dir)/${name}/SKILL.md" ]; then echo "yes|unknown"; else echo "no|unknown"; fi
 }
 
-# TWO HALVES, ONE ANSWER (epic-18 T1, AC-2). `present=yes` used to mean only
-# "the command is set" — the probe-contract violation that let a machine
-# report healthy while ccstatusline rendered its own stock default (handoff
-# §3.1). Now it means both: the command AND the layout file the command
-# reads. The second field carries WHICH half is missing when it is not
-# `yes`, so doctor's degradation line can name it rather than repeat the
-# generic "is absent" sentence over a dependency that is half there.
-# (T5's probe audit deferred this row to T1's landing — satisfied above.)
+# THREE HALVES, ONE ANSWER (epic-18 T1 AC-2; epic-21 1.4.4 T5). `present=yes`
+# used to mean only "the command is set" — the probe-contract violation that let
+# a machine report healthy while ccstatusline rendered its own stock default
+# (handoff §3.1) — and then "the command AND the layout file the command reads".
+# It now means all three: an executable that IS installed, a recorded command
+# that will exec it without a network round trip, and the layout it renders
+# from. The second field carries WHICH parts are missing when the answer is not
+# `yes`, plus-joined, so a caller that wants to name the gap can.
+#
+# WHY THE npx FORM IS AN ABSENCE, NOT A PRESENCE (review-a C-1, review-b F-1).
+# The old glob accepted `npx ccstatusline@latest` as proof the dependency was
+# there, which is the string this release exists to remove: doctor's ENVIRONMENT
+# table flagged it and sent the reader to `/bionic:setup`, setup asked this
+# function, was told the row was fine, and reported "nothing left to do" with the
+# ✗ still on the screen. That is the field defect of
+# `bug-doctor-setup-ownership.md` verbatim, one release later, and every machine
+# that ran setup before 1.4.4 is in exactly that state. Rejecting the npx form
+# here is what puts a real item behind the hint: the row goes pending on those
+# machines, `--all` offers the repair, and the existing install arm rewrites the
+# command. The glob needs the trailing space, so a command merely CONTAINING
+# "npx" is not caught.
+#
+# AND "RECORDED" IS NOT "INSTALLED" (review-a C-4). The command being set says
+# nothing about whether `npm install -g ccstatusline` ever succeeded — the
+# interim hand patch in the bug report applied the settings.json edit alone, and
+# a failed or offline install leaves the same shape. Doctor rendered `✓
+# ccstatusline … command set, layout file in place` over a machine with a blank
+# status line. The binary is probed exactly the way every other npm row's is, so
+# "installed" means one thing across the roster. An UNREADABLE answer (no npm on
+# the machine) is not a missing one: reporting the row absent there would send
+# the reader to a repair that cannot run, since the installer needs the same npm.
 _dep_check_statusline() {
-  local settings cmd cmd_ok=no cfg_ok=no
+  local name="${1:-ccstatusline}" settings cmd bin missing=""
+  local cmd_ok=no cfg_ok=no bin_ok=yes
   settings="$(_dep_settings_file)"
   _dep_have jq || { echo "unknown|unknown"; return 0; }
   if [ -f "$settings" ]; then
-    cmd="$(jq -r '.statusLine.command // ""' "$settings" 2>/dev/null)"
-    case "$cmd" in *ccstatusline*) cmd_ok=yes ;; esac
+    cmd="$(jq -r '.statusLine?.command? // "" | tostring' "$settings" 2>/dev/null)"
+    case "$cmd" in
+      "npx "*)        cmd_ok=no ;;
+      *ccstatusline*) cmd_ok=yes ;;
+    esac
   fi
   _dep_ccstatusline_layout_match "$(_dep_ccstatusline_config_source)" "$(_dep_ccstatusline_config_target)" \
     && cfg_ok=yes
+  bin="$(_dep_check_npm_global "$name")"
+  [ "${bin%%|*}" = "no" ] && bin_ok=no
 
-  if [ "$cmd_ok" = "yes" ] && [ "$cfg_ok" = "yes" ]; then
-    echo "yes|ok"
-  elif [ "$cmd_ok" = "yes" ]; then
-    echo "no|config-missing"
-  elif [ "$cfg_ok" = "yes" ]; then
-    echo "no|command-missing"
-  else
-    echo "no|both-missing"
-  fi
+  [ "$bin_ok" = "yes" ] || missing="binary"
+  [ "$cmd_ok" = "yes" ] || missing="${missing:+${missing}+}command"
+  [ "$cfg_ok" = "yes" ] || missing="${missing:+${missing}+}config"
+  if [ -z "$missing" ]; then echo "yes|ok"; else echo "no|${missing}-missing"; fi
 }
 
 # ─── check_dep ───────────────────────────────────────────────────────────────
@@ -1209,31 +1341,66 @@ bionic_strip_permission_block() {  # [settings-file]
   _dep_settings_write_jq "$settings" "$BIONIC_PERMISSION_BLOCK_STRIP_JQ"
 }
 
-# The statusline is a settings.json edit, not a package install: `npx
-# ccstatusline@latest` is the command Claude Code runs to RENDER the line, and
-# installing it means recording that command. Ported from
-# claude-bootstrap.sh's do_set_statusline.
+# ccstatusline is a REAL package install now, not only a settings.json edit
+# (epic-21, bug-ccstatusline-npx-per-render.md). Claude Code runs the recorded
+# `.statusLine.command` on EVERY render, and the command used to be `npx
+# ccstatusline@latest` — a registry lookup to resolve `latest` before the
+# first byte of the status line could print, measured stalling 73s per render
+# on a network with TLS interception (the bug report's table). The fix
+# installs the binary once, the same `npm install -g` mechanism the
+# `npm-global` kind runs (see `_dep_install_argv`'s `npm-global` case), and
+# records the bare command name so every later render just execs it — nothing
+# left to resolve. Ported from claude-bootstrap.sh's do_set_statusline, which
+# this now goes beyond: that installer never ran `npm install` either, and
+# relied on `npx` to fetch on demand — the exact behavior being removed.
 #
-# BOTH HALVES (epic-18 T1, AC-1). Recording the command alone leaves
-# ccstatusline rendering its own stock default — handoff §3.1's incident —
-# because the LAYOUT (colors, field order) lives in a second file this
-# function now also copies: the payload's own
+# UNPINNED, BY MEASUREMENT (the bug report leaves this call to the writer).
+# `npm:ccstatusline@2.2.29` would guard against the shipped layout's schema
+# drifting out from under a newer ccstatusline release. It is not needed:
+# `_dep_ccstatusline_layout_match` (above) already strips `.version` before
+# comparing, added 2026-09-03 for exactly this — ccstatusline 2.2.29 rewrote
+# bionic's layout from schema version 3 to 4 in place and changed nothing else
+# — so the one schema bump on record was already absorbed without a pin.
+# Pinning would freeze ccstatusline's own upstream bugfixes for no schema
+# benefit this repo can see today, so the locator stays `any`/unpinned.
+#
+# BOTH HALVES (epic-18 T1, AC-1) STILL STAND. Recording the command alone
+# leaves ccstatusline rendering its own stock default — handoff §3.1's
+# incident — because the LAYOUT (colors, field order) lives in a second file
+# this function also copies: the payload's own
 # ${CLAUDE_PLUGIN_ROOT}/ccstatusline/settings.json, published to
 # ~/.config/ccstatusline/settings.json exactly as claude-bootstrap.sh's
 # ccstatusline-config step did. Skipped when already byte-identical, ported
 # from that same step's `diff -q` short-circuit.
+#
+# THE WRITE IS A MERGE, AND THE COMMAND IS NOT THE LOCATOR (1.4.4 T5, review-a
+# C-3 / review-b N-1). Two facts about the one jq assignment below:
+#   • `.statusLine` is an object the USER may already own. Replacing it whole
+#     threw away every sibling key beside `command` — ccstatusline's own
+#     `padding`, anything a future Claude Code release adds — on a file bionic is
+#     a guest in. Merging into what is there writes the two keys this function
+#     is responsible for and leaves the rest alone.
+#   • The command has to be EXECUTABLE. It used to be the locator target
+#     verbatim, so the pin the docblock above holds in reserve would have
+#     recorded `ccstatusline@2.2.29` — a string no shell can run — and the status
+#     line would have gone blank with nothing on screen to say why. The install
+#     still takes the pinned form; only the recorded command is stripped.
 _dep_install_statusline() {
-  local settings cmd source target
+  local settings pkg cmd source target
   settings="$(_dep_settings_file)"
-  cmd="npx $(_dep_locator_target "$(dep_field ccstatusline source_url)")"
-  _dep_have jq || { echo "$(_dep_indent)jq is not installed — cannot edit ${settings}" >&2; return 1; }
+  pkg="$(_dep_locator_target "$(dep_field ccstatusline source_url)")"
+  cmd="$(_dep_pkg_unversioned "$pkg")"
+  _dep_have jq  || { echo "$(_dep_indent)jq is not installed — cannot edit ${settings}" >&2; return 1; }
+  _dep_have npm || { echo "$(_dep_indent)npm is not installed — cannot install ${pkg}" >&2; return 1; }
+  npm install -g "$pkg" --silent || { echo "$(_dep_indent)npm install -g ${pkg} failed" >&2; return 1; }
   # Deliberately NOT under `umask 077`: the defect being fixed is widening a mode
   # the USER chose, and a file that does not exist yet carries no such choice.
   # bionic creating settings.json at 0600 where the CLI would have made it 0644
   # is a different decision, and not this fold's to make.
   [ -f "$settings" ] || echo '{}' > "$settings"
   _dep_settings_write_jq "$settings" \
-    '.statusLine = {"type": "command", "command": $c}' --arg c "$cmd" || return 1
+    '.statusLine = ((.statusLine // {}) + {"type": "command", "command": $c})' \
+    --arg c "$cmd" || return 1
 
   source="$(_dep_ccstatusline_config_source)"
   target="$(_dep_ccstatusline_config_target)"
@@ -1270,7 +1437,11 @@ install_dep() {  # <name>
     if [ -f "$cfg_target" ] && ! _dep_ccstatusline_layout_match "$cfg_source" "$cfg_target"; then
       cfg_note=" (a config file already there differs from the shipped layout and would be overwritten)"
     fi
-    plan="record 'npx $(_dep_locator_target "$(dep_field "$name" source_url)")' as the statusline in $(_dep_settings_file), and copy ${cfg_source} to ${cfg_target}${cfg_note}"
+    # THE PLAN NAMES WHAT THE WRITE WILL WRITE. Two different strings under a pin —
+    # the package installed, and the bare command recorded — so the sentence a user
+    # consents to reads them separately rather than printing the locator twice.
+    local sl_pkg; sl_pkg="$(_dep_locator_target "$(dep_field "$name" source_url)")"
+    plan="npm install -g ${sl_pkg}, record '$(_dep_pkg_unversioned "$sl_pkg")' as the statusline in $(_dep_settings_file), and copy ${cfg_source} to ${cfg_target}${cfg_note}"
   else
     while IFS= read -r line; do argv+=("$line"); done < <(_dep_install_argv "$name") || true
     [ "${#argv[@]}" -gt 0 ] || { echo "deps.sh: no install mechanism for ${name}" >&2; return 1; }
@@ -1561,6 +1732,47 @@ _dep_remove_argv() {  # <name> — one token per line
 #
 # The caller counts 0 and 2 as settled and 1 as outstanding; remove.sh's summary
 # is built on that split.
+# ─── What a teardown asks, which is not what a report asks ───────────────────
+#
+# A REPORT asks "is this row in the state setup leaves it in". A TEARDOWN asks
+# "is there anything of bionic's here to take off". For nearly every row those
+# are the same question and this function answers both with the same probe.
+#
+# THEY CAME APART ON THE STATUS LINE (1.4.4 T5, t5-report.md R-1). The moment
+# `_dep_check_statusline` stopped calling `npx ccstatusline@latest` healthy, the
+# pre-1.4.4 machine started reporting the row absent — while still carrying the
+# command bionic wrote into settings.json, the layout bionic copied into
+# ~/.config/ccstatusline, and possibly the package bionic installed. Asked the
+# HEALTH question, `/bionic:remove` called that machine "already clean" and
+# walked away from all three, on precisely the machines this release exists for.
+# A teardown keyed on health is a teardown that stops working the instant a
+# probe gets stricter, which is backwards.
+_dep_statusline_leftovers() {  # <name> -> 0 when this machine carries statusline state bionic wrote
+  local name="${1:-ccstatusline}" settings cmd
+  settings="$(_dep_settings_file)"
+  if [ -f "$settings" ] && _dep_have jq; then
+    cmd="$(jq -r '.statusLine?.command? // "" | tostring' "$settings" 2>/dev/null)"
+    # THE NAME, NOT THE KEY. A `.statusLine` pointing at the user's own renderer
+    # is not bionic's to remove and must survive a teardown; every string bionic
+    # has ever written there names ccstatusline, the npx form included.
+    case "$cmd" in *ccstatusline*) return 0 ;; esac
+  fi
+  [ -d "$(_dep_ccstatusline_config_dir)" ] && return 0
+  case "$(_dep_check_npm_global "$name")" in "yes|"*) return 0 ;; esac
+  return 1
+}
+
+dep_teardown_state() {  # <name> -> yes | no | unknown
+  local name="${1:-}" raw
+  if [ "$(dep_field "$name" install_fn_or_check)" = "statusline" ]; then
+    if _dep_statusline_leftovers "$name"; then echo "yes"; else echo "no"; fi
+    return 0
+  fi
+  raw="$(check_dep "$name")" || return 1
+  raw="${raw#present=}"
+  echo "${raw%%|*}"
+}
+
 remove_dep() {  # <name>
   local name="${1:-}" behavior plan line rc
   local -a argv=()
@@ -1637,7 +1849,16 @@ remove_dep() {  # <name>
       return 0
       ;;
     statusline)
-      plan="clear .statusLine from $(_dep_settings_file), and remove $(_dep_ccstatusline_config_dir)"
+      # Fix step 3 (bug-ccstatusline-npx-per-render.md): the install arm now
+      # runs a real `npm install -g`, so the removal plan says so too — a
+      # settings.json clear alone would leave the global package on disk.
+      # review-e E-2: this is the sentence printed at the moment of consent,
+      # on BOTH the `--all` and `--only tool:ccstatusline` doors — `--only`
+      # never shows the page bullet `_rm_item_verb` builds, so this is the
+      # only place that door's user reads what the clear will do. It has to
+      # say the same conditional thing that bullet does (review-d D-1):
+      # `.statusLine` is cleared only if it still names ccstatusline.
+      plan="npm uninstall -g $(_dep_locator_target "$(dep_field "$name" source_url)"), clear .statusLine from $(_dep_settings_file) only if it still names ccstatusline, and remove $(_dep_ccstatusline_config_dir)"
       ;;
     *)
       while IFS= read -r line; do argv+=("$line"); done < <(_dep_remove_argv "$name") || true
@@ -1675,11 +1896,29 @@ remove_dep() {  # <name>
         # shape a machine with the config directory but no `.statusLine` key
         # is in. The two removals are independent now: an absent settings
         # file is nothing to clear, not a reason to stop.
-        local settings dir
+        local settings dir pkg
+        # THE GLOBAL PACKAGE, THIRD (epic-21 Fix step 3). Best-effort: npm
+        # missing or the uninstall failing is not a reason to abandon the two
+        # removals below it — a package that never installed cleanly is not
+        # made worse by a settings.json this still clears.
+        pkg="$(_dep_locator_target "$(dep_field "$name" source_url)")"
+        _dep_have npm && npm uninstall -g "$pkg" >/dev/null 2>&1
+        # THE NAME, NOT THE UNION (review-d D-1). `dep_teardown_state` asks
+        # whether ANY of three facts is true — the command names ccstatusline,
+        # OR the config directory exists, OR the package is installed —
+        # because the directory and the package are bionic's to remove even
+        # once the command has moved on. That union is licence to run this
+        # whole arm; it is not licence for what THIS clear does. A `.statusLine`
+        # pointing at the user's own renderer is not bionic's, and must survive
+        # this teardown even when it is reached because of the OTHER two
+        # facts — so the delete is conditional on the one fact that makes it
+        # bionic's, exactly like `_dep_statusline_leftovers`'s own command arm.
         settings="$(_dep_settings_file)"
         if [ -f "$settings" ]; then
           _dep_have jq || return 1
-          _dep_settings_write_jq "$settings" 'del(.statusLine)' || return 1
+          _dep_settings_write_jq "$settings" \
+            'if ((.statusLine?.command? // "") | tostring | test("ccstatusline")) then del(.statusLine) else . end' \
+            || return 1
         fi
         # THE SAME NEVER-LIST remove.sh's `_rm_purge_dir` enforces, its own
         # copy rather than a call across files — this library must stay

@@ -19,17 +19,20 @@ interactive turns before it writes any code, and its walls will refuse commands 
 
 ```bash
 claude plugin marketplace add chrisalehman/bionic
-claude plugin install bionic
+claude plugin install bionic@bionic
 ```
 
-The first tells Claude Code where bionic lives; the second installs it.
+The first tells Claude Code where bionic lives; the second installs it. The suffix names
+the marketplace — the plugin and its marketplace are both called `bionic` — so the id is
+unambiguous even when another marketplace carries a plugin of the same name. Update with
+`claude plugin update bionic@bionic`.
 
 <details>
 <summary>From inside a session</summary>
 
 ```
 /plugin marketplace add chrisalehman/bionic
-/plugin install bionic
+/plugin install bionic@bionic
 ```
 
 </details>

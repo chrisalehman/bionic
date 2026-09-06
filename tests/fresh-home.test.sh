@@ -499,9 +499,21 @@ case "${1:-}" in
             printf ']\n'
             ;;
           *)
+            # THE STATE THIS SHIM COULD NOT REPORT until 1.4.4's fixit: a plugin the CLI
+            # KNOWS and refuses to LOAD. `enabled` and `failed to load` are different
+            # answers to different questions, and setup's load-state arm reads the second.
+            # A machine is put into it by naming the id in ${BIONIC_TEST_STATE}/load-broken;
+            # the block printed is the one epic-17 W5 F12 measured, character for character
+            # (tests/fixtures/plugin-list-dep-broken.txt carries the same text).
+            broken=""
+            [ -f "${BIONIC_TEST_STATE}/load-broken" ] && read -r broken < "${BIONIC_TEST_STATE}/load-broken"
             printf 'Installed plugins:\n\n'
             while read -r id en; do
               [ -n "$id" ] || continue
+              if [ -n "$broken" ] && [ "$id" = "$broken" ]; then
+                printf '  ❯ %s\n    Version: 1.0.0\n    Scope: user\n    Status: ✘ failed to load\n    Error: Dependency "superpowers@bionic" is not installed — run `claude plugin install superpowers@bionic`, …\n\n' "$id"
+                continue
+              fi
               if [ "$en" = "true" ]; then st='✔ enabled'; else st='✘ not enabled'; fi
               printf '  ❯ %s\n    Version: 1.0.0\n    Scope: user\n    Status: %s\n\n' "$id" "$st"
             done < "$STATE_FILE"
@@ -605,8 +617,8 @@ run_payload() {  # <script> [args...] — stdin carries the answers
     BIONIC_TEST_BIN="$BIN" \
     BIONIC_TEST_SHIMSRC="$SHIMSRC" \
     BIONIC_TEST_PKG_MAP="$PKG_MAP" \
-    BIONIC_PLUGIN_ROOT="$PAYLOAD" \
-    CLAUDE_PLUGIN_ROOT="$PAYLOAD" \
+    BIONIC_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
+    CLAUDE_PLUGIN_ROOT="${FH_PAYLOAD:-$PAYLOAD}" \
     BIONIC_PLAYWRIGHT_CACHE="${HOME_FIX}/.cache/ms-playwright" \
     BIONIC_DOCTOR_PROBE_SECONDS=5 \
     bash "$script" "$@" 2>&1
@@ -627,8 +639,9 @@ jqf() {  # <jq-program> — read one value out of the fixture settings.json
 
 # One table/section out of a doctor report, by its flush-left heading (doctor
 # no longer delimits sections with `=== NAME ===`; a heading is a line with no
-# leading whitespace — "THIRD PARTY — installed by /bionic:setup", "ENVIRONMENT",
-# "BIONIC NATIVE — ships inside the plugin" — and every row under it is indented).
+# leading whitespace — "THIRD PARTY — tools and plugins bionic depends on",
+# "ENVIRONMENT", "BIONIC NATIVE — ships inside the plugin" — and every row under
+# it is indented).
 # The heading itself is matched by PREFIX, since most of them carry an em-dash
 # tagline after the name, and it is never printed back; capture runs until the
 # blank line doctor always prints before the next heading.
@@ -934,13 +947,23 @@ echo ""
 echo "=== Group 3: the manifest setup is supposed to leave ==="
 
 # ── ccstatusline: both halves ──
+#
+# THE COMMAND IS THE INSTALLED BINARY, NEVER npx (epic-21 bug-ccstatusline-npx-per-render.md,
+# Fix steps 1-2). `npx ccstatusline@latest` resolves a registry lookup on every render —
+# this is the exact string an EXACT match pins, not a substring, so a regression back to
+# the npx form (even wrapped, e.g. "npx ccstatusline") would fail this the same way a bare
+# substring match on '*ccstatusline*' never could.
 expect_true "manifest: settings.json exists" test -f "$SETTINGS"
-expect_match "manifest: settings.json records the ccstatusline statusLine command" \
-  '*ccstatusline*' "$(jqf '.statusLine.command // ""')"
+expect_eq "manifest: settings.json records the installed-binary statusLine command, never npx" \
+  "ccstatusline" "$(jqf '.statusLine.command // ""')"
 expect_true "manifest: ~/.config/ccstatusline/settings.json exists [ccstatusline-config-missing]" \
   test -f "$CCS_CONFIG"
 expect_true "manifest: ~/.config/ccstatusline/settings.json matches the shipped layout [ccstatusline-config-missing]" \
   cmp -s "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+expect_match "manifest: the ccstatusline install reached npm, not npx (AC-3)" \
+  '*npm install -g ccstatusline*' "$(cat "$CALLS")"
+expect_no_match "manifest: the ccstatusline install never resolves a package over npx" \
+  '*npx ccstatusline*' "$(cat "$CALLS")"
 
 # ── notebooklm: both halves ──
 expect_match "manifest: the notebooklm CLI install reached uv" \
@@ -1259,6 +1282,13 @@ expect_eq "remove: settings.json carried a statusLine command and no longer does
 expect_eq "remove: settings.json carried bionic's environment names and no longer does" \
   "yes no" "${ENV_NAMES_WAS} $(yn "$(settings_env_names "$SETTINGS")")"
 
+# THE GLOBAL PACKAGE COMES OFF TOO (Fix step 3, AC-3). Clearing `.statusLine` and the
+# config dir used to be the whole removal; now ccstatusline is a real global npm
+# install, and leaving it on disk after `/bionic:remove` is exactly the "clean
+# machine" promise that removal exists to keep.
+expect_match "remove: the ccstatusline uninstall reached npm" \
+  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+
 # DELETED AT THE REVIVE (epic-18 wave-03): a row asserting that no
 # `bionic-profile-` permission rule survived the teardown. Group 3 asserts setup
 # writes NO permission rules at all, so that extractor's input was empty by
@@ -1302,8 +1332,606 @@ expect_eq "remove: ~/.claude/CLAUDE.md is still not a file this plugin touches (
 
 
 # ---------------------------------------------------------------------------
+# Group 6 — the statusLine WRITE itself: what it preserves, and what it records
+# (1.4.4 T5; review-a C-3, review-b N-1).
+#
+# TWO CLAIMS ABOUT ONE jq LINE. `_dep_install_statusline` sets `.statusLine` in a
+# settings.json the USER owns, and both defects live in that one assignment:
+# replacing the whole object throws away any sibling key the user put beside
+# `command`, and writing the locator target verbatim records `ccstatusline@2.2.29`
+# — not an executable — the moment anyone adopts the pin the deps.sh docblock
+# holds in reserve. Neither is reachable from the Group 2-5 sequence: that fixture
+# starts with no settings.json and runs the unpinned locator, so both defects are
+# invisible to it and stayed invisible through two reviews.
+#
+# THESE GROUPS OWN THEIR OWN FIXTURE. Each calls `fresh_home` first — which also
+# clears the npm shim's global state and the call log — so the row is genuinely
+# pending and setup genuinely runs the install arm rather than reporting
+# "present" and writing nothing. Nothing after this group reads the fixture.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 6a: the statusLine write MERGES into the user's object ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest",
+    "padding": 0
+  }
+}
+JSON
+expect_eq "6a precondition: the planted settings.json carries a sibling field under .statusLine" \
+  "0" "$(jqf '.statusLine.padding')"
+
+G6A_OUT="$TMP/setup-statusline-merge.txt"
+printf 'y\ny\ny\n' | run_payload "$SETUP_SH" --only tool:ccstatusline > "$G6A_OUT" 2>&1
+
+# The anti-vacuity control: if the item had reported "present" and written nothing, the
+# padding below would survive for the wrong reason entirely.
+expect_eq "6a: setup rewrote the npx command to the installed binary" \
+  "ccstatusline" "$(jqf '.statusLine.command // ""')"
+expect_eq "6a: …and the user's own field beside it is still there" \
+  "0" "$(jqf '.statusLine.padding')"
+expect_eq "6a: …and so is the rest of the file" \
+  "opus" "$(jqf '.model // ""')"
+
+echo ""
+echo "=== Group 6b: a PINNED locator still records an executable name ==="
+
+# The pin the deps.sh docblock argues against adopting today, adopted here so the write can
+# be measured under it. A copy of the whole payload — setup.sh refuses to run without its
+# libraries beside it — with one locator changed and nothing else.
+fresh_home
+# The claude home exists on any machine that has the CLI, and bionic is a plugin of it —
+# `_dep_install_statusline` writes settings.json into that directory and does not create it,
+# so a fixture without it measures a machine shape that cannot happen.
+mkdir -p "${HOME_FIX}/.claude"
+G6B_PAYLOAD="$TMP/payload-pinned"
+rm -rf "$G6B_PAYLOAD"
+cp -R "$PAYLOAD" "$G6B_PAYLOAD"
+LC_ALL=C sed 's#npm:ccstatusline|#npm:ccstatusline@2.2.29|#' \
+  "$PAYLOAD/scripts/lib/deps.sh" > "$G6B_PAYLOAD/scripts/lib/deps.sh"
+expect_eq "6b: the pinned payload differs from the shipped one by exactly the locator" \
+  "1" "$(diff "$PAYLOAD/scripts/lib/deps.sh" "$G6B_PAYLOAD/scripts/lib/deps.sh" | grep -c '^< ')"
+
+G6B_OUT="$TMP/setup-statusline-pinned.txt"
+printf 'y\ny\ny\n' | FH_PAYLOAD="$G6B_PAYLOAD" \
+  run_payload "$G6B_PAYLOAD/scripts/setup.sh" --only tool:ccstatusline > "$G6B_OUT" 2>&1
+
+# The pin reached the installer — without this the row below could pass on a run where the
+# locator change never took effect at all.
+expect_match "6b: the install ran against the pinned package" \
+  '*npm install -g ccstatusline@2.2.29*' "$(cat "$CALLS")"
+expect_eq "6b: …and the command recorded in settings.json is the executable, not the pin" \
+  "ccstatusline" "$(jqf '.statusLine.command // ""')"
+
+# ---------------------------------------------------------------------------
+# Group 7 — the teardown asks a DIFFERENT question from the report (1.4.4 T5,
+# t5-report.md R-1).
+#
+# A teardown wants to know whether this machine carries anything bionic wrote.
+# It used to ask `check_dep`, which answers whether the row is in the HEALTHY
+# state setup leaves it in — a different question, and on the pre-1.4.4 machine
+# the two answers point opposite ways. Once the presence check stopped calling
+# `npx ccstatusline@latest` healthy, `/bionic:remove` started calling that same
+# machine "already clean" and walking away from the command in the user's
+# settings.json and the config directory bionic itself copied in. Every machine
+# 1.4.4 exists for is in exactly that state.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 7: remove takes bionic's statusline state off a pre-1.4.4 machine ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest"
+  }
+}
+JSON
+cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+expect_eq "7 precondition: the fixture is the pre-1.4.4 machine — npx command recorded" \
+  "npx ccstatusline@latest" "$(jqf '.statusLine.command // ""')"
+expect_true "7 precondition: …and the layout bionic copied is on disk" test -f "$CCS_CONFIG"
+
+G7_OUT="$TMP/remove-statusline-pre144.txt"
+printf 'y\ny\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G7_OUT" 2>&1
+
+# LINE-SCOPED ON PURPOSE. A glob over the whole report would pair "ccstatusline" on one
+# line with "already clean" on another and answer about neither, so the claim is made
+# against the ccstatusline row itself.
+g7_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is clean
+  grep 'ccstatusline' "$1" 2>/dev/null | grep 'already clean' 2>/dev/null
+  return 0
+}
+expect_eq "7: no ccstatusline row calls a machine carrying bionic's statusline state clean" \
+  "" "$(g7_clean_rows "$G7_OUT")"
+expect_eq "7: the statusLine bionic wrote is gone from settings.json" \
+  "" "$(jqf '.statusLine.command // ""')"
+expect_true "7: …and the config directory bionic copied in is gone" \
+  test ! -d "${HOME_FIX}/.config/ccstatusline"
+# AC-7's rule, on this item too: what was not bionic's is still where the user left it.
+expect_eq "7: …and the rest of the user's settings.json is untouched" \
+  "opus" "$(jqf '.model // ""')"
+
+# The other direction, so the rows above are a measurement and not a constant: a machine
+# with no statusline state of bionic's IS clean, and the run says so.
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+echo '{"model":"opus"}' > "$SETTINGS"
+G7_CLEAN_OUT="$TMP/remove-statusline-clean.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G7_CLEAN_OUT" 2>&1
+expect_ne "7: a machine with none of it DOES read already clean, on the same extractor" \
+  "" "$(g7_clean_rows "$G7_CLEAN_OUT")"
+
+# ---------------------------------------------------------------------------
+# Group 8 — /bionic:remove takes the leftovers /bionic:setup now removes
+# (1.4.4 T5 extension, plan A-8).
+#
+# T1 gave setup two items for the pre-plugin hook files under ~/.claude/hooks and
+# the drifted role copies under ~/.claude/agents. The teardown door had neither,
+# so a full consented `/bionic:remove` left behind an older build of every wall
+# bionic ships and a set of role files a dispatched agent still reads. Same
+# detectors, same payload-side names discipline, same consent shape.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 8: remove takes the legacy hook files and drifted agent copies ==="
+
+# The claude-home the field machine had, built the way cross-gate's `ds_plant` builds it:
+# payload-named files two builds behind, plus ONE file in each directory that is not
+# bionic's and must survive.
+g8_plant() {
+  local f n=0
+  rm -rf "${HOME_FIX}/.claude/hooks" "${HOME_FIX}/.claude/agents"
+  mkdir -p "${HOME_FIX}/.claude/hooks" "${HOME_FIX}/.claude/agents"
+  for f in "$PAYLOAD"/hooks/*.sh; do
+    [ -f "$f" ] || continue
+    [ "$n" -lt 16 ] || break
+    printf '#!/bin/bash\n# an older build of %s\n' "${f##*/}" > "${HOME_FIX}/.claude/hooks/${f##*/}"
+    n=$((n + 1))
+  done
+  printf '#!/bin/bash\n# the machine owner wrote this one\n' > "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+  for f in "$PAYLOAD"/agents/*.md; do
+    [ -f "$f" ] || continue
+    printf -- '---\nname: %s\n---\nan older build of this role.\n' "${f##*/}" \
+      > "${HOME_FIX}/.claude/agents/${f##*/}"
+  done
+  printf -- '---\nname: not-bionics\n---\nthe machine owner wrote this one.\n' \
+    > "${HOME_FIX}/.claude/agents/not-bionics.md"
+}
+
+g8_count() {  # <dir> <glob>
+  local n=0 f
+  for f in "$1"/$2; do [ -e "$f" ] && n=$((n + 1)); done
+  printf '%s' "$n"
+}
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+g8_plant
+expect_eq "8 precondition: seventeen files in the hooks directory, one of them not bionic's" \
+  "17" "$(g8_count "${HOME_FIX}/.claude/hooks" '*.sh')"
+
+G8_LIST="$(run_payload "$REMOVE_SH" --list 2>&1)"
+expect_match "8: legacy-hook-files is a name the teardown takes" \
+  '*legacy-hook-files*' "$G8_LIST"
+expect_match "8: legacy-agent-copies is a name the teardown takes" \
+  '*legacy-agent-copies*' "$G8_LIST"
+
+G8_HOOKS="$(printf 'y\ny\n' | run_payload "$REMOVE_SH" --only legacy-hook-files 2>&1)"
+expect_eq "8: the consented removal leaves exactly the machine's own hook behind" \
+  "1" "$(g8_count "${HOME_FIX}/.claude/hooks" '*.sh')"
+expect_true "8: …and that survivor is the one the payload does not ship" \
+  test -f "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+expect_match "8: …and the run reports what it removed" '*✓*hook file*' "$G8_HOOKS"
+
+G8_AGENTS="$(printf 'y\ny\n' | run_payload "$REMOVE_SH" --only legacy-agent-copies 2>&1)"
+expect_eq "8: the consented removal leaves exactly the machine's own agent behind" \
+  "1" "$(g8_count "${HOME_FIX}/.claude/agents" '*.md')"
+expect_true "8: …and that survivor is the one the payload does not ship" \
+  test -f "${HOME_FIX}/.claude/agents/not-bionics.md"
+expect_match "8: …and the run reports what it removed" '*✓*agent*' "$G8_AGENTS"
+
+# The negative twin on the same extractors: with the leftovers gone both items read clean,
+# so the rows above measure the removal rather than restating the fixture.
+expect_match "8: a second pass over the same machine reads already clean" \
+  '*already clean*' "$(printf 'y\n' | run_payload "$REMOVE_SH" --only legacy-hook-files 2>&1)"
+
+# ---------------------------------------------------------------------------
+# Group 9 — the statusline teardown clears .statusLine ONLY when it names
+# ccstatusline (1.4.4 T7, review-d D-1).
+#
+# `dep_teardown_state`'s presence predicate is a UNION over three facts — the
+# recorded command names ccstatusline, OR the config directory exists, OR the
+# global package is installed — because the config directory and the package
+# are bionic's to remove even once the command has moved on. The removal body
+# used to treat that same union as licence to delete all three, including a
+# `.statusLine` the union only asked about because of the OTHER two facts. A
+# machine where the user has since pointed the status line at their OWN
+# renderer, but never cleaned up the config directory bionic copied in (or the
+# package bionic installed), is a real, reachable machine: use bionic, adopt a
+# different renderer, then run /bionic:remove. Two shapes below, matching
+# review-d's matrix rows 6 and 7 — the "new harm" rows, run beside Group 7's
+# existing positive twin so this is a measurement against the same extractor,
+# not a new one.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 9: remove clears .statusLine only when it names ccstatusline ==="
+
+# Shape one (matrix row 6): the user's own renderer, PLUS the config directory
+# bionic copied in and never cleaned up. The row is still pending — the config
+# directory alone makes it so — and the run must still take the directory
+# while leaving the key alone.
+fresh_home
+mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "my-renderer"
+  }
+}
+JSON
+cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+expect_eq "9a precondition: the fixture's statusLine names the user's own renderer" \
+  "my-renderer" "$(jqf '.statusLine.command // ""')"
+
+G9A_OUT="$TMP/remove-statusline-user-owned-cfgdir.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G9A_OUT" 2>&1
+
+g9_clean_rows() {  # <file> -> the ccstatusline rows that claim the machine is clean
+  grep 'ccstatusline' "$1" 2>/dev/null | grep 'already clean' 2>/dev/null
+  return 0
+}
+expect_eq "9a: the row is still offered — the config directory is bionic's, so the union still fires" \
+  "" "$(g9_clean_rows "$G9A_OUT")"
+expect_eq "9a: the user's own .statusLine SURVIVES a consented teardown" \
+  "my-renderer" "$(jqf '.statusLine.command // ""')"
+expect_true "9a: …and the config directory bionic copied in is still gone" \
+  test ! -d "${HOME_FIX}/.config/ccstatusline"
+expect_eq "9a: …and the rest of the user's settings.json is untouched" \
+  "opus" "$(jqf '.model // ""')"
+
+# Shape two (matrix row 7): the user's own renderer, PLUS the global package
+# bionic installed and never uninstalled — no config directory this time, so
+# the package is the only other fact making the row pending.
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "my-renderer"
+  }
+}
+JSON
+printf 'ccstatusline\n' > "${STATE}/npm-global"
+expect_eq "9b precondition: the fixture's statusLine names the user's own renderer" \
+  "my-renderer" "$(jqf '.statusLine.command // ""')"
+
+G9B_OUT="$TMP/remove-statusline-user-owned-pkg.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G9B_OUT" 2>&1
+
+expect_eq "9b: the row is still offered — the installed package is bionic's, so the union still fires" \
+  "" "$(g9_clean_rows "$G9B_OUT")"
+expect_eq "9b: the user's own .statusLine SURVIVES a consented teardown" \
+  "my-renderer" "$(jqf '.statusLine.command // ""')"
+expect_match "9b: …and the package bionic installed is uninstalled" \
+  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+expect_eq "9b: …and the rest of the user's settings.json is untouched" \
+  "opus" "$(jqf '.model // ""')"
+
+# The positive control, on the same two extractors: a command that DOES name
+# ccstatusline is exactly what Group 7 already measures — not repeated here.
+
+# ---------------------------------------------------------------------------
+# Group 10 — the four teardown removal loops are glob-safe against $PWD
+# (1.4.4 T7, review-d D-2).
+#
+# `set -- $names` re-splits a detector's comma-separated list into positional
+# parameters; unquoted, that is a pathname expansion, and two of the four
+# call sites (setup's) ran it with no `set -f` guard. A payload shipping a
+# hook literally named `n*.sh`, beside a machine owner's own file, with a
+# decoy in the CALLING PROCESS's $PWD that happens to match that glob, turns
+# the split's one "name" into whatever the decoy is — deleting the owner's
+# file and leaving the payload's own leftover in place. This is the exact
+# shape review-d's D-2 demonstrated against setup.sh; the same fixture proves
+# remove.sh's twins were already safe and stay that way.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 10: the split loops do not glob against \$PWD ==="
+
+# A fixture payload whose only shipped hook is literally named n*.sh — a
+# filename no real commit would carry, chosen because it is the one the
+# review's demonstration used: harmless as a literal, dangerous as a pattern.
+G10_PAYLOAD="$TMP/payload-glob"
+rm -rf "$G10_PAYLOAD"
+cp -R "$PAYLOAD" "$G10_PAYLOAD"
+# payload/hooks is a symlink to the repo's own hooks/ (`ls -la payload/`) — cp -R
+# copies the LINK, not a directory, so it has to come off before this fixture can
+# carry a hook roster of its own instead of the real one's.
+rm -f "$G10_PAYLOAD/hooks"
+mkdir -p "$G10_PAYLOAD/hooks"
+printf '#!/bin/bash\n# the payload'"'"'s one hook, named to double as a glob\n' \
+  > "$G10_PAYLOAD/hooks/n*.sh"
+
+g10_plant() {  # -> builds the fixture home + a decoy $PWD, fresh each time
+  fresh_home
+  mkdir -p "${HOME_FIX}/.claude/hooks"
+  cp "$G10_PAYLOAD/hooks/n*.sh" "${HOME_FIX}/.claude/hooks/n*.sh"
+  printf '#!/bin/bash\n# the machine owner wrote this one\n' \
+    > "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+
+  G10_PWD="$TMP/cwd-with-decoy"
+  rm -rf "$G10_PWD"; mkdir -p "$G10_PWD"
+  # The decoy: a file that has nothing to do with bionic, sitting in the
+  # CALLER's cwd, whose name happens to glob-match the payload's one hook name.
+  printf 'decoy\n' > "$G10_PWD/not-bionics.sh"
+}
+
+# <script-basename> <label> — runs that script's legacy-hook-files item with the
+# CALLING PROCESS cd'd into the decoy directory, exactly the shape D-2 describes.
+g10_run() {
+  local script="$1" label="$2"
+  G10_OUT="$TMP/${label}.txt"
+  ( cd "$G10_PWD" && printf 'y\ny\n' | FH_PAYLOAD="$G10_PAYLOAD" \
+      run_payload "$G10_PAYLOAD/scripts/${script}.sh" --only legacy-hook-files ) \
+    > "$G10_OUT" 2>&1
+}
+
+g10_plant
+g10_run setup setup-glob-guard-setup
+expect_true "10 setup: the payload-named leftover is gone" \
+  test ! -e "${HOME_FIX}/.claude/hooks/n*.sh"
+expect_true "10 setup: the machine owner's file survives a glob-matching decoy in \$PWD" \
+  test -f "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+expect_match "10 setup: the run reports the removal, not a leftover" \
+  '*removed*' "$(cat "$G10_OUT")"
+
+g10_plant
+g10_run remove setup-glob-guard-remove
+expect_true "10 remove: the payload-named leftover is gone" \
+  test ! -e "${HOME_FIX}/.claude/hooks/n*.sh"
+expect_true "10 remove: the machine owner's file survives a glob-matching decoy in \$PWD" \
+  test -f "${HOME_FIX}/.claude/hooks/not-bionics.sh"
+
+# ---------------------------------------------------------------------------
+# Group 11 — the statusline teardown's jq predicate is TOTAL over
+# `.statusLine`'s type (1.4.4 T8, review-e E-1).
+#
+# The T7 predicate, `(.statusLine.command // "") | test("ccstatusline")`, reads
+# fine the moment `.statusLine` is an object and `.command` a string — every
+# shape bionic itself ever writes — but a settings.json is not bionic's file,
+# and `.statusLine` is a Claude Code key the CLI's own schema also accepts as a
+# bare string. Indexing a string with `.command` is a jq TYPE error, not a
+# missing-key null, so `// ""` never reaches it: jq exits non-zero,
+# `_dep_settings_write_jq` turns that into `return 1`, and `remove_dep` returns
+# from the statusline arm before the config-directory purge below it ever
+# runs — on a machine carrying all three leftovers, a consented teardown then
+# leaves the config directory in place, leaks a raw `jq:` line to the
+# terminal, and reports the row `skipped by you` to a user who answered yes.
+# The fix makes both the index and the value optional so a malformed key is
+# read as "no match" instead of raised as an error.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 11: the jq predicate is total over .statusLine's type ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": "my-renderer"
+}
+JSON
+cp "$CCSTATUSLINE_SHIPPED" "$CCS_CONFIG"
+printf 'ccstatusline\n' > "${STATE}/npm-global"
+
+expect_eq "11 precondition: the fixture's .statusLine is a malformed (string) value" \
+  "my-renderer" "$(jqf '.statusLine')"
+
+G11_OUT="$TMP/remove-statusline-malformed-key.txt"
+printf 'y\ny\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G11_OUT" 2>&1
+
+expect_eq "11: a malformed .statusLine value survives (not bionic's shape to touch)" \
+  "my-renderer" "$(jqf '.statusLine')"
+expect_true "11: …and the config directory bionic copied in is still gone" \
+  test ! -d "${HOME_FIX}/.config/ccstatusline"
+expect_match "11: …and the package bionic installed is uninstalled" \
+  '*npm uninstall -g ccstatusline*' "$(cat "$CALLS")"
+expect_no_match "11: …and no raw jq error reaches the output" \
+  '*jq:*' "$(cat "$G11_OUT")"
+expect_match "11: …and the run reports it removed, not skipped by you" \
+  '*1 removed*0 already clean*0 skipped by you*' "$(cat "$G11_OUT")"
+
+# The other two `.statusLine.command` readers (health probe, teardown-state
+# union) already fail safe on this same malformed input — each swallows jq's
+# stderr and never checks its exit code, so the raised type error was already
+# invisible and the readers already answer "no match". Nothing here
+# distinguishes their behaviour before and after aligning their jq totality,
+# so — good-tests doctrine — nothing is pinned for them; the alignment is a
+# robustness fix for the NEXT caller, not a behaviour change on this one.
+
+# ---------------------------------------------------------------------------
+# Group 12 — the consent-moment sentence matches what the clear actually does
+# (1.4.4 T8, review-e E-2).
+#
+# `_rm_item_verb`'s `--all` page bullet already says the clear is conditional
+# ("clears .statusLine only if it still names ccstatusline" — 1.4.4 T7,
+# review-d D-1). The sentence printed immediately above the consent question
+# itself, built in deps.sh's `remove_dep` and shown on BOTH the `--all` and
+# `--only tool:ccstatusline` doors, still promised an unconditional clear.
+# `--only` never renders the page bullet at all, so that door had no accurate
+# sentence anywhere. One string, read from both doors here.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 12: the consent sentence says the clear is conditional ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "ccstatusline"
+  }
+}
+JSON
+printf 'ccstatusline\n' > "${STATE}/npm-global"
+
+G12_ALL_OUT="$TMP/remove-statusline-consent-all.txt"
+printf '%s' "$YES" | run_payload "$REMOVE_SH" --all > "$G12_ALL_OUT" 2>&1
+expect_match "12 --all: the consent-moment sentence says the clear is conditional" \
+  '*clear .statusLine*only if it still names ccstatusline*' "$(cat "$G12_ALL_OUT")"
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+cat > "$SETTINGS" <<'JSON'
+{
+  "model": "opus",
+  "statusLine": {
+    "type": "command",
+    "command": "ccstatusline"
+  }
+}
+JSON
+printf 'ccstatusline\n' > "${STATE}/npm-global"
+
+G12_ONLY_OUT="$TMP/remove-statusline-consent-only.txt"
+printf 'n\n' | run_payload "$REMOVE_SH" --only tool:ccstatusline > "$G12_ONLY_OUT" 2>&1
+expect_match "12 --only: the (only) consent sentence this door shows says the clear is conditional" \
+  '*clear .statusLine*only if it still names ccstatusline*' "$(cat "$G12_ONLY_OUT")"
+
+# ---------------------------------------------------------------------------
+# Group 13 — `_dep_rm_named_files` restores `set -f` to the CALLER's prior
+# state, not unconditionally to off (1.4.4 T8, review-e E-3).
+#
+# Harmless at today's four call sites (every one reads the helper back through
+# a command substitution, so the mutation dies in the subshell), but the
+# consolidation moved the guard from two private script bodies into a public
+# library function any future caller can invoke directly — exactly the moment
+# an unconditional `set +f` stops being a detail nobody can observe.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 13: _dep_rm_named_files restores set -f to the caller's state ==="
+
+e13_setf_after() {  # <on|off> -> the shell's OWN set -f state after a direct call
+  env -i HOME="$HOME_FIX" PATH="$BIN" bash -c '
+    . "$1"
+    if [ "$2" = "on" ]; then set -f; else set +f; fi
+    _dep_rm_named_files "'"$TMP"'/g13-nonexistent-dir" "a,b,c" >/dev/null
+    case $- in *f*) echo on ;; *) echo off ;; esac
+  ' _ "${LIB_DIR}/deps.sh" "$1"
+}
+
+expect_eq "13: caller's set -f ON survives a direct call" \
+  "on" "$(e13_setf_after on)"
+expect_eq "13: caller's set -f OFF survives a direct call" \
+  "off" "$(e13_setf_after off)"
+
+# ---------------------------------------------------------------------------
 # Results
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Group 14 — setup's LOAD-FAILURE arm names the repair route deps.sh owns
+# (bionic 1.4.4 fixit T1, phase 2).
+#
+# THE FOURTH RENDERER. The fixit gave one owner — `dep_core_repair_route` — three
+# renderers: doctor's THIRD PARTY row, doctor's headline core-absence line, and
+# setup's absent-dependency action line. This arm was the fourth site naming the
+# same repair and the last one still spelling it by hand, as "reinstall bionic
+# with: claude plugin install <id> --scope user --yes". That wording is the one
+# A-1 refutes: bionic is installed and registered, and a dependency is missing.
+# The verb coincides; the description does not.
+#
+# THE CLI'S OWN WORDS STAY FIRST, which is this arm's older contract and is not
+# what changed: the error is printed unedited, and the Fix line under it is what
+# now defers to the library.
+#
+# WHY THIS SUITE. It is the only one that drives setup.sh against a stubbed
+# listing on a fixture $HOME with PATH replaced, so the failed state can be put
+# in front of the production path without touching a real CLI. The shim above
+# gained the one status it could not previously report.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "=== Group 14: setup's load-failure arm names the CLI's own repair route ==="
+
+fresh_home
+mkdir -p "${HOME_FIX}/.claude"
+
+# THE POSITIVE ARM FIRST, on the same fixture and the same extractor: a listing
+# that knows bionic and reports it healthy. Without it every assertion below
+# would pass on a setup run that had crashed before step 1 printed anything.
+printf 'bionic@bionic true\n' > "${STATE}/plugins"
+G14_OK="$TMP/setup-load-loaded.txt"
+run_payload "$SETUP_SH" < /dev/null > "$G14_OK" 2>&1
+expect_match "14: a healthy listing renders the loaded row" \
+  '*load state*loaded*' "$(cat "$G14_OK")"
+expect_no_match "14: …and a loaded machine is told nothing about a repair" \
+  '*did not load*' "$(cat "$G14_OK")"
+
+# The same machine, with the CLI answering the way it answers when a declared
+# dependency is missing (epic-17 W5 F12 §4.1).
+printf 'bionic@bionic\n' > "${STATE}/load-broken"
+G14_BAD="$TMP/setup-load-failed.txt"
+run_payload "$SETUP_SH" < /dev/null > "$G14_BAD" 2>&1
+
+expect_match "14: the failed arm reports the CLI's own error first, unedited" \
+  '*did not load. The CLI reports:*Dependency "superpowers@bionic" is not installed*' \
+  "$(cat "$G14_BAD")"
+# THE FIX LINE ALONE, not the whole run. Step 2's absent-dependency action line — the
+# third renderer, fixed in phase 1 — carries the same route further down the same output,
+# so a glob over the whole run would match it and this row would pass on an unfixed step 1.
+G14_FIX="$(grep -F 'Fix: install what the message names' "$G14_BAD" | head -1)"
+expect_true "14: …the failed arm prints a Fix line at all (the two rows below are not vacuous)" \
+  test -n "$G14_FIX"
+expect_match "14: …and the Fix line names the route deps.sh owns" \
+  "*reinstall bionic's dependencies: claude plugin install bionic@bionic*" "$G14_FIX"
+# THE NEGATIVE SURVIVES THE WORDING CHANGE (1.4.4 fixit phase 4, review-c C-3). This line
+# says "reinstall" now rather than "re-resolve" — plainer, and one column shorter — because
+# what A-1 refutes is not the verb but the OBJECT. bionic is installed and registered; a
+# dependency is missing. So the claim the row makes is that bionic is never the thing being
+# reinstalled, and the bracket IS that claim: any character other than an apostrophe after
+# the name makes bionic the object, which is exactly the shape of the two spellings this
+# line has actually carried ("reinstall bionic with: …", "reinstall bionic so its
+# dependencies resolve"). A glob of `*reinstall bionic*` cannot make this claim any more —
+# it matches the correct line too.
+expect_no_match "14: …and never asks for bionic ITSELF to be reinstalled, which misdescribes a machine whose only fault is a missing dependency" \
+  "*reinstall bionic[!']*" "$G14_FIX"
+
+# RENDERER 3, ON ITS OWN LINE (1.4.4 fixit phase 4, review-b B-9). Step 2's absent-core
+# action line is the third site rendering `dep_core_repair_route`. This run drives it — the
+# fixture home has neither core dependency, so step 2's absent arm fires twice — and until
+# now nothing asserted it: the suite executed the renderer and measured nothing, so a
+# regression there was invisible to the whole tree. Extracted rather than globbed over the
+# whole run for the same reason the Fix line above is: both lines carry the same route, so a
+# whole-run glob passes on either one alone.
+G14_DEP="$(grep -F 'is missing)' "$G14_BAD" | head -1)"
+expect_true "14: …step 2 prints an absent-core action line at all (the row below is not vacuous)" \
+  test -n "$G14_DEP"
+expect_match "14: …and it names the same route, with the dependency that is missing" \
+  "*reinstall bionic's dependencies: claude plugin install bionic@bionic (superpowers is missing)*" \
+  "$G14_DEP"
 
 echo ""
 echo "========================================"

@@ -36,3 +36,23 @@ lands (a rules file on the next read, a role file on the next session), not in r
 Nothing pins the roster of files here any more — `tests/scripts.test.sh` did, and was retired with
 the reliability-tier cut (epic-18 W3, commit 8582861) — so adding one is a deliberate act by
 review, not by test.
+
+## Agent skills
+
+Per-repo config for the `mattpocock-skills` toolkit lives in `.mattpocock/` — gitignored,
+tool-local, the same pattern as `.bionic/` and `.claude/`. The pointer is committed; the
+files are not.
+
+### Issue tracker
+
+GitHub Issues via the `gh` CLI. See `.mattpocock/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels, unchanged: `needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human`, `wontfix`. See `.mattpocock/triage-labels.md`.
+
+### Domain docs
+
+Single-context. Glossary is `design/domain-dictionary.md` (no root `CONTEXT.md`); ADRs under
+`.bionic/docs/adrs/`, never a root `docs/` tree. See `.mattpocock/domain.md`.
