@@ -376,9 +376,23 @@ anchor() {
 # ── the tally ────────────────────────────────────────────────────────────────
 #
 # finish — closes the open section, turns every section that asserted nothing
-# into a named FAIL (AC-13), prints the tally with `sections=N setup=M`, and
-# exits by FAIL. Call it as the last line of a suite instead of a hand-rolled
-# `[ "$FAIL" -eq 0 ]`.
+# into a named FAIL (AC-13), fails a suite that asserted nothing AT ALL, prints
+# the tally with `sections=N setup=M`, and exits by FAIL. Call it as the last
+# line of a suite instead of a hand-rolled `[ "$FAIL" -eq 0 ]`.
+#
+# THE WHOLE-SUITE FLOOR (review-a A-4). AC-13 closes lie class 3 per SECTION; it
+# said nothing about a suite that opens none. Such a suite has an empty
+# `_TF_EMPTY`, `FAIL=0`, and exits 0 — and tests/run.sh judges on rc and prints
+# `✓ PASS`, so `0/0 passed` counts toward `Gating: N passed`. A result that
+# covered nothing claimed a covered environment, which is the lie this wave
+# exists to close, one level up from the section. The reachable shape is not a
+# hand-written empty suite: it is an early `exit 0` on a missing fixture tool,
+# or a migration that leaves a file with its sections stripped.
+#
+# THE FLOOR IS ASSERTIONS, NOT SECTIONS. `tests/loader.test.sh` and
+# `tests/patrol-marker.test.sh` legitimately open no `section` at all and assert
+# from the top level (`sections=0`, TOTAL > 0); they are not the shape this
+# refuses. TOTAL is what a result is made of, so TOTAL is what is floored.
 finish() {
   local name suite
   _tf_close_section
@@ -392,6 +406,10 @@ $_TF_EMPTY
 TF_EMPTY_SECTIONS
   fi
   suite="$(basename "${0:-suite}")"
+  if [ "$TOTAL" -eq 0 ]; then
+    TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1))
+    echo "FAIL: suite asserted nothing: ${suite}"
+  fi
   echo ""
   echo "──────────────────────────────────────────────"
   echo "${suite}: ${PASS}/${TOTAL} passed, ${FAIL} failed  sections=${_TF_SECTIONS} setup=${_TF_SETUPS}"
