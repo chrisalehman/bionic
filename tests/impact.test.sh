@@ -227,6 +227,30 @@ expect_eq "dir-ref: the reason is named" \
 expect_has "pin: a tests/run.sh registration pin is an edge" \
   "f.test.sh" "$(oneline "$FX" tests/run.sh)"
 
+# A DIRECTORY ARGUMENT COVERS ITS FILES (review-a A-3). The rule the docblock
+# states for what a SUITE names was not applied to what the CALLER asks about,
+# so `Files: tests/lib` — a legal declaration that reaches this program — derived
+# only the suites naming that directory literally: 2 in the real tree, against 55
+# for the union of its files. AC-18/AC-19 are SOUNDNESS claims, and that is an
+# under-approximation, the one direction this file may not fail in.
+# payload/scripts/lib is the directory to ask about: no fixture suite NAMES it,
+# so every suite in the answer got there through a file beneath it.
+DA_UNION="$(suites "$FX" payload/scripts/lib/width.sh payload/scripts/lib/run.sh)"
+expect_nonempty "dir-arg: the union of the directory's files is not empty (not vacuous)" \
+  "$DA_UNION"
+expect_eq "dir-arg: a directory query answers the union of its files' queries" \
+  "$DA_UNION" "$(suites "$FX" payload/scripts/lib)"
+expect_has "dir-arg: …so it carries a suite only a FILE under it reaches (transitive-lib)" \
+  "b.test.sh" "$(oneline "$FX" payload/scripts/lib)"
+expect_has "dir-arg: …and one only another file under it reaches (transitive-doctor)" \
+  "e.test.sh" "$(oneline "$FX" payload/scripts/lib)"
+# PAIRED: a FILE argument is untouched — the rule is scoped to directories, and a
+# derivation that simply answered everything would pass the row above.
+expect_eq "dir-arg: a file argument still answers only for that file" \
+  "b.test.sh" "$(suites "$FX" tests/lib/helper.sh)"
+expect_eq "dir-arg: …and a file under a directory does not drag in the directory" \
+  "a.test.sh" "$(suites "$FX" tests/a.test.sh)"
+
 # ── §B every edge kind can go away ──────────────────────────────────────────
 # The mutation half. Each positive above is re-run against a fixture with that
 # one edge deleted; the suite must DISAPPEAR from the answer. A derivation that
@@ -270,6 +294,13 @@ M="$(mut dirref)"
 printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\necho no directory here\n' >"$M/tests/g.test.sh"
 expect_lacks "dir-ref: dropping the directory reference drops the suite" \
   "g.test.sh" "$(oneline "$M" hooks/h2.sh)"
+
+M="$(mut dirarg)"
+printf '#!/bin/bash\necho nothing\n' >"$M/tests/lib/helper.sh"
+expect_lacks "dir-arg: a directory answer loses the suite whose only edge to a file under it went away" \
+  "b.test.sh" "$(oneline "$M" payload/scripts/lib)"
+expect_has "dir-arg: …while the suites reaching it another way stay" \
+  "e.test.sh" "$(oneline "$M" payload/scripts/lib)"
 
 M="$(mut pathref)"
 printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\necho nothing\n' >"$M/tests/a.test.sh"
