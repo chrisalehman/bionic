@@ -700,7 +700,11 @@ _tf_require_derived_helpers() {
   defs="$(echo "$scan" | sed -n 's/^DEF //p' | sort -u)"
   for name in $calls; do
     type -t "$name" >/dev/null 2>&1 && continue
-    echo "$defs" | grep -qx -- "$name" && continue
+    # A HERESTRING, not `echo | grep -q` — the form this file bans twice, at :100
+    # and :332, and the form it was written in on the load path of every suite
+    # (review-a A-6). Harmless today, since $defs is a few hundred bytes of the
+    # suite's own function names, and wrong in the file that says so.
+    grep -qx -- "$name" <<<"$defs" && continue
     missing="$missing $name"
   done
   if [ -n "$missing" ]; then
