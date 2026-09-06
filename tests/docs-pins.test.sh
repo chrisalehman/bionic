@@ -101,7 +101,12 @@ fi
 
 # --- Anti-vacuity: the same extractors must discriminate a real mismatch ---
 
-anchor "$HELP_MD" "bionic ${PLUGIN_VERSION} (installed)" 1
+# WHOLE-LINE ERE, because the sed two lines down is `^...$`-anchored. A fixed-string
+# anchor is a substring test: it survives a reindent of this line while the sed does
+# not, leaving a "mutant" byte-identical to the shipped help.md — see plant 2 of
+# s19c-planted-move.log, where exactly that hid a broken mutation. The version's dots
+# are escaped so a literal `1.4.4` cannot match `1x4x4`.
+anchor -E "$HELP_MD" "^bionic ${PLUGIN_VERSION//./\\.} \\(installed\\)$" 1
 DOCTORED_HELP="$TMP/help-mismatched.md"
 sed "s/^bionic ${PLUGIN_VERSION} (installed)\$/bionic 0.0.0-mismatch (installed)/" \
   "$HELP_MD" > "$DOCTORED_HELP"
