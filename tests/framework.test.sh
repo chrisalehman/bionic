@@ -968,6 +968,30 @@ done
 expect_empty "14: a REAL heredoc body is still content, not code" "$(f14_wall realhd)"
 expect_eq "14: …and the derivation does not fire on a call inside it" "0" "$(f14_deriv realhd)"
 
+# --- a ONE-LINE definition carries its body on the same line (A-2) ----------
+# `eq() { ...; ok "$1"; ... }` is where 45 framework call sites in 14 suites
+# lived, session-start.test.sh among them: every one of its ~150 assertions
+# routes through three such wrappers, and the suite scanned as ZERO calls.
+# PLANTED THROUGH A HEREDOC, like every other fixture in this file: the body is
+# content, so the scanner does not read this suite as calling the helper below.
+cat > "$F14_D/oneline.sh" <<'F14_ONELINE'
+#!/bin/bash
+eq() { if [ "$2" = "$3" ]; then ok "$1"; else expect_oneline_never_defined "$1"; fi; }
+eq "a row" x x
+F14_ONELINE
+expect_eq "14: a call inside a one-line definition body is derived" "1" "$(f14_deriv oneline)"
+expect_contains "14: …and the name it names is the one on that line" \
+  "expect_oneline_never_defined" \
+  "$( ( _tf_require_derived_helpers "$F14_D/oneline.sh" ) 2>&1 >/dev/null )"
+# PAIRED: the definition itself is still recorded, so the fall-through did not
+# cost the DEF/TOPDEF records the adoption wall reads.
+cat > "$F14_D/onelinetop.sh" <<'F14_ONELINETOP'
+#!/bin/bash
+ok() { PASS=$((PASS + 1)); no "x" "y"; }
+F14_ONELINETOP
+expect_contains "14: …and a one-line shadow is still a TOPDEF the wall refuses" \
+  "defines ok() at column 0" "$(f14_wall onelinetop)"
+
 # --- no file in tests/ ends with a heredoc still open ------------------------
 # NOT A COUNT PIN. The property that failed is "the scan reaches EOF", so that
 # is what is asserted; counts move with every edit. The tracer runs the SHIPPED

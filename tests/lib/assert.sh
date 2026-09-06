@@ -523,13 +523,21 @@ _tf_scan() {
         }
       }
 
+      # A DEFINITION, AND THEN THE REST OF THE LINE. The `name()` head is cut
+      # off and what follows falls through to the tokeniser, because a
+      # definition written on ONE line carries its whole body there —
+      #   eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "..."; fi; }
+      # — and a scanner that stopped at the head derived nothing from it. 45
+      # framework call sites in 14 suites were invisible that way. All ~150
+      # assertions of session-start.test.sh route through three such wrappers,
+      # and that suite scanned as ZERO calls (review-a A-2).
       if (match(line, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) {
-        d = substr(line, RSTART, RLENGTH)
+        rs = RSTART; rl = RLENGTH
+        d = substr(line, rs, rl)
         gsub(/[^A-Za-z0-9_]/, "", d)
         print "DEF " d
         if (line ~ /^[A-Za-z_]/) print "TOPDEF " d
-        hd = pending
-        next
+        line = substr(line, rs + rl)
       }
 
       gsub(/[;()&|{}]/, " \001 ", line)
