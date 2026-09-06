@@ -546,6 +546,16 @@ expect_contains "4i: …and the marker keys on the row that actually carries an 
 MONODIR="$SANDBOX/hooks-mono-mutant"
 mkdir -p "$MONODIR"
 cp "$HOOKS_DIR/session-sweeper.sh" "$MONODIR/session-sweeper.sh"
+# The awk below rewrites ONE line of the shipped gate, so that line is this mutation's
+# precondition and it is declared through the framework's `anchor` (cross-gate section
+# S19) rather than checked afterwards.
+#
+# THE PATTERN IS A WHOLE-LINE ERE, not the fixed string it reads like, because the awk
+# compares `$0` against the WHOLE line: a fixed-string anchor is a substring test and
+# would still match a reindented copy the awk no longer touches, leaving a mutant that
+# is byte-identical to the shipped gate and every row below it green against it. The
+# count was measured against the shipped gate before this call was written.
+anchor -E "$GATE" '^    if \(aid != ""\) agent\[name\] = aid$' 1
 awk '{
        if ($0 == "    if (aid != \"\") agent[name] = aid") {
          print "    if (aid == \"\") agent[name] = aid"
@@ -553,12 +563,6 @@ awk '{
        }
        print
      }' "$GATE" > "$MONODIR/landing-gate.sh"
-if cmp -s "$GATE" "$MONODIR/landing-gate.sh"; then
-  no "4i-mut: the inverted-guard mutation applies to landing-gate.sh" \
-     "the mutation target matched nothing — the rule moved and this proof is vacuous"
-else
-  ok "4i-mut: the inverted-guard mutation applies to landing-gate.sh"
-fi
 
 R4I_MUT="$(make_wave_repo r4i-mut)"
 add_row "$R4I_MUT" name=w4-t2mono status=intended agent_id= \
