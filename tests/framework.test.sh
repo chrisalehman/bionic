@@ -199,6 +199,70 @@ expect_empty "expect_empty fails on a non-empty value" "something"
 finish
 PLANT_NEGATIVES
 
+# The generic family (S1b): one planted suite whose ONLY assertions are the
+# eleven canonical helpers in their PASSING form, and one whose only assertions
+# are the same eleven in their FAILING form. Together they prove each helper
+# reports through ok/no — the tallies move, and the section floor sees the rows.
+
+cat > "$SB/tests/p-family-pass.test.sh" <<'PLANT_FAMILY_PASS'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+section "the eleven generic helpers, passing arms"
+expect_eq        "eq"        same same
+expect_ne        "ne"        wanted other
+expect_true      "true"      test 1 -eq 1
+expect_false     "false"     test 1 -eq 2
+expect_contains  "contains"  "need" "a needle here"
+expect_absent    "absent"    "haystalk" "a needle here"
+expect_match     "match"     '*need*'  "a needle here"
+expect_no_match  "no_match"  '*straw*' "a needle here"
+expect_status    "status"    0 0
+expect_empty     "empty"     ""
+expect_nonempty  "nonempty"  "x"
+
+finish
+PLANT_FAMILY_PASS
+
+cat > "$SB/tests/p-family-fail.test.sh" <<'PLANT_FAMILY_FAIL'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+section "the eleven generic helpers, failing arms"
+expect_eq        "eq"        wanted got
+expect_ne        "ne"        same same
+expect_true      "true"      test 1 -eq 2
+expect_false     "false"     test 1 -eq 1
+expect_contains  "contains"  "straw" "a needle here"
+expect_absent    "absent"    "need"  "a needle here"
+expect_match     "match"     '*straw*' "a needle here"
+expect_no_match  "no_match"  '*need*'  "a needle here"
+expect_status    "status"    0 1
+expect_empty     "empty"     "loud"
+expect_nonempty  "nonempty"  ""
+
+finish
+PLANT_FAMILY_FAIL
+
+# expect_true/expect_false SILENCE the command they run (the tree's majority, 17
+# of 20 and 6 of 9). This plant proves that: the command writes to stdout and to
+# stderr, and neither reaches the suite's output.
+cat > "$SB/tests/p-family-silent.test.sh" <<'PLANT_FAMILY_SILENT'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+noisy() { echo "NOISE-ON-STDOUT"; echo "NOISE-ON-STDERR" >&2; return "$1"; }
+
+section "the command's own output does not reach the suite"
+expect_true  "true silences a noisy success" noisy 0
+expect_false "false silences a noisy failure" noisy 1
+
+finish
+PLANT_FAMILY_SILENT
+
 # ============================================================
 section "1: a section that asserts nothing fails by name (AC-13)"
 # ============================================================
@@ -299,7 +363,9 @@ expect_eq "5: …and both rows are counted as failures" \
 section "6: the framework owns the counters and the helpers"
 # ============================================================
 
-for _fn in section setup_section ok no expect_eq expect_empty finish require_helpers; do
+for _fn in section setup_section ok no finish require_helpers \
+          expect_eq expect_ne expect_true expect_false expect_contains expect_absent \
+          expect_match expect_no_match expect_status expect_empty expect_nonempty; do
   expect_eq "6: the framework defines ${_fn}" "function" "$(type -t "$_fn")"
 done
 # The counters: a planted suite that defines none of its own reads all three
@@ -345,5 +411,72 @@ expect_eq "8: tests/run.sh names framework.test.sh" "yes" \
 RUNSH_STRIPPED="$(printf '%s\n' "$RUNSH" | grep -v 'run "framework.test.sh"')"
 expect_eq "8: …and the check discriminates (a copy without the line fails it)" "no" \
   "$(contains "$RUNSH_STRIPPED" 'run "framework.test.sh" bash tests/framework.test.sh')"
+
+# ============================================================
+section "9: the generic expect family is the framework's (AC-12, S1b)"
+# ============================================================
+#
+# A-16's decision: the framework OWNS the eleven generic assertion names, and a
+# suite-specific helper under a name the framework does NOT own stays local. The
+# rows below are the framework half. The wall that refuses a suite for shadowing
+# an owned name is S10's, and is not asserted here.
+#
+# PAIRED, BY CONSTRUCTION. Every helper appears twice: once directly in this
+# suite where its passing arm must produce a PASS row, and once inside a planted
+# suite where its failing arm must produce a FAIL row. A helper that silently did
+# nothing would move neither tally.
+
+# --- passing arms, called directly: each of these adds one PASS to THIS suite
+expect_eq       "9: expect_eq passes on equal values"              same     same
+expect_ne       "9: expect_ne passes on differing values"          wanted   other
+expect_true     "9: expect_true passes on a zero-exit command"     test 1 -eq 1
+expect_false    "9: expect_false passes on a non-zero command"     test 1 -eq 2
+expect_contains "9: expect_contains passes on a present substring" "need"   "a needle here"
+expect_absent   "9: expect_absent passes on an absent substring"   "straw"  "a needle here"
+expect_match    "9: expect_match passes on a matching glob"        '*need*' "a needle here"
+expect_no_match "9: expect_no_match passes on a non-matching glob" '*straw*' "a needle here"
+expect_status   "9: expect_status passes on the expected status"   0        0
+expect_empty    "9: expect_empty passes on an empty value"         ""
+expect_nonempty "9: expect_nonempty passes on a non-empty value"   "x"
+
+# --- the passing arms move the PASS counter and satisfy the section floor
+plant_run p-family-pass.test.sh
+expect_eq "9: eleven passing arms are eleven PASS rows in one section" \
+  "p-family-pass.test.sh: 11/11 passed, 0 failed  sections=1 setup=0" \
+  "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-family-pass\.test\.sh: .*\)$/\1/p')"
+expect_eq "9: …so the section floor does not name that section empty" "no" \
+  "$(contains "$P_OUT" "section asserted nothing")"
+expect_eq "9: …and the passing suite exits 0" "0" "$P_RC"
+
+# --- the failing arms move the FAIL counter: each helper calls no()
+plant_run p-family-fail.test.sh
+expect_eq "9: eleven failing arms are eleven FAIL rows" \
+  "p-family-fail.test.sh: 0/11 passed, 11 failed  sections=1 setup=0" \
+  "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-family-fail\.test\.sh: .*\)$/\1/p')"
+expect_eq "9: …and the failing suite exits 1" "1" "$P_RC"
+for _fn in eq ne true false contains absent match no_match status empty nonempty; do
+  expect_eq "9: expect_${_fn}'s failing arm printed its FAIL row by label" "yes" \
+    "$(contains "$P_OUT" "FAIL: ${_fn}")"
+done
+
+# --- expect_true/expect_false silence the command they run
+plant_run p-family-silent.test.sh
+expect_eq "9: a noisy command under expect_true/expect_false still passes and fails" \
+  "p-family-silent.test.sh: 2/2 passed, 0 failed  sections=1 setup=0" \
+  "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-family-silent\.test\.sh: .*\)$/\1/p')"
+expect_eq "9: …and the command's stdout never reaches the suite output" "no" \
+  "$(contains "$P_OUT" "NOISE-ON-STDOUT")"
+expect_eq "9: …nor its stderr" "no" \
+  "$(contains "$P_OUT" "NOISE-ON-STDERR")"
+
+# --- the mapping table is IN the framework, because S5-S8 quote it from there
+FAMDOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
+expect_eq "9: the docblock carries the old-spelling mapping table" "yes" \
+  "$(contains "$FAMDOC" "expect_equal -> expect_eq")"
+expect_eq "9: …including the entry that is NOT a rename (ERE vs glob)" "yes" \
+  "$(contains "$FAMDOC" "expect_matches -> NOT a rename")"
+FAMDOC_STRIPPED="$(grep -v 'expect_equal ->' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
+expect_eq "9: …and the pin discriminates on a copy with the row removed" "no" \
+  "$(contains "$FAMDOC_STRIPPED" "expect_equal -> expect_eq")"
 
 finish
