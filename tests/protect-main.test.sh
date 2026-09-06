@@ -9,11 +9,9 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/protect-main.sh"
-PASS=0
-FAIL=0
-TOTAL=0
 
 # ---------- helpers ----------
 
@@ -59,26 +57,20 @@ pm_payload() {  # <cwd> <command>
 expect_block() {
   local label="$1"
   local cmd="$2"
-  TOTAL=$((TOTAL + 1))
   if run_hook "$cmd"; then
-    echo "FAIL (expected BLOCK): $label"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected BLOCK, got ALLOW"
   else
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+    ok "$label"
   fi
 }
 
 expect_allow() {
   local label="$1"
   local cmd="$2"
-  TOTAL=$((TOTAL + 1))
   if run_hook "$cmd"; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL (expected ALLOW): $label"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected ALLOW, got BLOCK"
   fi
 }
 
@@ -108,8 +100,7 @@ trap cleanup EXIT
 # SECTION 1: On main branch — every push must be blocked
 # ============================================================
 
-echo ""
-echo "=== Section 1: On 'main' branch (all pushes must be BLOCKED) ==="
+section "Section 1: On 'main' branch (all pushes must be BLOCKED)"
 export FAKE_BRANCH="main"
 
 expect_block "explicit: push origin main"            "git push origin main"
@@ -136,8 +127,7 @@ expect_block "refspec push HEAD:main"                 "git push origin HEAD:main
 # SECTION 2: On master branch — every push must be blocked
 # ============================================================
 
-echo ""
-echo "=== Section 2: On 'master' branch (all pushes must be BLOCKED) ==="
+section "Section 2: On 'master' branch (all pushes must be BLOCKED)"
 export FAKE_BRANCH="master"
 
 expect_block "master: bare push"                      "git push"
@@ -149,8 +139,7 @@ expect_block "master: push origin master"             "git push origin master"
 # SECTION 3: On feature branch — non-main pushes must be allowed
 # ============================================================
 
-echo ""
-echo "=== Section 3: On feature branch (safe pushes must be ALLOWED) ==="
+section "Section 3: On feature branch (safe pushes must be ALLOWED)"
 export FAKE_BRANCH="feat/cool-thing"
 
 expect_allow "feature: push origin feat/cool-thing"   "git push origin feat/cool-thing"
@@ -176,8 +165,7 @@ expect_allow "feature: push domain-main branch"        "git push origin domain-m
 # SECTION 4: Non-push commands must always pass through
 # ============================================================
 
-echo ""
-echo "=== Section 4: Non-push commands (must be ALLOWED) ==="
+section "Section 4: Non-push commands (must be ALLOWED)"
 export FAKE_BRANCH="main"
 
 expect_allow "git status"                             "git status"
@@ -217,8 +205,7 @@ expect_block "GIT_ASKPASS prefix on push"             "GIT_ASKPASS=cat git push 
 # so Block 3 (any push while on main) cannot mask the result: what these pin is
 # the destination reading, nothing else.
 
-echo ""
-echo "=== Section 5: git spellings that reach main (all BLOCKED) ==="
+section "Section 5: git spellings that reach main (all BLOCKED)"
 export FAKE_BRANCH="feat/cool-thing"
 
 expect_block "AC-9 -C <dir> global option"        "git -C /tmp/r push origin main"
@@ -249,8 +236,7 @@ expect_block "AC-9 -C <dir> force push of a feature branch" \
 # segments on newlines, so every line of a body became a candidate command and
 # a document that MENTIONED a main push was refused as if it were one.
 
-echo ""
-echo "=== Section 6: near-misses and prose (all ALLOWED) ==="
+section "Section 6: near-misses and prose (all ALLOWED)"
 export FAKE_BRANCH="feat/cool-thing"
 
 expect_allow "AC-10 topic/main is its own branch"  "git push origin topic/main"
@@ -282,8 +268,7 @@ expect_block "after a heredoc, a real main push is still blocked" "$HEREDOC_THEN
 #
 # Feature branch again, so Block 3 cannot mask the result.
 
-echo ""
-echo "=== Section 7: openers, prefixes and runner strings (all BLOCKED) ==="
+section "Section 7: openers, prefixes and runner strings (all BLOCKED)"
 export FAKE_BRANCH="feat/cool-thing"
 
 # --- shell constructs that open a command without a separator ---
@@ -375,8 +360,7 @@ expect_allow "B-1 an UNQUOTED heredoc body is still ignored" \
 # The branch stays `main` throughout, so the third block (any push while ON main) is
 # live for every row here and each one is a command that WOULD be refused two lines up.
 
-echo ""
-echo "=== the unengaged session: silent on the pushes every section above blocks ==="
+section "the unengaged session: silent on the pushes every section above blocks"
 
 export FAKE_BRANCH=main
 
@@ -385,11 +369,10 @@ pm_unengaged() {  # <label> <command> — expect exit 0, empty stdout, empty std
   out=$(pm_payload "$PLAIN_REPO" "$cmd" \
           | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" 2>"$PM_SANDBOX/.err") || st=$?
   err=$(cat "$PM_SANDBOX/.err")
-  TOTAL=$((TOTAL + 1))
   if [ "$st" = "0" ] && [ -z "$out" ] && [ -z "$err" ]; then
-    echo "PASS: $label"; PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL: $label"; echo "      exit=$st stdout=[$out] stderr=[$err]"; FAIL=$((FAIL + 1))
+    no "$label" "exit=$st stdout=[$out] stderr=[$err]"
   fi
 }
 
@@ -409,27 +392,13 @@ rm -f "$PLAIN_REPO/.bionic/tmp/engaged-$SID.state"
 # ...AND THE POSITIVE CONTROL FOR THIS SECTION'S OWN MACHINERY: the identical driver,
 # pointed at the ENGAGED repo, still refuses. Without it every row above would also pass
 # on a hook that had simply stopped working.
-TOTAL=$((TOTAL + 1))
 if pm_payload "$ENGAGED_REPO" "git push --force origin main" \
      | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" >/dev/null 2>&1; then
-  echo "FAIL: AC-20 control — the same driver on the ENGAGED repo still BLOCKS"
-  FAIL=$((FAIL + 1))
+  no "AC-20 control — the same driver on the ENGAGED repo still BLOCKS"
 else
-  echo "PASS: AC-20 control — the same driver on the ENGAGED repo still BLOCKS"
-  PASS=$((PASS + 1))
+  ok "AC-20 control — the same driver on the ENGAGED repo still BLOCKS"
 fi
 
 rm -rf "$PM_SANDBOX"
 
-# ============================================================
-# Results
-# ============================================================
-
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish

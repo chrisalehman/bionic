@@ -56,6 +56,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/root.sh"
@@ -65,33 +66,19 @@ SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/root-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
-PASS=0
-FAIL=0
-TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
-expect_ne() { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected anything but [$2], got it"; fi; }
-
 TAB="$(printf '\t')"
 
 # tags seen across the whole run, for the vocabulary-coverage assertion at the end
 TAGS_SEEN="$SANDBOX/.tags-seen"
 : > "$TAGS_SEEN"
 
-# ============================================================
-echo "=== 0 — the library is on disk and parses ==="
-# ============================================================
+section "0 — the library is on disk and parses"
 if [ -f "$LIB" ]; then
   ok "payload/scripts/lib/root.sh is on disk"
 else
   no "payload/scripts/lib/root.sh is on disk" "$LIB"
-  echo ""
   echo "root.test.sh: no library at $LIB — every assertion below would pass over nothing."
-  echo "========================================"
-  echo "root: $PASS/$TOTAL passed"
-  echo "========================================"
-  exit 1
+  finish
 fi
 
 if bash -n "$LIB" 2>"$SANDBOX/.syn"; then
@@ -188,8 +175,7 @@ export GIT_TERMINAL_PROMPT=0
 HOME_DEFAULT="$SANDBOX/home"
 
 # ============================================================
-echo ""
-echo "=== 1 — a git repo nested under a NON-GIT workspace holding .bionic ==="
+section "1 — a git repo nested under a NON-GIT workspace holding .bionic"
 # ============================================================
 # The bug this library exists to kill (handoff §2.2): the old resolvers ask git
 # first, so the nested repo always answered itself and the workspace's plans
@@ -215,8 +201,7 @@ expect_eq "1: the chosen line is the last line (the walk stops at the first hit)
 assert_agrees "1" "$SANDBOX/t1/ws/repo/src" "$HOME_DEFAULT"
 
 # ============================================================
-echo ""
-echo "=== 2 — a LINKED WORKTREE maps onto its main repository ==="
+section "2 — a LINKED WORKTREE maps onto its main repository"
 # ============================================================
 # AC-9's shape: a worktree cwd must answer the MAIN repo's address space, or the
 # roster the writer appends and the roster the gate polls are two different files.
@@ -250,8 +235,7 @@ expect_eq "2b: a real .bionic INSIDE the worktree still loses — the map runs b
   "$T2_MAIN" "$(root_at "$SANDBOX/t2/wt-a/sub" "$HOME_DEFAULT")"
 
 # ============================================================
-echo ""
-echo "=== 3 — a PHANTOM nested .bionic below the repo root: nearest wins ==="
+section "3 — a PHANTOM nested .bionic below the repo root: nearest wins"
 # ============================================================
 # design-ledger S3, verbatim: "Phantom nested .bionic = nearest wins, by rule."
 # The git-root-privileged alternative was rejected there by name, so the git
@@ -279,8 +263,7 @@ expect_eq "3b: with the phantom deleted the same cwd climbs to the repo root" \
   "$SANDBOX/t3/proj" "$(root_at "$SANDBOX/t3/proj/apps/inner/src" "$HOME_DEFAULT")"
 
 # ============================================================
-echo ""
-echo "=== 4 — a SYMLINKED .bionic is never a root (C2) ==="
+section "4 — a SYMLINKED .bionic is never a root (C2)"
 # ============================================================
 # spawn-worktree.sh used to plant <wt>/.bionic -> <main>/.bionic. C2 retired it
 # and made the skip a rule of the resolver, so a legacy link left on disk is
@@ -312,8 +295,7 @@ expect_eq "4b: the same path as a real directory is chosen — the skip was abou
   "$SANDBOX/t4/ws/repo" "$(root_at "$SANDBOX/t4/ws/repo" "$HOME_DEFAULT")"
 
 # ============================================================
-echo ""
-echo "=== 5 — a .bionic inside \$HOME is never a candidate ==="
+section "5 — a .bionic inside \$HOME is never a candidate"
 # ============================================================
 # A stray ~/.bionic would otherwise become every project's root the moment a
 # repo lived under it, which is every repo on a developer machine.
@@ -341,8 +323,7 @@ expect_eq "5b: with HOME elsewhere the same directory becomes the root — the s
   "$T5_HOME" "$(root_at "$SANDBOX/t5/home/proj/deep" "$HOME_DEFAULT")"
 
 # ============================================================
-echo ""
-echo "=== 6 — an unrelated repo with no .bionic anywhere ==="
+section "6 — an unrelated repo with no .bionic anywhere"
 # ============================================================
 gitinit "$SANDBOX/t6/repo"
 mkdir -p "$SANDBOX/t6/repo/deep/er"
@@ -359,8 +340,7 @@ expect_eq "6: every directory between cwd and the sandbox is reported as a candi
 assert_agrees "6" "$SANDBOX/t6/repo/deep/er" "$HOME_DEFAULT"
 
 # ============================================================
-echo ""
-echo "=== 7 — no git, no .bionic: the cwd answers ==="
+section "7 — no git, no .bionic: the cwd answers"
 # ============================================================
 # The seventh shape the six topologies do not reach. Without it `cwd-fallback`
 # is a tag no fixture ever produces, and a resolver that could never emit it
@@ -376,8 +356,7 @@ expect_eq "7: the terminal line carries cwd-fallback" \
 assert_agrees "7" "$SANDBOX/t7/plain/deep" "$HOME_DEFAULT"
 
 # ============================================================
-echo ""
-echo "=== 8 — a WORKTREE OF A BARE REPOSITORY: the checkout is the only working tree ==="
+section "8 — a WORKTREE OF A BARE REPOSITORY: the checkout is the only working tree"
 # ============================================================
 # critic-findings.md issue 2 (MEDIUM). Rule 1 maps a linked worktree onto
 # dirname(--git-common-dir); for a worktree of a NON-bare repo that is the main
@@ -445,8 +424,7 @@ expect_eq "8c: the report still begins at the main repo, not the worktree cwd" \
   "$SANDBOX/t8c/main${TAB}chosen" "$(printf '%s\n' "$t8c_rep" | head -1)"
 
 # ============================================================
-echo ""
-echo "=== 9 — the tag vocabulary is closed, and every tag in it is reachable ==="
+section "9 — the tag vocabulary is closed, and every tag in it is reachable"
 # ============================================================
 # Two halves of one claim: the reports emitted nothing outside the vocabulary
 # (a typo'd tag is a silent contract break for the tick's listing, 2.4), and no
@@ -455,9 +433,4 @@ VOCAB="above-home candidate chosen cwd-fallback git-toplevel-fallback skipped-sy
 seen="$(sort -u "$TAGS_SEEN" | tr '\n' ' ' | sed 's/ *$//')"
 expect_eq "8: the tags emitted across all seven topologies are exactly the vocabulary" "$VOCAB" "$seen"
 
-echo ""
-echo "========================================"
-echo "root: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish

@@ -50,17 +50,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 SEAM="${REPO}/tests/lib/resolve-roots.sh"
 MARKER="SEAM-DOCTORED-MARKER-b7f3"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-# Containment done in-process (case/glob), never `printf | grep -q`: that pipe is
-# the SIGPIPE race tests/assert-helper-race.test.sh used to pin (deleted at 8582861,
-# epic-18 wave-03; nothing replaced the pin), and its dangerous
-# direction reports a FALSE PASS for the absent-check. No pipe, no race.
-expect_eq()      { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "expected to contain '$2', got '$3'" ;; esac; }
-expect_absent()   { case "$3" in *"$2"*) no "$1" "expected NOT to contain '$2', got '$3'" ;; *) ok "$1" ;; esac; }
+. "$(dirname "$0")/lib/assert.sh"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -121,8 +111,7 @@ PROBE
 # probe <cwd> <seam-ref> <check> — env overrides come from the caller's own env.
 probe() { ( cd "$1" && bash "$TMP/probe.sh" "$2" "$3" 2>&1 ); }
 
-echo ""
-echo "=== Group 1: repo defaults with no override set ==="
+section "Group 1: repo defaults with no override set"
 
 expect_eq "BIONIC_HOOKS_DIR defaults to <repo>/hooks" \
   "$REPO/hooks" "$(probe "$REPO" "$SEAM" var-hooks)"
@@ -131,8 +120,7 @@ expect_eq "BIONIC_SKILLS_DIR defaults to <repo>/skills" \
 expect_eq "BIONIC_SCRIPTS_DIR defaults to <repo>" \
   "$REPO" "$(probe "$REPO" "$SEAM" var-scripts)"
 
-echo ""
-echo "=== Group 2: location independence (repo derives from the helper, not the caller) ==="
+section "Group 2: location independence (repo derives from the helper, not the caller)"
 
 expect_eq "absolute source from cwd=/ resolves <repo>/hooks" \
   "$REPO/hooks" "$(probe "/" "$SEAM" var-hooks)"
@@ -154,8 +142,7 @@ expect_eq "relative source from cwd=<repo>/hooks resolves <repo>/skills" \
 expect_eq "relative source from cwd=<repo>/skills resolves <repo>" \
   "$REPO" "$(probe "$REPO/skills" "../tests/lib/resolve-roots.sh" var-scripts)"
 
-echo ""
-echo "=== Group 3: override set -> the named check reads the DOCTORED copy ==="
+section "Group 3: override set -> the named check reads the DOCTORED copy"
 
 _v="$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "$REPO" "$SEAM" read-hooks)"
 expect_eq "hooks override: named check reads the doctored constant" \
@@ -171,8 +158,7 @@ expect_eq "scripts override: marker is present in what was read" \
 expect_eq "override survives a foreign cwd (cwd=/, hooks redirected)" \
   "SUPPORTED_SDLC_VERSION=99999" "$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "/" "$SEAM" read-hooks)"
 
-echo ""
-echo "=== Group 4: override unset -> the same check reads the REPO copy ==="
+section "Group 4: override unset -> the same check reads the REPO copy"
 
 _v="$(probe "$REPO" "$SEAM" read-hooks)"
 expect_eq "no override: named check reads the repo constant" \
@@ -184,8 +170,7 @@ expect_eq "no override: skills read carries no doctored marker" \
 expect_eq "no override: scripts read carries no doctored marker" \
   "0" "$(probe "$REPO" "$SEAM" mark-scripts)"
 
-echo ""
-echo "=== Group 5: the three classes are independent ==="
+section "Group 5: the three classes are independent"
 
 expect_eq "hooks override does not drag skills along" \
   "0" "$(BIONIC_HOOKS_DIR="$DOC/hooks" probe "$REPO" "$SEAM" mark-skills)"
@@ -201,8 +186,7 @@ probe3() { BIONIC_HOOKS_DIR="$DOC/hooks" BIONIC_SKILLS_DIR="$DOC/skills" BIONIC_
 expect_eq "all three overrides together each bind to their own class" \
   "1 1 1" "$(probe3 mark-hooks) $(probe3 mark-skills) $(probe3 mark-scripts)"
 
-echo ""
-echo "=== Group 6: no suite resolves privately (spec AC-3, enumerated) ==="
+section "Group 6: no suite resolves privately (spec AC-3, enumerated)"
 # The seam is only a seam while it is the ONLY answer. A suite added later with a
 # hardcoded offset opts out silently: it sources nothing, reds nothing, and goes
 # blind the day an overridden root goes live (W5 cold install).
@@ -234,11 +218,4 @@ done
 expect_eq "every suite sources the path-resolution seam" "" "$UNSEAMED"
 expect_eq "no suite keeps a private legacy offset alongside the seam" "" "$LEGACY_IDIOM"
 
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish

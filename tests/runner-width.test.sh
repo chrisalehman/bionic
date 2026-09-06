@@ -35,15 +35,9 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 RUN="${BIONIC_SCRIPTS_DIR}/tests/run.sh"
-
-PASS=0; FAIL=0; TOTAL=0
-ok()  { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-bad() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2], got [$3]"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else bad "$1" "missing: $2"; fi; }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then bad "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
 
 TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/runner-width-test.XXXXXX")"
 trap 'rm -rf "$TMPROOT"' EXIT
@@ -80,7 +74,7 @@ dry_run() {
 S_CLEAR='44|69|1.6|8'
 S_CRIT='10|50|1|8'
 
-echo "=== Section 1: --dry-run prints JOBS=<n> and exits before any suite runs ==="
+section "Section 1: --dry-run prints JOBS=<n> and exits before any suite runs"
 
 # (a) a critical ring at ceiling 8 -> the quartered rung, 2.
 RING_A="$TMPROOT/a/pressure.ring"
@@ -109,7 +103,7 @@ expect_contains "1c …confirmed against a critical ring too (quarters 8, not an
   "JOBS=2" "$DRY_OUT"
 
 echo
-echo "=== Section 2: --dry-run writes NOTHING (S25, critic K-4 option 2) ==="
+section "Section 2: --dry-run writes NOTHING (S25, critic K-4 option 2)"
 #
 # RATIFIED: `tests/run.sh --dry-run` is a user-facing surface, and the obligation that
 # rides with it is that a dry run writes nothing. Before S25 the runner sampled the
@@ -161,7 +155,7 @@ expect_eq "2b the ordinary path still appends exactly one sample (AC-15 intact)"
   "$((BEFORE_LINES2 + 1))" "$AFTER_LINES2"
 
 echo
-echo "=== Section 3: BIONIC_TEST_JOBS is retired ==="
+section "Section 3: BIONIC_TEST_JOBS is retired"
 
 RING_E="$TMPROOT/e/pressure.ring"
 ring_of "$RING_E" "$NOW" "$S_CLEAR"
@@ -184,7 +178,7 @@ dry_run "$RING_F" "$S_CLEAR" 8
 expect_absent "3c no notice when BIONIC_TEST_JOBS was never set" "BIONIC_TEST_JOBS is retired" "$DRY_ERR"
 
 echo
-echo "=== Section 5: a garbage ceiling falls back, it does not kill the run (C-6) ==="
+section "Section 5: a garbage ceiling falls back, it does not kill the run (C-6)"
 
 # `pressure_level` refuses a ceiling that is not a positive integer with exit 2 and prints
 # nothing on stdout. `:-8` covers UNSET and nothing else, so `JOBS` came out empty and
@@ -206,7 +200,7 @@ dry_run "$RING_G" "$S_CLEAR" 3
 expect_contains "5 a valid ceiling of 3 is still honoured (not replaced by 8)" "JOBS=3" "$DRY_OUT"
 
 echo
-echo "=== Section 4: registration (hook-authoring convention) ==="
+section "Section 4: registration (hook-authoring convention)"
 
 # THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner — an unregistered
 # suite is a silent false green (pattern: tests/patrol-duties-gate.test.sh Group 24).
@@ -214,10 +208,7 @@ if grep -q 'run "runner-width.test.sh" bash tests/runner-width.test.sh' \
      "${BIONIC_SCRIPTS_DIR}/tests/run.sh"; then
   ok "4 tests/run.sh names runner-width.test.sh"
 else
-  bad "4 tests/run.sh does not name this suite — it would never run"
+  no "4 tests/run.sh does not name this suite — it would never run"
 fi
 
-echo
-echo "──────────────────────────────────────────────"
-echo "runner-width.test.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ]
+finish

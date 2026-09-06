@@ -8,11 +8,9 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/protect-database.sh"
-PASS=0
-FAIL=0
-TOTAL=0
 
 # ---------- the engaged fixture (task-engaged-session, AC-20) ----------
 #
@@ -55,25 +53,19 @@ run_hook() {
 
 expect_block() {
   local label="$1" cmd="$2"
-  TOTAL=$((TOTAL + 1))
   if run_hook "$cmd"; then
-    echo "FAIL (expected BLOCK): $label"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected BLOCK, got ALLOW"
   else
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+    ok "$label"
   fi
 }
 
 expect_allow() {
   local label="$1" cmd="$2"
-  TOTAL=$((TOTAL + 1))
   if run_hook "$cmd"; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL (expected ALLOW): $label"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected ALLOW, got BLOCK"
   fi
 }
 
@@ -81,8 +73,7 @@ expect_allow() {
 # SECTION 1: DROP operations (must be BLOCKED)
 # ============================================================
 
-echo ""
-echo "=== Section 1: DROP operations (must be BLOCKED) ==="
+section "Section 1: DROP operations (must be BLOCKED)"
 
 expect_block "psql DROP TABLE"              "psql -c 'DROP TABLE users'"
 expect_block "psql DROP DATABASE"           "psql -c 'DROP DATABASE mydb'"
@@ -103,8 +94,7 @@ expect_block "mixed case Drop Table"        "psql -c 'Drop Table users'"
 # SECTION 2: TRUNCATE operations (must be BLOCKED)
 # ============================================================
 
-echo ""
-echo "=== Section 2: TRUNCATE operations (must be BLOCKED) ==="
+section "Section 2: TRUNCATE operations (must be BLOCKED)"
 
 expect_block "psql TRUNCATE"                "psql -c 'TRUNCATE users'"
 expect_block "psql TRUNCATE TABLE"          "psql -c 'TRUNCATE TABLE users'"
@@ -115,8 +105,7 @@ expect_block "lowercase truncate"           "psql -c 'truncate users'"
 # SECTION 3: DELETE without WHERE (must be BLOCKED)
 # ============================================================
 
-echo ""
-echo "=== Section 3: DELETE without WHERE (must be BLOCKED) ==="
+section "Section 3: DELETE without WHERE (must be BLOCKED)"
 
 expect_block "DELETE FROM no WHERE"         "psql -c 'DELETE FROM users'"
 expect_block "DELETE FROM lowercase"        "psql -c 'delete from users'"
@@ -126,8 +115,7 @@ expect_block "multi-stmt DELETE bypass"     "psql -c 'DELETE FROM users WHERE id
 # SECTION 4: ALTER TABLE DROP (must be BLOCKED)
 # ============================================================
 
-echo ""
-echo "=== Section 4: ALTER TABLE DROP (must be BLOCKED) ==="
+section "Section 4: ALTER TABLE DROP (must be BLOCKED)"
 
 expect_block "ALTER TABLE DROP COLUMN"      "psql -c 'ALTER TABLE users DROP COLUMN email'"
 expect_block "ALTER TABLE DROP CONSTRAINT"  "psql -c 'ALTER TABLE orders DROP CONSTRAINT fk_user'"
@@ -136,8 +124,7 @@ expect_block "ALTER TABLE DROP CONSTRAINT"  "psql -c 'ALTER TABLE orders DROP CO
 # SECTION 5: MongoDB destructive ops (must be BLOCKED)
 # ============================================================
 
-echo ""
-echo "=== Section 5: MongoDB destructive operations (must be BLOCKED) ==="
+section "Section 5: MongoDB destructive operations (must be BLOCKED)"
 
 expect_block "mongosh dropDatabase"         "mongosh --eval 'db.dropDatabase()'"
 expect_block "mongosh collection drop"      "mongosh --eval 'db.users.drop()'"
@@ -147,8 +134,7 @@ expect_block "mongosh deleteMany empty"     "mongosh --eval 'db.users.deleteMany
 # SECTION 6: Piped SQL (must be BLOCKED)
 # ============================================================
 
-echo ""
-echo "=== Section 6: Piped SQL (must be BLOCKED) ==="
+section "Section 6: Piped SQL (must be BLOCKED)"
 
 expect_block "echo DROP piped to psql"      "echo 'DROP TABLE users' | psql"
 expect_block "echo TRUNCATE piped to mysql"  "echo 'TRUNCATE users' | mysql"
@@ -157,8 +143,7 @@ expect_block "echo TRUNCATE piped to mysql"  "echo 'TRUNCATE users' | mysql"
 # SECTION 7: Safe operations (must be ALLOWED)
 # ============================================================
 
-echo ""
-echo "=== Section 7: Safe operations (must be ALLOWED) ==="
+section "Section 7: Safe operations (must be ALLOWED)"
 
 expect_allow "psql SELECT"                  "psql -c 'SELECT * FROM users'"
 expect_allow "psql INSERT"                  "psql -c INSERT INTO users id VALUES 1"
@@ -185,19 +170,17 @@ expect_allow "npm install"                  "npm install express"
 # Every assertion here sits beside its positive twin above, on the same hook and the same
 # command text, so neither half can pass by being vacuous.
 
-echo ""
-echo "=== Section 8: no engagement marker — silent on the very commands 1-6 block ==="
+section "Section 8: no engagement marker — silent on the very commands 1-6 block"
 
 unengaged() {  # <label> <command> — expect exit 0, empty stdout, empty stderr
   local label="$1" cmd="$2" out err st=0
   out=$(pdb_payload "$PLAIN_REPO" "$cmd" \
           | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= bash "$HOOK" 2>"$SANDBOX/.err") || st=$?
   err=$(cat "$SANDBOX/.err")
-  TOTAL=$((TOTAL + 1))
   if [ "$st" = "0" ] && [ -z "$out" ] && [ -z "$err" ]; then
-    echo "PASS: $label"; PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL: $label"; echo "      exit=$st stdout=[$out] stderr=[$err]"; FAIL=$((FAIL + 1))
+    no "$label" "exit=$st stdout=[$out] stderr=[$err]"
   fi
 }
 
@@ -220,15 +203,4 @@ rm -f "$PLAIN_REPO/.bionic/tmp/engaged-$SID.state"
 : > "$PLAIN_REPO/.bionic/tmp/engaged-11111111-2222-3333-4444-555555555555.state"
 unengaged "AC-20 ...another session's marker is not engagement" "psql -c 'DROP TABLE users'"
 
-# ============================================================
-# Results
-# ============================================================
-
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish
