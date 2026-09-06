@@ -675,7 +675,7 @@ cp "$REPO"/payload/scripts/lib/*.sh    "$W_TREE/payload/scripts/lib/" 2>/dev/nul
 
 # the shipped roster out, these six in — the same rewrite tests/interpreter-pin
 # does, and for the same reason: a scratch runner must not reach the real tree.
-W_SUITES="w-ok.test.sh w-owned.test.sh w-counter.test.sh w-empty.test.sh w-heredoc.test.sh w-indented.test.sh w-local.test.sh"
+W_SUITES="w-ok.test.sh w-owned.test.sh w-counter.test.sh w-unadopted.test.sh w-empty.test.sh w-heredoc.test.sh w-indented.test.sh w-local.test.sh"
 awk -v labels="$W_SUITES" '
   /^run "/ { next }
   { print }
@@ -727,6 +727,26 @@ ok "a real row"
 
 finish
 W_PLANT_COUNTER
+
+# --- REFUSED (4/4): a suite that adopts nothing at all (K-7) -----------------
+# It shadows no owned name and resets no counter, so the shadowing half of the
+# wall has nothing to say about it. It sources nothing and calls no finish: it
+# reports its own verdict on its own terms, which is the state AC-12 exists to
+# make impossible.
+cat > "$W_TREE/tests/w-unadopted.test.sh" <<'W_PLANT_UNADOPTED'
+#!/bin/bash
+set -uo pipefail
+: > "$S10_MARKS/w-unadopted.ran"
+
+P=0; F=0
+t_ok() { P=$((P + 1)); echo "PASS: $1"; }
+t_no() { P=$((P + 1)); echo "PASS: $1"; }
+
+t_ok "a row that passed"
+t_no "a row that failed, reported as a pass"
+echo "w-unadopted.test.sh: 2/2 passed, 0 failed"
+exit 0
+W_PLANT_UNADOPTED
 
 # --- LAUNCHED AND FAILED: a suite that asserts nothing (A-4) -----------------
 # Not a wall case. This suite adopts the framework properly, shadows nothing and
@@ -817,7 +837,7 @@ section "12: the adoption wall refuses a shadowing suite, by name (AC-12, S10)"
 
 # NOT VACUOUS: the runner and the framework under drive are the shipped files.
 expect_eq "12: the scratch runner is the shipped one apart from its roster" "yes" \
-  "$([ "$(grep -c '^run "' "$W_TREE/tests/run.sh")" = "7" ] && echo yes || echo no)"
+  "$([ "$(grep -c '^run "' "$W_TREE/tests/run.sh")" = "8" ] && echo yes || echo no)"
 expect_eq "12: the framework under drive is the shipped one, byte for byte" "yes" \
   "$(cmp -s "$FRAMEWORK" "$W_TREE/tests/lib/assert.sh" && echo yes || echo no)"
 
@@ -860,8 +880,8 @@ expect_eq "12: …nor the suite-specific one" "no" \
   "$(contains "$W_OUT" "w-local.test.sh defines")"
 
 # --- the tally and the exit status stay honest ------------------------------
-expect_eq "12: the tally counts three refusals and one empty suite as four failures" "yes" \
-  "$(contains "$W_OUT" "Gating: 3 passed, 4 failed")"
+expect_eq "12: the tally counts four refusals and one empty suite as five failures" "yes" \
+  "$(contains "$W_OUT" "Gating: 3 passed, 5 failed")"
 expect_eq "12: …and the run exits 1" "1" "$W_RC"
 
 # --- ONE WALL, BOTH SCHEDULERS ----------------------------------------------
@@ -879,7 +899,7 @@ W_SERIAL_RC=$?
 expect_eq "12: --serial refuses the same suite, in the same words" "yes" \
   "$(contains "$W_SERIAL_OUT" "adoption wall: tests/w-ok.test.sh defines ok() at column 0")"
 expect_eq "12: …and reaches the same tally" "yes" \
-  "$(contains "$W_SERIAL_OUT" "Gating: 3 passed, 4 failed")"
+  "$(contains "$W_SERIAL_OUT" "Gating: 3 passed, 5 failed")"
 expect_eq "12: …and the same exit status" "1" "$W_SERIAL_RC"
 
 # ============================================================
@@ -951,11 +971,16 @@ section "14: the scanner reads the file bash reads (A-1/A-9)"
 F14_D="$SB/scan14"
 mkdir -p "$F14_D"
 
+# EVERY PLANT BELOW IS A REALISTIC SUITE — it sources the framework and calls
+# finish — so the ADOPTION half of the wall (§16) has nothing to say about it
+# and each row isolates the scanner property it is there for.
 f14_plant() {   # f14_plant <name> <line-that-must-not-open-a-heredoc>
   { printf '#!/bin/bash\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
     printf '%s\n' "$2"
     printf 'ok() { PASS=$((PASS + 1)); }\n'
     printf 'expect_fourteen_never_defined "x"\n'
+    printf 'finish\n'
   } > "$F14_D/$1.sh"
 }
 f14_wall()  { _tf_adoption_refusal "$F14_D/$1.sh"; }
@@ -976,11 +1001,13 @@ done
 # Without this row the four above could be a scanner that stopped skipping
 # heredoc bodies altogether — which would refuse framework.test.sh itself first.
 { printf '#!/bin/bash\n'
+  printf '. "$(dirname "$0")/lib/assert.sh"\n'
   printf 'cat > /dev/null <<%s\n' "'F14_INNER'"
   printf 'ok() { echo "content, not a definition"; }\n'
   printf 'expect_fourteen_never_defined "content, not a call"\n'
   printf 'F14_INNER\n'
   printf 'ok "a real row"\n'
+  printf 'finish\n'
 } > "$F14_D/realhd.sh"
 expect_empty "14: a REAL heredoc body is still content, not code" "$(f14_wall realhd)"
 expect_eq "14: …and the derivation does not fire on a call inside it" "0" "$(f14_deriv realhd)"
@@ -993,8 +1020,10 @@ expect_eq "14: …and the derivation does not fire on a call inside it" "0" "$(f
 # content, so the scanner does not read this suite as calling the helper below.
 cat > "$F14_D/oneline.sh" <<'F14_ONELINE'
 #!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
 eq() { if [ "$2" = "$3" ]; then ok "$1"; else expect_oneline_never_defined "$1"; fi; }
 eq "a row" x x
+finish
 F14_ONELINE
 expect_eq "14: a call inside a one-line definition body is derived" "1" "$(f14_deriv oneline)"
 expect_contains "14: …and the name it names is the one on that line" \
@@ -1004,7 +1033,9 @@ expect_contains "14: …and the name it names is the one on that line" \
 # cost the DEF/TOPDEF records the adoption wall reads.
 cat > "$F14_D/onelinetop.sh" <<'F14_ONELINETOP'
 #!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
 ok() { PASS=$((PASS + 1)); no "x" "y"; }
+finish
 F14_ONELINETOP
 expect_contains "14: …and a one-line shadow is still a TOPDEF the wall refuses" \
   "defines ok() at column 0" "$(f14_wall onelinetop)"
@@ -1018,12 +1049,16 @@ expect_contains "14: …and a one-line shadow is still a TOPDEF the wall refuses
 # one syntax we read".
 cat > "$F14_D/fnkw.sh" <<'F14_FNKW'
 #!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
 function ok { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); echo "PASS: $1"; }
 function no { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); echo "PASS: $1"; }
+finish
 F14_FNKW
 cat > "$F14_D/fnkwparen.sh" <<'F14_FNKWP'
 #!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
 function expect_eq() { echo "every comparison is equal"; }
+finish
 F14_FNKWP
 expect_contains "14: function ok { ... } is a shadow the wall refuses" \
   "defines no() ok() at column 0" "$(f14_wall fnkw)"
@@ -1033,8 +1068,10 @@ expect_contains "14: …and so is function name() { ... }" \
 # own is a DEF, not a shadow, and must not fire a false red at load (A-16).
 cat > "$F14_D/fnkwlocal.sh" <<'F14_FNKWL'
 #!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
 function expect_local_thing { ok "$1"; }
 expect_local_thing "x"
+finish
 F14_FNKWL
 expect_empty "14: a function-keyword helper the framework does not own stays legal" \
   "$(f14_wall fnkwlocal)"
@@ -1125,5 +1162,80 @@ expect_eq "15: …and the runner reports it failed" "yes" \
   "$(contains "$W_OUT" "- w-empty.test.sh")"
 expect_eq "15: …and its own line says what it failed for" "yes" \
   "$(contains "$W_OUT" "FAIL: suite asserted nothing: w-empty.test.sh")"
+
+# ============================================================
+section "16: the wall enforces ADOPTION, not only non-shadowing (K-7)"
+# ============================================================
+#
+# Refusing a shadow is half of "one framework, adopted by every suite". The
+# other half — that a roster suite sources the framework and calls finish — was
+# a measurement the migration slices took once, and §13's `0 refused` read as
+# proof of a wall that did not exist.
+
+F16_D="$SB/adopt16"
+mkdir -p "$F16_D"
+f16_wall() { _tf_adoption_refusal "$F16_D/$1.sh"; }
+
+cat > "$F16_D/nosource.sh" <<'F16_NOSOURCE'
+#!/bin/bash
+P=0; F=0
+t_ok() { P=$((P + 1)); echo "ok: $1"; }
+t_ok "my own row"
+echo "1/1 passed"
+exit 0
+F16_NOSOURCE
+cat > "$F16_D/nofinish.sh" <<'F16_NOFINISH'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+ok "a row"
+exit 0
+F16_NOFINISH
+cat > "$F16_D/good.sh" <<'F16_GOOD'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+ok "a row"
+finish
+F16_GOOD
+
+expect_contains "16: a suite that sources the framework nowhere is refused" \
+  "does not source the framework" "$(f16_wall nosource)"
+expect_contains "16: …and the refusal names the suite" "nosource.sh" "$(f16_wall nosource)"
+expect_contains "16: a suite that never calls finish is refused" \
+  "never calls finish" "$(f16_wall nofinish)"
+# THE HEREDOC EXEMPTION HOLDS ON THIS HALF TOO: a `finish` written into a
+# fixture is content, not a call, so writing one must not buy adoption.
+cat > "$F16_D/heredocfinish.sh" <<'F16_HD'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+cat > /dev/null <<'F16_INNER'
+finish
+F16_INNER
+ok "a row"
+exit 0
+F16_HD
+expect_contains "16: a finish written into a heredoc does not count as calling it" \
+  "never calls finish" "$(f16_wall heredocfinish)"
+# PAIRED POSITIVE, and the roster census below is the real one.
+expect_empty "16: a suite that sources it and calls finish is not refused" "$(f16_wall good)"
+
+F16_SCANNED=0
+F16_REFUSED=0
+for f16_f in "$REPO"/tests/*.test.sh; do
+  F16_SCANNED=$((F16_SCANNED + 1))
+  [ -n "$(_tf_adoption_refusal "$f16_f")" ] && F16_REFUSED=$((F16_REFUSED + 1))
+done
+expect_eq "16: the census read the whole roster (not vacuous)" "yes" \
+  "$([ "$F16_SCANNED" -ge 40 ] && echo yes || echo no)"
+expect_eq "16: every suite on the roster adopts the framework" "0" "$F16_REFUSED"
+
+# --- THROUGH THE RUNNER -----------------------------------------------------
+expect_contains "16: the runner refuses the unadopted suite, by name" \
+  "adoption wall: tests/w-unadopted.test.sh does not source the framework" "$W_OUT"
+expect_eq "16: …and it never ran (no marker)" "no" \
+  "$([ -f "$W_MARKS/w-unadopted.ran" ] && echo yes || echo no)"
+expect_eq "16: …and the verdict reads REFUSED" "yes" \
+  "$(contains "$W_OUT" "- w-unadopted.test.sh (refused by the adoption wall, never run)")"
+expect_contains "16: --serial refuses it in the same words" \
+  "adoption wall: tests/w-unadopted.test.sh does not source the framework" "$W_SERIAL_OUT"
 
 finish

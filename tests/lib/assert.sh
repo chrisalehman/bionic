@@ -451,6 +451,11 @@ require_helpers() {
 #                   a DEF and NOT a TOPDEF (A-29).
 #   TOPSET <name>   a counter reset (`PASS=0`, `FAIL=0`, `TOTAL=0`) on a line
 #                   that BEGINS with one, including the `PASS=0; FAIL=0` form.
+#   SOURCES assert.sh   the suite sources this framework, outside a heredoc.
+#   USES finish     the suite calls `finish` in command position, outside a
+#                   heredoc. Together these two are the ADOPTION half of AC-12
+#                   (K-7): the wall used to enforce only that a suite may not
+#                   SHADOW the framework, never that it must adopt it.
 _tf_scan() {
   awk '
     # hdtag(s) — THE HEREDOC TAG OPENED BY THIS LINE, or "". QUOTE- AND
@@ -530,6 +535,11 @@ _tf_scan() {
       # heredoc opener on this line? (herestrings <<< are not openers)
       pending = hdtag(line)
 
+      # THE TWO RECORDS THE ADOPTION HALF READS (critic K-7). Both are taken
+      # from the same heredoc-skipping pass, so a suite that only writes the
+      # word `finish` into a scratch fixture does not count as calling it.
+      if (line ~ /^[ \t]*(\.|source)[ \t]+.*lib\/assert\.sh/) print "SOURCES assert.sh"
+
       # a counter reset at column 0, and every one after a `;` on that line
       if (match(line, /^(PASS|FAIL|TOTAL)=0/) && substr(line, RLENGTH + 1, 1) !~ /[0-9A-Za-z_.]/) {
         nseg = split(line, seg, /;/)
@@ -586,6 +596,7 @@ _tf_scan() {
         if (prev == "\001" || prev == "then" || prev == "else" || prev == "elif" \
             || prev == "do" || prev == "if" || prev == "while" || prev == "until" || prev == "!") {
           if (t ~ /^(ok|no|expect_[a-z_]+|anchor)$/) print "CALL " t
+          else if (t == "finish") print "USES finish"
         }
         prev = t
       }
@@ -618,6 +629,15 @@ _tf_scan() {
 # A suite-specific helper under a name this file does NOT own is not shadowing
 # and stays legal (A-16): `expect_finding`, `expect_audit_line` and the other
 # 24 one-offs are built on ok/no and belong to the suite that needs them.
+#
+# AND THE OTHER HALF: A SUITE MUST ADOPT (critic K-7). Refusing a shadow is only
+# half of "one framework, adopted by every suite". Nothing required a roster
+# suite to source this file or to call `finish`, so a suite spelling its helpers
+# `t_ok`/`t_no` and its counters `P`/`F`, printing its own tally, passed the
+# wall untouched — the exact state AC-12 exists to make impossible, while §13's
+# `0 refused` read as proof it already was. All 55 suites adopt today, but that
+# was a measurement (the migration slices' one-time greps), not a mechanism.
+# It is a mechanism now.
 
 # _tf_owned_names — the names this framework owns. READ FROM THIS FILE at call
 # time, never hand-listed: every `expect_*` it defines at column 0, plus the six
@@ -632,7 +652,7 @@ _tf_owned_names() {
 # returns 0 when it does not. A suite that cannot be read is not judged: the
 # runner is about to fail it for a reason it can state better.
 _tf_adoption_refusal() {
-  local suite="${1:-}" scan owned shadowed bad="" name
+  local suite="${1:-}" scan owned shadowed bad="" name unadopted=""
   [ -n "$suite" ] && [ -f "$suite" ] && [ -r "$suite" ] || return 0
   scan="$(_tf_scan "$suite")"
   owned=" $(_tf_owned_names | sort -u | tr '\n' ' ')"
@@ -643,9 +663,27 @@ _tf_adoption_refusal() {
   for name in $(printf '%s\n' "$scan" | sed -n 's/^TOPSET //p' | sort -u); do
     bad="$bad ${name}=0"
   done
-  [ -n "$bad" ] || return 0
-  printf '%s defines%s at column 0 — the framework owns those names: %s\n' \
-    "$suite" "$bad" "$_TF_LIB"
+  if [ -n "$bad" ]; then
+    printf '%s defines%s at column 0 — the framework owns those names: %s\n' \
+      "$suite" "$bad" "$_TF_LIB"
+    return 0
+  fi
+  # THE ADOPTION HALF, ASKED SECOND (critic K-7). Shadowing is reported first
+  # because it is the more specific finding and the one a reader fixes first; a
+  # suite can be in both states and one line is enough to refuse it.
+  case "$scan" in
+    *"SOURCES assert.sh"*) : ;;
+    *) unadopted="does not source the framework" ;;
+  esac
+  if [ -z "$unadopted" ]; then
+    case "$scan" in
+      *"USES finish"*) : ;;
+      *) unadopted="never calls finish" ;;
+    esac
+  fi
+  [ -n "$unadopted" ] || return 0
+  printf '%s %s — every gating suite is a client of it, and a suite that is not reports its own verdict on its own terms: %s\n' \
+    "$suite" "$unadopted" "$_TF_LIB"
 }
 
 # The load-time derivation (AC-14). Runs once, here, for whatever suite sourced
