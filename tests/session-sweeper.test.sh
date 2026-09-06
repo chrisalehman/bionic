@@ -945,6 +945,11 @@ SWEEP_BOUND=30
 _t0=$(date -u +%s)
 sweep "$RP" verdict perf1999
 _t1=$(date -u +%s)
+# RESTORED, and not dead (review-a drive-by, checked and refuted at Step 6). The
+# 30 s bound above is this one case's; every `sweep` from Section 8 onward reads
+# SWEEP_BOUND again through the watchdog at :162 and :184, so leaving it at 30
+# would hide a hang in 27 later cases behind a bound half again too generous.
+# Section 8 asserts the restored value, so deleting this line is red.
 SWEEP_BOUND=20
 expect_eq "a scoped verdict over a 2000-row roster answers (exit 0)" "0" "$RC"
 expect_contains "…for the row it was asked about" "name=perf1999|state=MET" "$OUT"
@@ -972,6 +977,11 @@ add_row "$R18" name=w4-s1  deliverable="$R18/absent-1.md" duration="4 hours" lau
 add_row "$R18" name=w4-s10 deliverable="$R18/absent-10.md" duration="4 hours" launched_at="$(iso_ago 600)"
 DEL18="$R18/landed.md"; echo "landed" > "$DEL18"
 add_row "$R18" name=lander deliverable="$DEL18" duration="4 hours" launched_at="$(iso_ago 600)"
+
+# THE WATCHDOG BOUND IS BACK TO THE DEFAULT for the 27 sweeps in this section
+# and below. Section 7 raised it to 30 for its 2000-row case; this row is what
+# makes that restore a read value rather than a line a reader could delete.
+expect_eq "the sweep watchdog bound was restored after the 2000-row case" "20" "$SWEEP_BOUND"
 
 # --- unacked: the field is present and says no ---
 #
