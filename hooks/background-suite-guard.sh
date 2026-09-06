@@ -358,7 +358,15 @@ EOF
   exit 2
 }
 
-for _target in $(cmd_suite_targets "$COMMAND"); do
+# THE READING IS SCOPED TO THIS REPOSITORY and the split is guarded. `$BSG_REPO` is what
+# turns "a file named x.test.sh" into "this row's suite x.test.sh" (critic K-2), and `set
+# -f` keeps a target carrying a glob metacharacter — `bash tests/*.test.sh` reads as the
+# literal `*.test.sh` — from being expanded against the HOOK PROCESS'S cwd before the loop
+# sees it (review-a A-7b). The sibling site at hooks/dispatch-preflight.sh does the same.
+_TARGETS=$(cmd_suite_targets "$COMMAND" "$BSG_REPO")
+set -f
+# shellcheck disable=SC2086  # deliberate split of a newline-joined target list, globbing off
+for _target in $_TARGETS; do
   if [ "$_target" = "run.sh" ]; then
     # THE FULL TREE IS REFUSED WITHOUT A ROW THAT NAMES IT — the one place this arm fails
     # closed. AC-21: "tests/run.sh is refused unless the row carries it."
@@ -386,4 +394,5 @@ EOF
     *) budget_refuse "$_target" "$SUITES_ALLOWED" ;;
   esac
 done
+set +f
 exit 0
