@@ -3886,16 +3886,15 @@ expect_nonempty "§O …over a diff that really is non-empty (the filter is not 
 # from). The shipped files are never written to.
 SPO_MUT="$SANDBOX/o-mutant-poker.sh"
 # The needle is `line_field`'s one distinguishing pipeline stage, and it occurs exactly
-# once in the file — asserted below rather than assumed, because a sed that matched
-# nothing would leave an identical copy and every row after it would be vacuous.
+# once in the file. That count is this mutation's PRECONDITION and it is declared through
+# the framework's `anchor` (§S19): a sed whose target had moved would leave an identical
+# copy and every row after it would be vacuous, and the anchor names the pattern and the
+# count it actually found rather than only reporting that the bytes came out equal.
 SPO_NEEDLE='grep "^$2=" | head -1 | cut -d= -f2-'
 SPO_MUT_NEEDLE='grep "^$2=" | tail -1 | cut -d= -f2-'
-expect_eq "§O the mutation's needle occurs exactly once in the poker" "1" \
-  "$(grep -cF "$SPO_NEEDLE" "$SPO")"
+anchor "$SPO" "$SPO_NEEDLE" 1
 sed "s@$(printf '%s' "$SPO_NEEDLE" | sed 's/[\\&@]/\\&/g')@$(printf '%s' "$SPO_MUT_NEEDLE" | sed 's/[\\&@]/\\&/g')@" \
   "$SPO" > "$SPO_MUT"
-expect_eq "§O the mutation applies (line_field's body has not moved)" "no" \
-  "$(cmp -s "$SPO" "$SPO_MUT" && echo yes || echo no)"
 expect_ne "§O …and the SAME comparison calls the doctored copy a drift" \
   "$(fn_code "$SWEEPER" line_field)" "$(fn_code "$SPO_MUT" line_field)"
 expect_eq "§O …while every OTHER primitive in the doctored copy still agrees (one row moved, not all)" \
@@ -7552,11 +7551,12 @@ section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-3
 # under it then goes green against a fixture that was never mutated. Before this
 # wave every one of these sites carried its own precondition or none: a `cmp -s`
 # against the doctored copy, a count-difference row, or nothing at all. The
-# research code map's census found 24 of them; the real number in this tree is 45,
-# because the census read only `grep -v` in this suite and `DOCTORED…=` in
-# docs-pins, and missed every `sed`/`awk` mutant tree here (17 of them) plus the
-# doctoring `agent-context-guard` and `landing-gate` each carry. This section is
-# the wall that keeps the survivors at ONE spelling: the framework's `anchor`.
+# research code map's census found 24 of them; the real number in this tree is 49
+# call sites over four suites, because the census read only `grep -v` in this suite
+# and `DOCTORED…=` in docs-pins, and missed every `sed`/`awk` mutant tree here plus
+# the doctoring `agent-context-guard` and `landing-gate` each carry. Every one of
+# them now goes through ONE spelling — the framework's `anchor` — and this section
+# is the wall that keeps them there.
 #
 # THE BRACKETS IN THE PATTERN BELOW ARE DELIBERATE. This file is itself one of the
 # files the absence sweep reads, so a pattern spelling the idiom literally would
@@ -7579,18 +7579,17 @@ expect_eq "S19.1 …and it is the framework" "1" \
 
 # --- §S19.2 ABSENCE: no suite hand-rolls its own mutation precondition ---
 #
-# TWO NAMED EXCEPTIONS, NOT A NARROWED PATTERN. `tests/agent-context-guard.test.sh`
-# (`mutate_guard`, which seds a shipped hook) and `tests/landing-gate.test.sh` (an
-# awk that inverts one guard line in landing-gate.sh) are two doctoring anchors the
-# code map's 24-site census did not find, and neither file is in this slice's
-# declared set, so S19 could not route them. They are pinned here BY NAME with
-# their hit counts rather than excluded from the pattern: the sweep still reads
-# every suite, so a NEW hand-rolled anchor anywhere in tests/ turns this row red,
-# and the day those two are routed this row goes red too and is deleted with them.
+# NO EXCEPTIONS, AND NO NARROWED PATTERN. This row carried a named waiver while two
+# doctoring sites the code map's 24-site census never found — `mutate_guard` in
+# `tests/agent-context-guard.test.sh` and the inverted-guard awk in
+# `tests/landing-gate.test.sh` — sat outside the declared set of the slice that
+# built `anchor`. Both are routed now, so the waiver is deleted and the expectation
+# is EMPTY: the sweep reads every suite in tests/, and a hand-rolled precondition
+# reappearing ANYWHERE turns this row red and names the file and the hit count.
 S19_HAND_HITS="$(cd "$S19_TESTS_DIR" && /usr/bin/grep -cE -- "$S19_HANDROLLED" ./*.test.sh 2>/dev/null \
   | /usr/bin/grep -v ':0$' | sed 's|^\./||' | tr '\n' ' ' | sed 's/ $//')"
-expect_eq "S19.2 the only hand-rolled mutation preconditions left are the two S19 could not reach" \
-  "agent-context-guard.test.sh:2 landing-gate.test.sh:2" "$S19_HAND_HITS"
+expect_empty "S19.2 no suite in tests/ hand-rolls a mutation precondition any more" \
+  "$S19_HAND_HITS"
 
 # THE PAIRED POSITIVE, and the discriminating one: the same sweep over a copy of
 # docs-pins with ONE of those idioms planted back must name that copy. Without
@@ -7607,12 +7606,26 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 
 # --- §S19.3 POSITIVE: every doctoring site declares through `anchor` ---
 # The census: a doctoring site in docs-pins is a `DOCTORED…="$TMP/…"` assignment.
-expect_eq "S19.3 docs-pins holds 21 doctoring sites" "21" \
+expect_eq "S19.3 docs-pins holds 23 doctoring sites" "23" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 22 anchor calls (Section 8's doctoring rewrites two sentences)" "22" \
+expect_eq "S19.3 …declared by 24 anchor calls (Section 8's doctoring rewrites two sentences)" "24" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …and this suite's own mutant trees by 21 more" "21" \
+expect_eq "S19.3 …and this suite's own mutant trees by 23 more" "23" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
+# The two suites the waiver used to name. One call site each: `mutate_guard` anchors
+# per call (its callers pass the shipped line they delete), and landing-gate's
+# inverted-guard awk anchors the line it rewrites.
+expect_eq "S19.3 …and agent-context-guard by one, now that mutate_guard anchors per call" "1" \
+  "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/agent-context-guard.test.sh")"
+expect_eq "S19.3 …and landing-gate by one, for the inverted-guard mutant" "1" \
+  "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/landing-gate.test.sh")"
+# THE TOTAL AC-30 NAMES. Stated as its own measured literal rather than left to the
+# reader to add up: this is the number that has to move when a doctoring site is
+# added or removed anywhere in the four suites that build mutants.
+expect_eq "S19.3 …49 anchor call sites across the four doctoring suites, all told" "49" \
+  "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
+        "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
+     | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
 
 # --- §S19.4 COMPLETENESS: no doctoring site is left undeclared ---
 # Mechanically derived rather than counted: every `DOCTORED…="$TMP/…"` assignment
@@ -7775,9 +7788,8 @@ expect_eq "S17b …with exactly one teammate_id on the row, never two" \
 # different key. Every reader in the fleet is by key, so this is precisely the drift the
 # comparison above exists to catch, and it is invisible to every other assertion in the tree.
 S17_ER_MUT="$SANDBOX/s17-execution-recorder-mutant.sh"
+anchor "$PARTY_ER" '|teammate_id=%s' 1
 awk '{ gsub(/\|teammate_id=%s/, "|teammate=%s"); print }' "$PARTY_ER" > "$S17_ER_MUT"
-expect_eq "S17b the mutation applies (the append has not moved out from under this proof)" \
-  "1" "$(diff "$PARTY_ER" "$S17_ER_MUT" | grep -c '^< ')"
 S17_DONE_MUT="$(s17_rewrite_via "$S17_ER_MUT" "$S17_LAUNCH_ROW" "as17-1111111111111111" "$S17_TID" "s17-writer")"
 expect_eq "S17b …and the key-set pin goes red on it (the pin discriminates)" \
   "no" "$([ "$(s17_keys "$S17_WRITTEN")" = "$(s17_keys "$S17_DONE_MUT")" ] && echo yes || echo no)"
