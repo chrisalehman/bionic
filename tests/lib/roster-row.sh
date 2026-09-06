@@ -86,3 +86,20 @@ roster_row_prefix_only() {  # <key=value>...
 if ! type -t roster_row >/dev/null 2>&1; then
   . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/roster.sh"
 fi
+
+# roster_row_schema -> the row's schema token (`roster-state/<version>`), taken off a row
+# the production writer just wrote rather than spelled out here.
+#
+# FOR THE READERS, NOT THE WRITERS. A dozen assertions in the fleet's suites SELECT rows
+# with a literal prefix — `grep -c '^roster-state/v1|'`, `grep "^roster-state/v1|status=…"`.
+# Those are not builders and converting them to `roster_row_fixture` would be nonsense, but
+# a hand-typed schema token in a reader drifts exactly as far as one in a writer: the day
+# the schema goes to v2 the grep matches nothing and the assertion counts zero of zero and
+# passes. This gives a reader the writer's own answer.
+roster_row_schema() {
+  roster_row status= | cut -d'|' -f1
+}
+
+# Resolved once at source time so a reader can say `"^${ROSTER_ROW_SCHEMA}|"` without paying
+# a subshell per assertion.
+ROSTER_ROW_SCHEMA="$(roster_row_schema)"

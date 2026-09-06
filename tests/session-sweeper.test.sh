@@ -39,6 +39,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 # Overridable so this suite can be driven against a MUTATED COPY of the sweeper without the
 # shipped file ever being modified — the same substitution
@@ -97,8 +98,7 @@ backdate() {  # <file> <seconds ago> — sets mtime, the staleness input
 }
 
 new_roster() {  # <repo>
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$(roster_of "$1")"
+  roster_header > "$(roster_of "$1")"
 }
 
 # Emits one roster-state/v1 row. Field set and ORDER are those of the roster writer in
@@ -128,9 +128,13 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
-    "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
-    "$deliverable" "$source" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
+  # THE ROW COMES OFF THE PRODUCTION WRITER (S17, spec AC-25); what stays here is this
+  # suite's house defaults and the unknown-key refusal, which `roster_row` now makes.
+  roster_row_fixture status="$status" session="$session" name="$name" \
+    agent_id="$agent_id" launched_at="$launched_at" subagent_type="$subagent_type" \
+    model="$model" deliverable="$deliverable" source="$source" duration="$duration" \
+    progress="$progress" claims="$claims" cadence="$cadence" waiver="$waiver" \
+    tool_use_id="$tool_use_id"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -354,8 +358,8 @@ expect_eq "…and the reading verb refuses over the same link too (exit 2)" "2" 
 # ledger line the operator asked for, and refusing it would deny the one action still
 # available precisely when the roster cannot be read.
 R3C="$(make_repo s3roster)"
-printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|deliverable=|duration=1 minute|\n' \
-  "$SID" > "$TMPROOT/elsewhere-s3-roster.state"
+roster_row_fixture status=confirmed session="$SID" name=elsewhere duration='1 minute' \
+  > "$TMPROOT/elsewhere-s3-roster.state"
 ln -s "$TMPROOT/elsewhere-s3-roster.state" "$(roster_of "$R3C")"
 sweep "$R3C" verdict
 expect_eq "verdict over a symlinked roster REFUSES (exit 2), never a clean session" "2" "$RC"
@@ -710,7 +714,7 @@ sweep "$RVR" verdict
 expect_eq "the read-only run saw its UNMET row" "1" "$RC"
 expect_false "verdict writes no ledger" test -e "$(ledger_of "$RVR")"
 expect_eq "verdict does not touch the roster" "1" \
-  "$(grep -c '^roster-state/v1|' "$(roster_of "$RVR")")"
+  "$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$RVR")")"
 # The state directory holds the roster it was handed and NOTHING this verb put there —
 # asserted over the whole directory rather than against a list of filenames, so a state
 # file nobody thought to name is caught too.
@@ -922,11 +926,21 @@ expect_contains "…and counting both rows as closed" "2 row(s) acked" "$OUT"
 # subagent stop. The bound below is ~40x the fixed cost and ~4x under the measured broken
 # one, so it discriminates without being a stopwatch.
 RP="$(make_repo perf)"; new_roster "$RP"
-awk -v sid="$SID" -v n=2000 -v la="$(iso_ago 600)" '
-  BEGIN {
-    for (i = 1; i <= n; i++)
-      printf "roster-state/v1|status=confirmed|session=%s|name=perf%04d|agent_id=a%04d|launched_at=%s|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=4 hours|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_%04d\n", sid, i, i, la, i
-  }' >> "$(roster_of "$RP")"
+# TWO THOUSAND ROWS THROUGH THE ONE WRITER (S17). The awk that used to generate these had
+# its own copy of the row's format string — the biggest single fixture in the tree, and the
+# one nothing would have noticed drifting. Generation is outside the measured window below.
+_PERF_LA="$(iso_ago 600)"
+{
+  _pi=1
+  while [ "$_pi" -le 2000 ]; do
+    printf -v _pn 'perf%04d' "$_pi"
+    printf -v _pa 'a%04d' "$_pi"
+    printf -v _pt 'toolu_%04d' "$_pi"
+    roster_row_fixture status=confirmed session="$SID" name="$_pn" agent_id="$_pa" \
+      launched_at="$_PERF_LA" duration='4 hours' tool_use_id="$_pt"
+    _pi=$((_pi + 1))
+  done
+} >> "$(roster_of "$RP")"
 SWEEP_BOUND=30
 _t0=$(date -u +%s)
 sweep "$RP" verdict perf1999
