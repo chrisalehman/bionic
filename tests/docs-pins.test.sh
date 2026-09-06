@@ -213,6 +213,11 @@ expect_eq "11: the marketplace manifest sources bionic from ./payload — the ow
   "./payload" "$(mkt_source_of "$MARKETPLACE")"
 expect_empty "12: …and declares no version of its own, so there is nothing here to drift" \
   "$(mkt_version_of "$MARKETPLACE")"
+# The jq below selects the bionic plugin entry BY NAME, so that name is this mutation's
+# anchor. TWO is the measured truth, not a slack bound: the manifest carries its own
+# `"name": "bionic"` at the top level and the plugins[] entry carries a second. Either one
+# moving turns this row red and says which count it found.
+anchor "$MARKETPLACE" '"name": "bionic"' 2
 DOCTORED_MKT="$TMP/marketplace-mismatched.json"
 jq '(.plugins[] | select(.name == "bionic")) |= (. + {version: "0.0.0-mismatch"})' \
   "$MARKETPLACE" > "$DOCTORED_MKT"
@@ -234,6 +239,7 @@ expect_contains "16: …and PLUGIN_VERSION comes from detect_plugin_integrity, n
   'PLUGIN_VERSION="${PLUGIN_FACT#plugin: version=}"' "$(cat "$DOCTOR_SH")"
 expect_eq "17: …and that reader reports plugin.json's version for the shipped payload root" \
   "$PLUGIN_VERSION" "$(detect_version_of "${REPO}/payload")"
+anchor "$PLUGIN_JSON" '"version": "' 1
 DOCTORED_ROOT="$TMP/doctored-root"
 mkdir -p "$DOCTORED_ROOT/.claude-plugin"
 jq --arg v "0.0.0-mismatch" '.version = $v' "$PLUGIN_JSON" > "$DOCTORED_ROOT/.claude-plugin/plugin.json"
