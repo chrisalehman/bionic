@@ -310,6 +310,15 @@ fi
 # budget in name only — that is a wish, not a wall — so nothing in this arm looks at it.
 [ -n "$ACTOR" ] || exit 0
 
+# THE SHAPE RULE, AT THE SITE THAT FORMS THE PATH (review-a A-10). `session_id` returns the
+# host-supplied value verbatim — it validates nothing — and this line turns it into a path.
+# hooks/execution-recorder.sh:382 and hooks/agent-context-guard.sh:246 both apply this exact
+# case before their own roster path, for the reason hooks/landing-gate.sh:284 states about
+# `agent_id`: a key carrying path separators does not trip the symlink guards, it writes (or
+# here, reads) outside the directory those guards protect. This roster READ is new in this
+# wave and did not inherit the rule. An unusable id leaves the budget unstated, which is the
+# documented no-row fail direction: a NAMED suite passes, `tests/run.sh` still does not.
+case "$BSG_SID" in *[!A-Za-z0-9_-]*) BSG_SID="" ;; esac
 ROSTER_FILE="$BSG_REPO/.bionic/tmp/roster-${BSG_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""

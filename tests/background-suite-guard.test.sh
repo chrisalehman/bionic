@@ -417,4 +417,36 @@ expect_eq "B9f control: an ordinary off-budget suite still refuses" "2" "$ST"
 expect_contains "B9f …and its label carries no space before the colon" "You asked for:" "$ERR"
 expect_absent "B9f …the stray space is gone" "You asked for :" "$ERR"
 
+section "B10 — every site that turns a session id into a roster path carries the shape rule (A-10)"
+# THE INCONSISTENCY. `session_id` (payload/scripts/lib/session.sh) prefers
+# CLAUDE_CODE_SESSION_ID, falls back to the payload value, and returns whichever it got
+# VERBATIM — it validates nothing. Two hooks that build a roster path apply the shape rule
+# before doing so; this hook's roster READ is new in this wave and did not inherit it.
+# hooks/landing-gate.sh:284 states the rationale for `agent_id`: a key carrying path
+# separators does not trip the symlink guards, it reads outside what those guards protect.
+#
+# WHY THIS IS A SOURCE ASSERTION AND NOT A DRIVEN ONE, said plainly. The line is
+# UNREACHABLE through the supported path: `engaged_session` (payload/scripts/lib/run.sh:566)
+# applies the identical case to the same id ~70 lines earlier, so a malformed id exits the
+# hook at the engagement switch and never reaches the path. A test that piped a malformed
+# id into this hook and watched it pass would be asserting the ENGAGEMENT check while
+# claiming to assert this one — a green that proves a different line than the one it names,
+# which is the exact class this wave exists to close. What IS true and checkable is the
+# family property A-10 names: the same rule, at every path-forming site.
+B10_HOOKS="background-suite-guard.sh execution-recorder.sh agent-context-guard.sh"
+B10_RULE='case .*\[!A-Za-z0-9_-\]\*\)'
+for _h in $B10_HOOKS; do
+  expect_regex "B10 $_h shape-checks the session id" "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/$_h")"
+done
+# NON-VACUITY: the pattern is not one that matches any shell file. A hook with no such rule
+# fails it, so the loop above is reading the rule and not the language.
+expect_no_regex "B10 …and the pattern discriminates (a hook without the rule fails it)" \
+  "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/farm-out-reminder.sh")"
+# AND THE RULE IS AT THIS HOOK'S OWN PATH-FORMING SITE, not merely somewhere in the file:
+# the roster path is built on the line after it. A rule that drifted away from the line it
+# protects is the state A-10 found, spelled differently.
+B10_ADJACENT=$(/usr/bin/grep -A1 'case "\$BSG_SID" in' "$GUARD" | tail -1)
+expect_match "B10 …on the line immediately before the roster path is formed" \
+  'ROSTER_FILE=*' "$B10_ADJACENT"
+
 finish
