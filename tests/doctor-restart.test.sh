@@ -42,6 +42,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -49,22 +50,6 @@ DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "doctor-restart.test.sh: jq is required"; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "doctor-restart.test.sh: git is required"; exit 1; }
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.900s' "$actual")"; fi
-}
-expect_no_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
-}
 
 TMP="$(mktemp -d /tmp/bionic-doctor-restart.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
@@ -128,7 +113,7 @@ HOOKS_MTIME=1788003600     # 2026-08-27T15:00:00 local
 BEFORE_MS=1788000000000    # an hour earlier
 AFTER_MS=1788007200000     # an hour later
 
-echo "=== Section 1: session older than hooks.json — restart needed ==="
+section "Section 1: session older than hooks.json — restart needed"
 
 TREE1="$(make_plugin_tree)"
 set_hooks_mtime "$TREE1" "$HOOKS_MTIME"
@@ -144,8 +129,7 @@ expect_match "3: a fix line tells the operator to exit and restart" \
 expect_match "4: the fix line cites what the process registered" \
   "*registered hooks.json as it was at*" "$OUT1"
 
-echo ""
-echo "=== Section 2: session newer than hooks.json — silent ==="
+section "Section 2: session newer than hooks.json — silent"
 
 rm -f "${CHOME}/sessions/${LIVE_PID}.json"
 TREE2="$(make_plugin_tree)"
@@ -158,8 +142,7 @@ OUT2="$(run_doctor)"
 expect_no_match "5: no restart-needed row" "*restart needed*" "$OUT2"
 expect_no_match "6: no matching fix line" "*exit claude and start it again*" "$OUT2"
 
-echo ""
-echo "=== Section 3: no session file for this cwd — silent ==="
+section "Section 3: no session file for this cwd — silent"
 
 rm -f "${CHOME}/sessions/${LIVE_PID}.json"
 TREE3="$(make_plugin_tree)"
@@ -171,8 +154,7 @@ OUT3="$(run_doctor)"
 
 expect_no_match "7: no restart-needed row with no session file" "*restart needed*" "$OUT3"
 
-echo ""
-echo "=== Section 4: a session file for ANOTHER cwd is ignored ==="
+section "Section 4: a session file for ANOTHER cwd is ignored"
 
 TREE4="$(make_plugin_tree)"
 set_hooks_mtime "$TREE4" "$HOOKS_MTIME"
@@ -188,15 +170,9 @@ OUT4="$(run_doctor)"
 expect_no_match "8: a session naming a different cwd is not this project's row" \
   "*restart needed*" "$OUT4"
 
-echo ""
-echo "=== Section 5: wiring ==="
+section "Section 5: wiring"
 
 expect_true "9: tests/run.sh names doctor-restart.test.sh" \
   grep -q 'run "doctor-restart.test.sh" bash tests/doctor-restart.test.sh' "${REPO}/tests/run.sh"
 
-echo ""
-echo "========================================"
-echo "doctor-restart: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
