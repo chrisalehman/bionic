@@ -423,7 +423,7 @@ esac
 # the SAME question its sibling answers so the two cannot quietly drift into different
 # readings of one fact. `parse_seconds` is duplicated post-fix (epic-16 w2 S2, same commit
 # that fixed the original); `file_mtime` joined them for `adopt`, which reads a predecessor
-# agent's progress file the way the sweeper reads a live one. The six are held together by
+# agent's progress file the way the sweeper reads a live one. The seven are held together by
 # tests/cross-gate-agreement.test.sh
 # §O, which compares executable text with every pure-comment line stripped from both sides —
 # epic-16 w2 Step-6 remediation R3, closing rd review D-1 (this claim used to name no test,
