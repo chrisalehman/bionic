@@ -27,6 +27,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 HOOK="$BIONIC_HOOKS_DIR/engage.sh"
@@ -39,15 +40,6 @@ RUNNER="$REPO_ROOT/tests/run.sh"
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/engage-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
-
-PASS=0
-FAIL=0
-TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
-expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "expected to contain [$2], got: $3" ;; esac; }
 
 SID="e40aged1-2222-3333-4444-555555555555"
 OTHER_SID="0ther999-8888-7777-6666-555555555555"
@@ -225,7 +217,7 @@ call_open_runs() {  # <root> -> sets OR_OUT/OR_ST
 }
 
 # ============================================================
-echo "=== E0 — the hook exists, parses, and is executable ==="
+section "E0 — the hook exists, parses, and is executable"
 # ============================================================
 
 if [ -f "$HOOK" ]; then ok "hooks/engage.sh is on disk"; else no "hooks/engage.sh is on disk" "$HOOK"; fi
@@ -243,8 +235,7 @@ else
 fi
 
 # ============================================================
-echo ""
-echo "=== E1 (AC-1) — a Skill call for canonical-sdlc engages the session ==="
+section "E1 (AC-1) — a Skill call for canonical-sdlc engages the session"
 # ============================================================
 
 R1="$(make_repo e1)"
@@ -283,8 +274,7 @@ expect_contains "…and still names the plan" "plan=" "$(cat "$M1")"
 [ -n "$BEFORE" ] || no "the first marker was non-empty (non-vacuity)" "empty"
 
 # ============================================================
-echo ""
-echo "=== E2 (AC-2) — no other skill engages anything ==="
+section "E2 (AC-2) — no other skill engages anything"
 # ============================================================
 #
 # EACH NEGATIVE IS PAIRED WITH THE POSITIVE ON THE SAME FIXTURE. A negative arm that
@@ -344,8 +334,7 @@ expect_eq "an unrelated event (Stop) exits 0" "0" "$HOOK_RC"
 if [ -e "$M2" ]; then no "…and writes NO marker" "marker appeared"; else ok "…and writes NO marker"; fi
 
 # ============================================================
-echo ""
-echo "=== E3 (AC-3) — the TYPED path: UserPromptExpansion by command name ==="
+section "E3 (AC-3) — the TYPED path: UserPromptExpansion by command name"
 # ============================================================
 #
 # R-A §5.2 proved a typed /bionic:canonical-sdlc is NOT a Skill tool call and NOT a
@@ -379,8 +368,7 @@ for name in loop bionic:help bionic:doctor clear canonical-sdlc-notes ""; do
 done
 
 # ============================================================
-echo ""
-echo "=== E4 (AC-4) — engaged_session: the predicate every wall reads ==="
+section "E4 (AC-4) — engaged_session: the predicate every wall reads"
 # ============================================================
 
 R4="$(make_repo e4)"
@@ -439,8 +427,7 @@ expect_eq "a directory at the marker path -> FALSE" "1" "$ES_ST"
 rmdir "$M4"
 
 # ============================================================
-echo ""
-echo "=== E5 (AC-17) — registration and the loader idiom ==="
+section "E5 (AC-17) — registration and the loader idiom"
 # ============================================================
 
 HJ_ROWS=$(jq -r '
@@ -487,8 +474,7 @@ expect_eq "engage.sh defines no private root resolver" "" \
   "$(/usr/bin/grep -l '^resolve_project_root()' "$HOOK" 2>/dev/null)"
 
 # ============================================================
-echo ""
-echo "=== E6 (AC-18) — engagement precedes the plan, and precedes the tree ==="
+section "E6 (AC-18) — engagement precedes the plan, and precedes the tree"
 # ============================================================
 
 # (a) A run's Step 0 happens BEFORE its plan file exists. The marker is still written,
@@ -548,8 +534,7 @@ expect_empty "…and prints nothing on stdout" "$HOOK_OUT"
 expect_eq "…and leaves the file alone" "not a directory" "$(cat "$R9/.bionic/tmp" 2>/dev/null)"
 
 # ============================================================
-echo ""
-echo "=== E7 — the sid must resolve, or nothing is written ==="
+section "E7 — the sid must resolve, or nothing is written"
 # ============================================================
 
 RA="$(make_repo e7)"
@@ -583,8 +568,7 @@ expect_eq "a non-JSON payload exits 0" "0" "$HOOK_RC"
 expect_empty "…and prints nothing" "$HOOK_OUT"
 
 # ============================================================
-echo ""
-echo "=== E8 (wave-session-bound-run, AC-7/AC-8/AC-9) — bind_plan, the single writer ==="
+section "E8 (wave-session-bound-run, AC-7/AC-8/AC-9) — bind_plan, the single writer"
 # ============================================================
 #
 # `payload/scripts/lib/binding.sh` is the ONE function allowed to write the marker.
@@ -791,8 +775,7 @@ call_bind "$R10C" "$SID" "$P10C"
 expect_eq "…paired: with the directory gone the same call writes (exit 0)" "0" "$BIND_ST"
 
 # ============================================================
-echo ""
-echo "=== E9 (AC-7) — engagement binds the SOLE open run, and a binding survives ==="
+section "E9 (AC-7) — engagement binds the SOLE open run, and a binding survives"
 # ============================================================
 #
 # THE RULE THIS SUITE NOW OWNS (wave-session-bound-run, spec §Design "Session binding";
@@ -970,8 +953,7 @@ expect_eq "engage.sh wants binding.sh from the loader" "1" \
   "$(/usr/bin/grep -c '^BIONIC_LIB_WANT=".*binding\.sh' "$HOOK")"
 
 # ============================================================
-echo ""
-echo "=== E10 (AC-2, wave-roster-lifecycle S2) — the count rule counts LIVE runs, not merely open ones ==="
+section "E10 (AC-2, wave-roster-lifecycle S2) — the count rule counts LIVE runs, not merely open ones"
 # ============================================================
 #
 # S2 (spec AC-2; design §2 "engage.sh"). `RUNS=$(open_runs "$REPO")` becomes
@@ -1073,8 +1055,4 @@ expect_eq "…paired: the identically-shaped plan while still FRESH binds" "$P22
 # built here; E9(d) and E9(e) above are the proof, re-affirmed for the record.
 
 # ============================================================
-echo ""
-echo "========================================"
-echo "engage.test.sh: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-[ "$FAIL" -eq 0 ]
+finish

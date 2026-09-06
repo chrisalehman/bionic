@@ -72,6 +72,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
@@ -81,26 +82,6 @@ FIX_BROKEN="${FIX_DIR}/plugin-list-dep-broken.txt"
 FIX_F12_HEALTHY="${FIX_DIR}/plugin-list-f12-healthy.txt"
 FIX_F12_BROKEN="${FIX_DIR}/plugin-list-f12-dep-broken.txt"
 FIX_DUP="${FIX_DIR}/installed-plugins-dup.json"
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-# Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
-# 8582861, epic-18 wave-03, and nothing replaced the pin).
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "'$actual' does not match '$pattern'"; fi
-}
-expect_no_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then no "$label" "'$actual' unexpectedly matches '$pattern'"; else ok "$label"; fi
-}
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/home"
@@ -154,7 +135,7 @@ probe_run_st() {
   P_ERR=$(cat "$TMP/probe.err")
 }
 
-echo "=== Group 1: the fixtures are present and the library still sources ==="
+section "Group 1: the fixtures are present and the library still sources"
 
 # (fixture-only check removed epic-18 W3 4/6: no production subject -- see ledger-detect-probes.md)
 expect_true "detect.sh passes bash -n" bash -n "$DETECT_SH"
@@ -182,8 +163,7 @@ expect_eq "the measured fixture is a block format: the id line carries no status
 expect_eq "…and the report's rendering is a one-line format: id and status together" \
   "3" "$(/usr/bin/grep -c '❯.*Status:' "$FIX_F12_HEALTHY")"
 
-echo ""
-echo "=== Group 2: detect_plugin_load_state — the four states ==="
+section "Group 2: detect_plugin_load_state — the four states"
 #
 # The contract (plan §S2):
 #   load-state=<loaded|failed|absent|unknown> error=<verbatim Error: text or ->
@@ -213,8 +193,7 @@ expect_eq "'bionic@bionic-extras' is not 'bionic@bionic' (id matched whole, not 
   "load-state=absent error=-" \
   "$(probe_run BIONIC_PLUGIN_LIST_CMD="cat $FIX_HEALTHY" -- detect_plugin_load_state bionic@bionic-extras)"
 
-echo ""
-echo "=== Group 2b: the same four states in the report's one-line rendering ==="
+section "Group 2b: the same four states in the report's one-line rendering"
 #
 # THE REGRESSION THIS GROUP EXISTS FOR. The first cut of this parser was written
 # against the one-line rendering alone and passed everything below — while
@@ -241,8 +220,7 @@ expect_eq "a glyphless one-line listing is still read, not called garbage" \
   "load-state=loaded error=-" \
   "$(probe_run BIONIC_PLUGIN_LIST_CMD="cat $TMP/noglyph.txt" -- detect_plugin_load_state bionic@bionic)"
 
-echo ""
-echo "=== Group 3: detect_plugin_load_state — every way of not knowing ==="
+section "Group 3: detect_plugin_load_state — every way of not knowing"
 #
 # A-3.2: any unrecognized shape is `unknown`, NEVER `loaded`. The cheapest
 # possible bug in a probe like this is a parser that treats "I could not read
@@ -341,8 +319,7 @@ expect_match "an explicitly-empty seam reaches the empty-command guard" \
 expect_no_match "…and never falls back to the shipped default command" \
   "*claude plugin list*" "$EMPTY_SEAM"
 
-echo ""
-echo "=== Group 4: detect_plugin_load_state exits 0 and writes nothing ==="
+section "Group 4: detect_plugin_load_state exits 0 and writes nothing"
 #
 # The file's output contract: fact functions REPORT. Callers parse fields;
 # they never branch on the exit code.
@@ -355,8 +332,7 @@ probe_run_st BIONIC_PLUGIN_LIST_CMD="no-such-command-at-all" -- detect_plugin_lo
 expect_eq "exit 0 even when the listing command is missing" "0" "$P_ST"
 expect_eq "…and says nothing on stderr (doctor renders this in a table cell)" "" "$P_ERR"
 
-echo ""
-echo "=== Group 5: detect_plugin_duplicates — bare-name collisions across catalogs ==="
+section "Group 5: detect_plugin_duplicates — bare-name collisions across catalogs"
 #
 # Bare-name collision = two registry keys whose split(\"@\")[0] match. The loser
 # in `fix=` is the non-@bionic copy when one side is @bionic; with no @bionic
@@ -384,8 +360,7 @@ expect_eq "two foreign copies: the fix names both and says to choose" \
   "dup=foo ids=foo@alpha,foo@beta fix=choose one: claude plugin uninstall foo@alpha, or claude plugin uninstall foo@beta" \
   "$(probe_run BIONIC_INSTALLED_PLUGINS_FILE="$NEUTRAL" -- detect_plugin_duplicates)"
 
-echo ""
-echo "=== Group 6: detect_plugin_duplicates — the negative arms ==="
+section "Group 6: detect_plugin_duplicates — the negative arms"
 
 CLEAN="$TMP/clean.json"
 cat > "$CLEAN" <<'JSON'
@@ -423,8 +398,7 @@ expect_match "CLAUDE_CONFIG_DIR is honoured when BIONIC_CLAUDE_HOME is not set" 
   "*dup=superpowers *" \
   "$(probe_run CLAUDE_CONFIG_DIR="$CH_DIR" -- detect_plugin_duplicates)"
 
-echo ""
-echo "=== Group 6b: detect_plugin_duplicates is BOUNDED, by the same runner (A-6.6 (b)) ==="
+section "Group 6b: detect_plugin_duplicates is BOUNDED, by the same runner (A-6.6 (b))"
 #
 # WHAT WAS UNBOUNDED. W6 S11 gave the load-state probe a bound and gave it ONE owner
 # (`detect_bounded`), on the stated ground that a probe bionic does not control can wedge
@@ -492,8 +466,7 @@ expect_match "with a jq that answers, the duplicate is still found" \
   "*dup=bionic ids=bionic@bionic,bionic@claude-plugins-official*" \
   "$(probe_run BIONIC_INSTALLED_PLUGINS_FILE="$FIX_DUP" -- detect_plugin_duplicates)"
 
-echo ""
-echo "=== Group 7: read-only is a contract, not an intention ==="
+section "Group 7: read-only is a contract, not an intention"
 #
 # Same wall the rest of detect.sh lives under: fingerprint the inputs, run
 # every probe, fingerprint again.
@@ -517,8 +490,7 @@ expect_eq "neither probe changed a byte of anything it read" "$BEFORE" "$AFTER"
 expect_eq "…and neither created a file beside the registry" \
   "installed_plugins.json" "$(ls "$CH_DIR/plugins")"
 
-echo ""
-echo "=== Group 8: the suite is registered in tests/run.sh by name ==="
+section "Group 8: the suite is registered in tests/run.sh by name"
 #
 # tests/*.test.sh is NOT globbed. A suite nobody names never runs, and a probe
 # nobody runs is worse than no probe: it reads as coverage.
@@ -526,11 +498,4 @@ echo "=== Group 8: the suite is registered in tests/run.sh by name ==="
 expect_true "tests/run.sh names detect-probes.test.sh" \
   /usr/bin/grep -q 'run "detect-probes.test.sh" bash tests/detect-probes.test.sh' "${REPO}/tests/run.sh"
 
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish

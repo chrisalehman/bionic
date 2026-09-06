@@ -57,6 +57,14 @@
 # EXPORTS (all take the command as $1; none write outside their own locals):
 #   cmd_strip_heredocs <cmd>  -> the command with every heredoc body removed
 #   cmd_class_lines    <cmd>  -> one "<class><TAB><segment>" line per non-empty segment
+#   cmd_suite_targets  <cmd> [<root>]
+#                             -> for each suite-class segment that names a suite FILE, its
+#                                basename, one per line, in position order and deduplicated.
+#                                `bash tests/a.test.sh && ./tests/run.sh` prints two lines;
+#                                `pytest` and `make test` are suite-class and print none,
+#                                because they name no file this repo budgets by. GIVEN A
+#                                REPO ROOT the answer is scoped to that repo's tests/ and a
+#                                `--dry-run` segment names nothing — see the function.
 #   cmd_class          <cmd>  -> the whole command's class, by PRIORITY not by position:
 #                                suite > bootstrap > install > build > none. Priority, so
 #                                that `make widget && bash tests/run.sh` still routes to
@@ -280,9 +288,24 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       return k
     }
 
+    # LAST_TARGET is this reading`s SECOND answer, set beside the class rather than
+    # derived from the segment afterwards (S13, spec AC-21). The budget guard needs to
+    # know WHICH suite a command runs, and the only code that knows is the code that
+    # just decided it is a suite at all: re-finding the token with a second matcher
+    # outside this function is the twin that drifts, and it would have to re-implement
+    # strip_leading, unwrap_runner and the quote-aware tokeniser to see the same argv
+    # positions this does. It is set ONLY for the two script forms that name a file —
+    # pytest, `npm test`, `go test` and `make test` are suite-class and name no
+    # tests/<x>.test.sh, so they leave it empty and the caller reports no target.
     function classify_argv(s,   a, n, i, a1, a2, b0, b1) {
+      LAST_TARGET = ""; LAST_PATH = ""; LAST_DRY = 0
       n = argv_tok(s, a)
       if (n == 0) return "none"
+      # `--dry-run` IS A MODE THAT RUNS NOTHING (the walk, A-36a; critic K-2). It is read
+      # off the whole segment rather than off argv[1], because the runner takes it after
+      # the script and a reader that insisted on a position would miss the one spelling
+      # anybody types. The CLASS is untouched: the command still runs the runner.
+      for (i = 1; i <= n; i++) if (a[i] == "--dry-run") LAST_DRY = 1
       b0 = base(a[1])
       if (b0 == "bash" || b0 == "sh" || b0 == "zsh" || b0 == "dash" || b0 == "ksh") {
         # skip the runner s own options: `bash -x tests/run.sh` runs the same suite
@@ -290,12 +313,12 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         while (i <= n && substr(a[i], 1, 1) == "-") i++
         a1 = (i <= n ? a[i] : ""); b1 = base(a1)
         if (b1 ~ /^claude-(bootstrap|reset)\.sh$/) return "bootstrap"
-        if (b1 == "test.sh" || b1 ~ /\.test\.sh$/) return "suite"
+        if (b1 == "test.sh" || b1 ~ /\.test\.sh$/) { LAST_TARGET = b1; LAST_PATH = a1; return "suite" }
         # A bare `run.sh` is only a suite invocation when a cd put us in its
         # directory — which is exactly the shape `cd <worktree>/tests && bash
         # run.sh` takes, and the shape the path-component requirement missed
         # (critic C-2). On its own the word says nothing, so it stays none.
-        if (b1 == "run.sh" && (index(a1, "/") > 0 || CD_SEEN)) return "suite"
+        if (b1 == "run.sh" && (index(a1, "/") > 0 || CD_SEEN)) { LAST_TARGET = b1; LAST_PATH = a1; return "suite" }
         return "none"
       }
       a1 = (n >= 2 ? a[2] : ""); a2 = (n >= 3 ? a[3] : "")
@@ -306,8 +329,11 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # through every arm to none. The path component is what separates running
       # it from naming it: `ls tests/run.sh` is argv[0] ls and stays none, and a
       # bare `run.sh` word is not something the shell would run either.
-      if (index(a[1], "/") > 0 && (b0 == "run.sh" || b0 == "test.sh" || b0 ~ /\.test\.sh$/))
+      if (index(a[1], "/") > 0 && (b0 == "run.sh" || b0 == "test.sh" || b0 ~ /\.test\.sh$/)) {
+        LAST_TARGET = b0
+        LAST_PATH = a[1]
         return "suite"
+      }
       if (b0 == "pytest") return "suite"
       if (b0 == "npm" || b0 == "pnpm" || b0 == "yarn") {
         if (a1 == "test") return "suite"
@@ -375,7 +401,21 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       for (i = 1; i <= k; i++) {
         t = trim(seg[i])
         if (t == "") continue
-        printf "%s\t%s\n", class_seg(t, 0), t
+        LAST_TARGET = ""
+        cls = class_seg(t, 0)
+        if (mode == "targets") {
+          # ONE LINE PER DISTINCT SUITE, in position order. A command naming the same
+          # suite twice states one budget claim, and the caller compares a set.
+          if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && !(LAST_TARGET in tgt_seen)) {
+            tgt_seen[LAST_TARGET] = 1
+            # BASENAME AND PATH, tab-separated. The shell wrapper is the only caller and
+            # reduces this to the basename; it needs the path to answer "whose suite is
+            # this?", which a basename cannot (critic K-2).
+            printf "%s\t%s\n", LAST_TARGET, LAST_PATH
+          }
+        } else {
+          printf "%s\t%s\n", cls, t
+        }
         # Left-to-right, so a cd only licenses the basename form in the
         # segments that FOLLOW it.
         if (is_cd(t)) CD_SEEN = 1
@@ -394,6 +434,48 @@ cmd_unwrap_head() {  # <command> -> the command reduced to what argv[0] reads
 
 cmd_class_lines() {  # <command> -> "<class>\t<segment>" per non-empty segment
   printf '%s' "${1-}" | _cmd_class_awk lines
+}
+
+cmd_suite_targets() {  # <command> [<repo root>] -> the suite BASENAME each suite-class segment runs
+  # WITH A REPO ROOT the answer is SCOPED: a segment names a target only when the path it
+  # runs resolves to that repository's `tests/<basename>`. Without one the answer is the
+  # bare basename, which is what it always was — the reading, not the row, decides.
+  #
+  # WHY SCOPING EXISTS (critic K-2, review-a A-7). A bare basename made any file on the
+  # machine ending `.test.sh` this row's business: a scratch probe under /tmp and another
+  # repository's `tests/run.sh` were both refused against a budget they had nothing to do
+  # with, and the refusal named a repository the command never mentioned.
+  #
+  # SHAPE, NOT EXISTENCE. The resolved path is compared to `<root>/tests/<basename>`; it is
+  # never stat'd. Refusing only files the hook can see would let a suite the writer is
+  # about to create past the budget, and would make the answer depend on the filesystem at
+  # hook time rather than on the command. "A path somewhere else" is visible in the path.
+  #
+  # TWO SPELLINGS STAY NAMED ON PURPOSE, both because the caller has something to say
+  # about them and cannot say it about a target it never hears:
+  #   * the cd-licensed basename form (`cd tests && bash run.sh`) records no directory to
+  #     resolve against, and the full tree is the one act this budget fails CLOSED on;
+  #   * a token carrying `$` or a backtick cannot be resolved at hook time at all — the
+  #     guard has a refusal written for exactly that state.
+  local _root="${2-}" _b _p _abs
+  if [ -z "$_root" ]; then
+    printf '%s' "${1-}" | _cmd_class_awk targets | awk -F'\t' '{ print $1 }'
+    return 0
+  fi
+  printf '%s' "${1-}" | _cmd_class_awk targets | while IFS=$'\t' read -r _b _p; do
+    [ -n "$_b" ] || continue
+    case "$_p" in
+      *'$'*|*'`'*) printf '%s\n' "$_b"; continue ;;
+      */*) : ;;
+      *) printf '%s\n' "$_b"; continue ;;
+    esac
+    case "$_p" in
+      /*) _abs="$_p" ;;
+      *)  _abs="$_root/${_p#./}" ;;
+    esac
+    if [ "$_abs" = "$_root/tests/$_b" ]; then printf '%s\n' "$_b"; fi
+  done
+  return 0
 }
 
 cmd_class() {  # <command> -> suite|bootstrap|install|build|none, by priority

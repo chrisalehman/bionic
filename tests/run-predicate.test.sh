@@ -33,6 +33,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
@@ -40,13 +41,6 @@ LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/run-predicate-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
-
-PASS=0
-FAIL=0
-TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
 
 # SUBSTRING, AS A FUNCTION. Nine rows below asked this with a one-line `case` inside a
 # command substitution. Under bash 3.2 — what `/bin/bash` is on macOS, and what this
@@ -60,10 +54,9 @@ rp_contains() {  # <haystack> <needle> -> yes|no
     *)      printf 'no'  ;;
   esac
 }
-expect_empty() { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
 
 # ============================================================
-echo "=== R0 — the library exists and parses ==="
+section "R0 — the library exists and parses"
 # ============================================================
 if [ -f "$LIB" ]; then ok "payload/scripts/lib/run.sh is on disk"; else
   no "payload/scripts/lib/run.sh is on disk" "$LIB"
@@ -106,7 +99,7 @@ call_active_plan() {  # <root> -> sets AP_OUT, AP_ST
 }
 
 # ============================================================
-echo "=== R1 — docs_root: default and .bionic/config.yaml override ==="
+section "R1 — docs_root: default and .bionic/config.yaml override"
 # ============================================================
 ROOT1="$SANDBOX/r1"
 mkdir -p "$ROOT1/.bionic"
@@ -122,7 +115,7 @@ expect_eq "docs_root honours an absolute docs-root: override" \
 rm -f "$ROOT1/.bionic/config.yaml"
 
 # ============================================================
-echo "=== R2 — active_plan / active_run fixtures ==="
+section "R2 — active_plan / active_run fixtures"
 # ============================================================
 # mk_plan_in <root> <reldir under the docs root> <name> <current-line-body> [extra-lines...]
 # The general form: mk_plan below is its plans/ special case. R6 needs `incidents/` and
@@ -223,7 +216,7 @@ expect_eq "newest-by-mtime (open) wins over an older closed plan -> active_run e
 expect_eq "…and prints the newer plan's path" "$NEW" "$AR_OUT"
 
 # ============================================================
-echo "=== R3 — the plan-search DEPTH BOUND is 2, and it is the fleet's only one ==="
+section "R3 — the plan-search DEPTH BOUND is 2, and it is the fleet's only one"
 # ============================================================
 #
 # THE BOUND IS A CONTRACT, not an implementation detail, and it is pinned here because this
@@ -262,7 +255,7 @@ expect_eq "…while the same file at depth 2 is found (the fixture measures dept
 
 # ============================================================
 echo
-echo "=== R4 — SIGPIPE-under-pipefail does not flip a >64 KB plan's verdict (AC-21) ==="
+section "R4 — SIGPIPE-under-pipefail does not flip a >64 KB plan's verdict (AC-21)"
 # ============================================================
 #
 # WHY THIS SECTION EXISTS AND R0-R3 DID NOT CATCH IT (research-refusal.md VERDICT,
@@ -403,7 +396,7 @@ expect_empty "…and prints nothing" "$AR_OUT"
 
 # ============================================================
 echo
-echo "=== R5 — run_open <plan>: the verdict table, on ONE file, with no root walk ==="
+section "R5 — run_open <plan>: the verdict table, on ONE file, with no root walk"
 # ============================================================
 #
 # WHY THIS FUNCTION EXISTS (wave-session-bound-run, spec §Design; AC-6). Until this wave the
@@ -535,7 +528,7 @@ done
 
 # ============================================================
 echo
-echo "=== R6 — open_runs <root>: every open run in the root, newest first ==="
+section "R6 — open_runs <root>: every open run in the root, newest first"
 # ============================================================
 #
 # WHY (spec §Design, ownership table "the open-run set"). Engagement binds a session to the
@@ -676,6 +669,33 @@ call_active_plan "$R"
 expect_eq "open_runs line 1 == active_plan's answer, with spaces in every path" \
   "$G_NEW" "$AP_OUT"
 
+# --- R6h: plans written inside ONE SECOND — the two selectors still agree (AC-9) ---
+#
+# THE LIMITATION IS DOCUMENTED, AND THIS IS WHAT THE DOCUMENTATION BUYS. `-nt`
+# compares whole seconds under /bin/bash 3.2, so two plans written in the same
+# second tie and the tie is broken by directory order — which of them
+# `active_plan` names is genuinely unspecified, and asserting a winner here
+# would pin the filesystem rather than the library. What is NOT unspecified is
+# that both selectors resolve the tie the SAME way, because they run the same
+# comparator over the same walk: `open_runs`' line 1 is `active_plan`'s answer.
+# That is the invariant lib/run.sh accepts the whole-second reading in order to
+# keep, and the reason a sub-second comparator in ONE of them was rejected
+# rather than taken (see the block under `open_runs`).
+#
+# NO `touch -t` HERE, ON PURPOSE. Every other fixture in R6 sets its mtimes
+# explicitly and can therefore never meet a tie; this one writes three plans as
+# fast as the shell can and lets them collide, which is the state
+# patrol-revive's rows 33/34 actually hit.
+R="$SANDBOX/r6-burst"; mkdir -p "$R/.bionic"
+mk_plan "$R" "burst-a.plan.md" "4" "- Step 4: in progress" >/dev/null
+mk_plan "$R" "burst-b.plan.md" "4" "- Step 4: in progress" >/dev/null
+mk_plan "$R" "burst-c.plan.md" "4" "- Step 4: in progress" >/dev/null
+call_open_runs "$R"
+call_active_plan "$R"
+expect_eq "same-second burst: all three plans are in the open set" 3 "$(line_count "$OR_OUT")"
+expect_eq "same-second burst: open_runs line 1 == active_plan's answer" \
+  "$AP_OUT" "$(first_line "$OR_OUT")"
+
 # --- R6f: no docs tree at all ---
 R="$SANDBOX/r6f"; mkdir -p "$R/.bionic"
 call_open_runs "$R"
@@ -684,7 +704,7 @@ expect_empty "open_runs: no plans dir -> prints nothing" "$OR_OUT"
 
 # ============================================================
 echo
-echo "=== R7 — session_plan <root> <sid>: the marker's plan= field, and only that ==="
+section "R7 — session_plan <root> <sid>: the marker's plan= field, and only that"
 # ============================================================
 #
 # WHY (spec §Design, "Session binding"). hooks/engage.sh has written `plan=<path>` into
@@ -770,7 +790,7 @@ expect_eq "session_plan: an empty sid -> exit 1" 1 "$SP_ST"
 
 # ============================================================
 echo
-echo "=== R8 — session_run <root> <sid>: the verdict a hook acts on ==="
+section "R8 — session_run <root> <sid>: the verdict a hook acts on"
 # ============================================================
 #
 # THE FOUR VERDICTS (spec §Design, "Run verdict"):
@@ -913,7 +933,7 @@ expect_eq "session_run: …naming it" "fallback $SHUT" "$SR_OUT"
 
 # ============================================================
 echo
-echo "=== R9 — config_value <root> <key> <default>: one reader for .bionic/config.yaml ==="
+section "R9 — config_value <root> <key> <default>: one reader for .bionic/config.yaml"
 # ============================================================
 #
 # WHY (spec §Design §2, R1). `live-window:` is the second key this library needs out of
@@ -993,7 +1013,7 @@ expect_eq "…and docs_root reads its own key exactly the same way" "$R9/d1\"" \
 
 # ============================================================
 echo
-echo "=== R10 — live_runs <root>: the open runs whose plan is still WARM ==="
+section "R10 — live_runs <root>: the open runs whose plan is still WARM"
 # ============================================================
 #
 # WHY (spec AC-1, R1; design §1 "Run"). `open_runs` answers "not finished". A repository
@@ -1152,8 +1172,4 @@ expect_eq "live_runs: at LR_NOW the fresh plan is live" "$F_FRESH" "$LR_OUT"
 call_live_runs "$R" "$(( LR_NOW + 20 * LR_DAY ))"
 expect_eq "live_runs: …and 20 days later, on the same tree, nothing is" 1 "$LR_ST"
 expect_empty "live_runs: …with no output" "$LR_OUT"
-# ============================================================
-echo
-echo "=== run-predicate: $PASS/$TOTAL passed ==="
-[ "$FAIL" -eq 0 ] || echo "FAILURES: $FAIL"
-[ "$FAIL" -eq 0 ]
+finish

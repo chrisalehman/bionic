@@ -27,6 +27,16 @@
 # the SAME extractors now report a mismatch. That is proven fresh on every run
 # rather than taken on faith from a report.
 #
+# WHAT THIS SECTION STILL CANNOT SEE, and it is not a gap to be closed here (wave-01
+# verification-cannot-lie, AC-17). Every assertion below is an AGREEMENT: it holds when
+# every surface says the same thing. A version that is WRONG but AGREEING — a release that
+# bumped nothing, or bumped every surface to the same wrong number — passes all of it, at
+# every surface, in silence. That is FOG in this wave's sense: a class of defect no
+# assertion here can turn red, named rather than claimed away. Its cure is canon R0.1,
+# render every surface from one source (wave 02), which removes the several-surfaces
+# problem instead of testing around it. This section's power is over DISAGREEMENT, and
+# that is what it is claimed to have.
+#
 # HERMETIC. Reads the two committed files and the template by path; doctored copies
 # live under a mktemp dir removed on exit. Nothing in the repo tree is mutated.
 # The one subprocess this section shells out to, `agents-src/render.sh --check`, is
@@ -38,6 +48,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PLUGIN_JSON="${REPO}/payload/.claude-plugin/plugin.json"
@@ -46,12 +57,6 @@ HELP_TMPL="${REPO}/agents-src/templates/commands/help.md.tmpl"
 RENDER_SH="${REPO}/agents-src/render.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "docs-pins.test.sh: jq is required"; exit 1; }
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_ne() { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected values to differ, both were '$2'"; fi; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -65,8 +70,7 @@ help_version_of() {
   grep -m1 -E '^bionic [^ ]+ \(installed\)$' "$1" 2>/dev/null | awk '{print $2}'
 }
 
-echo ""
-echo "=== Section 1: the help version pair equals plugin.json's version (RELEASE, AC-36) ==="
+section "Section 1: the help version pair equals plugin.json's version (RELEASE, AC-36)"
 
 PLUGIN_VERSION="$(plugin_version_of "$PLUGIN_JSON")"
 if [ -n "$PLUGIN_VERSION" ]; then
@@ -97,6 +101,12 @@ fi
 
 # --- Anti-vacuity: the same extractors must discriminate a real mismatch ---
 
+# WHOLE-LINE ERE, because the sed two lines down is `^...$`-anchored. A fixed-string
+# anchor is a substring test: it survives a reindent of this line while the sed does
+# not, leaving a "mutant" byte-identical to the shipped help.md — see plant 2 of
+# s19c-planted-move.log, where exactly that hid a broken mutation. The version's dots
+# are escaped so a literal `1.4.4` cannot match `1x4x4`.
+anchor -E "$HELP_MD" "^bionic ${PLUGIN_VERSION//./\\.} \\(installed\\)$" 1
 DOCTORED_HELP="$TMP/help-mismatched.md"
 sed "s/^bionic ${PLUGIN_VERSION} (installed)\$/bionic 0.0.0-mismatch (installed)/" \
   "$HELP_MD" > "$DOCTORED_HELP"
@@ -104,6 +114,7 @@ DOCTORED_HELP_VERSION="$(help_version_of "$DOCTORED_HELP")"
 expect_ne "5: a doctored help.md with a different version reads as a different version (pin discriminates)" \
   "$PLUGIN_VERSION" "$DOCTORED_HELP_VERSION"
 
+anchor "$PLUGIN_JSON" '"version"' 1
 DOCTORED_PLUGIN="$TMP/plugin-mismatched.json"
 jq --arg v "0.0.0-mismatch" '.version = $v' "$PLUGIN_JSON" > "$DOCTORED_PLUGIN"
 DOCTORED_PLUGIN_VERSION="$(plugin_version_of "$DOCTORED_PLUGIN")"
@@ -126,6 +137,166 @@ if grep -q 'run "docs-pins.test.sh" bash tests/docs-pins.test.sh' "${REPO}/tests
 else
   no "8: tests/run.sh names docs-pins.test.sh"
 fi
+
+# ── AC-17: the version is one truth rendered at MANY surfaces ────────────────
+#
+# Assertions 1-8 pin ONE pair, plugin.json and help.md. The version is restated at more
+# surfaces than that, and until this slice nothing looked at the rest: the marketplace
+# manifest the CLI reads, the `payload/.version` file the plan named, and doctor's own
+# header line. Each is asserted against `payload/.claude-plugin/plugin.json`, the single
+# owner — and each pin carries the doctored control that proves its extractor discriminates,
+# for §N.1's differential-control reason.
+
+MARKETPLACE="${REPO}/.claude-plugin/marketplace.json"
+VERSION_FILE="${REPO}/payload/.version"
+DOCTOR_SH="${REPO}/payload/scripts/doctor.sh"
+DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
+
+# version_file_of <path> -> the version on the first line, empty if the file is absent.
+version_file_of() { [ -f "$1" ] || return 0; head -1 "$1" 2>/dev/null | tr -d '[:space:]'; }
+
+# mkt_version_of <manifest> -> the bionic ENTRY's own .version, empty when it declares none.
+mkt_version_of() { jq -r '(.plugins // []) | map(select(.name == "bionic")) | .[0].version // empty' "$1" 2>/dev/null; }
+
+# mkt_source_of <manifest> -> the bionic entry's source, as a string when it is one.
+mkt_source_of() { jq -r '(.plugins // []) | map(select(.name == "bionic")) | .[0].source | if type == "string" then . else empty end' "$1" 2>/dev/null; }
+
+# detect_version_of <plugin root> -> what detect_plugin_integrity reports for that root.
+# THIS IS DOCTOR'S OWN READER, not a re-implementation of it: doctor.sh:528 takes
+# PLUGIN_VERSION out of this line and its header prints that value.
+detect_version_of() {
+  ( . "$DETECT_SH" >/dev/null 2>&1
+    BIONIC_PLUGIN_ROOT="$1" detect_plugin_integrity 2>/dev/null ) \
+  | sed -n 's/^plugin: version=\([^ ]*\).*/\1/p'
+}
+
+# doctor_header_line <doctor.sh> -> the one line that renders the report header.
+doctor_header_line() { grep -m1 -F 'Bionic Doctor — payload' "$1" 2>/dev/null; }
+
+# declaring_sites <root> -> "<path>|<version>" for every file in the tree that DECLARES a
+# bionic version, sorted. Declaring, not mentioning: a `"version": "1.2.3"` key in the
+# plugin payload or the marketplace manifest, and the `bionic <v> (installed)` line the
+# help command opens with. Prose that names a past release ("the 1.4.4 fixit", of which
+# there are two dozen) declares nothing and is not swept up.
+#
+# /usr/bin/grep, not `grep`: the shell grep on this machine is ugrep with --ignore-files,
+# which skips hidden directories — and BOTH declaring sites live under one
+# (`payload/.claude-plugin`, `.claude-plugin`). The same trap tests/cross-gate-agreement.test.sh
+# names at its own expect_absent_ug.
+#
+# Candidates come from `git ls-files`, not a filesystem walk — an UNTRACKED file (scratch
+# tooling debris, a stray virtualenv, anything nobody committed) is not a declaring surface
+# just because it happens to sit on disk under payload/. A-48(a): the 2026-09-06 residual
+# was an untracked `.venv`'s `package.json` making the census see three surfaces instead of
+# two in a polluted checkout, while every committed/archived tree only ever saw two. When
+# `$r` is not a git worktree at all (the sweep's own synthetic scratch-tree control below,
+# built with plain `mkdir`/`cp`), there is no tracked/untracked distinction to make, so every
+# file on disk is a candidate — same as before.
+declaring_sites() {
+  local r="$1" f v version_candidates installed_candidates
+  if git -C "$r" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    version_candidates=$(cd "$r" && git ls-files -- payload .claude-plugin 2>/dev/null)
+    installed_candidates=$(cd "$r" && git ls-files -- payload agents-src 2>/dev/null)
+  else
+    version_candidates=$(cd "$r" && find payload .claude-plugin -type f 2>/dev/null)
+    installed_candidates=$(cd "$r" && find payload agents-src -type f 2>/dev/null)
+  fi
+  {
+    for f in $version_candidates; do
+      /usr/bin/grep -qE '^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+[^"]*"' "$r/$f" 2>/dev/null || continue
+      v=$(/usr/bin/grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' "$r/$f" 2>/dev/null | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+      printf '%s|%s\n' "$f" "$v"
+    done
+    for f in $installed_candidates; do
+      /usr/bin/grep -qE '^bionic [0-9]+\.[0-9]+\.[0-9]+[^ ]* \(installed\)$' "$r/$f" 2>/dev/null || continue
+      v=$(/usr/bin/grep -m1 -E '^bionic [^ ]+ \(installed\)$' "$r/$f" 2>/dev/null | awk '{print $2}')
+      printf '%s|%s\n' "$f" "$v"
+    done
+  } | LC_ALL=C sort
+}
+
+# --- surface: payload/.version -----------------------------------------------
+#
+# The plan named this file as a version-bearing surface. It does not exist in this tree, so
+# plugin.json is the sole FILE owner — asserted as the absence it is, with the extractor
+# proven able to read one so that "empty" cannot mean "the reader is broken".
+expect_empty "9: payload/.version declares nothing — plugin.json is the sole file owner" \
+  "$(version_file_of "$VERSION_FILE")"
+printf '%s\n' "$PLUGIN_VERSION" > "$TMP/dot-version"
+expect_eq "10: …and the same extractor DOES read a .version file that exists (not a broken reader)" \
+  "$PLUGIN_VERSION" "$(version_file_of "$TMP/dot-version")"
+
+# --- surface: the marketplace manifest ---------------------------------------
+#
+# `.claude-plugin/marketplace.json` is what `claude plugin marketplace add` reads, and it is
+# where a second version number would be most invisible: nothing renders it beside the
+# plugin's own. It carries none, and it must not — its bionic entry points at `./payload`,
+# whose plugin.json is the owner. The pin is therefore that this surface RESTATES NOTHING.
+expect_eq "11: the marketplace manifest sources bionic from ./payload — the owner's directory" \
+  "./payload" "$(mkt_source_of "$MARKETPLACE")"
+expect_empty "12: …and declares no version of its own, so there is nothing here to drift" \
+  "$(mkt_version_of "$MARKETPLACE")"
+# The jq below selects the bionic plugin entry BY NAME, so that name is this mutation's
+# anchor. TWO is the measured truth, not a slack bound: the manifest carries its own
+# `"name": "bionic"` at the top level and the plugins[] entry carries a second. Either one
+# moving turns this row red and says which count it found.
+anchor "$MARKETPLACE" '"name": "bionic"' 2
+DOCTORED_MKT="$TMP/marketplace-mismatched.json"
+jq '(.plugins[] | select(.name == "bionic")) |= (. + {version: "0.0.0-mismatch"})' \
+  "$MARKETPLACE" > "$DOCTORED_MKT"
+expect_eq "13: …and a manifest that DID carry one is read as carrying it (pin discriminates)" \
+  "0.0.0-mismatch" "$(mkt_version_of "$DOCTORED_MKT")"
+
+# --- surface: doctor's header line -------------------------------------------
+#
+# `Bionic Doctor — payload <v> @ <sha>` is the version most users ever see. It is not an
+# independent surface: doctor.sh:528 reads detect_plugin_integrity's `version=` and prints
+# that. So the pin has two halves — the header renders the variable rather than a literal,
+# and the reader behind the variable really does report plugin.json's value.
+DOCTOR_HEADER="$(doctor_header_line "$DOCTOR_SH")"
+expect_contains "14: doctor's header renders \${PLUGIN_VERSION}, never a typed-in version" \
+  '${PLUGIN_VERSION}' "$DOCTOR_HEADER"
+expect_no_regex "15: …and carries no version literal of its own" \
+  '[0-9]+\.[0-9]+\.[0-9]+' "$DOCTOR_HEADER"
+expect_contains "16: …and PLUGIN_VERSION comes from detect_plugin_integrity, not a second parse" \
+  'PLUGIN_VERSION="${PLUGIN_FACT#plugin: version=}"' "$(cat "$DOCTOR_SH")"
+expect_eq "17: …and that reader reports plugin.json's version for the shipped payload root" \
+  "$PLUGIN_VERSION" "$(detect_version_of "${REPO}/payload")"
+anchor "$PLUGIN_JSON" '"version": "' 1
+DOCTORED_ROOT="$TMP/doctored-root"
+mkdir -p "$DOCTORED_ROOT/.claude-plugin"
+jq --arg v "0.0.0-mismatch" '.version = $v' "$PLUGIN_JSON" > "$DOCTORED_ROOT/.claude-plugin/plugin.json"
+expect_eq "18: …and reports the DOCTORED version for a doctored root (the header would show it)" \
+  "0.0.0-mismatch" "$(detect_version_of "$DOCTORED_ROOT")"
+
+# --- the census: no THIRD surface appears unnoticed ---------------------------
+#
+# The four pins above are a fixed list, and a fixed list goes stale the moment somebody adds
+# a fifth surface. The sweep is the pin that notices: exactly two files in this tree DECLARE
+# a bionic version, and both of them agree with the owner.
+SITES="$(declaring_sites "$REPO")"
+expect_eq "19: exactly two surfaces in the tree DECLARE a version, and they are the known two" \
+  "payload/.claude-plugin/plugin.json|${PLUGIN_VERSION}
+payload/commands/help.md|${PLUGIN_VERSION}" "$SITES"
+
+SITE_DISAGREEMENTS="$(printf '%s\n' "$SITES" | awk -F'|' -v v="$PLUGIN_VERSION" '$2 != v')"
+expect_empty "20: …and every one of them agrees with plugin.json" "$SITE_DISAGREEMENTS"
+
+# The sweep's own controls, over a scratch tree: a THIRD declaring surface is found, and a
+# disagreeing one is reported as a disagreement. Without these, an empty sweep and a broken
+# sweep look identical.
+SWEEP_TREE="$TMP/sweep-tree"
+mkdir -p "$SWEEP_TREE/payload/.claude-plugin" "$SWEEP_TREE/payload/commands" \
+         "$SWEEP_TREE/payload/scripts" "$SWEEP_TREE/.claude-plugin" "$SWEEP_TREE/agents-src"
+cp "$PLUGIN_JSON" "$SWEEP_TREE/payload/.claude-plugin/plugin.json"
+cp "$HELP_MD" "$SWEEP_TREE/payload/commands/help.md"
+printf '{\n  "name": "bionic-thing",\n  "version": "0.0.0-mismatch"\n}\n' \
+  > "$SWEEP_TREE/payload/scripts/third-surface.json"
+SWEEP_SITES="$(declaring_sites "$SWEEP_TREE")"
+expect_contains "21: the sweep FINDS a third declaring surface planted in a scratch tree" \
+  "payload/scripts/third-surface.json|0.0.0-mismatch" "$SWEEP_SITES"
+expect_nonempty "22: …and the disagreement filter reports it as a disagreement" \
+  "$(printf '%s\n' "$SWEEP_SITES" | awk -F'|' -v v="$PLUGIN_VERSION" '$2 != v')"
 
 # ── SECTION 2 — WALLS (spec AC-14/AC-26, `.bionic/docs/plans/wave-bionic-1.4.0-update/`).
 #
@@ -151,8 +322,7 @@ fi
 #
 # HERMETIC. Reads committed files by path; doctored copies live under $TMP.
 
-echo ""
-echo "=== Section 2: the WALLS instruction-surface pins (AC-14, AC-26) ==="
+section "Section 2: the WALLS instruction-surface pins (AC-14, AC-26)"
 
 SKILL_MD="${REPO}/payload/skills/canonical-sdlc/SKILL.md"
 SURVIVAL_BLOCK="${REPO}/agents-src/blocks/survival.md"
@@ -261,6 +431,7 @@ fi
 
 # --- Anti-vacuity: the same extractors must report a mutation ---
 
+anchor "$SKILL_MD" 'never re-derived downstream' 1
 DOCTORED_SKILL="$TMP/skill-mutated.md"
 sed 's/never re-derived downstream/re-derived wherever convenient/' "$SKILL_MD" > "$DOCTORED_SKILL"
 if has_pin "$DOCTORED_SKILL" "$PIN_PROBE"; then
@@ -270,19 +441,18 @@ else
   ok "17: a doctored SKILL.md fails the probe pin (pin discriminates)"
 fi
 
+anchor "$SURVIVAL_BLOCK" 'only when your brief names a ceiling' 1
 DOCTORED_BLOCK="$TMP/survival-mutated.md"
 sed 's/only when your brief names a ceiling/whenever you feel the machine is busy/' \
   "$SURVIVAL_BLOCK" > "$DOCTORED_BLOCK"
-if cmp -s "$SURVIVAL_BLOCK" "$DOCTORED_BLOCK"; then
-  no "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_BLOCK" "$PIN_JOBS"; then
+if has_pin "$DOCTORED_BLOCK" "$PIN_JOBS"; then
   no "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)" \
      "the mutated copy still matched — the pin is vacuous"
 else
   ok "18: a doctored survival.md fails the BIONIC_TEST_JOBS pin (pin discriminates)"
 fi
 
+anchor "$AGENT_RULES" 'the address that survives' 1
 DOCTORED_RULES="$TMP/rules-mutated.md"
 sed 's/the address that survives/the address that dies/' "$AGENT_RULES" > "$DOCTORED_RULES"
 expect_ne "19: a doctored agent-discipline.md reads as a different paragraph (pin discriminates)" \
@@ -315,8 +485,7 @@ expect_ne "19: a doctored agent-discipline.md reads as a different paragraph (pi
 # APPENDED, NEVER REWRITTEN: §1 is RELEASE's and §2 is WALLS's, and a slice that edited
 # another slice's pins would be a slice deciding what that slice owns.
 
-echo ""
-echo "=== Section 3: the SCHED Patrol-text pins (AC-30, AC-38) ==="
+section "Section 3: the SCHED Patrol-text pins (AC-30, AC-38)"
 
 PIN_THROTTLE='**the tick reads pressure to throttle, never to re-derive the budget** — the ceiling is the plan header'"'"'s `parallel-budget:`, written once by Step 0 from the probe, and no live reading ever raises or lowers it.'
 PIN_QUIET='**An armed session that has dispatched nothing yet decides QUIET, never REFUSED** — `poker: QUIET — armed, nothing dispatched yet on this session`, stamp kept — because arming precedes dispatch by design'
@@ -352,6 +521,7 @@ fi
 
 # --- Anti-vacuity: the same extractor must report a mutation ---
 
+anchor "$SKILL_MD" 'never to re-derive the budget' 1
 DOCTORED_SCHED="$TMP/skill-sched-mutated.md"
 sed 's/never to re-derive the budget/and to re-derive the budget/' "$SKILL_MD" > "$DOCTORED_SCHED"
 if has_pin "$DOCTORED_SCHED" "$PIN_THROTTLE"; then
@@ -361,6 +531,7 @@ else
   ok "23: a doctored SKILL.md fails the throttle pin (pin discriminates)"
 fi
 
+anchor "$SKILL_MD" 'decides QUIET, never REFUSED' 1
 DOCTORED_SCHED2="$TMP/skill-sched-mutated-2.md"
 sed 's/decides QUIET, never REFUSED/is REFUSED/' "$SKILL_MD" > "$DOCTORED_SCHED2"
 if has_pin "$DOCTORED_SCHED2" "$PIN_QUIET"; then
@@ -370,8 +541,7 @@ else
   ok "24: a doctored SKILL.md fails the QUIET pin (pin discriminates)"
 fi
 
-echo ""
-echo "--- SECTION 4 — the Patrol tick literal, one string in two files (step-6 review R-8) ---"
+section "SECTION 4 — the Patrol tick literal, one string in two files (step-6 review R-8)"
 #
 # WHAT THIS SECTION OWNS. The armed cron job's prompt begins with the token
 # `bionic-patrol session=<session-id[0:8]>`. SKILL.md is where the operator is told to
@@ -435,31 +605,22 @@ esac
 
 # --- Anti-vacuity: the same extractors must report a mutation, from either side ---
 
+anchor "$SKILL_MD" 'its first token `bionic-patrol session=' 1
 DOCTORED_TICK_DOC="$TMP/skill-tick-mutated.md"
 sed 's/its first token `bionic-patrol session=/its first token `bionic patrol session=/' \
   "$SKILL_MD" > "$DOCTORED_TICK_DOC"
-if cmp -s "$SKILL_MD" "$DOCTORED_TICK_DOC"; then
-  no "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-else
-  expect_ne "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
-    "$TICK_CODE" "$(tick_literal_doc "$DOCTORED_TICK_DOC")"
-fi
+expect_ne "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
+  "$TICK_CODE" "$(tick_literal_doc "$DOCTORED_TICK_DOC")"
 
+anchor -E "$TICK_GATE" '^TICK_MARK="bionic-patrol session=' 1
 DOCTORED_TICK_CODE="$TMP/patrol-duties-gate-mutated.sh"
 sed 's/^TICK_MARK="bionic-patrol session=/TICK_MARK="bionic-patrol sid=/' \
   "$TICK_GATE" > "$DOCTORED_TICK_CODE"
-if cmp -s "$TICK_GATE" "$DOCTORED_TICK_CODE"; then
-  no "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
-     "the sed target matched nothing — the assignment moved"
-else
-  expect_ne "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
-    "$TICK_DOC" "$(tick_literal_code "$DOCTORED_TICK_CODE")"
-fi
+expect_ne "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
+  "$TICK_DOC" "$(tick_literal_code "$DOCTORED_TICK_CODE")"
 
-echo ""
-echo "--- SECTION 5 — the session-bound run, and the bind step in the resume ritual (wave-session-bound-run, A4/AC-5/AC-8) ---"
 #
+# SECTION 5 — the session-bound run, and the bind step in the resume ritual (wave-session-bound-run, A4/AC-5/AC-8).
 # WHAT THIS SECTION OWNS. Two sentences in `payload/skills/canonical-sdlc/SKILL.md`'s Patrol
 # paragraph that no hook can check, and that decide whether a resumed session works its own
 # run or its neighbour's:
@@ -486,8 +647,7 @@ echo "--- SECTION 5 — the session-bound run, and the bind step in the resume r
 #
 # APPENDED, NEVER REWRITTEN: §1-§4 belong to earlier slices.
 
-echo ""
-echo "=== Section 5: the session-bound run and the resume-ritual bind step ==="
+section "Section 5: the session-bound run and the resume-ritual bind step"
 
 # THE PARAGRAPH STATES ONE RULE, ONCE (review readability F1, S10b). Before this pin the
 # Patrol paragraph carried the PRE-wave rule as a fact — "whether this PROJECT has an OPEN
@@ -550,40 +710,32 @@ expect_eq "34: …and the verb both sides name is 'session-poker.sh bind <plan>'
 
 # --- Anti-vacuity: the same extractors and pins must report a mutation ---
 
+anchor "$SKILL_MD" 'Only an UNBOUND session falls back' 1
 DOCTORED_BOUND="$TMP/skill-bound-run-mutated.md"
 sed 's/Only an UNBOUND session falls back/Every session falls back/' "$SKILL_MD" > "$DOCTORED_BOUND"
-if cmp -s "$SKILL_MD" "$DOCTORED_BOUND"; then
-  no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_BOUND" "$PIN_FALLBACK"; then
+if has_pin "$DOCTORED_BOUND" "$PIN_FALLBACK"; then
   no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
   ok "35: a doctored SKILL.md fails the fallback pin (pin discriminates)"
 fi
 
+anchor "$SKILL_MD" 'binds its run before it adopts anything' 1
 DOCTORED_BIND="$TMP/skill-bind-step-mutated.md"
 sed 's/binds its run before it adopts anything/adopts before it binds anything/' \
   "$SKILL_MD" > "$DOCTORED_BIND"
-if cmp -s "$SKILL_MD" "$DOCTORED_BIND"; then
-  no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_BIND" "$PIN_BIND_STEP"; then
+if has_pin "$DOCTORED_BIND" "$PIN_BIND_STEP"; then
   no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
      "the pin matched a copy that puts adopt first"
 else
   ok "36: a reordered resume ritual fails the bind-step pin (pin discriminates)"
 fi
 
+anchor "$POKER_SH" 'session-poker.sh bind <plan>' 1
 DOCTORED_BIND_VERB="$TMP/session-poker-verb-mutated.sh"
 sed 's/session-poker\.sh bind <plan>/session-poker.sh bindrun <plan>/' "$POKER_SH" > "$DOCTORED_BIND_VERB"
-if cmp -s "$POKER_SH" "$DOCTORED_BIND_VERB"; then
-  no "37: a renamed poker verb splits from the doc (pin discriminates)" \
-     "the sed target matched nothing — the usage line moved"
-else
-  expect_ne "37: a renamed poker verb splits from the doc (pin discriminates)" \
-    "$BIND_DOC" "$(bind_verb_code "$DOCTORED_BIND_VERB")"
-fi
+expect_ne "37: a renamed poker verb splits from the doc (pin discriminates)" \
+  "$BIND_DOC" "$(bind_verb_code "$DOCTORED_BIND_VERB")"
 
 if has_pin "$SKILL_MD" "$PIN_SCOPE_PAIR"; then
   ok "38: SKILL.md's two-facts sentence names the SESSION's bound run, not the project's"
@@ -600,13 +752,11 @@ else
 fi
 
 # Anti-vacuity for 38, same pattern as 35/36: the extractor must report a doctored copy.
+anchor "$SKILL_MD" 'which run this SESSION is bound to' 1
 DOCTORED_SCOPE="$TMP/skill-scope-mutated.md"
 sed 's/which run this SESSION is bound to/whether this PROJECT has an OPEN run/' \
   "$SKILL_MD" > "$DOCTORED_SCOPE"
-if cmp -s "$SKILL_MD" "$DOCTORED_SCOPE"; then
-  no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_SCOPE" "$PIN_SCOPE_PAIR"; then
+if has_pin "$DOCTORED_SCOPE" "$PIN_SCOPE_PAIR"; then
   no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
@@ -642,32 +792,27 @@ else
      "file: $SKILL_MD"
 fi
 
+anchor "$SKILL_MD" 'recreate one entry per step' 1
 DOCTORED_TASKLIST="$TMP/skill-tasklist-mutated.md"
 sed 's/recreate one entry per step/recreate one entry per slice only/' "$SKILL_MD" > "$DOCTORED_TASKLIST"
-if cmp -s "$SKILL_MD" "$DOCTORED_TASKLIST"; then
-  no "50: a doctored SKILL.md fails the task-list pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_TASKLIST" "$PIN_TASKLIST"; then
+if has_pin "$DOCTORED_TASKLIST" "$PIN_TASKLIST"; then
   no "50: a doctored SKILL.md fails the task-list pin (pin discriminates)" \
      "the pin matched a doctored copy"
 else
   ok "50: a doctored SKILL.md fails the task-list pin (pin discriminates)"
 fi
 
+anchor "$SKILL_MD" 'NARROW and RELAX are retired' 1
 DOCTORED_RUNG="$TMP/skill-rung-mutated.md"
 sed 's/NARROW and RELAX are retired/NARROW and RELAX still apply/' "$SKILL_MD" > "$DOCTORED_RUNG"
-if cmp -s "$SKILL_MD" "$DOCTORED_RUNG"; then
-  no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_RUNG" "$PIN_RUNG"; then
+if has_pin "$DOCTORED_RUNG" "$PIN_RUNG"; then
   no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
      "the pin matched a doctored copy"
 else
   ok "51: a doctored SKILL.md fails the rung pin (pin discriminates)"
 fi
 
-echo ""
-echo "=== Section 6: Step 8's tmp wipe spares session-keyed state ==="
+section "Section 6: Step 8's tmp wipe spares session-keyed state"
 #
 # THE DEFECT THIS PINS (critic C-2, remediated at S10b). Step 8 said `wipe .bionic/tmp/*`,
 # unqualified. `.bionic/tmp/` is where EVERY session in the root keeps its engagement
@@ -705,20 +850,17 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40.
+anchor "$SKILL_MD" 'sparing every session-keyed file' 1
 DOCTORED_TMP="$TMP/skill-tmp-wipe-mutated.md"
 sed 's/sparing every session-keyed file/taking every file/' "$SKILL_MD" > "$DOCTORED_TMP"
-if cmp -s "$SKILL_MD" "$DOCTORED_TMP"; then
-  no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
+if has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
   no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
   ok "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)"
 fi
 
-echo ""
-echo "=== Section 7: bind's operand takes the spelling session-start prints ==="
+section "Section 7: bind's operand takes the spelling session-start prints"
 #
 # THE PAIR THIS PINS (S10b phase 2). hooks/session-start.sh prints the open-run listing
 # DOCS-root-relative, so an operator copies `plans/<epic>/<wave>.md` out of it. That is the
@@ -749,13 +891,11 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40/44.
+anchor "$SKILL_MD" 'its operand may be absolute, project-root-relative, or docs-root-relative' 1
 DOCTORED_OPERAND="$TMP/skill-bind-operand-mutated.md"
 sed 's/its operand may be absolute, project-root-relative, or docs-root-relative/its operand must be absolute/' \
   "$SKILL_MD" > "$DOCTORED_OPERAND"
-if cmp -s "$SKILL_MD" "$DOCTORED_OPERAND"; then
-  no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_OPERAND" "$PIN_BIND_OPERAND"; then
+if has_pin "$DOCTORED_OPERAND" "$PIN_BIND_OPERAND"; then
   no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
@@ -764,20 +904,17 @@ fi
 
 # Anti-vacuity for 46: a poker with the fallback line deleted must fail the same regex, so
 # assertion 46 is proven to discriminate rather than matching everything by accident.
+anchor "$POKER_SH" 'BIND_DOCS_TRY=' 1
 DOCTORED_POKER_NO_FALLBACK="$TMP/session-poker-no-docs-fallback.sh"
 /usr/bin/grep -v 'BIND_DOCS_TRY=' "$POKER_SH" > "$DOCTORED_POKER_NO_FALLBACK"
-if cmp -s "$POKER_SH" "$DOCTORED_POKER_NO_FALLBACK"; then
-  no "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)" \
-     "the grep -v target matched nothing — the fallback line moved"
-elif /usr/bin/grep -Eq "$BIND_DOCS_FALLBACK_RE" "$DOCTORED_POKER_NO_FALLBACK"; then
+if /usr/bin/grep -Eq "$BIND_DOCS_FALLBACK_RE" "$DOCTORED_POKER_NO_FALLBACK"; then
   no "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)" \
      "the regex matched a copy with the fallback line removed"
 else
   ok "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)"
 fi
 
-echo ""
-echo "=== Section 8: SKILL.md carries its OWN copy of the rung-pointer sentence (AC-18) ==="
+section "Section 8: SKILL.md carries its OWN copy of the rung-pointer sentence (AC-18)"
 #
 # THE GAP THE READBACK NAMED. Assertions 11/12 pin the rendered role files against
 # `PIN_JOBS`, but nothing here had ever checked SKILL.md's own restatement of the same
@@ -797,13 +934,11 @@ else
 fi
 
 # Anti-vacuity, same 47-style shape: a doctored SKILL.md must fail the pin above.
+anchor "$SKILL_MD" 'Each brief in the batch points the writer at the rung' 1
 DOCTORED_SKILL_JOBS="$TMP/skill-jobs-mutated.md"
 sed 's/Each brief in the batch points the writer at the rung/Each brief in the batch reads the frozen literal/' \
   "$SKILL_MD" > "$DOCTORED_SKILL_JOBS"
-if cmp -s "$SKILL_MD" "$DOCTORED_SKILL_JOBS"; then
-  no "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)" \
-     "the sed target matched nothing — the sentence moved"
-elif has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"; then
+if has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"; then
   no "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
@@ -811,8 +946,7 @@ else
 fi
 
 
-echo ""
-echo "=== Section 8: the tick interval, in every place it is written down (D-3) ==="
+section "Section 9: the tick interval, in every place it is written down (D-3)"
 #
 # THE GAP THIS CLOSES. The design ledger's tick-interval row named "docs-pins holds the
 # sentence" as its agreement test, and docs-pins held no such thing: `grep -n '20m'
@@ -852,21 +986,100 @@ expect_eq "58: …and that default really is 20 minutes, in seconds" "1200" "$PO
 
 # ANTI-VACUITY, the same doctored-copy shape as 50/51/54: a SKILL.md whose interval was
 # reverted to the pre-wave 30m must fail both prose pins.
+anchor "$SKILL_MD" 'default 20m' 1
+anchor "$SKILL_MD" 'every 20 minutes' 1
 DOCTORED_INTERVAL="$TMP/skill-interval-mutated.md"
 sed 's/default 20m/default 30m/; s/every 20 minutes/every 30 minutes/' "$SKILL_MD" > "$DOCTORED_INTERVAL"
-if cmp -s "$SKILL_MD" "$DOCTORED_INTERVAL"; then
-  no "59: a doctored SKILL.md fails both interval pins (they discriminate)" \
-     "the sed targets matched nothing — the sentences moved"
-elif has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_KNOB" || has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_CRON"; then
+if has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_KNOB" || has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_CRON"; then
   no "59: a doctored SKILL.md fails both interval pins (they discriminate)" \
      "a pin matched a copy carrying the pre-wave 30m"
 else
   ok "59: a doctored SKILL.md fails both interval pins (they discriminate)"
 fi
 
-echo ""
-echo "========================================"
-echo "docs-pins: $PASS/$TOTAL passed"
-echo "========================================"
+# ---------------------------------------------------------------------------
+# SECTION 60-63 — S13: the instrument the brief declares (spec AC-20, AC-21)
+# ---------------------------------------------------------------------------
+#
+# WHAT IT OWNS. `skills/canonical-sdlc/SKILL.md` §Dispatch is where an orchestrator reads
+# what a brief must carry. The wall in `hooks/dispatch-preflight.sh` refuses a brief that
+# carries neither `Files:` nor `Suites:`, and the writer-side guard refuses a suite outside
+# the recorded set — so a §Dispatch section that never mentions either label documents a
+# grammar the machine no longer accepts, and every author writes a brief that is refused.
+# These pins hold the two labels, the waiver, and the one-regression rule in that section.
+#
+# THE ROLE FILES ARE NOT PINNED HERE. `agents-src/blocks/survival.md` is the writer-side
+# copy and it is GENERATED into agents/*.md — identity by construction, checked by
+# `agents-src/render.sh --check`, which section 7 above already calls. A second pin on the
+# generated text would be pinning the renderer's arithmetic.
+#
+# ANTI-VACUITY, the doctored-copy shape sections 50/51/54/59 use: a SKILL.md with the
+# instrument sentence removed must fail these pins.
+section "SECTION 10 — S13: the instrument the brief declares (spec AC-20, AC-21)"
 
-[ "$FAIL" -eq 0 ] || exit 1
+PIN_S13_FILES='`Files:` on a line of its own names the paths this slice will write'
+PIN_S13_DERIVE='the impact command named in `.bionic/config.yaml` turns them into the closed set of suites the agent may run'
+PIN_S13_DECLARE='Where no impact command is configured, name the closed set yourself under `Suites:`'
+PIN_S13_WAIVER='a brief that runs no suite at all waives with `Suites: none`'
+PIN_S13_NEITHER='A brief carrying neither label refuses at dispatch.'
+PIN_S13_REGRESSION='a second one refuses unless the plan'"'"'s `## SDLC State` carries a `regression-cause:` line for it'
+
+for _p in FILES DERIVE DECLARE WAIVER NEITHER REGRESSION; do
+  eval "_pv=\$PIN_S13_$_p"
+  if has_pin "$SKILL_MD" "$_pv"; then
+    ok "60: SKILL.md §Dispatch carries the S13 $_p sentence verbatim"
+  else
+    no "60: SKILL.md §Dispatch carries the S13 $_p sentence verbatim" "file: $SKILL_MD"
+  fi
+done
+
+anchor "$SKILL_MD" '`Files:` on a line of its own names the paths this slice will write' 1
+DOCTORED_S13="$TMP/skill-s13-mutated.md"
+sed 's/`Files:` on a line of its own names the paths this slice will write/the brief says what it likes/' \
+  "$SKILL_MD" > "$DOCTORED_S13"
+if has_pin "$DOCTORED_S13" "$PIN_S13_FILES"; then
+  no "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)" \
+     "the pin matched a copy with the sentence removed"
+else
+  ok "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)"
+fi
+
+# THE WRITER-SIDE COPY EXISTS AND IS THE RENDERER'S INPUT. Not its text — its presence in
+# the SOURCE block, so the sentence a dispatched agent reads cannot be edited into the
+# generated file and lost at the next render (the failure mode agents-src exists to remove).
+SURVIVAL_BLOCK="${REPO}/agents-src/blocks/survival.md"
+PIN_S13_SURVIVAL='Your suite budget is on your roster row, and it is a wall.'
+if has_pin "$SURVIVAL_BLOCK" "$PIN_S13_SURVIVAL"; then
+  ok "62: the writer-side budget rule is in agents-src/blocks/survival.md, the rendered SOURCE"
+else
+  no "62: the writer-side budget rule is in agents-src/blocks/survival.md, the rendered SOURCE" \
+     "file: $SURVIVAL_BLOCK"
+fi
+# …and it reached every generated role file, which is what the writer actually reads.
+S13_ROLES_MISSING=0
+for _r in "${REPO}"/agents/*.md; do
+  has_pin "$_r" "$PIN_S13_SURVIVAL" || S13_ROLES_MISSING=$((S13_ROLES_MISSING + 1))
+done
+expect_eq "63: …and every generated role file carries it" "0" "$S13_ROLES_MISSING"
+expect_eq "63: …over a non-empty set of role files" "0" \
+  "$([ -n "$(ls "${REPO}"/agents/*.md 2>/dev/null)" ] && echo 0 || echo 1)"
+
+# THE SPELLING RULE THAT MAKES THE BUDGET USABLE (review-c C-6). The wall reads the command
+# TEXT, so a loop variable is refused by its unexpanded name — and the one place a writer
+# reads the budget rule said nothing about it. A fresh agent with no plan read hit exactly
+# that on its first attempt (the walk, heading 10b). Pinned in the SOURCE block, and
+# reaching every generated role file, on the same footing as the rule it qualifies.
+PIN_S13_SPELLING='Spell each suite as a literal path and call it once per suite'
+if has_pin "$SURVIVAL_BLOCK" "$PIN_S13_SPELLING"; then
+  ok "63b: the spelling rule is in agents-src/blocks/survival.md, the rendered SOURCE"
+else
+  no "63b: the spelling rule is in agents-src/blocks/survival.md, the rendered SOURCE" \
+     "file: $SURVIVAL_BLOCK"
+fi
+S13_SPELL_MISSING=0
+for _r in "${REPO}"/agents/*.md; do
+  has_pin "$_r" "$PIN_S13_SPELLING" || S13_SPELL_MISSING=$((S13_SPELL_MISSING + 1))
+done
+expect_eq "63b: …and every generated role file carries it" "0" "$S13_SPELL_MISSING"
+
+finish

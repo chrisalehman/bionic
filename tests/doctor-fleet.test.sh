@@ -37,27 +37,15 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "doctor-fleet.test.sh: jq is required"; exit 1; }
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.900s' "$actual")"; fi
-}
-expect_no_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
-}
 
 TMP="$(mktemp -d /tmp/bionic-doctor-fleet.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
@@ -122,31 +110,57 @@ write_attestation_v1() {  # <session-id>
 # pattern and its reasoning are tests/fresh-home.test.sh's, which replaces PATH
 # with a shim dir for the same reason.
 #
-# THE LIST IS THE COMPLETE SET OF PROGRAMS DOCTOR CAN REACH. `sleep` earns its
-# place because `detect_bounded` degrades to an unbounded wait without it;
-# `sysctl`, `vm_stat`, `df` and `id` because `resources_probe` is what Section 1
-# asserts; `ps` because `patrol_live_sessions` asks whether a pid answers; `git`
-# because the version row resolves a feed with it.
+# ─── THE TOOL DIRECTORY IS THE FIXTURE'S, NOT THE MACHINE'S (wave-01 S4, AC-7) ─
 #
-# `claude` IS ON THE LIST, and it is the one entry that is not free — the CLI's
-# plugin listing leaves the process. It stays because dropping it changes the
-# machine under test rather than the machine's speed: with the CLI absent, four
-# rows turn into "the claude CLI is not on PATH", and one of the FIX lines that
-# renders from that cause measures 105 columns, breaking case 20. That is a real
-# width defect in `FIX_LINES_OTHER` — the one printer on the page with no column
-# bound, already surfaced as DOCTOR/13 — and it belongs to whoever closes
-# DOCTOR/13, not to this fixture. A bionic machine has the CLI by construction;
-# manufacturing one that does not, in a suite about resources and rosters, would
-# be testing somebody else's row. The listing is bounded by
-# `BIONIC_DOCTOR_PROBE_SECONDS`, which is why it costs a second and not a hang.
-BIN="$TMP/bin"
-mkdir -p "$BIN"
-for _real in bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail \
-             sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf \
-             true false sleep dirname basename realpath id ps df sysctl vm_stat nproc git \
-             claude; do
-  _p="$(command -v "$_real" 2>/dev/null)" && ln -sf "$_p" "${BIN}/${_real}" 2>/dev/null
-done
+# WHAT THIS SUITE RENDERED USED TO DEPEND ON WHOSE LAPTOP RAN IT. doctor asks
+# `command -v` about the nine `brew-dep` rows of BIONIC_DEP_TABLE, and six of
+# them — node, gh, rg, uv, docker, aws — live under /opt/homebrew here and
+# nowhere on a stripped PATH. Under the ambient PATH those rows are present;
+# under `PATH=/usr/bin:/bin:/usr/sbin:/sbin` six more rows turn absent, the
+# dependency roster this file pins shifts by six names, and an assertion fails
+# on a page that is perfectly correct. `claude` is the same story one row over,
+# and the one that used to hurt: with the CLI off PATH four `mcp-server` rows
+# turn `unknown`.
+#
+# SO THE FIXTURE OWNS THE SET. Every program doctor RUNS is symlinked from the
+# real one; every program doctor only ASKS ABOUT is an inert stub answering
+# `--version`. PATH is REPLACED, never prepended, so nothing ambient is
+# reachable — and `claude` is present or absent because this file says so,
+# which is what makes the pair of directories below an experiment rather than
+# a reflection of the machine.
+_TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
+sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
+sleep dirname basename realpath id ps df sysctl vm_stat git strings"
+_TOOLS_STUB="node pnpm gh rg uv docker aws"
+
+make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT find
+  local d="$1" want="$2" t p missing=""
+  mkdir -p "$d"
+  for t in $_TOOLS_REAL; do
+    if p="$(command -v "$t" 2>/dev/null)"; then ln -sf "$p" "${d}/${t}"
+    else missing="${missing}${missing:+ }${t}"; fi
+  done
+  for t in $_TOOLS_STUB; do
+    printf '#!/bin/sh\ncase "$1" in --version) echo 1.0.0 ;; esac\nexit 0\n' > "${d}/${t}"
+    chmod +x "${d}/${t}"
+  done
+  # A CLI THAT ANSWERS "no such thing" to the one question doctor asks it —
+  # `claude mcp get <name>` — which is what a real CLI answers on a machine
+  # with no MCP server registered. Present-and-negative and absent are
+  # different renders, and telling them apart is this suite's AC-7 pair.
+  if [ "$want" = yes ]; then
+    printf '#!/bin/sh\nexit 1\n' > "${d}/claude"; chmod +x "${d}/claude"
+  else
+    rm -f "${d}/claude"
+  fi
+  printf '%s' "$missing"
+}
+
+BIN="${TMP}/toolbox"
+BIN_NO_CLAUDE="${TMP}/toolbox-no-claude"
+_TOOLS_MISSING="$(make_tool_dir "$BIN" yes)$(make_tool_dir "$BIN_NO_CLAUDE" no)"
+if [ -z "$_TOOLS_MISSING" ]; then ok "T0: the fixture's tool directory carries every program doctor runs"
+else no "T0: a program doctor runs is missing from the fixture's tool directory" "$_TOOLS_MISSING"; fi
 
 run_doctor() {
   ( cd "$PROJ" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
@@ -155,44 +169,53 @@ run_doctor() {
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
-section() {  # <output> <SECTION NAME> -> the lines under that heading
+run_doctor_no_claude() {  # the same machine with the CLI off PATH (AC-7)
+  ( cd "$PROJ" && HOME="$TMP" PATH="$BIN_NO_CLAUDE" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
+      BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      bash "$DOCTOR_SH" < /dev/null 2>&1 )
+}
+
+# doctor_section <output> <SECTION NAME> -> the lines under that heading in
+# doctor's own rendered output. NOT the framework's section() banner (A-10c) --
+# this is an output EXTRACTOR, renamed rather than deleted so every call site
+# keeps working once the framework owns the name `section`.
+doctor_section() {
   printf '%s\n' "$1" | awk -v h="$2" '
     $0 == h { on = 1; next }
     on && /^[A-Z][A-Z ]*$/ { on = 0 }
     on { print }'
 }
 
-echo "=== Section 1: the live probe ==="
+section "Section 1: the live probe"
 
 OUT1="$(run_doctor)"
-RES1="$(section "$OUT1" "RESOURCES")"
+RES1="$(doctor_section "$OUT1" "RESOURCES")"
 
 expect_match "1: the section exists" "*machine*" "$RES1"
 expect_match "2: it names cores, memory, free disk, load and os" \
   "*core*GB*free*load*" "$RES1"
 
-echo ""
-echo "=== Section 2: a version-2 attestation prints its recorded budget and source ==="
+section "Section 2: a version-2 attestation prints its recorded budget and source"
 
 write_session "1001" "$SID_V2" "$LIVE_PID"
 write_attestation_v2 "$SID_V2"
 
 OUT2="$(run_doctor)"
-RES2="$(section "$OUT2" "RESOURCES")"
+RES2="$(doctor_section "$OUT2" "RESOURCES")"
 
 expect_match "3: the session is named by its short id" "*${SID_V2%%-*}*" "$RES2"
 expect_match "4: the budget is the recorded string, not a re-derivation" \
   "*writers=22 suites=18 worktrees=32 test_jobs=18*" "$RES2"
 expect_match "5: and the source it was recorded with" "*source=probe*" "$RES2"
 
-echo ""
-echo "=== Section 3: a version-1 attestation records no budget, and says so ==="
+section "Section 3: a version-1 attestation records no budget, and says so"
 
 write_session "1002" "$SID_V1" "$LIVE_PID"
 write_attestation_v1 "$SID_V1"
 
 OUT3="$(run_doctor)"
-RES3="$(section "$OUT3" "RESOURCES")"
+RES3="$(doctor_section "$OUT3" "RESOURCES")"
 
 expect_match "6: the v1 session is named" "*${SID_V1%%-*}*" "$RES3"
 expect_match "7: with the honest line, never a budget of zeroes" \
@@ -200,8 +223,7 @@ expect_match "7: with the honest line, never a budget of zeroes" \
 expect_no_match "8: and no fabricated writers count rides it" \
   "*${SID_V1%%-*}*writers=*" "$RES3"
 
-echo ""
-echo "=== Section 4: the active-run row ==="
+section "Section 4: the active-run row"
 
 # A plan the `active_run` predicate calls OPEN: a `## SDLC State` heading and a
 # flush-left `current:` below 9.
@@ -235,8 +257,7 @@ OUT5="$(run_doctor)"
 expect_match "11: a closed run reads as no active run" "*active run*none*" "$OUT5"
 expect_no_match "12: and does not quote a step" "*active run*current: 9*" "$OUT5"
 
-echo ""
-echo "=== Section 5: predecessor rosters with open rows ==="
+section "Section 5: predecessor rosters with open rows"
 
 # A roster belonging to a session that is NOT live: three dispatches intended,
 # one swept closed by the landing gate, one never answered for, and one answered
@@ -259,12 +280,12 @@ echo "=== Section 5: predecessor rosters with open rows ==="
 # doctor's `_run_add` rather than through the live PATROL block that
 # doctor-patrol.test.sh Section 15 covers.
 {
-  printf '# bionic session roster — schema roster-state/v1\n'
-  printf 'roster-state/v1|status=intended|session=%s|name=W-ALPHA|agent_id=|launched_at=x\n' "$GONE_SID"
-  printf 'roster-state/v1|status=intended|session=%s|name=W-BETA|agent_id=|launched_at=x\n' "$GONE_SID"
-  printf 'roster-state/v1|status=intended|session=%s|name=W-GAMMA|agent_id=|launched_at=x\n' "$GONE_SID"
-  printf 'landing-swept/v1|at=2026-09-02T00:00:01Z|session=%s|name=W-ALPHA|agent_id=a000|state=MET\n' "$GONE_SID"
-  printf 'landing-swept/v1|at=2026-09-02T00:00:02Z|session=%s|name=W-GAMMA|agent_id=a001|state=UNMET\n' "$GONE_SID"
+  roster_header
+  roster_row_fixture status=intended session="$GONE_SID" name=W-ALPHA agent_id= launched_at=x
+  roster_row_fixture status=intended session="$GONE_SID" name=W-BETA  agent_id= launched_at=x
+  roster_row_fixture status=intended session="$GONE_SID" name=W-GAMMA agent_id= launched_at=x
+  swept_marker_write /dev/stdout 2026-09-02T00:00:01Z "$GONE_SID" W-ALPHA a000 MET
+  swept_marker_write /dev/stdout 2026-09-02T00:00:02Z "$GONE_SID" W-GAMMA a001 UNMET
 } > "${PROJ}/.bionic/tmp/roster-${GONE_SID}.state"
 
 OUT6="$(run_doctor)"
@@ -293,8 +314,7 @@ PRED_LINES="$(printf '%s\n' "$OUT6" | awk '/predecessor/')"
 expect_no_match "15: a LIVE session's roster is not called a predecessor" \
   "*${SID_V2%%-*}*" "$PRED_LINES"
 
-echo ""
-echo "=== Section 6: legacy .bionic symlinks under .worktrees/ ==="
+section "Section 6: legacy .bionic symlinks under .worktrees/"
 
 mkdir -p "${PROJ}/.worktrees/alpha" "${PROJ}/.worktrees/beta"
 ln -s "${PROJ}/.bionic" "${PROJ}/.worktrees/alpha/.bionic"
@@ -306,8 +326,7 @@ expect_match "16: the symlinked worktree is listed" "*legacy .bionic symlink*alp
 expect_no_match "17: a real .bionic directory is not" "*legacy .bionic symlink*beta*" "$OUT7"
 expect_match "18: and the row carries a repair" "*legacy .bionic symlink*1*" "$OUT7"
 
-echo ""
-echo "=== Section 6b: the attestation set is THIS PROJECT's, not the machine's ==="
+section "Section 6b: the attestation set is THIS PROJECT's, not the machine's"
 
 # THE DEFECT THIS SECTION OWNS (T3 finding 2, AC-35 drive, 2026-09-03). Doctor
 # printed `– no session · none has taken an attestation in this project` on a
@@ -349,7 +368,7 @@ jq -nc --arg sid "$OTHER_SID" --arg cwd "$OTHER" --argjson pid "$LIVE_PID" \
   > "${CHOME}/sessions/1003.json"
 
 OUT6B="$(run_doctor)"
-RES6B="$(section "$OUT6B" "RESOURCES")"
+RES6B="$(doctor_section "$OUT6B" "RESOURCES")"
 
 expect_match "18b: an attestation whose writer has exited is still this project's record" \
   "*${GONE_ATT_SID%%-*}*writers=22*" "$RES6B"
@@ -366,12 +385,11 @@ mkdir -p "${BARE}/.bionic/tmp"
 OUT6C="$( cd "$BARE" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
   BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
   BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
-RES6C="$(section "$OUT6C" "RESOURCES")"
+RES6C="$(doctor_section "$OUT6C" "RESOURCES")"
 expect_match "18f: a project with no attestation still says so" \
   "*none has taken an attestation in this project*" "$RES6C"
 
-echo ""
-echo "=== Section 7: registration, and the column budget ==="
+section "Section 7: registration, and the column budget"
 
 expect_true "19: tests/run.sh names doctor-fleet.test.sh" \
   grep -q 'run "doctor-fleet.test.sh" bash tests/doctor-fleet.test.sh' "${REPO}/tests/run.sh"
@@ -387,9 +405,26 @@ ${OUT6B}")"
 if [ -z "$_over" ]; then ok "20: every line of the fullest run fits 100 columns"
 else no "20: a line exceeds 100 columns" "$_over"; fi
 
-echo ""
-echo "========================================"
-echo "doctor-fleet: $PASS/$TOTAL passed"
-echo "========================================"
 
-[ "$FAIL" -eq 0 ] || exit 1
+section "Section 8: the claude CLI absent, and present, on one fixture (AC-7)"
+
+# THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
+# `claude` is the one program on the fixture's PATH whose presence changes what
+# this page says: the four `mcp-server` rows are checked with `claude mcp get`,
+# so with the CLI gone they turn from a plain absence into an UNKNOWN with a
+# cause, and one of the fix lines that renders from that cause measured 105
+# columns. Before the tool directory above, which half a run got was whatever
+# the runner's PATH happened to hold. Now the fixture says, and both halves are
+# asserted here — the absent render, and the present one that proves the absent
+# assertion is not matching everything.
+OUT_NOCLI="$(run_doctor_no_claude)"
+OUT_WITHCLI="$(run_doctor)"
+
+expect_match "21.1: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
+expect_no_match "21.2: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
+expect_match "21.3: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
+_over="$(too_wide "$OUT_NOCLI")"
+if [ -z "$_over" ]; then ok "21.4: the CLI-absent page still fits 100 columns"
+else no "21.4: a line of the CLI-absent page exceeds 100 columns" "$_over"; fi
+
+finish

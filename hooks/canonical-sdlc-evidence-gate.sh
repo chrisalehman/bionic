@@ -1875,6 +1875,150 @@ validate_walk_artifact() {
   return 0
 }
 
+# S3 (AC-4, AC-23; wave-01-verification-cannot-lie, D-S1b): environments —
+# declared, covered, fog. Frontmatter `environments:` is one line naming the
+# set this wave's Step-5 tests floor claims to run on, entries joined by
+# " · ", each `<name> (covered...)` or `<name> (fog — cure: <text>)`. A plan
+# that never mentions the key makes no environment claim at all: the arm
+# no-ops. Most plans never declare it (this repo's own wave-01 plan is the
+# exception, not the rule), so the no-op is recorded to the durable audit
+# file only (log_finding_quiet, below) and never echoed to stderr — an
+# ordinary commit stays exactly as silent as it is today. Declared, it
+# requires the Step-5 evidence to carry an `environments-covered:` line
+# naming every non-fog environment, and blocks a fog entry that names no
+# cure — both are real refusals, spoken the normal BLOCKED way.
+#
+# AC-23: this arm reads only the DECLARATION and the Step-5
+# `environments-covered:` line — never a derived suite set. It is
+# independent of validate_tests_block, which is what actually requires the
+# unconditional whole-suite floor run; nothing here substitutes for that,
+# and nothing here is consulted by it.
+#
+# Fires at current: 5..9, the same durable-prefix span as
+# validate_walk_artifact: the covered claim cannot quietly go stale once
+# Verify is behind you.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+env_split_entries() {  # $1 = raw `environments:` value -> "name<TAB>descriptor" lines
+  printf '%s\n' "$1" | awk '
+    {
+      n = split($0, parts, /[ \t]*·[ \t]*/)
+      for (i = 1; i <= n; i++) {
+        entry = parts[i]
+        gsub(/^[ \t]+|[ \t]+$/, "", entry)
+        if (entry == "") continue
+        name = entry
+        sub(/[ \t]*\(.*/, "", name)
+        desc = entry
+        sub(/^[^(]*\(/, "", desc)
+        sub(/\)[ \t]*$/, "", desc)
+        if (name != "") print name "\t" desc
+      }
+    }'
+}
+
+# Same audit-file write as log_finding, but WITHOUT the stderr echo. The
+# absent-`environments:` case fires on nearly every ordinary commit in
+# nearly every bionic-using repo (the key is opt-in), so surfacing it there
+# the way an actionable finding is surfaced would be noise, not information.
+# The durable file still gets the line — "log-only" — but only a plan that
+# actually declared the key can make this arm speak on stderr.
+# [INSTRUMENT]
+log_finding_quiet() {  # $1=check-id  $2=detail
+  local f
+  if f=$(audit_path "$(audit_root)"); then
+    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
+    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
+  fi
+  return 0
+}
+
+validate_environments() {
+  local raw entries name desc cure covered_names fog_names fog_missing_cure
+  local b5 covered_line covered_norm missing claimed_fog claimed_undeclared
+  case "$CURRENT" in 5|6|7|8|9) : ;; *) return 0 ;; esac
+  raw=$(frontmatter_get environments)
+  if [ -z "$raw" ]; then
+    log_finding_quiet environments "no 'environments:' declared in frontmatter — the covered/fog check is a no-op"
+    return 0
+  fi
+
+  entries=$(env_split_entries "$raw")
+  covered_names=""
+  fog_names=""
+  fog_missing_cure=""
+  while IFS=$'\t' read -r name desc; do
+    [ -n "$name" ] || continue
+    case "$desc" in
+      fog*)
+        fog_names="${fog_names:+$fog_names }$name"
+        cure=""
+        case "$desc" in
+          *cure:*) cure=$(printf '%s' "$desc" | sed -E 's/^.*cure:[[:space:]]*//' | sed -E 's/[[:space:]]+$//') ;;
+        esac
+        [ -n "$cure" ] || fog_missing_cure="${fog_missing_cure:+$fog_missing_cure }$name"
+        ;;
+      *)
+        covered_names="${covered_names:+$covered_names }$name"
+        ;;
+    esac
+  done <<< "$entries"
+
+  if [ -n "$fog_missing_cure" ]; then
+    block_matrix "environments: fog entry with no cure named: ${fog_missing_cure} (declared: '${raw}')." \
+      "name each fog environment's cure in the frontmatter, e.g. '<name> (fog — cure: <how it gets covered>)'."
+  fi
+
+  if [ -n "$covered_names" ]; then
+    b5=$(step5_evidence_block)
+    covered_line=$(echo "$b5" | grep -E '^[[:space:]]*environments-covered[[:space:]]*:' | head -1 \
+      | sed -E 's/^[[:space:]]*environments-covered[[:space:]]*:[[:space:]]*//' \
+      | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
+    if [ -z "$covered_line" ]; then
+      block_matrix "environments: declared covered set (${covered_names}) but the Step 5 evidence has no 'environments-covered:' line." \
+        "record 'environments-covered: <name>[, <name>...]' in the Step 5 block naming every declared non-fog environment."
+    fi
+    covered_norm=$(printf '%s' "$covered_line" | tr ',' ' ' | tr -s '[:space:]' ' ')
+    missing=""
+    for name in $covered_names; do
+      case " $covered_norm " in
+        *" $name "*) : ;;
+        *) missing="${missing:+$missing }$name" ;;
+      esac
+    done
+    if [ -n "$missing" ]; then
+      block_matrix "environments-covered '${covered_line}' omits declared environment(s): ${missing} (declared covered set: ${covered_names}; fog: ${fog_names:-none})." \
+        "run the Step-5 tests floor on every declared non-fog environment and list it in 'environments-covered:', or move it to a fog entry naming its cure."
+    fi
+
+    # THE OTHER DIRECTION — OVER-CLAIMING (critic K-5). The loop above walks the DECLARED
+    # non-fog names and requires each to be covered. Nothing walked the covered names, so a
+    # plan could claim coverage it does not have and the arm was silent: this wave's own
+    # frontmatter passes `environments-covered: macos-system, linux-system` while
+    # linux-system is declared FOG, and a fog entry's entire meaning is "not covered". A
+    # name that was never declared at all (`freebsd`) was equally silent. The ownership row
+    # states the containment in this direction — covered ⊆ declared — and until now only
+    # the opposite one was implemented.
+    claimed_fog=""
+    claimed_undeclared=""
+    for name in $covered_norm; do
+      case " $covered_names " in *" $name "*) continue ;; esac
+      case " $fog_names " in
+        *" $name "*) claimed_fog="${claimed_fog:+$claimed_fog }$name"; continue ;;
+      esac
+      claimed_undeclared="${claimed_undeclared:+$claimed_undeclared }$name"
+    done
+    if [ -n "$claimed_fog" ]; then
+      block_matrix "environments-covered '${covered_line}' claims coverage of environment(s) this plan declares as FOG: ${claimed_fog} (fog: ${fog_names:-none})." \
+        "a fog entry means NOT covered — either drop the name from 'environments-covered:', or run the Step-5 tests floor there and move it out of fog in the frontmatter."
+    fi
+    if [ -n "$claimed_undeclared" ]; then
+      block_matrix "environments-covered '${covered_line}' names environment(s) the frontmatter never declared: ${claimed_undeclared} (declared: '${raw}')." \
+        "declare the environment in the frontmatter's 'environments:' list, or drop it from 'environments-covered:' — the covered set is a subset of the declared one."
+    fi
+  fi
+  return 0
+}
+
 # Verify gate: tests floor, the Verification Matrix, and — at peer-reviewed or
 # audited rigor, once no row is still pending — a non-empty `auditor:` pointer.
 # At `tested` that pointer is not demanded (matrix_auditor_required).
@@ -1882,6 +2026,7 @@ validate_walk_artifact() {
 validate_verify_step() {
   local aud
   validate_tests_block 5
+  validate_environments
   validate_matrix
   # Walk-first: the narration must already exist once anything has discharged.
   validate_walk_artifact
@@ -2062,9 +2207,11 @@ dispatch() {
   # gate on — current: 5 validates it inside validate_verify_step; current: 6..9
   # validate it here, so a REFUTED auditor blocks post-Verify commits too.
   # The walk artifact is a durable prefix condition alongside it (A5): deleting
-  # the narration after the Verify gate blocks every later commit.
+  # the narration after the Verify gate blocks every later commit. The
+  # environments claim (S3, AC-4) is the same shape: covered ⊆ declared and
+  # every fog entry's cure stay true across the whole post-Verify span.
   case "$CURRENT" in
-    6|7|8|9) validate_matrix; validate_walk_artifact ;;
+    6|7|8|9) validate_matrix; validate_walk_artifact; validate_environments ;;
   esac
   # Log-only epic merge-target check at the integrate step.
   [ "$CURRENT" = "$INTEGRATE_STEP" ] && validate_merge_target

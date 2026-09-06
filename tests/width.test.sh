@@ -23,15 +23,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq() { TOTAL=$((TOTAL + 1)); if [ "$2" = "$3" ]; then PASS=$((PASS + 1)); echo "PASS: $1"; else FAIL=$((FAIL + 1)); echo "FAIL: $1"; echo "      expected '$2', got '$3'"; fi; }
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
+# expect_true is the framework's (tests/lib/assert.sh) — S9b removed the private
+# shadow here (AC-12); same semantics (silences the command's own output).
 
 expect_true "payload/scripts/lib/width.sh exists" test -f "$WIDTH_SH"
 
@@ -50,7 +48,7 @@ cols_c() {  # <string> -> its measured width under the C locale
   LC_ALL=C bash -c '. "$1"; bionic_cols "$2"' _ "$WIDTH_SH" "${1:-}"
 }
 
-echo "=== Section 1: every glyph in the closed set measures one column ==="
+section "Section 1: every glyph in the closed set measures one column"
 
 for g in '✓' '✗' '–' '—' '≥' '…' '·' '→' '•'; do
   expect_eq "1.${g}: '${g}' measures 1 under a UTF-8 locale" "1" "$(bionic_cols "$g")"
@@ -60,8 +58,7 @@ done
 expect_eq "2: ASCII is measured verbatim" "5" "$(bionic_cols "abcde")"
 expect_eq "3: a mixed string counts glyphs as one each" "7" "$(cols_c "ab → cd")"
 
-echo ""
-echo "=== Section 2: no glyph reaches a bounded row unmeasured ==="
+section "Section 2: no glyph reaches a bounded row unmeasured"
 
 # THE GLYPHS THE PRINTING SCRIPTS ACTUALLY PUT IN A ROW. Taken from the shell
 # STRING LITERALS the two report surfaces build rows out of — a glyph that only
@@ -102,8 +99,7 @@ else
   else no "5: a glyph a row can carry is not in width.sh's closed set" "$_bad"; fi
 fi
 
-echo ""
-echo "=== Section 3: the truncator cuts characters, never bytes ==="
+section "Section 3: the truncator cuts characters, never bytes"
 
 # width.sh's own correction: `printf '%.*s'` counts BYTES, so a length test in
 # characters against a cut in bytes slices a multi-byte glyph in half. A cut
@@ -116,8 +112,51 @@ else
   no "7: the cut produced invalid UTF-8" "$(printf '%s' "$CUT" | od -c | head -2)"
 fi
 
-echo ""
-echo "=== Section 4: bionic_line protects the instruction it is handed ==="
+# A GLYPH OUTSIDE THE CLOSED SET, WHICH IS WHERE THE CUT USED TO BREAK (AC-8,
+# S24 F-25). Section 1 sweeps the set; this is the other half of the world —
+# the characters that reach a bounded row as DATA rather than as decoration. A
+# user whose home directory carries an accent, a dependency named in a script
+# that is not ASCII, a marketplace path under a non-Latin name: none of them are
+# in width.sh's list and none of them can be, because the list is the glyphs
+# BIONIC prints.
+#
+# THE LOCALE IS THE DISCRIMINATOR, so the pair below is one call made twice.
+# Under a UTF-8 locale `${s%?}` drops a character and the cut was always whole;
+# under `LC_ALL=C` it drops a BYTE, and a three-byte character that the loop
+# stops in the middle of leaves a fragment — invalid UTF-8, rendered as a
+# replacement box, one level below the `printf '%.*s'` failure this file's
+# header is about. Measured before the fix: `bionic_trunc "ab★cd" 4` returned
+# the bytes `61 62 e2 e2 80 a6` under C and `ab…` under UTF-8.
+trunc_c() {  # <string> <budget> -> the cut, made under the C locale
+  LC_ALL=C bash -c '. "$1"; bionic_trunc "$2" "$3"' _ "$WIDTH_SH" "${1:-}" "${2:-0}"
+}
+
+CUT_C="$(trunc_c "ab★cd" 4)"
+if printf '%s' "$CUT_C" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+  ok "7c: a cut through a glyph outside the closed set leaves valid UTF-8 under LC_ALL=C"
+else
+  no "7c: the cut split a multi-byte character under LC_ALL=C" \
+     "$(printf '%s' "$CUT_C" | od -An -tx1 | tr -s ' ')"
+fi
+# THE PAIRED POSITIVE. The same string and budget under a UTF-8 locale, where
+# this has always held — so a `7c` that passes because `bionic_trunc` started
+# returning nothing, or because iconv stopped being run, fails here too.
+CUT_U="$(bionic_trunc "ab★cd" 4)"
+expect_true "7u: …and the same cut under a UTF-8 locale is valid too" \
+  sh -c 'printf %s "$1" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1' _ "$CUT_U"
+# AND THE TWO LOCALES NOW RETURN THE SAME STRING, which is the property AC-8 is
+# actually about: a report whose text depends on the environment the reader's
+# shell was started in is a report that says two things. Before the fix the same
+# call returned `ab★…` under UTF-8 and the bytes `61 62 e2 e2 80 a6` under C.
+# The agreed answer is the CONSERVATIVE one — `★` is outside the closed glyph
+# set, so it is measured at its three bytes and the cut takes it whole rather
+# than keeping a character it cannot size. Short of the budget, never over it,
+# and the same in both places.
+expect_eq "7n: …and the C and the UTF-8 cut are now the same string" "$CUT_U" "$CUT_C"
+expect_true "7b: the C-locale cut is bounded by the budget it was given" \
+  test "$(cols_c "$CUT_C")" -le 4
+
+section "Section 4: bionic_line protects the instruction it is handed"
 
 LINE="$(bionic_line "  ✓ $(printf '%-40s' 'a label')" \
         "$(printf 'x%.0s' $(seq 1 200))" " → run /bionic:setup")"
@@ -127,15 +166,9 @@ case "$LINE" in
   *) no "9: the instruction was eaten by the cut" "$(printf '%.120s' "$LINE")" ;;
 esac
 
-echo ""
-echo "=== Section 5: registration ==="
+section "Section 5: registration"
 
 expect_true "10: tests/run.sh names width.test.sh" \
   grep -q 'run "width.test.sh" bash tests/width.test.sh' "${REPO}/tests/run.sh"
 
-echo ""
-echo "========================================"
-echo "width: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish

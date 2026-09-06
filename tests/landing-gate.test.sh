@@ -35,6 +35,9 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 GATE="$HOOKS_DIR/landing-gate.sh"
@@ -49,21 +52,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-PASS=0
-FAIL=0
-TOTAL=0
-
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing [$2] in: $(printf '%s' "$3" | head -3)"; fi; }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
-expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2] got [$3]"; fi; }
-expect_gt()       { if [ "$2" -gt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected > $3, got $2"; fi; }
-expect_lt()       { if [ "$2" -lt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected < $3, got $2"; fi; }
-section()         { printf '\n=== %s ===\n' "$1"; }
+# expect_status, expect_contains, expect_absent, expect_empty, expect_eq are
+# the framework's (tests/lib/assert.sh) — identical semantics to the private
+# definitions this suite carried (grep -qF vs the framework's case glob agree
+# on every needle here: all single-line, per the framework's own docblock).
+# expect_gt/expect_lt are not owned names (A-17 W+1) and stay local, built on
+# the framework's ok/no. This suite's own section() was a plain banner
+# printer with the framework's exact signature (A-10c) — deleted outright,
+# every existing `section "..."` call site binds unchanged, now WITH the
+# section-floor enforcement it never had before.
+expect_gt() { if [ "$2" -gt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected > $3, got $2"; fi; }
+expect_lt() { if [ "$2" -lt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected < $3, got $2"; fi; }
 
 # ---------- fixtures ----------
 #
@@ -172,6 +171,7 @@ mkrow() {  # <key=value>...
   local status=confirmed session="$SID" name=agent agent_id="$AID_A" launched_at=""
   local subagent_type=implementor model=opus deliverable="" duration="" progress=""
   local claims="" cadence="" waiver="" tool_use_id=toolu_x source=declared teammate_id="" kv
+  local files="" has_files=0
   for kv in "$@"; do
     case "$kv" in
       source=*)      source="${kv#*=}" ;;
@@ -188,28 +188,39 @@ mkrow() {  # <key=value>...
       cadence=*)     cadence="${kv#*=}" ;;
       waiver=*)      waiver="${kv#*=}" ;;
       tool_use_id=*) tool_use_id="${kv#*=}" ;;
+      # S18, AC-22: present-if-passed, like the real writer's three instrument fields — a
+      # caller that never passes `files=` builds a row shaped exactly as every fixture above
+      # already does (no key at all), and a caller that does gets the post-S13 shape (the key
+      # always present, empty or not).
+      files=*)       files="${kv#*=}"; has_files=1 ;;
       *) printf 'mkrow: unknown key %s\n' "$kv" >&2; return 1 ;;
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  # `teammate_id` is APPENDED rather than slotted, because that is how the writer emits it:
-  # hooks/execution-recorder.sh's completion arm substitutes the field when the launch row
-  # already carries one and appends it at the end when it does not — and the launch wall
-  # never writes it, so every real teammate row carries it last. It is the field that says
-  # which namespace the row's id is in, and (this slice) which half of the machinery owns
-  # the row's landing verdict.
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s' \
-    "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
-    "$deliverable" "$source" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
-  [ -n "$teammate_id" ] && printf '|teammate_id=%s' "$teammate_id"
-  printf '\n'
+  # THE ROW COMES OFF THE PRODUCTION WRITER (S17, spec AC-25). What stays here is this
+  # suite's HOUSE DEFAULTS — the values a case does not name — and the unknown-key refusal,
+  # which `roster_row` now makes for real rather than by this wrapper's own `case`.
+  #
+  # `files=` (S18) and `teammate_id=` are PRESENT-IF-PASSED, which is the writer's own rule
+  # and the reason both can be added by naming them rather than by appending a segment by
+  # hand. That is also why they are collected into an argument list here instead of four
+  # spelled-out calls: the writer decides where each field SITS on the row, so a caller only
+  # has to decide whether it is there at all.
+  local _mkrow_args
+  _mkrow_args=( status="$status" session="$session" name="$name" agent_id="$agent_id"
+                launched_at="$launched_at" subagent_type="$subagent_type" model="$model"
+                deliverable="$deliverable" source="$source" duration="$duration"
+                progress="$progress" claims="$claims" cadence="$cadence" waiver="$waiver"
+                tool_use_id="$tool_use_id" )
+  if [ "$has_files" -eq 1 ]; then _mkrow_args+=( files="$files" ); fi
+  if [ -n "$teammate_id" ]; then _mkrow_args+=( teammate_id="$teammate_id" ); fi
+  roster_row_fixture "${_mkrow_args[@]}"
 }
 
 roster_of() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "${2:-$SID}"; }
 
 new_roster() {  # <repo> [sid]
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$(roster_of "$1" "${2:-$SID}")"
+  roster_header > "$(roster_of "$1" "${2:-$SID}")"
   # THE ROSTER AND THE ENGAGEMENT MARKER TRAVEL TOGETHER (task-engaged-session): a roster
   # exists because an engaged session dispatched, and this gate asks `engaged_session`
   # before it looks for a roster at all. Without the marker every assertion in this file
@@ -227,7 +238,7 @@ add_row() {  # <repo> <key=value>...
 # prefix, which every roster reader in the fleet filters on (`roster-state/v1|`), so a swept
 # line is inert to all of them and cannot outlive the roster it belongs to.
 swept_lines() {  # <repo> -> the marker lines, one per verdicted row
-  /usr/bin/grep '^landing-swept/v1|' "$(roster_of "$1")" 2>/dev/null
+  /usr/bin/grep "^${SWEPT_SCHEMA}|" "$(roster_of "$1")" 2>/dev/null
 }
 swept_count() {  # <repo>
   swept_lines "$1" | /usr/bin/grep -c '|' | tr -d ' '
@@ -295,6 +306,59 @@ deliver() {  # <repo> <relative path> — a real artifact, written now (after la
   local p="$1/$2"
   mkdir -p "$(dirname "$p")"
   printf 'the report\n' > "$p"
+}
+
+# ---------- git fixtures for the Files: reconciliation (S18, AC-22) ----------
+#
+# A REAL WORKTREE, REAL COMMITS, REAL git diff/merge-base — every other fixture in this file
+# is a synthesized roster line because the gate's OWN subject (the sweep, the landing verdict)
+# never touches git. This one does: the reconciliation IS a git operation, and a fixture that
+# faked its answer would leave exactly the production path this slice adds unverified (rule:
+# seam-blindness — a seam substituting the value under test proves nothing about it).
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_SYSTEM=/dev/null
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_TERMINAL_PROMPT=0
+
+git_id() { git -C "$1" config user.email "test@example.invalid"; git -C "$1" config user.name "Bionic Test"; }
+
+# The main checkout: one commit on a branch named `main` (forced, so the fixture is
+# deterministic regardless of the machine's init.defaultBranch), which is what
+# `git -C <repo> rev-parse --abbrev-ref HEAD` — the branch the reconciliation merge-bases
+# against — reads back.
+make_git_wave_repo() {  # <label> -> repo path
+  local r
+  r="$(make_wave_repo "$1")"
+  git -C "$r" symbolic-ref HEAD refs/heads/main
+  git_id "$r"
+  printf '.bionic\n.bionic/\n.worktrees/\n' > "$r/.gitignore"
+  echo base > "$r/base.txt"
+  git -C "$r" add .gitignore base.txt
+  git -C "$r" commit -q -m base
+  printf '%s' "$r"
+}
+
+# A linked worktree at .worktrees/<name>, branched off the repo's current HEAD — the same
+# place `worktree_for_row` (payload/scripts/lib/worktree.sh) looks and spawn-worktree.sh
+# creates one. <name> doubles as the roster row's `name=` in every case but §16d, so the
+# primary (case-preserving) resolution path is what most of this section exercises.
+make_slice_tree() {  # <repo> <name> -> worktree path
+  local r="$1" name="$2" wt="$1/.worktrees/$2"
+  git -C "$r" worktree add -q "$wt" -b "wt/$name" >/dev/null 2>&1
+  git_id "$wt"
+  printf '%s' "$wt"
+}
+
+# One commit in the worktree touching every path given.
+commit_files() {  # <worktree> <message> <path>...
+  local wt="$1" msg="$2" p
+  shift 2
+  for p in "$@"; do
+    mkdir -p "$(dirname "$wt/$p")"
+    echo content >> "$wt/$p"
+  done
+  git -C "$wt" add "$@"
+  git -C "$wt" commit -q -m "$msg"
 }
 
 # ---------- running the gate ----------
@@ -482,6 +546,16 @@ expect_contains "4i: …and the marker keys on the row that actually carries an 
 MONODIR="$SANDBOX/hooks-mono-mutant"
 mkdir -p "$MONODIR"
 cp "$HOOKS_DIR/session-sweeper.sh" "$MONODIR/session-sweeper.sh"
+# The awk below rewrites ONE line of the shipped gate, so that line is this mutation's
+# precondition and it is declared through the framework's `anchor` (cross-gate section
+# S19) rather than checked afterwards.
+#
+# THE PATTERN IS A WHOLE-LINE ERE, not the fixed string it reads like, because the awk
+# compares `$0` against the WHOLE line: a fixed-string anchor is a substring test and
+# would still match a reindented copy the awk no longer touches, leaving a mutant that
+# is byte-identical to the shipped gate and every row below it green against it. The
+# count was measured against the shipped gate before this call was written.
+anchor -E "$GATE" '^    if \(aid != ""\) agent\[name\] = aid$' 1
 awk '{
        if ($0 == "    if (aid != \"\") agent[name] = aid") {
          print "    if (aid == \"\") agent[name] = aid"
@@ -489,12 +563,6 @@ awk '{
        }
        print
      }' "$GATE" > "$MONODIR/landing-gate.sh"
-if cmp -s "$GATE" "$MONODIR/landing-gate.sh"; then
-  no "4i-mut: the inverted-guard mutation applies to landing-gate.sh" \
-     "the mutation target matched nothing — the rule moved and this proof is vacuous"
-else
-  ok "4i-mut: the inverted-guard mutation applies to landing-gate.sh"
-fi
 
 R4I_MUT="$(make_wave_repo r4i-mut)"
 add_row "$R4I_MUT" name=w4-t2mono status=intended agent_id= \
@@ -608,7 +676,7 @@ expect_eq "6c: …and nothing is marked closed on a line that was never printed"
 R6B="$(make_repo r6b)"
 plan_active "$R6B"
 REAL_ROSTER="$SANDBOX/elsewhere-roster.state"
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$REAL_ROSTER"
+roster_header > "$REAL_ROSTER"
 mkrow name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)" >> "$REAL_ROSTER"
 ln -s "$REAL_ROSTER" "$(roster_of "$R6B")"
@@ -730,7 +798,7 @@ R11="$(make_wave_repo r11)"
 mkdir -p "$R11/.bionic/tmp/roster-x" "$R11/planted"
 SID_TRAVERSAL='x/../../../planted/evil'
 PLANTED="$R11/planted/evil.state"
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$PLANTED"
+roster_header > "$PLANTED"
 mkrow name=w1-s5 session="$SID_TRAVERSAL" agent_id="$AID_A" \
   deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)" >> "$PLANTED"
 run_gate "$GATE" "$(stop_payload "$R11" "$SID_TRAVERSAL" false)"
@@ -1112,6 +1180,290 @@ run_gate "$SUPDIR/landing-gate.sh" "$(stop_payload "$R15H_MUT" "$SID" false)"
 expect_eq "15h-mut: with the guard removed the SAME row is marked — the fixture really does discriminate" \
   "1" "$(swept_count "$R15H_MUT")"
 
-# ---------- summary ----------
-printf '\n---\n%d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
-[ "$FAIL" -eq 0 ]
+# ================================================================= Section 16
+section "Section 16: Files: RECONCILIATION — the diff is checked against the declared set (S18, AC-22)"
+
+# --- 16a/16b: THE DISCRIMINATING PAIR — a diff outside Files: refuses, one wholly inside
+# does not. Both rows deliver (the deliverable side is MET), so any refusal seen is the
+# Files: check speaking, never the contract check above it.
+R16A="$(make_git_wave_repo r16a)"
+WT16A=$(make_slice_tree "$R16A" slice16a)
+commit_files "$WT16A" "in scope" declared/one.sh
+commit_files "$WT16A" "out of scope" undeclared/two.sh
+add_row "$R16A" name=slice16a agent_id="$AID_A" deliverable=.bionic/docs/record/s16a.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16A" .bionic/docs/record/s16a.md
+run_gate "$GATE" "$(stop_payload "$R16A" "$SID" false)"
+expect_status "16a: a diff outside the declared Files: refuses the stop" "2" "$RC"
+expect_contains "16a: …naming the row" "slice16a" "$OUT_STDERR"
+expect_contains "16a: …naming the offending file" "undeclared/two.sh" "$OUT_STDERR"
+expect_absent "16a: …never the declared file" "declared/one.sh" "$OUT_STDERR"
+expect_eq "16a: …the deliverable side stays silent (it WAS delivered)" "0" \
+  "$(printf '%s' "$OUT_STDERR" | /usr/bin/grep -c 'LANDING CONTRACT UNMET')"
+expect_empty "16a: …the refusal goes to stderr, never stdout" "$OUT_STDOUT"
+
+R16B="$(make_git_wave_repo r16b)"
+WT16B=$(make_slice_tree "$R16B" slice16b)
+commit_files "$WT16B" "both in scope" declared/one.sh declared/two.sh
+add_row "$R16B" name=slice16b agent_id="$AID_A" deliverable=.bionic/docs/record/s16b.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16B" .bionic/docs/record/s16b.md
+run_gate "$GATE" "$(stop_payload "$R16B" "$SID" false)"
+expect_status "16b: a diff wholly inside the declared Files: passes" "0" "$RC"
+expect_empty "16b: …silently" "$OUT_STDERR"
+expect_eq "16b: …and the row really was processed (marked swept once)" "1" "$(swept_count "$R16B")"
+
+# --- 16c: A Suites:-only brief — no `files=` on the row at all — is not reconciled against
+# anything, SILENTLY, no matter what the diff touches: this is the ordinary case for most of
+# the fleet today (Files: is the newer of AC-20's two labels), and a stderr line on every
+# such landing would turn the routine case into noise on every turn end.
+R16C="$(make_git_wave_repo r16c)"
+WT16C=$(make_slice_tree "$R16C" slice16c)
+commit_files "$WT16C" "anything at all" anywhere/thing.sh
+add_row "$R16C" name=slice16c agent_id="$AID_A" deliverable=.bionic/docs/record/s16c.md \
+  launched_at="$(iso_ago 600)"
+deliver "$R16C" .bionic/docs/record/s16c.md
+run_gate "$GATE" "$(stop_payload "$R16C" "$SID" false)"
+expect_status "16c: no Files: declared on the row passes" "0" "$RC"
+expect_empty "16c: …silently, however wide the diff" "$OUT_STDERR"
+expect_eq "16c: …yet the row really was processed (deliverable side still marks it)" \
+  "1" "$(swept_count "$R16C")"
+
+# --- 16d: THE CASE-INSENSITIVE FALLBACK. The row name and the worktree's directory basename
+# differ only in case (the shape this wave's own dispatch actually produced: row
+# `s18-landing-files`, directory `S18-landing-files`) — `worktree_for_row` lowercases and a
+# case-sensitive scan would miss it, so this is the one case the farm scan exists for.
+R16D="$(make_git_wave_repo r16d)"
+git -C "$R16D" worktree add -q "$R16D/.worktrees/Mixed-Case" -b wt/mixedcase >/dev/null 2>&1
+git_id "$R16D/.worktrees/Mixed-Case"
+commit_files "$R16D/.worktrees/Mixed-Case" "out of scope" undeclared/x.sh
+add_row "$R16D" name=mixed-case agent_id="$AID_A" deliverable=.bionic/docs/record/s16d.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16D" .bionic/docs/record/s16d.md
+run_gate "$GATE" "$(stop_payload "$R16D" "$SID" false)"
+expect_status "16d: the worktree is found by name even when the directory case differs" "2" "$RC"
+expect_contains "16d: …naming the offending file" "undeclared/x.sh" "$OUT_STDERR"
+
+# --- 16e: A declared Files: with NO locatable worktree (the tree was already removed, or
+# never matched by name) is an AMBIGUITY, not a refusal — the same "cannot place it" pass
+# every join in this file already takes. The deliverable side still verdicts and marks the
+# row, proving the row really was processed rather than skipped for an unrelated reason.
+R16E="$(make_git_wave_repo r16e)"
+add_row "$R16E" name=ghost-slice agent_id="$AID_A" deliverable=.bionic/docs/record/s16e.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16E" .bionic/docs/record/s16e.md
+run_gate "$GATE" "$(stop_payload "$R16E" "$SID" false)"
+expect_status "16e: a declared Files: with no locatable worktree passes" "0" "$RC"
+expect_empty "16e: …silently — an unlocatable tree is ambiguity, not a violation" "$OUT_STDERR"
+expect_eq "16e: …yet the row really was processed (deliverable side still marks it)" \
+  "1" "$(swept_count "$R16E")"
+
+# --- 16f: "a declared directory covers its files" holds without a trailing slash too.
+R16F="$(make_git_wave_repo r16f)"
+WT16F=$(make_slice_tree "$R16F" slice16f)
+commit_files "$WT16F" "in scope, declared with no trailing slash" declared/one.sh
+add_row "$R16F" name=slice16f agent_id="$AID_A" deliverable=.bionic/docs/record/s16f.md \
+  files="declared" launched_at="$(iso_ago 600)"
+deliver "$R16F" .bionic/docs/record/s16f.md
+run_gate "$GATE" "$(stop_payload "$R16F" "$SID" false)"
+expect_status "16f: a declared directory with no trailing slash still covers its files" "0" "$RC"
+expect_empty "16f: …silently" "$OUT_STDERR"
+expect_eq "16f: …and the row really was processed" "1" "$(swept_count "$R16F")"
+
+# --- 16g: an `impact-command:` configured in .bionic/config.yaml — same key S13's dispatch
+# wall reads — names the suites the offending files imply, alongside the files themselves.
+R16G="$(make_git_wave_repo r16g)"
+WT16G=$(make_slice_tree "$R16G" slice16g)
+commit_files "$WT16G" "out of scope" undeclared/three.sh
+STUB16G="$SANDBOX/impact-stub-16g.sh"
+cat > "$STUB16G" <<'STUBEOF'
+#!/bin/bash
+for f in "$@"; do
+  case "$f" in undeclared/*) printf 'fake.test.sh\tstub\n' ;; esac
+done
+STUBEOF
+chmod +x "$STUB16G"
+mkdir -p "$R16G/.bionic"
+printf 'impact-command: bash %s\n' "$STUB16G" > "$R16G/.bionic/config.yaml"
+add_row "$R16G" name=slice16g agent_id="$AID_A" deliverable=.bionic/docs/record/s16g.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16G" .bionic/docs/record/s16g.md
+run_gate "$GATE" "$(stop_payload "$R16G" "$SID" false)"
+expect_status "16g: a diff outside Files: with an impact command configured still refuses" "2" "$RC"
+expect_contains "16g: …naming the offending file" "undeclared/three.sh" "$OUT_STDERR"
+expect_contains "16g: …and the suite the impact command derived for it" "fake.test.sh" "$OUT_STDERR"
+
+# --- 16h: A DETACHED MAIN CHECKOUT (review-a A-5). `git rev-parse --abbrev-ref HEAD` prints
+# the literal string `HEAD` there, and `HEAD` resolves INSIDE the worktree to the worktree's
+# own tip — so the merge-base came back non-empty, the diff came back EMPTY, and every
+# landing reconciled clean with no refusal and no diagnostic. A wall that is off and quiet
+# is indistinguishable from a wall that is passing everything (tests/run.sh:267-272), so the
+# inert state is announced. `git bisect`, `git checkout <tag>` and a checkout parked on a
+# sha are all ordinary states for this repository during an integration.
+R16H="$(make_git_wave_repo r16h)"
+WT16H=$(make_slice_tree "$R16H" slice16h)
+commit_files "$WT16H" "out of scope" undeclared/four.sh
+add_row "$R16H" name=slice16h agent_id="$AID_A" deliverable=.bionic/docs/record/s16h.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16H" .bionic/docs/record/s16h.md
+git -C "$R16H" checkout -q --detach HEAD
+run_gate "$GATE" "$(stop_payload "$R16H" "$SID" false)"
+expect_contains "16h: a detached main checkout ANNOUNCES the reconciliation is inert" \
+  "the Files: reconciliation is INERT" "$OUT_STDERR"
+expect_contains "16h: …naming the reason" "detached HEAD" "$OUT_STDERR"
+expect_contains "16h: …naming the row it could not judge" "slice16h" "$OUT_STDERR"
+expect_contains "16h: …and the declared set it did not check the diff against" "declared/" "$OUT_STDERR"
+expect_eq "16h: …and the row really was processed (deliverable side still marks it)" \
+  "1" "$(swept_count "$R16H")"
+# CONTROL: the identical fixture in a repo whose main checkout is on its branch — the
+# refusal is there, so 16h is about the detached state and not about a fixture that could
+# never refuse. A second repo rather than a second run: the sweep marks a row once, so
+# re-running the same one proves only that idempotency works.
+R16H2="$(make_git_wave_repo r16h2)"
+WT16H2=$(make_slice_tree "$R16H2" slice16h2)
+commit_files "$WT16H2" "out of scope" undeclared/four.sh
+add_row "$R16H2" name=slice16h2 agent_id="$AID_A" deliverable=.bionic/docs/record/s16h2.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16H2" .bionic/docs/record/s16h2.md
+run_gate "$GATE" "$(stop_payload "$R16H2" "$SID" false)"
+expect_absent "16h: control: on a branch the announcement is gone" "reconciliation is INERT" "$OUT_STDERR"
+expect_contains "16h: control: …and the diff outside Files: refuses" "undeclared/four.sh" "$OUT_STDERR"
+
+# --- 16i: THE DERIVATION IS BOUNDED (review-c C-17). The impact command costs ~2.6-6.5 s
+# and this hook is registered at "timeout": 10 on Stop and SubagentStop, with the call
+# inside the per-candidate loop. The budget is spent across the sweep; a row that gets no
+# derivation still REFUSES and says the suites were not named. The one thing it must never
+# become is a silent pass. NO SEAM: the bound is the shipped 6 seconds, and the stub simply
+# outruns it.
+R16I="$(make_git_wave_repo r16i)"
+WT16I=$(make_slice_tree "$R16I" slice16i)
+commit_files "$WT16I" "out of scope" undeclared/slow.sh
+STUB16I="$SANDBOX/impact-stub-16i.sh"
+printf '#!/bin/bash\nsleep 30\nprintf "never.test.sh\\tstub\\n"\n' > "$STUB16I"
+chmod +x "$STUB16I"
+mkdir -p "$R16I/.bionic"
+printf 'impact-command: bash %s\n' "$STUB16I" > "$R16I/.bionic/config.yaml"
+add_row "$R16I" name=slice16i agent_id="$AID_A" deliverable=.bionic/docs/record/s16i.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16I" .bionic/docs/record/s16i.md
+T16I=$(date +%s)
+run_gate "$GATE" "$(stop_payload "$R16I" "$SID" false)"
+E16I=$(( $(date +%s) - T16I ))
+expect_status "16i: a slow derivation does not turn the refusal into a pass" "2" "$RC"
+expect_contains "16i: …the offending file is still named" "undeclared/slow.sh" "$OUT_STDERR"
+expect_contains "16i: …and the reader is told the suites were NOT derived" \
+  "are NOT named here" "$OUT_STDERR"
+expect_absent "16i: …never the answer the command would eventually have given" \
+  "never.test.sh" "$OUT_STDERR"
+if [ "$E16I" -lt 10 ]; then
+  ok "16i: …and the sweep finished inside the hook's own 10s registration (${E16I}s)"
+else
+  no "16i: …and the sweep finished inside the hook's own 10s registration" "took ${E16I}s"
+fi
+
+# --- 16j: `set -f` AROUND THE DIFF-PATH SPLIT (review-a A-11). `$LG_OUTSIDE` comes from
+# `git diff --name-only` and was expanded unquoted with no `set -f`, so a committed path
+# carrying a glob metacharacter was pathname-expanded against $REPO and the impact command
+# was handed files that were never in the diff. The sibling site in
+# hooks/dispatch-preflight.sh guards the identical construction. The main checkout below
+# holds two files the pattern matches, so an unguarded split has something to expand INTO.
+R16J="$(make_git_wave_repo r16j)"
+mkdir -p "$R16J/undeclared"
+: > "$R16J/undeclared/aX.sh"
+: > "$R16J/undeclared/aY.sh"
+WT16J=$(make_slice_tree "$R16J" slice16j)
+commit_files "$WT16J" "out of scope, with a metacharacter in the name" 'undeclared/a*.sh'
+ARGS16J="$SANDBOX/impact-args-16j.txt"
+STUB16J="$SANDBOX/impact-stub-16j.sh"
+printf '#!/bin/bash\nprintf "%%s\\n" "$@" > %s\nprintf "fake.test.sh\\tstub\\n"\n' "$ARGS16J" > "$STUB16J"
+chmod +x "$STUB16J"
+mkdir -p "$R16J/.bionic"
+printf 'impact-command: bash %s\n' "$STUB16J" > "$R16J/.bionic/config.yaml"
+add_row "$R16J" name=slice16j agent_id="$AID_A" deliverable=.bionic/docs/record/s16j.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16J" .bionic/docs/record/s16j.md
+run_gate "$GATE" "$(stop_payload "$R16J" "$SID" false)"
+expect_status "16j: a diff path carrying a glob metacharacter still refuses" "2" "$RC"
+expect_eq "16j: …and the impact command received the path from the DIFF, unexpanded" \
+  'undeclared/a*.sh' "$(cat "$ARGS16J" 2>/dev/null)"
+
+section "Section 17: the swept-marker extraction fails LOUDLY, or not at all (review-b B-12)"
+# tests/lib/swept-marker.sh obtains both the constant and the writer by matching SOURCE TEXT
+# of this hook at column 0 — `^SWEPT_SCHEMA=` and `^swept_marker_write()`. Indent the
+# function, move the constant, and both `eval`s become no-ops: the builder silently does not
+# exist, and the failure surfaces as `command not found` under the runner's stderr-strict
+# arm rather than as a named assertion in the suite that depends on it. Seven suites source
+# that lib. The framework's own derivation cannot cover it either — `swept_marker_write` is
+# not in `_tf_scan`'s token set.
+#
+# THE MUTANT IS THE REFORMATTING ITSELF, applied to a COPY, with both anchors checked first:
+# a doctored hook whose anchors had already moved would prove nothing about the guard.
+SM_DIR="$SANDBOX/swept-doctored"
+SM_DIR2="$SANDBOX/swept-doctored-const"
+SM_DIR3="$SANDBOX/swept-doctored-fn"
+mkdir -p "$SM_DIR" "$SM_DIR2" "$SM_DIR3"
+# BOTH ANCHORS ONCE, IMMEDIATELY BEFORE THE THREE MUTANTS THEY GUARD — the pair below and
+# the two single-line variants further down are the same two rewrites in three
+# combinations, so anchoring each pattern once is anchoring all three.
+anchor -E "$BIONIC_HOOKS_DIR/landing-gate.sh" '^SWEPT_SCHEMA=' 1
+anchor -E "$BIONIC_HOOKS_DIR/landing-gate.sh" '^swept_marker_write\(\)' 1
+sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' -e 's/^swept_marker_write()/  swept_marker_write()/' \
+  "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR/landing-gate.sh"
+sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR2/landing-gate.sh"
+sed -e 's/^swept_marker_write()/  swept_marker_write()/' \
+  "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR3/landing-gate.sh"
+expect_eq "17a the mutant really did move both anchors" "0" \
+  "$(/usr/bin/grep -cE '^(SWEPT_SCHEMA=|swept_marker_write\(\))' "$SM_DIR/landing-gate.sh" | tr -d ' ')"
+
+# A REAL SCRIPT FILE, not `bash -c`: the framework derives a suite's helper calls from its
+# own source and refuses a `$0` it cannot read, so a `-c` driver would fail for a reason
+# that has nothing to do with the subject.
+SM_LIB="$(cd "$(dirname "$0")/lib" && pwd -P)"
+SM_DRIVER="$SANDBOX/swept-marker-driver.sh"
+cat > "$SM_DRIVER" <<'SMEOF'
+#!/bin/bash
+set -uo pipefail
+SM_LIB_DIR="$1"
+BIONIC_HOOKS_DIR="$2"
+. "$SM_LIB_DIR/assert.sh"
+. "$SM_LIB_DIR/swept-marker.sh"
+# THE DRIVER'S OWN EXIT MUST MEAN ONE THING. `type -t` on an undefined name exits 1 all by
+# itself, so a driver ending on it would report "the lib refused" for a lib that sourced
+# straight through and simply has no builder — the confound this arm exists to tell apart.
+echo "SOURCED-ANYWAY"
+type -t swept_marker_write || echo "NO-BUILDER"
+exit 0
+SMEOF
+chmod +x "$SM_DRIVER"
+
+SM_OUT=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR" 2>&1)
+SM_ST=$?
+expect_eq "17b sourcing the lib against a reformatted hook EXITS non-zero" "1" "$SM_ST"
+expect_absent "17b …and does not carry on with no builder" "SOURCED-ANYWAY" "$SM_OUT"
+expect_contains "17b …naming the lib that could not extract" "tests/lib/swept-marker.sh" "$SM_OUT"
+expect_contains "17b …and the hook it read" "landing-gate.sh" "$SM_OUT"
+
+# THE CONSTANT'S HALF, on its own: only the SWEPT_SCHEMA line moved, so the function still
+# extracts and the failure has to come from the constant's own check.
+SM_OUT2=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR2" 2>&1)
+SM_ST2=$?
+expect_eq "17c a moved SWEPT_SCHEMA= alone also EXITS non-zero" "1" "$SM_ST2"
+expect_contains "17c …naming the constant and the file it was not in" "SWEPT_SCHEMA" "$SM_OUT2"
+expect_contains "17c …and the hook it read" "landing-gate.sh" "$SM_OUT2"
+
+# THE FUNCTION'S HALF, on its own: only `swept_marker_write()` is indented, so the constant
+# still extracts and the failure has to come from the builder's own presence check — the
+# `command not found` this whole guard exists to turn into a named refusal.
+SM_OUT4=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR3" 2>&1)
+SM_ST4=$?
+expect_eq "17e an indented swept_marker_write() alone also EXITS non-zero" "1" "$SM_ST4"
+expect_contains "17e …naming the builder that was not extracted" "swept_marker_write" "$SM_OUT4"
+expect_absent "17e …and never reaches the code that would have called it" "SOURCED-ANYWAY" "$SM_OUT4"
+
+# CONTROL: the SHIPPED hook, same three lines — it sources clean and the builder is real.
+SM_OUT3=$(bash "$SM_DRIVER" "$SM_LIB" "$BIONIC_HOOKS_DIR" 2>&1)
+SM_ST3=$?
+expect_eq "17d control: against the shipped hook the lib sources clean" "0" "$SM_ST3"
+expect_contains "17d …and the builder is a real function" "function" "$SM_OUT3"
+
+finish

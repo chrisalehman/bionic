@@ -52,22 +52,10 @@ SETUP_SH="${REPO}/payload/scripts/setup.sh"
 DOCTOR_SH="${REPO}/payload/scripts/doctor.sh"
 REMOVE_SH="${REPO}/payload/scripts/remove.sh"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
+. "$(dirname "$0")/lib/assert.sh"
 
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_ne() { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected something other than '$2'"; fi; }
-expect_nonempty() { if [ -n "$2" ]; then ok "$1"; else no "$1" "expected a non-empty value"; fi; }
-expect_empty() { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected empty, got '$2'"; fi; }
-expect_contains() {
-  local label="$1" needle="$2" hay="$3"
-  case "$hay" in *"$needle"*) ok "$label" ;; *) no "$label" "'$needle' not found in: $hay" ;; esac
-}
-expect_not_contains() {
-  local label="$1" needle="$2" hay="$3"
-  case "$hay" in *"$needle"*) no "$label" "'$needle' should not be in: $hay" ;; *) ok "$label" ;; esac
-}
+# expect_not_contains -> expect_absent, pure rename (S1b/A-17 mapping table): same
+# `case` glob semantics.
 expect_same_bytes() {  # <label> <file-a> <file-b>
   if cmp -s "$2" "$3"; then ok "$1"; else no "$1" "$(diff "$2" "$3" 2>&1 | head -20)"; fi
 }
@@ -289,7 +277,7 @@ env_eval() {  # <sandbox> <shell-path> <snippet>
     ' _ "$ENV_SH" "$3"
 }
 
-echo "── env.sh: the roster, the literals and the default ─────────────────────"
+section "env.sh: the roster, the literals and the default"
 
 SB_A="$(new_sandbox)"
 expect_eq "env.sh RC_ITEMS names the proxy" \
@@ -307,7 +295,7 @@ expect_eq "rc_default claude-proxy is the proxy function, exactly" \
 expect_empty "rc_default refuses a name that is not bionic's" \
   "$(env_run "$SB_A" /bin/zsh -- rc_default not-an-item 2>/dev/null)"
 
-echo "── env.sh: rc_file picks the rc the shell reads ──────────────────────────"
+section "env.sh: rc_file picks the rc the shell reads"
 
 SB_B="$(new_sandbox)"
 expect_eq "rc_file under zsh is that HOME's .zshrc" \
@@ -318,7 +306,7 @@ RC_FISH_OUT="$(env_run "$SB_B" /usr/local/bin/fish -- rc_file 2>&1)"; RC_FISH_RC
 expect_ne "rc_file refuses a shell bionic writes no rc for" "0" "$RC_FISH_RC"
 expect_contains "rc_file says which shell it declined" "fish" "$RC_FISH_OUT"
 
-echo "── setup: consent yes writes the block, and the shell reads it ──────────"
+section "setup: consent yes writes the block, and the shell reads it"
 
 SB_YES="$(new_sandbox)"
 cp "$SB_YES/.zshrc" "$TMP/yes-before.zshrc"
@@ -338,7 +326,7 @@ expect_eq "the block holds exactly the proxy function" "$PROXY_LINE" "$BLOCK_AFT
 expect_empty  "before setup the same file has no marker block" "$BLOCK_BEFORE"
 
 expect_contains "after setup the shell reports claude as a function" "shell function" "$TYPE_AFTER"
-expect_not_contains "before setup the same shell reports no function" "shell function" "$TYPE_BEFORE"
+expect_absent "before setup the same shell reports no function" "shell function" "$TYPE_BEFORE"
 
 expect_contains "setup states the why before it asks" "bypass" "$SETUP_OUT"
 
@@ -353,7 +341,7 @@ cat "$TMP/yes-before.zshrc" "$TMP/expected-block" > "$TMP/yes-expected.zshrc"
 expect_same_bytes "the rc is the planted file plus the block, byte for byte" \
   "$TMP/yes-expected.zshrc" "$SB_YES/.zshrc"
 
-echo "── setup: a second run changes nothing ──────────────────────────────────"
+section "setup: a second run changes nothing"
 
 cp "$SB_YES/.zshrc" "$TMP/idem-before.zshrc"
 setup_run "$SB_YES" y >/dev/null 2>&1
@@ -364,7 +352,7 @@ expect_eq "exactly one start marker after two runs" "1" \
 expect_eq "exactly one proxy line after two runs" "1" \
   "$(count_lines_equal "$SB_YES/.zshrc" "$PROXY_LINE")"
 
-echo "── setup: consent no writes nothing ─────────────────────────────────────"
+section "setup: consent no writes nothing"
 
 SB_NO="$(new_sandbox)"
 cp "$SB_NO/.zshrc" "$TMP/no-before.zshrc"
@@ -380,7 +368,7 @@ expect_diff_bytes "a consented setup on the same fixture does change the rc" \
 expect_nonempty "a consented setup on the same fixture does write a block" \
   "$(rc_block_lines "$SB_NO/.zshrc")"
 
-echo "── doctor: one row, absent before and present after ─────────────────────"
+section "doctor: one row, absent before and present after"
 
 SB_DOC="$(new_sandbox)"
 ROW_ABSENT="$(report_row "$(doctor_run "$SB_DOC")" "$DOCTOR_ROW_LABEL")"
@@ -391,9 +379,9 @@ expect_nonempty "doctor renders a proxy row when the block is present" "$ROW_PRE
 expect_nonempty "doctor renders a proxy row when the block is absent"  "$ROW_ABSENT"
 expect_ne "the two rows differ" "$ROW_ABSENT" "$ROW_PRESENT"
 expect_contains "the absent row routes the reader to setup" "/bionic:setup" "$ROW_ABSENT"
-expect_not_contains "the present row does not route to setup" "/bionic:setup" "$ROW_PRESENT"
+expect_absent "the present row does not route to setup" "/bionic:setup" "$ROW_PRESENT"
 
-echo "── detect: the presence fact ────────────────────────────────────────────"
+section "detect: the presence fact"
 
 SB_DET="$(new_sandbox)"
 detect_run() {  # <sandbox>
@@ -408,7 +396,7 @@ expect_eq "detect_rc_claude_proxy reports present after setup" \
 expect_eq "detect_rc_claude_proxy reports absent before setup" \
   "env:rc-claude-proxy present=no" "$DET_ABSENT"
 
-echo "── the two doors answer the same question the same way ──────────────────"
+section "the two doors answer the same question the same way"
 
 # WHAT THIS SECTION OWNS. "Is bionic's `claude()` proxy in place" is asked by
 # two doors — setup decides whether to offer the item (`rc_get`), doctor decides
@@ -483,7 +471,7 @@ expect_contains "the stale row says stale"                     "stale"         "
 expect_contains "the stale row routes the reader to setup"     "/bionic:setup" "$ROW_STALE"
 expect_ne "the stale row is not the healthy row" "$ROW_PRESENT" "$ROW_STALE"
 
-echo "── remove: the block goes, every other line stays ───────────────────────"
+section "remove: the block goes, every other line stays"
 
 SB_RM="$(new_sandbox)"
 cp "$SB_RM/.zshrc" "$TMP/rm-before.zshrc"
@@ -499,7 +487,7 @@ expect_same_bytes "after remove the rc is byte-identical to the planted file" \
   "$TMP/rm-before.zshrc" "$SB_RM/.zshrc"
 expect_contains "remove names the file it changed" "${SB_RM}/.zshrc" "$RM_OUT"
 
-echo "── remove: the standalone door does the same ────────────────────────────"
+section "remove: the standalone door does the same"
 
 # The script alone, with no scripts/lib beside it — the curl-fetched shape.
 mkdir -p "$TMP/standalone"
@@ -523,7 +511,7 @@ expect_nonempty "remove.sh carries an RM_RC_END copy"   "$RM_RC_END_COPY"
 expect_eq "RM_RC_START is byte-equal to env.sh's RC_START" "$ENV_RC_START" "$RM_RC_START_COPY"
 expect_eq "RM_RC_END is byte-equal to env.sh's RC_END"     "$ENV_RC_END"   "$RM_RC_END_COPY"
 
-echo "── env.sh: rc_get sees the line only inside the markers ─────────────────"
+section "env.sh: rc_get sees the line only inside the markers"
 
 SB_G="$(new_sandbox)"
 setup_run "$SB_G" y >/dev/null 2>&1
@@ -537,7 +525,7 @@ printf '%s\n' "$PROXY_LINE" >> "$SB_H/.zshrc"
 env_run "$SB_H" /bin/zsh -- rc_get claude-proxy >/dev/null 2>&1
 expect_ne "rc_get is non-zero for the same line outside the markers" "0" "$?"
 
-echo "── a stale in-block line: the block is rebuilt, never filtered ──────────"
+section "a stale in-block line: the block is rebuilt, never filtered"
 
 # WHAT THIS SECTION OWNS. What setup and remove do to a marker block that holds
 # something other than the current `rc_default` line. Everything above this
@@ -616,7 +604,4 @@ remove_run "$SB_ST3" y "$TMP/standalone/remove.sh" >/dev/null 2>&1
 expect_same_bytes "the standalone door strips a stale block to the same bytes" \
   "$TMP/stale-after-remove.zshrc" "$SB_ST3/.zshrc"
 
-echo "──────────────────────────────────────────────"
-echo "rc-item.test.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ] || exit 1
-exit 0
+finish

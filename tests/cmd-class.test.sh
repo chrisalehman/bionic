@@ -35,6 +35,8 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 # THE TWO SPELLINGS OF ONE DIRECTORY. payload/hooks is a symlink to <repo>/hooks, so a hook
@@ -52,15 +54,6 @@ SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/cmd-class-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
-PASS=0
-FAIL=0
-TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "expected to contain [$2], got: $3" ;; esac; }
-expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
-
 SID="7b2ae913-0c4f-4d21-9a55-13e0c7ab4d10"
 AGENT_ID="as5class-91ab3cd7e5f20114"
 
@@ -68,9 +61,7 @@ FAKE_HOME="$SANDBOX/home"
 mkdir -p "$FAKE_HOME/.claude/projects/-sandbox"
 : > "$FAKE_HOME/.claude/projects/-sandbox/$SID.jsonl"
 
-# ============================================================
-echo "=== C0 — the library and both hooks exist and parse ==="
-# ============================================================
+section "C0 — the library and both hooks exist and parse"
 if [ -f "$LIB" ]; then ok "payload/scripts/lib/cmd-class.sh is on disk"; else
   no "payload/scripts/lib/cmd-class.sh is on disk" "$LIB"
 fi
@@ -84,9 +75,7 @@ if bash -n "$FARM_OUT" 2>"$SANDBOX/.syn"; then ok "farm-out-reminder.sh parses (
   no "farm-out-reminder.sh parses (bash -n)" "$(cat "$SANDBOX/.syn")"
 fi
 
-# ============================================================
-echo "=== C1 — the library reads argv positions, never prose ==="
-# ============================================================
+section "C1 — the library reads argv positions, never prose"
 # Driven through a child bash that sources the library, so a `set -e`/`set -u` collision or
 # a stray write to the caller's shell shows up here rather than corrupting the suite.
 class_of() {  # <command> -> the library's verdict
@@ -243,9 +232,7 @@ EOF
 bash tests/run.sh"
 case_is suite "$HEREDOC_THEN_SUITE" "suite: a real command AFTER a heredoc still classifies"
 
-# ============================================================
-echo "=== C2/C3 — farm-out-reminder through the library (AC-15, AC-16) ==="
-# ============================================================
+section "C2/C3 — farm-out-reminder through the library (AC-15, AC-16)"
 # ---------- engagement (task-engaged-session, AC-6 / AC-20) ----------
 #
 # Since 2026-09-03 both hooks this section drives ask one question before any other: did
@@ -459,9 +446,7 @@ D=$(farm_decision 'bash tests/run.sh')
 expect_contains "advisory mode downgrades the suite deny to a nudge" 'additionalContext' "$D"
 rm -f "$FARM_REPO/.bionic/config.yaml"
 
-# ============================================================
-echo "=== C4 — background-suite-guard behind agent-context-guard (AC-23, AC-24) ==="
-# ============================================================
+section "C4 — background-suite-guard behind agent-context-guard (AC-23, AC-24)"
 make_repo() {  # <name> -> an armed repo of an ENGAGED session
   local repo="$SANDBOX/$1/repo"
   mkdir -p "$repo/.bionic/tmp"
@@ -475,8 +460,18 @@ make_repo() {  # <name> -> an armed repo of an ENGAGED session
   echo seed > "$repo/README.md"
   git -C "$repo" add README.md
   git -C "$repo" commit -qm seed 2>/dev/null
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$repo/.bionic/tmp/roster-$SID.state"
+  {
+    roster_header
+    # THE ROW CARRIES THE FULL-TREE BUDGET, and it has to (S13, spec AC-21). Every cell in
+    # C4 drives `bash tests/run.sh` from an agent context, and since the budget arm shipped
+    # a full-tree run is refused unless this agent`s own row allows it — so a header-only
+    # roster would put the BUDGET arm under test in the cells that exist to test the
+    # BACKGROUND one, and the three "must stay silent" cells would have gone red for a
+    # wall they never meant to reach. The unbudgeted world is
+    # tests/background-suite-guard.test.sh`s.
+    roster_row_fixture "session=$SID" name=guarded "agent_id=$AGENT_ID" \
+      suites_allowed=run.sh suites_source=declared files=
+  } > "$repo/.bionic/tmp/roster-$SID.state"
   chmod 600 "$repo/.bionic/tmp/roster-$SID.state"
   printf '%s' "$repo"
 }
@@ -531,9 +526,7 @@ expect_eq "an unarmed session leaves the arm silent even for a backgrounded suit
 run_hook "$(mk_bash_payload "$UREPO" 'bash tests/run.sh' "$AGENT_ID" true)" "$BG_GUARD"
 expect_eq "…positive control: that same payload refuses when driven straight into the wall" 2 "$ST"
 
-# ============================================================
-echo "=== C5 — FAIL-CLOSED sourcing: no library, no pass (AC-12 shape, D1) ==="
-# ============================================================
+section "C5 — FAIL-CLOSED sourcing: no library, no pass (AC-12 shape, D1)"
 # HERMETIC, AND THAT IS A CORRECTION. This section used to `mv` the SHIPPED library aside
 # for its own length and restore it from a trap — a write outside its own mktemp root, and
 # the one thing tests/run.sh's parallel mode assumes no suite does. Every sibling suite
@@ -583,9 +576,7 @@ FARM_OUT="$C5_SAVED_FARM"; BG_GUARD="$C5_SAVED_BG"
 # so prove it rather than assume it.
 expect_eq "C5 the library is back on disk" "suite" "$(class_of 'bash tests/run.sh')"
 
-# ============================================================
-echo "=== C6 — every source in payload/hooks/*.sh resolves inside payload/ ==="
-# ============================================================
+section "C6 — every source in payload/hooks/*.sh resolves inside payload/"
 # A sourced library the installer misses is a silently inert wall (agent-context-guard.sh
 # :106-108). The hooks are reachable under two spellings of one directory (see the header),
 # so each literal is expanded under BOTH and the pin is: at least one expansion exists, and
@@ -667,10 +658,7 @@ expect_eq "the installed-plugin reading of the cmd-class source lands on the shi
 expect_contains "…and the extractor sees the cmd-class library (shape A)" "cmd-class.sh" "$SRC_LITERALS"
 expect_contains "…and the sweeper handoff (shape B)" "session-sweeper.sh" "$SRC_LITERALS"
 
-# ============================================================
-echo
-echo "=== C6 — the session never invoked the skill: neither hook is there (AC-6, AC-20) ==="
-# ============================================================
+section "C6 — the session never invoked the skill: neither hook is there (AC-6, AC-20)"
 #
 # THE PAIRED WORLD for C2/C3 and C4. Chris, 2026-09-03: "all guardrails imposed by bionic
 # should only apply when exercising bionic. Nothing should apply until bionic is
@@ -729,8 +717,145 @@ engage "$GREPO"
 run_hook "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)" "$BG_GUARD"
 expect_eq "AC-20 control: with the marker back, the wall REFUSES again" "2" "$ST"
 
-# ============================================================
-echo
-echo "=== cmd-class: $PASS/$TOTAL passed ==="
-[ "$FAIL" -eq 0 ] || echo "FAILURES: $FAIL"
-[ "$FAIL" -eq 0 ]
+section "C7 — cmd_suite_targets: WHICH suite a command runs (S13, AC-21)"
+# The budget arm cannot compare a command to a set of suite basenames without knowing which
+# basenames the command names. That reading is here, beside the class, because it is the
+# same reading: `cmd_class` and `cmd_suite_targets` answer off the same argv positions, and
+# a second matcher outside this library would have to re-implement strip_leading,
+# unwrap_runner and the quote-aware tokeniser to see them.
+#
+# MEASURED IN BOTH DIRECTIONS, per the library`s own superset note (:47-51: "Any new arm
+# here is a wall — measure both directions"). Every spelling the class arm recognises must
+# also NAME its suite, or the budget arm silently allows what the class arm caught; and no
+# spelling the class arm rejects may name one, or the budget arm refuses prose.
+
+targets_of() {  # <command> -> the library's targets, newline-joined
+  printf '%s' "$1" | bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_suite_targets "$(cat)"
+  ' _ "$LIB" 2>&1
+}
+
+targets_are() {  # <expected, newline-joined> <command>
+  expect_eq "targets [$2]" "$1" "$(targets_of "$2")"
+}
+
+# --- direction 1: every suite-class spelling names the file it runs ---
+targets_are 'run.sh'       'bash tests/run.sh'
+targets_are 'run.sh'       'bash tests/run.sh --serial'
+targets_are 'run.sh'       'bash -x tests/run.sh'
+targets_are 'cmd-class.test.sh' 'bash tests/cmd-class.test.sh'
+targets_are 'test.sh'      'bash test.sh'
+targets_are 'run.sh'       './tests/run.sh'
+targets_are 'run.sh'       'tests/run.sh'
+targets_are 'run.sh'       'cd tests && bash run.sh'
+targets_are 'run.sh'       '(cd tests; bash run.sh)'
+targets_are 'run.sh'       'sudo bash tests/run.sh'
+targets_are 'run.sh'       '( bash tests/run.sh )'
+targets_are 'run.sh'       'if true; then bash tests/run.sh; fi'
+targets_are 'run.sh'       'FARM_OUT_ALLOW=1 bash tests/run.sh'
+targets_are 'run.sh'       'PIN=/tmp/p PATH=$PIN:$PATH bash tests/run.sh'
+targets_are 'loader.test.sh' 'bash "$REPO/tests/loader.test.sh"'
+targets_are 'width.test.sh' 'bash tests/width.test.sh 2>&1 | tee /tmp/w.log'
+
+# THE WHOLE POINT OF THE SET: a chain names every suite in it, in position order.
+targets_are 'a.test.sh
+b.test.sh' 'bash tests/a.test.sh && bash tests/b.test.sh'
+targets_are 'a.test.sh
+run.sh' 'bash tests/a.test.sh; ./tests/run.sh'
+# …and a suite named twice is one claim, not two.
+targets_are 'a.test.sh' 'bash tests/a.test.sh && bash tests/a.test.sh'
+
+# THE SUPERSET ARRAY ITSELF, so a spelling added to the class arm cannot be added without
+# an answer here. Both halves asserted per spelling: it classifies AND it names a target.
+for sc in "${SUPERSET_SUITES[@]}"; do
+  expect_eq "C7 [$sc] is suite-class" "suite" "$(class_of "$sc")"
+  expect_eq "C7 …and names its suite" "run.sh" "$(targets_of "$sc")"
+done
+
+# --- direction 2: nothing else names one ---
+targets_are '' 'git status --short'
+targets_are '' 'echo "bash tests/run.sh"'
+targets_are '' 'echo run bash tests/run.sh first'
+targets_are '' 'git commit -m "make the row green"'
+targets_are '' 'ls tests/run.sh'
+targets_are '' 'bash run.sh'
+targets_are '' 'cat <<EOF
+bash tests/run.sh
+EOF'
+# SUITE-CLASS BUT FILELESS. These run a suite and name no file this repo budgets by, so the
+# budget arm has nothing to compare and stands aside — asserted rather than assumed,
+# because a target invented for them would refuse a project bionic has no row about.
+for fileless in 'pytest' 'npm test' 'go test ./...' 'make test' 'make check' 'cargo test'; do
+  expect_eq "C7 [$fileless] is suite-class" "suite" "$(class_of "$fileless")"
+  expect_eq "C7 …and names no suite FILE" "" "$(targets_of "$fileless")"
+done
+
+
+section "C8 — the SCOPED reading: which repo's suite, and a mode that runs nothing (K-2, A-7, A-36a)"
+# THE DEFECT. `cmd_suite_targets` answered with a BASENAME and nothing else, so the budget
+# arm judged any file on the machine named `*.test.sh` against THIS repository's roster.
+# Three false refusals were hit without trying (critic K-2): a scratch probe at
+# /tmp/critic-probe/probe2.test.sh, an unexpanded `$t.test.sh`, and `bash tests/run.sh
+# --dry-run`, a mode whose whole documented behaviour is to run nothing (the walk, A-36a).
+#
+# THE CURE, in two halves. (a) An optional SECOND argument names the repository the answer
+# is about; with it, a segment names a target only when the path it runs resolves to that
+# repo's `tests/<basename>`. (b) A suite-class segment carrying `--dry-run` names no target
+# at all — the runner's own "run nothing" mode is not an instrument spend.
+#
+# WHY SHAPE AND NOT EXISTENCE. The resolved path is compared to `<root>/tests/<basename>`;
+# it is NOT stat'd. A hook that refused only files it could see would allow a suite the
+# writer is about to create, and would make the wall's answer depend on the filesystem at
+# hook time rather than on the command. The class this closes is "a path somewhere else",
+# and the path says that on its own.
+
+targets_of_in() {  # <repo root> <command> -> the library's targets, scoped to that root
+  printf '%s' "$2" | bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_suite_targets "$(cat)" "$2"
+  ' _ "$LIB" "$1" 2>&1
+}
+
+C8_ROOT="$SANDBOX/c8repo"
+mkdir -p "$C8_ROOT/tests"
+
+targets_in_are() {  # <expected> <command>
+  expect_eq "C8 targets [$2] under the repo root" "$1" "$(targets_of_in "$C8_ROOT" "$2")"
+}
+
+# --- (a) this repo's tests/, and nothing else ---
+targets_in_are 'run.sh'          'bash tests/run.sh'
+targets_in_are 'run.sh'          './tests/run.sh'
+targets_in_are 'alpha.test.sh'   'bash tests/alpha.test.sh'
+targets_in_are 'alpha.test.sh'   "bash $C8_ROOT/tests/alpha.test.sh"
+# …and the same basename anywhere else on the machine is NOT this row's business.
+targets_in_are ''                'bash /tmp/critic-probe/probe2.test.sh'
+targets_in_are ''                'bash /some/other/tree/tests/run.sh'
+targets_in_are ''                'bash ../sibling/tests/alpha.test.sh'
+targets_in_are ''                'bash scratch/alpha.test.sh'
+
+# THE cd-LICENSED BASENAME FORM STAYS NAMED. `cd tests && bash run.sh` records no
+# directory to resolve against, so the reading cannot say which tree it is in — and the
+# full tree is the one act this arm fails CLOSED on. Named, therefore refusable.
+targets_in_are 'run.sh'          'cd tests && bash run.sh'
+
+# AN UNEXPANDED VARIABLE STAYS NAMED TOO, deliberately: the guard has a refusal written
+# for exactly this state (C-5), and it can only give it if the reading hands the token up.
+targets_in_are '$s.test.sh'      'bash "tests/$s.test.sh"'
+
+# --- (b) --dry-run runs nothing, so it spends nothing ---
+targets_in_are ''                'bash tests/run.sh --dry-run'
+targets_in_are ''                'bash tests/run.sh --dry-run 2>&1 | tee /tmp/d.log'
+expect_eq "C8 …and --dry-run is still suite-CLASS (the class arm is unchanged)" \
+  "suite" "$(class_of 'bash tests/run.sh --dry-run')"
+# The exemption is the flag, not the runner: a real run beside it is still named.
+targets_in_are 'run.sh'          'bash tests/run.sh --serial'
+
+# --- the unscoped call is unchanged: no root, the legacy basename answer ---
+expect_eq "C8 with no root the answer is the bare basename, as before" \
+  "probe2.test.sh" "$(targets_of 'bash /tmp/critic-probe/probe2.test.sh')"
+
+finish

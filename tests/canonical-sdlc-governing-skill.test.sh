@@ -11,6 +11,7 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 # THE ONE BOUND-MARKER BUILDER (AC-24). Two hand-written markers in this file survived that
 # consolidation — they happened to match `bind_plan`'s output byte for byte, which is exactly
 # the agreement a shared builder makes true by construction instead of by luck (Step-6
@@ -18,9 +19,6 @@ set -euo pipefail
 . "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh"
-PASS=0
-FAIL=0
-TOTAL=0
 
 cleanup_dirs=()
 cleanup() {
@@ -130,30 +128,15 @@ run_edit() {
   rm -f "$tmp_err"
 }
 
-assert_eq() {
-  local label="$1" expected="$2" actual="$3"
-  TOTAL=$((TOTAL + 1))
-  if [ "$expected" = "$actual" ]; then
-    PASS=$((PASS + 1))
-    printf '  PASS  %s\n' "$label"
-  else
-    FAIL=$((FAIL + 1))
-    printf '  FAIL  %s (expected=%q actual=%q)\n' "$label" "$expected" "$actual"
-  fi
-}
+# Same semantics as the framework's expect_eq (label, expected, actual;
+# string equality) -- delegated rather than reimplemented so the counting
+# and section-floor bookkeeping run through the ONE definition (AC-12, A-16).
+assert_eq() { expect_eq "$1" "$2" "$3"; }
 
-# Asserts $3 (haystack, typically $HOOK_STDERR) contains substring $2.
-# Same PASS/FAIL accounting + output shape as the inline `case` idiom
-# used throughout this file, hoisted to a helper for the many
-# stderr-substring checks.
-assert_contains() {
-  local label="$1" needle="$2" hay="$3"
-  TOTAL=$((TOTAL + 1))
-  case "$hay" in
-    *"$needle"*) PASS=$((PASS + 1)); printf '  PASS  %s\n' "$label" ;;
-    *) FAIL=$((FAIL + 1)); printf '  FAIL  %s (missing %q in %q)\n' "$label" "$needle" "$hay" ;;
-  esac
-}
+# Asserts $3 (haystack, typically $HOOK_STDERR) contains substring $2. Same
+# semantics as the framework's expect_contains (literal substring via a
+# quoted case glob, same argument order) -- delegated for the same reason.
+assert_contains() { expect_contains "$1" "$2" "$3"; }
 
 # Builds a valid canonical-sdlc artifact. All config via KEY=VALUE args
 # (bash-3.2 arg parse):
@@ -466,7 +449,7 @@ assert_eq "continuation_exempt_from_matrix exit 0" 0 "$HOOK_EXIT"
 # naming both legal values.
 
 echo
-echo "=== walk: enum (epic-14 AC-3) ==="
+section "walk: enum (epic-14 AC-3)"
 
 echo "walk: required → allow"
 run_write "$project/.bionic/docs/plans/epic-01-demo/walk-required.plan.md" \
@@ -623,9 +606,9 @@ project=$(make_project)
 run_write "$project/.bionic/docs/plans/epic-01-demo/audit-create.plan.md" "$(build_plan intent=spike rigor=audited)"
 assert_eq "floor_audit_file_created exit 0" 0 "$HOOK_EXIT"
 if [ -f "$(audit_file_for "$project")" ]; then
-  PASS=$((PASS+1)); TOTAL=$((TOTAL+1)); printf '  PASS  floor_audit_file_created (file + dir created)\n'
+  ok "floor_audit_file_created (file + dir created)"
 else
-  FAIL=$((FAIL+1)); TOTAL=$((TOTAL+1)); printf '  FAIL  floor_audit_file_created (file missing)\n'
+  no "floor_audit_file_created (file missing)"
 fi
 # Incident 0001 (AC-3): the SAME write that just landed above must leave no
 # audit file anywhere under the project tree. Paired with the presence check
@@ -662,7 +645,7 @@ assert_contains "floor_never_blocks logs epic-floor" "epic-floor" "$(read_audit 
 # the marker, the existing violation log line is unchanged.
 
 echo
-echo "=== rigor-override: marker (epic-14 AC-10, AC-11) ==="
+section "rigor-override: marker (epic-14 AC-10, AC-11)"
 
 RIGOR_OVERRIDE_LINE='rigor-override: chris 2026-08-01 derived=audited chosen=tested'
 
@@ -674,16 +657,8 @@ run_write "$project/.bionic/docs/plans/epic-01-demo/override-present.plan.md" \
 assert_eq "rigor_override_present exit 0" 0 "$HOOK_EXIT"
 assert_contains "rigor_override_present stderr says user-overridden" "user-overridden" "$HOOK_STDERR"
 assert_contains "rigor_override_present audit says user-overridden" "user-overridden" "$(read_audit "$project")"
-TOTAL=$((TOTAL + 1))
-case "$HOOK_STDERR" in
-  *"project floor"*) FAIL=$((FAIL + 1)); printf '  FAIL  rigor_override_present stderr still names the violation text\n' ;;
-  *) PASS=$((PASS + 1)); printf '  PASS  rigor_override_present stderr does not name the violation text\n' ;;
-esac
-TOTAL=$((TOTAL + 1))
-case "$(read_audit "$project")" in
-  *"project floor"*) FAIL=$((FAIL + 1)); printf '  FAIL  rigor_override_present audit still names the violation text\n' ;;
-  *) PASS=$((PASS + 1)); printf '  PASS  rigor_override_present audit does not name the violation text\n' ;;
-esac
+expect_absent "rigor_override_present stderr does not name the violation text" "project floor" "$HOOK_STDERR"
+expect_absent "rigor_override_present audit does not name the violation text" "project floor" "$(read_audit "$project")"
 
 echo "project-floor violated, NO marker → existing violation log unchanged"
 project2=$(make_project)
@@ -691,11 +666,7 @@ printf 'rigor-floor: audited\n' > "$project2/.bionic/config.yaml"
 run_write "$project2/.bionic/docs/plans/epic-01-demo/override-absent.plan.md" \
   "$(build_plan intent=build rigor=tested)"
 assert_eq "rigor_override_absent exit 0" 0 "$HOOK_EXIT"
-TOTAL=$((TOTAL + 1))
-case "$(read_audit "$project2")" in
-  *"user-overridden"*) FAIL=$((FAIL + 1)); printf '  FAIL  rigor_override_absent audit wrongly says user-overridden\n' ;;
-  *) PASS=$((PASS + 1)); printf '  PASS  rigor_override_absent audit does not say user-overridden\n' ;;
-esac
+expect_absent "rigor_override_absent audit does not say user-overridden" "user-overridden" "$(read_audit "$project2")"
 
 # ============================================================
 # AC-10: the project root is COMPUTED, never discovered
@@ -712,7 +683,7 @@ esac
 # `git` would reproduce whatever the test author believed it does, which is
 # the belief the AC exists to check.
 echo
-echo "=== AC-10: computed root resolution ==="
+section "AC-10: computed root resolution"
 
 # The five criteria below run against the SHIPPED text of the function,
 # extracted from the hook and eval'd here — not against a reimplementation.
@@ -872,7 +843,7 @@ assert_contains "ac10_e2e_oldgit names the artifact's own repo, not the session 
 # gives every other section in this file) would hide the exact defect this
 # AC guards.
 echo
-echo "=== AC-11/AC-12: tree creation on first lifecycle use ==="
+section "AC-11/AC-12: tree creation on first lifecycle use"
 
 make_bare_project() {
   local dir
@@ -966,44 +937,40 @@ echo "AC-11 c4d: blocked on the VERSION gate (wrong number) -> no tree"
 ac11_p6=$(make_bare_project)
 run_write "$ac11_p6/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan version=3)"
 assert_eq "ac11_c4d write blocked" 2 "$HOOK_EXIT"
-TOTAL=$((TOTAL + 1))
 if [ -d "$ac11_p6/.bionic/docs" ]; then
-  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4d no .bionic/ created for a wrong-version artifact (found %s/.bionic)\n' "$ac11_p6"
+  no "ac11_c4d no .bionic/ created for a wrong-version artifact" "found $ac11_p6/.bionic"
 else
-  PASS=$((PASS + 1)); printf '  PASS  ac11_c4d no .bionic/ created for a wrong-version artifact\n'
+  ok "ac11_c4d no .bionic/ created for a wrong-version artifact"
 fi
 
 echo "AC-11 c4e: blocked on the TRIPLE gate (invalid intent) -> no tree"
 ac11_p7=$(make_bare_project)
 run_write "$ac11_p7/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan intent=definitely-not-an-intent)"
 assert_eq "ac11_c4e write blocked" 2 "$HOOK_EXIT"
-TOTAL=$((TOTAL + 1))
 if [ -d "$ac11_p7/.bionic/docs" ]; then
-  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4e no .bionic/ created for an invalid-triple artifact (found %s/.bionic)\n' "$ac11_p7"
+  no "ac11_c4e no .bionic/ created for an invalid-triple artifact" "found $ac11_p7/.bionic"
 else
-  PASS=$((PASS + 1)); printf '  PASS  ac11_c4e no .bionic/ created for an invalid-triple artifact\n'
+  ok "ac11_c4e no .bionic/ created for an invalid-triple artifact"
 fi
 
 echo "AC-11 c4f: blocked on the required-FLAGS gate -> no tree"
 ac11_p8=$(make_bare_project)
 run_write "$ac11_p8/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan omit=has_ui)"
 assert_eq "ac11_c4f write blocked" 2 "$HOOK_EXIT"
-TOTAL=$((TOTAL + 1))
 if [ -d "$ac11_p8/.bionic/docs" ]; then
-  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4f no .bionic/ created for a flag-missing artifact (found %s/.bionic)\n' "$ac11_p8"
+  no "ac11_c4f no .bionic/ created for a flag-missing artifact" "found $ac11_p8/.bionic"
 else
-  PASS=$((PASS + 1)); printf '  PASS  ac11_c4f no .bionic/ created for a flag-missing artifact\n'
+  ok "ac11_c4f no .bionic/ created for a flag-missing artifact"
 fi
 
 echo "AC-11 c4g: blocked on the MATRIX gate -> no tree"
 ac11_p9=$(make_bare_project)
 run_write "$ac11_p9/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$(build_plan matrix=no)"
 assert_eq "ac11_c4g write blocked" 2 "$HOOK_EXIT"
-TOTAL=$((TOTAL + 1))
 if [ -d "$ac11_p9/.bionic/docs" ]; then
-  FAIL=$((FAIL + 1)); printf '  FAIL  ac11_c4g no .bionic/ created for a matrix-less step-3 plan (found %s/.bionic)\n' "$ac11_p9"
+  no "ac11_c4g no .bionic/ created for a matrix-less step-3 plan" "found $ac11_p9/.bionic"
 else
-  PASS=$((PASS + 1)); printf '  PASS  ac11_c4g no .bionic/ created for a matrix-less step-3 plan\n'
+  ok "ac11_c4g no .bionic/ created for a matrix-less step-3 plan"
 fi
 
 echo "AC-12 c1: .bionic/.gitignore exists and contains '*'"
@@ -1062,7 +1029,7 @@ assert_eq "ac12_c4 ...and says nothing on stderr" "" "$HOOK_STDERR"
 # files carrying canonical-sdlc frontmatter (slice 6 put them there); they are
 # placed, and c8 pins that they stay unblocked.
 echo
-echo "=== AC-13: misplacement blocks; absence never does ==="
+section "AC-13: misplacement blocks; absence never does"
 
 ac13_p=$(make_project)
 ac13_docs="$ac13_p/.bionic/docs"
@@ -1196,22 +1163,17 @@ assert_contains "ac13_c10 misplaced-via-symlink names the real docs root" \
 # repo's shipped text, not about this hook. Homed here rather than in a new
 # suite so `tests/run.sh`'s suite count is unchanged.
 echo
-echo "=== AC-14: no session-state file under the new layout ==="
+section "AC-14: no session-state file under the new layout"
 
 AC14_REPO="$(cd "$(dirname "$HOOK")/.." && pwd)"
 
 echo "AC-14 a: the only context.md under the new docs layout is the exempt operational record"
-TOTAL=$((TOTAL + 1))
 ac14_stray=""
 if [ -d "$AC14_REPO/.bionic/docs" ]; then
   ac14_stray=$(find "$AC14_REPO/.bionic/docs" -type f -name 'context.md' \
                ! -path "$AC14_REPO/.bionic/docs/record/context.md" 2>/dev/null)
 fi
-if [ -z "$ac14_stray" ]; then
-  PASS=$((PASS + 1)); printf '  PASS  ac14_a no stray context.md under .bionic/docs (outside the exempt record)\n'
-else
-  FAIL=$((FAIL + 1)); printf '  FAIL  ac14_a stray context.md found outside the exempt record:\n%s\n' "$ac14_stray"
-fi
+expect_empty "ac14_a no stray context.md under .bionic/docs (outside the exempt record)" "$ac14_stray"
 
 echo "AC-14 b: no shipped surface instructs anything to write a session-state context.md"
 # Shipped surfaces = what claude-bootstrap.sh installs into ~/.claude/ (hooks,
@@ -1233,13 +1195,8 @@ done < <(find "$AC14_REPO/skills" -type f -name '*.md' 2>/dev/null)
 # A vacuous glob would make this assertion pass by matching nothing. Pin the
 # surface set as non-empty first, so "no hits" means "searched and found none".
 
-TOTAL=$((TOTAL + 1))
 ac14_hits=$(grep -nEi "$AC14_WRITE_VERB" "${AC14_SURFACES[@]}" 2>/dev/null || true)
-if [ -z "$ac14_hits" ]; then
-  PASS=$((PASS + 1)); printf '  PASS  ac14_b no shipped surface instructs a context.md write\n'
-else
-  FAIL=$((FAIL + 1)); printf '  FAIL  ac14_b shipped surfaces still instruct a context.md write:\n%s\n' "$ac14_hits"
-fi
+expect_empty "ac14_b no shipped surface instructs a context.md write" "$ac14_hits"
 
 # ============================================================
 # design wall: the three-way rule (wave-02 AC-2, AC-3, AC-4)
@@ -1345,7 +1302,7 @@ Design decisions below cite the requirements they serve (R-refs).
 }
 
 echo
-echo "=== design wall: three-way rule (wave-02 AC-2, AC-3, AC-4) ==="
+section "design wall: three-way rule (wave-02 AC-2, AC-3, AC-4)"
 
 design_project=$(make_project)
 DESIGN_SPECS="$design_project/.bionic/docs/specs/epic-01-demo"
@@ -1533,7 +1490,7 @@ assert_eq "design_combined_valid exit 0" 0 "$HOOK_EXIT"
 # (no worktree involved at all) — the wall's TARGET_BIONIC/PINNED_BIONIC
 # comparison is agnostic to which kind of "wrong tree" it is.
 echo
-echo "=== AC-13: pinned-root wall ==="
+section "AC-13: pinned-root wall"
 
 ac13_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac13_tmp")
 ac13_main="$ac13_tmp/main"
@@ -1657,7 +1614,7 @@ assert_contains "ac13_canonical_still_ac10_arm names the pinned docs root, AC-10
   "$ac13_main/.bionic/docs/plans/" "$HOOK_STDERR"
 
 echo
-echo "=== AC-14: no-git fallback walks up from the TARGET, not the shell ==="
+section "AC-14: no-git fallback walks up from the TARGET, not the shell"
 #
 # session-20260812-bionic-root-pin. resolve_project_root()'s no-git fallback used to answer
 # `pwd` unconditionally, so a session whose shell cwd sat somewhere else entirely pinned the
@@ -1798,26 +1755,20 @@ assert_eq "walls-6 a spec write from a worktree cwd is not this arm's business" 
 # mattered for a project that had none.
 
 echo
-echo "=== AC-7: no engagement marker → silent on every clause of the project disjunction ==="
+section "AC-7: no engagement marker → silent on every clause of the project disjunction"
 
 AC7_BAD_PLAN=$(build_plan intent=definitely-not-an-intent)
 
 ac7_silent() {  # <label> — asserts on the last run_write
-  TOTAL=$((TOTAL + 1))
   if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-    PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"
+    ok "$1"
   else
-    FAIL=$((FAIL + 1)); printf '  FAIL  %s (exit=%s stderr=%q)\n' "$1" "$HOOK_EXIT" "$HOOK_STDERR"
+    no "$1" "exit=$HOOK_EXIT stderr=$HOOK_STDERR"
   fi
 }
 
 ac7_refused() {  # <label> — the control on the same fixture, marker restored
-  TOTAL=$((TOTAL + 1))
-  if [ "$HOOK_EXIT" -eq 2 ]; then
-    PASS=$((PASS + 1)); printf '  PASS  %s\n' "$1"
-  else
-    FAIL=$((FAIL + 1)); printf '  FAIL  %s (expected exit 2, got %s)\n' "$1" "$HOOK_EXIT"
-  fi
+  expect_eq "$1" 2 "$HOOK_EXIT"
 }
 
 # --- clause 1: an OPEN RUN under this root ---
@@ -1848,11 +1799,10 @@ unengage "$ac7_p3"
 rm -rf "$ac7_p3/.bionic"
 run_write "$ac7_p3/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
 ac7_silent "ac7 clause 3 (path inside a .bionic that does not exist): passes an unengaged session"
-TOTAL=$((TOTAL + 1))
 if [ -d "$ac7_p3/.bionic" ]; then
-  FAIL=$((FAIL + 1)); printf '  FAIL  ac7 clause 3 ...and creates no tree on the way past\n'
+  no "ac7 clause 3 ...and creates no tree on the way past"
 else
-  PASS=$((PASS + 1)); printf '  PASS  ac7 clause 3 ...and creates no tree on the way past\n'
+  ok "ac7 clause 3 ...and creates no tree on the way past"
 fi
 engage "$ac7_p3"
 run_write "$ac7_p3/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7_BAD_PLAN"
@@ -1887,7 +1837,7 @@ run_write_from "$ac7_p5/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md" "$AC7
 ac7_silent "ac7 engagement in the cwd's project does not arm the wall over another project's artifact"
 
 echo
-echo "=== AC-9: bind-on-write, and the run verdict this hook now reads ==="
+section "AC-9: bind-on-write, and the run verdict this hook now reads"
 
 # WHY THIS SECTION EXISTS (wave-session-bound-run, 2026-09-04). Until this wave every
 # hook answered "which run am I in" by scanning the project root for the newest plan, so
@@ -2132,11 +2082,7 @@ assert_eq "v1 ...and passes" 0 "$HOOK_EXIT"
 
 bound_marker "$v_p" "$GS_SID" "$v_plans/wave-01-old.plan.md"
 run_write "$v_probe" '# operational note'
-TOTAL=$((TOTAL + 1))
-case "$HOOK_STDERR" in
-  *fallback*) FAIL=$((FAIL + 1)); printf '  FAIL  %s (stderr=%q)\n' "v2 a BOUND session never announces a fallback" "$HOOK_STDERR" ;;
-  *)          PASS=$((PASS + 1)); printf '  PASS  %s\n' "v2 a BOUND session never announces a fallback" ;;
-esac
+expect_absent "v2 a BOUND session never announces a fallback" "fallback" "$HOOK_STDERR"
 
 # AC-6: a binding is a commitment. The bound plan is delivered and the OTHER plan in this
 # root is wide open — the session still has no run, and is told why rather than being
@@ -2148,8 +2094,4 @@ assert_contains "v3 a session bound to a closed plan is told, and never falls th
   "$HOOK_STDERR"
 assert_eq "v3 ...and still passes" 0 "$HOOK_EXIT"
 
-echo
-printf 'Results: %d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
-if [ "$FAIL" -ne 0 ]; then
-  exit 1
-fi
+finish

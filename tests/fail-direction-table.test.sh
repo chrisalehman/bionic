@@ -21,6 +21,9 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 # Overridable so the table can be driven against a MUTATED COPY without the
 # shipped file ever being modified — §9's mutation-and-restore proof, repeatable
@@ -68,11 +71,6 @@ chmod +x "$SANDBOX/stub/security"
 # DIFFERENT blocking probe (start:probe-refuses breaks the state-dir probe, per
 # w2-s45-wallfacts.md §5 judgment call 9: never an absent credential).
 printf '{}' > "$CLAUDE_CONFIG_DIR/.credentials.json"
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -152,13 +150,16 @@ plant_agent() {  # <subagents-dir> <agent-id> <name>
 # hooks/dispatch-preflight.sh). Since slice 4/9 the roster no longer decides
 # ownership — the session directory does — so a row here carries the CONTRACT and,
 # when it is `confirmed`, reaches a target outside this session's own directory.
-roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
+# RENAMED OFF THE WRITER'S NAME (S17): `roster_row` is the production writer
+# (payload/scripts/lib/roster.sh), and a private definition of that name would shadow the
+# one writer with a fixture. The row itself now comes from `roster_row_fixture`.
+fd_roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
   local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
   local f="$repo/.bionic/tmp/roster-$sid.state"
   mkdir -p "$repo/.bionic/tmp"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
-    "$status" "$sid" "$name" "$aid" "$prog" >> "$f"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status="$status" session="$sid" name="$name" agent_id="$aid" \
+    launched_at=2026-08-05T00:00:00Z progress="$prog" >> "$f"
   return 0
 }
 
@@ -178,12 +179,7 @@ fd_live() {  # <transcript> <name>...
   local tr="$1"; shift
   local n body
   mkdir -p "$(dirname "$tr")"
-  body=$(
-    printf '%s\n\nTeammates (%d):\n' "$FD_LA_SELF" "$#"
-    for n in "$@"; do
-      printf '  %s [8895ce]  ·  bionic:implementor  ·  running  ·  started 7m ago\n' "$n"
-    done
-  )
+  body="$(live_answer_body "$@")"
   {
     jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
       '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
@@ -205,9 +201,14 @@ payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
     # PAIR — an ordinary, well-formed dispatch — and its §7 direction is
     # "pass in silence"; a fieldless brief is a malformed dispatch, whose warning
     # is a different claim, driven in tests/dispatch-preflight.test.sh S10c.
+    # The `Suites:` line joins the well-formed brief for the same reason the labels above
+    # are here (S13, spec AC-20): the start gate refuses a brief declaring neither `Files:`
+    # nor `Suites:`, so without it the POSITIVE PAIR would be a malformed dispatch and the
+    # row's own §7 direction ("pass in silence") could never be measured.
     Agent)    input=$(jq -n --arg d "a dispatch" --arg p 'Expected artifact: .bionic/docs/record/w99.txt
 Expected duration: ~25 minutes.
-Progress artifact: .bionic/tmp/w99.progress' \
+Progress artifact: .bionic/tmp/w99.progress
+Suites: tests/widget.test.sh' \
                 '{description:$d, subagent_type:"implementor", name:"w99-impl", prompt:$p}') ;;
     TaskStop) input=$(jq -n --arg k "$arg" '{task_id:$k}') ;;
     Bash)     input=$(jq -n --arg c "$arg" '{command:$c}') ;;
@@ -228,7 +229,7 @@ IFS='|' read -r A_REPO A_TR A_SUB <<< "$(make_world active yes)"
 plant_agent "$A_SUB" "aworker-1111111111111111" "worker"
 plant_agent "$A_SUB" "atwin-2222222222222222" "twin"
 plant_agent "$A_SUB" "atwin-3333333333333333" "twin"
-roster_row "$A_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_roster_row "$A_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 # THE AMBIGUITY IS IN THE ANSWER, NOT ON DISK (S6, D2′). Two `agent-<id>.meta.json` files of
 # one name used to make `twin` ambiguous because the resolver scanned the session directory;
 # it no longer scans anything, so the ambiguity this world exists to drive has to be what it
@@ -296,7 +297,7 @@ printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$T_SLUG/$SID_A.jsonl"
 # hooks/stop-check.sh prints — so the producer is genuinely run here.
 IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world observed yes)"
 plant_agent "$O_SUB" "aworker-1111111111111111" "worker"
-roster_row "$O_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_roster_row "$O_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 # Both halves of the pair resolve through the live set (S6): the PRODUCER needs it to reach
 # an evidence tier at all, and the gate needs it to reach the observation record.
 fd_live "$O_TR" worker
@@ -327,7 +328,7 @@ observe "$SID_A" "$O_TR" "$O_REPO" "worker"
 # Stale: observed, then the target writes again (D-1's activity boundary).
 IFS='|' read -r S_REPO S_TR S_SUB <<< "$(make_world stale yes)"
 plant_agent "$S_SUB" "aworker-1111111111111111" "worker"
-roster_row "$S_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_roster_row "$S_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 fd_live "$S_TR" worker
 observe "$SID_A" "$S_TR" "$S_REPO" "worker"
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more work"}]}}\n' \
@@ -336,14 +337,14 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"more wo
 # Foreign: the only observation belongs to another session.
 IFS='|' read -r F_REPO F_TR F_SUB <<< "$(make_world foreign yes)"
 plant_agent "$F_SUB" "aworker-1111111111111111" "worker"
-roster_row "$F_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_roster_row "$F_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 # THE LOOK IS SESSION B'S, so session B is the one that has to resolve the target: the
 # producer runs under B's key, reads B's transcript for the live set and B's roster for the
 # agent id. Session A needs its own answer too, or the gate would refuse for want of one and
 # never reach the foreign-observation verdict this row names.
 F_TR_B="${F_TR%/*}/$SID_B.jsonl"
 plant_agent "${F_TR_B%.jsonl}/subagents" "aworker-1111111111111111" "worker"
-roster_row "$F_REPO" "$SID_B" "worker" "aworker-1111111111111111"
+fd_roster_row "$F_REPO" "$SID_B" "worker" "aworker-1111111111111111"
 fd_live "$F_TR" worker
 fd_live "$F_TR_B" worker
 # The look is driven ENTIRELY inside session B — B's transcript, B's roster, B's copy of the
@@ -370,7 +371,7 @@ X_TR_B="${X_TR%/*}/$SID_B.jsonl"
 # `stop|unresolvable` a second time. The id below is what the platform actually emits.
 X_FULL_ID="abb20f6167777777777777"
 plant_agent "${X_TR_B%.jsonl}/subagents" "$X_FULL_ID" "worker"
-roster_row "$X_REPO" "$SID_A" "worker" "" "" intended
+fd_roster_row "$X_REPO" "$SID_A" "worker" "" "" intended
 fd_live "$X_TR" worker
 fd_live "$X_TR_B" worker
 observe "$SID_A" "$X_TR_B" "$X_REPO" "worker"
@@ -379,7 +380,7 @@ observe "$SID_A" "$X_TR_B" "$X_REPO" "worker"
 # session's, and about the right target — and it is not the stopper's own.
 IFS='|' read -r B_REPO B_TR B_SUB <<< "$(make_world borrowedlook yes)"
 plant_agent "$B_SUB" "aworker-1111111111111111" "worker"
-roster_row "$B_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_roster_row "$B_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 fd_live "$B_TR" worker
 observe "$SID_A" "$B_TR" "$B_REPO" "worker" "asubagent-2020202020202020"
 
@@ -387,7 +388,7 @@ observe "$SID_A" "$B_TR" "$B_REPO" "worker" "asubagent-2020202020202020"
 # working log is untouched, so this is the channel D-1 alone could not see.
 IFS='|' read -r G_REPO G_TR G_SUB <<< "$(make_world progressstale yes)"
 plant_agent "$G_SUB" "aworker-1111111111111111" "worker"
-roster_row "$G_REPO" "$SID_A" "worker" "aworker-1111111111111111" ".bionic/tmp/w99.progress"
+fd_roster_row "$G_REPO" "$SID_A" "worker" "aworker-1111111111111111" ".bionic/tmp/w99.progress"
 fd_live "$G_TR" worker
 printf 'stage 1\n' > "$G_REPO/.bionic/tmp/w99.progress"
 observe "$SID_A" "$G_TR" "$G_REPO" "worker"
@@ -397,7 +398,7 @@ printf 'stage 2\n' >> "$G_REPO/.bionic/tmp/w99.progress"
 # Unknown schema version: a record this gate will not guess at (checklist A6).
 IFS='|' read -r V_REPO V_TR V_SUB <<< "$(make_world badversion yes)"
 plant_agent "$V_SUB" "aworker-1111111111111111" "worker"
-roster_row "$V_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_roster_row "$V_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 fd_live "$V_TR" worker
 mkdir -p "$V_REPO/.bionic/tmp"
 printf 'v9|session=%s|target=%s|typed=worker|log=%s|mtime=1|size=1\n' \
@@ -407,7 +408,7 @@ printf 'v9|session=%s|target=%s|typed=worker|log=%s|mtime=1|size=1\n' \
 # A symlinked state path — a hostile repo may CLOSE the wall, never open it (§8).
 IFS='|' read -r L_REPO L_TR L_SUB <<< "$(make_world symlinked yes)"
 plant_agent "$L_SUB" "aworker-1111111111111111" "worker"
-roster_row "$L_REPO" "$SID_A" "worker" "aworker-1111111111111111"
+fd_roster_row "$L_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 fd_live "$L_TR" worker
 mkdir -p "$L_REPO/.bionic/tmp"
 ln -s "$SANDBOX/elsewhere.state" "$L_REPO/.bionic/tmp/stop-check.state"
@@ -588,7 +589,7 @@ stop|observed|0|silent|Stop gate — the positive pair: a fresh observation perm
 stop|unrostered-full-id|2|loud|Stop gate — after the verdict: CLOSED, loud
 '
 
-echo "=== §7 rows driven as behaviour (AC-10) ==="
+section "§7 rows driven as behaviour (AC-10)"
 while IFS='|' read -r surface cond want_exit want_loud row; do
   [ -n "$surface" ] || continue
   drive "$surface:$cond"
@@ -629,8 +630,7 @@ $(printf '%s' "$TABLE")
 EOF
 
 # ============================================================
-echo ""
-echo "=== the asymmetry itself: ONE missing field, TWO directions ==="
+section "the asymmetry itself: ONE missing field, TWO directions"
 # ============================================================
 #
 # Checklist A10's defect was not a wrong direction — it was that no test asserted
@@ -652,8 +652,7 @@ fi
 expect_eq "the open side stays silent about it" "" "$S_START_ERR"
 
 # ============================================================
-echo ""
-echo "=== the producer's two rows (§7 rows 4 and 5) ==="
+section "the producer's two rows (§7 rows 4 and 5)"
 # ============================================================
 
 P_REPO="$SANDBOX/w/producer/repo"; mkdir -p "$P_REPO/.bionic/tmp"
@@ -687,7 +686,5 @@ OUT=$( cd "$P_REPO" && env -u ANTHROPIC_API_KEY CLAUDE_CODE_SESSION_ID="$SID_A" 
 expect_eq "environment check with a failing blocking probe exits 1" "1" "$ST"
 expect_eq "…and no attestation is on disk" "no" "$([ -e "$PRIOR_A" ] && echo yes || echo no)"
 
-echo ""
-echo "──────────────────────────────────────────────"
-echo "fail-direction-table: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
+finish
 [ "$FAIL" -eq 0 ]

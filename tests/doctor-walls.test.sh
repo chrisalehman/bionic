@@ -33,25 +33,11 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.600s' "$actual")"; fi
-}
-expect_no_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
-}
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -81,8 +67,68 @@ mkdir -p "$EMPTY_PLUGINS"
 FIXTURE_RC="${TMP}/dot.zshrc"
 : > "$FIXTURE_RC"
 
+
+# ─── THE TOOL DIRECTORY IS THE FIXTURE'S, NOT THE MACHINE'S (wave-01 S4, AC-7) ─
+#
+# WHAT THIS SUITE RENDERED USED TO DEPEND ON WHOSE LAPTOP RAN IT. doctor asks
+# `command -v` about the nine `brew-dep` rows of BIONIC_DEP_TABLE, and six of
+# them — node, gh, rg, uv, docker, aws — live under /opt/homebrew here and
+# nowhere on a stripped PATH. Under the ambient PATH those rows are present;
+# under `PATH=/usr/bin:/bin:/usr/sbin:/sbin` six more rows turn absent, the
+# dependency roster this file pins shifts by six names, and an assertion fails
+# on a page that is perfectly correct. `claude` is the same story one row over,
+# and the one that used to hurt: with the CLI off PATH four `mcp-server` rows
+# turn `unknown`.
+#
+# SO THE FIXTURE OWNS THE SET. Every program doctor RUNS is symlinked from the
+# real one; every program doctor only ASKS ABOUT is an inert stub answering
+# `--version`. PATH is REPLACED, never prepended, so nothing ambient is
+# reachable — and `claude` is present or absent because this file says so,
+# which is what makes the pair of directories below an experiment rather than
+# a reflection of the machine.
+_TOOLS_REAL="bash sh env cat grep sed awk mkdir rm cp mv chmod stat readlink ls tr head tail
+sort uniq wc cut jq mktemp find xargs shasum uname date touch diff cmp printf true false
+sleep dirname basename realpath id ps df sysctl vm_stat git strings"
+_TOOLS_STUB="node pnpm gh rg uv docker aws"
+
+make_tool_dir() {  # <dir> <claude: yes|no> -> prints the reals it could NOT find
+  local d="$1" want="$2" t p missing=""
+  mkdir -p "$d"
+  for t in $_TOOLS_REAL; do
+    if p="$(command -v "$t" 2>/dev/null)"; then ln -sf "$p" "${d}/${t}"
+    else missing="${missing}${missing:+ }${t}"; fi
+  done
+  for t in $_TOOLS_STUB; do
+    printf '#!/bin/sh\ncase "$1" in --version) echo 1.0.0 ;; esac\nexit 0\n' > "${d}/${t}"
+    chmod +x "${d}/${t}"
+  done
+  # A CLI THAT ANSWERS "no such thing" to the one question doctor asks it —
+  # `claude mcp get <name>` — which is what a real CLI answers on a machine
+  # with no MCP server registered. Present-and-negative and absent are
+  # different renders, and telling them apart is this suite's AC-7 pair.
+  if [ "$want" = yes ]; then
+    printf '#!/bin/sh\nexit 1\n' > "${d}/claude"; chmod +x "${d}/claude"
+  else
+    rm -f "${d}/claude"
+  fi
+  printf '%s' "$missing"
+}
+
+BIN="${TMP}/toolbox"
+BIN_NO_CLAUDE="${TMP}/toolbox-no-claude"
+_TOOLS_MISSING="$(make_tool_dir "$BIN" yes)$(make_tool_dir "$BIN_NO_CLAUDE" no)"
+if [ -z "$_TOOLS_MISSING" ]; then ok "T0: the fixture's tool directory carries every program doctor runs"
+else no "T0: a program doctor runs is missing from the fixture's tool directory" "$_TOOLS_MISSING"; fi
+
 run_doctor() {  # -> doctor's whole output
-  ( cd "$REPO" && HOME="$TMP" BIONIC_SHELL_RC="$FIXTURE_RC" \
+  ( cd "$REPO" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
+      BIONIC_CLAUDE_HOME="$TMP/claude-home" BIONIC_PLUGIN_ROOT="$PLUG" \
+      BIONIC_PLUGINS_DIR="$EMPTY_PLUGINS" BIONIC_DOCTOR_PROBE_SECONDS=3 \
+      bash "$DOCTOR_SH" < /dev/null 2>&1 )
+}
+
+run_doctor_no_claude() {  # -> the same page with the CLI off PATH
+  ( cd "$REPO" && HOME="$TMP" PATH="$BIN_NO_CLAUDE" BIONIC_SHELL_RC="$FIXTURE_RC" \
       BIONIC_CLAUDE_HOME="$TMP/claude-home" BIONIC_PLUGIN_ROOT="$PLUG" \
       BIONIC_PLUGINS_DIR="$EMPTY_PLUGINS" BIONIC_DOCTOR_PROBE_SECONDS=3 \
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
@@ -100,7 +146,7 @@ walls_rows() {  # <full-output> -> the walls summary row and any per-wall rows
   printf '%s\n' "$1" | awk '/^  [^ ]+ wall/'
 }
 
-echo "=== Section 1: an intact tree — every wall's library resolves ==="
+section "Section 1: an intact tree — every wall's library resolves"
 
 OUT1="$(run_doctor)"
 ROWS1="$(walls_rows "$OUT1")"
@@ -110,8 +156,7 @@ expect_no_match "2: no per-wall failure row prints on an intact tree" "*cannot l
 expect_no_match "3: no wall reaches the FIX section on an intact tree" \
   "*wall cannot load*" "$OUT1"
 
-echo ""
-echo "=== Section 2: one library deleted — the two walls that want it go red ==="
+section "Section 2: one library deleted — the two walls that want it go red"
 
 rm -f "$PLUG/scripts/lib/git-argv.sh"
 
@@ -129,8 +174,7 @@ expect_no_match "7: a wall whose library is intact is not named" \
 expect_match "8: the FIX section carries the repair-phrased line" \
   "*protect-main*cannot load*git-argv.sh*→ run /bionic:setup — repair*" "$OUT2"
 
-echo ""
-echo "=== Section 3: the second library deleted — all four go red ==="
+section "Section 3: the second library deleted — all four go red"
 
 rm -f "$PLUG/scripts/lib/cmd-class.sh"
 
@@ -143,8 +187,7 @@ expect_match "10: farm-out-reminder is named with cmd-class.sh" \
 expect_match "11: background-suite-guard is named with cmd-class.sh" \
   "*background-suite-guard*cmd-class.sh*" "$ROWS3"
 
-echo ""
-echo "=== Section 4: every line this report printed fits the column budget ==="
+section "Section 4: every line this report printed fits the column budget"
 
 # lib/width.sh's rule, measured in COLUMNS: the glyph set is substituted away
 # before the length is taken, exactly as bionic_cols does it.
@@ -162,6 +205,26 @@ for _n in 1 2 3; do
   else no "12.${_n}: a line of run ${_n} exceeds 100 columns" "$_over"; fi
 done
 
-echo ""
-echo "walls: ${PASS}/${TOTAL} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ]
+
+section "Section 5: the claude CLI absent, and present, on one fixture (AC-7)"
+
+# THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
+# `claude` is the one program on the fixture's PATH whose presence changes what
+# this page says: the four `mcp-server` rows are checked with `claude mcp get`,
+# so with the CLI gone they turn from a plain absence into an UNKNOWN with a
+# cause, and one of the fix lines that renders from that cause measured 105
+# columns. Before the tool directory above, which half a run got was whatever
+# the runner's PATH happened to hold. Now the fixture says, and both halves are
+# asserted here — the absent render, and the present one that proves the absent
+# assertion is not matching everything.
+OUT_NOCLI="$(run_doctor_no_claude)"
+OUT_WITHCLI="$(run_doctor)"
+
+expect_match "13.1: with the CLI off PATH, an MCP row names that as the cause"   "*chrome-devtools*the claude CLI is not on PATH*" "$OUT_NOCLI"
+expect_no_match "13.2: …and with the CLI present that cause is nowhere on the page"   "*the claude CLI is not on PATH*" "$OUT_WITHCLI"
+expect_match "13.3: …which answers the same row from the CLI instead (the pair is not vacuous)"   "*chrome-devtools*not installed*" "$OUT_WITHCLI"
+_over="$(too_wide "$OUT_NOCLI")"
+if [ -z "$_over" ]; then ok "13.4: the CLI-absent page still fits 100 columns"
+else no "13.4: a line of the CLI-absent page exceeds 100 columns" "$_over"; fi
+
+finish
