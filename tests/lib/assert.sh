@@ -39,13 +39,12 @@
 #                         nothing, print the tally, exit by FAIL
 #
 # THE COUNTERS AND ok/no ARE DEFINED HERE, UNCONDITIONALLY. This file is the ONE
-# definition of PASS/FAIL/TOTAL and of what counts as a result (D1). A suite that
-# still carries its own `PASS=0; FAIL=0; TOTAL=0` and its own `ok()`/`no()` — 49
-# of them do, on the day this is written — overrides these after sourcing and
-# keeps working exactly as before; migrating those suites is S5–S9's job and the
-# runner's adoption wall (S10) is what makes a private definition an error. What
-# changes here is that the framework no longer DEFERS: the definitions below are
-# the tree's, not a fallback.
+# definition of PASS/FAIL/TOTAL and of what counts as a result (D1). It does not
+# DEFER: a suite that defines its own `ok()`/`no()` or resets its own counters at
+# column 0 is REFUSED by the runner's adoption wall (`_tf_adoption_refusal`,
+# below) and never runs — as is a suite that does not adopt this file at all.
+# All 55 suites on the roster are clients of it; the 49 that carried private
+# definitions were migrated by S5–S9 and the wall closed the door behind them.
 #
 # ── THE GENERIC FAMILY: SEMANTICS, ARGUMENT ORDER, AND THE OLD SPELLINGS ─────
 #
@@ -63,8 +62,9 @@
 # ARGUMENT ORDER is `<label> <expected> <actual>` throughout, which is what the
 # tree already did unanimously: expected-side first for eq/ne/status, needle
 # before haystack for contains/absent, pattern before subject for match/no_match.
-# The two exceptions in the tree (live-agents and resources spell expect_match
-# `<label> <actual> <ERE>`) are outvoted 11 to 2 and are migration work.
+# The two exceptions in the tree (live-agents and resources spelled expect_match
+# `<label> <actual> <ERE>`) were outvoted 11 to 2 and were renamed onto
+# `expect_regex` by S9b; no `expect_match` call survives in either file.
 #
 # SEMANTICS are the tree's most common definition of each name, measured:
 #
