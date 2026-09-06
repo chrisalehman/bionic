@@ -23,13 +23,11 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 REC="$HERE/execution-recorder.sh"
 OBSERVE="$HERE/stop-check.sh"
-PASS=0
-FAIL=0
-TOTAL=0
 
 # `cd … && pwd` normalizes the path: $TMPDIR carries a trailing slash on macOS,
 # and a doubled separator would slugify differently from the cwd the scripts
@@ -38,21 +36,14 @@ SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/exec-recorder-test.XXXXXX")" && pwd)
 trap 'rm -rf "$SANDBOX"' EXIT
 
 # ---------- assertions ----------
-
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-
-expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-# Was undefined until wave-roster-lifecycle S9: Section 12b called it and bash's
-# "command not found" (no `set -e` in this file) silently dropped both calls
-# instead of counting them — a false green over two assertions this suite has
-# always claimed to make. Every sibling suite that uses this name defines it the
-# same way (tests/dispatch-preflight.test.sh, tests/stop-guard.test.sh, …).
-expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_matches()  { if grep -qE -- "$2" <<<"$3"; then ok "$1"; else no "$1" "no match: $2"; fi; }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
+#
+# ok/no/expect_status/expect_eq/expect_empty/expect_contains/expect_absent are
+# the framework's (tests/lib/assert.sh) — byte-identical semantics, verified by
+# a scratch-copy before/after run under the pin (119/119 both ways, zero fails
+# either side; S6 report). expect_matches was a pure rename onto expect_regex
+# (same ERE-via-herestring semantics, same argument order — S1b/A-17 mapping
+# table). expect_file/expect_no_file are not owned names (S1b's report lists
+# them explicitly as not-owned) and stay local, unchanged.
 expect_file()     { if [ -f "$2" ]; then ok "$1"; else no "$1" "no such file: $2"; fi; }
 expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2"; else ok "$1"; fi; }
 
@@ -306,8 +297,7 @@ observe() {
 }
 
 # ============================================================
-echo ""
-echo "=== Section 1: the hot path — relevance before any plan walk (checklist A7) ==="
+section "Section 1: the hot path — relevance before any plan walk (checklist A7)"
 # ============================================================
 
 IFS='|' read -r W1_REPO W1_TR W1_SUB W1_CFG <<< "$(make_world w1 yes)"
@@ -332,8 +322,7 @@ plant_agent "$NW_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
 observe "$SID_A" "$NW_CFG" "$NW_REPO" "$NW_TR" quiet-reviewer
 
 # ============================================================
-echo ""
-echo "=== Section 2: a run that produced evidence is recorded (AC-3, positive) ==="
+section "Section 2: a run that produced evidence is recorded (AC-3, positive)"
 # ============================================================
 
 observe "$SID_A" "$W1_CFG" "$W1_REPO" "$W1_TR" quiet-reviewer
@@ -342,8 +331,8 @@ STATE=$(cat "$W1_REPO/$STATE_REL" 2>/dev/null)
 expect_contains "the record names the RESOLVED target" "aquiet-reviewer-deadbeefdeadbeef" "$STATE"
 expect_contains "the record names the observing session" "$SID_A" "$STATE"
 expect_contains "the record names the target AS TYPED" "typed=quiet-reviewer" "$STATE"
-expect_matches "the record carries the activity level seen (log mtime)" 'mtime=[0-9]+' "$STATE"
-expect_matches "the record carries the activity level seen (log size)" 'size=[0-9]+' "$STATE"
+expect_regex "the record carries the activity level seen (log mtime)" 'mtime=[0-9]+' "$STATE"
+expect_regex "the record carries the activity level seen (log size)" 'size=[0-9]+' "$STATE"
 
 # THE FILE FACTS ARE THE PRODUCER'S, NOT A SECOND COMPUTATION. What the operator
 # read as the working log's size is the number stored, because there is only one
@@ -381,7 +370,7 @@ STATE=$(cat "$D6_REPO/$STATE_REL" 2>/dev/null)
 expect_contains "the record carries each deliverable's state" "present:report.md" "$STATE"
 expect_contains "the record carries an absent deliverable as absent" "absent:missing.md" "$STATE"
 expect_contains "the record carries the progress artifact's state" "progress_state=present" "$STATE"
-expect_matches "the record carries the progress artifact's mtime" 'progress_mtime=[0-9]+' "$STATE"
+expect_regex "the record carries the progress artifact's mtime" 'progress_mtime=[0-9]+' "$STATE"
 
 # A contract that named NO progress artifact is distinguishable from one whose
 # artifact is missing — the D-6 distinction a blank value would erase.
@@ -395,8 +384,7 @@ run_rec "$(mk_bash_post "$SID_A" "$W2_TR" "$W2_REPO" \
   "AWS_SECRET=hunter2 bash ~/.claude/hooks/stop-check.sh one" "$OBS_OUT")"
 
 # ============================================================
-echo ""
-echo "=== Section 3: no successful run, no record (AC-3, the C6 closure) ==="
+section "Section 3: no successful run, no record (AC-3, the C6 closure)"
 # ============================================================
 #
 # This is the section the slice exists for. The predecessor recorded from
@@ -468,8 +456,7 @@ plant_agent "${FS_TR%/*}/$SID_B/subagents" "aforeign-3333333333333333" "foreign"
 observe "$SID_A" "$FS_CFG" "$FS_REPO" "$FS_TR" foreign
 
 # ============================================================
-echo ""
-echo "=== Section 4: the observer (AC-3's third field, slice 4/1 assumption A) ==="
+section "Section 4: the observer (AC-3's third field, slice 4/1 assumption A)"
 # ============================================================
 #
 # Capture A vs capture B: the same command, the same session, the same turn,
@@ -490,13 +477,12 @@ expect_contains "a payload WITH agent_id records that subagent as observer" \
   "observer=$SUB_AGENT_ID" "$(cat "$OB_REPO/$STATE_REL")"
 
 # ============================================================
-echo ""
-echo "=== Section 5: the record is VERSIONED, key-addressed and BOUNDED ==="
+section "Section 5: the record is VERSIONED, key-addressed and BOUNDED"
 # ============================================================
 
 STATE=$(cat "$OB_REPO/$STATE_REL")
-expect_matches "the record leads with a schema version token" '(^|\|)v1(\||$)' "$STATE"
-expect_matches "fields are key=value, not positional" 'target=' "$STATE"
+expect_regex "the record leads with a schema version token" '(^|\|)v1(\||$)' "$STATE"
+expect_regex "fields are key=value, not positional" 'target=' "$STATE"
 expect_contains "the file carries its schema in a header comment" \
   "schema stop-check-state/v1" "$STATE"
 
@@ -545,8 +531,7 @@ expect_contains "pruning does not disturb the record being written" \
   "alive-8888888888888888" "$(cat "$P2B_REPO/$STATE_REL" 2>/dev/null)"
 
 # ============================================================
-echo ""
-echo "=== Section 6: the roster arm — intended → confirmed (AC-1, confirmation half) ==="
+section "Section 6: the roster arm — intended → confirmed (AC-1, confirmation half)"
 # ============================================================
 
 TUID="toolu_01QhBXwHyZfMQNmS571fqmg8"
@@ -728,8 +713,7 @@ IFS='|' read -r RX_REPO RX_TR RX_SUB RX_CFG <<< "$(make_world rosterabsent yes)"
 run_rec "$(mk_agent_post "$SID_A" "$RX_TR" "$RX_REPO" "orphan" "$NEW_AID" "$TUID")"
 
 # ============================================================
-echo ""
-echo "=== Section 7: hostile repo (AC-8, TDD §8, checklist A2/A3) ==="
+section "Section 7: hostile repo (AC-8, TDD §8, checklist A2/A3)"
 # ============================================================
 
 # Predictable temp names + symlink-following writes were a PROVEN arbitrary-file
@@ -774,8 +758,7 @@ run_rec "$(mk_bash_post "$SID_A" "$FG_TR" "$FG_REPO" "bash stop-check.sh x" \
   "stop-check-observation/v1|target=aelsewhere-2222222222222222|typed=x|log=/etc/passwd|mtime=1|size=1|deliverables=|progress=|progress_mtime=0|progress_state=unnamed")"
 
 # ============================================================
-echo ""
-echo "=== Section 8: it never blocks, whatever happens (PostToolUse invariant) ==="
+section "Section 8: it never blocks, whatever happens (PostToolUse invariant)"
 # ============================================================
 #
 # PostToolUse cannot block — the tool has already run — so every path must exit
@@ -822,8 +805,7 @@ do
 done
 
 # ============================================================
-echo ""
-echo "=== Section 9: six-axis review remediations (S-1 sanitizer parity, S-2 log existence, P roster bound) ==="
+section "Section 9: six-axis review remediations (S-1 sanitizer parity, S-2 log existence, P roster bound)"
 # ============================================================
 #
 # S-1. The writer these values land beside — hooks/dispatch-preflight.sh's
@@ -945,8 +927,7 @@ PR_LIVE=$(grep 'name=live-one|' "$PR_ROSTER" 2>/dev/null)
 # intended row it completes stays exactly where the launch put it.
 
 # ============================================================
-echo ""
-echo "=== Section 10: the identification arm — SubagentStart → identified (AC-2, epic-16 w1 slice 1) ==="
+section "Section 10: the identification arm — SubagentStart → identified (AC-2, epic-16 w1 slice 1)"
 # ============================================================
 #
 # FIXTURE FIDELITY: mk_subagent_start is transcribed field for field from
@@ -1258,8 +1239,7 @@ expect_eq "…and the appended row is still one line" \
   "1" "$(grep -c 'status=identified' "$I7_ROSTER")"
 
 # ============================================================
-echo ""
-echo "=== Section 11: the session key is shape-checked before it becomes a path (Step-6 S-4) ==="
+section "Section 11: the session key is shape-checked before it becomes a path (Step-6 S-4)"
 # ============================================================
 #
 # `roster-${SID}.state` interpolates the payload's `.session_id` straight into a write path.
@@ -1276,8 +1256,7 @@ seed_roster_full "$I8_REPO" "$SID_TRAVERSAL" "probemate" "toolu_01TRAVERSE" conf
 run_rec "$(mk_subagent_start "$SID_TRAVERSAL" "$I8_TR" "$I8_REPO" "general-purpose" "$START_ID")"
 
 # ============================================================
-echo ""
-echo "=== Section 12: launch-reference immutability across resume (AC-5, R6, epic-16 w2 S6) ==="
+section "Section 12: launch-reference immutability across resume (AC-5, R6, epic-16 w2 S6)"
 # ============================================================
 #
 # FIXTURE FIDELITY: this section replays the documented field sequence from
@@ -1420,8 +1399,7 @@ expect_contains "ARM 2 alone pins the resume's completion to the original launch
   "launched_at=$RC_T0" "$RC2_LAST_CONFIRMED"
 
 # ============================================================
-echo ""
-echo "=== Section 12: THE ENGAGEMENT SWITCH (AC-6) ==="
+section "Section 12: THE ENGAGEMENT SWITCH (AC-6)"
 # ============================================================
 #
 # Since task-engaged-session this recorder asks `engaged_session` before it asks anything
@@ -1480,8 +1458,7 @@ expect_contains "12f engaged with no plan on disk: the row is still confirmed" \
   "status=confirmed" "$(cat "$E2_REPO/.bionic/tmp/roster-${SID_A}.state")"
 
 # ============================================================
-echo ""
-echo "=== Section 13: THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15) ==="
+section "Section 13: THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15)"
 # ============================================================
 #
 # One `pressure_sample` call after the engagement check, on every engaged Bash
@@ -1601,8 +1578,4 @@ expect_status "13f a Bash call carrying a machine line still exits 0" "0" "$REC_
 expect_eq "13f …and it does NOT take the early exit — the arms below it run" "yes" \
   "$([ "$(wc -c < "$P_JQC" | tr -d ' ')" -gt 4 ] && echo yes || echo no)"
 
-# ============================================================
-echo ""
-echo "──────────────────────────────────────────────"
-echo "execution-recorder.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ]
+finish
