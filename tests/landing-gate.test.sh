@@ -1326,4 +1326,40 @@ else
 fi
 
 
+# --- 16h: A DETACHED MAIN CHECKOUT (review-a A-5). `git rev-parse --abbrev-ref HEAD` prints
+# the literal string `HEAD` there, and `HEAD` resolves INSIDE the worktree to the worktree's
+# own tip — so the merge-base came back non-empty, the diff came back EMPTY, and every
+# landing reconciled clean with no refusal and no diagnostic. A wall that is off and quiet
+# is indistinguishable from a wall that is passing everything (tests/run.sh:267-272), so the
+# inert state is announced. `git bisect`, `git checkout <tag>` and a checkout parked on a
+# sha are all ordinary states for this repository during an integration.
+R16H="$(make_git_wave_repo r16h)"
+WT16H=$(make_slice_tree "$R16H" slice16h)
+commit_files "$WT16H" "out of scope" undeclared/four.sh
+add_row "$R16H" name=slice16h agent_id="$AID_A" deliverable=.bionic/docs/record/s16h.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16H" .bionic/docs/record/s16h.md
+git -C "$R16H" checkout -q --detach HEAD
+run_gate "$GATE" "$(stop_payload "$R16H" "$SID" false)"
+expect_contains "16h: a detached main checkout ANNOUNCES the reconciliation is inert" \
+  "the Files: reconciliation is INERT" "$OUT_STDERR"
+expect_contains "16h: …naming the reason" "detached HEAD" "$OUT_STDERR"
+expect_contains "16h: …naming the row it could not judge" "slice16h" "$OUT_STDERR"
+expect_contains "16h: …and the declared set it did not check the diff against" "declared/" "$OUT_STDERR"
+expect_eq "16h: …and the row really was processed (deliverable side still marks it)" \
+  "1" "$(swept_count "$R16H")"
+# CONTROL: the identical fixture in a repo whose main checkout is on its branch — the
+# refusal is there, so 16h is about the detached state and not about a fixture that could
+# never refuse. A second repo rather than a second run: the sweep marks a row once, so
+# re-running the same one proves only that idempotency works.
+R16H2="$(make_git_wave_repo r16h2)"
+WT16H2=$(make_slice_tree "$R16H2" slice16h2)
+commit_files "$WT16H2" "out of scope" undeclared/four.sh
+add_row "$R16H2" name=slice16h2 agent_id="$AID_A" deliverable=.bionic/docs/record/s16h2.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16H2" .bionic/docs/record/s16h2.md
+run_gate "$GATE" "$(stop_payload "$R16H2" "$SID" false)"
+expect_absent "16h: control: on a branch the announcement is gone" "reconciliation is INERT" "$OUT_STDERR"
+expect_contains "16h: control: …and the diff outside Files: refuses" "undeclared/four.sh" "$OUT_STDERR"
+
 finish
