@@ -476,6 +476,13 @@ run "doctor-restart.test.sh" bash tests/doctor-restart.test.sh
 # run with its cwd inside a fixture project holding its own .bionic/, and the "live"
 # sessions name the suite's own pid.
 run "doctor-fleet.test.sh" bash tests/doctor-fleet.test.sh
+# wave-01 verification-cannot-lie (slice S1; spec AC-13/AC-14/AC-15): the test
+# framework's own suite. tests/lib/assert.sh is the one thing in this tree that decides
+# whether a result EXISTS — sections, the counters, the assertion helpers, and the
+# load-time derivation that turns a called-but-undefined helper from a discarded stderr
+# line into a refusal — so it is the one thing that cannot be certified by the mechanism
+# it certifies. Every row plants a scratch suite and reads the verdict the framework gave.
+run "framework.test.sh" bash tests/framework.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
