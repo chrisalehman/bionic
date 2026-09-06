@@ -1293,4 +1293,37 @@ expect_status "16g: a diff outside Files: with an impact command configured stil
 expect_contains "16g: …naming the offending file" "undeclared/three.sh" "$OUT_STDERR"
 expect_contains "16g: …and the suite the impact command derived for it" "fake.test.sh" "$OUT_STDERR"
 
+# --- 16i: THE DERIVATION IS BOUNDED (review-c C-17). The impact command costs ~2.6-6.5 s
+# and this hook is registered at "timeout": 10 on Stop and SubagentStop, with the call
+# inside the per-candidate loop. The budget is spent across the sweep; a row that gets no
+# derivation still REFUSES and says the suites were not named. The one thing it must never
+# become is a silent pass. NO SEAM: the bound is the shipped 6 seconds, and the stub simply
+# outruns it.
+R16I="$(make_git_wave_repo r16i)"
+WT16I=$(make_slice_tree "$R16I" slice16i)
+commit_files "$WT16I" "out of scope" undeclared/slow.sh
+STUB16I="$SANDBOX/impact-stub-16i.sh"
+printf '#!/bin/bash\nsleep 30\nprintf "never.test.sh\\tstub\\n"\n' > "$STUB16I"
+chmod +x "$STUB16I"
+mkdir -p "$R16I/.bionic"
+printf 'impact-command: bash %s\n' "$STUB16I" > "$R16I/.bionic/config.yaml"
+add_row "$R16I" name=slice16i agent_id="$AID_A" deliverable=.bionic/docs/record/s16i.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16I" .bionic/docs/record/s16i.md
+T16I=$(date +%s)
+run_gate "$GATE" "$(stop_payload "$R16I" "$SID" false)"
+E16I=$(( $(date +%s) - T16I ))
+expect_status "16i: a slow derivation does not turn the refusal into a pass" "2" "$RC"
+expect_contains "16i: …the offending file is still named" "undeclared/slow.sh" "$OUT_STDERR"
+expect_contains "16i: …and the reader is told the suites were NOT derived" \
+  "are NOT named here" "$OUT_STDERR"
+expect_absent "16i: …never the answer the command would eventually have given" \
+  "never.test.sh" "$OUT_STDERR"
+if [ "$E16I" -lt 10 ]; then
+  ok "16i: …and the sweep finished inside the hook's own 10s registration (${E16I}s)"
+else
+  no "16i: …and the sweep finished inside the hook's own 10s registration" "took ${E16I}s"
+fi
+
+
 finish
