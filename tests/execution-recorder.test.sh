@@ -1777,4 +1777,91 @@ expect_status "13f a Bash call carrying a machine line still exits 0" "0" "$REC_
 expect_eq "13f …and it does NOT take the early exit — the arms below it run" "yes" \
   "$([ "$(wc -c < "$P_JQC" | tr -d ' ')" -gt 4 ] && echo yes || echo no)"
 
+# ============================================================
+section "Section 14: the BUDGET FIELDS survive both rebuilds, byte for byte (review-b B-4)"
+# ============================================================
+#
+# THE LINK NOTHING TESTED. `hooks/background-suite-guard.sh`'s budget arm reads
+# `suites_allowed=` off the LAST roster row carrying this agent's id — and the launch row
+# hooks/dispatch-preflight.sh writes carries `agent_id=` EMPTY, so it can never be that row.
+# The field is filled only here, by ARM 2 (confirmation) and ARM 3 (identification), both of
+# which rebuild the row FIELD-WISE with `RS = "|"`. Every test of the budget arm plants its
+# row directly with `roster_row_fixture`; no test drove dispatch → recorder → guard, so a
+# rebuild that dropped or renamed the three fields would turn the AC-21 named-suite refusal
+# inert in production with every suite still green — the wall going quiet, which is the
+# failure direction this wave exists to close.
+#
+# BYTE FOR BYTE, not "present": the budget is compared as a string by the guard
+# (`case " $SUITES_ALLOWED " in *" $_target "*`), so a value that survived with its spacing
+# or ordering changed is a different budget.
+
+S14_TUID="toolu_01BUDGETCARRY0001"
+S14_AID="a91be40cf7712533c"
+S14_FILES="payload/scripts/lib/widget.sh,hooks/widget-guard.sh"
+S14_SUITES="alpha.test.sh beta.test.sh gamma.test.sh"
+
+seed_roster_budget() {  # <repo> <sid> <name> <tool_use_id> <status> <agent-id>
+  local repo="$1" sid="$2" name="$3" tuid="$4" status="$5" aid="$6"
+  local f="$repo/.bionic/tmp/roster-${sid}.state"
+  mkdir -p "$repo/.bionic/tmp"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status="$status" session="$sid" name="$name" agent_id="$aid" \
+    launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+    deliverable=.bionic/docs/record/w14-budget.md duration='~25 minutes.' \
+    progress=.bionic/tmp/w14.progress tool_use_id="$tuid" \
+    files="$S14_FILES" suites_allowed="$S14_SUITES" suites_source=derived >> "$f"
+  return 0
+}
+
+# --- 14a: ARM 2, the confirmation rebuild ---
+IFS='|' read -r B1_REPO B1_TR B1_SUB B1_CFG <<< "$(make_world budgetconfirm yes)"
+seed_roster_budget "$B1_REPO" "$SID_A" "w14-impl" "$S14_TUID" intended ""
+B1_ROSTER="$B1_REPO/.bionic/tmp/roster-${SID_A}.state"
+# NON-VACUITY, the precondition: the launch row really carries the three fields, and really
+# carries an EMPTY agent_id — the two facts that make this the row the guard cannot use yet.
+B1_LAUNCH=$(grep 'status=intended' "$B1_ROSTER" 2>/dev/null)
+expect_contains "14a the launch row carries the derived budget" "|suites_allowed=$S14_SUITES|" "$B1_LAUNCH"
+expect_contains "14a …and an empty agent_id, so the guard can never match it" \
+  "|agent_id=|" "$B1_LAUNCH"
+
+run_rec "$(mk_agent_post "$SID_A" "$B1_TR" "$B1_REPO" "w14-impl" "$S14_AID" "$S14_TUID")"
+B1_ROW=$(grep 'status=confirmed' "$B1_ROSTER" 2>/dev/null)
+expect_contains "14a the confirmed row is the one the guard reads" "agent_id=$S14_AID" "$B1_ROW"
+expect_contains "14a …carrying files= forward byte for byte" "|files=$S14_FILES|" "$B1_ROW"
+expect_contains "14a …carrying suites_allowed= forward byte for byte" \
+  "|suites_allowed=$S14_SUITES|" "$B1_ROW"
+expect_contains "14a …carrying suites_source= forward byte for byte" \
+  "|suites_source=derived|" "$B1_ROW"
+# ONE OF EACH. Every reader takes the FIRST match for a key, so a rebuild that appended
+# rather than substituted would answer with whichever copy it happened to put first.
+for _k in files suites_allowed suites_source; do
+  expect_eq "14a …exactly one $_k= field on the rebuilt row" "1" \
+    "$(printf '%s' "$B1_ROW" | tr '|' '\n' | /usr/bin/grep -c "^$_k=" | tr -d ' ')"
+done
+
+# --- 14b: ARM 3, the identification rebuild ---
+IFS='|' read -r B2_REPO B2_TR B2_SUB B2_CFG <<< "$(make_world budgetident yes)"
+seed_roster_budget "$B2_REPO" "$SID_A" "w14-mate" "toolu_01BUDGETCARRY0002" confirmed "$START_ID"
+B2_ROSTER="$B2_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$B2_TR" "$B2_REPO" "general-purpose" "$START_ID")"
+B2_ROW=$(grep 'status=identified' "$B2_ROSTER" 2>/dev/null)
+expect_contains "14b the identified row keys to the same agent" "agent_id=$START_ID" "$B2_ROW"
+expect_contains "14b …carrying files= forward byte for byte" "|files=$S14_FILES|" "$B2_ROW"
+expect_contains "14b …carrying suites_allowed= forward byte for byte" \
+  "|suites_allowed=$S14_SUITES|" "$B2_ROW"
+expect_contains "14b …carrying suites_source= forward byte for byte" \
+  "|suites_source=derived|" "$B2_ROW"
+for _k in files suites_allowed suites_source; do
+  expect_eq "14b …exactly one $_k= field on the rebuilt row" "1" \
+    "$(printf '%s' "$B2_ROW" | tr '|' '\n' | /usr/bin/grep -c "^$_k=" | tr -d ' ')"
+done
+
+# --- 14c: THE LAST ROW WINS, and it is the one that carries the budget. The guard reads the
+# newest row for an id; after both rebuilds that row must still state the same set.
+B2_LAST=$(grep -v '^#' "$B2_ROSTER" | tail -1)
+expect_contains "14c the LAST row carrying the id is the one the guard would read" \
+  "agent_id=$START_ID" "$B2_LAST"
+expect_contains "14c …and it states the budget the dispatch derived" \
+  "|suites_allowed=$S14_SUITES|" "$B2_LAST"
+
 finish
