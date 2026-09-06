@@ -46,6 +46,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/resources.sh"
@@ -55,14 +56,11 @@ TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/resources-test.XXXXXX")"
 cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
-PASS=0; FAIL=0; TOTAL=0
-ok()  { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-bad() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2], got [$3]"; fi; }
-expect_match() { if printf '%s' "$2" | grep -Eq "$3"; then ok "$1"; else bad "$1" "[$2] does not match /$3/"; fi; }
-expect_true()  { if "${@:2}"; then ok "$1"; else bad "$1"; fi; }
-expect_false() { if "${@:2}"; then bad "$1"; else ok "$1"; fi; }
-section() { echo; echo "── $1"; }
+# expect_match here was an ERE matcher spelled under the framework's glob name, with
+# arguments reversed (`<label> <actual> <ERE>`) — the A-17 hazard. Every call site below
+# is renamed to expect_regex with the order corrected (label, ERE, actual), never a bare
+# delete: a bare delete binds the calls to the framework's whole-value GLOB matcher with
+# the arguments still in the wrong position, and nothing goes red.
 
 # The library must load before anything else can be asked of it.
 if [ ! -r "$LIB" ]; then
@@ -106,7 +104,7 @@ for _c in MEM_RESERVE_GB MEM_PER_SUITE_GB CORES_PER_SUITE DISK_PER_TREE_GB WRITE
   if grep -Eq "^${_c}=[^ ]+[[:space:]]+#[[:space:]]*\S" "$LIB"; then
     ok "$_c assignment carries a datum comment"
   else
-    bad "$_c assignment carries a datum comment"
+    no "$_c assignment carries a datum comment"
   fi
 done
 
@@ -156,8 +154,8 @@ expect_eq "18c/128GB/1700GB (this machine) → writers 15"   "15" "$(field "$B4"
 expect_eq "18c/128GB/1700GB (this machine) → worktrees 32" "32" "$(field "$B4" worktrees)"
 expect_eq "18c/128GB/1700GB (this machine) → test_jobs 18" "18" "$(field "$B4" test_jobs)"
 
-expect_match "output is one key=value line, four keys, plan order" "$B4" \
-  '^writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+$'
+expect_regex "output is one key=value line, four keys, plan order" '^writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+$'\
+  "$B4"
 
 # A pure function of its arguments: it must not consult the live machine at all, so a
 # machine under load answers exactly what an idle one does (design-ledger S6).
@@ -182,8 +180,8 @@ expect_true "a missing argument is refused (non-zero exit)" [ "$?" -ne 0 ]
 section "C — resources_probe reads THIS machine (AC-24; shape and plausibility only)"
 
 P="$(resources_probe)"
-expect_match "probe prints all five keys in order" "$P" \
-  '^cores=[0-9]+ mem_gb=[0-9]+ disk_free_gb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? os=(darwin|linux)$'
+expect_regex "probe prints all five keys in order" '^cores=[0-9]+ mem_gb=[0-9]+ disk_free_gb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? os=(darwin|linux)$'\
+  "$P"
 
 P_CORES="$(field "$P" cores)"; P_MEM="$(field "$P" mem_gb)"
 P_DISK="$(field "$P" disk_free_gb)"; P_OS="$(field "$P" os)"
@@ -204,8 +202,8 @@ esac
 
 # The probe's own numbers must be a legal budget input — the two halves are one pipeline.
 PB="$(resources_budget "$P_CORES" "$P_MEM" "$P_DISK")"
-expect_match "probe output feeds resources_budget without editing" "$PB" \
-  '^writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+$'
+expect_regex "probe output feeds resources_budget without editing" '^writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+$'\
+  "$PB"
 
 # ════════════════════════════════════════════════════════════ §D — resources_pressure
 
@@ -217,8 +215,8 @@ pressure() {  # <free_mb> <load_1m> <cores>
 
 R="$(pressure 8000 2.0 18)"
 expect_eq "ample memory, load well under cores×1.5 → ok" "ok" "$(field "$R" state)"
-expect_match "pressure prints the three original keys, in order and first" "$R" \
-  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? '
+expect_regex "pressure prints the three original keys, in order and first" '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? '\
+  "$R"
 expect_eq "pressure echoes the free reading it judged"  "8000" "$(field "$R" free_mb)"
 expect_eq "pressure echoes the load reading it judged"  "2.0"  "$(field "$R" load_1m)"
 
@@ -254,8 +252,8 @@ expect_eq "free 100 MB with a calm load is still emergency" "emergency" \
 
 # With no overrides it must read the live machine and still answer one of the three states.
 R_LIVE="$(resources_pressure "$P_CORES")"
-expect_match "live pressure answers a legal state" "$R_LIVE" \
-  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? '
+expect_regex "live pressure answers a legal state" '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? '\
+  "$R_LIVE"
 
 # ════════════════════════════════════════════════════════════ §E — attestation v2
 
@@ -292,13 +290,13 @@ expect_eq "session_id is unchanged" "$SESSION_A"           "$(att_field session_
 
 # The five probe fields, by key.
 for _k in cores mem_gb disk_free_gb load_1m os; do
-  if [ -n "$(att_field "$_k")" ]; then ok "attestation carries $_k"; else bad "attestation carries $_k"; fi
+  if [ -n "$(att_field "$_k")" ]; then ok "attestation carries $_k"; else no "attestation carries $_k"; fi
 done
-expect_match "attestation cores is an integer"  "$(att_field cores)"        '^[0-9]+$'
-expect_match "attestation mem_gb is an integer" "$(att_field mem_gb)"       '^[0-9]+$'
-expect_match "attestation disk_free_gb is an integer" "$(att_field disk_free_gb)" '^[0-9]+$'
-expect_match "attestation load_1m is a number"  "$(att_field load_1m)"      '^[0-9]+(\.[0-9]+)?$'
-expect_match "attestation os is darwin or linux" "$(att_field os)"          '^(darwin|linux)$'
+expect_regex "attestation cores is an integer" '^[0-9]+$' "$(att_field cores)"
+expect_regex "attestation mem_gb is an integer" '^[0-9]+$' "$(att_field mem_gb)"
+expect_regex "attestation disk_free_gb is an integer" '^[0-9]+$' "$(att_field disk_free_gb)"
+expect_regex "attestation load_1m is a number" '^[0-9]+(\.[0-9]+)?$' "$(att_field load_1m)"
+expect_regex "attestation os is darwin or linux" '^(darwin|linux)$' "$(att_field os)"
 
 # The recorded machine must be THIS machine — the attestation is a record, not a template.
 expect_eq "attestation cores match the live probe"  "$P_CORES" "$(att_field cores)"
@@ -307,8 +305,8 @@ expect_eq "attestation mem_gb matches the live probe" "$P_MEM"  "$(att_field mem
 # The budget line, in the same shape the plan frontmatter's `parallel-budget:` carries, so
 # WALLS and DOCTOR read one string rather than re-deriving anything (ownership table).
 BUD="$(att_field budget)"
-expect_match "attestation carries a budget line in parallel-budget shape" "$BUD" \
-  '^writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+ source=probe$'
+expect_regex "attestation carries a budget line in parallel-budget shape" '^writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+ source=probe$'\
+  "$BUD"
 expect_eq "the recorded budget is what the library derives from the recorded machine" \
   "$(resources_budget "$(att_field cores)" "$(att_field mem_gb)" "$(att_field disk_free_gb)") source=probe" \
   "$BUD"
@@ -493,8 +491,8 @@ chmod +x "$STUBS/memory_pressure" "$STUBS/sysctl" "$STUBS/sysctl-noswap" "$STUBS
 
 # The new fields are appended, so the record's shape assertion moves with them.
 R="$(BIONIC_PROBE_FREE_PCT=44 BIONIC_PROBE_SWAP_PCT=69 pressure 8000 2.0 18)"
-expect_match "pressure prints all five keys in order" "$R" \
-  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? free_pct=-?[0-9]+ swap_pct=-?[0-9]+$'
+expect_regex "pressure prints all five keys in order" '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? free_pct=-?[0-9]+ swap_pct=-?[0-9]+$'\
+  "$R"
 expect_eq "the existing three fields are unchanged by the two new ones" \
   "ok 8000 2.0" "$(field "$R" state) $(field "$R" free_mb) $(field "$R" load_1m)"
 
@@ -563,17 +561,17 @@ STUB
 else
   # Not Darwin: the same three claims are made against the live Linux sensor, by shape.
   RL="$(BIONIC_PROBE_FREE_MB=8000 BIONIC_PROBE_LOAD_1M=1.6 resources_pressure 8)"
-  expect_match "non-Darwin: free_pct is a percentage or the -1 degrade" "$(field "$RL" free_pct)" \
-    '^(-1|100|[0-9]{1,2})$'
-  expect_match "non-Darwin: swap_pct is a percentage or the -1 degrade" "$(field "$RL" swap_pct)" \
-    '^(-1|100|[0-9]{1,2})$'
+  expect_regex "non-Darwin: free_pct is a percentage or the -1 degrade" \
+    '^(-1|100|[0-9]{1,2})$' "$(field "$RL" free_pct)"
+  expect_regex "non-Darwin: swap_pct is a percentage or the -1 degrade" \
+    '^(-1|100|[0-9]{1,2})$' "$(field "$RL" swap_pct)"
   expect_eq "non-Darwin: an unreadable sensor does not move state off ok" "ok" "$(field "$RL" state)"
 fi
 
 # The live machine, no stubs and no pins: shape and range only (the §C convention).
 R_LIVE_PCT="$(resources_pressure "$P_CORES")"
-expect_match "live pressure carries both percentages in range" "$R_LIVE_PCT" \
-  '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? free_pct=(-1|100|[0-9]{1,2}) swap_pct=(-1|100|[0-9]{1,2})$'
+expect_regex "live pressure carries both percentages in range" '^state=(ok|hold|emergency) free_mb=[0-9]+ load_1m=[0-9]+(\.[0-9]+)? free_pct=(-1|100|[0-9]{1,2}) swap_pct=(-1|100|[0-9]{1,2})$'\
+  "$R_LIVE_PCT"
 
 # ════════════════════════════════════════════════ §I — pressure_band (AC-13, AC-14)
 
@@ -637,8 +635,8 @@ expect_eq "PRESSURE_WINDOW_S is the five-minute smoothing window" "300" "${PRESS
 sample 1000 >/dev/null 2>&1
 expect_true "the first sample creates the ring and its parent directory" [ -f "$RING" ]
 expect_eq   "one append, one line" "1" "$(wc -l < "$RING" | tr -d ' ')"
-expect_match "the line is epoch|free|swap|load|cores" "$(head -1 "$RING")" \
-  '^1000\|44\|69\|1\.6\|8$'
+expect_regex "the line is epoch|free|swap|load|cores" \
+  '^1000\|44\|69\|1\.6\|8$' "$(head -1 "$RING")"
 
 sample 1001 >/dev/null 2>&1
 sample 1002 >/dev/null 2>&1
@@ -968,7 +966,7 @@ done <<EOF
 $K2_ROWS
 EOF
 for k2b in clear warning critical emergency; do
-  expect_match "…and the table reaches the $k2b band" "$K2_SEEN" "(^| )$k2b( |$)"
+  expect_regex "…and the table reaches the $k2b band" "(^| )$k2b( |$)" "$K2_SEEN"
 done
 
 # THE REFUSALS AGREE TOO: a sample `pressure_band` will not band is a sample
@@ -995,8 +993,4 @@ EOF
 expect_eq "a sample pressure_band refuses is a sample pressure_level does not count" \
   "" "$K2_BAD_DISAGREE"
 
-# ════════════════════════════════════════════════════════════ report
-
-echo
-echo "resources.test.sh: $PASS passed, $FAIL failed, $TOTAL total"
-[ "$FAIL" -eq 0 ]
+finish
