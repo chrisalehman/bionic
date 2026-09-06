@@ -5415,6 +5415,50 @@ expect_allow "36h absent 'environments:' + all rows pending → allow, silent on
 expect_audit_line "36h2 …and the no-op is still recorded on the audit-file channel only" \
   "$h36h" 'git commit -m "x"' "evidence-gate environments:"
 
+# 36i/36j — THE OVER-CLAIM DIRECTION (critic K-5). The arm walked the declared non-fog
+# names and required each to be covered; nothing walked the covered names, so a plan could
+# claim coverage it does not have and the gate was silent. THIS WAVE'S OWN FRONTMATTER is
+# the live instance: `environments-covered: macos-system, linux-system` passed while
+# linux-system was declared FOG, and a fog entry's entire meaning is "not covered".
+env_step5_overclaim_fog="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  environments-covered: macos-system, linux-system"
+
+h36i=$(make_home)
+write_plan "$h36i" "$(env_plan5 "$env_two_decl" "$env_step5_overclaim_fog" "$matrix_complete")" > /dev/null
+expect_block "36i environments-covered claims a FOG environment → block" \
+  "$h36i" 'git commit -m "x"' "declares as FOG"
+
+env_step5_overclaim_undeclared="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  environments-covered: macos-system, freebsd"
+
+h36j=$(make_home)
+write_plan "$h36j" "$(env_plan5 "$env_single_decl" "$env_step5_overclaim_undeclared" "$matrix_complete")" > /dev/null
+expect_block "36j environments-covered names an UNDECLARED environment → block" \
+  "$h36j" 'git commit -m "x"' "never declared"
+
+# 36k — CONTROL, so 36i/36j are the over-claim rule and not a fixture that could never
+# pass: the same declaration with the fog name dropped from the covered line allows. 36c
+# above asserts the same thing from the other side; this one shares 36i's fixture.
+h36k=$(make_home)
+write_plan "$h36k" "$(env_plan5 "$env_two_decl" "$env_step5_covered" "$matrix_complete")" > /dev/null
+expect_allow "36k control: the same declaration, covering only what it declares → allow" \
+  "$h36k" 'git commit -m "x"'
+
+# 36l — the durable prefix (mirrors 36g): at current: 6 the over-claim still blocks, so a
+# coverage claim cannot go stale once Verify is behind you.
+h36l=$(make_home)
+write_plan "$h36l" "$(env_plan6 "$env_two_decl" "$env_step5_overclaim_fog" "$matrix_complete")" > /dev/null
+expect_block "36l current: 6 still refuses the over-claim (durable prefix)" \
+  "$h36l" 'git commit -m "x"' "declares as FOG"
+
 # ============================================================
 # Summary
 # ============================================================

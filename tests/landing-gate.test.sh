@@ -1293,4 +1293,177 @@ expect_status "16g: a diff outside Files: with an impact command configured stil
 expect_contains "16g: …naming the offending file" "undeclared/three.sh" "$OUT_STDERR"
 expect_contains "16g: …and the suite the impact command derived for it" "fake.test.sh" "$OUT_STDERR"
 
+# --- 16h: A DETACHED MAIN CHECKOUT (review-a A-5). `git rev-parse --abbrev-ref HEAD` prints
+# the literal string `HEAD` there, and `HEAD` resolves INSIDE the worktree to the worktree's
+# own tip — so the merge-base came back non-empty, the diff came back EMPTY, and every
+# landing reconciled clean with no refusal and no diagnostic. A wall that is off and quiet
+# is indistinguishable from a wall that is passing everything (tests/run.sh:267-272), so the
+# inert state is announced. `git bisect`, `git checkout <tag>` and a checkout parked on a
+# sha are all ordinary states for this repository during an integration.
+R16H="$(make_git_wave_repo r16h)"
+WT16H=$(make_slice_tree "$R16H" slice16h)
+commit_files "$WT16H" "out of scope" undeclared/four.sh
+add_row "$R16H" name=slice16h agent_id="$AID_A" deliverable=.bionic/docs/record/s16h.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16H" .bionic/docs/record/s16h.md
+git -C "$R16H" checkout -q --detach HEAD
+run_gate "$GATE" "$(stop_payload "$R16H" "$SID" false)"
+expect_contains "16h: a detached main checkout ANNOUNCES the reconciliation is inert" \
+  "the Files: reconciliation is INERT" "$OUT_STDERR"
+expect_contains "16h: …naming the reason" "detached HEAD" "$OUT_STDERR"
+expect_contains "16h: …naming the row it could not judge" "slice16h" "$OUT_STDERR"
+expect_contains "16h: …and the declared set it did not check the diff against" "declared/" "$OUT_STDERR"
+expect_eq "16h: …and the row really was processed (deliverable side still marks it)" \
+  "1" "$(swept_count "$R16H")"
+# CONTROL: the identical fixture in a repo whose main checkout is on its branch — the
+# refusal is there, so 16h is about the detached state and not about a fixture that could
+# never refuse. A second repo rather than a second run: the sweep marks a row once, so
+# re-running the same one proves only that idempotency works.
+R16H2="$(make_git_wave_repo r16h2)"
+WT16H2=$(make_slice_tree "$R16H2" slice16h2)
+commit_files "$WT16H2" "out of scope" undeclared/four.sh
+add_row "$R16H2" name=slice16h2 agent_id="$AID_A" deliverable=.bionic/docs/record/s16h2.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16H2" .bionic/docs/record/s16h2.md
+run_gate "$GATE" "$(stop_payload "$R16H2" "$SID" false)"
+expect_absent "16h: control: on a branch the announcement is gone" "reconciliation is INERT" "$OUT_STDERR"
+expect_contains "16h: control: …and the diff outside Files: refuses" "undeclared/four.sh" "$OUT_STDERR"
+
+# --- 16i: THE DERIVATION IS BOUNDED (review-c C-17). The impact command costs ~2.6-6.5 s
+# and this hook is registered at "timeout": 10 on Stop and SubagentStop, with the call
+# inside the per-candidate loop. The budget is spent across the sweep; a row that gets no
+# derivation still REFUSES and says the suites were not named. The one thing it must never
+# become is a silent pass. NO SEAM: the bound is the shipped 6 seconds, and the stub simply
+# outruns it.
+R16I="$(make_git_wave_repo r16i)"
+WT16I=$(make_slice_tree "$R16I" slice16i)
+commit_files "$WT16I" "out of scope" undeclared/slow.sh
+STUB16I="$SANDBOX/impact-stub-16i.sh"
+printf '#!/bin/bash\nsleep 30\nprintf "never.test.sh\\tstub\\n"\n' > "$STUB16I"
+chmod +x "$STUB16I"
+mkdir -p "$R16I/.bionic"
+printf 'impact-command: bash %s\n' "$STUB16I" > "$R16I/.bionic/config.yaml"
+add_row "$R16I" name=slice16i agent_id="$AID_A" deliverable=.bionic/docs/record/s16i.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16I" .bionic/docs/record/s16i.md
+T16I=$(date +%s)
+run_gate "$GATE" "$(stop_payload "$R16I" "$SID" false)"
+E16I=$(( $(date +%s) - T16I ))
+expect_status "16i: a slow derivation does not turn the refusal into a pass" "2" "$RC"
+expect_contains "16i: …the offending file is still named" "undeclared/slow.sh" "$OUT_STDERR"
+expect_contains "16i: …and the reader is told the suites were NOT derived" \
+  "are NOT named here" "$OUT_STDERR"
+expect_absent "16i: …never the answer the command would eventually have given" \
+  "never.test.sh" "$OUT_STDERR"
+if [ "$E16I" -lt 10 ]; then
+  ok "16i: …and the sweep finished inside the hook's own 10s registration (${E16I}s)"
+else
+  no "16i: …and the sweep finished inside the hook's own 10s registration" "took ${E16I}s"
+fi
+
+# --- 16j: `set -f` AROUND THE DIFF-PATH SPLIT (review-a A-11). `$LG_OUTSIDE` comes from
+# `git diff --name-only` and was expanded unquoted with no `set -f`, so a committed path
+# carrying a glob metacharacter was pathname-expanded against $REPO and the impact command
+# was handed files that were never in the diff. The sibling site in
+# hooks/dispatch-preflight.sh guards the identical construction. The main checkout below
+# holds two files the pattern matches, so an unguarded split has something to expand INTO.
+R16J="$(make_git_wave_repo r16j)"
+mkdir -p "$R16J/undeclared"
+: > "$R16J/undeclared/aX.sh"
+: > "$R16J/undeclared/aY.sh"
+WT16J=$(make_slice_tree "$R16J" slice16j)
+commit_files "$WT16J" "out of scope, with a metacharacter in the name" 'undeclared/a*.sh'
+ARGS16J="$SANDBOX/impact-args-16j.txt"
+STUB16J="$SANDBOX/impact-stub-16j.sh"
+printf '#!/bin/bash\nprintf "%%s\\n" "$@" > %s\nprintf "fake.test.sh\\tstub\\n"\n' "$ARGS16J" > "$STUB16J"
+chmod +x "$STUB16J"
+mkdir -p "$R16J/.bionic"
+printf 'impact-command: bash %s\n' "$STUB16J" > "$R16J/.bionic/config.yaml"
+add_row "$R16J" name=slice16j agent_id="$AID_A" deliverable=.bionic/docs/record/s16j.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16J" .bionic/docs/record/s16j.md
+run_gate "$GATE" "$(stop_payload "$R16J" "$SID" false)"
+expect_status "16j: a diff path carrying a glob metacharacter still refuses" "2" "$RC"
+expect_eq "16j: …and the impact command received the path from the DIFF, unexpanded" \
+  'undeclared/a*.sh' "$(cat "$ARGS16J" 2>/dev/null)"
+
+section "Section 17: the swept-marker extraction fails LOUDLY, or not at all (review-b B-12)"
+# tests/lib/swept-marker.sh obtains both the constant and the writer by matching SOURCE TEXT
+# of this hook at column 0 — `^SWEPT_SCHEMA=` and `^swept_marker_write()`. Indent the
+# function, move the constant, and both `eval`s become no-ops: the builder silently does not
+# exist, and the failure surfaces as `command not found` under the runner's stderr-strict
+# arm rather than as a named assertion in the suite that depends on it. Seven suites source
+# that lib. The framework's own derivation cannot cover it either — `swept_marker_write` is
+# not in `_tf_scan`'s token set.
+#
+# THE MUTANT IS THE REFORMATTING ITSELF, applied to a COPY, with both anchors checked first:
+# a doctored hook whose anchors had already moved would prove nothing about the guard.
+SM_DIR="$SANDBOX/swept-doctored"
+SM_DIR2="$SANDBOX/swept-doctored-const"
+SM_DIR3="$SANDBOX/swept-doctored-fn"
+mkdir -p "$SM_DIR" "$SM_DIR2" "$SM_DIR3"
+# BOTH ANCHORS ONCE, IMMEDIATELY BEFORE THE THREE MUTANTS THEY GUARD — the pair below and
+# the two single-line variants further down are the same two rewrites in three
+# combinations, so anchoring each pattern once is anchoring all three.
+anchor -E "$BIONIC_HOOKS_DIR/landing-gate.sh" '^SWEPT_SCHEMA=' 1
+anchor -E "$BIONIC_HOOKS_DIR/landing-gate.sh" '^swept_marker_write\(\)' 1
+sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' -e 's/^swept_marker_write()/  swept_marker_write()/' \
+  "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR/landing-gate.sh"
+sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR2/landing-gate.sh"
+sed -e 's/^swept_marker_write()/  swept_marker_write()/' \
+  "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR3/landing-gate.sh"
+expect_eq "17a the mutant really did move both anchors" "0" \
+  "$(/usr/bin/grep -cE '^(SWEPT_SCHEMA=|swept_marker_write\(\))' "$SM_DIR/landing-gate.sh" | tr -d ' ')"
+
+# A REAL SCRIPT FILE, not `bash -c`: the framework derives a suite's helper calls from its
+# own source and refuses a `$0` it cannot read, so a `-c` driver would fail for a reason
+# that has nothing to do with the subject.
+SM_LIB="$(cd "$(dirname "$0")/lib" && pwd -P)"
+SM_DRIVER="$SANDBOX/swept-marker-driver.sh"
+cat > "$SM_DRIVER" <<'SMEOF'
+#!/bin/bash
+set -uo pipefail
+SM_LIB_DIR="$1"
+BIONIC_HOOKS_DIR="$2"
+. "$SM_LIB_DIR/assert.sh"
+. "$SM_LIB_DIR/swept-marker.sh"
+# THE DRIVER'S OWN EXIT MUST MEAN ONE THING. `type -t` on an undefined name exits 1 all by
+# itself, so a driver ending on it would report "the lib refused" for a lib that sourced
+# straight through and simply has no builder — the confound this arm exists to tell apart.
+echo "SOURCED-ANYWAY"
+type -t swept_marker_write || echo "NO-BUILDER"
+exit 0
+SMEOF
+chmod +x "$SM_DRIVER"
+
+SM_OUT=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR" 2>&1)
+SM_ST=$?
+expect_eq "17b sourcing the lib against a reformatted hook EXITS non-zero" "1" "$SM_ST"
+expect_absent "17b …and does not carry on with no builder" "SOURCED-ANYWAY" "$SM_OUT"
+expect_contains "17b …naming the lib that could not extract" "tests/lib/swept-marker.sh" "$SM_OUT"
+expect_contains "17b …and the hook it read" "landing-gate.sh" "$SM_OUT"
+
+# THE CONSTANT'S HALF, on its own: only the SWEPT_SCHEMA line moved, so the function still
+# extracts and the failure has to come from the constant's own check.
+SM_OUT2=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR2" 2>&1)
+SM_ST2=$?
+expect_eq "17c a moved SWEPT_SCHEMA= alone also EXITS non-zero" "1" "$SM_ST2"
+expect_contains "17c …naming the constant and the file it was not in" "SWEPT_SCHEMA" "$SM_OUT2"
+expect_contains "17c …and the hook it read" "landing-gate.sh" "$SM_OUT2"
+
+# THE FUNCTION'S HALF, on its own: only `swept_marker_write()` is indented, so the constant
+# still extracts and the failure has to come from the builder's own presence check — the
+# `command not found` this whole guard exists to turn into a named refusal.
+SM_OUT4=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR3" 2>&1)
+SM_ST4=$?
+expect_eq "17e an indented swept_marker_write() alone also EXITS non-zero" "1" "$SM_ST4"
+expect_contains "17e …naming the builder that was not extracted" "swept_marker_write" "$SM_OUT4"
+expect_absent "17e …and never reaches the code that would have called it" "SOURCED-ANYWAY" "$SM_OUT4"
+
+# CONTROL: the SHIPPED hook, same three lines — it sources clean and the builder is real.
+SM_OUT3=$(bash "$SM_DRIVER" "$SM_LIB" "$BIONIC_HOOKS_DIR" 2>&1)
+SM_ST3=$?
+expect_eq "17d control: against the shipped hook the lib sources clean" "0" "$SM_ST3"
+expect_contains "17d …and the builder is a real function" "function" "$SM_OUT3"
+
 finish

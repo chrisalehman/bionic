@@ -695,6 +695,19 @@ _field() {  # <key> — by key, never by position, as every reader of these line
 }
 
 REFUSALS=""
+
+# ONE DERIVATION BUDGET FOR THE WHOLE SWEEP (review-c C-17). The impact command below is
+# the same call hooks/dispatch-preflight.sh makes and costs the same ~2.6-6.5 s, but it
+# sits inside this per-candidate loop, and this hook is registered at "timeout": 10 on both
+# Stop and SubagentStop. N offending rows would pay N x that. So the budget is spent across
+# the loop rather than granted per row: whatever is left when a row asks, and nothing once
+# it is gone. A row that gets no derivation still REFUSES — it names its files and says the
+# suites were not derived. The one thing this must never become is a silent pass.
+#
+# BUILT, NOT BORROWED, for the same reason as the dispatch site: bionic's command discipline
+# forbids a `timeout`/`gtimeout` binary and macOS ships neither.
+LG_IMPACT_BOUND_S=6
+LG_IMPACT_TICKS_LEFT=60          # 60 x 0.1s, shared by every candidate in this sweep
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 while IFS=$'\t' read -r AID NAME KIND CFILES; do
@@ -768,7 +781,26 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
       # the main branch has moved on since the tree was spawned — a stored base sha would not.
       LG_MAIN_BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)
       LG_BASE=""
+      # A DETACHED MAIN CHECKOUT IS NOT A BRANCH NAME (review-a A-5). `rev-parse
+      # --abbrev-ref HEAD` prints the literal string `HEAD` there, and `HEAD` resolves
+      # INSIDE the worktree to the worktree's own tip — so the merge-base comes back
+      # non-empty, the diff comes back EMPTY, and every landing reconciles clean with no
+      # refusal and no diagnostic. `git bisect`, `git checkout <tag>` and a checkout parked
+      # on a sha are all ordinary states for this repository during an integration.
+      case "$LG_MAIN_BRANCH" in HEAD) LG_MAIN_BRANCH="" ;; esac
       [ -n "$LG_MAIN_BRANCH" ] && LG_BASE=$(git -C "$LG_WT" merge-base "$LG_MAIN_BRANCH" HEAD 2>/dev/null)
+      if [ -z "$LG_BASE" ]; then
+        # ANNOUNCED INERT, the standard tests/run.sh:267-272 sets for the adoption wall:
+        # "a wall that is off and quiet is indistinguishable from a wall that is passing
+        # everything". Unrelated histories, a worktree with no commits and any other
+        # merge-base failure land here too, and each says so rather than passing silently.
+        if [ -z "$LG_MAIN_BRANCH" ]; then
+          LG_WHY="the main checkout is on no branch (detached HEAD), so there is no branch to take a merge-base from"
+        else
+          LG_WHY="no merge-base between ${LG_MAIN_BRANCH} and this tree"
+        fi
+        echo "landing-gate: ${LG_WHY} — the Files: reconciliation is INERT for row ${NAME}; its diff was NOT checked against '${CFILES}'" >&2
+      fi
       if [ -n "$LG_BASE" ]; then
         LG_OUTSIDE=""
         while IFS= read -r LG_DF; do
@@ -785,13 +817,45 @@ LGDIFF
           # dispatch wall itself falls back when nothing is configured.
           LG_IMPACT_CMD=$(config_value "$REPO" "impact-command" "")
           LG_SUITES=""
+          LG_SUITES_NOTE=""
           if [ -n "$LG_IMPACT_CMD" ]; then
-            # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-            LG_SUITES=$(cd "$REPO" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE 2>/dev/null \
-              | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
-            LG_SUITES="${LG_SUITES% }"
+            if [ "$LG_IMPACT_TICKS_LEFT" -le 0 ]; then
+              LG_SUITES_NOTE=" (this sweep's ${LG_IMPACT_BOUND_S}s derivation budget was spent on earlier rows, so the suites these files imply are NOT named here — derive them by hand)"
+            else
+              LG_IMPACT_TMP="${TMPDIR:-/tmp}/bionic-lg-impact-$$-${RANDOM}.out"
+              # `set -f` AROUND THE SPLIT (review-a A-11). `$LG_OUTSIDE` is built from `git
+              # diff --name-only`, and a committed path carrying `*`, `?` or `[` would
+              # otherwise be pathname-expanded against $REPO and hand the command files
+              # that were never in the diff. The dispatch site guards the identical
+              # construction; this one did not.
+              set -f
+              # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
+              ( cd "$REPO" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE >"$LG_IMPACT_TMP" 2>/dev/null ) &
+              LG_IMPACT_PID=$!
+              set +f
+              LG_TICKS=0
+              LG_OVERRAN=0
+              while kill -0 "$LG_IMPACT_PID" 2>/dev/null; do
+                if [ "$LG_TICKS" -ge "$LG_IMPACT_TICKS_LEFT" ]; then
+                  kill -TERM "$LG_IMPACT_PID" 2>/dev/null
+                  LG_OVERRAN=1
+                  break
+                fi
+                sleep 0.1
+                LG_TICKS=$((LG_TICKS + 1))
+              done
+              wait "$LG_IMPACT_PID" 2>/dev/null
+              LG_IMPACT_TICKS_LEFT=$((LG_IMPACT_TICKS_LEFT - LG_TICKS))
+              if [ "$LG_OVERRAN" -eq 1 ]; then
+                LG_SUITES_NOTE=" (the impact command did not answer within this sweep's ${LG_IMPACT_BOUND_S}s derivation budget, so the suites these files imply are NOT named here — derive them by hand)"
+              else
+                LG_SUITES=$(awk -F'\t' '$1 != "" { print $1 }' "$LG_IMPACT_TMP" 2>/dev/null | sort -u | tr '\n' ' ')
+                LG_SUITES="${LG_SUITES% }"
+              fi
+              rm -f "$LG_IMPACT_TMP"
+            fi
           fi
-          REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})} — not declared. Add the file(s) to Files: and re-derive, or revert them before landing.
+          REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})}${LG_SUITES_NOTE} — not declared. Add the file(s) to Files: and re-derive, or revert them before landing.
 "
         fi
       fi

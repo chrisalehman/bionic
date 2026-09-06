@@ -53,7 +53,10 @@ about doing the job well; they are about still being alive to report it.
   dispatch wall recorded the resulting set before you started. A `bash tests/<x>.test.sh`
   outside that set is REFUSED, and so is `tests/run.sh` unless your own row carries it — one
   full-tree regression per run belongs to the Step-5 runner, not to a writer proving its work
-  twice. `FARM_OUT_ALLOW=1` does not widen it: that override is the orchestrator's escape from
+  twice. **Spell each suite as a literal path and call it once per suite** — the wall reads
+  your command text before the shell expands it, so `for s in a b; do bash "tests/$s.test.sh";
+  done` is refused by the unexpanded name `$s.test.sh`, whatever the loop would have run.
+  `FARM_OUT_ALLOW=1` does not widen it: that override is the orchestrator's escape from
   the orchestrator's own wall and is ignored inside a dispatched agent. If the change genuinely
   reaches further than your brief said, say so in your report and SendMessage the orchestrator
   — widening the instrument is its decision, because it is the one holding the budget for the
