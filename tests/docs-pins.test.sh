@@ -1046,4 +1046,22 @@ expect_eq "63: …and every generated role file carries it" "0" "$S13_ROLES_MISS
 expect_eq "63: …over a non-empty set of role files" "0" \
   "$([ -n "$(ls "${REPO}"/agents/*.md 2>/dev/null)" ] && echo 0 || echo 1)"
 
+# THE SPELLING RULE THAT MAKES THE BUDGET USABLE (review-c C-6). The wall reads the command
+# TEXT, so a loop variable is refused by its unexpanded name — and the one place a writer
+# reads the budget rule said nothing about it. A fresh agent with no plan read hit exactly
+# that on its first attempt (the walk, heading 10b). Pinned in the SOURCE block, and
+# reaching every generated role file, on the same footing as the rule it qualifies.
+PIN_S13_SPELLING='Spell each suite as a literal path and call it once per suite'
+if has_pin "$SURVIVAL_BLOCK" "$PIN_S13_SPELLING"; then
+  ok "63b: the spelling rule is in agents-src/blocks/survival.md, the rendered SOURCE"
+else
+  no "63b: the spelling rule is in agents-src/blocks/survival.md, the rendered SOURCE" \
+     "file: $SURVIVAL_BLOCK"
+fi
+S13_SPELL_MISSING=0
+for _r in "${REPO}"/agents/*.md; do
+  has_pin "$_r" "$PIN_S13_SPELLING" || S13_SPELL_MISSING=$((S13_SPELL_MISSING + 1))
+done
+expect_eq "63b: …and every generated role file carries it" "0" "$S13_SPELL_MISSING"
+
 finish
