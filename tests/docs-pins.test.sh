@@ -864,6 +864,73 @@ else
   ok "59: a doctored SKILL.md fails both interval pins (they discriminate)"
 fi
 
+# ---------------------------------------------------------------------------
+# SECTION 60-63 — S13: the instrument the brief declares (spec AC-20, AC-21)
+# ---------------------------------------------------------------------------
+#
+# WHAT IT OWNS. `skills/canonical-sdlc/SKILL.md` §Dispatch is where an orchestrator reads
+# what a brief must carry. The wall in `hooks/dispatch-preflight.sh` refuses a brief that
+# carries neither `Files:` nor `Suites:`, and the writer-side guard refuses a suite outside
+# the recorded set — so a §Dispatch section that never mentions either label documents a
+# grammar the machine no longer accepts, and every author writes a brief that is refused.
+# These pins hold the two labels, the waiver, and the one-regression rule in that section.
+#
+# THE ROLE FILES ARE NOT PINNED HERE. `agents-src/blocks/survival.md` is the writer-side
+# copy and it is GENERATED into agents/*.md — identity by construction, checked by
+# `agents-src/render.sh --check`, which section 7 above already calls. A second pin on the
+# generated text would be pinning the renderer's arithmetic.
+#
+# ANTI-VACUITY, the doctored-copy shape sections 50/51/54/59 use: a SKILL.md with the
+# instrument sentence removed must fail these pins.
+PIN_S13_FILES='`Files:` on a line of its own names the paths this slice will write'
+PIN_S13_DERIVE='the impact command named in `.bionic/config.yaml` turns them into the closed set of suites the agent may run'
+PIN_S13_DECLARE='Where no impact command is configured, name the closed set yourself under `Suites:`'
+PIN_S13_WAIVER='a brief that runs no suite at all waives with `Suites: none`'
+PIN_S13_NEITHER='A brief carrying neither label refuses at dispatch.'
+PIN_S13_REGRESSION='a second one refuses unless the plan'"'"'s `## SDLC State` carries a `regression-cause:` line for it'
+
+for _p in FILES DERIVE DECLARE WAIVER NEITHER REGRESSION; do
+  eval "_pv=\$PIN_S13_$_p"
+  if has_pin "$SKILL_MD" "$_pv"; then
+    ok "60: SKILL.md §Dispatch carries the S13 $_p sentence verbatim"
+  else
+    no "60: SKILL.md §Dispatch carries the S13 $_p sentence verbatim" "file: $SKILL_MD"
+  fi
+done
+
+DOCTORED_S13="$TMP/skill-s13-mutated.md"
+sed 's/`Files:` on a line of its own names the paths this slice will write/the brief says what it likes/' \
+  "$SKILL_MD" > "$DOCTORED_S13"
+if cmp -s "$SKILL_MD" "$DOCTORED_S13"; then
+  no "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)" \
+     "the sed target matched nothing — the sentence moved"
+elif has_pin "$DOCTORED_S13" "$PIN_S13_FILES"; then
+  no "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)" \
+     "the pin matched a copy with the sentence removed"
+else
+  ok "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)"
+fi
+
+# THE WRITER-SIDE COPY EXISTS AND IS THE RENDERER'S INPUT. Not its text — its presence in
+# the SOURCE block, so the sentence a dispatched agent reads cannot be edited into the
+# generated file and lost at the next render (the failure mode agents-src exists to remove).
+SURVIVAL_BLOCK="${REPO}/agents-src/blocks/survival.md"
+PIN_S13_SURVIVAL='Your suite budget is on your roster row, and it is a wall.'
+if has_pin "$SURVIVAL_BLOCK" "$PIN_S13_SURVIVAL"; then
+  ok "62: the writer-side budget rule is in agents-src/blocks/survival.md, the rendered SOURCE"
+else
+  no "62: the writer-side budget rule is in agents-src/blocks/survival.md, the rendered SOURCE" \
+     "file: $SURVIVAL_BLOCK"
+fi
+# …and it reached every generated role file, which is what the writer actually reads.
+S13_ROLES_MISSING=0
+for _r in "${REPO}"/agents/*.md; do
+  has_pin "$_r" "$PIN_S13_SURVIVAL" || S13_ROLES_MISSING=$((S13_ROLES_MISSING + 1))
+done
+expect_eq "63: …and every generated role file carries it" "0" "$S13_ROLES_MISSING"
+expect_eq "63: …over a non-empty set of role files" "0" \
+  "$([ -n "$(ls "${REPO}"/agents/*.md 2>/dev/null)" ] && echo 0 || echo 1)"
+
 echo ""
 echo "========================================"
 echo "docs-pins: $PASS/$TOTAL passed"

@@ -760,11 +760,16 @@ chmod 600 "$R8/.bionic/tmp/patrol-${OWN8}.state"
 : > "$R8/.bionic/tmp/engaged-${OWN8}.state"
 
 echo "progress line" > "$R8/prog-g.progress"
+# THE `Suites:` LINE IS A WRITER PRECONDITION, not part of the value under test (S13,
+# spec AC-20): the start gate refuses a brief that declares neither `Files:` nor `Suites:`,
+# and this case needs the dispatch to actually JOURNAL a row. The DECLARED spelling,
+# because this fixture repo configures no `impact-command:`.
 BRIEF_G="Canonical-sdlc Step 4, slice 4/12 of epic-99 wave-01; build · audited · wave.
 Expected artifact: $R8/deliv-a.md
 Expected duration: ~30 minutes. Progress: $R8/prog-g.progress, cadence ~6m.
 Subprocess claim: \`$MARKER2\` → $H8/claims-out.log
-Exit condition: the artifact exists."
+Exit condition: the artifact exists.
+Suites: tests/widget.test.sh"
 jq -n --arg s "$OWN8" --arg c "$R8" --arg p "$BRIEF_G" \
   '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
     hook_event_name:"PreToolUse", tool_name:"Agent",
