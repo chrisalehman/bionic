@@ -37,12 +37,16 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HOOK="${BIONIC_PATROL_REVIVE_UNDER_TEST:-${BIONIC_HOOKS_DIR}/patrol-revive.sh}"
-PASS=0; FAIL=0; TOTAL=0
 
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; FAIL=$((FAIL + 1)); }
+# pass/fail were pure-rename shadows of the framework's ok/no; the suite's own
+# explicit TOTAL=$((TOTAL + 1)) lines (including the ones inside
+# expect_quiet/expect_block/expect_reason_names below) are dropped too since
+# ok/no already increment it (S7, AC-12). expect_quiet/expect_block/
+# expect_reason_names are suite-specific helpers (not owned names) rebuilt on
+# the framework's ok/no.
 
 command -v jq >/dev/null 2>&1 || { echo "patrol-revive: jq absent — suite cannot run"; exit 1; }
 
@@ -146,11 +150,10 @@ reason_of()   { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
 decision_of() { printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 
 expect_quiet() {  # <label>
-  TOTAL=$((TOTAL + 1))
   if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
-    pass "$1"
+    ok "$1"
   else
-    fail "$1" "rc=$HOOK_RC stdout=<$HOOK_OUT>"
+    no "$1" "rc=$HOOK_RC stdout=<$HOOK_OUT>"
   fi
 }
 
@@ -159,27 +162,25 @@ expect_quiet() {  # <label>
 # into the operator's terminal. That rendering IS the notice AC-F6 asks for:
 # there is no second output surface here.
 expect_block() {  # <label>
-  TOTAL=$((TOTAL + 1))
   local d; d=$(decision_of)
   if [ "$HOOK_RC" -ne 0 ]; then
-    fail "$1" "rc=$HOOK_RC (a JSON block exits 0); stdout=<$HOOK_OUT>"; return
+    no "$1" "rc=$HOOK_RC (a JSON block exits 0); stdout=<$HOOK_OUT>"; return
   fi
   if [ "$d" != "block" ]; then
-    fail "$1" "decision=<$d> expected block; stdout=<$HOOK_OUT>"; return
+    no "$1" "decision=<$d> expected block; stdout=<$HOOK_OUT>"; return
   fi
-  pass "$1"
+  ok "$1"
 }
 
 expect_reason_names() {  # <label> <substring>
-  TOTAL=$((TOTAL + 1))
   local r; r=$(reason_of)
   case "$r" in
-    *"$2"*) pass "$1" ;;
-    *)      fail "$1" "reason does not name <$2>: $r" ;;
+    *"$2"*) ok "$1" ;;
+    *)      no "$1" "reason does not name <$2>: $r" ;;
   esac
 }
 
-echo "=== Group 1: the three stamp states ==="
+section "Group 1: the three stamp states"
 
 # 1: STALE — armed, and the clock stopped. The one state that speaks.
 D=$(make_env); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
@@ -202,8 +203,7 @@ fire "$D"; expect_quiet "4: 100s old against a 1m interval (limit 120s) is silen
 D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 200
 fire "$D"; expect_block "5: 200s old against a 1m interval (limit 120s) blocks"
 
-echo ""
-echo "=== Group 2: the false-positive guards ==="
+section "Group 2: the false-positive guards"
 
 # A stamp belonging to ANOTHER session is not this session's Patrol. Without this
 # the hook would raise a dead Patrol on a session that never had one.
@@ -281,19 +281,17 @@ _PAYLOAD14=$(stdin_for "$D")
 # CLAUDE_CODE_SESSION_ID the hook resolves no session, matches no stamp and is
 # silent on ANY input — measured here — so the call below was silent for that
 # reason as much as for the missing jq. Two wrong reasons for one right answer.
-TOTAL=$((TOTAL + 1))
 if [ -n "$_PAYLOAD14" ]; then
-  pass "14a: the jq-absent fixture built a real payload to hand the hook"
+  ok "14a: the jq-absent fixture built a real payload to hand the hook"
 else
-  fail "14a: the jq-absent fixture handed the hook nothing" \
+  no "14a: the jq-absent fixture handed the hook nothing" \
        "14 below would then pass for the wrong reason"
 fi
-TOTAL=$((TOTAL + 1))
 _OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" PATH="$NOJQ" bash "$HOOK" <<< "$_PAYLOAD14" 2>/dev/null); _RC=$?
 if [ "$_RC" -eq 0 ] && [ -z "$_OUT" ]; then
-  pass "14: jq absent — passes, silent"
+  ok "14: jq absent — passes, silent"
 else
-  fail "14: jq absent did not pass silently" "rc=$_RC stdout=<$_OUT>"
+  no "14: jq absent did not pass silently" "rc=$_RC stdout=<$_OUT>"
 fi
 # THE PAIRED POSITIVE, on the same payload and the same directory with jq put
 # back. Silence is the easiest verdict in the world to get by accident, and
@@ -302,12 +300,11 @@ fi
 # nothing on any input — survives assertion 14 untouched. This is the arm that
 # rules them out: change one program on the PATH and the same call speaks.
 _jq_real=$(command -v jq 2>/dev/null) && ln -sf "$_jq_real" "$NOJQ/jq"
-TOTAL=$((TOTAL + 1))
 _OUT14B=$(env CLAUDE_CODE_SESSION_ID="$SID" PATH="$NOJQ" bash "$HOOK" <<< "$_PAYLOAD14" 2>/dev/null); _RC14B=$?
 if [ "$_RC14B" -eq 0 ] && [ -n "$_OUT14B" ]; then
-  pass "14b: …and with jq put back, that same payload DOES produce a finding"
+  ok "14b: …and with jq put back, that same payload DOES produce a finding"
 else
-  fail "14b: the jq-present control said nothing either — 14 proves nothing" \
+  no "14b: the jq-present control said nothing either — 14 proves nothing" \
        "rc=$_RC14B stdout=<$_OUT14B>"
 fi
 rm -rf "$NOJQ"
@@ -317,17 +314,15 @@ rm -rf "$NOJQ"
 # hooks/dispatch-preflight.sh takes for its own staleness half.
 D=$(make_env); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
 LONEDIR=$(mktemp -d); cp "$HOOK" "$LONEDIR/patrol-revive.sh"
-TOTAL=$((TOTAL + 1))
 _OUT=$(CLAUDE_CONFIG_DIR="$LONEDIR" bash "$LONEDIR/patrol-revive.sh" <<< "$(stdin_for "$D")" 2>/dev/null); _RC=$?
 if [ "$_RC" -eq 0 ] && [ -z "$_OUT" ]; then
-  pass "15: no sibling poker — passes, silent (no threshold, no finding)"
+  ok "15: no sibling poker — passes, silent (no threshold, no finding)"
 else
-  fail "15: a hook with no poker beside it did not pass silently" "rc=$_RC stdout=<$_OUT>"
+  no "15: a hook with no poker beside it did not pass silently" "rc=$_RC stdout=<$_OUT>"
 fi
 rm -rf "$LONEDIR"
 
-echo ""
-echo "=== Group 3: worktree resolution ==="
+section "Group 3: worktree resolution"
 
 # THE STAMP LIVES AT THE MAIN REPOSITORY'S ROOT, always — hooks/session-poker.sh
 # writes it there through the same `--git-common-dir` mapping, and a reader that
@@ -379,8 +374,7 @@ write_stamp "$WT" "$SID"; backdate "$(stamp_path "$WT" "$SID")" 600
 fire "$WT"; expect_quiet "17: a stale stamp under the WORKTREE's own tree is not read"
 rm -rf "$WTBASE"
 
-echo ""
-echo "=== Group 4: what the notice says ==="
+section "Group 4: what the notice says"
 
 # A 1m interval, so the limit it reports is a deterministic 120s. The AGE is not
 # asserted as a literal anywhere: a second can elapse between the backdate and the
@@ -409,16 +403,15 @@ expect_reason_names "21: …with the poker resolved to an absolute path" "${BION
 # The measurement itself, so the notice is a finding rather than an assertion —
 # an age in seconds, and the limit it was judged against, which follows the
 # project's own knob (1m here, so 120s).
-TOTAL=$((TOTAL + 1))
 # MATCHED WITHOUT A PIPE INTO `grep -q`. Under `set -o pipefail` (line 37) a `grep -q` that
 # exits on its first match SIGPIPEs the producer, and the pipeline reports 141 — this very
 # assertion failed that way once on a reason that plainly said "600s old" (wave-1.3.2 slice
 # 4/9). The text is captured first and matched in the shell.
 R22_REASON="$(reason_of)"
 if [[ "$R22_REASON" =~ [0-9]+s\ old ]]; then
-  pass "22: …and states the age it measured"
+  ok "22: …and states the age it measured"
 else
-  fail "22: the notice states no age" "$R22_REASON"
+  no "22: the notice states no age" "$R22_REASON"
 fi
 expect_reason_names "22b: …against the limit this project's interval sets" "120s limit"
 expect_reason_names "22c: …naming that interval as its source" "60s poker-interval"
@@ -430,8 +423,7 @@ expect_reason_names "23: …and the cause the operator can act on" "plugin updat
 # The way out. Without it a blocked stop reads as a wedge.
 expect_reason_names "24: …and that it blocks once" "blocks once"
 
-echo ""
-echo "=== Group 5: it writes nothing, and stamps nothing ==="
+section "Group 5: it writes nothing, and stamps nothing"
 
 # THE CENTRAL SAFETY PROPERTY. A hook that ran `arm` would satisfy the arming wall
 # over an empty cron table — a Patrol that reads alive forever and fires never.
@@ -442,31 +434,27 @@ fire "$D"
 AFTER_M=$(mtime_of "$(stamp_path "$D" "$SID")")
 AFTER_T=$(find "$D" -type f | sort | cksum)
 
-TOTAL=$((TOTAL + 1))
 if [ "$BEFORE_M" = "$AFTER_M" ]; then
-  pass "25: the stamp's mtime is untouched — the hook never arms"
+  ok "25: the stamp's mtime is untouched — the hook never arms"
 else
-  fail "25: the hook re-stamped the Patrol" "$BEFORE_M -> $AFTER_M"
+  no "25: the hook re-stamped the Patrol" "$BEFORE_M -> $AFTER_M"
 fi
 
-TOTAL=$((TOTAL + 1))
 if [ "$BEFORE_T" = "$AFTER_T" ]; then
-  pass "26: the hook creates and removes no file in the project"
+  ok "26: the hook creates and removes no file in the project"
 else
-  fail "26: the hook touched the project tree" "$BEFORE_T -> $AFTER_T"
+  no "26: the hook touched the project tree" "$BEFORE_T -> $AFTER_T"
 fi
 
-echo ""
-echo "=== Group 6: registration ==="
+section "Group 6: registration"
 
 # tests/*.test.sh is NOT globbed by the runner — an unregistered suite is a silent
 # false green, and this hook would then be a wall nothing drives.
-TOTAL=$((TOTAL + 1))
 if grep -q 'run "patrol-revive.test.sh" bash tests/patrol-revive.test.sh' \
      "${BIONIC_SCRIPTS_DIR}/tests/run.sh"; then
-  pass "27: tests/run.sh names patrol-revive.test.sh"
+  ok "27: tests/run.sh names patrol-revive.test.sh"
 else
-  fail "27: tests/run.sh does not name this suite — it would never run"
+  no "27: tests/run.sh does not name this suite — it would never run"
 fi
 
 # A hook with a suite, a run line and no registration is installed, green in its
@@ -479,22 +467,20 @@ fi
 # so BOTH halves are asserted, because either alone is a wall in the wrong place: a
 # lingering frontmatter entry would fire it twice per turn (the CLI does not deduplicate
 # across the two manifests), and a missing manifest entry would not fire it at all.
-TOTAL=$((TOTAL + 1))
 if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh' \
      "${BIONIC_HOOKS_DIR}/hooks.json"; then
-  pass "28: hooks/hooks.json registers the hook, always on"
+  ok "28: hooks/hooks.json registers the hook, always on"
 else
-  fail "28: the hook is not registered in hooks/hooks.json — it would never fire"
+  no "28: the hook is not registered in hooks/hooks.json — it would never fire"
 fi
-TOTAL=$((TOTAL + 1))
 # The REGISTRATION spelling, not any mention: the Patrol section names this hook in prose
 # (it is what reports a Patrol death, and the disarm ritual exists because of it), and a
 # grep for the bare filename would forbid the documentation along with the duplicate.
 if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive\.sh' \
      "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
-  fail "28b: SKILL.md still registers the hook — a second registration fires it twice per turn"
+  no "28b: SKILL.md still registers the hook — a second registration fires it twice per turn"
 else
-  pass "28b: …and SKILL.md's frontmatter does not, so it fires exactly once"
+  ok "28b: …and SKILL.md's frontmatter does not, so it fires exactly once"
 fi
 
 # 29: THE ASSERTION THAT WOULD HAVE CAUGHT THIS. The manifest registers
@@ -507,17 +493,15 @@ fi
 # found this bug caught it by reproducing the registration exactly, and that is
 # what this assertion now does: a bare path handed to `sh -c`, matching
 # `sh -c ".../patrol-revive.sh"` verbatim.
-TOTAL=$((TOTAL + 1))
 sh -c "$HOOK" <<< '{"hook_event_name":"Stop"}' >/dev/null 2>&1
 REGISTERED_RC=$?
 if [ "$REGISTERED_RC" -ne 126 ]; then
-  pass "29: the hook runs when invoked exactly as registered (bare path via sh -c, rc=$REGISTERED_RC)"
+  ok "29: the hook runs when invoked exactly as registered (bare path via sh -c, rc=$REGISTERED_RC)"
 else
-  fail "29: rc=126 (Permission denied) invoking the hook as the manifest registers it — the tracked file lost its execute bit"
+  no "29: rc=126 (Permission denied) invoking the hook as the manifest registers it — the tracked file lost its execute bit"
 fi
 
-echo ""
-echo "=== Group 7: the deliberate stop — a removed stamp is what ends the notice ==="
+section "Group 7: the deliberate stop — a removed stamp is what ends the notice"
 
 # THE NOTICE IS PER-TURN, NOT ONCE PER SESSION, and that is the whole reason
 # `session-poker.sh disarm` exists (critic C-2, epic-19 w1 Step 6). `stop_hook_active`
@@ -537,22 +521,20 @@ for _t in 1 2 3 4 5; do
   fire "$D"
   [ "$(decision_of)" = "block" ] && G7_BLOCKS=$((G7_BLOCKS + 1))
 done
-TOTAL=$((TOTAL + 1))
 if [ "$G7_BLOCKS" -eq 5 ]; then
-  pass "30: a stale stamp blocks EVERY turn — five turns, five blocks (the notice is per-turn)"
+  ok "30: a stale stamp blocks EVERY turn — five turns, five blocks (the notice is per-turn)"
 else
-  fail "30: the per-turn block is not what this hook does" "blocked $G7_BLOCKS of 5 turns"
+  no "30: the per-turn block is not what this hook does" "blocked $G7_BLOCKS of 5 turns"
 fi
 
 # THE CURE, THROUGH THE REAL VERB — never an `rm` in the test, which would pin this suite to
 # its own idea of where the stamp lives instead of to the poker that owns it.
-TOTAL=$((TOTAL + 1))
 ( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER_FOR_DISARM" disarm ) >/dev/null 2>&1
 G7_RC=$?
 if [ "$G7_RC" -eq 0 ] && [ ! -e "$(stamp_path "$D" "$SID")" ]; then
-  pass "31: session-poker.sh disarm removes this session's stamp (rc=0)"
+  ok "31: session-poker.sh disarm removes this session's stamp (rc=0)"
 else
-  fail "31: disarm did not remove the stamp" \
+  no "31: disarm did not remove the stamp" \
        "rc=$G7_RC; still at $(stamp_path "$D" "$SID")"
 fi
 
@@ -601,16 +583,15 @@ backdate "$(armed_path "$D" "$SID")" 600
 backdate "$(stamp_path "$D" "$SID")" 600
 G7_TICK=$( cd "$D" && env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$D/no-config" \
              bash "$POKER_FOR_DISARM" tick 2>&1 )
-TOTAL=$((TOTAL + 1))
 case "$G7_TICK" in
   *decision=DISARM*)
     if [ ! -e "$(stamp_path "$D" "$SID")" ]; then
-      pass "33: a DISARM tick removes the stamp it wrote — the decision and the disk agree"
+      ok "33: a DISARM tick removes the stamp it wrote — the decision and the disk agree"
     else
-      fail "33: a DISARM tick left its stamp behind — the death notice fires on the next turn"
+      no "33: a DISARM tick left its stamp behind — the death notice fires on the next turn"
     fi
     ;;
-  *) fail "33: the fixture roster did not reach a DISARM decision" "$G7_TICK" ;;
+  *) no "33: the fixture roster did not reach a DISARM decision" "$G7_TICK" ;;
 esac
 
 # THE DEATH NOTICE AFTER A DISARM IS LATE, NEVER ABSENT, and that is what this case has to
@@ -652,21 +633,18 @@ expect_reason_names "38: …and the deliberate-stop path is named, not left to b
 # here. A limit accepted against a safety net that does not exist is the thing this pin
 # exists to keep out — asserted as a PAIR, so the absence rests on an extractor proven to
 # find text in this file.
-TOTAL=$((TOTAL + 1))
 if grep -q 'never consecutive' "$HOOK"; then
-  pass "39: the header states why the CLI's consecutive-block override cannot engage here"
+  ok "39: the header states why the CLI's consecutive-block override cannot engage here"
 else
-  fail "39: the header does not say why the consecutive-block override cannot engage"
+  no "39: the header does not say why the consecutive-block override cannot engage"
 fi
-TOTAL=$((TOTAL + 1))
 if grep -q 'backstop above ours is the CLI' "$HOOK"; then
-  fail "39b: the header still claims a backstop that cannot fire for this hook"
+  no "39b: the header still claims a backstop that cannot fire for this hook"
 else
-  pass "39b: …and no longer claims that backstop as its own"
+  ok "39b: …and no longer claims that backstop as its own"
 fi
 
-echo ""
-echo "=== Group 8: the second-stamp finding (bionic 1.4.0, AC-3) ==="
+section "Group 8: the second-stamp finding (bionic 1.4.0, AC-3)"
 #
 # THE CONTRACT UNDER TEST. One clock per run: a second FRESH `patrol-<sid>.state`
 # belonging to ANOTHER session in this project's .bionic/tmp means two Patrol crons
@@ -689,20 +667,18 @@ FINDING_TEXT="a second live Patrol stamp for session"
 # the other session's first 8 characters.
 D=$(make_env); write_stamp "$D" "$SID"; write_stamp "$D" "$OTHER_SID"
 fire_stderr "$D"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
   *"patrol-revive: $FINDING_TEXT ${OTHER_SID:0:8}"*"one clock per run"*"delete the stray job and stamp"*)
-    pass "40: two fresh stamps produce the finding line, naming the other session's first 8 chars" ;;
-  *) fail "40: no finding for a second fresh stamp" "$HOOK_ERR" ;;
+    ok "40: two fresh stamps produce the finding line, naming the other session's first 8 chars" ;;
+  *) no "40: no finding for a second fresh stamp" "$HOOK_ERR" ;;
 esac
 
 # 41: ONE stamp (this session's own alone) — silent on this arm.
 D=$(make_env); write_stamp "$D" "$SID"
 fire_stderr "$D"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
-  *"$FINDING_TEXT"*) fail "41: a lone stamp wrongly produced the second-stamp finding" "$HOOK_ERR" ;;
-  *) pass "41: one stamp — silent on the second-stamp arm" ;;
+  *"$FINDING_TEXT"*) no "41: a lone stamp wrongly produced the second-stamp finding" "$HOOK_ERR" ;;
+  *) ok "41: one stamp — silent on the second-stamp arm" ;;
 esac
 
 # 42: the other stamp is STALE, not fresh — a dead predecessor is not "a second
@@ -710,10 +686,9 @@ esac
 D=$(make_env); write_stamp "$D" "$SID"; write_stamp "$D" "$OTHER_SID"
 backdate "$(stamp_path "$D" "$OTHER_SID")" 600
 fire_stderr "$D"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
-  *"$FINDING_TEXT"*) fail "42: a STALE second stamp wrongly produced the finding" "$HOOK_ERR" ;;
-  *) pass "42: a stale second stamp is silent — only a fresh duplicate is a finding" ;;
+  *"$FINDING_TEXT"*) no "42: a STALE second stamp wrongly produced the finding" "$HOOK_ERR" ;;
+  *) ok "42: a stale second stamp is silent — only a fresh duplicate is a finding" ;;
 esac
 
 # 43: a symlinked second stamp is not a stamp, same posture as this session's own
@@ -722,10 +697,9 @@ D=$(make_env); write_stamp "$D" "$SID"
 OTHERD=$(make_env); write_stamp "$OTHERD" "$OTHER_SID"
 ln -s "$(stamp_path "$OTHERD" "$OTHER_SID")" "$(stamp_path "$D" "$OTHER_SID")"
 fire_stderr "$D"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
-  *"$FINDING_TEXT"*) fail "43: a symlinked second stamp wrongly produced the finding" "$HOOK_ERR" ;;
-  *) pass "43: a symlinked second stamp is silent, never followed" ;;
+  *"$FINDING_TEXT"*) no "43: a symlinked second stamp wrongly produced the finding" "$HOOK_ERR" ;;
+  *) ok "43: a symlinked second stamp is silent, never followed" ;;
 esac
 rm -rf "$OTHERD"
 
@@ -737,31 +711,28 @@ rm -rf "$OTHERD"
 E=$(make_env 1s)
 write_stamp "$E" "$SID"; backdate "$(stamp_path "$E" "$SID")" 600
 fire "$E"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_OUT" in
-  *"Patrol"*) pass "44: engaged: a stale stamp is reported" ;;
-  *) fail "44: engaged: a stale stamp is reported" "out=<$HOOK_OUT>" ;;
+  *"Patrol"*) ok "44: engaged: a stale stamp is reported" ;;
+  *) no "44: engaged: a stale stamp is reported" "out=<$HOOK_OUT>" ;;
 esac
 E_FINDING="$HOOK_OUT"
 
 rm -f "$E/.bionic/tmp/engaged-$SID.state"
 fire "$E"
-TOTAL=$((TOTAL + 1))
 if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
-  pass "45: the same stale stamp unengaged says nothing"
+  ok "45: the same stale stamp unengaged says nothing"
 else
-  fail "45: the same stale stamp unengaged says nothing" "rc=$HOOK_RC out=<$HOOK_OUT>"
+  no "45: the same stale stamp unengaged says nothing" "rc=$HOOK_RC out=<$HOOK_OUT>"
 fi
 
 # a SYMLINK at the marker path reads as absent, never followed.
 E_DECOY=$(mktemp); printf 'plan=none\n' > "$E_DECOY"
 ln -s "$E_DECOY" "$E/.bionic/tmp/engaged-$SID.state"
 fire "$E"
-TOTAL=$((TOTAL + 1))
 if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
-  pass "46: a symlink at the marker path is not an engagement"
+  ok "46: a symlink at the marker path is not an engagement"
 else
-  fail "46: a symlink at the marker path is not an engagement" "rc=$HOOK_RC out=<$HOOK_OUT>"
+  no "46: a symlink at the marker path is not an engagement" "rc=$HOOK_RC out=<$HOOK_OUT>"
 fi
 rm -f "$E/.bionic/tmp/engaged-$SID.state" "$E_DECOY"
 
@@ -771,18 +742,16 @@ rm -f "$E/.bionic/tmp/engaged-$SID.state" "$E_DECOY"
 # switch, and pinning it would make this assertion fail on a slow machine and nowhere else.
 : > "$E/.bionic/tmp/engaged-$SID.state"
 fire "$E"
-TOTAL=$((TOTAL + 1))
 E_FINDING_N=$(printf '%s' "$E_FINDING" | sed -E 's/stamp is [0-9]+s old/stamp is Ns old/')
 HOOK_OUT_N=$(printf '%s' "$HOOK_OUT" | sed -E 's/stamp is [0-9]+s old/stamp is Ns old/')
 E_FINDING="$E_FINDING_N"; HOOK_OUT="$HOOK_OUT_N"
 if [ "$HOOK_OUT" = "$E_FINDING" ]; then
-  pass "47: re-engaged, the finding is byte-identical"
+  ok "47: re-engaged, the finding is byte-identical"
 else
-  fail "47: re-engaged, the finding is byte-identical" "was <$E_FINDING> now <$HOOK_OUT>"
+  no "47: re-engaged, the finding is byte-identical" "was <$E_FINDING> now <$HOOK_OUT>"
 fi
 
-echo ""
-echo "=== Group 9: active_run -> session_run (wave-session-bound-run S5) ==="
+setup_section "Group 9: active_run -> session_run (wave-session-bound-run S5)"
 #
 # THE CONTRACT UNDER TEST (design ledger AC-1/AC-3/AC-6). The run predicate at
 # `:361` used to be `active_run "$REPO" >/dev/null || exit 0` — the newest open
@@ -855,21 +824,18 @@ current: 9
 EOF
 }
 
-echo ""
-echo "---------- 48: bound-open — proceeds (a stale stamp still blocks), no fallback line ----------"
+section "48: bound-open — proceeds (a stale stamp still blocks), no fallback line"
 
 D=$(make_env_two_plans); write_stamp "$D" "$SID"; s5_bind "$D" "$PLAN_A_REL"
 backdate "$(stamp_path "$D" "$SID")" 600
 fire "$D"; expect_block "48a: bound to A, a stale stamp still blocks (the predicate did not exit early)"
 fire_stderr "$D"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
-  *"run resolved by newest-plan fallback"*) fail "48b: bound to A prints no fallback line" "$HOOK_ERR" ;;
-  *) pass "48b: bound to A prints no fallback line" ;;
+  *"run resolved by newest-plan fallback"*) no "48b: bound to A prints no fallback line" "$HOOK_ERR" ;;
+  *) ok "48b: bound to A prints no fallback line" ;;
 esac
 
-echo ""
-echo "---------- 49: fallback — unbound resolves to the newest plan (B), and says so ----------"
+section "49: fallback — unbound resolves to the newest plan (B), and says so"
 
 D=$(make_env_two_plans); write_stamp "$D" "$SID"
 backdate "$(stamp_path "$D" "$SID")" 600
@@ -879,44 +845,34 @@ backdate "$(stamp_path "$D" "$SID")" 600
 D_PHYS=$(cd "$D" && pwd -P)
 fire "$D"; expect_block "49a: unbound, a stale stamp still blocks (the predicate did not exit early)"
 fire_stderr "$D"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
   *"patrol-revive: run resolved by newest-plan fallback (session unbound) — $D_PHYS/.bionic/docs/plans/$PLAN_B_REL"*)
-    pass "49b: unbound prints the fallback line, naming B (the newest) verbatim" ;;
-  *) fail "49b: unbound prints the fallback line, naming B (the newest) verbatim" "$HOOK_ERR" ;;
+    ok "49b: unbound prints the fallback line, naming B (the newest) verbatim" ;;
+  *) no "49b: unbound prints the fallback line, naming B (the newest) verbatim" "$HOOK_ERR" ;;
 esac
 
-echo ""
-echo "---------- 50: bound-closed — a plan that closed is no open run at all ----------"
+section "50: bound-closed — a plan that closed is no open run at all"
 
 D=$(make_env_two_plans); write_stamp "$D" "$SID"
 s5_deliver "$D/.bionic/docs/plans/$PLAN_A_REL"
 s5_bind "$D" "$PLAN_A_REL"
 backdate "$(stamp_path "$D" "$SID")" 600
 fire "$D"
-TOTAL=$((TOTAL + 1))
 if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
-  pass "50a: bound to a CLOSED plan (A), the hook is silent — same branch as no open run"
+  ok "50a: bound to a CLOSED plan (A), the hook is silent — same branch as no open run"
 else
-  fail "50a: bound to a CLOSED plan (A), the hook is silent — same branch as no open run" \
+  no "50a: bound to a CLOSED plan (A), the hook is silent — same branch as no open run" \
     "rc=$HOOK_RC out=<$HOOK_OUT>"
 fi
 fire_stderr "$D"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
   *"patrol-revive: bound plan closed — $D/.bionic/docs/plans/$PLAN_A_REL; this session has no open run"*)
-    pass "50b: the closed-plan advisory names A, verbatim" ;;
-  *) fail "50b: the closed-plan advisory names A, verbatim" "$HOOK_ERR" ;;
+    ok "50b: the closed-plan advisory names A, verbatim" ;;
+  *) no "50b: the closed-plan advisory names A, verbatim" "$HOOK_ERR" ;;
 esac
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
-  *"$PLAN_B_REL"*) fail "50c: B's path (the still-open plan) appears nowhere in the output" "$HOOK_ERR" ;;
-  *) pass "50c: B's path (the still-open plan) appears nowhere in the output" ;;
+  *"$PLAN_B_REL"*) no "50c: B's path (the still-open plan) appears nowhere in the output" "$HOOK_ERR" ;;
+  *) ok "50c: B's path (the still-open plan) appears nowhere in the output" ;;
 esac
 
-echo ""
-echo "========================================"
-echo "patrol-revive: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
