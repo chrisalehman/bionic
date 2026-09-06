@@ -914,4 +914,84 @@ expect_eq "13: one planted shadow moves the count from zero to one" "1" "$W_MUT_
 expect_eq "13: …and the refusal names the planted name" "yes" \
   "$(contains "$(_tf_adoption_refusal "$W_MUT/$(basename "$W_VICTIM")")" "defines ok() at column 0")"
 
+# ============================================================
+section "14: the scanner reads the file bash reads (A-1/A-9)"
+# ============================================================
+#
+# ONE SCANNER, TWO WALLS. `_tf_scan` is the single reader behind the adoption
+# wall (AC-12) and the load-time derivation (AC-14), so a line it misreads takes
+# BOTH out at once — and it does so silently, for every line to the end of the
+# file. Four suites in this tree shipped in that state (git-argv, protect-main,
+# canonical-sdlc-evidence-gate, cmd-class): each writes a `<<WORD` inside a
+# quoted fixture string, and the textual matcher read it as a real opener.
+#
+# WHY THIS SECTION EXISTS WHEN §4 AND §12 ALREADY PLANT HEREDOCS. Both of those
+# plant only WELL-FORMED openers that close, so the catch-proof never sampled
+# the class that was live in the tree (review-a A-1, A-31c's shape). Every plant
+# below is a file the shell parses as a definition and a call; the framework has
+# to agree with the shell about that.
+
+F14_D="$SB/scan14"
+mkdir -p "$F14_D"
+
+f14_plant() {   # f14_plant <name> <line-that-must-not-open-a-heredoc>
+  { printf '#!/bin/bash\n'
+    printf '%s\n' "$2"
+    printf 'ok() { PASS=$((PASS + 1)); }\n'
+    printf 'expect_fourteen_never_defined "x"\n'
+  } > "$F14_D/$1.sh"
+}
+f14_wall()  { _tf_adoption_refusal "$F14_D/$1.sh"; }
+f14_deriv() { ( _tf_require_derived_helpers "$F14_D/$1.sh" ) >/dev/null 2>&1; echo $?; }
+
+# --- the openers that are not openers ----------------------------------------
+f14_plant quoted   'echo "see <<EOF for the format"'
+f14_plant squoted  "printf '%s' 'run <<EOF to open one'"
+f14_plant arith    'x=$(( 1 << 3 ))'
+f14_plant subst    '_v="$(printf "cat <<EOF")"'
+for f14_c in quoted squoted arith subst; do
+  expect_contains "14: [$f14_c] a <<WORD that opens nothing leaves the wall awake" \
+    "defines ok() at column 0" "$(f14_wall "$f14_c")"
+  expect_eq "14: [$f14_c] …and leaves the derivation awake" "1" "$(f14_deriv "$f14_c")"
+done
+
+# --- PAIRED NEGATIVE: a REAL opener still hides its body ---------------------
+# Without this row the four above could be a scanner that stopped skipping
+# heredoc bodies altogether — which would refuse framework.test.sh itself first.
+{ printf '#!/bin/bash\n'
+  printf 'cat > /dev/null <<%s\n' "'F14_INNER'"
+  printf 'ok() { echo "content, not a definition"; }\n'
+  printf 'expect_fourteen_never_defined "content, not a call"\n'
+  printf 'F14_INNER\n'
+  printf 'ok "a real row"\n'
+} > "$F14_D/realhd.sh"
+expect_empty "14: a REAL heredoc body is still content, not code" "$(f14_wall realhd)"
+expect_eq "14: …and the derivation does not fire on a call inside it" "0" "$(f14_deriv realhd)"
+
+# --- no file in tests/ ends with a heredoc still open ------------------------
+# NOT A COUNT PIN. The property that failed is "the scan reaches EOF", so that
+# is what is asserted; counts move with every edit. The tracer runs the SHIPPED
+# hdtag, lifted out of the framework by text, so it cannot drift from it.
+awk '/^    function hdtag\(/,/^    \}$/' "$FRAMEWORK" > "$F14_D/hdtag.awk"
+cat >> "$F14_D/hdtag.awk" <<'F14_TRACE'
+hd != "" { if ($0 ~ ("^[ \t]*" hd "[ \t]*$")) hd = ""; next }
+{ if ($0 ~ /^[ \t]*#/) next; hd = hdtag($0) }
+END { if (hd != "") print hd }
+F14_TRACE
+expect_eq "14: the tracer is the shipped hdtag (not vacuous)" "1" \
+  "$(grep -c 'function hdtag' "$F14_D/hdtag.awk")"
+expect_eq "14: …and it still sees a real unterminated opener" "F14_UNCLOSED" \
+  "$(printf 'cat <<F14_UNCLOSED\nbody\n' | awk -f "$F14_D/hdtag.awk")"
+
+F14_BLIND=0
+F14_BLIND_NAMES=""
+for f14_f in "$REPO"/tests/*.test.sh "$REPO"/tests/lib/*.sh; do
+  if [ -n "$(awk -f "$F14_D/hdtag.awk" "$f14_f")" ]; then
+    F14_BLIND=$((F14_BLIND + 1))
+    F14_BLIND_NAMES="${F14_BLIND_NAMES} $(basename "$f14_f")"
+  fi
+done
+echo "   files whose scan ends inside a heredoc:${F14_BLIND_NAMES:- none}"
+expect_eq "14: no file under tests/ ends with a heredoc still open" "0" "$F14_BLIND"
+
 finish

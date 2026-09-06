@@ -435,6 +435,72 @@ require_helpers() {
 #                   that BEGINS with one, including the `PASS=0; FAIL=0` form.
 _tf_scan() {
   awk '
+    # hdtag(s) — THE HEREDOC TAG OPENED BY THIS LINE, or "". QUOTE- AND
+    # ARITHMETIC-AWARE (review-a A-1/A-9): `echo "see <<EOF"` is text and
+    # `$(( 1 << 3 ))` is a shift, and neither opens anything. That is not a
+    # nicety. Every line from an opener to its terminator is consumed unread, so
+    # ONE phantom opener blinds the adoption wall AND the derivation for the
+    # whole rest of the file, silently — which is the state four suites in this
+    # tree were in when the textual matcher shipped. The character loop is the
+    # one payload/scripts/lib/cmd-class.sh already carries for the same problem
+    # (`heredoc_tag`), plus arithmetic state and command-substitution nesting —
+    # a $( ) inside a double-quoted string re-enters an UNQUOTED context, and
+    # protect-main.test.sh:343 is that exact line. A herestring <<< opens no body.
+    # NOTE FOR EDITORS: this awk program is inside a shell single-quoted string,
+    # so it must not contain an apostrophe anywhere, comments included. A single
+    # quote is spelled \047.
+    function hdtag(s,   i, c, L, j, t, ch, q, dep, qs, ar, pc) {
+      L = length(s); q = ""; dep = 0; ar = 0; pc = ""
+      for (i = 1; i <= L; i++) {
+        c = substr(s, i, 1)
+        if (ar > 0) {                                  # inside $(( )) / (( ))
+          if (c == "(") ar++
+          else if (c == ")") ar--
+          continue
+        }
+        if (q == "\047") {                             # inside \047 quotes: nothing is special
+          if (c == "\047") q = ""
+          continue
+        }
+        if (q == "\"") {                               # double quotes: \ escapes, $( nests
+          if (c == "\\") { i++; continue }
+          if (c == "\"") { q = ""; continue }
+          if (c == "$" && substr(s, i + 1, 1) == "(") {
+            if (substr(s, i + 2, 1) == "(") { ar = 2; i += 2; continue }
+            dep++; qs[dep] = q; q = ""; i++; pc = ""; continue
+          }
+          continue
+        }
+        if (c == "\047" || c == "\"") { q = c; pc = c; continue }
+        if (c == "\\") { i++; pc = ""; continue }
+        if (c == "$" && substr(s, i + 1, 1) == "(") {
+          if (substr(s, i + 2, 1) == "(") { ar = 2; i += 2; continue }
+          dep++; qs[dep] = q; q = ""; i++; pc = ""; continue
+        }
+        if (c == ")" && dep > 0) { q = qs[dep]; dep--; pc = ")"; continue }
+        if (c == "(" && substr(s, i + 1, 1) == "(" \
+            && (pc == "" || pc == ";" || pc == "&" || pc == "|" || pc == "(" || pc == "{")) {
+          ar = 2; i++; continue
+        }
+        if (c == "<" && substr(s, i + 1, 1) == "<") {
+          if (substr(s, i + 2, 1) == "<") { i += 2; pc = "<"; continue }   # here-STRING
+          j = i + 2
+          if (substr(s, j, 1) == "-") j++
+          while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+          ch = substr(s, j, 1)
+          if (ch == "\047" || ch == "\"") j++
+          t = ""
+          while (j <= L) {
+            c = substr(s, j, 1)
+            if (c ~ /[A-Za-z0-9_]/) { t = t c; j++ } else break
+          }
+          if (t != "") return t
+          i = j - 1; pc = "<"; continue
+        }
+        if (c != " " && c != "\t") pc = c
+      }
+      return ""
+    }
     hd != "" {
       if ($0 ~ ("^[ \t]*" hd "[ \t]*$")) hd = ""
       next
@@ -444,15 +510,7 @@ _tf_scan() {
       if (line ~ /^[ \t]*#/) next
 
       # heredoc opener on this line? (herestrings <<< are not openers)
-      hline = line
-      gsub(/<<</, "   ", hline)
-      pending = ""
-      if (match(hline, /<<-?[ \t]*[^ \t<>;&|()]+/)) {
-        w0 = substr(hline, RSTART, RLENGTH)
-        sub(/^<<-?[ \t]*/, "", w0)
-        gsub(/[^A-Za-z0-9_]/, "", w0)
-        if (w0 != "") pending = w0
-      }
+      pending = hdtag(line)
 
       # a counter reset at column 0, and every one after a `;` on that line
       if (match(line, /^(PASS|FAIL|TOTAL)=0/) && substr(line, RLENGTH + 1, 1) !~ /[0-9A-Za-z_.]/) {
