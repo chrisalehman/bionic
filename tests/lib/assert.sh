@@ -12,8 +12,23 @@
 #   setup_section <name>  opens a section exempt from that rule (fixture building)
 #   ok <msg>              record a pass
 #   no <msg> [detail]     record a fail
-#   expect_eq <msg> <expected> <actual>
-#   expect_empty <msg> <value>
+#   THE GENERIC ASSERTION FAMILY — the thirteen names below are the framework's
+#   and no suite's (A-16, spec AC-12). Every one reports through ok/no, so the
+#   counters and the section floor see it.
+#
+#   expect_eq <msg> <expected> <actual>          string equality
+#   expect_ne <msg> <not-expected> <actual>      string inequality
+#   expect_true <msg> <cmd>...                   command exits 0 (output silenced)
+#   expect_false <msg> <cmd>...                  command exits non-zero (silenced)
+#   expect_contains <msg> <needle> <haystack>    literal substring present
+#   expect_absent <msg> <needle> <haystack>      literal substring absent
+#   expect_match <msg> <glob> <actual>           GLOB match (not a regex)
+#   expect_no_match <msg> <glob> <actual>        GLOB non-match
+#   expect_regex <msg> <ERE> <actual>            ERE match, unanchored
+#   expect_no_regex <msg> <ERE> <actual>         ERE non-match
+#   expect_status <msg> <expected> <actual>      exit status equality
+#   expect_empty <msg> <value>                   value is the empty string
+#   expect_nonempty <msg> <value>                value is not the empty string
 #   require_helpers <name>...   explicit presence guard (kept for the two suites
 #                               that already call it)
 #   finish                close the last section, fail every section that asserted
@@ -27,6 +42,96 @@
 # runner's adoption wall (S10) is what makes a private definition an error. What
 # changes here is that the framework no longer DEFERS: the definitions below are
 # the tree's, not a fallback.
+#
+# ── THE GENERIC FAMILY: SEMANTICS, ARGUMENT ORDER, AND THE OLD SPELLINGS ─────
+#
+# Before this file owned them, 53 suites carried 37 distinct private `expect_*`
+# spellings between them. Thirteen of those are GENERIC — they say nothing about
+# bionic, only about strings, commands, patterns and exit statuses — and those
+# thirteen are now defined here, once. Regex matching is on that list rather than
+# left private (A-S1b-2, resolved by the orchestrator 2026-09-06 as option 2):
+# eight suites need it, so leaving it out would have made the ownership boundary
+# a loophole for exactly the duplication this wave removes. The other 24 are
+# suite-specific (expect_finding,
+# expect_audit_line, expect_block, expect_allow, …); they are built on ok/no,
+# they stay local to the suite that needs them, and they stay legal.
+#
+# ARGUMENT ORDER is `<label> <expected> <actual>` throughout, which is what the
+# tree already did unanimously: expected-side first for eq/ne/status, needle
+# before haystack for contains/absent, pattern before subject for match/no_match.
+# The two exceptions in the tree (live-agents and resources spell expect_match
+# `<label> <actual> <ERE>`) are outvoted 11 to 2 and are migration work.
+#
+# SEMANTICS are the tree's most common definition of each name, measured:
+#
+#   expect_true / expect_false SILENCE the command they run (stdout AND stderr).
+#     17 of 20 private definitions of expect_true do, and 6 of 9 of expect_false.
+#     A command whose output you want to assert on should be captured into a
+#     variable and asserted with expect_contains — not run through expect_true.
+#
+#   expect_contains / expect_absent take a LITERAL substring, implemented with a
+#     quoted `case` glob rather than `grep -F`. The tree is split almost evenly
+#     (10 `case` to 9 `grep -qF` for contains), and the two agree on every
+#     single-line needle. `case` is chosen because it is exact substring
+#     semantics: `grep -F` reads a newline in the needle as pattern alternation,
+#     so a multi-line needle matches too eagerly under contains and, worse, too
+#     eagerly under absent. It also keeps expect_absent the exact complement of
+#     expect_contains, and it spawns nothing (no `grep -q` in a pipeline, which
+#     exits 141 under pipefail on a large producer).
+#
+#   expect_match / expect_no_match take a GLOB, not a regex — `[[ $actual == $pat ]]`
+#     with the pattern unquoted. 11 of 14 private definitions of expect_match are
+#     this, and all 8 of expect_no_match are; between them they carry 266 call
+#     sites against 75 for the regex spellings. Anchoring is implicit: the glob
+#     must match the WHOLE value, so a substring test needs `*needle*`.
+#
+#   expect_regex / expect_no_regex take an EXTENDED regular expression and are
+#     UNANCHORED: `needle` matches "a needle here" with no `.*` on either side.
+#     This is the semantics of the tree's `expect_matches` (5 definitions, 25 call
+#     sites), and it is a genuinely different matcher from expect_match — a glob
+#     reads `[0-9]+` as a literal bracket expression followed by a literal plus.
+#     Pick expect_regex when the pattern needs a quantifier, alternation or an
+#     anchor; pick expect_match when a `*needle*` says it.
+#
+#     The value is matched with a HERESTRING, never `printf ... | grep -q`. Two
+#     suites spell their private expect_matches as a pipeline, and under
+#     `pipefail` that reports FAILURE on a value the pattern matches, as soon as
+#     the value outgrows the 64 KiB pipe buffer: grep leaves early and the
+#     producer takes EPIPE. The status is 141 when the producer dies by SIGPIPE
+#     and 1 when bash reports the write error instead — it varies with the
+#     producer, the size and whether a trap is installed, so only "non-zero" is
+#     stable. Either way the assertion says FAIL and the code is fine.
+#     framework.test.sh §10 pins both halves. Capture the value, then match it.
+#
+#   expect_status compares two exit statuses as strings, expected first.
+#
+# THE OLD SPELLINGS — `old -> canonical`. No aliases are defined here: the
+# migration slices rename the call sites. S5-S8 quote this table.
+#
+#   expect_equal -> expect_eq — pure rename (stop-check, 4 call sites; its
+#     failing arm also printed a diff, which is detail text, not semantics).
+#   expect_differ -> expect_ne — pure rename (stop-check; defined, never called).
+#   expect_not_contains -> expect_absent — pure rename, same `case` semantics
+#     (command-relay, env, rc-item; 7 call sites).
+#   expect_matches -> expect_regex — PURE rename, same ERE semantics, same
+#     argument order (execution-recorder, interpreter-pin, session-sweeper,
+#     stop-check, stop-guard; 25 call sites). The two pipeline spellings
+#     (interpreter-pin, session-sweeper) lose their 141 exposure in the move.
+#   expect_match, in the THREE suites where it is secretly an ERE -> expect_regex.
+#     live-agents (8 sites) and resources (17) also REVERSE the arguments, spelling
+#     it `<label> <actual> <ERE>`, so those 25 sites need the order corrected as
+#     well as the name changed. This is the highest-risk rebinding in the
+#     migration: their private definition wins today, so nothing is red now, and
+#     the moment the adoption wall removes the shadow the calls bind to the glob
+#     helper with the arguments the wrong way round and STILL nothing goes red.
+#     preflight-probe (11 sites) is the third: its expect_match takes a FILE, so
+#     each call site must grow a read of that file, and its sibling expect_nomatch
+#     stays local — that suite ends up with a split idiom until someone routes
+#     both together.
+#   expect_nomatch -> NOT a rename: it takes a FILE rather than a string
+#     (preflight-probe, 14 call sites). Stays local under its own name.
+#   expect_absent_ug -> NOT a rename: it pins /usr/bin/grep on purpose, because
+#     the shell `grep` on this machine skips hidden directories (cross-gate).
 #
 # ── ASSERTION DISCIPLINE ─────────────────────────────────────────────────────
 #
@@ -128,9 +233,74 @@ no() {
 # expect_eq <label> <expected> <actual>
 expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 
+# expect_ne <label> <not-expected> <actual>
+expect_ne() { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected anything but '$2', got it"; fi; }
+
+# expect_true <label> <cmd>... — the command's own output is silenced.
+expect_true() {
+  local _l="$1"; shift
+  if "$@" >/dev/null 2>&1; then ok "$_l"; else no "$_l" "command failed: $*"; fi
+}
+
+# expect_false <label> <cmd>... — the command's own output is silenced.
+expect_false() {
+  local _l="$1"; shift
+  if "$@" >/dev/null 2>&1; then no "$_l" "command unexpectedly succeeded: $*"; else ok "$_l"; fi
+}
+
+# expect_contains <label> <needle> <haystack> — literal substring.
+expect_contains() {
+  case "$3" in
+    *"$2"*) ok "$1" ;;
+    *)      no "$1" "missing '$2' in: $(printf '%.400s' "$3")" ;;
+  esac
+}
+
+# expect_absent <label> <needle> <haystack> — the exact complement of
+# expect_contains, and a NEGATIVE assertion: pair it with a positive one over the
+# same fixture, or it passes when the producer never ran.
+expect_absent() {
+  case "$3" in
+    *"$2"*) no "$1" "unexpectedly present: '$2' in: $(printf '%.400s' "$3")" ;;
+    *)      ok "$1" ;;
+  esac
+}
+
+# expect_match <label> <glob> <actual> — GLOB, not a regex, and it must match the
+# whole value: a substring test is '*needle*'.
+expect_match() {
+  # shellcheck disable=SC2053  # RHS is a glob on purpose
+  if [[ "$3" == $2 ]]; then ok "$1"; else no "$1" "no match for '$2' in: $(printf '%.400s' "$3")"; fi
+}
+
+# expect_no_match <label> <glob> <actual> — a NEGATIVE assertion; pair it.
+expect_no_match() {
+  # shellcheck disable=SC2053  # RHS is a glob on purpose
+  if [[ "$3" == $2 ]]; then no "$1" "unexpected match for '$2' in: $(printf '%.400s' "$3")"; else ok "$1"; fi
+}
+
+# expect_regex <label> <ERE> <actual> — EXTENDED regular expression, unanchored.
+# The value is matched through a herestring, not a pipeline: `printf | grep -q`
+# exits 141 under pipefail on a large value and reports a false FAIL.
+expect_regex() {
+  if grep -qE -- "$2" <<<"$3"; then ok "$1"; else no "$1" "no match for /$2/ in: $(printf '%.400s' "$3")"; fi
+}
+
+# expect_no_regex <label> <ERE> <actual> — the exact complement of expect_regex,
+# and a NEGATIVE assertion: pair it with a positive one over the same fixture.
+expect_no_regex() {
+  if grep -qE -- "$2" <<<"$3"; then no "$1" "unexpected match for /$2/ in: $(printf '%.400s' "$3")"; else ok "$1"; fi
+}
+
+# expect_status <label> <expected> <actual>
+expect_status() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
+
 # expect_empty <label> <value> — a NEGATIVE assertion: pair it with a positive
 # one over the same fixture, or it passes when the producer never ran.
 expect_empty() { if [ -z "${2:-}" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
+
+# expect_nonempty <label> <value>
+expect_nonempty() { if [ -n "${2:-}" ]; then ok "$1"; else no "$1" "expected a non-empty value, got nothing"; fi; }
 
 # ── the tally ────────────────────────────────────────────────────────────────
 #
