@@ -30,12 +30,15 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HOOK="${BIONIC_PATROL_DUTIES_GATE_UNDER_TEST:-${BIONIC_HOOKS_DIR}/patrol-duties-gate.sh}"
-PASS=0; FAIL=0; TOTAL=0
 
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; FAIL=$((FAIL + 1)); }
+# pass/fail were pure-rename shadows of the framework's ok/no; the suite's own
+# explicit TOTAL=$((TOTAL + 1)) lines (including the two inside expect_allow/
+# expect_block below) are dropped too since ok/no already increment it
+# (S7, AC-12). expect_allow/expect_block are suite-specific helpers (not
+# owned names) rebuilt on the framework's ok/no.
 
 command -v jq >/dev/null 2>&1 || { echo "patrol-duties-gate: jq absent — suite cannot run"; exit 1; }
 
@@ -183,11 +186,10 @@ reason_of() { printf '%s' "$HOOK_OUT" | jq -r '.reason // ""' 2>/dev/null; }
 decision_of() { printf '%s' "$HOOK_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 
 expect_allow() {  # <label>
-  TOTAL=$((TOTAL + 1))
   if [ "$HOOK_RC" -eq 0 ] && [ -z "$HOOK_OUT" ]; then
-    pass "$1"
+    ok "$1"
   else
-    fail "$1" "rc=$HOOK_RC stdout=<$HOOK_OUT>"
+    no "$1" "rc=$HOOK_RC stdout=<$HOOK_OUT>"
   fi
 }
 
@@ -196,30 +198,29 @@ expect_allow() {  # <label>
 # a reason that lists both duties whichever one is missing tells the reader
 # nothing, and is the failure this gate's whole value rests on avoiding.
 expect_block() {  # <label> <must-contain> [must-not-contain]
-  TOTAL=$((TOTAL + 1))
   local d r; d=$(decision_of); r=$(reason_of)
   if [ "$HOOK_RC" -ne 0 ]; then
-    fail "$1" "rc=$HOOK_RC (a JSON block exits 0); stdout=<$HOOK_OUT>"; return
+    no "$1" "rc=$HOOK_RC (a JSON block exits 0); stdout=<$HOOK_OUT>"; return
   fi
   if [ "$d" != "block" ]; then
-    fail "$1" "decision=<$d> expected block; stdout=<$HOOK_OUT>"; return
+    no "$1" "decision=<$d> expected block; stdout=<$HOOK_OUT>"; return
   fi
   case "$r" in
     *"$2"*) ;;
-    *) fail "$1" "reason does not name <$2>: $r"; return ;;
+    *) no "$1" "reason does not name <$2>: $r"; return ;;
   esac
   if [ -n "${3:-}" ]; then
     case "$r" in
-      *"$3"*) fail "$1" "reason wrongly names <$3>: $r"; return ;;
+      *"$3"*) no "$1" "reason wrongly names <$3>: $r"; return ;;
     esac
   fi
-  pass "$1"
+  ok "$1"
 }
 
 LA_MISSING="ListAgents"
 TL_MISSING="TaskList or a plan-ledger write"
 
-echo "=== Section 1: the six contract cases (Design T5) ==="
+section "Section 1: the six contract cases (Design T5)"
 
 # 1: tick + both duties -> allow.
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" TaskList
@@ -253,8 +254,7 @@ fire "$d"; expect_allow "5: a non-tick turn with neither duty passes"
 d=$(make_env); u_tick "$d"
 fire "$d" Stop true; expect_allow "6: stop_hook_active true passes the same incomplete tick"
 
-echo ""
-echo "=== Section 2: discrimination — what counts, and when ==="
+section "Section 2: discrimination — what counts, and when"
 
 # 7: neither duty -> the reason names BOTH.
 d=$(make_env); u_tick "$d"
@@ -311,8 +311,7 @@ fire "$d"; expect_allow "15: both duties in ONE assistant entry pass"
 d=$(make_env); u_tick "$d"; u_prompt "$d" "actually, do this instead"
 fire "$d"; expect_allow "16: a user prompt after the tick ends the tick's turn"
 
-echo ""
-echo "=== Section 3: fail directions — silence on every ambiguity ==="
+section "Section 3: fail directions — silence on every ambiguity"
 
 # 17: SubagentStop is not this gate's event. A subagent has no Patrol duties.
 d=$(make_env); u_tick "$d"
@@ -363,23 +362,21 @@ d=$(make_env); u_tick "$d"
 _before=$(find "$d" -type f | sort | cksum)
 fire "$d"
 _after=$(find "$d" -type f | sort | cksum)
-TOTAL=$((TOTAL + 1))
 if [ "$_before" = "$_after" ]; then
-  pass "23: the gate creates and removes no file in the project"
+  ok "23: the gate creates and removes no file in the project"
 else
-  fail "23: the gate touched the project tree" "$_before -> $_after"
+  no "23: the gate touched the project tree" "$_before -> $_after"
 fi
 
 # 24: THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner — an
 # unregistered suite is a silent false green, and this gate would then be a wall
 # nothing drives. (The pattern was tests/doctor.test.sh Group 11, deleted at
 # 8582861, epic-18 wave-03.)
-TOTAL=$((TOTAL + 1))
 if grep -q 'run "patrol-duties-gate.test.sh" bash tests/patrol-duties-gate.test.sh' \
      "${BIONIC_SCRIPTS_DIR}/tests/run.sh"; then
-  pass "24: tests/run.sh names patrol-duties-gate.test.sh"
+  ok "24: tests/run.sh names patrol-duties-gate.test.sh"
 else
-  fail "24: tests/run.sh does not name this suite — it would never run"
+  no "24: tests/run.sh does not name this suite — it would never run"
 fi
 
 # 25: THE GATE IS REGISTERED ON THE STOP CHANNEL. A hook with a suite, a run line
@@ -393,19 +390,17 @@ fi
 # the duty it binds went on existing. Both halves are asserted, because either alone is a
 # wall in the wrong place: a lingering frontmatter entry fires it twice per turn (the CLI
 # does not deduplicate across the two manifests), and a missing manifest entry not at all.
-TOTAL=$((TOTAL + 1))
 if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
      "${BIONIC_HOOKS_DIR}/hooks.json"; then
-  pass "25: hooks/hooks.json registers the gate on the Stop channel, always on"
+  ok "25: hooks/hooks.json registers the gate on the Stop channel, always on"
 else
-  fail "25: the gate is not registered in hooks/hooks.json — it would never fire"
+  no "25: the gate is not registered in hooks/hooks.json — it would never fire"
 fi
-TOTAL=$((TOTAL + 1))
 if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
      "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"; then
-  fail "25b: SKILL.md still registers the gate — a second registration fires it twice per turn"
+  no "25b: SKILL.md still registers the gate — a second registration fires it twice per turn"
 else
-  pass "25b: …and SKILL.md's frontmatter does not, so it fires exactly once"
+  ok "25b: …and SKILL.md's frontmatter does not, so it fires exactly once"
 fi
 
 # 26/26b: THE HEADER'S OWN HONESTY ABOUT ITS BACKSTOP. This file used to cite the
@@ -417,21 +412,18 @@ fi
 # S10 (critic C-2); this is the same correction on the other hook that makes it,
 # pinned the same way — as a PAIR, so the absence rests on an extractor proven to
 # find text in this very file.
-TOTAL=$((TOTAL + 1))
 if grep -q 'never consecutive' "$HOOK"; then
-  pass "26: the header states why the CLI's consecutive-block override cannot engage here"
+  ok "26: the header states why the CLI's consecutive-block override cannot engage here"
 else
-  fail "26: the header does not say why the consecutive-block override cannot engage"
+  no "26: the header does not say why the consecutive-block override cannot engage"
 fi
-TOTAL=$((TOTAL + 1))
 if grep -q 'Backstop above ours, from the same reference' "$HOOK"; then
-  fail "26b: the header still claims a backstop that cannot fire for this hook"
+  no "26b: the header still claims a backstop that cannot fire for this hook"
 else
-  pass "26b: …and no longer claims that backstop as its own"
+  ok "26b: …and no longer claims that backstop as its own"
 fi
 
-echo ""
-echo "=== Section 4: the resume/clear ritual arm (bionic 1.4.0, AC-3) ==="
+section "Section 4: the resume/clear ritual arm (bionic 1.4.0, AC-3)"
 #
 # A /clear rewrites the session id in place but does NOT kill a predecessor's cron
 # job (A-probe-4: it survives and keeps firing into the new conversation). The
@@ -465,12 +457,11 @@ RITUAL_ADOPT="adopt"
 d=$(make_env); u_clear_marker "$d"; a_tool "$d" CronCreate
 fire "$d"
 expect_block "27: CronCreate with no prior CronList after a clear marker blocks" "$RITUAL_CRONLIST"
-TOTAL=$((TOTAL + 1))
 r=$(reason_of)
 case "$r" in
   *"$RITUAL_CRONLIST"*"$RITUAL_JOB"*"$RITUAL_CRONCREATE"*"$RITUAL_ARM"*"$RITUAL_ADOPT"*)
-    pass "28: the reason states the ritual in order — CronList, delete the stray job, CronCreate, arm, adopt" ;;
-  *) fail "28: the reason does not state the ritual in order" "$r" ;;
+    ok "28: the reason states the ritual in order — CronList, delete the stray job, CronCreate, arm, adopt" ;;
+  *) no "28: the reason does not state the ritual in order" "$r" ;;
 esac
 
 # 29: the same marker, but CronList precedes the CronCreate -> passes.
@@ -505,8 +496,7 @@ fire "$d"; expect_allow "34: a marker followed only by CronList passes — nothi
 d=$(make_env); u_clear_marker "$d"; a_tool_sidechain "$d" CronCreate
 fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the ritual"
 
-echo ""
-echo "=== Section 5: the third duty — a printed FILL is answered (AC-29) ==="
+section "Section 5: the third duty — a printed FILL is answered (AC-29)"
 
 # THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
 # the roster and name the slices that are ready, but it cannot dispatch — and a
@@ -630,8 +620,7 @@ u_tick_out "$d" "poker: FILL ALPHA"
 fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
 
 
-echo ""
-echo "=== Section 6: marker scope — a file the agent merely READ is not a decline (review F2) ==="
+section "Section 6: marker scope — a file the agent merely READ is not a decline (review F2)"
 #
 # THE DEFECT. `fill-declined:` and the two clear/resume markers were read as a raw-text
 # substring of EVERY transcript record, tool results included. A tool result is how the
@@ -703,8 +692,7 @@ d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA
 a_agent "$d" "W-ALPHA" "Slice ALPHA, implementor."
 fire "$d"; expect_block "55: the FILL line is still read out of the tick's tool result" "BETA" "ALPHA"
 
-echo ""
-echo "=== Section 7: a dot in a slice id is a dot, not a wildcard (review correctness F1) ==="
+section "Section 7: a dot in a slice id is a dot, not a wildcard (review correctness F1)"
 #
 # THE DEFECT. The word-boundary test splices the slice id into a DYNAMIC awk regex:
 #   agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")
@@ -741,8 +729,7 @@ fire "$d"; expect_block "58: a dotted id inside a longer word does not answer th
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL W-FIX.GATE"
 fire "$d"; expect_block "59: an unanswered id carrying both a dot and a hyphen is named verbatim" "W-FIX.GATE"
 
-echo ""
-echo "=== Section 8: the scan is windowed (review performance, finding 1) ==="
+section "Section 8: the scan is windowed (review performance, finding 1)"
 #
 # THE DEFECT. This gate read the WHOLE transcript through one jq pass on every Stop of an
 # open run — from byte zero, ~85 ms of CPU per MB, measured 4.3 s over the 50 MB a long
@@ -785,11 +772,10 @@ fire "$d"; expect_allow "61: a marker beyond the window reads as no marker — t
 # 62: THE BOUND IS NAMED AND IS A CONSTANT. A window that regresses to an unbounded read
 # is invisible in every behavioural test above — 60 and 61 both still pass without a
 # `tail` if the whole file is small. This is the assertion that the bound exists at all.
-TOTAL=$((TOTAL + 1))
 if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK" && grep -q 'tail -n "\$SCAN_WINDOW_LINES"' "$HOOK"; then
-  pass "62: the transcript scan is bounded by a named SCAN_WINDOW_LINES constant"
+  ok "62: the transcript scan is bounded by a named SCAN_WINDOW_LINES constant"
 else
-  fail "62: the transcript scan has no named line bound — it reads from byte zero"
+  no "62: the transcript scan has no named line bound — it reads from byte zero"
 fi
 # ---------- Group 25: THE ENGAGEMENT SWITCH (AC-8) ----------
 #
@@ -859,8 +845,7 @@ u_prompt "$d" "... \`bash <plugin-root>/hooks/session-poker.sh tick\` is the dec
 both_duties "$d"; u_tick_out "$d" "poker: FILL S3 S4"
 fire "$d"; expect_allow "73: …and the same FILL line after a non-tick row is not a duty"
 
-echo ""
-echo "=== Section S5: active_run -> session_run (wave-session-bound-run S5) ==="
+setup_section "Section S5: active_run -> session_run (wave-session-bound-run S5)"
 #
 # THE CONTRACT UNDER TEST (design ledger AC-1/AC-3/AC-6). `PLAN` — and so
 # `PLAN_NAME`, the basename that discharges the task-list duty — used to come
@@ -938,8 +923,7 @@ current: 9
 EOF
 }
 
-echo ""
-echo "---------- 24: bound-open — only the BOUND plan's basename discharges the duty ----------"
+section "24: bound-open — only the BOUND plan's basename discharges the duty"
 
 d=$(make_env_two_plans); s5_bind "$d" "$PLAN_A_REL"
 u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_A_REL"
@@ -950,14 +934,12 @@ u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PL
 fire "$d"; expect_block "24b: bound to A, an Edit naming B (unrelated to A) does not satisfy it" \
   "$TL_MISSING" "$LA_MISSING"
 fire_stderr "$d"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
-  *"run resolved by newest-plan fallback"*) fail "24c: bound to A prints no fallback line" "$HOOK_ERR" ;;
-  *) pass "24c: bound to A prints no fallback line" ;;
+  *"run resolved by newest-plan fallback"*) no "24c: bound to A prints no fallback line" "$HOOK_ERR" ;;
+  *) ok "24c: bound to A prints no fallback line" ;;
 esac
 
-echo ""
-echo "---------- 25: fallback — unbound resolves to the newest plan (B), and says so ----------"
+section "25: fallback — unbound resolves to the newest plan (B), and says so"
 
 d=$(make_env_two_plans)
 # PHYSICAL, because the fallback path comes off active_plan's own resolution —
@@ -970,11 +952,10 @@ d_phys=$(cd "$d" && pwd -P)
 u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PLAN_B_REL"
 fire "$d"; expect_allow "25a: unbound, an Edit naming B (the newest) satisfies the duty"
 fire_stderr "$d"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
   *"patrol-duties-gate: run resolved by newest-plan fallback (session unbound) — $d_phys/.bionic/docs/plans/$PLAN_B_REL"*)
-    pass "25b: unbound prints the fallback line, naming B verbatim" ;;
-  *) fail "25b: unbound prints the fallback line, naming B verbatim" "$HOOK_ERR" ;;
+    ok "25b: unbound prints the fallback line, naming B verbatim" ;;
+  *) no "25b: unbound prints the fallback line, naming B verbatim" "$HOOK_ERR" ;;
 esac
 
 # THE PAIRED NEGATIVE: unbound, A's name (the OLDER plan, not the fallback
@@ -984,8 +965,7 @@ u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PL
 fire "$d"; expect_block "25c: unbound, an Edit naming A (not the fallback target) does not satisfy it" \
   "$TL_MISSING" "$LA_MISSING"
 
-echo ""
-echo "---------- 26: bound-closed — a plan that closed is no open run at all ----------"
+section "26: bound-closed — a plan that closed is no open run at all"
 
 d=$(make_env_two_plans)
 s5_deliver "$d/.bionic/docs/plans/$PLAN_A_REL"
@@ -994,21 +974,14 @@ u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/.bionic/docs/plans/$PL
 fire "$d"; expect_block "26a: bound to a CLOSED A, an Edit naming open B satisfies nothing" \
   "$TL_MISSING" "$LA_MISSING"
 fire_stderr "$d"
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
   *"patrol-duties-gate: bound plan closed — $d/.bionic/docs/plans/$PLAN_A_REL; this session has no open run"*)
-    pass "26b: the closed-plan advisory names A, verbatim" ;;
-  *) fail "26b: the closed-plan advisory names A, verbatim" "$HOOK_ERR" ;;
+    ok "26b: the closed-plan advisory names A, verbatim" ;;
+  *) no "26b: the closed-plan advisory names A, verbatim" "$HOOK_ERR" ;;
 esac
-TOTAL=$((TOTAL + 1))
 case "$HOOK_ERR" in
-  *"$PLAN_B_REL"*) fail "26c: B's path (the still-open plan) appears nowhere in the output" "$HOOK_ERR" ;;
-  *) pass "26c: B's path (the still-open plan) appears nowhere in the output" ;;
+  *"$PLAN_B_REL"*) no "26c: B's path (the still-open plan) appears nowhere in the output" "$HOOK_ERR" ;;
+  *) ok "26c: B's path (the still-open plan) appears nowhere in the output" ;;
 esac
 
-echo ""
-echo "========================================"
-echo "patrol-duties-gate: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
