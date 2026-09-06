@@ -46,3 +46,6 @@ node_modules/
 # playwright
 .playwright-cli
 .playwright
+
+# Matt Pocock skills per-repo config (tool-local, like .bionic/ and .claude/)
+.mattpocock/

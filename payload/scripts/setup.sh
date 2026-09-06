@@ -201,12 +201,18 @@ done
 BIONIC_DEP_INDENT="   "
 
 SETUP_DEP_MARKETPLACE="${BIONIC_DEP_MARKETPLACE:-bionic}"
-# The default is COMPOSED from the marketplace above rather than spelled whole,
-# because `install_plugin_native` composes the id it installs the same way. A
-# machine that re-points bionic's catalog moves both together; two independent
-# defaults would move one of them and leave the other naming a plugin nobody
-# installed.
-SETUP_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}"
+# The default is COMPOSED rather than spelled whole, because
+# `install_plugin_native` composes the id it installs the same way. A machine
+# that re-points bionic's catalog moves both together; two independent defaults
+# would move one of them and leave the other naming a plugin nobody installed.
+#
+# AND deps.sh COMPOSES IT (bionic 1.4.4 fixit phase 4, review-b B-7). This line
+# used to expand `${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}` itself,
+# which agreed with doctor.sh's and deps.sh's copies on every input and was not
+# textually either of them. `dep_plugin_id` is the one owner now; deps.sh is
+# sourced at the top of this file, well above this line. `SETUP_DEP_MARKETPLACE`
+# above stays — the per-dependency ids further down need the bare catalog.
+SETUP_PLUGIN_ID="$(dep_plugin_id)"
 
 # THE ENV RC BLOCK IS GONE FROM THIS FILE, deliberately. Step 5 used to append a
 # `# ─── bionic:env:start/end ───` block here; it writes settings.json now (the
@@ -328,6 +334,8 @@ _setup_item_ids() {
   say "legacy-alias"
   say "legacy-hooks"
   say "legacy-skill-copy"
+  say "legacy-hook-files"
+  say "legacy-agent-copies"
   say "legacy-permission-block"
   say "permission-mode"
   return 0
@@ -393,11 +401,27 @@ _setup_item_verb() {  # <name>
     legacy-alias)       say "remove the retired shell alias block from $(_detect_shell_rc)" ;;
     legacy-hooks)       say "remove the retired hook entries from $(_dep_settings_file)" ;;
     legacy-skill-copy)  say "remove the pre-plugin skill copy at $(_setup_legacy_skill_dir)" ;;
+    legacy-hook-files)
+      _setup_verb_line="$(detect_legacy_hook_files)"
+      _setup_verb_count="${_setup_verb_line#*count=}"; _setup_verb_count="${_setup_verb_count%% *}"
+      _setup_verb_dir="${_setup_verb_line#*path=}";    _setup_verb_dir="${_setup_verb_dir%% *}"
+      say "remove ${_setup_verb_count} pre-plugin hook file(s) from ${_setup_verb_dir}" ;;
+    legacy-agent-copies)
+      _setup_verb_line="$(detect_installed_agent_copies)"
+      _setup_verb_count="${_setup_verb_line#*drift=}"; _setup_verb_count="${_setup_verb_count%% *}"
+      say "remove ${_setup_verb_count} installed agent role file(s) that no longer match the payload, from $(_setup_agent_copies_dir)" ;;
     legacy-permission-block) say "remove bionic's retired permission block from $(_dep_settings_file)" ;;
     permission-mode)    say "set Claude Code's default permission mode to ${BIONIC_DEFAULT_PERMISSION_MODE}" ;;
     *)                  return 1 ;;
   esac
   return 0
+}
+
+# The directory steps 11 names. `detect_installed_agent_copies` reports state, counts and
+# names but no path — doctor's row does not print one — so the one place that already owns
+# "where is the claude-home" answers it, rather than a fourth copy of the env-var chain.
+_setup_agent_copies_dir() {
+  printf '%s/agents' "$(_dep_claude_home)"
 }
 
 # The one directory step 9 offers to remove, read from the fact function that
@@ -458,6 +482,18 @@ _setup_item_pending() {  # <name> -> 0 when the item has something to ask about
       line="$(detect_legacy_skill_copy)"
       present="${line#*present=}"; present="${present%% *}"
       [ "$present" = "yes" ] ;;
+    legacy-hook-files)
+      # `unknown` is not a question: the step says so and changes nothing.
+      line="$(detect_legacy_hook_files)"; count="${line#*count=}"; count="${count%% *}"
+      case "$count" in ''|*[!0-9]*|0) return 1 ;; esac
+      return 0 ;;
+    legacy-agent-copies)
+      line="$(detect_installed_agent_copies)"
+      present="${line#*state=}"; present="${present%% *}"
+      [ "$present" = "present" ] || return 1
+      count="${line#*drift=}"; count="${count%% *}"
+      case "$count" in ''|*[!0-9]*|0) return 1 ;; esac
+      return 0 ;;
     legacy-permission-block)
       bionic_has_permission_block "$(_dep_settings_file)" ;;
     permission-mode)
@@ -768,9 +804,22 @@ setup_load_state() {
     failed)
       # A real error, so it is reported the way the contract requires: the CLI's
       # own words first, unedited, then one line naming what to do about them.
+      #
+      # THE FOURTH RENDERER OF ONE ROUTE (bionic 1.4.4 fixit, phase 2). This line
+      # used to spell the repair by hand — "reinstall bionic with: claude plugin
+      # install <id> --scope user --yes" — which is the wording A-1 refutes:
+      # bionic is installed and registered, and a dependency is missing. The verb
+      # coincides, the description does not — which is why the object of the verb
+      # is the dependencies and never bionic (phase 4, review-c C-3: "reinstall"
+      # reads plainer than the "re-resolve" this line carried between, and the
+      # object was always the point). It comes from deps.sh now, like the
+      # three renderers beside it, so a machine that re-points bionic's catalog
+      # moves all four together. What did NOT change is the order: the CLI's own
+      # error is still printed first and unedited, and this is still one line
+      # under it. Pinned by tests/fresh-home.test.sh Group 14.
       say "   bionic is installed but did not load. The CLI reports:"
       say "   ${err}"
-      say "   Fix: install what the message names, then start a new session — or reinstall bionic with: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes"
+      say "   Fix: install what the message names, then start a new session — or reinstall bionic's dependencies: $(dep_core_repair_route)"
       action "bionic did not load: ${err}"
       ;;
     absent)
@@ -934,8 +983,18 @@ setup_dep_enable_verify() {
         fi
         ;;
       absent)
+        # TEXT ONLY, AND THE TEXT COMES FROM deps.sh (bionic 1.4.4 fixit, A-2).
+        # This arm installs nothing and never has — D1 rules that setup is not a
+        # second installer for a native row — so what it owes the reader is an
+        # accurate sentence, and the one it carried was not: a bare "reinstall
+        # bionic" says bionic is broken when bionic is installed and registered
+        # and a dependency is missing. The verb was never the problem — it is the
+        # verb the CLI actually takes — so what this line fixes is the OBJECT,
+        # which is the dependencies. It is the same route doctor's THIRD PARTY row, doctor's
+        # headline and step 1's load-failure Fix line render, from the same
+        # function, so the four surfaces cannot drift.
         item "$SETUP_BAD" "$name" "not installed — it shipped with bionic, so this install is incomplete"
-        action "reinstall bionic so its dependencies resolve: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes (${name} is missing)"
+        action "reinstall bionic's dependencies: $(dep_core_repair_route) (${name} is missing)"
         ;;
       *)
         item "$SETUP_NIL" "$name" "enabled-state unknown — the claude CLI or jq could not read it"
@@ -1445,7 +1504,144 @@ setup_legacy_skill_copy() {
   return 0
 }
 
-# ─── Step 10 — the permission mode ───────────────────────────────────────────
+# ─── Step 10 — the legacy installed hook FILES ───────────────────────────────
+#
+# THE STEP DOCTOR'S HINT ALREADY PROMISED. `detect_legacy_hook_files` has counted these for
+# as long as doctor has had a row for them, and that row ends ` → /bionic:setup`. Until this
+# function existed the suffix named a command which then reported "nothing left to do — this
+# machine is set up." over sixteen files the reader could see with `ls`
+# (.bionic/docs/ideas/bug-doctor-setup-ownership.md, filed 2026-09-05 against payload 1.4.3;
+# Chris: "That's inconsistent, and very confusing"). A hint naming a remedy nobody owns is
+# worse than no hint — it teaches the reader to stop believing the report. Doctor was not
+# changed for this: its row was true about the machine all along, and what was missing is the
+# thing it pointed at.
+#
+# WHAT GOES IS WHAT THE FACT FUNCTION NAMED. The removal walks the `names=` list the detector
+# built by matching THIS payload's own hooks/ directory against the installed one; nothing
+# here globs the claude-home. A `.sh` in that directory the payload does not ship is the
+# machine owner's own hook, and deleting somebody's work while claiming to clean up after
+# bionic is the one mistake this step may not make.
+#
+# INERT IS NOT ABSENT. With the settings-channel entries gone (step 8) these files run
+# nothing — they are disk, not behaviour. They are also an older build of every wall this
+# repo ships, sitting under a path four eras of documentation told people to invoke, which is
+# why the machine keeps them until somebody says yes.
+
+setup_legacy_hook_files() {
+  _setup_wants legacy-hook-files || return 0
+  say ""
+  say "10. Legacy installed hook files"
+  local line count dir names left removed=0
+  line="$(detect_legacy_hook_files)"
+  count="${line#*count=}"; count="${count%% *}"
+  dir="${line#*path=}";    dir="${dir%% *}"
+  names="${line##*names=}"
+
+  case "$count" in
+    0)
+      item "$SETUP_NIL" "legacy hook files" "no pre-plugin hook files — nothing to remove"
+      return 0 ;;
+    unknown)
+      item "$SETUP_NIL" "legacy hook files" "count unknown — ${line##*cause=}"
+      return 0 ;;
+  esac
+
+  say "   ${count} file(s) in ${dir} are pre-plugin copies of hooks this payload ships."
+  say "   They fire nothing while the plugin channel is live, and they are an older build of"
+  say "   every wall bionic ships, under a path the retired installer told people to invoke."
+  consent "   Remove those ${count} file(s) from ${dir}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then
+    _setup_say_declined "$_setup_consent_rc" "${dir} is unchanged."
+    action "remove ${count} pre-plugin hook file(s) from ${dir} — $(_setup_answer_yes legacy-hook-files)"
+    return 0
+  fi
+
+  # ONE NAME AT A TIME, AND ONLY FROM THE LIST. `_dep_rm_named_files` (deps.sh) re-splits
+  # the detector's own comma-separated list into positional parameters under a `set -f`
+  # guard, so a glob character in a payload filename cannot expand against this process's
+  # $PWD on the way through — the same guard every one of the four teardown call sites now
+  # shares (review-d D-2).
+  removed="$(_dep_rm_named_files "$dir" "$names")"
+
+  # THE VERDICT IS RE-MEASURED, NOT ASSUMED. The same fact function that decided to ask is
+  # asked again; a file that would not delete is then a `✗` with a by-hand action, never a
+  # green row over a directory that still carries what it named.
+  line="$(detect_legacy_hook_files)"; left="${line#*count=}"; left="${left%% *}"
+  if [ "$left" = "0" ]; then
+    item "$SETUP_OK" "legacy hook files" "removed ${removed} file(s) from ${dir}"
+  else
+    item "$SETUP_BAD" "legacy hook files" "${left} of ${count} are still in ${dir}"
+    action "remove the remaining pre-plugin hook file(s) from ${dir} by hand"
+  fi
+  return 0
+}
+
+# ─── Step 11 — the legacy installed agent role files ─────────────────────────
+#
+# THE SAME DEBT IN THE DIRECTORY NEXT DOOR, and this one is not inert. Role files are
+# instructions a dispatched subagent obeys, so while `~/.claude/agents/auditor.md` exists the
+# session's agent-type list carries both `auditor` and `bionic:auditor` with different bodies
+# — a build of bionic's own dispatch discipline that no plugin update will ever reach, and
+# nothing else on the machine reports the gap.
+#
+# THE DRIFTED COPIES, WHICH IS EXACTLY WHAT DOCTOR'S ROW COUNTS.
+# `detect_installed_agent_copies` digests every role file this payload ships against a
+# same-named copy in the claude-home and names the ones that differ; doctor prints
+# `N/M differ → /bionic:setup` from that number, and this step offers those N. A copy that
+# still matches the payload byte for byte is on neither surface: the two are allowed to say
+# different things about different machines, never about the same one.
+#
+# PAYLOAD-SIDE NAMES ONLY, for the reason step 10 states — a `.md` in that directory the
+# payload does not ship is somebody's own agent.
+
+setup_legacy_agent_copies() {
+  _setup_wants legacy-agent-copies || return 0
+  say ""
+  say "11. Legacy installed agent copies"
+  local line state total drift names dir left removed=0
+  line="$(detect_installed_agent_copies)"
+  state="${line#*state=}"; state="${state%% *}"
+  total="${line#*total=}"; total="${total%% *}"
+  drift="${line#*drift=}"; drift="${drift%% *}"
+  names="${line#*names=}"; names="${names%% *}"
+  dir="$(_setup_agent_copies_dir)"
+
+  case "$state" in
+    unknown)
+      item "$SETUP_NIL" "legacy agent copies" "state unknown — ${line##*cause=}"
+      return 0 ;;
+    absent)
+      item "$SETUP_NIL" "legacy agent copies" "no installed agent copies — nothing to remove"
+      return 0 ;;
+  esac
+  if [ "$drift" = "0" ]; then
+    item "$SETUP_NIL" "legacy agent copies" "${total} installed copy(ies), all matching this payload"
+    return 0
+  fi
+
+  say "   ${drift} of the ${total} role file(s) in ${dir} no longer match the ones this payload"
+  say "   ships. A dispatched agent reads the installed copy, so the stale one is what runs."
+  consent "   Remove those ${drift} file(s) from ${dir}?"; _setup_consent_rc=$?
+  if [ "$_setup_consent_rc" -ne 0 ]; then
+    _setup_say_declined "$_setup_consent_rc" "${dir} is unchanged."
+    action "remove ${drift} drifted agent role file(s) from ${dir} — $(_setup_answer_yes legacy-agent-copies)"
+    return 0
+  fi
+
+  # Same guard, same helper (review-d D-2) — see step 10 above.
+  removed="$(_dep_rm_named_files "$dir" "$names")"
+
+  line="$(detect_installed_agent_copies)"; left="${line#*drift=}"; left="${left%% *}"
+  if [ "$left" = "0" ]; then
+    item "$SETUP_OK" "legacy agent copies" "removed ${removed} file(s) from ${dir}"
+  else
+    item "$SETUP_BAD" "legacy agent copies" "${left} of ${drift} are still in ${dir}"
+    action "remove the remaining drifted agent role file(s) from ${dir} by hand"
+  fi
+  return 0
+}
+
+# ─── Step 12 — the permission mode ───────────────────────────────────────────
 #
 # THE STEP IS TWO DECISIONS, SO IT IS TWO FUNCTIONS, and they are independent: a
 # machine with no leftover block still has a mode question to answer, and the
@@ -1456,7 +1652,7 @@ setup_legacy_skill_copy() {
 setup_permission_mode() {
   _setup_wants legacy-permission-block || _setup_wants permission-mode || return 0
   say ""
-  say "10. Permission mode"
+  say "12. Permission mode"
   _setup_wants legacy-permission-block && _setup_legacy_permission_block
   _setup_wants permission-mode && _setup_default_mode
   return 0
@@ -1679,6 +1875,8 @@ setup_claude_proxy
 setup_legacy_alias
 setup_legacy_channel_hooks
 setup_legacy_skill_copy
+setup_legacy_hook_files
+setup_legacy_agent_copies
 setup_permission_mode
 setup_summary
 

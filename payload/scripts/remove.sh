@@ -268,6 +268,19 @@ if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/env.sh" ]; then
   # shellcheck source=/dev/null
   . "${RM_LIB_DIR}/env.sh"
 fi
+# detect.sh, when it is there. THE ONLY LIBRARY THIS SCRIPT HAS NO STANDALONE
+# ANSWER FOR (1.4.4 T5, plan A-8). Every other predicate here is a literal this
+# file carries its own copy of, because a broken plugin must still be removable.
+# The two legacy-leftover items below cannot work that way: what makes a file in
+# ~/.claude/hooks bionic's leftover is that THIS PAYLOAD ships a hook by that
+# name, and a standalone remove.sh has no payload to read the names from.
+# Removing by wildcard instead would take the machine owner's own hook with it,
+# which is the one thing both detectors exist to prevent. So the items are
+# payload-only, exactly like the tool rows, and say nothing at all standalone.
+if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/detect.sh" ]; then
+  # shellcheck source=/dev/null
+  . "${RM_LIB_DIR}/detect.sh"
+fi
 # shell.sh, when it is there. `_rm_shell_rc` above delegates to its
 # `shell_rc_file` in payload mode and falls back to its own copy standalone.
 if [ "$RM_MODE" = "payload" ] && [ -f "${RM_LIB_DIR}/shell.sh" ]; then
@@ -641,6 +654,21 @@ RM_PLUGIN_STILL_INSTALLED=0
 # restated — and they exist only in payload mode, because standalone there is no
 # table to read and the tools item says exactly that instead of pretending.
 
+# The two detectors the legacy-leftover items below are built on, present only in
+# payload mode. Asked as ONE question so a roster entry, a plan line and the item
+# itself cannot disagree about whether the fact is readable at all.
+_rm_have_detectors() {
+  [ "$RM_MODE" = "payload" ] || return 1
+  declare -F detect_legacy_hook_files      >/dev/null 2>&1 || return 1
+  declare -F detect_installed_agent_copies >/dev/null 2>&1 || return 1
+  return 0
+}
+
+# `detect_installed_agent_copies` reports state, counts and names but no path —
+# doctor's row prints none — so the one place that already owns "where is the
+# claude-home" answers it, the same way setup.sh's `_setup_agent_copies_dir` does.
+_rm_agent_copies_dir() { printf '%s/agents' "$(_rm_claude_home)"; }
+
 _rm_item_ids() {
   local n
   echo "legacy-alias"
@@ -648,6 +676,12 @@ _rm_item_ids() {
   echo "claude-proxy"
   echo "legacy-hooks"
   echo "legacy-skill-copy"
+  # Payload-only, for the reason the detect.sh loader above gives: the names come
+  # from the payload's own hooks/ and agents/ directories or they do not come at all.
+  if _rm_have_detectors; then
+    echo "legacy-hook-files"
+    echo "legacy-agent-copies"
+  fi
   echo "legacy-permission-block"
   echo "permission-mode"
   if [ "$RM_MODE" = "payload" ]; then
@@ -698,13 +732,33 @@ _rm_item_verb() {  # <id>
     environment)           echo "delete bionic's environment settings from ${RM_SETTINGS}" ;;
     legacy-hooks)          echo "remove the retired hook entries from ${RM_SETTINGS}" ;;
     legacy-skill-copy)     echo "remove the pre-plugin skill copy at ${RM_LEGACY_SKILL_DIR}" ;;
+    legacy-hook-files)
+      local hf_line hf_count hf_dir
+      hf_line="$(detect_legacy_hook_files)"
+      hf_count="${hf_line#*count=}"; hf_count="${hf_count%% *}"
+      hf_dir="${hf_line#*path=}";    hf_dir="${hf_dir%% *}"
+      echo "remove ${hf_count} pre-plugin hook file(s) from ${hf_dir}" ;;
+    legacy-agent-copies)
+      local ac_line ac_drift
+      ac_line="$(detect_installed_agent_copies)"
+      ac_drift="${ac_line#*drift=}"; ac_drift="${ac_drift%% *}"
+      echo "remove ${ac_drift} installed agent role file(s) that no longer match this payload, from $(_rm_agent_copies_dir)" ;;
     legacy-permission-block) echo "remove bionic's retired permission block from ${RM_SETTINGS}" ;;
     permission-mode)       echo "reset Claude Code's default permission mode" ;;
     claude-proxy)          echo "remove bionic's claude() shell function from ${RC_FILE}" ;;
     plugin-data)           echo "delete bionic's plugin data under ${RM_DATA_ROOT}" ;;
     plugin)                echo "remove the plugin $(_rm_registered_plugin_id) (claude plugin uninstall)" ;;
     orphaned-dependencies) echo "remove the dependencies nothing needs any more (claude plugin prune)" ;;
-    tool:*)                echo "remove ${1#tool:}" ;;
+    tool:*)
+      case "${1#tool:}" in
+        # review-d D-1: the ONLY tool row whose removal touches a settings.json key the
+        # user could have repointed at their own value, so it is the only one whose
+        # bullet says the clear is conditional — every other row's uninstall is
+        # unconditional once this page is consented to.
+        ccstatusline)
+          echo "remove ccstatusline (uninstalls the package; clears .statusLine only if it still names ccstatusline)" ;;
+        *) echo "remove ${1#tool:}" ;;
+      esac ;;
     *)                     return 1 ;;
   esac
   return 0
@@ -738,6 +792,18 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       return 0 ;;
     legacy-skill-copy)
       [ -d "$RM_LEGACY_SKILL_DIR" ] && [ -f "${RM_LEGACY_SKILL_DIR}/SKILL.md" ] ;;
+    legacy-hook-files)
+      _rm_have_detectors || return 1
+      count="$(detect_legacy_hook_files)"
+      count="${count#*count=}"; count="${count%% *}"
+      case "$count" in ''|*[!0-9]*|0) return 1 ;; esac
+      return 0 ;;
+    legacy-agent-copies)
+      _rm_have_detectors || return 1
+      count="$(detect_installed_agent_copies)"
+      count="${count#*drift=}"; count="${count%% *}"
+      case "$count" in ''|*[!0-9]*|0) return 1 ;; esac
+      return 0 ;;
     legacy-permission-block)
       _rm_file_has_literal "$RM_SETTINGS" "$RM_PERMISSION_BLOCK_BEGIN_PREFIX" ;;
     permission-mode)
@@ -750,9 +816,13 @@ _rm_item_pending() {  # <id> -> 0 when the item has something to ask about
       # uninstall below; somebody else's copy of a same-named plugin is left
       # alone. None of those asks anything, so none of them belongs on a page
       # headed "bionic would".
+      # THE TEARDOWN'S OWN QUESTION (1.4.4 T5). `check_dep` answers whether the row
+      # is in the state setup leaves it in; what belongs on a page headed "bionic
+      # would" is whether this machine carries anything bionic wrote. deps.sh's
+      # `dep_teardown_state` is the same probe for every row where those coincide,
+      # and the honest one for the status line, where they no longer do.
       [ "$RM_MODE" = "payload" ] || return 1
-      present="$(check_dep "${id#tool:}")"
-      present="${present#present=}"; present="${present%%|*}"
+      present="$(dep_teardown_state "${id#tool:}")"
       [ "$present" = "yes" ] || return 1
       behavior="$(dep_field "${id#tool:}" removal_behavior)"
       case "$behavior" in
@@ -1257,6 +1327,116 @@ _rm_item_legacy_skill_copy() {
   echo ""
 }
 
+# ─── Item: the pre-plugin hook FILES ─────────────────────────────────────────
+#
+# THE OTHER DOOR ON T1's TWO ITEMS (1.4.4 T5, plan A-8). `/bionic:setup` learned to
+# remove these at T1 and the teardown door did not, so a full consented
+# `/bionic:remove` left an older build of every wall bionic ships sitting under a
+# path four eras of documentation told people to invoke. A teardown that leaves
+# behind what the repair step removes is not a teardown.
+#
+# BY NAME, NEVER BY WILDCARD. The names come from the payload's own hooks/
+# directory through the detector, so a hook the machine owner wrote is never
+# counted and never deleted — the same discipline setup's step 10 keeps, on the
+# same fact function, so the two doors cannot come to disagree about what is
+# bionic's.
+#
+# AND THE VERDICT IS RE-MEASURED. The detector is asked again after the deletes;
+# a file that would not go is a leftover with a by-hand line, never a ✓ over a
+# directory that still carries what it named.
+
+_rm_item_legacy_hook_files() {
+  _rm_wants legacy-hook-files || return 0
+  _rm_have_detectors || return 0
+  echo "legacy installed hook files:"
+  local line count dir names left removed=0
+  line="$(detect_legacy_hook_files)"
+  count="${line#*count=}"; count="${count%% *}"
+  dir="${line#*path=}";    dir="${dir%% *}"
+  names="${line##*names=}"
+
+  case "$count" in
+    unknown)
+      _rm_not_checked "legacy installed hook files" "${line##*cause=}"
+      echo ""; return 0 ;;
+    0)
+      _rm_clean "legacy installed hook files under ${dir}"
+      echo ""; return 0 ;;
+  esac
+
+  echo "  ${count} file(s) in ${dir} are pre-plugin copies of hooks this payload ships."
+  echo "  They fire nothing while the plugin channel is live, and they are an older build of"
+  echo "  every wall bionic ships, under a path the retired installer told people to invoke."
+  if _rm_consent "Remove those ${count} file(s) from ${dir}?"; then
+    # `_dep_rm_named_files` (deps.sh) re-splits the detector's own comma-separated list
+    # into positional parameters under a `set -f` guard, so a glob character in a
+    # payload filename cannot expand against this process's $PWD on the way through —
+    # the same guard every one of the four teardown call sites now shares (review-d D-2).
+    removed="$(_dep_rm_named_files "$dir" "$names")"
+    line="$(detect_legacy_hook_files)"; left="${line#*count=}"; left="${left%% *}"
+    if [ "$left" = "0" ]; then
+      _rm_removed "${removed} legacy hook file(s) from ${dir}"
+    else
+      _rm_leftover "${left} of ${count} legacy hook file(s) are still in ${dir}"
+    fi
+  else
+    _rm_skipped "$?" legacy-hook-files "${count} legacy hook file(s) in ${dir}"
+  fi
+  echo ""
+}
+
+# ─── Item: the drifted installed agent role copies ───────────────────────────
+#
+# THE SAME DEBT IN THE DIRECTORY NEXT DOOR, and this one is not inert: a role file
+# is instructions a dispatched subagent obeys, so while `~/.claude/agents/auditor.md`
+# exists the session carries a build of bionic's own dispatch discipline that no
+# plugin update will ever reach. THE DRIFTED ONES ONLY, which is exactly what
+# doctor's row counts and what setup's step 11 offers — a copy still byte-identical
+# to the payload's is on neither surface, and the two doors are allowed to say
+# different things about different machines, never about the same one.
+
+_rm_item_legacy_agent_copies() {
+  _rm_wants legacy-agent-copies || return 0
+  _rm_have_detectors || return 0
+  echo "legacy installed agent copies:"
+  local line state total drift names dir left removed=0
+  line="$(detect_installed_agent_copies)"
+  state="${line#*state=}"; state="${state%% *}"
+  total="${line#*total=}"; total="${total%% *}"
+  drift="${line#*drift=}"; drift="${drift%% *}"
+  names="${line#*names=}"; names="${names%% *}"
+  dir="$(_rm_agent_copies_dir)"
+
+  case "$state" in
+    unknown)
+      _rm_not_checked "legacy installed agent copies" "${line##*cause=}"
+      echo ""; return 0 ;;
+    absent)
+      _rm_clean "legacy installed agent copies under ${dir}"
+      echo ""; return 0 ;;
+  esac
+  if [ "$drift" = "0" ]; then
+    _rm_clean "legacy installed agent copies under ${dir} (${total} installed, all matching this payload)"
+    echo ""; return 0
+  fi
+
+  echo "  ${drift} of the ${total} role file(s) in ${dir} no longer match the ones this payload"
+  echo "  ships. A dispatched agent reads the installed copy, so the stale one is what runs."
+  if _rm_consent "Remove those ${drift} file(s) from ${dir}?"; then
+    # Same guard, same helper (review-d D-2) — see legacy-hook-files above.
+    removed="$(_dep_rm_named_files "$dir" "$names")"
+    line="$(detect_installed_agent_copies)"; left="${line#*drift=}"; left="${left%% *}"
+    if [ "$left" = "0" ]; then
+      _rm_removed "${removed} drifted agent role file(s) from ${dir}"
+    else
+      _rm_leftover "${left} of ${drift} drifted agent role file(s) are still in ${dir}"
+    fi
+  else
+    _rm_skipped "$?" legacy-agent-copies "${drift} drifted agent role file(s) in ${dir}"
+  fi
+  echo ""
+}
+
 # ─── Item: the retired permission block ──────────────────────────────────────
 #
 # bionic used to render a managed allow-list into settings.json so its own
@@ -1406,8 +1586,10 @@ _rm_item_tools() {
       [ -n "$dep_name" ] || continue
       _rm_wants "tool:${dep_name}" || continue
       dep_behavior="$(dep_field "$dep_name" removal_behavior)"
-      dep_present="$(check_dep "$dep_name")"
-      dep_present="${dep_present#present=}"; dep_present="${dep_present%%|*}"
+      # The same question the plan asked (see `_rm_item_pending`'s tool arm): what
+      # is HERE, not what is healthy. Asked through one function so the page and
+      # the run cannot come to disagree about which rows have something to remove.
+      dep_present="$(dep_teardown_state "$dep_name")"
 
       case "$dep_present" in
         yes)
@@ -1768,6 +1950,8 @@ _rm_item_environment
 _rm_item_claude_proxy
 _rm_item_legacy_hooks
 _rm_item_legacy_skill_copy
+_rm_item_legacy_hook_files
+_rm_item_legacy_agent_copies
 _rm_item_permission_block
 _rm_item_permission_mode
 _rm_item_tools

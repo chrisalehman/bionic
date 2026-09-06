@@ -48,10 +48,26 @@ expect_match() {
   # shellcheck disable=SC2053  # RHS is a glob on purpose
   if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.700s' "$actual")"; fi
 }
+expect_eq() {
+  local label="$1" want="$2" got="$3"
+  if [ "$want" = "$got" ]; then ok "$label"; else no "$label" "expected '$want', got '$got'"; fi
+}
 expect_no_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose
   if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
+}
+
+# THE 100-COLUMN RULE, MEASURED THE WAY width.sh MEASURES IT — every glyph in
+# `_bionic_cols_into`'s closed set substituted for one ASCII character before the
+# length is taken. Defined here rather than beside its first caller because two
+# sections use it now: Section 8's sweep over the fullest run, and Section 6f's
+# pin on the one line whose fixed part grows with the catalog name.
+too_wide() {  # <text> -> the offending lines, empty when every line fits
+  printf '%s\n' "$1" | awk '
+    { s = $0
+      gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
+      if (length(s) > 100) print length(s) ": " $0 }'
 }
 
 # A SHORT ROOT ON PURPOSE. macOS hands `mktemp -d` a ~50-character path under
@@ -240,6 +256,233 @@ case "$STALE_ARM" in
 esac
 
 echo ""
+echo "=== Section 6d: a settings.json still naming npx flags a defect (epic-21 AC-3) ==="
+
+# THE NETWORK-PER-RENDER DEFECT (bug-ccstatusline-npx-per-render.md, Fix step 5). A
+# `statusLine.command` that still starts with `npx ` is the pre-fix shape: Claude Code
+# runs that command on every render, and `npx pkg@latest` resolves a registry lookup
+# before it can print anything. Nothing rewrites settings.json on its own, so a machine
+# written before this fix stays broken until a person re-runs setup — which is exactly
+# what doctor has to tell them.
+cat > "${CHOME}/settings.json" <<'JSON'
+{
+  "statusLine": {
+    "type": "command",
+    "command": "npx ccstatusline@latest"
+  }
+}
+JSON
+
+# THE WHOLE PRE-1.4.4 MACHINE, NOT HALF OF IT (1.4.4 T5). `_dep_check_statusline` reads two
+# halves — the recorded command and the layout file under ~/.config/ccstatusline — and a
+# fixture with only the first would report the row absent for the LAYOUT's sake, which is a
+# different fact from the one this section is about. Copying the shipped layout in makes the
+# recorded command the only thing wrong on this machine, which is the state every machine
+# that ran setup before 1.4.4 is actually in.
+mkdir -p "${TMP}/.config/ccstatusline"
+cp "${PAYLOAD}/ccstatusline/settings.json" "${TMP}/.config/ccstatusline/settings.json"
+
+OUT6D="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
+
+expect_match "12d1: the npx statusLine command is flagged as a defect" \
+  "*statusLine command*npx*" "$OUT6D"
+# THE HINT IS A PROMISE, AND IT IS KEPT NOW (1.4.4 T5, review-b F-1). This row used to pin a
+# false promise: `_dep_check_statusline` accepted the npx string as proof the dependency was
+# present, so `tool:ccstatusline` was never pending and the setup run doctor names here
+# reported "nothing left to do" with the ✗ still on the screen. The presence check rejects
+# the npx form now, which is what puts an item behind the hint —
+# tests/cross-gate-agreement.test.sh §DS.2 is the row that proves setup actually offers it.
+expect_match "12d2: and the row names re-running setup" \
+  "*statusLine command*npx*/bionic:setup*" "$OUT6D"
+
+# ONE MACHINE, ONE ANSWER (1.4.4 T5, review-a C-4). Doctor's THIRD PARTY table and its
+# ENVIRONMENT table are two renderings of the same machine, and on this fixture they used to
+# contradict each other seventeen lines apart: `✓ ccstatusline … command set, layout file in
+# place` above, `✗ statusLine command … still uses npx` below. A reader cannot act on a
+# report that says the thing is fine and broken at once.
+ROW6D="$(printf '%s\n' "$OUT6D" | grep -E '^  . +ccstatusline ' | head -1)"
+expect_true "12d4: doctor renders a THIRD PARTY row for ccstatusline (the two rows below are not vacuous)" \
+  test -n "$ROW6D"
+expect_no_match "12d5: the THIRD PARTY row does not call the npx machine's status line healthy" \
+  "*command set, layout file in place*" "$ROW6D"
+expect_match "12d6: it agrees with the ENVIRONMENT row and sends the reader to the same place" \
+  "*not installed → /bionic:setup*" "$ROW6D"
+
+# THE FIXED FORM MUST NOT BE FLAGGED — a bare binary name never blocks on the
+# network, so this is not a defect and the row must stay silent (format rule 4).
+cat > "${CHOME}/settings.json" <<'JSON'
+{
+  "statusLine": {
+    "type": "command",
+    "command": "ccstatusline"
+  }
+}
+JSON
+OUT6E="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
+expect_no_match "12d3: the installed-binary command form is never flagged" \
+  "*statusLine command*npx*" "$OUT6E"
+
+echo ""
+echo ""
+echo "=== Section 6f: an absent CORE dependency routes to the CLI, not /bionic:setup (1.4.4 fixit) ==="
+
+# A CORE DEPENDENCY IS BIONIC'S OWN. `payload/.claude-plugin/plugin.json` declares
+# superpowers and agent-skills as bionic's dependencies and the CLI installs them alongside
+# bionic itself (`"auto": true` in the registry) — no setup item installs one, and deps.sh's
+# D1 says setup never installs a native row. So a machine missing one is not a
+# `/bionic:setup` repair, and the row that used to end that way sent the reader to a command
+# that plans nothing for it (.bionic/docs/ideas/fixit-1.4.4-absent-core-dependency-hint.md;
+# the same class the 1.4.4 bug report describes). The repair is the CLI's own verb, measured
+# restoring the dependency at record/epic-21-v1-ladder/fixit-dep-repair-measurement.md.
+#
+# A REGISTRY THAT KNOWS BIONIC AND NEITHER DEPENDENCY is the shape of an install that came
+# in incomplete — which is the machine epic-17 W5 F12 §4.1 measured, where `claude plugin
+# list` prints `✘ failed to load` and names the missing dependency.
+jq -nc '{plugins:{"bionic@bionic":[{installPath:"/nonexistent/a", gitCommitSha:"deadbeef", version:"1.4.4"}]}}' \
+  > "${CHOME}/plugins/installed_plugins.json"
+
+# AND THE LEFTOVERS SECTIONS 3-5 PLANTED ARE SWEPT BACK OFF, so the only thing wrong with
+# this machine is its dependencies. That is the machine the fixit is about, and it is also
+# what makes the two headline rows below load-bearing: the verdict line is truncated at 100
+# columns, so while the fixture carries leftover hook files and drifted agent copies those
+# names lead the line and the collapsed dependency list is cut off the end of it — an
+# assertion about which names reach that line would then pass on a doctor nobody had fixed.
+rm -rf "${CHOME}/hooks" "${CHOME}/agents" "${CHOME}/skills"
+
+# THE RENDERER REFS ARE PASSED, and that is what makes the headline rows below
+# load-bearing. Section 6c left `${VENV_DIR}.lock.sha256` matching `${REFS}/uv.lock`, so this
+# run has no stale-venv fix line — without it that line leads the verdict and the collapsed
+# absence list is cut off the end of it before any dependency name is reached, which would
+# let 12f5b pass on a doctor that had never been fixed.
+OUT6F="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}")"
+ROW6F="$(printf '%s\n' "$OUT6F" | grep -E '^  . +superpowers ' | head -1)"
+ROW6F2="$(printf '%s\n' "$OUT6F" | grep -E '^  . +agent-skills ' | head -1)"
+
+expect_true "12f1: doctor renders a THIRD PARTY row for the absent core dependency (the rows below are not vacuous)" \
+  test -n "$ROW6F"
+expect_match "12f2: the row names the CLI verb that re-resolves bionic's dependencies" \
+  "*superpowers*absent → claude plugin install bionic@bionic*" "$ROW6F"
+expect_no_match "12f3: …and never /bionic:setup, which installs nothing for a core row" \
+  "*/bionic:setup*" "$ROW6F"
+expect_match "12f4: the second core dependency's row carries the same route" \
+  "*agent-skills*absent → claude plugin install bionic@bionic*" "$ROW6F2"
+
+# THE HEADLINE IS THE SAME PROMISE, ONE LINE HIGHER. The collapsed
+# `N dependencies absent (…) → run /bionic:setup` verdict is the line a reader acts on
+# first, so a core absence folded into it is the same broken remedy in the place it is most
+# likely to be read.
+VERDICT6F="$(printf '%s\n' "$OUT6F" | grep -F 'Run /bionic:setup to fix:' | head -1)"
+# The line is TRUNCATED at 100 columns — it is the one place doctor cuts names rather than
+# wrapping them — so the anchor is the FIRST absent name on it, which is the first one setup
+# actually installs.
+expect_match "12f5a: the collapsed setup verdict is on the page and names what setup DOES install" \
+  "*Run /bionic:setup to fix:*dependencies absent (impeccable*" "$VERDICT6F"
+expect_no_match "12f5b: …and it never names an absent core dependency, which setup cannot install" \
+  "*superpowers*" "$VERDICT6F"
+expect_match "12f6: the core absences get their own line, with the route on it" \
+  "*core dependencies absent (superpowers, agent-skills) → claude plugin install bionic@bionic*" \
+  "$OUT6F"
+
+# THE PROBLEM COUNT IS ROWS, NOT CATEGORIES (Chris 2026-08-22, and doctor.sh's own comment
+# at the swap), and adding a class of absence must not change what that sentence means. The
+# verdict collapses the setup-fixable absences into one fix line and swaps that line for the
+# number of ✗ dependency rows it stands for; the core absences are a SECOND collapsed line
+# over rows the same tally already counts, so counting both lines AND all the rows counts
+# the core rows twice.
+#
+# MEASURED AGAINST A SECOND RENDER, NEVER A HARDCODED TOTAL. The expected count depends on
+# how many other things are wrong with the fixture — the unwritten environment settings here
+# — and writing that total down would pin the fixture instead of the rule. So the same
+# machine is rendered twice, once with the two core dependencies in the registry and once
+# without, and the rule is the difference: putting two absent core rows on the page adds
+# exactly two problems. Everything else about the two machines is identical, so every
+# non-dependency fix line cancels out of the subtraction. Before the fix the difference was
+# three.
+d6f_problems() {  # <doctor report> -> the N in "→ N problems."
+  sed -n 's/^→ \([0-9][0-9]*\) problem.*/\1/p' <<<"$1" | head -1
+}
+d6f_bad_dep_rows() {  # <doctor report> -> the count of ✗ rows in the THIRD PARTY table
+  awk '/^THIRD PARTY/ { i = 1; next }
+       i && /^[A-Z][A-Z]/ { exit }
+       i && /^  ✗ / { n++ }
+       END { print n + 0 }' <<<"$1"
+}
+
+# The same fixture with both core dependencies present — the only difference between the two
+# machines.
+jq -nc '{plugins:{
+    "bionic@bionic":       [{installPath:"/nonexistent/a", gitCommitSha:"deadbeef", version:"1.4.4"}],
+    "superpowers@bionic":  [{installPath:"/nonexistent/s", version:"6.3.0"}],
+    "agent-skills@bionic": [{installPath:"/nonexistent/g", version:"0.6.7"}]
+  }}' > "${CHOME}/plugins/installed_plugins.json"
+OUT6FOK="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}")"
+
+D6F_N_BAD="$(d6f_problems "$OUT6F")";  D6F_ROWS_BAD="$(d6f_bad_dep_rows "$OUT6F")"
+D6F_N_OK="$(d6f_problems "$OUT6FOK")"; D6F_ROWS_OK="$(d6f_bad_dep_rows "$OUT6FOK")"
+
+# Anti-vacuity: both renders produced a count, and the core-absent one really does carry the
+# two extra rows. Without these the subtraction below could be 0 = 0 over two empty strings.
+expect_match "12f9: both renders report a problem count" \
+  "[0-9]*|[0-9]*" "${D6F_N_BAD}|${D6F_N_OK}"
+expect_eq "12f10: …and the core-absent machine carries exactly two more ✗ dependency rows" \
+  "2" "$(( D6F_ROWS_BAD - D6F_ROWS_OK ))"
+expect_eq "12f11: …so it reports exactly two more problems, not three" \
+  "$(( D6F_ROWS_BAD - D6F_ROWS_OK ))" "$(( D6F_N_BAD - D6F_N_OK ))"
+
+# Back to the core-absent registry, which is what the rows below read.
+jq -nc '{plugins:{"bionic@bionic":[{installPath:"/nonexistent/a", gitCommitSha:"deadbeef", version:"1.4.4"}]}}' \
+  > "${CHOME}/plugins/installed_plugins.json"
+
+# THE PAIRED POSITIVE, so neither scan above is a constant: `impeccable` is an `extra` native
+# row, absent from the same registry, and setup's install arms DO install it — so its row
+# still ends where it always did.
+ROW6FX="$(printf '%s\n' "$OUT6F" | grep -E '^  . +impeccable ' | head -1)"
+expect_true "12f7: doctor renders a THIRD PARTY row for the absent extra dependency too" \
+  test -n "$ROW6FX"
+expect_match "12f8: a basic/extra absence still routes to /bionic:setup on the same fixture" \
+  "*impeccable*not installed → /bionic:setup*" "$ROW6FX"
+
+# THE CATALOG IS DERIVED ON EVERY SURFACE, NEVER SPELLED (1.4.4 fixit phase 4, review-b
+# B-10). Three files compose the plugin id this route names — deps.sh's `dep_plugin_id`,
+# doctor.sh's `BIONIC_PLUGIN_ID`, setup.sh's `SETUP_PLUGIN_ID` — and every assertion above
+# pins the rendered default `bionic@bionic`. Nothing in the tree re-pointed the catalog, so
+# any one of those three could have been edited back to a literal and the whole suite stayed
+# green. This render moves the catalog and asserts the moved name reaches both of doctor's
+# surfaces, which is the one thing a literal cannot do.
+#
+# NINETEEN CHARACTERS ON PURPOSE. The headline's fixed part grows with the route, so the
+# name length is what decides whether that line obeys the report's own 100-column rule — and
+# a cap copied from another line's budget passes at `bionic` and overflows here (review-a
+# A-2, review-c C-2). The row is a different story and is asserted differently below.
+OUT6FMK="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}" \
+  "BIONIC_DEP_MARKETPLACE=chrisalehman-bionic")"
+ROW6FMK="$(printf '%s\n' "$OUT6FMK" | grep -E '^  . +superpowers ' | head -1)"
+HEAD6FMK="$(printf '%s\n' "$OUT6FMK" | grep -F 'core dependencies absent' | head -1)"
+
+expect_true "12f12: the re-pointed catalog still renders a core row (the rows below are not vacuous)" \
+  test -n "$ROW6FMK"
+expect_true "12f13: …and a headline core line (the rows below are not vacuous)" \
+  test -n "$HEAD6FMK"
+
+# THE ROW carries the moved catalog, and only its first thirteen columns: at this name
+# length `bionic_line` has no budget left for the instruction slot and truncates the route
+# with the rest of the tail (review-a A-1, promoted out of this slice — the row still tells
+# the truth about which catalog it means, and the headline below carries the command whole).
+# What this row pins is the derivation, which is what B-10 found unpinned.
+expect_match "12f14: the row's route names the re-pointed catalog" \
+  "*claude plugin install bionic@chris*" "$ROW6FMK"
+expect_no_match "12f15: …and never the default one, which is what a literal would still have printed" \
+  "*bionic@bionic*" "$ROW6FMK"
+# THE HEADLINE carries it whole, and the pattern ends where the line does: the route is the
+# last thing on it, so a cap that ate the command instead of the names would fail here.
+expect_match "12f16: the headline core line ends with the re-pointed catalog, whole" \
+  "*core dependencies absent (*) → claude plugin install bionic@chrisalehman-bionic" "$HEAD6FMK"
+# AND IT STILL FITS. The names on this line are capped, and the cap has to be THIS line's
+# budget — 100 columns less its own fixed part, which the route is part of — not the 44 the
+# THIRD PARTY row's state cell is worth. Both numbers leave the line whole at `bionic`; at
+# this catalog the 44 overflows by seven columns.
+expect_eq "12f17: …and the whole line still fits 100 columns" "" "$(too_wide "$HEAD6FMK")"
+
 echo "=== Section 7: nothing this file gathers is left unrendered ==="
 
 # THE STRUCTURAL HALF, and it is the one that keeps this class of defect from
@@ -302,12 +545,6 @@ echo "=== Section 8: registration, and the column budget ==="
 expect_true "14: tests/run.sh names doctor-reads.test.sh" \
   grep -q 'run "doctor-reads.test.sh" bash tests/doctor-reads.test.sh' "${REPO}/tests/run.sh"
 
-too_wide() {
-  printf '%s\n' "$1" | awk '
-    { s = $0
-      gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
-      if (length(s) > 100) print length(s) ": " $0 }'
-}
 _over="$(too_wide "$OUT6")"
 if [ -z "$_over" ]; then ok "15: every line of the fullest run fits 100 columns"
 else no "15: a line exceeds 100 columns" "$_over"; fi

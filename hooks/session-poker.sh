@@ -1150,6 +1150,52 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
   SCHED_JOBS="$(budget_int "$SCHED_BUDGET" test_jobs)"
 }
 
+# ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
+# duties gate (hooks/patrol-duties-gate.sh) refuses the turn until every named slice is
+# either dispatched or explicitly declined — and dispatching into a plan that has not
+# reached Step 4 sends a writer against a slice table nobody has ratified: Steps 0-3 are
+# research/spec/plan/REVIEW, and `current:` only reaches 4 once Step 3's approval is given
+# (SKILL.md §Steps). Observed 2026-09-05T17:54Z: the tick printed `FILL S1 S2 S3 S4 S12 S14
+# S15 S16` against the wave-01 plan sitting at `current: 3`.
+#
+# THE SAME FENCE-AWARE READ `run_state` USES ABOVE, deliberately duplicated rather than
+# shared. `run_state` answers a different question (has THIS run delivered) off a plan
+# resolved through its own `resolve_run` call, and folding this into it would couple the
+# DISARM decision to the FILL decision — two arms this wave's scope keeps apart. Sharing the
+# awk/grep/sed pipeline, not the caller, keeps the two readings from ever disagreeing about
+# what one `current:` line says.
+_sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or "" if
+                               # no plan, no ## SDLC State section, or no current: line
+  local plan="$1" section
+  [ -n "$plan" ] && [ -f "$plan" ] || { printf ''; return 0; }
+  section="$(normalize_newlines "$plan" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## SDLC State/ { flag=1; next }
+    /^## / { flag=0 }
+    flag')"
+  printf '%s\n' "$section" \
+    | grep -E '^[[:space:]]*current[[:space:]]*:' \
+    | head -1 \
+    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
+    | tr -d '[:space:]'
+}
+
+# THE ONE GRAMMAR THIS REPO ALREADY HAS (Step-6 review-a C-5, review-b finding (c)/N-2).
+# payload/scripts/lib/run.sh's run_open strips a trailing a/b sub-step letter before it
+# ever looks at digits (`local step="${current%[ab]}"`) — `current: 3b` and `current: 4b`
+# are recognized, in-repo forms, not malformed ones. This mirrors exactly that: strip the
+# same optional letter, then require what remains to be all-digits. A task-scale `current:
+# T<n>` needs no special case to land here — "T1" ends in neither `a` nor `b`, so the strip
+# is a no-op and the leftover `T` fails the digit test on its own, same as it always has.
+sched_plan_current() {  # <plan path> -> the current: value (digits only, sub-step letter
+                        # stripped), or "" if the raw value is unreadable
+  local plan="$1" current step
+  current="$(_sched_plan_current_field "$plan")"
+  step="${current%[ab]}"
+  case "$step" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$step" ;; esac
+}
+
 # ── THE RUNG, SAMPLED AND REPORTED (AC-17). One sample appended to the machine-scoped ring,
 # then the rung read back off it — the order the design names, because a consumer that read
 # without sampling would answer from other sessions' readings alone and a first consumer on
@@ -2769,7 +2815,29 @@ EOF
       # roster — a `status=intended` row with no `landing-swept/v1` marker and no ack. It is
       # the loop's own count rather than a second walk, because two definitions of "running"
       # in one file is the drift the count exists to prevent.
-      if [ -z "$SCHED_WRITERS" ]; then
+      #
+      # THE APPROVAL GATE COMES FIRST, ahead of the budget/readiness checks below (AC-5). A
+      # plan below `current: 4` has not passed Step 3, and no reading of the budget or the
+      # slice table changes that — so this is a wall in front of the rest of the arm, not one
+      # more branch beside them.
+      #
+      # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
+      # review-b finding (c)/N-2). A task-scale `current: T<n>` (no numbered step to compare
+      # against 4), an empty field, or a line that will not parse are all cases where this
+      # gate cannot tell whether Step 3 has passed — and falling through to the
+      # readiness/budget checks below on THAT basis is DOUBT-then-FILL: the one shape this
+      # arm exists to prevent, measured live on a plan whose `current:` carried a sub-step
+      # letter (`3b`) that the old digit-only read rejected as unreadable and then filled
+      # anyway. So this differs from an unreadable RUNG, which falls back to the ceiling —
+      # there is no safe fallback for "did Step 3 pass," only "no."
+      SCHED_CURRENT=""
+      [ -n "$SCHED_PLAN" ] && SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
+      if [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_CURRENT" ]; then
+        SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
+        say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
+      elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
+        say "no FILL — plan at current: ${SCHED_CURRENT}, Step-3 approval pending"
+      elif [ -z "$SCHED_WRITERS" ]; then
         if [ -z "$SCHED_PLAN" ]; then
           say "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a slice table from."
         else
