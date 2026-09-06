@@ -24,6 +24,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 . "$(dirname "$0")/lib/swept-marker.sh"
@@ -33,7 +34,6 @@ set -uo pipefail
 #   W2_POKER_UNDER_TEST=/tmp/mutant.sh bash tests/session-poker.test.sh
 POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 TMPROOT="$(mktemp -d)"
-PASS=0; FAIL=0; TOTAL=0
 
 # THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
 # library through the shared loader idiom, whose candidates (2) and (3) read the CLI's
@@ -67,17 +67,6 @@ cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
 SID="8a41c2e0-9b71-4f3a-8d6e-2c19f7b0e5aa"
-
-# ---------- assertion helpers ----------
-
-ok()  { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); printf 'PASS: %s\n' "$1"; }
-bad() { TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); printf 'FAIL: %s\n' "$1"
-        [ $# -gt 1 ] && printf '      %s\n' "$2"; return 0; }
-
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2] got [$3]"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "no [$2] in: $(printf '%s' "$3" | head -3)" ;; esac; }
-expect_absent()   { case "$3" in *"$2"*) bad "$1" "unexpected [$2] in: $(printf '%s' "$3" | head -3)" ;; *) ok "$1" ;; esac; }
-section()         { printf '\n=== %s ===\n' "$1"; }
 
 # ---------- sandbox + fixture builders (mirrors tests/session-sweeper.test.sh) ----------
 
@@ -720,7 +709,7 @@ expect_eq "arm succeeds with no roster in existence at all (exit 0)" "0" "$RC"
 if [ -f "$(stamp_of "$R6")" ]; then
   ok "arm writes the session-keyed stamp beside the roster"
 else
-  bad "arm writes the session-keyed stamp beside the roster" "no file at $(stamp_of "$R6")"
+  no "arm writes the session-keyed stamp beside the roster" "no file at $(stamp_of "$R6")"
 fi
 S6_BODY="$(cat "$(stamp_of "$R6")" 2>/dev/null)"
 expect_contains "the stamp carries its own schema" "patrol-stamp/v1" "$S6_BODY"
@@ -746,7 +735,7 @@ expect_eq "a pre-roster tick still REFUSES (exit 2)" "2" "$RC"
 if [ -f "$(stamp_of "$R6B")" ]; then
   ok "…and it stamped anyway: liveness is firings landing, not decisions succeeding"
 else
-  bad "…and it stamped anyway: liveness is firings landing, not decisions succeeding" \
+  no "…and it stamped anyway: liveness is firings landing, not decisions succeeding" \
       "no file at $(stamp_of "$R6B")"
 fi
 expect_contains "the refused tick's stamp records the verb that wrote it" "verb=tick" \
@@ -763,7 +752,7 @@ expect_eq "a keyless tick refuses (exit 3)" "3" "$RC"
 # what it now asks.
 R6C_WROTE="$(ls "$R6C/.bionic/tmp/" 2>/dev/null | /usr/bin/grep -v "^engaged-$SID.state$" || true)"
 if [ -n "$R6C_WROTE" ]; then
-  bad "…and writes no stamp: a session-keyed file needs a session key" \
+  no "…and writes no stamp: a session-keyed file needs a session key" \
       "wrote: $R6C_WROTE"
 else
   ok "…and writes no stamp: a session-keyed file needs a session key"
@@ -780,7 +769,7 @@ S6_AGE=$(( $(date +%s) - $(mtime_of "$(stamp_of "$R6D")") ))
 if [ "$S6_AGE" -lt 120 ]; then
   ok "a tick refreshes the stamp it found stale"
 else
-  bad "a tick refreshes the stamp it found stale" "age is still ${S6_AGE}s"
+  no "a tick refreshes the stamp it found stale" "age is still ${S6_AGE}s"
 fi
 
 # ---------- the stamp follows the PINNED root, exactly as the roster does ----------
@@ -796,7 +785,7 @@ if [ -d "$R6EWT" ]; then
   if [ -f "$(stamp_of "$R6E")" ]; then
     ok "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp"
   else
-    bad "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp" \
+    no "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp" \
         "not at $(stamp_of "$R6E"); worktree has: $(ls "$R6EWT/.bionic/tmp" 2>/dev/null)"
   fi
   ( cd "$R6E" && git worktree remove --force "$R6EWT" ) >/dev/null 2>&1
@@ -1309,7 +1298,7 @@ cp "$POKER" "$MULT_MUT_ROOT/hooks/session-poker.sh"
 if grep -qF 'export PATROL_STALE_MULTIPLIER=1' "$MULT_MUT_ROOT/scripts/lib/patrol.sh"; then
   ok "8j meta: the doctored multiplier landed (the sed anchor still matches)"
 else
-  bad "8j meta: the doctored multiplier did NOT land — the pair below proves nothing"
+  no "8j meta: the doctored multiplier did NOT land — the pair below proves nothing"
 fi
 
 R8M="$(make_repo s8-multiplier)"; new_roster "$R8M"
@@ -1900,7 +1889,7 @@ POKER="$POKER_REAL_11B3"
 expect_contains "the doctored tick still fills (the mutation is only in the plan-touch path)" \
   "poker: FILL NEXT" "$OUT"
 if [ "$CKSUM_11B3_MUT_BEFORE" = "$(cksum < "$PLAN_R11B2")" ]; then
-  bad "planedit: the doctored tick's plan edit did NOT change the plan's bytes (the arm proves nothing)"
+  no "planedit: the doctored tick's plan edit did NOT change the plan's bytes (the arm proves nothing)"
 else
   ok "planedit: the doctored tick DID change the plan's bytes — the byte-identity pin above discriminates"
 fi
@@ -2311,7 +2300,7 @@ expect_absent "…and no QUIET is taken on a session it decided nothing about" "
 if [ -z "$(ls "$R13C/.bionic/tmp/" 2>/dev/null)" ]; then
   ok "…and no stamp, no .bionic/tmp manufactured under the wrong root"
 else
-  bad "…and no stamp, no .bionic/tmp manufactured under the wrong root" \
+  no "…and no stamp, no .bionic/tmp manufactured under the wrong root" \
       "found: $(ls "$R13C/.bionic/tmp/")"
 fi
 
@@ -2343,8 +2332,7 @@ expect_eq "…and the stamp lands under the checkout, not under dirname(bare.git
   "$([ -f "$(stamp_of "$R13DWT")" ] && echo yes || echo no)"
 
 # ============================================================
-echo ""
-echo "=== Section 14: the LEASE OVERRUN — a worktree outliving its row (AC-28) ==="
+section "Section 14: the LEASE OVERRUN — a worktree outliving its row (AC-28)"
 # ============================================================
 #
 # A spawned worktree is a leased slot bound to the ledger row that dispatched its writer,
@@ -3727,7 +3715,4 @@ expect_absent "no current: line at all — no FILL" "poker: FILL" "$OUT"
 expect_contains "…named as unreadable, with an empty value" \
   "no FILL — plan current: unreadable (none)" "$OUT"
 
-# ============================================================
-printf '\n──────────────────────────────────────────────\n'
-printf 'session-poker: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
-[ "$FAIL" -eq 0 ]
+finish
