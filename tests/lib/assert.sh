@@ -39,13 +39,12 @@
 #                         nothing, print the tally, exit by FAIL
 #
 # THE COUNTERS AND ok/no ARE DEFINED HERE, UNCONDITIONALLY. This file is the ONE
-# definition of PASS/FAIL/TOTAL and of what counts as a result (D1). A suite that
-# still carries its own `PASS=0; FAIL=0; TOTAL=0` and its own `ok()`/`no()` — 49
-# of them do, on the day this is written — overrides these after sourcing and
-# keeps working exactly as before; migrating those suites is S5–S9's job and the
-# runner's adoption wall (S10) is what makes a private definition an error. What
-# changes here is that the framework no longer DEFERS: the definitions below are
-# the tree's, not a fallback.
+# definition of PASS/FAIL/TOTAL and of what counts as a result (D1). It does not
+# DEFER: a suite that defines its own `ok()`/`no()` or resets its own counters at
+# column 0 is REFUSED by the runner's adoption wall (`_tf_adoption_refusal`,
+# below) and never runs — as is a suite that does not adopt this file at all.
+# All 55 suites on the roster are clients of it; the 49 that carried private
+# definitions were migrated by S5–S9 and the wall closed the door behind them.
 #
 # ── THE GENERIC FAMILY: SEMANTICS, ARGUMENT ORDER, AND THE OLD SPELLINGS ─────
 #
@@ -63,8 +62,9 @@
 # ARGUMENT ORDER is `<label> <expected> <actual>` throughout, which is what the
 # tree already did unanimously: expected-side first for eq/ne/status, needle
 # before haystack for contains/absent, pattern before subject for match/no_match.
-# The two exceptions in the tree (live-agents and resources spell expect_match
-# `<label> <actual> <ERE>`) are outvoted 11 to 2 and are migration work.
+# The two exceptions in the tree (live-agents and resources spelled expect_match
+# `<label> <actual> <ERE>`) were outvoted 11 to 2 and were renamed onto
+# `expect_regex` by S9b; no `expect_match` call survives in either file.
 #
 # SEMANTICS are the tree's most common definition of each name, measured:
 #
@@ -171,6 +171,13 @@
 #
 # MATCHING USES THE SUITE'S OWN `grep`, the same binary the doctoring line uses,
 # so the anchor and the mutation cannot disagree about what the pattern means.
+#
+# THE ANCHOR MUST MATCH AT LEAST AS STRICTLY AS THE MUTATION (A-35a, S19c). A
+# fixed-string anchor is a SUBSTRING test, so it still matches a line that has
+# drifted by one leading space — while a whole-line-anchored `sed 's/^exact$/…/'`
+# or `grep -vx` no-ops on that same line. Anchor a whole-line mutation with `-E`
+# and the mutation's own `^…$`, or the precondition is weaker than the thing it
+# is the precondition for and the green it gives is worth nothing.
 #
 # ── ASSERTION DISCIPLINE ─────────────────────────────────────────────────────
 #
@@ -366,19 +373,41 @@ anchor() {
   _got="$(grep -c "$_mode" -- "$_pat" "$_file" 2>/dev/null)"
   _got="$(printf '%s' "${_got:-0}" | tr -cd '0-9')"
   [ -n "$_got" ] || _got=0
+  # THE DETAIL BRANCHES ON THE DIRECTION (review-c C-7). Fewer than declared is
+  # the moved anchor: the mutation is a no-op and everything under it reads the
+  # shipped file. MORE than declared is the opposite failure — `grep -v` strips
+  # two lines and `sed` rewrites both, which the COUNT, NOT PRESENCE paragraph
+  # above already says. One string covering both told the reader the wrong half
+  # of the time.
   if [ "$_got" = "$_want" ]; then
     ok "$_name"
-  else
+  elif [ "${_got:-0}" -lt "${_want:-0}" ] 2>/dev/null; then
     no "$_name" "found $_got line(s) — the anchor MOVED, so the mutation below is a no-op and every row under it is reading the shipped file"
+  else
+    no "$_name" "found $_got line(s) — the anchor matches MORE than it declared, so the mutation below strips or rewrites lines it was never meant to touch"
   fi
 }
 
 # ── the tally ────────────────────────────────────────────────────────────────
 #
 # finish — closes the open section, turns every section that asserted nothing
-# into a named FAIL (AC-13), prints the tally with `sections=N setup=M`, and
-# exits by FAIL. Call it as the last line of a suite instead of a hand-rolled
-# `[ "$FAIL" -eq 0 ]`.
+# into a named FAIL (AC-13), fails a suite that asserted nothing AT ALL, prints
+# the tally with `sections=N setup=M`, and exits by FAIL. Call it as the last
+# line of a suite instead of a hand-rolled `[ "$FAIL" -eq 0 ]`.
+#
+# THE WHOLE-SUITE FLOOR (review-a A-4). AC-13 closes lie class 3 per SECTION; it
+# said nothing about a suite that opens none. Such a suite has an empty
+# `_TF_EMPTY`, `FAIL=0`, and exits 0 — and tests/run.sh judges on rc and prints
+# `✓ PASS`, so `0/0 passed` counts toward `Gating: N passed`. A result that
+# covered nothing claimed a covered environment, which is the lie this wave
+# exists to close, one level up from the section. The reachable shape is not a
+# hand-written empty suite: it is an early `exit 0` on a missing fixture tool,
+# or a migration that leaves a file with its sections stripped.
+#
+# THE FLOOR IS ASSERTIONS, NOT SECTIONS. `tests/loader.test.sh` and
+# `tests/patrol-marker.test.sh` legitimately open no `section` at all and assert
+# from the top level (`sections=0`, TOTAL > 0); they are not the shape this
+# refuses. TOTAL is what a result is made of, so TOTAL is what is floored.
 finish() {
   local name suite
   _tf_close_section
@@ -392,6 +421,10 @@ $_TF_EMPTY
 TF_EMPTY_SECTIONS
   fi
   suite="$(basename "${0:-suite}")"
+  if [ "$TOTAL" -eq 0 ]; then
+    TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1))
+    echo "FAIL: suite asserted nothing: ${suite}"
+  fi
   echo ""
   echo "──────────────────────────────────────────────"
   echo "${suite}: ${PASS}/${TOTAL} passed, ${FAIL} failed  sections=${_TF_SECTIONS} setup=${_TF_SETUPS}"
@@ -433,8 +466,79 @@ require_helpers() {
 #                   a DEF and NOT a TOPDEF (A-29).
 #   TOPSET <name>   a counter reset (`PASS=0`, `FAIL=0`, `TOTAL=0`) on a line
 #                   that BEGINS with one, including the `PASS=0; FAIL=0` form.
+#   SOURCES assert.sh   the suite sources this framework, outside a heredoc.
+#   USES finish     the suite calls `finish` in command position, outside a
+#                   heredoc. Together these two are the ADOPTION half of AC-12
+#                   (K-7): the wall used to enforce only that a suite may not
+#                   SHADOW the framework, never that it must adopt it.
 _tf_scan() {
   awk '
+    # hdtag(s) — THE HEREDOC TAG OPENED BY THIS LINE, or "". QUOTE- AND
+    # ARITHMETIC-AWARE (review-a A-1/A-9): `echo "see <<EOF"` is text and
+    # `$(( 1 << 3 ))` is a shift, and neither opens anything. That is not a
+    # nicety. Every line from an opener to its terminator is consumed unread, so
+    # ONE phantom opener blinds the adoption wall AND the derivation for the
+    # whole rest of the file, silently — which is the state four suites in this
+    # tree were in when the textual matcher shipped. The character loop is the
+    # one payload/scripts/lib/cmd-class.sh already carries for the same problem
+    # (`heredoc_tag`), plus arithmetic state and command-substitution nesting —
+    # a $( ) inside a double-quoted string re-enters an UNQUOTED context, and
+    # protect-main.test.sh:343 is that exact line. A herestring <<< opens no body.
+    # NOTE FOR EDITORS: this awk program is inside a shell single-quoted string,
+    # so it must not contain an apostrophe anywhere, comments included. A single
+    # quote is spelled \047.
+    function hdtag(s,   i, c, L, j, t, ch, q, dep, qs, ar, pc) {
+      L = length(s); q = ""; dep = 0; ar = 0; pc = ""
+      for (i = 1; i <= L; i++) {
+        c = substr(s, i, 1)
+        if (ar > 0) {                                  # inside $(( )) / (( ))
+          if (c == "(") ar++
+          else if (c == ")") ar--
+          continue
+        }
+        if (q == "\047") {                             # inside \047 quotes: nothing is special
+          if (c == "\047") q = ""
+          continue
+        }
+        if (q == "\"") {                               # double quotes: \ escapes, $( nests
+          if (c == "\\") { i++; continue }
+          if (c == "\"") { q = ""; continue }
+          if (c == "$" && substr(s, i + 1, 1) == "(") {
+            if (substr(s, i + 2, 1) == "(") { ar = 2; i += 2; continue }
+            dep++; qs[dep] = q; q = ""; i++; pc = ""; continue
+          }
+          continue
+        }
+        if (c == "\047" || c == "\"") { q = c; pc = c; continue }
+        if (c == "\\") { i++; pc = ""; continue }
+        if (c == "$" && substr(s, i + 1, 1) == "(") {
+          if (substr(s, i + 2, 1) == "(") { ar = 2; i += 2; continue }
+          dep++; qs[dep] = q; q = ""; i++; pc = ""; continue
+        }
+        if (c == ")" && dep > 0) { q = qs[dep]; dep--; pc = ")"; continue }
+        if (c == "(" && substr(s, i + 1, 1) == "(" \
+            && (pc == "" || pc == ";" || pc == "&" || pc == "|" || pc == "(" || pc == "{")) {
+          ar = 2; i++; continue
+        }
+        if (c == "<" && substr(s, i + 1, 1) == "<") {
+          if (substr(s, i + 2, 1) == "<") { i += 2; pc = "<"; continue }   # here-STRING
+          j = i + 2
+          if (substr(s, j, 1) == "-") j++
+          while (substr(s, j, 1) == " " || substr(s, j, 1) == "\t") j++
+          ch = substr(s, j, 1)
+          if (ch == "\047" || ch == "\"") j++
+          t = ""
+          while (j <= L) {
+            c = substr(s, j, 1)
+            if (c ~ /[A-Za-z0-9_]/) { t = t c; j++ } else break
+          }
+          if (t != "") return t
+          i = j - 1; pc = "<"; continue
+        }
+        if (c != " " && c != "\t") pc = c
+      }
+      return ""
+    }
     hd != "" {
       if ($0 ~ ("^[ \t]*" hd "[ \t]*$")) hd = ""
       next
@@ -444,15 +548,12 @@ _tf_scan() {
       if (line ~ /^[ \t]*#/) next
 
       # heredoc opener on this line? (herestrings <<< are not openers)
-      hline = line
-      gsub(/<<</, "   ", hline)
-      pending = ""
-      if (match(hline, /<<-?[ \t]*[^ \t<>;&|()]+/)) {
-        w0 = substr(hline, RSTART, RLENGTH)
-        sub(/^<<-?[ \t]*/, "", w0)
-        gsub(/[^A-Za-z0-9_]/, "", w0)
-        if (w0 != "") pending = w0
-      }
+      pending = hdtag(line)
+
+      # THE TWO RECORDS THE ADOPTION HALF READS (critic K-7). Both are taken
+      # from the same heredoc-skipping pass, so a suite that only writes the
+      # word `finish` into a scratch fixture does not count as calling it.
+      if (line ~ /^[ \t]*(\.|source)[ \t]+.*lib\/assert\.sh/) print "SOURCES assert.sh"
 
       # a counter reset at column 0, and every one after a `;` on that line
       if (match(line, /^(PASS|FAIL|TOTAL)=0/) && substr(line, RLENGTH + 1, 1) !~ /[0-9A-Za-z_.]/) {
@@ -465,13 +566,40 @@ _tf_scan() {
         }
       }
 
-      if (match(line, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) {
-        d = substr(line, RSTART, RLENGTH)
+      # A DEFINITION, AND THEN THE REST OF THE LINE. The `name()` head is cut
+      # off and what follows falls through to the tokeniser, because a
+      # definition written on ONE line carries its whole body there —
+      #   eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "..."; fi; }
+      # — and a scanner that stopped at the head derived nothing from it. 45
+      # framework call sites in 14 suites were invisible that way. All ~150
+      # assertions of session-start.test.sh route through three such wrappers,
+      # and that suite scanned as ZERO calls (review-a A-2).
+      #
+      # BOTH SYNTAXES BASH ACCEPTS (critic K-1). `function name { ... }` and
+      # `function name() { ... }` define a function exactly as `name()` does,
+      # and the POSIX-only test read neither: a suite spelling its private ok as
+      # `function ok {` produced no DEF and no TOPDEF, so the wall had nothing
+      # to match and the runner launched it. Nothing in the tree exploits that
+      # today, which is what makes it a hole rather than a lie.
+      isdef = 0
+      if (match(line, /^[ \t]*function[ \t]+[A-Za-z_][A-Za-z0-9_]*([ \t]*\(\))?/)) {
+        rs = RSTART; rl = RLENGTH
+        d = substr(line, rs, rl)
+        sub(/^[ \t]*function[ \t]+/, "", d)
         gsub(/[^A-Za-z0-9_]/, "", d)
+        isdef = 1
+        istop = (line ~ /^function[ \t]/)
+      } else if (match(line, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) {
+        rs = RSTART; rl = RLENGTH
+        d = substr(line, rs, rl)
+        gsub(/[^A-Za-z0-9_]/, "", d)
+        isdef = 1
+        istop = (line ~ /^[A-Za-z_]/)
+      }
+      if (isdef) {
         print "DEF " d
-        if (line ~ /^[A-Za-z_]/) print "TOPDEF " d
-        hd = pending
-        next
+        if (istop) print "TOPDEF " d
+        line = substr(line, rs + rl)
       }
 
       gsub(/[;()&|{}]/, " \001 ", line)
@@ -483,6 +611,7 @@ _tf_scan() {
         if (prev == "\001" || prev == "then" || prev == "else" || prev == "elif" \
             || prev == "do" || prev == "if" || prev == "while" || prev == "until" || prev == "!") {
           if (t ~ /^(ok|no|expect_[a-z_]+|anchor)$/) print "CALL " t
+          else if (t == "finish") print "USES finish"
         }
         prev = t
       }
@@ -515,6 +644,15 @@ _tf_scan() {
 # A suite-specific helper under a name this file does NOT own is not shadowing
 # and stays legal (A-16): `expect_finding`, `expect_audit_line` and the other
 # 24 one-offs are built on ok/no and belong to the suite that needs them.
+#
+# AND THE OTHER HALF: A SUITE MUST ADOPT (critic K-7). Refusing a shadow is only
+# half of "one framework, adopted by every suite". Nothing required a roster
+# suite to source this file or to call `finish`, so a suite spelling its helpers
+# `t_ok`/`t_no` and its counters `P`/`F`, printing its own tally, passed the
+# wall untouched — the exact state AC-12 exists to make impossible, while §13's
+# `0 refused` read as proof it already was. All 55 suites adopt today, but that
+# was a measurement (the migration slices' one-time greps), not a mechanism.
+# It is a mechanism now.
 
 # _tf_owned_names — the names this framework owns. READ FROM THIS FILE at call
 # time, never hand-listed: every `expect_*` it defines at column 0, plus the six
@@ -529,7 +667,7 @@ _tf_owned_names() {
 # returns 0 when it does not. A suite that cannot be read is not judged: the
 # runner is about to fail it for a reason it can state better.
 _tf_adoption_refusal() {
-  local suite="${1:-}" scan owned shadowed bad="" name
+  local suite="${1:-}" scan owned shadowed bad="" name unadopted=""
   [ -n "$suite" ] && [ -f "$suite" ] && [ -r "$suite" ] || return 0
   scan="$(_tf_scan "$suite")"
   owned=" $(_tf_owned_names | sort -u | tr '\n' ' ')"
@@ -540,14 +678,49 @@ _tf_adoption_refusal() {
   for name in $(printf '%s\n' "$scan" | sed -n 's/^TOPSET //p' | sort -u); do
     bad="$bad ${name}=0"
   done
-  [ -n "$bad" ] || return 0
-  printf '%s defines%s at column 0 — the framework owns those names: %s\n' \
-    "$suite" "$bad" "$_TF_LIB"
+  if [ -n "$bad" ]; then
+    printf '%s defines%s at column 0 — the framework owns those names: %s\n' \
+      "$suite" "$bad" "$_TF_LIB"
+    return 0
+  fi
+  # THE ADOPTION HALF, ASKED SECOND (critic K-7). Shadowing is reported first
+  # because it is the more specific finding and the one a reader fixes first; a
+  # suite can be in both states and one line is enough to refuse it.
+  case "$scan" in
+    *"SOURCES assert.sh"*) : ;;
+    *) unadopted="does not source the framework" ;;
+  esac
+  if [ -z "$unadopted" ]; then
+    case "$scan" in
+      *"USES finish"*) : ;;
+      *) unadopted="never calls finish" ;;
+    esac
+  fi
+  [ -n "$unadopted" ] || return 0
+  printf '%s %s — every gating suite is a client of it, and a suite that is not reports its own verdict on its own terms: %s\n' \
+    "$suite" "$unadopted" "$_TF_LIB"
 }
 
 # The load-time derivation (AC-14). Runs once, here, for whatever suite sourced
 # this file. A suite the framework cannot read cannot be certified by it, so an
 # unreadable $0 is an error and not a silent skip.
+#
+# WHAT IT CAN AND CANNOT SEE (Step-5 audit §5.1, substance finding 1). It derives
+# the FRAMEWORK'S OWN name family and nothing else: `_tf_scan` records a CALL
+# only for `ok`, `no`, `anchor` and `expect_[a-z_]+` — lower-case and underscores,
+# so `expect_case2` is outside it too. A suite that calls a vanished helper under
+# any other name is invisible here. The walk demonstrated the consequence live:
+# an undefined `walk_vanished_helper` inserted above `finish` left
+# docs-pins.test.sh reporting `107/107 passed, 0 failed`, rc=0, with the
+# diagnostic only on stderr.
+#
+# SO A HAND-RUN HAS INTERPRETER PARITY, NOT VERDICT PARITY. AC-2 makes the
+# hand-run a first-class path by re-executing it under /bin/bash
+# (tests/lib/resolve-roots.sh). What it does NOT give it is the runner's
+# stderr-strict arm, which is what catches that class at RUNTIME — under
+# `tests/run.sh` the suite above is red; typed at a prompt, nothing says so. That
+# is a boundary neither AC-2 nor AC-14 states, and a reader debugging by hand
+# should know which half of the verdict they are getting.
 _tf_require_derived_helpers() {
   local src="$1" scan calls defs name missing=""
   if [ ! -f "$src" ] || [ ! -r "$src" ]; then
@@ -559,7 +732,11 @@ _tf_require_derived_helpers() {
   defs="$(echo "$scan" | sed -n 's/^DEF //p' | sort -u)"
   for name in $calls; do
     type -t "$name" >/dev/null 2>&1 && continue
-    echo "$defs" | grep -qx -- "$name" && continue
+    # A HERESTRING, not `echo | grep -q` — the form this file bans twice, at :100
+    # and :332, and the form it was written in on the load path of every suite
+    # (review-a A-6). Harmless today, since $defs is a few hundred bytes of the
+    # suite's own function names, and wrong in the file that says so.
+    grep -qx -- "$name" <<<"$defs" && continue
     missing="$missing $name"
   done
   if [ -n "$missing" ]; then

@@ -56,6 +56,24 @@
 # it, INCLUDING what its symlinks reach: `payload` covers `hooks/…`, because
 # `payload/hooks` is `hooks`.
 #
+# AND SO DOES A DIRECTORY ARGUMENT (review-a A-3). The rule above is about what a
+# SUITE names. It was not applied to what the CALLER asks about, so a query for a
+# directory matched only the suites that named that same directory literally, and
+# the answer was smaller than the change:
+#
+#     tests/lib                    2 suites   |  every file under it, unioned   55
+#     payload/scripts/lib         21          |                                 52
+#     payload                     13          |  payload/scripts/lib/roster.sh  34
+#
+# `Files: tests/lib` is a legal declaration that reaches this program — the last
+# line under-derives by 27x — and AC-18/AC-19 are SOUNDNESS claims, so an
+# under-approximation here is the one direction this file may not fail in. The
+# landing leg already documented the opposite reading of the same spelling
+# (hooks/landing-gate.sh: "a declared directory covers its files"), so the two
+# legs disagreed about `Files: tests/lib` by 53 suites. A directory argument now
+# expands to every file beneath it, symlinks followed, and the directory itself
+# stays in the query so directory-to-directory edges still match.
+#
 # TRANSITIVE READS.  Code map §3.5 names two hops a per-suite grep cannot see.
 # `tests/lib/bound-marker.sh` sources `payload/scripts/lib/run.sh` and
 # `binding.sh`, so its six consumers read both without naming either. And ten
@@ -492,7 +510,21 @@ mv "$WORK/all.flagged" "$WORK/all"
 : >"$WORK/query"
 for a in "$@"; do
   c="$(_canon "$a")"
-  [ -n "$c" ] && printf '%s\n' "$c" >>"$WORK/query"
+  [ -n "$c" ] || continue
+  printf '%s\n' "$c" >>"$WORK/query"
+  # A DIRECTORY ARGUMENT COVERS ITS FILES (review-a A-3; see DIRECTORIES EXPAND
+  # above). `-L` because the four root aliases are symlinked directories and a
+  # caller asking about `payload` is asking about `hooks/` too; each result is
+  # de-aliased back to the one canonical spelling, so `payload/hooks/x.sh` and
+  # `hooks/x.sh` do not both enter the query as separate paths. Textual, not
+  # _canon: everything under $ROOT/$c is already repo-relative by construction,
+  # and a per-file `cd`/`dirname` would put three forks on a hook's 10 s budget.
+  if [ -d "$ROOT/$c" ]; then
+    find -L "$ROOT/$c" -type f 2>/dev/null \
+      | while IFS= read -r _f; do
+          _dealias "$(_norm "${_f#"$ROOT"/}")"
+        done >>"$WORK/query"
+  fi
 done
 sort -u "$WORK/query" -o "$WORK/query"
 

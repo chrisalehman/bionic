@@ -52,22 +52,56 @@ fi
 # re-runs by hand — and it rides here because sourcing this seam is the one thing every
 # suite in the tree already does.
 #
-# EXACTLY ONCE, AND IT CANNOT LOOP. The marker is exported before the exec, so the
-# re-executed copy — and every child it starts — sees it and falls straight through. It is
-# the same marker `tests/run.sh` exports when it builds the pin, so a suite the runner
-# launched (already `/bin/bash`) never re-execs either.
+# THE TEST IS THE INTERPRETER, NOT A MARKER (critic K-4). This guard used to
+# re-exec only while `BIONIC_TEST_INTERPRETER_PINNED` was empty — a variable that
+# ASSERTS the conclusion, with nothing checking that the interpreter actually is
+# `/bin/bash`. `tests/run.sh` exports it to every descendant of a run, so any
+# hand-run started from inside a suite, a debugger, or a shell that had once run
+# the runner inherited it and reported bash 5.3 while saying nothing:
+#
+#   $ BIONIC_TEST_INTERPRETER_PINNED=1 /opt/homebrew/bin/bash tests/probe.sh
+#   interpreter: 5.3.15(1)-release          <- pin skipped, silently
+#
+# That is this repository's own fail-closed-constants doctrine inverted: a
+# fixture going inert on an inherited env pin. The condition now reads the
+# running interpreter and nothing else; the marker is still exported, and
+# `tests/run.sh` still exports it, as a RECORD that a run built the pin — but it
+# no longer decides.
+#
+# EXACTLY ONCE, AND IT CANNOT LOOP. After `exec /bin/bash "$0"`, `$BASH` is the
+# path the shell was invoked by — `/bin/bash` — so the condition is false in the
+# re-executed copy and the pin fires once. The one host on which that would not
+# hold is one where `/bin/bash` is a wrapper for some other shell, and there the
+# old marker would have hidden an infinite loop; so the target is ASKED, once,
+# on the re-exec path only, and a `/bin/bash` that does not report itself is
+# announced on stderr instead of exec'd.
+#
+# THE RUNNER IS THE ONE EXEMPTION, recognised by its own name — the same
+# convention, for the same reason, as the derivation's exemption in
+# tests/lib/assert.sh. `tests/run.sh` is not a suite: it BUILDS the pin (a
+# directory with one `bash` in it, first on PATH) and hands it to its children,
+# so every suite it launches is already `/bin/bash` and needs nothing from here.
+# The runner itself keeps whatever interpreter the caller typed, and must — it
+# sources this seam in a subshell AFTER printing the environment stamp, so
+# re-executing it there would re-run the whole roster inside that subshell.
+# Before Step 6 the exported marker happened to cover this; now that the marker
+# no longer decides, the exemption has to be said out loud.
 #
 # WHAT IT WILL NOT DO. `$0` must be a readable file: sourced into an interactive shell
 # there is nothing to re-execute, and guessing would exec the shell's own name. `/bin/bash`
 # must exist and be executable — on a host where it does not, the shebang every payload
 # script carries is unrunnable and this seam is not the place that discovers it.
-if [ -z "${BIONIC_TEST_INTERPRETER_PINNED:-}" ] \
-   && [ "${BASH:-}" != "/bin/bash" ] \
+if [ "${BASH:-}" != "/bin/bash" ] \
+   && [ "${0##*/}" != "run.sh" ] \
    && [ -x "/bin/bash" ] \
    && [ -f "$0" ] && [ -r "$0" ]; then
-  BIONIC_TEST_INTERPRETER_PINNED=1
-  export BIONIC_TEST_INTERPRETER_PINNED
-  exec /bin/bash "$0" "$@"
+  if [ "$(/bin/bash -c 'printf %s "$BASH"' 2>/dev/null)" = "/bin/bash" ]; then
+    BIONIC_TEST_INTERPRETER_PINNED=1
+    export BIONIC_TEST_INTERPRETER_PINNED
+    exec /bin/bash "$0" "$@"
+  else
+    echo "resolve-roots.sh: /bin/bash does not report itself as /bin/bash — not re-executing, so this run is under ${BASH:-an unknown shell} and the pin is OFF" >&2
+  fi
 fi
 
 _bionic_seam_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || {
