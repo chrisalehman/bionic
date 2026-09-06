@@ -57,6 +57,11 @@
 # EXPORTS (all take the command as $1; none write outside their own locals):
 #   cmd_strip_heredocs <cmd>  -> the command with every heredoc body removed
 #   cmd_class_lines    <cmd>  -> one "<class><TAB><segment>" line per non-empty segment
+#   cmd_suite_targets  <cmd>  -> for each suite-class segment that names a suite FILE, its
+#                                basename, one per line, in position order and deduplicated.
+#                                `bash tests/a.test.sh && ./tests/run.sh` prints two lines;
+#                                `pytest` and `make test` are suite-class and print none,
+#                                because they name no file this repo budgets by.
 #   cmd_class          <cmd>  -> the whole command's class, by PRIORITY not by position:
 #                                suite > bootstrap > install > build > none. Priority, so
 #                                that `make widget && bash tests/run.sh` still routes to
@@ -280,7 +285,17 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       return k
     }
 
+    # LAST_TARGET is this reading`s SECOND answer, set beside the class rather than
+    # derived from the segment afterwards (S13, spec AC-21). The budget guard needs to
+    # know WHICH suite a command runs, and the only code that knows is the code that
+    # just decided it is a suite at all: re-finding the token with a second matcher
+    # outside this function is the twin that drifts, and it would have to re-implement
+    # strip_leading, unwrap_runner and the quote-aware tokeniser to see the same argv
+    # positions this does. It is set ONLY for the two script forms that name a file —
+    # pytest, `npm test`, `go test` and `make test` are suite-class and name no
+    # tests/<x>.test.sh, so they leave it empty and the caller reports no target.
     function classify_argv(s,   a, n, i, a1, a2, b0, b1) {
+      LAST_TARGET = ""
       n = argv_tok(s, a)
       if (n == 0) return "none"
       b0 = base(a[1])
@@ -290,12 +305,12 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         while (i <= n && substr(a[i], 1, 1) == "-") i++
         a1 = (i <= n ? a[i] : ""); b1 = base(a1)
         if (b1 ~ /^claude-(bootstrap|reset)\.sh$/) return "bootstrap"
-        if (b1 == "test.sh" || b1 ~ /\.test\.sh$/) return "suite"
+        if (b1 == "test.sh" || b1 ~ /\.test\.sh$/) { LAST_TARGET = b1; return "suite" }
         # A bare `run.sh` is only a suite invocation when a cd put us in its
         # directory — which is exactly the shape `cd <worktree>/tests && bash
         # run.sh` takes, and the shape the path-component requirement missed
         # (critic C-2). On its own the word says nothing, so it stays none.
-        if (b1 == "run.sh" && (index(a1, "/") > 0 || CD_SEEN)) return "suite"
+        if (b1 == "run.sh" && (index(a1, "/") > 0 || CD_SEEN)) { LAST_TARGET = b1; return "suite" }
         return "none"
       }
       a1 = (n >= 2 ? a[2] : ""); a2 = (n >= 3 ? a[3] : "")
@@ -306,8 +321,10 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # through every arm to none. The path component is what separates running
       # it from naming it: `ls tests/run.sh` is argv[0] ls and stays none, and a
       # bare `run.sh` word is not something the shell would run either.
-      if (index(a[1], "/") > 0 && (b0 == "run.sh" || b0 == "test.sh" || b0 ~ /\.test\.sh$/))
+      if (index(a[1], "/") > 0 && (b0 == "run.sh" || b0 == "test.sh" || b0 ~ /\.test\.sh$/)) {
+        LAST_TARGET = b0
         return "suite"
+      }
       if (b0 == "pytest") return "suite"
       if (b0 == "npm" || b0 == "pnpm" || b0 == "yarn") {
         if (a1 == "test") return "suite"
@@ -375,7 +392,18 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       for (i = 1; i <= k; i++) {
         t = trim(seg[i])
         if (t == "") continue
-        printf "%s\t%s\n", class_seg(t, 0), t
+        LAST_TARGET = ""
+        cls = class_seg(t, 0)
+        if (mode == "targets") {
+          # ONE LINE PER DISTINCT SUITE, in position order. A command naming the same
+          # suite twice states one budget claim, and the caller compares a set.
+          if (cls == "suite" && LAST_TARGET != "" && !(LAST_TARGET in tgt_seen)) {
+            tgt_seen[LAST_TARGET] = 1
+            print LAST_TARGET
+          }
+        } else {
+          printf "%s\t%s\n", cls, t
+        }
         # Left-to-right, so a cd only licenses the basename form in the
         # segments that FOLLOW it.
         if (is_cd(t)) CD_SEEN = 1
@@ -394,6 +422,10 @@ cmd_unwrap_head() {  # <command> -> the command reduced to what argv[0] reads
 
 cmd_class_lines() {  # <command> -> "<class>\t<segment>" per non-empty segment
   printf '%s' "${1-}" | _cmd_class_awk lines
+}
+
+cmd_suite_targets() {  # <command> -> the suite BASENAME each suite-class segment runs, one per line
+  printf '%s' "${1-}" | _cmd_class_awk targets
 }
 
 cmd_class() {  # <command> -> suite|bootstrap|install|build|none, by priority

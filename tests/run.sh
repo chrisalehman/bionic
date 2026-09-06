@@ -443,6 +443,12 @@ run "doctor-version.test.sh" bash tests/doctor-version.test.sh
 #     spellings (lib/patrol.sh SSoT, patrol-duties-gate.sh, SKILL.md)
 run "git-argv.test.sh" bash tests/git-argv.test.sh
 run "cmd-class.test.sh" bash tests/cmd-class.test.sh
+# wave-01 verification-cannot-lie (S13, spec AC-21): the BUDGET arm of
+# hooks/background-suite-guard.sh — a dispatched agent may run only the suites its roster
+# row allows, and never the full tree unless the row names it. The hook's older
+# backgrounded-suite arm stays where it has always been proved (cmd-class.test.sh §C4,
+# which drives the pair as hooks.json registers it); this suite owns the budget half.
+run "background-suite-guard.test.sh" bash tests/background-suite-guard.test.sh
 run "patrol-marker.test.sh" bash tests/patrol-marker.test.sh
 # bionic 1.4.0 (wave-bionic-1.4.0-update, L-RUN slice, spec AC-8): the one library function
 # `active_run` — docs_root, active_plan, active_run — that every always-on hook gates its

@@ -142,12 +142,17 @@ BRIEF_BROKEN='Canonical-sdlc Step 4. Your slice: implement the widget behind the
 Exit condition: the paired suite is green.'
 
 # A brief every wall accepts — used for the LEDGER cases, where the point is what
-# gets journalled on a dispatch that passes.
+# gets journalled on a dispatch that passes. The `Suites:` line is the instrument the
+# suite-allowance wall requires of every brief since S13 (spec AC-20); a brief without one
+# is refused there, which would have made every LEDGER case below measure that wall
+# instead of the partition it means to measure. The DECLARED spelling, because these
+# fixture repos configure no `impact-command:`.
 BRIEF_OK='Canonical-sdlc Step 4, slice 4/9 of epic-99 wave-01; build · audited · wave.
 Your slice: implement the widget behind the existing seam.
 Expected artifact: .bionic/docs/record/w99-widget.txt
 Expected duration: ~25 minutes.
-Progress artifact: .bionic/tmp/w99-widget.progress, cadence ~5m'
+Progress artifact: .bionic/tmp/w99-widget.progress, cadence ~5m
+Suites: tests/widget.test.sh'
 
 # mk_agent_payload <cwd> <with-agent-id:yes|no> [prompt] [session_id]
 mk_agent_payload() {
@@ -482,6 +487,84 @@ expect_eq "G8.2 ...nothing on stderr" "" "$ERR"
 : > "$REPO_U/.bionic/tmp/engaged-$SID.state"
 run_guard "$(mk_agent_payload "$REPO_U" yes)" "$DISPATCH_WALL"
 expect_eq "G8.3 control: restore the marker and the dispatch wall REFUSES again" "2" "$ST"
+
+# ============================================================
+echo ""
+echo "=== G9 — the partition covers the BUDGET arm too (S13, AC-21) ==="
+# ============================================================
+# hooks/background-suite-guard.sh grew a second arm in wave-01: inside a dispatched agent
+# it refuses a suite outside the budget its roster row records. That arm reaches the
+# machine through THIS guard — `hooks.json` registers the pair, and nothing else does — so
+# the guard's four cells have to hold for it exactly as they hold for the two walls above.
+# What the arm ITSELF does with a row is tests/background-suite-guard.test.sh's; what is
+# asserted here is that the channel delivers it, and that no cell the guard is supposed to
+# silence lets it through.
+#
+# The two silent cells get the POSITIVE CONTROL this file's header requires: the same
+# payload driven STRAIGHT into the wall must refuse it, so a silence is the guard's
+# decision and not a payload the wall would have ignored anyway.
+SUITE_WALL="$HOOKS_DIR/background-suite-guard.sh"
+
+mk_suite_payload() {  # <cwd> <command> <with-agent-id:yes|no>
+  jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" --arg a "$AGENT_ID" \
+    --argjson withid "$([ "$3" = yes ] && echo true || echo false)" \
+    '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
+      prompt_id:"f3cd7d62-305d-47ed-9eaf-46fb12d4f4ed",
+      permission_mode:"bypassPermissions", effort:{level:"high"},
+      hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:$cmd},
+      tool_use_id:"toolu_01budgetarm"}
+     + (if $withid then {agent_id:$a} else {} end)'
+}
+
+REPO_S=$(make_repo g9)
+arm_roster "$REPO_S"
+# The budget this agent was dispatched with — through the one production writer, so a
+# field this fixture believes in that the writer stopped emitting fails loudly.
+. "$(dirname "$0")/lib/roster-row.sh"
+roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
+  suites_allowed=alpha.test.sh suites_source=declared files= \
+  >> "$REPO_S/.bionic/tmp/roster-$SID.state"
+
+# CELL 1: agent context + armed -> the arm runs, and refuses the off-budget suite.
+run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+expect_eq "G9.1 agent context + armed: the budget arm REFUSES an off-budget suite" "2" "$ST"
+expect_contains "G9.1 …in the arm's own words" "BUDGET" "$ERR"
+expect_contains "G9.1 …naming the recorded set" "alpha.test.sh" "$ERR"
+
+# …and the same channel lets an ON-budget suite through, so G9.1 is the budget and not the
+# channel refusing everything it is handed.
+run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/alpha.test.sh' yes)" "$SUITE_WALL"
+expect_eq "G9.1 control: an ON-budget suite passes the same channel" "0" "$ST"
+expect_empty "G9.1 …silently" "$OUT$ERR"
+
+# CELL 2: MAIN THREAD (no agent_id) + armed -> silent.
+run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' no)" "$SUITE_WALL"
+expect_eq "G9.2 main thread + armed: silent" "0" "$ST"
+expect_empty "G9.2 …silently" "$OUT$ERR"
+
+# CELL 3: agent context + UNARMED (no roster) -> silent, and the wall itself would too.
+disarm_roster "$REPO_S"
+run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+expect_eq "G9.3 agent context + unarmed: silent" "0" "$ST"
+expect_empty "G9.3 …silently" "$OUT$ERR"
+arm_roster "$REPO_S"
+roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
+  suites_allowed=alpha.test.sh suites_source=declared files= \
+  >> "$REPO_S/.bionic/tmp/roster-$SID.state"
+run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+expect_eq "G9.3 control: re-arm the roster and the same payload REFUSES again" "2" "$ST"
+
+# CELL 4: the session never invoked the skill -> silent on both sides of the guard.
+unengage "$REPO_S"
+run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+expect_eq "G9.4 an unengaged session is silent through the guard" "0" "$ST"
+run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+expect_eq "G9.4 …and driven straight into the wall, which asks the same question itself" "0" "$ST"
+expect_empty "G9.4 …silently" "$OUT$ERR"
+: > "$REPO_S/.bionic/tmp/engaged-$SID.state"
+run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+expect_eq "G9.4 control: restore the marker and the wall REFUSES again" "2" "$ST"
 
 
 # ============================================================

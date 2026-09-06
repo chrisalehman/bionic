@@ -201,9 +201,14 @@ payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
     # PAIR — an ordinary, well-formed dispatch — and its §7 direction is
     # "pass in silence"; a fieldless brief is a malformed dispatch, whose warning
     # is a different claim, driven in tests/dispatch-preflight.test.sh S10c.
+    # The `Suites:` line joins the well-formed brief for the same reason the labels above
+    # are here (S13, spec AC-20): the start gate refuses a brief declaring neither `Files:`
+    # nor `Suites:`, so without it the POSITIVE PAIR would be a malformed dispatch and the
+    # row's own §7 direction ("pass in silence") could never be measured.
     Agent)    input=$(jq -n --arg d "a dispatch" --arg p 'Expected artifact: .bionic/docs/record/w99.txt
 Expected duration: ~25 minutes.
-Progress artifact: .bionic/tmp/w99.progress' \
+Progress artifact: .bionic/tmp/w99.progress
+Suites: tests/widget.test.sh' \
                 '{description:$d, subagent_type:"implementor", name:"w99-impl", prompt:$p}') ;;
     TaskStop) input=$(jq -n --arg k "$arg" '{task_id:$k}') ;;
     Bash)     input=$(jq -n --arg c "$arg" '{command:$c}') ;;

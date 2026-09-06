@@ -161,7 +161,7 @@ mk_agent_payload() {  # <sid> <cwd>
       permission_mode:"bypassPermissions", effort:{level:"high"},
       hook_event_name:"PreToolUse", tool_name:"Agent",
       tool_input:{description:"a dispatch", subagent_type:"implementor", name:"w99-impl",
-                  prompt:"Expected artifact: .bionic/docs/record/w99.txt\nExpected duration: ~25 minutes.\nProgress artifact: .bionic/tmp/w99.progress"},
+                  prompt:"Expected artifact: .bionic/docs/record/w99.txt\nExpected duration: ~25 minutes.\nProgress artifact: .bionic/tmp/w99.progress\nSuites: tests/widget.test.sh"},
       tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
@@ -1850,7 +1850,8 @@ H_BRIEF='Canonical-sdlc Step 4, slice 4/13 of epic-99 wave-01; build · audited 
 Expected artifact: .bionic/docs/record/w99-live.txt
 Expected duration: ~45 minutes. Progress: .bionic/tmp/w99-live.progress, cadence ~7m.
 Subprocess claim: `w99-suite-marker` → .bionic/tmp/w99-live.log
-Exit condition: the artifact exists.'
+Exit condition: the artifact exists.
+Suites: tests/widget.test.sh'
 plant "$ISUB" "aw99live-9999999999999999" "w99-live"
 jq -n --arg s "$SID_A" --arg c "$IREPO" --arg p "$H_BRIEF" \
   '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
@@ -2439,7 +2440,8 @@ K_BRIEF='Canonical-sdlc Step 4, slice 6 of epic-16 wave-01; build · audited · 
 Expected artifact: .bionic/docs/record/w16-chain.md
 Expected duration: ~30 minutes. Progress artifact: .bionic/tmp/w16-chain.progress, cadence ~7m.
 Subprocess claim: `w16-chain-marker` → .bionic/tmp/w16-chain.log
-Exit condition: the artifact exists.'
+Exit condition: the artifact exists.
+Suites: tests/widget.test.sh'
 
 # STAGE 1 — the dispatch wall writes `intended`.
 mk_agent_payload "$SID_A" "$KREPO" \
@@ -3622,7 +3624,8 @@ n_dispatch() {  # <name> <prompt> — runs the wall in this shell; its exit is t
 }
 n_row() { grep -F "|name=$1|" "$NSRC/.bionic/tmp/roster-$SID_A.state" 2>/dev/null | tail -1; }
 
-n_dispatch declaring 'Expected artifact: .bionic/docs/record/declared.md'; N_ST=$?
+n_dispatch declaring 'Expected artifact: .bionic/docs/record/declared.md
+Suites: tests/widget.test.sh'; N_ST=$?
 expect_eq "a LABELED slot-free path passes the wall" "0" "$N_ST"
 expect_contains "…and records source=declared" "|source=declared|" "$(n_row declaring)"
 n_dispatch inferring 'the notes go in .bionic/docs/record/inferred.md when done'; N_ST=$?
@@ -3674,7 +3677,7 @@ N_INV_AFTER=$(cat "$NGH/.bionic/tmp/roster-$SID_A.state" 2>/dev/null; echo "[no 
 # row from the wall and one more from each stop-side arm. Without it the three assertions
 # above would pass over a recorder that had stopped writing rows at all.
 printf '%s' "$N_REFUSED" \
-  | jq '.tool_input.prompt = "Expected artifact: .bionic/docs/record/accepted.md"
+  | jq '.tool_input.prompt = "Expected artifact: .bionic/docs/record/accepted.md\nSuites: tests/widget.test.sh"
         | .tool_input.name = "accepted" | .tool_use_id = "toolu_01ACCEPT"' \
   | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
 expect_eq "an accepted dispatch draws exactly one row from the wall" "1" \
@@ -3751,7 +3754,7 @@ n_cycle() {  # <tool_use_id> — one full dispatch cycle through all three real 
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       hook_event_name:"PreToolUse", tool_name:"Agent",
       tool_input:{description:"a dispatch", subagent_type:"implementor", name:"resumed",
-                  prompt:("Expected artifact: " + $d)},
+                  prompt:("Expected artifact: " + $d + "\nSuites: tests/widget.test.sh")},
       tool_use_id:$u}' | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
   jq -n --arg s "$SID_A" --arg c "$NLR" --arg u "$1" --arg a "$NLR_ID" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
@@ -7363,6 +7366,121 @@ expect_eq "S15b …and hooks/session-poker.sh's copy agrees, byte for byte" \
   "$S15_LG_SCHEMA_LINE" "$S15_PK_SCHEMA_LINE"
 expect_eq "S15b …the copy is a named constant, not a literal in adopt_copy_marker's own grep" \
   "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^landing-swept/v1|'")"
+
+# ============================================================
+echo ""
+echo "=== S13 — the suite budget: one derivation, one row writer, one alphabet ==="
+# ============================================================
+#
+# (wave-01 verification-cannot-lie, S13; spec AC-20/AC-21; design ledger D2.)
+#
+# THREE FILES HAVE TO AGREE ABOUT ONE SET, and none of them can see the other two:
+#
+#   tests/lib/impact.sh                 PRODUCES it, as `suite<TAB>reason` lines (S12)
+#   hooks/dispatch-preflight.sh         RECORDS it, as `suites_allowed=` on the roster row
+#   hooks/background-suite-guard.sh     ENFORCES it, against basenames read out of a command
+#
+# Each has its own suite, and each of those suites builds its own fixture — so all three
+# can pass while the wall records a spelling the derivation never prints and the guard
+# never matches. What is pinned here is the SEAM: the real derivation, driven over a real
+# file, answering in the alphabet the guard compares in.
+
+S13_IMPACT="$REPO_ROOT/tests/lib/impact.sh"
+S13_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+S13_BG="$BIONIC_HOOKS_DIR/background-suite-guard.sh"
+S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
+[ -r "$S13_ROSTER_LIB" ] || S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/roster.sh"
+S13_CMDCLASS="$BIONIC_HOOKS_DIR/../payload/scripts/lib/cmd-class.sh"
+[ -r "$S13_CMDCLASS" ] || S13_CMDCLASS="$BIONIC_HOOKS_DIR/../scripts/lib/cmd-class.sh"
+
+# --- §S13.1 the derivation's output shape is the one the wall consumes ---
+#
+# Driven over a REAL file of this tree, so the answer is the derivation's own rather than a
+# fixture's idea of it. `payload/scripts/lib/cmd-class.sh` is chosen because its own suite
+# is on the answer by construction (`self`/`path-ref`), which gives the assertion below a
+# value it can name without hardcoding the whole set.
+S13_RAW=$(cd "$REPO_ROOT" && bash "$S13_IMPACT" payload/scripts/lib/cmd-class.sh 2>/dev/null)
+expect_eq "S13.1 the derivation answers at all (non-vacuity)" "0" \
+  "$([ -n "$S13_RAW" ] && echo 0 || echo 1)"
+expect_eq "S13.1 every line is exactly two TAB-separated fields" "0" \
+  "$(printf '%s\n' "$S13_RAW" | awk -F'\t' 'NF != 2 { n++ } END { print n + 0 }')"
+expect_eq "S13.1 the first field is a suite BASENAME, never a path" "0" \
+  "$(printf '%s\n' "$S13_RAW" | awk -F'\t' '$1 ~ /\// || $1 !~ /\.test\.sh$/ { n++ } END { print n + 0 }')"
+expect_contains "S13.1 …and the suite that owns that file is in the answer" \
+  "cmd-class.test.sh" "$(printf '%s\n' "$S13_RAW" | cut -f1 | tr '\n' ' ')"
+
+# --- §S13.2 the wall reduces that output the way this test does ---
+#
+# The wall's reduction is `cut -f1 | sort -u`, spelled as an awk field-1 print. Reproduce it
+# here from the SAME raw output and require the same set the wall would record, so a change
+# to either side that stops them agreeing is red — a derivation that grew a third column, or
+# a wall that started keeping the reason.
+S13_SET=$(printf '%s\n' "$S13_RAW" | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
+S13_SET="${S13_SET% }"
+expect_eq "S13.2 the reduced set carries no reason column" "0" \
+  "$(printf '%s' "$S13_SET" | grep -c ':')"
+expect_eq "S13.2 …and no tab survived the reduction" "0" \
+  "$(printf '%s' "$S13_SET" | tr -cd '\t' | wc -c | tr -d ' ')"
+expect_eq "S13.2 …and holds no duplicate" "0" \
+  "$(printf '%s\n' "$S13_SET" | tr ' ' '\n' | sort | uniq -d | grep -c .)"
+
+# --- §S13.3 the guard compares in that same alphabet ---
+#
+# `cmd_suite_targets` is the reader on the enforcement side. Every basename the derivation
+# just produced must be a name it can produce too, from the command a writer would type —
+# otherwise a suite on the budget is refused by the wall that granted it.
+S13_TARGETS_OK=0
+for _s13_b in $S13_SET; do
+  _s13_got=$(bash -c '
+    set -uo pipefail
+    . "$1" || exit 1
+    cmd_suite_targets "bash tests/$2"
+  ' _ "$S13_CMDCLASS" "$_s13_b" 2>/dev/null)
+  [ "$_s13_got" = "$_s13_b" ] || S13_TARGETS_OK=$((S13_TARGETS_OK + 1))
+done
+expect_eq "S13.3 every derived basename round-trips through cmd_suite_targets" "0" "$S13_TARGETS_OK"
+# NON-VACUITY: the loop really ran over a non-empty set.
+expect_eq "S13.3 …over a set with something in it" "0" \
+  "$([ -n "$S13_SET" ] && echo 0 || echo 1)"
+
+# --- §S13.4 the three fields go through the ONE row writer, from both call sites ---
+#
+# §RA.2 pins that the row has one writer. This pins that the fields S13 added did not
+# quietly acquire a second one: neither hook may hold a `suites_allowed=` literal of its
+# own, and the library must know all three keys. A hook that built the field into a
+# format string beside the call would pass §RA.2 (the captured rows carry none of the
+# three) and be invisible until a reader met a row with the key in the wrong place.
+for _s13_key in files suites_allowed suites_source; do
+  expect_eq "S13.4 roster.sh knows the key [$_s13_key]" "1" \
+    "$(awk '/^roster_row\(\)/,/^\}/' "$S13_ROSTER_LIB" | grep -cE "^ *${_s13_key}\)")"
+done
+# THE ROW-BUILDING SPELLING IS `|suites_allowed=` — a pipe in front of the key is a
+# format string assembling the row, and it may exist in exactly one file.
+expect_eq "S13.4 dispatch-preflight assembles no row segment of its own" "0" \
+  "$(grep -c '|suites_allowed=' "$S13_DP")"
+expect_eq "S13.4 …and neither does session-poker's adopt" "0" \
+  "$(grep -c '|suites_allowed=' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+expect_eq "S13.4 …because the one library that may is the one that does" "1" \
+  "$(grep -c '|suites_allowed=' "$S13_ROSTER_LIB")"
+# The paired POSITIVE: both writers do pass the key by name, so the two zeros above are
+# "no second speller" and not "nobody writes it".
+expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
+  "$(grep -c '"suites_allowed=\${SUITES_ALLOWED}"' "$S13_DP")"
+expect_eq "S13.4 …and session-poker builds its three as one group" "1" \
+  "$(grep -c 'suites_allowed=\$(clean "\$sallow")' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+
+# --- §S13.5 the field the wall writes is the field the guard reads ---
+#
+# One key name, two files, neither able to see the other. A rename on either side is the
+# whole failure mode, and it is silent: the guard would find no budget and stand aside for
+# every named suite in the fleet.
+expect_eq "S13.5 the guard reads the key the wall writes" "0" \
+  "$(grep -qF 'suites_allowed=' "$S13_BG" && echo 0 || echo 1)"
+S13_BG_OFFSET=$(grep -oE 'substr\(\$i, 16\)' "$S13_BG" | head -1)
+expect_eq "S13.5 …substr past 'suites_allowed=' is 16, the character after the equals" \
+  "substr(\$i, 16)" "$S13_BG_OFFSET"
+expect_eq "S13.5 …which is what awk needs for a key of this length" \
+  "16" "$(( $(printf '%s' 'suites_allowed=' | wc -c | tr -d ' ') + 1 ))"
 
 # ============================================================
 echo ""

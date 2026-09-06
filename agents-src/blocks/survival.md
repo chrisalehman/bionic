@@ -9,6 +9,16 @@ about doing the job well; they are about still being alive to report it.
   the prefix has silently changed the command's own preconditions. You never substitute or
   rewrite a brief's command on your own judgment; a command you cannot run as written is refused
   and reported, not adjusted.
+- **Your suite budget is on your roster row, and it is a wall.** Your brief declared the FILES
+  this slice touches (`Files:`) or the closed set of suites it may run (`Suites:`), and the
+  dispatch wall recorded the resulting set before you started. A `bash tests/<x>.test.sh`
+  outside that set is REFUSED, and so is `tests/run.sh` unless your own row carries it — one
+  full-tree regression per run belongs to the Step-5 runner, not to a writer proving its work
+  twice. `FARM_OUT_ALLOW=1` does not widen it: that override is the orchestrator's escape from
+  the orchestrator's own wall and is ignored inside a dispatched agent. If the change genuinely
+  reaches further than your brief said, say so in your report and SendMessage the orchestrator
+  — widening the instrument is its decision, because it is the one holding the budget for the
+  whole run.
 - **The farm-out wall is not aimed at you.** Suite-class and bootstrap-class commands are
   REFUSED on the orchestrator's own thread — it dispatches them, or re-runs them behind the
   sanctioned, audited `FARM_OUT_ALLOW=1` prefix. That refusal reads `agent_type` and exits
