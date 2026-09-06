@@ -531,4 +531,261 @@ expect_eq "10: the pipeline spelling is right on a small value" "0" "$PIPE_SMALL
 expect_ne "10: …and wrong on a large one, non-zero though the pattern matches" \
   "0" "$PIPE_BIG"
 
+# ============================================================
+setup_section "plant the adoption wall's scratch tree and its six suites (S10)"
+# ============================================================
+#
+# THE WALL IS THE RUNNER'S, so it is proved by RUNNING the runner — against a
+# scratch tree carrying the shipped tests/run.sh and the shipped framework, byte
+# for byte, with a roster of six planted suites and nothing else. The real
+# roster is never launched from here.
+#
+# ONE VIOLATION PER PLANT, so a refusal names what it refused rather than a
+# soup. Every one of the six is a GREEN suite under the framework alone — that
+# is what makes the three refusals the wall's doing and not the suite's own.
+
+W_TREE="$SB/wall-tree"
+W_MARKS="$SB/wall-marks"
+mkdir -p "$W_TREE/tests/lib" "$W_TREE/payload/scripts/lib" "$W_MARKS"
+cp "$REPO/tests/run.sh"                "$W_TREE/tests/run.sh"
+cp "$REPO/tests/lib/resolve-roots.sh"  "$W_TREE/tests/lib/resolve-roots.sh"
+cp "$FRAMEWORK"                        "$W_TREE/tests/lib/assert.sh"
+cp "$REPO"/payload/scripts/lib/*.sh    "$W_TREE/payload/scripts/lib/" 2>/dev/null
+
+# the shipped roster out, these six in — the same rewrite tests/interpreter-pin
+# does, and for the same reason: a scratch runner must not reach the real tree.
+W_SUITES="w-ok.test.sh w-owned.test.sh w-counter.test.sh w-heredoc.test.sh w-indented.test.sh w-local.test.sh"
+awk -v labels="$W_SUITES" '
+  /^run "/ { next }
+  { print }
+  /^echo "Gating suites:"$/ {
+    n = split(labels, a, " ")
+    for (i = 1; i <= n; i++) printf "run \"%s\" bash tests/%s\n", a[i], a[i]
+  }
+' "$W_TREE/tests/run.sh" > "$W_TREE/tests/run.sh.rewritten"
+mv "$W_TREE/tests/run.sh.rewritten" "$W_TREE/tests/run.sh"
+
+# --- REFUSED (1/3): ok() at column 0 -----------------------------------------
+cat > "$W_TREE/tests/w-ok.test.sh" <<'W_PLANT_OK'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$S10_MARKS/w-ok.ran"
+
+ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
+
+ok "the private ok() reported"
+
+finish
+W_PLANT_OK
+
+# --- REFUSED (2/3): a name the framework owns, at column 0 -------------------
+cat > "$W_TREE/tests/w-owned.test.sh" <<'W_PLANT_OWNED'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$S10_MARKS/w-owned.ran"
+
+expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "mismatch"; fi; }
+
+expect_eq "the private expect_eq reported" x x
+
+finish
+W_PLANT_OWNED
+
+# --- REFUSED (3/3): a counter at column 0 ------------------------------------
+cat > "$W_TREE/tests/w-counter.test.sh" <<'W_PLANT_COUNTER'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$S10_MARKS/w-counter.ran"
+
+PASS=0
+
+ok "a real row"
+
+finish
+W_PLANT_COUNTER
+
+# --- NOT REFUSED (1/3): the same three definitions, inside a heredoc (A-10b) --
+cat > "$W_TREE/tests/w-heredoc.test.sh" <<'W_PLANT_HEREDOC'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$S10_MARKS/w-heredoc.ran"
+
+cat > /dev/null <<'INNER'
+ok() { echo "content, not a definition"; }
+PASS=0
+expect_eq() { echo "content, not a definition"; }
+INNER
+
+ok "a heredoc body is content, not a definition"
+
+finish
+W_PLANT_HEREDOC
+
+# --- NOT REFUSED (2/3): the r24e subshell probe (A-29) -----------------------
+cat > "$W_TREE/tests/w-indented.test.sh" <<'W_PLANT_INDENTED'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$S10_MARKS/w-indented.ran"
+
+(
+  PASS=0; FAIL=0; TOTAL=0
+  ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); }
+  no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); }
+  expect_eq "probe" a a
+  exit "$FAIL"
+)
+W_PROBE_RC=$?
+
+expect_eq "a subshell-scoped shadow is a probe, not an adoption failure" "0" "$W_PROBE_RC"
+
+finish
+W_PLANT_INDENTED
+
+# --- NOT REFUSED (3/3): a suite-specific name the framework does not own -----
+cat > "$W_TREE/tests/w-local.test.sh" <<'W_PLANT_LOCAL'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$S10_MARKS/w-local.ran"
+
+expect_finding() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "mismatch"; fi; }
+
+expect_finding "a suite-specific helper stays legal" x x
+
+finish
+W_PLANT_LOCAL
+
+W_OUT=""
+W_RC=0
+w_drive() {  # run the scratch runner over the six planted suites
+  W_OUT="$( cd "$W_TREE" && \
+    S10_MARKS="$W_MARKS" \
+    BIONIC_PRESSURE_RING="$SB/wall-ring" \
+    BIONIC_NOW_EPOCH="1700000000" \
+    BIONIC_TEST_JOBS_CEILING="2" \
+    bash tests/run.sh 2>&1 )"
+  W_RC=$?
+}
+w_drive
+
+# ============================================================
+section "11: the adoption wall refuses a shadowing suite, by name (AC-12, S10)"
+# ============================================================
+
+# NOT VACUOUS: the runner and the framework under drive are the shipped files.
+expect_eq "11: the scratch runner is the shipped one apart from its roster" "yes" \
+  "$([ "$(grep -c '^run "' "$W_TREE/tests/run.sh")" = "6" ] && echo yes || echo no)"
+expect_eq "11: the framework under drive is the shipped one, byte for byte" "yes" \
+  "$(cmp -s "$FRAMEWORK" "$W_TREE/tests/lib/assert.sh" && echo yes || echo no)"
+
+# --- the three refusals, each naming the suite and the shadowed name ---------
+expect_eq "11: a private ok() at column 0 is refused, by name" "yes" \
+  "$(contains "$W_OUT" "adoption wall: tests/w-ok.test.sh defines ok() at column 0")"
+expect_eq "11: a private expect_eq() at column 0 is refused, by name" "yes" \
+  "$(contains "$W_OUT" "adoption wall: tests/w-owned.test.sh defines expect_eq() at column 0")"
+expect_eq "11: a private PASS=0 at column 0 is refused, by name" "yes" \
+  "$(contains "$W_OUT" "adoption wall: tests/w-counter.test.sh defines PASS=0 at column 0")"
+expect_eq "11: …and the refusal names the framework that owns the name" "yes" \
+  "$(contains "$W_OUT" "the framework owns those names: $W_TREE/tests/lib/assert.sh")"
+expect_eq "11: …and the verdict says refused, not failed-some-other-way" "yes" \
+  "$(contains "$W_OUT" "✗ REFUSED (the adoption wall)")"
+expect_eq "11: …and the failed list names the suite and says it never ran" "yes" \
+  "$(contains "$W_OUT" "- w-ok.test.sh (refused by the adoption wall, never run)")"
+
+# --- a refused suite is not run at all: its own marker never appears ---------
+# PAIRED with the three markers below, which DO appear — so an absent marker is
+# a suite that did not run, not a marker mechanism that never worked.
+expect_eq "11: a refused suite never ran (no marker)" "no" \
+  "$([ -f "$W_MARKS/w-ok.ran" ] && echo yes || echo no)"
+expect_eq "11: …nor the second refused one" "no" \
+  "$([ -f "$W_MARKS/w-owned.ran" ] && echo yes || echo no)"
+expect_eq "11: …nor the third" "no" \
+  "$([ -f "$W_MARKS/w-counter.ran" ] && echo yes || echo no)"
+
+# --- the three exempt suites are launched and pass --------------------------
+expect_eq "11: a definition inside a heredoc body is not a definition (A-10b)" "yes" \
+  "$([ -f "$W_MARKS/w-heredoc.ran" ] && echo yes || echo no)"
+expect_eq "11: a subshell-scoped shadow is exempt (A-29, the r24e probe)" "yes" \
+  "$([ -f "$W_MARKS/w-indented.ran" ] && echo yes || echo no)"
+expect_eq "11: a name the framework does not own stays legal (A-16)" "yes" \
+  "$([ -f "$W_MARKS/w-local.ran" ] && echo yes || echo no)"
+expect_eq "11: …and none of the three is named in a refusal" "no" \
+  "$(contains "$W_OUT" "w-heredoc.test.sh defines")"
+expect_eq "11: …nor the subshell one" "no" \
+  "$(contains "$W_OUT" "w-indented.test.sh defines")"
+expect_eq "11: …nor the suite-specific one" "no" \
+  "$(contains "$W_OUT" "w-local.test.sh defines")"
+
+# --- the tally and the exit status stay honest ------------------------------
+expect_eq "11: the tally counts three refusals as three failures" "yes" \
+  "$(contains "$W_OUT" "Gating: 3 passed, 3 failed")"
+expect_eq "11: …and the run exits 1" "1" "$W_RC"
+
+# --- ONE WALL, BOTH SCHEDULERS ----------------------------------------------
+# A mode is a scheduling choice and nothing else (this runner's own header), so
+# --serial must refuse the same three and report the same tally. The refusal
+# path differs between the two — the queue is walked in one and not the other —
+# which is exactly why both are driven.
+W_SERIAL_OUT="$( cd "$W_TREE" && \
+  S10_MARKS="$W_MARKS" \
+  BIONIC_PRESSURE_RING="$SB/wall-ring" \
+  BIONIC_NOW_EPOCH="1700000000" \
+  BIONIC_TEST_JOBS_CEILING="2" \
+  bash tests/run.sh --serial 2>&1 )"
+W_SERIAL_RC=$?
+expect_eq "11: --serial refuses the same suite, in the same words" "yes" \
+  "$(contains "$W_SERIAL_OUT" "adoption wall: tests/w-ok.test.sh defines ok() at column 0")"
+expect_eq "11: …and reaches the same tally" "yes" \
+  "$(contains "$W_SERIAL_OUT" "Gating: 3 passed, 3 failed")"
+expect_eq "11: …and the same exit status" "1" "$W_SERIAL_RC"
+
+# ============================================================
+section "12: every suite on the real roster passes the wall (AC-12, S10)"
+# ============================================================
+#
+# The wall's own scan, over the tree as it stands. This is the adoption half of
+# AC-12 read as a number: a suite added in the shape S5-S9 migrated away from
+# fails here on the day it is written, not on the day someone reads it.
+
+W_SCANNED=0
+W_REFUSED=0
+W_REFUSED_NAMES=""
+for W_F in "$REPO"/tests/*.test.sh; do
+  W_SCANNED=$((W_SCANNED + 1))
+  W_R="$(_tf_adoption_refusal "$W_F")"
+  if [ -n "$W_R" ]; then
+    W_REFUSED=$((W_REFUSED + 1))
+    W_REFUSED_NAMES="${W_REFUSED_NAMES} $(basename "$W_F")"
+  fi
+done
+echo "   roster scanned: ${W_SCANNED} suites, ${W_REFUSED} refused${W_REFUSED_NAMES}"
+
+expect_eq "12: the scan read the whole roster (not vacuous)" "yes" \
+  "$([ "$W_SCANNED" -ge 40 ] && echo yes || echo no)"
+expect_eq "12: no suite on the roster shadows the framework" "0" "$W_REFUSED"
+
+# --- THE MUTATION ARM: the count moves when a shadow is planted -------------
+# A scratch COPY of the roster's first suite, doctored with one flush-left
+# definition. Without this row the zero above could be a scan that never fired.
+W_VICTIM=""
+for W_F in "$REPO"/tests/*.test.sh; do W_VICTIM="$W_F"; break; done
+W_MUT="$SB/wall-mutant"
+mkdir -p "$W_MUT"
+{ echo '#!/bin/bash'; echo 'ok() { echo "planted shadow"; }'; cat "$W_VICTIM"; } \
+  > "$W_MUT/$(basename "$W_VICTIM")"
+W_MUT_REFUSED=0
+for W_F in "$W_MUT"/*.test.sh; do
+  [ -n "$(_tf_adoption_refusal "$W_F")" ] && W_MUT_REFUSED=$((W_MUT_REFUSED + 1))
+done
+expect_eq "12: the doctored copy differs from the suite it was made from" "no" \
+  "$(cmp -s "$W_VICTIM" "$W_MUT/$(basename "$W_VICTIM")" && echo yes || echo no)"
+expect_eq "12: one planted shadow moves the count from zero to one" "1" "$W_MUT_REFUSED"
+expect_eq "12: …and the refusal names the planted name" "yes" \
+  "$(contains "$(_tf_adoption_refusal "$W_MUT/$(basename "$W_VICTIM")")" "defines ok() at column 0")"
+
 finish

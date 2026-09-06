@@ -78,6 +78,14 @@
 # 2026-08-22 (ef23f75, user's call) and BIONIC_TEST_JOBS is there for a machine with less
 # or more.
 #
+# EVERY SUITE IS A CLIENT OF ONE FRAMEWORK (wave-01 S10, spec AC-12). Before a
+# roster line is launched its source is read, and a suite that defines a name
+# tests/lib/assert.sh owns — or its own PASS/FAIL/TOTAL counters — at column 0 is
+# REFUSED, named, and counted failed. The rule, its two exemptions (an indented
+# or subshell-scoped redefinition, and a definition inside a heredoc body) and
+# the scanner all live in the framework; see `_tf_adoption_refusal` there and
+# THE ADOPTION WALL below.
+#
 # WHY A SIGNAL DEATH IS NOT A FAILED ASSERTION. That same kill was reported as a
 # plain ✗ FAIL, which reads as "this suite's assertions failed" and sends the
 # reader hunting a defect that is not there. A suite that dies by signal now says
@@ -236,6 +244,50 @@ echo "$ENV_STAMP"
 QUEUE="$TMP/queue"; : >"$QUEUE"
 export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
 
+# ── THE ADOPTION WALL (wave-01 verification-cannot-lie S10, spec AC-12) ──────
+#
+# WHAT IT REFUSES. A suite that defines, at COLUMN 0 and outside any heredoc
+# body, a name tests/lib/assert.sh owns — `ok`, `no`, any `expect_*` the
+# framework defines, `section`, `setup_section`, `finish`, `anchor` — or a
+# counter reset (`PASS=0`, `FAIL=0`, `TOTAL=0`). A refusal is a FAILED suite: it
+# is named in the tally, it is named under `Failed:`, and the run exits 1.
+#
+# WHY IT IS A WALL AND NOT ADVICE. A private `ok()` replaces the framework's for
+# the whole suite, and with it goes everything the framework was adopted for —
+# the section floor (AC-13), the derivation that catches a vanished helper
+# (AC-14), and one true tally. A suite in that state reports its own verdict on
+# its own terms, which is the lie this wave exists to close.
+#
+# THE RULE AND ITS TWO EXEMPTIONS LIVE IN THE FRAMEWORK, beside the names they
+# protect and the scanner that reads them (`_tf_adoption_refusal`, which reuses
+# `_tf_scan` — the runner does not carry a second scanner that would skip
+# heredocs differently). This file's part is to ask, once per roster line,
+# before the suite is launched.
+#
+# NO FRAMEWORK, NO WALL — SAID OUT LOUD. The rule is "a name the framework in
+# THIS tree owns", so a tree with no framework owns no names and can refuse
+# nothing. That is the honest reading and it is what the scratch trees other
+# suites build (they copy this runner, not the framework) get; it is announced
+# on stderr rather than left silent, because a wall that is off and quiet is
+# indistinguishable from a wall that is passing everything.
+TF_LIB="$REPO/tests/lib/assert.sh"
+if [ -r "$TF_LIB" ]; then
+  # shellcheck source=/dev/null
+  . "$TF_LIB"
+else
+  echo "tests/run.sh: no framework at tests/lib/assert.sh — the adoption wall is inert for this run" >&2
+  _tf_adoption_refusal() { :; }
+fi
+
+# _wall_suite <cmd...> -> the file a roster line runs, or nothing. The last
+# argument that names a readable file: roster lines are `bash tests/x.test.sh`,
+# and a line whose file is missing is left to fail on its own terms.
+_wall_suite() {
+  local a suite=""
+  for a in "$@"; do [ -f "$a" ] && suite="$a"; done
+  printf '%s' "$suite"
+}
+
 pass=0; fail=0; failed=""
 
 # Opt-in, and opt-in on purpose: no per-suite timing has ever existed (W7 S8
@@ -274,6 +326,17 @@ _lost_command() {
 # The one place a result is judged and printed, so the two modes cannot drift.
 _verdict() {
   local label="$1" rc="$2" out="$3" sig="" lost=""
+  # The adoption wall refused this suite before it ran (S10). It never had an
+  # exit status, so it is judged from the refusal the wall left behind.
+  if [ -f "$TMP/${label}.refused" ]; then
+    echo "✗ REFUSED (the adoption wall)"
+    fail=$((fail+1))
+    failed="${failed}\n    - ${label} (refused by the adoption wall, never run)"
+    echo "───── ${label}: the adoption wall ─────"
+    cat "$TMP/${label}.refused"
+    echo "───── end ${label} ─────"
+    return
+  fi
   lost="$(_lost_command "$out")"
   if [ "$rc" = "0" ] && [ -z "$lost" ]; then
     echo "✓ PASS"; pass=$((pass+1)); return
@@ -301,6 +364,25 @@ _verdict() {
 
 run() {  # run <label> <cmd...>   — gating
   local label="$1"; shift
+  # THE WALL, ASKED BEFORE THE SUITE IS LAUNCHED (S10). A refused suite is not
+  # run at all: the refusal is written down here, and _verdict reads it where
+  # every other verdict is read — so a refusal prints in roster order in both
+  # modes and lands in the same tally.
+  local _suite _refusal
+  _suite="$(_wall_suite "$@")"
+  if [ -n "$_suite" ]; then
+    _refusal="$(_tf_adoption_refusal "$_suite")"
+    if [ -n "$_refusal" ]; then
+      printf 'adoption wall: %s\n' "$_refusal" >"$TMP/${label}.refused"
+      if [ "$SERIAL" -eq 1 ]; then
+        _label "$label"
+        _verdict "$label" "" "$TMP/${label}.out"
+      else
+        printf '%s\t%s\n' "$label" "$*" >>"$QUEUE"
+      fi
+      return
+    fi
+  fi
   if [ "$SERIAL" -eq 1 ]; then
     local start rc
     _label "$label"
@@ -611,7 +693,16 @@ run "impact.test.sh" bash tests/impact.test.sh
 # writing its own files; then the queue is walked again IN ORDER so the report reads the same as
 # a serial one — a reader comparing two runs is comparing rosters, not schedules.
 if [ "$SERIAL" -eq 0 ]; then
-  cut -f1 "$QUEUE" | xargs -P "$JOBS" -n1 bash "$SELF" --one
+  # A suite the adoption wall refused stays in the queue — the report below walks
+  # it, and roster order is what makes two runs comparable — but it is not
+  # launched: its verdict is already on disk.
+  LAUNCH="$TMP/launch"; : >"$LAUNCH"
+  while IFS="$(printf '\t')" read -r label _queued_cmd; do
+    [ -n "$label" ] || continue
+    [ -f "$TMP/${label}.refused" ] && continue
+    printf '%s\n' "$label" >>"$LAUNCH"
+  done <"$QUEUE"
+  [ -s "$LAUNCH" ] && xargs -P "$JOBS" -n1 bash "$SELF" --one <"$LAUNCH"
   while IFS="$(printf '\t')" read -r label _queued_cmd; do
     [ -n "$label" ] || continue
     _label "$label"
