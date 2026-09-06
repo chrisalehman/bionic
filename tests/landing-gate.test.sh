@@ -169,6 +169,7 @@ mkrow() {  # <key=value>...
   local status=confirmed session="$SID" name=agent agent_id="$AID_A" launched_at=""
   local subagent_type=implementor model=opus deliverable="" duration="" progress=""
   local claims="" cadence="" waiver="" tool_use_id=toolu_x source=declared teammate_id="" kv
+  local files="" has_files=0
   for kv in "$@"; do
     case "$kv" in
       source=*)      source="${kv#*=}" ;;
@@ -185,6 +186,11 @@ mkrow() {  # <key=value>...
       cadence=*)     cadence="${kv#*=}" ;;
       waiver=*)      waiver="${kv#*=}" ;;
       tool_use_id=*) tool_use_id="${kv#*=}" ;;
+      # S18, AC-22: present-if-passed, like the real writer's three instrument fields — a
+      # caller that never passes `files=` builds a row shaped exactly as every fixture above
+      # already does (no key at all), and a caller that does gets the post-S13 shape (the key
+      # always present, empty or not).
+      files=*)       files="${kv#*=}"; has_files=1 ;;
       *) printf 'mkrow: unknown key %s\n' "$kv" >&2; return 1 ;;
     esac
   done
@@ -198,6 +204,7 @@ mkrow() {  # <key=value>...
   printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s' \
     "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
     "$deliverable" "$source" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
+  [ "$has_files" -eq 1 ] && printf '|files=%s' "$files"
   [ -n "$teammate_id" ] && printf '|teammate_id=%s' "$teammate_id"
   printf '\n'
 }
@@ -292,6 +299,59 @@ deliver() {  # <repo> <relative path> — a real artifact, written now (after la
   local p="$1/$2"
   mkdir -p "$(dirname "$p")"
   printf 'the report\n' > "$p"
+}
+
+# ---------- git fixtures for the Files: reconciliation (S18, AC-22) ----------
+#
+# A REAL WORKTREE, REAL COMMITS, REAL git diff/merge-base — every other fixture in this file
+# is a synthesized roster line because the gate's OWN subject (the sweep, the landing verdict)
+# never touches git. This one does: the reconciliation IS a git operation, and a fixture that
+# faked its answer would leave exactly the production path this slice adds unverified (rule:
+# seam-blindness — a seam substituting the value under test proves nothing about it).
+export GIT_CONFIG_GLOBAL=/dev/null
+export GIT_CONFIG_SYSTEM=/dev/null
+export GIT_CONFIG_NOSYSTEM=1
+export GIT_TERMINAL_PROMPT=0
+
+git_id() { git -C "$1" config user.email "test@example.invalid"; git -C "$1" config user.name "Bionic Test"; }
+
+# The main checkout: one commit on a branch named `main` (forced, so the fixture is
+# deterministic regardless of the machine's init.defaultBranch), which is what
+# `git -C <repo> rev-parse --abbrev-ref HEAD` — the branch the reconciliation merge-bases
+# against — reads back.
+make_git_wave_repo() {  # <label> -> repo path
+  local r
+  r="$(make_wave_repo "$1")"
+  git -C "$r" symbolic-ref HEAD refs/heads/main
+  git_id "$r"
+  printf '.bionic\n.bionic/\n.worktrees/\n' > "$r/.gitignore"
+  echo base > "$r/base.txt"
+  git -C "$r" add .gitignore base.txt
+  git -C "$r" commit -q -m base
+  printf '%s' "$r"
+}
+
+# A linked worktree at .worktrees/<name>, branched off the repo's current HEAD — the same
+# place `worktree_for_row` (payload/scripts/lib/worktree.sh) looks and spawn-worktree.sh
+# creates one. <name> doubles as the roster row's `name=` in every case but §16d, so the
+# primary (case-preserving) resolution path is what most of this section exercises.
+make_slice_tree() {  # <repo> <name> -> worktree path
+  local r="$1" name="$2" wt="$1/.worktrees/$2"
+  git -C "$r" worktree add -q "$wt" -b "wt/$name" >/dev/null 2>&1
+  git_id "$wt"
+  printf '%s' "$wt"
+}
+
+# One commit in the worktree touching every path given.
+commit_files() {  # <worktree> <message> <path>...
+  local wt="$1" msg="$2" p
+  shift 2
+  for p in "$@"; do
+    mkdir -p "$(dirname "$wt/$p")"
+    echo content >> "$wt/$p"
+  done
+  git -C "$wt" add "$@"
+  git -C "$wt" commit -q -m "$msg"
 }
 
 # ---------- running the gate ----------
@@ -1108,5 +1168,118 @@ deliver "$R15H_MUT" .bionic/docs/record/mate.md
 run_gate "$SUPDIR/landing-gate.sh" "$(stop_payload "$R15H_MUT" "$SID" false)"
 expect_eq "15h-mut: with the guard removed the SAME row is marked — the fixture really does discriminate" \
   "1" "$(swept_count "$R15H_MUT")"
+
+# ================================================================= Section 16
+section "Section 16: Files: RECONCILIATION — the diff is checked against the declared set (S18, AC-22)"
+
+# --- 16a/16b: THE DISCRIMINATING PAIR — a diff outside Files: refuses, one wholly inside
+# does not. Both rows deliver (the deliverable side is MET), so any refusal seen is the
+# Files: check speaking, never the contract check above it.
+R16A="$(make_git_wave_repo r16a)"
+WT16A=$(make_slice_tree "$R16A" slice16a)
+commit_files "$WT16A" "in scope" declared/one.sh
+commit_files "$WT16A" "out of scope" undeclared/two.sh
+add_row "$R16A" name=slice16a agent_id="$AID_A" deliverable=.bionic/docs/record/s16a.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16A" .bionic/docs/record/s16a.md
+run_gate "$GATE" "$(stop_payload "$R16A" "$SID" false)"
+expect_status "16a: a diff outside the declared Files: refuses the stop" "2" "$RC"
+expect_contains "16a: …naming the row" "slice16a" "$OUT_STDERR"
+expect_contains "16a: …naming the offending file" "undeclared/two.sh" "$OUT_STDERR"
+expect_absent "16a: …never the declared file" "declared/one.sh" "$OUT_STDERR"
+expect_eq "16a: …the deliverable side stays silent (it WAS delivered)" "0" \
+  "$(printf '%s' "$OUT_STDERR" | /usr/bin/grep -c 'LANDING CONTRACT UNMET')"
+expect_empty "16a: …the refusal goes to stderr, never stdout" "$OUT_STDOUT"
+
+R16B="$(make_git_wave_repo r16b)"
+WT16B=$(make_slice_tree "$R16B" slice16b)
+commit_files "$WT16B" "both in scope" declared/one.sh declared/two.sh
+add_row "$R16B" name=slice16b agent_id="$AID_A" deliverable=.bionic/docs/record/s16b.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16B" .bionic/docs/record/s16b.md
+run_gate "$GATE" "$(stop_payload "$R16B" "$SID" false)"
+expect_status "16b: a diff wholly inside the declared Files: passes" "0" "$RC"
+expect_empty "16b: …silently" "$OUT_STDERR"
+expect_eq "16b: …and the row really was processed (marked swept once)" "1" "$(swept_count "$R16B")"
+
+# --- 16c: A Suites:-only brief — no `files=` on the row at all — is not reconciled against
+# anything, SILENTLY, no matter what the diff touches: this is the ordinary case for most of
+# the fleet today (Files: is the newer of AC-20's two labels), and a stderr line on every
+# such landing would turn the routine case into noise on every turn end.
+R16C="$(make_git_wave_repo r16c)"
+WT16C=$(make_slice_tree "$R16C" slice16c)
+commit_files "$WT16C" "anything at all" anywhere/thing.sh
+add_row "$R16C" name=slice16c agent_id="$AID_A" deliverable=.bionic/docs/record/s16c.md \
+  launched_at="$(iso_ago 600)"
+deliver "$R16C" .bionic/docs/record/s16c.md
+run_gate "$GATE" "$(stop_payload "$R16C" "$SID" false)"
+expect_status "16c: no Files: declared on the row passes" "0" "$RC"
+expect_empty "16c: …silently, however wide the diff" "$OUT_STDERR"
+expect_eq "16c: …yet the row really was processed (deliverable side still marks it)" \
+  "1" "$(swept_count "$R16C")"
+
+# --- 16d: THE CASE-INSENSITIVE FALLBACK. The row name and the worktree's directory basename
+# differ only in case (the shape this wave's own dispatch actually produced: row
+# `s18-landing-files`, directory `S18-landing-files`) — `worktree_for_row` lowercases and a
+# case-sensitive scan would miss it, so this is the one case the farm scan exists for.
+R16D="$(make_git_wave_repo r16d)"
+git -C "$R16D" worktree add -q "$R16D/.worktrees/Mixed-Case" -b wt/mixedcase >/dev/null 2>&1
+git_id "$R16D/.worktrees/Mixed-Case"
+commit_files "$R16D/.worktrees/Mixed-Case" "out of scope" undeclared/x.sh
+add_row "$R16D" name=mixed-case agent_id="$AID_A" deliverable=.bionic/docs/record/s16d.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16D" .bionic/docs/record/s16d.md
+run_gate "$GATE" "$(stop_payload "$R16D" "$SID" false)"
+expect_status "16d: the worktree is found by name even when the directory case differs" "2" "$RC"
+expect_contains "16d: …naming the offending file" "undeclared/x.sh" "$OUT_STDERR"
+
+# --- 16e: A declared Files: with NO locatable worktree (the tree was already removed, or
+# never matched by name) is an AMBIGUITY, not a refusal — the same "cannot place it" pass
+# every join in this file already takes. The deliverable side still verdicts and marks the
+# row, proving the row really was processed rather than skipped for an unrelated reason.
+R16E="$(make_git_wave_repo r16e)"
+add_row "$R16E" name=ghost-slice agent_id="$AID_A" deliverable=.bionic/docs/record/s16e.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16E" .bionic/docs/record/s16e.md
+run_gate "$GATE" "$(stop_payload "$R16E" "$SID" false)"
+expect_status "16e: a declared Files: with no locatable worktree passes" "0" "$RC"
+expect_empty "16e: …silently — an unlocatable tree is ambiguity, not a violation" "$OUT_STDERR"
+expect_eq "16e: …yet the row really was processed (deliverable side still marks it)" \
+  "1" "$(swept_count "$R16E")"
+
+# --- 16f: "a declared directory covers its files" holds without a trailing slash too.
+R16F="$(make_git_wave_repo r16f)"
+WT16F=$(make_slice_tree "$R16F" slice16f)
+commit_files "$WT16F" "in scope, declared with no trailing slash" declared/one.sh
+add_row "$R16F" name=slice16f agent_id="$AID_A" deliverable=.bionic/docs/record/s16f.md \
+  files="declared" launched_at="$(iso_ago 600)"
+deliver "$R16F" .bionic/docs/record/s16f.md
+run_gate "$GATE" "$(stop_payload "$R16F" "$SID" false)"
+expect_status "16f: a declared directory with no trailing slash still covers its files" "0" "$RC"
+expect_empty "16f: …silently" "$OUT_STDERR"
+expect_eq "16f: …and the row really was processed" "1" "$(swept_count "$R16F")"
+
+# --- 16g: an `impact-command:` configured in .bionic/config.yaml — same key S13's dispatch
+# wall reads — names the suites the offending files imply, alongside the files themselves.
+R16G="$(make_git_wave_repo r16g)"
+WT16G=$(make_slice_tree "$R16G" slice16g)
+commit_files "$WT16G" "out of scope" undeclared/three.sh
+STUB16G="$SANDBOX/impact-stub-16g.sh"
+cat > "$STUB16G" <<'STUBEOF'
+#!/bin/bash
+for f in "$@"; do
+  case "$f" in undeclared/*) printf 'fake.test.sh\tstub\n' ;; esac
+done
+STUBEOF
+chmod +x "$STUB16G"
+mkdir -p "$R16G/.bionic"
+printf 'impact-command: bash %s\n' "$STUB16G" > "$R16G/.bionic/config.yaml"
+add_row "$R16G" name=slice16g agent_id="$AID_A" deliverable=.bionic/docs/record/s16g.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R16G" .bionic/docs/record/s16g.md
+run_gate "$GATE" "$(stop_payload "$R16G" "$SID" false)"
+expect_status "16g: a diff outside Files: with an impact command configured still refuses" "2" "$RC"
+expect_contains "16g: …naming the offending file" "undeclared/three.sh" "$OUT_STDERR"
+expect_contains "16g: …and the suite the impact command derived for it" "fake.test.sh" "$OUT_STDERR"
 
 finish
