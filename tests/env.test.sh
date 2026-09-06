@@ -40,28 +40,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 ENV_SH="${REPO}/payload/scripts/lib/env.sh"
 SETUP_SH="${REPO}/payload/scripts/setup.sh"
 REMOVE_SH="${REPO}/payload/scripts/remove.sh"
 DOCTOR_SH="${REPO}/payload/scripts/doctor.sh"
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
-expect_contains() {
-  local label="$1" needle="$2" hay="$3"
-  case "$hay" in *"$needle"*) ok "$label" ;; *) no "$label" "'$needle' not found in: $hay" ;; esac
-}
-expect_not_contains() {
-  local label="$1" needle="$2" hay="$3"
-  case "$hay" in *"$needle"*) no "$label" "'$needle' should not be in: $hay" ;; *) ok "$label" ;; esac
-}
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -138,7 +123,7 @@ env_status() {  # <settings-file> [env assignments...] -- <function> [args...]
 
 mkdir -p "$TMP/home"
 
-echo "=== Group 1: the roster and the defaults ==="
+section "Group 1: the roster and the defaults"
 
 # ONE LIST, THREE READERS. setup writes it, remove deletes it, doctor reports
 # it, and all three walk this string. A name that lives in one of them and not
@@ -167,8 +152,7 @@ CEILING="$(env_run "$TMP/nonexistent.json" -- env_default BASH_MAX_TIMEOUT_MS)"
 expect_true "…and that ceiling clears the serial suite's own wall-clock" \
   test "$CEILING" -gt 900000
 
-echo ""
-echo "=== Group 2: env_set merges into a populated file ==="
+section "Group 2: env_set merges into a populated file"
 
 S="$TMP/populated.json"
 plant_settings_populated "$S"
@@ -199,8 +183,7 @@ env_status "$S" -- env_set CLAUDE_CODE_ENABLE_TODO_TOOLS 1
 expect_eq "writing the same value twice changes no bytes" \
   "$BYTES_BEFORE" "$(shasum -a 256 "$S" | awk '{print $1}')"
 
-echo ""
-echo "=== Group 3: env_set creates the env object when there is none ==="
+section "Group 3: env_set creates the env object when there is none"
 
 S2="$TMP/no-env.json"
 plant_settings_no_env "$S2"
@@ -218,8 +201,7 @@ expect_true "env_set on a machine with no settings file creates it" \
   env_status "$S3" -- env_set BASH_MAX_TIMEOUT_MS 1800000
 expect_eq "…carrying the name" "1800000" "$(jq -r '.env.BASH_MAX_TIMEOUT_MS' "$S3")"
 
-echo ""
-echo "=== Group 4: env_get reads the file, and only the file ==="
+section "Group 4: env_get reads the file, and only the file"
 
 S4="$TMP/get.json"
 plant_settings_populated "$S4"
@@ -241,8 +223,7 @@ expect_false "a name live in the process is still absent from the file" \
 expect_false "env_get on a machine with no settings file exits non-zero" \
   env_status "$TMP/never-existed.json" -- env_get BASH_MAX_TIMEOUT_MS
 
-echo ""
-echo "=== Group 5: env_unset deletes exactly one name ==="
+section "Group 5: env_unset deletes exactly one name"
 
 S5="$TMP/unset.json"
 plant_settings_populated "$S5"
@@ -281,8 +262,7 @@ expect_true "env_unset on a machine with no settings file succeeds" \
   env_status "$TMP/never-existed-2.json" -- env_unset BASH_MAX_TIMEOUT_MS
 expect_false "…and does not create one" test -f "$TMP/never-existed-2.json"
 
-echo ""
-echo "=== Group 6: env_live reads the process, and only the process ==="
+section "Group 6: env_live reads the process, and only the process"
 
 S7="$TMP/live.json"
 plant_settings_populated "$S7"
@@ -311,8 +291,7 @@ expect_false "…and the file says no" \
 expect_true "a name exported empty is live" \
   env_status "$S7" BASH_MAX_TIMEOUT_MS= -- env_live BASH_MAX_TIMEOUT_MS
 
-echo ""
-echo "=== Group 7: the file's mode survives a write ==="
+section "Group 7: the file's mode survives a write"
 
 # The `env` block is where tokens live on a lot of machines, so a settings.json
 # a user deliberately kept at 0600 must not come back at 0644 because bionic
@@ -370,8 +349,7 @@ expect_eq "env.sh contains no settings writer of its own" "0" \
 expect_true "…it calls the pinned one by name" \
   /usr/bin/grep -q '_dep_settings_write_jq' "$ENV_SH"
 
-echo ""
-echo "=== Group 8: the three callers reach this file and not around it ==="
+section "Group 8: the three callers reach this file and not around it"
 
 # ONE HOME MEANS ONE READER AND ONE WRITER. A caller that reached into `.env`
 # with its own jq would be a second opinion about what bionic's environment is,
@@ -406,17 +384,9 @@ expect_true "doctor.sh reads through env_get and env_live" \
 expect_eq "setup.sh appends no CLAUDE_CODE_ENABLE_TODO_TOOLS export to a shell rc" "" \
   "$(/usr/bin/grep -n 'export CLAUDE_CODE_ENABLE_TODO_TOOLS' "$SETUP_SH" || true)"
 
-echo ""
-echo "=== Group 9: the suite is registered in tests/run.sh by name ==="
+section "Group 9: the suite is registered in tests/run.sh by name"
 
 expect_true "tests/run.sh runs env.test.sh by name" \
   /usr/bin/grep -qF 'run "env.test.sh" bash tests/env.test.sh' "${REPO}/tests/run.sh"
 
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish
