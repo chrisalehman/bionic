@@ -221,6 +221,8 @@ expect_no_match  "no_match"  '*straw*' "a needle here"
 expect_status    "status"    0 0
 expect_empty     "empty"     ""
 expect_nonempty  "nonempty"  "x"
+expect_regex     "regex"     'need[a-z]+' "a needle here"
+expect_no_regex  "no_regex"  'straw[0-9]+' "a needle here"
 
 finish
 PLANT_FAMILY_PASS
@@ -242,6 +244,8 @@ expect_no_match  "no_match"  '*need*'  "a needle here"
 expect_status    "status"    0 1
 expect_empty     "empty"     "loud"
 expect_nonempty  "nonempty"  ""
+expect_regex     "regex"     'straw[0-9]+' "a needle here"
+expect_no_regex  "no_regex"  'need[a-z]+' "a needle here"
 
 finish
 PLANT_FAMILY_FAIL
@@ -365,7 +369,8 @@ section "6: the framework owns the counters and the helpers"
 
 for _fn in section setup_section ok no finish require_helpers \
           expect_eq expect_ne expect_true expect_false expect_contains expect_absent \
-          expect_match expect_no_match expect_status expect_empty expect_nonempty; do
+          expect_match expect_no_match expect_status expect_empty expect_nonempty \
+          expect_regex expect_no_regex; do
   expect_eq "6: the framework defines ${_fn}" "function" "$(type -t "$_fn")"
 done
 # The counters: a planted suite that defines none of its own reads all three
@@ -438,11 +443,13 @@ expect_no_match "9: expect_no_match passes on a non-matching glob" '*straw*' "a 
 expect_status   "9: expect_status passes on the expected status"   0        0
 expect_empty    "9: expect_empty passes on an empty value"         ""
 expect_nonempty "9: expect_nonempty passes on a non-empty value"   "x"
+expect_regex    "9: expect_regex passes on a matching ERE"            'need[a-z]+' "a needle here"
+expect_no_regex "9: expect_no_regex passes on a non-matching ERE"     'straw[0-9]+' "a needle here"
 
 # --- the passing arms move the PASS counter and satisfy the section floor
 plant_run p-family-pass.test.sh
-expect_eq "9: eleven passing arms are eleven PASS rows in one section" \
-  "p-family-pass.test.sh: 11/11 passed, 0 failed  sections=1 setup=0" \
+expect_eq "9: thirteen passing arms are thirteen PASS rows in one section" \
+  "p-family-pass.test.sh: 13/13 passed, 0 failed  sections=1 setup=0" \
   "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-family-pass\.test\.sh: .*\)$/\1/p')"
 expect_eq "9: …so the section floor does not name that section empty" "no" \
   "$(contains "$P_OUT" "section asserted nothing")"
@@ -450,11 +457,11 @@ expect_eq "9: …and the passing suite exits 0" "0" "$P_RC"
 
 # --- the failing arms move the FAIL counter: each helper calls no()
 plant_run p-family-fail.test.sh
-expect_eq "9: eleven failing arms are eleven FAIL rows" \
-  "p-family-fail.test.sh: 0/11 passed, 11 failed  sections=1 setup=0" \
+expect_eq "9: thirteen failing arms are thirteen FAIL rows" \
+  "p-family-fail.test.sh: 0/13 passed, 13 failed  sections=1 setup=0" \
   "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-family-fail\.test\.sh: .*\)$/\1/p')"
 expect_eq "9: …and the failing suite exits 1" "1" "$P_RC"
-for _fn in eq ne true false contains absent match no_match status empty nonempty; do
+for _fn in eq ne true false contains absent match no_match status empty nonempty regex no_regex; do
   expect_eq "9: expect_${_fn}'s failing arm printed its FAIL row by label" "yes" \
     "$(contains "$P_OUT" "FAIL: ${_fn}")"
 done
@@ -473,10 +480,55 @@ expect_eq "9: …nor its stderr" "no" \
 FAMDOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
 expect_eq "9: the docblock carries the old-spelling mapping table" "yes" \
   "$(contains "$FAMDOC" "expect_equal -> expect_eq")"
-expect_eq "9: …including the entry that is NOT a rename (ERE vs glob)" "yes" \
-  "$(contains "$FAMDOC" "expect_matches -> NOT a rename")"
+expect_eq "9: …including the ERE spelling, now a pure rename onto expect_regex" "yes" \
+  "$(contains "$FAMDOC" "expect_matches -> expect_regex")"
+expect_eq "9: …and the entry that is still NOT a rename (it takes a file)" "yes" \
+  "$(contains "$FAMDOC" "expect_nomatch -> NOT a rename")"
 FAMDOC_STRIPPED="$(grep -v 'expect_equal ->' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
 expect_eq "9: …and the pin discriminates on a copy with the row removed" "no" \
   "$(contains "$FAMDOC_STRIPPED" "expect_equal -> expect_eq")"
+
+# ============================================================
+section "10: expect_regex is an ERE, and it is not a pipeline (S1b phase 2)"
+# ============================================================
+#
+# A-S1b-2 resolved as option 2: regex matching is generic, so the framework owns
+# it rather than leaving eight suites to keep a private copy. Two things have to
+# be true of it and are not true of expect_match, so they are asserted here and
+# not inferred: it is a REGEX, and it does not run grep in a pipeline.
+
+# --- it is an ERE, not a glob: quantifiers and alternation mean what they say
+expect_regex    "10: a quantifier is a quantifier"        'mtime=[0-9]+' "target=x|mtime=1234"
+expect_regex    "10: alternation and anchors work"        '(^|\|)v1(\||$)' "v1|target=x"
+expect_no_regex "10: …and a non-matching ERE does not fire" 'mtime=[a-z]+' "target=x|mtime=1234"
+# PAIRED NEGATIVE, the discriminating one: the glob helper reads the same pattern
+# literally, so what expect_regex matches, expect_match must NOT.
+expect_no_match "10: expect_match reads that same pattern as a literal glob" \
+  'mtime=[0-9]+' "target=x|mtime=1234"
+
+# --- it is unanchored: a substring ERE matches without needing .* on either side
+expect_regex "10: the ERE is unanchored (no leading .* required)" 'needle' "a needle here"
+expect_match "10: …whereas the glob helper needs the stars" '*needle*' "a needle here"
+
+# --- it is not a pipeline. `producer | grep -q` exits 141 under pipefail once
+# the producer outstrips the 64 KiB pipe buffer, because grep leaves early and
+# the producer takes SIGPIPE. That is a FALSE FAIL, and it is how two suites
+# spell their private expect_matches today.
+BIG="$(yes abcdefghij | head -20000)"
+expect_regex "10: a large value still matches (no SIGPIPE in the framework's form)" \
+  'abcdefghij' "$BIG"
+# The paired halves of the defect: the SAME pipeline, the SAME pattern, one small
+# value and one large one. Small is correct; large reports failure on a value the
+# pattern matches. The exact status is not pinned — it is 141 when printf dies by
+# SIGPIPE and 1 when bash reports the write error instead, which varies with the
+# producer, the size and whether a trap is installed (measured all three ways on
+# this machine). What is stable, and what makes it a lie, is non-zero.
+printf '%s\n' "abcdefghij" 2>/dev/null | grep -qE -- 'abcdefghij'
+PIPE_SMALL=$?
+printf '%s\n' "$BIG" 2>/dev/null | grep -qE -- 'abcdefghij'
+PIPE_BIG=$?
+expect_eq "10: the pipeline spelling is right on a small value" "0" "$PIPE_SMALL"
+expect_ne "10: …and wrong on a large one, non-zero though the pattern matches" \
+  "0" "$PIPE_BIG"
 
 finish
