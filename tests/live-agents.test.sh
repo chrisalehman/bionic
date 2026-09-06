@@ -67,6 +67,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/agents.sh"
@@ -75,18 +76,18 @@ SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/live-agents-test.XXXXXX")" && pwd -P
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
 
-PASS=0
-FAIL=0
-TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
-expect_empty() { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
-expect_match() { if printf '%s' "$2" | grep -Eq "$3"; then ok "$1"; else no "$1" "[$2] does not match /$3/"; fi; }
+# expect_eq, expect_empty are the framework's (tests/lib/assert.sh) — identical
+# semantics. This suite's private expect_match was secretly an ERE matcher
+# under the glob name, via a `printf | grep -Eq` PIPELINE, AND spelled its
+# arguments `<label> <actual> <ERE>` — reversed from the framework's
+# `expect_regex <label> <ERE> <actual>` (S1b/A-17, the highest-risk rebinding
+# in this migration: deleting the shadow without fixing the order would bind
+# every call to the framework's whole-value GLOB with arguments backwards, and
+# NOTHING would go red). All 8 call sites below are renamed to expect_regex
+# with the argument order corrected — this also removes the pipe's SIGPIPE-141
+# exposure, since expect_regex matches via herestring (S7, AC-12).
 
-# ============================================================
-echo "=== §A — the library exists, parses, and is safe to source ==="
-# ============================================================
+section "§A — the library exists, parses, and is safe to source"
 if [ -f "$LIB" ]; then ok "payload/scripts/lib/agents.sh is on disk"; else
   no "payload/scripts/lib/agents.sh is on disk" "$LIB"
 fi
@@ -214,10 +215,7 @@ call_live_agents_has() {  # <transcript> <name>
 # 2026-09-05T01:00:00Z.
 export BIONIC_NOW_EPOCH=1788570000
 
-# ============================================================
-echo
-echo "=== §B — (a) prompt then a fresh answer: FRESH, one teammate line ==="
-# ============================================================
+section "§B — (a) prompt then a fresh answer: FRESH, one teammate line"
 T_FRESH="$SANDBOX/fresh.jsonl"
 {
   entry_prompt        "2026-09-05T00:50:00.000Z" "dispatch the code-map researcher"
@@ -262,10 +260,7 @@ expect_eq "two teammates -> exit 0" 0 "$ST"
 expect_eq "two teammates -> both lines, in answer order" \
   "$(printf 'research-code-map|bionic:researcher|running\ns1-run-library|bionic:senior-implementor|running')" "$OUT"
 
-# ============================================================
-echo
-echo "=== §C — (b) a prompt after the answer makes it STALE ==="
-# ============================================================
+section "§C — (b) a prompt after the answer makes it STALE"
 T_STALE="$SANDBOX/stale.jsonl"
 {
   entry_prompt      "2026-09-05T00:50:00.000Z" "dispatch the code-map researcher"
@@ -288,10 +283,7 @@ expect_eq "STALE is not reported as a fresh empty set" 3 "$ST"
 expect_eq "STALE still prints the newest answer's teammates" \
   "research-code-map|bionic:researcher|running" "$OUT"
 
-# ============================================================
-echo
-echo "=== §D — (d) a real answer with no Teammates block: FRESH, zero lines ==="
-# ============================================================
+section "§D — (d) a real answer with no Teammates block: FRESH, zero lines"
 T_EMPTY="$SANDBOX/empty.jsonl"
 {
   entry_prompt      "2026-09-05T00:20:00.000Z" "anything running?"
@@ -306,10 +298,7 @@ expect_empty "answer with no Teammates block -> zero lines" "$OUT"
 expect_eq "empty answer -> stderr still fresh, with its age" \
   "live-agents: fresh age=1263" "$ERR"
 
-# ============================================================
-echo
-echo "=== §E — (c) no ListAgents answer at all: NONE ==="
-# ============================================================
+section "§E — (c) no ListAgents answer at all: NONE"
 T_NONE="$SANDBOX/none.jsonl"
 {
   entry_prompt      "2026-09-05T00:50:00.000Z" "get on with it"
@@ -333,10 +322,7 @@ expect_eq "missing transcript -> stderr says none" "live-agents: none age=none" 
 call_live_agents "$SANDBOX/blank.jsonl"
 expect_eq "empty transcript -> exit 4 (NONE)" 4 "$ST"
 
-# ============================================================
-echo
-echo "=== §F — (f) an unparseable answer body is NONE, never 'all gone' ==="
-# ============================================================
+section "§F — (f) an unparseable answer body is NONE, never 'all gone'"
 # The tool call WAS ListAgents and the id joins, so §J's forgery rule is not what is
 # under test here: this is a body the reader does not recognise. Returning zero
 # teammates would tell the dispatch wall the roster is clear and the stop guard its
@@ -367,10 +353,7 @@ expect_eq "…the same fixture with a real body -> exit 0" 0 "$ST"
 expect_eq "…the same fixture with a real body -> the teammate" \
   "research-code-map|bionic:researcher|running" "$OUT"
 
-# ============================================================
-echo
-echo "=== §G — the NEWEST answer wins, and it is the whole answer ==="
-# ============================================================
+section "§G — the NEWEST answer wins, and it is the whole answer"
 # The reported field failure this wave exists to fix: an agent present in an older
 # answer and absent from the newest must read as GONE. Both answers are real bodies.
 T_NEWEST="$SANDBOX/newest.jsonl"
@@ -401,10 +384,7 @@ call_live_agents "$T_NEWEST2"
 expect_eq "newest answer names it, older did not -> the researcher is live" \
   "research-code-map|bionic:researcher|running" "$OUT"
 
-# ============================================================
-echo
-echo "=== §H — freshness is measured against the LAST user prompt ==="
-# ============================================================
+section "§H — freshness is measured against the LAST user prompt"
 # Two prompts, two answers, interleaved: the answer after the SECOND prompt is what
 # makes the file fresh. An implementation comparing against the FIRST prompt would call
 # the stale file fresh, which is the whole point of D1′.
@@ -434,10 +414,7 @@ expect_eq "…one more prompt appended -> exit 3 (STALE)" 3 "$ST"
 call_live_agents "$T_FRESH"
 expect_eq "a tool_result entry is not counted as a user prompt" 0 "$ST"
 
-# ============================================================
-echo
-echo "=== §J — the answer is located by the tool_use_id join, never by body text ==="
-# ============================================================
+section "§J — the answer is located by the tool_use_id join, never by body text"
 # A Bash tool_result whose body is a byte-perfect copy of a real ListAgents answer —
 # the file could have been `cat`ed. Sniffing for "Teammates (" would adopt it. Joining
 # on the id cannot: no ListAgents tool_use carries that id.
@@ -473,10 +450,7 @@ T_ORPHAN="$SANDBOX/orphan.jsonl"
 call_live_agents "$T_ORPHAN"
 expect_eq "a ListAgents call with no recorded result -> exit 4 (NONE)" 4 "$ST"
 
-# ============================================================
-echo
-echo "=== §K — malformed lines do not stop the reader ==="
-# ============================================================
+section "§K — malformed lines do not stop the reader"
 # Transcripts are appended to live; a torn last line and harness bookkeeping entries
 # with no .timestamp both occur. Neither may cost the reader the answer.
 T_DIRTY="$SANDBOX/dirty.jsonl"
@@ -494,10 +468,7 @@ expect_eq "malformed and untimestamped lines -> the answer is still read, exit 0
 expect_eq "…and it is the real teammate line" \
   "research-code-map|bionic:researcher|running" "$OUT"
 
-# ============================================================
-echo
-echo "=== §L — (e) live_agents_has: 0 once, 1 absent, 2 twice, 3/4 propagate ==="
-# ============================================================
+section "§L — (e) live_agents_has: 0 once, 1 absent, 2 twice, 3/4 propagate"
 call_live_agents_has "$T_FRESH" "research-code-map"
 expect_eq "live_agents_has: present exactly once -> exit 0" 0 "$HST"
 
@@ -545,23 +516,17 @@ expect_eq "live_agents_has: present in the older answer only -> exit 1 (gone)" 1
 
 expect_empty "live_agents_has prints nothing on stdout" "$HOUT"
 
-# ============================================================
-echo
-echo "=== §M — one stderr line, exactly, on every path ==="
-# ============================================================
+section "§M — one stderr line, exactly, on every path"
 # The callers append this line to a refusal a human reads. Two lines, or none, is a
 # defect in every one of them at once.
 for f in "$T_FRESH" "$T_STALE" "$T_NONE" "$T_GARBAGE" "$T_EMPTY"; do
   call_live_agents "$f"
   expect_eq "stderr is exactly one line for $(basename "$f")" 1 "$(printf '%s\n' "$ERR" | grep -c .)"
-  expect_match "…and it is the contract line for $(basename "$f")" "$ERR" \
-    '^live-agents: (fresh|stale|none) age=([0-9]+|none)$'
+  expect_regex "…and it is the contract line for $(basename "$f")" \
+    '^live-agents: (fresh|stale|none) age=([0-9]+|none)$' "$ERR"
 done
 
-# ============================================================
-echo
-echo "=== §N — every path survives a caller running set -euo pipefail ==="
-# ============================================================
+section "§N — every path survives a caller running set -euo pipefail"
 # `.claude/rules/test-harness.md` records this trap by name: a suite runs
 # `set -uo pipefail` while the script it exercises runs `set -euo pipefail`, so errexit
 # behaviour goes untested and a non-zero status from an inner pipeline kills the caller
@@ -594,8 +559,8 @@ errexit_probe "$T_NONE"
 expect_eq "set -e caller: NONE returns 4" "4" "$ERC"
 errexit_probe "$T_GARBAGE"
 expect_eq "set -e caller: an unparseable body returns 4, it does not abort the caller" "4" "$ERC"
-expect_match "set -e caller: …and the contract line was still written" "$EERR" \
-  '^live-agents: none age=none$'
+expect_regex "set -e caller: …and the contract line was still written" \
+  '^live-agents: none age=none$' "$EERR"
 errexit_probe "$SANDBOX/does-not-exist.jsonl"
 expect_eq "set -e caller: a missing transcript returns 4" "4" "$ERC"
 
@@ -619,9 +584,7 @@ expect_eq "set -e caller: live_agents_has STALE -> 3" "3" "$HERC"
 has_errexit_probe "$T_GARBAGE" "research-code-map"
 expect_eq "set -e caller: live_agents_has unparseable -> 4" "4" "$HERC"
 
-# ============================================================
-echo "=== §P — live_agents_status: the status of a name, and idle is not running ==="
-# ============================================================
+section "§P — live_agents_status: the status of a name, and idle is not running"
 # WHY THIS SECTION EXISTS (spec R2, AC-6/AC-27; the Step-5 auditor's F-1). R2 names TWO
 # departure modes — "delivered and stopped, or finished and never stopped" — and until
 # this section the whole fixture corpus held one status, `running`. The harness KEEPS
@@ -734,8 +697,8 @@ expect_empty "…and prints nothing" "$SOUT"
 call_live_agents_status "$T_IDLE" ""
 expect_eq "live_agents_status: an empty name is exit 1" "1" "$SST"
 
-expect_match "live_agents_status writes the one contract line and nothing else" "$SERR" \
-  '^live-agents: fresh age=[0-9]+$'
+expect_regex "live_agents_status writes the one contract line and nothing else" \
+  '^live-agents: fresh age=[0-9]+$' "$SERR"
 
 # ------------------------------------------------------------
 # §P.2 — the exit codes track live_agents_has exactly, so the budget and the guard can
@@ -772,8 +735,8 @@ expect_empty "has and status return the same exit code for every name on one ans
 # ------------------------------------------------------------
 DOCTORED_LIB="$SANDBOX/agents-nostatus.sh"
 sed 's/print name "|" type "|" status/print name "|" type "|" "running"/' "$LIB" > "$DOCTORED_LIB"
-expect_match "the doctored copy differs from the library in exactly one line" \
-  "$(diff "$LIB" "$DOCTORED_LIB" | grep -c '^[<>]')" '^2$'
+expect_regex "the doctored copy differs from the library in exactly one line" \
+  '^2$' "$(diff "$LIB" "$DOCTORED_LIB" | grep -c '^[<>]')"
 DOCT_OUT="$(bash -c 'set -u; . "$1"; live_agents_status "$2" "$3"' _ "$DOCTORED_LIB" "$T_IDLE" "s6-stop-resolution" 2>/dev/null)"
 expect_eq "a parser doctored to write 'running' into every row moves live_agents_status" \
   "running" "$DOCT_OUT"
@@ -948,8 +911,8 @@ expect_eq "live_row_open: NONE propagates 4" "4" "$RST"
 call_live_row_open "$T_GARBAGE" "research-code-map"
 expect_eq "live_row_open: an unparseable body propagates 4" "4" "$RST"
 
-expect_match "live_row_open passes the one contract line through unchanged" "$RERR" \
-  '^live-agents: none age=none$'
+expect_regex "live_row_open passes the one contract line through unchanged" \
+  '^live-agents: none age=none$' "$RERR"
 
 # --- the predicate is a VIEW of the same parse, not a second reading ----------
 #
@@ -988,10 +951,7 @@ row_open_errexit_probe "$T_STALE" "research-code-map"
 expect_eq "set -e caller: live_row_open STALE -> 3" "3" "$RERC"
 row_open_errexit_probe "$T_GARBAGE" "research-code-map"
 expect_eq "set -e caller: live_row_open unparseable -> 4" "4" "$RERC"
-# ============================================================
-echo
-echo "=== §Q — an ARRAY-shaped user prompt is a prompt (Step-6 review S-1 = C-3) ==="
-# ============================================================
+section "§Q — an ARRAY-shaped user prompt is a prompt (Step-6 review S-1 = C-3)"
 #
 # THE DEFECT THIS SECTION EXISTS FOR. `_la_scan` recorded a user PROMPT only when
 # `.message.content` was a plain STRING. The harness writes a prompt that carries an
@@ -1111,10 +1071,7 @@ Q_TRA="$SANDBOX/q-toolresult-array.jsonl"
 } > "$Q_TRA"
 call_live_agents "$Q_TRA"
 expect_eq "§Q.4 an array-content tool_result is not a prompt either (exit 0)" 0 "$ST"
-# ============================================================
-echo
-echo "=== §T — ONE parse per process per file state (Step-6 review P-1 = P-4) ==="
-# ============================================================
+section "§T — ONE parse per process per file state (Step-6 review P-1 = P-4)"
 #
 # THE COST THIS SECTION BOUNDS. `live_row_open` -> `live_agents_status` -> `live_agents`
 # runs `_la_scan` and `_la_body` over the WHOLE transcript, twice. Every consumer that
@@ -1202,10 +1159,7 @@ T_GROW_OUT="$(bash -c '
   ' _ "$LIB" "$T_GROW" "$T_APPEND")"
 expect_eq "§T.3 the first read sees one teammate, and the read after an append sees two" \
   "$(printf 'research-code-map|bionic:researcher|running\n2')" "$T_GROW_OUT"
-# ============================================================
-echo
-echo "=== §U — the reducer compares NORMALISED timestamps (Step-6 review C-4) ==="
-# ============================================================
+section "§U — the reducer compares NORMALISED timestamps (Step-6 review C-4)"
 #
 # Lexicographic order is chronological for UTC ISO-8601 only once the fractional part has
 # a fixed width: `…:23.45Z` sorts BELOW `…:23.4Z` as a raw string, because `5` < `Z`. That
@@ -1255,10 +1209,7 @@ U_PROMPT="$SANDBOX/u-prompt.jsonl"
 call_live_agents "$U_PROMPT"
 expect_eq "§U.2 a later prompt with a longer fraction is still the last prompt -> STALE" \
   3 "$ST"
-# ============================================================
-echo
-echo "=== §V — the Teammates block is anchored on its FIRST header (review S-2) ==="
-# ============================================================
+section "§V — the Teammates block is anchored on its FIRST header (review S-2)"
 #
 # The block state machine re-opened on ANY flush-left `Teammates (N):` line, anywhere in
 # the body, including after `Peer sessions`. The answer body carries free-form
@@ -1339,10 +1290,7 @@ call_live_agents_has "$V_T_REALDUP" "research-code-map"
 expect_eq "§V.3 two rows of one name inside the ONE block are still ambiguous (exit 2)" \
   2 "$HST"
 
-# ============================================================
-echo
-echo "=== §W — the committed corpus, through the ONE builder, round-trips (S16, AC-27) ==="
-# ============================================================
+section "§W — the committed corpus, through the ONE builder, round-trips (S16, AC-27)"
 # WHAT THIS SECTION PROVES, and why it is not §P again. §P above hand-typed three of the
 # real corpus bodies straight into this file's own SELFLINE/PEERS/BODY_S6_* constants —
 # a private builder of its own, because this suite is the parser's home rather than a
@@ -1398,12 +1346,12 @@ expect_eq "§W …11 idle" "11" "$W_IDLE_ROWS"
 W_RUN="$SANDBOX/w-running.jsonl"; live_answer_running "$W_RUN"
 call_live_agents "$W_RUN"
 expect_eq "§W.1 live_answer_running is FRESH" 0 "$ST"
-expect_match "§W.1 …and its status word is running" "$OUT" '\|running$'
+expect_regex "§W.1 …and its status word is running" '\|running$' "$OUT"
 
 W_IDLE="$SANDBOX/w-idle.jsonl"; live_answer_idle "$W_IDLE"
 call_live_agents "$W_IDLE"
 expect_eq "§W.1 live_answer_idle is FRESH" 0 "$ST"
-expect_match "§W.1 …and its status word is idle" "$OUT" '\|idle$'
+expect_regex "§W.1 …and its status word is idle" '\|idle$' "$OUT"
 
 W_STALE="$SANDBOX/w-stale.jsonl"; live_answer_stale "$W_STALE"
 call_live_agents "$W_STALE"
@@ -1422,13 +1370,9 @@ expect_empty "§W.1 …and prints nothing" "$OUT"
 # --- §W.2 — the self line every builder-emitted body carries is the corpus's own, never
 # invented; it is what lets the parser's recognition anchor fire at all.
 W_RUN_BODY="$(live_answer_content "$LIVE_ANSWER_RUNNING_LINE")"
-expect_match "§W.2 the running answer's self line is the corpus's own" \
-  "$W_RUN_BODY" '^This session is bionic-02 \[fc3e2d\]'
+expect_regex "§W.2 the running answer's self line is the corpus's own" \
+  '^This session is bionic-02 \[fc3e2d\]' "$W_RUN_BODY"
 
 
 
-# ============================================================
-echo
-echo "=== live-agents: $PASS/$TOTAL passed ==="
-[ "$FAIL" -eq 0 ] || echo "FAILURES: $FAIL"
-[ "$FAIL" -eq 0 ]
+finish
