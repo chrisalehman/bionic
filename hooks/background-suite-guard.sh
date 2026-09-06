@@ -38,9 +38,26 @@ INPUT=$(cat) || exit 0
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null || printf ''; }
 
 [ "$(_jq '.tool_name')" = "Bash" ] || exit 0
-[ "$(_jq '.tool_input.run_in_background|tostring')" = "true" ] || exit 0
 COMMAND=$(_jq '.tool_input.command')
 [ -n "$COMMAND" ] || exit 0
+
+# TWO ARMS NOW LIVE IN THIS FILE, and the cheap pre-filter is their union.
+#
+#   B-9 (AC-23)  a BACKGROUNDED suite, wherever it is run from — nobody reads the result.
+#   S13 (AC-21)  a suite OUTSIDE THE ROW`S BUDGET, inside a dispatched agent — foreground
+#                or not, because an extra full-tree run costs 40 minutes either way.
+#
+# The first needs no agent context (its own suite drives it straight with a main-thread
+# payload as a positive control); the second needs nothing but one. So the filter is
+# either-or, and a main-thread foreground command still leaves this hook before it loads
+# a library — which is what keeps an always-on hooks.json registration cheap.
+IS_BACKGROUND=no
+[ "$(_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
+# THE ACTOR (design D1, slice 4/1 probe): an agent-context payload carries a top-level
+# `agent_id`, a main-thread one does not. hooks/stop-guard.sh reads the same field the
+# same way.
+ACTOR=$(_jq '.agent_id')
+[ "$IS_BACKGROUND" = yes ] || [ -n "$ACTOR" ] || exit 0
 
 # ---------- the command reader ----------
 #
@@ -221,12 +238,16 @@ engaged_session "$BSG_REPO" "$BSG_SID" || exit 0
 
 [ "$(cmd_class "$COMMAND")" = "suite" ] || exit 0
 
-# ---------- refuse, naming the shape that works ----------
+# ---------- ARM 1 (B-9, AC-23): refuse, naming the shape that works ----------
+#
+# FIRST, because it is the wider refusal: a backgrounded suite is refused whether or not
+# it is on the budget, and being on the budget is no answer to "nobody read the result".
 #
 # The command is echoed back so the fix is a copy-paste rather than a retype. It is the
 # agent's own text going back to the agent — no third party reads this stream — so it is
 # quoted whole rather than scrubbed and truncated the way farm-out-reminder.sh's audit
 # line is.
+if [ "$IS_BACKGROUND" = yes ]; then
 cat >&2 <<EOF
 BLOCKED: a suite may not run with run_in_background — nobody would read the result.
 
@@ -243,3 +264,126 @@ Then read the log and quote the pass/total line. If the suite is genuinely longe
 timeout you can set, say so in your report and stop — do not background it.
 EOF
 exit 2
+fi
+
+# ---------- ARM 2 (S13, AC-21): THE BUDGET ARM ----------
+#
+# INSIDE A DISPATCHED AGENT ONLY. `hooks/dispatch-preflight.sh` wrote this agent`s budget
+# onto the roster row at launch — `suites_allowed=`, derived from the tree by the impact
+# command or declared by the brief — and this is the wall that holds it there. On the
+# orchestrator`s own thread hooks/farm-out-reminder.sh owns the same question and answers
+# it differently (dispatch it, or take the audited override), so this arm never speaks
+# there: no `agent_id`, no arm.
+#
+# THIS IS A BUDGET, NOT A SAFETY WALL, and the refusal says so in that word (ADR-002). An
+# extra suite run is undoable and visible — it costs compute and forty minutes of a
+# machine, never a byte of anyone`s work — so the fail directions below are chosen by what
+# a wrong answer costs rather than uniformly:
+#
+#   no row for this agent, or a row with no `suites_allowed` key at all
+#       A row is written for every dispatch that passes the wall, so its absence means the
+#       journal failed or the row predates the wall. Refusing every suite would punish an
+#       agent for a bookkeeping failure it did not cause, so a NAMED suite passes in
+#       silence. `tests/run.sh` still does not: a full-tree run is the one act the standing
+#       ruling caps at one per run, and no row is not a licence to spend it.
+#
+#   `suites_allowed=` present but EMPTY
+#       A budget was stated and came out empty — the impact command failed or derived
+#       nothing, and the dispatch warned about it. Read exactly as the absent case above.
+#
+#   `suites_allowed=none`
+#       The explicit `Suites: none` waiver. A brief that declared it runs no suite at all,
+#       and every suite is refused, `tests/run.sh` included.
+#
+#   a set of basenames
+#       Each suite the command names must be in it.
+#
+# A SUITE-CLASS COMMAND THAT NAMES NO FILE — `pytest`, `make test`, `npm test` — has no
+# basename to compare and passes. This repo budgets by suite file; a project that does not
+# is not one this row can speak about, and inventing a refusal for it would be the wall
+# guessing.
+#
+# FARM_OUT_ALLOW IS NOT READ HERE, AND THAT IS THE POINT. The override exists so the
+# ORCHESTRATOR can run something on its own thread when dispatching it genuinely will not
+# work; it is farm-out-reminder.sh`s escape from farm-out-reminder.sh`s wall. A writer that
+# could set an environment variable on itself to widen its own instrument would have a
+# budget in name only — that is a wish, not a wall — so nothing in this arm looks at it.
+[ -n "$ACTOR" ] || exit 0
+
+ROSTER_FILE="$BSG_REPO/.bionic/tmp/roster-${BSG_SID}.state"
+BUDGET_STATED=no
+SUITES_ALLOWED=""
+if [ -n "$BSG_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
+  # THE LAST ROW CARRYING THIS ID WINS, which is the whole fleet`s reading of the roster
+  # (hooks/stop-guard.sh, hooks/session-poker.sh: "the last row carrying a name wins"). A
+  # launch row is later joined by the recorder`s `status=confirmed` copy and, across a
+  # /clear, by the poker`s adopted row; each carries the budget forward, and the newest is
+  # the current statement about this agent.
+  BUDGET_LINE=$(awk -F'|' -v id="$ACTOR" '
+    /^roster-state\// {
+      hit = 0; stated = 0; allowed = ""
+      for (i = 1; i <= NF; i++) {
+        if ($i == "agent_id=" id) hit = 1
+        else if ($i ~ /^suites_allowed=/) { stated = 1; allowed = substr($i, 16) }
+      }
+      if (hit) last = stated ":" allowed
+    }
+    END { if (last != "") print last }
+  ' "$ROSTER_FILE" 2>/dev/null)
+  case "$BUDGET_LINE" in
+    1:*) BUDGET_STATED=yes; SUITES_ALLOWED="${BUDGET_LINE#1:}" ;;
+  esac
+fi
+[ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
+
+# `none` is a STATED empty set and reads as one: nothing is on the budget, so the loop
+# below refuses every target it is handed.
+case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
+
+budget_refuse() {  # <suite basename>
+  cat >&2 <<EOF
+BLOCKED: $1 is not on this agent's suite budget.
+
+This is a BUDGET arm, not a safety wall: an extra suite run breaks nothing, it spends
+forty minutes of a machine nobody else can use. The set was recorded on this agent's
+roster row at dispatch, from the files its brief declared.
+
+On the budget: ${2:-(nothing — this brief declared Suites: none)}
+You asked for : $1
+
+Run only what is on it. If the change genuinely reaches further than the brief said,
+say so in your report and let the orchestrator widen the brief — a wider instrument is
+its decision to make, and it is the one holding the one-regression budget for the run.
+EOF
+  exit 2
+}
+
+for _target in $(cmd_suite_targets "$COMMAND"); do
+  if [ "$_target" = "run.sh" ]; then
+    # THE FULL TREE IS REFUSED WITHOUT A ROW THAT NAMES IT — the one place this arm fails
+    # closed. AC-21: "tests/run.sh is refused unless the row carries it."
+    case " $SUITES_ALLOWED " in
+      *" run.sh "*) continue ;;
+    esac
+    cat >&2 <<EOF
+BLOCKED: the full tree (tests/run.sh) is not on this agent's suite budget.
+
+This is a BUDGET arm, not a safety wall. One regression means one: the whole tree is
+proved once per run, by one dispatched runner whose row carries tests/run.sh, at
+integration close. A second full run costs forty minutes and proves what the first one
+already did.
+
+On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
+
+Run the suites your brief named instead. If the tree genuinely must be re-proved, say so
+in your report: the orchestrator records the cause on the plan and dispatches the runner.
+EOF
+    exit 2
+  fi
+  [ "$BUDGET_STATED" = yes ] || continue
+  case " $SUITES_ALLOWED " in
+    *" $_target "*) : ;;
+    *) budget_refuse "$_target" "$SUITES_ALLOWED" ;;
+  esac
+done
+exit 0

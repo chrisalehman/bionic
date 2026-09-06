@@ -1485,7 +1485,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver
+adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites-source
   awk -v ackfile="$2" '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
@@ -1527,6 +1527,14 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
       # before it ever asks about a deliverable, so an empty copy verdicted as an unmet
       # SILENT row instead.
       v = kv($0, "waiver");        if (v != "") waiv[n]   = v
+      # THE THREE INSTRUMENT FIELDS (wave-01 S13, spec AC-20), carried forward exactly as
+      # the contract fields above are. They are what the writer-side budget guard reads:
+      # a resumed agent whose adopted row lost `suites_allowed=` would come out of a
+      # /clear with no budget on it, and the wall that refuses an off-budget suite would
+      # go quiet for exactly the agents a clear leaves running longest.
+      v = kv($0, "files");          if (v != "") files[n]  = v
+      v = kv($0, "suites_allowed"); if (v != "") sallow[n] = v
+      v = kv($0, "suites-source");  if (v != "") ssrc[n]   = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
@@ -1550,9 +1558,10 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
         n = order[i]
         if (n in met) continue
         if (n in acked) continue
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
-               ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n]
+               ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
+               files[n], sallow[n], ssrc[n]
       }
     }
   ' "$1" 2>/dev/null
@@ -1612,9 +1621,11 @@ adopt_fold() {  # <roster file> <ack ledger file> -> name|id|type|deliverable|pr
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites-source> -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
   local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
+  local files="${14:-}" sallow="${15:-}" ssrc="${16:-}"
+  local -a INSTRUMENT_FIELDS
   [ -n "$id" ] || return 1
   [ -n "$sid" ] || return 1
   d="${f%/*}"
@@ -1639,6 +1650,20 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # before any verb decides anything — and that is a guard in another file for another
   # reason, not this writer's own.
   #
+  # THE THREE INSTRUMENT FIELDS TRAVEL AS A GROUP, AND ONLY WHEN THE SOURCE ROW HAD THEM
+  # (wave-01 S13, spec AC-20). `roster_row` emits them present-if-PASSED, and the
+  # distinction is load-bearing at the writer-side guard: a row with `suites_allowed=`
+  # empty stated a budget that came out empty, while a row with no such key at all was
+  # written before the wall existed. Adopting the second kind must not manufacture the
+  # first. All three go or none do — an empty member of a stated group is itself a
+  # statement, and splitting them would let a resumed row claim a source for a set it
+  # does not carry.
+  INSTRUMENT_FIELDS=()
+  if [ -n "$files" ] || [ -n "$sallow" ] || [ -n "$ssrc" ]; then
+    INSTRUMENT_FIELDS=("files=$(clean "$files")" \
+                       "suites_allowed=$(clean "$sallow")" \
+                       "suites-source=$(clean "$ssrc")")
+  fi
   # THE ROW IS BUILT BY `roster_row` (payload/scripts/lib/roster.sh), not by a format string
   # here (spec AC-25, ledger D3). The eleven fields this writer leaves EMPTY are still named
   # — `model=`, `duration=`, `claims=`, `absent=` and the rest — because an omitted key and
@@ -1662,6 +1687,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
     "cadence=$(clean "$cad")" \
     absent= \
     "waiver=$(clean "$waiver")" \
+    ${INSTRUMENT_FIELDS[@]+"${INSTRUMENT_FIELDS[@]}"} \
     "teammate_id=$(clean "$addr")" \
     "adopted_from=$(clean "$osid")" \
     tool_use_id= \
@@ -1929,7 +1955,8 @@ case "$VERB" in
       # every agent that session launched.
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
-      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER; do
+      while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER \
+                            RFILES RSALLOW RSSRC; do
         [ -n "$RNAME" ] || continue
         ADOPT_ROWS=$((ADOPT_ROWS + 1))
 
@@ -2113,7 +2140,8 @@ case "$VERB" in
             elif [ -n "$RID" ]; then
               if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
                    "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
-                   "${ADOPT_OWN_PLAN:-none}" "$RWAIVER"; then
+                   "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
+                   "$RFILES" "$RSALLOW" "$RSSRC"; then
                 ROW_JOURNALLED=yes
                 # THE MARKER COPY (S17, AC-12 attempt 2). `hooks/landing-gate.sh` is this
                 # schema's one writer today — its own comment at :561-563 calls a second
