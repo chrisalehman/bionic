@@ -373,10 +373,18 @@ anchor() {
   _got="$(grep -c "$_mode" -- "$_pat" "$_file" 2>/dev/null)"
   _got="$(printf '%s' "${_got:-0}" | tr -cd '0-9')"
   [ -n "$_got" ] || _got=0
+  # THE DETAIL BRANCHES ON THE DIRECTION (review-c C-7). Fewer than declared is
+  # the moved anchor: the mutation is a no-op and everything under it reads the
+  # shipped file. MORE than declared is the opposite failure — `grep -v` strips
+  # two lines and `sed` rewrites both, which the COUNT, NOT PRESENCE paragraph
+  # above already says. One string covering both told the reader the wrong half
+  # of the time.
   if [ "$_got" = "$_want" ]; then
     ok "$_name"
-  else
+  elif [ "${_got:-0}" -lt "${_want:-0}" ] 2>/dev/null; then
     no "$_name" "found $_got line(s) — the anchor MOVED, so the mutation below is a no-op and every row under it is reading the shipped file"
+  else
+    no "$_name" "found $_got line(s) — the anchor matches MORE than it declared, so the mutation below strips or rewrites lines it was never meant to touch"
   fi
 }
 
