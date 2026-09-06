@@ -297,7 +297,7 @@ observe() {
 }
 
 # ============================================================
-section "Section 1: the hot path — relevance before any plan walk (checklist A7)"
+section "Section 1: the hot path — relevance before the expensive work (checklist A7)"
 # ============================================================
 
 IFS='|' read -r W1_REPO W1_TR W1_SUB W1_CFG <<< "$(make_world w1 yes)"
@@ -307,19 +307,75 @@ run_rec "$(jq -n --arg c "$W1_REPO" '{session_id:"x", cwd:$c, hook_event_name:"P
 
 run_rec "$(mk_bash_post "$SID_A" "$W1_TR" "$W1_REPO" "ls -la && git status" "README.md")"
 
-# Static order pin: the cheap relevance test must PRECEDE the plan-directory walk
-# in the source, not merely produce the same answer (arch-perf F8/F9 — the defect
+# Static order pin: the cheap relevance test must PRECEDE the expensive work in
+# the source, not merely produce the same answer (arch-perf F8/F9 — the defect
 # was cost, which behaviour alone cannot detect). This script is registered on
-# every Bash call in the session, so the walk on the unrelated path is the whole
-# cost.
+# every Bash call in the session, so the resolution on the unrelated path is the
+# whole cost.
+#
+# THE PLAN WALK IS GONE, AND THAT IS WHY THIS PIN CHANGED SHAPE (S11, AC-16).
+# The comment here used to name `PLAN=`/`for d in "$DOCS_ROOT` as the expensive
+# thing the relevance test had to precede, and derived a `_walk_line` from it —
+# a grep that has matched NOTHING in this file since the run predicate was
+# removed (`THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK`). The line
+# number it computed was the empty string, so the comparison the section
+# describes could never have been written against it. What this script actually
+# spends on an unrelated Bash call today is the git resolution and, below the
+# pressure sample, the state-path resolution, the symlink guards and the roster
+# read — so those are what the order pin names.
 _rel_line=$(grep -n 'MLINES=' "$REC" | head -1 | cut -d: -f1)
-_walk_line=$(grep -nE '^[[:space:]]*(PLAN=|for d in "\$DOCS_ROOT)' "$REC" | head -1 | cut -d: -f1)
+_root_line=$(grep -n 'REPO=$(project_root' "$REC" | head -1 | cut -d: -f1)
+# THE CODE, NOT ITS BANNER (S11). This first read the `THE EARLY EXIT, RESTORED`
+# comment, and a planted regression that MOVED the exit block below the state
+# paths left the banner where it was and the pin stayed green. A source-order pin
+# has to grep the line that runs.
+_exit_line=$(grep -nF 'if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ] && [ -z "$MLINES" ]; then' "$REC" | head -1 | cut -d: -f1)
+_state_line=$(grep -n 'STATE_DIR="$REPO/.bionic/tmp"' "$REC" | head -1 | cut -d: -f1)
+
+# Every line number is asserted non-empty BEFORE it is compared: a grep that
+# finds nothing yields the empty string, and `test "" -lt ""` is an error rather
+# than a comparison — an order pin over two empty values pins nothing, which is
+# exactly what this section had.
+expect_nonempty "the cheap relevance test is findable in the recorder's source (MLINES=)" "$_rel_line"
+expect_nonempty "the git resolution is findable in the recorder's source (project_root)" "$_root_line"
+expect_nonempty "the restored early exit is findable in the recorder's source" "$_exit_line"
+expect_nonempty "the state-path resolution is findable in the recorder's source" "$_state_line"
+expect_true "the relevance test PRECEDES the git resolution, not merely in effect" \
+  test "$_rel_line" -lt "$_root_line"
+expect_true "the early exit PRECEDES the state paths, the symlink guards and the roster read" \
+  test "$_exit_line" -lt "$_state_line"
+
+# The plan walk really is absent — asserted, not assumed, and paired with the
+# same grep over a script that DOES walk, so "no match" cannot mean "the pattern
+# is broken".
+_walk_pat='^[[:space:]]*(PLAN=|for d in "\$DOCS_ROOT)'
+expect_empty "the recorder walks no plan directory at all (the run predicate is gone)" \
+  "$(grep -nE "$_walk_pat" "$REC" | head -1)"
+expect_nonempty "…and the same pattern DOES find the walk in a hook that walks (not a broken pattern)" \
+  "$(grep -nE "$_walk_pat" "$HERE/dispatch-preflight.sh" | head -1)"
 
 # Outside an active wave the script is inert, like every other gate in this
 # family (spec §Component boundaries: "Inert when no wave is active").
+#
+# THE ROSTER ROW IS PLANTED HERE TOO (S11). Until this slice the nowave world
+# planted an agent WITHOUT its roster row, so the observation resolved nothing
+# and the world would have recorded nothing whether a wave was active or not:
+# the inertness this section names was never the reason for the silence. With
+# the row planted, the only difference between this world and the paired
+# positive below is the active wave.
 IFS='|' read -r NW_REPO NW_TR NW_SUB NW_CFG <<< "$(make_world nowave no)"
-plant_agent "$NW_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
+plant_agent "$NW_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer" "$NW_REPO"
 observe "$SID_A" "$NW_CFG" "$NW_REPO" "$NW_TR" quiet-reviewer
+expect_no_file "outside an active wave the recorder writes no state" "$NW_REPO/$STATE_REL"
+
+# THE PAIRED POSITIVE for that absence, over the same builder and the same
+# drive, differing only in the wave flag: an absence assertion whose producer
+# never ran passes just as loudly.
+IFS='|' read -r AW_REPO AW_TR AW_SUB AW_CFG <<< "$(make_world nowave-control yes)"
+plant_agent "$AW_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer" "$AW_REPO"
+observe "$SID_A" "$AW_CFG" "$AW_REPO" "$AW_TR" quiet-reviewer
+expect_file "…while the SAME drive inside an active wave does record (paired positive)" \
+  "$AW_REPO/$STATE_REL"
 
 # ============================================================
 section "Section 2: a run that produced evidence is recorded (AC-3, positive)"
@@ -718,29 +774,79 @@ section "Section 7: hostile repo (AC-8, TDD §8, checklist A2/A3)"
 
 # Predictable temp names + symlink-following writes were a PROVEN arbitrary-file
 # overwrite in the discarded run (corr-sec S1/S2). Every level is replanted.
+# THE CONTROL WORLD FIRST (S11, AC-16). Every assertion in this section is an
+# ABSENCE — a file outside the repo that still holds its original bytes, a
+# directory outside the repo that stayed empty — and an absence over a drive that
+# resolved nothing is not a guard, it is silence. This world is the hostile ones
+# with the hostile part left out: same builder, same agent, same observation, a
+# real `.bionic/tmp`. It has to record, or none of the refusals below mean
+# anything.
+#
+# THE ROSTER ROW IS PLANTED IN EVERY WORLD HERE (S11). Until this slice the three
+# hostile worlds called plant_agent WITHOUT the repo argument, so no roster row
+# carried the agent id, the observation resolved nothing, and the recorder had
+# nothing to write with or without a symlink in the way. The guards were never
+# reached by this section at all.
+IFS='|' read -r SOK_REPO SOK_TR SOK_SUB SOK_CFG <<< "$(make_world secok yes)"
+plant_agent "$SOK_SUB" "avictim-ffffffffffffffff" "victim" "$SOK_REPO"
+observe "$SID_A" "$SOK_CFG" "$SOK_REPO" "$SOK_TR" victim
+expect_file "the control: the same drive with no symlink in the way DOES record" \
+  "$SOK_REPO/$STATE_REL"
+expect_contains "…naming the same agent the hostile worlds plant" \
+  "avictim-ffffffffffffffff" "$(cat "$SOK_REPO/$STATE_REL" 2>/dev/null)"
+
 IFS='|' read -r S_REPO S_TR S_SUB S_CFG <<< "$(make_world sec yes)"
-plant_agent "$S_SUB" "avictim-ffffffffffffffff" "victim"
+plant_agent "$S_SUB" "avictim-ffffffffffffffff" "victim" "$S_REPO"
 mkdir -p "$S_REPO/.bionic/tmp"
 VICTIM_FILE="$SANDBOX/sec-outside-file.txt"
 echo "ORIGINAL CONTENT" > "$VICTIM_FILE"
 ln -s "$VICTIM_FILE" "$S_REPO/$STATE_REL"
 observe "$SID_A" "$S_CFG" "$S_REPO" "$S_TR" victim
+expect_eq "a symlinked state FILE is not written through — the file outside keeps its bytes" \
+  "ORIGINAL CONTENT" "$(cat "$VICTIM_FILE" 2>/dev/null)"
+expect_eq "…and the outside file is still one line long (nothing was appended either)" \
+  "1" "$(wc -l < "$VICTIM_FILE" | tr -d ' ')"
 
 IFS='|' read -r S2_REPO S2_TR S2_SUB S2_CFG <<< "$(make_world sec2 yes)"
-plant_agent "$S2_SUB" "avictim-ffffffffffffffff" "victim"
+plant_agent "$S2_SUB" "avictim-ffffffffffffffff" "victim" "$S2_REPO"
 OUTSIDE_DIR="$SANDBOX/sec2-outside-dir"
 mkdir -p "$OUTSIDE_DIR" "$S2_REPO/.bionic"
 ln -s "$OUTSIDE_DIR" "$S2_REPO/.bionic/tmp"
 observe "$SID_A" "$S2_CFG" "$S2_REPO" "$S2_TR" victim
+expect_no_file "a symlinked state DIRECTORY is not written through" \
+  "$OUTSIDE_DIR/stop-check.state"
+expect_empty "…and the directory outside the repo is still empty" \
+  "$(ls -A "$OUTSIDE_DIR" 2>/dev/null)"
 
 # The roster path gets the same treatment: a symlinked roster is never appended
 # through, so a hostile repo cannot turn a dispatch into a write anywhere it likes.
+# THE FILE OUTSIDE IS A PLAUSIBLE ROSTER, not a line of prose (S11). It used to
+# hold `ROSTER ORIGINAL`, which carries no row this dispatch could complete — so
+# the fold found nothing to write and the assertion below would have held with
+# every symlink guard in this script removed. A hostile repo pointing its roster
+# at a file outside the repo points it at something that looks like a roster; the
+# victim is seeded with the very `intended` row this payload confirms, so
+# "not appended through" is a claim about the guard and not about the join.
 IFS='|' read -r S3_REPO S3_TR S3_SUB S3_CFG <<< "$(make_world sec3 yes)"
-mkdir -p "$S3_REPO/.bionic/tmp"
-ROSTER_VICTIM="$SANDBOX/sec3-roster-victim.txt"
-echo "ROSTER ORIGINAL" > "$ROSTER_VICTIM"
+mkdir -p "$S3_REPO/.bionic/tmp" "$SANDBOX/sec3-victim-seed"
+seed_roster "$SANDBOX/sec3-victim-seed" "$SID_A" "w99-impl" "$TUID"
+ROSTER_VICTIM="$SANDBOX/sec3-victim-seed/.bionic/tmp/roster-${SID_A}.state"
+ROSTER_VICTIM_BEFORE="$(cat "$ROSTER_VICTIM")"
 ln -s "$ROSTER_VICTIM" "$S3_REPO/.bionic/tmp/roster-${SID_A}.state"
 run_rec "$(mk_agent_post "$SID_A" "$S3_TR" "$S3_REPO" "w99-impl" "$NEW_AID" "$TUID")"
+expect_eq "a symlinked ROSTER is not appended through — the file outside keeps its bytes" \
+  "$ROSTER_VICTIM_BEFORE" "$(cat "$ROSTER_VICTIM" 2>/dev/null)"
+expect_absent "…so no confirmation row reaches it" "status=confirmed" "$(cat "$ROSTER_VICTIM" 2>/dev/null)"
+expect_status "…and the roster arm still exits 0 rather than failing loudly" "0" "$REC_ST"
+
+# The control for that absence: the SAME dispatch payload against a repo whose
+# roster is a real file writes the row. Without this the assertion above passes
+# on any recorder that has stopped writing rosters entirely.
+IFS='|' read -r S3OK_REPO S3OK_TR S3OK_SUB S3OK_CFG <<< "$(make_world sec3ok yes)"
+seed_roster "$S3OK_REPO" "$SID_A" "w99-impl" "$TUID"
+run_rec "$(mk_agent_post "$SID_A" "$S3OK_TR" "$S3OK_REPO" "w99-impl" "$NEW_AID" "$TUID")"
+expect_contains "the control: a REAL roster does get the confirmation row appended" \
+  "status=confirmed" "$(cat "$S3OK_REPO/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
 
 # Unpredictable temp names: mktemp with an X-template, and no PID-based name.
 
@@ -748,14 +854,33 @@ run_rec "$(mk_agent_post "$SID_A" "$S3_TR" "$S3_REPO" "w99-impl" "$NEW_AID" "$TU
 # producer normalizes `|` out of every operator-supplied value; this asserts the
 # consumer is not the only thing standing between a crafted name and a forged row.
 IFS='|' read -r FG_REPO FG_TR FG_SUB FG_CFG <<< "$(make_world forge yes)"
-plant_agent "$FG_SUB" "aworker-1111111111111111" "worker"
+plant_agent "$FG_SUB" "aworker-1111111111111111" "worker" "$FG_REPO"
+
+# THE CONTROL FOR THE TWO FORGERIES, first and over the same world: a WELL-FORMED
+# machine line naming a log inside this session's subagents directory IS stored.
+# Both rows below are absences, and an absence over a recorder that stores
+# nothing here would pass without the guards existing.
+run_rec "$(mk_bash_post "$SID_A" "$FG_TR" "$FG_REPO" "bash stop-check.sh x" \
+  "stop-check-observation/v1|target=aworker-1111111111111111|typed=x|log=$FG_SUB/agent-aworker-1111111111111111.jsonl|mtime=1|size=1|deliverables=|progress=|progress_mtime=0|progress_state=unnamed")"
+expect_contains "the control: a well-formed machine line IS stored" \
+  "target=aworker-1111111111111111" "$(cat "$FG_REPO/$STATE_REL" 2>/dev/null)"
+
+rm -f "$FG_REPO/$STATE_REL"
 run_rec "$(mk_bash_post "$SID_A" "$FG_TR" "$FG_REPO" "bash stop-check.sh x" \
   "stop-check-observation/v1|target=aworker-1111111111111111|typed=x|log=$FG_SUB/agent-aworker-1111111111111111.jsonl|mtime=notanumber|size=1|deliverables=|progress=|progress_mtime=0|progress_state=unnamed")"
+expect_absent "a non-numeric mtime never becomes a stored fact" \
+  "mtime=notanumber" "$(cat "$FG_REPO/$STATE_REL" 2>/dev/null)"
 
 # A machine line naming a log OUTSIDE this session's subagents directory is not
 # dischargeable evidence and is not stored, however well-formed it is.
+rm -f "$FG_REPO/$STATE_REL"
 run_rec "$(mk_bash_post "$SID_A" "$FG_TR" "$FG_REPO" "bash stop-check.sh x" \
   "stop-check-observation/v1|target=aelsewhere-2222222222222222|typed=x|log=/etc/passwd|mtime=1|size=1|deliverables=|progress=|progress_mtime=0|progress_state=unnamed")"
+FG_OUTSIDE=$(cat "$FG_REPO/$STATE_REL" 2>/dev/null)
+expect_absent "a log outside this session's subagents directory is not stored" \
+  "log=/etc/passwd" "$FG_OUTSIDE"
+expect_absent "…and neither is the agent id that came with it" \
+  "aelsewhere-2222222222222222" "$FG_OUTSIDE"
 
 # ============================================================
 section "Section 8: it never blocks, whatever happens (PostToolUse invariant)"
@@ -766,8 +891,16 @@ section "Section 8: it never blocks, whatever happens (PostToolUse invariant)"
 # fails for reasons no reclaim can fix (an unwritable state directory is
 # repo-controlled) and `rm -rf` of an ABSENT path SUCCEEDS.
 run_bounded() {  # <secs> <payload> -> sets BOUNDED_ST (137 = killed)
-  local secs="$1" payload="$2" waited=0 pid
-  printf '%s' "$payload" | bash "$REC" >"$SANDBOX/.bout" 2>"$SANDBOX/.berr" &
+  local secs="$1" payload="$2" waited=0 pid _sid
+  # THE ENVIRONMENT AGREES WITH THE PAYLOAD, for run_rec's reason and with its
+  # spelling (S11). Without the pin this driver left the RUNNER's own
+  # CLAUDE_CODE_SESSION_ID in the environment, the hook took that key as primary,
+  # and the engagement marker this world plants for the fixture session did not
+  # match it — so every bounded drive exited at the engagement switch and the
+  # lock below it was never reached by this section at all.
+  _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  printf '%s' "$payload" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$REC" \
+    >"$SANDBOX/.bout" 2>"$SANDBOX/.berr" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$secs" ]; do
     sleep 1; waited=$((waited + 1))
@@ -787,13 +920,31 @@ run_observation "$SID_A" "$LK_CFG" "$LK_REPO" wedged
 chmod 500 "$LK_REPO/.bionic/tmp"
 run_bounded 12 "$(mk_bash_post "$SID_A" "$LK_TR" "$LK_REPO" \
   "bash ~/.claude/hooks/stop-check.sh wedged" "$OBS_OUT")"
-if [ "$BOUNDED_ST" = "137" ]; then
-  no "the recorder terminates when the lock cannot be taken" "still running after 12s"
-fi
+# THE ASSERTION, NOT JUST THE FAILURE BRANCH (S11, AC-16). This section used to
+# call `no` inside `if [ "$BOUNDED_ST" = "137" ]` and nothing else: on the healthy
+# path it counted nothing, so it could never contribute a PASS and a recorder that
+# had stopped running altogether would have looked identical to one that exits
+# cleanly. `expect_status` reports both directions of the same fact — 137 is the
+# kill this bound applies after 12 s, and any non-zero is a block.
+expect_status "the recorder terminates and exits 0 when the lock cannot be taken" \
+  "0" "$BOUNDED_ST"
 chmod 700 "$LK_REPO/.bionic/tmp"
 
+# THE HEALTHY-PATH POSITIVE for the same bounded driver, over the same world with
+# the state directory writable again: the driver reaches the script, the script
+# finishes inside the bound, and it records. Without this the row above passes on
+# a payload that never started a process at all.
+run_bounded 12 "$(mk_bash_post "$SID_A" "$LK_TR" "$LK_REPO" \
+  "bash ~/.claude/hooks/stop-check.sh wedged" "$OBS_OUT")"
+expect_status "…and the same bounded drive on a WRITABLE state directory also exits 0" \
+  "0" "$BOUNDED_ST"
+expect_file "…having actually recorded, so the bound is measuring a real run" \
+  "$LK_REPO/$STATE_REL"
+
 # Malformed payloads: this script is fed by the platform, and a shape it does not
-# expect must be inert rather than fatal.
+# expect must be inert rather than fatal. Each one is asserted: PostToolUse cannot
+# block, so the exit status IS the invariant, and five drives that nobody looked
+# at were five chances for this script to start exiting non-zero unnoticed.
 for bad_payload in \
   '{}' \
   '{"tool_name":"Bash"}' \
@@ -802,6 +953,8 @@ for bad_payload in \
   'not json at all'
 do
   run_rec "$bad_payload"
+  expect_status "a malformed payload is inert, not fatal: $bad_payload" "0" "$REC_ST"
+  expect_empty "…and it blocks nothing on stdout either: $bad_payload" "$REC_OUT"
 done
 
 # ============================================================
@@ -1249,11 +1402,46 @@ section "Section 11: the session key is shape-checked before it becomes a path (
 # on this path is sanitized, this one was not, and this script's own threat model says the
 # repo is hostile. The check is the dispatch wall's, spelling for spelling.
 IFS='|' read -r I8_REPO I8_TR I8_SUB I8_CFG <<< "$(make_world identtraversal yes)"
-mkdir -p "$I8_REPO/.bionic/tmp/roster-x" "$I8_REPO/planted"
+# BOTH INTERPOLATION SITES GET THEIR DIRECTORY (S11). The key is interpolated
+# into `roster-<sid>.state` AND into the engagement marker `engaged-<sid>.state`,
+# and a traversal only resolves if the leading segment exists as a directory. With
+# `engaged-x` missing, the engagement switch — not the shape check — was what
+# refused this world, and removing the shape check from a scratch copy of the hook
+# left the section green: the guard the section names was never the reason. Both
+# paths resolve to the SAME file, `<repo>/planted/evil.state`, which the seed
+# below writes, so the engagement marker the switch looks for is a regular file
+# and the drive reaches the write this section is about.
+mkdir -p "$I8_REPO/.bionic/tmp/roster-x" "$I8_REPO/.bionic/tmp/engaged-x" "$I8_REPO/planted"
 SID_TRAVERSAL='x/../../../planted/evil'
 I8_PLANTED="$I8_REPO/planted/evil.state"
 seed_roster_full "$I8_REPO" "$SID_TRAVERSAL" "probemate" "toolu_01TRAVERSE" confirmed "$START_ID"
+
+# THE SEED ITSELF WROTE THROUGH THE TRAVERSAL, so the planted file EXISTS before
+# the hook runs — `roster-x/../../../planted/evil.state` under the state
+# directory resolves to `<repo>/planted/evil.state`. The question this section
+# asks is therefore not whether the file is there; it is whether THE HOOK wrote
+# to it. The seeded bytes are the baseline (S11, AC-16).
+I8_BEFORE="$(cat "$I8_PLANTED" 2>/dev/null)"
+expect_contains "the fixture really did place a file outside the state directory (the target exists)" \
+  "status=confirmed" "$I8_BEFORE"
+
 run_rec "$(mk_subagent_start "$SID_TRAVERSAL" "$I8_TR" "$I8_REPO" "general-purpose" "$START_ID")"
+
+I8_AFTER="$(cat "$I8_PLANTED" 2>/dev/null)"
+expect_eq "a session key carrying path separators writes NOTHING outside the state directory" \
+  "$I8_BEFORE" "$I8_AFTER"
+expect_absent "…so no identified row is appended through the traversal" \
+  "status=identified" "$I8_AFTER"
+expect_status "…and the hook is silent about it rather than failing" "0" "$REC_ST"
+
+# THE PAIRED POSITIVE, same section, same drive, same roster shape: a WELL-FORMED
+# session key does get its identified row. Without it, all three rows above pass
+# on a hook that stopped writing rosters entirely.
+IFS='|' read -r I8OK_REPO I8OK_TR I8OK_SUB I8OK_CFG <<< "$(make_world identtraversalok yes)"
+seed_roster_full "$I8OK_REPO" "$SID_A" "probemate" "toolu_01TRAVERSE" confirmed "$START_ID"
+run_rec "$(mk_subagent_start "$SID_A" "$I8OK_TR" "$I8OK_REPO" "general-purpose" "$START_ID")"
+expect_contains "the control: a harness-shaped session key DOES get its identified row" \
+  "status=identified" "$(cat "$I8OK_REPO/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
 
 # ============================================================
 section "Section 12: launch-reference immutability across resume (AC-5, R6, epic-16 w2 S6)"

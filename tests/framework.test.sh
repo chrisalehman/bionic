@@ -19,6 +19,11 @@
 #   §6  the counters and the assertion helpers are defined by the framework
 #   §7  the assertion-discipline docblock carries its two obligations
 #   §8  tests/run.sh registers this suite
+#   §9  the thirteen generic expect_* helpers are the framework's, each in a
+#       passing and a failing arm (AC-12)
+#   §10 expect_regex is an ERE and is not a pipeline (the 141 false FAIL)
+#   §11 anchor: a moved mutation anchor is red BEFORE the mutation runs,
+#       naming the anchor and the count it actually found (AC-29, AC-31)
 #
 # HERMETIC. Every planted suite is written into a mktemp'd sandbox holding a COPY
 # of the real tests/lib/assert.sh and is run as a child process; nothing here
@@ -266,6 +271,51 @@ expect_false "false silences a noisy failure" noisy 1
 
 finish
 PLANT_FAMILY_SILENT
+
+# --- §11's plants (S19, AC-29/AC-31). The fixture lives beside the planted
+# suites so a quoted heredoc can name it without expanding anything here.
+cat > "$SB/anchor-fx.txt" <<'PLANT_ANCHOR_FX'
+a needle here
+line 1
+line 2
+PLANT_ANCHOR_FX
+
+cat > "$SB/tests/p-anchor.test.sh" <<'PLANT_ANCHOR'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+FX="$(dirname "$0")/../anchor-fx.txt"
+
+section "anchor, both arms"
+anchor    "$FX" 'needle' 1
+anchor -E "$FX" '^line [0-9]+$' 2
+anchor    "$FX" '^line [0-9]+$' 2
+anchor    "$FX" 'needle' 2
+anchor    "$FX" 'moved-away' 1
+anchor    "$(dirname "$0")/../no-such-fixture.txt" 'needle' 1
+anchor    "$FX" 'line' 2
+
+finish
+PLANT_ANCHOR
+
+# The ORDER plant (AC-29: the anchor fails BEFORE the doctoring step). The
+# mutation here is a bare echo standing in for the `grep -v`/`sed` that would
+# follow it in a real suite; the row must already be on stdout when it runs.
+cat > "$SB/tests/p-anchor-order.test.sh" <<'PLANT_ANCHOR_ORDER'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+FX="$(dirname "$0")/../anchor-fx.txt"
+
+section "the anchor precedes the mutation"
+anchor "$FX" 'moved-away' 1
+echo "MUTATION-RAN"
+ok "the suite kept going after the red anchor"
+
+finish
+PLANT_ANCHOR_ORDER
 
 # ============================================================
 section "1: a section that asserts nothing fails by name (AC-13)"
@@ -532,6 +582,77 @@ expect_ne "10: …and wrong on a large one, non-zero though the pattern matches"
   "0" "$PIPE_BIG"
 
 # ============================================================
+section "11: anchor — the precondition of a mutation (AC-29, AC-31, S19)"
+# ============================================================
+#
+# A doctoring anchor is the `grep -v`/`sed` pattern a suite removes or rewrites
+# to build a mutant. When that pattern MOVES, the mutant comes out byte-identical
+# to the shipped file and every behavioural row below it goes green against a
+# fixture that was never mutated. `anchor` is the row that says so, by name,
+# before the mutation runs.
+#
+# PAIRED, BY CONSTRUCTION, the same shape as §9: each arm appears once here in
+# its passing form (a PASS row in THIS suite) and once inside a planted suite in
+# its failing form (a FAIL row read back out of that suite's output).
+
+ANCHOR_FX="$SB/anchor-fx.txt"
+
+# --- passing arms, called directly
+anchor    "$ANCHOR_FX" 'needle' 1
+anchor    "$ANCHOR_FX" 'line' 2
+anchor -E "$ANCHOR_FX" '^line [0-9]+$' 2
+
+# --- the failing arms, read back from the planted suite
+plant_run p-anchor.test.sh
+expect_eq "11: three anchors hold and four are red, in one section" \
+  "p-anchor.test.sh: 3/7 passed, 4 failed  sections=1 setup=0" \
+  "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-anchor\.test\.sh: .*\)$/\1/p')"
+expect_eq "11: …and the suite carrying a moved anchor exits 1" "1" "$P_RC"
+
+# AC-29: the failing row NAMES THE ANCHOR — its pattern and the file it anchors.
+expect_eq "11: a moved anchor is red by name (pattern and file)" "yes" \
+  "$(contains "$P_OUT" "FAIL: anchor: moved-away matches 1 line(s) of anchor-fx.txt")"
+# AC-29: …AND THE ACTUAL COUNT, which is what tells a reader it moved rather
+# than that the mutation's consumer broke.
+expect_eq "11: …and reports the actual count it found" "yes" \
+  "$(contains "$P_OUT" "found 0 line(s)")"
+expect_eq "11: a wrong count is red with that count, not just with zero" "yes" \
+  "$(contains "$P_OUT" "FAIL: anchor: needle matches 2 line(s) of anchor-fx.txt")"
+expect_eq "11: …naming the one line it actually found" "yes" \
+  "$(contains "$P_OUT" "found 1 line(s)")"
+# an anchor whose file is gone is red too, not silently zero
+expect_eq "11: an unreadable anchored file is red naming the file" "yes" \
+  "$(contains "$P_OUT" "FAIL: anchor: needle matches 1 line(s) of no-such-fixture.txt")"
+expect_eq "11: …and says the file could not be read" "yes" \
+  "$(contains "$P_OUT" "cannot read the anchored file")"
+
+# --- the two matchers are different matchers, the same discriminator §10 uses:
+# what the ERE form matches, the default fixed-string form must NOT.
+expect_eq "11: the default form reads its pattern as a fixed string, not an ERE" "yes" \
+  "$(contains "$P_OUT" "FAIL: anchor: ^line [0-9]+$ matches 2 line(s) of anchor-fx.txt")"
+
+# --- AC-29: the row is recorded BEFORE the mutation runs
+plant_run p-anchor-order.test.sh
+ANCHOR_ORDER_FAIL="$(printf '%s\n' "$P_OUT" | grep -n 'FAIL: anchor: moved-away' | head -1 | cut -d: -f1)"
+ANCHOR_ORDER_MUT="$(printf '%s\n' "$P_OUT" | grep -n '^MUTATION-RAN$' | head -1 | cut -d: -f1)"
+expect_nonempty "11: the order plant produced a red anchor row" "$ANCHOR_ORDER_FAIL"
+expect_nonempty "11: …and reached the mutation that follows it" "$ANCHOR_ORDER_MUT"
+expect_eq "11: the anchor's verdict is on stdout BEFORE the mutation runs" "yes" \
+  "$([ -n "$ANCHOR_ORDER_FAIL" ] && [ -n "$ANCHOR_ORDER_MUT" ] && \
+     [ "$ANCHOR_ORDER_FAIL" -lt "$ANCHOR_ORDER_MUT" ] && echo yes || echo "no")"
+# …and it does not abort the suite: a red anchor is a diagnosis, not a stop.
+expect_eq "11: a red anchor does not abort the suite" "yes" \
+  "$(contains "$P_OUT" "PASS: the suite kept going after the red anchor")"
+
+# --- the docblock carries the reason, and the pin discriminates
+ANCHORDOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
+expect_eq "11: the framework's docblock says why an anchor is a precondition" "yes" \
+  "$(contains "$ANCHORDOC" "a mutation whose anchor moved is byte-identical to the shipped file")"
+ANCHORDOC_STRIPPED="$(grep -v 'byte-identical to the shipped file' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
+expect_eq "11: …and that pin discriminates on a copy with the sentence removed" "no" \
+  "$(contains "$ANCHORDOC_STRIPPED" "a mutation whose anchor moved is byte-identical to the shipped file")"
+
+# ============================================================
 setup_section "plant the adoption wall's scratch tree and its six suites (S10)"
 # ============================================================
 #
@@ -674,57 +795,57 @@ w_drive() {  # run the scratch runner over the six planted suites
 w_drive
 
 # ============================================================
-section "11: the adoption wall refuses a shadowing suite, by name (AC-12, S10)"
+section "12: the adoption wall refuses a shadowing suite, by name (AC-12, S10)"
 # ============================================================
 
 # NOT VACUOUS: the runner and the framework under drive are the shipped files.
-expect_eq "11: the scratch runner is the shipped one apart from its roster" "yes" \
+expect_eq "12: the scratch runner is the shipped one apart from its roster" "yes" \
   "$([ "$(grep -c '^run "' "$W_TREE/tests/run.sh")" = "6" ] && echo yes || echo no)"
-expect_eq "11: the framework under drive is the shipped one, byte for byte" "yes" \
+expect_eq "12: the framework under drive is the shipped one, byte for byte" "yes" \
   "$(cmp -s "$FRAMEWORK" "$W_TREE/tests/lib/assert.sh" && echo yes || echo no)"
 
 # --- the three refusals, each naming the suite and the shadowed name ---------
-expect_eq "11: a private ok() at column 0 is refused, by name" "yes" \
+expect_eq "12: a private ok() at column 0 is refused, by name" "yes" \
   "$(contains "$W_OUT" "adoption wall: tests/w-ok.test.sh defines ok() at column 0")"
-expect_eq "11: a private expect_eq() at column 0 is refused, by name" "yes" \
+expect_eq "12: a private expect_eq() at column 0 is refused, by name" "yes" \
   "$(contains "$W_OUT" "adoption wall: tests/w-owned.test.sh defines expect_eq() at column 0")"
-expect_eq "11: a private PASS=0 at column 0 is refused, by name" "yes" \
+expect_eq "12: a private PASS=0 at column 0 is refused, by name" "yes" \
   "$(contains "$W_OUT" "adoption wall: tests/w-counter.test.sh defines PASS=0 at column 0")"
-expect_eq "11: …and the refusal names the framework that owns the name" "yes" \
+expect_eq "12: …and the refusal names the framework that owns the name" "yes" \
   "$(contains "$W_OUT" "the framework owns those names: $W_TREE/tests/lib/assert.sh")"
-expect_eq "11: …and the verdict says refused, not failed-some-other-way" "yes" \
+expect_eq "12: …and the verdict says refused, not failed-some-other-way" "yes" \
   "$(contains "$W_OUT" "✗ REFUSED (the adoption wall)")"
-expect_eq "11: …and the failed list names the suite and says it never ran" "yes" \
+expect_eq "12: …and the failed list names the suite and says it never ran" "yes" \
   "$(contains "$W_OUT" "- w-ok.test.sh (refused by the adoption wall, never run)")"
 
 # --- a refused suite is not run at all: its own marker never appears ---------
 # PAIRED with the three markers below, which DO appear — so an absent marker is
 # a suite that did not run, not a marker mechanism that never worked.
-expect_eq "11: a refused suite never ran (no marker)" "no" \
+expect_eq "12: a refused suite never ran (no marker)" "no" \
   "$([ -f "$W_MARKS/w-ok.ran" ] && echo yes || echo no)"
-expect_eq "11: …nor the second refused one" "no" \
+expect_eq "12: …nor the second refused one" "no" \
   "$([ -f "$W_MARKS/w-owned.ran" ] && echo yes || echo no)"
-expect_eq "11: …nor the third" "no" \
+expect_eq "12: …nor the third" "no" \
   "$([ -f "$W_MARKS/w-counter.ran" ] && echo yes || echo no)"
 
 # --- the three exempt suites are launched and pass --------------------------
-expect_eq "11: a definition inside a heredoc body is not a definition (A-10b)" "yes" \
+expect_eq "12: a definition inside a heredoc body is not a definition (A-10b)" "yes" \
   "$([ -f "$W_MARKS/w-heredoc.ran" ] && echo yes || echo no)"
-expect_eq "11: a subshell-scoped shadow is exempt (A-29, the r24e probe)" "yes" \
+expect_eq "12: a subshell-scoped shadow is exempt (A-29, the r24e probe)" "yes" \
   "$([ -f "$W_MARKS/w-indented.ran" ] && echo yes || echo no)"
-expect_eq "11: a name the framework does not own stays legal (A-16)" "yes" \
+expect_eq "12: a name the framework does not own stays legal (A-16)" "yes" \
   "$([ -f "$W_MARKS/w-local.ran" ] && echo yes || echo no)"
-expect_eq "11: …and none of the three is named in a refusal" "no" \
+expect_eq "12: …and none of the three is named in a refusal" "no" \
   "$(contains "$W_OUT" "w-heredoc.test.sh defines")"
-expect_eq "11: …nor the subshell one" "no" \
+expect_eq "12: …nor the subshell one" "no" \
   "$(contains "$W_OUT" "w-indented.test.sh defines")"
-expect_eq "11: …nor the suite-specific one" "no" \
+expect_eq "12: …nor the suite-specific one" "no" \
   "$(contains "$W_OUT" "w-local.test.sh defines")"
 
 # --- the tally and the exit status stay honest ------------------------------
-expect_eq "11: the tally counts three refusals as three failures" "yes" \
+expect_eq "12: the tally counts three refusals as three failures" "yes" \
   "$(contains "$W_OUT" "Gating: 3 passed, 3 failed")"
-expect_eq "11: …and the run exits 1" "1" "$W_RC"
+expect_eq "12: …and the run exits 1" "1" "$W_RC"
 
 # --- ONE WALL, BOTH SCHEDULERS ----------------------------------------------
 # A mode is a scheduling choice and nothing else (this runner's own header), so
@@ -738,14 +859,14 @@ W_SERIAL_OUT="$( cd "$W_TREE" && \
   BIONIC_TEST_JOBS_CEILING="2" \
   bash tests/run.sh --serial 2>&1 )"
 W_SERIAL_RC=$?
-expect_eq "11: --serial refuses the same suite, in the same words" "yes" \
+expect_eq "12: --serial refuses the same suite, in the same words" "yes" \
   "$(contains "$W_SERIAL_OUT" "adoption wall: tests/w-ok.test.sh defines ok() at column 0")"
-expect_eq "11: …and reaches the same tally" "yes" \
+expect_eq "12: …and reaches the same tally" "yes" \
   "$(contains "$W_SERIAL_OUT" "Gating: 3 passed, 3 failed")"
-expect_eq "11: …and the same exit status" "1" "$W_SERIAL_RC"
+expect_eq "12: …and the same exit status" "1" "$W_SERIAL_RC"
 
 # ============================================================
-section "12: every suite on the real roster passes the wall (AC-12, S10)"
+section "13: every suite on the real roster passes the wall (AC-12, S10)"
 # ============================================================
 #
 # The wall's own scan, over the tree as it stands. This is the adoption half of
@@ -765,9 +886,9 @@ for W_F in "$REPO"/tests/*.test.sh; do
 done
 echo "   roster scanned: ${W_SCANNED} suites, ${W_REFUSED} refused${W_REFUSED_NAMES}"
 
-expect_eq "12: the scan read the whole roster (not vacuous)" "yes" \
+expect_eq "13: the scan read the whole roster (not vacuous)" "yes" \
   "$([ "$W_SCANNED" -ge 40 ] && echo yes || echo no)"
-expect_eq "12: no suite on the roster shadows the framework" "0" "$W_REFUSED"
+expect_eq "13: no suite on the roster shadows the framework" "0" "$W_REFUSED"
 
 # --- THE MUTATION ARM: the count moves when a shadow is planted -------------
 # A scratch COPY of the roster's first suite, doctored with one flush-left
@@ -782,10 +903,10 @@ W_MUT_REFUSED=0
 for W_F in "$W_MUT"/*.test.sh; do
   [ -n "$(_tf_adoption_refusal "$W_F")" ] && W_MUT_REFUSED=$((W_MUT_REFUSED + 1))
 done
-expect_eq "12: the doctored copy differs from the suite it was made from" "no" \
+expect_eq "13: the doctored copy differs from the suite it was made from" "no" \
   "$(cmp -s "$W_VICTIM" "$W_MUT/$(basename "$W_VICTIM")" && echo yes || echo no)"
-expect_eq "12: one planted shadow moves the count from zero to one" "1" "$W_MUT_REFUSED"
-expect_eq "12: …and the refusal names the planted name" "yes" \
+expect_eq "13: one planted shadow moves the count from zero to one" "1" "$W_MUT_REFUSED"
+expect_eq "13: …and the refusal names the planted name" "yes" \
   "$(contains "$(_tf_adoption_refusal "$W_MUT/$(basename "$W_VICTIM")")" "defines ok() at column 0")"
 
 finish

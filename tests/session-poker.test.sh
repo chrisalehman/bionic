@@ -596,11 +596,46 @@ expect_absent   "…and the acked overdue row raises nothing" "decision=NOTIFY" 
 section "Section 4: refusals propagate from the sweeper's one read"
 # ============================================================
 
+#
+# THE CLAIM, ASSERTED (wave-01 S11, AC-16 / A-23). This section built its fixture,
+# ran a tick and asserted nothing — the framework's section floor is what surfaced
+# it. What it means to say is the exit table's line 2 at the top of
+# hooks/session-poker.sh: a refusal PROPAGATED from the sweeper's one read is the
+# tick's own refusal, exit 2, quoting the sweeper.
+#
+# THE FIXTURE REACHED NO SWEEPER READ (S11). `rm -rf .bionic/tmp` removes the
+# engagement marker `make_repo` plants along with the roster, so the tick exited at
+# the engagement switch with `NOT-ENGAGED … nothing decided` and rc 0: the section
+# was driving a bystander session, not a refusal. The marker is re-planted AFTER
+# the symlink goes in — through it, which is what a repo whose state directory is
+# a link actually looks like — so the tick is engaged and reaches the read.
 R4="$(make_repo s4)"; new_roster "$R4"
 rm -rf "$R4/.bionic/tmp"
 mkdir -p "$TMPROOT/elsewhere-s4"
 ln -s "$TMPROOT/elsewhere-s4" "$R4/.bionic/tmp"
+engage "$R4"
+new_roster "$R4"
 poke "$R4" tick
+expect_status "a tick over an unreadable state directory REFUSES (exit 2), it does not decide" \
+  "2" "$RC"
+expect_contains "…and says the verdict read did not complete" \
+  "REFUSED — the verdict read did not complete" "$OUT"
+expect_contains "…quoting the SWEEPER's own refusal rather than inventing one" \
+  "sweeper: REFUSED" "$OUT"
+expect_contains "…naming the state directory as the symbolic link it is" \
+  "is a symbolic link" "$OUT"
+expect_absent "…and decides nothing: no DISARM, NOTIFY or QUIET verdict is printed" \
+  "poker: QUIET" "$OUT"
+
+# THE PAIRED POSITIVE, same builder and same drive with the link taken out: the
+# tick decides. Every row above is about a refusal, and a refusal assertion over a
+# drive that could never have decided anything is not a propagation test.
+R4OK="$(make_repo s4ok)"; new_roster "$R4OK"
+poke "$R4OK" tick
+expect_status "the control: the same tick over a REAL state directory decides (exit 0)" \
+  "0" "$RC"
+expect_absent "…and refuses nothing" "REFUSED" "$OUT"
+expect_regex "…printing a verdict of its own" 'poker: (DISARM|QUIET|NOTIFY)' "$OUT"
 
 # ============================================================
 section "Section 5: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1)"
