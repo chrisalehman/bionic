@@ -7456,4 +7456,159 @@ expect_eq "S13.5 …which is what awk needs for a key of this length" \
   "16" "$(( $(printf '%s' 'suites_allowed=' | wc -c | tr -d ' ') + 1 ))"
 
 # ============================================================
+# ============================================================
+section "S17 — no private builder of a shared shape remains (AC-28)"
+# ============================================================
+#
+# THE ABSENCE HALF AND THE POSITIVE HALF, TOGETHER (spec AC-28). Three shapes crossed this
+# tree in sixty-three hand-written copies: the `roster-state/v1` row (16 suites), the
+# `landing-swept/v1` marker (6), and the recorded ListAgents answer (8). S14/S15/S16 built
+# the one builder for each; S17 removed the copies. An absence test alone would pass on a
+# tree where the suites were deleted, so every absence below is paired with the positive
+# that the former site now SOURCES the builder it was replaced by.
+#
+# THIS SECTION SPELLS NONE OF THE THREE LITERALS. Each is read back out of the writer that
+# owns it — the row's token off `roster_row`'s own output, the marker's off the constant the
+# two hooks share, the answer's off the committed corpus — so a suite cannot pass this by
+# renaming the schema, and this file cannot match its own scan.
+#
+# WHAT COUNTS AS A HIT. The schema token followed by `|` is a row or marker being written or
+# selected; the token alone is the VERSION being asserted, which several suites do on
+# purpose (`the row's leading field is the schema version`) and which must stay. Full-line
+# comments are skipped: naming the shape in prose is how these files stay readable, and a
+# scan that forbade it would buy its zero by making the tree worse.
+#
+# THE ONE EXEMPTION, NAMED: tests/live-agents.test.sh. That suite is the PARSER's own, and
+# its bodies are the parser's inputs — a doubled `Teammates` header, a forged block after
+# `Peer sessions`, a garbled separator. A builder able to emit those would be able to emit
+# them by accident, so they stay hand-written there and the exemption is held to that one
+# file, with the paired positive that the file really does still carry them.
+
+S17_TESTS_DIR="$REPO_ROOT/tests"
+S17_ROW_TOKEN="${ROSTER_ROW_SCHEMA}|"
+S17_MARK_TOKEN="${SWEPT_SCHEMA}|"
+S17_LA_TOKEN="$(live_answer_block_header 1 | cut -d'(' -f1)("
+
+# Non-vacuity of the three tokens themselves: a typo in any of them would make every
+# absence assertion below pass over an untouched tree.
+expect_contains "S17 the row token came off the writer" "roster-state/" "$S17_ROW_TOKEN"
+expect_contains "S17 the marker token came off the hooks' shared constant" "landing-swept/" \
+  "$S17_MARK_TOKEN"
+expect_contains "S17 the answer token came off the corpus" "Teammates" "$S17_LA_TOKEN"
+
+s17_hits() {  # <literal> [exempt basename] -> "<suite>:<count> …" for every suite still holding it
+  local lit="$1" exempt="${2:-}" f b n out=""
+  for f in "$S17_TESTS_DIR"/*.test.sh; do
+    b="$(basename "$f")"
+    [ "$b" = "$exempt" ] && continue
+    n="$(grep -v '^[[:space:]]*#' "$f" | grep -cF "$lit")" || n=0
+    [ "$n" -gt 0 ] && out="${out}${b}:${n} "
+  done
+  printf '%s' "$out"
+}
+
+expect_eq "S17 no suite hand-writes or hand-selects the roster row any more" \
+  "" "$(s17_hits "$S17_ROW_TOKEN")"
+expect_eq "S17 no suite hand-writes or hand-selects the swept marker any more" \
+  "" "$(s17_hits "$S17_MARK_TOKEN")"
+expect_eq "S17 no suite hand-writes a ListAgents answer any more (the parser's own excepted)" \
+  "" "$(s17_hits "$S17_LA_TOKEN" live-agents.test.sh)"
+
+# THE EXEMPTION IS NOT A BLANK CHEQUE: it is one file, and that file is exempt because it
+# genuinely still carries such bodies. If it ever stops, the exemption goes with it.
+expect_true "S17 the exempt suite is the parser's own, and it does still hold answer bodies" \
+  test "$(grep -v '^[[:space:]]*#' "$S17_TESTS_DIR/live-agents.test.sh" | grep -cF "$S17_LA_TOKEN")" -gt 0
+
+# --- the paired positive: every former site sources the builder that replaced it ---
+
+s17_sources() {  # <suite basename> <lib basename> -> 1 when the suite sources it
+  grep -cF ". \"\$(dirname \"\$0\")/lib/$2\"" "$S17_TESTS_DIR/$1.test.sh" 2>/dev/null || printf '0'
+}
+
+for _s17 in cross-gate-agreement dispatch-preflight execution-recorder fail-direction-table \
+            session-poker stop-check stop-guard stop-orders; do
+  expect_eq "S17 [$_s17] sources the one ListAgents builder" \
+    "1" "$(s17_sources "$_s17" live-answer.sh)"
+done
+
+for _s17 in cross-gate-agreement dispatch-preflight doctor-fleet doctor-patrol \
+            execution-recorder fail-direction-table hook-adoption landing-gate \
+            preflight-probe session-poker session-start session-sweeper stop-check \
+            stop-guard stop-orders worktree; do
+  expect_eq "S17 [$_s17] sources the one roster-row builder" \
+    "1" "$(s17_sources "$_s17" roster-row.sh)"
+done
+
+for _s17 in dispatch-preflight doctor-fleet doctor-patrol landing-gate session-poker \
+            session-start; do
+  expect_eq "S17 [$_s17] sources the one swept-marker builder" \
+    "1" "$(s17_sources "$_s17" swept-marker.sh)"
+done
+
+# --- §S17b the THIRD producer of the roster row, held to the writer's key set (A-15) ---
+#
+# hooks/execution-recorder.sh does not BUILD a row — it rewrites one field-wise with
+# `RS = "|"`, which is why a row that grows a field anywhere still comes back out unchanged.
+# But its `END` arm APPENDS `teammate_id=` when the launch row carried none, and that append
+# is a from-scratch segment written by a file that is not the writer. Routing the whole
+# rewrite through `roster_row` was rejected: the writer emits its optional fields
+# present-if-passed, so re-emitting a pre-wall row through it would ADD `files=`,
+# `suites_allowed=` and `suites_source=` empty and destroy the third state those keys'
+# ABSENCE encodes (payload/scripts/lib/roster.sh's own header). What is pinned instead is
+# that the two producers agree on the KEY SET and on every VALUE — the row's readers are by
+# key, and position is the one thing they demonstrably do not read.
+#
+# The recorder's awk is not re-typed here: it is extracted from the shipped file and eval'd,
+# the same `field1_via`/`field2_via` idiom this suite already uses.
+
+s17_rewrite_via() {  # <hook file> <row> <agent id> <teammate id> <name> -> the completed row
+  ( ROW="$2"; ROW_AGENT_ID="$3"; ROW_TEAMMATE_ID="$4"; ROW_NAME="$5"; PRIOR_LAUNCH=""
+    eval "$(awk '/^  COMPLETED=\$\(printf/,/^    END \{ if \(tid/' "$1")"
+    printf '%s\n' "$COMPLETED" ) 2>/dev/null
+}
+
+s17_keys() { printf '%s' "$1" | tr '|' '\n' | cut -d= -f1 | sort | tr '\n' ' '; }
+s17_pairs() { printf '%s' "$1" | tr '|' '\n' | sort | tr '\n' ' '; }
+
+S17_LAUNCH_ROW="$(roster_row_fixture status=intended session=s17sess name=s17-writer \
+  agent_id= launched_at=2026-09-06T00:00:00Z deliverable=.bionic/docs/record/s17.md \
+  tool_use_id=toolu_01S17)"
+S17_TID="s17-writer@session-s17sess"
+S17_DONE="$(s17_rewrite_via "$PARTY_ER" "$S17_LAUNCH_ROW" "as17-1111111111111111" "$S17_TID" "s17-writer")"
+
+# What the ONE WRITER produces for the same facts, with the field named.
+S17_WRITTEN="$(roster_row_fixture status=confirmed session=s17sess name=s17-writer \
+  agent_id=as17-1111111111111111 launched_at=2026-09-06T00:00:00Z \
+  deliverable=.bionic/docs/record/s17.md teammate_id="$S17_TID" tool_use_id=toolu_01S17)"
+
+expect_eq "S17b the recorder's appended row carries the writer's key set, exactly" \
+  "$(s17_keys "$S17_WRITTEN")" "$(s17_keys "$S17_DONE")"
+expect_eq "S17b …and every key's value agrees, field for field" \
+  "$(s17_pairs "$S17_WRITTEN")" "$(s17_pairs "$S17_DONE")"
+expect_eq "S17b …with exactly one teammate_id on the row, never two" \
+  "1" "$(printf '%s' "$S17_DONE" | tr '|' '\n' | grep -c '^teammate_id=')"
+
+# THE DISCRIMINATOR — a copy of the recorder whose appended segment is spelled with a
+# different key. Every reader in the fleet is by key, so this is precisely the drift the
+# comparison above exists to catch, and it is invisible to every other assertion in the tree.
+S17_ER_MUT="$SANDBOX/s17-execution-recorder-mutant.sh"
+awk '{ gsub(/\|teammate_id=%s/, "|teammate=%s"); print }' "$PARTY_ER" > "$S17_ER_MUT"
+expect_eq "S17b the mutation applies (the append has not moved out from under this proof)" \
+  "1" "$(diff "$PARTY_ER" "$S17_ER_MUT" | grep -c '^< ')"
+S17_DONE_MUT="$(s17_rewrite_via "$S17_ER_MUT" "$S17_LAUNCH_ROW" "as17-1111111111111111" "$S17_TID" "s17-writer")"
+expect_eq "S17b …and the key-set pin goes red on it (the pin discriminates)" \
+  "no" "$([ "$(s17_keys "$S17_WRITTEN")" = "$(s17_keys "$S17_DONE_MUT")" ] && echo yes || echo no)"
+
+# --- §S17c the poker's third spelling of the marker schema is gone (A-14b) ---
+#
+# §S15b pins `adopt_copy_marker`. `youngest_suite_writer` was the OTHER function in the same
+# file greping the bare literal, and it is the one whose failure mode is silent: no closing
+# markers found reads there as "every row is still open", which fills the writer budget.
+expect_eq "S17c youngest_suite_writer greps the shared constant, not a literal" \
+  "0" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF "grep '^${SWEPT_SCHEMA}|'")"
+expect_eq "S17c …and it does grep the marker, through the constant (the zero is not absence)" \
+  "1" "$(awk '/^youngest_suite_writer\(\)/,/^\}/' "$PARTY_PK" | grep -cF 'grep "^${SWEPT_SCHEMA}|"')"
+
+
+# ============================================================
 finish
