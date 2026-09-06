@@ -37,6 +37,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 LIB="${REPO}/payload/scripts/lib/worktree.sh"
@@ -441,9 +442,7 @@ landing-verdict/v1|at=2026-09-02T00:00:00Z|session=s|name=W-ADOPT|state=UNMET|ac
 V
 expect_eq "an ACKED row discharges too" "${O}/.worktrees/adopt	W-ADOPT" \
   "$(worktree_lease_overruns "$O" "$VERDICTS")"
-cat > "$VERDICTS" <<'V'
-roster-state/v1|status=CLOSED|session=s|name=W-ADOPT|deliverable=x
-V
+roster_row_fixture status=CLOSED session=s name=W-ADOPT deliverable=x > "$VERDICTS"
 expect_eq "a CLOSED roster row discharges too" "${O}/.worktrees/adopt	W-ADOPT" \
   "$(worktree_lease_overruns "$O" "$VERDICTS")"
 
