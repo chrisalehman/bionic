@@ -137,6 +137,22 @@
 #   - a teammate row with NO marker at all               -> skip, unmarked (never a first
 #                                                          verdict from this event)
 #
+# THE Files: RECONCILIATION (S18, AC-22) rides the same per-candidate loop, once per row, on
+# a "verdict" candidate only — a recheck never speaks (belt-on-belt with "supersession never
+# speaks" above) and a row with no `deliverable=` never becomes a candidate at all, so it is
+# out of reach of this check too, on the same "declares nothing" reasoning the deliverable
+# checks already use:
+#   - the row's `files=` is empty (a Suites:-only brief,
+#     or a row that predates the wall)                    -> not reconciled, silent, pass
+#   - the row's worktree cannot be located or is gone,
+#     or its branch has no merge-base with the main
+#     checkout's current branch                            -> not reconciled, silent (ambiguity)
+#   - the diff has no path outside the declared `files=`   -> pass, silent
+#   - the diff touches a path outside the declared
+#     `files=`                                              -> REFUSE, naming the file(s) and
+#                                                          (impact-command configured) the
+#                                                          suites `impact` derives for them
+#
 # Exit code 2 = block the stop in Claude Code hooks; stderr goes back to the orchestrator,
 # which is why the refusal must name the row and its artifacts rather than the rule.
 # [WALL: tests/landing-gate.test.sh]
@@ -165,6 +181,61 @@ swept_marker_write() {  # <roster file> <at> <session> <name> <agent id> <state>
   printf '%s|at=%s|session=%s|name=%s|agent_id=%s|state=%s\n' \
     "$SWEPT_SCHEMA" "$at" "$sid" "$name" "$aid" "$state" >> "$f" 2>/dev/null
   return 0
+}
+
+# ---------------------------------------------------------- FILES: RECONCILIATION (S18, AC-22)
+#
+# DECLARE -> DERIVE -> RECONCILE (design ledger D2). `hooks/dispatch-preflight.sh` derives a
+# BUDGET from a brief's `Files:` at dispatch; these two functions are the third leg — asking,
+# once a row is landed, whether the diff the agent actually produced stayed inside that same
+# declared set. Called from the per-candidate loop below, never from the sweeper: the
+# sweeper answers about the DELIVERABLE, this answers about the DIFF, and the two questions
+# share a candidate line but not a verdict.
+
+# The row's worktree, by the ONE mapping the fleet has for "which tree belongs to whom"
+# (payload/scripts/lib/worktree.sh's `worktree_for_row`, sourced above as `BIONIC_LIB_WANT`
+# declares). That function only builds a path string — it lowercases the row name and never
+# stats anything — which a case-INSENSITIVE filesystem (macOS, this wave's covered
+# environment) resolves against a mixed-case directory for free. A case-SENSITIVE one
+# (Linux, fog) would not, so the fallback below scans the farm by lowercased basename before
+# giving up; it is the one place this file re-derives any part of the mapping, and it does
+# so only to absorb a filesystem property `worktree_for_row` does not, never to re-decide
+# which directory a row's name means.
+_lg_worktree_for_name() {  # <repo> <row name> -> abs worktree path on stdout, or nothing
+  local repo="$1" name="$2" cand d base lc
+  if declare -f worktree_for_row >/dev/null 2>&1; then
+    cand=$(worktree_for_row "$repo" "$name" 2>/dev/null)
+    if [ -n "$cand" ] && [ -d "$cand" ]; then printf '%s' "$cand"; return 0; fi
+  fi
+  lc=$(printf '%s' "${name#W-}" | tr '[:upper:]' '[:lower:]')
+  [ -n "$lc" ] && [ -d "$repo/.worktrees" ] || return 1
+  for d in "$repo"/.worktrees/*/; do
+    [ -d "$d" ] || continue
+    base=$(basename "$d")
+    if [ "$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')" = "$lc" ]; then
+      printf '%s' "${d%/}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Is a path the diff touched inside the declared set? Exact match, or under a declared
+# DIRECTORY — "a declared directory covers its files" (S18 brief) — checked without caring
+# whether the author spelled the directory with a trailing slash.
+_lg_path_declared() {  # <diff path> <comma-joined declared files>
+  local p="$1" list="$2" old_ifs entry
+  old_ifs="$IFS"; IFS=','; set -f
+  # shellcheck disable=SC2086
+  set -- $list
+  set +f; IFS="$old_ifs"
+  for entry in "$@"; do
+    entry="${entry%/}"
+    [ -n "$entry" ] || continue
+    [ "$p" = "$entry" ] && return 0
+    case "$p" in "$entry"/*) return 0 ;; esac
+  done
+  return 1
 }
 
 INPUT=$(cat)
@@ -237,7 +308,7 @@ CWD=$(_jq '.cwd')
 # payload/scripts/lib/loader.sh. FAIL OPEN: the landing verdict is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="root.sh run.sh session.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -372,6 +443,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "landing-gate"; fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# THE ROW -> WORKTREE MAPPING (S18, AC-22). `worktree_for_row` is the one place that
+# convention lives (payload/scripts/lib/worktree.sh: "a second spelling of it there is a
+# second definition of which tree belongs to whom") — sourced here so the Files:
+# reconciliation below asks it rather than re-deriving the mapping.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/worktree.sh"
 
 # THE ROOT (spec AC-10, lib/root.sh). `git rev-parse --show-toplevel` answered with the
 # WORKTREE's own root, so a stop raised from a linked worktree looked for the roster
@@ -486,7 +563,7 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
   }
   index($0, pfx) != 1 { next }
   {
-    name = ""; rsession = ""; aid = ""; deliv = ""; tid = ""
+    name = ""; rsession = ""; aid = ""; deliv = ""; tid = ""; fls = ""
     nf = split($0, f, "|")
     for (i = 1; i <= nf; i++) {
       if (name == ""     && substr(f[i], 1, 5)  == "name=")        name     = substr(f[i], 6)
@@ -494,6 +571,7 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
       if (aid == ""      && substr(f[i], 1, 9)  == "agent_id=")    aid      = substr(f[i], 10)
       if (deliv == ""    && substr(f[i], 1, 12) == "deliverable=") deliv    = substr(f[i], 13)
       if (tid == ""      && substr(f[i], 1, 12) == "teammate_id=") tid      = substr(f[i], 13)
+      if (fls == ""      && substr(f[i], 1, 6)  == "files=")       fls      = substr(f[i], 7)
     }
     # The roster file is already per-session; this only fires on a hand-edited or copied
     # file, and it costs one comparison to keep the sweep honest about whose promises it is
@@ -508,6 +586,13 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
     # appended without copying it forward cannot un-teammate a contract.
     if (tid != "") tm[name] = tid
     dl[name] = deliv
+    # `files=` (S18, AC-22) is read the same way `deliverable=` is: the LATEST row value,
+    # whatever it is. Post-S13 every row dispatch-preflight writes carries the key (empty
+    # string for a Suites:-only brief); a pre-S13 row carries no key at all and parses to the
+    # same empty value either way, so one predicate downstream (non-empty or not) covers both.
+    # (No apostrophes in this paragraph: it lives inside a single-quoted awk program.)
+    gsub(/\t/, " ", fls)
+    fl[name] = fls
   }
   END {
     # ---------- the landing arm: ONE row, the one that just stopped ----------
@@ -535,7 +620,7 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
       # Both keys, because the marker may have been written under either: the row id when the
       # identification arm ran, the payload id when it did not.
       if ((a in swept) || (pid in swept)) exit
-      printf "%s\t%s\t%s\n", a, nm, "verdict"
+      printf "%s\t%s\t%s\t%s\n", a, nm, "verdict", fl[nm]
       exit
     }
 
@@ -597,7 +682,7 @@ CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEM
       if (!(nm in agent)) continue          # never confirmed: cannot be placed
       if (dl[nm] == "") continue            # declares nothing; MET vacuously either way
       if (agent[nm] in swept) continue      # already answered for, once and for all
-      printf "%s\t%s\t%s\n", agent[nm], nm, "verdict"
+      printf "%s\t%s\t%s\t%s\n", agent[nm], nm, "verdict", fl[nm]
     }
   }
 ' "$ROSTER_FILE" 2>/dev/null)
@@ -612,7 +697,7 @@ _field() {  # <key> — by key, never by position, as every reader of these line
 REFUSALS=""
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-while IFS=$'\t' read -r AID NAME KIND; do
+while IFS=$'\t' read -r AID NAME KIND CFILES; do
   [ -n "$AID" ] && [ -n "$NAME" ] || continue
   # STILL IN FLIGHT — the payload says so, and an agent that is visibly still working has
   # not failed to land. No verdict, and no marker: its one answer is still owed.
@@ -664,6 +749,61 @@ while IFS=$'\t' read -r AID NAME KIND; do
   # has already been refused once, the agent has already acted on that refusal, and the whole
   # promise of this gate is that it blocks once. Recording the recovery is the entire job.
   [ "$KIND" = "recheck" ] && continue
+
+  # ---------------------------------------------------------- Files: RECONCILIATION (S18, AC-22)
+  #
+  # INDEPENDENT OF THE DELIVERABLE VERDICT ABOVE, and run exactly once — this row reaches
+  # this line only as a first-time "verdict" candidate (recheck already continued above,
+  # and a row with no `deliverable=` never became a candidate at all — see the awk END
+  # block's own "declares nothing" skips, which this check inherits rather than re-states).
+  if [ -n "$CFILES" ]; then
+    LG_WT=$(_lg_worktree_for_name "$REPO" "$NAME")
+    if [ -n "$LG_WT" ] && [ -d "$LG_WT" ]; then
+      # THE BASE IS THE MERGE-BASE WITH THE MAIN CHECKOUT'S CURRENT BRANCH, recomputed here
+      # rather than read off a stored value: no roster field records the sha a worktree
+      # spawned from, and `worktree.sh`'s own `land` verb does not need one either — it
+      # counts commits `HEAD..branch` from the main checkout. A merge-base is exactly
+      # "everything this branch has added since it diverged", which is what a `Files:`
+      # declaration is a promise ABOUT, and recomputing it survives the ordinary case where
+      # the main branch has moved on since the tree was spawned — a stored base sha would not.
+      LG_MAIN_BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)
+      LG_BASE=""
+      [ -n "$LG_MAIN_BRANCH" ] && LG_BASE=$(git -C "$LG_WT" merge-base "$LG_MAIN_BRANCH" HEAD 2>/dev/null)
+      if [ -n "$LG_BASE" ]; then
+        LG_OUTSIDE=""
+        while IFS= read -r LG_DF; do
+          [ -n "$LG_DF" ] || continue
+          _lg_path_declared "$LG_DF" "$CFILES" && continue
+          LG_OUTSIDE="${LG_OUTSIDE}${LG_OUTSIDE:+ }${LG_DF}"
+        done <<LGDIFF
+$(git -C "$LG_WT" diff --name-only "${LG_BASE}..HEAD" 2>/dev/null)
+LGDIFF
+        if [ -n "$LG_OUTSIDE" ]; then
+          # THE SAME COMMAND, THE SAME CONFIG KEY hooks/dispatch-preflight.sh reads (S13),
+          # re-asked of the offending files alone (spec AC-22: "naming the files and the
+          # suites they imply"). Absent command -> name the files only, exactly as the
+          # dispatch wall itself falls back when nothing is configured.
+          LG_IMPACT_CMD=$(config_value "$REPO" "impact-command" "")
+          LG_SUITES=""
+          if [ -n "$LG_IMPACT_CMD" ]; then
+            # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
+            LG_SUITES=$(cd "$REPO" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE 2>/dev/null \
+              | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
+            LG_SUITES="${LG_SUITES% }"
+          fi
+          REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})} — not declared. Add the file(s) to Files: and re-derive, or revert them before landing.
+"
+        fi
+      fi
+    fi
+  fi
+  # A Suites:-only brief (AC-20's other half), or a pre-S13 row, declared no Files: at all,
+  # so there is no declared set to reconcile the diff against. SILENT, on the same footing
+  # as every other "cannot judge this" path in this file: this is the ordinary case for most
+  # of the fleet today (Files: is the newer of AC-20's two labels), and a stderr line on
+  # every such landing would turn the common case into noise on every turn end — the exact
+  # false-alarm shape the rest of this gate exists to end. The disposition is documented
+  # once, above, in the FAIL DIRECTIONS table; it is not re-announced per row.
 
   [ "$VERDICT_RC" -eq 1 ] || continue
   [ "$STATE" = "UNMET" ] || continue
