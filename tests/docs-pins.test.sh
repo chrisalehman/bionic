@@ -101,7 +101,12 @@ fi
 
 # --- Anti-vacuity: the same extractors must discriminate a real mismatch ---
 
-anchor "$HELP_MD" "bionic ${PLUGIN_VERSION} (installed)" 1
+# WHOLE-LINE ERE, because the sed two lines down is `^...$`-anchored. A fixed-string
+# anchor is a substring test: it survives a reindent of this line while the sed does
+# not, leaving a "mutant" byte-identical to the shipped help.md — see plant 2 of
+# s19c-planted-move.log, where exactly that hid a broken mutation. The version's dots
+# are escaped so a literal `1.4.4` cannot match `1x4x4`.
+anchor -E "$HELP_MD" "^bionic ${PLUGIN_VERSION//./\\.} \\(installed\\)$" 1
 DOCTORED_HELP="$TMP/help-mismatched.md"
 sed "s/^bionic ${PLUGIN_VERSION} (installed)\$/bionic 0.0.0-mismatch (installed)/" \
   "$HELP_MD" > "$DOCTORED_HELP"
@@ -213,6 +218,11 @@ expect_eq "11: the marketplace manifest sources bionic from ./payload — the ow
   "./payload" "$(mkt_source_of "$MARKETPLACE")"
 expect_empty "12: …and declares no version of its own, so there is nothing here to drift" \
   "$(mkt_version_of "$MARKETPLACE")"
+# The jq below selects the bionic plugin entry BY NAME, so that name is this mutation's
+# anchor. TWO is the measured truth, not a slack bound: the manifest carries its own
+# `"name": "bionic"` at the top level and the plugins[] entry carries a second. Either one
+# moving turns this row red and says which count it found.
+anchor "$MARKETPLACE" '"name": "bionic"' 2
 DOCTORED_MKT="$TMP/marketplace-mismatched.json"
 jq '(.plugins[] | select(.name == "bionic")) |= (. + {version: "0.0.0-mismatch"})' \
   "$MARKETPLACE" > "$DOCTORED_MKT"
@@ -234,6 +244,7 @@ expect_contains "16: …and PLUGIN_VERSION comes from detect_plugin_integrity, n
   'PLUGIN_VERSION="${PLUGIN_FACT#plugin: version=}"' "$(cat "$DOCTOR_SH")"
 expect_eq "17: …and that reader reports plugin.json's version for the shipped payload root" \
   "$PLUGIN_VERSION" "$(detect_version_of "${REPO}/payload")"
+anchor "$PLUGIN_JSON" '"version": "' 1
 DOCTORED_ROOT="$TMP/doctored-root"
 mkdir -p "$DOCTORED_ROOT/.claude-plugin"
 jq --arg v "0.0.0-mismatch" '.version = $v' "$PLUGIN_JSON" > "$DOCTORED_ROOT/.claude-plugin/plugin.json"
