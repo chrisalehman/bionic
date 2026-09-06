@@ -50,16 +50,10 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 SPAWN="${REPO}/payload/scripts/spawn-worktree.sh"
 
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
-# Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
-# 8582861, epic-18 wave-03, and nothing replaced the pin).
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "'$actual' does not match '$pattern'"; fi
-}
+# expect_true, expect_false, expect_match are the framework's (tests/lib/assert.sh)
+# — S9b removed the private shadows here (AC-12); expect_match's glob semantics
+# and argument order (`<label> <glob> <actual>`) were already identical, so
+# every call site below binds unchanged.
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 

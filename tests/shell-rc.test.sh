@@ -38,7 +38,8 @@ SHELL_SH="${REPO}/payload/scripts/lib/shell.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
 REMOVE_SH="${REPO}/payload/scripts/remove.sh"
 
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
+# expect_true is the framework's (tests/lib/assert.sh) — S9b removed the private
+# shadow here (AC-12); same semantics (silences the command's own output).
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

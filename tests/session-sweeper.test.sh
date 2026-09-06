@@ -63,13 +63,14 @@ SID="4b2f7a10-1c33-4e05-9f21-7d0c5a8e6b44"
 SID_FOREIGN="0e91c355-77aa-42d6-b0e8-3c1f2a94d7e0"
 
 # ---------- assertion helpers ----------
-
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2] got [$3]"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "no [$2] in: $(printf '%s' "$3" | head -3)" ;; esac; }
-expect_absent()   { case "$3" in *"$2"*) no "$1" "unexpected [$2] in: $(printf '%s' "$3" | head -3)" ;; *) ok "$1" ;; esac; }
-expect_matches()  { if printf '%s\n' "$3" | grep -qE "$2"; then ok "$1"; else no "$1" "no match /$2/ in: $(printf '%s' "$3" | head -3)"; fi; }
-expect_true()     { local l="$1"; shift; if "$@"; then ok "$l"; else no "$l" "condition failed: $*"; fi; }
-expect_false()    { local l="$1"; shift; if "$@"; then no "$l" "condition unexpectedly true: $*"; else ok "$l"; fi; }
+#
+# expect_eq, expect_contains, expect_absent, expect_true, expect_false are the
+# framework's (tests/lib/assert.sh) — S9b removed the private shadows here (AC-12).
+# expect_matches was this suite's own name for the framework's expect_regex
+# (same ERE, same argument order, pure rename — S1b/A-17 mapping table); its one
+# call site below is renamed too, and the rename also removes a
+# `printf | grep -qE` pipeline that was exposed to the SIGPIPE-141 false-fail on
+# a large value (assert.sh docblock, "the value is matched with a herestring").
 
 # ---------- sandbox + fixture builders ----------
 
@@ -897,7 +898,7 @@ expect_contains "…as WAIVED, because only the waiver was declared" "state=WAIV
 # and the ordinary path is driven for regression beside it. The arm half of this pin retired
 # with the `arm` verb; ack is the only journalling verb left.
 SWEEPER_SRC="$(cat "$SWEEPER")"
-expect_matches "ack's delta-count is scoped to the acking pid, not to any ack line" \
+expect_regex "ack's delta-count is scoped to the acking pid, not to any ack line" \
   'ledger_count .\|event=ack\|\.\*\|pid=\$\$\|.' "$SWEEPER_SRC"
 
 # …and the scoped count still answers correctly with a FOREIGN entry already in the ledger,

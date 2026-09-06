@@ -29,9 +29,9 @@ SWEEPER="$HERE/session-sweeper.sh"
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/stop-orders-test.XXXXXX")" && pwd)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
-expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
+# expect_status, expect_contains, expect_absent are the framework's
+# (tests/lib/assert.sh) — S9b removed the private shadows here (AC-12); same
+# semantics (contains/absent are literal substring, argument order unchanged).
 
 SID="6c85684c-9588-45a0-bd26-e8c46956c94f"
 
