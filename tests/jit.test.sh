@@ -26,27 +26,16 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 JIT_SH="${REPO}/payload/scripts/lib/jit.sh"
 DEPS_SH="${REPO}/payload/scripts/lib/deps.sh"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
-# Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
-# 8582861, epic-18 wave-03, and nothing replaced the pin).
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "'$actual' does not match '$pattern'"; fi
-}
-expect_empty() { local label="$1" actual="$2"; if [ -z "$actual" ]; then ok "$label"; else no "$label" "expected empty, got '$actual'"; fi; }
+# expect_eq, expect_true, expect_false, expect_match, expect_empty are the
+# framework's (tests/lib/assert.sh) — identical semantics to the private
+# definitions this suite carried (same argument order, same glob match for
+# expect_match, same silencing for expect_true/expect_false) (S7, AC-12).
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -94,7 +83,7 @@ make_stub "$PRESENT_BIN" rg
 make_stub "$PRESENT_BIN" npm
 make_stub "$PRESENT_BIN" brew
 
-echo "=== Group 1: jit.sh exists, sources cleanly, passes bash -n ==="
+section "Group 1: jit.sh exists, sources cleanly, passes bash -n"
 
 # (file-exists fixture check removed epic-18 W3 4/6: no production subject -- see ledger-jit.md)
 expect_true "jit.sh sources without error" bash -c '. "$1"' _ "$JIT_SH"
@@ -106,8 +95,7 @@ expect_true "jit.sh sourcing defines jit_offer" \
 expect_true "sourcing jit.sh also pulls in deps.sh's check_dep (self-source guard)" \
   bash -c '. "$1"; declare -F check_dep' _ "$JIT_SH"
 
-echo ""
-echo "=== Group 2: jit_check — both arms ==="
+section "Group 2: jit_check — both arms"
 
 expect_true "jit_check rg: present on PATH -> exit 0" \
   bash -c 'env -i HOME="$1" PATH="$2" bash -c ". \"\$1\"; jit_check rg" _ "$3"' _ "$TMP/home" "$PRESENT_BIN" "$JIT_SH"
@@ -119,8 +107,7 @@ expect_true "jit_check rg: absent from PATH -> exit 1" test "$ABSENT_RC" -ne 0
 expect_false "jit_check on an unknown dep exits non-zero" \
   bash -c '. "$1"; jit_check no-such-dep' _ "$JIT_SH"
 
-echo ""
-echo "=== Group 3: the ownership-table agreement — jit_offer calls install_dep BY NAME ==="
+section "Group 3: the ownership-table agreement — jit_offer calls install_dep BY NAME"
 #
 # Override install_dep AFTER sourcing jit.sh, BEFORE calling jit_offer. If
 # jit_offer's "yes" path reaches the override, it has no private installer —
@@ -137,8 +124,7 @@ env -i HOME="$TMP/home" PATH="$BASE_BIN" BIONIC_TEST_TRACE="$TRACE" \
 expect_match "jit_offer(yes) reaches the function literally named install_dep" \
   "*install_dep-override rg*" "$(cat "$TRACE")"
 
-echo ""
-echo "=== Group 4: jit_offer — consent path invokes the real install_dep (production behavior) ==="
+section "Group 4: jit_offer — consent path invokes the real install_dep (production behavior)"
 
 : > "$CALLS"
 env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
@@ -148,8 +134,7 @@ expect_match "jit_offer(yes) drives the real brew install (via install_dep)" \
   "*brew install ripgrep*" "$(cat "$CALLS")"
 
 
-echo ""
-echo "=== Group 5: jit_offer — declined path (AC-5's clean-degrade half) ==="
+section "Group 5: jit_offer — declined path (AC-5's clean-degrade half)"
 
 : > "$CALLS"
 DECLINE_ERR="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="$CALLS" \
@@ -169,8 +154,7 @@ DECLINE_N_OUT="$(env -i HOME="$TMP/home" PATH="$PRESENT_BIN" BIONIC_TEST_CALLS="
   bash -c 'echo n | { . "$1"; jit_offer rg some-route "fast search" "grep is used instead"; }' _ "$JIT_SH" 2>&1)"
 expect_eq "jit_offer(explicit n) ran nothing" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 
-echo ""
-echo "=== Group 6: no assume-yes knob (S1-8 stands) ==="
+section "Group 6: no assume-yes knob (S1-8 stands)"
 #
 # jit.sh must not grow an env-var bypass around consent — the same rule
 # tests/plugin-lib.test.sh used to pin for install_dep itself; that suite was
@@ -184,8 +168,7 @@ expect_true "jit.sh source carries no assume-yes / auto-yes env-var bypass" \
 expect_true "jit.sh reads stdin only through install_dep (no private read of its own)" \
   bash -c '! grep -qE "^[[:space:]]*read " "$1"' _ "$JIT_SH"
 
-echo ""
-echo "=== Group 7: mutation-and-restore — decline mutates NOTHING, proven twice, two mechanisms ==="
+section "Group 7: mutation-and-restore — decline mutates NOTHING, proven twice, two mechanisms"
 #
 # Two independent fixture roots, two different install mechanisms (brew-dep
 # and npm-global), fingerprinted before/after a decline each. A single proof
@@ -213,8 +196,7 @@ env -i HOME="$TMP/home" PATH="$FP2_ROOT/bin" BIONIC_TEST_CALLS="$CALLS" \
 FP2_AFTER="$(fingerprint "$FP2_ROOT")"
 expect_eq "mutation-and-restore #2: recorder log still empty" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 
-echo ""
-echo "=== Group 8: jit_check absence-vs-presence, driven against @playwright/cli too ==="
+section "Group 8: jit_check absence-vs-presence, driven against @playwright/cli too"
 
 expect_true "jit_check @playwright/cli: present -> exit 0" \
   bash -c 'env -i HOME="$1" PATH="$2" BIONIC_TEST_CALLS="$3" bash -c ". \"\$1\"; jit_check @playwright/cli" _ "$4"' \
@@ -224,8 +206,7 @@ expect_true "jit_check @playwright/cli: absent -> exit 1" test "$PW_ABSENT_RC" -
 expect_match "jit_check @playwright/cli absent: names a fix (npm install -g)" \
   "*npm install -g @playwright/cli*" "$PW_ABSENT_OUT"
 
-echo ""
-echo "=== Group 9: route wiring — the two owner SKILL.md files name the contract ==="
+section "Group 9: route wiring — the two owner SKILL.md files name the contract"
 #
 # S2's dispatch-paragraph precedent: name the contract, let the script bind —
 # no restated mechanics. One sentence each, at the point an environment-class
@@ -242,8 +223,7 @@ expect_true "browser-verify SKILL.md names jit_offer" grep -q 'jit_offer' "$BROW
 expect_true "excalidraw-diagram SKILL.md names jit_check" grep -q 'jit_check' "$EXCALIDRAW_SKILL"
 expect_true "excalidraw-diagram SKILL.md names jit_offer" grep -q 'jit_offer' "$EXCALIDRAW_SKILL"
 
-echo ""
-echo "=== Group 9b: the native when-needed row — ONE question, ONE installer (AC-11) ==="
+section "Group 9b: the native when-needed row — ONE question, ONE installer (AC-11)"
 #
 # THE RULING THIS PINS (plan A-4.S4.4-RULING). `impeccable` is `when-needed` AND
 # `native`: the moment to install it is the moment the design route asks, and
@@ -300,14 +280,12 @@ expect_match "jit_offer reaches the function literally named install_plugin_nati
 # not a way in through it. If this ever passed, the kludge D1 rejected would be
 # back and the refusal would be decoration.
 
-echo ""
-echo "=== Group 10: the suite is registered in tests/run.sh by name ==="
+section "Group 10: the suite is registered in tests/run.sh by name"
 
 expect_true "tests/run.sh names jit.test.sh" \
   grep -q 'run "jit.test.sh" bash tests/jit.test.sh' "${REPO}/tests/run.sh"
 
-echo ""
-echo "=== Group 11: excalidraw-diagram route fixes (epic-17 w4 S10, AC-10) ==="
+section "Group 11: excalidraw-diagram route fixes (epic-17 w4 S10, AC-10)"
 #
 # AC-10 pinned the skill as a default-off opt-in living outside the payload, with a
 # config-dir-aware render path because that is where a manually-copied personal skill lands.
@@ -350,8 +328,7 @@ expect_true "excalidraw-diagram SKILL.md addresses the renderer through CLAUDE_P
 expect_true "excalidraw-diagram README.md addresses the renderer through CLAUDE_PLUGIN_ROOT" \
   grep -q 'CLAUDE_PLUGIN_ROOT' "$EXCALIDRAW_README"
 
-echo ""
-echo "=== Group 12: Step-0 model_plan derivation is mechanical, not invented (epic-19 F1) ==="
+section "Group 12: Step-0 model_plan derivation is mechanical, not invented (epic-19 F1)"
 #
 # AC-F1: the orchestrator reads agents/*.md frontmatter for the six dispatched-role
 # tiers; the confirmation display cites each line's source. Before this fix the whole
@@ -369,8 +346,7 @@ expect_true "canonical-sdlc SKILL.md: model_plan derivation names the rendered r
 expect_eq "canonical-sdlc SKILL.md: all 6 dispatched-role lines in the confirmation display cite a role-file source" \
   "6" "$(grep -c 'role-file default: agents/' "$CANONICAL_SKILL")"
 
-echo ""
-echo "=== Group 13: README roster table agrees with agents/*.md frontmatter (epic-19 F9) ==="
+section "Group 13: README roster table agrees with agents/*.md frontmatter (epic-19 F9)"
 #
 # AC-F9: README.md's roster table (step1-model-surfaces.md §6) is the one copy render.sh's
 # AGENT-ROSTER directive does not reach — it is hand-written and had already drifted
@@ -391,11 +367,4 @@ for role in researcher test-runner implementor senior-implementor auditor critic
     "*${model_title}*" "$readme_row"
 done
 
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish
