@@ -4,7 +4,8 @@
 # WHAT IT OWNS (L-RUN, wave-bionic-1.4.0-update, spec AC-8; design-ledger S1). Pure
 # functions of disk, no writes:
 #   docs_root <root>   -> <root>/<docs-root from .bionic/config.yaml, default .bionic/docs>
-#   active_plan <root> -> the newest *.md (by mtime) under <docs_root>/plans (depth <= 2)
+#   active_plan <root> -> the newest *.md (by mtime, to the SECOND under bash 3.2 — see
+#                         the compare site) under <docs_root>/plans (depth <= 2)
 #                         and <docs_root>/incidents (depth <= 2) that carries a flush-left
 #                         `## SDLC State` heading; exit 1 and silent if none.
 #   run_open <plan>    -> exit 0 iff THAT ONE FILE reads as an open run: its flush-left
@@ -196,6 +197,27 @@ active_plan() {
   droot=$(docs_root "$root")
   local plan="" f
   while IFS= read -r -d '' f; do
+    # THE COMPARATOR IS THE SHELL'S, AND UNDER BASH 3.2 THAT IS WHOLE SECONDS
+    # (wave-01 S4, AC-9 — the documented outcome, not the portable one). `-nt`
+    # compares `st_mtime` to the second under /bin/bash 3.2, the interpreter
+    # ADR-001 pins the hooks to, and to the full timespec under bash 4.2+. So
+    # two plans written inside ONE SECOND tie here, and a tie keeps the first
+    # candidate the walk produced — directory order, which is not a fact about
+    # the plans. tests/patrol-revive.test.sh rows 33/34 are the fixture that
+    # meets it; a fixture that sets its mtimes with `touch -t` never can.
+    #
+    # WHY IT IS NOT FIXED WITH `stat`, WHICH BOTH PLATFORMS CAN ANSWER
+    # SUB-SECOND (`stat -f %Fm` / `stat -c %Y.%N`): `open_runs` below orders the
+    # same candidates with the same `-nt`, and "line 1 is `active_run`'s answer"
+    # is the invariant run-predicate R6 and cross-gate §OR.1 pin. A finer
+    # comparator HERE and the shell's THERE disagree for exactly the candidates
+    # that share a second, which is the failure the block under `open_runs`
+    # records as measured — identical set, 21 lines in a different order — when
+    # a `stat`-keyed sort was built and rejected there. Making both finer costs
+    # a `stat` pair per comparison in a loop that was deliberately taken from
+    # 125,000 stat pairs down to ~9. So the two stay wrong in the same
+    # direction, which is what makes them agree, and the ambiguity is a
+    # documented property of the selection rather than a defect in one caller.
     if [ -z "$plan" ] || [ "$f" -nt "$plan" ]; then
       plan="$f"
     fi

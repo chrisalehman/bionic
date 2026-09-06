@@ -81,15 +81,37 @@ bionic_cols() {  # <string> -> its width in terminal columns
 # caller whose prefix already ate the whole line still gets its content — a row
 # that printed an ellipsis and no fact would be worse than a long row.
 bionic_trunc() {  # <string> <column-budget> -> string
-  local s="${1:-}" max="${2:-0}" want
+  # THE CUT IS BYTEWISE AND THE LOCALE IS THIS FUNCTION'S OWN (wave-01 S4,
+  # AC-8; S24 F-25). `${s%?}` drops one CHARACTER under a UTF-8 locale and one
+  # BYTE under `LC_ALL=C` — and a hook, a cron job or a script started from a
+  # stripped environment gets the C locale. So the old loop, which was written
+  # against the UTF-8 reading and says so in its own comment, cut three-byte
+  # glyphs into fragments there: `/Users/josé/...` came back ending in half an
+  # `é`, which is invalid UTF-8 and prints as a replacement box. That is the
+  # exact failure this file's header (`printf '%.*s' counts BYTES`) exists to
+  # prevent, reintroduced one level down by a locale nobody chose.
+  #
+  # PINNING `LC_ALL=C` HERE MAKES THE READING THE SAME IN BOTH: every string
+  # operation below is bytes, and the inner loop drops a whole UTF-8 character
+  # by walking off its continuation bytes (0x80-0xBF) and then its lead byte.
+  # `local` restores the caller's locale on return, so nothing outside this
+  # function changes reading.
+  local s="${1:-}" max="${2:-0}" want last
+  local LC_ALL=C
   [ "$max" -gt 0 ] || { printf '%s' "$s"; return 0; }
   _bionic_cols_into "$s"
   [ "$BIONIC_COLS" -le "$max" ] && { printf '%s' "$s"; return 0; }
-  # One column of the budget goes to the ellipsis. `${s%?}` drops the last
-  # CHARACTER, so a multi-byte glyph leaves whole or not at all.
+  # One column of the budget goes to the ellipsis.
   want=$(( max - 1 )); [ "$want" -gt 0 ] || want=0
   while [ -n "$s" ] && [ "$BIONIC_COLS" -gt "$want" ]; do
-    s="${s%?}"
+    while [ -n "$s" ]; do
+      last="${s:${#s}-1}"
+      s="${s%?}"
+      case "$last" in
+        [$'\200'-$'\277']) ;;   # a continuation byte: the character is not whole yet
+        *) break ;;
+      esac
+    done
     _bionic_cols_into "$s"
   done
   printf '%s…' "$s"
