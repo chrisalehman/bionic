@@ -3970,8 +3970,14 @@ expect_status "28a …and its row carries run.sh, which is what makes it countab
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28-runner-two")"
 expect_status "28b a SECOND full-tree dispatch in the same run is REFUSED" "2" "$GATE_ST"
 expect_contains "28b …counting what it found" "Full-tree runs on this roster: 1" "$GATE_ERR"
-expect_contains "28b …naming the plan the cause belongs on" \
-  ".bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "$GATE_ERR"
+# READ OUT OF THE FIX BLOCK, not merely "somewhere on stderr" — the unbound-session
+# advisory this gate prints on every run also names the plan path, so a plain contains
+# passes over a wall that never fired.
+# Compared from the fixture root rightwards, because the gate resolves symlinks on the
+# path it prints (/var -> /private/var on macOS) while $REPO does not.
+S28_FIXLINE=$(printf '%s\n' "$GATE_ERR" | grep -A1 -F 'under `## SDLC State` in' | tail -1 | sed 's/^[[:space:]]*//')
+expect_status "28b …naming the plan the cause belongs on, inside its own Fix block" \
+  "/repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md" "${S28_FIXLINE##*/r28}"
 expect_contains "28b …and the line to write" "regression-cause:" "$GATE_ERR"
 expect_status "28b …and the refused dispatch journalled no second row" \
   "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
