@@ -1307,7 +1307,11 @@ youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>,
   # THE CLOSING MARKERS, BY FIELD EQUALITY rather than by substring: `state=` is last in the
   # originator's printf today and a future field appended after it must not turn every marker
   # into a non-closing one.
-  swept="$(grep '^landing-swept/v1|' "$roster" 2>/dev/null \
+  # THE SHARED CONSTANT (declared above), NOT A SECOND SPELLING (S17, on A-14b). This was
+  # the third hand-rolled spelling of the schema in the fleet and the one S15 did not reach:
+  # a rename on landing-gate.sh's side would have left this function silently matching
+  # nothing, and "no closing markers" reads here as "every row is still open".
+  swept="$(grep "^${SWEPT_SCHEMA}|" "$roster" 2>/dev/null \
     | awk -F'|' '{ for (i = 1; i <= NF; i++) if ($i == "state=MET") { print; break } }' || true)"
 
   # PASS ONE — THE ROSTER. Kept in the current shell rather than a pipeline subshell, because

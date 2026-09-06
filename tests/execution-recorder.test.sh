@@ -24,6 +24,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 REC="$HERE/execution-recorder.sh"
@@ -207,12 +209,7 @@ rec_live() {  # <transcript> <name>...
   mkdir -p "$(dirname "$tr")"
   for n in "$@"; do printf '%s\n' "$n" >> "$f"; done
   while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < "$f"
-  body=$(
-    printf '%s\n\nTeammates (%d):\n' "$REC_LA_SELF" "${#names[@]}"
-    for n in "${names[@]}"; do
-      printf '  %s [8895ce]  ·  bionic:implementor  ·  running  ·  started 7m ago\n' "$n"
-    done
-  )
+  body="$(live_answer_body ${names[@]+"${names[@]}"})"
   {
     jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
       '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
@@ -229,9 +226,9 @@ rec_live() {  # <transcript> <name>...
 rec_roster_row() {  # <repo> <sid> <name> <agent-id>
   local f="$1/.bionic/tmp/roster-$2.state"
   mkdir -p "$1/.bionic/tmp"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|absent=|tool_use_id=toolu_01FIXTURE\n' \
-    "$2" "$3" "$4" >> "$f"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status=identified session="$2" name="$3" agent_id="$4" \
+    launched_at=2026-08-05T00:00:00Z >> "$f"
   return 0
 }
 
@@ -599,9 +596,10 @@ seed_roster() {  # <repo> <sid> <name> <tool_use_id>
   local repo="$1" sid="$2" name="$3" tuid="$4"
   mkdir -p "$repo/.bionic/tmp"
   {
-    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-    printf 'roster-state/v1|status=intended|session=%s|name=%s|agent_id=|launched_at=2026-08-05T12:00:00Z|subagent_type=implementor|model=|deliverable=.bionic/docs/record/w99.txt|duration=~25 minutes.|progress=.bionic/tmp/w99.progress|absent=|tool_use_id=%s\n' \
-      "$sid" "$name" "$tuid"
+    roster_header
+    roster_row_fixture status=intended session="$sid" name="$name" agent_id= \
+      launched_at=2026-08-05T12:00:00Z model= deliverable=.bionic/docs/record/w99.txt \
+      duration='~25 minutes.' progress=.bionic/tmp/w99.progress tool_use_id="$tuid"
   } > "$repo/.bionic/tmp/roster-${sid}.state"
 }
 
@@ -982,12 +980,12 @@ S1_ROSTER="$S1_REPO/.bionic/tmp/roster-${SID_A}.state"
 # No pipe of its own: everything after the newline is supplied by the REAL row's
 # own remaining fields, which is what makes the split line schema-shaped.
 S1_EVIL="aevil-3333333333333333
-roster-state/v1"
+${ROSTER_ROW_SCHEMA}"
 run_rec "$(mk_agent_post "$SID_A" "$S1_TR" "$S1_REPO" "w99-impl" "$S1_EVIL" "$TUID")"
 expect_eq "a newline in the platform's agentId cannot split the row it writes" \
-  "2" "$(grep -c '^roster-state/v1|' "$S1_ROSTER" 2>/dev/null)"
+  "2" "$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$S1_ROSTER" 2>/dev/null)"
 expect_contains "…the id is normalized into the row instead, as the writer would" \
-  "agent_id=aevil-3333333333333333 roster-state/v1|" "$(cat "$S1_ROSTER" 2>/dev/null)"
+  "agent_id=aevil-3333333333333333 ${ROSTER_ROW_SCHEMA}|" "$(cat "$S1_ROSTER" 2>/dev/null)"
 
 IFS='|' read -r S1B_REPO S1B_TR S1B_SUB S1B_CFG <<< "$(make_world sanparityobs yes)"
 plant_agent "$S1B_SUB" "aworker-1111111111111111" "worker" "$S1B_REPO"
@@ -1045,17 +1043,18 @@ PR_ROSTER="$PR_REPO/.bionic/tmp/roster-${SID_A}.state"
 # A SECOND agent, still running, whose brief declared a progress path. It is the
 # OLDEST row in the file after the seed — the first thing eviction-by-recency
 # takes, and the row hooks/stop-guard.sh sources its refusal from.
-printf 'roster-state/v1|status=intended|session=%s|name=live-one|agent_id=|launched_at=2026-08-05T12:00:00Z|subagent_type=implementor|model=|deliverable=|duration=|progress=.bionic/tmp/live-one.progress|claims=|cadence=~6m.|absent=|tool_use_id=toolu_LIVEONE\n' \
-  "$SID_A" >> "$PR_ROSTER"
+roster_row_fixture status=intended session="$SID_A" name=live-one agent_id= \
+  launched_at=2026-08-05T12:00:00Z model= progress=.bionic/tmp/live-one.progress \
+  cadence='~6m.' tool_use_id=toolu_LIVEONE >> "$PR_ROSTER"
 {
   _i=0
   while [ "$_i" -lt 3000 ]; do
-    printf 'roster-state/v1|status=confirmed|session=%s|name=old-%s|agent_id=aold-%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_OLD%s\n' \
-      "$SID_A" "$_i" "$_i" "$_i"
+    roster_row_fixture status=confirmed session="$SID_A" name="old-$_i" \
+      agent_id="aold-$_i" launched_at=2026-08-05T00:00:00Z tool_use_id="toolu_OLD$_i"
     _i=$((_i + 1))
   done
 } >> "$PR_ROSTER"
-PR_BEFORE=$(grep -c '^roster-state/v1|' "$PR_ROSTER" 2>/dev/null || echo 0)
+PR_BEFORE=$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$PR_ROSTER" 2>/dev/null || echo 0)
 
 # Seconds, not milliseconds, and deliberately: `date +%s` is the one clock every
 # platform this suite runs on has. The budget it has to discriminate is 0.1 s
@@ -1072,7 +1071,7 @@ else
 fi
 
 expect_eq "the ledger is NOT truncated: the completion is a pure append" \
-  "$((PR_BEFORE + 1))" "$(grep -c '^roster-state/v1|' "$PR_ROSTER" 2>/dev/null || echo 0)"
+  "$((PR_BEFORE + 1))" "$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$PR_ROSTER" 2>/dev/null || echo 0)"
 expect_contains "the row this event confirmed is appended" \
   "agent_id=$NEW_AID" "$(grep 'status=confirmed|.*name=w99-impl|' "$PR_ROSTER" 2>/dev/null)"
 PR_LIVE=$(grep 'name=live-one|' "$PR_ROSTER" 2>/dev/null)
@@ -1127,11 +1126,21 @@ seed_roster_full() {  # <repo> <sid> <name> <tool_use_id> [status] [agent-id] [t
   local status="${5:-intended}" aid="${6:-}" tid="${7:-}"
   local f="$repo/.bionic/tmp/roster-${sid}.state"
   mkdir -p "$repo/.bionic/tmp"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-08T09:00:00Z|subagent_type=implementor|model=claude-opus-5|deliverable=.bionic/docs/record/w1-slice1-report.md|source=declared|duration=~25 minutes.|progress=.bionic/tmp/w1-s1-progress.md|claims=|cadence=~8m.|absent=|waiver=|tool_use_id=%s' \
-    "$status" "$sid" "$name" "$aid" "$tuid" >> "$f"
-  if [ -n "$tid" ]; then printf '|teammate_id=%s' "$tid" >> "$f"; fi
-  printf '\n' >> "$f"
+  [ -f "$f" ] || roster_header > "$f"
+  # `teammate_id=` is PRESENT-IF-PASSED, which is the writer's own rule and the reason the
+  # optional field can be added by naming it rather than by appending a segment by hand.
+  if [ -n "$tid" ]; then
+    roster_row_fixture status="$status" session="$sid" name="$name" agent_id="$aid" \
+      launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+      deliverable=.bionic/docs/record/w1-slice1-report.md duration='~25 minutes.' \
+      progress=.bionic/tmp/w1-s1-progress.md cadence='~8m.' teammate_id="$tid" \
+      tool_use_id="$tuid" >> "$f"
+  else
+    roster_row_fixture status="$status" session="$sid" name="$name" agent_id="$aid" \
+      launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+      deliverable=.bionic/docs/record/w1-slice1-report.md duration='~25 minutes.' \
+      progress=.bionic/tmp/w1-s1-progress.md cadence='~8m.' tool_use_id="$tuid" >> "$f"
+  fi
   return 0
 }
 
@@ -1189,7 +1198,7 @@ expect_contains "…carrying the same transcript-form id the confirmation record
 expect_contains "…and the deliverable the brief contracted rides forward" \
   "deliverable=.bionic/docs/record/w1-slice1-report.md" "$I2_ROW"
 expect_eq "the chain is three rows, none rewritten" \
-  "3" "$(grep -c '^roster-state/v1|' "$I2_ROSTER")"
+  "3" "$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$I2_ROSTER")"
 
 # A TEAMMATE confirmation leaves `agent_id=` empty on purpose (the launch response
 # carries only the ADDRESSING form), so there is no id to join on — and until
@@ -1465,9 +1474,11 @@ seed_roster_at() {  # <repo> <sid> <name> <tool_use_id> <launched_at> [status] [
   local status="${6:-intended}" aid="${7:-}"
   local f="$repo/.bionic/tmp/roster-${sid}.state"
   mkdir -p "$repo/.bionic/tmp"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=implementor|model=claude-sonnet-5|deliverable=.bionic/docs/record/w1-rc-verify.md|source=declared|duration=~25 minutes.|progress=.bionic/tmp/w1-rc.progress|claims=|cadence=~8m.|absent=|waiver=|tool_use_id=%s\n' \
-    "$status" "$sid" "$name" "$aid" "$lat" "$tuid" >> "$f"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status="$status" session="$sid" name="$name" agent_id="$aid" \
+    launched_at="$lat" model=claude-sonnet-5 \
+    deliverable=.bionic/docs/record/w1-rc-verify.md duration='~25 minutes.' \
+    progress=.bionic/tmp/w1-rc.progress cadence='~8m.' tool_use_id="$tuid" >> "$f"
   return 0
 }
 

@@ -22,6 +22,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 PROBE="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 TMPROOT="$(mktemp -d)"
@@ -455,8 +456,8 @@ section "S6c — rostered-vs-unrostered scan (slice 4/7, display/warn only)"
 SBX="$(mk_sandbox)"
 : > "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
 mkdir -p "$SBX/repo/.bionic/tmp"
-printf 'roster-state/v1|status=confirmed|session=%s|name=foo|agent_id=deadbeef|launched_at=x\n' "$SESSION_B" \
-  > "$SBX/repo/.bionic/tmp/roster-${SESSION_B}.state"
+roster_row_fixture status=confirmed session="$SESSION_B" name=foo agent_id=deadbeef \
+  launched_at=x > "$SBX/repo/.bionic/tmp/roster-${SESSION_B}.state"
 rc="$(run_probe "$SBX")"
 expect_eq "a live foreign session WITH a roster file still exits 0" "0" "$rc"
 if grep -qE "$SESSION_B.*roster: present" "$OUT" "$ERR" 2>/dev/null; then
@@ -497,8 +498,8 @@ SBX="$(mk_sandbox)"
 mkdir -p "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents"
 printf '{"name":"covered"}' > "$SBX/config/projects/$PROJSLUG/$SESSION_B/subagents/agent-covered456.meta.json"
 mkdir -p "$SBX/repo/.bionic/tmp"
-printf 'roster-state/v1|status=confirmed|session=%s|name=covered|agent_id=covered456|launched_at=x\n' "$SESSION_B" \
-  > "$SBX/repo/.bionic/tmp/roster-${SESSION_B}.state"
+roster_row_fixture status=confirmed session="$SESSION_B" name=covered agent_id=covered456 \
+  launched_at=x > "$SBX/repo/.bionic/tmp/roster-${SESSION_B}.state"
 rc="$(run_probe "$SBX")"
 expect_eq "a rostered subagent's session still exits 0" "0" "$rc"
 if grep -qE "UNROSTERED.*covered456" "$OUT" "$ERR" 2>/dev/null; then

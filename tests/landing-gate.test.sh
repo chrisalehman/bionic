@@ -36,6 +36,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 GATE="$HOOKS_DIR/landing-gate.sh"
@@ -195,25 +197,30 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  # `teammate_id` is APPENDED rather than slotted, because that is how the writer emits it:
-  # hooks/execution-recorder.sh's completion arm substitutes the field when the launch row
-  # already carries one and appends it at the end when it does not — and the launch wall
-  # never writes it, so every real teammate row carries it last. It is the field that says
-  # which namespace the row's id is in, and (this slice) which half of the machinery owns
-  # the row's landing verdict.
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s' \
-    "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
-    "$deliverable" "$source" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
-  [ "$has_files" -eq 1 ] && printf '|files=%s' "$files"
-  [ -n "$teammate_id" ] && printf '|teammate_id=%s' "$teammate_id"
-  printf '\n'
+  # THE ROW COMES OFF THE PRODUCTION WRITER (S17, spec AC-25). What stays here is this
+  # suite's HOUSE DEFAULTS — the values a case does not name — and the unknown-key refusal,
+  # which `roster_row` now makes for real rather than by this wrapper's own `case`.
+  #
+  # `files=` (S18) and `teammate_id=` are PRESENT-IF-PASSED, which is the writer's own rule
+  # and the reason both can be added by naming them rather than by appending a segment by
+  # hand. That is also why they are collected into an argument list here instead of four
+  # spelled-out calls: the writer decides where each field SITS on the row, so a caller only
+  # has to decide whether it is there at all.
+  local _mkrow_args
+  _mkrow_args=( status="$status" session="$session" name="$name" agent_id="$agent_id"
+                launched_at="$launched_at" subagent_type="$subagent_type" model="$model"
+                deliverable="$deliverable" source="$source" duration="$duration"
+                progress="$progress" claims="$claims" cadence="$cadence" waiver="$waiver"
+                tool_use_id="$tool_use_id" )
+  if [ "$has_files" -eq 1 ]; then _mkrow_args+=( files="$files" ); fi
+  if [ -n "$teammate_id" ]; then _mkrow_args+=( teammate_id="$teammate_id" ); fi
+  roster_row_fixture "${_mkrow_args[@]}"
 }
 
 roster_of() { printf '%s/.bionic/tmp/roster-%s.state' "$1" "${2:-$SID}"; }
 
 new_roster() {  # <repo> [sid]
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$(roster_of "$1" "${2:-$SID}")"
+  roster_header > "$(roster_of "$1" "${2:-$SID}")"
   # THE ROSTER AND THE ENGAGEMENT MARKER TRAVEL TOGETHER (task-engaged-session): a roster
   # exists because an engaged session dispatched, and this gate asks `engaged_session`
   # before it looks for a roster at all. Without the marker every assertion in this file
@@ -231,7 +238,7 @@ add_row() {  # <repo> <key=value>...
 # prefix, which every roster reader in the fleet filters on (`roster-state/v1|`), so a swept
 # line is inert to all of them and cannot outlive the roster it belongs to.
 swept_lines() {  # <repo> -> the marker lines, one per verdicted row
-  /usr/bin/grep '^landing-swept/v1|' "$(roster_of "$1")" 2>/dev/null
+  /usr/bin/grep "^${SWEPT_SCHEMA}|" "$(roster_of "$1")" 2>/dev/null
 }
 swept_count() {  # <repo>
   swept_lines "$1" | /usr/bin/grep -c '|' | tr -d ' '
@@ -665,7 +672,7 @@ expect_eq "6c: …and nothing is marked closed on a line that was never printed"
 R6B="$(make_repo r6b)"
 plan_active "$R6B"
 REAL_ROSTER="$SANDBOX/elsewhere-roster.state"
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$REAL_ROSTER"
+roster_header > "$REAL_ROSTER"
 mkrow name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)" >> "$REAL_ROSTER"
 ln -s "$REAL_ROSTER" "$(roster_of "$R6B")"
@@ -787,7 +794,7 @@ R11="$(make_wave_repo r11)"
 mkdir -p "$R11/.bionic/tmp/roster-x" "$R11/planted"
 SID_TRAVERSAL='x/../../../planted/evil'
 PLANTED="$R11/planted/evil.state"
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$PLANTED"
+roster_header > "$PLANTED"
 mkrow name=w1-s5 session="$SID_TRAVERSAL" agent_id="$AID_A" \
   deliverable=.bionic/docs/record/never.md launched_at="$(iso_ago 600)" >> "$PLANTED"
 run_gate "$GATE" "$(stop_payload "$R11" "$SID_TRAVERSAL" false)"
