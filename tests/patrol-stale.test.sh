@@ -21,16 +21,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PATROL_SH="${REPO}/payload/scripts/lib/patrol.sh"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
+# expect_eq, expect_true are the framework's (tests/lib/assert.sh) — identical
+# semantics to the private definitions this suite carried (S7, AC-12).
 expect_true "payload/scripts/lib/patrol.sh exists" test -f "$PATROL_SH"
 expect_true "patrol.sh passes bash -n" bash -n "$PATROL_SH"
 
@@ -43,8 +40,7 @@ sourced() {  # <fn-or-expr...> — run against a clean copy of patrol.sh's globa
   bash -c '. "$1"; shift; "$@"' _ "$PATROL_SH" "$@" 2>/dev/null
 }
 
-echo ""
-echo "=== Section 1: the constant is exported and equals 2 ==="
+section "Section 1: the constant is exported and equals 2"
 
 expect_eq "1: PATROL_STALE_MULTIPLIER is exported" \
   "PATROL_STALE_MULTIPLIER" \
@@ -53,8 +49,7 @@ expect_eq "1: PATROL_STALE_MULTIPLIER is exported" \
 expect_eq "2: PATROL_STALE_MULTIPLIER equals 2" \
   "2" "$(bash -c '. "$1"; printf "%s" "$PATROL_STALE_MULTIPLIER"' _ "$PATROL_SH")"
 
-echo ""
-echo "=== Section 2: patrol_stamp_state's limit follows the constant ==="
+section "Section 2: patrol_stamp_state's limit follows the constant"
 
 # No hooks/session-poker.sh beside this fixture repo, so patrol_interval falls
 # back to its own last-resort default (1200s, PATROL_INTERVAL_LAST_RESORT,
@@ -79,8 +74,7 @@ expect_eq "4: limit = interval * PATROL_STALE_MULTIPLIER" \
 expect_eq "5: with the real last-resort default and the real multiplier, limit is 2400" \
   "2400" "$LIMIT"
 
-echo ""
-echo "=== Section 3: registration ==="
+section "Section 3: registration"
 
 if grep -q 'run "patrol-stale.test.sh" bash tests/patrol-stale.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"; then
   ok "6: tests/run.sh names patrol-stale.test.sh"
@@ -88,8 +82,7 @@ else
   no "6: tests/run.sh names patrol-stale.test.sh"
 fi
 
-echo ""
-echo "=== Section 4: the constant's three readers agree (spec AC-22) ==="
+section "Section 4: the constant's three readers agree (spec AC-22)"
 #
 # THREE READERS BY DESIGN (ownership table, spec §3): patrol.sh's own
 # `patrol_stamp_state` (Section 2), the poker's `adopt` liveness window, and the
@@ -117,9 +110,4 @@ esac
 expect_eq "9: the dispatch wall measures staleness with the same multiplier" \
   "$MULT" "$DP_MULT"
 
-echo ""
-echo "========================================"
-echo "patrol-stale: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
