@@ -25,6 +25,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 # Overridable exactly as tests/session-sweeper.test.sh offers, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -115,8 +117,7 @@ backdate() {  # <file> <seconds ago> — sets mtime, the progress-staleness inpu
 }
 
 new_roster() {  # <repo>
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$(roster_of "$1")"
+  roster_header > "$(roster_of "$1")"
 }
 
 # Subset of tests/session-sweeper.test.sh's mkrow — the fields the poker actually reads
@@ -153,11 +154,19 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=opus|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s' \
-    "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$deliverable" "$source" \
-    "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
-  [ "$plan_set" = yes ] && printf '|plan=%s' "$plan"
-  printf '\n'
+  # THE ROW ITSELF COMES FROM `roster_row`, through tests/lib/roster-row.sh (S14, AC-25).
+  # What stays here is this file's own house defaults — `model=opus`, `tool_use_id=toolu_x`,
+  # a launch time sixty seconds ago — and the `plan=` opt-in above, which is the one thing
+  # the production writer cannot express: no writer emits a row without that field any more,
+  # and a pre-wave roster is exactly what these cases are about.
+  local emit=roster_row_fixture
+  [ "$plan_set" = yes ] || emit=roster_row_no_plan
+  "$emit" \
+    "status=$status" "session=$session" "name=$name" "agent_id=$agent_id" \
+    "launched_at=$launched_at" "subagent_type=$subagent_type" model=opus \
+    "deliverable=$deliverable" "source=$source" "duration=$duration" \
+    "progress=$progress" "claims=$claims" "cadence=$cadence" absent= \
+    "waiver=$waiver" "tool_use_id=$tool_use_id" "plan=$plan"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -172,7 +181,7 @@ add_row() {  # <repo> <key=value>...
 add_row_to() {  # <repo> <session-id> <key=value>...
   local repo="$1" sid="$2"; shift 2
   local f; f="$(roster_of "$repo" "$sid")"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  [ -f "$f" ] || roster_header > "$f"
   mkrow session="$sid" "$@" >> "$f"
 }
 
@@ -469,8 +478,7 @@ expect_absent   "…never DISARM on the same tick" "decision=DISARM" "$OUT"
 R3SW="$(make_repo s3-swept-marker)"; new_roster "$R3SW"
 add_row "$R3SW" name=overdue-swept deliverable="$R3SW/absent-overdue-swept.md" \
   duration="1 minute" launched_at="$(iso_ago 120)"
-printf 'landing-swept/v1|at=%s|session=%s|name=overdue-swept|agent_id=a000|state=UNMET\n' \
-  "$(iso_ago 1)" "$SID" >> "$(roster_of "$R3SW")"
+swept_marker_write "$(roster_of "$R3SW")" "$(iso_ago 1)" "$SID" overdue-swept a000 UNMET
 poke "$R3SW" tick
 expect_eq "a landing-swept marker after the row does not silence NOTIFY (exit 1)" "1" "$RC"
 expect_contains "…decision=NOTIFY survives the marker" "decision=NOTIFY" "$OUT"
@@ -882,8 +890,7 @@ add_row_to "$R8" "$ADOPT_A" name=closed-one status=identified agent_id="$ID_CLOS
 # The terminal row: hooks/landing-gate.sh's own marker, the only thing that closes a row
 # without an ack. Written by hand here for the same reason the ack above is NOT — this
 # marker's writer is a Stop hook with a whole payload contract, and the shape is one line.
-printf 'landing-swept/v1|at=%s|session=%s|name=closed-one|agent_id=%s|state=MET\n' \
-  "$(iso_ago 300)" "$ADOPT_A" "$ID_CLOSED" >> "$(roster_of "$R8" "$ADOPT_A")"
+swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 300)" "$ADOPT_A" closed-one "$ID_CLOSED" MET
 
 # ---- predecessor A: a Deliverable-waiver row (S17, AC-12 attempt 2) ----
 #
@@ -906,8 +913,7 @@ add_row_to "$R8" "$ADOPT_A" name=waived-one status=identified agent_id="$ID_WAIV
 add_row_to "$R8" "$ADOPT_A" name=recheck-one status=identified agent_id="$ID_RECHECK" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/recheck-one.md"
-printf 'landing-swept/v1|at=%s|session=%s|name=recheck-one|agent_id=%s|state=UNMET\n' \
-  "$(iso_ago 200)" "$ADOPT_A" "$ID_RECHECK" >> "$(roster_of "$R8" "$ADOPT_A")"
+swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 200)" "$ADOPT_A" recheck-one "$ID_RECHECK" UNMET
 
 printf 'the report\n' > "$R8/.bionic/docs/record/landed-one.md"
 printf 'progress\n'   > "$R8/.bionic/tmp/progress-landed.md"
@@ -3369,8 +3375,7 @@ section "Section 20: the kill-floor target reads the ONE openness predicate, and
 # on a first tick would be a wall firing on the healthy path.
 
 swept_marker() {  # <repo> <name> <state>
-  printf 'landing-swept/v1|at=%s|session=%s|name=%s|agent_id=a000|state=%s\n' \
-    "$(iso_ago 30)" "$SID" "$2" "$3" >> "$(roster_of "$1")"
+  swept_marker_write "$(roster_of "$1")" "$(iso_ago 30)" "$SID" "$2" a000 "$3"
 }
 
 s20_repo() {  # <label> -> a repo with ONE intended, suite-claiming row named `suite-writer`

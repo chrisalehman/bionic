@@ -150,6 +150,23 @@ SWEPT_SCHEMA="landing-swept/v1"
 # hooks/session-sweeper.sh states for its copy: a prefix drift here is a mislabeled scan.
 ROSTER_VERSION="v1"
 
+# THE ONE WRITER (S15, AC-26; research-code-map §2.c). Defined here, not sourced from a
+# shared lib file: this hook's own `BIONIC_LIB_WANT` stays "root.sh run.sh session.sh"
+# unchanged, and a copy of this file (as tests/landing-gate.test.sh's own mutation-arm
+# fixtures make) carries the writer with it rather than depending on a lib file resolving
+# through the loader's registry/cache fallback to whatever was last landed there.
+# hooks/session-poker.sh's `adopt_copy_marker` never calls this function — its job is to
+# relay a line this one already wrote, verbatim — but it DOES share the `SWEPT_SCHEMA`
+# constant above, spelled identically (byte-pinned, tests/cross-gate-agreement.test.sh),
+# never as a second literal the way `grep -rn SWEPT_SCHEMA hooks/*.sh` could miss.
+swept_marker_write() {  # <roster file> <at> <session> <name> <agent id> <state> -> 0/1
+  local f="$1" at="$2" sid="$3" name="$4" aid="$5" state="$6"
+  [ -n "$f" ] || return 1
+  printf '%s|at=%s|session=%s|name=%s|agent_id=%s|state=%s\n' \
+    "$SWEPT_SCHEMA" "$at" "$sid" "$name" "$aid" "$state" >> "$f" 2>/dev/null
+  return 0
+}
+
 INPUT=$(cat)
 _jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
@@ -637,8 +654,10 @@ while IFS=$'\t' read -r AID NAME KIND; do
   # trailing append). This is the same lock-free discipline the trailing append relied on —
   # one line, well under a pipe buffer, O_APPEND — just paid once per row instead of once
   # per sweep, so a sweep killed mid-loop still banks every verdict already decided.
-  printf '%s|at=%s|session=%s|name=%s|agent_id=%s|state=%s\n' \
-    "$SWEPT_SCHEMA" "$NOW" "$SID" "$NAME" "$AID" "$STATE" >> "$ROSTER_FILE" 2>/dev/null
+  #
+  # THE ONE WRITER (S15, AC-26): `swept_marker_write`, defined above, owns this printf;
+  # hooks/session-poker.sh's `adopt_copy_marker` never re-spells it.
+  swept_marker_write "$ROSTER_FILE" "$NOW" "$SID" "$NAME" "$AID" "$STATE"
 
   # AND A SUPERSESSION NEVER SPEAKS. Its marker is MET by construction, so nothing below
   # would fire anyway — but the reason it must not is stronger than the arithmetic: the row

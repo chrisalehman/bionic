@@ -3700,24 +3700,42 @@ expect_eq "…and the recorder advances it rather than ignoring the roster" "1" 
 # rename of `launched_at=` at the writer would make the pin scan for a key that no longer
 # exists and FAIL OPEN — find nothing, treat every resume as a new agent, restore the exact
 # bug S6 fixed, and stay green everywhere. This is what makes that rename fail loud.
-n_row_keys() {  # <file> -> the keys the roster ROW template emits, in order
-  grep -F 'ROW="roster-state/' "$1" | head -1 | tr '|' '\n' | sed -n 's/^\([a-z_]*\)=.*/\1/p' \
-    | tr '\n' ' ' | sed 's/ $//'
+# THE KEYS COME FROM THE WRITER, DRIVEN — not from a format string read out of the hook.
+# Until S14 this scraped `ROW="roster-state/` from `hooks/dispatch-preflight.sh`, which is
+# how it could report "the mutation target matched nothing" the moment the row moved. The
+# row now has one writer, `roster_row` (payload/scripts/lib/roster.sh), and the honest way to
+# ask what keys it emits is to run it. `$( … )` is a subshell, so the library never leaks
+# into the rest of this suite and a mutated copy is a real substitution.
+N_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
+[ -r "$N_ROSTER_LIB" ] || N_ROSTER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/roster.sh"
+n_row_keys() {  # <library> -> the keys the row carries, in order, as the writer emits them
+  ( . "$1" >/dev/null 2>&1 && roster_row status=probe ) \
+    | tr '|' '\n' | sed -n 's/^\([a-z_]*\)=.*/\1/p' | tr '\n' ' ' | sed 's/ $//'
 }
-N_KEYS=$(n_row_keys "$DP_N")
-expect_contains "the writer's row template carries launched_at at all" "launched_at" "$N_KEYS"
-# Proven loud by mutation: rename the key at the writer and the first assertion above is the
-# one that goes red, which is the point — the failure is a suite failure, not a silent
-# fail-open at 3am.
-N_MUT_DP="$SANDBOX/fx/renamed-preflight.sh"
-awk '{ if (index($0, "ROW=\"roster-state/") > 0) gsub(/launched_at=/, "launchedat=")
-       print }' "$DP_N" > "$N_MUT_DP"
-if cmp -s "$DP_N" "$N_MUT_DP"; then
-  no "the launched_at rename applies to dispatch-preflight.sh" \
-     "the mutation target matched nothing — the row template moved and this proof is vacuous"
+N_KEYS=$(n_row_keys "$N_ROSTER_LIB")
+expect_contains "the writer's row carries launched_at at all" "launched_at" "$N_KEYS"
+# Proven loud by mutation: rename the key at the writer and the assertion above is the one
+# that goes red — a suite failure, not a silent fail-open at 3am. Only the EMITTED field is
+# renamed (`|launched_at=`, which appears once, in the row `roster_row` builds); renaming the
+# variable too would leave the mutant unable to run and prove nothing about the key.
+mkdir -p "$SANDBOX/fx"
+N_MUT_LIB="$SANDBOX/fx/renamed-roster.sh"
+sed 's/|launched_at=/|launchedat=/' "$N_ROSTER_LIB" > "$N_MUT_LIB"
+if cmp -s "$N_ROSTER_LIB" "$N_MUT_LIB"; then
+  no "the launched_at rename applies to the roster writer" \
+     "the mutation target matched nothing — the row moved and this proof is vacuous"
 else
-  ok "the launched_at rename applies to dispatch-preflight.sh"
+  ok "the launched_at rename applies to the roster writer"
 fi
+# AND THE KEY REALLY LEAVES THE ROW. The `cmp` above only says the edit landed somewhere;
+# this says the writer stopped emitting the field, which is the state that would fail open.
+N_MUT_KEYS="$(n_row_keys "$N_MUT_LIB")"
+expect_eq "…and the mutant's row no longer carries launched_at at all" "0" \
+  "$(printf '%s\n' "$N_MUT_KEYS" | tr ' ' '\n' | LC_ALL=C grep -c '^launched_at$' | tr -d ' ')"
+# Non-vacuity: the same count over the SHIPPED writer's keys is one, so the zero above is a
+# fact about the mutant and not about the counting.
+expect_eq "…while the shipped writer's row carries it exactly once" "1" \
+  "$(printf '%s\n' "$N_KEYS" | tr ' ' '\n' | LC_ALL=C grep -c '^launched_at$' | tr -d ' ')"
 
 # THE END-TO-END HALF (row 1): every writer real, every reader real, and the observable is the
 # VERDICT rather than the roster row — which is the gap S6's own suite could not close, since
@@ -5447,9 +5465,13 @@ RA_MUT="$SANDBOX/ra-mutant"
 mkdir -p "$RA_MUT/hooks" "$RA_MUT/scripts/lib"
 cp "$LIB_DIR_SRC"/*.sh "$RA_MUT/scripts/lib/" 2>/dev/null
 cp "$BIONIC_HOOKS_DIR"/*.sh "$RA_MUT/hooks/" 2>/dev/null
-sed 's/|adopted_from=%s|tool_use_id=|plan=%s\\n/|adopted_from=%s|tool_use_id=\\n/' \
+# The field is now an ARGUMENT to `roster_row` rather than a slot in a format string
+# (S14, AC-25), so the doctoring deletes the line that passes it. What the mutant writes
+# is `plan=` empty rather than no `plan=` at all, and both are the same thing to the
+# reader under test: `ra_field` returns "" either way, and the row is still written.
+sed '/"plan=$(clean "$plan")"/d' \
   "$SPO" > "$RA_MUT/hooks/session-poker.sh"
-expect_eq "the adopt-writer mutation applies (the printf has not moved)" "no" \
+expect_eq "the adopt-writer mutation applies (the plan argument has not moved)" "no" \
   "$(cmp -s "$SPO" "$RA_MUT/hooks/session-poker.sh" && echo yes || echo no)"
 RA_REPO_M=$(new_repo "ra-mutant-repo")
 RA_PLAN_M="$RA_REPO_M/.bionic/docs/plans/epic-99/ra-run.md"
@@ -5466,61 +5488,116 @@ expect_eq "…and a doctored adopt writer leaves the row unattributed (§RA disc
 expect_contains "…while still writing the row, so the difference is the FIELD" \
   "$RA_PRED_ID" "$RA_ADOPT_M"
 
-# --- §RA.2 — the two writers of roster-state/v1 carry the SAME KEY SET -------------
+# --- §RA.2 — ONE WRITER OF roster-state/v1, PINNED TO A CAPTURED REAL ROW ----------
 #
-# Step-6 review D-8. The row has two producers that share no builder:
-# `hooks/dispatch-preflight.sh` writes `status=intended` and `hooks/session-poker.sh`'s
-# `adopt_write_row` writes `status=identified`. §RA above proves the two AGREE on the value
-# of one field, `plan=` — and this wave widened the pair, adding `waiver=` to the adopt
-# writer, with no cross-writer pin on it at all. Readers extract by key, so field ORDER
-# cannot break them; a field present on ONE writer and absent from the other is exactly
-# what breaks them, and that is what this row forbids.
+# (wave-01 verification-cannot-lie, S14; spec AC-25; design ledger D3.)
 #
-# THE ADOPT-ONLY KEYS ARE PINNED BY NAME, not waved through. `teammate_id` and
-# `adopted_from` exist only on a row that came from a predecessor session; adding a third
-# adopt-only key is a deliberate act that has to be written down here.
-ra2_keys() {  # <file> <literal anchor> -> the row's key names, one per line, in order
-  LC_ALL=C grep -F -- "$2" "$1" 2>/dev/null | head -1 \
-    | sed 's/^.*roster-state\///' \
-    | tr '|' '\n' \
-    | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*$/\1/p'
+# WHAT THIS ROW USED TO SAY, AND WHY IT CHANGED. Until S14 the schema had TWO producers
+# sharing no builder — `hooks/dispatch-preflight.sh`'s `ROW=` and
+# `hooks/session-poker.sh`'s `adopt_write_row` — so the obligation here was a KEY-SET
+# COMPARISON scraped out of the two source files: same keys in the same order, plus two
+# adopt-only names listed by hand (Step-6 review D-8). That comparison could only ever
+# notice the two writers disagreeing WITH EACH OTHER. Both drifting together, away from
+# what the fleet's readers parse, was invisible to it — and "wrong but agreeing" is
+# exactly the fog D3 ruled unacceptable. `roster_row` (payload/scripts/lib/roster.sh) is
+# now the one writer, so the two CANNOT disagree any more, and the obligation becomes the
+# one thing the old shape could not check: that the one writer still emits the row the
+# fleet actually has on disk.
+#
+# THE PIN IS AGAINST A CAPTURE, NOT AN EXPECTATION. tests/fixtures/roster-row.captured
+# holds two rows written by the two production call sites BEFORE either of them called
+# `roster_row`; its header records which line came from which writer and from where.
+# Comparing the one writer against a string this repo also wrote is a self-comparison —
+# both halves move together and the pin survives any drift. A row the function did not
+# write is the only version of this claim that can fail.
+#
+# THE ARGUMENTS ARE THE CAPTURE'S OWN FIELDS, HANDED OVER BACKWARDS. The test splits the
+# captured row on `|`, gives `roster_row` the resulting `key=value` bag in REVERSE order,
+# and requires the original line back. Field ORDER, field PRESENCE and the separators are
+# therefore all the function's to supply; none of them can be echoed out of the input.
+# The adopt row's two extra fields (`teammate_id=`, `adopted_from=`) are pinned in the one
+# place they belong — a real row — instead of being listed by name in a test that would
+# have to be edited to admit a third.
+RA2_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
+[ -r "$RA2_ROSTER_LIB" ] || RA2_ROSTER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/roster.sh"
+RA2_CAPTURE="$REPO_ROOT/tests/fixtures/roster-row.captured"
+
+ra2_captured() {  # <status> -> the one captured row carrying that status
+  LC_ALL=C grep "^roster-state/v1|status=$1|" "$RA2_CAPTURE" 2>/dev/null | head -1
 }
-RA2_ADOPT_ONLY='teammate_id
-adopted_from'
 
-ra2_compare() {  # <dispatch-preflight path> <session-poker path> -> "" when they agree
-  local dp="$1" pk="$2" a b
-  a="$(ra2_keys "$dp" 'ROW="roster-state/')"
-  b="$(ra2_keys "$pk" "printf 'roster-state/v1|status=identified" \
-       | LC_ALL=C grep -v -x -F -f <(printf '%s\n' "$RA2_ADOPT_ONLY"))"
-  [ "$a" = "$b" ] && return 0
-  printf 'dispatch-preflight:\n%s\nsession-poker (adopt-only keys removed):\n%s\n' "$a" "$b"
+# The rebuild. `$( … )` is a subshell, so sourcing the library here cannot leak
+# `roster_row` into the rest of this suite — every call pays for its own load, which is
+# also what makes the mutant-library arm below a real substitution rather than a
+# redefinition racing the first source.
+ra2_rebuild() {  # <row> [library path] -> roster_row's output for that row's own fields
+  local row="$1" lib="${2:-$RA2_ROSTER_LIB}" f
+  local args=()
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    args=("$f" ${args[@]+"${args[@]}"})   # prepend: the bag reaches roster_row REVERSED
+  done <<RA2_FIELDS
+$(printf '%s' "$row" | tr '|' '\n' | tail -n +2)
+RA2_FIELDS
+  [ "${#args[@]}" -gt 0 ] || return 1
+  ( . "$lib" >/dev/null 2>&1 && roster_row "${args[@]}" )
 }
 
-RA2_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
-RA2_PK="$BIONIC_HOOKS_DIR/session-poker.sh"
-expect_eq "the two roster-state/v1 writers emit the same keys in the same order" "" \
-  "$(ra2_compare "$RA2_DP" "$RA2_PK")"
-# Non-vacuity: the extraction really found a row, and it is the row this wave widened.
-RA2_DP_KEYS="$(ra2_keys "$RA2_DP" 'ROW="roster-state/')"
-expect_contains "…the extraction is not empty (it names status)"  "status"  "$RA2_DP_KEYS"
-expect_contains "…and it names the field this wave added to the other writer" \
-  "waiver" "$RA2_DP_KEYS"
-expect_eq "…and the adopt writer's extra keys are exactly the two adopt-only ones" \
-  "$RA2_ADOPT_ONLY" \
-  "$(ra2_keys "$RA2_PK" "printf 'roster-state/v1|status=identified" \
-     | LC_ALL=C grep -v -x -F -f <(printf '%s\n' "$RA2_DP_KEYS"))"
+RA2_CAP_I="$(ra2_captured intended)"
+RA2_CAP_A="$(ra2_captured identified)"
+# NON-VACUITY FIRST: a capture that failed to load would make every equality below compare
+# two empty strings and pass. Each row is checked for the field that identifies its writer.
+expect_contains "the capture holds the launch-time row (dispatch-preflight's)" \
+  "|status=intended|" "$RA2_CAP_I"
+expect_contains "the capture holds the adopt-time row (session-poker's), with its extras" \
+  "|adopted_from=" "$RA2_CAP_A"
 
-# THE MUTATION ARM: drop `waiver=` from the adopt writer in a COPY and require the
-# comparison to name it. This is the exact drift D-8 found unpinned.
+expect_eq "roster_row reproduces the captured launch-time row byte for byte" \
+  "$RA2_CAP_I" "$(ra2_rebuild "$RA2_CAP_I")"
+expect_eq "roster_row reproduces the captured adopt-time row byte for byte" \
+  "$RA2_CAP_A" "$(ra2_rebuild "$RA2_CAP_A")"
+
+# THE MUTATION ARMS. Two, because the pin has two halves that can rot independently.
+#
+# ARM 1 — DOCTOR THE ROW. One field's value is changed in the capture handed to the
+# rebuild; the output must then differ from the untouched capture. This is what proves the
+# equality above is load-bearing rather than comparing a value to itself.
+RA2_DOCTORED="$(printf '%s' "$RA2_CAP_I" | sed 's/|subagent_type=[^|]*|/|subagent_type=DOCTORED|/')"
+expect_eq "the row-doctoring arm really changed one field" "yes" \
+  "$([ "$RA2_DOCTORED" != "$RA2_CAP_I" ] && echo yes || echo no)"
+expect_eq "…and the pin goes red on it (the doctored field does not reproduce the capture)" "no" \
+  "$([ "$(ra2_rebuild "$RA2_DOCTORED")" = "$RA2_CAP_I" ] && echo yes || echo no)"
+expect_contains "…and what came back carries the doctored value, so the writer was really driven" \
+  "subagent_type=DOCTORED" "$(ra2_rebuild "$RA2_DOCTORED")"
+
+# ARM 2 — DOCTOR THE WRITER. A copy of the library drops one field from the row it emits.
+# This is the drift the pin exists for: the one writer moving away from the shape on disk.
 RA2_MUT="$SANDBOX/ra2-mutant"
 mkdir -p "$RA2_MUT"
-sed 's/|waiver=%s|teammate_id=/|teammate_id=/' "$RA2_PK" > "$RA2_MUT/session-poker.sh"
-expect_eq "the mutation arm really removed waiver= from the adopt row" "yes" \
-  "$([ "$(ra2_keys "$RA2_MUT/session-poker.sh" "printf 'roster-state/v1|status=identified" \
-      | LC_ALL=C grep -c -x waiver | tr -d ' ')" = "0" ] && echo yes || echo no)"
-expect_contains "…and the key-set comparison goes red on it" "waiver" \
-  "$(ra2_compare "$RA2_DP" "$RA2_MUT/session-poker.sh")"
+sed 's/|absent=\$absent//' "$RA2_ROSTER_LIB" > "$RA2_MUT/roster.sh"
+expect_eq "the writer-doctoring arm really removed absent= from the emitted row" "yes" \
+  "$([ "$(LC_ALL=C grep -c 'absent=\$absent' "$RA2_MUT/roster.sh" | tr -d ' ')" = "0" ] && echo yes || echo no)"
+expect_eq "…and the pin goes red on the mutated writer" "no" \
+  "$([ "$(ra2_rebuild "$RA2_CAP_I" "$RA2_MUT/roster.sh")" = "$RA2_CAP_I" ] && echo yes || echo no)"
+
+# BOTH CALL SITES REALLY ROUTE THROUGH IT. The pin above proves the FUNCTION is right; these
+# two prove the hooks are its callers, which is the other half of "one writer". The absence
+# assertion is paired with the positive one on purpose: a hook that deleted its row
+# entirely would satisfy the absence alone.
+# THE PATTERN MUST NOT CATCH READERS. Both hooks still SELECT rows by prefix
+# (`hooks/dispatch-preflight.sh`'s prune, `hooks/session-poker.sh`'s open-row grep) and a
+# prefix test names `status=` without ever naming `session=`. A row being BUILT always
+# carries the session it belongs to, so that is what separates the two.
+ra2_code_hits() {  # <file> <extended regex> -> matching lines, whole-line comments removed
+  LC_ALL=C grep -nE -- "$2" "$1" 2>/dev/null | LC_ALL=C grep -v ':[[:space:]]*#' | wc -l | tr -d ' '
+}
+RA2_BUILT_ROW='roster-state/[^|]*\|status=[a-z]+\|session='
+RA2_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+RA2_PK="$BIONIC_HOOKS_DIR/session-poker.sh"
+expect_eq "dispatch-preflight builds its row by calling roster_row, and holds no row literal" \
+  "1 0" "$(ra2_code_hits "$RA2_DP" 'roster_row ') $(ra2_code_hits "$RA2_DP" "$RA2_BUILT_ROW")"
+expect_eq "session-poker's adopt builds its row by calling roster_row, and holds no row literal" \
+  "1 0" "$(ra2_code_hits "$RA2_PK" 'roster_row ') $(ra2_code_hits "$RA2_PK" "$RA2_BUILT_ROW")"
 
 
 # ============================================================
@@ -7205,6 +7282,87 @@ expect_eq "CG.4 …the mutant copy rejects current: 3b as unreadable (the pre-fi
   "" "$(cg_sched_current_mut "$CG_PLAN_3B")"
 expect_eq "CG.4 …while the shipped file still reads it as step 3 — CG.1 discriminates" \
   "3" "$(cg_sched_current "$CG_PLAN_3B")"
+
+
+# ============================================================
+echo ""
+echo "=== S15 — landing-swept/v1: one writer, pinned to a captured marker ==="
+# ============================================================
+#
+# THE OWNERSHIP-TABLE ROW (spec AC-26; research-code-map §2.c): hooks/landing-gate.sh's
+# originator, `swept_marker_write`, is pinned here against tests/fixtures/landing-swept.captured
+# — a real marker taken from a live sweep on this machine
+# (roster-84f06e58-9262-4c7f-a199-ca77c24a332e.state, name=research-code-map, MET).
+# hooks/session-poker.sh's `adopt_copy_marker` never calls the writer (its job is to relay a
+# line the originator already wrote, verbatim) — what it shares is the `SWEPT_SCHEMA`
+# constant, so §S15b below pins the two hooks' copies of that constant to agree, byte for
+# byte, rather than sourcing one file: two separate hook PROCESSES have no shared memory to
+# source an in-process value from, the same reason payload/scripts/lib/loader.sh's own block
+# is duplicated-but-pinned rather than sourced.
+#
+# EXTRACTED, NOT SOURCED FROM A LIB (see tests/lib/swept-marker.sh's own header for why: a
+# hook copied out of the tree, as several sections above already do, resolves its
+# BIONIC_LIB_WANT files through the loader's registry/cache fallback — whatever was last
+# LANDED, not this worktree's uncommitted tree). The real source, `eval`'d, real call — the
+# same `field1_via`/`field2_via` idiom this file already uses.
+#
+# BY KEY, NEVER BY POSITION. The captured line's five fields are read out with the same
+# by-key idiom every production reader uses, so a reordering upstream cannot pass this pin
+# by accident — only the shared writer producing the identical byte sequence can.
+
+S15_LG="$PARTY_LG"
+S15_PK="$PARTY_PK"
+S15_CAPTURED="$REPO_ROOT/tests/fixtures/landing-swept.captured"
+S15_LINE="$(cat "$S15_CAPTURED")"
+
+s15_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
+S15_AT="$(s15_field "$S15_LINE" at)"
+S15_SID="$(s15_field "$S15_LINE" session)"
+S15_NAME="$(s15_field "$S15_LINE" name)"
+S15_AID="$(s15_field "$S15_LINE" agent_id)"
+S15_STATE="$(s15_field "$S15_LINE" state)"
+
+s15_write() {  # <hook file> <roster file> <at> <session> <name> <agent id> <state>
+  ( eval "$(grep -m1 '^SWEPT_SCHEMA=' "$1")"
+    eval "$(awk '/^swept_marker_write\(\)/,/^\}/' "$1")"
+    swept_marker_write "$2" "$3" "$4" "$5" "$6" "$7" ) 2>/dev/null
+}
+
+S15_OUT="$SANDBOX/s15-roster.state"
+s15_write "$S15_LG" "$S15_OUT" "$S15_AT" "$S15_SID" "$S15_NAME" "$S15_AID" "$S15_STATE"
+expect_eq "S15 the shared writer reproduces the captured marker byte for byte" \
+  "$S15_LINE" "$(cat "$S15_OUT" 2>/dev/null)"
+
+# THE DISCRIMINATOR — one field doctored, and the pin must go red. A copy of the hook with
+# `state=%s` in the writer's printf format replaced by the literal `state=MUTATED`, so every
+# marker it writes carries the wrong state regardless of what it is called with — a
+# plausible schema drift, not damage. The shipped hook is never touched.
+S15_MUT="$SANDBOX/s15-landing-gate-mutant.sh"
+awk '{ gsub(/state=%s/, "state=MUTATED"); print }' "$S15_LG" > "$S15_MUT"
+expect_eq "S15 the mutation applies (the printf line has not moved out from under this proof)" \
+  "1" "$(diff "$S15_LG" "$S15_MUT" | grep -c '^< ')"
+
+S15_MUT_OUT="$SANDBOX/s15-roster-mutant.state"
+s15_write "$S15_MUT" "$S15_MUT_OUT" "$S15_AT" "$S15_SID" "$S15_NAME" "$S15_AID" "$S15_STATE"
+expect_eq "S15 …the mutant's output is NOT the captured shape (the pin discriminates)" \
+  "no" "$([ "$(cat "$S15_MUT_OUT" 2>/dev/null)" = "$S15_LINE" ] && echo yes || echo no)"
+expect_contains "S15 …the real state value nowhere survives the mutant — it is truly overwritten" \
+  "state=MUTATED" "$(cat "$S15_MUT_OUT" 2>/dev/null)"
+
+# ---- §S15b — the constant the two hooks share, pinned to agree ----
+#
+# hooks/session-poker.sh's `adopt_copy_marker` never calls the writer above; it shares only
+# the schema NAME, each hook carrying its own `SWEPT_SCHEMA=` assignment line. A rename on
+# one side and not the other is exactly the drift research-code-map §2.c warned a
+# constant-by-NAME grep can miss — this pins the two LINES, not just the grep, to agree.
+S15_LG_SCHEMA_LINE="$(grep -m1 '^SWEPT_SCHEMA=' "$S15_LG")"
+S15_PK_SCHEMA_LINE="$(grep -m1 '^SWEPT_SCHEMA=' "$S15_PK")"
+expect_eq "S15b hooks/landing-gate.sh declares the constant" \
+  'SWEPT_SCHEMA="landing-swept/v1"' "$S15_LG_SCHEMA_LINE"
+expect_eq "S15b …and hooks/session-poker.sh's copy agrees, byte for byte" \
+  "$S15_LG_SCHEMA_LINE" "$S15_PK_SCHEMA_LINE"
+expect_eq "S15b …the copy is a named constant, not a literal in adopt_copy_marker's own grep" \
+  "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^landing-swept/v1|'")"
 
 # ============================================================
 echo ""

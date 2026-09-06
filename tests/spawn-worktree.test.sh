@@ -45,25 +45,15 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 SPAWN="${REPO}/payload/scripts/spawn-worktree.sh"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
-# Pattern match without a pipe: `printf | grep -q` is a SIGPIPE race under
-# pipefail (tests/assert-helper-race.test.sh used to pin that lesson; deleted at
-# 8582861, epic-18 wave-03, and nothing replaced the pin).
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "'$actual' does not match '$pattern'"; fi
-}
+# expect_true, expect_false, expect_match are the framework's (tests/lib/assert.sh)
+# — S9b removed the private shadows here (AC-12); expect_match's glob semantics
+# and argument order (`<label> <glob> <actual>`) were already identical, so
+# every call site below binds unchanged.
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -125,13 +115,12 @@ spawn_out_with() {  # <script> <cwd> <args...>
   ( cd "$cwd" && bash "$script" "$@" 2>/dev/null )
 }
 
-echo "=== Group 1: the script exists, is executable, and parses ==="
+section "Group 1: the script exists, is executable, and parses"
 
 # (file-exists/executable fixture checks removed epic-18 W3 4/6: no production subject -- see ledger-spawn-worktree.md)
 expect_true "spawn-worktree.sh passes bash -n"  bash -n "$SPAWN"
 
-echo ""
-echo "=== Group 2: create — the call succeeds ==="
+section "Group 2: create — the call succeeds"
 
 R1="$(new_repo "$TMP/r1")"
 SHA1="$(sha_of "$R1")"
@@ -139,8 +128,7 @@ spawn_out "$R1" create "$SHA1" feat-alpha >/dev/null
 
 expect_eq "create exits 0" "0" "$(spawn_rc "$R1" create "$SHA1" feat-alpha-2)"
 
-echo ""
-echo "=== Group 3: create — what the line CLAIMS is what is on disk ==="
+section "Group 3: create — what the line CLAIMS is what is on disk"
 #
 # An attestation is worth nothing if it is printed from the arguments rather
 # than read back from the result. Each field is re-derived from the filesystem
@@ -160,8 +148,7 @@ expect_eq "create adds NOTHING to the worktree tree beyond the checkout" \
 expect_eq "the attestation carries no bionic-symlink field" "0" \
   "$(printf '%s\n' "$(spawn_out "$R1" create "$SHA1" feat-alpha-3)" | grep -c 'bionic-symlink')"
 
-echo ""
-echo "=== Group 4: create — base resolution and the older-commit arm ==="
+section "Group 4: create — base resolution and the older-commit arm"
 #
 # `base` is not decoration: a worktree at HEAD when an older SHA was asked for
 # is the exact defect the pin+verify-HEAD interim discipline existed to catch.
@@ -173,8 +160,7 @@ spawn_out "$R2" create "$OLD2" older >/dev/null
 expect_eq   "the worktree really is at the older sha" "$OLD2" "$(sha_of "${R2}/.worktrees/older")"
 expect_true "the older sha is not HEAD (the arm discriminates)" test "$OLD2" != "$HEAD2"
 # (fixture self-check removed epic-18 W3 4/6: not testing the script -- see ledger-spawn-worktree.md)
-echo ""
-echo "=== Group 5: create — where the worktree lands ==="
+section "Group 5: create — where the worktree lands"
 #
 # `git worktree add` resolves a relative path against pwd, not the repo root
 # (.claude/rules/git-worktree-docs.md records the nested-worktree accident that
@@ -207,8 +193,7 @@ expect_match "a slashed branch name yields a flat directory named for its last c
   "*path=${R3}/.worktrees/17-99-demo branch=wave/17-99-demo *" "$OUT3C"
 expect_true "the slashed branch exists" git -C "$R3" show-ref --verify --quiet refs/heads/wave/17-99-demo
 
-echo ""
-echo "=== Group 6: create — spawning from INSIDE a linked worktree ==="
+section "Group 6: create — spawning from INSIDE a linked worktree"
 #
 # The nesting accident this repo actually suffered. A dispatcher running inside
 # a worktree must produce a SIBLING under the main checkout, not a worktree
@@ -225,8 +210,7 @@ expect_false "the sibling carries no .bionic entry either" \
   test -e "${R4}/.worktrees/second/.bionic"
 expect_false "no nested .worktrees directory was created" test -d "${R4}/.worktrees/first/.worktrees"
 
-echo ""
-echo "=== Group 7: create — refusals ==="
+section "Group 7: create — refusals"
 #
 # Each refusal is paired with the acceptance it discriminates against, and each
 # one is asserted to leave NOTHING behind: a refusal that half-creates is worse
@@ -284,8 +268,7 @@ mkdir -p "$NB/.bionic"
 expect_match "the same repo is accepted once .bionic exists (the arm discriminates)" \
   "spawn-worktree: OK *" "$(spawn_out "$NB" create "$NBSHA" nostate)"
 
-echo ""
-echo "=== Group 8: create — a tracked .bionic in the branch is no longer a refusal ==="
+section "Group 8: create — a tracked .bionic in the branch is no longer a refusal"
 #
 # Until C2 this fixture was the self-verification failure: `git worktree add`
 # checks the tracked `.bionic` out, the plant target is occupied, and the
@@ -313,7 +296,7 @@ expect_false "and it is not a symlink"   test -L "${R6}/.worktrees/tracked-state
 expect_eq    "the branch's own state file is what is there" "tracked state" \
   "$(cat "${R6}/.worktrees/tracked-state/.bionic/tracked.md")"
 
-echo "=== Group 9: remove — the companion verb ==="
+section "Group 9: remove — the companion verb"
 #
 # Teardown is never automatic and never deletes the branch: the merge decision
 # belongs to the orchestrator (D4), so `remove` gives back a tree and keeps the
@@ -359,8 +342,7 @@ expect_match "removing the MAIN checkout is refused" "spawn-worktree: FAIL reaso
 expect_match "remove with no path is refused" "spawn-worktree: FAIL reason=*" \
   "$(spawn_out "$R7" remove)"
 
-echo ""
-echo "=== Group 10: mutation and restore — do the pins above actually catch? ==="
+section "Group 10: mutation and restore — do the pins above actually catch?"
 #
 # RED evidence is perishable: once the script is written the assertions are
 # green forever and nothing records that they discriminate. Each arm below
@@ -477,8 +459,7 @@ mutate_check "mutation: the cleanup on failed verification removed is caught" \
   's|^  cleanup_partial$|  :|' \
   verify_cleanup "residue"
 
-echo ""
-echo "=== Group 11: the suite is registered in tests/run.sh by name ==="
+section "Group 11: the suite is registered in tests/run.sh by name"
 #
 # tests/*.test.sh is NOT globbed by the runner — an unregistered suite is a
 # silent false green (tests/run.sh records the last time that happened).
@@ -486,15 +467,11 @@ echo "=== Group 11: the suite is registered in tests/run.sh by name ==="
 expect_true "tests/run.sh names spawn-worktree.test.sh" \
   grep -q 'run "spawn-worktree.test.sh" bash tests/spawn-worktree.test.sh' "${REPO}/tests/run.sh"
 
-echo ""
-echo "=== Group 12: the shipped skill is the payload's own copy ==="
+# The old "Group 12: the shipped skill is the payload's own copy" banner (git
+# HEAD:490-492) named no subject and carried zero assertions — the
+# pre-framework harness never noticed. The framework's section floor DOES
+# (captured to record/wave-verification-cannot-lie/s9-planted.log); S9 is a
+# mechanical migration and does not author new assertions, so the dead banner
+# is dropped rather than given content (S9 W+1 candidate 1).
 
-
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish

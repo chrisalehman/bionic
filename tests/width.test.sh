@@ -23,15 +23,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq() { TOTAL=$((TOTAL + 1)); if [ "$2" = "$3" ]; then PASS=$((PASS + 1)); echo "PASS: $1"; else FAIL=$((FAIL + 1)); echo "FAIL: $1"; echo "      expected '$2', got '$3'"; fi; }
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
+# expect_true is the framework's (tests/lib/assert.sh) — S9b removed the private
+# shadow here (AC-12); same semantics (silences the command's own output).
 
 expect_true "payload/scripts/lib/width.sh exists" test -f "$WIDTH_SH"
 
@@ -50,7 +48,7 @@ cols_c() {  # <string> -> its measured width under the C locale
   LC_ALL=C bash -c '. "$1"; bionic_cols "$2"' _ "$WIDTH_SH" "${1:-}"
 }
 
-echo "=== Section 1: every glyph in the closed set measures one column ==="
+section "Section 1: every glyph in the closed set measures one column"
 
 for g in '✓' '✗' '–' '—' '≥' '…' '·' '→' '•'; do
   expect_eq "1.${g}: '${g}' measures 1 under a UTF-8 locale" "1" "$(bionic_cols "$g")"
@@ -60,8 +58,7 @@ done
 expect_eq "2: ASCII is measured verbatim" "5" "$(bionic_cols "abcde")"
 expect_eq "3: a mixed string counts glyphs as one each" "7" "$(cols_c "ab → cd")"
 
-echo ""
-echo "=== Section 2: no glyph reaches a bounded row unmeasured ==="
+section "Section 2: no glyph reaches a bounded row unmeasured"
 
 # THE GLYPHS THE PRINTING SCRIPTS ACTUALLY PUT IN A ROW. Taken from the shell
 # STRING LITERALS the two report surfaces build rows out of — a glyph that only
@@ -102,8 +99,7 @@ else
   else no "5: a glyph a row can carry is not in width.sh's closed set" "$_bad"; fi
 fi
 
-echo ""
-echo "=== Section 3: the truncator cuts characters, never bytes ==="
+section "Section 3: the truncator cuts characters, never bytes"
 
 # width.sh's own correction: `printf '%.*s'` counts BYTES, so a length test in
 # characters against a cut in bytes slices a multi-byte glyph in half. A cut
@@ -116,8 +112,7 @@ else
   no "7: the cut produced invalid UTF-8" "$(printf '%s' "$CUT" | od -c | head -2)"
 fi
 
-echo ""
-echo "=== Section 4: bionic_line protects the instruction it is handed ==="
+section "Section 4: bionic_line protects the instruction it is handed"
 
 LINE="$(bionic_line "  ✓ $(printf '%-40s' 'a label')" \
         "$(printf 'x%.0s' $(seq 1 200))" " → run /bionic:setup")"
@@ -127,15 +122,9 @@ case "$LINE" in
   *) no "9: the instruction was eaten by the cut" "$(printf '%.120s' "$LINE")" ;;
 esac
 
-echo ""
-echo "=== Section 5: registration ==="
+section "Section 5: registration"
 
 expect_true "10: tests/run.sh names width.test.sh" \
   grep -q 'run "width.test.sh" bash tests/width.test.sh' "${REPO}/tests/run.sh"
 
-echo ""
-echo "========================================"
-echo "width: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish

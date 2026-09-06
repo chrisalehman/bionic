@@ -15,14 +15,9 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 SESSION_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/session.sh"
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 
 # Call session_id in a scrubbed environment.
 #   session_call <env-sid|__UNSET__> <payload-sid>
@@ -42,21 +37,19 @@ session_call() {
   rm -f "$out_f" "$err_f"
 }
 
-echo "=== Group 0: sourcing the library is silent and has no side effects ==="
+section "Group 0: sourcing the library is silent and has no side effects"
 
 SOURCE_OUT="$(env -i bash -c '. "$1"' _ "$SESSION_SH" 2>&1)"
 expect_eq "sourcing session.sh prints nothing" "" "$SOURCE_OUT"
 
-echo ""
-echo "=== Group 1: env and payload agree — silent, prints env ==="
+section "Group 1: env and payload agree — silent, prints env"
 
 session_call "sess-aaa" "sess-aaa"
 expect_eq "agreement: stdout is the (shared) env value" "sess-aaa" "$SC_STDOUT"
 expect_eq "agreement: no stderr" "" "$SC_STDERR"
 expect_eq "agreement: exit 0" "0" "$SC_STATUS"
 
-echo ""
-echo "=== Group 2: env and payload diverge — one stderr line, prints env ==="
+section "Group 2: env and payload diverge — one stderr line, prints env"
 
 session_call "sess-env" "sess-pay"
 expect_eq "divergence: stdout is the env value" "sess-env" "$SC_STDOUT"
@@ -64,8 +57,7 @@ expect_eq "divergence: exactly one stderr line naming both, env wins" \
   "session-id: payload sess-pay ≠ env sess-env — using env" "$SC_STDERR"
 expect_eq "divergence: exit 0" "0" "$SC_STATUS"
 
-echo ""
-echo "=== Group 3: env unset, payload present — prints payload, one stderr line ==="
+section "Group 3: env unset, payload present — prints payload, one stderr line"
 
 session_call "__UNSET__" "sess-pay"
 expect_eq "env-unset: stdout is the payload value" "sess-pay" "$SC_STDOUT"
@@ -73,8 +65,7 @@ expect_eq "env-unset: one stderr line" \
   "session-id: env unset — using payload" "$SC_STDERR"
 expect_eq "env-unset: exit 0" "0" "$SC_STATUS"
 
-echo ""
-echo "=== Group 4: both absent — exit 1, one stderr line, no stdout ==="
+section "Group 4: both absent — exit 1, one stderr line, no stdout"
 
 session_call "__UNSET__" ""
 expect_eq "both-absent: no stdout" "" "$SC_STDOUT"
@@ -82,17 +73,9 @@ expect_eq "both-absent: one stderr line" \
   "session-id: no session id in env or payload" "$SC_STDERR"
 expect_eq "both-absent: exit 1" "1" "$SC_STATUS"
 
-echo ""
-echo "=== Group 5: the suite is registered in tests/run.sh by name ==="
+section "Group 5: the suite is registered in tests/run.sh by name"
 
 expect_eq "tests/run.sh runs session.test.sh by name" "1" \
   "$(/usr/bin/grep -c 'run "session.test.sh" bash tests/session.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh")"
 
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish
