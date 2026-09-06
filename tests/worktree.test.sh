@@ -36,24 +36,16 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 LIB="${REPO}/payload/scripts/lib/worktree.sh"
 SPAWN="${REPO}/payload/scripts/spawn-worktree.sh"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
-# No `printf | grep -q`: that is a SIGPIPE race under pipefail.
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "'$actual' does not match '$pattern'"; fi
-}
+# expect_true, expect_false, expect_match are the framework's (tests/lib/assert.sh)
+# — S9b removed the private shadows here (AC-12); expect_match's glob semantics
+# and argument order (`<label> <glob> <actual>`) were already identical, so
+# every call site below binds unchanged.
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -106,15 +98,14 @@ new_tree() {  # <repo> <branch> [content] -> echoes the worktree path
 # shellcheck source=/dev/null
 . "$LIB" 2>/dev/null || { echo "FAIL: the library does not source ($LIB)"; exit 1; }
 
-echo "=== Group 1: the library exists and parses ==="
+section "Group 1: the library exists and parses"
 
 expect_true "worktree.sh passes bash -n" bash -n "$LIB"
 expect_true "worktree_legacy_links is defined"    declare -f worktree_legacy_links
 expect_true "worktree_land is defined"            declare -f worktree_land
 expect_true "worktree_lease_overruns is defined"  declare -f worktree_lease_overruns
 
-echo ""
-echo "=== Group 2: worktree_legacy_links — what C2 retired, listed ==="
+section "Group 2: worktree_legacy_links — what C2 retired, listed"
 #
 # The link is gone from `create`, so the only ones left on a machine are the
 # ones an older bionic planted. Listing them is how doctor and the SessionStart
@@ -137,8 +128,7 @@ expect_eq "a real .bionic directory is not listed as a legacy link" \
 expect_eq "a repo with no .worktrees at all lists nothing" "" \
   "$(worktree_legacy_links "$(new_repo "$TMP/nofarm")")"
 
-echo ""
-echo "=== Group 3: worktree_land — the happy path is ONE act ==="
+section "Group 3: worktree_land — the happy path is ONE act"
 #
 # C1: the lease ends with a merge, a removal and a prune, and a land that did
 # two of the three is a lease half-ended. Every field of the LANDED line is
@@ -174,8 +164,7 @@ expect_eq "the landing went onto the branch the main checkout was on" "other-lin
   "$(git -C "$H" rev-parse --abbrev-ref HEAD)"
 expect_eq "and beta is an ancestor of it" "0" "$(git -C "$H" rev-list --count HEAD..beta)"
 
-echo ""
-echo "=== Group 4: worktree_land — the refusals, each naming why ==="
+section "Group 4: worktree_land — the refusals, each naming why"
 #
 # BOTH ARMS. Every refusal below is asserted against a world where the same
 # call lands, so a land that refused everything could not pass this group.
@@ -224,8 +213,7 @@ expect_match "a path that is no worktree at all is refused" "spawn-worktree: REF
 expect_match "no path at all is refused" "spawn-worktree: REFUSED reason=no-such-worktree*" \
   "$(worktree_land)"
 
-echo ""
-echo "=== Group 4b: worktree_land — the two SCOPE refusals (security F1) ==="
+section "Group 4b: worktree_land — the two SCOPE refusals (security F1)"
 #
 # `land` merges into whatever branch the main checkout is on and removes
 # whatever linked worktree it is handed. Two facts bound that power, and both
@@ -318,8 +306,7 @@ worktree_land "${OUTSIDE}/stranger" >/dev/null
 expect_true "a refused out-of-scope land does not even drop the legacy link" \
   test -L "${OUTSIDE}/stranger/.bionic"
 
-echo ""
-echo "=== Group 5: worktree_land — D1, never land under a running suite ==="
+section "Group 5: worktree_land — D1, never land under a running suite"
 #
 # D1 is a CONJUNCTION: a `busy` session whose cwd is this project or a linked
 # worktree of it, AND a live `tests/run.sh`. This suite is itself run by
@@ -381,8 +368,7 @@ expect_match "a busy session whose process is dead does not refuse" \
   "spawn-worktree: LANDED *" "$(worktree_land "$BT4")"
 rm -f "$CLAUDE_HOME/sessions/${DEADPID}.json"
 
-echo ""
-echo "=== Group 6: worktree_land — the legacy link, and the branch, and prune ==="
+section "Group 6: worktree_land — the legacy link, and the branch, and prune"
 
 G="$(new_repo "$TMP/land-legacy")"
 GT="$(new_tree "$G" legacy-arm)"
@@ -397,8 +383,7 @@ expect_true  "the state directory the link pointed at is intact" \
 expect_eq "no stale administrative entry survives the landing" "0" \
   "$(ls "${G}/.git/worktrees" 2>/dev/null | grep -c .)"
 
-echo ""
-echo "=== Group 7: the land VERB — spawn-worktree.sh land <path> ==="
+section "Group 7: the land VERB — spawn-worktree.sh land <path>"
 #
 # The verb is a call site, not a second implementation: what is asserted here
 # is the wiring and the exit codes a caller reads.
@@ -418,8 +403,7 @@ expect_match "land with no path is refused" "spawn-worktree: REFUSED *" \
 expect_true "the usage text names the land verb" \
   grep -q 'spawn-worktree.sh land' "$SPAWN"
 
-echo ""
-echo "=== Group 8: worktree_lease_overruns — a tree outliving its row ==="
+section "Group 8: worktree_lease_overruns — a tree outliving its row"
 #
 # C1's tick finding. The lease ends when the row is fact-discharged; a tree
 # still standing after that is a slot counted against the worktree budget that
@@ -478,11 +462,4 @@ expect_eq "a missing verdict file is not an error, just silence" "" \
 expect_eq "the function removes nothing" "3" \
   "$(ls "${O}/.worktrees" | grep -c .)"
 
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish

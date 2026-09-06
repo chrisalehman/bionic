@@ -1,0 +1,33 @@
+# tests/fixtures/roster-row.captured — TWO REAL `roster-state/v1` ROWS, CAPTURED, NEVER BUILT
+# (wave-01 verification-cannot-lie, S14, spec AC-25; design ledger D3).
+#
+# WHY A CAPTURE AND NOT AN EXPECTATION. `roster_row` (payload/scripts/lib/roster.sh) is now
+# the one writer of this row, and a pin that compares the one writer against a string this
+# repo also wrote is a self-comparison: both halves move together and the pin stays green
+# through any drift. These two lines came off a REAL roster, written by the two production
+# call sites BEFORE either of them called `roster_row` — so they are the last independent
+# record of the shape the fleet's readers were built against. Reproducing them is the whole
+# claim.
+#
+# PROVENANCE. Both lines are verbatim from the live session roster
+#   .bionic/tmp/roster-c04c2d44-2eac-41af-bfef-b109aeed728a.state
+# (machine-local, gitignored) of the session that dispatched S14 itself, captured
+# 2026-09-06 while the pre-S14 payload was the one on disk. Both name THIS slice, which is
+# why they were chosen: the rows and the change they pin have one traceable origin.
+#
+#   INTENDED  — `hooks/dispatch-preflight.sh`'s `ROW=` (:1822), the launch-time writer.
+#               `status=intended`, no `teammate_id=`/`adopted_from=`, 18 fields.
+#               tool_use_id=toolu_01VwLjtaur4XoZKv4s5rzGpU is S14's own Agent call.
+#   ADOPTED   — `hooks/session-poker.sh`'s `adopt_write_row` (:1578), the resume-time writer.
+#               `status=identified`, `source=adopted`, and the two fields only it writes,
+#               `teammate_id=` and `adopted_from=`, 20 fields. This row is S14's own agent
+#               adopted forward out of predecessor session 84f06e58 after a /clear.
+#
+# THE ROWS ARE NOT INTERCHANGEABLE. The pin drives each one through the call site that made
+# it; a single captured row would leave whichever writer it did not come from unpinned, and
+# the adopt writer's two extra fields are exactly the drift §RA.2 was built to catch.
+#
+# FORMAT. Comment lines start with `#`. Every other non-empty line is one captured row,
+# byte for byte, no trailing whitespace. Readers select by `|status=`.
+roster-state/v1|status=intended|session=c04c2d44-2eac-41af-bfef-b109aeed728a|name=s14-roster-row|agent_id=|launched_at=2026-09-06T03:01:07Z|subagent_type=bionic:senior-implementor|model=|deliverable=/Users/admin/workspace/personal/bionic/.bionic/docs/record/wave-verification-cannot-lie/s14-report.md|source=declared|duration=45 min|progress=/Users/admin/workspace/personal/bionic/.bionic/docs/record/wave-verification-cannot-lie/s14.progress|claims=|cadence=300s — append one timestamped line per milestone.|absent=|waiver=|tool_use_id=toolu_01VwLjtaur4XoZKv4s5rzGpU|plan=/Users/admin/workspace/personal/bionic/.bionic/docs/plans/epic-21-v1-ladder/wave-01-verification-cannot-lie.plan.md
+roster-state/v1|status=identified|session=c04c2d44-2eac-41af-bfef-b109aeed728a|name=s14-roster-row|agent_id=as14-roster-row-51621bea104d1d83|launched_at=2026-09-05T17:59:11Z|subagent_type=bionic:senior-implementor|model=|deliverable=/Users/admin/workspace/personal/bionic/.bionic/docs/record/wave-verification-cannot-lie/s14-report.md|source=adopted|duration=|progress=/Users/admin/workspace/personal/bionic/.bionic/docs/record/wave-verification-cannot-lie/s14.progress|claims=|cadence=300s.|absent=|waiver=|teammate_id=s14-roster-row@session-84f06e58|adopted_from=84f06e58-9262-4c7f-a199-ca77c24a332e|tool_use_id=|plan=/Users/admin/workspace/personal/bionic/.bionic/docs/plans/epic-21-v1-ladder/wave-01-verification-cannot-lie.plan.md
