@@ -26,6 +26,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 # Overridable exactly as tests/session-sweeper.test.sh offers, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -477,8 +478,7 @@ expect_absent   "…never DISARM on the same tick" "decision=DISARM" "$OUT"
 R3SW="$(make_repo s3-swept-marker)"; new_roster "$R3SW"
 add_row "$R3SW" name=overdue-swept deliverable="$R3SW/absent-overdue-swept.md" \
   duration="1 minute" launched_at="$(iso_ago 120)"
-printf 'landing-swept/v1|at=%s|session=%s|name=overdue-swept|agent_id=a000|state=UNMET\n' \
-  "$(iso_ago 1)" "$SID" >> "$(roster_of "$R3SW")"
+swept_marker_write "$(roster_of "$R3SW")" "$(iso_ago 1)" "$SID" overdue-swept a000 UNMET
 poke "$R3SW" tick
 expect_eq "a landing-swept marker after the row does not silence NOTIFY (exit 1)" "1" "$RC"
 expect_contains "…decision=NOTIFY survives the marker" "decision=NOTIFY" "$OUT"
@@ -890,8 +890,7 @@ add_row_to "$R8" "$ADOPT_A" name=closed-one status=identified agent_id="$ID_CLOS
 # The terminal row: hooks/landing-gate.sh's own marker, the only thing that closes a row
 # without an ack. Written by hand here for the same reason the ack above is NOT — this
 # marker's writer is a Stop hook with a whole payload contract, and the shape is one line.
-printf 'landing-swept/v1|at=%s|session=%s|name=closed-one|agent_id=%s|state=MET\n' \
-  "$(iso_ago 300)" "$ADOPT_A" "$ID_CLOSED" >> "$(roster_of "$R8" "$ADOPT_A")"
+swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 300)" "$ADOPT_A" closed-one "$ID_CLOSED" MET
 
 # ---- predecessor A: a Deliverable-waiver row (S17, AC-12 attempt 2) ----
 #
@@ -914,8 +913,7 @@ add_row_to "$R8" "$ADOPT_A" name=waived-one status=identified agent_id="$ID_WAIV
 add_row_to "$R8" "$ADOPT_A" name=recheck-one status=identified agent_id="$ID_RECHECK" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/recheck-one.md"
-printf 'landing-swept/v1|at=%s|session=%s|name=recheck-one|agent_id=%s|state=UNMET\n' \
-  "$(iso_ago 200)" "$ADOPT_A" "$ID_RECHECK" >> "$(roster_of "$R8" "$ADOPT_A")"
+swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 200)" "$ADOPT_A" recheck-one "$ID_RECHECK" UNMET
 
 printf 'the report\n' > "$R8/.bionic/docs/record/landed-one.md"
 printf 'progress\n'   > "$R8/.bionic/tmp/progress-landed.md"
@@ -3377,8 +3375,7 @@ section "Section 20: the kill-floor target reads the ONE openness predicate, and
 # on a first tick would be a wall firing on the healthy path.
 
 swept_marker() {  # <repo> <name> <state>
-  printf 'landing-swept/v1|at=%s|session=%s|name=%s|agent_id=a000|state=%s\n' \
-    "$(iso_ago 30)" "$SID" "$2" "$3" >> "$(roster_of "$1")"
+  swept_marker_write "$(roster_of "$1")" "$(iso_ago 30)" "$SID" "$2" a000 "$3"
 }
 
 s20_repo() {  # <label> -> a repo with ONE intended, suite-claiming row named `suite-writer`
