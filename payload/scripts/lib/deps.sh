@@ -504,6 +504,26 @@ dep_names_marketplace() {  # <catalog>
   return 0
 }
 
+# THE ID THE CLI KNOWS BIONIC BY, and the one place it is composed (bionic
+# 1.4.4 fixit phase 4, review-b B-7). `<name>@<catalog>` is the key `claude
+# plugin list` prints and the argument an install command takes. Three files
+# needed it and each spelled the same expansion — this one, doctor.sh's
+# `BIONIC_PLUGIN_ID` and setup.sh's `SETUP_PLUGIN_ID` — and the derivation is the
+# one thing no suite could see, because nothing in the tree re-pointed the
+# catalog: any one of the three could have been edited back to the literal
+# `bionic@bionic` and every assertion still passed on its rendered default. A
+# machine that re-points the catalog has to move all three together, so they are
+# one function now, and doctor-reads §6f renders the report under a re-pointed
+# catalog so a copy that stopped moving goes red.
+#
+# THE ENVIRONMENT WINS OUTRIGHT. `BIONIC_PLUGIN_ID` names the whole id, so a
+# machine that sets it is not asked about a catalog at all; `BIONIC_DEP_MARKETPLACE`
+# names only the catalog half. Both read with `:-`, so an empty value falls back
+# the same way an unset one does.
+dep_plugin_id() {  # -> the <name>@<catalog> id this machine knows bionic by
+  echo "${BIONIC_PLUGIN_ID:-bionic@${BIONIC_DEP_MARKETPLACE:-bionic}}"
+}
+
 # THE REPAIR ROUTE FOR A MISSING CORE DEPENDENCY, and the one place it is
 # spelled (bionic 1.4.4 fixit, design "Option 1", Chris 2026-09-05).
 #
@@ -514,8 +534,9 @@ dep_names_marketplace() {  # <catalog>
 # never installs a native row, so `→ /bionic:setup` on such a row names a command
 # that plans nothing for it — the reader runs it, is told "nothing left to do",
 # and the ✗ is still there. The party that owns this repair is the CLI, and the
-# three surfaces that render the row (doctor's THIRD PARTY table, doctor's
-# headline absence line, setup's own absent arm) all defer to it from here.
+# four surfaces that render the route (doctor's THIRD PARTY table, doctor's
+# headline absence line, setup's own absent arm, and setup's load-failure arm —
+# the Fix line under the CLI's own error) all defer to it from here.
 #
 # WHY THE RE-RUN AND NOT `claude plugin install <dep>@bionic`. Measured, CLI
 # 2.1.261, record/epic-21-v1-ladder/fixit-dep-repair-measurement.md: re-running
@@ -526,13 +547,15 @@ dep_names_marketplace() {  # <catalog>
 # registers it as a user-owned plugin, and `claude plugin update` does not repair
 # at all ("already at the latest version", nothing written).
 #
-# THE ID IS DERIVED, NEVER SPELLED. `${BIONIC_PLUGIN_ID:-bionic@${BIONIC_DEP_MARKETPLACE:-bionic}}`
-# is setup.sh's own derivation of `SETUP_PLUGIN_ID`, character for character: a
-# machine that re-points bionic's catalog moves both together, and two
-# independent defaults would move one and leave the other naming a plugin nobody
-# installed.
+# THE ID IS DERIVED, NEVER SPELLED, and it is `dep_plugin_id` above that derives
+# it — for this route, for doctor's `BIONIC_PLUGIN_ID` and for setup's
+# `SETUP_PLUGIN_ID` alike. This function used to expand the same fallback pair
+# inline and claim it matched setup's "character for character"; it matched
+# semantically and not textually (review-a A-3), which is the kind of claim that
+# stops being true without anything looking edited. One owner, so there is
+# nothing left to compare.
 dep_core_repair_route() {  # -> the command that re-resolves bionic's declared dependencies
-  echo "claude plugin install ${BIONIC_PLUGIN_ID:-bionic@${BIONIC_DEP_MARKETPLACE:-bionic}}"
+  echo "claude plugin install $(dep_plugin_id)"
 }
 
 # Reports any row whose field count is not exactly 7. Silence means the table

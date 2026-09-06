@@ -6793,9 +6793,13 @@ ds_hint_labels() {  # <doctor report>
   done <<<"$(ds_env_section "$1")"
 }
 
-# Doctor's THIRD PARTY table, on the same terms (1.4.4 fixit T1). The header line itself
-# carries the words `/bionic:setup` — "THIRD PARTY — installed by /bionic:setup" — and is
-# skipped before any row is read, so the section name can never be mistaken for a hint.
+# Doctor's THIRD PARTY table, on the same terms (1.4.4 fixit T1). The header line is skipped
+# before any row is read, so the section name can never be mistaken for a hint. It carried
+# the words `/bionic:setup` when this was written — "THIRD PARTY — installed by
+# /bionic:setup" — which is what made the skip load-bearing; phase 4 changed it to name the
+# table's subject instead ("tools and plugins bionic depends on", review-b B-3), because the
+# `core` rows this scan is about were the first two rows contradicting it. The skip stays:
+# the scan reads rows, and a header is not one.
 ds_third_section() {  # <doctor report>
   awk '/^THIRD PARTY/ { inside = 1; next }
        inside && /^[A-Z][A-Z]/ { exit }
@@ -7059,6 +7063,12 @@ expect_absent "DS.7 …and never /bionic:setup, which has no item that installs 
 # The paired positive on the SAME fixture, so the row above is a measurement and not a
 # constant: `agent-skills` is present in the planted registry and earns no hint at all.
 DS_OK_ROW="$(ds_third_section "$DS_REPORT" | grep -E '^  . +agent-skills ' | head -1)"
+# The same guard `DS_CORE_ROW` carries two rows up, and for the same reason: `expect_absent`
+# is a `grep -qF` over the haystack, so an empty extract passes it while asking nothing. A
+# renamed dependency or a changed symbol column would take this row silent instead of red
+# (review-a A-4).
+expect_true "DS.7 …and that dependency has a row at all (the row below is not vacuous)" \
+  test -n "$DS_OK_ROW"
 expect_absent "DS.7 …while the core dependency the registry DOES carry earns no hint" \
   "→" "$DS_OK_ROW"
 
