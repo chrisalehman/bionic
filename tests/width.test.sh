@@ -28,7 +28,8 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
+# expect_true is the framework's (tests/lib/assert.sh) — S9b removed the private
+# shadow here (AC-12); same semantics (silences the command's own output).
 
 expect_true "payload/scripts/lib/width.sh exists" test -f "$WIDTH_SH"
 
