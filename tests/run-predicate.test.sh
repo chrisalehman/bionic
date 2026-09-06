@@ -676,6 +676,33 @@ call_active_plan "$R"
 expect_eq "open_runs line 1 == active_plan's answer, with spaces in every path" \
   "$G_NEW" "$AP_OUT"
 
+# --- R6h: plans written inside ONE SECOND — the two selectors still agree (AC-9) ---
+#
+# THE LIMITATION IS DOCUMENTED, AND THIS IS WHAT THE DOCUMENTATION BUYS. `-nt`
+# compares whole seconds under /bin/bash 3.2, so two plans written in the same
+# second tie and the tie is broken by directory order — which of them
+# `active_plan` names is genuinely unspecified, and asserting a winner here
+# would pin the filesystem rather than the library. What is NOT unspecified is
+# that both selectors resolve the tie the SAME way, because they run the same
+# comparator over the same walk: `open_runs`' line 1 is `active_plan`'s answer.
+# That is the invariant lib/run.sh accepts the whole-second reading in order to
+# keep, and the reason a sub-second comparator in ONE of them was rejected
+# rather than taken (see the block under `open_runs`).
+#
+# NO `touch -t` HERE, ON PURPOSE. Every other fixture in R6 sets its mtimes
+# explicitly and can therefore never meet a tie; this one writes three plans as
+# fast as the shell can and lets them collide, which is the state
+# patrol-revive's rows 33/34 actually hit.
+R="$SANDBOX/r6-burst"; mkdir -p "$R/.bionic"
+mk_plan "$R" "burst-a.plan.md" "4" "- Step 4: in progress" >/dev/null
+mk_plan "$R" "burst-b.plan.md" "4" "- Step 4: in progress" >/dev/null
+mk_plan "$R" "burst-c.plan.md" "4" "- Step 4: in progress" >/dev/null
+call_open_runs "$R"
+call_active_plan "$R"
+expect_eq "same-second burst: all three plans are in the open set" 3 "$(line_count "$OR_OUT")"
+expect_eq "same-second burst: open_runs line 1 == active_plan's answer" \
+  "$AP_OUT" "$(first_line "$OR_OUT")"
+
 # --- R6f: no docs tree at all ---
 R="$SANDBOX/r6f"; mkdir -p "$R/.bionic"
 call_open_runs "$R"
