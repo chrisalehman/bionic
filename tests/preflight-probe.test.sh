@@ -21,11 +21,11 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 PROBE="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
 TMPROOT="$(mktemp -d)"
 OUT="$TMPROOT/stdout"; ERR="$TMPROOT/stderr"
-PASS=0; FAIL=0; TOTAL=0
 BG_PIDS=""
 
 cleanup() {
@@ -49,37 +49,36 @@ SESSION_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
 SESSION_C="9a2e5d18-4471-4c9e-9b3a-7412fa0e5c33"
 
 # ---------- assertion helpers ----------
-
-ok()   { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); printf 'PASS: %s\n' "$1"; }
-bad()  { TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); printf 'FAIL: %s\n' "$1"
-         [ $# -gt 1 ] && printf '      %s\n' "$2"; }
-
-expect_eq() {  # <label> <expected> <actual>
-  if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2] got [$3]"; fi
-}
-expect_true() {  # <label> <cmd...>
-  local label="$1"; shift
-  if "$@"; then ok "$label"; else bad "$label" "condition failed: $*"; fi
-}
-expect_false() {  # <label> <cmd...>
-  local label="$1"; shift
-  if "$@"; then bad "$label" "condition unexpectedly true: $*"; else ok "$label"; fi
-}
-expect_match() {  # <label> <regex> <file>
-  if [ ! -f "$3" ]; then bad "$1" "file absent: $3"; return; fi
-  if grep -qE "$2" "$3"; then ok "$1"; else bad "$1" "no match for /$2/ in $(basename "$3")"; fi
+#
+# ok, expect_eq, expect_contains are the framework's (tests/lib/assert.sh) —
+# identical semantics to the private definitions this suite carried; `bad`
+# was byte-for-byte the framework's `no` (A-S9-3 pattern), so every call site
+# above was renamed rather than kept as a distinct helper. expect_true/
+# expect_false here did NOT silence their command's output (the framework's
+# do) — verified latent, not manifest: every call site below wraps `[ ... ]`
+# or `grep -q`, neither of which ever produces stdout, so the difference is
+# a pure delete (S7, AC-12).
+#
+# expect_match/expect_nomatch here take a FILE (grep -qE against a path), a
+# genuinely different matcher from the framework's expect_match (a GLOB
+# against a value) — per A-18a the pair moves TOGETHER as a pure rename to
+# local, non-owned names, never split into one framework call plus one local
+# helper. Renamed to expect_file_regex/expect_file_no_regex, same argument
+# order, same "file absent: <path>" failure message, built on the
+# framework's ok/no.
+expect_file_regex() {  # <label> <regex> <file>
+  if [ ! -f "$3" ]; then no "$1" "file absent: $3"; return; fi
+  if grep -qE "$2" "$3"; then ok "$1"; else no "$1" "no match for /$2/ in $(basename "$3")"; fi
 }
 # A missing file must never satisfy a "must not contain" assertion — that is the
 # fixture-pins-away-the-test class this wave exists to avoid.
-expect_nomatch() {  # <label> <regex> <file>
-  if [ ! -f "$3" ]; then bad "$1" "file absent: $3"; return; fi
-  if grep -qE "$2" "$3"; then bad "$1" "unexpected match for /$2/"; else ok "$1"; fi
+expect_file_no_regex() {  # <label> <regex> <file>
+  if [ ! -f "$3" ]; then no "$1" "file absent: $3"; return; fi
+  if grep -qE "$2" "$3"; then no "$1" "unexpected match for /$2/"; else ok "$1"; fi
 }
-expect_contains() {  # <label> <needle> <haystack-string>
-  case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "no [$2] in: $(printf '%s' "$3" | head -c 200)" ;; esac
-}
-
-section() { printf '\n=== %s ===\n' "$1"; }
+# This suite's private section() was a plain banner printer with the
+# framework's exact signature (A-10c) — deleted outright, every existing
+# section "..." call site binds unchanged.
 
 # ---------- sandbox ----------
 
@@ -147,10 +146,10 @@ rc="$(run_probe "$SBX")"
 expect_eq "clean environment exits 0" "0" "$rc"
 expect_true "attestation written at the per-session path" [ -f "$SBX/repo/$STATE_REL" ]
 expect_true "attestation is a regular file, not a symlink" [ ! -L "$SBX/repo/$STATE_REL" ]
-expect_match "attestation carries a version line (A6)" '^version=[0-9]+$' "$SBX/repo/$STATE_REL"
-expect_match "attestation is keyed to this session" "^session_id=$SESSION_A\$" "$SBX/repo/$STATE_REL"
-expect_match "attestation names the repo it describes" '^repo=/' "$SBX/repo/$STATE_REL"
-expect_match "attestation records when it was written" '^written_at=[0-9]+$' "$SBX/repo/$STATE_REL"
+expect_file_regex "attestation carries a version line (A6)" '^version=[0-9]+$' "$SBX/repo/$STATE_REL"
+expect_file_regex "attestation is keyed to this session" "^session_id=$SESSION_A\$" "$SBX/repo/$STATE_REL"
+expect_file_regex "attestation names the repo it describes" '^repo=/' "$SBX/repo/$STATE_REL"
+expect_file_regex "attestation records when it was written" '^written_at=[0-9]+$' "$SBX/repo/$STATE_REL"
 expect_eq "attestation mode is 0600" "600" "$(stat -f '%OLp' "$SBX/repo/$STATE_REL" 2>/dev/null || stat -c '%a' "$SBX/repo/$STATE_REL")"
 
 # every content line is key=value (A6: no fixed-field-order positional record)
@@ -184,8 +183,8 @@ printf 'unknown_future_field=x\nsession_id=%s\nversion=1\nrepo=/somewhere\n' "$S
   > "$SBX4/repo/$STATE_REL"
 rc="$(run_probe "$SBX4")"
 expect_eq "re-run over a reordered/extended prior record exits 0" "0" "$rc"
-expect_match "re-run refreshes this session's record" "^session_id=$SESSION_A\$" "$SBX4/repo/$STATE_REL"
-expect_nomatch "re-run discards the stale placeholder repo field" "^repo=/somewhere\$" "$SBX4/repo/$STATE_REL"
+expect_file_regex "re-run refreshes this session's record" "^session_id=$SESSION_A\$" "$SBX4/repo/$STATE_REL"
+expect_file_no_regex "re-run discards the stale placeholder repo field" "^repo=/somewhere\$" "$SBX4/repo/$STATE_REL"
 
 # ============================================================
 section "S2 — blocking failure writes nothing and destroys the prior stamp (AC-1)"
@@ -238,7 +237,7 @@ rc="$(run_probe "$SBX")"
 chmod 700 "$SBX/repo/.bionic/tmp"
 expect_eq "unwritable state dir exits 1" "1" "$rc"
 if grep -q '^session_id=' "$SBX/repo/$STATE_REL" 2>/dev/null; then
-  bad "an unwritable state dir leaves NO usable prior attestation (C2)" \
+  no "an unwritable state dir leaves NO usable prior attestation (C2)" \
       "the prior attestation survived a blocking failure and still keys this session"
 else
   ok "an unwritable state dir leaves NO usable prior attestation (C2)"
@@ -314,13 +313,13 @@ expect_false "no readable attestation results from the occupied path" [ -f "$SBX
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX" ANTHROPIC_API_KEY=sk-ant-fixture-SECRET-9f2b)"
 expect_eq "run with a credential in the environment exits 0" "0" "$rc"
-expect_nomatch "credential value absent from the attestation" 'SECRET-9f2b' "$SBX/repo/$STATE_REL"
-expect_nomatch "credential value absent from stdout" 'SECRET-9f2b' "$OUT"
-expect_nomatch "credential value absent from stderr" 'SECRET-9f2b' "$ERR"
+expect_file_no_regex "credential value absent from the attestation" 'SECRET-9f2b' "$SBX/repo/$STATE_REL"
+expect_file_no_regex "credential value absent from stdout" 'SECRET-9f2b' "$OUT"
+expect_file_no_regex "credential value absent from stderr" 'SECRET-9f2b' "$ERR"
 
 # static regression pins for the A2 defect class (predictable "$$"-derived temp names)
-expect_nomatch 'no \$\$-derived temp filename (A2)' '\.tmp\.\$\$|\$\$\.tmp|\$\{?\$\}?"?\.' "$PROBE"
-expect_match "mktemp template uses XXXXXX" 'mktemp[^|&;]*XXXXXX' "$PROBE"
+expect_file_no_regex 'no \$\$-derived temp filename (A2)' '\.tmp\.\$\$|\$\$\.tmp|\$\{?\$\}?"?\.' "$PROBE"
+expect_file_regex "mktemp template uses XXXXXX" 'mktemp[^|&;]*XXXXXX' "$PROBE"
 
 # ============================================================
 section "S5 — locking against racing writers (A4)"
@@ -366,8 +365,8 @@ section "S6 — context probes never block (design §4)"
 
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
-expect_match "git baseline recorded in the attestation" '^git_branch=' "$SBX/repo/$STATE_REL"
-expect_match "git head recorded in the attestation" '^git_head=' "$SBX/repo/$STATE_REL"
+expect_file_regex "git baseline recorded in the attestation" '^git_branch=' "$SBX/repo/$STATE_REL"
+expect_file_regex "git head recorded in the attestation" '^git_head=' "$SBX/repo/$STATE_REL"
 
 # a non-git directory is a context miss, never a block
 SBX="$(mk_sandbox)"
@@ -382,7 +381,7 @@ SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
 expect_eq "another live session does not block the check" "0" "$rc"
 if grep -qE "WARN.*$SESSION_B" "$OUT" "$ERR" 2>/dev/null; then ok "other live session warned by identity"
-else bad "other live session warned by identity" "expected a WARN naming $SESSION_B"; fi
+else no "other live session warned by identity" "expected a WARN naming $SESSION_B"; fi
 
 # an old transcript is not a live session
 SBX="$(mk_sandbox)"
@@ -390,12 +389,12 @@ SBX="$(mk_sandbox)"
 touch -t 202601010000 "$SBX/config/projects/$PROJSLUG/$SESSION_B.jsonl"
 rc="$(run_probe "$SBX")"
 expect_eq "stale transcript still exits 0" "0" "$rc"
-expect_nomatch "stale transcript raises no live-session warning" "WARN.*$SESSION_B" "$OUT"
+expect_file_no_regex "stale transcript raises no live-session warning" "WARN.*$SESSION_B" "$OUT"
 
 # our own transcript is never reported as somebody else
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
-expect_nomatch "own session never warned about" "WARN.*$SESSION_A" "$OUT"
+expect_file_no_regex "own session never warned about" "WARN.*$SESSION_A" "$OUT"
 
 # ============================================================
 section "S6b — D-5: legacy single-slot pruning, dead-session pruning (slice 4/2)"
@@ -463,7 +462,7 @@ expect_eq "a live foreign session WITH a roster file still exits 0" "0" "$rc"
 if grep -qE "$SESSION_B.*roster: present" "$OUT" "$ERR" 2>/dev/null; then
   ok "live foreign session reports roster: present"
 else
-  bad "live foreign session reports roster: present"
+  no "live foreign session reports roster: present"
 fi
 
 # (a) negative: a live foreign session with NO roster file on disk
@@ -474,7 +473,7 @@ expect_eq "a live foreign session with NO roster file still exits 0" "0" "$rc"
 if grep -qE "$SESSION_B.*roster: absent" "$OUT" "$ERR" 2>/dev/null; then
   ok "live foreign session with no roster reports roster: absent"
 else
-  bad "live foreign session with no roster reports roster: absent"
+  no "live foreign session with no roster reports roster: absent"
 fi
 
 # (b) an agent-id under a live foreign session's subagents dir that NO roster
@@ -488,7 +487,7 @@ expect_eq "unrostered subagent metadata still exits 0 (display/warn only, never 
 if grep -qE "UNROSTERED.*orphan123" "$OUT" "$ERR" 2>/dev/null; then
   ok "unrostered live subagent metadata is flagged UNROSTERED"
 else
-  bad "unrostered live subagent metadata is flagged UNROSTERED"
+  no "unrostered live subagent metadata is flagged UNROSTERED"
 fi
 
 # (b) the same shape, but the agent id IS named by a roster row on disk — no
@@ -503,7 +502,7 @@ printf 'roster-state/v1|status=confirmed|session=%s|name=covered|agent_id=covere
 rc="$(run_probe "$SBX")"
 expect_eq "a rostered subagent's session still exits 0" "0" "$rc"
 if grep -qE "UNROSTERED.*covered456" "$OUT" "$ERR" 2>/dev/null; then
-  bad "a rostered subagent is NOT flagged UNROSTERED" "unexpected UNROSTERED for covered456"
+  no "a rostered subagent is NOT flagged UNROSTERED" "unexpected UNROSTERED for covered456"
 else
   ok "a rostered subagent is NOT flagged UNROSTERED"
 fi
@@ -538,7 +537,7 @@ mutate() {  # <label> <awk-or-sed marker> — echoes path of a mutated COPY, or 
 # A5: a write failure must leave NO attestation — not the new one, not the prior one.
 MUT="$(mutate failmv)"
 if [ -z "$MUT" ]; then
-  bad "mutation 'failmv' changed the script" "sed matched nothing — the write step moved"
+  no "mutation 'failmv' changed the script" "sed matched nothing — the write step moved"
 else
   SBX="$(mk_sandbox)"
   rc="$(run_probe "$SBX")"
@@ -557,7 +556,7 @@ fi
 # AC-8: temp names are unpredictable — two runs, two unrelated names.
 MUT="$(mutate showtmp)"
 if [ -z "$MUT" ]; then
-  bad "mutation 'showtmp' changed the script" "awk matched nothing — the mktemp step moved"
+  no "mutation 'showtmp' changed the script" "awk matched nothing — the mktemp step moved"
 else
   SBX="$(mk_sandbox)"
   n1="$( ( cd "$SBX/repo" && env -u ANTHROPIC_API_KEY HOME="$SBX/home" \
@@ -571,7 +570,7 @@ else
   expect_false "two runs produce different temp names (AC-8)" [ "$n1" = "$n2" ]
   if printf '%s' "$n1" | grep -qE "preflight-${SESSION_A}\\.state\\.[A-Za-z0-9]{6}\$"; then
     ok "temp name carries a 6-character random suffix"
-  else bad "temp name carries a 6-character random suffix" "got [$n1]"; fi
+  else no "temp name carries a 6-character random suffix" "got [$n1]"; fi
 fi
 
 
@@ -587,7 +586,7 @@ expect_eq "documented exit codes == reachable exit codes (A5)" "$_doc_codes" "$_
 
 # A7's surface is the always-on gates, not this once-per-session producer; pin that the
 # producer never grows a plan-directory walk of its own.
-expect_nomatch "the producer performs no plan-directory walk (A7)" 'docs/plans' "$PROBE"
+expect_file_no_regex "the producer performs no plan-directory walk (A7)" 'docs/plans' "$PROBE"
 
 expect_true "script is bash and runs under set -u" grep -q '^set -u' "$PROBE"
 
@@ -610,8 +609,8 @@ SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX" PATH="$(claude_stub_dir "$SBX" "$PIN")")"
 expect_eq "matching pin still exits 0" "0" "$rc"
 expect_true "matching pin still writes the attestation" [ -f "$SBX/repo/$STATE_REL" ]
-expect_nomatch "matching pin prints no canary warning" 'unvalidated' "$OUT"
-expect_nomatch "matching pin prints no canary warning (stderr)" 'unvalidated' "$ERR"
+expect_file_no_regex "matching pin prints no canary warning" 'unvalidated' "$OUT"
+expect_file_no_regex "matching pin prints no canary warning (stderr)" 'unvalidated' "$ERR"
 
 # mismatched pin: the installed CLI reports a different version -> one warn-only line naming
 # the risk and the fix, exit code and attestation unaffected
@@ -622,13 +621,13 @@ expect_true "mismatched pin still writes the attestation" [ -f "$SBX/repo/$STATE
 if grep -qE 'WARN.*unvalidated.*0\.0\.1' "$OUT" "$ERR" 2>/dev/null; then
   ok "mismatched pin warns, naming the installed version"
 else
-  bad "mismatched pin warns, naming the installed version"
+  no "mismatched pin warns, naming the installed version"
 fi
 
 # the attestation content itself is unaffected by a mismatched pin (no new field, no change
 # to the fields the start gate depends on)
-expect_match "mismatched-pin attestation is still keyed to this session" "^session_id=$SESSION_A\$" "$SBX/repo/$STATE_REL"
-expect_nomatch "the canary warning is never written INTO the attestation" 'unvalidated' "$SBX/repo/$STATE_REL"
+expect_file_regex "mismatched-pin attestation is still keyed to this session" "^session_id=$SESSION_A\$" "$SBX/repo/$STATE_REL"
+expect_file_no_regex "the canary warning is never written INTO the attestation" 'unvalidated' "$SBX/repo/$STATE_REL"
 
 # a blocking failure alongside a mismatched pin still exits non-zero and writes nothing —
 # the canary is warn-only and never promotes or masks a real blocking failure
@@ -658,13 +657,13 @@ section "S10 — the sweeper arm line is GONE (epic-16 w2 slice S1)"
 SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
 expect_eq "a clean run without the arm line still exits 0" "0" "$rc"
-expect_nomatch "the probe never names the deleted arm verb" \
+expect_file_no_regex "the probe never names the deleted arm verb" \
   'session-sweeper\.sh arm' "$PROBE"
-expect_nomatch "…nor invites anyone to arm a sweeper" 'arm the session sweeper' "$PROBE"
+expect_file_no_regex "…nor invites anyone to arm a sweeper" 'arm the session sweeper' "$PROBE"
 
 # The probe still never spawns the sweeper, which was true before the deletion and stays
 # true after it: nothing here backgrounds or execs the script under any verb.
-expect_nomatch "the probe source never execs or backgrounds session-sweeper.sh (D2)" \
+expect_file_no_regex "the probe source never execs or backgrounds session-sweeper.sh (D2)" \
   'session-sweeper\.sh[^"]*&|exec[^\n]*session-sweeper\.sh' "$PROBE"
 
 # ============================================================
@@ -798,8 +797,8 @@ SBX="$(mk_sandbox)"
 rc="$(run_probe "$SBX")"
 expect_eq "clean environment still exits 0 with the resources probe in the path" "0" "$rc"
 ATT10="$SBX/repo/$STATE_REL"
-expect_match "the attestation declares version $_wv" "^version=$_wv\$" "$ATT10"
-expect_match "the attestation carries the budget as one parallel-budget string" \
+expect_file_regex "the attestation declares version $_wv" "^version=$_wv\$" "$ATT10"
+expect_file_regex "the attestation carries the budget as one parallel-budget string" \
   '^budget=writers=[0-9]+ suites=[0-9]+ worktrees=[0-9]+ test_jobs=[0-9]+ source=probe$' "$ATT10"
 
 # READ MODE IS READ-ONLY. It takes no lock, needs no session key, and must leave the state
@@ -819,8 +818,4 @@ expect_eq "--read on an absent file exits 5" "5" "$?"
 bash "$PROBE" --read >"$OUT" 2>"$ERR"
 expect_eq "--read with no path exits 5" "5" "$?"
 
-# ============================================================
-printf '\n──────────────────────────────────────────────\n'
-printf 'preflight-probe.test.sh: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
-[ "$FAIL" -eq 0 ] || exit 1
-exit 0
+finish
