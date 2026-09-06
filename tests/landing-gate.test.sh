@@ -548,13 +548,14 @@ mkdir -p "$MONODIR"
 cp "$HOOKS_DIR/session-sweeper.sh" "$MONODIR/session-sweeper.sh"
 # The awk below rewrites ONE line of the shipped gate, so that line is this mutation's
 # precondition and it is declared through the framework's `anchor` (cross-gate section
-# S19) rather than checked afterwards. The pattern is the line the awk compares `$0`
-# against, as a fixed string, and its count was measured against the shipped gate before
-# this call was written. If the rule is reworded or reindented the awk matches nothing,
-# the "mutant" is byte-identical to the shipped file, and every row below it reads the
-# shipped gate — the anchor says so by name and count, which a bytes-are-equal check
-# cannot.
-anchor "$GATE" '    if (aid != "") agent[name] = aid' 1
+# S19) rather than checked afterwards.
+#
+# THE PATTERN IS A WHOLE-LINE ERE, not the fixed string it reads like, because the awk
+# compares `$0` against the WHOLE line: a fixed-string anchor is a substring test and
+# would still match a reindented copy the awk no longer touches, leaving a mutant that
+# is byte-identical to the shipped gate and every row below it green against it. The
+# count was measured against the shipped gate before this call was written.
+anchor -E "$GATE" '^    if \(aid != ""\) agent\[name\] = aid$' 1
 awk '{
        if ($0 == "    if (aid != \"\") agent[name] = aid") {
          print "    if (aid == \"\") agent[name] = aid"
