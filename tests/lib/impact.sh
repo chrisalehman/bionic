@@ -34,6 +34,7 @@
 #   transitive-doctor  payload/scripts/doctor.sh sources the file and the suite
 #                      reads doctor.sh
 #   transitive-script  the same, for the other payload/scripts/*.sh
+#   transitive-hook    a hook the suite runs sources the file
 #
 # The reason column reports the STRONGEST kind found, in the order listed above.
 # It is diagnosis, not gating: a consumer that only needs the set does `cut -f1`.
@@ -231,6 +232,14 @@ FNR == 1 {
     val = substr(line, RSTART + RLENGTH)
     gsub(/^["'\'']/, "", val)
     sub(/["'\''][[:space:]]*$/, "", val)
+    # THE OVERRIDE-SEAM IDIOM. Half the suites write
+    # `X="${X_UNDER_TEST:-${REPO}/hooks/y.sh}"` (session-poker.test.sh:32) so a
+    # caller can point one file somewhere else. The override name is never a
+    # path; the DEFAULT is, and it is what the suite reads on an ordinary run.
+    if (match(val, /^\$\{[A-Za-z_][A-Za-z0-9_]*:-/)) {
+      val = substr(val, RLENGTH + 1)
+      sub(/\}[[:space:]]*$/, "", val)
+    }
     rp = resolve(val)
     if (rp != "") VAR[nm] = rp
   }
@@ -261,6 +270,34 @@ FNR == 1 {
     if (base != "") {
       print OWNER "\t" "source?" "\t" OWNERDIR "/lib/" base
       print OWNER "\t" "source?" "\t" OWNERDIR "/" base
+      # A hook spells its library directory `$BIONIC_LIB`, assigned from a
+      # FUNCTION ARGUMENT at run time (hooks/stop-check.sh:261) — no static
+      # reading resolves it. So every library directory in the tree is offered
+      # as a candidate and the existence filter picks the real one.
+      nld = split(LIBDIRS, LD, " ")
+      for (li = 1; li <= nld; li++)
+        if (LD[li] != "") print OWNER "\t" "source?" "\t" LD[li] "/" base
+    }
+  }
+
+  # (3b) a SIBLING of a resolved path. `bash "$(dirname "$POKER")/protect-main.sh"`
+  #      (session-poker.test.sh:2491) names a second hook without naming its
+  #      directory, and the planted-edit proof caught the miss: mutating
+  #      protect-main.sh turned session-poker.test.sh red while the derivation
+  #      said it could not.
+  t = line
+  while (match(t, /\$\(dirname[[:space:]]+"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"\)\/[A-Za-z0-9_.@\/-]*/)) {
+    tok = substr(t, RSTART, RLENGTH)
+    t = substr(t, RSTART + RLENGTH)
+    if (match(tok, /\$\{?[A-Za-z_][A-Za-z0-9_]*\}?"\)/)) {
+      vn = substr(tok, RSTART, RLENGTH)
+      gsub(/[$}{"\)]/, "", vn)
+      if (vn in VAR) {
+        base = tok; sub(/^.*\)\//, "", base)
+        pp = VAR[vn]
+        if (pp ~ /\//) sub(/\/[^\/]*$/, "", pp); else pp = ""
+        if (base != "") print OWNER "\t" kind "\t" (pp == "" ? base : pp "/" base)
+      }
     }
   }
 
@@ -289,12 +326,24 @@ FNR == 1 {
 }
 AWK
 
+# Every library directory in the tree, repo-relative — the candidate roots for a
+# source line whose directory cannot be read statically.
+LIBDIRS="$(find "$ROOT" -type d -name lib \
+  -not -path "$ROOT/.git/*" -not -path "$ROOT/.worktrees/*" 2>/dev/null \
+  | sed "s|^$ROOT/||" | sort -u | tr '\n' ' ')"
+
+# HOOKS ARE OWNERS TOO. A suite that runs `hooks/session-start.sh` reads every
+# library that hook sources, and the planted-edit proof measured the cost of
+# leaving them out: wiping payload/scripts/lib/patrol.sh turned four suites red
+# that the derivation could not see, all of them reading it through a hook.
 EXTRACT_FILES=""
-for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/lib/*.sh "$ROOT"/payload/scripts/*.sh; do
+for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/lib/*.sh \
+         "$ROOT"/payload/scripts/*.sh "$ROOT"/hooks/*.sh; do
   [ -f "$f" ] && EXTRACT_FILES="$EXTRACT_FILES $f"
 done
 # shellcheck disable=SC2086  # deliberate split of the file list
-awk -v ROOTRE="$ROOT" -f "$WORK/extract.awk" $EXTRACT_FILES 2>/dev/null >"$WORK/raw" || :
+awk -v ROOTRE="$ROOT" -v LIBDIRS="$LIBDIRS" -f "$WORK/extract.awk" \
+  $EXTRACT_FILES 2>/dev/null >"$WORK/raw" || :
 
 # ── canonicalise, and settle the sourcing candidates ─────────────────────────
 # `source?` is a guess built from the owner's own directory; it becomes a real
@@ -410,12 +459,13 @@ rm -f "$WORK/suite_libs.next" "$WORK/all.prev"
 
 # transitive through a payload script — ten suites execute doctor.sh, which
 # sources eight libraries none of them names (code map §3.5).
-awk -F'\t' '$3 ~ /^payload\/scripts\/[^\/]*\.sh$/ { print $1 "\t" $3 }' "$WORK/all" \
-  | sort -u >"$WORK/suite_scripts"
+awk -F'\t' '$3 ~ /^payload\/scripts\/[^\/]*\.sh$/ || $3 ~ /^hooks\/[^\/]*\.sh$/ {
+  print $1 "\t" $3 }' "$WORK/all" | sort -u >"$WORK/suite_scripts"
 while IFS="$(printf '\t')" read -r suite script; do
   [ -n "$suite" ] || continue
   case "$script" in
     payload/scripts/doctor.sh) k="transitive-doctor" ;;
+    hooks/*) k="transitive-hook" ;;
     *) k="transitive-script" ;;
   esac
   awk -F'\t' -v o="$script" -v s="$suite" -v k="$k" '
@@ -456,8 +506,9 @@ awk -F'\t' '
     if (k == "transitive-lib") return 6
     if (k == "transitive-doctor") return 7
     if (k == "transitive-script") return 8
-    if (k == "payload-copy") return 9
-    return 10
+    if (k == "transitive-hook") return 9
+    if (k == "payload-copy") return 10
+    return 11
   }
   function better(suite, k, q,   r) {
     r = rank(k)

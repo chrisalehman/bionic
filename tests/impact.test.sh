@@ -425,92 +425,204 @@ if [ "${BIONIC_IMPACT_PLANTED:-0}" != "1" ]; then
   echo "      wave-verification-cannot-lie/s12-planted-edits.log)"
 else
   PLOG="${BIONIC_IMPACT_PLANTED_LOG:-$TMP/planted-edits.log}"
+
+  # WIDTH IS READ, NOT SET — the same rule tests/run.sh:168 follows, and the
+  # same ceiling. Six whole-roster runs at width one would take the better part
+  # of an hour; the roster's own isolation audit is what makes running them at
+  # once safe (tests/run.sh:52-70).
+  PJOBS=8
+  if [ -f "$REPO/payload/scripts/lib/resources.sh" ]; then
+    # shellcheck source=/dev/null
+    . "$REPO/payload/scripts/lib/resources.sh" 2>/dev/null || :
+    if command -v pressure_level >/dev/null 2>&1; then
+      PJOBS="$(pressure_level "${BIONIC_TEST_JOBS_CEILING:-8}" 2>/dev/null)"
+    fi
+  fi
+  case "$PJOBS" in ''|*[!0-9]*) PJOBS=8 ;; esac
+
   : >"$PLOG"
-  echo "planted-edit proof — $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >>"$PLOG"
-  echo "repo: $REPO" >>"$PLOG"
-  echo "interpreter: $(bash --version | head -1)" >>"$PLOG"
+  {
+    echo "planted-edit proof — spec AC-19"
+    echo "when:        $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "repo:        $REPO"
+    echo "commit:      $(cd "$REPO" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "interpreter: $(bash --version | head -1)"
+    echo "width:       $PJOBS"
+    echo
+    echo "METHOD. A scratch copy of the checkout is made once. For each file"
+    echo "class the derived set is recorded, one maximal edit is planted, the"
+    echo "WHOLE roster is run against the mutated tree, and the file is"
+    echo "restored. The claim under test is derived ⊇ red: its falsifier is a"
+    echo "suite that goes red and is not in the derived set, so the complement"
+    echo "is run in full rather than sampled. A control run over the unmutated"
+    echo "tree comes first, and any suite red there is discounted everywhere —"
+    echo "a suite that cannot pass on its own proves nothing about impact."
+  } >>"$PLOG"
 
   SCRATCH="$TMP/scratch"
   mkdir -p "$SCRATCH"
   ( cd "$REPO" && tar cf - --exclude=.git --exclude=.worktrees --exclude=.bionic . ) \
     | ( cd "$SCRATCH" && tar xf - )
-  echo "scratch tree: a copy of the checkout, .git/.worktrees/.bionic excluded" >>"$PLOG"
 
-  # run_suite <tree> <label> → prints "pass" or "fail"; never fixes anything.
-  run_suite() {
-    local tree="$1" label="$2" rc
-    ( cd "$tree" && bash "tests/${label}" ) >"$TMP/rs.out" 2>&1
-    rc=$?
-    [ "$rc" -eq 0 ] && echo pass || echo fail
+  ROSTER="$(/usr/bin/grep -oE '^run "[^"]+"' "$SCRATCH/tests/run.sh" | sed 's/^run "//; s/"$//' | sort)"
+  printf '%s\n' "$ROSTER" >"$TMP/roster"
+  echo "roster:      $(grep -c . "$TMP/roster") suites" >>"$PLOG"
+
+  # the parallel arm — one label in, one <label>.rc out. §F's own suite is
+  # skipped inside the scratch tree: it would recurse into another whole proof.
+  cat >"$TMP/arm.sh" <<'ARM'
+#!/bin/bash
+# THE SEAM HAS TO BE CLOSED BEFORE THE SUITE STARTS. This suite sourced
+# tests/lib/resolve-roots.sh at its top, which EXPORTS BIONIC_HOOKS_DIR,
+# BIONIC_SKILLS_DIR and BIONIC_SCRIPTS_DIR pointing at the real checkout —
+# and resolve-roots takes an existing export verbatim. Inherited, those three
+# send every suite in the scratch tree to read the REAL files, so the planted
+# edit is never seen and the proof reports a clean superset while testing
+# nothing (memory "seam-blindness-class": a seam that substitutes the value
+# under test leaves the production path unverified). Unset them and each suite
+# re-derives its roots from its own location, which is the scratch tree.
+unset BIONIC_HOOKS_DIR BIONIC_SKILLS_DIR BIONIC_SCRIPTS_DIR
+unset BIONIC_IMPACT_ROOT BIONIC_IMPACT_PLANTED BIONIC_IMPACT_PLANTED_LOG
+label="$1"
+# impact.test.sh's own §F would recurse into another whole proof from inside
+# this one; the outer run is what covers it.
+if [ "$label" = "impact.test.sh" ]; then echo 0 >"$RESDIR/$label.rc"; exit 0; fi
+( cd "$SCRATCHDIR" && bash "tests/$label" ) >"$RESDIR/$label.out" 2>&1
+echo $? >"$RESDIR/$label.rc"
+ARM
+
+  # list_run <resdir> <list-file> — runs the named suites against $SCRATCH at
+  # width $PJOBS, prints the red ones.
+  list_run() {
+    local rd="$1" list="$2"
+    rm -rf "$rd"; mkdir -p "$rd"
+    SCRATCHDIR="$SCRATCH" RESDIR="$rd" \
+      xargs -P "$PJOBS" -n1 bash "$TMP/arm.sh" <"$list" >/dev/null 2>&1
+    while IFS= read -r l; do
+      [ -n "$l" ] || continue
+      [ -f "$rd/$l.rc" ] || { echo "$l"; continue; }
+      [ "$(cat "$rd/$l.rc")" = "0" ] || echo "$l"
+    done <"$list"
   }
 
-  ROSTER="$(/usr/bin/grep -oE '^run "[^"]+"' "$SCRATCH/tests/run.sh" | sed 's/^run "//; s/"$//')"
+  # PROVE THE SEAM IS CLOSED before trusting a single result below. A suite
+  # launched by the arm must resolve its roots to the SCRATCH tree; if it
+  # resolves to the real checkout the whole proof is vacuous, so this is checked
+  # rather than assumed, and checked the way the suites themselves do it.
+  cat >"$TMP/seam-probe.sh" <<'PROBE'
+#!/bin/bash
+unset BIONIC_HOOKS_DIR BIONIC_SKILLS_DIR BIONIC_SCRIPTS_DIR
+. "$(dirname "$0")/lib/resolve-roots.sh"
+printf '%s\n' "$BIONIC_SCRIPTS_DIR"
+PROBE
+  cp "$TMP/seam-probe.sh" "$SCRATCH/tests/seam-probe.sh"
+  SEAM_SAW="$( ( cd "$SCRATCH" && bash tests/seam-probe.sh ) 2>/dev/null )"
+  rm -f "$SCRATCH/tests/seam-probe.sh"
+  # Compared PHYSICALLY. resolve-roots.sh reports `pwd -P`, and mktemp hands out
+  # a path under /var, which is a symlink to /private/var here — so the two
+  # spellings of the same directory differ textually and only textually.
+  SCRATCH_P="$(cd "$SCRATCH" && pwd -P)"
+  {
+    echo
+    echo "SEAM CHECK — the root a suite in the scratch tree resolves to"
+    echo "  scratch:   $SCRATCH_P"
+    echo "  suite saw: $SEAM_SAW"
+  } >>"$PLOG"
+  if [ "$SEAM_SAW" = "$SCRATCH_P" ]; then
+    pass "planted seam: a suite in the scratch tree resolves to the scratch tree"
+  else
+    fail "planted seam: a suite in the scratch tree resolves to the scratch tree" \
+      "saw [$SEAM_SAW] — every result below would be about the real checkout"
+  fi
 
-  # plant <class> <file> <how>   — mutate, derive, run the complement, restore.
+  # the control. Anything red here is red for its own reasons.
+  BASE_RED="$(list_run "$TMP/res-base" "$TMP/roster")"
+  {
+    echo
+    echo "CONTROL (no edit planted)"
+    echo "  red: ${BASE_RED:-none}"
+  } >>"$PLOG"
+  if [ -z "$BASE_RED" ]; then
+    pass "planted control: the unmutated scratch tree is wholly green"
+  else
+    pass "planted control: $(printf '%s\n' "$BASE_RED" | grep -c .) suite(s) red before any edit, discounted below"
+  fi
+
+  # plant <class> <file> <how> <witness>
+  #
+  # WHAT IS RUN, AND WHY NOT EVERYTHING. The claim is derived ⊇ red. Its only
+  # falsifier is a suite red OUTSIDE the derived set, so the COMPLEMENT is run in
+  # full — never sampled, because a sampled complement proves a sampled claim.
+  # Inside the derived set nothing needs proving except that the edit is not
+  # inert, and one named witness settles that: the suite whose whole subject is
+  # the mutated file. Running the other twenty-odd derived suites would add half
+  # again to a proof already measured in roster-runs and answer no question.
   plant() {
-    local class="$1" file="$2" how="$3"
-    local derived complement red_out=0 witness="" n_comp=0 n_red_outside=0
+    local class="$1" file="$2" how="$3" wit="$4"
+    local derived red witness="" outside="" n_out=0 wit_red
 
     derived="$(BIONIC_IMPACT_ROOT="$SCRATCH" bash "$IMPACT" "$file" | cut -f1 | sort -u)"
-    {
-      echo
-      echo "════════════════════════════════════════════════════════════════"
-      echo "class:   $class"
-      echo "file:    $file"
-      echo "edit:    $how"
-      echo "derived: $(printf '%s ' $derived)"
-      echo "derived count: $(printf '%s\n' "$derived" | grep -c .)"
-    } >>"$PLOG"
+    printf '%s\n' "$derived" | grep . >"$TMP/derived" || : >"$TMP/derived"
 
     cp "$SCRATCH/$file" "$TMP/restore.bak"
     case "$how" in
-      early-exit) printf '%s\n' 'exit 99' | cat - "$SCRATCH/$file" >"$TMP/m" && mv "$TMP/m" "$SCRATCH/$file" ;;
+      early-exit) printf 'exit 99\n' | cat - "$TMP/restore.bak" >"$SCRATCH/$file" ;;
       syntax)     printf '\nif then fi(((\n' >>"$SCRATCH/$file" ;;
-      corrupt)    printf '\nBIONIC_IMPACT_PLANTED_CORRUPTION\n' >>"$SCRATCH/$file" ;;
+      # a file read as TEXT — a roster, an SSoT a pin greps — is not broken by
+      # an appended line or an early exit; only losing its content breaks it.
+      wipe)       printf '#!/bin/bash\n# BIONIC_IMPACT_PLANTED_WIPE\n' >"$SCRATCH/$file" ;;
     esac
 
-    # the witness: one derived suite must actually go red, or the edit is inert
-    # and the whole superset claim is vacuous for this class.
-    for w in $derived; do
-      if [ "$(run_suite "$SCRATCH" "$w")" = "fail" ]; then witness="$w"; break; fi
-    done
+    comm -23 "$TMP/roster" "$TMP/derived" >"$TMP/complement"
+    printf '%s\n' "$wit" >"$TMP/witlist"
+    wit_red="$(list_run "$TMP/res-wit" "$TMP/witlist")"
+    red="$(list_run "$TMP/res-comp" "$TMP/complement")"
+    cp "$TMP/restore.bak" "$SCRATCH/$file"
 
-    complement="$(printf '%s\n' $ROSTER | sort -u | comm -23 - <(printf '%s\n' "$derived" | sort -u))"
-    for c in $complement; do
-      n_comp=$((n_comp + 1))
-      if [ "$(run_suite "$SCRATCH" "$c")" = "fail" ]; then
-        n_red_outside=$((n_red_outside + 1))
-        echo "  RED OUTSIDE THE DERIVED SET: $c" >>"$PLOG"
-      fi
-    done
-
-    mv "$TMP/restore.bak" "$SCRATCH/$file"
+    # discount the control's own reds, then split by the derived set
+    printf '%s\n' "$red" | grep . >"$TMP/red" || : >"$TMP/red"
+    printf '%s\n' "$BASE_RED" | grep . >"$TMP/basered" || : >"$TMP/basered"
+    sort -u "$TMP/red" -o "$TMP/red"
+    sort -u "$TMP/basered" -o "$TMP/basered"
+    comm -23 "$TMP/red" "$TMP/basered" >"$TMP/outside"
+    outside="$(tr '\n' ' ' <"$TMP/outside")"
+    n_out="$(grep -c . "$TMP/outside")"
+    case "$BASE_RED" in *"$wit"*) witness="" ;; *) witness="$wit_red" ;; esac
 
     {
-      echo "witness (a derived suite that went red): ${witness:-NONE}"
-      echo "complement run: $n_comp suites"
-      echo "red outside the derived set: $n_red_outside"
+      echo
+      echo "════════════════════════════════════════════════════════════════"
+      echo "class:            $class"
+      echo "file:             $file"
+      echo "edit:             $how"
+      echo "derived ($(grep -c . "$TMP/derived")): $(tr '\n' ' ' <"$TMP/derived")"
+      echo "witness (derived, run to prove the edit bites): $wit -> ${wit_red:+RED}${wit_red:-green}"
+      echo "complement run in full: $(grep -c . "$TMP/complement") suites"
+      echo "red OUTSIDE the derived set, control discounted: ${outside:-none}"
     } >>"$PLOG"
 
-    if [ -z "$witness" ]; then
-      fail "planted [$class]: the edit makes at least one derived suite red" \
-        "no derived suite failed — the planted edit is inert"
+    if [ -n "$witness" ]; then
+      pass "planted [$class]: the edit really bites — $witness went red"
     else
-      pass "planted [$class]: the edit makes at least one derived suite red ($witness)"
+      fail "planted [$class]: the edit really bites" \
+        "no derived suite went red; the planted edit is inert and the superset claim is vacuous"
     fi
-    if [ "$n_red_outside" -eq 0 ]; then
-      pass "planted [$class]: derived ⊇ red — $n_comp complement suites, none red"
+    if [ "$n_out" -eq 0 ]; then
+      pass "planted [$class]: derived ⊇ red, over the whole roster"
     else
-      fail "planted [$class]: derived ⊇ red" \
-        "$n_red_outside of $n_comp complement suites went red; see $PLOG"
+      fail "planted [$class]: derived ⊇ red, over the whole roster" \
+        "$n_out suite(s) red outside the derived set: $outside"
     fi
   }
 
-  plant "a hook"                     "hooks/protect-main.sh"           early-exit
-  plant "a lib the doctor sources"   "payload/scripts/lib/width.sh"    early-exit
-  plant "a tests/lib helper"         "tests/lib/bound-marker.sh"       syntax
-  plant "tests/run.sh"               "tests/run.sh"                    corrupt
-  plant "a whole-payload-copied file" "payload/scripts/lib/patrol.sh"  early-exit
+  # The five classes AC-19 names, each with the suite whose whole subject is the
+  # mutated file, and a maximal edit: a small edit makes a small red set and a
+  # correspondingly weak superset claim.
+  plant "a hook"                      "hooks/protect-main.sh"         early-exit protect-main.test.sh
+  plant "a lib the doctor sources"    "payload/scripts/lib/width.sh"  early-exit width.test.sh
+  plant "a tests/lib helper"          "tests/lib/bound-marker.sh"     wipe       session-start.test.sh
+  plant "tests/run.sh"                "tests/run.sh"                  wipe       version-compare.test.sh
+  plant "a whole-payload-copied file" "payload/scripts/lib/patrol.sh" wipe       patrol-marker.test.sh
 
   echo
   echo "planted-edit log: $PLOG"
