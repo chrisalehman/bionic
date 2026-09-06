@@ -38,6 +38,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 # Overridable so this suite can be driven against a MUTATED COPY of the sweeper without the
 # shipped file ever being modified — the same substitution
@@ -46,7 +47,6 @@ set -uo pipefail
 #   W4_SWEEPER_UNDER_TEST=/tmp/mutant.sh bash tests/session-sweeper.test.sh
 SWEEPER="${W4_SWEEPER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-sweeper.sh}"
 TMPROOT="$(mktemp -d)"
-PASS=0; FAIL=0; TOTAL=0
 BG_PIDS=""
 
 cleanup() {
@@ -64,17 +64,12 @@ SID_FOREIGN="0e91c355-77aa-42d6-b0e8-3c1f2a94d7e0"
 
 # ---------- assertion helpers ----------
 
-ok()  { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); printf 'PASS: %s\n' "$1"; }
-bad() { TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); printf 'FAIL: %s\n' "$1"
-        [ $# -gt 1 ] && printf '      %s\n' "$2"; return 0; }
-
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2] got [$3]"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "no [$2] in: $(printf '%s' "$3" | head -3)" ;; esac; }
-expect_absent()   { case "$3" in *"$2"*) bad "$1" "unexpected [$2] in: $(printf '%s' "$3" | head -3)" ;; *) ok "$1" ;; esac; }
-expect_matches()  { if printf '%s\n' "$3" | grep -qE "$2"; then ok "$1"; else bad "$1" "no match /$2/ in: $(printf '%s' "$3" | head -3)"; fi; }
-expect_true()     { local l="$1"; shift; if "$@"; then ok "$l"; else bad "$l" "condition failed: $*"; fi; }
-expect_false()    { local l="$1"; shift; if "$@"; then bad "$l" "condition unexpectedly true: $*"; else ok "$l"; fi; }
-section()         { printf '\n=== %s ===\n' "$1"; }
+expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2] got [$3]"; fi; }
+expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "no [$2] in: $(printf '%s' "$3" | head -3)" ;; esac; }
+expect_absent()   { case "$3" in *"$2"*) no "$1" "unexpected [$2] in: $(printf '%s' "$3" | head -3)" ;; *) ok "$1" ;; esac; }
+expect_matches()  { if printf '%s\n' "$3" | grep -qE "$2"; then ok "$1"; else no "$1" "no match /$2/ in: $(printf '%s' "$3" | head -3)"; fi; }
+expect_true()     { local l="$1"; shift; if "$@"; then ok "$l"; else no "$l" "condition failed: $*"; fi; }
+expect_false()    { local l="$1"; shift; if "$@"; then no "$l" "condition unexpectedly true: $*"; else ok "$l"; fi; }
 
 # ---------- sandbox + fixture builders ----------
 
@@ -1041,8 +1036,4 @@ expect_eq "a symlinked ledger refuses the verdict outright (exit 2)" "2" "$RC"
 expect_absent "…printing no line for any reader to trust" "landing-verdict/v1|" "$OUT"
 rm -f "$(ledger_of "$R19")"
 
-# ============================================================
-printf '\n──────────────────────────────────────────────\n'
-printf 'session-sweeper: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
-[ "$FAIL" -eq 0 ] || exit 1
-exit 0
+finish
