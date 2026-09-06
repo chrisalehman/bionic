@@ -25,6 +25,7 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 # Overridable exactly as tests/session-sweeper.test.sh offers, for RED evidence against a
 # mutated copy without ever touching the shipped file:
@@ -115,8 +116,7 @@ backdate() {  # <file> <seconds ago> — sets mtime, the progress-staleness inpu
 }
 
 new_roster() {  # <repo>
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$(roster_of "$1")"
+  roster_header > "$(roster_of "$1")"
 }
 
 # Subset of tests/session-sweeper.test.sh's mkrow — the fields the poker actually reads
@@ -153,11 +153,19 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=opus|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s' \
-    "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$deliverable" "$source" \
-    "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
-  [ "$plan_set" = yes ] && printf '|plan=%s' "$plan"
-  printf '\n'
+  # THE ROW ITSELF COMES FROM `roster_row`, through tests/lib/roster-row.sh (S14, AC-25).
+  # What stays here is this file's own house defaults — `model=opus`, `tool_use_id=toolu_x`,
+  # a launch time sixty seconds ago — and the `plan=` opt-in above, which is the one thing
+  # the production writer cannot express: no writer emits a row without that field any more,
+  # and a pre-wave roster is exactly what these cases are about.
+  local emit=roster_row_fixture
+  [ "$plan_set" = yes ] || emit=roster_row_no_plan
+  "$emit" \
+    "status=$status" "session=$session" "name=$name" "agent_id=$agent_id" \
+    "launched_at=$launched_at" "subagent_type=$subagent_type" model=opus \
+    "deliverable=$deliverable" "source=$source" "duration=$duration" \
+    "progress=$progress" "claims=$claims" "cadence=$cadence" absent= \
+    "waiver=$waiver" "tool_use_id=$tool_use_id" "plan=$plan"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -172,7 +180,7 @@ add_row() {  # <repo> <key=value>...
 add_row_to() {  # <repo> <session-id> <key=value>...
   local repo="$1" sid="$2"; shift 2
   local f; f="$(roster_of "$repo" "$sid")"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  [ -f "$f" ] || roster_header > "$f"
   mkrow session="$sid" "$@" >> "$f"
 }
 
