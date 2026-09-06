@@ -58,18 +58,20 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 IMPACT="${REPO}/tests/lib/impact.sh"
 
-PASS=0; FAIL=0
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; FAIL=$((FAIL + 1)); }
-section() { echo; echo "── $1 ─────────────────────────────────────────"; }
+# pass/fail route through the framework's ok/no instead of touching PASS/FAIL/TOTAL
+# directly (the protect-database.test.sh pattern, S8) - kept under their own names
+# because every call site in this file already says pass/fail, not ok/no. The
+# private expect_eq (identical semantics to the framework's - "$2" = "$3", same
+# argument order) and the private echo-only section() are deleted outright: the
+# framework's own, already sourced, take over under the same names.
+pass() { ok "$1"; }
+fail() { no "$1" "${2:-}"; }
 
-expect_eq() { # expect_eq <name> <expected> <actual>
-  if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "expected [$2] got [$3]"; fi
-}
 expect_has() { # expect_has <name> <needle> <haystack>
   case "$3" in
     *"$2"*) pass "$1" ;;
@@ -93,9 +95,7 @@ if [ -f "$IMPACT" ]; then
   pass "tests/lib/impact.sh exists"
 else
   fail "tests/lib/impact.sh exists" "$IMPACT"
-  echo
-  echo "Gating: $PASS passed, $FAIL failed"
-  exit 1
+  finish
 fi
 
 if bash -n "$IMPACT" 2>/dev/null; then
@@ -417,13 +417,21 @@ expect_eq "several files in one call answer as their union" \
 #
 # The planted edits are maximal breakage on purpose (an unconditional early exit,
 # a syntax error): a small edit makes a small red set and a weak superset claim.
-section "§F the planted-edit proof"
-
+#
+# §F IS A SECTION ONLY WHEN IT RUNS (A-S5c-k, orchestrator ruling 2026-09-06). An
+# opt-in proof that opens a section unconditionally and then skips would be exactly
+# the vacuous-section lie the floor exists to catch; a section that "asserts" its
+# own skip condition is that same lie wearing an assertion. So `section` is called
+# only inside the BIONIC_IMPACT_PLANTED=1 branch, where the proof actually asserts;
+# the default path prints its SKIP line with no open section at all, and the
+# suite's tally reads sections=N without §F on an ordinary run, sections=N+1 when
+# the proof runs.
 if [ "${BIONIC_IMPACT_PLANTED:-0}" != "1" ]; then
-  echo "SKIP: §F not requested (BIONIC_IMPACT_PLANTED=1 to run it; the"
+  echo "SKIP: §F the planted-edit proof — not requested (BIONIC_IMPACT_PLANTED=1 to run it; the"
   echo "      authoring-time record is committed at .bionic/docs/record/"
   echo "      wave-verification-cannot-lie/s12-planted-edits.log)"
 else
+  section "§F the planted-edit proof"
   PLOG="${BIONIC_IMPACT_PLANTED_LOG:-$TMP/planted-edits.log}"
 
   # WIDTH IS READ, NOT SET — the same rule tests/run.sh:168 follows, and the
@@ -628,7 +636,4 @@ PROBE
   echo "planted-edit log: $PLOG"
 fi
 
-echo
-echo "──────────────────────────────────────────────"
-echo "Gating: $PASS passed, $FAIL failed"
-[ "$FAIL" -eq 0 ] || exit 1
+finish
