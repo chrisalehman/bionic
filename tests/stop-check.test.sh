@@ -18,6 +18,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 CHECK="${BIONIC_HOOKS_DIR}/stop-check.sh"
 # The roster's WRITER. Section 8 reads rows; §8(g) drives this script to produce
@@ -110,14 +112,20 @@ make_world() {
 # THE BODY'S SHAPE IS THE REAL ONE, copied from tests/live-agents.test.sh, whose bodies are
 # byte-verbatim captures of this project's own transcript: the separator is U+00B7 and the
 # `[8895ce]` ref suffix is what the reader strips off a name.
-LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
+# THE ANSWER BODY IS BUILT BY tests/lib/live-answer.sh (S17, spec AC-27/AC-28): the self
+# line, the `Teammates (N):` header and every teammate row come out of the committed corpus
+# at tests/fixtures/claude/listagents-answers.jsonl with only this suite's names and
+# statuses substituted in place. The private builder that used to sit here re-typed the
+# harness's separator, its ref suffix and its recognition anchor — three spellings of that
+# anchor across the tree, and the one thing standing between "empty answer" and
+# "unrecognised body".
+#
+# `LIVE_ANSWER_TYPE` is the type the composed rows carry; §W8 asserts on
+# `bionic:senior-implementor`.
+LIVE_ANSWER_TYPE="bionic:senior-implementor"
 
-la_body() {  # <name>... -> one real-shaped ListAgents answer body
-  local n
-  printf '%s\n\nTeammates (%d):\n' "$LA_SELF" "$#"
-  for n in "$@"; do
-    printf '  %s [8895ce]  ·  bionic:senior-implementor  ·  running  ·  started 7m ago\n' "$n"
-  done
+la_body() {  # <name[:status]>... -> one real-shaped ListAgents answer body
+  live_answer_body "$@"
 }
 
 # plant_live <transcript> <fresh|stale> <name>...
@@ -171,9 +179,9 @@ make_agent() {
   if [ "${MK_AGENT_ROW:-yes}" = "yes" ]; then
     mkdir -p "$repo/.bionic/tmp"
     local rf="$repo/.bionic/tmp/roster-$sid.state"
-    [ -f "$rf" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$rf"
-    printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|absent=|waiver=|teammate_id=|adopted_from=|tool_use_id=toolu_01FIXTURE\n' \
-      "$sid" "$aname" "$aid" >> "$rf"
+    [ -f "$rf" ] || roster_header > "$rf"
+    roster_row_fixture status=identified session="$sid" name="$aname" agent_id="$aid" \
+      launched_at=2026-08-05T00:00:00Z teammate_id= adopted_from= >> "$rf"
   fi
   # meta.json — field set per §2.8 plus the live named-teammate fields.
   if [ -n "$extra" ]; then
@@ -649,9 +657,11 @@ make_agent "$H8" "$S8" "$OWN8" "aours-1111111111111111" "ours-target" "working a
 echo "the deliverable body" > "$R8/deliv-a.md"
 echo "progress line" > "$R8/prog-a.progress"
 {
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-  printf 'roster-state/v1|status=confirmed|session=%s|name=ours-target|agent_id=aours-1111111111111111|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=~10 minutes|progress=%s|claims=|absent=|tool_use_id=toolu_A\n' \
-    "$OWN8" "$R8/deliv-a.md" "$R8/prog-a.progress"
+  roster_header
+  roster_row_fixture status=confirmed session="$OWN8" name=ours-target \
+    agent_id=aours-1111111111111111 launched_at=2026-08-05T00:00:00Z \
+    deliverable="$R8/deliv-a.md" duration='~10 minutes' progress="$R8/prog-a.progress" \
+    tool_use_id=toolu_A
 } > "$R8/.bionic/tmp/roster-${OWN8}.state"
 
 OUT8A=$(run_check_as "$OWN8" "$H8" "$R8" "ours-target")
@@ -836,9 +846,10 @@ echo "our progress" > "$R9/prog-9.progress"
 # same-NAME agent under ANOTHER session's directory. The row grants nothing, and neither
 # does the metadata — this session's live set does not name it. ---
 {
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-  printf 'roster-state/v1|status=intended|session=%s|name=walker|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=researcher|model=|deliverable=|duration=|progress=%s|absent=deliverable|tool_use_id=toolu_W\n' \
-    "$OWN9" "$R9/prog-9.progress"
+  roster_header
+  roster_row_fixture status=intended session="$OWN9" name=walker agent_id= \
+    launched_at=2026-08-05T00:00:00Z subagent_type=researcher model= \
+    progress="$R9/prog-9.progress" absent=deliverable tool_use_id=toolu_W
 } > "$R9/.bionic/tmp/roster-${OWN9}.state"
 MK_AGENT_ROW=no make_agent "$H9" "$S9" "$OTHER9" "acorpse-1111111111111111" "walker" "three days ago" >/dev/null
 # The world's primary session is $OWN9, and it is the one the observation reads. Planted
@@ -863,8 +874,10 @@ expect_contains "D2: …and the reason names the harness's answer, not a directo
 # --- (c) the roster is the CONTRACT source for a target the live set has already named. It
 # is no longer an ownership oracle of any kind — that is the whole of what D1 cost. ---
 make_agent "$H9" "$S9" "$OWN9" "aconfirmed-3333333333333333" "elsewhere" "hi" >/dev/null
-printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|agent_id=aconfirmed-3333333333333333|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_C\n' \
-  "$OWN9" "$R9/prog-9.progress" >> "$R9/.bionic/tmp/roster-${OWN9}.state"
+roster_row_fixture status=confirmed session="$OWN9" name=elsewhere \
+  agent_id=aconfirmed-3333333333333333 launched_at=2026-08-05T00:00:00Z \
+  progress="$R9/prog-9.progress" tool_use_id=toolu_C \
+  >> "$R9/.bionic/tmp/roster-${OWN9}.state"
 OUT9C=$(run_check_as "$OWN9" "$H9" "$R9" "elsewhere")
 M9C=$(printf '%s\n' "$OUT9C" | grep '^stop-check-observation/')
 expect_contains "a live target with a CONFIRMED row resolves OURS" "Classification: OURS" "$OUT9C"
@@ -910,9 +923,10 @@ mkdir -p "$R10/docs"
 echo "decoy a" > "$R10/docs/a.md"
 echo "decoy b" > "$R10/docs/b.md"
 {
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-  printf 'roster-state/v1|status=confirmed|session=%s|name=glob-target|agent_id=aours-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=docs/*.md|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_G\n' \
-    "$OWN10"
+  roster_header
+  roster_row_fixture status=confirmed session="$OWN10" name=glob-target \
+    agent_id=aours-1010101010101010 launched_at=2026-08-05T00:00:00Z \
+    deliverable='docs/*.md' tool_use_id=toolu_G
 } > "$R10/.bionic/tmp/roster-${OWN10}.state"
 
 OUT10A=$(run_check_as "$OWN10" "$H10" "$R10" "glob-target")
@@ -931,16 +945,18 @@ expect_absent_ci "C-1: no cwd file rides into the durable record as a deliverabl
 # `intended` rows. The stated invariant and the enforced one differing is the
 # exact shape slice 4/9 was remediating, so it is enforced here.
 MK_AGENT_ROW=no make_agent "$H10" "$S10" "$OWN10" "aforeign-1010101010101010" "id-target" "working" >/dev/null
-printf 'roster-state/v1|status=intended|session=%s|name=id-target|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
-  "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+roster_row_fixture status=intended session="$OWN10" name=id-target \
+  agent_id=aforeign-1010101010101010 launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_I \
+  >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 OUT10B=$(run_check_as "$OWN10" "$H10" "$R10" "id-target"); ST=$?
 expect_status "C-2: an INTENDED row's id supplies nothing, so there is no evidence tier" 1 "$ST"
 expect_contains "C-2: …and the run says which fact is missing" "no agent id" "$OUT10B"
 
 # …while a CONFIRMED row's id still supplies it, which is the invariant slice 4/9 kept and
 # this slice moved rather than removed: the id is what the working log is filed under.
-printf 'roster-state/v1|status=confirmed|session=%s|name=id-target|agent_id=aforeign-1010101010101010|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_I\n' \
-  "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+roster_row_fixture status=confirmed session="$OWN10" name=id-target \
+  agent_id=aforeign-1010101010101010 launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_I \
+  >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 OUT10C=$(run_check_as "$OWN10" "$H10" "$R10" "id-target")
 expect_contains "C-2: a CONFIRMED row's id still establishes the evidence tier" \
   "Classification: OURS" "$OUT10C"
@@ -955,8 +971,9 @@ expect_contains "…on the log that id names" "agent-aforeign-1010101010101010.j
 # leave this rule dead for every teammate dispatch while looking alive in the
 # suite, because every fixture predating the wave was async-shaped.
 MK_AGENT_ROW=no make_agent "$H10" "$S10" "$OWN10" "aforeign-2020202020202020" "id-target-2" "working" >/dev/null
-printf 'roster-state/v1|status=identified|session=%s|name=id-target-2|agent_id=aforeign-2020202020202020|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_J\n' \
-  "$OWN10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+roster_row_fixture status=identified session="$OWN10" name=id-target-2 \
+  agent_id=aforeign-2020202020202020 launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_J \
+  >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 OUT10E=$(run_check_as "$OWN10" "$H10" "$R10" "id-target-2")
 expect_contains "an IDENTIFIED row's id establishes the evidence tier — the state teammate ids arrive in" \
   "Classification: OURS" "$OUT10E"
@@ -970,8 +987,9 @@ expect_contains "an IDENTIFIED row's id establishes the evidence tier — the st
 # clause must not touch either, which is what this case pins.
 make_agent "$H10" "$S10" "$OWN10" "aours-9090909090909090" "prerestart" "working" >/dev/null
 echo "the deliverable" > "$R10/deliv-pre.md"
-printf 'roster-state/v1|status=intended|session=%s|name=prerestart|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_P\n' \
-  "$OWN10" "$R10/deliv-pre.md" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+roster_row_fixture status=intended session="$OWN10" name=prerestart agent_id= \
+  launched_at=2026-08-05T00:00:00Z deliverable="$R10/deliv-pre.md" tool_use_id=toolu_P \
+  >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 OUT10D=$(run_check_as "$OWN10" "$H10" "$R10" "prerestart")
 M10D=$(printf '%s\n' "$OUT10D" | grep '^stop-check-observation/')
 expect_contains "C-2 regression: an unconfirmed row's own live agent still resolves" \
@@ -1000,8 +1018,10 @@ ADOPTED10="10101010-0000-0000-0000-000000000003"
 # where it was launched.
 MK_AGENT_ROW=no make_agent "$H10" "$S10" "$ADOPTED10" "aadoptee-3030303030303030" "adoptee" "still working" >/dev/null
 add_live "$H10" "$S10" "$OWN10" "adoptee"
-printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-3030303030303030|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=adopted|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=|teammate_id=adoptee@session-%s|adopted_from=%s\n' \
-  "$OWN10" "${ADOPTED10:0:8}" "$ADOPTED10" >> "$R10/.bionic/tmp/roster-${OWN10}.state"
+roster_row_fixture status=identified session="$OWN10" name=adoptee \
+  agent_id=aadoptee-3030303030303030 launched_at=2026-08-05T00:00:00Z source=adopted \
+  tool_use_id= teammate_id="adoptee@session-${ADOPTED10:0:8}" adopted_from="$ADOPTED10" \
+  >> "$R10/.bionic/tmp/roster-${OWN10}.state"
 
 OUT10F=$(run_check_as "$OWN10" "$H10" "$R10" "adoptee@session-${ADOPTED10:0:8}")
 M10F=$(printf '%s\n' "$OUT10F" | grep '^stop-check-observation/')
