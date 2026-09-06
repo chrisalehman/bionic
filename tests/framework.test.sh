@@ -317,6 +317,41 @@ ok "the suite kept going after the red anchor"
 finish
 PLANT_ANCHOR_ORDER
 
+# THE ANCHOR STRENGTH PLANT (A-35a, S19c). The drift fixture is anchor-fx.txt
+# with ONE leading space on the anchored line — the shape 61b8ca8 produced by
+# reindenting a call. A fixed-string anchor is a SUBSTRING test and still matches
+# it; a whole-line mutation does not touch it. The -E form, given the mutation's
+# own ^…$, is the one that says so.
+cat > "$SB/anchor-drift.txt" <<'PLANT_ANCHOR_DRIFT'
+a needle here
+ line 1
+line 2
+PLANT_ANCHOR_DRIFT
+
+cat > "$SB/tests/p-anchor-strength.test.sh" <<'PLANT_ANCHOR_STRENGTH'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+FX="$(dirname "$0")/../anchor-drift.txt"
+
+section "an anchor must match at least as strictly as its mutation"
+# THE WEAK ANCHOR: fixed-string, and it is GREEN over the drifted line.
+anchor "$FX" 'line 1' 1
+# THE STRONG ONE: the mutation's own whole-line ERE, and it is RED.
+anchor -E "$FX" '^line 1$' 1
+# What the mutation itself does to that file, so the row above is not a claim
+# about grep but about the mutant: a whole-line sed no-ops.
+MUT="$(sed 's/^line 1$/MUTATED/' "$FX")"
+if [ "$MUT" = "$(cat "$FX")" ]; then
+  ok "the whole-line mutation is a no-op on the drifted file"
+else
+  no "the whole-line mutation is a no-op on the drifted file" "it changed something"
+fi
+
+finish
+PLANT_ANCHOR_STRENGTH
+
 # ============================================================
 section "1: a section that asserts nothing fails by name (AC-13)"
 # ============================================================
@@ -662,6 +697,27 @@ expect_eq "11: the anchor's verdict is on stdout BEFORE the mutation runs" "yes"
 expect_eq "11: a red anchor does not abort the suite" "yes" \
   "$(contains "$P_OUT" "PASS: the suite kept going after the red anchor")"
 
+# --- THE ANCHOR STRENGTH RULE (A-35a, S19c) ---------------------------------
+# An anchor is only a precondition if it fails wherever the mutation would
+# no-op. A FIXED-STRING anchor is a substring test, so it stays GREEN over a line
+# that drifted by one leading space, while the whole-line `sed 's/^…$/…/'` it
+# precedes does nothing to that line — and every behavioural row beneath then
+# reads the shipped file. That is the S19c hole, and it is pinned here rather
+# than left as a sentence, because the sentence is what was missing.
+plant_run p-anchor-strength.test.sh
+expect_eq "11: the strength plant ran its three rows in one section" \
+  "p-anchor-strength.test.sh: 2/3 passed, 1 failed  sections=1 setup=0" \
+  "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-anchor-strength\.test\.sh: .*\)$/\1/p')"
+expect_eq "11: a fixed-string anchor stays GREEN over a one-space drift" "yes" \
+  "$(contains "$P_OUT" "PASS: anchor: line 1 matches 1 line(s) of anchor-drift.txt")"
+expect_eq "11: …while the whole-line ERE anchor goes red on the same file" "yes" \
+  "$(contains "$P_OUT" "FAIL: anchor: ^line 1$ matches 1 line(s) of anchor-drift.txt")"
+expect_eq "11: …and the mutation the strong anchor guards really is a no-op there" "yes" \
+  "$(contains "$P_OUT" "PASS: the whole-line mutation is a no-op on the drifted file")"
+# PAIRED POSITIVE: on the UNDRIFTED fixture the same whole-line ERE holds, so the
+# red above is the drift and not a pattern that could never match.
+anchor -E "$ANCHOR_FX" '^line 1$' 1
+
 # --- the docblock carries the reason, and the pin discriminates
 ANCHORDOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
 expect_eq "11: the framework's docblock says why an anchor is a precondition" "yes" \
@@ -669,6 +725,11 @@ expect_eq "11: the framework's docblock says why an anchor is a precondition" "y
 ANCHORDOC_STRIPPED="$(grep -v 'byte-identical to the shipped file' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
 expect_eq "11: …and that pin discriminates on a copy with the sentence removed" "no" \
   "$(contains "$ANCHORDOC_STRIPPED" "a mutation whose anchor moved is byte-identical to the shipped file")"
+expect_eq "11: …and it states the strength rule the arm above demonstrates" "yes" \
+  "$(contains "$ANCHORDOC" "THE ANCHOR MUST MATCH AT LEAST AS STRICTLY AS THE MUTATION")"
+ANCHORDOC_STRIPPED2="$(grep -v 'AT LEAST AS STRICTLY' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
+expect_eq "11: …and that pin discriminates too" "no" \
+  "$(contains "$ANCHORDOC_STRIPPED2" "THE ANCHOR MUST MATCH AT LEAST AS STRICTLY AS THE MUTATION")"
 
 # ============================================================
 setup_section "plant the adoption wall's scratch tree and its six suites (S10)"
