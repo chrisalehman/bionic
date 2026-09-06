@@ -12,7 +12,7 @@
 #   setup_section <name>  opens a section exempt from that rule (fixture building)
 #   ok <msg>              record a pass
 #   no <msg> [detail]     record a fail
-#   THE GENERIC ASSERTION FAMILY — the eleven names below are the framework's
+#   THE GENERIC ASSERTION FAMILY — the thirteen names below are the framework's
 #   and no suite's (A-16, spec AC-12). Every one reports through ok/no, so the
 #   counters and the section floor see it.
 #
@@ -24,6 +24,8 @@
 #   expect_absent <msg> <needle> <haystack>      literal substring absent
 #   expect_match <msg> <glob> <actual>           GLOB match (not a regex)
 #   expect_no_match <msg> <glob> <actual>        GLOB non-match
+#   expect_regex <msg> <ERE> <actual>            ERE match, unanchored
+#   expect_no_regex <msg> <ERE> <actual>         ERE non-match
 #   expect_status <msg> <expected> <actual>      exit status equality
 #   expect_empty <msg> <value>                   value is the empty string
 #   expect_nonempty <msg> <value>                value is not the empty string
@@ -44,9 +46,13 @@
 # ── THE GENERIC FAMILY: SEMANTICS, ARGUMENT ORDER, AND THE OLD SPELLINGS ─────
 #
 # Before this file owned them, 53 suites carried 37 distinct private `expect_*`
-# spellings between them. Eleven of those are GENERIC — they say nothing about
-# bionic, only about strings, commands and exit statuses — and those eleven are
-# now defined here, once. The other 26 are suite-specific (expect_finding,
+# spellings between them. Thirteen of those are GENERIC — they say nothing about
+# bionic, only about strings, commands, patterns and exit statuses — and those
+# thirteen are now defined here, once. Regex matching is on that list rather than
+# left private (A-S1b-2, resolved by the orchestrator 2026-09-06 as option 2):
+# eight suites need it, so leaving it out would have made the ownership boundary
+# a loophole for exactly the duplication this wave removes. The other 24 are
+# suite-specific (expect_finding,
 # expect_audit_line, expect_block, expect_allow, …); they are built on ok/no,
 # they stay local to the suite that needs them, and they stay legal.
 #
@@ -79,6 +85,24 @@
 #     sites against 75 for the regex spellings. Anchoring is implicit: the glob
 #     must match the WHOLE value, so a substring test needs `*needle*`.
 #
+#   expect_regex / expect_no_regex take an EXTENDED regular expression and are
+#     UNANCHORED: `needle` matches "a needle here" with no `.*` on either side.
+#     This is the semantics of the tree's `expect_matches` (5 definitions, 25 call
+#     sites), and it is a genuinely different matcher from expect_match — a glob
+#     reads `[0-9]+` as a literal bracket expression followed by a literal plus.
+#     Pick expect_regex when the pattern needs a quantifier, alternation or an
+#     anchor; pick expect_match when a `*needle*` says it.
+#
+#     The value is matched with a HERESTRING, never `printf ... | grep -q`. Two
+#     suites spell their private expect_matches as a pipeline, and under
+#     `pipefail` that reports FAILURE on a value the pattern matches, as soon as
+#     the value outgrows the 64 KiB pipe buffer: grep leaves early and the
+#     producer takes EPIPE. The status is 141 when the producer dies by SIGPIPE
+#     and 1 when bash reports the write error instead — it varies with the
+#     producer, the size and whether a trap is installed, so only "non-zero" is
+#     stable. Either way the assertion says FAIL and the code is fine.
+#     framework.test.sh §10 pins both halves. Capture the value, then match it.
+#
 #   expect_status compares two exit statuses as strings, expected first.
 #
 # THE OLD SPELLINGS — `old -> canonical`. No aliases are defined here: the
@@ -89,15 +113,23 @@
 #   expect_differ -> expect_ne — pure rename (stop-check; defined, never called).
 #   expect_not_contains -> expect_absent — pure rename, same `case` semantics
 #     (command-relay, env, rc-item; 7 call sites).
-#   expect_matches -> NOT a rename. It is ERE (`grep -qE`), expect_match is glob.
-#     25 call sites in execution-recorder, interpreter-pin, session-sweeper,
-#     stop-check and stop-guard; 27 of the 39 regex call sites in the tree carry
-#     metacharacters with no glob equivalent (`[0-9]+`, `(^|\|)v1(\||$)`), so
-#     they cannot be converted mechanically. Until the wave decides, a suite that
-#     needs ERE keeps a PRIVATE helper under a name this file does not own —
-#     which AC-12 permits — and does not spell it `expect_match`.
-#   expect_nomatch -> NOT a rename, for the same reason, and it takes a FILE
-#     rather than a string (preflight-probe, 14 call sites).
+#   expect_matches -> expect_regex — PURE rename, same ERE semantics, same
+#     argument order (execution-recorder, interpreter-pin, session-sweeper,
+#     stop-check, stop-guard; 25 call sites). The two pipeline spellings
+#     (interpreter-pin, session-sweeper) lose their 141 exposure in the move.
+#   expect_match, in the THREE suites where it is secretly an ERE -> expect_regex.
+#     live-agents (8 sites) and resources (17) also REVERSE the arguments, spelling
+#     it `<label> <actual> <ERE>`, so those 25 sites need the order corrected as
+#     well as the name changed. This is the highest-risk rebinding in the
+#     migration: their private definition wins today, so nothing is red now, and
+#     the moment the adoption wall removes the shadow the calls bind to the glob
+#     helper with the arguments the wrong way round and STILL nothing goes red.
+#     preflight-probe (11 sites) is the third: its expect_match takes a FILE, so
+#     each call site must grow a read of that file, and its sibling expect_nomatch
+#     stays local — that suite ends up with a split idiom until someone routes
+#     both together.
+#   expect_nomatch -> NOT a rename: it takes a FILE rather than a string
+#     (preflight-probe, 14 call sites). Stays local under its own name.
 #   expect_absent_ug -> NOT a rename: it pins /usr/bin/grep on purpose, because
 #     the shell `grep` on this machine skips hidden directories (cross-gate).
 #
@@ -245,6 +277,19 @@ expect_match() {
 expect_no_match() {
   # shellcheck disable=SC2053  # RHS is a glob on purpose
   if [[ "$3" == $2 ]]; then no "$1" "unexpected match for '$2' in: $(printf '%.400s' "$3")"; else ok "$1"; fi
+}
+
+# expect_regex <label> <ERE> <actual> — EXTENDED regular expression, unanchored.
+# The value is matched through a herestring, not a pipeline: `printf | grep -q`
+# exits 141 under pipefail on a large value and reports a false FAIL.
+expect_regex() {
+  if grep -qE -- "$2" <<<"$3"; then ok "$1"; else no "$1" "no match for /$2/ in: $(printf '%.400s' "$3")"; fi
+}
+
+# expect_no_regex <label> <ERE> <actual> — the exact complement of expect_regex,
+# and a NEGATIVE assertion: pair it with a positive one over the same fixture.
+expect_no_regex() {
+  if grep -qE -- "$2" <<<"$3"; then no "$1" "unexpected match for /$2/ in: $(printf '%.400s' "$3")"; else ok "$1"; fi
 }
 
 # expect_status <label> <expected> <actual>
