@@ -1339,7 +1339,91 @@ call_live_agents_has "$V_T_REALDUP" "research-code-map"
 expect_eq "§V.3 two rows of one name inside the ONE block are still ambiguous (exit 2)" \
   2 "$HST"
 
+# ============================================================
+echo
+echo "=== §W — the committed corpus, through the ONE builder, round-trips (S16, AC-27) ==="
+# ============================================================
+# WHAT THIS SECTION PROVES, and why it is not §P again. §P above hand-typed three of the
+# real corpus bodies straight into this file's own SELFLINE/PEERS/BODY_S6_* constants —
+# a private builder of its own, because this suite is the parser's home rather than a
+# consumer of it. Design ledger D3 makes the committed corpus the one fixture-fidelity
+# anchor for every OTHER suite that needs a ListAgents answer, through the new
+# tests/lib/live-answer.sh — the ONE builder (research-code-map §2.a counts eight private
+# builders elsewhere that collapse onto it at S17). This section is that builder's own
+# proof: every one of the corpus's 26 real answers, wrapped in a synthetic transcript by
+# `live_answer_build` and read back through the SAME parser this file already exercises
+# above, must come back with exactly the teammate rows and status words the harness
+# recorded — never a body the builder invented.
+. "$(dirname "$0")/lib/live-answer.sh"
 
+W_COUNT="$(live_answer_count)"
+expect_eq "§W the committed corpus holds 26 answers" "26" "$W_COUNT"
+
+W_TOTAL_ROWS=0
+W_RUNNING_ROWS=0
+W_IDLE_ROWS=0
+W_MISMATCH=""
+w_i=0
+while [ "$w_i" -lt "$W_COUNT" ]; do
+  W_CONTENT="$(live_answer_content "$w_i")"
+  W_EXPECTED_RC=0
+  W_EXPECTED="$(printf '%s\n' "$W_CONTENT" | bash -c 'set -u; . "$1"; _la_parse_teammates' _ "$LIB")" || W_EXPECTED_RC=$?
+  W_T="$SANDBOX/w-corpus-$w_i.jsonl"
+  live_answer_build "$W_T" "$w_i"
+  call_live_agents "$W_T"
+  if [ "$W_EXPECTED_RC" -ne 0 ]; then
+    # A body the parser does not recognise (corpus line 1, a real capture that is not a
+    # ListAgents answer at all): the round trip must land on NONE too, never an
+    # empty-but-FRESH set.
+    if [ "$ST" -eq 4 ] && [ -z "$OUT" ]; then :; else
+      W_MISMATCH="$W_MISMATCH line=$w_i(expected NONE, got rc=$ST out=[$OUT])"
+    fi
+  else
+    if [ "$ST" -eq 0 ] && [ "$OUT" = "$W_EXPECTED" ]; then :; else
+      W_MISMATCH="$W_MISMATCH line=$w_i(expected FRESH [$W_EXPECTED], got rc=$ST out=[$OUT])"
+    fi
+    W_ROWS_THIS="$(printf '%s\n' "$W_EXPECTED" | grep -c .)"
+    W_TOTAL_ROWS=$((W_TOTAL_ROWS + W_ROWS_THIS))
+    W_RUNNING_ROWS=$((W_RUNNING_ROWS + $(printf '%s\n' "$W_EXPECTED" | grep -c '|running$')))
+    W_IDLE_ROWS=$((W_IDLE_ROWS + $(printf '%s\n' "$W_EXPECTED" | grep -c '|idle$')))
+  fi
+  w_i=$((w_i + 1))
+done
+expect_eq "§W every one of the 26 corpus lines round-trips to its recorded answer" "" "$W_MISMATCH"
+expect_eq "§W the corpus carries 44 teammate rows total (design ledger D3 count)" "44" "$W_TOTAL_ROWS"
+expect_eq "§W …33 running" "33" "$W_RUNNING_ROWS"
+expect_eq "§W …11 idle" "11" "$W_IDLE_ROWS"
+
+# --- §W.1 — the five named states, each off the builder's own convenience wrapper ----
+W_RUN="$SANDBOX/w-running.jsonl"; live_answer_running "$W_RUN"
+call_live_agents "$W_RUN"
+expect_eq "§W.1 live_answer_running is FRESH" 0 "$ST"
+expect_match "§W.1 …and its status word is running" "$OUT" '\|running$'
+
+W_IDLE="$SANDBOX/w-idle.jsonl"; live_answer_idle "$W_IDLE"
+call_live_agents "$W_IDLE"
+expect_eq "§W.1 live_answer_idle is FRESH" 0 "$ST"
+expect_match "§W.1 …and its status word is idle" "$OUT" '\|idle$'
+
+W_STALE="$SANDBOX/w-stale.jsonl"; live_answer_stale "$W_STALE"
+call_live_agents "$W_STALE"
+expect_eq "§W.1 live_answer_stale is STALE (exit 3)" 3 "$ST"
+
+W_ABSENT="$SANDBOX/w-absent.jsonl"; live_answer_absent "$W_ABSENT"
+call_live_agents "$W_ABSENT"
+expect_eq "§W.1 live_answer_absent is NONE (exit 4, no file)" 4 "$ST"
+if [ -e "$W_ABSENT" ]; then no "§W.1 …and no file was written"; else ok "§W.1 …and no file was written"; fi
+
+W_NONE="$SANDBOX/w-none.jsonl"; live_answer_none "$W_NONE"
+call_live_agents "$W_NONE"
+expect_eq "§W.1 live_answer_none is NONE (exit 4, a real unrecognised body)" 4 "$ST"
+expect_empty "§W.1 …and prints nothing" "$OUT"
+
+# --- §W.2 — the self line every builder-emitted body carries is the corpus's own, never
+# invented; it is what lets the parser's recognition anchor fire at all.
+W_RUN_BODY="$(live_answer_content "$LIVE_ANSWER_RUNNING_LINE")"
+expect_match "§W.2 the running answer's self line is the corpus's own" \
+  "$W_RUN_BODY" '^This session is bionic-02 \[fc3e2d\]'
 
 
 
