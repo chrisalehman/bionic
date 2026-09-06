@@ -41,6 +41,35 @@ if [ -z "${BASH_SOURCE[0]:-}" ]; then
   return 1 2>/dev/null || exit 1
 fi
 
+# ── HAND-RUN PARITY: ONE INTERPRETER, HOWEVER THE SUITE WAS STARTED ──────────
+# (wave-01 verification-cannot-lie S2, spec AC-2; ADR-001 "one interpreter".)
+#
+# Every payload script and hook pins `#!/bin/bash` — 3.2 on a Mac — and the CLI runs a hook
+# by path, so the shebang picks the interpreter. A suite, though, is typed: `bash
+# tests/x.test.sh` takes whatever `bash` is first on PATH, which on a machine with Homebrew
+# bash is 5.3. `tests/run.sh` pins its children to `/bin/bash` for a whole run; this is the
+# same guarantee for the OTHER way a suite starts — one typed at a prompt, or one a debugger
+# re-runs by hand — and it rides here because sourcing this seam is the one thing every
+# suite in the tree already does.
+#
+# EXACTLY ONCE, AND IT CANNOT LOOP. The marker is exported before the exec, so the
+# re-executed copy — and every child it starts — sees it and falls straight through. It is
+# the same marker `tests/run.sh` exports when it builds the pin, so a suite the runner
+# launched (already `/bin/bash`) never re-execs either.
+#
+# WHAT IT WILL NOT DO. `$0` must be a readable file: sourced into an interactive shell
+# there is nothing to re-execute, and guessing would exec the shell's own name. `/bin/bash`
+# must exist and be executable — on a host where it does not, the shebang every payload
+# script carries is unrunnable and this seam is not the place that discovers it.
+if [ -z "${BIONIC_TEST_INTERPRETER_PINNED:-}" ] \
+   && [ "${BASH:-}" != "/bin/bash" ] \
+   && [ -x "/bin/bash" ] \
+   && [ -f "$0" ] && [ -r "$0" ]; then
+  BIONIC_TEST_INTERPRETER_PINNED=1
+  export BIONIC_TEST_INTERPRETER_PINNED
+  exec /bin/bash "$0" "$@"
+fi
+
 _bionic_seam_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || {
   echo "resolve-roots.sh: cannot resolve repo root from ${BASH_SOURCE[0]}" >&2
   # shellcheck disable=SC2317  # reached when this file is executed, not sourced
