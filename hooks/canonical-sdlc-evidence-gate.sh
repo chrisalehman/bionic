@@ -1934,7 +1934,7 @@ log_finding_quiet() {  # $1=check-id  $2=detail
 
 validate_environments() {
   local raw entries name desc cure covered_names fog_names fog_missing_cure
-  local b5 covered_line covered_norm missing
+  local b5 covered_line covered_norm missing claimed_fog claimed_undeclared
   case "$CURRENT" in 5|6|7|8|9) : ;; *) return 0 ;; esac
   raw=$(frontmatter_get environments)
   if [ -z "$raw" ]; then
@@ -1988,6 +1988,32 @@ validate_environments() {
     if [ -n "$missing" ]; then
       block_matrix "environments-covered '${covered_line}' omits declared environment(s): ${missing} (declared covered set: ${covered_names}; fog: ${fog_names:-none})." \
         "run the Step-5 tests floor on every declared non-fog environment and list it in 'environments-covered:', or move it to a fog entry naming its cure."
+    fi
+
+    # THE OTHER DIRECTION — OVER-CLAIMING (critic K-5). The loop above walks the DECLARED
+    # non-fog names and requires each to be covered. Nothing walked the covered names, so a
+    # plan could claim coverage it does not have and the arm was silent: this wave's own
+    # frontmatter passes `environments-covered: macos-system, linux-system` while
+    # linux-system is declared FOG, and a fog entry's entire meaning is "not covered". A
+    # name that was never declared at all (`freebsd`) was equally silent. The ownership row
+    # states the containment in this direction — covered ⊆ declared — and until now only
+    # the opposite one was implemented.
+    claimed_fog=""
+    claimed_undeclared=""
+    for name in $covered_norm; do
+      case " $covered_names " in *" $name "*) continue ;; esac
+      case " $fog_names " in
+        *" $name "*) claimed_fog="${claimed_fog:+$claimed_fog }$name"; continue ;;
+      esac
+      claimed_undeclared="${claimed_undeclared:+$claimed_undeclared }$name"
+    done
+    if [ -n "$claimed_fog" ]; then
+      block_matrix "environments-covered '${covered_line}' claims coverage of environment(s) this plan declares as FOG: ${claimed_fog} (fog: ${fog_names:-none})." \
+        "a fog entry means NOT covered — either drop the name from 'environments-covered:', or run the Step-5 tests floor there and move it out of fog in the frontmatter."
+    fi
+    if [ -n "$claimed_undeclared" ]; then
+      block_matrix "environments-covered '${covered_line}' names environment(s) the frontmatter never declared: ${claimed_undeclared} (declared: '${raw}')." \
+        "declare the environment in the frontmatter's 'environments:' list, or drop it from 'environments-covered:' — the covered set is a subset of the declared one."
     fi
   fi
   return 0

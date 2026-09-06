@@ -310,6 +310,15 @@ fi
 # budget in name only — that is a wish, not a wall — so nothing in this arm looks at it.
 [ -n "$ACTOR" ] || exit 0
 
+# THE SHAPE RULE, AT THE SITE THAT FORMS THE PATH (review-a A-10). `session_id` returns the
+# host-supplied value verbatim — it validates nothing — and this line turns it into a path.
+# hooks/execution-recorder.sh:382 and hooks/agent-context-guard.sh:246 both apply this exact
+# case before their own roster path, for the reason hooks/landing-gate.sh:284 states about
+# `agent_id`: a key carrying path separators does not trip the symlink guards, it writes (or
+# here, reads) outside the directory those guards protect. This roster READ is new in this
+# wave and did not inherit the rule. An unusable id leaves the budget unstated, which is the
+# documented no-row fail direction: a NAMED suite passes, `tests/run.sh` still does not.
+case "$BSG_SID" in *[!A-Za-z0-9_-]*) BSG_SID="" ;; esac
 ROSTER_FILE="$BSG_REPO/.bionic/tmp/roster-${BSG_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
@@ -341,6 +350,29 @@ fi
 case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
 
 budget_refuse() {  # <suite basename>
+  # A NAME THE SHELL HAS NOT EXPANDED YET IS A DIFFERENT REFUSAL (review-c C-5, A-35c). A
+  # hook sees the command TEXT, so `for s in a b; do bash "tests/$s.test.sh"; done` reaches
+  # here as the literal `$s.test.sh`. Refusing is right — the hook cannot check what it
+  # cannot read — but the ordinary headline is false in exactly this case: every one of
+  # those suites may be on the budget, and it sends the reader to audit a set that is not
+  # the problem. Two readers hit it before this branch existed.
+  case "$1" in
+    *'$'*|*'`'*)
+      cat >&2 <<EOF
+BLOCKED: $1 cannot be named at hook time.
+
+This command names its suite with a shell variable, and this wall reads your command
+text BEFORE the shell expands it — so the name never resolves to a suite it can check
+against your budget. It may well be on it; nothing here can tell.
+
+Spell the suite literally, one per call:
+    bash tests/alpha.test.sh
+    bash tests/beta.test.sh
+
+On the budget: ${2:-(nothing — this brief declared Suites: none)}
+EOF
+      exit 2 ;;
+  esac
   cat >&2 <<EOF
 BLOCKED: $1 is not on this agent's suite budget.
 
@@ -349,7 +381,7 @@ forty minutes of a machine nobody else can use. The set was recorded on this age
 roster row at dispatch, from the files its brief declared.
 
 On the budget: ${2:-(nothing — this brief declared Suites: none)}
-You asked for : $1
+You asked for: $1
 
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is
@@ -358,7 +390,15 @@ EOF
   exit 2
 }
 
-for _target in $(cmd_suite_targets "$COMMAND"); do
+# THE READING IS SCOPED TO THIS REPOSITORY and the split is guarded. `$BSG_REPO` is what
+# turns "a file named x.test.sh" into "this row's suite x.test.sh" (critic K-2), and `set
+# -f` keeps a target carrying a glob metacharacter — `bash tests/*.test.sh` reads as the
+# literal `*.test.sh` — from being expanded against the HOOK PROCESS'S cwd before the loop
+# sees it (review-a A-7b). The sibling site at hooks/dispatch-preflight.sh does the same.
+_TARGETS=$(cmd_suite_targets "$COMMAND" "$BSG_REPO")
+set -f
+# shellcheck disable=SC2086  # deliberate split of a newline-joined target list, globbing off
+for _target in $_TARGETS; do
   if [ "$_target" = "run.sh" ]; then
     # THE FULL TREE IS REFUSED WITHOUT A ROW THAT NAMES IT — the one place this arm fails
     # closed. AC-21: "tests/run.sh is refused unless the row carries it."
@@ -386,4 +426,5 @@ EOF
     *) budget_refuse "$_target" "$SUITES_ALLOWED" ;;
   esac
 done
+set +f
 exit 0

@@ -3848,9 +3848,10 @@ fn_code() {  # <file> <function name> -> fn_body with pure-comment lines strippe
 # agreement suite asserting nothing, which is this wave's thesis in miniature. The five the
 # comment spoke of is SEVEN as measured: every function hooks/session-poker.sh's own
 # "DELIBERATELY DUPLICATED" header block introduces has a same-named copy in
-# hooks/session-sweeper.sh, and all seven agree as code today. (session-poker.sh:429 calls
-# the family "the six"; the count in that comment is one short of the file. Reported, not
-# edited here — this slice's diff is the four suites.)
+# hooks/session-sweeper.sh, and all seven agree as code today. (session-poker.sh's own
+# header called the family "the six" — one short of the file — from S11's measurement until
+# the F2 fold-in (item 12) corrected it to "the seven" at session-poker.sh:426. The comment
+# and this measurement agree now; the discrepancy this parenthetical used to report is gone.)
 SPO_DUPES="now_epoch iso_now file_mtime iso_epoch line_field clean parse_seconds"
 
 for _fn in $SPO_DUPES; do
@@ -7648,17 +7649,22 @@ expect_eq "S19.3 …declared by 24 anchor calls (Section 8's doctoring rewrites 
 # anchors both lines it lifts (review-b B-3).
 expect_eq "S19.3 …and this suite's own mutant trees and lifts by 25 more" "25" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
-# The two suites the waiver used to name. One call site each: `mutate_guard` anchors
-# per call (its callers pass the shipped line they delete), and landing-gate's
-# inverted-guard awk anchors the line it rewrites.
+# The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
+# the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
+# the F2 fold-in (review-b B-12) — the two whole-line moves its §17 doctors into
+# hooks/landing-gate.sh to prove the swept-marker extraction fails loudly.
 expect_eq "S19.3 …and agent-context-guard by one, now that mutate_guard anchors per call" "1" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/agent-context-guard.test.sh")"
-expect_eq "S19.3 …and landing-gate by one, for the inverted-guard mutant" "1" \
+expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and the two line moves §17 doctors" "3" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/landing-gate.test.sh")"
 # THE TOTAL AC-30 NAMES. Stated as its own measured literal rather than left to the
 # reader to add up: this is the number that has to move when a doctoring site is
 # added or removed anywhere in the four suites that build mutants.
-expect_eq "S19.3 …51 anchor call sites across the four doctoring suites, all told" "51" \
+# 53 since the fold-in landings (A-44). F1 (item 17) and F2 (item 11) each added two
+# anchors — F1 in this suite, F2 in landing-gate — and each rewrote this total from 49
+# to 51 in BYTE-IDENTICAL text, so the merge was conflict-free and the pin was two short
+# of the tree. Measured at the merged head, not predicted: 24 + 25 + 1 + 3 = 53.
+expect_eq "S19.3 …53 anchor call sites across the four doctoring suites, all told" "53" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"

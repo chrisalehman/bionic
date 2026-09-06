@@ -327,4 +327,126 @@ guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" false
 expect_eq "B7c run_in_background false is not backgrounded, and on-budget passes" "0" "$ST"
 expect_empty "B7c …silently" "$OUT$ERR"
 
+section "B8 — the arm is scoped to THIS repo, and a mode that runs nothing spends nothing"
+# THE THREE FALSE REFUSALS (critic K-2, review-a A-7, the walk A-36a). The reading behind
+# this arm used to answer with a bare basename, so any file on the machine ending
+# `.test.sh` was judged against this row's budget, and `--dry-run` — documented as "run
+# nothing" — was refused on the same terms as a forty-minute run.
+
+guarded "$R1" 'bash tests/run.sh --dry-run'
+expect_eq "B8a the runner's --dry-run mode is ALLOWED against a narrow budget" "0" "$ST"
+expect_empty "B8a …silently" "$OUT$ERR"
+
+# CONTROL: the same command without the flag is the full tree, and still refused.
+guarded "$R1" 'bash tests/run.sh'
+expect_eq "B8b control: without the flag the full tree is still REFUSED" "2" "$ST"
+
+# A SUITE FILE THAT IS NOT THIS REPO'S is not this row's business either.
+guarded "$R1" 'bash /tmp/scratch-probe/probe2.test.sh'
+expect_eq "B8c an off-budget basename OUTSIDE the repo is allowed" "0" "$ST"
+expect_empty "B8c …silently" "$OUT$ERR"
+guarded "$R1" 'bash /some/other/tree/tests/run.sh'
+expect_eq "B8d …and so is a full tree that is not this one" "0" "$ST"
+
+# CONTROL: the same basename inside the repo is refused, so B8c is scoping and not silence.
+guarded "$R1" 'bash tests/probe2.test.sh'
+expect_eq "B8e control: the same basename INSIDE the repo is REFUSED" "2" "$ST"
+
+# THE SPLIT IS GUARDED. `bash tests/*.test.sh` names the literal `*.test.sh`, and the loop
+# that reads the targets runs with `set -f` — so the HOOK PROCESS'S OWN CWD cannot expand
+# that word into whatever files happen to sit there (review-a A-7b). The cwd below holds
+# `alpha.test.sh` and `beta.test.sh`, which are exactly this row's budget: without the
+# guard the word expands into two allowed names and the command passes.
+BSG_GLOBDIR="$SANDBOX/globcwd"
+mkdir -p "$BSG_GLOBDIR"
+: > "$BSG_GLOBDIR/alpha.test.sh"
+: > "$BSG_GLOBDIR/beta.test.sh"
+guarded_from() {  # <cwd for the hook process> <repo> <command>
+  local _dir="$1" _payload
+  _payload=$(mk_payload "$2" "$3" "$ACTOR" omit)
+  OUT=$(cd "$_dir" && printf '%s' "$_payload" | env HOME="$FAKE_HOME" \
+          CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
+          CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
+          bash "$CTX_GUARD" "$GUARD" 2>"$SANDBOX/.err")
+  ST=$?
+  ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+guarded_from "$BSG_GLOBDIR" "$R1" 'bash tests/*.test.sh'
+expect_eq "B8f a glob target is REFUSED by its literal name" "2" "$ST"
+expect_contains "B8f …naming the unexpanded word, not the files beside the hook" "*.test.sh" "$ERR"
+
+section "B9 — a suite named by a shell VARIABLE is a different refusal (C-5, A-35c)"
+# THE DEFECT. A hook reads the command text BEFORE the shell expands it. A writer looping
+# over four suites all of which are on its budget got
+#     BLOCKED: $s.test.sh is not on this agent's suite budget.
+# — a headline that is false in the case that produces it, sending the reader to check a
+# set that is not the problem. Two independent readers hit it (A-35c; the walk's heading
+# 10(b), a fresh agent on its first attempt). The correct behaviour is still to refuse;
+# the wrong thing was the sentence.
+
+guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
+expect_eq "B9a a variable-named suite is still REFUSED" "2" "$ST"
+expect_contains "B9a …saying the name could not be resolved at hook time" \
+  "cannot be named at hook time" "$ERR"
+expect_contains "B9a …and telling the reader what to type instead" \
+  "Spell the suite literally, one per call" "$ERR"
+# THE HEADLINE THE READER ACTS ON must not claim the suite is off a budget the hook never
+# managed to check it against.
+expect_absent "B9a …never claiming it is off the budget" "is not on this agent's suite budget" "$ERR"
+
+# THE BRACE FORM AND A COMMAND SUBSTITUTION ARE THE SAME STATE.
+guarded "$R1" 'bash "tests/${s}.test.sh"'
+expect_eq "B9b the brace spelling reads the same way" "2" "$ST"
+expect_contains "B9b …with the same refusal" "cannot be named at hook time" "$ERR"
+guarded "$R1" 'bash tests/`suite_name`.test.sh'
+expect_eq "B9c a command substitution reads the same way" "2" "$ST"
+expect_contains "B9c …with the same refusal" "cannot be named at hook time" "$ERR"
+
+# CONTROL: the literal spelling the refusal asks for is allowed, so B9a is about the
+# spelling and not about the suite.
+guarded "$R1" 'bash tests/alpha.test.sh'
+expect_eq "B9e control: the literal spelling of an on-budget suite passes" "0" "$ST"
+expect_empty "B9e …silently" "$OUT$ERR"
+
+# THE ORDINARY REFUSAL'S OWN ALIGNMENT. `You asked for : x` carried a space before the
+# colon — column alignment against the line above it, and a typo to everyone who did not
+# notice. Both labels now end at the colon and the values align on the padding.
+guarded "$R1" 'bash tests/gamma.test.sh'
+expect_eq "B9f control: an ordinary off-budget suite still refuses" "2" "$ST"
+expect_contains "B9f …and its label carries no space before the colon" "You asked for:" "$ERR"
+expect_absent "B9f …the stray space is gone" "You asked for :" "$ERR"
+
+section "B10 — every site that turns a session id into a roster path carries the shape rule (A-10)"
+# THE INCONSISTENCY. `session_id` (payload/scripts/lib/session.sh) prefers
+# CLAUDE_CODE_SESSION_ID, falls back to the payload value, and returns whichever it got
+# VERBATIM — it validates nothing. Two hooks that build a roster path apply the shape rule
+# before doing so; this hook's roster READ is new in this wave and did not inherit it.
+# hooks/landing-gate.sh:284 states the rationale for `agent_id`: a key carrying path
+# separators does not trip the symlink guards, it reads outside what those guards protect.
+#
+# WHY THIS IS A SOURCE ASSERTION AND NOT A DRIVEN ONE, said plainly. The line is
+# UNREACHABLE through the supported path: `engaged_session` (payload/scripts/lib/run.sh:566)
+# applies the identical case to the same id ~70 lines earlier, so a malformed id exits the
+# hook at the engagement switch and never reaches the path. A test that piped a malformed
+# id into this hook and watched it pass would be asserting the ENGAGEMENT check while
+# claiming to assert this one — a green that proves a different line than the one it names,
+# which is the exact class this wave exists to close. What IS true and checkable is the
+# family property A-10 names: the same rule, at every path-forming site.
+B10_HOOKS="background-suite-guard.sh execution-recorder.sh agent-context-guard.sh"
+B10_RULE='case .*\[!A-Za-z0-9_-\]\*\)'
+for _h in $B10_HOOKS; do
+  expect_regex "B10 $_h shape-checks the session id" "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/$_h")"
+done
+# NON-VACUITY: the pattern is not one that matches any shell file. A hook with no such rule
+# fails it, so the loop above is reading the rule and not the language.
+expect_no_regex "B10 …and the pattern discriminates (a hook without the rule fails it)" \
+  "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/farm-out-reminder.sh")"
+# AND THE RULE IS AT THIS HOOK'S OWN PATH-FORMING SITE, not merely somewhere in the file:
+# the roster path is built on the line after it. A rule that drifted away from the line it
+# protects is the state A-10 found, spelled differently.
+B10_ADJACENT=$(/usr/bin/grep -A1 'case "\$BSG_SID" in' "$GUARD" | tail -1)
+expect_match "B10 …on the line immediately before the roster path is formed" \
+  'ROSTER_FILE=*' "$B10_ADJACENT"
+
 finish
