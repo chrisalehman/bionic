@@ -93,6 +93,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -101,25 +102,6 @@ DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
 REMOVE_SH="${PAYLOAD}/scripts/remove.sh"
 LIB_DIR="${PAYLOAD}/scripts/lib"
 CCSTATUSLINE_SHIPPED="${PAYLOAD}/ccstatusline/settings.json"
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_eq()    { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_ne()    { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected NOT '$2'"; fi; }
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_false() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then no "$label" "expected non-zero exit"; else ok "$label"; fi; }
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.400s' "$actual")"; fi
-}
-expect_no_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
-}
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
@@ -839,8 +821,7 @@ RC
 # Group 1 — the suite's own preconditions.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 1: preconditions ==="
+section "Group 1: preconditions"
 
 expect_true "payload/scripts/setup.sh exists"  test -f "$SETUP_SH"
 expect_true "payload/scripts/doctor.sh exists" test -f "$DOCTOR_SH"
@@ -910,8 +891,7 @@ RC_STARTS_BEFORE="$(count_lines_equal "$RC_FILE_FIX" "$RC_START_LIT")"
 # Group 2 — setup --all against an empty $HOME.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 2: setup --all on a pristine machine ==="
+section "Group 2: setup --all on a pristine machine"
 
 SETUP_OUT="$TMP/setup.txt"
 printf '%s' "$YES" | run_payload "$SETUP_SH" --all > "$SETUP_OUT" 2>&1
@@ -943,8 +923,7 @@ expect_match "the substrate install reached brew" '*brew install*' "$(cat "$CALL
 # the user left it.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 3: the manifest setup is supposed to leave ==="
+section "Group 3: the manifest setup is supposed to leave"
 
 # ── ccstatusline: both halves ──
 #
@@ -1063,8 +1042,7 @@ expect_eq "manifest: the rc still parses as a shell script after setup wrote to 
 # Group 4 — doctor agrees with the machine (AC-10a, AC-10c).
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 4: doctor on the machine setup just built ==="
+section "Group 4: doctor on the machine setup just built"
 
 DOC1="$TMP/doctor-after-setup.txt"
 run_payload "$DOCTOR_SH" < /dev/null > "$DOC1" 2>&1
@@ -1161,8 +1139,7 @@ expect_eq "doctor: the claude() shell proxy row agrees the block is on disk" \
 # must still read present: the path this checks is `$HOME`-anchored, never
 # plugin-root-anchored.
 
-echo ""
-echo "=== Group 4b: VENV — stable venv path, version-independent, stale-lock state (AC-17) ==="
+section "Group 4b: VENV — stable venv path, version-independent, stale-lock state (AC-17)"
 
 VENV_DIR="${HOME_FIX}/.local/share/bionic/excalidraw-venv"
 VENV_LOCK_HASH="${VENV_DIR}.lock.sha256"
@@ -1219,8 +1196,7 @@ expect_match "VENV: a uv.lock that changed since sync reads present=stale, not a
 # — a loop the status line's own migration re-entered every session.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 4c: a ccstatusline-migrated layout still reads as installed ==="
+section "Group 4c: a ccstatusline-migrated layout still reads as installed"
 
 CCS_MIGRATED="$TMP/ccs-migrated.json"
 jq '.version += 1' "$CCS_CONFIG" > "$CCS_MIGRATED" && cp "$CCS_MIGRATED" "$CCS_CONFIG"
@@ -1244,8 +1220,7 @@ expect_no_match "4c setup --all: does not offer to install ccstatusline again" \
 # Group 5 — remove --all undoes the manifest (AC-10, the second half).
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 5: remove --all takes the manifest back off ==="
+section "Group 5: remove --all takes the manifest back off"
 
 # Captured BEFORE the teardown, because the post-remove absence of a file that
 # was never created proves nothing. Each removal claim below is the conjunction:
@@ -1350,8 +1325,7 @@ expect_eq "remove: ~/.claude/CLAUDE.md is still not a file this plugin touches (
 # "present" and writing nothing. Nothing after this group reads the fixture.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 6a: the statusLine write MERGES into the user's object ==="
+section "Group 6a: the statusLine write MERGES into the user's object"
 
 fresh_home
 mkdir -p "${HOME_FIX}/.claude"
@@ -1380,8 +1354,7 @@ expect_eq "6a: …and the user's own field beside it is still there" \
 expect_eq "6a: …and so is the rest of the file" \
   "opus" "$(jqf '.model // ""')"
 
-echo ""
-echo "=== Group 6b: a PINNED locator still records an executable name ==="
+section "Group 6b: a PINNED locator still records an executable name"
 
 # The pin the deps.sh docblock argues against adopting today, adopted here so the write can
 # be measured under it. A copy of the whole payload — setup.sh refuses to run without its
@@ -1424,8 +1397,7 @@ expect_eq "6b: …and the command recorded in settings.json is the executable, n
 # 1.4.4 exists for is in exactly that state.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 7: remove takes bionic's statusline state off a pre-1.4.4 machine ==="
+section "Group 7: remove takes bionic's statusline state off a pre-1.4.4 machine"
 
 fresh_home
 mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
@@ -1484,8 +1456,7 @@ expect_ne "7: a machine with none of it DOES read already clean, on the same ext
 # detectors, same payload-side names discipline, same consent shape.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 8: remove takes the legacy hook files and drifted agent copies ==="
+section "Group 8: remove takes the legacy hook files and drifted agent copies"
 
 # The claude-home the field machine had, built the way cross-gate's `ds_plant` builds it:
 # payload-named files two builds behind, plus ONE file in each directory that is not
@@ -1566,8 +1537,7 @@ expect_match "8: a second pass over the same machine reads already clean" \
 # not a new one.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 9: remove clears .statusLine only when it names ccstatusline ==="
+section "Group 9: remove clears .statusLine only when it names ccstatusline"
 
 # Shape one (matrix row 6): the user's own renderer, PLUS the config directory
 # bionic copied in and never cleaned up. The row is still pending — the config
@@ -1652,8 +1622,7 @@ expect_eq "9b: …and the rest of the user's settings.json is untouched" \
 # remove.sh's twins were already safe and stay that way.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 10: the split loops do not glob against \$PWD ==="
+section "Group 10: the split loops do not glob against \$PWD"
 
 # A fixture payload whose only shipped hook is literally named n*.sh — a
 # filename no real commit would carry, chosen because it is the one the
@@ -1728,8 +1697,7 @@ expect_true "10 remove: the machine owner's file survives a glob-matching decoy 
 # read as "no match" instead of raised as an error.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 11: the jq predicate is total over .statusLine's type ==="
+section "Group 11: the jq predicate is total over .statusLine's type"
 
 fresh_home
 mkdir -p "${HOME_FIX}/.claude" "${HOME_FIX}/.config/ccstatusline"
@@ -1780,8 +1748,7 @@ expect_match "11: …and the run reports it removed, not skipped by you" \
 # sentence anywhere. One string, read from both doors here.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 12: the consent sentence says the clear is conditional ==="
+section "Group 12: the consent sentence says the clear is conditional"
 
 fresh_home
 mkdir -p "${HOME_FIX}/.claude"
@@ -1830,8 +1797,7 @@ expect_match "12 --only: the (only) consent sentence this door shows says the cl
 # an unconditional `set +f` stops being a detail nobody can observe.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 13: _dep_rm_named_files restores set -f to the caller's state ==="
+section "Group 13: _dep_rm_named_files restores set -f to the caller's state"
 
 e13_setf_after() {  # <on|off> -> the shell's OWN set -f state after a direct call
   env -i HOME="$HOME_FIX" PATH="$BIN" bash -c '
@@ -1873,8 +1839,7 @@ expect_eq "13: caller's set -f OFF survives a direct call" \
 # gained the one status it could not previously report.
 # ---------------------------------------------------------------------------
 
-echo ""
-echo "=== Group 14: setup's load-failure arm names the CLI's own repair route ==="
+section "Group 14: setup's load-failure arm names the CLI's own repair route"
 
 fresh_home
 mkdir -p "${HOME_FIX}/.claude"
@@ -1933,11 +1898,4 @@ expect_match "14: …and it names the same route, with the dependency that is mi
   "*reinstall bionic's dependencies: claude plugin install bionic@bionic (superpowers is missing)*" \
   "$G14_DEP"
 
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish
