@@ -37,27 +37,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "doctor-fleet.test.sh: jq is required"; exit 1; }
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.900s' "$actual")"; fi
-}
-expect_no_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
-}
 
 TMP="$(mktemp -d /tmp/bionic-doctor-fleet.XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
@@ -188,44 +174,46 @@ run_doctor_no_claude() {  # the same machine with the CLI off PATH (AC-7)
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
-section() {  # <output> <SECTION NAME> -> the lines under that heading
+# doctor_section <output> <SECTION NAME> -> the lines under that heading in
+# doctor's own rendered output. NOT the framework's section() banner (A-10c) --
+# this is an output EXTRACTOR, renamed rather than deleted so every call site
+# keeps working once the framework owns the name `section`.
+doctor_section() {
   printf '%s\n' "$1" | awk -v h="$2" '
     $0 == h { on = 1; next }
     on && /^[A-Z][A-Z ]*$/ { on = 0 }
     on { print }'
 }
 
-echo "=== Section 1: the live probe ==="
+section "Section 1: the live probe"
 
 OUT1="$(run_doctor)"
-RES1="$(section "$OUT1" "RESOURCES")"
+RES1="$(doctor_section "$OUT1" "RESOURCES")"
 
 expect_match "1: the section exists" "*machine*" "$RES1"
 expect_match "2: it names cores, memory, free disk, load and os" \
   "*core*GB*free*load*" "$RES1"
 
-echo ""
-echo "=== Section 2: a version-2 attestation prints its recorded budget and source ==="
+section "Section 2: a version-2 attestation prints its recorded budget and source"
 
 write_session "1001" "$SID_V2" "$LIVE_PID"
 write_attestation_v2 "$SID_V2"
 
 OUT2="$(run_doctor)"
-RES2="$(section "$OUT2" "RESOURCES")"
+RES2="$(doctor_section "$OUT2" "RESOURCES")"
 
 expect_match "3: the session is named by its short id" "*${SID_V2%%-*}*" "$RES2"
 expect_match "4: the budget is the recorded string, not a re-derivation" \
   "*writers=22 suites=18 worktrees=32 test_jobs=18*" "$RES2"
 expect_match "5: and the source it was recorded with" "*source=probe*" "$RES2"
 
-echo ""
-echo "=== Section 3: a version-1 attestation records no budget, and says so ==="
+section "Section 3: a version-1 attestation records no budget, and says so"
 
 write_session "1002" "$SID_V1" "$LIVE_PID"
 write_attestation_v1 "$SID_V1"
 
 OUT3="$(run_doctor)"
-RES3="$(section "$OUT3" "RESOURCES")"
+RES3="$(doctor_section "$OUT3" "RESOURCES")"
 
 expect_match "6: the v1 session is named" "*${SID_V1%%-*}*" "$RES3"
 expect_match "7: with the honest line, never a budget of zeroes" \
@@ -233,8 +221,7 @@ expect_match "7: with the honest line, never a budget of zeroes" \
 expect_no_match "8: and no fabricated writers count rides it" \
   "*${SID_V1%%-*}*writers=*" "$RES3"
 
-echo ""
-echo "=== Section 4: the active-run row ==="
+section "Section 4: the active-run row"
 
 # A plan the `active_run` predicate calls OPEN: a `## SDLC State` heading and a
 # flush-left `current:` below 9.
@@ -268,8 +255,7 @@ OUT5="$(run_doctor)"
 expect_match "11: a closed run reads as no active run" "*active run*none*" "$OUT5"
 expect_no_match "12: and does not quote a step" "*active run*current: 9*" "$OUT5"
 
-echo ""
-echo "=== Section 5: predecessor rosters with open rows ==="
+section "Section 5: predecessor rosters with open rows"
 
 # A roster belonging to a session that is NOT live: three dispatches intended,
 # one swept closed by the landing gate, one never answered for, and one answered
@@ -326,8 +312,7 @@ PRED_LINES="$(printf '%s\n' "$OUT6" | awk '/predecessor/')"
 expect_no_match "15: a LIVE session's roster is not called a predecessor" \
   "*${SID_V2%%-*}*" "$PRED_LINES"
 
-echo ""
-echo "=== Section 6: legacy .bionic symlinks under .worktrees/ ==="
+section "Section 6: legacy .bionic symlinks under .worktrees/"
 
 mkdir -p "${PROJ}/.worktrees/alpha" "${PROJ}/.worktrees/beta"
 ln -s "${PROJ}/.bionic" "${PROJ}/.worktrees/alpha/.bionic"
@@ -339,8 +324,7 @@ expect_match "16: the symlinked worktree is listed" "*legacy .bionic symlink*alp
 expect_no_match "17: a real .bionic directory is not" "*legacy .bionic symlink*beta*" "$OUT7"
 expect_match "18: and the row carries a repair" "*legacy .bionic symlink*1*" "$OUT7"
 
-echo ""
-echo "=== Section 6b: the attestation set is THIS PROJECT's, not the machine's ==="
+section "Section 6b: the attestation set is THIS PROJECT's, not the machine's"
 
 # THE DEFECT THIS SECTION OWNS (T3 finding 2, AC-35 drive, 2026-09-03). Doctor
 # printed `– no session · none has taken an attestation in this project` on a
@@ -382,7 +366,7 @@ jq -nc --arg sid "$OTHER_SID" --arg cwd "$OTHER" --argjson pid "$LIVE_PID" \
   > "${CHOME}/sessions/1003.json"
 
 OUT6B="$(run_doctor)"
-RES6B="$(section "$OUT6B" "RESOURCES")"
+RES6B="$(doctor_section "$OUT6B" "RESOURCES")"
 
 expect_match "18b: an attestation whose writer has exited is still this project's record" \
   "*${GONE_ATT_SID%%-*}*writers=22*" "$RES6B"
@@ -399,12 +383,11 @@ mkdir -p "${BARE}/.bionic/tmp"
 OUT6C="$( cd "$BARE" && HOME="$TMP" PATH="$BIN" BIONIC_SHELL_RC="$FIXTURE_RC" \
   BIONIC_CLAUDE_HOME="$CHOME" BIONIC_PLUGIN_ROOT="$PAYLOAD" \
   BIONIC_DOCTOR_PROBE_SECONDS=3 bash "$DOCTOR_SH" < /dev/null 2>&1 )"
-RES6C="$(section "$OUT6C" "RESOURCES")"
+RES6C="$(doctor_section "$OUT6C" "RESOURCES")"
 expect_match "18f: a project with no attestation still says so" \
   "*none has taken an attestation in this project*" "$RES6C"
 
-echo ""
-echo "=== Section 7: registration, and the column budget ==="
+section "Section 7: registration, and the column budget"
 
 expect_true "19: tests/run.sh names doctor-fleet.test.sh" \
   grep -q 'run "doctor-fleet.test.sh" bash tests/doctor-fleet.test.sh' "${REPO}/tests/run.sh"
@@ -421,8 +404,7 @@ if [ -z "$_over" ]; then ok "20: every line of the fullest run fits 100 columns"
 else no "20: a line exceeds 100 columns" "$_over"; fi
 
 
-echo ""
-echo "=== Section 8: the claude CLI absent, and present, on one fixture (AC-7) ==="
+section "Section 8: the claude CLI absent, and present, on one fixture (AC-7)"
 
 # THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
 # `claude` is the one program on the fixture's PATH whose presence changes what
@@ -443,9 +425,4 @@ _over="$(too_wide "$OUT_NOCLI")"
 if [ -z "$_over" ]; then ok "21.4: the CLI-absent page still fits 100 columns"
 else no "21.4: a line of the CLI-absent page exceeds 100 columns" "$_over"; fi
 
-echo ""
-echo "========================================"
-echo "doctor-fleet: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
