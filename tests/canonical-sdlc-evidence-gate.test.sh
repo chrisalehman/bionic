@@ -17,12 +17,10 @@
 set -euo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
-PASS=0
-FAIL=0
-TOTAL=0
 
 # ---------- helpers ----------
 
@@ -205,29 +203,21 @@ run_hook_with_project() {
 
 expect_allow() {
   local label="$1" home_dir="$2" command="$3"
-  TOTAL=$((TOTAL + 1))
   run_hook "$home_dir" "$command"
   if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL (expected allow, exit 0, no stderr): $label"
-    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected allow, exit 0, no stderr; got exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   fi
 }
 
 expect_block() {
   local label="$1" home_dir="$2" command="$3" expected_substr="${4:-BLOCKED}"
-  TOTAL=$((TOTAL + 1))
   run_hook "$home_dir" "$command"
-  if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -q "$expected_substr"; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+  if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$expected_substr" <<<"$HOOK_STDERR"; then
+    ok "$label"
   else
-    echo "FAIL (expected block exit 2 with substring '$expected_substr'): $label"
-    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected block exit 2 with substring '$expected_substr'; got exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   fi
 }
 
@@ -249,8 +239,7 @@ has_ui: false
 # Section 1: non-commit commands always allowed
 # ============================================================
 
-echo ""
-echo "=== Section 1: Non-commit commands pass through ==="
+section "Section 1: Non-commit commands pass through"
 
 h1=$(make_home)
 # Seed a plan that WOULD block if the command were a commit.
@@ -267,8 +256,7 @@ expect_allow "git push — not a commit" "$h1" "git push origin main"
 # Section 2: commit with no plans directory / no plans
 # ============================================================
 
-echo ""
-echo "=== Section 2: Commit with no canonical-sdlc state — allowed ==="
+section "Section 2: Commit with no canonical-sdlc state — allowed"
 
 h2=$(make_home)
 # plans dir exists but empty
@@ -286,8 +274,7 @@ No SDLC State section here." > /dev/null
 # Section 3: valid evidence allows commit
 # ============================================================
 
-echo ""
-echo "=== Section 3: Valid evidence in ## SDLC State — allowed ==="
+section "Section 3: Valid evidence in ## SDLC State — allowed"
 
 h3=$(make_home)
 write_plan "$h3" "$FM
@@ -320,8 +307,7 @@ expect_allow "bulleted Step line — allow" "$h3c" 'git commit -m "x"'
 # Section 4: malformed / missing SDLC State pieces
 # ============================================================
 
-echo ""
-echo "=== Section 4: Malformed SDLC State — blocked ==="
+section "Section 4: Malformed SDLC State — blocked"
 
 h4=$(make_home)
 write_plan "$h4" "$FM
@@ -351,8 +337,7 @@ expect_block "non-numeric current" "$h4c" 'git commit -m "x"' "missing a valid '
 # Section 5: empty / placeholder evidence — blocked
 # ============================================================
 
-echo ""
-echo "=== Section 5: Placeholder evidence — blocked ==="
+section "Section 5: Placeholder evidence — blocked"
 
 h5=$(make_home)
 write_plan "$h5" "$FM
@@ -430,8 +415,7 @@ expect_block "continuation 'stack-health: pending' (whole value) → block" \
 # Section 6: compound commands + edge cases
 # ============================================================
 
-echo ""
-echo "=== Section 6: Compound commands — commit detection ==="
+section "Section 6: Compound commands — commit detection"
 
 h6=$(make_home)
 write_plan "$h6" "$FM
@@ -454,8 +438,7 @@ expect_allow "echo only, no real commit" "$h6b" 'echo "we will git commit later"
 # Section 7: newest-plan-wins
 # ============================================================
 
-echo ""
-echo "=== Section 7: Newest plan file is the one enforced ==="
+section "Section 7: Newest plan file is the one enforced"
 #
 # THIS SECTION IS THE FALLBACK ARM, and since wave-session-bound-run that is a scope rather
 # than a description of the whole rule. "Which plan answers for the run" is now a property of
@@ -505,35 +488,26 @@ write_plan "$h7c" "# unrelated plan, no SDLC State" "only-neutral.md" > /dev/nul
 # Section 8: project-local plan directory (.bionic/docs/plans/)
 # ============================================================
 
-echo ""
-echo "=== Section 8: Project-local plan dir (CLAUDE_PROJECT_DIR) ==="
+section "Section 8: Project-local plan dir (CLAUDE_PROJECT_DIR)"
 
 # Helpers that exercise both plan-dir paths at once.
 expect_allow_both() {
   local label="$1" home_dir="$2" project_dir="$3" command="$4"
-  TOTAL=$((TOTAL + 1))
   run_hook_with_project "$home_dir" "$project_dir" "$command"
   if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL (expected allow): $label"
-    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected allow; got exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   fi
 }
 
 expect_block_both() {
   local label="$1" home_dir="$2" project_dir="$3" command="$4" substr="${5:-BLOCKED}"
-  TOTAL=$((TOTAL + 1))
   run_hook_with_project "$home_dir" "$project_dir" "$command"
-  if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -q "$substr"; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+  if [ "$HOOK_EXIT" -eq 2 ] && grep -q "$substr" <<<"$HOOK_STDERR"; then
+    ok "$label"
   else
-    echo "FAIL (expected block with '$substr'): $label"
-    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected block with '$substr'; got exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   fi
 }
 
@@ -671,8 +645,7 @@ expect_allow_both "good project plan allows regardless of the global directory" 
 # row's auditor cell must read CONFIRMED. The matrix validates at current: 5
 # (Step-5 validator) and as a prefix check for current: 6..9.
 
-echo ""
-echo "=== Section 17: Verification Matrix gate ==="
+section "Section 17: Verification Matrix gate"
 
 # `walk: exempt` here and in the other fixture builders below is deliberate and
 # load-bearing: the walk arm (Section 26) is fail-closed, so an ABSENT key on a
@@ -1353,8 +1326,7 @@ expect_block "17r slice: 9 on a T1 row at current 5 → block naming the tier" \
 # parsed as a matrix row and blocked the commit with a bogus malformed-row
 # error.
 
-echo ""
-echo "=== Section 18: matrix section scoping + fenced-code skip ==="
+section "Section 18: matrix section scoping + fenced-code skip"
 
 # A fenced bash block whose jq pipeline uses leading-pipe continuation lines
 # — the exact shape that tripped the validator live. Single-quoted so the
@@ -1458,8 +1430,7 @@ expect_allow "18d fenced pipeline before the table (mid-section) → allow" \
 # THAT row (proving the frontmatter and body actually parsed, rather than the
 # file being waved through or rejected wholesale).
 
-echo ""
-echo "=== Section 15: CRLF and CR-only line endings ==="
+section "Section 15: CRLF and CR-only line endings"
 
 # Inserts a literal CR before each newline. Bash-3.2-safe ANSI-C quoting embeds
 # a real CR byte in the sed script itself (BSD sed's replacement text does not
@@ -1516,36 +1487,27 @@ expect_block "CR-only plan, broken matrix row → block on AC-1 (body parsed)" \
 # integrate step. `current: T<n>` on a non-task plan still blocks — the
 # T-format is scale: task only.
 
-echo ""
-echo "=== Section 19: triple, task ledger, merge-target ==="
+section "Section 19: triple, task ledger, merge-target"
 
 # Log-only assertion helpers: exit 0 with a finding on stderr (the standard
 # expect_allow requires EMPTY stderr, which a finding violates).
 expect_finding() {
   local label="$1" home_dir="$2" command="$3" substr="$4"
-  TOTAL=$((TOTAL + 1))
   run_hook "$home_dir" "$command"
-  if [ "$HOOK_EXIT" -eq 0 ] && echo "$HOOK_STDERR" | grep -q "$substr"; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+  if [ "$HOOK_EXIT" -eq 0 ] && grep -q "$substr" <<<"$HOOK_STDERR"; then
+    ok "$label"
   else
-    echo "FAIL (expected allow exit 0 + stderr '$substr'): $label"
-    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected allow exit 0 + stderr '$substr'; got exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   fi
 }
 
 expect_finding_both() {
   local label="$1" home_dir="$2" project_dir="$3" command="$4" substr="$5"
-  TOTAL=$((TOTAL + 1))
   run_hook_with_project "$home_dir" "$project_dir" "$command"
-  if [ "$HOOK_EXIT" -eq 0 ] && echo "$HOOK_STDERR" | grep -q "$substr"; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+  if [ "$HOOK_EXIT" -eq 0 ] && grep -q "$substr" <<<"$HOOK_STDERR"; then
+    ok "$label"
   else
-    echo "FAIL (expected allow exit 0 + stderr '$substr'): $label"
-    echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected allow exit 0 + stderr '$substr'; got exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
   fi
 }
 
@@ -1553,7 +1515,6 @@ expect_finding_both() {
 # line matching $4 — pins the D14 file channel (not just the stderr echo).
 expect_audit_line() {
   local label="$1" home_dir="$2" command="$3" substr="$4"
-  TOTAL=$((TOTAL + 1))
   run_hook "$home_dir" "$command"
   # run_hook posts cwd=$home_dir with CLAUDE_PROJECT_DIR="", and the plan lives
   # in that sandbox's own docs root, which is no git repository — so
@@ -1561,12 +1522,9 @@ expect_audit_line() {
   # file on that root but roots the file itself under HOME.
   local af; af=$(audit_file_for "$home_dir" "$home_dir")
   if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$af" ] && grep -q "$substr" "$af"; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL (expected exit 0 + audit-file line '$substr'): $label"
-    echo "  exit=$HOOK_EXIT audit='$( [ -f "$af" ] && cat "$af" )'"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected exit 0 + audit-file line '$substr'; got exit=$HOOK_EXIT audit='$( [ -f "$af" ] && cat "$af" )'"
   fi
 }
 
@@ -1976,24 +1934,19 @@ expect_allow_both "19r fenced ## SDLC State in epic plan → merge-target reads 
 # not a universal Step-5 key like bundle-fresh/drive-check/stack-health. A
 # — no audit write, no finding.
 
-echo ""
-echo "=== Section 20: intent-scoped Step-5 evidence keys (R7, log-only) ==="
+section "Section 20: intent-scoped Step-5 evidence keys (R7, log-only)"
 
 # Counts occurrences of $substr in stderr — for asserting an exact finding
 # count (e.g. the tune intent's three missing keys).
 expect_finding_count() {
   local label="$1" home_dir="$2" command="$3" substr="$4" expected="$5"
-  TOTAL=$((TOTAL + 1))
   run_hook "$home_dir" "$command"
   local count
-  count=$(echo "$HOOK_STDERR" | grep -c "$substr") || count=0
+  count=$(grep -c "$substr" <<<"$HOOK_STDERR") || count=0
   if [ "$HOOK_EXIT" -eq 0 ] && [ "$count" -eq "$expected" ]; then
-    echo "PASS: $label"
-    PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL (expected allow exit 0 + ${expected}x '$substr'): $label"
-    echo "  exit=$HOOK_EXIT count=$count stderr='$HOOK_STDERR'"
-    FAIL=$((FAIL + 1))
+    no "$label" "expected allow exit 0 + ${expected}x '$substr'; got exit=$HOOK_EXIT count=$count stderr='$HOOK_STDERR'"
   fi
 }
 
@@ -2148,8 +2101,7 @@ expect_finding_count "20h tune baseline: tbd (rest valid) → exactly 1 tune-evi
 # names. Both cases below pass identically before and after the refactor;
 # they pin the new code path (and its fallback) rather than catch a bug.
 
-echo ""
-echo "=== Section 21: audit dir follows the plan's project (strategy alignment) ==="
+section "Section 21: audit dir follows the plan's project (strategy alignment)"
 
 # Like run_hook_with_project, but pins CLAUDE_PROJECT_DIR to $2 (the fixture
 # project that owns the plan) while the JSON cwd field AND the actual
@@ -2183,18 +2135,14 @@ h21a=$(make_home)
 fixture21a=$(make_project)
 elsewhere21a=$(mktemp -d); cleanup_dirs+=("$elsewhere21a")
 write_project_plan "$fixture21a" "$(r7_wave_plan tune 5 "$step5_base" "$matrix_complete")" > /dev/null
-TOTAL=$((TOTAL + 1))
 run_hook_project_elsewhere_cwd "$h21a" "$fixture21a" "$elsewhere21a" 'git commit -m "x"'
 fixture_audit=$(audit_file_for "$h21a" "$fixture21a")
 in_tree21a=$(find "$fixture21a" "$elsewhere21a" -name 'sdlc-audit.md' 2>/dev/null)
 if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$fixture_audit" ] && grep -q "tune-evidence" "$fixture_audit" \
   && [ ! -d "$elsewhere21a/.bionic" ] && [ -z "$in_tree21a" ]; then
-  echo "PASS: 21a audit line follows the plan's fixture project, not the invoking cwd"
-  PASS=$((PASS + 1))
+  ok "21a audit line follows the plan's fixture project, not the invoking cwd"
 else
-  echo "FAIL (expected fixture-keyed audit line under HOME + no audit file in any project tree): 21a"
-  echo "  exit=$HOOK_EXIT fixture_audit_exists=$([ -f "$fixture_audit" ] && echo yes || echo no) elsewhere_bionic=$([ -d "$elsewhere21a/.bionic" ] && echo yes || echo no) in_tree='$in_tree21a'"
-  FAIL=$((FAIL + 1))
+  no "21a" "expected fixture-keyed audit line under HOME + no audit file in any project tree; exit=$HOOK_EXIT fixture_audit_exists=$([ -f "$fixture_audit" ] && echo yes || echo no) elsewhere_bionic=$([ -d "$elsewhere21a/.bionic" ] && echo yes || echo no) in_tree='$in_tree21a'"
 fi
 
 # 21b — fail-open fallback: the sandbox-HOME fixture (Section 19/20's usual
@@ -2255,19 +2203,15 @@ touch "$ac10_main/.bionic/docs/plans/active.md"
 printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: tested\nscale: wave\n---\n## SDLC State\ncurrent: 5\nStep 5: TODO\n' \
   > "$ac10_wt/.bionic/docs/plans/decoy.md"
 touch "$ac10_wt/.bionic/docs/plans/decoy.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$h21c" "$ac10_wt" 'git commit -m "x"'
 ac10_main_audit=$(audit_file_for "$h21c" "$ac10_main")
 ac10_wt_audit=$(audit_file_for "$h21c" "$ac10_wt")
 if [ "$HOOK_EXIT" -eq 0 ] && [ -f "$ac10_main_audit" ] && grep -q "tune-evidence" "$ac10_main_audit" \
    && [ ! -f "$ac10_wt_audit" ]; then
-  echo "PASS: 21c-e2e commit from a worktree → main repo's plan, one audit file keyed on the main repo"
-  PASS=$((PASS + 1))
+  ok "21c-e2e commit from a worktree → main repo's plan, one audit file keyed on the main repo"
 else
-  echo "FAIL: 21c-e2e commit from a worktree → main repo's plan and audit file"
-  echo "  exit=$HOOK_EXIT main_audit=$([ -f "$ac10_main_audit" ] && echo yes || echo no) wt_audit=$([ -f "$ac10_wt_audit" ] && echo yes || echo no)"
-  echo "  stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "21c-e2e commit from a worktree → main repo's plan and audit file" \
+    "exit=$HOOK_EXIT main_audit=$([ -f "$ac10_main_audit" ] && echo yes || echo no) wt_audit=$([ -f "$ac10_wt_audit" ] && echo yes || echo no) stderr='$HOOK_STDERR'"
 fi
 
 # ============================================================
@@ -2281,8 +2225,7 @@ fi
 # (a non-empty cell outside tested|peer-reviewed|audited → INVALID). Every OTHER
 # row keeps its log-only handling (D14) at this slice — 22a6 pins that scope.
 
-echo ""
-echo "=== Section 22: rigor-keyed ledger lanes ==="
+section "Section 22: rigor-keyed ledger lanes"
 
 # --- 22a: blocking tested floor on the addressed ledger unit --------------
 
@@ -2626,8 +2569,7 @@ expect_block "22b8b proof-shape pin: digit, no command token → block" \
 # presence, NO per-row auditor/critic, plan Assumption A2). Every other plan is
 # a guard no-op.
 
-echo ""
-echo "=== Section 22c: audited strictness + D7 dispatch-ledger presence ==="
+section "Section 22c: audited strictness + D7 dispatch-ledger presence"
 
 # ---- Part A: task-scale audited plan-level strictness --------------------
 
@@ -2813,8 +2755,7 @@ expect_allow "22c11 self-reference pin — THIS plan's exact ## Tasks shape (zer
 # confirmation-vs-actual probe on a NON-addressed row's off-enum rigor cell —
 # see its comment for the finding.
 
-echo ""
-echo "=== Section 22d: per-row rigor resolution (R4) ==="
+section "Section 22d: per-row rigor resolution (R4)"
 
 # 22d1 — frontmatter rigor tested, addressed row cell peer-reviewed (heavier),
 # weak prose evidence → block. The row CELL overrides the lighter frontmatter:
@@ -3153,8 +3094,7 @@ expect_allow "22d6h control: empty rigor cell on non-addressed active row inheri
 # missing/placeholder-evidence or malformed-cell block still wins. 22f7 also
 # pins the F3 word-boundary fix on the critic/auditor lane tokens.
 
-echo ""
-echo "=== Section 22f: row rigor is a floor — downgrade blocks unless waived ==="
+section "Section 22f: row rigor is a floor — downgrade blocks unless waived"
 
 # 22f1 — frontmatter audited, ADDRESSED row cell tested (downgrade), real
 # non-placeholder prose evidence, NO waiver → block. This is the critic's F1
@@ -3367,8 +3307,7 @@ expect_allow "22f7b same evidence + standalone 'critic no-blocking' token → al
 # The version check sits ahead of every shape check, so these fixtures carry a
 # valid ## SDLC State: what is under test is the version, not the evidence.
 
-echo ""
-echo "=== Section 23: canonical_sdlc_version — exactly one supported value ==="
+section "Section 23: canonical_sdlc_version — exactly one supported value"
 
 versioned_plan() {  # $1 = the canonical_sdlc_version value to declare
   printf -- '---\n'
@@ -3425,8 +3364,7 @@ expect_allow "canonical_sdlc_version: 14 → allow" "$h23ok" 'git commit -m "x"'
 #                outside every directory the gate searches. The gate is
 #                silently disabled and the commit would sail through. Blocks,
 #                naming where the plan belongs.
-echo ""
-echo "=== Section 24: AC-13 — misplaced plan blocks, absent plan never does ==="
+section "Section 24: AC-13 — misplaced plan blocks, absent plan never does"
 
 s24_marked_plan() {  # a plan carrying the run-state marker + a satisfied state
   printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
@@ -3441,30 +3379,22 @@ s24_h1=$(make_home)
 s24_p1=$(mktemp -d); cleanup_dirs+=("$s24_p1")
 mkdir -p "$s24_p1/src"
 printf 'echo hi\n' > "$s24_p1/src/main.sh"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h1" "$s24_p1" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: no .bionic/, no plan anywhere → allow, silently"
-  PASS=$((PASS + 1))
+  ok "no .bionic/, no plan anywhere → allow, silently"
 else
-  echo "FAIL (expected allow): no .bionic/, no plan anywhere"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "no .bionic/, no plan anywhere → allow, silently" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # .bionic/docs/plans/ exists but is empty — a project that has run Step 0 and
 # not yet written a plan. Still absence, still no block.
 s24_h1b=$(make_home)
 s24_p1b=$(make_project)
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h1b" "$s24_p1b" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: empty .bionic/docs/plans/ → allow, silently"
-  PASS=$((PASS + 1))
+  ok "empty .bionic/docs/plans/ → allow, silently"
 else
-  echo "FAIL (expected allow): empty .bionic/docs/plans/"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "empty .bionic/docs/plans/ → allow, silently" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 echo "-- c2: MISPLACEMENT blocks, naming the correct path --"
@@ -3478,17 +3408,13 @@ mkdir -p "$s24_p2/docs/bionic/plans/epic-01-demo"
 # other. hooks/engage.sh makes the tmp directory in exactly this shape of project.
 engage "$s24_p2"
 s24_marked_plan > "$s24_p2/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h2" "$s24_p2" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] \
-   && echo "$HOOK_STDERR" | grep -q "misplaced" \
-   && echo "$HOOK_STDERR" | grep -qF "$s24_p2/.bionic/docs/plans/"; then
-  echo "PASS: misplaced plan → block, naming the correct path"
-  PASS=$((PASS + 1))
+   && grep -q "misplaced" <<<"$HOOK_STDERR" \
+   && grep -qF "$s24_p2/.bionic/docs/plans/" <<<"$HOOK_STDERR"; then
+  ok "misplaced plan → block, naming the correct path"
 else
-  echo "FAIL (expected block naming $s24_p2/.bionic/docs/plans/): misplaced plan"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "misplaced plan → block, naming the correct path" "expected block naming $s24_p2/.bionic/docs/plans/; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # The identical plan in the right place is found and gated normally — proof the
@@ -3505,15 +3431,11 @@ s24_h4=$(make_home)
 s24_p4=$(mktemp -d); cleanup_dirs+=("$s24_p4")
 mkdir -p "$s24_p4/notes"
 printf '# Some plan\n\nnot a canonical-sdlc artifact\n' > "$s24_p4/notes/roadmap.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h4" "$s24_p4" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: unmarked *.plan.md → allow, silently"
-  PASS=$((PASS + 1))
+  ok "unmarked *.plan.md → allow, silently"
 else
-  echo "FAIL (expected allow): unmarked *.plan.md"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "unmarked *.plan.md → allow, silently" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # A FENCED example of the frontmatter is documentation. Only the leading block
@@ -3524,15 +3446,11 @@ s24_p5=$(mktemp -d); cleanup_dirs+=("$s24_p5")
 mkdir -p "$s24_p5/docs"
 { printf '# How to write a plan\n\n```\n---\ncanonical_sdlc_version: 14\n---\n```\n'; } \
   > "$s24_p5/docs/example.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h5" "$s24_p5" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: fenced frontmatter example → allow, silently"
-  PASS=$((PASS + 1))
+  ok "fenced frontmatter example → allow, silently"
 else
-  echo "FAIL (expected allow): fenced frontmatter example"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "fenced frontmatter example → allow, silently" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 echo "-- c4: elsewhere under the docs root is PLACED, not misplaced --"
@@ -3543,15 +3461,11 @@ s24_h6=$(make_home)
 s24_p6=$(make_project)
 mkdir -p "$s24_p6/.bionic/docs/spikes"
 s24_marked_plan > "$s24_p6/.bionic/docs/spikes/spike-x.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h6" "$s24_p6" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: marked plan under <docs-root>/spikes/ → placed, allow"
-  PASS=$((PASS + 1))
+  ok "marked plan under <docs-root>/spikes/ → placed, allow"
 else
-  echo "FAIL (expected allow): marked plan under <docs-root>/spikes/"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "marked plan under <docs-root>/spikes/ → placed, allow" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 echo "-- c5: the named path follows docs-root: in config.yaml --"
@@ -3561,15 +3475,11 @@ mkdir -p "$s24_p7/.bionic" "$s24_p7/.bionic/docs/plans/epic-01-demo"
 printf 'docs-root: custom/docs\n' > "$s24_p7/.bionic/config.yaml"
 engage "$s24_p7"
 s24_marked_plan > "$s24_p7/.bionic/docs/plans/epic-01-demo/wave-01-x.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h7" "$s24_p7" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -qF "$s24_p7/custom/docs/plans/"; then
-  echo "PASS: block names the CONFIGURED docs root, not a hardcoded .bionic/"
-  PASS=$((PASS + 1))
+if [ "$HOOK_EXIT" -eq 2 ] && grep -qF "$s24_p7/custom/docs/plans/" <<<"$HOOK_STDERR"; then
+  ok "block names the CONFIGURED docs root, not a hardcoded .bionic/"
 else
-  echo "FAIL (expected block naming $s24_p7/custom/docs/plans/): configured docs-root"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "block names the CONFIGURED docs root, not a hardcoded .bionic/" "expected block naming $s24_p7/custom/docs/plans/; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 echo "-- c6: a non-commit command is never touched by any of this --"
@@ -3599,17 +3509,13 @@ s24_p9=$(mktemp -d); cleanup_dirs+=("$s24_p9")
 mkdir -p "$s24_p9/docs/bionic/plans/epic-01-demo"
 engage "$s24_p9"
 s24_marked_plan > "$s24_p9/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h9" "$s24_p9" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] \
-   && echo "$HOOK_STDERR" | grep -q "misplaced" \
-   && echo "$HOOK_STDERR" | grep -qF "$s24_p9/.bionic/docs/plans/"; then
-  echo "PASS: misplaced plan blocks even with a non-empty ~/.claude/plans"
-  PASS=$((PASS + 1))
+   && grep -q "misplaced" <<<"$HOOK_STDERR" \
+   && grep -qF "$s24_p9/.bionic/docs/plans/" <<<"$HOOK_STDERR"; then
+  ok "misplaced plan blocks even with a non-empty ~/.claude/plans"
 else
-  echo "FAIL (expected block): misplaced plan with a non-empty ~/.claude/plans"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "misplaced plan blocks even with a non-empty ~/.claude/plans" "expected block; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # The guard must not widen the BLOCK. A project whose plan is correctly placed
@@ -3620,15 +3526,11 @@ printf '# just a note\n' > "$s24_h10/.claude/plans/stray.md"
 s24_p10=$(make_project)
 s24_marked_plan > "$s24_p10/.bionic/docs/plans/wave-01-x.plan.md"
 touch "$s24_p10/.bionic/docs/plans/wave-01-x.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h10" "$s24_p10" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: correctly-placed project plan + non-empty ~/.claude/plans → no false block"
-  PASS=$((PASS + 1))
+  ok "correctly-placed project plan + non-empty ~/.claude/plans → no false block"
 else
-  echo "FAIL (expected allow): correctly-placed project plan + non-empty ~/.claude/plans"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "correctly-placed project plan + non-empty ~/.claude/plans → no false block" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # ABSENCE still never blocks, even though the sweep now runs in this state.
@@ -3637,15 +3539,11 @@ printf '# just a note\n' > "$s24_h11/.claude/plans/stray.md"
 s24_p11=$(mktemp -d); cleanup_dirs+=("$s24_p11")
 mkdir -p "$s24_p11/src"
 printf 'echo hi\n' > "$s24_p11/src/main.sh"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s24_h11" "$s24_p11" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: no project plan, nothing misplaced, non-empty ~/.claude/plans → allow"
-  PASS=$((PASS + 1))
+  ok "no project plan, nothing misplaced, non-empty ~/.claude/plans → allow"
 else
-  echo "FAIL (expected allow): absence with a non-empty ~/.claude/plans"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "no project plan, nothing misplaced, non-empty ~/.claude/plans → allow" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # ============================================================
@@ -3668,8 +3566,7 @@ fi
 # the behaviour under test is git's own --git-common-dir handling.
 # [WALL: hooks/canonical-sdlc-evidence-gate.sh]
 
-echo ""
-echo "=== Section 25: one root per repo across both hooks (worktrees) ==="
+section "Section 25: one root per repo across both hooks (worktrees)"
 
 s25_plan() {  # a canonical plan whose current step evidence is a placeholder
   printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
@@ -3690,30 +3587,22 @@ s25_plan > "$s25_main/.bionic/docs/plans/wave-01-x.plan.md"
 
 echo "-- 25a: a commit FROM the worktree is gated against the main repo's plan --"
 s25_h1=$(make_home)
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s25_h1" "$s25_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] \
-   && echo "$HOOK_STDERR" | grep -q "placeholder" \
-   && echo "$HOOK_STDERR" | grep -qF "$s25_main/.bionic/docs/plans/wave-01-x.plan.md"; then
-  echo "PASS: 25a commit from a linked worktree is gated by the main repo's plan"
-  PASS=$((PASS + 1))
+   && grep -q "placeholder" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25_main/.bionic/docs/plans/wave-01-x.plan.md" <<<"$HOOK_STDERR"; then
+  ok "25a commit from a linked worktree is gated by the main repo's plan"
 else
-  echo "FAIL (expected block naming the main repo's plan): 25a worktree commit"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "25a commit from a linked worktree is gated by the main repo's plan" "expected block naming the main repo's plan; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 echo "-- 25b: control — the identical commit from the MAIN repo --"
 s25_h2=$(make_home)
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s25_h2" "$s25_main" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -q "placeholder"; then
-  echo "PASS: 25b commit from the main repo blocks identically"
-  PASS=$((PASS + 1))
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "placeholder" <<<"$HOOK_STDERR"; then
+  ok "25b commit from the main repo blocks identically"
 else
-  echo "FAIL (expected block): 25b main-repo commit"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "25b commit from the main repo blocks identically" "expected block; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 echo "-- 25c: the misplacement sweep also walks the MAIN repo, not the worktree --"
@@ -3735,18 +3624,14 @@ s25_marked_plan_body() {
 }
 s25_marked_plan_body > "$s25_main2/notes/rogue.plan.md"
 s25_h3=$(make_home)
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s25_h3" "$s25_wt2" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] \
-   && echo "$HOOK_STDERR" | grep -q "misplaced" \
-   && echo "$HOOK_STDERR" | grep -qF "$s25_main2/notes/rogue.plan.md" \
-   && echo "$HOOK_STDERR" | grep -qF "$s25_main2/.bionic/docs/plans/"; then
-  echo "PASS: 25c sweep from a worktree finds the main repo's misplaced plan"
-  PASS=$((PASS + 1))
+   && grep -q "misplaced" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25_main2/notes/rogue.plan.md" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25_main2/.bionic/docs/plans/" <<<"$HOOK_STDERR"; then
+  ok "25c sweep from a worktree finds the main repo's misplaced plan"
 else
-  echo "FAIL (expected block naming the main repo's paths): 25c worktree sweep"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "25c sweep from a worktree finds the main repo's misplaced plan" "expected block naming the main repo's paths; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 echo "-- 25e: ONE file, BOTH hooks, one worktree — the two must agree --"
@@ -3810,42 +3695,30 @@ current: 5
 Step 5: TODO
 '
 s25_run_write "$s25_wt/.bionic/docs/plans/epic-01-demo/both.plan.md" "$s25_artifact"
-TOTAL=$((TOTAL + 1))
-if [ "$S25_GOV_EXIT" -eq 2 ] && echo "$S25_GOV_STDERR" | grep -qF "$s25_main/.bionic/docs"; then
-  echo "PASS: 25e1 governing hook refuses the worktree-local placement, names the main repo"
-  PASS=$((PASS + 1))
+if [ "$S25_GOV_EXIT" -eq 2 ] && grep -qF "$s25_main/.bionic/docs" <<<"$S25_GOV_STDERR"; then
+  ok "25e1 governing hook refuses the worktree-local placement, names the main repo"
 else
-  echo "FAIL: 25e1 governing hook on a worktree-local artifact"
-  echo "  exit=$S25_GOV_EXIT stderr='$S25_GOV_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "25e1 governing hook refuses the worktree-local placement, names the main repo" "exit=$S25_GOV_EXIT stderr='$S25_GOV_STDERR'"
 fi
 
 mkdir -p "$s25_main/.bionic/docs/plans/epic-01-demo"
 s25_run_write "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md" "$s25_artifact"
-TOTAL=$((TOTAL + 1))
 if [ "$S25_GOV_EXIT" -eq 0 ]; then
-  echo "PASS: 25e2 governing hook accepts the placement it named"
-  PASS=$((PASS + 1))
+  ok "25e2 governing hook accepts the placement it named"
 else
-  echo "FAIL: 25e2 governing hook rejects the placement it named"
-  echo "  exit=$S25_GOV_EXIT stderr='$S25_GOV_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "25e2 governing hook accepts the placement it named" "exit=$S25_GOV_EXIT stderr='$S25_GOV_STDERR'"
 fi
 
 printf '%s' "$s25_artifact" > "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md"
 touch "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md"
 s25_h5=$(make_home)
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s25_h5" "$s25_wt" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] \
-   && echo "$HOOK_STDERR" | grep -q "placeholder" \
-   && echo "$HOOK_STDERR" | grep -qF "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md"; then
-  echo "PASS: 25e3 the gate, from the worktree, gates the SAME file the governing hook accepted"
-  PASS=$((PASS + 1))
+   && grep -q "placeholder" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25_main/.bionic/docs/plans/epic-01-demo/both.plan.md" <<<"$HOOK_STDERR"; then
+  ok "25e3 the gate, from the worktree, gates the SAME file the governing hook accepted"
 else
-  echo "FAIL: 25e3 the gate does not see the file the governing hook accepted"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "25e3 the gate, from the worktree, gates the SAME file the governing hook accepted" "exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 ac10_oldgit=$(mktemp -d); cleanup_dirs+=("$ac10_oldgit")
@@ -3866,20 +3739,16 @@ echo "-- 25f: git < 2.31 — the two hooks still agree on one root --"
 # variable changed.
 # [WALL: hooks/canonical-sdlc-evidence-gate.sh]
 s25_h6=$(make_home)
-TOTAL=$((TOTAL + 1))
 s25_saved_path="$PATH"
 PATH="$ac10_oldgit:$PATH"
 run_hook_with_project "$s25_h6" "$s25_wt" 'git commit -m "x"'
 PATH="$s25_saved_path"
 if [ "$HOOK_EXIT" -eq 2 ] \
-   && echo "$HOOK_STDERR" | grep -q "placeholder" \
-   && echo "$HOOK_STDERR" | grep -qF "$s25_main/.bionic/docs/plans/"; then
-  echo "PASS: 25f old git — worktree commit still gated by the main repo's plan"
-  PASS=$((PASS + 1))
+   && grep -q "placeholder" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25_main/.bionic/docs/plans/" <<<"$HOOK_STDERR"; then
+  ok "25f old git — worktree commit still gated by the main repo's plan"
 else
-  echo "FAIL (expected block naming the main repo): 25f old-git worktree commit"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "25f old git — worktree commit still gated by the main repo's plan" "expected block naming the main repo; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 echo "-- 25d: a non-repo project dir still resolves to itself (fallback intact) --"
@@ -3888,15 +3757,11 @@ echo "-- 25d: a non-repo project dir still resolves to itself (fallback intact) 
 s25_h4=$(make_home)
 s25_p4=$(make_project)
 s24_marked_plan > "$s25_p4/.bionic/docs/plans/wave-01-x.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$s25_h4" "$s25_p4" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: 25d non-repo project dir resolves to itself, plan still found"
-  PASS=$((PASS + 1))
+  ok "25d non-repo project dir resolves to itself, plan still found"
 else
-  echo "FAIL (expected allow): 25d non-repo project dir"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "25d non-repo project dir resolves to itself, plan still found" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # ============================================================
@@ -3920,8 +3785,7 @@ fi
 # The Step-5 block is read by its own extractor at every step, not from the
 # current step's BLOCK — at current: 6 the BLOCK holds Step-6 evidence.
 
-echo ""
-echo "=== Section 26: walk-artifact arm ==="
+section "Section 26: walk-artifact arm"
 
 # $1 = a full `walk:` frontmatter line, or empty for THE KEY IS ABSENT (the
 # fail-closed case). Otherwise the Section-17 shape: audited wave, no
@@ -4173,8 +4037,7 @@ expect_block "26o packed walk-artifact line with a bad truncated path → block"
 # one case at current: 6 confirms the arm fires there without a duplicate
 # implementation.
 
-echo ""
-echo "=== Section 27: provenance arm ==="
+section "Section 27: provenance arm"
 
 # Builds a one-row T1 matrix (discharged, auditor CONFIRMED) whose AC-1 block
 # carries tier-run + readback (satisfying T1's own evidence requirement) plus
@@ -4294,8 +4157,7 @@ write_plan "$h27k" "$(plan 4 "$prov_pointer_body" "$(prov_matrix "implementation
 # three CommonMark bullet markers (`-`, `*`, `+`) plus at least one space, flush
 # left — 28g/28h pin the two boundaries that stay invisible.
 
-echo ""
-echo "=== Section 28: matrix_block list-leader tolerance ==="
+section "Section 28: matrix_block list-leader tolerance"
 
 # T1's own evidence keys, satisfying the per-tier requirement.
 leader_t1_keys="  tier-run: bash test.sh — unit suite
@@ -4409,8 +4271,7 @@ expect_block "28h '  - AC-1:' (indented) → block (pinned boundary: strip is fl
 # `deploy_target` itself is n/a by default and is never inferred (AC-3), so
 # the trio is strictly opt-in: 29a/29e/29e2 are the ordinary run, 29c is the
 # dogfood run that operates its own surface.
-echo ""
-echo "=== Section 29: Step 9 close-out contract (v14) ==="
+section "Section 29: Step 9 close-out contract (v14)"
 
 # A plan at current: 9. $1 = deploy_target value, $2 = the Step-9 block body.
 # Reuses Section 17's matrix_complete, since current: 9 revalidates the matrix
@@ -4522,8 +4383,7 @@ $ship_trio")" > /dev/null
 # human actually said it; a fabricated `chris 2026-08-19 ...` passes the form.
 # The form buys a record that names who and when — it does not buy honesty, and
 # it is not sold as if it did.
-echo ""
-echo "=== Section 30: T4 rows discharge on user-confirmed, impostors do not ==="
+section "Section 30: T4 rows discharge on user-confirmed, impostors do not"
 
 # $1 = tier, $2 = auditor cell, $3 = the block's user-confirmed value.
 t4_matrix() {
@@ -4663,13 +4523,10 @@ DOCTORED_HOOK="$h30g_dir/hooks/loose-gate.sh"
 sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \
   "$HOOK" > "$DOCTORED_HOOK"
 
-TOTAL=$((TOTAL + 1))
 if ! diff -q "$HOOK" "$DOCTORED_HOOK" > /dev/null 2>&1; then
-  echo "PASS: 30g meta: the doctored copy differs from the real hook (mutation landed)"
-  PASS=$((PASS + 1))
+  ok "30g meta: the doctored copy differs from the real hook (mutation landed)"
 else
-  echo "FAIL: 30g meta: the form-check mutation did not apply — the sed anchor moved, so the arms below prove nothing"
-  FAIL=$((FAIL + 1))
+  no "30g meta: the doctored copy differs from the real hook (mutation landed)" "the form-check mutation did not apply — the sed anchor moved, so the arms below prove nothing"
 fi
 
 _real_hook="$HOOK"
@@ -4694,8 +4551,7 @@ expect_block "30g meta: the real hook still refuses the impostor after the mutat
 # never been made. The observed reflex is to re-run the same combined call. When
 # the refused command's text names the plan, the refusal now says so.
 
-echo ""
-echo "=== Section 31: refusal names the edit-then-commit split ==="
+section "Section 31: refusal names the edit-then-commit split"
 
 # 31a — a python3 heredoc writing the plan's absolute path, then a commit,
 # refused by the matrix arm → the refusal carries the split line.
@@ -4721,17 +4577,13 @@ expect_block "31b relative plan path in the command → names the split" \
 # 31c — a refused commit that does NOT name the plan gets the ordinary 3-line
 # refusal and no split line. Same fixture and same extractor as 31a, so this
 # pins the note's scope rather than asserting an empty world.
-TOTAL=$((TOTAL + 1))
 run_hook "$h31a" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 2 ] \
-   && echo "$HOOK_STDERR" | grep -q "AC-2" \
-   && ! echo "$HOOK_STDERR" | grep -q "also writes the plan"; then
-  echo "PASS: 31c plain commit refusal carries no split line"
-  PASS=$((PASS + 1))
+   && grep -q "AC-2" <<<"$HOOK_STDERR" \
+   && ! grep -q "also writes the plan" <<<"$HOOK_STDERR"; then
+  ok "31c plain commit refusal carries no split line"
 else
-  echo "FAIL (expected a block naming AC-2 with NO split line): 31c"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "31c plain commit refusal carries no split line" "expected a block naming AC-2 with NO split line; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # 31d — the note rides on a refusal, never on its own: a command that names the
@@ -4763,8 +4615,7 @@ expect_allow "31d naming the plan in an otherwise-clean commit → allow, silent
 # The task-ledger side (apply_rigor_lanes) was already rigor-keyed; 32f/32k pin
 # it as B-10's mirror so the two surfaces cannot drift apart.
 
-echo ""
-echo "=== Section 32: the auditor wall is rigor-keyed ==="
+section "Section 32: the auditor wall is rigor-keyed"
 
 # A wave plan at a caller-chosen frontmatter rigor. Same shape as
 # matrix_frontmatter (walk: exempt, deploy_target: none, no multi_agent — so the
@@ -4973,8 +4824,7 @@ expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fai
 # evidence cell or a `waiver:` line in the AC block — so "waived" means the
 # same thing here as it does for the per-tier keys three lines below.
 
-echo ""
-echo "=== Section 33: a waiver outranks the slice: 9 tier refusal ==="
+section "Section 33: a waiver outranks the slice: 9 tier refusal"
 
 # A T1 row (not T0, so the tag is a mis-tag) carrying `slice: 9`, WAIVED via
 # the evidence cell. AC-1 is an ordinary discharged row so the matrix is
@@ -5055,8 +4905,7 @@ expect_block "33d control: a waived row still meets the provenance arm above it"
 # whether or not a run is open (34b's control). What the guard adds is prior to both
 # questions, not a fourth clause inside either.
 
-echo ""
-echo "=== Section 34: no engagement marker — the gate is not there at all ==="
+section "Section 34: no engagement marker — the gate is not there at all"
 
 # Captures stdout as well as stderr and the exit code: "silent" here means all three.
 run_hook_full() {  # <home> <command> -> S34_EXIT / S34_OUT / S34_ERR
@@ -5075,25 +4924,15 @@ run_hook_full() {  # <home> <command> -> S34_EXIT / S34_OUT / S34_ERR
 }
 
 expect_silent() {  # <label> — asserts on the last run_hook_full
-  TOTAL=$((TOTAL + 1))
   if [ "$S34_EXIT" -eq 0 ] && [ -z "$S34_OUT" ] && [ -z "$S34_ERR" ]; then
-    echo "PASS: $1"; PASS=$((PASS + 1))
+    ok "$1"
   else
-    echo "FAIL (expected exit 0 and total silence): $1"
-    echo "  exit=$S34_EXIT stdout='$S34_OUT' stderr='$S34_ERR'"
-    FAIL=$((FAIL + 1))
+    no "$1" "expected exit 0 and total silence; got exit=$S34_EXIT stdout='$S34_OUT' stderr='$S34_ERR'"
   fi
 }
 
 expect_refused() {  # <label> — the control: the SAME fixture, marker restored
-  TOTAL=$((TOTAL + 1))
-  if [ "$S34_EXIT" -eq 2 ]; then
-    echo "PASS: $1"; PASS=$((PASS + 1))
-  else
-    echo "FAIL (expected exit 2): $1"
-    echo "  exit=$S34_EXIT stderr='$S34_ERR'"
-    FAIL=$((FAIL + 1))
-  fi
+  expect_eq "$1" 2 "$S34_EXIT"
 }
 
 # --- 34a: an open run whose current step has no evidence — the gate's core refusal ---
@@ -5126,26 +4965,18 @@ h34c=$(make_home)
 p34c=$(mktemp -d); cleanup_dirs+=("$p34c")
 mkdir -p "$p34c/docs/bionic/plans/epic-01-demo"
 s24_marked_plan > "$p34c/docs/bionic/plans/epic-01-demo/wave-01-x.plan.md"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$h34c" "$p34c" 'git commit -m "x"'
 if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  echo "PASS: 34c the misplacement sweep does not fire in an unengaged session"
-  PASS=$((PASS + 1))
+  ok "34c the misplacement sweep does not fire in an unengaged session"
 else
-  echo "FAIL (expected allow): 34c misplacement sweep in an unengaged session"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "34c the misplacement sweep does not fire in an unengaged session" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 engage "$p34c"
-TOTAL=$((TOTAL + 1))
 run_hook_with_project "$h34c" "$p34c" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && echo "$HOOK_STDERR" | grep -q "misplaced"; then
-  echo "PASS: 34c control: the same tree, marker planted, is REFUSED as misplaced"
-  PASS=$((PASS + 1))
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "misplaced" <<<"$HOOK_STDERR"; then
+  ok "34c control: the same tree, marker planted, is REFUSED as misplaced"
 else
-  echo "FAIL (expected block): 34c control with the marker planted"
-  echo "  exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
-  FAIL=$((FAIL + 1))
+  no "34c control: the same tree, marker planted, is REFUSED as misplaced" "expected block; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
 # --- 34d: the shapes that are NOT engagement, on a fixture that otherwise refuses ---
@@ -5192,8 +5023,7 @@ rmdir "$h34d/.bionic/tmp/engaged-$EG_SID.state"
 # rule agrees there. 35b swaps which plan carries the evidence, so the bound session
 # blocks on the OLDER plan while the newest one is clean, which the old rule cannot do.
 
-echo ""
-echo "=== Section 35: two sessions, two plans, one root ==="
+section "Section 35: two sessions, two plans, one root"
 
 S35_SID_A="a1111111-2222-3333-4444-555555555555"
 S35_SID_B="b6666666-7777-8888-9999-000000000000"
@@ -5270,7 +5100,6 @@ s35_run() {  # <root> <sid> <command> -> S35_EXIT / S35_ERR
 # <label> <expected exit> <substring stderr MUST carry, or -> <substring it must NOT, or ->
 s35_assert() {
   local label="$1" want="$2" yes="$3" nope="$4" why=""
-  TOTAL=$((TOTAL + 1))
   [ "$S35_EXIT" = "$want" ] || why="exit=$S35_EXIT want=$want"
   if [ -z "$why" ] && [ "$yes" != "-" ] && ! grep -qF -- "$yes" <<< "$S35_ERR"; then
     why="stderr is missing '$yes'"
@@ -5279,12 +5108,9 @@ s35_assert() {
     why="stderr carries '$nope' and must not"
   fi
   if [ -z "$why" ]; then
-    echo "PASS: $label"; PASS=$((PASS + 1))
+    ok "$label"
   else
-    echo "FAIL: $label"
-    echo "  $why"
-    echo "  stderr='$S35_ERR'"
-    FAIL=$((FAIL + 1))
+    no "$label" "$why stderr='$S35_ERR'"
   fi
 }
 
@@ -5473,8 +5299,7 @@ s35_assert "35g3 bound to a LIVE plan over the same tree is gated on it, not on 
 # `environments-covered:` line naming every non-fog environment; a fog entry
 # with no cure blocks regardless of the covered line's content.
 
-echo ""
-echo "=== Section 36: environments arm ==="
+section "Section 36: environments arm"
 
 # $1 = optional `environments:` frontmatter line (empty = key absent, the
 # no-op case). walk: exempt keeps that unrelated arm out of the way so each
@@ -5594,12 +5419,4 @@ expect_audit_line "36h2 …and the no-op is still recorded on the audit-file cha
 # Summary
 # ============================================================
 
-echo ""
-echo "============================================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "============================================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
-exit 0
+finish
