@@ -581,6 +581,24 @@ expect_eq "10: the pipeline spelling is right on a small value" "0" "$PIPE_SMALL
 expect_ne "10: …and wrong on a large one, non-zero though the pattern matches" \
   "0" "$PIPE_BIG"
 
+# --- AND NOWHERE ELSE IN THE FILE (review-a A-6) ----------------------------
+# The ban is stated twice in the framework's own docblocks and was broken in the
+# framework's own load path — `echo "$defs" | grep -qx` inside the AC-14
+# derivation, on the path every suite crosses. A census, so a new one added
+# tomorrow fails here rather than the day a producer outgrows the pipe buffer.
+# The pattern is built at runtime so this row does not match itself.
+# Comment lines are excluded because the ban is STATED in three of them; the
+# census is about code. `grep -c` is not `grep -q`, so it reads to EOF and takes
+# no SIGPIPE of its own.
+F10_BANNED="$(printf '| %s -q' grep)"
+F10_CODE="$(grep -v '^[[:space:]]*#' "$FRAMEWORK")"
+expect_eq "10: no producer-into-grep -q in the framework's code" "0" \
+  "$(printf '%s\n' "$F10_CODE" | grep -c -- "$F10_BANNED" | tr -d ' ')"
+expect_eq "10: …and the ban is still stated in its docblocks" "3" \
+  "$(grep -c -- "$F10_BANNED" "$FRAMEWORK" | tr -d ' ')"
+expect_eq "10: …and the census can see one in code when there is one (not vacuous)" "1" \
+  "$(printf 'echo "$x" %s -- "$y"\n' "$F10_BANNED" | grep -v '^[[:space:]]*#' | grep -c -- "$F10_BANNED" | tr -d ' ')"
+
 # ============================================================
 section "11: anchor — the precondition of a mutation (AC-29, AC-31, S19)"
 # ============================================================
