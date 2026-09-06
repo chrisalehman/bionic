@@ -781,7 +781,26 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
       # the main branch has moved on since the tree was spawned — a stored base sha would not.
       LG_MAIN_BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)
       LG_BASE=""
+      # A DETACHED MAIN CHECKOUT IS NOT A BRANCH NAME (review-a A-5). `rev-parse
+      # --abbrev-ref HEAD` prints the literal string `HEAD` there, and `HEAD` resolves
+      # INSIDE the worktree to the worktree's own tip — so the merge-base comes back
+      # non-empty, the diff comes back EMPTY, and every landing reconciles clean with no
+      # refusal and no diagnostic. `git bisect`, `git checkout <tag>` and a checkout parked
+      # on a sha are all ordinary states for this repository during an integration.
+      case "$LG_MAIN_BRANCH" in HEAD) LG_MAIN_BRANCH="" ;; esac
       [ -n "$LG_MAIN_BRANCH" ] && LG_BASE=$(git -C "$LG_WT" merge-base "$LG_MAIN_BRANCH" HEAD 2>/dev/null)
+      if [ -z "$LG_BASE" ]; then
+        # ANNOUNCED INERT, the standard tests/run.sh:267-272 sets for the adoption wall:
+        # "a wall that is off and quiet is indistinguishable from a wall that is passing
+        # everything". Unrelated histories, a worktree with no commits and any other
+        # merge-base failure land here too, and each says so rather than passing silently.
+        if [ -z "$LG_MAIN_BRANCH" ]; then
+          LG_WHY="the main checkout is on no branch (detached HEAD), so there is no branch to take a merge-base from"
+        else
+          LG_WHY="no merge-base between ${LG_MAIN_BRANCH} and this tree"
+        fi
+        echo "landing-gate: ${LG_WHY} — the Files: reconciliation is INERT for row ${NAME}; its diff was NOT checked against '${CFILES}'" >&2
+      fi
       if [ -n "$LG_BASE" ]; then
         LG_OUTSIDE=""
         while IFS= read -r LG_DF; do
