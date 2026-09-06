@@ -44,6 +44,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -62,19 +63,6 @@ WIDTH_SH="${PAYLOAD}/scripts/lib/width.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "command-relay.test.sh: jq is required"; exit 1; }
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_contains() {
-  local label="$1" needle="$2" hay="$3"
-  case "$hay" in *"$needle"*) ok "$label" ;; *) no "$label" "'$needle' not found in: $(printf '%.200s' "$hay")" ;; esac
-}
-expect_not_contains() {
-  local label="$1" needle="$2" hay="$3"
-  case "$hay" in *"$needle"*) no "$label" "'$needle' should not be in: $(printf '%.200s' "$hay")" ;; *) ok "$label" ;; esac
-}
 # All-lines-fit is the AC-15 assertion, restated for setup.sh's own output: no
 # line printed may exceed the column budget.
 #
@@ -93,7 +81,6 @@ expect_all_lines_fit() {  # <label> <max-width> <text>
   done <<< "$text"
   if [ "$longest" -le "$max" ]; then ok "$label"; else no "$label" "longest line is ${longest} columns (budget ${max})"; fi
 }
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 
 # AN EXPLICIT /tmp TEMPLATE, short side only. macOS's `mktemp -d` ignores
 # TMPDIR and always roots under /var/folders/.../T — itself 50-60 columns
@@ -110,7 +97,7 @@ TMP="$(mktemp -d "/tmp/cr.XXXXXX")"; trap 'rm -rf "$TMP"' EXIT
 
 VOICE_TEXT="$(cat "$VOICE_BLOCK")"
 expect_contains  "A1: voice-contract.md demands a fenced code block"       "fenced code block" "$VOICE_TEXT"
-expect_not_contains "A2: voice-contract.md no longer says the bare 'in one block'" ", in one block," "$VOICE_TEXT"
+expect_absent "A2: voice-contract.md no longer says the bare 'in one block'" ", in one block," "$VOICE_TEXT"
 
 SETUP_MD_TEXT="$(cat "$SETUP_MD")"
 DOCTOR_MD_TEXT="$(cat "$DOCTOR_MD")"
@@ -196,14 +183,14 @@ write_env_fixture "$SHORT_SETTINGS"
 SHORT_OUT="$(run_setup BIONIC_SETTINGS_FILE="$SHORT_SETTINGS" -- --only environment)"
 expect_all_lines_fit "B1: --only environment, short path — every line fits 100 columns" "$BIONIC_LINE_WIDTH" "$SHORT_OUT"
 expect_contains      "B2: --only environment, short path — full path shown, untouched" "$SHORT_SETTINGS" "$SHORT_OUT"
-expect_not_contains  "B3: --only environment, short path — nothing needed eliding" "…" "$SHORT_OUT"
+expect_absent  "B3: --only environment, short path — nothing needed eliding" "…" "$SHORT_OUT"
 
 LONG_SETTINGS="$TMP/${LONGSEG}/${LONGSEG}/${LONGSEG}/settings.json"
 write_env_fixture "$LONG_SETTINGS"
 LONG_OUT="$(run_setup BIONIC_SETTINGS_FILE="$LONG_SETTINGS" -- --only environment)"
 expect_all_lines_fit "B4: --only environment, long path — every line still fits 100 columns" "$BIONIC_LINE_WIDTH" "$LONG_OUT"
 expect_contains      "B5: --only environment, long path — the field was elided" "…" "$LONG_OUT"
-expect_not_contains  "B6: --only environment, long path — the untruncated path is gone" "$LONG_SETTINGS" "$LONG_OUT"
+expect_absent  "B6: --only environment, long path — the untruncated path is gone" "$LONG_SETTINGS" "$LONG_OUT"
 
 # ── B7/B8: item()'s third field — the "claude-proxy" idempotence guard ──────
 write_rc_fixture() {  # <rc-file>
@@ -226,7 +213,7 @@ write_rc_fixture "$LONG_RC"
 LONG_RC_OUT="$(run_setup BIONIC_SHELL_RC="$LONG_RC" -- --only claude-proxy)"
 expect_all_lines_fit "B9: --only claude-proxy, long rc path — every line still fits 100 columns" "$BIONIC_LINE_WIDTH" "$LONG_RC_OUT"
 expect_contains      "B10: --only claude-proxy, long rc path — the field was elided" "…" "$LONG_RC_OUT"
-expect_not_contains  "B11: --only claude-proxy, long rc path — the untruncated path is gone" "$LONG_RC" "$LONG_RC_OUT"
+expect_absent  "B11: --only claude-proxy, long rc path — the untruncated path is gone" "$LONG_RC" "$LONG_RC_OUT"
 
 # ── B12: the --all plan's verb lines carry the same bound ───────────────────
 # Neither settings.json nor the rc exist yet, so both items are genuinely
@@ -305,11 +292,9 @@ else
 
   # The cut is a cut, not a pass-through: the untruncated path is gone and the
   # budget still holds under a locale where a glyph is one column, not three.
-  expect_not_contains "C3: the untruncated accented path is gone" "$UTF8_DIR" "$UTF8_OUT"
+  expect_absent "C3: the untruncated accented path is gone" "$UTF8_DIR" "$UTF8_OUT"
   expect_all_lines_fit "C4: and every line still fits the budget under UTF-8" \
     "$BIONIC_LINE_WIDTH" "$UTF8_OUT"
 fi
 
-echo ""
-echo "command-relay.test.sh: ${PASS}/${TOTAL} passed"
-[ "$FAIL" -eq 0 ]
+finish
