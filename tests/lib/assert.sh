@@ -415,7 +415,7 @@ finish() {
     while IFS= read -r name; do
       [ -n "$name" ] || continue
       TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1))
-      echo "FAIL: section asserted nothing: $name"
+      echo "FAIL: section asserted nothing: $name — a section that legitimately makes no assertion is declared with \`setup_section\`"
     done <<TF_EMPTY_SECTIONS
 $_TF_EMPTY
 TF_EMPTY_SECTIONS
