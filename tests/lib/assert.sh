@@ -172,6 +172,13 @@
 # MATCHING USES THE SUITE'S OWN `grep`, the same binary the doctoring line uses,
 # so the anchor and the mutation cannot disagree about what the pattern means.
 #
+# THE ANCHOR MUST MATCH AT LEAST AS STRICTLY AS THE MUTATION (A-35a, S19c). A
+# fixed-string anchor is a SUBSTRING test, so it still matches a line that has
+# drifted by one leading space — while a whole-line-anchored `sed 's/^exact$/…/'`
+# or `grep -vx` no-ops on that same line. Anchor a whole-line mutation with `-E`
+# and the mutation's own `^…$`, or the precondition is weaker than the thing it
+# is the precondition for and the green it gives is worth nothing.
+#
 # ── ASSERTION DISCIPLINE ─────────────────────────────────────────────────────
 #
 # PAIRED POSITIVE. A negative assertion — "this string is absent", "this set is
