@@ -107,7 +107,7 @@ CWD=$(_jq '.cwd')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-BIONIC_LIB_WANT="root.sh run.sh session.sh patrol.sh agents.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh patrol.sh agents.sh roster.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -246,6 +246,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 . "$BIONIC_LIB/patrol.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/agents.sh"
+# The `roster-state/v1` row has one writer, and it is `roster_row` here, not the format
+# string this hook used to carry (spec AC-25, design ledger D3).
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roster.sh"
 
 # THE ROOT (spec AC-10). Every path this gate owns hangs off the answer: the
 # attestation it reads, the roster it appends, the containment wall it measures
@@ -649,7 +653,12 @@ fi
 # plan still gets `plan=<that plan>` here, so `adopt`'s partition (S6) can tell
 # "this session's own run" from "no binding at all" without re-deriving either.
 
-ROSTER_VERSION="v1"
+# ONE OWNER OF THE VERSION, and it is the library that writes the row it labels
+# (`ROSTER_SCHEMA_VERSION`, payload/scripts/lib/roster.sh). Kept under this name because
+# the READER below (`status=intended` rows, :830) and the file header both spell it this
+# way, and a version the writer and the reader could disagree about is the whole reason
+# the constant is not written twice.
+ROSTER_VERSION="$ROSTER_SCHEMA_VERSION"
 ROSTER_PREFIX="roster-"
 ROSTER_SUFFIX=".state"
 # STATE_DIR is set above, at the arming wall — the first thing on this path to need it.
@@ -1819,17 +1828,48 @@ fi
 ROSTER_PLAN=$(sanitize "$(session_plan "$REPO" "$PAYLOAD_SID")" 400)
 [ -n "$ROSTER_PLAN" ] || ROSTER_PLAN="none"
 
-ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|source=${C_SOURCE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}|plan=${ROSTER_PLAN}"
+# EVERY FIELD NAMED, AND THE ROW ITSELF BUILT ELSEWHERE (spec AC-25). What this hook owns
+# is the VALUES — where each comes from, and the per-field cap `sanitize` applies to it.
+# What the row IS — which fields, in what order, with what separator — belongs to
+# `roster_row` (payload/scripts/lib/roster.sh), which `hooks/session-poker.sh`'s `adopt`
+# also calls, so the two writers can no longer drift apart. The empty `agent_id=` is
+# passed explicitly rather than omitted: a launch-time row has no id yet, and saying so is
+# the field's content, not its absence.
+ROW=$(roster_row \
+  status=intended \
+  "session=${PAYLOAD_SID}" \
+  "name=${AGENT_NAME}" \
+  agent_id= \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "subagent_type=${SUBAGENT_TYPE}" \
+  "model=${AGENT_MODEL}" \
+  "deliverable=${C_DELIVERABLE}" \
+  "source=${C_SOURCE}" \
+  "duration=${C_DURATION}" \
+  "progress=${C_PROGRESS}" \
+  "claims=${C_CLAIMS}" \
+  "cadence=${C_CADENCE}" \
+  "absent=${ABSENT}" \
+  "waiver=${C_WAIVER}" \
+  "tool_use_id=${TOOL_USE_ID}" \
+  "plan=${ROSTER_PLAN}") || ROW=""
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then
   # A concurrent dispatch in the same session can lose this race and write the
   # header twice; both are comment lines and every reader skips them. The ROWS
   # are what must not interleave, and each is a single short append.
-  printf '# bionic session roster — schema roster-state/%s — machine-local, safe to delete\n' \
-    "$ROSTER_VERSION" >> "$ROSTER_FILE" 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
+  roster_header >> "$ROSTER_FILE" 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
 fi
-printf '%s\n' "$ROW" >> "$ROSTER_FILE" 2>/dev/null || WROTE=0
+# A ROW THAT DID NOT BUILD IS NOT APPENDED. `roster_row` refuses a field name no reader
+# knows rather than writing it, and an empty `$ROW` here would put a blank line on the
+# roster and call it journalled. The existing WROTE=0 path already says the launch could
+# not be journalled, which is the true thing to say in both cases.
+if [ -n "$ROW" ]; then
+  printf '%s\n' "$ROW" >> "$ROSTER_FILE" 2>/dev/null || WROTE=0
+else
+  WROTE=0
+fi
 
 # No lock, unlike the observation record: that one is a read-modify-write of the
 # whole file, this one is a single O_APPEND write of well under a pipe buffer,
