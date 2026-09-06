@@ -35,20 +35,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-PASS=0
-FAIL=0
-TOTAL=0
-
-# ---------- assertions ----------
-
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-
-expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
-expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
-
 # HELPER-PRESENCE GUARD (spec AC-25). This file runs under `set -uo pipefail` — NO
 # `-e` — so a call to an assertion helper that was never defined here is a silent
 # "command not found" on stderr: the row asserts nothing and the suite's own
@@ -409,9 +395,7 @@ write_legacy_attestation() {
   chmod 600 "$repo/.bionic/tmp/preflight.state"
 }
 
-# ============================================================
-echo "=== S1 — relevance hoist (A7): irrelevant tool passes, silent ==="
-# ============================================================
+section "S1 — relevance hoist (A7): irrelevant tool passes, silent"
 
 
 REPO=$(make_repo r1 yes)
@@ -436,9 +420,7 @@ else
   no "relevance check precedes the plan-directory walk" "tool=$TOOL_LINE walk=$WALK_LINE"
 fi
 
-# ============================================================
-echo "=== S2 — ambiguity: repo unresolvable -> OPEN, silent ==="
-# ============================================================
+section "S2 — ambiguity: repo unresolvable -> OPEN, silent"
 
 run_gate "$(mk_agent_payload "$SID_A" "")"
 expect_status "empty cwd exits 0" "0" "$GATE_ST"
@@ -474,9 +456,7 @@ expect_status "A2 non-git cwd WITH a .bionic root above it reaches the wall (exi
 expect_contains "A2 …refusing at the arming wall, which is what the old precondition hid" \
   "Patrol" "$GATE_ERR"
 
-# ============================================================
-echo "=== S3 — no active wave -> inert, nothing to decide ==="
-# ============================================================
+section "S3 — no active wave -> inert, nothing to decide"
 
 REPO_NOWAVE=$(make_repo r3a no)
 run_gate "$(mk_agent_payload "$SID_A" "$REPO_NOWAVE")"
@@ -509,9 +489,7 @@ expect_empty "no SDLC State produces no stderr" "$GATE_ERR"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO_NOWAVE")"
 expect_status "Agent dispatch with no wave and no attestation still exits 0" "0" "$GATE_ST"
 
-# ============================================================
-echo "=== S4 — active wave + payload missing session_id -> OPEN, silent (§7 table) ==="
-# ============================================================
+section "S4 — active wave + payload missing session_id -> OPEN, silent (§7 table)"
 
 REPO=$(make_repo r4 yes)
 run_gate "$(mk_agent_payload "" "$REPO")"
@@ -519,9 +497,7 @@ expect_status "missing session_id in an active wave exits 0" "0" "$GATE_ST"
 expect_empty "missing session_id produces no stdout" "$GATE_OUT"
 expect_empty "missing session_id produces no stderr" "$GATE_ERR"
 
-# ============================================================
-echo "=== S5 — active wave + no attestation on disk -> AUTO-PROBE, then pass (AC-2 / AC-4) ==="
-# ============================================================
+section "S5 — active wave + no attestation on disk -> AUTO-PROBE, then pass (AC-2 / AC-4)"
 #
 # THE DIRECTION REVERSED IN EPIC-16 WAVE-02 (R5). Through wave-01 this refused and named
 # a command for the operator to run by hand — and the Synthesis field report measured
@@ -557,9 +533,7 @@ case "$GATE_ERR" in
   *) ok "refusal never names itself as the fix" ;;
 esac
 
-# ============================================================
-echo "=== S6 — active wave + only a FOREIGN session's attestation exists -> AUTO-PROBE (AC-2) ==="
-# ============================================================
+section "S6 — active wave + only a FOREIGN session's attestation exists -> AUTO-PROBE (AC-2)"
 #
 # slice 4/2 (D-5): the foreign attestation is written at ITS OWN per-session filename
 # (preflight-<SID_B>.state) — there is no file at all for SID_A, which is exactly what
@@ -577,9 +551,7 @@ expect_status "…and this session gets a record of its OWN, at its own filename
 expect_status "…while the LIVE foreign session's record is untouched (D-5)" "0" \
   "$([ -f "$REPO/.bionic/tmp/preflight-$SID_B.state" ] && echo 0 || echo 1)"
 
-# ============================================================
-echo "=== S6b — active wave + BOTH sessions hold valid attestations concurrently (AC-2) ==="
-# ============================================================
+section "S6b — active wave + BOTH sessions hold valid attestations concurrently (AC-2)"
 #
 # The D-5 core case: two sessions on one repo, each with its own per-session file. Both
 # dispatches pass — session B's attestation existing is neither necessary nor sufficient
@@ -595,9 +567,7 @@ run_gate "$(mk_agent_payload "$SID_B" "$REPO")"
 expect_status "session B's dispatch ALSO passes with both attestations present" "0" "$GATE_ST"
 expect_empty "session B's pass produces no stdout" "$GATE_OUT"
 
-# ============================================================
-echo "=== S6c — the legacy single-slot file is NEVER consulted (slice 4/2) ==="
-# ============================================================
+section "S6c — the legacy single-slot file is NEVER consulted (slice 4/2)"
 #
 # A legacy preflight.state carrying this session's own, perfectly valid-looking
 # session_id= must still refuse: only the per-session filename is ever read.
@@ -613,9 +583,7 @@ expect_status "…and the record that admits the dispatch is at the PER-SESSION 
 expect_status "…the legacy slot is gone, not merely ignored" "0" \
   "$([ -f "$REPO/.bionic/tmp/preflight.state" ] && echo 1 || echo 0)"
 
-# ============================================================
-echo "=== S7 — active wave + attestation IS this session -> pass, verdict silent (AC-2) ==="
-# ============================================================
+section "S7 — active wave + attestation IS this session -> pass, verdict silent (AC-2)"
 #
 # "Silent" here is about the VERDICT (no BLOCKED refusal, nothing on stdout ever) — not
 # absolute stderr silence, which S10c's absence warning already established is not the
@@ -643,9 +611,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "reordered/extended attestation with a matching key still passes" "0" "$GATE_ST"
 expect_empty "reordered/extended pass produces no stdout" "$GATE_OUT"
 
-# ============================================================
-echo "=== S8 — hostile/malformed attestation shapes -> REFUSE, never followed (AC-8-adjacent) ==="
-# ============================================================
+section "S8 — hostile/malformed attestation shapes -> REFUSE, never followed (AC-8-adjacent)"
 
 # attestation path occupied by a directory
 REPO=$(make_repo r8a yes)
@@ -718,9 +684,7 @@ expect_status "attestation with no session_id= line -> re-taken, not refused" "0
 expect_status "…and the unreadable record is replaced by a keyed one" "0" \
   "$(grep -qx "session_id=$SID_A" "$REPO/.bionic/tmp/preflight-$SID_A.state" && echo 0 || echo 1)"
 
-# ============================================================
-echo "=== S9 — the fix command is runnable from a NON-REPO cwd (checklist A1) ==="
-# ============================================================
+section "S9 — the fix command is runnable from a NON-REPO cwd (checklist A1)"
 
 # The fix line now lives on the surviving refusal — a probe that FAILED — rather than on
 # a missing attestation, which the gate takes for itself (S5). What A1 asks of it is
@@ -783,9 +747,7 @@ RUN9_ERR_TEXT="$(cat "$RUN9_ERR")"
 expect_absent "fix-command run produces no 'No such file or directory'" "No such file or directory" "$RUN9_ERR_TEXT"
 expect_absent "fix-command run produces no 'command not found'" "command not found" "$RUN9_ERR_TEXT"
 
-# ============================================================
-echo "=== S10 — the roster row is written on the pass path (AC-1, launch half) ==="
-# ============================================================
+section "S10 — the roster row is written on the pass path (AC-1, launch half)"
 #
 # Governing design: spec §Design "Roster" + §Component boundaries. The row is
 # appended at launch with status `intended`; the full agent id and `confirmed`
@@ -833,9 +795,7 @@ expect_status "row lifts the progress path from 'Progress artifact:'" \
   ".bionic/tmp/w99-widget.progress" "$(roster_field "$ROW" progress)"
 expect_status "no contract field is recorded absent for a complete brief" "" "$(roster_field "$ROW" absent)"
 
-# ============================================================
-echo "=== S10b — the compact one-line label grammar is lifted too (AC-1) ==="
-# ============================================================
+section "S10b — the compact one-line label grammar is lifted too (AC-1)"
 #
 # Real briefs put two labels on one line ("Expected duration: ~35 minutes.
 # Progress: append to <path> per stage") — see the exemplar at
@@ -865,9 +825,7 @@ expect_status "compact grammar: progress path lifted from a mid-line 'Progress:'
 # "4/4" inside the commit subject is slash-bearing but not a path; a lifted
 # deliverable list containing it would mean the extractor is matching fractions.
 
-# ============================================================
-echo "=== S10c — a missing NON-deliverable field is RECORDED + WARNED, never blocked (AC-1) ==="
-# ============================================================
+section "S10c — a missing NON-deliverable field is RECORDED + WARNED, never blocked (AC-1)"
 #
 # Spec §Component boundaries: "Extraction failure warns and records absence —
 # starts fail open (TDD §7)." The verdict is the load-bearing assertion here: a
@@ -909,9 +867,7 @@ expect_status "the absent contract field is empty in the row, not fabricated" ""
 # ordinary case and train the operator to read past the real ones.
 expect_absent "an omitted model is NOT recorded as an absence" "model" "$ABSENT"
 
-# ============================================================
-echo "=== S10W — a brief naming NO deliverable is REFUSED; the in-brief waiver is the only way through ==="
-# ============================================================
+section "S10W — a brief naming NO deliverable is REFUSED; the in-brief waiver is the only way through"
 #
 # USER-DIRECTED (epic-15 post-w4): "A wall. It should be a wall." The absence
 # warning above was the whole enforcement for the one contract field the rest of
@@ -1015,9 +971,7 @@ expect_status "a brief that waives nothing carries an empty waiver field" \
   "" "$(roster_field "$ROW" waiver)"
 expect_absent "…and no waiver is echoed for it" "waived" "$GATE_ERR"
 
-# ============================================================
-echo "=== S10L — the LIVENESS fields are lifted: cadence + the subprocess claim (6-axis A-1) ==="
-# ============================================================
+section "S10L — the LIVENESS fields are lifted: cadence + the subprocess claim (6-axis A-1)"
 #
 # The ratified liveness contract shipped into skills/canonical-sdlc/SKILL.md
 # §Dispatch in slice 4/7 — "The progress-artifact path carries a `cadence`
@@ -1226,9 +1180,7 @@ ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "the cadence beside the progress path is the one that counts" \
   "~9m." "$(roster_field "$ROW" cadence)"
 
-# ============================================================
-echo "=== S10d — rows APPEND; the roster is a ledger, not a slot ==="
-# ============================================================
+section "S10d — rows APPEND; the roster is a ledger, not a slot"
 
 REPO=$(make_repo r10d yes)
 write_attestation "$REPO" "$SID_A"
@@ -1241,9 +1193,7 @@ expect_status "the second row is the second dispatch" "second-agent" "$(roster_f
 expect_status "the schema header is written once, not per row" "1" \
   "$(grep -c '^# bionic session roster' "$R10D")"
 
-# ============================================================
-echo "=== S10e — the roster is per-session from birth (D-5) ==="
-# ============================================================
+section "S10e — the roster is per-session from birth (D-5)"
 
 REPO=$(make_repo r10e yes)
 write_attestation "$REPO" "$SID_A"
@@ -1260,9 +1210,7 @@ expect_status "B's row is B's agent" "agent-of-B" "$(roster_field "$(roster_nth_
 expect_status "no shared single-slot roster.state was created" "1" \
   "$([ -f "$REPO/.bionic/tmp/roster.state" ] && echo 0 || echo 1)"
 
-# ============================================================
-echo "=== S10f — dead-session rosters are pruned, LIVE foreign ones are not (D-5) ==="
-# ============================================================
+section "S10f — dead-session rosters are pruned, LIVE foreign ones are not (D-5)"
 #
 # Same liveness rule slice 4/2 established for the attestation
 # (hooks/preflight-probe.sh: a session is live iff its transcript still exists
@@ -1305,9 +1253,7 @@ expect_status "our own roster was written" "1" "$(roster_rows "$(roster_path "$R
 expect_status "the prune leaves attestations alone" "0" \
   "$([ -f "$REPO/.bionic/tmp/preflight-$SID_A.state" ] && echo 0 || echo 1)"
 
-# ============================================================
-echo "=== S10g — a roster WRITE FAILURE warns and leaves the verdict alone ==="
-# ============================================================
+section "S10g — a roster WRITE FAILURE warns and leaves the verdict alone"
 #
 # TDD §7: starts fail open. The roster is a ledger, not a wall — a gate that
 # refused a dispatch because it could not journal it would be a new failure
@@ -1324,9 +1270,7 @@ expect_contains "a write failure is warned on stderr" "WARN" "$GATE_ERR"
 expect_status "no roster file was left behind" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-# ============================================================
-echo "=== S10h — a symlinked roster path is never written through (§8) ==="
-# ============================================================
+section "S10h — a symlinked roster path is never written through (§8)"
 #
 # A hostile repo controls its own .bionic/ contents. It may make this gate fail
 # to journal; it must not gain an arbitrary-file append. (The DIRECTORY-level
@@ -1343,9 +1287,7 @@ expect_status "a symlinked roster path does not change the PASS verdict" "0" "$G
 expect_contains "a symlinked roster path is warned" "WARN" "$GATE_ERR"
 expect_status "the symlink target is not appended to" "untouched" "$(cat "$DECOY_ROSTER")"
 
-# ============================================================
-echo "=== S10i — no row on any path that is not a launch ==="
-# ============================================================
+section "S10i — no row on any path that is not a launch"
 
 # refused dispatch (active wave, the environment probe refuses): the launch never
 # happens. The driver moved with the wall itself in epic-16 wave-02 — a missing
@@ -1375,9 +1317,7 @@ run_gate "$(mk_bash_payload "$SID_A" "$REPO")"
 expect_status "a Bash call in an attested active wave writes no roster" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
-# ============================================================
-echo "=== S11 — the unarmed-sweeper nag is GONE (epic-16 w2 slice S1) ==="
-# ============================================================
+section "S11 — the unarmed-sweeper nag is GONE (epic-16 w2 slice S1)"
 #
 # A warn-only nag stood here: it asked the sibling sweeper whether a watcher was live for
 # this session and, when none was, named the command to arm one. Both the watcher and its
@@ -1436,9 +1376,7 @@ chmod 700 "$REPO/.bionic/tmp"
 expect_status "a refused dispatch (the probe refused) still exits 2" "2" "$GATE_ST"
 expect_absent "a refused dispatch prints no sweeper nag" "session-sweeper.sh" "$GATE_ERR"
 
-# ============================================================
-echo "=== S12 — inference WITHDRAWN: an unlabeled path never satisfies the wall (R1, AC-3) ==="
-# ============================================================
+section "S12 — inference WITHDRAWN: an unlabeled path never satisfies the wall (R1, AC-3)"
 #
 # THE REVERSAL (Step-6 decision, plan assumption 48). Wave-02 R4 let an unlabeled
 # `record/`-prefixed path satisfy the deliverable wall by INFERENCE — walking the
@@ -1586,9 +1524,7 @@ expect_status "the roster records the real declared deliverable, recovered by it
 expect_status "the recovered value is DECLARED — it came from a label, not a prose scan" \
   "declared" "$(roster_field "$ROW" source)"
 
-# ============================================================
-echo "=== S13 — Step-6 review remediation A + R1: C-1/C-2/F-RD, S-1, S-2, S-4 ==="
-# ============================================================
+section "S13 — Step-6 review remediation A + R1: C-1/C-2/F-RD, S-1, S-2, S-4"
 #
 # Holes found by the independent Step-6 reviewers (w1-review-corr-sec.md and, for
 # this wave, w2-review-cs.md C-2 + w2-review-rd.md F-RD). Each case below was
@@ -1830,9 +1766,7 @@ expect_status "S-4: …and NO roster row is written outside the state directory"
   "$(grep -c '^roster-state/' "$REPO/.bionic/rogue.state" 2>/dev/null)"
 expect_absent "S-4: …and the escaped path is never named on stderr" "rogue.state" "$GATE_ERR"
 
-# ============================================================
-echo "=== S14 — a templated deliverable is not a declaration: it REFUSES (R1) ==="
-# ============================================================
+section "S14 — a templated deliverable is not a declaration: it REFUSES (R1)"
 #
 # The `<slot>` shape has a long lineage. Wave-01 remediation A-b made `ispath()`
 # reject any token carrying an unfilled `<…>` slot, so a brief quoting the wall's
@@ -1908,9 +1842,7 @@ expect_absent "…so no slot reaches the field the liveness check stats" "<" \
 expect_contains "…and the absent progress path is warned" "progress" "$GATE_ERR"
 expect_status "…while the real deliverable still passes the wall" "0" "$GATE_ST"
 
-# ============================================================
-echo "=== S15 — the ship-day corners now pass BY DECLARING, not by guessing (R1, AC-3) ==="
-# ============================================================
+section "S15 — the ship-day corners now pass BY DECLARING, not by guessing (R1, AC-3)"
 #
 # The two 2026-08-08 false blocks were GRAMMAR corners
 # (`plans/epic-16-landing-contract/continuation.md` §charter-seed, decision 3: "Both of
@@ -2012,9 +1944,7 @@ expect_status "AC-3: a quoted template ahead of a real line still loses to it" \
 expect_status "AC-3: …recorded declared, because a label yielded it" \
   "declared" "$(roster_field "$ROW" source)"
 
-# ============================================================
-echo "=== S16 — the combined preflight: a missing attestation AUTO-RUNS the probe (epic-16 w2 S5, AC-4) ==="
-# ============================================================
+section "S16 — the combined preflight: a missing attestation AUTO-RUNS the probe (epic-16 w2 S5, AC-4)"
 #
 # Synthesis §3, the five serialized minutes between order and spawn: the operator was
 # refused, ran the probe by hand, retried, and only then dispatched. R5 makes the
@@ -2075,9 +2005,7 @@ expect_contains "AC-4: …and hands over the probe's own reason, not a paraphras
 expect_status "AC-4: …and a blocked dispatch is journalled nowhere (AC-12)" "0" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 1 || echo 0)"
 
-# ============================================================
-echo "=== S17 — ledger hygiene: a refusal leaves NO row; a same-path claim WARNS (epic-16 w2 S4, AC-12) ==="
-# ============================================================
+section "S17 — ledger hygiene: a refusal leaves NO row; a same-path claim WARNS (epic-16 w2 S4, AC-12)"
 #
 # The F-4 phantom-intended-rows class, closed by inventory rather than by inspection: the
 # roster is compared BYTE FOR BYTE across a refused dispatch, so a row added anywhere on
@@ -2148,9 +2076,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_OTHER_PATH" "owner-b")"
 expect_status "AC-12 paired negative: a distinct deliverable draws no contention warning" "0" "$GATE_ST"
 expect_absent "AC-12 paired negative: …and says nothing about an owner" "already" "$GATE_ERR"
 
-# ============================================================
-echo "=== S18 — EXACTLY ONE path under the deliverable label (R7: R6 critic R6-1/R6-2/R6-3/R6-4) ==="
-# ============================================================
+section "S18 — EXACTLY ONE path under the deliverable label (R7: R6 critic R6-1/R6-2/R6-3/R6-4)"
 #
 # R1 withdrew prose inference but kept a guess inside the label: it read the FIRST
 # SENTENCE of the label span and took the FIRST path-shaped token in it. The R6 critic
@@ -2420,9 +2346,7 @@ expect_absent "R6-3: …with no dangling open bracket for parse_seconds to choke
 expect_absent "R6-3: …and none of the parentheticals own numbers" \
   "phase" "$(roster_field "$ROW" duration)"
 
-# ============================================================
-echo "=== S19 — deliverable-kind labels are LINE-START ONLY (R8: final-audit A-1) ==="
-# ============================================================
+section "S19 — deliverable-kind labels are LINE-START ONLY (R8: final-audit A-1)"
 #
 # record/w2-r7-audit.md A-1: R7's ambiguity wall refuses when a deliverable SPAN
 # holds two paths, but each of its three refusal messages quotes the same
@@ -2476,9 +2400,7 @@ expect_status "A-1 control (bare label): contracted to the real line-start path"
 expect_absent "A-1 control (bare label): never to the mid-line bait" \
   "bait-bare.md" "$(roster_field "$ROW" deliverable)"
 
-# ============================================================
-echo "=== S20 — the agent-context channel: walls travel, the LEDGER does not (T6, D1) ==="
-# ============================================================
+section "S20 — the agent-context channel: walls travel, the LEDGER does not (T6, D1)"
 #
 # hooks/agent-context-guard.sh registers this gate a second time, through
 # settings.json, so a dispatch made from INSIDE a teammate or subagent context meets
@@ -2533,10 +2455,7 @@ expect_status "an unrecognised channel value journals normally" "1" \
 GATE_ENV="$S20_SAVED_ENV"
 
 
-# ============================================================
-echo ""
-echo "=== S21: the arming wall — a dispatch needs a live Patrol (epic-17 W5 4/4, AC-6) ==="
-# ============================================================
+section "S21: the arming wall — a dispatch needs a live Patrol (epic-17 W5 4/4, AC-6)"
 #
 # WHAT THIS WALL IS FOR. Every other wall on this path asks whether the dispatch is
 # well-formed or the environment is sound. This one asks whether anything is WATCHING the
@@ -2810,8 +2729,7 @@ s22_fake_tree() {
   printf 'gitdir: %s/.git/worktrees/%s\n' "$1" "$2" > "$1/.worktrees/$2/.git"
 }
 
-echo ""
-echo "---------- S22: the parallel-budget arm ----------"
+section "S22: the parallel-budget arm"
 
 # --- writers: at the ceiling, refuse; one under it, pass.
 REPO=$(make_repo r22a yes)
@@ -2925,8 +2843,7 @@ expect_contains "…and so does lib/patrol.sh's patrol_roster_state, on the same
 # The predicate itself, isolated from every other S22 arm: one `status=intended` row,
 # writers budget tight enough that whether it counts open decides pass vs refuse.
 
-echo ""
-echo "---------- S22b: the budget count is read off the fresh live set ----------"
+section "S22b: the budget count is read off the fresh live set"
 
 # (a) the row's agent is ABSENT from a FRESH answer -> open=0, and the dispatch that
 # would have been the SECOND writer (budget=1, one row not counted) is allowed.
@@ -3038,8 +2955,7 @@ rm -rf "$GATE_MUT_ROOT"
 # print the orchestrator line again (delete the branch, keep one echo) and r22jf's two
 # text arms go red while every r22jg arm stays green. Captured in s18-mutation.log.
 
-echo ""
-echo "---------- S22b2: a subagent is told to ask, not to call a tool it lacks ----------"
+section "S22b2: a subagent is told to ask, not to call a tool it lacks"
 
 REPO=$(make_repo r22jf yes)
 write_attestation "$REPO" "$SID_A"
@@ -3105,8 +3021,7 @@ expect_contains "...with the orchestrator fix, not the subagent one" \
 # Every arm below holds the roster, the repo and the budget fixed and moves ONLY the
 # status in the answer, so nothing but the status can explain the verdict.
 
-echo ""
-echo "---------- S22c: an idle (finished, unstopped) teammate does not count open ----------"
+section "S22c: an idle (finished, unstopped) teammate does not count open"
 
 # (a) THE HEADLINE. Byte-for-byte r22jb's fixture — one row `r1`, writers=1, r1 named in
 # a fresh answer — with `running` changed to `idle`. r22jb REFUSES. This must pass.
@@ -3304,8 +3219,7 @@ expect_eq "…and the grep really can see that string when it is there (not vacu
 # BIONIC_HOOK_CHANNEL on the settings channel, and the payload's own `agent_type`,
 # which the harness sets for a dispatched agent — and either one is enough.
 
-echo ""
-echo "---------- S23: a main-thread dispatch from inside a linked worktree ----------"
+section "S23: a main-thread dispatch from inside a linked worktree"
 
 REPO=$(make_repo r23a yes)
 write_attestation "$REPO" "$SID_A"
@@ -3337,10 +3251,7 @@ S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" | jq '. + {agent_type:
 run_gate "$S23_AGENT_PAYLOAD"
 expect_status "r23d …and so is one whose payload carries agent_type" "0" "$GATE_ST"
 
-# ============================================================
-echo ""
-echo "=== S24 — THE ENGAGEMENT SWITCH (AC-5, AC-13, AC-14, AC-23) ==="
-# ============================================================
+section "S24 — THE ENGAGEMENT SWITCH (AC-5, AC-13, AC-14, AC-23)"
 #
 # The switch this wave adds, driven in both directions on ONE fixture so neither half can
 # be true by accident. Every silence below sits beside the positive it is the negation of:
@@ -3458,10 +3369,7 @@ run_gate "$(mk_agent_payload "$SID_A" "$S24_BUDGET")"
 expect_status "r24j …and unengaged, that same full budget decides nothing" "0" "$GATE_ST"
 expect_empty "r24j …silently" "$GATE_ERR"
 
-# ============================================================
-echo ""
-echo "=== S25 — active_run -> session_run (wave-session-bound-run S5) ==="
-# ============================================================
+setup_section "S25 — active_run -> session_run (wave-session-bound-run S5)"
 #
 # THE CONTRACT UNDER TEST (design ledger AC-1/AC-3/AC-6). `PLAN` used to come from
 # `active_run "$REPO"` — the newest open plan in the root, with no session input at
@@ -3539,8 +3447,7 @@ current: 9
 PLANDONE
 }
 
-echo ""
-echo "---------- S25a: bound-open — the caller's OWN plan is the ceiling ----------"
+section "S25a: bound-open — the caller's OWN plan is the ceiling"
 
 # A's budget is tight (writers=1, already at the ceiling with one open row); B's is
 # loose (writers=99). Bound to A, the dispatch is refused by A's ceiling — proof
@@ -3557,8 +3464,7 @@ expect_absent "25a3: …and B's path is never named" "$S25_PLAN_B" "$GATE_ERR"
 expect_absent "25a4: bound: no fallback line is printed" \
   "run resolved by newest-plan fallback" "$GATE_ERR"
 
-echo ""
-echo "---------- S25b: fallback — unbound resolves to the newest plan, and says so ----------"
+section "S25b: fallback — unbound resolves to the newest plan, and says so"
 
 # The SAME shape, a fresh repo, budgets swapped so B (the newest, and now the
 # fallback target) is the tight one. Left UNBOUND (make_repo's own empty marker,
@@ -3595,8 +3501,7 @@ expect_status "25b5: the SAME repo, now bound to A (loose budget), passes" "0" "
 expect_absent "25b6: …and the fallback advisory is gone" \
   "run resolved by newest-plan fallback" "$GATE_ERR"
 
-echo ""
-echo "---------- S25c: bound-closed — a plan that closed is no open run at all ----------"
+section "S25c: bound-closed — a plan that closed is no open run at all"
 
 # A is delivered (closed); B stays open, with a ceiling of zero — so if B were
 # consulted at all, ANY dispatch would refuse. Bound to closed A, the dispatch
@@ -3618,8 +3523,7 @@ expect_contains "25c2: …and the closed-plan advisory names A, verbatim" \
 expect_absent "25c3: …B's path (the still-open plan) appears nowhere" "$S25_PLAN_B" "$GATE_ERR"
 expect_absent "25c4: …nor does the writers=0 budget line B carries" "writers=0" "$GATE_ERR"
 
-echo ""
-echo "---------- S25d: the roster row's plan= field (AC-2, §Roster attribution) ----------"
+section "S25d: the roster row's plan= field (AC-2, §Roster attribution)"
 
 # Roster attribution is the BINDING, not the resolved run: a session bound to A
 # gets plan=A on its row even though the budget/fallback logic above resolves
@@ -3704,8 +3608,7 @@ expect_status "25d5f: and plan= holds the path with its pipes neutralised" \
 # THE COUNT IS THE PIN, not the timing. A `jq` shim on PATH records one line per
 # invocation whose argv names the transcript; the answer must be 2 (one `_la_scan`, one
 # `_la_body`) no matter how many rows the roster carries.
-echo ""
-echo "---------- S26: the budget parses the transcript once, not once per row ----------"
+section "S26: the budget parses the transcript once, not once per row"
 
 S26_SHIM="$SANDBOX/s26shim"
 mkdir -p "$S26_SHIM"
@@ -3742,8 +3645,7 @@ expect_status "26b …and the transcript was parsed exactly twice — once per j
   "2" "$(grep -c . "$S26_COUNT" | tr -d ' ')"
 
 # ============================================================================
-echo ""
-echo "---------- S27: the suite-allowance wall (AC-20, AC-24) ----------"
+section "S27: the suite-allowance wall (AC-20, AC-24)"
 # ============================================================================
 #
 # THE INCIDENT THIS SECTION IS ABOUT. Two dispatched writers finished their own work
@@ -3935,8 +3837,7 @@ $S27_FIX" "w27-followed")"
 expect_status "27h a brief following that Fix: line verbatim PASSES" "0" "$GATE_ST"
 
 # ============================================================================
-echo ""
-echo "---------- S28: one regression per run (AC-24) ----------"
+section "S28: one regression per run (AC-24)"
 # ============================================================================
 #
 # The full tree is proved once per run, by one dispatched runner, at integration close.
@@ -4011,7 +3912,4 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28f-two")"
 expect_status "28f a regression-cause above ## SDLC State does not count" "2" "$GATE_ST"
 expect_contains "28f …and the wall still reports zero causes" "Recorded causes on the plan: 0" "$GATE_ERR"
 
-echo ""
-echo "----------------------------------------"
-echo "TOTAL: $TOTAL  PASS: $PASS  FAIL: $FAIL"
-[ "$FAIL" -eq 0 ]
+finish
