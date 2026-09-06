@@ -153,7 +153,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -290,6 +290,9 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/resources.sh"
 . "$BIONIC_LIB/worktree.sh"
 . "$BIONIC_LIB/agents.sh"
+# `adopt` writes a `roster-state/v1` row, and `roster_row` is the one writer of that
+# shape — the same function hooks/dispatch-preflight.sh calls (spec AC-25, ledger D3).
+. "$BIONIC_LIB/roster.sh"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
@@ -1624,8 +1627,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   fi
   mkdir -p "$d" 2>/dev/null || return 1
   if [ ! -e "$f" ]; then
-    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-      >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
+    roster_header >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
   fi
   # EVERY FIELD THROUGH `clean()`, `session=` INCLUDED (Step-6 security review S-4). It was
   # the one interpolation of the thirteen that took its value raw, which is character for
@@ -1636,10 +1638,34 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # Unreachable today — `engaged_marker_path` refuses a session id outside `[A-Za-z0-9_-]`
   # before any verb decides anything — and that is a guard in another file for another
   # reason, not this writer's own.
-  printf 'roster-state/v1|status=identified|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=|deliverable=%s|source=adopted|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|teammate_id=%s|adopted_from=%s|tool_use_id=|plan=%s\n' \
-    "$(clean "$sid")" "$(clean "$name")" "$(clean "$id")" "$(clean "$launch")" "$(clean "$typ")" \
-    "$(clean "$deliv")" "$(clean "$prog")" "$(clean "$cad")" "$(clean "$waiver")" \
-    "$(clean "$addr")" "$(clean "$osid")" "$(clean "$plan")" \
+  #
+  # THE ROW IS BUILT BY `roster_row` (payload/scripts/lib/roster.sh), not by a format string
+  # here (spec AC-25, ledger D3). The eleven fields this writer leaves EMPTY are still named
+  # — `model=`, `duration=`, `claims=`, `absent=` and the rest — because an omitted key and
+  # an empty one are different rows to a by-key reader, and this writer has always emitted
+  # both of the fields no other writer does (`teammate_id=`, `adopted_from=`), empty address
+  # included. `clean()` stays here: it is this file's cap on a value, while the row's SHAPE
+  # is the library's.
+  roster_row \
+    status=identified \
+    "session=$(clean "$sid")" \
+    "name=$(clean "$name")" \
+    "agent_id=$(clean "$id")" \
+    "launched_at=$(clean "$launch")" \
+    "subagent_type=$(clean "$typ")" \
+    model= \
+    "deliverable=$(clean "$deliv")" \
+    source=adopted \
+    duration= \
+    "progress=$(clean "$prog")" \
+    claims= \
+    "cadence=$(clean "$cad")" \
+    absent= \
+    "waiver=$(clean "$waiver")" \
+    "teammate_id=$(clean "$addr")" \
+    "adopted_from=$(clean "$osid")" \
+    tool_use_id= \
+    "plan=$(clean "$plan")" \
     >> "$f" 2>/dev/null || return 1
   return 0
 }
