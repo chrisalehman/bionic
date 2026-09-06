@@ -675,7 +675,7 @@ cp "$REPO"/payload/scripts/lib/*.sh    "$W_TREE/payload/scripts/lib/" 2>/dev/nul
 
 # the shipped roster out, these six in — the same rewrite tests/interpreter-pin
 # does, and for the same reason: a scratch runner must not reach the real tree.
-W_SUITES="w-ok.test.sh w-owned.test.sh w-counter.test.sh w-heredoc.test.sh w-indented.test.sh w-local.test.sh"
+W_SUITES="w-ok.test.sh w-owned.test.sh w-counter.test.sh w-empty.test.sh w-heredoc.test.sh w-indented.test.sh w-local.test.sh"
 awk -v labels="$W_SUITES" '
   /^run "/ { next }
   { print }
@@ -727,6 +727,23 @@ ok "a real row"
 
 finish
 W_PLANT_COUNTER
+
+# --- LAUNCHED AND FAILED: a suite that asserts nothing (A-4) -----------------
+# Not a wall case. This suite adopts the framework properly, shadows nothing and
+# is launched — and it is a FAILURE because it covered nothing while reporting
+# a result. Before the whole-suite floor it exited 0 and the runner printed
+# ✓ PASS over `0/0 passed`.
+cat > "$W_TREE/tests/w-empty.test.sh" <<'W_PLANT_EMPTY'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$S10_MARKS/w-empty.ran"
+
+setup_section "a fixture, and no assertion anywhere"
+: > /dev/null
+
+finish
+W_PLANT_EMPTY
 
 # --- NOT REFUSED (1/3): the same three definitions, inside a heredoc (A-10b) --
 cat > "$W_TREE/tests/w-heredoc.test.sh" <<'W_PLANT_HEREDOC'
@@ -800,7 +817,7 @@ section "12: the adoption wall refuses a shadowing suite, by name (AC-12, S10)"
 
 # NOT VACUOUS: the runner and the framework under drive are the shipped files.
 expect_eq "12: the scratch runner is the shipped one apart from its roster" "yes" \
-  "$([ "$(grep -c '^run "' "$W_TREE/tests/run.sh")" = "6" ] && echo yes || echo no)"
+  "$([ "$(grep -c '^run "' "$W_TREE/tests/run.sh")" = "7" ] && echo yes || echo no)"
 expect_eq "12: the framework under drive is the shipped one, byte for byte" "yes" \
   "$(cmp -s "$FRAMEWORK" "$W_TREE/tests/lib/assert.sh" && echo yes || echo no)"
 
@@ -843,8 +860,8 @@ expect_eq "12: …nor the suite-specific one" "no" \
   "$(contains "$W_OUT" "w-local.test.sh defines")"
 
 # --- the tally and the exit status stay honest ------------------------------
-expect_eq "12: the tally counts three refusals as three failures" "yes" \
-  "$(contains "$W_OUT" "Gating: 3 passed, 3 failed")"
+expect_eq "12: the tally counts three refusals and one empty suite as four failures" "yes" \
+  "$(contains "$W_OUT" "Gating: 3 passed, 4 failed")"
 expect_eq "12: …and the run exits 1" "1" "$W_RC"
 
 # --- ONE WALL, BOTH SCHEDULERS ----------------------------------------------
@@ -862,7 +879,7 @@ W_SERIAL_RC=$?
 expect_eq "12: --serial refuses the same suite, in the same words" "yes" \
   "$(contains "$W_SERIAL_OUT" "adoption wall: tests/w-ok.test.sh defines ok() at column 0")"
 expect_eq "12: …and reaches the same tally" "yes" \
-  "$(contains "$W_SERIAL_OUT" "Gating: 3 passed, 3 failed")"
+  "$(contains "$W_SERIAL_OUT" "Gating: 3 passed, 4 failed")"
 expect_eq "12: …and the same exit status" "1" "$W_SERIAL_RC"
 
 # ============================================================
@@ -1048,5 +1065,65 @@ for f14_f in "$REPO"/tests/*.test.sh "$REPO"/tests/lib/*.sh; do
 done
 echo "   files whose scan ends inside a heredoc:${F14_BLIND_NAMES:- none}"
 expect_eq "14: no file under tests/ ends with a heredoc still open" "0" "$F14_BLIND"
+
+# ============================================================
+section "15: a suite that asserted nothing is a failure (A-4)"
+# ============================================================
+#
+# AC-13 closed lie class 3 per SECTION. A suite that opens none — or only
+# setup_sections — had an empty `_TF_EMPTY`, FAIL=0, and exited 0; the runner
+# judges on rc and printed ✓ PASS over `0/0 passed`, counting it toward
+# `Gating: N passed`. THE FLOOR IS ASSERTIONS, NOT SECTIONS: loader.test.sh and
+# patrol-marker.test.sh open no section and assert from the top level, and they
+# are not this shape.
+
+F15_D="$SB/floor15"
+mkdir -p "$F15_D/lib"
+cp "$REPO/tests/lib/resolve-roots.sh" "$F15_D/lib/resolve-roots.sh"
+cp "$FRAMEWORK"                       "$F15_D/lib/assert.sh"
+f15_plant() {   # f15_plant <name> <body-line>
+  { printf '#!/bin/bash\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf '%s\n' "$2"
+    printf 'finish\n'
+  } > "$F15_D/$1.sh"
+}
+f15_run() { ( cd "$F15_D" && bash "$1.sh" 2>&1 ); }
+f15_rc()  { ( cd "$F15_D" && bash "$1.sh" >/dev/null 2>&1 ); echo $?; }
+
+f15_plant nothing   ':'
+f15_plant setuponly 'setup_section "fixture only"'
+f15_plant toplevel  'ok "one real row"'
+
+expect_eq "15: a suite with no assertion at all exits 1" "1" "$(f15_rc nothing)"
+expect_contains "15: …and says so by name" "FAIL: suite asserted nothing: nothing.sh" \
+  "$(f15_run nothing)"
+expect_contains "15: …and the failure is IN the tally, not beside it" "0/1 passed, 1 failed" \
+  "$(f15_run nothing)"
+expect_eq "15: a suite with only a setup_section exits 1 too" "1" "$(f15_rc setuponly)"
+expect_contains "15: …and its setup is still counted apart" "sections=0 setup=1" \
+  "$(f15_run setuponly)"
+# THE PAIRED POSITIVE, and it is the whole reason the floor is TOTAL and not
+# _TF_SECTIONS: two suites on the real roster assert from the top level.
+expect_eq "15: a suite that opens no section but asserts is green" "0" "$(f15_rc toplevel)"
+expect_contains "15: …with sections=0 on its tally" "1/1 passed, 0 failed  sections=0" \
+  "$(f15_run toplevel)"
+F15_TOPLEVEL=""
+for f15_f in "$REPO/tests/loader.test.sh" "$REPO/tests/patrol-marker.test.sh"; do
+  F15_TOPLEVEL="${F15_TOPLEVEL} $(grep -c '^section ' "$f15_f")"
+done
+expect_eq "15: the two real top-level suites still open no section" " 0 0" "$F15_TOPLEVEL"
+
+# --- THROUGH THE RUNNER: the wall tree carries w-empty.test.sh ---------------
+# It adopts the framework, shadows nothing, is LAUNCHED (its marker appears) and
+# is counted failed — the state that used to read ✓ PASS.
+expect_eq "15: the empty suite was launched, not refused" "yes" \
+  "$([ -f "$W_MARKS/w-empty.ran" ] && echo yes || echo no)"
+expect_eq "15: …and no refusal names it" "no" "$(contains "$W_OUT" "w-empty.test.sh defines")"
+expect_eq "15: …and the runner reports it failed" "yes" \
+  "$(contains "$W_OUT" "- w-empty.test.sh")"
+expect_eq "15: …and its own line says what it failed for" "yes" \
+  "$(contains "$W_OUT" "FAIL: suite asserted nothing: w-empty.test.sh")"
 
 finish
