@@ -5461,6 +5461,136 @@ s35_assert "35g3 bound to a LIVE plan over the same tree is gated on it, not on 
   0 - "$S35_STRAY"
 
 # ============================================================
+# Section 36: environments arm — declared, covered, fog (S3, AC-4, AC-23)
+# ============================================================
+#
+# Frontmatter `environments:` is one line of entries joined by " · ", each
+# `<name> (covered...)` or `<name> (fog — cure: <text>)`. The arm
+# (validate_environments) fires at current: 5..9, the same durable-prefix
+# span as the walk-artifact arm. Absent key: no-op — but the no-op still
+# names itself on the log channel via a `[environments]` finding, never
+# silent-silent. Declared: the Step-5 evidence must carry an
+# `environments-covered:` line naming every non-fog environment; a fog entry
+# with no cure blocks regardless of the covered line's content.
+
+echo ""
+echo "=== Section 36: environments arm ==="
+
+# $1 = optional `environments:` frontmatter line (empty = key absent, the
+# no-op case). walk: exempt keeps that unrelated arm out of the way so each
+# fixture isolates the environments subject.
+env_frontmatter() {
+  local env_line="${1:-}"
+  printf -- '---\n'
+  printf -- 'governing-skill: canonical-sdlc\ncanonical_sdlc_version: 14\n'
+  printf -- 'intent: build\nrigor: audited\nscale: wave\n'
+  printf -- 'deploy_target: none\nuse_worktree: false\nhas_ui: true\n'
+  printf -- 'walk: exempt\n'
+  if [ -n "$env_line" ]; then
+    printf -- '%s\n' "$env_line"
+  fi
+  printf -- '---\n'
+}
+
+# $1 environments line · $2 Step-5 body (indented) · $3 matrix section.
+env_plan5() {
+  printf '%s\n## SDLC State\ncurrent: 5\nStep 5:\n%s\n\n%s\n' \
+    "$(env_frontmatter "$1")" "$2" "$3"
+}
+
+# Same, at current: 6 — the Step-5 block stays in the section so the durable
+# prefix arm has something to read, mirroring walk_plan6.
+env_plan6() {
+  printf '%s\n## SDLC State\ncurrent: 6\nStep 5:\n%s\nStep 6:\n%s\n\n%s\n' \
+    "$(env_frontmatter "$1")" "$2" "$step6_body" "$3"
+}
+
+env_single_decl='environments: macos-system (covered by this wave)'
+env_two_decl='environments: macos-system (covered by this wave) · linux-system (fog — cure: a Linux host runs tests/run.sh under the pin)'
+env_fog_no_cure_decl='environments: macos-system (covered by this wave) · linux-system (fog)'
+env_two_covered_decl='environments: macos-system (covered by this wave) · windows-system (covered by this wave)'
+
+env_step5_covered="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md
+  environments-covered: macos-system"
+
+env_step5_no_covered_line="  cmd: bash test.sh
+  pass: 332
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/docs/record/audit.md"
+
+# 36a — declared covered set == the Step-5 environments-covered line → allow.
+h36a=$(make_home)
+write_plan "$h36a" "$(env_plan5 "$env_single_decl" "$env_step5_covered" "$matrix_complete")" > /dev/null
+expect_allow "36a declared covered set matches environments-covered → allow" \
+  "$h36a" 'git commit -m "x"'
+
+# 36b — declared covered set present, Step-5 evidence has no
+# 'environments-covered:' line at all → block.
+h36b=$(make_home)
+write_plan "$h36b" "$(env_plan5 "$env_single_decl" "$env_step5_no_covered_line" "$matrix_complete")" > /dev/null
+expect_block "36b declared covered set, no 'environments-covered:' line → block" \
+  "$h36b" 'git commit -m "x"' "no 'environments-covered:' line"
+
+# 36c — a fog entry WITH a cure passes so long as the covered set is listed;
+# the fog name itself must NOT be required in environments-covered.
+h36c=$(make_home)
+write_plan "$h36c" "$(env_plan5 "$env_two_decl" "$env_step5_covered" "$matrix_complete")" > /dev/null
+expect_allow "36c fog entry with a cure + covered listed → allow (fog name not required)" \
+  "$h36c" 'git commit -m "x"'
+
+# 36d — a fog entry naming no cure blocks, even though the covered set is
+# fully and correctly listed.
+h36d=$(make_home)
+write_plan "$h36d" "$(env_plan5 "$env_fog_no_cure_decl" "$env_step5_covered" "$matrix_complete")" > /dev/null
+expect_block "36d fog entry with no cure named → block" \
+  "$h36d" 'git commit -m "x"' "fog entry with no cure named"
+
+# 36e — 'environments-covered:' omits a declared non-fog environment → block.
+h36e=$(make_home)
+write_plan "$h36e" "$(env_plan5 "$env_two_covered_decl" "$env_step5_covered" "$matrix_complete")" > /dev/null
+expect_block "36e environments-covered omits a declared non-fog environment → block" \
+  "$h36e" 'git commit -m "x"' "omits declared environment"
+
+# 36f — the 'environments:' key is absent entirely → allow, SILENT on
+# stderr (an ordinary commit in an ordinary repo never declares this key,
+# so the no-op must not become noise the way an actionable finding is).
+h36f=$(make_home)
+write_plan "$h36f" "$(env_plan5 "" "$env_step5_no_covered_line" "$matrix_complete")" > /dev/null
+expect_allow "36f absent 'environments:' → allow, silent on stderr" \
+  "$h36f" 'git commit -m "x"'
+
+# 36f2 — the SAME fixture, but the no-op is still recorded on the durable
+# audit-file channel (log_finding_quiet) — "log-only" literally: logged,
+# but never surfaced on stderr the way Section 20's refactor/tune findings
+# are. Mirrors the 19e/19e2 stderr-vs-file split.
+expect_audit_line "36f2 …and the no-op is recorded on the audit-file channel only" \
+  "$h36f" 'git commit -m "x"' "evidence-gate environments:"
+
+# 36g — durable prefix span (mirrors 26g/A5): at current: 6 the same
+# fog-without-cure rule still blocks, so the claim cannot go stale once
+# Verify is behind you.
+h36g=$(make_home)
+write_plan "$h36g" "$(env_plan6 "$env_fog_no_cure_decl" "$env_step5_covered" "$matrix_complete")" > /dev/null
+expect_block "36g current: 6 still enforces the fog-cure rule (durable prefix)" \
+  "$h36g" 'git commit -m "x"' "fog entry with no cure named"
+
+# 36h — a plan whose frontmatter never mentions 'environments:' AND whose
+# rows are all still pending: still a silent allow (no interaction with the
+# matrix gate; the two arms are independent), and the no-op still lands on
+# the audit file only.
+h36h=$(make_home)
+write_plan "$h36h" "$(env_plan5 "" "$env_step5_no_covered_line" "$walk_matrix_all_pending")" > /dev/null
+expect_allow "36h absent 'environments:' + all rows pending → allow, silent on stderr" \
+  "$h36h" 'git commit -m "x"'
+expect_audit_line "36h2 …and the no-op is still recorded on the audit-file channel only" \
+  "$h36h" 'git commit -m "x"' "evidence-gate environments:"
+
+# ============================================================
 # Summary
 # ============================================================
 
