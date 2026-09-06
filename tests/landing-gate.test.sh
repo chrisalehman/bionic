@@ -35,6 +35,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
 GATE="$HOOKS_DIR/landing-gate.sh"
@@ -49,21 +50,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-PASS=0
-FAIL=0
-TOTAL=0
-
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing [$2] in: $(printf '%s' "$3" | head -3)"; fi; }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
-expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2] got [$3]"; fi; }
-expect_gt()       { if [ "$2" -gt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected > $3, got $2"; fi; }
-expect_lt()       { if [ "$2" -lt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected < $3, got $2"; fi; }
-section()         { printf '\n=== %s ===\n' "$1"; }
+# expect_status, expect_contains, expect_absent, expect_empty, expect_eq are
+# the framework's (tests/lib/assert.sh) — identical semantics to the private
+# definitions this suite carried (grep -qF vs the framework's case glob agree
+# on every needle here: all single-line, per the framework's own docblock).
+# expect_gt/expect_lt are not owned names (A-17 W+1) and stay local, built on
+# the framework's ok/no. This suite's own section() was a plain banner
+# printer with the framework's exact signature (A-10c) — deleted outright,
+# every existing `section "..."` call site binds unchanged, now WITH the
+# section-floor enforcement it never had before.
+expect_gt() { if [ "$2" -gt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected > $3, got $2"; fi; }
+expect_lt() { if [ "$2" -lt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expected < $3, got $2"; fi; }
 
 # ---------- fixtures ----------
 #
@@ -1112,6 +1109,4 @@ run_gate "$SUPDIR/landing-gate.sh" "$(stop_payload "$R15H_MUT" "$SID" false)"
 expect_eq "15h-mut: with the guard removed the SAME row is marked — the fixture really does discriminate" \
   "1" "$(swept_count "$R15H_MUT")"
 
-# ---------- summary ----------
-printf '\n---\n%d/%d passed, %d failed\n' "$PASS" "$TOTAL" "$FAIL"
-[ "$FAIL" -eq 0 ]
+finish
