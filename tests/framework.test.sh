@@ -505,6 +505,46 @@ expect_eq "6: …and the framework's ok() is what moves them" \
   "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-counters\.test\.sh: .*\)$/\1/p')"
 
 # ============================================================
+section "6b: the head docblock describes the tree it heads (review-c C-1/C-2)"
+# ============================================================
+#
+# It is the first paragraph an author writing suite 56 reads about ownership, and
+# it said a private `ok()` was tolerated and that the wall was S10's future work.
+# Both had been false since S10 landed. A docblock is not testable prose here —
+# every claim below is re-derived from the shipped tree in the same run.
+
+C1_DOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
+C1_REFUSED=0
+C1_SUITES=0
+for c1_f in "$REPO"/tests/*.test.sh; do
+  C1_SUITES=$((C1_SUITES + 1))
+  [ -n "$(_tf_adoption_refusal "$c1_f")" ] && C1_REFUSED=$((C1_REFUSED + 1))
+done
+expect_eq "6b: the count the docblock claims is the roster the tree has" \
+  "55" "$C1_SUITES"
+expect_eq "6b: …and none of them carries a private definition" "0" "$C1_REFUSED"
+expect_eq "6b: the docblock says all 55 are clients of this file" "yes" \
+  "$(contains "$C1_DOC" "All 55 suites on the roster are clients of it")"
+expect_eq "6b: …and that it does not DEFER to a private one" "yes" \
+  "$(contains "$C1_DOC" "It does not DEFER")"
+expect_eq "6b: …and the stale claim that 49 suites still carry one is gone" "no" \
+  "$(contains "$C1_DOC" "49 of them do, on the day this is written")"
+expect_eq "6b: …and the stale claim that migration is still S5-S9's job is gone" "no" \
+  "$(contains "$C1_DOC" "migrating those suites is S5")"
+# C-2: the two expect_match exceptions were migrated, so the docblock stops
+# calling them migration work — re-derived from the two files it names.
+expect_eq "6b: live-agents carries no expect_match call" "0" \
+  "$(grep -c '^[[:space:]]*expect_match ' "$REPO/tests/live-agents.test.sh" | tr -d ' ')"
+expect_eq "6b: resources carries none either" "0" \
+  "$(grep -c '^[[:space:]]*expect_match ' "$REPO/tests/resources.test.sh" | tr -d ' ')"
+# The needle is SINGLE-quoted: the docblock spells the helper in backticks, and
+# in a double-quoted needle bash would run it as a command substitution.
+expect_eq "6b: …and the docblock records that S9b renamed them" "yes" \
+  "$(contains "$C1_DOC" 'were renamed onto `expect_regex` by S9b')"
+expect_eq "6b: …not that they are still migration work" "no" \
+  "$(contains "$C1_DOC" "outvoted 11 to 2 and are migration work")"
+
+# ============================================================
 section "7: the assertion-discipline docblock carries its obligations"
 # ============================================================
 #
