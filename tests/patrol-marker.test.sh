@@ -45,6 +45,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -53,9 +54,9 @@ PATROL_LIB="${BIONIC_PATROL_LIB_UNDER_TEST:-${PAYLOAD}/scripts/lib/patrol.sh}"
 GATE_HOOK="${BIONIC_PATROL_GATE_UNDER_TEST:-${PAYLOAD}/hooks/patrol-duties-gate.sh}"
 SKILL_DOC="${BIONIC_PATROL_SKILL_UNDER_TEST:-${PAYLOAD}/skills/canonical-sdlc/SKILL.md}"
 
-PASS=0; FAIL=0; TOTAL=0
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; FAIL=$((FAIL + 1)); }
+# pass/fail were pure-rename shadows of the framework's ok/no; the suite's own
+# explicit `TOTAL=$((TOTAL + 1))` lines beside each call are dropped too, since
+# ok/no already increment it (S7, AC-12).
 
 # THE SUITE IS NOT ALLOWED TO BE VACUOUS over a missing subject: three absent
 # files would make every "does not carry the marker" assertion below pass
@@ -91,33 +92,29 @@ spelling_ok() {
 
 MARKER="$(marker_of "$PATROL_LIB")"
 
-TOTAL=$((TOTAL + 1))
 if [ -n "$MARKER" ]; then
-  pass "1: the tick marker literal reads out of $PATROL_LIB (the SSoT): '$MARKER'"
+  ok "1: the tick marker literal reads out of $PATROL_LIB (the SSoT): '$MARKER'"
 else
-  fail "1: no plain-text tick marker literal found in $PATROL_LIB" \
+  no "1: no plain-text tick marker literal found in $PATROL_LIB" \
     "the SSoT's own prose no longer spells the marker in plain text"
 fi
 
-TOTAL=$((TOTAL + 1))
 if [ -n "$MARKER" ] && grep -qF -- "$MARKER" "$GATE_HOOK"; then
-  pass "2: patrol-duties-gate.sh still carries the marker '$MARKER'"
+  ok "2: patrol-duties-gate.sh still carries the marker '$MARKER'"
 else
-  fail "2: patrol-duties-gate.sh no longer carries the marker read from patrol.sh"
+  no "2: patrol-duties-gate.sh no longer carries the marker read from patrol.sh"
 fi
 
-TOTAL=$((TOTAL + 1))
 if [ -n "$MARKER" ] && grep -qF -- "$MARKER" "$SKILL_DOC"; then
-  pass "3: SKILL.md still carries the marker '$MARKER'"
+  ok "3: SKILL.md still carries the marker '$MARKER'"
 else
-  fail "3: SKILL.md no longer carries the marker read from patrol.sh"
+  no "3: SKILL.md no longer carries the marker read from patrol.sh"
 fi
 
-TOTAL=$((TOTAL + 1))
 if [ -n "$MARKER" ] && spelling_ok "$MARKER" "$GATE_HOOK" "$SKILL_DOC"; then
-  pass "4: the three-way agreement holds — patrol.sh, patrol-duties-gate.sh and SKILL.md all spell the tick marker the same way"
+  ok "4: the three-way agreement holds — patrol.sh, patrol-duties-gate.sh and SKILL.md all spell the tick marker the same way"
 else
-  fail "4: the three-way agreement is broken — see #1-3 above for which side moved"
+  no "4: the three-way agreement is broken — see #1-3 above for which side moved"
 fi
 
 # ---------- §A2: the classifier regex is the spelling that DECIDES ----------
@@ -136,12 +133,11 @@ classifier_regex_of() {
     | sed -e 's/^test("//' -e 's/")$//' -e 's/\\\\/\\/g'
 }
 
-TOTAL=$((TOTAL + 1))
 CLASSIFIER_RE="$(classifier_regex_of "$PATROL_LIB")"
 if [ -n "$MARKER" ] && [ -n "$CLASSIFIER_RE" ] && printf '%s\n' "$MARKER" | grep -qE -- "$CLASSIFIER_RE"; then
-  pass "4b: patrol.sh's classifier regex ($CLASSIFIER_RE) matches the prose marker '$MARKER' — the deciding spelling agrees"
+  ok "4b: patrol.sh's classifier regex ($CLASSIFIER_RE) matches the prose marker '$MARKER' — the deciding spelling agrees"
 else
-  fail "4b: patrol.sh's classifier regex does not match the prose marker" \
+  no "4b: patrol.sh's classifier regex does not match the prose marker" \
     "regex='$CLASSIFIER_RE' marker='$MARKER'"
 fi
 
@@ -161,7 +157,7 @@ cp "$SKILL_DOC" "$WORK/SKILL.md"
 # check §A just trusted against the real files. Expects red.
 doctor_and_check() {
   local label="$1" which="$2" scratch lib gate skill got_marker
-  scratch="$(mktemp -d)" || { fail "$label" "cannot create a scratch dir"; return; }
+  scratch="$(mktemp -d)" || { no "$label" "cannot create a scratch dir"; return; }
   cp "$WORK/patrol.sh" "$scratch/patrol.sh"
   cp "$WORK/patrol-duties-gate.sh" "$scratch/patrol-duties-gate.sh"
   cp "$WORK/SKILL.md" "$scratch/SKILL.md"
@@ -170,27 +166,26 @@ doctor_and_check() {
     lib)   sed -i.bak 's/session-poker\.sh tick/session-poker.sh tock/g' "$scratch/patrol.sh" ;;
     gate)  sed -i.bak 's/session-poker\.sh tick/session-poker.sh tock/g' "$scratch/patrol-duties-gate.sh" ;;
     skill) sed -i.bak 's/session-poker\.sh tick/session-poker.sh tock/g' "$scratch/SKILL.md" ;;
-    *) fail "$label" "unknown mutation target '$which'"; rm -rf "$scratch"; return ;;
+    *) no "$label" "unknown mutation target '$which'"; rm -rf "$scratch"; return ;;
   esac
 
   lib="$scratch/patrol.sh"; gate="$scratch/patrol-duties-gate.sh"; skill="$scratch/SKILL.md"
   got_marker="$(marker_of "$lib")"
 
-  TOTAL=$((TOTAL + 1))
   if [ "$which" = lib ]; then
     # the SSoT itself moved: the extractor should now find nothing to read
     if [ -z "$got_marker" ]; then
-      pass "$label"
+      ok "$label"
     else
-      fail "$label" "doctoring patrol.sh's own spelling did not blind the extractor — got '$got_marker'"
+      no "$label" "doctoring patrol.sh's own spelling did not blind the extractor — got '$got_marker'"
     fi
   else
     # the SSoT is intact, but one of the two spellings it is compared against
     # moved alone — the agreement check must go red
     if [ -n "$got_marker" ] && ! spelling_ok "$got_marker" "$gate" "$skill"; then
-      pass "$label"
+      ok "$label"
     else
-      fail "$label" "mutating $which alone did not turn the agreement check red"
+      no "$label" "mutating $which alone did not turn the agreement check red"
     fi
   fi
   rm -rf "$scratch"
@@ -202,32 +197,25 @@ doctor_and_check "7: mutating SKILL.md's spelling alone goes red" skill
 
 # 7b: mutating ONLY the classifier regex (prose intact) must go red at §4b —
 # proves 4b reads the regex, not the prose it sits beside
-TOTAL=$((TOTAL + 1))
 scratch_re="$(mktemp -d)"
 cp "$WORK/patrol.sh" "$scratch_re/patrol.sh"
 sed -i.bak 's/test("session-poker\\\\\.sh\[\[:space:\]\]+tick")/test("session-poker\\\\.sh[[:space:]]+tock")/' "$scratch_re/patrol.sh"
 mut_re="$(classifier_regex_of "$scratch_re/patrol.sh")"
 mut_marker="$(marker_of "$scratch_re/patrol.sh")"
 if [ -n "$mut_marker" ] && [ -n "$mut_re" ] && [ "$mut_re" != "$CLASSIFIER_RE" ] && ! printf '%s\n' "$mut_marker" | grep -qE -- "$mut_re"; then
-  pass "7b: mutating patrol.sh's classifier regex alone (prose intact) goes red at 4b"
+  ok "7b: mutating patrol.sh's classifier regex alone (prose intact) goes red at 4b"
 else
-  fail "7b: mutating the classifier regex alone did not go red" "mutated regex='$mut_re' marker='$mut_marker'"
+  no "7b: mutating the classifier regex alone did not go red" "mutated regex='$mut_re' marker='$mut_marker'"
 fi
 rm -rf "$scratch_re"
 
 # the control: an UNMUTATED trio must still agree — proves §5-7's red comes
 # from the mutation, not from a broken harness that would be red regardless
-TOTAL=$((TOTAL + 1))
 control_marker="$(marker_of "$WORK/patrol.sh")"
 if [ -n "$control_marker" ] && spelling_ok "$control_marker" "$WORK/patrol-duties-gate.sh" "$WORK/SKILL.md"; then
-  pass "8: the unmutated scratch trio still agrees (the mutation harness itself is not the source of §5-7's red)"
+  ok "8: the unmutated scratch trio still agrees (the mutation harness itself is not the source of §5-7's red)"
 else
-  fail "8: the unmutated scratch trio disagrees — the mutation harness is broken, not the marker"
+  no "8: the unmutated scratch trio disagrees — the mutation harness is broken, not the marker"
 fi
 
-echo ""
-echo "========================================"
-echo "patrol-marker: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
