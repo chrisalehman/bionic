@@ -17,15 +17,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 CHECK="${BIONIC_HOOKS_DIR}/stop-check.sh"
 # The roster's WRITER. Section 8 reads rows; §8(g) drives this script to produce
 # one, because a hand-written row cannot prove the reader is reading a field the
 # writer can actually emit (Step-6 six-axis review, axis-3 FAIL).
 WRITER="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
-PASS=0
-FAIL=0
-TOTAL=0
 
 # `cd … && pwd` normalizes the path: $TMPDIR carries a trailing slash on
 # macOS, and a doubled separator would slugify differently from the cwd the
@@ -34,9 +32,6 @@ SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/stop-check-test.XXXXXX")" && pwd)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
 # ---------- assertions ----------
-
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
 
 expect_contains() {  # <label> <needle> <haystack>
   if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi
@@ -247,8 +242,7 @@ run_check_as() {
 }
 
 # ============================================================
-echo ""
-echo "=== Section 1: target resolution against on-disk metadata (AC-3) ==="
+section "Section 1: target resolution against on-disk metadata (AC-3)"
 # ============================================================
 
 IFS='|' read -r H1 R1 S1 <<< "$(make_world w1)"
@@ -311,8 +305,7 @@ expect_status "an agent on disk but absent from the live set exits 1" 1 "$ST"
 expect_contains "…and says it is not live" "not live" "$OUT"
 
 # ============================================================
-echo ""
-echo "=== Section 2: the evidence tier is printed (AC-3) ==="
+section "Section 2: the evidence tier is printed (AC-3)"
 # ============================================================
 
 IFS='|' read -r H2 R2 S2 <<< "$(make_world w2)"
@@ -330,8 +323,7 @@ expect_contains "last message from the agent printed" "I already completed this 
 expect_contains "repo activity printed" "seed commit" "$OUT"
 
 # ============================================================
-echo ""
-echo "=== Section 4: no seam — the default projects root is derived, not injected ==="
+section "Section 4: no seam — the default projects root is derived, not injected"
 # ============================================================
 # Seam-blindness (a substituted value leaves the production path unverified):
 # every test above runs with only the two environment variables the production
@@ -364,8 +356,7 @@ expect_contains "…and its transcript was found under this project's own slug" 
   "$S4B/55555555-5555-5555-5555-555555555555/subagents" "$OUT"
 
 # ============================================================
-echo ""
-echo "=== Section 5: usage and hostile inputs ==="
+section "Section 5: usage and hostile inputs"
 # ============================================================
 
 OUT=$(run_check "$H1" "$R1"); ST=$?
@@ -389,8 +380,7 @@ expect_contains "…resolving the target against the live set all the same" \
 expect_contains "…and naming the fact a cwd outside the repo cannot supply" "no agent id" "$OUT"
 
 # ============================================================
-echo ""
-echo "=== Section 6: the progress artifact — D-6's evidence level below the agent ==="
+section "Section 6: the progress artifact — D-6's evidence level below the agent"
 # ============================================================
 #
 # An hour-long command silences the working log for the whole hour — one tool
@@ -551,8 +541,7 @@ OUT6_TRAIL=$(run_check "$H6" "$R6" "long-runner" --progress "$PROG" -x); ST=$?
 expect_status "an unknown flag after a valid --progress pair exits 1" 1 "$ST"
 
 # ============================================================
-echo ""
-echo "=== Section 7: the machine line — printed on success, on nothing else ==="
+section "Section 7: the machine line — printed on success, on nothing else"
 # ============================================================
 #
 # hooks/execution-recorder.sh reads this line and nothing else, so its presence
@@ -647,8 +636,7 @@ expect_equal "the forged-field attempt still yields one line" "1" \
   "$(printf '%s\n' "$OUT7D" | grep -c '^stop-check-observation/')"
 
 # ============================================================
-echo ""
-echo "=== Section 8: roster classification, contract-from-roster, P2 claims (slice 4/5, AC-6) ==="
+section "Section 8: roster classification, contract-from-roster, P2 claims (slice 4/5, AC-6)"
 # ============================================================
 #
 # The roster's SCHEMA is hooks/dispatch-preflight.sh's (roster-state/v1); its
@@ -812,8 +800,7 @@ OUT8K=$(run_check "$H8" "$R8" "ours-target" --claims "$MARKER" --claims "$MARKER
 expect_status "a second --claims exits 1" 1 "$ST"
 
 # ============================================================
-echo ""
-echo "=== Section 9: what is OURS is what the harness names (S6, AC-9/AC-10) ==="
+section "Section 9: what is OURS is what the harness names (S6, AC-9/AC-10)"
 # ============================================================
 #
 # Three defects that only live operation could produce, each still driven here, on the key
@@ -900,8 +887,7 @@ expect_absent "D3: the retired token 'foreign-live' is gone" "foreign-live" "$OU
 expect_absent "D3: …and so is the verdict that replaced it" "FOREIGN" "$OUT9D"
 
 # ============================================================
-echo ""
-echo "=== Section 10: six-axis review remediations (C-1/S-3 glob, C-2 confirmed-by-id) ==="
+section "Section 10: six-axis review remediations (C-1/S-3 glob, C-2 confirmed-by-id)"
 # ============================================================
 
 IFS='|' read -r H10 R10 S10 <<< "$(make_world w10)"
@@ -1043,8 +1029,7 @@ expect_absent "a row that was never adopted claims no adoption" \
   "adopted_from=" "$(run_check_as "$OWN10" "$H10" "$R10" "id-target-2")"
 
 # ============================================================
-echo ""
-echo "=== Section 11: one logical agent is not an ambiguity (epic-16 w2 S3, field 2026-08-11) ==="
+section "Section 11: one logical agent is not an ambiguity (epic-16 w2 S3, field 2026-08-11)"
 # ============================================================
 #
 # WHY THIS SECTION EXISTED. The scan walked every session directory of the project, and one
@@ -1097,8 +1082,4 @@ expect_contains "…listing an address the stop primitive accepts" \
 expect_absent "…and no machine line, because no evidence tier was shown" \
   "stop-check-observation/" "$OUT11B"
 
-# ============================================================
-echo ""
-echo "──────────────────────────────────────────────"
-echo "stop-check.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ]
+finish
