@@ -798,9 +798,19 @@ setup_load_state() {
     failed)
       # A real error, so it is reported the way the contract requires: the CLI's
       # own words first, unedited, then one line naming what to do about them.
+      #
+      # THE FOURTH RENDERER OF ONE ROUTE (bionic 1.4.4 fixit, phase 2). This line
+      # used to spell the repair by hand — "reinstall bionic with: claude plugin
+      # install <id> --scope user --yes" — which is the wording A-1 refutes:
+      # bionic is installed and registered, and a dependency is missing. The verb
+      # coincides, the description does not. It comes from deps.sh now, like the
+      # three renderers beside it, so a machine that re-points bionic's catalog
+      # moves all four together. What did NOT change is the order: the CLI's own
+      # error is still printed first and unedited, and this is still one line
+      # under it. Pinned by tests/fresh-home.test.sh Group 14.
       say "   bionic is installed but did not load. The CLI reports:"
       say "   ${err}"
-      say "   Fix: install what the message names, then start a new session — or reinstall bionic with: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes"
+      say "   Fix: install what the message names, then start a new session — or re-resolve bionic's dependencies: $(dep_core_repair_route)"
       action "bionic did not load: ${err}"
       ;;
     absent)
@@ -964,8 +974,16 @@ setup_dep_enable_verify() {
         fi
         ;;
       absent)
+        # TEXT ONLY, AND THE TEXT COMES FROM deps.sh (bionic 1.4.4 fixit, A-2).
+        # This arm installs nothing and never has — D1 rules that setup is not a
+        # second installer for a native row — so what it owes the reader is an
+        # accurate sentence, and the one it carried was not: "reinstall bionic"
+        # says bionic is broken when bionic is installed and registered and a
+        # dependency is missing. The verb is the same either way; the description
+        # is not. It is the same route doctor's THIRD PARTY row and its headline
+        # render, from the same function, so the three surfaces cannot drift.
         item "$SETUP_BAD" "$name" "not installed — it shipped with bionic, so this install is incomplete"
-        action "reinstall bionic so its dependencies resolve: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes (${name} is missing)"
+        action "re-resolve bionic's dependencies: $(dep_core_repair_route) (${name} is missing)"
         ;;
       *)
         item "$SETUP_NIL" "$name" "enabled-state unknown — the claude CLI or jq could not read it"

@@ -504,6 +504,37 @@ dep_names_marketplace() {  # <catalog>
   return 0
 }
 
+# THE REPAIR ROUTE FOR A MISSING CORE DEPENDENCY, and the one place it is
+# spelled (bionic 1.4.4 fixit, design "Option 1", Chris 2026-09-05).
+#
+# WHOSE REPAIR IT IS. A `core` row is not installed by anything in this file:
+# the CLI installs superpowers and agent-skills alongside bionic itself, because
+# `payload/.claude-plugin/plugin.json` declares them as bionic's dependencies and
+# the registry records them with `"auto": true`. D1 already rules that setup
+# never installs a native row, so `→ /bionic:setup` on such a row names a command
+# that plans nothing for it — the reader runs it, is told "nothing left to do",
+# and the ✗ is still there. The party that owns this repair is the CLI, and the
+# three surfaces that render the row (doctor's THIRD PARTY table, doctor's
+# headline absence line, setup's own absent arm) all defer to it from here.
+#
+# WHY THE RE-RUN AND NOT `claude plugin install <dep>@bionic`. Measured, CLI
+# 2.1.261, record/epic-21-v1-ladder/fixit-dep-repair-measurement.md: re-running
+# bionic's own install re-resolves EVERY declared dependency at once and
+# re-registers the restored one as bionic's (`"auto": true`), leaving the
+# registry byte-shaped like a clean install — which is what /bionic:remove's
+# teardown reads. Installing the dependency directly also repairs the machine but
+# registers it as a user-owned plugin, and `claude plugin update` does not repair
+# at all ("already at the latest version", nothing written).
+#
+# THE ID IS DERIVED, NEVER SPELLED. `${BIONIC_PLUGIN_ID:-bionic@${BIONIC_DEP_MARKETPLACE:-bionic}}`
+# is setup.sh's own derivation of `SETUP_PLUGIN_ID`, character for character: a
+# machine that re-points bionic's catalog moves both together, and two
+# independent defaults would move one and leave the other naming a plugin nobody
+# installed.
+dep_core_repair_route() {  # -> the command that re-resolves bionic's declared dependencies
+  echo "claude plugin install ${BIONIC_PLUGIN_ID:-bionic@${BIONIC_DEP_MARKETPLACE:-bionic}}"
+}
+
 # Reports any row whose field count is not exactly 7. Silence means the table
 # is well-formed; the suite asserts on the silence.
 dep_table_field_count_report() {
