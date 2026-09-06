@@ -721,6 +721,32 @@ expect_eq "11: …and says the file could not be read" "yes" \
 expect_eq "11: the default form reads its pattern as a fixed string, not an ERE" "yes" \
   "$(contains "$P_OUT" "FAIL: anchor: ^line [0-9]+$ matches 2 line(s) of anchor-fx.txt")"
 
+# THE DETAIL IS RIGHT IN BOTH DIRECTIONS (review-c C-7). Too FEW is the moved
+# anchor; too MANY is the opposite failure, and one string covering both told a
+# reader the mutation was a no-op when in fact it was about to rewrite two lines.
+# Every red in p-anchor.test.sh is the too-FEW direction (0 or 1 found against a
+# declared 1 or 2), so the plant below supplies the direction that fixture never
+# produced: an anchor declaring 1 over a pattern that matches 2.
+expect_eq "11: too FEW says the anchor moved" "yes" \
+  "$(contains "$P_OUT" "the anchor MOVED, so the mutation below is a no-op")"
+cat > "$SB/tests/p-anchor-over.test.sh" <<'PLANT_ANCHOR_OVER'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+FX="$(dirname "$0")/../anchor-fx.txt"
+section "an anchor that matches more than it declared"
+anchor "$FX" 'line' 1
+finish
+PLANT_ANCHOR_OVER
+plant_run p-anchor-over.test.sh
+expect_eq "11: too MANY is red as well" "1" "$P_RC"
+expect_eq "11: …and says the anchor matches MORE than it declared" "yes" \
+  "$(contains "$P_OUT" "the anchor matches MORE than it declared, so the mutation below strips or rewrites lines it was never meant to touch")"
+expect_eq "11: …and does NOT call an over-matching anchor a moved one" "no" \
+  "$(contains "$P_OUT" "the anchor MOVED")"
+expect_eq "11: …still reporting the count it actually found" "yes" \
+  "$(contains "$P_OUT" "found 2 line(s)")"
+
 # --- AC-29: the row is recorded BEFORE the mutation runs
 plant_run p-anchor-order.test.sh
 ANCHOR_ORDER_FAIL="$(printf '%s\n' "$P_OUT" | grep -n 'FAIL: anchor: moved-away' | head -1 | cut -d: -f1)"
