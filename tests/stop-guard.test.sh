@@ -31,26 +31,14 @@ HERE="${BIONIC_HOOKS_DIR}"
 GUARD="$HERE/stop-guard.sh"
 RECORDER="$HERE/execution-recorder.sh"
 OBSERVE="$HERE/stop-check.sh"
-PASS=0
-FAIL=0
-TOTAL=0
-
 # `cd … && pwd` normalizes the path: $TMPDIR carries a trailing slash on
 # macOS, and a doubled separator would slugify differently from the cwd the
 # script under test actually sees.
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/stop-guard-test.XXXXXX")" && pwd)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
-# ---------- assertions ----------
+# ---------- suite-specific assertions (not framework-owned) ----------
 
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-
-expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_matches()  { if grep -qE -- "$2" <<<"$3"; then ok "$1"; else no "$1" "no match: $2"; fi; }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
-expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
 expect_file()     { if [ -f "$2" ]; then ok "$1"; else no "$1" "no such file: $2"; fi; }
 expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2"; else ok "$1"; fi; }
 
@@ -62,7 +50,7 @@ expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2
 # research-code-map §6.2). Every helper this file calls is checked to exist as a
 # function before the first test runs, so a future undefined call fails the whole
 # suite loudly instead of vanishing.
-require_helpers ok no expect_status expect_contains expect_matches expect_absent \
+require_helpers ok no expect_status expect_contains expect_regex expect_absent \
   expect_empty expect_file expect_no_file expect_eq
 
 # ---------- fixtures ----------
@@ -363,10 +351,7 @@ order_stop() {  # <repo> <sid> <target> [--at <epoch>]
   return 0
 }
 
-# ============================================================
-echo ""
-echo "=== Section 1: the hot path — relevance before any plan walk (checklist A7) ==="
-# ============================================================
+section "Section 1: the hot path — relevance before any plan walk (checklist A7)"
 
 IFS='|' read -r W1_REPO W1_TR W1_SUB <<< "$(make_world w1 yes)"
 plant_agent "$W1_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer"
@@ -405,10 +390,7 @@ else
   no "relevance check precedes the plan walk in source order" "relevance@${_rel_line:-none} walk@${_walk_line:-none}"
 fi
 
-# ============================================================
-echo ""
-echo "=== Section 2: WRITING moved out — see tests/execution-recorder.test.sh ==="
-# ============================================================
+setup_section "Section 2: WRITING moved out — see tests/execution-recorder.test.sh"
 #
 # Everything that used to be asserted here — a run records its target, a mention
 # records nothing, an unresolvable or ambiguous target records nothing, the state
@@ -420,10 +402,7 @@ echo "=== Section 2: WRITING moved out — see tests/execution-recorder.test.sh 
 # every section below does exactly that: each one seeds through `observe()`, which
 # runs the real observation and the real recorder end to end.
 
-# ============================================================
-echo ""
-echo "=== Section 3: the observation record is VERSIONED and key-addressed (checklist A6) ==="
-# ============================================================
+section "Section 3: the observation record is VERSIONED and key-addressed (checklist A6)"
 
 IFS='|' read -r W3_REPO W3_TR W3_SUB <<< "$(make_world w3 yes)"
 plant_agent "$W3_SUB" "atarget-3333333333333333" "target"
@@ -444,10 +423,7 @@ sed -i.bak 's/^v1|/v9|/' "$W3_REPO/$STATE_REL"; rm -f "$W3_REPO/$STATE_REL.bak"
 run_guard "$(mk_stop_payload "$SID_A" "$W3_TR" "$W3_REPO" "target")"
 expect_status "an unknown schema VERSION refuses the stop" 2 "$GUARD_ST"
 
-# ============================================================
-echo ""
-echo "=== Section 4: fail directions at the stop gate (AC-10, TDD §7) ==="
-# ============================================================
+section "Section 4: fail directions at the stop gate (AC-10, TDD §7)"
 
 # --- before the active-wave verdict: OPEN and SILENT ---
 IFS='|' read -r N_REPO N_TR N_SUB <<< "$(make_world nowave no)"
@@ -536,7 +512,7 @@ expect_status "active wave + empty task_id: REFUSED" 2 "$GUARD_ST"
 
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "no-such-agent")"
 expect_status "active wave + unresolvable name (not address-shaped): PASSES THROUGH (T4)" 0 "$GUARD_ST"
-expect_matches "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
+expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
 
 # Ambiguity: two live agents answering to the same name — two lines in the Teammates block,
 # which is what two sessions in one root launching same-named agents looks like (D2′).
@@ -572,10 +548,7 @@ observe "$SID_B" "$W5_TR" "$W5_REPO" "quiet-reviewer"
 run_guard "$(mk_stop_payload "$SID_A" "$W5_TR" "$W5_REPO" "quiet-reviewer")"
 expect_status "another session's observation does not discharge my stop" 2 "$GUARD_ST"
 
-# ============================================================
-echo ""
-echo "=== Section 4a: unsupervised-target passthrough (T4, AC-6) ==="
-# ============================================================
+section "Section 4a: unsupervised-target passthrough (T4, AC-6)"
 #
 # scan_subagent_dirs only ever iterates agent-*.meta.json — the Agent tool's own
 # bookkeeping. A background bash task id never gets one (A-D4), so MATCH_COUNT
@@ -590,7 +563,7 @@ echo "=== Section 4a: unsupervised-target passthrough (T4, AC-6) ==="
 # no agent metadata and wears no address shape: PASSES THROUGH.
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "t5triyxvo")"
 expect_status "a bash-task-shaped target with no metadata: PASSES THROUGH" 0 "$GUARD_ST"
-expect_matches "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
+expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
 
 # (b) An addressing-form target (`name@session-xxxx`) with no metadata IS
 # address-shaped: stays REFUSED, the verbatim unresolved-target message unchanged.
@@ -619,10 +592,7 @@ run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "hushed-reviewer")"
 expect_status "a supervised named target still engages the full guard path: REFUSED for want of an observation" 2 "$GUARD_ST"
 expect_absent "…and this is NOT the passthrough branch" "PASSTHROUGH" "$GUARD_ERR"
 
-# ============================================================
-echo ""
-echo "=== Section 5: D-1 — freshness by ACTIVITY BOUNDARY, no clocks (AC-4) ==="
-# ============================================================
+section "Section 5: D-1 — freshness by ACTIVITY BOUNDARY, no clocks (AC-4)"
 
 IFS='|' read -r D1_REPO D1_TR D1_SUB <<< "$(make_world d1 yes)"
 plant_agent "$D1_SUB" "aworker-7777777777777777" "worker"
@@ -681,10 +651,7 @@ expect_status "long exchange: beta woke up — its earlier observation is stale"
 run_guard "$(mk_stop_payload "$SID_A" "$LX_TR" "$LX_REPO" "gamma")"
 expect_status "long exchange: gamma's own observation survives the others" 0 "$GUARD_ST"
 
-# ============================================================
-echo ""
-echo "=== Section 6: D-2 — one observation, one stop (AC-5) ==="
-# ============================================================
+section "Section 6: D-2 — one observation, one stop (AC-5)"
 
 IFS='|' read -r D2R_REPO D2R_TR D2R_SUB <<< "$(make_world d2 yes)"
 plant_agent "$D2R_SUB" "arunner-dddddddddddddddd" "runner"
@@ -715,10 +682,7 @@ expect_status "the stale stop is refused" 2 "$GUARD_ST"
 expect_contains "a REFUSED stop consumes nothing" \
   "abusy-eeeeeeeeeeeeeeee" "$(cat "$D2B_REPO/$STATE_REL" 2>/dev/null)"
 
-# ============================================================
-echo ""
-echo "=== Section 6a: the refusal's Fix line is runnable AS PRINTED (R2) ==="
-# ============================================================
+section "Section 6a: the refusal's Fix line is runnable AS PRINTED (R2)"
 #
 # The ownership table names one test for fix-command text across TWO rendering
 # gates, and it drove only the start gate's (Step-6 duplication review, row 5).
@@ -750,10 +714,7 @@ else
 fi
 expect_absent "running the fix line as printed produces no usage error" "Usage:" "$R2_OUT"
 
-# ============================================================
-echo ""
-echo "=== Section 6b: the lock and the consume — the failure paths (C3, S2) ==="
-# ============================================================
+section "Section 6b: the lock and the consume — the failure paths (C3, S2)"
 #
 # This region shipped with no callsite at all (Step-6 architecture review A4),
 # and both a fail-OPEN consume (C3) and an unbounded spin (S2) lived in it.
@@ -826,10 +787,7 @@ else
 fi
 chmod 700 "$S2_REPO/.bionic/tmp"
 
-# ============================================================
-echo ""
-echo "=== Section 7: hostile repo (AC-8, TDD §8, checklist A2/A3) ==="
-# ============================================================
+section "Section 7: hostile repo (AC-8, TDD §8, checklist A2/A3)"
 
 # Predictable temp names + symlink-following writes were a PROVEN arbitrary-file
 # overwrite in the discarded run (corr-sec S1/S2). Both levels are replanted.
@@ -891,7 +849,7 @@ expect_contains "…because it was not read through: the id claim is never made"
   "no agent id" "$GUARD_ERR"
 
 # Unpredictable temp names: mktemp with an X-template, and no PID-based name.
-expect_matches "temp files use an mktemp X-template" 'mktemp.*XXXXXX' "$(cat "$GUARD")"
+expect_regex "temp files use an mktemp X-template" 'mktemp.*XXXXXX' "$(cat "$GUARD")"
 expect_absent "no PID-based temp filename" '.tmp.$$' "$(cat "$GUARD")"
 
 # The gate reads the working log; it must never quote it. (§8 keeps that
@@ -901,10 +859,7 @@ printf '{"type":"assistant","message":{"content":[{"type":"text","text":"CANARY_
 run_guard "$(mk_stop_payload "$SID_A" "$S_TR" "$S_REPO" "victim")"
 expect_absent "the refusal prints no working-log contents" "CANARY_LOG_BODY" "$GUARD_ERR"
 
-# ============================================================
-echo ""
-echo "=== Section 8: D-3 — a stop is discharged only by the STOPPER'S OWN look (AC-4) ==="
-# ============================================================
+section "Section 8: D-3 — a stop is discharged only by the STOPPER'S OWN look (AC-4)"
 #
 # The borrowed look. D-1 makes an observation perishable, but nothing made it
 # ATTRIBUTABLE: any record for the target discharged any actor's stop, so a
@@ -952,10 +907,7 @@ sed -i.bak 's/|observer=[^|]*//' "$SC_REPO/$STATE_REL"; rm -f "$SC_REPO/$STATE_R
 run_guard "$(mk_stop_payload "$SID_A" "$SC_TR" "$SC_REPO" "worker")"
 expect_status "a record carrying no observer discharges nothing" 2 "$GUARD_ST"
 
-# ============================================================
-echo ""
-echo "=== Section 9: D-6 — the contracted progress artifact is a second activity channel (AC-5) ==="
-# ============================================================
+section "Section 9: D-6 — the contracted progress artifact is a second activity channel (AC-5)"
 #
 # D-1 watched ONE channel: the working log. An agent that spends 40 minutes
 # inside a single tool call writes nothing to it, so "dormant since your look"
@@ -1045,10 +997,7 @@ observe "$SID_A" "$PU_TR" "$PU_REPO" "runner" "--progress" "$PROG_REL"
 run_guard "$(mk_stop_payload "$SID_A" "$PU_TR" "$PU_REPO" "runner")"
 expect_status "observing the contracted channel as instructed re-arms the stop" 0 "$GUARD_ST"
 
-# ============================================================
-echo ""
-echo "=== Section 10: AC-9 — resolution IS the live set, and the double file is not an ambiguity ==="
-# ============================================================
+section "Section 10: AC-9 — resolution IS the live set, and the double file is not an ambiguity"
 #
 # WHAT THIS SECTION USED TO BE, and why it is gone. It drove the OWNING-DIRECTORY rule: an
 # agent whose `agent-<id>.meta.json` sat under another session's `subagents/` was FOREIGN and
@@ -1126,7 +1075,7 @@ sg_roster_row "$TW_REPO" "$SID_A" "twin" "atwin-1111111111111111"
 run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin")"
 expect_status "a name the live set carries twice: REFUSED" 2 "$GUARD_ST"
 expect_contains "…the refusal counts them" "2 live agents answer to 'twin'" "$GUARD_ERR"
-expect_matches "…and prints both entries as the harness reported them" \
+expect_regex "…and prints both entries as the harness reported them" \
   'twin\|bionic:senior-implementor\|running' "$GUARD_ERR"
 run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin@session-${SID_A:0:8}")"
 expect_status "…and the alias spelling of an ambiguous name is refused too" 2 "$GUARD_ST"
@@ -1145,7 +1094,7 @@ run_guard "$(mk_stop_payload "$SID_A" "$RX_TR" "$RX_REPO" "a.b")"
 expect_status "a name with a regex metacharacter, two live entries: REFUSED" 2 "$GUARD_ST"
 expect_contains "…the refusal counts exactly the two of that exact name" \
   "2 live agents answer to 'a.b'" "$GUARD_ERR"
-expect_matches "…and prints both entries as the harness reported them" \
+expect_regex "…and prints both entries as the harness reported them" \
   'a\.b\|bionic:senior-implementor\|running' "$GUARD_ERR"
 expect_absent "…never widened to the bystander name the dot happens to match" \
   "axb" "$GUARD_ERR"
@@ -1189,10 +1138,7 @@ run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "unrostered@team")"
 expect_status "name@team is not an accepted alias: REFUSED" 2 "$GUARD_ST"
 expect_contains "…and the refusal names the accepted form" "@session-" "$GUARD_ERR"
 
-# ============================================================
-echo ""
-echo "=== Section 11: FACTS DISCHARGE THE STOP (epic-16 w2 S3, AC-1/AC-2, R2) ==="
-# ============================================================
+section "Section 11: FACTS DISCHARGE THE STOP (epic-16 w2 S3, AC-1/AC-2, R2)"
 #
 # The ceremony was never the point — the point was that a stop not destroy work
 # nobody had looked at. When the contract has LANDED, the artifact on disk is a
@@ -1311,10 +1257,7 @@ expect_status "an ack over a name no roster row carries does not discharge the s
 # The paired positive is one case up: the SAME ack verb, over a name that HAS a row, passes
 # the same gate silently ("ACKED row: the stop passes though the contract is UNMET").
 
-# ============================================================
-echo ""
-echo "=== Section 12: the USER-ORDERED stop executes, and reports (R3, AC-2) ==="
-# ============================================================
+section "Section 12: the USER-ORDERED stop executes, and reports (R3, AC-2)"
 #
 # A human order is not evidence and it is not a discharge of the contract: it is
 # an INSTRUCTION, and the gate's job in front of one is to get out of the way and
@@ -1353,10 +1296,7 @@ order_stop "$O_REPO" "$SID_A" "stale-order" --at $(( $(date -u +%s) - 86400 ))
 run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "stale-order")"
 expect_status "an EXPIRED order does not discharge: REFUSED" 2 "$GUARD_ST"
 
-# ============================================================
-echo ""
-echo "=== Section 13: name@session-<launcher> is an ALIAS, checked against that roster (AC-11) ==="
-# ============================================================
+section "Section 13: name@session-<launcher> is an ALIAS, checked against that roster (AC-11)"
 #
 # The suffix is the spelling the platform's stop primitive takes for a teammate, and it is
 # the one an operator can actually type (field data 2026-08-11). It is NOT a second way to
@@ -1400,10 +1340,7 @@ expect_contains "…including this session's own" "roamer@session-${SID_A:0:8}" 
 run_guard "$(mk_stop_payload "$SID_A" "$AL_TR" "$AL_REPO" "roamer@session-${SID_A:0:8}")"
 expect_status "the alias naming THIS session, whose roster carries the name: PERMITTED" 0 "$GUARD_ST"
 
-# ============================================================
-echo ""
-echo "=== Section 14: an ADOPTED agent is stoppable BY BARE NAME (the /clear defect, B-2) ==="
-# ============================================================
+section "Section 14: an ADOPTED agent is stoppable BY BARE NAME (the /clear defect, B-2)"
 #
 # THE DEFECT, from the field (epic-20 W1, 2026-08-30; re-diagnosed for this wave as B-2).
 # After a `/clear`+resume the agents a predecessor launched are still running — the same
@@ -1458,10 +1395,7 @@ run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "stranger@session-${SI
 expect_status "an agent on disk but absent from the live set: REFUSED" 2 "$GUARD_ST"
 expect_contains "…because it is not live, whatever the disk says" "is not live" "$GUARD_ERR"
 
-# ============================================================
-echo ""
-echo "=== Section 15: the answer must be FRESH, and a refusal names the fix (AC-9, D1′) ==="
-# ============================================================
+section "Section 15: the answer must be FRESH, and a refusal names the fix (AC-9, D1′)"
 #
 # The live set is only a statement about NOW if it was recorded this turn. A stale answer
 # still prints its teammates — S4's reader says so deliberately — so this gate must branch on
@@ -1485,7 +1419,7 @@ run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
 expect_status "a STALE answer refuses the stop even though the target is in it" 2 "$GUARD_ST"
 expect_contains "…and the refusal names the fix" "call ListAgents" "$GUARD_ERR"
 expect_contains "…and says the answer is stale" "stale" "$GUARD_ERR"
-expect_matches "…and prints the newest answer's age" 'age' "$GUARD_ERR"
+expect_regex "…and prints the newest answer's age" 'age' "$GUARD_ERR"
 
 # NONE — no ListAgents answer in the transcript at all.
 : > "$FR_TR"
@@ -1512,10 +1446,7 @@ plant_live "$FR_TR" fresh "worker"
 run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
 expect_status "…and with the answer restored the same stop is PERMITTED again" 0 "$GUARD_ST"
 
-# ============================================================
-echo ""
-echo "=== Section 16: an IDLE agent is exactly the one you stop (spec R2, AC-27; S16) ==="
-# ============================================================
+section "Section 16: an IDLE agent is exactly the one you stop (spec R2, AC-27; S16)"
 #
 # S16 splits the two questions the live set is asked. The DISPATCH BUDGET stops counting a
 # row once its agent reads `idle` — a teammate that finished its turn and was never stopped
@@ -1570,8 +1501,4 @@ expect_status "an IDLE agent with an UNMET contract still meets the ceremony: RE
 expect_contains "…with the observation refusal, not a resolution one" \
   "No observation has been recorded" "$GUARD_ERR"
 
-# ============================================================
-echo ""
-echo "──────────────────────────────────────────────"
-echo "stop-guard.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ]
+finish

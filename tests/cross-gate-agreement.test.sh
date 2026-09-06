@@ -3845,9 +3845,63 @@ fn_code() {  # <file> <function name> -> fn_body with pure-comment lines strippe
   fn_body "$1" "$2" | grep -v '^#'
 }
 
+# THE LOOP THE COMMENT ABOVE PROMISED (wave-01 S11, A-25). Until this slice this section
+# defined fn_code, said what the comparison would show, and made no comparison at all — an
+# agreement suite asserting nothing, which is this wave's thesis in miniature. The five the
+# comment spoke of is SEVEN as measured: every function hooks/session-poker.sh's own
+# "DELIBERATELY DUPLICATED" header block introduces has a same-named copy in
+# hooks/session-sweeper.sh, and all seven agree as code today. (session-poker.sh:429 calls
+# the family "the six"; the count in that comment is one short of the file. Reported, not
+# edited here — this slice's diff is the four suites.)
+SPO_DUPES="now_epoch iso_now file_mtime iso_epoch line_field clean parse_seconds"
+
+for _fn in $SPO_DUPES; do
+  _poke_code="$(fn_code "$SPO" "$_fn")"
+  _swee_code="$(fn_code "$SWEEPER" "$_fn")"
+  # EXTRACTED, NOT MISSING. fn_code returns the empty string for a name neither file
+  # defines, and two empty strings compare equal — the vacuity the comment below warns
+  # about, made impossible per function rather than argued away.
+  expect_nonempty "§O the poker's ${_fn}() body is extractable at all" "$_poke_code"
+  expect_nonempty "§O the sweeper's ${_fn}() body is extractable at all" "$_swee_code"
+  expect_eq "§O the poker's ${_fn}() is the sweeper's, code for code" "$_swee_code" "$_poke_code"
+done
+
 # The discriminating half: parse_seconds is NOT byte-identical (the comments legitimately
 # differ), which is the whole reason this loop compares code rather than bytes. Without this
-# the five expect_eq's above could be silently vacuous by fn_code stripping everything.
+# the seven expect_eq's above could be silently vacuous by fn_code stripping everything.
+expect_ne "§O parse_seconds is NOT byte-identical — the comments legitimately differ" \
+  "$(fn_body "$SWEEPER" parse_seconds)" "$(fn_body "$SPO" parse_seconds)"
+expect_eq "§O …and it IS code-identical, which is what the loop above compares" \
+  "$(fn_code "$SWEEPER" parse_seconds)" "$(fn_code "$SPO" parse_seconds)"
+# …and the byte difference really is comments alone: the two bodies differ, and every line
+# present in one and absent from the other starts with `#`.
+expect_empty "§O …and every line the two bodies differ by is a comment line" \
+  "$(diff <(fn_body "$SWEEPER" parse_seconds) <(fn_body "$SPO" parse_seconds) \
+      | grep -E '^[<>]' | sed 's/^[<>] //' | grep -v '^#')"
+expect_nonempty "§O …over a diff that really is non-empty (the filter is not eating it all)" \
+  "$(diff <(fn_body "$SWEEPER" parse_seconds) <(fn_body "$SPO" parse_seconds) | grep -cE '^[<>]')"
+
+# THE MUTATION ARM. A pin over two files that agree today passes just as loudly if the
+# comparison itself is broken, so one copy is DOCTORED in a scratch tree and the same
+# comparison is re-run against it: `head -1` becomes `tail -1` inside line_field, which is
+# a real drift shape (the two readers would disagree about which of two rows a key comes
+# from). The shipped files are never written to.
+SPO_MUT="$SANDBOX/o-mutant-poker.sh"
+# The needle is `line_field`'s one distinguishing pipeline stage, and it occurs exactly
+# once in the file — asserted below rather than assumed, because a sed that matched
+# nothing would leave an identical copy and every row after it would be vacuous.
+SPO_NEEDLE='grep "^$2=" | head -1 | cut -d= -f2-'
+SPO_MUT_NEEDLE='grep "^$2=" | tail -1 | cut -d= -f2-'
+expect_eq "§O the mutation's needle occurs exactly once in the poker" "1" \
+  "$(grep -cF "$SPO_NEEDLE" "$SPO")"
+sed "s@$(printf '%s' "$SPO_NEEDLE" | sed 's/[\\&@]/\\&/g')@$(printf '%s' "$SPO_MUT_NEEDLE" | sed 's/[\\&@]/\\&/g')@" \
+  "$SPO" > "$SPO_MUT"
+expect_eq "§O the mutation applies (line_field's body has not moved)" "no" \
+  "$(cmp -s "$SPO" "$SPO_MUT" && echo yes || echo no)"
+expect_ne "§O …and the SAME comparison calls the doctored copy a drift" \
+  "$(fn_code "$SWEEPER" line_field)" "$(fn_code "$SPO_MUT" line_field)"
+expect_eq "§O …while every OTHER primitive in the doctored copy still agrees (one row moved, not all)" \
+  "$(fn_code "$SWEEPER" parse_seconds)" "$(fn_code "$SPO_MUT" parse_seconds)"
 
 # ============================================================
 section "P — the three roster folds agree that the LATER row wins (ap review P-1)"
@@ -6013,6 +6067,21 @@ expect_eq "mutation B applies" "no" \
   "$(cmp -s "$LIB_DIR_SRC/agents.sh" "$LA_MUT_F/scripts/lib/agents.sh" && echo yes || echo no)"
 LA_MUTF_SET=$( . "$LA_MUT_F/scripts/lib/agents.sh" >/dev/null 2>&1; live_agents "$LA_TR" 2>/dev/null )
 expect_empty "…and it really does drop the idle rows from the set" "$LA_MUTF_SET"
+# THE PAIRED POSITIVE FOR THAT ABSENCE (wave-01 S11, AC-14 / A-10a). This `expect_empty`
+# was the call the framework did not define: for as long as the suite carried no
+# `expect_empty`, it was a `command not found` on a discarded stderr, counted nothing, and
+# an 818/818 green covered it. Now that it asserts, it is a NEGATIVE assertion over a
+# mutant extractor — and an extractor that returns the empty string for EVERY transcript
+# would satisfy it just as well as one that filters. The same mutant, over the same
+# builder, against an answer whose teammates are RUNNING, has to come back non-empty.
+LA_TR_RUN="$LA_PROJ/$SID_B.jsonl"
+rm -f "${LA_TR_RUN%.jsonl}.names"
+cg_live "$LA_TR_RUN" "la-budget:running" "la-target:running"
+LA_MUTF_RUN=$( . "$LA_MUT_F/scripts/lib/agents.sh" >/dev/null 2>&1; live_agents "$LA_TR_RUN" 2>/dev/null )
+expect_nonempty "…while the SAME mutant extractor over a RUNNING answer returns a set" \
+  "$LA_MUTF_RUN"
+expect_contains "…carrying the row it kept, so the emptiness above is a filter and not a blank" \
+  "la-budget|bionic:implementor|running" "$LA_MUTF_RUN"
 
 LA_TREE="$LA_MUT_F"
 LA_G5B=$(la_guard la-target)
@@ -7456,6 +7525,46 @@ expect_eq "S13.5 …which is what awk needs for a key of this length" \
   "16" "$(( $(printf '%s' 'suites_allowed=' | wc -c | tr -d ' ') + 1 ))"
 
 # ============================================================
+# --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
+#
+# THE OWNERSHIP-TABLE ROW THIS SLICE ADDS. "Impact of a change" (the spec's ## Design
+# ownership table) already has one owner — `tests/lib/impact.sh` — rendered at three
+# surfaces: `suites_allowed=` on the roster row, the brief's `Files:`, and now the landing
+# verdict. This section pins that third rendering the way §S13.4/§S13.5 pin the first two:
+# ONE reader of a row's `files=` for reconciliation, ONE place that computes the diff, ONE
+# row -> worktree mapping (never re-derived), and ONE re-ask of the SAME `impact-command`
+# key S13's dispatch wall already reads — never a second config key or a second derivation.
+S18_LG="$BIONIC_HOOKS_DIR/landing-gate.sh"
+S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+
+# --- §S18.1 exactly one hook computes a Files: diff, and it is landing-gate.sh ---
+expect_eq "S18.1 exactly one hook diffs a worktree by name-only" "1" \
+  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh | wc -l | tr -d ' ')"
+expect_eq "S18.1 …and it is landing-gate.sh" "1" \
+  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh | grep -c 'landing-gate\.sh$')"
+
+# --- §S18.2 the row -> worktree mapping has ONE definition (worktree.sh's `worktree_for_row`,
+# payload/scripts/lib/worktree.sh's own docblock: "a second spelling of it there is a second
+# definition of which tree belongs to whom") and landing-gate.sh calls it rather than
+# re-deriving the mapping itself ---
+expect_eq "S18.2 worktree_for_row is defined in exactly one library file" "1" \
+  "$(grep -l '^worktree_for_row()' "$S18_WT_LIB_DIR"/*.sh | wc -l | tr -d ' ')"
+expect_eq "S18.2 …and it is worktree.sh" "1" \
+  "$(grep -l '^worktree_for_row()' "$S18_WT_LIB_DIR"/*.sh | grep -c 'worktree\.sh$')"
+expect_eq "S18.2 landing-gate.sh calls the shared mapping" "1" \
+  "$(grep -cF 'worktree_for_row "$repo" "$name"' "$S18_LG")"
+expect_eq "S18.2 …and never redefines it" "0" \
+  "$(grep -c '^worktree_for_row()' "$S18_LG")"
+expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
+  "$(grep -cF 'BIONIC_LIB_WANT="root.sh run.sh session.sh worktree.sh"' "$S18_LG")"
+
+# --- §S18.3 the reconciliation re-asks the SAME impact-command key S13's dispatch wall
+# reads — never a second config key, never a second derivation command ---
+expect_eq "S18.3 landing-gate.sh reads impact-command exactly once" "1" \
+  "$(grep -cF 'config_value "$REPO" "impact-command" ""' "$S18_LG")"
+expect_eq "S18.3 …the same call shape dispatch-preflight.sh uses" "1" \
+  "$(grep -cF 'config_value "$REPO" "impact-command" ""' "$S13_DP")"
+
 # ============================================================
 section "S17 — no private builder of a shared shape remains (AC-28)"
 # ============================================================
