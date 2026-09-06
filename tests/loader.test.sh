@@ -54,6 +54,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -62,10 +63,10 @@ LOADER_LIB="${BIONIC_LOADER_LIB_UNDER_TEST:-${PAYLOAD}/scripts/lib/loader.sh}"
 MARK_BEGIN='# --- bionic-loader/v2 BEGIN'
 MARK_END='# --- bionic-loader/v2 END'
 
-PASS=0; FAIL=0; TOTAL=0
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); TOTAL=$((TOTAL + 1)); }
-fail() { echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; FAIL=$((FAIL + 1)); TOTAL=$((TOTAL + 1)); }
-eq()   { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "want [$3] got [$2]"; fi; }
+# pass/fail were pure-rename shadows of the framework's ok/no (identical
+# semantics) — deleted (S7, AC-12). eq() is a suite-specific helper (not an
+# owned name) built on the framework's ok/no.
+eq()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "want [$3] got [$2]"; fi; }
 
 # ── The subject must exist before anything claims to have tested it ──────────
 if [ ! -r "$LOADER_LIB" ]; then
@@ -82,28 +83,28 @@ FAKE_HOME="$WORK/nohome"; mkdir -p "$FAKE_HOME"
 BLOCK="$WORK/block.txt"
 ( set +u; . "$LOADER_LIB" && bionic_loader_pin ) > "$BLOCK" 2>"$WORK/pin.err"
 if [ ! -s "$BLOCK" ]; then
-  fail "0.1 bionic_loader_pin prints the canonical block" "empty; stderr: $(cat "$WORK/pin.err")"
+  no "0.1 bionic_loader_pin prints the canonical block" "empty; stderr: $(cat "$WORK/pin.err")"
 else
-  pass "0.1 bionic_loader_pin prints the canonical block"
+  ok "0.1 bionic_loader_pin prints the canonical block"
 fi
 eq "0.2 first line is the BEGIN marker"  "$(head -1 "$BLOCK")" "$MARK_BEGIN"
 eq "0.3 last line is the END marker"     "$(tail -1 "$BLOCK")" "$MARK_END"
 if [ "$(grep -c -- "^${MARK_BEGIN}\$" "$BLOCK")" = "1" ] && [ "$(grep -c -- "^${MARK_END}\$" "$BLOCK")" = "1" ]; then
-  pass "0.4 exactly one marker pair in the block"
+  ok "0.4 exactly one marker pair in the block"
 else
-  fail "0.4 exactly one marker pair in the block"
+  no "0.4 exactly one marker pair in the block"
 fi
 if [ "$(grep -c -- "^${MARK_BEGIN}\$" "$LOADER_LIB")" = "1" ]; then
-  pass "0.5 loader.sh carries the marker literally, once"
+  ok "0.5 loader.sh carries the marker literally, once"
 else
-  fail "0.5 loader.sh carries the marker literally, once"
+  no "0.5 loader.sh carries the marker literally, once"
 fi
 # Sourcing the carrier must define the function and do nothing else — in
 # particular it must not set BIONIC_LIB, which would mean the block ran.
 if ( set +u; . "$LOADER_LIB" >/dev/null 2>&1; [ -z "${BIONIC_LIB:-}" ] && [ -z "${BIONIC_LIB_MISSING:-}" ] ); then
-  pass "0.6 sourcing loader.sh does not execute the block"
+  ok "0.6 sourcing loader.sh does not execute the block"
 else
-  fail "0.6 sourcing loader.sh does not execute the block" "BIONIC_LIB/BIONIC_LIB_MISSING set on source"
+  no "0.6 sourcing loader.sh does not execute the block" "BIONIC_LIB/BIONIC_LIB_MISSING set on source"
 fi
 
 # ── fixture builder ─────────────────────────────────────────────────────────
@@ -147,9 +148,9 @@ chmod +x "$SHIM_BIN/jq"
 # `bash -n` on a built hook — the block must parse where it is actually pasted.
 mkhook "$WORK/parse" "$REPORT_TAIL"
 if bash -n "$WORK/parse/hooks/probe.sh" 2>"$WORK/parse.err"; then
-  pass "0.7 the block parses as bash inside a hook"
+  ok "0.7 the block parses as bash inside a hook"
 else
-  fail "0.7 the block parses as bash inside a hook" "$(cat "$WORK/parse.err")"
+  no "0.7 the block parses as bash inside a hook" "$(cat "$WORK/parse.err")"
 fi
 
 # ── §A — candidate (1) wins, and (2)/(3) are never evaluated ────────────────
@@ -161,9 +162,9 @@ eq "A1.1 installed spelling: hook exits 0"     "$A1RC" "0"
 eq "A1.2 installed spelling: BIONIC_LIB"       "$(field "$WORK/a1.out" LIB)" "$A1/hooks/../scripts/lib"
 eq "A1.3 installed spelling: nothing missing"  "$(field "$WORK/a1.out" MISSING)" ""
 if [ -f "$JQ_MARK" ]; then
-  fail "A1.4 candidates (2)/(3) never evaluated" "jq ran: $(cat "$JQ_MARK")"
+  no "A1.4 candidates (2)/(3) never evaluated" "jq ran: $(cat "$JQ_MARK")"
 else
-  pass "A1.4 candidates (2)/(3) never evaluated"
+  ok "A1.4 candidates (2)/(3) never evaluated"
 fi
 
 A2="$WORK/a2"; mkdir -p "$A2/payload/scripts/lib"; : > "$A2/payload/scripts/lib/git-argv.sh"
@@ -173,9 +174,9 @@ runhook "$A2" "$WORK/a2-plugins" "$SHIM_BIN" > "$WORK/a2.out" 2>"$WORK/a2.err"; 
 eq "A2.1 repo spelling: hook exits 0"    "$A2RC" "0"
 eq "A2.2 repo spelling: BIONIC_LIB"      "$(field "$WORK/a2.out" LIB)" "$A2/hooks/../payload/scripts/lib"
 if [ -f "$JQ_MARK" ]; then
-  fail "A2.3 repo spelling is still class (1) — no jq" "jq ran: $(cat "$JQ_MARK")"
+  no "A2.3 repo spelling is still class (1) — no jq" "jq ran: $(cat "$JQ_MARK")"
 else
-  pass "A2.3 repo spelling is still class (1) — no jq"
+  ok "A2.3 repo spelling is still class (1) — no jq"
 fi
 
 # A3 — the shim is reachable. Without this, A1.4/A2.3 could pass on a block that
@@ -186,9 +187,9 @@ printf '%s\n' '{"plugins":{"bionic@bionic":[{"installPath":"/nowhere"}]}}' > "$A
 rm -f "$JQ_MARK"
 runhook "$A3" "$A3PD" "$SHIM_BIN" > "$WORK/a3.out" 2>"$WORK/a3.err"
 if [ -f "$JQ_MARK" ]; then
-  pass "A3.1 the jq shim is reachable when the registry IS consulted"
+  ok "A3.1 the jq shim is reachable when the registry IS consulted"
 else
-  fail "A3.1 the jq shim is reachable when the registry IS consulted" "shim never fired — A1.4/A2.3 prove nothing"
+  no "A3.1 the jq shim is reachable when the registry IS consulted" "shim never fired — A1.4/A2.3 prove nothing"
 fi
 
 # ── §B — candidate (2): the marketplace source tree from the registry ───────
@@ -238,8 +239,8 @@ eq "D.2 BIONIC_LIB empty"                             "$(field "$WORK/d.out" LIB
 eq "D.3 BIONIC_LIB_MISSING names the wanted library"  "$(field "$WORK/d.out" MISSING)" "git-argv.sh"
 DCANDS="$(field "$WORK/d.out" CANDS)"
 case "$DCANDS" in
-  *"$D/hooks/../scripts/lib"*) pass "D.4 candidate list records what was tried" ;;
-  *) fail "D.4 candidate list records what was tried" "CANDS=[$DCANDS]" ;;
+  *"$D/hooks/../scripts/lib"*) ok "D.4 candidate list records what was tried" ;;
+  *) no "D.4 candidate list records what was tried" "CANDS=[$DCANDS]" ;;
 esac
 
 # ── §H — the BIONIC_LIB_WANT contract ADOPT writes ─────────────────────────
@@ -268,9 +269,9 @@ for t in dirname sed head cat printf env; do
   _p="$(command -v "$t" 2>/dev/null)" && ln -sf "$_p" "$NOJQ_BIN/$t"
 done
 if command -v jq >/dev/null 2>&1 && [ ! -e "$NOJQ_BIN/jq" ]; then
-  pass "H.0 the no-jq fixture really lacks jq"
+  ok "H.0 the no-jq fixture really lacks jq"
 else
-  fail "H.0 the no-jq fixture really lacks jq"
+  no "H.0 the no-jq fixture really lacks jq"
 fi
 env HOME="$FAKE_HOME" BIONIC_PLUGINS_DIR="$H2PD" PATH="$NOJQ_BIN" /bin/bash "$H2/hooks/probe.sh" > "$WORK/h2.out" 2>"$WORK/h2.err"; H2RC=$?
 eq "H.2 no jq on PATH: the block still exits 0"        "$H2RC" "0"
@@ -286,8 +287,8 @@ eq "E.3 fail_open prints exactly one stderr line" "$(wc -l < "$WORK/e.err" | tr 
 EMSG="$(cat "$WORK/e.err")"
 for needle in "farm-out-reminder" "git-argv.sh" "$E/hooks/../scripts/lib" "/bionic:doctor"; do
   case "$EMSG" in
-    *"$needle"*) pass "E.4 fail_open line names: $needle" ;;
-    *) fail "E.4 fail_open line names: $needle" "line=[$EMSG]" ;;
+    *"$needle"*) ok "E.4 fail_open line names: $needle" ;;
+    *) no "E.4 fail_open line names: $needle" "line=[$EMSG]" ;;
   esac
 done
 
@@ -325,21 +326,21 @@ for needle in \
   "bash $FROOT/scripts/doctor.sh" \
   "bash $FROOT/scripts/setup.sh"; do
   case "$FMSG" in
-    *"$needle"*) pass "F.10 refusal names: $needle" ;;
-    *) fail "F.10 refusal names: $needle" ;;
+    *"$needle"*) ok "F.10 refusal names: $needle" ;;
+    *) no "F.10 refusal names: $needle" ;;
   esac
 done
 case "$(cat "$WORK/f6.out")" in
-  *REACHED-PAST-FAIL-CLOSED*) fail "F.11 a refusal does not fall through to the hook body" ;;
-  *) pass "F.11 a refusal does not fall through to the hook body" ;;
+  *REACHED-PAST-FAIL-CLOSED*) no "F.11 a refusal does not fall through to the hook body" ;;
+  *) ok "F.11 a refusal does not fall through to the hook body" ;;
 esac
 
 # A permitted command must not reach the hook body either — the wall has no
 # library, so permitting means standing aside, not proceeding half-loaded.
 runhook "$F" "$FPD" "" "claude plugin update bionic@bionic" > "$WORK/f1.out" 2>"$WORK/f1.err"
 case "$(cat "$WORK/f1.out")" in
-  *REACHED-PAST-FAIL-CLOSED*) fail "F.12 a permit stands aside rather than proceeding" ;;
-  *) pass "F.12 a permit stands aside rather than proceeding" ;;
+  *REACHED-PAST-FAIL-CLOSED*) no "F.12 a permit stands aside rather than proceeding" ;;
+  *) ok "F.12 a permit stands aside rather than proceeding" ;;
 esac
 
 # ── §G — the allowlist is checked before any sourcing ──────────────────────
@@ -354,6 +355,4 @@ runhook "$G" "$WORK/g-plugins" "" "git push" > "$WORK/g.out" 2>"$WORK/g.err"; GR
 eq "G.1 the block itself never sources the library" "$(cat "$WORK/g.out")" ""
 eq "G.2 with a library present, fail_closed is the caller's choice, still exact-match" "$GRC" "2"
 
-echo
-echo "Gating: $PASS/$TOTAL passed"
-[ "$FAIL" -eq 0 ] || exit 1
+finish
