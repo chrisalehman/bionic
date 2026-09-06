@@ -7427,20 +7427,54 @@ expect_eq "S13.1 the first field is a suite BASENAME, never a path" "0" \
 expect_contains "S13.1 …and the suite that owns that file is in the answer" \
   "cmd-class.test.sh" "$(printf '%s\n' "$S13_RAW" | cut -f1 | tr '\n' ' ')"
 
-# --- §S13.2 the wall reduces that output the way this test does ---
+# --- §S13.2 the wall's OWN reduction, lifted out of the hook and run here ---
 #
-# The wall's reduction is `cut -f1 | sort -u`, spelled as an awk field-1 print. Reproduce it
-# here from the SAME raw output and require the same set the wall would record, so a change
-# to either side that stops them agreeing is red — a derivation that grew a third column, or
-# a wall that started keeping the reason.
-S13_SET=$(printf '%s\n' "$S13_RAW" | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
+# WHAT THIS USED TO BE, and why it changed (review-b B-6's sibling, B-3). The section was
+# titled as an agreement and asserted nothing about the wall: it re-typed the reduction, ran
+# it, and checked its own output for a colon, a tab and a duplicate. A self-check on this
+# test's own pipeline reads as the agreement pin for the derived set, so a future reader
+# weakening the real coverage would believe this still held the line.
+#
+# It is an agreement now. The two lines that build `suites_allowed=` are lifted OUT of
+# payload/hooks/dispatch-preflight.sh by text and run here over the same raw output, so a
+# change to the hook's spelling — a third column kept, a different sort, the trailing-space
+# trim dropped — is red HERE. The end-to-end coverage (a real dispatch, a real row) is
+# tests/dispatch-preflight.test.sh S27a and its mutation arm S27a2; this section is the
+# alphabet check that sits under it.
+S13_HOOK="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+expect_eq "S13.2 the hook this section reads is present" "yes" \
+  "$([ -r "$S13_HOOK" ] && echo yes || echo no)"
+# THE PRECONDITION OF THE LIFT (AC-29): the two lines are still there, exactly once each.
+anchor -E "$S13_HOOK" '^[[:space:]]*SUITES_ALLOWED=\$\(printf' 1
+anchor -E "$S13_HOOK" '^[[:space:]]*SUITES_ALLOWED="\$\{SUITES_ALLOWED% \}"' 1
+S13_REDUCTION=$(awk '/^[[:space:]]*SUITES_ALLOWED=\$\(printf/,/^[[:space:]]*SUITES_ALLOWED="\$\{SUITES_ALLOWED% \}"/' "$S13_HOOK")
+expect_eq "S13.2 the lift took exactly the two assignment lines" "2" \
+  "$(printf '%s\n' "$S13_REDUCTION" | grep -c 'SUITES_ALLOWED=')"
+expect_eq "S13.2 …and nothing else came with them" "0" \
+  "$(printf '%s\n' "$S13_REDUCTION" | grep -vc 'SUITES_ALLOWED=')"
+
+# The hook's own reduction, over the derivation's own output.
+S13_HOOK_SET=$(_impact_out="$S13_RAW"; eval "$S13_REDUCTION"; printf '%s' "$SUITES_ALLOWED")
+# This test's reading of the same rule, spelled independently.
+S13_SET=$(printf '%s\n' "$S13_RAW" | cut -f1 | sort -u | tr '\n' ' ')
 S13_SET="${S13_SET% }"
+
+expect_nonempty "S13.2 the hook's reduction answered something (non-vacuity)" "$S13_HOOK_SET"
+expect_eq "S13.2 the wall's own reduction and this test's agree, to the byte" \
+  "$S13_SET" "$S13_HOOK_SET"
+# THE MUTATION: doctor the raw output the way a derivation that grew a column would, and the
+# two sides must part. Without this the row above could be two spellings of `true`.
+S13_RAW_MUT="$(printf '%s\n' "$S13_RAW" | sed 's/^/x-/')"
+S13_HOOK_SET_MUT=$(_impact_out="$S13_RAW_MUT"; eval "$S13_REDUCTION"; printf '%s' "$SUITES_ALLOWED")
+expect_ne "S13.2 …and the comparison discriminates on a doctored raw output" \
+  "$S13_SET" "$S13_HOOK_SET_MUT"
+
 expect_eq "S13.2 the reduced set carries no reason column" "0" \
-  "$(printf '%s' "$S13_SET" | grep -c ':')"
+  "$(printf '%s' "$S13_HOOK_SET" | grep -c ':')"
 expect_eq "S13.2 …and no tab survived the reduction" "0" \
-  "$(printf '%s' "$S13_SET" | tr -cd '\t' | wc -c | tr -d ' ')"
+  "$(printf '%s' "$S13_HOOK_SET" | tr -cd '\t' | wc -c | tr -d ' ')"
 expect_eq "S13.2 …and holds no duplicate" "0" \
-  "$(printf '%s\n' "$S13_SET" | tr ' ' '\n' | sort | uniq -d | grep -c .)"
+  "$(printf '%s\n' "$S13_HOOK_SET" | tr ' ' '\n' | sort | uniq -d | grep -c .)"
 
 # --- §S13.3 the guard compares in that same alphabet ---
 #
@@ -7610,7 +7644,9 @@ expect_eq "S19.3 docs-pins holds 23 doctoring sites" "23" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
 expect_eq "S19.3 …declared by 24 anchor calls (Section 8's doctoring rewrites two sentences)" "24" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …and this suite's own mutant trees by 23 more" "23" \
+# 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
+# anchors both lines it lifts (review-b B-3).
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 25 more" "25" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. One call site each: `mutate_guard` anchors
 # per call (its callers pass the shipped line they delete), and landing-gate's
@@ -7622,7 +7658,7 @@ expect_eq "S19.3 …and landing-gate by one, for the inverted-guard mutant" "1" 
 # THE TOTAL AC-30 NAMES. Stated as its own measured literal rather than left to the
 # reader to add up: this is the number that has to move when a doctoring site is
 # added or removed anywhere in the four suites that build mutants.
-expect_eq "S19.3 …49 anchor call sites across the four doctoring suites, all told" "49" \
+expect_eq "S19.3 …51 anchor call sites across the four doctoring suites, all told" "51" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"

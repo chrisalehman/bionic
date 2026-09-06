@@ -186,8 +186,9 @@ echo ""
 section "§2 hand-run parity: a suite invoked by hand re-execs once under /bin/bash (AC-2)"
 #
 # The seam every suite already sources does the work, so a suite typed at a prompt under
-# another interpreter lands on the same one the runner would have given it. The guard is an
-# exported marker, so the re-exec happens exactly once and can never loop.
+# another interpreter lands on the same one the runner would have given it. The guard is the
+# RUNNING INTERPRETER, not a marker: after `exec /bin/bash "$0"`, `$BASH` is `/bin/bash`, so
+# the re-exec happens exactly once and can never loop (critic K-4, Step 6).
 
 HAND="$TMPROOT/hand.test.sh"
 { printf '#!/bin/bash\n'
@@ -199,9 +200,13 @@ HAND="$TMPROOT/hand.test.sh"
 } > "$HAND"
 chmod +x "$HAND"
 
-hand_run() {  # hand_run <interpreter> — leaves HAND_VER / HAND_STARTS / HAND_ARGV behind
+hand_run() {  # hand_run <interpreter> [marker] — leaves HAND_VER / HAND_STARTS / HAND_ARGV
   : > "$TMPROOT/hand.count"; : > "$TMPROOT/hand.out"
-  ( unset BIONIC_TEST_INTERPRETER_PINNED
+  ( if [ -n "${2:-}" ]; then
+      BIONIC_TEST_INTERPRETER_PINNED="$2"; export BIONIC_TEST_INTERPRETER_PINNED
+    else
+      unset BIONIC_TEST_INTERPRETER_PINNED
+    fi
     PATH="$ALT_DIR:$PATH" \
     HAND_COUNT="$TMPROOT/hand.count" HAND_OUT="$TMPROOT/hand.out" \
     "$1" "$HAND" one two ) >/dev/null 2>&1
@@ -219,8 +224,23 @@ if [ -n "$ALT_BASH" ]; then
   expect_eq "2.3 …with its arguments intact across the re-exec" "one two" "$HAND_ARGV"
   expect_eq "2.4 …and the seam still answers the question it exists for" \
     "$REPO/hooks" "$HAND_ROOTS"
+
+  # --- THE MARKER IS NOT THE TEST (critic K-4) ------------------------------
+  # `tests/run.sh` exports BIONIC_TEST_INTERPRETER_PINNED to every descendant of
+  # a run, so a hand-run started from inside a suite, a debugger, or a shell that
+  # had once run the runner INHERITS it. While the guard trusted that marker the
+  # pin was skipped and nothing said so: the suite reported bash 5.3 and there is
+  # no stamp on the hand-run path to record which interpreter made the log.
+  hand_run "$ALT_BASH" "1"
+  expect_eq "2.4a an inherited pin marker does not defeat the pin" "$SYS_VER" "$HAND_VER"
+  expect_eq "2.4b …and the re-exec still happens exactly once" "2" "$HAND_STARTS"
+  expect_eq "2.4c …with its arguments still intact" "one two" "$HAND_ARGV"
+  # PAIRED, so 2.4a is not a row that would pass under any interpreter: the same
+  # marker with the SYSTEM bash must not provoke a second start.
+  hand_run "$SYS_BASH" "1"
+  expect_eq "2.4d …and a suite already under /bin/bash still does not re-exec" "1" "$HAND_STARTS"
 else
-  skip "2.1–2.4 hand-run parity under a foreign interpreter" "this host has only one bash"
+  skip "2.1–2.4d hand-run parity under a foreign interpreter" "this host has only one bash"
 fi
 
 hand_run "$SYS_BASH"

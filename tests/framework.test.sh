@@ -317,6 +317,41 @@ ok "the suite kept going after the red anchor"
 finish
 PLANT_ANCHOR_ORDER
 
+# THE ANCHOR STRENGTH PLANT (A-35a, S19c). The drift fixture is anchor-fx.txt
+# with ONE leading space on the anchored line — the shape 61b8ca8 produced by
+# reindenting a call. A fixed-string anchor is a SUBSTRING test and still matches
+# it; a whole-line mutation does not touch it. The -E form, given the mutation's
+# own ^…$, is the one that says so.
+cat > "$SB/anchor-drift.txt" <<'PLANT_ANCHOR_DRIFT'
+a needle here
+ line 1
+line 2
+PLANT_ANCHOR_DRIFT
+
+cat > "$SB/tests/p-anchor-strength.test.sh" <<'PLANT_ANCHOR_STRENGTH'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+FX="$(dirname "$0")/../anchor-drift.txt"
+
+section "an anchor must match at least as strictly as its mutation"
+# THE WEAK ANCHOR: fixed-string, and it is GREEN over the drifted line.
+anchor "$FX" 'line 1' 1
+# THE STRONG ONE: the mutation's own whole-line ERE, and it is RED.
+anchor -E "$FX" '^line 1$' 1
+# What the mutation itself does to that file, so the row above is not a claim
+# about grep but about the mutant: a whole-line sed no-ops.
+MUT="$(sed 's/^line 1$/MUTATED/' "$FX")"
+if [ "$MUT" = "$(cat "$FX")" ]; then
+  ok "the whole-line mutation is a no-op on the drifted file"
+else
+  no "the whole-line mutation is a no-op on the drifted file" "it changed something"
+fi
+
+finish
+PLANT_ANCHOR_STRENGTH
+
 # ============================================================
 section "1: a section that asserts nothing fails by name (AC-13)"
 # ============================================================
@@ -368,6 +403,43 @@ expect_eq "3: …before a single row is recorded" \
   "no" "$(contains "$P_OUT" "PASS: a real row")"
 expect_eq "3: …and before the suite prints its own tally" \
   "no" "$(contains "$P_OUT" "TOTAL=")"
+
+# --- THE BOUNDARY THE DOCBLOCK NOW STATES (Step-5 audit §5.1) --------------
+# The derivation sees the framework's own name family and nothing else, so a
+# vanished helper under another name is caught at RUNTIME by the runner's
+# stderr-strict arm and not at load. Demonstrated, not asserted from the
+# docblock: the same undefined call under a derived name is red at load, and
+# under a name outside the family is not.
+cat > "$SB/tests/p-outside-family.test.sh" <<'PLANT_OUTSIDE'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+section "a vanished helper outside the derived name family"
+ok "the suite loaded and got this far"
+walk_vanished_helper "gone"
+finish
+PLANT_OUTSIDE
+plant_run p-outside-family.test.sh
+expect_eq "3: a call outside the derived family does not stop the load" "0" "$P_RC"
+expect_eq "3: …and the suite reports a clean tally in spite of it" "yes"   "$(contains "$P_OUT" "1/1 passed, 0 failed")"
+expect_eq "3: …with the diagnostic only on stderr, which is the runner's half" "yes"   "$(contains "$P_OUT" "command not found")"
+# PAIRED: the SAME shape under a derived name IS red at load.
+cat > "$SB/tests/p-inside-family.test.sh" <<'PLANT_INSIDE'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+section "a vanished helper inside the derived name family"
+expect_vanished_helper "gone"
+finish
+PLANT_INSIDE
+plant_run p-inside-family.test.sh
+expect_eq "3: the same call under a DERIVED name is red at load" "1" "$P_RC"
+expect_eq "3: …naming the helper" "yes"   "$(contains "$P_OUT" "helper called but never defined: expect_vanished_helper")"
+# and the docblock says so, with a discriminating pin.
+FAMDOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
+expect_eq "3: the framework says a hand-run has interpreter parity, not verdict parity" "yes"   "$(contains "$FAMDOC" "SO A HAND-RUN HAS INTERPRETER PARITY, NOT VERDICT PARITY")"
+FAMDOC_STRIPPED="$(grep -v 'INTERPRETER PARITY, NOT VERDICT PARITY' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
+expect_eq "3: …and that pin discriminates" "no"   "$(contains "$FAMDOC_STRIPPED" "SO A HAND-RUN HAS INTERPRETER PARITY, NOT VERDICT PARITY")"
 
 # ============================================================
 section "4: the derivation does not over-fire"
@@ -433,6 +505,46 @@ expect_eq "6: …and the framework's ok() is what moves them" \
   "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-counters\.test\.sh: .*\)$/\1/p')"
 
 # ============================================================
+section "6b: the head docblock describes the tree it heads (review-c C-1/C-2)"
+# ============================================================
+#
+# It is the first paragraph an author writing suite 56 reads about ownership, and
+# it said a private `ok()` was tolerated and that the wall was S10's future work.
+# Both had been false since S10 landed. A docblock is not testable prose here —
+# every claim below is re-derived from the shipped tree in the same run.
+
+C1_DOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
+C1_REFUSED=0
+C1_SUITES=0
+for c1_f in "$REPO"/tests/*.test.sh; do
+  C1_SUITES=$((C1_SUITES + 1))
+  [ -n "$(_tf_adoption_refusal "$c1_f")" ] && C1_REFUSED=$((C1_REFUSED + 1))
+done
+expect_eq "6b: the count the docblock claims is the roster the tree has" \
+  "55" "$C1_SUITES"
+expect_eq "6b: …and none of them carries a private definition" "0" "$C1_REFUSED"
+expect_eq "6b: the docblock says all 55 are clients of this file" "yes" \
+  "$(contains "$C1_DOC" "All 55 suites on the roster are clients of it")"
+expect_eq "6b: …and that it does not DEFER to a private one" "yes" \
+  "$(contains "$C1_DOC" "It does not DEFER")"
+expect_eq "6b: …and the stale claim that 49 suites still carry one is gone" "no" \
+  "$(contains "$C1_DOC" "49 of them do, on the day this is written")"
+expect_eq "6b: …and the stale claim that migration is still S5-S9's job is gone" "no" \
+  "$(contains "$C1_DOC" "migrating those suites is S5")"
+# C-2: the two expect_match exceptions were migrated, so the docblock stops
+# calling them migration work — re-derived from the two files it names.
+expect_eq "6b: live-agents carries no expect_match call" "0" \
+  "$(grep -c '^[[:space:]]*expect_match ' "$REPO/tests/live-agents.test.sh" | tr -d ' ')"
+expect_eq "6b: resources carries none either" "0" \
+  "$(grep -c '^[[:space:]]*expect_match ' "$REPO/tests/resources.test.sh" | tr -d ' ')"
+# The needle is SINGLE-quoted: the docblock spells the helper in backticks, and
+# in a double-quoted needle bash would run it as a command substitution.
+expect_eq "6b: …and the docblock records that S9b renamed them" "yes" \
+  "$(contains "$C1_DOC" 'were renamed onto `expect_regex` by S9b')"
+expect_eq "6b: …not that they are still migration work" "no" \
+  "$(contains "$C1_DOC" "outvoted 11 to 2 and are migration work")"
+
+# ============================================================
 section "7: the assertion-discipline docblock carries its obligations"
 # ============================================================
 #
@@ -466,6 +578,26 @@ expect_eq "8: tests/run.sh names framework.test.sh" "yes" \
 RUNSH_STRIPPED="$(printf '%s\n' "$RUNSH" | grep -v 'run "framework.test.sh"')"
 expect_eq "8: …and the check discriminates (a copy without the line fails it)" "no" \
   "$(contains "$RUNSH_STRIPPED" 'run "framework.test.sh" bash tests/framework.test.sh')"
+
+# --- THE HEADER'S OWN NUMBERS (review-c C-3/C-4) ----------------------------
+# The runner's header tells a maintainer to re-derive the roster count rather
+# than trust the number in it — and then carried 31 against a roster of 55, in
+# the paragraph whose subject is how much of the roster the isolation audits
+# cover. This row does the re-derivation the sentence asks for.
+R8_LINES="$(grep -c '^run "' "${REPO}/tests/run.sh" | tr -d ' ')"
+R8_FILES="$(ls "${REPO}"/tests/*.test.sh | grep -c . | tr -d ' ')"
+expect_eq "8: every suite file has a run line, and no run line has no file" \
+  "$R8_FILES" "$R8_LINES"
+expect_eq "8: …and the header's stated count is that number" "yes" \
+  "$(contains "$RUNSH" "$R8_LINES \`run\` lines as of this writing")"
+# C-4: the header named a retired input as the knob to reach for. Two other
+# places in the same file say it is retired, one of them at runtime.
+expect_eq "8: the header points at the live width knob" "yes" \
+  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS_CEILING` is there for a machine')"
+expect_eq "8: …and not at the retired one" "no" \
+  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS is there for a machine')"
+expect_eq "8: …while the file still says out loud that it is retired" "yes" \
+  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS` is retired as an input')"
 
 # ============================================================
 section "9: the generic expect family is the framework's (AC-12, S1b)"
@@ -581,6 +713,24 @@ expect_eq "10: the pipeline spelling is right on a small value" "0" "$PIPE_SMALL
 expect_ne "10: …and wrong on a large one, non-zero though the pattern matches" \
   "0" "$PIPE_BIG"
 
+# --- AND NOWHERE ELSE IN THE FILE (review-a A-6) ----------------------------
+# The ban is stated twice in the framework's own docblocks and was broken in the
+# framework's own load path — `echo "$defs" | grep -qx` inside the AC-14
+# derivation, on the path every suite crosses. A census, so a new one added
+# tomorrow fails here rather than the day a producer outgrows the pipe buffer.
+# The pattern is built at runtime so this row does not match itself.
+# Comment lines are excluded because the ban is STATED in three of them; the
+# census is about code. `grep -c` is not `grep -q`, so it reads to EOF and takes
+# no SIGPIPE of its own.
+F10_BANNED="$(printf '| %s -q' grep)"
+F10_CODE="$(grep -v '^[[:space:]]*#' "$FRAMEWORK")"
+expect_eq "10: no producer-into-grep -q in the framework's code" "0" \
+  "$(printf '%s\n' "$F10_CODE" | grep -c -- "$F10_BANNED" | tr -d ' ')"
+expect_eq "10: …and the ban is still stated in its docblocks" "3" \
+  "$(grep -c -- "$F10_BANNED" "$FRAMEWORK" | tr -d ' ')"
+expect_eq "10: …and the census can see one in code when there is one (not vacuous)" "1" \
+  "$(printf 'echo "$x" %s -- "$y"\n' "$F10_BANNED" | grep -v '^[[:space:]]*#' | grep -c -- "$F10_BANNED" | tr -d ' ')"
+
 # ============================================================
 section "11: anchor — the precondition of a mutation (AC-29, AC-31, S19)"
 # ============================================================
@@ -631,6 +781,32 @@ expect_eq "11: …and says the file could not be read" "yes" \
 expect_eq "11: the default form reads its pattern as a fixed string, not an ERE" "yes" \
   "$(contains "$P_OUT" "FAIL: anchor: ^line [0-9]+$ matches 2 line(s) of anchor-fx.txt")"
 
+# THE DETAIL IS RIGHT IN BOTH DIRECTIONS (review-c C-7). Too FEW is the moved
+# anchor; too MANY is the opposite failure, and one string covering both told a
+# reader the mutation was a no-op when in fact it was about to rewrite two lines.
+# Every red in p-anchor.test.sh is the too-FEW direction (0 or 1 found against a
+# declared 1 or 2), so the plant below supplies the direction that fixture never
+# produced: an anchor declaring 1 over a pattern that matches 2.
+expect_eq "11: too FEW says the anchor moved" "yes" \
+  "$(contains "$P_OUT" "the anchor MOVED, so the mutation below is a no-op")"
+cat > "$SB/tests/p-anchor-over.test.sh" <<'PLANT_ANCHOR_OVER'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+FX="$(dirname "$0")/../anchor-fx.txt"
+section "an anchor that matches more than it declared"
+anchor "$FX" 'line' 1
+finish
+PLANT_ANCHOR_OVER
+plant_run p-anchor-over.test.sh
+expect_eq "11: too MANY is red as well" "1" "$P_RC"
+expect_eq "11: …and says the anchor matches MORE than it declared" "yes" \
+  "$(contains "$P_OUT" "the anchor matches MORE than it declared, so the mutation below strips or rewrites lines it was never meant to touch")"
+expect_eq "11: …and does NOT call an over-matching anchor a moved one" "no" \
+  "$(contains "$P_OUT" "the anchor MOVED")"
+expect_eq "11: …still reporting the count it actually found" "yes" \
+  "$(contains "$P_OUT" "found 2 line(s)")"
+
 # --- AC-29: the row is recorded BEFORE the mutation runs
 plant_run p-anchor-order.test.sh
 ANCHOR_ORDER_FAIL="$(printf '%s\n' "$P_OUT" | grep -n 'FAIL: anchor: moved-away' | head -1 | cut -d: -f1)"
@@ -644,6 +820,27 @@ expect_eq "11: the anchor's verdict is on stdout BEFORE the mutation runs" "yes"
 expect_eq "11: a red anchor does not abort the suite" "yes" \
   "$(contains "$P_OUT" "PASS: the suite kept going after the red anchor")"
 
+# --- THE ANCHOR STRENGTH RULE (A-35a, S19c) ---------------------------------
+# An anchor is only a precondition if it fails wherever the mutation would
+# no-op. A FIXED-STRING anchor is a substring test, so it stays GREEN over a line
+# that drifted by one leading space, while the whole-line `sed 's/^…$/…/'` it
+# precedes does nothing to that line — and every behavioural row beneath then
+# reads the shipped file. That is the S19c hole, and it is pinned here rather
+# than left as a sentence, because the sentence is what was missing.
+plant_run p-anchor-strength.test.sh
+expect_eq "11: the strength plant ran its three rows in one section" \
+  "p-anchor-strength.test.sh: 2/3 passed, 1 failed  sections=1 setup=0" \
+  "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-anchor-strength\.test\.sh: .*\)$/\1/p')"
+expect_eq "11: a fixed-string anchor stays GREEN over a one-space drift" "yes" \
+  "$(contains "$P_OUT" "PASS: anchor: line 1 matches 1 line(s) of anchor-drift.txt")"
+expect_eq "11: …while the whole-line ERE anchor goes red on the same file" "yes" \
+  "$(contains "$P_OUT" "FAIL: anchor: ^line 1$ matches 1 line(s) of anchor-drift.txt")"
+expect_eq "11: …and the mutation the strong anchor guards really is a no-op there" "yes" \
+  "$(contains "$P_OUT" "PASS: the whole-line mutation is a no-op on the drifted file")"
+# PAIRED POSITIVE: on the UNDRIFTED fixture the same whole-line ERE holds, so the
+# red above is the drift and not a pattern that could never match.
+anchor -E "$ANCHOR_FX" '^line 1$' 1
+
 # --- the docblock carries the reason, and the pin discriminates
 ANCHORDOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
 expect_eq "11: the framework's docblock says why an anchor is a precondition" "yes" \
@@ -651,6 +848,11 @@ expect_eq "11: the framework's docblock says why an anchor is a precondition" "y
 ANCHORDOC_STRIPPED="$(grep -v 'byte-identical to the shipped file' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
 expect_eq "11: …and that pin discriminates on a copy with the sentence removed" "no" \
   "$(contains "$ANCHORDOC_STRIPPED" "a mutation whose anchor moved is byte-identical to the shipped file")"
+expect_eq "11: …and it states the strength rule the arm above demonstrates" "yes" \
+  "$(contains "$ANCHORDOC" "THE ANCHOR MUST MATCH AT LEAST AS STRICTLY AS THE MUTATION")"
+ANCHORDOC_STRIPPED2="$(grep -v 'AT LEAST AS STRICTLY' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
+expect_eq "11: …and that pin discriminates too" "no" \
+  "$(contains "$ANCHORDOC_STRIPPED2" "THE ANCHOR MUST MATCH AT LEAST AS STRICTLY AS THE MUTATION")"
 
 # ============================================================
 setup_section "plant the adoption wall's scratch tree and its six suites (S10)"
@@ -675,7 +877,7 @@ cp "$REPO"/payload/scripts/lib/*.sh    "$W_TREE/payload/scripts/lib/" 2>/dev/nul
 
 # the shipped roster out, these six in — the same rewrite tests/interpreter-pin
 # does, and for the same reason: a scratch runner must not reach the real tree.
-W_SUITES="w-ok.test.sh w-owned.test.sh w-counter.test.sh w-heredoc.test.sh w-indented.test.sh w-local.test.sh"
+W_SUITES="w-ok.test.sh w-owned.test.sh w-counter.test.sh w-unadopted.test.sh w-empty.test.sh w-heredoc.test.sh w-indented.test.sh w-local.test.sh"
 awk -v labels="$W_SUITES" '
   /^run "/ { next }
   { print }
@@ -727,6 +929,43 @@ ok "a real row"
 
 finish
 W_PLANT_COUNTER
+
+# --- REFUSED (4/4): a suite that adopts nothing at all (K-7) -----------------
+# It shadows no owned name and resets no counter, so the shadowing half of the
+# wall has nothing to say about it. It sources nothing and calls no finish: it
+# reports its own verdict on its own terms, which is the state AC-12 exists to
+# make impossible.
+cat > "$W_TREE/tests/w-unadopted.test.sh" <<'W_PLANT_UNADOPTED'
+#!/bin/bash
+set -uo pipefail
+: > "$S10_MARKS/w-unadopted.ran"
+
+P=0; F=0
+t_ok() { P=$((P + 1)); echo "PASS: $1"; }
+t_no() { P=$((P + 1)); echo "PASS: $1"; }
+
+t_ok "a row that passed"
+t_no "a row that failed, reported as a pass"
+echo "w-unadopted.test.sh: 2/2 passed, 0 failed"
+exit 0
+W_PLANT_UNADOPTED
+
+# --- LAUNCHED AND FAILED: a suite that asserts nothing (A-4) -----------------
+# Not a wall case. This suite adopts the framework properly, shadows nothing and
+# is launched — and it is a FAILURE because it covered nothing while reporting
+# a result. Before the whole-suite floor it exited 0 and the runner printed
+# ✓ PASS over `0/0 passed`.
+cat > "$W_TREE/tests/w-empty.test.sh" <<'W_PLANT_EMPTY'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$S10_MARKS/w-empty.ran"
+
+setup_section "a fixture, and no assertion anywhere"
+: > /dev/null
+
+finish
+W_PLANT_EMPTY
 
 # --- NOT REFUSED (1/3): the same three definitions, inside a heredoc (A-10b) --
 cat > "$W_TREE/tests/w-heredoc.test.sh" <<'W_PLANT_HEREDOC'
@@ -800,7 +1039,7 @@ section "12: the adoption wall refuses a shadowing suite, by name (AC-12, S10)"
 
 # NOT VACUOUS: the runner and the framework under drive are the shipped files.
 expect_eq "12: the scratch runner is the shipped one apart from its roster" "yes" \
-  "$([ "$(grep -c '^run "' "$W_TREE/tests/run.sh")" = "6" ] && echo yes || echo no)"
+  "$([ "$(grep -c '^run "' "$W_TREE/tests/run.sh")" = "8" ] && echo yes || echo no)"
 expect_eq "12: the framework under drive is the shipped one, byte for byte" "yes" \
   "$(cmp -s "$FRAMEWORK" "$W_TREE/tests/lib/assert.sh" && echo yes || echo no)"
 
@@ -843,8 +1082,8 @@ expect_eq "12: …nor the suite-specific one" "no" \
   "$(contains "$W_OUT" "w-local.test.sh defines")"
 
 # --- the tally and the exit status stay honest ------------------------------
-expect_eq "12: the tally counts three refusals as three failures" "yes" \
-  "$(contains "$W_OUT" "Gating: 3 passed, 3 failed")"
+expect_eq "12: the tally counts four refusals and one empty suite as five failures" "yes" \
+  "$(contains "$W_OUT" "Gating: 3 passed, 5 failed")"
 expect_eq "12: …and the run exits 1" "1" "$W_RC"
 
 # --- ONE WALL, BOTH SCHEDULERS ----------------------------------------------
@@ -862,7 +1101,7 @@ W_SERIAL_RC=$?
 expect_eq "12: --serial refuses the same suite, in the same words" "yes" \
   "$(contains "$W_SERIAL_OUT" "adoption wall: tests/w-ok.test.sh defines ok() at column 0")"
 expect_eq "12: …and reaches the same tally" "yes" \
-  "$(contains "$W_SERIAL_OUT" "Gating: 3 passed, 3 failed")"
+  "$(contains "$W_SERIAL_OUT" "Gating: 3 passed, 5 failed")"
 expect_eq "12: …and the same exit status" "1" "$W_SERIAL_RC"
 
 # ============================================================
@@ -913,5 +1152,292 @@ expect_eq "13: the doctored copy differs from the suite it was made from" "no" \
 expect_eq "13: one planted shadow moves the count from zero to one" "1" "$W_MUT_REFUSED"
 expect_eq "13: …and the refusal names the planted name" "yes" \
   "$(contains "$(_tf_adoption_refusal "$W_MUT/$(basename "$W_VICTIM")")" "defines ok() at column 0")"
+
+# ============================================================
+section "14: the scanner reads the file bash reads (A-1/A-9)"
+# ============================================================
+#
+# ONE SCANNER, TWO WALLS. `_tf_scan` is the single reader behind the adoption
+# wall (AC-12) and the load-time derivation (AC-14), so a line it misreads takes
+# BOTH out at once — and it does so silently, for every line to the end of the
+# file. Four suites in this tree shipped in that state (git-argv, protect-main,
+# canonical-sdlc-evidence-gate, cmd-class): each writes a `<<WORD` inside a
+# quoted fixture string, and the textual matcher read it as a real opener.
+#
+# WHY THIS SECTION EXISTS WHEN §4 AND §12 ALREADY PLANT HEREDOCS. Both of those
+# plant only WELL-FORMED openers that close, so the catch-proof never sampled
+# the class that was live in the tree (review-a A-1, A-31c's shape). Every plant
+# below is a file the shell parses as a definition and a call; the framework has
+# to agree with the shell about that.
+
+F14_D="$SB/scan14"
+mkdir -p "$F14_D"
+
+# EVERY PLANT BELOW IS A REALISTIC SUITE — it sources the framework and calls
+# finish — so the ADOPTION half of the wall (§16) has nothing to say about it
+# and each row isolates the scanner property it is there for.
+f14_plant() {   # f14_plant <name> <line-that-must-not-open-a-heredoc>
+  { printf '#!/bin/bash\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf '%s\n' "$2"
+    printf 'ok() { PASS=$((PASS + 1)); }\n'
+    printf 'expect_fourteen_never_defined "x"\n'
+    printf 'finish\n'
+  } > "$F14_D/$1.sh"
+}
+f14_wall()  { _tf_adoption_refusal "$F14_D/$1.sh"; }
+f14_deriv() { ( _tf_require_derived_helpers "$F14_D/$1.sh" ) >/dev/null 2>&1; echo $?; }
+
+# --- the openers that are not openers ----------------------------------------
+f14_plant quoted   'echo "see <<EOF for the format"'
+f14_plant squoted  "printf '%s' 'run <<EOF to open one'"
+f14_plant arith    'x=$(( 1 << 3 ))'
+f14_plant subst    '_v="$(printf "cat <<EOF")"'
+for f14_c in quoted squoted arith subst; do
+  expect_contains "14: [$f14_c] a <<WORD that opens nothing leaves the wall awake" \
+    "defines ok() at column 0" "$(f14_wall "$f14_c")"
+  expect_eq "14: [$f14_c] …and leaves the derivation awake" "1" "$(f14_deriv "$f14_c")"
+done
+
+# --- PAIRED NEGATIVE: a REAL opener still hides its body ---------------------
+# Without this row the four above could be a scanner that stopped skipping
+# heredoc bodies altogether — which would refuse framework.test.sh itself first.
+{ printf '#!/bin/bash\n'
+  printf '. "$(dirname "$0")/lib/assert.sh"\n'
+  printf 'cat > /dev/null <<%s\n' "'F14_INNER'"
+  printf 'ok() { echo "content, not a definition"; }\n'
+  printf 'expect_fourteen_never_defined "content, not a call"\n'
+  printf 'F14_INNER\n'
+  printf 'ok "a real row"\n'
+  printf 'finish\n'
+} > "$F14_D/realhd.sh"
+expect_empty "14: a REAL heredoc body is still content, not code" "$(f14_wall realhd)"
+expect_eq "14: …and the derivation does not fire on a call inside it" "0" "$(f14_deriv realhd)"
+
+# --- a ONE-LINE definition carries its body on the same line (A-2) ----------
+# `eq() { ...; ok "$1"; ... }` is where 45 framework call sites in 14 suites
+# lived, session-start.test.sh among them: every one of its ~150 assertions
+# routes through three such wrappers, and the suite scanned as ZERO calls.
+# PLANTED THROUGH A HEREDOC, like every other fixture in this file: the body is
+# content, so the scanner does not read this suite as calling the helper below.
+cat > "$F14_D/oneline.sh" <<'F14_ONELINE'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+eq() { if [ "$2" = "$3" ]; then ok "$1"; else expect_oneline_never_defined "$1"; fi; }
+eq "a row" x x
+finish
+F14_ONELINE
+expect_eq "14: a call inside a one-line definition body is derived" "1" "$(f14_deriv oneline)"
+expect_contains "14: …and the name it names is the one on that line" \
+  "expect_oneline_never_defined" \
+  "$( ( _tf_require_derived_helpers "$F14_D/oneline.sh" ) 2>&1 >/dev/null )"
+# PAIRED: the definition itself is still recorded, so the fall-through did not
+# cost the DEF/TOPDEF records the adoption wall reads.
+cat > "$F14_D/onelinetop.sh" <<'F14_ONELINETOP'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+ok() { PASS=$((PASS + 1)); no "x" "y"; }
+finish
+F14_ONELINETOP
+expect_contains "14: …and a one-line shadow is still a TOPDEF the wall refuses" \
+  "defines ok() at column 0" "$(f14_wall onelinetop)"
+
+# --- BOTH SYNTAXES BASH ACCEPTS (critic K-1) --------------------------------
+# `function ok { ... }` defines ok exactly as `ok() { ... }` does. The POSIX-only
+# definition test read neither `function` form, so a suite spelling its private
+# ok that way produced no TOPDEF, the wall had nothing to match, and the runner
+# launched it — and §13s `0 refused` was a census taken with the same blind
+# scanner, which cannot tell "no suite shadows" from "no suite shadows in the
+# one syntax we read".
+cat > "$F14_D/fnkw.sh" <<'F14_FNKW'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+function ok { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); echo "PASS: $1"; }
+function no { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); echo "PASS: $1"; }
+finish
+F14_FNKW
+cat > "$F14_D/fnkwparen.sh" <<'F14_FNKWP'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+function expect_eq() { echo "every comparison is equal"; }
+finish
+F14_FNKWP
+expect_contains "14: function ok { ... } is a shadow the wall refuses" \
+  "defines no() ok() at column 0" "$(f14_wall fnkw)"
+expect_contains "14: …and so is function name() { ... }" \
+  "defines expect_eq() at column 0" "$(f14_wall fnkwparen)"
+# PAIRED NEGATIVE: a function-keyword helper under a name the framework does not
+# own is a DEF, not a shadow, and must not fire a false red at load (A-16).
+cat > "$F14_D/fnkwlocal.sh" <<'F14_FNKWL'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+function expect_local_thing { ok "$1"; }
+expect_local_thing "x"
+finish
+F14_FNKWL
+expect_empty "14: a function-keyword helper the framework does not own stays legal" \
+  "$(f14_wall fnkwlocal)"
+expect_eq "14: …and the derivation counts it as defined" "0" "$(f14_deriv fnkwlocal)"
+
+# --- no file in tests/ ends with a heredoc still open ------------------------
+# NOT A COUNT PIN. The property that failed is "the scan reaches EOF", so that
+# is what is asserted; counts move with every edit. The tracer runs the SHIPPED
+# hdtag, lifted out of the framework by text, so it cannot drift from it.
+awk '/^    function hdtag\(/,/^    \}$/' "$FRAMEWORK" > "$F14_D/hdtag.awk"
+cat >> "$F14_D/hdtag.awk" <<'F14_TRACE'
+hd != "" { if ($0 ~ ("^[ \t]*" hd "[ \t]*$")) hd = ""; next }
+{ if ($0 ~ /^[ \t]*#/) next; hd = hdtag($0) }
+END { if (hd != "") print hd }
+F14_TRACE
+expect_eq "14: the tracer is the shipped hdtag (not vacuous)" "1" \
+  "$(grep -c 'function hdtag' "$F14_D/hdtag.awk")"
+expect_eq "14: …and it still sees a real unterminated opener" "F14_UNCLOSED" \
+  "$(printf 'cat <<F14_UNCLOSED\nbody\n' | awk -f "$F14_D/hdtag.awk")"
+
+F14_BLIND=0
+F14_BLIND_NAMES=""
+for f14_f in "$REPO"/tests/*.test.sh "$REPO"/tests/lib/*.sh; do
+  if [ -n "$(awk -f "$F14_D/hdtag.awk" "$f14_f")" ]; then
+    F14_BLIND=$((F14_BLIND + 1))
+    F14_BLIND_NAMES="${F14_BLIND_NAMES} $(basename "$f14_f")"
+  fi
+done
+echo "   files whose scan ends inside a heredoc:${F14_BLIND_NAMES:- none}"
+expect_eq "14: no file under tests/ ends with a heredoc still open" "0" "$F14_BLIND"
+
+# ============================================================
+section "15: a suite that asserted nothing is a failure (A-4)"
+# ============================================================
+#
+# AC-13 closed lie class 3 per SECTION. A suite that opens none — or only
+# setup_sections — had an empty `_TF_EMPTY`, FAIL=0, and exited 0; the runner
+# judges on rc and printed ✓ PASS over `0/0 passed`, counting it toward
+# `Gating: N passed`. THE FLOOR IS ASSERTIONS, NOT SECTIONS: loader.test.sh and
+# patrol-marker.test.sh open no section and assert from the top level, and they
+# are not this shape.
+
+F15_D="$SB/floor15"
+mkdir -p "$F15_D/lib"
+cp "$REPO/tests/lib/resolve-roots.sh" "$F15_D/lib/resolve-roots.sh"
+cp "$FRAMEWORK"                       "$F15_D/lib/assert.sh"
+f15_plant() {   # f15_plant <name> <body-line>
+  { printf '#!/bin/bash\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf '%s\n' "$2"
+    printf 'finish\n'
+  } > "$F15_D/$1.sh"
+}
+f15_run() { ( cd "$F15_D" && bash "$1.sh" 2>&1 ); }
+f15_rc()  { ( cd "$F15_D" && bash "$1.sh" >/dev/null 2>&1 ); echo $?; }
+
+f15_plant nothing   ':'
+f15_plant setuponly 'setup_section "fixture only"'
+f15_plant toplevel  'ok "one real row"'
+
+expect_eq "15: a suite with no assertion at all exits 1" "1" "$(f15_rc nothing)"
+expect_contains "15: …and says so by name" "FAIL: suite asserted nothing: nothing.sh" \
+  "$(f15_run nothing)"
+expect_contains "15: …and the failure is IN the tally, not beside it" "0/1 passed, 1 failed" \
+  "$(f15_run nothing)"
+expect_eq "15: a suite with only a setup_section exits 1 too" "1" "$(f15_rc setuponly)"
+expect_contains "15: …and its setup is still counted apart" "sections=0 setup=1" \
+  "$(f15_run setuponly)"
+# THE PAIRED POSITIVE, and it is the whole reason the floor is TOTAL and not
+# _TF_SECTIONS: two suites on the real roster assert from the top level.
+expect_eq "15: a suite that opens no section but asserts is green" "0" "$(f15_rc toplevel)"
+expect_contains "15: …with sections=0 on its tally" "1/1 passed, 0 failed  sections=0" \
+  "$(f15_run toplevel)"
+F15_TOPLEVEL=""
+for f15_f in "$REPO/tests/loader.test.sh" "$REPO/tests/patrol-marker.test.sh"; do
+  F15_TOPLEVEL="${F15_TOPLEVEL} $(grep -c '^section ' "$f15_f")"
+done
+expect_eq "15: the two real top-level suites still open no section" " 0 0" "$F15_TOPLEVEL"
+
+# --- THROUGH THE RUNNER: the wall tree carries w-empty.test.sh ---------------
+# It adopts the framework, shadows nothing, is LAUNCHED (its marker appears) and
+# is counted failed — the state that used to read ✓ PASS.
+expect_eq "15: the empty suite was launched, not refused" "yes" \
+  "$([ -f "$W_MARKS/w-empty.ran" ] && echo yes || echo no)"
+expect_eq "15: …and no refusal names it" "no" "$(contains "$W_OUT" "w-empty.test.sh defines")"
+expect_eq "15: …and the runner reports it failed" "yes" \
+  "$(contains "$W_OUT" "- w-empty.test.sh")"
+expect_eq "15: …and its own line says what it failed for" "yes" \
+  "$(contains "$W_OUT" "FAIL: suite asserted nothing: w-empty.test.sh")"
+
+# ============================================================
+section "16: the wall enforces ADOPTION, not only non-shadowing (K-7)"
+# ============================================================
+#
+# Refusing a shadow is half of "one framework, adopted by every suite". The
+# other half — that a roster suite sources the framework and calls finish — was
+# a measurement the migration slices took once, and §13's `0 refused` read as
+# proof of a wall that did not exist.
+
+F16_D="$SB/adopt16"
+mkdir -p "$F16_D"
+f16_wall() { _tf_adoption_refusal "$F16_D/$1.sh"; }
+
+cat > "$F16_D/nosource.sh" <<'F16_NOSOURCE'
+#!/bin/bash
+P=0; F=0
+t_ok() { P=$((P + 1)); echo "ok: $1"; }
+t_ok "my own row"
+echo "1/1 passed"
+exit 0
+F16_NOSOURCE
+cat > "$F16_D/nofinish.sh" <<'F16_NOFINISH'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+ok "a row"
+exit 0
+F16_NOFINISH
+cat > "$F16_D/good.sh" <<'F16_GOOD'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+ok "a row"
+finish
+F16_GOOD
+
+expect_contains "16: a suite that sources the framework nowhere is refused" \
+  "does not source the framework" "$(f16_wall nosource)"
+expect_contains "16: …and the refusal names the suite" "nosource.sh" "$(f16_wall nosource)"
+expect_contains "16: a suite that never calls finish is refused" \
+  "never calls finish" "$(f16_wall nofinish)"
+# THE HEREDOC EXEMPTION HOLDS ON THIS HALF TOO: a `finish` written into a
+# fixture is content, not a call, so writing one must not buy adoption.
+cat > "$F16_D/heredocfinish.sh" <<'F16_HD'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+cat > /dev/null <<'F16_INNER'
+finish
+F16_INNER
+ok "a row"
+exit 0
+F16_HD
+expect_contains "16: a finish written into a heredoc does not count as calling it" \
+  "never calls finish" "$(f16_wall heredocfinish)"
+# PAIRED POSITIVE, and the roster census below is the real one.
+expect_empty "16: a suite that sources it and calls finish is not refused" "$(f16_wall good)"
+
+F16_SCANNED=0
+F16_REFUSED=0
+for f16_f in "$REPO"/tests/*.test.sh; do
+  F16_SCANNED=$((F16_SCANNED + 1))
+  [ -n "$(_tf_adoption_refusal "$f16_f")" ] && F16_REFUSED=$((F16_REFUSED + 1))
+done
+expect_eq "16: the census read the whole roster (not vacuous)" "yes" \
+  "$([ "$F16_SCANNED" -ge 40 ] && echo yes || echo no)"
+expect_eq "16: every suite on the roster adopts the framework" "0" "$F16_REFUSED"
+
+# --- THROUGH THE RUNNER -----------------------------------------------------
+expect_contains "16: the runner refuses the unadopted suite, by name" \
+  "adoption wall: tests/w-unadopted.test.sh does not source the framework" "$W_OUT"
+expect_eq "16: …and it never ran (no marker)" "no" \
+  "$([ -f "$W_MARKS/w-unadopted.ran" ] && echo yes || echo no)"
+expect_eq "16: …and the verdict reads REFUSED" "yes" \
+  "$(contains "$W_OUT" "- w-unadopted.test.sh (refused by the adoption wall, never run)")"
+expect_contains "16: --serial refuses it in the same words" \
+  "adoption wall: tests/w-unadopted.test.sh does not source the framework" "$W_SERIAL_OUT"
 
 finish
