@@ -6651,12 +6651,18 @@ expect_eq "…but the grep catches it" "yes" \
 # the one item narrowed, with the answer channel CLOSED so a pending item reports itself
 # through its action line and nothing on the fixture is ever written.
 #
-# WHAT IS IN SCOPE, AND WHAT IS DELIBERATELY NOT. The scan takes doctor's ENVIRONMENT
-# section — the table that reports the machine's own state, where all five leftover rows and
-# the environment keys live. The THIRD PARTY table above it is the dependency roster, whose
-# ownership is a separate question with a separate answer (a core dependency doctor reports
-# absent is installed by the CLI as bionic's own dependency, not by a setup item), and
-# folding it in here would make this section a test of two contracts at once.
+# BOTH TABLES ARE IN SCOPE NOW (1.4.4 fixit T1, AC-1). The scan used to take doctor's
+# ENVIRONMENT section alone — the table that reports the machine's own state, where the five
+# leftover rows and the environment keys live — and said so here: the THIRD PARTY table was
+# "a separate question with a separate answer", because a core dependency doctor reports
+# absent is installed by the CLI as bionic's own dependency and not by a setup item. That
+# was the right answer to the wrong question. The separate answer is what the ROW must say;
+# it is not a reason to leave the row unscanned, and while it was unscanned the row went on
+# ending `→ /bionic:setup` over a command that plans nothing for it — the same defect this
+# section exists to catch, in the one table it could not see. So the hint is checked in both
+# tables against one rule (every `→ /bionic:setup` needs an item that fires), and the core
+# row is checked against the other half of the contract: it names the CLI's repair route and
+# never sends anyone to setup. §DS.7 and §DS.8 below.
 #
 # THE MUTATION ARMS ARE BOTH DIRECTIONS OF THE SAME DRIFT. A doctored setup.sh whose roster
 # has lost `legacy-hook-files` must take the agreement row red — that is the exact field
@@ -6702,6 +6708,28 @@ ds_plant() {  # <home> <hooks:yes|no> <agents:yes|no>
 DSJSON
   mkdir -p "$h/.config/ccstatusline"
   cp "$DS_PAYLOAD/ccstatusline/settings.json" "$h/.config/ccstatusline/settings.json"
+  # AND THE PLUGIN REGISTRY, WITH ONE CORE DEPENDENCY MISSING (1.4.4 fixit T1). This is the
+  # seam `_dep_check_native` reads — `$BIONIC_CLAUDE_HOME/plugins/installed_plugins.json` via
+  # `_dep_installed_json` — and writing it is what makes a core dependency absent WITHOUT
+  # installing or uninstalling anything for real. The shape is this machine's own registry
+  # (`bionic`, `agent-skills`, `impeccable` from bionic's catalog; the two anthropic skill
+  # packs from theirs) minus `superpowers`, which is exactly the machine epic-17 W5 F12 §4.1
+  # measured: the CLI refuses to load bionic and its own error names the repair
+  # (record/epic-17-w5/f12-runtime-report.md §4.1). Leaving the file out entirely — which is
+  # what this fixture used to do — reads as EVERY native row absent, including the ones that
+  # are fine, so the table under test would have been all one state.
+  mkdir -p "$h/.claude/plugins"
+  cat > "$h/.claude/plugins/installed_plugins.json" <<'DSREG'
+{
+  "plugins": {
+    "bionic@bionic":                          [{"version": "1.4.4", "installPath": "/nonexistent/bionic"}],
+    "agent-skills@bionic":                    [{"version": "0.6.7", "installPath": "/nonexistent/agent-skills"}],
+    "impeccable@bionic":                      [{"version": "4.1.1", "installPath": "/nonexistent/impeccable"}],
+    "document-skills@anthropic-agent-skills": [{"version": "41bbe19d1a1a", "installPath": "/nonexistent/document-skills"}],
+    "example-skills@anthropic-agent-skills":  [{"version": "41bbe19d1a1a", "installPath": "/nonexistent/example-skills"}]
+  }
+}
+DSREG
   if [ "$want_hooks" = "yes" ]; then
     mkdir -p "$h/.claude/hooks"
     for f in "$DS_PAYLOAD"/hooks/*.sh; do
@@ -6763,6 +6791,58 @@ ds_hint_labels() {  # <doctor report>
     rest="${line#  }"; rest="${rest#* }"
     printf '%s\n' "${rest%%  *}"
   done <<<"$(ds_env_section "$1")"
+}
+
+# Doctor's THIRD PARTY table, on the same terms (1.4.4 fixit T1). The header line itself
+# carries the words `/bionic:setup` — "THIRD PARTY — installed by /bionic:setup" — and is
+# skipped before any row is read, so the section name can never be mistaken for a hint.
+ds_third_section() {  # <doctor report>
+  awk '/^THIRD PARTY/ { inside = 1; next }
+       inside && /^[A-Z][A-Z]/ { exit }
+       inside { print }' <<<"$1"
+}
+
+# Every dependency in that table whose row ends in the fix hint. The label is the NAME cell,
+# padded to 21 columns by `_doctor_third_row`, so cutting at the first DOUBLE space ends it
+# for every name in the table (the longest is 19 characters).
+ds_party_hint_labels() {  # <doctor report>
+  local line rest
+  while IFS= read -r line; do
+    case "$line" in *"→ /bionic:setup"*) ;; *) continue ;; esac
+    rest="${line#  }"; rest="${rest#* }"
+    printf '%s\n' "${rest%%  *}"
+  done <<<"$(ds_third_section "$1")"
+}
+
+# WHICH ITEM CLEARS WHICH DEPENDENCY ROW — written out by hand for the same reason the
+# environment table below is: it is the claim under test, not a derivation of the table
+# doctor already read. A dependency row's item is `tool:<name>`, and the two CORE rows are
+# deliberately absent from it — the CLI installs those alongside bionic (`"auto": true`) and
+# deps.sh's D1 forbids setup a second installer, so there is no item that clears one. A core
+# row reaching this function at all is the defect: it means the row promised setup would fix
+# something setup has never been able to fix.
+ds_party_item_for() {  # <third-party row label> -> the setup item that clears it
+  case "$1" in
+    superpowers|agent-skills) return 1 ;;
+    git|node|pnpm|gh|jq|rg|uv|docker|aws)    printf 'tool:%s' "$1" ;;
+    impeccable|excalidraw-renderer|motion)   printf 'tool:%s' "$1" ;;
+    '@playwright/cli'|chrome-devtools|playwright-chromium) printf 'tool:%s' "$1" ;;
+    ccstatusline|notebooklm|context7)        printf 'tool:%s' "$1" ;;
+    '@pencil.dev/cli'|humanizer)             printf 'tool:%s' "$1" ;;
+    document-skills|example-skills)          printf 'tool:%s' "$1" ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+# The completeness half of the scan, factored out because the mutation arm below runs the
+# very same code over a doctored doctor and has to come out non-empty.
+ds_party_unmapped() {  # <doctor report> -> the hinted labels with no item behind them
+  local label
+  while IFS= read -r label; do
+    [ -n "$label" ] || continue
+    ds_party_item_for "$label" >/dev/null || printf '%s\n' "$label"
+  done <<<"$(ds_party_hint_labels "$1")"
 }
 
 # WHICH ITEM CLEARS WHICH ROW — the table this section is for. It is written out by hand
@@ -6935,6 +7015,68 @@ expect_eq "DS.6 the doctored doctor differs from the shipped one by exactly the 
   "1" "$(diff "$PARTY_DOCTOR" "$DS_MUT_DOC" | grep -c '^> ')"
 DS_MUT_LABELS="$( PARTY_DOCTOR="$DS_MUT_DOC"; ds_hint_labels "$(ds_doctor "$DS_HOME")" )"
 expect_contains "DS.6 …the scan sees the planted row" "$DS_INVENTED" "$DS_MUT_LABELS"
+
+# ── DS.7 the same rule over doctor's THIRD PARTY table (1.4.4 fixit, AC-1) ───
+# The table §DS used to leave alone. Same rule, same fixture, same two halves: a row that
+# ends `→ /bionic:setup` must have an item on setup's roster, and that item must fire on the
+# machine doctor just read. The core row is the one the rule cannot cover — no item exists —
+# so it is checked against the other half of the contract instead.
+DS_PARTY_LABELS="$(ds_party_hint_labels "$DS_REPORT")"
+DS_LIST="$(ds_setup "$DS_HOME" --list)"
+ds_listed_in() {  # <--list output> <item>
+  local id
+  while IFS= read -r id; do [ "$id" = "$2" ] && return 0; done <<<"$1"
+  return 1
+}
+
+DS_P_UNLISTED=""; DS_P_UNPENDING=""; DS_P_SEEN=0
+while IFS= read -r ds_label; do
+  [ -n "$ds_label" ] || continue
+  DS_P_SEEN=$((DS_P_SEEN + 1))
+  ds_item="$(ds_party_item_for "$ds_label")" || continue
+  ds_listed_in "$DS_LIST" "$ds_item" \
+    || DS_P_UNLISTED="${DS_P_UNLISTED}${DS_P_UNLISTED:+, }${ds_label} → ${ds_item}"
+  ds_pending "$DS_HOME" "$ds_item" \
+    || DS_P_UNPENDING="${DS_P_UNPENDING}${DS_P_UNPENDING:+, }${ds_label} → ${ds_item}"
+done <<<"$DS_PARTY_LABELS"
+
+# The anti-vacuity control, the same one DS.2 carries: an extractor that returned nothing
+# would pass all three rows below without asking either script anything.
+expect_true "DS.7 the THIRD PARTY scan found hinted rows to check (the rows under it are not vacuous)" \
+  test "$DS_P_SEEN" -ge 3
+expect_eq "DS.7 every hinted dependency row has a setup item" "" "$(ds_party_unmapped "$DS_REPORT")"
+expect_eq "DS.7 …and every one of those items is on setup's --list" "" "$DS_P_UNLISTED"
+expect_eq "DS.7 …and every one of them fires on the machine doctor read" "" "$DS_P_UNPENDING"
+
+# The core row: the absence the fixture plants, and the route it must carry instead.
+DS_CORE_ROW="$(ds_third_section "$DS_REPORT" | grep -E '^  . +superpowers ' | head -1)"
+expect_true "DS.7 doctor renders a THIRD PARTY row for the absent core dependency (the two below are not vacuous)" \
+  test -n "$DS_CORE_ROW"
+expect_contains "DS.7 …and the row names the CLI verb that re-resolves bionic's dependencies" \
+  "claude plugin install bionic@bionic" "$DS_CORE_ROW"
+expect_absent "DS.7 …and never /bionic:setup, which has no item that installs a core dependency" \
+  "/bionic:setup" "$DS_CORE_ROW"
+# The paired positive on the SAME fixture, so the row above is a measurement and not a
+# constant: `agent-skills` is present in the planted registry and earns no hint at all.
+DS_OK_ROW="$(ds_third_section "$DS_REPORT" | grep -E '^  . +agent-skills ' | head -1)"
+expect_absent "DS.7 …while the core dependency the registry DOES carry earns no hint" \
+  "→" "$DS_OK_ROW"
+
+# ── DS.8 mutation: the core arm removed puts the row back on /bionic:setup ───
+# The defect this slice repaired, planted back. A COPY of doctor.sh with exactly one line
+# struck out — the `core` branch of the absent arm — makes the row fall through to the
+# `else` and end `→ /bionic:setup` again, with no item behind it. DS.7's completeness row
+# must go red on it, which is what proves that row can fail.
+DS_MUT_CORE="$DS_MUT/scripts/doctor-nocore.sh"
+LC_ALL=C sed '/elif \[ "$dep_class" = "core" \]/d' "$PARTY_DOCTOR" > "$DS_MUT_CORE"
+expect_eq "DS.8 the doctored doctor differs from the shipped one by exactly the core arm" \
+  "1" "$(diff "$PARTY_DOCTOR" "$DS_MUT_CORE" | grep -c '^< ')"
+DS_MUT_CORE_REPORT="$( PARTY_DOCTOR="$DS_MUT_CORE"; ds_doctor "$DS_HOME" )"
+DS_MUT_CORE_ROW="$(ds_third_section "$DS_MUT_CORE_REPORT" | grep -E '^  . +superpowers ' | head -1)"
+expect_contains "DS.8 …the doctored row is back on the hint that has no item behind it" \
+  "→ /bionic:setup" "$DS_MUT_CORE_ROW"
+expect_contains "DS.8 …and the THIRD PARTY completeness scan goes RED on it" \
+  "superpowers" "$(ds_party_unmapped "$DS_MUT_CORE_REPORT")"
 
 
 # ============================================================

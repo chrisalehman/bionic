@@ -964,8 +964,16 @@ setup_dep_enable_verify() {
         fi
         ;;
       absent)
+        # TEXT ONLY, AND THE TEXT COMES FROM deps.sh (bionic 1.4.4 fixit, A-2).
+        # This arm installs nothing and never has — D1 rules that setup is not a
+        # second installer for a native row — so what it owes the reader is an
+        # accurate sentence, and the one it carried was not: "reinstall bionic"
+        # says bionic is broken when bionic is installed and registered and a
+        # dependency is missing. The verb is the same either way; the description
+        # is not. It is the same route doctor's THIRD PARTY row and its headline
+        # render, from the same function, so the three surfaces cannot drift.
         item "$SETUP_BAD" "$name" "not installed — it shipped with bionic, so this install is incomplete"
-        action "reinstall bionic so its dependencies resolve: claude plugin install ${SETUP_PLUGIN_ID} --scope user --yes (${name} is missing)"
+        action "re-resolve bionic's dependencies: $(dep_core_repair_route) (${name} is missing)"
         ;;
       *)
         item "$SETUP_NIL" "$name" "enabled-state unknown — the claude CLI or jq could not read it"

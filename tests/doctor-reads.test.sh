@@ -307,6 +307,75 @@ expect_no_match "12d3: the installed-binary command form is never flagged" \
   "*statusLine command*npx*" "$OUT6E"
 
 echo ""
+echo ""
+echo "=== Section 6f: an absent CORE dependency routes to the CLI, not /bionic:setup (1.4.4 fixit) ==="
+
+# A CORE DEPENDENCY IS BIONIC'S OWN. `payload/.claude-plugin/plugin.json` declares
+# superpowers and agent-skills as bionic's dependencies and the CLI installs them alongside
+# bionic itself (`"auto": true` in the registry) — no setup item installs one, and deps.sh's
+# D1 says setup never installs a native row. So a machine missing one is not a
+# `/bionic:setup` repair, and the row that used to end that way sent the reader to a command
+# that plans nothing for it (.bionic/docs/ideas/fixit-1.4.4-absent-core-dependency-hint.md;
+# the same class the 1.4.4 bug report describes). The repair is the CLI's own verb, measured
+# restoring the dependency at record/epic-21-v1-ladder/fixit-dep-repair-measurement.md.
+#
+# A REGISTRY THAT KNOWS BIONIC AND NEITHER DEPENDENCY is the shape of an install that came
+# in incomplete — which is the machine epic-17 W5 F12 §4.1 measured, where `claude plugin
+# list` prints `✘ failed to load` and names the missing dependency.
+jq -nc '{plugins:{"bionic@bionic":[{installPath:"/nonexistent/a", gitCommitSha:"deadbeef", version:"1.4.4"}]}}' \
+  > "${CHOME}/plugins/installed_plugins.json"
+
+# AND THE LEFTOVERS SECTIONS 3-5 PLANTED ARE SWEPT BACK OFF, so the only thing wrong with
+# this machine is its dependencies. That is the machine the fixit is about, and it is also
+# what makes the two headline rows below load-bearing: the verdict line is truncated at 100
+# columns, so while the fixture carries leftover hook files and drifted agent copies those
+# names lead the line and the collapsed dependency list is cut off the end of it — an
+# assertion about which names reach that line would then pass on a doctor nobody had fixed.
+rm -rf "${CHOME}/hooks" "${CHOME}/agents" "${CHOME}/skills"
+
+# THE RENDERER REFS ARE PASSED, and that is what makes the headline rows below
+# load-bearing. Section 6c left `${VENV_DIR}.lock.sha256` matching `${REFS}/uv.lock`, so this
+# run has no stale-venv fix line — without it that line leads the verdict and the collapsed
+# absence list is cut off the end of it before any dependency name is reached, which would
+# let 12f5b pass on a doctor that had never been fixed.
+OUT6F="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}")"
+ROW6F="$(printf '%s\n' "$OUT6F" | grep -E '^  . +superpowers ' | head -1)"
+ROW6F2="$(printf '%s\n' "$OUT6F" | grep -E '^  . +agent-skills ' | head -1)"
+
+expect_true "12f1: doctor renders a THIRD PARTY row for the absent core dependency (the rows below are not vacuous)" \
+  test -n "$ROW6F"
+expect_match "12f2: the row names the CLI verb that re-resolves bionic's dependencies" \
+  "*superpowers*absent → claude plugin install bionic@bionic*" "$ROW6F"
+expect_no_match "12f3: …and never /bionic:setup, which installs nothing for a core row" \
+  "*/bionic:setup*" "$ROW6F"
+expect_match "12f4: the second core dependency's row carries the same route" \
+  "*agent-skills*absent → claude plugin install bionic@bionic*" "$ROW6F2"
+
+# THE HEADLINE IS THE SAME PROMISE, ONE LINE HIGHER. The collapsed
+# `N dependencies absent (…) → run /bionic:setup` verdict is the line a reader acts on
+# first, so a core absence folded into it is the same broken remedy in the place it is most
+# likely to be read.
+VERDICT6F="$(printf '%s\n' "$OUT6F" | grep -F 'Run /bionic:setup to fix:' | head -1)"
+# The line is TRUNCATED at 100 columns — it is the one place doctor cuts names rather than
+# wrapping them — so the anchor is the FIRST absent name on it, which is the first one setup
+# actually installs.
+expect_match "12f5a: the collapsed setup verdict is on the page and names what setup DOES install" \
+  "*Run /bionic:setup to fix:*dependencies absent (impeccable*" "$VERDICT6F"
+expect_no_match "12f5b: …and it never names an absent core dependency, which setup cannot install" \
+  "*superpowers*" "$VERDICT6F"
+expect_match "12f6: the core absences get their own line, with the route on it" \
+  "*core dependencies absent (superpowers, agent-skills) → claude plugin install bionic@bionic*" \
+  "$OUT6F"
+
+# THE PAIRED POSITIVE, so neither scan above is a constant: `impeccable` is an `extra` native
+# row, absent from the same registry, and setup's install arms DO install it — so its row
+# still ends where it always did.
+ROW6FX="$(printf '%s\n' "$OUT6F" | grep -E '^  . +impeccable ' | head -1)"
+expect_true "12f7: doctor renders a THIRD PARTY row for the absent extra dependency too" \
+  test -n "$ROW6FX"
+expect_match "12f8: a basic/extra absence still routes to /bionic:setup on the same fixture" \
+  "*impeccable*not installed → /bionic:setup*" "$ROW6FX"
+
 echo "=== Section 7: nothing this file gathers is left unrendered ==="
 
 # THE STRUCTURAL HALF, and it is the one that keeps this class of defect from
