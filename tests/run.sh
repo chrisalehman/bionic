@@ -81,10 +81,11 @@
 # EVERY SUITE IS A CLIENT OF ONE FRAMEWORK (wave-01 S10, spec AC-12). Before a
 # roster line is launched its source is read, and a suite that defines a name
 # tests/lib/assert.sh owns — or its own PASS/FAIL/TOTAL counters — at column 0 is
-# REFUSED, named, and counted failed. The rule, its two exemptions (an indented
-# or subshell-scoped redefinition, and a definition inside a heredoc body) and
-# the scanner all live in the framework; see `_tf_adoption_refusal` there and
-# THE ADOPTION WALL below.
+# REFUSED, named, and counted failed — and so is a suite that does not adopt the
+# framework at all (one that sources it nowhere, or never calls `finish`). The
+# rule, its two exemptions (an indented or subshell-scoped redefinition, and a
+# definition inside a heredoc body) and the scanner all live in the framework;
+# see `_tf_adoption_refusal` there and THE ADOPTION WALL below.
 #
 # WHY A SIGNAL DEATH IS NOT A FAILED ASSERTION. That same kill was reported as a
 # plain ✗ FAIL, which reads as "this suite's assertions failed" and sends the
@@ -246,11 +247,23 @@ export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
 
 # ── THE ADOPTION WALL (wave-01 verification-cannot-lie S10, spec AC-12) ──────
 #
-# WHAT IT REFUSES. A suite that defines, at COLUMN 0 and outside any heredoc
-# body, a name tests/lib/assert.sh owns — `ok`, `no`, any `expect_*` the
-# framework defines, `section`, `setup_section`, `finish`, `anchor` — or a
-# counter reset (`PASS=0`, `FAIL=0`, `TOTAL=0`). A refusal is a FAILED suite: it
-# is named in the tally, it is named under `Failed:`, and the run exits 1.
+# WHAT IT REFUSES. Two things, and the second was added in Step 6 (critic K-7).
+#
+#   SHADOWING. A suite that defines, at COLUMN 0 and outside any heredoc body, a
+#   name tests/lib/assert.sh owns — `ok`, `no`, any `expect_*` the framework
+#   defines, `section`, `setup_section`, `finish`, `anchor` — or a counter reset
+#   (`PASS=0`, `FAIL=0`, `TOTAL=0`).
+#
+#   NOT ADOPTING AT ALL. A suite that sources the framework nowhere, or never
+#   calls `finish`. Refusing a shadow is only half of "one framework, adopted by
+#   every suite": a suite spelling its helpers `t_ok`/`t_no` and its counters
+#   `P`/`F`, printing its own tally and exiting 0, shadows nothing and used to
+#   pass untouched. That all 55 suites adopt was a MEASUREMENT taken by the
+#   migration slices, not a mechanism, and `0 refused` read as proof of a wall
+#   that was not there.
+#
+# A refusal is a FAILED suite: it is named in the tally, it is named under
+# `Failed:`, and the run exits 1.
 #
 # WHY IT IS A WALL AND NOT ADVICE. A private `ok()` replaces the framework's for
 # the whole suite, and with it goes everything the framework was adopted for —
