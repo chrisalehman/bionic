@@ -39,28 +39,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "doctor-patrol.test.sh: jq is required"; exit 1; }
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.400s' "$actual")"; fi
-}
-expect_no_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
-}
 
 TMP="$(mktemp -d)"
 LIVE_PIDS=""
@@ -223,7 +208,7 @@ patrol_block() {  # <full-output>
   printf '%s\n' "$1" | awk '/^PATROL$/{f=1} f'
 }
 
-echo "=== Section 1: no live Patrol anywhere ==="
+section "Section 1: no live Patrol anywhere"
 
 EMPTY_HOME="$(make_empty_claude_home)"
 EMPTY_PROJ="$(make_repo_without_roster)"
@@ -233,8 +218,7 @@ PB1="$(patrol_block "$OUT1")"
 expect_match    "1: the fallback line prints" "*none running*" "$PB1"
 expect_no_match "2: no session line prints alongside the fallback" "*session*" "$PB1"
 
-echo ""
-echo "=== Section 2: one live Patrol, one open dispatch (singular) ==="
+section "Section 2: one live Patrol, one open dispatch (singular)"
 
 SID2="cccccccc-1111-2222-3333-444455556666"
 SHORT2="${SID2%%-*}"
@@ -273,8 +257,7 @@ expect_no_match "9: the interval-provenance detail is gone" "*came from the poke
 expect_no_match "10: the 'dispatch wall' row is gone" "*dispatch wall*" "$PB2"
 expect_no_match "11: the this-repo cwd detail is gone" "*this repo*" "$PB2"
 
-echo ""
-echo "=== Section 3: duplicate Patrols — the one survivor ==="
+section "Section 3: duplicate Patrols — the one survivor"
 
 SID3="dddddddd-1111-2222-3333-444455556666"
 SHORT3="${SID3%%-*}"
@@ -302,8 +285,7 @@ expect_no_match "14: the fix line does NOT also name the newer (kept) job" \
 expect_no_match "15: the Patrol block itself carries no per-job detail" \
   "*old11111*" "$PB3"
 
-echo ""
-echo "=== Section 4: the job is in the transcript and the Patrol is DEAD ==="
+section "Section 4: the job is in the transcript and the Patrol is DEAD"
 
 # WHAT THIS SECTION OWNS, and why nothing above it could see it. Jobs are
 # reconstructed from the transcript — CronCreate minus CronDelete — and the four
@@ -338,8 +320,7 @@ expect_match    "20: the fix section names the session and what to do" \
 expect_no_match "21: the stamp state itself is still not printed" "*not-firing*" "$OUT4"
 expect_no_match "22: nor its age or interval provenance" "*came from the poker*" "$OUT4"
 
-echo ""
-echo "=== Section 5: the job is in the transcript and there is no stamp ==="
+section "Section 5: the job is in the transcript and there is no stamp"
 
 # THE THIRD STATE, AND IT IS NOT A FAULT. An absent stamp means never armed —
 # or deliberately ended, because the poker's `disarm` verb REMOVES this file
@@ -363,8 +344,7 @@ expect_match    "24: the section falls back to none running" "*none running*" "$
 expect_no_match "25: and a deliberate stop earns no fix line" \
   "*session ${SHORT5}: the Patrol*" "$OUT5"
 
-echo ""
-echo "=== Section 6: registration ==="
+section "Section 6: registration"
 
 # THE SUITE IS REGISTERED. tests/*.test.sh is NOT globbed by the runner — see
 # tests/patrol-duties-gate.test.sh's own case 24 for the prior instance of this
@@ -373,8 +353,7 @@ echo "=== Section 6: registration ==="
 expect_true "26: tests/run.sh names doctor-patrol.test.sh" \
   grep -q 'run "doctor-patrol.test.sh" bash tests/doctor-patrol.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"
 
-echo ""
-echo "=== Section 7: a firing Patrol with NO roster file and launches in the transcript ==="
+section "Section 7: a firing Patrol with NO roster file and launches in the transcript"
 
 # THE DEFECT THIS SECTION OWNS (Chris, 2026-08-29, on the 1.3.0 plugin):
 # `/bionic:doctor` printed `✓ session 61be8dc9 · 0 open dispatches` while two
@@ -415,8 +394,7 @@ expect_no_match "28: and the row makes no open-dispatch claim at all" \
 expect_match "29: the fix line names the unrostered launches and ends in the cure" \
   "*session ${SHORT7}: 3 launches unrostered → re-invoke /bionic:canonical-sdlc*" "$OUT7"
 
-echo ""
-echo "=== Section 8: a firing Patrol whose roster is PRESENT and incomplete ==="
+section "Section 8: a firing Patrol whose roster is PRESENT and incomplete"
 
 # THE OTHER HALF, and what keeps Section 7's row honest: here the roster is
 # real — one open dispatch, and the row still says exactly that — while the
@@ -446,8 +424,7 @@ expect_no_match "31: and a present roster is never re-rendered as absent" \
 expect_match "32: the fix line reports only the launches the roster never saw" \
   "*session ${SHORT8}: 2 launches unrostered → re-invoke /bionic:canonical-sdlc*" "$OUT8"
 
-echo ""
-echo "=== Section 9: one cure, two surfaces — and the column budget ==="
+section "Section 9: one cure, two surfaces — and the column budget"
 
 # ONE CURE, ONE SURFACE NOW (bionic 1.4.0, slice ADOPT). This used to be a two-reader
 # agreement: hooks/session-poker.sh decided `wall-blind` at tick time and named the
@@ -529,8 +506,7 @@ else
      "$(bionic_cols "$WIDE") columns: ${WIDE}"
 fi
 
-echo ""
-echo "=== Section 10: a firing Patrol with NO roster file and NOTHING dispatched ==="
+section "Section 10: a firing Patrol with NO roster file and NOTHING dispatched"
 
 # THE HEALTHY HALF OF `present=no`, and the reason Section 7's row is gated on a
 # COUNT rather than on the file. The roster file is written by the FIRST
@@ -568,8 +544,7 @@ expect_no_match "38: and is never described as a missing record" \
 expect_no_match "39: nor earns an unrostered-launch fix line it cannot have" \
   "*session ${SHORT10}: * unrostered*" "$OUT10"
 
-echo ""
-echo "=== Section 11: two projects on one machine — doctor answers about ONE ==="
+section "Section 11: two projects on one machine — doctor answers about ONE"
 
 # THE DEFECT THIS SECTION OWNS (T3 finding 1, AC-35 drive, 2026-09-03). Doctor
 # was driven cold in a session whose cwd was a probe project and printed a PATROL
@@ -633,8 +608,7 @@ expect_no_match "42: nor does its duplicate-Patrol fix line reach this page" \
 expect_no_match "43: and no row is attributed to the other project's roster" \
   "*2 open dispatches*" "$PB11"
 
-echo ""
-echo "=== Section 13: a NESTED .bionic below a git root — roster must resolve through project_root ==="
+section "Section 13: a NESTED .bionic below a git root — roster must resolve through project_root"
 # ============================================================
 # FIX-PATROL-ROOT (wave.plan.md Assumptions, FIX-DOCTOR/5). lib/patrol.sh's
 # _patrol_repo_root asked git for --git-common-dir FIRST and walked for a
@@ -703,8 +677,7 @@ expect_match "44: pointed at the other project, that project's session prints" \
 expect_no_match "45: and the first project's session is now the one absent" \
   "*session ${SHORT_A}*" "$PB12"
 
-echo ""
-echo "=== Section 14: the engagement field — report only (T4/AC-16) ==="
+section "Section 14: the engagement field — report only (T4/AC-16)"
 # THE SAME SWITCH EVERY RUN-SCOPED HOOK READS FIRST (lib/run.sh
 # `engaged_session`) — doctor's row says which side of it this session's
 # marker is on, and changes nothing on disk: the `find | sort` fingerprint
@@ -784,8 +757,7 @@ else
     "line is $(bionic_cols "$WIDE_ENG") columns: $WIDE_ENG"
 fi
 
-echo ""
-echo "=== Section 15: only a MET marker closes a row (Step-6 security review, out-of-axis 2) ==="
+section "Section 15: only a MET marker closes a row (Step-6 security review, out-of-axis 2)"
 
 # FOUR READERS OF ONE SCHEMA DISAGREED ABOUT WHETHER `state=` MATTERS.
 # hooks/session-start.sh's `open_rows` and the poker's `adopt_fold` require
@@ -829,9 +801,4 @@ PB17B="$(patrol_block "$OUT17B")"
 expect_match "56: …and flipping that same marker to MET closes it (54 discriminates)" \
   "*✓ session ${SHORT17} · 0 open dispatches*" "$PB17B"
 
-echo ""
-echo "========================================"
-echo "doctor-patrol: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
