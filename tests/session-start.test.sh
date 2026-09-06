@@ -37,13 +37,10 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 
 HOOK="${BIONIC_SESSION_START_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-start.sh}"
-PASS=0; FAIL=0; TOTAL=0
-
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "  $2"; return 0; }
 
 eq()  { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
 has() { if printf '%s' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing '$2' in: $3"; fi; }
@@ -219,7 +216,7 @@ eq  "0.1 the harness reads a non-zero exit as non-zero" "3" "$(rc)"
 has "0.2 …and reads the driven script's stderr" "harness-probe-stderr" "$(errtext)"
 HOOK="$BIONIC_SESSION_START_UNDER_TEST_SAVE"
 
-echo "=== 1 — a predecessor roster on a /clear: the block, and the sequence ==="
+section "1 — a predecessor roster on a /clear: the block, and the sequence"
 # The whole point of the hook, driven exactly as the probe left the disk: same
 # process, new sid, the old conversation's roster still open beside the new one's.
 P1=$(make_env 1s)
@@ -244,8 +241,7 @@ has  "1.10 …then adopt" "adopt" "$OUT"
 has  "1.11 the session-id triple agrees" "— agree" "$OUT"
 eq   "1.12 the hook wrote nothing under .bionic" "$S1_BEFORE" "$(snap "$P1")"
 
-echo ""
-echo "=== 2 — startup with nothing to report: silence ==="
+section "2 — startup with nothing to report: silence"
 P2=$(make_env 1s)
 S2_BEFORE=$(snap "$P2")
 OUT=$(drive "$P2" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
@@ -253,8 +249,7 @@ eq "2.1 exit 0" "0" "$(rc)"
 eq "2.2 nothing on stdout" "" "$OUT"
 eq "2.3 wrote nothing" "$S2_BEFORE" "$(snap "$P2")"
 
-echo ""
-echo "=== 3 — no .bionic anywhere above the cwd: silence ==="
+section "3 — no .bionic anywhere above the cwd: silence"
 # A bare temp directory: no git, no `.bionic`. project_root falls back to the cwd
 # and there is no real `.bionic` under it, so there is no project to report on.
 P3=$(mktemp -d "$WORK/bare.XXXXXX")
@@ -263,8 +258,7 @@ eq "3.1 exit 0" "0" "$(rc)"
 eq "3.2 nothing on stdout" "" "$OUT"
 eq "3.3 no .bionic was created" "" "$(ls -A "$P3")"
 
-echo ""
-echo "=== 4 — a divergent session-id triple: DIVERGE, named channel by channel ==="
+section "4 — a divergent session-id triple: DIVERGE, named channel by channel"
 P4=$(make_env 1s)
 OUT=$(drive "$P4" clear "$CUR_SID" "$PAY_SID" "$OLD_SID")
 eq  "4.1 exit 0" "0" "$(rc)"
@@ -282,8 +276,7 @@ OUT=$(drive "$P4b" clear "$CUR_SID" "$PAY_SID" "-")
 has "4.7 an absent pid file is reported absent" "pidfile=absent" "$OUT"
 has "4.8 …and two channels that still disagree still DIVERGE" "DIVERGE" "$OUT"
 
-echo ""
-echo "=== 5 — a legacy .bionic symlink under .worktrees (AC-11, ledger C2) ==="
+section "5 — a legacy .bionic symlink under .worktrees (AC-11, ledger C2)"
 P5=$(make_env 1s)
 mkdir -p "$P5/.worktrees/wt-one"
 ln -s "$P5/.bionic" "$P5/.worktrees/wt-one/.bionic"
@@ -296,8 +289,7 @@ has "5.3 …by its path" ".worktrees/wt-one/.bionic" "$OUT"
 hasnt "5.4 …and a real directory beside it is not" ".worktrees/wt-two/.bionic" "$OUT"
 eq  "5.5 wrote nothing" "$S5_BEFORE" "$(snap "$P5")"
 
-echo ""
-echo "=== 6 — predecessor stamps: stale past PATROL_STALE_MULTIPLIER x interval ==="
+section "6 — predecessor stamps: stale past PATROL_STALE_MULTIPLIER x interval"
 # interval 1s -> limit 2s. One predecessor stamp backdated well past it, one
 # predecessor stamp written now, and THIS session's own stamp backdated too — the
 # last is the anti-vacuity control: staleness alone must not make a stamp mine.
@@ -317,8 +309,7 @@ hasnt "6.5 THIS session's own stale stamp is not a predecessor" "  ${CUR_SID:0:8
 has "6.6 the age is reported in seconds" "s old" "$OUT"
 eq  "6.7 wrote nothing" "$S6_BEFORE" "$(snap "$P6")"
 
-echo ""
-echo "=== 7 — the hook never blocks and never refuses ==="
+section "7 — the hook never blocks and never refuses"
 # Every fixture above already asserted rc 0. What is left is the degenerate input
 # a real SessionStart can still deliver: no payload at all, and no session key.
 P7=$(make_env 1s)
@@ -330,8 +321,7 @@ eq "7.2 …and still wrote nothing" "$S7_BEFORE" "$(snap "$P7")"
 OUT=$( cd "$P7" && printf 'not json at all' | CLAUDE_CODE_SESSION_ID="$CUR_SID" BIONIC_CLAUDE_HOME="$WORK/nohome" bash "$HOOK" 2>/dev/null )
 eq "7.3 unparsable payload: exit 0" "0" "$?"
 
-echo ""
-echo "=== 8 — an open run, no engagement marker: one line, nothing else (AC-11) ==="
+section "8 — an open run, no engagement marker: one line, nothing else (AC-11)"
 # A predecessor roster and stamp are seeded too — the positive control that
 # proves the gate, not an empty fixture, is what silences the block: under
 # today's rules (no open run) this exact disk state would have printed both.
@@ -351,8 +341,7 @@ hasnt "8.7 no predecessor roster line" "roster-$OLD_SID.state" "$OUT"
 hasnt "8.8 no predecessor stamps section" "predecessor stamps:" "$OUT"
 eq    "8.9 the hook wrote nothing under .bionic" "$S8_BEFORE" "$(snap "$P8")"
 
-echo ""
-echo "=== 9 — an open run + the engagement marker: today's block, unchanged (AC-12) ==="
+section "9 — an open run + the engagement marker: today's block, unchanged (AC-12)"
 P9=$(make_env 1s)
 write_open_plan "$P9" >/dev/null
 roster_rows "$P9/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-DELTA"
@@ -368,8 +357,7 @@ hasnt "9.5 the bystander notice does not also print" \
   "invoke /bionic:canonical-sdlc to engage it" "$OUT"
 eq    "9.6 the hook wrote nothing under .bionic" "$S9_BEFORE" "$(snap "$P9")"
 
-echo ""
-echo "=== 10 — a symlink at the marker path reads as absent, same as no marker (AC-4) ==="
+section "10 — a symlink at the marker path reads as absent, same as no marker (AC-4)"
 P10=$(make_env 1s)
 PLAN10="$(write_open_plan "$P10")"
 mkdir -p "$P10/.bionic/tmp"
@@ -382,8 +370,7 @@ has   "10.2 a symlinked marker reads not-engaged: the notice prints" \
 has   "10.3 …naming the plan path" "$PLAN10" "$OUT"
 hasnt "10.4 …and not the re-arm block" "re-arm" "$OUT"
 
-echo ""
-echo "=== 11 — no open run at all: the marker's presence or absence changes nothing (AC-11 pair) ==="
+section "11 — no open run at all: the marker's presence or absence changes nothing (AC-11 pair)"
 # The paired control the design calls for: no plan on disk, marker absent —
 # today's behaviour, silence over a clean fixture. Marker presence must not
 # matter either, since the gate above is conditioned on PLAN being non-empty.
@@ -397,8 +384,7 @@ OUT=$(drive "$P11b" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq "11.3 exit 0 with the marker present too" "0" "$(rc)"
 eq "11.4 still nothing on stdout — no run, no notice, no block" "" "$OUT"
 
-echo ""
-echo "=== 12 — two or more open runs (AC-5, S7) ==="
+section "12 — two or more open runs (AC-5, S7)"
 
 echo "--- 12a: two open plans, not engaged: the listing block, and nothing else ---"
 P12=$(make_env 1s)
@@ -532,8 +518,7 @@ eq    "12f.5 wrote nothing" "$S12f_BEFORE" "$(snap "$P12f")"
 # file's mtime itself, so the wall clock's real "now" already sees it as stale.
 QUIET_AGO=$((8 * 86400))
 
-echo ""
-echo "=== 13 — live vs open: the quiet-count line replaces the quiet listing (AC-3, S3) ==="
+section "13 — live vs open: the quiet-count line replaces the quiet listing (AC-3, S3)"
 
 echo "--- 13a: 3 open, 1 live, not engaged: only the live plan is listed, plus a quiet-count line ---"
 P13=$(make_env 1s)
@@ -577,8 +562,7 @@ write_open_plan "$P13c" beta >/dev/null
 OUT=$(drive "$P13c" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 hasnt "13c.1 no quiet-count line when nothing is quiet" "quiet open run(s)" "$OUT"
 
-echo ""
-echo "=== 14 — engaged and bound: the bound-run line names the plan and its step (AC-21, S3) ==="
+section "14 — engaged and bound: the bound-run line names the plan and its step (AC-21, S3)"
 
 echo "--- 14a: exactly one open run, engaged and bound to it: one line, nothing else ---"
 P14=$(make_env 1s)
@@ -616,8 +600,7 @@ hasnt "14c.3 the sibling (unbound) plan is not named" "$(basename "$PLAN14cB")" 
 hasnt "14c.4 no count-style listing" "open runs exist here" "$OUT"
 has   "14c.5 the predecessor roster still prints alongside it" "roster-$OLD_SID.state" "$OUT"
 
-echo ""
-echo "=== 15 — engaged, one live run, unbound: unchanged (regression control, S3 scope (c)) ==="
+section "15 — engaged, one live run, unbound: unchanged (regression control, S3 scope (c))"
 P15=$(make_env 1s)
 write_open_plan "$P15" >/dev/null
 roster_rows "$P15/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-IOTA"
@@ -630,7 +613,4 @@ hasnt "15.3 no quiet-count line — nothing is quiet" "quiet open run(s)" "$OUT"
 has   "15.4 the predecessor roster still prints, exactly as today" "roster-$OLD_SID.state" "$OUT"
 eq    "15.5 wrote nothing" "$S15_BEFORE" "$(snap "$P15")"
 
-echo ""
-echo "──────────────────────────────────────────────"
-echo "session-start: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
-[ "$FAIL" -eq 0 ]
+finish
