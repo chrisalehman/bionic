@@ -35,6 +35,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 # THE TWO SPELLINGS OF ONE DIRECTORY. payload/hooks is a symlink to <repo>/hooks, so a hook
@@ -475,8 +476,18 @@ make_repo() {  # <name> -> an armed repo of an ENGAGED session
   echo seed > "$repo/README.md"
   git -C "$repo" add README.md
   git -C "$repo" commit -qm seed 2>/dev/null
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$repo/.bionic/tmp/roster-$SID.state"
+  {
+    roster_header
+    # THE ROW CARRIES THE FULL-TREE BUDGET, and it has to (S13, spec AC-21). Every cell in
+    # C4 drives `bash tests/run.sh` from an agent context, and since the budget arm shipped
+    # a full-tree run is refused unless this agent`s own row allows it — so a header-only
+    # roster would put the BUDGET arm under test in the cells that exist to test the
+    # BACKGROUND one, and the three "must stay silent" cells would have gone red for a
+    # wall they never meant to reach. The unbudgeted world is
+    # tests/background-suite-guard.test.sh`s.
+    roster_row_fixture "session=$SID" name=guarded "agent_id=$AGENT_ID" \
+      suites_allowed=run.sh suites-source=declared files=
+  } > "$repo/.bionic/tmp/roster-$SID.state"
   chmod 600 "$repo/.bionic/tmp/roster-$SID.state"
   printf '%s' "$repo"
 }
@@ -728,6 +739,83 @@ expect_empty "AC-20 …still silently" "$OUT$ERR"
 engage "$GREPO"
 run_hook "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)" "$BG_GUARD"
 expect_eq "AC-20 control: with the marker back, the wall REFUSES again" "2" "$ST"
+
+# ============================================================
+echo "=== C7 — cmd_suite_targets: WHICH suite a command runs (S13, AC-21) ==="
+# ============================================================
+# The budget arm cannot compare a command to a set of suite basenames without knowing which
+# basenames the command names. That reading is here, beside the class, because it is the
+# same reading: `cmd_class` and `cmd_suite_targets` answer off the same argv positions, and
+# a second matcher outside this library would have to re-implement strip_leading,
+# unwrap_runner and the quote-aware tokeniser to see them.
+#
+# MEASURED IN BOTH DIRECTIONS, per the library`s own superset note (:47-51: "Any new arm
+# here is a wall — measure both directions"). Every spelling the class arm recognises must
+# also NAME its suite, or the budget arm silently allows what the class arm caught; and no
+# spelling the class arm rejects may name one, or the budget arm refuses prose.
+
+targets_of() {  # <command> -> the library's targets, newline-joined
+  printf '%s' "$1" | bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_suite_targets "$(cat)"
+  ' _ "$LIB" 2>&1
+}
+
+targets_are() {  # <expected, newline-joined> <command>
+  expect_eq "targets [$2]" "$1" "$(targets_of "$2")"
+}
+
+# --- direction 1: every suite-class spelling names the file it runs ---
+targets_are 'run.sh'       'bash tests/run.sh'
+targets_are 'run.sh'       'bash tests/run.sh --serial'
+targets_are 'run.sh'       'bash -x tests/run.sh'
+targets_are 'cmd-class.test.sh' 'bash tests/cmd-class.test.sh'
+targets_are 'test.sh'      'bash test.sh'
+targets_are 'run.sh'       './tests/run.sh'
+targets_are 'run.sh'       'tests/run.sh'
+targets_are 'run.sh'       'cd tests && bash run.sh'
+targets_are 'run.sh'       '(cd tests; bash run.sh)'
+targets_are 'run.sh'       'sudo bash tests/run.sh'
+targets_are 'run.sh'       '( bash tests/run.sh )'
+targets_are 'run.sh'       'if true; then bash tests/run.sh; fi'
+targets_are 'run.sh'       'FARM_OUT_ALLOW=1 bash tests/run.sh'
+targets_are 'run.sh'       'PIN=/tmp/p PATH=$PIN:$PATH bash tests/run.sh'
+targets_are 'loader.test.sh' 'bash "$REPO/tests/loader.test.sh"'
+targets_are 'width.test.sh' 'bash tests/width.test.sh 2>&1 | tee /tmp/w.log'
+
+# THE WHOLE POINT OF THE SET: a chain names every suite in it, in position order.
+targets_are 'a.test.sh
+b.test.sh' 'bash tests/a.test.sh && bash tests/b.test.sh'
+targets_are 'a.test.sh
+run.sh' 'bash tests/a.test.sh; ./tests/run.sh'
+# …and a suite named twice is one claim, not two.
+targets_are 'a.test.sh' 'bash tests/a.test.sh && bash tests/a.test.sh'
+
+# THE SUPERSET ARRAY ITSELF, so a spelling added to the class arm cannot be added without
+# an answer here. Both halves asserted per spelling: it classifies AND it names a target.
+for sc in "${SUPERSET_SUITES[@]}"; do
+  expect_eq "C7 [$sc] is suite-class" "suite" "$(class_of "$sc")"
+  expect_eq "C7 …and names its suite" "run.sh" "$(targets_of "$sc")"
+done
+
+# --- direction 2: nothing else names one ---
+targets_are '' 'git status --short'
+targets_are '' 'echo "bash tests/run.sh"'
+targets_are '' 'echo run bash tests/run.sh first'
+targets_are '' 'git commit -m "make the row green"'
+targets_are '' 'ls tests/run.sh'
+targets_are '' 'bash run.sh'
+targets_are '' 'cat <<EOF
+bash tests/run.sh
+EOF'
+# SUITE-CLASS BUT FILELESS. These run a suite and name no file this repo budgets by, so the
+# budget arm has nothing to compare and stands aside — asserted rather than assumed,
+# because a target invented for them would refuse a project bionic has no row about.
+for fileless in 'pytest' 'npm test' 'go test ./...' 'make test' 'make check' 'cargo test'; do
+  expect_eq "C7 [$fileless] is suite-class" "suite" "$(class_of "$fileless")"
+  expect_eq "C7 …and names no suite FILE" "" "$(targets_of "$fileless")"
+done
 
 # ============================================================
 echo

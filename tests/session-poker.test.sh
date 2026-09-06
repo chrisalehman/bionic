@@ -135,6 +135,12 @@ mkrow() {  # <key=value>...
   # pre-wave roster, so `plan=` is written only when a case asks for it, and every existing
   # row in this file stays exactly the shape it was.
   local plan="" plan_set=no
+  # THE THREE INSTRUMENT FIELDS ARE OPT-IN for the same reason `plan=` is (S13, spec
+  # AC-20): every roster written before the suite-allowance wall carries none of them, and
+  # `adopt` has to answer for those files too. A fixture that always emitted them could not
+  # describe a pre-wall roster, and the third state — key absent, as opposed to key present
+  # and empty — is the one the writer-side budget guard partitions on.
+  local files="" sallow="" ssrc="" instrument_set=no
   for kv in "$@"; do
     case "$kv" in
       plan=*)        plan="${kv#*=}"; plan_set=yes ;;
@@ -150,6 +156,9 @@ mkrow() {  # <key=value>...
       claims=*)      claims="${kv#*=}" ;;
       cadence=*)     cadence="${kv#*=}" ;;
       waiver=*)      waiver="${kv#*=}" ;;
+      files=*)          files="${kv#*=}";  instrument_set=yes ;;
+      suites_allowed=*) sallow="${kv#*=}"; instrument_set=yes ;;
+      suites-source=*)  ssrc="${kv#*=}";   instrument_set=yes ;;
       *) printf 'mkrow: unknown key %s\n' "$kv" >&2; return 1 ;;
     esac
   done
@@ -161,12 +170,17 @@ mkrow() {  # <key=value>...
   # and a pre-wave roster is exactly what these cases are about.
   local emit=roster_row_fixture
   [ "$plan_set" = yes ] || emit=roster_row_no_plan
+  local -a instrument
+  if [ "$instrument_set" = yes ]; then
+    instrument=("files=$files" "suites_allowed=$sallow" "suites-source=$ssrc")
+  fi
   "$emit" \
     "status=$status" "session=$session" "name=$name" "agent_id=$agent_id" \
     "launched_at=$launched_at" "subagent_type=$subagent_type" model=opus \
     "deliverable=$deliverable" "source=$source" "duration=$duration" \
     "progress=$progress" "claims=$claims" "cadence=$cadence" absent= \
-    "waiver=$waiver" "tool_use_id=$tool_use_id" "plan=$plan"
+    "waiver=$waiver" ${instrument[@]+"${instrument[@]}"} \
+    "tool_use_id=$tool_use_id" "plan=$plan"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -876,10 +890,19 @@ add_row_to "$R8" "$ADOPT_A" name=landed-one status=identified agent_id="$ID_LAND
   subagent_type=bionic:senior-implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/landed-one.md" \
   progress="$R8/.bionic/tmp/progress-landed.md"
+# THE SUITE BUDGET THIS AGENT WAS DISPATCHED WITH (S13, spec AC-20). The writer-side guard
+# in hooks/background-suite-guard.sh reads `suites_allowed=` off the row for the agent`s
+# own id, so a resumed writer whose adopted row lost the field would come out of a /clear
+# with no budget on it — and the wall that refuses an off-budget suite would go quiet for
+# exactly the agents a clear leaves running longest. `running-one` carries one; the rows
+# beside it deliberately do not, which is what makes §8g″ below able to tell a carried
+# field from a manufactured one.
 add_row_to "$R8" "$ADOPT_A" name=running-one status=identified agent_id="$ID_RUNNING" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/running-one.md" \
-  progress="$R8/.bionic/tmp/progress-running.md"
+  progress="$R8/.bionic/tmp/progress-running.md" \
+  files="payload/scripts/lib/widget.sh,hooks/widget-guard.sh" \
+  suites_allowed="alpha.test.sh beta.test.sh" suites-source=derived
 add_row_to "$R8" "$ADOPT_A" name=silent-one status=identified agent_id="$ID_SILENT" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/silent-one.md" \
@@ -1095,6 +1118,34 @@ expect_contains "…its declared cadence" "|cadence=10 minutes|" "$ADOPTED_ROW"
 expect_contains "…and the provenance of the adoption" "|adopted_from=$ADOPT_A|" "$ADOPTED_ROW"
 expect_contains "the roster file carries its schema header" "roster-state/v1" \
   "$(head -1 "$OWN_ROSTER")"
+
+# ---------- 8g″: the carried suite budget (S13, spec AC-20) ----------
+#
+# THREE FIELDS, CARRIED AS A GROUP. `files=` is what the brief declared it would touch,
+# `suites_allowed=` the set derived or declared from it, `suites-source=` which of the two
+# it was. hooks/background-suite-guard.sh reads the second off the row belonging to the
+# calling agent`s id, and a /clear is exactly when it matters most: the agents that survive
+# one are the long-running writers, and a budget that evaporates at the resume leaves the
+# wall silent for them.
+BUDGET_ROW="$(grep -F "|name=running-one|" "$OWN_ROSTER" | tail -1)"
+expect_contains "the adopted row carries the derived suite budget forward" \
+  "|suites_allowed=alpha.test.sh beta.test.sh|" "$BUDGET_ROW"
+expect_contains "…the files the brief declared" \
+  "|files=payload/scripts/lib/widget.sh,hooks/widget-guard.sh|" "$BUDGET_ROW"
+expect_contains "…and where the set came from, so no reader mistakes derived for declared" \
+  "|suites-source=derived|" "$BUDGET_ROW"
+
+# A PRE-WALL ROW ADOPTS WITHOUT MANUFACTURING ONE. Absent is a third state, distinct from
+# present-and-empty: the guard reads an empty `suites_allowed=` as "a budget was stated and
+# came out empty" and an absent key as "this row predates the wall". An adopt that invented
+# the first from the second would put a statement on the roster that nobody made.
+NOBUDGET_ROW="$(grep -F "|name=waived-one|" "$OWN_ROSTER" | tail -1)"
+expect_absent "a source row with no budget adopts with no budget field at all" \
+  "suites_allowed=" "$NOBUDGET_ROW"
+expect_absent "…nor a source for a set it does not carry" "suites-source=" "$NOBUDGET_ROW"
+# NON-VACUITY: that row IS an adopted row, so the two absences above are the group being
+# withheld and not a row that failed to be written.
+expect_contains "…while still being a real adopted row" "|adopted_from=$ADOPT_A|" "$NOBUDGET_ROW"
 
 # ---------- 8g′: the carried waiver and the copied marker (S17, AC-12 attempt 2) ----------
 #
