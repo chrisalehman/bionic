@@ -897,6 +897,11 @@ W_VICTIM=""
 for W_F in "$REPO"/tests/*.test.sh; do W_VICTIM="$W_F"; break; done
 W_MUT="$SB/wall-mutant"
 mkdir -p "$W_MUT"
+# THE PRECONDITION OF THIS MUTATION (§11's idiom, AC-29). The plant below adds a
+# flush-left ok() to a suite that must not already have one — if it did, the
+# mutant would be indistinguishable from the shipped file and the count below
+# would move for a reason that has nothing to do with the plant.
+anchor -E "$W_VICTIM" '^ok\(\)' 0
 { echo '#!/bin/bash'; echo 'ok() { echo "planted shadow"; }'; cat "$W_VICTIM"; } \
   > "$W_MUT/$(basename "$W_VICTIM")"
 W_MUT_REFUSED=0
