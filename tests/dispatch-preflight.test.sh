@@ -3750,6 +3750,12 @@ expect_status "27c a brief declaring neither Files: nor Suites: is REFUSED" "2" 
 expect_contains "27c …naming the Files: fix" "Files: path/one.sh" "$GATE_ERR"
 expect_contains "27c …naming the Suites: fix" "Suites: tests/one.test.sh" "$GATE_ERR"
 expect_contains "27c …and the waiver" "Suites: none" "$GATE_ERR"
+# THE SPELLING RULE, IN THE ONE MESSAGE AN AUTHOR READS WHEN THE LABELS ARE MISSING. Both
+# labels are read out of the brief TEXT before any shell expands anything, and the
+# writer-side guard reads its command the same way (review-c C-5/C-6): a name that is still
+# a variable when a hook sees it can be neither derived from nor checked against anything.
+expect_contains "27c …and the spelling rule the two labels share" \
+  "one path per token, no shell variables" "$GATE_ERR"
 expect_empty "27c …with nothing on stdout" "$GATE_OUT"
 expect_status "27c …and no row journalled for a refused dispatch" \
   "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"

@@ -1845,6 +1845,11 @@ if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ]; then
   echo "Or waive the budget for a brief that runs no suite at all —" >&2
   echo "    Suites: none" >&2
   echo "" >&2
+  echo "Either way: one path per token, no shell variables. Both labels are read out of the" >&2
+  echo "brief TEXT, before any shell has expanded anything, and the writer-side guard reads" >&2
+  echo "its command the same way — a name that is still a variable when a hook sees it can" >&2
+  echo "be neither derived from nor checked against anything." >&2
+  echo "" >&2
   echo "Then retry the dispatch." >&2
   exit 2
 fi
