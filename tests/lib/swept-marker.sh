@@ -34,6 +34,20 @@ if ! type -t swept_marker_write >/dev/null 2>&1; then
   eval "$(awk '/^swept_marker_write\(\)/,/^\}/' "${BIONIC_HOOKS_DIR}/landing-gate.sh")"
 fi
 
+# THE EXTRACTION IS CHECKED (review-b B-12). Both `eval`s above obtain their subject by
+# matching SOURCE TEXT of hooks/landing-gate.sh at column 0 — `^SWEPT_SCHEMA=` and
+# `^swept_marker_write()`. Indent the function, move the constant, and both become `eval ""`:
+# a silent no-op, after which the builder simply does not exist and the failure surfaces
+# as `command not found` under the runner's stderr-strict arm, in a suite whose own tally
+# says nothing about it. The framework's derivation cannot cover this one either —
+# `swept_marker_write` is not in `_tf_scan`'s token set — so the check is here, beside the
+# extraction, and it names the file it failed to read.
+if ! declare -p SWEPT_SCHEMA >/dev/null 2>&1; then
+  echo "tests/lib/swept-marker.sh: no '^SWEPT_SCHEMA=' line in ${BIONIC_HOOKS_DIR}/landing-gate.sh — the constant could not be extracted (the hook was reformatted, or the name moved)." >&2
+  exit 1
+fi
+require_helpers swept_marker_write
+
 swept_marker_field() {  # <line> <key> -> value
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }

@@ -7612,17 +7612,18 @@ expect_eq "S19.3 …declared by 24 anchor calls (Section 8's doctoring rewrites 
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 expect_eq "S19.3 …and this suite's own mutant trees by 23 more" "23" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
-# The two suites the waiver used to name. One call site each: `mutate_guard` anchors
-# per call (its callers pass the shipped line they delete), and landing-gate's
-# inverted-guard awk anchors the line it rewrites.
+# The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
+# the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
+# the F2 fold-in (review-b B-12) — the two whole-line moves its §17 doctors into
+# hooks/landing-gate.sh to prove the swept-marker extraction fails loudly.
 expect_eq "S19.3 …and agent-context-guard by one, now that mutate_guard anchors per call" "1" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/agent-context-guard.test.sh")"
-expect_eq "S19.3 …and landing-gate by one, for the inverted-guard mutant" "1" \
+expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and the two line moves §17 doctors" "3" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/landing-gate.test.sh")"
 # THE TOTAL AC-30 NAMES. Stated as its own measured literal rather than left to the
 # reader to add up: this is the number that has to move when a doctoring site is
 # added or removed anywhere in the four suites that build mutants.
-expect_eq "S19.3 …49 anchor call sites across the four doctoring suites, all told" "49" \
+expect_eq "S19.3 …51 anchor call sites across the four doctoring suites, all told" "51" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
