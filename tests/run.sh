@@ -61,10 +61,11 @@
 # suites on the reliability ruling (commit 8582861), one of the nineteen
 # (fresh-home.test.sh) was later revived, rc-item.test.sh was added new, and
 # epic-19 wave-01 added doctor-patrol.test.sh (F3) and command-relay.test.sh
-# (F4), and bionic 1.3.2 added git-argv, cmd-class and patrol-marker — 31 `run` lines as of this writing (`grep -c '^run "' tests/run.sh`
-# equals `ls tests/*.test.sh | wc -l`;
+# (F4), bionic 1.3.2 added git-argv, cmd-class and patrol-marker, and wave-01
+# verification-cannot-lie added four more — 55 `run` lines as of this writing
+# (`grep -c '^run "' tests/run.sh` equals `ls tests/*.test.sh | wc -l`;
 # a maintainer re-derives the count rather than trusting a number in a
-# comment, this one included). Neither audit file re-covers what changed since
+# comment, this one included — and tests/framework.test.sh §8 now does). Neither audit file re-covers what changed since
 # it ran; a suite added or restored after S8b carries no isolation proof
 # beyond its own file. A suite that writes outside its own mktemp root breaks this
 # premise, which is the other reason the roster is hand-listed: adding a line is the
@@ -75,8 +76,9 @@
 # seven of these slices each ran a full suite concurrently on one machine, free memory
 # fell to ~188 MB and the kernel SIGKILLed a suite mid-run (W7 assumption A4.2). Four was
 # the width with headroom on that measurement; the default was raised to eight on
-# 2026-08-22 (ef23f75, user's call) and BIONIC_TEST_JOBS is there for a machine with less
-# or more.
+# 2026-08-22 (ef23f75, user's call) and `BIONIC_TEST_JOBS_CEILING` is there for a machine
+# with less or more. NOT `BIONIC_TEST_JOBS`, which is retired as an input — line 45 above
+# says so and line 169 prints it at runtime.
 #
 # EVERY SUITE IS A CLIENT OF ONE FRAMEWORK (wave-01 S10, spec AC-12). Before a
 # roster line is launched its source is read, and a suite that defines a name

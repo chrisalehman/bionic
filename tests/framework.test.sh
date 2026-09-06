@@ -579,6 +579,26 @@ RUNSH_STRIPPED="$(printf '%s\n' "$RUNSH" | grep -v 'run "framework.test.sh"')"
 expect_eq "8: …and the check discriminates (a copy without the line fails it)" "no" \
   "$(contains "$RUNSH_STRIPPED" 'run "framework.test.sh" bash tests/framework.test.sh')"
 
+# --- THE HEADER'S OWN NUMBERS (review-c C-3/C-4) ----------------------------
+# The runner's header tells a maintainer to re-derive the roster count rather
+# than trust the number in it — and then carried 31 against a roster of 55, in
+# the paragraph whose subject is how much of the roster the isolation audits
+# cover. This row does the re-derivation the sentence asks for.
+R8_LINES="$(grep -c '^run "' "${REPO}/tests/run.sh" | tr -d ' ')"
+R8_FILES="$(ls "${REPO}"/tests/*.test.sh | grep -c . | tr -d ' ')"
+expect_eq "8: every suite file has a run line, and no run line has no file" \
+  "$R8_FILES" "$R8_LINES"
+expect_eq "8: …and the header's stated count is that number" "yes" \
+  "$(contains "$RUNSH" "$R8_LINES \`run\` lines as of this writing")"
+# C-4: the header named a retired input as the knob to reach for. Two other
+# places in the same file say it is retired, one of them at runtime.
+expect_eq "8: the header points at the live width knob" "yes" \
+  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS_CEILING` is there for a machine')"
+expect_eq "8: …and not at the retired one" "no" \
+  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS is there for a machine')"
+expect_eq "8: …while the file still says out loud that it is retired" "yes" \
+  "$(contains "$RUNSH" 'BIONIC_TEST_JOBS` is retired as an input')"
+
 # ============================================================
 section "9: the generic expect family is the framework's (AC-12, S1b)"
 # ============================================================
