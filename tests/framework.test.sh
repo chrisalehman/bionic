@@ -992,6 +992,37 @@ F14_ONELINETOP
 expect_contains "14: …and a one-line shadow is still a TOPDEF the wall refuses" \
   "defines ok() at column 0" "$(f14_wall onelinetop)"
 
+# --- BOTH SYNTAXES BASH ACCEPTS (critic K-1) --------------------------------
+# `function ok { ... }` defines ok exactly as `ok() { ... }` does. The POSIX-only
+# definition test read neither `function` form, so a suite spelling its private
+# ok that way produced no TOPDEF, the wall had nothing to match, and the runner
+# launched it — and §13s `0 refused` was a census taken with the same blind
+# scanner, which cannot tell "no suite shadows" from "no suite shadows in the
+# one syntax we read".
+cat > "$F14_D/fnkw.sh" <<'F14_FNKW'
+#!/bin/bash
+function ok { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); echo "PASS: $1"; }
+function no { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); echo "PASS: $1"; }
+F14_FNKW
+cat > "$F14_D/fnkwparen.sh" <<'F14_FNKWP'
+#!/bin/bash
+function expect_eq() { echo "every comparison is equal"; }
+F14_FNKWP
+expect_contains "14: function ok { ... } is a shadow the wall refuses" \
+  "defines no() ok() at column 0" "$(f14_wall fnkw)"
+expect_contains "14: …and so is function name() { ... }" \
+  "defines expect_eq() at column 0" "$(f14_wall fnkwparen)"
+# PAIRED NEGATIVE: a function-keyword helper under a name the framework does not
+# own is a DEF, not a shadow, and must not fire a false red at load (A-16).
+cat > "$F14_D/fnkwlocal.sh" <<'F14_FNKWL'
+#!/bin/bash
+function expect_local_thing { ok "$1"; }
+expect_local_thing "x"
+F14_FNKWL
+expect_empty "14: a function-keyword helper the framework does not own stays legal" \
+  "$(f14_wall fnkwlocal)"
+expect_eq "14: …and the derivation counts it as defined" "0" "$(f14_deriv fnkwlocal)"
+
 # --- no file in tests/ ends with a heredoc still open ------------------------
 # NOT A COUNT PIN. The property that failed is "the scan reaches EOF", so that
 # is what is asserted; counts move with every edit. The tracer runs the SHIPPED
