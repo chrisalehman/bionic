@@ -389,14 +389,18 @@ mutate_guard() {  # <name> <anchor pattern> <sed expression> [<count>] -> sets M
                   # stdout would swallow them.
                   #
                   # THE PRECONDITION IS THE FRAMEWORK'S `anchor` (cross-gate section S19).
-                  # The sed expression is a BRE and cannot be reused verbatim as a grep
-                  # pattern, so each caller passes the shipped LINE it deletes as a fixed
-                  # string, measured against the guard before the call was written. A line
-                  # that moved makes the mutant byte-identical to the shipped hook and every
-                  # arm below vacuous; the anchor names the pattern and the count it found,
-                  # which a bytes-are-equal check cannot.
+                  #
+                  # THE PATTERN IS AN ERE AND IT IS WHOLE-LINE ANCHORED, because the sed
+                  # expressions below are. A fixed-string anchor is a SUBSTRING test: it
+                  # still matches after the guard line is reindented, while the `^...$`
+                  # sed no longer does — the mutant comes out byte-identical and every arm
+                  # under it reads the shipped hook with nothing red. Proved by planting a
+                  # single leading space (s19c-planted-move.log, plant 2). The sed's own
+                  # expression is a BRE and cannot be reused verbatim, so each caller
+                  # passes the ERE for the same line, measured against the shipped guard
+                  # before the call was written.
   MUTANT="$MUTANT_TREE/hooks/mutant-$1.sh"
-  anchor "$GUARD" "$2" "${4:-1}"
+  anchor -E "$GUARD" "$2" "${4:-1}"
   sed "$3" "$GUARD" > "$MUTANT"
 }
 
@@ -416,7 +420,7 @@ arm_roster "$REPO_M"
 # Half 1 — the agent-context test. Without it the settings channel fires on the MAIN
 # THREAD too, where the skill channel already runs the same wall: one dispatch, two
 # refusals, and (for a passing one) two roster rows.
-mutate_guard noctx '[ -n "$(_jq '"'"'.agent_id'"'"')" ] || exit 0' \
+mutate_guard noctx '^\[ -n "\$\(_jq '"'"'\.agent_id'"'"'\)" \] \|\| exit 0$' \
   "/^\[ -n \"\$(_jq '\.agent_id')\" \] || exit 0$/d"
 run_mutant "$MUTANT" "$(mk_agent_payload "$REPO_M" no)" "$DISPATCH_WALL"
 expect_status "G7.1 without the agent_id test the guard fires on the MAIN thread (double-fire)" 2 "$ST"
@@ -426,7 +430,7 @@ expect_status "G7.1 …and the shipped guard does not" 0 "$ST"
 # Half 2 — the arming test. Without it every agent context on this machine, in every
 # session that never invoked the skill, meets sdlc walls again — the exact scoping
 # the walls were moved to the skill channel to get.
-mutate_guard noarm '[ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ] || exit 0' \
+mutate_guard noarm '^\[ ! -L "\$ROSTER_FILE" \] && \[ -f "\$ROSTER_FILE" \] \|\| exit 0$' \
   '/^\[ ! -L "\$ROSTER_FILE" \] && \[ -f "\$ROSTER_FILE" \] || exit 0$/d'
 disarm_roster "$REPO_M"
 run_mutant "$MUTANT" "$(mk_agent_payload "$REPO_M" yes)" "$DISPATCH_WALL"
