@@ -179,11 +179,60 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+
+# ── THE INTERPRETER PIN (wave-01 verification-cannot-lie S2, spec AC-1; ADR-001) ──
+#
+# WHAT IT FIXES. Every payload script and hook pins `#!/bin/bash` — bash 3.2 on a Mac — and
+# the CLI runs a hook BY PATH, so the shebang is what chooses the interpreter in production.
+# The roster below, though, TYPES the interpreter: `bash tests/x.test.sh` takes whatever
+# `bash` is first on PATH, which on a machine with Homebrew bash is 5.3. A green run the
+# default way therefore proved the payload under an interpreter it is never executed with,
+# and 3.2-only failures — a bare `"${arr[@]}"` under `set -u`, the here-string divergence
+# tests/interpreter-pin.test.sh plants — could not be seen from here at all. ADR-001 settled
+# it: one interpreter, the one the shebang names, so each host tests its own production
+# interpreter by construction.
+#
+# HOW. One directory, with one entry in it, first on PATH for the run. `bash` resolves to
+# `/bin/bash` for every child of this process — the workers `xargs` forks, the suites they
+# run, and anything those suites start — and the REST of PATH is the caller's own, so `jq`,
+# `git` and `claude` resolve exactly where they did. It is called THE INTERPRETER PIN and
+# never "the PATH shim": v1 wave 0 deletes an unrelated piece by that name, and two
+# mechanisms sharing one name is how a reader ends up in the wrong file.
+#
+# THE MARKER travels with it. tests/lib/resolve-roots.sh — the seam every suite sources —
+# re-executes a HAND-run suite under `/bin/bash` so a suite typed at a prompt lands on the
+# same interpreter this pin would have given it; the marker tells it that a suite launched
+# from here is already pinned and must not re-exec.
+if [ ! -x /bin/bash ]; then
+  echo "tests/run.sh: /bin/bash is not executable — the interpreter every payload script's shebang names is unrunnable on this host" >&2
+  exit 2
+fi
+PIN="$TMP/pin"
+mkdir -p "$PIN"
+ln -sf /bin/bash "$PIN/bash"
+PATH="$PIN:$PATH"
+export PATH
+export BIONIC_TEST_INTERPRETER_PINNED=1
+
+# ── THE ENVIRONMENT STAMP (S2, spec AC-3) ────────────────────────────────────
+# A run's verdict is a claim about an environment, so the run says which one: the OS, the
+# interpreter the suites actually got (asked of the pinned binary, not of this process), the
+# locale that decides how every width and sort behaves, and the launch directory the pin was
+# built in. Printed twice — in the header, where a reader meets the run, and beside
+# `Gating:`, where they read its verdict — because a captured log is usually read from one
+# end or the other.
+ENV_STAMP="$(printf 'env: os=%s bash=%s locale=%s path=%s' \
+  "$(uname -s | tr '[:upper:]' '[:lower:]')" \
+  "$("$PIN/bash" -c 'echo "$BASH_VERSION"' 2>/dev/null)" \
+  "${LC_ALL:-${LANG:-unset}}" \
+  "$PIN")"
+echo "$ENV_STAMP"
+
 ( . tests/lib/resolve-roots.sh
   printf 'Roots: hooks=%s skills=%s scripts=%s\n\n' \
     "$BIONIC_HOOKS_DIR" "$BIONIC_SKILLS_DIR" "$BIONIC_SCRIPTS_DIR" )
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 QUEUE="$TMP/queue"; : >"$QUEUE"
 export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
 
@@ -200,15 +249,41 @@ _timing() {  # _timing <label> <seconds>
 
 _label() { printf '  %-36s ' "$1"; }
 
+# _lost_command <captured-output-file> -> the interpreter's own "command not found"
+# diagnostic, if the suite's output carries one.
+#
+# THE SHAPE, NOT THE WORDS (spec AC-14, runner half). A suite here runs under `set -uo
+# pipefail` with no `-e`, so a call to a helper that was deleted or renamed is one line on
+# stderr and nothing else: the suite runs on, its own pass/total never notices, and this
+# runner prints ✓ PASS. That is a green with a hole in it, and it has happened — the
+# `expect_eq` call that asserted nothing in cross-gate-agreement, found by research, not by
+# a run. So a suite that exited 0 is now read as well as counted.
+#
+# Matched on the DIAGNOSTIC's structure — `<script>: line <n>: <cmd>: command not found`, or
+# `<shell>: <cmd>: command not found` for a `bash -c` — never on the bare phrase, because
+# suites legitimately PRINT the phrase in an assertion label
+# (tests/dispatch-preflight.test.sh asserts a fix command produces no 'command not found',
+# and prints that label when it passes). awk rather than `grep | head`, so a long capture
+# cannot turn this into the SIGPIPE-under-pipefail flake the assert-helper race taught.
+_lost_command() {
+  [ -f "$1" ] || return 0
+  LC_ALL=C awk '/[^ \t]+: (line [0-9]+: )?[^ \t]+: command not found/ { print; exit }' "$1" 2>/dev/null
+}
+
 # _verdict <label> <exit-status-or-empty> <captured-output-file>
 # The one place a result is judged and printed, so the two modes cannot drift.
 _verdict() {
-  local label="$1" rc="$2" out="$3" sig=""
-  if [ "$rc" = "0" ]; then
+  local label="$1" rc="$2" out="$3" sig="" lost=""
+  lost="$(_lost_command "$out")"
+  if [ "$rc" = "0" ] && [ -z "$lost" ]; then
     echo "✓ PASS"; pass=$((pass+1)); return
   fi
   fail=$((fail+1))
-  if [ -z "$rc" ]; then
+  if [ "$rc" = "0" ]; then
+    # Exited 0, but the interpreter said a command it called does not exist.
+    echo "✗ FAIL (exited 0; a command it called was not found)"
+    failed="${failed}\n    - ${label} (exited 0, but: ${lost})"
+  elif [ -z "$rc" ]; then
     # No .rc file: the worker itself did not survive to write one.
     echo "✗ KILLED (no exit status recorded)"
     failed="${failed}\n    - ${label} (killed, no exit status)"
@@ -433,6 +508,14 @@ run "resources.test.sh" bash tests/resources.test.sh
 # and samples nothing, so it can observe the width without also mutating machine state.
 # Hand-listed like every suite outside hooks/.
 run "runner-width.test.sh" bash tests/runner-width.test.sh
+# wave-01 verification-cannot-lie S2 (spec AC-1, AC-2, AC-3, AC-10 and the runner half of
+# AC-14): this file's OWN interpreter pin — the launch directory that makes `bash` mean
+# /bin/bash for every child, the environment stamp beside the header and the tally, the
+# hand-run re-exec in tests/lib/resolve-roots.sh, and the two MEASURED 3.2/5.x divergences
+# planted to prove the pin catches what it exists to catch. Every drive is against a scratch
+# copy of this runner with its own roster, so nothing there re-enters the real one.
+# Hand-listed like every suite outside hooks/.
+run "interpreter-pin.test.sh" bash tests/interpreter-pin.test.sh
 #   - docs-pins.test.sh: doc-text agreement pins with no other home. §1 (RELEASE, spec
 #     AC-36) is the help version pair — replaces the coverage version-ssot.test.sh had
 #     before it was deleted below; WALLS and SCHED append their own numbered sections
@@ -476,6 +559,19 @@ run "doctor-restart.test.sh" bash tests/doctor-restart.test.sh
 # run with its cwd inside a fixture project holding its own .bionic/, and the "live"
 # sessions name the suite's own pid.
 run "doctor-fleet.test.sh" bash tests/doctor-fleet.test.sh
+# wave-01 verification-cannot-lie (slice S1; spec AC-13/AC-14/AC-15): the test
+# framework's own suite. tests/lib/assert.sh is the one thing in this tree that decides
+# whether a result EXISTS — sections, the counters, the assertion helpers, and the
+# load-time derivation that turns a called-but-undefined helper from a discarded stderr
+# line into a refusal — so it is the one thing that cannot be certified by the mechanism
+# it certifies. Every row plants a scratch suite and reads the verdict the framework gave.
+run "framework.test.sh" bash tests/framework.test.sh
+# wave-01-verification-cannot-lie S12 (spec AC-18, AC-19): the impacted-suite
+# derivation. Its §F planted-edit proof runs real suites against a mutated
+# scratch tree — minutes, not seconds — so it is behind BIONIC_IMPACT_PLANTED=1
+# and is NOT what this line runs; the committed record of that proof is at
+# .bionic/docs/record/wave-verification-cannot-lie/s12-planted-edits.log.
+run "impact.test.sh" bash tests/impact.test.sh
 # The following suites were deleted at 8582861 (epic-18 wave-03, the MEDIUM/LOW-reliability
 # ruling) and nothing replaced their coverage:
 #   - command-format.test.sh (epic-17 W3 S9) — payload/commands/*.md conventions
@@ -522,6 +618,7 @@ fi
 
 echo "──────────────────────────────────────────────"
 echo "Gating: ${pass} passed, ${fail} failed"
+echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
   exit 1
