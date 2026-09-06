@@ -7206,6 +7206,87 @@ expect_eq "CG.4 …the mutant copy rejects current: 3b as unreadable (the pre-fi
 expect_eq "CG.4 …while the shipped file still reads it as step 3 — CG.1 discriminates" \
   "3" "$(cg_sched_current "$CG_PLAN_3B")"
 
+
+# ============================================================
+echo ""
+echo "=== S15 — landing-swept/v1: one writer, pinned to a captured marker ==="
+# ============================================================
+#
+# THE OWNERSHIP-TABLE ROW (spec AC-26; research-code-map §2.c): hooks/landing-gate.sh's
+# originator, `swept_marker_write`, is pinned here against tests/fixtures/landing-swept.captured
+# — a real marker taken from a live sweep on this machine
+# (roster-84f06e58-9262-4c7f-a199-ca77c24a332e.state, name=research-code-map, MET).
+# hooks/session-poker.sh's `adopt_copy_marker` never calls the writer (its job is to relay a
+# line the originator already wrote, verbatim) — what it shares is the `SWEPT_SCHEMA`
+# constant, so §S15b below pins the two hooks' copies of that constant to agree, byte for
+# byte, rather than sourcing one file: two separate hook PROCESSES have no shared memory to
+# source an in-process value from, the same reason payload/scripts/lib/loader.sh's own block
+# is duplicated-but-pinned rather than sourced.
+#
+# EXTRACTED, NOT SOURCED FROM A LIB (see tests/lib/swept-marker.sh's own header for why: a
+# hook copied out of the tree, as several sections above already do, resolves its
+# BIONIC_LIB_WANT files through the loader's registry/cache fallback — whatever was last
+# LANDED, not this worktree's uncommitted tree). The real source, `eval`'d, real call — the
+# same `field1_via`/`field2_via` idiom this file already uses.
+#
+# BY KEY, NEVER BY POSITION. The captured line's five fields are read out with the same
+# by-key idiom every production reader uses, so a reordering upstream cannot pass this pin
+# by accident — only the shared writer producing the identical byte sequence can.
+
+S15_LG="$PARTY_LG"
+S15_PK="$PARTY_PK"
+S15_CAPTURED="$REPO_ROOT/tests/fixtures/landing-swept.captured"
+S15_LINE="$(cat "$S15_CAPTURED")"
+
+s15_field() { printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-; }
+S15_AT="$(s15_field "$S15_LINE" at)"
+S15_SID="$(s15_field "$S15_LINE" session)"
+S15_NAME="$(s15_field "$S15_LINE" name)"
+S15_AID="$(s15_field "$S15_LINE" agent_id)"
+S15_STATE="$(s15_field "$S15_LINE" state)"
+
+s15_write() {  # <hook file> <roster file> <at> <session> <name> <agent id> <state>
+  ( eval "$(grep -m1 '^SWEPT_SCHEMA=' "$1")"
+    eval "$(awk '/^swept_marker_write\(\)/,/^\}/' "$1")"
+    swept_marker_write "$2" "$3" "$4" "$5" "$6" "$7" ) 2>/dev/null
+}
+
+S15_OUT="$SANDBOX/s15-roster.state"
+s15_write "$S15_LG" "$S15_OUT" "$S15_AT" "$S15_SID" "$S15_NAME" "$S15_AID" "$S15_STATE"
+expect_eq "S15 the shared writer reproduces the captured marker byte for byte" \
+  "$S15_LINE" "$(cat "$S15_OUT" 2>/dev/null)"
+
+# THE DISCRIMINATOR — one field doctored, and the pin must go red. A copy of the hook with
+# `state=%s` in the writer's printf format replaced by the literal `state=MUTATED`, so every
+# marker it writes carries the wrong state regardless of what it is called with — a
+# plausible schema drift, not damage. The shipped hook is never touched.
+S15_MUT="$SANDBOX/s15-landing-gate-mutant.sh"
+awk '{ gsub(/state=%s/, "state=MUTATED"); print }' "$S15_LG" > "$S15_MUT"
+expect_eq "S15 the mutation applies (the printf line has not moved out from under this proof)" \
+  "1" "$(diff "$S15_LG" "$S15_MUT" | grep -c '^< ')"
+
+S15_MUT_OUT="$SANDBOX/s15-roster-mutant.state"
+s15_write "$S15_MUT" "$S15_MUT_OUT" "$S15_AT" "$S15_SID" "$S15_NAME" "$S15_AID" "$S15_STATE"
+expect_eq "S15 …the mutant's output is NOT the captured shape (the pin discriminates)" \
+  "no" "$([ "$(cat "$S15_MUT_OUT" 2>/dev/null)" = "$S15_LINE" ] && echo yes || echo no)"
+expect_contains "S15 …the real state value nowhere survives the mutant — it is truly overwritten" \
+  "state=MUTATED" "$(cat "$S15_MUT_OUT" 2>/dev/null)"
+
+# ---- §S15b — the constant the two hooks share, pinned to agree ----
+#
+# hooks/session-poker.sh's `adopt_copy_marker` never calls the writer above; it shares only
+# the schema NAME, each hook carrying its own `SWEPT_SCHEMA=` assignment line. A rename on
+# one side and not the other is exactly the drift research-code-map §2.c warned a
+# constant-by-NAME grep can miss — this pins the two LINES, not just the grep, to agree.
+S15_LG_SCHEMA_LINE="$(grep -m1 '^SWEPT_SCHEMA=' "$S15_LG")"
+S15_PK_SCHEMA_LINE="$(grep -m1 '^SWEPT_SCHEMA=' "$S15_PK")"
+expect_eq "S15b hooks/landing-gate.sh declares the constant" \
+  'SWEPT_SCHEMA="landing-swept/v1"' "$S15_LG_SCHEMA_LINE"
+expect_eq "S15b …and hooks/session-poker.sh's copy agrees, byte for byte" \
+  "$S15_LG_SCHEMA_LINE" "$S15_PK_SCHEMA_LINE"
+expect_eq "S15b …the copy is a named constant, not a literal in adopt_copy_marker's own grep" \
+  "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^landing-swept/v1|'")"
+
 # ============================================================
 echo ""
 echo "──────────────────────────────────────────────"
