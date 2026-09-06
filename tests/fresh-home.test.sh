@@ -639,8 +639,9 @@ jqf() {  # <jq-program> — read one value out of the fixture settings.json
 
 # One table/section out of a doctor report, by its flush-left heading (doctor
 # no longer delimits sections with `=== NAME ===`; a heading is a line with no
-# leading whitespace — "THIRD PARTY — installed by /bionic:setup", "ENVIRONMENT",
-# "BIONIC NATIVE — ships inside the plugin" — and every row under it is indented).
+# leading whitespace — "THIRD PARTY — tools and plugins bionic depends on",
+# "ENVIRONMENT", "BIONIC NATIVE — ships inside the plugin" — and every row under
+# it is indented).
 # The heading itself is matched by PREFIX, since most of them carry an em-dash
 # tagline after the name, and it is never printed back; capture runs until the
 # blank line doctor always prints before the next heading.
@@ -1905,9 +1906,32 @@ G14_FIX="$(grep -F 'Fix: install what the message names' "$G14_BAD" | head -1)"
 expect_true "14: …the failed arm prints a Fix line at all (the two rows below are not vacuous)" \
   test -n "$G14_FIX"
 expect_match "14: …and the Fix line names the route deps.sh owns" \
-  "*re-resolve bionic's dependencies: claude plugin install bionic@bionic*" "$G14_FIX"
-expect_no_match "14: …and never \"reinstall bionic\", which misdescribes a machine whose only fault is a missing dependency" \
-  '*reinstall bionic*' "$G14_FIX"
+  "*reinstall bionic's dependencies: claude plugin install bionic@bionic*" "$G14_FIX"
+# THE NEGATIVE SURVIVES THE WORDING CHANGE (1.4.4 fixit phase 4, review-c C-3). This line
+# says "reinstall" now rather than "re-resolve" — plainer, and one column shorter — because
+# what A-1 refutes is not the verb but the OBJECT. bionic is installed and registered; a
+# dependency is missing. So the claim the row makes is that bionic is never the thing being
+# reinstalled, and the bracket IS that claim: any character other than an apostrophe after
+# the name makes bionic the object, which is exactly the shape of the two spellings this
+# line has actually carried ("reinstall bionic with: …", "reinstall bionic so its
+# dependencies resolve"). A glob of `*reinstall bionic*` cannot make this claim any more —
+# it matches the correct line too.
+expect_no_match "14: …and never asks for bionic ITSELF to be reinstalled, which misdescribes a machine whose only fault is a missing dependency" \
+  "*reinstall bionic[!']*" "$G14_FIX"
+
+# RENDERER 3, ON ITS OWN LINE (1.4.4 fixit phase 4, review-b B-9). Step 2's absent-core
+# action line is the third site rendering `dep_core_repair_route`. This run drives it — the
+# fixture home has neither core dependency, so step 2's absent arm fires twice — and until
+# now nothing asserted it: the suite executed the renderer and measured nothing, so a
+# regression there was invisible to the whole tree. Extracted rather than globbed over the
+# whole run for the same reason the Fix line above is: both lines carry the same route, so a
+# whole-run glob passes on either one alone.
+G14_DEP="$(grep -F 'is missing)' "$G14_BAD" | head -1)"
+expect_true "14: …step 2 prints an absent-core action line at all (the row below is not vacuous)" \
+  test -n "$G14_DEP"
+expect_match "14: …and it names the same route, with the dependency that is missing" \
+  "*reinstall bionic's dependencies: claude plugin install bionic@bionic (superpowers is missing)*" \
+  "$G14_DEP"
 
 echo ""
 echo "========================================"
