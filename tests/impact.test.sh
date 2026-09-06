@@ -134,6 +134,8 @@ oneline() { suites "$@" | tr '\n' ' '; }
 #   tests/e.test.sh   runs payload/scripts/doctor.sh         → transitive-doctor
 #   tests/f.test.sh   pins tests/run.sh                      → pin
 #   tests/g.test.sh   names the hooks DIRECTORY              → dir-ref
+#   tests/h.test.sh   runs hooks/h3.sh, which sources
+#                     payload/scripts/lib/hooklib.sh        → transitive-hook
 #   payload/hooks is a symlink to ../hooks, as in the real tree.
 mk_fixture() { # mk_fixture <dir>
   local fx="$1"
@@ -144,6 +146,11 @@ mk_fixture() { # mk_fixture <dir>
   printf '#!/bin/bash\necho h2\n' >"$fx/hooks/h2.sh"
   printf '#!/bin/bash\necho width\n' >"$fx/payload/scripts/lib/width.sh"
   printf '#!/bin/bash\necho run\n' >"$fx/payload/scripts/lib/run.sh"
+  printf '#!/bin/bash\necho hooklib\n' >"$fx/payload/scripts/lib/hooklib.sh"
+  # h3 is the hook with a library of its own — the transitive-hook edge. It is a
+  # SEPARATE hook from h1 and h2 so that adding it moves no set another row pins.
+  printf '#!/bin/bash\nHOOK_LIB="$(dirname "$0")/../payload/scripts/lib"\n. "${HOOK_LIB}/hooklib.sh"\n' \
+    >"$fx/hooks/h3.sh"
   printf '#!/bin/bash\nDOCTOR_LIB="$(dirname "$0")/lib"\n. "${DOCTOR_LIB}/width.sh"\n' \
     >"$fx/payload/scripts/doctor.sh"
 
@@ -158,10 +165,11 @@ mk_fixture() { # mk_fixture <dir>
   printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\nREPO="${BIONIC_SCRIPTS_DIR}"\nbash "${REPO}/payload/scripts/doctor.sh"\n' >"$fx/tests/e.test.sh"
   printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\ngrep -q pressure "${BIONIC_SCRIPTS_DIR}/tests/run.sh"\n' >"$fx/tests/f.test.sh"
   printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\nREPO="${BIONIC_SCRIPTS_DIR}"\nfor f in "$REPO/hooks"/*.sh; do echo "$f"; done\n' >"$fx/tests/g.test.sh"
+  printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\nbash "$BIONIC_HOOKS_DIR/h3.sh"\n' >"$fx/tests/h.test.sh"
 
   {
     printf '#!/bin/bash\n'
-    for s in a b c d e f g; do
+    for s in a b c d e f g h; do
       printf 'run "%s.test.sh" bash tests/%s.test.sh\n' "$s" "$s"
     done
   } >"$fx/tests/run.sh"
@@ -223,6 +231,16 @@ expect_has "dir-ref: a directory glob reaches every file under it" \
 expect_eq "dir-ref: the reason is named" \
   "dir-ref" "$(reason_for "$FX" g.test.sh hooks/h2.sh | cut -d: -f1)"
 
+# transitive-hook — h runs hooks/h3.sh and never names hooklib.sh. S12 added this
+# edge kind AFTER the planted proof revealed that hooks were not owners, and it is
+# the one kind §B never had a mutation row for: the Step-5 revert arm meant to fill
+# that hole was VOID after two attempts (step5-audit.md §6), so the hole was open
+# at the head this fold-in started from.
+expect_has "transitive-hook: a suite that runs a hook inherits the hook's libs" \
+  "h.test.sh" "$(oneline "$FX" payload/scripts/lib/hooklib.sh)"
+expect_eq "transitive-hook: the reason is named" \
+  "transitive-hook" "$(reason_for "$FX" h.test.sh payload/scripts/lib/hooklib.sh | cut -d: -f1)"
+
 # tests/run.sh — f pins it. This is the 33-suite registration-pin edge (§1.4).
 expect_has "pin: a tests/run.sh registration pin is an edge" \
   "f.test.sh" "$(oneline "$FX" tests/run.sh)"
@@ -235,7 +253,12 @@ expect_has "pin: a tests/run.sh registration pin is an edge" \
 # under-approximation, the one direction this file may not fail in.
 # payload/scripts/lib is the directory to ask about: no fixture suite NAMES it,
 # so every suite in the answer got there through a file beneath it.
-DA_UNION="$(suites "$FX" payload/scripts/lib/width.sh payload/scripts/lib/run.sh)"
+# The file list is pinned, so a file added to the fixture later fails HERE by
+# name instead of moving the union row's expectation out from under it.
+expect_eq "dir-arg: the fixture directory holds exactly the files this row unions" \
+  "payload/scripts/lib/hooklib.sh payload/scripts/lib/run.sh payload/scripts/lib/width.sh" \
+  "$( cd "$FX" && find -L payload/scripts/lib -type f | sort | tr '\n' ' ' | sed 's/ $//' )"
+DA_UNION="$(suites "$FX" payload/scripts/lib/hooklib.sh payload/scripts/lib/run.sh payload/scripts/lib/width.sh)"
 expect_nonempty "dir-arg: the union of the directory's files is not empty (not vacuous)" \
   "$DA_UNION"
 expect_eq "dir-arg: a directory query answers the union of its files' queries" \
@@ -294,6 +317,20 @@ M="$(mut dirref)"
 printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\necho no directory here\n' >"$M/tests/g.test.sh"
 expect_lacks "dir-ref: dropping the directory reference drops the suite" \
   "g.test.sh" "$(oneline "$M" hooks/h2.sh)"
+
+# THE ARM THE STEP-5 REVERT PASS COULD NOT LAND. Both of its attempts stubbed the
+# label and the loop rather than the filter, so the derivation answered nothing at
+# all and every section screamed — a broken script's red, not a removed edge's.
+# Here the derivation is untouched and the FIXTURE loses the edge: h3.sh sources
+# nothing, so h.test.sh has no path to hooklib.sh. The paired row is what tells a
+# removed edge from a broken program — c.test.sh reaches the same file by
+# payload-copy and must STAY.
+M="$(mut transhook)"
+printf '#!/bin/bash\necho nothing\n' >"$M/hooks/h3.sh"
+expect_lacks "transitive-hook: a hook that sources nothing drops the suite that runs it" \
+  "h.test.sh" "$(oneline "$M" payload/scripts/lib/hooklib.sh)"
+expect_has "transitive-hook: …while the payload copier still reaches the same file" \
+  "c.test.sh" "$(oneline "$M" payload/scripts/lib/hooklib.sh)"
 
 M="$(mut dirarg)"
 printf '#!/bin/bash\necho nothing\n' >"$M/tests/lib/helper.sh"
