@@ -695,6 +695,19 @@ _field() {  # <key> — by key, never by position, as every reader of these line
 }
 
 REFUSALS=""
+
+# ONE DERIVATION BUDGET FOR THE WHOLE SWEEP (review-c C-17). The impact command below is
+# the same call hooks/dispatch-preflight.sh makes and costs the same ~2.6-6.5 s, but it
+# sits inside this per-candidate loop, and this hook is registered at "timeout": 10 on both
+# Stop and SubagentStop. N offending rows would pay N x that. So the budget is spent across
+# the loop rather than granted per row: whatever is left when a row asks, and nothing once
+# it is gone. A row that gets no derivation still REFUSES — it names its files and says the
+# suites were not derived. The one thing this must never become is a silent pass.
+#
+# BUILT, NOT BORROWED, for the same reason as the dispatch site: bionic's command discipline
+# forbids a `timeout`/`gtimeout` binary and macOS ships neither.
+LG_IMPACT_BOUND_S=6
+LG_IMPACT_TICKS_LEFT=60          # 60 x 0.1s, shared by every candidate in this sweep
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 while IFS=$'\t' read -r AID NAME KIND CFILES; do
@@ -785,13 +798,38 @@ LGDIFF
           # dispatch wall itself falls back when nothing is configured.
           LG_IMPACT_CMD=$(config_value "$REPO" "impact-command" "")
           LG_SUITES=""
+          LG_SUITES_NOTE=""
           if [ -n "$LG_IMPACT_CMD" ]; then
-            # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-            LG_SUITES=$(cd "$REPO" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE 2>/dev/null \
-              | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
-            LG_SUITES="${LG_SUITES% }"
+            if [ "$LG_IMPACT_TICKS_LEFT" -le 0 ]; then
+              LG_SUITES_NOTE=" (this sweep's ${LG_IMPACT_BOUND_S}s derivation budget was spent on earlier rows, so the suites these files imply are NOT named here — derive them by hand)"
+            else
+              LG_IMPACT_TMP="${TMPDIR:-/tmp}/bionic-lg-impact-$$-${RANDOM}.out"
+              # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
+              ( cd "$REPO" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE >"$LG_IMPACT_TMP" 2>/dev/null ) &
+              LG_IMPACT_PID=$!
+              LG_TICKS=0
+              LG_OVERRAN=0
+              while kill -0 "$LG_IMPACT_PID" 2>/dev/null; do
+                if [ "$LG_TICKS" -ge "$LG_IMPACT_TICKS_LEFT" ]; then
+                  kill -TERM "$LG_IMPACT_PID" 2>/dev/null
+                  LG_OVERRAN=1
+                  break
+                fi
+                sleep 0.1
+                LG_TICKS=$((LG_TICKS + 1))
+              done
+              wait "$LG_IMPACT_PID" 2>/dev/null
+              LG_IMPACT_TICKS_LEFT=$((LG_IMPACT_TICKS_LEFT - LG_TICKS))
+              if [ "$LG_OVERRAN" -eq 1 ]; then
+                LG_SUITES_NOTE=" (the impact command did not answer within this sweep's ${LG_IMPACT_BOUND_S}s derivation budget, so the suites these files imply are NOT named here — derive them by hand)"
+              else
+                LG_SUITES=$(awk -F'\t' '$1 != "" { print $1 }' "$LG_IMPACT_TMP" 2>/dev/null | sort -u | tr '\n' ' ')
+                LG_SUITES="${LG_SUITES% }"
+              fi
+              rm -f "$LG_IMPACT_TMP"
+            fi
           fi
-          REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})} — not declared. Add the file(s) to Files: and re-derive, or revert them before landing.
+          REFUSALS="${REFUSALS}LANDING DIFF OUTSIDE Files: — ${NAME} touched: ${LG_OUTSIDE}${LG_SUITES:+ (suites: ${LG_SUITES})}${LG_SUITES_NOTE} — not declared. Add the file(s) to Files: and re-derive, or revert them before landing.
 "
         fi
       fi
