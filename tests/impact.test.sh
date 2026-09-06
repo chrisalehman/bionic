@@ -63,27 +63,15 @@ set -uo pipefail
 REPO="${BIONIC_SCRIPTS_DIR}"
 IMPACT="${REPO}/tests/lib/impact.sh"
 
-# pass/fail route through the framework's ok/no instead of touching PASS/FAIL/TOTAL
-# directly (the protect-database.test.sh pattern, S8) - kept under their own names
-# because every call site in this file already says pass/fail, not ok/no. The
-# private expect_eq (identical semantics to the framework's - "$2" = "$3", same
-# argument order) and the private echo-only section() are deleted outright: the
-# framework's own, already sourced, take over under the same names.
-pass() { ok "$1"; }
-fail() { no "$1" "${2:-}"; }
-
-expect_has() { # expect_has <name> <needle> <haystack>
-  case "$3" in
-    *"$2"*) pass "$1" ;;
-    *) fail "$1" "[$2] not found in [$3]" ;;
-  esac
-}
-expect_lacks() { # expect_lacks <name> <needle> <haystack>
-  case "$3" in
-    *"$2"*) fail "$1" "[$2] unexpectedly present in [$3]" ;;
-    *) pass "$1" ;;
-  esac
-}
+# NO PRIVATE ASSERTION NAMES HERE (review-b B-6, folded in at Step 6). This suite
+# once carried `pass`/`fail` wrappers over ok/no and `expect_has`/`expect_lacks`,
+# which were argument-for-argument the framework's `expect_contains` and
+# `expect_absent`. The adoption wall did not refuse them — it refuses only the
+# exact names the framework OWNS — so the wave that removed 37 private spellings
+# from 53 suites added four back in its own new suite. Worse, `_tf_scan` derives
+# call tokens matching `ok|no|expect_[a-z_]+|anchor`: `pass` and `fail` are
+# outside that set, so an undefined one would have slipped past the load-time
+# derivation (AC-14) and surfaced only through the runner's stderr-strict arm.
 
 # ── §0 the subject exists and parses ────────────────────────────────────────
 # Nothing below can mean anything if the derivation is missing: an absent
@@ -92,16 +80,16 @@ expect_lacks() { # expect_lacks <name> <needle> <haystack>
 section "§0 the subject"
 
 if [ -f "$IMPACT" ]; then
-  pass "tests/lib/impact.sh exists"
+  ok "tests/lib/impact.sh exists"
 else
-  fail "tests/lib/impact.sh exists" "$IMPACT"
+  no "tests/lib/impact.sh exists" "$IMPACT"
   finish
 fi
 
 if bash -n "$IMPACT" 2>/dev/null; then
-  pass "tests/lib/impact.sh parses under bash -n"
+  ok "tests/lib/impact.sh parses under bash -n"
 else
-  fail "tests/lib/impact.sh parses under bash -n" "$(bash -n "$IMPACT" 2>&1)"
+  no "tests/lib/impact.sh parses under bash -n" "$(bash -n "$IMPACT" 2>&1)"
 fi
 
 TMP="$(mktemp -d)"
@@ -195,23 +183,23 @@ expect_eq "source: the reason is named" \
 # transitive-lib — helper.sh reads payload/scripts/lib/run.sh, so b reads it
 # without naming it. The suite-level grep the code map warns about (§3.5) misses
 # exactly this edge, which is why it has its own kind.
-expect_has "transitive-lib: the sourcing suite inherits its helper's reads" \
+expect_contains "transitive-lib: the sourcing suite inherits its helper's reads" \
   "b.test.sh" "$(oneline "$FX" payload/scripts/lib/run.sh)"
 expect_eq "transitive-lib: the reason is named" \
   "transitive-lib" "$(reason_for "$FX" b.test.sh payload/scripts/lib/run.sh | cut -d: -f1)"
 
 # transitive-doctor — doctor.sh sources lib/width.sh; e runs doctor.sh and never
 # names width.sh. This is the FIX_LINES_OTHER edge from code map §3.5.
-expect_has "transitive-doctor: a doctor.sh runner inherits doctor.sh's libs" \
+expect_contains "transitive-doctor: a doctor.sh runner inherits doctor.sh's libs" \
   "e.test.sh" "$(oneline "$FX" payload/scripts/lib/width.sh)"
 expect_eq "transitive-doctor: the reason is named" \
   "transitive-doctor" "$(reason_for "$FX" e.test.sh payload/scripts/lib/width.sh | cut -d: -f1)"
 
 # payload-copy — c names the payload root, so every file under payload/ reaches
 # it, including files reached only through payload/hooks' symlink.
-expect_has "payload-copy: a payload-root namer reads a file under payload/" \
+expect_contains "payload-copy: a payload-root namer reads a file under payload/" \
   "c.test.sh" "$(oneline "$FX" payload/scripts/lib/run.sh)"
-expect_has "payload-copy: …and a file reached only through payload/hooks" \
+expect_contains "payload-copy: …and a file reached only through payload/hooks" \
   "c.test.sh" "$(oneline "$FX" hooks/h1.sh)"
 expect_eq "payload-copy: the reason is named" \
   "payload-copy" "$(reason_for "$FX" c.test.sh hooks/h1.sh | cut -d: -f1)"
@@ -226,7 +214,7 @@ expect_eq "pin: a grep -q is reported as a pin" \
 # dir-ref — g globs the hooks directory. A per-file grep sees no filename here
 # (code map §3.4 calls it "a glob, not a path"), so the directory expansion is
 # the only thing that finds the edge.
-expect_has "dir-ref: a directory glob reaches every file under it" \
+expect_contains "dir-ref: a directory glob reaches every file under it" \
   "g.test.sh" "$(oneline "$FX" hooks/h2.sh)"
 expect_eq "dir-ref: the reason is named" \
   "dir-ref" "$(reason_for "$FX" g.test.sh hooks/h2.sh | cut -d: -f1)"
@@ -236,13 +224,13 @@ expect_eq "dir-ref: the reason is named" \
 # the one kind §B never had a mutation row for: the Step-5 revert arm meant to fill
 # that hole was VOID after two attempts (step5-audit.md §6), so the hole was open
 # at the head this fold-in started from.
-expect_has "transitive-hook: a suite that runs a hook inherits the hook's libs" \
+expect_contains "transitive-hook: a suite that runs a hook inherits the hook's libs" \
   "h.test.sh" "$(oneline "$FX" payload/scripts/lib/hooklib.sh)"
 expect_eq "transitive-hook: the reason is named" \
   "transitive-hook" "$(reason_for "$FX" h.test.sh payload/scripts/lib/hooklib.sh | cut -d: -f1)"
 
 # tests/run.sh — f pins it. This is the 33-suite registration-pin edge (§1.4).
-expect_has "pin: a tests/run.sh registration pin is an edge" \
+expect_contains "pin: a tests/run.sh registration pin is an edge" \
   "f.test.sh" "$(oneline "$FX" tests/run.sh)"
 
 # A DIRECTORY ARGUMENT COVERS ITS FILES (review-a A-3). The rule the docblock
@@ -263,9 +251,9 @@ expect_nonempty "dir-arg: the union of the directory's files is not empty (not v
   "$DA_UNION"
 expect_eq "dir-arg: a directory query answers the union of its files' queries" \
   "$DA_UNION" "$(suites "$FX" payload/scripts/lib)"
-expect_has "dir-arg: …so it carries a suite only a FILE under it reaches (transitive-lib)" \
+expect_contains "dir-arg: …so it carries a suite only a FILE under it reaches (transitive-lib)" \
   "b.test.sh" "$(oneline "$FX" payload/scripts/lib)"
-expect_has "dir-arg: …and one only another file under it reaches (transitive-doctor)" \
+expect_contains "dir-arg: …and one only another file under it reaches (transitive-doctor)" \
   "e.test.sh" "$(oneline "$FX" payload/scripts/lib)"
 # PAIRED: a FILE argument is untouched — the rule is scoped to directories, and a
 # derivation that simply answered everything would pass the row above.
@@ -294,28 +282,28 @@ expect_eq "source: dropping the source line empties the answer" \
 
 M="$(mut translib)"
 printf '#!/bin/bash\necho nothing\n' >"$M/tests/lib/helper.sh"
-expect_lacks "transitive-lib: emptying the helper drops the suite" \
+expect_absent "transitive-lib: emptying the helper drops the suite" \
   "b.test.sh" "$(oneline "$M" payload/scripts/lib/run.sh)"
 
 M="$(mut transdoctor)"
 printf '#!/bin/bash\necho nothing\n' >"$M/payload/scripts/doctor.sh"
-expect_lacks "transitive-doctor: a doctor.sh that sources nothing drops the suite" \
+expect_absent "transitive-doctor: a doctor.sh that sources nothing drops the suite" \
   "e.test.sh" "$(oneline "$M" payload/scripts/lib/width.sh)"
 
 M="$(mut payloadcopy)"
 printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\necho no payload here\n' >"$M/tests/c.test.sh"
-expect_lacks "payload-copy: dropping the payload-root reference drops the suite" \
+expect_absent "payload-copy: dropping the payload-root reference drops the suite" \
   "c.test.sh" "$(oneline "$M" payload/scripts/lib/run.sh)"
 
 M="$(mut symlink)"
 rm "$M/payload/hooks"
 mkdir -p "$M/payload/hooks"
-expect_lacks "payload-copy: with payload/hooks no longer a symlink, hooks/h1.sh is outside payload" \
+expect_absent "payload-copy: with payload/hooks no longer a symlink, hooks/h1.sh is outside payload" \
   "c.test.sh" "$(oneline "$M" hooks/h1.sh)"
 
 M="$(mut dirref)"
 printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\necho no directory here\n' >"$M/tests/g.test.sh"
-expect_lacks "dir-ref: dropping the directory reference drops the suite" \
+expect_absent "dir-ref: dropping the directory reference drops the suite" \
   "g.test.sh" "$(oneline "$M" hooks/h2.sh)"
 
 # THE ARM THE STEP-5 REVERT PASS COULD NOT LAND. Both of its attempts stubbed the
@@ -327,16 +315,16 @@ expect_lacks "dir-ref: dropping the directory reference drops the suite" \
 # payload-copy and must STAY.
 M="$(mut transhook)"
 printf '#!/bin/bash\necho nothing\n' >"$M/hooks/h3.sh"
-expect_lacks "transitive-hook: a hook that sources nothing drops the suite that runs it" \
+expect_absent "transitive-hook: a hook that sources nothing drops the suite that runs it" \
   "h.test.sh" "$(oneline "$M" payload/scripts/lib/hooklib.sh)"
-expect_has "transitive-hook: …while the payload copier still reaches the same file" \
+expect_contains "transitive-hook: …while the payload copier still reaches the same file" \
   "c.test.sh" "$(oneline "$M" payload/scripts/lib/hooklib.sh)"
 
 M="$(mut dirarg)"
 printf '#!/bin/bash\necho nothing\n' >"$M/tests/lib/helper.sh"
-expect_lacks "dir-arg: a directory answer loses the suite whose only edge to a file under it went away" \
+expect_absent "dir-arg: a directory answer loses the suite whose only edge to a file under it went away" \
   "b.test.sh" "$(oneline "$M" payload/scripts/lib)"
-expect_has "dir-arg: …while the suites reaching it another way stay" \
+expect_contains "dir-arg: …while the suites reaching it another way stay" \
   "e.test.sh" "$(oneline "$M" payload/scripts/lib)"
 
 M="$(mut pathref)"
@@ -389,8 +377,8 @@ expect_eq "real: resolve-roots.sh reaches every suite in the roster" \
 
 # code map §1.2 rows 5–6: docs-pins doctors hooks/session-poker.sh.
 RT_POKER="$(oneline "$REPO" hooks/session-poker.sh)"
-expect_has "real: docs-pins reads hooks/session-poker.sh" "docs-pins.test.sh" "$RT_POKER"
-expect_has "real: session-poker's own suite reads it" "session-poker.test.sh" "$RT_POKER"
+expect_contains "real: docs-pins reads hooks/session-poker.sh" "docs-pins.test.sh" "$RT_POKER"
+expect_contains "real: session-poker's own suite reads it" "session-poker.test.sh" "$RT_POKER"
 expect_eq "real: docs-pins' reason for session-poker.sh is an anchor" \
   "anchor" "$(reason_for "$REPO" docs-pins.test.sh hooks/session-poker.sh | cut -d: -f1)"
 
@@ -399,7 +387,7 @@ expect_eq "real: docs-pins' reason for session-poker.sh is an anchor" \
 RT_WIDTH="$(oneline "$REPO" payload/scripts/lib/width.sh)"
 for s in doctor-fleet doctor-patrol doctor-reads doctor-restart doctor-version \
          doctor-walls fresh-home loader patrol-marker command-relay; do
-  expect_has "real: $s.test.sh reads payload/scripts/lib/width.sh" \
+  expect_contains "real: $s.test.sh reads payload/scripts/lib/width.sh" \
     "$s.test.sh" "$RT_WIDTH"
 done
 
@@ -426,12 +414,12 @@ for f in "$REPO"/tests/*.test.sh; do
 done
 RT_NPIN="$(printf '%s\n' $RT_PINNED | grep -c .)"
 if [ "$RT_NPIN" -lt 10 ]; then
-  fail "real: the registration-pin census found suites to check" "found $RT_NPIN"
+  no "real: the registration-pin census found suites to check" "found $RT_NPIN"
 elif [ -n "$RT_MISSED" ]; then
-  fail "real: every registration-pinned suite is derived from tests/run.sh" \
+  no "real: every registration-pinned suite is derived from tests/run.sh" \
     "missing:$RT_MISSED"
 else
-  pass "real: all $RT_NPIN registration-pinned suites are derived from tests/run.sh"
+  ok "real: all $RT_NPIN registration-pinned suites are derived from tests/run.sh"
 fi
 
 # ── §E the output contract ──────────────────────────────────────────────────
@@ -460,14 +448,14 @@ BIONIC_IMPACT_ROOT="$FX" bash "$IMPACT" design/nobody-reads-this.md >"$TMP/none.
 N_RC=$?
 expect_eq "a file no suite reads derives nothing" "" "$(cat "$TMP/none.out")"
 expect_eq "…and says so with exit 0, not an error" "0" "$N_RC"
-expect_has "…while a not-yet-created file under a copied directory still derives its readers" \
+expect_contains "…while a not-yet-created file under a copied directory still derives its readers" \
   "c.test.sh" "$(oneline "$FX" hooks/not-created-yet.sh)"
 
 BIONIC_IMPACT_ROOT="$FX" bash "$IMPACT" >"$TMP/usage.out" 2>"$TMP/usage.err"
 U_RC=$?
 expect_eq "no arguments is a usage error, not an empty answer" "2" "$U_RC"
 expect_eq "…and the usage goes to stderr, leaving stdout clean" "" "$(cat "$TMP/usage.out")"
-expect_has "…and the usage names the program" "impact.sh" "$(cat "$TMP/usage.err")"
+expect_contains "…and the usage names the program" "impact.sh" "$(cat "$TMP/usage.err")"
 
 expect_eq "several files in one call answer as their union" \
   "$(printf '%s\n%s\n' "$(suites "$FX" hooks/h1.sh)" "$(suites "$FX" tests/lib/helper.sh)" | sort -u | grep -c .)" \
@@ -605,9 +593,9 @@ PROBE
     echo "  suite saw: $SEAM_SAW"
   } >>"$PLOG"
   if [ "$SEAM_SAW" = "$SCRATCH_P" ]; then
-    pass "planted seam: a suite in the scratch tree resolves to the scratch tree"
+    ok "planted seam: a suite in the scratch tree resolves to the scratch tree"
   else
-    fail "planted seam: a suite in the scratch tree resolves to the scratch tree" \
+    no "planted seam: a suite in the scratch tree resolves to the scratch tree" \
       "saw [$SEAM_SAW] — every result below would be about the real checkout"
   fi
 
@@ -619,9 +607,9 @@ PROBE
     echo "  red: ${BASE_RED:-none}"
   } >>"$PLOG"
   if [ -z "$BASE_RED" ]; then
-    pass "planted control: the unmutated scratch tree is wholly green"
+    ok "planted control: the unmutated scratch tree is wholly green"
   else
-    pass "planted control: $(printf '%s\n' "$BASE_RED" | grep -c .) suite(s) red before any edit, discounted below"
+    ok "planted control: $(printf '%s\n' "$BASE_RED" | grep -c .) suite(s) red before any edit, discounted below"
   fi
 
   # plant <class> <file> <how> <witness>
@@ -678,15 +666,15 @@ PROBE
     } >>"$PLOG"
 
     if [ -n "$witness" ]; then
-      pass "planted [$class]: the edit really bites — $witness went red"
+      ok "planted [$class]: the edit really bites — $witness went red"
     else
-      fail "planted [$class]: the edit really bites" \
+      no "planted [$class]: the edit really bites" \
         "no derived suite went red; the planted edit is inert and the superset claim is vacuous"
     fi
     if [ "$n_out" -eq 0 ]; then
-      pass "planted [$class]: derived ⊇ red, over the whole roster"
+      ok "planted [$class]: derived ⊇ red, over the whole roster"
     else
-      fail "planted [$class]: derived ⊇ red, over the whole roster" \
+      no "planted [$class]: derived ⊇ red, over the whole roster" \
         "$n_out suite(s) red outside the derived set: $outside"
     fi
   }
