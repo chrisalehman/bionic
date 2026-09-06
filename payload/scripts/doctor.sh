@@ -1744,7 +1744,22 @@ if [ -n "$THIRD_ROWS" ]; then
     case "$_third_line" in "  ${DOCTOR_BAD} "*) N_BAD_DEPS=$((N_BAD_DEPS + 1)) ;; esac
   done <<< "$THIRD_ROWS"
 fi
-case "$FIX_NAMES_SETUP" in *"dependenc"*) N_FIX=$((N_FIX - 1 + N_BAD_DEPS)) ;; esac
+#
+# BOTH COLLAPSED DEPENDENCY LINES ARE SWAPPED, TOGETHER, FOR THE ROWS THEY STAND
+# FOR (bionic 1.4.4 fixit, phase 3). There are two of them since the core
+# absences got a line of their own — `N dependencies absent … → run
+# /bionic:setup` and `N core dependencies absent … → <route>` — and
+# `N_BAD_DEPS` above counts the ✗ rows of BOTH, because it counts rendered rows
+# and a rendered row does not carry its class. Swapping only the first line left
+# the second one counted as a problem in its own right ON TOP of the rows it
+# stands for, so a machine missing two core dependencies reported one problem
+# more than it had: the walk rendered `12 problems` where the same machine had
+# always read 11. Counting the collapse lines and subtracting all of them keeps
+# the original sentence — the count is rows — true for one line or two.
+N_DEP_COLLAPSE=0
+case "$FIX_NAMES_SETUP" in *"dependenc"*) N_DEP_COLLAPSE=$((N_DEP_COLLAPSE + 1)) ;; esac
+[ -n "$ABSENT_CORE_NAMES" ] && N_DEP_COLLAPSE=$((N_DEP_COLLAPSE + 1))
+[ "$N_DEP_COLLAPSE" -gt 0 ] && N_FIX=$((N_FIX - N_DEP_COLLAPSE + N_BAD_DEPS))
 
 # ─── The report ──────────────────────────────────────────────────────────────
 #

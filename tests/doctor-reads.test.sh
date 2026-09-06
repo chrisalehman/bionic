@@ -48,6 +48,10 @@ expect_match() {
   # shellcheck disable=SC2053  # RHS is a glob on purpose
   if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.700s' "$actual")"; fi
 }
+expect_eq() {
+  local label="$1" want="$2" got="$3"
+  if [ "$want" = "$got" ]; then ok "$label"; else no "$label" "expected '$want', got '$got'"; fi
+}
 expect_no_match() {
   local label="$1" pattern="$2" actual="$3"
   # shellcheck disable=SC2053  # RHS is a glob on purpose
@@ -366,6 +370,56 @@ expect_no_match "12f5b: …and it never names an absent core dependency, which s
 expect_match "12f6: the core absences get their own line, with the route on it" \
   "*core dependencies absent (superpowers, agent-skills) → claude plugin install bionic@bionic*" \
   "$OUT6F"
+
+# THE PROBLEM COUNT IS ROWS, NOT CATEGORIES (Chris 2026-08-22, and doctor.sh's own comment
+# at the swap), and adding a class of absence must not change what that sentence means. The
+# verdict collapses the setup-fixable absences into one fix line and swaps that line for the
+# number of ✗ dependency rows it stands for; the core absences are a SECOND collapsed line
+# over rows the same tally already counts, so counting both lines AND all the rows counts
+# the core rows twice.
+#
+# MEASURED AGAINST A SECOND RENDER, NEVER A HARDCODED TOTAL. The expected count depends on
+# how many other things are wrong with the fixture — the unwritten environment settings here
+# — and writing that total down would pin the fixture instead of the rule. So the same
+# machine is rendered twice, once with the two core dependencies in the registry and once
+# without, and the rule is the difference: putting two absent core rows on the page adds
+# exactly two problems. Everything else about the two machines is identical, so every
+# non-dependency fix line cancels out of the subtraction. Before the fix the difference was
+# three.
+d6f_problems() {  # <doctor report> -> the N in "→ N problems."
+  sed -n 's/^→ \([0-9][0-9]*\) problem.*/\1/p' <<<"$1" | head -1
+}
+d6f_bad_dep_rows() {  # <doctor report> -> the count of ✗ rows in the THIRD PARTY table
+  awk '/^THIRD PARTY/ { i = 1; next }
+       i && /^[A-Z][A-Z]/ { exit }
+       i && /^  ✗ / { n++ }
+       END { print n + 0 }' <<<"$1"
+}
+
+# The same fixture with both core dependencies present — the only difference between the two
+# machines.
+jq -nc '{plugins:{
+    "bionic@bionic":       [{installPath:"/nonexistent/a", gitCommitSha:"deadbeef", version:"1.4.4"}],
+    "superpowers@bionic":  [{installPath:"/nonexistent/s", version:"6.3.0"}],
+    "agent-skills@bionic": [{installPath:"/nonexistent/g", version:"0.6.7"}]
+  }}' > "${CHOME}/plugins/installed_plugins.json"
+OUT6FOK="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}")"
+
+D6F_N_BAD="$(d6f_problems "$OUT6F")";  D6F_ROWS_BAD="$(d6f_bad_dep_rows "$OUT6F")"
+D6F_N_OK="$(d6f_problems "$OUT6FOK")"; D6F_ROWS_OK="$(d6f_bad_dep_rows "$OUT6FOK")"
+
+# Anti-vacuity: both renders produced a count, and the core-absent one really does carry the
+# two extra rows. Without these the subtraction below could be 0 = 0 over two empty strings.
+expect_match "12f9: both renders report a problem count" \
+  "[0-9]*|[0-9]*" "${D6F_N_BAD}|${D6F_N_OK}"
+expect_eq "12f10: …and the core-absent machine carries exactly two more ✗ dependency rows" \
+  "2" "$(( D6F_ROWS_BAD - D6F_ROWS_OK ))"
+expect_eq "12f11: …so it reports exactly two more problems, not three" \
+  "$(( D6F_ROWS_BAD - D6F_ROWS_OK ))" "$(( D6F_N_BAD - D6F_N_OK ))"
+
+# Back to the core-absent registry, which is what the rows below read.
+jq -nc '{plugins:{"bionic@bionic":[{installPath:"/nonexistent/a", gitCommitSha:"deadbeef", version:"1.4.4"}]}}' \
+  > "${CHOME}/plugins/installed_plugins.json"
 
 # THE PAIRED POSITIVE, so neither scan above is a constant: `impeccable` is an `extra` native
 # row, absent from the same registry, and setup's install arms DO install it — so its row
