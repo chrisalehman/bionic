@@ -46,6 +46,9 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 . "$(dirname "$0")/lib/frontmatter-parser.sh"
 
 REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
@@ -308,13 +311,21 @@ run_pair() {  # <repo> <transcript> <sid> <args…> -> recorder's exit status; s
 # contract state) and the stop gate (the foreign-stop rule) read this file, which
 # is precisely why it is planted from ONE helper here: a fixture written twice is
 # two shapes, and this suite exists to catch exactly that.
-roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
+# RENAMED OFF THE WRITER'S NAME (S17). This helper used to be called `roster_row`, which is
+# now the production writer's own name — sourcing tests/lib/roster-row.sh with a private
+# `roster_row` still defined would have shadowed the one writer with a fixture, which is the
+# exact inversion this wave exists to end (S14 renamed dispatch-preflight's reader for the
+# same reason). The row itself now comes from `roster_row_fixture`, so the fields this
+# fixture used to omit — `source=`, `claims=`, `cadence=`, `waiver=`, `plan=` — are the
+# writer's own defaults rather than absent, and the header line is `roster_header`'s.
+cg_roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
   local repo="$1" sid="$2" name="$3" aid="$4" prog="${5:-}" status="${6:-confirmed}"
   local f="$repo/.bionic/tmp/roster-$sid.state"
   mkdir -p "$repo/.bionic/tmp"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=%s|absent=|tool_use_id=toolu_01FIXTURE\n' \
-    "$status" "$sid" "$name" "$aid" "$prog" >> "$f"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture \
+    status="$status" session="$sid" name="$name" agent_id="$aid" \
+    launched_at=2026-08-05T00:00:00Z progress="$prog" >> "$f"
   return 0
 }
 
@@ -341,40 +352,29 @@ roster_identify() {  # <repo> <sid> <name> <agent-id>
       | sed -e 's/|status=[^|]*|/|status=identified|/' -e "s/|agent_id=[^|]*|/|agent_id=$4|/" >> "$f"
     return 0
   fi
-  roster_row "$1" "$2" "$3" "$4" "" "identified"
+  cg_roster_row "$1" "$2" "$3" "$4" "" "identified"
 }
 
-CG_LA_SELF='This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).'
-
-# ONE TEAMMATE LINE. Hoisted out of the command substitution in `cg_live` below, and it
-# has to stay hoisted: bash 3.2 — which is what `/bin/bash` is on macOS, and what this
-# file's own shebang names — cannot parse a `case` statement inside `$( … )`; it trips on
-# the `)` that closes a case pattern (Step-6 review C-2). The suite ran anyway only
-# because this machine's PATH resolves `bash` to a 5.x build. §BP below sweeps the whole
-# tree so the next one is caught here rather than on somebody's laptop.
+# THE ANSWER BODY IS BUILT BY tests/lib/live-answer.sh (S17, spec AC-27/AC-28). The self
+# line, the `Teammates (N):` header and every teammate row come out of the committed corpus
+# with only this suite's names, statuses and type substituted in place — so the recognition
+# anchor these sections lean on is the one the harness actually writes, not this file's own
+# spelling of it, and the bash-3.2 `case`-inside-`$( … )` hazard the old private row builder
+# had to be hoisted out of (Step-6 review C-2) is gone with the builder.
 #
-# A bare name is `running`. `name:idle` writes the harness's other status — the teammate
-# that finished its turn and was never stopped, which LA.5 turns into the discriminator
-# between the two questions the one parse now answers.
-cg_la_row() {  # <name[:status]> -> one teammate line of a ListAgents answer body
-  local n="$1" nm st
-  case "$n" in
-    *:*) nm="${n%%:*}"; st="${n##*:}" ;;
-    *)   nm="$n";       st="running"  ;;
-  esac
-  printf '  %s [8895ce]  ·  bionic:implementor  ·  %s  ·  started 7m ago\n' "$nm" "$st"
-}
+# `LIVE_ANSWER_TYPE` is the type every composed row carries: §LA.5 and §LA.6 assert on it.
+# A bare name is the corpus's own `running`; `name:idle` writes the harness's other status —
+# the teammate that finished its turn and was never stopped, which LA.5 turns into the
+# discriminator between the two questions the one parse now answers.
+LIVE_ANSWER_TYPE="bionic:implementor"
 
 cg_live() {  # <transcript> <name[:status]>...
   local tr="$1"; shift
-  local f="${tr%.jsonl}.names" names=() n nm st body
+  local f="${tr%.jsonl}.names" names=() n body
   mkdir -p "$(dirname "$tr")"
   for n in "$@"; do printf '%s\n' "$n" >> "$f"; done
   while IFS= read -r n; do [ -n "$n" ] && names+=("$n"); done < "$f"
-  body=$(
-    printf '%s\n\nTeammates (%d):\n' "$CG_LA_SELF" "${#names[@]}"
-    for n in "${names[@]}"; do cg_la_row "$n"; done
-  )
+  body="$(live_answer_body ${names[@]+"${names[@]}"})"
   {
     jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
       '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
@@ -458,9 +458,9 @@ verdict_er() {  # <repo> -> yes|no|other:<detail>
   roster="$repo/.bionic/tmp/roster-$SID_A.state"
   mkdir -p "$repo/.bionic/tmp"
   {
-    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-    printf 'roster-state/v1|status=intended|session=%s|name=battery|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=|deliverable=|duration=|progress=|absent=|tool_use_id=toolu_BATTERY\n' \
-      "$SID_A"
+    roster_header
+    roster_row_fixture status=intended session="$SID_A" name=battery agent_id= \
+      launched_at=2026-08-05T00:00:00Z model= tool_use_id=toolu_BATTERY
   } > "$roster"
   out=$(mk_agent_post "$SID_A" "$SANDBOX/t.jsonl" "$repo" "toolu_BATTERY" | bash "$PARTY_ER" 2>&1); st=$?
   if [ "$st" -ne 0 ]; then echo "other:exit-$st"; return; fi
@@ -507,9 +507,10 @@ verdict_lg() {  # <repo> -> yes|no|other:<detail>
   roster="$repo/.bionic/tmp/roster-$SID_LG.state"
   mkdir -p "$repo/.bionic/tmp"
   {
-    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-    printf 'roster-state/v1|status=confirmed|session=%s|name=lg-probe|agent_id=alg-probe-0001|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lg.md|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_LGPROBE\n' \
-      "$SID_LG"
+    roster_header
+    roster_row_fixture status=confirmed session="$SID_LG" name=lg-probe \
+      agent_id=alg-probe-0001 launched_at=2026-08-05T00:00:00Z \
+      deliverable=.bionic/docs/record/never-lg.md tool_use_id=toolu_LGPROBE
   } > "$roster"
   out=$(mk_stopsweep_payload "$repo" "$SID_LG" false | bash "$PARTY_LG" 2>&1); st=$?
   case "$st" in
@@ -1024,7 +1025,7 @@ printf '{}\n' > "$ISUB/agent-aworker-1111111111111111.jsonl"
 # …and the two facts S6 added to "reachable by both parties": a line in this session's live
 # set, and a roster row carrying the agent id the working log is filed under.
 cg_live "$ITR" "worker"
-roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111" "" "identified"
+cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111" "" "identified"
 write_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # The producer, run for real, with the session key on the channel it actually
@@ -1082,8 +1083,8 @@ expect_eq "start gate: a foreign session is refused" "2" "$ST"
 # Both sessions get a row so that the roster is not what differs between the two
 # stops below: the ONLY thing that differs is the session value carried by the
 # record and the payload, which is what this section is about.
-roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111"
-roster_row "$IREPO" "${SID_A%?}0" "worker" "aworker-1111111111111111"
+cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111"
+cg_roster_row "$IREPO" "${SID_A%?}0" "worker" "aworker-1111111111111111"
 run_pair "$IREPO" "$ITR" "$SID_A" worker
 SGSTATE="$IREPO/.bionic/tmp/stop-check.state"
 expect_eq "the recorder wrote an observation record" "yes" "$([ -f "$SGSTATE" ] && echo yes || echo no)"
@@ -1186,7 +1187,7 @@ plant "$RPROJ/$SID_A/subagents" "asolo-1111111111111111" "solo"
 # …and this session's roster records it. Since slice 4/9 the row is not what makes
 # it ours — it is filed under this session's own directory — but keeping the row
 # holds this case fixed on the RESOLUTION question the three parties are answering.
-roster_row "$RREPO" "$SID_A" "solo" "asolo-1111111111111111"
+cg_roster_row "$RREPO" "$SID_A" "solo" "asolo-1111111111111111"
 expect_eq "C1 observation resolves a uniquely-named agent" "resolved" "$(q_observation solo)"
 expect_eq "C1 recorder records the same agent" "recorded" "$(q_recorder solo)"
 expect_eq "C1 gate discharges the stop on that record" "permitted" "$(q_gate solo)"
@@ -1374,7 +1375,7 @@ SSUB="$SPROJ/$SID_A/subagents"
 printf '{"name":"worker"}' > "$SSUB/agent-aworker-2222222222222222.meta.json"
 printf '{}\n' > "$SSUB/agent-aworker-2222222222222222.jsonl"
 cg_live "$STR" "worker"
-roster_row "$SREPO" "$SID_A" "worker" "aworker-2222222222222222" "" "identified"
+cg_roster_row "$SREPO" "$SID_A" "worker" "aworker-2222222222222222" "" "identified"
 write_plan "$SREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # 1. the recorder, with the secret in the command line beside a real run
@@ -1496,7 +1497,7 @@ section "E — classification + contract-source ride the machine line into the r
 # agents already planted there) rather than building a new one, because the
 # claim under test is agreement over ONE resolution, not a new resolver case.
 
-roster_row "$RREPO" "$SID_A" "worker" "aworker-7777777777777777"
+cg_roster_row "$RREPO" "$SID_A" "worker" "aworker-7777777777777777"
 
 # --- a target THIS session's roster records: OURS, end to end ---
 E_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" worker 2>&1 )
@@ -1536,7 +1537,7 @@ expect_contains "the recorder forwards that classification into the record" \
 # therefore has nothing to copy. That is a stronger agreement than a shared label: there is
 # no second reading of it to drift. ---
 plant "$RPROJ/$SID_B/subagents" "acorpse-aaaaaaaaaaaaaaaa" "corpse"
-roster_row "$RREPO" "$SID_A" "corpse" "" "" intended
+cg_roster_row "$RREPO" "$SID_A" "corpse" "" "" intended
 E5_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" corpse 2>&1 )
 E5_MLINE=$(printf '%s\n' "$E5_OUT" | grep '^stop-check-observation/')
 expect_contains "an unconfirmed row's NAME does not make another session's agent ours" \
@@ -1636,12 +1637,12 @@ expect_eq "a write to the roster-contracted progress path stales the look" "2" "
 # asserted only that the row THIS event confirmed survived the fold, which is why
 # 110/110 was green over the defect.
 F4_ROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
-F4_BEFORE=$(grep -c '^roster-state/v1|' "$F4_ROSTER" 2>/dev/null || echo 0)
+F4_BEFORE=$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$F4_ROSTER" 2>/dev/null || echo 0)
 {
   _i=0
   while [ "$_i" -lt 260 ]; do
-    printf 'roster-state/v1|status=confirmed|session=%s|name=old-%s|agent_id=aold-%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|duration=|progress=|claims=|cadence=|absent=|tool_use_id=toolu_OLD%s\n' \
-      "$SID_A" "$_i" "$_i" "$_i"
+    roster_row_fixture status=confirmed session="$SID_A" name="old-$_i" \
+      agent_id="aold-$_i" launched_at=2026-08-05T00:00:00Z tool_use_id="toolu_OLD$_i"
     _i=$((_i + 1))
   done
 } >> "$F4_ROSTER"
@@ -1657,7 +1658,7 @@ mk_agent_post "$SID_A" "$ITR" "$IREPO" "toolu_OTHERDISPATCH" "w99-other" \
 expect_contains "the other dispatch's completion is journalled" \
   "agent_id=a26bd30bf8616411b" "$(grep 'status=confirmed|.*name=w99-other|' "$F4_ROSTER" 2>/dev/null)"
 expect_eq "no row is evicted to make room for it (append-only, unbounded)" \
-  "$((F4_BEFORE + 262))" "$(grep -c '^roster-state/v1|' "$F4_ROSTER" 2>/dev/null || echo 0)"
+  "$((F4_BEFORE + 262))" "$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$F4_ROSTER" 2>/dev/null || echo 0)"
 # Both of these read the ROW, never the file. Scoping is load-bearing twice over:
 # the second dispatch above carries the same brief, so a file-wide grep for the
 # contract would stay green with the live row gone — and `expect_contains` cannot
@@ -1918,7 +1919,10 @@ field1_via() {  # <file> <line> <key> -> landing-gate.sh's ONE-argument _field()
     LINE="$line" _field "$key" ) 2>/dev/null
 }
 
-I1_LINE='roster-state/v1|status=confirmed|name=w4-i1|agent_id=ai1test0000000000|deliverable=.bionic/docs/record/i1.md|state=UNMET'
+# DELIBERATELY NOT A ROW (and so not `roster_row_fixture`'s to build): it carries a
+# `state=` key no writer emits, because what is under test is `line_field`'s by-key
+# extraction, not the row. Only the schema token comes off the writer.
+I1_LINE="${ROSTER_ROW_SCHEMA}|status=confirmed|name=w4-i1|agent_id=ai1test0000000000|deliverable=.bionic/docs/record/i1.md|state=UNMET"
 for _key in status name agent_id deliverable state; do
   I1_WANT=$(field2_via "$SWEEPER" line_field "$I1_LINE" "$_key")
   expect_eq "…and stop-check's line_field(${_key}), called for real, agrees" \
@@ -1932,7 +1936,7 @@ done
 I1_MUT_DIR="$SANDBOX/fx/i1-unanchored"
 mkdir -p "$I1_MUT_DIR"
 awk '{ sub(/grep "\^\$1="/, "grep \"$1=\""); print }' "$PARTY_LG" > "$I1_MUT_DIR/landing-gate.sh"
-I1_DECOY='roster-state/v1|prev_status=confirmed|status=UNMET'
+I1_DECOY="${ROSTER_ROW_SCHEMA}|prev_status=confirmed|status=UNMET"
 
 # --- I.2 done-detection: one concept, two implementations, one answer ---
 
@@ -1958,14 +1962,15 @@ D_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 
 DROSTER="$DREPO/.bionic/tmp/roster-$SID_A.state"
 mkdir -p "$DREPO/.bionic/tmp"
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$DROSTER"
+roster_header > "$DROSTER"
 # The agent's own row, re-planted because the header write above truncates the file: since S6
 # the observation takes the agent id — and therefore the working log — off this row, and every
 # `d_row` below is a CONTRACT row named for its case rather than for the agent.
 roster_identify "$DREPO" "$SID_A" "deliv" "adeliv-2222222222222222"
 d_row() {  # <name> <deliverable value>
-  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=adeliv-2222222222222222|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=1 minute|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01%s\n' \
-    "$SID_A" "$1" "$D_LAUNCHED" "$2" "$1" >> "$DROSTER"
+  roster_row_fixture status=confirmed session="$SID_A" name="$1" \
+    agent_id=adeliv-2222222222222222 launched_at="$D_LAUNCHED" deliverable="$2" \
+    duration="1 minute" tool_use_id="toolu_01$1" >> "$DROSTER"
 }
 
 # The stop gate's answer, read off the evidence it prints for a human rather than off a
@@ -2070,11 +2075,12 @@ J_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
 # row whose id is absent from the Stop payload's `background_tasks[]` has landed and is
 # judged, and one still listed there is skipped. The rest of the row is the writer's own.
 jrow() {  # <name> <deliverable> <progress> <cadence> <waiver> [tool_use_id]
-  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=a-%s|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=|progress=%s|claims=|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
-    "$SID_A" "$1" "$1" "$J_LAUNCHED" "$2" "$3" "$4" "$5" "${6:-toolu_01LANDING}" >> "$JROSTER"
+  roster_row_fixture status=confirmed session="$SID_A" name="$1" agent_id="a-$1" \
+    launched_at="$J_LAUNCHED" deliverable="$2" progress="$3" cadence="$4" waiver="$5" \
+    tool_use_id="${6:-toolu_01LANDING}" >> "$JROSTER"
 }
 
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$JROSTER"
+roster_header > "$JROSTER"
 echo "the report" > "$JDELIV/met.md"
 : > "$JDELIV/empty.md"
 echo "written before the agent was ever dispatched" > "$JDELIV/stale.md"
@@ -2330,9 +2336,10 @@ printf 'stage 1\n' > "$DLREPO/.bionic/tmp/dl.progress"
 # argv can contain, which is what makes the claim's deadness a property of this run alone.
 DL_CLAIM="bionic-xgate-D2-deadclaim-no-such-process-9f5c1a2b-$$"
 {
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
-  printf 'roster-state/v1|status=confirmed|session=%s|name=dl-row|agent_id=adl-row-0001|launched_at=%s|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-dl.md|source=declared|duration=|progress=%s|claims=%s|cadence=~5m|absent=|waiver=|tool_use_id=toolu_DL\n' \
-    "$SID_A" "$DL_LAUNCHED" ".bionic/tmp/dl.progress" "$DL_CLAIM"
+  roster_header
+  roster_row_fixture status=confirmed session="$SID_A" name=dl-row agent_id=adl-row-0001 \
+    launched_at="$DL_LAUNCHED" deliverable=.bionic/docs/record/never-dl.md \
+    progress=.bionic/tmp/dl.progress claims="$DL_CLAIM" cadence=~5m tool_use_id=toolu_DL
 } > "$DL_ROSTER"
 # Not vacuous: the claimed process really is dead.
 
@@ -2992,8 +2999,10 @@ write_plan "$MREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 # A contract that will NEVER land: the artifact is not written, so every party's verdict is
 # UNMET and the ack is the only thing that can discharge anything. A fixture whose contract
 # landed would agree for the wrong reason.
-printf 'roster-state/v1|status=confirmed|session=%s|name=finished|agent_id=afinished-1111111111111111|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never.md|duration=|progress=|absent=|waiver=|teammate_id=finished@session-%s|tool_use_id=toolu_01FIXTURE\n' \
-  "$SID_A" "$(printf '%s' "$SID_A" | cut -c1-8)" \
+roster_row_fixture status=confirmed session="$SID_A" name=finished \
+  agent_id=afinished-1111111111111111 launched_at=2026-08-05T00:00:00Z \
+  deliverable=.bionic/docs/record/never.md \
+  teammate_id="finished@session-$(printf '%s' "$SID_A" | cut -c1-8)" \
   >> "$MREPO/.bionic/tmp/roster-$SID_A.state"
 
 # The landing sweep answers for each row ONCE, ever, and journals a marker into the roster
@@ -3100,7 +3109,7 @@ mk_order_world() {  # <label> <name> <agent-id> -> "<repo>|<transcript>"
   printf '{}\n' > "$tr"
   plant "$sub" "$3" "$2"
   write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
-  roster_row "$repo" "$SID_A" "$2" "$3"
+  cg_roster_row "$repo" "$SID_A" "$2" "$3"
   printf '%s|%s\n' "$repo" "$tr"
 }
 
@@ -3748,7 +3757,7 @@ n_state_of_row() {  # <roster row> -> the verdict's state for it alone
   local d="$SANDBOX/fx/lr-fold"
   rm -rf "$d"; mkdir -p "$d/.bionic/tmp"
   git -C "$d" init -q 2>/dev/null
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  roster_header \
     > "$d/.bionic/tmp/roster-$SID_A.state"
   printf '%s\n' "$1" >> "$d/.bionic/tmp/roster-$SID_A.state"
   ( cd "$d" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict resumed 2>/dev/null ) \
@@ -3879,11 +3888,12 @@ P_NEW=$(date -u -v-60S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
         || date -u -d '-60 seconds' +%Y-%m-%dT%H:%M:%SZ)
 
 p_row() {  # <name> <deliverable> <duration> <launched_at> <teammate_id>
-  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=%s|progress=|claims=|cadence=|absent=|waiver=|teammate_id=%s|tool_use_id=toolu_P%s\n' \
-    "$SID_A" "$1" "$4" "$2" "$3" "$5" "$1"
+  roster_row_fixture status=confirmed session="$SID_A" name="$1" agent_id= \
+    launched_at="$4" deliverable="$2" duration="$3" teammate_id="$5" \
+    tool_use_id="toolu_P$1"
 }
 
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+roster_header \
   > "$PROSTER"
 # dup-open: the EARLIER row would read as landed and unhurried (a delivered artifact, four
 # hours to do it, launched a minute ago); the LATER row is the true contract and is neither.
@@ -3928,7 +3938,7 @@ p_lg_fixture() {  # <repo> -> an active wave + an lg-dup roster, earlier row bar
   mkdir -p "$1/.bionic/tmp" "$1/.bionic/docs/record"
   write_plan "$1/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
   {
-    printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n'
+    roster_header
     # SAME tool_use_id on both rows — the real writers (dispatch-preflight, then
     # execution-recorder at confirm/identify) never mint a second one for the same
     # dispatch, and the sweeper's OWN fold counts distinct tool_use_id as distinct
@@ -3936,8 +3946,10 @@ p_lg_fixture() {  # <repo> -> an active wave + an lg-dup roster, earlier row bar
     # sharing a name (AMBIGUOUS, §N's `dup` shape) rather than the SAME contract's
     # two rows, which is what this fixture is about.
     p_row lg-dup "" "1 minute" "$P_NEW" "" | sed "s/agent_id=|/agent_id=alg-dup-early001|/"
-    printf 'roster-state/v1|status=confirmed|session=%s|name=lg-dup|agent_id=alg-dup-late0001|launched_at=%s|subagent_type=implementor|model=opus|deliverable=%s|source=declared|duration=1 minute|progress=|claims=|cadence=|absent=|waiver=|teammate_id=|tool_use_id=toolu_Plg-dup\n' \
-      "$SID_A" "$P_NEW" "$1/.bionic/docs/record/lg-never-written.md"
+    roster_row_fixture status=confirmed session="$SID_A" name=lg-dup \
+      agent_id=alg-dup-late0001 launched_at="$P_NEW" \
+      deliverable="$1/.bionic/docs/record/lg-never-written.md" duration="1 minute" \
+      teammate_id= tool_use_id=toolu_Plg-dup
   } > "$1/.bionic/tmp/roster-$SID_A.state"
 }
 
@@ -3948,7 +3960,7 @@ PLG_ROSTER="$PLGREPO/.bionic/tmp/roster-$SID_A.state"
 LG_OUT=$( mk_stopsweep_payload "$PLGREPO" "$SID_A" false | bash "$PARTY_LG" 2>&1 ); LG_RC=$?
 expect_eq "landing-gate joins §P: it refuses lg-dup, folding to the LATER row (the genuinely missing artifact)" \
   "2" "$LG_RC"
-LG_MARK=$(grep -F '|name=lg-dup|' "$PLG_ROSTER" | grep -F 'landing-swept/v1|' | tail -1)
+LG_MARK=$(grep -F '|name=lg-dup|' "$PLG_ROSTER" | grep -F "${SWEPT_SCHEMA}|" | tail -1)
 expect_contains "…and the roster marker is keyed to the LATER row agent_id" \
   "agent_id=alg-dup-late0001" "$LG_MARK"
 
@@ -4341,8 +4353,10 @@ write_plan "$RREPO_AD/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # THE PREDECESSOR'S ROW, as hooks/execution-recorder.sh left it when that session died:
 # `identified`, the transcript-form id, a contract that never landed.
-printf 'roster-state/v1|status=identified|session=%s|name=adoptee|agent_id=aadoptee-4444444444444444|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=.bionic/docs/record/never-lands.md|source=declared|duration=|progress=|claims=|cadence=10 minutes|absent=|waiver=|tool_use_id=toolu_01FIXTURE\n' \
-  "$SID_A" >> "$RREPO_AD/.bionic/tmp/roster-$SID_A.state"
+roster_row_fixture status=identified session="$SID_A" name=adoptee \
+  agent_id=aadoptee-4444444444444444 launched_at=2026-08-05T00:00:00Z \
+  deliverable=.bionic/docs/record/never-lands.md cadence="10 minutes" \
+  >> "$RREPO_AD/.bionic/tmp/roster-$SID_A.state"
 
 # THE ADOPTING SESSION IS DELIBERATELY UNBOUND, and since wave-session-bound-run that is a
 # decision rather than an accident. `adopt` now partitions foreign rows on `plan=`: a BOUND
@@ -4629,7 +4643,7 @@ s_eg_read() {  # <repo> [sid] -> "<plan path>|<current>", or "none"
 
 s_pk_read() {  # <repo> [sid] -> "<plan path>|<current>", or "none"
   local out plan cur sid="${2:-$SID_A}"
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  roster_header \
     > "$1/.bionic/tmp/roster-$sid.state"
   # THE STAMP IS RE-PLANTED PER READ. A tick that decides DISARM removes this session's
   # Patrol stamp as its last act (hooks/session-poker.sh), so a second read of the same
@@ -4864,7 +4878,7 @@ s4_cs() {  # <repo> <sid>
   return 0
 }
 s4_pk() {  # <repo> <sid>
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  roster_header \
     > "$1/.bionic/tmp/roster-$2.state"
   ( cd "$1" && env CLAUDE_CODE_SESSION_ID="$2" CLAUDE_CONFIG_DIR="$1/no-such-config" \
       bash "$PARTY_PK_S" tick 2>&1 )
@@ -4947,8 +4961,8 @@ expect_eq "…and session B's for session B" "$S4_PB|6" "$(s_pk_read "$S4_R1" "$
 # same transcript with a fresh ListAgents answer naming both dispatched agents; that is the
 # only reason this file names s4a/s4b at all.
 cg_live "$S4_R1/s4-transcript.jsonl" "s4a" "s4b"
-roster_row "$S4_R1" "$SID_A" "s4a" "as4a-1111111111111111" "" "intended"
-roster_row "$S4_R1" "$SID_B" "s4b" "as4b-2222222222222222" "" "intended"
+cg_roster_row "$S4_R1" "$SID_A" "s4a" "as4a-1111111111111111" "" "intended"
+cg_roster_row "$S4_R1" "$SID_B" "s4b" "as4b-2222222222222222" "" "intended"
 S4_DP_A=$(s4_dp "$S4_R1" "$SID_A")
 S4_DP_B=$(s4_dp "$S4_R1" "$SID_B")
 expect_contains "…the dispatch wall's ceiling is declared by session A's plan" "$S4_PA" "$S4_DP_A"
@@ -5379,8 +5393,9 @@ RA_DISPATCH_ROW=$(grep '^roster-state/' "$RA_REPO/.bionic/tmp/roster-$SID_A.stat
 # The predecessor's row carries `plan=` too, so it partitions as `own` and is journalled;
 # that it does so is §17's claim in tests/session-poker.test.sh, not this section's.
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$RA_REPO" | sed 's/[^a-zA-Z0-9]/-/g')/$RA_PRED/subagents"
-printf 'roster-state/v1|status=identified|session=%s|name=ra-writer|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01RAFIX|plan=%s\n' \
-  "$RA_PRED" "$RA_PRED_ID" "$RA_PLAN" >> "$RA_REPO/.bionic/tmp/roster-$RA_PRED.state"
+roster_row_fixture status=identified session="$RA_PRED" name=ra-writer \
+  agent_id="$RA_PRED_ID" launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_01RAFIX \
+  plan="$RA_PLAN" >> "$RA_REPO/.bionic/tmp/roster-$RA_PRED.state"
 s4_bind "$RA_REPO" "$SID_B" "$RA_PLAN"
 ( cd "$RA_REPO" && env CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SPO" adopt ) >/dev/null 2>&1
 RA_ADOPT_ROW=$(grep "agent_id=$RA_PRED_ID" "$RA_REPO/.bionic/tmp/roster-$SID_B.state" 2>/dev/null | tail -1)
@@ -5411,8 +5426,9 @@ write_plan "$RA_PLAN_U" "current: 4"
 s4_attest "$RA_REPO_U" "$SID_A"
 mk_agent_payload "$SID_A" "$RA_REPO_U" | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_DP" >/dev/null 2>&1
 RA_DISPATCH_U=$(grep '^roster-state/' "$RA_REPO_U/.bionic/tmp/roster-$SID_A.state" 2>/dev/null | tail -1)
-printf 'roster-state/v1|status=identified|session=%s|name=ra-writer|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01RAFIX|plan=none\n' \
-  "$RA_PRED" "$RA_PRED_ID" >> "$RA_REPO_U/.bionic/tmp/roster-$RA_PRED.state"
+roster_row_fixture status=identified session="$RA_PRED" name=ra-writer \
+  agent_id="$RA_PRED_ID" launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_01RAFIX \
+  plan=none >> "$RA_REPO_U/.bionic/tmp/roster-$RA_PRED.state"
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$RA_REPO_U" | sed 's/[^a-zA-Z0-9]/-/g')/$RA_PRED/subagents"
 ( cd "$RA_REPO_U" && env CLAUDE_CODE_SESSION_ID="$SID_B" bash "$SPO" adopt ) >/dev/null 2>&1
 RA_ADOPT_U=$(grep "agent_id=$RA_PRED_ID" "$RA_REPO_U/.bionic/tmp/roster-$SID_B.state" 2>/dev/null | tail -1)
@@ -5439,8 +5455,9 @@ expect_eq "the adopt-writer mutation applies (the plan argument has not moved)" 
 RA_REPO_M=$(new_repo "ra-mutant-repo")
 RA_PLAN_M="$RA_REPO_M/.bionic/docs/plans/epic-99/ra-run.md"
 write_plan "$RA_PLAN_M" "current: 4"
-printf 'roster-state/v1|status=identified|session=%s|name=ra-writer|agent_id=%s|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01RAFIX|plan=%s\n' \
-  "$RA_PRED" "$RA_PRED_ID" "$RA_PLAN_M" >> "$RA_REPO_M/.bionic/tmp/roster-$RA_PRED.state"
+roster_row_fixture status=identified session="$RA_PRED" name=ra-writer \
+  agent_id="$RA_PRED_ID" launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_01RAFIX \
+  plan="$RA_PLAN_M" >> "$RA_REPO_M/.bionic/tmp/roster-$RA_PRED.state"
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$RA_REPO_M" | sed 's/[^a-zA-Z0-9]/-/g')/$RA_PRED/subagents"
 s4_bind "$RA_REPO_M" "$SID_B" "$RA_PLAN_M"
 ( cd "$RA_REPO_M" && env CLAUDE_CODE_SESSION_ID="$SID_B" bash "$RA_MUT/hooks/session-poker.sh" adopt ) >/dev/null 2>&1
@@ -5486,7 +5503,7 @@ RA2_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
 RA2_CAPTURE="$REPO_ROOT/tests/fixtures/roster-row.captured"
 
 ra2_captured() {  # <status> -> the one captured row carrying that status
-  LC_ALL=C grep "^roster-state/v1|status=$1|" "$RA2_CAPTURE" 2>/dev/null | head -1
+  LC_ALL=C grep "^${ROSTER_ROW_SCHEMA}|status=$1|" "$RA2_CAPTURE" 2>/dev/null | head -1
 }
 
 # The rebuild. `$( … )` is a subshell, so sourcing the library here cannot leak
@@ -5794,7 +5811,7 @@ LA_TID="alat-9999999999999999"
 cg_live "$LA_TR" "la-budget" "la-target"
 
 # the open seat (budget) and the identified agent (resolution)
-roster_row "$LA_REPO" "$SID_A" "la-budget" "alab-8888888888888888" "" "intended"
+cg_roster_row "$LA_REPO" "$SID_A" "la-budget" "alab-8888888888888888" "" "intended"
 printf '{"name":"la-target","agentType":"implementor","description":"fixture","model":"opus"}' \
   > "$LA_PROJ/$SID_A/subagents/agent-$LA_TID.meta.json"
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
@@ -6062,10 +6079,12 @@ expect_eq "LA.6 meta: this session's id names exactly one transcript on the whol
 # MET for want of anything to hold it to, and would make the tick's count zero for a reason
 # that has nothing to do with the live set.
 la6_row() {  # <name>
-  printf 'roster-state/v1|status=intended|session=%s|name=%s|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s/never-written-%s.md|source=declared|duration=4 hours|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01LA6%s\n' \
-    "$LA6_SID" "$1" "$LA6_REPO" "$1" "$1" >> "$LA6_REPO/.bionic/tmp/roster-$LA6_SID.state"
+  roster_row_fixture status=intended session="$LA6_SID" name="$1" agent_id= \
+    launched_at=2026-08-05T00:00:00Z deliverable="$LA6_REPO/never-written-$1.md" \
+    duration="4 hours" tool_use_id="toolu_01LA6$1" \
+    >> "$LA6_REPO/.bionic/tmp/roster-$LA6_SID.state"
 }
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+roster_header \
   > "$LA6_REPO/.bionic/tmp/roster-$LA6_SID.state"
 la6_row "la6-idle"
 la6_row "la6-live"
@@ -6222,10 +6241,12 @@ write_plan "$PC_OTHER" "current: 6"
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/$(printf '%s' "$PC_REPO" | sed 's/[^a-zA-Z0-9]/-/g')/$PC_PRED/subagents"
 
 pc_adopt() {  # <foreign plan= spelling> -> the adopt listing
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+  roster_header \
     > "$PC_REPO/.bionic/tmp/roster-$PC_PRED.state"
-  printf 'roster-state/v1|status=identified|session=%s|name=pc-agent|agent_id=apc-1111111111111111|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01PCFIX|plan=%s\n' \
-    "$PC_PRED" "$1" >> "$PC_REPO/.bionic/tmp/roster-$PC_PRED.state"
+  roster_row_fixture status=identified session="$PC_PRED" name=pc-agent \
+    agent_id=apc-1111111111111111 launched_at=2026-08-05T00:00:00Z \
+    tool_use_id=toolu_01PCFIX plan="$1" \
+    >> "$PC_REPO/.bionic/tmp/roster-$PC_PRED.state"
   s4_bind "$PC_REPO" "$SID_A" "$PC_PLAN"
   ( cd "$PC_REPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PC_SPO" adopt 2>&1 )
   return 0
@@ -6360,7 +6381,7 @@ mkdir -p "$(dirname "$RG_PLAN")"
   printf 'current: 4\n\n- Step 3: prior evidence\n'
 } > "$RG_PLAN"
 s4_bind "$RG_REPO" "$SID_A" "$RG_PLAN"
-roster_row "$RG_REPO" "$SID_A" "rg-writer" "arg-1111111111111111" "" "identified"
+cg_roster_row "$RG_REPO" "$SID_A" "rg-writer" "arg-1111111111111111" "" "identified"
 
 # ---- the two consumers, each asked through its own surface -------------------
 rg_runner() {  # -> the width tests/run.sh would run at, under the pinned environment
@@ -7318,7 +7339,7 @@ expect_eq "S15b hooks/landing-gate.sh declares the constant" \
 expect_eq "S15b …and hooks/session-poker.sh's copy agrees, byte for byte" \
   "$S15_LG_SCHEMA_LINE" "$S15_PK_SCHEMA_LINE"
 expect_eq "S15b …the copy is a named constant, not a literal in adopt_copy_marker's own grep" \
-  "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^landing-swept/v1|'")"
+  "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^${SWEPT_SCHEMA}|'")"
 
 # ============================================================
 section "S13 — the suite budget: one derivation, one row writer, one alphabet"
