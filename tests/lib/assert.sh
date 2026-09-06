@@ -531,12 +531,31 @@ _tf_scan() {
       # framework call sites in 14 suites were invisible that way. All ~150
       # assertions of session-start.test.sh route through three such wrappers,
       # and that suite scanned as ZERO calls (review-a A-2).
-      if (match(line, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) {
+      #
+      # BOTH SYNTAXES BASH ACCEPTS (critic K-1). `function name { ... }` and
+      # `function name() { ... }` define a function exactly as `name()` does,
+      # and the POSIX-only test read neither: a suite spelling its private ok as
+      # `function ok {` produced no DEF and no TOPDEF, so the wall had nothing
+      # to match and the runner launched it. Nothing in the tree exploits that
+      # today, which is what makes it a hole rather than a lie.
+      isdef = 0
+      if (match(line, /^[ \t]*function[ \t]+[A-Za-z_][A-Za-z0-9_]*([ \t]*\(\))?/)) {
+        rs = RSTART; rl = RLENGTH
+        d = substr(line, rs, rl)
+        sub(/^[ \t]*function[ \t]+/, "", d)
+        gsub(/[^A-Za-z0-9_]/, "", d)
+        isdef = 1
+        istop = (line ~ /^function[ \t]/)
+      } else if (match(line, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) {
         rs = RSTART; rl = RLENGTH
         d = substr(line, rs, rl)
         gsub(/[^A-Za-z0-9_]/, "", d)
+        isdef = 1
+        istop = (line ~ /^[A-Za-z_]/)
+      }
+      if (isdef) {
         print "DEF " d
-        if (line ~ /^[A-Za-z_]/) print "TOPDEF " d
+        if (istop) print "TOPDEF " d
         line = substr(line, rs + rl)
       }
 
