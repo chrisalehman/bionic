@@ -40,6 +40,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
@@ -119,7 +121,12 @@ make_repo_with_roster() {  # <sid> <open-names...> -- <closed-names...> -> repo 
   local mode=open
   for nm in "$@"; do
     if [ "$nm" = "--" ]; then mode=closed; continue; fi
-    printf 'roster-state/v1|status=intended|name=%s|ts=2026-08-27T00:00:00Z\n' "$nm" >> "$f"
+    # THE INVENTED `ts=` IS GONE (S17, on S14's F-S14-2). This fixture carried a field
+    # no production writer has ever emitted and no reader in the fleet consumes — proven
+    # by grep over payload/hooks and payload/scripts — for as long as nothing checked.
+    # `roster_row` refuses the key outright, which is the point: a fixture cannot invent
+    # a field the fleet has no reader for.
+    roster_row_fixture status=intended session="$sid" name="$nm" >> "$f"
     # THE MARKER IN THE SHAPE ITS ONE ORIGINATOR WRITES IT, `state=` and all
     # (hooks/landing-gate.sh's `SWEPT_SCHEMA` printf). A closing marker says
     # `state=MET`; a marker that says anything else is a contract the sweep
@@ -127,7 +134,7 @@ make_repo_with_roster() {  # <sid> <open-names...> -- <closed-names...> -> repo 
     # predecessor's verdict verbatim onto a successor's roster. A fixture that
     # wrote no `state=` at all could not tell the two apart, which is precisely
     # the distinction `patrol_roster_state` now makes.
-    [ "$mode" = "closed" ] && printf 'landing-swept/v1|at=2026-08-27T00:00:01Z|session=%s|name=%s|agent_id=a000|state=MET\n' "$sid" "$nm" >> "$f"
+    [ "$mode" = "closed" ] && swept_marker_write "$f" 2026-08-27T00:00:01Z "$sid" "$nm" a000 MET
   done
   printf '%s' "$dir"
 }
@@ -628,7 +635,7 @@ GITROOT13="$(mktemp -d -p "$TMP")"
 git -c init.defaultBranch=main init -q "$GITROOT13" >/dev/null 2>&1
 NESTED13="$GITROOT13/apps/inner"
 mkdir -p "$NESTED13/.bionic/tmp"
-printf 'roster-state/v1|status=intended|name=beta|ts=2026-08-27T00:00:00Z\n' \
+roster_row_fixture status=intended session="$SID13" name=beta \
   > "$NESTED13/.bionic/tmp/roster-${SID13}.state"
 
 HOME13="$(make_claude_home "$SID13" "$PID13" "$NESTED13")"
@@ -653,7 +660,7 @@ mkdir -p "$GITROOT13B/.bionic/tmp"
 SID13B="00000000-1111-2222-3333-444455556666"
 SHORT13B="${SID13B%%-*}"
 spawn_live_pid; PID13B="$LIVE_PID"
-printf 'roster-state/v1|status=intended|name=beta|ts=2026-08-27T00:00:00Z\n' \
+roster_row_fixture status=intended session="$SID13B" name=beta \
   > "$GITROOT13B/.bionic/tmp/roster-${SID13B}.state"
 HOME13B="$(make_claude_home "$SID13B" "$PID13B" "$GITROOT13B")"
 TR13B="$(transcript_of "$HOME13B" "$SID13B")"
@@ -775,9 +782,8 @@ spawn_live_pid; PID17="$LIVE_PID"
 REPO17="$(make_repo_with_roster "$SID17" -- closed-met)"
 # The UNMET row, appended in the originator's exact shape beside the MET one.
 ROSTER17="$REPO17/.bionic/tmp/roster-${SID17}.state"
-printf 'roster-state/v1|status=intended|name=unmet-row|ts=2026-08-27T00:00:00Z\n' >> "$ROSTER17"
-printf 'landing-swept/v1|at=2026-08-27T00:00:01Z|session=%s|name=unmet-row|agent_id=a000|state=UNMET\n' \
-  "$SID17" >> "$ROSTER17"
+roster_row_fixture status=intended session="$SID17" name=unmet-row >> "$ROSTER17"
+swept_marker_write "$ROSTER17" 2026-08-27T00:00:01Z "$SID17" unmet-row a000 UNMET
 HOME17="$(make_claude_home "$SID17" "$PID17" "$REPO17")"
 TR17="$(transcript_of "$HOME17" "$SID17")"
 plant_patrol_job "$TR17" "toolu_1" "abc17777"

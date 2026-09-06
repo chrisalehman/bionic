@@ -138,3 +138,124 @@ live_answer_stale() { live_answer_build "$1" "$LIVE_ANSWER_RUNNING_LINE" "2026-0
 live_answer_absent() { rm -f "$1"; }
 
 live_answer_none() { live_answer_build "$1" "$LIVE_ANSWER_NONE_LINE"; }
+
+# ---------------------------------------------------------------------------
+# COMPOSING AN ANSWER THAT NAMES THE SUITE'S OWN TEAMMATES (S17, spec AC-28)
+#
+# The eight private builders this file replaces did not want a corpus line — they wanted
+# an answer naming `alpha`, `battery`, `w1r-slice-4-3`, whatever the case under test had
+# just written a roster row for. That is why each of them hand-wrote a teammate line, and
+# why the tree ended up with three spellings of the recognition anchor and two of the ref
+# suffix.
+#
+# So the composer below builds the answer out of the corpus's OWN LINES and substitutes
+# only the values a case names: the self line is corpus line 0's first line verbatim; the
+# `Teammates (N):` header is corpus line 0's header with its count replaced; each teammate
+# row is corpus line 0's teammate row with the name, type and status replaced IN PLACE —
+# the indent, the ref suffix, the middot separator and the `started …` tail all stay the
+# bytes the harness wrote. Nothing here types a separator or a suffix; every one of them is
+# read back out of the corpus at call time, so the day the harness changes its row format
+# the fixtures change with it (which is the whole of D3).
+#
+# WHAT IT DELIBERATELY CANNOT DO. It cannot emit a second `Teammates (N):` header, a
+# reordered block, a truncated self line or a body with the middot replaced — the malformed
+# shapes `tests/live-agents.test.sh` feeds the parser. Those are the PARSER's inputs, not
+# fixtures for anything else, and a builder able to produce them would be able to produce
+# them by accident. They stay hand-written in that one suite; see the AC-28 section of
+# tests/cross-gate-agreement.test.sh, which names the exemption and holds it to one file.
+#
+#   live_answer_self_line                    -> the corpus's recognition anchor, verbatim
+#   live_answer_block_header <n>             -> the corpus's block header, count replaced
+#   live_answer_teammate_line <name> [status] [type]
+#                                            -> the corpus's teammate row, values replaced
+#   live_answer_body <name[:status[:type]]>...
+#                                            -> a whole answer body; with NO names, the
+#                                               self line alone (recognisable, zero
+#                                               teammates — the shape a session with no
+#                                               live agents gets)
+#
+# `LIVE_ANSWER_TYPE` sets the type every row carries when a caller does not name one, so a
+# suite whose assertions pin `bionic:senior-implementor` sets it once. Unset, the rows carry
+# the corpus's own type.
+
+# Corpus line 0 is the template for every composed row: one running teammate, the shape the
+# harness writes. `_LIVE_ANSWER_ROW` / `_LIVE_ANSWER_SELF` / `_LIVE_ANSWER_HDR` cache the
+# three pieces, because composing an answer is on the inner loop of several suites and each
+# read is a `sed` plus a `jq` over the corpus.
+_LIVE_ANSWER_SELF=""
+_LIVE_ANSWER_HDR=""
+_LIVE_ANSWER_ROW=""
+
+# The real 03:07:41.801Z answer: one writer idle beside one running. The one corpus line
+# that carries two teammates in different states, which is what the budget's open-count
+# cases need.
+LIVE_ANSWER_MIXED_LINE=7
+
+_live_answer_template() {
+  [ -n "$_LIVE_ANSWER_SELF" ] && return 0
+  local body
+  body="$(live_answer_content "$LIVE_ANSWER_RUNNING_LINE")"
+  _LIVE_ANSWER_SELF="$(printf '%s\n' "$body" | sed -n '1p')"
+  _LIVE_ANSWER_HDR="$(printf '%s\n' "$body" | LC_ALL=C awk '/^Teammates \([0-9]+\):[ \t]*$/ { print; exit }')"
+  _LIVE_ANSWER_ROW="$(printf '%s\n' "$body" | LC_ALL=C awk '
+    /^Teammates \([0-9]+\):[ \t]*$/ { f = 1; next }
+    f && /^[ \t]+[^ \t]/            { print; exit }')"
+  [ -n "$_LIVE_ANSWER_SELF" ] && [ -n "$_LIVE_ANSWER_HDR" ] && [ -n "$_LIVE_ANSWER_ROW" ]
+}
+
+live_answer_self_line() {
+  _live_answer_template || return 1
+  printf '%s\n' "$_LIVE_ANSWER_SELF"
+}
+
+live_answer_block_header() {  # <count> -> the corpus header with its count replaced
+  _live_answer_template || return 1
+  printf '%s\n' "$_LIVE_ANSWER_HDR" | sed "s/([0-9][0-9]*)/(${1:-1})/"
+}
+
+# The corpus's own teammate row with the name, type and status substituted in place. Every
+# byte that is not one of those three — the indent, the whitespace before the ref bracket,
+# the ref itself, the separator, the `started …` tail — is carried over from the corpus row
+# by position, never re-typed.
+live_answer_teammate_line() {  # <name> [status] [type]
+  _live_answer_template || return 1
+  printf '%s\n' "$_LIVE_ANSWER_ROW" | LC_ALL=C awk \
+    -v nm="$1" -v st="${2:-}" -v ty="${3:-${LIVE_ANSWER_TYPE:-}}" '
+    {
+      line = $0
+      match(line, /^[ \t]*/); indent = substr(line, 1, RLENGTH)
+      line = substr(line, RLENGTH + 1)
+      match(line, /[ \t]*·[ \t]*/); sep = substr(line, RSTART, RLENGTH)
+      n = split(line, p, /[ \t]*·[ \t]*/)
+      if (nm != "") {
+        ref = ""
+        if (match(p[1], /[ \t]*\[[^]]*\][ \t]*$/)) ref = substr(p[1], RSTART)
+        p[1] = nm ref
+      }
+      if (ty != "" && n >= 2) p[2] = ty
+      if (st != "" && n >= 3) p[3] = st
+      out = p[1]
+      for (i = 2; i <= n; i++) out = out sep p[i]
+      print indent out
+    }'
+}
+
+# live_answer_body <name[:status[:type]]>... -> a whole answer body on stdout.
+live_answer_body() {
+  _live_answer_template || return 1
+  live_answer_self_line
+  [ "$#" -gt 0 ] || return 0
+  printf '\n'
+  live_answer_block_header "$#"
+  local spec nm rest st ty
+  for spec in "$@"; do
+    nm="${spec%%:*}"; rest="${spec#*:}"
+    st=""; ty=""
+    if [ "$rest" != "$spec" ]; then
+      st="${rest%%:*}"
+      ty="${rest#*:}"
+      [ "$ty" = "$rest" ] && ty=""
+    fi
+    live_answer_teammate_line "$nm" "$st" "$ty"
+  done
+}

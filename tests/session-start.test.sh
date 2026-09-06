@@ -39,6 +39,8 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 HOOK="${BIONIC_SESSION_START_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-start.sh}"
 
@@ -83,13 +85,22 @@ make_env() {  # [interval] -> project dir on stdout
 roster_rows() {  # <file> <sid> <name>
   local f="$1" sid="$2" n="$3" st
   for st in intended identified confirmed; do
-    printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=a%s-1111111111111111|launched_at=2026-09-02T20:00:00Z|subagent_type=implementor|model=|deliverable=.bionic/docs/record/%s.md|source=declared|duration=|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_01FIXTURE\n' \
-      "$st" "$sid" "$n" "$n" "$n" >> "$f"
+    roster_row_fixture status="$st" session="$sid" name="$n" \
+      agent_id="a$n-1111111111111111" launched_at=2026-09-02T20:00:00Z model= \
+      deliverable=".bionic/docs/record/$n.md" >> "$f"
   done
 }
 
-swept() {  # <file> <name>   the landing gate's closing marker
-  printf 'landing-swept/v1|name=%s|state=MET|at=2026-09-02T21:00:00Z\n' "$2" >> "$1"
+# THROUGH THE ONE WRITER (S17, spec AC-26): `swept_marker_write` is
+# hooks/landing-gate.sh's own function, extracted by tests/lib/swept-marker.sh and called
+# for real. The printf that used to sit here wrote a marker the originator would not
+# recognise — no `session=`, no `agent_id=` — and stayed green because every reader of the
+# marker is by key.
+#
+# The old spelling here also REORDERED the fields (`name=` before `state=` before `at=`),
+# which no reader noticed and no writer has ever produced.
+swept() {  # <file> <sid> <name>   the landing gate's closing marker
+  swept_marker_write "$1" 2026-09-02T21:00:00Z "$2" "$3" "" MET
 }
 
 backdate() {  # <file> <seconds ago>
@@ -222,7 +233,7 @@ section "1 — a predecessor roster on a /clear: the block, and the sequence"
 P1=$(make_env 1s)
 roster_rows "$P1/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-ALPHA"
 roster_rows "$P1/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-BETA"
-swept "$P1/.bionic/tmp/roster-$OLD_SID.state" "W-BETA"
+swept "$P1/.bionic/tmp/roster-$OLD_SID.state" "$OLD_SID" "W-BETA"
 # THIS session's own roster, also with an open row: it must NOT be listed. Without
 # this the "predecessor" filter could be a no-op and every assertion still pass.
 roster_rows "$P1/.bionic/tmp/roster-$CUR_SID.state" "$CUR_SID" "W-MINE"

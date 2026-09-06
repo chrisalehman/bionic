@@ -22,6 +22,8 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
@@ -139,31 +141,19 @@ entry_tool_result() {  # <ts> <tool_use_id> <body>
     "$1" "$2" "$(json_str "$3")"
 }
 
-# la_body <name[:status]> ... -> a real `Teammates (N):` block (or, with no names, a
-# recognisable answer carrying no Teammates block at all — AC-6's "zero lines" case, per
-# the real harness shape tests/live-agents.test.sh documents).
+# THE ANSWER BODY IS BUILT BY tests/lib/live-answer.sh (S17, spec AC-27/AC-28): the self
+# line, the block header and every teammate row come out of the committed corpus with only
+# this suite's names and statuses substituted in place. With NO names it is the self line
+# alone — recognisable, carrying no teammates block at all, which is AC-6's "zero lines"
+# case. This suite's private builder was one of the two that truncated the recognition
+# anchor to its own spelling; the corpus's is now the only one in the tree.
 #
-# A bare name is `running`, which is what every fixture written before S16 meant and
-# still means. `name:idle` writes the OTHER status the real harness emits: a teammate
-# that finished its turn and was never TaskStop'd stays listed, because it stays
-# addressable, and S22c is where that costs a writer slot or does not.
-la_body() {
-  local out='This session is bionic-s5 [aabbcc] — the name other sessions use to message it.'
-  if [ "$#" -gt 0 ]; then
-    out="$out
-
-Teammates ($#):"
-    local n nm st
-    for n in "$@"; do
-      case "$n" in
-        *:*) nm="${n%%:*}"; st="${n##*:}" ;;
-        *)   nm="$n";       st="running"  ;;
-      esac
-      out="$out
-  ${nm} [000000]  ·  bionic:implementor  ·  ${st}  ·  started 3m ago"
-    done
-  fi
-  printf '%s' "$out"
+# A bare name is the corpus's own `running`. `name:idle` writes the OTHER status the real
+# harness emits: a teammate that finished its turn and was never TaskStop'd stays listed,
+# because it stays addressable, and S22c is where that costs a writer slot or does not.
+LIVE_ANSWER_TYPE="bionic:implementor"
+la_body() {  # <name[:status]>... -> one real-shaped ListAgents answer body
+  live_answer_body "$@"
 }
 
 # mk_transcript <path> <fresh|stale|none> [name] ... — writes a jsonl transcript at
@@ -2719,8 +2709,13 @@ s22_roster_row() {
 }
 
 # s22_sweep <repo> <sid> <name> — the landing marker that closes a row.
+# THROUGH THE ONE WRITER (S17, spec AC-26): `swept_marker_write` is
+# hooks/landing-gate.sh's own function, extracted by tests/lib/swept-marker.sh and called
+# for real. The printf that used to sit here wrote a marker the originator would not
+# recognise — no `session=`, no `agent_id=` — and stayed green because every reader of the
+# marker is by key.
 s22_sweep() {
-  printf 'landing-swept/v1|at=2026-09-02T00:00:00Z|name=%s|state=MET\n' "$3" >> "$(roster_path "$1" "$2")"
+  swept_marker_write "$(roster_path "$1" "$2")" 2026-09-02T00:00:00Z "$2" "$3" "" MET
 }
 
 # s22_fake_tree <repo> <dir> — a linked worktree's on-disk signature: a `.git` FILE.
@@ -3039,7 +3034,7 @@ expect_absent "…and the dispatch is not blocked" "BLOCKED" "$GATE_ERR"
 # The meta-row: the fixture really did say idle. Without it, a builder that silently
 # dropped the status and wrote nothing would make (a) pass for the wrong reason.
 expect_contains "r22ka meta: the answer body names r1 idle, not running" \
-  "r1 [000000]  ·  bionic:implementor  ·  idle" "$(cat "$R22KA_T")"
+  "r1 [8895ce]  ·  bionic:implementor  ·  idle" "$(cat "$R22KA_T")"
 
 # (b) THE DISCRIMINATING PAIR, on one answer. Two rows, one idle and one running,
 # against writers=1: the count is 1, not 2 and not 0. A rule that ignored status would
@@ -3095,11 +3090,12 @@ write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
 s22_roster_row "$REPO" "$SID_A" "s6-stop-resolution"
 s22_roster_row "$REPO" "$SID_A" "s5-dispatch-budget"
-R22KE_BODY='This session is bionic-02 [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).
-
-Teammates (2):
-  s6-stop-resolution [864238]  ·  bionic:senior-implementor  ·  idle  ·  started 1h ago
-  s5-dispatch-budget [d34f18]  ·  bionic:implementor  ·  running  ·  started 34m ago'
+# THE BODY IS THE CORPUS'S OWN LINE, not a copy of it (S17). This section is about ONE
+# REAL ANSWER — the 03:07:41.801Z one, an idle writer beside a running one — and that
+# answer is committed at tests/fixtures/claude/listagents-answers.jsonl as the line
+# `LIVE_ANSWER_MIXED_LINE` names. Read back rather than re-typed, so the two names below
+# and the two names on the roster rows above cannot drift apart from it.
+R22KE_BODY="$(live_answer_content "$LIVE_ANSWER_MIXED_LINE")"
 R22KE_T="$SANDBOX/.r22ke.jsonl"
 {
   entry_prompt      "2026-09-05T03:07:30.000Z" "land S6"
@@ -3163,7 +3159,7 @@ expect_status "r22kh an UNKNOWN third status word still counts OPEN -> REFUSED" 
 expect_contains "…open=1, the slot kept on a reading nobody has seen before" \
   "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_ERR"
 expect_contains "r22kh meta: the answer body really says starting, not running" \
-  "r1 [000000]  ·  bionic:implementor  ·  starting" "$(cat "$R22KH_T")"
+  "r1 [8895ce]  ·  bionic:implementor  ·  starting" "$(cat "$R22KH_T")"
 
 # THE DISCRIMINATING PAIR for (g), on one roster and one budget: the SAME row read `idle`
 # is let through. Without it, r22kh would pass against a gate that had gone back to
