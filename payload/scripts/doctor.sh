@@ -164,7 +164,15 @@ BIONIC_REMOVE_RAW_URL="https://raw.githubusercontent.com/chrisalehman/bionic/mai
 # The id the CLI knows this plugin by — `<name>@<catalog>`, which is the key the
 # listing prints and the argument an install command takes. Named once here
 # because it appears in a fact lookup and in two fix lines.
-BIONIC_PLUGIN_ID="bionic@bionic"
+#
+# DERIVED, NOT SPELLED (bionic 1.4.4 fixit, A-5). This used to be the literal
+# `bionic@bionic` while setup.sh composed the same id from the catalog
+# (`SETUP_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}"`), and
+# deps.sh's `dep_core_repair_route` — the route this file now renders in two
+# places — composes it a third time. A machine that re-points bionic's catalog
+# has to move all three together, and a literal here would have moved with
+# neither. The default on a machine that sets no environment is unchanged.
+BIONIC_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${BIONIC_DEP_MARKETPLACE:-bionic}}"
 
 # ─── Bounded probes ──────────────────────────────────────────────────────────
 #
@@ -435,10 +443,18 @@ _doctor_native_row() {  # <symbol> <component> <count> <detail>
 # worth reading twice: two rows can both say `present 1.2.3` and be installed by
 # entirely different machinery, and which machinery it was decides what a user
 # types to repair or remove it.
-_doctor_third_row() {  # <symbol> <name> <version> <source> <state>
+# THE SIXTH ARGUMENT IS THE INSTRUCTION THAT MAY NOT BE EATEN, the same contract
+# `_doctor_env_row` below already has and for the same reason (lib/width.sh's
+# worked example). Four fixed cells leave this row exactly 44 columns for its
+# state, and `absent → claude plugin install bionic@bionic` — the core-dependency
+# route — is all 44 of them. Passed as the tail it would come back as
+# `…install bion…`: a row that states a problem and truncates its cure, which is
+# the one failure this table cannot afford. Every other row passes nothing here
+# and is rendered exactly as before.
+_doctor_third_row() {  # <symbol> <name> <version> <source> <state> [<instruction>]
   local prefix
   prefix="  $1 $(_doctor_cell "$2" 21) $(_doctor_cell "$3" 11) $(_doctor_cell "$4" 17) "
-  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${5:-}")")"
+  printf '%s\n' "$(_doctor_rtrim "$(bionic_line "$prefix" "${5:-}" "${6:-}")")"
 }
 
 # `KEY=value  state`. The left cell is one token on purpose — an environment
@@ -861,10 +877,11 @@ THIRD_ROWS=""
 ROSTER_ROWS=""
 DEP_VERSIONS=""
 N_PRESENT=0; N_ABSENT=0; N_UNKNOWN=0; N_VIOLATION=0
-N_ABSENT_ACTIONABLE=0; N_ABSENT_WHEN_NEEDED=0
+N_ABSENT_ACTIONABLE=0; N_ABSENT_WHEN_NEEDED=0; N_ABSENT_CORE=0
 ROSTER_TOTAL=0; ROSTER_TOTAL_KNOWN=yes
 ROSTER_ZERO=0
 ABSENT_NAMES=""
+ABSENT_CORE_NAMES=""
 
 while IFS= read -r dep_name; do
   [ -n "$dep_name" ] || continue
@@ -929,6 +946,7 @@ while IFS= read -r dep_name; do
   # this report rather than as a property of the thing being reported.
   third_version="$dep_version"
   third_state=""
+  third_keep=""
   # MULTI-PART ROWS SAY WHAT IS PRESENT (Chris 2026-08-22: "Why is ccstatusline
   # 'ok' for version, with no status?"). The two-half probes return a status word
   # in the version slot — it is not a version and never prints as one. The
@@ -961,7 +979,16 @@ while IFS= read -r dep_name; do
         third_state="$(_doctor_no_version_reason "$kind")"
       fi ;;
     no)
-      if [ "$dep_class" = "when-needed" ]; then third_state="installs on demand"
+      # THREE CLASSES, THREE OWNERS (bionic 1.4.4 fixit, AC-1). A `when-needed`
+      # tool is absent by design until a route asks for it. A `basic` or `extra`
+      # row is setup's — deps.sh's install arms do install it — and keeps the
+      # hint it always had. A `core` row is neither: the CLI installed it
+      # alongside bionic and setup has no item that can put it back, so the hint
+      # it used to carry named a command that plans nothing for this row. The
+      # route comes from deps.sh, which owns it for all three renderers, and
+      # rides in the instruction slot so a cut can never reach it.
+      if   [ "$dep_class" = "when-needed" ]; then third_state="installs on demand"
+      elif [ "$dep_class" = "core" ]; then third_state="absent"; third_keep=" → $(dep_core_repair_route)"
       else third_state="not installed → /bionic:setup"; fi ;;
     stale)
       third_state="stale against uv.lock — re-sync with /bionic:setup" ;;
@@ -975,7 +1002,7 @@ while IFS= read -r dep_name; do
   esac
   case "$third_version" in unknown|-|"") third_version="—" ;; esac
   THIRD_ROWS="${THIRD_ROWS}$(_doctor_third_row "$dep_sym" "$dep_name" "$third_version" \
-    "$(_doctor_source_of "$dep_name")" "$third_state")"$'\n'
+    "$(_doctor_source_of "$dep_name")" "$third_state" "$third_keep")"$'\n'
 
   # ── roster footprint ──
   #
@@ -1052,6 +1079,15 @@ while IFS= read -r dep_name; do
       case "$dep_class" in
         when-needed)
           N_ABSENT_WHEN_NEEDED=$((N_ABSENT_WHEN_NEEDED + 1)) ;;
+        # COUNTED APART, BECAUSE THE COMMAND IS NOT THE SAME ONE (bionic 1.4.4
+        # fixit, AC-2). The line below collapses absences into a single
+        # `→ run /bionic:setup`, which is only honest while every name on it is
+        # a name that command installs. A core dependency is not, so folding one
+        # in put a name setup cannot act on into the one line a reader acts on
+        # first. It gets its own line, with its own route, further down.
+        core)
+          N_ABSENT_CORE=$((N_ABSENT_CORE + 1))
+          ABSENT_CORE_NAMES="${ABSENT_CORE_NAMES}${ABSENT_CORE_NAMES:+, }${dep_name}" ;;
         *)
           N_ABSENT_ACTIONABLE=$((N_ABSENT_ACTIONABLE + 1))
           # NAMED HERE, PRINTED AS ONE LINE BELOW. Eleven absences on a cold
@@ -1616,6 +1652,20 @@ if [ -n "$ABSENT_NAMES" ]; then
     _doctor_absent_list="$(printf '%.41s' "$_doctor_absent_list")…"
   fi
   fix "${N_ABSENT_ACTIONABLE} $(_doctor_plural "$N_ABSENT_ACTIONABLE" dependency dependencies) absent (${_doctor_absent_list}) → run /bionic:setup"
+fi
+
+# THE CORE ABSENCES, ON THEIR OWN LINE AND WITH THEIR OWN COMMAND. Same shape as
+# the line above — one line, the names truncated rather than wrapped — and a
+# different owner: the CLI installed these alongside bionic, so the route is
+# deps.sh's `dep_core_repair_route` and not /bionic:setup. `fix` sorts on the
+# suffix, so this line lands in FIX_LINES_OTHER and is printed whole under the
+# verdict instead of being folded into the collapsed setup list.
+if [ -n "$ABSENT_CORE_NAMES" ]; then
+  _doctor_absent_core="$ABSENT_CORE_NAMES"
+  if [ "${#_doctor_absent_core}" -gt 44 ]; then
+    _doctor_absent_core="$(printf '%.41s' "$_doctor_absent_core")…"
+  fi
+  fix "${N_ABSENT_CORE} core $(_doctor_plural "$N_ABSENT_CORE" dependency dependencies) absent (${_doctor_absent_core}) → $(dep_core_repair_route)"
 fi
 
 # THE FILE IS WHAT SETUP CAN REPAIR. A name live in this process but absent from
