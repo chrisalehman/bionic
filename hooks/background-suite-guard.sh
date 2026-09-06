@@ -341,6 +341,29 @@ fi
 case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
 
 budget_refuse() {  # <suite basename>
+  # A NAME THE SHELL HAS NOT EXPANDED YET IS A DIFFERENT REFUSAL (review-c C-5, A-35c). A
+  # hook sees the command TEXT, so `for s in a b; do bash "tests/$s.test.sh"; done` reaches
+  # here as the literal `$s.test.sh`. Refusing is right — the hook cannot check what it
+  # cannot read — but the ordinary headline is false in exactly this case: every one of
+  # those suites may be on the budget, and it sends the reader to audit a set that is not
+  # the problem. Two readers hit it before this branch existed.
+  case "$1" in
+    *'$'*|*'`'*)
+      cat >&2 <<EOF
+BLOCKED: $1 cannot be named at hook time.
+
+This command names its suite with a shell variable, and this wall reads your command
+text BEFORE the shell expands it — so the name never resolves to a suite it can check
+against your budget. It may well be on it; nothing here can tell.
+
+Spell the suite literally, one per call:
+    bash tests/alpha.test.sh
+    bash tests/beta.test.sh
+
+On the budget: ${2:-(nothing — this brief declared Suites: none)}
+EOF
+      exit 2 ;;
+  esac
   cat >&2 <<EOF
 BLOCKED: $1 is not on this agent's suite budget.
 
@@ -349,7 +372,7 @@ forty minutes of a machine nobody else can use. The set was recorded on this age
 roster row at dispatch, from the files its brief declared.
 
 On the budget: ${2:-(nothing — this brief declared Suites: none)}
-You asked for : $1
+You asked for: $1
 
 Run only what is on it. If the change genuinely reaches further than the brief said,
 say so in your report and let the orchestrator widen the brief — a wider instrument is

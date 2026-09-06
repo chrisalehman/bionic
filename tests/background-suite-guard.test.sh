@@ -376,4 +376,45 @@ guarded_from "$BSG_GLOBDIR" "$R1" 'bash tests/*.test.sh'
 expect_eq "B8f a glob target is REFUSED by its literal name" "2" "$ST"
 expect_contains "B8f …naming the unexpanded word, not the files beside the hook" "*.test.sh" "$ERR"
 
+section "B9 — a suite named by a shell VARIABLE is a different refusal (C-5, A-35c)"
+# THE DEFECT. A hook reads the command text BEFORE the shell expands it. A writer looping
+# over four suites all of which are on its budget got
+#     BLOCKED: $s.test.sh is not on this agent's suite budget.
+# — a headline that is false in the case that produces it, sending the reader to check a
+# set that is not the problem. Two independent readers hit it (A-35c; the walk's heading
+# 10(b), a fresh agent on its first attempt). The correct behaviour is still to refuse;
+# the wrong thing was the sentence.
+
+guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
+expect_eq "B9a a variable-named suite is still REFUSED" "2" "$ST"
+expect_contains "B9a …saying the name could not be resolved at hook time" \
+  "cannot be named at hook time" "$ERR"
+expect_contains "B9a …and telling the reader what to type instead" \
+  "Spell the suite literally, one per call" "$ERR"
+# THE HEADLINE THE READER ACTS ON must not claim the suite is off a budget the hook never
+# managed to check it against.
+expect_absent "B9a …never claiming it is off the budget" "is not on this agent's suite budget" "$ERR"
+
+# THE BRACE FORM AND A COMMAND SUBSTITUTION ARE THE SAME STATE.
+guarded "$R1" 'bash "tests/${s}.test.sh"'
+expect_eq "B9b the brace spelling reads the same way" "2" "$ST"
+expect_contains "B9b …with the same refusal" "cannot be named at hook time" "$ERR"
+guarded "$R1" 'bash tests/`suite_name`.test.sh'
+expect_eq "B9c a command substitution reads the same way" "2" "$ST"
+expect_contains "B9c …with the same refusal" "cannot be named at hook time" "$ERR"
+
+# CONTROL: the literal spelling the refusal asks for is allowed, so B9a is about the
+# spelling and not about the suite.
+guarded "$R1" 'bash tests/alpha.test.sh'
+expect_eq "B9e control: the literal spelling of an on-budget suite passes" "0" "$ST"
+expect_empty "B9e …silently" "$OUT$ERR"
+
+# THE ORDINARY REFUSAL'S OWN ALIGNMENT. `You asked for : x` carried a space before the
+# colon — column alignment against the line above it, and a typo to everyone who did not
+# notice. Both labels now end at the colon and the values align on the padding.
+guarded "$R1" 'bash tests/gamma.test.sh'
+expect_eq "B9f control: an ordinary off-budget suite still refuses" "2" "$ST"
+expect_contains "B9f …and its label carries no space before the colon" "You asked for:" "$ERR"
+expect_absent "B9f …the stray space is gone" "You asked for :" "$ERR"
+
 finish
