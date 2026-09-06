@@ -29,6 +29,10 @@
 #   expect_status <msg> <expected> <actual>      exit status equality
 #   expect_empty <msg> <value>                   value is the empty string
 #   expect_nonempty <msg> <value>                value is not the empty string
+#   anchor [-E] <file> <pattern> <count>  the PRECONDITION of a mutation: the
+#                               pattern still matches exactly <count> lines of
+#                               <file>. Call it BEFORE the grep -v / sed that
+#                               builds the mutant.
 #   require_helpers <name>...   explicit presence guard (kept for the two suites
 #                               that already call it)
 #   finish                close the last section, fail every section that asserted
@@ -132,6 +136,41 @@
 #     (preflight-probe, 14 call sites). Stays local under its own name.
 #   expect_absent_ug -> NOT a rename: it pins /usr/bin/grep on purpose, because
 #     the shell `grep` on this machine skips hidden directories (cross-gate).
+#
+# ── THE ANCHOR: THE PRECONDITION OF A MUTATION (AC-29, S19) ──────────────────
+#
+# A suite that proves an assertion DISCRIMINATES builds a mutant: it strips or
+# rewrites one line of a shipped source file with `grep -v` or `sed`, drives the
+# mutant through the same check, and asserts the check now disagrees. The pattern
+# it strips is the ANCHOR, and it is a precondition, not a detail — when the
+# anchored line is reworded, reindented or moved, the pattern matches nothing and
+# a mutation whose anchor moved is byte-identical to the shipped file. The mutant
+# is then a control, the row below it goes green, and the suite reports that a
+# check discriminates when nothing was ever mutated. That is the S21 incident
+# (`61b8ca8` reindented a `pressure_sample` call and renamed a local; the anchor
+# pinned both, matched nothing, and only a hand-rolled count-difference row caught
+# it) and it is the shape this helper makes free.
+#
+#   anchor <file> <pattern> <count>       <pattern> is a FIXED STRING
+#   anchor -E <file> <ERE> <count>        <pattern> is an EXTENDED regular expression
+#
+# THE DEFAULT IS FIXED-STRING because that is what a maintainer means by "this
+# line is still here": most anchors are a sentence or an assignment quoted out of
+# the file, and reading `.` or `+` in it as a metacharacter can only make the
+# anchor match MORE than the mutation will. `-E` is opt-in and takes the mutation's
+# own ERE verbatim, which is what the four `grep -vE` sites need.
+#
+# IT REPORTS, IT DOES NOT ABORT. A red anchor is a diagnosis: it says the mutation
+# below is a no-op, so a reader knows the behavioural reds that follow are about
+# the anchor and not about the contract. The suite keeps running, the way every
+# other assertion here does.
+#
+# COUNT, NOT PRESENCE. `<count>` is exact. A sentence that was duplicated rather
+# than moved breaks a mutation just as thoroughly as one that vanished — `grep -v`
+# would then strip two lines, and `sed` would rewrite both.
+#
+# MATCHING USES THE SUITE'S OWN `grep`, the same binary the doctoring line uses,
+# so the anchor and the mutation cannot disagree about what the pattern means.
 #
 # ── ASSERTION DISCIPLINE ─────────────────────────────────────────────────────
 #
@@ -301,6 +340,28 @@ expect_empty() { if [ -z "${2:-}" ]; then ok "$1"; else no "$1" "expected no out
 
 # expect_nonempty <label> <value>
 expect_nonempty() { if [ -n "${2:-}" ]; then ok "$1"; else no "$1" "expected a non-empty value, got nothing"; fi; }
+
+# anchor [-E] <file> <pattern> <expected-count> — the precondition of a mutation.
+# Call it immediately BEFORE the `grep -v` / `sed` that builds the mutant. See the
+# docblock above for why a mutation whose anchor moved proves nothing.
+anchor() {
+  local _mode="-F" _file _pat _want _name _got
+  if [ "${1:-}" = "-E" ]; then _mode="-E"; shift; fi
+  _file="${1:-}"; _pat="${2:-}"; _want="${3:-}"
+  _name="anchor: ${_pat} matches ${_want} line(s) of ${_file##*/}"
+  if [ ! -f "$_file" ] || [ ! -r "$_file" ]; then
+    no "$_name" "cannot read the anchored file: $_file"
+    return 0
+  fi
+  _got="$(grep -c "$_mode" -- "$_pat" "$_file" 2>/dev/null)"
+  _got="$(printf '%s' "${_got:-0}" | tr -cd '0-9')"
+  [ -n "$_got" ] || _got=0
+  if [ "$_got" = "$_want" ]; then
+    ok "$_name"
+  else
+    no "$_name" "found $_got line(s) — the anchor MOVED, so the mutation below is a no-op and every row under it is reading the shipped file"
+  fi
+}
 
 # ── the tally ────────────────────────────────────────────────────────────────
 #
