@@ -49,16 +49,11 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 REPO="$BIONIC_SCRIPTS_DIR"
 
-PASS=0; FAIL=0; TOTAL=0; SKIPPED=0
-ok()   { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no()   { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
+SKIPPED=0
 skip() { SKIPPED=$((SKIPPED + 1)); echo "SKIP: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
-expect_ne()       { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "both sides are [$2]"; fi; }
-expect_contains() { if printf '%s\n' "$3" | grep -qF -- "$2"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_matches()  { if printf '%s\n' "$3" | grep -qE -- "$2"; then ok "$1"; else no "$1" "no line matches: $2"; fi; }
 
 TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/interpreter-pin-test.XXXXXX")"
 trap 'rm -rf "$TMPROOT"' EXIT
@@ -132,9 +127,7 @@ drive() {
   DRV_RC=$?
 }
 
-# ============================================================
-echo "=== §1 the pin: every child of the runner is /bin/bash, and the rest of PATH is intact (AC-1) ==="
-# ============================================================
+section "§1 the pin: every child of the runner is /bin/bash, and the rest of PATH is intact (AC-1)"
 #
 # The probe is a real suite in the roster. It cannot report through stdout — the runner
 # prints a passing suite's captured output nowhere — so it writes the facts it reads to
@@ -190,9 +183,7 @@ for MODE in "--serial" ""; do
 done
 echo ""
 
-# ============================================================
-echo "=== §2 hand-run parity: a suite invoked by hand re-execs once under /bin/bash (AC-2) ==="
-# ============================================================
+section "§2 hand-run parity: a suite invoked by hand re-execs once under /bin/bash (AC-2)"
 #
 # The seam every suite already sources does the work, so a suite typed at a prompt under
 # another interpreter lands on the same one the runner would have given it. The guard is an
@@ -237,9 +228,7 @@ expect_eq "2.5 a hand-run suite ALREADY under /bin/bash does not re-exec" "1" "$
 expect_eq "2.6 …and reports the system version" "$SYS_VER" "$HAND_VER"
 echo ""
 
-# ============================================================
-echo "=== §3 the planted 3.2 incompatibilities: the pin catches what it exists to catch (AC-10) ==="
-# ============================================================
+section "§3 the planted 3.2 incompatibilities: the pin catches what it exists to catch (AC-10)"
 
 PLANT_TREE="$TMPROOT/plant-tree"
 mk_tree "$PLANT_TREE" "planted-case-leak.test.sh" "planted-herestring.test.sh"
@@ -302,9 +291,7 @@ else
 fi
 echo ""
 
-# ============================================================
-echo "=== §4 the environment stamp: the run says which environment it ran in (AC-3) ==="
-# ============================================================
+section "§4 the environment stamp: the run says which environment it ran in (AC-3)"
 #
 # One line, twice: in the header, where a reader meets the run, and beside `Gating:`, where
 # they read its verdict — a tail -5 of a captured log carries the environment with it.
@@ -312,7 +299,7 @@ echo "=== §4 the environment stamp: the run says which environment it ran in (A
 drive "$PROBE_TREE" "--serial"
 STAMPS="$(printf '%s\n' "$DRV_OUT" | grep -c '^env: ')"
 expect_eq "4.1 the stamp is printed exactly twice" "2" "$STAMPS"
-expect_matches "4.2 …with all four fields, in order" \
+expect_regex "4.2 …with all four fields, in order" \
   '^env: os=[a-z]+ bash=[^ ]+ locale=[^ ]+ path=/' "$DRV_OUT"
 STAMP_LINE="$(printf '%s\n' "$DRV_OUT" | grep '^env: ' | head -1)"
 STAMP_TAIL="$(printf '%s\n' "$DRV_OUT" | grep '^env: ' | tail -1)"
@@ -337,9 +324,7 @@ expect_eq "4.7 the path field is the launch directory the suites were given" \
 expect_contains "4.8 the Gating line is unchanged in shape" "Gating: 1 passed, 0 failed" "$DRV_OUT"
 echo ""
 
-# ============================================================
-echo "=== §5 stderr-strict: a green suite that lost a command is red (the runner half of AC-14) ==="
-# ============================================================
+section "§5 stderr-strict: a green suite that lost a command is red (the runner half of AC-14)"
 #
 # `set -uo pipefail` with no `-e` is this repo's suite convention, so a call to a helper
 # that vanished is a `command not found` on stderr and nothing else — the suite finishes,
@@ -375,12 +360,9 @@ expect_eq "5.1 the run fails when a green suite lost a command" "1" "$DRV_RC"
 expect_contains "5.2 …and the tally counts it failed" "Gating: 1 passed, 1 failed" "$DRV_OUT"
 expect_contains "5.3 …naming the suite and why" "- noisy.test.sh" "$DRV_OUT"
 expect_contains "5.4 …in words that send the reader to the missing command" "command not found" "$DRV_OUT"
-expect_matches "5.5 a suite that only QUOTES the phrase stays green" \
+expect_regex "5.5 a suite that only QUOTES the phrase stays green" \
   '^  quoting\.test\.sh +✓ PASS' "$DRV_OUT"
 echo ""
 
-# ============================================================
-echo "──────────────────────────────────────────────"
-echo "interpreter-pin: ${PASS}/${TOTAL} passed, ${FAIL} failed, ${SKIPPED} skipped"
-[ "$FAIL" -eq 0 ] || exit 1
-exit 0
+echo "interpreter-pin: ${SKIPPED} skipped (see SKIP: rows above)"
+finish
