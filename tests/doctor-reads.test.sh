@@ -58,6 +58,18 @@ expect_no_match() {
   if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
 }
 
+# THE 100-COLUMN RULE, MEASURED THE WAY width.sh MEASURES IT — every glyph in
+# `_bionic_cols_into`'s closed set substituted for one ASCII character before the
+# length is taken. Defined here rather than beside its first caller because two
+# sections use it now: Section 8's sweep over the fullest run, and Section 6f's
+# pin on the one line whose fixed part grows with the catalog name.
+too_wide() {  # <text> -> the offending lines, empty when every line fits
+  printf '%s\n' "$1" | awk '
+    { s = $0
+      gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
+      if (length(s) > 100) print length(s) ": " $0 }'
+}
+
 # A SHORT ROOT ON PURPOSE. macOS hands `mktemp -d` a ~50-character path under
 # /var/folders, and two of the rows below print a PATH inside a 100-column row —
 # a fixture path half again longer than a real `~/.claude` would be measures the
@@ -430,6 +442,47 @@ expect_true "12f7: doctor renders a THIRD PARTY row for the absent extra depende
 expect_match "12f8: a basic/extra absence still routes to /bionic:setup on the same fixture" \
   "*impeccable*not installed → /bionic:setup*" "$ROW6FX"
 
+# THE CATALOG IS DERIVED ON EVERY SURFACE, NEVER SPELLED (1.4.4 fixit phase 4, review-b
+# B-10). Three files compose the plugin id this route names — deps.sh's `dep_plugin_id`,
+# doctor.sh's `BIONIC_PLUGIN_ID`, setup.sh's `SETUP_PLUGIN_ID` — and every assertion above
+# pins the rendered default `bionic@bionic`. Nothing in the tree re-pointed the catalog, so
+# any one of those three could have been edited back to a literal and the whole suite stayed
+# green. This render moves the catalog and asserts the moved name reaches both of doctor's
+# surfaces, which is the one thing a literal cannot do.
+#
+# NINETEEN CHARACTERS ON PURPOSE. The headline's fixed part grows with the route, so the
+# name length is what decides whether that line obeys the report's own 100-column rule — and
+# a cap copied from another line's budget passes at `bionic` and overflows here (review-a
+# A-2, review-c C-2). The row is a different story and is asserted differently below.
+OUT6FMK="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}" "BIONIC_EXCALIDRAW_REFS=${REFS}" \
+  "BIONIC_DEP_MARKETPLACE=chrisalehman-bionic")"
+ROW6FMK="$(printf '%s\n' "$OUT6FMK" | grep -E '^  . +superpowers ' | head -1)"
+HEAD6FMK="$(printf '%s\n' "$OUT6FMK" | grep -F 'core dependencies absent' | head -1)"
+
+expect_true "12f12: the re-pointed catalog still renders a core row (the rows below are not vacuous)" \
+  test -n "$ROW6FMK"
+expect_true "12f13: …and a headline core line (the rows below are not vacuous)" \
+  test -n "$HEAD6FMK"
+
+# THE ROW carries the moved catalog, and only its first thirteen columns: at this name
+# length `bionic_line` has no budget left for the instruction slot and truncates the route
+# with the rest of the tail (review-a A-1, promoted out of this slice — the row still tells
+# the truth about which catalog it means, and the headline below carries the command whole).
+# What this row pins is the derivation, which is what B-10 found unpinned.
+expect_match "12f14: the row's route names the re-pointed catalog" \
+  "*claude plugin install bionic@chris*" "$ROW6FMK"
+expect_no_match "12f15: …and never the default one, which is what a literal would still have printed" \
+  "*bionic@bionic*" "$ROW6FMK"
+# THE HEADLINE carries it whole, and the pattern ends where the line does: the route is the
+# last thing on it, so a cap that ate the command instead of the names would fail here.
+expect_match "12f16: the headline core line ends with the re-pointed catalog, whole" \
+  "*core dependencies absent (*) → claude plugin install bionic@chrisalehman-bionic" "$HEAD6FMK"
+# AND IT STILL FITS. The names on this line are capped, and the cap has to be THIS line's
+# budget — 100 columns less its own fixed part, which the route is part of — not the 44 the
+# THIRD PARTY row's state cell is worth. Both numbers leave the line whole at `bionic`; at
+# this catalog the 44 overflows by seven columns.
+expect_eq "12f17: …and the whole line still fits 100 columns" "" "$(too_wide "$HEAD6FMK")"
+
 echo "=== Section 7: nothing this file gathers is left unrendered ==="
 
 # THE STRUCTURAL HALF, and it is the one that keeps this class of defect from
@@ -492,12 +545,6 @@ echo "=== Section 8: registration, and the column budget ==="
 expect_true "14: tests/run.sh names doctor-reads.test.sh" \
   grep -q 'run "doctor-reads.test.sh" bash tests/doctor-reads.test.sh' "${REPO}/tests/run.sh"
 
-too_wide() {
-  printf '%s\n' "$1" | awk '
-    { s = $0
-      gsub(/✓|✗|–|—|≥|…|·|→|•/, ".", s)
-      if (length(s) > 100) print length(s) ": " $0 }'
-}
 _over="$(too_wide "$OUT6")"
 if [ -z "$_over" ]; then ok "15: every line of the fullest run fits 100 columns"
 else no "15: a line exceeds 100 columns" "$_over"; fi

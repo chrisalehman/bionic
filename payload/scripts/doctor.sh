@@ -165,14 +165,16 @@ BIONIC_REMOVE_RAW_URL="https://raw.githubusercontent.com/chrisalehman/bionic/mai
 # listing prints and the argument an install command takes. Named once here
 # because it appears in a fact lookup and in two fix lines.
 #
-# DERIVED, NOT SPELLED (bionic 1.4.4 fixit, A-5). This used to be the literal
-# `bionic@bionic` while setup.sh composed the same id from the catalog
-# (`SETUP_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}"`), and
-# deps.sh's `dep_core_repair_route` — the route this file now renders in two
-# places — composes it a third time. A machine that re-points bionic's catalog
-# has to move all three together, and a literal here would have moved with
-# neither. The default on a machine that sets no environment is unchanged.
-BIONIC_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${BIONIC_DEP_MARKETPLACE:-bionic}}"
+# DERIVED, NOT SPELLED, AND DERIVED IN ONE PLACE (bionic 1.4.4 fixit, A-5; one
+# owner at phase 4, review-b B-7). This used to be the literal `bionic@bionic`
+# while setup.sh composed the same id from the catalog and deps.sh composed it a
+# third time — three copies of one expansion, none of them pinned, because no
+# suite re-pointed the catalog. `dep_plugin_id` is the owner now. deps.sh is in
+# this process by the time this line runs: detect.sh is sourced above and soft-
+# sources deps.sh when `check_dep` is undefined (lib/detect.sh:77-80), which is
+# always true here — this file sources no library before detect.sh. The default
+# on a machine that sets no environment is unchanged.
+BIONIC_PLUGIN_ID="$(dep_plugin_id)"
 
 # ─── Bounded probes ──────────────────────────────────────────────────────────
 #
@@ -985,8 +987,10 @@ while IFS= read -r dep_name; do
       # hint it always had. A `core` row is neither: the CLI installed it
       # alongside bionic and setup has no item that can put it back, so the hint
       # it used to carry named a command that plans nothing for this row. The
-      # route comes from deps.sh, which owns it for all three renderers, and
-      # rides in the instruction slot so a cut can never reach it.
+      # route comes from deps.sh, which owns it for all four renderers — this
+      # row, the headline core-absence line below, setup's absent arm and
+      # setup's load-failure arm — and rides in the instruction slot so a cut
+      # can never reach it.
       if   [ "$dep_class" = "when-needed" ]; then third_state="installs on demand"
       elif [ "$dep_class" = "core" ]; then third_state="absent"; third_keep=" → $(dep_core_repair_route)"
       else third_state="not installed → /bionic:setup"; fi ;;
@@ -1661,11 +1665,25 @@ fi
 # suffix, so this line lands in FIX_LINES_OTHER and is printed whole under the
 # verdict instead of being folded into the collapsed setup list.
 if [ -n "$ABSENT_CORE_NAMES" ]; then
-  _doctor_absent_core="$ABSENT_CORE_NAMES"
-  if [ "${#_doctor_absent_core}" -gt 44 ]; then
-    _doctor_absent_core="$(printf '%.41s' "$_doctor_absent_core")…"
-  fi
-  fix "${N_ABSENT_CORE} core $(_doctor_plural "$N_ABSENT_CORE" dependency dependencies) absent (${_doctor_absent_core}) → $(dep_core_repair_route)"
+  _doctor_core_route="$(dep_core_repair_route)"
+  _doctor_core_head="${N_ABSENT_CORE} core $(_doctor_plural "$N_ABSENT_CORE" dependency dependencies) absent ("
+  # THE BUDGET IS THIS LINE'S OWN, AND IT IS MEASURED (1.4.4 fixit phase 4,
+  # review-a A-2 / review-c C-2). The first version of this block copied the 44
+  # the line above uses, which is what `_doctor_third_row`'s state cell is worth
+  # — the wrong number for a line with a different fixed part. This line's fixed
+  # part is the render loop's `→ `, the sentence, and the route, and the route
+  # grows with the catalog name: at `bionic@bionic` the names may run to 31
+  # columns and at a 19-character catalog to 18. Copying 44 put the line at 107
+  # columns on the second machine, over the rule width.sh owns.
+  #
+  # SO IT IS COMPUTED FROM THE STRING, never counted by hand: the sentence is
+  # built once, measured with the same `bionic_cols` the wall measures with, and
+  # what is left over is what the names get. `bionic_trunc` also drops whole
+  # characters, which the `printf '%.41s'` idiom above it does not — a
+  # multi-byte dependency name cannot be cut mid-glyph here.
+  _doctor_absent_core="$(bionic_trunc "$ABSENT_CORE_NAMES" \
+    "$(( BIONIC_LINE_WIDTH - $(bionic_cols "→ ${_doctor_core_head}) → ${_doctor_core_route}") ))")"
+  fix "${_doctor_core_head}${_doctor_absent_core}) → ${_doctor_core_route}"
 fi
 
 # THE FILE IS WHAT SETUP CAN REPAIR. A name live in this process but absent from
@@ -1802,7 +1820,14 @@ else
   if [ -n "$FIX_LINES_OTHER" ]; then
     while IFS= read -r _fix_other; do
       [ -n "$_fix_other" ] || continue
-      printf '→ %s\n' "$_fix_other"
+      # THROUGH THE SAME OWNER THE VERDICT LINE ABOVE USES (1.4.4 fixit phase 4,
+      # review-a A-2). These lines were the one part of the report printed with a
+      # bare `printf` and no bound, which held only while every one of them was
+      # short by construction — and it stopped holding when the core-absence line
+      # started carrying a 44-column variable-length field. `bionic_line`
+      # computes the budget from the real prefix, so the `→ ` costs its two
+      # columns and the line lands at 100 rather than 102.
+      printf '%s\n' "$(bionic_line "→ " "$_fix_other")"
     done <<< "$FIX_LINES_OTHER"
     # The one command that cannot ride on its own line: a raw URL inside a
     # pipefail wrapper, printed whole underneath rather than wrapped by the
@@ -1936,9 +1961,19 @@ esac
   _doctor_native_row "$DOCTOR_BAD" "install" "—" "half-uninstalled — the CLI no longer knows bionic"
 printf '%s' "$DUP_ROWS"
 
-# ─── Table 2 — what /bionic:setup put on this machine ────────────────────────
+# ─── Table 2 — the tools and plugins bionic depends on ───────────────────────
 echo ""
-echo "THIRD PARTY — installed by /bionic:setup"
+# THE HEADER NAMES THE TABLE'S SUBJECT, NOT ITS OWNER (bionic 1.4.4 fixit phase
+# 4, review-b B-3). It used to read "installed by /bionic:setup", which was true
+# of every row under it until a `core` row started saying otherwise — and those
+# rows are the FIRST two in the table, because `dep_names_class core` is iterated
+# first, so a reader met the contradiction before anything else. Three classes of
+# row live here with three different owners; the state cell is the only place
+# that can be right for all three, and it now is. The `THIRD PARTY` prefix is
+# load-bearing and does not move: tests/cross-gate-agreement.test.sh's
+# `ds_third_section` anchors the table on /^THIRD PARTY/, and fresh-home's
+# `doctor_section` matches headings by prefix.
+echo "THIRD PARTY — tools and plugins bionic depends on"
 _doctor_third_row " " "name" "version" "source" "state"
 printf '%s' "$THIRD_ROWS"
 

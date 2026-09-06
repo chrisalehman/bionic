@@ -201,12 +201,18 @@ done
 BIONIC_DEP_INDENT="   "
 
 SETUP_DEP_MARKETPLACE="${BIONIC_DEP_MARKETPLACE:-bionic}"
-# The default is COMPOSED from the marketplace above rather than spelled whole,
-# because `install_plugin_native` composes the id it installs the same way. A
-# machine that re-points bionic's catalog moves both together; two independent
-# defaults would move one of them and leave the other naming a plugin nobody
-# installed.
-SETUP_PLUGIN_ID="${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}"
+# The default is COMPOSED rather than spelled whole, because
+# `install_plugin_native` composes the id it installs the same way. A machine
+# that re-points bionic's catalog moves both together; two independent defaults
+# would move one of them and leave the other naming a plugin nobody installed.
+#
+# AND deps.sh COMPOSES IT (bionic 1.4.4 fixit phase 4, review-b B-7). This line
+# used to expand `${BIONIC_PLUGIN_ID:-bionic@${SETUP_DEP_MARKETPLACE}}` itself,
+# which agreed with doctor.sh's and deps.sh's copies on every input and was not
+# textually either of them. `dep_plugin_id` is the one owner now; deps.sh is
+# sourced at the top of this file, well above this line. `SETUP_DEP_MARKETPLACE`
+# above stays — the per-dependency ids further down need the bare catalog.
+SETUP_PLUGIN_ID="$(dep_plugin_id)"
 
 # THE ENV RC BLOCK IS GONE FROM THIS FILE, deliberately. Step 5 used to append a
 # `# ─── bionic:env:start/end ───` block here; it writes settings.json now (the
@@ -803,14 +809,17 @@ setup_load_state() {
       # used to spell the repair by hand — "reinstall bionic with: claude plugin
       # install <id> --scope user --yes" — which is the wording A-1 refutes:
       # bionic is installed and registered, and a dependency is missing. The verb
-      # coincides, the description does not. It comes from deps.sh now, like the
+      # coincides, the description does not — which is why the object of the verb
+      # is the dependencies and never bionic (phase 4, review-c C-3: "reinstall"
+      # reads plainer than the "re-resolve" this line carried between, and the
+      # object was always the point). It comes from deps.sh now, like the
       # three renderers beside it, so a machine that re-points bionic's catalog
       # moves all four together. What did NOT change is the order: the CLI's own
       # error is still printed first and unedited, and this is still one line
       # under it. Pinned by tests/fresh-home.test.sh Group 14.
       say "   bionic is installed but did not load. The CLI reports:"
       say "   ${err}"
-      say "   Fix: install what the message names, then start a new session — or re-resolve bionic's dependencies: $(dep_core_repair_route)"
+      say "   Fix: install what the message names, then start a new session — or reinstall bionic's dependencies: $(dep_core_repair_route)"
       action "bionic did not load: ${err}"
       ;;
     absent)
@@ -977,13 +986,15 @@ setup_dep_enable_verify() {
         # TEXT ONLY, AND THE TEXT COMES FROM deps.sh (bionic 1.4.4 fixit, A-2).
         # This arm installs nothing and never has — D1 rules that setup is not a
         # second installer for a native row — so what it owes the reader is an
-        # accurate sentence, and the one it carried was not: "reinstall bionic"
-        # says bionic is broken when bionic is installed and registered and a
-        # dependency is missing. The verb is the same either way; the description
-        # is not. It is the same route doctor's THIRD PARTY row and its headline
-        # render, from the same function, so the three surfaces cannot drift.
+        # accurate sentence, and the one it carried was not: a bare "reinstall
+        # bionic" says bionic is broken when bionic is installed and registered
+        # and a dependency is missing. The verb was never the problem — it is the
+        # verb the CLI actually takes — so what this line fixes is the OBJECT,
+        # which is the dependencies. It is the same route doctor's THIRD PARTY row, doctor's
+        # headline and step 1's load-failure Fix line render, from the same
+        # function, so the four surfaces cannot drift.
         item "$SETUP_BAD" "$name" "not installed — it shipped with bionic, so this install is incomplete"
-        action "re-resolve bionic's dependencies: $(dep_core_repair_route) (${name} is missing)"
+        action "reinstall bionic's dependencies: $(dep_core_repair_route) (${name} is missing)"
         ;;
       *)
         item "$SETUP_NIL" "$name" "enabled-state unknown — the claude CLI or jq could not read it"
