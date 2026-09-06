@@ -31,28 +31,23 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "version-compare.test.sh: jq is required"; exit 1; }
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-
-if bash -n "$DETECT_SH" >/dev/null 2>&1; then ok "0: detect.sh passes bash -n"; else no "0: detect.sh passes bash -n"; fi
 
 sourced() {  # <fn> [args...] — run one detect.sh function in a clean subshell
   bash -c '. "$1"; shift; "$@"' _ "$DETECT_SH" "$@" 2>/dev/null
 }
 
-echo ""
-echo "=== Section 1: version_compare — semver ordering, not string inequality ==="
+section "Section 1: version_compare — semver ordering, not string inequality"
+
+if bash -n "$DETECT_SH" >/dev/null 2>&1; then ok "0: detect.sh passes bash -n"; else no "0: detect.sh passes bash -n"; fi
 
 expect_eq "1: 1.4.0 vs 1.3.2 -> ahead"    "ahead"   "$(sourced version_compare 1.4.0 1.3.2)"
 expect_eq "2: 1.3.2 vs 1.3.2 -> current"  "current" "$(sourced version_compare 1.3.2 1.3.2)"
@@ -64,8 +59,7 @@ expect_eq "5: 1.9.0 vs 1.10.0 -> lag (the reverse of 4)" \
 expect_eq "6: a prerelease suffix compares by its release numbers" \
   "lag" "$(sourced version_compare 9.9.9-rc.1 10.0.0)"
 
-echo ""
-echo "=== Section 2: detect_plugin_latest gains a real ahead state ==="
+section "Section 2: detect_plugin_latest gains a real ahead state"
 
 # A fixture PAYLOAD whose own plugin.json is NEWER than the marketplace clone's,
 # which is the exact defect this slice closes: pre-fix, string inequality alone
@@ -121,8 +115,7 @@ case "$FACT_LAG" in
   *) no "9: installed behind the marketplace -> lag, unchanged" "$FACT_LAG" ;;
 esac
 
-echo ""
-echo "=== Section 3: registration ==="
+section "Section 3: registration"
 
 if grep -q 'run "version-compare.test.sh" bash tests/version-compare.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"; then
   ok "10: tests/run.sh names version-compare.test.sh"
@@ -130,9 +123,4 @@ else
   no "10: tests/run.sh names version-compare.test.sh"
 fi
 
-echo ""
-echo "========================================"
-echo "version-compare: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
