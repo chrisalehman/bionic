@@ -31,18 +31,15 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 SHELL_SH="${REPO}/payload/scripts/lib/shell.sh"
 DETECT_SH="${REPO}/payload/scripts/lib/detect.sh"
 REMOVE_SH="${REPO}/payload/scripts/remove.sh"
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-
-expect_true() { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
+# expect_true is the framework's (tests/lib/assert.sh) — S9b removed the private
+# shadow here (AC-12); same semantics (silences the command's own output).
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -52,8 +49,7 @@ mkdir -p "$FIXHOME"
 expect_true "payload/scripts/lib/shell.sh exists" test -f "$SHELL_SH"
 expect_true "shell.sh passes bash -n" bash -n "$SHELL_SH"
 
-echo ""
-echo "=== Section 1: shell_rc_file itself, one resolver ==="
+section "Section 1: shell_rc_file itself, one resolver"
 
 run_shell_rc_file() {  # <shell-basename-or-path> [BIONIC_SHELL_RC]
   HOME="$FIXHOME" SHELL="$1" BIONIC_SHELL_RC="${2:-}" \
@@ -67,8 +63,7 @@ expect_eq "4: an unrecognized shell falls back"  "$FIXHOME/.bashrc" "$(run_shell
 expect_eq "5: BIONIC_SHELL_RC overrides everything" \
   "$TMP/override.rc" "$(run_shell_rc_file /bin/zsh "$TMP/override.rc")"
 
-echo ""
-echo "=== Section 2: both callers are THIN — they delegate, they do not reimplement ==="
+section "Section 2: both callers are THIN — they delegate, they do not reimplement"
 
 # STRUCTURAL, not behavioral: a caller could reimplement the same case
 # statement and pass every Section 1/3 check while still being the exact
@@ -119,8 +114,7 @@ case "$REMOVE_FN_BODY" in
   *) no "11: _rm_shell_rc tries the delegate before its standalone fallback" "body: $REMOVE_FN_BODY" ;;
 esac
 
-echo ""
-echo "=== Section 3: the two callers AGREE, for every shell shell_rc_file resolves ==="
+section "Section 3: the two callers AGREE, for every shell shell_rc_file resolves"
 
 run_detect_shell_rc() {  # <shell>
   HOME="$FIXHOME" SHELL="$1" BIONIC_SHELL_RC="" \
@@ -142,15 +136,9 @@ for shell_path in /bin/zsh /bin/bash /usr/bin/fish /opt/weird/shell; do
   expect_eq "12/${shell_path##*/}: _detect_shell_rc and _rm_shell_rc agree" "$d" "$r"
 done
 
-echo ""
-echo "=== Section 4: registration ==="
+section "Section 4: registration"
 
 expect_true "16: tests/run.sh names shell-rc.test.sh" \
   grep -q 'run "shell-rc.test.sh" bash tests/shell-rc.test.sh' "${BIONIC_SCRIPTS_DIR}/tests/run.sh"
 
-echo ""
-echo "========================================"
-echo "shell-rc: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish

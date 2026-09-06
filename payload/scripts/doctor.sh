@@ -1456,10 +1456,11 @@ done
 if [ "$_doctor_link_n" -gt 0 ]; then
   _run_add "$(_doctor_item "$DOCTOR_BAD" "legacy .bionic symlinks" \
     "${_doctor_link_n} under .worktrees/ (${_doctor_links})")"
-  # THE NAMES STAY ON THE ROW, NOT ON THIS LINE. A fix line in FIX_LINES_OTHER is
-  # printed whole and unbounded — the one place on this page a long string can
-  # actually break the column rule — so it carries the count and the command and
-  # nothing else, and the row above carries the list.
+  # THE NAMES STAY ON THE ROW, NOT ON THIS LINE. A fix line in FIX_LINES_OTHER
+  # is now bounded by the render loop (AC-6), so a long list here would be
+  # ELIDED rather than overflow — which is a worse answer than not putting it
+  # here at all. The line carries the count and the command; the row above
+  # carries the list, whole.
   fix "${_doctor_link_n} legacy .bionic $(_doctor_plural "$_doctor_link_n" symlink symlinks) under .worktrees/ → spawn-worktree.sh remove"
 fi
 
@@ -1510,7 +1511,18 @@ if [ -n "$_doctor_hooks_mtime" ]; then
     _rs_hooks_fmt="$(_doctor_utc_short "$_doctor_hooks_mtime")"
     _run_add "$(_doctor_item "$DOCTOR_BAD" "restart needed" \
       "pid ${_rs_pid} started ${_rs_started_fmt:-?} — hooks.json changed ${_rs_hooks_fmt:-?}")"
-    fix "pid ${_rs_pid} registered a stale hooks.json → exit claude and start it again — the running process registered hooks.json as it was at ${_rs_started_fmt:-$_rs_started_ms}"
+    # THE FACT GOES IN FRONT OF THE ARROW AND THE COMMAND IS THE WHOLE TAIL
+    # (wave-01 S4, AC-6's precondition). This line used to carry a second clause
+    # AFTER its command — `… start it again — the running process registered
+    # hooks.json as it was at <time>` — which put the fact a reader compares
+    # against on the far side of the instruction and ran the line to 148
+    # columns. `fix` splits on the FIRST arrow, so everything past it is the
+    # command, and the render loop protects exactly that: a tail that is half
+    # instruction and half evidence cannot be protected, and the 1.4.4 fixit
+    # reverted a loop-wide bound (dd07b33) rather than move the evidence. It
+    # moves here. The timestamp is the problem's own — which hooks.json this
+    # process is holding — and the row above pairs it with the file's mtime.
+    fix "pid ${_rs_pid} registered hooks.json as it was at ${_rs_started_fmt:-$_rs_started_ms} → exit claude and start it again"
   done <<EOF
 $(patrol_live_sessions 2>/dev/null)
 EOF
@@ -1651,10 +1663,15 @@ fi
 # not install it if it ran. The names are truncated rather than wrapped — a cold
 # machine has eleven of them and the line has 100 columns.
 if [ -n "$ABSENT_NAMES" ]; then
-  _doctor_absent_list="$ABSENT_NAMES"
-  if [ "${#_doctor_absent_list}" -gt 44 ]; then
-    _doctor_absent_list="$(printf '%.41s' "$_doctor_absent_list")…"
-  fi
+  # THROUGH THE ONE TRUNCATOR (wave-01 S4, fixit B-11). This was the last
+  # hand-rolled cut on the page: `${#s} -gt 44` then `printf '%.41s'` plus an
+  # ellipsis, which is 42 columns and not the 44 it names, counts BYTES where
+  # the rest of the report counts columns, and cuts mid-glyph on a multi-byte
+  # name — the three failures `bionic_trunc` was written to end. The cap stays
+  # 44; what changes is who applies it, and that the line now cuts to the 44 it
+  # says. The line itself is a `/bionic:setup` fix, so it lands on the collapsed
+  # verdict line, which bounds the whole sentence at 100 a second time.
+  _doctor_absent_list="$(bionic_trunc "$ABSENT_NAMES" 44)"
   fix "${N_ABSENT_ACTIONABLE} $(_doctor_plural "$N_ABSENT_ACTIONABLE" dependency dependencies) absent (${_doctor_absent_list}) → run /bionic:setup"
 fi
 
@@ -1662,7 +1679,7 @@ fi
 # the line above — one line, the names truncated rather than wrapped — and a
 # different owner: the CLI installed these alongside bionic, so the route is
 # deps.sh's `dep_core_repair_route` and not /bionic:setup. `fix` sorts on the
-# suffix, so this line lands in FIX_LINES_OTHER and is printed whole under the
+# suffix, so this line lands in FIX_LINES_OTHER and gets its own line under the
 # verdict instead of being folded into the collapsed setup list.
 if [ -n "$ABSENT_CORE_NAMES" ]; then
   _doctor_core_route="$(dep_core_repair_route)"
@@ -1820,22 +1837,34 @@ else
   if [ -n "$FIX_LINES_OTHER" ]; then
     while IFS= read -r _fix_other; do
       [ -n "$_fix_other" ] || continue
-      # EACH LINE IS PRINTED WHOLE, AND THE BOUND LIVES AT THE BUILD SITE
-      # (1.4.4 fixit phase 5, regression on tests/doctor-restart.test.sh). Phase
-      # 4 wrapped this loop in `bionic_line "→ "` to bound the core-absence line
-      # it had just made variable-length, and a loop-wide bound was the wrong
-      # place for it: it bounds every OTHER line here too, and the restart line
-      # above (~170 columns) carries its payload in its tail — the timestamp the
-      # operator is being asked to compare against. Truncating there deletes the
-      # fact and leaves the instruction, which is the failure mode `bionic_line`
-      # exists to prevent, one level up.
+      # THE BOUND IS THE LOOP'S, AND THE COMMAND IS WHAT SURVIVES IT (wave-01
+      # S4, AC-6; closes DOCTOR/13). These lines were the one part of the report
+      # printed with a bare `printf` and no bound — which held only while every
+      # one of them was short by construction, and stopped holding when the
+      # core-absence line started carrying a variable-length name list and the
+      # dependency-unknown line started carrying a spelled-out cause (105
+      # columns with the CLI off PATH).
       #
-      # So the 100-column guarantee is the core-absence line's own, computed
-      # where that line is built (search `_doctor_core_head`) from a fixed part
-      # that already counts this `→ `. A line that needs a bound gets one at its
-      # build site, where the thing that must survive the cut is known. The
-      # restart line's oversize is pre-existing and is tracked separately.
-      printf '→ %s\n' "$_fix_other"
+      # THE FIXIT ALREADY TRIED A BOUND HERE AND REVERTED IT (c9f66b5, dd07b33).
+      # It failed because it passed the whole line as `bionic_line`'s tail, so
+      # the ellipsis ate the END of the line — which is where doctor's first
+      # format rule puts the command. The tail is not one string: it is a
+      # problem and then a command, split on the same FIRST arrow `fix` itself
+      # splits on to name the problem. Passed separately, the problem half
+      # absorbs the whole shortfall and the command is printed whole, which is
+      # exactly the contract `bionic_line`'s third argument exists for.
+      #
+      # A command with no room left to protect it in falls back to
+      # `bionic_line`'s own documented degenerate case — one bound over the
+      # whole tail — and that is the library's ruling, not a new one here.
+      _fix_head="${_fix_other%% → *}"
+      _fix_cmd="${_fix_other#* → }"
+      if [ "$_fix_head" = "$_fix_other" ]; then
+        # No arrow: nothing to protect, one bound over the line.
+        printf '%s\n' "$(bionic_line '→ ' "$_fix_other")"
+      else
+        printf '%s\n' "$(bionic_line '→ ' "$_fix_head" " → ${_fix_cmd}")"
+      fi
     done <<< "$FIX_LINES_OTHER"
     # The one command that cannot ride on its own line: a raw URL inside a
     # pipefail wrapper, printed whole underneath rather than wrapped by the

@@ -24,14 +24,17 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
+. "$(dirname "$0")/lib/live-answer.sh"
 
 # Overridable exactly as tests/session-sweeper.test.sh offers, for RED evidence against a
 # mutated copy without ever touching the shipped file:
 #   W2_POKER_UNDER_TEST=/tmp/mutant.sh bash tests/session-poker.test.sh
 POKER="${W2_POKER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-poker.sh}"
 TMPROOT="$(mktemp -d)"
-PASS=0; FAIL=0; TOTAL=0
 
 # THE LOADER'S REGISTRY LANE, POINTED AT NOTHING (bionic 1.4.0). The poker now finds its
 # library through the shared loader idiom, whose candidates (2) and (3) read the CLI's
@@ -65,17 +68,6 @@ cleanup() { chmod -R u+rwX "$TMPROOT" 2>/dev/null; rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
 SID="8a41c2e0-9b71-4f3a-8d6e-2c19f7b0e5aa"
-
-# ---------- assertion helpers ----------
-
-ok()  { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); printf 'PASS: %s\n' "$1"; }
-bad() { TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); printf 'FAIL: %s\n' "$1"
-        [ $# -gt 1 ] && printf '      %s\n' "$2"; return 0; }
-
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2] got [$3]"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "no [$2] in: $(printf '%s' "$3" | head -3)" ;; esac; }
-expect_absent()   { case "$3" in *"$2"*) bad "$1" "unexpected [$2] in: $(printf '%s' "$3" | head -3)" ;; *) ok "$1" ;; esac; }
-section()         { printf '\n=== %s ===\n' "$1"; }
 
 # ---------- sandbox + fixture builders (mirrors tests/session-sweeper.test.sh) ----------
 
@@ -115,8 +107,7 @@ backdate() {  # <file> <seconds ago> — sets mtime, the progress-staleness inpu
 }
 
 new_roster() {  # <repo>
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$(roster_of "$1")"
+  roster_header > "$(roster_of "$1")"
 }
 
 # Subset of tests/session-sweeper.test.sh's mkrow — the fields the poker actually reads
@@ -134,6 +125,12 @@ mkrow() {  # <key=value>...
   # pre-wave roster, so `plan=` is written only when a case asks for it, and every existing
   # row in this file stays exactly the shape it was.
   local plan="" plan_set=no
+  # THE THREE INSTRUMENT FIELDS ARE OPT-IN for the same reason `plan=` is (S13, spec
+  # AC-20): every roster written before the suite-allowance wall carries none of them, and
+  # `adopt` has to answer for those files too. A fixture that always emitted them could not
+  # describe a pre-wall roster, and the third state — key absent, as opposed to key present
+  # and empty — is the one the writer-side budget guard partitions on.
+  local files="" sallow="" ssrc="" instrument_set=no
   for kv in "$@"; do
     case "$kv" in
       plan=*)        plan="${kv#*=}"; plan_set=yes ;;
@@ -149,15 +146,31 @@ mkrow() {  # <key=value>...
       claims=*)      claims="${kv#*=}" ;;
       cadence=*)     cadence="${kv#*=}" ;;
       waiver=*)      waiver="${kv#*=}" ;;
+      files=*)          files="${kv#*=}";  instrument_set=yes ;;
+      suites_allowed=*) sallow="${kv#*=}"; instrument_set=yes ;;
+      suites_source=*)  ssrc="${kv#*=}";   instrument_set=yes ;;
       *) printf 'mkrow: unknown key %s\n' "$kv" >&2; return 1 ;;
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=opus|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s' \
-    "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$deliverable" "$source" \
-    "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
-  [ "$plan_set" = yes ] && printf '|plan=%s' "$plan"
-  printf '\n'
+  # THE ROW ITSELF COMES FROM `roster_row`, through tests/lib/roster-row.sh (S14, AC-25).
+  # What stays here is this file's own house defaults — `model=opus`, `tool_use_id=toolu_x`,
+  # a launch time sixty seconds ago — and the `plan=` opt-in above, which is the one thing
+  # the production writer cannot express: no writer emits a row without that field any more,
+  # and a pre-wave roster is exactly what these cases are about.
+  local emit=roster_row_fixture
+  [ "$plan_set" = yes ] || emit=roster_row_no_plan
+  local -a instrument
+  if [ "$instrument_set" = yes ]; then
+    instrument=("files=$files" "suites_allowed=$sallow" "suites_source=$ssrc")
+  fi
+  "$emit" \
+    "status=$status" "session=$session" "name=$name" "agent_id=$agent_id" \
+    "launched_at=$launched_at" "subagent_type=$subagent_type" model=opus \
+    "deliverable=$deliverable" "source=$source" "duration=$duration" \
+    "progress=$progress" "claims=$claims" "cadence=$cadence" absent= \
+    "waiver=$waiver" ${instrument[@]+"${instrument[@]}"} \
+    "tool_use_id=$tool_use_id" "plan=$plan"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -172,7 +185,7 @@ add_row() {  # <repo> <key=value>...
 add_row_to() {  # <repo> <session-id> <key=value>...
   local repo="$1" sid="$2"; shift 2
   local f; f="$(roster_of "$repo" "$sid")"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
+  [ -f "$f" ] || roster_header > "$f"
   mkrow session="$sid" "$@" >> "$f"
 }
 
@@ -469,8 +482,7 @@ expect_absent   "…never DISARM on the same tick" "decision=DISARM" "$OUT"
 R3SW="$(make_repo s3-swept-marker)"; new_roster "$R3SW"
 add_row "$R3SW" name=overdue-swept deliverable="$R3SW/absent-overdue-swept.md" \
   duration="1 minute" launched_at="$(iso_ago 120)"
-printf 'landing-swept/v1|at=%s|session=%s|name=overdue-swept|agent_id=a000|state=UNMET\n' \
-  "$(iso_ago 1)" "$SID" >> "$(roster_of "$R3SW")"
+swept_marker_write "$(roster_of "$R3SW")" "$(iso_ago 1)" "$SID" overdue-swept a000 UNMET
 poke "$R3SW" tick
 expect_eq "a landing-swept marker after the row does not silence NOTIFY (exit 1)" "1" "$RC"
 expect_contains "…decision=NOTIFY survives the marker" "decision=NOTIFY" "$OUT"
@@ -585,11 +597,46 @@ expect_absent   "…and the acked overdue row raises nothing" "decision=NOTIFY" 
 section "Section 4: refusals propagate from the sweeper's one read"
 # ============================================================
 
+#
+# THE CLAIM, ASSERTED (wave-01 S11, AC-16 / A-23). This section built its fixture,
+# ran a tick and asserted nothing — the framework's section floor is what surfaced
+# it. What it means to say is the exit table's line 2 at the top of
+# hooks/session-poker.sh: a refusal PROPAGATED from the sweeper's one read is the
+# tick's own refusal, exit 2, quoting the sweeper.
+#
+# THE FIXTURE REACHED NO SWEEPER READ (S11). `rm -rf .bionic/tmp` removes the
+# engagement marker `make_repo` plants along with the roster, so the tick exited at
+# the engagement switch with `NOT-ENGAGED … nothing decided` and rc 0: the section
+# was driving a bystander session, not a refusal. The marker is re-planted AFTER
+# the symlink goes in — through it, which is what a repo whose state directory is
+# a link actually looks like — so the tick is engaged and reaches the read.
 R4="$(make_repo s4)"; new_roster "$R4"
 rm -rf "$R4/.bionic/tmp"
 mkdir -p "$TMPROOT/elsewhere-s4"
 ln -s "$TMPROOT/elsewhere-s4" "$R4/.bionic/tmp"
+engage "$R4"
+new_roster "$R4"
 poke "$R4" tick
+expect_status "a tick over an unreadable state directory REFUSES (exit 2), it does not decide" \
+  "2" "$RC"
+expect_contains "…and says the verdict read did not complete" \
+  "REFUSED — the verdict read did not complete" "$OUT"
+expect_contains "…quoting the SWEEPER's own refusal rather than inventing one" \
+  "sweeper: REFUSED" "$OUT"
+expect_contains "…naming the state directory as the symbolic link it is" \
+  "is a symbolic link" "$OUT"
+expect_absent "…and decides nothing: no DISARM, NOTIFY or QUIET verdict is printed" \
+  "poker: QUIET" "$OUT"
+
+# THE PAIRED POSITIVE, same builder and same drive with the link taken out: the
+# tick decides. Every row above is about a refusal, and a refusal assertion over a
+# drive that could never have decided anything is not a propagation test.
+R4OK="$(make_repo s4ok)"; new_roster "$R4OK"
+poke "$R4OK" tick
+expect_status "the control: the same tick over a REAL state directory decides (exit 0)" \
+  "0" "$RC"
+expect_absent "…and refuses nothing" "REFUSED" "$OUT"
+expect_regex "…printing a verdict of its own" 'poker: (DISARM|QUIET|NOTIFY)' "$OUT"
 
 # ============================================================
 section "Section 5: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1)"
@@ -712,7 +759,7 @@ expect_eq "arm succeeds with no roster in existence at all (exit 0)" "0" "$RC"
 if [ -f "$(stamp_of "$R6")" ]; then
   ok "arm writes the session-keyed stamp beside the roster"
 else
-  bad "arm writes the session-keyed stamp beside the roster" "no file at $(stamp_of "$R6")"
+  no "arm writes the session-keyed stamp beside the roster" "no file at $(stamp_of "$R6")"
 fi
 S6_BODY="$(cat "$(stamp_of "$R6")" 2>/dev/null)"
 expect_contains "the stamp carries its own schema" "patrol-stamp/v1" "$S6_BODY"
@@ -738,7 +785,7 @@ expect_eq "a pre-roster tick still REFUSES (exit 2)" "2" "$RC"
 if [ -f "$(stamp_of "$R6B")" ]; then
   ok "…and it stamped anyway: liveness is firings landing, not decisions succeeding"
 else
-  bad "…and it stamped anyway: liveness is firings landing, not decisions succeeding" \
+  no "…and it stamped anyway: liveness is firings landing, not decisions succeeding" \
       "no file at $(stamp_of "$R6B")"
 fi
 expect_contains "the refused tick's stamp records the verb that wrote it" "verb=tick" \
@@ -755,7 +802,7 @@ expect_eq "a keyless tick refuses (exit 3)" "3" "$RC"
 # what it now asks.
 R6C_WROTE="$(ls "$R6C/.bionic/tmp/" 2>/dev/null | /usr/bin/grep -v "^engaged-$SID.state$" || true)"
 if [ -n "$R6C_WROTE" ]; then
-  bad "…and writes no stamp: a session-keyed file needs a session key" \
+  no "…and writes no stamp: a session-keyed file needs a session key" \
       "wrote: $R6C_WROTE"
 else
   ok "…and writes no stamp: a session-keyed file needs a session key"
@@ -772,7 +819,7 @@ S6_AGE=$(( $(date +%s) - $(mtime_of "$(stamp_of "$R6D")") ))
 if [ "$S6_AGE" -lt 120 ]; then
   ok "a tick refreshes the stamp it found stale"
 else
-  bad "a tick refreshes the stamp it found stale" "age is still ${S6_AGE}s"
+  no "a tick refreshes the stamp it found stale" "age is still ${S6_AGE}s"
 fi
 
 # ---------- the stamp follows the PINNED root, exactly as the roster does ----------
@@ -788,7 +835,7 @@ if [ -d "$R6EWT" ]; then
   if [ -f "$(stamp_of "$R6E")" ]; then
     ok "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp"
   else
-    bad "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp" \
+    no "arming from a worktree cwd stamps the MAIN repository's .bionic/tmp" \
         "not at $(stamp_of "$R6E"); worktree has: $(ls "$R6EWT/.bionic/tmp" 2>/dev/null)"
   fi
   ( cd "$R6E" && git worktree remove --force "$R6EWT" ) >/dev/null 2>&1
@@ -868,10 +915,19 @@ add_row_to "$R8" "$ADOPT_A" name=landed-one status=identified agent_id="$ID_LAND
   subagent_type=bionic:senior-implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/landed-one.md" \
   progress="$R8/.bionic/tmp/progress-landed.md"
+# THE SUITE BUDGET THIS AGENT WAS DISPATCHED WITH (S13, spec AC-20). The writer-side guard
+# in hooks/background-suite-guard.sh reads `suites_allowed=` off the row for the agent`s
+# own id, so a resumed writer whose adopted row lost the field would come out of a /clear
+# with no budget on it — and the wall that refuses an off-budget suite would go quiet for
+# exactly the agents a clear leaves running longest. `running-one` carries one; the rows
+# beside it deliberately do not, which is what makes §8g″ below able to tell a carried
+# field from a manufactured one.
 add_row_to "$R8" "$ADOPT_A" name=running-one status=identified agent_id="$ID_RUNNING" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/running-one.md" \
-  progress="$R8/.bionic/tmp/progress-running.md"
+  progress="$R8/.bionic/tmp/progress-running.md" \
+  files="payload/scripts/lib/widget.sh,hooks/widget-guard.sh" \
+  suites_allowed="alpha.test.sh beta.test.sh" suites_source=derived
 add_row_to "$R8" "$ADOPT_A" name=silent-one status=identified agent_id="$ID_SILENT" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/silent-one.md" \
@@ -882,8 +938,7 @@ add_row_to "$R8" "$ADOPT_A" name=closed-one status=identified agent_id="$ID_CLOS
 # The terminal row: hooks/landing-gate.sh's own marker, the only thing that closes a row
 # without an ack. Written by hand here for the same reason the ack above is NOT — this
 # marker's writer is a Stop hook with a whole payload contract, and the shape is one line.
-printf 'landing-swept/v1|at=%s|session=%s|name=closed-one|agent_id=%s|state=MET\n' \
-  "$(iso_ago 300)" "$ADOPT_A" "$ID_CLOSED" >> "$(roster_of "$R8" "$ADOPT_A")"
+swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 300)" "$ADOPT_A" closed-one "$ID_CLOSED" MET
 
 # ---- predecessor A: a Deliverable-waiver row (S17, AC-12 attempt 2) ----
 #
@@ -906,8 +961,7 @@ add_row_to "$R8" "$ADOPT_A" name=waived-one status=identified agent_id="$ID_WAIV
 add_row_to "$R8" "$ADOPT_A" name=recheck-one status=identified agent_id="$ID_RECHECK" \
   subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
   deliverable="$R8/.bionic/docs/record/recheck-one.md"
-printf 'landing-swept/v1|at=%s|session=%s|name=recheck-one|agent_id=%s|state=UNMET\n' \
-  "$(iso_ago 200)" "$ADOPT_A" "$ID_RECHECK" >> "$(roster_of "$R8" "$ADOPT_A")"
+swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 200)" "$ADOPT_A" recheck-one "$ID_RECHECK" UNMET
 
 printf 'the report\n' > "$R8/.bionic/docs/record/landed-one.md"
 printf 'progress\n'   > "$R8/.bionic/tmp/progress-landed.md"
@@ -1090,6 +1144,34 @@ expect_contains "…and the provenance of the adoption" "|adopted_from=$ADOPT_A|
 expect_contains "the roster file carries its schema header" "roster-state/v1" \
   "$(head -1 "$OWN_ROSTER")"
 
+# ---------- 8g″: the carried suite budget (S13, spec AC-20) ----------
+#
+# THREE FIELDS, CARRIED AS A GROUP. `files=` is what the brief declared it would touch,
+# `suites_allowed=` the set derived or declared from it, `suites_source=` which of the two
+# it was. hooks/background-suite-guard.sh reads the second off the row belonging to the
+# calling agent`s id, and a /clear is exactly when it matters most: the agents that survive
+# one are the long-running writers, and a budget that evaporates at the resume leaves the
+# wall silent for them.
+BUDGET_ROW="$(grep -F "|name=running-one|" "$OWN_ROSTER" | tail -1)"
+expect_contains "the adopted row carries the derived suite budget forward" \
+  "|suites_allowed=alpha.test.sh beta.test.sh|" "$BUDGET_ROW"
+expect_contains "…the files the brief declared" \
+  "|files=payload/scripts/lib/widget.sh,hooks/widget-guard.sh|" "$BUDGET_ROW"
+expect_contains "…and where the set came from, so no reader mistakes derived for declared" \
+  "|suites_source=derived|" "$BUDGET_ROW"
+
+# A PRE-WALL ROW ADOPTS WITHOUT MANUFACTURING ONE. Absent is a third state, distinct from
+# present-and-empty: the guard reads an empty `suites_allowed=` as "a budget was stated and
+# came out empty" and an absent key as "this row predates the wall". An adopt that invented
+# the first from the second would put a statement on the roster that nobody made.
+NOBUDGET_ROW="$(grep -F "|name=waived-one|" "$OWN_ROSTER" | tail -1)"
+expect_absent "a source row with no budget adopts with no budget field at all" \
+  "suites_allowed=" "$NOBUDGET_ROW"
+expect_absent "…nor a source for a set it does not carry" "suites_source=" "$NOBUDGET_ROW"
+# NON-VACUITY: that row IS an adopted row, so the two absences above are the group being
+# withheld and not a row that failed to be written.
+expect_contains "…while still being a real adopted row" "|adopted_from=$ADOPT_A|" "$NOBUDGET_ROW"
+
 # ---------- 8g′: the carried waiver and the copied marker (S17, AC-12 attempt 2) ----------
 #
 # THE WAIVER. `adopt_write_row` used to hard-code `waiver=` empty on every adopted row —
@@ -1106,14 +1188,14 @@ expect_contains "the adopted row carries the source's waiver, not an empty field
 # both of which read a `landing-swept/v1` line straight off the SAME roster file as ground
 # truth, with no re-derivation — see the same history on the successor roster that stood on
 # the predecessor's.
-RECHECK_MARKERS="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -F '|name=recheck-one|')"
+RECHECK_MARKERS="$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER" | grep -F '|name=recheck-one|')"
 expect_contains "the source's non-MET marker is copied onto the successor roster" \
   "state=UNMET" "$RECHECK_MARKERS"
 expect_eq "…verbatim, exactly once" "1" "$(printf '%s\n' "$RECHECK_MARKERS" | grep -c .)"
 # A MET marker can never reach this path — closed-one (§8d) proves the fold excludes it
 # from adoption entirely, so there is no row here for a MET marker to attach to.
 expect_absent "a MET marker is never copied — there is no adopted row it could attach to" \
-  "name=closed-one" "$(grep -F 'landing-swept/v1|' "$OWN_ROSTER")"
+  "name=closed-one" "$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER")"
 
 # A ROW WITH NO ID BUYS NOTHING, so none is written. UNADDRESSABLE is the whole point of
 # that verdict: there is no identity to file, and a row carrying an empty `agent_id=` would
@@ -1127,10 +1209,10 @@ expect_absent "…nor is the phantom id on an intended row" \
 # next resume; an append per run would grow the roster without adding a fact, and every
 # reader would re-read the same contract N times.
 _dup_before="$(grep -c -F "|name=landed-one|" "$OWN_ROSTER")"
-_marker_dup_before="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
+_marker_dup_before="$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
 poke "$R8" adopt
 _dup_after="$(grep -c -F "|name=landed-one|" "$OWN_ROSTER")"
-_marker_dup_after="$(grep -F 'landing-swept/v1|' "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
+_marker_dup_after="$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER" | grep -c -F '|name=recheck-one|')"
 expect_eq "a second adopt appends no second row for the same agent" "$_dup_before" "$_dup_after"
 expect_eq "…nor a second copy of the carried marker" "$_marker_dup_before" "$_marker_dup_after"
 
@@ -1303,7 +1385,7 @@ cp "$POKER" "$MULT_MUT_ROOT/hooks/session-poker.sh"
 if grep -qF 'export PATROL_STALE_MULTIPLIER=1' "$MULT_MUT_ROOT/scripts/lib/patrol.sh"; then
   ok "8j meta: the doctored multiplier landed (the sed anchor still matches)"
 else
-  bad "8j meta: the doctored multiplier did NOT land — the pair below proves nothing"
+  no "8j meta: the doctored multiplier did NOT land — the pair below proves nothing"
 fi
 
 R8M="$(make_repo s8-multiplier)"; new_roster "$R8M"
@@ -1894,7 +1976,7 @@ POKER="$POKER_REAL_11B3"
 expect_contains "the doctored tick still fills (the mutation is only in the plan-touch path)" \
   "poker: FILL NEXT" "$OUT"
 if [ "$CKSUM_11B3_MUT_BEFORE" = "$(cksum < "$PLAN_R11B2")" ]; then
-  bad "planedit: the doctored tick's plan edit did NOT change the plan's bytes (the arm proves nothing)"
+  no "planedit: the doctored tick's plan edit did NOT change the plan's bytes (the arm proves nothing)"
 else
   ok "planedit: the doctored tick DID change the plan's bytes — the byte-identity pin above discriminates"
 fi
@@ -2305,7 +2387,7 @@ expect_absent "…and no QUIET is taken on a session it decided nothing about" "
 if [ -z "$(ls "$R13C/.bionic/tmp/" 2>/dev/null)" ]; then
   ok "…and no stamp, no .bionic/tmp manufactured under the wrong root"
 else
-  bad "…and no stamp, no .bionic/tmp manufactured under the wrong root" \
+  no "…and no stamp, no .bionic/tmp manufactured under the wrong root" \
       "found: $(ls "$R13C/.bionic/tmp/")"
 fi
 
@@ -2337,8 +2419,7 @@ expect_eq "…and the stamp lands under the checkout, not under dirname(bare.git
   "$([ -f "$(stamp_of "$R13DWT")" ] && echo yes || echo no)"
 
 # ============================================================
-echo ""
-echo "=== Section 14: the LEASE OVERRUN — a worktree outliving its row (AC-28) ==="
+section "Section 14: the LEASE OVERRUN — a worktree outliving its row (AC-28)"
 # ============================================================
 #
 # A spawned worktree is a leased slot bound to the ledger row that dispatched its writer,
@@ -3084,26 +3165,13 @@ mkdir -p "$S19_CFG/projects/-fixture-project"
 
 s19_answer() {  # <state: fresh|stale|none> <name[:status]>... -> plants this session's transcript
   local state="$1"; shift
-  local tr="$S19_CFG/projects/-fixture-project/$SID.jsonl" body n nm st
+  local tr="$S19_CFG/projects/-fixture-project/$SID.jsonl" body
   if [ "$state" = "none" ]; then
     printf '{"type":"user","timestamp":"2026-09-05T00:50:00.000Z","message":{"role":"user","content":"go"}}\n' \
       > "$tr"
     return 0
   fi
-  body="This session is bionic-fixture [fc3e2d] — the name other sessions use to message it."
-  if [ "$#" -gt 0 ]; then
-    body="$body
-
-Teammates ($#):"
-    for n in "$@"; do
-      case "$n" in
-        *:*) nm="${n%%:*}"; st="${n##*:}" ;;
-        *)   nm="$n";       st="running"  ;;
-      esac
-      body="$body
-  ${nm} [000000]  ·  bionic:implementor  ·  ${st}  ·  started 7m ago"
-    done
-  fi
+  body="$(live_answer_body "$@")"
   {
     jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
       '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
@@ -3369,8 +3437,7 @@ section "Section 20: the kill-floor target reads the ONE openness predicate, and
 # on a first tick would be a wall firing on the healthy path.
 
 swept_marker() {  # <repo> <name> <state>
-  printf 'landing-swept/v1|at=%s|session=%s|name=%s|agent_id=a000|state=%s\n' \
-    "$(iso_ago 30)" "$SID" "$2" "$3" >> "$(roster_of "$1")"
+  swept_marker_write "$(roster_of "$1")" "$(iso_ago 30)" "$SID" "$2" a000 "$3"
 }
 
 s20_repo() {  # <label> -> a repo with ONE intended, suite-claiming row named `suite-writer`
@@ -3490,7 +3557,7 @@ bash -c '
     pred-writer apred-writer-2121212121212121 bionic:implementor \
     deliv.md prog.md "10 minutes" 2026-09-05T00:00:00Z osid addr none ""
 ' "$S21A_LIB" "$S21A_ROOT" >/dev/null 2>&1
-S21A_ROW="$(grep '^roster-state/v1|' "$S21A_ROOT/.bionic/tmp/roster-forged.state" 2>/dev/null | head -1)"
+S21A_ROW="$(grep "^${ROSTER_ROW_SCHEMA}|" "$S21A_ROOT/.bionic/tmp/roster-forged.state" 2>/dev/null | head -1)"
 expect_contains "the row IS written (21a is not vacuous)" \
   "agent_id=apred-writer-2121212121212121" "$S21A_ROW"
 expect_eq "…and the FIRST name= field a by-key reader sees is the real agent's" \
@@ -3722,7 +3789,4 @@ expect_absent "no current: line at all — no FILL" "poker: FILL" "$OUT"
 expect_contains "…named as unreadable, with an empty value" \
   "no FILL — plan current: unreadable (none)" "$OUT"
 
-# ============================================================
-printf '\n──────────────────────────────────────────────\n'
-printf 'session-poker: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
-[ "$FAIL" -eq 0 ]
+finish

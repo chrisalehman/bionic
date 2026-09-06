@@ -23,10 +23,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
-
-PASS=0
-FAIL=0
-TOTAL=0
+. "$(dirname "$0")/lib/assert.sh"
 
 US=$'\037'
 
@@ -67,15 +64,12 @@ cleanup() {
 trap cleanup EXIT
 
 # ---------- assertion helpers ----------
-
-ok() {
-  TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"
-}
-no() {
-  TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"
-  [ $# -gt 1 ] && echo "  $2"
-  return 0
-}
+#
+# ok/no are the framework's (tests/lib/assert.sh); the private counters and
+# ok()/no() definitions that used to live here are gone (AC-12, S6). `eq` is a
+# local convenience wrapper, not one of the framework's owned names — it stays
+# local per the migration brief, built on the framework's own ok/no exactly as
+# expect_eq is.
 eq() {  # <label> <expected> <actual>
   if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2] got [$3]"; fi
 }
@@ -101,8 +95,7 @@ parse_cmd() {
 # Section 1: the library
 # ============================================================
 
-echo ""
-echo "=== Section 1: segmentation, quoting, heredoc bodies ==="
+section "Section 1: segmentation, quoting, heredoc bodies"
 
 eq "plain command tokenises" \
    "git|push|origin|main" "$(segs 'git push origin main')"
@@ -169,8 +162,7 @@ HD_REAL=$(printf 'cat > /tmp/n.txt <<EOF\ngit push origin main\nEOF\n')
 eq "an UNQUOTED opener still removes its body" \
    "$(printf 'cat|/tmp/n.txt')" "$(segs "$HD_REAL")"
 
-echo ""
-echo "=== Section 1d: the two libraries agree about heredocs (review-b B-1) ==="
+section "Section 1d: the two libraries agree about heredocs (review-b B-1)"
 #
 # ONE READING, TWO RENDERINGS. git-argv.sh and cmd-class.sh each carry the
 # quote-aware heredoc pass in their own awk program (see the report's A-2 for
@@ -203,8 +195,7 @@ else
   done
 fi
 
-echo ""
-echo "=== Section 1b: git global options and the subcommand ==="
+section "Section 1b: git global options and the subcommand"
 
 parse_cmd 'git -C /tmp/r push origin main' && eq "-C <dir> is skipped with its value" "push" "$GIT_SUB" \
   || no "-C <dir> is skipped with its value" "no git segment parsed"
@@ -237,8 +228,7 @@ else
   ok "a heredoc body is not a git command"
 fi
 
-echo ""
-echo "=== Section 1c: git_push_targets — destinations and force ==="
+section "Section 1c: git_push_targets — destinations and force"
 
 dests_of() {  # <command> -> destinations joined by `|`
   parse_cmd "$1" || { echo "<not-a-git-command>"; return 0; }
@@ -279,8 +269,7 @@ eq "-C <dir> does not hide --force" "1" "$(force_of 'git -C /tmp/r push --force 
 # a copy of the shipped tree with the library renamed away — each hook must
 # exit non-zero on a command it would otherwise wave through.
 
-echo ""
-echo "=== Section 2: a hook whose library is missing REFUSES ==="
+section "Section 2: a hook whose library is missing REFUSES"
 
 # HERMETIC, and since bionic 1.4.0 that is load-bearing rather than tidy. The loader
 # these hooks share HEALS before it fails: when the library is not beside the hook it
@@ -381,8 +370,7 @@ done
 # Section 3: every source line resolves inside the shipped tree
 # ============================================================
 
-echo ""
-echo "=== Section 3: hook source lines name shipped library files ==="
+section "Section 3: hook source lines name shipped library files"
 
 # Two halves, because a hook's `source` names a VARIABLE and the path it holds
 # is written elsewhere:
@@ -441,8 +429,7 @@ fi
 # Section 4: the evidence gate's command reading (AC-11)
 # ============================================================
 
-echo ""
-echo "=== Section 4: evidence gate fires on git global-option commit forms ==="
+section "Section 4: evidence gate fires on git global-option commit forms"
 
 FM='---
 governing-skill: canonical-sdlc
@@ -534,8 +521,7 @@ gate_silent "R-12 find with no -exec is silent"          "find . -name 'git comm
 gate_silent "R-12 sudo of a non-commit is silent"        'sudo git status'
 
 # --- the library-level reading behind those gate answers (AC-11, R-12) ---
-echo ""
-echo "=== Section 4b: git_argv_expand reads openers, prefixes and -c strings ==="
+section "Section 4b: git_argv_expand reads openers, prefixes and -c strings"
 
 has_push() {  # <command> -> yes|no
   if git_argv_has_sub "$1" push; then echo yes; else echo no; fi
@@ -580,8 +566,7 @@ eq "R-12 command substitution stays OUT of scope" "no" "$(has_push 'echo $(git p
 # walls come to disagree about which branch is the branch, so the list lives
 # here and both walls ask it.
 
-echo ""
-echo "=== Section 5: git_branch_protected ==="
+section "Section 5: git_branch_protected"
 
 protected_says() { if git_branch_protected "${1:-}"; then echo yes; else echo no; fi; }
 
@@ -608,15 +593,4 @@ eq "protect-main.sh asks the library, at both of its checks" "1" \
 eq "protect-main.sh compares against no quoted branch literal" "0" \
   "$(grep -c '= "main"\|= "master"' "$PROTECT_MAIN")"
 
-# ============================================================
-# Results
-# ============================================================
-
-echo ""
-echo "========================================"
-echo "Results: $PASS/$TOTAL passed, $FAIL failed"
-echo "========================================"
-
-if [ "$FAIL" -gt 0 ]; then
-  exit 1
-fi
+finish

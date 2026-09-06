@@ -38,6 +38,8 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 # Overridable so this suite can be driven against a MUTATED COPY of the sweeper without the
 # shipped file ever being modified — the same substitution
@@ -46,7 +48,6 @@ set -uo pipefail
 #   W4_SWEEPER_UNDER_TEST=/tmp/mutant.sh bash tests/session-sweeper.test.sh
 SWEEPER="${W4_SWEEPER_UNDER_TEST:-${BIONIC_HOOKS_DIR}/session-sweeper.sh}"
 TMPROOT="$(mktemp -d)"
-PASS=0; FAIL=0; TOTAL=0
 BG_PIDS=""
 
 cleanup() {
@@ -63,18 +64,14 @@ SID="4b2f7a10-1c33-4e05-9f21-7d0c5a8e6b44"
 SID_FOREIGN="0e91c355-77aa-42d6-b0e8-3c1f2a94d7e0"
 
 # ---------- assertion helpers ----------
-
-ok()  { TOTAL=$((TOTAL+1)); PASS=$((PASS+1)); printf 'PASS: %s\n' "$1"; }
-bad() { TOTAL=$((TOTAL+1)); FAIL=$((FAIL+1)); printf 'FAIL: %s\n' "$1"
-        [ $# -gt 1 ] && printf '      %s\n' "$2"; return 0; }
-
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1" "expected [$2] got [$3]"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) bad "$1" "no [$2] in: $(printf '%s' "$3" | head -3)" ;; esac; }
-expect_absent()   { case "$3" in *"$2"*) bad "$1" "unexpected [$2] in: $(printf '%s' "$3" | head -3)" ;; *) ok "$1" ;; esac; }
-expect_matches()  { if printf '%s\n' "$3" | grep -qE "$2"; then ok "$1"; else bad "$1" "no match /$2/ in: $(printf '%s' "$3" | head -3)"; fi; }
-expect_true()     { local l="$1"; shift; if "$@"; then ok "$l"; else bad "$l" "condition failed: $*"; fi; }
-expect_false()    { local l="$1"; shift; if "$@"; then bad "$l" "condition unexpectedly true: $*"; else ok "$l"; fi; }
-section()         { printf '\n=== %s ===\n' "$1"; }
+#
+# expect_eq, expect_contains, expect_absent, expect_true, expect_false are the
+# framework's (tests/lib/assert.sh) — S9b removed the private shadows here (AC-12).
+# expect_matches was this suite's own name for the framework's expect_regex
+# (same ERE, same argument order, pure rename — S1b/A-17 mapping table); its one
+# call site below is renamed too, and the rename also removes a
+# `printf | grep -qE` pipeline that was exposed to the SIGPIPE-141 false-fail on
+# a large value (assert.sh docblock, "the value is matched with a herestring").
 
 # ---------- sandbox + fixture builders ----------
 
@@ -101,8 +98,7 @@ backdate() {  # <file> <seconds ago> — sets mtime, the staleness input
 }
 
 new_roster() {  # <repo>
-  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-    > "$(roster_of "$1")"
+  roster_header > "$(roster_of "$1")"
 }
 
 # Emits one roster-state/v1 row. Field set and ORDER are those of the roster writer in
@@ -132,9 +128,13 @@ mkrow() {  # <key=value>...
     esac
   done
   [ -n "$launched_at" ] || launched_at="$(iso_ago 60)"
-  printf 'roster-state/v1|status=%s|session=%s|name=%s|agent_id=%s|launched_at=%s|subagent_type=%s|model=%s|deliverable=%s|source=%s|duration=%s|progress=%s|claims=%s|cadence=%s|absent=|waiver=%s|tool_use_id=%s\n' \
-    "$status" "$session" "$name" "$agent_id" "$launched_at" "$subagent_type" "$model" \
-    "$deliverable" "$source" "$duration" "$progress" "$claims" "$cadence" "$waiver" "$tool_use_id"
+  # THE ROW COMES OFF THE PRODUCTION WRITER (S17, spec AC-25); what stays here is this
+  # suite's house defaults and the unknown-key refusal, which `roster_row` now makes.
+  roster_row_fixture status="$status" session="$session" name="$name" \
+    agent_id="$agent_id" launched_at="$launched_at" subagent_type="$subagent_type" \
+    model="$model" deliverable="$deliverable" source="$source" duration="$duration" \
+    progress="$progress" claims="$claims" cadence="$cadence" waiver="$waiver" \
+    tool_use_id="$tool_use_id"
 }
 
 add_row() {  # <repo> <key=value>...
@@ -358,8 +358,8 @@ expect_eq "…and the reading verb refuses over the same link too (exit 2)" "2" 
 # ledger line the operator asked for, and refusing it would deny the one action still
 # available precisely when the roster cannot be read.
 R3C="$(make_repo s3roster)"
-printf 'roster-state/v1|status=confirmed|session=%s|name=elsewhere|deliverable=|duration=1 minute|\n' \
-  "$SID" > "$TMPROOT/elsewhere-s3-roster.state"
+roster_row_fixture status=confirmed session="$SID" name=elsewhere duration='1 minute' \
+  > "$TMPROOT/elsewhere-s3-roster.state"
 ln -s "$TMPROOT/elsewhere-s3-roster.state" "$(roster_of "$R3C")"
 sweep "$R3C" verdict
 expect_eq "verdict over a symlinked roster REFUSES (exit 2), never a clean session" "2" "$RC"
@@ -714,7 +714,7 @@ sweep "$RVR" verdict
 expect_eq "the read-only run saw its UNMET row" "1" "$RC"
 expect_false "verdict writes no ledger" test -e "$(ledger_of "$RVR")"
 expect_eq "verdict does not touch the roster" "1" \
-  "$(grep -c '^roster-state/v1|' "$(roster_of "$RVR")")"
+  "$(grep -c "^${ROSTER_ROW_SCHEMA}|" "$(roster_of "$RVR")")"
 # The state directory holds the roster it was handed and NOTHING this verb put there —
 # asserted over the whole directory rather than against a list of filenames, so a state
 # file nobody thought to name is caught too.
@@ -902,7 +902,7 @@ expect_contains "…as WAIVED, because only the waiver was declared" "state=WAIV
 # and the ordinary path is driven for regression beside it. The arm half of this pin retired
 # with the `arm` verb; ack is the only journalling verb left.
 SWEEPER_SRC="$(cat "$SWEEPER")"
-expect_matches "ack's delta-count is scoped to the acking pid, not to any ack line" \
+expect_regex "ack's delta-count is scoped to the acking pid, not to any ack line" \
   'ledger_count .\|event=ack\|\.\*\|pid=\$\$\|.' "$SWEEPER_SRC"
 
 # …and the scoped count still answers correctly with a FOREIGN entry already in the ledger,
@@ -926,15 +926,30 @@ expect_contains "…and counting both rows as closed" "2 row(s) acked" "$OUT"
 # subagent stop. The bound below is ~40x the fixed cost and ~4x under the measured broken
 # one, so it discriminates without being a stopwatch.
 RP="$(make_repo perf)"; new_roster "$RP"
-awk -v sid="$SID" -v n=2000 -v la="$(iso_ago 600)" '
-  BEGIN {
-    for (i = 1; i <= n; i++)
-      printf "roster-state/v1|status=confirmed|session=%s|name=perf%04d|agent_id=a%04d|launched_at=%s|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=4 hours|progress=|claims=|cadence=|absent=|waiver=|tool_use_id=toolu_%04d\n", sid, i, i, la, i
-  }' >> "$(roster_of "$RP")"
+# TWO THOUSAND ROWS THROUGH THE ONE WRITER (S17). The awk that used to generate these had
+# its own copy of the row's format string — the biggest single fixture in the tree, and the
+# one nothing would have noticed drifting. Generation is outside the measured window below.
+_PERF_LA="$(iso_ago 600)"
+{
+  _pi=1
+  while [ "$_pi" -le 2000 ]; do
+    printf -v _pn 'perf%04d' "$_pi"
+    printf -v _pa 'a%04d' "$_pi"
+    printf -v _pt 'toolu_%04d' "$_pi"
+    roster_row_fixture status=confirmed session="$SID" name="$_pn" agent_id="$_pa" \
+      launched_at="$_PERF_LA" duration='4 hours' tool_use_id="$_pt"
+    _pi=$((_pi + 1))
+  done
+} >> "$(roster_of "$RP")"
 SWEEP_BOUND=30
 _t0=$(date -u +%s)
 sweep "$RP" verdict perf1999
 _t1=$(date -u +%s)
+# RESTORED, and not dead (review-a drive-by, checked and refuted at Step 6). The
+# 30 s bound above is this one case's; every `sweep` from Section 8 onward reads
+# SWEEP_BOUND again through the watchdog at :162 and :184, so leaving it at 30
+# would hide a hang in 27 later cases behind a bound half again too generous.
+# Section 8 asserts the restored value, so deleting this line is red.
 SWEEP_BOUND=20
 expect_eq "a scoped verdict over a 2000-row roster answers (exit 0)" "0" "$RC"
 expect_contains "…for the row it was asked about" "name=perf1999|state=MET" "$OUT"
@@ -962,6 +977,11 @@ add_row "$R18" name=w4-s1  deliverable="$R18/absent-1.md" duration="4 hours" lau
 add_row "$R18" name=w4-s10 deliverable="$R18/absent-10.md" duration="4 hours" launched_at="$(iso_ago 600)"
 DEL18="$R18/landed.md"; echo "landed" > "$DEL18"
 add_row "$R18" name=lander deliverable="$DEL18" duration="4 hours" launched_at="$(iso_ago 600)"
+
+# THE WATCHDOG BOUND IS BACK TO THE DEFAULT for the 27 sweeps in this section
+# and below. Section 7 raised it to 30 for its 2000-row case; this row is what
+# makes that restore a read value rather than a line a reader could delete.
+expect_eq "the sweep watchdog bound was restored after the 2000-row case" "20" "$SWEEP_BOUND"
 
 # --- unacked: the field is present and says no ---
 #
@@ -1041,8 +1061,4 @@ expect_eq "a symlinked ledger refuses the verdict outright (exit 2)" "2" "$RC"
 expect_absent "…printing no line for any reader to trust" "landing-verdict/v1|" "$OUT"
 rm -f "$(ledger_of "$R19")"
 
-# ============================================================
-printf '\n──────────────────────────────────────────────\n'
-printf 'session-sweeper: %d passed, %d failed, %d total\n' "$PASS" "$FAIL" "$TOTAL"
-[ "$FAIL" -eq 0 ] || exit 1
-exit 0
+finish

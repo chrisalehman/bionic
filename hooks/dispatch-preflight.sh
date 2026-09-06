@@ -107,7 +107,7 @@ CWD=$(_jq '.cwd')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-BIONIC_LIB_WANT="root.sh run.sh session.sh patrol.sh agents.sh"
+BIONIC_LIB_WANT="root.sh run.sh session.sh patrol.sh agents.sh roster.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
 # library cannot load itself, so the duplication is the design and
@@ -246,6 +246,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 . "$BIONIC_LIB/patrol.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/agents.sh"
+# The `roster-state/v1` row has one writer, and it is `roster_row` here, not the format
+# string this hook used to carry (spec AC-25, design ledger D3).
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roster.sh"
 
 # THE ROOT (spec AC-10). Every path this gate owns hangs off the answer: the
 # attestation it reads, the roster it appends, the containment wall it measures
@@ -649,7 +653,12 @@ fi
 # plan still gets `plan=<that plan>` here, so `adopt`'s partition (S6) can tell
 # "this session's own run" from "no binding at all" without re-deriving either.
 
-ROSTER_VERSION="v1"
+# ONE OWNER OF THE VERSION, and it is the library that writes the row it labels
+# (`ROSTER_SCHEMA_VERSION`, payload/scripts/lib/roster.sh). Kept under this name because
+# the READER below (`status=intended` rows, :830) and the file header both spell it this
+# way, and a version the writer and the reader could disagree about is the whole reason
+# the constant is not written twice.
+ROSTER_VERSION="$ROSTER_SCHEMA_VERSION"
 ROSTER_PREFIX="roster-"
 ROSTER_SUFFIX=".state"
 # STATE_DIR is set above, at the arming wall — the first thing on this path to need it.
@@ -1274,6 +1283,35 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # A waiver REASON that is the angle-bracketed slot out of the wall message,
     # copied rather than filled in. A real reason never opens with one.
     function isplaceholder(v) { return (v ~ /^<[^<>]*>/) }
+    # THE SUITE BASENAMES named in a span, space-joined, in position order and
+    # without duplicates — or the literal `none` when the span waives the budget.
+    #
+    # A SUITE IS RECOGNISED BY ITS BASENAME, never by the directory in front of it:
+    # `tests/x.test.sh`, `./tests/x.test.sh` and an absolute spelling are one suite,
+    # and it is the basename the derived set (`tests/lib/impact.sh | cut -f1`) prints
+    # too. `run.sh` is admitted ONLY with a path component, because the bare word is
+    # not a suite anywhere in this repo and briefs use it in prose constantly; the
+    # same restraint payload/scripts/lib/cmd-class.sh applies to argv[0].
+    #
+    # THE WAIVER IS A WHOLE WORD, matched on the collapsed span rather than anywhere
+    # in it: a brief reading `Suites: none` waives, and one reading
+    # `Suites: tests/a.test.sh — none of the others` declares one suite and does not.
+    function suite_names(s,   n, arr, i, t, b, out, seen, c) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
+      for (i = 1; i <= n; i++) {
+        t = trimtok(arr[i])
+        if (t == "" || istemplate(t)) continue
+        b = t; sub(/.*\//, "", b)
+        if (b !~ /\.test\.sh$/ && !(b == "run.sh" && index(t, "/") > 0)) continue
+        if (seen[b]) continue
+        seen[b] = 1
+        out = (out == "" ? b : out " " b)
+        if (++c >= SUITES_MAX) break
+      }
+      if (out != "") return out
+      if (tolower(collapse(s)) ~ /^none([^a-z0-9]|$)/) return "none"
+      return ""
+    }
     function paths(s, maxn,   n, arr, i, t, out, seen, c) {
       n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
       for (i = 1; i <= n; i++) {
@@ -1291,6 +1329,13 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # One is the contract; anything above one is refused, and the number only has to
       # be large enough for the refusal to show the author what it saw.
       DELIV_MAX = 12
+      # How many paths a `Files:` span reports and how many basenames a `Suites:`
+      # span reports. Both are bounds on a ROW FIELD, not on a judgment: the row is
+      # one line the fleet parses by key, and a brief that names a hundred files has
+      # a problem the wall cannot fix. Wide enough that no real slice brief in this
+      # repo has ever reached either.
+      FILES_MAX = 60
+      SUITES_MAX = 60
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
       #
@@ -1367,6 +1412,15 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       addlabel("progress",           "progress")
       addlabel("duration",           "duration")
       addlabel("cadence",            "cadence", "([ \t]*:|[ \t])[ \t]*")
+      # THE TWO INSTRUMENT LABELS (wave-01 S13, spec AC-20), BOTH PINNED TO LINE
+      # START. `Files:` declares the intent — what this slice will touch — and
+      # `Suites:` declares the consequence directly, for a repository where no
+      # impact command is configured. Both are pinned for the reason the six
+      # deliverable-kind labels are: every refusal below quotes them back as a
+      # copy-paste example, and a brief that repeats the example mid-sentence has
+      # documented the wall, not declared a field.
+      addlabel("suites",             "suites", "", 1)
+      addlabel("files",              "files",  "", 1)
       addlabel("scope",              "-")
       addlabel("model",              "-")
       addlabel("exit",               "-")
@@ -1445,6 +1499,21 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # that quotes the slot back unfilled has given no reason at all (S-1).
       h = firsthit("waiver")
       if (h > 0) { v = collapse(spanof(h)); if (v != "" && !isplaceholder(v)) print "waiver=" v }
+      # THE FILES THE SLICE DECLARES IT WILL TOUCH — every distinct path-shaped
+      # token in the span, comma-joined, exactly as the deliverable label lifts
+      # its candidates. Several paths is the ORDINARY case here rather than an
+      # ambiguity: a slice touches a set, and the wall does not have to choose
+      # among them, it hands the whole set to the impact command.
+      h = firsthit("files")
+      if (h > 0) { v = paths(spanof(h), FILES_MAX); if (v != "") print "files=" v }
+      # THE SUITES THE BRIEF DECLARES, NORMALISED TO BASENAMES at the moment they
+      # are lifted, so the declared spelling and the derived one are the same
+      # spelling on the row and the writer-side guard compares one alphabet. The
+      # explicit waiver `Suites: none` lifts as the literal token `none`, which is
+      # a DECLARED empty set — distinguishable on the row from a brief that stated
+      # no budget at all, and refused by the guard for every suite.
+      h = firsthit("suites")
+      if (h > 0) { v = suite_names(spanof(h)); if (v != "") print "suites=" v }
     }
   ' 2>/dev/null
 }
@@ -1502,6 +1571,12 @@ C_PROGRESS=$(sanitize "$(field_of progress)" 300)
 C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
+# THE TWO INSTRUMENT FIELDS (spec AC-20). `Files:` is the declared INTENT — the paths this
+# slice will touch — and `Suites:` the declared CONSEQUENCE. The caps are the widest on the
+# row because both are lists rather than single values, and truncating a list silently
+# narrows a budget: 900 is what the ambiguity candidates already allow.
+C_FILES=$(sanitize "$(field_of files)" 900)
+C_SUITES=$(sanitize "$(field_of suites)" 900)
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
@@ -1725,6 +1800,247 @@ if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
   exit 2
 fi
 
+# ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
+# (seed .bionic/docs/ideas/suite-allowance-wall.md items 1-2; design ledger D2,
+# Chris 2026-09-05 "Option 2": a brief declares INTENT, the machine derives the
+# consequences.)
+#
+# THE INCIDENT. Two writers finished their own hooks green at ~45 minutes and then
+# spent 40 more re-running the entire test tree one suite at a time, in parallel, on
+# an 8 GB machine at load 10. Their briefs said "run impacted suites only; never
+# tests/run.sh; run X, Y, Z as consumers", and "consumers" was read as "everything".
+# Prose in a brief is a wish. Only a wall binds a writer.
+#
+# WHAT THE BRIEF DECLARES. `Files:` — the paths this slice will touch. That is intent,
+# and it is the only thing the author reliably knows at dispatch. The CONSEQUENCE (which
+# suites read those paths) is a fact about the tree, and D2 gave the tree ownership of it:
+# `impact-command:` in .bionic/config.yaml names the derivation, the wall runs it over the
+# declared paths, and the answer goes on the roster row for the writer-side guard to hold
+# the agent to.
+#
+# `Suites:` IS THE OTHER HALF, not a legacy spelling. bionic runs in repositories that
+# have no impact command and never will, and there the author is the only one who can
+# state the set — so a declared list is a first-class input, recorded as
+# `suites_source=declared` so no reader downstream mistakes a stated set for a derived
+# one. It also WINS over a derivation when a brief carries both: `Suites: none` is the
+# waiver, and a waiver that a derivation could overrule is not a waiver.
+#
+# A BRIEF WITH NEITHER IS REFUSED, and that is the whole wall. Everything else here is
+# bookkeeping: without one of the two labels there is no budget on the row, and a guard
+# with no budget to enforce is the prose the incident already proved does not bind.
+if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ]; then
+  echo "BLOCKED: this dispatch brief declares neither the files it will touch nor the suites it may run — a wave is active." >&2
+  echo "" >&2
+  echo "An agent with no declared instrument runs whatever it decides to run. Two writers" >&2
+  echo "read \"run the impacted suites\" as the whole tree and spent 40 minutes each" >&2
+  echo "re-proving the world; the budget only binds when it is on the roster row." >&2
+  echo "" >&2
+  echo "Fix: declare the files this slice will touch, on a line of its own —" >&2
+  echo "    Files: path/one.sh, path/two.sh" >&2
+  echo "  The impact command named in .bionic/config.yaml derives the suites from them." >&2
+  echo "" >&2
+  echo "Where no impact command is configured, name the closed set yourself —" >&2
+  echo "    Suites: tests/one.test.sh, tests/two.test.sh" >&2
+  echo "" >&2
+  echo "Or waive the budget for a brief that runs no suite at all —" >&2
+  echo "    Suites: none" >&2
+  echo "" >&2
+  echo "Either way: one path per token, no shell variables. Both labels are read out of the" >&2
+  echo "brief TEXT, before any shell has expanded anything, and the writer-side guard reads" >&2
+  echo "its command the same way — a name that is still a variable when a hook sees it can" >&2
+  echo "be neither derived from nor checked against anything." >&2
+  echo "" >&2
+  echo "Then retry the dispatch." >&2
+  exit 2
+fi
+
+# ---------- the derivation ----------
+#
+# THE COMMAND IS CONFIGURATION, THE PATHS ARE THE BRIEF. The command is word-split (it is
+# `bash tests/lib/impact.sh` — a runner and a script, not one word) and the declared paths
+# go in as separate arguments, quoted. Nothing is eval'd: a path lifted out of a brief is
+# author-supplied text, and word-splitting it into a command line is how a `Files:` line
+# carrying a semicolon becomes a command. `ispath` has already rejected anything without a
+# slash, but the shape of the guard here does not depend on that check holding.
+#
+# THE COMMITTED DEFAULT IS ABSENCE (plan A-8). `.bionic/config.yaml` is machine-local, so a
+# fresh clone and every other repository bionic runs in take the declared path.
+#
+# A DERIVATION THAT FAILS OR ANSWERS NOTHING LEAVES `suites_allowed=` EMPTY, and empty is
+# the third state: not a set, and not the `none` waiver either. The writer-side guard reads
+# it as "no budget was stated" and stands aside for a named suite while still refusing
+# tests/run.sh, so a broken impact command costs an over-wide instrument rather than an
+# agent that can run nothing. The operator is told at dispatch, which is the moment the
+# config is still fixable.
+IMPACT_COMMAND=$(config_value "$REPO" "impact-command" "")
+SUITES_ALLOWED=""
+SUITES_SOURCE=""
+if [ -n "$C_SUITES" ]; then
+  SUITES_ALLOWED="$C_SUITES"
+  SUITES_SOURCE="declared"
+elif [ -n "$IMPACT_COMMAND" ]; then
+  _old_ifs="$IFS"; IFS=','; set -f
+  # shellcheck disable=SC2086
+  set -- $C_FILES
+  set +f; IFS="$_old_ifs"
+  _impact_out=""
+  if [ "$#" -gt 0 ]; then
+    # A BOUND THE HOOK BUILDS ITSELF (review-c C-16). hooks/hooks.json registers this hook
+    # at "timeout": 10, and the derivation is the whole of the gate's cost: ~0.3 s without
+    # it, ~2.9-3.1 s with it on an idle tree, and 5.06-6.51 s measured while this wave's own
+    # writers were running — which is exactly the condition under which a wave dispatches.
+    #
+    # WHY THE BOUND IS A REFUSAL AND NOT A FALLBACK. A PreToolUse hook killed on the CLI's
+    # timeout does NOT exit 2. The dispatch proceeds, no roster row is written, and the
+    # writer runs with no budget at all — the wall defeated by the cost of the wall. That is
+    # the one failure this arm cannot have, so the overrun is refused here, in time, with a
+    # message. The other derivation failures stay as they were (empty budget + a warning):
+    # a command that answers nothing has still answered.
+    #
+    # BUILT, NOT BORROWED. bionic's command discipline forbids a `timeout`/`gtimeout` binary
+    # and macOS ships neither, so the bound is a backgrounded child and a `kill -0` poll.
+    IMPACT_BOUND_S=6
+    IMPACT_BOUND_TICKS=60          # 60 x 0.1s; the tick is the poll, the product is the bound
+    _impact_tmp="${TMPDIR:-/tmp}/bionic-impact-$$-${RANDOM}.out"
+    # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
+    ( cd "$REPO" 2>/dev/null && $IMPACT_COMMAND "$@" >"$_impact_tmp" 2>/dev/null ) &
+    _impact_pid=$!
+    _impact_ticks=0
+    _impact_overran=0
+    while kill -0 "$_impact_pid" 2>/dev/null; do
+      if [ "$_impact_ticks" -ge "$IMPACT_BOUND_TICKS" ]; then
+        kill -TERM "$_impact_pid" 2>/dev/null
+        _impact_overran=1
+        break
+      fi
+      sleep 0.1
+      _impact_ticks=$((_impact_ticks + 1))
+    done
+    wait "$_impact_pid" 2>/dev/null
+    if [ "$_impact_overran" -eq 1 ]; then
+      rm -f "$_impact_tmp"
+      echo "BLOCKED: the impact command did not answer within ${IMPACT_BOUND_S}s, so this dispatch has no budget to record — a wave is active." >&2
+      echo "" >&2
+      echo "The command named by \`impact-command:\` in .bionic/config.yaml turns the paths this" >&2
+      echo "brief declared into the set of suites the agent may run. This hook is registered at a" >&2
+      echo "10-second timeout, and a hook killed on that timeout does NOT refuse: the dispatch" >&2
+      echo "would proceed with no roster row at all, and the writer would run with no budget —" >&2
+      echo "the wall defeated by the cost of the wall. So the derivation is bounded here." >&2
+      echo "" >&2
+      echo "  command: $IMPACT_COMMAND" >&2
+      echo "  paths:   $*" >&2
+      echo "  bound:   ${IMPACT_BOUND_S}s" >&2
+      echo "" >&2
+      echo "Fix: narrow \`Files:\` to the paths this slice really writes, or name the closed set" >&2
+      echo "directly with \`Suites:\` — a declared set needs no derivation at all. If the command" >&2
+      echo "itself has become slow, that is the thing to fix: it runs on every dispatch." >&2
+      exit 2
+    fi
+    _impact_out=$(cat "$_impact_tmp" 2>/dev/null) || _impact_out=""
+    rm -f "$_impact_tmp"
+  fi
+  SUITES_ALLOWED=$(printf '%s\n' "$_impact_out" | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
+  SUITES_ALLOWED="${SUITES_ALLOWED% }"
+  SUITES_SOURCE="derived"
+  if [ -z "$SUITES_ALLOWED" ]; then
+    warn "the impact command derived no suites from the declared files; the row records an empty budget: $IMPACT_COMMAND"
+  fi
+else
+  # `Files:` alone in a repository with no impact command states an intent nothing can turn
+  # into a budget. AC-20: where no impact command is configured the wall requires the
+  # explicit list. Refused rather than passed with an empty set, because the author is
+  # holding the brief and one line fixes it.
+  echo "BLOCKED: this dispatch brief declares Files: but no impact command is configured to derive suites from them — a wave is active." >&2
+  echo "" >&2
+  echo "\`Files:\` states which paths the slice will touch. Turning that into the set of" >&2
+  echo "suites the agent may run is the tree's job, and this repository has not named the" >&2
+  echo "command that asks it." >&2
+  echo "" >&2
+  echo "Fix: name the closed set in the brief instead —" >&2
+  echo "    Suites: tests/one.test.sh, tests/two.test.sh" >&2
+  echo "" >&2
+  echo "Or configure the derivation once, in .bionic/config.yaml —" >&2
+  echo "    impact-command: bash tests/lib/impact.sh" >&2
+  echo "" >&2
+  echo "Then retry the dispatch." >&2
+  exit 2
+fi
+
+# ============================================= THE ONE-REGRESSION WALL (AC-24)
+# (seed item 4; the standing ruling "one regression means one" made mechanical.)
+#
+# The full tree is run ONCE per run, at integration close, by one dispatched runner. A
+# second runner in the same run is not a mistake the orchestrator makes in ignorance — it
+# is the shape a re-proof takes after a merge, a bump or a panic — so the wall does not
+# forbid it, it makes it COST A WRITTEN REASON in the plan, where a reader will find it
+# next to the run it explains.
+#
+# NEWER IS COUNTED, NOT TIMED. "A `regression-cause:` line newer than the last regression
+# row" cannot be read off a clock: the plan file is rewritten after every slice, so its
+# mtime is newer than everything and the rule would be vacuous within minutes. It is read
+# as a LEDGER instead — the Nth full-tree dispatch of a run needs the (N-1)th cause line
+# on the plan — which is monotone, hermetic, and forces one new sentence per extra
+# regression rather than one sentence that licenses all of them.
+#
+# ROWS ARE COUNTED BY NAME. hooks/execution-recorder.sh appends a `status=confirmed` copy
+# of a row it did not write from scratch, so one dispatch is two or more lines carrying the
+# same budget; counting lines would refuse the second half of the first regression.
+#
+# PLAN-FREE SESSIONS SKIP IT. An engaged session with no bound plan has nowhere to write a
+# cause, and the budget wall above already binds every such dispatch.
+regression_rows() {  # -> the number of DISTINCT agent names already dispatched with run.sh
+  [ -f "$ROSTER_FILE" ] || { printf '0'; return 0; }
+  [ -L "$ROSTER_FILE" ] && { printf '0'; return 0; }
+  awk -F'|' -v ver="roster-state/${ROSTER_VERSION}" '
+    $1 != ver { next }
+    {
+      name = ""; allowed = ""
+      for (i = 1; i <= NF; i++) {
+        if ($i ~ /^name=/)                name    = substr($i, 6)
+        else if ($i ~ /^suites_allowed=/) allowed = substr($i, 16)
+      }
+      if (name == "" || allowed == "") next
+      n = split(allowed, parts, " ")
+      for (j = 1; j <= n; j++) if (parts[j] == "run.sh") { seen[name] = 1; break }
+    }
+    END { c = 0; for (k in seen) c++; print c }
+  ' "$ROSTER_FILE" 2>/dev/null
+}
+regression_causes() {  # -> how many `regression-cause:` lines the plan carries under ## SDLC State
+  [ -n "$PLAN" ] && [ -f "$PLAN" ] || { printf '0'; return 0; }
+  awk '
+    /^## SDLC State/ { instate = 1; next }
+    /^## / { instate = 0 }
+    instate && /^[ \t]*regression-cause[ \t]*:/ { c++ }
+    END { print c + 0 }
+  ' "$PLAN" 2>/dev/null
+}
+case " $SUITES_ALLOWED " in
+  *" run.sh "*)
+    if [ -n "$PLAN" ]; then
+      _reg_rows=$(regression_rows); _reg_causes=$(regression_causes)
+      case "$_reg_rows" in ''|*[!0-9]*) _reg_rows=0 ;; esac
+      case "$_reg_causes" in ''|*[!0-9]*) _reg_causes=0 ;; esac
+      if [ "$_reg_rows" -gt 0 ] && [ "$_reg_causes" -lt "$_reg_rows" ]; then
+        echo "BLOCKED: this run has already dispatched a full-tree regression — a wave is active." >&2
+        echo "" >&2
+        echo "Full-tree runs on this roster: ${_reg_rows}. Recorded causes on the plan: ${_reg_causes}." >&2
+        echo "One regression means one: the tree is proved once, at integration close, and a" >&2
+        echo "second full run is a deliberate act that owes its reason to the next reader." >&2
+        echo "" >&2
+        echo "Fix: record why this one is needed, under \`## SDLC State\` in —" >&2
+        echo "    $PLAN" >&2
+        echo "" >&2
+        echo "    regression-cause: <why the tree must be re-proved>" >&2
+        echo "" >&2
+        echo "Then retry the dispatch. A narrower brief needs no cause: name only the suites" >&2
+        echo "the change actually reaches." >&2
+        exit 2
+      fi
+    fi
+    ;;
+esac
+
 # ---------- THE LEDGER STOPS AT DEPTH ONE ----------
 # (session-20260815-landing-supervision T6; design D1 "writers stay put".)
 #
@@ -1819,17 +2135,58 @@ fi
 ROSTER_PLAN=$(sanitize "$(session_plan "$REPO" "$PAYLOAD_SID")" 400)
 [ -n "$ROSTER_PLAN" ] || ROSTER_PLAN="none"
 
-ROW="roster-state/${ROSTER_VERSION}|status=intended|session=${PAYLOAD_SID}|name=${AGENT_NAME}|agent_id=|launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)|subagent_type=${SUBAGENT_TYPE}|model=${AGENT_MODEL}|deliverable=${C_DELIVERABLE}|source=${C_SOURCE}|duration=${C_DURATION}|progress=${C_PROGRESS}|claims=${C_CLAIMS}|cadence=${C_CADENCE}|absent=${ABSENT}|waiver=${C_WAIVER}|tool_use_id=${TOOL_USE_ID}|plan=${ROSTER_PLAN}"
+# EVERY FIELD NAMED, AND THE ROW ITSELF BUILT ELSEWHERE (spec AC-25). What this hook owns
+# is the VALUES — where each comes from, and the per-field cap `sanitize` applies to it.
+# What the row IS — which fields, in what order, with what separator — belongs to
+# `roster_row` (payload/scripts/lib/roster.sh), which `hooks/session-poker.sh`'s `adopt`
+# also calls, so the two writers can no longer drift apart. The empty `agent_id=` is
+# passed explicitly rather than omitted: a launch-time row has no id yet, and saying so is
+# the field's content, not its absence.
+#
+# THE THREE INSTRUMENT FIELDS ARE ALWAYS NAMED HERE (spec AC-20), even when the wall above
+# derived an empty set, for the same reason: a launch row that reached this line passed the
+# suite-allowance wall, so it HAS a budget statement, and an omitted key would say the row
+# predates the wall entirely. They are optional in `roster_row` so the captured rows in
+# tests/fixtures/roster-row.captured — written before this slice existed — still rebuild
+# byte for byte; they are not optional to this writer.
+ROW=$(roster_row \
+  status=intended \
+  "session=${PAYLOAD_SID}" \
+  "name=${AGENT_NAME}" \
+  agent_id= \
+  "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "subagent_type=${SUBAGENT_TYPE}" \
+  "model=${AGENT_MODEL}" \
+  "deliverable=${C_DELIVERABLE}" \
+  "source=${C_SOURCE}" \
+  "duration=${C_DURATION}" \
+  "progress=${C_PROGRESS}" \
+  "claims=${C_CLAIMS}" \
+  "cadence=${C_CADENCE}" \
+  "absent=${ABSENT}" \
+  "waiver=${C_WAIVER}" \
+  "files=${C_FILES}" \
+  "suites_allowed=${SUITES_ALLOWED}" \
+  "suites_source=${SUITES_SOURCE}" \
+  "tool_use_id=${TOOL_USE_ID}" \
+  "plan=${ROSTER_PLAN}") || ROW=""
 
 WROTE=1
 if [ ! -e "$ROSTER_FILE" ]; then
   # A concurrent dispatch in the same session can lose this race and write the
   # header twice; both are comment lines and every reader skips them. The ROWS
   # are what must not interleave, and each is a single short append.
-  printf '# bionic session roster — schema roster-state/%s — machine-local, safe to delete\n' \
-    "$ROSTER_VERSION" >> "$ROSTER_FILE" 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
+  roster_header >> "$ROSTER_FILE" 2>/dev/null && chmod 600 "$ROSTER_FILE" 2>/dev/null
 fi
-printf '%s\n' "$ROW" >> "$ROSTER_FILE" 2>/dev/null || WROTE=0
+# A ROW THAT DID NOT BUILD IS NOT APPENDED. `roster_row` refuses a field name no reader
+# knows rather than writing it, and an empty `$ROW` here would put a blank line on the
+# roster and call it journalled. The existing WROTE=0 path already says the launch could
+# not be journalled, which is the true thing to say in both cases.
+if [ -n "$ROW" ]; then
+  printf '%s\n' "$ROW" >> "$ROSTER_FILE" 2>/dev/null || WROTE=0
+else
+  WROTE=0
+fi
 
 # No lock, unlike the observation record: that one is a read-modify-write of the
 # whole file, this one is a single O_APPEND write of well under a pipe buffer,

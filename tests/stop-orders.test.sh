@@ -20,23 +20,20 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
+. "$(dirname "$0")/lib/live-answer.sh"
+. "$(dirname "$0")/lib/roster-row.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 ORDERS="$HERE/stop-orders.sh"
 SWEEPER="$HERE/session-sweeper.sh"
-PASS=0
-FAIL=0
-TOTAL=0
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/stop-orders-test.XXXXXX")" && pwd)"
 trap 'rm -rf "$SANDBOX"' EXIT
 
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-
-expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
+# expect_status, expect_contains, expect_absent are the framework's
+# (tests/lib/assert.sh) — S9b removed the private shadows here (AC-12); same
+# semantics (contains/absent are literal substring, argument order unchanged).
 
 SID="6c85684c-9588-45a0-bd26-e8c46956c94f"
 
@@ -54,12 +51,16 @@ make_repo() {  # <name> -> repo path
   printf '%s\n' "$repo"
 }
 
-roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims]
+# RENAMED OFF THE WRITER'S NAME (S17): `roster_row` is the production writer
+# (payload/scripts/lib/roster.sh), and a private definition of that name would shadow the
+# one writer with a fixture.
+so_roster_row() {  # <repo> <name> <deliverable> [waiver] [teammate-id] [claims]
   local repo="$1" name="$2" deliv="$3" waiver="${4:-}" tmid="${5:-}" claims="${6:-}"
   local f="$repo/.bionic/tmp/roster-$SID.state"
-  [ -f "$f" ] || printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' > "$f"
-  printf 'roster-state/v1|status=confirmed|session=%s|name=%s|agent_id=|launched_at=2026-08-05T00:00:00Z|subagent_type=implementor|model=opus|deliverable=%s|duration=|progress=|claims=%s|absent=|waiver=%s|teammate_id=%s|tool_use_id=toolu_01FIXTURE\n' \
-    "$SID" "$name" "$deliv" "$claims" "$waiver" "$tmid" >> "$f"
+  [ -f "$f" ] || roster_header > "$f"
+  roster_row_fixture status=confirmed session="$SID" name="$name" agent_id= \
+    launched_at=2026-08-05T00:00:00Z deliverable="$deliv" claims="$claims" \
+    waiver="$waiver" teammate_id="$tmid" >> "$f"
   return 0
 }
 
@@ -72,8 +73,7 @@ run_orders() {  # <repo> <args…>
 }
 
 # ============================================================
-echo ""
-echo "=== Section 1: usage, session key, hostile paths ==="
+section "Section 1: usage, session key, hostile paths"
 # ============================================================
 
 R1="$(make_repo usage)"
@@ -102,12 +102,11 @@ run_orders "$R2" order someone
 expect_status "a symlinked orders file is REFUSED" 2 "$ST"
 
 # ============================================================
-echo ""
-echo "=== Section 2: the order verb records, reports, and never refuses (R3) ==="
+section "Section 2: the order verb records, reports, and never refuses (R3)"
 # ============================================================
 
 R3="$(make_repo ordering)"
-roster_row "$R3" "unlanded" ".bionic/docs/record/unlanded.md"
+so_roster_row "$R3" "unlanded" ".bionic/docs/record/unlanded.md"
 
 run_orders "$R3" order unlanded
 expect_status "an order over an UNMET contract is recorded, not refused" 0 "$ST"
@@ -121,7 +120,7 @@ fi
 
 # A landed contract gives nothing up, and the order says so rather than inventing a loss.
 echo landed > "$R3/.bionic/docs/record/landed.md"
-roster_row "$R3" "landed" ".bionic/docs/record/landed.md"
+so_roster_row "$R3" "landed" ".bionic/docs/record/landed.md"
 run_orders "$R3" order landed
 expect_status "an order over a MET contract is recorded too" 0 "$ST"
 
@@ -132,8 +131,7 @@ run_orders "$R3" order ghost
 expect_status "an order for an unknown name is still recorded" 0 "$ST"
 
 # ============================================================
-echo ""
-echo "=== Section 3: standdown — the batch, and what it leaves alone (AC-11, R8) ==="
+section "Section 3: standdown — the batch, and what it leaves alone (AC-11, R8)"
 # ============================================================
 
 R4="$(make_repo standdown)"
@@ -141,17 +139,17 @@ R4="$(make_repo standdown)"
 # Four landed rows, by three different routes, plus two that must be left running.
 echo a > "$R4/.bionic/docs/record/a.md"
 echo b > "$R4/.bionic/docs/record/b.md"
-roster_row "$R4" "met-one" ".bionic/docs/record/a.md" "" "met-one@session-6c85684c"
-roster_row "$R4" "met-two" ".bionic/docs/record/b.md" "" "met-two@session-6c85684c"
-roster_row "$R4" "waived-one" "" "produces nothing durable" "waived-one@session-6c85684c"
-roster_row "$R4" "acked-one" ".bionic/docs/record/never.md" "" "acked-one@session-6c85684c"
+so_roster_row "$R4" "met-one" ".bionic/docs/record/a.md" "" "met-one@session-6c85684c"
+so_roster_row "$R4" "met-two" ".bionic/docs/record/b.md" "" "met-two@session-6c85684c"
+so_roster_row "$R4" "waived-one" "" "produces nothing durable" "waived-one@session-6c85684c"
+so_roster_row "$R4" "acked-one" ".bionic/docs/record/never.md" "" "acked-one@session-6c85684c"
 ( cd "$R4" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-one ) >/dev/null 2>&1
 
 # LEFT ALONE: one genuinely unmet, one still live. The live row's claimed process is this
 # very suite — `claims=` is checked for EXISTENCE by pattern, so the honest way to fixture a
 # live claim is to name a process that really is running rather than to stub the check.
-roster_row "$R4" "unmet-one" ".bionic/docs/record/missing.md" "" "unmet-one@session-6c85684c"
-roster_row "$R4" "live-one" ".bionic/docs/record/missing2.md" "" "live-one@session-6c85684c" \
+so_roster_row "$R4" "unmet-one" ".bionic/docs/record/missing.md" "" "unmet-one@session-6c85684c"
+so_roster_row "$R4" "live-one" ".bionic/docs/record/missing2.md" "" "live-one@session-6c85684c" \
   "stop-orders.test.sh"
 
 run_orders "$R4" standdown
@@ -182,7 +180,7 @@ expect_contains "…the STILL-LIVE row is named as left alone" "live-one" "$LEFT
 # down on that would be standing it down on a fact nobody produced; an ack is what closes
 # those rows, and until one arrives it is left alone.
 R5="$(make_repo vacuous)"
-roster_row "$R5" "declares-nothing" ""
+so_roster_row "$R5" "declares-nothing" ""
 run_orders "$R5" standdown
 expect_status "a contract-less roster still answers" 0 "$ST"
 STANDDOWN_BLOCK=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
@@ -201,8 +199,8 @@ expect_contains "…and the ack is what puts it in the batch" "1 row(s) have lan
 # tests/cross-gate-agreement.test.sh §P.
 R5B="$(make_repo advanced)"
 echo landed > "$R5B/.bionic/docs/record/advanced.md"
-roster_row "$R5B" "advancing" "" "" "stale-address@session-6c85684c"
-roster_row "$R5B" "advancing" ".bionic/docs/record/advanced.md" "" "live-address@session-6c85684c"
+so_roster_row "$R5B" "advancing" "" "" "stale-address@session-6c85684c"
+so_roster_row "$R5B" "advancing" ".bionic/docs/record/advanced.md" "" "live-address@session-6c85684c"
 run_orders "$R5B" standdown
 expect_status "a roster carrying two rows for one name still answers" 0 "$ST"
 STANDDOWN_BLOCK=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
@@ -217,8 +215,7 @@ run_orders "$R6" standdown
 expect_status "an empty roster answers cleanly" 0 "$ST"
 
 # ============================================================
-echo ""
-echo "=== Section 3b: standdown on an ADOPTED WAIVED row survives /clear (S17, AC-12) ==="
+section "Section 3b: standdown on an ADOPTED WAIVED row survives /clear (S17, AC-12)"
 # ============================================================
 #
 # THE CROSS-SCRIPT PROOF. §3 above plants a waived row by hand with `roster_row`; this plants
@@ -232,12 +229,11 @@ mkdir -p "$R3B/.bionic/docs/record"
 ADOPT3B_PRED="9f1e2d3c-4b5a-6978-8899-aabbccddeeff"
 ADOPT3B_ID="aadoptedwaived00000000000000000"
 ADOPT3B_ROSTER="$R3B/.bionic/tmp/roster-$ADOPT3B_PRED.state"
-printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
-  > "$ADOPT3B_ROSTER"
-printf 'roster-state/v1|status=identified|session=%s|name=adopted-waived-row|agent_id=%s|launched_at=%s|subagent_type=implementor|model=opus|deliverable=|source=declared|duration=|progress=|claims=|cadence=10 minutes|absent=|waiver=%s|tool_use_id=toolu_01S17FIX\n' \
-  "$ADOPT3B_PRED" "$ADOPT3B_ID" "2026-08-05T00:00:00Z" \
-  "probe only — a throwaway read-only agent for the standdown/adopt walk" \
-  >> "$ADOPT3B_ROSTER"
+roster_header > "$ADOPT3B_ROSTER"
+roster_row_fixture status=identified session="$ADOPT3B_PRED" name=adopted-waived-row \
+  agent_id="$ADOPT3B_ID" launched_at=2026-08-05T00:00:00Z cadence='10 minutes' \
+  waiver='probe only — a throwaway read-only agent for the standdown/adopt walk' \
+  tool_use_id=toolu_01S17FIX >> "$ADOPT3B_ROSTER"
 
 # `adopt` decides nothing in a session that never engaged bionic (AC-10) — the same guard
 # session-poker.test.sh's fixtures carry, planted by hand here since this suite has no
@@ -254,8 +250,7 @@ expect_contains "…because its CARRIED waiver, not an ack or a fresh MET" \
   "waived — adopted-waived-row" "$SD3B_BLOCK"
 
 # ============================================================
-echo ""
-echo "=== Section 4: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1) ==="
+section "Section 4: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1)"
 # ============================================================
 #
 # ap review A-1: from a worktree cwd, `git rev-parse --show-toplevel` answers the WORKTREE
@@ -267,7 +262,7 @@ R7="$(make_repo worktree)"
 echo seed > "$R7/README.md"
 git -C "$R7" add README.md >/dev/null 2>&1
 git -C "$R7" commit -qm seed >/dev/null 2>&1
-roster_row "$R7" "live-worker" ".bionic/docs/record/never.md" "" "live-worker@session-6c85684c"
+so_roster_row "$R7" "live-worker" ".bionic/docs/record/never.md" "" "live-worker@session-6c85684c"
 
 R7WT="$SANDBOX/worktree-wt"
 # A REAL `git worktree add` (never a mocked path) — built from the repo root, since
@@ -287,8 +282,7 @@ expect_contains "…still names the open row through the worktree cwd" "live-wor
 git -C "$R7" worktree remove --force "$R7WT" >/dev/null 2>&1
 
 # ============================================================
-echo ""
-echo "=== Section 6: standdown LANDS the trees it stands down (AC-28, C1) ==="
+section "Section 6: standdown LANDS the trees it stands down (AC-28, C1)"
 # ============================================================
 #
 # C1: a worktree is a leased slot bound to its ledger row, and standing an agent
@@ -328,9 +322,9 @@ git -C "$R8/.worktrees/still-working" commit -qm "wip" >/dev/null 2>&1
 
 for n in land-a land-b land-c; do
   echo "$n" > "$R8/.bionic/docs/record/$n.md"
-  roster_row "$R8" "$n" ".bionic/docs/record/$n.md" "" "$n@session-6c85684c"
+  so_roster_row "$R8" "$n" ".bionic/docs/record/$n.md" "" "$n@session-6c85684c"
 done
-roster_row "$R8" "still-working" ".bionic/docs/record/nothing.md" "" "still-working@session-6c85684c"
+so_roster_row "$R8" "still-working" ".bionic/docs/record/nothing.md" "" "still-working@session-6c85684c"
 
 run_orders "$R8" standdown
 expect_status "standdown with trees exits clean" 0 "$ST"
@@ -381,7 +375,7 @@ git -C "$R9/.worktrees/land-p" add -A >/dev/null 2>&1
 git -C "$R9/.worktrees/land-p" commit -qm "land-p work" >/dev/null 2>&1
 git -C "$R9" checkout -q -b main
 echo land-p > "$R9/.bionic/docs/record/land-p.md"
-roster_row "$R9" "land-p" ".bionic/docs/record/land-p.md" "" "land-p@session-6c85684c"
+so_roster_row "$R9" "land-p" ".bionic/docs/record/land-p.md" "" "land-p@session-6c85684c"
 
 run_orders "$R9" standdown
 expect_status "standdown on a protected checkout still exits clean" 0 "$ST"
@@ -401,8 +395,7 @@ expect_status "a session with no trees stands down unchanged" 0 "$ST"
 expect_absent "…and reports no landings" "LANDED branch=" "$OUT"
 
 # ============================================================
-echo ""
-echo "=== Section 7: standdown reports LIVENESS beside a held row, and still writes nothing (S6) ==="
+section "Section 7: standdown reports LIVENESS beside a held row, and still writes nothing (S6)"
 # ============================================================
 #
 # WHAT THE ROSTER CANNOT SAY. A row whose contract has not landed is held either way, and
@@ -418,18 +411,19 @@ R8SLUG=$(printf '%s' "$R8" | sed 's/[^a-zA-Z0-9]/-/g')
 mkdir -p "$R8CFG/projects/$R8SLUG"
 R8TR="$R8CFG/projects/$R8SLUG/$SID.jsonl"
 
-# The recorded ListAgents answer, in the harness's real shape (bodies byte-verbatim in
-# tests/live-agents.test.sh; the separator is U+00B7 and `[8895ce]` is the ref suffix the
-# reader strips). FRESH because the answer postdates the last user prompt.
+# THE ANSWER BODY IS BUILT BY tests/lib/live-answer.sh (S17, spec AC-27/AC-28): the self
+# line, the `Teammates (N):` header and every teammate row come out of the committed corpus
+# at tests/fixtures/claude/listagents-answers.jsonl with only this suite's names and
+# statuses substituted in place. The private builder that used to sit here re-typed the
+# harness's separator, its ref suffix and its recognition anchor — three spellings of that
+# anchor across the tree, and the one thing standing between "empty answer" and
+# "unrecognised body".
+# FRESH because the answer postdates the last user prompt.
+LIVE_ANSWER_TYPE="bionic:implementor"
 plant_live() {  # <transcript> <fresh|stale> <name>...
   local tr="$1" freshness="$2"; shift 2
-  local body n
-  body=$(
-    printf 'This session is bionic-fixture [fc3e2d] — the name other sessions use to message it (it is not listed below; a message to it would be a message to yourself).\n\nTeammates (%d):\n' "$#"
-    for n in "$@"; do
-      printf '  %s [8895ce]  ·  bionic:implementor  ·  running  ·  started 7m ago\n' "$n"
-    done
-  )
+  local body
+  body="$(live_answer_body "$@")"
   {
     jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
       '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
@@ -454,9 +448,9 @@ run_orders_cfg() {  # <repo> <args…> — like run_orders, with the metadata ro
 }
 
 echo landed > "$R8/.bionic/docs/record/landed.md"
-roster_row "$R8" "met-row"   ".bionic/docs/record/landed.md"  "" "met-row@session-6c85684c"
-roster_row "$R8" "still-at-it" ".bionic/docs/record/nope.md"  "" "still-at-it@session-6c85684c"
-roster_row "$R8" "walked-off"  ".bionic/docs/record/nope2.md" "" "walked-off@session-6c85684c"
+so_roster_row "$R8" "met-row"   ".bionic/docs/record/landed.md"  "" "met-row@session-6c85684c"
+so_roster_row "$R8" "still-at-it" ".bionic/docs/record/nope.md"  "" "still-at-it@session-6c85684c"
+so_roster_row "$R8" "walked-off"  ".bionic/docs/record/nope2.md" "" "walked-off@session-6c85684c"
 plant_live "$R8TR" fresh "still-at-it"
 
 R8_BEFORE=$(cat "$R8/.bionic/tmp/roster-$SID.state")
@@ -505,7 +499,7 @@ expect_absent "…and still carry no liveness claim" "[not live]" "$R8_LA3"
 # typed target or a value lifted off a row, neither of which the fleet charset-guards. The row
 # below answers to nothing in the live set and would be annotated `[live]` off its neighbour's
 # name alone. Diagnostic-only, and the annotation is the entire point of this block.
-roster_row "$R8" "s.ill-at-it" ".bionic/docs/record/nope3.md" "" "s.ill-at-it@session-6c85684c"
+so_roster_row "$R8" "s.ill-at-it" ".bionic/docs/record/nope3.md" "" "s.ill-at-it@session-6c85684c"
 plant_live "$R8TR" fresh "still-at-it"
 run_orders_cfg "$R8" standdown
 R8_LA4=$(printf '%s\n' "$OUT" | sed -n '/LEFT ALONE/,$p')
@@ -521,8 +515,4 @@ expect_absent "…never annotated live off the neighbour its pattern would have 
 expect_contains "…while the real still-at-it beside it is still live" "[live]" \
   "$(printf '%s\n' "$R8_LA4" | grep -F 'still-at-it   (UNMET')"
 
-# ============================================================
-echo ""
-echo "──────────────────────────────────────────────"
-echo "stop-orders.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ]
+finish
