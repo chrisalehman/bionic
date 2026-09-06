@@ -255,17 +255,60 @@ fire_raw "$(jq -nc '{session_id:"11111111-2222-3333-4444-555555555555",cwd:"",ho
 expect_quiet "13: an empty cwd is silent"
 
 # jq itself absent: the hook cannot read its own payload, so it cannot decide.
+#
+# THE PAYLOAD IS BUILT BEFORE THE RESTRICTED PATH APPLIES (wave-01 S4, AC-11).
+# `PATH="$NOJQ" bash "$HOOK" <<< "$(stdin_for "$D")"` is a temporary assignment
+# on a simple command, and bash 3.2 has that assignment IN EFFECT while the
+# here-string's command substitution is expanded, where bash 5.3 does not.
+# `stdin_for` is itself a `jq` call and `jq` is the one program this directory
+# deliberately omits — so, measured on this machine, the same line handed the
+# hook `{"session_id":…}` under 5.3 and a bare newline under 3.2. Under the
+# interpreter ADR-001 pins the fleet to, this assertion was passing on an EMPTY
+# payload: a hook that cannot read a payload it was never given, which is a
+# different fact from the one the label names.
 D=$(make_env); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
-TOTAL=$((TOTAL + 1))
+# EVERYTHING BUT jq. The list this started as — nine programs — was short of
+# what the hook actually runs (`INPUT=$(cat)` on its first working line), so
+# the jq-present control below could not have spoken whatever the hook did.
+# A directory that is missing eleven things does not test the absence of one.
 NOJQ=$(mktemp -d)
-for _b in bash date stat touch git grep sed awk dirname; do
+for _b in bash sh cat date stat touch git grep sed awk dirname basename mktemp \
+          tr head tail cut find rm ls printf realpath readlink id sort uniq wc env; do
   _p=$(command -v "$_b" 2>/dev/null) && ln -sf "$_p" "$NOJQ/$_b"
 done
-_OUT=$(PATH="$NOJQ" bash "$HOOK" <<< "$(stdin_for "$D")" 2>/dev/null); _RC=$?
+_PAYLOAD14=$(stdin_for "$D")
+# AND THE SESSION KEY IS SET, THE WAY `fire` SETS IT. Without
+# CLAUDE_CODE_SESSION_ID the hook resolves no session, matches no stamp and is
+# silent on ANY input — measured here — so the call below was silent for that
+# reason as much as for the missing jq. Two wrong reasons for one right answer.
+TOTAL=$((TOTAL + 1))
+if [ -n "$_PAYLOAD14" ]; then
+  pass "14a: the jq-absent fixture built a real payload to hand the hook"
+else
+  fail "14a: the jq-absent fixture handed the hook nothing" \
+       "14 below would then pass for the wrong reason"
+fi
+TOTAL=$((TOTAL + 1))
+_OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" PATH="$NOJQ" bash "$HOOK" <<< "$_PAYLOAD14" 2>/dev/null); _RC=$?
 if [ "$_RC" -eq 0 ] && [ -z "$_OUT" ]; then
   pass "14: jq absent — passes, silent"
 else
   fail "14: jq absent did not pass silently" "rc=$_RC stdout=<$_OUT>"
+fi
+# THE PAIRED POSITIVE, on the same payload and the same directory with jq put
+# back. Silence is the easiest verdict in the world to get by accident, and
+# every other reason this hook could be silent — a stamp the fixture failed to
+# plant, a payload the hook rejects for some other reason, a hook that says
+# nothing on any input — survives assertion 14 untouched. This is the arm that
+# rules them out: change one program on the PATH and the same call speaks.
+_jq_real=$(command -v jq 2>/dev/null) && ln -sf "$_jq_real" "$NOJQ/jq"
+TOTAL=$((TOTAL + 1))
+_OUT14B=$(env CLAUDE_CODE_SESSION_ID="$SID" PATH="$NOJQ" bash "$HOOK" <<< "$_PAYLOAD14" 2>/dev/null); _RC14B=$?
+if [ "$_RC14B" -eq 0 ] && [ -n "$_OUT14B" ]; then
+  pass "14b: …and with jq put back, that same payload DOES produce a finding"
+else
+  fail "14b: the jq-present control said nothing either — 14 proves nothing" \
+       "rc=$_RC14B stdout=<$_OUT14B>"
 fi
 rm -rf "$NOJQ"
 
