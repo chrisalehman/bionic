@@ -44,6 +44,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 . "$(dirname "$0")/lib/frontmatter-parser.sh"
 
@@ -91,24 +92,17 @@ mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
 # resolve anything.
 unset CLAUDE_CODE_SESSION_ID
 
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-# The haystack reaches grep by here-string, NOT by `printf ... | grep -q`. Under
-# the `set -o pipefail` above, that pipe is a race: `grep -q` exits on the first
-# match without draining stdin, so for any haystack past the 64 KiB pipe buffer
-# — every whole-hook-file assertion in §F/§G/§H/§L below — the printf builtin is
-# still mid-write when grep leaves, takes SIGPIPE, and reports 141. pipefail
-# then makes 141 the PIPELINE status even though grep exited 0 having FOUND the
-# needle, so expect_contains reports `missing:` for a needle that is present and
-# expect_absent returns a false GREEN on a needle that is. That is the whole of
-# the epic-17-w1 "cross-gate flake" — an in-process scheduling race, not state
-# pollution. expect_contains/expect_absent here used to be pinned by
-# tests/assert-helper-race.test.sh, and expect_absent_ug below (§L) was pinned
-# there too; that suite was deleted at 8582861 (epic-18 wave-03) and nothing
-# replaced either pin.
-expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
+# ok/no/expect_eq/expect_contains/expect_absent/expect_true/expect_false migrated onto
+# tests/lib/assert.sh (S5a, AC-12). The framework's expect_contains/expect_absent are a
+# quoted `case` glob, never `grep -F` — no pipe, so the epic-17-w1 SIGPIPE-141 flake this
+# block used to describe by hand cannot recur, and no 64 KiB haystack limit either. The
+# ONE semantic difference measured against the private definitions this file used to carry
+# (byte-identical to the framework's except here): `grep -F` treats a NEWLINE inside the
+# needle as alternation ("either line matches"), while the framework's `case` requires the
+# whole multi-line needle as one contiguous substring. Exactly one call site in this file
+# passed a two-line needle (§B2, "the two-line shape, plan first") — verified line-by-line
+# that its fixture always produces the two lines adjacent and in order, so the tighter
+# contiguous check is not a narrowing here; see that assertion's own comment.
 
 # SUBSTRING, AS A FUNCTION RATHER THAN A `case` INSIDE `$( … )`. bash 3.2 — what
 # `/bin/bash` is on macOS, and what this file's shebang names — mis-parses a `case` inside
@@ -122,15 +116,6 @@ cg_contains() {  # <haystack> <needle> -> yes|no
     *)      printf 'no'  ;;
   esac
 }
-expect_absent()   { if grep -qF -- "$2" <<<"$3"; then no "$1" "unexpectedly present: $2"; else ok "$1"; fi; }
-# expect_true/expect_false take a COMMAND as the assertion. Added epic-18 W3 slice 4/3:
-# §L.7 called both against a helper that was never defined in this file, so under the
-# `set -uo pipefail` above (no `-e`) each call died on stderr as `command not found`,
-# incremented no counter and rendered no verdict — three assertions that had never once
-# been evaluated (s1-probe-report F2). Defined here so a call site is either a real
-# verdict or a hard error, never silence.
-expect_true()     { local _l="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$_l"; else no "$_l" "command failed: $*"; fi; }
-expect_false()    { local _l="$1"; shift; if "$@" >/dev/null 2>&1; then no "$_l" "command unexpectedly succeeded: $*"; else ok "$_l"; fi; }
 
 SID_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 SID_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
@@ -847,8 +832,7 @@ EOF
 }
 
 # ============================================================
-echo ""
-echo "=== A1 — N-way agreement on active-wave detection (AC-9, checklist A8/A9) ==="
+section "A1 — N-way agreement on active-wave detection (AC-9, checklist A8/A9)"
 # ============================================================
 echo "parties: $(basename "$PARTY_DP") · $(basename "$PARTY_SG") · $(basename "$PARTY_EG") · $(basename "$PARTY_ER") · $(basename "$PARTY_LG")"
 
@@ -875,8 +859,7 @@ expect_eq "…and re-engaged, the dispatch wall decides again"  "yes" "$(verdict
 # the copy it holds is really the active-wave detection block, not something else.
 
 # ============================================================
-echo ""
-echo "=== A2 — a LIBRARY mutation moves every party (checklist A9, TDD §9) ==="
+section "A2 — a LIBRARY mutation moves every party (checklist A9, TDD §9)"
 # ============================================================
 #
 # WHAT THIS SECTION USED TO PROVE, AND WHY THE PROOF MOVED. Until bionic 1.4.0 the
@@ -992,8 +975,7 @@ PARTY_DP="$saved_dp"; PARTY_SG="$saved_sg"; PARTY_EG="$saved_eg"
 PARTY_ER="$saved_er"; PARTY_LG="$saved_lg"
 
 # ============================================================
-echo ""
-echo "=== A3 — the one KNOWN divergence, pinned so it cannot drift silently ==="
+section "A3 — the one KNOWN divergence, pinned so it cannot drift silently"
 # ============================================================
 #
 # `current: T<n>` on a plan that is not `scale: task`: the two gates read the
@@ -1014,8 +996,7 @@ expect_eq "T-token, wave scale: the start gate reads an active wave"  "yes" "$(v
 expect_eq "T-token, wave scale: the stop gate reads an active wave"   "other:pass-with-output" "$(verdict_sg "$TREPO")"
 
 # ============================================================
-echo ""
-echo "=== B — the session-identity key: producer and BOTH consumers agree ==="
+section "B — the session-identity key: producer and BOTH consumers agree"
 # ============================================================
 #
 # Ownership table (spec §Design): preflight-probe WRITES the session identity;
@@ -1123,8 +1104,7 @@ expect_eq "stop gate: a one-character-different session is refused (exact compar
 # itself, so the reason is legible when it does.
 
 # ============================================================
-echo ""
-echo "=== C — target resolution: the observation and BOTH stop-guard arms agree ==="
+section "C — target resolution: the observation and BOTH stop-guard arms agree"
 # ============================================================
 #
 # `scan_subagent_dirs` and the portable file facts are duplicated between
@@ -1371,8 +1351,7 @@ expect_eq "the size the observation PRINTS is the size the recorder STORES" \
   "$OBS_SIZE" "$REC_SIZE"
 
 # ============================================================
-echo ""
-echo "=== D — cross-script security regressions (AC-8, TDD §8) ==="
+section "D — cross-script security regressions (AC-8, TDD §8)"
 # ============================================================
 #
 # Per-script coverage already exists for: the credential value never reaching
@@ -1501,8 +1480,7 @@ expect_eq "the start gate writes ONLY the attestation, the roster row and their 
 ( cd "$QREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" nobody >/dev/null 2>&1 )
 
 # ============================================================
-echo ""
-echo "=== E — classification + contract-source ride the machine line into the recorded observation (slice 4/5) ==="
+section "E — classification + contract-source ride the machine line into the recorded observation (slice 4/5)"
 # ============================================================
 #
 # hooks/stop-check.sh (producer) computes classification/deliverable_source/
@@ -1583,8 +1561,7 @@ expect_absent "the recorder writes no record for a run that showed no evidence" 
   "typed=worker|log=" "$E4_STATE"
 
 # ============================================================
-echo ""
-echo "=== F — the roster row and the observer/progress fields: writer, producer and GATE agree (slice 4/6) ==="
+section "F — the roster row and the observer/progress fields: writer, producer and GATE agree (slice 4/6)"
 # ============================================================
 #
 # Slice 4/6 turned the stop gate into a reader of four things it had never read:
@@ -1730,8 +1707,7 @@ expect_eq "the subagent that looked can" "0" "$ST"
 # breaks this suite with a legible reason rather than turning a wall inert.
 
 # ============================================================
-echo ""
-echo "=== G — the roster FILENAME is one pattern with five sites (6-axis D-1) ==="
+section "G — the roster FILENAME is one pattern with five sites (6-axis D-1)"
 # ============================================================
 #
 # `roster-<session-id>.state` under `.bionic/tmp/` is constructed independently in
@@ -1835,8 +1811,7 @@ for _party in "$PARTY_DP" "$PROBE" "$PARTY_ER" "$PARTY_SG" "$OBSERVE"; do
 done
 
 # ============================================================
-echo ""
-echo "=== H — the LIVENESS fields: writer lifts them, the observation displays them (6-axis A-1) ==="
+section "H — the LIVENESS fields: writer lifts them, the observation displays them (6-axis A-1)"
 # ============================================================
 #
 # The axis-3 FAIL: hooks/stop-check.sh read `claims=` off the roster row and NO
@@ -1872,8 +1847,7 @@ expect_contains "the observation reads that same key" 'line_field "$ROSTER_ROW" 
 expect_contains "the observation reads that same key" 'line_field "$ROSTER_ROW" cadence' "$(cat "$OBSERVE")"
 
 # ============================================================
-echo ""
-echo "=== I — DONE-DETECTION, and the primitives the sweeper says it copied (6-axis D-2, R-1) ==="
+section "I — DONE-DETECTION, and the primitives the sweeper says it copied (6-axis D-2, R-1)"
 # ============================================================
 #
 # hooks/session-sweeper.sh's own header declares four functions "DELIBERATELY DUPLICATED
@@ -2059,8 +2033,7 @@ expect_eq "a PRE-LAUNCH file: the stop gate reads it as delivered (it never date
   "delivered" "$(sc_answer "$DFX/prelaunch.md")"
 
 # ============================================================
-echo ""
-echo "=== J — THE LANDING CONTRACT: the gate refuses exactly when the verdict says UNMET ==="
+section "J — THE LANDING CONTRACT: the gate refuses exactly when the verdict says UNMET"
 # ============================================================
 #
 # epic-16 wave-01 split one answer across two scripts on purpose.
@@ -2236,8 +2209,7 @@ expect_eq "…while the verb's answer is unchanged, because the disk did not cha
   "UNMET" "$(j_verdict unmet)"
 
 # ============================================================
-echo ""
-echo "=== J.2 — only a GATE change can split the two answers (mutation goes RED) ==="
+section "J.2 — only a GATE change can split the two answers (mutation goes RED)"
 # ============================================================
 #
 # Each mutation is applied to a COPY of the gate, installed in its own directory
@@ -2298,8 +2270,7 @@ for m in ignore-background-tasks ambient-session-key no-cd-to-repo; do
 done
 
 # ============================================================
-echo ""
-echo "=== J.3 — a PREDICATE change moves BOTH answers, never one (the single owner) ==="
+section "J.3 — a PREDICATE change moves BOTH answers, never one (the single owner)"
 # ============================================================
 #
 # The mutant sweeper below reads an EMPTY file as delivered — the `[ -s ]` defect
@@ -2321,8 +2292,7 @@ expect_eq "…and the gate passes the same stop it refused a moment ago" "pass" 
 PARTY_LG="$j_saved_lg"; PARTY_SW="$j_saved_sw"
 
 # ============================================================
-echo ""
-echo "=== J.4 — still-live has ONE owner now; the row that split the two is pinned ==="
+section "J.4 — still-live has ONE owner now; the row that split the two is pinned"
 # ============================================================
 #
 # "Is this row still live?" used to be computed at TWO sites in hooks/session-sweeper.sh
@@ -2398,8 +2368,7 @@ expect_eq "…and passes it the moment the progress is fresh again" "0" "$JDL_ST
 PARTY_LG="$j_saved_lg2"
 
 # ============================================================
-echo ""
-echo "=== K — the IDENTITY CHAIN: intended → confirmed → identified, one contract ==="
+section "K — the IDENTITY CHAIN: intended → confirmed → identified, one contract"
 # ============================================================
 #
 # The roster is append-only and a contract ADVANCES along it: `intended` at the
@@ -2714,8 +2683,7 @@ fi
 
 # ============================================================
 # ============================================================
-echo ""
-echo "=== L — the WIRING: one hook, one registration, one manifest ==="
+section "L — the WIRING: one hook, one registration, one manifest"
 # ============================================================
 #
 # A hook that reads an event nobody registered it for is inert, and inert in the
@@ -2977,8 +2945,7 @@ expect_eq "…and the file that row names exists and parses" "ok" \
       && bash -n "$BIONIC_HOOKS_DIR/session-start.sh" 2>/dev/null && echo ok )"
 
 # ============================================================
-echo ""
-echo "=== M — THE ACK, and the stop order: ONE owner, three consumers (epic-16 w2 S3/S9) ==="
+section "M — THE ACK, and the stop order: ONE owner, three consumers (epic-16 w2 S3/S9)"
 # ============================================================
 #
 # Two facts reach the stop arc from outside it, and each has ONE writer and several readers:
@@ -3148,8 +3115,7 @@ OUT=$(mk_stop_payload "$SID_A" "$EX_TR" "$EX_REPO" "expired" | bash "$SG_M" 2>&1
 expect_eq "an order just outside it does not — the ceremony is where it was" "2" "$ST"
 
 # ============================================================
-echo ""
-echo "=== N — the wave-02 facts: one root, one vocabulary, one launch reference (S9) ==="
+section "N — the wave-02 facts: one root, one vocabulary, one launch reference (S9)"
 # ============================================================
 #
 # Six rows specified by the slices that could not add them: `record/w2-s45-wallfacts.md` §6
@@ -3188,8 +3154,8 @@ echo "=== N — the wave-02 facts: one root, one vocabulary, one launch referenc
 # before this wave; the ones that survive are the ones those subsections still drive.
 DP_N="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 
-# expect_ne — asserted the other way round: the value must have MOVED.
-expect_ne() { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected anything but [$2], got it"; fi; }
+# expect_ne migrated onto tests/lib/assert.sh (S5a, AC-12) — same semantics, asserted the
+# other way round: the value must have MOVED.
 
 N_LOADER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/loader.sh"
 [ -r "$N_LOADER_LIB" ] || N_LOADER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/loader.sh"
@@ -3847,8 +3813,7 @@ expect_eq "…and the reader then calls the SAME delivered artifact stale — th
 PARTY_ER="$n_saved_er"
 
 # ============================================================
-echo ""
-echo "=== O — session-poker's copied primitives, CODE-identical (6-axis D-1) ==="
+section "O — session-poker's copied primitives, CODE-identical (6-axis D-1)"
 # ============================================================
 #
 # hooks/session-poker.sh's own header declared five functions "DELIBERATELY DUPLICATED from
@@ -3876,8 +3841,7 @@ fn_code() {  # <file> <function name> -> fn_body with pure-comment lines strippe
 # the five expect_eq's above could be silently vacuous by fn_code stripping everything.
 
 # ============================================================
-echo ""
-echo "=== P — the three roster folds agree that the LATER row wins (ap review P-1) ==="
+section "P — the three roster folds agree that the LATER row wins (ap review P-1)"
 # ============================================================
 #
 # The roster is append-only and a contract advances along it (`intended` → `confirmed` →
@@ -4013,8 +3977,7 @@ expect_eq "…and with the fold flipped to first-row-wins, the SAME contract pas
   "0" "$LG_MUT_RC"
 
 # ============================================================
-echo ""
-echo "=== Q — has_sdlc_state() has NO carrier left: the library is the only reader ==="
+section "Q — has_sdlc_state() has NO carrier left: the library is the only reader"
 # ============================================================
 #
 # It was a five-copy family: the evidence gate held the origin (the file documenting the
@@ -4052,8 +4015,7 @@ expect_eq "…while the library defines the predicate it replaced them with" "ye
   "$(/usr/bin/grep -q '^active_plan()' "$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh" && echo yes || echo no)"
 
 # ============================================================
-echo ""
-echo "=== R — where a contracted path resolves: four copies, one rule (epic-17 W6 S15) ==="
+section "R — where a contracted path resolves: four copies, one rule (epic-17 W6 S15)"
 # ============================================================
 #
 # THE DISAGREEMENT THIS ENDS, measured on this epic's own dispatches. A brief writes
@@ -4148,8 +4110,7 @@ fi
 
 
 # ============================================================
-echo ""
-echo "=== Section P — the Patrol stamp: the poker WRITES exactly the path the gate READS ==="
+section "Section P — the Patrol stamp: the poker WRITES exactly the path the gate READS"
 # ============================================================
 #
 # epic-17 wave-05 slice 4/4 (spec AC-6). A producer/consumer pair with the path spelled
@@ -4199,8 +4160,7 @@ P_OUT2=$(mk_agent_payload "$P_SID" "$P_REPO" | bash "$PARTY_DP" 2>&1 >/dev/null)
 expect_eq "…and the named fix opens it: the same dispatch now passes" "0" "$P_ST2"
 
 # ============================================================
-echo ""
-echo "=== Section Q — refusal credit: one rule, two readers ==="
+section "Section Q — refusal credit: one rule, two readers"
 # ============================================================
 #
 # Step-6 findings C1/C2/C3, .bionic/docs/record/task-dispatch-wall-channel-loss/
@@ -4343,8 +4303,7 @@ expect_eq "…and the truncating copy misses the late marker, so the pair splits
   "0" "$Q_MUT_R"
 
 # ============================================================
-echo ""
-echo "=== Section R — the ADOPTED address: one construction, three sites ==="
+section "Section R — the ADOPTED address: one construction, three sites"
 # ============================================================
 #
 # `<name>@session-<id8>` is the only spelling the platform's stop primitive takes for a
@@ -4444,8 +4403,7 @@ for _f in "$PARTY_SG" "$OBSERVE" "$SPO"; do
 done
 
 # ============================================================
-echo ""
-echo "=== S — which plan answers for the run: the tick reads what the gate reads (wave-1.3.2 4/4, AC-13/AC-14) ==="
+section "S — which plan answers for the run: the tick reads what the gate reads (wave-1.3.2 4/4, AC-13/AC-14)"
 # ============================================================
 #
 # THE COPY THIS SECTION EXISTS FOR. `hooks/session-poker.sh tick` DISARMs the Patrol —
@@ -4748,8 +4706,7 @@ expect_eq "…and the SAME content at depth 2 is seen by the gate (the bound is 
 expect_eq "…and by the tick" "$S_EG" "$S_PK"
 
 # ============================================================
-echo ""
-echo "=== S.4 — THE RUN VERDICT: one root, two sessions, every consumer answers for ITS OWN run ==="
+section "S.4 — THE RUN VERDICT: one root, two sessions, every consumer answers for ITS OWN run"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW THIS DISCHARGES (spec §Design): "the run verdict · owning module
@@ -5169,8 +5126,7 @@ expect_contains "restored: the shipped tree honours the binding again" \
   "$S4_R2A" "$(s4_pk "$S4_R2" "$SID_A")"
 
 # ============================================================
-echo ""
-echo "=== B2 — THE SESSION'S BOUND PLAN: three writers, one marker shape ==="
+section "B2 — THE SESSION'S BOUND PLAN: three writers, one marker shape"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design): "the session's bound plan · owning module
@@ -5240,6 +5196,12 @@ expect_contains "the governing skill bound the plan its Write created" "plan=$B2
 
 expect_eq "engage.sh and poker bind write ONE marker shape" "$B2_E" "$B2_P"
 expect_eq "…and so does the governing skill's bind-on-write" "$B2_E" "$B2_G"
+# S5a NOTE (AC-12 migration): this needle is genuinely two lines, and the framework's
+# expect_contains (a `case` glob) requires them contiguous and in order — stricter than
+# the pre-migration private definition (`grep -F`, which reads the embedded newline as
+# alternation and would have passed on EITHER line alone). b2_shape's own output always
+# writes `plan=` then `engaged_at=` adjacent, so this call site never relied on the
+# looser reading; before/after tallies for this assertion agree (see s5a-report.md).
 expect_contains "…which is the two-line shape, plan first" "plan=$B2_PLAN
 engaged_at=<iso>" "$B2_E"
 expect_contains "…at mode 0600, the invariant the marker has always carried" "rw-------" "$B2_E"
@@ -5278,8 +5240,7 @@ expect_contains "…while still naming the same plan, so the difference is the S
   "plan=$B2_PLAN" "$B2_M"
 
 # ============================================================
-echo ""
-echo "=== OR — THE OPEN-RUN SET: active_run's answer is always a member of open_runs ==="
+section "OR — THE OPEN-RUN SET: active_run's answer is always a member of open_runs"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design): "the open-run set · owning module lib/run.sh
@@ -5375,8 +5336,7 @@ expect_eq "restored: the shipped library answers as it did before the mutation" 
   "$OR_AR2_ST" "$OR_ST"
 
 # ============================================================
-echo ""
-echo "=== RA — ROSTER ATTRIBUTION: two row writers, one plan= field ==="
+section "RA — ROSTER ATTRIBUTION: two row writers, one plan= field"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design): "roster attribution · owning module
@@ -5604,8 +5564,7 @@ expect_eq "session-poker's adopt builds its row by calling roster_row, and holds
 
 
 # ============================================================
-echo ""
-echo "=== LR — THE LIVE-RUN SET: live_runs is always a subset of open_runs ==="
+section "LR — THE LIVE-RUN SET: live_runs is always a subset of open_runs"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design §3): "run is live · owning module `live_runs`
@@ -5789,8 +5748,7 @@ expect_eq "…and the doctored gate now fails the very pin above (the arm goes r
 rm -rf "$LR_GATE_MUT_ROOT"
 
 # ============================================================
-echo ""
-echo "=== LA — THE LIVE-AGENT SET: one parser, three readers ==="
+section "LA — THE LIVE-AGENT SET: one parser, three readers"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design §3): "live agent set · owning module `live_agents`
@@ -6174,8 +6132,7 @@ expect_eq "restored: the wall counts one open row again" "1" "$(la6_open_budget 
 expect_eq "…and so does the tick" "1" "$(la6_open_tick "$(la6_tick)")"
 
 # ============================================================
-echo ""
-echo "=== PC — THE PLAN PATH's CANONICAL FORM: one canonicalizer, three sites ==="
+section "PC — THE PLAN PATH's CANONICAL FORM: one canonicalizer, three sites"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design §3): "plan path canonical form · owning module
@@ -6336,8 +6293,7 @@ expect_eq "restored: bind_plan answers canonically again for ./…" \
   "$PC_CANON" "$(pc_bind_lib "$SID_A" "$PC_DOT")"
 
 # ============================================================
-echo ""
-echo "=== RG — THE PRESSURE RUNG: two consumers, one ring, one rung ==="
+section "RG — THE PRESSURE RUNG: two consumers, one ring, one rung"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design §3): "machine pressure level · owning module
@@ -6607,8 +6563,7 @@ expect_eq "…and the default ring holds none of them: the pin was honoured by e
 expect_contains "…and that default ring is itself inside the sandbox, never the machine's" \
   "$SANDBOX" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring"
 # ============================================================
-echo ""
-echo "=== BP — every shell file in the tree parses under the SYSTEM interpreter ==="
+section "BP — every shell file in the tree parses under the SYSTEM interpreter"
 # ============================================================
 #
 # WHY THIS SECTION EXISTS. `tests/cross-gate-agreement.test.sh` shipped a `case` inside a
@@ -7170,8 +7125,7 @@ expect_contains "DS.8 …and the THIRD PARTY completeness scan goes RED on it" \
 
 
 # ============================================================
-echo ""
-echo "=== CG — the current: GRAMMAR: sched_plan_current agrees with run.sh's run_open step-read (epic-21 T6) ==="
+section "CG — the current: GRAMMAR: sched_plan_current agrees with run.sh's run_open step-read (epic-21 T6)"
 # ============================================================
 #
 # TWO READERS OF ONE FIELD, deliberately duplicated rather than shared (hooks/session-poker.sh
@@ -7288,8 +7242,7 @@ expect_eq "CG.4 …while the shipped file still reads it as step 3 — CG.1 disc
 
 
 # ============================================================
-echo ""
-echo "=== S15 — landing-swept/v1: one writer, pinned to a captured marker ==="
+section "S15 — landing-swept/v1: one writer, pinned to a captured marker"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec AC-26; research-code-map §2.c): hooks/landing-gate.sh's
@@ -7368,8 +7321,7 @@ expect_eq "S15b …the copy is a named constant, not a literal in adopt_copy_mar
   "0" "$(awk '/^adopt_copy_marker\(\)/,/^\}/' "$S15_PK" | grep -cF "grep '^landing-swept/v1|'")"
 
 # ============================================================
-echo ""
-echo "=== S13 — the suite budget: one derivation, one row writer, one alphabet ==="
+section "S13 — the suite budget: one derivation, one row writer, one alphabet"
 # ============================================================
 #
 # (wave-01 verification-cannot-lie, S13; spec AC-20/AC-21; design ledger D2.)
@@ -7483,7 +7435,4 @@ expect_eq "S13.5 …which is what awk needs for a key of this length" \
   "16" "$(( $(printf '%s' 'suites_allowed=' | wc -c | tr -d ' ') + 1 ))"
 
 # ============================================================
-echo ""
-echo "──────────────────────────────────────────────"
-echo "cross-gate-agreement: ${PASS} passed, ${FAIL} failed, ${TOTAL} total"
-[ "$FAIL" -eq 0 ]
+finish

@@ -38,6 +38,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PLUGIN_JSON="${REPO}/payload/.claude-plugin/plugin.json"
@@ -46,12 +47,6 @@ HELP_TMPL="${REPO}/agents-src/templates/commands/help.md.tmpl"
 RENDER_SH="${REPO}/agents-src/render.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "docs-pins.test.sh: jq is required"; exit 1; }
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_eq() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected '$2', got '$3'"; fi; }
-expect_ne() { if [ "$2" != "$3" ]; then ok "$1"; else no "$1" "expected values to differ, both were '$2'"; fi; }
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -65,8 +60,7 @@ help_version_of() {
   grep -m1 -E '^bionic [^ ]+ \(installed\)$' "$1" 2>/dev/null | awk '{print $2}'
 }
 
-echo ""
-echo "=== Section 1: the help version pair equals plugin.json's version (RELEASE, AC-36) ==="
+section "Section 1: the help version pair equals plugin.json's version (RELEASE, AC-36)"
 
 PLUGIN_VERSION="$(plugin_version_of "$PLUGIN_JSON")"
 if [ -n "$PLUGIN_VERSION" ]; then
@@ -151,8 +145,7 @@ fi
 #
 # HERMETIC. Reads committed files by path; doctored copies live under $TMP.
 
-echo ""
-echo "=== Section 2: the WALLS instruction-surface pins (AC-14, AC-26) ==="
+section "Section 2: the WALLS instruction-surface pins (AC-14, AC-26)"
 
 SKILL_MD="${REPO}/payload/skills/canonical-sdlc/SKILL.md"
 SURVIVAL_BLOCK="${REPO}/agents-src/blocks/survival.md"
@@ -315,8 +308,7 @@ expect_ne "19: a doctored agent-discipline.md reads as a different paragraph (pi
 # APPENDED, NEVER REWRITTEN: §1 is RELEASE's and §2 is WALLS's, and a slice that edited
 # another slice's pins would be a slice deciding what that slice owns.
 
-echo ""
-echo "=== Section 3: the SCHED Patrol-text pins (AC-30, AC-38) ==="
+section "Section 3: the SCHED Patrol-text pins (AC-30, AC-38)"
 
 PIN_THROTTLE='**the tick reads pressure to throttle, never to re-derive the budget** — the ceiling is the plan header'"'"'s `parallel-budget:`, written once by Step 0 from the probe, and no live reading ever raises or lowers it.'
 PIN_QUIET='**An armed session that has dispatched nothing yet decides QUIET, never REFUSED** — `poker: QUIET — armed, nothing dispatched yet on this session`, stamp kept — because arming precedes dispatch by design'
@@ -370,8 +362,7 @@ else
   ok "24: a doctored SKILL.md fails the QUIET pin (pin discriminates)"
 fi
 
-echo ""
-echo "--- SECTION 4 — the Patrol tick literal, one string in two files (step-6 review R-8) ---"
+section "SECTION 4 — the Patrol tick literal, one string in two files (step-6 review R-8)"
 #
 # WHAT THIS SECTION OWNS. The armed cron job's prompt begins with the token
 # `bionic-patrol session=<session-id[0:8]>`. SKILL.md is where the operator is told to
@@ -457,9 +448,8 @@ else
     "$TICK_DOC" "$(tick_literal_code "$DOCTORED_TICK_CODE")"
 fi
 
-echo ""
-echo "--- SECTION 5 — the session-bound run, and the bind step in the resume ritual (wave-session-bound-run, A4/AC-5/AC-8) ---"
 #
+# SECTION 5 — the session-bound run, and the bind step in the resume ritual (wave-session-bound-run, A4/AC-5/AC-8).
 # WHAT THIS SECTION OWNS. Two sentences in `payload/skills/canonical-sdlc/SKILL.md`'s Patrol
 # paragraph that no hook can check, and that decide whether a resumed session works its own
 # run or its neighbour's:
@@ -486,8 +476,7 @@ echo "--- SECTION 5 — the session-bound run, and the bind step in the resume r
 #
 # APPENDED, NEVER REWRITTEN: §1-§4 belong to earlier slices.
 
-echo ""
-echo "=== Section 5: the session-bound run and the resume-ritual bind step ==="
+section "Section 5: the session-bound run and the resume-ritual bind step"
 
 # THE PARAGRAPH STATES ONE RULE, ONCE (review readability F1, S10b). Before this pin the
 # Patrol paragraph carried the PRE-wave rule as a fact — "whether this PROJECT has an OPEN
@@ -666,8 +655,7 @@ else
   ok "51: a doctored SKILL.md fails the rung pin (pin discriminates)"
 fi
 
-echo ""
-echo "=== Section 6: Step 8's tmp wipe spares session-keyed state ==="
+section "Section 6: Step 8's tmp wipe spares session-keyed state"
 #
 # THE DEFECT THIS PINS (critic C-2, remediated at S10b). Step 8 said `wipe .bionic/tmp/*`,
 # unqualified. `.bionic/tmp/` is where EVERY session in the root keeps its engagement
@@ -717,8 +705,7 @@ else
   ok "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)"
 fi
 
-echo ""
-echo "=== Section 7: bind's operand takes the spelling session-start prints ==="
+section "Section 7: bind's operand takes the spelling session-start prints"
 #
 # THE PAIR THIS PINS (S10b phase 2). hooks/session-start.sh prints the open-run listing
 # DOCS-root-relative, so an operator copies `plans/<epic>/<wave>.md` out of it. That is the
@@ -776,8 +763,7 @@ else
   ok "52: a poker with the docs-root fallback deleted fails assertion 46's check (pin discriminates)"
 fi
 
-echo ""
-echo "=== Section 8: SKILL.md carries its OWN copy of the rung-pointer sentence (AC-18) ==="
+section "Section 8: SKILL.md carries its OWN copy of the rung-pointer sentence (AC-18)"
 #
 # THE GAP THE READBACK NAMED. Assertions 11/12 pin the rendered role files against
 # `PIN_JOBS`, but nothing here had ever checked SKILL.md's own restatement of the same
@@ -811,8 +797,7 @@ else
 fi
 
 
-echo ""
-echo "=== Section 8: the tick interval, in every place it is written down (D-3) ==="
+section "Section 8: the tick interval, in every place it is written down (D-3)"
 #
 # THE GAP THIS CLOSES. The design ledger's tick-interval row named "docs-pins holds the
 # sentence" as its agreement test, and docs-pins held no such thing: `grep -n '20m'
@@ -882,6 +867,8 @@ fi
 #
 # ANTI-VACUITY, the doctored-copy shape sections 50/51/54/59 use: a SKILL.md with the
 # instrument sentence removed must fail these pins.
+section "SECTION 60-63 — S13: the instrument the brief declares (spec AC-20, AC-21)"
+
 PIN_S13_FILES='`Files:` on a line of its own names the paths this slice will write'
 PIN_S13_DERIVE='the impact command named in `.bionic/config.yaml` turns them into the closed set of suites the agent may run'
 PIN_S13_DECLARE='Where no impact command is configured, name the closed set yourself under `Suites:`'
@@ -931,9 +918,4 @@ expect_eq "63: …and every generated role file carries it" "0" "$S13_ROLES_MISS
 expect_eq "63: …over a non-empty set of role files" "0" \
   "$([ -n "$(ls "${REPO}"/agents/*.md 2>/dev/null)" ] && echo 0 || echo 1)"
 
-echo ""
-echo "========================================"
-echo "docs-pins: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
