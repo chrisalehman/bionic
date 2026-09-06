@@ -404,6 +404,43 @@ expect_eq "3: …before a single row is recorded" \
 expect_eq "3: …and before the suite prints its own tally" \
   "no" "$(contains "$P_OUT" "TOTAL=")"
 
+# --- THE BOUNDARY THE DOCBLOCK NOW STATES (Step-5 audit §5.1) --------------
+# The derivation sees the framework's own name family and nothing else, so a
+# vanished helper under another name is caught at RUNTIME by the runner's
+# stderr-strict arm and not at load. Demonstrated, not asserted from the
+# docblock: the same undefined call under a derived name is red at load, and
+# under a name outside the family is not.
+cat > "$SB/tests/p-outside-family.test.sh" <<'PLANT_OUTSIDE'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+section "a vanished helper outside the derived name family"
+ok "the suite loaded and got this far"
+walk_vanished_helper "gone"
+finish
+PLANT_OUTSIDE
+plant_run p-outside-family.test.sh
+expect_eq "3: a call outside the derived family does not stop the load" "0" "$P_RC"
+expect_eq "3: …and the suite reports a clean tally in spite of it" "yes"   "$(contains "$P_OUT" "1/1 passed, 0 failed")"
+expect_eq "3: …with the diagnostic only on stderr, which is the runner's half" "yes"   "$(contains "$P_OUT" "command not found")"
+# PAIRED: the SAME shape under a derived name IS red at load.
+cat > "$SB/tests/p-inside-family.test.sh" <<'PLANT_INSIDE'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+section "a vanished helper inside the derived name family"
+expect_vanished_helper "gone"
+finish
+PLANT_INSIDE
+plant_run p-inside-family.test.sh
+expect_eq "3: the same call under a DERIVED name is red at load" "1" "$P_RC"
+expect_eq "3: …naming the helper" "yes"   "$(contains "$P_OUT" "helper called but never defined: expect_vanished_helper")"
+# and the docblock says so, with a discriminating pin.
+FAMDOC="$(tr '\n' ' ' < "$FRAMEWORK" | sed 's/#//g' | tr -s ' ')"
+expect_eq "3: the framework says a hand-run has interpreter parity, not verdict parity" "yes"   "$(contains "$FAMDOC" "SO A HAND-RUN HAS INTERPRETER PARITY, NOT VERDICT PARITY")"
+FAMDOC_STRIPPED="$(grep -v 'INTERPRETER PARITY, NOT VERDICT PARITY' "$FRAMEWORK" | tr '\n' ' ' | sed 's/#//g' | tr -s ' ')"
+expect_eq "3: …and that pin discriminates" "no"   "$(contains "$FAMDOC_STRIPPED" "SO A HAND-RUN HAS INTERPRETER PARITY, NOT VERDICT PARITY")"
+
 # ============================================================
 section "4: the derivation does not over-fire"
 # ============================================================

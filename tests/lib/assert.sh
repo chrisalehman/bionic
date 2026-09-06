@@ -696,6 +696,23 @@ _tf_adoption_refusal() {
 # The load-time derivation (AC-14). Runs once, here, for whatever suite sourced
 # this file. A suite the framework cannot read cannot be certified by it, so an
 # unreadable $0 is an error and not a silent skip.
+#
+# WHAT IT CAN AND CANNOT SEE (Step-5 audit §5.1, substance finding 1). It derives
+# the FRAMEWORK'S OWN name family and nothing else: `_tf_scan` records a CALL
+# only for `ok`, `no`, `anchor` and `expect_[a-z_]+` — lower-case and underscores,
+# so `expect_case2` is outside it too. A suite that calls a vanished helper under
+# any other name is invisible here. The walk demonstrated the consequence live:
+# an undefined `walk_vanished_helper` inserted above `finish` left
+# docs-pins.test.sh reporting `107/107 passed, 0 failed`, rc=0, with the
+# diagnostic only on stderr.
+#
+# SO A HAND-RUN HAS INTERPRETER PARITY, NOT VERDICT PARITY. AC-2 makes the
+# hand-run a first-class path by re-executing it under /bin/bash
+# (tests/lib/resolve-roots.sh). What it does NOT give it is the runner's
+# stderr-strict arm, which is what catches that class at RUNTIME — under
+# `tests/run.sh` the suite above is red; typed at a prompt, nothing says so. That
+# is a boundary neither AC-2 nor AC-14 states, and a reader debugging by hand
+# should know which half of the verdict they are getting.
 _tf_require_derived_helpers() {
   local src="$1" scan calls defs name missing=""
   if [ ! -f "$src" ] || [ ! -r "$src" ]; then
