@@ -1880,8 +1880,59 @@ elif [ -n "$IMPACT_COMMAND" ]; then
   set +f; IFS="$_old_ifs"
   _impact_out=""
   if [ "$#" -gt 0 ]; then
+    # A BOUND THE HOOK BUILDS ITSELF (review-c C-16). hooks/hooks.json registers this hook
+    # at "timeout": 10, and the derivation is the whole of the gate's cost: ~0.3 s without
+    # it, ~2.9-3.1 s with it on an idle tree, and 5.06-6.51 s measured while this wave's own
+    # writers were running — which is exactly the condition under which a wave dispatches.
+    #
+    # WHY THE BOUND IS A REFUSAL AND NOT A FALLBACK. A PreToolUse hook killed on the CLI's
+    # timeout does NOT exit 2. The dispatch proceeds, no roster row is written, and the
+    # writer runs with no budget at all — the wall defeated by the cost of the wall. That is
+    # the one failure this arm cannot have, so the overrun is refused here, in time, with a
+    # message. The other derivation failures stay as they were (empty budget + a warning):
+    # a command that answers nothing has still answered.
+    #
+    # BUILT, NOT BORROWED. bionic's command discipline forbids a `timeout`/`gtimeout` binary
+    # and macOS ships neither, so the bound is a backgrounded child and a `kill -0` poll.
+    IMPACT_BOUND_S=6
+    IMPACT_BOUND_TICKS=60          # 60 x 0.1s; the tick is the poll, the product is the bound
+    _impact_tmp="${TMPDIR:-/tmp}/bionic-impact-$$-${RANDOM}.out"
     # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-    _impact_out=$(cd "$REPO" 2>/dev/null && $IMPACT_COMMAND "$@" 2>/dev/null) || _impact_out=""
+    ( cd "$REPO" 2>/dev/null && $IMPACT_COMMAND "$@" >"$_impact_tmp" 2>/dev/null ) &
+    _impact_pid=$!
+    _impact_ticks=0
+    _impact_overran=0
+    while kill -0 "$_impact_pid" 2>/dev/null; do
+      if [ "$_impact_ticks" -ge "$IMPACT_BOUND_TICKS" ]; then
+        kill -TERM "$_impact_pid" 2>/dev/null
+        _impact_overran=1
+        break
+      fi
+      sleep 0.1
+      _impact_ticks=$((_impact_ticks + 1))
+    done
+    wait "$_impact_pid" 2>/dev/null
+    if [ "$_impact_overran" -eq 1 ]; then
+      rm -f "$_impact_tmp"
+      echo "BLOCKED: the impact command did not answer within ${IMPACT_BOUND_S}s, so this dispatch has no budget to record — a wave is active." >&2
+      echo "" >&2
+      echo "The command named by \`impact-command:\` in .bionic/config.yaml turns the paths this" >&2
+      echo "brief declared into the set of suites the agent may run. This hook is registered at a" >&2
+      echo "10-second timeout, and a hook killed on that timeout does NOT refuse: the dispatch" >&2
+      echo "would proceed with no roster row at all, and the writer would run with no budget —" >&2
+      echo "the wall defeated by the cost of the wall. So the derivation is bounded here." >&2
+      echo "" >&2
+      echo "  command: $IMPACT_COMMAND" >&2
+      echo "  paths:   $*" >&2
+      echo "  bound:   ${IMPACT_BOUND_S}s" >&2
+      echo "" >&2
+      echo "Fix: narrow \`Files:\` to the paths this slice really writes, or name the closed set" >&2
+      echo "directly with \`Suites:\` — a declared set needs no derivation at all. If the command" >&2
+      echo "itself has become slow, that is the thing to fix: it runs on every dispatch." >&2
+      exit 2
+    fi
+    _impact_out=$(cat "$_impact_tmp" 2>/dev/null) || _impact_out=""
+    rm -f "$_impact_tmp"
   fi
   SUITES_ALLOWED=$(printf '%s\n' "$_impact_out" | awk -F'\t' '$1 != "" { print $1 }' | sort -u | tr '\n' ' ')
   SUITES_ALLOWED="${SUITES_ALLOWED% }"

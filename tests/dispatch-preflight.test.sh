@@ -3908,4 +3908,82 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_REGRESSION" "w28f-two")"
 expect_status "28f a regression-cause above ## SDLC State does not count" "2" "$GATE_ST"
 expect_contains "28f …and the wall still reports zero causes" "Recorded causes on the plan: 0" "$GATE_ERR"
 
+section "SECTION 29 — the derivation is BOUNDED, and the overrun is a refusal (review-c C-16)"
+# THE DEFECT. The impact command is the whole of this gate's cost — ~0.3 s without it,
+# ~2.9-3.1 s with it on an idle tree, 5.06-6.51 s measured while this wave's own writers
+# were running. hooks/hooks.json registers the hook at "timeout": 10 and the call had no
+# bound of its own. A PreToolUse hook killed on the CLI's timeout does NOT exit 2: the
+# dispatch proceeds, NO ROSTER ROW IS WRITTEN, and the writer runs with no budget at all —
+# the wall defeated by the cost of the wall. So the bound is built here, and it refuses.
+#
+# NO SEAM. The bound is the shipped 6 seconds, not a value this suite hands the hook; the
+# stub below simply outruns it. A test that shortened the bound would prove a constant it
+# had itself supplied and leave the production path unverified.
+
+# s29_impact <repo> <sleep seconds> — an impact command that answers correctly, but late.
+s29_impact() {
+  local repo="$1" secs="$2"
+  mkdir -p "$repo/.bionic"
+  {
+    printf '#!/bin/bash\n'
+    printf 'sleep %s\n' "$secs"
+    printf 'printf "alpha.test.sh\\tpath-ref:fixture\\n"\n'
+  } > "$repo/.bionic/impact-stub.sh"
+  chmod +x "$repo/.bionic/impact-stub.sh"
+  printf 'impact-command: bash %s/.bionic/impact-stub.sh\n' "$repo" > "$repo/.bionic/config.yaml"
+}
+
+# --- 29a: a derivation that outruns the bound REFUSES, and refuses in time ---
+REPO=$(make_repo r29a yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 30
+S29_T0=$(date +%s)
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w29-slow")"
+S29_ELAPSED=$(( $(date +%s) - S29_T0 ))
+expect_status "29a a derivation that outruns the bound REFUSES the dispatch" "2" "$GATE_ST"
+expect_contains "29a …naming the bound it outran" "did not answer within 6s" "$GATE_ERR"
+expect_contains "29a …naming the command that was slow" "impact-stub.sh" "$GATE_ERR"
+expect_contains "29a …naming the paths it was asked about" "payload/scripts/lib/widget.sh" "$GATE_ERR"
+expect_contains "29a …and saying why an unbounded one would be worse" "no roster row" "$GATE_ERR"
+# THE POINT OF THE BOUND IS THE CLOCK. The hook is registered at a 10-second timeout, so a
+# refusal that arrives after it is no refusal at all.
+if [ "$S29_ELAPSED" -lt 10 ]; then
+  ok "29a …and it refused inside the hook's own 10s registration (${S29_ELAPSED}s)"
+else
+  no "29a …and it refused inside the hook's own 10s registration" "took ${S29_ELAPSED}s"
+fi
+# FAIL-CLOSED MEANS NO ROW. A refused dispatch journals nothing, so there is no row a
+# writer-side guard could read as "no budget was stated" and stand aside on.
+expect_status "29a …and journalled no row at all" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# --- 29b: CONTROL — the same brief, the same stub, fast, still derives and passes ---
+REPO=$(make_repo r29b yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 0
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w29-fast")"
+expect_status "29b control: the same stub, prompt, PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "29b …and the derived budget is the stub's answer" \
+  "alpha.test.sh" "$(roster_field "$ROW" suites_allowed)"
+expect_status "29b …recorded as derived" "derived" "$(roster_field "$ROW" suites_source)"
+
+# --- 29c: a derivation that answers NOTHING is unchanged: empty budget, a warning ---
+# The overrun is a refusal because the alternative is an unwritten row; a command that
+# fails or answers nothing has still answered, and the third state (`suites_allowed=` empty)
+# already has readers. This is the boundary between the two, asserted so a later edit
+# cannot quietly turn one into the other.
+REPO=$(make_repo r29c yes)
+write_attestation "$REPO" "$SID_A"
+mkdir -p "$REPO/.bionic"
+printf '#!/bin/bash\nexit 3\n' > "$REPO/.bionic/impact-stub.sh"
+chmod +x "$REPO/.bionic/impact-stub.sh"
+printf 'impact-command: bash %s/.bionic/impact-stub.sh\n' "$REPO" > "$REPO/.bionic/config.yaml"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w29-empty")"
+expect_status "29c a derivation that answers nothing still PASSES" "0" "$GATE_ST"
+expect_contains "29c …with the operator warned at the moment the config is fixable" \
+  "derived no suites" "$GATE_ERR"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "29c …and the row records the empty third state" "" "$(roster_field "$ROW" suites_allowed)"
+
 finish
