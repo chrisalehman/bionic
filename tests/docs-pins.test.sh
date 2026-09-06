@@ -183,14 +183,32 @@ doctor_header_line() { grep -m1 -F 'Bionic Doctor — payload' "$1" 2>/dev/null;
 # which skips hidden directories — and BOTH declaring sites live under one
 # (`payload/.claude-plugin`, `.claude-plugin`). The same trap tests/cross-gate-agreement.test.sh
 # names at its own expect_absent_ug.
+#
+# Candidates come from `git ls-files`, not a filesystem walk — an UNTRACKED file (scratch
+# tooling debris, a stray virtualenv, anything nobody committed) is not a declaring surface
+# just because it happens to sit on disk under payload/. A-48(a): the 2026-09-06 residual
+# was an untracked `.venv`'s `package.json` making the census see three surfaces instead of
+# two in a polluted checkout, while every committed/archived tree only ever saw two. When
+# `$r` is not a git worktree at all (the sweep's own synthetic scratch-tree control below,
+# built with plain `mkdir`/`cp`), there is no tracked/untracked distinction to make, so every
+# file on disk is a candidate — same as before.
 declaring_sites() {
-  local r="$1" f v
+  local r="$1" f v version_candidates installed_candidates
+  if git -C "$r" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    version_candidates=$(cd "$r" && git ls-files -- payload .claude-plugin 2>/dev/null)
+    installed_candidates=$(cd "$r" && git ls-files -- payload agents-src 2>/dev/null)
+  else
+    version_candidates=$(cd "$r" && find payload .claude-plugin -type f 2>/dev/null)
+    installed_candidates=$(cd "$r" && find payload agents-src -type f 2>/dev/null)
+  fi
   {
-    for f in $(cd "$r" && /usr/bin/grep -rlE '^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+[^"]*"' payload .claude-plugin 2>/dev/null); do
+    for f in $version_candidates; do
+      /usr/bin/grep -qE '^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"[0-9]+\.[0-9]+\.[0-9]+[^"]*"' "$r/$f" 2>/dev/null || continue
       v=$(/usr/bin/grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]+"' "$r/$f" 2>/dev/null | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
       printf '%s|%s\n' "$f" "$v"
     done
-    for f in $(cd "$r" && /usr/bin/grep -rlE '^bionic [0-9]+\.[0-9]+\.[0-9]+[^ ]* \(installed\)$' payload agents-src 2>/dev/null); do
+    for f in $installed_candidates; do
+      /usr/bin/grep -qE '^bionic [0-9]+\.[0-9]+\.[0-9]+[^ ]* \(installed\)$' "$r/$f" 2>/dev/null || continue
       v=$(/usr/bin/grep -m1 -E '^bionic [^ ]+ \(installed\)$' "$r/$f" 2>/dev/null | awk '{print $2}')
       printf '%s|%s\n' "$f" "$v"
     done
@@ -928,7 +946,7 @@ else
 fi
 
 
-section "Section 8: the tick interval, in every place it is written down (D-3)"
+section "Section 9: the tick interval, in every place it is written down (D-3)"
 #
 # THE GAP THIS CLOSES. The design ledger's tick-interval row named "docs-pins holds the
 # sentence" as its agreement test, and docs-pins held no such thing: `grep -n '20m'
@@ -997,7 +1015,7 @@ fi
 #
 # ANTI-VACUITY, the doctored-copy shape sections 50/51/54/59 use: a SKILL.md with the
 # instrument sentence removed must fail these pins.
-section "SECTION 60-63 — S13: the instrument the brief declares (spec AC-20, AC-21)"
+section "SECTION 10 — S13: the instrument the brief declares (spec AC-20, AC-21)"
 
 PIN_S13_FILES='`Files:` on a line of its own names the paths this slice will write'
 PIN_S13_DERIVE='the impact command named in `.bionic/config.yaml` turns them into the closed set of suites the agent may run'
