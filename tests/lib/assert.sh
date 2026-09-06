@@ -211,6 +211,16 @@ PASS=0
 FAIL=0
 TOTAL=0
 
+# THIS FILE'S OWN PATH, absolute. `_tf_owned_names` reads the ownership list out
+# of it at call time, and callers run from their own cwd (tests/run.sh cds to the
+# repo root, a suite does not), so a relative path here would be read from
+# whichever directory happened to be current.
+_TF_LIB="${BASH_SOURCE[0]:-$0}"
+case "$_TF_LIB" in
+  /*) ;;
+  *)  _TF_LIB="$(cd "$(dirname "$_TF_LIB")" 2>/dev/null && pwd)/$(basename "$_TF_LIB")" ;;
+esac
+
 # ── section state ────────────────────────────────────────────────────────────
 _TF_SECTION=""        # name of the open section, empty when none
 _TF_SECTION_KIND=""   # assert | setup
@@ -412,6 +422,17 @@ require_helpers() {
 # it. Full-line comments are skipped. Command position means: first word of a
 # line, or the first word after ; & | ( ) { } or then/else/elif/do/if/while/
 # until/!.
+#
+# IT ALSO PRINTS THE TWO RECORDS THE ADOPTION WALL READS (S10), because one
+# scanner is the point: a second one would skip heredocs differently on the day
+# it mattered.
+#
+#   TOPDEF <name>   a function definition at COLUMN 0 — the shadow that replaces
+#                   the framework's own for the rest of the suite. Every TOPDEF
+#                   is also a DEF; an indented or subshell-scoped definition is
+#                   a DEF and NOT a TOPDEF (A-29).
+#   TOPSET <name>   a counter reset (`PASS=0`, `FAIL=0`, `TOTAL=0`) on a line
+#                   that BEGINS with one, including the `PASS=0; FAIL=0` form.
 _tf_scan() {
   awk '
     hd != "" {
@@ -433,10 +454,22 @@ _tf_scan() {
         if (w0 != "") pending = w0
       }
 
+      # a counter reset at column 0, and every one after a `;` on that line
+      if (match(line, /^(PASS|FAIL|TOTAL)=0/) && substr(line, RLENGTH + 1, 1) !~ /[0-9A-Za-z_.]/) {
+        nseg = split(line, seg, /;/)
+        for (si = 1; si <= nseg; si++) {
+          s = seg[si]
+          sub(/^[ \t]+/, "", s)
+          if (match(s, /^(PASS|FAIL|TOTAL)=0/) && substr(s, RLENGTH + 1, 1) !~ /[0-9A-Za-z_.]/)
+            print "TOPSET " substr(s, 1, index(s, "=") - 1)
+        }
+      }
+
       if (match(line, /^[ \t]*[A-Za-z_][A-Za-z0-9_]*[ \t]*\(\)/)) {
         d = substr(line, RSTART, RLENGTH)
         gsub(/[^A-Za-z0-9_]/, "", d)
         print "DEF " d
+        if (line ~ /^[A-Za-z_]/) print "TOPDEF " d
         hd = pending
         next
       }
@@ -456,6 +489,60 @@ _tf_scan() {
       hd = pending
     }
   ' "$1"
+}
+
+# ── the adoption wall's rule (S10, spec AC-12) ───────────────────────────────
+#
+# THE RULE. A suite is refused when its source carries, at COLUMN 0 and outside
+# any heredoc body, a definition of a name THIS FILE owns, or a counter reset
+# (`PASS=0` / `FAIL=0` / `TOTAL=0`). The refusal is the runner's — tests/run.sh
+# calls `_tf_adoption_refusal` before it launches a suite — and the rule lives
+# here, beside the scanner it reads and the names it protects.
+#
+# WHY COLUMN 0 (A-29). A top-level definition REPLACES the framework's function
+# for the whole suite; an indented or subshell-scoped one cannot. The standing
+# example is tests/dispatch-preflight.test.sh r24e, which redefines ok/no and the
+# counters inside a `( … )` to prove expect_eq's failure path is not vacuous —
+# a legitimate probe that shadows by necessity, and one this wall must not
+# refuse.
+#
+# THE TWO EXEMPTIONS, therefore:
+#   - an INDENTED or SUBSHELL-SCOPED redefinition (r24e's probe);
+#   - a definition inside a HEREDOC BODY (A-10b) — tests/framework.test.sh
+#     plants suites carrying `ok()`, `no()` and `PASS=0` through heredocs, so a
+#     scanner that read heredoc bodies would refuse the framework's own suite
+#     first.
+# A suite-specific helper under a name this file does NOT own is not shadowing
+# and stays legal (A-16): `expect_finding`, `expect_audit_line` and the other
+# 24 one-offs are built on ok/no and belong to the suite that needs them.
+
+# _tf_owned_names — the names this framework owns. READ FROM THIS FILE at call
+# time, never hand-listed: every `expect_*` it defines at column 0, plus the six
+# structural names. A helper added below is owned the moment it is written.
+_tf_owned_names() {
+  awk '/^expect_[a-z_]+\(\)/ { n = $0; sub(/\(\).*/, "", n); print n }' "$_TF_LIB"
+  printf '%s\n' ok no section setup_section finish anchor
+}
+
+# _tf_adoption_refusal <suite> — prints ONE line naming the suite, the shadowed
+# names and this file, when <suite> breaks the rule above; prints nothing and
+# returns 0 when it does not. A suite that cannot be read is not judged: the
+# runner is about to fail it for a reason it can state better.
+_tf_adoption_refusal() {
+  local suite="${1:-}" scan owned shadowed bad="" name
+  [ -n "$suite" ] && [ -f "$suite" ] && [ -r "$suite" ] || return 0
+  scan="$(_tf_scan "$suite")"
+  owned=" $(_tf_owned_names | sort -u | tr '\n' ' ')"
+  shadowed="$(printf '%s\n' "$scan" | sed -n 's/^TOPDEF //p' | sort -u)"
+  for name in $shadowed; do
+    case "$owned" in *" $name "*) bad="$bad ${name}()" ;; esac
+  done
+  for name in $(printf '%s\n' "$scan" | sed -n 's/^TOPSET //p' | sort -u); do
+    bad="$bad ${name}=0"
+  done
+  [ -n "$bad" ] || return 0
+  printf '%s defines%s at column 0 — the framework owns those names: %s\n' \
+    "$suite" "$bad" "$_TF_LIB"
 }
 
 # The load-time derivation (AC-14). Runs once, here, for whatever suite sourced
@@ -482,4 +569,12 @@ _tf_require_derived_helpers() {
   fi
 }
 
-_tf_require_derived_helpers "${0:-}"
+# THE DERIVATION IS FOR SUITES. tests/run.sh sources this file too — for the
+# scanner the adoption wall reads (S10) — and it is not a suite: it has no
+# assertion calls to derive, and dying at its load would take the whole run with
+# it. The runner is the ONE exception, recognised by its own name, so nothing in
+# the environment can turn this off for a suite.
+case "${0##*/}" in
+  run.sh) : ;;
+  *)      _tf_require_derived_helpers "${0:-}" ;;
+esac
