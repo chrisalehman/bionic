@@ -1820,14 +1820,22 @@ else
   if [ -n "$FIX_LINES_OTHER" ]; then
     while IFS= read -r _fix_other; do
       [ -n "$_fix_other" ] || continue
-      # THROUGH THE SAME OWNER THE VERDICT LINE ABOVE USES (1.4.4 fixit phase 4,
-      # review-a A-2). These lines were the one part of the report printed with a
-      # bare `printf` and no bound, which held only while every one of them was
-      # short by construction — and it stopped holding when the core-absence line
-      # started carrying a 44-column variable-length field. `bionic_line`
-      # computes the budget from the real prefix, so the `→ ` costs its two
-      # columns and the line lands at 100 rather than 102.
-      printf '%s\n' "$(bionic_line "→ " "$_fix_other")"
+      # EACH LINE IS PRINTED WHOLE, AND THE BOUND LIVES AT THE BUILD SITE
+      # (1.4.4 fixit phase 5, regression on tests/doctor-restart.test.sh). Phase
+      # 4 wrapped this loop in `bionic_line "→ "` to bound the core-absence line
+      # it had just made variable-length, and a loop-wide bound was the wrong
+      # place for it: it bounds every OTHER line here too, and the restart line
+      # above (~170 columns) carries its payload in its tail — the timestamp the
+      # operator is being asked to compare against. Truncating there deletes the
+      # fact and leaves the instruction, which is the failure mode `bionic_line`
+      # exists to prevent, one level up.
+      #
+      # So the 100-column guarantee is the core-absence line's own, computed
+      # where that line is built (search `_doctor_core_head`) from a fixed part
+      # that already counts this `→ `. A line that needs a bound gets one at its
+      # build site, where the thing that must survive the cut is known. The
+      # restart line's oversize is pre-existing and is tracked separately.
+      printf '→ %s\n' "$_fix_other"
     done <<< "$FIX_LINES_OTHER"
     # The one command that cannot ride on its own line: a raw URL inside a
     # pipefail wrapper, printed whole underneath rather than wrapped by the
