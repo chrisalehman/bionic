@@ -32,31 +32,13 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 DOCTOR_SH="${PAYLOAD}/scripts/doctor.sh"
 
 command -v jq >/dev/null 2>&1 || { echo "doctor-reads.test.sh: jq is required"; exit 1; }
-
-PASS=0; FAIL=0; TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; return 0; }
-expect_true()  { local label="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$label"; else no "$label"; fi; }
-expect_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then ok "$label"; else no "$label" "no match for '$pattern' in: $(printf '%.700s' "$actual")"; fi
-}
-expect_eq() {
-  local label="$1" want="$2" got="$3"
-  if [ "$want" = "$got" ]; then ok "$label"; else no "$label" "expected '$want', got '$got'"; fi
-}
-expect_no_match() {
-  local label="$1" pattern="$2" actual="$3"
-  # shellcheck disable=SC2053  # RHS is a glob on purpose
-  if [[ "$actual" == $pattern ]]; then no "$label" "unexpected match for '$pattern'"; else ok "$label"; fi
-}
 
 # THE 100-COLUMN RULE, MEASURED THE WAY width.sh MEASURES IT — every glyph in
 # `_bionic_cols_into`'s closed set substituted for one ASCII character before the
@@ -151,7 +133,7 @@ run_doctor_no_claude() {  # [extra env assignments] — the CLI off PATH
       bash "$DOCTOR_SH" < /dev/null 2>&1 )
 }
 
-echo "=== Section 1: pnpm-store — the cause names the file that could not be read ==="
+section "Section 1: pnpm-store — the cause names the file that could not be read"
 
 # A store directory with no index.db. `_dep_check_pnpm_store` answers `unknown`
 # here, and the row's cause is what this section is about.
@@ -166,8 +148,7 @@ expect_match "1: the row names the missing store index" \
 expect_no_match "2: the retired 'no presence surface' sentence is gone from the motion row" \
   "*motion*no presence surface*" "$ROW1"
 
-echo ""
-echo "=== Section 2: pnpm-store — a readable index answers, and says nothing extra ==="
+section "Section 2: pnpm-store — a readable index answers, and says nothing extra"
 
 FULL_STORE="${TMP}/pnpm-store-full"
 mkdir -p "$FULL_STORE"
@@ -181,8 +162,7 @@ ROW2="$(printf '%s\n' "$OUT2" | awk '/motion/')"
 expect_match "3: a readable index reports the cached version" "*motion*12.3.4*" "$ROW2"
 expect_no_match "4: and carries no unreadable-index cause" "*index.db*" "$ROW2"
 
-echo ""
-echo "=== Section 3: the installed agent copies, and their drift, reach the page ==="
+section "Section 3: the installed agent copies, and their drift, reach the page"
 
 # A payload agent copied into the claude-home and then EDITED: the probe's
 # `drift` count is exactly this, and nothing rendered it.
@@ -199,8 +179,7 @@ expect_match "6: the drifted installed copy is named" \
   "*installed agent*${_agent_name}*" "$OUT3"
 expect_match "7: and it carries a repair" "*installed agent*/bionic:setup*" "$OUT3"
 
-echo ""
-echo "=== Section 4: legacy hook files on disk reach the page ==="
+section "Section 4: legacy hook files on disk reach the page"
 
 mkdir -p "${CHOME}/hooks"
 cp "${PAYLOAD}/hooks/protect-main.sh" "${CHOME}/hooks/protect-main.sh" 2>/dev/null
@@ -211,8 +190,7 @@ OUT4="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
 expect_match "8: the count of legacy hook FILES is printed" "*legacy hook file*2*" "$OUT4"
 expect_match "9: and it carries a repair" "*legacy hook file*/bionic:setup*" "$OUT4"
 
-echo ""
-echo "=== Section 5: the legacy skill copy names its path ==="
+section "Section 5: the legacy skill copy names its path"
 
 mkdir -p "${CHOME}/skills/canonical-sdlc"
 printf -- "---\nname: canonical-sdlc\n---\n" > "${CHOME}/skills/canonical-sdlc/SKILL.md"
@@ -225,8 +203,7 @@ OUT5="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
 expect_match "10: the row names the directory a reader has to go to" \
   "*legacy installed skill copy*~/claude-home/skills/canonical-sdlc*" "$OUT5"
 
-echo ""
-echo "=== Section 6: the duplicate-registry scan reaches the page ==="
+section "Section 6: the duplicate-registry scan reaches the page"
 
 # One plugin registered twice under two marketplaces — the state the probe was
 # written for, and whose consolidation command it already computes.
@@ -241,8 +218,7 @@ expect_match "11: the duplicate is named" "*duplicate*bionic*" "$OUT6"
 expect_match "12: with the consolidation command the probe computed" \
   "*claude plugin uninstall bionic@my-fork*" "$OUT6"
 
-echo ""
-echo "=== Section 6b: a renderer venv stale against uv.lock renders as a re-sync ==="
+section "Section 6b: a renderer venv stale against uv.lock renders as a re-sync"
 
 # THE VENV FINDING (wave assumptions, 22:30Z). `_dep_check_uv_project` gained a
 # third state — `stale`, a venv built against a DIFFERENT `uv.lock` than the one
@@ -287,8 +263,7 @@ else
   no "12b5: neither shasum nor sha256sum is on PATH"
 fi
 
-echo ""
-echo "=== Section 6c: setup treats stale as a re-sync, never as a fresh offer ==="
+section "Section 6c: setup treats stale as a re-sync, never as a fresh offer"
 
 # STRUCTURAL, AND PINNED TO THE MECHANISM RATHER THAN TO A SENTENCE. AC-17 says a
 # stale venv is "re-synced, not re-offered", and the thing that decides whether a
@@ -309,8 +284,7 @@ case "$STALE_ARM" in
   *) no "12c3: the stale arm names no installer" ;;
 esac
 
-echo ""
-echo "=== Section 6d: a settings.json still naming npx flags a defect (epic-21 AC-3) ==="
+section "Section 6d: a settings.json still naming npx flags a defect (epic-21 AC-3)"
 
 # THE NETWORK-PER-RENDER DEFECT (bug-ccstatusline-npx-per-render.md, Fix step 5). A
 # `statusLine.command` that still starts with `npx ` is the pre-fix shape: Claude Code
@@ -377,8 +351,7 @@ expect_no_match "12d3: the installed-binary command form is never flagged" \
   "*statusLine command*npx*" "$OUT6E"
 
 echo ""
-echo ""
-echo "=== Section 6f: an absent CORE dependency routes to the CLI, not /bionic:setup (1.4.4 fixit) ==="
+section "Section 6f: an absent CORE dependency routes to the CLI, not /bionic:setup (1.4.4 fixit)"
 
 # A CORE DEPENDENCY IS BIONIC'S OWN. `payload/.claude-plugin/plugin.json` declares
 # superpowers and agent-skills as bionic's dependencies and the CLI installs them alongside
@@ -561,7 +534,7 @@ expect_match "12f16: the headline core line ends with the re-pointed catalog, wh
 # this catalog the 44 overflows by seven columns.
 expect_eq "12f17: …and the whole line still fits 100 columns" "" "$(too_wide "$HEAD6FMK")"
 
-echo "=== Section 7: nothing this file gathers is left unrendered ==="
+section "Section 7: nothing this file gathers is left unrendered"
 
 # THE STRUCTURAL HALF, and it is the one that keeps this class of defect from
 # coming back: a top-level assignment in doctor.sh whose name is never read
@@ -617,8 +590,7 @@ PY
   else no "13: a fact is computed and never read" "$UNREAD"; fi
 fi
 
-echo ""
-echo "=== Section 8: registration, and the column budget ==="
+section "Section 8: registration, and the column budget"
 
 expect_true "14: tests/run.sh names doctor-reads.test.sh" \
   grep -q 'run "doctor-reads.test.sh" bash tests/doctor-reads.test.sh' "${REPO}/tests/run.sh"
@@ -628,8 +600,7 @@ if [ -z "$_over" ]; then ok "15: every line of the fullest run fits 100 columns"
 else no "15: a line exceeds 100 columns" "$_over"; fi
 
 
-echo ""
-echo "=== Section 9: the claude CLI absent, and present, on one fixture (AC-7) ==="
+section "Section 9: the claude CLI absent, and present, on one fixture (AC-7)"
 
 # THE PAIR IS THE POINT, AND IT IS THE STATE THAT USED TO BREAK THIS SUITE.
 # `claude` is the one program on the fixture's PATH whose presence changes what
@@ -650,9 +621,4 @@ _over="$(too_wide "$OUT_NOCLI")"
 if [ -z "$_over" ]; then ok "16.4: the CLI-absent page still fits 100 columns"
 else no "16.4: a line of the CLI-absent page exceeds 100 columns" "$_over"; fi
 
-echo ""
-echo "========================================"
-echo "doctor-reads: $PASS/$TOTAL passed"
-echo "========================================"
-
-[ "$FAIL" -eq 0 ] || exit 1
+finish
