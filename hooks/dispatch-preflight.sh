@@ -1821,7 +1821,7 @@ fi
 # `Suites:` IS THE OTHER HALF, not a legacy spelling. bionic runs in repositories that
 # have no impact command and never will, and there the author is the only one who can
 # state the set — so a declared list is a first-class input, recorded as
-# `suites-source=declared` so no reader downstream mistakes a stated set for a derived
+# `suites_source=declared` so no reader downstream mistakes a stated set for a derived
 # one. It also WINS over a derivation when a brief carries both: `Suites: none` is the
 # waiver, and a waiver that a derivation could overrule is not a waiver.
 #
@@ -2111,7 +2111,7 @@ ROW=$(roster_row \
   "waiver=${C_WAIVER}" \
   "files=${C_FILES}" \
   "suites_allowed=${SUITES_ALLOWED}" \
-  "suites-source=${SUITES_SOURCE}" \
+  "suites_source=${SUITES_SOURCE}" \
   "tool_use_id=${TOOL_USE_ID}" \
   "plan=${ROSTER_PLAN}") || ROW=""
 

@@ -142,7 +142,7 @@ echo "=== B1 — a stated budget: on it passes, off it refuses ==="
 # ============================================================
 R1=$(mk_repo b1)
 add_row "$R1" name=w-b1 "agent_id=$ACTOR" "suites_allowed=alpha.test.sh beta.test.sh" \
-  suites-source=derived files=payload/scripts/lib/widget.sh
+  suites_source=derived files=payload/scripts/lib/widget.sh
 
 guarded "$R1" 'bash tests/alpha.test.sh'
 expect_eq "B1a a suite ON the budget is allowed" "0" "$ST"
@@ -201,7 +201,7 @@ expect_contains "B2a …calling itself a BUDGET" "BUDGET" "$ERR"
 expect_contains "B2a …and naming the standing ruling it makes mechanical" "One regression means one" "$ERR"
 
 R2=$(mk_repo b2)
-add_row "$R2" name=w-b2 "agent_id=$ACTOR" suites_allowed=run.sh suites-source=declared files=
+add_row "$R2" name=w-b2 "agent_id=$ACTOR" suites_allowed=run.sh suites_source=declared files=
 guarded "$R2" 'bash tests/run.sh'
 expect_eq "B2b the Step-5 runner, whose row carries run.sh, is allowed" "0" "$ST"
 expect_empty "B2b …silently" "$OUT$ERR"
@@ -239,7 +239,7 @@ echo "=== B4 — the three states of suites_allowed ==="
 # are three different facts and the arm answers each differently.
 
 R4A=$(mk_repo b4a)
-add_row "$R4A" name=w-b4a "agent_id=$ACTOR" suites_allowed=none suites-source=declared files=
+add_row "$R4A" name=w-b4a "agent_id=$ACTOR" suites_allowed=none suites_source=declared files=
 guarded "$R4A" 'bash tests/alpha.test.sh'
 expect_eq "B4a a Suites: none row refuses every named suite" "2" "$ST"
 expect_contains "B4a …saying the brief declared none" "Suites: none" "$ERR"
@@ -247,7 +247,7 @@ guarded "$R4A" 'bash tests/run.sh'
 expect_eq "B4a …and the full tree with it" "2" "$ST"
 
 R4B=$(mk_repo b4b)
-add_row "$R4B" name=w-b4b "agent_id=$ACTOR" suites_allowed= suites-source=derived files=x/y.sh
+add_row "$R4B" name=w-b4b "agent_id=$ACTOR" suites_allowed= suites_source=derived files=x/y.sh
 guarded "$R4B" 'bash tests/alpha.test.sh'
 expect_eq "B4b an EMPTY budget stands aside for a named suite" "0" "$ST"
 expect_empty "B4b …silently" "$OUT$ERR"
@@ -270,7 +270,7 @@ expect_absent "B4c …and it carries no suites_allowed key" \
   "suites_allowed=" "$(cat "$R4C/.bionic/tmp/roster-$SID.state")"
 
 R4D=$(mk_repo b4d)                                   # no row for this agent at all
-add_row "$R4D" name=someone-else "agent_id=$OTHER" suites_allowed=alpha.test.sh suites-source=declared files=
+add_row "$R4D" name=someone-else "agent_id=$OTHER" suites_allowed=alpha.test.sh suites_source=declared files=
 guarded "$R4D" 'bash tests/alpha.test.sh'
 expect_eq "B4d no row for this agent stands aside for a named suite" "0" "$ST"
 guarded "$R4D" 'bash tests/run.sh'
@@ -287,9 +287,9 @@ echo "=== B5 — the LAST row carrying this id wins ==="
 # Each carries the budget forward, and the newest is the current statement about the agent.
 R5=$(mk_repo b5)
 add_row "$R5" name=w-b5 "agent_id=$ACTOR" status=intended suites_allowed=alpha.test.sh \
-  suites-source=declared files=
+  suites_source=declared files=
 add_row "$R5" name=w-b5 "agent_id=$ACTOR" status=confirmed suites_allowed="alpha.test.sh delta.test.sh" \
-  suites-source=declared files=
+  suites_source=declared files=
 guarded "$R5" 'bash tests/delta.test.sh'
 expect_eq "B5a a suite the LATER row allows is allowed" "0" "$ST"
 guarded "$R5" 'bash tests/epsilon.test.sh'
