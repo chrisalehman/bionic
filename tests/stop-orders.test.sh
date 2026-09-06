@@ -20,19 +20,14 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 ORDERS="$HERE/stop-orders.sh"
 SWEEPER="$HERE/session-sweeper.sh"
-PASS=0
-FAIL=0
-TOTAL=0
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/stop-orders-test.XXXXXX")" && pwd)"
 trap 'rm -rf "$SANDBOX"' EXIT
-
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
 
 expect_status()   { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected exit $2, got $3"; fi; }
 expect_contains() { if grep -qF -- "$2" <<<"$3"; then ok "$1"; else no "$1" "missing: $2"; fi; }
@@ -72,8 +67,7 @@ run_orders() {  # <repo> <args…>
 }
 
 # ============================================================
-echo ""
-echo "=== Section 1: usage, session key, hostile paths ==="
+section "Section 1: usage, session key, hostile paths"
 # ============================================================
 
 R1="$(make_repo usage)"
@@ -102,8 +96,7 @@ run_orders "$R2" order someone
 expect_status "a symlinked orders file is REFUSED" 2 "$ST"
 
 # ============================================================
-echo ""
-echo "=== Section 2: the order verb records, reports, and never refuses (R3) ==="
+section "Section 2: the order verb records, reports, and never refuses (R3)"
 # ============================================================
 
 R3="$(make_repo ordering)"
@@ -132,8 +125,7 @@ run_orders "$R3" order ghost
 expect_status "an order for an unknown name is still recorded" 0 "$ST"
 
 # ============================================================
-echo ""
-echo "=== Section 3: standdown — the batch, and what it leaves alone (AC-11, R8) ==="
+section "Section 3: standdown — the batch, and what it leaves alone (AC-11, R8)"
 # ============================================================
 
 R4="$(make_repo standdown)"
@@ -217,8 +209,7 @@ run_orders "$R6" standdown
 expect_status "an empty roster answers cleanly" 0 "$ST"
 
 # ============================================================
-echo ""
-echo "=== Section 3b: standdown on an ADOPTED WAIVED row survives /clear (S17, AC-12) ==="
+section "Section 3b: standdown on an ADOPTED WAIVED row survives /clear (S17, AC-12)"
 # ============================================================
 #
 # THE CROSS-SCRIPT PROOF. §3 above plants a waived row by hand with `roster_row`; this plants
@@ -254,8 +245,7 @@ expect_contains "…because its CARRIED waiver, not an ack or a fresh MET" \
   "waived — adopted-waived-row" "$SD3B_BLOCK"
 
 # ============================================================
-echo ""
-echo "=== Section 4: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1) ==="
+section "Section 4: the pinned root — a worktree cwd answers for the MAIN repository (6-axis A-1)"
 # ============================================================
 #
 # ap review A-1: from a worktree cwd, `git rev-parse --show-toplevel` answers the WORKTREE
@@ -287,8 +277,7 @@ expect_contains "…still names the open row through the worktree cwd" "live-wor
 git -C "$R7" worktree remove --force "$R7WT" >/dev/null 2>&1
 
 # ============================================================
-echo ""
-echo "=== Section 6: standdown LANDS the trees it stands down (AC-28, C1) ==="
+section "Section 6: standdown LANDS the trees it stands down (AC-28, C1)"
 # ============================================================
 #
 # C1: a worktree is a leased slot bound to its ledger row, and standing an agent
@@ -401,8 +390,7 @@ expect_status "a session with no trees stands down unchanged" 0 "$ST"
 expect_absent "…and reports no landings" "LANDED branch=" "$OUT"
 
 # ============================================================
-echo ""
-echo "=== Section 7: standdown reports LIVENESS beside a held row, and still writes nothing (S6) ==="
+section "Section 7: standdown reports LIVENESS beside a held row, and still writes nothing (S6)"
 # ============================================================
 #
 # WHAT THE ROSTER CANNOT SAY. A row whose contract has not landed is held either way, and
@@ -521,8 +509,4 @@ expect_absent "…never annotated live off the neighbour its pattern would have 
 expect_contains "…while the real still-at-it beside it is still live" "[live]" \
   "$(printf '%s\n' "$R8_LA4" | grep -F 'still-at-it   (UNMET')"
 
-# ============================================================
-echo ""
-echo "──────────────────────────────────────────────"
-echo "stop-orders.sh: ${PASS}/${TOTAL} passed, ${FAIL} failed"
-[ "$FAIL" -eq 0 ]
+finish

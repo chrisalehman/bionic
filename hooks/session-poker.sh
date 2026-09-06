@@ -297,6 +297,21 @@ BIONIC_LOADER_REFUSE
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
 
+# THE SHARED CONSTANT (S15, AC-26; research-code-map §2.c). hooks/landing-gate.sh is the one
+# ORIGINATOR of this marker — its own `swept_marker_write` owns the printf — and this file's
+# `adopt_copy_marker` (below) is the second appender, but it only ever RELAYS a line the
+# originator already wrote; it never computes one. Before this wave `adopt_copy_marker`
+# spelled the schema as a bare literal inside its own grep pattern rather than through a
+# named constant, which is exactly the shape research-code-map §2.c calls out as a hazard:
+# "the grep that finds both writers is `grep -rn 'landing-swept/v1' hooks/*.sh` — a
+# derivation that greps for the constant NAME misses the literal spelling". Both files now
+# carry a `SWEPT_SCHEMA=` line naming it, byte-identical, pinned in
+# tests/cross-gate-agreement.test.sh so the two spellings cannot drift apart unnoticed — the
+# same duplicated-but-pinned shape payload/scripts/lib/loader.sh's own block uses, for the
+# same reason: two separate hook processes have no shared memory to source a single
+# in-process constant from.
+SWEPT_SCHEMA="landing-swept/v1"
+
 # The Patrol stamp — schema, and the two halves of its per-session filename. Read back by
 # hooks/dispatch-preflight.sh's arming wall; the two spellings are held together by
 # tests/cross-gate-agreement.test.sh §P, so a rename on one side cannot go quiet on the other.
@@ -1682,7 +1697,10 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
 adopt_copy_marker() {  # <source roster> <own roster> <name> -> 0 copied/already there, 1 nothing to copy
   local src="$1" own="$2" name="$3" line
   [ -n "$name" ] && [ -f "$src" ] && [ ! -L "$src" ] || return 1
-  line="$(grep '^landing-swept/v1|' "$src" 2>/dev/null | grep -F "|name=${name}|" | tail -1)"
+  # THE SHARED CONSTANT (declared above), NOT A SECOND SPELLING (S15, AC-26). This used to
+  # grep the bare literal 'landing-swept/v1' — see the constant's own comment for why a
+  # literal here was the exact hazard research-code-map §2.c named.
+  line="$(grep "^${SWEPT_SCHEMA}|" "$src" 2>/dev/null | grep -F "|name=${name}|" | tail -1)"
   [ -n "$line" ] || return 1
   grep -qF "$line" "$own" 2>/dev/null && return 0
   [ -f "$own" ] && [ ! -L "$own" ] || return 1
