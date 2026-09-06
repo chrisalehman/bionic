@@ -7435,4 +7435,45 @@ expect_eq "S13.5 …which is what awk needs for a key of this length" \
   "16" "$(( $(printf '%s' 'suites_allowed=' | wc -c | tr -d ' ') + 1 ))"
 
 # ============================================================
+# --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
+#
+# THE OWNERSHIP-TABLE ROW THIS SLICE ADDS. "Impact of a change" (the spec's ## Design
+# ownership table) already has one owner — `tests/lib/impact.sh` — rendered at three
+# surfaces: `suites_allowed=` on the roster row, the brief's `Files:`, and now the landing
+# verdict. This section pins that third rendering the way §S13.4/§S13.5 pin the first two:
+# ONE reader of a row's `files=` for reconciliation, ONE place that computes the diff, ONE
+# row -> worktree mapping (never re-derived), and ONE re-ask of the SAME `impact-command`
+# key S13's dispatch wall already reads — never a second config key or a second derivation.
+S18_LG="$BIONIC_HOOKS_DIR/landing-gate.sh"
+S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+
+# --- §S18.1 exactly one hook computes a Files: diff, and it is landing-gate.sh ---
+expect_eq "S18.1 exactly one hook diffs a worktree by name-only" "1" \
+  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh | wc -l | tr -d ' ')"
+expect_eq "S18.1 …and it is landing-gate.sh" "1" \
+  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh | grep -c 'landing-gate\.sh$')"
+
+# --- §S18.2 the row -> worktree mapping has ONE definition (worktree.sh's `worktree_for_row`,
+# payload/scripts/lib/worktree.sh's own docblock: "a second spelling of it there is a second
+# definition of which tree belongs to whom") and landing-gate.sh calls it rather than
+# re-deriving the mapping itself ---
+expect_eq "S18.2 worktree_for_row is defined in exactly one library file" "1" \
+  "$(grep -l '^worktree_for_row()' "$S18_WT_LIB_DIR"/*.sh | wc -l | tr -d ' ')"
+expect_eq "S18.2 …and it is worktree.sh" "1" \
+  "$(grep -l '^worktree_for_row()' "$S18_WT_LIB_DIR"/*.sh | grep -c 'worktree\.sh$')"
+expect_eq "S18.2 landing-gate.sh calls the shared mapping" "1" \
+  "$(grep -cF 'worktree_for_row "$repo" "$name"' "$S18_LG")"
+expect_eq "S18.2 …and never redefines it" "0" \
+  "$(grep -c '^worktree_for_row()' "$S18_LG")"
+expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
+  "$(grep -cF 'BIONIC_LIB_WANT="root.sh run.sh session.sh worktree.sh"' "$S18_LG")"
+
+# --- §S18.3 the reconciliation re-asks the SAME impact-command key S13's dispatch wall
+# reads — never a second config key, never a second derivation command ---
+expect_eq "S18.3 landing-gate.sh reads impact-command exactly once" "1" \
+  "$(grep -cF 'config_value "$REPO" "impact-command" ""' "$S18_LG")"
+expect_eq "S18.3 …the same call shape dispatch-preflight.sh uses" "1" \
+  "$(grep -cF 'config_value "$REPO" "impact-command" ""' "$S13_DP")"
+
+# ============================================================
 finish
