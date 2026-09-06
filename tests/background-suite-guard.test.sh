@@ -41,6 +41,7 @@
 set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
+. "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -51,16 +52,6 @@ CTX_GUARD="$PAYLOAD_HOOKS/agent-context-guard.sh"
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/bg-suite-guard-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
 trap cleanup EXIT
-
-PASS=0
-FAIL=0
-TOTAL=0
-ok() { TOTAL=$((TOTAL + 1)); PASS=$((PASS + 1)); echo "PASS: $1"; }
-no() { TOTAL=$((TOTAL + 1)); FAIL=$((FAIL + 1)); echo "FAIL: $1"; [ -n "${2:-}" ] && echo "      $2"; }
-expect_eq()       { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "expected [$2], got [$3]"; fi; }
-expect_contains() { case "$3" in *"$2"*) ok "$1" ;; *) no "$1" "expected to contain [$2], got: $3" ;; esac; }
-expect_absent()   { case "$3" in *"$2"*) no "$1" "unexpectedly present: $2" ;; *) ok "$1" ;; esac; }
-expect_empty()    { if [ -z "$2" ]; then ok "$1"; else no "$1" "expected no output, got: $2"; fi; }
 
 SID="4e2b9a17-55c8-4d0e-9b31-7f6a2c4e18d9"
 ACTOR="as13writer-4c9f1e07ab32d650"
@@ -127,9 +118,7 @@ guarded() {  # <repo> <command> [agent_id] [bg]
   run_hook "$(mk_payload "$1" "$2" "${3-$ACTOR}" "${4:-omit}")" "$CTX_GUARD" "$GUARD"
 }
 
-# ============================================================
-echo "=== B0 — the hook exists and parses ==="
-# ============================================================
+section "B0 — the hook exists and parses"
 if [ -f "$GUARD" ]; then ok "hooks/background-suite-guard.sh is on disk"; else
   no "hooks/background-suite-guard.sh is on disk" "$GUARD"
 fi
@@ -137,9 +126,7 @@ if bash -n "$GUARD" 2>"$SANDBOX/.syn"; then ok "it parses (bash -n)"; else
   no "it parses (bash -n)" "$(cat "$SANDBOX/.syn")"
 fi
 
-# ============================================================
-echo "=== B1 — a stated budget: on it passes, off it refuses ==="
-# ============================================================
+section "B1 — a stated budget: on it passes, off it refuses"
 R1=$(mk_repo b1)
 add_row "$R1" name=w-b1 "agent_id=$ACTOR" "suites_allowed=alpha.test.sh beta.test.sh" \
   suites_source=derived files=payload/scripts/lib/widget.sh
@@ -191,9 +178,7 @@ guarded "$R1" 'pytest'
 expect_eq "B1h a suite-class command naming no suite FILE is allowed" "0" "$ST"
 expect_empty "B1h …silently" "$OUT$ERR"
 
-# ============================================================
-echo "=== B2 — tests/run.sh is refused unless the row carries it ==="
-# ============================================================
+section "B2 — tests/run.sh is refused unless the row carries it"
 guarded "$R1" 'bash tests/run.sh'
 expect_eq "B2a the full tree is REFUSED against a narrow budget" "2" "$ST"
 expect_contains "B2a …naming the full tree" "tests/run.sh" "$ERR"
@@ -209,9 +194,7 @@ expect_empty "B2b …silently" "$OUT$ERR"
 guarded "$R2" 'bash tests/alpha.test.sh'
 expect_eq "B2c …but its row does not license a suite it does not name" "2" "$ST"
 
-# ============================================================
-echo "=== B3 — FARM_OUT_ALLOW does not widen a budget (AC-21) ==="
-# ============================================================
+section "B3 — FARM_OUT_ALLOW does not widen a budget (AC-21)"
 # The override exists so the ORCHESTRATOR can run something on its own thread when
 # dispatching it genuinely will not work — it is farm-out-reminder.sh's escape from
 # farm-out-reminder.sh's wall. A writer that could set an environment variable on itself
@@ -231,9 +214,7 @@ guarded "$R1" 'bash tests/alpha.test.sh'
 expect_eq "B3e non-vacuity: an on-budget suite still passes with the override set" "0" "$ST"
 EXTRA_ENV=""
 
-# ============================================================
-echo "=== B4 — the three states of suites_allowed ==="
-# ============================================================
+section "B4 — the three states of suites_allowed"
 # `none` is a DECLARED empty set (the `Suites: none` waiver); an empty value is a budget
 # that was stated and came out empty; an absent key is a row written before the wall. They
 # are three different facts and the arm answers each differently.
@@ -279,9 +260,7 @@ expect_eq "B4d …and still refuses the full tree" "2" "$ST"
 guarded "$R4D" 'bash tests/gamma.test.sh'
 expect_eq "B4d another agent's narrow budget does not bind this one" "0" "$ST"
 
-# ============================================================
-echo "=== B5 — the LAST row carrying this id wins ==="
-# ============================================================
+section "B5 — the LAST row carrying this id wins"
 # One dispatch becomes several rows: the launch row, hooks/execution-recorder.sh's
 # `status=confirmed` copy, and — across a /clear — hooks/session-poker.sh's adopted row.
 # Each carries the budget forward, and the newest is the current statement about the agent.
@@ -296,9 +275,7 @@ guarded "$R5" 'bash tests/epsilon.test.sh'
 expect_eq "B5b …and one neither row allows is still refused" "2" "$ST"
 expect_contains "B5b …against the later row's set" "alpha.test.sh delta.test.sh" "$ERR"
 
-# ============================================================
-echo "=== B6 — scope: the arm is the AGENT's, and the session must be engaged ==="
-# ============================================================
+section "B6 — scope: the arm is the AGENT's, and the session must be engaged"
 # A main-thread payload has no top-level agent_id (t1-probe-report.md §3). The
 # orchestrator's own thread is hooks/farm-out-reminder.sh's, which answers the same
 # question differently, so this arm never speaks there.
@@ -334,9 +311,7 @@ rm -f "$R6/.bionic/tmp/roster-$SID.state"
 guarded "$R6" 'bash tests/gamma.test.sh'
 expect_eq "B6d an unarmed session is silent (the guard in front never runs the wall)" "0" "$ST"
 
-# ============================================================
-echo "=== B7 — which arm speaks when both apply ==="
-# ============================================================
+section "B7 — which arm speaks when both apply"
 # A backgrounded suite is refused whether or not it is on the budget, and being on the
 # budget is no answer to "nobody read the result" — so the B-9 arm speaks first.
 guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" true
@@ -352,7 +327,4 @@ guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" false
 expect_eq "B7c run_in_background false is not backgrounded, and on-budget passes" "0" "$ST"
 expect_empty "B7c …silently" "$OUT$ERR"
 
-echo
-echo "=== background-suite-guard: $PASS/$TOTAL passed ==="
-[ "$FAIL" -eq 0 ] || echo "FAILURES: $FAIL"
-[ "$FAIL" -eq 0 ]
+finish
