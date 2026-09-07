@@ -36,6 +36,11 @@ needs:
 loading: deferred
 ---
 
+<!-- GENERATED FILE — DO NOT EDIT.
+     Rendered by agents-src/render.sh from agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl and the shared
+     blocks in agents-src/blocks/. Edit those, then re-run `bash agents-src/render.sh`.
+     tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
+
 # Canonical SDLC
 
 Governs non-trivial engineering work. Every run declares a triple — `<intent> · <rigor> · <scale>` — and walks the applicable steps, leaving evidence a hook can read.
@@ -373,7 +378,9 @@ A lower tier passing while a higher one fails is a **locator, not a contradictio
 
 A **fresh, independent** exec-complex agent (`subagent_type: bionic:auditor`) — never the implementer, never a fork of the orchestrator, whose context is the thing under audit. Dispatch carries this mandate **verbatim**; a paraphrase is a weakened auditor:
 
+<!-- AUDITOR-MANDATE-BEGIN -->
 > Your job is to falsify the claim that this wave's requirements were faithfully implemented **and proven** — not to review its code. You hold the spec, its governing design, the Verification Matrix, the per-row evidence, and repo access. Walk three levels, top-down. **(1) Coverage** — walk the chain whole: requirement → design decision → criterion → evidence. For every requirement in the spec, name both the design decisions and the criteria that serve it; a requirement answered by criteria but by no design decision is a hole in the chain, not a covered requirement (where the design is waived, say so and walk requirement → criterion). Seed this mechanically: invert the `provenance:` citation map and the design section's requirement references, and requirements with zero inbound citations from either are the uncovered list before any judgment is spent; spend the judgment on the harder half — requirements cited but weakly expressed, covered in letter and missed in substance. A hole is a **wave-level** finding, because the per-row verdict scheme cannot express a missing row: emit one wave-level verdict alongside the row verdicts. **(2) Power** — for every row, state what the observation would have shown had the change been absent; if the answer is "the same thing," the row proves nothing, whatever its tier. A zero, empty, or not-present readback with no paired positive case is presumed powerless and cannot discharge — you are that rule's enforcement. Once per wave, go one step past judgment with a revert-and-watch demonstration: you are read-only and must not revert or stub anything yourself, so have the test-runner revert or stub the named change and capture a named check going red, then validate the capture — the change really absent, the check one the matrix leans on, the red the failure you predicted. Its value over per-slice RED evidence is that it is durable, auditable after integration, and covers the whole change. **(3) Authenticity** — confirm each row's evidence was produced at its declared tier: a T3 row must cite the declared real surface, its per-origin freshness proofs, a cold client, and a feature-scoped semantic readback; a T2 row must carry its fixture-fidelity declaration, and the fixture must be structurally able to reach the failure the AC guards. Re-execute at least one evidence command per tier used (cap 3 total) and compare outputs. Verdict per row **and one for the wave**: CONFIRMED / REFUTED / UNVERIFIABLE. "The evidence is plausible" is not a verdict. Agreement without re-execution is not acceptable output. Hold every report to the reporting contract: a factual claim carrying neither its proving command with output nor the label "unverified" is itself a finding.
+<!-- AUDITOR-MANDATE-END -->
 
 Bounds: audits the verification, not the wave — never re-verifies the feature, re-runs the whole suite, or reviews the code. The boundary with Step 6's critic sharpens rather than moves: the auditor proves the *verification* faithful to the *requirements*; the critic attacks the *code*. Read-only is literal — the revert-and-watch demonstration is performed by the `test-runner` on request and the auditor validates the capture it returns. One auditor, one pass, ≤3 re-executions.
 
@@ -395,15 +402,19 @@ Note the hole: the hook checks only that the token `waiver` is present — not w
 
 **Architecture-axis closure check:** for each new primitive added this wave, trace user input → new code, and confirm the Step-5 T3 readback reached the same code. No callsite reaching it means the substrate is dead and the axis is FAIL.
 
+<!-- DUPLICATION-AXIS-BEGIN -->
 **Duplication axis — one implementation site per concept.** The design's ownership table is the anchor: its owner column already says where each concept lives, so the axis is a comparison, not a hunt. A second site computing or deciding the same thing is a FLAG; a concept the table gives two owners is a FAIL; a concept the wave introduced and the table never named is a FLAG against the design, not against the code.
 
 **Agreement tests.** Each shared-truth pair in the ownership table — one concept, more than one rendering surface — names one hermetic test that fails when the surfaces disagree. The standing exemplar is `tests/cross-gate-agreement.test.sh` §N.1: one logical text, the loader idiom, rendered into nineteen hooks, pinned byte-for-byte against `bionic_loader_pin`'s live output, with a mutation arm that doctors one copy and proves the pin goes red. §R does the same for the four-copy `resolve_docs_root` family — and it is also the honest limit: until wave 1.4.0 that section built its mutant and asserted nothing, and two documents cited it as the safety net anyway. A pin nobody has watched fail is prose wearing a test. A listed pair with no named test is a FLAG, and "the suite covers it" is not a named test.
+<!-- DUPLICATION-AXIS-END -->
 
 Neither of these is a wall. **No hook sees the duplication axis or the agreement-test obligation** — they are carried by the reviewer and critic mandates and enforced by judgment, which is the whole reason the ownership table is authored at Step 2 where a human ratifies it.
 
 **Stance 2 — adversarial critic.** Mandatory at `audited`. Must be an **independent** agent (`subagent_type: bionic:critic`) — never the author, never self-graded. Distinct from the Step-5 auditor: the critic falsifies the *code*, the auditor falsifies the *evidence*. Prompt template:
 
+<!-- CRITIC-TEMPLATE-BEGIN -->
 > _Your job is to find what went wrong in this change. You have the spec, the plan, the diff, and the 6-axis self-review notes. Read them and try to falsify the claim that this is ready to merge. Look specifically for: silent wrong assumptions not logged in the `## Assumptions` section, scope creep beyond the spec, missing edge cases, fabricated evidence, and cross-cutting concerns a single-axis review would miss. Output either: at least one specific, reproducible issue, or an explicit "no issues found" followed by the three strongest falsification attempts you made and why each failed. Confirmation-seeking agreement is not acceptable output._
+<!-- CRITIC-TEMPLATE-END -->
 
 Incident framing: does the fix mask a deeper issue, and is the monitoring-gap analysis honest. Sycophantic output is not evidence.
 
@@ -421,7 +432,7 @@ Atomic, one task. Merge the wave into the declared integration branch (local mer
 
 **Close-out is an institution, not a courtesy.** Every finding this run's rigor machinery surfaced — walk, matrix discharge, auditor, critic — gets exactly one terminal disposition. "Continuation candidate" is abolished; nothing leaves this step homeless.
 
-<!-- TERMDISP-BEGIN -->
+<!-- TERMINAL-DISPOSITION-BEGIN -->
 > Abolish "continuation candidate." Every finding gets exactly one of three terminal
 > dispositions at wave close:
 > 1. **DO-NOW** — folded into the closing wave.
@@ -437,7 +448,7 @@ Atomic, one task. Merge the wave into the declared integration branch (local mer
 >    that is what schedules cleanup waves by momentum. (Amended 2026-08-16 on
 >    Chris's catch: the original trigger-only form had no bin for legitimately
 >    deferred major work — the plugin conversion itself is the proof case.)
-<!-- TERMDISP-END -->
+<!-- TERMINAL-DISPOSITION-END -->
 
 The vehicle is a single-turn close-out report, sent to the user at Step 9 and never re-run as ceremony: plain English, at the altitude of decisions rather than of code, covering ten parts — goal, accomplished, deferred-with-dispositions (each finding's DO-NOW / ACCEPT-CLOSED / PROMOTE named), special attention, material risks, challenges, decisions, success/failure verdict, learnings, next. Authoring detail per part and the anti-ceremony bound live in `operational-rules.md`. Write `continuation.md` (§Handoff above) alongside it — the report is what the user reads; the file is what the next wave opens.
 
@@ -472,6 +483,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 
 **Known holes — do not mistake these for enforcement.** The governing-skill hook validates `Write` content but not `Edit` content, so one valid write covers every later edit. Flag *values* are never checked, only presence. The evidence gate reads the plan file's text, so an `Edit` that writes evidence for tests never run passes unseen. Proof-shape is a heuristic: a digit plus a `/` satisfies it.
 
+<!-- ORCHESTRATOR-DISPATCH-BEGIN -->
 ## Dispatch
 
 The orchestrator stays free: it keeps Steps 0–3, slice decomposition, and every approval-shaped decision, and offloads research, execution, verification, and review. Subagents return summaries, never payloads. Dispatch is the orchestrator's authority alone: a dispatched agent never dispatches — it asks the orchestrator — and the wall says so when a subagent tries.
@@ -556,6 +568,7 @@ Before ending a turn, reconcile: every `active` row either has a verified result
 **Three-fail rule.** Three failures to produce valid evidence for one step: if diagnostic, run a full MAP-INSTRUMENT-NARROW pass (the counter resets on a completed pass, not on more speculative fixes); if decision-related, stop and surface. A `standard` slice that fails twice re-dispatches once as `senior-implementor` — that is the third try, not a fourth.
 
 **Stop and wake** for: an ambiguous spec needing a judgment call, new external-API auth, anything affecting billing, destructive migrations, secrets or production infrastructure, and anything the user's own config marks as requiring approval. Append a `## Wake Note` and do not proceed past it.
+<!-- ORCHESTRATOR-DISPATCH-END -->
 
 ## Diagrams
 
