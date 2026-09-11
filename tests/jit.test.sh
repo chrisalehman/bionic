@@ -211,12 +211,15 @@ section "Group 9: route wiring — the two owner SKILL.md files name the contrac
 # no restated mechanics. One sentence each, at the point an environment-class
 # dependency is assumed.
 
-CANONICAL_SKILL="${REPO}/skills/canonical-sdlc/SKILL.md"
+# wave-11-lean-spine 1b split canonical-sdlc's SKILL.md into a core plus per-step files;
+# jit_check/jit_offer moved with Step 5's prose, so this group reads steps/5.md rather than
+# a single whole-skill path. Group 12 below reads a second split surface, steps/0.md.
+CANONICAL_SKILL_STEP5="${REPO}/skills/canonical-sdlc/steps/5.md"
 BROWSER_SKILL="${REPO}/skills/browser-verify/SKILL.md"
 EXCALIDRAW_SKILL="${REPO}/payload/skills/excalidraw-diagram/SKILL.md"
 
-expect_true "canonical-sdlc SKILL.md names jit_check" grep -q 'jit_check' "$CANONICAL_SKILL"
-expect_true "canonical-sdlc SKILL.md names jit_offer" grep -q 'jit_offer' "$CANONICAL_SKILL"
+expect_true "canonical-sdlc steps/5.md names jit_check" grep -q 'jit_check' "$CANONICAL_SKILL_STEP5"
+expect_true "canonical-sdlc steps/5.md names jit_offer" grep -q 'jit_offer' "$CANONICAL_SKILL_STEP5"
 expect_true "browser-verify SKILL.md names jit_check" grep -q 'jit_check' "$BROWSER_SKILL"
 expect_true "browser-verify SKILL.md names jit_offer" grep -q 'jit_offer' "$BROWSER_SKILL"
 expect_true "excalidraw-diagram SKILL.md names jit_check" grep -q 'jit_check' "$EXCALIDRAW_SKILL"
@@ -328,15 +331,16 @@ section "Group 12: Step-0 model_plan derivation is mechanical, not invented (epi
 # tiers; the confirmation display cites each line's source. Before this fix the whole
 # derivation rule was "model_plan from multi_agent and the detected session model" —
 # no route to the role files existed anywhere in the skill (grounding:
-# .bionic/docs/record/epic-19/step1-fixes-grounding.md §1). Reuses $CANONICAL_SKILL
-# from Group 9 above rather than re-deriving the path — this suite is otherwise about
-# jit/degradation, but it is the one place in the roster already set up to pin literal
-# prose spans of this SKILL.md.
+# .bionic/docs/record/epic-19/step1-fixes-grounding.md §1). wave-11-lean-spine 1b moved
+# Step 0's prose, this sentence included, into steps/0.md — this group now reads that file
+# rather than a whole-skill path; it remains the one place in the roster already set up to
+# pin literal prose spans of the Step-0 card.
+CANONICAL_SKILL_STEP0="${REPO}/skills/canonical-sdlc/steps/0.md"
 
-expect_true "canonical-sdlc SKILL.md: model_plan derivation is never invented or recalled from memory" \
-  grep -q 'never invented or recalled from memory' "$CANONICAL_SKILL"
-expect_true "canonical-sdlc SKILL.md: model_plan derivation names the rendered role files as the source" \
-  grep -q 'rendered role files' "$CANONICAL_SKILL"
+expect_true "canonical-sdlc steps/0.md: model_plan derivation is never invented or recalled from memory" \
+  grep -q 'never invented or recalled from memory' "$CANONICAL_SKILL_STEP0"
+expect_true "canonical-sdlc steps/0.md: model_plan derivation names the rendered role files as the source" \
+  grep -q 'rendered role files' "$CANONICAL_SKILL_STEP0"
 # RE-POINTED (epic-22 K1, plan slice 15, A-7). K1's Step-0 settings card drops per-line
 # inference rationale — the six "role-file default: agents/<role>.md" annotations that used
 # to sit beside each model value are gone; that string no longer appears anywhere in
@@ -345,8 +349,8 @@ expect_true "canonical-sdlc SKILL.md: model_plan derivation names the rendered r
 # and is stated ONCE rather than six times; what this assertion re-points to is the fact the
 # AC actually cares about — that all six dispatched-role tiers are still named, one per line,
 # in the card's Models section (record/wave-01-plugin-only/design-ledger.md §D1).
-expect_eq "canonical-sdlc SKILL.md: the Step-0 card's Models section names all 6 dispatched roles (K1 — source is the one-line prose above, not a per-line citation)" \
-  "6" "$(sed -n '/^  Models$/,/^$/p' "$CANONICAL_SKILL" | grep -cE '^    (implementor|senior-implementor|researcher|auditor|critic|test-runner)([[:space:]]|$)')"
+expect_eq "canonical-sdlc steps/0.md: the Step-0 card's Models section names all 6 dispatched roles (K1 — source is the one-line prose above, not a per-line citation)" \
+  "6" "$(sed -n '/^  Models$/,/^$/p' "$CANONICAL_SKILL_STEP0" | grep -cE '^    (implementor|senior-implementor|researcher|auditor|critic|test-runner)([[:space:]]|$)')"
 
 section "Group 13: README roster table agrees with agents/*.md frontmatter (epic-19 F9)"
 #
