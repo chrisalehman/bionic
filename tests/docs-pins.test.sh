@@ -1889,4 +1889,139 @@ esac
 expect_contains "110c: the doctored copy still carries the REST of the paragraph (the mutation is surgical, not 105's whole-paragraph wipe)" \
   "requirements.md\`: numbered requirements" "$DOCTORED_THREE_ARTIFACT_110"
 
+section "Section 17: REQ-1b — the split skill's byte caps and the core's step index"
+#
+# WHAT THIS SECTION OWNS. wave-11-lean-spine row 1b split the governing skill into a CORE
+# (`skills/canonical-sdlc/SKILL.md`), ten STEP FILES (`steps/0.md` … `steps/9.md`) and a
+# DISPATCH REFERENCE (`dispatch.md`). The split is only worth its cost while the pieces stay
+# small: the whole point is that a session carries the core plus the one step it is on, not
+# the file that used to be 108,652 B. Nothing else in this tree measures that, so the four
+# caps of AC-1b.1 through AC-1b.4 are pinned here, in bytes, against the rendered finals.
+#
+# WHY BYTES AND NOT LINES. The cost the split exists to cut is context, and context is
+# charged by bytes, not by how they are wrapped. A line pin would go green on a re-wrap that
+# moved nothing.
+#
+# THE CAPS ARE THE RATIFIED NUMBERS, not measurements of what happened to land: core 25,000 ·
+# each step file 14,000 · dispatch 30,000 · the three together 96,000, from the requirements
+# file's AC table. Headroom under a cap is not a reason to move the cap down, and a future
+# wave that needs a cap raised raises it in the requirements first.
+#
+# AC-1b.5 is the structural half, and it is what makes the byte caps mean anything: a core
+# that still carried its `### Step N` sections would be under no cap at all, and a core that
+# dropped the sections without naming the files would leave the model with no way to find
+# them. Both halves are pinned — zero `### Step` headings in the core, and every one of the
+# ten step files named in it by path.
+#
+# `steps/4.md` gets its own, much tighter cap. It is a POINTER, not a step file: Step 4 is
+# dispatch, whose text lives in `dispatch.md` and nowhere else, and the one thing that must
+# never happen to it is that someone answers "steps/4.md is nearly empty" by writing new
+# Step-4 prose into it. 1,024 B is small enough that the answer has to be the pointer.
+#
+# HERMETIC. Reads the committed rendered finals by path; measures with `wc -c`.
+
+SPLIT_SKILL_DIR="${REPO}/skills/canonical-sdlc"
+SPLIT_CORE="${SPLIT_SKILL_DIR}/SKILL.md"
+SPLIT_DISPATCH="${SPLIT_SKILL_DIR}/dispatch.md"
+
+# bytes_of <file> -> the byte count, or -1 when the file is not there. -1 rather than 0
+# because a MISSING file measures 0 and would slide under every cap below: the absence has
+# to fail the cap, not satisfy it.
+bytes_of() { [ -f "$1" ] && wc -c < "$1" | tr -cd '0-9' || echo -1; }
+
+# le_cap <label> <file> <cap> — one assertion, reporting the measurement either way.
+le_cap() {
+  local _label="$1" _file="$2" _cap="$3" _got
+  _got="$(bytes_of "$_file")"
+  if [ "$_got" -ge 0 ] 2>/dev/null && [ "$_got" -le "$_cap" ] 2>/dev/null; then
+    ok "$_label ($_got B ≤ $_cap B)"
+  elif [ "$_got" -lt 0 ] 2>/dev/null; then
+    no "$_label" "no file at $_file"
+  else
+    no "$_label" "$_got B exceeds the $_cap B cap by $((_got - _cap)) B: $_file"
+  fi
+}
+
+le_cap "111: AC-1b.1 — the core is at or under its cap (fails-when: the core grows back)" \
+  "$SPLIT_CORE" 25000
+
+for _n in 0 1 2 3 4 5 6 7 8 9; do
+  le_cap "112.$_n: AC-1b.2 — steps/$_n.md exists and is at or under its cap (fails-when: missing or oversized)" \
+    "${SPLIT_SKILL_DIR}/steps/${_n}.md" 14000
+done
+
+le_cap "113: AC-1b.3 — the dispatch reference is at or under its cap (fails-when: the dispatch body grows back)" \
+  "$SPLIT_DISPATCH" 30000
+
+# steps/4.md's own cap — the no-new-Step-4-prose wall (REQ-1b: "No new Step-4 prose is
+# authored: the dispatch reference serves Step 4").
+le_cap "114: AC-1b.2 — steps/4.md is a pointer, not a step file (fails-when: Step-4 prose is authored into it)" \
+  "${SPLIT_SKILL_DIR}/steps/4.md" 1024
+
+# The total the model is told to read. operational-rules.md is excluded by AC-1b.4's own
+# wording — nothing tells the model to read it, and it is not part of this budget.
+SPLIT_TOTAL=0
+SPLIT_TOTAL_MISSING=""
+for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
+          "${SPLIT_SKILL_DIR}"/steps/0.md "${SPLIT_SKILL_DIR}"/steps/1.md \
+          "${SPLIT_SKILL_DIR}"/steps/2.md "${SPLIT_SKILL_DIR}"/steps/3.md \
+          "${SPLIT_SKILL_DIR}"/steps/4.md "${SPLIT_SKILL_DIR}"/steps/5.md \
+          "${SPLIT_SKILL_DIR}"/steps/6.md "${SPLIT_SKILL_DIR}"/steps/7.md \
+          "${SPLIT_SKILL_DIR}"/steps/8.md "${SPLIT_SKILL_DIR}"/steps/9.md; do
+  _b="$(bytes_of "$_f")"
+  if [ "$_b" -lt 0 ] 2>/dev/null; then SPLIT_TOTAL_MISSING="$SPLIT_TOTAL_MISSING ${_f##*canonical-sdlc/}"; else
+    SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
+done
+if [ -n "$SPLIT_TOTAL_MISSING" ]; then
+  no "115: AC-1b.4 — core + steps + dispatch at or under 96,000 B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 96000 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 96,000 B ($SPLIT_TOTAL B ≤ 96000 B)"
+else
+  no "115: AC-1b.4 — core + steps + dispatch at or under 96,000 B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 96000)) B"
+fi
+
+# AC-1b.5, both halves.
+expect_eq "116: AC-1b.5 — the core carries no '### Step N' section (fails-when: a step section is left behind)" \
+  "0" "$(grep -c '^### Step' "$SPLIT_CORE" 2>/dev/null | tr -cd '0-9')"
+
+SPLIT_INDEX_HITS="$(grep -c 'steps/[0-9]\.md' "$SPLIT_CORE" 2>/dev/null | tr -cd '0-9')"
+SPLIT_INDEX_HITS="${SPLIT_INDEX_HITS:-0}"
+if [ "$SPLIT_INDEX_HITS" -ge 10 ] 2>/dev/null; then
+  ok "117: AC-1b.5 — the core names all ten step files by path ($SPLIT_INDEX_HITS lines)"
+else
+  no "117: AC-1b.5 — the core names all ten step files by path" \
+     "only $SPLIT_INDEX_HITS line(s) name a steps/N.md path"
+fi
+
+# The read rule itself — the sentence that turns the index into an instruction. Without it
+# the paths are decoration and the model has no boundary at which to read one.
+if has_pin "$SPLIT_CORE" 'Before any Step-N action, read `steps/N.md`. Before Step 4'"'"'s first action and before the first dispatch, read `dispatch.md`. The load-time announcement names the file just read.'; then
+  ok "118: AC-1b.5 — the core carries the read rule verbatim"
+else
+  no "118: AC-1b.5 — the core carries the read rule verbatim" "file: $SPLIT_CORE"
+fi
+
+# --- Anti-vacuity: the cap assertions must go red on an oversized file ---
+#
+# le_cap is the only new extractor in this section and every cap above runs through it, so
+# one doctored measurement discharges all sixteen. The mutant is a copy of the core padded
+# past its own cap; the same helper must report it.
+anchor "$SPLIT_CORE" '## Steps' 1
+DOCTORED_FAT_CORE="$TMP/skill-core-oversized.md"
+{ cat "$SPLIT_CORE"; head -c 26000 /dev/zero | tr '\0' 'x'; } > "$DOCTORED_FAT_CORE"
+DOCTORED_FAT_BYTES="$(bytes_of "$DOCTORED_FAT_CORE")"
+if [ "$DOCTORED_FAT_BYTES" -gt 25000 ] 2>/dev/null; then
+  ok "119: a core padded past 25,000 B measures over the cap (the cap discriminates)"
+else
+  no "119: a core padded past 25,000 B measures over the cap (the cap discriminates)" \
+     "padded copy measured $DOCTORED_FAT_BYTES B"
+fi
+
+# …and a MISSING file must fail rather than measure zero, which is the failure mode a plain
+# `wc -c` would have: the cap would be satisfied by deleting the file.
+expect_eq "120: a missing step file measures -1, not 0 (absence fails the cap, never satisfies it)" \
+  "-1" "$(bytes_of "${SPLIT_SKILL_DIR}/steps/nonexistent.md")"
+
+
 finish
