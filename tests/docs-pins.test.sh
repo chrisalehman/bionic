@@ -400,16 +400,19 @@ else
 fi
 
 # The render is the delivery mechanism; asserting the block alone would pass on a repo
-# whose agents/ was never re-rendered, which is the state a dispatched writer meets.
-PINS_JOBS_MISSING=""
-for role in auditor critic implementor researcher senior-implementor test-runner; do
-  has_pin "${REPO}/agents/${role}.md" "$PIN_JOBS" || PINS_JOBS_MISSING="${PINS_JOBS_MISSING} ${role}"
-done
-if [ -z "$PINS_JOBS_MISSING" ]; then
-  ok "12: all six rendered agents/*.md carry the rung-pointer sentence (render is current, AC-18)"
+# whose rendered output was never refreshed, which is the state a dispatched writer meets.
+#
+# RE-POINTED (wave-11 1c, was: the six agents/*.md). The survival text renders ONCE now, to
+# payload/context/survival.md, and reaches an agent by push (the SubagentStart hook) rather
+# than by being restated in six role definitions. So the file this arm reads is the rendered
+# SHIPPED copy, not the role files — the same question ("did the render reach the delivered
+# text?"), asked of the one file that now carries it.
+SURVIVAL_SHIPPED="${REPO}/payload/context/survival.md"
+if has_pin "$SURVIVAL_SHIPPED" "$PIN_JOBS"; then
+  ok "12: the rendered payload/context/survival.md carries the rung-pointer sentence (render is current, AC-18)"
 else
-  no "12: all six rendered agents/*.md carry the rung-pointer sentence (render is current, AC-18)" \
-     "missing in:${PINS_JOBS_MISSING} — run 'bash agents-src/render.sh'"
+  no "12: the rendered payload/context/survival.md carries the rung-pointer sentence (render is current, AC-18)" \
+     "file: $SURVIVAL_SHIPPED — run 'bash agents-src/render.sh'"
 fi
 
 # clear_paragraph <file> -> the one paragraph opening with the `/clear` marker, verbatim.
@@ -449,16 +452,12 @@ else
      "file: $AGENT_RULES still matches the extractor — a second copy survived the move"
 fi
 
-PINS_CLEAR_MISSING=""
-for role in auditor critic implementor researcher senior-implementor test-runner; do
-  [ "$(clear_paragraph "${REPO}/agents/${role}.md")" = "$CLEAR_BLOCK" ] \
-    || PINS_CLEAR_MISSING="${PINS_CLEAR_MISSING} ${role}"
-done
-if [ -z "$PINS_CLEAR_MISSING" ]; then
-  ok "15: all six rendered agents/*.md carry that paragraph byte-identically"
+# RE-POINTED (wave-11 1c, was: the six agents/*.md). One rendered home, so one comparison.
+if [ "$(clear_paragraph "$SURVIVAL_SHIPPED")" = "$CLEAR_BLOCK" ] && [ -n "$CLEAR_BLOCK" ]; then
+  ok "15: the rendered payload/context/survival.md carries that paragraph byte-identically"
 else
-  no "15: all six rendered agents/*.md carry that paragraph byte-identically" \
-     "differs or missing in:${PINS_CLEAR_MISSING} — run 'bash agents-src/render.sh'"
+  no "15: the rendered payload/context/survival.md carries that paragraph byte-identically" \
+     "differs or missing in: $SURVIVAL_SHIPPED — run 'bash agents-src/render.sh'"
 fi
 
 # 16: CENSUS — no THIRD home exists anywhere in the tree. Assertion 14 proves the one
@@ -466,10 +465,13 @@ fi
 # the same construction-guarded-vs-enforcement-guarded distinction r3 §Part 2 item 18
 # draws for AD18's other two copies.
 CLEAR_MARKER='`/clear` does not kill agents.'
-CLEAR_HOMES_EXPECTED="agents-src/blocks/survival.md agents/auditor.md agents/critic.md agents/implementor.md agents/researcher.md agents/senior-implementor.md agents/test-runner.md"
+# RE-POINTED (wave-11 1c): two homes, not seven — the source block and the ONE rendered
+# shipped copy. The six role files dropped their injection; a role file that reacquires the
+# paragraph makes this census over-count, which is exactly the regression to catch.
+CLEAR_HOMES_EXPECTED="agents-src/blocks/survival.md payload/context/survival.md"
 CLEAR_HOMES_ACTUAL="$(cd "$REPO" && /usr/bin/grep -rl -F -- "$CLEAR_MARKER" \
   agents-src agents .claude payload skills 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')"
-expect_eq "16: the '/clear' marker exists ONLY at its seven expected homes (no third copy anywhere)" \
+expect_eq "16: the '/clear' marker exists ONLY at its two expected homes (no third copy anywhere)" \
   "$(printf '%s\n' $CLEAR_HOMES_EXPECTED | sort | tr '\n' ' ' | sed 's/ $//')" "$CLEAR_HOMES_ACTUAL"
 
 # --- Anti-vacuity: the same extractors must report a mutation ---
@@ -1101,14 +1103,16 @@ else
   no "62: the writer-side budget rule is in agents-src/blocks/survival.md, the rendered SOURCE" \
      "file: $SURVIVAL_BLOCK"
 fi
-# …and it reached every generated role file, which is what the writer actually reads.
-S13_ROLES_MISSING=0
-for _r in "${REPO}"/agents/*.md; do
-  has_pin "$_r" "$PIN_S13_SURVIVAL" || S13_ROLES_MISSING=$((S13_ROLES_MISSING + 1))
-done
-expect_eq "63: …and every generated role file carries it" "0" "$S13_ROLES_MISSING"
-expect_eq "63: …over a non-empty set of role files" "0" \
-  "$([ -n "$(ls "${REPO}"/agents/*.md 2>/dev/null)" ] && echo 0 || echo 1)"
+# …and it reached the rendered file the writer actually receives.
+#
+# RE-POINTED (wave-11 1c, was: every generated role file). The block renders once now; the
+# delivered text is payload/context/survival.md. The companion non-vacuity arm asserts that
+# file is non-empty, replacing the old "over a non-empty set of role files" guard.
+SURVIVAL_SHIPPED_63="${REPO}/payload/context/survival.md"
+expect_eq "63: …and the rendered payload/context/survival.md carries it" "0" \
+  "$(has_pin "$SURVIVAL_SHIPPED_63" "$PIN_S13_SURVIVAL" && echo 0 || echo 1)"
+expect_eq "63: …over a non-empty rendered file" "0" \
+  "$([ -s "$SURVIVAL_SHIPPED_63" ] && echo 0 || echo 1)"
 
 # THE SPELLING RULE THAT MAKES THE BUDGET USABLE (review-c C-6). The wall reads the command
 # TEXT, so a loop variable is refused by its unexpanded name — and the one place a writer
@@ -1122,11 +1126,9 @@ else
   no "63b: the spelling rule is in agents-src/blocks/survival.md, the rendered SOURCE" \
      "file: $SURVIVAL_BLOCK"
 fi
-S13_SPELL_MISSING=0
-for _r in "${REPO}"/agents/*.md; do
-  has_pin "$_r" "$PIN_S13_SPELLING" || S13_SPELL_MISSING=$((S13_SPELL_MISSING + 1))
-done
-expect_eq "63b: …and every generated role file carries it" "0" "$S13_SPELL_MISSING"
+# RE-POINTED (wave-11 1c, was: every generated role file) — same move as 63.
+expect_eq "63b: …and the rendered payload/context/survival.md carries it" "0" \
+  "$(has_pin "$SURVIVAL_SHIPPED_63" "$PIN_S13_SPELLING" && echo 0 || echo 1)"
 
 section "Section 11: the plugin renders whole — the skill file is a build output (wave-02 AC-1, AC-6, AC-8)"
 
@@ -1165,10 +1167,13 @@ expect_true "64b: the renderer's unit table names the skill unit" \
 clone_render_tree() {
   local dest="$1"
   mkdir -p "$dest/payload/commands" "$dest/payload/.claude-plugin" "$dest/payload/integrity" \
-           "$dest/skills/canonical-sdlc" "$dest/agents" || return 1
+           "$dest/payload/context" "$dest/skills/canonical-sdlc" "$dest/agents" || return 1
   cp -R "${REPO}/agents-src" "$dest/agents-src" || return 1
   cp "${REPO}"/agents/*.md "$dest/agents/" || return 1
   cp "${REPO}"/payload/commands/*.md "$dest/payload/commands/" || return 1
+  # The fourth render unit's output (wave-11 1c) — omit it and every fixture below
+  # renders against a missing final.
+  cp "${REPO}"/payload/context/*.md "$dest/payload/context/" || return 1
   cp "${REPO}/payload/.claude-plugin/plugin.json" "$dest/payload/.claude-plugin/" || return 1
   cp "${REPO}/skills/canonical-sdlc/SKILL.md" "$dest/skills/canonical-sdlc/" || return 1
   [ -f "$RENDERED_MANIFEST" ] && cp "$RENDERED_MANIFEST" "$dest/payload/integrity/"
@@ -1264,8 +1269,17 @@ same_everywhere() {
   fi
 }
 
-same_everywhere 68 "the auditor mandate is one text in the block, the skill file and agents/auditor.md" \
-  "${BLOCK_DIR}/auditor-mandate.md" "AUDITOR-MANDATE" "$SKILL_MD" "${REPO}/agents/auditor.md"
+# RE-POINTED (wave-11 1c, was: … and agents/auditor.md). The orchestrator's dispatch carries
+# the mandate VERBATIM to the auditor (canonical-sdlc Step 5), so agents/auditor.md stopped
+# injecting a second copy and points at the dispatch instead. Two surfaces remain, and the
+# arm below pins that the role file really did give the copy up rather than keep a stale one.
+same_everywhere 68 "the auditor mandate is one text in the block and the skill file" \
+  "${BLOCK_DIR}/auditor-mandate.md" "AUDITOR-MANDATE" "$SKILL_MD"
+expect_absent "68d: …and agents/auditor.md no longer carries an injected copy of it" \
+  "AUDITOR-MANDATE-BEGIN" "$(cat "${REPO}/agents/auditor.md")"
+expect_contains "68e: …it points at the dispatch brief instead" \
+  "Your mandate arrives verbatim in the dispatch brief and is authoritative." \
+  "$(cat "${REPO}/agents/auditor.md")"
 
 same_everywhere 69 "the critic prompt template is one text in the block, the skill file and agents/critic.md" \
   "${BLOCK_DIR}/critic-template.md" "CRITIC-TEMPLATE" "$SKILL_MD" "${REPO}/agents/critic.md"
@@ -1291,8 +1305,13 @@ expect_true "74a: payload/integrity/rendered.sha256 exists" test -f "$RENDERED_M
 expect_false "74b: payload/integrity/agents.sha256 is gone" \
   test -f "${REPO}/payload/integrity/agents.sha256"
 MANIFEST_BODY="$(grep -v '^#' "$RENDERED_MANIFEST" 2>/dev/null | grep -v '^[[:space:]]*$')"
-expect_eq "74c: it carries one row per rendered file (six roles, five commands, the skill)" \
-  "12" "$(printf '%s\n' "$MANIFEST_BODY" | wc -l | tr -d ' ')"
+# RE-POINTED (wave-11 1c): thirteen, not twelve — payload/context/survival.md is the
+# fourth render unit's one output. T5 adds further rendered files in parallel; the count is
+# reconciled at land.
+expect_eq "74c: it carries one row per rendered file (six roles, five commands, the skill, the dispatch terms)" \
+  "13" "$(printf '%s\n' "$MANIFEST_BODY" | wc -l | tr -d ' ')"
+expect_contains "74g: …including the once-rendered dispatch terms, plugin-root-relative" \
+  "  context/survival.md" "$MANIFEST_BODY"
 expect_contains "74d: …including the skill file, plugin-root-relative" \
   "  skills/canonical-sdlc/SKILL.md" "$MANIFEST_BODY"
 expect_contains "74e: …and the command pages, plugin-root-relative" \
@@ -1906,5 +1925,157 @@ for _cmd in setup doctor remove version help; do
     no "111t-${_cmd}: the ${_cmd} template lacks disable-model-invocation: true"
   fi
 done
+
+section "Section 17: the lean spine — role files are role-sized and the dispatch terms render once (wave-11 REQ-1c, AC-1c.1/.2/.3)"
+
+# WHAT THIS SECTION OWNS. Until wave-11 the survival block rendered into all six role
+# files: 33,222 B of the 57,013 B role surface was six copies of one 5,491 B text
+# (record/wave-11-lean-spine/step1-measure-1c-1d.md §1.3). A role file is read in full at
+# every dispatch, so six copies is six times the cost for one text that never varies by
+# role. The repair is structural, not editorial — the block renders ONCE, to
+# payload/context/survival.md, and the SubagentStart hook pushes it — so what needs pinning
+# is the SHAPE of the result: role files stay role-sized, exactly one shipped copy of the
+# terms exists, and that copy says who sent it.
+#
+# WHY A BYTE CAP IS A LEGITIMATE PIN. It is not style policing. The cap is what makes the
+# six-copies regression impossible to reintroduce quietly: a re-added `<!-- INJECT: survival
+# -->` puts 5,537 B back into a role file and this section goes red naming the file, whereas
+# a prose-only pin would stay green until someone happened to read the render.
+#
+# ANTI-VACUITY. The census arm (113) is a COUNT, not an absence, so it fails in BOTH
+# directions — zero copies (the render never ran) and two (a second home appeared) are each
+# red, and the first-line arm below proves the one copy found is the real rendered file
+# rather than an empty placeholder that would satisfy a count.
+#
+# HERMETIC. Reads committed files by path; the doctored copies live under this file's own
+# mktemp dir. Nothing in the repo tree is written.
+
+ROLE_CAP=5120
+ROLE_TOTAL_CAP=26000
+ROLE_OVER=""
+ROLE_TOTAL=0
+ROLE_COUNT=0
+for _rf in "${REPO}"/agents/*.md; do
+  [ -f "$_rf" ] || continue
+  ROLE_COUNT=$((ROLE_COUNT + 1))
+  _rb="$(wc -c < "$_rf" | tr -d ' ')"
+  ROLE_TOTAL=$((ROLE_TOTAL + _rb))
+  [ "$_rb" -le "$ROLE_CAP" ] || ROLE_OVER="${ROLE_OVER} ${_rf##*/}=${_rb}"
+done
+
+# The set arm first: a glob that matched nothing would make every cap below true for free.
+expect_eq "111a: the role-file set is the six roles (the cap arms have something to measure)" \
+  "6" "$ROLE_COUNT"
+if [ -z "$ROLE_OVER" ]; then
+  ok "111b: AC-1c.1 — every agents/*.md is at or under ${ROLE_CAP} B"
+else
+  no "111b: AC-1c.1 — every agents/*.md is at or under ${ROLE_CAP} B" \
+     "over cap:${ROLE_OVER} — the survival block renders once now; a role file this large is carrying a copy of something shared"
+fi
+if [ "$ROLE_TOTAL" -le "$ROLE_TOTAL_CAP" ]; then
+  ok "111c: AC-1c.2 — the six role files total ${ROLE_TOTAL} B, at or under ${ROLE_TOTAL_CAP} B"
+else
+  no "111c: AC-1c.2 — the six role files total ${ROLE_TOTAL} B, at or under ${ROLE_TOTAL_CAP} B" \
+     "total=${ROLE_TOTAL} — was 57013 before wave-11 1c"
+fi
+
+# EVERY ROLE POINTS AT THE TERMS. Dropping the injection without leaving the pointer would
+# satisfy the cap and strand the agent, which is the failure this arm exists for.
+SURVIVAL_POINTER='Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.'
+ROLE_NOPTR=""
+for _rf in "${REPO}"/agents/*.md; do
+  has_pin "$_rf" "$SURVIVAL_POINTER" || ROLE_NOPTR="${ROLE_NOPTR} ${_rf##*/}"
+done
+if [ -z "$ROLE_NOPTR" ]; then
+  ok "112: every role file carries the one-line pointer to the dispatch terms"
+else
+  no "112: every role file carries the one-line pointer to the dispatch terms" \
+     "missing in:${ROLE_NOPTR} — run 'bash agents-src/render.sh'"
+fi
+
+# THE CENSUS (AC-1c.3, shipped half). Exactly one file under payload/ carries the terms.
+# `grep -rl` over payload/ is the brief's own instrument; payload/agents and
+# payload/skills/canonical-sdlc are symlinks into the repo, so a role file that reacquired
+# the block would be found through them and this count would read 2 or more.
+SURVIVAL_SENTINEL='Agents have died on each of these, mid-task, with the work already finished.'
+SURVIVAL_HOMES="$(cd "$REPO" && /usr/bin/grep -rl -F -- "$SURVIVAL_SENTINEL" payload 2>/dev/null | sort)"
+SURVIVAL_HOME_COUNT="$(printf '%s' "$SURVIVAL_HOMES" | grep -c . | tr -d ' ')"
+expect_eq "113a: AC-1c.3 — the survival sentinel is in exactly ONE file under payload/" \
+  "1" "$SURVIVAL_HOME_COUNT"
+expect_eq "113b: …and that file is payload/context/survival.md" \
+  "payload/context/survival.md" "$SURVIVAL_HOMES"
+
+# THE SELF-ATTRIBUTION. Pushed text an agent did not ask for is text an agent can reasonably
+# distrust; the first line says what it is and who delivered it, which is the whole of why
+# the hook's stdout is obeyed rather than queried.
+SURVIVAL_FIRST_LINE="$(head -1 "${REPO}/payload/context/survival.md" 2>/dev/null)"
+case "$SURVIVAL_FIRST_LINE" in
+  '> bionic dispatch terms'*)
+    ok "114a: payload/context/survival.md opens with its self-attribution line" ;;
+  *)
+    no "114a: payload/context/survival.md opens with its self-attribution line" \
+       "first line reads: ${SURVIVAL_FIRST_LINE:-<empty or missing file>}" ;;
+esac
+expect_contains "114b: …naming the hook that delivers it" \
+  "hooks/execution-recorder.sh" "$SURVIVAL_FIRST_LINE"
+
+# --- Anti-vacuity: the census and the first-line arm must report a mutation ---
+anchor "${REPO}/payload/context/survival.md" 'Agents have died on each of these' 1
+DOCTORED_SURVIVAL="$TMP/survival-second-home.md"
+cp "${REPO}/payload/context/survival.md" "$DOCTORED_SURVIVAL" 2>/dev/null
+DOCTORED_HOME_COUNT="$(/usr/bin/grep -rl -F -- "$SURVIVAL_SENTINEL" \
+  "${REPO}/payload" "$DOCTORED_SURVIVAL" 2>/dev/null | sort -u | grep -c . | tr -d ' ')"
+expect_eq "115a: a second copy of the sentinel makes the census read 2 (the count discriminates)" \
+  "2" "$DOCTORED_HOME_COUNT"
+anchor "${REPO}/payload/context/survival.md" '> bionic dispatch terms' 1
+DOCTORED_FIRST="$TMP/survival-no-attribution.md"
+tail -n +2 "${REPO}/payload/context/survival.md" > "$DOCTORED_FIRST" 2>/dev/null
+case "$(head -1 "$DOCTORED_FIRST")" in
+  '> bionic dispatch terms'*)
+    no "115b: a copy with the attribution line stripped still passes 114a (the arm is vacuous)" ;;
+  *)
+    ok "115b: a copy with the attribution line stripped fails 114a (the arm discriminates)" ;;
+esac
+
+# ── AC-1c.4: the four writer-side field rules are role-file DEFAULTS ─────────
+#
+# WHY THESE FOUR AND NOT THE OTHER FIVE. The brief's §5 carries nine rules; five of them
+# ("every brief names the main-root .bionic path", the A-range reservation, the evidence
+# field block, verify-before-land, artifact names checked against the record directory) are
+# addressed to whoever WRITES the brief and cannot be a role-file default — a writer cannot
+# obey a rule about how it was dispatched (record/wave-11-lean-spine/step1-measure-1c-1d.md
+# §3). The four below are the writer's own, and each was either absent from every role file
+# or, in PIPESTATUS's case, actively CONTRADICTED by one.
+WRITER_ROLES="implementor senior-implementor test-runner"
+pin_writer_rule() {  # <n> <label> <pin text>
+  local n="$1" label="$2" pin="$3" missing="" r
+  for r in $WRITER_ROLES; do
+    has_pin "${REPO}/agents/${r}.md" "$pin" || missing="${missing} ${r}"
+  done
+  if [ -z "$missing" ]; then
+    ok "${n}: ${label}"
+  else
+    no "${n}: ${label}" "missing in:${missing} — the rule is a default only where it renders"
+  fi
+}
+
+pin_writer_rule "116a" "AC-1c.4 §5 #1 — suites run foreground with the tool timeout at 600000 ms" \
+  'Suites run FOREGROUND with the Bash tool `timeout` parameter set to 600000 ms, never `run_in_background`, never a timeout binary.'
+pin_writer_rule "116b" "AC-1c.4 §5 #2 — only the suites the brief names" \
+  "Run only the suites the brief's \`Suites:\` names."
+pin_writer_rule "116c" "AC-1c.4 §5 #8 — the cd guard covers the whole command" \
+  '`cd <tree> || exit 1` guards the WHOLE command'
+
+# #7 is a CORRECTION, so it takes both halves: the new rule present, and the sentence that
+# taught the opposite gone. An absence arm alone would pass on a file that lost the whole
+# Logging section, which is why the positive half is asserted over the same file first.
+expect_contains "116d: AC-1c.4 §5 #7 — agents/test-runner.md captures exit codes with the rc= form" \
+  'Capture exit codes as `{ cmd; echo "rc=$?"; } > log 2>&1`, never PIPESTATUS' \
+  "$(cat "${REPO}/agents/test-runner.md")"
+expect_absent "116e: …and no longer INSTRUCTS the shell-specific PIPESTATUS array (the contradiction is gone)" \
+  'the per-stage array is shell-specific — `${PIPESTATUS[0]}` in **bash** (zero-indexed)' \
+  "$(cat "${REPO}/agents/test-runner.md")"
+expect_contains "116f: …and the implementors carry the same rc= rule" \
+  'Capture exit codes as' "$(cat "${REPO}/agents/senior-implementor.md")"
 
 finish

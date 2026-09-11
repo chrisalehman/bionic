@@ -8,7 +8,7 @@
 # green right up until someone edits five of the six. Here there is one copy of each block
 # and the finals are generated, so they cannot disagree: identity by CONSTRUCTION.
 #
-# THREE RENDER UNITS, ONE PIPELINE:
+# FOUR RENDER UNITS, ONE PIPELINE:
 #
 #   agents-src/templates/          -> agents/              the six agent role files. Shared
 #                                                          duty text: the reporting contract
@@ -26,6 +26,20 @@
 #                                                          duplication axis, the terminal-
 #                                                          disposition rule, and the
 #                                                          orchestrator's dispatch body.
+#   agents-src/templates/context/  -> payload/context/     the dispatch terms, ONE shipped
+#                                                          file (wave-11 REQ-1c). Shared
+#                                                          text: the survival block, which
+#                                                          used to render into all six role
+#                                                          files.
+#
+# WHY THE DISPATCH TERMS ARE THEIR OWN UNIT (wave-11 1c). The survival block is the one
+# shared text that varies by NOTHING — not by role, not by step — and it was the largest:
+# 33,222 B of the 57,013 B role surface was six copies of it, re-read in full at every
+# dispatch. A role file is now the role, and the terms are one shipped file the
+# SubagentStart hook pushes. The unit exists rather than a hand-written file for the same
+# reason every other one does: a hand-written copy of a block is a promise, an injection is
+# a fact. The output is NOT under agents/ because every `.md` there loads as an agent
+# definition; payload/context/ is a plain shipped directory with no such meaning.
 #
 # WHY THE SKILL FILE IS A RENDER TARGET (wave-02 DD-2). Until this unit existed the skill
 # file was hand-written, and four of its passages were hand-copied into role files under
@@ -145,6 +159,7 @@ RENDER_UNITS="
 agents-src/templates|agents
 agents-src/templates/commands|payload/commands
 agents-src/templates/skills/canonical-sdlc|skills/canonical-sdlc
+agents-src/templates/context|payload/context
 "
 
 ROLES="auditor critic implementor researcher senior-implementor test-runner"
@@ -159,8 +174,8 @@ ROLES="auditor critic implementor researcher senior-implementor test-runner"
 # here as well: an output path under payload/ loses that prefix, and one outside payload/ is
 # already the name the plugin root carries.
 #
-# IT COVERS EVERY RENDERING, one row per output of every unit — the six role files, the four
-# command files, and the skill file. Widening it past the role files was wave-02 AC-8's own
+# IT COVERS EVERY RENDERING, one row per output of every unit — the six role files, the five
+# command files, the skill file, and the dispatch terms. Widening it past the role files was wave-02 AC-8's own
 # acceptance criterion, not a side effect: a manifest that answered for three of eleven
 # rendered files would report a doctored command page or a doctored method as stock. Rows
 # are emitted in unit-table order and, within a unit, in glob order, so the file a write

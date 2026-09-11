@@ -8556,11 +8556,14 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # 29->32/30->33; K4 (Section 15) added two more (DOCTORED_NO_ROWRULE,
 # DOCTORED_NO_CLOSEDBY), 32->34/33->35; K5.4 (Section 16, plan slice 21) added one more
 # (DOCTORED_NO_K54_CLAUSE), 34->35/35->36 — A-31's own warning that a later card with a
-# branch pair moves this count, landing on schedule. RE-DERIVED BY DIRECT GREP over the
-# merged docs-pins.test.sh at each point, not carried forward from any pre-merge side.
-expect_eq "S19.3 docs-pins holds 35 doctoring sites" "35" \
+# branch pair moves this count, landing on schedule. epic-23 wave-11 1c (Section 17) adds
+# two more (DOCTORED_SURVIVAL, the second-home census mutant; DOCTORED_FIRST, the
+# attribution-stripped mutant) and two anchor calls, 35->37/36->38. RE-DERIVED BY DIRECT
+# GREP over the merged docs-pins.test.sh at each point, not carried forward from any
+# pre-merge side.
+expect_eq "S19.3 docs-pins holds 37 doctoring sites" "37" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 36 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4)" "36" \
+expect_eq "S19.3 …declared by 38 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c)" "38" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -8605,7 +8608,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # protect-main.sh before stripping them — so this suite is 26 again (the row above this
 # one), for a different reason than it was before N1.
 #
-# 36 + 26 + 1 + 3 = 66 — RE-DERIVED BY DIRECT GREP over the merged files at THIS commit,
+# 38 + 26 + 1 + 3 = 68 — RE-DERIVED BY DIRECT GREP over the merged files at THIS commit,
 # never carried forward from any pre-merge side, which is the whole reason this literal
 # exists.
 #
@@ -8616,7 +8619,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section slice 11 does not own.
-expect_eq "S19.3 …66 anchor call sites across the four doctoring suites, all told" "66" \
+expect_eq "S19.3 …68 anchor call sites across the four doctoring suites, all told" "68" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
