@@ -703,10 +703,12 @@ expect_false "48: …and no longer ships the old integrity/agents.sha256" \
 # names (the repo reaches those through payload/agents and payload/skills/* symlinks).
 make_plugin_root() {
   local dir; dir="$(mktemp -d -p "$TMP")"
-  mkdir -p "$dir/integrity" "$dir/agents" "$dir/commands" "$dir/skills/canonical-sdlc"
+  mkdir -p "$dir/integrity" "$dir/agents" "$dir/commands" "$dir/context" "$dir/skills/canonical-sdlc"
   cp "$RENDERED_MANIFEST" "$dir/integrity/" || return 1
   cp "${REPO}"/agents/*.md "$dir/agents/" || return 1
   cp "${REPO}"/payload/commands/*.md "$dir/commands/" || return 1
+  # wave-11 1c: the once-rendered dispatch terms are a manifest row like any other.
+  cp "${REPO}"/payload/context/*.md "$dir/context/" || return 1
   cp "${REPO}/skills/canonical-sdlc/SKILL.md" "$dir/skills/canonical-sdlc/" || return 1
   printf '%s' "$dir"
 }
@@ -719,7 +721,8 @@ integrity_line() {
 PROOT_STOCK="$(make_plugin_root)"
 LINE_STOCK="$(integrity_line "$PROOT_STOCK")"
 expect_match "49: an untouched install reads as stock" "*state=stock*" "$LINE_STOCK"
-expect_match "50: …over all twelve rendered files, not just the six roles" "*total=12*" "$LINE_STOCK"
+# RE-POINTED (wave-11 1c): thirteen — payload/context/survival.md joined the manifest.
+expect_match "50: …over all thirteen rendered files, not just the six roles" "*total=13*" "$LINE_STOCK"
 expect_match "51: …with nothing named as modified" "*modified=0 names=-*" "$LINE_STOCK"
 
 # THE DEFECT CONTROL. `stock` above is worth nothing unless the same reader turns on a
