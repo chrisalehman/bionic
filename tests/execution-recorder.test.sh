@@ -1864,4 +1864,88 @@ expect_contains "14c the LAST row carrying the id is the one the guard would rea
 expect_contains "14c …and it states the budget the dispatch derived" \
   "|suites_allowed=$S14_SUITES|" "$B2_LAST"
 
+# ============================================================
+section "Section 15: dispatch-terms delivery — SubagentStart pushes survival.md to bionic agents (wave-11 1c-b, design D2, probe P2)"
+# ============================================================
+#
+# D2 (spec §2, "Dispatcher ↔ agent"): the SubagentStart hook, already registered, reads
+# `agent_type`; for `bionic:*` it prints `payload/context/survival.md` as `additionalContext`.
+# Third-party and harness agents receive nothing. Probe P2
+# (record/wave-11-lean-spine/step2-probe-premises.md §2) proved the mechanism end to end on a
+# live dispatch: the exact stdout shape
+# `{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":"<text>"}}`
+# reaches the child transcript as a `<system-reminder>` and is acted on. This section drives
+# that same shape through the real hook, hermetically, over `agent_type` alone — the field
+# ARM 3 already reads for identification (its own comments call it unreliable for a NAME, but
+# it is the field this script is given for the subagent's TYPE, which is what a `bionic:`
+# prefix test is about).
+#
+# BYTE-FOR-BYTE PIN (item 3): the survival text is shipped in exactly one file —
+# `payload/context/survival.md` — and that file is the SSoT; this hook's stdout is its
+# rendering surface (spec ownership table, "SurvivalTerms"). Case 15a's equality assertion
+# IS the agreement between the two: a future edit that changes one without the other fails
+# here first.
+#
+# PLACEMENT, independent of the roster (deliberate). The print is gated on `agent_type` alone,
+# ahead of the `ROSTER_FILE`/`ROW` bookkeeping ARM 3 already does — delivering the dispatch
+# terms cannot depend on whether this session's roster happens to carry a matching row, or a
+# bionic agent started from a roster-less path would silently lose its survival terms. Case
+# 15b drives that independence directly: no roster row is seeded at all, and delivery still
+# fires. Case 15e is the paired positive showing the two effects (stdout delivery, roster
+# identification) coexist without one gating the other, over the SAME fixture as case 15a.
+#
+# ENGAGEMENT-SCOPED, like every arm in this file (`engaged_session` is asked before any of
+# ARM 1/2/3's own logic) — every fixture below is a `yes`-wave world.
+
+# The SSoT itself, read once. `$HERE` is this suite's own `BIONIC_HOOKS_DIR`
+# (tests/lib/resolve-roots.sh), so `dirname "$HERE"` is THIS repo's root regardless of which
+# checkout is under test — never the fixture sandbox, because the hook resolves its library
+# (and this file) from its OWN path, not from the payload's `cwd`.
+SURVIVAL_REAL="$(dirname "$HERE")/payload/context/survival.md"
+expect_file "15: the SSoT file this whole section pins against exists" "$SURVIVAL_REAL"
+S15_WANT="$(cat "$SURVIVAL_REAL" 2>/dev/null)"
+expect_nonempty "15: …and it is not empty (a non-vacuous byte-for-byte pin)" "$S15_WANT"
+
+# --- 15a: bionic:senior-implementor, WITH a matching roster row (reuses 14/10's own
+#     fixture idiom) — proves delivery AND that ARM 3's existing identification duty is
+#     untouched (item 1e). ---
+IFS='|' read -r S15A_REPO S15A_TR S15A_SUB S15A_CFG <<< "$(make_world survivalsenior yes)"
+seed_roster_full "$S15A_REPO" "$SID_A" "s15a-senior" "toolu_01SURVIVALA" confirmed "$START_ID"
+S15A_ROSTER="$S15A_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$S15A_TR" "$S15A_REPO" "bionic:senior-implementor" "$START_ID")"
+expect_eq "15a: stdout is exactly one line" "1" "$(printf '%s\n' "$REC_OUT" | grep -c .)"
+S15A_EVENT=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.hookEventName' 2>/dev/null)
+expect_eq "15a: hookSpecificOutput.hookEventName is SubagentStart" "SubagentStart" "$S15A_EVENT"
+S15A_CTX=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)
+expect_eq "15a: additionalContext equals the byte content of payload/context/survival.md (SSoT pin, item 3)" \
+  "$S15_WANT" "$S15A_CTX"
+# --- 15e: the existing recorder duty still fires alongside delivery, over this same fixture ---
+S15A_ROW=$(grep 'status=identified' "$S15A_ROSTER" 2>/dev/null)
+expect_contains "15e: ARM 3's identification still fires on a bionic type" \
+  "status=identified" "$S15A_ROW"
+expect_contains "15e: …carrying the same transcript-form id delivery did not disturb" \
+  "agent_id=$START_ID" "$S15A_ROW"
+
+# --- 15b: bionic:test-runner, with NO roster row at all — delivery does not depend on the
+#     roster arm finding (or even having) anything to join. ---
+IFS='|' read -r S15B_REPO S15B_TR S15B_SUB S15B_CFG <<< "$(make_world survivalrunner yes)"
+run_rec "$(mk_subagent_start "$SID_A" "$S15B_TR" "$S15B_REPO" "bionic:test-runner" "$START_ID")"
+expect_eq "15b: stdout is exactly one line" "1" "$(printf '%s\n' "$REC_OUT" | grep -c .)"
+S15B_EVENT=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.hookEventName' 2>/dev/null)
+expect_eq "15b: hookSpecificOutput.hookEventName is SubagentStart" "SubagentStart" "$S15B_EVENT"
+S15B_CTX=$(printf '%s' "$REC_OUT" | jq -r '.hookSpecificOutput.additionalContext' 2>/dev/null)
+expect_eq "15b: additionalContext equals the byte content of payload/context/survival.md" \
+  "$S15_WANT" "$S15B_CTX"
+
+# --- 15c: general-purpose (a harness agent) — no dispatch terms; this is not a bionic role. ---
+IFS='|' read -r S15C_REPO S15C_TR S15C_SUB S15C_CFG <<< "$(make_world survivalharness yes)"
+run_rec "$(mk_subagent_start "$SID_A" "$S15C_TR" "$S15C_REPO" "general-purpose" "$START_ID")"
+expect_empty "15c: a harness agent type receives nothing on stdout" "$REC_OUT"
+
+# --- 15d: superpowers:something (a third-party skill's agent) — no dispatch terms either;
+#     the prefix test is `bionic:`, not merely "carries a colon". ---
+IFS='|' read -r S15D_REPO S15D_TR S15D_SUB S15D_CFG <<< "$(make_world survivalthirdparty yes)"
+run_rec "$(mk_subagent_start "$SID_A" "$S15D_TR" "$S15D_REPO" "superpowers:something" "$START_ID")"
+expect_empty "15d: a third-party agent type receives nothing on stdout" "$REC_OUT"
+
 finish
