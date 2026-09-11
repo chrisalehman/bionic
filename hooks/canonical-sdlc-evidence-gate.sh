@@ -1714,15 +1714,20 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
 # Per-tier required evidence keys — MIRROR of the canonical table in
-# skills/canonical-sdlc/SKILL.md Step 5 ("Per-tier required evidence keys").
-# Change THAT table first; this function follows it. (R27)
+# skills/canonical-sdlc/steps/5.md ("Per-tier required keys"). Change THAT
+# table first; this function follows it. (R27)
+#
+# `evidence` (1a, D5) is the one SHARED key every tier owes on top of its own
+# — the AC block's record/ proof path — and it is listed LAST in every arm so
+# the loop that walks this list still blocks on a tier-specific key first when
+# one is missing (see the 'evidence' branch inside validate_matrix's loop).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 keys_for_tier() {
   case "$1" in
-    T0|T1) echo "tier-run readback" ;;
-    T2)    echo "tier-run readback fixture-fidelity" ;;
-    T3)    echo "tier-run fresh cold-client contact readback" ;;
-    T4)    echo "user-confirmed" ;;
+    T0|T1) echo "tier-run readback evidence" ;;
+    T2)    echo "tier-run readback fixture-fidelity evidence" ;;
+    T3)    echo "tier-run fresh cold-client contact readback evidence" ;;
+    T4)    echo "user-confirmed evidence" ;;
   esac
 }
 
@@ -1822,7 +1827,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc slice_val slice9 row_is_waived
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc slice_val slice9 row_is_waived ev_abs
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -2030,6 +2035,36 @@ validate_matrix() {
                   "a live-tier field cannot be n/a — downgrade the row via the Waiver Protocol (record 'waiver: <user> <date> <reason>'), a user decision." ;;
             esac ;;
         esac
+        # The 'evidence:' key (1a, D5) is the plan-holds-claims/record-holds-proof
+        # boundary: its value must resolve to a real file under
+        # <docs-root>/record/, reusing resolve_walk_path()'s own template
+        # (record/<file> against the docs root, a bare path against the project
+        # root, absolute as written) and the walk arm's '..' refusal — one
+        # resolution rule for both citations, rather than a second copy of it.
+        # It sits LAST in keys_for_tier()'s per-tier list (R27's table), so a
+        # block that is missing some OTHER required key still blocks on that
+        # key first; this branch only bites a block that was otherwise complete.
+        # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+        if [ "$key" = "evidence" ]; then
+          if echo "$val" | grep -qE '(^|/)\.\.(/|$)'; then
+            block_matrix "${ac}'s evidence path climbs out of record/" "name it under record/" \
+              "matrix row '${ac}' evidence '${val}' climbs out of the record directory and so does not resolve under ${DOCS_ROOT}/record/." \
+              "point '${ac}:' evidence at a path under record/, e.g. 'evidence: record/<wave>/evidence/${ac}.md'."
+          fi
+          ev_abs=$(resolve_walk_path "$val")
+          case "$ev_abs" in
+            "$DOCS_ROOT"/record/*) : ;;
+            *)
+              block_matrix "${ac}'s evidence sits outside record/" "move it into record/" \
+                "matrix row '${ac}' evidence '${val}' does not resolve under ${DOCS_ROOT}/record/ (resolved to ${ev_abs})." \
+                "move the proof file into <docs-root>/record/ and point '${ac}:' evidence there." ;;
+          esac
+          if [ ! -f "$ev_abs" ]; then
+            block_matrix "${ac}'s evidence names no real file" "write the proof file there" \
+              "matrix row '${ac}' evidence '${val}' is named but no file exists at ${ev_abs}." \
+              "write the proof for '${ac}' to that path before discharging the row."
+          fi
+        fi
       done
     fi
     # Once past the Verify gate, every non-waived row must be CONFIRMED —

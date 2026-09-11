@@ -57,13 +57,30 @@ audit_file_for() {
 # Creates an isolated $HOME-equivalent that is ALSO usable as the project the
 # single-argument runners gate against: an empty ~/.claude/plans/ (never
 # searched — see write_global_note) plus an empty .bionic/docs/plans/ (searched).
+#
+# Also seeds the one shared proof file (1a, D5) that every fixture matrix's
+# `evidence: record/generic-evidence.md` line resolves to — write_generic_evidence()
+# below is the single writer, so a fixture needing a DIFFERENT evidence path
+# (or none at all) still gets this default for free and only overrides it when
+# the case is actually about the evidence arm itself (Section 39).
 make_home() {
   local dir
   dir=$(mktemp -d)
   mkdir -p "$dir/.claude/plans" "$dir/.bionic/docs/plans"
+  write_generic_evidence "$dir"
   engage "$dir"
   cleanup_dirs+=("$dir")
   echo "$dir"
+}
+
+# The default proof file every 'evidence: record/generic-evidence.md' fixture
+# line resolves to (1a, D5) — non-empty, so it also clears the file-existence
+# check, never the file-content check (this gate demands no content shape).
+write_generic_evidence() {
+  local dir="$1"
+  mkdir -p "$dir/.bionic/docs/record"
+  printf 'generic fixture proof — this suite tests the gate, not the artifact.\n' \
+    > "$dir/.bionic/docs/record/generic-evidence.md"
 }
 
 # ---------- engagement (task-engaged-session, AC-6) ----------
@@ -89,6 +106,7 @@ make_project() {
   local dir
   dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/docs/plans"
+  write_generic_evidence "$dir"
   engage "$dir"
   cleanup_dirs+=("$dir")
   echo "$dir"
@@ -798,6 +816,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -805,6 +824,7 @@ AC-1:
   readback: panel.visible === true via page eval
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
@@ -820,6 +840,7 @@ stack-health: n/a: no long-running serve
 
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 332/332 asserted"
 
@@ -834,6 +855,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a
   cold-client: fresh incognito profile
@@ -851,6 +873,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a
   cold-client: fresh incognito profile
@@ -869,6 +892,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: suite: hermetic-x
   readback: 12/12 asserted"
 
@@ -885,6 +909,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -892,6 +917,7 @@ AC-1:
   readback: panel.visible === true via page eval
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
@@ -908,6 +934,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -915,6 +942,7 @@ AC-1:
   readback: panel.visible === true via page eval
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
@@ -927,6 +955,7 @@ matrix_no_stackhealth="## Verification Matrix
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted"
 
@@ -941,6 +970,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted"
 
@@ -957,15 +987,18 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit
   readback: 40/40 asserted
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: playwright hermetic run
   readback: rendered rows === 5
   fixture-fidelity: derived from captured prod payload 2026-07-10
 AC-3:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: pnpm build && tsc
   readback: 0 type errors"
 
@@ -980,6 +1013,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted
 
@@ -996,6 +1030,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted
 
@@ -1013,6 +1048,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: x
   fresh: x
   cold-client: x
@@ -1052,6 +1088,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: status pending → done, 40/40 asserted"
 h17c2=$(make_home)
@@ -1083,6 +1120,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a
   cold-client: fresh incognito profile
@@ -1103,6 +1141,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a
   cold-client: fresh incognito profile
@@ -1241,6 +1280,7 @@ stack-health: before: process restarts 0; walk in progress
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -1259,6 +1299,7 @@ v101_matrix_bad_status="${v101_matrix_pending/| AC-2 | T3 | pending | see AC-2 |
 v101_matrix_pending_partial="$v101_matrix_pending
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   contact: n/a: staging origin down"
 
 # 17n — pending row, no AC block, current: 5 → allow (mid-walk commit home).
@@ -1339,6 +1380,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -1346,6 +1388,7 @@ AC-1:
   readback: panel.visible === true via page eval
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   provenance: spec §Close-out obligations
   slice: 9"
 
@@ -1502,6 +1545,7 @@ $v10_fence_block
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: x
   fresh: x
   cold-client: x
@@ -1528,6 +1572,7 @@ $v10_fence_block
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted"
 
@@ -2321,6 +2366,7 @@ echo ""
 ac10_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac10_tmp")
 ac10_main="$ac10_tmp/main"
 mkdir -p "$ac10_main/.bionic/docs/plans" "$ac10_main/deep/sub/dir"
+write_generic_evidence "$ac10_main"
 git -C "$ac10_main" init -q .
 git -C "$ac10_main" commit -q --allow-empty -m init
 git -C "$ac10_main" worktree add -q "$ac10_tmp/wt" -b ac10-wt
@@ -4232,7 +4278,8 @@ prov_matrix() {
     prov_line="
   provenance: $1"
   fi
-  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  tier-run: bash test.sh — unit suite\n  fails-when: the planted defect this eval must go red on\n  readback: 332/332 asserted%s\n' "$prov_line"
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  tier-run: bash test.sh — unit suite\n  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md\n  readback: 332/332 asserted%s\n' "$prov_line"
 }
 
 # 27a — the literal value blocks.
@@ -4345,6 +4392,7 @@ section "Section 28: matrix_block list-leader tolerance"
 # T1's own evidence keys, satisfying the per-tier requirement.
 leader_t1_keys="  tier-run: bash test.sh — unit suite
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   readback: 332/332 asserted"
 
 # $1 = block-header leader ("" flush-left, "- ", "* ", …)
@@ -4376,7 +4424,8 @@ write_plan "$h28b" "$(plan 6 "$step6_body" "$(leader_matrix '- ' "$leader_t1_key
 # block visible the row is exempt from the per-tier keys and commits clean.
 h28c=$(make_home)
 write_plan "$h28c" "$(plan 5 "$step5_base" "$(leader_matrix '- ' "  waiver: dana 2026-08-01 env stale
-  fails-when: the planted defect this eval must go red on")")" > /dev/null
+  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md")")" > /dev/null
 # The `fails-when:` line is not part of 28c's subject — the block-side waiver is. It is here
 # because that key is unconditional from `current: 4` (epic-22 K2): a waiver dissolves the
 # obligation to RUN an eval, never the obligation to have designed one, so a waived row still
@@ -4417,10 +4466,12 @@ stack-health: n/a: no long-running serve
 
 - AC-11:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
 $leader_t1_keys
   provenance: implementation
 - AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
 $leader_t1_keys
   provenance: spec §3")" > /dev/null
 expect_block "28f '- AC-11:' before '- AC-1:' → AC-1 keeps its own block (AC-11 is the row that blocks)" \
@@ -4589,6 +4640,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   user-confirmed: %s
   tier-run: rendered the wall in the live client
   fresh: rebuilt from the deployed payload
@@ -4847,10 +4899,12 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash tests/canonical-sdlc-evidence-gate.test.sh
   readback: 120/120 asserted
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
@@ -5041,10 +5095,12 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   slice: 9"
 
 # The same row with the waiver taken away: pending, no token anywhere.
@@ -5079,11 +5135,12 @@ expect_allow "33c the waiver as an AC-block line (not the evidence cell) → all
 # from the loop's unconditional arms. The same waived row with a circular
 # `provenance: implementation` still blocks — the provenance arm sits above
 # both, deliberately, and this fix did not move it.
-m33_waived_prov="${m33_waived/AC-2:
-  fails-when: the planted defect this eval must go red on
-  slice: 9/AC-2:
-  fails-when: the planted defect this eval must go red on
-  slice: 9
+# Anchored on 'slice: 9' alone (never a path-bearing line): the pattern half
+# of a bash ${var/pattern/replacement} substitution ends at its own FIRST '/',
+# so a pattern spanning the 'evidence: record/generic-evidence.md' line above
+# would truncate there and garble both halves — this fixture proved that the
+# hard way and moved the anchor to a slash-free line instead.
+m33_waived_prov="${m33_waived/  slice: 9/  slice: 9
   provenance: implementation}"
 h33d=$(make_home)
 write_plan "$h33d" "$(plan 6 "$step6_body" "$m33_waived_prov")" > /dev/null
@@ -5247,6 +5304,7 @@ s35_root() {
   # what a `/var/...` needle does against a `/private/var/...` haystack.
   dir=$(cd "$dir" && pwd -P)
   mkdir -p "$dir/.claude/plans" "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
+  write_generic_evidence "$dir"
   echo "$dir"
 }
 
@@ -6143,6 +6201,94 @@ expect_allow "38e a prototype slice present, but no AC block names it → allow"
 # than reproduced here — `.bionic/` is machine-local and absent from a fresh clone, so
 # an in-suite fixture reading it would degrade to a vacuous pass on exactly the
 # machines this arm is meant to protect.
+
+# ============================================================
+# Section 39: the matrix evidence-path arm (AC-1a.3, AC-1a.6)
+# ============================================================
+#
+# wave-11-lean-spine row 1a: the plan holds claims, `record/` holds proof. From
+# current: 5 onward, a `discharged` row's AC block must carry an `evidence:`
+# key whose value resolves to a real file under <docs-root>/record/ — reusing
+# resolve_walk_path()'s own template (record/<file> against the docs root, a
+# bare path against the project root, absolute as written, a `..` component
+# refused). Pending/blocked and waived rows are exempt, exactly as the
+# existing per-tier key loop already is (validate_matrix's row-status
+# branches, unchanged by this arm). The key sits last in keys_for_tier()'s
+# per-tier list, so every fixture above that intentionally exercises a missing
+# OTHER key still blocks on that key first — this arm only bites a block that
+# was otherwise complete.
+
+section "Section 39: the matrix evidence-path arm (AC-1a.3, AC-1a.6)"
+
+# One discharged T1 row, complete per-tier keys (tier-run, readback), plus an
+# `evidence:` value the caller supplies raw (after the colon) — the fixture
+# varies only that one line.
+evidence_matrix() {  # $1 = the evidence: value to write
+  cat <<EOF
+## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted
+  evidence: $1
+EOF
+}
+
+# 39a — a path-cited evidence value naming a real file under record/ → allow.
+# The whole plan is well under the 40 KB cap (AC-1a.1) — this fixture is a few
+# hundred bytes, not the wave's own 40 KB-adjacent plan.
+h39a=$(make_home)
+mkdir -p "$h39a/.bionic/docs/record/wave-11-lean-spine/evidence"
+printf 'AC-1: the unit suite went green — 332/332, output attached.\n' \
+  > "$h39a/.bionic/docs/record/wave-11-lean-spine/evidence/AC-1.md"
+write_plan "$h39a" "$(plan 5 "$step5_base" "$(evidence_matrix 'record/wave-11-lean-spine/evidence/AC-1.md')")" > /dev/null
+expect_allow "39a discharged row, evidence: a real file under record/ → allow" \
+  "$h39a" 'git commit -m "x"'
+
+# 39b — an empty evidence value refuses, naming the row.
+h39b=$(make_home)
+write_plan "$h39b" "$(plan 5 "$step5_base" "$(evidence_matrix '')")" > /dev/null
+expect_block "39b discharged row, evidence: empty → block, naming the row" \
+  "$h39b" 'git commit -m "x"' "AC-1"
+
+# 39c — a non-empty evidence value naming a path that does not resolve under
+# record/ (a real file, just in the wrong place) refuses the same way the
+# walk-artifact arm does for the identical shape (Section 26j).
+h39c=$(make_home)
+mkdir -p "$h39c/.bionic/docs/plans"
+printf 'wrongly placed\n' > "$h39c/.bionic/docs/plans/AC-1.md"
+write_plan "$h39c" "$(plan 5 "$step5_base" "$(evidence_matrix '.bionic/docs/plans/AC-1.md')")" > /dev/null
+expect_block "39c discharged row, evidence: path outside record/ → block" \
+  "$h39c" 'git commit -m "x"' "does not resolve under"
+
+# 39d — the same climb-out shape the walk arm refuses (Section 26i): a `..`
+# component is refused outright, before any file test.
+h39d=$(make_home)
+printf 'escaped\n' > "$h39d/.bionic/docs/escaped.md"
+write_plan "$h39d" "$(plan 5 "$step5_base" "$(evidence_matrix 'record/../escaped.md')")" > /dev/null
+expect_block "39d discharged row, evidence: path climbing out of record/ → block" \
+  "$h39d" 'git commit -m "x"' "climbs out of"
+
+# 39e — a pending row carries no evidence contract yet (the same exemption
+# the per-tier key loop already gives it) — control for 39a-d.
+h39e=$(make_home)
+evidence_matrix_pending="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | pending | see AC-1 |  |"
+write_plan "$h39e" "$(plan 5 "$step5_base" "$evidence_matrix_pending")" > /dev/null
+expect_allow "39e pending row, no evidence: key at all → allow (exempt, mid-discharge)" \
+  "$h39e" 'git commit -m "x"'
 
 section "AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 

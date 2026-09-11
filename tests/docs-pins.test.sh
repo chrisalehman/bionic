@@ -2344,5 +2344,17 @@ fi
 expect_eq "120: a missing step file measures -1, not 0 (absence fails the cap, never satisfies it)" \
   "-1" "$(bytes_of "${SPLIT_SKILL_DIR}/steps/nonexistent.md")"
 
+section "Section 19: REQ-1a — the AC block's evidence: key resolves under record/ (AC-1a.3)"
+#
+# WHAT THIS SECTION OWNS. Row 1a's evidence-gate arm requires a `discharged` matrix row's AC
+# block to carry an `evidence:` key resolving to a real file under `<docs-root>/record/` — the
+# per-tier "required keys" table is the canonical copy the hook's keys_for_tier() mirrors (R27),
+# so a table that stops naming the key is a table the hook has silently outgrown. HERMETIC:
+# reads the committed rendered Step-5 final by path.
+
+AC1A_STEP5="${SPLIT_SKILL_DIR}/steps/5.md"
+AC1A_KEYS_TABLE="$(awk '/Per-tier required keys/{f=1} f{print} f&&/^\|.*T4/{exit}' "$AC1A_STEP5" 2>/dev/null)"
+expect_contains "121: AC-1a.3 — the Step-5 per-tier required-keys table names 'evidence'" \
+  '`evidence`' "$AC1A_KEYS_TABLE"
 
 finish
