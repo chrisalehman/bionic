@@ -1,3 +1,6 @@
+<!-- GENERATED FILE — DO NOT EDIT. Rendered by agents-src/render.sh from agents-src/templates/skills/canonical-sdlc/dispatch.md.tmpl. -->
+
+<!-- ORCHESTRATOR-DISPATCH-BEGIN -->
 ## Dispatch
 
 The orchestrator stays free: it keeps Steps 0–3, slice decomposition, and every approval-shaped decision, and offloads research, execution, verification, and review. Subagents return summaries, never payloads. Dispatch is the orchestrator's authority alone: a dispatched agent never dispatches — it asks the orchestrator — and the wall says so when a subagent tries.
@@ -92,3 +95,4 @@ Before ending a turn, reconcile: every `active` row either has a verified result
 **Three-fail rule.** Three failures to produce valid evidence for one step: if diagnostic, run a full MAP-INSTRUMENT-NARROW pass (the counter resets on a completed pass, not on more speculative fixes); if decision-related, stop and surface. A `standard` slice that fails twice re-dispatches once as `senior-implementor` — that is the third try, not a fourth.
 
 **Stop and wake** for: an ambiguous spec needing a judgment call, new external-API auth, anything affecting billing, destructive migrations, secrets or production infrastructure, and anything the user's own config marks as requiring approval. Append a `## Wake Note` and do not proceed past it.
+<!-- ORCHESTRATOR-DISPATCH-END -->

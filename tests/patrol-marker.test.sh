@@ -3,10 +3,11 @@
 # spellings: payload/scripts/lib/patrol.sh (the SSoT, where the classifier
 # regex lives and the header prose names the literal in plain text at :28/:34),
 # payload/hooks/patrol-duties-gate.sh (the literal substring its awk index()
-# search reads at :177), and payload/skills/canonical-sdlc/SKILL.md (the
+# search reads at :177), and payload/skills/canonical-sdlc/dispatch.md (the
 # literal command the patrol prompt actually issues at its "Tick the poker"
 # bullet, which is what ends up in the transcript the other two read back).
-# Bionic 1.3.2, wave-01-dogfood-fixes slice 4/6, spec AC-21.
+# Bionic 1.3.2, wave-01-dogfood-fixes slice 4/6, spec AC-21. Re-pointed from
+# SKILL.md to dispatch.md at wave-11-lean-spine 1b, when the Patrol text moved.
 #
 # WHY THIS EXISTS. Nothing joins these three copies together today
 # (.bionic/docs/record/wave-bionic-1.3.2-dogfood-fixes/
@@ -52,7 +53,9 @@ PAYLOAD="${REPO}/payload"
 
 PATROL_LIB="${BIONIC_PATROL_LIB_UNDER_TEST:-${PAYLOAD}/scripts/lib/patrol.sh}"
 GATE_HOOK="${BIONIC_PATROL_GATE_UNDER_TEST:-${PAYLOAD}/hooks/patrol-duties-gate.sh}"
-SKILL_DOC="${BIONIC_PATROL_SKILL_UNDER_TEST:-${PAYLOAD}/skills/canonical-sdlc/SKILL.md}"
+# wave-11-lean-spine 1b moved the "Tick the poker" bullet, with the rest of the Patrol
+# text, out of SKILL.md into dispatch.md — this default follows it there.
+SKILL_DOC="${BIONIC_PATROL_SKILL_UNDER_TEST:-${PAYLOAD}/skills/canonical-sdlc/dispatch.md}"
 
 # pass/fail were pure-rename shadows of the framework's ok/no; the suite's own
 # explicit `TOTAL=$((TOTAL + 1))` lines beside each call are dropped too, since
@@ -106,13 +109,13 @@ else
 fi
 
 if [ -n "$MARKER" ] && grep -qF -- "$MARKER" "$SKILL_DOC"; then
-  ok "3: SKILL.md still carries the marker '$MARKER'"
+  ok "3: dispatch.md still carries the marker '$MARKER'"
 else
-  no "3: SKILL.md no longer carries the marker read from patrol.sh"
+  no "3: dispatch.md no longer carries the marker read from patrol.sh"
 fi
 
 if [ -n "$MARKER" ] && spelling_ok "$MARKER" "$GATE_HOOK" "$SKILL_DOC"; then
-  ok "4: the three-way agreement holds — patrol.sh, patrol-duties-gate.sh and SKILL.md all spell the tick marker the same way"
+  ok "4: the three-way agreement holds — patrol.sh, patrol-duties-gate.sh and dispatch.md all spell the tick marker the same way"
 else
   no "4: the three-way agreement is broken — see #1-3 above for which side moved"
 fi
@@ -193,7 +196,7 @@ doctor_and_check() {
 
 doctor_and_check "5: mutating patrol.sh's own spelling alone goes red" lib
 doctor_and_check "6: mutating patrol-duties-gate.sh's spelling alone goes red" gate
-doctor_and_check "7: mutating SKILL.md's spelling alone goes red" skill
+doctor_and_check "7: mutating dispatch.md's spelling alone goes red" skill
 
 # 7b: mutating ONLY the classifier regex (prose intact) must go red at §4b —
 # proves 4b reads the regex, not the prose it sits beside

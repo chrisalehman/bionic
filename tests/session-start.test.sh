@@ -632,8 +632,15 @@ OUT=$(drive "$P14" startup "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq  "14a.1 exit 0" "0" "$(rc)"
 has "14a.2 the bound line names the docs-root-relative plan and its current step" \
   "bionic: bound to ${PLAN14#$P14/.bionic/docs/} — current: 3" "$OUT"
-eq  "14a.3 exactly one line of output — no predecessor state to also report" \
-  "1" "$(printf '%s\n' "$OUT" | grep -c .)"
+# TWO LINES SINCE WAVE-11 ROW 1b, and the second one is the point of the split. The bound
+# line names the run and its step; the line under it names the step FILE the governing skill
+# tells the model to read at that step. The count is still pinned exactly, not loosened to
+# "at least one" — a third line here would be predecessor state this fixture has none of,
+# which is what 14a.3 has always been guarding.
+eq  "14a.3 exactly two lines of output — the bound line and its step-file pointer, no predecessor state" \
+  "2" "$(printf '%s\n' "$OUT" | grep -c .)"
+has "14a.3b the second line points at the step file for the plan's own current step" \
+  "skills/canonical-sdlc/steps/3.md" "$OUT"
 eq  "14a.4 wrote nothing" "$S14_BEFORE" "$(snap "$P14")"
 
 echo ""
