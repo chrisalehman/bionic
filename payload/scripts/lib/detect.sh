@@ -1732,25 +1732,3 @@ detect_half_uninstalled() {
   fi
   return 0
 }
-
-# ─── Sweep ───────────────────────────────────────────────────────────────────
-#
-# Every fact, once, in a stable order. doctor renders this; it does not
-# recompute any of it.
-detect_all() {
-  local name
-  detect_plugin_integrity
-  detect_env_todo_tools
-  detect_rc_claude_proxy
-  detect_zshrc_legacy_block
-  detect_legacy_channel_hooks
-  detect_legacy_hook_files
-  detect_legacy_skill_copy
-  detect_installed_agent_copies
-  detect_plugin_registered
-  detect_half_uninstalled
-  while IFS= read -r name; do
-    [ -n "$name" ] && detect_dep "$name"
-  done < <(dep_names)
-  return 0
-}

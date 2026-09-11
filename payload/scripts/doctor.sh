@@ -2503,33 +2503,6 @@ fi
 # the Patrol is what acts on them.
 printf '%s' "$RUN_ROWS"
 
-
-# ─── The one question, and the section it appends ────────────────────────────
-#
-# EVERYTHING ABOVE THIS LINE IS INSTANT. That is what earns the question its
-# place at the end: the report is already complete and already printed, so a user
-# who says no has lost nothing and a user who says yes knows exactly what they
-# are waiting for. The question states its own cost in the same breath, because a
-# prompt that hides a thirty-second wait is not a question, it is a trap.
-#
-# WHERE THE ANSWER CAN COME FROM. A terminal, a pipe, or a file — the three ways
-# a caller can actually answer. Anything else (a closed stream, the socket a tool
-# harness hands a script) gets no question at all: printing one there would put
-# an unanswerable prompt in a report and then, if this code read anyway, block
-# forever waiting for a reply nobody is going to send. Measured, not assumed —
-# an unguarded read against a harness-supplied stream does not return.
-#
-# THE PROMPT SHAPE IS deps.sh's, by eye and not by call: doctor is forbidden to
-# reach into the consent machinery (that library's asking function belongs to the
-# code that mutates things, and this code mutates nothing), so the shape is
-# reproduced here and the ban stays intact.
-_doctor_can_ask() {
-  [ -t 0 ] && return 0
-  [ -p /dev/stdin ] && return 0
-  [ -f /dev/stdin ] && return 0
-  return 1
-}
-
 # The version the dependency sweep already probed. Used only where a package
 # manager reports that a row is outdated without saying what is installed — the
 # answer is already in this report and asking twice could disagree with itself.
