@@ -729,6 +729,52 @@ fi
 # cadence, waiver — off that row alone. A row that dropped a field would not
 # merely be terse; it would silently retract the contract it inherited.
 if [ -n "$IS_START" ]; then
+  # ---------- SURVIVAL TERMS DELIVERY (wave-11 1c-b, design D2, probe P2) ----------
+  #
+  # D2 (spec §2, "Dispatcher ↔ agent"): this hook already reads `agent_type` on every
+  # SubagentStart; for `bionic:*` it now prints `payload/context/survival.md` as
+  # `additionalContext`, so a dispatched bionic agent receives the dispatch terms by PUSH
+  # rather than by pulling a file it might skip. Third-party and harness agent types get
+  # nothing. Probe P2 (record/wave-11-lean-spine/step2-probe-premises.md §2) proved this
+  # exact stdout shape reaches a live subagent's transcript as a `<system-reminder>` and is
+  # acted on — this is that shape, unchanged:
+  #   {"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":"<text>"}}
+  #
+  # THE FIELD, and why `agent_type` alone is the right test here even though the comment
+  # above (THE FIELD THAT IDENTIFIES A TEAMMATE) says it is not one field with one meaning.
+  # That caution is about using it as a NAME for a roster join; this is a TYPE test, and
+  # `agent_type` is the only field this payload carries that could ever hold a subagent
+  # TYPE string like `bionic:senior-implementor`. A teammate dispatch that puts a dispatch
+  # NAME there instead is not a bionic type either way this reads it — worst case, one
+  # dispatch literally named after a bionic role does not receive terms it does not need
+  # a hook to hand it, which is the same class of residual ARM 3 already accepts below.
+  #
+  # PLACED BEFORE THE ROSTER, deliberately — delivery must not depend on this session's
+  # roster carrying a row to join (a bionic agent dispatched outside that bookkeeping would
+  # otherwise silently lose its dispatch terms), and every existing arm below this line is
+  # untouched: this prints to stdout only and returns to falling through unchanged.
+  #
+  # RESOLVED THROUGH THE HOOK'S OWN LIB ROOT, never a hard-coded path. `$BIONIC_LIB` is
+  # `<root>/scripts/lib` in both shapes the loader above already normalized (the installed
+  # plugin root, and this repo's `payload/`), so its grandparent is that same root, and
+  # `context/survival.md` sits directly under it (payload/context/survival.md on disk).
+  #
+  # NEVER FAILS THE HOOK (PostToolUse invariant, restated at the top of this file): a
+  # missing or unreadable file prints nothing and logs one stderr line rather than
+  # touching the exit code below.
+  case "$(sanitize "$START_TYPE" 200)" in
+    bionic:*)
+      SURVIVAL_FILE="$BIONIC_LIB/../../context/survival.md"
+      if [ -r "$SURVIVAL_FILE" ]; then
+        jq -cn --rawfile _sf_c "$SURVIVAL_FILE" \
+          '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$_sf_c}}' \
+          2>/dev/null
+      else
+        echo "execution-recorder: survival terms not found at $SURVIVAL_FILE — printing nothing" >&2
+      fi
+      ;;
+  esac
+
   [ -f "$ROSTER_FILE" ] || exit 0
   [ -L "$ROSTER_FILE" ] && exit 0
 
