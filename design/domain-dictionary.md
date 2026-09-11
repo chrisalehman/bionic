@@ -104,3 +104,21 @@ date and the effort that adopted it.
 - **mind / seat** — a mind is an actor with judgement; a seat is a mind with a session and a lease
   of its own, added through the roster. Native sub-agents are minds within their parent's seat.
   *(adopted 2026-09-03, #25)*
+- **epic** — the outermost unit of work: a named body of change delivered by a sequence of waves,
+  owning the requirements file and the ADR directory the waves write into. Names a directory under
+  `.bionic/docs/specs/` and `.bionic/docs/plans/`, never a run of its own.
+  *(adopted 2026-09-11, epic-23 wave-11-lean-spine)*
+- **wave** — one run of the canonical SDLC inside an epic: one spec, one plan, one verification
+  matrix, one integration. The unit a triple (`intent · rigor · scale`) is declared for and the
+  unit a worktree is spawned for. *(adopted 2026-09-11, epic-23 wave-11-lean-spine)*
+- **task** — the unit of work at Steps 3–9: one row of the plan's `## Tasks` table, carrying
+  `id · step · kind · task · agent · deps · size · serves · Files · status`. The thing a brief is
+  written for, a writer is dispatched on, and a status is kept for. Read by exactly one parser,
+  `payload/scripts/lib/units.sh`; the surfaces that use the word are the plan's `## Tasks` table,
+  the tick's FILL line, and the evidence gate's ledger checks.
+  *(adopted 2026-09-11, epic-23 wave-11-lean-spine)*
+- **slice** *(retired 2026-09-11 in favour of task)* — the former name for the unit of work,
+  carried by the plan's `## Slices` table and by `slice_table`/`slice_ready` in the tick. Retired
+  because the four-column table it named could not express the step a unit belongs to, so the tick
+  filled Step-5 work against a Step-4 wave. Kept here for reading closed records and historical
+  design docs, which were not migrated. *(retired 2026-09-11, epic-23 wave-11-lean-spine, REQ-1e)*
