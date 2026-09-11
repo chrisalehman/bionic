@@ -807,19 +807,6 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
   ' "$1" 2>/dev/null
 }
 
-# One row per dispatch, and only the row the WALL itself writes: `status=intended` is
-# hooks/dispatch-preflight.sh's own append (its ROW, one per Agent PreToolUse). The later
-# `status=confirmed` / `status=identified` copies hooks/execution-recorder.sh appends are
-# the SAME dispatch re-stated on an append-only file, so counting them would inflate the
-# rostered side threefold and hide every real gap. Schema-prefix filtered first, the same
-# discipline every other roster reader in the fleet follows.
-count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
-  [ -f "$1" ] || { printf '0'; return 0; }
-  grep -F "roster-state/v1|" "$1" 2>/dev/null \
-    | grep -F "|session=$2|" \
-    | grep -c -F "|status=intended|"
-}
-
 # ---------------------------------------------------------------- the run's own state
 #
 # WHAT THE TICK COULD NOT SEE UNTIL NOW. `open == 0` is not "this run is finished" — it is

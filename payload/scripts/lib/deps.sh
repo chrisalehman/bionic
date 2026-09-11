@@ -137,12 +137,6 @@ _dep_ccstatusline_config_dir() {
   echo "${t%/*}"
 }
 
-# Byte-identical, the same word AC-1 uses and the same tool
-# claude-bootstrap.sh's ccstatusline-config step used (`diff -q`) — not `cmp`,
-# so a hermetic suite need not add a second comparison binary to its curated
-# PATH beside the one every writer path already needs.
-_dep_files_match() { [ -f "${1:-}" ] && [ -f "${2:-}" ] && diff -q "$1" "$2" >/dev/null 2>&1; }
-
 # THE LAYOUT MATCH IGNORES THE SCHEMA VERSION (Chris 2026-09-03: "Why the hell
 # is ccstatusline not installing?? I just installed it!"). ccstatusline
 # migrates its own settings file in place the first time it renders — 2.2.29
@@ -493,19 +487,6 @@ dep_marketplace_source() {  # <name>
   esac
 }
 
-# The rows a given catalog serves. bionic's own answer is what marketplace.json
-# is rendered from and what tests/plugin-lib.test.sh Group 18 used to pin in
-# both directions; that suite was deleted at 8582861 (epic-18 wave-03) and
-# nothing replaced the pin.
-dep_names_marketplace() {  # <catalog>
-  local want="${1:-}" n
-  while IFS= read -r n; do
-    [ -n "$n" ] || continue
-    [ "$(dep_marketplace "$n" 2>/dev/null)" = "$want" ] && echo "$n"
-  done <<< "$(dep_names_kind native)"
-  return 0
-}
-
 # THE ID THE CLI KNOWS BIONIC BY, and the one place it is composed (bionic
 # 1.4.4 fixit phase 4, review-b B-7). `<name>@<catalog>` is the key `claude
 # plugin list` prints and the argument an install command takes. Three files
@@ -558,18 +539,6 @@ dep_plugin_id() {  # -> the <name>@<catalog> id this machine knows bionic by
 # nothing left to compare.
 dep_core_repair_route() {  # -> the command that re-resolves bionic's declared dependencies
   echo "claude plugin install $(dep_plugin_id)"
-}
-
-# Reports any row whose field count is not exactly 7. Silence means the table
-# is well-formed; the suite asserts on the silence.
-dep_table_field_count_report() {
-  local line n
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    n="$(printf '%s' "$line" | tr -cd '|' | wc -c | tr -d ' ')"
-    [ "$n" = "6" ] || echo "${line} (has $((n + 1)) fields, want 7)"
-  done <<< "$BIONIC_DEP_TABLE"
-  return 0
 }
 
 # ─── Version comparison ──────────────────────────────────────────────────────

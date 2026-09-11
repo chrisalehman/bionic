@@ -631,7 +631,6 @@ _bionic_check_field() {  # <id> <field index 2..6>
 # checks, so the two are gone rather than kept for a future that has not arrived.
 bionic_check_label()    { _bionic_check_field "${1:-}" 2; }
 bionic_check_detector() { _bionic_check_field "${1:-}" 3; }
-bionic_check_item()     { _bionic_check_field "${1:-}" 5; }
 bionic_check_hint()     { _bionic_check_field "${1:-}" 6; }
 
 # The hint a dependency row carries, empty for a dependency no row covers. One
