@@ -57,10 +57,12 @@ rt_git() {
 rt_fixture() {
   local dir="$1"
   mkdir -p "$dir/agents" "$dir/payload/commands" "$dir/payload/.claude-plugin" \
-           "$dir/payload/integrity" "$dir/skills/canonical-sdlc" || return 1
+           "$dir/payload/integrity" "$dir/payload/context" "$dir/skills/canonical-sdlc" || return 1
   cp -R "$REPO/agents-src" "$dir/agents-src" || return 1
   cp "$REPO"/agents/*.md "$dir/agents/" || return 1
   cp "$REPO"/payload/commands/*.md "$dir/payload/commands/" || return 1
+  # The fourth render unit's output (wave-11 1c): the once-rendered dispatch terms.
+  cp "$REPO"/payload/context/*.md "$dir/payload/context/" || return 1
   cp "$REPO/payload/.claude-plugin/plugin.json" "$dir/payload/.claude-plugin/" || return 1
   cp "$REPO/skills/canonical-sdlc/SKILL.md" "$dir/skills/canonical-sdlc/" || return 1
   cp "$REPO/payload/integrity/rendered.sha256" "$dir/payload/integrity/" || return 1
@@ -171,8 +173,11 @@ expect_status "4b: the TREE arm is GREEN — on-disk source and on-disk finals a
 
 rt_check "$FIX_DIFF" --check --archive
 expect_ne "4c: the ARCHIVE arm is RED" "0" "$RT_RC"
+# RE-POINTED (wave-11 1c, was: *agents/auditor.md*). The fixture's plant appends a sentence
+# to agents-src/blocks/survival.md, and that block renders into exactly one final now — so
+# the final HEAD cannot reproduce is payload/context/survival.md, not a role file.
 expect_match "4d: …and it names a rendered final that HEAD does not reproduce" \
-  "*agents/auditor.md*" "$RT_OUT"
+  "*payload/context/survival.md*" "$RT_OUT"
 expect_match "4e: …and prints the difference as a diff, not only a verdict" \
   "*UNCOMMITTED SOURCE SENTENCE*" "$RT_OUT"
 
