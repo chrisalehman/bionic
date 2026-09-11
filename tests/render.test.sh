@@ -57,12 +57,22 @@ rt_git() {
 rt_fixture() {
   local dir="$1"
   mkdir -p "$dir/agents" "$dir/payload/commands" "$dir/payload/.claude-plugin" \
-           "$dir/payload/integrity" "$dir/skills/canonical-sdlc" || return 1
+           "$dir/payload/integrity" "$dir/skills/canonical-sdlc/steps" || return 1
   cp -R "$REPO/agents-src" "$dir/agents-src" || return 1
   cp "$REPO"/agents/*.md "$dir/agents/" || return 1
   cp "$REPO"/payload/commands/*.md "$dir/payload/commands/" || return 1
   cp "$REPO/payload/.claude-plugin/plugin.json" "$dir/payload/.claude-plugin/" || return 1
+  # ALL TWELVE SKILL FINALS (wave-11 row 1b), not just SKILL.md. The fixture's whole job is to
+  # be a tree whose committed finals already agree with its sources, so that the PLANT is the
+  # only disagreement any arm can find. A fixture missing the ten step files and the dispatch
+  # reference disagrees with its own sources before anything is planted, and every control arm
+  # below ("the unplanted fixture is green") then fails for a reason the suite is not about.
+  # `steps/` is created by the mkdir above because the renderer's preflight dies on a missing
+  # output directory — an empty one is not enough for the copy, but it is what the preflight
+  # needs, and both are satisfied here.
   cp "$REPO/skills/canonical-sdlc/SKILL.md" "$dir/skills/canonical-sdlc/" || return 1
+  cp "$REPO/skills/canonical-sdlc/dispatch.md" "$dir/skills/canonical-sdlc/" || return 1
+  cp "$REPO"/skills/canonical-sdlc/steps/*.md "$dir/skills/canonical-sdlc/steps/" || return 1
   cp "$REPO/payload/integrity/rendered.sha256" "$dir/payload/integrity/" || return 1
   rt_git "$dir" init || return 1
   rt_git "$dir" add -A || return 1

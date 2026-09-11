@@ -350,7 +350,27 @@ expect_nonempty "24: …and a version.md doctored to 1.5.1 reads as a disagreeme
 
 section "Section 2: the WALLS instruction-surface pins (AC-14, AC-26)"
 
-SKILL_MD="${REPO}/payload/skills/canonical-sdlc/SKILL.md"
+# THE SPLIT SURFACE (wave-11 row 1b). What used to be one 108,652-byte SKILL.md is now a
+# CORE plus ten step files plus a dispatch reference, and every pin below names the file that
+# carries its sentence rather than "the skill file". That is the whole re-point: no assertion
+# was dropped and no needle was reworded — each one moved to the surface its text moved to,
+# which is also what makes these pins worth more than they were. A sentence pinned against
+# the core now fails if it drifts into a step file, and vice versa, so the split itself is
+# held in place by the same assertions that hold the text.
+#
+# `payload/skills/canonical-sdlc` is a symlink to `../../skills/canonical-sdlc`, so every
+# path below is the same real file the render writes and archive.test.sh reads.
+SKILL_DIR="${REPO}/payload/skills/canonical-sdlc"
+SKILL_MD="${SKILL_DIR}/SKILL.md"
+DISPATCH_MD="${SKILL_DIR}/dispatch.md"
+STEP0_MD="${SKILL_DIR}/steps/0.md"
+STEP1_MD="${SKILL_DIR}/steps/1.md"
+STEP2_MD="${SKILL_DIR}/steps/2.md"
+STEP3_MD="${SKILL_DIR}/steps/3.md"
+STEP5_MD="${SKILL_DIR}/steps/5.md"
+STEP6_MD="${SKILL_DIR}/steps/6.md"
+STEP8_MD="${SKILL_DIR}/steps/8.md"
+STEP9_MD="${SKILL_DIR}/steps/9.md"
 SURVIVAL_BLOCK="${REPO}/agents-src/blocks/survival.md"
 AGENT_RULES="${REPO}/.claude/rules/agent-discipline.md"
 
@@ -380,16 +400,16 @@ PIN_JOBS='**You do not set your test width.** `tests/run.sh` samples the machine
 _flatten() { tr '\n' ' ' < "$1" 2>/dev/null | sed 's/[[:space:]][[:space:]]*/ /g'; }
 has_pin() { _flatten "$1" | grep -qF -- "$2"; }
 
-if has_pin "$SKILL_MD" "$PIN_PROBE"; then
+if has_pin "$STEP0_MD" "$PIN_PROBE"; then
   ok "9: SKILL.md Step 0 carries the resources-probe sentence verbatim"
 else
-  no "9: SKILL.md Step 0 carries the resources-probe sentence verbatim" "file: $SKILL_MD"
+  no "9: SKILL.md Step 0 carries the resources-probe sentence verbatim" "file: $STEP0_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_FILL"; then
+if has_pin "$DISPATCH_MD" "$PIN_FILL"; then
   ok "10: SKILL.md carries the 'fill the budget' dispatch rule verbatim"
 else
-  no "10: SKILL.md carries the 'fill the budget' dispatch rule verbatim" "file: $SKILL_MD"
+  no "10: SKILL.md carries the 'fill the budget' dispatch rule verbatim" "file: $DISPATCH_MD"
 fi
 
 if has_pin "$SURVIVAL_BLOCK" "$PIN_JOBS"; then
@@ -474,9 +494,9 @@ expect_eq "16: the '/clear' marker exists ONLY at its seven expected homes (no t
 
 # --- Anti-vacuity: the same extractors must report a mutation ---
 
-anchor "$SKILL_MD" 'never re-derived downstream' 1
+anchor "$STEP0_MD" 'never re-derived downstream' 1
 DOCTORED_SKILL="$TMP/skill-mutated.md"
-sed 's/never re-derived downstream/re-derived wherever convenient/' "$SKILL_MD" > "$DOCTORED_SKILL"
+sed 's/never re-derived downstream/re-derived wherever convenient/' "$STEP0_MD" > "$DOCTORED_SKILL"
 if has_pin "$DOCTORED_SKILL" "$PIN_PROBE"; then
   no "17: a doctored SKILL.md fails the probe pin (pin discriminates)" \
      "the mutated copy still matched — the pin is vacuous"
@@ -536,17 +556,17 @@ section "Section 3: the SCHED Patrol-text pins (AC-30, AC-38)"
 PIN_THROTTLE='**the tick reads pressure to throttle, never to re-derive the budget** — the ceiling is the plan header'"'"'s `parallel-budget:`, written once by Step 0 from the probe, and no live reading ever raises or lowers it.'
 PIN_QUIET='**An armed session that has dispatched nothing yet decides QUIET, never REFUSED** — `poker: QUIET — armed, nothing dispatched yet on this session`, stamp kept — because arming precedes dispatch by design'
 
-if has_pin "$SKILL_MD" "$PIN_THROTTLE"; then
+if has_pin "$DISPATCH_MD" "$PIN_THROTTLE"; then
   ok "20: SKILL.md carries the pressure-throttles-never-re-derives sentence verbatim"
 else
   no "20: SKILL.md carries the pressure-throttles-never-re-derives sentence verbatim" \
-     "file: $SKILL_MD"
+     "file: $DISPATCH_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_QUIET"; then
+if has_pin "$DISPATCH_MD" "$PIN_QUIET"; then
   ok "21: SKILL.md carries the AC-38 QUIET sentence verbatim"
 else
-  no "21: SKILL.md carries the AC-38 QUIET sentence verbatim" "file: $SKILL_MD"
+  no "21: SKILL.md carries the AC-38 QUIET sentence verbatim" "file: $DISPATCH_MD"
 fi
 
 # The two rungs, the tick's rung line and the fill duty are named in the same section —
@@ -556,7 +576,7 @@ fi
 # S10's to retire" — NARROW is gone from hooks/session-poker.sh entirely).
 PINS_RUNGS_MISSING=""
 for token in 'EMERGENCY' 'HOLD' 'rung=<n>/<ceiling>' 'FILL <ids>' 'fill-declined: <reason>' 'Step-3 approval pending'; do
-  has_pin "$SKILL_MD" "$token" || PINS_RUNGS_MISSING="${PINS_RUNGS_MISSING} ${token}"
+  has_pin "$DISPATCH_MD" "$token" || PINS_RUNGS_MISSING="${PINS_RUNGS_MISSING} ${token}"
 done
 if [ -z "$PINS_RUNGS_MISSING" ]; then
   ok "22: SKILL.md's Patrol section names both rungs, the tick's rung line, the FILL line and the decline"
@@ -567,9 +587,9 @@ fi
 
 # --- Anti-vacuity: the same extractor must report a mutation ---
 
-anchor "$SKILL_MD" 'never to re-derive the budget' 1
+anchor "$DISPATCH_MD" 'never to re-derive the budget' 1
 DOCTORED_SCHED="$TMP/skill-sched-mutated.md"
-sed 's/never to re-derive the budget/and to re-derive the budget/' "$SKILL_MD" > "$DOCTORED_SCHED"
+sed 's/never to re-derive the budget/and to re-derive the budget/' "$DISPATCH_MD" > "$DOCTORED_SCHED"
 if has_pin "$DOCTORED_SCHED" "$PIN_THROTTLE"; then
   no "23: a doctored SKILL.md fails the throttle pin (pin discriminates)" \
      "the mutated copy still matched — the pin is vacuous"
@@ -577,9 +597,9 @@ else
   ok "23: a doctored SKILL.md fails the throttle pin (pin discriminates)"
 fi
 
-anchor "$SKILL_MD" 'decides QUIET, never REFUSED' 1
+anchor "$DISPATCH_MD" 'decides QUIET, never REFUSED' 1
 DOCTORED_SCHED2="$TMP/skill-sched-mutated-2.md"
-sed 's/decides QUIET, never REFUSED/is REFUSED/' "$SKILL_MD" > "$DOCTORED_SCHED2"
+sed 's/decides QUIET, never REFUSED/is REFUSED/' "$DISPATCH_MD" > "$DOCTORED_SCHED2"
 if has_pin "$DOCTORED_SCHED2" "$PIN_QUIET"; then
   no "24: a doctored SKILL.md fails the QUIET pin (pin discriminates)" \
      "the mutated copy still matched — the pin is vacuous"
@@ -626,7 +646,7 @@ tick_literal_code() {
     | sed 's/\${SID:0:8}"$//'
 }
 
-TICK_DOC=$(tick_literal_doc "$SKILL_MD")
+TICK_DOC=$(tick_literal_doc "$DISPATCH_MD")
 TICK_CODE=$(tick_literal_code "$TICK_GATE")
 
 expect_eq "25: SKILL.md's patrol-prompt token is the tick prefix the cron carries" \
@@ -640,21 +660,21 @@ expect_eq "26: patrol-duties-gate.sh rebuilds the SAME prefix SKILL.md documents
 # buffer, so under this file's `set -o pipefail` an early-exiting `grep -q` SIGPIPEs the
 # producer and the pipeline returns 141: a real match reported as a miss, intermittently.
 TICK_RESUME_NEEDLE='delete every job whose prompt begins with the patrol marker `bionic-patrol session=`'
-TICK_FLAT=$(_flatten "$SKILL_MD")
+TICK_FLAT=$(_flatten "$DISPATCH_MD")
 case "$TICK_FLAT" in
   *"$TICK_RESUME_NEEDLE"*)
     ok "27: SKILL.md's resume ritual names the same marker it tells the prompt to carry" ;;
   *)
     no "27: SKILL.md's resume ritual names the same marker it tells the prompt to carry" \
-       "file: $SKILL_MD" ;;
+       "file: $DISPATCH_MD" ;;
 esac
 
 # --- Anti-vacuity: the same extractors must report a mutation, from either side ---
 
-anchor "$SKILL_MD" 'its first token `bionic-patrol session=' 1
+anchor "$DISPATCH_MD" 'its first token `bionic-patrol session=' 1
 DOCTORED_TICK_DOC="$TMP/skill-tick-mutated.md"
 sed 's/its first token `bionic-patrol session=/its first token `bionic patrol session=/' \
-  "$SKILL_MD" > "$DOCTORED_TICK_DOC"
+  "$DISPATCH_MD" > "$DOCTORED_TICK_DOC"
 expect_ne "28: a reworded SKILL.md token breaks the pin (pin discriminates)" \
   "$TICK_CODE" "$(tick_literal_doc "$DOCTORED_TICK_DOC")"
 
@@ -708,23 +728,23 @@ PIN_BOUND_RUN='**Which run is a property of the SESSION, not of the project** (b
 PIN_FALLBACK='Only an UNBOUND session falls back to the newest plan under the docs root'
 PIN_BIND_STEP='**The resume ritual binds its run before it adopts anything:** if session-start listed more than one open run — or this session is otherwise unbound in a root that holds several — run `bash <plugin-root>/hooks/session-poker.sh bind <plan>` for the plan this session means, immediately after engaging and before the first dispatch.'
 
-if has_pin "$SKILL_MD" "$PIN_BOUND_RUN"; then
+if has_pin "$DISPATCH_MD" "$PIN_BOUND_RUN"; then
   ok "30: SKILL.md states that the run is a property of the session, verbatim"
 else
-  no "30: SKILL.md states that the run is a property of the session, verbatim" "file: $SKILL_MD"
+  no "30: SKILL.md states that the run is a property of the session, verbatim" "file: $DISPATCH_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_FALLBACK"; then
+if has_pin "$DISPATCH_MD" "$PIN_FALLBACK"; then
   ok "31: …and that ONLY an unbound session takes the newest-plan fallback"
 else
-  no "31: …and that ONLY an unbound session takes the newest-plan fallback" "file: $SKILL_MD"
+  no "31: …and that ONLY an unbound session takes the newest-plan fallback" "file: $DISPATCH_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_BIND_STEP"; then
+if has_pin "$DISPATCH_MD" "$PIN_BIND_STEP"; then
   ok "32: SKILL.md's resume ritual carries the bind step verbatim (A4: exactly one added step)"
 else
   no "32: SKILL.md's resume ritual carries the bind step verbatim (A4: exactly one added step)" \
-     "file: $SKILL_MD"
+     "file: $DISPATCH_MD"
 fi
 
 # --- 33: the verb the paragraph types is the verb the tool offers ---
@@ -746,7 +766,7 @@ bind_verb_code() {
     | sed -n 's/.*\(session-poker\.sh bind <plan>\).*/\1/p'
 }
 
-BIND_DOC=$(bind_verb_doc "$SKILL_MD")
+BIND_DOC=$(bind_verb_doc "$DISPATCH_MD")
 BIND_CODE=$(bind_verb_code "$POKER_SH")
 
 expect_eq "33: SKILL.md tells the operator to type the verb the poker publishes" \
@@ -756,9 +776,9 @@ expect_eq "34: …and the verb both sides name is 'session-poker.sh bind <plan>'
 
 # --- Anti-vacuity: the same extractors and pins must report a mutation ---
 
-anchor "$SKILL_MD" 'Only an UNBOUND session falls back' 1
+anchor "$DISPATCH_MD" 'Only an UNBOUND session falls back' 1
 DOCTORED_BOUND="$TMP/skill-bound-run-mutated.md"
-sed 's/Only an UNBOUND session falls back/Every session falls back/' "$SKILL_MD" > "$DOCTORED_BOUND"
+sed 's/Only an UNBOUND session falls back/Every session falls back/' "$DISPATCH_MD" > "$DOCTORED_BOUND"
 if has_pin "$DOCTORED_BOUND" "$PIN_FALLBACK"; then
   no "35: a doctored SKILL.md fails the fallback pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
@@ -766,10 +786,10 @@ else
   ok "35: a doctored SKILL.md fails the fallback pin (pin discriminates)"
 fi
 
-anchor "$SKILL_MD" 'binds its run before it adopts anything' 1
+anchor "$DISPATCH_MD" 'binds its run before it adopts anything' 1
 DOCTORED_BIND="$TMP/skill-bind-step-mutated.md"
 sed 's/binds its run before it adopts anything/adopts before it binds anything/' \
-  "$SKILL_MD" > "$DOCTORED_BIND"
+  "$DISPATCH_MD" > "$DOCTORED_BIND"
 if has_pin "$DOCTORED_BIND" "$PIN_BIND_STEP"; then
   no "36: a reordered resume ritual fails the bind-step pin (pin discriminates)" \
      "the pin matched a copy that puts adopt first"
@@ -783,14 +803,14 @@ sed 's/session-poker\.sh bind <plan>/session-poker.sh bindrun <plan>/' "$POKER_S
 expect_ne "37: a renamed poker verb splits from the doc (pin discriminates)" \
   "$BIND_DOC" "$(bind_verb_code "$DOCTORED_BIND_VERB")"
 
-if has_pin "$SKILL_MD" "$PIN_SCOPE_PAIR"; then
+if has_pin "$DISPATCH_MD" "$PIN_SCOPE_PAIR"; then
   ok "38: SKILL.md's two-facts sentence names the SESSION's bound run, not the project's"
 else
   no "38: SKILL.md's two-facts sentence names the SESSION's bound run, not the project's" \
-     "file: $SKILL_MD"
+     "file: $DISPATCH_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_SCOPE_OLD"; then
+if has_pin "$DISPATCH_MD" "$PIN_SCOPE_OLD"; then
   no "39: …and the pre-wave project-scoped clause is gone from the paragraph" \
      "SKILL.md still states the rule this wave deleted: '$PIN_SCOPE_OLD'"
 else
@@ -798,10 +818,10 @@ else
 fi
 
 # Anti-vacuity for 38, same pattern as 35/36: the extractor must report a doctored copy.
-anchor "$SKILL_MD" 'which run this SESSION is bound to' 1
+anchor "$DISPATCH_MD" 'which run this SESSION is bound to' 1
 DOCTORED_SCOPE="$TMP/skill-scope-mutated.md"
 sed 's/which run this SESSION is bound to/whether this PROJECT has an OPEN run/' \
-  "$SKILL_MD" > "$DOCTORED_SCOPE"
+  "$DISPATCH_MD" > "$DOCTORED_SCOPE"
 if has_pin "$DOCTORED_SCOPE" "$PIN_SCOPE_PAIR"; then
   no "40: a doctored SKILL.md fails the scope pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
@@ -824,23 +844,23 @@ PIN_TASKLIST='**The resume ritual rebuilds the task list after it binds:** run `
 # The pin still holds the NARROW/RELAX retirement, which is what it was for.
 PIN_RUNG='The rung is the separate thing they are often confused with: `pressure_level`'"'"'s integer, printed on every tick as `poker: rung=<n>/<ceiling>`, and it is the number a fill is sized by. NARROW and RELAX are retired — regulation is the rung'"'"'s, read by every consumer at the moment of use, never a tick'"'"'s advice.'
 
-if has_pin "$SKILL_MD" "$PIN_TASKLIST"; then
+if has_pin "$DISPATCH_MD" "$PIN_TASKLIST"; then
   ok "48: SKILL.md's resume ritual rebuilds the task list after it binds, verbatim"
 else
   no "48: SKILL.md's resume ritual rebuilds the task list after it binds, verbatim" \
-     "file: $SKILL_MD"
+     "file: $DISPATCH_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_RUNG"; then
+if has_pin "$DISPATCH_MD" "$PIN_RUNG"; then
   ok "49: SKILL.md's Patrol prompt names the rung line and retires NARROW/RELAX, verbatim"
 else
   no "49: SKILL.md's Patrol prompt names the rung line and retires NARROW/RELAX, verbatim" \
-     "file: $SKILL_MD"
+     "file: $DISPATCH_MD"
 fi
 
-anchor "$SKILL_MD" 'recreate one entry per step' 1
+anchor "$DISPATCH_MD" 'recreate one entry per step' 1
 DOCTORED_TASKLIST="$TMP/skill-tasklist-mutated.md"
-sed 's/recreate one entry per step/recreate one entry per slice only/' "$SKILL_MD" > "$DOCTORED_TASKLIST"
+sed 's/recreate one entry per step/recreate one entry per slice only/' "$DISPATCH_MD" > "$DOCTORED_TASKLIST"
 if has_pin "$DOCTORED_TASKLIST" "$PIN_TASKLIST"; then
   no "50: a doctored SKILL.md fails the task-list pin (pin discriminates)" \
      "the pin matched a doctored copy"
@@ -848,9 +868,9 @@ else
   ok "50: a doctored SKILL.md fails the task-list pin (pin discriminates)"
 fi
 
-anchor "$SKILL_MD" 'NARROW and RELAX are retired' 1
+anchor "$DISPATCH_MD" 'NARROW and RELAX are retired' 1
 DOCTORED_RUNG="$TMP/skill-rung-mutated.md"
-sed 's/NARROW and RELAX are retired/NARROW and RELAX still apply/' "$SKILL_MD" > "$DOCTORED_RUNG"
+sed 's/NARROW and RELAX are retired/NARROW and RELAX still apply/' "$DISPATCH_MD" > "$DOCTORED_RUNG"
 if has_pin "$DOCTORED_RUNG" "$PIN_RUNG"; then
   no "51: a doctored SKILL.md fails the rung pin (pin discriminates)" \
      "the pin matched a doctored copy"
@@ -874,13 +894,13 @@ section "Section 6: Step 8's tmp wipe spares session-keyed state"
 PIN_TMP_SPARE='sparing every session-keyed file — `engaged-*.state`, `roster-*.state`, `patrol-*.state*`, `preflight-*.state`, `sweeper-*.state`'
 PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
 
-if has_pin "$SKILL_MD" "$PIN_TMP_SPARE"; then
+if has_pin "$STEP8_MD" "$PIN_TMP_SPARE"; then
   ok "41: SKILL.md's Step 8 names the session-keyed files its wipe spares"
 else
-  no "41: SKILL.md's Step 8 names the session-keyed files its wipe spares" "file: $SKILL_MD"
+  no "41: SKILL.md's Step 8 names the session-keyed files its wipe spares" "file: $STEP8_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_TMP_BLANKET"; then
+if has_pin "$STEP8_MD" "$PIN_TMP_BLANKET"; then
   no "42: …and no longer instructs the blanket wipe that destroyed them" \
      "SKILL.md still says: $PIN_TMP_BLANKET"
 else
@@ -896,9 +916,9 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40.
-anchor "$SKILL_MD" 'sparing every session-keyed file' 1
+anchor "$STEP8_MD" 'sparing every session-keyed file' 1
 DOCTORED_TMP="$TMP/skill-tmp-wipe-mutated.md"
-sed 's/sparing every session-keyed file/taking every file/' "$SKILL_MD" > "$DOCTORED_TMP"
+sed 's/sparing every session-keyed file/taking every file/' "$STEP8_MD" > "$DOCTORED_TMP"
 if has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
   no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
@@ -916,10 +936,10 @@ section "Section 7: bind's operand takes the spelling session-start prints"
 # reader learns the verb from must name all three spellings the verb accepts.
 PIN_BIND_OPERAND='its operand may be absolute, project-root-relative, or docs-root-relative — the spelling session-start'"'"'s own listing prints'
 
-if has_pin "$SKILL_MD" "$PIN_BIND_OPERAND"; then
+if has_pin "$DISPATCH_MD" "$PIN_BIND_OPERAND"; then
   ok "45: SKILL.md names all three spellings bind accepts"
 else
-  no "45: SKILL.md names all three spellings bind accepts" "file: $SKILL_MD"
+  no "45: SKILL.md names all three spellings bind accepts" "file: $DISPATCH_MD"
 fi
 
 # THE CODE HALF, read from the poker rather than asserted against a constant (§4's rule):
@@ -937,10 +957,10 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40/44.
-anchor "$SKILL_MD" 'its operand may be absolute, project-root-relative, or docs-root-relative' 1
+anchor "$DISPATCH_MD" 'its operand may be absolute, project-root-relative, or docs-root-relative' 1
 DOCTORED_OPERAND="$TMP/skill-bind-operand-mutated.md"
 sed 's/its operand may be absolute, project-root-relative, or docs-root-relative/its operand must be absolute/' \
-  "$SKILL_MD" > "$DOCTORED_OPERAND"
+  "$DISPATCH_MD" > "$DOCTORED_OPERAND"
 if has_pin "$DOCTORED_OPERAND" "$PIN_BIND_OPERAND"; then
   no "47: a doctored SKILL.md fails the operand pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
@@ -973,17 +993,17 @@ section "Section 8: SKILL.md carries its OWN copy of the rung-pointer sentence (
 # SKILL.md; this pins the same words in the form SKILL.md actually carries them.
 PIN_JOBS_SKILL='Each brief in the batch points the writer at the rung: `take your test width from pressure_level at suite start; the ceiling is this header'"'"'s test_jobs`.'
 
-if has_pin "$SKILL_MD" "$PIN_JOBS_SKILL"; then
+if has_pin "$DISPATCH_MD" "$PIN_JOBS_SKILL"; then
   ok "53: SKILL.md carries its own copy of the rung-pointer sentence (AC-18)"
 else
-  no "53: SKILL.md carries its own copy of the rung-pointer sentence (AC-18)" "file: $SKILL_MD"
+  no "53: SKILL.md carries its own copy of the rung-pointer sentence (AC-18)" "file: $DISPATCH_MD"
 fi
 
 # Anti-vacuity, same 47-style shape: a doctored SKILL.md must fail the pin above.
-anchor "$SKILL_MD" 'Each brief in the batch points the writer at the rung' 1
+anchor "$DISPATCH_MD" 'Each brief in the batch points the writer at the rung' 1
 DOCTORED_SKILL_JOBS="$TMP/skill-jobs-mutated.md"
 sed 's/Each brief in the batch points the writer at the rung/Each brief in the batch reads the frozen literal/' \
-  "$SKILL_MD" > "$DOCTORED_SKILL_JOBS"
+  "$DISPATCH_MD" > "$DOCTORED_SKILL_JOBS"
 if has_pin "$DOCTORED_SKILL_JOBS" "$PIN_JOBS_SKILL"; then
   no "54: a doctored SKILL.md fails the rung-pointer pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
@@ -1010,15 +1030,15 @@ PIN_INTERVAL_KNOB='config knob `poker-interval:` in `.bionic/config.yaml`, defau
 PIN_INTERVAL_CRON='fires into a `command not found` every 20 minutes and reports nothing'
 PATROL_LIB="${REPO}/payload/scripts/lib/patrol.sh"
 
-if has_pin "$SKILL_MD" "$PIN_INTERVAL_KNOB"; then
+if has_pin "$DISPATCH_MD" "$PIN_INTERVAL_KNOB"; then
   ok "55: SKILL.md names the poker-interval default as 20m, verbatim"
 else
-  no "55: SKILL.md names the poker-interval default as 20m, verbatim" "file: $SKILL_MD"
+  no "55: SKILL.md names the poker-interval default as 20m, verbatim" "file: $DISPATCH_MD"
 fi
-if has_pin "$SKILL_MD" "$PIN_INTERVAL_CRON"; then
+if has_pin "$DISPATCH_MD" "$PIN_INTERVAL_CRON"; then
   ok "56: SKILL.md's cron sentence names the same cadence in minutes, verbatim"
 else
-  no "56: SKILL.md's cron sentence names the same cadence in minutes, verbatim" "file: $SKILL_MD"
+  no "56: SKILL.md's cron sentence names the same cadence in minutes, verbatim" "file: $DISPATCH_MD"
 fi
 
 # THE TWO CONSTANTS AGREE, and the poker's own verb is what says so — `interval-default`
@@ -1032,10 +1052,10 @@ expect_eq "58: …and that default really is 20 minutes, in seconds" "1200" "$PO
 
 # ANTI-VACUITY, the same doctored-copy shape as 50/51/54: a SKILL.md whose interval was
 # reverted to the pre-wave 30m must fail both prose pins.
-anchor "$SKILL_MD" 'default 20m' 1
-anchor "$SKILL_MD" 'every 20 minutes' 1
+anchor "$DISPATCH_MD" 'default 20m' 1
+anchor "$DISPATCH_MD" 'every 20 minutes' 1
 DOCTORED_INTERVAL="$TMP/skill-interval-mutated.md"
-sed 's/default 20m/default 30m/; s/every 20 minutes/every 30 minutes/' "$SKILL_MD" > "$DOCTORED_INTERVAL"
+sed 's/default 20m/default 30m/; s/every 20 minutes/every 30 minutes/' "$DISPATCH_MD" > "$DOCTORED_INTERVAL"
 if has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_KNOB" || has_pin "$DOCTORED_INTERVAL" "$PIN_INTERVAL_CRON"; then
   no "59: a doctored SKILL.md fails both interval pins (they discriminate)" \
      "a pin matched a copy carrying the pre-wave 30m"
@@ -1072,17 +1092,17 @@ PIN_S13_REGRESSION='a second one refuses unless the plan'"'"'s `## SDLC State` c
 
 for _p in FILES DERIVE DECLARE WAIVER NEITHER REGRESSION; do
   eval "_pv=\$PIN_S13_$_p"
-  if has_pin "$SKILL_MD" "$_pv"; then
+  if has_pin "$DISPATCH_MD" "$_pv"; then
     ok "60: SKILL.md §Dispatch carries the S13 $_p sentence verbatim"
   else
-    no "60: SKILL.md §Dispatch carries the S13 $_p sentence verbatim" "file: $SKILL_MD"
+    no "60: SKILL.md §Dispatch carries the S13 $_p sentence verbatim" "file: $DISPATCH_MD"
   fi
 done
 
-anchor "$SKILL_MD" '`Files:` on a line of its own names the paths this slice will write' 1
+anchor "$DISPATCH_MD" '`Files:` on a line of its own names the paths this slice will write' 1
 DOCTORED_S13="$TMP/skill-s13-mutated.md"
 sed 's/`Files:` on a line of its own names the paths this slice will write/the brief says what it likes/' \
-  "$SKILL_MD" > "$DOCTORED_S13"
+  "$DISPATCH_MD" > "$DOCTORED_S13"
 if has_pin "$DOCTORED_S13" "$PIN_S13_FILES"; then
   no "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)" \
      "the pin matched a copy with the sentence removed"
@@ -1160,17 +1180,31 @@ expect_true "64a: the skill file has a template (it is a render target, not a ha
   test -f "$SKILL_TMPL"
 expect_true "64b: the renderer's unit table names the skill unit" \
   grep -qF 'agents-src/templates/skills/canonical-sdlc|skills/canonical-sdlc' "$RENDER_SH"
+# THE STEPS UNIT IS ITS OWN ROW, and it has to be: every unit's template glob is one level
+# deep, so without this row the ten step templates render nowhere and --check never looks at
+# them. `dispatch.md.tmpl` deliberately has NO row — it sits in the directory the skill unit
+# above already globs.
+expect_true "64b2: …and the per-step unit, which the one-level-deep glob cannot reach from it" \
+  grep -qF 'agents-src/templates/skills/canonical-sdlc/steps|skills/canonical-sdlc/steps' "$RENDER_SH"
 
 # clone_render_tree <dest> — the render inputs and outputs, and nothing else.
 clone_render_tree() {
   local dest="$1"
   mkdir -p "$dest/payload/commands" "$dest/payload/.claude-plugin" "$dest/payload/integrity" \
-           "$dest/skills/canonical-sdlc" "$dest/agents" || return 1
+           "$dest/skills/canonical-sdlc/steps" "$dest/agents" || return 1
   cp -R "${REPO}/agents-src" "$dest/agents-src" || return 1
   cp "${REPO}"/agents/*.md "$dest/agents/" || return 1
   cp "${REPO}"/payload/commands/*.md "$dest/payload/commands/" || return 1
   cp "${REPO}/payload/.claude-plugin/plugin.json" "$dest/payload/.claude-plugin/" || return 1
+  # EVERY rendered final under skills/canonical-sdlc, not just SKILL.md (wave-11 row 1b). A
+  # clone missing the step files or the dispatch reference renders them fresh and then reports
+  # every one of them as staleness, which would redden 65's control arm for a reason that has
+  # nothing to do with the mutation 66 and 67 are about. `steps/` is a committed output
+  # directory, so the mkdir above creates it whether or not it holds anything yet — the
+  # renderer's preflight dies on a missing output directory.
   cp "${REPO}/skills/canonical-sdlc/SKILL.md" "$dest/skills/canonical-sdlc/" || return 1
+  cp "${REPO}/skills/canonical-sdlc/dispatch.md" "$dest/skills/canonical-sdlc/" || return 1
+  cp "${REPO}"/skills/canonical-sdlc/steps/*.md "$dest/skills/canonical-sdlc/steps/" || return 1
   [ -f "$RENDERED_MANIFEST" ] && cp "$RENDERED_MANIFEST" "$dest/payload/integrity/"
   return 0
 }
@@ -1265,19 +1299,19 @@ same_everywhere() {
 }
 
 same_everywhere 68 "the auditor mandate is one text in the block, the skill file and agents/auditor.md" \
-  "${BLOCK_DIR}/auditor-mandate.md" "AUDITOR-MANDATE" "$SKILL_MD" "${REPO}/agents/auditor.md"
+  "${BLOCK_DIR}/auditor-mandate.md" "AUDITOR-MANDATE" "$STEP5_MD" "${REPO}/agents/auditor.md"
 
 same_everywhere 69 "the critic prompt template is one text in the block, the skill file and agents/critic.md" \
-  "${BLOCK_DIR}/critic-template.md" "CRITIC-TEMPLATE" "$SKILL_MD" "${REPO}/agents/critic.md"
+  "${BLOCK_DIR}/critic-template.md" "CRITIC-TEMPLATE" "$STEP6_MD" "${REPO}/agents/critic.md"
 
 same_everywhere 70 "the duplication axis is one text in the block, the skill file and agents/critic.md" \
-  "${BLOCK_DIR}/duplication-axis.md" "DUPLICATION-AXIS" "$SKILL_MD" "${REPO}/agents/critic.md"
+  "${BLOCK_DIR}/duplication-axis.md" "DUPLICATION-AXIS" "$STEP6_MD" "${REPO}/agents/critic.md"
 
 same_everywhere 71 "the terminal-disposition rule is one text in the block and the skill file" \
-  "${BLOCK_DIR}/terminal-disposition.md" "TERMINAL-DISPOSITION" "$SKILL_MD"
+  "${BLOCK_DIR}/terminal-disposition.md" "TERMINAL-DISPOSITION" "$STEP9_MD"
 
 same_everywhere 72 "the orchestrator's dispatch body is one text in the block and the skill file" \
-  "${BLOCK_DIR}/orchestrator-dispatch.md" "ORCHESTRATOR-DISPATCH" "$SKILL_MD"
+  "${BLOCK_DIR}/orchestrator-dispatch.md" "ORCHESTRATOR-DISPATCH" "$DISPATCH_MD"
 
 # The duplicate that had no renderer at all: two hand-written files carrying one span.
 expect_true "73a: operational-rules.md no longer carries its own copy of the rule" \
@@ -1291,8 +1325,16 @@ expect_true "74a: payload/integrity/rendered.sha256 exists" test -f "$RENDERED_M
 expect_false "74b: payload/integrity/agents.sha256 is gone" \
   test -f "${REPO}/payload/integrity/agents.sha256"
 MANIFEST_BODY="$(grep -v '^#' "$RENDERED_MANIFEST" 2>/dev/null | grep -v '^[[:space:]]*$')"
-expect_eq "74c: it carries one row per rendered file (six roles, five commands, the skill)" \
-  "12" "$(printf '%s\n' "$MANIFEST_BODY" | wc -l | tr -d ' ')"
+# TWENTY-THREE SINCE ROW 1b: six roles, five commands, and the split skill's twelve finals —
+# the core, ten step files, and the dispatch reference. The number is hard-coded rather than
+# counted from the tree on purpose, exactly as it was at twelve: a count derived from whatever
+# the renderer just produced would agree with itself no matter what the renderer dropped.
+expect_eq "74c: it carries one row per rendered file (six roles, five commands, the split skill's twelve)" \
+  "23" "$(printf '%s\n' "$MANIFEST_BODY" | wc -l | tr -d ' ')"
+expect_contains "74c2: …including a step file, plugin-root-relative" \
+  "  skills/canonical-sdlc/steps/4.md" "$MANIFEST_BODY"
+expect_contains "74c3: …and the dispatch reference" \
+  "  skills/canonical-sdlc/dispatch.md" "$MANIFEST_BODY"
 expect_contains "74d: …including the skill file, plugin-root-relative" \
   "  skills/canonical-sdlc/SKILL.md" "$MANIFEST_BODY"
 expect_contains "74e: …and the command pages, plugin-root-relative" \
@@ -1333,22 +1375,22 @@ PIN_K3_MECH='**Mechanisms inherited**, one line per substrate or mechanism the d
 # named strategic BY RULE, not left to a default.
 PIN_K3_STRATEGIC='placing a test cohort in a tier, a job on a runtime surface, or a workload on hardware is **strategic by rule**'
 
-if has_pin "$SKILL_MD" "$PIN_K3_FIRST"; then
+if has_pin "$STEP2_MD" "$PIN_K3_FIRST"; then
   ok "76: SKILL.md's Step-2 frame ratifies Context and Problem, for a stranger, first"
 else
-  no "76: SKILL.md's Step-2 frame ratifies Context and Problem, for a stranger, first" "file: $SKILL_MD"
+  no "76: SKILL.md's Step-2 frame ratifies Context and Problem, for a stranger, first" "file: $STEP2_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_K3_MECH"; then
+if has_pin "$STEP2_MD" "$PIN_K3_MECH"; then
   ok "77: …and carries a Mechanisms inherited item, each kept or questioned"
 else
-  no "77: …and carries a Mechanisms inherited item, each kept or questioned" "file: $SKILL_MD"
+  no "77: …and carries a Mechanisms inherited item, each kept or questioned" "file: $STEP2_MD"
 fi
 
-if has_pin "$SKILL_MD" "$PIN_K3_STRATEGIC"; then
+if has_pin "$STEP2_MD" "$PIN_K3_STRATEGIC"; then
   ok "78: …and names tier/runtime-surface/hardware placement strategic by rule"
 else
-  no "78: …and names tier/runtime-surface/hardware placement strategic by rule" "file: $SKILL_MD"
+  no "78: …and names tier/runtime-surface/hardware placement strategic by rule" "file: $STEP2_MD"
 fi
 
 # --- Anti-vacuity: the same pins must discriminate a mutated copy ---
@@ -1357,11 +1399,11 @@ fi
 # Context-and-Problem sentence and the Design-intuition sentence in place — the
 # literal shape of "the order is reversed" — rather than deleting anything, so a
 # pin that merely checked PRESENCE of both phrases would stay green through it.
-anchor -E "$SKILL_MD" 'Its first ratification is \*\*Context and Problem, for a stranger\*\*' 1
+anchor -E "$STEP2_MD" 'Its first ratification is \*\*Context and Problem, for a stranger\*\*' 1
 DOCTORED_K3_ORDER="$TMP/skill-k3-order-reversed.md"
 sed -E '
 s/(\*\*Open with the frame\*\*, before any question\. )(Its first ratification is \*\*Context and Problem, for a stranger\*\*: the problem and the goal, written as if for a reader who has never opened this repo; this comes before your own design intuition and before every decision in the frame below it — a change not yet explainable to someone who was not there is not yet understood\. )(Then your own \*\*Design intuition\*\*, the shape you expect to be right, stated so the user can push on it; )/\1\3\2/
-' "$SKILL_MD" > "$DOCTORED_K3_ORDER"
+' "$STEP2_MD" > "$DOCTORED_K3_ORDER"
 if has_pin "$DOCTORED_K3_ORDER" "$PIN_K3_FIRST"; then
   no "79: order-reversed SKILL.md fails the first-ratification pin (pin discriminates)" \
      "the mutated copy still matched — the pin does not see the reorder"
@@ -1378,10 +1420,10 @@ expect_contains "79b: …and the doctored copy really does read Design intuition
 # 80: Mechanisms inherited ABSENT (AC-K3.2's fails-when). The strategic-by-rule
 # clause stays untouched in this copy — proof the mutation removed only the
 # Mechanisms-inherited item, not the whole paragraph.
-anchor "$SKILL_MD" 'Mechanisms inherited' 1
+anchor "$STEP2_MD" 'Mechanisms inherited' 1
 DOCTORED_K3_MECH="$TMP/skill-k3-mechanisms-absent.md"
 sed 's/\*\*Mechanisms inherited\*\*, one line per substrate or mechanism the design builds on, each marked `kept` or `questioned` — a `questioned` line becomes a strategic fork; //' \
-  "$SKILL_MD" > "$DOCTORED_K3_MECH"
+  "$STEP2_MD" > "$DOCTORED_K3_MECH"
 if has_pin "$DOCTORED_K3_MECH" "$PIN_K3_MECH"; then
   no "80: SKILL.md with Mechanisms inherited stripped still passes the mech pin (pin discriminates)" \
      "the mutated copy still matched — the pin does not see the removal"
@@ -1397,10 +1439,10 @@ fi
 
 # 81: "strategic by rule" ABSENT (AC-K3.2's other half). Mechanisms inherited
 # stays untouched here, the mirror-image isolation check of 80b.
-anchor "$SKILL_MD" 'strategic by rule' 1
+anchor "$STEP2_MD" 'strategic by rule' 1
 DOCTORED_K3_STRAT="$TMP/skill-k3-strategic-absent.md"
 sed "s/is \\*\\*strategic by rule\\*\\* and is never defaulted/is left to the writer's judgment/" \
-  "$SKILL_MD" > "$DOCTORED_K3_STRAT"
+  "$STEP2_MD" > "$DOCTORED_K3_STRAT"
 if has_pin "$DOCTORED_K3_STRAT" "$PIN_K3_STRATEGIC"; then
   no "81: SKILL.md with strategic-by-rule stripped still passes the strategic pin (pin discriminates)" \
      "the mutated copy still matched — the pin does not see the removal"
@@ -1432,7 +1474,7 @@ step0_card() {
   awk '/^Step 0 · Plan Configuration$/{f=1} f{print} f&&/^```$/{exit}' "$1" 2>/dev/null
 }
 
-STEP0_CARD="$(step0_card "$SKILL_MD")"
+STEP0_CARD="$(step0_card "$STEP0_MD")"
 
 expect_true "76: the Step-0 card block is found in SKILL.md" \
   test -n "$STEP0_CARD"
@@ -1464,9 +1506,9 @@ expect_contains "79b: AC-K1.3 — …and the integration branch line" \
 # --- Anti-vacuity: each extractor must go red on the fails-when it names ---
 
 # 80: a card with a whole section dropped (Gates) fails K1.1's order check.
-anchor -E "$SKILL_MD" '^  Gates$' 1
+anchor -E "$STEP0_MD" '^  Gates$' 1
 DOCTORED_NO_GATES="$TMP/skill-k1-no-gates.md"
-sed '/^  Gates$/,/^$/d' "$SKILL_MD" > "$DOCTORED_NO_GATES"
+sed '/^  Gates$/,/^$/d' "$STEP0_MD" > "$DOCTORED_NO_GATES"
 DOCTORED_SECTIONS_80="$(printf '%s\n' "$(step0_card "$DOCTORED_NO_GATES")" | grep -E "$K1_SECTION_RE" | sed 's/^  //')"
 if [ "$DOCTORED_SECTIONS_80" = "$K1_EXPECTED_SECTIONS" ]; then
   no "80: a Step-0 card partially rendered (a section dropped) fails the order check (pin discriminates)" \
@@ -1476,9 +1518,9 @@ else
 fi
 
 # 81: a card with the matrix left in fails K1.2.
-anchor -E "$SKILL_MD" '^Step 0 · Plan Configuration$' 1
+anchor -E "$STEP0_MD" '^Step 0 · Plan Configuration$' 1
 DOCTORED_MATRIX_BACK="$TMP/skill-k1-matrix-back.md"
-awk '{print} /^Step 0 · Plan Configuration$/{print "  Verification Matrix:"}' "$SKILL_MD" > "$DOCTORED_MATRIX_BACK"
+awk '{print} /^Step 0 · Plan Configuration$/{print "  Verification Matrix:"}' "$STEP0_MD" > "$DOCTORED_MATRIX_BACK"
 DOCTORED_CARD_81="$(step0_card "$DOCTORED_MATRIX_BACK")"
 case "$DOCTORED_CARD_81" in
   *"Verification Matrix"*) ok "81: a Step-0 card with the matrix left in fails the no-matrix check (pin discriminates)" ;;
@@ -1487,14 +1529,26 @@ case "$DOCTORED_CARD_81" in
 esac
 
 # 82: a card missing the integration branch line fails K1.3.
-# FOUR, not one, since slice 16 landed (epic-22 K2): the Step-1, Step-2 and Step-3 cards each
-# carry the same branch pair, so this mutation now strips four lines. That is fine for THIS
-# row — `step0_card` reads only the Step-0 span, so the discrimination below is unchanged —
-# but the count has to say what the pattern really matches, or the anchor is a promise the
-# mutation does not keep.
-anchor "$SKILL_MD" '    integration   ' 4
+#
+# ONE PER FILE NOW, WHERE IT USED TO BE FOUR IN ONE (wave-11 row 1b). The fact this pin holds
+# has not changed since epic-22 K2 landed it: all four cards carry the same branch pair, so a
+# reader of any one of them learns where the work lands and where it merges. What changed is
+# that the four cards live in four files, which turns a single count of 4 into four counts of
+# 1 — and, because the count alone no longer says WHICH files, a fifth assertion that the core
+# carries none, since a card left behind in the core would keep the total at four while
+# defeating the split.
+#
+# The anchor immediately below is the mutation's own precondition and reads the ONE file the
+# `sed` under it rewrites; the four rows after it are the K2 fact, restated across the split.
+for _cardfile in "$STEP0_MD" "$STEP1_MD" "$STEP2_MD" "$STEP3_MD"; do
+  expect_eq "82pre.${_cardfile##*/}: AC-K1.3 — this step file's card carries exactly one integration branch line" \
+    "1" "$(grep -c '^    integration   ' "$_cardfile" 2>/dev/null | tr -cd '0-9')"
+done
+expect_eq "82pre.core: …and the core carries none, so no card was left behind in it" \
+  "0" "$(grep -c '^    integration   ' "$SKILL_MD" 2>/dev/null | tr -cd '0-9')"
+anchor "$STEP0_MD" '    integration   ' 1
 DOCTORED_NO_INTEGRATION="$TMP/skill-k1-no-integration.md"
-sed '/^    integration   /d' "$SKILL_MD" > "$DOCTORED_NO_INTEGRATION"
+sed '/^    integration   /d' "$STEP0_MD" > "$DOCTORED_NO_INTEGRATION"
 DOCTORED_CARD_82="$(step0_card "$DOCTORED_NO_INTEGRATION")"
 case "$DOCTORED_CARD_82" in
   *"    integration"*) no "82: a Step-0 card missing the integration branch line still 'has' it (pin is vacuous)" ;;
@@ -1549,9 +1603,9 @@ has_all() {
   return 0
 }
 
-CARD1="$(card_span "$SKILL_MD" 'Step 1 · Requirements')"
-CARD2="$(card_span "$SKILL_MD" 'Step 2 · Design')"
-CARD3="$(card_span "$SKILL_MD" 'Step 3 · Plan')"
+CARD1="$(card_span "$STEP1_MD" 'Step 1 · Requirements')"
+CARD2="$(card_span "$STEP2_MD" 'Step 2 · Design')"
+CARD3="$(card_span "$STEP3_MD" 'Step 3 · Plan')"
 
 expect_true "90a: the Step-1 card is a fenced literal in the skill file" test -n "$CARD1"
 expect_true "90b: the Step-2 card is a fenced literal in the skill file" test -n "$CARD2"
@@ -1631,37 +1685,74 @@ expect_contains "95e: the Step-3 card's look-closer line opens one slice" \
   'show slice <n>' "$CARD3"
 
 # --- AC-K2.2: the spec template's Eval design table -------------------------
-SKILL_BODY="$(cat "$SKILL_MD" 2>/dev/null)"
+STEP2_BODY="$(cat "$STEP2_MD" 2>/dev/null)"
 expect_contains "96a: the skill names the spec's section '## Eval design'" \
-  '## Eval design' "$SKILL_BODY"
-EVAL_HEADER="$(grep -m1 -F '| Requirement | Approach |' "$SKILL_MD" 2>/dev/null)"
+  '## Eval design' "$STEP2_BODY"
+EVAL_HEADER="$(grep -m1 -F '| Requirement | Approach |' "$STEP2_MD" 2>/dev/null)"
 expect_true "96b: …and gives it a column header row" test -n "$EVAL_HEADER"
 for _col in Requirement Approach Criterion "Eval type" Eval "Fails when"; do
   expect_contains "96c: …carrying the ratified column '$_col'" "$_col" "$EVAL_HEADER"
 done
 expect_contains "96d: …and states the invariant that gives the sixth column its force" \
-  'is not an eval' "$SKILL_BODY"
+  'is not an eval' "$STEP2_BODY"
 
-# --- Anti-vacuity: the spans are BOUNDED, not the whole file -----------------
+# --- Anti-vacuity: the spans are BOUNDED, and each card is in its own file ---
 #
-# THE FAILURE THIS GUARDS. `card_span` prints from a heading to the next fence. An
-# extractor that lost its terminator — or a card whose closing fence was deleted — would
-# return the REST OF THE FILE, and every `has_all` above would then pass on words found
-# hundreds of lines away in prose that has nothing to do with a card. So each span is
-# asserted to stop where its card stops, by naming text that lives OUTSIDE it: the next
-# card's question, and a Step-3 sentence no card contains. Doctored copies would say the
-# same thing at the cost of two more mutation sites in a file whose census is pinned
-# elsewhere; these rows are the same discrimination, in memory.
-expect_absent "97a: the Step-1 card's span stops before the Step-2 card's question" \
-  'Do you approve this design?' "$CARD1"
-expect_absent "97b: the Step-2 card's span stops before the Step-3 card's question" \
-  'Do you approve this plan?' "$CARD2"
-expect_absent "97c: the Step-3 card's span stops before the Step-5 prose below it" \
+# THE FAILURE THIS GUARDS. `card_span` prints from a heading to the next fence. An extractor
+# that lost its terminator — or a card whose closing fence was deleted — would return the REST
+# OF THE FILE, and every `has_all` above would then pass on words found hundreds of lines away
+# in prose that has nothing to do with a card.
+#
+# HOW THIS IS STATED AFTER THE SPLIT (wave-11 row 1b). Until the split the three cards sat in
+# one file in the order Step 1 → Step 2 → Step 3 → Step-5 prose, and each span was bounded by
+# naming the NEXT card's question: text that was in the file but outside the span. The cards
+# are now one per step file, so that phrasing would be vacuous — an unbounded Step-1 span runs
+# to the end of `steps/1.md` and still never reaches the Step-2 card's question, which is in a
+# different file. The same two facts are asserted instead, and they are strictly harder to
+# satisfy by accident:
+#
+#   (a) each card's question appears in its OWN step file and in NO other one and not in the
+#       core, which is boundedness and correct placement in one statement — an unbounded span
+#       cannot swallow a neighbouring card, because the neighbour is not in its file, and a
+#       card left behind in the core fails here rather than passing quietly;
+#   (b) the ten step files exist, in order, so "it is in its own file" is a claim about a
+#       roster that is itself checked rather than about whichever files happen to be present.
+#
+# The Step-5 sentence 97c used to reach for is pinned in (a)'s shape too: `Wave shape locks at
+# approval` closes Step 3, so `steps/3.md` is where it must be and the Step-3 CARD is where it
+# must not.
+_CARD_Q1='Do you approve these requirements?'
+_CARD_Q2='Do you approve this design?'
+_CARD_Q3='Do you approve this plan?'
+for _spec in "1:$_CARD_Q1" "2:$_CARD_Q2" "3:$_CARD_Q3"; do
+  _owner="${_spec%%:*}"; _q="${_spec#*:}"
+  _homes=""
+  for _n in 0 1 2 3 4 5 6 7 8 9; do
+    eval "_f=\"\${SKILL_DIR}/steps/${_n}.md\""
+    grep -qF -- "$_q" "$_f" 2>/dev/null && _homes="${_homes}${_n} "
+  done
+  grep -qF -- "$_q" "$SKILL_MD" 2>/dev/null && _homes="${_homes}core "
+  expect_eq "97a.$_owner: the Step-$_owner card's question lives in steps/$_owner.md and nowhere else" \
+    "$_owner " "$_homes"
+done
+
+# 97b: the card span really is bounded — the Step-3 card stops before the Step-3 prose that
+# follows it in the same file, which is the one place the old in-file phrasing still applies.
+expect_absent "97b: the Step-3 card's span stops before the Step-3 prose below it in steps/3.md" \
   'Wave shape locks at approval' "$CARD3"
-# …and the positive those three need: the text they say is outside a span really is in the
-# file, so an absence above cannot be an absence from the whole document.
-expect_contains "97d: …and all three of those sentences do exist in the skill file" \
-  'Wave shape locks at approval' "$SKILL_BODY"
+
+# 97c: the roster (b) — ten step files, in order, each a real file.
+_STEPS_PRESENT=""
+for _n in 0 1 2 3 4 5 6 7 8 9; do
+  [ -f "${SKILL_DIR}/steps/${_n}.md" ] && _STEPS_PRESENT="${_STEPS_PRESENT}${_n}"
+done
+expect_eq "97c: the ten step files exist, in order (fails-when: a step file is missing)" \
+  "0123456789" "$_STEPS_PRESENT"
+
+# …and the positive 97b needs: the sentence it says is outside the card really is in that
+# card's file, so the absence cannot be an absence from the whole document.
+expect_contains "97d: …and the Step-3 sentence 97b excludes does exist in steps/3.md" \
+  'Wave shape locks at approval' "$(cat "$STEP3_MD" 2>/dev/null)"
 
 # --- the authoring half, in operational-rules.md ----------------------------
 #
@@ -1789,7 +1880,7 @@ proto_span() {
     index($0, "The prototype unit") { f=1 }
     f { print }
     f && /^$/ { exit }
-  ' "$SKILL_MD"
+  ' "$STEP2_MD"
 }
 PROTO_SPAN="$(proto_span)"
 
@@ -1805,9 +1896,9 @@ else
 fi
 
 # 107c: Anti-vacuity — a copy with the no-row rule's sentence stripped fails 107b's check.
-anchor "$SKILL_MD" 'never owns a matrix row' 1
+anchor "$STEP2_MD" 'never owns a matrix row' 1
 DOCTORED_NO_ROWRULE="$TMP/skill-k4-no-rowrule.md"
-sed '/never owns a matrix row/d' "$SKILL_MD" > "$DOCTORED_NO_ROWRULE"
+sed '/never owns a matrix row/d' "$STEP2_MD" > "$DOCTORED_NO_ROWRULE"
 DOCTORED_PROTO_SPAN="$(awk '
     index($0, "The prototype unit") { f=1 }
     f { print }
@@ -1830,9 +1921,9 @@ expect_contains "107d: AC-K4.3 — the Step-3 card's Open-at-approval row maps a
   "closed by slice" "$CARD3"
 
 # 107e: Anti-vacuity — a Step-3 card with the mapping text stripped fails 107d.
-anchor "$SKILL_MD" 'closed by slice' 1
+anchor "$STEP3_MD" 'closed by slice' 1
 DOCTORED_NO_CLOSEDBY="$TMP/skill-k4-no-closedby.md"
-sed 's/closed by slice/discharged eventually/' "$SKILL_MD" > "$DOCTORED_NO_CLOSEDBY"
+sed 's/closed by slice/discharged eventually/' "$STEP3_MD" > "$DOCTORED_NO_CLOSEDBY"
 DOCTORED_CARD3_107="$(card_span "$DOCTORED_NO_CLOSEDBY" 'Step 3 · Plan')"
 case "$DOCTORED_CARD3_107" in
   *"closed by slice"*) no "107f: a Step-3 card missing the 'closed by slice' mapping still 'has' it (pin is vacuous)" ;;

@@ -37,7 +37,11 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/archive.sh"
-SKILL_MD="$REPO_ROOT/skills/canonical-sdlc/SKILL.md"
+# STEP 9 LIVES IN ITS OWN FILE SINCE WAVE-11 ROW 1b. This suite's §7 reads the Step-9 span
+# and nothing else in the skill, so it names the step file rather than the core. The
+# extractor below is unchanged: it still starts at `### Step 9 —`, and its `^## [^#]`
+# terminator simply never fires now, because the step file ends where the step does.
+SKILL_MD="$REPO_ROOT/skills/canonical-sdlc/steps/9.md"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/archive-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
