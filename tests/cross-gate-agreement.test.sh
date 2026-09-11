@@ -3231,6 +3231,51 @@ for _h in $N_ADOPTED; do
   expect_eq "$_h.sh carries the canonical loader block, byte for byte" \
     "$N_BLOCK" "$(n_block_of "$BIONIC_HOOKS_DIR/$_h.sh")"
 done
+# ------------------------------------------------ …AND IT IS SMALL (the cap, 1f-c)
+#
+# ONE TEXT was never the whole property. The block is pasted into 22 files, so every line
+# of it is paid 22 times, and 64 of the original 147 were commentary restating the code
+# beside them or repeating loader.sh's own header (census, record/wave-11-lean-spine/
+# step1-census-1f.md §3.1). Byte-identity is satisfied by 147 identical lines exactly as
+# happily as by 95, so the SIZE is pinned separately (REQ-1f, AC-1f.1): the rows above fix
+# what the block says, this one fixes how much room it is allowed to say it in.
+N_CAP=95
+N_CAN_LINES=$(printf '%s\n' "$N_BLOCK" | wc -l | tr -d ' ')
+expect_eq "the canonical loader block is at most $N_CAP lines (measured $N_CAN_LINES)" "yes" \
+  "$([ "$N_CAN_LINES" -le "$N_CAP" ] && echo yes || echo no)"
+
+# MEASURED IN THE HOOKS TOO, not inferred from the canonical text. The agreement rows above
+# make this redundant only while they pass: rename the marker in one hook and `n_block_of`
+# returns nothing there, and nothing is under any cap. So the longest span is reported BY
+# NAME, and a span that failed to extract at all is reported as its own failure.
+N_LONGEST=""; N_LONGEST_N=0; N_UNEXTRACTED=""
+for _h in $N_ADOPTED; do
+  _n=$(n_block_of "$BIONIC_HOOKS_DIR/$_h.sh" | wc -l | tr -d ' ')
+  if [ "${_n:-0}" -lt 1 ]; then N_UNEXTRACTED="$N_UNEXTRACTED $_h"; continue; fi
+  if [ "$_n" -gt "$N_LONGEST_N" ]; then N_LONGEST_N="$_n"; N_LONGEST="$_h"; fi
+done
+expect_eq "every adopted hook's loader span extracts (the cap is measuring text, not air)" \
+  "" "$N_UNEXTRACTED"
+expect_eq "the longest hook loader span is at most $N_CAP lines (${N_LONGEST:-none} at $N_LONGEST_N)" \
+  "yes" "$([ "$N_LONGEST_N" -le "$N_CAP" ] && echo yes || echo no)"
+
+# MUTATION, both pins at once. A cap and a byte pin that have never been seen to fail are
+# two comments. ONE copy is doctored in the SANDBOX — never in the tree — by padding its
+# span past the cap, and both properties must reject it: the bytes no longer agree, and the
+# measurement no longer fits.
+mkdir -p "$SANDBOX/fx"
+N_MUT_HOOK="$SANDBOX/fx/fat-loader-copy.sh"
+awk -v cap="$N_CAP" '
+  { print }
+  /^# --- bionic-loader\/v2 BEGIN$/ { for (i = 0; i <= cap; i++) print "# padding the span past the cap" }
+' "$BIONIC_HOOKS_DIR/agent-context-guard.sh" > "$N_MUT_HOOK"
+N_MUT_BLOCK="$(n_block_of "$N_MUT_HOOK")"
+N_MUT_LINES=$(printf '%s\n' "$N_MUT_BLOCK" | wc -l | tr -d ' ')
+expect_ne "the loader-cap mutation really doctored the span (not a byte-identical copy)" \
+  "$(n_block_of "$BIONIC_HOOKS_DIR/agent-context-guard.sh")" "$N_MUT_BLOCK"
+expect_ne "…and the byte-for-byte pin calls the doctored span a drift" "$N_BLOCK" "$N_MUT_BLOCK"
+expect_eq "…and the cap rejects it ($N_MUT_LINES lines against a cap of $N_CAP)" "no" \
+  "$([ "$N_MUT_LINES" -le "$N_CAP" ] && echo yes || echo no)"
 
 # NO PRIVATE RESOLVER SURVIVES — none, not one. ADOPT converted seventeen hooks and slice
 # POKER the eighteenth, so the eight-copy family is empty and this row is what keeps a
