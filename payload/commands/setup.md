@@ -1,6 +1,7 @@
 ---
 allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh:*)
 description: Set this machine up for bionic — idempotent, consented, one item at a time.
+disable-model-invocation: true
 ---
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered from agents-src/templates/commands/setup.md.tmpl and the shared blocks in

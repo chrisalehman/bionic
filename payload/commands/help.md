@@ -1,5 +1,6 @@
 ---
 description: bionic overview — what it is, the command roster, and where to start.
+disable-model-invocation: true
 ---
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered from agents-src/templates/commands/help.md.tmpl and the shared blocks in
