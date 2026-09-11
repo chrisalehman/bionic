@@ -1889,4 +1889,22 @@ esac
 expect_contains "110c: the doctored copy still carries the REST of the paragraph (the mutation is surgical, not 105's whole-paragraph wipe)" \
   "requirements.md\`: numbered requirements" "$DOCTORED_THREE_ARTIFACT_110"
 
+# ---- 111: the five user-only commands are hidden from model invocation (wave-11 row 1d) ----
+# `disable-model-invocation: true` is what drops a command's description from the Skill
+# roster the model sees; a template that loses the line silently puts ~600 B back into every
+# request. Pinned on the rendered file (the shipped surface) AND the template (the source).
+for _cmd in setup doctor remove version help; do
+  _md="${REPO}/payload/commands/${_cmd}.md"; _tp="${REPO}/agents-src/templates/commands/${_cmd}.md.tmpl"
+  if awk '/^---$/{c++; next} c==1' "$_md" | grep -q '^disable-model-invocation: true$'; then
+    ok "111-${_cmd}: payload/commands/${_cmd}.md frontmatter carries disable-model-invocation: true"
+  else
+    no "111-${_cmd}: payload/commands/${_cmd}.md frontmatter lacks disable-model-invocation: true"
+  fi
+  if awk '/^---$/{c++; next} c==1' "$_tp" | grep -q '^disable-model-invocation: true$'; then
+    ok "111t-${_cmd}: the ${_cmd} template carries the line (source, not just output)"
+  else
+    no "111t-${_cmd}: the ${_cmd} template lacks disable-model-invocation: true"
+  fi
+done
+
 finish
