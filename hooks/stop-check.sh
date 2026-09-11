@@ -28,6 +28,12 @@
 #
 # This is a PRODUCER, not a hook — it lives in hooks/ for test-harness pairing
 # only. Producers may think and take seconds; gates may only read (§3.2).
+#
+# UNREGISTERED BY DESIGN: this is the hand-run observation producer. The
+# orchestrator runs it by hand, before stopping a subagent, and it is the sole
+# producer of the stop-check-observation/v1 records the stop gate spends
+# (wave-11-lean-spine T9 ruling, 2026-09-11 — the census's "unregistered" was
+# a misclassification of intentional design, not evidence of dead code).
 # [WALL: tests/stop-check.test.sh]
 #
 # Registered on no channel — invoked on demand from the mounted plugin payload.
