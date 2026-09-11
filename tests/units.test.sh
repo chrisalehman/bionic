@@ -403,6 +403,51 @@ expect_eq "the one well-formed row draws no violation of its own" "0" \
   "$(printf '%s\n' "$VAL_BAD" | grep -c '^T1: [^d]' | tr -d ' ')"
 
 # ============================================================
+section "6b — the transitive rule is decided PER ROW, and the arm proves it discriminates"
+# ============================================================
+#
+# WHY THIS SECTION EXISTS. §6's table carries exactly one Step-5-or-later row, so a library
+# that computed the reachable set ONCE for the whole table — never resetting it between rows —
+# would pass every assertion there. That is not hypothetical: the first implementation of this
+# rule did exactly that, and the live specimen hid it, because the row before the offender
+# reached everything and left its closure behind. Two Step-5 rows, the first reaching both
+# Step-4 rows and the second reaching only one, is the smallest table that tells them apart.
+
+cat > "$SANDBOX/leak.md" <<'LEAK_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 3 | doc | plan written | orchestrator | — | 30m | all | plan | landed |
+| T2 | 4 | build | first | implementor | T1 | 15m | REQ-x | a.sh | landed |
+| T3 | 4 | build | second | implementor | T1 | 15m | REQ-x | b.sh | landed |
+| T4 | 5 | verify | reaches both Step-4 rows | researcher | T2, T3 | 30m | all | w.md | pending |
+| T5 | 5 | test | reaches only T2 | test-runner | T2 | 40m | all | f.md | pending |
+LEAK_EOF
+
+VAL_LEAK="$(call units_validate "$SANDBOX/leak.md")"
+expect_eq "of two Step-5 rows, only the one that misses a Step-4 row is reported" "1" \
+  "$(nlines "$VAL_LEAK")"
+expect_contains "…naming the row and the Step-4 row it never reaches" \
+  "T5: step 5 does not depend transitively on step-4 row T3" "$VAL_LEAK"
+expect_eq "…and the Step-5 row that does reach both draws nothing" "" \
+  "$(printf '%s\n' "$VAL_LEAK" | grep '^T4:')"
+
+# THE MUTATION ARM. Strip the per-row reset of the reachable set from a scratch copy of the
+# shipped library: T4's closure then leaks into T5's, T5 appears to reach T3, and the
+# violation disappears. Without this arm the three rows above pass just as loudly on a
+# library that decides the rule once for the whole table.
+anchor "$LIB" 'split("", reach)' 1
+MUTANT="$SANDBOX/units-mutant.sh"
+grep -v 'split("", reach)' "$LIB" > "$MUTANT"
+MUTANT_OUT="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_validate "$2"' \
+  _ "$MUTANT" "$SANDBOX/leak.md")"
+expect_eq "the shipped library reports it; the mutant that never resets the set does not" \
+  "1 0" "$(nlines "$VAL_LEAK") $(nlines "$MUTANT_OUT")"
+expect_eq "…and the mutant still parses, so the arm measures behaviour and not a syntax error" \
+  "yes" "$(bash -n "$MUTANT" 2>/dev/null && echo yes || echo no)"
+
+# ============================================================
 section "7 — units_validate: a missing column is a violation of the table, not of a row"
 # ============================================================
 
