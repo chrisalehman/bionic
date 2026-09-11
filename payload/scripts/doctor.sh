@@ -1085,7 +1085,22 @@ while IFS= read -r dep_name; do
       third_state="$(_doctor_unknown_cause "$kind")"
       case "${dep_class}/${kind}" in
         when-needed/*) ;;
-        */pnpm-store)  third_state="${third_state} — setup pre-warms it" ;;
+        # THE ROUTE RIDES IN THE INSTRUCTION SLOT, WHICH THE CUT MAY NOT EAT
+        # (1g, 2026-09-11). This row said "setup pre-warms it" in prose and
+        # named no route, so it was the one FIRED row on doctor's page that did
+        # not carry its table row's hint — the agreement walk read
+        # `tool:motion|motion|…|setup|tool:motion|/bionic:setup` and found
+        # nothing of it on the line. The 2026-08-22 ruling settled the FIX
+        # SENTENCE below, not this row's party: what does not exist for a pnpm
+        # store is a repair for the CAUSE ("resolve the unreadable index"), and
+        # `/bionic:setup` re-warming the store is a repair that does exist —
+        # setup carries `tool:motion` as an item and offers it on exactly this
+        # state. So the prose stays and the route joins it, in the slot
+        # `_doctor_env_row`'s comment already names: the cause here is an
+        # unbounded PATH, and a state cell long enough to push the cure off the
+        # end is the defect lib/width.sh exists to stop.
+        */pnpm-store)  third_state="${third_state} — setup pre-warms it"
+                       third_keep="${_doctor_dep_hint:+ → ${_doctor_dep_hint}}" ;;
         *)             third_state="${third_state}${_doctor_dep_hint:+ → ${_doctor_dep_hint}}" ;;
       esac ;;
   esac
@@ -1204,6 +1219,13 @@ while IFS= read -r dep_name; do
       # names a repair that does not exist. Class alone was enough while the only
       # such row was `when-needed`; the ruling that made `motion` an `extra` sent
       # it straight to the sentence about a repair nobody can perform.
+      #
+      # AND IT STILL EARNS NONE, WHICH IS NOT WHAT THE ROW ABOVE DECIDED (1g,
+      # 2026-09-11). The THIRD PARTY row now ends `→ /bionic:setup` and this arm
+      # is still silent, and the two agree: the row names the party who can
+      # re-warm the store, while a FIX line here would have to name a repair for
+      # the unreadable INDEX, which is the thing that does not exist. The cure
+      # reaches the reader on the row, where it is true.
       case "${dep_class}/${kind}" in
         when-needed/*) ;;
         */pnpm-store)  ;;
