@@ -360,6 +360,21 @@ print_bound_line() {  # <verdict "bound-open <plan>">
   step="$(grep -m1 '^current:' "$bplan" 2>/dev/null | tr -dc '0-9T')"
   if [ -n "$DOCS" ]; then relplan="${bplan#"$DOCS"/}"; else relplan="$bplan"; fi
   printf 'bionic: bound to %s — current: %s\n' "$relplan" "$step"
+  # THE STEP FILE, NAMED RATHER THAN INJECTED (wave-11 row 1b, design D1). The governing
+  # skill is a core plus one file per step, and the core's own rule is to read `steps/N.md`
+  # before acting at step N. Nothing enforces that — no hook can see whether a model read a
+  # file — so this line does the one thing a hook honestly can: it puts the path in front of
+  # the session at the moment the step is known, so the read is a glance away rather than a
+  # lookup. `$HOOK_ROOT` is the tree this hook was launched from, the same root the re-arm
+  # line prints and the same one `ss_interval` asks for the poker, so the path names a file
+  # in the plugin that is actually running rather than in whichever one is installed.
+  #
+  # ONLY FOR A NUMERIC STEP. A task-scale plan reads `current: T<n>`, which names no step
+  # file, and a plan with no readable `current:` leaves `$step` empty; printing
+  # `steps/T3.md` or `steps/.md` would send a reader at a path that does not exist.
+  case "$step" in
+    [0-9]|[0-9][0-9]) printf '  step file: %s/skills/canonical-sdlc/steps/%s.md\n' "$HOOK_ROOT" "$step" ;;
+  esac
 }
 
 if [ "$N" -eq 1 ]; then
