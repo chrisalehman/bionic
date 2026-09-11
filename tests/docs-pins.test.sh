@@ -2344,5 +2344,23 @@ fi
 expect_eq "120: a missing step file measures -1, not 0 (absence fails the cap, never satisfies it)" \
   "-1" "$(bytes_of "${SPLIT_SKILL_DIR}/steps/nonexistent.md")"
 
+section "Section 19: REQ-1f — hooks/stop-check.sh's header names it the hand-run observation producer (wave-11 T9 ruling)"
+#
+# step1-census-1f.md §5 read stop-check.sh's absence from hooks/hooks.json as evidence of
+# dead code; the wave-11 T9 ruling (2026-09-11) corrected that: it is unregistered BY
+# DESIGN, the orchestrator's own hand-run producer of the stop-check-observation/v1 record
+# the stop gate spends, not a hook the loader is ever supposed to fire. This pin holds the
+# header's own statement of that fact, read OUTSIDE the loader span (T11 is editing that
+# span in parallel elsewhere in this wave), so a future census does not re-derive
+# "unregistered" as "dead" a second time without a live sentence contradicting it.
+STOP_CHECK_SH="${BIONIC_HOOKS_DIR}/stop-check.sh"
+if [ -f "$STOP_CHECK_SH" ]; then
+  STOP_CHECK_HEADER="$(awk '/^# --- bionic-loader\/v2 BEGIN$/{exit} {print}' "$STOP_CHECK_SH")"
+  expect_contains "121: REQ-1f — stop-check.sh's header names it the hand-run observation producer" \
+    "hand-run observation producer" "$STOP_CHECK_HEADER"
+else
+  no "121: REQ-1f — stop-check.sh's header names it the hand-run observation producer" \
+     "hooks/stop-check.sh does not exist"
+fi
 
 finish
