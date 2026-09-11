@@ -1994,9 +1994,13 @@ section "Section 17: REQ-1b — the split skill's byte caps and the core's step 
 # moved nothing.
 #
 # THE CAPS ARE THE RATIFIED NUMBERS, not measurements of what happened to land: core 25,000 ·
-# each step file 14,000 · dispatch 30,000 · the three together 96,000, from the requirements
-# file's AC table. Headroom under a cap is not a reason to move the cap down, and a future
-# wave that needs a cap raised raises it in the requirements first.
+# each step file 14,000 · dispatch 34,500 · the three together 107,500, from the requirements
+# file's AC table as AMENDED 2026-09-11 (user ruling "Ok, option 1": caps measure the loaded
+# surface; the prose cut is a chartered later wave). A fifth cap, also from that ruling, pins
+# the loaded surface itself: core + the largest single steps/N.md ≤ 36,000 B, since that pair
+# is what a session actually carries at a step boundary — the whole-surface total below it
+# does not measure that. Headroom under a cap is not a reason to move the cap down, and a
+# future wave that needs a cap raised raises it in the requirements first.
 #
 # AC-1b.5 is the structural half, and it is what makes the byte caps mean anything: a core
 # that still carried its `### Step N` sections would be under no cap at all, and a core that
@@ -2042,7 +2046,7 @@ for _n in 0 1 2 3 4 5 6 7 8 9; do
 done
 
 le_cap "113: AC-1b.3 — the dispatch reference is at or under its cap (fails-when: the dispatch body grows back)" \
-  "$SPLIT_DISPATCH" 30000
+  "$SPLIT_DISPATCH" 34500
 
 # steps/4.md's own cap — the no-new-Step-4-prose wall (REQ-1b: "No new Step-4 prose is
 # authored: the dispatch reference serves Step 4").
@@ -2064,12 +2068,42 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 96,000 B" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 96000 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 96,000 B ($SPLIT_TOTAL B ≤ 96000 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 107,500 B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 107500 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 107,500 B ($SPLIT_TOTAL B ≤ 107500 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 96,000 B" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 96000)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 107,500 B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 107500)) B"
+fi
+
+# The LOADED surface — core + the largest single step file — is what a session actually
+# carries at a step boundary, which the whole-surface total above does not measure (it sums
+# every step file, only one of which is ever loaded at once). New pin from the 2026-09-11 cap
+# ruling ("Ok, option 1").
+SPLIT_MAX_STEP=0
+SPLIT_MAX_STEP_MISSING=""
+for _n in 0 1 2 3 4 5 6 7 8 9; do
+  _b="$(bytes_of "${SPLIT_SKILL_DIR}/steps/${_n}.md")"
+  if [ "$_b" -lt 0 ] 2>/dev/null; then
+    SPLIT_MAX_STEP_MISSING="$SPLIT_MAX_STEP_MISSING steps/${_n}.md"
+  elif [ "$_b" -gt "$SPLIT_MAX_STEP" ] 2>/dev/null; then
+    SPLIT_MAX_STEP="$_b"
+  fi
+done
+SPLIT_CORE_BYTES="$(bytes_of "$SPLIT_CORE")"
+if [ -n "$SPLIT_MAX_STEP_MISSING" ] || [ "$SPLIT_CORE_BYTES" -lt 0 ] 2>/dev/null; then
+  SPLIT_LOADED_MISSING="$SPLIT_MAX_STEP_MISSING"
+  [ "$SPLIT_CORE_BYTES" -lt 0 ] 2>/dev/null && SPLIT_LOADED_MISSING="$SPLIT_LOADED_MISSING ${SPLIT_CORE##*canonical-sdlc/}"
+  no "115a: AC-1b.4 — loaded surface: core + largest steps/N.md at or under 36,000 B" \
+     "missing:$SPLIT_LOADED_MISSING"
+else
+  SPLIT_LOADED_SURFACE=$((SPLIT_CORE_BYTES + SPLIT_MAX_STEP))
+  if [ "$SPLIT_LOADED_SURFACE" -le 36000 ]; then
+    ok "115a: AC-1b.4 — loaded surface: core + largest steps/N.md at or under 36,000 B ($SPLIT_LOADED_SURFACE B ≤ 36000 B)"
+  else
+    no "115a: AC-1b.4 — loaded surface: core + largest steps/N.md at or under 36,000 B" \
+       "$SPLIT_LOADED_SURFACE B exceeds the cap by $((SPLIT_LOADED_SURFACE - 36000)) B"
+  fi
 fi
 
 # AC-1b.5, both halves.
