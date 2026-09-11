@@ -1,0 +1,44 @@
+<!-- GENERATED-HEADER -->
+
+### Step 1 — Scope
+
+Step 1 is interactive Q&A and is never skipped. It authors ONE kind of knowledge — what is
+wanted, in the user's terms — and lands it in ONE artifact: `wave-NN-<slug>.requirements.md`,
+beside the spec under `specs/epic-NN-<slug>/`. Numbered requirements, each with its
+`provenance:` and its acceptance criteria; then "Not Doing". No design, no slices, no evals.
+
+**Write every criterion so a "fails when" is nameable.** Step 2 has to be able to say what
+planted defect would turn each criterion's eval red; a criterion that admits no such sentence
+("the code is clean", "performance is good") cannot be evaluated and is rewritten here, where
+it is still cheap. That is a Step-1 quality bar, not a Step-2 discovery.
+
+**The step ends at the card below, rendered in full.** One line per requirement, never a
+paragraph — the artifact path is the depth, and `explain <requirement>` opens one. Ratification
+is against the card, and the card's own question is the gate.
+
+```
+Step 1 · Requirements
+
+  Purpose
+    <one paragraph: what this run ships, and for whom>
+
+  Branches
+    working       <branch>              (from <base> @ <sha>)
+    integration   <branch>              (Step 8 merges here)
+
+  Requirements
+    REQ-<id>   <the requirement in one line>
+               provenance <user quote | spec section | ticket | report>    ACs <n>
+
+  Not Doing
+    <one line per excluded item — what is out, and why>
+
+  Artifacts
+    requirements  <docs-root>/specs/epic-NN-<slug>/wave-NN-<slug>.requirements.md
+
+Do you approve these requirements? Reply "approved" to ratify it.
+explain <requirement>
+```
+
+**Evidence:** `Step 1: requirements: <path>; <how the scope was ratified>`
+
