@@ -8558,9 +8558,15 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # (DOCTORED_NO_K54_CLAUSE), 34->35/35->36 — A-31's own warning that a later card with a
 # branch pair moves this count, landing on schedule. RE-DERIVED BY DIRECT GREP over the
 # merged docs-pins.test.sh at each point, not carried forward from any pre-merge side.
-expect_eq "S19.3 docs-pins holds 35 doctoring sites" "35" \
+#
+# WAVE-11 ROW 1b: +1 each. Section 17 (the split skill's byte caps) doctors one copy —
+# DOCTORED_FAT_CORE, a core padded past its own cap — and declares it with one anchor,
+# 35->36/36->37. The split itself moved no count: the four structural assertions it
+# rewrote replaced one anchor with one anchor, and the 99 re-pointed rows changed which
+# file a pin reads, never how many mutants the suite builds.
+expect_eq "S19.3 docs-pins holds 36 doctoring sites" "36" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 36 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4)" "36" \
+expect_eq "S19.3 …declared by 37 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds one, the oversized-core mutant)" "37" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -8616,7 +8622,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section slice 11 does not own.
-expect_eq "S19.3 …66 anchor call sites across the four doctoring suites, all told" "66" \
+expect_eq "S19.3 …67 anchor call sites across the four doctoring suites, all told" "67" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
