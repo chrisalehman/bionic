@@ -265,13 +265,17 @@ EOF
 # HEADER IS WORDED DIFFERENTLY" above.
 generated_header() {
   case "$1" in
-    agents-src/templates/skills/canonical-sdlc/steps/*)
-      # ONE LINE FOR A STEP FILE, and the reason is the budget the split exists to serve.
-      # These ten files are read one at a time by a model at a step boundary, and REQ-1b
-      # caps what all of them together may cost. The four-line warning below would be ten
-      # copies of the same sentence inside that cap — ~2.2 KB of it — buying nothing the
-      # one line does not already say. The warning itself is not optional: a step file is
-      # as generated as any other final, and --check goes red on a hand edit either way.
+    agents-src/templates/skills/canonical-sdlc/steps/* | \
+    agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl | \
+    agents-src/templates/skills/canonical-sdlc/dispatch.md.tmpl)
+      # ONE LINE across the whole split-skill surface — core, dispatch reference and the
+      # ten step files alike — and the reason is the budget the split exists to serve.
+      # REQ-1b's byte caps (docs-pins Section 17) are measured against exactly these
+      # files, and the four-line warning below would cost ~290 B on each of twelve of
+      # them for a warning the one line already gives in full: --check goes red on a
+      # hand edit either way, so nothing enforceable is lost (2026-09-11 cap ruling,
+      # "no growth" total). Ratified 2026-09-11 for the core and dispatch reference too,
+      # after the T5-report §3 prunable-narrative estimate proved too small on its own.
       cat <<EOF
 <!-- GENERATED FILE — DO NOT EDIT. Rendered by agents-src/render.sh from $1. -->
 EOF
