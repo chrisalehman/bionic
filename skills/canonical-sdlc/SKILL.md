@@ -36,10 +36,7 @@ needs:
 loading: deferred
 ---
 
-<!-- GENERATED FILE — DO NOT EDIT.
-     Rendered by agents-src/render.sh from agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl and the shared
-     blocks in agents-src/blocks/. Edit those, then re-run `bash agents-src/render.sh`.
-     tests/docs-pins.test.sh goes red whenever this file and its sources disagree. -->
+<!-- GENERATED FILE — DO NOT EDIT. Rendered by agents-src/render.sh from agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl. -->
 
 # Canonical SDLC
 

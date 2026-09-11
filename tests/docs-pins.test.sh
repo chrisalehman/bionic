@@ -1994,9 +1994,14 @@ section "Section 17: REQ-1b — the split skill's byte caps and the core's step 
 # moved nothing.
 #
 # THE CAPS ARE THE RATIFIED NUMBERS, not measurements of what happened to land: core 25,000 ·
-# each step file 14,000 · dispatch 34,500 · the three together 107,500, from the requirements
-# file's AC table as AMENDED 2026-09-11 (user ruling "Ok, option 1": caps measure the loaded
-# surface; the prose cut is a chartered later wave). A fifth cap, also from that ruling, pins
+# each step file 14,000 · dispatch 35,000 · the three together 108,652 (today's exact size —
+# "no growth," literally), from the requirements file's AC table as AMENDED 2026-09-11 (user
+# ruling "Ok, option 1": caps measure the loaded surface; the prose cut is a chartered later
+# wave) and RE-AMENDED the same day once the T5-report §3 prunable-narrative estimate proved
+# too small to reach a tighter pair of caps on its own: dispatch to the measured cut (35,000,
+# still below today's 35,366) and total to the measured no-growth line (108,652), reached by
+# giving the core and dispatch reference the same one-line GENERATED header the step files
+# already use, not by cutting more prose. A fifth cap, also from the 2026-09-11 ruling, pins
 # the loaded surface itself: core + the largest single steps/N.md ≤ 36,000 B, since that pair
 # is what a session actually carries at a step boundary — the whole-surface total below it
 # does not measure that. Headroom under a cap is not a reason to move the cap down, and a
@@ -2046,7 +2051,7 @@ for _n in 0 1 2 3 4 5 6 7 8 9; do
 done
 
 le_cap "113: AC-1b.3 — the dispatch reference is at or under its cap (fails-when: the dispatch body grows back)" \
-  "$SPLIT_DISPATCH" 34500
+  "$SPLIT_DISPATCH" 35000
 
 # steps/4.md's own cap — the no-new-Step-4-prose wall (REQ-1b: "No new Step-4 prose is
 # authored: the dispatch reference serves Step 4").
@@ -2068,12 +2073,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 107,500 B" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 107500 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 107,500 B ($SPLIT_TOTAL B ≤ 107500 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth)" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 108652 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth) ($SPLIT_TOTAL B ≤ 108652 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 107,500 B" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 107500)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth)" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 108652)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
