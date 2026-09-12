@@ -544,11 +544,21 @@ fi
 # to either.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
-# THE CONTEXT, IN ONE CALL AND NOT BEFORE NOW (REQ-1f, lib/context.sh). The POSITION
-# is this gate's own and is deliberate: every line above is answerable without touching
-# the filesystem, and a non-commit Bash command must not pay for a root walk. So the
-# call sits BELOW the commit arm, and the gate reads nothing of the context itself
-# first. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
+# THE CONTEXT, RESOLVED AGAIN HERE, AND THAT IS THE POINT (REQ-1f, lib/context.sh).
+# The POSITION below the commit arm is this gate's own and it was a cost argument when
+# this body was its own process: a non-commit Bash command must not pay for a root walk.
+# THE CARRIER NO LONGER HONOURS THAT. hooks/bash-walls.sh calls `bionic_context` for
+# every Bash tool call in an engaged session, before any wall is entered, so the walk is
+# already paid by the time this line is reached and the deferral buys nothing.
+#
+# THE CALL STAYS ANYWAY, for a reason that outranks the walk it repeats: this body is
+# carried into the library VERBATIM from the hook it replaced, and the differential T23
+# rests on is a differential against that text. Deleting a line the subshell would have
+# inherited from its parent is a behaviour-preserving edit that nothing here proves is
+# behaviour-preserving. The values cannot disagree — same payload, same environment, and
+# `bionic_context` is a pure function of both — so the duplicate costs one root walk on
+# commit commands and nothing else. Consolidating it belongs with the verbatim-carry
+# guarantee it would break, not beside it. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
 # `loader_fail_closed` needed the command text before any library existed.
 #
 # THE CWD LADDER IS THE LIBRARY'S, and is named nowhere else in this file but the

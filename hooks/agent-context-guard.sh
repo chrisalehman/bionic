@@ -1,22 +1,35 @@
 #!/bin/bash
 # THE PLUGIN-CHANNEL PARTITION GUARD — session-20260815-landing-supervision, T6.
 #
-# It stands in hooks/hooks.json — four entries, one per event that needs it — in
-# front of a wall that is ALREADY registered on the skill channel, and its whole job
-# is to make sure exactly one of those two registrations is ever live for a given
-# event:
+# WHAT IS TRUE OF IT TODAY, measured rather than inherited (A-54, and wave-11's fold).
+# ONE registration in hooks/hooks.json — SubagentStop, in front of hooks/stop.sh — and
+# no other. The header below still describes the partition this file exists for, and the
+# partition still holds; what is no longer true of THIS file is the count and the second
+# lane:
 #
-#     hooks.json     ->  this guard  ->  exec the real wall   (agent contexts only)
-#     SKILL.md hooks ->  the real wall                        (main thread, unchanged)
+#     hooks.json  ->  this guard  ->  exec hooks/stop.sh   (agent contexts only)
 #
-# (Historically that first lane was the CLI's own settings.json, which is how this
+# THERE IS NO SKILL-FRONTMATTER LANE. No SKILL.md in this repo carries a `hooks:` key —
+# every registration bionic ships is in hooks/hooks.json. The lane the diagram used to
+# name was real when this file was written and is not real now, and the argument below
+# for why a SECOND channel was needed is kept because it is still why the guard exists:
+# the plugin channel is the only one alive inside an agent context.
+#
+# ITS BASH-SIDE WORK MOVED INTO THE WALL, IT DID NOT DISAPPEAR (A-54, T23). Silencing
+# background-suite-guard's backgrounded-suite arm on the main thread and in a session
+# with no roster row is a FUNCTION-level gate inside `wall_background_suite_guard`
+# (payload/scripts/lib/walls.sh) now, not a wrapper around the folded Bash compound —
+# the same five conditions, asked where the wall is rather than in front of five
+# processes. This file keeps the turn-end half.
+#
+# (Historically the first lane was the CLI's own settings.json, which is how this
 # file was written and named; the epic-17 plugin conversion moved every always-on
 # registration into the payload's hooks.json and nothing on that channel is read out
 # of settings.json any more.)
 #
-# WHY A SECOND CHANNEL AT ALL. The skill-frontmatter channel is looked up by SESSION
-# key, and a tool-class event raised inside a teammate or subagent context is
-# dispatched under the AGENT key — so `PreToolUse|Write`, `PreToolUse|Agent` and
+# WHY A SECOND CHANNEL WAS NEEDED, which is the argument this file was built on. The
+# skill-frontmatter channel was looked up by SESSION key, and a tool-class event raised
+# inside a teammate or subagent context is dispatched under the AGENT key — so `PreToolUse|Write`, `PreToolUse|Agent` and
 # their PostToolUse twins never reach a skill-registered hook from inside an agent.
 # Measured, both directions, with a same-session main-thread positive control:
 # .bionic/docs/record/session-20260815-landing-supervision/t1-probe-report.md §3
@@ -64,7 +77,8 @@
 # Exit code 2 (from the wall behind it) = block the tool call entirely.
 # [WALL: tests/agent-context-guard.test.sh]
 #
-# Registered always-on in hooks/hooks.json, in front of the wall named by its argument.
+# Registered always-on in hooks/hooks.json, once, on SubagentStop, in front of the wall
+# named by its argument — today that argument is hooks/stop.sh.
 
 set -uo pipefail
 
@@ -95,7 +109,7 @@ _jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 # take every wall behind it down with it in every session on the machine.
 BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
 # long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
 # tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names

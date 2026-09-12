@@ -51,7 +51,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 # payload/scripts/lib/loader.sh.
 BIONIC_LIB_WANT="context.sh fold.sh refuse.sh root.sh run.sh session.sh stop.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
 # long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
 # tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
@@ -175,8 +175,14 @@ bionic_context 2>/dev/null || exit 0
 # verdicted on a re-entry: every row is still owed its one answer.
 [ "$(bionic_jq .stop_hook_active)" = "true" ] && exit 0
 
-# AN ABSENT FIELD IS NOT A MISMATCH, so a hand-run payload still sweeps — the rule
-# hooks/landing-gate.sh stated for its own `case` and the one every function keeps.
+# AN ABSENT FIELD IS PASSED ON AS THE EMPTY STRING, and what each function makes of it
+# is the function's own business — not a rule this line imposes. Only `stop_context_spend`
+# treats an absent event as Stop (`case "$_ev" in ''|Stop)`, payload/scripts/lib/stop.sh),
+# which is the rule hooks/landing-gate.sh stated for its own `case` and the one that
+# function keeps. The other three match `Stop` strictly, exactly as their hooks did before
+# the merge, so a hand-run payload with no event field wakes the spend instrument and
+# nothing else. Base-faithful in both directions; the comment claimed a uniformity the
+# four never had.
 EVENT=$(bionic_jq .hook_event_name)
 
 bionic_fold "$EVENT" \
