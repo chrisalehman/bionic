@@ -39,7 +39,16 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
-HOOK="${BIONIC_PATROL_REVIVE_UNDER_TEST:-${BIONIC_HOOKS_DIR}/patrol-revive.sh}"
+# THE MERGED ENTRY POINT (epic-23 wave-11, T12). This monitor is a FUNCTION now —
+# `stop_patrol_revive` in payload/scripts/lib/stop.sh — and the process that runs it is
+# hooks/stop.sh. Every fixture below drives that process.
+HOOK="${BIONIC_PATROL_REVIVE_UNDER_TEST:-${BIONIC_HOOKS_DIR}/stop.sh}"
+
+# THE SOURCE THE THREE FILE-READING ARMS BELOW ASK (epic-23 wave-11, T12). This
+# gate's body lives in payload/scripts/lib/stop.sh now; $HOOK is the process that
+# runs it. An arm that reads TEXT reads the library, an arm that DRIVES drives the
+# hook, and the two are named separately so neither can silently read the other.
+HOOK_SRC="${BIONIC_PATROL_REVIVE_SRC_UNDER_TEST:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
 
 # pass/fail were pure-rename shadows of the framework's ok/no; the suite's own
 # explicit TOTAL=$((TOTAL + 1)) lines (including the ones inside
@@ -463,7 +472,7 @@ section "Group 6: registration"
 # so BOTH halves are asserted, because either alone is a wall in the wrong place: a
 # lingering frontmatter entry would fire it twice per turn (the CLI does not deduplicate
 # across the two manifests), and a missing manifest entry would not fire it at all.
-if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh' \
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh' \
      "${BIONIC_HOOKS_DIR}/hooks.json"; then
   ok "28: hooks/hooks.json registers the hook, always on"
 else
@@ -629,7 +638,7 @@ expect_reason_names "38: …and the deliberate-stop path is named, not left to b
 # here. A limit accepted against a safety net that does not exist is the thing this pin
 # exists to keep out — asserted as a PAIR, so the absence rests on an extractor proven to
 # find text in this file.
-if grep -q 'never consecutive' "$HOOK"; then
+if grep -q 'never consecutive' "$HOOK_SRC"; then
   ok "39: the header states why the CLI's consecutive-block override cannot engage here"
 else
   no "39: the header does not say why the consecutive-block override cannot engage"

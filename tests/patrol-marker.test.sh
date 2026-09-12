@@ -52,7 +52,7 @@ REPO="${BIONIC_SCRIPTS_DIR}"
 PAYLOAD="${REPO}/payload"
 
 PATROL_LIB="${BIONIC_PATROL_LIB_UNDER_TEST:-${PAYLOAD}/scripts/lib/patrol.sh}"
-GATE_HOOK="${BIONIC_PATROL_GATE_UNDER_TEST:-${PAYLOAD}/hooks/patrol-duties-gate.sh}"
+GATE_HOOK="${BIONIC_PATROL_GATE_UNDER_TEST:-${PAYLOAD}/scripts/lib/stop.sh}"
 # wave-11-lean-spine 1b moved the "Tick the poker" bullet, with the rest of the Patrol
 # text, out of SKILL.md into dispatch.md — this default follows it there.
 SKILL_DOC="${BIONIC_PATROL_SKILL_UNDER_TEST:-${PAYLOAD}/skills/canonical-sdlc/dispatch.md}"

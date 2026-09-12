@@ -95,12 +95,9 @@ farm-out-reminder|open|no
 background-suite-guard|open|no
 dispatch-preflight|open|yes
 canonical-sdlc-governing-skill|open|yes
-landing-gate|open|no
+stop|open|no
 execution-recorder|open|no
 stop-guard|open|no
-context-spend|open|yes
-patrol-duties-gate|open|yes
-patrol-revive|open|yes
 agent-context-guard|open|no
 preflight-probe|open|no
 stop-orders|open|no
@@ -186,7 +183,7 @@ expect_eq "no hook still defines a private resolve_project_root (POKER landed th
 # so the ask is now either call, and a hook that resolves no root at all still fails.
 # ONE LINE, and it has to be: the membership test below is a `case` glob on `" $name "`,
 # and a newline between two names is not the space that pattern needs.
-CTX_CALLERS=" agent-context-guard background-suite-guard canonical-sdlc-evidence-gate canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database protect-main session-start stop-guard "
+CTX_CALLERS=" agent-context-guard background-suite-guard canonical-sdlc-evidence-gate canonical-sdlc-governing-skill dispatch-preflight execution-recorder farm-out-reminder protect-database protect-main session-start stop stop-guard "
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
@@ -223,8 +220,8 @@ section "3 — one session id: every reader asks the library"
 # hook is asked for whichever call is its own, and the roster below is split on that line
 # rather than the list being shortened: a hook that asks for NEITHER still fails.
 SID_VIA_LIB='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
-canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
-farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
+canonical-sdlc-governing-skill dispatch-preflight execution-recorder
+farm-out-reminder protect-database stop
 protect-main session-start stop-guard'
 SID_DIRECT='preflight-probe stop-orders session-sweeper stop-check engage'
 SID_READERS="$SID_VIA_LIB
@@ -442,7 +439,7 @@ seed_hook() {  # <hook> <root>
   mkdir -p "$root/.bionic/tmp" 2>/dev/null || true
   : > "$root/.bionic/tmp/engaged-$SID.state"
   case "$hook" in
-    landing-gate|execution-recorder|stop-guard|agent-context-guard|background-suite-guard)
+    stop|execution-recorder|stop-guard|agent-context-guard|background-suite-guard)
       {
         roster_header
         roster_row_fixture status=intended session="$SID" name=w1-impl agent_id= \
@@ -457,7 +454,7 @@ seed_hook() {  # <hook> <root>
           tool_use_id=toolu_ADOPT1
       } > "$root/.bionic/tmp/roster-$SID.state"
       ;;
-    patrol-revive)
+    stop2)
       # A stale stamp against a one-second interval: staleness is an MTIME, never a sleep.
       printf 'poker-interval: 1s\n' > "$root/.bionic/config.yaml"
       printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID" \
@@ -466,6 +463,17 @@ seed_hook() {  # <hook> <root>
       touch -t "$ts" "$root/.bionic/tmp/patrol-$SID.state"
       ;;
   esac
+  # THE MERGED PROCESS RUNS FOUR VERDICTS (epic-23 wave-11, T12), so its fixture seeds
+  # every precondition the four need rather than one arm's: the roster arm above already
+  # ran for it, and the Patrol stamp is seeded here. A fixture that armed only one arm
+  # would leave three of the four silent for a reason that has nothing to do with scoping.
+  if [ "$hook" = "stop" ]; then
+    printf 'poker-interval: 1s\n' > "$root/.bionic/config.yaml"
+    printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID" \
+      > "$root/.bionic/tmp/patrol-$SID.state"
+    ts="$(date -v-600S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-600 seconds" +%Y%m%d%H%M.%S)"
+    touch -t "$ts" "$root/.bionic/tmp/patrol-$SID.state"
+  fi
 }
 
 # drive <hook> <payload-json> [extra-env...]  -> DRV_ST / DRV_OUT / DRV_ERR
@@ -516,13 +524,7 @@ payload_for() {
                          agentId:"aw1impl-1111111111111111", description:"a dispatch",
                          resolvedModel:"claude-sonnet-5", prompt:"go"},
           tool_use_id:"toolu_ADOPT1", duration_ms:6}' ;;
-    context-spend)
-      jq -n --arg s "$SID" --arg c "$cwd" --arg t "$TICK_TR" '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop"}' ;;
-    patrol-duties-gate)
-      jq -n --arg s "$SID" --arg c "$cwd" --arg t "$TICK_TR" '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop",stop_hook_active:false}' ;;
-    patrol-revive)
-      jq -n --arg s "$SID" --arg c "$cwd" --arg t "$TICK_TR" '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop",stop_hook_active:false}' ;;
-    landing-gate)
+    stop)
       # `background_tasks` is what makes a Stop payload legible to the sweep — it is the
       # list of what is STILL RUNNING, and the gate exits before anything else without it.
       jq -n --arg s "$SID" --arg c "$cwd" --arg t "$TICK_TR" '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}' ;;
@@ -563,7 +565,16 @@ payload_for() {
 # knowing a suite command belongs in a subagent needs no plan, and the sessions most in need
 # of the reminder are the ones in Step 0 through Step 3 that have not written one. The
 # paired arms live in tests/cmd-class.test.sh §R-1.
-RUN_SCOPED='canonical-sdlc-evidence-gate context-spend patrol-revive'
+# THE MERGED TURN-END PROCESS IS NOT A MEMBER, and that is a statement about it rather
+# than an omission (epic-23 wave-11, T12). hooks/stop.sh runs four verdicts and they do
+# not agree on this question: `stop_context_spend` and `stop_patrol_revive` are run-scoped
+# and exit on a closed run, while `stop_landing_gate` and `stop_patrol_duties` act for an
+# ENGAGED session whether or not a plan is on disk — the AC-23 change §5's own header
+# describes, which is why those two left this loop before the merge. A process that
+# carries both cannot be silent on a closed run, so asserting that it is would be asserting
+# a thing the design says is false. Each verdict's own scoping is driven in its own suite,
+# through this process: tests/context-spend.test.sh §12 and tests/patrol-revive.test.sh §11.
+RUN_SCOPED='canonical-sdlc-evidence-gate'
 
 # unrun_mutant <hook> -> a copy of the hook with the run predicate neutralised
 #
@@ -649,7 +660,7 @@ section "5c — THE ENGAGEMENT SWITCH gates every hook, uniformly (task-engaged-
 # The roster is the seven hooks task-engaged-session T2 moved behind the switch.
 # canonical-sdlc-evidence-gate, canonical-sdlc-governing-skill and farm-out-reminder are
 # T3's and join this list with their own guard, in their own commit.
-ENGAGEMENT_SCOPED='dispatch-preflight landing-gate execution-recorder stop-guard patrol-duties-gate patrol-revive context-spend'
+ENGAGEMENT_SCOPED='dispatch-preflight execution-recorder stop-guard stop'
 
 for hook in $ENGAGEMENT_SCOPED; do
   # an OPEN run, every precondition seeded, and the marker deliberately removed
@@ -755,8 +766,8 @@ section "5d — ONE session-id guard: a malformed or empty key silences all fift
 # must be uniform is that no hook ACTS: exit 0, nothing on the user stream, no state written.
 
 GUARD_FIFTEEN='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
-canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
-farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
+canonical-sdlc-governing-skill dispatch-preflight execution-recorder
+farm-out-reminder protect-database stop
 protect-main session-start stop-guard'
 
 # A wall for agent-context-guard to hand its payload to: it takes the wall's path as $1 and
@@ -869,7 +880,7 @@ section "6 — a missing library: refused by cost, never by uniformity"
 BROKEN="$SANDBOX/broken-plugin"
 mkdir -p "$BROKEN/hooks" "$SANDBOX/plugins-empty"
 BROKEN_REAL="$(cd "$BROKEN" && pwd -P)"
-for h in protect-main canonical-sdlc-evidence-gate landing-gate; do
+for h in protect-main canonical-sdlc-evidence-gate stop; do
   cp "$HOOKS/$h.sh" "$BROKEN/hooks/$h.sh"
 done
 
@@ -942,9 +953,9 @@ for h in protect-main canonical-sdlc-evidence-gate; do
 done
 
 # OPEN CLASS: one line on stderr, exit 0, nothing on stdout.
-drive_broken landing-gate "$(jq -n --arg s "$SID" --arg c "$SANDBOX" --arg t "$TICK_TR" \
+drive_broken stop "$(jq -n --arg s "$SID" --arg c "$SANDBOX" --arg t "$TICK_TR" \
   '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')"
-expect_eq "landing-gate with no library steps aside (exit 0)" "0" "$DRV_ST"
+expect_eq "stop with no library steps aside (exit 0)" "0" "$DRV_ST"
 expect_empty "…writing nothing to stdout" "$DRV_OUT"
 expect_eq "…and exactly one line on stderr" "1" "$(printf '%s\n' "$DRV_ERR" | grep -c .)"
 expect_contains "…naming what it could not find" "library" "$DRV_ERR"

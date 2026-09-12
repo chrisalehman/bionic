@@ -32,7 +32,18 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
-HOOK="${BIONIC_PATROL_DUTIES_GATE_UNDER_TEST:-${BIONIC_HOOKS_DIR}/patrol-duties-gate.sh}"
+# THE MERGED ENTRY POINT (epic-23 wave-11, T12). This gate is a FUNCTION now —
+# `stop_patrol_duties` in payload/scripts/lib/stop.sh — and the process that runs it is
+# hooks/stop.sh, registered once on Stop and once on SubagentStop. Every fixture below
+# drives that process, so each assertion is now a claim about the verdict this gate
+# contributes to the composed one rather than about a hook of its own.
+HOOK="${BIONIC_PATROL_DUTIES_GATE_UNDER_TEST:-${BIONIC_HOOKS_DIR}/stop.sh}"
+
+# THE SOURCE THE THREE FILE-READING ARMS BELOW ASK (epic-23 wave-11, T12). This
+# gate's body lives in payload/scripts/lib/stop.sh now; $HOOK is the process that
+# runs it. An arm that reads TEXT reads the library, an arm that DRIVES drives the
+# hook, and the two are named separately so neither can silently read the other.
+HOOK_SRC="${BIONIC_PATROL_DUTIES_GATE_SRC_UNDER_TEST:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
 
 # pass/fail were pure-rename shadows of the framework's ok/no; the suite's own
 # explicit TOTAL=$((TOTAL + 1)) lines (including the two inside expect_allow/
@@ -382,7 +393,7 @@ fi
 # the duty it binds went on existing. Both halves are asserted, because either alone is a
 # wall in the wrong place: a lingering frontmatter entry fires it twice per turn (the CLI
 # does not deduplicate across the two manifests), and a missing manifest entry not at all.
-if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/stop\.sh' \
      "${BIONIC_HOOKS_DIR}/hooks.json"; then
   ok "25: hooks/hooks.json registers the gate on the Stop channel, always on"
 else
@@ -404,7 +415,7 @@ fi
 # S10 (critic C-2); this is the same correction on the other hook that makes it,
 # pinned the same way — as a PAIR, so the absence rests on an extractor proven to
 # find text in this very file.
-if grep -q 'never consecutive' "$HOOK"; then
+if grep -q 'never consecutive' "$HOOK_SRC"; then
   ok "26: the header states why the CLI's consecutive-block override cannot engage here"
 else
   no "26: the header does not say why the consecutive-block override cannot engage"
@@ -764,7 +775,7 @@ fire "$d"; expect_allow "61: a marker beyond the window reads as no marker — t
 # 62: THE BOUND IS NAMED AND IS A CONSTANT. A window that regresses to an unbounded read
 # is invisible in every behavioural test above — 60 and 61 both still pass without a
 # `tail` if the whole file is small. This is the assertion that the bound exists at all.
-if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK" && grep -q 'tail -n "\$SCAN_WINDOW_LINES"' "$HOOK"; then
+if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK_SRC" && grep -q 'tail -n "\$SCAN_WINDOW_LINES"' "$HOOK_SRC"; then
   ok "62: the transcript scan is bounded by a named SCAN_WINDOW_LINES constant"
 else
   no "62: the transcript scan has no named line bound — it reads from byte zero"

@@ -631,7 +631,9 @@ section "SECTION 4 — the Patrol tick literal, one string in two files (step-6 
 # Assertion 25 additionally pins the extracted value, so an extractor that returned empty
 # on both sides could not agree its way to green.
 
-TICK_GATE="${REPO}/hooks/patrol-duties-gate.sh"
+# The gate is `stop_patrol_duties` in the library now (epic-23 wave-11, T12); the
+# prefix it rebuilds moved with its body, unchanged.
+TICK_GATE="${REPO}/payload/scripts/lib/stop.sh"
 
 # tick_literal_doc <SKILL.md> -> the prefix as documented, placeholder stripped.
 # Fails LOUD rather than empty: an unmatched sed leaves the whole line, which no
@@ -642,10 +644,16 @@ tick_literal_doc() {
     | sed 's/<session-id\[0:8\]>$//'
 }
 # tick_literal_code <patrol-duties-gate.sh> -> the prefix the hook builds.
+# THE VARIABLE NAME IS DERIVED, NOT SPELLED (epic-23 wave-11, T12). This stripped a
+# literal `${SID:0:8}"`, and T10 renamed that variable to `BIONIC_SID` when the context
+# preamble became one library call — after which the sed matched nothing, the extractor
+# returned the whole right-hand side, and §26 was RED at 852ebd6 before this task touched
+# anything. What the pin owns is the PREFIX the two files must agree on, so the suffix is
+# matched by its shape and a future rename cannot break it the same way twice.
 tick_literal_code() {
   /usr/bin/grep -m1 '^TICK_MARK=' "$1" 2>/dev/null \
     | sed 's/^TICK_MARK="//' \
-    | sed 's/\${SID:0:8}"$//'
+    | sed 's/\${[A-Za-z_][A-Za-z0-9_]*:0:8}"$//'
 }
 
 TICK_DOC=$(tick_literal_doc "$DISPATCH_MD")
