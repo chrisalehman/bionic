@@ -177,12 +177,28 @@ STRAGGLERS=$(grep -ln '^resolve_project_root()' "$HOOKS"/*.sh 2>/dev/null | xarg
 expect_eq "no hook still defines a private resolve_project_root (POKER landed the poker on the spine)" \
   "" "$STRAGGLERS"
 
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). This row was written against a tree
+# where every hook resolved its own root, and it asked each one for a `project_root` call.
+# Fifteen hooks ask `bionic_context` now and never name the resolver; the drift it was
+# written for — a hook restating the walk — is caught by the straggler row above and by
+# tests/cross-gate-agreement.test.sh §CTX, which requires the inline sequence in ZERO hook
+# bodies. What this row still owns is that each hook gets its root from SOMEWHERE shared,
+# so the ask is now either call, and a hook that resolves no root at all still fails.
+# ONE LINE, and it has to be: the membership test below is a `case` glob on `" $name "`,
+# and a newline between two names is not the space that pattern needs.
+CTX_CALLERS=" agent-context-guard background-suite-guard canonical-sdlc-evidence-gate canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database protect-main session-start stop-guard "
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || continue
-  case "$name" in
-    protect-main|background-suite-guard) continue ;;  # neither reads a root
+  case "$CTX_CALLERS" in
+    *" $name "*)
+      if grep -q '^bionic_context' "$f"; then
+        ok "$name resolves its root through the library (bionic_context)"
+      else
+        no "$name resolves its root through the library (bionic_context)" "no bionic_context call in $f"
+      fi
+      continue ;;
   esac
   if grep -qE '=\$\(project_root |=\$\(project_root$|project_root "' "$f"; then
     ok "$name resolves its root through the library"
@@ -200,9 +216,29 @@ section "3 — one session id: every reader asks the library"
 # over the record, which is the divergence R-1 measured. So: every hook that
 # derives a session id calls `session_id`, and the payload read that remains is
 # the ARGUMENT to that call, never the answer.
-SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start engage patrol-duties-gate stop-guard
-canonical-sdlc-evidence-gate canonical-sdlc-governing-skill protect-main protect-database background-suite-guard'
-for name in $SID_READERS; do
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f/REQ-1h). The property is unchanged — a
+# hook must not read `.session_id` straight out of its payload and call that the record —
+# but the fifteen preamble hooks reach `session_id` THROUGH `bionic_context` now, which
+# also applies the one shape guard they used to carry six copies of between them. So each
+# hook is asked for whichever call is its own, and the roster below is split on that line
+# rather than the list being shortened: a hook that asks for NEITHER still fails.
+SID_VIA_LIB='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
+canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
+farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
+protect-main session-start stop-guard'
+SID_DIRECT='preflight-probe stop-orders session-sweeper stop-check engage'
+SID_READERS="$SID_VIA_LIB
+$SID_DIRECT"
+for name in $SID_VIA_LIB; do
+  f="$HOOKS/$name.sh"
+  [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
+  if grep -q '^bionic_context' "$f"; then
+    ok "$name takes its session id from the library, through bionic_context"
+  else
+    no "$name takes its session id from the library, through bionic_context" "no bionic_context call in $f"
+  fi
+done
+for name in $SID_DIRECT; do
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
   if grep -q 'session_id "' "$f"; then
@@ -218,11 +254,19 @@ done
 # unpinned by this list until the line above — so the roster is now also DERIVED from the
 # tree and compared to the hand-written one, byte for byte, the same technique used above
 # for the private-resolver family (`ADOPTED`/no-stragglers, §1).
+# DERIVED ON BOTH SIDES OF THE SPLIT, so neither half can quietly gain a member. The
+# direct-caller set is the one that shrank when the preamble moved into the library, and
+# it is the one a new hand-rolled reading would land in.
 SID_ACTUAL=$(grep -l 'session_id "' "$HOOKS"/*.sh 2>/dev/null \
   | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
-SID_EXPECTED=$(printf '%s\n' $SID_READERS | sort | tr '\n' ' ' | sed 's/ $//')
-expect_eq "the session-id reader roster names every hook that calls session_id, and no other" \
-  "$SID_EXPECTED" "$SID_ACTUAL"
+SID_DIRECT_EXPECTED=$(printf '%s\n' $SID_DIRECT | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the direct session-id reader roster names every hook that calls session_id, and no other" \
+  "$SID_DIRECT_EXPECTED" "$SID_ACTUAL"
+SID_CTX_ACTUAL=$(grep -l '^bionic_context' "$HOOKS"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+SID_CTX_EXPECTED=$(printf '%s\n' $SID_VIA_LIB | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "…and the via-the-library roster names every hook that calls bionic_context, and no other" \
+  "$SID_CTX_EXPECTED" "$SID_CTX_ACTUAL"
 
 section "4 — one run predicate: no hook restates it, the run-scoped ones call it"
 #
@@ -269,10 +313,16 @@ while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || continue
-  if grep -q 'session_run "' "$f"; then found=yes; else found=no; fi
-  if grep -qE 'active_run "|session_run "' "$f"; then found_any=yes; else found_any=no; fi
+  # RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). The verdict is still `session_run`'s
+  # and still per-session; what moved is WHERE it is asked. A preamble hook takes it from
+  # `bionic_context`, which calls `session_run "$BIONIC_ROOT" "$BIONIC_SID"` once and hands
+  # back the word and the path — so the proxy for "run-scoped" is a read of BIONIC_RUN_WORD
+  # or BIONIC_RUN_PLAN, and for a hook outside the preamble it is still the call itself.
+  # A hook that reverted to the PROJECT-keyed `active_run` fails either way.
+  if grep -qE 'session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN' "$f"; then found=yes; else found=no; fi
+  if grep -qE 'active_run "|session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN' "$f"; then found_any=yes; else found_any=no; fi
   case "$scoped" in
-    yes) expect_eq "$name gates on session_run, the session-keyed predicate" "yes" "$found" ;;
+    yes) expect_eq "$name gates on the session-keyed run verdict" "yes" "$found" ;;
     no)  expect_eq "$name is NOT run-scoped and reads neither run predicate" "no" "$found_any" ;;
   esac
 done <<EOF

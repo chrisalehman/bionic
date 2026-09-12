@@ -321,20 +321,25 @@ run_rec "$(mk_bash_post "$SID_A" "$W1_TR" "$W1_REPO" "ls -la && git status" "REA
 # pressure sample, the state-path resolution, the symlink guards and the roster
 # read — so those are what the order pin names.
 _rel_line=$(grep -n 'MLINES=' "$REC" | head -1 | cut -d: -f1)
-_root_line=$(grep -n 'REPO=$(project_root' "$REC" | head -1 | cut -d: -f1)
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f): the git resolution is `bionic_context`'s
+# now, and the literal this line greps for is the call rather than the assignment it
+# replaced. The `expect_nonempty` below is what stops the same silent-empty failure this
+# section's own comment records — it is the reason the grep literal is re-pointed rather
+# than deleted.
+_root_line=$(grep -n '^bionic_context' "$REC" | head -1 | cut -d: -f1)
 # THE CODE, NOT ITS BANNER (S11). This first read the `THE EARLY EXIT, RESTORED`
 # comment, and a planted regression that MOVED the exit block below the state
 # paths left the banner where it was and the pin stayed green. A source-order pin
 # has to grep the line that runs.
 _exit_line=$(grep -nF 'if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ] && [ -z "$MLINES" ]; then' "$REC" | head -1 | cut -d: -f1)
-_state_line=$(grep -n 'STATE_DIR="$REPO/.bionic/tmp"' "$REC" | head -1 | cut -d: -f1)
+_state_line=$(grep -n 'STATE_DIR="$BIONIC_ROOT/.bionic/tmp"' "$REC" | head -1 | cut -d: -f1)
 
 # Every line number is asserted non-empty BEFORE it is compared: a grep that
 # finds nothing yields the empty string, and `test "" -lt ""` is an error rather
 # than a comparison — an order pin over two empty values pins nothing, which is
 # exactly what this section had.
 expect_nonempty "the cheap relevance test is findable in the recorder's source (MLINES=)" "$_rel_line"
-expect_nonempty "the git resolution is findable in the recorder's source (project_root)" "$_root_line"
+expect_nonempty "the git resolution is findable in the recorder's source (bionic_context)" "$_root_line"
 expect_nonempty "the restored early exit is findable in the recorder's source" "$_exit_line"
 expect_nonempty "the state-path resolution is findable in the recorder's source" "$_state_line"
 expect_true "the relevance test PRECEDES the git resolution, not merely in effect" \
