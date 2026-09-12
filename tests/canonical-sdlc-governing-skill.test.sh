@@ -2587,4 +2587,84 @@ assert_eq "E1.5 …with the one line still first" \
   "bionic: write refused — this artifact declares an unsupported version (set the supported version)" \
   "$(printf '%s\n' "$HOOK_VSTDERR" | /usr/bin/grep -m1 '^bionic: ')"
 
+# ============================================================
+section "REQ-1e AC-1e.5: the Step-3 wall on the '## Tasks' table"
+# ============================================================
+#
+# fails-when: a plan whose Tasks table has an unknown status, a dangling dep, or a
+# missing column is written at sdlc-step >= 3.
+#
+# THE WALL IS THE PLAN SIDE OF WHAT units.sh OWNS. The evidence gate catches a broken
+# table at COMMIT time, which is one round trip and a refused commit too late: the
+# orchestrator has already briefed writers off it. This arm runs `units_validate` on the
+# content being written, at the same step boundary and the same scale carve-out as the
+# Verification Matrix arm above — the table is a Step-3 artifact, and a task-scale plan
+# carries the five-column registration ledger instead, which this schema does not widen.
+#
+# AN ABSENT TABLE IS NOT A VIOLATION HERE. A plan mid-authoring may not have written its
+# table yet, and the D7 PRESENCE rule already lives in the evidence gate at commit time
+# (validate_dispatch_ledger). This arm judges a table that is there.
+
+gs_1e_project=$(make_project)
+gs_1e_plan="$gs_1e_project/.bionic/docs/plans/epic-01-demo/tasks.plan.md"
+
+# A valid ten-column table, and the three fixtures AC-1e.5 names, each one cell away
+# from it. Appended to build_plan's body, which already satisfies every other arm.
+gs_tasks_good='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 5 | verify | the verify | auditor | T1 | 30m | REQ-x | b.sh | pending |
+'
+gs_tasks_bad_status="${gs_tasks_good/| b.sh | pending |/| b.sh | doing |}"
+gs_tasks_dangling="${gs_tasks_good/| auditor | T1 |/| auditor | T99 |}"
+gs_tasks_missing_col='
+## Tasks
+
+| id | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|
+| T1 | build | the build | implementor | — | 30m | REQ-x | a.sh | landed |
+'
+
+echo "1e.5a: a valid Tasks table at sdlc-step 3 → allow"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_good"
+assert_eq "1e.5a exit 0" 0 "$HOOK_EXIT"
+assert_eq "1e.5a silent" "" "$HOOK_STDERR"
+
+echo "1e.5b: a status nobody defines → refused, naming the id and the rule"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_bad_status"
+assert_eq "1e.5b exit 2" 2 "$HOOK_EXIT"
+assert_contains "1e.5b the detail names the offending id" "T2" "$HOOK_VSTDERR"
+assert_contains "1e.5b …and the rule it broke" "status doing is not one of" "$HOOK_VSTDERR"
+
+echo "1e.5c: a dep naming no row → refused, naming the dep"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_dangling"
+assert_eq "1e.5c exit 2" 2 "$HOOK_EXIT"
+assert_contains "1e.5c the detail names the dangling dep" "T99" "$HOOK_VSTDERR"
+
+echo "1e.5d: a header short of the ten columns → refused, naming the column"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_missing_col"
+assert_eq "1e.5d exit 2" 2 "$HOOK_EXIT"
+assert_contains "1e.5d the detail names the absent column" "missing column step" "$HOOK_VSTDERR"
+
+echo "1e.5e: the same broken table at sdlc-step 2 → allow (the wall opens at 3)"
+run_write "$gs_1e_plan" "$(build_plan step=2 matrix=no)$gs_tasks_bad_status"
+assert_eq "1e.5e exit 0" 0 "$HOOK_EXIT"
+
+echo "1e.5f: a task-scale plan is out of scope (its ledger is the five-column one)"
+run_write "$gs_1e_plan" "$(build_plan scale=task matrix=no)$gs_tasks_bad_status"
+assert_eq "1e.5f exit 0" 0 "$HOOK_EXIT"
+
+echo "1e.5g: a plan with no Tasks table at all → allow (presence is the gate's rule)"
+run_write "$gs_1e_plan" "$(build_plan)"
+assert_eq "1e.5g exit 0" 0 "$HOOK_EXIT"
+assert_eq "1e.5g silent" "" "$HOOK_STDERR"
+
+# The live wave plan's own table is pinned hermetically by fixture 22e1 in
+# tests/canonical-sdlc-evidence-gate.test.sh, not read off disk here: `.bionic/` is
+# machine-local and absent from a fresh clone, so a fixture reading it would degrade to a
+# vacuous pass on exactly the machines this arm protects (Section 38f's rule).
+
 finish
