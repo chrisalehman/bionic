@@ -2357,4 +2357,32 @@ AC1A_KEYS_TABLE="$(awk '/Per-tier required keys/{f=1} f{print} f&&/^\|.*T4/{exit
 expect_contains "121: AC-1a.3 — the Step-5 per-tier required-keys table names 'evidence'" \
   '`evidence`' "$AC1A_KEYS_TABLE"
 
+section "Section 20: REQ-1a — assumptions and narratives are cited from record/, never appended to the plan (AC-1a.4)"
+#
+# WHAT THIS SECTION OWNS. Row 1a moved assumption bullets and landing narratives out of the
+# plan into record/<wave>/ files cited by path — the plan's `## Assumptions` is now a one-line
+# pointer to `record/<wave>/assumptions.md`, never a place a writer appends a bullet to
+# directly. Three prose surfaces used to say otherwise (the critic block, the
+# senior-implementor role description and body, and the skill's Step-0/3 text); this section
+# pins that none of them still does.
+#
+# THE OLD PHRASES, verbatim, are the regression pin: each is the exact instruction this wave
+# retired (measured at step1-measure-1a-1e.md §2), so a grep for any of them returning a hit
+# is the failure mode this section exists to catch — a reverted edit, or a fresh writer copying
+# the old shape into a new surface. HERMETIC: reads the committed rendered finals by path.
+
+AC1A_SCAN_DIRS="${REPO}/skills/canonical-sdlc ${REPO}/agents"
+AC1A_OLD_PHRASES='append one line to the plan|logged to the plan.s Assumptions|logged in the `## Assumptions` section|record in `## Assumptions`|go to `## Assumptions` as W\+1'
+
+AC1A_HITS="$(grep -rnE "$AC1A_OLD_PHRASES" $AC1A_SCAN_DIRS 2>/dev/null || true)"
+expect_eq "122: AC-1a.4 — no rendered file under skills/canonical-sdlc/ or agents/ still tells a writer to append assumption lines to the plan" \
+  "" "$AC1A_HITS"
+
+# Anti-vacuity: the pattern must actually fire on the shape it is supposed to catch, proven
+# against a doctored copy carrying one of the retired sentences verbatim.
+AC1A_MUT="$TMP/ac1a-old-phrase.md"
+printf 'silent wrong assumptions not logged in the `## Assumptions` section\n' > "$AC1A_MUT"
+expect_true "123: the retired-phrase grep fires on the shape it targets (the pattern discriminates)" \
+  grep -qE "$AC1A_OLD_PHRASES" "$AC1A_MUT"
+
 finish
