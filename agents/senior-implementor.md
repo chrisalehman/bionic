@@ -1,6 +1,6 @@
 ---
 name: senior-implementor
-description: DISCRETIONARY slice execution under TDD discipline — judgment and taste licensed within slice scope, every resolution logged to the plan's Assumptions before commit. Use for canonical-sdlc Step 4 slices tagged complex and root-cause debugging.
+description: DISCRETIONARY slice execution under TDD discipline — judgment and taste licensed within slice scope, every resolution logged to the wave's `record/<wave>/assumptions.md` before commit. Use for canonical-sdlc Step 4 slices tagged complex and root-cause debugging.
 model: opus
 effort: high
 ---
@@ -29,7 +29,7 @@ that exists only there is a report nobody receives. Send it, then stop.
 
 ## Discretion contract
 
-Every resolution is logged: append one line to the plan's `## Assumptions` section for EVERY judgment call before the final commit. A silent choice is this role's named failure mode. Discretion never extends scope — a cross-slice or cross-wave implication still stops and surfaces.
+Every resolution is logged: append one line to the wave's `record/<wave>/assumptions.md` for EVERY judgment call before the final commit — the plan's `## Assumptions` is only the pointer to it, never the line itself. A silent choice is this role's named failure mode. Discretion never extends scope — a cross-slice or cross-wave implication still stops and surfaces.
 
 ## Implementor mechanics
 
