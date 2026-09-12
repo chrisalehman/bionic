@@ -589,4 +589,49 @@ expect_eq "11i: …and still removes the directory it made" "yes" \
 expect_eq "11j: …leaving nothing behind under its own TMPDIR" "0" \
   "$(ls "$TD_TMPDIR" 2>/dev/null | grep -c 'bionic-gate' || true)"
 
+# ---------------------------------------------------------------------------
+section "12 — the two-repos day: a CLAUDE_PROJECT_DIR that is no project may not disarm the walls (critic Issue 2, A-85)"
+#
+# THE CONDITION IS ORDINARY. A session launched outside a bionic project and then worked
+# inside one keeps CLAUDE_PROJECT_DIR at the LAUNCH directory while every payload carries
+# the project as its `.cwd`. Before A-85 the ladder took the launch directory on `-d`
+# alone, resolved a root that held no engagement marker, and every wall in this process
+# went silent: the critic measured `push refused, rc 2` becoming rc 0 and an empty stream.
+# Nine of the fifteen pre-fold hooks recovered through `.cwd` and stayed armed, so this
+# suite is asserting base-faithful reach, not a new one.
+#
+# TWO WALLS, DELIBERATELY. protect-main refuses whether or not the session is engaged, so
+# it proves the ROOT was found; the evidence gate refuses only an ENGAGED session under a
+# blocking plan, so it proves the engagement marker was found under that root too. A fix
+# that resolved the root and lost the marker would pass the first row and fail the second.
+
+R_NOPROJ="$SANDBOX/launched-elsewhere"
+mkdir -p "$R_NOPROJ"
+git -C "$R_NOPROJ" init -q 2>/dev/null
+expect_eq "12a: the launch directory is a git repo and NOT a bionic project" "yes" \
+  "$([ -d "$R_NOPROJ/.git" ] && [ ! -e "$R_NOPROJ/.bionic" ] && echo yes || echo no)"
+
+run_hook "$(mk_payload "$R_PUSH" 'git push origin main')" CLAUDE_PROJECT_DIR="$R_NOPROJ"
+expect_status "12b: a push to main is still refused, rc 2" 2 "$ST"
+expect_contains "12c: …in protect-main's own words" \
+  "main is a protected branch here" "$ERR"
+
+run_hook "$(mk_payload "$R_COMMIT" 'git commit -m wip')" CLAUDE_PROJECT_DIR="$R_NOPROJ"
+expect_status "12d: the evidence gate still refuses a commit under a blocking plan" 2 "$ST"
+
+# THE CONTROLS. The same two payloads with CLAUDE_PROJECT_DIR pointing at the project
+# itself — the rung is still taken when it names one — and with it empty, which is how
+# every other row in this file drives the hook.
+run_hook "$(mk_payload "$R_PUSH" 'git push origin main')" CLAUDE_PROJECT_DIR="$R_PUSH"
+expect_status "12e: control — the env naming the project itself refuses too" 2 "$ST"
+run_hook "$(mk_payload "$R_PUSH" 'git push origin main')"
+expect_status "12f: control — the env empty refuses too" 2 "$ST"
+
+# AND THE BYSTANDER IS STILL A BYSTANDER: falling through to `.cwd` may not arm a session
+# that never engaged. The evidence gate is the arm to ask, since protect-main refuses
+# unconditionally by design (§7).
+run_hook "$(mk_payload "$R_PLAIN" 'bash tests/run.sh')" CLAUDE_PROJECT_DIR="$R_NOPROJ"
+expect_status "12g: an unengaged session is still silent through the fall-through" 0 "$ST"
+expect_empty "12h: …on both streams" "$OUT$ERR"
+
 finish
