@@ -669,13 +669,32 @@ section "C6 — every source in payload/hooks/*.sh resolves inside payload/"
 # library any more. They are collected here explicitly, from the block itself, so this
 # section still covers the reference that matters most — and covers BOTH spellings,
 # which the old extractor never did (it only ever saw whichever one a hook wrote first).
+#
+# AND A HOOK'S `BIONIC_LIB_WANT` IS NO LONGER THE WHOLE SET (T23, A-56.1/A-57). The five
+# PreToolUse|Bash walls share one process, and hooks/bash-walls.sh asks the loader only
+# for what the two FAIL-CLOSED walls need — otherwise a file that merely makes an
+# advisory wall step aside would refuse every Bash command on the machine. A library only
+# an advisory wall reads is declared per wall in payload/scripts/lib/walls.sh's table and
+# sourced there, by `wall_libs`, out of the same `$BIONIC_LIB` the loader resolved. So
+# that table is the second place a class-(1) reference is declared, and this extractor
+# reads it for the same reason it reads the WANT lines: the reference is real, it has to
+# resolve inside the checkout, and nothing here may name a basename by hand.
+#
+# Both sweeps are DERIVED. Empty either declaration and the anti-vacuity rows at the end
+# of this section go red rather than the sweep quietly covering less.
+WALLS_LIB="$(dirname "$LIB")/walls.sh"
 SRC_LITERALS=$( { /usr/bin/grep -hoE '\$\(dirname "\$0"\)/[^"]*\.sh' "$PAYLOAD_HOOKS"/*.sh \
                     | sed 's|^\$(dirname "\$0")||'
                   /usr/bin/grep -hoE '&& pwd\)/[^"]*\.sh' "$PAYLOAD_HOOKS"/*.sh \
                     | sed 's|^&& pwd)||'
-                  # the loader's own class-(1) directories, one per wanted basename
-                  for _c6_want in $(/usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/*.sh \
-                                      | sed -E 's/^BIONIC_LIB_WANT="//; s/"$//' | tr ' ' '\n' | sort -u); do
+                  # the loader's own class-(1) directories, one per wanted basename —
+                  # from the hooks' WANT lines and from the per-wall table together,
+                  # because both declare files sourced out of $BIONIC_LIB.
+                  for _c6_want in $( { /usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/*.sh \
+                                         | sed -E 's/^BIONIC_LIB_WANT="//; s/"$//'
+                                       /usr/bin/grep -hoE '^BIONIC_WALL_LIBS_[A-Za-z0-9_]*="[^"]*"' "$WALLS_LIB" \
+                                         | sed -E 's/^BIONIC_WALL_LIBS_[A-Za-z0-9_]*="//; s/"$//'
+                                     } 2>/dev/null | tr ' ' '\n' | sort -u); do
                     printf '/../scripts/lib/%s\n/../payload/scripts/lib/%s\n' "$_c6_want" "$_c6_want"
                   done
                 } 2>/dev/null | sort -u)
@@ -732,9 +751,17 @@ expect_eq "every relative sibling reference resolves, and never outside the chec
 expect_eq "the installed-plugin reading of the cmd-class source lands on the shipped library" \
   "$REPO_ROOT/payload/scripts/lib/cmd-class.sh" \
   "$(lexnorm "$PAYLOAD_HOOKS/../scripts/lib/cmd-class.sh")"
-# ANTI-VACUITY: the extractor must actually see both shapes it claims to cover.
+# ANTI-VACUITY: the extractor must actually see every shape it claims to cover.
 expect_contains "…and the extractor sees the cmd-class library (shape A)" "cmd-class.sh" "$SRC_LITERALS"
 expect_contains "…and the sweeper handoff (shape B)" "session-sweeper.sh" "$SRC_LITERALS"
+# WHERE SHAPE A FINDS THE CLASSIFIER NOW, stated so the row above cannot pass on the
+# wrong declaration: no hook's WANT line names cmd-class.sh any more, and the per-wall
+# table does. If the sweep of that table were dropped, the row above would go red — which
+# is what it did when the fold moved the source site and this sweep had not followed.
+expect_absent "…and no hook's own WANT line names it, which is why the table is swept" \
+  "cmd-class.sh" "$(/usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/*.sh)"
+expect_contains "…while the per-wall table declares it, for the two walls that read it" \
+  "cmd-class.sh" "$(/usr/bin/grep -hoE '^BIONIC_WALL_LIBS_[A-Za-z0-9_]*="[^"]*"' "$WALLS_LIB")"
 
 section "C6 — the session never invoked the skill: neither hook is there (AC-6, AC-20)"
 #
