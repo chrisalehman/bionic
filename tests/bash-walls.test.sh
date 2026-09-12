@@ -115,15 +115,21 @@ Step 5: TODO" > "$1/.bionic/docs/plans/active.md"
 # for the backgrounded-suite arm, which is the arm this suite drives.
 arm_roster() { : > "$1/.bionic/tmp/roster-$SID.state"; }
 
-# mk_payload <cwd> <command> [agent_id] [run_in_background] [tool_name]
+# mk_payload <cwd> <command> [agent_id] [run_in_background] [tool_name] [agent_type]
+#
+# `agent_type` IS A SEPARATE FIELD FROM `agent_id` and the two walls read different ones:
+# hooks/farm-out-reminder.sh leaves on a non-empty `agent_type` (it moves work OFF the
+# orchestrator thread, so the thread it moved work TO must not be nudged), while the
+# agent-context predicate is `agent_id`. A row that wants ONE wall to answer sets both.
 mk_payload() {
   jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" --arg a "${3:-}" \
-        --arg bg "${4:-omit}" --arg t "${5:-Bash}" \
+        --arg bg "${4:-omit}" --arg t "${5:-Bash}" --arg at "${6:-}" \
     '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:$t,
       tool_input:({command:$cmd}
                   + (if $bg == "omit" then {} else {run_in_background: ($bg == "true")} end)),
       tool_use_id:"toolu_01t23walls"}
-     + (if $a == "" then {} else {agent_id:$a} end)'
+     + (if $a == "" then {} else {agent_id:$a} end)
+     + (if $at == "" then {} else {agent_type:$at} end)'
 }
 
 OUT=""; ERR=""; ST=0
@@ -203,8 +209,11 @@ expect_eq "2h: …on the deny wire" "deny" \
   "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecision // ""' 2>/dev/null)"
 expect_contains "2i: …naming the role it redirects to" "subagent_type: test-runner" "$(deny_reason)"
 
+# `agent_type` SILENCES farm-out-reminder so this row reads ONE wall. Without it the
+# same payload is a main-thread suite command by farm-out's own rule and BOTH walls
+# block — which is faithful, and section 6's business rather than this one's.
 arm_roster "$R_BG"
-run_hook "$(mk_payload "$R_BG" 'bash tests/run.sh' "$ACTOR" true)"
+run_hook "$(mk_payload "$R_BG" 'bash tests/run.sh' "$ACTOR" true Bash test-runner)"
 expect_status "2j: background-suite-guard still refuses a backgrounded suite" 2 "$ST"
 expect_contains "2k: …in its own words" "a backgrounded suite's result is never read" "$ERR"
 
@@ -216,16 +225,30 @@ section "3 — two walls, one payload: both reasons print, in manifest order"
 # were two processes with two unreconciled verdicts and no rule; after it, one composed
 # refusal carrying both reasons in the order the manifest listed the walls.
 
-run_hook "$(mk_payload "$R_TWO" 'git push origin main && psql -c "DROP TABLE users"' )"
+# THE DESTRUCTIVE LITERAL IS ASSEMBLED AT RUN TIME, never spelled in this file. Every
+# command a run of this suite issues passes through the machine's own installed walls,
+# and a fixture that spells the statement in a tool call is refused by the very wall it
+# is here to drive.
+DROPSQL="$(printf 'D%sP T%sLE users' 'RO' 'AB')"
+run_hook "$(mk_payload "$R_TWO" "git push origin main && psql -c \"$DROPSQL\"")"
 expect_status "3a: two blockers still block" 2 "$ST"
-expect_contains "3b: the FIRST wall's reason is in the composed verdict" \
-  "The destination this segment resolved to" "$ERR$OUT"
-expect_contains "3c: the SECOND wall's reason is too — not just the first" \
-  "A migration run from your own terminal is the route" "$ERR$OUT"
-expect_contains "3d: the one user line is the first blocker's, by manifest order" \
-  "bionic: push refused — main is a protected branch here" "$ERR"
-expect_eq "3e: …exactly one user line, however many walls blocked" "1" \
+expect_contains "3b: the FIRST wall's sentence is on the user stream" \
+  "bionic: push refused — main is a protected branch here (push from your own terminal)" "$ERR"
+expect_contains "3c: the SECOND wall's sentence is too — not just the first" \
+  "bionic: sql refused — this command DROPs a database object (run the migration yourself)" "$ERR"
+expect_true "3d: …in manifest order, by line" \
+  test "$(line_of 'push refused')" -lt "$(line_of 'sql refused')"
+# ONE LINE PER BLOCKER, NOT ONE PER FOLD. `refuse`'s "the user sees exactly one line" is
+# the rule for ONE refusal; two walls refusing one command are two refusals, and two
+# lines is exactly what the two processes this replaced put on that stream. Measured
+# against the originals at the base SHA — T23 report section 7.
+expect_eq "3e: exactly one user line per blocker — no more, no fewer" "2" \
   "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
+# …AND STILL NO `detail` ON THE exit2 WIRE. Ruling D-1 spends that channel's one stream
+# on the sentence alone; a fold composing two reasons must not start leaking the
+# paragraphs behind them onto a stream that never carried one.
+expect_absent "3f: the exit2 channel still carries no detail" \
+  "The destination this segment resolved to" "$ERR$OUT"
 
 # ---------------------------------------------------------------------------
 section "4 — a block and a model-facing nudge on one payload (R7)"
@@ -269,7 +292,15 @@ expect_contains "6b: the push refusal's reason survives the cross-channel fold" 
   "main is a protected branch here" "$(deny_reason)$ERR"
 expect_contains "6c: …and so does the farm-out redirect" "belongs in a subagent" \
   "$(deny_reason)$ERR"
-expect_eq "6d: …exactly one user line" "1" "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
+# ONE USER LINE HERE, AND THAT IS THE RULING RATHER THAN A LOSS. `deny` carries the
+# composed detail to the MODEL in full, so the second wall's own sentence is inside the
+# reason above; refuse.sh's D-1 spends the user's stream on one line whenever the model
+# has the rest, and T12 pinned that shape. Section 3's exit2-only fold is the case with
+# nowhere else to put a second sentence, and it prints two.
+expect_eq "6d: the user stream keeps one line when the model got the rest" "1" \
+  "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
+expect_contains "6e: …and the other wall's sentence is on the model's wire" \
+  "bionic: run refused — this command belongs in a subagent" "$(deny_reason)"
 
 # ---------------------------------------------------------------------------
 section "7 — the partition that used to be a wrapper (R2)"
@@ -280,13 +311,13 @@ section "7 — the partition that used to be a wrapper (R2)"
 # guard cannot wrap the compound — it would silence the other four walls in every
 # main-thread session — so its predicate is a gate on that ONE function now.
 
-run_hook "$(mk_payload "$R_BG" 'bash tests/run.sh' '' true)"
+run_hook "$(mk_payload "$R_BG" 'bash tests/run.sh' '' true Bash test-runner)"
 expect_status "7a: a MAIN-THREAD backgrounded suite is not this wall's business" 0 "$ST"
 expect_absent "7b: …the backgrounded-suite refusal does not fire there" \
   "a backgrounded suite's result is never read" "$ERR"
 
 R_UNARMED="$(mk_repo unarmed)"
-run_hook "$(mk_payload "$R_UNARMED" 'bash tests/run.sh' "$ACTOR" true)"
+run_hook "$(mk_payload "$R_UNARMED" 'bash tests/run.sh' "$ACTOR" true Bash test-runner)"
 expect_status "7c: an agent context with NO roster is not armed" 0 "$ST"
 expect_absent "7d: …and the wall stays silent" "a backgrounded suite's result" "$ERR"
 
@@ -304,7 +335,7 @@ section "8 — blocks before advisories, by offset"
 # while it runs, which is before the fold renders anything, and the refusal still leads the
 # user's stream.
 
-run_hook "$(mk_payload "$R_TWO" 'git push origin main && psql -c "DROP TABLE x"')"
+run_hook "$(mk_payload "$R_TWO" "git push origin main && psql -c \"$DROPSQL\"")"
 expect_nonempty "8a: the composed refusal reached the user stream" "$(line_of '^bionic: ')"
 expect_eq "8b: …as the FIRST bionic line on it" "1" \
   "$(printf '%s\n' "$ERR" | /usr/bin/grep -n '^bionic: ' | head -1 | cut -d: -f1)"

@@ -46,8 +46,12 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
 PLAIN_HOOKS="${BIONIC_HOOKS_DIR}"
 LIB="$REPO_ROOT/payload/scripts/lib/cmd-class.sh"
-FARM_OUT="$PAYLOAD_HOOKS/farm-out-reminder.sh"
-BG_GUARD="$PAYLOAD_HOOKS/background-suite-guard.sh"
+# BOTH WALLS ARE ONE PROCESS (T23). `wall_farm_out_reminder` and
+# `wall_background_suite_guard` are functions of payload/scripts/lib/walls.sh behind
+# hooks/bash-walls.sh, so the two names below name the same hook; the classifier each of
+# them consumes is unchanged, which is what this suite is about.
+FARM_OUT="$PAYLOAD_HOOKS/bash-walls.sh"
+BG_GUARD="$PAYLOAD_HOOKS/bash-walls.sh"
 CTX_GUARD="$PAYLOAD_HOOKS/agent-context-guard.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/cmd-class-test.XXXXXX")" && pwd -P)"
@@ -565,11 +569,10 @@ for _c5_lib in "$(dirname "$LIB")"/*.sh; do
   case "$(basename "$_c5_lib")" in cmd-class.sh) continue ;; esac
   cp "$_c5_lib" "$C5_TREE/scripts/lib/"
 done
-cp "$FARM_OUT" "$C5_TREE/hooks/farm-out-reminder.sh"
-cp "$BG_GUARD" "$C5_TREE/hooks/background-suite-guard.sh"
+cp "$FARM_OUT" "$C5_TREE/hooks/bash-walls.sh"
 C5_SAVED_FARM="$FARM_OUT"; C5_SAVED_BG="$BG_GUARD"
-FARM_OUT="$C5_TREE/hooks/farm-out-reminder.sh"
-BG_GUARD="$C5_TREE/hooks/background-suite-guard.sh"
+FARM_OUT="$C5_TREE/hooks/bash-walls.sh"
+BG_GUARD="$C5_TREE/hooks/bash-walls.sh"
 
 # BOTH OF THESE STEP ASIDE NOW (bionic 1.4.0, design ledger S4). They refused until
 # 1.4.0, on the reasoning the two irreversible-action walls still use — and that

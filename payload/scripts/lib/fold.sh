@@ -141,9 +141,49 @@ ${1:-}"
   fi
 }
 
+# fold_context <text> — stage a MODEL-FACING advisory: text that must ride
+# `hookSpecificOutput.additionalContext` on stdout rather than the user's stream.
+#
+# WHY THERE ARE TWO ADVISORY VERBS. `fold_advise` is words for the person reading the
+# terminal. This is words for the model and nobody else — the channel
+# hooks/farm-out-reminder.sh has answered on since epic-08 wave-04 (ADR-002), where
+# the reader never sees the nudge and the next turn does. They are not the same
+# stream and one verb could not choose between them without guessing.
+#
+# THE MERGE IS THE WHOLE REASON IT LIVES HERE. Before T23 one process emitted one
+# such object; five walls in one process could emit several, and several JSON
+# documents on one stdout is not a wire any reader parses — it is the fail-OPEN
+# direction, since an unparseable verdict is no verdict. So the fold owns the channel
+# the way it already owns the refusal: whatever the number of speakers, ONE object.
+fold_context() {
+  if [ -z "${_BF_PEND_CONTEXT:-}" ]; then
+    _BF_PEND_CONTEXT="${1:-}"
+  else
+    # A BLANK LINE, as between composed reasons: each nudge is a paragraph and run
+    # together they would read as one speaker's.
+    _BF_PEND_CONTEXT="$_BF_PEND_CONTEXT
+
+${1:-}"
+  fi
+}
+
 _fold_clear_pending() {
   _BF_PEND_MODE=""; _BF_PEND_VERB=""; _BF_PEND_FACT=""
-  _BF_PEND_FIX=""; _BF_PEND_DETAIL=""; _BF_PEND_ADVICE=""
+  _BF_PEND_FIX=""; _BF_PEND_DETAIL=""; _BF_PEND_ADVICE=""; _BF_PEND_CONTEXT=""
+}
+
+# _fold_emit_context <event> <text> — the one object, on stdout.
+#
+# THROUGH `jq`, DELIBERATELY, where refuse.sh escapes JSON by hand. The two have
+# different callers: refuse.sh must format a refusal on a machine that has lost `jq`,
+# because a wall that cannot format its refusal must not therefore fail open. This is
+# an ADVISORY — losing it costs a nudge — and going through `jq` keeps the bytes
+# identical to the emitter this replaces, which is what makes the merge a refactor on
+# the one payload where a single wall speaks. With no `jq` the text is not dropped:
+# the caller puts it on the user's stream instead.
+_fold_emit_context() {
+  jq -n --arg e "${1:-}" --arg c "${2:-}" \
+    '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}' 2>/dev/null
 }
 
 # ─── The fold ────────────────────────────────────────────────────────────────
@@ -165,8 +205,10 @@ bionic_fold() {
   BIONIC_FOLD_FIX=""
   BIONIC_FOLD_DETAIL=""
   BIONIC_FOLD_ADVICE=""
+  BIONIC_FOLD_CONTEXT=""
+  BIONIC_FOLD_LINES=""
 
-  local _fn _rc _m _errf _out _rrc
+  local _fn _rc _m _errf _out _rrc _ctx _bline
   for _fn in "$@"; do
     _fold_clear_pending
     # THE CALL. Unquoted-by-name, in this shell, with the event as its one argument.
@@ -185,6 +227,24 @@ bionic_fold() {
           BIONIC_FOLD_VERB="$_BF_PEND_VERB"
           BIONIC_FOLD_FACT="$_BF_PEND_FACT"
           BIONIC_FOLD_FIX="$_BF_PEND_FIX"
+        fi
+        # EVERY BLOCKER AFTER THE FIRST BRINGS ITS OWN LINE (T23). The composed object
+        # keeps the FIRST blocker's verb, fact and fix, so without this the second
+        # wall's SENTENCE — not just its detail — would be gone: a push refused
+        # alongside a DROP would print the push and say nothing about the DROP, while
+        # the two processes this replaced printed both. The line is built exactly as
+        # `refuse` builds it, and it leads that blocker's own detail.
+        if [ "$BIONIC_FOLD_BLOCKS" -gt 1 ]; then
+          _bline="bionic: ${_BF_PEND_VERB} refused — ${_BF_PEND_FACT} (${_BF_PEND_FIX})"
+          BIONIC_FOLD_LINES="${BIONIC_FOLD_LINES}${BIONIC_FOLD_LINES:+
+}${_bline}"
+          if [ -n "$_BF_PEND_DETAIL" ]; then
+            _BF_PEND_DETAIL="${_bline}
+
+${_BF_PEND_DETAIL}"
+          else
+            _BF_PEND_DETAIL="$_bline"
+          fi
         fi
         # ONE TRAILING NEWLINE IS NOT A PARAGRAPH BREAK. Several walls build `detail` by
         # appending `…\n` per row, so the value arrives with a newline already on it; the
@@ -220,12 +280,33 @@ $_BF_PEND_DETAIL"
 $_BF_PEND_ADVICE"
         fi
       fi
+      # THE MODEL'S HALF, merged on the same rule and separated by a blank line.
+      if [ -n "${_BF_PEND_CONTEXT:-}" ]; then
+        if [ -z "$BIONIC_FOLD_CONTEXT" ]; then
+          BIONIC_FOLD_CONTEXT="$_BF_PEND_CONTEXT"
+        else
+          BIONIC_FOLD_CONTEXT="$BIONIC_FOLD_CONTEXT
+
+$_BF_PEND_CONTEXT"
+        fi
+      fi
     fi
   done
   _fold_clear_pending
 
   # ── NOTHING BLOCKED ─────────────────────────────────────────────────────────
   if [ "$BIONIC_FOLD_BLOCKS" -eq 0 ]; then
+    if [ -n "$BIONIC_FOLD_CONTEXT" ]; then
+      _out=$(_fold_emit_context "$_event" "$BIONIC_FOLD_CONTEXT")
+      if [ -n "$_out" ]; then
+        printf '%s\n' "$_out"
+      else
+        # NO `jq`, SO NO OBJECT — and the words are put where they can still be read
+        # rather than dropped in silence.
+        BIONIC_FOLD_ADVICE="${BIONIC_FOLD_ADVICE}${BIONIC_FOLD_ADVICE:+
+}$BIONIC_FOLD_CONTEXT"
+      fi
+    fi
     [ -n "$BIONIC_FOLD_ADVICE" ] && printf '%s\n' "$BIONIC_FOLD_ADVICE" >&2
     return 0
   fi
@@ -258,6 +339,48 @@ $_BF_PEND_ADVICE"
   [ -n "$_out" ] && printf '%s\n' "$_out"
   [ -s "$_errf" ] && cat "$_errf" >&2
   rm -f "$_errf" 2>/dev/null
+
+  # ── THE OTHER BLOCKERS' LINES, WHERE NO STREAM AT ALL RECEIVED THEM ─────────
+  #
+  # `model_only` IS THE TEST, AND `detail_to_user` IS NOT. On `deny` and `block` the
+  # composed detail reaches the MODEL in full, every later blocker's sentence with it,
+  # and the user's one line is refuse.sh's ruling D-1 working as intended — T12 pinned
+  # that shape (tests/fold.test.sh 2f, tests/stop.test.sh 1e) and it stands.
+  #
+  # `exit2` is the case with nowhere to put them: one wire for both readers, spent on
+  # the headline, `detail` never emitted at all. With one blocker that is still the
+  # ruling. With two it DELETED a wall's verdict outright — neither reader learned the
+  # second wall had refused anything — while the processes this fold replaced each
+  # printed their own line and a reader saw both. So on a channel that carries detail
+  # to nobody, the later blockers' lines follow the headline: the same sentences, in
+  # manifest order, and nothing that was not on that stream before the merge.
+  #
+  # NOT UNDER THE VERBOSE KNOB, which already put the whole composed detail — extra
+  # sentences and all — on the user stream through `refuse`.
+  if [ -n "$BIONIC_FOLD_LINES" ] \
+     && [ "${BIONIC_WALL_VERBOSE:-}" != "1" ] \
+     && [ "$(refuse_channel "$BIONIC_FOLD_MODE" model_only 2>/dev/null || echo no)" != "yes" ]; then
+    printf '%s\n' "$BIONIC_FOLD_LINES" >&2
+  fi
+
+  # ── THE MODEL'S ADVISORIES, AND WHO OWNS STDOUT ─────────────────────────────
+  #
+  # A REFUSAL THAT ALREADY WROTE STDOUT KEEPS IT. `deny` and `block` put their JSON
+  # there; a second document beside it leaves the whole stream unparseable, and an
+  # unreadable refusal is no refusal — the fail-OPEN direction, which is never the
+  # one to take by accident. So the advisory yields the channel and degrades to the
+  # user's stream, where it is still read by someone, rather than being dropped or
+  # corrupting the verdict. On `exit2` stdout is free and the object rides it.
+  if [ -n "$BIONIC_FOLD_CONTEXT" ]; then
+    _ctx=""
+    [ -z "$_out" ] && _ctx=$(_fold_emit_context "$_event" "$BIONIC_FOLD_CONTEXT")
+    if [ -n "$_ctx" ]; then
+      printf '%s\n' "$_ctx"
+    else
+      BIONIC_FOLD_ADVICE="${BIONIC_FOLD_ADVICE}${BIONIC_FOLD_ADVICE:+
+}$BIONIC_FOLD_CONTEXT"
+    fi
+  fi
   [ -n "$BIONIC_FOLD_ADVICE" ] && printf '%s\n' "$BIONIC_FOLD_ADVICE" >&2
   return "$_rrc"
 }
