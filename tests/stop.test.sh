@@ -38,6 +38,8 @@ set -uo pipefail
 
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
+# THE ONE ROW BUILDER (cross-gate §S17): no suite hand-writes a roster row.
+. "$(dirname "$0")/lib/roster-row.sh"
 
 HOOK="${BIONIC_STOP_UNDER_TEST:-${BIONIC_HOOKS_DIR}/stop.sh}"
 
@@ -66,10 +68,16 @@ mkfix() {
   printf '%s' "$d"
 }
 
-# A ROSTER ROW WITH AN UNDELIVERED ARTIFACT — the landing sweep's block.
+# A ROSTER ROW WITH AN UNDELIVERED ARTIFACT — the landing sweep's block. Built through
+# tests/lib/roster-row.sh, the fleet's one row writer, so a schema change that the sweep
+# stopped producing cannot pass here (cross-gate §S17).
 unmet_row() {  # <project>
-  printf 'roster-state/v1|status=identified|session=%s|name=w1-row|agent_id=%s|deliverable=%s|tool_use_id=toolu_X|launched_at=2026-09-01T00:00:00Z\n' \
-    "$SID" "$AID" ".bionic/docs/record/never.md" > "$1/.bionic/tmp/roster-$SID.state"
+  {
+    roster_header
+    roster_row_fixture status=identified session="$SID" name=w1-row agent_id="$AID" \
+      deliverable=.bionic/docs/record/never.md launched_at=2026-09-01T00:00:00Z \
+      tool_use_id=toolu_X
+  } > "$1/.bionic/tmp/roster-$SID.state"
 }
 
 # A PATROL STAMP PAST 2x THE INTERVAL — patrol-revive's block. The interval is
@@ -131,7 +139,7 @@ refusal_lines() {
   printf '%s\n' "$STOP_ERR" | /usr/bin/grep -c '^bionic: ' || true
 }
 
-require_helpers mkfix unmet_row stale_stamp usage_tx fire reason_of \
+require_helpers roster_header roster_row_fixture mkfix unmet_row stale_stamp usage_tx fire reason_of \
                 offset_in_reason refusal_lines
 
 # ─────────────────────────────────────────────────────────────────────────────
