@@ -461,4 +461,273 @@ expect_eq "a plan with no ## Tasks section at all is refused" "1" \
   "$(call_rc units_validate "$SANDBOX/no-table.md")"
 expect_contains "…naming the absent section" "## Tasks" "$(call units_validate "$SANDBOX/no-table.md")"
 
+# ============================================================
+section "8 — the differential: the OLD FILL derivation and units_ready answer the same"
+# ============================================================
+#
+# WHAT THIS PROVES, and why a refactor needs it. REQ-1e deleted `slice_table` and
+# `slice_ready` from hooks/session-poker.sh and pointed the tick at `units_ready`. A
+# refactor that changes the answer is not a refactor, and "the suite is still green" does
+# not say that: the suite's own FILL fixtures were migrated in the same commit. So the OLD
+# derivation is kept HERE, lifted byte-for-byte out of hooks/session-poker.sh at 1f48673
+# (`git show 1f48673:hooks/session-poker.sh`), and run beside the new one over the same
+# tables. A diff of the two answers is the claim.
+#
+# TWO SPECIMENS, for the two things that could have moved:
+#   - THE 1.4.0 SPECIMEN (tests/fixtures/migration/wave-1.4.0-slices.md, the retired
+#     four-column shape) against a ten-column twin carrying the same ids, deps and
+#     statuses. This is the MIGRATION claim: the same schedule, written the new way,
+#     dispatches the same batch.
+#   - THIS WAVE'S OWN TEN-COLUMN TABLE. Here the two readers are asked DIFFERENT
+#     questions on purpose — the old one has no step to scope by — so the identity is
+#     between the old answer and the UNION of `units_ready` over Steps 3-9. That union is
+#     the whole of what the old reader could say; the per-step split is what REQ-1e added.
+#
+# NOT VACUOUS. The 1.4.0 specimen lands every row, so its final state has an EMPTY ready
+# set and "both agree" would be true of two broken readers. The configurations below
+# rewind it: config k is the first k ids `landed` and the rest `pending`, which walks the
+# plan back along its own timeline, and the run asserts that at least one configuration
+# produced a non-empty answer before it believes any of the equalities.
+
+# The OLD derivation, VERBATIM. Do not repair, reformat or improve anything between the
+# markers: its value is that it is the code that shipped, and an edit here would turn the
+# differential into a comparison of two things this wave wrote.
+cat > "$SANDBOX/old-fill.sh" <<'OLD_FILL_EOF'
+# --- lifted verbatim from hooks/session-poker.sh at 1f48673 ---
+normalize_newlines() {
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
+}
+
+slice_table() {  # <plan> -> id<TAB>deps<TAB>status, one per row
+  normalize_newlines "$1" 2>/dev/null | awk '
+    function trim(v) { sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); return v }
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    !intable {
+      if ($0 !~ /^[[:space:]]*\|/) next
+      n = split($0, c, "|")
+      idc = 0; depc = 0; stc = 0
+      for (i = 1; i <= n; i++) {
+        t = trim(c[i])
+        if (t == "id") idc = i
+        else if (t == "deps") depc = i
+        else if (t == "status") stc = i
+      }
+      if (idc && depc && stc) intable = 1
+      next
+    }
+    {
+      if ($0 !~ /^[[:space:]]*\|/) exit
+      n = split($0, c, "|")
+      id = trim(c[idc])
+      # The |---|---| separator row, and any row whose id cell is empty or punctuation.
+      if (id == "" || id ~ /^[-: ]+$/) next
+      printf "%s\t%s\t%s\n", id, trim(c[depc]), trim(c[stc])
+    }'
+}
+
+slice_ready() {  # <table> -> the ready ids, one per line, in table order
+  # ONE PASS TO REMEMBER, one to decide, over the same stream: a dependency may be named
+  # before or after the row that depends on it, so nothing can be answered until the whole
+  # table has been read. Table order is preserved by indexing on NR.
+  printf '%s\n' "$1" | awk -F'\t' '
+    $1 == "" { next }
+    { n = n + 1; id[n] = $1; dep[n] = $2; st[$1] = $3 }
+    END {
+      for (i = 1; i <= n; i++) {
+        if (st[id[i]] != "pending") continue
+        deps = dep[i]
+        gsub(/[[:space:]]/, "", deps)
+        # A cell with no alphanumeric character names no dependency: the empty cell, the
+        # hyphen and the em dash the plan actually uses are all spelled this one way, and
+        # matching the dash byte-for-byte would put a Unicode literal in a bash 3.2 awk
+        # program for no gain.
+        if (deps !~ /[A-Za-z0-9]/) { print id[i]; continue }
+        m = split(deps, d, ",")
+        ready = 1
+        for (j = 1; j <= m; j++) {
+          if (d[j] == "" || d[j] !~ /[A-Za-z0-9]/) continue
+          if (st[d[j]] != "landed") { ready = 0; break }
+        }
+        if (ready) print id[i]
+      }
+    }'
+}
+# --- end of the lifted text ---
+OLD_FILL_EOF
+
+# old_ready <plan file> -> the ids the RETIRED derivation would have filled, one per line.
+old_ready() {
+  bash -c '. "$1" >/dev/null 2>&1 || exit 127; slice_ready "$(slice_table "$2")"' \
+    _ "$SANDBOX/old-fill.sh" "$1"
+}
+
+# new_ready <plan file> <step> -> the same question asked of the shipped library.
+new_ready() { call units_ready "$1" "$2"; }
+
+# sorted <string> -> the set, one per line, in a canonical order. The two readers are
+# required to agree on WHICH ids, and both already preserve table order; sorting here keeps
+# a future ordering change from reading as a membership difference.
+sorted() { [ -z "$1" ] && return 0; printf '%s\n' "$1" | sort; }
+
+# ---------- specimen A: the 1.4.0 schedule, old shape and new ----------
+
+DIFF_IDS="$(awk -F'|' '/^\| [A-Z]/ { gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2 }' \
+  "$REPO_ROOT/tests/fixtures/migration/wave-1.4.0-slices.md")"
+DIFF_DEPS_OF() {  # <id> -> that row's deps cell, verbatim
+  awk -F'|' -v want="$1" '
+    /^\| [A-Z]/ {
+      id = $2; gsub(/^[ \t]+|[ \t]+$/, "", id)
+      if (id == want) { d = $3; gsub(/^[ \t]+|[ \t]+$/, "", d); print d; exit }
+    }' "$REPO_ROOT/tests/fixtures/migration/wave-1.4.0-slices.md"
+}
+expect_eq "the migration fixture carries the specimen's nineteen rows" "19" "$(nlines "$DIFF_IDS")"
+
+# write_pair <k> — the first k ids landed, the rest pending, written twice: once in the
+# retired four-column shape the old reader was built for, once in the ten-column schema.
+write_pair() {
+  local k="$1" i=0 id deps st
+  {
+    printf -- '## Slices\n\n| id | deps | complexity | status |\n|---|---|---|---|\n'  # retired: slice
+    i=0
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      i=$((i + 1)); st=pending; [ "$i" -le "$k" ] && st=landed
+      printf -- '| %s | %s | complex | %s |\n' "$id" "$(DIFF_DEPS_OF "$id")" "$st"
+    done <<DIFF_IDS_EOF
+$DIFF_IDS
+DIFF_IDS_EOF
+  } > "$SANDBOX/diff-old-$k.md"
+  {
+    printf -- '---\ncurrent: 4\n---\n\n## Tasks\n\n'
+    printf -- '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+    printf -- '|---|---|---|---|---|---|---|---|---|---|\n'
+    i=0
+    while IFS= read -r id; do
+      [ -n "$id" ] || continue
+      i=$((i + 1)); st=pending; [ "$i" -le "$k" ] && st=landed
+      printf -- '| %s | 4 | build | a row | implementor | %s | 15m | REQ-x | a.sh | %s |\n' \
+        "$id" "$(DIFF_DEPS_OF "$id")" "$st"
+    done <<DIFF_IDS_EOF2
+$DIFF_IDS
+DIFF_IDS_EOF2
+  } > "$SANDBOX/diff-new-$k.md"
+}
+
+DIFF_MISMATCH=""
+DIFF_NONEMPTY=0
+DIFF_K=0
+while [ "$DIFF_K" -le 19 ]; do
+  write_pair "$DIFF_K"
+  DIFF_A="$(sorted "$(old_ready "$SANDBOX/diff-old-$DIFF_K.md")")"
+  DIFF_B="$(sorted "$(new_ready "$SANDBOX/diff-new-$DIFF_K.md" 4)")"
+  [ -n "$DIFF_A" ] && DIFF_NONEMPTY=$((DIFF_NONEMPTY + 1))
+  if [ "$DIFF_A" != "$DIFF_B" ]; then
+    DIFF_MISMATCH="${DIFF_MISMATCH}config ${DIFF_K}: old=[${DIFF_A}] new=[${DIFF_B}]
+"
+  fi
+  DIFF_K=$((DIFF_K + 1))
+done
+
+expect_eq "twenty configurations of the 1.4.0 schedule: the two readers never disagree" \
+  "" "$DIFF_MISMATCH"
+expect_eq "…and the comparison had something to compare (configurations with a ready row)" \
+  "yes" "$([ "$DIFF_NONEMPTY" -ge 10 ] && echo yes || echo no)"
+
+# THE POWER CHECK the equality above needs. Two readers that both answered nothing would
+# satisfy it. Doctor ONE cell of one configuration — a dependency that has not landed — and
+# the old reader's answer must change; that is the comparison having teeth.
+write_pair 6
+DIFF_BASE="$(sorted "$(old_ready "$SANDBOX/diff-old-6.md")")"
+expect_contains "config 6 has ADOPT ready — every one of its five dependencies has landed" \
+  "ADOPT" "$DIFF_BASE"
+# Rewind ONE of those five. ADOPT must leave the answer, and nothing else may move.
+sed 's/^| L-ROOT | — | complex | landed |$/| L-ROOT | — | complex | pending |/' \
+  "$SANDBOX/diff-old-6.md" > "$SANDBOX/diff-old-6-doctored.md"
+sed 's/^| L-ROOT | 4 | build | a row | implementor | — | 15m | REQ-x | a.sh | landed |$/| L-ROOT | 4 | build | a row | implementor | — | 15m | REQ-x | a.sh | pending |/' \
+  "$SANDBOX/diff-new-6.md" > "$SANDBOX/diff-new-6-doctored.md"
+DIFF_DOC_OLD="$(sorted "$(old_ready "$SANDBOX/diff-old-6-doctored.md")")"
+expect_eq "an unlanded dependency drops ADOPT from the OLD answer, so the equality is not vacuous" \
+  "no" "$([ "$DIFF_BASE" = "$DIFF_DOC_OLD" ] && echo yes || echo no)"
+expect_absent "…ADOPT is the row that left" "ADOPT" "$DIFF_DOC_OLD"
+expect_eq "…and the shipped library moved with it, not against it" \
+  "$DIFF_DOC_OLD" "$(sorted "$(new_ready "$SANDBOX/diff-new-6-doctored.md" 4)")"
+
+# ---------- specimen B: this wave's own ten-column table ----------
+#
+# The old reader takes `id`, `deps` and `status` off this table by header NAME and ignores
+# every other column, `step` included — so its answer is the union of what `units_ready`
+# says at each step, and nothing else.
+# wave_at <pending id>... — this wave's table VERBATIM, with the named ids `pending` and
+# every other row `landed`. Only the status cell moves; the ten columns, the ids, the deps
+# and the step cells are the plan's own. The snapshot's own statuses leave nothing ready
+# (the rows behind the pending ones are `active`), and a differential between two empty
+# answers measures nothing — so the schedule is driven to states that have work in them.
+wave_at() {
+  local want=" $* "
+  {
+    printf -- '---\ncurrent: 4\n---\n\n## Tasks\n\n'
+    awk -F'|' -v want="$want" '
+      function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+      /^\|[ \t]*T[0-9]+[ \t]*\|/ {
+        id = trim($2)
+        st = (index(want, " " id " ") > 0) ? "pending" : "landed"
+        sub(/\|[^|]*\|$/, "| " st " |")
+        print
+        next
+      }
+      { print }
+    ' "$SANDBOX/tasks-table.md"
+  } > "$SANDBOX/diff-wave.md"
+}
+
+# union_ready — units_ready asked once per step, 3 through 9, folded into one set. That is
+# the whole of what the old reader could ever have said about this table, since it has no
+# step to scope by.
+union_ready() {
+  local u="" st
+  for st in 3 4 5 6 7 8 9; do
+    u="${u}$(new_ready "$SANDBOX/diff-wave.md" "$st")
+"
+  done
+  printf '%s' "$u" | grep -v '^$' | sort || true
+}
+
+# Three states of the wave's own schedule: one with work at a single step, one with work at
+# two steps at once (which is where the old reader and a per-step reader must differ), and
+# the snapshot's own all-but-one state.
+WAVE_MISMATCH=""
+WAVE_STATES="T10 T13 T14|T10|T13 T17"
+OLD_IFS="$IFS"; IFS='|'
+for WAVE_STATE in $WAVE_STATES; do
+  IFS="$OLD_IFS"
+  wave_at $WAVE_STATE
+  WAVE_UNION="$(union_ready)"
+  WAVE_OLD="$(sorted "$(old_ready "$SANDBOX/diff-wave.md")")"
+  if [ "$WAVE_OLD" != "$WAVE_UNION" ]; then
+    WAVE_MISMATCH="${WAVE_MISMATCH}pending=[${WAVE_STATE}] old=[${WAVE_OLD}] union=[${WAVE_UNION}]
+"
+  fi
+  IFS='|'
+done
+IFS="$OLD_IFS"
+
+expect_eq "on this wave's own table the old answer is the union of units_ready over Steps 3-9" \
+  "" "$WAVE_MISMATCH"
+
+# NOT VACUOUS, and then THE ONE PLACE THEY MUST DIFFER — the reason REQ-1e made the change.
+# With a Step-4 row and a Step-5 row both ready, the old reader names both; asked about one
+# step, the new reader names only that step's.
+wave_at T10 T13 T14
+WAVE_UNION="$(union_ready)"
+WAVE_OLD="$(sorted "$(old_ready "$SANDBOX/diff-wave.md")")"
+expect_eq "…with T10 (step 4), T13 and T14 (step 5) all ready at once" \
+  "T10
+T13
+T14" "$WAVE_UNION"
+expect_eq "asked about Step 4 alone, units_ready names only the Step-4 row" \
+  "T10" "$(sorted "$(new_ready "$SANDBOX/diff-wave.md" 4)")"
+expect_eq "…and the old whole-table reader could not make that distinction" \
+  "no" "$([ "$WAVE_OLD" = "T10" ] && echo yes || echo no)"
+
 finish
