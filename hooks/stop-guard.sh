@@ -71,8 +71,8 @@ ORDER_CMD="bash ${HOOK_DIR}/stop-orders.sh order"
 # discharge block below for why an instruction gets a clock when evidence never does.
 ORDER_TTL_SECONDS=1800
 
-INPUT=$(cat)
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+BIONIC_INPUT=$(cat)
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 TOOL_NAME=$(_jq '.tool_name')
 
@@ -155,16 +155,13 @@ state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsaf
 [ "$TOOL_NAME" = "TaskStop" ] || exit 0
 
 # ---------- before the verdict: OPEN and SILENT ----------
-
-CWD=$(_jq '.cwd')
-[ -n "$CWD" ] || exit 0
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
 # payload/scripts/lib/loader.sh. FAIL OPEN: the stop verdict is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh agents.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh agents.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -261,6 +258,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-guard"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -281,8 +280,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-guard"; fi
 # every row in silence, exactly where a wave most needs it. `project_root` maps a linked
 # worktree onto its main repository and walks for the nearest real `.bionic`, so the
 # reader and the writer land on one address space.
-REPO=$(project_root "$CWD")
-[ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
+bionic_context 2>/dev/null || exit 0
+[ -d "$BIONIC_ROOT" ] || exit 0
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
@@ -297,12 +296,14 @@ REPO=$(project_root "$CWD")
 # arming partition IS the consent boundary).
 #
 # THE KEY COMES FROM THE LIBRARY (design §1: env primary, payload witness), which is what
-# the marker's writer uses, so the two spell one session one way. The raw payload read
-# further down keeps this gate's OWN state filenames exactly where they were — moving them
-# is not this change's business — and the divergence line is silenced here because a
-# bystander session must produce no output at all.
-ENGAGED_SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || ENGAGED_SID=""
-engaged_session "$REPO" "$ENGAGED_SID" || exit 0
+# the marker's writer uses, so the two spell one session one way. It is now the ONLY key
+# this gate has: the raw payload read that used to sit ~70 lines below, building the
+# roster filename out of a second, unguarded reading of the same field, is gone (REQ-1h,
+# AC-1h.2). One source, so the roster path this gate reads is keyed by the session the
+# engagement switch admitted — a clean environment value and a malformed payload value
+# used to pass this switch and then address a file outside the state directory.
+bionic_context 2>/dev/null || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # ---------- THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK (task-engaged-session) --
 #
@@ -369,9 +370,6 @@ A stop the human performs themselves does not reach this gate at all."
 
 [ -n "$RAW" ] || deny "this stop names no target" "name the agent to stop" "The stop names no target: tool_input.task_id is empty."
 
-SID=$(_jq '.session_id')
-[ -n "$SID" ] || deny "this stop carries no session key" "run /bionic:doctor" "This stop request carries no session key, so no observation can be proven mine."
-
 TRANSCRIPT=$(_jq '.transcript_path')
 SUB=$(session_subagents_dir "$TRANSCRIPT") \
   || deny "this stop carries no transcript path" "run /bionic:doctor" "This stop request carries no usable transcript path, so its session's agents cannot be resolved."
@@ -381,7 +379,7 @@ SUB=$(session_subagents_dir "$TRANSCRIPT") \
 # The state paths are taken FIRST, because resolution now reads the roster — for the agent
 # id, and for the rosters an `@session-` alias is checked against. `state_paths` declines a
 # symlinked state path, which is the same refusal it always made, one step earlier.
-PATHS=$(state_paths "$REPO") \
+PATHS=$(state_paths "$BIONIC_ROOT") \
   || deny "the observation state path is a symlink" "remove that symlink" "The observation state path is a symlink; nothing here will read or write through it."
 STATE_DIR="${PATHS%|*}"; STATE_FILE="${PATHS#*|}"
 
@@ -397,7 +395,7 @@ case "$RAW" in *@*) ALIAS_SUFFIX="${RAW##*@}" ;; esac
 # lists teammates by NAME, so an id has to become a name before the live set can be asked
 # about it. Nothing here is a name-oracle — a row supplies an id for a name, never the fact
 # that the agent exists, which is the whole of what D1′ moved.
-ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
+ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
 ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
 # TWO ROWS CAN CARRY ONE AGENT. The dispatch writes the CONTRACT and the recorder writes the
 # id one state later, so the last row of a name is the current statement about it while the
@@ -471,7 +469,7 @@ is_address_shaped() {  # <typed> -> 0 if it wears an agent-address shape
   return 1
 }
 
-# EVERY ROSTER IN THIS REPO THAT CARRIES THIS NAME, as the addresses the platform's stop
+# EVERY ROSTER IN THIS BIONIC_ROOT THAT CARRIES THIS NAME, as the addresses the platform's stop
 # primitive takes. It is the one spelling this gate prints and the one it accepts (Section R),
 # and it is built from the roster FILENAME because that is the session that wrote the row.
 accepted_addresses() {  # -> "    <name>@session-xxxxxxxx" per launcher, newline separated
@@ -630,7 +628,7 @@ fi
 ROSTER_TEAMMATE=$(record_field "$ROSTER_ROW" teammate_id)
 STOP_ADDRESS="$ROSTER_TEAMMATE"
 if [ -z "$STOP_ADDRESS" ]; then
-  STOP_ADDRESS="${AGENT_NAME}@session-$(printf '%s' "${AFROM:-$SID}" | cut -c1-8)"
+  STOP_ADDRESS="${AGENT_NAME}@session-$(printf '%s' "${AFROM:-$BIONIC_SID}" | cut -c1-8)"
 fi
 
 # ---------- epic-16 wave-02: FACTS DISCHARGE THE STOP (R2), ORDERS EXECUTE (R3) ----------
@@ -674,7 +672,7 @@ fi
 # three now share. Pinned in the suite beside its paired positive.
 
 SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
-ORDERS_FILE="$STATE_DIR/stop-orders-${SID}.state"
+ORDERS_FILE="$STATE_DIR/stop-orders-${BIONIC_SID}.state"
 
 V_TAKEN=0; V_STATE=""; V_DETAIL=""; V_ACKED=""
 take_verdict() {
@@ -689,8 +687,8 @@ take_verdict() {
   # decline to ask rather than ask the wrong question.
   case "$(printf '%s' "$AGENT_NAME" | tr -d '[:space:][:cntrl:]|')" in "") return 0 ;; esac
   local out line
-  out=$( cd "$REPO" 2>/dev/null || exit 9
-         CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict "$AGENT_NAME" 2>/dev/null )
+  out=$( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
+         CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "$SWEEPER" verdict "$AGENT_NAME" 2>/dev/null )
   line=$(printf '%s\n' "$out" | grep -F 'landing-verdict/v1|' | head -1)
   [ -n "$line" ] || return 0
   V_STATE=$(record_field "$line" state)
@@ -788,7 +786,7 @@ while IFS= read -r line; do
   if [ "$(record_version "$line")" != "$STATE_VERSION" ]; then
     BAD_VERSION=$(record_version "$line"); continue
   fi
-  if [ "$(record_field "$line" session)" != "$SID" ]; then
+  if [ "$(record_field "$line" session)" != "$BIONIC_SID" ]; then
     FOREIGN=$(record_field "$line" session); continue
   fi
   RECORD="$line"
@@ -872,7 +870,7 @@ fi
 # wave closed elsewhere. What the roster is still consulted for is the one thing
 # the record cannot say: that a contracted channel was never looked at at all.
 #
-# A relative path is resolved against the REPO ROOT, which is where the contract
+# A relative path is resolved against the BIONIC_ROOT ROOT, which is where the contract
 # is written from and where the observation runs; the resolved path is printed in
 # the refusal so the comparison is never a hidden one.
 REC_PROGRESS=$(record_field "$RECORD" progress)
@@ -880,7 +878,7 @@ REC_PMTIME=$(record_field "$RECORD" progress_mtime)
 REC_PSTATE=$(record_field "$RECORD" progress_state)
 
 abs_progress() {  # <path> -> absolute
-  case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$REPO" "$1" ;; esac
+  case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$BIONIC_ROOT" "$1" ;; esac
 }
 
 case "$REC_PSTATE" in

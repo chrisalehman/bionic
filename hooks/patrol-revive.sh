@@ -147,9 +147,9 @@
 set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
-INPUT=$(cat)
+BIONIC_INPUT=$(cat)
 
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 # THIS SCRIPT'S OWN DIRECTORY, so the poker it measures against and the poker it
 # NAMES are the same file — resolved the way hooks/dispatch-preflight.sh resolves
@@ -181,16 +181,12 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # the directory the guards are about. Session ids are harness-minted UUIDs, so
 # this refuses nothing real; it is the same belt hooks/dispatch-preflight.sh wears
 # on the same value, taken in the same direction: pass, silent.
-PAYLOAD_SID=$(_jq '.session_id')
-
-CWD=$(_jq '.cwd')
-[ -n "$CWD" ] && [ -d "$CWD" ] || exit 0
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: a monitor
 # that refused a stop because a file was missing would be a worse outage than the one
 # it watches for.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -287,6 +283,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "patrol-revive"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -295,18 +293,15 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "patrol-revive"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
 
-REPO=$(project_root "$CWD")
-[ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
-
-# THE SESSION KEY, from the library (design §1): env primary, payload witness. The stamp
-# filename is built from it and hooks/session-poker.sh writes that filename from its own
-# reading, so the two have to ask one reader or this monitor watches a file nothing
-# writes. Session ids are harness-minted UUIDs, so the shape check below refuses nothing
-# real; it is the same belt hooks/dispatch-preflight.sh wears on the same value, taken in
-# the same direction: pass, silent.
-SID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || SID=""
-[ -n "$SID" ] || exit 0
-case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+# THE ROOT AND THE SESSION KEY, from one call (REQ-1f, lib/context.sh): env primary,
+# payload witness (design §1). The stamp filename is built from the key and
+# hooks/session-poker.sh writes that filename from its own reading, so the two have to
+# ask one reader or this monitor watches a file nothing writes. Session ids are
+# harness-minted UUIDs, so the shape check inside that call refuses nothing real; it is
+# the same belt every hook now wears on the same value, taken in the same direction:
+# pass, silent.
+bionic_context 2>/dev/null || exit 0
+[ -d "$BIONIC_ROOT" ] || exit 0
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
@@ -317,7 +312,7 @@ case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
 # direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
-engaged_session "$REPO" "$SID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
 #
@@ -336,10 +331,8 @@ engaged_session "$REPO" "$SID" || exit 0
 # as before, and this hook says so once on stderr (AC-3); bound to a plan that
 # has since closed takes exactly this line's existing branch — exit 0 — after
 # announcing the closure (AC-6).
-_RUN_VERDICT=$(session_run "$REPO" "$SID")
-_RUN_WORD="${_RUN_VERDICT%% *}"
-_RUN_PLAN="${_RUN_VERDICT#* }"
-case "$_RUN_WORD" in
+_RUN_PLAN="$BIONIC_RUN_PLAN"
+case "$BIONIC_RUN_WORD" in
   bound-open) : ;;
   fallback)
     echo "patrol-revive: run resolved by newest-plan fallback (session unbound) — $_RUN_PLAN" >&2
@@ -360,7 +353,7 @@ esac
 # on the other. A symlink is not a stamp: it reads as ABSENT rather than being
 # followed, which is the posture every other .bionic/tmp reader takes and the
 # direction §8 requires — a hostile repo may CLOSE a wall and must never OPEN one.
-STAMP_FILE="$REPO/.bionic/tmp/patrol-${SID}.state"
+STAMP_FILE="$BIONIC_ROOT/.bionic/tmp/patrol-${BIONIC_SID}.state"
 [ -L "$STAMP_FILE" ] && exit 0
 [ -f "$STAMP_FILE" ] || exit 0
 
@@ -383,7 +376,7 @@ POKER="${HOOK_DIR}/session-poker.sh"
 [ -f "$POKER" ] || POKER="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
 [ -f "$POKER" ] || exit 0
 
-INTERVAL=$( cd "$REPO" 2>/dev/null && bash "$POKER" interval 2>/dev/null )
+INTERVAL=$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$POKER" interval 2>/dev/null )
 case "$INTERVAL" in ''|*[!0-9]*) INTERVAL="" ;; esac
 if [ -z "$INTERVAL" ] || [ "$INTERVAL" -le 0 ]; then
   INTERVAL=$( bash "$POKER" interval-default 2>/dev/null )
@@ -401,13 +394,13 @@ LIMIT=$(( INTERVAL * 2 ))
 # judged against the SAME limit — a fresh one is a live duplicate clock, worth a
 # finding whether or not THIS session's own clock turns out to be stale or fine.
 _rival_now="$(date -u +%s 2>/dev/null || echo 0)"
-for _rival_sf in "$REPO"/.bionic/tmp/patrol-*.state; do
+for _rival_sf in "$BIONIC_ROOT"/.bionic/tmp/patrol-*.state; do
   [ -e "$_rival_sf" ] || [ -L "$_rival_sf" ] || continue
   [ "$_rival_sf" = "$STAMP_FILE" ] && continue
   [ -L "$_rival_sf" ] && continue
   _rival_sid="${_rival_sf##*/}"; _rival_sid="${_rival_sid#patrol-}"; _rival_sid="${_rival_sid%.state}"
   [ -n "$_rival_sid" ] || continue
-  [ "$_rival_sid" = "$SID" ] && continue
+  [ "$_rival_sid" = "$BIONIC_SID" ] && continue
   _rival_mt=$(stat -f %m "$_rival_sf" 2>/dev/null || stat -c %Y "$_rival_sf" 2>/dev/null)
   case "$_rival_mt" in ''|*[!0-9]*) continue ;; esac
   _rival_age=$(( _rival_now - _rival_mt ))

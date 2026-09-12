@@ -52,6 +52,39 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ── THE SHIPPED LAYOUT AROUND EVERY MUTANT: hooks/ beside scripts/lib/ ────────
+#
+# Two sections below run a MUTATED COPY of the gate out of `$SANDBOX/<name>/`, so the
+# loader's first candidate is `$SANDBOX/<name>/../scripts/lib` — this directory. Without
+# it the loader's healing candidates reach the plugin INSTALLED on this machine, whose
+# library is whatever was last published; the mutant is then driven against someone
+# else's libraries, and one that cannot load its own fails OPEN and marks nothing.
+#
+# FAILING OPEN IS INVISIBLE HERE, WHICH IS WHY THIS IS BUILT ONCE AND EARLY. Section 4i's
+# mutant asserts exit 0 and "nothing marked" — exactly what a gate that never loaded
+# produces — so a missing library does not turn that arm red, it turns it VACUOUS. The
+# supersede mutant in section 15h built this directory for itself and was safe; the
+# monotone mutant in section 4i ran ~600 lines earlier and was not. Measured in epic-23
+# wave-11 when the gate took `context.sh`: the copy reported
+# `BIONIC_LIB_MISSING=context.sh`, failed open, and section 4i stayed green.
+#
+# THE BASENAME LIST IS THE WHOLE LIBRARY DIRECTORY OF THE TREE UNDER TEST, and the
+# ANCHOR below derives the gate's own `BIONIC_LIB_WANT` and refuses to proceed unless
+# every basename it names arrived. A hand-written list is a second declaration of the
+# gate's dependencies that nothing keeps in step; this one fails loudly instead.
+MUTANT_LIB="$SANDBOX/scripts/lib"
+mkdir -p "$MUTANT_LIB"
+for _lg_libdir in "$HOOKS_DIR/../scripts/lib" "$HOOKS_DIR/../payload/scripts/lib"; do
+  if [ -d "$_lg_libdir" ]; then cp "$_lg_libdir"/*.sh "$MUTANT_LIB/" 2>/dev/null; break; fi
+done
+_lg_want=$(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$GATE" | head -1)
+_lg_absent=""
+for _lg_b in $_lg_want; do
+  [ -r "$MUTANT_LIB/$_lg_b" ] || _lg_absent="$_lg_absent $_lg_b"
+done
+expect_eq "every library the gate declares travels with its mutant copies" "" \
+  "$(printf '%s' "${_lg_absent# }")"
+
 # expect_status, expect_contains, expect_absent, expect_empty, expect_eq are
 # the framework's (tests/lib/assert.sh) — identical semantics to the private
 # definitions this suite carried (grep -qF vs the framework's case glob agree
@@ -1174,16 +1207,10 @@ expect_eq "15h: …and marks nothing, delivered or not" "0" "$(swept_count "$R15
 SUPDIR="$SANDBOX/hooks-supersede-mutant"
 mkdir -p "$SUPDIR"
 cp "$HOOKS_DIR/session-sweeper.sh" "$SUPDIR/session-sweeper.sh"
-# THE SHIPPED LAYOUT AROUND THE MUTANT: hooks/ beside scripts/lib/, holding THIS
-# checkout's library (epic-22 wave-01, N1). Without it the loader's first candidate misses
-# and its healing candidates reach the plugin INSTALLED on this machine, whose library is
-# whatever was last published — so the mutant would be driven against someone else's
-# libraries, and a mutant that fails to load its own fails OPEN and marks nothing, which
-# reads here as the guard still holding. Same reason cross-gate's `plant_hook_tree` exists.
-mkdir -p "$SANDBOX/scripts/lib"
-for _sup_lib in "$HOOKS_DIR/../scripts/lib" "$HOOKS_DIR/../payload/scripts/lib"; do
-  if [ -d "$_sup_lib" ]; then cp "$_sup_lib"/*.sh "$SANDBOX/scripts/lib/" 2>/dev/null; break; fi
-done
+# THE SHIPPED LAYOUT AROUND THE MUTANT — hooks/ beside scripts/lib/, holding THIS
+# checkout's library (epic-22 wave-01, N1) — is `$MUTANT_LIB`, built once at the top of
+# this file and asserted complete against the gate's own `BIONIC_LIB_WANT` there. It used
+# to be built here, which left section 4i's mutant ~600 lines earlier without one.
 # BOTH guards go, because either one alone still holds the line: an unmarked row has no
 # latest state, so the UNMET comparison rejects it too. The mutant is therefore the
 # over-broad implementation this arm could plausibly have been written as — supersede any

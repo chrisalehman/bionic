@@ -395,13 +395,20 @@ expect_status "the Agent tool is not this gate's business" 0 "$GUARD_ST"
 # the tool-name check itself.
 _rel_line=$(grep -n 'TOOL_NAME" = "TaskStop" \] || exit 0' "$GUARD" | head -1 | cut -d: -f1)
 # The expensive work used to begin at the plan walk; since task-engaged-session this gate
-# reads no plan at all, and the first thing it pays for is resolving the project root — the
-# ancestor walk `engaged_session` and every state path below it are built on.
-_walk_line=$(grep -nE '^[[:space:]]*(REPO=\$\(project_root|PLAN=|find )' "$GUARD" | head -1 | cut -d: -f1)
+# reads no plan at all, and the first thing it pays for is resolving its context — the
+# ancestor walk, the session id and every state path below them (RE-POINTED epic-23
+# wave-11-lean-spine, REQ-1f: that resolution is `bionic_context`).
+#
+# BOTH LINE NUMBERS ARE ASSERTED FINDABLE FIRST. A grep whose literal has left the file
+# yields the empty string, and an order pin over two empty values pins nothing while
+# reading exactly like one that holds.
+_walk_line=$(grep -n '^bionic_context' "$GUARD" | head -1 | cut -d: -f1)
+expect_nonempty "the relevance test is findable in the guard's source" "$_rel_line"
+expect_nonempty "the context resolution is findable in the guard's source" "$_walk_line"
 if [ -n "$_rel_line" ] && [ -n "$_walk_line" ] && [ "$_rel_line" -lt "$_walk_line" ]; then
-  ok "relevance check precedes the plan walk in source order"
+  ok "relevance check precedes the context resolution in source order"
 else
-  no "relevance check precedes the plan walk in source order" "relevance@${_rel_line:-none} walk@${_walk_line:-none}"
+  no "relevance check precedes the context resolution in source order" "relevance@${_rel_line:-none} walk@${_walk_line:-none}"
 fi
 
 setup_section "Section 2: WRITING moved out — see tests/execution-recorder.test.sh"
@@ -743,7 +750,30 @@ section "Section 6b: the lock and the consume — the failure paths (C3, S2)"
 # Proven the way §9 names as durable: mutate a COPY so the rename targets an
 # unwritable path, drive it, then re-checksum the shipped file.
 GUARD_SUM_BEFORE=$(shasum "$GUARD" | awk '{print $1}')
-MUTANT="$SANDBOX/stop-guard.consume-fails.sh"
+# THE MUTANT LIVES IN A TREE SHAPED LIKE THE SHIPPED ONE — hooks/ beside scripts/lib/ —
+# because the loader's first candidate is `$(dirname "$0")/../scripts/lib`. A copy alone in
+# the sandbox root finds nothing there and its healing candidates reach the plugin
+# INSTALLED on this machine, whose library is whatever was last published; a mutant that
+# cannot load its own library fails OPEN, exits 0, and this arm then reports "the consume
+# did not refuse" while measuring the loader instead. Measured in epic-23 wave-11, when the
+# guard took `context.sh`: `BIONIC_LIB_MISSING=context.sh`, exit 0, C3 red for the wrong
+# reason.
+#
+# THE BASENAMES ARE DERIVED FROM THE GUARD'S OWN `BIONIC_LIB_WANT`, never typed, and the
+# anchor below fails loudly if one did not arrive — a hand-written list is a second
+# declaration of the guard's dependencies that nothing keeps in step.
+MUTANT_TREE="$SANDBOX/consume-mutant"
+mkdir -p "$MUTANT_TREE/hooks" "$MUTANT_TREE/scripts/lib"
+for _sg_libdir in "$(dirname "$GUARD")/../scripts/lib" "$(dirname "$GUARD")/../payload/scripts/lib"; do
+  if [ -d "$_sg_libdir" ]; then cp "$_sg_libdir"/*.sh "$MUTANT_TREE/scripts/lib/" 2>/dev/null; break; fi
+done
+_sg_absent=""
+for _sg_b in $(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$GUARD" | head -1); do
+  [ -r "$MUTANT_TREE/scripts/lib/$_sg_b" ] || _sg_absent="$_sg_absent $_sg_b"
+done
+expect_eq "every library the guard declares travels with its mutant copy" "" \
+  "$(printf '%s' "${_sg_absent# }")"
+MUTANT="$MUTANT_TREE/hooks/stop-guard.consume-fails.sh"
 sed 's|mv -f "$TMP" "$STATE_FILE" 2>/dev/null|mv -f "$TMP" "/nonexistent-dir-0xdead/x" 2>/dev/null|' \
   "$GUARD" > "$MUTANT"
 

@@ -2278,8 +2278,12 @@ j_mutant() {  # <kind> -> path to a mutant gate with a sibling sweeper, or empty
     # The hook process's ambient session key instead of the payload's (the gate
     # documents why at the code) — a wrong or absent roster, silently.
     ambient-session-key)
-      anchor -E "$PARTY_LG" 'CLAUDE_CODE_SESSION_ID="[$]SID" ' 1
-      awk '{ sub(/CLAUDE_CODE_SESSION_ID="[$]SID" /, ""); print }' \
+      # RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f): the gate's session key is
+      # `BIONIC_SID`, resolved once by `bionic_context`, so that is the variable the
+      # sweeper is handed and the one this mutation strips. The `anchor` above is what
+      # turned the stale literal into a loud failure rather than a byte-identical mutant.
+      anchor -E "$PARTY_LG" 'CLAUDE_CODE_SESSION_ID="[$]BIONIC_SID" ' 1
+      awk '{ sub(/CLAUDE_CODE_SESSION_ID="[$]BIONIC_SID" /, ""); print }' \
         "$PARTY_LG" > "$d/landing-gate.sh" ;;
     # The sweeper resolves its own state directory from the working directory, so
     # dropping the cd asks the verb about whatever repo the hook happened to run in.
@@ -3288,10 +3292,189 @@ expect_eq "no hook defines a private resolve_project_root any more" "" "$N_STRAG
 # protect-main and background-suite-guard used to be excluded here — they classified a
 # command and read no root at all — but the engagement marker lives UNDER a root, so both
 # now resolve one through the library like everyone else and the carve-out is gone.
+#
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). Fifteen of these hooks no longer NAME
+# `project_root`: they ask `bionic_context`, which resolves the root by the one cwd ladder
+# and calls the one resolver. The question this row asks is unchanged — does this hook get
+# its root from the library, or work one out — so the ask is EITHER shared call, and a hook
+# that resolves no root at all still fails. What stops that from being a weakening is the
+# straggler row above (no private resolver) and §CTX below (the inline sequence in ZERO
+# hook bodies), neither of which either call can satisfy.
 for _h in $N_ADOPTED; do
   expect_eq "$_h.sh resolves its root through the library" "yes" \
-    "$(/usr/bin/grep -q 'project_root "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
+    "$(/usr/bin/grep -qE '^bionic_context|project_root "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
 done
+
+# ------------------------------------------------ §CTX THE CONTEXT PREAMBLE, one lib call
+#
+# (epic-23 wave-11-lean-spine, REQ-1f (ii) AC-1f.2 and REQ-1h AC-1h.1; spec Design §1
+# "ContextPreamble", §2 D6, §3 ownership row "context preamble".)
+#
+# WHAT WAS WRONG. Fifteen hooks opened the same way after the loader — read the payload,
+# find the cwd, find the root, resolve the session id, ask engagement, ask the run — in 861
+# lines that said one thing, and the T10 census measured that they did not in fact say the
+# same thing: SEVEN cwd ladders, a session-id shape guard in six of the fifteen, three
+# different actions on an empty id, and one hook reading its session key twice from two
+# sources. `payload/scripts/lib/context.sh` says it once, as `bionic_context`.
+#
+# THE INVARIANT IS NEGATIVE, and that is the point. "Every hook calls the library" is
+# satisfied by a hook that calls it and then restates the sequence anyway — which is how
+# every duplicated-family regression in this tree has actually happened. So the pin has two
+# halves: each of the fifteen CALLS it, and NO file under hooks/ carries the sequence
+# inline. The second half is the one with teeth, and the mutation arm below is what keeps it
+# from being a comment.
+#
+# THE FIFTEEN, named rather than globbed (A-40/A-41). session-sweeper and stop-check read a
+# root, a sid and docs_root and ask neither engagement nor a run verdict — §Roots below pins
+# that neither declares run.sh, which adopting context.sh would break — and the three CLIs
+# (engage, preflight-probe, stop-orders) plus session-poker take no hook payload at all.
+# All six keep their own calls, which is why the negative half is scoped by the SEQUENCE
+# rather than by the presence of any one function.
+N_CTX_FIFTEEN='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
+canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
+farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
+protect-main session-start stop-guard'
+
+for _h in $N_CTX_FIFTEEN; do
+  expect_eq "$_h.sh asks lib/context.sh:bionic_context for its context" "yes" \
+    "$(/usr/bin/grep -q 'bionic_context' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
+done
+
+# AND THE COUNT IS EXACTLY FIFTEEN (AC-1f.2's own measurement). The per-hook rows above
+# cannot see a SIXTEENTH caller, and a hook that picked the call up without being part of
+# the preamble family is a hook paying a root walk and a plan walk for nothing.
+N_CTX_CALLERS=$(/usr/bin/grep -l 'bionic_context' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+N_CTX_EXPECTED=$(printf '%s\n' $N_CTX_FIFTEEN | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the preamble roster names every hook that calls bionic_context, and no other" \
+  "$N_CTX_EXPECTED" "$N_CTX_CALLERS"
+
+# ── the negative half: the sequence occurs in ZERO hook bodies ────────────────
+#
+# THE SEQUENCE IS DEFINED BY WHAT IT DOES, not by a line of text: a body that, BELOW its
+# loader span, calls `project_root "` AND `session_id "` AND `engaged_session "` itself is a
+# hook that has restated the preamble whether or not it also calls the library. Below the
+# span, because the span itself is byte-identical in 22 files and contains none of the three
+# — scoping to it would be scoping to a constant.
+#
+# THE SIX NON-MEMBERS SURVIVE THIS TEST BY CONSTRUCTION, not by exemption: none of them
+# calls all three. session-sweeper and stop-check ask for no engagement at all, the three
+# CLIs ask for neither engagement nor a payload, and session-poker reads the predicate as
+# data from inside a verb body. That is what makes an UNSCOPED sweep of hooks/*.sh the right
+# shape here — an allow-list would have to be maintained, and the thing it would be hiding
+# is exactly the thing this row exists to find.
+ctx_inline_carriers() {  # <hooks-dir> -> basenames carrying the inline sequence below the span
+  local _f _body
+  for _f in "$1"/*.sh; do
+    [ -f "$_f" ] || continue
+    _body=$(awk '/^# --- bionic-loader\/v2 END$/{s=1;next} s{print}' "$_f")
+    printf '%s\n' "$_body" | /usr/bin/grep -q 'project_root "'    || continue
+    printf '%s\n' "$_body" | /usr/bin/grep -q 'session_id "'      || continue
+    printf '%s\n' "$_body" | /usr/bin/grep -q 'engaged_session "' || continue
+    basename "$_f"
+  done | sort | tr '\n' ' ' | sed 's/ $//'
+}
+
+expect_eq "no hook body carries the context sequence inline any more" \
+  "" "$(ctx_inline_carriers "$BIONIC_HOOKS_DIR")"
+
+# MUTATION — the row above is a claim about ABSENCE, and an absence row passes just as
+# happily when the detector is broken as when the tree is clean. One copy of the hooks
+# directory, with the sequence re-inlined into ONE hook below its loader span, must be
+# reported as a carrier. If it is not, the row above proves nothing.
+N_CTX_MUT="$SANDBOX/fx/ctx-inline"
+mkdir -p "$N_CTX_MUT/clean" "$N_CTX_MUT/inlined"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$N_CTX_MUT/clean/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$N_CTX_MUT/inlined/" 2>/dev/null
+# The mutant restates the preamble the way a hand edit would: three real calls, appended
+# below the span, in a hook that is one of the fifteen.
+{
+  cat "$BIONIC_HOOKS_DIR/landing-gate.sh"
+  printf '%s\n' \
+    'CWD_MUT=$(bionic_jq .cwd)' \
+    'REPO_MUT=$(project_root "$CWD_MUT")' \
+    'SID_MUT=$(session_id "$(bionic_jq .session_id)" 2>/dev/null) || SID_MUT=""' \
+    'engaged_session "$REPO_MUT" "$SID_MUT" || exit 0'
+} > "$N_CTX_MUT/inlined/landing-gate.sh"
+expect_eq "…and a hook that re-inlines the sequence below its span is caught" \
+  "landing-gate.sh" "$(ctx_inline_carriers "$N_CTX_MUT/inlined")"
+expect_eq "control: the same copying, unmutated, reports no carrier" \
+  "" "$(ctx_inline_carriers "$N_CTX_MUT/clean")"
+
+# ── AC-1h.1's static half: no hook reads either cwd channel itself ────────────
+#
+# The ladder is ONE ladder because it is implemented once. A hook that still reached for
+# the environment variable or the payload's own cwd field would be carrying rung 1 or rung 2
+# of a second ladder, and the two would disagree exactly where this wave runs — a worktree
+# whose cwd and project directory are different trees.
+#
+# THE SWEEP STARTS AT THE FIRST `. "$BIONIC_LIB/…"` LINE, which is the first line in a hook
+# where a library function can be called at all. Everything above it — the loader span, the
+# cheap relevance reads, and the fail-closed arm — runs in a world where the library may not
+# exist, and ONE hook has a ladder there by necessity: canonical-sdlc-evidence-gate asks
+# "could a run exist here" before refusing a command it cannot read, and the file that owns
+# that rule is exactly the one that failed to load. That block is declared in the gate at
+# its definition as the one place duplication is the design. Scoping to "the whole file"
+# would have forced that necessary copy out and left the gate refusing `ls` in every
+# repository on the machine.
+#
+# IT IS OVER THE TEXT, COMMENTS INCLUDED, and deliberately: a comment naming a channel its
+# file no longer reads is how the next reader learns the wrong thing, so below the first
+# source line the hooks name the LADDER (lib/context.sh) rather than its rungs.
+ctx_ladder_carriers() {  # <hooks-dir> <names…> -> basenames reading a rung below the sources
+  local _d="$1" _h _body; shift
+  for _h in "$@"; do
+    [ -r "$_d/$_h.sh" ] || continue
+    _body=$(awk '/^\. "\$BIONIC_LIB\//{s=1} s{print}' "$_d/$_h.sh")
+    printf '%s' "$_body" | /usr/bin/grep -qE 'CLAUDE_PROJECT_DIR|\.cwd' && echo "$_h.sh"
+  done | sort | tr '\n' ' ' | sed 's/ $//'
+}
+
+# ONE DECLARED EXEMPTION, NAMED AND COUNTED rather than carved out of the pattern.
+# canonical-sdlc-governing-skill's worktree-lease wall reads the payload's own `.cwd` to ask
+# WHERE THE WRITE WAS ISSUED FROM — a different question from "which project is this hook
+# scoped to", and one the ladder's `pwd` rung answers wrongly, since a hook process's
+# directory is not documented to be the session's. It is exempt from the row below and held
+# by the two rows after it instead: exactly one such read, and no CLAUDE_PROJECT_DIR at all.
+# An exemption that grew to a second read, or to rung 1, fails.
+N_CTX_LADDER_EXEMPT='canonical-sdlc-governing-skill'
+# A `grep -v`, not a `case`: a one-line `case` inside a command substitution is the shape
+# this suite's own §case row forbids, and bash refuses to parse it here too.
+N_CTX_LADDER_SWEPT=$(printf '%s\n' $N_CTX_FIFTEEN \
+  | /usr/bin/grep -vxF "$N_CTX_LADDER_EXEMPT")
+expect_eq "none of the fifteen reads CLAUDE_PROJECT_DIR or the payload cwd below its sources" \
+  "" "$(ctx_ladder_carriers "$BIONIC_HOOKS_DIR" $N_CTX_LADDER_SWEPT)"
+
+# THE EXEMPTION, BOUNDED. Rung 1 is forbidden to it like everyone else, and its payload-cwd
+# read is exactly one — a wall, not a ladder.
+for _h in $N_CTX_LADDER_EXEMPT; do
+  _body=$(awk '/^\. "\$BIONIC_LIB\//{s=1} s{print}' "$BIONIC_HOOKS_DIR/$_h.sh")
+  expect_eq "$_h.sh reaches for no CLAUDE_PROJECT_DIR either" "0" \
+    "$(printf '%s' "$_body" | /usr/bin/grep -c 'CLAUDE_PROJECT_DIR' | tr -d ' ')"
+  expect_eq "$_h.sh reads the payload cwd exactly once, and for its own wall" "1" \
+    "$(printf '%s' "$_body" | /usr/bin/grep -c '\.cwd' | tr -d ' ')"
+done
+
+# NOT VACUOUS: the sweep really does reach fifteen non-empty bodies. A `. "$BIONIC_LIB/`
+# line that moved or lost its column-0 spelling would make every row above pass over air.
+N_CTX_READABLE=$(for _h in $N_CTX_FIFTEEN; do
+    [ -n "$(awk '/^\. "\$BIONIC_LIB\//{s=1} s{print}' "$BIONIC_HOOKS_DIR/$_h.sh")" ] && echo x
+  done | wc -l | tr -d ' ')
+expect_eq "…and the ladder sweep found a source line and a body in all fifteen" "15" "$N_CTX_READABLE"
+expect_eq "…of which fourteen are swept and one is the declared exemption" "14" \
+  "$(printf '%s\n' $N_CTX_LADDER_SWEPT | wc -l | tr -d ' ')"
+
+# MUTATION — an absence row passes as happily when the detector is broken as when the tree
+# is clean. A copy with one rung re-introduced BELOW the sources must be caught.
+N_CTX_LMUT="$SANDBOX/fx/ctx-ladder"
+mkdir -p "$N_CTX_LMUT"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$N_CTX_LMUT/" 2>/dev/null
+{
+  cat "$BIONIC_HOOKS_DIR/patrol-revive.sh"
+  printf '%s\n' 'CWD_MUT="${CLAUDE_PROJECT_DIR:-}"'
+} > "$N_CTX_LMUT/patrol-revive.sh"
+expect_eq "…and a hook that reaches for a rung below its sources is caught" \
+  "patrol-revive.sh" "$(ctx_ladder_carriers "$N_CTX_LMUT" $N_CTX_LADDER_SWEPT)"
 
 # ------------------------------------------------ §P′ THE SESSION-ID SOURCE, bound
 #
@@ -3301,12 +3484,25 @@ done
 # two hooks choosing differently give one session two of each. What is pinned is the
 # SOURCE, not the value: every reader calls `session_id`, and any payload read that
 # remains is the ARGUMENT to that call.
-N_SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check
-landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder
-session-start engage patrol-duties-gate stop-guard
-canonical-sdlc-evidence-gate canonical-sdlc-governing-skill protect-main protect-database
-background-suite-guard'
-for _h in $N_SID_READERS; do
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f/REQ-1h). The rule is unchanged and the
+# roster is unchanged; what split is HOW a member reaches `session_id`. Fifteen hooks reach
+# it through `bionic_context`, which calls it once and then applies the ONE shape guard
+# those hooks used to carry six copies of between them. Five reach it directly — the three
+# CLIs and the two roots-only readers, none of which take a hook payload or ask engagement.
+# The roster is split on that line rather than shortened, so a member that asks for NEITHER
+# still fails, and both halves are derived from the tree below.
+N_SID_VIA_CTX='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
+canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
+farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
+protect-main session-start stop-guard'
+N_SID_DIRECT='engage preflight-probe session-sweeper stop-check stop-orders'
+N_SID_READERS="$N_SID_VIA_CTX
+$N_SID_DIRECT"
+for _h in $N_SID_VIA_CTX; do
+  expect_eq "$_h.sh takes its session id from lib/session.sh, through bionic_context" "yes" \
+    "$(/usr/bin/grep -q '^bionic_context' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
+done
+for _h in $N_SID_DIRECT; do
   expect_eq "$_h.sh takes its session id from lib/session.sh" "yes" \
     "$(/usr/bin/grep -q 'session_id "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
 done
@@ -3319,9 +3515,17 @@ done
 # private-resolver family.
 N_SID_ACTUAL=$(/usr/bin/grep -l 'session_id "' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
   | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
-N_SID_EXPECTED=$(printf '%s\n' $N_SID_READERS | sort | tr '\n' ' ' | sed 's/ $//')
-expect_eq "the session-id reader roster names every hook that calls session_id, and no other" \
-  "$N_SID_EXPECTED" "$N_SID_ACTUAL"
+N_SID_DIRECT_EXPECTED=$(printf '%s\n' $N_SID_DIRECT | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the direct session-id roster names every hook that calls session_id, and no other" \
+  "$N_SID_DIRECT_EXPECTED" "$N_SID_ACTUAL"
+# AND THE OTHER HALF, derived the same way. A sixteenth hook that picked up the preamble
+# call without joining the roster is the omission this half exists to catch — it is the
+# same row §CTX states as the count of fifteen, asked here about the session key.
+N_SID_CTX_ACTUAL=$(/usr/bin/grep -l '^bionic_context' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+N_SID_CTX_EXPECTED=$(printf '%s\n' $N_SID_VIA_CTX | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the via-the-library roster names every hook that calls bionic_context, and no other" \
+  "$N_SID_CTX_EXPECTED" "$N_SID_CTX_ACTUAL"
 
 
 # ------------------------------------------------ §P‴ THE ENGAGEMENT-GUARD ROSTER, complete
@@ -3346,44 +3550,80 @@ expect_eq "the session-id reader roster names every hook that calls session_id, 
 # uses it to choose WHICH notice to print (its whole job is to speak to a bystander) and
 # session-poker.sh consults it inside the tick and adopt verbs. Their membership is pinned
 # too; what they are exempt from is the `|| exit 0` shape.
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). The decision is what is pinned, and the
+# decision has not moved — its SPELLING has. `bionic_context` asks `engaged_session` once
+# and hands back BIONIC_ENGAGED as a 0 or a 1, deliberately as a value: session-start
+# prints its bystander notice exactly where the other fourteen exit, and a library that
+# acted on the predicate would have deleted that notice. So thirteen hooks now spell the
+# guard `[ "$BIONIC_ENGAGED" = 1 ] || exit 0` at column 0, and THAT is the shape row below.
+#
+# THREE ROSTERS NOW, not two, because the third is a real and separate case:
+#   GUARD     — the thirteen that exit on the value the preamble resolved.
+#   OWN_ROOT  — canonical-sdlc-governing-skill, which asks the predicate ITSELF because it
+#               scopes to the ARTIFACT's root rather than the session's cwd (its own comment
+#               says why: a hook that scoped by one root and enforced against another would
+#               go quiet exactly where it was added to bind). It keeps the old call shape.
+#   DATA      — session-poker and session-start, which read the predicate without exiting.
 N_ENGAGED_READERS='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
-canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
-farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
-protect-main stop-guard'
+context-spend dispatch-preflight execution-recorder farm-out-reminder landing-gate
+patrol-duties-gate patrol-revive protect-database protect-main stop-guard'
+N_ENGAGED_OWN_ROOT='canonical-sdlc-governing-skill'
 N_ENGAGED_DATA='session-poker session-start'
 
-# derive_engaged <hooks-dir> -> sorted, space-joined basenames of every hook calling the predicate
+# derive_engaged <hooks-dir> -> sorted basenames of every hook calling the predicate DIRECTLY
 derive_engaged() {
   /usr/bin/grep -l 'engaged_session ' "$1"/*.sh 2>/dev/null \
     | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//'
 }
+# derive_engaged_value <hooks-dir> -> sorted basenames of every hook reading the VALUE
+derive_engaged_value() {
+  /usr/bin/grep -l 'BIONIC_ENGAGED' "$1"/*.sh 2>/dev/null \
+    | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//'
+}
 
-N_ENG_EXPECTED=$(printf '%s\n' $N_ENGAGED_READERS $N_ENGAGED_DATA | sort | tr '\n' ' ' | sed 's/ $//')
+N_ENG_EXPECTED=$(printf '%s\n' $N_ENGAGED_OWN_ROOT session-poker | sort | tr '\n' ' ' | sed 's/ $//')
 N_ENG_ACTUAL=$(derive_engaged "$BIONIC_HOOKS_DIR")
-expect_eq "the engagement roster names every hook that calls engaged_session, and no other" \
+expect_eq "the direct-predicate roster names every hook that calls engaged_session, and no other" \
   "$N_ENG_EXPECTED" "$N_ENG_ACTUAL"
 
-# NOT VACUOUS: the derived set is non-empty and large enough to be the real roster.
-expect_ne "…and the derivation actually found hooks (this row is not vacuous)" "" "$N_ENG_ACTUAL"
+N_ENGV_EXPECTED=$(printf '%s\n' $N_ENGAGED_READERS $N_ENGAGED_OWN_ROOT $N_ENGAGED_DATA \
+  | /usr/bin/grep -v '^session-poker$' | sort | tr '\n' ' ' | sed 's/ $//')
+N_ENGV_ACTUAL=$(derive_engaged_value "$BIONIC_HOOKS_DIR")
+expect_eq "…and the value roster names every hook that reads BIONIC_ENGAGED, and no other" \
+  "$N_ENGV_EXPECTED" "$N_ENGV_ACTUAL"
 
-# THE CALL SHAPE, per guard member. The first `engaged_session` line in the file must be
-# the guard itself, at column 0, with two `"$VAR"` arguments and `|| exit 0` — the hook's
-# first scoping decision. A guard that resolved a literal, swallowed the result or exited
-# non-zero would still satisfy the roster row above and fail here.
+# NOT VACUOUS: both derived sets are non-empty.
+expect_ne "…and the derivation actually found hooks (this row is not vacuous)" "" "$N_ENG_ACTUAL"
+expect_ne "…and so did the value derivation" "" "$N_ENGV_ACTUAL"
+
+# THE GUARD SHAPE, per member. The FIRST BIONIC_ENGAGED line in the file must be the guard
+# itself, at column 0, comparing to 1 and exiting 0 — the hook's first scoping decision
+# after the context resolves. A guard that compared to the wrong value, swallowed the
+# result, or exited non-zero would still satisfy the roster rows above and fail here.
 for _h in $N_ENGAGED_READERS; do
-  _line=$(/usr/bin/grep -m1 'engaged_session ' "$BIONIC_HOOKS_DIR/$_h.sh" 2>/dev/null)
+  _line=$(/usr/bin/grep -m1 'BIONIC_ENGAGED' "$BIONIC_HOOKS_DIR/$_h.sh" 2>/dev/null)
   case "$_line" in
-    'engaged_session "$'*'" "$'*'" || exit 0') ok "$_h.sh guards on the canonical call shape" ;;
-    *) no "$_h.sh guards on the canonical call shape" "first engaged_session line was: [$_line]" ;;
+    '[ "$BIONIC_ENGAGED" = 1 ] || exit 0') ok "$_h.sh guards on the canonical shape" ;;
+    *) no "$_h.sh guards on the canonical shape" "first BIONIC_ENGAGED line was: [$_line]" ;;
   esac
 done
 
-# THE DATA READERS are members of the roster and are NOT held to that shape — pinned so a
-# future reader does not "fix" them into an exit.
-for _h in $N_ENGAGED_DATA; do
-  expect_eq "$_h.sh reads the predicate (as data, exempt from the guard shape)" "yes" \
-    "$(/usr/bin/grep -q 'engaged_session ' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
+# THE ONE THAT ASKS FOR ITSELF keeps the call shape it always had, against its own root.
+for _h in $N_ENGAGED_OWN_ROOT; do
+  _line=$(/usr/bin/grep -m1 'engaged_session ' "$BIONIC_HOOKS_DIR/$_h.sh" 2>/dev/null)
+  case "$_line" in
+    'engaged_session "$'*'" "$'*'" || exit 0') ok "$_h.sh guards on the canonical call shape, against the artifact root" ;;
+    *) no "$_h.sh guards on the canonical call shape, against the artifact root" "first engaged_session line was: [$_line]" ;;
+  esac
 done
+
+# THE DATA READERS are members and are NOT held to either shape — pinned so a future reader
+# does not "fix" them into an exit. session-poker still asks the predicate directly inside
+# its verb bodies; session-start reads the value the preamble resolved.
+expect_eq "session-poker.sh reads the predicate (as data, exempt from the guard shape)" "yes" \
+  "$(/usr/bin/grep -q 'engaged_session ' "$BIONIC_HOOKS_DIR/session-poker.sh" && echo yes || echo no)"
+expect_eq "session-start.sh reads the value (as data, exempt from the guard shape)" "yes" \
+  "$(/usr/bin/grep -q 'BIONIC_ENGAGED' "$BIONIC_HOOKS_DIR/session-start.sh" && echo yes || echo no)"
 
 # MUTATION, both directions. A completeness row that never moves is a comment. Two doctored
 # copies of the hooks directory: one with a guard DELETED (a hook silently leaves the
@@ -3393,13 +3633,18 @@ N_ENG_MUT="$SANDBOX/fx/engaged-roster"
 mkdir -p "$N_ENG_MUT/drop" "$N_ENG_MUT/add"
 cp "$BIONIC_HOOKS_DIR"/*.sh "$N_ENG_MUT/drop/" 2>/dev/null
 cp "$BIONIC_HOOKS_DIR"/*.sh "$N_ENG_MUT/add/" 2>/dev/null
-anchor "$BIONIC_HOOKS_DIR/landing-gate.sh" 'engaged_session ' 1
-grep -v 'engaged_session ' "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$N_ENG_MUT/drop/landing-gate.sh"
+# RE-POINTED with the roster: landing-gate's guard is a BIONIC_ENGAGED test now, so the
+# `drop` mutant deletes that line instead, and the completeness row it must turn red is the
+# VALUE roster. A `grep -v` for a literal that had left the file would have deleted nothing
+# and reported a mutation that never happened, which is why the anchor above it is the part
+# that matters.
+anchor "$BIONIC_HOOKS_DIR/landing-gate.sh" 'BIONIC_ENGAGED' 1
+grep -v 'BIONIC_ENGAGED' "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$N_ENG_MUT/drop/landing-gate.sh"
 expect_ne "…and a hook that quietly loses its guard makes the roster row RED" \
-  "$N_ENG_EXPECTED" "$(derive_engaged "$N_ENG_MUT/drop")"
-printf 'engaged_session "$X" "$Y" || exit 0\n' > "$N_ENG_MUT/add/zz-new-wall.sh"
+  "$N_ENGV_EXPECTED" "$(derive_engaged_value "$N_ENG_MUT/drop")"
+printf '[ "$BIONIC_ENGAGED" = 1 ] || exit 0\n' > "$N_ENG_MUT/add/zz-new-wall.sh"
 expect_ne "…and an unlisted NEW hook carrying the guard makes it RED too" \
-  "$N_ENG_EXPECTED" "$(derive_engaged "$N_ENG_MUT/add")"
+  "$N_ENGV_EXPECTED" "$(derive_engaged_value "$N_ENG_MUT/add")"
 
 # THE PAIRED POSITIVE: the same copying, unmutated, still agrees — or both reds above are
 # the `cp` and not the mutation.
@@ -3407,6 +3652,8 @@ mkdir -p "$N_ENG_MUT/clean"
 cp "$BIONIC_HOOKS_DIR"/*.sh "$N_ENG_MUT/clean/" 2>/dev/null
 expect_eq "control: an UNMUTATED copy of the hooks directory still matches the roster" \
   "$N_ENG_EXPECTED" "$(derive_engaged "$N_ENG_MUT/clean")"
+expect_eq "control: …and matches the value roster too" \
+  "$N_ENGV_EXPECTED" "$(derive_engaged_value "$N_ENG_MUT/clean")"
 
 # ------------------------------------------------ §P″ THE DIVERGENT-CHANNEL FIXTURE, two
 # real hooks, one filename (auditor A-1, AC-2's other half)
@@ -8518,15 +8765,31 @@ expect_eq "S18.2 landing-gate.sh calls the shared mapping" "1" \
   "$(grep -cF 'worktree_for_row "$repo" "$name"' "$S18_LG")"
 expect_eq "S18.2 …and never redefines it" "0" \
   "$(grep -c '^worktree_for_row()' "$S18_LG")"
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). This was the only BYTE-EXACT
+# BIONIC_LIB_WANT string in the tree, and it broke the moment the gate declared one more
+# library — which is the wrong thing for it to be sensitive to. What S18.2 owns is that the
+# dependency it just proved the gate CALLS is also DECLARED, so the line is re-derived from
+# the file and the membership of `worktree.sh` in it is the assertion. The anchor keeps it
+# honest: a gate with no WANT line at all fails loudly rather than comparing empty strings.
+S18_WANT=$(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$S18_LG" | head -1)
+expect_nonempty "S18.2 the gate declares a BIONIC_LIB_WANT line at all" "$S18_WANT"
 expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
-  "$(grep -cF 'BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh worktree.sh"' "$S18_LG")"
+  "$(printf '%s' " $S18_WANT " | /usr/bin/grep -c ' worktree\.sh ')"
 
 # --- §S18.3 the reconciliation re-asks the SAME impact-command key S13's dispatch wall
 # reads — never a second config key, never a second derivation command ---
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). The root variable is `BIONIC_ROOT` in
+# both hooks now, and a byte-exact literal naming the OLD one is a pin that breaks on a
+# rename while saying nothing about the property. The property is that the two hooks ask
+# ONE key through ONE call shape, so each hook's own call line is derived and the two are
+# compared to each other — which is a stronger statement than either literal was, and one
+# no rename can falsify.
+S18_LG_IMPACT=$(/usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | sort -u)
+S13_DP_IMPACT=$(/usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$S13_DP" | sort -u)
 expect_eq "S18.3 landing-gate.sh reads impact-command exactly once" "1" \
-  "$(grep -cF 'config_value "$REPO" "impact-command" ""' "$S18_LG")"
-expect_eq "S18.3 …the same call shape dispatch-preflight.sh uses" "1" \
-  "$(grep -cF 'config_value "$REPO" "impact-command" ""' "$S13_DP")"
+  "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | tr -d ' ')"
+expect_nonempty "S18.3 …and the call is findable at all (the pin is not comparing air)" "$S18_LG_IMPACT"
+expect_eq "S18.3 …the same call shape dispatch-preflight.sh uses" "$S18_LG_IMPACT" "$S13_DP_IMPACT"
 # ============================================================
 section "S19 — THE MUTATION ANCHOR: one call, every doctoring site (AC-29/AC-30/AC-31)"
 # ============================================================

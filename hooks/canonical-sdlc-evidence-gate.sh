@@ -40,8 +40,8 @@ set -u
 # consulted BEFORE this wall decides to refuse — otherwise a broken publish locks
 # the user out of the very commands that repair it (R-1 §(5), the lockout this wave
 # is named for). `jq` on the payload is the one read that does not need the library.
-INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+BIONIC_INPUT=$(cat)
+COMMAND=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.command // empty')
 
 # Not a Bash tool call or empty command — nothing to gate, and nothing the library
 # would have been consulted about.
@@ -57,7 +57,7 @@ fi
 # FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): this is a wall over an
 # IRREVERSIBLE action, so it refuses rather than waving a command through it cannot
 # read — after permitting the four repair commands by whole-string match.
-BIONIC_LIB_WANT="git-argv.sh refuse.sh root.sh run.sh session.sh units.sh"
+BIONIC_LIB_WANT="context.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -201,15 +201,19 @@ _bionic_gate_run_possible() {  # <cwd> -> 0 when a real `.bionic` sits at or abo
   return 1
 }
 if [ -n "$BIONIC_LIB_MISSING" ]; then
-  # The same cwd this hook resolves its project from below (CLAUDE_PROJECT_DIR, then
-  # the payload, then $PWD), read here without the library because the answer decides
-  # whether the library's absence is this gate's business at all.
+  # The same cwd lib/context.sh resolves below, restated here because the answer
+  # decides whether the library's absence is this gate's business at all — and the
+  # library is what failed to load. The rungs are kept in step by hand for this one
+  # block only; tests/cross-gate-agreement.test.sh §CTX scopes its ladder sweep below
+  # the loader span for exactly this reason.
   _BG_CWD="${CLAUDE_PROJECT_DIR:-}"
-  [ -n "$_BG_CWD" ] || _BG_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+  [ -n "$_BG_CWD" ] || _BG_CWD=$(echo "$BIONIC_INPUT" | jq -r '.cwd // empty')
   [ -n "$_BG_CWD" ] || _BG_CWD="$PWD"
   _bionic_gate_run_possible "$_BG_CWD" || exit 0
   loader_fail_closed "canonical-sdlc-evidence-gate" "$COMMAND"
 fi
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/git-argv.sh"
 # shellcheck source=/dev/null
@@ -263,30 +267,27 @@ fi
 # to either.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
-# Project resolution mirrors memory-update.sh: CLAUDE_PROJECT_DIR first,
-# then the hook input's cwd field, then pwd. Consistent with existing hooks.
-# That value NAMES the invoking directory; the ROOT is computed from it below.
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
-if [ -z "$PROJECT_DIR" ]; then
-  PROJECT_DIR=$(echo "$INPUT" | jq -r '.cwd // empty')
-fi
-if [ -z "$PROJECT_DIR" ]; then
-  PROJECT_DIR=$(pwd)
-fi
-
-# THE ROOT, from the library (spec AC-10, lib/root.sh). This used to be a private
-# `resolve_project_root()` — one of eight byte-identical copies across hooks/, held
-# together by an agreement suite that could only ever prove they had not drifted YET.
-# The eight are gone; `project_root` is the one answer, and it is a strictly better
-# one: the old copy asked git for the root and stopped there, so a project whose
-# `.bionic/` sat ABOVE the repo (a repo nested in a workspace) resolved to the repo
-# and every artifact path this gate checks landed in the wrong tree.
+# THE CONTEXT, IN ONE CALL AND NOT BEFORE NOW (REQ-1f, lib/context.sh). The POSITION
+# is this gate's own and is deliberate: every line above is answerable without touching
+# the filesystem, and a non-commit Bash command must not pay for a root walk. So the
+# call sits BELOW the commit arm, and the gate reads nothing of the context itself
+# first. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
+# `loader_fail_closed` needed the command text before any library existed.
 #
-# THE WORKTREE CASE, which the old copy did get right and this one keeps: a linked
-# worktree maps back onto its main repository, so every worktree of one repo
-# resolves to ONE root and therefore one audit file, one docs root, one plan. Obeying
-# the governing hook and the gate at once was impossible before that mapping existed.
-PROJECT_DIR=$(project_root "$PROJECT_DIR")
+# THE CWD LADDER IS THE LIBRARY'S, and is named nowhere else in this file but the
+# fail-closed pre-check above — which restates it by hand for the one reason that
+# block exists at all: the file that owns the rule is exactly what failed to load.
+#
+# THE ROOT used to be a private `resolve_project_root()` — one of eight byte-identical
+# copies across hooks/, held together by an agreement suite that could only ever prove
+# they had not drifted YET. The eight are gone; `project_root` is the one answer, and a
+# strictly better one: the old copy asked git for the root and stopped there, so a
+# project whose `.bionic/` sat ABOVE the repo (a repo nested in a workspace) resolved to
+# the repo and every artifact path this gate checks landed in the wrong tree. THE
+# WORKTREE CASE, which the old copy did get right and this one keeps: a linked worktree
+# maps back onto its main repository, so every worktree of one repo resolves to ONE root
+# and therefore one audit file, one docs root, one plan.
+bionic_context 2>/dev/null || exit 0
 
 # ---------- THE ENGAGEMENT GUARD (AC-6): is this session bionic's at all? ----------
 #
@@ -310,8 +311,7 @@ PROJECT_DIR=$(project_root "$PROJECT_DIR")
 # partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
 # which never consented is the defect this guard exists to remove.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-EG_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || EG_SID=""
-engaged_session "$PROJECT_DIR" "$EG_SID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # THE DOCS ROOT, FROM THE LIBRARY. This hook carried `resolve_docs_root()` and was the
 # designated ORIGIN of the four hook copies cross-gate §R held body-for-body. There are no
@@ -323,7 +323,7 @@ engaged_session "$PROJECT_DIR" "$EG_SID" || exit 0
 # `.claude/rules/hook-authoring.md` § "`set -u` and conditionally-bound variables".
 # The misplacement sweep below is this value's only remaining consumer — plan
 # SELECTION moved to the library.
-DOCS_ROOT=$(docs_root "$PROJECT_DIR")
+DOCS_ROOT=$(docs_root "$BIONIC_ROOT")
 
 # THE PLAN, from the library (lib/run.sh's `active_plan`). This used to be a private
 # `has_sdlc_state()` plus a newest-.md walk — one of five copies of one question
@@ -360,7 +360,7 @@ DOCS_ROOT=$(docs_root "$PROJECT_DIR")
 # So the closed plan stays THE plan here — the hygiene refusals below still judge it,
 # because a plan that lies is a defect in every state and this hook's ordering contract
 # says so — and nothing else in the root is read to replace it.
-EG_RUN=$(session_run "$PROJECT_DIR" "$EG_SID")
+EG_RUN=$(session_run "$BIONIC_ROOT" "$BIONIC_SID")
 EG_VERDICT="${EG_RUN%% *}"
 EG_VPATH=""
 case "$EG_RUN" in *' '*) EG_VPATH="${EG_RUN#* }" ;; esac
@@ -374,7 +374,7 @@ case "$EG_VERDICT" in
     # reached it before this wave. `fallback` and `none` both mean "no binding", and
     # AC-3's promise is that such a session behaves EXACTLY as it did — so the promise is
     # kept by running the old path rather than by a new one that agrees with it.
-    PLAN=$(active_plan "$PROJECT_DIR") || PLAN=""
+    PLAN=$(active_plan "$BIONIC_ROOT") || PLAN=""
     ;;
 esac
 
@@ -448,7 +448,7 @@ esac
 # bound plan that is not on disk is the arm below it.
 if [ -z "$PLAN" ]; then
   MISPLACED_PLAN=""
-  if [ -d "$PROJECT_DIR" ]; then
+  if [ -d "$BIONIC_ROOT" ]; then
     while IFS= read -r -d '' f; do
       case "$f" in "$DOCS_ROOT"/*) continue ;; esac
       if head -c 8192 "$f" \
@@ -460,7 +460,7 @@ if [ -z "$PLAN" ]; then
         MISPLACED_PLAN="$f"
         break
       fi
-    done < <(find "$PROJECT_DIR" -maxdepth 5 \
+    done < <(find "$BIONIC_ROOT" -maxdepth 5 \
                \( -name .git -o -name node_modules \) -prune -o \
                -type f -name '*.plan.md' -print0 2>/dev/null)
   fi
@@ -608,7 +608,7 @@ audit_root() {
   # project, so the finding would land keyed on a tree that owns nothing. When the
   # answer is not a real project, the invoking project (itself library-resolved) is
   # the honest owner — which is the fail-open the walk-up this replaced also had.
-  if [ -d "$r/.bionic" ]; then printf '%s\n' "$r"; else printf '%s\n' "$PROJECT_DIR"; fi
+  if [ -d "$r/.bionic" ]; then printf '%s\n' "$r"; else printf '%s\n' "$BIONIC_ROOT"; fi
 }
 
 # Incident 0001: the audit stream must live where a consuming project cannot
@@ -1321,7 +1321,7 @@ fi
 case "$EG_VERDICT" in
   bound-open)   : ;;
   bound-closed) exit 0 ;;
-  *)            active_run "$PROJECT_DIR" >/dev/null || exit 0 ;;
+  *)            active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
 esac
 
 # Find the evidence line for the current step: a "Step N:" line, with or
@@ -1444,7 +1444,7 @@ resolve_requirements_path() {  # $1 = raw requirements: value
   case "$1" in
     /*)      printf '%s\n' "$1" ;;
     specs/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
-    *)       printf '%s/%s\n' "$PROJECT_DIR" "$1" ;;
+    *)       printf '%s/%s\n' "$BIONIC_ROOT" "$1" ;;
   esac
 }
 
@@ -1755,7 +1755,7 @@ user_confirmed_form_ok() {
 plan_write_note() {
   local rel="$PLAN"
   [ -n "$PLAN" ] || return 0
-  case "$PLAN" in "$PROJECT_DIR"/*) rel="${PLAN#"$PROJECT_DIR"/}" ;; esac
+  case "$PLAN" in "$BIONIC_ROOT"/*) rel="${PLAN#"$BIONIC_ROOT"/}" ;; esac
   case "$COMMAND" in
     *"$PLAN"*|*"$rel"*)
       echo "Note: this command also writes the plan — run the edit first, then commit in a separate call." ;;
@@ -2129,7 +2129,7 @@ resolve_walk_path() {  # $1 = raw walk-artifact value
   case "$1" in
     /*)       printf '%s\n' "$1" ;;
     record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
-    *)        printf '%s/%s\n' "$PROJECT_DIR" "$1" ;;
+    *)        printf '%s/%s\n' "$BIONIC_ROOT" "$1" ;;
   esac
 }
 

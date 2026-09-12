@@ -26,19 +26,14 @@
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-INPUT=$(cat) || exit 0
-[ -n "$INPUT" ] || exit 0
+BIONIC_INPUT=$(cat) || exit 0
+[ -n "$BIONIC_INPUT" ] || exit 0
 
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null || printf ''; }
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null || printf ''; }
 
 AGENT_TYPE=$(_jq '.agent_type');   [ -n "$AGENT_TYPE" ] && exit 0
 TOOL_NAME=$(_jq '.tool_name');     [ "$TOOL_NAME" = "Bash" ] || exit 0
 CMD=$(_jq '.tool_input.command');  [ -n "$CMD" ] || exit 0
-PAYLOAD_SID=$(_jq '.session_id')
-
-CWD="${CLAUDE_PROJECT_DIR:-}"
-[ -n "$CWD" ] || CWD=$(_jq '.cwd')
-[ -n "$CWD" ] && [ -d "$CWD" ] || exit 0
 
 # ── the library ──────────────────────────────────────────────────────────────
 # The command classifier, the root, the run predicate and the session id. One idiom,
@@ -50,7 +45,7 @@ CWD="${CLAUDE_PROJECT_DIR:-}"
 # the hook prints one line and steps aside. Until 1.4.0 it denied instead, on the
 # same reasoning the two irreversible-action walls still use; the cost of THAT
 # mistake is what separates them.
-BIONIC_LIB_WANT="cmd-class.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="cmd-class.sh context.sh refuse.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -149,6 +144,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "farm-out-reminder"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/cmd-class.sh"
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -157,13 +154,17 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "farm-out-reminder"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
 
-# THE ROOT AND THE SESSION ID, from the library. `project_root` walks to the nearest
-# real `.bionic` ancestor rather than trusting whatever directory invoked the hook —
-# the audit file and the config below both hang off the answer, and a worktree that
-# answered with its own tree would write a second audit stream for one project.
-ROOT=$(project_root "$CWD")
-SESSION_ID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || SESSION_ID=""
-[ -n "$SESSION_ID" ] || SESSION_ID="unknown"
+# THE ROOT AND THE SESSION ID, from their one owner (REQ-1f, lib/context.sh).
+# `project_root` walks to the nearest real `.bionic` ancestor rather than trusting
+# whatever directory invoked the hook — the audit file and the config below both hang
+# off the answer, and a worktree that answered with its own tree would write a second
+# audit stream for one project.
+#
+# THE `unknown` SUBSTITUTION IS GONE (REQ-1h). An empty session id used to become that
+# literal and carry on to be refused by name one guard later; the library returns 1 and
+# this hook exits, which is the same silence by a route that never forms a state path
+# out of a value it has already judged unusable.
+bionic_context 2>/dev/null || exit 0
 
 # ---------- THE ENGAGEMENT GUARD (AC-6): is this session bionic's at all? ----------
 #
@@ -179,12 +180,11 @@ SESSION_ID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || SESSION_ID=""
 # bypass. An audit line recording an "override" of a wall that was never going to fire
 # is noise in the one stream that has to stay readable.
 #
-# `unknown` IS NOT A SESSION. The fallback two lines up is a display value; the
-# predicate refuses it by name, along with an absent marker, a symlink at the path and a
-# foreign or unshaped key. Every unreadable state reads as NOT engaged, because the
-# arming partition is the consent boundary (1.3.2 close-out).
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — an absent marker, a symlink at the path,
+# a foreign key — because the arming partition is the consent boundary (1.3.2 close-out).
+# An unshaped key never reaches here at all: `bionic_context` refused it above.
 # [WALL: tests/cmd-class.test.sh]
-engaged_session "$ROOT" "$SESSION_ID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # ── NO RUN PREDICATE HERE, DELIBERATELY (step-6 review R-1) ──────────────────
 #
@@ -196,11 +196,11 @@ engaged_session "$ROOT" "$SESSION_ID" || exit 0
 # re-open the hole R-1 named.
 # [WALL: tests/cmd-class.test.sh]
 
-PROJECT_DIR="$ROOT"
+
 
 MODE="block"
-if [ -f "$PROJECT_DIR/.bionic/config.yaml" ]; then
-  _cfg=$(grep -E '^farm-out-mode:' "$PROJECT_DIR/.bionic/config.yaml" 2>/dev/null | head -1 \
+if [ -f "$BIONIC_ROOT/.bionic/config.yaml" ]; then
+  _cfg=$(grep -E '^farm-out-mode:' "$BIONIC_ROOT/.bionic/config.yaml" 2>/dev/null | head -1 \
     | sed 's/^farm-out-mode:[[:space:]]*//' | tr -d '\r' | sed 's/[[:space:]]*$//')
   case "$_cfg" in block|advisory|off) MODE="$_cfg" ;; esac
 fi
@@ -231,7 +231,7 @@ log_event() {  # $1=event $2=class
   # A length bound is not a sanitizer — incident 0001 leaked a live credential
   # through the former `cut -c1-120` excerpt of the raw command.
   local f
-  if f=$(audit_path "$PROJECT_DIR"); then
+  if f=$(audit_path "$BIONIC_ROOT"); then
     local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE"
     mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
   fi
@@ -322,12 +322,12 @@ classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
 }
 
 nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = suppressed
-  local state="$PROJECT_DIR/.bionic/tmp/farm-out.state"
-  mkdir -p "$PROJECT_DIR/.bionic/tmp" 2>/dev/null
-  if [ -f "$state" ] && grep -qF "$SESSION_ID	$1" "$state" 2>/dev/null; then
+  local state="$BIONIC_ROOT/.bionic/tmp/farm-out.state"
+  mkdir -p "$BIONIC_ROOT/.bionic/tmp" 2>/dev/null
+  if [ -f "$state" ] && grep -qF "$BIONIC_SID	$1" "$state" 2>/dev/null; then
     log_event "suppressed" "$1"; return 0
   fi
-  printf '%s\t%s\n' "$SESSION_ID" "$1" >> "$state" 2>/dev/null || true
+  printf '%s\t%s\n' "$BIONIC_SID" "$1" >> "$state" 2>/dev/null || true
   log_event "nudge" "$1"; emit_nudge "$1" "$2"; return 0
 }
 

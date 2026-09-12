@@ -23,25 +23,17 @@
 set -u
 
 command -v jq >/dev/null 2>&1 || exit 0
-INPUT=$(cat)
+BIONIC_INPUT=$(cat)
 
-PAYLOAD_SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null) || PAYLOAD_SID=""
-
-TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
+TRANSCRIPT=$(printf '%s' "$BIONIC_INPUT" | jq -r '.transcript_path // empty' 2>/dev/null) || TRANSCRIPT=""
 [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || exit 0
-
-CWD="${CLAUDE_PROJECT_DIR:-}"
-if [ -z "$CWD" ]; then
-  CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null) || CWD=""
-fi
-[ -n "$CWD" ] && [ -d "$CWD" ] || exit 0
 
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN, and here that
 # is barely a choice: this hook is an instrument. Its whole failure mode is silence, and
 # a missing library is one more way to be silent.
-BIONIC_LIB_WANT="root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -138,19 +130,25 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "context-spend"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
 
-# ROOT, SESSION ID, RUN — the three facts, each from its one owner. The state file this
-# hook diffs against is per (plan, session), so a root or an id spelled differently here
-# than in the hook that wrote the plan produces a delta against nobody's occupancy.
-ROOT=$(project_root "$CWD")
-SESSION_ID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || SESSION_ID=""
-[ -n "$SESSION_ID" ] || SESSION_ID="unknown"
-PROJECT_DIR="$ROOT"
+# ROOT, SESSION ID, RUN — the three facts, from their one owner (REQ-1f,
+# lib/context.sh). The state file this hook diffs against is per (plan, session), so a
+# root or an id spelled differently here than in the hook that wrote the plan produces a
+# delta against nobody's occupancy — which is why one call answering for all fifteen is
+# worth more here than the four lines it replaces.
+#
+# THE `unknown` SUBSTITUTION IS GONE (REQ-1h). An empty session id used to become the
+# literal `unknown` and carry on, which `engaged_session` then read as NOT engaged — a
+# two-step route to the same silence, through a value that had meanwhile been
+# interpolated into a state path. The library returns 1 instead and this hook exits.
+bionic_context 2>/dev/null || exit 0
 
 # Incident 0001: the audit stream must live where a consuming project cannot
 # commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
@@ -178,10 +176,10 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
 # by invoking canonical-sdlc. A session that never did is a bystander here and must not see
 # a refusal, an advisory, or a state write from this hook. `engaged_session` (lib/run.sh) is
 # true only for a REGULAR file at `.bionic/tmp/engaged-<sid>.state`; every unreadable state —
-# absent, symlink, foreign sid, and the `unknown` fallback this hook substitutes above —
-# reads as NOT engaged. Silent, exit 0: the direction §7 gives every start-side ambiguity,
-# and here it is the consent boundary itself (1.3.2 close-out ruling).
-engaged_session "$PROJECT_DIR" "$SESSION_ID" || exit 0
+# absent, symlink, foreign sid — reads as NOT engaged. Silent, exit 0: the direction §7
+# gives every start-side ambiguity, and here it is the consent boundary itself (1.3.2
+# close-out ruling). `bionic_context` asked the question above; this is the answer.
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
 #
@@ -205,10 +203,8 @@ engaged_session "$PROJECT_DIR" "$SESSION_ID" || exit 0
 # this hook NEVER writes stdout, see the header) (AC-3); bound to a plan that has
 # since closed takes exactly this line's existing branch — the hard exit — after
 # announcing the closure (AC-6).
-_RUN_VERDICT=$(session_run "$PROJECT_DIR" "$SESSION_ID")
-_RUN_WORD="${_RUN_VERDICT%% *}"
-PLAN="${_RUN_VERDICT#* }"
-case "$_RUN_WORD" in
+PLAN="$BIONIC_RUN_PLAN"
+case "$BIONIC_RUN_WORD" in
   bound-open) : ;;
   fallback)
     echo "context-spend: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
@@ -248,7 +244,7 @@ OCCUPIED=${_row##*	}
 case "$OCCUPIED" in ''|*[!0-9]*) exit 0 ;; esac
 [ "$OCCUPIED" -gt 0 ] || exit 0
 
-STATE_DIR="$PROJECT_DIR/.bionic/tmp"
+STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
 STATE="$STATE_DIR/context-spend.state"
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 
@@ -261,8 +257,8 @@ fi
 # concurrent sessions on the same plan must never diff against each
 # other's occupancy — a session change re-seeds, same as a plan change.
 # [INSTRUMENT]
-if [ "$s_plan" != "$PLAN" ] || [ "$s_sess" != "$SESSION_ID" ] || [ -z "$s_step" ]; then
-  printf '%s\t%s\t%s\t%s\n' "$PLAN" "$SESSION_ID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
+if [ "$s_plan" != "$PLAN" ] || [ "$s_sess" != "$BIONIC_SID" ] || [ -z "$s_step" ]; then
+  printf '%s\t%s\t%s\t%s\n' "$PLAN" "$BIONIC_SID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
   exit 0
 fi
 
@@ -275,8 +271,8 @@ case "$s_occ" in ''|*[!0-9]*) s_occ="$OCCUPIED" ;; esac
 DELTA=$((OCCUPIED - s_occ))
 if [ "$DELTA" -ge 0 ]; then DELTA="+$DELTA"; fi
 LINE="- $(date -u +%Y-%m-%dT%H:%M:%SZ) context-spend step-$s_step: occupied=$OCCUPIED delta=$DELTA model=$MODEL ($PLAN)"
-if AUDIT_FILE=$(audit_path "$PROJECT_DIR"); then
+if AUDIT_FILE=$(audit_path "$BIONIC_ROOT"); then
   mkdir -p "$(dirname "$AUDIT_FILE")" 2>/dev/null && printf '%s\n' "$LINE" >> "$AUDIT_FILE" 2>/dev/null
 fi
-printf '%s\t%s\t%s\t%s\n' "$PLAN" "$SESSION_ID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
+printf '%s\t%s\t%s\t%s\n' "$PLAN" "$BIONIC_SID" "$STEP" "$OCCUPIED" > "$STATE" 2>/dev/null || true
 exit 0
