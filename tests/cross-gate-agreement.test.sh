@@ -3293,6 +3293,123 @@ for _h in $N_ADOPTED; do
     "$(/usr/bin/grep -q 'project_root "' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
 done
 
+# ------------------------------------------------ §CTX THE CONTEXT PREAMBLE, one lib call
+#
+# (epic-23 wave-11-lean-spine, REQ-1f (ii) AC-1f.2 and REQ-1h AC-1h.1; spec Design §1
+# "ContextPreamble", §2 D6, §3 ownership row "context preamble".)
+#
+# WHAT WAS WRONG. Fifteen hooks opened the same way after the loader — read the payload,
+# find the cwd, find the root, resolve the session id, ask engagement, ask the run — in 861
+# lines that said one thing, and the T10 census measured that they did not in fact say the
+# same thing: SEVEN cwd ladders, a session-id shape guard in six of the fifteen, three
+# different actions on an empty id, and one hook reading its session key twice from two
+# sources. `payload/scripts/lib/context.sh` says it once, as `bionic_context`.
+#
+# THE INVARIANT IS NEGATIVE, and that is the point. "Every hook calls the library" is
+# satisfied by a hook that calls it and then restates the sequence anyway — which is how
+# every duplicated-family regression in this tree has actually happened. So the pin has two
+# halves: each of the fifteen CALLS it, and NO file under hooks/ carries the sequence
+# inline. The second half is the one with teeth, and the mutation arm below is what keeps it
+# from being a comment.
+#
+# THE FIFTEEN, named rather than globbed (A-40/A-41). session-sweeper and stop-check read a
+# root, a sid and docs_root and ask neither engagement nor a run verdict — §Roots below pins
+# that neither declares run.sh, which adopting context.sh would break — and the three CLIs
+# (engage, preflight-probe, stop-orders) plus session-poker take no hook payload at all.
+# All six keep their own calls, which is why the negative half is scoped by the SEQUENCE
+# rather than by the presence of any one function.
+N_CTX_FIFTEEN='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
+canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
+farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
+protect-main session-start stop-guard'
+
+for _h in $N_CTX_FIFTEEN; do
+  expect_eq "$_h.sh asks lib/context.sh:bionic_context for its context" "yes" \
+    "$(/usr/bin/grep -q 'bionic_context' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
+done
+
+# AND THE COUNT IS EXACTLY FIFTEEN (AC-1f.2's own measurement). The per-hook rows above
+# cannot see a SIXTEENTH caller, and a hook that picked the call up without being part of
+# the preamble family is a hook paying a root walk and a plan walk for nothing.
+N_CTX_CALLERS=$(/usr/bin/grep -l 'bionic_context' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+N_CTX_EXPECTED=$(printf '%s\n' $N_CTX_FIFTEEN | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the preamble roster names every hook that calls bionic_context, and no other" \
+  "$N_CTX_EXPECTED" "$N_CTX_CALLERS"
+
+# ── the negative half: the sequence occurs in ZERO hook bodies ────────────────
+#
+# THE SEQUENCE IS DEFINED BY WHAT IT DOES, not by a line of text: a body that, BELOW its
+# loader span, calls `project_root "` AND `session_id "` AND `engaged_session "` itself is a
+# hook that has restated the preamble whether or not it also calls the library. Below the
+# span, because the span itself is byte-identical in 22 files and contains none of the three
+# — scoping to it would be scoping to a constant.
+#
+# THE SIX NON-MEMBERS SURVIVE THIS TEST BY CONSTRUCTION, not by exemption: none of them
+# calls all three. session-sweeper and stop-check ask for no engagement at all, the three
+# CLIs ask for neither engagement nor a payload, and session-poker reads the predicate as
+# data from inside a verb body. That is what makes an UNSCOPED sweep of hooks/*.sh the right
+# shape here — an allow-list would have to be maintained, and the thing it would be hiding
+# is exactly the thing this row exists to find.
+ctx_inline_carriers() {  # <hooks-dir> -> basenames carrying the inline sequence below the span
+  local _f _body
+  for _f in "$1"/*.sh; do
+    [ -f "$_f" ] || continue
+    _body=$(awk '/^# --- bionic-loader\/v2 END$/{s=1;next} s{print}' "$_f")
+    printf '%s\n' "$_body" | /usr/bin/grep -q 'project_root "'    || continue
+    printf '%s\n' "$_body" | /usr/bin/grep -q 'session_id "'      || continue
+    printf '%s\n' "$_body" | /usr/bin/grep -q 'engaged_session "' || continue
+    basename "$_f"
+  done | sort | tr '\n' ' ' | sed 's/ $//'
+}
+
+expect_eq "no hook body carries the context sequence inline any more" \
+  "" "$(ctx_inline_carriers "$BIONIC_HOOKS_DIR")"
+
+# MUTATION — the row above is a claim about ABSENCE, and an absence row passes just as
+# happily when the detector is broken as when the tree is clean. One copy of the hooks
+# directory, with the sequence re-inlined into ONE hook below its loader span, must be
+# reported as a carrier. If it is not, the row above proves nothing.
+N_CTX_MUT="$SANDBOX/fx/ctx-inline"
+mkdir -p "$N_CTX_MUT/clean" "$N_CTX_MUT/inlined"
+cp "$BIONIC_HOOKS_DIR"/*.sh "$N_CTX_MUT/clean/" 2>/dev/null
+cp "$BIONIC_HOOKS_DIR"/*.sh "$N_CTX_MUT/inlined/" 2>/dev/null
+# The mutant restates the preamble the way a hand edit would: three real calls, appended
+# below the span, in a hook that is one of the fifteen.
+{
+  cat "$BIONIC_HOOKS_DIR/landing-gate.sh"
+  printf '%s\n' \
+    'CWD_MUT=$(bionic_jq .cwd)' \
+    'REPO_MUT=$(project_root "$CWD_MUT")' \
+    'SID_MUT=$(session_id "$(bionic_jq .session_id)" 2>/dev/null) || SID_MUT=""' \
+    'engaged_session "$REPO_MUT" "$SID_MUT" || exit 0'
+} > "$N_CTX_MUT/inlined/landing-gate.sh"
+expect_eq "…and a hook that re-inlines the sequence below its span is caught" \
+  "landing-gate.sh" "$(ctx_inline_carriers "$N_CTX_MUT/inlined")"
+expect_eq "control: the same copying, unmutated, reports no carrier" \
+  "" "$(ctx_inline_carriers "$N_CTX_MUT/clean")"
+
+# ── AC-1h.1's static half: no hook reads either cwd channel itself ────────────
+#
+# The ladder is ONE ladder because it is implemented once. A hook that still reached for
+# the environment variable or the payload's own cwd field would be carrying rung 1 or rung 2
+# of a second ladder, and the two would disagree exactly where this wave runs — a worktree
+# whose cwd and project directory are different trees.
+#
+# THE SWEEP IS OVER THE WHOLE FILE, comments included, and deliberately: a comment naming
+# the channel it no longer reads is how the next reader learns the wrong thing, so the
+# hooks name the LADDER (lib/context.sh) instead of its rungs.
+N_CTX_LADDER=$(for _h in $N_CTX_FIFTEEN; do
+    /usr/bin/grep -lE 'CLAUDE_PROJECT_DIR|\.cwd' "$BIONIC_HOOKS_DIR/$_h.sh" 2>/dev/null
+  done | xargs -n1 basename 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "none of the fifteen reads CLAUDE_PROJECT_DIR or the payload cwd itself" \
+  "" "$N_CTX_LADDER"
+
+# NOT VACUOUS: the sweep really does look at fifteen readable files.
+N_CTX_READABLE=$(for _h in $N_CTX_FIFTEEN; do
+    [ -r "$BIONIC_HOOKS_DIR/$_h.sh" ] && echo x; done | wc -l | tr -d ' ')
+expect_eq "…and the ladder sweep read all fifteen hooks" "15" "$N_CTX_READABLE"
+
 # ------------------------------------------------ §P′ THE SESSION-ID SOURCE, bound
 #
 # The environment value is primary and the payload is a witness (design §1, R-1). A hook
