@@ -105,7 +105,7 @@ TOOL_NAME=$(_jq '.tool_name')
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
 BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
 # long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
 # tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names

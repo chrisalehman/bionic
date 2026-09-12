@@ -327,14 +327,63 @@ rm -rf "$NOJQ"
 # monitor that cannot measure has nothing to report — the same direction
 # hooks/dispatch-preflight.sh takes for its own staleness half.
 D=$(make_env); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
-LONEDIR=$(mktemp -d); cp "$HOOK" "$LONEDIR/patrol-revive.sh"
-_OUT=$(CLAUDE_CONFIG_DIR="$LONEDIR" bash "$LONEDIR/patrol-revive.sh" <<< "$(stdin_for "$D")" 2>/dev/null); _RC=$?
+
+# THE COPY GOES IN A SHIPPED-SHAPE TREE (duplication F-5, A-52's class). A bare copy of
+# hooks/stop.sh in a mktemp'd directory has no scripts/lib beside it, so the loader finds
+# no library and the hook steps aside — at rc 0 with an empty stdout, which is letter for
+# letter what this assertion reads as "no threshold, no finding". It passed for the wrong
+# reason, and it would get worse after the merge rather than better: one of the loader's
+# healing candidates is the main checkout's payload/scripts/lib, so once this wave lands
+# the bare copy would start loading MAIN's libraries and exercising a different tree than
+# the one under test. hooks/ beside scripts/lib/, holding THIS checkout's library, is the
+# shape that makes the copy run its own code.
+PR_LIB_SRC="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+[ -d "$PR_LIB_SRC" ] || PR_LIB_SRC="${BIONIC_SCRIPTS_DIR}/scripts/lib"
+PRTREE=$(mktemp -d)
+mkdir -p "$PRTREE/hooks" "$PRTREE/scripts/lib" "$PRTREE/cfg"
+cp "$PR_LIB_SRC"/*.sh "$PRTREE/scripts/lib/" 2>/dev/null || true
+cp "$HOOK" "$PRTREE/hooks/stop.sh"
+# AND NO session-poker.sh IN EITHER PLACE THE GATE LOOKS — its own directory first, then
+# $CLAUDE_CONFIG_DIR/hooks. That absence is the whole condition under test, so both
+# lookups are pointed at directories this fixture built and left pokerless.
+# AND THE SESSION KEY IS SET, THE WAY `fire` SETS IT — assertion 14's rule, and the other
+# reason this fixture used to be silent. Without CLAUDE_CODE_SESSION_ID the hook resolves no
+# session, matches no stamp and says nothing on ANY input, so the absent poker would have
+# been the second wrong reason for one right answer.
+_OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$PRTREE/cfg" \
+         bash "$PRTREE/hooks/stop.sh" <<< "$(stdin_for "$D")" 2>"$PRTREE/.err"); _RC=$?
+_ERR=$(cat "$PRTREE/.err" 2>/dev/null)
 if [ "$_RC" -eq 0 ] && [ -z "$_OUT" ]; then
   ok "15: no sibling poker — passes, silent (no threshold, no finding)"
 else
   no "15: a hook with no poker beside it did not pass silently" "rc=$_RC stdout=<$_OUT>"
 fi
-rm -rf "$LONEDIR"
+
+# THE LOUD ANCHOR, first half: the copy RAN. A hook that stepped aside at the loader is
+# silent too, and the sentence that tells the two apart is the loader's own — it names the
+# library it could not read and says the hook is standing down. Emptiness is NOT the test:
+# this gate narrates its plan resolution on stderr when it resolves one, which is the copy
+# working rather than the copy failing.
+case "$_ERR" in
+  *"stepping aside"*|*"library "*" not found"*)
+    no "15a: the copied hook stepped aside at the loader instead of running" "stderr=<$_ERR>" ;;
+  *)
+    ok "15a: …with the copy running its own logic, not stepping aside at the loader" ;;
+esac
+
+# THE LOUD ANCHOR, second half — the paired positive, on the same tree and the same
+# payload with a poker put beside it. Silence is the easiest verdict in the world to get by
+# accident; change one file in the directory and the same call must speak.
+cp "${BIONIC_HOOKS_DIR}/session-poker.sh" "$PRTREE/hooks/session-poker.sh"
+_OUT15B=$(env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_CONFIG_DIR="$PRTREE/cfg" \
+            bash "$PRTREE/hooks/stop.sh" <<< "$(stdin_for "$D")" 2>/dev/null); _RC15B=$?
+if [ "$_RC15B" -eq 0 ] && [ -n "$_OUT15B" ]; then
+  ok "15b: …and with a poker beside it that same payload DOES produce a finding"
+else
+  no "15b: the poker-present control said nothing either — 15 proves nothing" \
+       "rc=$_RC15B stdout=<$_OUT15B>"
+fi
+rm -rf "$PRTREE"
 
 section "Group 3: worktree resolution"
 

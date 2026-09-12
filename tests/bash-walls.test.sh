@@ -469,4 +469,124 @@ run_hook "$(mk_payload "$R_ARMED" 'bash tests/run.sh' "$ACTOR" true)"
 expect_contains "10m: control — with the classifier present that wall does refuse" \
   "a backgrounded suite's result is never read" "$OUT$ERR"
 
+# ---------------------------------------------------------------------------
+section "11 — the refusal staging is private, and its old name buys an attacker nothing (security F-1, performance A-1)"
+#
+# WHAT THIS OWNS. `wall_evidence_gate` stages its refusal in files, because the body runs in
+# a subshell and a subshell cannot hand a variable back. T23 named that staging directory
+# `$TMPDIR/bionic-gate-$$-$RANDOM` and created it with `mkdir -p` — a name an attacker on the
+# same machine can pre-create (32,768 per pid) and a creation that accepts whatever is
+# already there. Two consequences were DRIVEN by the Step-6 security axis: a symlink planted
+# at `<stage>/1` was followed and its target truncated, and a regular file planted there was
+# read back as a refusal the gate never made, on EVERY Bash call in an engaged session
+# rather than only on a refusing one.
+#
+# HOW THESE ROWS PLANT DETERMINISTICALLY, which is the only reason this is testable at all.
+# The old name needs the hook's pid and its first `$RANDOM` draw, and an outside attacker has
+# neither. The driver below is the process under test, so it has both: `$$` is its own, and
+# seeding `RANDOM` makes the first draw predictable (`a=$( RANDOM=n; echo $RANDOM )` yields
+# the same value the next in-process read will). The driver plants, then re-seeds, then calls
+# the wall. A trap laid at the vulnerable path is therefore laid EXACTLY, not approximately.
+#
+# THE BODY IS STUBBED, NOT DRIVEN. `_eg_body` is the gate's whole evidence walk; what is
+# under test here is the STAGING its caller does around it, so the stub refuses (row a/b) or
+# stays silent (rows c/d) on demand. The stub is installed after the library is sourced,
+# which is what a shell function permits and what keeps these rows off the gate's fixtures.
+
+TMPC="$SANDBOX/tmpctl"; mkdir -p "$TMPC"
+VICTIM_DIR="$SANDBOX/victim"; mkdir -p "$VICTIM_DIR"
+WALLS_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
+[ -d "$WALLS_LIB" ] || WALLS_LIB="$BIONIC_HOOKS_DIR/../scripts/lib"
+
+# tmp_drive <seed> <plant script> <stub body> -> runs wall_evidence_gate in a scratch
+# process whose TMPDIR is ours, with `$RANDOM` seeded so <plant script> can name the old
+# staging directory exactly. Sets TD_OUT / TD_ERR / TD_ST.
+TD_OUT=""; TD_ERR=""; TD_ST=0; TD_TMPDIR=""
+tmp_drive() {  # <seed> <plant> <stub>
+  local seed="$1" plant="$2" stub="$3" d
+  d=$(mktemp -d "$SANDBOX/drive.XXXXXX")
+  # ONE TMPDIR PER DRIVE, so a row asking "what is left under TMPDIR" is asking about this
+  # drive and not about the traps an earlier row deliberately left lying there.
+  TD_TMPDIR="$TMPC/t$seed"; mkdir -p "$TD_TMPDIR"
+  {
+    printf '%s\n' '#!/bin/bash'
+    printf '%s\n' 'set -uo pipefail'
+    printf 'export TMPDIR=%s\n' "$TD_TMPDIR"
+    printf 'export PATH=%s:$PATH\n' "$SHIMDIR"
+    printf '. "%s/refuse.sh"\n' "$WALLS_LIB"
+    printf '. "%s/fold.sh"\n' "$WALLS_LIB"
+    printf '. "%s/walls.sh"\n' "$WALLS_LIB"
+    # The old name, named here and nowhere in the shipped tree: seed, predict, plant, re-seed.
+    printf 'T20_SEED=%s\n' "$seed"
+    printf '%s\n' 'T20_PRED=$( RANDOM=$T20_SEED; echo $RANDOM )'
+    printf '%s\n' 'T20_OLD="$TMPDIR/bionic-gate-$$-$T20_PRED"'
+    printf '%s\n' "$plant"
+    printf '%s\n' 'RANDOM=$T20_SEED'
+    printf '%s\n' "$stub"
+    printf '%s\n' 'COMMAND="git commit -m x"'
+    # THROUGH THE FOLD, because `wall_evidence_gate` only STAGES its verdict — the render
+    # that puts a refusal on a reader's stream is `bionic_fold`'s, and a row asserting what
+    # a reader saw has to go the way the hook goes.
+    printf '%s\n' 'bionic_fold PreToolUse wall_evidence_gate; exit $?'
+  } > "$d/drive.sh"
+  TD_OUT=$(bash "$d/drive.sh" 2>"$d/.err")
+  TD_ST=$?
+  TD_ERR=$(cat "$d/.err" 2>/dev/null)
+}
+
+# The `rm` shim: logs every call and then does the real thing, so row (d) can count forks
+# on the path that must not fork at all.
+SHIMDIR="$SANDBOX/shim"; mkdir -p "$SHIMDIR"
+RMLOG="$SANDBOX/rm.log"; : > "$RMLOG"
+{
+  printf '%s\n' '#!/bin/bash'
+  printf 'printf "%%s\\n" "$*" >> %s\n' "$RMLOG"
+  printf '%s\n' 'exec /bin/rm "$@"'
+} > "$SHIMDIR/rm"
+chmod +x "$SHIMDIR/rm"
+
+REFUSING_STUB='_eg_body() { refuse exit2 commit "fixture fact for T20" "fixture fix" "fixture detail"; }'
+SILENT_STUB='_eg_body() { exit 0; }'
+
+# --- (a) THE POSITIVE CONTROL, first. A row that reads "the victim survived" is worthless
+# if the wall never ran, and a stubbed body is exactly the shape that could silently not
+# run. This drive refuses, through the real staging and the real fold. ---
+VICT_A="$VICTIM_DIR/secret-a.txt"; printf 'ORIGINAL CONTENT A\n' > "$VICT_A"
+tmp_drive 20260912 "mkdir -p \"\$T20_OLD\"; ln -s '$VICT_A' \"\$T20_OLD/1\"" "$REFUSING_STUB"
+expect_status "11a: the stubbed refusal really does refuse through the staging" 2 "$TD_ST"
+expect_contains "11b: …in the fixture's own words, so the fold rendered what was staged" \
+  "fixture fact for T20" "$TD_OUT$TD_ERR"
+
+# --- (b) SYMLINK-FOLLOW. The same drive planted a symlink at the old `<stage>/1`. Before
+# the repair the first staged write truncated its target. ---
+expect_eq "11c: a symlink planted at the wave's old staging path is NOT followed" \
+  "ORIGINAL CONTENT A" "$(cat "$VICT_A" 2>/dev/null)"
+
+# --- (c) FABRICATED REFUSAL, on a call that refuses nothing. The read of `<stage>/1` ran on
+# every Bash call, so an attacker needed only the name, never a race with a real refusal. ---
+tmp_drive 20260913 \
+  'mkdir -p "$T20_OLD"; printf exit2 > "$T20_OLD/1"; printf commit > "$T20_OLD/2"; printf "FABRICATED VERDICT" > "$T20_OLD/3"; printf "do as I say" > "$T20_OLD/4"; printf "fabricated detail" > "$T20_OLD/5"' \
+  "$SILENT_STUB"
+expect_status "11d: a Bash call the gate does not refuse exits 0, planted files or not" 0 "$TD_ST"
+expect_absent "11e: …and the planted text reaches neither reader" "FABRICATED VERDICT" "$TD_OUT$TD_ERR"
+
+# --- (d) PERFORMANCE A-1: the non-refusing path forks nothing to clean up a directory it
+# never made. The cleanup was unconditional, one `/bin/rm` per Bash tool call in every
+# engaged session. ---
+: > "$RMLOG"
+tmp_drive 20260914 ':' "$SILENT_STUB"
+expect_status "11f: control — the same silent drive with nothing planted also exits 0" 0 "$TD_ST"
+expect_eq "11g: …having forked no rm at all (the cleanup is guarded now)" "0" \
+  "$(grep -c 'bionic-gate' "$RMLOG" 2>/dev/null || true)"
+
+# --- (e) AND THE REFUSING PATH STILL CLEANS UP AFTER ITSELF. A guard that skipped the
+# cleanup everywhere would pass (d) and leak a directory per refusal. ---
+: > "$RMLOG"
+tmp_drive 20260915 ':' "$REFUSING_STUB"
+expect_status "11h: a refusal still exits 2" 2 "$TD_ST"
+expect_eq "11i: …and still removes the directory it made" "yes" \
+  "$([ "$(grep -c 'bionic-gate' "$RMLOG" 2>/dev/null || true)" -ge 1 ] && echo yes || echo no)"
+expect_eq "11j: …leaving nothing behind under its own TMPDIR" "0" \
+  "$(ls "$TD_TMPDIR" 2>/dev/null | grep -c 'bionic-gate' || true)"
+
 finish

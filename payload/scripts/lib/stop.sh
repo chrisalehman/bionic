@@ -13,7 +13,8 @@
 #
 # NO BEHAVIOUR MOVED (R2). Each function is the corresponding hook's body after
 # its preamble, carried over verbatim — its own arms, its own reads, its own
-# refusal object — with four mechanical changes and no fifth:
+# refusal object — with four mechanical changes, and one deliberate fifth that the
+# event section below names and explains (stop_context_spend's new SubagentStop guard):
 #
 #   1. `exit 0`            -> `return "$_adv"`, the function's own verdict
 #   2. `refuse <mode> …`   -> `fold_block <mode> …` + `return 2`
@@ -82,11 +83,9 @@ fi
 
 # ─── FILE SCOPE: hooks/context-spend.sh's audit path ─────────────────────────
 #
-# Carried over at COLUMN ZERO and byte-identical to the copies in
-# farm-out-reminder.sh, canonical-sdlc-governing-skill.sh and
-# canonical-sdlc-evidence-gate.sh — divergence would give one project two audit
-# files, which is the whole reason those four copies are deliberate rather than
-# shared.
+# Carried over at COLUMN ZERO and byte-identical to the two other copies in the
+# tree — divergence would give one project two audit files, which is the whole
+# reason three copies are deliberate rather than shared.
 
 
 # Incident 0001: the audit stream must live where a consuming project cannot
@@ -96,10 +95,13 @@ fi
 # Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
 # collision-resistant across same-named projects under different parents.
 # cksum and basename are POSIX — no new dependency.
-# Byte-identical to the copies in farm-out-reminder.sh,
-# canonical-sdlc-governing-skill.sh and canonical-sdlc-evidence-gate.sh —
-# divergence would give one project two audit files. Deliberate per-hook
-# duplication (no shared lib).
+# THREE COPIES, ONE BODY, AND THE OTHER TWO ARE NAMED HERE:
+# payload/scripts/lib/walls.sh (the PreToolUse|Bash process) and
+# hooks/canonical-sdlc-governing-skill.sh (the PreToolUse|Write process). This one
+# serves the turn-end process. Divergence would give one project two audit files;
+# tests/cross-gate-agreement.test.sh §AP compares the three bodies by checksum and
+# proves by mutation that the comparison discriminates. Deliberate duplication, one
+# copy per process, no shared lib — consolidation is promoted, not done here.
 # [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1
@@ -459,7 +461,8 @@ return "$_adv"
 # carrying a non-empty `teammate_id=`.
 #
 # THAT SCOPE CUTS BOTH WAYS, and the sweep half of it is in the fold below: teammate rows are
-# skipped there, with the one exception the next paragraph names. An async subagent stopping on this event is passed over in silence, because
+# skipped there, with the one exception the next paragraph names. An async subagent
+# stopping on this event is passed over in silence, because
 # the sweep is the arm that owns it and the marker written here is exactly what would tell
 # the sweep the row is already answered for — verdicting an async row here would not
 # duplicate the sweep, it would silently replace the refusal the orchestrator sees with one
@@ -538,7 +541,9 @@ return "$_adv"
 # which is why the refusal must name the row and its artifacts rather than the rule.
 # [WALL: tests/landing-gate.test.sh]
 #
-# Registered on both channels: hooks/hooks.json (agent contexts, behind agent-context-guard.sh) and skills/canonical-sdlc/SKILL.md frontmatter (main thread).
+# Registered on both channels by hooks/hooks.json, and by nothing else: one Stop entry
+# for the main thread, and one behind agent-context-guard.sh for agent contexts. No
+# SKILL.md carries a `hooks:` key — that channel was never how this hook was delivered.
 #
 # hooks/landing-gate.sh's body — the ONE function of the four with a SubagentStop
 # arm. Its `case "$EVENT"` is carried over unchanged; what changed is where the
