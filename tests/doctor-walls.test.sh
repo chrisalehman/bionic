@@ -6,13 +6,17 @@
 # library resolves and prints a row with a repair-phrased FIX line before the
 # first refusal; intact → clean."
 #
-# The four walls are the four hooks the loader idiom replaced
-# (payload/scripts/lib/loader.sh's header names them): protect-main and
-# canonical-sdlc-evidence-gate, which refuse when they cannot read a command,
-# and farm-out-reminder and background-suite-guard, which classify one. Each
-# names the library basenames it sources; doctor resolves those THROUGH THE
-# IDIOM ITSELF — `bionic_loader_pin` driven with `$0` set to the hook's own
-# path — so this row can never disagree with what the hook will do at fire time.
+# The FIVE walls are the five PreToolUse|Bash walls the fold made functions of
+# payload/scripts/lib/walls.sh (T23, A-56.2): protect-main and
+# canonical-sdlc-evidence-gate, which refuse when they cannot read a command;
+# protect-database, which refuses a destructive one; and farm-out-reminder and
+# background-suite-guard, which classify one. Each DECLARES the library basenames
+# its function sources, in walls.sh's per-wall table, and doctor resolves those
+# THROUGH THE IDIOM ITSELF — `bionic_loader_pin` driven with `$0` set to the
+# carrier hook's own path — so this row can never disagree with what the wall
+# will do at fire time. One hook file, five verdicts: a row that collapsed to the
+# carrier would say "bash-walls cannot load cmd-class.sh" and leave the reader to
+# work out that three of the five are untouched.
 #
 # WHY THE FIXTURE IS A COPIED TREE. The row is about a DAMAGED install, and the
 # only honest way to produce one is to damage a real one: the payload is copied
@@ -54,10 +58,10 @@ PLUG="${TMP}/plug"
 mkdir -p "$PLUG"
 cp -RL "${PAYLOAD}/." "$PLUG/" 2>/dev/null
 
-# THE FOUR WALLS ARE ONE FILE (epic-23 wave-11-lean-spine, T23). protect-main,
+# THE FIVE WALLS ARE ONE FILE (epic-23 wave-11-lean-spine, T23). protect-main,
 # protect-database, the evidence gate, farm-out-reminder and background-suite-guard are
 # functions of payload/scripts/lib/walls.sh behind hooks/bash-walls.sh, so the roster
-# lib/checks.sh keeps has one name in it and this row asks for that file.
+# lib/checks.sh keeps names five WALLS and resolves each of them to that one file.
 expect_true "the fixture tree carries the wall hook" \
   test -f "$PLUG/hooks/bash-walls.sh"
 expect_true "the fixture tree carries its own library" test -f "$PLUG/scripts/lib/git-argv.sh"
@@ -155,19 +159,23 @@ section "Section 1: an intact tree — every wall's library resolves"
 OUT1="$(run_doctor)"
 ROWS1="$(walls_rows "$OUT1")"
 
-expect_match "1: the walls row is a checkmark at four of four" "*✓ walls*4/4*" "$ROWS1"
+expect_match "1: the walls row is a checkmark at five of five" "*✓ walls*5/5*" "$ROWS1"
 expect_no_match "2: no per-wall failure row prints on an intact tree" "*cannot load*" "$ROWS1"
 expect_no_match "3: no wall reaches the FIX section on an intact tree" \
   "*wall cannot load*" "$OUT1"
 
 section "Section 2: one library deleted — the two walls that want it go red"
+#
+# TWO OF FIVE, NOT TWO OF FOUR (T23, A-56.2). protect-database joined the roster
+# with the fold and wants neither library this suite deletes, so the counts below
+# moved by the one wall that was always there and never had a row of its own.
 
 rm -f "$PLUG/scripts/lib/git-argv.sh"
 
 OUT2="$(run_doctor)"
 ROWS2="$(walls_rows "$OUT2")"
 
-expect_match "4: the summary row drops to two of four and is a cross" "*✗ walls*2/4*" "$ROWS2"
+expect_match "4: the summary row drops to three of five and is a cross" "*✗ walls*3/5*" "$ROWS2"
 expect_match "5: protect-main is named with the library it wanted" \
   "*protect-main*git-argv.sh*" "$ROWS2"
 expect_match "6: the evidence gate is named with the library it wanted" \
@@ -198,7 +206,14 @@ rm -f "$PLUG/scripts/lib/cmd-class.sh"
 OUT3="$(run_doctor)"
 ROWS3="$(walls_rows "$OUT3")"
 
-expect_match "9: no wall resolves" "*✗ walls*0/4*" "$ROWS3"
+# ONE WALL STILL RESOLVES, AND IT IS NAMED. protect-database wants neither
+# git-argv.sh nor cmd-class.sh (walls.sh's table: context.sh refuse.sh root.sh
+# run.sh session.sh), so a "0/5" here would be asserting a wall had broken that
+# had not. The pair below is the assertion: four red, and the fifth explicitly
+# not named on the page.
+expect_match "9: four of the five walls no longer resolve" "*✗ walls*1/5*" "$ROWS3"
+expect_no_match "9: …and the one that wants neither deleted library is not named" \
+  "*protect-database*" "$ROWS3"
 expect_match "10: farm-out-reminder is named with cmd-class.sh" \
   "*farm-out-reminder*cmd-class.sh*" "$ROWS3"
 expect_match "11: background-suite-guard is named with cmd-class.sh" \
