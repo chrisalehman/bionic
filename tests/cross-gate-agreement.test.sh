@@ -79,7 +79,14 @@ SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # The landing gate (epic-16 wave-01) is a fifth party and an overridable one for
 # the same reason the four above are: §J drives a MUTATED COPY of it to prove the
 # verdict/gate battery discriminates, and the shipped file is never touched.
-PARTY_LG="${W1R_PARTY_LG:-$BIONIC_HOOKS_DIR/landing-gate.sh}"
+# THE LANDING SWEEP IS A FUNCTION NOW (epic-23 wave-11, T12): `stop_landing_gate` in
+# payload/scripts/lib/stop.sh, run by hooks/stop.sh. TWO NAMES, because the sections below
+# want two different things and one name would let a section silently read the wrong file:
+# $PARTY_LG is the process a fixture DRIVES, $PARTY_LG_SRC is the file a mutation or a
+# source extraction READS. A mutation of the sweep is a LIBRARY edit now, so every mutant
+# below plants a tree and drives the unmutated hook against its own doctored library.
+PARTY_LG="${W1R_PARTY_LG:-$BIONIC_HOOKS_DIR/stop.sh}"
+PARTY_LG_SRC="${W1R_PARTY_LG_SRC:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
 # §J also drives a mutated copy of the SWEEPER, to prove the opposite direction:
 # a change to the predicate moves both answers rather than splitting them.
 PARTY_SW="$SWEEPER"
@@ -790,6 +797,18 @@ plant_hook_tree() {  # <tree root> -> echoes <tree root>/hooks
   printf '%s' "$root/hooks"
 }
 
+# plant_lg_tree <tree root> -> echoes a runnable hooks/stop.sh whose sibling
+# scripts/lib is this checkout's, for a caller that is about to doctor one file in it.
+# The sweep's body lives in the library, so a mutation of the sweep is a library edit and
+# the hook copied here stays stock — which is also what keeps each mutant's doctored file
+# out of every other mutant's tree.
+plant_lg_tree() {  # <tree root> -> the hook to drive
+  local root="$1" h
+  h="$(plant_hook_tree "$root")"
+  cp "$PARTY_LG" "$h/stop.sh"
+  printf '%s' "$h/stop.sh"
+}
+
 # run_battery <mode>  — mode=assert emits one assertion per fixture;
 #                       mode=detect returns 1 at the FIRST disagreement.
 run_battery() {
@@ -889,7 +908,7 @@ section "A2 — a LIBRARY mutation moves every party (checklist A9, TDD §9)"
 # which is also what makes the parties load the mutant at all — the loader's first
 # candidate is `$(dirname "$0")/../scripts/lib`.
 
-CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" 2>/dev/null)
+CKSUM_BEFORE=$(shasum "$PARTY_DP" "$PARTY_SG" "$PARTY_EG" "$PARTY_ER" "$PARTY_LG" "$PARTY_LG_SRC" 2>/dev/null)
 RUN_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/run.sh"
 [ -r "$RUN_LIB" ] || RUN_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/run.sh"
 LIB_DIR_SRC="$(dirname "$RUN_LIB")"
@@ -1968,7 +1987,7 @@ done
 # makes the unanchored pattern answer wrong instead of merely reading identically anyway.
 I1_MUT_DIR="$SANDBOX/fx/i1-unanchored"
 mkdir -p "$I1_MUT_DIR"
-awk '{ sub(/grep "\^\$1="/, "grep \"$1=\""); print }' "$PARTY_LG" > "$I1_MUT_DIR/landing-gate.sh"
+awk '{ sub(/grep "\^\$1="/, "grep \"$1=\""); print }' "$PARTY_LG_SRC" > "$I1_MUT_DIR/stop.sh"
 I1_DECOY="${ROSTER_ROW_SCHEMA}|prev_status=confirmed|status=UNMET"
 
 # --- I.2 done-detection: one concept, two implementations, one answer ---
@@ -2257,14 +2276,15 @@ section "J.2 — only a GATE change can split the two answers (mutation goes RED
 # test seam. Every one is a plausible drift, not damage.
 
 JMUT="$SANDBOX/landing-mutants"
-J_CKSUM_BEFORE=$(shasum "$PARTY_LG" "$PARTY_SW" 2>/dev/null)
+J_CKSUM_BEFORE=$(shasum "$PARTY_LG" "$PARTY_LG_SRC" "$PARTY_SW" 2>/dev/null)
 
 j_mutant() {  # <kind> -> path to a mutant gate with a sibling sweeper, or empty
   # Two statements, not one: `local a=1 b="$a"` expands every word BEFORE it
   # assigns any of them, so under `set -u` the second reference is unbound.
   local kind="$1"
-  local d
-  d="$(plant_hook_tree "$JMUT/$kind")"
+  local d lib
+  d="$(plant_lg_tree "$JMUT/$kind")"; d="${d%/stop.sh}"
+  lib="$d/../scripts/lib/stop.sh"
   cp "$PARTY_SW" "$d/session-sweeper.sh"
   case "$kind" in
     # THE LANDED/LIVE DISCRIMINATION DROPPED. `background_tasks[]` is the payload's
@@ -2272,9 +2292,9 @@ j_mutant() {  # <kind> -> path to a mutant gate with a sibling sweeper, or empty
     # of "judge it when it lands". Without the skip the sweep holds every mid-flight
     # agent to a contract it has not finished — the false-alarm direction.
     ignore-background-tasks)
-      anchor "$PARTY_LG" 'case "$LIVE_IDS" in' 1
+      anchor "$PARTY_LG_SRC" 'case "$LIVE_IDS" in' 1
       awk '{ if (index($0, "$LIVE_IDS") > 0 && index($0, "case ") > 0) next
-             print }' "$PARTY_LG" > "$d/landing-gate.sh" ;;
+             print }' "$PARTY_LG_SRC" > "$lib" ;;
     # The hook process's ambient session key instead of the payload's (the gate
     # documents why at the code) — a wrong or absent roster, silently.
     ambient-session-key)
@@ -2282,21 +2302,21 @@ j_mutant() {  # <kind> -> path to a mutant gate with a sibling sweeper, or empty
       # `BIONIC_SID`, resolved once by `bionic_context`, so that is the variable the
       # sweeper is handed and the one this mutation strips. The `anchor` above is what
       # turned the stale literal into a loud failure rather than a byte-identical mutant.
-      anchor -E "$PARTY_LG" 'CLAUDE_CODE_SESSION_ID="[$]BIONIC_SID" ' 1
+      anchor -E "$PARTY_LG_SRC" 'CLAUDE_CODE_SESSION_ID="[$]BIONIC_SID" ' 1
       awk '{ sub(/CLAUDE_CODE_SESSION_ID="[$]BIONIC_SID" /, ""); print }' \
-        "$PARTY_LG" > "$d/landing-gate.sh" ;;
+        "$PARTY_LG_SRC" > "$lib" ;;
     # The sweeper resolves its own state directory from the working directory, so
     # dropping the cd asks the verb about whatever repo the hook happened to run in.
     no-cd-to-repo)
-      anchor "$PARTY_LG" 'VERDICT=$( cd ' 1
+      anchor "$PARTY_LG_SRC" 'VERDICT=$( cd ' 1
       awk '{ if (index($0, "VERDICT=$( cd ") > 0) $0 = "VERDICT=$( true"
-             print }' "$PARTY_LG" > "$d/landing-gate.sh" ;;
+             print }' "$PARTY_LG_SRC" > "$lib" ;;
     *) return 1 ;;
   esac
   # CONTROL FLOW, not a precondition: the three anchors above are what report a moved
   # target. This line only decides whether the caller gets a path back.
-  cmp -s "$PARTY_LG" "$d/landing-gate.sh" && return 1
-  printf '%s' "$d/landing-gate.sh"
+  cmp -s "$PARTY_LG_SRC" "$lib" && return 1
+  printf '%s' "$d/stop.sh"
 }
 
 for m in ignore-background-tasks ambient-session-key no-cd-to-repo; do
@@ -2304,7 +2324,7 @@ for m in ignore-background-tasks ambient-session-key no-cd-to-repo; do
   if [ -z "$mpath" ]; then
     # A mutation that matched nothing is not a passing test — it means the code
     # moved and this proof has gone vacuous.
-    no "gate mutation '$m' applies to landing-gate.sh" \
+    no "gate mutation '$m' applies to payload/scripts/lib/stop.sh" \
        "the doctored copy came out byte-identical — see the anchor row above"
     continue
   fi
@@ -2330,10 +2350,10 @@ section "J.3 — a PREDICATE change moves BOTH answers, never one (the single ow
 # is the reason the two can never be caught telling different people different
 # things about one contract.
 JP="$(plant_hook_tree "$JMUT/predicate")"
-cp "$PARTY_LG" "$JP/landing-gate.sh"
+cp "$PARTY_LG" "$JP/stop.sh"
 awk '{ sub(/\[ ! -s "[$]p" \]/, "[ ! -e \"$p\" ]"); print }' "$PARTY_SW" > "$JP/session-sweeper.sh"
 j_saved_lg="$PARTY_LG"; j_saved_sw="$PARTY_SW"
-PARTY_LG="$JP/landing-gate.sh"; PARTY_SW="$JP/session-sweeper.sh"
+PARTY_LG="$JP/stop.sh"; PARTY_SW="$JP/session-sweeper.sh"
 j_gate empty
 expect_eq "with the predicate loosened, the verb calls the empty file delivered" \
   "MET" "$(j_verdict empty)"
@@ -2841,16 +2861,11 @@ PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh|10
 PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh|10
 PreToolUse|TaskStop|${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10
 PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10
-PreToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
-PreToolUse|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
+PreToolUse|Write|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
-PostToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
-PostToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
+PostToolUse|Bash|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
 SubagentStart||${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
-Stop||${CLAUDE_PLUGIN_ROOT}/hooks/context-spend.sh|10
-Stop||${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|10
-Stop||${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate.sh|10
-Stop||${CLAUDE_PLUGIN_ROOT}/hooks/patrol-revive.sh|10
+Stop||${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|10
 PreToolUse|Skill|${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 UserPromptExpansion||${CLAUDE_PLUGIN_ROOT}/hooks/engage.sh|10
 '
@@ -2932,7 +2947,7 @@ expect_contains "the guard still fronts the BACKGROUNDED-SUITE wall on Bash" \
   'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/background-suite-guard.sh|' \
   "$HOOKS_JSON_ROWS"
 expect_contains "…and the LANDING verdict on SubagentStop, with no matcher" \
-  'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/landing-gate.sh|' \
+  'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|' \
   "$HOOKS_JSON_ROWS"
 for _unguarded in dispatch-preflight canonical-sdlc-governing-skill; do
   expect_absent_ug "…and no longer fronts ${_unguarded}.sh, whose only reason was the partition" \
@@ -2951,7 +2966,7 @@ expect_contains "the guard sets the channel marker the dispatch wall reads" \
 # name is absent from these arms is a wall that exits before it reads anything. The gate
 # now answers BOTH Stop (the orchestrator's own rows, straight) and SubagentStop (a
 # teammate's, behind the guard), so both arms must be present in the script.
-LG_EVENT_ARMS=$(awk '/^case "\$EVENT" in$/{f=1} f{print} f&&/^esac$/{exit}' "$PARTY_LG")
+LG_EVENT_ARMS=$(awk '/^case "\$EVENT" in$/{f=1} f{print} f&&/^esac$/{exit}' "$PARTY_LG_SRC")
 expect_eq "the landing gate's event case extracts at all (not vacuous)" "yes" \
   "$([ -n "$LG_EVENT_ARMS" ] && echo yes || echo no)"
 expect_contains "…and answers Stop" "Stop" "$LG_EVENT_ARMS"
@@ -3018,7 +3033,7 @@ section "M — THE ACK, and the stop order: ONE owner, three consumers (epic-16 
 # real writer wrote — including when the single owner is mutated to lie (§M.5).
 
 SG_M="$BIONIC_HOOKS_DIR/stop-guard.sh"
-LG_M="$BIONIC_HOOKS_DIR/landing-gate.sh"
+LG_M="$BIONIC_HOOKS_DIR/stop.sh"
 SO_M="$BIONIC_HOOKS_DIR/stop-orders.sh"
 
 # --- M.1 ONE OWNER: no consumer reads the ledger, in any of the three ways it could ---
@@ -3118,7 +3133,7 @@ expect_contains "…addressed the way the stop primitive takes it" \
 # not a test seam.
 MMUT="$(plant_hook_tree "$SANDBOX/ack-mutant")"
 cp "$SG_M" "$MMUT/stop-guard.sh"
-cp "$LG_M" "$MMUT/landing-gate.sh"
+cp "$LG_M" "$MMUT/stop.sh"
 cp "$SO_M" "$MMUT/stop-orders.sh"
 awk '{ if (index($0, "row_acked \"$_pname\"") > 0) $0 = "    _acked=no"
        print }' "$SWEEPER" > "$MMUT/session-sweeper.sh"
@@ -3126,7 +3141,7 @@ expect_contains "the mutated owner reports the acked row as unacked" "|acked=no|
   "$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/session-sweeper.sh" verdict finished 2>/dev/null )"
 OUT=$(mk_stop_payload "$SID_A" "$MTR" "$MREPO" "finished" | bash "$MMUT/stop-guard.sh" 2>&1); ST=$?
 expect_eq "…and the stop gate refuses the stop it passed a moment ago" "2" "$ST"
-OUT=$(m_sweep "$MMUT/landing-gate.sh"); ST=$?
+OUT=$(m_sweep "$MMUT/stop.sh"); ST=$?
 expect_eq "…and the landing gate refuses it too" "2" "$ST"
 OUT=$( cd "$MREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$MMUT/stop-orders.sh" standdown 2>&1 )
 expect_contains "…and the stand-down puts it back in LEFT ALONE" "LEFT ALONE" "$OUT"
@@ -3228,8 +3243,8 @@ n_block_of() {  # <file> -> the marker-delimited span, markers inclusive
 # than a sibling one (Step-6 duplication review, record/wave-1.4.0/review-duplication.md,
 # ownership row 6: neither was pinned anywhere, so nothing would catch drift in either).
 N_ADOPTED='protect-main protect-database canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard
-dispatch-preflight canonical-sdlc-governing-skill landing-gate execution-recorder stop-guard
-context-spend patrol-duties-gate patrol-revive agent-context-guard preflight-probe stop-orders
+dispatch-preflight canonical-sdlc-governing-skill stop execution-recorder stop-guard
+agent-context-guard preflight-probe stop-orders
 session-sweeper stop-check session-poker session-start engage'
 for _h in $N_ADOPTED; do
   expect_eq "$_h.sh carries the canonical loader block, byte for byte" \
@@ -3330,18 +3345,22 @@ done
 # (engage, preflight-probe, stop-orders) plus session-poker take no hook payload at all.
 # All six keep their own calls, which is why the negative half is scoped by the SEQUENCE
 # rather than by the presence of any one function.
+# TWELVE NOW, NOT FIFTEEN (epic-23 wave-11, T12). The four Stop hooks became four
+# FUNCTIONS in payload/scripts/lib/stop.sh and one process, hooks/stop.sh, which takes the
+# call once for all four. The rule is unchanged — one hook, one `bionic_context` — and the
+# roster is the tree's, not a number this file remembers.
 N_CTX_FIFTEEN='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
-canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
-farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
-protect-main session-start stop-guard'
+canonical-sdlc-governing-skill dispatch-preflight execution-recorder
+farm-out-reminder protect-database
+protect-main session-start stop stop-guard'
 
 for _h in $N_CTX_FIFTEEN; do
   expect_eq "$_h.sh asks lib/context.sh:bionic_context for its context" "yes" \
     "$(/usr/bin/grep -q 'bionic_context' "$BIONIC_HOOKS_DIR/$_h.sh" && echo yes || echo no)"
 done
 
-# AND THE COUNT IS EXACTLY FIFTEEN (AC-1f.2's own measurement). The per-hook rows above
-# cannot see a SIXTEENTH caller, and a hook that picked the call up without being part of
+# AND THE COUNT IS EXACTLY THE ROSTER (AC-1f.2's own measurement, re-derived at T12 when
+# the four Stop hooks became one). The per-hook rows above cannot see an EXTRA caller, and a hook that picked the call up without being part of
 # the preamble family is a hook paying a root walk and a plan walk for nothing.
 N_CTX_CALLERS=$(/usr/bin/grep -l 'bionic_context' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
   | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
@@ -3389,15 +3408,15 @@ cp "$BIONIC_HOOKS_DIR"/*.sh "$N_CTX_MUT/inlined/" 2>/dev/null
 # The mutant restates the preamble the way a hand edit would: three real calls, appended
 # below the span, in a hook that is one of the fifteen.
 {
-  cat "$BIONIC_HOOKS_DIR/landing-gate.sh"
+  cat "$BIONIC_HOOKS_DIR/stop.sh"
   printf '%s\n' \
     'CWD_MUT=$(bionic_jq .cwd)' \
     'REPO_MUT=$(project_root "$CWD_MUT")' \
     'SID_MUT=$(session_id "$(bionic_jq .session_id)" 2>/dev/null) || SID_MUT=""' \
     'engaged_session "$REPO_MUT" "$SID_MUT" || exit 0'
-} > "$N_CTX_MUT/inlined/landing-gate.sh"
+} > "$N_CTX_MUT/inlined/stop.sh"
 expect_eq "…and a hook that re-inlines the sequence below its span is caught" \
-  "landing-gate.sh" "$(ctx_inline_carriers "$N_CTX_MUT/inlined")"
+  "stop.sh" "$(ctx_inline_carriers "$N_CTX_MUT/inlined")"
 expect_eq "control: the same copying, unmutated, reports no carrier" \
   "" "$(ctx_inline_carriers "$N_CTX_MUT/clean")"
 
@@ -3442,7 +3461,7 @@ N_CTX_LADDER_EXEMPT='canonical-sdlc-governing-skill'
 # this suite's own §case row forbids, and bash refuses to parse it here too.
 N_CTX_LADDER_SWEPT=$(printf '%s\n' $N_CTX_FIFTEEN \
   | /usr/bin/grep -vxF "$N_CTX_LADDER_EXEMPT")
-expect_eq "none of the fifteen reads CLAUDE_PROJECT_DIR or the payload cwd below its sources" \
+expect_eq "none of the twelve reads CLAUDE_PROJECT_DIR or the payload cwd below its sources" \
   "" "$(ctx_ladder_carriers "$BIONIC_HOOKS_DIR" $N_CTX_LADDER_SWEPT)"
 
 # THE EXEMPTION, BOUNDED. Rung 1 is forbidden to it like everyone else, and its payload-cwd
@@ -3460,8 +3479,8 @@ done
 N_CTX_READABLE=$(for _h in $N_CTX_FIFTEEN; do
     [ -n "$(awk '/^\. "\$BIONIC_LIB\//{s=1} s{print}' "$BIONIC_HOOKS_DIR/$_h.sh")" ] && echo x
   done | wc -l | tr -d ' ')
-expect_eq "…and the ladder sweep found a source line and a body in all fifteen" "15" "$N_CTX_READABLE"
-expect_eq "…of which fourteen are swept and one is the declared exemption" "14" \
+expect_eq "…and the ladder sweep found a source line and a body in all twelve" "12" "$N_CTX_READABLE"
+expect_eq "…of which eleven are swept and one is the declared exemption" "11" \
   "$(printf '%s\n' $N_CTX_LADDER_SWEPT | wc -l | tr -d ' ')"
 
 # MUTATION — an absence row passes as happily when the detector is broken as when the tree
@@ -3470,11 +3489,11 @@ N_CTX_LMUT="$SANDBOX/fx/ctx-ladder"
 mkdir -p "$N_CTX_LMUT"
 cp "$BIONIC_HOOKS_DIR"/*.sh "$N_CTX_LMUT/" 2>/dev/null
 {
-  cat "$BIONIC_HOOKS_DIR/patrol-revive.sh"
+  cat "$BIONIC_HOOKS_DIR/stop.sh"
   printf '%s\n' 'CWD_MUT="${CLAUDE_PROJECT_DIR:-}"'
-} > "$N_CTX_LMUT/patrol-revive.sh"
+} > "$N_CTX_LMUT/stop.sh"
 expect_eq "…and a hook that reaches for a rung below its sources is caught" \
-  "patrol-revive.sh" "$(ctx_ladder_carriers "$N_CTX_LMUT" $N_CTX_LADDER_SWEPT)"
+  "stop.sh" "$(ctx_ladder_carriers "$N_CTX_LMUT" $N_CTX_LADDER_SWEPT)"
 
 # ------------------------------------------------ §P′ THE SESSION-ID SOURCE, bound
 #
@@ -3492,9 +3511,9 @@ expect_eq "…and a hook that reaches for a rung below its sources is caught" \
 # The roster is split on that line rather than shortened, so a member that asks for NEITHER
 # still fails, and both halves are derived from the tree below.
 N_SID_VIA_CTX='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
-canonical-sdlc-governing-skill context-spend dispatch-preflight execution-recorder
-farm-out-reminder landing-gate patrol-duties-gate patrol-revive protect-database
-protect-main session-start stop-guard'
+canonical-sdlc-governing-skill dispatch-preflight execution-recorder
+farm-out-reminder protect-database
+protect-main session-start stop stop-guard'
 N_SID_DIRECT='engage preflight-probe session-sweeper stop-check stop-orders'
 N_SID_READERS="$N_SID_VIA_CTX
 $N_SID_DIRECT"
@@ -3564,9 +3583,14 @@ expect_eq "the via-the-library roster names every hook that calls bionic_context
 #               says why: a hook that scoped by one root and enforced against another would
 #               go quiet exactly where it was added to bind). It keeps the old call shape.
 #   DATA      — session-poker and session-start, which read the predicate without exiting.
+# NINE NOW, NOT THIRTEEN (epic-23 wave-11, T12). The four Stop hooks' guards went into
+# payload/scripts/lib/stop.sh with their bodies, where each spells it as a `return` rather
+# than an `exit` — a folded function must not exit. hooks/stop.sh itself asks nothing about
+# engagement: the four functions each answer for their own arm, exactly as the four hooks
+# did. So the merged process is off this roster by design, not by omission.
 N_ENGAGED_READERS='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
-context-spend dispatch-preflight execution-recorder farm-out-reminder landing-gate
-patrol-duties-gate patrol-revive protect-database protect-main stop-guard'
+dispatch-preflight execution-recorder farm-out-reminder
+protect-database protect-main stop-guard'
 N_ENGAGED_OWN_ROOT='canonical-sdlc-governing-skill'
 N_ENGAGED_DATA='session-poker session-start'
 
@@ -3638,8 +3662,8 @@ cp "$BIONIC_HOOKS_DIR"/*.sh "$N_ENG_MUT/add/" 2>/dev/null
 # VALUE roster. A `grep -v` for a literal that had left the file would have deleted nothing
 # and reported a mutation that never happened, which is why the anchor above it is the part
 # that matters.
-anchor "$BIONIC_HOOKS_DIR/landing-gate.sh" 'BIONIC_ENGAGED' 1
-grep -v 'BIONIC_ENGAGED' "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$N_ENG_MUT/drop/landing-gate.sh"
+anchor "$BIONIC_HOOKS_DIR/stop-guard.sh" 'BIONIC_ENGAGED' 1
+grep -v 'BIONIC_ENGAGED' "$BIONIC_HOOKS_DIR/stop-guard.sh" > "$N_ENG_MUT/drop/stop-guard.sh"
 expect_ne "…and a hook that quietly loses its guard makes the roster row RED" \
   "$N_ENGV_EXPECTED" "$(derive_engaged_value "$N_ENG_MUT/drop")"
 printf '[ "$BIONIC_ENGAGED" = 1 ] || exit 0\n' > "$N_ENG_MUT/add/zz-new-wall.sh"
@@ -4345,8 +4369,8 @@ expect_contains "…and the roster marker is keyed to the LATER row agent_id" \
 # deliverable instead of the last, sibling of a real sweeper, driven against an identical
 # fresh fixture (a fresh repo, so the real run's marker above cannot mask the mutant's
 # silence).
-LG_MUT_DIR="$SANDBOX/fx/lg-first-wins"
-mkdir -p "$LG_MUT_DIR"
+LG_MUT_HOOK="$(plant_lg_tree "$SANDBOX/fx/lg-first-wins")"
+LG_MUT_DIR="${LG_MUT_HOOK%/stop.sh}"
 cp "$SWEEPER" "$LG_MUT_DIR/session-sweeper.sh"
 awk '{
        if ($0 == "    dl[name] = deliv") {
@@ -4354,12 +4378,12 @@ awk '{
          next
        }
        print
-     }' "$PARTY_LG" > "$LG_MUT_DIR/landing-gate.sh"
+     }' "$PARTY_LG_SRC" > "$LG_MUT_DIR/../scripts/lib/stop.sh"
 
 PLGREPO2=$(new_repo "fold-agreement-lg-mut")
 p_lg_fixture "$PLGREPO2"
 PLG_ROSTER2="$PLGREPO2/.bionic/tmp/roster-$SID_A.state"
-lg_saved="$PARTY_LG"; PARTY_LG="$LG_MUT_DIR/landing-gate.sh"
+lg_saved="$PARTY_LG"; PARTY_LG="$LG_MUT_HOOK"
 LG_MUT_OUT=$( mk_stopsweep_payload "$PLGREPO2" "$SID_A" false | bash "$PARTY_LG" 2>&1 ); LG_MUT_RC=$?
 PARTY_LG="$lg_saved"
 expect_eq "…and with the fold flipped to first-row-wins, the SAME contract passes SILENTLY (§P discriminates)" \
@@ -5526,9 +5550,13 @@ s4_ss() {  # <repo> <sid> — SessionStart; stdout is where its listing goes
 }
 
 PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
-PARTY_PDG="$BIONIC_HOOKS_DIR/patrol-duties-gate.sh"
-PARTY_PRV="$BIONIC_HOOKS_DIR/patrol-revive.sh"
-PARTY_CS="$BIONIC_HOOKS_DIR/context-spend.sh"
+# THREE NAMES, ONE PROCESS (epic-23 wave-11, T12). The three used to be three hooks and
+# are three functions inside hooks/stop.sh now. The names stay because this section is about
+# which RUN each consumer answers for, and each function still answers for its own; what
+# changed is that one process delivers all three answers.
+PARTY_PDG="$BIONIC_HOOKS_DIR/stop.sh"
+PARTY_PRV="$BIONIC_HOOKS_DIR/stop.sh"
+PARTY_CS="$BIONIC_HOOKS_DIR/stop.sh"
 PARTY_SS="$BIONIC_HOOKS_DIR/session-start.sh"
 
 # THE SEVEN THAT ANNOUNCE, as a table driven by one loop: a per-consumer `case` written out
@@ -5724,18 +5752,18 @@ s4_repoint() {  # aim every driver at the mutant tree
   PARTY_EG="$S4_MUT/hooks/canonical-sdlc-evidence-gate.sh"
   PARTY_SG_W="$S4_MUT/hooks/canonical-sdlc-governing-skill.sh"
   PARTY_DP="$S4_MUT/hooks/dispatch-preflight.sh"
-  PARTY_PDG="$S4_MUT/hooks/patrol-duties-gate.sh"
-  PARTY_PRV="$S4_MUT/hooks/patrol-revive.sh"
-  PARTY_CS="$S4_MUT/hooks/context-spend.sh"
+  PARTY_PDG="$S4_MUT/hooks/stop.sh"
+  PARTY_PRV="$S4_MUT/hooks/stop.sh"
+  PARTY_CS="$S4_MUT/hooks/stop.sh"
   PARTY_PK_S="$S4_MUT/hooks/session-poker.sh"
 }
 s4_restore() {
   PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh}"
   PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
   PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
-  PARTY_PDG="$BIONIC_HOOKS_DIR/patrol-duties-gate.sh"
-  PARTY_PRV="$BIONIC_HOOKS_DIR/patrol-revive.sh"
-  PARTY_CS="$BIONIC_HOOKS_DIR/context-spend.sh"
+  PARTY_PDG="$BIONIC_HOOKS_DIR/stop.sh"
+  PARTY_PRV="$BIONIC_HOOKS_DIR/stop.sh"
+  PARTY_CS="$BIONIC_HOOKS_DIR/stop.sh"
   PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 }
 
@@ -6366,7 +6394,7 @@ expect_eq "restored: the shipped library answers as it did before the mutations"
 # so this row greps the two callers this wave gave `live_runs` and the eight gates a
 # dispatch/stop/evidence/landing decision runs through, and pins the split directly.
 LR_LIVE_CALLERS="engage.sh session-start.sh"
-LR_GATES="canonical-sdlc-evidence-gate.sh canonical-sdlc-governing-skill.sh dispatch-preflight.sh stop-guard.sh patrol-duties-gate.sh patrol-revive.sh context-spend.sh landing-gate.sh"
+LR_GATES="canonical-sdlc-evidence-gate.sh canonical-sdlc-governing-skill.sh dispatch-preflight.sh stop-guard.sh stop.sh"
 
 for f in $LR_LIVE_CALLERS; do
   expect_eq "…$f (a live_runs caller) really does reference it (non-vacuity)" "1" \
@@ -8533,7 +8561,7 @@ section "S15 — landing-swept/v1: one writer, pinned to a captured marker"
 # by-key idiom every production reader uses, so a reordering upstream cannot pass this pin
 # by accident — only the shared writer producing the identical byte sequence can.
 
-S15_LG="$PARTY_LG"
+S15_LG="$PARTY_LG_SRC"
 S15_PK="$PARTY_PK"
 S15_CAPTURED="$REPO_ROOT/tests/fixtures/landing-swept.captured"
 S15_LINE="$(cat "$S15_CAPTURED")"
@@ -8579,7 +8607,7 @@ expect_contains "S15 …the real state value nowhere survives the mutant — it 
 # constant-by-NAME grep can miss — this pins the two LINES, not just the grep, to agree.
 S15_LG_SCHEMA_LINE="$(grep -m1 '^SWEPT_SCHEMA=' "$S15_LG")"
 S15_PK_SCHEMA_LINE="$(grep -m1 '^SWEPT_SCHEMA=' "$S15_PK")"
-expect_eq "S15b hooks/landing-gate.sh declares the constant" \
+expect_eq "S15b payload/scripts/lib/stop.sh declares the constant" \
   'SWEPT_SCHEMA="landing-swept/v1"' "$S15_LG_SCHEMA_LINE"
 expect_eq "S15b …and hooks/session-poker.sh's copy agrees, byte for byte" \
   "$S15_LG_SCHEMA_LINE" "$S15_PK_SCHEMA_LINE"
@@ -8744,14 +8772,22 @@ expect_eq "S13.5 …which is what awk needs for a key of this length" \
 # ONE reader of a row's `files=` for reconciliation, ONE place that computes the diff, ONE
 # row -> worktree mapping (never re-derived), and ONE re-ask of the SAME `impact-command`
 # key S13's dispatch wall already reads — never a second config key or a second derivation.
-S18_LG="$BIONIC_HOOKS_DIR/landing-gate.sh"
+# The reconciliation is `stop_landing_gate`'s now (epic-23 wave-11, T12): the diff, the
+# shared mapping and the impact-command read all moved into payload/scripts/lib/stop.sh
+# with the rest of the sweep. One owner still, at a new address.
+S18_LG="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
 S18_WT_LIB_DIR="$BIONIC_HOOKS_DIR/../payload/scripts/lib"
 
-# --- §S18.1 exactly one hook computes a Files: diff, and it is landing-gate.sh ---
-expect_eq "S18.1 exactly one hook diffs a worktree by name-only" "1" \
-  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh | wc -l | tr -d ' ')"
-expect_eq "S18.1 …and it is landing-gate.sh" "1" \
-  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh | grep -c 'landing-gate\.sh$')"
+# --- §S18.1 exactly one file computes a Files: diff, and it is lib/stop.sh ---
+# The claim is unchanged — ONE owner of the reconciliation — and the address moved with the
+# sweep at T12, so the count is taken over the library and a stray copy left behind under
+# hooks/ fails the second row below.
+expect_eq "S18.1 exactly one library file diffs a worktree by name-only" "1" \
+  "$(grep -lF -- '--name-only' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"/*.sh | wc -l | tr -d ' ')"
+expect_eq "S18.1 …and no hook file does it any more" "0" \
+  "$(grep -lF -- '--name-only' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | wc -l | tr -d ' ')"
+expect_eq "S18.1 …and it is payload/scripts/lib/stop.sh" "1" \
+  "$(grep -lF -- '--name-only' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"/*.sh | grep -c '/stop\.sh$')"
 
 # --- §S18.2 the row -> worktree mapping has ONE definition (worktree.sh's `worktree_for_row`,
 # payload/scripts/lib/worktree.sh's own docblock: "a second spelling of it there is a second
@@ -8761,7 +8797,7 @@ expect_eq "S18.2 worktree_for_row is defined in exactly one library file" "1" \
   "$(grep -l '^worktree_for_row()' "$S18_WT_LIB_DIR"/*.sh | wc -l | tr -d ' ')"
 expect_eq "S18.2 …and it is worktree.sh" "1" \
   "$(grep -l '^worktree_for_row()' "$S18_WT_LIB_DIR"/*.sh | grep -c 'worktree\.sh$')"
-expect_eq "S18.2 landing-gate.sh calls the shared mapping" "1" \
+expect_eq "S18.2 lib/stop.sh calls the shared mapping" "1" \
   "$(grep -cF 'worktree_for_row "$repo" "$name"' "$S18_LG")"
 expect_eq "S18.2 …and never redefines it" "0" \
   "$(grep -c '^worktree_for_row()' "$S18_LG")"
@@ -8771,8 +8807,11 @@ expect_eq "S18.2 …and never redefines it" "0" \
 # dependency it just proved the gate CALLS is also DECLARED, so the line is re-derived from
 # the file and the membership of `worktree.sh` in it is the assertion. The anchor keeps it
 # honest: a gate with no WANT line at all fails loudly rather than comparing empty strings.
-S18_WANT=$(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$S18_LG" | head -1)
-expect_nonempty "S18.2 the gate declares a BIONIC_LIB_WANT line at all" "$S18_WANT"
+# THE DECLARATION IS THE HOOK'S, THE CALL IS THE LIBRARY'S (T12). `BIONIC_LIB_WANT` is
+# what the loader reads, so it lives in the process — hooks/stop.sh — while the call it
+# has to cover lives in the function the process runs.
+S18_WANT=$(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$BIONIC_HOOKS_DIR/stop.sh" | head -1)
+expect_nonempty "S18.2 hooks/stop.sh declares a BIONIC_LIB_WANT line at all" "$S18_WANT"
 expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
   "$(printf '%s' " $S18_WANT " | /usr/bin/grep -c ' worktree\.sh ')"
 
@@ -8786,7 +8825,7 @@ expect_eq "S18.2 …declaring the dependency, per the loader contract" "1" \
 # no rename can falsify.
 S18_LG_IMPACT=$(/usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | sort -u)
 S13_DP_IMPACT=$(/usr/bin/grep -o 'config_value "[^"]*" "impact-command" ""' "$S13_DP" | sort -u)
-expect_eq "S18.3 landing-gate.sh reads impact-command exactly once" "1" \
+expect_eq "S18.3 lib/stop.sh reads impact-command exactly once" "1" \
   "$(/usr/bin/grep -c 'config_value "[^"]*" "impact-command" ""' "$S18_LG" | tr -d ' ')"
 expect_nonempty "S18.3 …and the call is findable at all (the pin is not comparing air)" "$S18_LG_IMPACT"
 expect_eq "S18.3 …the same call shape dispatch-preflight.sh uses" "$S18_LG_IMPACT" "$S13_DP_IMPACT"
@@ -9367,8 +9406,11 @@ stop-orders.sh'
 
 # --- (a) NON-VACUITY OF THE SEARCH SET. Every count below is over a real glob, and
 # the renderer this section exists for is on disk. ---
+# THE FLOOR MOVED WITH THE MERGE (epic-23 wave-11, T12): four Stop hooks became one, so
+# the tree carries eighteen hook files where it carried twenty-one. The number is a
+# not-counting-over-air guard, not a roster, so it tracks the tree.
 expect_eq "Refuse the hooks glob is non-empty (this section is not counting over air)" "yes" \
-  "$([ "$(ls "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | wc -l | tr -d ' ')" -ge 20 ] && echo yes || echo no)"
+  "$([ "$(ls "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | wc -l | tr -d ' ')" -ge 18 ] && echo yes || echo no)"
 expect_eq "Refuse payload/scripts/lib/refuse.sh is on disk" "yes" \
   "$([ -r "$REFUSE_LIB_DIR/refuse.sh" ] && echo yes || echo no)"
 
@@ -9393,7 +9435,7 @@ REFUSE_FOUND_EOF
 expect_eq "Refuse every file still printing its own refusal is one of the five CLI commands" \
   "" "$REFUSE_STRAY"
 expect_eq "Refuse …and no WALL is among them: the hooks-that-are-walls count is zero" "0" \
-  "$(printf '%s\n' "$REFUSE_FOUND" | /usr/bin/grep -cE '^(agent-context-guard|background-suite-guard|canonical-sdlc-evidence-gate|canonical-sdlc-governing-skill|context-spend|dispatch-preflight|engage|execution-recorder|farm-out-reminder|landing-gate|patrol-duties-gate|patrol-revive|protect-database|protect-main|session-start|session-sweeper|stop-guard)\.sh$' || true)"
+  "$(printf '%s\n' "$REFUSE_FOUND" | /usr/bin/grep -cE '^(agent-context-guard|background-suite-guard|canonical-sdlc-evidence-gate|canonical-sdlc-governing-skill|dispatch-preflight|engage|execution-recorder|farm-out-reminder|protect-database|protect-main|session-start|session-sweeper|stop|stop-guard)\.sh$' || true)"
 expect_eq "Refuse …and the set is what task 13 left: preflight-probe.sh alone still spells it" \
   "preflight-probe.sh" "$(printf '%s\n' "$REFUSE_FOUND" | tr -d ' ')"
 
