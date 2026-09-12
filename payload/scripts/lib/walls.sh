@@ -1,234 +1,476 @@
 #!/bin/bash
-# EVIDENCE GATE: Blocks git commits during a canonical-sdlc run when the
-# plan file's ## SDLC State section is missing the current step's evidence.
+# payload/scripts/lib/walls.sh — THE FIVE PreToolUse|Bash WALLS, AS FUNCTIONS
+# (epic-23 wave-11-lean-spine, REQ-1f (v), AC-1f.5; ADR-004; user ruling A-50
+# "Option 3", 2026-09-12: the fold is ONE event-agnostic mechanism).
 #
-# Convention: the plan file contains a section like:
+# WHAT THIS FILE IS. Five hook files used to fire on every Bash tool call —
+# hooks/protect-main.sh, hooks/protect-database.sh,
+# hooks/canonical-sdlc-evidence-gate.sh, hooks/farm-out-reminder.sh and
+# hooks/background-suite-guard.sh — each paying the loader and the preamble, each
+# answering the harness separately, and NO RULE saying how five answers combine. The
+# bodies are here now, one function each, and payload/scripts/lib/fold.sh composes
+# what they say by the rule T12 wrote for the four Stop walls:
 #
-#   ## SDLC State
-#   integration-branch: main
-#   current: 5
-#   Step 1: /path/or/link
-#   Step 2: /path/to/spec.md
-#   Step 3: .bionic/docs/plans/epic-NN-<slug>/wave-NN-<slug>.plan.md
-#   Step 4: git worktree at /path, base SHA abc123
-#   Step 5: tests passing, commit abc123
+#     any block is a block · all reasons print · blocks before advisories
 #
-# If the current step's line is empty or a placeholder (TODO, pending,
-# in progress, XXX, TBD, placeholder), block the commit. The rule is:
-# the evidence artifact must be recorded in the plan file *before* the
-# commit that closes the step.
+# THE CONTRACT EACH FUNCTION SIGNS (fold.sh's, unchanged): it never renders and never
+# exits. It stages with `fold_block <mode> <verb> <fact> <fix> <detail>` and returns 2,
+# or `fold_advise`/`fold_context` and returns 1, or stages nothing and returns 0 — and
+# THE RETURN CODE IS THE VERDICT while the staged text is only the words for it.
+#
+# WHAT MOVED OUT OF THE BODIES AND INTO hooks/bash-walls.sh, ONCE. The payload read,
+# the command read, `bionic_context`, and the engagement predicate
+# `[ "$BIONIC_ENGAGED" = 1 ]` — five identical spellings of one question, which is
+# what the merge was for. Each function keeps the WORDS that say why its scope is what
+# it is; only the duplicated line is gone.
+#
+# THEY SHARE A SHELL, SO THEY SHARE A NAMESPACE. Every value a body assigns is
+# `local` to its function, and two shell OPTIONS are restored on every exit path
+# rather than at the end of a file that no longer ends the process — see
+# `wall_background_suite_guard`'s `set -f`. The one thing a wall may leave behind is a
+# file it wrote, which is what it always was.
+#
+# THE ORDER IS THE MANIFEST'S, and hooks/bash-walls.sh spells it: protect-main,
+# protect-database, the evidence gate, farm-out-reminder, background-suite-guard. The
+# functions are independent — none reads state another writes during one event — so
+# the order decides how a composed refusal READS, not what it decides.
+#
+# FOUR OF THE FIVE REFUSE BY exit 2 WITH THE TEXT ON STDERR; farm-out-reminder alone
+# answers on stdout as JSON (`deny` for a block, `hookSpecificOutput.additionalContext`
+# for a nudge). That difference is preserved to the byte: `refuse` is still the one
+# renderer, `bionic_fold` still makes exactly one call to it, and the nudge rides
+# `fold_context`, which is the channel this wave added to the fold for exactly this
+# wall (A-53, T23 ruling R3).
+#
+# BASH 3.2. SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME — the rule every
+# library in this directory follows, for lib/context.sh's reason: callers read library
+# answers through `$( )` and anything printed on the way in corrupts the first field
+# of every one.
+#
+# [WALL: tests/bash-walls.test.sh]
+# [WALL: tests/protect-main.test.sh]
+# [WALL: tests/protect-database.test.sh]
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+# [WALL: tests/farm-out-reminder.test.sh]
+# [WALL: tests/background-suite-guard.test.sh]
+
+# ─── FILE SCOPE: the one helper two of the five carried a copy of ────────────
+#
+# Incident 0001: the audit stream must live where a consuming project cannot commit
+# it, regardless of that project's .gitignore. $HOME-rooted, per-project, durable —
+# the same $HOME/.claude/ audit path the archived epic-10 poker used (that work is
+# recoverable at tag archive/epic-10-never-die).
+# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
+# collision-resistant across same-named projects under different parents.
+# cksum and basename are POSIX — no new dependency.
+#
+# ONE DEFINITION, NOT A COMMENT ASKING FOR ONE. The evidence gate and
+# farm-out-reminder each carried a copy whose headers said "byte-identical to the
+# copies in …, divergence would give one project two audit files". Two copies in one
+# shell is a drift the shell itself would resolve, silently and in whichever order the
+# file happened to be read; one definition is the guarantee those comments wanted.
+# payload/scripts/lib/stop.sh carries the same function for the turn-end process,
+# which is a different process and therefore still a copy.
+# [INSTRUMENT]
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
+}
+
+# ─── THE PER-WALL LIBRARY DECLARATION (A-56.1, A-56.2) ───────────────────────
+#
+# ONE TABLE, TWO READERS, AND IT IS WHY THE COMPOUND DOES NOT FAIL CLOSED ON A
+# LIBRARY ONLY AN ADVISORY WALL WANTS. The five hooks each declared their own
+# `BIONIC_LIB_WANT`; folding them made hooks/bash-walls.sh's WANT the UNION of
+# five lists, and a union is fail-closed at its widest member — `cmd-class.sh`
+# absent refused EVERY Bash command in every project, where before it only made
+# farm-out-reminder and background-suite-guard step aside (measured: cmd-class
+# C5, runner-T23-suites at 5a6e053). R4 says fail-closed is per wall, so the
+# carrier's WANT is the two closed walls' union and NOTHING ELSE, and a library
+# only an advisory wall needs is sourced by that wall's own function, below.
+#
+# THE ROWS ARE THE PRE-FOLD `BIONIC_LIB_WANT` LINES, unchanged — read them back
+# with `git show 60c528b:hooks/<wall>.sh | grep BIONIC_LIB_WANT=`. They do NOT
+# name fold.sh or walls.sh: those two are what the COMPOUND is made of rather
+# than what a wall asks for, and hooks/bash-walls.sh declares them itself.
+#
+# THE SECOND READER IS DOCTOR. payload/scripts/lib/checks.sh builds
+# BIONIC_WALL_HOOKS out of these variable names, so doctor's walls row stays
+# PER WALL — five verdicts, each naming the wall and the library it wanted —
+# rather than collapsing to one row for the carrier that would tell a reader
+# "bash-walls cannot load cmd-class.sh" and leave them to guess which of five
+# behaviours that costs them.
+#
+# THE NAME MANGLE IS THE FUNCTION NAMES' OWN: `-` becomes `_`, exactly as
+# `wall_farm_out_reminder` spells `farm-out-reminder`. No wall name carries an
+# underscore, so the inverse is unambiguous and checks.sh takes it.
+BIONIC_WALL_LIBS_protect_main="context.sh git-argv.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_WALL_LIBS_protect_database="context.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_WALL_LIBS_canonical_sdlc_evidence_gate="context.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh"
+BIONIC_WALL_LIBS_farm_out_reminder="cmd-class.sh context.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_WALL_LIBS_background_suite_guard="cmd-class.sh context.sh refuse.sh root.sh run.sh session.sh"
+
+# THE HOOK THAT CARRIES ALL FIVE, declared here because the table's other reader
+# has to turn a wall NAME into a file on disk and there is exactly one answer.
+BIONIC_WALL_CARRIER="bash-walls"
+
+# ─── wall_libs — an advisory wall's own loader, for the files the carrier did
+#     not demand ─────────────────────────────────────────────────────────────
+#
+# THE LINE IT PRINTS IS THE LINE THE HOOK PRINTED. `loader_fail_open` in every
+# pre-fold hook said exactly this, with the hook's own name in front:
+#
+#     farm-out-reminder: library cmd-class.sh not found at <candidates> —
+#     hook stepping aside; run /bionic:doctor
+#
+# so a user who has seen a broken install before sees the same sentence, and the
+# WALL is named rather than the compound — which is the whole point of keeping
+# this per wall. (The fail-CLOSED refusal names `bash-walls`, per A-54, because
+# there it really is the compound that refused.)
+#
+# ONE LINE PER WALL, NOT ONE PER PROCESS. Two advisory walls wanting the same
+# absent file say so twice, once each, because they are two walls that stepped
+# aside and a reader who is told once cannot tell which. The sourcing itself is
+# done at most once per file per process — the message is the part that repeats.
+_bionic_wall_sourced=" "
+wall_libs() {  # <wall name> <basename>… -> 0 all sourced · 1 one named, caller returns 0
+  local who="$1"; shift
+  local f
+  for f in "$@"; do
+    [ -r "$BIONIC_LIB/$f" ] && continue
+    echo "$who: library $f not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+    return 1
+  done
+  for f in "$@"; do
+    case "$_bionic_wall_sourced" in *" $f "*) continue ;; esac
+    # shellcheck source=/dev/null
+    . "$BIONIC_LIB/$f" || return 1
+    _bionic_wall_sourced="${_bionic_wall_sourced}${f} "
+  done
+  return 0
+}
+
+# ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
+#
+# HARD BLOCK: Prevents AI from pushing to main/master branches.
+# The user must push to main manually from their own terminal.
+# [WALL: tests/protect-main.test.sh]
+#
+# THE COMMAND READER. Everything below asks the library what the words of this
+# command line are; nothing here greps the raw text. Until 1.3.2 it did, and
+# `git -C /tmp/r push origin main`, `git push origin "main"` and
+# `git push origin feature:refs/heads/main` all walked past this wall while a
+# heredoc that merely MENTIONED a push was refused.
+#
+# THE COMMAND IS STILL READ BEFORE THE LIBRARY IS, in hooks/bash-walls.sh and not
+# here: the repair allowlist in `loader_fail_closed` needs the text, and it has to be
+# consulted BEFORE the compound decides to refuse.
+#
+# FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): a wall over an IRREVERSIBLE
+# action that cannot load its library refuses, because a wall that cannot read a
+# command must not wave it through. That arm is the compound's now — one process
+# either loads the library or does not — and this wall is the reason the compound
+# has it at all, together with the evidence gate.
+wall_protect_main() {  # <event> -> 0 nothing · 2 block
+
+# ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
+#
+# FIRST, above every other scoping question this hook asks. Chris, 2026-09-03: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
+# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A session that
+# never invoked it is one this hook has nothing to say to, and it says nothing: exit 0,
+# no stdout, no stderr.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The marker is the one artifact whose
+# PRESENCE opens a wall, so the fail direction is inverted here on purpose: the arming
+# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
+# which never consented is the defect this guard exists to remove.
+# [WALL: tests/protect-main.test.sh]
+#
+# THE LOADER REFUSAL ABOVE IS NOT SCOPED BY THIS and cannot be: the predicate lives in
+# the library that just failed to load. A broken plugin still refuses a push in any
+# session, engaged or not — the one place this wall outruns the ruling, and the price of
+# a fail-closed wall that cannot read its own scope.
+#
+# ASKED ONCE, IN hooks/bash-walls.sh, FOR ALL FIVE (T23). `bionic_context` and this
+# predicate were spelled identically in each of the five walls and are now read once
+# ahead of the fold — five identical answers to one question is what the merge was for.
+# The words stay here because they are this wall's scope, not the caller's.
+
+# Read every segment. A segment is a push only when git is argv[0] (after
+# leading VAR=value assignments, shell openers, command-taking prefixes and
+# git's own global options) and `push` is the subcommand — so
+# `echo 'git push origin main'`, `grep 'git push' README.md` and a heredoc body
+# are not pushes, and `git -C <dir> push`, `sudo git push`,
+# `if …; then git push …; fi` and `sh -c 'git push …'` are.
+#
+# git_argv_EXPAND, not git_argv_segments: the expanded list adds the segments
+# of any `sh -c` / `eval` string, which the segment list on its own leaves as a
+# single opaque token (R-12, critic C-1/C-5).
+local IS_PUSH=0 segment rest dest CURRENT_BRANCH
+while IFS= read -r segment; do
+  [ -n "$segment" ] || continue
+  git_argv_parse "$segment" || continue
+  [ "$GIT_SUB" = "push" ] || continue
+  IS_PUSH=1
+  git_push_targets
+
+  # Block 1: this push writes to a protected branch. GIT_DESTS is US-separated;
+  # each destination is asked of git_branch_protected, which is the ONE place
+  # `main` and `master` are named — payload/scripts/lib/worktree.sh's land wall
+  # asks the same function about the branch it is about to merge into, and a
+  # second copy of the list here is how the two would drift apart.
+  # The split is pure parameter expansion: no subshell on the hot path of a hook
+  # that runs on every Bash call. `topic/main` and `main-fixes` are their own
+  # branches and stay allowed, because the predicate matches the whole name.
+  # [WALL: tests/protect-main.test.sh]
+  rest="$GIT_DESTS"
+  while [ -n "$rest" ]; do
+    dest="${rest%%"$GIT_ARGV_US"*}"
+    if [ "$dest" = "$rest" ]; then rest=""; else rest="${rest#*"$GIT_ARGV_US"}"; fi
+    [ -n "$dest" ] || continue
+    if git_branch_protected "$dest"; then
+      fold_block exit2 push "main is a protected branch here" "push from your own terminal" \
+        "A push to main is the user's own act, never Claude's. The destination this segment resolved to is \"$dest\"."
+      return 2
+    fi
+  done
+
+  # Block 2: force pushes (always dangerous) [WALL: tests/protect-main.test.sh]
+  if [ "$GIT_FORCE" -eq 1 ]; then
+    fold_block exit2 push "this is a force push" "push from your own terminal" \
+      "A force push rewrites published history and has no undo from here. Run it from your own terminal if you mean it."
+    return 2
+  fi
+done <<< "$(git_argv_expand "$COMMAND")"
+
+# Skip if no actual push command found
+if [ "$IS_PUSH" -eq 0 ]; then
+  return 0
+fi
+
+# Block 3: Any push while on main/master branch (catches implicit pushes
+# like "git push origin", "git push origin HEAD", bare "git push")
+# [WALL: tests/protect-main.test.sh]
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [ -n "$CURRENT_BRANCH" ] && git_branch_protected "$CURRENT_BRANCH"; then
+  fold_block exit2 push "the current branch is protected" "switch to a feature branch" \
+    "The current branch is \"$CURRENT_BRANCH\". Switch to a feature branch, or push by hand from your own terminal."
+  return 2
+fi
+
+return 0
+}
+
+# ─── wall_protect_database — hooks/protect-database.sh ───────────────────────
+#
+# HARD BLOCK: Prevents AI from running destructive database operations.
+# Catches DROP, TRUNCATE, DELETE without WHERE, and ALTER TABLE...DROP
+# via psql, mysql, sqlite3, and other common DB CLIs.
+# [WALL: tests/protect-database.test.sh]
+#
+# FAIL OPEN (task-engaged-session, 2026-09-03). This wall carried no library at all
+# until the engagement predicate arrived, and refusing every database command in
+# every project on the machine because one file is missing would arm it in exactly
+# the sessions Chris's ruling takes it out of. The direction is chosen by the cost of
+# the mistake: a destructive command that slips through a broken plugin is one
+# command, and the plugin being broken is loud. In the compound that reads as "this
+# wall is not one of the two that hold the fail-closed arm".
+wall_protect_database() {  # <event> -> 0 nothing · 2 block
+  [ -n "$COMMAND" ] || return 0
+
+# ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
+#
+# FIRST, above every other question this hook asks. Chris, 2026-09-03: "all guardrails
+# imposed by bionic should only apply when exercising bionic. Nothing should apply until
+# bionic is triggered" — and the trigger is the canonical-sdlc skill, which writes
+# `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A session that never
+# invoked it is one this wall has nothing to say to, and it says nothing: exit 0, no
+# stdout, no stderr.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The marker is the one artifact whose
+# PRESENCE opens a wall, so the fail direction is inverted here on purpose: the arming
+# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
+# which never consented is the defect this guard exists to remove.
+# [WALL: tests/protect-database.test.sh]
+#
+# ASKED ONCE, IN hooks/bash-walls.sh, FOR ALL FIVE (T23) — see wall_protect_main.
+
+
+# Uppercase for case-insensitive matching
+local CMD_UPPER stmt stmt_upper
+CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
+
+# Check if this involves a database CLI
+if echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-client|cqlsh|cockroach sql|pg_|mariadb)\b'; then
+
+  # DROP TABLE / DATABASE / SCHEMA / INDEX / COLLECTION / VIEW / FUNCTION / TRIGGER / PROCEDURE / SEQUENCE / TYPE
+  # [WALL: tests/protect-database.test.sh]
+  if echo "$CMD_UPPER" | grep -qE 'DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|COLLECTION|VIEW|FUNCTION|TRIGGER|PROCEDURE|SEQUENCE|TYPE)'; then
+    fold_block exit2 sql "this command DROPs a database object" "run the migration yourself" \
+      "The matched pattern is a DROP of a table, database, schema, index, collection, view, function, trigger, procedure, sequence or type. A migration run from your own terminal is the route."
+    return 2
+  fi
+
+  # TRUNCATE [WALL: tests/protect-database.test.sh]
+  if echo "$CMD_UPPER" | grep -qE 'TRUNCATE\s'; then
+    fold_block exit2 sql "this command TRUNCATEs a table" "run the migration yourself" \
+      "The matched pattern is TRUNCATE. A migration run from your own terminal is the route."
+    return 2
+  fi
+
+  # DELETE without WHERE (mass delete) — check per-statement to avoid multi-statement bypass
+  # [WALL: tests/protect-database.test.sh]
+  while IFS= read -r stmt; do
+    stmt_upper=$(echo "$stmt" | tr '[:lower:]' '[:upper:]')
+    if echo "$stmt_upper" | grep -qE 'DELETE\s+FROM\s' && ! echo "$stmt_upper" | grep -qE 'DELETE\s+FROM\s+\S+\s+WHERE\s'; then
+      fold_block exit2 sql "this DELETE has no WHERE clause" "add a WHERE clause" \
+        "The matched pattern is a DELETE FROM with no WHERE in the same statement. An unbounded DELETE empties the table."
+      return 2
+    fi
+  done <<< "$(echo "$CMD_UPPER" | tr ';' '\n')"
+
+  # ALTER TABLE ... DROP COLUMN [WALL: tests/protect-database.test.sh]
+  if echo "$CMD_UPPER" | grep -qE 'ALTER\s+TABLE\s+.*DROP\s'; then
+    fold_block exit2 sql "this ALTER TABLE drops a column or key" "run the migration yourself" \
+      "The matched pattern is an ALTER TABLE that DROPs. A migration run from your own terminal is the route."
+    return 2
+  fi
+
+  # MongoDB destructive operations (JavaScript method calls)
+  # [WALL: tests/protect-database.test.sh]
+  if echo "$COMMAND" | grep -qEi '(\.drop\(\)|\.dropDatabase\(\)|\.deleteMany\(\s*\{\s*\}\s*\))'; then
+    fold_block exit2 sql "this drops or wipes a MongoDB collection" "run it from your own terminal" \
+      "The matched pattern is a collection drop, a database drop, or an unfiltered many-document delete. Run it from your own terminal if you mean it."
+    return 2
+  fi
+fi
+
+# Also catch raw SQL piped or passed inline (e.g., echo "DROP TABLE..." | psql)
+# [WALL: tests/protect-database.test.sh]
+if echo "$CMD_UPPER" | grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|FUNCTION|TRIGGER|PROCEDURE)|TRUNCATE\s)' && echo "$COMMAND" | grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )'; then
+  fold_block exit2 sql "destructive SQL is piped to a db client" "run the migration yourself" \
+    "The matched pattern is a DROP or TRUNCATE piped or heredoc-fed into psql, mysql, sqlite3 or mongosh. Piping hides the statement from the argv check."
+  return 2
+fi
+
+return 0
+}
+
+# ─── wall_evidence_gate — hooks/canonical-sdlc-evidence-gate.sh ──────────────
+#
+# EVIDENCE GATE: blocks git commits during a canonical-sdlc run when the plan file's
+# `## SDLC State` section is missing the current step's evidence. The rule is: the
+# evidence artifact must be recorded in the plan file *before* the commit that closes
+# the step. Plans without `## SDLC State` pass through unblocked — this wall only
+# enforces against canonical-sdlc runs.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
-# Plans without ## SDLC State pass through unblocked — this hook only
-# enforces against canonical-sdlc runs.
+# FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): a wall over an IRREVERSIBLE
+# action refuses rather than waving through a command it cannot read. That arm is the
+# compound's now, in hooks/bash-walls.sh, after the four repair commands are matched
+# as whole strings.
 #
-# Exit code 2 = block the tool call entirely in Claude Code hooks.
+# ── WHY THIS ONE WALL IS RUN IN A SUBSHELL, AND THE OTHER FOUR ARE NOT ───────
 #
-# Registered once in hooks/hooks.json, always on. It is not scoped by whether a skill
-# is armed — an on-disk fact is: the hook loads the library, asks `session_run` (which was
-# `active_run` until wave-session-bound-run made run identity per-session) whether THIS
-# SESSION has an open run, and exits silently when it does not.
+# The fold's contract is that a folded function stages a refusal and RETURNS, never
+# exits. protect-main, protect-database, farm-out-reminder and background-suite-guard
+# each have between one and six refusal sites, all within one or two call frames, and
+# each was converted to `fold_block … ; return 2` with every caller propagating — the
+# mechanical change T12 made to the four Stop walls.
 #
-# WHEN THE LIBRARY DOES NOT LOAD, that order inverts: the scope question has to be
-# answered BEFORE the fail-closed refusal, and answered without the library. See the
-# ancestor walk just below the loader block.
-
-set -u
-
-# THE COMMAND IS READ BEFORE THE LIBRARY IS. Not for convenience: the repair
-# allowlist in `loader_fail_closed` needs the command text, and it has to be
-# consulted BEFORE this wall decides to refuse — otherwise a broken publish locks
-# the user out of the very commands that repair it (R-1 §(5), the lockout this wave
-# is named for). `jq` on the payload is the one read that does not need the library.
-BIONIC_INPUT=$(cat)
-COMMAND=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.command // empty')
-
-# Not a Bash tool call or empty command — nothing to gate, and nothing the library
-# would have been consulted about.
-if [ -z "$COMMAND" ]; then
-  exit 0
-fi
-
-# THE LIBRARY: the command reader (git-argv.sh), the root (root.sh) and the run
-# predicate (run.sh). One idiom, byte-identical in every hook — see
-# payload/scripts/lib/loader.sh, which is where this text comes from and what
-# tests/hook-adoption.test.sh pins each copy against.
+# THIS BODY HAS 32, at up to four frames deep, and 32 of them are inside `validate_matrix`
+# alone — a 300-line function whose refusals fire from inside loops, through helper
+# frames (`block_matrix`, `ledger_shape_fail`, `shape_block`) that were written knowing
+# `refuse` never returns. Propagating a return through every one of those call sites is
+# ~50 edits in which a single miss converts a BLOCK into a silent pass: the wall keeps
+# running, the next `fold_block` overwrites the staged object, and the function returns
+# 0 with the refusal discarded. That is the fail-OPEN direction, on the wall that stands
+# over `git commit`, and no suite can prove the absence of the miss it did not think to
+# drive.
 #
-# FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): this is a wall over an
-# IRREVERSIBLE action, so it refuses rather than waving a command through it cannot
-# read — after permitting the four repair commands by whole-string match.
-BIONIC_LIB_WANT="context.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh"
-# --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
-# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
-# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
-# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
-# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
-# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
-# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
-# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
-# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
-# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
-# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
-BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
-_bl_try() {
-  [ -n "${1:-}" ] || return 1
-  if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
-  [ -d "$1" ] || return 1
-  for _bl_f in $_bl_want; do [ -r "$1/$_bl_f" ] || return 1; done
-  BIONIC_LIB="$1"
-}
-if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
-  if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
-    _bl_mk="${_bl_keys%%
-*}"
-    _bl_mk="${_bl_mk#bionic@}"
-  fi
-  if [ -n "$_bl_mk" ]; then
-    _bl_src=""
-    if [ -r "$_bl_pd/known_marketplaces.json" ]; then
-      _bl_src="$(jq -r --arg mk "$_bl_mk" '.[$mk].source.path // empty' "$_bl_pd/known_marketplaces.json" 2>/dev/null)"
-    fi
-    if [ -n "$_bl_src" ]; then _bl_try "$_bl_src/payload/scripts/lib" || :; fi
-    if [ -z "$BIONIC_LIB" ]; then
-      _bl_best=""; _bl_bestk=""
-      for _bl_v in "$_bl_pd/cache/$_bl_mk/bionic"/*; do
-        [ -d "$_bl_v" ] || continue
-        _bl_n="${_bl_v##*/}"
-        case "$_bl_n" in ''|*[!0-9.]*) continue ;; esac
-        _bl_x1=""; _bl_x2=""; _bl_x3=""
-        IFS=. read -r _bl_x1 _bl_x2 _bl_x3 _bl_rest <<BIONIC_LOADER_VER
-$_bl_n
-BIONIC_LOADER_VER
-        _bl_k="$(printf '%05d%05d%05d' "$((10#${_bl_x1:-0}))" "$((10#${_bl_x2:-0}))" "$((10#${_bl_x3:-0}))" 2>/dev/null)" || continue
-        if [ -z "$_bl_bestk" ] || [ "$_bl_k" \> "$_bl_bestk" ]; then _bl_bestk="$_bl_k"; _bl_best="$_bl_n"; fi
-      done
-      if [ -n "$_bl_best" ]; then _bl_try "$_bl_pd/cache/$_bl_mk/bionic/$_bl_best/scripts/lib" || :; fi
-    fi
-  fi
-fi
-if [ -z "$BIONIC_LIB" ]; then
-  BIONIC_LIB_MISSING="${_bl_want%% *}"
-  [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
-fi
-loader_fail_open() {
-  echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
-  exit 0
-}
-loader_fail_closed() {
-  _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
-  [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
-  case "${2:-}" in
-    "claude plugin update bionic@bionic"|\
-    "claude plugin install bionic@bionic"|\
-    "bash $_bl_root/scripts/doctor.sh"|\
-    "bash $_bl_root/scripts/setup.sh") exit 0 ;;
-  esac
-  _bl_who="${1:-a bionic hook}"
-  if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
-  printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
-    cat >&2 <<BIONIC_LOADER_REFUSE
-A wall that cannot read a command refuses it rather than waving it through.
-
-Wanted: ${BIONIC_LIB_MISSING:-the bionic library}
-Looked in: ${BIONIC_LIB_CANDS:-(no candidate)}
-
-Until the plugin is whole again this wall permits exactly four commands, each matched
-as a whole string:
-
-    claude plugin update bionic@bionic
-    claude plugin install bionic@bionic
-    bash $_bl_root/scripts/doctor.sh
-    bash $_bl_root/scripts/setup.sh
-
-Anything else is refused, including one of those four with another command chained
-after it. Run one of them, or act from your own terminal.
-BIONIC_LOADER_REFUSE
-  fi
-  exit 2
-}
-# --- bionic-loader/v2 END
-
-# ARMED BEFORE REFUSING. This wall is fail-CLOSED, and the decision is taken HERE — at
-# load time, hundreds of lines before `active_run` gets asked whether this project has
-# a run, because `active_run` lives in the library that just failed to load. Left at
-# that, a half-updated plugin refuses every Bash command in EVERY project on the
-# machine, `ls` included, in repositories that carry no `.bionic` and never had a run.
-# That is not the wall being cautious; it is the wall firing outside its own reach.
-# [WALL: tests/hook-adoption.test.sh §6b]
+# So the body is carried VERBATIM — every `exit`, every frame, every refusal site — and
+# run in a subshell where `refuse` is shimmed to RECORD the object and exit, which is
+# exactly what the library's `refuse` does minus the rendering. The abort semantics are
+# the ones the 32 sites were written against, unchanged and unaudited-for, and the
+# parent stages the recorded object through `fold_block` like every other wall. The
+# differential (T23 §7) is the proof: on a payload where only this wall speaks, the
+# bytes on both streams are the ones the hook produced.
 #
-# So the cheapest fact that needs no library is read first: COULD a run exist here? A
-# run lives in a `.bionic` directory at or above the payload cwd. None → exit 0 in
-# silence. One → the fail-closed path below, repair allowlist and all, unchanged.
+# WHAT THE SUBSHELL COSTS, SAID OUT LOUD. One fork per Bash tool call in an engaged
+# session — no exec, no re-parse, no second loader run, against the five execs and five
+# loader runs the merge removes. The body may not hand shell state to a later wall, and
+# it never did: what it leaves behind is the audit file it wrote, which is a file.
 #
-# The walk is lib/root.sh's rules 3 and 4 restated by hand, which is the one place in
-# this repo that duplication is the design: the file that owns those rules is exactly
-# what cannot be sourced. A `.bionic` SYMLINK is not a `.bionic` (rule 3); `$HOME` and
-# above are never inspected (rule 4). Canonicalisation is `cd … && pwd -P` — stock
-# macOS ships no `realpath`. The walk is bounded three ways: `/`, `$HOME`, 64 levels.
-#
-# hooks/protect-main.sh deliberately carries NO such pre-check. It guards a push in
-# every project on the machine, wave or no wave, so its reach IS every project.
-_bionic_gate_abs() {  # <path> -> absolute, symlink-resolved, nearest existing ancestor
-  _bga_p="${1:-}"
-  [ -n "$_bga_p" ] || _bga_p="$PWD"
-  case "$_bga_p" in /*) ;; *) _bga_p="$PWD/$_bga_p" ;; esac
-  while [ -n "$_bga_p" ] && [ "$_bga_p" != "/" ] && [ ! -d "$_bga_p" ]; do
-    _bga_p="$(dirname "$_bga_p")"
+# THE STAGING IS FIVE FILES AND NOT ONE, because `detail` carries newlines and blank
+# lines by design and any single-file encoding would need an escape this can do without.
+# `$( cat )` strips trailing newlines, which is what `bionic_fold` does to `detail`
+# anyway, and `mode`, `verb`, `fact` and `fix` cannot contain a newline — `refuse`
+# refuses its own caller for that.
+_eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail>
+  local d="${1:-}" i=1 a
+  shift
+  mkdir -p "$d" 2>/dev/null || return 0
+  for a in "$@"; do
+    printf '%s' "$a" > "$d/$i" 2>/dev/null
+    i=$((i + 1))
   done
-  ( cd "$_bga_p" 2>/dev/null && pwd -P ) || printf '%s\n' "$_bga_p"
 }
-_bionic_gate_run_possible() {  # <cwd> -> 0 when a real `.bionic` sits at or above it
-  _bgr_p="$(_bionic_gate_abs "${1:-}")"
-  _bgr_home=""
-  [ -n "${HOME:-}" ] && _bgr_home="$(_bionic_gate_abs "$HOME")"
-  _bgr_n=0
-  while [ -n "$_bgr_p" ] && [ "$_bgr_p" != "/" ] && [ "$_bgr_n" -lt 64 ]; do
-    if [ -n "$_bgr_home" ]; then
-      # $HOME itself, or any ancestor of it. Walking further up only finds more
-      # ancestors of $HOME, so stopping here is the whole of rule 4.
-      [ "$_bgr_p" = "$_bgr_home" ] && return 1
-      case "$_bgr_home/" in "$_bgr_p/"*) return 1 ;; esac
-    fi
-    if [ ! -L "$_bgr_p/.bionic" ] && [ -d "$_bgr_p/.bionic" ]; then return 0; fi
-    _bgr_p="$(dirname "$_bgr_p")"
-    _bgr_n=$((_bgr_n + 1))
-  done
-  return 1
+
+wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
+  # Not a Bash tool call or an empty command — nothing to gate.
+  [ -n "$COMMAND" ] || return 0
+
+  local _eg_stage _eg_rc
+  _eg_stage="${TMPDIR:-/tmp}/bionic-gate-$$-${RANDOM}"
+  (
+    # THE SHIM, and the only line of this wall that is not the hook's own. It has
+    # `refuse`'s signature and `refuse`'s abort, and it renders nothing: the parent
+    # makes the one `refuse` call through `bionic_fold`, so the channel rule holds
+    # (cross-gate §Refuse: no hook prints a refusal directly).
+    refuse() { _eg_stage_refusal "$_eg_stage" "$@"; exit 2; }
+    _eg_body
+  )
+  _eg_rc=$?
+
+  if [ -f "$_eg_stage/1" ]; then
+    fold_block "$(cat "$_eg_stage/1" 2>/dev/null)" "$(cat "$_eg_stage/2" 2>/dev/null)" \
+               "$(cat "$_eg_stage/3" 2>/dev/null)" "$(cat "$_eg_stage/4" 2>/dev/null)" \
+               "$(cat "$_eg_stage/5" 2>/dev/null)"
+    rm -rf "$_eg_stage" 2>/dev/null
+    return 2
+  fi
+  rm -rf "$_eg_stage" 2>/dev/null
+
+  # A NON-ZERO EXIT WITH NOTHING STAGED is `refuse` refusing its own caller — a
+  # malformed refusal, whose complaint is already on stderr in the library's own
+  # format. `_refuse_selfrefuse` exits 2 "because the wall the caller was building
+  # must still hold", and it holds here: the commit is refused, and the refusal says
+  # which failure this is rather than inheriting an empty object.
+  if [ "$_eg_rc" -ne 0 ]; then
+    fold_block exit2 commit "the evidence gate's own refusal is malformed" "run /bionic:doctor" \
+      "The gate refused this commit and the refusal it built was rejected by the one
+renderer; the library's complaint is on the stream above this line. The commit is
+still refused — a wall whose words are broken is not a wall that waves things past."
+    return 2
+  fi
+  return 0
 }
-if [ -n "$BIONIC_LIB_MISSING" ]; then
-  # The same cwd lib/context.sh resolves below, restated here because the answer
-  # decides whether the library's absence is this gate's business at all — and the
-  # library is what failed to load. The rungs are kept in step by hand for this one
-  # block only; tests/cross-gate-agreement.test.sh §CTX scopes its ladder sweep below
-  # the loader span for exactly this reason.
-  _BG_CWD="${CLAUDE_PROJECT_DIR:-}"
-  [ -n "$_BG_CWD" ] || _BG_CWD=$(echo "$BIONIC_INPUT" | jq -r '.cwd // empty')
-  [ -n "$_BG_CWD" ] || _BG_CWD="$PWD"
-  _bionic_gate_run_possible "$_BG_CWD" || exit 0
-  loader_fail_closed "canonical-sdlc-evidence-gate" "$COMMAND"
-fi
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/context.sh"
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/git-argv.sh"
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/refuse.sh"
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/root.sh"
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/run.sh"
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/session.sh"
-# THE ONE READER OF `## Tasks` (REQ-1e, spec §2 D3). Both ledger checks and the
-# prototype-row arm below take their rows from here; this hook parses no table of
-# its own. Sourced through the lib the loader already found, like every other.
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/units.sh"
+
+# ── the hook's body, carried whole ───────────────────────────────────────────
+#
+# EVERYTHING BELOW IS hooks/canonical-sdlc-evidence-gate.sh FROM ITS LAST `. "$BIONIC_LIB/…"`
+# LINE TO ITS LAST `exit 0`, with ONE deletion: the `audit_path` copy, which is at file
+# scope now. Its `exit` statements are load-bearing and deliberate — see the subshell
+# note above — and its margin is column zero because `tests/cross-gate-agreement.test.sh`
+# and `tests/docs-pins.test.sh` read literals out of it with `^`-anchored extractions.
+_eg_body() {
 
 # Is any segment of the command a `git commit`? The library answers by argv
 # position: git must be argv[0] (after leading VAR=value assignments and git's
@@ -611,24 +853,9 @@ audit_root() {
   if [ -d "$r/.bionic" ]; then printf '%s\n' "$r"; else printf '%s\n' "$BIONIC_ROOT"; fi
 }
 
-# Incident 0001: the audit stream must live where a consuming project cannot
-# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
-# durable — the same $HOME/.claude/ audit path the archived epic-10 poker used
-# (that work is recoverable at tag archive/epic-10-never-die).
-# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
-# collision-resistant across same-named projects under different parents.
-# cksum and basename are POSIX — no new dependency.
-# Byte-identical to the copies in farm-out-reminder.sh,
-# canonical-sdlc-governing-skill.sh and context-spend.sh — divergence would give
-# one project two audit files. Deliberate per-hook duplication (no shared lib).
-# [INSTRUMENT]
-audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
-  [ -n "${HOME:-}" ] || return 1
-  local base sum
-  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
-  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
-}
+# `audit_path` IS AT FILE SCOPE NOW (T23) — one definition for the two walls that
+# carried a byte-identical copy, which is the guarantee the copies' headers asked for.
+# hooks/canonical-sdlc-governing-skill.sh is a different process and keeps its own.
 
 # Log-only finding channel (D14): append one line to the durable audit file
 # AND echo to stderr, then return 0 — floor/ledger/merge-target findings never
@@ -2587,3 +2814,568 @@ dispatch() {
 
 dispatch
 exit 0
+}
+
+# ─── wall_farm_out_reminder — hooks/farm-out-reminder.sh ─────────────────────
+#
+# FARM-OUT: tiered enforcement — long-running main-thread commands DENY with a
+# redirect to the right role; fuzzy production-shaped commands get ONE
+# additionalContext nudge per class per session; every tier-1/tier-2 event logs one
+# line to $HOME/.claude/logs/<project-slug>/sdlc-audit.md — outside every consuming
+# project tree (incident 0001) — via audit_path().
+#
+# ENFORCEMENT LIVES IN STDOUT JSON ONLY, never exit 2 (epic-08 wave-04 ADR-002;
+# amends D14 per user ratification 2026-07-20). It is the one wall of the five that
+# answers on that wire, and the fold keeps the distinction rather than averaging it
+# away: `deny` for a block, `fold_context` for a nudge.
+# [UNENFORCED]
+#
+# Thread discrimination (epic-08 Q1 spike + hooks docs): agent_type non-empty →
+# subagent → silent. Missing keys classify as MAIN THREAD.
+# [WALL: tests/farm-out-reminder.test.sh]
+wall_farm_out_reminder() {  # <event> -> 0 nothing · 1 nudge · 2 deny
+  local AGENT_TYPE TOOL_NAME CMD
+  AGENT_TYPE=$(bionic_jq .agent_type);   [ -n "$AGENT_TYPE" ] && return 0
+  TOOL_NAME=$(bionic_jq .tool_name);     [ "$TOOL_NAME" = "Bash" ] || return 0
+  CMD="$COMMAND";                        [ -n "$CMD" ] || return 0
+
+  # THE CLASSIFIER IS THIS WALL'S OWN TO FIND (A-56.1). hooks/bash-walls.sh does
+  # not demand cmd-class.sh, because a wall that steps aside over a missing file
+  # must not make the two walls over irreversible actions refuse everything. So
+  # this function asks for it here, at the point it has decided it has work to
+  # do, and steps aside naming the file when it is not there — which is what the
+  # hook did, in the same words.
+  wall_libs farm-out-reminder cmd-class.sh || return 0
+
+# ASKED ONCE, IN hooks/bash-walls.sh, FOR ALL FIVE (T23). The root and the session id
+# come from their one owner (REQ-1f, lib/context.sh).
+# `project_root` walks to the nearest real `.bionic` ancestor rather than trusting
+# whatever directory invoked the hook — the audit file and the config below both hang
+# off the answer, and a worktree that answered with its own tree would write a second
+# audit stream for one project.
+#
+# THE `unknown` SUBSTITUTION IS GONE (REQ-1h). An empty session id used to become that
+# literal and carry on to be refused by name one guard later; the library returns 1 and
+# this hook exits, which is the same silence by a route that never forms a state path
+# out of a value it has already judged unusable.
+
+# ---------- THE ENGAGEMENT GUARD (AC-6): is this session bionic's at all? ----------
+#
+# FIRST, above the run predicate and above the FARM_OUT_ALLOW override both. Chris,
+# 2026-09-03: "all guardrails imposed by bionic should only apply when exercising
+# bionic. Nothing should apply until bionic is triggered" — and the trigger is the
+# canonical-sdlc skill, which writes `.bionic/tmp/engaged-<sid>.state` at the instant it
+# is invoked. A session that never invoked it gets no nudge, no deny and no audit line:
+# exit 0, no stdout, no stderr.
+#
+# ABOVE THE OVERRIDE for the same reason the run predicate is: FARM_OUT_ALLOW=1 exists
+# to bypass a wall that is binding, and where the wall is inert there is nothing to
+# bypass. An audit line recording an "override" of a wall that was never going to fire
+# is noise in the one stream that has to stay readable.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — an absent marker, a symlink at the path,
+# a foreign key — because the arming partition is the consent boundary (1.3.2 close-out).
+# An unshaped key never reaches here at all: `bionic_context` refused it above.
+# [WALL: tests/cmd-class.test.sh]
+
+# ── NO RUN PREDICATE HERE, DELIBERATELY (step-6 review R-1) ──────────────────
+#
+# This hook used to ask `active_run` for an open canonical-sdlc run and exit silently
+# without one. That gate is gone. The nudge is PLAN-FREE: engagement decides whether a
+# bionic wall speaks at all, and knowing that a suite command belongs in a subagent
+# needs no plan — the sessions most in need of the reminder are the ones in Step 0
+# through Step 3, which have not written one yet. Adding the predicate back would
+# re-open the hole R-1 named.
+# [WALL: tests/cmd-class.test.sh]
+
+
+
+local MODE FLAT SAFE_FLAT TARGET CLASS ROLE CHAIN_SEGS CHAIN_COUNT CHAIN_ROLE
+local _cfg _seg _has_nonexempt
+MODE="block"
+if [ -f "$BIONIC_ROOT/.bionic/config.yaml" ]; then
+  _cfg=$(grep -E '^farm-out-mode:' "$BIONIC_ROOT/.bionic/config.yaml" 2>/dev/null | head -1 \
+    | sed 's/^farm-out-mode:[[:space:]]*//' | tr -d '\r' | sed 's/[[:space:]]*$//')
+  case "$_cfg" in block|advisory|off) MODE="$_cfg" ;; esac
+fi
+[ "$MODE" = "off" ] && return 0
+
+# Normalized single-line form for matching + the scrubbed deny reason (CR translate).
+FLAT=$(printf '%s' "$CMD" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
+  | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
+
+# `audit_path` IS AT FILE SCOPE NOW, once for the two walls that carried a copy — see
+# the top of this file. The copies were byte-identical and had to be, or one project
+# would get two audit files; one definition is that guarantee rather than a comment
+# asking for it.
+
+log_event() {  # $1=event $2=class
+  # No command-derived text: `class=<c> mode=<m>` is the complete payload.
+  # A length bound is not a sanitizer — incident 0001 leaked a live credential
+  # through the former `cut -c1-120` excerpt of the raw command.
+  local f
+  if f=$(audit_path "$BIONIC_ROOT"); then
+    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) farm-out $1: class=$2 mode=$MODE"
+    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
+  fi
+  echo "farm-out [$1] class=$2" >&2
+  return 0
+}
+
+# [WALL: tests/farm-out-reminder.test.sh]
+emit_deny() {  # $1=class $2=role
+  # THROUGH THE ONE RENDERER (task 13, table row 106). `deny` is the mode this hook has
+  # always used and the one the E1 measurement showed carries a model-only channel, so
+  # the user gets the single line and the whole existing instruction rides the JSON
+  # reason unchanged. `refuse` EXITS — with status 0 on this mode, which is what the
+  # JSON verdict needs. Under the fold the object is STAGED and `bionic_fold` makes the
+  # one `refuse` call, so the mode, the words and the wire are unchanged and only the
+  # moment of rendering moved (A-53).
+  fold_block deny run "this command belongs in a subagent" "dispatch it with the Agent tool" \
+    "$(deny_reason "$1" "$2")"
+  return 2
+}
+
+emit_nudge() {  # $1=class $2=role
+  # THE MODEL'S CHANNEL, STAGED (T23, fold.sh's `fold_context`). This hook built the
+  # `hookSpecificOutput` object itself because it was the only process on the wire; five
+  # walls in one process can reach for the same object, and several JSON documents on one
+  # stdout is a wire nothing parses. The text is unchanged to the byte and the fold emits
+  # it through the same `jq -n`, so a lone nudge is the object this line used to print.
+  fold_context "farm-out checkpoint: $1-class command on the main thread — production-shaped work belongs in a subagent. Fix: dispatch via Agent(subagent_type: $2) when you can. This protects your own context budget; a stuck orchestrator cannot process completions. Advisory only."
+  return 1
+}
+
+# Pattern scrub for command-derived text (incident 0001). Two shapes:
+# a hex run of 32+ (API keys, tokens, hashes) and an explicit
+# KEY=/TOKEN=/SECRET= assignment. This is deliberately farm-out-local —
+# no other hook in this repo interpolates raw command text.
+scrub_secrets() {  # stdin → stdout
+  sed -E -e 's/[A-Fa-f0-9]{32,}/[REDACTED]/g' \
+         -e 's/([A-Za-z0-9_]*(KEY|TOKEN|SECRET)=)[^[:space:]]+/\1[REDACTED]/g'
+}
+
+deny_reason() {  # $1=class $2=role
+  # Scrub BEFORE truncating: truncating first can split a hex run below the
+  # 32-char threshold and leak a prefix.
+  local safe; safe=$(printf '%s' "$FLAT" | scrub_secrets | cut -c1-120)
+  printf '%s' "farm-out checkpoint: this $1-class command doesn't belong on the orchestrator thread (a stuck orchestrator is unavailable and cannot process subagent completions — this protects your own context budget). Fix: dispatch it — Agent(subagent_type: $2, prompt carrying the command from this tool call): $safe — scrubbed and truncated for the log; the agent returns the result summary. If this genuinely cannot be dispatched (needs this session's state), re-run prefixed FARM_OUT_ALLOW=1 — the override is sanctioned and audited."
+}
+
+# ── classification (B-5: argv positions, read by scripts/lib/cmd-class.sh) ───────
+# override check + wrapper unwrap precede classification.
+
+# The sed twins that used to live here — strip_prefixes() and unwrap() — are
+# GONE (review-b B-4a). They were hand-rolled copies of the library's
+# strip_leading()/unwrap_runner() with their own smaller rule set: the prefix
+# strip knew only `env`, `FARM_OUT_*=`, `nohup` and `timeout <n>`, so a `sudo`,
+# a `time`, an `xargs` or an ordinary `FOO=1` left the wrapper sitting at
+# argv[0] and the tier-2 matcher below never fired. Tier-2 now reads
+# cmd_unwrap_head, which is the same reduction cmd_class itself performs — one
+# reader, one set of rules, and the R-12 superset applies to the nudge tier too.
+# [WALL: tests/cmd-class.test.sh]
+
+role_for_class() {  # $1=class → the role a redirect names
+  case "$1" in suite) printf 'test-runner' ;; *) printf 'implementor' ;; esac
+}
+
+classify_tier1() {  # $1=command text → sets CLASS ROLE, rc 0 on match
+  # ONE READER, argv-positional (payload/scripts/lib/cmd-class.sh). The regex classifier
+  # this replaced matched mid-string after any space, so `make( +[^ ]+)?` denied
+  # `git commit -m "make the row green"` as class=build and a heredoc body carrying
+  # `bash tests/run.sh` denied as class=suite — both measured, research-b3 §2. Prose,
+  # quoted strings and heredoc bodies are never argv[0], so they no longer classify.
+  # A short (<3-segment) chain that carries a tier-1 command still denies here on
+  # purpose; the ≥3-segment chain is a separate arm (class=chain) reached only when
+  # this one skips.
+  # [WALL: tests/cmd-class.test.sh]
+  local c
+  c=$(cmd_class "$1")
+  [ "$c" = "none" ] && return 1
+  CLASS="$c"; ROLE=$(role_for_class "$c")
+  return 0
+}
+
+emit_tier1() {  # $1=class $2=role — deny, or downgrade to a nudge under advisory
+  if [ "$MODE" = "advisory" ]; then
+    log_event "deny-downgraded" "$1"; emit_nudge "$1" "$2"; return 1
+  fi
+  log_event "deny" "$1"; emit_deny "$1" "$2"
+}
+
+classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
+  local c="$1"
+  if printf '%s' "$c" | grep -qE '^git +clone([;&| ]|$)'; then CLASS="clone"; ROLE="implementor"; return 0; fi
+  if printf '%s' "$c" | grep -qE '^docker +(run|pull)([;&| ]|$)'; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
+  if printf '%s' "$c" | grep -qE '^(npx|uvx) +'; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
+  return 1
+}
+
+nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = suppressed
+  local state="$BIONIC_ROOT/.bionic/tmp/farm-out.state"
+  mkdir -p "$BIONIC_ROOT/.bionic/tmp" 2>/dev/null
+  if [ -f "$state" ] && grep -qF "$BIONIC_SID	$1" "$state" 2>/dev/null; then
+    log_event "suppressed" "$1"; return 0
+  fi
+  printf '%s\t%s\n' "$BIONIC_SID" "$1" >> "$state" 2>/dev/null || true
+  log_event "nudge" "$1"; emit_nudge "$1" "$2"; return 1
+}
+
+# ── main flow: override → unwrap → tier-1 deny → tier-2 nudge (single + chain) ──
+# Chain-aware: the override token is honored ANYWHERE in the invocation —
+# leading, after a separator (;/&/|), or as an env-prefix mid-chain
+# (`cd x && FARM_OUT_ALLOW=1 bash tests/run.sh`) — not only in leading
+# position. W4's false fire was exactly this shape: a 2-segment &&-chain hit
+# the single-command tier-1 arm before the old leading-only case ever ran.
+if printf '%s' "$FLAT" | grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)'; then
+  log_event "override" "user-sanctioned"; return 0
+fi
+
+# The heredoc-free form of the command. Chain segmentation and the tier-2 matcher read
+# it rather than FLAT, so a `&&` or an `npx` inside a heredoc body cannot reshape the
+# decision any more than it can classify.
+SAFE_FLAT=$(cmd_strip_heredocs "$CMD" \
+  | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
+  | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
+
+TARGET=$(cmd_unwrap_head "$SAFE_FLAT")
+CLASS=""; ROLE=""
+
+# Chain segmentation (≥3 &&-joined segments) feeds both chain arms below;
+# compute the segment list once. Empty/0 when no `&&` is present.
+CHAIN_SEGS=""; CHAIN_COUNT=0
+case "$SAFE_FLAT" in
+  *"&&"*)
+    CHAIN_SEGS=$(printf '%s' "$SAFE_FLAT" | awk '{ gsub(/&&/, "\n"); print }')
+    CHAIN_COUNT=$(printf '%s\n' "$CHAIN_SEGS" | grep -cE '[^[:space:]]')
+    ;;
+esac
+
+# Tier-1 single command → deny (advisory-downgrades to a nudge inside emit_tier1).
+# A ≥3-segment && chain defers to the chain tier-1 arm below so it keeps its
+# class=chain label: now that install/build share the suite/bootstrap segment
+# anchoring, an unguarded single-command match would relabel those chains.
+if [ "${CHAIN_COUNT:-0}" -lt 3 ] && classify_tier1 "$CMD"; then
+  emit_tier1 "$CLASS" "$ROLE"; return $?
+fi
+
+# Chain tier-1 arm: ANY stripped/unwrapped segment matches tier-1 → deny as
+# class=chain, role taken from the matching segment.
+if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
+  CHAIN_ROLE=""
+  while IFS= read -r _seg; do
+    _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$_seg" ] || continue
+    if classify_tier1 "$_seg"; then
+      CHAIN_ROLE="$ROLE"; break
+    fi
+  done <<EOF
+$CHAIN_SEGS
+EOF
+  if [ -n "$CHAIN_ROLE" ]; then emit_tier1 "chain" "$CHAIN_ROLE"; return $?; fi
+fi
+
+# Tier-2 single command → nudge once per (session, class).
+if classify_tier2 "$TARGET"; then
+  nudge_once "$CLASS" "$ROLE"; return $?
+fi
+
+# Chain tier-2 arm: ≥3 segments, NO tier-1 segment (the tier-1 arm above would
+# have exited otherwise), ≥1 non-exempt segment → nudge as class=chain.
+if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
+  _has_nonexempt=""
+  while IFS= read -r _seg; do
+    _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    [ -n "$_seg" ] || continue
+    printf '%s' "$_seg" | grep -qE '^(git|ls|cat|head|tail|wc|grep|rg|find|awk|sed|mkdir|cp|mv|rm|touch|echo|printf|test|cd|pwd|which|command|true|false) ' \
+      || { _has_nonexempt=1; break; }
+  done <<EOF
+$CHAIN_SEGS
+EOF
+  if [ -n "$_has_nonexempt" ]; then nudge_once "chain" "implementor"; return $?; fi
+fi
+
+return 0
+}
+
+# ─── wall_background_suite_guard — hooks/background-suite-guard.sh ───────────
+#
+# A subagent may not run a suite where nobody reads the output (B-9,
+# wave-bionic-1.3.2; spec R-9, AC-23/AC-24).
+#
+# THE DEFECT. A dispatched agent that runs `bash tests/run.sh` with the Bash tool's
+# `run_in_background: true` gets a shell id back instead of a result. The suite runs,
+# the agent's turn ends, and the evidence the task was dispatched to produce exists
+# nowhere: no file, no transcript, no exit status anyone read.
+#
+# ABSENT, NOT FALSE. The CLI omits `run_in_background` from `tool_input` when the
+# caller did not set it (@anthropic-ai/claude-code 2.1.251, sdk-tools.d.ts:722
+# declares it optional on the Bash tool input), so the test is `== true` and never
+# `!= false`.
+#
+# THE PARTITION IS A GATE HERE NOW (T23 ruling R2). This wall was registered BEHIND
+# hooks/agent-context-guard.sh, which ran it only inside an agent context of an armed
+# session — and that wrapper was the only thing keeping arm 1 off the main thread:
+# driven straight, this wall refuses a main-thread backgrounded suite; driven through
+# the guard it did not (measured 2026-09-12, T23 report §2). A wrapper around the
+# COMPOUND would silence protect-main, protect-database, the evidence gate and
+# farm-out-reminder on every main-thread call, so the predicate is asked here, of
+# this one function, and the guard file stays registered on SubagentStop untouched.
+# [WALL: tests/background-suite-guard.test.sh]
+# [WALL: tests/cmd-class.test.sh]
+wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
+  local IS_BACKGROUND ACTOR _bsg_roster
+  [ "$(bionic_jq .tool_name)" = "Bash" ] || return 0
+  [ -n "$COMMAND" ] || return 0
+
+  # TWO ARMS LIVE IN THIS FUNCTION, and the cheap pre-filter is their union.
+  #
+  #   B-9 (AC-23)  a BACKGROUNDED suite — nobody reads the result.
+  #   S13 (AC-21)  a suite OUTSIDE THE ROW'S BUDGET, inside a dispatched agent —
+  #                foreground or not, because an extra full-tree run costs 40 minutes
+  #                either way.
+  IS_BACKGROUND=no
+  [ "$(bionic_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
+  # THE ACTOR (design D1, task 4/1 probe): an agent-context payload carries a top-level
+  # `agent_id`, a main-thread one does not. hooks/stop-guard.sh reads the same field the
+  # same way.
+  ACTOR=$(bionic_jq .agent_id)
+  [ "$IS_BACKGROUND" = yes ] || [ -n "$ACTOR" ] || return 0
+
+  # ── THE PARTITION, verbatim from hooks/agent-context-guard.sh's predicate ──
+  #
+  # 1. an agent context at all — main-thread payloads carry no top-level `agent_id`
+  #    (t1 §3, `ctx = .agent_id // "MAIN"`).
+  # 2. a root that exists, and no symlink anywhere on the arming path — the same
+  #    three levels the attestation gets in hooks/dispatch-preflight.sh. A repo
+  #    pointing this wall at another tree's arming fact is a repo deciding which
+  #    session it belongs to.
+  # 3. this session is ARMED: the roster file the dispatch wall wrote. An unarmed
+  #    session fails on one stat and pays nothing else, which is what kept an
+  #    always-on registration from re-globalising a deliberately scoped wall.
+  #
+  # Anything else — ambiguity included — returns 0 in silence. This gate never
+  # refuses on its own account and never prints.
+  [ -n "$ACTOR" ] || return 0
+  [ -d "$BIONIC_ROOT" ] || return 0
+  [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || return 0
+  _bsg_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+  [ ! -L "$_bsg_roster" ] && [ -f "$_bsg_roster" ] || return 0
+
+# ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
+#
+# FIRST, above every other scoping question this hook asks. Chris, 2026-09-03: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
+# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked. A session that
+# never invoked it is one this hook has nothing to say to, and it says nothing: exit 0,
+# no stdout, no stderr.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The marker is the one artifact whose
+# PRESENCE opens a wall, so the fail direction is inverted here on purpose: the arming
+# partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
+# which never consented is the defect this guard exists to remove.
+# [WALL: tests/cmd-class.test.sh]
+#
+# THE GUARD IN FRONT IS GONE AND ITS PREDICATE IS ABOVE (T23/R2). It could not wrap the
+# compound — it would have silenced the other four walls on every main-thread call — so
+# it is the first thing this ONE function asks, which is the same scope by a route that
+# reaches no other wall.
+#
+# ASKED ONCE, IN hooks/bash-walls.sh, FOR ALL FIVE (T23) — see wall_protect_main. The
+# shape guard this wall used to apply LATE, at the roster read, still lives in
+# `bionic_context` (REQ-1h), so BIONIC_SID cannot be unusable by the time it is a path.
+
+# THE CLASSIFIER IS THIS WALL'S OWN TO FIND (A-56.1) — see wall_farm_out_reminder.
+# BELOW THE PARTITION, deliberately: a main-thread or unarmed call has already been
+# answered "not live here" and has nothing to classify, so it neither pays for the
+# source nor prints a line about a file it was never going to read.
+wall_libs background-suite-guard cmd-class.sh || return 0
+
+[ "$(cmd_class "$COMMAND")" = "suite" ] || return 0
+
+# ---------- ARM 1 (B-9, AC-23): refuse, naming the shape that works ----------
+#
+# FIRST, because it is the wider refusal: a backgrounded suite is refused whether or not
+# it is on the budget, and being on the budget is no answer to "nobody read the result".
+#
+# The command is echoed back so the fix is a copy-paste rather than a retype. It is the
+# agent's own text going back to the agent — no third party reads this stream — so it is
+# quoted whole rather than scrubbed and truncated the way farm-out-reminder.sh's audit
+# line is.
+if [ "$IS_BACKGROUND" = yes ]; then
+  fold_block exit2 suite-run "a backgrounded suite's result is never read" "run it in the foreground" \
+    "A backgrounded suite returns a shell id, not an outcome. Your turn can end before it
+finishes, and then the evidence this task exists to produce lives nowhere: no file, no
+exit status anyone saw. Reports are turn-scoped; files are not.
+
+Run it in the FOREGROUND instead, bounded by the Bash tool's own timeout parameter (never
+a timeout/gtimeout binary), with the output tee'd to the evidence log your brief names:
+
+    $COMMAND 2>&1 | tee <evidence log>
+
+Then read the log and quote the pass/total line. If the suite is genuinely longer than any
+timeout you can set, say so in your report and stop — do not background it."
+  return 2
+fi
+
+# ---------- ARM 2 (S13, AC-21): THE BUDGET ARM ----------
+#
+# INSIDE A DISPATCHED AGENT ONLY. `hooks/dispatch-preflight.sh` wrote this agent`s budget
+# onto the roster row at launch — `suites_allowed=`, derived from the tree by the impact
+# command or declared by the brief — and this is the wall that holds it there. On the
+# orchestrator`s own thread hooks/farm-out-reminder.sh owns the same question and answers
+# it differently (dispatch it, or take the audited override), so this arm never speaks
+# there: no `agent_id`, no arm.
+#
+# THIS IS A BUDGET, NOT A SAFETY WALL, and the refusal says so in that word (ADR-002). An
+# extra suite run is undoable and visible — it costs compute and forty minutes of a
+# machine, never a byte of anyone`s work — so the fail directions below are chosen by what
+# a wrong answer costs rather than uniformly:
+#
+#   no row for this agent, or a row with no `suites_allowed` key at all
+#       A row is written for every dispatch that passes the wall, so its absence means the
+#       journal failed or the row predates the wall. Refusing every suite would punish an
+#       agent for a bookkeeping failure it did not cause, so a NAMED suite passes in
+#       silence. `tests/run.sh` still does not: a full-tree run is the one act the standing
+#       ruling caps at one per run, and no row is not a licence to spend it.
+#
+#   `suites_allowed=` present but EMPTY
+#       A budget was stated and came out empty — the impact command failed or derived
+#       nothing, and the dispatch warned about it. Read exactly as the absent case above.
+#
+#   `suites_allowed=none`
+#       The explicit `Suites: none` waiver. A brief that declared it runs no suite at all,
+#       and every suite is refused, `tests/run.sh` included.
+#
+#   a set of basenames
+#       Each suite the command names must be in it.
+#
+# A SUITE-CLASS COMMAND THAT NAMES NO FILE — `pytest`, `make test`, `npm test` — has no
+# basename to compare and passes. This repo budgets by suite file; a project that does not
+# is not one this row can speak about, and inventing a refusal for it would be the wall
+# guessing.
+#
+# FARM_OUT_ALLOW IS NOT READ HERE, AND THAT IS THE POINT. The override exists so the
+# ORCHESTRATOR can run something on its own thread when dispatching it genuinely will not
+# work; it is farm-out-reminder.sh`s escape from farm-out-reminder.sh`s wall. A writer that
+# could set an environment variable on itself to widen its own instrument would have a
+# budget in name only — that is a wish, not a wall — so nothing in this arm looks at it.
+[ -n "$ACTOR" ] || return 0
+
+# THE SHAPE RULE IS ALREADY SPENT (REQ-1h). `session_id` returns the host-supplied value
+# verbatim — it validates nothing — and this line turns it into a path. The rule that made
+# that safe used to live here, blanking the id and carrying on; it lives in `bionic_context`
+# now and ENDS the hook instead, so BIONIC_SID cannot be unusable by the time it reaches
+# this line. The reason is hooks/landing-gate.sh:284's about `agent_id`: a key carrying path
+# separators does not trip the symlink guards, it reads outside the directory those guards
+# protect.
+local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED BUDGET_LINE _TARGETS _target
+ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
+BUDGET_STATED=no
+SUITES_ALLOWED=""
+if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
+  # THE LAST ROW CARRYING THIS ID WINS, which is the whole fleet`s reading of the roster
+  # (hooks/stop-guard.sh, hooks/session-poker.sh: "the last row carrying a name wins"). A
+  # launch row is later joined by the recorder`s `status=confirmed` copy and, across a
+  # /clear, by the poker`s adopted row; each carries the budget forward, and the newest is
+  # the current statement about this agent.
+  BUDGET_LINE=$(awk -F'|' -v id="$ACTOR" '
+    /^roster-state\// {
+      hit = 0; stated = 0; allowed = ""
+      for (i = 1; i <= NF; i++) {
+        if ($i == "agent_id=" id) hit = 1
+        else if ($i ~ /^suites_allowed=/) { stated = 1; allowed = substr($i, 16) }
+      }
+      if (hit) last = stated ":" allowed
+    }
+    END { if (last != "") print last }
+  ' "$ROSTER_FILE" 2>/dev/null)
+  case "$BUDGET_LINE" in
+    1:*) BUDGET_STATED=yes; SUITES_ALLOWED="${BUDGET_LINE#1:}" ;;
+  esac
+fi
+[ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
+
+# `none` is a STATED empty set and reads as one: nothing is on the budget, so the loop
+# below refuses every target it is handed.
+case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
+
+budget_refuse() {  # <suite basename>
+  # A NAME THE SHELL HAS NOT EXPANDED YET IS A DIFFERENT REFUSAL (review-c C-5, A-35c). A
+  # hook sees the command TEXT, so `for s in a b; do bash "tests/$s.test.sh"; done` reaches
+  # here as the literal `$s.test.sh`. Refusing is right — the hook cannot check what it
+  # cannot read — but the ordinary headline is false in exactly this case: every one of
+  # those suites may be on the budget, and it sends the reader to audit a set that is not
+  # the problem. Two readers hit it before this branch existed.
+  case "$1" in
+    *'$'*|*'`'*)
+      fold_block exit2 suite-run "the suite name here is a shell variable" "spell each suite literally" \
+        "The name as read: $1
+
+This command names its suite with a shell variable, and this wall reads your command
+text BEFORE the shell expands it — so the name never resolves to a suite it can check
+against your budget. It may well be on it; nothing here can tell.
+
+Spell the suite literally, one per call:
+    bash tests/alpha.test.sh
+    bash tests/beta.test.sh
+
+On the budget: ${2:-(nothing — this brief declared Suites: none)}"
+      return 2 ;;
+  esac
+  fold_block exit2 suite-run "that suite is not on this agent's budget" "run only the budgeted suites" \
+    "This is a BUDGET arm, not a safety wall: an extra suite run breaks nothing, it spends
+forty minutes of a machine nobody else can use. The set was recorded on this agent's
+roster row at dispatch, from the files its brief declared.
+
+On the budget: ${2:-(nothing — this brief declared Suites: none)}
+You asked for: $1
+
+Run only what is on it. If the change genuinely reaches further than the brief said,
+say so in your report and let the orchestrator widen the brief — a wider instrument is
+its decision to make, and it is the one holding the one-regression budget for the run."
+  return 2
+}
+
+# THE READING IS SCOPED TO THIS REPOSITORY and the split is guarded. `$BIONIC_ROOT` is what
+# turns "a file named x.test.sh" into "this row's suite x.test.sh" (critic K-2), and `set
+# -f` keeps a target carrying a glob metacharacter — `bash tests/*.test.sh` reads as the
+# literal `*.test.sh` — from being expanded against the HOOK PROCESS'S cwd before the loop
+# sees it (review-a A-7b). The sibling site at hooks/dispatch-preflight.sh does the same.
+_TARGETS=$(cmd_suite_targets "$COMMAND" "$BIONIC_ROOT")
+set -f
+# shellcheck disable=SC2086  # deliberate split of a newline-joined target list, globbing off
+for _target in $_TARGETS; do
+  if [ "$_target" = "run.sh" ]; then
+    # THE FULL TREE IS REFUSED WITHOUT A ROW THAT NAMES IT — the one place this arm fails
+    # closed. AC-21: "tests/run.sh is refused unless the row carries it."
+    case " $SUITES_ALLOWED " in
+      *" run.sh "*) continue ;;
+    esac
+    fold_block exit2 suite-run "the full tree is not on this agent's budget" "run your brief's suites" \
+      "This is a BUDGET arm, not a safety wall. One regression means one: the whole tree is
+proved once per run, by one dispatched runner whose row carries tests/run.sh, at
+integration close. A second full run costs forty minutes and proves what the first one
+already did.
+
+On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent)}
+
+Run the suites your brief named instead. If the tree genuinely must be re-proved, say so
+in your report: the orchestrator records the cause on the plan and dispatches the runner."
+    # `set -f` IS PROCESS STATE NOW, not this hook's alone (T23). Five walls share one
+    # shell and the fold renders after them all, so a return that skipped the `set +f`
+    # below would leave globbing off for everything after it.
+    set +f
+    return 2
+  fi
+  [ "$BUDGET_STATED" = yes ] || continue
+  case " $SUITES_ALLOWED " in
+    *" $_target "*) : ;;
+    *) budget_refuse "$_target" "$SUITES_ALLOWED"; set +f; return 2 ;;
+  esac
+done
+set +f
+return 0
+}

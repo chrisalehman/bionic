@@ -68,7 +68,9 @@ REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 #   W1R_PARTY_DP=/tmp/mutant.sh bash tests/cross-gate-agreement.test.sh
 PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
 PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
-PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh}"
+# THE EVIDENCE GATE IS A FUNCTION BEHIND hooks/bash-walls.sh (T23). The party this
+# variable names is still "the process a git commit reaches"; it is the compound now.
+PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/bash-walls.sh}"
 # The recorder moved out of the stop gate at task 4/4: observations are written
 # post-execution by their own script, from the producer's own printed output.
 PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
@@ -2854,11 +2856,13 @@ HOOKS_JSON_ROWS=$(jq -r '
 # trigger that never fires and a session that stays unengaged forever, so the name is
 # filtered INSIDE the hook, where both spellings and the leading slash are all accepted and
 # tests/engage.test.sh drives each one.
+# THE BASH EVENT IS ONE ROW (epic-23 wave-11-lean-spine, T23; AC-1f.5). Five command
+# objects stood here — protect-main, protect-database, the evidence gate, farm-out-reminder
+# and background-suite-guard behind its guard — each starting a process on every Bash tool
+# call. They are functions of payload/scripts/lib/walls.sh now, composed by
+# `bionic_fold`, behind the single `hooks/bash-walls.sh` row below.
 L2_EXPECTED='
-PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-main.sh|10
-PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/protect-database.sh|10
-PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-evidence-gate.sh|10
-PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/farm-out-reminder.sh|10
+PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/bash-walls.sh|10
 PreToolUse|TaskStop|${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10
 PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10
 PreToolUse|Write|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
@@ -2938,13 +2942,18 @@ expect_eq "the manifest renders exactly one timeout value across all its rows" \
 # uncovered, which is the reverse of what the guard was ever for.
 #
 # It survives on the two entries where the scope is real rather than channel-shaped:
-#   background-suite-guard — refuses a subagent's BACKGROUNDED suite. It has no
-#     main-thread meaning at all (farm-out-reminder already refuses a suite there), so
-#     the guarded entry is the whole of its coverage.
 #   landing-gate on SubagentStop — the teammate landing verdict. SubagentStop only ever
 #     fires in an agent context, and the roster half of the guard is real arming.
-expect_contains "the guard still fronts the BACKGROUNDED-SUITE wall on Bash" \
-  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/background-suite-guard.sh|' \
+#
+# THE BASH ENTRY IS GONE (epic-23 wave-11-lean-spine, T23). It fronted
+# background-suite-guard, and that wall is now one function of five in a single process:
+# a wrapper there would have silenced protect-main, protect-database, the evidence gate
+# and farm-out-reminder on every main-thread Bash call, which is the reverse of what the
+# guard was ever for — the same sentence three paragraphs up, at a smaller scale. The
+# predicate itself was NOT dropped: `wall_background_suite_guard` asks it of that one
+# function, and tests/background-suite-guard.test.sh B6 drives both sides of it.
+expect_absent_ug "the guard no longer fronts anything on Bash — the five walls are one process" \
+  'PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh' \
   "$HOOKS_JSON_ROWS"
 expect_contains "…and the LANDING verdict on SubagentStop, with no matcher" \
   'SubagentStop||${CLAUDE_PLUGIN_ROOT}/hooks/agent-context-guard.sh ${CLAUDE_PLUGIN_ROOT}/hooks/stop.sh|' \
@@ -3242,7 +3251,9 @@ n_block_of() {  # <file> -> the marker-delimited span, markers inclusive
 # the same way every other member of this set does, so they belong in the SAME list rather
 # than a sibling one (Step-6 duplication review, record/wave-1.4.0/review-duplication.md,
 # ownership row 6: neither was pinned anywhere, so nothing would catch drift in either).
-N_ADOPTED='protect-main protect-database canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard
+# THE FIVE PreToolUse|Bash WALLS ARE ONE FILE (epic-23 wave-11-lean-spine, T23):
+# hooks/bash-walls.sh, whose bodies are functions of payload/scripts/lib/walls.sh.
+N_ADOPTED='bash-walls
 dispatch-preflight canonical-sdlc-governing-skill stop execution-recorder stop-guard
 agent-context-guard preflight-probe stop-orders
 session-sweeper stop-check session-poker session-start engage'
@@ -3349,10 +3360,11 @@ done
 # FUNCTIONS in payload/scripts/lib/stop.sh and one process, hooks/stop.sh, which takes the
 # call once for all four. The rule is unchanged — one hook, one `bionic_context` — and the
 # roster is the tree's, not a number this file remembers.
-N_CTX_FIFTEEN='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
+# THE FIVE PreToolUse|Bash WALLS ARE ONE FILE (epic-23 wave-11-lean-spine, T23):
+# hooks/bash-walls.sh, whose bodies are functions of payload/scripts/lib/walls.sh.
+N_CTX_FIFTEEN='agent-context-guard bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-farm-out-reminder protect-database
-protect-main session-start stop stop-guard'
+session-start stop stop-guard'
 
 for _h in $N_CTX_FIFTEEN; do
   expect_eq "$_h.sh asks lib/context.sh:bionic_context for its context" "yes" \
@@ -3479,8 +3491,15 @@ done
 N_CTX_READABLE=$(for _h in $N_CTX_FIFTEEN; do
     [ -n "$(awk '/^\. "\$BIONIC_LIB\//{s=1} s{print}' "$BIONIC_HOOKS_DIR/$_h.sh")" ] && echo x
   done | wc -l | tr -d ' ')
-expect_eq "…and the ladder sweep found a source line and a body in all twelve" "12" "$N_CTX_READABLE"
-expect_eq "…of which eleven are swept and one is the declared exemption" "11" \
+# THE TWO NUMBERS ARE DERIVED FROM THE ROSTER (T23), which shrank when the five Bash walls
+# became one file. A typed literal here would go red on every future merge for the wrong
+# reason, and — worse — would go GREEN over a roster that had silently lost a member.
+N_CTX_COUNT=$(printf '%s\n' $N_CTX_FIFTEEN | /usr/bin/grep -c .)
+expect_eq "…and the ladder sweep found a source line and a body in every one of them" \
+  "$N_CTX_COUNT" "$N_CTX_READABLE"
+expect_true "…over a roster that is not empty" test "$N_CTX_COUNT" -ge 6
+expect_eq "…of which all but one are swept and that one is the declared exemption" \
+  "$((N_CTX_COUNT - 1))" \
   "$(printf '%s\n' $N_CTX_LADDER_SWEPT | wc -l | tr -d ' ')"
 
 # MUTATION — an absence row passes as happily when the detector is broken as when the tree
@@ -3510,10 +3529,11 @@ expect_eq "…and a hook that reaches for a rung below its sources is caught" \
 # CLIs and the two roots-only readers, none of which take a hook payload or ask engagement.
 # The roster is split on that line rather than shortened, so a member that asks for NEITHER
 # still fails, and both halves are derived from the tree below.
-N_SID_VIA_CTX='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
+# THE FIVE PreToolUse|Bash WALLS ARE ONE FILE (epic-23 wave-11-lean-spine, T23):
+# hooks/bash-walls.sh, whose bodies are functions of payload/scripts/lib/walls.sh.
+N_SID_VIA_CTX='agent-context-guard bash-walls
 canonical-sdlc-governing-skill dispatch-preflight execution-recorder
-farm-out-reminder protect-database
-protect-main session-start stop stop-guard'
+session-start stop stop-guard'
 N_SID_DIRECT='engage preflight-probe session-sweeper stop-check stop-orders'
 N_SID_READERS="$N_SID_VIA_CTX
 $N_SID_DIRECT"
@@ -3588,9 +3608,10 @@ expect_eq "the via-the-library roster names every hook that calls bionic_context
 # than an `exit` — a folded function must not exit. hooks/stop.sh itself asks nothing about
 # engagement: the four functions each answer for their own arm, exactly as the four hooks
 # did. So the merged process is off this roster by design, not by omission.
-N_ENGAGED_READERS='agent-context-guard background-suite-guard canonical-sdlc-evidence-gate
-dispatch-preflight execution-recorder farm-out-reminder
-protect-database protect-main stop-guard'
+# THE FIVE PreToolUse|Bash WALLS ARE ONE FILE (epic-23 wave-11-lean-spine, T23):
+# hooks/bash-walls.sh, whose bodies are functions of payload/scripts/lib/walls.sh.
+N_ENGAGED_READERS='agent-context-guard bash-walls
+dispatch-preflight execution-recorder stop-guard'
 N_ENGAGED_OWN_ROOT='canonical-sdlc-governing-skill'
 N_ENGAGED_DATA='session-poker session-start'
 
@@ -3624,6 +3645,9 @@ expect_ne "…and so did the value derivation" "" "$N_ENGV_ACTUAL"
 # itself, at column 0, comparing to 1 and exiting 0 — the hook's first scoping decision
 # after the context resolves. A guard that compared to the wrong value, swallowed the
 # result, or exited non-zero would still satisfy the roster rows above and fail here.
+# THE GUARD IS READ WHERE IT IS WRITTEN (T23). hooks/bash-walls.sh asks it ONCE for all
+# five of its walls, at column zero like the rest, and the other members still ask it in
+# their own bodies — so the file each member is read from is its own.
 for _h in $N_ENGAGED_READERS; do
   _line=$(/usr/bin/grep -m1 'BIONIC_ENGAGED' "$BIONIC_HOOKS_DIR/$_h.sh" 2>/dev/null)
   case "$_line" in
@@ -4506,11 +4530,21 @@ expect_eq "Roots …by sourcing it, not by restating it" "1" \
 
 # --- (d) THE FIVE RETIRED DOCS-ROOT COPIES ARE CALLERS. §R's four carriers plus run.sh's
 # `docs_root()`, the one §R could not see. Each defines nothing and calls the library. ---
-for _rh in canonical-sdlc-evidence-gate canonical-sdlc-governing-skill session-sweeper stop-check; do
+# THE GATE'S HALF IS IN THE LIBRARY (T23) and is asked for there; the other three are
+# still hooks. Each name below resolves to whichever file carries that body now.
+# EACH NAME IS READ FROM THE FILE THAT CARRIES ITS BODY (T23): the evidence gate's half is
+# `wall_evidence_gate` in payload/scripts/lib/walls.sh, the other three are still hooks.
+roots_file_for() {  # <name> -> the path whose body carries that docs-root caller
+  case "$1" in
+    walls) printf '%s\n' "$ROOTS_LIB_DIR/walls.sh" ;;
+    *)     printf '%s\n' "$ROOTS_TREE/hooks/$1.sh" ;;
+  esac
+}
+for _rh in walls canonical-sdlc-governing-skill session-sweeper stop-check; do
   expect_eq "Roots $_rh.sh defines no resolve_docs_root of its own" "0" \
-    "$(/usr/bin/grep -cE '^resolve_docs_root\(\)' "$ROOTS_TREE/hooks/$_rh.sh")"
+    "$(/usr/bin/grep -cE '^resolve_docs_root\(\)' "$(roots_file_for "$_rh")")"
   expect_eq "Roots …and calls the library's docs_root" "yes" \
-    "$([ "$(/usr/bin/grep -cE '(^|[^a-z_])docs_root "' "$ROOTS_TREE/hooks/$_rh.sh")" -ge 1 ] \
+    "$([ "$(/usr/bin/grep -cE '(^|[^a-z_])docs_root "' "$(roots_file_for "$_rh")")" -ge 1 ] \
        && echo yes || echo no)"
   # THE DECLARATION RULE, and why it is a disjunction. A hook reaches `docs_root` one of
   # two ways: it declares roots.sh through the loader idiom, or it declares run.sh, which
@@ -4518,8 +4552,13 @@ for _rh in canonical-sdlc-evidence-gate canonical-sdlc-governing-skill session-s
   # shape lib/detect.sh already has for lib/deps.sh, and no hook in the tree declares
   # deps.sh either. What matters is that a hook does not reach a library it never named a
   # route to; a hook declaring NEITHER is the regression this row catches.
+  # THE DECLARATION IS THE HOOK'S, NOT THE LIBRARY'S. A library file declares nothing —
+  # the hook that sources it does — so a caller whose body lives in walls.sh is asked about
+  # hooks/bash-walls.sh's own BIONIC_LIB_WANT line.
+  _rh_decl="$ROOTS_TREE/hooks/$_rh.sh"
+  [ "$_rh" = walls ] && _rh_decl="$ROOTS_TREE/hooks/bash-walls.sh"
   expect_eq "Roots …declaring a route to it, roots.sh or the run.sh that pulls it in" "yes" \
-    "$([ "$(/usr/bin/grep -cE '^BIONIC_LIB_WANT=.*(roots\.sh|run\.sh)' "$ROOTS_TREE/hooks/$_rh.sh")" -ge 1 ] \
+    "$([ "$(/usr/bin/grep -cE '^BIONIC_LIB_WANT=.*(roots\.sh|run\.sh)' "$_rh_decl")" -ge 1 ] \
        && echo yes || echo no)"
 done
 
@@ -4609,7 +4648,11 @@ section "V — SUPPORTED_SDLC_VERSION: one owner, four carriers, five renderings
 # three of the five total renderings the census counts as "both SVGs"). A per-file suite
 # cannot see this drift: each carrier reads fine on its own while all five disagree.
 
-V_ORIGIN="$PARTY_EG"
+# THE ORIGIN IS THE LIBRARY THE GATE'S BODY LIVES IN (T23): `SUPPORTED_SDLC_VERSION`
+# is inside `_eg_body` in payload/scripts/lib/walls.sh, at column zero, and the hook beside
+# it is preamble and a fold.
+V_ORIGIN="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
+[ -r "$V_ORIGIN" ] || V_ORIGIN="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
 V_GSKILL="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
 V_RULES="$BIONIC_SKILLS_DIR/canonical-sdlc/operational-rules.md"
 V_LIFECYCLE="$BIONIC_SKILLS_DIR/canonical-sdlc/diagrams/lifecycle.svg"
@@ -5749,7 +5792,7 @@ sed 's/  if plan=$(session_plan "$root" "$sid"); then/  if false \&\& plan=$(ses
   "$RUN_LIB" > "$S4_MUT/scripts/lib/run.sh"
 
 s4_repoint() {  # aim every driver at the mutant tree
-  PARTY_EG="$S4_MUT/hooks/canonical-sdlc-evidence-gate.sh"
+  PARTY_EG="$S4_MUT/hooks/bash-walls.sh"
   PARTY_SG_W="$S4_MUT/hooks/canonical-sdlc-governing-skill.sh"
   PARTY_DP="$S4_MUT/hooks/dispatch-preflight.sh"
   PARTY_PDG="$S4_MUT/hooks/stop.sh"
@@ -5758,7 +5801,7 @@ s4_repoint() {  # aim every driver at the mutant tree
   PARTY_PK_S="$S4_MUT/hooks/session-poker.sh"
 }
 s4_restore() {
-  PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh}"
+  PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/bash-walls.sh}"
   PARTY_SG_W="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
   PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
   PARTY_PDG="$BIONIC_HOOKS_DIR/stop.sh"
@@ -6394,7 +6437,7 @@ expect_eq "restored: the shipped library answers as it did before the mutations"
 # so this row greps the two callers this wave gave `live_runs` and the eight gates a
 # dispatch/stop/evidence/landing decision runs through, and pins the split directly.
 LR_LIVE_CALLERS="engage.sh session-start.sh"
-LR_GATES="canonical-sdlc-evidence-gate.sh canonical-sdlc-governing-skill.sh dispatch-preflight.sh stop-guard.sh stop.sh"
+LR_GATES="bash-walls.sh canonical-sdlc-governing-skill.sh dispatch-preflight.sh stop-guard.sh stop.sh"
 
 for f in $LR_LIVE_CALLERS; do
   expect_eq "…$f (a live_runs caller) really does reference it (non-vacuity)" "1" \
@@ -7493,6 +7536,11 @@ DSREG
       printf '#!/bin/bash\n# an older build of %s\n' "${f##*/}" > "$h/.claude/hooks/${f##*/}"
       n=$((n + 1))
     done
+    # THE COUNT THE ROW ASSERTS IS THE COUNT THIS LOOP PLANTED (T23). The cap is the field
+    # machine's sixteen, and the payload has carried fewer hook names since the five Bash
+    # walls became one file — so a literal here would go stale with the roster while still
+    # looking like a measurement.
+    DS_PLANTED_HOOKS="$n"
     printf '#!/bin/bash\n# the machine owner wrote this one\n' > "$h/.claude/hooks/not-bionics.sh"
   fi
   # THE PRE-MARKER ALIAS, OFF BY DEFAULT (Step-6 recheck part 4, R-2). This is the
@@ -7771,8 +7819,10 @@ expect_contains "DS.1 doctor flags the leftover hook FILES on the fixture machin
   "legacy hook files" "$DS_LABELS"
 expect_contains "DS.1 …and the installed agent copies that no longer match the payload" \
   "legacy installed agent copies" "$DS_LABELS"
-expect_contains "DS.1 …and it counts the sixteen payload-named files, not the whole directory" \
-  "16 in ~/.claude/hooks" "$DS_REPORT"
+expect_contains "DS.1 …and it counts the payload-named files, not the whole directory" \
+  "$DS_PLANTED_HOOKS in ~/.claude/hooks" "$DS_REPORT"
+expect_true "DS.1 …over a non-empty plant (the count is not zero over zero)" \
+  test "${DS_PLANTED_HOOKS:-0}" -ge 10
 expect_contains "DS.1 …and all six role files as drifted" \
   "6/6 differ" "$DS_REPORT"
 
@@ -8025,15 +8075,22 @@ DS_WALL_ROOT="$DS_DIR/wall-root"
 rm -rf "$DS_WALL_ROOT"; mkdir -p "$DS_WALL_ROOT/hooks"
 for ds_h in "$DS_PAYLOAD"/hooks/*.sh; do
   [ -f "$ds_h" ] || continue
-  case "${ds_h##*/}" in protect-main.sh) continue ;; esac
+  case "${ds_h##*/}" in bash-walls.sh) continue ;; esac
   cp "$ds_h" "$DS_WALL_ROOT/hooks/"
 done
 DS_WALL_REPORT="$(HOME="$DS_HOME" BIONIC_CLAUDE_HOME="$DS_HOME/.claude" \
   BIONIC_PLUGIN_ROOT="$DS_WALL_ROOT" bash "$PARTY_DOCTOR" 2>/dev/null)"
 expect_true "DS.4b the sparse payload root really is missing the wall (the rows under it are not vacuous)" \
-  test ! -e "$DS_WALL_ROOT/hooks/protect-main.sh"
-expect_contains "DS.4b doctor raises the missing wall" \
+  test ! -e "$DS_WALL_ROOT/hooks/bash-walls.sh"
+# THE ROW NAMES THE WALL, NOT THE FILE (T23, A-56.2). The five PreToolUse|Bash
+# walls share one hook, so taking hooks/bash-walls.sh away takes all five — and
+# doctor says so per wall, because "bash-walls is missing" leaves a reader to work
+# out which behaviours they just lost. Two of the five are asserted here: one
+# fail-closed, one advisory, so a row that only knew the first name cannot pass.
+expect_contains "DS.4b doctor raises the missing wall, by the wall's own name" \
   "protect-main wall is missing from the payload" "$DS_WALL_REPORT"
+expect_contains "DS.4b …and every other wall the same hook carried" \
+  "background-suite-guard wall is missing from the payload" "$DS_WALL_REPORT"
 expect_contains "DS.4b …and routes it to the party its table row names" \
   "$(ds_field "$(printf '%s\n' "$DS_TABLE" | grep '^wall-payload|')" 6)" "$DS_WALL_REPORT"
 expect_absent "DS.4b …and never to setup's phantom repair verb" \
@@ -8062,13 +8119,13 @@ ds_wall_state() {  # <payload root> <wall name> -> the row's own per-wall verdic
 expect_eq "DS.4c the row's detector fires on the very root whose page raised the wall" \
   "yes" "$(ds_wall_fires "$DS_WALL_ROOT" wall-payload)"
 expect_eq "DS.4c …and names that wall as the missing one" \
-  "missing" "$(ds_wall_state "$DS_WALL_ROOT" protect-main)"
+  "missing" "$(ds_wall_state "$DS_WALL_ROOT" bash-walls)"
 # PAIRED: the shipped payload root, where doctor's page reports 4/4 and the row
 # is quiet — so the two rows above are a measurement and not a constant.
 expect_eq "DS.4c …while on the shipped payload root the same detector is quiet" \
   "no" "$(ds_wall_fires "$DS_PAYLOAD" wall-payload)"
 expect_eq "DS.4c …and that wall resolves its library there" \
-  "ok" "$(ds_wall_state "$DS_PAYLOAD" protect-main)"
+  "ok" "$(ds_wall_state "$DS_PAYLOAD" bash-walls)"
 expect_contains "DS.4c …which is what doctor's page says about it too" \
   "walls" "$(ds_page_line_for "$DS_REPORT" "walls")"
 
@@ -8633,7 +8690,11 @@ section "S13 — the suite budget: one derivation, one row writer, one alphabet"
 
 S13_IMPACT="$REPO_ROOT/tests/lib/impact.sh"
 S13_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
-S13_BG="$BIONIC_HOOKS_DIR/background-suite-guard.sh"
+# THE BUDGET ARM'S READER IS IN THE LIBRARY NOW (T23) — `wall_background_suite_guard` in
+# payload/scripts/lib/walls.sh, at column zero like the rest of the carried bodies, so the
+# `^`-anchored extractions below still find it.
+S13_BG="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
+[ -r "$S13_BG" ] || S13_BG="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
 S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/roster.sh"
 [ -r "$S13_ROSTER_LIB" ] || S13_ROSTER_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/roster.sh"
 S13_CMDCLASS="$BIONIC_HOOKS_DIR/../payload/scripts/lib/cmd-class.sh"
@@ -9406,11 +9467,12 @@ stop-orders.sh'
 
 # --- (a) NON-VACUITY OF THE SEARCH SET. Every count below is over a real glob, and
 # the renderer this section exists for is on disk. ---
-# THE FLOOR MOVED WITH THE MERGE (epic-23 wave-11, T12): four Stop hooks became one, so
-# the tree carries eighteen hook files where it carried twenty-one. The number is a
-# not-counting-over-air guard, not a roster, so it tracks the tree.
+# THE FLOOR MOVES WITH THE MERGES (epic-23 wave-11): T12 made four Stop hooks one and T23
+# made five Bash walls one, so the tree carries fourteen hook files where it carried
+# twenty-one. The number is a not-counting-over-air guard, not a roster, so it tracks the
+# tree — and it is a floor rather than an equality for exactly that reason.
 expect_eq "Refuse the hooks glob is non-empty (this section is not counting over air)" "yes" \
-  "$([ "$(ls "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | wc -l | tr -d ' ')" -ge 18 ] && echo yes || echo no)"
+  "$([ "$(ls "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null | wc -l | tr -d ' ')" -ge 14 ] && echo yes || echo no)"
 expect_eq "Refuse payload/scripts/lib/refuse.sh is on disk" "yes" \
   "$([ -r "$REFUSE_LIB_DIR/refuse.sh" ] && echo yes || echo no)"
 
@@ -9435,7 +9497,7 @@ REFUSE_FOUND_EOF
 expect_eq "Refuse every file still printing its own refusal is one of the five CLI commands" \
   "" "$REFUSE_STRAY"
 expect_eq "Refuse …and no WALL is among them: the hooks-that-are-walls count is zero" "0" \
-  "$(printf '%s\n' "$REFUSE_FOUND" | /usr/bin/grep -cE '^(agent-context-guard|background-suite-guard|canonical-sdlc-evidence-gate|canonical-sdlc-governing-skill|dispatch-preflight|engage|execution-recorder|farm-out-reminder|protect-database|protect-main|session-start|session-sweeper|stop|stop-guard)\.sh$' || true)"
+  "$(printf '%s\n' "$REFUSE_FOUND" | /usr/bin/grep -cE '^(agent-context-guard|bash-walls|canonical-sdlc-governing-skill|dispatch-preflight|engage|execution-recorder|session-start|session-sweeper|stop|stop-guard)\.sh$' || true)"
 expect_eq "Refuse …and the set is what task 13 left: preflight-probe.sh alone still spells it" \
   "preflight-probe.sh" "$(printf '%s\n' "$REFUSE_FOUND" | tr -d ' ')"
 

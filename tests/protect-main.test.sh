@@ -11,7 +11,12 @@ set -euo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
-HOOK="${BIONIC_HOOKS_DIR}/protect-main.sh"
+# THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23). This wall is a
+# FUNCTION now — `wall_protect_main` in payload/scripts/lib/walls.sh — registered through
+# the one PreToolUse|Bash command object that carries all five. Every case below drives
+# that process, which is what a Bash tool call actually starts; the wall's own verdict is
+# unchanged and tests/bash-walls.test.sh owns the composition the process adds.
+HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
 # ---------- helpers ----------
 

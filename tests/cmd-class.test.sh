@@ -46,9 +46,16 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
 PLAIN_HOOKS="${BIONIC_HOOKS_DIR}"
 LIB="$REPO_ROOT/payload/scripts/lib/cmd-class.sh"
-FARM_OUT="$PAYLOAD_HOOKS/farm-out-reminder.sh"
-BG_GUARD="$PAYLOAD_HOOKS/background-suite-guard.sh"
-CTX_GUARD="$PAYLOAD_HOOKS/agent-context-guard.sh"
+# BOTH WALLS ARE ONE PROCESS (T23). `wall_farm_out_reminder` and
+# `wall_background_suite_guard` are functions of payload/scripts/lib/walls.sh behind
+# hooks/bash-walls.sh, so the two names below name the same hook; the classifier each of
+# them consumes is unchanged, which is what this suite is about.
+FARM_OUT="$PAYLOAD_HOOKS/bash-walls.sh"
+BG_GUARD="$PAYLOAD_HOOKS/bash-walls.sh"
+# hooks/agent-context-guard.sh IS NO LONGER IN FRONT OF THIS WALL (T23/R2): the manifest
+# registers hooks/bash-walls.sh alone on PreToolUse|Bash and the guard's predicate is a
+# function-level gate inside `wall_background_suite_guard`. The file itself stays, still
+# registered on SubagentStop, and tests/agent-context-guard.test.sh is its suite.
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/cmd-class-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
@@ -446,7 +453,24 @@ D=$(farm_decision 'bash tests/run.sh')
 expect_contains "advisory mode downgrades the suite deny to a nudge" 'additionalContext' "$D"
 rm -f "$FARM_REPO/.bionic/config.yaml"
 
-section "C4 — background-suite-guard behind agent-context-guard (AC-23, AC-24)"
+section "C4 — background-suite-guard inside the compound (AC-23, AC-24)"
+#
+# THE GUARD IS NOT IN FRONT ANY MORE, AND THE MANIFEST IS WHY (T23 ruling R2, A-54).
+# hooks/agent-context-guard.sh used to wrap this wall's registration; the fold could not
+# keep that wrapper, because a wrapper around the COMPOUND would silence protect-main,
+# protect-database, the evidence gate and farm-out-reminder on every main-thread call.
+# The guard's predicate is a FUNCTION-level gate inside `wall_background_suite_guard`
+# now, and hooks.json registers hooks/bash-walls.sh alone — so a fixture that still drove
+# the guard in front would be driving a registration that does not exist.
+#
+# AND THE VERDICT IS COMPOSED (A-53, A-56.3). Every payload below is suite-class, so
+# farm-out-reminder answers it too, and it always did: on this thread its tier-1 deny has
+# fired on `bash tests/run.sh` since 1.3.2. What the old fixture measured was the guard
+# keeping the OTHER wall off the call. With one process the two answers meet, and the
+# fold composes them into ONE `permissionDecision: deny` carrying BOTH reasons — the deny
+# wire's exit status is 0, with the decision in the JSON. So each row below asserts the
+# arm it is about BY ITS OWN SENTENCE, present or absent, rather than by an exit code
+# that now belongs to the compound.
 make_repo() {  # <name> -> an armed repo of an ENGAGED session
   local repo="$SANDBOX/$1/repo"
   mkdir -p "$repo/.bionic/tmp"
@@ -477,74 +501,93 @@ make_repo() {  # <name> -> an armed repo of an ENGAGED session
 }
 GREPO=$(make_repo guarded)
 
-run_guarded() {  # <payload> — through agent-context-guard, as hooks.json registers it
-  run_hook "$1" "$CTX_GUARD" "$BG_GUARD"
+run_compound() {  # <payload> — straight into hooks/bash-walls.sh, as hooks.json registers it
+  run_hook "$1" "$BG_GUARD"
 }
 
-# THE SAME PAIR WITH THE DETAIL KNOB ON (task 13, ruling D-1). A refusal puts ONE line on
-# the user stream — `bionic: <verb> refused — <fact> (<fix>)` — and everything else it has
-# to say is `detail`, which is emitted only under BIONIC_WALL_VERBOSE=1. A row that needs a
-# value out of a refusal drives the call a second time through this and asserts on $VERR;
-# asserting that value on $ERR would now be asserting that the wall leaks it.
-VERR=""
-run_guarded_verbose() {  # <payload> -> sets VERR
-  local payload="$1"
-  local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
-  printf '%s' "$payload" | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
-      BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$_sid" \
-      CLAUDE_PROJECT_DIR= BIONIC_WALL_VERBOSE=1 bash "$CTX_GUARD" "$BG_GUARD" \
-      >/dev/null 2>"$SANDBOX/.verr"
-  VERR=$(cat "$SANDBOX/.verr")
-  return 0
-}
+# THE BACKGROUND ARM'S OWN SENTENCE, which is what every row in this section is really
+# asking about. It is `wall_background_suite_guard`'s fact and no other wall's, so its
+# presence in the composed verdict is the arm firing and its absence is the arm silent —
+# a reading that survives farm-out-reminder answering the same payload.
+BSG_REASON='suite-run refused — a backgrounded suite'"'"'s result is never read'
+FARM_REASON="run refused — this command belongs in a subagent"
+
+# THE DETAIL KNOB IS NOT THIS SECTION'S ANY MORE. `BIONIC_WALL_VERBOSE=1` is the `exit2`
+# channel's rule — one line on the user stream, everything else behind the knob — and the
+# composed verdict here renders on the `deny` channel, whose reason field carries the
+# detail to the model by design (that is what farm-out-reminder's own deny has always
+# done). The knob's behaviour on a wall that blocks ALONE is still driven, in
+# tests/background-suite-guard.test.sh; here the detail is asserted where it actually
+# lands, in $OUT.
 
 # --- AC-23: agent context + armed + run_in_background true + suite-class -> REFUSED
-run_guarded "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
-expect_eq "AC-23 a backgrounded suite in an agent context of an armed session is REFUSED" 2 "$ST"
-expect_contains "AC-23 …in the ruled one line, and it is the BACKGROUND arm's" \
-  "suite-run refused — a backgrounded suite's result is never read" "$ERR"
-run_guarded_verbose "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
-expect_contains "AC-23 …and the refusal names the foreground tee form" "2>&1 | tee" "$VERR"
-expect_contains "AC-23 …quoting the command it refused" "bash tests/run.sh" "$VERR"
+run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
+expect_contains "AC-23 a backgrounded suite in an agent context of an armed session is REFUSED" \
+  '"permissionDecision":"deny"' "$OUT"
+expect_contains "AC-23 …and the refusal is the BACKGROUND arm's" "$BSG_REASON" "$OUT"
+expect_contains "AC-23 …composed WITH farm-out's own reason, not instead of it" "$FARM_REASON" "$OUT"
+expect_eq "AC-23 …on the deny wire, whose status is 0 with the decision in the JSON" 0 "$ST"
+expect_contains "AC-23 …and the refusal names the foreground tee form" "2>&1 | tee" "$OUT"
+expect_contains "AC-23 …quoting the command it refused" "bash tests/run.sh" "$OUT"
 
 # --- AC-24: the three cells that must stay silent ---
-run_guarded "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" omit)"
-expect_eq "AC-24 the same command with no run_in_background is ALLOWED" 0 "$ST"
-expect_empty "AC-24 …silently" "$ERR$OUT"
+# THE THREE CELLS THE BACKGROUND ARM MUST STAY OUT OF. Each is suite-class, so
+# farm-out-reminder answers it — and that is the tier-1 deny it has always given on this
+# thread, not the arm under test. The row is the ABSENCE of the background arm's own
+# sentence, which is the same claim the old `expect_empty` made when the guard kept the
+# other wall off the call.
+run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" omit)"
+expect_eq "AC-24 the same command with no run_in_background is ALLOWED by the background arm" 0 "$ST"
+expect_absent "AC-24 …silently — its reason is nowhere in the verdict" "$BSG_REASON" "$ERR$OUT"
+expect_contains "AC-24 …while farm-out's own deny stands, as it does on this thread" \
+  "$FARM_REASON" "$OUT"
 
-run_guarded "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" false)"
-expect_eq "AC-24 run_in_background false is ALLOWED" 0 "$ST"
-expect_empty "AC-24 …silently" "$ERR$OUT"
+run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" false)"
+expect_eq "AC-24 run_in_background false is ALLOWED by the background arm" 0 "$ST"
+expect_absent "AC-24 …silently" "$BSG_REASON" "$ERR$OUT"
 
-run_guarded "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "" true)"
+run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "" true)"
 expect_eq "AC-24 a MAIN-THREAD payload (no agent_id) leaves the arm silent" 0 "$ST"
-expect_empty "AC-24 …silently" "$ERR$OUT"
+expect_absent "AC-24 …silently" "$BSG_REASON" "$ERR$OUT"
+expect_contains "AC-24 …and the main thread is exactly where farm-out's deny belongs" \
+  "$FARM_REASON" "$OUT"
 
-run_guarded "$(mk_bash_payload "$GREPO" 'git status --short' "$AGENT_ID" true)"
+# THE TWO THAT ARE SILENT ALL THE WAY DOWN: not suite-class, so neither wall speaks.
+run_compound "$(mk_bash_payload "$GREPO" 'git status --short' "$AGENT_ID" true)"
 expect_eq "AC-24 a non-suite command backgrounded is ALLOWED" 0 "$ST"
 expect_empty "AC-24 …silently" "$ERR$OUT"
 
-run_guarded "$(mk_bash_payload "$GREPO" 'git commit -m "make the row green"' "$AGENT_ID" true)"
+run_compound "$(mk_bash_payload "$GREPO" 'git commit -m "make the row green"' "$AGENT_ID" true)"
 expect_eq "AC-24 …and B-5's prose case is not a suite either" 0 "$ST"
+expect_empty "AC-24 …silently, on both streams" "$ERR$OUT"
 
 # --- AC-16 (R-12/C-2): the B-9 wall refuses the same superset ---
 for sc in "${SUPERSET_SUITES[@]}"; do
-  run_guarded "$(mk_bash_payload "$GREPO" "$sc" "$AGENT_ID" true)"
-  expect_eq "AC-16 background-suite-guard REFUSES backgrounded [$sc]" 2 "$ST"
+  run_compound "$(mk_bash_payload "$GREPO" "$sc" "$AGENT_ID" true)"
+  expect_contains "AC-16 background-suite-guard REFUSES backgrounded [$sc]" "$BSG_REASON" "$OUT"
 done
 # NEGATIVE CONTROL on the same arm: prose that merely names a suite is not one.
-run_guarded "$(mk_bash_payload "$GREPO" 'echo "sudo bash tests/run.sh"' "$AGENT_ID" true)"
+run_compound "$(mk_bash_payload "$GREPO" 'echo "sudo bash tests/run.sh"' "$AGENT_ID" true)"
 expect_eq "AC-16 …but prose naming a suite is still ALLOWED" 0 "$ST"
+expect_empty "AC-16 …in silence, from both walls" "$ERR$OUT"
 
-# --- the guard's own partition still holds: an UNARMED session is silent ---
+# --- the partition still holds, one level in: an UNARMED session is silent ---
+#
+# THE PARTITION MOVED, THE EXPERIMENT DID NOT. It used to be hooks/agent-context-guard.sh
+# in front; it is the first thing `wall_background_suite_guard` asks now (T23/R2). So the
+# pair below is the same difference measured at the same fixture — unarmed, and armed —
+# with the verdict read by the arm's own sentence rather than by an exit code the
+# compound now shares with farm-out-reminder.
 UREPO=$(make_repo unarmed)
 rm -f "$UREPO/.bionic/tmp/roster-$SID.state"
-run_guarded "$(mk_bash_payload "$UREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
+run_compound "$(mk_bash_payload "$UREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
 expect_eq "an unarmed session leaves the arm silent even for a backgrounded suite" 0 "$ST"
-# POSITIVE CONTROL: the same payload straight into the wall must refuse, so the silence
-# above is the guard's decision and not a dud fixture.
-run_hook "$(mk_bash_payload "$UREPO" 'bash tests/run.sh' "$AGENT_ID" true)" "$BG_GUARD"
-expect_eq "…positive control: that same payload refuses when driven straight into the wall" 2 "$ST"
+expect_absent "…its reason nowhere in the verdict" "$BSG_REASON" "$ERR$OUT"
+# POSITIVE CONTROL: the identical payload in an ARMED session must carry that reason, so
+# the silence above is the partition deciding and not a dud fixture.
+run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
+expect_contains "…positive control: the same payload in an ARMED session does refuse" \
+  "$BSG_REASON" "$OUT"
 
 section "C5 — FAIL-CLOSED sourcing: no library, no pass (AC-12 shape, D1)"
 # HERMETIC, AND THAT IS A CORRECTION. This section used to `mv` the SHIPPED library aside
@@ -565,11 +608,10 @@ for _c5_lib in "$(dirname "$LIB")"/*.sh; do
   case "$(basename "$_c5_lib")" in cmd-class.sh) continue ;; esac
   cp "$_c5_lib" "$C5_TREE/scripts/lib/"
 done
-cp "$FARM_OUT" "$C5_TREE/hooks/farm-out-reminder.sh"
-cp "$BG_GUARD" "$C5_TREE/hooks/background-suite-guard.sh"
+cp "$FARM_OUT" "$C5_TREE/hooks/bash-walls.sh"
 C5_SAVED_FARM="$FARM_OUT"; C5_SAVED_BG="$BG_GUARD"
-FARM_OUT="$C5_TREE/hooks/farm-out-reminder.sh"
-BG_GUARD="$C5_TREE/hooks/background-suite-guard.sh"
+FARM_OUT="$C5_TREE/hooks/bash-walls.sh"
+BG_GUARD="$C5_TREE/hooks/bash-walls.sh"
 
 # BOTH OF THESE STEP ASIDE NOW (bionic 1.4.0, design ledger S4). They refused until
 # 1.4.0, on the reasoning the two irreversible-action walls still use — and that
@@ -586,10 +628,26 @@ expect_contains "C5 …naming the file it could not load, once, on stderr" "cmd-
 expect_eq "C5 …in exactly one line" "1" "$(printf '%s\n' "$ERR" | /usr/bin/grep -c .)"
 expect_contains "C5 …and pointing at the diagnosis" "/bionic:doctor" "$ERR"
 
-run_guarded "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
+# BOTH ADVISORY WALLS WANT THE CLASSIFIER, and in one process both reach for it on this
+# payload — so both step aside and both say so, one line each, each naming itself. Two
+# walls stood down; a reader told once could not tell which.
+run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
 expect_eq "C5 background-suite-guard STEPS ASIDE when its classifier cannot load" 0 "$ST"
 expect_contains "C5 …naming the file it could not load" "cmd-class.sh" "$ERR"
-expect_eq "C5 …in exactly one line" "1" "$(printf '%s\n' "$ERR" | /usr/bin/grep -c .)"
+expect_contains "C5 …and naming itself, not the compound" "background-suite-guard:" "$ERR"
+expect_contains "C5 …beside farm-out-reminder, which wanted the same file" "farm-out-reminder:" "$ERR"
+expect_eq "C5 …in exactly one line per wall" "2" "$(printf '%s\n' "$ERR" | /usr/bin/grep -c .)"
+
+# THE COMPOUND STILL FAILS CLOSED ON WHAT THE CLOSED WALLS NEED (A-56.1). The classifier
+# is absent on this very tree and a push is refused all the same — which is the whole
+# point of a WANT that names only the two closed walls' libraries. Without it the fold
+# made the WANT the union of five, and one advisory wall's missing file refused every
+# Bash command in every project on the machine.
+run_hook "$(mk_bash_payload "$FARM_REPO" 'git push origin main')" "$FARM_OUT"
+expect_eq "C5 …while a push on the same tree is still REFUSED" "2" "$ST"
+expect_contains "C5 …by protect-main, which never wanted the classifier" "push refused" "$ERR"
+run_hook "$(mk_bash_payload "$FARM_REPO" 'ls')" "$FARM_OUT"
+expect_eq "C5 …and an ordinary command still passes" "0" "$ST"
 
 FARM_OUT="$C5_SAVED_FARM"; BG_GUARD="$C5_SAVED_BG"
 # The shipped library was never touched, and everything after this line depends on that,
@@ -611,13 +669,32 @@ section "C6 — every source in payload/hooks/*.sh resolves inside payload/"
 # library any more. They are collected here explicitly, from the block itself, so this
 # section still covers the reference that matters most — and covers BOTH spellings,
 # which the old extractor never did (it only ever saw whichever one a hook wrote first).
+#
+# AND A HOOK'S `BIONIC_LIB_WANT` IS NO LONGER THE WHOLE SET (T23, A-56.1/A-57). The five
+# PreToolUse|Bash walls share one process, and hooks/bash-walls.sh asks the loader only
+# for what the two FAIL-CLOSED walls need — otherwise a file that merely makes an
+# advisory wall step aside would refuse every Bash command on the machine. A library only
+# an advisory wall reads is declared per wall in payload/scripts/lib/walls.sh's table and
+# sourced there, by `wall_libs`, out of the same `$BIONIC_LIB` the loader resolved. So
+# that table is the second place a class-(1) reference is declared, and this extractor
+# reads it for the same reason it reads the WANT lines: the reference is real, it has to
+# resolve inside the checkout, and nothing here may name a basename by hand.
+#
+# Both sweeps are DERIVED. Empty either declaration and the anti-vacuity rows at the end
+# of this section go red rather than the sweep quietly covering less.
+WALLS_LIB="$(dirname "$LIB")/walls.sh"
 SRC_LITERALS=$( { /usr/bin/grep -hoE '\$\(dirname "\$0"\)/[^"]*\.sh' "$PAYLOAD_HOOKS"/*.sh \
                     | sed 's|^\$(dirname "\$0")||'
                   /usr/bin/grep -hoE '&& pwd\)/[^"]*\.sh' "$PAYLOAD_HOOKS"/*.sh \
                     | sed 's|^&& pwd)||'
-                  # the loader's own class-(1) directories, one per wanted basename
-                  for _c6_want in $(/usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/*.sh \
-                                      | sed -E 's/^BIONIC_LIB_WANT="//; s/"$//' | tr ' ' '\n' | sort -u); do
+                  # the loader's own class-(1) directories, one per wanted basename —
+                  # from the hooks' WANT lines and from the per-wall table together,
+                  # because both declare files sourced out of $BIONIC_LIB.
+                  for _c6_want in $( { /usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/*.sh \
+                                         | sed -E 's/^BIONIC_LIB_WANT="//; s/"$//'
+                                       /usr/bin/grep -hoE '^BIONIC_WALL_LIBS_[A-Za-z0-9_]*="[^"]*"' "$WALLS_LIB" \
+                                         | sed -E 's/^BIONIC_WALL_LIBS_[A-Za-z0-9_]*="//; s/"$//'
+                                     } 2>/dev/null | tr ' ' '\n' | sort -u); do
                     printf '/../scripts/lib/%s\n/../payload/scripts/lib/%s\n' "$_c6_want" "$_c6_want"
                   done
                 } 2>/dev/null | sort -u)
@@ -674,9 +751,17 @@ expect_eq "every relative sibling reference resolves, and never outside the chec
 expect_eq "the installed-plugin reading of the cmd-class source lands on the shipped library" \
   "$REPO_ROOT/payload/scripts/lib/cmd-class.sh" \
   "$(lexnorm "$PAYLOAD_HOOKS/../scripts/lib/cmd-class.sh")"
-# ANTI-VACUITY: the extractor must actually see both shapes it claims to cover.
+# ANTI-VACUITY: the extractor must actually see every shape it claims to cover.
 expect_contains "…and the extractor sees the cmd-class library (shape A)" "cmd-class.sh" "$SRC_LITERALS"
 expect_contains "…and the sweeper handoff (shape B)" "session-sweeper.sh" "$SRC_LITERALS"
+# WHERE SHAPE A FINDS THE CLASSIFIER NOW, stated so the row above cannot pass on the
+# wrong declaration: no hook's WANT line names cmd-class.sh any more, and the per-wall
+# table does. If the sweep of that table were dropped, the row above would go red — which
+# is what it did when the fold moved the source site and this sweep had not followed.
+expect_absent "…and no hook's own WANT line names it, which is why the table is swept" \
+  "cmd-class.sh" "$(/usr/bin/grep -hoE '^BIONIC_LIB_WANT="[^"]*"' "$PAYLOAD_HOOKS"/*.sh)"
+expect_contains "…while the per-wall table declares it, for the two walls that read it" \
+  "cmd-class.sh" "$(/usr/bin/grep -hoE '^BIONIC_WALL_LIBS_[A-Za-z0-9_]*="[^"]*"' "$WALLS_LIB")"
 
 section "C6 — the session never invoked the skill: neither hook is there (AC-6, AC-20)"
 #
@@ -720,22 +805,26 @@ engage "$FARM_REPO"
 expect_contains "AC-6 control: with the marker back, the same suite command DENIES" \
   '"deny"' "$(farm_decision 'bash tests/run.sh')"
 
-# --- background-suite-guard: the same, behind its own guard and driven straight (AC-20) ---
+# --- background-suite-guard: the same, inside the compound (AC-20) ---
+#
+# THE ENGAGEMENT GUARD IS AHEAD OF ALL FIVE NOW, in hooks/bash-walls.sh, which is why the
+# unengaged rows below are silent on BOTH streams rather than only on the background arm's:
+# no wall runs at all. That is the same answer the five hooks gave one by one, asked once.
 unengage "$GREPO"
-run_guarded "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
-expect_eq "AC-20 a backgrounded suite passes an unengaged session (through the guard)" "0" "$ST"
+run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
+expect_eq "AC-20 a backgrounded suite passes an unengaged session" "0" "$ST"
 expect_empty "AC-20 …silently" "$OUT$ERR"
 
-# STRAIGHT INTO THE WALL, bypassing hooks/agent-context-guard.sh entirely: the wall has
-# its own scope and does not depend on the guard in front remembering to check.
-run_hook "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)" "$BG_GUARD"
-expect_eq "AC-20 …and driven straight into the wall, still exit 0" "0" "$ST"
+# A SECOND UNENGAGED PAYLOAD, so the silence is the marker's doing and not this one
+# command's: a push is the loudest thing in the tree and it too says nothing here.
+run_compound "$(mk_bash_payload "$GREPO" 'git push origin main' "$AGENT_ID" true)"
+expect_eq "AC-20 …and so does a push, which no wall is armed to see" "0" "$ST"
 expect_empty "AC-20 …still silently" "$OUT$ERR"
 
-# CONTROL: the marker back, the same payload straight into the wall refuses again.
+# CONTROL: the marker back, the same payload refuses again.
 engage "$GREPO"
-run_hook "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)" "$BG_GUARD"
-expect_eq "AC-20 control: with the marker back, the wall REFUSES again" "2" "$ST"
+run_compound "$(mk_bash_payload "$GREPO" 'bash tests/run.sh' "$AGENT_ID" true)"
+expect_contains "AC-20 control: with the marker back, the wall REFUSES again" "$BSG_REASON" "$OUT"
 
 section "C7 — cmd_suite_targets: WHICH suite a command runs (S13, AC-21)"
 # The budget arm cannot compare a command to a set of suite basenames without knowing which
