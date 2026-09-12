@@ -1,7 +1,7 @@
 #!/bin/bash
 # Tests for hooks/session-start.sh — THE POST-`/clear` DETECTOR (bionic 1.4.0,
 # spec AC-1, AC-4's "the block runs the report", AC-11's symlink listing; plan
-# slice SSTART).
+# task SSTART).
 #
 # THE CONTRACT UNDER TEST. `/clear` re-keys the session id in place (probe
 # A-probe-1/2/3: env, payload and `sessions/<pid>.json` all move together, same

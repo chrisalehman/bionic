@@ -251,7 +251,7 @@ unengage() { rm -f "$1/.bionic/tmp/engaged-$SID.state"; }
 FARM_REPO="$SANDBOX/farm/repo"
 mkdir -p "$FARM_REPO/.bionic/tmp" "$FARM_REPO/.bionic/docs/plans"
 engage "$FARM_REPO"
-# THE WALL IS RUN-SCOPED SINCE bionic 1.4.0 (slice ADOPT, spec AC-7). The hook is
+# THE WALL IS RUN-SCOPED SINCE bionic 1.4.0 (task ADOPT, spec AC-7). The hook is
 # registered always-on now, so what scopes it is an on-disk fact rather than an armed
 # skill: `active_run` under the payload's project root. Every AC-16 arm below asks
 # whether the wall still refuses the real thing, and none of them would be asking
@@ -481,7 +481,7 @@ run_guarded() {  # <payload> — through agent-context-guard, as hooks.json regi
   run_hook "$1" "$CTX_GUARD" "$BG_GUARD"
 }
 
-# THE SAME PAIR WITH THE DETAIL KNOB ON (slice 13, ruling D-1). A refusal puts ONE line on
+# THE SAME PAIR WITH THE DETAIL KNOB ON (task 13, ruling D-1). A refusal puts ONE line on
 # the user stream — `bionic: <verb> refused — <fact> (<fix>)` — and everything else it has
 # to say is `detail`, which is emitted only under BIONIC_WALL_VERBOSE=1. A row that needs a
 # value out of a refusal drives the call a second time through this and asserts on $VERR;
@@ -605,7 +605,7 @@ section "C6 — every source in payload/hooks/*.sh resolves inside payload/"
 # handoff to a sibling SCRIPT) and "$(cd "$(dirname "$0")" … && pwd)/<name>.sh" (the
 # sweeper handoff every stop hook uses).
 #
-# THE LIBRARY IS NO LONGER ONE OF THEM, and that is the bionic 1.4.0 change (slice
+# THE LIBRARY IS NO LONGER ONE OF THEM, and that is the bionic 1.4.0 change (task
 # ADOPT, spec AC-16): the two class-(1) candidate spellings live inside the shared
 # loader block, computed from a variable, so no `$(dirname "$0")/...` literal names a
 # library any more. They are collected here explicitly, from the block itself, so this

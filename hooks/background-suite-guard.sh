@@ -4,7 +4,7 @@
 #
 # THE DEFECT. A dispatched agent that runs `bash tests/run.sh` with the Bash tool's
 # `run_in_background: true` gets a shell id back instead of a result. The suite runs, the
-# agent's turn ends, and the evidence the slice was dispatched to produce exists nowhere:
+# agent's turn ends, and the evidence the task was dispatched to produce exists nowhere:
 # no file, no transcript, no exit status anyone read. The fix the role files carry in prose
 # — foreground, bounded by the Bash tool's own `timeout` parameter, output tee'd to an
 # evidence log — is a rule, and a rule that only lives in prose is a wish. This is the wall.
@@ -53,7 +53,7 @@ COMMAND=$(_jq '.tool_input.command')
 # a library — which is what keeps an always-on hooks.json registration cheap.
 IS_BACKGROUND=no
 [ "$(_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
-# THE ACTOR (design D1, slice 4/1 probe): an agent-context payload carries a top-level
+# THE ACTOR (design D1, task 4/1 probe): an agent-context payload carries a top-level
 # `agent_id`, a main-thread one does not. hooks/stop-guard.sh reads the same field the
 # same way.
 ACTOR=$(_jq '.agent_id')
@@ -219,7 +219,7 @@ engaged_session "$BSG_REPO" "$BSG_SID" || exit 0
 if [ "$IS_BACKGROUND" = yes ]; then
   refuse exit2 suite-run "a backgrounded suite's result is never read" "run it in the foreground" \
     "A backgrounded suite returns a shell id, not an outcome. Your turn can end before it
-finishes, and then the evidence this slice exists to produce lives nowhere: no file, no
+finishes, and then the evidence this task exists to produce lives nowhere: no file, no
 exit status anyone saw. Reports are turn-scoped; files are not.
 
 Run it in the FOREGROUND instead, bounded by the Bash tool's own timeout parameter (never

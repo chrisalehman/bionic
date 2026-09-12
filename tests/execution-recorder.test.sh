@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/execution-recorder.sh — ONE script, TWO arms (epic-15 wave-03,
-# slice 4/4).
+# task 4/4).
 #
 #   PostToolUse|Bash  — the OBSERVATION arm. Turns hooks/stop-check.sh's printed
 #                       machine line into the record a stop spends. Never blocks.
@@ -15,7 +15,7 @@
 # ~/.claude/hooks/, or writes outside a mktemp'd sandbox. The observation arm is
 # driven with the REAL producer's REAL stdout — hooks/stop-check.sh is executed
 # against the fixture world and its output becomes the payload — because the
-# whole thesis of this slice is that one program's output is the other's input,
+# whole thesis of this task is that one program's output is the other's input,
 # and a synthesized machine line would test the two halves apart.
 #
 # Usage: bash tests/execution-recorder.test.sh
@@ -73,7 +73,7 @@ set_mtime_epoch() {  # <file> <epoch>
 # FIXTURE FIDELITY (declared per checklist §A / spec §Design).
 #
 # Source: .bionic/docs/record/w3-slice1-posttooluse-probe.md §2, the verbatim
-# PostToolUse payloads captured live on CLI 2.1.222 for this slice. Every payload
+# PostToolUse payloads captured live on CLI 2.1.222 for this task. Every payload
 # builder below DERIVES from those captures:
 #
 #   * PostToolUse|Bash, orchestrator-invoked — FAITHFUL to capture A, field for
@@ -190,7 +190,7 @@ scale: wave
 integration-branch: main
 current: 4
 
-- Step 4: slices in flight
+- Step 4: tasks in flight
 PLAN
   fi
   printf '%s|%s|%s|%s\n' "$repo" "$proj/$SID_A.jsonl" "$proj/$SID_A/subagents" "$home/.claude"
@@ -234,7 +234,7 @@ rec_roster_row() {  # <repo> <sid> <name> <agent-id>
 
 # plant_agent <subagents-dir> <agent-id> <name> [repo]
 #
-# THE THREE THINGS AN OBSERVABLE AGENT NOW IS (wave-roster-lifecycle S6). Until that slice
+# THE THREE THINGS AN OBSERVABLE AGENT NOW IS (wave-roster-lifecycle S6). Until that task
 # an agent existed for hooks/stop-check.sh because its `meta.json` was on disk under a
 # session's `subagents/` directory, and this helper wrote exactly that. The directory scan
 # is gone: resolution reads the newest recorded ListAgents answer in the session's own
@@ -354,7 +354,7 @@ expect_nonempty "…and the same pattern DOES find the walk in a hook that walks
 # Outside an active wave the script is inert, like every other gate in this
 # family (spec §Component boundaries: "Inert when no wave is active").
 #
-# THE ROSTER ROW IS PLANTED HERE TOO (S11). Until this slice the nowave world
+# THE ROSTER ROW IS PLANTED HERE TOO (S11). Until this task the nowave world
 # planted an agent WITHOUT its roster row, so the observation resolved nothing
 # and the world would have recorded nothing whether a wave was active or not:
 # the inertness this section names was never the reason for the silence. With
@@ -410,7 +410,7 @@ STATE=$(cat "$W2_REPO/$STATE_REL" 2>/dev/null)
 expect_contains "two chained runs record the first target" "aone-1111111111111111" "$STATE"
 expect_contains "two chained runs record the second target" "atwo-2222222222222222" "$STATE"
 
-# The contract state the observation displayed rides into the record: slices 4/5
+# The contract state the observation displayed rides into the record: tasks 4/5
 # and 4/6 compare the progress artifact's mtime against the look, so the look has
 # to have written down what it saw (D-6).
 IFS='|' read -r D6_REPO D6_TR D6_SUB D6_CFG <<< "$(make_world d6 yes)"
@@ -440,7 +440,7 @@ run_rec "$(mk_bash_post "$SID_A" "$W2_TR" "$W2_REPO" \
 section "Section 3: no successful run, no record (AC-3, the C6 closure)"
 # ============================================================
 #
-# This is the section the slice exists for. The predecessor recorded from
+# This is the section the task exists for. The predecessor recorded from
 # PreToolUse by re-parsing the command TEXT, so a command the operator watched
 # FAIL still left a record naming a live agent, carrying that agent's log mtime
 # and size — the exact facts the stop gate spends (critic finding A, pinned as a
@@ -495,7 +495,7 @@ do
   run_rec "$(mk_bash_post "$SID_A" "$C6_TR" "$C6_REPO" "$mention" "$mention")"
 done
 
-# A command that was never dispatched at all fires no PostToolUse event — slice
+# A command that was never dispatched at all fires no PostToolUse event — task
 # 4/1 §5 captured the harness rejecting one and neither hook firing. The
 # equivalent here is the absence of any call into this script; asserted as the
 # invariant it is, that state on disk is unchanged by an event that never arrives.
@@ -509,11 +509,11 @@ plant_agent "${FS_TR%/*}/$SID_B/subagents" "aforeign-3333333333333333" "foreign"
 observe "$SID_A" "$FS_CFG" "$FS_REPO" "$FS_TR" foreign
 
 # ============================================================
-section "Section 4: the observer (AC-3's third field, slice 4/1 assumption A)"
+section "Section 4: the observer (AC-3's third field, task 4/1 assumption A)"
 # ============================================================
 #
 # Capture A vs capture B: the same command, the same session, the same turn,
-# differing only in a top-level `agent_id`. That single key is what lets slice
+# differing only in a top-level `agent_id`. That single key is what lets task
 # 4/6 refuse a stop discharged by somebody else's look (D-3).
 
 IFS='|' read -r OB_REPO OB_TR OB_SUB OB_CFG <<< "$(make_world observer yes)"
@@ -590,7 +590,7 @@ section "Section 6: the roster arm — intended → confirmed (AC-1, confirmatio
 TUID="toolu_01QhBXwHyZfMQNmS571fqmg8"
 NEW_AID="a26bd30bf8616411b"
 
-# The intended row EXACTLY as hooks/dispatch-preflight.sh writes it (slice 4/3,
+# The intended row EXACTLY as hooks/dispatch-preflight.sh writes it (task 4/3,
 # schema roster-state/v1 — the field order and header are that script's).
 seed_roster() {  # <repo> <sid> <name> <tool_use_id>
   local repo="$1" sid="$2" name="$3" tuid="$4"
@@ -674,7 +674,7 @@ run_rec "$(jq -n --arg s "$SID_A" --arg t "$RS_TR" --arg c "$RS_REPO" --arg u "$
 expect_contains "a synchronous dispatch confirms the same way (capture D shape)" \
   "agent_id=a6bc0caf11962bbb6" "$(grep 'status=confirmed' "$RS_REPO/.bionic/tmp/roster-${SID_A}.state")"
 
-# ---------- the TEAMMATE payload shape (AC-10, epic-16 wave-01 slice 0) ----------
+# ---------- the TEAMMATE payload shape (AC-10, epic-16 wave-01 task 0) ----------
 #
 # FIXTURE FIDELITY: transcribed field for field from
 # .bionic/docs/record/landing-wave-capture-probe.md §3-A — the verbatim
@@ -697,7 +697,7 @@ expect_contains "a synchronous dispatch confirms the same way (capture D shape)"
 # `agent_id=` would turn every by-id wall's input from EMPTY into WRONG — the
 # roster would assert an identity no observation can ever match. So the
 # addressing id lands in its own field and `agent_id=` stays empty here; the
-# transcript-form id arrives later, from SubagentStart (slice 1's `identified`
+# transcript-form id arrives later, from SubagentStart (task 1's `identified`
 # row). A confirmed row never carries a wrong-namespace id.
 mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <tool_use_id>
   jq -n --arg s "$1" --arg t "$2" --arg c "$3" --arg n "$4" --arg a "$5" --arg u "$6" \
@@ -780,7 +780,7 @@ section "Section 7: hostile repo (AC-8, TDD §8, checklist A2/A3)"
 # real `.bionic/tmp`. It has to record, or none of the refusals below mean
 # anything.
 #
-# THE ROSTER ROW IS PLANTED IN EVERY WORLD HERE (S11). Until this slice the three
+# THE ROSTER ROW IS PLANTED IN EVERY WORLD HERE (S11). Until this task the three
 # hostile worlds called plant_agent WITHOUT the repo argument, so no roster row
 # carried the agent id, the observation resolved nothing, and the recorder had
 # nothing to write with or without a symlink in the way. The guards were never
@@ -1079,7 +1079,7 @@ PR_LIVE=$(grep 'name=live-one|' "$PR_ROSTER" 2>/dev/null)
 # intended row it completes stays exactly where the launch put it.
 
 # ============================================================
-section "Section 10: the identification arm — SubagentStart → identified (AC-2, epic-16 w1 slice 1)"
+section "Section 10: the identification arm — SubagentStart → identified (AC-2, epic-16 w1 task 1)"
 # ============================================================
 #
 # FIXTURE FIDELITY: mk_subagent_start is transcribed field for field from
@@ -1162,7 +1162,7 @@ expect_contains "…carrying the TRANSCRIPT-form id the by-id walls can match" \
 # nowhere and matched nothing.
 expect_contains "…still named for the DISPATCH, never for the payload's agent_type" \
   "name=probemate" "$I1_ROW"
-# Slice 2's verdict verb folds the roster to the LATEST row per name and reads
+# Task 2's verdict verb folds the roster to the LATEST row per name and reads
 # the contract off that row alone (plan Assumptions 8). Every field carried
 # forward is what makes that fold sound.
 expect_contains "…and the deliverable the brief contracted" \

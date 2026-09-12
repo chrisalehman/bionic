@@ -15,7 +15,7 @@
 # marketplace-clone compare in `detect_plugin_latest` gains `ahead`.
 #
 # WHAT THIS SUITE DOES NOT OWN. How doctor.sh RENDERS an `ahead` row — that is
-# a later slice in this wave (the DOCTOR slice); this suite only pins the
+# a later task in this wave (the DOCTOR task); this suite only pins the
 # library-level state, not doctor's presentation of it.
 #
 # HERMETIC, DIRECT-SOURCED (same posture as tests/detect-probes.test.sh):
@@ -61,7 +61,7 @@ expect_eq "6: a prerelease suffix compares by its release numbers" \
 section "Section 2: detect_plugin_latest gains a real ahead state"
 
 # A fixture PAYLOAD whose own plugin.json is NEWER than the marketplace clone's,
-# which is the exact defect this slice closes: pre-fix, string inequality alone
+# which is the exact defect this task closes: pre-fix, string inequality alone
 # ("9.9.9" != "1.0.0") reported this machine as state=lag — a build newer than
 # the marketplace copy told it was "behind".
 make_payload() {  # <version> -> payload root on stdout

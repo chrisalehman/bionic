@@ -14,7 +14,7 @@
 # unset $SHELL, all resolve to "$HOME/.bashrc" — rather than introducing a new
 # refusal path. `env.sh`'s `rc_file` is a separate, pre-existing resolver with
 # its own, stricter posture (it REFUSES for a shell it does not recognize) and
-# is out of scope here: it is not one of the two functions this slice was asked
+# is out of scope here: it is not one of the two functions this task was asked
 # to unify, and giving it a third behavior on top of two would be a second,
 # uncoordinated change to a fact this file does not own.
 #

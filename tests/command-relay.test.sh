@@ -237,7 +237,7 @@ expect_all_lines_fit "B14: --all plan, long paths pending — every line fits 10
 # BYTES. The predecessor truncator tested length one way and cut the other
 # (`${#s}` characters, `printf '%.*s'` bytes); under C those two units are the
 # same and the bug is invisible, while under the UTF-8 locale a real user's
-# shell exports it slices a multi-byte glyph in half and emits invalid UTF-8.
+# shell exports it tasks a multi-byte glyph in half and emits invalid UTF-8.
 # Same code, same input, two locales, two answers: the hermetic fixture was
 # exercising a different code path than the one that ships (Step-6 critic C-1,
 # reproduced on 3 of 5 cut offsets).

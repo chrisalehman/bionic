@@ -218,7 +218,7 @@ case "${1:-}" in
     esac
     exit 1 ;;
   sync)
-    # The `uv-project` kind (epic-18 T3's excalidraw-renderer row; VENV slice,
+    # The `uv-project` kind (epic-18 T3's excalidraw-renderer row; VENV task,
     # AC-17, epic-20 wave-bionic-1.4.0): the argv is `uv sync --project <dir>`,
     # and what makes the row PRESENT is a real venv, because `_dep_check_uv_project`
     # is a filesystem test, not a call back into this binary. A recorder that only
@@ -1125,7 +1125,7 @@ expect_eq "doctor: the claude() shell proxy row agrees the block is on disk" \
 
 
 # ---------------------------------------------------------------------------
-# Group 4b — VENV slice: a stable, plugin-version-independent venv path, and a
+# Group 4b — VENV task: a stable, plugin-version-independent venv path, and a
 # stale uv.lock reads `stale`, not `absent` (AC-17, wave-bionic-1.4.0).
 # ---------------------------------------------------------------------------
 #
@@ -1901,7 +1901,7 @@ expect_match "14: …and it names the same route, with the dependency that is mi
 
 # ---------------------------------------------------------------------------
 # Group 15 — the registry row that was dropped while the plugin's files stayed
-# (REQ-S0, AC-S0.3; slice-0 ruling §4 and §8).
+# (REQ-S0, AC-S0.3; task-0 ruling §4 and §8).
 #
 # THE STATE, AND WHY IT NEEDED A NEW PROBE. `/bionic:remove` followed by a
 # reinstall restores the two plugins bionic DECLARES and leaves the one it does
@@ -1994,7 +1994,7 @@ g15_doctor_lines() {  # <report file> -> the count
   # NO `|| echo 0` FALLBACK. `grep -c` already prints `0` when it matches nothing
   # and merely exits 1 for it, so an `||` arm appends a SECOND zero and the value
   # becomes two lines — which reads as a failure against `0` and would have been
-  # mistaken for a red row (it was, once, during this slice's own red run).
+  # mistaken for a red row (it was, once, during this task's own red run).
   local n
   n="$(grep -c "impeccable lost its entry but its files are still on disk" "$1" 2>/dev/null)"
   printf '%s' "${n:-0}"

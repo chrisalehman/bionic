@@ -38,10 +38,12 @@
 # is the newest-race incident in a new costume. The fence toggle runs before the section
 # test, so a fenced `## Tasks` heading does not open the section either.
 #
-# `## Tasks` IS THE ONLY SECTION READ. A `## Slices` table — the retired four-column shape
-# this wave replaces — is ignored even though it carries `id`, `deps` and `status` cells that
-# a name-keyed reader would otherwise be happy to take. The section ends at the next `##`
-# heading or at the first line that is not a table row.
+# `## Tasks` IS THE ONLY SECTION READ. A table under the RETIRED section heading this wave
+# replaced — the four-column shape, spelled with the unit-of-work noun the domain dictionary
+# now marks retired — is ignored even though it carries `id`, `deps` and `status` cells that
+# a name-keyed reader would otherwise be happy to take. tests/units.test.sh's `decoys.md`
+# fixture is what holds that, and it keeps the old heading literal for the purpose. The
+# section ends at the next `##` heading or at the first line that is not a table row.
 #
 # ONE PARSE, THREE VERBS. `units_ready` and `units_validate` are functions of `units_rows`'
 # output and never touch the file themselves, so the three answers cannot disagree about
@@ -58,6 +60,21 @@
 #
 # A CELL NEVER CONTAINS A LITERAL `|` (the brief rule for this table), so there is no
 # escaping to undo and `split($0, c, "|")` is exact.
+#
+# LINE ENDINGS ARE NORMALISED HERE, NOT AT THE CALLER (T8). Two of the callers read plans
+# a human may have written on another machine, and one of them — the evidence gate — is
+# pinned on CR-only (classic-Mac) input by tests/canonical-sdlc-evidence-gate.test.sh
+# 19j-cr1/19j-cr2: a CR-only file collapses to ONE awk record, so a parser that did not
+# translate would find no table and say so silently. The translation is a pass of its own
+# because a record split on `\n` cannot re-split itself.
+#
+# SLOT 3 ANSWERS TO TWO NAMES, `kind` AND `rigor` (T8). Slot 3 is the row's CLASSIFICATION
+# cell. The wave-scale table this library was written for spells it `kind`; the task-scale
+# registration ledger the evidence gate has read since D12 — `| id | intent | rigor |
+# description | status |` — spells the same slot `rigor`, and that table is NOT widened by
+# this wave. One alias is what lets `validate_task_ledger` read its rigor cell through this
+# library instead of keeping a second `## Tasks` parser alive, which is the whole of
+# AC-1e.1. No table carries both spellings, and the first header cell to match wins.
 
 # ── THE ONE PARSE ────────────────────────────────────────────────────────────
 #
@@ -69,7 +86,7 @@
 # missing-column set is not known until the header has been read.
 _units_read() {
   [ -n "${1:-}" ] && [ -f "$1" ] || return 1
-  awk '
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" | awk '
     function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
 
     BEGIN {
@@ -79,10 +96,9 @@ _units_read() {
       disp[5] = "agent"; disp[6] = "deps";   disp[7] = "size";   disp[8] = "serves"
       disp[9] = "Files"; disp[10] = "status"
       for (k = 1; k <= 10; k++) want[k] = tolower(disp[k])
+      alt[3] = "rigor"   # slot 3 as the task-scale ledger spells it
       state = 0   # 0 before the section · 1 in it, header not yet seen · 2 in the table · 3 done
     }
-
-    { sub(/\r$/, "") }
 
     # THE FENCE TOGGLE RUNS FIRST, so a heading or a table inside a code block is prose.
     /^[ \t]*```/ { fence = !fence; next }
@@ -105,7 +121,8 @@ _units_read() {
       n = split($0, c, "|")
       for (i = 1; i <= n; i++) {
         t = tolower(trim(c[i]))
-        for (k = 1; k <= 10; k++) if (t == want[k] && col[k] == 0) col[k] = i
+        if (t == "") continue
+        for (k = 1; k <= 10; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
       }
       if (col[1] == 0) next          # no `id` cell — not the header row
       found = 1
@@ -137,10 +154,41 @@ _units_read() {
       printf "# %s\n", missing
       for (i = 1; i <= nr; i++) print row[i]
     }
-  ' "$1"
+  '
 }
 
-# ── THE THREE VERBS ──────────────────────────────────────────────────────────
+# ── THE THREE VERBS, AND THE ONE ACCESSOR ────────────────────────────────────
+
+# units_field <record> <column> -> that column's cell of one `units_rows` line.
+#
+# WHY AN ACCESSOR AT ALL (T8). `IFS=\t read -r a b c ...` is the obvious way to take a TSV
+# record apart and it is WRONG here: tab is IFS whitespace, so the shell folds a run of
+# tabs into ONE delimiter and a row with an empty cell shifts every field after it. awk
+# -F'\t' is exact but costs a process per cell, and the callers ask for two or three cells
+# of every row of a twenty-row table. This is pure parameter expansion: no process, no
+# fold, and an absent trailing cell reads empty rather than shifting.
+#
+# BY NAME, NOT BY NUMBER, for the reason the parse is header-keyed: a caller that wrote
+# `10` would have to be found again if the contract ever grew an eleventh field. The name
+# is this library's own contract spelling, NOT the table's header text — `rigor` is
+# accepted as the second name of slot 3, the same alias the header scan takes.
+units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on a bad name
+  local rec="${1:-}" n
+  case "${2:-}" in
+    id) n=1 ;;    step) n=2 ;;   kind|rigor) n=3 ;; task) n=4 ;;  agent) n=5 ;;
+    deps) n=6 ;;  size) n=7 ;;   serves) n=8 ;;     Files) n=9 ;;  status) n=10 ;;
+    *) return 1 ;;
+  esac
+  while [ "$n" -gt 1 ]; do
+    case "$rec" in
+      *$'\t'*) rec="${rec#*$'\t'}" ;;
+      *) return 0 ;;
+    esac
+    n=$((n - 1))
+  done
+  printf '%s' "${rec%%$'\t'*}"
+}
+
 
 # units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status, tab-separated,
 #                      one line per row, in TABLE order. Exit 1 when there is no table.

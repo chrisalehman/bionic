@@ -203,7 +203,7 @@ done
 # width.sh, for the column budget every line below is held inside. The rule is
 # doctor's (spec AC-15, 100 columns) and so is the file — one number and one
 # truncator, consumed by both scripts, rather than the copy-per-script this
-# wave shipped at slice 4/3 and then broke at slice 4/4.
+# wave shipped at task 4/3 and then broke at task 4/4.
 # shellcheck source=/dev/null
 . "${SETUP_LIB_DIR}/width.sh"
 
@@ -505,7 +505,7 @@ SETUP_ASK='?'
 # reason to.
 #
 # SO THE NUMBER AND THE TRUNCATOR LIVE IN lib/width.sh, sourced above, and both
-# scripts consume them. Slice 4/3 built this budget for setup.sh alone and slice
+# scripts consume them. Task 4/3 built this budget for setup.sh alone and task
 # 4/4 then broke it in doctor.sh in the same wave — the same number written
 # twice in two files with nothing binding them, which is what the Step-6 review
 # called out and what one owner ends. `bionic_line` is where the prefix-aware
@@ -1214,7 +1214,7 @@ _setup_rc_why() {  # <item>
     # WRITTEN TO RIDE ON THE LINE IT PRINTS ON (AC-F4/AC-15). Its caller is a
     # bare `say "   — …"`, five columns of lead-in and no truncator between this
     # string and the screen, so the budget is kept HERE, by the length of the
-    # sentence: 93 characters, 98 columns printed. Slice 4/1 replaced the old
+    # sentence: 93 characters, 98 columns printed. Task 4/1 replaced the old
     # 55-character line ("launches claude with bypass available in the mode
     # cycle") with this longer and more exact one — the flag stopped starting
     # the session in bypass and started only offering it — which is what spends

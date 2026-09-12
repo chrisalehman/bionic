@@ -300,7 +300,7 @@ run_hook_at() {  # <hook path> <command> -> sets RC, ERRTXT and (on a refusal) V
        CLAUDE_CODE_SESSION_ID="$GA_SID" CLAUDE_PROJECT_DIR= \
        bash "$hook" >/dev/null 2>"$tmp_err"; then RC=0; else RC=$?; fi
   ERRTXT=$(cat "$tmp_err"); rm -f "$tmp_err"
-  # THE DETAIL, ON A SECOND DRIVE, AND ONLY AFTER A REFUSAL (slice 13, ruling D-1). A
+  # THE DETAIL, ON A SECOND DRIVE, AND ONLY AFTER A REFUSAL (task 13, ruling D-1). A
   # refusal now puts ONE line on the user stream — `bionic: load refused — <hook> cannot
   # load the bionic library (run /bionic:doctor)` — and the library it wanted, the
   # candidates it tried and the repair commands it still permits are `detail`, emitted
@@ -321,7 +321,7 @@ run_hook_at() {  # <hook path> <command> -> sets RC, ERRTXT and (on a refusal) V
 # THE FIXTURE LIBRARY IS THE ONE THE HOOKS ASK FOR, read out of the hooks themselves. The
 # loader qualifies a candidate directory only when it holds EVERY basename in that hook's
 # BIONIC_LIB_WANT, so a hand-kept list here goes stale the moment a hook wants one more
-# file — and it did: wave-01 slice 13 added refuse.sh to the BIONIC_LIB_WANT of eleven of
+# file — and it did: wave-01 task 13 added refuse.sh to the BIONIC_LIB_WANT of eleven of
 # the twenty-one hooks, these two among them, and this section's
 # POSITIVE controls then failed with "cannot load the bionic library", which reads as a
 # broken hook and was really a fixture that never built a whole library.

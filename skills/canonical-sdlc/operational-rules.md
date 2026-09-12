@@ -36,14 +36,14 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 
   with check-ids `refactor-evidence` / `tune-evidence` (log-only, fire at the Verify gate on v11 wave/epic-scale plans of those intents; task-scale ledger lines carry no Step-5 block, so the checks don't fire there; missing/empty/placeholder values all log — the R7 key lines are exempt from the universal placeholder block on v11 plans only).
 
-  **D-slice 4 — rigor-keyed task-ledger enforcement, now BLOCKING (wave-05, 2026-07-19; tightened v11 IN PLACE — no v12).** D12's task-ledger validation (log-only above) was rigor-keyed and promoted to blocking. Evidence GATHERING stays rigor-invariant; the row's EFFECTIVE RIGOR (its own `rigor` cell, resolved per A15 below — empty cell inherits frontmatter; an off-enum cell is a blocking malformation on ANY row, at ANY status, regardless of frontmatter rigor) selects which fields must exist, in three cumulative lanes:
+  **D-task 4 — rigor-keyed task-ledger enforcement, now BLOCKING (wave-05, 2026-07-19; tightened v11 IN PLACE — no v12).** D12's task-ledger validation (log-only above) was rigor-keyed and promoted to blocking. Evidence GATHERING stays rigor-invariant; the row's EFFECTIVE RIGOR (its own `rigor` cell, resolved per A15 below — empty cell inherits frontmatter; an off-enum cell is a blocking malformation on ANY row, at ANY status, regardless of frontmatter rigor) selects which fields must exist, in three cumulative lanes:
   - **tested (floor, all rigors):** the addressed unit (`current: T<n>`) must have a row in `## Tasks` and a non-placeholder `- T<n>:` evidence line. Nothing else — the cheap lane stays one honest line.
   - **peer-reviewed:** the evidence line must be PROOF-SHAPED — ≥1 digit AND a command token (a backtick, a `/`-bearing path, or a whole-word runner from `bash|sh|npm|pnpm|yarn|make|pytest|go|cargo|git|test`) — plus, on `done` rows, an `auditor` token.
   - **audited:** `done` rows additionally carry a `critic` token.
 
   These lanes apply to the addressed unit always, and to any OTHER `done` row that already carries real (non-empty, non-placeholder) evidence — a false-done claim at peer-reviewed+ blocks even off the addressed row.
 
-  **A15 — row rigor is a FLOOR, not a free two-way override (Step-6 USER DECISION, momentous, ratified 2026-07-19; refines D-slice 4 above, which originally shipped as "cell overrides frontmatter both directions").** A per-row `rigor` cell may RAISE a row's effective rigor above frontmatter `rigor:` freely (drives the heavier lane). A cell that LOWERS it below frontmatter is a DOWNGRADE and BLOCKS (exit 2) unless the row's `- T<n>:` evidence line carries a Waiver-Protocol marker (`waiver: <user> <date> <reason>`, whole-word match), in which case it proceeds at the lower cell's lane. This unifies row-rigor with the v11 run-rigor floor model above (upward-only; downgrade = a recorded user decision) and closes the Step-6 adversarial critic's **F1 finding** (a per-row cell could silently disarm the proof-shape/auditor/critic lanes with no audit trail). An empty cell resolves to frontmatter first, so it is never a phantom downgrade; an EQUAL cell is not a downgrade either (strict `<`). Implemented by `rigor_ord()` + `enforce_rigor_floor()`, riding the same rails as the three lanes above (addressed unit at any status; non-addressed `done` rows with real evidence) — fires immediately before the lanes. Folded same-slice: word-boundary matching for the `auditor`/`critic` tokens (F3 — `critical` no longer satisfies `critic`). Shipped docs (SKILL.md/README.md) updated to "cells raise; lowering = waiver" — the "overrides ... both directions" phrasing is retired.
+  **A15 — row rigor is a FLOOR, not a free two-way override (Step-6 USER DECISION, momentous, ratified 2026-07-19; refines D-task 4 above, which originally shipped as "cell overrides frontmatter both directions").** A per-row `rigor` cell may RAISE a row's effective rigor above frontmatter `rigor:` freely (drives the heavier lane). A cell that LOWERS it below frontmatter is a DOWNGRADE and BLOCKS (exit 2) unless the row's `- T<n>:` evidence line carries a Waiver-Protocol marker (`waiver: <user> <date> <reason>`, whole-word match), in which case it proceeds at the lower cell's lane. This unifies row-rigor with the v11 run-rigor floor model above (upward-only; downgrade = a recorded user decision) and closes the Step-6 adversarial critic's **F1 finding** (a per-row cell could silently disarm the proof-shape/auditor/critic lanes with no audit trail). An empty cell resolves to frontmatter first, so it is never a phantom downgrade; an EQUAL cell is not a downgrade either (strict `<`). Implemented by `rigor_ord()` + `enforce_rigor_floor()`, riding the same rails as the three lanes above (addressed unit at any status; non-addressed `done` rows with real evidence) — fires immediately before the lanes. Folded same-task: word-boundary matching for the `auditor`/`critic` tokens (F3 — `critical` no longer satisfies `critic`). Shipped docs (SKILL.md/README.md) updated to "cells raise; lowering = waiver" — the "overrides ... both directions" phrasing is retired.
 
   **Plan-level audited strictness:** at frontmatter `rigor: audited`, the previously-log-only ledger-shape checks on NON-addressed rows (missing `## Tasks`, bad status enum, an active/done row with missing/placeholder evidence) become BLOCKING too. Below `audited` they stay log-only, unchanged.
 
@@ -323,7 +323,7 @@ eval with no nameable "Fails when" is refused at the card. This is how to fill o
   eval, and rewriting the eval around an unfalsifiable criterion buys a green that means
   nothing. Step 1's quality bar — write each criterion so a "fails when" is nameable — is this
   rule paid for early, where it is cheap.
-- **One row per criterion, and the plan renders them.** Step 3 adds sequencing (which slice
+- **One row per criterion, and the plan renders them.** Step 3 adds sequencing (which task
   implements which eval, in what order) and the matrix's bookkeeping columns. It authors no eval
   of its own, and a matrix row with no row here is a criterion that skipped a step.
 - **The gate reads the rendered column.** From `current: 4` on, an AC block whose `fails-when:`
@@ -336,11 +336,11 @@ eval with no nameable "Fails when" is refused at the card. This is how to fill o
   the concept, what breaks if the assumption is wrong. No table, and no wall.
 - **Wave** — a page or two in the spec, all five parts. The ownership table usually runs three to
   six rows; at twenty, the wave is carrying more than one wave's worth of concepts and the
-  finding is the slice decomposition, not the table.
+  finding is the task decomposition, not the table.
 - **Epic** — the domain model and boundaries that outlive any single wave, so waves can point at
   them rather than restate them.
 - **Never forty pages.** The section exists to make the ownership and duplication decisions
-  visible before code is written, not to specify the code. A design longer than the slice list it
+  visible before code is written, not to specify the code. A design longer than the task list it
   governs has stopped being a design and started being an implementation nobody ran.
 
 Rejected alternatives are one line each — the alternative, and why it lost — and they are the

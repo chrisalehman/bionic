@@ -1,5 +1,5 @@
 #!/bin/bash
-# version.sh — the one-line answer to "what am I running" (epic-22 wave-01 slice 14,
+# version.sh — the one-line answer to "what am I running" (epic-22 wave-01 task 14,
 # spec AC-E2.1). `/bionic:version` runs this and shows its output verbatim.
 #
 # WHAT THIS FILE OWNS. Nothing factual, the same posture doctor.sh states for itself:
