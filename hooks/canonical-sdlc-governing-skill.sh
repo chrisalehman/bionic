@@ -184,7 +184,7 @@ physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resol
 # machine because a file is missing is not recoverable at that price.
 BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh units.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
 # long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
 # tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
@@ -477,9 +477,13 @@ DOCS_ROOT=$(docs_root "$PROJECT_ROOT_FROM_PATH")
 # Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
 # collision-resistant across same-named projects under different parents.
 # cksum and basename are POSIX — no new dependency.
-# Byte-identical to the copies in farm-out-reminder.sh,
-# canonical-sdlc-evidence-gate.sh and context-spend.sh — divergence would give
-# one project two audit files. Deliberate per-hook duplication (no shared lib).
+# THREE COPIES, ONE BODY, AND THE OTHER TWO ARE NAMED HERE:
+# payload/scripts/lib/walls.sh (the PreToolUse|Bash process) and
+# payload/scripts/lib/stop.sh (the turn-end process). This one serves the
+# PreToolUse|Write process. Divergence would give one project two audit files;
+# tests/cross-gate-agreement.test.sh §AP compares the three bodies by checksum and
+# proves by mutation that the comparison discriminates. Deliberate duplication, one
+# copy per process, no shared lib — consolidation is promoted, not done here.
 # [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1

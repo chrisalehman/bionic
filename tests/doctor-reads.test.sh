@@ -694,8 +694,9 @@ section "Section 19: dead-session state — the fix line follows the auto-sweep'
 # behaviour below). This suite already carries the N_FIX/headline mechanics the
 # row participates in — Section 18's own comment names "the dead-session line" as
 # one of the collapses that mechanic covers — so the row's OWN test belongs
-# beside them rather than in doctor-walls.test.sh, which is scoped to the four
-# fail-closed wall hooks and carries no dead-session fixture machinery at all.
+# beside them rather than in doctor-walls.test.sh, which is scoped to the Bash
+# walls — five of them, through ONE compound process now, two fail-closed and
+# three advisory (A-57) — and carries no dead-session fixture machinery at all.
 #
 # A PRIVATE PROJECT ROOT, NOT $REPO. Every other section in this file drives
 # doctor from inside the real bionic checkout ($REPO) because none of them reads

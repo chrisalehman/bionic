@@ -64,13 +64,18 @@
 # collision-resistant across same-named projects under different parents.
 # cksum and basename are POSIX — no new dependency.
 #
-# ONE DEFINITION, NOT A COMMENT ASKING FOR ONE. The evidence gate and
+# ONE DEFINITION PER PROCESS, AND THERE ARE THREE PROCESSES. The evidence gate and
 # farm-out-reminder each carried a copy whose headers said "byte-identical to the
 # copies in …, divergence would give one project two audit files". Two copies in one
 # shell is a drift the shell itself would resolve, silently and in whichever order the
-# file happened to be read; one definition is the guarantee those comments wanted.
-# payload/scripts/lib/stop.sh carries the same function for the turn-end process,
-# which is a different process and therefore still a copy.
+# file happened to be read; folding those walls into this library left one.
+#
+# THE OTHER TWO COPIES, NAMED BECAUSE A HEADER THAT NAMES A DELETED FILE IS WORSE THAN
+# NO HEADER: payload/scripts/lib/stop.sh (the turn-end process) and
+# hooks/canonical-sdlc-governing-skill.sh (the PreToolUse|Write process). Three copies,
+# three processes, one body — pinned by tests/cross-gate-agreement.test.sh §AP, which
+# compares the three bodies by checksum and carries a mutation arm proving the
+# comparison discriminates. Consolidation to one owner is promoted, not done here.
 # [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1
@@ -413,14 +418,34 @@ return 0
 # `$( cat )` strips trailing newlines, which is what `bionic_fold` does to `detail`
 # anyway, and `mode`, `verb`, `fact` and `fix` cannot contain a newline — `refuse`
 # refuses its own caller for that.
-_eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail>
+#
+# THE DIRECTORY IS CREATED HERE, EXCLUSIVELY, AND ONLY ON THE REFUSAL PATH (security F-1,
+# performance A-1). `mkdir -p` accepted whatever was already at the name — a symlink planted
+# by anyone who could guess `$$` and one `$RANDOM` draw was followed and its target
+# truncated, and a regular file planted there was read back on the NEXT Bash call as a
+# refusal this gate never made. Plain `mkdir` is atomic and fails when anything already
+# holds the name, so a squatter gets a refusal whose words degrade to the malformed-refusal
+# arm below — fail-closed, never a truncation and never attacker-authored prose. `-m 700`
+# means nothing can be planted inside it afterwards either.
+#
+# AND IT RUNS NOWHERE ELSE. A Bash call this gate does not refuse never reaches this
+# function, so it creates nothing, and the caller's cleanup has nothing to remove — which is
+# the fork the old unconditional `rm -rf` paid on every Bash tool call in every engaged
+# session.
+#
+# RC IS THE SIGNAL, because a subshell cannot hand a variable back. 0 means the five files
+# are there and the caller may read them; 1 means they are not and the caller must not.
+# [WALL: tests/bash-walls.test.sh §11]
+_eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail> -> 0 staged · 1 not
   local d="${1:-}" i=1 a
   shift
-  mkdir -p "$d" 2>/dev/null || return 0
+  [ -n "$d" ] || return 1
+  mkdir -m 700 "$d" 2>/dev/null || return 1
   for a in "$@"; do
-    printf '%s' "$a" > "$d/$i" 2>/dev/null
+    printf '%s' "$a" > "$d/$i" 2>/dev/null || return 1
     i=$((i + 1))
   done
+  return 0
 }
 
 wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
@@ -428,29 +453,39 @@ wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
   [ -n "$COMMAND" ] || return 0
 
   local _eg_stage _eg_rc
-  _eg_stage="${TMPDIR:-/tmp}/bionic-gate-$$-${RANDOM}"
+  # NO FORK TO NAME IT. The name is a string this process already knows; what makes it safe
+  # is that `_eg_stage_refusal` CREATES it exclusively, and only when there is a refusal to
+  # stage. `$RANDOM` bought nothing once creation is exclusive, and it cost one guessable
+  # name per pid while it was there.
+  _eg_stage="${TMPDIR:-/tmp}/bionic-gate-$$"
   (
     # THE SHIM, and the only line of this wall that is not the hook's own. It has
     # `refuse`'s signature and `refuse`'s abort, and it renders nothing: the parent
     # makes the one `refuse` call through `bionic_fold`, so the channel rule holds
     # (cross-gate §Refuse: no hook prints a refusal directly).
-    refuse() { _eg_stage_refusal "$_eg_stage" "$@"; exit 2; }
+    #
+    # TWO ABORT CODES, because the staging can fail and the parent has to be able to tell.
+    # 2 is "the five files are written, read them"; 3 is "this was a refusal and its words
+    # are gone", which the malformed-refusal arm below turns into a refusal that still holds.
+    refuse() { _eg_stage_refusal "$_eg_stage" "$@" && exit 2; exit 3; }
     _eg_body
   )
   _eg_rc=$?
 
-  if [ -f "$_eg_stage/1" ]; then
+  if [ "$_eg_rc" -eq 2 ] && [ -f "$_eg_stage/1" ]; then
     fold_block "$(cat "$_eg_stage/1" 2>/dev/null)" "$(cat "$_eg_stage/2" 2>/dev/null)" \
                "$(cat "$_eg_stage/3" 2>/dev/null)" "$(cat "$_eg_stage/4" 2>/dev/null)" \
                "$(cat "$_eg_stage/5" 2>/dev/null)"
     rm -rf "$_eg_stage" 2>/dev/null
     return 2
   fi
-  rm -rf "$_eg_stage" 2>/dev/null
+  # GUARDED, so the path that staged nothing forks nothing (performance A-1).
+  [ -d "$_eg_stage" ] && rm -rf "$_eg_stage" 2>/dev/null
 
-  # A NON-ZERO EXIT WITH NOTHING STAGED is `refuse` refusing its own caller — a
-  # malformed refusal, whose complaint is already on stderr in the library's own
-  # format. `_refuse_selfrefuse` exits 2 "because the wall the caller was building
+  # A NON-ZERO EXIT WITH NOTHING STAGED has two causes and one answer. Either `refuse`
+  # refused its own caller — a malformed refusal, whose complaint is already on stderr in
+  # the library's own format — or the staging itself could not be made (exit 3: the name
+  # was already taken, or the temp directory is unwritable). `_refuse_selfrefuse` exits 2 "because the wall the caller was building
   # must still hold", and it holds here: the commit is refused, and the refusal says
   # which failure this is rather than inheriting an empty object.
   if [ "$_eg_rc" -ne 0 ]; then
@@ -509,11 +544,21 @@ fi
 # to either.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 #
-# THE CONTEXT, IN ONE CALL AND NOT BEFORE NOW (REQ-1f, lib/context.sh). The POSITION
-# is this gate's own and is deliberate: every line above is answerable without touching
-# the filesystem, and a non-commit Bash command must not pay for a root walk. So the
-# call sits BELOW the commit arm, and the gate reads nothing of the context itself
-# first. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
+# THE CONTEXT, RESOLVED AGAIN HERE, AND THAT IS THE POINT (REQ-1f, lib/context.sh).
+# The POSITION below the commit arm is this gate's own and it was a cost argument when
+# this body was its own process: a non-commit Bash command must not pay for a root walk.
+# THE CARRIER NO LONGER HONOURS THAT. hooks/bash-walls.sh calls `bionic_context` for
+# every Bash tool call in an engaged session, before any wall is entered, so the walk is
+# already paid by the time this line is reached and the deferral buys nothing.
+#
+# THE CALL STAYS ANYWAY, for a reason that outranks the walk it repeats: this body is
+# carried into the library VERBATIM from the hook it replaced, and the differential T23
+# rests on is a differential against that text. Deleting a line the subshell would have
+# inherited from its parent is a behaviour-preserving edit that nothing here proves is
+# behaviour-preserving. The values cannot disagree — same payload, same environment, and
+# `bionic_context` is a pure function of both — so the duplicate costs one root walk on
+# commit commands and nothing else. Consolidating it belongs with the verbatim-carry
+# guarantee it would break, not beside it. It adopts the BIONIC_INPUT read before the loader (R1) — stdin is spent, and
 # `loader_fail_closed` needed the command text before any library existed.
 #
 # THE CWD LADDER IS THE LIBRARY'S, and is named nowhere else in this file but the
@@ -2701,10 +2746,11 @@ validate_intent_evidence() {
 # TESTED-FLOOR SHAPE ONLY (plan Assumption A2): the wave's own Step-5 auditor /
 # Step-6 critic are the assurance roles at wave scale, so per-row auditor/critic
 # tokens (task-scale machinery) are NOT demanded here.
-#   1. `## Tasks` section ABSENT -> exit 2 (empty is fine, absent is not — the
-#      audited multi_agent wave must carry its dispatched-task ledger home).
-#   2. ZERO data rows -> SATISFIED (a human `none dispatched` prose line is
-#      documentation, not required by the parser). return 0.
+#   1. `## Tasks` section ABSENT OR EMPTY -> exit 2 (the audited multi_agent wave
+#      must carry its dispatched-task ledger home).
+#   2. NO TABLE, OR A TABLE WITH ZERO DATA ROWS -> SATISFIED (a human
+#      `none dispatched` prose line is documentation, not required by the
+#      parser — the shape this refusal's own Fix text advertises). return 0.
 #   3. Each data row: the Task invariants, delegated to `units_validate` (REQ-1e)
 #      — status in {pending,active,landed,dropped} among them — else exit 2; a
 #      non-placeholder `- T<n>:` evidence line must exist in the ## SDLC State
@@ -2715,7 +2761,7 @@ validate_dispatch_ledger() {
   [ "$RIGOR" = "audited" ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local rows rc line id ev violations
+  local tasks rows line id ev violations
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -2732,13 +2778,31 @@ validate_dispatch_ledger() {
   # WHAT STAYS HERE is the pair of facts units.sh cannot know: that this plan owes a
   # ledger at all (the D7 PRESENCE rule, guarded to the triple above), and that every
   # row's evidence has actually been written on a `- T<n>:` line in ## SDLC State.
-  rows="$(units_rows "$PLAN")"; rc=$?
-  if [ "$rc" -ne 0 ]; then
+  #
+  # PRESENCE IS A QUESTION ABOUT THE SECTION, NOT ABOUT THE TABLE, and the base's
+  # own fence-aware extractor is what answers it (correctness F-1, A-68.1). Asking
+  # `units_rows` instead moved the basis: that reader exits 1 for a section carrying
+  # PROSE and no header row, a shape the docblock above calls SATISFIED and this
+  # refusal's own Fix text advertises ("a header plus a 'none dispatched' line is
+  # fine"). The next audited multi_agent wave that wrote it would have been unable
+  # to commit. Same extractor as validate_task_ledger, and the same one the pre-wave
+  # hook carried at 84da6b5.
+  tasks=$(normalize_newlines "$PLAN" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## Tasks/ { f=1; next }
+    /^## / { f=0 }
+    f')
+  if [ -z "$tasks" ]; then
     _eg_detail="canonical-sdlc audited multi_agent wave plan has no '## Tasks' dispatched-task ledger section.
 Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
     refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"
   fi
+  # THE SECTION IS PRESENT. What is left is the TABLE, and a section without one is
+  # rule 2 — satisfied, and returned BEFORE `units_validate`, which has no rows to
+  # judge and would only restate the absence as an invariant violation.
+  rows="$(units_rows "$PLAN")" || return 0
   [ -n "$rows" ] || return 0
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   violations="$(units_validate "$PLAN")" || true

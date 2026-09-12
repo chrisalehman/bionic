@@ -25,8 +25,8 @@
 # in tests/loader.test.sh, which builds throwaway hooks out of this same output.
 #
 # THIS HEADER IS WHERE THE LONG FORM LIVES, and that is a size decision rather than a
-# stylistic one (wave-11-lean-spine, 1f-c). A line inside the heredoc below is paid 22
-# times — once here, once in each of the 21 hooks — and a line out here is paid once.
+# stylistic one (wave-11-lean-spine, 1f-c). A line inside the heredoc below is paid 15
+# times — once here, once in each of the 14 hooks — and a line out here is paid once.
 # So the block keeps a dense preamble plus the decisions a reader cannot recover from
 # the code beside them, everything else was lifted up into this header, and
 # tests/cross-gate-agreement.test.sh §N.1 caps the block at 95 lines to hold it there.
@@ -102,7 +102,7 @@
 bionic_loader_pin() {
   cat <<'BIONIC_LOADER_PIN_EOF'
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
 # long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
 # tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names

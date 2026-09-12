@@ -2956,6 +2956,28 @@ write_plan "$h22c11" "$(d7_wave_plan "$tasks_selfref" "")" > /dev/null
 expect_allow "22c11 self-reference pin — THIS plan's exact ## Tasks shape (zero T-rows) → allow" \
   "$h22c11" 'git commit -m "x"'
 
+# 22c12 (base-faithful presence, correctness F-1) — a `## Tasks` section carrying
+# PROSE and NO header row at all → allow. D7's presence rule is a question about the
+# SECTION, not about the table: rule 2 of this function's own docblock, and the shape
+# its own Fix text advertises ("a header plus a 'none dispatched' line is fine").
+# 22c6 and 22c11 both carry a ten-column header AND a `|---|` separator, so neither
+# can tell a section-basis presence test from a table-basis one; this fixture can.
+tasks_prose_only="## Tasks
+
+none dispatched — no task-shaped unit has been dispatched on this wave yet."
+h22c12=$(make_home)
+write_plan "$h22c12" "$(d7_wave_plan "$tasks_prose_only" "")" > /dev/null
+expect_allow "22c12 audited multi_agent wave, ## Tasks prose with NO header row → allow (presence is the section, not the table)" \
+  "$h22c12" 'git commit -m "x"'
+
+# 22c13 — a `## Tasks` heading with an EMPTY section (nothing between it and the
+# next `##`) → block. The other half of the base rule: empty is not fine, only a
+# section with content is. 22c5 pins the ABSENT half.
+h22c13=$(make_home)
+write_plan "$h22c13" "$(d7_wave_plan "## Tasks" "")" > /dev/null
+expect_block "22c13 audited multi_agent wave, ## Tasks heading with an empty section → block (D7 presence)" \
+  "$h22c13" 'git commit -m "x"' "dispatched-task ledger"
+
 # ---- 22e: the wave's TEN-column ## Tasks table (REQ-1e, AC-1e.3) ----------
 #
 # THE SELF-REFERENCE PIN THIS WAVE NEEDS. 22c11 pinned the five-column shape
