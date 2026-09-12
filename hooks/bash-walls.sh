@@ -62,11 +62,22 @@
 # holds it to the canonical shape, so a comment quoting the guard above the guard would
 # make that row read prose instead of code.
 #
-# THE LIBRARY IS WANTED IN FULL. `BIONIC_LIB_WANT` names every file the five functions
-# between them source — the union of the five hooks' lists plus fold.sh and walls.sh —
-# so a partial library fails the loader's readability check and the fail-closed arm
-# answers for the whole compound rather than four walls running and the fifth being
-# dropped.
+# THE LIBRARY IS WANTED ONLY AS WIDE AS THE FAIL-CLOSED ARM REACHES (A-56.1).
+# `BIONIC_LIB_WANT` is the union of the two CLOSED walls' pre-fold lists — protect-main's
+# and the evidence gate's, readable back at `git show 60c528b:hooks/protect-main.sh` and
+# `git show 60c528b:hooks/canonical-sdlc-evidence-gate.sh` — plus fold.sh and walls.sh,
+# which are not a wall's ask but the two files this compound is MADE of: a fail-closed
+# wall that cannot be called has not been consulted, and a compound that cannot compose
+# has no verdict to give.
+#
+# WHAT IT DELIBERATELY OMITS, AND WHY. Folding five WANT lines into one made this the
+# UNION of five, and a union is fail-closed at its widest member: `cmd-class.sh` absent
+# refused EVERY Bash command in every project on the machine, where before it only made
+# farm-out-reminder and background-suite-guard step aside. R4 puts fail-closed per WALL,
+# not per compound, so a library only an advisory wall needs is sourced by that wall's
+# own function in payload/scripts/lib/walls.sh (`wall_libs`), and that wall steps aside
+# naming the file, in the words its hook used. The declaration lives beside the
+# functions, in walls.sh's per-wall table, which doctor reads for the same reason.
 #
 # [WALL: tests/bash-walls.test.sh]
 #
@@ -88,7 +99,7 @@ COMMAND=$(printf '%s' "$BIONIC_INPUT" | jq -r '.tool_input.command // empty' 2>/
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
 # payload/scripts/lib/loader.sh.
-BIONIC_LIB_WANT="cmd-class.sh context.sh fold.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh walls.sh"
+BIONIC_LIB_WANT="context.sh fold.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh walls.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -183,9 +194,7 @@ BIONIC_LOADER_REFUSE
   exit 2
 }
 # --- bionic-loader/v2 END
-if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "protect-main" "$COMMAND"; fi
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/cmd-class.sh"
+if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "bash-walls" "$COMMAND"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/context.sh"
 # shellcheck source=/dev/null

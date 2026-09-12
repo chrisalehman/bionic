@@ -8082,8 +8082,15 @@ DS_WALL_REPORT="$(HOME="$DS_HOME" BIONIC_CLAUDE_HOME="$DS_HOME/.claude" \
   BIONIC_PLUGIN_ROOT="$DS_WALL_ROOT" bash "$PARTY_DOCTOR" 2>/dev/null)"
 expect_true "DS.4b the sparse payload root really is missing the wall (the rows under it are not vacuous)" \
   test ! -e "$DS_WALL_ROOT/hooks/bash-walls.sh"
-expect_contains "DS.4b doctor raises the missing wall" \
-  "bash-walls wall is missing from the payload" "$DS_WALL_REPORT"
+# THE ROW NAMES THE WALL, NOT THE FILE (T23, A-56.2). The five PreToolUse|Bash
+# walls share one hook, so taking hooks/bash-walls.sh away takes all five — and
+# doctor says so per wall, because "bash-walls is missing" leaves a reader to work
+# out which behaviours they just lost. Two of the five are asserted here: one
+# fail-closed, one advisory, so a row that only knew the first name cannot pass.
+expect_contains "DS.4b doctor raises the missing wall, by the wall's own name" \
+  "protect-main wall is missing from the payload" "$DS_WALL_REPORT"
+expect_contains "DS.4b …and every other wall the same hook carried" \
+  "background-suite-guard wall is missing from the payload" "$DS_WALL_REPORT"
 expect_contains "DS.4b …and routes it to the party its table row names" \
   "$(ds_field "$(printf '%s\n' "$DS_TABLE" | grep '^wall-payload|')" 6)" "$DS_WALL_REPORT"
 expect_absent "DS.4b …and never to setup's phantom repair verb" \

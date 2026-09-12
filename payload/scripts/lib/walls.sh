@@ -80,6 +80,79 @@ audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
 }
 
+# ─── THE PER-WALL LIBRARY DECLARATION (A-56.1, A-56.2) ───────────────────────
+#
+# ONE TABLE, TWO READERS, AND IT IS WHY THE COMPOUND DOES NOT FAIL CLOSED ON A
+# LIBRARY ONLY AN ADVISORY WALL WANTS. The five hooks each declared their own
+# `BIONIC_LIB_WANT`; folding them made hooks/bash-walls.sh's WANT the UNION of
+# five lists, and a union is fail-closed at its widest member — `cmd-class.sh`
+# absent refused EVERY Bash command in every project, where before it only made
+# farm-out-reminder and background-suite-guard step aside (measured: cmd-class
+# C5, runner-T23-suites at 5a6e053). R4 says fail-closed is per wall, so the
+# carrier's WANT is the two closed walls' union and NOTHING ELSE, and a library
+# only an advisory wall needs is sourced by that wall's own function, below.
+#
+# THE ROWS ARE THE PRE-FOLD `BIONIC_LIB_WANT` LINES, unchanged — read them back
+# with `git show 60c528b:hooks/<wall>.sh | grep BIONIC_LIB_WANT=`. They do NOT
+# name fold.sh or walls.sh: those two are what the COMPOUND is made of rather
+# than what a wall asks for, and hooks/bash-walls.sh declares them itself.
+#
+# THE SECOND READER IS DOCTOR. payload/scripts/lib/checks.sh builds
+# BIONIC_WALL_HOOKS out of these variable names, so doctor's walls row stays
+# PER WALL — five verdicts, each naming the wall and the library it wanted —
+# rather than collapsing to one row for the carrier that would tell a reader
+# "bash-walls cannot load cmd-class.sh" and leave them to guess which of five
+# behaviours that costs them.
+#
+# THE NAME MANGLE IS THE FUNCTION NAMES' OWN: `-` becomes `_`, exactly as
+# `wall_farm_out_reminder` spells `farm-out-reminder`. No wall name carries an
+# underscore, so the inverse is unambiguous and checks.sh takes it.
+BIONIC_WALL_LIBS_protect_main="context.sh git-argv.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_WALL_LIBS_protect_database="context.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_WALL_LIBS_canonical_sdlc_evidence_gate="context.sh git-argv.sh refuse.sh root.sh run.sh session.sh units.sh"
+BIONIC_WALL_LIBS_farm_out_reminder="cmd-class.sh context.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_WALL_LIBS_background_suite_guard="cmd-class.sh context.sh refuse.sh root.sh run.sh session.sh"
+
+# THE HOOK THAT CARRIES ALL FIVE, declared here because the table's other reader
+# has to turn a wall NAME into a file on disk and there is exactly one answer.
+BIONIC_WALL_CARRIER="bash-walls"
+
+# ─── wall_libs — an advisory wall's own loader, for the files the carrier did
+#     not demand ─────────────────────────────────────────────────────────────
+#
+# THE LINE IT PRINTS IS THE LINE THE HOOK PRINTED. `loader_fail_open` in every
+# pre-fold hook said exactly this, with the hook's own name in front:
+#
+#     farm-out-reminder: library cmd-class.sh not found at <candidates> —
+#     hook stepping aside; run /bionic:doctor
+#
+# so a user who has seen a broken install before sees the same sentence, and the
+# WALL is named rather than the compound — which is the whole point of keeping
+# this per wall. (The fail-CLOSED refusal names `bash-walls`, per A-54, because
+# there it really is the compound that refused.)
+#
+# ONE LINE PER WALL, NOT ONE PER PROCESS. Two advisory walls wanting the same
+# absent file say so twice, once each, because they are two walls that stepped
+# aside and a reader who is told once cannot tell which. The sourcing itself is
+# done at most once per file per process — the message is the part that repeats.
+_bionic_wall_sourced=" "
+wall_libs() {  # <wall name> <basename>… -> 0 all sourced · 1 one named, caller returns 0
+  local who="$1"; shift
+  local f
+  for f in "$@"; do
+    [ -r "$BIONIC_LIB/$f" ] && continue
+    echo "$who: library $f not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
+    return 1
+  done
+  for f in "$@"; do
+    case "$_bionic_wall_sourced" in *" $f "*) continue ;; esac
+    # shellcheck source=/dev/null
+    . "$BIONIC_LIB/$f" || return 1
+    _bionic_wall_sourced="${_bionic_wall_sourced}${f} "
+  done
+  return 0
+}
+
 # ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
 #
 # HARD BLOCK: Prevents AI from pushing to main/master branches.
@@ -2766,6 +2839,14 @@ wall_farm_out_reminder() {  # <event> -> 0 nothing · 1 nudge · 2 deny
   TOOL_NAME=$(bionic_jq .tool_name);     [ "$TOOL_NAME" = "Bash" ] || return 0
   CMD="$COMMAND";                        [ -n "$CMD" ] || return 0
 
+  # THE CLASSIFIER IS THIS WALL'S OWN TO FIND (A-56.1). hooks/bash-walls.sh does
+  # not demand cmd-class.sh, because a wall that steps aside over a missing file
+  # must not make the two walls over irreversible actions refuse everything. So
+  # this function asks for it here, at the point it has decided it has work to
+  # do, and steps aside naming the file when it is not there — which is what the
+  # hook did, in the same words.
+  wall_libs farm-out-reminder cmd-class.sh || return 0
+
 # ASKED ONCE, IN hooks/bash-walls.sh, FOR ALL FIVE (T23). The root and the session id
 # come from their one owner (REQ-1f, lib/context.sh).
 # `project_root` walks to the nearest real `.bionic` ancestor rather than trusting
@@ -3105,6 +3186,12 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
 # ASKED ONCE, IN hooks/bash-walls.sh, FOR ALL FIVE (T23) — see wall_protect_main. The
 # shape guard this wall used to apply LATE, at the roster read, still lives in
 # `bionic_context` (REQ-1h), so BIONIC_SID cannot be unusable by the time it is a path.
+
+# THE CLASSIFIER IS THIS WALL'S OWN TO FIND (A-56.1) — see wall_farm_out_reminder.
+# BELOW THE PARTITION, deliberately: a main-thread or unarmed call has already been
+# answered "not live here" and has nothing to classify, so it neither pays for the
+# source nor prints a line about a file it was never going to read.
+wall_libs background-suite-guard cmd-class.sh || return 0
 
 [ "$(cmd_class "$COMMAND")" = "suite" ] || return 0
 

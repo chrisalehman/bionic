@@ -343,12 +343,17 @@ expect_eq "8b: …as the FIRST bionic line on it" "1" \
 # ---------------------------------------------------------------------------
 section "9 — no library: fail-closed direction and reach, unchanged (R4)"
 #
-# THE CLASSES DISAGREE AND THE COMPOUND KEEPS THE UNION. protect-main and the evidence
-# gate refuse when the library cannot load; the other three step aside. In one process the
-# loader either loads or does not, so the compound runs the fail-closed arm alone — and
-# protect-main's arm is armed in EVERY project on the machine, with no `.bionic` needed,
-# which is what makes the union's reach every project. The four repair commands are still
-# matched as whole strings, ahead of everything.
+# THE CLASSES DISAGREE, AND THE COMPOUND ASKS FOR ONLY WHAT THE CLOSED ONES NEED.
+# protect-main and the evidence gate refuse when the library cannot load; the other three
+# step aside. `BIONIC_LIB_WANT` in hooks/bash-walls.sh is therefore the two CLOSED walls'
+# lists and nothing else. This section's fixture has NO library at all, so the closed arm
+# is the one that fires — and protect-main's arm is armed in EVERY project on the machine
+# with no `.bionic` needed, which is what makes its reach every project. The four repair
+# commands are still matched as whole strings, ahead of everything, and the refusal names
+# `bash-walls` — what actually refused (A-54).
+#
+# SECTION 10 IS THE OTHER HALF of this one: a library that is whole except for a file only
+# an ADVISORY wall wants, which must NOT reach this arm.
 
 BROKEN="$SANDBOX/broken-plugin"
 mkdir -p "$BROKEN/hooks" "$SANDBOX/plugins-empty"
@@ -387,5 +392,81 @@ expect_status "9f: …and so is doctor" 0 "$DRV_ST"
 
 drive_broken "bash $BROKEN_REAL/scripts/doctor.sh; git push origin main" "$NOBIONIC"
 expect_status "9g: a repair with a command chained after it is not a repair" 2 "$DRV_ST"
+
+expect_contains "9h: …and the line names the compound, which is what refused (A-54)" \
+  "bash-walls cannot load the bionic library" "$DRV_ERR"
+
+# ---------------------------------------------------------------------------
+section "10 — fail-closed is PER WALL, not per compound (A-56.1)"
+#
+# THE DEFECT THIS SECTION EXISTS FOR, MEASURED. Folding five hooks into one made
+# `BIONIC_LIB_WANT` the UNION of five want lists, and the loader qualifies a directory
+# only when it holds EVERY name on the list — so `cmd-class.sh` absent, a file only
+# farm-out-reminder and background-suite-guard read, failed the WHOLE compound closed and
+# refused every Bash command in every project on the machine. Before the fold that same
+# damage made those two walls step aside and touched nothing else
+# (tests/cmd-class.test.sh §C5). R4 puts fail-closed per WALL; this is the proof.
+#
+# THE TREE IS C5's OWN: a plugin-shaped directory, hooks/ beside scripts/lib/, every
+# library present except the classifier. Nothing outside $SANDBOX is touched — the
+# shipped library is never moved, which is the correction §C5 carries in its own header.
+NOCLASS="$SANDBOX/no-classifier"
+mkdir -p "$NOCLASS/hooks" "$NOCLASS/scripts/lib"
+for _nc in "${BIONIC_SCRIPTS_DIR}"/payload/scripts/lib/*.sh; do
+  case "$(basename "$_nc")" in cmd-class.sh) continue ;; esac
+  cp "$_nc" "$NOCLASS/scripts/lib/"
+done
+cp "$HOOK" "$NOCLASS/hooks/bash-walls.sh"
+expect_true "10a: the fixture library is whole except for the classifier" \
+  test ! -e "$NOCLASS/scripts/lib/cmd-class.sh" -a -r "$NOCLASS/scripts/lib/git-argv.sh"
+
+R_NOCLASS="$(mk_repo noclassifier)"
+arm_roster "$R_NOCLASS"
+NC_ST=0; NC_ERR=""; NC_OUT=""
+drive_noclass() {  # <payload>
+  NC_OUT=$(printf '%s' "$1" | env HOME="$FAKE_HOME" \
+      BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
+      CLAUDE_PROJECT_DIR= bash "$NOCLASS/hooks/bash-walls.sh" 2>"$SANDBOX/.nerr")
+  NC_ST=$?
+  NC_ERR=$(cat "$SANDBOX/.nerr")
+  return 0
+}
+require_helpers drive_noclass
+
+# THE CLOSED WALLS ARE UNTOUCHED: a push is still refused, by its own wall and not by the
+# loader — the fact is protect-main's, not "cannot load the bionic library".
+drive_noclass "$(mk_payload "$R_NOCLASS" 'git push origin main')"
+expect_status "10b: a push is STILL refused with the classifier absent" 2 "$NC_ST"
+expect_contains "10c: …by protect-main's own fact, not by the loader arm" \
+  "push refused" "$NC_ERR"
+expect_absent "10d: …and nothing on this stream says the library would not load" \
+  "cannot load the bionic library" "$NC_ERR"
+
+# AND AN ORDINARY COMMAND PASSES, which is the row the union broke: before this fix `ls`
+# was refused in every project on the machine.
+drive_noclass "$(mk_payload "$R_NOCLASS" 'ls')"
+expect_status "10e: an ordinary command PASSES, where the union refused it" 0 "$NC_ST"
+expect_empty "10f: …writing nothing to stdout" "$NC_OUT"
+
+# THE TWO ADVISORY WALLS STEP ASIDE, each naming the file, once, in the words its own hook
+# used before the fold (`git show 60c528b:hooks/farm-out-reminder.sh`, loader_fail_open).
+drive_noclass "$(mk_payload "$R_NOCLASS" 'bash tests/run.sh' "$ACTOR" true)"
+expect_status "10g: a backgrounded suite is neither refused nor classified" 0 "$NC_ST"
+expect_empty "10h: …with nothing on stdout" "$NC_OUT"
+expect_contains "10i: farm-out-reminder names the file it could not load" \
+  "farm-out-reminder: library cmd-class.sh not found" "$NC_ERR"
+expect_contains "10j: background-suite-guard names it too, for itself" \
+  "background-suite-guard: library cmd-class.sh not found" "$NC_ERR"
+expect_contains "10k: …and both point at the diagnosis" "/bionic:doctor" "$NC_ERR"
+expect_eq "10l: …one line per wall that stood down, and no more" "2" \
+  "$(printf '%s\n' "$NC_ERR" | grep -c .)"
+
+# ANTI-VACUITY: the same payload on the WHOLE library carries the background arm's refusal,
+# so the silence above is the missing file and not a fixture that never reached the wall.
+R_ARMED="$(mk_repo noclassifier-control)"
+arm_roster "$R_ARMED"
+run_hook "$(mk_payload "$R_ARMED" 'bash tests/run.sh' "$ACTOR" true)"
+expect_contains "10m: control — with the classifier present that wall does refuse" \
+  "a backgrounded suite's result is never read" "$OUT$ERR"
 
 finish
