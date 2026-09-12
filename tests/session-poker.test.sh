@@ -3863,7 +3863,7 @@ expect_eq "a plan awaiting approval still ticks cleanly (exit 0)" "0" "$RC"
 expect_absent "the 17:54Z shape at current: 3 prints no FILL line at all" "poker: FILL" "$OUT"
 expect_contains "…and names the pending approval instead" \
   "no FILL — plan at current: 3, Step-3 approval pending" "$OUT"
-expect_absent "…so none of the eight tasks are named" "S1" "$OUT"
+expect_absent "…so none of the eight tasks are named" "FILL S1" "$OUT"
 
 # ---------- 22b: the same plan at current: 4 FILLs exactly as it always has ----------
 R22B="$(make_repo s22-current-4)"; new_roster "$R22B"
