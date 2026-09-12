@@ -9585,4 +9585,70 @@ expect_eq "Refuse the user line's format string is written exactly once" "1" \
 
 
 # ============================================================
+section "AP — audit_path: three copies, one body, and a pin that goes red when they part (duplication F-2)"
+# ============================================================
+#
+# WHY THERE ARE THREE. The audit stream has to land where a consuming project cannot commit
+# it, so its path is `$HOME`-rooted and slugged from the project root — and a project that
+# got two different slugs would get two audit files, which is the whole reason each carrier
+# was given its own copy rather than a shared one. Every copy's header has said "byte-
+# identical to the copies in …" since incident 0001. NOTHING TESTED IT. T12 and T23 each
+# gave a new library a fresh copy and the count went from four hooks to three files without
+# any of them being compared, while the headers went on naming files that no longer exist.
+#
+# NOT CONSOLIDATED, DELIBERATELY (A-69). One owner is the right end state and it is promoted
+# with a charter, beside `normalize_newlines` ×2 and `log_finding` ×2. What lands here is the
+# agreement the headers have been claiming: one body, and a red pin the moment they differ.
+#
+# BODIES, NOT DEFINITIONS — §I.1's rule and `fn_body`'s reason for existing. Each carrier
+# explains its copy in its own words, so the comments above the signature legitimately
+# differ; only the executable text may not.
+
+AP_TREE="$(cd "$BIONIC_HOOKS_DIR/.." && pwd -P)"
+AP_LIB="$AP_TREE/payload/scripts/lib"
+[ -d "$AP_LIB" ] || AP_LIB="$AP_TREE/scripts/lib"
+AP_PARTIES="$AP_LIB/walls.sh $AP_LIB/stop.sh $AP_TREE/hooks/canonical-sdlc-governing-skill.sh"
+
+# --- (a) NON-VACUITY. `fn_body` returns nothing for a name it cannot find, and three
+# nothings have one md5 too. Each party is on disk, defines the name exactly once at column
+# zero, and yields a body that carries the slug's own arithmetic. ---
+for _apf in $AP_PARTIES; do
+  expect_eq "AP.1 $(basename "$_apf") is on disk" "yes" \
+    "$([ -r "$_apf" ] && echo yes || echo no)"
+  expect_eq "AP.1 …defining audit_path exactly once, at column zero" "1" \
+    "$(/usr/bin/grep -cE '^audit_path\(\)' "$_apf")"
+  expect_contains "AP.1 …and its body is the real one, not an empty extraction" \
+    "cksum" "$(fn_body "$_apf" audit_path)"
+done
+
+# --- (b) THE PIN. One body across the three, by checksum. ---
+AP_SUMS="$(for _apf in $AP_PARTIES; do fn_body "$_apf" audit_path | shasum | cut -d' ' -f1; done | sort -u)"
+expect_eq "AP.2 the three audit_path bodies are one text" "1" \
+  "$(printf '%s\n' "$AP_SUMS" | /usr/bin/grep -c .)"
+
+# --- (c) THE COUNT. Exactly three, tree-wide — so a fourth copy has to be added to this
+# pin rather than drifting outside it, which is precisely how the count reached three
+# unnoticed. The three directories are named rather than globbed, for §N.1's reason. ---
+expect_eq "AP.3 audit_path is defined in exactly three files across hooks/, scripts/ and scripts/lib/" \
+  "3" "$(/usr/bin/grep -lE '^audit_path\(\)' \
+           "$AP_TREE/hooks"/*.sh "$(dirname "$AP_LIB")"/*.sh "$AP_LIB"/*.sh 2>/dev/null \
+           | sort -u | wc -l | tr -d ' ')"
+
+# --- (d) THE MUTATION ARM, which is the half §R never had: it BUILT a mutant and asserted
+# nothing about it. Doctor one copy in a throwaway tree — the slug's separator, a one-
+# character change that would give one project two audit files and nothing else — and the
+# comparison above must go red. The doctoring is itself asserted, so a sed that matched
+# nothing cannot be mistaken for a pin that discriminates. ---
+AP_MUT="$SANDBOX/audit-path-mutant"; mkdir -p "$AP_MUT"
+for _apf in $AP_PARTIES; do cp "$_apf" "$AP_MUT/$(basename "$_apf")"; done
+AP_VICTIM="$AP_MUT/walls.sh"
+sed -e "s|'%s/.claude/logs/%s-%s/sdlc-audit.md'|'%s/.claude/logs/%s_%s/sdlc-audit.md'|" \
+    "$AP_VICTIM" > "$AP_VICTIM.new" && mv "$AP_VICTIM.new" "$AP_VICTIM"
+expect_ne "AP.4 the mutant's audit_path really was doctored" \
+  "$(fn_body "$AP_LIB/walls.sh" audit_path)" "$(fn_body "$AP_VICTIM" audit_path)"
+AP_MUT_SUMS="$(for _apf in "$AP_MUT"/*.sh; do fn_body "$_apf" audit_path | shasum | cut -d' ' -f1; done | sort -u)"
+expect_eq "AP.5 …and the pin goes red on it: two texts, not one" "2" \
+  "$(printf '%s\n' "$AP_MUT_SUMS" | /usr/bin/grep -c .)"
+
+# ============================================================
 finish
