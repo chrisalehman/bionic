@@ -62,8 +62,8 @@ MAX_RECORDS=200
 MACHINE_SCHEMA="stop-check-observation/v1"
 ROSTER_VERSION="v1"
 
-INPUT=$(cat)
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+BIONIC_INPUT=$(cat)
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 TOOL_NAME=$(_jq '.tool_name')
 # THE THIRD ARM'S EVENT CARRIES NO TOOL NAME AT ALL (capture probe §3-C): a
@@ -162,7 +162,7 @@ elif [ "$TOOL_NAME" = "Bash" ]; then
   # that case parseable rather than crashing jq. Only STDOUT is searched — the
   # machine line is printed there, and searching stderr would let a quoted error
   # message masquerade as evidence.
-  STDOUT=$(printf '%s' "$INPUT" \
+  STDOUT=$(printf '%s' "$BIONIC_INPUT" \
     | jq -r 'if (.tool_response | type) == "object" then (.tool_response.stdout // "")
              else (.tool_response // "" | tostring) end' 2>/dev/null)
   MLINES=$(printf '%s\n' "$STDOUT" | grep "^${MACHINE_SCHEMA}|")
@@ -213,15 +213,13 @@ else
   [ -n "$AGENT_ID" ] && [ -n "$TOOL_USE_ID" ] || exit 0
 fi
 
-CWD=$(_jq '.cwd')
-[ -n "$CWD" ] || exit 0
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
 # payload/scripts/lib/loader.sh. FAIL OPEN: the roster row is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="root.sh run.sh session.sh resources.sh"
+BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh resources.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -318,6 +316,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
@@ -332,21 +332,15 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 # every row in silence, exactly where a wave most needs it. `project_root` maps a linked
 # worktree onto its main repository and walks for the nearest real `.bionic`, so the
 # reader and the writer land on one address space.
-REPO=$(project_root "$CWD")
-[ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
-
-# THE SESSION KEY, from the library (design §1): env primary, payload witness. The roster
-# filename is built from it, so the writer and every reader have to spell one session one
-# way — two spellings produced two rosters, and a row nobody could find.
-SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || SID=""
-[ -n "$SID" ] || exit 0
-# SHAPE-CHECKED BEFORE IT BECOMES A PATH, exactly as hooks/dispatch-preflight.sh checks it.
-# This value is interpolated into the roster path below and this script APPENDS to that
-# file. The symlink guards check `.bionic`, the state directory and the exact filenames, so
-# a key carrying path separators does not trip a guard — it writes outside the directory the
-# guards protect. Session ids are harness-minted UUIDs today; every other payload value on
-# this write path is sanitized and this one was not (Step-6 review S-4).
-case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+# THE SESSION KEY comes back from the same call (design §1): env primary, payload
+# witness, and SHAPE-CHECKED BEFORE IT BECOMES A PATH. The roster filename is built from
+# it and this script APPENDS to that file; the symlink guards check `.bionic`, the state
+# directory and the exact filenames, so a key carrying path separators does not trip a
+# guard — it writes outside the directory the guards protect (Step-6 review S-4). That
+# rule is `bionic_context`'s now, applied for all fifteen, so the writer and every reader
+# spell one session one way by construction rather than by four hooks agreeing.
+bionic_context 2>/dev/null || exit 0
+[ -d "$BIONIC_ROOT" ] || exit 0
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
@@ -357,7 +351,7 @@ case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
 # direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
-engaged_session "$REPO" "$SID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # ---------- THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15, R4) ----------
 #
@@ -412,10 +406,10 @@ fi
 # level redirects our write outside the repo — the proven arbitrary-file-overwrite
 # shape. Refuse rather than follow; refusing to RECORD only makes the later stop
 # refuse, which is the safe direction.
-STATE_DIR="$REPO/.bionic/tmp"
+STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
 STATE_FILE="$STATE_DIR/stop-check.state"
-ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
-[ -L "$REPO/.bionic" ] && exit 0
+ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
+[ -L "$BIONIC_ROOT/.bionic" ] && exit 0
 [ -L "$STATE_DIR" ] && exit 0
 
 # ONE LAUNCH REFERENCE PER AGENT ID, EVER (epic-16 wave-02 S6; AC-5; R6; spec
@@ -454,7 +448,7 @@ prior_launch_for_agent() {  # <agent-id> -> earliest launched_at for that id thi
       *) continue ;;
     esac
     [ "$(line_field "$line" agent_id)" = "$aid" ] || continue
-    [ "$(line_field "$line" session)" = "$SID" ] || continue
+    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
     found=$(line_field "$line" launched_at)
     [ -n "$found" ] || continue
     printf '%s' "$found"
@@ -541,7 +535,7 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     esac
     [ "$(line_field "$line" tool_use_id)" = "$TOOL_USE_ID" ] || continue
     [ "$(line_field "$line" status)" = "intended" ] || continue
-    [ "$(line_field "$line" session)" = "$SID" ] || continue
+    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
     ROW="$line"
   done < "$ROSTER_FILE"
   [ -n "$ROW" ] || exit 0
@@ -749,7 +743,7 @@ if [ -n "$IS_START" ]; then
     esac
     [ "$(line_field "$line" agent_id)" = "$START_ID" ] || continue
     case "$(line_field "$line" status)" in intended|confirmed) : ;; *) continue ;; esac
-    [ "$(line_field "$line" session)" = "$SID" ] || continue
+    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
     ROW="$line"
   done < "$ROSTER_FILE"
 
@@ -822,7 +816,7 @@ if [ -n "$IS_START" ]; then
       esac
       [ "$(line_field "$line" name)" = "$START_TYPE" ] || continue
       case "$(line_field "$line" status)" in intended|confirmed) : ;; *) continue ;; esac
-      [ "$(line_field "$line" session)" = "$SID" ] || continue
+      [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
       ROW="$line"
     done < "$ROSTER_FILE"
   fi
@@ -983,7 +977,7 @@ write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <pro
       {
         while IFS= read -r line; do
           case "$line" in '#'*|'') continue ;; esac
-          [ "$(line_field "$line" session)" = "$SID" ] \
+          [ "$(line_field "$line" session)" = "$BIONIC_SID" ] \
             && [ "$(line_field "$line" target)" = "$tid" ] && continue
           local rlog rdir
           rlog=$(line_field "$line" log); rdir="${rlog%/agent-*}"
@@ -1000,7 +994,7 @@ write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <pro
     # the two contract-source fields the same way — copied verbatim from the
     # producer's own machine line, additive, still `v1`.
     printf '%s|session=%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|observer=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \
-      "$STATE_VERSION" "$SID" "$tid" "$typed" "$log" "$mt" "$sz" "$OBSERVER" "$dl" "$pp" "$pm" "$ps" "$cl" "$dsrc" "$psrc"
+      "$STATE_VERSION" "$BIONIC_SID" "$tid" "$typed" "$log" "$mt" "$sz" "$OBSERVER" "$dl" "$pp" "$pm" "$ps" "$cl" "$dsrc" "$psrc"
   } > "$tmp" 2>/dev/null
   mv -f "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
   rm -rf "$lock"

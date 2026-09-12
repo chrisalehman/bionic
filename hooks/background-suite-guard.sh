@@ -32,10 +32,10 @@
 set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
-INPUT=$(cat) || exit 0
-[ -n "$INPUT" ] || exit 0
+BIONIC_INPUT=$(cat) || exit 0
+[ -n "$BIONIC_INPUT" ] || exit 0
 
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null || printf ''; }
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null || printf ''; }
 
 [ "$(_jq '.tool_name')" = "Bash" ] || exit 0
 COMMAND=$(_jq '.tool_input.command')
@@ -72,7 +72,7 @@ ACTOR=$(_jq '.agent_id')
 # cheap next to refusing every backgrounded command in every session on the machine
 # because one file is missing. The failure directions in this repo are chosen by the
 # cost of the mistake, never uniformly.
-BIONIC_LIB_WANT="cmd-class.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="cmd-class.sh context.sh refuse.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -171,6 +171,8 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "background-suite-guard";
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/cmd-class.sh"
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -199,11 +201,14 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "background-suite-guard";
 # that guard owns the agent context and the roster, this one is driven straight by its
 # own suite, and a wall whose scope depends on a caller remembering to check it is a
 # wall with no scope of its own.
-BSG_CWD=$(_jq '.cwd')
-[ -n "$BSG_CWD" ] || BSG_CWD=$(pwd)
-BSG_REPO=$(project_root "$BSG_CWD")
-BSG_SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || BSG_SID=""
-engaged_session "$BSG_REPO" "$BSG_SID" || exit 0
+#
+# THE CONTEXT IS ONE CALL (REQ-1f, lib/context.sh). It adopts the BIONIC_INPUT read
+# above and answers with the root and the session id; the shape guard this hook used
+# to apply LATE, at the roster read, is applied here to the resolved value instead
+# (REQ-1h) — so an unusable id ends the hook rather than being blanked and carried
+# down to address a file outside the state directory.
+bionic_context 2>/dev/null || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 [ "$(cmd_class "$COMMAND")" = "suite" ] || exit 0
 
@@ -275,19 +280,17 @@ fi
 # budget in name only — that is a wish, not a wall — so nothing in this arm looks at it.
 [ -n "$ACTOR" ] || exit 0
 
-# THE SHAPE RULE, AT THE SITE THAT FORMS THE PATH (review-a A-10). `session_id` returns the
-# host-supplied value verbatim — it validates nothing — and this line turns it into a path.
-# hooks/execution-recorder.sh:382 and hooks/agent-context-guard.sh:246 both apply this exact
-# case before their own roster path, for the reason hooks/landing-gate.sh:284 states about
-# `agent_id`: a key carrying path separators does not trip the symlink guards, it writes (or
-# here, reads) outside the directory those guards protect. This roster READ is new in this
-# wave and did not inherit the rule. An unusable id leaves the budget unstated, which is the
-# documented no-row fail direction: a NAMED suite passes, `tests/run.sh` still does not.
-case "$BSG_SID" in *[!A-Za-z0-9_-]*) BSG_SID="" ;; esac
-ROSTER_FILE="$BSG_REPO/.bionic/tmp/roster-${BSG_SID}.state"
+# THE SHAPE RULE IS ALREADY SPENT (REQ-1h). `session_id` returns the host-supplied value
+# verbatim — it validates nothing — and this line turns it into a path. The rule that made
+# that safe used to live here, blanking the id and carrying on; it lives in `bionic_context`
+# now and ENDS the hook instead, so BIONIC_SID cannot be unusable by the time it reaches
+# this line. The reason is hooks/landing-gate.sh:284's about `agent_id`: a key carrying path
+# separators does not trip the symlink guards, it reads outside the directory those guards
+# protect.
+ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
-if [ -n "$BSG_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
+if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
   # THE LAST ROW CARRYING THIS ID WINS, which is the whole fleet`s reading of the roster
   # (hooks/stop-guard.sh, hooks/session-poker.sh: "the last row carrying a name wins"). A
   # launch row is later joined by the recorder`s `status=confirmed` copy and, across a
@@ -349,12 +352,12 @@ say so in your report and let the orchestrator widen the brief — a wider instr
 its decision to make, and it is the one holding the one-regression budget for the run."
 }
 
-# THE READING IS SCOPED TO THIS REPOSITORY and the split is guarded. `$BSG_REPO` is what
+# THE READING IS SCOPED TO THIS REPOSITORY and the split is guarded. `$BIONIC_ROOT` is what
 # turns "a file named x.test.sh" into "this row's suite x.test.sh" (critic K-2), and `set
 # -f` keeps a target carrying a glob metacharacter — `bash tests/*.test.sh` reads as the
 # literal `*.test.sh` — from being expanded against the HOOK PROCESS'S cwd before the loop
 # sees it (review-a A-7b). The sibling site at hooks/dispatch-preflight.sh does the same.
-_TARGETS=$(cmd_suite_targets "$COMMAND" "$BSG_REPO")
+_TARGETS=$(cmd_suite_targets "$COMMAND" "$BIONIC_ROOT")
 set -f
 # shellcheck disable=SC2086  # deliberate split of a newline-joined target list, globbing off
 for _target in $_TARGETS; do

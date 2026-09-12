@@ -52,8 +52,8 @@ set -u
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 SUPPORTED_SDLC_VERSION=14
 
-INPUT=$(cat)
-TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
+BIONIC_INPUT=$(cat)
+TOOL=$(echo "$BIONIC_INPUT" | jq -r '.tool_name // empty')
 
 # THIS HOOK ANSWERS ON TWO EVENTS (wave-session-bound-run, 2026-09-04). PreToolUse is the
 # wall, unchanged. PostToolUse|Write is the BIND ARM, and it exists because of a hard
@@ -66,7 +66,7 @@ TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
 # The event is absent on nothing this hook is registered for, but `// empty` keeps a
 # payload without it reading as the wall rather than as the bind arm — the direction that
 # preserves today's behaviour.
-EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
+EVENT=$(echo "$BIONIC_INPUT" | jq -r '.hook_event_name // empty')
 
 # Only Write and Edit need checking. Other tools pass through.
 case "$TOOL" in
@@ -74,7 +74,7 @@ case "$TOOL" in
   *) exit 0 ;;
 esac
 
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+FILE_PATH=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.file_path // empty')
 if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
@@ -182,7 +182,7 @@ physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resol
 # a mistake a person can move, and the evidence gate's own misplacement sweep catches
 # the consequential half of it at commit time. Refusing every Write and Edit on the
 # machine because a file is missing is not recoverable at that price.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh binding.sh units.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh units.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -279,6 +279,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing-skill"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -295,7 +297,18 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
 
-# THE ROOT THAT OWNS THE ARTIFACT — the artifact's own, not the invoking session's.
+# THE CONTEXT, IN ONE CALL (REQ-1f, lib/context.sh): it adopts the payload read before
+# the loader, and returns the session id past the ONE shape guard (REQ-1h) — which this
+# hook had none of. What it does NOT decide here is the root.
+#
+# THE ROOT THAT OWNS THE ARTIFACT — the artifact's own, not the invoking session's — is
+# this hook's own work and stays here. `BIONIC_ROOT` is resolved from the session's cwd
+# by the one ladder, and the two are different questions: the guard below and every
+# clause under it ask whether the FILE BEING WRITTEN belongs to an engaged project, and
+# a hook that scoped itself by the session's cwd and enforced against the artifact's
+# root would go quiet exactly where it was added to bind. So the engagement predicate is
+# re-asked against this root rather than read off `BIONIC_ENGAGED`.
+bionic_context 2>/dev/null || exit 0
 PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
   # project_root always answers, so this is unreachable in practice. Kept as a
@@ -326,8 +339,7 @@ fi
 # foreign or unshaped session key, no key at all. The arming partition is the consent
 # boundary (1.3.2 close-out).
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-GS_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || GS_SID=""
-engaged_session "$PROJECT_ROOT_FROM_PATH" "$GS_SID" || exit 0
+engaged_session "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" || exit 0
 
 # ---------- THE BIND ARM (AC-9): a new run's plan claims the session that wrote it ----------
 #
@@ -372,7 +384,7 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # sits crosswise to the precedent ADR's "No nested tracking … the roster records only
   # depth-one dispatches": binding is identity state, and a depth-two act must not mutate
   # depth-one identity.
-  case "$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)" in
+  case "$(echo "$BIONIC_INPUT" | jq -r '.agent_id // empty' 2>/dev/null)" in
     ?*) exit 0 ;;
   esac
 
@@ -384,7 +396,7 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # falls through to binding rather than to silence — a missing distinction must not cost
   # AC-9 the case it exists for, and a redundant rebind to a plan the session is already
   # working in is the harmless direction.
-  case "$(echo "$INPUT" | jq -r '.tool_response.type // empty' 2>/dev/null)" in
+  case "$(echo "$BIONIC_INPUT" | jq -r '.tool_response.type // empty' 2>/dev/null)" in
     update) exit 0 ;;
   esac
 
@@ -399,7 +411,7 @@ if [ "$EVENT" = "PostToolUse" ]; then
     *) exit 0 ;;
   esac
 
-  if bind_plan "$PROJECT_ROOT_FROM_PATH" "$GS_SID" "$GS_BIND_TARGET"; then
+  if bind_plan "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" "$GS_BIND_TARGET"; then
     echo "governing-skill: session bound to $GS_BIND_TARGET" >&2
   fi
   exit 0
@@ -416,7 +428,7 @@ fi
 # requires an unbound session to be TOLD it fell back to the newest plan, and AC-6 requires
 # a session whose bound plan has closed to be told that rather than handed another run's.
 # Neither line blocks anything.
-GS_RUN=$(session_run "$PROJECT_ROOT_FROM_PATH" "$GS_SID" 2>/dev/null) || :
+GS_RUN=$(session_run "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" 2>/dev/null) || :
 case "$GS_RUN" in
   fallback\ *)
     echo "governing-skill: run resolved by newest-plan fallback (session unbound) — ${GS_RUN#fallback }" >&2 ;;
@@ -572,7 +584,7 @@ fi
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 CONTENT=""
 if [ "$TOOL" = "Write" ]; then
-  CONTENT=$(echo "$INPUT" | jq -r '.tool_input.content // empty')
+  CONTENT=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.content // empty')
 else
   if [ -f "$FILE_PATH" ]; then
     if [ "$IN_SCOPE" -eq 1 ]; then
@@ -895,14 +907,18 @@ fi
 # behind the guard, so `agent_type` is the spelling that answers here — the other is read
 # anyway, because a partition maintained by hand is one edit away from covering neither.
 #
-# AMBIGUITY PASSES. No cwd in the payload, a cwd outside any repository, a tree whose main
-# repository cannot be resolved: this wall has no main checkout to name and says nothing.
+# AMBIGUITY PASSES. A cwd outside any repository, a tree whose main repository cannot be
+# resolved: this wall has no main checkout to name and says nothing.
+#
+# THE CWD IS THE LADDER'S (REQ-1h). It used to be a second, private read of the payload
+# field, which was empty when the payload carried none; it is `BIONIC_CWD` now, so this
+# wall and the root every clause above it uses come from one resolution.
 case "$BASENAME" in
   *.plan.md)
     LEASE_AGENT=0
     [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && LEASE_AGENT=1
-    [ -n "$(echo "$INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
-    LEASE_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+    [ -n "$(echo "$BIONIC_INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
+    LEASE_CWD="$BIONIC_CWD"
     if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ]; then
       # A linked worktree's `.git` is a FILE pointing into the shared repository; the main
       # checkout's is a directory. Same test scripts/lib/worktree.sh's land verb uses.

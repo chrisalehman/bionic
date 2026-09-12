@@ -238,8 +238,8 @@ _lg_path_declared() {  # <diff path> <comma-joined declared files>
   return 1
 }
 
-INPUT=$(cat)
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+BIONIC_INPUT=$(cat)
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 # ---------- relevance first: the cheapest checks, before any git resolution ----------
 
@@ -266,8 +266,8 @@ if [ "$MODE" = "sweep" ]; then
   # set: an empty array means every dispatch has finished (the payload says so on every turn
   # where nothing is running), while a missing key means this is not a payload that can tell
   # us, and judging on it would hold running agents to contracts they are still working on.
-  [ "$(printf '%s' "$INPUT" | jq -r 'if has("background_tasks") then "yes" else empty end' 2>/dev/null)" = "yes" ] || exit 0
-  LIVE_IDS="|$(printf '%s' "$INPUT" \
+  [ "$(printf '%s' "$BIONIC_INPUT" | jq -r 'if has("background_tasks") then "yes" else empty end' 2>/dev/null)" = "yes" ] || exit 0
+  LIVE_IDS="|$(printf '%s' "$BIONIC_INPUT" \
     | jq -r '[.background_tasks[]?.id // empty] | join("|")' 2>/dev/null | tr -d '\n')|"
 else
   # THE LANDING ARM READS NO LIVE SET, and that is the point of it rather than an omission.
@@ -299,16 +299,13 @@ fi
 # verdicted on a re-entry either: the rows are still owed their one answer.
 [ "$(_jq '.stop_hook_active')" = "true" ] && exit 0
 
-# ---------- ambiguity: cannot locate the repo or the session -> pass, silent ----------
-CWD=$(_jq '.cwd')
-[ -n "$CWD" ] || exit 0
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
 # payload/scripts/lib/loader.sh. FAIL OPEN: the landing verdict is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh worktree.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh worktree.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -405,6 +402,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "landing-gate"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -425,26 +424,22 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "landing-gate"; fi
 # every row in silence, exactly where a wave most needs it. `project_root` maps a linked
 # worktree onto its main repository and walks for the nearest real `.bionic`, so the
 # reader and the writer land on one address space.
-REPO=$(project_root "$CWD")
-[ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
-
-# THE SESSION KEY, from the library (design §1, R-1): the ENVIRONMENT value is primary and
-# the payload is a witness. This file used to prefer the payload on the reasoning that a
-# hook process's env is not a documented carrier of the id — measurement overtook that
-# (A-probe-1/A-probe-2: a plain /clear re-keys the env, the payload and the pid file
-# together, and hook processes see the new value). What made the choice matter is that
-# the roster filename is built from it and other readers took the env: two spellings of
-# one session produced two rosters. It is passed to the sweeper below for the same reason.
-SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || SID=""
-[ -n "$SID" ] || exit 0
-# SHAPE-CHECKED BEFORE IT BECOMES A PATH, exactly as hooks/dispatch-preflight.sh checks it.
-# This value is interpolated into `roster-${SID}.state` below — a file this script now
-# APPENDS to — and exported to the sweeper, which builds its own ledger and findings paths
-# from it; the symlink guards on those paths check the state directory and the exact
-# filenames, so a key carrying separators does not trip a guard, it leaves the directory the
-# guards protect. Session ids are harness-minted UUIDs today and nothing reaches this, but
-# every other payload value on this path is sanitized and this one was not (Step-6 S-4).
-case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+# THE SESSION KEY comes back from the same call (design §1, R-1): the ENVIRONMENT value
+# is primary and the payload is a witness. This file used to prefer the payload on the
+# reasoning that a hook process's env is not a documented carrier of the id — measurement
+# overtook that (A-probe-1/A-probe-2: a plain /clear re-keys the env, the payload and the
+# pid file together, and hook processes see the new value). What made the choice matter is
+# that the roster filename is built from it and other readers took the env: two spellings
+# of one session produced two rosters.
+#
+# SHAPE-CHECKED BEFORE IT BECOMES A PATH, for all fifteen at once now. This value is
+# interpolated into `roster-${BIONIC_SID}.state` below — a file this script APPENDS to —
+# and exported to the sweeper, which builds its own ledger and findings paths from it; the
+# symlink guards on those paths check the state directory and the exact filenames, so a key
+# carrying separators does not trip a guard, it leaves the directory the guards protect
+# (Step-6 S-4).
+bionic_context 2>/dev/null || exit 0
+[ -d "$BIONIC_ROOT" ] || exit 0
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
@@ -455,15 +450,15 @@ case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
 # direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
-engaged_session "$REPO" "$SID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
-ROSTER_FILE="$REPO/.bionic/tmp/roster-${SID}.state"
+ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 # Existence first, so a session that has dispatched nothing costs one stat. The symlink
 # guard is the write half of TDD §8: a repo controls its own .bionic/, and a link at any
 # level redirects this script's marker append outside the repo.
 [ -e "$ROSTER_FILE" ] || exit 0
-[ -L "$REPO/.bionic" ] && exit 0
-[ -L "$REPO/.bionic/tmp" ] && exit 0
+[ -L "$BIONIC_ROOT/.bionic" ] && exit 0
+[ -L "$BIONIC_ROOT/.bionic/tmp" ] && exit 0
 [ -L "$ROSTER_FILE" ] && exit 0
 
 # ---------- THE RUN PREDICATE IS GONE — ENGAGEMENT SCOPES THIS HOOK (task-engaged-session) --
@@ -512,7 +507,7 @@ SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
 # same way the verb folds it. `kind` is `verdict` for a row being answered for the first (and
 # only) time, and `recheck` for the supersession arm below, which is the one caller that may
 # write a SECOND marker for a row and the one that never refuses.
-CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEMA}|" -v sid="$SID" \
+CANDIDATES=$(awk -v pfx="roster-state/${ROSTER_VERSION}|" -v spfx="${SWEPT_SCHEMA}|" -v sid="$BIONIC_SID" \
                  -v mode="$MODE" -v pid="$STOP_AGENT_ID" -v atype="$STOP_AGENT_NAME" '
   index($0, spfx) == 1 {
     nf = split($0, f, "|"); a = ""; mn = ""; ms = ""
@@ -695,8 +690,8 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
   # directory, and with the payload's session key. `|| exit 9` keeps a failed `cd` out of the
   # exit-1 band: exit 1 is the verb's "at least one UNMET row", and nothing else may be
   # allowed to spell it.
-  VERDICT=$( cd "$REPO" 2>/dev/null || exit 9
-             CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict "$NAME" 2>/dev/null )
+  VERDICT=$( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
+             CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "$SWEEPER" verdict "$NAME" 2>/dev/null )
   VERDICT_RC=$?
 
   # AN ANSWER WE DID NOT GET IS NOT AN ANSWER. Exit 2 is a refusal (the verb was redirected
@@ -730,7 +725,7 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
   #
   # THE ONE WRITER (S15, AC-26): `swept_marker_write`, defined above, owns this printf;
   # hooks/session-poker.sh's `adopt_copy_marker` never re-spells it.
-  swept_marker_write "$ROSTER_FILE" "$NOW" "$SID" "$NAME" "$AID" "$STATE"
+  swept_marker_write "$ROSTER_FILE" "$NOW" "$BIONIC_SID" "$NAME" "$AID" "$STATE"
 
   # AND A SUPERSESSION NEVER SPEAKS. Its marker is MET by construction, so nothing below
   # would fire anyway — but the reason it must not is stronger than the arithmetic: the row
@@ -745,7 +740,7 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
   # and a row with no `deliverable=` never became a candidate at all — see the awk END
   # block's own "declares nothing" skips, which this check inherits rather than re-states).
   if [ -n "$CFILES" ]; then
-    LG_WT=$(_lg_worktree_for_name "$REPO" "$NAME")
+    LG_WT=$(_lg_worktree_for_name "$BIONIC_ROOT" "$NAME")
     if [ -n "$LG_WT" ] && [ -d "$LG_WT" ]; then
       # THE BASE IS THE MERGE-BASE WITH THE MAIN CHECKOUT'S CURRENT BRANCH, recomputed here
       # rather than read off a stored value: no roster field records the sha a worktree
@@ -754,7 +749,7 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
       # "everything this branch has added since it diverged", which is what a `Files:`
       # declaration is a promise ABOUT, and recomputing it survives the ordinary case where
       # the main branch has moved on since the tree was spawned — a stored base sha would not.
-      LG_MAIN_BRANCH=$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)
+      LG_MAIN_BRANCH=$(git -C "$BIONIC_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)
       LG_BASE=""
       # A DETACHED MAIN CHECKOUT IS NOT A BRANCH NAME (review-a A-5). `rev-parse
       # --abbrev-ref HEAD` prints the literal string `HEAD` there, and `HEAD` resolves
@@ -790,7 +785,7 @@ LGDIFF
           # re-asked of the offending files alone (spec AC-22: "naming the files and the
           # suites they imply"). Absent command -> name the files only, exactly as the
           # dispatch wall itself falls back when nothing is configured.
-          LG_IMPACT_CMD=$(config_value "$REPO" "impact-command" "")
+          LG_IMPACT_CMD=$(config_value "$BIONIC_ROOT" "impact-command" "")
           LG_SUITES=""
           LG_SUITES_NOTE=""
           if [ -n "$LG_IMPACT_CMD" ]; then
@@ -800,12 +795,12 @@ LGDIFF
               LG_IMPACT_TMP="${TMPDIR:-/tmp}/bionic-lg-impact-$$-${RANDOM}.out"
               # `set -f` AROUND THE SPLIT (review-a A-11). `$LG_OUTSIDE` is built from `git
               # diff --name-only`, and a committed path carrying `*`, `?` or `[` would
-              # otherwise be pathname-expanded against $REPO and hand the command files
+              # otherwise be pathname-expanded against $BIONIC_ROOT and hand the command files
               # that were never in the diff. The dispatch site guards the identical
               # construction; this one did not.
               set -f
               # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-              ( cd "$REPO" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE >"$LG_IMPACT_TMP" 2>/dev/null ) &
+              ( cd "$BIONIC_ROOT" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE >"$LG_IMPACT_TMP" 2>/dev/null ) &
               LG_IMPACT_PID=$!
               set +f
               LG_TICKS=0
