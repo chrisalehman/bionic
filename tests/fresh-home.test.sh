@@ -1490,8 +1490,12 @@ g8_count() {  # <dir> <glob>
 fresh_home
 mkdir -p "${HOME_FIX}/.claude"
 g8_plant
-expect_eq "8 precondition: seventeen files in the hooks directory, one of them not bionic's" \
-  "17" "$(g8_count "${HOME_FIX}/.claude/hooks" '*.sh')"
+# The expectation is DERIVED from the payload, not typed: g8_plant copies at most sixteen of the
+# shipped hook files and adds one that is not bionic's. A literal here went stale the moment the
+# hook roster changed (wave-11: 19 → 14 files), which is the drift a precondition exists to catch.
+G8_SHIPPED="$(g8_count "$PAYLOAD/hooks" '*.sh')"; [ "$G8_SHIPPED" -gt 16 ] && G8_SHIPPED=16
+expect_eq "8 precondition: every shipped hook file (capped at sixteen) plus one not bionic's in the hooks directory" \
+  "$((G8_SHIPPED + 1))" "$(g8_count "${HOME_FIX}/.claude/hooks" '*.sh')"
 
 G8_LIST="$(run_payload "$REMOVE_SH" --list 2>&1)"
 expect_match "8: legacy-hook-files is a name the teardown takes" \
