@@ -7,8 +7,9 @@
 # doctor-patrol, cross-gate-agreement, engage, hook-adoption, patrol-duties-gate and
 # session-sweep each reach it while asking about something else — so a merge that
 # changed its behaviour had thin cover. This suite is the BASELINE the fold is
-# proven against: it is committed GREEN against the unmerged `hooks/context-spend.sh`
-# and then re-pointed, unchanged in count, at `hooks/stop.sh`.
+# proven against: it was committed GREEN against the unmerged `hooks/context-spend.sh`
+# and is re-pointed here, unchanged in count, at `hooks/stop.sh` — which runs this
+# instrument as `stop_context_spend` (payload/scripts/lib/stop.sh).
 #
 # WHAT THE INSTRUMENT PROMISES (hooks/context-spend.sh header). One line per SDLC
 # step boundary, appended to `$HOME/.claude/logs/<slug>/sdlc-audit.md` — outside
@@ -16,24 +17,24 @@
 # refuses and it never writes stdout, because a Stop hook's stdout can carry a block
 # payload.
 #
-# ── TWO ASSERTIONS HERE RECORD A GAP, NOT A PROMISE ──────────────────────────
+# ── TWO ASSERTIONS HERE RECORD THE GAP THE MERGE CLOSED ──────────────────────
 #
-# §1b and §2b are marked [BASELINE GAP] and they assert what this hook DOES today,
-# which is not what the other three Stop hooks do. Measured at this file's authoring
-# commit:
+# §1b and §2b are marked [GAP CLOSED]. Before the merge this hook read NEITHER
+# `hook_event_name` NOR `stop_hook_active` — measured at the baseline commit:
 #
 #     grep -n 'hook_event_name\|stop_hook_active' hooks/context-spend.sh   -> (no output)
 #
-# The other three open with `[ "$(_jq '.hook_event_name')" = "Stop" ] || exit 0` and
-# `[ "$(_jq '.stop_hook_active')" = "true" ] && exit 0`. This one has NEITHER. In
-# production that has cost nothing, because `hooks.json` registers it on Stop alone
-# and a re-entry Stop finds the state file already carrying the new step — so the
-# same-step arm at :267 makes it idempotent by a different route. Both facts are
-# asserted below rather than assumed: §5 drives the re-entry idempotence directly.
+# while the other three opened with both. In production the omission cost nothing,
+# because hooks.json registered this hook on Stop alone and a re-entry Stop finds the
+# state file already carrying the new step — the same-step arm makes it idempotent by
+# a different route, which §5 drives directly. Both assertions were committed in the
+# OTHER direction first, green against the unmerged hook, so the pair below reads as
+# a change that was measured rather than a rule that was asserted.
 #
-# The gap becomes load-bearing the moment the four fold into one process registered
-# on Stop AND SubagentStop (REQ-1f (iv), ADR-004), which is why it is pinned here in
-# the baseline instead of being discovered by the merge.
+# The gap was load-bearing from the moment the four folded into one process
+# registered on Stop AND SubagentStop (REQ-1f (iv), ADR-004): without the event guard
+# the instrument would start recording step boundaries on every teammate landing, a
+# thing it has never done.
 #
 # ACCELERATED, NEVER SLEPT. A step boundary is manufactured by seeding the state file
 # through the hook itself and then editing the plan's `current:` — the boundary
@@ -53,7 +54,7 @@ set -uo pipefail
 # THE SEAM (S18 precedent, tests/patrol-revive.test.sh:42). Named so that T12's merge
 # re-points this whole suite at hooks/stop.sh by setting one variable, and so that the
 # differential can drive the ORIGINAL out of a scratch directory.
-HOOK="${BIONIC_CONTEXT_SPEND_UNDER_TEST:-${BIONIC_HOOKS_DIR}/context-spend.sh}"
+HOOK="${BIONIC_CONTEXT_SPEND_UNDER_TEST:-${BIONIC_HOOKS_DIR}/stop.sh}"
 
 command -v jq >/dev/null 2>&1 || { echo "context-spend: jq absent — suite cannot run"; exit 1; }
 
@@ -219,23 +220,18 @@ expect_silent "1a: the first Stop of a session seeds the state and is silent" "$
 expect_true "1a: …and the seed really was written" \
   test -f "$CS_D/.bionic/tmp/context-spend.state"
 
-# 1b: [BASELINE GAP] A NON-Stop payload is treated exactly like a Stop, because this
-# hook reads no `hook_event_name` at all:
-#
-#     grep -n 'hook_event_name' hooks/context-spend.sh   -> (no output)
-#
-# The other three Stop hooks exit at their first lines on a foreign event. In
-# production this costs nothing — hooks.json registers this one on Stop alone — and it
-# is pinned here because the merge of the four into one process registered on Stop AND
-# SubagentStop is exactly what makes the missing guard reachable (ADR-004).
+# 1b: [GAP CLOSED] A NON-Stop payload is silent. `stop_context_spend` opens with the
+# event guard its hook never carried, so the process that is now registered on
+# SubagentStop as well records nothing there — which is exactly the behaviour the
+# hook had when only Stop could reach it.
 CS_D=$(make_env 4); CS_H=$(make_home); CS_T=$(mktemp)
 write_transcript "$CS_T" 1000 200 300
 fire "$CS_D" "$CS_H" "$CS_T"                       # seed at step 4
 set_step "$CS_D" 5
 write_transcript "$CS_T" 4000 200 300
 fire "$CS_D" "$CS_H" "$CS_T" "$SID" SubagentStop   # boundary, on a foreign event
-expect_eq "1b: [BASELINE GAP] a SubagentStop payload at a boundary still appends — no event guard" \
-  "1" "$(audit_lines "$CS_H" "$CS_D")"
+expect_eq "1b: [GAP CLOSED] a SubagentStop payload at a boundary appends nothing" \
+  "0" "$(audit_lines "$CS_H" "$CS_D")"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "Group 2: re-entrancy"
@@ -251,23 +247,20 @@ expect_silent "2a: a bystander session is silent" "$CS_H" "$CS_D"
 expect_false "2a: …and no state file was written for it either" \
   test -f "$CS_D/.bionic/tmp/context-spend.state"
 
-# 2b: [BASELINE GAP] `stop_hook_active: true` is not read either:
-#
-#     grep -n 'stop_hook_active' hooks/context-spend.sh   -> (no output)
-#
-# A re-entry Stop at a boundary therefore appends, exactly as a first Stop would.
-# §5 shows why this has been harmless: the FIRST Stop of the pair already moved the
-# state on, so a real re-entry finds the same step and the same-step arm (:267) stops
-# it. The gap is only reachable with a payload that re-enters WITHOUT a preceding
-# verdict, which is what this fixture builds.
+# 2b: [GAP CLOSED] `stop_hook_active: true` is read ONCE, in hooks/stop.sh, ahead of
+# all four functions — so a re-entry Stop at a boundary now appends nothing. Nothing
+# is lost by that: §5 shows the FIRST Stop of a real pair has already moved the state
+# on, so the boundary was recorded before the re-entry ever arrived. This fixture
+# reaches the arm the only way it can be reached, with a payload that re-enters
+# WITHOUT a preceding verdict.
 CS_D=$(make_env 4); CS_H=$(make_home); CS_T=$(mktemp)
 write_transcript "$CS_T" 1000 200 300
 fire "$CS_D" "$CS_H" "$CS_T"                          # seed at step 4
 set_step "$CS_D" 5
 write_transcript "$CS_T" 4000 200 300
 fire "$CS_D" "$CS_H" "$CS_T" "$SID" Stop true         # boundary, re-entry flag set
-expect_eq "2b: [BASELINE GAP] stop_hook_active true at a boundary still appends — no re-entrancy guard" \
-  "1" "$(audit_lines "$CS_H" "$CS_D")"
+expect_eq "2b: [GAP CLOSED] stop_hook_active true at a boundary appends nothing" \
+  "0" "$(audit_lines "$CS_H" "$CS_D")"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "Group 3: an engaged session at a step boundary — the one thing it says"
