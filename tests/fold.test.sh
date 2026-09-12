@@ -308,4 +308,93 @@ drive "$STUB_BLOCK_A" SubagentStop blockA
 expect_contains "11c: a block on any event composes the same way" \
   "REASON-ALPHA" "$(reason_of)"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "12: the model-facing advisory — one hookSpecificOutput object, merged"
+#
+# THE SECOND ADVISORY CHANNEL, and the one T23 needs (ruling R3). `fold_advise`
+# puts words on the USER's stream; `hooks/farm-out-reminder.sh` has always put its
+# nudge somewhere else entirely — `hookSpecificOutput.additionalContext` on stdout,
+# which the user never sees and the model reads. Folding five walls into one
+# process merges two streams that were never in one process before, so the fold has
+# to own that channel the way it already owns the refusal: ONE object, whatever the
+# number of speakers, with their strings joined by a blank line.
+#
+# ONE EMITTER EXISTS TODAY, so the merge is proven here by two stubs rather than by
+# production — the case a second emitter would reach on its first day.
+
+STUB_CONTEXT_A='ctxA() {
+  fold_context "CONTEXT-ONE from the first speaker"
+  return 1
+}'
+STUB_CONTEXT_B='ctxB() {
+  fold_context "CONTEXT-TWO from the second speaker"
+  return 1
+}'
+STUB_CONTEXT_MUTE='ctxM() {
+  fold_context "CONTEXT-DISCARDED by a function that said nothing"
+  return 0
+}'
+
+context_of() {  # the merged additionalContext, read through jq and never by substring
+  printf '%s' "$FOLD_OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null
+}
+require_helpers context_of
+
+drive "$STUB_CONTEXT_A" PreToolUse ctxA
+expect_status "12a: a model-facing advisory does not block" "0" "$FOLD_RC"
+expect_eq "12b: …it rides hookSpecificOutput on the event it was folded for" \
+  "PreToolUse" "$(printf '%s' "$FOLD_OUT" | jq -r '.hookSpecificOutput.hookEventName // ""' 2>/dev/null)"
+expect_eq "12c: …carrying the text verbatim" "CONTEXT-ONE from the first speaker" "$(context_of)"
+expect_empty "12d: …and saying nothing on the user's stream" "$FOLD_ERR"
+
+# THE MERGE. Two speakers, ONE object — never two JSON documents on one stdout,
+# which is not a wire any reader parses.
+drive "$STUB_CONTEXT_A
+$STUB_CONTEXT_B" PreToolUse ctxA ctxB
+expect_eq "12e: two model-facing advisories produce exactly one JSON document" "1" \
+  "$(printf '%s' "$FOLD_OUT" | jq -s 'length' 2>/dev/null)"
+expect_contains "12f: …carrying the first speaker's text" "CONTEXT-ONE" "$(context_of)"
+expect_contains "12g: …and the second's" "CONTEXT-TWO" "$(context_of)"
+expect_true "12h: …in the order the functions were named" \
+  test "$(awk '/CONTEXT-ONE/{print NR; exit}' <<<"$(context_of)")" -lt \
+       "$(awk '/CONTEXT-TWO/{print NR; exit}' <<<"$(context_of)")"
+expect_regex "12i: …separated by a blank line, not run together" \
+  'CONTEXT-ONE[^\n]*\n\nCONTEXT-TWO' "$(context_of)"
+
+# THE RETURN CODE IS STILL THE VERDICT (§7's rule, on this channel too).
+drive "$STUB_CONTEXT_MUTE" PreToolUse ctxM
+expect_empty "12j: a function that stages context and returns 0 has said nothing" "$FOLD_OUT"
+
+# THE TWO ADVISORY CHANNELS DO NOT COLLIDE: one is the user's stream, one is the
+# model's, and a fold carrying both puts each where it belongs.
+drive "$STUB_CONTEXT_A
+$STUB_ADVISE" PreToolUse ctxA adviseA
+expect_contains "12k: a user advisory still reaches stderr alongside a model one" \
+  "ADVISORY-ONE" "$FOLD_ERR"
+expect_contains "12l: …and the model one still reaches stdout" "CONTEXT-ONE" "$(context_of)"
+expect_absent "12m: …neither leaking onto the other's stream" "CONTEXT-ONE" "$FOLD_ERR"
+
+# A BLOCK ON THE exit2 CHANNEL LEAVES STDOUT FREE, so the context object rides it
+# and the refusal rides stderr — the production shape when a push is refused on the
+# same command a nudge fired for.
+drive "$STUB_BLOCK_EXIT2
+$STUB_CONTEXT_A" PreToolUse blockE ctxA
+expect_status "12n: an exit2 block still exits 2 with a model advisory beside it" "2" "$FOLD_RC"
+expect_contains "12o: …the refusal on the user's stream" "the exit2 fact" "$FOLD_ERR"
+expect_eq "12p: …and the advisory as the one object on stdout" \
+  "CONTEXT-ONE from the first speaker" "$(context_of)"
+
+# A BLOCK THAT ALREADY OWNS STDOUT. `deny` and `block` render their own JSON there,
+# and a second document beside it would make the whole wire unparseable — which is
+# the fail-OPEN direction, since an unreadable deny is no deny. The refusal keeps
+# the channel and the advisory degrades to the user's stream rather than being
+# dropped or corrupting it.
+drive "$STUB_BLOCK_A
+$STUB_CONTEXT_A" PreToolUse blockA ctxA
+expect_eq "12q: a JSON refusal keeps stdout to itself — one document" "1" \
+  "$(printf '%s' "$FOLD_OUT" | jq -s 'length' 2>/dev/null)"
+expect_contains "12r: …and that document is the refusal" "REASON-ALPHA" "$(reason_of)"
+expect_contains "12s: …the displaced advisory is not lost, it degrades to stderr" \
+  "CONTEXT-ONE" "$FOLD_ERR"
+
 finish
