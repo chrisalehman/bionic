@@ -345,8 +345,9 @@ eval with no nameable "Fails when" is refused at the card. This is how to fill o
 
 Rejected alternatives are one line each — the alternative, and why it lost — and they are the
 part a later reader needs most, because the question they answer ("why not just…") is the one
-that recurs. Assumptions are what the design would break if false; they seed the plan's
-`## Assumptions`, where Step 4 resolves them inline.
+that recurs. Assumptions are what the design would break if false; they seed
+`record/<wave>/assumptions.md`, which the plan's `## Assumptions` cites, and Step 4 resolves them
+there.
 
 ### The by-reference form
 

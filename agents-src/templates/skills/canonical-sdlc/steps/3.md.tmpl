@@ -21,7 +21,7 @@ current: <N>
 
 **Task-scale variant.** `current: T<n>`, one `- T<n>: <evidence>` line per task, backed by a `## Tasks` table with columns `| id | intent | rigor | description | status |`, `id` matching `^T[0-9]+$` and status in `pending|active|done|dropped`. A row's rigor cell may RAISE that task above the frontmatter default; lowering it is a downgrade that blocks unless the evidence line carries a `waiver:` marker. Dispatched work is ledgered by the orchestrator, never by the subagent.
 
-`## Assumptions` is seeded from Step 1's "Not Doing" plus spec ambiguities; Step 4 appends inline, before the commit that resolves each one.
+`## Assumptions` points to `record/<wave>/assumptions.md` — seeded from Step 1's "Not Doing" plus spec ambiguities; Step 4 appends there before each commit.
 
 Tag every Step-4 slice `complexity: standard | complex`. When uncertain, tag `complex`.
 
@@ -83,5 +83,5 @@ Do you approve this plan? Reply "approved" to ratify it.
 show evals <req> · show slice <n> · explain <decision>
 ```
 
-**Wave shape locks at approval.** Mid-wave discoveries go to `## Assumptions` as W+1 candidates — they do not reshape the current wave. Two exceptions: a discovery that makes the wave structurally impossible (surface a Wake Note and halt — the answer is "this wave cannot ship," not "ship a different wave"), and one-line trivial corrections.
+**Wave shape locks at approval.** Mid-wave discoveries go there as W+1 candidates — they do not reshape the current wave. Two exceptions: a discovery that makes the wave structurally impossible (surface a Wake Note and halt — the answer is "this wave cannot ship," not "ship a different wave"), and one-line trivial corrections.
 
