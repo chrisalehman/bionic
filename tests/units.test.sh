@@ -776,4 +776,125 @@ expect_eq "asked about Step 4 alone, units_ready names only the Step-4 row" \
 expect_eq "…and the old whole-table reader could not make that distinction" \
   "no" "$([ "$WAVE_OLD" = "T10" ] && echo yes || echo no)"
 
+# ============================================================
+section "9 — a markdown-escaped pipe in a cell (the critic's Issue 1)"
+# ============================================================
+#
+# `\|` IS THE ONE ESCAPE A GFM TABLE CELL DEFINES, and it is a raw `|` to `split()`. A
+# reader that splits the record as written opens an extra field at the escape and reads
+# every cell after it one slot early — the `agent` cell as `deps`, the `Files` cell as
+# `status` — which is silent, because a shifted row is still a row.
+#
+# THIS IS NOT HYPOTHETICAL. This wave's own plan carries one, in T23's `task` cell
+# (`the five PreToolUse\|Bash walls fold by …`), and with it in place `units_ready` could
+# name nothing at Step 5 and `units_validate` reported two violations against cells that
+# are correct. The docblock's old claim — "a cell never contains a literal `|`, so there
+# is no escaping to undo" — was true of the RAW byte and false of the table.
+#
+# TWO FIXTURES, and the second is the critic's own control. A purpose-built table isolates
+# the shift; the derived one puts the live plan's actual row back and asks the scheduler
+# the question the wave asked it.
+
+cat > "$SANDBOX/escaped-cell.md" <<'ESCAPED_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the five PreToolUse\|Bash walls fold into one process | senior-implementor | — | 90m | REQ-1f | payload/scripts/lib/walls.sh | landed |
+| T2 | 4 | build | matches \|first\| and \|second\| both | implementor | T1 | 10m | REQ-1f | hooks/a.sh | landed |
+| T3 | 5 | verify | plain prose, no escape anywhere | test-runner | T1, T2 | 20m | all | record/x.md | pending |
+ESCAPED_EOF
+
+ROWS_ESC="$(call units_rows "$SANDBOX/escaped-cell.md")"
+
+expect_eq "three data rows, escapes and all" "3" "$(nlines "$ROWS_ESC")"
+expect_eq "every row still carries exactly ten fields" "3" \
+  "$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' 'NF == 10 { n++ } END { print n + 0 }')"
+
+# THE WHOLE ROW, field by field. The shift this section exists for moves every cell AFTER
+# the escape, so asserting the escaped cell alone would pass on a reader that recovered the
+# text and lost the columns.
+ESC_T1="$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' '$1 == "T1"')"
+expect_eq "the escaped cell reads back with a LITERAL pipe, the escape undone" \
+  "the five PreToolUse|Bash walls fold into one process" "$(printf '%s\n' "$ESC_T1" | cut -f4)"
+expect_eq "…and field 5 is still the agent"  "senior-implementor" "$(printf '%s\n' "$ESC_T1" | cut -f5)"
+expect_eq "…and field 6 is still deps"       "—"                  "$(printf '%s\n' "$ESC_T1" | cut -f6)"
+expect_eq "…and field 7 is still size"       "90m"                "$(printf '%s\n' "$ESC_T1" | cut -f7)"
+expect_eq "…and field 8 is still serves"     "REQ-1f"             "$(printf '%s\n' "$ESC_T1" | cut -f8)"
+expect_eq "…and field 9 is still Files"      "payload/scripts/lib/walls.sh" \
+  "$(printf '%s\n' "$ESC_T1" | cut -f9)"
+expect_eq "…and field 10 is still the status" "landed"            "$(printf '%s\n' "$ESC_T1" | cut -f10)"
+
+# TWO ESCAPES IN ONE CELL, and the restore is per-occurrence rather than per-cell.
+ESC_T2="$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' '$1 == "T2"')"
+expect_eq "a cell carrying two escaped pipes reads back with both" \
+  "matches |first| and |second| both" "$(printf '%s\n' "$ESC_T2" | cut -f4)"
+expect_eq "…and its status is still the status" "landed" "$(printf '%s\n' "$ESC_T2" | cut -f10)"
+
+# THE TWO VERBS, which is where the shift was actually costing the wave.
+expect_eq "units_validate finds no violation in a table whose only oddity is the escape" \
+  "" "$(call units_validate "$SANDBOX/escaped-cell.md")"
+expect_eq "…and exits 0" "0" "$(call_rc units_validate "$SANDBOX/escaped-cell.md")"
+expect_eq "units_ready can still schedule the Step-5 row behind those two" \
+  "T3" "$(call units_ready "$SANDBOX/escaped-cell.md" 5)"
+
+# ── the critic's control, on this wave's own schedule ────────────────────────
+#
+# THE SPECIMEN PREDATES T23 (it was spliced at 1f48673). The row below is the live plan's
+# own, reproduced verbatim — the plan tree is gitignored and absent from a worktree, so it
+# cannot be read here without breaking hermeticity. The transform then extends T13's and
+# T14's deps cells the way the live plan does and lands every row but those two, which is
+# the state the tick was asked about when it answered nothing.
+T23_ROW='| T23 | 4 | build | 1f-e: the five PreToolUse\|Bash walls fold by the same bionic_fold into one process (hooks/bash-walls.sh); differential vs the five originals incl. stdout JSON merge; hooks.json 16 → 12 (AC-1f.5) | senior-implementor | T12 | 90m | REQ-1f | payload/scripts/lib/walls.sh, hooks/bash-walls.sh, hooks/hooks.json | landed |'
+
+# THE ROW TRAVELS BY FILE, NEVER BY `awk -v`. An assignment on the command line is scanned
+# for escape sequences, so `\|` reaches the program as a bare `|` and the fixture would lose
+# the very byte it exists to carry. (Measured on darwin 25.6.0: the first draft of this
+# fixture read back `PreToolUse|Bash` and the RED run passed the wrong assertion.)
+printf '%s\n' "$T23_ROW" > "$SANDBOX/t23-row.md"
+
+{
+  printf -- '---\ncurrent: 5\n---\n\n## Tasks\n\n'
+  awk '
+    FNR == NR { t23 = $0; next }
+    /^\|[ \t]*T[0-9]+[ \t]*\|/ {
+      st = ($0 ~ /^\|[ \t]*T1[34][ \t]*\|/) ? "| pending |" : "| landed |"
+      sub(/\| T2, T4, T5, T6, T8, T12, T22 \|/, "| T2, T4, T5, T6, T8, T12, T22, T23 |")
+      sub(/\|[^|]*\|$/, st)
+      print
+      if ($0 ~ /^\|[ \t]*T12[ \t]*\|/) print t23
+      next
+    }
+    { print }
+  ' "$SANDBOX/t23-row.md" "$SANDBOX/tasks-table.md"
+  printf -- '\n## Verification Matrix\n'
+} > "$SANDBOX/escaped-live.md"
+
+# THE CONTROL IS THE SAME FILE WITH THE ESCAPE SPENT — one hyphen where the backslash-pipe
+# was, nothing else touched. Two answers that differ can only differ because of it.
+awk '{ gsub(/\\[|]/, "-"); print }' "$SANDBOX/escaped-live.md" > "$SANDBOX/escaped-live-control.md"
+
+expect_eq "the fixture really does carry one escaped pipe, and the control none" "1 0" \
+  "$(printf '%s %s' \
+      "$(grep -c '\\[|]' "$SANDBOX/escaped-live.md" | tr -d ' ')" \
+      "$(grep -c '\\[|]' "$SANDBOX/escaped-live-control.md" | tr -d ' ')")"
+
+READY_ESC="$(call units_ready "$SANDBOX/escaped-live.md" 5)"
+READY_CTL="$(call units_ready "$SANDBOX/escaped-live-control.md" 5)"
+
+expect_eq "on the wave's own schedule the control schedules T13 and T14 at Step 5" \
+  "$(printf 'T13\nT14')" "$READY_CTL"
+expect_eq "…and the escape changes NOTHING about that answer" "$READY_CTL" "$READY_ESC"
+expect_eq "units_validate clears the escaped schedule too" "" \
+  "$(call units_validate "$SANDBOX/escaped-live.md")"
+
+# T23's own row, which is the one the shift mangled: its agent was read as its deps and its
+# Files as its status.
+ESC_T23="$(call units_rows "$SANDBOX/escaped-live.md" | awk -F'\t' '$1 == "T23"')"
+expect_eq "T23's agent is the agent"   "senior-implementor" "$(printf '%s\n' "$ESC_T23" | cut -f5)"
+expect_eq "T23's deps is the deps"     "T12"                "$(printf '%s\n' "$ESC_T23" | cut -f6)"
+expect_eq "T23's status is the status" "landed"             "$(printf '%s\n' "$ESC_T23" | cut -f10)"
+expect_contains "T23's task cell keeps its pipe" "PreToolUse|Bash" \
+  "$(printf '%s\n' "$ESC_T23" | cut -f4)"
+
 finish
