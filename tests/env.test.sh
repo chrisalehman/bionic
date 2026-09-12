@@ -1,5 +1,5 @@
 #!/bin/bash
-# ENVIRONMENT SETTINGS — epic-17 wave-07 slice S4 (spec R4 / AC-5, AC-6, AC-7).
+# ENVIRONMENT SETTINGS — epic-17 wave-07 task S4 (spec R4 / AC-5, AC-6, AC-7).
 #
 # WHAT THIS SUITE OWNS. payload/scripts/lib/env.sh: the `env` object in the CLI's
 # own settings.json — which names bionic puts there, the merge that adds one

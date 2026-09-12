@@ -128,7 +128,7 @@ USAGE
 # Two failure classes, two exit codes, because callers distinguish them:
 #   2  refused — a precondition said no; nothing was created, nothing to undo.
 #   1  aborted — creation had begun and verification failed; it has been undone.
-# RENAMED FROM `refuse` (slice 13, ruling D-6). scripts/lib/refuse.sh defines a
+# RENAMED FROM `refuse` (task 13, ruling D-6). scripts/lib/refuse.sh defines a
 # five-argument `refuse` for the walls; this is a private one-argument helper and the
 # names collided. Nothing sources both today, but the day this script needs a refusal
 # and declares refuse.sh, the later definition would silently replace the earlier one

@@ -87,7 +87,7 @@ cat > "$SANDBOX/tasks-table.md" <<'TASKS_TABLE_EOF'
 | T5 | 4 | build | 1b: core + steps/0–9 + dispatch.md from the template; render.sh unit rows; 168 pins re-pointed, 4 structural ones rewritten; prune to caps; session-start pointer line | senior-implementor | T1 | 120m | REQ-1b | agents-src/templates/skills/canonical-sdlc/, agents-src/render.sh, skills/canonical-sdlc/, tests/docs-pins.test.sh, tests/render.test.sh, payload/integrity/rendered.sha256, hooks/session-start.sh | landed |
 | T6 | 4 | build | 1a: three prose surfaces re-pointed to record/ paths; evidence-gate fixtures (path-cited ≤40 KB passes; empty evidence value fails) | implementor | T3, T5 | 45m | REQ-1a | agents-src/blocks/critic-template.md, agents-src/templates/senior-implementor.md.tmpl, agents-src/templates/skills/canonical-sdlc/steps/, tests/canonical-sdlc-evidence-gate.test.sh | active |
 | T7 | 4 | build | 1e-a: lib/units.sh (units_rows, units_ready, units_validate) TDD from tests/units.test.sh; domain dictionary entry | senior-implementor | T1 | 60m | REQ-1e | payload/scripts/lib/units.sh, tests/units.test.sh, design/domain-dictionary.md | active |
-| T8 | 4 | build | 1e-b: callers onto units.sh (gate ledger checks + prototype check, tick FILL, governing-skill Step-3 wall); slice→task rename; fixtures migrated; differential vs old parsers on the specimen plan | senior-implementor | T7 | 120m | REQ-1e | hooks/canonical-sdlc-evidence-gate.sh, hooks/session-poker.sh, hooks/canonical-sdlc-governing-skill.sh, hooks/dispatch-preflight.sh, tests/canonical-sdlc-evidence-gate.test.sh, tests/session-poker.test.sh, tests/canonical-sdlc-governing-skill.test.sh, tests/docs-pins.test.sh, agents-src/ | pending |
+| T8 | 4 | build | 1e-b: callers onto units.sh (gate ledger checks + prototype check, tick FILL, governing-skill Step-3 wall); the retired word becomes task; fixtures migrated; differential vs old parsers on the specimen plan | senior-implementor | T7 | 120m | REQ-1e | hooks/canonical-sdlc-evidence-gate.sh, hooks/session-poker.sh, hooks/canonical-sdlc-governing-skill.sh, hooks/dispatch-preflight.sh, tests/canonical-sdlc-evidence-gate.test.sh, tests/session-poker.test.sh, tests/canonical-sdlc-governing-skill.test.sh, tests/docs-pins.test.sh, agents-src/ | pending |
 | T9 | 4 | build | 1f-a: delete hooks/stop-check.sh and every reference; remove the seven dead functions | implementor | T8 | 30m | REQ-1f | hooks/stop-check.sh, hooks/stop-guard.sh, payload/scripts/lib/, tests/ | pending |
 | T10 | 4 | build | 1f-b: lib/context.sh with bionic_context; fifteen hooks call it; no-inline-sequence pin | senior-implementor | T9 | 90m | REQ-1f | payload/scripts/lib/context.sh, hooks/*.sh, tests/cross-gate-agreement.test.sh | pending |
 | T11 | 4 | build | 1f-c: loader block ≤95 lines in loader.sh's heredoc and all 21 hooks; §N.1 pin and mutation arm green | senior-implementor | T10 | 60m | REQ-1f | payload/scripts/lib/loader.sh, hooks/*.sh, tests/cross-gate-agreement.test.sh | pending |
@@ -137,12 +137,14 @@ reverse_cells "$SANDBOX/tasks-table.md" > "$SANDBOX/tasks-table-reversed.md"
   printf -- '\n## Verification Matrix\n'
 } > "$SANDBOX/reordered.md"
 
-# decoys.md — a retired `## Slices` table BEFORE the real one, and a fenced example table
-# AFTER it. Neither is the plan's schedule; a reader that keyed on header names alone, or
-# that ignored fences, would take one of them for the table.
+# decoys.md — a table under the RETIRED section heading BEFORE the real one, and a fenced
+# example table AFTER it. Neither is the plan's schedule; a reader that keyed on header
+# names alone, or that ignored fences, would take one of them for the table. The heading
+# literal below is the retired word, kept on purpose: this fixture is what proves the
+# reader refuses it.  # retired: slice
 {
   printf -- '---\ncurrent: 4\n---\n\n'
-  printf -- '## Slices (machine-readable)\n\n'
+  printf -- '## Slices (machine-readable)\n\n'  # retired: slice
   printf -- '| id | deps | complexity | status |\n|---|---|---|---|\n'
   printf -- '| S1 | — | complex | landed |\n| S2 | S1 | standard | pending |\n\n'
   printf -- '## Tasks\n\n'
@@ -206,7 +208,7 @@ current: 4
 | T1 | 4 | build | the same id again | implementor | — | 15m | REQ-x | b.sh | pending |
 | X1 | 4 | build | an id of the wrong shape | implementor | — | 15m | REQ-x | c.sh | pending |
 | T3 | 2 | build | a step below the range | implementor | — | 15m | REQ-x | d.sh | pending |
-| T4 | 4 | slice | the retired word as a kind | implementor | — | 15m | REQ-x | e.sh | pending |
+| T4 | 4 | slice | the retired word as a kind | implementor | — | 15m | REQ-x | e.sh | pending |  # retired: slice
 | T5 | 4 | build | a status nobody defines | implementor | — | 15m | REQ-x | f.sh | done |
 | T6 | 4 | build | a dep naming no row | implementor | T99 | 15m | REQ-x | g.sh | pending |
 | T7 | 6 | review | reaches only T1 | critic | T1 | 15m | REQ-x | h.sh | pending |
@@ -320,7 +322,7 @@ section "3 — units_rows reads the ## Tasks section and nothing else"
 
 ROWS_DECOYS="$(call units_rows "$SANDBOX/decoys.md")"
 expect_eq "…over 22 real rows, not two empty strings" "22" "$(nlines "$ROWS_DECOYS")"
-expect_eq "a retired ## Slices table in the same file is ignored" "$ROWS_LIVE" "$ROWS_DECOYS"
+expect_eq "a retired ## Slices table in the same file is ignored" "$ROWS_LIVE" "$ROWS_DECOYS"  # retired: slice
 expect_eq "…so no S-row reaches the output" "" \
   "$(printf '%s\n' "$ROWS_DECOYS" | awk -F'\t' '$1 ~ /^S[0-9]/')"
 expect_eq "…and the fenced example row is documentation, not a row" "" \
@@ -390,7 +392,7 @@ expect_contains "an id of the wrong shape names the shape it must match" \
 expect_contains "a step outside 3-9 names the step and the range" \
   "T3: step 2 is outside 3-9" "$VAL_BAD"
 expect_contains "a kind outside the eight names the kind and the vocabulary" \
-  "T4: kind slice is not one of build test verify review doc integrate close prototype" "$VAL_BAD"
+  "T4: kind slice is not one of build test verify review doc integrate close prototype" "$VAL_BAD"  # retired: slice
 expect_contains "a status outside the four names the status and the vocabulary" \
   "T5: status done is not one of pending active landed dropped" "$VAL_BAD"
 expect_contains "a dep naming no row names the dep" \

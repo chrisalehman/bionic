@@ -3,7 +3,7 @@
 #
 # Governing design: design/orchestrator-subagent-coordination.md §4 "The environment check",
 # §7 (failure model), §8 (security), §9 (verification strategy).
-# Serves AC-1, and the slice-4/1 share of AC-8 and AC-10.
+# Serves AC-1, and the task-4/1 share of AC-8 and AC-10.
 #
 # Hermetic: every run happens inside a throwaway sandbox git repo with HOME and
 # CLAUDE_CONFIG_DIR redirected into that sandbox. Nothing reads or writes the real
@@ -45,7 +45,7 @@ SESSION_A="6c85684c-9588-45a0-bd26-e8c46956c94f"
 # verbatim session_id exists. Only "a different, well-formed session id" is load-bearing
 # here; the digits are arbitrary.
 SESSION_B="1f4a7c02-3bd9-4e15-8a66-90c1de77b204"
-# fixture-fidelity: SHAPE-ONLY, slice 4/2. A third well-formed session id, used only as a
+# fixture-fidelity: SHAPE-ONLY, task 4/2. A third well-formed session id, used only as a
 # "dead" session for pruning fixtures — no transcript is ever created for it.
 SESSION_C="9a2e5d18-4471-4c9e-9b3a-7412fa0e5c33"
 
@@ -99,7 +99,7 @@ mk_sandbox() {  # echoes the sandbox root
   printf '%s' "$d"
 }
 
-# slice 4/2 (D-5): the attestation filename is per-session, not a shared single slot.
+# task 4/2 (D-5): the attestation filename is per-session, not a shared single slot.
 # STATE_REL is kept as the SESSION_A-keyed path — the session run_probe() defaults to —
 # since nearly every existing case in this file operates as session A; STATE_REL_B and
 # LEGACY_STATE_REL exist for the cases that need a second or a pre-wave-03 filename.
@@ -174,7 +174,7 @@ rc="$(run_probe "$SBX3" PATH="$(stub_dir "$SBX3" 0)")"
 expect_eq "credential satisfied by the keychain source alone" "0" "$rc"
 
 # re-run over an attestation carrying unknown extra fields in a different order (A6
-# forward-compatibility: the record must not be parsed positionally). slice 4/2: the
+# forward-compatibility: the record must not be parsed positionally). task 4/2: the
 # stale record sits at THIS session's own per-session path — a foreign session's record
 # at MY filename is not a reachable case under D-5 (it would live at ITS OWN filename;
 # see "D-5 per-session attestation" section below for that scenario).
@@ -223,7 +223,7 @@ chmod 700 "$SBX/repo"
 expect_eq "unwritable repo exits 1" "1" "$rc"
 expect_false "unwritable repo leaves no attestation" [ -e "$SBX/repo/$STATE_REL" ]
 
-# C2 (Step-6 correctness review, slice 4/7). THE STATE DIRECTORY ITSELF is the
+# C2 (Step-6 correctness review, task 4/7). THE STATE DIRECTORY ITSELF is the
 # failing blocking probe. The delete-on-fail obligation holds here too: a
 # directory can be readable-but-not-writable while holding a perfectly readable
 # prior attestation, and the start gate reads that file and passes — a stale pass
@@ -333,7 +333,7 @@ expect_eq "a held lock yields exit 4, not a racing write" "4" "$rc"
 expect_false "a held lock leaves no attestation behind" [ -e "$SBX/repo/$STATE_REL" ]
 rmdir "$SBX/repo/.bionic/tmp/.preflight.lock"
 
-# two DIFFERENT sessions writing in parallel (slice 4/2, D-5): each writes its OWN
+# two DIFFERENT sessions writing in parallel (task 4/2, D-5): each writes its OWN
 # per-session file, so both survive concurrently — this is the collision the shared
 # single-slot file used to produce (one writer's record clobbering the other's) and
 # per-session filenames structurally remove. A same-session race (a session probing
@@ -398,7 +398,7 @@ rc="$(run_probe "$SBX")"
 expect_file_no_regex "own session never warned about" "WARN.*$SESSION_A" "$OUT"
 
 # ============================================================
-section "S6b — D-5: legacy single-slot pruning, dead-session pruning (slice 4/2)"
+section "S6b — D-5: legacy single-slot pruning, dead-session pruning (task 4/2)"
 # ============================================================
 
 # (iii) the legacy single-slot file is pruned on every run and never honored — this
@@ -440,7 +440,7 @@ expect_eq "the live foreign session's record is unchanged, still keyed to sessio
 expect_true "this session's own record was ALSO written (both valid concurrently)" [ -f "$SBX/repo/$STATE_REL" ]
 
 # ============================================================
-section "S6c — rostered-vs-unrostered scan (slice 4/7, display/warn only)"
+section "S6c — rostered-vs-unrostered scan (task 4/7, display/warn only)"
 # ============================================================
 #
 # spec Design "Component boundaries and interfaces": "hooks/preflight-probe.sh
@@ -592,7 +592,7 @@ expect_file_no_regex "the producer performs no plan-directory walk (A7)" 'docs/p
 expect_true "script is bash and runs under set -u" grep -q '^set -u' "$PROBE"
 
 # ============================================================
-section "S9 — payload-shape canary: CLI version pin for the D-3 agent_id discriminator (w3 slice 4/4)"
+section "S9 — payload-shape canary: CLI version pin for the D-3 agent_id discriminator (w3 task 4/4)"
 # ============================================================
 #
 # The D-3 same-actor wall reads observer identity from the undocumented top-level agent_id
@@ -646,7 +646,7 @@ expect_eq "mismatched pin does not mask a real blocking failure" "1" "$rc"
 expect_false "mismatched pin does not cause a spurious attestation on blocking failure" [ -e "$SBX/repo/$STATE_REL" ]
 
 # ============================================================
-section "S10 — the sweeper arm line is GONE (epic-16 w2 slice S1)"
+section "S10 — the sweeper arm line is GONE (epic-16 w2 task S1)"
 # ============================================================
 #
 # The probe used to close with a print-only ACTION LINE naming the command that armed this

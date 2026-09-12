@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/render.test.sh — the render pipeline's two check arms (epic-22 wave-01 slice 1,
+# tests/render.test.sh — the render pipeline's two check arms (epic-22 wave-01 task 1,
 # REQ-R1: AC-R1.1 and AC-R1.4).
 #
 # WHAT THIS SUITE OWNS. The ARCHIVE arm of `agents-src/render.sh`, and the tree arm's
@@ -101,7 +101,7 @@ expect_match "1b: …and says every final and the manifest match a fresh render"
   "*every rendered final matches a fresh render*" "$RT_OUT"
 
 # The archive arm on this repo is NOT asserted here. It answers a question about what is
-# COMMITTED, and a writer's tree legitimately carries an uncommitted render input mid-slice;
+# COMMITTED, and a writer's tree legitimately carries an uncommitted render input mid-task;
 # pinning it against the live checkout would make this suite a function of the developer's
 # staging area. Sections 2-6 drive it against fixtures whose commit state the suite owns.
 

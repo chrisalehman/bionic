@@ -62,7 +62,7 @@ Triple not yet declared → say so and list the axes. Invoked as `help` → rend
 
 | Intent | Use when | Evidence delta |
 |---|---|---|
-| `build` | Capability that did not exist, or capability restored by ADDING machinery/interfaces/config (the machinery test). | RED→GREEN per slice. When the build IS a verification instrument, prove it CATCHES planted failures — a check that never fails is not proven to work. |
+| `build` | Capability that did not exist, or capability restored by ADDING machinery/interfaces/config (the machinery test). | RED→GREEN per task. When the build IS a verification instrument, prove it CATCHES planted failures — a check that never fails is not proven to work. |
 | `bugfix` | Restore intended behavior WITHIN the existing design. A repair, not new machinery. | The RED test is the failing repro. |
 | `refactor` | Change structure, preserve behavior. Covers upgrades, migrations, removals/deprecations. | `behavior-preservation:` in the Step-5 block; migrations add `compat-matrix:`/`revert-plan:` (or `n/a: not a migration`). Log-only. |
 | `tune` | Move a NAMED measurement toward a target. If you cannot name the measurement, it is not tune. | `baseline:`/`target:`/`re-measure:` in the Step-5 block, all three. Log-only. |
@@ -87,7 +87,7 @@ mode.
 | Scale | Steps | Artifacts | Branch |
 |---|---|---|---|
 | `task` | Full set, compressed. Several per session. | ONE session plan with a `## Tasks` ledger; no per-task plan or spec. | The session's branch. |
-| `wave` | Full set (0–9). Default. | One wave spec + plan; slices inside Step 4. | Wave branch off the epic integration branch; merges back at Step 8. |
+| `wave` | Full set (0–9). Default. | One wave spec + plan; tasks inside Step 4. | Wave branch off the epic integration branch; merges back at Step 8. |
 | `epic` | 0–3 only. | `epic.spec.md` + `epic.plan.md`; carves waves. Does NOT run 4–9. | Owns `epic/NN-<slug>`; merges to mainline once, at close. |
 
 **Rigor floors.** Default is scale-keyed: at `task`, `bugfix`→tested and `build`/`refactor`/`tune`→peer-reviewed; at `wave` and above, `audited`. Effective rigor is the MAX of the default and four floors — intent (`incident-response` floors at `audited`, `spike` is CAPPED at `tested`), flag (security-touching or privacy/vulnerable-population work floors at `audited`), project (`rigor-floor:` in `.bionic/config.yaml`), epic (`rigor-floor:` in epic frontmatter). Floors only push UP — the *derivation* is a MAX, never a subtraction. Provisional at Step 0, locked at Step 3. **Floors advise; they never force.** Upgrades are free, and a rigor below the derived floor is the user's to choose: advised against at Step 0, then accepted and recorded as `rigor-override:` (see the Override DSL). Nothing enforces the floors — the only check that reads them is log-only, and it logs `user-overridden` wherever that marker is present. One adjacent check does block, and it is not a floor: a task-ledger row whose rigor cell sits *below* the plan's own frontmatter `rigor:` is refused unless the row records a waiver. That is a consistency check against the value the plan declares — lower the frontmatter and the rows follow it down, so it never re-imposes a floor the user has overridden.
@@ -126,7 +126,7 @@ writes `wave-NN-<slug>.requirements.md`: numbered requirements/user stories, eac
 provenance and acceptance criteria written so a "fails when" is nameable, plus Not Doing. Step
 2 writes `wave-NN-<slug>.spec.md`: the technical design (domain model, architecture, ownership
 table, rejected alternatives), the Eval design table, and ADR pointers. Step 3 writes
-`wave-NN-<slug>.plan.md`: slices, sequencing, the dispatch ledger, and the verification matrix
+`wave-NN-<slug>.plan.md`: tasks, sequencing, the dispatch ledger, and the verification matrix
 rendered from Step 2's Eval design. Requirements live beside the spec, both under
 `specs/epic-NN-<slug>/` — the governing-skill hook validates `*.requirements.md` frontmatter the
 same way it validates `*.spec.md`, minus the design three-way rule (that stays spec-only). Each
@@ -151,8 +151,8 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 0 Configure | `steps/0.md` | `canonical-sdlc` | Frontmatter complete, matrix derived, user confirmed, task list created |
 | 1 Scope | `steps/1.md` | `agent-skills:idea-refine` | Refined idea + explicit "Not Doing" + alternatives lens cites prior art; writes `wave-NN-<slug>.requirements.md` — numbered requirements/user stories with provenance and acceptance criteria, plus Not Doing |
 | 2 Design | `steps/2.md` | `agent-skills:spec-driven-development` | Every requirement has an acceptance criterion; every criterion cites its `provenance:`; wave+ carries a governing design; writes `wave-NN-<slug>.spec.md` — the technical design, ownership table, and the Eval design table |
-| 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; slices tagged; user approved; writes `wave-NN-<slug>.plan.md` — slices, sequencing, and the verification matrix rendered from Step 2's Eval design |
-| 4 Implement | `steps/4.md` | `agent-skills:incremental-implementation` | Every slice RED before GREEN; assumptions logged |
+| 3 Plan | `steps/3.md` | `superpowers:writing-plans` | No placeholders; `integration-branch:` present; matrix locked; tasks tagged; user approved; writes `wave-NN-<slug>.plan.md` — tasks, sequencing, and the verification matrix rendered from Step 2's Eval design |
+| 4 Implement | `steps/4.md` | `agent-skills:incremental-implementation` | Every task RED before GREEN; assumptions logged |
 | 5 Verify | `steps/5.md` | `superpowers:verification-before-completion` | Walk artifact in `record/`; tests floor green; every matrix row discharged at tier or waived; auditor CONFIRMED |
 | 6 Review | `steps/6.md` | `agent-skills:code-review-and-quality` | Every axis has a verdict; independent critic attached |
 | 7 Document | `steps/7.md` | `agent-skills:documentation-and-adrs` | Every decision at medium significance or above is recorded |

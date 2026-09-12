@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for hooks/stop-orders.sh — the human's stop order, and the batch stand-down
-# (epic-16 wave-02 slice S3; R3, R8; AC-2's user-ordered half and AC-11).
+# (epic-16 wave-02 task S3; R3, R8; AC-2's user-ordered half and AC-11).
 #
 # HERMETIC. Every run happens inside a mktemp'd repo with its own roster, its own sweeper
 # ledger and its own session key; nothing here stops an agent, reads the live installed

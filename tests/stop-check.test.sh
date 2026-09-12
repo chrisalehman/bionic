@@ -104,7 +104,7 @@ make_world() {
 
 # ---------- THE RECORDED ListAgents ANSWER — the live set (S6, D1′) ----------
 #
-# Since this slice a target resolves against the newest recorded ListAgents answer in the
+# Since this task a target resolves against the newest recorded ListAgents answer in the
 # OBSERVING session's transcript, not against agent-*.meta.json on disk. So every world needs
 # a transcript carrying a prompt, the assistant's ListAgents call and the harness's answer, in
 # that order — the order is what makes the answer FRESH.
@@ -223,7 +223,7 @@ run_check() {
 
 # run_check_as <own-session-id> <home> <repo> [args...] — like run_check, but with
 # CLAUDE_CODE_SESSION_ID explicitly set: the channel stop-check.sh reads to learn
-# "this session's own id" for roster classification (slice 4/5), mirroring the
+# "this session's own id" for roster classification (task 4/5), mirroring the
 # same resolution hooks/preflight-probe.sh already makes. run_check ALWAYS pins
 # this variable (empty above) rather than leaving it to the ambient shell — this
 # suite is run inside a real Claude Code session, which exports its own real
@@ -249,22 +249,22 @@ section "Section 1: target resolution against on-disk metadata (AC-3)"
 
 IFS='|' read -r H1 R1 S1 <<< "$(make_world w1)"
 make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
-  "aw1r-slice-4-3-3202dd476c0b4a5e" "w1r-slice-4-3" \
+  "aw1r-task-4-3-3202dd476c0b4a5e" "w1r-task-4-3" \
   "I already completed this review — resending now." \
   '"model":"opus","taskKind":"in_process_teammate","teamName":"session-11111111","customAgentType":"senior-implementor"' >/dev/null
 
-OUT=$(run_check "$H1" "$R1" "w1r-slice-4-3"); ST=$?
+OUT=$(run_check "$H1" "$R1" "w1r-task-4-3"); ST=$?
 expect_status "resolving by name exits 0" 0 "$ST"
-expect_contains "resolves a target typed as a NAME to its agent id" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
+expect_contains "resolves a target typed as a NAME to its agent id" "aw1r-task-4-3-3202dd476c0b4a5e" "$OUT"
 
-OUT=$(run_check "$H1" "$R1" "aw1r-slice-4-3-3202dd476c0b4a5e"); ST=$?
+OUT=$(run_check "$H1" "$R1" "aw1r-task-4-3-3202dd476c0b4a5e"); ST=$?
 expect_status "resolving by agent id exits 0" 0 "$ST"
-expect_contains "resolves a target typed as an AGENT ID" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
+expect_contains "resolves a target typed as an AGENT ID" "aw1r-task-4-3-3202dd476c0b4a5e" "$OUT"
 
 # P5: `name@team` is a legal TaskStop reference, so the observation must accept it.
-OUT=$(run_check "$H1" "$R1" "w1r-slice-4-3@session-11111111"); ST=$?
+OUT=$(run_check "$H1" "$R1" "w1r-task-4-3@session-11111111"); ST=$?
 expect_status "resolving by name@team exits 0" 0 "$ST"
-expect_contains "resolves a target typed as name@team" "aw1r-slice-4-3-3202dd476c0b4a5e" "$OUT"
+expect_contains "resolves a target typed as name@team" "aw1r-task-4-3-3202dd476c0b4a5e" "$OUT"
 
 OUT=$(run_check "$H1" "$R1" "no-such-agent"); ST=$?
 expect_status "unresolvable target exits 1" 1 "$ST"
@@ -272,31 +272,31 @@ expect_status "unresolvable target exits 1" 1 "$ST"
 # Ambiguity: one name, TWO live teammates — two lines in the Teammates block, which is what
 # two sessions in one root launching same-named agents looks like to the harness (D2′).
 make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
-  "a567bd5c6d1e03d67" "w1r-slice-4-3" "older run" >/dev/null
-OUT=$(run_check "$H1" "$R1" "w1r-slice-4-3"); ST=$?
+  "a567bd5c6d1e03d67" "w1r-task-4-3" "older run" >/dev/null
+OUT=$(run_check "$H1" "$R1" "w1r-task-4-3"); ST=$?
 expect_status "ambiguous target exits 1" 1 "$ST"
 expect_contains "the ambiguity is counted out of the live set" \
-  "2 live agents answer to 'w1r-slice-4-3'" "$OUT"
+  "2 live agents answer to 'w1r-task-4-3'" "$OUT"
 expect_regex "…and both entries are printed as the harness reported them" \
-  'w1r-slice-4-3\|bionic:senior-implementor\|running' "$OUT"
+  'w1r-task-4-3\|bionic:senior-implementor\|running' "$OUT"
 expect_contains "…beside an address the stop primitive accepts" \
-  "w1r-slice-4-3@session-11111111" "$OUT"
+  "w1r-task-4-3@session-11111111" "$OUT"
 
 # A NAME IS NOT A PATTERN (Step-6 security review S-5). The ambiguity arm counts the live
 # entries by dropping the typed target into a basic regular expression, so a `.`, `*` or `[`
 # in it over-matches and the refusal reports a count that is not the ambiguity it found. The
-# target below genuinely answers to two live agents; the four `w1r-slice-4-3` entries beside
+# target below genuinely answers to two live agents; the four `w1r-task-4-3` entries beside
 # it are what its `.` would have swallowed.
 make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
-  "a111dotted111111a" "w1r.slice-4-3" "dotted one" >/dev/null
+  "a111dotted111111a" "w1r.task-4-3" "dotted one" >/dev/null
 make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
-  "a222dotted222222b" "w1r.slice-4-3" "dotted two" >/dev/null
-OUT=$(run_check "$H1" "$R1" "w1r.slice-4-3"); ST=$?
+  "a222dotted222222b" "w1r.task-4-3" "dotted two" >/dev/null
+OUT=$(run_check "$H1" "$R1" "w1r.task-4-3"); ST=$?
 expect_status "a metacharacter target is still resolved as ambiguous" 1 "$ST"
 expect_contains "…and counted LITERALLY: two, not the four its pattern would have matched" \
-  "2 live agents answer to 'w1r.slice-4-3'" "$OUT"
+  "2 live agents answer to 'w1r.task-4-3'" "$OUT"
 expect_absent_ci "…so the neighbour the \`.\` would have swallowed is never listed under it" \
-  "w1r-slice-4-3 " "$OUT"
+  "w1r-task-4-3 " "$OUT"
 
 # A NAME THE ANSWER DOES NOT CARRY is not live, whatever is on disk. `departed` has a full
 # set of metadata and a working log; the harness does not name it, so it does not resolve.
@@ -583,7 +583,7 @@ OUT7_SIZE=$(printf '%s\n' "$OUT7" | grep -E '^  size:' | grep -oE '[0-9]+' | hea
 expect_eq "the size printed for the reader is the size carried for the machine" \
   "$OUT7_SIZE" "$(printf '%s' "$M7" | tr '|' '\n' | grep '^size=' | cut -d= -f2)"
 
-# Contract state rides along, for the D-6 comparison slices 4/5 and 4/6 make.
+# Contract state rides along, for the D-6 comparison tasks 4/5 and 4/6 make.
 OUT7B=$(run_check "$H7" "$R7" "machine" report7.md nosuch.md --progress "$PROG7")
 M7B=$(MLINE_OF "$OUT7B")
 expect_contains "each deliverable's state is carried, present" "present:report7.md" "$M7B"
@@ -638,7 +638,7 @@ expect_eq "the forged-field attempt still yields one line" "1" \
   "$(printf '%s\n' "$OUT7D" | grep -c '^stop-check-observation/')"
 
 # ============================================================
-section "Section 8: roster classification, contract-from-roster, P2 claims (slice 4/5, AC-6)"
+section "Section 8: roster classification, contract-from-roster, P2 claims (task 4/5, AC-6)"
 # ============================================================
 #
 # The roster's SCHEMA is hooks/dispatch-preflight.sh's (roster-state/v1); its
@@ -774,7 +774,7 @@ echo "progress line" > "$R8/prog-g.progress"
 # spec AC-20): the start gate refuses a brief that declares neither `Files:` nor `Suites:`,
 # and this case needs the dispatch to actually JOURNAL a row. The DECLARED spelling,
 # because this fixture repo configures no `impact-command:`.
-BRIEF_G="Canonical-sdlc Step 4, slice 4/12 of epic-99 wave-01; build · audited · wave.
+BRIEF_G="Canonical-sdlc Step 4, task 4/12 of epic-99 wave-01; build · audited · wave.
 Expected artifact: $R8/deliv-a.md
 Expected duration: ~30 minutes. Progress: $R8/prog-g.progress, cadence ~6m.
 Subprocess claim: \`$MARKER2\` → $H8/claims-out.log
@@ -815,7 +815,7 @@ section "Section 9: what is OURS is what the harness names (S6, AC-9/AC-10)"
 # Three defects that only live operation could produce, each still driven here, on the key
 # that replaced the one that produced them.
 #
-#   D1 (false OURS). Slice 4/5 keyed ownership on ROSTER MEMBERSHIP, falling back to `name=`.
+#   D1 (false OURS). Task 4/5 keyed ownership on ROSTER MEMBERSHIP, falling back to `name=`.
 #      Every row in a session that had not restarted since the recorder shipped was
 #      `status=intended` with an EMPTY `agent_id=`, so the name arm was the only one live —
 #      and a three-day-dead agent of another session, answering to a name this session's
@@ -829,7 +829,7 @@ section "Section 9: what is OURS is what the harness names (S6, AC-9/AC-10)"
 #      deleted — measured, all 57 sessions with subagents under this project satisfied it,
 #      including sessions finished days ago.
 #
-# Slice 4/9 re-keyed all three on the metadata's own FILING, which is a fact about records,
+# Task 4/9 re-keyed all three on the metadata's own FILING, which is a fact about records,
 # and records outlive agents: after a `/clear` the successor read its own live agent as
 # foreign, and one agent's metadata filed under two directories as an ambiguity (B-2). The
 # key now is the harness's own answer. D3 is the reason it has to be: a file on disk was
@@ -943,7 +943,7 @@ expect_absent_ci "C-1: no cwd file rides into the durable record as a deliverabl
 # whose `agent_id=` is non-empty. What made that safe was a property of a
 # DIFFERENT file — hooks/dispatch-preflight.sh always emits `agent_id=` empty on
 # `intended` rows. The stated invariant and the enforced one differing is the
-# exact shape slice 4/9 was remediating, so it is enforced here.
+# exact shape task 4/9 was remediating, so it is enforced here.
 MK_AGENT_ROW=no make_agent "$H10" "$S10" "$OWN10" "aforeign-1010101010101010" "id-target" "working" >/dev/null
 roster_row_fixture status=intended session="$OWN10" name=id-target \
   agent_id=aforeign-1010101010101010 launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_I \
@@ -952,8 +952,8 @@ OUT10B=$(run_check_as "$OWN10" "$H10" "$R10" "id-target"); ST=$?
 expect_status "C-2: an INTENDED row's id supplies nothing, so there is no evidence tier" 1 "$ST"
 expect_contains "C-2: …and the run says which fact is missing" "no agent id" "$OUT10B"
 
-# …while a CONFIRMED row's id still supplies it, which is the invariant slice 4/9 kept and
-# this slice moved rather than removed: the id is what the working log is filed under.
+# …while a CONFIRMED row's id still supplies it, which is the invariant task 4/9 kept and
+# this task moved rather than removed: the id is what the working log is filed under.
 roster_row_fixture status=confirmed session="$OWN10" name=id-target \
   agent_id=aforeign-1010101010101010 launched_at=2026-08-05T00:00:00Z tool_use_id=toolu_I \
   >> "$R10/.bionic/tmp/roster-${OWN10}.state"
@@ -962,7 +962,7 @@ expect_contains "C-2: a CONFIRMED row's id still establishes the evidence tier" 
   "Classification: OURS" "$OUT10C"
 expect_contains "…on the log that id names" "agent-aforeign-1010101010101010.jsonl" "$OUT10C"
 
-# …and so does an IDENTIFIED row's (epic-16 wave-01 slice 1). `confirmed` alone
+# …and so does an IDENTIFIED row's (epic-16 wave-01 task 1). `confirmed` alone
 # was an accepted set no teammate row could ever satisfy BY ID: the launch half
 # learns only the addressing form `name@session-xxxx`, so a confirmed row's
 # `agent_id=` is written empty in that mode by design (capture probe §3

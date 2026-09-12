@@ -1,7 +1,7 @@
 #!/bin/bash
-# DOCS PINS — one file, one section per slice that owns a doc-text agreement pin
+# DOCS PINS — one file, one section per task that owns a doc-text agreement pin
 # (spec AC-36 for RELEASE; WALLS and SCHED append their own numbered sections here
-# in later slices of this wave — this file is shared harness, not RELEASE-owned).
+# in later tasks of this wave — this file is shared harness, not RELEASE-owned).
 #
 # SECTION 1 — RELEASE (spec AC-36, `.bionic/docs/plans/wave-bionic-1.4.0-update/`).
 # WHAT THIS SECTION OWNS. The "version pair": `payload/.claude-plugin/plugin.json`'s
@@ -134,7 +134,7 @@ fi
 # ── AC-17: the version is one truth rendered at MANY surfaces ────────────────
 #
 # Assertions 1-8 pin ONE pair, plugin.json and help.md. The version is restated at more
-# surfaces than that, and until this slice nothing looked at the rest: the marketplace
+# surfaces than that, and until this task nothing looked at the rest: the marketplace
 # manifest the CLI reads, the `payload/.version` file the plan named, and doctor's own
 # header line. Each is asserted against `payload/.claude-plugin/plugin.json`, the single
 # owner — and each pin carries the doctored control that proves its extractor discriminates,
@@ -268,7 +268,7 @@ expect_eq "18: …and reports the DOCTORED version for a doctored root (the head
 # a fifth surface. The sweep is the pin that notices: exactly three files in this tree
 # DECLARE a bionic version, and all three agree with the owner.
 #
-# THE THIRD SURFACE, ADDED AT SLICE 14 (E2). `payload/commands/version.md` carries the same
+# THE THIRD SURFACE, ADDED AT TASK 14 (E2). `payload/commands/version.md` carries the same
 # baked `bionic <version> (installed)` line help.md does — see its template's "The printed
 # line begins with:" block — so `/bionic:version`'s own doc text is a version declaration by
 # the identical extractor, never a second regex. AC-E2.3's fails-when ("census still 2") is
@@ -381,7 +381,7 @@ PIN_PROBE='`resources_probe` and `resources_budget` from `<plugin-root>/scripts/
 # to the RUNG off a live-trimmed open count, so the pin was holding a contradiction green. A
 # pin follows the sentence it is a pin FOR: when the doctrine is corrected the needle moves
 # with it, or the test outlives the thing it was protecting.
-PIN_FILL='every slice with no unmet dependency dispatches in one batch sized by the rung the tick prints — `poker: rung=<n>/<ceiling>`, the machine'"'"'s answer to how wide it will carry right now — with `writers` as the ceiling that rung is taken against and the only number the wall enforces'
+PIN_FILL='every task with no unmet dependency dispatches in one batch sized by the rung the tick prints — `poker: rung=<n>/<ceiling>`, the machine'"'"'s answer to how wide it will carry right now — with `writers` as the ceiling that rung is taken against and the only number the wall enforces'
 # RE-POINTED, WRITER-FACING (Step-6 readability R-8). The old needle held a sentence that
 # was correct in SKILL.md — where it addresses the DISPATCHER, and where PIN_JOBS_SKILL still
 # holds it — and had been pasted verbatim into a block every other bullet of which is
@@ -550,8 +550,8 @@ expect_ne "19: a doctored survival.md reads as a different '/clear' paragraph (p
 #
 # ANTI-VACUITY, same discriminate-a-doctored-copy pattern §1 and §2 use.
 #
-# APPENDED, NEVER REWRITTEN: §1 is RELEASE's and §2 is WALLS's, and a slice that edited
-# another slice's pins would be a slice deciding what that slice owns.
+# APPENDED, NEVER REWRITTEN: §1 is RELEASE's and §2 is WALLS's, and a task that edited
+# another task's pins would be a task deciding what that task owns.
 
 section "Section 3: the SCHED Patrol-text pins (AC-30, AC-38)"
 
@@ -713,7 +713,7 @@ expect_ne "29: a renamed hook-side literal breaks the pin (pin discriminates)" \
 # its own usage block. A rename on either side splits them here rather than in a session that
 # types a command the tool does not have.
 #
-# APPENDED, NEVER REWRITTEN: §1-§4 belong to earlier slices.
+# APPENDED, NEVER REWRITTEN: §1-§4 belong to earlier tasks.
 
 section "Section 5: the session-bound run and the resume-ritual bind step"
 
@@ -839,7 +839,7 @@ fi
 # replacement for the retired NARROW recommendation (AC-17/AC-19; S8's report: "docs-pins.
 # test.sh:327 still pins the token in SKILL.md and is S10's to retire" — Section 3's token
 # list above no longer names NARROW, and this is the positive sentence that replaced it).
-PIN_TASKLIST='**The resume ritual rebuilds the task list after it binds:** run `TaskList`; if it is empty and the bound plan has `## SDLC State`, recreate one entry per step (and per slice at the current step) from the plan, statuses from the step lines.'
+PIN_TASKLIST='**The resume ritual rebuilds the task list after it binds:** run `TaskList`; if it is empty and the bound plan has `## SDLC State`, recreate one entry per step (and per task at the current step) from the plan, statuses from the step lines.'
 # RE-POINTED at the sentence that separates the rung from the two HOLDS (Step-6 readability
 # R-5/R-6). The prompt used to say "Three rungs, in order:" and then list two, and used the
 # word `rung` for the advisory pair AND for `pressure_level`'s integer eleven words apart.
@@ -862,7 +862,7 @@ fi
 
 anchor "$DISPATCH_MD" 'recreate one entry per step' 1
 DOCTORED_TASKLIST="$TMP/skill-tasklist-mutated.md"
-sed 's/recreate one entry per step/recreate one entry per slice only/' "$DISPATCH_MD" > "$DOCTORED_TASKLIST"
+sed 's/recreate one entry per step/recreate one entry per task only/' "$DISPATCH_MD" > "$DOCTORED_TASKLIST"
 if has_pin "$DOCTORED_TASKLIST" "$PIN_TASKLIST"; then
   no "50: a doctored SKILL.md fails the task-list pin (pin discriminates)" \
      "the pin matched a doctored copy"
@@ -1085,7 +1085,7 @@ fi
 # instrument sentence removed must fail these pins.
 section "SECTION 10 — S13: the instrument the brief declares (spec AC-20, AC-21)"
 
-PIN_S13_FILES='`Files:` on a line of its own names the paths this slice will write'
+PIN_S13_FILES='`Files:` on a line of its own names the paths this task will write'
 PIN_S13_DERIVE='the impact command named in `.bionic/config.yaml` turns them into the closed set of suites the agent may run'
 PIN_S13_DECLARE='Where no impact command is configured, name the closed set yourself under `Suites:`'
 PIN_S13_WAIVER='a brief that runs no suite at all waives with `Suites: none`'
@@ -1101,9 +1101,9 @@ for _p in FILES DERIVE DECLARE WAIVER NEITHER REGRESSION; do
   fi
 done
 
-anchor "$DISPATCH_MD" '`Files:` on a line of its own names the paths this slice will write' 1
+anchor "$DISPATCH_MD" '`Files:` on a line of its own names the paths this task will write' 1
 DOCTORED_S13="$TMP/skill-s13-mutated.md"
-sed 's/`Files:` on a line of its own names the paths this slice will write/the brief says what it likes/' \
+sed 's/`Files:` on a line of its own names the paths this task will write/the brief says what it likes/' \
   "$DISPATCH_MD" > "$DOCTORED_S13"
 if has_pin "$DOCTORED_S13" "$PIN_S13_FILES"; then
   no "61: a doctored SKILL.md fails the S13 FILES pin (it discriminates)" \
@@ -1242,7 +1242,7 @@ expect_match "66b: …and the diff names the file it rejected" \
   "*skills/canonical-sdlc/SKILL.md*" "$CHECK_OUT"
 
 # THE SAME FOR THE WIDENED MANIFEST'S OTHER HALF: a command page is a rendered file too,
-# and before this slice the manifest answered only for the six role files.
+# and before this task the manifest answered only for the six role files.
 CLONE2="$TMP/render-clone-2"
 clone_render_tree "$CLONE2" || true
 printf '\nhand-edited\n' >> "$CLONE2/payload/commands/help.md"
@@ -1478,7 +1478,7 @@ else
      "the mutation removed more than the strategic-by-rule clause"
 fi
 
-section "Section 12: K1 — the Step-0 confirmation display is a settings-only card (spec §Eval design K1, plan slice 15)"
+section "Section 12: K1 — the Step-0 confirmation display is a settings-only card (spec §Eval design K1, plan task 15)"
 #
 # WHAT THIS SECTION OWNS. D1 (design ledger record/wave-01-plugin-only/design-ledger.md §D1)
 # moves the Verification Matrix to Step 3 and cuts per-line inference rationale from Step 0:
@@ -1583,7 +1583,7 @@ section "Section 13: the Step-1/2/3 cards and the spec's Eval design table (epic
 #
 # WHAT THIS SECTION OWNS. Steps 0-3 each end at a gate, and since the wave-01-plugin-only
 # design interview each of those gates ends with a CARD: one line per item, never a
-# paragraph, the artifact path for the depth. Step 0's card is slice 15's; this section
+# paragraph, the artifact path for the depth. Step 0's card is task 15's; this section
 # owns the other three, plus the `## Eval design` table the Step-2 spec authors and the
 # Step-3 card renders.
 #
@@ -1638,7 +1638,7 @@ expect_true "90c: the Step-3 card is a fenced literal in the skill file" test -n
 # The row NAMES are the ratification (design ledger §"Cards ratified" and §"Step-3 card
 # ratified"): Step 1 is purpose/requirements/not-doing/artifact, Step 2 is
 # decisions/ownership/eval-design/open/artifacts, Step 3 is
-# problem/branches/slices/width/eval-design/verification/open/artifacts.
+# problem/branches/tasks/width/eval-design/verification/open/artifacts.
 if has_all "$CARD1" "Purpose" "Requirements" "Not Doing" "Artifacts"; then
   ok "91a: the Step-1 card carries Purpose, Requirements, Not Doing and Artifacts"
 else
@@ -1664,11 +1664,11 @@ else
      "card body: $CARD2"
 fi
 
-if has_all "$CARD3" "Problem" "Branches" "Slices" "kind" "depends" "agent" \
+if has_all "$CARD3" "Problem" "Branches" "Tasks" "kind" "depends" "agent" \
                     "Eval design" "Verification" "Open at approval" "Artifacts"; then
-  ok "93a: the Step-3 card carries Problem, Branches, Slices (kind/depends/agent), Eval design, Verification, Open at approval, Artifacts"
+  ok "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Open at approval, Artifacts"
 else
-  no "93a: the Step-3 card carries Problem, Branches, Slices (kind/depends/agent), Eval design, Verification, Open at approval, Artifacts" \
+  no "93a: the Step-3 card carries Problem, Branches, Tasks (kind/depends/agent), Eval design, Verification, Open at approval, Artifacts" \
      "card body: $CARD3"
 fi
 if has_all "$CARD3" "first batch"; then
@@ -1703,8 +1703,8 @@ expect_contains "95c: the Step-3 card asks the ratified question" \
   'Do you approve this plan? Reply "approved" to ratify it.' "$CARD3"
 expect_contains "95d: the Step-2 card's look-closer line opens one requirement's evals" \
   'show evals <req>' "$CARD2"
-expect_contains "95e: the Step-3 card's look-closer line opens one slice" \
-  'show slice <n>' "$CARD3"
+expect_contains "95e: the Step-3 card's look-closer line opens one task" \
+  'show task <n>' "$CARD3"
 
 # --- AC-K2.2: the spec template's Eval design table -------------------------
 STEP2_BODY="$(cat "$STEP2_MD" 2>/dev/null)"
@@ -1795,7 +1795,7 @@ expect_contains "97h: …and sends an unfalsifiable criterion back to Step 1" \
 expect_eq "97e: the Eval design column header is a single line" "1" \
   "$(printf '%s\n' "$EVAL_HEADER" | wc -l | tr -d ' ')"
 
-section "Section 14: K5 — the layout block names .requirements.md and the three-artifact sentence (spec §Eval design K5, plan slice 19)"
+section "Section 14: K5 — the layout block names .requirements.md and the three-artifact sentence (spec §Eval design K5, plan task 19)"
 #
 # WHAT THIS SECTION OWNS. K5 (design ledger K5; ADR-001) fixes three artifacts to three
 # steps. AC-K5.3 pins that SKILL.md's own text — the Artifact-layout code block and the
@@ -1804,7 +1804,7 @@ section "Section 14: K5 — the layout block names .requirements.md and the thre
 # hook arms that enforce it (governing-skill's frontmatter contract, evidence-gate's
 # Step-1 pointer) are pinned by their own suites, not here.
 #
-# NUMBERED FROM 98 (renumbered at the epic-22 K2+K5 merge, plan slices 16/19 landing
+# NUMBERED FROM 98 (renumbered at the epic-22 K2+K5 merge, plan tasks 16/19 landing
 # together — both sections were independently numbered "Section 13" and started their own
 # assertions back at ~83/90a; Section 13 above is K2's and keeps its numbers, this section
 # is K5's and starts fresh past its last one, 97h).
@@ -1839,7 +1839,7 @@ expect_contains "102a: AC-K5.3 — names requirements.md and what it holds (fail
 expect_contains "102b: AC-K5.3 — names spec.md and what it holds (fails-when: absent)" \
   "spec.md\`: the technical design" "$THREE_ARTIFACT_TEXT"
 expect_contains "102c: AC-K5.3 — names plan.md and what it holds (fails-when: absent)" \
-  "plan.md\`: slices, sequencing" "$THREE_ARTIFACT_TEXT"
+  "plan.md\`: tasks, sequencing" "$THREE_ARTIFACT_TEXT"
 
 # Steps table rows 1-3: each row's Gate cell also names its Step's artifact + one-line content.
 STEP1_ROW="$(grep -E '^\| 1 Scope \|' "$SKILL_MD")"
@@ -1851,7 +1851,7 @@ expect_contains "103a: AC-K5.3 — Step 1's table row names requirements.md + wh
 expect_contains "103b: AC-K5.3 — Step 2's table row names spec.md + what it holds (fails-when: absent)" \
   "spec.md\` — the technical design" "$STEP2_ROW"
 expect_contains "103c: AC-K5.3 — Step 3's table row names plan.md + what it holds (fails-when: absent)" \
-  "plan.md\` — slices, sequencing" "$STEP3_ROW"
+  "plan.md\` — tasks, sequencing" "$STEP3_ROW"
 
 # --- Anti-vacuity: each extractor must go red on the fails-when it names (absent) ---
 
@@ -1935,24 +1935,24 @@ else
   ok "107c: a prototype-unit paragraph missing the no-row rule fails 107b's check (pin discriminates)"
 fi
 
-# AC-K4.3: the Step-3 card's "Open at approval" section is a QUESTION → SLICE mapping, not
+# AC-K4.3: the Step-3 card's "Open at approval" section is a QUESTION → TASK mapping, not
 # just a bare header — 93a already pins the header string; this pins the row shape it
-# names, `closed by slice <n>`, which is what makes the section machine-checkable rather
+# names, `closed by task <n>`, which is what makes the section machine-checkable rather
 # than a caption with nothing under it.
-expect_contains "107d: AC-K4.3 — the Step-3 card's Open-at-approval row maps a question to the slice that closes it" \
-  "closed by slice" "$CARD3"
+expect_contains "107d: AC-K4.3 — the Step-3 card's Open-at-approval row maps a question to the task that closes it" \
+  "closed by task" "$CARD3"
 
 # 107e: Anti-vacuity — a Step-3 card with the mapping text stripped fails 107d.
-anchor "$STEP3_MD" 'closed by slice' 1
+anchor "$STEP3_MD" 'closed by task' 1
 DOCTORED_NO_CLOSEDBY="$TMP/skill-k4-no-closedby.md"
-sed 's/closed by slice/discharged eventually/' "$STEP3_MD" > "$DOCTORED_NO_CLOSEDBY"
+sed 's/closed by task/discharged eventually/' "$STEP3_MD" > "$DOCTORED_NO_CLOSEDBY"
 DOCTORED_CARD3_107="$(card_span "$DOCTORED_NO_CLOSEDBY" 'Step 3 · Plan')"
 case "$DOCTORED_CARD3_107" in
-  *"closed by slice"*) no "107f: a Step-3 card missing the 'closed by slice' mapping still 'has' it (pin is vacuous)" ;;
-  *) ok "107f: a Step-3 card missing the 'closed by slice' mapping fails the K4.3 check (pin discriminates)" ;;
+  *"closed by task"*) no "107f: a Step-3 card missing the 'closed by task' mapping still 'has' it (pin is vacuous)" ;;
+  *) ok "107f: a Step-3 card missing the 'closed by task' mapping fails the K4.3 check (pin discriminates)" ;;
 esac
 
-section "Section 16: K5.4 — the goal-paragraph rule text (design ledger K5.4, plan slice 21)"
+section "Section 16: K5.4 — the goal-paragraph rule text (design ledger K5.4, plan task 21)"
 #
 # WHAT THIS SECTION OWNS. AC-K5.4 pins that SKILL.md's own text says each of the three
 # artifacts opens with a concise goal paragraph under '## Goal', and that a

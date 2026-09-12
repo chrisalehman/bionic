@@ -241,7 +241,7 @@ log_event() {  # $1=event $2=class
 
 # [WALL: tests/farm-out-reminder.test.sh]
 emit_deny() {  # $1=class $2=role
-  # THROUGH THE ONE RENDERER (slice 13, table row 106). `deny` is the mode this hook has
+  # THROUGH THE ONE RENDERER (task 13, table row 106). `deny` is the mode this hook has
   # always used and the one the E1 measurement showed carries a model-only channel, so
   # the user gets the single line and the whole existing instruction rides the JSON
   # reason unchanged. `refuse` EXITS — with status 0 on this mode, which is what the

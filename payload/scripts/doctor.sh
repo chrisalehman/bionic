@@ -1,5 +1,5 @@
 #!/bin/bash
-# doctor.sh — the read-only diagnosis (epic-17 wave-03 slice S7, spec AC-3).
+# doctor.sh — the read-only diagnosis (epic-17 wave-03 task S7, spec AC-3).
 #
 # WHAT THIS FILE OWNS. Nothing factual. Doctor is a RENDERING SURFACE: every
 # number, verdict and state below is computed by detect.sh, deps.sh or env.sh
@@ -214,7 +214,7 @@ done
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
-# it. scripts/remove.sh is the same file this URL serves; slice S8 owns that
+# it. scripts/remove.sh is the same file this URL serves; task S8 owns that
 # script, and this constant is the one place doctor names its public location.
 BIONIC_REMOVE_RAW_URL="https://raw.githubusercontent.com/chrisalehman/bionic/main/payload/scripts/remove.sh"
 
@@ -274,7 +274,7 @@ BIONIC_PLUGIN_ID="$(dep_plugin_id)"
 # terminal rather than by this file. This used to be a sentence and nothing
 # else: tests/doctor.test.sh walled it for both fixture machines until that
 # suite was deleted at 8582861 (epic-18 wave-03), and the next row added to this
-# file — F5's version row, slice 4/4 of this very wave — came out at 104 columns
+# file — F5's version row, task 4/4 of this very wave — came out at 104 columns
 # on the wave's own T3 capture and past 130 in its worst case. The rule is now
 # enforced where rows are BUILT (the three builders below, plus the verdict
 # line), so a row added by a future arm inherits the bound the same way it
@@ -785,7 +785,7 @@ done
 # that adopts the idiom declares them on a `BIONIC_LIB_WANT=` line above the
 # block; one that has not yet adopted it names its library in the `lib/<name>.sh`
 # path it sources. Either way the answer is the hook's own, so this row keeps
-# telling the truth across the slice that rewrites the hooks.
+# telling the truth across the task that rewrites the hooks.
 # THE ROSTER AND THE PROBE ARE lib/checks.sh's (1.5.1). A wall missing from the
 # payload is a row of the check table like any other — a fact bionic needs true,
 # with a party that repairs it — so the list of walls, "which libraries does this
@@ -1328,7 +1328,7 @@ _p_here=""
 #
 # THE STAMP IS THE ONLY FACT ON THIS PAGE THAT KNOWS. hooks/session-poker.sh
 # touches it on every tick, so its age answers "did this thing fire recently"
-# where the transcript answers only "was it ever asked for". Slice 4/2 removed
+# where the transcript answers only "was it ever asked for". Task 4/2 removed
 # this parse arm while minimising the section; lib/patrol.sh never stopped
 # emitting it. Restored here with a smaller job than it had — it renders
 # nothing, it GATES.
@@ -1403,7 +1403,7 @@ _patrol_flush() {
       fi
       # THE COUNT IS THE ACTIONABLE HALF. Doctor is now the ONE surface for this
       # fact — the tick's `NOTIFY wall-blind` diagnosis was deleted in 1.4.0
-      # (slice ADOPT; it had no "no active run" branch and false-fired pre-plan),
+      # (task ADOPT; it had no "no active run" branch and false-fired pre-plan),
       # so there is no second speller to agree with; tests/doctor-patrol.test.sh
       # §9 pins the `patrol-wall/v1` record this reads and the library that
       # defines it. It is printed for a present-but-incomplete roster too: the
@@ -2083,7 +2083,7 @@ echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
 # lose to an ellipsis, so `bionic_line` eats the shortfall out of the path, never
 # the bracket.
 # THE VERDICT ITSELF COMES FROM ONE SHARED SITE, `detect_checkout_verdict`
-# (epic-22 wave-01 slice 14) — the realpath comparison used to live here alone;
+# (epic-22 wave-01 task 14) — the realpath comparison used to live here alone;
 # it is now the same function `/bionic:version` calls, so the two surfaces can
 # never disagree about what "this checkout" means.
 if [ "$MP_SOURCE_STATE" -eq 0 ] && [ -n "$MP_SOURCE_PATH" ]; then

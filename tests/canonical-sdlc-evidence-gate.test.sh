@@ -42,7 +42,7 @@ trap cleanup EXIT
 slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
                             "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
 # $1 = sandbox HOME, $2 = the audit_root the hook resolved (the plan's project).
-# THE SLUG IS TAKEN OVER THE CANONICAL PATH (bionic 1.4.0, slice ADOPT). The hook
+# THE SLUG IS TAKEN OVER THE CANONICAL PATH (bionic 1.4.0, task ADOPT). The hook
 # now resolves its root through lib/root.sh's `project_root`, which answers with
 # `pwd -P` — so on a machine where the fixture root sits under a symlinked prefix
 # (macOS: /var/folders -> /private/var/folders, which mktemp -d hands back
@@ -172,7 +172,7 @@ split_stderr() {  # <file> -> HOOK_RESOLUTION + HOOK_STDERR
   HOOK_STDERR=$(printf '%s\n' "$raw" | grep -v -E "$EG_RESOLUTION_RE" || true)
 }
 
-# THE VERBOSE STREAM (slice 13, ruling D-1). This gate's refusal is now ONE line —
+# THE VERBOSE STREAM (task 13, ruling D-1). This gate's refusal is now ONE line —
 # `bionic: commit refused — <fact> (<fix>)` — and everything this suite reads off a
 # refusal (the task id, the rigor values, the matrix row, the evidence key, the walk
 # path, the missing fields, the plan path, the Fix prose) is `detail`, which reaches a
@@ -252,7 +252,7 @@ expect_allow() {
   fi
 }
 
-# THE TWO STREAMS, AND WHICH ONE EACH HALF READS (slice 13, ruling D-1). A refusal is
+# THE TWO STREAMS, AND WHICH ONE EACH HALF READS (task 13, ruling D-1). A refusal is
 # now ONE line on the user stream, `bionic: commit refused — <fact> (<fix>)`, and every
 # value a caller here names — a task id, a rigor cell, a matrix row, an evidence key, a
 # walk path, a missing field — is `detail`, which travels only under
@@ -1737,7 +1737,7 @@ task_plan() {
 
 # A task-scale plan at a caller-chosen frontmatter rigor (frontmatter
 # hardcodes audited). $1 rigor, $2 body. Used to pin the log-only ledger-shape
-# path that slice 4/3 promotes to BLOCKING only under frontmatter rigor:
+# path that task 4/3 promotes to BLOCKING only under frontmatter rigor:
 # audited — a non-audited plan keeps logging findings.
 task_frontmatter_rigor() {  # $1 rigor
   printf -- '---\n'
@@ -1825,7 +1825,7 @@ expect_allow "19d task plan current: T2 valid ledger → allow (T-format accepte
   "$h19d" 'git commit -m "x"'
 
 # 19e — no ## Tasks section on a NON-audited plan → exit 0 + task-ledger finding
-# (log-only). Slice 4/3 promotes this check to BLOCKING under frontmatter
+# (log-only). Task 4/3 promotes this check to BLOCKING under frontmatter
 # rigor: audited (pinned by 22c5); a peer-reviewed plan keeps logging.
 ledger_no_tasks="## SDLC State
 
@@ -1848,7 +1848,7 @@ expect_audit_line "19e2 missing ## Tasks → audit file line (evidence-gate task
   "$h19e2" 'git commit -m "x"' "evidence-gate task-ledger:"
 
 # 19f — status outside the enum (doing) on a NON-audited plan → exit 0 + finding
-# (log-only). Slice 4/3 blocks this under rigor: audited (pinned by 22c1).
+# (log-only). Task 4/3 blocks this under rigor: audited (pinned by 22c1).
 ledger_bad_status="${ledger_valid/| T2 | refactor | peer-reviewed | extract the ledger helper | active |/| T2 | refactor | peer-reviewed | extract the ledger helper | doing |}"
 h19f=$(make_home)
 write_plan "$h19f" "$(task_plan_rigor tested "$ledger_bad_status")" > /dev/null
@@ -1856,7 +1856,7 @@ expect_finding "19f invalid status 'doing' (non-audited) → exit 0 + task-ledge
   "$h19f" 'git commit -m "x"' "task-ledger"
 
 # 19g — the ADDRESSED active task (T2, current: T2) with no `- T2:` evidence
-# line → BLOCK. Slice 4/1 made the addressed-unit tested floor blocking; this
+# line → BLOCK. Task 4/1 made the addressed-unit tested floor blocking; this
 # case previously logged a finding (see Section 22 for the full lane coverage).
 ledger_active_no_line="## Tasks
 
@@ -1878,7 +1878,7 @@ expect_block "19g addressed active task without evidence line → block" \
   "$h19g" 'git commit -m "x"' "evidence line"
 
 # 19h — the ADDRESSED active task (T2) with a placeholder evidence value
-# (`- T2: TBD`) → BLOCK (slice 4/1 blocking floor; previously a finding).
+# (`- T2: TBD`) → BLOCK (task 4/1 blocking floor; previously a finding).
 ledger_active_placeholder="${ledger_valid/- T2: bash extract-helper.sh 4 cases green, commit def456/- T2: TBD}"
 h19h=$(make_home)
 write_plan "$h19h" "$(task_plan_rigor tested "$ledger_active_placeholder")" > /dev/null
@@ -1886,7 +1886,7 @@ expect_block "19h addressed active task placeholder evidence → block" \
   "$h19h" 'git commit -m "x"' "placeholder"
 
 # 19i — done non-addressed task (T1) with an empty evidence line (`- T1:`) on a
-# NON-audited plan → finding (log-only). Slice 4/3 blocks this under rigor:
+# NON-audited plan → finding (log-only). Task 4/3 blocks this under rigor:
 # audited (pinned by 22c3).
 ledger_done_empty="${ledger_valid/- T1: fixed in commit abc123, suite 5\/5 green/- T1:}"
 h19i=$(make_home)
@@ -2397,12 +2397,12 @@ fi
 # Section 22: rigor-keyed ledger lanes
 # ============================================================
 #
-# Slice 4/1 makes the task-ledger tested floor BLOCKING for THE ADDRESSED
+# Task 4/1 makes the task-ledger tested floor BLOCKING for THE ADDRESSED
 # UNIT ONLY (the T<n> named by `current: T<n>`). For that one task the gate now
 # exits 2 when: its row is absent from `## Tasks`; its `- T<n>:` evidence line
 # is missing or a placeholder; or its rigor cell fails `effective_row_rigor`
 # (a non-empty cell outside tested|peer-reviewed|audited → INVALID). Every OTHER
-# row keeps its log-only handling (D14) at this slice — 22a6 pins that scope.
+# row keeps its log-only handling (D14) at this task — 22a6 pins that scope.
 
 section "Section 22: rigor-keyed ledger lanes"
 
@@ -2514,7 +2514,7 @@ expect_block "22a5 addressed unit T2 invalid rigor cell → block" \
 # while the addressed unit T2 is honest → NO block on a NON-audited plan. The
 # non-addressed row keeps its log-only handling (this exits 0 with a task-ledger
 # finding, not a block), pinning the addressed-unit-only scope of the 4/1
-# blocking floor. NB: slice 4/3 makes this same NON-addressed check BLOCKING
+# blocking floor. NB: task 4/3 makes this same NON-addressed check BLOCKING
 # under frontmatter rigor: audited (pinned by 22c3), so this fixture is
 # deliberately NON-audited (tested) to keep exercising the surviving log-only
 # lane. Tested also keeps every cell at the floor so the 4/8 downgrade gate
@@ -2539,9 +2539,9 @@ write_plan "$h22a6" "$(task_plan_rigor tested "$v22_nonaddressed_broken")" > /de
 expect_finding "22a6 broken non-addressed row (T1) + honest T2 (non-audited) → no block, log-only finding" \
   "$h22a6" 'git commit -m "x"' "task-ledger"
 
-# --- 22b: proof-shape + auditor/critic lanes (slice 4/2) ------------------
+# --- 22b: proof-shape + auditor/critic lanes (task 4/2) ------------------
 #
-# Lane scope (D-slice 4/2): the addressed row (any status) AND every OTHER
+# Lane scope (D-task 4/2): the addressed row (any status) AND every OTHER
 # row with status `done` are subject to — effective rigor peer-reviewed OR
 # audited: evidence must be proof-shaped (is_proof_shaped); done AND rigor
 # >= peer-reviewed: evidence must contain "auditor"; done AND rigor audited:
@@ -2552,7 +2552,7 @@ expect_finding "22a6 broken non-addressed row (T1) + honest T2 (non-audited) →
 # so each heavier cell (peer-reviewed/audited) is a RAISE above the floor — the
 # CELL drives the lane, and the 4/8 downgrade gate never fires (raises are always
 # free). This isolates the lane behavior from the floor check. (Was
-# task_plan / audited before slice 4/8, where a tested/peer-reviewed cell
+# task_plan / audited before task 4/8, where a tested/peer-reviewed cell
 # would now be a blocking downgrade and mask the lane under test.)
 
 # 22b1 — addressed row (peer-reviewed, active) with prose evidence (no digit,
@@ -2751,7 +2751,7 @@ write_plan "$h22b8b" "$(task_plan_rigor tested "$v22b_t2_no_command")" > /dev/nu
 expect_block "22b8b proof-shape pin: digit, no command token → block" \
   "$h22b8b" 'git commit -m "x"' "not prose"
 
-# --- 22c: audited plan-level strictness + wave D7 dispatch-ledger (slice 4/3) -
+# --- 22c: audited plan-level strictness + wave D7 dispatch-ledger (task 4/3) -
 #
 # Part A (task scale): the previously log-only NON-addressed-row ledger-shape
 # checks (missing ## Tasks, bad status enum, active/done row missing/placeholder
@@ -2862,7 +2862,7 @@ d7_wave_plan() {
   local tasks="$1" extra_state="$2" rigor="${3:-audited}" multi="${4:-true}"
   printf '%s\n' "$(d7_wave_frontmatter "$rigor" "$multi")"
   [ -n "$tasks" ] && printf '%s\n\n' "$tasks"
-  # Both K5 (this slice) and K2 (slice 16) scope-match this fixture (rigor:audited +
+  # Both K5 (this task) and K2 (task 16) scope-match this fixture (rigor:audited +
   # multi_agent:true + wave, at current: 5 >= 4): K5/AC-K5.2 needs the Step-1
   # requirements: pointer (resolves to the plan file itself — project-relative; this
   # fixture's own subject is D7, not K5, so a real file is all the arm demands, not a
@@ -3054,7 +3054,7 @@ write_plan "$h22e4" "$(d7_wave_plan "$tasks_bad_status" "- T1: bash suite 9/9 gr
 expect_block "22e4 status 'done' in the widened schema → block (the four are pending active landed dropped)" \
   "$h22e4" 'git commit -m "x"' "status done is not one of"
 
-# ---- 22d: per-row rigor resolution (slice 4/4, R4) ------------------------
+# ---- 22d: per-row rigor resolution (task 4/4, R4) ------------------------
 #
 # effective_row_rigor resolves cell-first: a non-empty, enum-valid cell wins
 # outright — it does NOT blend with, or get overridden by, the frontmatter
@@ -3097,7 +3097,7 @@ expect_block "22d1 frontmatter tested, cell peer-reviewed (heavier), prose evide
 # below the frontmatter rigor must be waived). WITHOUT a waiver marker on the
 # `- T1:` line it BLOCKS; WITH one it runs at the (lower) tested lane, so the
 # plain evidence is fine and it allows. (Was expect_allow under the pre-A15
-# "cell wins freely downward" model; slice 4/8 makes downward a recorded
+# "cell wins freely downward" model; task 4/8 makes downward a recorded
 # decision. 22d2/22d2b are the split; 22f1/22f2 restate the same contract
 # in the dedicated floor block.)
 v22d2_body="## Tasks
@@ -3221,7 +3221,7 @@ expect_block "22d5b same, drop critic token → block (cell audited lane still d
   "$h22d5b" 'git commit -m "x"' "critic"
 
 # 22d6 — an off-enum rigor cell 'reviewed' on a NON-addressed 'done' row.
-# effective_row_rigor("reviewed") resolves to the INVALID sentinel. Slice 4/4
+# effective_row_rigor("reviewed") resolves to the INVALID sentinel. Task 4/4
 # pinned (as expect_allow) that this evaded detection entirely: INVALID was
 # only ever explicitly checked on the ADDRESSED unit's own row (4/1's
 # `if [ "$eff" = "INVALID" ]` block), so the non-addressed done-row path called
@@ -3230,7 +3230,7 @@ expect_block "22d5b same, drop critic token → block (cell audited lane still d
 # no block, and (unlike the ledger_shape_fail-routed defects) no log-only
 # finding either.
 #
-# Slice 4/6 closes that gap: the non-addressed done-row path now guards for
+# Task 4/6 closes that gap: the non-addressed done-row path now guards for
 # eff=INVALID BEFORE calling apply_rigor_lanes, mirroring the addressed unit's
 # 4/1 INVALID block. A malformed rigor cell makes the row's lane indeterminate
 # — you cannot resolve which evidence contract applies — so it is a hard
@@ -3320,7 +3320,7 @@ write_plan "$h22d6e" "$(task_plan_rigor tested "$v22d6e_body")" > /dev/null
 expect_allow "22d6e control: empty rigor cell on non-addressed done row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6e" 'git commit -m "x"'
 
-# 22d6f/g/h — slice 4/7 closes the residual left by 4/6: an off-enum rigor cell
+# 22d6f/g/h — task 4/7 closes the residual left by 4/6: an off-enum rigor cell
 # blocked only on the addressed unit (any status, 4/1) and on non-addressed DONE
 # rows (4/6), but a non-addressed ACTIVE or PENDING row with an off-enum cell
 # still passed SILENTLY — its lane was never resolved, so no block and no
@@ -3331,7 +3331,7 @@ expect_allow "22d6e control: empty rigor cell on non-addressed done row inherits
 # guard that runs before the status-based branching, so a malformed rigor cell
 # blocks UNIFORMLY on any row (addressed or not; done, active, pending, dropped)
 # at any frontmatter rigor. 22d6f (active) and 22d6g (pending) are the residuals
-# this slice closes; 22d6h is a negative control proving an EMPTY cell on an
+# this task closes; 22d6h is a negative control proving an EMPTY cell on an
 # active row still inherits and allows (empty ≠ INVALID — active rows without a
 # done claim are not over-blocked).
 
@@ -3405,7 +3405,7 @@ write_plan "$h22d6h" "$(task_plan_rigor tested "$v22d6h_body")" > /dev/null
 expect_allow "22d6h control: empty rigor cell on non-addressed active row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6h" 'git commit -m "x"'
 
-# ---- 22f: row rigor is a FLOOR — downgrade blocks unless waived (slice 4/8) --
+# ---- 22f: row rigor is a FLOOR — downgrade blocks unless waived (task 4/8) --
 #
 # A15 (user-ratified, momentous): the per-row `rigor` cell is a FLOOR unified
 # with the run-rigor floor model. A cell that RAISES a row above the
@@ -3889,7 +3889,7 @@ fi
 # (`--git-common-dir`, i.e. the MAIN repo even from inside a linked worktree).
 # This gate derived PROJECT_DIR — and therefore DOCS_ROOT, PLAN_DIRS and the
 # AC-13 misplacement sweep's root — from CLAUDE_PROJECT_DIR/.cwd/pwd, i.e. the
-# WORKTREE. Slice 1 migrated only audit_root().
+# WORKTREE. Task 1 migrated only audit_root().
 #
 # The consequence was that in a linked worktree NO artifact placement satisfied
 # both hooks: put the plan where the governing hook demands (the main repo) and
@@ -5128,7 +5128,7 @@ expect_block "32j rigor peer-reviewed, discharged rows, no Step-5 auditor: point
   "$h32j" 'git commit -m "x"' "requires 'auditor:"
 
 # 32k — a row whose OWN rigor cell RAISES it above the plan's frontmatter
-# follows the row's rigor (the floor model, slice 4/8): a tested plan, one
+# follows the row's rigor (the floor model, task 4/8): a tested plan, one
 # `done` row raised to peer-reviewed, proof-shaped evidence naming no auditor →
 # that row still demands the verdict. The relaxation is keyed to effective
 # rigor, never to the frontmatter alone.
@@ -5468,7 +5468,7 @@ s35_run() {  # <root> <sid> <command> -> S35_EXIT / S35_ERR
     S35_EXIT=$?
   fi
   S35_ERR=$(cat "$tmp_err")
-  # THE DETAIL STREAM (slice 13, ruling D-1): this section greps plan PATHS off the
+  # THE DETAIL STREAM (task 13, ruling D-1): this section greps plan PATHS off the
   # refusal, and a path is `detail` now. Gated on the refusal so an allowed commit is
   # never driven twice.
   # An ALLOWED call has no refusal to expand, and its announcements are already on the
@@ -6203,7 +6203,7 @@ done
 # inert for the identical reason: both tables are Step-3 artifacts, not necessarily
 # complete before Step 4.
 #
-# MIGRATED BY REQ-1e (T8). The section this arm read was `## Slices`, four of whose
+# MIGRATED BY REQ-1e (T8). The section this arm read was `## Tasks`, four of whose
 # columns it took by position; it is `## Tasks` now, read through lib/units.sh, and
 # the matrix field it cross-references is `task:`. The fixtures below carry the
 # widened ten-column schema for that reason.

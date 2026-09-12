@@ -1,5 +1,5 @@
 #!/bin/bash
-# SEAM RESOLUTION CATCH-PROOF — epic-17 wave-02 slice S1 (spec AC-4).
+# SEAM RESOLUTION CATCH-PROOF — epic-17 wave-02 task S1 (spec AC-4).
 #
 # WHAT THE SEAM IS. `tests/lib/resolve-roots.sh` is a sourced helper owning one
 # question: where do the scripts under test live. It exports three per-class root

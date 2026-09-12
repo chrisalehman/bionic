@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/hook-adoption.test.sh — ADOPT: every hook on the library spine, always-on.
-# (bionic 1.4.0, wave-bionic-1.4.0-update slice ADOPT; spec AC-7, AC-8, AC-9, AC-12,
+# (bionic 1.4.0, wave-bionic-1.4.0-update task ADOPT; spec AC-7, AC-8, AC-9, AC-12,
 # AC-16; design §2 "order in every hook: load, active_run, own work".)
 #
 # WHAT IS UNDER TEST. Not a library — a CONVENTION, held across eighteen files that
@@ -170,8 +170,8 @@ EOF
 section "2 — one root: no hook restates the walk"
 #
 # The eight `resolve_project_root` copies this replaces were byte-identical by
-# assertion and divergent by history; the library ends the family. Slice POKER
-# converted the last carrier (session-poker.sh) in parallel with this slice, so the
+# assertion and divergent by history; the library ends the family. Task POKER
+# converted the last carrier (session-poker.sh) in parallel with this task, so the
 # family is empty; this assertion is what notices a copy creeping back.
 STRAGGLERS=$(grep -ln '^resolve_project_root()' "$HOOKS"/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
 expect_eq "no hook still defines a private resolve_project_root (POKER landed the poker on the spine)" \
@@ -229,7 +229,7 @@ section "4 — one run predicate: no hook restates it, the run-scoped ones call 
 # has_sdlc_state() was a five-copy family plus one merged reimplementation, and every
 # one of them answered "is there a run" by restating the algorithm. The library answers
 # it once. session-poker.sh was the last carrier — named here rather than excused — and
-# slice SCHED deleted its copy (POKER/2, ratified 2026-09-03), so the family is now EMPTY.
+# task SCHED deleted its copy (POKER/2, ratified 2026-09-03), so the family is now EMPTY.
 # The second row is the one with teeth: an empty grep also describes a fleet that lost the
 # predicate altogether, so the tick is asked to name the library functions it calls instead.
 HS_CARRIERS=$(grep -ln '^has_sdlc_state()' "$HOOKS"/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
@@ -689,7 +689,7 @@ for h in protect-main canonical-sdlc-evidence-gate landing-gate; do
   cp "$HOOKS/$h.sh" "$BROKEN/hooks/$h.sh"
 done
 
-# TWO DRIVES OF THE SAME CALL, and the pair is what slice 13's ruling D-1 made necessary.
+# TWO DRIVES OF THE SAME CALL, and the pair is what task 13's ruling D-1 made necessary.
 # `loader_fail_closed` puts ONE line on the user stream — `bionic: load refused — <hook>
 # cannot load the bionic library (run /bionic:doctor)` — and the four permitted repair
 # commands, the library it wanted and the candidates it tried are `detail`, emitted only

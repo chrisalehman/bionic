@@ -18,7 +18,7 @@ about doing the job well; they are about still being alive to report it.
   rewrite a brief's command on your own judgment; a command you cannot run as written is refused
   and reported, not adjusted.
 - **Your suite budget is on your roster row, and it is a wall.** Your brief declared the FILES
-  this slice touches (`Files:`) or the closed set of suites it may run (`Suites:`), and the
+  this task touches (`Files:`) or the closed set of suites it may run (`Suites:`), and the
   dispatch wall recorded the resulting set before you started. A `bash tests/<x>.test.sh`
   outside that set is REFUSED, and so is `tests/run.sh` unless your own row carries it — one
   full-tree regression per run belongs to the Step-5 runner, not to a writer proving its work

@@ -143,7 +143,7 @@ live_answer_none() { live_answer_build "$1" "$LIVE_ANSWER_NONE_LINE"; }
 # COMPOSING AN ANSWER THAT NAMES THE SUITE'S OWN TEAMMATES (S17, spec AC-28)
 #
 # The eight private builders this file replaces did not want a corpus line — they wanted
-# an answer naming `alpha`, `battery`, `w1r-slice-4-3`, whatever the case under test had
+# an answer naming `alpha`, `battery`, `w1r-task-4-3`, whatever the case under test had
 # just written a roster row for. That is why each of them hand-wrote a teammate line, and
 # why the tree ended up with three spellings of the recognition anchor and two of the ref
 # suffix.

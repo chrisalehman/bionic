@@ -31,7 +31,7 @@
 #
 # Attestation record — this script OWNS the schema (spec §Design ownership table); the
 # start gate carries its own reader copy, and the two are held together by the agreement
-# tests in slice 4/6. Format: `# comment` lines plus `key=value` lines in any order, read
+# tests in task 4/6. Format: `# comment` lines plus `key=value` lines in any order, read
 # BY KEY and never by position (checklist A6). A version line is always present so a
 # future field addition is a readable change rather than a silent parse break.
 #
@@ -70,7 +70,7 @@
 # the user's bootstrap replaces that install, a run of this script must not silently
 # disarm the live gate by renaming the one field it reads.
 #
-# State filename — per-session (design D-5, slice 4/2): the attestation is written to
+# State filename — per-session (design D-5, task 4/2): the attestation is written to
 #     .bionic/tmp/preflight-<session_id>.state
 # never to the old shared .bionic/tmp/preflight.state slot, so two sessions working the
 # same repo hold valid attestations concurrently instead of racing to overwrite a single
@@ -114,7 +114,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # on purpose: a writer emits one schema, a reader must tolerate every schema still on disk.
 ATTESTATION_VERSION=2
 ATTESTATION_VERSIONS_SUPPORTED="1 2"
-# D-3 payload-shape canary (w3 slice 4/4): the same-actor wall in hooks/stop-guard.sh reads
+# D-3 payload-shape canary (w3 task 4/4): the same-actor wall in hooks/stop-guard.sh reads
 # observer identity from the undocumented top-level `agent_id` field on subagent-invoked
 # PostToolUse|Bash payloads (validated .bionic/docs/record/w3-slice1-posttooluse-probe.md,
 # CLI 2.1.222, and re-validated .bionic/docs/record/w3-canary-validation.md, CLI 2.1.223). The
@@ -129,7 +129,7 @@ LEGACY_STATE_BASENAME="preflight.state"
 LOCK_BASENAME=".preflight.lock"
 OTHER_SESSION_WINDOW_MIN=15   # warn-only liveness heuristic; mtime-based, known to
                               # false-positive on recently-dead sessions (spec Not Doing)
-# Reader copy of hooks/dispatch-preflight.sh's roster filename constants (slice
+# Reader copy of hooks/dispatch-preflight.sh's roster filename constants (task
 # 4/7). This script only reads roster files, byte for byte, so a real prefix
 # mismatch is a mislabeled scan, never a write hazard — kept as a copy per TDD
 # §9 rather than a source, same precedent as the other cross-script duplicates.
@@ -446,7 +446,7 @@ if [ "$STATE_DIR_OK" -eq 1 ]; then
   esac
 fi
 
-# ---------------------------------------------------------------- D-5 pruning (slice 4/2)
+# ---------------------------------------------------------------- D-5 pruning (task 4/2)
 #
 # On every run where the state directory is usable — independent of whether THIS
 # session's own blocking probes above passed — remove: (a) the legacy single-slot file,
@@ -574,7 +574,7 @@ else
   say "resources: library not found beside this script (attestation stays at version 1)"
 fi
 
-# D-3 payload-shape canary (w3 slice 4/4): compare the pinned validated CLI version against
+# D-3 payload-shape canary (w3 task 4/4): compare the pinned validated CLI version against
 # what's actually installed. Warn only — never blocking, never written into the attestation —
 # because the last-known-good behavior (the discriminator holding) is what the pin records,
 # not a live re-check of the discriminator itself (that needs a full probe run, not a version

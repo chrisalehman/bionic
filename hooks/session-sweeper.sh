@@ -265,7 +265,7 @@ fi
 #
 # THE DOCS ROOT, AND WHY THIS HOOK SUDDENLY NEEDS ONE (epic-17 W6 S15, A-6.6 (c)).
 # A roster deliverable is brief prose: `Expected artifact: record/epic-17-w6/x.md` is what
-# every slice brief in this epic actually writes, because that is the spelling the Step-5
+# every task brief in this epic actually writes, because that is the spelling the Step-5
 # contract and `canonical-sdlc-evidence-gate.sh` established for an artifact under the docs
 # root. This gate resolved it against the REPO root, looked at `<repo>/record/…`, found
 # nothing, and reported the row missing while the file sat where the brief meant. One wave

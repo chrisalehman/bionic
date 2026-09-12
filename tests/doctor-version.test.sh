@@ -290,8 +290,8 @@ section "Section 5: every line doctor prints fits the column budget"
 # tests/doctor.test.sh was deleted at 8582861 (epic-18 wave-03). The row F5 added
 # is what found the gap: on the wave's own T3 capture it measured 104 columns,
 # because `unknown — ${LATEST_CAUSE}` interpolates free text nobody bounded.
-# Slice 4/3 had built exactly this wall for setup.sh (tests/command-relay.test.sh
-# Group B) one slice earlier. This is that wall, on the other script, driving the
+# Task 4/3 had built exactly this wall for setup.sh (tests/command-relay.test.sh
+# Group B) one task earlier. This is that wall, on the other script, driving the
 # four feed-kind arms above plus the worst case below.
 #
 # THE RULER IS THE PRODUCT'S OWN (`bionic_cols`, payload/scripts/lib/width.sh) —
@@ -744,7 +744,7 @@ LINE_ROLE="$(integrity_line "$PROOT_ROLE")"
 expect_match "52: one doctored ROLE file reads as modified" "*state=modified*" "$LINE_ROLE"
 expect_match "53: …and is named" "*names=critic.md*" "$LINE_ROLE"
 
-# THE WIDENING ITSELF: before this slice a doctored skill file or command page was
+# THE WIDENING ITSELF: before this task a doctored skill file or command page was
 # invisible to this line, because the manifest had no row for either.
 PROOT_SKILL="$(make_plugin_root)"
 printf '\nlocally added line\n' >> "$PROOT_SKILL/skills/canonical-sdlc/SKILL.md"
