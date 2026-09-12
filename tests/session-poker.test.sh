@@ -2485,7 +2485,7 @@ sp_plan_at_step "$R12K1" 5 \
   "| T3 | 6 | review | the NEXT step's work | critic | T1 | 15m | REQ-x | c.sh | pending |" > /dev/null
 poke_pressure "$R12K1" 8192 1.0 tick
 expect_contains "at current: 5 the ready Step-5 task is filled" "poker: FILL T2" "$OUT"
-expect_absent "…and the ready Step-6 task is not" "T3" "$OUT"
+expect_absent "…and the ready Step-6 task is not" "T3" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # 12k2 — at current: 4, two ready Step-4 rows and one held back by an unlanded dependency,
 # named in TABLE order (the orchestrator's own dependency ordering, not an ordering the
@@ -2497,7 +2497,9 @@ sp_plan_at_step "$R12K2" 4 \
   "| T3 | 4 | build | ready, second in the table | implementor | — | 15m | REQ-x | c.sh | pending |" > /dev/null
 poke_pressure "$R12K2" 8192 1.0 tick
 expect_contains "two ready Step-4 tasks are filled in table order" "poker: FILL T1 T3" "$OUT"
-expect_absent "…and the one whose dependency has not landed is held back" "T2" "$OUT"
+# A bare task id is tested against the FILL line only: the tick's decision record carries an
+# ISO timestamp (`at=2026-09-12T21:…`) whose `T2` made this case red for UTC hours 20–23 (A-86).
+expect_absent "…and the one whose dependency has not landed is held back" "T2" "$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL')"
 
 # 12k3 — the same table at current: 6, where nothing is ready: the tick says so, naming
 # the step it asked about rather than reporting an empty table.
