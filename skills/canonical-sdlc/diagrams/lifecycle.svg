@@ -66,7 +66,7 @@
   <text x="722" y="186" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">superpowers:writing-plans</text>
   <text x="722" y="222" font-size="10.5" fill="#3a424c">· no placeholders</text>
   <text x="722" y="238" font-size="10.5" fill="#3a424c">· integration-branch named</text>
-  <text x="722" y="254" font-size="10.5" fill="#3a424c">· matrix locked, slices tagged</text>
+  <text x="722" y="254" font-size="10.5" fill="#3a424c">· matrix locked, tasks tagged</text>
   <text x="722" y="270" font-size="10.5" fill="#3a424c">· epic stops right here</text>
 
   <line x1="244" y1="211" x2="258" y2="211" stroke="#8b949e" stroke-width="1.6" marker-end="url(#arrow)"/>
@@ -79,7 +79,7 @@
   <text x="946" y="164" font-size="16" font-weight="600" fill="#b42318">Approval Checkpoint</text>
   <text x="946" y="184" font-size="11" font-style="italic" fill="#b42318">the wave shape locks here, and the run goes quiet</text>
   <text x="946" y="212" font-size="10.5" fill="#3a424c">· one checkpoint — not a series of small confirmations</text>
-  <text x="946" y="230" font-size="10.5" fill="#3a424c">· the user approves the plan, the slices, the locked matrix</text>
+  <text x="946" y="230" font-size="10.5" fill="#3a424c">· the user approves the plan, the tasks, the locked matrix</text>
   <text x="946" y="248" font-size="10.5" fill="#3a424c">· a rigor floor is advice: an override is recorded, never refused</text>
   <text x="946" y="266" font-size="10.5" fill="#3a424c">· below this line the run is unattended, within stop-and-wake</text>
 
@@ -96,7 +96,7 @@
   <text class="step" data-step="4" data-step-name="Implement" x="56" y="376" font-size="16" fill="#16191d"><tspan font-weight="700">4</tspan><tspan dx="10" font-weight="600">Implement</tspan></text>
   <text x="56" y="398" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">agent-skills:</text>
   <text x="56" y="410" font-size="9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#8b949e">incremental-implementation</text>
-  <text x="56" y="434" font-size="10.5" fill="#3a424c">· RED before GREEN, every slice</text>
+  <text x="56" y="434" font-size="10.5" fill="#3a424c">· RED before GREEN, every task</text>
   <text x="56" y="450" font-size="10.5" fill="#3a424c">· assumptions logged as taken</text>
   <text x="56" y="466" font-size="10.5" fill="#3a424c">· parallel writers: worktrees</text>
 

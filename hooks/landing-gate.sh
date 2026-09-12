@@ -1,5 +1,5 @@
 #!/bin/bash
-# THE LANDING SWEEP — epic-16 wave-01 (the gate), wave-03 slice T4c (the sweep).
+# THE LANDING SWEEP — epic-16 wave-01 (the gate), wave-03 task T4c (the sweep).
 #
 # Stop. On every orchestrator turn end, during an active wave: read this session's roster,
 # take a landing verdict for every contract that has LANDED since the last sweep, and refuse
@@ -29,7 +29,7 @@
 # here, one string across all three (§2.2, §4, measured on one dispatch). A roster row whose
 # id is ABSENT from that list has landed; a row still on it is skipped in silence. Nothing
 # on this path reads `agent_type`, which carries the subagent TYPE and never the dispatch
-# name — the join defect t4-probes-report.md §5.1 found open and this slice closes.
+# name — the join defect t4-probes-report.md §5.1 found open and this task closes.
 #
 # ONCE PER ROW, EVER. Stop fires every turn and a landed row stays landed, so a sweep that
 # re-verdicted would refuse every turn end for the rest of the session over one agent's
@@ -664,7 +664,7 @@ _field() {  # <key> — by key, never by position, as every reader of these line
 }
 
 REFUSALS=""
-# WHICH FACT THE ONE LINE CARRIES when a sweep finds both kinds (slice 13, table rows
+# WHICH FACT THE ONE LINE CARRIES when a sweep finds both kinds (task 13, table rows
 # 107 and 108). The gate accumulates a paragraph per failing row and prints them all;
 # ruling D-1 gives the reader ONE line, so the FIRST kind found names it and every
 # accumulated paragraph rides `detail`. The alternative — a third, summarising fact —
@@ -848,7 +848,7 @@ LGDIFF
   [ "$VERDICT_RC" -eq 1 ] || continue
   [ "$STATE" = "UNMET" ] || continue
 
-  # AN ACKED ROW IS CLOSED FOR EVERY READER (epic-16 wave-02 slice S3, R2). The orchestrator
+  # AN ACKED ROW IS CLOSED FOR EVERY READER (epic-16 wave-02 task S3, R2). The orchestrator
   # verified this agent's completion and made that durable; reporting it again over artifacts
   # a human has already accounted for is the false alarm this wave exists to end. Read off
   # the verdict line, which is where the one reader of that ledger publishes it (S9).

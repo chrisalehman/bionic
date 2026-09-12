@@ -18,7 +18,7 @@
 #      # --- bionic-loader/v2 END
 #
 # WHO USES IT. `bionic_loader_pin` prints the block, markers inclusive, on stdout.
-# Slice ADOPT pastes that output verbatim into every hook on the spine; the
+# Task ADOPT pastes that output verbatim into every hook on the spine; the
 # byte-identity pin in tests/cross-gate-agreement.test.sh re-derives each hook's copy
 # from this function rather than from a hardcoded string, so a hook that drifts goes
 # red and this file stays the single source of truth. The block's BEHAVIOUR is proved

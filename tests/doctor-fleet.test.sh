@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/doctor-fleet.test.sh — doctor's RESOURCES section and the three run-scoped
-# rows (bionic 1.4.0, wave-bionic-1.4.0-update slice DOCTOR handoff 5.3 and 1.4;
+# rows (bionic 1.4.0, wave-bionic-1.4.0-update task DOCTOR handoff 5.3 and 1.4;
 # spec AC-27, AC-4's doctor line, AC-8, AC-11).
 #
 # WHAT IS UNDER TEST, and why these four facts belong on one page.

@@ -1,18 +1,18 @@
 #!/bin/bash
-# THE STOP GATE — epic-15 wave-01R, extended at wave-03 slice 4/6. ONE
+# THE STOP GATE — epic-15 wave-01R, extended at wave-03 task 4/6. ONE
 # registration, PreToolUse|TaskStop. A stop during an active wave is permitted
 # only against an observation that is:
 #
 #   OURS      — this session's (D-1), and the STOPPER'S OWN look, not another
-#               actor's borrowed one (D-3, slice 4/6);
+#               actor's borrowed one (D-3, task 4/6);
 #   FRESH     — on both activity channels: the target's working log (D-1) and,
 #               where the work contract named one, its progress artifact (D-6,
-#               slice 4/6);
+#               task 4/6);
 #   SPENT     — one observation discharges exactly one stop (D-2).
 #
 # And it is a stop of an agent THIS SESSION LAUNCHED. A target the session roster
 # does not record is refused when addressed by name and permitted when addressed
-# by full agent id (AC-6, slice 4/6) — a name is not an identity.
+# by full agent id (AC-6, task 4/6) — a name is not an identity.
 #
 # Why a gate at all: a stop is irreversible, and the failure mode it guards is
 # the orchestrator's own judgment lapsing mid-drift — so the guarantee cannot
@@ -20,7 +20,7 @@
 # §3.1). The gate reads state and decides; it never judges. Every judgment
 # belongs upstream, in the observation.
 #
-# THIS SCRIPT NO LONGER WRITES THE RECORDS IT SPENDS (slice 4/4). It used to
+# THIS SCRIPT NO LONGER WRITES THE RECORDS IT SPENDS (task 4/4). It used to
 # carry a second arm on PreToolUse|Bash that watched for hooks/stop-check.sh in a
 # command line and recorded an observation from the command TEXT. That arm fired
 # BEFORE the command ran, so it could never know whether one had — and it paid
@@ -327,8 +327,8 @@ engaged_session "$REPO" "$ENGAGED_SID" || exit 0
 
 RAW=$(_jq '.tool_input.task_id')
 
-# THE ACTOR REQUESTING THIS STOP (D-3, slice 4/6). A subagent-invoked payload
-# carries a top-level `agent_id`; the orchestrator's does not (slice 4/1 probe,
+# THE ACTOR REQUESTING THIS STOP (D-3, task 4/6). A subagent-invoked payload
+# carries a top-level `agent_id`; the orchestrator's does not (task 4/1 probe,
 # assumption A resolved FULL). hooks/execution-recorder.sh renders the same field
 # the same way into `observer=` — absence as the literal token `orchestrator`, so
 # neither side ever has to decide what a blank means. One key, two payloads.
@@ -343,7 +343,7 @@ FIX_TARGET="${RAW:-<agent-name-or-id>}"
 FIX_EXTRA=""
 
 deny() {  # <fact> <fix> <reason line>...
-  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (slice 13, ruling D-1). It used
+  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (task 13, ruling D-1). It used
   # to print twelve fixed lines and then the caller's reasons, all to the one stream the
   # reader is interrupted on. Now the caller's FACT and FIX — the ruled wording, one row
   # per reason, s12-refusal-wording-draft.md §1 rows 15-36 — render as the single user
@@ -612,7 +612,7 @@ fi
 #
 # The id and the session the log is filed under both come from the ROSTER ROW, which is the
 # only record that ever knew them: the harness's answer lists names, and the directory scan
-# that used to supply an id is what this slice deleted. `adopted_from` names the session that
+# that used to supply an id is what this task deleted. `adopted_from` names the session that
 # LAUNCHED an agent this one took over after a `/clear` — the log stays filed there, and the
 # row is where that fact was written down (session-poker.sh `adopt`).
 AFROM=$(record_field "$ROSTER_ROW" adopted_from)
@@ -624,7 +624,7 @@ else
 fi
 
 # HOW THE OPERATOR ADDRESSES THIS AGENT, in a form the platform's stop primitive accepts
-# (epic-16 wave-02 slice S3, from field data 2026-08-11). The roster's recorded teammate
+# (epic-16 wave-02 task S3, from field data 2026-08-11). The roster's recorded teammate
 # address wins; the constructed form is the fallback, and it is built from the session that
 # launched the agent, because that is the session the address names.
 ROSTER_TEAMMATE=$(record_field "$ROSTER_ROW" teammate_id)
@@ -866,7 +866,7 @@ fi
 # any activity after the look stales the look.
 #
 # THE PATH COMES OUT OF THE RECORD, not out of a second resolution. The
-# observation already resolved it under the precedence slice 4/5 fixed (an
+# observation already resolved it under the precedence task 4/5 fixed (an
 # explicit --progress overrides the roster's row), and re-deriving it here would
 # be a second parser answering the same question — the F-1 divergence class this
 # wave closed elsewhere. What the roster is still consulted for is the one thing

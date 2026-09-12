@@ -57,7 +57,7 @@ fi
 # FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): this is a wall over an
 # IRREVERSIBLE action, so it refuses rather than waving a command through it cannot
 # read — after permitting the four repair commands by whole-string match.
-BIONIC_LIB_WANT="git-argv.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="git-argv.sh refuse.sh root.sh run.sh session.sh units.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -220,6 +220,11 @@ fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# THE ONE READER OF `## Tasks` (REQ-1e, spec §2 D3). Both ledger checks and the
+# prototype-row arm below take their rows from here; this hook parses no table of
+# its own. Sourced through the lib the loader already found, like every other.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/units.sh"
 
 # Is any segment of the command a `git commit`? The library answers by argv
 # position: git must be argv[0] (after leading VAR=value assignments and git's
@@ -666,7 +671,7 @@ effective_row_rigor() {  # $1 = row's rigor cell
   esac
 }
 
-# Total order over the rigor enum, for the per-row FLOOR check (slice 4/8).
+# Total order over the rigor enum, for the per-row FLOOR check (task 4/8).
 # tested < peer-reviewed < audited. An empty/unknown value maps to 0 (the tested
 # floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -713,7 +718,7 @@ matrix_auditor_required() {
   esac
 }
 
-# Proof-shape test (D-slice 4/2): an evidence value counts as "proof-shaped"
+# Proof-shape test (D-task 4/2): an evidence value counts as "proof-shaped"
 # — a command invocation + result counts, not prose — iff it contains BOTH
 # at least one digit AND at least one command token. A command token is any
 # of: a backtick; a literal '/' anywhere (a path, e.g. 'hooks/foo.sh'); or a
@@ -738,7 +743,7 @@ is_proof_shaped() {  # $1 = evidence value
   return 1
 }
 
-# Rigor-keyed evidence lanes (D-slice 4/2, TASK SCALE ONLY). Applies to
+# Rigor-keyed evidence lanes (D-task 4/2, TASK SCALE ONLY). Applies to
 # the addressed row (any status) and to every OTHER row with status `done`
 # that has a non-empty, non-placeholder evidence line — the caller only
 # invokes this once those upstream 4/1 presence/placeholder checks (and, for
@@ -787,7 +792,7 @@ Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line bef
   fi
 }
 
-# Per-row rigor FLOOR check (slice 4/8, A15 — user-ratified, momentous). The
+# Per-row rigor FLOOR check (task 4/8, A15 — user-ratified, momentous). The
 # per-row `rigor` cell is a FLOOR unified with the run-rigor floor model: a
 # cell RAISING a row above the frontmatter rigor is always allowed (the cell
 # drives the heavier lane, 4/4), but a cell LOWERING it below the frontmatter
@@ -822,7 +827,7 @@ Fix: raise the cell to at least '${RIGOR}', or record a downgrade: add 'waiver: 
 }
 
 # Router for the previously-log-only NON-addressed-row ledger-shape checks
-# (D-slice 4/3, task scale). On a frontmatter `rigor: audited` plan these
+# (D-task 4/3, task scale). On a frontmatter `rigor: audited` plan these
 # promote to BLOCKING (exit 2); at any other rigor they stay log-only findings
 # (D14, unchanged). The detail string is authored once by the caller and used
 # verbatim in whichever channel fires. The addressed-unit floor (4/1) and the
@@ -848,7 +853,7 @@ Audited rigor makes the ledger-shape checks blocking; a non-audited plan would l
 # table (fence-aware, the matrix_section idiom) and the per-task `- T<n>:`
 # evidence lines in the ## SDLC State section (SECTION, already newline-normalized).
 #
-# Two lanes (slice 4/1), plus rigor-keyed lanes on top (slice 4/2):
+# Two lanes (task 4/1), plus rigor-keyed lanes on top (task 4/2):
 #   - THE ADDRESSED UNIT — the `T<n>` named by `current: T<n>` — is BLOCKING at
 #     the tested floor: its row must exist in `## Tasks`, carry a non-placeholder
 #     `- T<n>:` evidence line, and have a rigor cell that resolves (its cell
@@ -873,24 +878,40 @@ Audited rigor makes the ledger-shape checks blocking; a non-audited plan would l
 #     status-based branching; see that guard for the rationale.
 # [INSTRUMENT]
 validate_task_ledger() {
-  local tasks rows line id status rigor_cell ev eff addressed_found=0
-  tasks=$(normalize_newlines "$PLAN" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## Tasks/ { f=1; next }
-    /^## / { f=0 }
-    f')
-  if [ -z "$tasks" ]; then
+  local rows rc line id status rigor_cell ev eff addressed_found=0
+  # THE ROWS COME FROM lib/units.sh (REQ-1e, AC-1e.1), header-keyed. The cells this
+  # function wants are slot 1 `id`, slot 10 `status` and slot 3 — which the widened
+  # wave schema spells `kind` and this task-scale registration table spells `rigor`,
+  # one slot under two names (see units.sh's header). The read it replaces took
+  # `$2`/`$6`/`$4` by COLUMN POSITION, which is the defect measured at
+  # record/wave-11-lean-spine/step1-measure-1a-1e.md §4.3.
+  #
+  # THE TASK-SCALE ENUMS STAY HERE, NOT IN `units_validate` (T8 ruling, recorded in
+  # record/wave-11-lean-spine/assumptions.md). `units_validate` enforces the
+  # WAVE schema — ten columns, status `landed` — and this table is the five-column
+  # `| id | intent | rigor | description | status |` ledger with `done` in it, which
+  # REQ-1e does not widen. Delegating here would refuse every task-scale plan for
+  # eight columns it was never asked to carry.
+  #
+  # A NON-ZERO rc IS AN ABSENT TABLE; zero rows is a PRESENT but empty one, which
+  # falls through to the addressed-unit check at the bottom. The distinction is the
+  # old `[ -z "$tasks" ]` test, kept: "no ledger yet" and "your row is missing" are
+  # different findings.
+  rows="$(units_rows "$PLAN")"; rc=$?
+  if [ "$rc" -ne 0 ]; then
     ledger_shape_fail "this task-scale plan has no tasks table yet" "add a row per task" \
       "task-scale plan has no '## Tasks' registration section"
     return 0
   fi
-  rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    id=$(echo "$line"         | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    status=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
-    rigor_cell=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
+    id=$(units_field "$line" id)
+    # T-IDS ONLY, as the `| T[0-9]+` row grep this replaced demanded: a `## Tasks`
+    # table may carry a legend or a non-unit row, and the evidence lines this
+    # function looks up are `- T<n>:` by name.
+    case "$id" in T[0-9]*) : ;; *) continue ;; esac
+    status=$(units_field "$line" status)
+    rigor_cell=$(units_field "$line" rigor)
     # status enum — routed through ledger_shape_fail (4/3): blocking on audited
     # plans, log-only otherwise (was unconditionally log-only in D12).
     case "$status" in
@@ -925,7 +946,7 @@ Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited b
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
     if [ "$id" = "$CURRENT" ]; then
-      # THE ADDRESSED UNIT: the tested floor is BLOCKING (slice 4/1).
+      # THE ADDRESSED UNIT: the tested floor is BLOCKING (task 4/1).
       addressed_found=1
       if [ -z "$ev" ]; then
         _eg_detail="canonical-sdlc task ${id} has no '- ${id}:' evidence line in '## SDLC State'.
@@ -1171,57 +1192,48 @@ Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${a
   return 0
 }
 
-# The `## Slices` section body, same fence-aware/heading-bounded shape as
-# `matrix_section` above — a separate awk pass over the whole plan, stopping at the
-# next `## ` heading. Moved up beside the other Step-4 arms (epic-22 K2.5) for the
-# same reason: the task-scale branch below needs it defined before it is called.
-slices_section() {
-  normalize_newlines "$PLAN" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## Slices/ { f=1; next }
-    /^## / { f=0 }
-    f'
-}
-
 # ---------- the prototype no-row arm (AC-K4.2, epic-22 K4 + K2.5) ----------
 #
 # A PROTOTYPE NEVER DISCHARGES A MATRIX ROW (design decision D7). Its output is a
 # design ruling written back to the spec, not a shipped behavior — nothing about a
-# throwaway is provable by an eval, so a `kind: prototype` slice that also owns a
+# throwaway is provable by an eval, so a `kind: prototype` task that also owns a
 # Verification Matrix AC block is a category error the gate can catch structurally:
-# the `## Slices` table names which slices are prototypes, and each AC block's own
-# `slice:` field names which slice discharges it. Reads both tables the same way
-# `validate_fails_when` reads the matrix — rows first, then the block underneath
-# each row — so an AC id absent from the row table (and therefore from the matrix
-# entirely) cannot be judged here either.
+# the `## Tasks` table names which tasks are prototypes, and each AC block's own
+# `task:` field names which task discharges it. Reads the matrix the same way
+# `validate_fails_when` does — rows first, then the block underneath each row — so
+# an AC id absent from the row table (and therefore from the matrix entirely)
+# cannot be judged here either.
+#
+# THE FOURTH READER REQ-1e RE-POINTS (measure §5, blocker 4). It used to read a
+# section of its own, under the heading this wave retired, by COLUMN POSITION: `$2`
+# for the number and `$4` for the kind. The section is `## Tasks` now, the rows come
+# from lib/units.sh header-keyed, the number is an id, and the matrix field it
+# cross-references is `task:`.
 #
 # INERT BELOW STEP 4 (numbered) OR BELOW `current: T<n>` (task-scale, epic-22 K2.5),
-# same reasoning as the two arms above: the Slices table and the Verification Matrix
+# same reasoning as the two arms above: the Tasks table and the Verification Matrix
 # are both Step-3 artifacts, not necessarily complete before then, and a task-scale
-# plan typically carries neither — `slices_section` returns empty and this is a no-op.
+# plan carries no `kind` cell at all — `units_field ... kind` reads empty and this
+# is a no-op.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_prototype_no_matrix_row() {
-  local step slices proto_nums line num kind rows ac block_txt ac_slice n
+  local step task_rows proto_ids line id rows ac block_txt ac_task n
   step=$(k2_step_num)
   [ -n "$step" ] || return 0
   [ "$step" -ge 4 ] || return 0
 
-  slices=$(slices_section | grep -E '^[[:space:]]*\|')
-  [ -n "$slices" ] || return 0
+  task_rows="$(units_rows "$PLAN")" || return 0
+  [ -n "$task_rows" ] || return 0
 
-  proto_nums=""
+  proto_ids=""
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    echo "$line" | grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' && continue
-    num=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    [ "$num" = "#" ] && continue
-    kind=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
-    [ "$kind" = "prototype" ] || continue
-    [ -n "$num" ] || continue
-    proto_nums="$proto_nums $num"
-  done <<< "$slices"
-  [ -n "$proto_nums" ] || return 0
+    [ "$(units_field "$line" kind)" = "prototype" ] || continue
+    id=$(units_field "$line" id)
+    [ -n "$id" ] || continue
+    proto_ids="$proto_ids $id"
+  done <<< "$task_rows"
+  [ -n "$proto_ids" ] || return 0
 
   MATRIX=$(matrix_section)
   [ -n "$MATRIX" ] || return 0
@@ -1236,15 +1248,15 @@ validate_prototype_no_matrix_row() {
     [ -n "$ac" ] || continue
     block_txt=$(matrix_block "$ac")
     [ -n "$block_txt" ] || continue
-    ac_slice=$(echo "$block_txt" | grep -E '^[[:space:]]*slice[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*slice[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    [ -n "$ac_slice" ] || continue
-    for n in $proto_nums; do
-      [ "$ac_slice" = "$n" ] || continue
-      _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names 'slice: ${ac_slice}', a 'kind: prototype' row in '## Slices'; a prototype ships nothing and never discharges a matrix row.
+    ac_task=$(echo "$block_txt" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
+      | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+    [ -n "$ac_task" ] || continue
+    for n in $proto_ids; do
+      [ "$ac_task" = "$n" ] || continue
+      _eg_detail="canonical-sdlc step ${CURRENT} — matrix row '${ac}' names 'task: ${ac_task}', a 'kind: prototype' row in '## Tasks'; a prototype ships nothing and never discharges a matrix row.
 Plan: $PLAN
-Fix: remove the '${ac}:' block, or repoint its 'slice:' to the build slice that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
-      refuse exit2 commit "that row's slice ships nothing" "point it at a shipping slice" "$_eg_detail"
+Fix: remove the '${ac}:' block, or repoint its 'task:' to the build task that cites the prototype's ruling — the prototype's own output is a design decision written to the spec, never a matrix discharge."
+      refuse exit2 commit "that row's task ships nothing" "point it at a shipping task" "$_eg_detail"
     done
   done <<< "$rows"
   return 0
@@ -1651,7 +1663,7 @@ Fix: add 'deployed:', 'verified:', and 'monitored:' to the Step ${step} block �
 # (pending|blocked|discharged|waived) since the relaxation makes it
 # load-bearing.
 #
-# Close-out criteria: a T0 row whose AC block carries `slice: 9` keeps that
+# Close-out criteria: a T0 row whose AC block carries `task: 9` keeps that
 # same relaxation ALL THE WAY to current: 9 — both the per-tier keys and the
 # CONFIRMED wall — because its evidence is a Step-9 artifact that does not
 # exist yet. It is two exemptions, not one: the key loop and the CONFIRMED
@@ -1755,7 +1767,7 @@ plan_write_note() {
 # command also writes the plan. $1 = message tail, $2 = fix line.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 block_matrix() {  # <fact> <fix> <observation> <repair prose>
-  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (slice 13, ruling D-1, parametric
+  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (task 13, ruling D-1, parametric
   # table v2). $1 and $2 are the ruled fact and fix and render as the one user line; the
   # step number, the caller's long observation — the only place ${ac}, ${tier}, ${key},
   # ${val}, ${aud}, the walk paths and the environment lists are spelled — the plan path,
@@ -1774,7 +1786,7 @@ matrix_is_placeholder() {
 }
 
 validate_matrix() {
-  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc slice_val slice9 row_is_waived ev_abs
+  local sh rows line ncols ac tier status ev aud block_txt key val val_lc prov_val prov_val_lc task_val task9 row_is_waived ev_abs
 
   # Set while any row is still pending/blocked at current: 5. The
   # Step-5 validator reads it to keep the `auditor:` pointer optional
@@ -1888,7 +1900,7 @@ validate_matrix() {
         "matrix row '${ac}' cites 'provenance: implementation' — the implementation cannot be the source of its own requirement." \
         "cite the real requirement source (user quote, spec section, ticket, report) for '${ac}', not the implementation itself."
     fi
-    # `slice: 9` (B-2, 2026-08-30): a criterion whose only evidence is a Step-9
+    # `task: 9` (B-2, 2026-08-30): a criterion whose only evidence is a Step-9
     # lifecycle artifact — the close-out report, continuation.md, the ADR the
     # close-out writes — cannot be discharged at Steps 5..8, because the thing
     # it would cite does not exist yet. Such a row had only dishonest homes: a
@@ -1903,17 +1915,17 @@ validate_matrix() {
     # cell, which is the same wall wearing a different refusal.
     #
     # T0-ONLY. Every other tier names evidence that exists before Step 9 (a
-    # suite run, a live surface, the user's own word), so `slice: 9` there is a
+    # suite run, a live surface, the user's own word), so `task: 9` there is a
     # mis-tag rather than a deferral: it blocks at ANY step, naming the tier —
     # including current: 5, where a pending row is otherwise exempt from
     # everything and the mis-tag would sit unread until the 5→6 advance.
-    # Only the exact value `9` means anything; `slice: 4` is an ordinary
+    # Only the exact value `9` means anything; `task: 4` is an ordinary
     # annotation this hook does not read.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    slice_val=$(echo "$block_txt" | grep -E '^[[:space:]]*slice[[:space:]]*:' | head -1 \
-      | sed -E 's/^[[:space:]]*slice[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
-    slice9=0
-    if [ "$slice_val" = "9" ]; then
+    task_val=$(echo "$block_txt" | grep -E '^[[:space:]]*task[[:space:]]*:' | head -1 \
+      | sed -E 's/^[[:space:]]*task[[:space:]]*:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')
+    task9=0
+    if [ "$task_val" = "9" ]; then
       # A WAIVED row is exempt from the tier refusal (review-a C-2). The tag on
       # a non-T0 row is a mis-tag, but a waiver has already dissolved that
       # row's evidence contract — every other per-row demand in this loop
@@ -1923,10 +1935,10 @@ validate_matrix() {
       # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
       if [ "$tier" != "T0" ] && [ "$row_is_waived" = "0" ]; then
         block_matrix "row ${ac} defers its evidence to close-out" "prove it now, or retier T0" \
-          "matrix row '${ac}' is ${tier} and carries 'slice: 9' — only a T0 row defers its evidence to the close-out." \
+          "matrix row '${ac}' is ${tier} and carries 'task: 9' — only a T0 row defers its evidence to the close-out." \
           "a ${tier} row's evidence exists before Step 9 — discharge '${ac}' at its own tier, or retier the row to T0 if the criterion really is a close-out obligation."
       fi
-      slice9=1
+      task9=1
     fi
     # waived rows (evidence cell or the AC block carries a `waiver:` entry) are
     # exempt from the per-tier evidence requirement.
@@ -1938,9 +1950,9 @@ validate_matrix() {
       # (the 6..9 prefix check), mirroring the CONFIRMED rule. This is what
       # gives a mid-walk corrective commit an honest home at current: 5.
       UNDISCHARGED=1
-    elif [ "$slice9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+    elif [ "$task9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
          && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
-      # Close-out row before Step 9 — see the `slice: 9` note above. Sits
+      # Close-out row before Step 9 — see the `task: 9` note above. Sits
       # BELOW the current: 5 arm on purpose: at the Verify gate the existing
       # relaxation must still set UNDISCHARGED, which keeps the Step-5
       # `auditor:` pointer optional while any row is undischarged.
@@ -2044,9 +2056,9 @@ validate_matrix() {
     if [ "$CURRENT" -gt 5 ] 2>/dev/null && matrix_auditor_required; then
       if [ "$status" = "waived" ] || [ "$row_is_waived" = "1" ]; then
         :
-      elif [ "$slice9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
+      elif [ "$task9" = "1" ] && [ "$CURRENT" -lt 9 ] 2>/dev/null \
            && { [ "$status" = "pending" ] || [ "$status" = "blocked" ]; }; then
-        # The second of the `slice: 9` tag's two arms. An auditor cannot
+        # The second of the `task: 9` tag's two arms. An auditor cannot
         # CONFIRM a row whose evidence Step 9 has not produced; demanding it
         # here would re-impose the wall the key-loop exemption just lifted.
         :
@@ -2450,7 +2462,7 @@ validate_intent_evidence() {
   return 0
 }
 
-# Wave-scale D7 dispatched-task ledger PRESENCE (D-slice 4/3). Guarded to
+# Wave-scale D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to
 # scale:wave + frontmatter rigor:audited + multi_agent:true plans; for
 # every other plan it is a no-op (return 0). scale:epic is intentionally OUT —
 # epic plans legitimately dispatch research, not task-shaped units, so demanding
@@ -2466,45 +2478,54 @@ validate_intent_evidence() {
 #      audited multi_agent wave must carry its dispatched-task ledger home).
 #   2. ZERO data rows -> SATISFIED (a human `none dispatched` prose line is
 #      documentation, not required by the parser). return 0.
-#   3. Each data row: status (field 6) in {pending,active,done,dropped} else
-#      exit 2; a non-placeholder `- T<n>:` evidence line must exist in the
-#      ## SDLC State section (SECTION) else exit 2.
+#   3. Each data row: the Task invariants, delegated to `units_validate` (REQ-1e)
+#      — status in {pending,active,landed,dropped} among them — else exit 2; a
+#      non-placeholder `- T<n>:` evidence line must exist in the ## SDLC State
+#      section (SECTION) else exit 2.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_dispatch_ledger() {
   [ "$SCALE" = "wave" ] || return 0
   [ "$RIGOR" = "audited" ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local tasks rows line id status ev
-  # Fence-aware `## Tasks` extraction — same awk extractor as validate_task_ledger.
-  tasks=$(normalize_newlines "$PLAN" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## Tasks/ { f=1; next }
-    /^## / { f=0 }
-    f')
-  if [ -z "$tasks" ]; then
+  local rows rc line id ev violations
+  # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
+  # This is the check the widened table breaks hardest: `| id | step | kind | task |
+  # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
+  # function used to read as a status, so every row of an ordinary wave plan failed
+  # the enum — on the wave's own plan, at its own next commit
+  # (record/wave-11-lean-spine/step1-measure-1a-1e.md §4.3, and fixture 22e1).
+  #
+  # DELEGATED, NOT RESTATED. The status enum this function carried is one of the
+  # Task invariants `units_validate` now owns, and it owns the rest of them too —
+  # id shape, step range, kind vocabulary, deps that resolve, and the Step-5+ rows
+  # depending transitively on every Step-4 row. One violation line per fault, each
+  # naming its id and its rule, is what the writer gets back.
+  #
+  # WHAT STAYS HERE is the pair of facts units.sh cannot know: that this plan owes a
+  # ledger at all (the D7 PRESENCE rule, guarded to the triple above), and that every
+  # row's evidence has actually been written on a `- T<n>:` line in ## SDLC State.
+  rows="$(units_rows "$PLAN")"; rc=$?
+  if [ "$rc" -ne 0 ]; then
     _eg_detail="canonical-sdlc audited multi_agent wave plan has no '## Tasks' dispatched-task ledger section.
 Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
     refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"
   fi
-  rows=$(echo "$tasks" | grep -E '^[[:space:]]*\|[[:space:]]*T[0-9]+')
   [ -n "$rows" ] || return 0
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  violations="$(units_validate "$PLAN")" || true
+  if [ -n "$violations" ]; then
+    _eg_detail="canonical-sdlc audited multi_agent wave plan's '## Tasks' table breaks the Task invariants:
+${violations}
+Plan: $PLAN
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status."
+    refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
+  fi
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    id=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
-    status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
-    # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-    case "$status" in
-      pending|active|done|dropped) : ;;
-      *)
-        _eg_detail="canonical-sdlc dispatched task ${id} has invalid status '${status:-empty}' (want pending|active|done|dropped).
-Plan: $PLAN
-Fix: set the '${id}' row's status cell to one of pending|active|done|dropped before committing."
-        refuse exit2 commit "that dispatched task's status is invalid" "use one of the four statuses" "$_eg_detail"
-        ;;
-    esac
+    id=$(units_field "$line" id)
+    case "$id" in T[0-9]*) : ;; *) continue ;; esac
     # Evidence line in ## SDLC State (anchored, same lookup as task scale).
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \

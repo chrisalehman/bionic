@@ -1,5 +1,5 @@
 #!/bin/bash
-# WORKTREE — bionic 1.4.0 wave, slice WORKTREE (spec AC-11, AC-28; design ledger
+# WORKTREE — bionic 1.4.0 wave, task WORKTREE (spec AC-11, AC-28; design ledger
 # C1 "worktree lease", C2 ".bionic symlink retired").
 #
 # WHAT THIS SUITE OWNS. One payload library:

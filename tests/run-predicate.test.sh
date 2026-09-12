@@ -1004,7 +1004,7 @@ expect_eq "config_value: …and the other one from the same file" "2d" \
 # them apart for one wave ("only this key uses it in this wave"), so what held them together
 # was agreement on the same input. The sharpest case was the quote-strip running BEFORE the
 # trailing-space trim in BOTH, so a quoted value with a trailing space keeps its closing
-# quote — a shared WART, pinned so that a slice fixing one reader and not the other failed
+# quote — a shared WART, pinned so that a task fixing one reader and not the other failed
 # here rather than in a hook.
 #
 # There is one reader now: `docs_root` and `config_value` both live in lib/roots.sh and

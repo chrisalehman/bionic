@@ -1,5 +1,5 @@
 #!/bin/bash
-# env.sh — the ONE home for bionic's environment settings (epic-17 wave-07 slice
+# env.sh — the ONE home for bionic's environment settings (epic-17 wave-07 task
 # S4, spec R4 / AC-5, AC-6, AC-7).
 #
 # WHAT THIS FILE OWNS. The `env` object in the CLI's own settings.json: which

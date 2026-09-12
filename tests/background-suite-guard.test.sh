@@ -116,7 +116,7 @@ run_hook() {  # <payload> <hook> [args...]
 # and a wall proved only when driven straight is a wall nobody proved.
 VERR=""
 guarded() {  # <repo> <command> [agent_id] [bg]
-  # TWO DRIVES OF THE SAME CALL, and the pair is what slice 13's ruling D-1 made
+  # TWO DRIVES OF THE SAME CALL, and the pair is what task 13's ruling D-1 made
   # necessary. The user stream is ONE line now — `bionic: <verb> refused — <fact>
   # (<fix>)` — and everything this suite used to read off it (the suite asked for, the
   # recorded set, the word BUDGET, the standing ruling) is `detail`, which reaches a
@@ -389,7 +389,7 @@ guarded_from() {  # <cwd for the hook process> <repo> <command>
           bash "$CTX_GUARD" "$GUARD" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
-  # The same call again with the knob, for the arms that read `detail` (slice 13, D-1).
+  # The same call again with the knob, for the arms that read `detail` (task 13, D-1).
   VERR=$(cd "$_dir" && printf '%s' "$_payload" | env HOME="$FAKE_HOME" \
           CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
           CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= BIONIC_WALL_VERBOSE=1 \

@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/session.test.sh — payload/scripts/lib/session.sh (bionic 1.4.0 wave,
-# spec AC-2, plan slice L-SESSION).
+# spec AC-2, plan task L-SESSION).
 #
 # WHAT THIS SUITE OWNS. The one library function `session_id`: the
 # environment value (`$CLAUDE_CODE_SESSION_ID`) is primary, a payload sid

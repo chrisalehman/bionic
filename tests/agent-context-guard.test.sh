@@ -81,7 +81,7 @@ scale: wave
 integration-branch: main
 current: 4
 
-- Step 4: slices in flight
+- Step 4: tasks in flight
 PLAN
   mkdir -p "$repo/.bionic/tmp"
   {
@@ -128,7 +128,7 @@ roster_rows() {  # grep -c prints 0 AND exits 1 on no match, so never `|| echo 0
 }
 
 # A brief that the absent-deliverable wall refuses: no deliverable, no waiver.
-BRIEF_BROKEN='Canonical-sdlc Step 4. Your slice: implement the widget behind the seam.
+BRIEF_BROKEN='Canonical-sdlc Step 4. Your task: implement the widget behind the seam.
 Exit condition: the paired suite is green.'
 
 # A brief every wall accepts — used for the LEDGER cases, where the point is what
@@ -137,8 +137,8 @@ Exit condition: the paired suite is green.'
 # is refused there, which would have made every LEDGER case below measure that wall
 # instead of the partition it means to measure. The DECLARED spelling, because these
 # fixture repos configure no `impact-command:`.
-BRIEF_OK='Canonical-sdlc Step 4, slice 4/9 of epic-99 wave-01; build · audited · wave.
-Your slice: implement the widget behind the existing seam.
+BRIEF_OK='Canonical-sdlc Step 4, task 4/9 of epic-99 wave-01; build · audited · wave.
+Your task: implement the widget behind the existing seam.
 Expected artifact: .bionic/docs/record/w99-widget.txt
 Expected duration: ~25 minutes.
 Progress artifact: .bionic/tmp/w99-widget.progress, cadence ~5m
@@ -198,7 +198,7 @@ run_guard() {  # <payload> <target...>
   return 0
 }
 
-# THE SAME CALL WITH THE DETAIL KNOB ON (slice 13, ruling D-1). The user stream is one
+# THE SAME CALL WITH THE DETAIL KNOB ON (task 13, ruling D-1). The user stream is one
 # line now — `bionic: <verb> refused — <fact> (<fix>)` — and everything a refusal used to
 # spell out for the reader is `detail`, which reaches a stream only under
 # BIONIC_WALL_VERBOSE=1. A row that wants a value out of a refusal drives the call a

@@ -1,5 +1,5 @@
 #!/bin/bash
-# THE EXECUTION-CONFIRMATION RECORDER — epic-15 wave-03, slice 4/4.
+# THE EXECUTION-CONFIRMATION RECORDER — epic-15 wave-03, task 4/4.
 #
 # ONE script, THREE registrations, one job: write down what ACTUALLY RAN.
 #
@@ -29,7 +29,7 @@
 # did. Here there is no second reader. The observation prints one machine line on
 # its success path and this script copies it; a command that was refused, that
 # exited non-zero, or that merely MENTIONS stop-check.sh prints no such line and
-# leaves nothing behind. Slice 4/1's probe confirmed the harness never fires this
+# leaves nothing behind. Task 4/1's probe confirmed the harness never fires this
 # event for a call it blocked pre-dispatch, so the gating is the platform's, not
 # ours (record/w3-slice1-posttooluse-probe.md §5).
 #
@@ -157,7 +157,7 @@ if [ -n "$IS_START" ]; then
   START_ID=$(_jq '.agent_id')
   [ -n "$START_ID" ] || exit 0
 elif [ "$TOOL_NAME" = "Bash" ]; then
-  # A Bash tool_response is an object carrying stdout/stderr (slice 4/1 capture
+  # A Bash tool_response is an object carrying stdout/stderr (task 4/1 capture
   # A); a failed call can hand back a bare string instead, and `tostring` keeps
   # that case parseable rather than crashing jq. Only STDOUT is searched — the
   # machine line is printed there, and searching stderr would let a quoted error
@@ -468,9 +468,9 @@ prior_launch_for_agent() {  # <agent-id> -> earliest launched_at for that id thi
 # ============================================================
 #
 # The launch half wrote an `intended` row at PreToolUse, keyed by `tool_use_id`
-# because no agent id exists yet at that moment (slice 4/3). This event carries
+# because no agent id exists yet at that moment (task 4/3). This event carries
 # the same `tool_use_id` and an id for the agent that spawned — and WHICH id
-# depends on the dispatch mode, which is the whole of epic-16 slice 0.
+# depends on the dispatch mode, which is the whole of epic-16 task 0.
 #
 # THE ID NAMESPACES DO NOT MEET. An async launch returns the transcript-form id
 # (`a26bd30bf8616411b`) — the same form every later observation of that agent
@@ -779,7 +779,7 @@ if [ -n "$IS_START" ]; then
   # an async dispatch (t1-probe-report.md §2.1, both measured on one live session).
   # THE CORRECTED HISTORY (Step-6 review flag 1-A; the prior text here had it
   # backwards). This join is not new and was never unscoped: it was WRITTEN at
-  # `47e8961` (epic-16 w1 slice 1/7) with the same predicates as today's — `name=`
+  # `47e8961` (epic-16 w1 task 1/7) with the same predicates as today's — `name=`
   # equality, `intended|confirmed`, session-scoped (`git show
   # 47e8961:hooks/execution-recorder.sh`) — then DELETED at `27a8e4c`, whose own
   # message gives the cause: "the execution recorder's identification arm keyed on
@@ -869,7 +869,7 @@ fi
 TRANSCRIPT=$(_jq '.transcript_path')
 SUB=$(session_subagents_dir "$TRANSCRIPT") || exit 0
 
-# THE OBSERVER (slice 4/1, assumption A resolved FULL). A top-level `agent_id` is
+# THE OBSERVER (task 4/1, assumption A resolved FULL). A top-level `agent_id` is
 # present on subagent-invoked payloads and absent on the orchestrator's — that is
 # the entire discriminator, and it is positive rather than inferential: present
 # means "this subagent made the call, and here is which one". Absence is rendered
@@ -996,7 +996,7 @@ write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <pro
     # already reads; `observer` and the D-6 progress snapshot are additive, and
     # the gate's by-key reader is inert to fields it does not know (checklist A6),
     # which is why this is still `v1` rather than a version bump that would refuse
-    # every record until its reader caught up. Slice 4/5 adds `classification` and
+    # every record until its reader caught up. Task 4/5 adds `classification` and
     # the two contract-source fields the same way — copied verbatim from the
     # producer's own machine line, additive, still `v1`.
     printf '%s|session=%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|observer=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \

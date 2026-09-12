@@ -1,7 +1,7 @@
 #!/bin/bash
 # STOP ORDERS — the human's instruction, and the batch stand-down.
 # Design: .bionic/docs/specs/epic-16-landing-contract/wave-02-fact-based-supervision.spec.md
-#         §Design (R3, R8), slice S3.
+#         §Design (R3, R8), task S3.
 # [WALL: tests/stop-orders.test.sh]
 #
 # This is NOT a hook. Like hooks/session-sweeper.sh and hooks/stop-check.sh it lives in
@@ -518,7 +518,7 @@ case "$VERB" in
 
     # THE LIVE SET, read ONCE for the whole batch and only for the LEFT ALONE reason text.
     # A stale or absent answer leaves `_live` empty and `_live_ok` at 0, and every held row
-    # is then reported exactly as it was before this slice: this verb owes a report, and an
+    # is then reported exactly as it was before this task: this verb owes a report, and an
     # annotation it cannot justify is worse than none.
     _live=""; _live_ok=0
     _own_tr=$(own_transcript) || _own_tr=""

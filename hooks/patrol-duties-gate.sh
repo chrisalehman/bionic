@@ -54,7 +54,7 @@
 # NotebookEdit/Bash tool_use whose input names the active plan file discharges
 # the same duty.
 #
-# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan slice STOPGATES). A `/clear`
+# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan task STOPGATES). A `/clear`
 # rewrites the session id in place but does not kill a predecessor's cron job — it
 # survives and keeps firing into the new conversation (probe A-probe-4). The new
 # transcript's very first turn is the literal `<command-name>/clear</command-name>`
@@ -89,8 +89,8 @@
 #   - both duties done since that prompt                  -> pass, silent
 #   - either duty missing                                 -> REFUSE, naming which
 #   - no `poker: FILL` line in the turn                   -> pass, silent (fill arm inert)
-#   - every named slice dispatched, or a decline present  -> pass, silent
-#   - a named slice neither dispatched nor declined       -> REFUSE, naming that slice
+#   - every named task dispatched, or a decline present  -> pass, silent
+#   - a named task neither dispatched nor declined       -> REFUSE, naming that task
 #   - a marker or a decline read out of a TOOL RESULT      -> ignored (not the orchestrator's)
 #   - no clear/resume marker anywhere in the transcript   -> pass, silent (ritual arm inert)
 #   - CronList precedes any CronCreate since the marker   -> pass, silent (ritual arm inert)
@@ -535,21 +535,21 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # ---------- THE THIRD DUTY: a printed FILL is answered before the turn ends (AC-29) ----
 #
 # WHY THIS IS A WALL AND NOT A LINE IN THE PROMPT. The tick can compute the gap between the
-# budget and the roster, and it can name the slices that are ready — but it cannot dispatch,
+# budget and the roster, and it can name the tasks that are ready — but it cannot dispatch,
 # and a recommendation nobody is obliged to answer is how this repo's own 1.4.0 wave ran six
 # writers against a budget of twenty-two. The turn's END is the only moment at which
 # "the FILL went unanswered" is a fact, so it is the moment this asks.
 #
-# ANSWERED MEANS EITHER: an `Agent` tool_use naming the slice, or an explicit
+# ANSWERED MEANS EITHER: an `Agent` tool_use naming the task, or an explicit
 # `fill-declined: <reason>` anywhere in the turn. The decline is not a loophole — it is the
 # point. There are good reasons not to fill (a dependency landing this minute, peers not yet
 # idle, a merge in flight), and every one of them is worth one line in the record. What is
 # refused is SILENCE.
 #
-# NAMED, not counted: a turn that dispatched two of three named slices is missing one, and
+# NAMED, not counted: a turn that dispatched two of three named tasks is missing one, and
 # the reason says which. An id is matched on a WORD BOUNDARY inside the dispatch's own
 # fields — its name, description, subagent_type and prompt — so `ONE` is not found inside
-# `PHONE`, and only ids shaped like slice ids (letters, digits, `_`, `.`, `-`) are ever
+# `PHONE`, and only ids shaped like task ids (letters, digits, `_`, `.`, `-`) are ever
 # echoed back into the refusal. A `.` in an id is a LITERAL dot in that boundary test, not
 # the regex wildcard it would otherwise be — see the escape in the fold below.
 #
@@ -592,7 +592,7 @@ FILL_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
 ')
 
 if [ -n "$FILL_MISSING" ]; then
-  FILL_REASON="Patrol fill unanswered: the tick printed FILL and this turn neither dispatched nor declined ${FILL_MISSING}. Dispatch each named slice, or write a line \"fill-declined: <reason>\" saying why not, then stop again — this gate blocks once."
+  FILL_REASON="Patrol fill unanswered: the tick printed FILL and this turn neither dispatched nor declined ${FILL_MISSING}. Dispatch each named task, or write a line \"fill-declined: <reason>\" saying why not, then stop again — this gate blocks once."
 else
   FILL_REASON=""
 fi
@@ -602,7 +602,7 @@ fi
 # would hide the second behind the one-shot: the next stop passes by design.
 if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
   if [ -n "$FILL_REASON" ]; then
-    refuse block stop "the tick printed FILL and nothing answered" "dispatch each slice, or decline" \
+    refuse block stop "the tick printed FILL and nothing answered" "dispatch each task, or decline" \
       "$FILL_REASON"
   fi
   exit 0
@@ -615,7 +615,7 @@ fi
 # already knows, and a gate that fires on every tick with the same paragraph is
 # read as noise inside two ticks. The three duty strings are LITERALS: no payload
 # value and no path is interpolated into them. The fill clause is the one
-# exception and it carries slice ids read out of the transcript — filtered in the
+# exception and it carries task ids read out of the transcript — filtered in the
 # fold above to `[A-Za-z0-9_.-]+` and handed to jq through `--arg`, so neither a
 # shell nor a JSON quoting surface is opened by them.
 # THE FACT AND THE FIX COME FROM THE VERDICT, one row per duty missed (table rows

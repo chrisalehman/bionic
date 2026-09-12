@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/lib/impact.sh — the ONE impacted-suite derivation.
-# wave-01-verification-cannot-lie slice S12, spec AC-18. Design ledger D2:
+# wave-01-verification-cannot-lie task S12, spec AC-18. Design ledger D2:
 # "the tree owns impact".
 #
 #     bash tests/lib/impact.sh <file>...   →   suite<TAB>reason   (one per suite)

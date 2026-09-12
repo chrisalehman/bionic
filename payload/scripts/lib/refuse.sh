@@ -1,6 +1,6 @@
 #!/bin/bash
 # payload/scripts/lib/refuse.sh — THE REFUSAL OBJECT AND ITS ONE RENDERER
-# (epic-22 wave-01 slice 11, REQ-E1, AC-E1.2/E1.3/E1.5; ADR-002 "a refusal is an
+# (epic-22 wave-01 task 11, REQ-E1, AC-E1.2/E1.3/E1.5; ADR-002 "a refusal is an
 # object rendered once, not a string each hook formats").
 #
 # WHAT IT OWNS. A refusal is `{verb, fact, fix, detail}` and this file is the only
@@ -38,10 +38,10 @@
 # ── THE CHANNEL TABLE IS DATA, AND ITS SOURCE IS A MEASUREMENT ────────────────
 #
 # `BIONIC_REFUSE_TABLE` below is not a summary of how Claude Code is believed to
-# behave. Every cell in it was measured on CLI 2.1.263 by slice 10 and is quoted from
+# behave. Every cell in it was measured on CLI 2.1.263 by task 10 and is quoted from
 # `record/wave-01-plugin-only/e1-measurement.md`; the `source` column names the row.
 # Cells the measurement could not establish carry the literal value `unverified`,
-# never a guess. Slice 12's attended run (§D-2 of the same file, findings F-D2-1..3)
+# never a guess. Task 12's attended run (§D-2 of the same file, findings F-D2-1..3)
 # drove the three BLOCKING modes live and filled their `user_interactive` cells; the
 # two non-blocking modes were never driven interactively and still say `unverified`,
 # which is a gap named rather than a guess written.
@@ -60,7 +60,7 @@
 #   9  detail_to_user    does THIS renderer also put `detail` on the user stream
 #   10 source            the measurement row every cell above is quoted from
 #
-# FIELD 9 IS THE ONE SWITCH SLICE 12 OWNED, AND IT IS NOW `no` EVERYWHERE. It is why
+# FIELD 9 IS THE ONE SWITCH TASK 12 OWNED, AND IT IS NOW `no` EVERYWHERE. It is why
 # the table is data rather than a `case`. On `deny` and `block` the split is real:
 # `detail` rides the JSON reason, the user line rides stderr, and the user stream is
 # one line. On `exit2` there is one wire for both — the CLI wraps the hook's stderr

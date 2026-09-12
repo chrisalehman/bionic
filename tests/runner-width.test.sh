@@ -8,7 +8,7 @@
 # ceiling. `BIONIC_TEST_JOBS` is retired as an input; a caller who still sets it is told once,
 # on stderr, and ignored.
 #
-# THE ONLY SAFE WAY TO DRIVE THIS is `tests/run.sh --dry-run` (added by this same slice):
+# THE ONLY SAFE WAY TO DRIVE THIS is `tests/run.sh --dry-run` (added by this same task):
 # it reads the rung the ring already carries and prints it, without launching the
 # 40-plus-suite roster a real run would. Every case below drives the REAL runner script
 # this way; nothing here reimplements the width computation.

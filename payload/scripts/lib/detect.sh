@@ -14,7 +14,7 @@
 # THE OUTPUT CONTRACT. One line, parseable, exit 0. Always exit 0: a fact
 # function's job is to REPORT, and "I could not tell" is a fact with a value
 # (`unknown`), not an error. Callers parse fields; they never branch on the
-# exit code. The line shapes are fixed and consumed by later slices verbatim:
+# exit code. The line shapes are fixed and consumed by later tasks verbatim:
 #
 #   plugin: version=<v> hooks=<ok|degraded|absent>
 #   agents: state=<stock|modified|unknown> total=<n|unknown> modified=<n|unknown> names=<a.md,b.md|-> cause=<text|->
@@ -335,7 +335,7 @@ detect_env_todo_tools() {
 # consumes to decide whether the item is done — asks whether `rc_default`'s line
 # is INSIDE bionic's markers, and this function asks `rc_get`. It used to grep
 # the START MARKER on its own, which agreed with setup only for as long as the
-# line between the markers never changed; slice 4/1 changed it
+# line between the markers never changed; task 4/1 changed it
 # (`--dangerously-skip-permissions` → `--allow-dangerously-skip-permissions`)
 # and every install already on disk became a machine setup called pending and
 # doctor called healthy. Two owners of one concept, disagreeing in the field:
@@ -753,7 +753,7 @@ detect_marketplace_source_path() {
 }
 
 # THE "THIS CHECKOUT / OTHER checkout / unregistered" VERDICT — ONE SITE FOR THE RULE
-# (epic-22 wave-01 slice 14, E2). `detect_marketplace_source_path`'s own header says that
+# (epic-22 wave-01 task 14, E2). `detect_marketplace_source_path`'s own header says that
 # comparison is the CALLER's to make; this function IS that caller, so that doctor.sh and
 # `/bionic:version` compare against the SAME rule instead of each keeping its own copy of
 # the realpath comparison (the exact duplication this file's ownership rule forbids —

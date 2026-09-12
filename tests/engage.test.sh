@@ -61,7 +61,7 @@ canonical_sdlc_version: 14
 
 current: 4
 
-- Step 4: slices in flight
+- Step 4: tasks in flight
 ENGPLAN
   printf '%s' "$dir"
 }
@@ -152,7 +152,7 @@ canonical_sdlc_version: 14
 
 current: 4
 
-- Step 4: slices in flight
+- Step 4: tasks in flight
 MKOPEN
   [ -n "${3:-}" ] && touch -t "$3" "$p"
   printf '%s' "$p"

@@ -19,7 +19,7 @@
 # (§4 "The start gate"); this gate never re-derives or second-guesses what
 # the producer already decided.
 #
-# Attestation filename is per-session (design D-5, slice 4/2):
+# Attestation filename is per-session (design D-5, task 4/2):
 #     .bionic/tmp/preflight-<this session's session_id>.state
 # A foreign session's attestation — however fresh — simply is not this file, so it is
 # never read at all; only THIS session's own filename is ever consulted, and the legacy
@@ -311,7 +311,7 @@ esac
 # ---------- this session is engaged: this IS a decision ----------
 
 deny() {  # <reason line>...
-  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (slice 13, D-1). Its fixed
+  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (task 13, D-1). Its fixed
   # headline and its Fix line are `detail` now; the caller passes the ruled fact and fix.
   local fact="$1" fix="$2"; shift 2
   local reasons="" line
@@ -670,7 +670,7 @@ Then retry the dispatch."
 esac
 
 # ================================================================== THE ROSTER
-# (design D-5 + spec §Design "Roster"; slice 4/3 — the LAUNCH half of AC-1.)
+# (design D-5 + spec §Design "Roster"; task 4/3 — the LAUNCH half of AC-1.)
 #
 # The attestation gate has decided. Everything below is a LEDGER — it appends one
 # row describing the launch that is about to happen — with exactly ONE exception,
@@ -685,7 +685,7 @@ esac
 # WHY THIS LIVES IN THE START GATE and not in a fresh hook: the row must exist
 # BEFORE the agent does. PostToolUse fires after the spawn, and the epic's whole
 # warrant is that an orchestrator's memory of what it launched is the thing that
-# fails. Slice 4/4 completes the row from the tool response (full agent id,
+# fails. Task 4/4 completes the row from the tool response (full agent id,
 # status `confirmed`); `tool_use_id` below is the key it correlates on.
 #
 # On printing: §4 forbids this gate from printing on the ALLOW path, and that
@@ -721,7 +721,7 @@ ROSTER_SUFFIX=".state"
 ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${PAYLOAD_SID}${ROSTER_SUFFIX}"
 
 # ============================================ THE LEASE WALL AND THE BUDGET WALL
-# (spec AC-14 and AC-26; plan slice WALLS; assumptions WALLS/2, WALLS/3, WALLS/4, WALLS/6.)
+# (spec AC-14 and AC-26; plan task WALLS; assumptions WALLS/2, WALLS/3, WALLS/4, WALLS/6.)
 #
 # TWO REFUSALS BELOW THE LEDGER'S HEADER, and the section comment above is written for
 # the append rather than for these: both sit here because both read the roster path or
@@ -803,7 +803,7 @@ fi
 # as it did. A budget is a ceiling a run OPTS INTO.
 #
 # THE LEADING FRONTMATTER BLOCK ONLY. A `parallel-budget:` inside the plan body is prose
-# — this wave's own plan quotes the header in a slice description — and a wall that read
+# — this wave's own plan quotes the header in a task description — and a wall that read
 # it would take a quotation for configuration.
 #
 # THE ONE PLAN-BOUND ARM OF THIS GATE (task-engaged-session, AC-23). The ceiling is a
@@ -1077,14 +1077,14 @@ sanitize() {  # <value> <max-chars>
 #     inner match becomes a terminator for its own outer span and every value
 #     lifts empty.
 # Deliverable and progress values are reduced to path-shaped tokens, because
-# their consumers (slices 4/5, 4/6) stat them; a slash-bearing token with no
-# letter is a fraction ("slice 4/3"), not a path.
+# their consumers (tasks 4/5, 4/6) stat them; a slash-bearing token with no
+# letter is a fraction ("task 4/3"), not a path.
 #
-# THE LIVENESS FIELDS (`cadence`, `claims`) join the same table, because slice
+# THE LIVENESS FIELDS (`cadence`, `claims`) join the same table, because task
 # 4/7 shipped them into the same §Dispatch prose the labels above anchor on:
 # "The progress-artifact path carries a `cadence` alongside it" and "A subprocess
 # claim — a process pattern plus its output file — is conditional-required". They
-# were prose-only for one slice — hooks/stop-check.sh read `claims=` off a row no
+# were prose-only for one task — hooks/stop-check.sh read `claims=` off a row no
 # writer could produce, which the Step-6 six-axis review called for what it was
 # (axis-3 FAIL: a shipped reader with no producer, its only test hand-writing an
 # impossible row). Two grammar notes, both forced by that ratified sentence:
@@ -1385,7 +1385,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # How many paths a `Files:` span reports and how many basenames a `Suites:`
       # span reports. Both are bounds on a ROW FIELD, not on a judgment: the row is
       # one line the fleet parses by key, and a brief that names a hundred files has
-      # a problem the wall cannot fix. Wide enough that no real slice brief in this
+      # a problem the wall cannot fix. Wide enough that no real task brief in this
       # repo has ever reached either.
       FILES_MAX = 60
       SUITES_MAX = 60
@@ -1424,7 +1424,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # THE SAME HAZARD REACHES THE DELIVERABLE LABELS (final-audit A-1,
       # record/w2-r7-audit.md). Every refusal this wall prints recommends the
       # same concrete, copy-paste example — Expected artifact:
-      # .bionic/docs/record/my-slice-notes.md — and a brief that quotes that
+      # .bionic/docs/record/my-task-notes.md — and a brief that quotes that
       # line in prose ahead of its real, later label puts each occurrence in its
       # OWN span, one path apiece, so the ambiguity wall below never sees two
       # paths in one span. decl_deliverable() then takes the FIRST hit that
@@ -1458,7 +1458,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       addlabel("current step",       "-")
       addlabel("deliverable",        "deliverable", "", 1)
       addlabel("constraints",        "-")
-      addlabel("your slice",         "-")
+      addlabel("your task",         "-")
       addlabel("read first",         "input")
       addlabel("artifacts",          "deliverable", "", 1)
       addlabel("artifact",           "deliverable", "", 1)
@@ -1466,7 +1466,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       addlabel("duration",           "duration")
       addlabel("cadence",            "cadence", "([ \t]*:|[ \t])[ \t]*")
       # THE TWO INSTRUMENT LABELS (wave-01 S13, spec AC-20), BOTH PINNED TO LINE
-      # START. `Files:` declares the intent — what this slice will touch — and
+      # START. `Files:` declares the intent — what this task will touch — and
       # `Suites:` declares the consequence directly, for a repository where no
       # impact command is configured. Both are pinned for the reason the six
       # deliverable-kind labels are: every refusal below quotes them back as a
@@ -1552,10 +1552,10 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # that quotes the slot back unfilled has given no reason at all (S-1).
       h = firsthit("waiver")
       if (h > 0) { v = collapse(spanof(h)); if (v != "" && !isplaceholder(v)) print "waiver=" v }
-      # THE FILES THE SLICE DECLARES IT WILL TOUCH — every distinct path-shaped
+      # THE FILES THE TASK DECLARES IT WILL TOUCH — every distinct path-shaped
       # token in the span, comma-joined, exactly as the deliverable label lifts
       # its candidates. Several paths is the ORDINARY case here rather than an
-      # ambiguity: a slice touches a set, and the wall does not have to choose
+      # ambiguity: a task touches a set, and the wall does not have to choose
       # among them, it hands the whole set to the impact command.
       h = firsthit("files")
       if (h > 0) { v = paths(spanof(h), FILES_MAX); if (v != "") print "files=" v }
@@ -1573,7 +1573,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
 
 # ---------- D-5 pruning ----------
 #
-# The same liveness rule slice 4/2 established for the attestation
+# The same liveness rule task 4/2 established for the attestation
 # (hooks/preflight-probe.sh): a session is live iff its transcript still exists
 # under CLAUDE_CONFIG_DIR/projects. A LIVE foreign session's roster is never
 # touched — that concurrency is the point of D-5 — and a dead session's is
@@ -1625,7 +1625,7 @@ C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
 # THE TWO INSTRUMENT FIELDS (spec AC-20). `Files:` is the declared INTENT — the paths this
-# slice will touch — and `Suites:` the declared CONSEQUENCE. The caps are the widest on the
+# task will touch — and `Suites:` the declared CONSEQUENCE. The caps are the widest on the
 # row because both are lists rather than single values, and truncating a list silently
 # narrows a budget: 900 is what the ambiguity candidates already allow.
 C_FILES=$(sanitize "$(field_of files)" 900)
@@ -1698,7 +1698,7 @@ the wall never picks among candidates — whichever it chose would be recorded a
 declared fact, and the landing check would order this agent to write it.
 
 Fix: name exactly one deliverable path in the label —
-    Expected artifact: .bionic/docs/record/my-slice-notes.md
+    Expected artifact: .bionic/docs/record/my-task-notes.md
   References and inputs the agent should READ go outside the label's span: on their
   own line, under Read first: or Scope constraint:, or after a blank line.
 
@@ -1783,7 +1783,7 @@ The landing check stats — and, for a directory, walks — whatever this names,
 on every stop of the agent that owns it. It must be a path inside this repo.
 
 Fix: name a repo-relative artifact path in the brief —
-    Expected artifact: .bionic/docs/record/my-slice-notes.md
+    Expected artifact: .bionic/docs/record/my-task-notes.md
 
 Then retry the dispatch."
       refuse exit2 dispatch "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"
@@ -1825,7 +1825,7 @@ if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
 path to stat when it reports done, and nothing left behind if it dies quietly.
 
 Fix: declare a durable artifact path with a canonical label —
-    Expected artifact: .bionic/docs/record/my-slice-notes.md
+    Expected artifact: .bionic/docs/record/my-task-notes.md
   Any of these labels lifts one: Expected artifact(s), Deliverable(s), Artifact(s).
   Name a concrete path — the wall never guesses one from prose, and a <slot> is not a name.
 
@@ -1847,7 +1847,7 @@ fi
 # tests/run.sh; run X, Y, Z as consumers", and "consumers" was read as "everything".
 # Prose in a brief is a wish. Only a wall binds a writer.
 #
-# WHAT THE BRIEF DECLARES. `Files:` — the paths this slice will touch. That is intent,
+# WHAT THE BRIEF DECLARES. `Files:` — the paths this task will touch. That is intent,
 # and it is the only thing the author reliably knows at dispatch. The CONSEQUENCE (which
 # suites read those paths) is a fact about the tree, and D2 gave the tree ownership of it:
 # `impact-command:` in .bionic/config.yaml names the derivation, the wall runs it over the
@@ -1869,7 +1869,7 @@ if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ]; then
 read \"run the impacted suites\" as the whole tree and spent 40 minutes each
 re-proving the world; the budget only binds when it is on the roster row.
 
-Fix: declare the files this slice will touch, on a line of its own —
+Fix: declare the files this task will touch, on a line of its own —
     Files: path/one.sh, path/two.sh
   The impact command named in .bionic/config.yaml derives the suites from them.
 
@@ -1963,7 +1963,7 @@ the wall defeated by the cost of the wall. So the derivation is bounded here.
   paths:   $*
   bound:   ${IMPACT_BOUND_S}s
 
-Fix: narrow \`Files:\` to the paths this slice really writes, or name the closed set
+Fix: narrow \`Files:\` to the paths this task really writes, or name the closed set
 directly with \`Suites:\` — a declared set needs no derivation at all. If the command
 itself has become slow, that is the thing to fix: it runs on every dispatch."
       refuse exit2 dispatch "the impact command did not answer" "fix impact-command in config.yaml" "$_dp_detail"
@@ -1982,7 +1982,7 @@ else
   # into a budget. AC-20: where no impact command is configured the wall requires the
   # explicit list. Refused rather than passed with an empty set, because the author is
   # holding the brief and one line fixes it.
-  _dp_detail="\`Files:\` states which paths the slice will touch. Turning that into the set of
+  _dp_detail="\`Files:\` states which paths the task will touch. Turning that into the set of
 suites the agent may run is the tree's job, and this repository has not named the
 command that asks it.
 
@@ -2006,7 +2006,7 @@ fi
 # next to the run it explains.
 #
 # NEWER IS COUNTED, NOT TIMED. "A `regression-cause:` line newer than the last regression
-# row" cannot be read off a clock: the plan file is rewritten after every slice, so its
+# row" cannot be read off a clock: the plan file is rewritten after every task, so its
 # mtime is newer than everything and the rule would be vacuous within minutes. It is read
 # as a LEDGER instead — the Nth full-tree dispatch of a run needs the (N-1)th cause line
 # on the plan — which is monotone, hermetic, and forces one new sentence per extra
@@ -2175,7 +2175,7 @@ ROSTER_PLAN=$(sanitize "$(session_plan "$REPO" "$PAYLOAD_SID")" 400)
 # derived an empty set, for the same reason: a launch row that reached this line passed the
 # suite-allowance wall, so it HAS a budget statement, and an omitted key would say the row
 # predates the wall entirely. They are optional in `roster_row` so the captured rows in
-# tests/fixtures/roster-row.captured — written before this slice existed — still rebuild
+# tests/fixtures/roster-row.captured — written before this task existed — still rebuild
 # byte for byte; they are not optional to this writer.
 ROW=$(roster_row \
   status=intended \

@@ -4,7 +4,7 @@
 #
 # It differs from gate.test.sh in exactly one respect — what it asserts — and
 # both point at the same enforcer. The harness must reach opposite verdicts on
-# them, which is the whole claim of slice 4/2.
+# them, which is the whole claim of task 4/2.
 set -uo pipefail
 GATE="$(cd "$(dirname "$0")" && pwd)/gate.sh"
 

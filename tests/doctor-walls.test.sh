@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/doctor-walls.test.sh — doctor's `walls` row (bionic 1.4.0,
-# wave-bionic-1.4.0-update slice DOCTOR handoff 3.1, spec AC-15).
+# wave-bionic-1.4.0-update task DOCTOR handoff 3.1, spec AC-15).
 #
 # THE CONTRACT UNDER TEST. AC-15: "Doctor verifies every fail-closed wall's
 # library resolves and prints a row with a repair-phrased FIX line before the

@@ -29,7 +29,7 @@
 # single <dep-name> the spec's ownership-table row shorthands it as: the
 # contracted degradation line ("<route> continues without <capability>: <what
 # changes>") names three things only the calling route can supply. Recorded
-# as this slice's discretionary resolution — see the wave report.
+# as this task's discretionary resolution — see the wave report.
 #
 # CONSENT. jit_offer asks AT MOST ONE question, and it is install_dep's own —
 # jit.sh adds no second prompt and no dry-run seam. There is no assume-yes

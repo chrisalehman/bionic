@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/width.test.sh — payload/scripts/lib/width.sh, the one column budget
-# (bionic 1.4.0, wave-bionic-1.4.0-update slice DOCTOR handoff 4.6, spec AC-23:
+# (bionic 1.4.0, wave-bionic-1.4.0-update task DOCTOR handoff 4.6, spec AC-23:
 # "the arrow glyph measures one column").
 #
 # WHAT THIS SUITE IS FOR. width.sh's own header states the property everything
@@ -102,7 +102,7 @@ fi
 section "Section 3: the truncator cuts characters, never bytes"
 
 # width.sh's own correction: `printf '%.*s'` counts BYTES, so a length test in
-# characters against a cut in bytes slices a multi-byte glyph in half. A cut
+# characters against a cut in bytes tasks a multi-byte glyph in half. A cut
 # through a run of arrows must leave whole arrows and valid UTF-8.
 CUT="$(bionic_trunc "→→→→→→→→→→" 5)"
 expect_eq "6: a cut string is measured back at its budget" "5" "$(bionic_cols "$CUT")"

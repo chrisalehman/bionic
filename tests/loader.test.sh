@@ -1,11 +1,11 @@
 #!/bin/bash
 # tests/loader.test.sh — the one loader idiom (bionic 1.4.0, wave-bionic-1.4.0-update
-# slice L-LOADER, spec AC-16, plan §L-LOADER; design ledger S4; R-1 §(4) and §(5)).
+# task L-LOADER, spec AC-16, plan §L-LOADER; design ledger S4; R-1 §(4) and §(5)).
 #
 # WHAT IS UNDER TEST. payload/scripts/lib/loader.sh carries the canonical idiom text
 # between the exact marker lines `# --- bionic-loader/v2 BEGIN` and
 # `# --- bionic-loader/v2 END`, and exposes `bionic_loader_pin`, which prints that
-# block (markers inclusive). Slice ADOPT pastes the printed block byte-identically
+# block (markers inclusive). Task ADOPT pastes the printed block byte-identically
 # into every hook; the byte-identity pin lives in the cross-gate suite. This suite
 # tests the BEHAVIOUR of the block, and it tests it the only honest way: by pasting
 # `bionic_loader_pin`'s output into a throwaway hook and running that hook. A library
@@ -318,7 +318,7 @@ deny  9 "bash $FROOT/scripts/doctor.sh --fix"
 
 # THE REFUSAL IS ONE LINE, IN THE RENDERER'S FORMAT — the only wall in the tree that
 # spells that line without scripts/lib/refuse.sh, because refuse.sh is inside the
-# library this wall reports missing (slice 13, ruling D-1, table row 1). AC-E1.3's own
+# library this wall reports missing (task 13, ruling D-1, table row 1). AC-E1.3's own
 # regex is driven here so the hand-spelled copy cannot drift from the rendered one.
 runhook "$F" "$FPD" "" "git push" > "$WORK/f6.out" 2>"$WORK/f6.err"
 FMSG="$(cat "$WORK/f6.err")"

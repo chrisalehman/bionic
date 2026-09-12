@@ -182,7 +182,7 @@ physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resol
 # a mistake a person can move, and the evidence gate's own misplacement sweep catches
 # the consequential half of it at commit time. Refusing every Write and Edit on the
 # machine because a file is missing is not recoverable at that price.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh binding.sh"
+BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh binding.sh units.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -290,6 +290,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing
 # line-ending translation it is written in terms of.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/binding.sh"
+# THE ONE READER OF `## Tasks` (REQ-1e, spec §2 D3). The Step-3 wall below runs its
+# `units_validate` and prints the violation lines back; nothing here parses the table.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/units.sh"
 
 # THE ROOT THAT OWNS THE ARTIFACT — the artifact's own, not the invoking session's.
 PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
@@ -491,7 +495,7 @@ esac
 #
 # The fail-open this closes: an artifact declaring canonical-sdlc frontmatter
 # but living outside the docs root used to fall straight out of the scope check
-# and exit 0 — written, ungated, in the wrong place. Slice 1's
+# and exit 0 — written, ungated, in the wrong place. Task 1's
 # resolve_project_root() always answers, so the historical no-root `exit 0` is
 # unreachable; the scope check is the fail-open that survived.
 #
@@ -734,7 +738,7 @@ fi
 # The triple's presence is the gate — there is no separate mode axis.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 block() {  # <fact> <fix> <what went wrong>
-  # THE FRAME KEEPS ITS PARAMETER AND LOSES ITS VOICE (slice 13, ruling D-1). The
+  # THE FRAME KEEPS ITS PARAMETER AND LOSES ITS VOICE (task 13, ruling D-1). The
   # caller's ruled fact and fix render as the one user line; the artifact name, its
   # path and the caller's own sentence become `detail`.
   refuse exit2 write "$1" "$2" "canonical-sdlc artifact '$BASENAME': $3
@@ -873,7 +877,7 @@ fi
 
 # ---------- the lease wall: a plan write issued from inside a linked worktree ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-# (spec AC-14; plan slice WALLS; assumption WALLS/6.)
+# (spec AC-14; plan task WALLS; assumption WALLS/6.)
 #
 # The other half of AC-14's pair — hooks/dispatch-preflight.sh carries the dispatch half.
 # A plan is the RUN's artifact and it lives under the main checkout; a plan write issued
@@ -1006,6 +1010,55 @@ Path: $FILE_PATH
 Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval."
             refuse exit2 write "this plan has no Verification Matrix" "add the Verification Matrix" "$_gs_detail"
           fi
+          # ---------- the Step-3 wall on `## Tasks` (REQ-1e, AC-1e.5) ----------
+          # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+          #
+          # THE PLAN SIDE OF WHAT lib/units.sh OWNS. The evidence gate validates this
+          # table at COMMIT time, which is one round trip and a refused commit too late:
+          # by then the orchestrator has briefed writers off it. `units_validate` is the
+          # single definition of the Task invariants — id shape and uniqueness, step in
+          # 3-9, the kind and status vocabularies, deps that name a row, and a Step-5+
+          # row depending transitively on every Step-4 row — and its output is one line
+          # per fault, each naming an id and a rule, which is what a writer can act on.
+          #
+          # SAME SCOPE AS THE MATRIX ARM ABOVE, deliberately: `*.plan.md`, numeric
+          # `sdlc-step >= 3`, and not `scale: task`. A task-scale plan carries the
+          # five-column registration ledger the evidence gate has read since D12, which
+          # REQ-1e does not widen; validating it against the ten-column schema would
+          # refuse every task-scale plan for eight columns it was never asked to carry.
+          #
+          # AN ABSENT TABLE IS NOT A VIOLATION HERE. A plan mid-authoring may not have
+          # written its table yet, and the D7 PRESENCE rule already lives in the gate at
+          # commit time. `units_rows` answers non-zero for "no table" and this arm stops
+          # there; a table that IS present is validated in full.
+          #
+          # WRITE CONTENT ONLY — the known hole. `$CONTENT` is the posted body on a
+          # Write and the file AS IT STANDS on an Edit, so an Edit that breaks the table
+          # is judged against the pre-edit text and passes. That is this hook's existing
+          # limitation for every content arm in it (see the CONTENT derivation above),
+          # not a new one, and the evidence gate still catches the result at commit.
+          #
+          # A TEMP FILE, because the verbs are functions of a PATH: one plan, one copy,
+          # removed on both paths out.
+          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ] && [ -n "$CONTENT" ]; then
+            _gs_units_tmp="$(mktemp "${TMPDIR:-/tmp}/bionic-units.XXXXXX")" || _gs_units_tmp=""
+            if [ -n "$_gs_units_tmp" ]; then
+              printf '%s\n' "$CONTENT" > "$_gs_units_tmp"
+              if units_rows "$_gs_units_tmp" >/dev/null 2>&1; then
+                _gs_units_bad="$(units_validate "$_gs_units_tmp" 2>/dev/null)" || true
+              else
+                _gs_units_bad=""
+              fi
+              rm -f "$_gs_units_tmp"
+              if [ -n "$_gs_units_bad" ]; then
+                _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) has a '## Tasks' table that breaks the Task invariants:
+${_gs_units_bad}
+Path: $FILE_PATH
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status."
+                refuse exit2 write "this plan's Tasks table is invalid" "fix the row the detail names" "$_gs_detail"
+              fi
+            fi
+          fi
         fi
         ;;
     esac
@@ -1066,7 +1119,7 @@ case "$BASENAME" in
       # author was reaching for — the author who mistyped a pointer may well be
       # the author who should have written the section.
       block_design() {  # $1 = what went wrong
-        # ONE ROW FOR FOUR ARMS (slice 13, table row 101). All four say the same thing to
+        # ONE ROW FOR FOUR ARMS (task 13, table row 101). All four say the same thing to
         # the reader — this spec names no design anywhere — and differ only in WHICH
         # route was tried, which is what `detail` carries.
         refuse exit2 write "this spec names no '## Design' anywhere" "add a '## Design' section" \
@@ -1315,21 +1368,21 @@ esac
 # ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
-# Slice 2 (F4): neither hook has an entry point that fires on true first
+# Task 2 (F4): neither hook has an entry point that fires on true first
 # lifecycle use without requiring `.bionic/` to pre-exist — except this one.
 # The governing-skill hook already knows the target artifact's path and, as
-# of slice 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
+# of task 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
 # walking for an existing `.bionic/`. Creation hangs off that same
 # computation.
 #
 # The discriminator is `canonical_sdlc_version` — the SAME field the schema
-# enforcement above reads, and for the same reason. Slice 2 keyed creation on
+# enforcement above reads, and for the same reason. Task 2 keyed creation on
 # `governing-skill: canonical-sdlc` instead, which is the artifact-AUTHOR
 # field; `.claude/rules/hook-authoring.md` (machine-local, gitignored, authored
 # in place — no script recreates it, so absent from a fresh clone) § "Discriminators in
 # enforcement hooks" names that as a known failure mode, because Step 3 plans legitimately
 # declare `governing-skill: superpowers:writing-plans` and would have found no
-# tree. Slice 2's stated rationale was avoiding a re-fire on later artifacts,
+# tree. Task 2's stated rationale was avoiding a re-fire on later artifacts,
 # and re-firing costs nothing: `mkdir -p` is idempotent and the `.gitignore`
 # write is `[ -f ]`-guarded.
 #
