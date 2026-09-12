@@ -64,13 +64,18 @@
 # collision-resistant across same-named projects under different parents.
 # cksum and basename are POSIX — no new dependency.
 #
-# ONE DEFINITION, NOT A COMMENT ASKING FOR ONE. The evidence gate and
+# ONE DEFINITION PER PROCESS, AND THERE ARE THREE PROCESSES. The evidence gate and
 # farm-out-reminder each carried a copy whose headers said "byte-identical to the
 # copies in …, divergence would give one project two audit files". Two copies in one
 # shell is a drift the shell itself would resolve, silently and in whichever order the
-# file happened to be read; one definition is the guarantee those comments wanted.
-# payload/scripts/lib/stop.sh carries the same function for the turn-end process,
-# which is a different process and therefore still a copy.
+# file happened to be read; folding those walls into this library left one.
+#
+# THE OTHER TWO COPIES, NAMED BECAUSE A HEADER THAT NAMES A DELETED FILE IS WORSE THAN
+# NO HEADER: payload/scripts/lib/stop.sh (the turn-end process) and
+# hooks/canonical-sdlc-governing-skill.sh (the PreToolUse|Write process). Three copies,
+# three processes, one body — pinned by tests/cross-gate-agreement.test.sh §AP, which
+# compares the three bodies by checksum and carries a mutation arm proving the
+# comparison discriminates. Consolidation to one owner is promoted, not done here.
 # [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1
