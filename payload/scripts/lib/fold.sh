@@ -332,13 +332,22 @@ $_BF_PEND_CONTEXT"
   # replayed here — stdout first (the JSON wire, where there is one), then stderr
   # (the user line), then the advisories. Nothing is reformatted: the bytes the
   # renderer produced are the bytes that go out.
-  _errf="${TMPDIR:-/tmp}/bionic-fold-$$-${RANDOM}.err"
+  # PRIVATE, AND CREATED BY mktemp (security F-2). The name this line used to build —
+  # pid plus one `$RANDOM` draw — is 32,768 guesses per pid to a local attacker, and the
+  # `2>` below creates through a symlink already sitting there, truncating its target. Every
+  # composed refusal on the machine goes through this line. `mktemp` creates exclusively, at
+  # a name nobody can pre-create, mode 600. A machine that cannot make a temp file at all
+  # falls back to /dev/null: the render still happens and the user still gets the refusal —
+  # only the replay of the renderer's own stderr is lost, which is the small half.
+  # [WALL: tests/fold.test.sh §14]
+  _errf="$(mktemp "${TMPDIR:-/tmp}/bionic-fold.XXXXXX" 2>/dev/null)" || _errf=/dev/null
+  [ -n "$_errf" ] || _errf=/dev/null
   _out=$(refuse "$BIONIC_FOLD_MODE" "$BIONIC_FOLD_VERB" "$BIONIC_FOLD_FACT" \
                 "$BIONIC_FOLD_FIX" "$BIONIC_FOLD_DETAIL" 2>"$_errf")
   _rrc=$?
   [ -n "$_out" ] && printf '%s\n' "$_out"
   [ -s "$_errf" ] && cat "$_errf" >&2
-  rm -f "$_errf" 2>/dev/null
+  [ "$_errf" = /dev/null ] || rm -f "$_errf" 2>/dev/null
 
   # ── THE OTHER BLOCKERS' LINES, WHERE NO STREAM AT ALL RECEIVED THEM ─────────
   #
