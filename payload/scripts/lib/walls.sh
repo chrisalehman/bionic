@@ -2701,10 +2701,11 @@ validate_intent_evidence() {
 # TESTED-FLOOR SHAPE ONLY (plan Assumption A2): the wave's own Step-5 auditor /
 # Step-6 critic are the assurance roles at wave scale, so per-row auditor/critic
 # tokens (task-scale machinery) are NOT demanded here.
-#   1. `## Tasks` section ABSENT -> exit 2 (empty is fine, absent is not — the
-#      audited multi_agent wave must carry its dispatched-task ledger home).
-#   2. ZERO data rows -> SATISFIED (a human `none dispatched` prose line is
-#      documentation, not required by the parser). return 0.
+#   1. `## Tasks` section ABSENT OR EMPTY -> exit 2 (the audited multi_agent wave
+#      must carry its dispatched-task ledger home).
+#   2. NO TABLE, OR A TABLE WITH ZERO DATA ROWS -> SATISFIED (a human
+#      `none dispatched` prose line is documentation, not required by the
+#      parser — the shape this refusal's own Fix text advertises). return 0.
 #   3. Each data row: the Task invariants, delegated to `units_validate` (REQ-1e)
 #      — status in {pending,active,landed,dropped} among them — else exit 2; a
 #      non-placeholder `- T<n>:` evidence line must exist in the ## SDLC State
@@ -2715,7 +2716,7 @@ validate_dispatch_ledger() {
   [ "$RIGOR" = "audited" ] || return 0
   [ "$MULTI_AGENT" = "true" ] || return 0
 
-  local rows rc line id ev violations
+  local tasks rows line id ev violations
   # THE ROWS AND THE INVARIANTS BOTH COME FROM lib/units.sh (REQ-1e, spec §2 D3).
   # This is the check the widened table breaks hardest: `| id | step | kind | task |
   # agent | deps | size | serves | Files | status |` puts `agent` at the `$6` this
@@ -2732,13 +2733,31 @@ validate_dispatch_ledger() {
   # WHAT STAYS HERE is the pair of facts units.sh cannot know: that this plan owes a
   # ledger at all (the D7 PRESENCE rule, guarded to the triple above), and that every
   # row's evidence has actually been written on a `- T<n>:` line in ## SDLC State.
-  rows="$(units_rows "$PLAN")"; rc=$?
-  if [ "$rc" -ne 0 ]; then
+  #
+  # PRESENCE IS A QUESTION ABOUT THE SECTION, NOT ABOUT THE TABLE, and the base's
+  # own fence-aware extractor is what answers it (correctness F-1, A-68.1). Asking
+  # `units_rows` instead moved the basis: that reader exits 1 for a section carrying
+  # PROSE and no header row, a shape the docblock above calls SATISFIED and this
+  # refusal's own Fix text advertises ("a header plus a 'none dispatched' line is
+  # fine"). The next audited multi_agent wave that wrote it would have been unable
+  # to commit. Same extractor as validate_task_ledger, and the same one the pre-wave
+  # hook carried at 84da6b5.
+  tasks=$(normalize_newlines "$PLAN" | awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## Tasks/ { f=1; next }
+    /^## / { f=0 }
+    f')
+  if [ -z "$tasks" ]; then
     _eg_detail="canonical-sdlc audited multi_agent wave plan has no '## Tasks' dispatched-task ledger section.
 Plan: $PLAN
 Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); the orchestrator appends one row per dispatched task-shaped unit (D7)."
     refuse exit2 commit "this wave plan has no '## Tasks' ledger" "add a '## Tasks' section" "$_eg_detail"
   fi
+  # THE SECTION IS PRESENT. What is left is the TABLE, and a section without one is
+  # rule 2 — satisfied, and returned BEFORE `units_validate`, which has no rows to
+  # judge and would only restate the absence as an invariant violation.
+  rows="$(units_rows "$PLAN")" || return 0
   [ -n "$rows" ] || return 0
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
   violations="$(units_validate "$PLAN")" || true
