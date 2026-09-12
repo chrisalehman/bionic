@@ -907,18 +907,24 @@ fi
 # behind the guard, so `agent_type` is the spelling that answers here — the other is read
 # anyway, because a partition maintained by hand is one edit away from covering neither.
 #
-# AMBIGUITY PASSES. A cwd outside any repository, a tree whose main repository cannot be
-# resolved: this wall has no main checkout to name and says nothing.
+# AMBIGUITY PASSES. No cwd in the payload, a cwd outside any repository, a tree whose main
+# repository cannot be resolved: this wall has no main checkout to name and says nothing.
 #
-# THE CWD IS THE LADDER'S (REQ-1h). It used to be a second, private read of the payload
-# field, which was empty when the payload carried none; it is `BIONIC_CWD` now, so this
-# wall and the root every clause above it uses come from one resolution.
+# THE PAYLOAD'S OWN FIELD, NOT `BIONIC_CWD`, AND THAT IS DELIBERATE (REQ-1h scope note).
+# This wall asks WHERE THE WRITE WAS ISSUED FROM, which is not the question the preamble
+# ladder answers. The ladder's third rung is `pwd` — the hook PROCESS's directory, which
+# nothing documents as the session's — so taking BIONIC_CWD here would turn "the payload
+# named no cwd, so this wall has nothing to say" into "refuse, because the hook happened to
+# be spawned inside a worktree". Measured: it fires on 62 assertions in this hook's own
+# suite and on the evidence gate's 25e2, none of which is about worktree placement. The
+# read goes through `bionic_jq`, so it is still the ONE payload reader; what stays local is
+# the QUESTION, the same way `docs_root` stays a per-hook call (A-40).
 case "$BASENAME" in
   *.plan.md)
     LEASE_AGENT=0
     [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && LEASE_AGENT=1
     [ -n "$(echo "$BIONIC_INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
-    LEASE_CWD="$BIONIC_CWD"
+    LEASE_CWD=$(bionic_jq .cwd)
     if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ]; then
       # A linked worktree's `.git` is a FILE pointing into the shared repository; the main
       # checkout's is a directory. Same test scripts/lib/worktree.sh's land verb uses.

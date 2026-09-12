@@ -3430,8 +3430,30 @@ ctx_ladder_carriers() {  # <hooks-dir> <names…> -> basenames reading a rung be
   done | sort | tr '\n' ' ' | sed 's/ $//'
 }
 
+# ONE DECLARED EXEMPTION, NAMED AND COUNTED rather than carved out of the pattern.
+# canonical-sdlc-governing-skill's worktree-lease wall reads the payload's own `.cwd` to ask
+# WHERE THE WRITE WAS ISSUED FROM — a different question from "which project is this hook
+# scoped to", and one the ladder's `pwd` rung answers wrongly, since a hook process's
+# directory is not documented to be the session's. It is exempt from the row below and held
+# by the two rows after it instead: exactly one such read, and no CLAUDE_PROJECT_DIR at all.
+# An exemption that grew to a second read, or to rung 1, fails.
+N_CTX_LADDER_EXEMPT='canonical-sdlc-governing-skill'
+# A `grep -v`, not a `case`: a one-line `case` inside a command substitution is the shape
+# this suite's own §case row forbids, and bash refuses to parse it here too.
+N_CTX_LADDER_SWEPT=$(printf '%s\n' $N_CTX_FIFTEEN \
+  | /usr/bin/grep -vxF "$N_CTX_LADDER_EXEMPT")
 expect_eq "none of the fifteen reads CLAUDE_PROJECT_DIR or the payload cwd below its sources" \
-  "" "$(ctx_ladder_carriers "$BIONIC_HOOKS_DIR" $N_CTX_FIFTEEN)"
+  "" "$(ctx_ladder_carriers "$BIONIC_HOOKS_DIR" $N_CTX_LADDER_SWEPT)"
+
+# THE EXEMPTION, BOUNDED. Rung 1 is forbidden to it like everyone else, and its payload-cwd
+# read is exactly one — a wall, not a ladder.
+for _h in $N_CTX_LADDER_EXEMPT; do
+  _body=$(awk '/^\. "\$BIONIC_LIB\//{s=1} s{print}' "$BIONIC_HOOKS_DIR/$_h.sh")
+  expect_eq "$_h.sh reaches for no CLAUDE_PROJECT_DIR either" "0" \
+    "$(printf '%s' "$_body" | /usr/bin/grep -c 'CLAUDE_PROJECT_DIR' | tr -d ' ')"
+  expect_eq "$_h.sh reads the payload cwd exactly once, and for its own wall" "1" \
+    "$(printf '%s' "$_body" | /usr/bin/grep -c '\.cwd' | tr -d ' ')"
+done
 
 # NOT VACUOUS: the sweep really does reach fifteen non-empty bodies. A `. "$BIONIC_LIB/`
 # line that moved or lost its column-0 spelling would make every row above pass over air.
@@ -3439,6 +3461,8 @@ N_CTX_READABLE=$(for _h in $N_CTX_FIFTEEN; do
     [ -n "$(awk '/^\. "\$BIONIC_LIB\//{s=1} s{print}' "$BIONIC_HOOKS_DIR/$_h.sh")" ] && echo x
   done | wc -l | tr -d ' ')
 expect_eq "…and the ladder sweep found a source line and a body in all fifteen" "15" "$N_CTX_READABLE"
+expect_eq "…of which fourteen are swept and one is the declared exemption" "14" \
+  "$(printf '%s\n' $N_CTX_LADDER_SWEPT | wc -l | tr -d ' ')"
 
 # MUTATION — an absence row passes as happily when the detector is broken as when the tree
 # is clean. A copy with one rung re-introduced BELOW the sources must be caught.
@@ -3450,7 +3474,7 @@ cp "$BIONIC_HOOKS_DIR"/*.sh "$N_CTX_LMUT/" 2>/dev/null
   printf '%s\n' 'CWD_MUT="${CLAUDE_PROJECT_DIR:-}"'
 } > "$N_CTX_LMUT/patrol-revive.sh"
 expect_eq "…and a hook that reaches for a rung below its sources is caught" \
-  "patrol-revive.sh" "$(ctx_ladder_carriers "$N_CTX_LMUT" $N_CTX_FIFTEEN)"
+  "patrol-revive.sh" "$(ctx_ladder_carriers "$N_CTX_LMUT" $N_CTX_LADDER_SWEPT)"
 
 # ------------------------------------------------ §P′ THE SESSION-ID SOURCE, bound
 #
