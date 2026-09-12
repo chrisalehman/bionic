@@ -631,7 +631,9 @@ section "SECTION 4 — the Patrol tick literal, one string in two files (step-6 
 # Assertion 25 additionally pins the extracted value, so an extractor that returned empty
 # on both sides could not agree its way to green.
 
-TICK_GATE="${REPO}/hooks/patrol-duties-gate.sh"
+# The gate is `stop_patrol_duties` in the library now (epic-23 wave-11, T12); the
+# prefix it rebuilds moved with its body, unchanged.
+TICK_GATE="${REPO}/payload/scripts/lib/stop.sh"
 
 # tick_literal_doc <SKILL.md> -> the prefix as documented, placeholder stripped.
 # Fails LOUD rather than empty: an unmatched sed leaves the whole line, which no
