@@ -40,7 +40,15 @@ set -uo pipefail
 . "$(dirname "$0")/lib/swept-marker.sh"
 
 HOOKS_DIR="${BIONIC_HOOKS_DIR}"
-GATE="$HOOKS_DIR/landing-gate.sh"
+
+# THE MERGED ENTRY POINT (epic-23 wave-11, T12). The landing sweep is a FUNCTION now —
+# `stop_landing_gate` in payload/scripts/lib/stop.sh — and the process that runs it is
+# hooks/stop.sh, registered once on Stop and once on SubagentStop. Two names, because the
+# two are read for different things and a single one would let an arm silently read the
+# wrong file: $GATE is what a fixture DRIVES, $GATE_SRC is what a mutation or a text
+# assertion READS.
+GATE="$HOOKS_DIR/stop.sh"
+GATE_SRC="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/landing-gate-test.XXXXXX")" && pwd)"
 BG_PIDS=""
@@ -74,6 +82,25 @@ trap cleanup EXIT
 # gate's dependencies that nothing keeps in step; this one fails loudly instead.
 MUTANT_LIB="$SANDBOX/scripts/lib"
 mkdir -p "$MUTANT_LIB"
+
+# plant_tree <name> -> an isolated shipped layout at $SANDBOX/<name>, printed on stdout:
+#
+#     $SANDBOX/<name>/hooks/stop.sh          the process, copied unmutated
+#     $SANDBOX/<name>/scripts/lib/*.sh       ITS OWN copy of the library
+#
+# ONE LIBRARY PER MUTANT, which the old arrangement did not need. Every mutant used to be
+# a doctored copy of the gate itself in a directory beside ONE shared $MUTANT_LIB; the
+# gate's body lives in the library now, so a mutation IS a library edit and a shared copy
+# would leak section 4i's doctored awk into section 15h's fixture six hundred lines later.
+# The sweeper is NOT planted here: section 6 exists to drive the three ways it can be
+# missing, so each caller places (or deliberately does not place) its own.
+plant_tree() {  # <name> -> the tree root
+  local d="$SANDBOX/$1"
+  mkdir -p "$d/hooks" "$d/scripts/lib"
+  cp "$MUTANT_LIB"/*.sh "$d/scripts/lib/" 2>/dev/null
+  cp "$GATE" "$d/hooks/stop.sh"
+  printf '%s' "$d"
+}
 for _lg_libdir in "$HOOKS_DIR/../scripts/lib" "$HOOKS_DIR/../payload/scripts/lib"; do
   if [ -d "$_lg_libdir" ]; then cp "$_lg_libdir"/*.sh "$MUTANT_LIB/" 2>/dev/null; break; fi
 done
@@ -433,7 +460,17 @@ run_gate() {  # <gate path> <payload json>
     wait "$pid"; RC=$?
   fi
   OUT_STDOUT="$(cat "$SANDBOX/gate.out")"
-  OUT_STDERR="$(cat "$SANDBOX/gate.err")"
+  # THE SWEEP'S OWN HALF OF A SHARED STREAM (epic-23 wave-11, T12). hooks/stop.sh runs
+  # four verdicts in one process, so its stderr now carries whatever the other three had
+  # to say about the same event. That is not new BEHAVIOUR — all four hooks fired on
+  # every Stop before the merge and each wrote its own advisory then too; what is new is
+  # that ONE process's stream carries all of it, and this suite used to read a stream
+  # only the gate could write. Every "…silently" arm below means the SWEEP said nothing,
+  # so the three siblings' advisories are removed here, by their own self-naming prefix,
+  # and nothing else is. $OUT_STDERR_RAW keeps the whole stream for any arm that wants it.
+  OUT_STDERR_RAW="$(cat "$SANDBOX/gate.err")"
+  OUT_STDERR="$(/usr/bin/grep -v -e '^context-spend: ' -e '^patrol-duties-gate: ' \
+                                 -e '^patrol-revive: ' "$SANDBOX/gate.err" || true)"
   # THE SAME CALL AGAIN, WITH THE KNOB, ONLY WHEN IT REFUSED (task 13, ruling D-1).
   # This gate's refusal is now ONE line — `bionic: stop refused — <fact> (<fix>)` — and
   # the per-row paragraphs this suite reads for names, files and derived suites are
@@ -592,9 +629,8 @@ expect_contains "4i: …and the marker keys on the row that actually carries an 
 # it takes the EMPTY row's non-answer, the candidate's AID goes blank, and the gate's own
 # `[ -n "$AID" ] ... || continue` drops the row silently — a genuinely UNMET contract
 # passes. The mutant copy sits beside a real sweeper, the production resolution.
-MONODIR="$SANDBOX/hooks-mono-mutant"
-mkdir -p "$MONODIR"
-cp "$HOOKS_DIR/session-sweeper.sh" "$MONODIR/session-sweeper.sh"
+MONODIR="$(plant_tree hooks-mono-mutant)"
+cp "$HOOKS_DIR/session-sweeper.sh" "$MONODIR/hooks/session-sweeper.sh"
 # The awk below rewrites ONE line of the shipped gate, so that line is this mutation's
 # precondition and it is declared through the framework's `anchor` (cross-gate section
 # S19) rather than checked afterwards.
@@ -604,14 +640,14 @@ cp "$HOOKS_DIR/session-sweeper.sh" "$MONODIR/session-sweeper.sh"
 # would still match a reindented copy the awk no longer touches, leaving a mutant that
 # is byte-identical to the shipped gate and every row below it green against it. The
 # count was measured against the shipped gate before this call was written.
-anchor -E "$GATE" '^    if \(aid != ""\) agent\[name\] = aid$' 1
+anchor -E "$GATE_SRC" '^    if \(aid != ""\) agent\[name\] = aid$' 1
 awk '{
        if ($0 == "    if (aid != \"\") agent[name] = aid") {
          print "    if (aid == \"\") agent[name] = aid"
          next
        }
        print
-     }' "$GATE" > "$MONODIR/landing-gate.sh"
+     }' "$GATE_SRC" > "$MONODIR/scripts/lib/stop.sh"
 
 R4I_MUT="$(make_wave_repo r4i-mut)"
 add_row "$R4I_MUT" name=w4-t2mono status=intended agent_id= \
@@ -620,7 +656,7 @@ add_row "$R4I_MUT" name=w4-t2mono status=intended agent_id= \
 add_row "$R4I_MUT" name=w4-t2mono status=identified agent_id="$AID_A" \
   deliverable=.bionic/docs/record/never-mono.md tool_use_id=toolu_MONO \
   launched_at="$(iso_ago 600)"
-run_gate "$MONODIR/landing-gate.sh" "$(stop_payload "$R4I_MUT" "$SID" false)"
+run_gate "$MONODIR/hooks/stop.sh" "$(stop_payload "$R4I_MUT" "$SID" false)"
 expect_status "4i-mut: with the guard inverted, the SAME genuinely-UNMET contract passes silently" \
   "0" "$RC"
 expect_eq "4i-mut: …and nothing is marked — the row was dropped by the blank-AID skip, never judged" \
@@ -694,28 +730,22 @@ R6="$(make_wave_repo r6)"
 add_row "$R6" name=w1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 
-NOSWEEP="$SANDBOX/hooks-nosweeper"
-mkdir -p "$NOSWEEP"
-cp "$GATE" "$NOSWEEP/landing-gate.sh" 2>/dev/null
-run_gate "$NOSWEEP/landing-gate.sh" "$(stop_payload "$R6" "$SID" false)"
+NOSWEEP="$(plant_tree hooks-nosweeper)"
+run_gate "$NOSWEEP/hooks/stop.sh" "$(stop_payload "$R6" "$SID" false)"
 expect_status "6a: the sweeper script is absent — pass, do not block on a verdict we cannot take" "0" "$RC"
 expect_eq "6a: …and mark nothing swept on an answer we never got" "0" "$(swept_count "$R6")"
 
-BADSWEEP="$SANDBOX/hooks-badsweeper"
-mkdir -p "$BADSWEEP"
-cp "$GATE" "$BADSWEEP/landing-gate.sh" 2>/dev/null
-printf '#!/bin/bash\nexit 7\n' > "$BADSWEEP/session-sweeper.sh"
-chmod +x "$BADSWEEP/session-sweeper.sh"
-run_gate "$BADSWEEP/landing-gate.sh" "$(stop_payload "$R6" "$SID" false)"
+BADSWEEP="$(plant_tree hooks-badsweeper)"
+printf '#!/bin/bash\nexit 7\n' > "$BADSWEEP/hooks/session-sweeper.sh"
+chmod +x "$BADSWEEP/hooks/session-sweeper.sh"
+run_gate "$BADSWEEP/hooks/stop.sh" "$(stop_payload "$R6" "$SID" false)"
 expect_status "6b: the sweeper errors — pass" "0" "$RC"
 expect_eq "6b: …and the row stays owed a verdict" "0" "$(swept_count "$R6")"
 
-QUIETSWEEP="$SANDBOX/hooks-quietsweeper"
-mkdir -p "$QUIETSWEEP"
-cp "$GATE" "$QUIETSWEEP/landing-gate.sh" 2>/dev/null
-printf '#!/bin/bash\nexit 1\n' > "$QUIETSWEEP/session-sweeper.sh"
-chmod +x "$QUIETSWEEP/session-sweeper.sh"
-run_gate "$QUIETSWEEP/landing-gate.sh" "$(stop_payload "$R6" "$SID" false)"
+QUIETSWEEP="$(plant_tree hooks-quietsweeper)"
+printf '#!/bin/bash\nexit 1\n' > "$QUIETSWEEP/hooks/session-sweeper.sh"
+chmod +x "$QUIETSWEEP/hooks/session-sweeper.sh"
+run_gate "$QUIETSWEEP/hooks/stop.sh" "$(stop_payload "$R6" "$SID" false)"
 expect_eq "6c: …and nothing is marked closed on a line that was never printed" \
   "0" "$(swept_count "$R6")"
 
@@ -1204,9 +1234,8 @@ deliver "$R15H" .bionic/docs/record/mate.md
 run_gate "$GATE" "$(stop_payload "$R15H" "$SID" false)"
 expect_eq "15h: …and marks nothing, delivered or not" "0" "$(swept_count "$R15H")"
 
-SUPDIR="$SANDBOX/hooks-supersede-mutant"
-mkdir -p "$SUPDIR"
-cp "$HOOKS_DIR/session-sweeper.sh" "$SUPDIR/session-sweeper.sh"
+SUPDIR="$(plant_tree hooks-supersede-mutant)"
+cp "$HOOKS_DIR/session-sweeper.sh" "$SUPDIR/hooks/session-sweeper.sh"
 # THE SHIPPED LAYOUT AROUND THE MUTANT — hooks/ beside scripts/lib/, holding THIS
 # checkout's library (epic-22 wave-01, N1) — is `$MUTANT_LIB`, built once at the top of
 # this file and asserted complete against the gate's own `BIONIC_LIB_WANT` there. It used
@@ -1221,15 +1250,15 @@ awk '{
          next
        }
        print
-     }' "$GATE" > "$SUPDIR/landing-gate.sh"
+     }' "$GATE_SRC" > "$SUPDIR/scripts/lib/stop.sh"
 expect_eq "15h-mut: the guard PAIR is where the mutation says it is (not vacuous)" \
-  "2" "$(diff "$GATE" "$SUPDIR/landing-gate.sh" | /usr/bin/grep -c '^< ' | tr -d ' ')"
+  "2" "$(diff "$GATE_SRC" "$SUPDIR/scripts/lib/stop.sh" | /usr/bin/grep -c '^< ' | tr -d ' ')"
 
 R15H_MUT="$(make_wave_repo r15h-mut)"
 add_row "$R15H_MUT" name=w2mate agent_id="$TEAM_AID" teammate_id="$TEAM_ADDR" \
   deliverable=.bionic/docs/record/mate.md launched_at="$(iso_ago 600)"
 deliver "$R15H_MUT" .bionic/docs/record/mate.md
-run_gate "$SUPDIR/landing-gate.sh" "$(stop_payload "$R15H_MUT" "$SID" false)"
+run_gate "$SUPDIR/hooks/stop.sh" "$(stop_payload "$R15H_MUT" "$SID" false)"
 expect_eq "15h-mut: with the guard removed the SAME row is marked — the fixture really does discriminate" \
   "1" "$(swept_count "$R15H_MUT")"
 
@@ -1442,7 +1471,7 @@ expect_eq "16j: …and the impact command received the path from the DIFF, unexp
 
 section "Section 17: the swept-marker extraction fails LOUDLY, or not at all (review-b B-12)"
 # tests/lib/swept-marker.sh obtains both the constant and the writer by matching SOURCE TEXT
-# of this hook at column 0 — `^SWEPT_SCHEMA=` and `^swept_marker_write()`. Indent the
+# of payload/scripts/lib/stop.sh at column 0 — `^SWEPT_SCHEMA=` and `^swept_marker_write()`. Indent the
 # function, move the constant, and both `eval`s become no-ops: the builder silently does not
 # exist, and the failure surfaces as `command not found` under the runner's stderr-strict
 # arm rather than as a named assertion in the suite that depends on it. Seven suites source
@@ -1458,15 +1487,15 @@ mkdir -p "$SM_DIR" "$SM_DIR2" "$SM_DIR3"
 # BOTH ANCHORS ONCE, IMMEDIATELY BEFORE THE THREE MUTANTS THEY GUARD — the pair below and
 # the two single-line variants further down are the same two rewrites in three
 # combinations, so anchoring each pattern once is anchoring all three.
-anchor -E "$BIONIC_HOOKS_DIR/landing-gate.sh" '^SWEPT_SCHEMA=' 1
-anchor -E "$BIONIC_HOOKS_DIR/landing-gate.sh" '^swept_marker_write\(\)' 1
+anchor -E "$GATE_SRC" '^SWEPT_SCHEMA=' 1
+anchor -E "$GATE_SRC" '^swept_marker_write\(\)' 1
 sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' -e 's/^swept_marker_write()/  swept_marker_write()/' \
-  "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR/landing-gate.sh"
-sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR2/landing-gate.sh"
+  "$GATE_SRC" > "$SM_DIR/stop.sh"
+sed -e 's/^SWEPT_SCHEMA=/  SWEPT_SCHEMA=/' "$GATE_SRC" > "$SM_DIR2/stop.sh"
 sed -e 's/^swept_marker_write()/  swept_marker_write()/' \
-  "$BIONIC_HOOKS_DIR/landing-gate.sh" > "$SM_DIR3/landing-gate.sh"
+  "$GATE_SRC" > "$SM_DIR3/stop.sh"
 expect_eq "17a the mutant really did move both anchors" "0" \
-  "$(/usr/bin/grep -cE '^(SWEPT_SCHEMA=|swept_marker_write\(\))' "$SM_DIR/landing-gate.sh" | tr -d ' ')"
+  "$(/usr/bin/grep -cE '^(SWEPT_SCHEMA=|swept_marker_write\(\))' "$SM_DIR/stop.sh" | tr -d ' ')"
 
 # A REAL SCRIPT FILE, not `bash -c`: the framework derives a suite's helper calls from its
 # own source and refuses a `$0` it cannot read, so a `-c` driver would fail for a reason
@@ -1477,7 +1506,7 @@ cat > "$SM_DRIVER" <<'SMEOF'
 #!/bin/bash
 set -uo pipefail
 SM_LIB_DIR="$1"
-BIONIC_HOOKS_DIR="$2"
+BIONIC_SWEPT_SOURCE="$2"
 . "$SM_LIB_DIR/assert.sh"
 . "$SM_LIB_DIR/swept-marker.sh"
 # THE DRIVER'S OWN EXIT MUST MEAN ONE THING. `type -t` on an undefined name exits 1 all by
@@ -1489,32 +1518,32 @@ exit 0
 SMEOF
 chmod +x "$SM_DRIVER"
 
-SM_OUT=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR" 2>&1)
+SM_OUT=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR/stop.sh" 2>&1)
 SM_ST=$?
 expect_eq "17b sourcing the lib against a reformatted hook EXITS non-zero" "1" "$SM_ST"
 expect_absent "17b …and does not carry on with no builder" "SOURCED-ANYWAY" "$SM_OUT"
 expect_contains "17b …naming the lib that could not extract" "tests/lib/swept-marker.sh" "$SM_OUT"
-expect_contains "17b …and the hook it read" "landing-gate.sh" "$SM_OUT"
+expect_contains "17b …and the file it read" "stop.sh" "$SM_OUT"
 
 # THE CONSTANT'S HALF, on its own: only the SWEPT_SCHEMA line moved, so the function still
 # extracts and the failure has to come from the constant's own check.
-SM_OUT2=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR2" 2>&1)
+SM_OUT2=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR2/stop.sh" 2>&1)
 SM_ST2=$?
 expect_eq "17c a moved SWEPT_SCHEMA= alone also EXITS non-zero" "1" "$SM_ST2"
 expect_contains "17c …naming the constant and the file it was not in" "SWEPT_SCHEMA" "$SM_OUT2"
-expect_contains "17c …and the hook it read" "landing-gate.sh" "$SM_OUT2"
+expect_contains "17c …and the file it read" "stop.sh" "$SM_OUT2"
 
 # THE FUNCTION'S HALF, on its own: only `swept_marker_write()` is indented, so the constant
 # still extracts and the failure has to come from the builder's own presence check — the
 # `command not found` this whole guard exists to turn into a named refusal.
-SM_OUT4=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR3" 2>&1)
+SM_OUT4=$(bash "$SM_DRIVER" "$SM_LIB" "$SM_DIR3/stop.sh" 2>&1)
 SM_ST4=$?
 expect_eq "17e an indented swept_marker_write() alone also EXITS non-zero" "1" "$SM_ST4"
 expect_contains "17e …naming the builder that was not extracted" "swept_marker_write" "$SM_OUT4"
 expect_absent "17e …and never reaches the code that would have called it" "SOURCED-ANYWAY" "$SM_OUT4"
 
 # CONTROL: the SHIPPED hook, same three lines — it sources clean and the builder is real.
-SM_OUT3=$(bash "$SM_DRIVER" "$SM_LIB" "$BIONIC_HOOKS_DIR" 2>&1)
+SM_OUT3=$(bash "$SM_DRIVER" "$SM_LIB" "$GATE_SRC" 2>&1)
 SM_ST3=$?
 expect_eq "17d control: against the shipped hook the lib sources clean" "0" "$SM_ST3"
 expect_contains "17d …and the builder is a real function" "function" "$SM_OUT3"
