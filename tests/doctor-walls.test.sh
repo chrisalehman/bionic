@@ -54,8 +54,12 @@ PLUG="${TMP}/plug"
 mkdir -p "$PLUG"
 cp -RL "${PAYLOAD}/." "$PLUG/" 2>/dev/null
 
-expect_true "the fixture tree carries the four wall hooks" \
-  test -f "$PLUG/hooks/protect-main.sh" -a -f "$PLUG/hooks/background-suite-guard.sh"
+# THE FOUR WALLS ARE ONE FILE (epic-23 wave-11-lean-spine, T23). protect-main,
+# protect-database, the evidence gate, farm-out-reminder and background-suite-guard are
+# functions of payload/scripts/lib/walls.sh behind hooks/bash-walls.sh, so the roster
+# lib/checks.sh keeps has one name in it and this row asks for that file.
+expect_true "the fixture tree carries the wall hook" \
+  test -f "$PLUG/hooks/bash-walls.sh"
 expect_true "the fixture tree carries its own library" test -f "$PLUG/scripts/lib/git-argv.sh"
 
 # An empty registry: no installed_plugins.json, no known_marketplaces.json, no
@@ -265,9 +269,9 @@ expect_eq "14.1: the row's per-wall verdict names the same library the page name
 expect_match "14.2: …and the page it was taken from said exactly that" \
   "*protect-main*cannot load*git-argv.sh*" "$ROWS3"
 expect_match "14.3: the wanted basenames come from the hook itself, not from a list here" \
-  "*git-argv.sh*" "$(wall_ask "bionic_check_wall_want '$PLUG/hooks/protect-main.sh'")"
+  "*git-argv.sh*" "$(wall_ask "bionic_check_wall_want '$PLUG/hooks/bash-walls.sh'")"
 expect_match "14.4: the loader probe answers with an empty library and names the one it wanted" \
-  "lib=|missing=git-argv.sh*" "$(wall_ask "bionic_check_wall_probe '$PLUG/hooks/protect-main.sh' git-argv.sh")"
+  "lib=|missing=git-argv.sh*" "$(wall_ask "bionic_check_wall_probe '$PLUG/hooks/bash-walls.sh' git-argv.sh")"
 # THE TWO ROW DETECTORS, over the same root: no wall FILE is gone, so the
 # payload row is quiet, while every wall fails to load, so the library row fires.
 expect_eq "14.5: the wall-payload row is quiet — no wall hook is missing here" \
@@ -285,7 +289,7 @@ expect_no_match "14.9: …while protect-main is no longer named at all" \
   "*protect-main*" "$(walls_rows "$(run_doctor)")"
 # AND THE MISSING ARM, which the sections above never reach: take the hook file
 # itself away and the payload row is the one that fires.
-rm -f "$PLUG/hooks/protect-main.sh"
+rm -f "$PLUG/hooks/bash-walls.sh"
 expect_eq "14.10: with the hook file itself gone the verdict is missing, not unloadable" \
   "missing" "$(wall_ask 'bionic_check_wall_state protect-main')"
 expect_eq "14.11: …and the wall-payload row is what fires for it" \

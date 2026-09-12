@@ -122,6 +122,11 @@ STUB_BLOCK_EXIT2='blockE() {
   return 2
 }'
 
+STUB_BLOCK_EXIT2_B='blockE2() {
+  fold_block exit2 stop "the second exit2 fact" "fix the second" "REASON-EXIT2-B for the model"
+  return 2
+}'
+
 STUB_ADVISE='adviseA() {
   fold_advise "ADVISORY-ONE from a function with no refusal"
   return 1
@@ -358,8 +363,12 @@ expect_contains "12g: …and the second's" "CONTEXT-TWO" "$(context_of)"
 expect_true "12h: …in the order the functions were named" \
   test "$(awk '/CONTEXT-ONE/{print NR; exit}' <<<"$(context_of)")" -lt \
        "$(awk '/CONTEXT-TWO/{print NR; exit}' <<<"$(context_of)")"
-expect_regex "12i: …separated by a blank line, not run together" \
-  'CONTEXT-ONE[^\n]*\n\nCONTEXT-TWO' "$(context_of)"
+# SEPARATED BY A BLANK LINE, asserted as the whole merged value rather than by a
+# pattern: each nudge is a paragraph, and run together they read as one speaker's.
+expect_eq "12i: …separated by a blank line, not run together" \
+  "CONTEXT-ONE from the first speaker
+
+CONTEXT-TWO from the second speaker" "$(context_of)"
 
 # THE RETURN CODE IS STILL THE VERDICT (§7's rule, on this channel too).
 drive "$STUB_CONTEXT_MUTE" PreToolUse ctxM
@@ -396,5 +405,82 @@ expect_eq "12q: a JSON refusal keeps stdout to itself — one document" "1" \
 expect_contains "12r: …and that document is the refusal" "REASON-ALPHA" "$(reason_of)"
 expect_contains "12s: …the displaced advisory is not lost, it degrades to stderr" \
   "CONTEXT-ONE" "$FOLD_ERR"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "13: two blockers on a channel that carries no detail — no reason is deleted"
+#
+# THE DEFECT THIS PINS, found by tests/bash-walls.test.sh section 3 and repaired here.
+# The composed object keeps the FIRST blocker's verb, fact and fix; every other
+# blocker's words used to live only in `detail`. On `exit2` there is one wire and
+# ruling D-1 spends it on the headline, so `detail` is never emitted — which meant that
+# when two `exit2` walls refused one command, the second wall's SENTENCE disappeared.
+# The two processes this fold replaced each printed their own line and a reader saw
+# both. "All reasons print" is the rule; deleting one of them is not a way to keep it.
+#
+# THE FIX, on both halves of the wire: every blocker after the first leads its own
+# `detail` with its own rendered line (so a channel that carries detail carries the
+# sentence too), and where the channel carries no detail the extra lines follow the
+# headline on the user's stream. One line per blocker, in the order the functions were
+# named, and nothing that was not on that stream before the merge.
+
+drive "$STUB_BLOCK_EXIT2
+$STUB_BLOCK_EXIT2_B" Stop blockE blockE2
+expect_status "13a: two exit2 blockers exit 2" "2" "$FOLD_RC"
+expect_contains "13b: the first blocker's sentence is the headline" \
+  "bionic: stop refused — the exit2 fact (fix the exit2)" "$FOLD_ERR"
+expect_contains "13c: the second blocker's sentence is NOT deleted" \
+  "bionic: stop refused — the second exit2 fact (fix the second)" "$FOLD_ERR"
+expect_eq "13d: one line per blocker — two blockers, two lines" "2" \
+  "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -c '^bionic: ')"
+expect_true "13e: …in the order the functions were named" \
+  test "$(awk '/the exit2 fact/{print NR; exit}' <<<"$FOLD_ERR")" -lt \
+       "$(awk '/the second exit2 fact/{print NR; exit}' <<<"$FOLD_ERR")"
+# THE CHANNEL IS UNCHANGED BY THE REPAIR: `exit2` still carries no `detail`.
+expect_absent "13f: …and still no detail on a channel that has no room for it" \
+  "REASON-EXIT2" "$FOLD_ERR"
+
+# ONE BLOCKER IS UNTOUCHED — the verbatim case the whole merge rests on.
+drive "$STUB_BLOCK_EXIT2" Stop blockE
+expect_eq "13g: a lone exit2 blocker still prints exactly one line" "1" \
+  "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -c '^bionic: ')"
+expect_eq "13h: …and it is that blocker's own, byte for byte" \
+  "bionic: stop refused — the exit2 fact (fix the exit2)" \
+  "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep '^bionic: ')"
+
+# ON A CHANNEL THAT DOES CARRY DETAIL the extra sentence rides the model's wire with
+# its own reason behind it, and the user's stream keeps one line per blocker as above.
+drive "$STUB_BLOCK_A
+$STUB_BLOCK_B" Stop blockA blockB
+expect_contains "13i: the second blocker's sentence leads its reason in the composed detail" \
+  "bionic: stop refused — the second fact (fix the second)" "$(reason_of)"
+expect_true "13j: …ahead of that blocker's own detail" \
+  test "$(index_of 'the second fact')" -lt "$(index_of REASON-BETA)"
+
+# THE KNOB DOES NOT DOUBLE THE LINES. Under BIONIC_WALL_VERBOSE=1 `refuse` puts the
+# whole composed detail on the user stream, extra sentences and all, so the fold must
+# not append them a second time.
+FOLD_VERBOSE_ERR=""
+drive_verbose() {  # <stub text> <event> <fn>...
+  local body="$1" event="$2"; shift 2
+  local d; d=$(mktemp -d)
+  {
+    printf '%s\n' '#!/bin/bash'
+    printf '%s\n' 'set -uo pipefail'
+    printf '. "%s/refuse.sh"\n' "$LIB"
+    printf '. "%s/fold.sh"\n' "$LIB"
+    printf '%s\n' "$body"
+    printf 'bionic_fold "%s"' "$event"
+    printf ' %s' "$@"
+    printf '\nexit $?\n'
+  } > "$d/drive.sh"
+  BIONIC_WALL_VERBOSE=1 bash "$d/drive.sh" >/dev/null 2>"$FOLD_ERRFILE"
+  FOLD_VERBOSE_ERR=$(cat "$FOLD_ERRFILE" 2>/dev/null)
+  rm -rf "$d"
+}
+require_helpers drive_verbose
+drive_verbose "$STUB_BLOCK_EXIT2
+$STUB_BLOCK_EXIT2_B" Stop blockE blockE2
+expect_eq "13k: under the verbose knob the second sentence appears once, not twice" "1" \
+  "$(printf '%s\n' "$FOLD_VERBOSE_ERR" | /usr/bin/grep -c 'the second exit2 fact')"
 
 finish

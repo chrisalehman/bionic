@@ -42,7 +42,7 @@ set -uo pipefail
 
 # THE SEAM IS A VARIABLE, NOT A LITERAL AT EVERY CALL SITE. T23 re-points this one line
 # at hooks/bash-walls.sh and the whole suite drives the folded process instead.
-HOOK="${BIONIC_HOOKS_DIR}/farm-out-reminder.sh"
+HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/farm-out-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }

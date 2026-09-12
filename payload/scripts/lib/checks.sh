@@ -95,7 +95,7 @@ bionic_check_route() {  # <setup|cli|user>
 # The four hooks that stand over actions that cannot be taken back. Their roster
 # lived in doctor.sh until 1.5.1; it is a list of things bionic needs true, so it
 # is here, and doctor reads it.
-BIONIC_WALL_HOOKS="protect-main canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard"
+BIONIC_WALL_HOOKS="bash-walls"
 
 bionic_check_payload_root() { plugin_root; }
 

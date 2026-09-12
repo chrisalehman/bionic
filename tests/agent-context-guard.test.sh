@@ -507,21 +507,34 @@ expect_eq "G8.2 ...nothing on stderr" "" "$ERR"
 run_guard "$(mk_agent_payload "$REPO_U" yes)" "$DISPATCH_WALL"
 expect_eq "G8.3 control: restore the marker and the dispatch wall REFUSES again" "2" "$ST"
 
-section "G9 — the partition covers the BUDGET arm too (S13, AC-21)"
-# hooks/background-suite-guard.sh grew a second arm in wave-01: inside a dispatched agent
-# it refuses a suite outside the budget its roster row records. That arm reaches the
-# machine through THIS guard — `hooks.json` registers the pair, and nothing else does — so
-# the guard's four cells have to hold for it exactly as they hold for the two walls above.
-# What the arm ITSELF does with a row is tests/background-suite-guard.test.sh's; what is
-# asserted here is that the channel delivers it, and that no cell the guard is supposed to
-# silence lets it through.
+section "G9 — the BUDGET arm's partition, now that it is not this guard's (S13, AC-21)"
 #
-# The two silent cells get the POSITIVE CONTROL this file's header requires: the same
-# payload driven STRAIGHT into the wall must refuse it, so a silence is the guard's
-# decision and not a payload the wall would have ignored anyway.
-SUITE_WALL="$HOOKS_DIR/background-suite-guard.sh"
+# WHAT THIS SECTION USED TO PROVE, AND WHY IT CHANGED (epic-23 wave-11-lean-spine, T23).
+# hooks/background-suite-guard.sh grew a second arm in wave-01: inside a dispatched agent
+# it refuses a suite outside the budget its roster row records. That arm reached the
+# machine THROUGH THIS GUARD — `hooks.json` registered the pair on PreToolUse|Bash and
+# nothing else did — so the guard's four cells were asserted on it here.
+#
+# THAT REGISTRATION IS GONE. The five PreToolUse|Bash walls are one process behind
+# hooks/bash-walls.sh, and a wrapper in front of the compound would have silenced
+# protect-main, protect-database, the evidence gate and farm-out-reminder on every
+# main-thread Bash call — the reverse of what this guard has ever been for. So the
+# predicate moved INTO the wall: `wall_background_suite_guard` in
+# payload/scripts/lib/walls.sh asks the same three questions, of that one function, and
+# the guard file stays registered on SubagentStop untouched (sections G1-G8 above).
+#
+# THE FOUR CELLS ARE STILL WORTH DRIVING, and they are driven here against the process the
+# manifest actually registers. What is asserted is unchanged — an armed agent context
+# refuses an off-budget suite, and the main thread, an unarmed session and an unengaged
+# session are each silent — and only the party that answers has moved. That the guard is no
+# longer on that path at all is pinned in tests/cross-gate-agreement.test.sh section L.4;
+# that the wall's own arms behave is tests/background-suite-guard.test.sh's.
+SUITE_WALL="$HOOKS_DIR/bash-walls.sh"
 
 mk_suite_payload() {  # <cwd> <command> <with-agent-id:yes|no>
+  # `agent_type` TRAVELS WITH `agent_id`. A dispatched agent's tool-class payload carries
+  # both, and without the first the compound's farm-out function reads this as a
+  # MAIN-THREAD suite command and denies it beside the verdict this section is about.
   jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" --arg a "$AGENT_ID" \
     --argjson withid "$([ "$3" = yes ] && echo true || echo false)" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
@@ -530,7 +543,17 @@ mk_suite_payload() {  # <cwd> <command> <with-agent-id:yes|no>
       hook_event_name:"PreToolUse", tool_name:"Bash",
       tool_input:{command:$cmd},
       tool_use_id:"toolu_01budgetarm"}
-     + (if $withid then {agent_id:$a} else {} end)'
+     + (if $withid then {agent_id:$a, agent_type:"test-runner"} else {agent_type:"test-runner"} end)'
+}
+
+run_wall_verbose() {  # <payload> <wall> -> sets VERR
+  local payload="$1" wall="$2"
+  local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
+  printf '%s' "$payload" | env HOME="$FAKE_HOME" CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" \
+          CLAUDE_CODE_SESSION_ID="$_sid" BIONIC_WALL_VERBOSE=1 \
+          ANTHROPIC_API_KEY=sk-fixture-marker bash "$wall" >/dev/null 2>"$SANDBOX/.verr"
+  VERR=$(cat "$SANDBOX/.verr")
+  return 0
 }
 
 REPO_S=$(make_repo g9)
@@ -543,43 +566,42 @@ roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
   >> "$REPO_S/.bionic/tmp/roster-$SID.state"
 
 # CELL 1: agent context + armed -> the arm runs, and refuses the off-budget suite.
-run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
 expect_eq "G9.1 agent context + armed: the budget arm REFUSES an off-budget suite" "2" "$ST"
 expect_contains "G9.1 …in the ruled one line, and it is the BUDGET arm's" \
   "suite-run refused — that suite is not on this agent's budget" "$ERR"
-run_guard_verbose "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+run_wall_verbose "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
 expect_contains "G9.1 …in the arm's own words" "BUDGET" "$VERR"
 expect_contains "G9.1 …naming the recorded set" "alpha.test.sh" "$VERR"
 
-# …and the same channel lets an ON-budget suite through, so G9.1 is the budget and not the
-# channel refusing everything it is handed.
-run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/alpha.test.sh' yes)" "$SUITE_WALL"
-expect_eq "G9.1 control: an ON-budget suite passes the same channel" "0" "$ST"
+# …and the same process lets an ON-budget suite through, so G9.1 is the budget and not a
+# wall refusing everything it is handed.
+run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/alpha.test.sh' yes)" "$SUITE_WALL"
+expect_eq "G9.1 control: an ON-budget suite passes the same process" "0" "$ST"
 expect_empty "G9.1 …silently" "$OUT$ERR"
 
-# CELL 2: MAIN THREAD (no agent_id) + armed -> silent.
-run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' no)" "$SUITE_WALL"
+# CELL 2: MAIN THREAD (no agent_id) + armed -> silent. This is the cell the wrapper used
+# to own, and the one that would have been lost if the predicate had not moved with it.
+run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' no)" "$SUITE_WALL"
 expect_eq "G9.2 main thread + armed: silent" "0" "$ST"
 expect_empty "G9.2 …silently" "$OUT$ERR"
 
-# CELL 3: agent context + UNARMED (no roster) -> silent, and the wall itself would too.
+# CELL 3: agent context + UNARMED (no roster) -> silent.
 disarm_roster "$REPO_S"
-run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
 expect_eq "G9.3 agent context + unarmed: silent" "0" "$ST"
 expect_empty "G9.3 …silently" "$OUT$ERR"
 arm_roster "$REPO_S"
 roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
   suites_allowed=alpha.test.sh suites_source=declared files= \
   >> "$REPO_S/.bionic/tmp/roster-$SID.state"
-run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
+run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
 expect_eq "G9.3 control: re-arm the roster and the same payload REFUSES again" "2" "$ST"
 
-# CELL 4: the session never invoked the skill -> silent on both sides of the guard.
+# CELL 4: the session never invoked the skill -> silent.
 unengage "$REPO_S"
-run_guard "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
-expect_eq "G9.4 an unengaged session is silent through the guard" "0" "$ST"
 run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
-expect_eq "G9.4 …and driven straight into the wall, which asks the same question itself" "0" "$ST"
+expect_eq "G9.4 an unengaged session is silent" "0" "$ST"
 expect_empty "G9.4 …silently" "$OUT$ERR"
 : > "$REPO_S/.bionic/tmp/engaged-$SID.state"
 run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
