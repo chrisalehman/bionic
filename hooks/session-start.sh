@@ -58,7 +58,7 @@
 
 set -u
 
-BIONIC_LIB_WANT="root.sh session.sh patrol.sh run.sh"
+BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -157,6 +157,7 @@ BIONIC_LOADER_REFUSE
 # The library, or nothing. `loader_fail_open` prints one stderr line and exits 0 —
 # a detector that cannot read the disk reports nothing rather than guessing.
 [ -n "$BIONIC_LIB" ] || loader_fail_open "session-start"
+. "$BIONIC_LIB/context.sh" || exit 0   # bionic_context, bionic_jq
 . "$BIONIC_LIB/root.sh"    || exit 0   # project_root
 . "$BIONIC_LIB/session.sh" || exit 0   # session_id, and its one divergence warning
 . "$BIONIC_LIB/patrol.sh"  || exit 0   # PATROL_STALE_MULTIPLIER
@@ -164,33 +165,43 @@ BIONIC_LOADER_REFUSE
 
 # The tree this hook was launched from — printed absolute in the re-arm line, and
 # the tree whose poker is asked for the interval. `$(dirname "$0")/..` and `pwd -P`
-# rather than `realpath`, which stock macOS does not ship (L-LOADER/5, L-ROOT/2).
+# rather than `realpath`, which stock macOS does not ship (L-LOADER/5, L-BIONIC_ROOT/2).
 HOOK_ROOT="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || HOOK_ROOT=""
 [ -n "$HOOK_ROOT" ] || HOOK_ROOT="$(dirname "$0")/.."
 
-# ---------------------------------------------------------------- the payload
-INPUT=""
-[ -t 0 ] || INPUT="$(cat)"
+# ------------------------------------------------- the payload, and the context
+#
+# ONE CALL (REQ-1f, lib/context.sh): the payload read at most once and only when
+# stdin is not a terminal, the cwd by the ONE ladder, the root from it, the session
+# id past the ONE guard, engagement and the run verdict as VALUES.
+#
+# THE REDIRECTION IS NOT HERE, and that is this hook's one deviation from the shape
+# the other fourteen use. lib/session.sh prints a line when the payload and the
+# environment disagree about the session id, and this hook is the single reader that
+# must SHOW that line — the L-SESSION contract, pinned at
+# tests/cross-gate-agreement.test.sh §P2. Suppression belongs at the call site, so
+# the other fourteen write `bionic_context 2>/dev/null || exit 0` and this one does
+# not.
+#
+# THE LADDER USED TO BE REVERSED HERE, and REQ-1h ended that: this hook is on the
+# library's one ladder now, in the library's order, like every other hook. The rungs
+# are named once, in lib/context.sh, and deliberately not restated here — a comment
+# naming a channel its file no longer reads is how the next reader learns the wrong
+# thing.
+bionic_context || exit 0
 
 pfield() {  # <jq path> -> the field, or empty
   command -v jq >/dev/null 2>&1 || return 0
-  printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null
+  bionic_jq "$1"
 }
 SOURCE="$(pfield .source)"
-PAYLOAD_SID="$(pfield .session_id)"
-CWD="$(pfield .cwd)"
-[ -n "$CWD" ] && [ -d "$CWD" ] || CWD="${CLAUDE_PROJECT_DIR:-$PWD}"
-[ -d "$CWD" ] || CWD="$PWD"
 
 # ---------------------------------------------------------------- the project
-# One root, from the one owner (spec §3). A `.bionic` that is a SYMLINK is never a
-# root (ledger C2) — which is exactly the legacy link this hook reports further
-# down, so a worktree carrying one resolves to the main checkout and reports the
-# main checkout's state, not a second copy of it.
-ROOT="$(project_root "$CWD" 2>/dev/null)" || ROOT=""
-[ -n "$ROOT" ] || exit 0
-[ -d "$ROOT/.bionic" ] && [ ! -L "$ROOT/.bionic" ] || exit 0
-TMP="$ROOT/.bionic/tmp"
+# A `.bionic` that is a SYMLINK is never a root (ledger C2) — which is exactly the
+# legacy link this hook reports further down, so a worktree carrying one resolves to
+# the main checkout and reports the main checkout's state, not a second copy of it.
+[ -d "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic" ] || exit 0
+TMP="$BIONIC_ROOT/.bionic/tmp"
 
 # ---------------------------------------------------------------- the three channels
 #
@@ -200,16 +211,18 @@ TMP="$ROOT/.bionic/tmp"
 # probe's finding that they agree on a plain `/clear` is a measurement of one CLI
 # build, not a guarantee.
 ENV_SID="${CLAUDE_CODE_SESSION_ID:-}"
+# THE PAYLOAD'S OWN VALUE, read here rather than taken from `BIONIC_SID`. They are
+# different questions: `BIONIC_SID` is the RESOLVED id — the environment's, with the
+# payload as a witness — and this is the witness itself, printed beside the other two
+# so a reader can tell an agreement from a coincidence. Reading the resolved value
+# into this slot would make the three channels agree by construction and report
+# nothing.
+PAYLOAD_SID="$(pfield .session_id)"
 PID_SID=""
 PIDFILE="$(claude_home)/sessions/$PPID.json"
 if [ -f "$PIDFILE" ] && [ ! -L "$PIDFILE" ] && command -v jq >/dev/null 2>&1; then
   PID_SID="$(jq -r '.sessionId // empty' "$PIDFILE" 2>/dev/null)"
 fi
-
-# The current session id, through the one function every other reader calls. Its
-# stderr warning on a divergent payload is deliberately NOT suppressed: that line
-# is the L-SESSION contract, and this hook is one of the twenty readers.
-CUR="$(session_id "$PAYLOAD_SID")" || CUR=""
 
 # ---------------------------------------------------------------- engagement
 #
@@ -231,7 +244,7 @@ CUR="$(session_id "$PAYLOAD_SID")" || CUR=""
 # bound to a run that has since closed) gets the same listing prepended to
 # today's engaged block rather than a silent guess — it is not exited early,
 # because the roster/stamp/re-arm report still belongs to an engaged reader.
-RUNS="$(open_runs "$ROOT")" || RUNS=""
+RUNS="$(open_runs "$BIONIC_ROOT")" || RUNS=""
 N=$(printf '%s\n' "$RUNS" | grep -c '.')
 
 # LIVE VS OPEN (spec AC-1/AC-3, S3). `live_runs` is a FILTER over `open_runs` — see
@@ -239,7 +252,7 @@ N=$(printf '%s\n' "$RUNS" | grep -c '.')
 # unchanged) while the listing itself shows only the LIVE subset; the quiet remainder is
 # reported as one count, not a second listing, because a bystander acts on a live plan by
 # name and on a quiet one only by knowing it exists at all.
-LIVE="$(live_runs "$ROOT")" || LIVE=""
+LIVE="$(live_runs "$BIONIC_ROOT")" || LIVE=""
 LIVE_N=$(printf '%s\n' "$LIVE" | grep -c '.')
 QUIET=$((N - LIVE_N))
 
@@ -257,7 +270,7 @@ QUIET=$((N - LIVE_N))
 # still reachable: `bind` takes any open plan by name, listed or not. The HEADER above each
 # call still names the true count, so the cap never understates what is here.
 #
-# PATHS ARE RELATIVE TO THE DOCS ROOT. Every one of them shares the same long prefix (47
+# PATHS ARE RELATIVE TO THE DOCS BIONIC_ROOT. Every one of them shares the same long prefix (47
 # characters here), and a listed line PASTES STRAIGHT INTO THE BIND VERB named on the header
 # line above it: `bind` takes an operand that is absolute, project-root-relative or
 # docs-root-relative, trying the project root first and the docs root when that misses
@@ -265,7 +278,7 @@ QUIET=$((N - LIVE_N))
 # paths are printed whole rather than mangled by a prefix strip that would eat a leading
 # slash.
 RUN_LIST_CAP=8
-DOCS="$(docs_root "$ROOT" 2>/dev/null)" || DOCS=""
+DOCS="$(docs_root "$BIONIC_ROOT" 2>/dev/null)" || DOCS=""
 print_runs() {  # <newline-separated runs> -> the capped, docs-root-relative listing
   local runs="$1" total shown=0 _p
   total=$(printf '%s\n' "$runs" | grep -c '.')
@@ -326,26 +339,24 @@ print_bound_line() {  # <verdict "bound-open <plan>">
 
 if [ "$N" -eq 1 ]; then
   PLAN="$RUNS"
-  if ! engaged_session "$ROOT" "$CUR"; then
+  if [ "$BIONIC_ENGAGED" != 1 ]; then
     printf 'bionic: an open run exists here (%s) — invoke /bionic:canonical-sdlc to engage it\n' "$PLAN"
     exit 0
   else
-    VERDICT="$(session_run "$ROOT" "$CUR" 2>/dev/null)"
-    case "$VERDICT" in
-      bound-open\ *) print_bound_line "$VERDICT" ;;
+    case "$BIONIC_RUN_WORD" in
+      bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN" ;;
     esac
   fi
 elif [ "$N" -ge 2 ]; then
-  if ! engaged_session "$ROOT" "$CUR"; then
+  if [ "$BIONIC_ENGAGED" != 1 ]; then
     printf 'bionic: %s open runs exist here — invoke /bionic:canonical-sdlc, then bind the one you mean with: bash %s/hooks/session-poker.sh bind <plan>\n' \
       "$N" "$HOOK_ROOT"
     print_runs "$LIVE"
     print_quiet_line
     exit 0
   else
-    VERDICT="$(session_run "$ROOT" "$CUR" 2>/dev/null)"
-    case "$VERDICT" in
-      bound-open\ *) print_bound_line "$VERDICT" ;;
+    case "$BIONIC_RUN_WORD" in
+      bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN" ;;
       *)
         printf 'bionic: %s open runs exist here and this session is not bound to one — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
           "$N" "$HOOK_ROOT"
@@ -418,7 +429,7 @@ for RF in "$TMP"/roster-*.state; do
   [ -L "$RF" ] && continue        # symlinks are not followed, as everywhere in tmp
   OSID="${RF##*/}"; OSID="${OSID#roster-}"; OSID="${OSID%.state}"
   [ -n "$OSID" ] || continue
-  if [ -n "$CUR" ] && [ "$OSID" = "$CUR" ]; then continue; fi
+  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
   LEDGER="$TMP/sweeper-$OSID.state"
   if [ ! -f "$LEDGER" ] || [ -L "$LEDGER" ]; then LEDGER=""; fi
   N="$(open_rows "$RF" "$LEDGER")"
@@ -439,7 +450,7 @@ done
 ss_interval() {
   local poker="$HOOK_ROOT/hooks/session-poker.sh" s=""
   if [ -f "$poker" ]; then
-    s="$( cd "$ROOT" 2>/dev/null && bash "$poker" interval 2>/dev/null )"
+    s="$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" interval 2>/dev/null )"
     case "$s" in ''|*[!0-9]*) s="" ;; esac
     if [ -z "$s" ]; then
       s="$( bash "$poker" interval-default 2>/dev/null )"
@@ -465,7 +476,7 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep
   : > "$out" 2>/dev/null || out="/dev/null"
   case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
   set -m
-  ( cd "$ROOT" 2>/dev/null && bash "$poker" sweep ) </dev/null >"$out" 2>/dev/null &
+  ( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" sweep ) </dev/null >"$out" 2>/dev/null &
   pid=$!
   [ "$had_monitor" = "yes" ] || set +m
   if command -v sleep >/dev/null 2>&1; then
@@ -495,7 +506,7 @@ for SF in "$TMP"/patrol-*.state; do
   [ -L "$SF" ] && continue
   OSID="${SF##*/}"; OSID="${OSID#patrol-}"; OSID="${OSID%.state}"
   [ -n "$OSID" ] || continue
-  if [ -n "$CUR" ] && [ "$OSID" = "$CUR" ]; then continue; fi
+  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
   MT="$(stat -f %m "$SF" 2>/dev/null || stat -c %Y "$SF" 2>/dev/null)"
   case "$MT" in ''|*[!0-9]*) continue ;; esac
   AGE=$(( NOW - MT )); [ "$AGE" -ge 0 ] || AGE=0
@@ -506,9 +517,9 @@ done
 
 # ---------------------------------------------------------------- legacy symlinks
 LINKS=""
-for LN in "$ROOT"/.worktrees/*/.bionic; do
+for LN in "$BIONIC_ROOT"/.worktrees/*/.bionic; do
   [ -L "$LN" ] || continue
-  LINKS="${LINKS}  ${LN#"$ROOT"/} -> $(readlink "$LN" 2>/dev/null)
+  LINKS="${LINKS}  ${LN#"$BIONIC_ROOT"/} -> $(readlink "$LN" 2>/dev/null)
 "
 done
 
@@ -561,7 +572,7 @@ done
 # stops being reported the moment sweeping actually works again.
 SWEEP_FAIL_LINE=""
 if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
-  SS_DEAD_IDS="$(patrol_dead_sessions "$ROOT" "$CUR" 2>/dev/null)"
+  SS_DEAD_IDS="$(patrol_dead_sessions "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)"
   SS_YOUNG=no
   if [ -n "$SS_DEAD_IDS" ]; then
     SS_LIMIT="$(ss_interval)"
@@ -582,7 +593,7 @@ if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
     # whole set rather than one per session.
     SS_FILES="$(while IFS= read -r SS_SID; do
         [ -n "$SS_SID" ] || continue
-        patrol_session_state_files "$ROOT" "$SS_SID"
+        patrol_session_state_files "$BIONIC_ROOT" "$SS_SID"
       done <<EOF
 $SS_DEAD_IDS
 EOF

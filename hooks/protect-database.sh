@@ -6,8 +6,8 @@
 # via psql, mysql, sqlite3, and other common DB CLIs.
 # Registered always-on in hooks/hooks.json; runs from the mounted plugin payload.
 
-INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+BIONIC_INPUT=$(cat)
+COMMAND=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.command // empty')
 
 # Only check Bash commands
 [ -z "$COMMAND" ] && exit 0
@@ -21,7 +21,7 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
 # missing would arm this wall in exactly the sessions Chris's ruling takes it out of.
 # The direction is chosen by the cost of the mistake: a destructive command that slips
 # through a broken plugin is one command, and the plugin being broken is loud.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -118,6 +118,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "protect-database"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -141,11 +143,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "protect-database"; fi
 # partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
 # which never consented is the defect this guard exists to remove.
 # [WALL: tests/protect-database.test.sh]
-DB_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
-[ -n "$DB_CWD" ] || DB_CWD=$(pwd)
-DB_REPO=$(project_root "$DB_CWD")
-DB_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || DB_SID=""
-engaged_session "$DB_REPO" "$DB_SID" || exit 0
+#
+# THE CONTEXT IS ONE CALL (REQ-1f, lib/context.sh). It adopts the BIONIC_INPUT read
+# above, resolves the cwd by the one ladder, the root, and the session id past the
+# one shape guard, and returns 1 when it cannot identify the session at all.
+bionic_context 2>/dev/null || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 
 # Uppercase for case-insensitive matching
