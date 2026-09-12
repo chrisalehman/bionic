@@ -80,25 +80,20 @@ TARGET="${1:-}"
 case "$TARGET" in '~/'*) TARGET="$HOME/${TARGET#\~/}" ;; esac
 [ -f "$TARGET" ] || exit 0
 
-INPUT=$(cat)
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+BIONIC_INPUT=$(cat)
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 # ---------- 1. is this an agent context? ----------
 # The cheapest question, asked first and with no filesystem behind it: every
 # main-thread tool call on this machine — armed or not — leaves here.
 [ -n "$(_jq '.agent_id')" ] || exit 0
 
-# ---------- 2. is this session armed? ----------
-PAYLOAD_SID=$(_jq '.session_id')
-CWD=$(_jq '.cwd')
-[ -n "$CWD" ] || exit 0
-
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: this guard
 # decides whether a wall RUNS, and a guard that refused when it could not load would
 # take every wall behind it down with it in every session on the machine.
-BIONIC_LIB_WANT="root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -195,28 +190,32 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "agent-context-guard"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
 
-# THE SESSION ID (design §1): the environment value is primary, the payload a witness.
-# The roster filename is built from it, so this guard and the wall behind it have to
-# key on the same one — a guard reading the payload while the wall read the
-# environment would answer "unarmed" for the roster the wall had just written.
-PAYLOAD_SID=$(session_id "$PAYLOAD_SID" 2>/dev/null) || PAYLOAD_SID=""
-[ -n "$PAYLOAD_SID" ] || exit 0
-# The same belt hooks/dispatch-preflight.sh wears on the same value, in the same
-# direction: the roster path is built by interpolating this key, so a key carrying
-# a path separator addresses a file outside the state directory entirely.
-case "$PAYLOAD_SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
-
-# THE ROOT (spec AC-10). This guard must land on the same `.bionic` the dispatch wall
-# wrote the roster into, or it answers "unarmed" from a worktree of an armed session —
-# a wall that goes quiet exactly where it was added to bind.
-REPO=$(project_root "$CWD")
-[ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
+# ---------- 2. is this session armed? ----------
+#
+# THE CONTEXT IS ONE CALL (REQ-1f, lib/context.sh), and it answers both halves of
+# the question this hook used to spell out over twelve lines.
+#
+# THE SESSION ID (design §1): the environment value is primary, the payload a
+# witness. The roster filename is built from it, so this guard and the wall behind
+# it have to key on the same one — a guard reading the payload while the wall read
+# the environment would answer "unarmed" for the roster the wall had just written.
+# The shape guard that used to sit below is the library's now, in the same
+# direction: a key carrying a path separator addresses a file outside the state
+# directory entirely, and `bionic_context` returns 1 rather than hand it back.
+#
+# THE ROOT (spec AC-10). This guard must land on the same `.bionic` the dispatch
+# wall wrote the roster into, or it answers "unarmed" from a worktree of an armed
+# session — a wall that goes quiet exactly where it was added to bind.
+bionic_context 2>/dev/null || exit 0
+[ -d "$BIONIC_ROOT" ] || exit 0
 
 # ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
 #
@@ -233,15 +232,15 @@ REPO=$(project_root "$CWD")
 # partition is the consent boundary (1.3.2 close-out), and a wall that binds a session
 # which never consented is the defect this guard exists to remove.
 # [WALL: tests/agent-context-guard.test.sh]
-engaged_session "$REPO" "$PAYLOAD_SID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # A symlink anywhere on the arming path is not followed, the same three levels the
 # attestation gets in hooks/dispatch-preflight.sh. The stakes are lower here — the
 # only thing a planted roster can do is make a wall RUN — but a repo pointing this
 # guard at another tree's arming fact is still a repo deciding which session it
 # belongs to, and the answer is cheap.
-[ ! -L "$REPO/.bionic" ] && [ ! -L "$REPO/.bionic/tmp" ] || exit 0
-ROSTER_FILE="$REPO/.bionic/tmp/roster-${PAYLOAD_SID}.state"
+[ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || exit 0
+ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ] || exit 0
 
 # ---------- both true: hand the payload to the wall ----------
@@ -249,5 +248,5 @@ ROSTER_FILE="$REPO/.bionic/tmp/roster-${PAYLOAD_SID}.state"
 # The payload goes back in on stdin exactly as it arrived, and the wall's exit
 # status is this guard's — a refusal must reach the harness as the wall's own 2,
 # with the wall's own words already on stderr.
-printf '%s' "$INPUT" | BIONIC_HOOK_CHANNEL=agent-context bash "$TARGET"
+printf '%s' "$BIONIC_INPUT" | BIONIC_HOOK_CHANNEL=agent-context bash "$TARGET"
 exit $?

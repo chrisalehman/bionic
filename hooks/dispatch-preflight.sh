@@ -78,18 +78,14 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # — which is what the installed-path spelling used to buy, now bought without the literal.
 PREFLIGHT_CMD="bash ${HOOK_DIR}/preflight-probe.sh"
 
-INPUT=$(cat)
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+BIONIC_INPUT=$(cat)
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 # ---------- relevance first (checklist A7): the cheapest possible check,
 # before any git resolution or plan-directory walk. Anything that isn't a
 # subagent dispatch is none of this gate's business. ----------
 TOOL_NAME=$(_jq '.tool_name')
 [ "$TOOL_NAME" = "Agent" ] || exit 0
-
-# ---------- ambiguity: cannot even locate the repo -> OPEN, silent ----------
-CWD=$(_jq '.cwd')
-[ -n "$CWD" ] || exit 0
 
 # A GIT TOPLEVEL IS NO LONGER THE PRECONDITION (bionic 1.4.0, spec AC-12, Decision A2).
 # It used to be: `git rev-parse --show-toplevel` had to succeed or the wall exited
@@ -107,7 +103,7 @@ CWD=$(_jq '.cwd')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -204,6 +200,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -220,37 +218,31 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
 
+# ---------- THE ROOT AND THE SESSION KEY, from one call ----------
+#
 # THE ROOT (spec AC-10). Every path this gate owns hangs off the answer: the
 # attestation it reads, the roster it appends, the containment wall it measures
 # deliverables against. A worktree that answered with its own tree would write an
 # attestation the probe on the other side of the combined preflight then could not
 # find — `project_root` maps a linked worktree back onto its main repository, so both
 # sides land in one address space. On an ordinary checkout nothing changes.
-REPO=$(project_root "$CWD")
-[ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
-
-
-# ---------- THE SESSION KEY ----------
 #
-# ABOVE THE RUN PREDICATE SINCE task-engaged-session, because the engagement switch below
-# is keyed to it and that switch is now this gate's FIRST scoping decision. Nothing about
-# the derivation moved with it.
+# THE SESSION KEY comes back from the same call, ABOVE THE RUN PREDICATE since
+# task-engaged-session, because the engagement switch below is keyed to it and that
+# switch is this gate's FIRST scoping decision.
 #
-# Payload missing its session key: the §7 fail-direction table names this
-# exact ambiguity and pins the start-side direction as open, silent — we
-# cannot prove whose dispatch this is, so we cannot refuse it as foreign.
-PAYLOAD_SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || PAYLOAD_SID=""
-[ -n "$PAYLOAD_SID" ] || exit 0
+# Payload missing its session key: the §7 fail-direction table names that exact
+# ambiguity and pins the start-side direction as open, silent — we cannot prove whose
+# dispatch this is, so we cannot refuse it as foreign. The same direction holds for a
+# key that is not SHAPED like one. Every state path this gate reads or writes is built
+# by interpolating this value — preflight-<sid>.state, roster-<sid>.state — and the
+# symlink guards below check $STATE_DIR and those exact filenames, so a key carrying a
+# path separator leaves the guarded directory entirely rather than tripping a guard
+# (Step-6 review S-4). `bionic_context` applies that rule now, for all fifteen, and
+# returns 1 on either ambiguity; this gate spells both as the same silent pass.
+bionic_context 2>/dev/null || exit 0
+[ -d "$BIONIC_ROOT" ] || exit 0
 
-# ...and the same direction for a session key that is not SHAPED like one. Every
-# state path this gate reads or writes is built by interpolating this value —
-# preflight-<sid>.state, roster-<sid>.state — and the symlink guards below check
-# $STATE_DIR and those exact filenames, so a key carrying a path separator leaves
-# the guarded directory entirely rather than tripping a guard (Step-6 review S-4).
-# Session ids are harness-minted UUIDs, so this refuses nothing real; it is the
-# belt every other payload value on these paths already wears via sanitize(),
-# taken in the one direction §7 assigns an unreadable session key — pass, silent.
-case "$PAYLOAD_SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
@@ -261,7 +253,7 @@ case "$PAYLOAD_SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
 # direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
-engaged_session "$REPO" "$PAYLOAD_SID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8) — now DATA, not scope ----------
 #
@@ -290,10 +282,8 @@ engaged_session "$REPO" "$PAYLOAD_SID" || exit 0
 # gate says so once on its advisory channel (AC-3); bound to a plan that has since
 # closed is treated as having no open run at all (AC-6) — the same PLAN="" arm this
 # code already took for "no run".
-_RUN_VERDICT=$(session_run "$REPO" "$PAYLOAD_SID")
-_RUN_WORD="${_RUN_VERDICT%% *}"
-PLAN="${_RUN_VERDICT#* }"
-case "$_RUN_WORD" in
+PLAN="$BIONIC_RUN_PLAN"
+case "$BIONIC_RUN_WORD" in
   bound-open) : ;;
   fallback)
     echo "dispatch-preflight: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
@@ -324,7 +314,7 @@ Fix: ${PREFLIGHT_CMD}
 Then retry the dispatch."
 }
 
-STATE_FILE="$REPO/.bionic/tmp/preflight-${PAYLOAD_SID}.state"
+STATE_FILE="$BIONIC_ROOT/.bionic/tmp/preflight-${BIONIC_SID}.state"
 
 # A symlink ANYWHERE on the attestation path is never followed — a hostile repo
 # can AIM or CLOSE this wall but must not be able to OPEN it by planting content
@@ -352,11 +342,11 @@ STATE_FILE="$REPO/.bionic/tmp/preflight-${PAYLOAD_SID}.state"
 # record must refuse a stop, because that side's ambiguity is what the wall is
 # for. Recorded in the spec's ownership table beside both schema rows.
 attested() {
-  [ ! -L "$REPO/.bionic" ] && [ ! -L "$REPO/.bionic/tmp" ] \
+  [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] \
     && [ ! -L "$STATE_FILE" ] && [ -f "$STATE_FILE" ] || return 1
   local sid
   sid=$(grep -m1 '^session_id=' "$STATE_FILE" 2>/dev/null | cut -d= -f2-)
-  [ -n "$sid" ] && [ "$sid" = "$PAYLOAD_SID" ]
+  [ -n "$sid" ] && [ "$sid" = "$BIONIC_SID" ]
 }
 
 # ==================================================== THE COMBINED PREFLIGHT
@@ -405,7 +395,7 @@ if ! attested; then
   # the attestation that had to be redone was taken against a root derived from the
   # working directory, and an attestation keyed to anything but the session whose
   # dispatch this is would be one this gate then refuses to read.
-  PROBE_OUT=$(cd "$REPO" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$PAYLOAD_SID" \
+  PROBE_OUT=$(cd "$BIONIC_ROOT" 2>/dev/null && CLAUDE_CODE_SESSION_ID="$BIONIC_SID" \
                 bash "$PROBE_SCRIPT" 2>&1)
   PROBE_ST=$?
 
@@ -467,8 +457,8 @@ fi
 # cannot see the CLI's cron table, so a job deleted seconds ago still looks alive for up to
 # 2x the interval. That window is the price of measuring the thing that actually matters.
 
-STATE_DIR="$REPO/.bionic/tmp"
-PATROL_STAMP_FILE="$STATE_DIR/patrol-${PAYLOAD_SID}.state"
+STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
+PATROL_STAMP_FILE="$STATE_DIR/patrol-${BIONIC_SID}.state"
 
 # The poker beside this gate, so a test drives the real one and an installed gate finds its
 # installed sibling — the same resolution, and the same residual config-dir second lane, the
@@ -516,7 +506,7 @@ Then retry the dispatch."
 PATROL_INTERVAL=""
 PATROL_INTERVAL_SOURCE=configured
 if [ -f "$POKER_SCRIPT" ]; then
-  PATROL_INTERVAL=$( cd "$REPO" 2>/dev/null && bash "$POKER_SCRIPT" interval 2>/dev/null )
+  PATROL_INTERVAL=$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$POKER_SCRIPT" interval 2>/dev/null )
   case "$PATROL_INTERVAL" in
     ''|*[!0-9]*) PATROL_INTERVAL="" ;;
   esac
@@ -718,7 +708,7 @@ ROSTER_VERSION="$ROSTER_SCHEMA_VERSION"
 ROSTER_PREFIX="roster-"
 ROSTER_SUFFIX=".state"
 # STATE_DIR is set above, at the arming wall — the first thing on this path to need it.
-ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${PAYLOAD_SID}${ROSTER_SUFFIX}"
+ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${BIONIC_SID}${ROSTER_SUFFIX}"
 
 # ============================================ THE LEASE WALL AND THE BUDGET WALL
 # (spec AC-14 and AC-26; plan task WALLS; assumptions WALLS/2, WALLS/3, WALLS/4, WALLS/6.)
@@ -757,13 +747,13 @@ is_agent_context() {
 # project root is the tree itself (a tree carrying its own `.bionic` is its own project,
 # not a lease of this one), this wall has no main checkout to name and says nothing.
 if ! is_agent_context; then
-  LEASE_TOP=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null) || LEASE_TOP=""
+  LEASE_TOP=$(git -C "$BIONIC_CWD" rev-parse --show-toplevel 2>/dev/null) || LEASE_TOP=""
   if [ -n "$LEASE_TOP" ] && [ -f "$LEASE_TOP/.git" ]; then
     LEASE_TOP=$( cd "$LEASE_TOP" 2>/dev/null && pwd -P ) || LEASE_TOP=""
   else
     LEASE_TOP=""
   fi
-  if [ -n "$LEASE_TOP" ] && [ "$LEASE_TOP" != "$REPO" ]; then
+  if [ -n "$LEASE_TOP" ] && [ "$LEASE_TOP" != "$BIONIC_ROOT" ]; then
     # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
     # answer against the tree, exactly as lib/root.sh's own walk does.
     LEASE_COMMON=$(git -C "$LEASE_TOP" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || LEASE_COMMON=""
@@ -775,7 +765,7 @@ if ! is_agent_context; then
     [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
     if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
       refuse exit2 dispatch "this dispatch came from a worktree" "dispatch from the main checkout" \
-        "    cwd:           ${CWD}
+        "    cwd:           ${BIONIC_CWD}
     worktree:      ${LEASE_TOP}
     main checkout: ${LEASE_MAIN}
 
@@ -1027,7 +1017,7 @@ machine genuinely has the room."
 
   B_TREES=$(budget_field worktrees)
   if [ -n "$B_TREES" ]; then
-    BUDGET_LIVE=$(budget_live_trees "$REPO")
+    BUDGET_LIVE=$(budget_live_trees "$BIONIC_ROOT")
     [ $(( BUDGET_LIVE + 1 )) -gt "$B_TREES" ] && budget_deny \
       "this passes the run's worktree budget" \
       "worktrees: budget=${B_TREES} live=${BUDGET_LIVE} with-this-dispatch=$(( BUDGET_LIVE + 1 ))"
@@ -1599,7 +1589,7 @@ prune_stale_rosters() {
     base="$(basename "$f")"
     sid="${base#"$ROSTER_PREFIX"}"
     sid="${sid%"$ROSTER_SUFFIX"}"
-    [ "$sid" = "$PAYLOAD_SID" ] && continue
+    [ "$sid" = "$BIONIC_SID" ] && continue
     roster_session_live "$sid" || rm -f "$f" 2>/dev/null
   done
 }
@@ -1737,7 +1727,7 @@ resolve_in_repo() {  # <path> -> absolute, `.`/`..` folded, existing prefix phys
   local p="$1" abs out part had_f head rest phys
   case "$p" in
     /*) abs="$p" ;;
-    *)  abs="$REPO/$p" ;;
+    *)  abs="$BIONIC_ROOT/$p" ;;
   esac
   case "$-" in *f*) had_f=1 ;; *) had_f=0 ;; esac
   set -f   # a `*` inside a brief-supplied path is a character, never a glob
@@ -1774,10 +1764,10 @@ resolve_in_repo() {  # <path> -> absolute, `.`/`..` folded, existing prefix phys
 if [ -n "$C_DELIVERABLE" ]; then
   D_ABS=$(resolve_in_repo "$C_DELIVERABLE")
   case "$D_ABS" in
-    "$REPO"/*) : ;;
+    "$BIONIC_ROOT"/*) : ;;
     *)
       _dp_detail="    ${C_DELIVERABLE}
-  resolves to ${D_ABS}, which is not under ${REPO}.
+  resolves to ${D_ABS}, which is not under ${BIONIC_ROOT}.
 
 The landing check stats — and, for a directory, walks — whatever this names,
 on every stop of the agent that owns it. It must be a path inside this repo.
@@ -1906,7 +1896,7 @@ fi
 # tests/run.sh, so a broken impact command costs an over-wide instrument rather than an
 # agent that can run nothing. The operator is told at dispatch, which is the moment the
 # config is still fixable.
-IMPACT_COMMAND=$(config_value "$REPO" "impact-command" "")
+IMPACT_COMMAND=$(config_value "$BIONIC_ROOT" "impact-command" "")
 SUITES_ALLOWED=""
 SUITES_SOURCE=""
 if [ -n "$C_SUITES" ]; then
@@ -1937,7 +1927,7 @@ elif [ -n "$IMPACT_COMMAND" ]; then
     IMPACT_BOUND_TICKS=60          # 60 x 0.1s; the tick is the poll, the product is the bound
     _impact_tmp="${TMPDIR:-/tmp}/bionic-impact-$$-${RANDOM}.out"
     # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
-    ( cd "$REPO" 2>/dev/null && $IMPACT_COMMAND "$@" >"$_impact_tmp" 2>/dev/null ) &
+    ( cd "$BIONIC_ROOT" 2>/dev/null && $IMPACT_COMMAND "$@" >"$_impact_tmp" 2>/dev/null ) &
     _impact_pid=$!
     _impact_ticks=0
     _impact_overran=0
@@ -2160,7 +2150,7 @@ fi
 # the one field that skipped it — while the parallel writer in `session-poker.sh adopt`
 # filtered the same value through `clean()`, so the asymmetry between the two writers was
 # itself the defect. 400 chars matches what `adopt` allows.
-ROSTER_PLAN=$(sanitize "$(session_plan "$REPO" "$PAYLOAD_SID")" 400)
+ROSTER_PLAN=$(sanitize "$(session_plan "$BIONIC_ROOT" "$BIONIC_SID")" 400)
 [ -n "$ROSTER_PLAN" ] || ROSTER_PLAN="none"
 
 # EVERY FIELD NAMED, AND THE ROW ITSELF BUILT ELSEWHERE (spec AC-25). What this hook owns
@@ -2179,7 +2169,7 @@ ROSTER_PLAN=$(sanitize "$(session_plan "$REPO" "$PAYLOAD_SID")" 400)
 # byte for byte; they are not optional to this writer.
 ROW=$(roster_row \
   status=intended \
-  "session=${PAYLOAD_SID}" \
+  "session=${BIONIC_SID}" \
   "name=${AGENT_NAME}" \
   agent_id= \
   "launched_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

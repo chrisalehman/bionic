@@ -15,15 +15,15 @@
 # allowlist below needs the command text, and it has to be consulted BEFORE this
 # wall decides to refuse. `jq` on the payload is the one read that does not need
 # the library, so it is the one read that can precede it.
-INPUT=$(cat)
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+BIONIC_INPUT=$(cat)
+COMMAND=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.command')
 
 # FAIL-CLOSED (design ledger S4, Chris D1 2026-08-30): a wall over an IRREVERSIBLE
 # action that cannot load its library refuses, because a wall that cannot read a
 # command must not wave it through. `loader_fail_closed` permits exactly four repair
 # commands by whole-string match first, so a broken publish can still be repaired —
 # the lockout R-1 §(5) measured and this wave is named for.
-BIONIC_LIB_WANT="git-argv.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh git-argv.sh refuse.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -120,6 +120,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "protect-main" "$COMMAND"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/git-argv.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
@@ -150,11 +152,13 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "protect-main" "$COMMAN
 # the library that just failed to load. A broken plugin still refuses a push in any
 # session, engaged or not — the one place this wall outruns the ruling, and the price of
 # a fail-closed wall that cannot read its own scope.
-PM_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
-[ -n "$PM_CWD" ] || PM_CWD=$(pwd)
-PM_REPO=$(project_root "$PM_CWD")
-PM_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || PM_SID=""
-engaged_session "$PM_REPO" "$PM_SID" || exit 0
+#
+# THE CONTEXT IS ONE CALL (REQ-1f, lib/context.sh). The payload was read above and
+# cannot be read again, so `bionic_context` ADOPTS the BIONIC_INPUT already set
+# rather than reaching for a stdin that is spent (R1) — the one rule that lets a
+# fail-closed wall keep its pre-loader read and still ask the library for the rest.
+bionic_context 2>/dev/null || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # Read every segment. A segment is a push only when git is argv[0] (after
 # leading VAR=value assignments, shell openers, command-taking prefixes and

@@ -360,8 +360,16 @@ section "G6 — one guard, one root: the resolver is the shared copy"
 # the property the family existed for.
 expect_eq "G6.1 the guard has no private root resolver left" "" \
   "$(awk '/^resolve_project_root\(\)/,/^\}/' "$GUARD")"
-expect_eq "G6.2 …and asks the library instead" "yes" \
-  "$(grep -q 'project_root "\$CWD"' "$GUARD" && echo yes || echo no)"
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). This was the only pin in the tree that
+# named the resolver AND its argument variable, and both left the guard when the preamble
+# became one library call. The property it owns is unchanged — the guard asks for its root
+# rather than working one out — so the ask is now `bionic_context`, at column 0, exactly
+# once. The ANCHOR is what keeps it honest: a count, not a presence test, so a second call
+# or none at all fails loudly instead of quietly matching a substring somewhere.
+expect_eq "G6.2 …and asks the library instead (bionic_context, once, at column 0)" "1" \
+  "$(/usr/bin/grep -c '^bionic_context' "$GUARD" | tr -d ' ')"
+expect_eq "G6.2 …and works no root out for itself" "0" \
+  "$(/usr/bin/grep -c 'project_root "' "$GUARD" | tr -d ' ')"
 GUARD_ROOT_LIB="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/root.sh"
 [ -r "$GUARD_ROOT_LIB" ] || GUARD_ROOT_LIB="${BIONIC_HOOKS_DIR}/../scripts/lib/root.sh"
 WT_MAIN="$SANDBOX/wt/repo"
@@ -388,16 +396,27 @@ section "G7 — the mutation loop: each half of the partition is load-bearing"
 # on the one cell that half owns. A mutation that changes nothing means the
 # assertion above was never testing anything.
 MUTANT=""
-# A MUTANT NEEDS THE LIBRARY BESIDE IT (bionic 1.4.0). The guard loads root.sh and
-# session.sh (and, since task-engaged-session, run.sh for `engaged_session`) through the
-# shared loader idiom, whose first candidate is
+# A MUTANT NEEDS THE LIBRARY BESIDE IT (bionic 1.4.0). The guard loads its libraries
+# through the shared loader idiom, whose first candidate is
 # `$(dirname "$0")/../scripts/lib`; a copy alone in the sandbox root finds nothing
 # there, fails OPEN, and every mutation arm below would be measuring the step-aside
 # instead of the deleted predicate. So the mutants live in a tree shaped like the
 # shipped one: hooks/ beside scripts/lib/.
+#
+# THE BASENAME LIST IS DERIVED FROM THE GUARD'S OWN `BIONIC_LIB_WANT`, never typed
+# (the self-maintaining shape tests/git-argv.test.sh:328-350 already uses). A
+# hand-written list is a second declaration of the hook's dependencies that nothing
+# keeps in step: when the guard took `context.sh` in epic-23 wave-11, a literal
+# `root.sh run.sh session.sh` here left the mutant one library short, the loader set
+# BIONIC_LIB_MISSING, the guard failed OPEN — and both halves of §G7 went green-side-up
+# for the wrong reason, reporting exit 0 where the deleted predicate should have fired.
+# Derived, the list cannot drift, because it IS the declaration.
 MUTANT_TREE="$SANDBOX/mutants"
 mkdir -p "$MUTANT_TREE/hooks" "$MUTANT_TREE/scripts/lib"
-for _acg_lib in root.sh run.sh session.sh; do
+_acg_want=$(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$GUARD" | head -1)
+[ -n "$_acg_want" ] || no "the guard declares BIONIC_LIB_WANT (the mutant tree is derived from it)" \
+  "no BIONIC_LIB_WANT line in $GUARD"
+for _acg_lib in $_acg_want; do
   cp "${BIONIC_HOOKS_DIR}/../payload/scripts/lib/$_acg_lib" "$MUTANT_TREE/scripts/lib/$_acg_lib" 2>/dev/null \
     || cp "${BIONIC_HOOKS_DIR}/../scripts/lib/$_acg_lib" "$MUTANT_TREE/scripts/lib/$_acg_lib" 2>/dev/null || true
 done

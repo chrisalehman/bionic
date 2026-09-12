@@ -443,7 +443,7 @@ expect_eq "B9f control: an ordinary off-budget suite still refuses" "2" "$ST"
 expect_contains "B9f …and its label carries no space before the colon" "You asked for:" "$VERR"
 expect_absent "B9f …the stray space is gone" "You asked for :" "$ERR"
 
-section "B10 — every site that turns a session id into a roster path carries the shape rule (A-10)"
+section "B10 — the shape rule is applied ONCE, and every path-forming site asks for it (A-10, REQ-1h)"
 # THE INCONSISTENCY. `session_id` (payload/scripts/lib/session.sh) prefers
 # CLAUDE_CODE_SESSION_ID, falls back to the payload value, and returns whichever it got
 # VERBATIM — it validates nothing. Two hooks that build a roster path apply the shape rule
@@ -451,29 +451,48 @@ section "B10 — every site that turns a session id into a roster path carries t
 # hooks/landing-gate.sh:284 states the rationale for `agent_id`: a key carrying path
 # separators does not trip the symlink guards, it reads outside what those guards protect.
 #
-# WHY THIS IS A SOURCE ASSERTION AND NOT A DRIVEN ONE, said plainly. The line is
-# UNREACHABLE through the supported path: `engaged_session` (payload/scripts/lib/run.sh:566)
-# applies the identical case to the same id ~70 lines earlier, so a malformed id exits the
-# hook at the engagement switch and never reaches the path. A test that piped a malformed
-# id into this hook and watched it pass would be asserting the ENGAGEMENT check while
-# claiming to assert this one — a green that proves a different line than the one it names,
-# which is the exact class this wave exists to close. What IS true and checkable is the
-# family property A-10 names: the same rule, at every path-forming site.
+# WHY THIS IS A SOURCE ASSERTION AND NOT A DRIVEN ONE, said plainly. The rule is
+# UNREACHABLE through the supported path: it is applied to the same id ~70 lines before any
+# roster path is formed, so a malformed id leaves the hook at the engagement switch and
+# never reaches the path. A test that piped a malformed id into this hook and watched it
+# pass would be asserting the ENGAGEMENT check while claiming to assert this one — a green
+# that proves a different line than the one it names, which is the exact class this wave
+# exists to close. What IS true and checkable is the family property A-10 names.
+#
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1h). A-10's property was "the same rule at
+# every path-forming site", and three hooks each carried their own copy of it. The property
+# is now stronger and cheaper to hold: there is ONE rule, in `bionic_context`
+# (payload/scripts/lib/context.sh), applied to the RESOLVED id, and a hook that fails it
+# exits rather than blanking the variable and carrying on. So the family row below asks
+# whether each hook takes its id from that one call — which is the same question A-10 asked,
+# put to the site that can now answer it — and the row after it pins the rule itself.
+B10_LIB="$REPO_ROOT/payload/scripts/lib/context.sh"
 B10_HOOKS="background-suite-guard.sh execution-recorder.sh agent-context-guard.sh"
 B10_RULE='case .*\[!A-Za-z0-9_-\]\*\)'
 for _h in $B10_HOOKS; do
-  expect_regex "B10 $_h shape-checks the session id" "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/$_h")"
+  expect_regex "B10 $_h takes its session id from the one call that shape-checks it" \
+    'bionic_context' "$(cat "$PAYLOAD_HOOKS/$_h")"
+  expect_eq "B10 …and restates the rule nowhere in its own body" "0" \
+    "$(/usr/bin/grep -cE "$B10_RULE" "$PAYLOAD_HOOKS/$_h" | tr -d ' ')"
 done
-# NON-VACUITY: the pattern is not one that matches any shell file. A hook with no such rule
-# fails it, so the loop above is reading the rule and not the language.
+# THE RULE ITSELF, at the one site that now owns it.
+expect_regex "B10 lib/context.sh carries the shape rule" "$B10_RULE" "$(cat "$B10_LIB")"
+# NON-VACUITY: the pattern is not one that matches any shell file. A file with no such rule
+# fails it, so the rows above are reading the rule and not the language.
 expect_no_regex "B10 …and the pattern discriminates (a hook without the rule fails it)" \
   "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/farm-out-reminder.sh")"
-# AND THE RULE IS AT THIS HOOK'S OWN PATH-FORMING SITE, not merely somewhere in the file:
-# the roster path is built on the line after it. A rule that drifted away from the line it
-# protects is the state A-10 found, spelled differently.
-B10_ADJACENT=$(/usr/bin/grep -A1 'case "\$BSG_SID" in' "$GUARD" | tail -1)
-expect_match "B10 …on the line immediately before the roster path is formed" \
-  'ROSTER_FILE=*' "$B10_ADJACENT"
+# AND IT IS APPLIED BEFORE THIS HOOK'S OWN PATH-FORMING SITE, not merely somewhere in the
+# file. A rule that drifted away from the line it protects is the state A-10 found, spelled
+# differently — so the ORDER is what is pinned, by line number, and an absent literal fails
+# loudly rather than comparing two empty strings.
+B10_CALL=$(/usr/bin/grep -n '^bionic_context' "$GUARD" | head -1 | cut -d: -f1)
+B10_PATH=$(/usr/bin/grep -n '^ROSTER_FILE=' "$GUARD" | head -1 | cut -d: -f1)
+expect_eq "B10 anchor: the guard calls bionic_context at column 0, once" "1" \
+  "$(/usr/bin/grep -c '^bionic_context' "$GUARD" | tr -d ' ')"
+expect_eq "B10 anchor: the guard forms exactly one roster path" "1" \
+  "$(/usr/bin/grep -c '^ROSTER_FILE=' "$GUARD" | tr -d ' ')"
+expect_eq "B10 …and the shape-checked id is resolved before the roster path is formed" "yes" \
+  "$([ -n "$B10_CALL" ] && [ -n "$B10_PATH" ] && [ "$B10_CALL" -lt "$B10_PATH" ] && echo yes || echo no)"
 
 section "B11 — AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 #

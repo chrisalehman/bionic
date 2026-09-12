@@ -126,9 +126,9 @@
 set -uo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
-INPUT=$(cat)
+BIONIC_INPUT=$(cat)
 
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 # ---------- relevance hoist ----------
 # SubagentStop is deliberately NOT accepted. A subagent has no Patrol duties, and
@@ -152,15 +152,11 @@ TRANSCRIPT=$(_jq '.transcript_path')
 HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
 
-CWD="${CLAUDE_PROJECT_DIR:-}"
-[ -n "$CWD" ] || CWD=$(_jq '.cwd')
-[ -n "$CWD" ] && [ -d "$CWD" ] || exit 0
-
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: this gate
 # refuses a STOP, and a stop refused for a missing file is a turn nobody can end.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 22 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -257,6 +253,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "patrol-duties-gate"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -265,20 +263,17 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "patrol-duties-gate"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
 
-PROJECT_DIR=$(project_root "$CWD")
-
-# ---------- THE SESSION KEY ----------
+# ---------- THE ROOT AND THE SESSION KEY, from one call ----------
 #
-# NEW AT task-engaged-session. This gate carried no session id at all — it read the
-# transcript and nothing session-keyed — and the engagement switch below is keyed to one.
-# Derived exactly as hooks/dispatch-preflight.sh derives it: from the library (design §1,
-# env primary and payload witness) so the marker's writer and this reader spell one session
-# one way, empty is silent-pass, and the shape is checked before the value is ever
-# interpolated into a path. The divergence line is silenced because a bystander session must
-# produce no output at all. It serves the tick marker below (AC-22) as well.
-SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || SID=""
-[ -n "$SID" ] || exit 0
-case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+# THE CONTEXT IS ONE CALL (REQ-1f, lib/context.sh). The session key is NEW here as of
+# task-engaged-session — this gate carried none at all, reading the transcript and
+# nothing session-keyed, and the engagement switch below is keyed to one. It arrives
+# the way every other hook's does now: env primary and payload witness (design §1), so
+# the marker's writer and this reader spell one session one way; empty is a silent pass;
+# and the shape is checked before the value is ever interpolated into a path. The
+# divergence line is silenced because a bystander session must produce no output at all.
+# It serves the tick marker below (AC-22) as well.
+bionic_context 2>/dev/null || exit 0
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
@@ -291,7 +286,7 @@ case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary). It is also what
 # ends this gate's largest cost on a bystander turn: the full-transcript jq pass below never
 # starts.
-engaged_session "$PROJECT_DIR" "$SID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # ---------- THE RUN PREDICATE (AC-7, AC-8) ----------
 #
@@ -318,10 +313,8 @@ engaged_session "$PROJECT_DIR" "$SID" || exit 0
 # newest plan exactly as before, and this gate says so once on stderr (AC-3);
 # bound to a plan that has since closed is policed exactly as engaged-with-no-plan
 # (AC-6) — the basename discharge is the only thing a missing plan costs.
-_RUN_VERDICT=$(session_run "$PROJECT_DIR" "$SID")
-_RUN_WORD="${_RUN_VERDICT%% *}"
-PLAN="${_RUN_VERDICT#* }"
-case "$_RUN_WORD" in
+PLAN="$BIONIC_RUN_PLAN"
+case "$BIONIC_RUN_WORD" in
   bound-open) : ;;
   fallback)
     echo "patrol-duties-gate: run resolved by newest-plan fallback (session unbound) — $PLAN" >&2
@@ -505,7 +498,7 @@ fi
 # session. That makes the test positional and session-scoped rather than a substring search,
 # so a row that merely quotes the tick command is not a tick, and a predecessor's job still
 # firing into this conversation after a /clear is not this session's tick either.
-TICK_MARK="bionic-patrol session=${SID:0:8}"
+TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 
 # TICK / LISTAGENTS / TASKLIST, folded over the last turn.
 VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" '

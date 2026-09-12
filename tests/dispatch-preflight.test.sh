@@ -452,14 +452,22 @@ expect_empty "irrelevant tool produces no stderr" "$GATE_ERR"
 # active-wave machinery (resolve_docs_root / the plan-directory find) — this
 # is the textual half of A7's hoist proof; the behavioral half is above.
 TOOL_LINE=$(grep -n '\[ "\$TOOL_NAME" = "Agent" \]' "$GATE" | head -1 | cut -d: -f1)
-# The plan-directory walk is the library's now (lib/run.sh's active_run); what this
-# pins is unchanged — the cheap relevance check comes first, before anything touches
-# disk.
-WALK_LINE=$(grep -n 'session_run "\$REPO"' "$GATE" | head -1 | cut -d: -f1)
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). The first thing this gate pays for is
+# no longer its own `session_run` call: `bionic_context` resolves the root, the session id
+# and the run verdict in one, and THAT is the line the relevance check must precede. What
+# is pinned is unchanged — nothing touches disk before the cheap check.
+#
+# THE ANCHOR IS THE POINT. Both line numbers are asserted findable BEFORE they are
+# compared, because a grep whose literal has left the file yields the empty string and
+# `[ "$TOOL_LINE" -lt "" ]` is an error, not a comparison — an order pin over two empty
+# values pins nothing, which is exactly the state this one was heading for.
+WALK_LINE=$(grep -n '^bionic_context' "$GATE" | head -1 | cut -d: -f1)
+expect_nonempty "the relevance check is findable in the gate's source" "$TOOL_LINE"
+expect_nonempty "the context call is findable in the gate's source" "$WALK_LINE"
 if [ -n "$TOOL_LINE" ] && [ -n "$WALK_LINE" ] && [ "$TOOL_LINE" -lt "$WALK_LINE" ]; then
-  ok "relevance check (line $TOOL_LINE) precedes the plan-directory walk (line $WALK_LINE)"
+  ok "relevance check (line $TOOL_LINE) precedes the context resolution (line $WALK_LINE)"
 else
-  no "relevance check precedes the plan-directory walk" "tool=$TOOL_LINE walk=$WALK_LINE"
+  no "relevance check precedes the context resolution" "tool=$TOOL_LINE walk=${WALK_LINE:-none}"
 fi
 
 section "S2 — ambiguity: repo unresolvable -> OPEN, silent"
