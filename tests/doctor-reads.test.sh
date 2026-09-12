@@ -182,7 +182,7 @@ expect_match "7: and it carries a repair" "*installed agent*/bionic:setup*" "$OU
 section "Section 4: legacy hook files on disk reach the page"
 
 mkdir -p "${CHOME}/hooks"
-cp "${PAYLOAD}/hooks/protect-main.sh" "${CHOME}/hooks/protect-main.sh" 2>/dev/null
+cp "${PAYLOAD}/hooks/bash-walls.sh" "${CHOME}/hooks/bash-walls.sh" 2>/dev/null
 cp "${PAYLOAD}/hooks/stop-guard.sh" "${CHOME}/hooks/stop-guard.sh" 2>/dev/null
 
 OUT4="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"

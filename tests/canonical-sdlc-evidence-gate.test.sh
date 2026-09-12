@@ -20,7 +20,12 @@ set -euo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 
-HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
+# THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23). This wall is a
+# FUNCTION now — `wall_evidence_gate` in payload/scripts/lib/walls.sh — registered through
+# the one PreToolUse|Bash command object that carries all five. Every case below drives
+# that process, which is what a Bash tool call actually starts; the wall's own verdict is
+# unchanged and tests/bash-walls.test.sh owns the composition the process adds.
+HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
 # ---------- helpers ----------
 
@@ -341,7 +346,13 @@ Step 5: TODO" > /dev/null
 
 expect_allow "ls command — not a commit" "$h1" "ls /tmp"
 expect_allow "git status — not a commit" "$h1" "git status"
-expect_allow "git push — not a commit" "$h1" "git push origin main"
+# THE DESTINATION IS A FEATURE BRANCH, AND ONLY SINCE T23. This row is about "a push is
+# not a commit", and the destination was incidental — but hooks/protect-main.sh is a
+# function in the same process now, and it refuses a push to main in every project on the
+# machine, which it did as a separate process before this suite ever saw the payload. A
+# row that kept `origin main` would be asserting the GATE's silence through another wall's
+# refusal, which is a green that proves a different line than the one it names.
+expect_allow "git push — not a commit" "$h1" "git push origin feature/x"
 
 # ============================================================
 # Section 2: commit with no plans directory / no plans
@@ -4879,15 +4890,25 @@ for _h30g_cand in "${BIONIC_HOOKS_DIR}/../scripts/lib" \
     break
   fi
 done
+# THE MUTATION LANDS ON THE LIBRARY NOW, NOT ON THE HOOK (T23). The predicate this
+# section loosens lives in `wall_evidence_gate`'s body in payload/scripts/lib/walls.sh;
+# the hook beside it is 200 lines of preamble and a fold. So the doctored tree gets a
+# doctored COPY OF THE LIBRARY and an untouched copy of the hook, and the loader finds
+# it because `$h30g_dir/scripts/lib` is candidate class (1).
 DOCTORED_HOOK="$h30g_dir/hooks/loose-gate.sh"
+cp "$HOOK" "$DOCTORED_HOOK"
+H30G_LIB="$h30g_dir/scripts/lib/walls.sh"
+H30G_LIB_REAL="$(dirname "$H30G_LIB")/.walls-real.sh"
+cp "$H30G_LIB" "$H30G_LIB_REAL"
 sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \
-  "$HOOK" > "$DOCTORED_HOOK"
+  "$H30G_LIB_REAL" > "$H30G_LIB"
 
-if ! diff -q "$HOOK" "$DOCTORED_HOOK" > /dev/null 2>&1; then
+if ! diff -q "$H30G_LIB_REAL" "$H30G_LIB" > /dev/null 2>&1; then
   ok "30g meta: the doctored copy differs from the real hook (mutation landed)"
 else
   no "30g meta: the doctored copy differs from the real hook (mutation landed)" "the form-check mutation did not apply — the sed anchor moved, so the arms below prove nothing"
 fi
+rm -f "$H30G_LIB_REAL"
 
 _real_hook="$HOOK"
 HOOK="$DOCTORED_HOOK"

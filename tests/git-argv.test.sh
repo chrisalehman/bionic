@@ -53,8 +53,12 @@ fi
 # shellcheck source=/dev/null
 . "$LIB"
 
-PROTECT_MAIN="${BIONIC_HOOKS_DIR}/protect-main.sh"
-EVIDENCE_GATE="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
+# BOTH CONSUMERS ARE ONE FILE NOW (T23). `git_argv_parse` is read by
+# `wall_protect_main` and `git_argv_has_sub` by `wall_evidence_gate`, and both are
+# functions of payload/scripts/lib/walls.sh behind hooks/bash-walls.sh — so the two
+# names below resolve to the same hook and the payloads below still reach both readers.
+PROTECT_MAIN="${BIONIC_HOOKS_DIR}/bash-walls.sh"
+EVIDENCE_GATE="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
 cleanup_dirs=()
 cleanup() {
@@ -330,12 +334,20 @@ GA_WANT=$(/usr/bin/grep -h '^BIONIC_LIB_WANT=' "$PROTECT_MAIN" "$EVIDENCE_GATE" 
           | tr ' ' '\n' | sort -u)
 expect_contains "the fixture reads the two hooks' own BIONIC_LIB_WANT" "git-argv.sh" "$GA_WANT"
 
+# WHAT THE DETAIL CAN NAME, derived rather than assumed. `loader_fail_closed` reports the
+# FIRST basename of the hook's own `BIONIC_LIB_WANT` — `${_bl_want%% *}` — and not the file
+# that happened to be missing, because the loader qualifies a DIRECTORY and never learns
+# which member failed. Hard-coding `git-argv.sh` here would be asserting a diagnostic the
+# loader has never produced; the rows below read the hook's own first word instead.
+GA_FIRST_WANT=$(/usr/bin/grep -h -m1 '^BIONIC_LIB_WANT=' "$PROTECT_MAIN" \
+  | sed -e 's/^BIONIC_LIB_WANT="//' -e 's/ .*$//' -e 's/"$//')
+expect_nonempty "the fixture reads the hook's first wanted basename" "$GA_FIRST_WANT"
+
 make_layout() {  # <style: installed|payload> -> echoes the tree root
   local style="$1" root libdir
   root=$(mktemp -d); cleanup_dirs+=("$root")
   mkdir -p "$root/hooks"
-  cp "$PROTECT_MAIN" "$root/hooks/protect-main.sh"
-  cp "$EVIDENCE_GATE" "$root/hooks/canonical-sdlc-evidence-gate.sh"
+  cp "$PROTECT_MAIN" "$root/hooks/bash-walls.sh"
   if [ "$style" = "installed" ]; then
     libdir="$root/scripts/lib"
   else
@@ -370,16 +382,21 @@ for style in installed payload; do
 
   # Positive control first — the copied tree WORKS, so a later refusal is the
   # missing library and not a broken fixture.
-  run_hook_at "$hookdir/protect-main.sh" "ls -la"
-  if [ "$RC" -eq 0 ]; then ok "$style layout: protect-main loads its library and allows 'ls -la'"
-  else no "$style layout: protect-main loads its library and allows 'ls -la'" "rc=$RC err='$ERRTXT'"; fi
+  # BOTH READERS ARE IN ONE PROCESS (T23). `git_argv_parse` is `wall_protect_main`'s and
+  # `git_argv_has_sub` is `wall_evidence_gate`'s, and both are functions of
+  # payload/scripts/lib/walls.sh behind hooks/bash-walls.sh — so the two rows below drive
+  # the same file and are told apart by the COMMAND, which is what reaches one reader or
+  # the other.
+  run_hook_at "$hookdir/bash-walls.sh" "ls -la"
+  if [ "$RC" -eq 0 ]; then ok "$style layout: the walls load their library and allow 'ls -la'"
+  else no "$style layout: the walls load their library and allow 'ls -la'" "rc=$RC err='$ERRTXT'"; fi
 
-  run_hook_at "$hookdir/canonical-sdlc-evidence-gate.sh" "ls -la"
-  if [ "$RC" -eq 0 ]; then ok "$style layout: evidence gate loads its library and allows 'ls -la'"
-  else no "$style layout: evidence gate loads its library and allows 'ls -la'" "rc=$RC err='$ERRTXT'"; fi
+  run_hook_at "$hookdir/bash-walls.sh" 'git commit -m x'
+  if [ "$RC" -eq 0 ]; then ok "$style layout: the evidence gate's reader runs and allows a commit with no plan"
+  else no "$style layout: the evidence gate's reader runs and allows a commit with no plan" "rc=$RC err='$ERRTXT'"; fi
 
   # And it still reads commands correctly through this layout.
-  run_hook_at "$hookdir/protect-main.sh" 'git push origin main'
+  run_hook_at "$hookdir/bash-walls.sh" 'git push origin main'
   if [ "$RC" -ne 0 ]; then ok "$style layout: protect-main still blocks an explicit main push"
   else no "$style layout: protect-main still blocks an explicit main push" "rc=0"; fi
 
@@ -389,25 +406,25 @@ for style in installed payload; do
 
   # THE REFUSAL IS READ IN TWO PLACES, because ruling D-1 put it in two: the one line the
   # reader is interrupted by, and the path in the detail behind BIONIC_WALL_VERBOSE=1.
-  run_hook_at "$hookdir/protect-main.sh" "ls -la"
+  run_hook_at "$hookdir/bash-walls.sh" "ls -la"
   if [ "$RC" -ne 0 ] && printf '%s' "$ERRTXT" | grep -q 'cannot load the bionic library'; then
     ok "$style layout: protect-main REFUSES with the library renamed away, in the ruled one line"
   else
     no "$style layout: protect-main REFUSES with the library renamed away, in the ruled one line" "rc=$RC err='$ERRTXT'"
   fi
-  if printf '%s' "$VERRTXT" | grep -q 'git-argv.sh'; then
+  if printf '%s' "$VERRTXT" | grep -q "$GA_FIRST_WANT"; then
     ok "$style layout: protect-main REFUSES with the library renamed away, naming the path"
   else
     no "$style layout: protect-main REFUSES with the library renamed away, naming the path" "detail='$VERRTXT'"
   fi
 
-  run_hook_at "$hookdir/canonical-sdlc-evidence-gate.sh" "ls -la"
+  run_hook_at "$hookdir/bash-walls.sh" "ls -la"
   if [ "$RC" -ne 0 ] && printf '%s' "$ERRTXT" | grep -q 'cannot load the bionic library'; then
     ok "$style layout: evidence gate REFUSES with the library renamed away, in the ruled one line"
   else
     no "$style layout: evidence gate REFUSES with the library renamed away, in the ruled one line" "rc=$RC err='$ERRTXT'"
   fi
-  if printf '%s' "$VERRTXT" | grep -q 'git-argv.sh'; then
+  if printf '%s' "$VERRTXT" | grep -q "$GA_FIRST_WANT"; then
     ok "$style layout: evidence gate REFUSES with the library renamed away, naming the path"
   else
     no "$style layout: evidence gate REFUSES with the library renamed away, naming the path" "detail='$VERRTXT'"
@@ -634,11 +651,16 @@ eq "no argument at all is not protected" "no" "$(protected_says)"
 # The wall that already had these two words must now be reading THIS list and
 # not a second copy of it. Both spellings protect-main.sh checks — the push
 # destination and the branch it is standing on — go through the predicate.
-eq "protect-main.sh asks the library, at both of its checks" "1" \
-  "$([ "$(grep -c 'git_branch_protected' "$PROTECT_MAIN")" -ge 2 ] && echo 1 || echo 0)"
+# THE WALL'S BODY IS IN THE LIBRARY (T23): `wall_protect_main` in
+# payload/scripts/lib/walls.sh. Both spellings it checks — the push destination and the
+# branch it is standing on — still go through the one predicate, and the count is taken
+# where the body lives.
+GA_WALLS="$(dirname "$LIB")/walls.sh"
+eq "wall_protect_main asks the library, at both of its checks" "1" \
+  "$([ "$(grep -c 'git_branch_protected' "$GA_WALLS")" -ge 2 ] && echo 1 || echo 0)"
 # ...and no longer compares a branch name against a quoted literal of its own.
 # The words may still appear in its prose; a TEST against them may not.
-eq "protect-main.sh compares against no quoted branch literal" "0" \
-  "$(grep -c '= "main"\|= "master"' "$PROTECT_MAIN")"
+eq "wall_protect_main compares against no quoted branch literal" "0" \
+  "$(grep -c '= "main"\|= "master"' "$GA_WALLS")"
 
 finish

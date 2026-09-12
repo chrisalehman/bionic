@@ -2762,7 +2762,7 @@ R15D_PUSH=$(jq -n --arg s "$SID" --arg c "$R15D" \
   '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
     tool_input:{command:"git push --force origin main"}}' \
   | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
-      bash "$(dirname "$POKER")/protect-main.sh" 2>&1 >/dev/null; echo "rc=$?")
+      bash "$(dirname "$POKER")/bash-walls.sh" 2>&1 >/dev/null; echo "rc=$?")
 expect_contains "AC-15 …so a wall still refuses after the disarm" "rc=2" "$R15D_PUSH"
 
 # ...and the paired negative: remove the marker too and that same push passes.
@@ -2771,7 +2771,7 @@ R15D_PUSH2=$(jq -n --arg s "$SID" --arg c "$R15D" \
   '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
     tool_input:{command:"git push --force origin main"}}' \
   | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
-      bash "$(dirname "$POKER")/protect-main.sh" 2>&1 >/dev/null; echo "rc=$?")
+      bash "$(dirname "$POKER")/bash-walls.sh" 2>&1 >/dev/null; echo "rc=$?")
 expect_contains "AC-15 …and with the marker gone, it does not" "rc=0" "$R15D_PUSH2"
 
 
