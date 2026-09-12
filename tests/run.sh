@@ -78,7 +78,7 @@
 # audit, since neither existing file can cover a suite written after it.
 #
 # WHY EIGHT (FOUR AT MEASUREMENT TIME) AND NOT FORTY-FIVE. Measured, not guessed. When
-# seven of these slices each ran a full suite concurrently on one machine, free memory
+# seven of these tasks each ran a full suite concurrently on one machine, free memory
 # fell to ~188 MB and the kernel SIGKILLed a suite mid-run (W7 assumption A4.2). Four was
 # the width with headroom on that measurement; the default was raised to eight on
 # 2026-08-22 (ef23f75, user's call) and `BIONIC_TEST_JOBS_CEILING` is there for a machine
@@ -132,7 +132,7 @@ if [ "${1:-}" = "--one" ]; then
 fi
 
 # ── argv ─────────────────────────────────────────────────────────────────────
-# Refused, not ignored. Before this slice the runner read no argv at all, so
+# Refused, not ignored. Before this task the runner read no argv at all, so
 # `bash tests/run.sh --serial` ran the whole roster and looked like it had
 # honoured a flag it had never heard of.
 SERIAL=0
@@ -382,7 +382,7 @@ export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
 #   every suite": a suite spelling its helpers `t_ok`/`t_no` and its counters
 #   `P`/`F`, printing its own tally and exiting 0, shadows nothing and used to
 #   pass untouched. That every suite on the roster adopts was a MEASUREMENT taken
-#   by the migration slices, not a mechanism, and `0 refused` read as proof of a
+#   by the migration tasks, not a mechanism, and `0 refused` read as proof of a
 #   wall that was not there.
 #
 # A refusal is a FAILED suite: it is named in the tally, it is named under

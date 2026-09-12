@@ -2,4 +2,4 @@
 
 A plain descriptive sentence that binds nothing.
 
-The orchestrator must never dispatch a slice without a red test.
+The orchestrator must never dispatch a task without a red test.

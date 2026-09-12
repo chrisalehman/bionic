@@ -48,7 +48,7 @@ mkdir -p "$BIONIC_PLUGINS_DIR"
 
 # THE MACHINE IS FIXTURE DATA HERE, WITHOUT EXCEPTION (S8). The tick now samples the
 # pressure ring and takes its fill width from `pressure_level`, so two readings that used
-# to reach only the advisory HOLD line now decide how many slices a FILL names. Left
+# to reach only the advisory HOLD line now decide how many tasks a FILL names. Left
 # unpinned, this suite would read THIS machine — and a suite that happens to run while the
 # fleet is busy would see a critical band, a quartered rung and a FILL of one where the case
 # asked for two. Every one of these is a seam lib/resources.sh already owns
@@ -729,7 +729,7 @@ expect_absent "…and the walk is not mistaken for a decision" "decision=" "$OUT
 section "Section 6: the Patrol stamp — the arm verb, and stamp-before-decide on every tick"
 # ============================================================
 #
-# epic-17 W5 slice 4/4, spec AC-6; design ledger D-C mechanics (2) and (3).
+# epic-17 W5 task 4/4, spec AC-6; design ledger D-C mechanics (2) and (3).
 #
 # WHAT THE STAMP MEASURES, and the whole reason it is written where it is written.
 # The stamp is the Patrol's liveness signal: a session-keyed file beside the roster whose
@@ -844,7 +844,7 @@ else
 fi
 
 # ============================================================
-# THE BLIND-WALL DETECTOR, RETIRED (bionic 1.4.0, slice ADOPT, spec AC-7)
+# THE BLIND-WALL DETECTOR, RETIRED (bionic 1.4.0, task ADOPT, spec AC-7)
 # ============================================================
 #
 # It compared main-thread `Agent` tool_uses in the transcript against rows on the roster
@@ -1069,7 +1069,7 @@ swept_marker_write "$(roster_of "$R8" "$ADOPT_A")" "$(iso_ago 300)" "$ADOPT_A" c
 # waiver instead — hooks/session-sweeper.sh's `verdict_row` reads `waiver=` straight off the
 # row (no marker involved) and calls this WAIVED before it ever asks about a deliverable, so
 # an adopted copy that lost the field verdicted as an unmet SILENT row for a contract that
-# was never open (the live T4 walk this slice repairs, ac12-t4-walk-2.md).
+# was never open (the live T4 walk this task repairs, ac12-t4-walk-2.md).
 add_row_to "$R8" "$ADOPT_A" name=waived-one status=identified agent_id="$ID_WAIVED" \
   subagent_type=bionic:researcher duration="20 minutes" cadence="10 minutes" \
   waiver="probe only — a throwaway read-only agent, S17 fixture"
@@ -1648,7 +1648,7 @@ section "Section 10: the run-state read — DISARM belongs to a delivered run (B
 # ============================================================
 #
 # THE DEFECT, from this repo's own dogfood (idea file §B-4). A wave landed every writer of
-# one slice, the roster went quiet for the minutes it took to brief the next, and the tick
+# one task, the roster went quiet for the minutes it took to brief the next, and the tick
 # that fired in that gap DISARMed — terminally, by doctrine — leaving the rest of the wave
 # unsupervised. `open == 0` answered "finished" for a state that was a lull.
 #
@@ -1856,7 +1856,7 @@ section "Section 11: pressure — HOLD, EMERGENCY, and the RUNG (AC-17, AC-30, S
 # tests/resources.test.sh), so every threshold below is fixture DATA.
 
 # A plan carrying BOTH halves the scheduler reads: the frontmatter `parallel-budget:` line
-# and the machine-readable slice table. Written as one builder because a fixture that
+# and the machine-readable task table. Written as one builder because a fixture that
 # carried only one of them would be testing a plan shape the wave never produces.
 #
 # The budget line's shape is byte-identical to what Step 0 writes and to what
@@ -1960,7 +1960,7 @@ expect_eq "a tick under memory pressure still exits 0 — HOLD is a decision, no
 expect_contains "…and prints HOLD with the free-memory reading" "poker: HOLD free_mb=512" "$OUT"
 expect_contains "…and the load reading beside it" "load_1m=1.0" "$OUT"
 expect_contains "…saying plainly that nothing is being filled" "no fills" "$OUT"
-expect_absent "…and fills nothing, though a ready slice and a gap both exist" "poker: FILL" "$OUT"
+expect_absent "…and fills nothing, though a ready task and a gap both exist" "poker: FILL" "$OUT"
 
 # The paired positive: the SAME repo, the SAME plan, with the machine reading healthy.
 # Without it, 11a passes on a tick that can never fill anything.
@@ -1985,7 +1985,7 @@ R11B="$(make_repo s11-rung-quiet)"; new_roster "$R11B"
 wave_plan "$R11B" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
   "| A | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |"
 # One open row, well inside its declared duration: the decision is QUIET and there is no
-# pending slice to fill, so this tick prints no FILL at all.
+# pending task to fill, so this tick prints no FILL at all.
 add_row "$R11B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_rung "$R11B" 60 0 tick
 expect_eq "a QUIET tick exits 0" "0" "$RC"
@@ -2116,10 +2116,10 @@ rm -rf "$POKER_MUT_PLANEDIT_ROOT"
 
 # ---------- 11c: the rung IS the band, and the FILL is sized by it (AC-17, AC-14) ----------
 #
-# THE DISCRIMINATOR. Four ready slices and a writers ceiling of eight means a clear machine
+# THE DISCRIMINATOR. Four ready tasks and a writers ceiling of eight means a clear machine
 # fills all four; the same fixture on a critical ring must fill exactly the quarter-ceiling.
 # A test that only ever ran clear would pass against a tick that ignored the ring entirely.
-mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready slices
+mk_rung_repo() {  # <label> -> a repo with writers=8 test_jobs=18 and four ready tasks
   local r; r="$(make_repo "$1")"; new_roster "$r"
   wave_plan "$r" "writers=8 suites=2 worktrees=8 test_jobs=18 source=probe" \
     "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
@@ -2148,7 +2148,7 @@ expect_contains "a CRITICAL ring quarters both numbers" \
   "poker: rung=2/8 writers=2 test_jobs=5" "$OUT"
 expect_contains "…and the fill names ONLY the quarter-ceiling, in table order" \
   "poker: FILL ONE TWO" "$OUT"
-expect_absent   "…never the third ready slice" "THREE" "$OUT"
+expect_absent   "…never the third ready task" "THREE" "$OUT"
 
 # SWAP REACHES THE SAME BAND BY THE OTHER TERM, so the rung is not a free-percentage
 # thermometer wearing a band's name.
@@ -2164,7 +2164,7 @@ R11C5="$(mk_rung_repo s11-rung-critical-open)"
 add_row "$R11C5" name=w1 deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_rung "$R11C5" 8 0 tick
 expect_contains "one open row against a rung of 2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent   "…and the second ready slice waits on the machine, not on the budget" "TWO" "$OUT"
+expect_absent   "…and the second ready task waits on the machine, not on the budget" "TWO" "$OUT"
 add_row "$R11C5" name=w2 deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_rung "$R11C5" 8 0 tick
 expect_absent   "two open rows against a rung of 2 fill nothing" "poker: FILL" "$OUT"
@@ -2299,7 +2299,7 @@ section "Section 12: FILL — gap, readiness, and table order (AC-29, S7)"
 # ============================================================
 #
 # gap = `writers` from the plan header's `parallel-budget:` MINUS the rows already open on
-# this session's roster; ready = the slice table's `pending` rows whose every dependency is
+# this session's roster; ready = the task table's `pending` rows whose every dependency is
 # `landed`. The tick prints min(gap, |ready|) ids in TABLE ORDER — the plan's own dependency
 # ordering, maintained by the orchestrator, never an ordering this hook invents.
 
@@ -2327,7 +2327,7 @@ wave_plan "$R12B" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
 add_row "$R12B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 poke_pressure "$R12B" 8192 1.0 tick
 expect_contains "one open row against writers=2 leaves a gap of one" "poker: FILL ONE" "$OUT"
-expect_absent "…and the second ready slice waits" "TWO" "$OUT"
+expect_absent "…and the second ready task waits" "TWO" "$OUT"
 
 # ---------- 12c: gap zero -> no FILL, and the reason is the budget ----------
 R12C="$(make_repo s12-fill-full)"; new_roster "$R12C"
@@ -2352,14 +2352,14 @@ expect_eq "a plan with no parallel-budget line still ticks cleanly (exit 0)" "0"
 expect_absent "…and fills nothing" "poker: FILL" "$OUT"
 expect_contains "…naming the missing field as the reason" "no readable parallel-budget: writers field" "$OUT"
 
-# ---------- 12e: a pending slice with an unlanded dependency is not ready ----------
+# ---------- 12e: a pending task with an unlanded dependency is not ready ----------
 R12E="$(make_repo s12-unlanded-dep)"; new_roster "$R12E"
 wave_plan "$R12E" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |" \
   "| DEPENDENT | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
   "| FREE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12E" 8192 1.0 tick
-expect_contains "a pending slice with an unlanded dep is held back" "poker: FILL BASE FREE" "$OUT"
+expect_contains "a pending task with an unlanded dep is held back" "poker: FILL BASE FREE" "$OUT"
 expect_absent "…and DEPENDENT is not named" "DEPENDENT" "$OUT"
 
 # Several deps, one of them unlanded: ALL of them must be landed, not any.
@@ -2369,18 +2369,18 @@ wave_plan "$R12F" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| B | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |" \
   "| C | 4 | build | fixture task | implementor | A,B | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12F" 8192 1.0 tick
-expect_contains "a slice whose deps are landed AND pending is not ready" "poker: FILL B" "$OUT"
+expect_contains "a task whose deps are landed AND pending is not ready" "poker: FILL B" "$OUT"
 expect_absent "…so C waits for every one of them" " C" "$OUT"
 
 # A dependency the table does not carry at all is not confirmable, and an unconfirmable
-# dependency holds its slice back — a slice held costs a batch, a slice dispatched onto an
+# dependency holds its task back — a task held costs a batch, a task dispatched onto an
 # unlanded dependency costs the writer's whole run.
 R12G="$(make_repo s12-unknown-dep)"; new_roster "$R12G"
 wave_plan "$R12G" "writers=8 suites=2 worktrees=8 test_jobs=8 source=probe" \
   "| ORPHAN | 4 | build | fixture task | implementor | NOT-IN-THIS-TABLE | 15m | REQ-x | a.sh | pending |" \
   "| FINE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
 poke_pressure "$R12G" 8192 1.0 tick
-expect_contains "an unknown dependency holds its slice back" "poker: FILL FINE" "$OUT"
+expect_contains "an unknown dependency holds its task back" "poker: FILL FINE" "$OUT"
 expect_absent "…and ORPHAN is not filled" "ORPHAN" "$OUT"
 
 # ---------- 12h: the table is read BY HEADER NAME, not by column position ----------
@@ -2422,7 +2422,7 @@ mkdir -p "$(dirname "$f12i")"
 } > "$f12i"
 touch "$f12i"
 poke_pressure "$R12I" 8192 1.0 tick
-expect_absent "a fenced slice table is documentation, and fills nothing" "poker: FILL" "$OUT"
+expect_absent "a fenced task table is documentation, and fills nothing" "poker: FILL" "$OUT"
 expect_contains "…and the tick says the table gave it nothing ready" \
   "no pending step-4 task has all its dependencies landed" "$OUT"
 
@@ -3307,23 +3307,23 @@ expect_absent   "…and announces no fallback: there was no open run to fall bac
 
 # ---------- 18e: the scheduler reads the same run ----------
 # The tick has two plan readers — the run-state read above and the FILL scheduler's budget
-# and slice table — and a Patrol that stood its ground correctly while filling another run's
-# slices would be worse than either failure alone. Two budgeted plans, one root: the bound
+# and task table — and a Patrol that stood its ground correctly while filling another run's
+# tasks would be worse than either failure alone. Two budgeted plans, one root: the bound
 # one is filled from, and the newest one is not.
 R18E="$(make_repo s18-scheduler)"; new_roster "$R18E"
 poke "$R18E" arm
 P18E_MINE="$(wave_plan_at "$R18E" 'epic-18/mine.plan.md' \
-  "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" "| MINE-SLICE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |")"
+  "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" "| MINE-TASK | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |")"
 P18E_THEIRS="$(wave_plan_at "$R18E" 'epic-18/theirs.plan.md' \
-  "writers=9 suites=2 worktrees=8 test_jobs=8 source=probe" "| THEIRS-SLICE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |")"
+  "writers=9 suites=2 worktrees=8 test_jobs=8 source=probe" "| THEIRS-TASK | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |")"
 bind_marker "$R18E" "$P18E_MINE"
 # THE READING IS FIXTURE DATA, exactly as Section 11 makes it: a FILL assertion taken on
 # whatever memory this machine happens to have free is an assertion that passes or fails on
 # the weather. `poke_pressure` pins it healthy so the scheduler reaches the fill decision.
 poke_pressure "$R18E" 8192 1.0 tick
-expect_contains "the scheduler fills from the BOUND plan's slice table" "poker: FILL MINE-SLICE" "$OUT"
+expect_contains "the scheduler fills from the BOUND plan's task table" "poker: FILL MINE-TASK" "$OUT"
 expect_absent   "…and never from the newest plan, which belongs to another run" \
-  "THEIRS-SLICE" "$OUT"
+  "THEIRS-TASK" "$OUT"
 
 # ============================================================
 section "Section 19: the tick sizes open= and FILL from the LIVE SET (S19; auditor F-14)"
@@ -3381,13 +3381,13 @@ s19_answer() {  # <state: fresh|stale|none> <name[:status]>... -> plants this se
 # THE FILL IS COMPARED EXACTLY, never with a substring. `poker: FILL ONE` is a PREFIX of
 # `poker: FILL ONE TWO`, so a contains-assertion on the smaller fill passes on the larger
 # one and the arm that is supposed to detect over-filling detects nothing. Found by
-# mutation (a) of this slice's own battery, which moved the gap from one to two and left
+# mutation (a) of this task's own battery, which moved the gap from one to two and left
 # the row green.
 s19_fill() {  # <the tick's whole channel> -> the ids it filled, or empty
   printf '%s\n' "$1" | sed -n 's/^poker: FILL //p' | head -1
 }
 
-s19_plan() {  # <repo> — writers=2, one landed base and two pending slices
+s19_plan() {  # <repo> — writers=2, one landed base and two pending tasks
   wave_plan "$1" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
     "| BASE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | landed |" \
     "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
@@ -3717,7 +3717,7 @@ section "Section 21: hardening — the one unfiltered field, and the tail that r
 # Twelve of the thirteen interpolated fields go through `clean()`; `session=%s` took `$sid`
 # raw. A value carrying a `|` forges a segment, and every by-key reader in the fleet takes
 # the FIRST match — so a forged `name=` ahead of the real one wins. This is character for
-# character the defect the wave fixed on the other writer one slice earlier
+# character the defect the wave fixed on the other writer one task earlier
 # (hooks/dispatch-preflight.sh: "the asymmetry between the two writers was itself the defect").
 #
 # CALLED DIRECTLY, because the verb cannot be driven to it. `engaged_marker_path`
@@ -3828,13 +3828,13 @@ section "Section 22: FILL waits on Step-3 approval (epic-21 T4, AC-5)"
 # dispatching a writer before Step 3's ratification review has ever run sends it against work
 # nobody approved. `current:` below 4 means the plan is still inside Steps 0-3; observed
 # 2026-09-05T17:54Z, the tick printed `FILL S1 S2 S3 S4 S12 S14 S15 S16` against the wave-01
-# plan sitting at `current: 3` with eight ready slices — this section reproduces that exact
-# shape (writers=8, eight dependency-free pending slices) as its RED fixture, and its GREEN
+# plan sitting at `current: 3` with eight ready tasks — this section reproduces that exact
+# shape (writers=8, eight dependency-free pending tasks) as its RED fixture, and its GREEN
 # twin (the identical plan at `current: 4`) proves the fix does not disturb the earlier,
 # already-covered current:4 behavior Section 12 pins.
 
 # ---------- fixture: the 17:54Z shape, at a caller-named `current:` ----------
-s22_plan_at_current() {  # <repo> <current> -> the path, an eight-slice writers=8 plan
+s22_plan_at_current() {  # <repo> <current> -> the path, an eight-task writers=8 plan
   local repo="$1" cur="$2"
   local f="$repo/.bionic/docs/plans/epic-21-v1-ladder/wave-01-fixture.plan.md"
   mkdir -p "$(dirname "$f")"
@@ -3855,7 +3855,7 @@ s22_plan_at_current() {  # <repo> <current> -> the path, an eight-slice writers=
   printf '%s' "$f"
 }
 
-# ---------- 22a: RED FIXTURE — current: 3, eight ready slices -> no FILL line ----------
+# ---------- 22a: RED FIXTURE — current: 3, eight ready tasks -> no FILL line ----------
 R22A="$(make_repo s22-current-3)"; new_roster "$R22A"
 s22_plan_at_current "$R22A" 3 >/dev/null
 poke_pressure "$R22A" 8192 1.0 tick
@@ -3863,7 +3863,7 @@ expect_eq "a plan awaiting approval still ticks cleanly (exit 0)" "0" "$RC"
 expect_absent "the 17:54Z shape at current: 3 prints no FILL line at all" "poker: FILL" "$OUT"
 expect_contains "…and names the pending approval instead" \
   "no FILL — plan at current: 3, Step-3 approval pending" "$OUT"
-expect_absent "…so none of the eight slices are named" "S1" "$OUT"
+expect_absent "…so none of the eight tasks are named" "S1" "$OUT"
 
 # ---------- 22b: the same plan at current: 4 FILLs exactly as it always has ----------
 R22B="$(make_repo s22-current-4)"; new_roster "$R22B"
@@ -3913,7 +3913,7 @@ expect_absent "…never the approval-pending wording" "Step-3 approval pending" 
 # sched_plan_current rejected the letter outright (`*[!0-9]*` matched the trailing `b`),
 # which made `3b` UNREADABLE rather than 3 — and an unreadable current: fell straight
 # through to the readiness/budget checks below the gate, so a plan sitting at `current: 3b`
-# with ready slices and room on the roster FILLed exactly as `t144-review-b` finding (c)
+# with ready tasks and room on the roster FILLed exactly as `t144-review-b` finding (c)
 # and review-a's C-5 describe. `4b` mirrors `4`.
 R22E="$(make_repo s22-current-3b)"; new_roster "$R22E"
 s22_plan_at_current "$R22E" 3b >/dev/null

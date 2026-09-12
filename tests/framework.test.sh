@@ -1371,7 +1371,7 @@ section "16: the wall enforces ADOPTION, not only non-shadowing (K-7)"
 #
 # Refusing a shadow is half of "one framework, adopted by every suite". The
 # other half — that a roster suite sources the framework and calls finish — was
-# a measurement the migration slices took once, and §13's `0 refused` read as
+# a measurement the migration tasks took once, and §13's `0 refused` read as
 # proof of a wall that did not exist.
 
 F16_D="$SB/adopt16"

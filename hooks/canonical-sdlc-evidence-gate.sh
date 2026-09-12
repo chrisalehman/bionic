@@ -671,7 +671,7 @@ effective_row_rigor() {  # $1 = row's rigor cell
   esac
 }
 
-# Total order over the rigor enum, for the per-row FLOOR check (slice 4/8).
+# Total order over the rigor enum, for the per-row FLOOR check (task 4/8).
 # tested < peer-reviewed < audited. An empty/unknown value maps to 0 (the tested
 # floor) so an unset frontmatter rigor never manufactures a phantom downgrade.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
@@ -718,7 +718,7 @@ matrix_auditor_required() {
   esac
 }
 
-# Proof-shape test (D-slice 4/2): an evidence value counts as "proof-shaped"
+# Proof-shape test (D-task 4/2): an evidence value counts as "proof-shaped"
 # — a command invocation + result counts, not prose — iff it contains BOTH
 # at least one digit AND at least one command token. A command token is any
 # of: a backtick; a literal '/' anywhere (a path, e.g. 'hooks/foo.sh'); or a
@@ -743,7 +743,7 @@ is_proof_shaped() {  # $1 = evidence value
   return 1
 }
 
-# Rigor-keyed evidence lanes (D-slice 4/2, TASK SCALE ONLY). Applies to
+# Rigor-keyed evidence lanes (D-task 4/2, TASK SCALE ONLY). Applies to
 # the addressed row (any status) and to every OTHER row with status `done`
 # that has a non-empty, non-placeholder evidence line — the caller only
 # invokes this once those upstream 4/1 presence/placeholder checks (and, for
@@ -792,7 +792,7 @@ Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line bef
   fi
 }
 
-# Per-row rigor FLOOR check (slice 4/8, A15 — user-ratified, momentous). The
+# Per-row rigor FLOOR check (task 4/8, A15 — user-ratified, momentous). The
 # per-row `rigor` cell is a FLOOR unified with the run-rigor floor model: a
 # cell RAISING a row above the frontmatter rigor is always allowed (the cell
 # drives the heavier lane, 4/4), but a cell LOWERING it below the frontmatter
@@ -827,7 +827,7 @@ Fix: raise the cell to at least '${RIGOR}', or record a downgrade: add 'waiver: 
 }
 
 # Router for the previously-log-only NON-addressed-row ledger-shape checks
-# (D-slice 4/3, task scale). On a frontmatter `rigor: audited` plan these
+# (D-task 4/3, task scale). On a frontmatter `rigor: audited` plan these
 # promote to BLOCKING (exit 2); at any other rigor they stay log-only findings
 # (D14, unchanged). The detail string is authored once by the caller and used
 # verbatim in whichever channel fires. The addressed-unit floor (4/1) and the
@@ -853,7 +853,7 @@ Audited rigor makes the ledger-shape checks blocking; a non-audited plan would l
 # table (fence-aware, the matrix_section idiom) and the per-task `- T<n>:`
 # evidence lines in the ## SDLC State section (SECTION, already newline-normalized).
 #
-# Two lanes (slice 4/1), plus rigor-keyed lanes on top (slice 4/2):
+# Two lanes (task 4/1), plus rigor-keyed lanes on top (task 4/2):
 #   - THE ADDRESSED UNIT — the `T<n>` named by `current: T<n>` — is BLOCKING at
 #     the tested floor: its row must exist in `## Tasks`, carry a non-placeholder
 #     `- T<n>:` evidence line, and have a rigor cell that resolves (its cell
@@ -946,7 +946,7 @@ Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited b
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
     if [ "$id" = "$CURRENT" ]; then
-      # THE ADDRESSED UNIT: the tested floor is BLOCKING (slice 4/1).
+      # THE ADDRESSED UNIT: the tested floor is BLOCKING (task 4/1).
       addressed_found=1
       if [ -z "$ev" ]; then
         _eg_detail="canonical-sdlc task ${id} has no '- ${id}:' evidence line in '## SDLC State'.
@@ -1205,9 +1205,10 @@ Fix: add 'fails-when: <the planted defect this eval must go red on>' to the '${a
 # cannot be judged here either.
 #
 # THE FOURTH READER REQ-1e RE-POINTS (measure §5, blocker 4). It used to read a
-# `## Slices` section of its own, by column position: `$2` for the number and `$4`
-# for the kind. The section is now `## Tasks`, the rows come from lib/units.sh
-# header-keyed, the number is an id, and the matrix field is `task:`.
+# section of its own, under the heading this wave retired, by COLUMN POSITION: `$2`
+# for the number and `$4` for the kind. The section is `## Tasks` now, the rows come
+# from lib/units.sh header-keyed, the number is an id, and the matrix field it
+# cross-references is `task:`.
 #
 # INERT BELOW STEP 4 (numbered) OR BELOW `current: T<n>` (task-scale, epic-22 K2.5),
 # same reasoning as the two arms above: the Tasks table and the Verification Matrix
@@ -1766,7 +1767,7 @@ plan_write_note() {
 # command also writes the plan. $1 = message tail, $2 = fix line.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 block_matrix() {  # <fact> <fix> <observation> <repair prose>
-  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (slice 13, ruling D-1, parametric
+  # THE FRAME KEEPS ITS PARAMETERS AND LOSES ITS VOICE (task 13, ruling D-1, parametric
   # table v2). $1 and $2 are the ruled fact and fix and render as the one user line; the
   # step number, the caller's long observation — the only place ${ac}, ${tier}, ${key},
   # ${val}, ${aud}, the walk paths and the environment lists are spelled — the plan path,
@@ -2461,7 +2462,7 @@ validate_intent_evidence() {
   return 0
 }
 
-# Wave-scale D7 dispatched-task ledger PRESENCE (D-slice 4/3). Guarded to
+# Wave-scale D7 dispatched-task ledger PRESENCE (D-task 4/3). Guarded to
 # scale:wave + frontmatter rigor:audited + multi_agent:true plans; for
 # every other plan it is a no-op (return 0). scale:epic is intentionally OUT —
 # epic plans legitimately dispatch research, not task-shaped units, so demanding

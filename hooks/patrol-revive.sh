@@ -75,7 +75,7 @@
 # replaces was a worse one, because a skill registration goes quiet without leaving
 # anything on disk to notice.
 #
-# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan slice STOPGATES): ONE CLOCK
+# A SECOND ARM, ADDED FOR bionic 1.4.0 (spec AC-3, plan task STOPGATES): ONE CLOCK
 # PER RUN. This session having a stamp of its own says a Patrol was armed here; a
 # second FRESH `patrol-<other-sid>.state` in the SAME project's `.bionic/tmp` says
 # another one is ALSO alive right now — the duplicate-clock shape S5's ritual

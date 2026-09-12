@@ -1,5 +1,5 @@
 #!/bin/bash
-# CROSS-COMPONENT INSTRUMENT PROOFS — epic-15 wave-01R, slice 4/6.
+# CROSS-COMPONENT INSTRUMENT PROOFS — epic-15 wave-01R, task 4/6.
 #
 # Serves AC-9 (N-way agreement over every copy of a duplicated concept,
 # including the actively-maintained origin; one-copy mutation goes red) and the
@@ -45,7 +45,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
-# THE DETAIL IS ON, FOR THE WHOLE SUITE (slice 13, ruling D-1). Since the migration a
+# THE DETAIL IS ON, FOR THE WHOLE SUITE (task 13, ruling D-1). Since the migration a
 # wall's user stream is ONE line — `bionic: <verb> refused — <fact> (<fix>)` — and every
 # FACT this file cross-checks between hooks (a resolved path, a derived step, a roster
 # id, a live version constant, a main checkout) travels in `detail`. That is the right
@@ -69,7 +69,7 @@ REPO_ROOT="${BIONIC_SCRIPTS_DIR}"
 PARTY_DP="${W1R_PARTY_DP:-$BIONIC_HOOKS_DIR/dispatch-preflight.sh}"
 PARTY_SG="${W1R_PARTY_SG:-$BIONIC_HOOKS_DIR/stop-guard.sh}"
 PARTY_EG="${W1R_PARTY_EG:-$BIONIC_HOOKS_DIR/canonical-sdlc-evidence-gate.sh}"
-# The recorder moved out of the stop gate at slice 4/4: observations are written
+# The recorder moved out of the stop gate at task 4/4: observations are written
 # post-execution by their own script, from the producer's own printed output.
 PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 
@@ -95,7 +95,7 @@ trap cleanup EXIT
 export HOME="$SANDBOX/home"
 export CLAUDE_CONFIG_DIR="$SANDBOX/cfg"     # NOT $HOME/.claude — see the header
 mkdir -p "$CLAUDE_CONFIG_DIR" "$HOME/.claude"
-# Since slice 4/5, hooks/stop-check.sh reads CLAUDE_CODE_SESSION_ID; since S6 it reads it to
+# Since task 4/5, hooks/stop-check.sh reads CLAUDE_CODE_SESSION_ID; since S6 it reads it to
 # find the session TRANSCRIPT the live set is recorded in, which is the whole of resolution.
 # This suite runs inside a real Claude Code session, which exports a real one, and an
 # unpinned call would read THAT session's live set — the suite's hermetic claim quietly false.
@@ -142,7 +142,7 @@ SID_LG="2ae9d613-4c07-4b8a-9f51-7d02ac86be40"
 # and §2.12 establish. Session ids, agent ids and plan text are SYNTHESIZED and
 # declared as such — none is a platform surface.
 #
-# The Agent tool_input carries a name and a contract-bearing brief (slice 4/3):
+# The Agent tool_input carries a name and a contract-bearing brief (task 4/3):
 # tool_input became load-bearing when the start gate began journalling the launch
 # to the session roster, and a brief with no labeled contract fields is warned
 # about on stderr. This suite's claim is producer/consumer AGREEMENT ON THE
@@ -214,9 +214,9 @@ mk_agent_post() {  # <sid> <transcript> <cwd> <tool_use_id> [name] [agentId]
       tool_use_id:$u, duration_ms:6}'
 }
 
-# The TEAMMATE completion (epic-16 wave-01 slice 0). FAITHFUL to
+# The TEAMMATE completion (epic-16 wave-01 task 0). FAITHFUL to
 # .bionic/docs/record/landing-wave-capture-probe.md §3-A and the live re-capture
-# slice 0 took through the pty harness: `tool_response.status` is
+# task 0 took through the pty harness: `tool_response.status` is
 # `teammate_spawned`, and `agent_id`/`teammate_id` both carry the ADDRESSING form
 # `<name>@session-<id8>` — never the transcript form, which no PostToolUse
 # payload contains. This is the dispatch mode every interactive session on this
@@ -238,7 +238,7 @@ mk_agent_post_teammate() {  # <sid> <transcript> <cwd> <name> <addressing-id> <t
       tool_use_id:$u, duration_ms:9}'
 }
 
-# The SubagentStart event (slice 1). VERBATIM shape from capture probe §3-C: six
+# The SubagentStart event (task 1). VERBATIM shape from capture probe §3-C: six
 # keys and no `tool_name` at all, which is why the recorder's third arm cannot sit
 # behind the tool-name gate its other two share. `agent_type` is the teammate's
 # NAME here — the platform's own rename — and `agent_id` is the TRANSCRIPT form.
@@ -249,7 +249,7 @@ mk_start_payload() {  # <sid> <transcript> <cwd> <name> <transcript-id>
       agent_id:$a, agent_type:$n, hook_event_name:"SubagentStart"}'
 }
 
-# The SubagentStop event (slice 5). FAITHFUL to capture probe §3-D, a live teammate
+# The SubagentStop event (task 5). FAITHFUL to capture probe §3-D, a live teammate
 # stop: `agent_type` carries the name, `agent_id` the transcript form,
 # `background_tasks[]` its task-id key. Only the four fields the gate reads vary.
 mk_substop_payload() {  # <cwd> <sid> <agent_type> <stop_hook_active true|false>
@@ -260,9 +260,9 @@ mk_substop_payload() {  # <cwd> <sid> <agent_type> <stop_hook_active true|false>
       agent_id:"aprobemate-4da9be517e8f90bd", agent_type:$a,
       effort:{level:"high"}, hook_event_name:"SubagentStop", stop_hook_active:$h,
       agent_transcript_path:("/tmp/transcripts/" + $s + "/subagents/agent-aprobemate-4da9be517e8f90bd.jsonl"),
-      last_assistant_message:"DONE\n\nRan the slice; report written.",
+      last_assistant_message:"DONE\n\nRan the task; report written.",
       background_tasks:[{id:"tooha5cgi", type:"teammate", status:"running",
-                         description:"run the slice and report"}],
+                         description:"run the task and report"}],
       session_crons:[]}'
 }
 
@@ -300,7 +300,7 @@ mk_substop_payload() {  # <cwd> <sid> <agent-id> <agent-type> <stop_hook_active 
       last_assistant_message:"Done.", background_tasks:[], session_crons:[]}'
 }
 
-# THE PRODUCER→RECORDER PAIR, DRIVEN END TO END. Since slice 4/4 the recorder
+# THE PRODUCER→RECORDER PAIR, DRIVEN END TO END. Since task 4/4 the recorder
 # reads no command line: it copies the machine line the observation printed. So
 # the only honest way to ask "what did the recorder write for this command" is to
 # RUN the observation and hand its real stdout to the real recorder — which is
@@ -337,7 +337,7 @@ cg_roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
   return 0
 }
 
-# THE RECORDED ListAgents ANSWER — the live set (S6, D1′). Since this slice both stop
+# THE RECORDED ListAgents ANSWER — the live set (S6, D1′). Since this task both stop
 # scripts resolve a target against the newest recorded ListAgents answer in a session's
 # transcript, so a fixture transcript is no longer an empty file. The body's shape is the
 # real one, copied from tests/live-agents.test.sh, whose bodies are byte-verbatim captures:
@@ -451,7 +451,7 @@ verdict_sg() {  # <repo> -> yes|no|other:<detail>
   esac
 }
 
-# The recorder holds the FOURTH copy of active-wave detection (slice 4/4), and a
+# The recorder holds the FOURTH copy of active-wave detection (task 4/4), and a
 # duplicated wall nothing drives is a wall that diverges. Its observable is the
 # roster: with a wave active it completes an `intended` row on execution
 # confirmation, and outside one it is inert. The row is re-seeded on every call so
@@ -480,7 +480,7 @@ verdict_er() {  # <repo> -> yes|no|other:<detail>
 # answer is `yes:<value>` where the others answer `yes`. Callers split on `:`.
 verdict_eg() {  # <repo> -> yes:<current>|no|other:<detail>
   local out st
-  # BIONIC_WALL_VERBOSE=1 (slice 13, ruling D-1). The gate's user line is one sentence
+  # BIONIC_WALL_VERBOSE=1 (task 13, ruling D-1). The gate's user line is one sentence
   # now and the DERIVED VALUE this party reports — the step number the plan has no line
   # for — lives in `detail`. Reading the line alone would make every row here
   # `other:<prefix>`; the knob is how the party keeps reporting a value at all.
@@ -1062,13 +1062,13 @@ cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111" "" "identifi
 write_plan "$IREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 
 # The producer, run for real, with the session key on the channel it actually
-# reads (CLAUDE_CODE_SESSION_ID — slice 4/1's resolution) and a credential
+# reads (CLAUDE_CODE_SESSION_ID — task 4/1's resolution) and a credential
 # present so the blocking probes pass.
 ( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" ANTHROPIC_API_KEY="sk-fixture-not-a-real-key" \
     HOME="$SANDBOX/home" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" \
     bash "$PROBE" >"$SANDBOX/probe.out" 2>"$SANDBOX/probe.err" )
 PROBE_ST=$?
-# slice 4/2 (D-5): the session identity is now carried in TWO places that must agree —
+# task 4/2 (D-5): the session identity is now carried in TWO places that must agree —
 # the FILENAME and the session_id= line inside it. A producer and a consumer that
 # disagreed on the filename scheme would refuse every dispatch, so the path is asserted
 # here as part of the same agreement the key is.
@@ -1217,7 +1217,7 @@ q_gate() {  # <typed> -> permitted|refused   (asked AFTER q_recorder, on its sta
 
 # --- case 1: unique in this session. All three say yes. ---
 plant "$RPROJ/$SID_A/subagents" "asolo-1111111111111111" "solo"
-# …and this session's roster records it. Since slice 4/9 the row is not what makes
+# …and this session's roster records it. Since task 4/9 the row is not what makes
 # it ours — it is filed under this session's own directory — but keeping the row
 # holds this case fixed on the RESOLUTION question the three parties are answering.
 cg_roster_row "$RREPO" "$SID_A" "solo" "asolo-1111111111111111"
@@ -1280,14 +1280,14 @@ plant "$HOMEPROJ/$SID_A/subagents" "adecoy-6666666666666666" "decoy"
 expect_eq "C5 observation ignores metadata under \$HOME/.claude when CLAUDE_CONFIG_DIR names another root" \
   "unresolved" "$(q_observation decoy)"
 
-# --- case 6: the ARGUMENT GRAMMAR itself — RESIDUAL CLOSED at slice 4/4.
+# --- case 6: the ARGUMENT GRAMMAR itself — RESIDUAL CLOSED at task 4/4.
 #
 # Cases 1-5 ask both halves about one typed name; this one asks them about one
 # COMMAND LINE, which is the thing they actually share. It used to be the hardest
 # row in this file, because there were TWO readers of that line: the observation
 # parsed its own `$@`, and a PreToolUse recorder re-parsed the same string with a
 # grammar of its own (skip `-*` tokens, take the first non-flag). Nothing held
-# them together, and a slice that widened one of them shipped: `--progress <path>
+# them together, and a task that widened one of them shipped: `--progress <path>
 # <agent>` had the operator looking at <agent> while the record named <path> — an
 # attestation about an agent nobody examined (Step-6 review F-1). Narrowing the
 # producer then CONVERTED two ordinary typos into refused-observation-still-
@@ -1399,7 +1399,7 @@ section "D — cross-script security regressions (AC-8, TDD §8)"
 SECRET="sk-ant-LEAKCANARY-9f2b41"
 SREPO=$(new_repo "secrets")
 # The metadata lives under the CONFIGURED root, because the producer now has to
-# resolve the target for real before anything can be recorded (slice 4/4).
+# resolve the target for real before anything can be recorded (task 4/4).
 SSLUG=$(printf '%s' "$SREPO" | sed 's/[^a-zA-Z0-9]/-/g')
 SPROJ="$CLAUDE_CONFIG_DIR/projects/$SSLUG"
 mkdir -p "$SPROJ/$SID_A/subagents"
@@ -1514,7 +1514,7 @@ expect_eq "the start gate writes ONLY the attestation, the roster row and their 
 ( cd "$QREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" nobody >/dev/null 2>&1 )
 
 # ============================================================
-section "E — classification + contract-source ride the machine line into the recorded observation (slice 4/5)"
+section "E — classification + contract-source ride the machine line into the recorded observation (task 4/5)"
 # ============================================================
 #
 # hooks/stop-check.sh (producer) computes classification/deliverable_source/
@@ -1547,7 +1547,7 @@ expect_contains "the recorded observation carries deliverable_source=none (no CL
 expect_contains "the recorded observation carries progress_source=none" "progress_source=none" "$E_STATE"
 
 # --- an UNROSTERED target under this session's OWN directory: OURS, because the
-# metadata's own filing is what ownership reads (slice 4/9). Before that fix this
+# metadata's own filing is what ownership reads (task 4/9). Before that fix this
 # classified foreign, of an agent this session had launched — the live defect, and
 # the standing state for everything dispatched before the roster hook shipped. ---
 plant "$RPROJ/$SID_A/subagents" "aloner-9999999999999999" "loner"
@@ -1595,10 +1595,10 @@ expect_absent "the recorder writes no record for a run that showed no evidence" 
   "typed=worker|log=" "$E4_STATE"
 
 # ============================================================
-section "F — the roster row and the observer/progress fields: writer, producer and GATE agree (slice 4/6)"
+section "F — the roster row and the observer/progress fields: writer, producer and GATE agree (task 4/6)"
 # ============================================================
 #
-# Slice 4/6 turned the stop gate into a reader of four things it had never read:
+# Task 4/6 turned the stop gate into a reader of four things it had never read:
 # the session roster's `name=`/`agent_id=` (the foreign-stop rule), and the
 # record's `observer=`, `progress=`/`progress_mtime=`/`progress_state=` (the
 # same-actor and progress-staleness checks). Every one of them is written by one
@@ -1700,7 +1700,7 @@ expect_eq "no row is evicted to make room for it (append-only, unbounded)" \
 # printf finishes, printf takes SIGPIPE, and the pipeline returns 141: a FALSE
 # FAIL on a string that is present. Verified in isolation — same haystack, early
 # match 141, late match 0, and 0 with pipefail off. It fails safe (red, not
-# green) and it is not this slice's to fix in six suites at once, but it is why
+# green) and it is not this task's to fix in six suites at once, but it is why
 # nothing here hands a whole roster to an assertion.
 F4_LIVE_ROW=$(grep 'name=w99-impl|' "$F4_ROSTER" 2>/dev/null)
 expect_contains "the LIVE agent's row survives a long session" \
@@ -1849,13 +1849,13 @@ section "H — the LIVENESS fields: writer lifts them, the observation displays 
 # ============================================================
 #
 # The axis-3 FAIL: hooks/stop-check.sh read `claims=` off the roster row and NO
-# writer emitted it, while slice 4/7 shipped procedure prose instructing authors
+# writer emitted it, while task 4/7 shipped procedure prose instructing authors
 # to declare both a `cadence` and a subprocess claim. A reader with no producer is
 # dead substrate, and the only test exercising it hand-wrote a row shape the
 # writer could not produce. Here the row is the one the real start gate wrote from
 # a real brief, and the real observation is run over it.
 
-H_BRIEF='Canonical-sdlc Step 4, slice 4/13 of epic-99 wave-01; build · audited · wave.
+H_BRIEF='Canonical-sdlc Step 4, task 4/13 of epic-99 wave-01; build · audited · wave.
 Expected artifact: .bionic/docs/record/w99-live.txt
 Expected duration: ~45 minutes. Progress: .bionic/tmp/w99-live.progress, cadence ~7m.
 Subprocess claim: `w99-suite-marker` → .bionic/tmp/w99-live.log
@@ -2099,7 +2099,7 @@ J_LAUNCHED=$(date -u -v-3600S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
   || date -u -d "-3600 seconds" +%Y-%m-%dT%H:%M:%SZ)
 
 # Roster rows in the shape hooks/dispatch-preflight.sh's `ROW=` line really writes
-# TODAY — field for field, including `source=` (slice 4/4) and `waiver=` (the
+# TODAY — field for field, including `source=` (task 4/4) and `waiver=` (the
 # absent-deliverable wall). A fixture missing a field the writer emits is how a
 # suite ends up green over a row shape nothing produces; the sweeper's and the
 # recorder's suites each had to make this same correction mid-wave.
@@ -2451,7 +2451,7 @@ KID="aw16chain-1234567890abcdef"
   printf 'session_id=%s\nwritten_at=1785790000\nrepo=%s\n' "$SID_A" "$KREPO"
 } > "$KREPO/.bionic/tmp/preflight-$SID_A.state"
 
-K_BRIEF='Canonical-sdlc Step 4, slice 6 of epic-16 wave-01; build · audited · wave.
+K_BRIEF='Canonical-sdlc Step 4, task 6 of epic-16 wave-01; build · audited · wave.
 Expected artifact: .bionic/docs/record/w16-chain.md
 Expected duration: ~30 minutes. Progress artifact: .bionic/tmp/w16-chain.progress, cadence ~7m.
 Subprocess claim: `w16-chain-marker` → .bionic/tmp/w16-chain.log
@@ -2531,7 +2531,7 @@ expect_eq "…and it reads the contract off the chain, not off nothing" "STILL-L
 # mtime > launched_at and the row was written this second.
 sleep 1
 mkdir -p "$KREPO/.bionic/docs/record"
-echo "the slice report" > "$KREPO/.bionic/docs/record/w16-chain.md"
+echo "the task report" > "$KREPO/.bionic/docs/record/w16-chain.md"
 K_VERDICT=$( cd "$KREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$PARTY_SW" verdict w16-chain 2>/dev/null )
 K_VLINE=$(printf '%s\n' "$K_VERDICT" | grep -F 'landing-verdict/v1|' | head -1)
 expect_eq "…and the same chain reads MET once the artifact lands" "MET" \
@@ -2571,7 +2571,7 @@ mk_bash_post "$SID_A" "$KTR" "$KREPO" "bash ~/.claude/hooks/stop-check.sh w16-ch
   | bash "$PARTY_ER" >/dev/null 2>&1
 sleep 1
 printf 'stage 2\n' >> "$KREPO/.bionic/tmp/w16-chain.progress"
-# THE CONTRACT IS TAKEN BACK OFF DISK FIRST (epic-16 wave-02 slice S3). D-6 is a rule about
+# THE CONTRACT IS TAKEN BACK OFF DISK FIRST (epic-16 wave-02 task S3). D-6 is a rule about
 # a stop that would end UNFINISHED work: since this wave, a LANDED contract discharges the
 # stop outright and no channel is consulted, which is AC-1 and is asserted as the paired
 # half below. Reader 3's question — does the chain carry the progress path all the way to
@@ -2736,7 +2736,7 @@ section "L — the WIRING: one hook, one registration, one manifest"
 # quietest possible way: it is installed, it is syntactically fine, its own suite is
 # green, and it never runs.
 #
-# THERE IS ONE REGISTRATION SURFACE NOW (bionic 1.4.0, slice ADOPT, spec AC-7):
+# THERE IS ONE REGISTRATION SURFACE NOW (bionic 1.4.0, task ADOPT, spec AC-7):
 # hooks/hooks.json. Until this wave there were two, and the split was not laziness —
 # it was a partition. Skill-frontmatter hooks bind only in sessions that invoke the
 # skill, which is what kept the sdlc walls off every unrelated project on the machine;
@@ -2897,7 +2897,7 @@ expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
 #
 # --- L.4b THE TIMEOUT IS THE LAST FIELD, NEVER THE FOURTH ---
 #
-# $NF, not $4 (bionic 1.4.0, slice SSTART). A row is `event|matcher|command|timeout`, and
+# $NF, not $4 (bionic 1.4.0, task SSTART). A row is `event|matcher|command|timeout`, and
 # until the SessionStart detector arrived every matcher in this tree was a single tool
 # name, so the fourth field and the last field were the same field.
 # `startup|clear|resume|compact` is a matcher that CONTAINS the delimiter — the platform's
@@ -2984,7 +2984,7 @@ expect_eq "SessionStart carries exactly one registration in hooks.json" \
   "1" "$(printf '%s\n' "$HOOKS_JSON_ROWS" | /usr/bin/grep -c '^SessionStart|')"
 # The hook the manifest names EXISTS and parses. §L.2's own header records that the
 # structural "every command names a file that exists" arm died with tests/scripts.test.sh
-# (8582861) and was never replaced; this row restores it for the one entry this slice adds,
+# (8582861) and was never replaced; this row restores it for the one entry this task adds,
 # so a renamed or deleted detector fails here instead of silently never firing.
 expect_eq "…and the file that row names exists and parses" "ok" \
   "$( [ -f "$BIONIC_HOOKS_DIR/session-start.sh" ] \
@@ -3166,7 +3166,7 @@ expect_eq "an order just outside it does not — the ceremony is where it was" "
 section "N — the wave-02 facts: one root, one vocabulary, one launch reference (S9)"
 # ============================================================
 #
-# Six rows specified by the slices that could not add them: `record/w2-s45-wallfacts.md` §6
+# Six rows specified by the tasks that could not add them: `record/w2-s45-wallfacts.md` §6
 # (the wall and the probe became one preflight, and duplicated the root resolver a fourth
 # time doing it) and `record/w2-s6-launchref.md` §6 (the launch reference stopped being
 # re-stamped on resume, in a file whose readers live elsewhere). Each is a property no
@@ -3192,7 +3192,7 @@ section "N — the wave-02 facts: one root, one vocabulary, one launch reference
 # Eight files, one algorithm, held together by a body-for-body pin that could only ever
 # prove they had not drifted YET.
 #
-# THEY ARE GONE (bionic 1.4.0, slice ADOPT, spec AC-10). What is pinned instead is the
+# THEY ARE GONE (bionic 1.4.0, task ADOPT, spec AC-10). What is pinned instead is the
 # convention that replaced them, and it has three parts, each with its own way of going
 # quietly wrong: the loader block that finds the library must be ONE text in every hook
 # (a hand edit to one copy), every reader must ASK for the root rather than restate it
@@ -3217,8 +3217,8 @@ n_block_of() {  # <file> -> the marker-delimited span, markers inclusive
 
 # THE ADOPTED SET, named rather than globbed: a glob would silently shrink to nothing if
 # the marker were renamed, and this section would pass over air. session-poker.sh (the
-# eighteenth hook off resolve_project_root, converted by slice POKER) and session-start.sh
-# (added by slice SSTART) both carry the idiom too — verified live, byte for byte, against
+# eighteenth hook off resolve_project_root, converted by task POKER) and session-start.sh
+# (added by task SSTART) both carry the idiom too — verified live, byte for byte, against
 # this section's own $N_BLOCK extraction — and both resolve their root through the library
 # the same way every other member of this set does, so they belong in the SAME list rather
 # than a sibling one (Step-6 duplication review, record/wave-1.4.0/review-duplication.md,
@@ -3277,7 +3277,7 @@ expect_ne "…and the byte-for-byte pin calls the doctored span a drift" "$N_BLO
 expect_eq "…and the cap rejects it ($N_MUT_LINES lines against a cap of $N_CAP)" "no" \
   "$([ "$N_MUT_LINES" -le "$N_CAP" ] && echo yes || echo no)"
 
-# NO PRIVATE RESOLVER SURVIVES — none, not one. ADOPT converted seventeen hooks and slice
+# NO PRIVATE RESOLVER SURVIVES — none, not one. ADOPT converted seventeen hooks and task
 # POKER the eighteenth, so the eight-copy family is empty and this row is what keeps a
 # nineteenth from being written by hand.
 N_STRAGGLERS=$(/usr/bin/grep -ln '^resolve_project_root()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null \
@@ -3608,7 +3608,7 @@ expect_eq "…and leaves no phantom .bionic in the worktree (R9: one address spa
 # absence of the auto-probe announce line, which the wall prints only when it had to take an
 # attestation of its own. A wall that looked in the worktree would announce every time.
 #
-# THE PAYLOAD IS AN AGENT'S (bionic 1.4.0, spec AC-14, slice WALLS). This section's subject is
+# THE PAYLOAD IS AN AGENT'S (bionic 1.4.0, spec AC-14, task WALLS). This section's subject is
 # the ADDRESS SPACE — producer and consumer resolving one root from a worktree cwd — and the
 # dispatch that legitimately happens there is a dispatched writer's, working in the tree it was
 # given. A MAIN-THREAD dispatch from a worktree is now the refusal N.3b drives below, so the
@@ -3634,7 +3634,7 @@ expect_eq "…writing it back to the same path the consumer reads" "yes" \
 
 # ------------------------------------------- N.3b the lease wall, on the same one address space
 #
-# Spec AC-14, slice WALLS. Everything above proves that a worktree cwd and the main checkout
+# Spec AC-14, task WALLS. Everything above proves that a worktree cwd and the main checkout
 # resolve to ONE address space; this is what the gate now does with that fact. A main-thread
 # dispatch made from inside a linked worktree is refused and NAMES the main checkout — the
 # same root N.1 measured — while the agent payload three lines up passes through the same
@@ -3877,8 +3877,8 @@ expect_eq "…so the reader still calls the delivered contract MET over that row
 # an UNMET over an artifact that exists. What is lost is only the sharpness of AC-5's "yields
 # MET": through this route it yields "not judged". Reconciling C-2's contract count with S6's
 # resume (same agent id, two tool_use_ids — arguably ONE contract resumed, not two dispatched)
-# is a change to a wave-01 remediation and to S6's own keying rule, which is a cross-slice
-# decision this slice surfaces rather than takes.
+# is a change to a wave-01 remediation and to S6's own keying rule, which is a cross-task
+# decision this task surfaces rather than takes.
 expect_eq "on the LIVE roster the resumed name reads AMBIGUOUS, not MET (recorded finding)" \
   "AMBIGUOUS" "$(n_state)"
 
@@ -3921,7 +3921,7 @@ fn_code() {  # <file> <function name> -> fn_body with pure-comment lines strippe
   fn_body "$1" "$2" | grep -v '^#'
 }
 
-# THE LOOP THE COMMENT ABOVE PROMISED (wave-01 S11, A-25). Until this slice this section
+# THE LOOP THE COMMENT ABOVE PROMISED (wave-01 S11, A-25). Until this task this section
 # defined fn_code, said what the comparison would show, and made no comparison at all — an
 # agreement suite asserting nothing, which is this wave's thesis in miniature. The five the
 # comment spoke of is SEVEN as measured: every function hooks/session-poker.sh's own
@@ -4128,11 +4128,11 @@ section "Q — has_sdlc_state() has NO carrier left: the library is the only rea
 # This section compared them body for body, which is the strongest thing a suite can do
 # about a duplication it cannot remove.
 #
-# It could be removed (bionic 1.4.0, slice ADOPT). The predicate is `lib/run.sh`'s
+# It could be removed (bionic 1.4.0, task ADOPT). The predicate is `lib/run.sh`'s
 # `active_plan`, every one of the five asks for it, and §A2 above proves the asking is
 # real by mutating the library and watching all five answers move. One straggler survived
-# that slice — hooks/session-poker.sh, whose tick carried its own copy — and this section
-# NAMED it rather than excusing it. Slice SCHED deleted it (POKER/2, ratified 2026-09-03),
+# that task — hooks/session-poker.sh, whose tick carried its own copy — and this section
+# NAMED it rather than excusing it. Task SCHED deleted it (POKER/2, ratified 2026-09-03),
 # so the count this pin asserts is now ZERO. An empty answer is a weak assertion on its
 # own, which is why the two rows below it are the ones with teeth: the library defines the
 # predicate, and the tick reaches it by CALLING that function rather than by restating it.
@@ -4178,7 +4178,7 @@ section "Roots — one resolver per root, one definition each (epic-22 wave-01, 
 # The gate resolved it there. hooks/session-sweeper.sh resolved it against the REPO root and
 # reported the row missing; hooks/stop-check.sh resolved it against the observer's cwd and
 # printed `progress_state=absent` for a file that was present. Three readers of one
-# sentence, two of them wrong — and one slice then wrote a duplicate copy at the repo root
+# sentence, two of them wrong — and one task then wrote a duplicate copy at the repo root
 # to satisfy the gate, so the wrong reader taught the work to be wrong too.
 #
 # STILL OUT OF SCOPE, and named so a later reader does not mistake absence for oversight:
@@ -4463,7 +4463,7 @@ expect_eq "…no 'canonical_sdlc_version: <digit>' literal anywhere in the hook'
 section "Section P — the Patrol stamp: the poker WRITES exactly the path the gate READS"
 # ============================================================
 #
-# epic-17 wave-05 slice 4/4 (spec AC-6). A producer/consumer pair with the path spelled
+# epic-17 wave-05 task 4/4 (spec AC-6). A producer/consumer pair with the path spelled
 # once on each side — hooks/session-poker.sh builds it out of PATROL_STAMP_PREFIX/SUFFIX
 # under the pinned project root, hooks/dispatch-preflight.sh builds it out of STATE_DIR and
 # the payload session id — and no single-component suite can see them disagree. A
@@ -4839,9 +4839,9 @@ PARTY_PK_S="${W1R_PARTY_PK:-$BIONIC_HOOKS_DIR/session-poker.sh}"
 #
 # The four bodies this section used to compare — `has_sdlc_state`, `resolve_docs_root`,
 # `normalize_newlines`, and the selection block — lived in the evidence gate as the
-# designated origin and in the tick as copies. The gate's are gone (bionic 1.4.0, slice
+# designated origin and in the tick as copies. The gate's are gone (bionic 1.4.0, task
 # ADOPT): it asks `lib/run.sh` now, and §A2 proves the asking is real by mutating the
-# library and watching every party's answer move. The tick's are gone too (slice SCHED,
+# library and watching every party's answer move. The tick's are gone too (task SCHED,
 # POKER/2 ratified 2026-09-03) — so there is no longer a text COMPARISON to make here,
 # and pretending otherwise would leave a section comparing a body against nothing and
 # calling it agreement. What §S pins about the TEXT now is the absence itself, in both
@@ -6986,7 +6986,7 @@ section "BP — every shell file in the tree parses under the SYSTEM interpreter
 # ============================================================
 #
 # WHY THIS SECTION EXISTS. `tests/cross-gate-agreement.test.sh` shipped a `case` inside a
-# `$( … )` at slice S19. Its own shebang says `#!/bin/bash`, which on macOS is bash 3.2,
+# `$( … )` at task S19. Its own shebang says `#!/bin/bash`, which on macOS is bash 3.2,
 # and 3.2's parser cannot read that construct — so the file that holds every one-owner
 # agreement row this wave added was unparseable by the interpreter it names. It ran green
 # for days because this machine's PATH resolves `bash` to a Homebrew 5.x build, and the
@@ -7279,7 +7279,7 @@ ds_setup_yes() {  # <home> <args…>
 # (`ds_item_for`, `ds_party_item_for`, 22 dependency names and six labels spelled
 # out by hand) were the claim under test only while nothing in the payload held
 # the claim; now something does, and a copy of it here would be the second source
-# this whole slice exists to remove.
+# this whole task exists to remove.
 #
 # READ UNDER THE FIXTURE'S OWN ENVIRONMENT, exactly as `ds_doctor` and `ds_setup`
 # are: the table's generated half asks the dependency catalog and the CLI's own
@@ -7831,7 +7831,7 @@ expect_eq "DS.5 …while the shipped doctor leaves it empty" \
 
 # ── DS.6 mutation: a renderer that spells the route itself goes red ─────────
 #
-# The regression this slice exists to prevent, planted. Not the 1.4.4 defect —
+# The regression this task exists to prevent, planted. Not the 1.4.4 defect —
 # THAT one is now unreachable by the edit that used to cause it: striking out the
 # `core` branch of the absent arm leaves the row reading its hint from the table
 # anyway, so it still names the CLI. What can still go wrong is a renderer that
@@ -8222,7 +8222,7 @@ expect_eq "CG.2 …and run_open agrees (no current: field is not an open state)"
 # ── CG.3 the DOCUMENTED divergence: task-scale current: T<n> — pinned, not silent ──
 # run_state's OTHER `current:` shape: `T<n>` is always an open run (no numbered close — the
 # session/task-scale plans this repo also carries, including the plan governing this very
-# slice). It has no numbered step to compare against 4, so the FILL gate cannot read "T1" as
+# task). It has no numbered step to compare against 4, so the FILL gate cannot read "T1" as
 # either approved or pending and withholds by design (T6 brief; review-a C-5; review-b N-2).
 # This is pinned as a DIVERGENCE, not an agreement: the two readers answer a DIFFERENT
 # question about the same value ON PURPOSE. A change that made them agree — teaching
@@ -8490,7 +8490,7 @@ expect_eq "S13.5 …which is what awk needs for a key of this length" \
 # ============================================================
 # --- S18 — landing-gate.sh reconciles the diff against Files:, once (spec AC-22) ---
 #
-# THE OWNERSHIP-TABLE ROW THIS SLICE ADDS. "Impact of a change" (the spec's ## Design
+# THE OWNERSHIP-TABLE ROW THIS TASK ADDS. "Impact of a change" (the spec's ## Design
 # ownership table) already has one owner — `tests/lib/impact.sh` — rendered at three
 # surfaces: `suites_allowed=` on the roster row, the brief's `Files:`, and now the landing
 # verdict. This section pins that third rendering the way §S13.4/§S13.5 pin the first two:
@@ -8569,7 +8569,7 @@ expect_eq "S19.1 …and it is the framework" "1" \
 # NO EXCEPTIONS, AND NO NARROWED PATTERN. This row carried a named waiver while two
 # doctoring sites the code map's 24-site census never found — `mutate_guard` in
 # `tests/agent-context-guard.test.sh` and the inverted-guard awk in
-# `tests/landing-gate.test.sh` — sat outside the declared set of the slice that
+# `tests/landing-gate.test.sh` — sat outside the declared set of the task that
 # built `anchor`. Both are routed now, so the waiver is deleted and the expectation
 # is EMPTY: the sweep reads every suite in tests/, and a hand-rolled precondition
 # reappearing ANYWHERE turns this row red and names the file and the hit count.
@@ -8593,13 +8593,13 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 
 # --- §S19.3 POSITIVE: every doctoring site declares through `anchor` ---
 # The census: a doctoring site in docs-pins is a `DOCTORED…="$TMP/…"` assignment.
-# RE-POINTED at THIS merge (epic-22 K1 + K3 + K4 + K5 + K5.4, plan slices 15/17/18/19/21,
+# RE-POINTED at THIS merge (epic-22 K1 + K3 + K4 + K5 + K5.4, plan tasks 15/17/18/19/21,
 # landing together): K1 (Section 12) added three doctoring sites and three anchor calls,
 # 23->26/24->27; K3 (Section 6) added three more (order-reversed, Mechanisms-inherited-
 # stripped, strategic-by-rule-stripped mutants), 26->29/27->30; K5 (Section 13) added
 # three more again (DOCTORED_NO_REQ_LAYOUT, DOCTORED_NO_SENTENCE, DOCTORED_NO_ROW_CLAUSE),
 # 29->32/30->33; K4 (Section 15) added two more (DOCTORED_NO_ROWRULE,
-# DOCTORED_NO_CLOSEDBY), 32->34/33->35; K5.4 (Section 16, plan slice 21) added one more
+# DOCTORED_NO_CLOSEDBY), 32->34/33->35; K5.4 (Section 16, plan task 21) added one more
 # (DOCTORED_NO_K54_CLAUSE), 34->35/35->36 — A-31's own warning that a later card with a
 # branch pair moves this count, landing on schedule. RE-DERIVED BY DIRECT GREP over the
 # merged docs-pins.test.sh at each point, not carried forward from any pre-merge side.
@@ -8624,7 +8624,7 @@ expect_eq "S19.3 …declared by 39 anchor calls (Section 8's doctoring rewrites 
 # a pattern-based rewrite that silently matched nothing, and §Roots' arm APPENDS a heredoc,
 # which cannot no-op, then asserts the definition count moved from 1 to 2. That is a
 # stronger precondition than an anchor, and it is a row a reader can watch fail.
-# 26 at epic-22 wave-01 slice 11: §Refuse's migration mutant anchors the four BLOCKED
+# 26 at epic-22 wave-01 task 11: §Refuse's migration mutant anchors the four BLOCKED
 # lines it strips from a scratch copy of protect-main.sh before stripping them, so a
 # rename of that hook's refusal text cannot leave the "a migrated hook drops out of the
 # set" arm passing over an unmutated file.
@@ -8645,16 +8645,16 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # anchors — F1 in this suite, F2 in landing-gate — and each rewrote this total from 49
 # to 51 in BYTE-IDENTICAL text, so the merge was conflict-free and the pin was two short
 # of the tree. Measured at the merged head, not predicted: 24 + 25 + 1 + 3 = 53.
-# 65 once five epic-22 slices landed on the 53 baseline, THIS merge included: K1 (plan
-# slice 15) gave docs-pins three more anchor CALLS (Section 12's anti-vacuity mutants);
-# R6 (plan slice 3) gave this suite one more through §V; K3 (plan slice 17, Section 6)
-# gave docs-pins three more again; K5 (plan slice 19, Section 13) gave docs-pins three
-# more again; K4 (plan slice 18, Section 15) gave docs-pins two more; K5.4 (plan slice
+# 65 once five epic-22 tasks landed on the 53 baseline, THIS merge included: K1 (plan
+# task 15) gave docs-pins three more anchor CALLS (Section 12's anti-vacuity mutants);
+# R6 (plan task 3) gave this suite one more through §V; K3 (plan task 17, Section 6)
+# gave docs-pins three more again; K5 (plan task 19, Section 13) gave docs-pins three
+# more again; K4 (plan task 18, Section 15) gave docs-pins two more; K5.4 (plan task
 # 21, Section 16) gave docs-pins one more — 27 -> 36 across K1+K3+K4+K5+K5.4 (the first
 # row above, which counts anchor CALLS — one more than its 35 doctoring SITES, a
 # pre-existing +1 offset Section 8's own comment names: one doctoring site there is
 # rewritten by two anchored sentences). N1 retired §R and the one anchor its awk mutant
-# declared (down from 26). E1 (plan slice 11) gave this suite one BACK through §Refuse,
+# declared (down from 26). E1 (plan task 11) gave this suite one BACK through §Refuse,
 # whose migration mutant anchors the four BLOCKED lines it strips from a scratch
 # protect-main.sh before stripping them — so this suite is 26 again (the row above this
 # one), for a different reason than it was before N1.
@@ -8669,7 +8669,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # there without a precondition, and the census's per-file grep would count 1 whatever
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
-# fifth term to it is a change to a section slice 11 does not own.
+# fifth term to it is a change to a section task 11 does not own.
 expect_eq "S19.3 …69 anchor call sites across the four doctoring suites, all told" "69" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
@@ -8854,7 +8854,7 @@ expect_eq "S17c …and it does grep the marker, through the constant (the zero i
 
 
 # ============================================================
-section "B — no backtick pair hides inside a double-quoted assertion name (AC-B.1/AC-B.2, epic-22 slice 7)"
+section "B — no backtick pair hides inside a double-quoted assertion name (AC-B.1/AC-B.2, epic-22 task 7)"
 # ============================================================
 #
 # THE DEFECT CLASS (seed ideas/fixit-residue-names.md item 3, critic issue 3 / A-S18a-6).
@@ -8866,7 +8866,7 @@ section "B — no backtick pair hides inside a double-quoted assertion name (AC-
 # error to stderr. This landed three times in this wave alone and once executed `uv tool
 # install --force omnigent` for real (critic issue 3) — a machine-mutating class of test
 # defect, not a cosmetic one. The instance live on main is tests/stop-check.test.sh:298,
-# fixed by 8727375 (this slice's cherry-pick, landed in this same tree).
+# fixed by 8727375 (this task's cherry-pick, landed in this same tree).
 #
 # THE SCAN. A per-line state machine, not a bare regex: it tracks single/double-quote state,
 # stops at a `#` outside any quote (comments never execute), and skips heredoc BODY lines
@@ -9026,9 +9026,9 @@ section "Refuse — no hook prints a refusal directly; refuse.sh is the only ren
 # ============================================================
 #
 # THE CRITERION. AC-E1.2: "no hook prints a refusal directly; all go through
-# refuse.sh", fails-when "a hook prints directly". The renderer landed in slice 11;
-# the 21 hooks are migrated in slice 13. So the wall this section builds cannot be
-# "zero hooks print directly" yet — it would be red for the whole of slice 11 and 12
+# refuse.sh", fails-when "a hook prints directly". The renderer landed in task 11;
+# the 21 hooks are migrated in task 13. So the wall this section builds cannot be
+# "zero hooks print directly" yet — it would be red for the whole of task 11 and 12
 # and would be turned off rather than fixed.
 #
 # THE SHAPE INSTEAD: A SHRINKING ALLOWLIST, ASSERTED BY EQUALITY. The roster below is
@@ -9038,12 +9038,12 @@ section "Refuse — no hook prints a refusal directly; refuse.sh is the only ren
 #   - a NEW hook that prints its own refusal makes the measured set bigger and this
 #     section goes red — the criterion's fails-when, held from the day the renderer
 #     exists rather than from the day the last hook is migrated;
-#   - a hook slice 13 MIGRATES makes the measured set smaller and this section also
+#   - a hook task 13 MIGRATES makes the measured set smaller and this section also
 #     goes red, until its name is struck from the roster below. That is the point: the
 #     roster shrinks by deliberate edit, one line per migrated hook, and when it is
 #     empty the equality is the criterion itself with nothing left to except.
 #
-# An allowlist that only bounded the set from above would let slice 13 finish without
+# An allowlist that only bounded the set from above would let task 13 finish without
 # anyone editing this file, and the exception would outlive the thing it excepted.
 #
 # WHAT COUNTS AS PRINTING A REFUSAL DIRECTLY. A non-comment line carrying the string
@@ -9052,7 +9052,7 @@ section "Refuse — no hook prints a refusal directly; refuse.sh is the only ren
 # EXPLAINS its wall is not counted as one; a heredoc body is counted, because a
 # heredoc body is printed. The 21 shared `loader_fail_closed` walls are inside this
 # count deliberately: they are 21 copies of one refusal, and they are the largest
-# single block of text slice 13 removes.
+# single block of text task 13 removes.
 
 REFUSE_TREE="$(cd "$BIONIC_HOOKS_DIR/.." && pwd -P)"
 REFUSE_LIB_DIR="$REFUSE_TREE/payload/scripts/lib"
@@ -9076,7 +9076,7 @@ refuse_direct_files() {
   done | sort
 }
 
-# THE ROSTER — the five CLI COMMANDS, and nothing else. Slice 13 migrated every WALL
+# THE ROSTER — the five CLI COMMANDS, and nothing else. Task 13 migrated every WALL
 # in hooks/ to scripts/lib/refuse.sh; what remains on this list is exempt by RULING D-5
 # (record/wave-01-plugin-only/s12-refusal-wording.md), and the reason is a boundary and
 # not a carve-out:
@@ -9131,7 +9131,7 @@ expect_eq "Refuse every file still printing its own refusal is one of the five C
   "" "$REFUSE_STRAY"
 expect_eq "Refuse …and no WALL is among them: the hooks-that-are-walls count is zero" "0" \
   "$(printf '%s\n' "$REFUSE_FOUND" | /usr/bin/grep -cE '^(agent-context-guard|background-suite-guard|canonical-sdlc-evidence-gate|canonical-sdlc-governing-skill|context-spend|dispatch-preflight|engage|execution-recorder|farm-out-reminder|landing-gate|patrol-duties-gate|patrol-revive|protect-database|protect-main|session-start|session-sweeper|stop-guard)\.sh$' || true)"
-expect_eq "Refuse …and the set is what slice 13 left: preflight-probe.sh alone still spells it" \
+expect_eq "Refuse …and the set is what task 13 left: preflight-probe.sh alone still spells it" \
   "preflight-probe.sh" "$(printf '%s\n' "$REFUSE_FOUND" | tr -d ' ')"
 
 # --- (c) THE SCANNER FINDS A PLANTED PRINT. Without this the equality above could be
@@ -9154,7 +9154,7 @@ expect_ne "Refuse MUTANT …so the subset check above would go RED on a new dire
 
 # A comment is not a print. The planted file's own first line says BLOCKED in a
 # comment; a scanner that counted it would flag every hook that merely documents its
-# wall, and the roster would stop shrinking when slice 13 removes the code but keeps
+# wall, and the roster would stop shrinking when task 13 removes the code but keeps
 # the explanation.
 cat > "$REFUSE_MUT/aaa-comment-only.sh" <<'COMMENT_EOF'
 #!/bin/bash
@@ -9168,7 +9168,7 @@ expect_absent "Refuse MUTANT a hook whose only BLOCKED is in a comment is NOT fl
 # --- (d) THE OTHER DIRECTION: a MIGRATED hook shrinks the set and the equality goes
 # red until the roster is edited. This is what makes the allowlist shrink rather than
 # rot. protect-main.sh is the stand-in — the scratch copy has its refusal prints
-# removed, the way slice 13 will remove them for real. ---
+# removed, the way task 13 will remove them for real. ---
 REFUSE_MIG="$SANDBOX/refuse-mig-hooks"
 mkdir -p "$REFUSE_MIG"
 cp "$BIONIC_HOOKS_DIR"/*.sh "$REFUSE_MIG/"
@@ -9195,7 +9195,7 @@ expect_ne "Refuse MUTANT …so the measured set moves when a file stops printing
 # arity — a wall that starts refusing everything, or a script that starts refusing
 # nothing, depending which order the sourcing landed in. Invisible at the call site.
 #
-# Slice 13 renamed the private one to `_wt_refuse` (ruling D-6). The count is ONE now,
+# Task 13 renamed the private one to `_wt_refuse` (ruling D-6). The count is ONE now,
 # and a second definition anywhere turns this red.
 expect_eq "Refuse refuse() is defined exactly once in the tree: the renderer" \
   "1" "$(/usr/bin/grep -lE '^refuse\(\)' "$REFUSE_TREE/hooks"/*.sh "$(dirname "$REFUSE_LIB_DIR")"/*.sh "$REFUSE_LIB_DIR"/*.sh 2>/dev/null | sort -u | wc -l | tr -d ' ')"

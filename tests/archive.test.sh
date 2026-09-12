@@ -224,7 +224,7 @@ section "3f — an unwritable archive root: the refusal is the ONLY line"
 # The refusal itself was always correct and every source tree was always left in place;
 # what leaked was a second line, in a project whose whole refusal contract (E1, ADR-002)
 # is that a wall says one thing once. `archive_run` is a COMMAND rather than a wall
-# (slice-12 ruling D-5, so it keeps its own voice and its own exit codes) but the
+# (task-12 ruling D-5, so it keeps its own voice and its own exit codes) but the
 # one-line property is the same property.
 #
 # A READ-ONLY PARENT, not a missing one: `mkdir -p` on a path it cannot create is the

@@ -1,7 +1,7 @@
 #!/bin/bash
 # SESSION-START — what the previous conversation left on this project, and nothing
 # else (bionic 1.4.0, spec AC-1; AC-4's "the SessionStart block runs the report";
-# AC-11's legacy-symlink listing; plan slice SSTART).
+# AC-11's legacy-symlink listing; plan task SSTART).
 #
 # WHAT `/clear` ACTUALLY DOES, measured (probe record, .bionic/docs/record/
 # wave-1.4.0-probe.md). The process does not restart: same pid, same
@@ -372,7 +372,7 @@ done
 # A name is CLOSED when the landing gate journalled a `landing-swept/v1|…|state=MET`
 # marker for it, or when the sweeper's ledger carries an `ack` for it — the same
 # two discharges `adopt_fold` in hooks/session-poker.sh applies, mirrored here
-# rather than shelled out to, because slice POKER owns that file and this hook must
+# rather than shelled out to, because task POKER owns that file and this hook must
 # read the same disk with or without its `--report-only` verb.
 open_rows() {  # <roster file> <ack ledger file|""> -> a count
   awk -v ackfile="$2" '

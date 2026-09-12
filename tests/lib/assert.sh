@@ -110,7 +110,7 @@
 #   expect_status compares two exit statuses as strings, expected first.
 #
 # THE OLD SPELLINGS — `old -> canonical`. No aliases are defined here: the
-# migration slices rename the call sites. S5-S8 quote this table.
+# migration tasks rename the call sites. S5-S8 quote this table.
 #
 #   expect_equal -> expect_eq — pure rename (stop-check, 4 call sites; its
 #     failing arm also printed a diff, which is detail text, not semantics).
@@ -651,7 +651,7 @@ _tf_scan() {
 # `t_ok`/`t_no` and its counters `P`/`F`, printing its own tally, passed the
 # wall untouched — the exact state AC-12 exists to make impossible, while §13's
 # `0 refused` read as proof it already was. That every suite adopted was once only
-# a measurement (the migration slices' one-time greps), not a mechanism.
+# a measurement (the migration tasks' one-time greps), not a mechanism.
 # It is a mechanism now.
 
 # _tf_owned_names — the names this framework owns. READ FROM THIS FILE at call

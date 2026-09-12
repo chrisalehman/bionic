@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for hooks/landing-gate.sh — THE LANDING SWEEP (epic-16 wave-03, slice T4c/T4d).
+# Tests for hooks/landing-gate.sh — THE LANDING SWEEP (epic-16 wave-03, task T4c/T4d).
 #
 # Stop. The gate used to run on SubagentStop and judge the ONE agent that stopped. That
 # event is structurally invisible to a skill-frontmatter registration (T4b §3: skill hooks
@@ -24,7 +24,7 @@
 #
 # THE SWEEPER IS REAL IN EVERY CASE THAT HAS ONE. The gate consumes
 # `session-sweeper.sh verdict <name>` and never re-implements its predicate, so a stubbed
-# verdict would leave exactly the seam this slice exists to close (rule: seam-blindness —
+# verdict would leave exactly the seam this task exists to close (rule: seam-blindness —
 # a seam substituting the value-under-test leaves the production path unverified). The gate
 # resolves the sweeper as its own SIBLING, which is what bootstrap's `hooks/*.sh` install
 # produces, so Section 6 gets its absent/erroring sweeper by running a COPY of the gate out
@@ -76,7 +76,7 @@ expect_lt() { if [ "$2" -lt "$3" ] 2>/dev/null; then ok "$1"; else no "$1" "expe
 #   * agent ids — the transcript form the platform mints for an Agent dispatch
 #     (`a8e3d9b517abc6bf7`, §4), which is the SAME string `tool_response.agentId` returns and
 #     the SAME string `background_tasks[].id` carries. That triple identity is the join this
-#     slice is built on, so the fixtures spell one form and never three.
+#     task is built on, so the fixtures spell one form and never three.
 #   * roster rows — the roster-state/v1 field set and ORDER written by
 #     hooks/dispatch-preflight.sh (the `ROW=` assignment), copied from
 #     tests/session-sweeper.test.sh's `mkrow`. This suite's subject reads the roster for the
@@ -313,7 +313,7 @@ deliver() {  # <repo> <relative path> — a real artifact, written now (after la
 # A REAL WORKTREE, REAL COMMITS, REAL git diff/merge-base — every other fixture in this file
 # is a synthesized roster line because the gate's OWN subject (the sweep, the landing verdict)
 # never touches git. This one does: the reconciliation IS a git operation, and a fixture that
-# faked its answer would leave exactly the production path this slice adds unverified (rule:
+# faked its answer would leave exactly the production path this task adds unverified (rule:
 # seam-blindness — a seam substituting the value under test proves nothing about it).
 export GIT_CONFIG_GLOBAL=/dev/null
 export GIT_CONFIG_SYSTEM=/dev/null
@@ -377,7 +377,7 @@ run_gate() {  # <gate path> <payload json>
   local gate="$1" json="$2"
   local _sid; _sid=$(printf '%s' "$json" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   printf '%s' "$json" > "$SANDBOX/payload.json"
-  # THE KNOB IS A DRIVER SETTING HERE, not a second drive (slice 13, ruling D-1). This
+  # THE KNOB IS A DRIVER SETTING HERE, not a second drive (task 13, ruling D-1). This
   # gate BLOCKS ONCE: it records that it refused and passes on the next stop, so a second
   # invocation to read `detail` comes back empty and every arm asserting the detail would
   # be asserting over nothing. Measured, not assumed. So the one drive carries
@@ -401,7 +401,7 @@ run_gate() {  # <gate path> <payload json>
   fi
   OUT_STDOUT="$(cat "$SANDBOX/gate.out")"
   OUT_STDERR="$(cat "$SANDBOX/gate.err")"
-  # THE SAME CALL AGAIN, WITH THE KNOB, ONLY WHEN IT REFUSED (slice 13, ruling D-1).
+  # THE SAME CALL AGAIN, WITH THE KNOB, ONLY WHEN IT REFUSED (task 13, ruling D-1).
   # This gate's refusal is now ONE line — `bionic: stop refused — <fact> (<fix>)` — and
   # the per-row paragraphs this suite reads for names, files and derived suites are
   # `detail`, which reaches a reader only under BIONIC_WALL_VERBOSE=1. `$OUT_STDERR` is
@@ -1275,7 +1275,7 @@ expect_contains "16d: …naming the offending file" "undeclared/x.sh" "$OUT_VSTD
 # every join in this file already takes. The deliverable side still verdicts and marks the
 # row, proving the row really was processed rather than skipped for an unrelated reason.
 R16E="$(make_git_wave_repo r16e)"
-add_row "$R16E" name=ghost-slice agent_id="$AID_A" deliverable=.bionic/docs/record/s16e.md \
+add_row "$R16E" name=ghost-task agent_id="$AID_A" deliverable=.bionic/docs/record/s16e.md \
   files="declared/" launched_at="$(iso_ago 600)"
 deliver "$R16E" .bionic/docs/record/s16e.md
 run_gate "$GATE" "$(stop_payload "$R16E" "$SID" false)"

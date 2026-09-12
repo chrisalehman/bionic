@@ -624,7 +624,7 @@ section "§P — live_agents_status: the status of a name, and idle is not runni
 # `TaskStop {"task_id":"s6-stop-resolution"}` at 2026-09-05T03:07:46.215Z answered
 # `Successfully stopped task: tql0f7z5e` at 03:07:46.928Z — between the IDLE answer and
 # the ABSENT one. The window from s6's delivery (~02:5x) to that stop is the defect this
-# slice closes: a finished agent, still listed, still counted.
+# task closes: a finished agent, still listed, still counted.
 
 BODY_S6_RUNNING="$SELFLINE
 

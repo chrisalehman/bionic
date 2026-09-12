@@ -18,7 +18,7 @@
 # record a later stop spends — so "I looked" becomes a fact rather than a memory
 # (design/orchestrator-subagent-coordination.md §4).
 #
-# THE MACHINE LINE IS THE ONLY THING THE RECORDER READS (slice 4/4). It is
+# THE MACHINE LINE IS THE ONLY THING THE RECORDER READS (task 4/4). It is
 # printed on the SUCCESS path and nowhere else: a usage error, an unresolved
 # target and an ambiguous target all exit non-zero having printed no such line,
 # so a run that showed the operator no evidence tier leaves nothing behind that
@@ -136,7 +136,7 @@ file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || ech
 # (checklist A6). DELIBERATELY DUPLICATED from hooks/execution-recorder.sh, which
 # reads the session roster with the identical function — the two copies are held
 # together by tests/cross-gate-agreement.test.sh. This copy reads the roster row
-# for classification and contract state (slice 4/5); it never writes one.
+# for classification and contract state (task 4/5); it never writes one.
 line_field() {  # <line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }
@@ -348,7 +348,7 @@ fi
 # ---------- resolving a contracted path (epic-17 W6 S15, A-6.6 (c)) ----------
 #
 # WHAT WAS WRONG. The paths this command stats — the deliverables, and the `--progress`
-# artifact — arrive as brief prose, and the spelling every slice brief in this epic uses is
+# artifact — arrive as brief prose, and the spelling every task brief in this epic uses is
 # `record/epic-NN-wM/x.md`, because that is the form the Step-5 contract and
 # `canonical-sdlc-evidence-gate.sh` publish for an artifact under the docs root. This
 # command resolved nothing at all: a relative path was stat'd against whatever directory
@@ -393,7 +393,7 @@ OWN_SESSION_ID=$(session_id "" 2>/dev/null) || OWN_SESSION_ID=""
 # the same file. The harness names it `<projects>/<slug>/<session-id>.jsonl`, so the slugs
 # above are tried first and a keyed walk of the project directories covers the one case that
 # breaks them: a worktree cwd files its session under a different slug from the repo it is
-# reading. Exactly the same two-step `adopted_subagent_dirs` used before this slice deleted it.
+# reading. Exactly the same two-step `adopted_subagent_dirs` used before this task deleted it.
 own_transcript() {  # -> the transcript file of THIS session, or nothing
   local slug d
   [ -n "$OWN_SESSION_ID" ] || return 1
@@ -573,7 +573,7 @@ AGENT_MODEL=$(jq -r '.model // "—"' "$META" 2>/dev/null)
 AGENT_DESC=$(jq -r '.description // "—"' "$META" 2>/dev/null)
 [ -n "$AGENT_DESC" ] || AGENT_DESC="—"
 
-# ---------- classification (slice 4/5, AC-6; re-keyed on the live set at S6) ----------
+# ---------- classification (task 4/5, AC-6; re-keyed on the live set at S6) ----------
 #
 # WHAT THIS USED TO ASK, and why it no longer can. It asked whether the agent's metadata was
 # filed under this session's own `subagents/` directory, and answered FOREIGN or DEAD HISTORY
@@ -600,7 +600,7 @@ fi
 # ---------- contract state: roster-sourced when OURS, CLI always overrides ----------
 #
 # "Deliverable/progress display logic itself is unchanged — only the SOURCE of
-# the paths widens" (slice 4/5 brief). An explicit CLI value always wins; when it
+# the paths widens" (task 4/5 brief). An explicit CLI value always wins; when it
 # differs from what the roster recorded, that is printed, never judged (§4: this
 # command decides nothing).
 ROSTER_DELIVERABLE=""; ROSTER_PROGRESS=""; ROSTER_CLAIMS=""; ROSTER_CADENCE=""
@@ -817,7 +817,7 @@ fi
 echo ""
 echo "This command decides nothing. It prints evidence; the judgment is yours."
 
-# ---------- the machine line (slice 4/4 — the recorder's ONLY input) ----------
+# ---------- the machine line (task 4/4 — the recorder's ONLY input) ----------
 #
 # Last line of a successful run, and the only line any machine reads. Three
 # properties earn their place:

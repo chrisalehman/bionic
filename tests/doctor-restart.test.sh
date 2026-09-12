@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/doctor-restart.test.sh — doctor.sh's "restart needed" row (bionic 1.4.0
-# fold-in, spec AC-37, plan slice DOCTOR-RESTART; ratified 2026-09-03 "Add
+# fold-in, spec AC-37, plan task DOCTOR-RESTART; ratified 2026-09-03 "Add
 # them. Folding them in is cheap and the case is good.", the dead-wall
 # incident recorded in the plan's Assumptions as "SESSION b1a850c1 FINDING
 # (2026-09-03T02:06Z)").

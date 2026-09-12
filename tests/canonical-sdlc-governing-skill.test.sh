@@ -90,7 +90,7 @@ unengage() { rm -f "$1/.bionic/tmp/engaged-$GS_SID.state"; }
 # Runs hook with a synthetic Write payload for $FILE with $CONTENT.
 HOOK_VSTDERR=""
 
-# AC-E1.3, SWEPT AT THE DRIVER (slice 13). Every refusal this wall makes is checked for
+# AC-E1.3, SWEPT AT THE DRIVER (task 13). Every refusal this wall makes is checked for
 # the criterion's shape as it happens, so no migrated site can be left without an eval
 # and no arm has to be written twice. The counters are read in the section at the end.
 GS_E1_SEEN=0; GS_E1_BAD_SHAPE=""; GS_E1_BAD_LINES=""; GS_E1_BAD_COLS=""
@@ -132,7 +132,7 @@ run_write() {
   fi
   HOOK_STDERR=$(cat "$tmp_err")
   gs_e1_sweep
-  # THE SAME WRITE AGAIN, WITH THE KNOB (slice 13, ruling D-1). This wall's refusal is
+  # THE SAME WRITE AGAIN, WITH THE KNOB (task 13, ruling D-1). This wall's refusal is
   # now ONE line — `bionic: write refused — <fact> (<fix>)` — and the artifact name, the
   # path and the Fix block this suite reads are `detail`, which reaches a reader only
   # under BIONIC_WALL_VERBOSE=1. `$HOOK_STDERR` is the line; `$HOOK_VSTDERR` is the line
@@ -163,7 +163,7 @@ run_edit() {
   fi
   HOOK_STDERR=$(cat "$tmp_err")
   gs_e1_sweep
-  # THE SAME WRITE AGAIN, WITH THE KNOB (slice 13, ruling D-1). This wall's refusal is
+  # THE SAME WRITE AGAIN, WITH THE KNOB (task 13, ruling D-1). This wall's refusal is
   # now ONE line — `bionic: write refused — <fact> (<fix>)` — and the artifact name, the
   # path and the Fix block this suite reads are `detail`, which reaches a reader only
   # under BIONIC_WALL_VERBOSE=1. `$HOOK_STDERR` is the line; `$HOOK_VSTDERR` is the line
@@ -843,8 +843,8 @@ run_write "$ac10_nb/.bionic/docs/plans/epic-01-demo/never-existed.plan.md" "$MIS
 # A worktree-local .bionic/ is NOT the project's tree: resolution answers with
 # main, so main's docs root does not contain this path.
 #
-# Slice 1 left this as an exit-0 pass-through and flagged it as the exact
-# misplacement class slice 3 was to close. It is now a BLOCK naming main's
+# Task 1 left this as an exit-0 pass-through and flagged it as the exact
+# misplacement class task 3 was to close. It is now a BLOCK naming main's
 # docs root — every worktree of one repo shares one tree (AC-10), so an
 # artifact written into a worktree-local .bionic/docs/ belongs in the parent
 # repo's tree and the hook says where.
@@ -881,7 +881,7 @@ run_write_oldgit() {  # like run_write, with the old-git shim first on PATH and 
     HOOK_EXIT=$?
   fi
   HOOK_STDERR=$(cat "$tmp_err")
-  # THE SAME CALL AGAIN, WITH THE KNOB (slice 13, ruling D-1): the values this suite
+  # THE SAME CALL AGAIN, WITH THE KNOB (task 13, ruling D-1): the values this suite
   # reads off the refusal are `detail` now. Guarded on the refusal and `|| true` because
   # the suite runs under `set -e` and the hook exits 2 when it refuses.
   HOOK_VSTDERR=""
@@ -907,7 +907,7 @@ assert_contains "ac10_e2e_oldgit names the artifact's own repo, not the session 
 # AC-11 / AC-12: tree creation on first lifecycle use
 # ============================================================
 #
-# Slice 2 (F4): creation hangs off the SAME frontmatter this hook already
+# Task 2 (F4): creation hangs off the SAME frontmatter this hook already
 # parses — a write carrying `governing-skill: canonical-sdlc` — not a
 # SessionStart hook, which would create .bionic/ in every repo the user
 # opens a session in. "First lifecycle use" is the first canonical-sdlc
@@ -961,7 +961,7 @@ ac11_p2=$(make_bare_project)
 run_write "$ac11_p2/README.md" "just some notes"
 assert_eq "ac11_c4a write allowed (not an enforced artifact)" 0 "$HOOK_EXIT"
 
-# A7 REGRESSION. Slice 2 gated creation on `governing-skill: canonical-sdlc` —
+# A7 REGRESSION. Task 2 gated creation on `governing-skill: canonical-sdlc` —
 # the artifact-AUTHOR field — and this case asserted the inverse of what is
 # below: that a plan authored by another skill created NO tree.
 #
@@ -1090,7 +1090,7 @@ assert_eq "ac12_c4 ...and says nothing on stderr" "" "$HOOK_STDERR"
 # The fail-open this closes: an artifact that DECLARES itself a canonical-sdlc
 # artifact but lives outside the project's computed docs root used to fall out
 # of the `case "$FILE_PATH"` scope check and exit 0 — written, ungated, in the
-# wrong place. Slice 1 replaced the ancestor walk with resolve_project_root(),
+# wrong place. Task 1 replaced the ancestor walk with resolve_project_root(),
 # which always answers, so the historical `exit 0`-on-no-root is unreachable;
 # the surviving fail-open is the scope check itself.
 #
@@ -1101,7 +1101,7 @@ assert_eq "ac12_c4 ...and says nothing on stderr" "" "$HOOK_STDERR"
 #
 # "Outside the docs root" is the whole docs root, not just the four enforced
 # subdirectories. `.bionic/docs/spikes/` and `.bionic/docs/record/` hold real
-# files carrying canonical-sdlc frontmatter (slice 6 put them there); they are
+# files carrying canonical-sdlc frontmatter (task 6 put them there); they are
 # placed, and c8 pins that they stay unblocked.
 echo
 section "AC-13: misplacement blocks; absence never does"
@@ -1198,7 +1198,7 @@ run_write "$ac13_cfg/custom/docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_F
 assert_eq "ac13_c9 configured location passes" 0 "$HOOK_EXIT"
 
 echo "AC-13 c10: a project reached through a SYMLINK is the same project"
-# Slice 1 flagged this and handed it here: `git` answers with the PHYSICAL
+# Task 1 flagged this and handed it here: `git` answers with the PHYSICAL
 # root while FILE_PATH arrives as whatever path the session used. Under the
 # old pass-through that mismatch was a silent bypass — artifacts quietly
 # stopped being gated. Under AC-13's fail-closed rule the same mismatch would
@@ -1229,12 +1229,12 @@ assert_contains "ac13_c10 misplaced-via-symlink names the real docs root" \
 #   (a) no `context.md`-shaped session-state file exists under the new layout;
 #   (b) no shipped surface instructs anything to write one.
 #
-# `.bionic/docs/record/context.md` is EXEMPT: slice 6 relocated the old file
+# `.bionic/docs/record/context.md` is EXEMPT: task 6 relocated the old file
 # there as an operational record of what happened, not as live state. The
 # whole point of the AC is that nothing reads or writes it as session state.
 #
 # This lives in the governing-skill suite because AC-13 and AC-14 are one
-# slice and this suite is the slice's surface; the assertion is about the
+# task and this suite is the task's surface; the assertion is about the
 # repo's shipped text, not about this hook. Homed here rather than in a new
 # suite so `tests/run.sh`'s suite count is unchanged.
 echo
@@ -1844,7 +1844,7 @@ assert_contains "ac14_phantom names the pinned root (the real workspace tree)" \
   "Pinned root: $ac14_ws/.bionic" "$HOOK_VSTDERR"
 
 # ============================================ WALLS: parallel-budget + worktree cwd
-# (spec AC-14 and AC-26; plan slice WALLS.)
+# (spec AC-14 and AC-26; plan task WALLS.)
 #
 # TWO FACTS, one about the header this hook validates and one about where the write
 # was made from.
@@ -1883,7 +1883,7 @@ run_write_from() {
     HOOK_EXIT=$?
   fi
   HOOK_STDERR=$(cat "$tmp_err")
-  # THE SAME CALL AGAIN, WITH THE KNOB (slice 13, ruling D-1): the values this suite
+  # THE SAME CALL AGAIN, WITH THE KNOB (task 13, ruling D-1): the values this suite
   # reads off the refusal are `detail` now. Guarded on the refusal and `|| true` because
   # the suite runs under `set -e` and the hook exits 2 when it refuses.
   HOOK_VSTDERR=""
@@ -2094,7 +2094,7 @@ run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id]
   fi
   HOOK_STDOUT=$(cat "$tmp_out")
   HOOK_STDERR=$(cat "$tmp_err")
-  # THE SAME CALL AGAIN, WITH THE KNOB (slice 13, ruling D-1): the values this suite
+  # THE SAME CALL AGAIN, WITH THE KNOB (task 13, ruling D-1): the values this suite
   # reads off the refusal are `detail` now. Guarded on the refusal and `|| true` because
   # the suite runs under `set -e` and the hook exits 2 when it refuses.
   HOOK_VSTDERR=""
@@ -2476,7 +2476,7 @@ user settings at Step 0, the contract at Step 3, and the premise before the buil
 # .bionic/docs/specs/epic-22-plugin-only/wave-01-plugin-only.spec.md (gitignored,
 # machine-local, same reason k5d's copy is literal). The real file's design wall is
 # satisfied by an in-place '## Design' section (not reproduced here — this fixture is
-# about the Goal arm, not the design wall, which slices 16/17/18 already cover in depth);
+# about the Goal arm, not the design wall, which tasks 16/17/18 already cover in depth);
 # a waiver substitutes, the same pattern SPEC_DESIGN_WAIVER already uses above for
 # fixtures that are not about design.
 K54_SPEC_EXEMPLAR='---

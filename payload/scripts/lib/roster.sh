@@ -59,7 +59,7 @@
 # instrument may be: the files its brief declared, the suite basenames it may run, and
 # whether that set was DERIVED from the tree by the configured impact command or DECLARED
 # by the brief. They are present-if-passed rather than always-emitted so that the captured
-# rows in `tests/fixtures/roster-row.captured` — real rows written before this slice
+# rows in `tests/fixtures/roster-row.captured` — real rows written before this task
 # existed — still reproduce byte for byte through this writer. A row from before the wall
 # carries none of the three, and that absence is a THIRD state the readers partition on:
 # an empty `suites_allowed=` is "no budget was stated", the literal token `none` is "this

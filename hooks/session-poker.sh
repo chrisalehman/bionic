@@ -815,7 +815,7 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
 #
 # WHAT THE TICK COULD NOT SEE UNTIL NOW. `open == 0` is not "this run is finished" — it is
 # "nothing is dispatched at this instant", which is equally the gap between two batches of a
-# live wave: every writer of one slice landed, the next slice not yet briefed. DISARM is
+# live wave: every writer of one task landed, the next task not yet briefed. DISARM is
 # terminal by doctrine (skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the
 # Patrol"), so taking it in that gap ended the supervision of a run with days of work left,
 # silently, and the next stretch of the wave ran unwatched. That is measured on this repo's
@@ -834,7 +834,7 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
 # `has_sdlc_state()`, `resolve_docs_root()`, `normalize_newlines()`'s selection loop inside
 # `newest_sdlc_plan()` — bounded at depth 2 and fence-aware, while the library walked 3.
 # tests/cross-gate-agreement.test.sh §S.3d pinned that disagreement rather than papering over
-# it, and slice SCHED closed it by moving the library to depth 2 and deleting the copy. Two
+# it, and task SCHED closed it by moving the library to depth 2 and deleting the copy. Two
 # plan readers with different bounds is the exact drift this wave exists to end.
 #
 # WHAT THE COPY WAS PROTECTING IS UNCHANGED, because the library carries it: the candidate
@@ -873,7 +873,7 @@ normalize_newlines() {
 # ---------------------------------------------------------------- whose run is this?
 #
 # THE TICK HAS TWO PLAN READERS — the run-state read below and the FILL scheduler's budget
-# and slice table — and before wave-session-bound-run both asked the ROOT: `active_plan`, the
+# and task table — and before wave-session-bound-run both asked the ROOT: `active_plan`, the
 # newest plan carrying an unfenced `## SDLC State`. A root with two runs in it has one newest
 # plan and two sessions, so one of them was always reading the other's run: the session whose
 # run was mid-flight DISARMed off the neighbour's close-out, and the session whose run had
@@ -1053,7 +1053,7 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
 #   HOLD       free memory or load past the warning line -> no fills this tick, with the
 #              measurement printed beside the verdict (a HOLD with no number is
 #              indistinguishable from a bug).
-#   FILL       otherwise -> the ready slices, up to the gap between the RUNG and the rows
+#   FILL       otherwise -> the ready tasks, up to the gap between the RUNG and the rows
 #              already open on this session's roster.
 #
 # AND ONE REPORT, ON EVERY TICK: `rung=<n>/<ceiling> writers=<w> test_jobs=<j>`. The rung is
@@ -1087,7 +1087,7 @@ space_field() {  # <record> <key> -> value on stdout, empty if absent
 #
 # THE LEADING FRONTMATTER BLOCK ONLY, byte-for-byte the read hooks/dispatch-preflight.sh's
 # budget arm takes: a `parallel-budget:` inside the plan BODY is prose — this wave's own
-# plan quotes the header in a slice description — and a reader that took a quotation for
+# plan quotes the header in a task description — and a reader that took a quotation for
 # configuration would fill against a number nobody set.
 plan_budget_line() {  # <plan> -> the value after `parallel-budget:`, or empty
   awk '
@@ -1137,9 +1137,9 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 }
 
 # ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
-# duties gate (hooks/patrol-duties-gate.sh) refuses the turn until every named slice is
+# duties gate (hooks/patrol-duties-gate.sh) refuses the turn until every named task is
 # either dispatched or explicitly declined — and dispatching into a plan that has not
-# reached Step 4 sends a writer against a slice table nobody has ratified: Steps 0-3 are
+# reached Step 4 sends a writer against a task table nobody has ratified: Steps 0-3 are
 # research/spec/plan/REVIEW, and `current:` only reaches 4 once Step 3's approval is given
 # (SKILL.md §Steps). Observed 2026-09-05T17:54Z: the tick printed `FILL S1 S2 S3 S4 S12 S14
 # S15 S16` against the wave-01 plan sitting at `current: 3`.
@@ -1614,7 +1614,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   fi
   # EVERY FIELD THROUGH `clean()`, `session=` INCLUDED (Step-6 security review S-4). It was
   # the one interpolation of the thirteen that took its value raw, which is character for
-  # character the defect this wave fixed on the other row writer one slice earlier
+  # character the defect this wave fixed on the other row writer one task earlier
   # (hooks/dispatch-preflight.sh: "a value carrying a `|` or a newline forges a segment …
   # the asymmetry between the two writers was itself the defect"). Every by-key reader in
   # the fleet takes the FIRST match, so a forged `name=` ahead of the real one wins outright.
@@ -2966,7 +2966,7 @@ EOF
     # this Patrol's arming (R-13: an older one is the previous run's close-out, still newest
     # while the new run's plan does not exist yet). "No open row" alone was the whole
     # predicate until 1.3.2, and it is also exactly what a live wave looks like between two
-    # batches: every writer of a slice landed, the next not yet briefed. The tick ended the
+    # batches: every writer of a task landed, the next not yet briefed. The tick ended the
     # Patrol there, terminally, and the rest of the wave ran unsupervised (epic-20 W1
     # dogfood, idea §B-4; R-4, AC-13/AC-14). The first conjunct still generalizes the spec's
     # literal "disarmed on empty roster" to a roster whose every row is MET/WAIVED/acked (S2
@@ -3071,9 +3071,9 @@ EOF
     # the same missing line. A budget is a ceiling a run opts into.
     #
     # THE SAME RUN THE DECISION ABOVE WAS TAKEN ON. `resolve_run` answers once per tick, so
-    # a session bound to its own plan fills from its own slice table and quotes its own
+    # a session bound to its own plan fills from its own task table and quotes its own
     # ceiling — a tick that stood its ground correctly and then filled the neighbour's
-    # slices would be worse than either failure alone (AC-1).
+    # tasks would be worse than either failure alone (AC-1).
     sched_budget_read "$REPO_REAL" "$SESSION_ID"
 
     if [ "$SCHED_STATE" = emergency ]; then
@@ -3104,7 +3104,7 @@ EOF
       [ "$SCHED_STATE" = hold ] && \
         say "HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD} — no fills"
     else
-      # ── FILL. gap = the RUNG − RUNNING, ready = pending slices whose deps all landed.
+      # ── FILL. gap = the RUNG − RUNNING, ready = pending tasks whose deps all landed.
       #
       # RUNNING IS `open` (WALLS/2): the rows already counted above, on THIS session's
       # roster — a `status=intended` row with no `landing-swept/v1` marker and no ack. It is
@@ -3113,7 +3113,7 @@ EOF
       #
       # THE APPROVAL GATE COMES FIRST, ahead of the budget/readiness checks below (AC-5). A
       # plan below `current: 4` has not passed Step 3, and no reading of the budget or the
-      # slice table changes that — so this is a wall in front of the rest of the arm, not one
+      # task table changes that — so this is a wall in front of the rest of the arm, not one
       # more branch beside them.
       #
       # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
@@ -3134,7 +3134,7 @@ EOF
         say "no FILL — plan at current: ${SCHED_CURRENT}, Step-3 approval pending"
       elif [ -z "$SCHED_WRITERS" ]; then
         if [ -z "$SCHED_PLAN" ]; then
-          say "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a slice table from."
+          say "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
         else
           say "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
         fi

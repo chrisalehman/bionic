@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/root.test.sh — payload/scripts/lib/root.sh, the ONE reader for "which
-# project root is this cwd in". bionic 1.4.0, wave-bionic-1.4.0-update slice
+# project root is this cwd in". bionic 1.4.0, wave-bionic-1.4.0-update task
 # L-ROOT, spec AC-10 (design-ledger S3 + C2).
 #
 # WHAT IS UNDER TEST. Two functions, sourced from the library:

@@ -92,7 +92,7 @@ canonical_sdlc_version: 14
 
 current: 4
 
-- Step 4: slices in flight
+- Step 4: tasks in flight
 PRPLAN
   printf '%s' "$dir"
 }
@@ -141,7 +141,7 @@ fire() {  # <cwd> [session] [event] [stop_hook_active]
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="${2:-$SID}" bash "$HOOK" \
     <<< "$(stdin_for "$1" "${2:-$SID}" "${3:-Stop}" "${4:-false}")" 2>"$PR_ERRFILE")
   HOOK_RC=$?
-  # THE USER STREAM (slice 13). The JSON reason on stdout is what every arm below reads;
+  # THE USER STREAM (task 13). The JSON reason on stdout is what every arm below reads;
   # this is the one line a reader is shown, and the AC-E1.3 section at the end asserts it.
   HOOK_ERR_USER=$(cat "$PR_ERRFILE" 2>/dev/null)
 }
@@ -362,7 +362,7 @@ canonical_sdlc_version: 14
 
 current: 4
 
-- Step 4: slices in flight
+- Step 4: tasks in flight
 PRWTPLAN
 WT="$WTBASE/wt"
 git -C "$WTREPO" worktree add -q -b pr-wt "$WT" >/dev/null 2>&1
@@ -410,7 +410,7 @@ expect_reason_names "21: …with the poker resolved to an absolute path" "${BION
 # project's own knob (1m here, so 120s).
 # MATCHED WITHOUT A PIPE INTO `grep -q`. Under `set -o pipefail` (line 37) a `grep -q` that
 # exits on its first match SIGPIPEs the producer, and the pipeline reports 141 — this very
-# assertion failed that way once on a reason that plainly said "600s old" (wave-1.3.2 slice
+# assertion failed that way once on a reason that plainly said "600s old" (wave-1.3.2 task
 # 4/9). The text is captured first and matched in the shell.
 R22_REASON="$(reason_of)"
 if [[ "$R22_REASON" =~ [0-9]+s\ old ]]; then
@@ -456,7 +456,7 @@ section "Group 6: registration"
 # A hook with a suite, a run line and no registration is installed, green in its
 # own suite, and never fired.
 #
-# THE CHANNEL MOVED (bionic 1.4.0, slice ADOPT, spec AC-7). It was registered in the
+# THE CHANNEL MOVED (bionic 1.4.0, task ADOPT, spec AC-7). It was registered in the
 # governing skill's frontmatter, which is what made this monitor share the failure mode
 # it monitors: three of the four events that kill a Patrol also deregistered the hook,
 # silently and at the same moment. It is in hooks/hooks.json now and survives all four —
@@ -543,7 +543,7 @@ fire "$D"; expect_quiet "32: …and the very next turn is silent — the forever
 D=$(make_env 1m)
 printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
   > "$D/.bionic/tmp/roster-$SID.state"
-# THE ROSTER IS NO LONGER THE WHOLE PREDICATE (bionic 1.3.2, wave-1.3.2 slice 4/4). An empty
+# THE ROSTER IS NO LONGER THE WHOLE PREDICATE (bionic 1.3.2, wave-1.3.2 task 4/4). An empty
 # roster on a run that has not delivered is a lull, not a finish, and the tick QUIETs and
 # keeps its stamp — so this fixture has to say the run IS delivered to reach the DISARM this
 # case is about. `current: 9` with `delivered:` on the Step-9 line is the only spelling

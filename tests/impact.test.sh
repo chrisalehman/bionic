@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/impact.test.sh — the impacted-suite derivation, and its planted-edit proof.
-# wave-01-verification-cannot-lie slice S12; spec AC-18 (the derivation) and
+# wave-01-verification-cannot-lie task S12; spec AC-18 (the derivation) and
 # AC-19 (completeness by planted edit).
 #
 # WHAT IS UNDER TEST. `tests/lib/impact.sh <file>...` prints the gating suites

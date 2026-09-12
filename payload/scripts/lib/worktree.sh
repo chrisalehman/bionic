@@ -258,7 +258,7 @@ worktree_land() {  # <worktree path> -> LANDED | REFUSED
     _wt_refuse "suite-running ${busy}"; return 2
   }
 
-  # --no-ff ALWAYS: a fast-forward would erase the fact that this was a slice,
+  # --no-ff ALWAYS: a fast-forward would erase the fact that this was a task,
   # and the merge commit is what the ledger row points at.
   if ! git -C "$root" merge --no-ff -m "merge ${branch} (land)" "$branch" >/dev/null 2>&1; then
     git -C "$root" merge --abort >/dev/null 2>&1

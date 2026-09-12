@@ -1,5 +1,5 @@
 #!/bin/bash
-# JIT / DEGRADATION — epic-17 wave-03 slice S10 (spec AC-5).
+# JIT / DEGRADATION — epic-17 wave-03 task S10 (spec AC-5).
 #
 # WHAT THIS SUITE OWNS. payload/scripts/lib/jit.sh: the route-facing
 # degradation contract — jit_check (presence + named fix) and jit_offer
@@ -185,7 +185,7 @@ FP1_AFTER="$(fingerprint "$FP1_ROOT")"
 expect_eq "mutation-and-restore #1: recorder log still empty" "0" "$(grep -c . "$CALLS" | tr -d ' ')"
 
 # Mutation-and-restore #2: @playwright/cli (npm-global) — the canonical
-# environment-class dep this slice was scoped around.
+# environment-class dep this task was scoped around.
 FP2_ROOT="$TMP/fp2"; mkdir -p "$FP2_ROOT"; cp -R "$PRESENT_BIN/." "$FP2_ROOT/bin/" 2>/dev/null || { mkdir -p "$FP2_ROOT/bin"; cp -R "$PRESENT_BIN/." "$FP2_ROOT/bin/"; }
 : > "$CALLS"
 FP2_BEFORE="$(fingerprint "$FP2_ROOT")"
@@ -341,7 +341,7 @@ expect_true "canonical-sdlc steps/0.md: model_plan derivation is never invented 
   grep -q 'never invented or recalled from memory' "$CANONICAL_SKILL_STEP0"
 expect_true "canonical-sdlc steps/0.md: model_plan derivation names the rendered role files as the source" \
   grep -q 'rendered role files' "$CANONICAL_SKILL_STEP0"
-# RE-POINTED (epic-22 K1, plan slice 15, A-7). K1's Step-0 settings card drops per-line
+# RE-POINTED (epic-22 K1, plan task 15, A-7). K1's Step-0 settings card drops per-line
 # inference rationale — the six "role-file default: agents/<role>.md" annotations that used
 # to sit beside each model value are gone; that string no longer appears anywhere in
 # SKILL.md, so the old grep -c over the whole file now finds 0 by design, not by defect. The

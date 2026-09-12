@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/refuse.test.sh — payload/scripts/lib/refuse.sh: the refusal object, its one
-# renderer, and the channel table it renders by (epic-22 wave-01 slice 11, REQ-E1;
+# renderer, and the channel table it renders by (epic-22 wave-01 task 11, REQ-E1;
 # AC-E1.3 and AC-E1.5; ADR-002).
 #
 # WHAT IT OWNS. Three questions no static pin can answer, each driven through a REAL
@@ -27,9 +27,9 @@
 # says "exactly one line, and the detail is not on it" as a literal expectation, not
 # as `refuse_channel exit2 detail_to_user`. A suite that asks the library what to
 # expect and then checks the library did it agrees with itself for any value of the
-# cell. Slice 12 owned that cell and flipped it to `no` (ruling D-1, "a refusal is a
+# cell. Task 12 owned that cell and flipped it to `no` (ruling D-1, "a refusal is a
 # sentence with a pointer"); this row went red on that flip and was edited on
-# purpose, in slice 13, which is exactly what it is here to force.
+# purpose, in task 13, which is exactly what it is here to force.
 #
 # EVERY ASSERTION HAS A MUTANT. Each section drives a scratch copy of refuse.sh with
 # exactly one guard removed and requires the copy to fail where the shipped file
@@ -40,7 +40,7 @@
 # HERMETIC. A mktemp sandbox, no HOME writes, no network, no plugin registry read.
 # The scratch hook sources the library by absolute path rather than through the
 # loader block: the loader's own behaviour is tests/loader.test.sh's, and reaching
-# refuse.sh through `BIONIC_LIB_WANT` is slice 13's edit to 21 hooks, not this file's.
+# refuse.sh through `BIONIC_LIB_WANT` is task 13's edit to 21 hooks, not this file's.
 #
 # Usage: bash tests/refuse.test.sh
 
@@ -101,11 +101,11 @@ drive() { drive_v "" "$@"; }
 # two renderings of the same thing. The detail deliberately carries a double quote, a
 # backslash and two newlines — §4 escapes it into JSON and parses the result back.
 FX_VERB="run-arm"
-FX_FACT="tests/run.sh is not on this slice's budget"
+FX_FACT="tests/run.sh is not on this task's budget"
 FX_FIX="add it to Suites:"
 FX_DETAIL='The wall reads the plan brief'"'"'s `Suites:` line and nothing else.
 A path-qualified "run.sh" token counts; a bare name does not.
-Widen the budget with a C:\slice brief, then re-dispatch.'
+Widen the budget with a C:\task brief, then re-dispatch.'
 
 # THE SEVEN-WORD ARMS GET THEIR OWN, SHORT FACT, and this is a finding rather than a
 # convenience. With FX_FACT the seven-word fix pushes the whole line to 103 columns,
@@ -154,10 +154,10 @@ section "1 — the channel table is data, and every cell is the measurement's"
 #
 # WHY THE CELLS ARE PINNED BY VALUE. The table is the only thing in the tree that
 # says what a Claude Code hook emission mode does, and it is quoted from a
-# measurement that cost a slice. A cell edited to a plausible guess — most likely
+# measurement that cost a task. A cell edited to a plausible guess — most likely
 # turning an `unverified` into a `yes` because the guess feels safe — would be
 # invisible, and every later reader would treat the guess as measured. The
-# `user_interactive` rows are the ones this protects: slice 12's attended run
+# `user_interactive` rows are the ones this protects: task 12's attended run
 # (e1-measurement.md §D-2) measured the three BLOCKING modes and replaced their
 # cells; the two non-blocking modes were never driven interactively and still say
 # `unverified`, which is a gap named rather than a guess written.
@@ -200,7 +200,7 @@ for _m in exit2 deny systemmessage block additionalcontext; do
     '^e1-measurement\.md channel table, mode [1-5]( \+ D-2)?$' "$(cell "$_m" source)"
 done
 
-# THE INTERACTIVE CELLS, filled by slice 12's attended run (e1-measurement.md §D-2,
+# THE INTERACTIVE CELLS, filled by task 12's attended run (e1-measurement.md §D-2,
 # F-D2-1..3) for the three blocking modes and still `unverified` for the two that
 # were never driven live. Pinned by a phrase each, not by the whole cell: the phrase
 # is the finding, and a cell rewritten to say something else about the same mode
@@ -230,7 +230,7 @@ expect_eq "1n block is model-only, on PreToolUse and on Stop alike" \
 expect_eq "1o exit2 is NOT model-only: one wire carries both halves" \
   "no" "$(cell exit2 model_only)"
 
-# (d) FIELD 9, the switch slice 12 owns. Asserted by value so the ruling is a
+# (d) FIELD 9, the switch task 12 owns. Asserted by value so the ruling is a
 # deliberate edit here and not a silent library change.
 expect_eq "1p exit2 does NOT put detail on the user stream — ruling D-1 flipped this cell" \
   "no" "$(cell exit2 detail_to_user)"
@@ -436,7 +436,7 @@ expect_contains "4c deny: permissionDecisionReason opens with the user line" \
 expect_contains "4d deny: …and carries the detail the user did not see" \
   "A path-qualified" "$DENY_REASON"
 expect_contains "4e deny: …with the quotes, backslash and newlines intact through the escaper" \
-  'C:\slice' "$DENY_REASON"
+  'C:\task' "$DENY_REASON"
 
 drive "$LIB" block "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
 expect_contains "4f block: the wire is a decision:block verdict" '"decision":"block"' "$DRV_OUT"
@@ -461,7 +461,7 @@ expect_contains "4k2 exit2: the knob is the way back to it, on the same wire" \
 
 # THE ESCAPER, on the shapes that break a hand-rolled one: a lone backslash before a
 # quote, a tab, a carriage return. A refusal naming a Windows path or a regex is not
-# hypothetical — `C:\slice` above is already one.
+# hypothetical — `C:\task` above is already one.
 HARD='a "quoted" thing, a \backslash, a \" pair, a	tab and a
 newline'
 drive "$LIB" block "$FX_VERB" "$FX_FACT" "$FX_FIX" "$HARD"

@@ -38,10 +38,12 @@
 # is the newest-race incident in a new costume. The fence toggle runs before the section
 # test, so a fenced `## Tasks` heading does not open the section either.
 #
-# `## Tasks` IS THE ONLY SECTION READ. A `## Slices` table — the retired four-column shape
-# this wave replaces — is ignored even though it carries `id`, `deps` and `status` cells that
-# a name-keyed reader would otherwise be happy to take. The section ends at the next `##`
-# heading or at the first line that is not a table row.
+# `## Tasks` IS THE ONLY SECTION READ. A table under the RETIRED section heading this wave
+# replaced — the four-column shape, spelled with the unit-of-work noun the domain dictionary
+# now marks retired — is ignored even though it carries `id`, `deps` and `status` cells that
+# a name-keyed reader would otherwise be happy to take. tests/units.test.sh's `decoys.md`
+# fixture is what holds that, and it keeps the old heading literal for the purpose. The
+# section ends at the next `##` heading or at the first line that is not a table row.
 #
 # ONE PARSE, THREE VERBS. `units_ready` and `units_validate` are functions of `units_rows`'
 # output and never touch the file themselves, so the three answers cannot disagree about

@@ -495,7 +495,7 @@ esac
 #
 # The fail-open this closes: an artifact declaring canonical-sdlc frontmatter
 # but living outside the docs root used to fall straight out of the scope check
-# and exit 0 — written, ungated, in the wrong place. Slice 1's
+# and exit 0 — written, ungated, in the wrong place. Task 1's
 # resolve_project_root() always answers, so the historical no-root `exit 0` is
 # unreachable; the scope check is the fail-open that survived.
 #
@@ -738,7 +738,7 @@ fi
 # The triple's presence is the gate — there is no separate mode axis.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 block() {  # <fact> <fix> <what went wrong>
-  # THE FRAME KEEPS ITS PARAMETER AND LOSES ITS VOICE (slice 13, ruling D-1). The
+  # THE FRAME KEEPS ITS PARAMETER AND LOSES ITS VOICE (task 13, ruling D-1). The
   # caller's ruled fact and fix render as the one user line; the artifact name, its
   # path and the caller's own sentence become `detail`.
   refuse exit2 write "$1" "$2" "canonical-sdlc artifact '$BASENAME': $3
@@ -877,7 +877,7 @@ fi
 
 # ---------- the lease wall: a plan write issued from inside a linked worktree ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-# (spec AC-14; plan slice WALLS; assumption WALLS/6.)
+# (spec AC-14; plan task WALLS; assumption WALLS/6.)
 #
 # The other half of AC-14's pair — hooks/dispatch-preflight.sh carries the dispatch half.
 # A plan is the RUN's artifact and it lives under the main checkout; a plan write issued
@@ -1119,7 +1119,7 @@ case "$BASENAME" in
       # author was reaching for — the author who mistyped a pointer may well be
       # the author who should have written the section.
       block_design() {  # $1 = what went wrong
-        # ONE ROW FOR FOUR ARMS (slice 13, table row 101). All four say the same thing to
+        # ONE ROW FOR FOUR ARMS (task 13, table row 101). All four say the same thing to
         # the reader — this spec names no design anywhere — and differ only in WHICH
         # route was tried, which is what `detail` carries.
         refuse exit2 write "this spec names no '## Design' anywhere" "add a '## Design' section" \
@@ -1368,21 +1368,21 @@ esac
 # ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
-# Slice 2 (F4): neither hook has an entry point that fires on true first
+# Task 2 (F4): neither hook has an entry point that fires on true first
 # lifecycle use without requiring `.bionic/` to pre-exist — except this one.
 # The governing-skill hook already knows the target artifact's path and, as
-# of slice 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
+# of task 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
 # walking for an existing `.bionic/`. Creation hangs off that same
 # computation.
 #
 # The discriminator is `canonical_sdlc_version` — the SAME field the schema
-# enforcement above reads, and for the same reason. Slice 2 keyed creation on
+# enforcement above reads, and for the same reason. Task 2 keyed creation on
 # `governing-skill: canonical-sdlc` instead, which is the artifact-AUTHOR
 # field; `.claude/rules/hook-authoring.md` (machine-local, gitignored, authored
 # in place — no script recreates it, so absent from a fresh clone) § "Discriminators in
 # enforcement hooks" names that as a known failure mode, because Step 3 plans legitimately
 # declare `governing-skill: superpowers:writing-plans` and would have found no
-# tree. Slice 2's stated rationale was avoiding a re-fire on later artifacts,
+# tree. Task 2's stated rationale was avoiding a re-fire on later artifacts,
 # and re-firing costs nothing: `mkdir -p` is idempotent and the `.gitignore`
 # write is `[ -f ]`-guarded.
 #
