@@ -752,12 +752,17 @@ expect_absent "rigor_override_absent audit does not say user-overridden" "user-o
 echo
 section "AC-10: computed root resolution"
 
-# The five criteria below run against the SHIPPED text of the function,
-# extracted from the hook and eval'd here — not against a reimplementation.
-# That seam can only observe what the function returns, never that the hook
-# calls it, so the two end-to-end cases at the end of this section drive the
-# hook through its real stdin contract and pin the call site.
-ac10_src=$(awk '/^resolve_project_root\(\)/,/^\}/' "$HOOK")
+# The five criteria below drive the HOOK, through its real stdin contract, on
+# four fixture roots — so what they observe is the root the hook resolved and
+# acted on, never a reimplementation of the walk.
+#
+# THE EXTRACTION THIS PARAGRAPH USED TO DESCRIBE IS GONE (close-out finding
+# A-43, removed at T8). `ac10_src=$(awk '/^resolve_project_root\(\)/,/^\}/' ...)`
+# was assigned here and never read, and it had been evaluating to the EMPTY
+# STRING for as long as it stood: this hook defines no `resolve_project_root`
+# — it calls `project_root`, which lib/root.sh owns. A dead assignment whose
+# value was also empty is two kinds of nothing, and the comment above it was
+# describing a seam the section does not use.
 
 # main: a repo WITH .bionic/ (untracked, so the worktree checkout has none).
 # wt:   a linked worktree of main, given its own .bionic/ on purpose — the

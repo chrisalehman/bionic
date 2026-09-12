@@ -316,6 +316,52 @@ expect_eq "…and the comparison is over 22 real rows, not two empty strings" "2
   "$(nlines "$ROWS_REORDERED")"
 expect_eq "reversing every column changes not one byte of the TSV" "$ROWS_LIVE" "$ROWS_REORDERED"
 
+# ---------- slot 3 answers to two names: `kind` and `rigor` (A-39) ----------
+#
+# THE ONE ALIAS, and the whole of why it exists. Slot 3 is the row's CLASSIFICATION cell.
+# The wave-scale table spells it `kind`; the task-scale registration ledger the evidence
+# gate has read since D12 — `| id | intent | rigor | description | status |` — spells the
+# same slot `rigor`, and REQ-1e does not widen that table. Without the alias
+# `validate_task_ledger` would have to keep a second `## Tasks` parser alive for one cell,
+# which is the whole of what AC-1e.1 forbids. Ruled A-39, 2026-09-12.
+#
+# NO TABLE CARRIES BOTH SPELLINGS, and the header scan takes the first cell to match, so
+# the alias cannot shadow a real `kind` column.
+cat > "$SANDBOX/task-scale-ledger.md" <<'TASK_SCALE_EOF'
+---
+scale: task
+current: T2
+---
+
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | bugfix | tested | fix the frontmatter parser | done |
+| T2 | refactor | peer-reviewed | extract the ledger helper | active |
+| T3 | refactor |  | inherits the frontmatter rigor | pending |
+TASK_SCALE_EOF
+
+ROWS_TASK_SCALE="$(call units_rows "$SANDBOX/task-scale-ledger.md")"
+expect_eq "the five-column task-scale ledger yields its three rows" "3" "$(nlines "$ROWS_TASK_SCALE")"
+expect_eq "…id from slot 1 and status from slot 10, by header name" \
+  "T1 done
+T2 active
+T3 pending" \
+  "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ print $1, $10 }')"
+expect_eq "…and the rigor cell reaches slot 3, which the wave schema calls kind" \
+  "[tested][peer-reviewed][]" \
+  "$(printf '%s\n' "$ROWS_TASK_SCALE" | awk -F'\t' '{ printf "[%s]", $3 }')"
+expect_eq "units_field takes that cell by either name" "peer-reviewed peer-reviewed" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127
+     row="$(units_rows "$2" | sed -n 2p)"
+     printf "%s %s" "$(units_field "$row" rigor)" "$(units_field "$row" kind)"' \
+     _ "$LIB" "$SANDBOX/task-scale-ledger.md")"
+expect_eq "…and refuses a column name the contract does not carry" "1" \
+  "$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_field "x" intent' _ "$LIB" >/dev/null 2>&1; echo $?)"
+expect_eq "an empty cell reads empty, not as the cell after it" "" \
+  "$(printf '%s\n' "$ROWS_TASK_SCALE" | sed -n 3p | awk -F'\t' '{ print $3 }')"
+
 # ============================================================
 section "3 — units_rows reads the ## Tasks section and nothing else"
 # ============================================================
