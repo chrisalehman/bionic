@@ -483,4 +483,46 @@ $STUB_BLOCK_EXIT2_B" Stop blockE blockE2
 expect_eq "13k: under the verbose knob the second sentence appears once, not twice" "1" \
   "$(printf '%s\n' "$FOLD_VERBOSE_ERR" | /usr/bin/grep -c 'the second exit2 fact')"
 
+# ---------------------------------------------------------------------------
+section "14: the stderr capture is private — a planted symlink at its old name is not truncated (security F-2)"
+#
+# `bionic_fold` runs the ONE render in a subshell and captures its stderr to a file, because
+# `refuse` does not return and its two streams have to be replayed in order. T12 named that
+# file `$TMPDIR/bionic-fold-$$-$RANDOM.err` and let the shell's own `2>` create it — which
+# follows a symlink already sitting there and truncates whatever it points at. Every composed
+# refusal on this machine goes through that line, on PreToolUse|Bash and at turn end alike.
+#
+# THE PLANT IS EXACT, not approximate. The old name needs the rendering process's pid and its
+# first `$RANDOM` draw; the driver IS that process, so it has both — `$$` is its own, and
+# seeding `RANDOM` makes the next draw predictable (`a=$( RANDOM=n; echo $RANDOM )` gives the
+# value the next in-process read returns). The body plants at that exact path, re-seeds, and
+# folds. Section 8 already owns what the render says; this owns where it writes.
+
+T20_TMPC="$(mktemp -d "${TMPDIR:-/tmp}/fold-t20.XXXXXX")"
+T20_VICTIM="$T20_TMPC/victim.txt"
+printf 'ORIGINAL FOLD VICTIM\n' > "$T20_VICTIM"
+
+drive "export TMPDIR='$T20_TMPC'
+T20_SEED=20260916
+T20_PRED=\$( RANDOM=\$T20_SEED; echo \$RANDOM )
+ln -s '$T20_VICTIM' \"\$TMPDIR/bionic-fold-\$\$-\$T20_PRED.err\"
+RANDOM=\$T20_SEED
+blockT20() {
+  fold_block exit2 commit 'the t20 fold fact' 'the t20 fold fix' 'the t20 fold detail'
+  return 2
+}" \
+  PreToolUse blockT20
+
+# --- the control first: the render really ran, or "the victim survived" proves nothing ---
+expect_eq "14a: the fold rendered a blocking verdict" "2" "$FOLD_RC"
+expect_contains "14b: …putting the staged fact on the user's stream" \
+  "the t20 fold fact" "$FOLD_ERR"
+
+# --- and the trap laid at the old path was not sprung ---
+expect_eq "14c: a symlink planted at the capture's old name is NOT followed" \
+  "ORIGINAL FOLD VICTIM" "$(cat "$T20_VICTIM" 2>/dev/null)"
+expect_eq "14d: …and the capture the fold made for itself is cleaned up" "0" \
+  "$(ls "$T20_TMPC" 2>/dev/null | /usr/bin/grep -c 'bionic-fold\.' || true)"
+rm -rf "$T20_TMPC"
+
 finish

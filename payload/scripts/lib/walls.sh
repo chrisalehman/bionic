@@ -413,14 +413,34 @@ return 0
 # `$( cat )` strips trailing newlines, which is what `bionic_fold` does to `detail`
 # anyway, and `mode`, `verb`, `fact` and `fix` cannot contain a newline — `refuse`
 # refuses its own caller for that.
-_eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail>
+#
+# THE DIRECTORY IS CREATED HERE, EXCLUSIVELY, AND ONLY ON THE REFUSAL PATH (security F-1,
+# performance A-1). `mkdir -p` accepted whatever was already at the name — a symlink planted
+# by anyone who could guess `$$` and one `$RANDOM` draw was followed and its target
+# truncated, and a regular file planted there was read back on the NEXT Bash call as a
+# refusal this gate never made. Plain `mkdir` is atomic and fails when anything already
+# holds the name, so a squatter gets a refusal whose words degrade to the malformed-refusal
+# arm below — fail-closed, never a truncation and never attacker-authored prose. `-m 700`
+# means nothing can be planted inside it afterwards either.
+#
+# AND IT RUNS NOWHERE ELSE. A Bash call this gate does not refuse never reaches this
+# function, so it creates nothing, and the caller's cleanup has nothing to remove — which is
+# the fork the old unconditional `rm -rf` paid on every Bash tool call in every engaged
+# session.
+#
+# RC IS THE SIGNAL, because a subshell cannot hand a variable back. 0 means the five files
+# are there and the caller may read them; 1 means they are not and the caller must not.
+# [WALL: tests/bash-walls.test.sh §11]
+_eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail> -> 0 staged · 1 not
   local d="${1:-}" i=1 a
   shift
-  mkdir -p "$d" 2>/dev/null || return 0
+  [ -n "$d" ] || return 1
+  mkdir -m 700 "$d" 2>/dev/null || return 1
   for a in "$@"; do
-    printf '%s' "$a" > "$d/$i" 2>/dev/null
+    printf '%s' "$a" > "$d/$i" 2>/dev/null || return 1
     i=$((i + 1))
   done
+  return 0
 }
 
 wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
@@ -428,29 +448,39 @@ wall_evidence_gate() {  # <event> -> 0 nothing · 2 block
   [ -n "$COMMAND" ] || return 0
 
   local _eg_stage _eg_rc
-  _eg_stage="${TMPDIR:-/tmp}/bionic-gate-$$-${RANDOM}"
+  # NO FORK TO NAME IT. The name is a string this process already knows; what makes it safe
+  # is that `_eg_stage_refusal` CREATES it exclusively, and only when there is a refusal to
+  # stage. `$RANDOM` bought nothing once creation is exclusive, and it cost one guessable
+  # name per pid while it was there.
+  _eg_stage="${TMPDIR:-/tmp}/bionic-gate-$$"
   (
     # THE SHIM, and the only line of this wall that is not the hook's own. It has
     # `refuse`'s signature and `refuse`'s abort, and it renders nothing: the parent
     # makes the one `refuse` call through `bionic_fold`, so the channel rule holds
     # (cross-gate §Refuse: no hook prints a refusal directly).
-    refuse() { _eg_stage_refusal "$_eg_stage" "$@"; exit 2; }
+    #
+    # TWO ABORT CODES, because the staging can fail and the parent has to be able to tell.
+    # 2 is "the five files are written, read them"; 3 is "this was a refusal and its words
+    # are gone", which the malformed-refusal arm below turns into a refusal that still holds.
+    refuse() { _eg_stage_refusal "$_eg_stage" "$@" && exit 2; exit 3; }
     _eg_body
   )
   _eg_rc=$?
 
-  if [ -f "$_eg_stage/1" ]; then
+  if [ "$_eg_rc" -eq 2 ] && [ -f "$_eg_stage/1" ]; then
     fold_block "$(cat "$_eg_stage/1" 2>/dev/null)" "$(cat "$_eg_stage/2" 2>/dev/null)" \
                "$(cat "$_eg_stage/3" 2>/dev/null)" "$(cat "$_eg_stage/4" 2>/dev/null)" \
                "$(cat "$_eg_stage/5" 2>/dev/null)"
     rm -rf "$_eg_stage" 2>/dev/null
     return 2
   fi
-  rm -rf "$_eg_stage" 2>/dev/null
+  # GUARDED, so the path that staged nothing forks nothing (performance A-1).
+  [ -d "$_eg_stage" ] && rm -rf "$_eg_stage" 2>/dev/null
 
-  # A NON-ZERO EXIT WITH NOTHING STAGED is `refuse` refusing its own caller — a
-  # malformed refusal, whose complaint is already on stderr in the library's own
-  # format. `_refuse_selfrefuse` exits 2 "because the wall the caller was building
+  # A NON-ZERO EXIT WITH NOTHING STAGED has two causes and one answer. Either `refuse`
+  # refused its own caller — a malformed refusal, whose complaint is already on stderr in
+  # the library's own format — or the staging itself could not be made (exit 3: the name
+  # was already taken, or the temp directory is unwritable). `_refuse_selfrefuse` exits 2 "because the wall the caller was building
   # must still hold", and it holds here: the commit is refused, and the refusal says
   # which failure this is rather than inheriting an empty object.
   if [ "$_eg_rc" -ne 0 ]; then
