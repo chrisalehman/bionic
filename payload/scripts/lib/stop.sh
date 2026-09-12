@@ -13,7 +13,8 @@
 #
 # NO BEHAVIOUR MOVED (R2). Each function is the corresponding hook's body after
 # its preamble, carried over verbatim — its own arms, its own reads, its own
-# refusal object — with four mechanical changes and no fifth:
+# refusal object — with four mechanical changes, and one deliberate fifth that the
+# event section below names and explains (stop_context_spend's new SubagentStop guard):
 #
 #   1. `exit 0`            -> `return "$_adv"`, the function's own verdict
 #   2. `refuse <mode> …`   -> `fold_block <mode> …` + `return 2`
@@ -460,7 +461,8 @@ return "$_adv"
 # carrying a non-empty `teammate_id=`.
 #
 # THAT SCOPE CUTS BOTH WAYS, and the sweep half of it is in the fold below: teammate rows are
-# skipped there, with the one exception the next paragraph names. An async subagent stopping on this event is passed over in silence, because
+# skipped there, with the one exception the next paragraph names. An async subagent
+# stopping on this event is passed over in silence, because
 # the sweep is the arm that owns it and the marker written here is exactly what would tell
 # the sweep the row is already answered for — verdicting an async row here would not
 # duplicate the sweep, it would silently replace the refusal the orchestrator sees with one
@@ -539,7 +541,9 @@ return "$_adv"
 # which is why the refusal must name the row and its artifacts rather than the rule.
 # [WALL: tests/landing-gate.test.sh]
 #
-# Registered on both channels: hooks/hooks.json (agent contexts, behind agent-context-guard.sh) and skills/canonical-sdlc/SKILL.md frontmatter (main thread).
+# Registered on both channels by hooks/hooks.json, and by nothing else: one Stop entry
+# for the main thread, and one behind agent-context-guard.sh for agent contexts. No
+# SKILL.md carries a `hooks:` key — that channel was never how this hook was delivered.
 #
 # hooks/landing-gate.sh's body — the ONE function of the four with a SubagentStop
 # arm. Its `case "$EVENT"` is carried over unchanged; what changed is where the
