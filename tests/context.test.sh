@@ -109,7 +109,17 @@ payload() {  # <cwd> [sid] -> the payload text
 # `<unset>` is distinguished from empty on purpose. "The lib never assigned this" and
 # "the lib assigned it the empty string" are different contract claims, and the tty
 # row below is exactly the pair that tells them apart.
+#
+# THE RECORD OPENS WITH A BARE NEWLINE, and that is for section 7 alone. BSD
+# `script` puts a real terminal on descriptor 0, and a terminal ECHOES what is
+# written to it: the forwarded payload comes back as `^D\b\b{"session_id":…}` with
+# no trailing newline, so the first field printed would continue THAT line and
+# `field`'s `^rc=` would never match. One leading newline puts every field at the
+# start of a line on both paths; on the fourteen non-pty rows it costs one blank
+# line that `sed` ignores. (Measured on darwin 25.6.0: without it the pty row's
+# record reads `{"cwd":"x"}rc=1`.)
 PROBE_BODY='
+  printf "\n"
   cd "$1" || exit 99
   . "$2" >/dev/null 2>&1 || exit 98
   bionic_context 2>/dev/null
