@@ -58,8 +58,17 @@
 # BASH 3.2 (macOS /bin/bash). No associative arrays, no `${var^^}`, no `mapfile`, and the
 # awk programs stay inside POSIX awk — no `gensub`, no `length(array)`, no sorting built-in.
 #
-# A CELL NEVER CONTAINS A LITERAL `|` (the brief rule for this table), so there is no
-# escaping to undo and `split($0, c, "|")` is exact.
+# A CELL MAY CONTAIN A PIPE, AND MARKDOWN SPELLS IT `\|` (critic Issue 1, A-84). The
+# earlier claim here — that no cell ever holds one, so there is nothing to unescape — was
+# true of the raw byte and false of the table: `\|` is the one escape GFM defines for a
+# table cell, it is a raw `|` to `split()`, and it opens an extra field that reads every
+# later cell one slot early. This wave's own plan carries one in T23's `task` cell, and
+# with it in place `units_ready` could schedule nothing at Step 5 while `units_validate`
+# reported two violations against cells that were correct — a silent shift, because a
+# shifted row is still a row. So `_units_read` folds `\|` to SUBSEP before the split and
+# restores a LITERAL `|` in `trim`, which is what the cell means. SUBSEP (`\034`) is the
+# sentinel because it is the one byte awk itself reserves for "not text", no plan file can
+# carry it through a markdown table, and it needs no regex quoting on either side.
 #
 # LINE ENDINGS ARE NORMALISED HERE, NOT AT THE CALLER (T8). Two of the callers read plans
 # a human may have written on another machine, and one of them — the evidence gate — is
@@ -87,7 +96,11 @@
 _units_read() {
   [ -n "${1:-}" ] && [ -f "$1" ] || return 1
   awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" | awk '
-    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    # esc() FOLDS THE ESCAPE, trim() RESTORES IT, and every cell reaches the caller through
+    # trim() — the header scan, the id test and the ten field reads alike — so there is no
+    # path on which a SUBSEP survives into the TSV.
+    function esc(v)  { gsub(/\\[|]/, SUBSEP, v); return v }
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); gsub(SUBSEP, "|", v); return v }
 
     BEGIN {
       # The contract order. `disp` is the spelling a violation names; `want` is the
@@ -118,7 +131,7 @@ _units_read() {
     # cell. Anything else in the section (a sentence, a blank line) is skipped.
     state == 1 {
       if ($0 !~ /^[ \t]*\|/) next
-      n = split($0, c, "|")
+      n = split(esc($0), c, "|")
       for (i = 1; i <= n; i++) {
         t = tolower(trim(c[i]))
         if (t == "") continue
@@ -133,7 +146,7 @@ _units_read() {
     # The rows. The table ends at the first line that is not a table row.
     state == 2 {
       if ($0 !~ /^[ \t]*\|/) { state = 3; next }
-      n = split($0, c, "|")
+      n = split(esc($0), c, "|")
       id = trim(c[col[1]])
       # The |---|---| separator, and any row whose id cell is empty or punctuation.
       if (id == "" || id ~ /^[-: ]+$/) next

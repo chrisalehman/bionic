@@ -14,7 +14,7 @@
 # THE SEVEN VALUES, and the fact that each is a VALUE and not an action:
 #
 #   BIONIC_INPUT      the payload text, read from stdin at most once
-#   BIONIC_CWD        the one ladder: CLAUDE_PROJECT_DIR if set and a directory,
+#   BIONIC_CWD        the one ladder: CLAUDE_PROJECT_DIR if it names a PROJECT,
 #                     else the payload's `.cwd` if a directory, else `pwd`
 #   BIONIC_ROOT       project_root "$BIONIC_CWD"
 #   BIONIC_SID        session_id, past the one shape guard
@@ -180,8 +180,9 @@ R_ENV=$(mk_repo ladder-env engaged)
 R_PAY=$(mk_repo ladder-payload engaged)
 R_PWD=$(mk_repo ladder-pwd engaged)
 
-# rung 1 — CLAUDE_PROJECT_DIR set AND a directory: it wins over a perfectly good
-# payload cwd. This is the rung session-start reverses today.
+# rung 1 — CLAUDE_PROJECT_DIR set, a directory AND naming a project: it wins over a
+# perfectly good payload cwd. This is the rung session-start reverses today. The
+# project half of the test is A-85's, driven in its own block below.
 REC=$(probe "$R_PWD" "$(payload "$R_PAY")" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$R_ENV")
 expect_eq "CLAUDE_PROJECT_DIR, set and a directory, is the cwd" "$R_ENV" "$(field "$REC" cwd)"
 
@@ -218,6 +219,68 @@ expect_eq "with an empty payload the cwd is still pwd" "$R_PWD" "$(field "$REC" 
 # session — the failure AC-10 was written for.
 REC=$(probe "$R_PWD" "$(payload "$R_PAY")" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$R_ENV")
 expect_eq "BIONIC_ROOT is resolved from whichever rung won" "$R_ENV" "$(field "$REC" root)"
+
+# ── rung 1 IS FOR PROJECTS, NOT FOR DIRECTORIES (critic Issue 2, A-85) ───────
+#
+# THE DIRECTION A WALL MUST FAIL IN. A session launched outside a bionic project
+# that then works inside one keeps CLAUDE_PROJECT_DIR at the LAUNCH directory, and
+# the payload's `.cwd` is the project. A rung 1 that asked only `-d` took the launch
+# directory, `project_root` answered with its git toplevel (root.sh's
+# `git-toplevel-fallback` — it never answers empty), no engagement marker lived
+# there, and every one of the five Bash walls and four turn-end verdicts went
+# silent: `push refused, rc 2` became silence and rc 0, measured. Nine of the
+# fifteen pre-fold hooks recovered through `.cwd` and would have stayed armed.
+#
+# So the rung tests for a PROJECT: `project_root_candidates` must terminate in
+# `chosen`, which is the one tag that means a real `.bionic` was found. A
+# `git-toplevel-fallback` or a `cwd-fallback` is not a project and does not win the
+# ladder — it falls through to the same two rungs below it.
+
+R_PLAIN_GIT="$SANDBOX/plain-git"; mkdir -p "$R_PLAIN_GIT"
+( cd "$R_PLAIN_GIT" && git init -q . >/dev/null 2>&1 ) || :
+R_PLAIN_BARE="$SANDBOX/plain-nogit"; mkdir -p "$R_PLAIN_BARE"
+
+expect_eq "the fixture really is a git repository with no .bionic" "yes"   "$([ -d "$R_PLAIN_GIT/.git" ] && [ ! -e "$R_PLAIN_GIT/.bionic" ] && echo yes || echo no)"
+
+# THE CRITIC'S TWO-REPOS DRIVE. CLAUDE_PROJECT_DIR at the git repo that is not a
+# project, the payload `.cwd` at the engaged project.
+REC=$(probe "$R_PWD" "$(payload "$R_PAY")" CLAUDE_CODE_SESSION_ID="$SID"       CLAUDE_PROJECT_DIR="$R_PLAIN_GIT")
+expect_eq "a CLAUDE_PROJECT_DIR that is a git repo but NOT a project falls through to the payload"   "$R_PAY" "$(field "$REC" cwd)"
+expect_eq "…and BIONIC_ROOT is the payload's project, not the git toplevel"   "$R_PAY" "$(field "$REC" root)"
+expect_eq "…and the session is still identified (return 0)" "0" "$(field "$REC" rc)"
+expect_eq "…and still reads as ENGAGED, which is what keeps the walls armed"   "1" "$(field "$REC" engaged)"
+
+# The same with no repository at all, where root.sh's terminal tag is cwd-fallback
+# rather than git-toplevel-fallback. Both are "no project"; neither may win.
+REC=$(probe "$R_PWD" "$(payload "$R_PAY")" CLAUDE_CODE_SESSION_ID="$SID"       CLAUDE_PROJECT_DIR="$R_PLAIN_BARE")
+expect_eq "a CLAUDE_PROJECT_DIR that is a plain directory falls through too"   "$R_PAY" "$(field "$REC" cwd)"
+expect_eq "…and its root is the payload's project" "$R_PAY" "$(field "$REC" root)"
+
+# RUNG 2 KEEPS ITS OWN TEST, and that is deliberate (A-85). The ruling scopes the
+# project test to rung 1, where the failure was: an env var SHADOWING a project the
+# payload names. Rung 2's only successor is `pwd` — the hook process's directory,
+# which is a worse answer than the directory the tool actually ran in — so a payload
+# `.cwd` that is a directory still wins on `-d`, exactly as before.
+REC=$(probe "$R_PWD" "$(payload "$R_PLAIN_BARE")" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$R_PLAIN_GIT")
+expect_eq "rung 1 refused, the payload's .cwd still wins on -d even when it is no project" "$R_PLAIN_BARE" "$(field "$REC" cwd)"
+
+# …and on to rung 3 when there is no payload cwd at all: the fall-through is the
+# WHOLE ladder, not a one-step swap.
+REC=$(probe "$R_PWD" '{"session_id":"'"$SID"'"}' CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$R_PLAIN_GIT")
+expect_eq "rung 1 refused and no payload cwd: the cwd is pwd" "$R_PWD" "$(field "$REC" cwd)"
+
+# THE POSITIVE CONTROL, so the row above cannot pass by disabling rung 1 outright:
+# a CLAUDE_PROJECT_DIR that IS a project still beats a perfectly good payload cwd.
+REC=$(probe "$R_PWD" "$(payload "$R_PAY")" CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR="$R_ENV")
+expect_eq "a CLAUDE_PROJECT_DIR that IS a project still wins over the payload"   "$R_ENV" "$(field "$REC" cwd)"
+expect_eq "…and its root is that project" "$R_ENV" "$(field "$REC" root)"
+
+# A NESTED cwd inside the project is a project too — the rung asks project_root,
+# not `-d .bionic`, so the env may name any directory under a root.
+mkdir -p "$R_ENV/deep/deeper"
+REC=$(probe "$R_PWD" "$(payload "$R_PAY")" CLAUDE_CODE_SESSION_ID="$SID"       CLAUDE_PROJECT_DIR="$R_ENV/deep/deeper")
+expect_eq "a CLAUDE_PROJECT_DIR nested inside a project wins, and resolves to the root"   "$R_ENV" "$(field "$REC" root)"
+expect_eq "…and the cwd is the directory the env named" "$R_ENV/deep/deeper" "$(field "$REC" cwd)"
 
 # ============================================================
 section "3 — ONE session-id guard (AC-1h.2): empty and malformed both return 1"

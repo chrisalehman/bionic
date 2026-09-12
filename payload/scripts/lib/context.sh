@@ -38,10 +38,11 @@
 # hooks; one that reports it changes none. So `bound-closed` returns 0 here like
 # any other identified session, and the `case` stays in the caller.
 #
-# ONE LADDER (REQ-1h, AC-1h.1; user ruling 2026-09-12 "1, go with unify"). The
-# census measured SEVEN cwd ladders across the fifteen. They are one now:
+# ONE LADDER (REQ-1h, AC-1h.1; user ruling 2026-09-12 "1, go with unify",
+# corrected by critic Issue 2 / A-85). The census measured SEVEN cwd ladders across
+# the fifteen. They are one now:
 #
-#   1. $CLAUDE_PROJECT_DIR, if set AND a directory
+#   1. $CLAUDE_PROJECT_DIR, if set and it names a PROJECT
 #   2. else the payload's `.cwd`, if a directory
 #   3. else `pwd`
 #
@@ -49,6 +50,27 @@
 # stopped at `-n` would answer with a path that does not exist and hand
 # `project_root` a walk from nowhere — which is the fail-dangerous direction, since
 # the walk would then answer about whatever directory the hook happened to be in.
+#
+# AND RUNG 1 TESTS FOR A PROJECT, NOT MERELY FOR A DIRECTORY, WHICH IS THE
+# DIRECTION A WALL MUST FAIL IN (critic Issue 2, A-85). A session launched outside
+# a bionic project and then worked inside one keeps CLAUDE_PROJECT_DIR at the
+# LAUNCH directory while the payload's `.cwd` is the project — the ordinary
+# two-repos day. A rung 1 that asked only `-d` took the launch directory;
+# `project_root` never answers empty (root.sh falls back to the git toplevel, else
+# the cwd), so the walk succeeded, found no engagement marker under that root, and
+# BIONIC_ENGAGED came back 0 — which fourteen callers spell `|| exit 0`. One
+# environment variable silenced all five Bash walls and all four turn-end verdicts
+# at once: `push refused, rc 2` became silence and rc 0, measured. Nine of the
+# fifteen pre-fold hooks recovered through `.cwd` and stayed armed, so this was a
+# REGRESSION against the base, not merely a permissive reading.
+#
+# THE TEST IS root.sh's TERMINAL TAG, not `-d .bionic`: `project_root_candidates`
+# ends in `chosen` exactly when a real `.bionic` was found, and in
+# `git-toplevel-fallback` or `cwd-fallback` when none was. So a directory NESTED
+# inside a project still wins rung 1 and still resolves to the root, and only a
+# path with no project above it falls through. The walk is made ONCE — the chosen
+# path is the root, so accepting the rung costs no second `project_root` call, and
+# refusing it costs one walk on a path that was going to be refused anyway.
 #
 # ONE GUARD (REQ-1h, AC-1h.2). The shape rule `[A-Za-z0-9_-]` lived in six of the
 # fifteen; nine had no check at all, one blanked the variable instead of exiting,
@@ -143,7 +165,7 @@ bionic_jq() {
 # BIONIC_CWD is assigned before the root can fail, and BIONIC_SID is blanked
 # before the guard returns.
 bionic_context() {
-  local _pcwd _sid _verdict
+  local _pcwd _sid _verdict _root=""
 
   # 1. THE PAYLOAD, ONCE.
   if [ -z "${BIONIC_INPUT+x}" ]; then
@@ -156,10 +178,16 @@ bionic_context() {
     fi
   fi
 
-  # 2. THE ONE LADDER.
+  # 2. THE ONE LADDER. Rung 1 asks for a PROJECT (see the docblock); the walk it
+  # makes is the same walk rung 3 would make, so it is kept rather than repeated.
+  BIONIC_CWD=""
   if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "${CLAUDE_PROJECT_DIR:-}" ]; then
-    BIONIC_CWD="$CLAUDE_PROJECT_DIR"
-  else
+    _root="$(project_root_candidates "$CLAUDE_PROJECT_DIR" 2>/dev/null \
+             | awk -F'\t' 'END { if ($2 == "chosen") print $1 }')"
+    [ -n "$_root" ] && BIONIC_CWD="$CLAUDE_PROJECT_DIR"
+  fi
+  if [ -z "$BIONIC_CWD" ]; then
+    _root=""
     _pcwd="$(bionic_jq .cwd)"
     if [ -n "$_pcwd" ] && [ -d "$_pcwd" ]; then
       BIONIC_CWD="$_pcwd"
@@ -168,9 +196,15 @@ bionic_context() {
     fi
   fi
 
-  # 3. THE ROOT. `project_root` prints nothing and still returns 0 when the walk
-  # finds no project, so the emptiness is the test.
-  BIONIC_ROOT="$(project_root "$BIONIC_CWD" 2>/dev/null)"
+  # 3. THE ROOT. On rungs 2 and 3 this is byte-for-byte the reading the library
+  # shipped with — `project_root` returns 0 whatever it finds, so the emptiness is
+  # the test and the walk's own fallbacks are honoured exactly as before. On rung 1
+  # the root is the `chosen` path the rung already walked to.
+  if [ -n "$_root" ]; then
+    BIONIC_ROOT="$_root"
+  else
+    BIONIC_ROOT="$(project_root "$BIONIC_CWD" 2>/dev/null)"
+  fi
   [ -n "$BIONIC_ROOT" ] || return 1
 
   # 4. THE SESSION ID, PAST THE ONE GUARD. stderr is suppressed HERE rather than
