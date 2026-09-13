@@ -92,10 +92,54 @@ bionic_check_route() {  # <setup|cli|user>
 
 # ─── The walls, which are facts about the payload and not about the machine ──
 #
-# The four hooks that stand over actions that cannot be taken back. Their roster
-# lived in doctor.sh until 1.5.1; it is a list of things bionic needs true, so it
-# is here, and doctor reads it.
-BIONIC_WALL_HOOKS="protect-main canonical-sdlc-evidence-gate farm-out-reminder background-suite-guard"
+# The walls that stand over actions that cannot be taken back, plus the two that
+# classify one. Their roster lived in doctor.sh until 1.5.1; it is a list of
+# things bionic needs true, so it is here, and doctor reads it.
+#
+# A WALL IS NOT A FILE ANY MORE (epic-23 wave-11-lean-spine, T23; A-56.2). The
+# five PreToolUse|Bash walls are FUNCTIONS of payload/scripts/lib/walls.sh behind
+# one hook, hooks/bash-walls.sh. A roster of hook files would therefore have one
+# entry, and doctor's page would say "bash-walls cannot load cmd-class.sh" and
+# leave the reader to work out which of five behaviours that costs them — when
+# the honest answer is that farm-out-reminder and background-suite-guard step
+# aside and the other three are untouched. So the roster is read from walls.sh's
+# own per-wall declaration table and the row stays per WALL.
+#
+# READ, NEVER SOURCED, and read from the library this file ships beside — the
+# same idiom `bionic_check_wall_want` uses on a hook. Sourcing walls.sh would
+# define five wall bodies inside doctor for the sake of five strings.
+_bionic_check_walls_file() {  # -> the payload's walls.sh, whichever tree this is
+  printf '%s/walls.sh' "$(cd "$(_bionic_checks_self_dir)" && pwd -P)"
+}
+
+# THE NAME MANGLE IS walls.sh's OWN, inverted: `wall_farm_out_reminder` spells
+# `farm-out-reminder`, and so does `BIONIC_WALL_LIBS_farm_out_reminder`. No wall
+# name carries an underscore, so `_` → `-` is unambiguous.
+bionic_check_wall_roster() {  # -> the wall names declared by walls.sh
+  local f names
+  f="$(_bionic_check_walls_file)"
+  names="$(grep -o '^BIONIC_WALL_LIBS_[A-Za-z0-9_]*=' "$f" 2>/dev/null \
+           | sed -e 's/^BIONIC_WALL_LIBS_//' -e 's/=$//' -e 's/_/-/g' | tr '\n' ' ')"
+  names="${names%% }"
+  # A PAYLOAD WITH NO walls.sh HAS NO TABLE TO READ, and an empty roster is the
+  # shape doctor renders as "no walls to check" — a silence on a payload that is
+  # visibly broken. The carrier's own name is the honest fallback: its
+  # BIONIC_LIB_WANT lists walls.sh, so the one row it produces reads
+  # "bash-walls cannot load …", which is exactly what is wrong.
+  [ -n "$names" ] || names="$(bionic_check_wall_carrier)"
+  printf '%s' "$names"
+}
+
+bionic_check_wall_carrier() {  # -> the hook basename that carries the wall functions
+  local f c
+  f="$(_bionic_check_walls_file)"
+  c="$(grep -m1 '^BIONIC_WALL_CARRIER=' "$f" 2>/dev/null \
+       | sed -e 's/^BIONIC_WALL_CARRIER=//' -e 's/^["'"'"']//' -e 's/["'"'"']$//')"
+  [ -n "$c" ] || c="bash-walls"
+  printf '%s' "$c"
+}
+
+BIONIC_WALL_HOOKS="$(bionic_check_wall_roster)"
 
 bionic_check_payload_root() { plugin_root; }
 
@@ -113,6 +157,49 @@ bionic_check_wall_want() {  # <hook-file> -> space-separated library basenames
             | sed 's|^lib/||' | sort -u | tr '\n' ' ')"
   fi
   printf '%s' "$want"
+}
+
+# THE PER-WALL ANSWER, which is the one doctor's row needs (A-56.2). A wall that
+# is a FUNCTION cannot declare a `BIONIC_LIB_WANT` line of its own — the carrier
+# declares one, and the carrier's is deliberately narrower than the union (only
+# what the two fail-closed walls need, per A-56.1). So the per-wall list comes
+# from walls.sh's declaration table, and the hook's own line is the fallback for
+# a wall that is still its own file.
+bionic_check_wall_libs() {  # <wall name> -> that wall's library basenames
+  local w="${1:-}" var libs
+  var="BIONIC_WALL_LIBS_$(printf '%s' "$w" | tr '-' '_')"
+  libs="$(grep -m1 "^${var}=" "$(_bionic_check_walls_file)" 2>/dev/null \
+          | sed -e "s/^${var}=//" -e 's/^["'"'"']//' -e 's/["'"'"']$//')"
+  printf '%s' "$libs"
+}
+
+# THE WALL'S FILE ON DISK. Every declared wall is carried by one hook; a wall
+# with no declaration is still its own hook, which is what the fallback says.
+bionic_check_wall_file() {  # <wall name> -> the hook file that carries it
+  local w="${1:-}" root
+  root="$(bionic_check_payload_root)"
+  if [ -n "$(bionic_check_wall_libs "$w")" ]; then
+    printf '%s/hooks/%s.sh' "$root" "$(bionic_check_wall_carrier)"
+  else
+    printf '%s/hooks/%s.sh' "$root" "$w"
+  fi
+}
+
+# WHICH WANTED FILE IS ACTUALLY ABSENT, which the loader block does not say.
+# `BIONIC_LIB_MISSING` is set to the FIRST name in the want list, not to the one
+# that could not be read — good enough for a hook's own one-line refusal, wrong
+# for a row whose whole job is to name the file the reader must restore. It went
+# wrong the moment a want list stopped being sorted with the interesting file
+# first: lib/context.sh was added ahead of git-argv.sh in every hook at T10, and
+# from that commit this row would have named context.sh for a payload whose
+# context.sh was perfectly fine. Read-only, one stat per wanted basename.
+bionic_check_wall_missing_lib() {  # <wanted basenames> -> the first this payload cannot read
+  local root f
+  root="$(bionic_check_payload_root)"
+  for f in ${1:-}; do
+    [ -r "${root}/scripts/lib/${f}" ] || { printf '%s' "$f"; return 0; }
+  done
+  printf ''
 }
 
 # ASKED THROUGH THE IDIOM ITSELF, never through a copy of it. `bionic_loader_pin`
@@ -334,12 +421,14 @@ bionic_check_statusline_npx() {  # <row id>
 # `unloadable=<library>` — the first basename the hook asked for and did not get,
 # falling back to what the hook declared when the probe itself could not run, so
 # a row names a library either way rather than an empty string.
-bionic_check_wall_state() {  # <wall hook name> -> missing | ok | unloadable=<lib>
-  local w="${1:-}" root f want probe lib miss
-  root="$(bionic_check_payload_root)"
-  f="${root}/hooks/${w}.sh"
+bionic_check_wall_state() {  # <wall name> -> missing | ok | unloadable=<lib>
+  local w="${1:-}" f want probe lib miss probe_miss
+  f="$(bionic_check_wall_file "$w")"
   [ -r "$f" ] || { printf 'missing'; return 0; }
-  want="$(bionic_check_wall_want "$f")"
+  # THE WALL'S OWN LIST, then the carrier's. A folded wall declares its libraries
+  # in walls.sh's table; an unfolded one declares them on its hook's WANT line.
+  want="$(bionic_check_wall_libs "$w")"
+  [ -n "$want" ] || want="$(bionic_check_wall_want "$f")"
   probe="$(bionic_check_wall_probe "$f" "$want")"
   lib=""; miss=""
   while IFS= read -r _bcw_f; do
@@ -349,6 +438,14 @@ bionic_check_wall_state() {  # <wall hook name> -> missing | ok | unloadable=<li
     esac
   done <<<"$(printf '%s' "$probe" | tr '|' '\n')"
   [ -n "$lib" ] && { printf 'ok'; return 0; }
+  # THE PROBE DECIDES *WHETHER*, THIS DECIDES *WHICH*. The loader idiom is the
+  # authority on whether a whole library resolved — it walks the healing
+  # candidates a hand-rolled check would not — but it reports the first NAME it
+  # wanted rather than the one it could not read, so the file the reader has to
+  # restore is read back directly here. The probe's answer is still the fallback.
+  probe_miss="$miss"
+  miss="$(bionic_check_wall_missing_lib "$want")"
+  [ -n "$miss" ] || miss="$probe_miss"
   [ -n "$miss" ] || miss="${want%% *}"
   [ -n "$miss" ] || miss="the bionic library"
   printf 'unloadable=%s' "$miss"
@@ -631,7 +728,6 @@ _bionic_check_field() {  # <id> <field index 2..6>
 # checks, so the two are gone rather than kept for a future that has not arrived.
 bionic_check_label()    { _bionic_check_field "${1:-}" 2; }
 bionic_check_detector() { _bionic_check_field "${1:-}" 3; }
-bionic_check_item()     { _bionic_check_field "${1:-}" 5; }
 bionic_check_hint()     { _bionic_check_field "${1:-}" 6; }
 
 # The hint a dependency row carries, empty for a dependency no row covers. One

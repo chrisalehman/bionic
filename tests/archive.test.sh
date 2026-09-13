@@ -37,7 +37,11 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 LIB="$REPO_ROOT/payload/scripts/lib/archive.sh"
-SKILL_MD="$REPO_ROOT/skills/canonical-sdlc/SKILL.md"
+# STEP 9 LIVES IN ITS OWN FILE SINCE WAVE-11 ROW 1b. This suite's §7 reads the Step-9 span
+# and nothing else in the skill, so it names the step file rather than the core. The
+# extractor below is unchanged: it still starts at `### Step 9 —`, and its `^## [^#]`
+# terminator simply never fires now, because the step file ends where the step does.
+SKILL_MD="$REPO_ROOT/skills/canonical-sdlc/steps/9.md"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/archive-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
@@ -220,7 +224,7 @@ section "3f — an unwritable archive root: the refusal is the ONLY line"
 # The refusal itself was always correct and every source tree was always left in place;
 # what leaked was a second line, in a project whose whole refusal contract (E1, ADR-002)
 # is that a wall says one thing once. `archive_run` is a COMMAND rather than a wall
-# (slice-12 ruling D-5, so it keeps its own voice and its own exit codes) but the
+# (task-12 ruling D-5, so it keeps its own voice and its own exit codes) but the
 # one-line property is the same property.
 #
 # A READ-ONLY PARENT, not a missing one: `mkdir -p` on a path it cannot create is the

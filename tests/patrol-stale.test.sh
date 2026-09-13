@@ -5,10 +5,10 @@
 # MULTIPLIER` — "the stamp is stale past twice the poker interval" as one
 # exported constant instead of an inline literal, and `patrol_stamp_state`'s
 # own reader of it. `hooks/session-poker.sh` switched its own
-# copy of that arithmetic to this constant at slice POKER (1.6, spec AC-22),
+# copy of that arithmetic to this constant at task POKER (1.6, spec AC-22),
 # and Section 4 below holds the two together; `hooks/dispatch-preflight.sh`
 # still carries the literal the constant was extracted from, and its switch
-# belongs to slice ADOPT. Section 4 asserts agreement on the VALUE rather than
+# belongs to task ADOPT. Section 4 asserts agreement on the VALUE rather than
 # on a spelling, so it holds before that switch and after it, unedited.
 #
 # SOURCED, DIRECTLY (patrol.sh's own header: "Sourced, never executed" — no

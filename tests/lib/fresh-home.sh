@@ -1,4 +1,4 @@
-# tests/lib/fresh-home.sh — the fresh-HOME rig (epic-22 wave-01 slice 0; REQ-S0, REQ-R3).
+# tests/lib/fresh-home.sh — the fresh-HOME rig (epic-22 wave-01 task 0; REQ-S0, REQ-R3).
 #
 # WHAT THIS IS, AND WHAT IT IS NOT. `tests/fresh-home.test.sh` answers "does an
 # all-yes setup leave the machine in the state the plugin claims", and it answers

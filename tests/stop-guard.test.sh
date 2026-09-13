@@ -1,9 +1,9 @@
 #!/bin/bash
 # Tests for hooks/stop-guard.sh — the STOP GATE, PreToolUse|TaskStop
-# (epic-15 wave-01R; recorder arm removed at wave-03 slice 4/4).
+# (epic-15 wave-01R; recorder arm removed at wave-03 task 4/4).
 #
 # The gate: D-1 activity-boundary freshness, D-2 consume-on-stop, and — since
-# wave-03 slice 4/6 — D-3 same-actor, D-6 progress staleness, and the
+# wave-03 task 4/6 — D-3 same-actor, D-6 progress staleness, and the
 # foreign-stop rule. Serves wave-01R's AC-4/AC-5 and the stop-side rows of
 # AC-8/AC-10, plus wave-03's AC-4 (§8), AC-5 (§9) and AC-6 (§10).
 #
@@ -43,7 +43,7 @@ expect_file()     { if [ -f "$2" ]; then ok "$1"; else no "$1" "no such file: $2
 expect_no_file()  { if [ -f "$2" ]; then no "$1" "file exists but should not: $2"; else ok "$1"; fi; }
 
 # HELPER-PRESENCE GUARD (S11, spec AC-25). `expect_eq` comes from tests/lib/assert.sh
-# and is not defined anywhere in this file — before this slice, its one call below
+# and is not defined anywhere in this file — before this task, its one call below
 # (":re-engaged: the refusal is byte-identical") ran under `set -uo pipefail` with no
 # `-e`, so an undefined `expect_eq` was a silent stderr line and the row asserted
 # nothing (the same class of defect r24e was in dispatch-preflight.test.sh,
@@ -110,7 +110,7 @@ mk_stop_payload() {  # <sid> <transcript> <cwd> <task_id>
       tool_input:{task_id:$id}, tool_use_id:"toolu_018jyjgop7KMxP6yKtoAWWtB"}'
 }
 
-# THE SAME PAYLOADS, INVOKED BY A SUBAGENT (slice 4/6, D-3). FAITHFUL to
+# THE SAME PAYLOADS, INVOKED BY A SUBAGENT (task 4/6, D-3). FAITHFUL to
 # .bionic/docs/record/w3-slice1-posttooluse-probe.md captures C and F: a
 # subagent-invoked PreToolUse or PostToolUse payload carries top-level `agent_id`
 # and `agent_type` alongside every field the orchestrator's payload has, and the
@@ -137,7 +137,7 @@ run_guard() {  # <payload-json>
   local _sid; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   GUARD_OUT=$(printf '%s' "$1" | env CLAUDE_CODE_SESSION_ID="$_sid" bash "$GUARD" 2>"$SANDBOX/.err"); GUARD_ST=$?
   GUARD_ERR=$(cat "$SANDBOX/.err")
-  # THE SAME CALL AGAIN, WITH THE KNOB (slice 13, ruling D-1). This gate's refusal is
+  # THE SAME CALL AGAIN, WITH THE KNOB (task 13, ruling D-1). This gate's refusal is
   # now ONE line — `bionic: stop refused — <fact> (<fix>)` — and the twelve-line frame
   # this suite reads for counts, spellings, ages and the pasteable Fix line is `detail`,
   # which reaches a reader only under BIONIC_WALL_VERBOSE=1. `$GUARD_ERR` is therefore
@@ -195,7 +195,7 @@ scale: wave
 integration-branch: main
 current: 4
 
-- Step 4: slices in flight
+- Step 4: tasks in flight
 PLAN
   fi
   printf '%s|%s|%s\n' "$repo" "$proj/$SID_A.jsonl" "$proj/$SID_A/subagents"
@@ -203,7 +203,7 @@ PLAN
 
 # ---------- THE RECORDED ListAgents ANSWER — the live set (S6, D1′) ----------
 #
-# Since this slice the two stop scripts resolve a target against the newest recorded
+# Since this task the two stop scripts resolve a target against the newest recorded
 # ListAgents answer in the session transcript, not against agent-*.meta.json on disk. So a
 # fixture world's transcript is no longer an empty file: it carries a prompt, the assistant's
 # ListAgents call and the harness's answer, in that order, which is what makes the answer
@@ -276,12 +276,12 @@ plant_agent() {
 
 STATE_REL=".bionic/tmp/stop-check.state"
 
-# THE WHOLE PRODUCER→RECORDER PATH, run for real. Since slice 4/4 an observation
+# THE WHOLE PRODUCER→RECORDER PATH, run for real. Since task 4/4 an observation
 # record exists only if hooks/stop-check.sh actually printed its machine line, so
 # seeding one by hand would seed a shape the shipped writer can no longer produce.
 # The metadata root is reached through CLAUDE_CONFIG_DIR, derived from the same
 # transcript path the gate resolves through, so both halves see one fixture world.
-# The observation's own session key travels on CLAUDE_CODE_SESSION_ID (slice
+# The observation's own session key travels on CLAUDE_CODE_SESSION_ID (task
 # 4/5): it is how the producer finds THIS session's roster, and therefore how a
 # contracted progress path reaches the record at all. This suite runs inside a
 # real Claude Code session, which exports a real value — unpinned, every call
@@ -319,16 +319,16 @@ observe_as() {  # <observer-agent-id|""> <sid> <transcript> <repo> <typed-target
 # THE SESSION ROSTER, planted as the PRECONDITION it is at a real stop. Row shape
 # FAITHFUL to the writer, hooks/dispatch-preflight.sh's `ROW=` line (field for
 # field, in order); the writer itself is driven by its own suite and the two
-# shapes are held together by tests/cross-gate-agreement.test.sh. Since slice 4/9
+# shapes are held together by tests/cross-gate-agreement.test.sh. Since task 4/9
 # a row is no longer what makes a target ours — its directory is — so a world that
 # plants none is a perfectly ordinary one. What a row still carries is the
 # CONTRACT, and, when `confirmed`, ownership of a target filed elsewhere.
 #
 # The CONTRACT FIELDS (deliverable, waiver, teammate_id) are optional trailing
-# arguments rather than a second helper: epic-16 wave-02 slice S3 made the row's
+# arguments rather than a second helper: epic-16 wave-02 task S3 made the row's
 # contract the thing that discharges a stop, so a suite that could only plant
 # contract-less rows could not express the discharging case at all. Every call
-# written before that slice passes none of them and gets the identical row it got
+# written before that task passes none of them and gets the identical row it got
 # before — an empty `deliverable=` is what the writer emits for a dispatch that
 # declared nothing.
 # `adopted_from=` is the tenth optional argument for the same reason the contract fields
@@ -374,7 +374,7 @@ run_guard "$(jq -n --arg c "$W1_REPO" '{session_id:"x", cwd:$c, hook_event_name:
 expect_status "an unrelated TOOL passes untouched" 0 "$GUARD_ST"
 expect_no_file "an unrelated tool writes no state" "$W1_REPO/$STATE_REL"
 
-# A Bash call is no longer this script's business AT ALL (slice 4/4 moved the
+# A Bash call is no longer this script's business AT ALL (task 4/4 moved the
 # recorder out). It must pass untouched and, more importantly, write nothing:
 # a settings file that still carries the retired PreToolUse|Bash registration
 # must produce silence rather than a second writer of the same state.
@@ -395,13 +395,20 @@ expect_status "the Agent tool is not this gate's business" 0 "$GUARD_ST"
 # the tool-name check itself.
 _rel_line=$(grep -n 'TOOL_NAME" = "TaskStop" \] || exit 0' "$GUARD" | head -1 | cut -d: -f1)
 # The expensive work used to begin at the plan walk; since task-engaged-session this gate
-# reads no plan at all, and the first thing it pays for is resolving the project root — the
-# ancestor walk `engaged_session` and every state path below it are built on.
-_walk_line=$(grep -nE '^[[:space:]]*(REPO=\$\(project_root|PLAN=|find )' "$GUARD" | head -1 | cut -d: -f1)
+# reads no plan at all, and the first thing it pays for is resolving its context — the
+# ancestor walk, the session id and every state path below them (RE-POINTED epic-23
+# wave-11-lean-spine, REQ-1f: that resolution is `bionic_context`).
+#
+# BOTH LINE NUMBERS ARE ASSERTED FINDABLE FIRST. A grep whose literal has left the file
+# yields the empty string, and an order pin over two empty values pins nothing while
+# reading exactly like one that holds.
+_walk_line=$(grep -n '^bionic_context' "$GUARD" | head -1 | cut -d: -f1)
+expect_nonempty "the relevance test is findable in the guard's source" "$_rel_line"
+expect_nonempty "the context resolution is findable in the guard's source" "$_walk_line"
 if [ -n "$_rel_line" ] && [ -n "$_walk_line" ] && [ "$_rel_line" -lt "$_walk_line" ]; then
-  ok "relevance check precedes the plan walk in source order"
+  ok "relevance check precedes the context resolution in source order"
 else
-  no "relevance check precedes the plan walk in source order" "relevance@${_rel_line:-none} walk@${_walk_line:-none}"
+  no "relevance check precedes the context resolution in source order" "relevance@${_rel_line:-none} walk@${_walk_line:-none}"
 fi
 
 setup_section "Section 2: WRITING moved out — see tests/execution-recorder.test.sh"
@@ -710,7 +717,7 @@ plant_agent "$R2_SUB" "ablocked-aaaaaaaaaaaaaaaa" "blocked"
 sg_roster_row "$R2_REPO" "$SID_A" "blocked" "ablocked-aaaaaaaaaaaaaaaa"
 run_guard "$(mk_stop_payload "$SID_A" "$R2_TR" "$R2_REPO" "blocked")"
 expect_status "the stop with no observation is refused (setup for R2)" 2 "$GUARD_ST"
-# THE PASTEABLE FIX LINE IS IN THE DETAIL NOW (slice 13, D-1): the user line names the
+# THE PASTEABLE FIX LINE IS IN THE DETAIL NOW (task 13, D-1): the user line names the
 # repair in six words and the runnable command is what the knob carries, so this is read
 # off the verbose stream. That it still EXECUTES is what the three arms below prove.
 FIXLINE=$(printf '%s\n' "$GUARD_VERR" | grep '^Fix: ' | sed 's/^Fix: //')
@@ -743,7 +750,30 @@ section "Section 6b: the lock and the consume — the failure paths (C3, S2)"
 # Proven the way §9 names as durable: mutate a COPY so the rename targets an
 # unwritable path, drive it, then re-checksum the shipped file.
 GUARD_SUM_BEFORE=$(shasum "$GUARD" | awk '{print $1}')
-MUTANT="$SANDBOX/stop-guard.consume-fails.sh"
+# THE MUTANT LIVES IN A TREE SHAPED LIKE THE SHIPPED ONE — hooks/ beside scripts/lib/ —
+# because the loader's first candidate is `$(dirname "$0")/../scripts/lib`. A copy alone in
+# the sandbox root finds nothing there and its healing candidates reach the plugin
+# INSTALLED on this machine, whose library is whatever was last published; a mutant that
+# cannot load its own library fails OPEN, exits 0, and this arm then reports "the consume
+# did not refuse" while measuring the loader instead. Measured in epic-23 wave-11, when the
+# guard took `context.sh`: `BIONIC_LIB_MISSING=context.sh`, exit 0, C3 red for the wrong
+# reason.
+#
+# THE BASENAMES ARE DERIVED FROM THE GUARD'S OWN `BIONIC_LIB_WANT`, never typed, and the
+# anchor below fails loudly if one did not arrive — a hand-written list is a second
+# declaration of the guard's dependencies that nothing keeps in step.
+MUTANT_TREE="$SANDBOX/consume-mutant"
+mkdir -p "$MUTANT_TREE/hooks" "$MUTANT_TREE/scripts/lib"
+for _sg_libdir in "$(dirname "$GUARD")/../scripts/lib" "$(dirname "$GUARD")/../payload/scripts/lib"; do
+  if [ -d "$_sg_libdir" ]; then cp "$_sg_libdir"/*.sh "$MUTANT_TREE/scripts/lib/" 2>/dev/null; break; fi
+done
+_sg_absent=""
+for _sg_b in $(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$GUARD" | head -1); do
+  [ -r "$MUTANT_TREE/scripts/lib/$_sg_b" ] || _sg_absent="$_sg_absent $_sg_b"
+done
+expect_eq "every library the guard declares travels with its mutant copy" "" \
+  "$(printf '%s' "${_sg_absent# }")"
+MUTANT="$MUTANT_TREE/hooks/stop-guard.consume-fails.sh"
 sed 's|mv -f "$TMP" "$STATE_FILE" 2>/dev/null|mv -f "$TMP" "/nonexistent-dir-0xdead/x" 2>/dev/null|' \
   "$GUARD" > "$MUTANT"
 
@@ -881,7 +911,7 @@ section "Section 8: D-3 — a stop is discharged only by the STOPPER'S OWN look 
 # The borrowed look. D-1 makes an observation perishable, but nothing made it
 # ATTRIBUTABLE: any record for the target discharged any actor's stop, so a
 # subagent's look could pay for the orchestrator's stop and neither one had seen
-# what the other saw. Slice 4/1 resolved assumption (A) FULL — a subagent-invoked
+# what the other saw. Task 4/1 resolved assumption (A) FULL — a subagent-invoked
 # payload carries top-level `agent_id`, the orchestrator's does not — so the
 # comparison is one payload field against the `observer=` field the recorder
 # wrote out of ITS payload. Same key, both ends.
@@ -930,7 +960,7 @@ section "Section 9: D-6 — the contracted progress artifact is a second activit
 # inside a single tool call writes nothing to it, so "dormant since your look"
 # was true of a wedged agent and a working one alike — and the work contract's
 # own progress artifact, the thing that separates them, counted for nothing at
-# the gate. Since slice 4/5 the observation records the progress state it saw;
+# the gate. Since task 4/5 the observation records the progress state it saw;
 # this gate compares that snapshot against the artifact as it is NOW, by exactly
 # the rule the working log already follows: any activity after the look stales
 # the look.
@@ -977,7 +1007,7 @@ run_guard "$(mk_stop_payload "$SID_A" "$PA_TR" "$PA_REPO" "runner")"
 expect_status "the contracted artifact appearing after the look: REFUSED" 2 "$GUARD_ST"
 
 # NO progress contract: the whole check is inert, and the world behaves exactly
-# as it did before this slice. A wall that fires where nothing was contracted
+# as it did before this task. A wall that fires where nothing was contracted
 # would refuse every ordinary stop.
 IFS='|' read -r PN_REPO PN_TR PN_SUB <<< "$(make_world progressnone yes)"
 plant_agent "$PN_SUB" "arunner-1414141414141414" "runner"
@@ -993,7 +1023,7 @@ expect_status "no progress contract: an unrelated file's write changes nothing" 
 # stale, so without this clause the check above is dodgeable by simply looking wrong.
 #
 # HOW THE LOOK MISSES IT, since S6. It used to be an observation run with no session key at
-# all — the `unknown` classification of slice 4/5, which saw no roster and so no contracted
+# all — the `unknown` classification of task 4/5, which saw no roster and so no contracted
 # path. That state is gone: with no session key there is no transcript, no live set, and
 # hooks/stop-check.sh refuses before it resolves anything, so a keyless look now produces no
 # record rather than an incomplete one. What still produces one is ORDER: the look ran while
@@ -1051,7 +1081,7 @@ fi
 echo "the delivered artifact" > "$LV_REPO/.bionic/docs/record/w1-rc.md"
 # `adopted_from` is what put BOTH directories in scope for the old scan — the successor
 # session took the row over after a /clear — and it is what made the double file a
-# MATCH_COUNT=2 ambiguity there. It stays on the row: after this slice it is read only for
+# MATCH_COUNT=2 ambiguity there. It stays on the row: after this task it is read only for
 # the session the working log is filed under, never for resolution.
 sg_roster_row "$LV_REPO" "$SID_A" "w1-rc" "aw1-rc-e0886335875ba2d1" "" "confirmed" \
   ".bionic/docs/record/w1-rc.md" "" "" "$SID_B"
@@ -1126,7 +1156,7 @@ expect_status "a live agent with no confirmed id on the roster: REFUSED" 2 "$GUA
 expect_contains "…and the refusal names the missing fact" "no agent id" "$GUARD_VERR"
 
 # …and an `intended` row is still not an ownership claim: its id is a claim about a launch
-# nothing has observed. Unchanged from slice 4/9, on the channel that now carries it.
+# nothing has observed. Unchanged from task 4/9, on the channel that now carries it.
 sg_roster_row "$LV_REPO" "$SID_A" "unrostered" "aunrostered-8888888888888888" "" "intended"
 run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "unrostered")"
 expect_status "an INTENDED row's id establishes nothing: still REFUSED" 2 "$GUARD_ST"
@@ -1141,7 +1171,7 @@ expect_status "an IDENTIFIED row's id makes the target observable: PERMITTED" 0 
 expect_empty "…and permitted in silence" "$GUARD_ERR"
 
 # (e) THE TRANSCRIPT-FORM ID still addresses an agent, by way of the roster row that carries
-# it — this slice moved where the id comes from, it did not retire the spelling.
+# it — this task moved where the id comes from, it did not retire the spelling.
 observe "$SID_A" "$LV_TR" "$LV_REPO" "unrostered"
 run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "aunrostered-8888888888888888")"
 expect_status "the transcript-form id resolves through the roster row: PERMITTED" 0 "$GUARD_ST"

@@ -20,7 +20,12 @@ set -euo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/bound-marker.sh"
 
-HOOK="${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh"
+# THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23). This wall is a
+# FUNCTION now — `wall_evidence_gate` in payload/scripts/lib/walls.sh — registered through
+# the one PreToolUse|Bash command object that carries all five. Every case below drives
+# that process, which is what a Bash tool call actually starts; the wall's own verdict is
+# unchanged and tests/bash-walls.test.sh owns the composition the process adds.
+HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
 # ---------- helpers ----------
 
@@ -42,7 +47,7 @@ trap cleanup EXIT
 slug_for() { printf '%s-%s' "$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')" \
                             "$(printf '%s' "$1" | cksum | cut -d' ' -f1)"; }
 # $1 = sandbox HOME, $2 = the audit_root the hook resolved (the plan's project).
-# THE SLUG IS TAKEN OVER THE CANONICAL PATH (bionic 1.4.0, slice ADOPT). The hook
+# THE SLUG IS TAKEN OVER THE CANONICAL PATH (bionic 1.4.0, task ADOPT). The hook
 # now resolves its root through lib/root.sh's `project_root`, which answers with
 # `pwd -P` — so on a machine where the fixture root sits under a symlinked prefix
 # (macOS: /var/folders -> /private/var/folders, which mktemp -d hands back
@@ -57,13 +62,30 @@ audit_file_for() {
 # Creates an isolated $HOME-equivalent that is ALSO usable as the project the
 # single-argument runners gate against: an empty ~/.claude/plans/ (never
 # searched — see write_global_note) plus an empty .bionic/docs/plans/ (searched).
+#
+# Also seeds the one shared proof file (1a, D5) that every fixture matrix's
+# `evidence: record/generic-evidence.md` line resolves to — write_generic_evidence()
+# below is the single writer, so a fixture needing a DIFFERENT evidence path
+# (or none at all) still gets this default for free and only overrides it when
+# the case is actually about the evidence arm itself (Section 39).
 make_home() {
   local dir
   dir=$(mktemp -d)
   mkdir -p "$dir/.claude/plans" "$dir/.bionic/docs/plans"
+  write_generic_evidence "$dir"
   engage "$dir"
   cleanup_dirs+=("$dir")
   echo "$dir"
+}
+
+# The default proof file every 'evidence: record/generic-evidence.md' fixture
+# line resolves to (1a, D5) — non-empty, so it also clears the file-existence
+# check, never the file-content check (this gate demands no content shape).
+write_generic_evidence() {
+  local dir="$1"
+  mkdir -p "$dir/.bionic/docs/record"
+  printf 'generic fixture proof — this suite tests the gate, not the artifact.\n' \
+    > "$dir/.bionic/docs/record/generic-evidence.md"
 }
 
 # ---------- engagement (task-engaged-session, AC-6) ----------
@@ -89,6 +111,7 @@ make_project() {
   local dir
   dir=$(mktemp -d)
   mkdir -p "$dir/.bionic/docs/plans"
+  write_generic_evidence "$dir"
   engage "$dir"
   cleanup_dirs+=("$dir")
   echo "$dir"
@@ -154,7 +177,7 @@ split_stderr() {  # <file> -> HOOK_RESOLUTION + HOOK_STDERR
   HOOK_STDERR=$(printf '%s\n' "$raw" | grep -v -E "$EG_RESOLUTION_RE" || true)
 }
 
-# THE VERBOSE STREAM (slice 13, ruling D-1). This gate's refusal is now ONE line —
+# THE VERBOSE STREAM (task 13, ruling D-1). This gate's refusal is now ONE line —
 # `bionic: commit refused — <fact> (<fix>)` — and everything this suite reads off a
 # refusal (the task id, the rigor values, the matrix row, the evidence key, the walk
 # path, the missing fields, the plan path, the Fix prose) is `detail`, which reaches a
@@ -234,7 +257,7 @@ expect_allow() {
   fi
 }
 
-# THE TWO STREAMS, AND WHICH ONE EACH HALF READS (slice 13, ruling D-1). A refusal is
+# THE TWO STREAMS, AND WHICH ONE EACH HALF READS (task 13, ruling D-1). A refusal is
 # now ONE line on the user stream, `bionic: commit refused — <fact> (<fix>)`, and every
 # value a caller here names — a task id, a rigor cell, a matrix row, an evidence key, a
 # walk path, a missing field — is `detail`, which travels only under
@@ -323,7 +346,13 @@ Step 5: TODO" > /dev/null
 
 expect_allow "ls command — not a commit" "$h1" "ls /tmp"
 expect_allow "git status — not a commit" "$h1" "git status"
-expect_allow "git push — not a commit" "$h1" "git push origin main"
+# THE DESTINATION IS A FEATURE BRANCH, AND ONLY SINCE T23. This row is about "a push is
+# not a commit", and the destination was incidental — but hooks/protect-main.sh is a
+# function in the same process now, and it refuses a push to main in every project on the
+# machine, which it did as a separate process before this suite ever saw the payload. A
+# row that kept `origin main` would be asserting the GATE's silence through another wall's
+# refusal, which is a green that proves a different line than the one it names.
+expect_allow "git push — not a commit" "$h1" "git push origin feature/x"
 
 # ============================================================
 # Section 2: commit with no plans directory / no plans
@@ -798,6 +827,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -805,6 +835,7 @@ AC-1:
   readback: panel.visible === true via page eval
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
@@ -820,6 +851,7 @@ stack-health: n/a: no long-running serve
 
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 332/332 asserted"
 
@@ -834,6 +866,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a
   cold-client: fresh incognito profile
@@ -851,6 +884,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a
   cold-client: fresh incognito profile
@@ -869,6 +903,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: suite: hermetic-x
   readback: 12/12 asserted"
 
@@ -885,6 +920,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -892,6 +928,7 @@ AC-1:
   readback: panel.visible === true via page eval
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
@@ -908,6 +945,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -915,6 +953,7 @@ AC-1:
   readback: panel.visible === true via page eval
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
@@ -927,6 +966,7 @@ matrix_no_stackhealth="## Verification Matrix
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted"
 
@@ -941,6 +981,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted"
 
@@ -957,15 +998,18 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit
   readback: 40/40 asserted
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: playwright hermetic run
   readback: rendered rows === 5
   fixture-fidelity: derived from captured prod payload 2026-07-10
 AC-3:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: pnpm build && tsc
   readback: 0 type errors"
 
@@ -980,6 +1024,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted
 
@@ -996,6 +1041,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted
 
@@ -1013,6 +1059,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: x
   fresh: x
   cold-client: x
@@ -1052,6 +1099,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: status pending → done, 40/40 asserted"
 h17c2=$(make_home)
@@ -1083,6 +1131,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a
   cold-client: fresh incognito profile
@@ -1103,6 +1152,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a
   cold-client: fresh incognito profile
@@ -1241,6 +1291,7 @@ stack-health: before: process restarts 0; walk in progress
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -1259,6 +1310,7 @@ v101_matrix_bad_status="${v101_matrix_pending/| AC-2 | T3 | pending | see AC-2 |
 v101_matrix_pending_partial="$v101_matrix_pending
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   contact: n/a: staging origin down"
 
 # 17n — pending row, no AC block, current: 5 → allow (mid-walk commit home).
@@ -1312,18 +1364,18 @@ write_plan "$h17q" "$(plan 6 "$step6_body" "$v101_matrix_pending")" > /dev/null
 expect_block "17q pending row at current 6 → block (relaxation is 5-only)" \
   "$h17q" 'git commit -m "x"' "AC-2"
 
-# --- 17r: `slice: 9` rows — evidence only Step 9 can produce --------------
+# --- 17r: `task: 9` rows — evidence only Step 9 can produce --------------
 #
 # A criterion whose only evidence is a Step-9 lifecycle artifact (the close-out
 # report, continuation.md, the ADR the close-out writes) cannot be discharged
 # while the plan sits at Steps 5..8: the artifact it would cite does not exist
-# yet. Such a row declares `slice: 9` in its AC block — parsed like
+# yet. Such a row declares `task: 9` in its AC block — parsed like
 # `provenance:`, never a sixth table cell (the 7-field row pin would refuse
 # every row) — and is then exempt from TWO separate arms while current < 9:
 # the per-tier evidence keys, and the CONFIRMED/auditor wall that bites at
 # current > 5. At current: 9 the artifact exists and the row is ordinary.
 # The tag is T0-only: every other tier names evidence that exists before Step
-# 9, so `slice: 9` there is a mis-tag and blocks, naming the tier.
+# 9, so `task: 9` there is a mis-tag and blocks, naming the tier.
 
 # T0 pending row whose AC block is the tag, beside a fully discharged T3 row
 # so the rest of the matrix is valid (matrix_complete's shape, which 17f2
@@ -1339,6 +1391,7 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: https://app.example/panel — opened the panel
   fresh: origin A rebuilt token-9f3a; origin B cdn purged
   cold-client: fresh incognito profile, no SW cache
@@ -1346,12 +1399,13 @@ AC-1:
   readback: panel.visible === true via page eval
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   provenance: spec §Close-out obligations
-  slice: 9"
+  task: 9"
 
 # The same matrix with the tag replaced by an ordinary line — the control that
 # keeps every allow below non-vacuous: untagged, this row blocks at current 6.
-v9_matrix_untagged="${v9_matrix/  slice: 9/  note: written at close-out}"
+v9_matrix_untagged="${v9_matrix/  task: 9/  note: written at close-out}"
 
 # The tag on a tier that has evidence before Step 9 — a mis-tag.
 v9_matrix_t1="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T1 | pending | see AC-2 |  |}"
@@ -1359,7 +1413,7 @@ v9_matrix_t4="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T4 | pe
 
 # The tagged row once Step 9 has run: discharged, T0 keys present, CONFIRMED.
 v9_matrix_discharged="${v9_matrix/| AC-2 | T0 | pending | see AC-2 |  |/| AC-2 | T0 | discharged | see AC-2 | CONFIRMED |}"
-v9_matrix_discharged="${v9_matrix_discharged/  slice: 9/  slice: 9
+v9_matrix_discharged="${v9_matrix_discharged/  task: 9/  task: 9
   tier-run: read .bionic/docs/record/wave-01/close-out.md
   readback: close-out names all 9 steps and the continuation}"
 
@@ -1374,17 +1428,17 @@ v9_step9_body="  delivered: close-out report and continuation.md written"
 # 17r — the exemption holds at every post-Verify step before 9 (AC-6).
 h17r6=$(make_home)
 write_plan "$h17r6" "$(plan 6 "$step6_body" "$v9_matrix")" > /dev/null
-expect_allow "17r T0 pending row with slice: 9 at current 6 → allow" \
+expect_allow "17r T0 pending row with task: 9 at current 6 → allow" \
   "$h17r6" 'git commit -m "x"'
 
 h17r7=$(make_home)
 write_plan "$h17r7" "$(plan 7 "$v9_step7_body" "$v9_matrix")" > /dev/null
-expect_allow "17r T0 pending row with slice: 9 at current 7 → allow" \
+expect_allow "17r T0 pending row with task: 9 at current 7 → allow" \
   "$h17r7" 'git commit -m "x"'
 
 h17r8=$(make_home)
 write_plan "$h17r8" "$(plan 8 "$v9_step8_body" "$v9_matrix")" > /dev/null
-expect_allow "17r T0 pending row with slice: 9 at current 8 → allow" \
+expect_allow "17r T0 pending row with task: 9 at current 8 → allow" \
   "$h17r8" 'git commit -m "x"'
 
 # 17r — control: the SAME row without the tag blocks at current 6, so the
@@ -1398,14 +1452,14 @@ expect_block "17r untagged T0 pending row at current 6 → block (control)" \
 # pending state blocks (AC-7).
 h17r9=$(make_home)
 write_plan "$h17r9" "$(plan 9 "$v9_step9_body" "$v9_matrix")" > /dev/null
-expect_block "17r slice: 9 row still pending at current 9 → block" \
+expect_block "17r task: 9 row still pending at current 9 → block" \
   "$h17r9" 'git commit -m "x"' "AC-2"
 
 # 17r — and discharging it the ordinary way at current: 9 passes, so the block
 # above is the row's state and not the tag becoming poison.
 h17r9d=$(make_home)
 write_plan "$h17r9d" "$(plan 9 "$v9_step9_body" "$v9_matrix_discharged")" > /dev/null
-expect_allow "17r slice: 9 row discharged + CONFIRMED at current 9 → allow" \
+expect_allow "17r task: 9 row discharged + CONFIRMED at current 9 → allow" \
   "$h17r9d" 'git commit -m "x"'
 
 # 17r — the tag on T1..T4 is a mis-tag: block, naming the tier (AC-8).
@@ -1414,19 +1468,19 @@ write_plan "$h17rt1" "$(plan 6 "$step6_body" "$v9_matrix_t1")" > /dev/null
 # Substring is the tag, not the tier: today's missing-key refusal for this row
 # ALSO contains "T1", so a tier-only assertion would pass for the wrong reason.
 # The current-5 case below is where "names the tier" discriminates.
-expect_block "17r slice: 9 on a T1 row at current 6 → block naming the tier" \
-  "$h17rt1" 'git commit -m "x"' "slice: 9"
+expect_block "17r task: 9 on a T1 row at current 6 → block naming the tier" \
+  "$h17rt1" 'git commit -m "x"' "task: 9"
 
 h17rt4=$(make_home)
 write_plan "$h17rt4" "$(plan 6 "$step6_body" "$v9_matrix_t4")" > /dev/null
-expect_block "17r slice: 9 on a T4 row at current 6 → block naming the tier" \
-  "$h17rt4" 'git commit -m "x"' "slice: 9"
+expect_block "17r task: 9 on a T4 row at current 6 → block naming the tier" \
+  "$h17rt4" 'git commit -m "x"' "task: 9"
 
 # 17r — the mis-tag is a shape error, so it fires at the Verify gate too,
 # where a pending row is otherwise exempt from everything.
 h17rt5=$(make_home)
 write_plan "$h17rt5" "$(plan 5 "$step5_base" "$v9_matrix_t1")" > /dev/null
-expect_block "17r slice: 9 on a T1 row at current 5 → block naming the tier" \
+expect_block "17r task: 9 on a T1 row at current 5 → block naming the tier" \
   "$h17rt5" 'git commit -m "x"' "T1"
 # ============================================================
 # Section 18: matrix parser — section scoping + fenced-code skip
@@ -1502,6 +1556,7 @@ $v10_fence_block
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: x
   fresh: x
   cold-client: x
@@ -1528,6 +1583,7 @@ $v10_fence_block
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh
   readback: 40/40 asserted"
 
@@ -1692,7 +1748,7 @@ task_plan() {
 
 # A task-scale plan at a caller-chosen frontmatter rigor (frontmatter
 # hardcodes audited). $1 rigor, $2 body. Used to pin the log-only ledger-shape
-# path that slice 4/3 promotes to BLOCKING only under frontmatter rigor:
+# path that task 4/3 promotes to BLOCKING only under frontmatter rigor:
 # audited — a non-audited plan keeps logging findings.
 task_frontmatter_rigor() {  # $1 rigor
   printf -- '---\n'
@@ -1780,7 +1836,7 @@ expect_allow "19d task plan current: T2 valid ledger → allow (T-format accepte
   "$h19d" 'git commit -m "x"'
 
 # 19e — no ## Tasks section on a NON-audited plan → exit 0 + task-ledger finding
-# (log-only). Slice 4/3 promotes this check to BLOCKING under frontmatter
+# (log-only). Task 4/3 promotes this check to BLOCKING under frontmatter
 # rigor: audited (pinned by 22c5); a peer-reviewed plan keeps logging.
 ledger_no_tasks="## SDLC State
 
@@ -1803,7 +1859,7 @@ expect_audit_line "19e2 missing ## Tasks → audit file line (evidence-gate task
   "$h19e2" 'git commit -m "x"' "evidence-gate task-ledger:"
 
 # 19f — status outside the enum (doing) on a NON-audited plan → exit 0 + finding
-# (log-only). Slice 4/3 blocks this under rigor: audited (pinned by 22c1).
+# (log-only). Task 4/3 blocks this under rigor: audited (pinned by 22c1).
 ledger_bad_status="${ledger_valid/| T2 | refactor | peer-reviewed | extract the ledger helper | active |/| T2 | refactor | peer-reviewed | extract the ledger helper | doing |}"
 h19f=$(make_home)
 write_plan "$h19f" "$(task_plan_rigor tested "$ledger_bad_status")" > /dev/null
@@ -1811,7 +1867,7 @@ expect_finding "19f invalid status 'doing' (non-audited) → exit 0 + task-ledge
   "$h19f" 'git commit -m "x"' "task-ledger"
 
 # 19g — the ADDRESSED active task (T2, current: T2) with no `- T2:` evidence
-# line → BLOCK. Slice 4/1 made the addressed-unit tested floor blocking; this
+# line → BLOCK. Task 4/1 made the addressed-unit tested floor blocking; this
 # case previously logged a finding (see Section 22 for the full lane coverage).
 ledger_active_no_line="## Tasks
 
@@ -1833,7 +1889,7 @@ expect_block "19g addressed active task without evidence line → block" \
   "$h19g" 'git commit -m "x"' "evidence line"
 
 # 19h — the ADDRESSED active task (T2) with a placeholder evidence value
-# (`- T2: TBD`) → BLOCK (slice 4/1 blocking floor; previously a finding).
+# (`- T2: TBD`) → BLOCK (task 4/1 blocking floor; previously a finding).
 ledger_active_placeholder="${ledger_valid/- T2: bash extract-helper.sh 4 cases green, commit def456/- T2: TBD}"
 h19h=$(make_home)
 write_plan "$h19h" "$(task_plan_rigor tested "$ledger_active_placeholder")" > /dev/null
@@ -1841,7 +1897,7 @@ expect_block "19h addressed active task placeholder evidence → block" \
   "$h19h" 'git commit -m "x"' "placeholder"
 
 # 19i — done non-addressed task (T1) with an empty evidence line (`- T1:`) on a
-# NON-audited plan → finding (log-only). Slice 4/3 blocks this under rigor:
+# NON-audited plan → finding (log-only). Task 4/3 blocks this under rigor:
 # audited (pinned by 22c3).
 ledger_done_empty="${ledger_valid/- T1: fixed in commit abc123, suite 5\/5 green/- T1:}"
 h19i=$(make_home)
@@ -2321,6 +2377,7 @@ echo ""
 ac10_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$ac10_tmp")
 ac10_main="$ac10_tmp/main"
 mkdir -p "$ac10_main/.bionic/docs/plans" "$ac10_main/deep/sub/dir"
+write_generic_evidence "$ac10_main"
 git -C "$ac10_main" init -q .
 git -C "$ac10_main" commit -q --allow-empty -m init
 git -C "$ac10_main" worktree add -q "$ac10_tmp/wt" -b ac10-wt
@@ -2351,12 +2408,12 @@ fi
 # Section 22: rigor-keyed ledger lanes
 # ============================================================
 #
-# Slice 4/1 makes the task-ledger tested floor BLOCKING for THE ADDRESSED
+# Task 4/1 makes the task-ledger tested floor BLOCKING for THE ADDRESSED
 # UNIT ONLY (the T<n> named by `current: T<n>`). For that one task the gate now
 # exits 2 when: its row is absent from `## Tasks`; its `- T<n>:` evidence line
 # is missing or a placeholder; or its rigor cell fails `effective_row_rigor`
 # (a non-empty cell outside tested|peer-reviewed|audited → INVALID). Every OTHER
-# row keeps its log-only handling (D14) at this slice — 22a6 pins that scope.
+# row keeps its log-only handling (D14) at this task — 22a6 pins that scope.
 
 section "Section 22: rigor-keyed ledger lanes"
 
@@ -2468,7 +2525,7 @@ expect_block "22a5 addressed unit T2 invalid rigor cell → block" \
 # while the addressed unit T2 is honest → NO block on a NON-audited plan. The
 # non-addressed row keeps its log-only handling (this exits 0 with a task-ledger
 # finding, not a block), pinning the addressed-unit-only scope of the 4/1
-# blocking floor. NB: slice 4/3 makes this same NON-addressed check BLOCKING
+# blocking floor. NB: task 4/3 makes this same NON-addressed check BLOCKING
 # under frontmatter rigor: audited (pinned by 22c3), so this fixture is
 # deliberately NON-audited (tested) to keep exercising the surviving log-only
 # lane. Tested also keeps every cell at the floor so the 4/8 downgrade gate
@@ -2493,9 +2550,9 @@ write_plan "$h22a6" "$(task_plan_rigor tested "$v22_nonaddressed_broken")" > /de
 expect_finding "22a6 broken non-addressed row (T1) + honest T2 (non-audited) → no block, log-only finding" \
   "$h22a6" 'git commit -m "x"' "task-ledger"
 
-# --- 22b: proof-shape + auditor/critic lanes (slice 4/2) ------------------
+# --- 22b: proof-shape + auditor/critic lanes (task 4/2) ------------------
 #
-# Lane scope (D-slice 4/2): the addressed row (any status) AND every OTHER
+# Lane scope (D-task 4/2): the addressed row (any status) AND every OTHER
 # row with status `done` are subject to — effective rigor peer-reviewed OR
 # audited: evidence must be proof-shaped (is_proof_shaped); done AND rigor
 # >= peer-reviewed: evidence must contain "auditor"; done AND rigor audited:
@@ -2506,7 +2563,7 @@ expect_finding "22a6 broken non-addressed row (T1) + honest T2 (non-audited) →
 # so each heavier cell (peer-reviewed/audited) is a RAISE above the floor — the
 # CELL drives the lane, and the 4/8 downgrade gate never fires (raises are always
 # free). This isolates the lane behavior from the floor check. (Was
-# task_plan / audited before slice 4/8, where a tested/peer-reviewed cell
+# task_plan / audited before task 4/8, where a tested/peer-reviewed cell
 # would now be a blocking downgrade and mask the lane under test.)
 
 # 22b1 — addressed row (peer-reviewed, active) with prose evidence (no digit,
@@ -2705,7 +2762,7 @@ write_plan "$h22b8b" "$(task_plan_rigor tested "$v22b_t2_no_command")" > /dev/nu
 expect_block "22b8b proof-shape pin: digit, no command token → block" \
   "$h22b8b" 'git commit -m "x"' "not prose"
 
-# --- 22c: audited plan-level strictness + wave D7 dispatch-ledger (slice 4/3) -
+# --- 22c: audited plan-level strictness + wave D7 dispatch-ledger (task 4/3) -
 #
 # Part A (task scale): the previously log-only NON-addressed-row ledger-shape
 # checks (missing ## Tasks, bad status enum, active/done row missing/placeholder
@@ -2816,7 +2873,7 @@ d7_wave_plan() {
   local tasks="$1" extra_state="$2" rigor="${3:-audited}" multi="${4:-true}"
   printf '%s\n' "$(d7_wave_frontmatter "$rigor" "$multi")"
   [ -n "$tasks" ] && printf '%s\n\n' "$tasks"
-  # Both K5 (this slice) and K2 (slice 16) scope-match this fixture (rigor:audited +
+  # Both K5 (this task) and K2 (task 16) scope-match this fixture (rigor:audited +
   # multi_agent:true + wave, at current: 5 >= 4): K5/AC-K5.2 needs the Step-1
   # requirements: pointer (resolves to the plan file itself — project-relative; this
   # fixture's own subject is D7, not K5, so a real file is all the arm demands, not a
@@ -2833,11 +2890,13 @@ expect_block "22c5 audited multi_agent wave with no ## Tasks → block (D7 prese
   "$h22c5" 'git commit -m "x"' "dispatched-task ledger"
 
 # 22c6 — WITH a ## Tasks section, header-only + a `none dispatched` line, zero
-# T-rows → allow (section present suffices; the parser needs no row).
+# T-rows → allow (section present suffices; the parser needs no row). The header
+# is the widened ten-column schema REQ-1e made the one Tasks shape; a header short
+# of it is a `missing column` violation now, pinned by 22e2 below.
 tasks_none="## Tasks
 
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
 
 none dispatched — the orchestrator appends one row per dispatched task-shaped unit."
 h22c6=$(make_home)
@@ -2850,9 +2909,9 @@ expect_allow "22c6 audited multi_agent wave with none-dispatched ## Tasks → al
 # yet it passes — tested-floor shape only at wave scale (pins Assumption A2).
 tasks_one_done="## Tasks
 
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
-| T1 | build | audited | dispatched slice | done |"
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | landed |"
 h22c7=$(make_home)
 write_plan "$h22c7" "$(d7_wave_plan "$tasks_one_done" "- T1: bash suite 9/9 green")" > /dev/null
 expect_allow "22c7 audited multi_agent wave dispatched T1 + evidence line → allow (tested-floor shape, no auditor/critic)" \
@@ -2886,18 +2945,149 @@ expect_allow "22c10 audited wave with multi_agent:false, no ## Tasks → allow (
 # steps into the dispatcher.
 tasks_selfref="## Tasks
 
-| id | intent | rigor | description | status |
-|---|---|---|---|---|
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
 
 none dispatched — D7 ledger opens empty; the orchestrator appends one row
-per dispatched task-shaped unit (slices ledger under Step-4 evidence, not
+per dispatched task-shaped unit (work ledgered under Step-4 evidence, not
 here, unless dispatched as discrete task-shaped work)."
 h22c11=$(make_home)
 write_plan "$h22c11" "$(d7_wave_plan "$tasks_selfref" "")" > /dev/null
 expect_allow "22c11 self-reference pin — THIS plan's exact ## Tasks shape (zero T-rows) → allow" \
   "$h22c11" 'git commit -m "x"'
 
-# ---- 22d: per-row rigor resolution (slice 4/4, R4) ------------------------
+# 22c12 (base-faithful presence, correctness F-1) — a `## Tasks` section carrying
+# PROSE and NO header row at all → allow. D7's presence rule is a question about the
+# SECTION, not about the table: rule 2 of this function's own docblock, and the shape
+# its own Fix text advertises ("a header plus a 'none dispatched' line is fine").
+# 22c6 and 22c11 both carry a ten-column header AND a `|---|` separator, so neither
+# can tell a section-basis presence test from a table-basis one; this fixture can.
+tasks_prose_only="## Tasks
+
+none dispatched — no task-shaped unit has been dispatched on this wave yet."
+h22c12=$(make_home)
+write_plan "$h22c12" "$(d7_wave_plan "$tasks_prose_only" "")" > /dev/null
+expect_allow "22c12 audited multi_agent wave, ## Tasks prose with NO header row → allow (presence is the section, not the table)" \
+  "$h22c12" 'git commit -m "x"'
+
+# 22c13 — a `## Tasks` heading with an EMPTY section (nothing between it and the
+# next `##`) → block. The other half of the base rule: empty is not fine, only a
+# section with content is. 22c5 pins the ABSENT half.
+h22c13=$(make_home)
+write_plan "$h22c13" "$(d7_wave_plan "## Tasks" "")" > /dev/null
+expect_block "22c13 audited multi_agent wave, ## Tasks heading with an empty section → block (D7 presence)" \
+  "$h22c13" 'git commit -m "x"' "dispatched-task ledger"
+
+# ---- 22e: the wave's TEN-column ## Tasks table (REQ-1e, AC-1e.3) ----------
+#
+# THE SELF-REFERENCE PIN THIS WAVE NEEDS. 22c11 pinned the five-column shape
+# `| id | intent | rigor | description | status |` the D7 ledger shipped with;
+# REQ-1e widens it to `| id | step | kind | task | agent | deps | size | serves
+# | Files | status |`, which puts `agent` where the old positional read took
+# `status` ($6) and `kind` where it took `rigor` ($4). Measured before the fix
+# (record/wave-11-lean-spine/step1-measure-1a-1e.md §4.3): every row of this
+# table fails the status enum, on this wave's own plan, at its own next commit.
+#
+# The table below is wave-11-lean-spine's OWN `## Tasks` section, copied
+# verbatim, on an audited multi_agent wave fixture at current: 5 — the exact
+# triple that arms validate_dispatch_ledger. It carries `landed`, the status the
+# widened schema uses and the old enum (pending|active|done|dropped) does not.
+IFS= read -r -d '' tasks_ten_column <<'TEN_COLUMN_EOF' || true
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 3 | doc | Plan, Tasks and matrix written; Step-3 card approved | orchestrator | — | 30m | all | plan | landed |
+| T2 | 4 | build | 1d: `disable-model-invocation: true` on the five command templates; re-render; frontmatter pin | orchestrator | T1 | 15m | REQ-1d | agents-src/templates/commands/*.tmpl, payload/commands/*.md, payload/integrity/rendered.sha256, tests/docs-pins.test.sh | landed |
+| T3 | 4 | build | 1c-a: survival renders once to payload/context/survival.md; auditor mandate moved the same way; role templates ≤5 KB with a one-line pointer; §5 writer rules as defaults; PIPESTATUS fixed; six pins re-pointed | senior-implementor | T1 | 60m | REQ-1c | agents-src/blocks/survival.md, agents-src/templates/*.md.tmpl, agents-src/render.sh, agents/*.md, payload/context/survival.md, tests/docs-pins.test.sh, tests/render.test.sh, payload/integrity/rendered.sha256 | landed |
+| T4 | 4 | build | 1c-b: SubagentStart hook injects survival for bionic:* agents, self-attributed first line; stdout-equals-file pin | implementor | T3 | 45m | REQ-1c | hooks/execution-recorder.sh, tests/execution-recorder.test.sh | landed |
+| T5 | 4 | build | 1b: core + steps/0–9 + dispatch.md from the template; render.sh unit rows; 168 pins re-pointed, 4 structural ones rewritten; prune to caps; session-start pointer line | senior-implementor | T1 | 120m | REQ-1b | agents-src/templates/skills/canonical-sdlc/, agents-src/render.sh, skills/canonical-sdlc/, tests/docs-pins.test.sh, tests/render.test.sh, payload/integrity/rendered.sha256, hooks/session-start.sh | landed |
+| T6 | 4 | build | 1a: three prose surfaces re-pointed to record/ paths; evidence-gate fixtures (path-cited ≤40 KB passes; empty evidence value fails) | implementor | T3, T5 | 45m | REQ-1a | agents-src/blocks/critic-template.md, agents-src/templates/senior-implementor.md.tmpl, agents-src/templates/skills/canonical-sdlc/steps/, tests/canonical-sdlc-evidence-gate.test.sh | landed |
+| T7 | 4 | build | 1e-a: lib/units.sh (units_rows, units_ready, units_validate) TDD from tests/units.test.sh; domain dictionary entry | senior-implementor | T1 | 60m | REQ-1e | payload/scripts/lib/units.sh, tests/units.test.sh, design/domain-dictionary.md | landed |
+| T8 | 4 | build | 1e-b: callers onto units.sh (gate ledger checks + prototype check, tick FILL, governing-skill Step-3 wall); the retired word becomes task everywhere; fixtures migrated; differential vs old parsers on the specimen plan | senior-implementor | T6, T7 | 120m | REQ-1e | hooks/canonical-sdlc-evidence-gate.sh, hooks/session-poker.sh, hooks/canonical-sdlc-governing-skill.sh, hooks/dispatch-preflight.sh, tests/canonical-sdlc-evidence-gate.test.sh, tests/session-poker.test.sh, tests/canonical-sdlc-governing-skill.test.sh, tests/docs-pins.test.sh, agents-src/ | active |
+| T9 | 4 | build | 1f-a: remove the seven dead functions; stop-check.sh retained as the observation producer (census DELETE reversed) | implementor | T1 | 30m | REQ-1f | hooks/stop-check.sh, hooks/stop-guard.sh, payload/scripts/lib/, tests/ | landed |
+| T10 | 4 | build | 1f-b: lib/context.sh with bionic_context; fifteen hooks call it; no-inline-sequence pin | senior-implementor | T8, T9, T11 | 90m | REQ-1f | payload/scripts/lib/context.sh, hooks/*.sh, tests/cross-gate-agreement.test.sh | pending |
+| T11 | 4 | build | 1f-c: loader block ≤95 lines in loader.sh's heredoc and all 21 hooks; §N.1 pin and mutation arm green | senior-implementor | T1 | 60m | REQ-1f | payload/scripts/lib/loader.sh, hooks/*.sh, tests/cross-gate-agreement.test.sh | landed |
+| T12 | 4 | build | 1f-d: context-spend suite first (RED); lib/stop.sh four functions; hooks/stop.sh on Stop + SubagentStop with fold; differential vs the four originals; hooks.json ≤12 command objects | senior-implementor | T10 | 150m | REQ-1f | payload/scripts/lib/stop.sh, hooks/stop.sh, hooks/hooks.json, hooks/context-spend.sh, hooks/landing-gate.sh, hooks/patrol-duties-gate.sh, hooks/patrol-revive.sh, tests/stop.test.sh, tests/context-spend.test.sh, tests/ | pending |
+| T13 | 5 | verify | Walk: an agent that has not read the ACs drives the candidate by plugin-dir in a throwaway project and narrates; record/wave-11-lean-spine/walk.md | researcher | T2, T4, T5, T6, T8, T12, T22 | 30m | all | record/wave-11-lean-spine/walk.md | pending |
+| T14 | 5 | test | Tests floor: bash tests/run.sh in the wave worktree; census commands re-run; evidence/floor.md | test-runner | T2, T4, T5, T6, T8, T12, T22 | 40m | all | record/wave-11-lean-spine/evidence/floor.md | pending |
+| T15 | 5 | verify | Discharge the matrix: 22 static pins, 12 hermetic rows, 6 live drives; one evidence file per AC | orchestrator | T13, T14 | 90m | all | record/wave-11-lean-spine/evidence/ | pending |
+| T16 | 5 | verify | Auditor on the REQ-1e and REQ-1f rows (audited) and the wave verdict | auditor | T15 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/auditor.md | pending |
+| T17 | 6 | review | Six-axis self-review, one reviewer per axis in parallel at exec-complex | orchestrator | T16 | 45m | all | record/wave-11-lean-spine/review/ | pending |
+| T18 | 6 | review | Critic on T7–T12 (audited rows) | critic | T17 | 45m | REQ-1e, REQ-1f | record/wave-11-lean-spine/critic.md | pending |
+| T19 | 7 | doc | ADRs 001–004; spec adrs: pointer | orchestrator | T18 | 30m | D1, D3, D4, D5 | adrs/epic-23-bionic-tech-debt/ | pending |
+| T20 | 8 | integrate | Wake Note, then attended no-ff merge to main; writer worktrees and the wave worktree removed; tmp ephemera wiped | orchestrator | T19 | 20m | all | none | pending |
+| T22 | 4 | build | 1g: fix the doctor/setup agreement on the `motion` row so DS.2a/2c/9/11 pass on this machine; honour the 2026-08-22 ruling | senior-implementor | T1 | 60m | REQ-1g | payload/scripts/lib/deps.sh, payload/scripts/doctor.sh, payload/scripts/setup.sh, tests/cross-gate-agreement.test.sh | landed |
+| T21 | 9 | close | Close-out report with dispositions; continuation.md; archive_run; Patrol CronDelete + disarm | orchestrator | T20 | 30m | all | record/wave-11-lean-spine/closeout-report.md | pending |
+TEN_COLUMN_EOF
+IFS= read -r -d '' ten_column_evidence <<'TEN_COLUMN_EV_EOF' || true
+- T1: record/wave-11-lean-spine/briefs/T1-report.md, suites green
+- T2: record/wave-11-lean-spine/briefs/T2-report.md, suites green
+- T3: record/wave-11-lean-spine/briefs/T3-report.md, suites green
+- T4: record/wave-11-lean-spine/briefs/T4-report.md, suites green
+- T5: record/wave-11-lean-spine/briefs/T5-report.md, suites green
+- T6: record/wave-11-lean-spine/briefs/T6-report.md, suites green
+- T7: record/wave-11-lean-spine/briefs/T7-report.md, suites green
+- T8: record/wave-11-lean-spine/briefs/T8-report.md, suites green
+- T9: record/wave-11-lean-spine/briefs/T9-report.md, suites green
+- T10: record/wave-11-lean-spine/briefs/T10-report.md, suites green
+- T11: record/wave-11-lean-spine/briefs/T11-report.md, suites green
+- T12: record/wave-11-lean-spine/briefs/T12-report.md, suites green
+- T13: record/wave-11-lean-spine/briefs/T13-report.md, suites green
+- T14: record/wave-11-lean-spine/briefs/T14-report.md, suites green
+- T15: record/wave-11-lean-spine/briefs/T15-report.md, suites green
+- T16: record/wave-11-lean-spine/briefs/T16-report.md, suites green
+- T17: record/wave-11-lean-spine/briefs/T17-report.md, suites green
+- T18: record/wave-11-lean-spine/briefs/T18-report.md, suites green
+- T19: record/wave-11-lean-spine/briefs/T19-report.md, suites green
+- T20: record/wave-11-lean-spine/briefs/T20-report.md, suites green
+- T22: record/wave-11-lean-spine/briefs/T22-report.md, suites green
+- T21: record/wave-11-lean-spine/briefs/T21-report.md, suites green
+TEN_COLUMN_EV_EOF
+h22e1=$(make_home)
+write_plan "$h22e1" "$(d7_wave_plan "$tasks_ten_column" "$ten_column_evidence")" > /dev/null
+expect_allow "22e1 AC-1e.3 — the ten-column ## Tasks table on an audited multi_agent wave → allow" \
+  "$h22e1" 'git commit -m "x"'
+
+# 22e2 — THE DELEGATION IS LIVE, not decorative: the invariants this check used to
+# restate by hand are `units_validate`'s now, and a violation it alone knows about —
+# a dep naming no row — refuses, naming the id and the rule.
+tasks_dangling_dep="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the dispatched unit | implementor | T99 | 30m | REQ-x | a.sh | landed |"
+h22e2=$(make_home)
+write_plan "$h22e2" "$(d7_wave_plan "$tasks_dangling_dep" "- T1: bash suite 9/9 green")" > /dev/null
+expect_block "22e2 a dep naming no row in the ten-column ledger → block (delegated to units_validate)" \
+  "$h22e2" 'git commit -m "x"' "T99"
+
+# 22e3 — a header short of the ten columns is a `missing column` violation, which is
+# the AC-1e.5 wall's third case reaching the gate from the other side.
+tasks_missing_column="## Tasks
+
+| id | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|
+| T1 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | landed |"
+h22e3=$(make_home)
+write_plan "$h22e3" "$(d7_wave_plan "$tasks_missing_column" "- T1: bash suite 9/9 green")" > /dev/null
+expect_block "22e3 a ledger header missing the step column → block naming the column" \
+  "$h22e3" 'git commit -m "x"' "missing column step"
+
+# 22e4 — the control 22e1 needs on the OTHER variable: the same ten-column table with
+# one status nobody defines. An allow above must be earned by the table being valid,
+# not by the check having gone inert on a shape it no longer understands.
+tasks_bad_status="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | done |"
+h22e4=$(make_home)
+write_plan "$h22e4" "$(d7_wave_plan "$tasks_bad_status" "- T1: bash suite 9/9 green")" > /dev/null
+expect_block "22e4 status 'done' in the widened schema → block (the four are pending active landed dropped)" \
+  "$h22e4" 'git commit -m "x"' "status done is not one of"
+
+# ---- 22d: per-row rigor resolution (task 4/4, R4) ------------------------
 #
 # effective_row_rigor resolves cell-first: a non-empty, enum-valid cell wins
 # outright — it does NOT blend with, or get overridden by, the frontmatter
@@ -2940,7 +3130,7 @@ expect_block "22d1 frontmatter tested, cell peer-reviewed (heavier), prose evide
 # below the frontmatter rigor must be waived). WITHOUT a waiver marker on the
 # `- T1:` line it BLOCKS; WITH one it runs at the (lower) tested lane, so the
 # plain evidence is fine and it allows. (Was expect_allow under the pre-A15
-# "cell wins freely downward" model; slice 4/8 makes downward a recorded
+# "cell wins freely downward" model; task 4/8 makes downward a recorded
 # decision. 22d2/22d2b are the split; 22f1/22f2 restate the same contract
 # in the dedicated floor block.)
 v22d2_body="## Tasks
@@ -3064,7 +3254,7 @@ expect_block "22d5b same, drop critic token → block (cell audited lane still d
   "$h22d5b" 'git commit -m "x"' "critic"
 
 # 22d6 — an off-enum rigor cell 'reviewed' on a NON-addressed 'done' row.
-# effective_row_rigor("reviewed") resolves to the INVALID sentinel. Slice 4/4
+# effective_row_rigor("reviewed") resolves to the INVALID sentinel. Task 4/4
 # pinned (as expect_allow) that this evaded detection entirely: INVALID was
 # only ever explicitly checked on the ADDRESSED unit's own row (4/1's
 # `if [ "$eff" = "INVALID" ]` block), so the non-addressed done-row path called
@@ -3073,7 +3263,7 @@ expect_block "22d5b same, drop critic token → block (cell audited lane still d
 # no block, and (unlike the ledger_shape_fail-routed defects) no log-only
 # finding either.
 #
-# Slice 4/6 closes that gap: the non-addressed done-row path now guards for
+# Task 4/6 closes that gap: the non-addressed done-row path now guards for
 # eff=INVALID BEFORE calling apply_rigor_lanes, mirroring the addressed unit's
 # 4/1 INVALID block. A malformed rigor cell makes the row's lane indeterminate
 # — you cannot resolve which evidence contract applies — so it is a hard
@@ -3163,7 +3353,7 @@ write_plan "$h22d6e" "$(task_plan_rigor tested "$v22d6e_body")" > /dev/null
 expect_allow "22d6e control: empty rigor cell on non-addressed done row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6e" 'git commit -m "x"'
 
-# 22d6f/g/h — slice 4/7 closes the residual left by 4/6: an off-enum rigor cell
+# 22d6f/g/h — task 4/7 closes the residual left by 4/6: an off-enum rigor cell
 # blocked only on the addressed unit (any status, 4/1) and on non-addressed DONE
 # rows (4/6), but a non-addressed ACTIVE or PENDING row with an off-enum cell
 # still passed SILENTLY — its lane was never resolved, so no block and no
@@ -3174,7 +3364,7 @@ expect_allow "22d6e control: empty rigor cell on non-addressed done row inherits
 # guard that runs before the status-based branching, so a malformed rigor cell
 # blocks UNIFORMLY on any row (addressed or not; done, active, pending, dropped)
 # at any frontmatter rigor. 22d6f (active) and 22d6g (pending) are the residuals
-# this slice closes; 22d6h is a negative control proving an EMPTY cell on an
+# this task closes; 22d6h is a negative control proving an EMPTY cell on an
 # active row still inherits and allows (empty ≠ INVALID — active rows without a
 # done claim are not over-blocked).
 
@@ -3248,7 +3438,7 @@ write_plan "$h22d6h" "$(task_plan_rigor tested "$v22d6h_body")" > /dev/null
 expect_allow "22d6h control: empty rigor cell on non-addressed active row inherits tested floor, honest evidence → allow (empty ≠ INVALID)" \
   "$h22d6h" 'git commit -m "x"'
 
-# ---- 22f: row rigor is a FLOOR — downgrade blocks unless waived (slice 4/8) --
+# ---- 22f: row rigor is a FLOOR — downgrade blocks unless waived (task 4/8) --
 #
 # A15 (user-ratified, momentous): the per-row `rigor` cell is a FLOOR unified
 # with the run-rigor floor model. A cell that RAISES a row above the
@@ -3732,7 +3922,7 @@ fi
 # (`--git-common-dir`, i.e. the MAIN repo even from inside a linked worktree).
 # This gate derived PROJECT_DIR — and therefore DOCS_ROOT, PLAN_DIRS and the
 # AC-13 misplacement sweep's root — from CLAUDE_PROJECT_DIR/.cwd/pwd, i.e. the
-# WORKTREE. Slice 1 migrated only audit_root().
+# WORKTREE. Task 1 migrated only audit_root().
 #
 # The consequence was that in a linked worktree NO artifact placement satisfied
 # both hooks: put the plan where the governing hook demands (the main repo) and
@@ -4232,7 +4422,8 @@ prov_matrix() {
     prov_line="
   provenance: $1"
   fi
-  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  tier-run: bash test.sh — unit suite\n  fails-when: the planted defect this eval must go red on\n  readback: 332/332 asserted%s\n' "$prov_line"
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\nAC-1:\n  tier-run: bash test.sh — unit suite\n  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md\n  readback: 332/332 asserted%s\n' "$prov_line"
 }
 
 # 27a — the literal value blocks.
@@ -4345,6 +4536,7 @@ section "Section 28: matrix_block list-leader tolerance"
 # T1's own evidence keys, satisfying the per-tier requirement.
 leader_t1_keys="  tier-run: bash test.sh — unit suite
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   readback: 332/332 asserted"
 
 # $1 = block-header leader ("" flush-left, "- ", "* ", …)
@@ -4376,7 +4568,8 @@ write_plan "$h28b" "$(plan 6 "$step6_body" "$(leader_matrix '- ' "$leader_t1_key
 # block visible the row is exempt from the per-tier keys and commits clean.
 h28c=$(make_home)
 write_plan "$h28c" "$(plan 5 "$step5_base" "$(leader_matrix '- ' "  waiver: dana 2026-08-01 env stale
-  fails-when: the planted defect this eval must go red on")")" > /dev/null
+  fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md")")" > /dev/null
 # The `fails-when:` line is not part of 28c's subject — the block-side waiver is. It is here
 # because that key is unconditional from `current: 4` (epic-22 K2): a waiver dissolves the
 # obligation to RUN an eval, never the obligation to have designed one, so a waived row still
@@ -4417,10 +4610,12 @@ stack-health: n/a: no long-running serve
 
 - AC-11:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
 $leader_t1_keys
   provenance: implementation
 - AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
 $leader_t1_keys
   provenance: spec §3")" > /dev/null
 expect_block "28f '- AC-11:' before '- AC-1:' → AC-1 keeps its own block (AC-11 is the row that blocks)" \
@@ -4589,6 +4784,7 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   user-confirmed: %s
   tier-run: rendered the wall in the live client
   fresh: rebuilt from the deployed payload
@@ -4716,15 +4912,25 @@ for _h30g_cand in "${BIONIC_HOOKS_DIR}/../scripts/lib" \
     break
   fi
 done
+# THE MUTATION LANDS ON THE LIBRARY NOW, NOT ON THE HOOK (T23). The predicate this
+# section loosens lives in `wall_evidence_gate`'s body in payload/scripts/lib/walls.sh;
+# the hook beside it is 200 lines of preamble and a fold. So the doctored tree gets a
+# doctored COPY OF THE LIBRARY and an untouched copy of the hook, and the loader finds
+# it because `$h30g_dir/scripts/lib` is candidate class (1).
 DOCTORED_HOOK="$h30g_dir/hooks/loose-gate.sh"
+cp "$HOOK" "$DOCTORED_HOOK"
+H30G_LIB="$h30g_dir/scripts/lib/walls.sh"
+H30G_LIB_REAL="$(dirname "$H30G_LIB")/.walls-real.sh"
+cp "$H30G_LIB" "$H30G_LIB_REAL"
 sed 's#user_confirmed_form_ok "\$block_txt"#[ -n "$(user_confirmed_value "$block_txt")" ]#' \
-  "$HOOK" > "$DOCTORED_HOOK"
+  "$H30G_LIB_REAL" > "$H30G_LIB"
 
-if ! diff -q "$HOOK" "$DOCTORED_HOOK" > /dev/null 2>&1; then
+if ! diff -q "$H30G_LIB_REAL" "$H30G_LIB" > /dev/null 2>&1; then
   ok "30g meta: the doctored copy differs from the real hook (mutation landed)"
 else
   no "30g meta: the doctored copy differs from the real hook (mutation landed)" "the form-check mutation did not apply — the sed anchor moved, so the arms below prove nothing"
 fi
+rm -f "$H30G_LIB_REAL"
 
 _real_hook="$HOOK"
 HOOK="$DOCTORED_HOOK"
@@ -4847,10 +5053,12 @@ stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash tests/canonical-sdlc-evidence-gate.test.sh
   readback: 120/120 asserted
 AC-2:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted"
 
@@ -4963,7 +5171,7 @@ expect_block "32j rigor peer-reviewed, discharged rows, no Step-5 auditor: point
   "$h32j" 'git commit -m "x"' "requires 'auditor:"
 
 # 32k — a row whose OWN rigor cell RAISES it above the plan's frontmatter
-# follows the row's rigor (the floor model, slice 4/8): a tested plan, one
+# follows the row's rigor (the floor model, task 4/8): a tested plan, one
 # `done` row raised to peer-reviewed, proof-shaped evidence naming no auditor →
 # that row still demands the verdict. The relaxation is keyed to effective
 # rigor, never to the frontmatter alone.
@@ -5010,10 +5218,10 @@ expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fai
   "$h32m2" 'git commit -m "x"' "requires 'auditor:"
 
 # ============================================================
-# Section 33: a waiver outranks the `slice: 9` tier refusal (review-a C-2)
+# Section 33: a waiver outranks the `task: 9` tier refusal (review-a C-2)
 # ============================================================
 #
-# The `slice: 9` tag (Section 17r) is T0-only: on any other tier it is a
+# The `task: 9` tag (Section 17r) is T0-only: on any other tier it is a
 # mis-tag, and the refusal fires at every step. That check sat ABOVE the
 # `waiver:` exemption in the row loop, so a row an author had WAIVED — the
 # criterion let go, its evidence contract dissolved — still met the tier
@@ -5025,9 +5233,9 @@ expect_block "32m2 no rigor key at current 5, no auditor: pointer → block (fai
 # evidence cell or a `waiver:` line in the AC block — so "waived" means the
 # same thing here as it does for the per-tier keys three lines below.
 
-section "Section 33: a waiver outranks the slice: 9 tier refusal"
+section "Section 33: a waiver outranks the task: 9 tier refusal"
 
-# A T1 row (not T0, so the tag is a mis-tag) carrying `slice: 9`, WAIVED via
+# A T1 row (not T0, so the tag is a mis-tag) carrying `task: 9`, WAIVED via
 # the evidence cell. AC-1 is an ordinary discharged row so the matrix is
 # otherwise complete and each verdict below is the waived row's doing.
 m33_waived="## Verification Matrix
@@ -5041,11 +5249,13 @@ stack-health: n/a: no long-running serve
 
 AC-1:
   fails-when: the planted defect this eval must go red on
+  evidence: record/generic-evidence.md
   tier-run: bash test.sh — unit suite
   readback: 332/332 asserted
 AC-2:
   fails-when: the planted defect this eval must go red on
-  slice: 9"
+  evidence: record/generic-evidence.md
+  task: 9"
 
 # The same row with the waiver taken away: pending, no token anywhere.
 m33_unwaived="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | pending | see AC-2 |  |}"
@@ -5053,13 +5263,13 @@ m33_unwaived="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criter
 # The waiver in the AC BLOCK rather than the evidence cell — the loop's other
 # spelling of the same fact.
 m33_waived_block="${m33_waived/| AC-2 | T1 | waived | waiver: dana 2026-08-30 criterion dropped | waived |/| AC-2 | T1 | waived | dropped, see block | waived |}"
-m33_waived_block="${m33_waived_block/  slice: 9/  slice: 9
+m33_waived_block="${m33_waived_block/  task: 9/  task: 9
   waiver: dana 2026-08-30 criterion dropped}"
 
-# 33a — waived T1 row carrying slice: 9 → commits.
+# 33a — waived T1 row carrying task: 9 → commits.
 h33a=$(make_home)
 write_plan "$h33a" "$(plan 6 "$step6_body" "$m33_waived")" > /dev/null
-expect_allow "33a waived T1 row carrying 'slice: 9' at current 6 → allow (waiver outranks)" \
+expect_allow "33a waived T1 row carrying 'task: 9' at current 6 → allow (waiver outranks)" \
   "$h33a" 'git commit -m "x"'
 
 # 33b — the same row UNWAIVED still blocks on the mis-tag, so 33a is the
@@ -5079,11 +5289,12 @@ expect_allow "33c the waiver as an AC-block line (not the evidence cell) → all
 # from the loop's unconditional arms. The same waived row with a circular
 # `provenance: implementation` still blocks — the provenance arm sits above
 # both, deliberately, and this fix did not move it.
-m33_waived_prov="${m33_waived/AC-2:
-  fails-when: the planted defect this eval must go red on
-  slice: 9/AC-2:
-  fails-when: the planted defect this eval must go red on
-  slice: 9
+# Anchored on 'task: 9' alone (never a path-bearing line): the pattern half
+# of a bash ${var/pattern/replacement} substitution ends at its own FIRST '/',
+# so a pattern spanning the 'evidence: record/generic-evidence.md' line above
+# would truncate there and garble both halves — this fixture proved that the
+# hard way and moved the anchor to a slash-free line instead.
+m33_waived_prov="${m33_waived/  task: 9/  task: 9
   provenance: implementation}"
 h33d=$(make_home)
 write_plan "$h33d" "$(plan 6 "$step6_body" "$m33_waived_prov")" > /dev/null
@@ -5247,6 +5458,7 @@ s35_root() {
   # what a `/var/...` needle does against a `/private/var/...` haystack.
   dir=$(cd "$dir" && pwd -P)
   mkdir -p "$dir/.claude/plans" "$dir/.bionic/docs/plans" "$dir/.bionic/tmp"
+  write_generic_evidence "$dir"
   echo "$dir"
 }
 
@@ -5299,7 +5511,7 @@ s35_run() {  # <root> <sid> <command> -> S35_EXIT / S35_ERR
     S35_EXIT=$?
   fi
   S35_ERR=$(cat "$tmp_err")
-  # THE DETAIL STREAM (slice 13, ruling D-1): this section greps plan PATHS off the
+  # THE DETAIL STREAM (task 13, ruling D-1): this section greps plan PATHS off the
   # refusal, and a path is `detail` now. Gated on the refusal so an allowed commit is
   # never driven twice.
   # An ALLOWED call has no refusal to expand, and its announcements are already on the
@@ -5908,7 +6120,7 @@ expect_allow "37j a Step-4 plan with no '## Verification Matrix' → allow (fail
 
 # 37l — A WAIVER DOES NOT EXCUSE THE COLUMN. Everywhere else in this loop a waiver
 # dissolves a row's demands: the per-tier evidence keys, the CONFIRMED verdict, the
-# `slice: 9` tier refusal all yield to one. This arm does not, and the distinction is the
+# `task: 9` tier refusal all yield to one. This arm does not, and the distinction is the
 # reason: those are demands for EVIDENCE, and a waiver is precisely the decision not to
 # gather it. `fails-when:` is not evidence — it is the design of the eval, authored at
 # Step 2 before any waiver exists, and a row that never named a failure was never
@@ -6027,31 +6239,36 @@ done
 # A PROTOTYPE NEVER DISCHARGES A MATRIX ROW (design decision D7). Its output is a
 # design ruling written back to the spec, not a shipped behavior — nothing about a
 # throwaway is provable by an eval. The arm reads two Step-3 tables the plan already
-# carries: `## Slices` names which slice numbers are `kind: prototype`, and each
-# Verification Matrix AC block's own `slice:` field names which slice discharges it.
-# An AC block naming a prototype slice is refused, at `current: 4` onward — the same
+# carries: `## Tasks` names which task ids are `kind: prototype`, and each
+# Verification Matrix AC block's own `task:` field names which task discharges it.
+# An AC block naming a prototype task is refused, at `current: 4` onward — the same
 # step boundary as the approval and fails-when arms beside it (Section 37), and
 # inert for the identical reason: both tables are Step-3 artifacts, not necessarily
 # complete before Step 4.
+#
+# MIGRATED BY REQ-1e (T8). The section this arm read was `## Tasks`, four of whose
+# columns it took by position; it is `## Tasks` now, read through lib/units.sh, and
+# the matrix field it cross-references is `task:`. The fixtures below carry the
+# widened ten-column schema for that reason.
 
 section "Section 38: the prototype no-row arm (epic-22 K4)"
 
-# k4_slices <prototype-num> <other-num> -> a Slices table with one prototype row and
-# one build row, the shape the real plan's slice 12 (prototype) and slice 13 (build)
-# already carry.
-k4_slices() {
+# k4_tasks <prototype-id> <other-id> -> a Tasks table with one prototype row and
+# one build row, the shape the real plan's prototype task and the build task that
+# cites its ruling already carry.
+k4_tasks() {
   cat <<EOF
-## Slices
+## Tasks
 
-| # | slice | kind | depends | complexity | Files: (closed set) | status |
-|---|---|---|---|---|---|---|
-| $1 | E1: refusal wording (attended) | prototype | 10 | standard | record/x.md | pending |
-| $2 | E1: hooks migrated | build | 11 $1 | complex | hooks/*.sh | pending |
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| $1 | 4 | prototype | E1: refusal wording (attended) | senior-implementor | — | 30m | E1 | record/x.md | pending |
+| $2 | 4 | build | E1: hooks migrated | senior-implementor | $1 | 60m | E1 | hooks/*.sh | pending |
 EOF
 }
 
-# k4_matrix <AC-1's slice: value> -> a one-row matrix whose AC-1 block names the given
-# slice.
+# k4_matrix <AC-1's task: value> -> a one-row matrix whose AC-1 block names the given
+# task.
 k4_matrix() {
   cat <<EOF
 ## Verification Matrix
@@ -6065,13 +6282,13 @@ stack-health: n/a: no long-running serve
 AC-1:
   criterion: the refusal wording is proven
   provenance: user 2026-09-07 "approved"
-  slice: $1
+  task: $1
   fails-when: the wording is untested
 EOF
 }
 
-# k4_plan <current> <slices section> <matrix section> -> a whole plan, same shape as
-# k2_plan (Section 37) with a `## Slices` table spliced in ahead of the matrix.
+# k4_plan <current> <tasks section> <matrix section> -> a whole plan, same shape as
+# k2_plan (Section 37) with a `## Tasks` table spliced in ahead of the matrix.
 k4_plan() {
   printf '%s\n## SDLC State\ncurrent: %s\n%s\nStep %s:\n%s\n\n%s\n\n%s\n' \
     "$(matrix_frontmatter true)" "$1" "$K2_APPROVED" "$1" "$k2_step4" "$2" "$3"
@@ -6079,70 +6296,158 @@ k4_plan() {
 
 # --- 38a/38b: the refusal, and its control -----------------------------------
 
-# 38a — slice 12 is `kind: prototype` and AC-1 names `slice: 12`: refused, naming
-# both the AC and the slice.
+# 38a — T12 is `kind: prototype` and AC-1 names `task: T12`: refused, naming
+# both the AC and the task.
 h38a=$(make_home)
-write_plan "$h38a" "$(k4_plan 4 "$(k4_slices 12 13)" "$(k4_matrix 12)")" > /dev/null
-expect_block "38a a kind: prototype slice (12) owning a matrix row (AC-1, slice: 12) → block" \
+write_plan "$h38a" "$(k4_plan 4 "$(k4_tasks T12 T13)" "$(k4_matrix T12)")" > /dev/null
+expect_block "38a a kind: prototype task (T12) owning a matrix row (AC-1, task: T12) → block" \
   "$h38a" 'git commit -m "x"' "AC-1"
 h38a2=$(make_home)
-write_plan "$h38a2" "$(k4_plan 4 "$(k4_slices 12 13)" "$(k4_matrix 12)")" > /dev/null
-expect_block "38a2 …and the refusal names the prototype slice" \
-  "$h38a2" 'git commit -m "x"' "slice: 12"
+write_plan "$h38a2" "$(k4_plan 4 "$(k4_tasks T12 T13)" "$(k4_matrix T12)")" > /dev/null
+expect_block "38a2 …and the refusal names the prototype task" \
+  "$h38a2" 'git commit -m "x"' "task: T12"
 
 # 38b — THE CONTROL 38a needs: the identical plan with AC-1 repointed at the BUILD
-# slice (13) instead. Same Slices table, same prototype row still present — only the
-# matrix's own `slice:` field changed — so an allow here proves the refusal above was
+# task (T13) instead. Same Tasks table, same prototype row still present — only the
+# matrix's own `task:` field changed — so an allow here proves the refusal above was
 # earned by the AC pointing at a prototype, not by the fixture shape.
 h38b=$(make_home)
-write_plan "$h38b" "$(k4_plan 4 "$(k4_slices 12 13)" "$(k4_matrix 13)")" > /dev/null
-expect_allow "38b control: the same AC repointed at the build slice (13) → allow" \
+write_plan "$h38b" "$(k4_plan 4 "$(k4_tasks T12 T13)" "$(k4_matrix T13)")" > /dev/null
+expect_allow "38b control: the same AC repointed at the build task (T13) → allow" \
   "$h38b" 'git commit -m "x"'
 
 # --- 38c: inert below Step 4 --------------------------------------------------
 #
-# `current: 3` is still plan authoring: the Slices table and the matrix may both be
+# `current: 3` is still plan authoring: the Tasks table and the matrix may both be
 # incomplete, and this arm — like the approval and fails-when arms beside it — does
 # not fire there even on a fixture that would refuse at Step 4.
 h38c=$(make_home)
-write_plan "$h38c" "$(k4_plan 3 "$(k4_slices 12 13)" "$(k4_matrix 12)")" > /dev/null
-expect_allow "38c current: 3 with a prototype slice owning a matrix row → allow (arm inert below Step 4)" \
+write_plan "$h38c" "$(k4_plan 3 "$(k4_tasks T12 T13)" "$(k4_matrix T12)")" > /dev/null
+expect_allow "38c current: 3 with a prototype task owning a matrix row → allow (arm inert below Step 4)" \
   "$h38c" 'git commit -m "x"'
 
 # --- 38d: no prototype row at all --------------------------------------------
 #
-# A Slices table with no `kind: prototype` row leaves the arm with nothing to check —
-# every AC's `slice:` value is compared against an empty set, never against itself.
+# A Tasks table with no `kind: prototype` row leaves the arm with nothing to check —
+# every AC's `task:` value is compared against an empty set, never against itself.
 h38d=$(make_home)
-k4_slices_no_proto="## Slices
+k4_tasks_no_proto="## Tasks
 
-| # | slice | kind | depends | complexity | Files: (closed set) | status |
-|---|---|---|---|---|---|---|
-| 12 | E1: refusal wording | build | 10 | standard | record/x.md | pending |
-| 13 | E1: hooks migrated | build | 11 12 | complex | hooks/*.sh | pending |"
-write_plan "$h38d" "$(k4_plan 4 "$k4_slices_no_proto" "$(k4_matrix 12)")" > /dev/null
-expect_allow "38d no kind: prototype row in '## Slices' → allow (nothing to check against)" \
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T12 | 4 | build | E1: refusal wording | senior-implementor | — | 30m | E1 | record/x.md | pending |
+| T13 | 4 | build | E1: hooks migrated | senior-implementor | T12 | 60m | E1 | hooks/*.sh | pending |"
+write_plan "$h38d" "$(k4_plan 4 "$k4_tasks_no_proto" "$(k4_matrix T12)")" > /dev/null
+expect_allow "38d no kind: prototype row in '## Tasks' → allow (nothing to check against)" \
   "$h38d" 'git commit -m "x"'
 
-# --- 38e: a prototype row, but no matrix AC names its slice ------------------
+# --- 38e: a prototype row, but no matrix AC names its task -------------------
 #
-# The prototype slice exists in '## Slices' but the matrix's own AC doesn't cite it
-# (points at the build slice) — this is 38b's shape again from the other direction,
-# confirming the arm judges the AC block's `slice:` field and not merely the presence
+# The prototype task exists in '## Tasks' but the matrix's own AC doesn't cite it
+# (points at the build task) — this is 38b's shape again from the other direction,
+# confirming the arm judges the AC block's `task:` field and not merely the presence
 # of a prototype row anywhere in the plan.
 h38e=$(make_home)
-write_plan "$h38e" "$(k4_plan 4 "$(k4_slices 12 13)" "$(k4_matrix 13)")" > /dev/null
-expect_allow "38e a prototype slice present, but no AC block names it → allow" \
+write_plan "$h38e" "$(k4_plan 4 "$(k4_tasks T12 T13)" "$(k4_matrix T13)")" > /dev/null
+expect_allow "38e a prototype task present, but no AC block names it → allow" \
   "$h38e" 'git commit -m "x"'
 
-# --- 38f: this plan's own slice 18 body — the wave's real Slices/matrix shape ---
+# --- 38f: this plan's own task body — the wave's real Tasks/matrix shape ------
 #
-# Not a fixture: the arm's brief requires this exact plan pass as it stands (slice 12
-# is `kind: prototype` and owns no matrix row). That drive is recorded, with the real
+# Not a fixture: the arm's brief requires this exact plan pass as it stands (the
+# prototype task owns no matrix row). That drive is recorded, with the real
 # hook and the real plan, in record/wave-01-plugin-only/s18-prototype-unit.log rather
 # than reproduced here — `.bionic/` is machine-local and absent from a fresh clone, so
 # an in-suite fixture reading it would degrade to a vacuous pass on exactly the
 # machines this arm is meant to protect.
+
+# ============================================================
+# Section 39: the matrix evidence-path arm (AC-1a.3, AC-1a.6)
+# ============================================================
+#
+# wave-11-lean-spine row 1a: the plan holds claims, `record/` holds proof. From
+# current: 5 onward, a `discharged` row's AC block must carry an `evidence:`
+# key whose value resolves to a real file under <docs-root>/record/ — reusing
+# resolve_walk_path()'s own template (record/<file> against the docs root, a
+# bare path against the project root, absolute as written, a `..` component
+# refused). Pending/blocked and waived rows are exempt, exactly as the
+# existing per-tier key loop already is (validate_matrix's row-status
+# branches, unchanged by this arm). The key sits last in keys_for_tier()'s
+# per-tier list, so every fixture above that intentionally exercises a missing
+# OTHER key still blocks on that key first — this arm only bites a block that
+# was otherwise complete.
+
+section "Section 39: the matrix evidence-path arm (AC-1a.3, AC-1a.6)"
+
+# One discharged T1 row, complete per-tier keys (tier-run, readback), plus an
+# `evidence:` value the caller supplies raw (after the colon) — the fixture
+# varies only that one line.
+evidence_matrix() {  # $1 = the evidence: value to write
+  cat <<EOF
+## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted
+  evidence: $1
+EOF
+}
+
+# 39a — a path-cited evidence value naming a real file under record/ → allow.
+# The whole plan is well under the 40 KB cap (AC-1a.1) — this fixture is a few
+# hundred bytes, not the wave's own 40 KB-adjacent plan.
+h39a=$(make_home)
+mkdir -p "$h39a/.bionic/docs/record/wave-11-lean-spine/evidence"
+printf 'AC-1: the unit suite went green — 332/332, output attached.\n' \
+  > "$h39a/.bionic/docs/record/wave-11-lean-spine/evidence/AC-1.md"
+write_plan "$h39a" "$(plan 5 "$step5_base" "$(evidence_matrix 'record/wave-11-lean-spine/evidence/AC-1.md')")" > /dev/null
+expect_allow "39a discharged row, evidence: a real file under record/ → allow" \
+  "$h39a" 'git commit -m "x"'
+
+# 39b — an empty evidence value refuses, naming the row.
+h39b=$(make_home)
+write_plan "$h39b" "$(plan 5 "$step5_base" "$(evidence_matrix '')")" > /dev/null
+expect_block "39b discharged row, evidence: empty → block, naming the row" \
+  "$h39b" 'git commit -m "x"' "AC-1"
+
+# 39c — a non-empty evidence value naming a path that does not resolve under
+# record/ (a real file, just in the wrong place) refuses the same way the
+# walk-artifact arm does for the identical shape (Section 26j).
+h39c=$(make_home)
+mkdir -p "$h39c/.bionic/docs/plans"
+printf 'wrongly placed\n' > "$h39c/.bionic/docs/plans/AC-1.md"
+write_plan "$h39c" "$(plan 5 "$step5_base" "$(evidence_matrix '.bionic/docs/plans/AC-1.md')")" > /dev/null
+expect_block "39c discharged row, evidence: path outside record/ → block" \
+  "$h39c" 'git commit -m "x"' "does not resolve under"
+
+# 39d — the same climb-out shape the walk arm refuses (Section 26i): a `..`
+# component is refused outright, before any file test.
+h39d=$(make_home)
+printf 'escaped\n' > "$h39d/.bionic/docs/escaped.md"
+write_plan "$h39d" "$(plan 5 "$step5_base" "$(evidence_matrix 'record/../escaped.md')")" > /dev/null
+expect_block "39d discharged row, evidence: path climbing out of record/ → block" \
+  "$h39d" 'git commit -m "x"' "climbs out of"
+
+# 39e — a pending row carries no evidence contract yet (the same exemption
+# the per-tier key loop already gives it) — control for 39a-d.
+h39e=$(make_home)
+evidence_matrix_pending="## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | pending | see AC-1 |  |"
+write_plan "$h39e" "$(plan 5 "$step5_base" "$evidence_matrix_pending")" > /dev/null
+expect_allow "39e pending row, no evidence: key at all → allow (exempt, mid-discharge)" \
+  "$h39e" 'git commit -m "x"'
 
 section "AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 

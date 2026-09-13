@@ -52,8 +52,8 @@ set -u
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 SUPPORTED_SDLC_VERSION=14
 
-INPUT=$(cat)
-TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
+BIONIC_INPUT=$(cat)
+TOOL=$(echo "$BIONIC_INPUT" | jq -r '.tool_name // empty')
 
 # THIS HOOK ANSWERS ON TWO EVENTS (wave-session-bound-run, 2026-09-04). PreToolUse is the
 # wall, unchanged. PostToolUse|Write is the BIND ARM, and it exists because of a hard
@@ -66,7 +66,7 @@ TOOL=$(echo "$INPUT" | jq -r '.tool_name // empty')
 # The event is absent on nothing this hook is registered for, but `// empty` keeps a
 # payload without it reading as the wall rather than as the bind arm — the direction that
 # preserves today's behaviour.
-EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
+EVENT=$(echo "$BIONIC_INPUT" | jq -r '.hook_event_name // empty')
 
 # Only Write and Edit need checking. Other tools pass through.
 case "$TOOL" in
@@ -74,7 +74,7 @@ case "$TOOL" in
   *) exit 0 ;;
 esac
 
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty')
+FILE_PATH=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.file_path // empty')
 if [ -z "$FILE_PATH" ]; then
   exit 0
 fi
@@ -182,41 +182,21 @@ physicalize() {  # $1=absolute path (need not exist) → folded, ancestors resol
 # a mistake a person can move, and the evidence gate's own misplacement sweep catches
 # the consequential half of it at commit time. Refusing every Write and Edit on the
 # machine because a file is missing is not recoverable at that price.
-BIONIC_LIB_WANT="refuse.sh root.sh run.sh session.sh binding.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh binding.sh units.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
-# library cannot load itself, so the duplication is the design and
-# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
-# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
-#
-# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
-# on a line above this block. Afterwards exactly one of these is non-empty:
-#   BIONIC_LIB          a readable directory holding every wanted basename
-#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
-# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
-#
-# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
-# healthy hook pays nothing for the healing path — not a jq, not a registry read.
-#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
-#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
-#      siblings, and the repo, where payload/hooks is a symlink to the top-level
-#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
-#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
-#      would find nothing in a directory-source session.
-#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
-#      plugin was installed from; that marketplace's source.path in
-#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
-#      a fork installs under its own name.
-#  (3) the newest version directory in that marketplace's plugin cache, by
-#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
-# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
-# upstream-broken publish breaks every location equally and is not covered.
-#
-# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
-# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
+# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
+# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
+# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
+# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
+# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
+# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
+# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
+# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
+# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
+# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
 BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"
-_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
 _bl_try() {
   [ -n "${1:-}" ] || return 1
   if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
@@ -225,13 +205,8 @@ _bl_try() {
   BIONIC_LIB="$1"
 }
 if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
-  _bl_mk=""
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
   if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    # First key only, and the prefix stripped by parameter expansion rather than
-    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
-    # `jq` runs with its stderr closed, so a machine missing jq degrades to
-    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
     _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
     _bl_mk="${_bl_keys%%
 *}"
@@ -261,25 +236,13 @@ BIONIC_LOADER_VER
   fi
 fi
 if [ -z "$BIONIC_LIB" ]; then
-  # The name in the message is the first library this hook asked for. A candidate
-  # directory qualifies only when it holds ALL of them, so with none qualifying the
-  # first wanted name is the honest thing to hand the reader.
   BIONIC_LIB_MISSING="${_bl_want%% *}"
   [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
 fi
-# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
-# stand aside. Blocking reversible work because a file is missing buys no safety and
-# costs the session.
 loader_fail_open() {
   echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
   exit 0
 }
-# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
-# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
-# here, before the hook sources anything. Whole-string and not prefix, so
-# `claude plugin update bionic@bionic; git push origin main` is refused like any
-# other push. There is no env-var override: a variable an agent turn can set on
-# itself is not a wall.
 loader_fail_closed() {
   _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
   [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
@@ -289,25 +252,9 @@ loader_fail_closed() {
     "bash $_bl_root/scripts/doctor.sh"|\
     "bash $_bl_root/scripts/setup.sh") exit 0 ;;
   esac
-  # THE ONE LINE, AND THE ONE PLACE IN THE TREE THAT SPELLS IT WITHOUT
-  # scripts/lib/refuse.sh. Every other wall calls `refuse`; this one cannot, because
-  # refuse.sh is IN the library this function exists to report missing. So the row-1
-  # wording (record/wave-01-plugin-only/s12-refusal-wording-draft.md §1) is written
-  # out here by hand, in the renderer's exact format, and tests/loader.test.sh §F
-  # drives it against AC-E1.3's own regex so the two spellings cannot drift.
-  #
-  # THE NAME IS BOUNDED IN PURE BASH for the same reason: `bionic_trunc` is in the
-  # missing library. 23 columns of prefix, 31 of fact after the name, 3 of brackets
-  # and 18 of fix leaves 25 for the hook's name, and the longest caller
-  # (`canonical-sdlc-evidence-gate`, 28) is over it — F-8's runtime-width hazard,
-  # arriving at the one site that cannot ask the truncator. The ellipsis is spent
-  # from inside the budget, exactly as bionic_trunc spends it.
   _bl_who="${1:-a bionic hook}"
   if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
   printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  # THE DETAIL, on the knob only. Ruling D-1: the reader who is interrupted gets one
-  # sentence; the rest is for whoever asks. There is no hook log to write here — the
-  # library that owns logging is the one that did not load.
   if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
     cat >&2 <<BIONIC_LOADER_REFUSE
 A wall that cannot read a command refuses it rather than waving it through.
@@ -332,6 +279,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing-skill"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
@@ -343,8 +292,23 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "canonical-sdlc-governing
 # line-ending translation it is written in terms of.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/binding.sh"
+# THE ONE READER OF `## Tasks` (REQ-1e, spec §2 D3). The Step-3 wall below runs its
+# `units_validate` and prints the violation lines back; nothing here parses the table.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/units.sh"
 
-# THE ROOT THAT OWNS THE ARTIFACT — the artifact's own, not the invoking session's.
+# THE CONTEXT, IN ONE CALL (REQ-1f, lib/context.sh): it adopts the payload read before
+# the loader, and returns the session id past the ONE shape guard (REQ-1h) — which this
+# hook had none of. What it does NOT decide here is the root.
+#
+# THE ROOT THAT OWNS THE ARTIFACT — the artifact's own, not the invoking session's — is
+# this hook's own work and stays here. `BIONIC_ROOT` is resolved from the session's cwd
+# by the one ladder, and the two are different questions: the guard below and every
+# clause under it ask whether the FILE BEING WRITTEN belongs to an engaged project, and
+# a hook that scoped itself by the session's cwd and enforced against the artifact's
+# root would go quiet exactly where it was added to bind. So the engagement predicate is
+# re-asked against this root rather than read off `BIONIC_ENGAGED`.
+bionic_context 2>/dev/null || exit 0
 PROJECT_ROOT_FROM_PATH=$(project_root "$(dirname "$FILE_PATH")")
 if [ -z "$PROJECT_ROOT_FROM_PATH" ]; then
   # project_root always answers, so this is unreachable in practice. Kept as a
@@ -375,8 +339,7 @@ fi
 # foreign or unshaped session key, no key at all. The arming partition is the consent
 # boundary (1.3.2 close-out).
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-GS_SID=$(session_id "$(echo "$INPUT" | jq -r '.session_id // empty')" 2>/dev/null) || GS_SID=""
-engaged_session "$PROJECT_ROOT_FROM_PATH" "$GS_SID" || exit 0
+engaged_session "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" || exit 0
 
 # ---------- THE BIND ARM (AC-9): a new run's plan claims the session that wrote it ----------
 #
@@ -421,7 +384,7 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # sits crosswise to the precedent ADR's "No nested tracking … the roster records only
   # depth-one dispatches": binding is identity state, and a depth-two act must not mutate
   # depth-one identity.
-  case "$(echo "$INPUT" | jq -r '.agent_id // empty' 2>/dev/null)" in
+  case "$(echo "$BIONIC_INPUT" | jq -r '.agent_id // empty' 2>/dev/null)" in
     ?*) exit 0 ;;
   esac
 
@@ -433,7 +396,7 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # falls through to binding rather than to silence — a missing distinction must not cost
   # AC-9 the case it exists for, and a redundant rebind to a plan the session is already
   # working in is the harmless direction.
-  case "$(echo "$INPUT" | jq -r '.tool_response.type // empty' 2>/dev/null)" in
+  case "$(echo "$BIONIC_INPUT" | jq -r '.tool_response.type // empty' 2>/dev/null)" in
     update) exit 0 ;;
   esac
 
@@ -448,7 +411,7 @@ if [ "$EVENT" = "PostToolUse" ]; then
     *) exit 0 ;;
   esac
 
-  if bind_plan "$PROJECT_ROOT_FROM_PATH" "$GS_SID" "$GS_BIND_TARGET"; then
+  if bind_plan "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" "$GS_BIND_TARGET"; then
     echo "governing-skill: session bound to $GS_BIND_TARGET" >&2
   fi
   exit 0
@@ -465,7 +428,7 @@ fi
 # requires an unbound session to be TOLD it fell back to the newest plan, and AC-6 requires
 # a session whose bound plan has closed to be told that rather than handed another run's.
 # Neither line blocks anything.
-GS_RUN=$(session_run "$PROJECT_ROOT_FROM_PATH" "$GS_SID" 2>/dev/null) || :
+GS_RUN=$(session_run "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" 2>/dev/null) || :
 case "$GS_RUN" in
   fallback\ *)
     echo "governing-skill: run resolved by newest-plan fallback (session unbound) — ${GS_RUN#fallback }" >&2 ;;
@@ -514,9 +477,13 @@ DOCS_ROOT=$(docs_root "$PROJECT_ROOT_FROM_PATH")
 # Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
 # collision-resistant across same-named projects under different parents.
 # cksum and basename are POSIX — no new dependency.
-# Byte-identical to the copies in farm-out-reminder.sh,
-# canonical-sdlc-evidence-gate.sh and context-spend.sh — divergence would give
-# one project two audit files. Deliberate per-hook duplication (no shared lib).
+# THREE COPIES, ONE BODY, AND THE OTHER TWO ARE NAMED HERE:
+# payload/scripts/lib/walls.sh (the PreToolUse|Bash process) and
+# payload/scripts/lib/stop.sh (the turn-end process). This one serves the
+# PreToolUse|Write process. Divergence would give one project two audit files;
+# tests/cross-gate-agreement.test.sh §AP compares the three bodies by checksum and
+# proves by mutation that the comparison discriminates. Deliberate duplication, one
+# copy per process, no shared lib — consolidation is promoted, not done here.
 # [INSTRUMENT]
 audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
   [ -n "${HOME:-}" ] || return 1
@@ -544,7 +511,7 @@ esac
 #
 # The fail-open this closes: an artifact declaring canonical-sdlc frontmatter
 # but living outside the docs root used to fall straight out of the scope check
-# and exit 0 — written, ungated, in the wrong place. Slice 1's
+# and exit 0 — written, ungated, in the wrong place. Task 1's
 # resolve_project_root() always answers, so the historical no-root `exit 0` is
 # unreachable; the scope check is the fail-open that survived.
 #
@@ -621,7 +588,7 @@ fi
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 CONTENT=""
 if [ "$TOOL" = "Write" ]; then
-  CONTENT=$(echo "$INPUT" | jq -r '.tool_input.content // empty')
+  CONTENT=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.content // empty')
 else
   if [ -f "$FILE_PATH" ]; then
     if [ "$IN_SCOPE" -eq 1 ]; then
@@ -787,7 +754,7 @@ fi
 # The triple's presence is the gate — there is no separate mode axis.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 block() {  # <fact> <fix> <what went wrong>
-  # THE FRAME KEEPS ITS PARAMETER AND LOSES ITS VOICE (slice 13, ruling D-1). The
+  # THE FRAME KEEPS ITS PARAMETER AND LOSES ITS VOICE (task 13, ruling D-1). The
   # caller's ruled fact and fix render as the one user line; the artifact name, its
   # path and the caller's own sentence become `detail`.
   refuse exit2 write "$1" "$2" "canonical-sdlc artifact '$BASENAME': $3
@@ -926,7 +893,7 @@ fi
 
 # ---------- the lease wall: a plan write issued from inside a linked worktree ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-# (spec AC-14; plan slice WALLS; assumption WALLS/6.)
+# (spec AC-14; plan task WALLS; assumption WALLS/6.)
 #
 # The other half of AC-14's pair — hooks/dispatch-preflight.sh carries the dispatch half.
 # A plan is the RUN's artifact and it lives under the main checkout; a plan write issued
@@ -946,12 +913,22 @@ fi
 #
 # AMBIGUITY PASSES. No cwd in the payload, a cwd outside any repository, a tree whose main
 # repository cannot be resolved: this wall has no main checkout to name and says nothing.
+#
+# THE PAYLOAD'S OWN FIELD, NOT `BIONIC_CWD`, AND THAT IS DELIBERATE (REQ-1h scope note).
+# This wall asks WHERE THE WRITE WAS ISSUED FROM, which is not the question the preamble
+# ladder answers. The ladder's third rung is `pwd` — the hook PROCESS's directory, which
+# nothing documents as the session's — so taking BIONIC_CWD here would turn "the payload
+# named no cwd, so this wall has nothing to say" into "refuse, because the hook happened to
+# be spawned inside a worktree". Measured: it fires on 62 assertions in this hook's own
+# suite and on the evidence gate's 25e2, none of which is about worktree placement. The
+# read goes through `bionic_jq`, so it is still the ONE payload reader; what stays local is
+# the QUESTION, the same way `docs_root` stays a per-hook call (A-40).
 case "$BASENAME" in
   *.plan.md)
     LEASE_AGENT=0
     [ "${BIONIC_HOOK_CHANNEL:-}" = "agent-context" ] && LEASE_AGENT=1
-    [ -n "$(echo "$INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
-    LEASE_CWD=$(echo "$INPUT" | jq -r '.cwd // empty')
+    [ -n "$(echo "$BIONIC_INPUT" | jq -r '.agent_type // empty')" ] && LEASE_AGENT=1
+    LEASE_CWD=$(bionic_jq .cwd)
     if [ "$LEASE_AGENT" -eq 0 ] && [ -n "$LEASE_CWD" ] && [ -d "$LEASE_CWD" ]; then
       # A linked worktree's `.git` is a FILE pointing into the shared repository; the main
       # checkout's is a directory. Same test scripts/lib/worktree.sh's land verb uses.
@@ -1059,6 +1036,55 @@ Path: $FILE_PATH
 Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval."
             refuse exit2 write "this plan has no Verification Matrix" "add the Verification Matrix" "$_gs_detail"
           fi
+          # ---------- the Step-3 wall on `## Tasks` (REQ-1e, AC-1e.5) ----------
+          # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+          #
+          # THE PLAN SIDE OF WHAT lib/units.sh OWNS. The evidence gate validates this
+          # table at COMMIT time, which is one round trip and a refused commit too late:
+          # by then the orchestrator has briefed writers off it. `units_validate` is the
+          # single definition of the Task invariants — id shape and uniqueness, step in
+          # 3-9, the kind and status vocabularies, deps that name a row, and a Step-5+
+          # row depending transitively on every Step-4 row — and its output is one line
+          # per fault, each naming an id and a rule, which is what a writer can act on.
+          #
+          # SAME SCOPE AS THE MATRIX ARM ABOVE, deliberately: `*.plan.md`, numeric
+          # `sdlc-step >= 3`, and not `scale: task`. A task-scale plan carries the
+          # five-column registration ledger the evidence gate has read since D12, which
+          # REQ-1e does not widen; validating it against the ten-column schema would
+          # refuse every task-scale plan for eight columns it was never asked to carry.
+          #
+          # AN ABSENT TABLE IS NOT A VIOLATION HERE. A plan mid-authoring may not have
+          # written its table yet, and the D7 PRESENCE rule already lives in the gate at
+          # commit time. `units_rows` answers non-zero for "no table" and this arm stops
+          # there; a table that IS present is validated in full.
+          #
+          # WRITE CONTENT ONLY — the known hole. `$CONTENT` is the posted body on a
+          # Write and the file AS IT STANDS on an Edit, so an Edit that breaks the table
+          # is judged against the pre-edit text and passes. That is this hook's existing
+          # limitation for every content arm in it (see the CONTENT derivation above),
+          # not a new one, and the evidence gate still catches the result at commit.
+          #
+          # A TEMP FILE, because the verbs are functions of a PATH: one plan, one copy,
+          # removed on both paths out.
+          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ] && [ -n "$CONTENT" ]; then
+            _gs_units_tmp="$(mktemp "${TMPDIR:-/tmp}/bionic-units.XXXXXX")" || _gs_units_tmp=""
+            if [ -n "$_gs_units_tmp" ]; then
+              printf '%s\n' "$CONTENT" > "$_gs_units_tmp"
+              if units_rows "$_gs_units_tmp" >/dev/null 2>&1; then
+                _gs_units_bad="$(units_validate "$_gs_units_tmp" 2>/dev/null)" || true
+              else
+                _gs_units_bad=""
+              fi
+              rm -f "$_gs_units_tmp"
+              if [ -n "$_gs_units_bad" ]; then
+                _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) has a '## Tasks' table that breaks the Task invariants:
+${_gs_units_bad}
+Path: $FILE_PATH
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status."
+                refuse exit2 write "this plan's Tasks table is invalid" "fix the row the detail names" "$_gs_detail"
+              fi
+            fi
+          fi
         fi
         ;;
     esac
@@ -1119,7 +1145,7 @@ case "$BASENAME" in
       # author was reaching for — the author who mistyped a pointer may well be
       # the author who should have written the section.
       block_design() {  # $1 = what went wrong
-        # ONE ROW FOR FOUR ARMS (slice 13, table row 101). All four say the same thing to
+        # ONE ROW FOR FOUR ARMS (task 13, table row 101). All four say the same thing to
         # the reader — this spec names no design anywhere — and differ only in WHICH
         # route was tried, which is what `detail` carries.
         refuse exit2 write "this spec names no '## Design' anywhere" "add a '## Design' section" \
@@ -1368,21 +1394,21 @@ esac
 # ---------- AC-11 / AC-12: tree creation on first lifecycle use ----------
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
-# Slice 2 (F4): neither hook has an entry point that fires on true first
+# Task 2 (F4): neither hook has an entry point that fires on true first
 # lifecycle use without requiring `.bionic/` to pre-exist — except this one.
 # The governing-skill hook already knows the target artifact's path and, as
-# of slice 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
+# of task 1, computes PROJECT_ROOT_FROM_PATH from git rather than by
 # walking for an existing `.bionic/`. Creation hangs off that same
 # computation.
 #
 # The discriminator is `canonical_sdlc_version` — the SAME field the schema
-# enforcement above reads, and for the same reason. Slice 2 keyed creation on
+# enforcement above reads, and for the same reason. Task 2 keyed creation on
 # `governing-skill: canonical-sdlc` instead, which is the artifact-AUTHOR
 # field; `.claude/rules/hook-authoring.md` (machine-local, gitignored, authored
 # in place — no script recreates it, so absent from a fresh clone) § "Discriminators in
 # enforcement hooks" names that as a known failure mode, because Step 3 plans legitimately
 # declare `governing-skill: superpowers:writing-plans` and would have found no
-# tree. Slice 2's stated rationale was avoiding a re-fire on later artifacts,
+# tree. Task 2's stated rationale was avoiding a re-fire on later artifacts,
 # and re-firing costs nothing: `mkdir -p` is idempotent and the `.gitignore`
 # write is `[ -f ]`-guarded.
 #

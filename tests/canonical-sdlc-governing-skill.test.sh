@@ -90,7 +90,7 @@ unengage() { rm -f "$1/.bionic/tmp/engaged-$GS_SID.state"; }
 # Runs hook with a synthetic Write payload for $FILE with $CONTENT.
 HOOK_VSTDERR=""
 
-# AC-E1.3, SWEPT AT THE DRIVER (slice 13). Every refusal this wall makes is checked for
+# AC-E1.3, SWEPT AT THE DRIVER (task 13). Every refusal this wall makes is checked for
 # the criterion's shape as it happens, so no migrated site can be left without an eval
 # and no arm has to be written twice. The counters are read in the section at the end.
 GS_E1_SEEN=0; GS_E1_BAD_SHAPE=""; GS_E1_BAD_LINES=""; GS_E1_BAD_COLS=""
@@ -132,7 +132,7 @@ run_write() {
   fi
   HOOK_STDERR=$(cat "$tmp_err")
   gs_e1_sweep
-  # THE SAME WRITE AGAIN, WITH THE KNOB (slice 13, ruling D-1). This wall's refusal is
+  # THE SAME WRITE AGAIN, WITH THE KNOB (task 13, ruling D-1). This wall's refusal is
   # now ONE line — `bionic: write refused — <fact> (<fix>)` — and the artifact name, the
   # path and the Fix block this suite reads are `detail`, which reaches a reader only
   # under BIONIC_WALL_VERBOSE=1. `$HOOK_STDERR` is the line; `$HOOK_VSTDERR` is the line
@@ -163,7 +163,7 @@ run_edit() {
   fi
   HOOK_STDERR=$(cat "$tmp_err")
   gs_e1_sweep
-  # THE SAME WRITE AGAIN, WITH THE KNOB (slice 13, ruling D-1). This wall's refusal is
+  # THE SAME WRITE AGAIN, WITH THE KNOB (task 13, ruling D-1). This wall's refusal is
   # now ONE line — `bionic: write refused — <fact> (<fix>)` — and the artifact name, the
   # path and the Fix block this suite reads are `detail`, which reaches a reader only
   # under BIONIC_WALL_VERBOSE=1. `$HOOK_STDERR` is the line; `$HOOK_VSTDERR` is the line
@@ -752,12 +752,17 @@ expect_absent "rigor_override_absent audit does not say user-overridden" "user-o
 echo
 section "AC-10: computed root resolution"
 
-# The five criteria below run against the SHIPPED text of the function,
-# extracted from the hook and eval'd here — not against a reimplementation.
-# That seam can only observe what the function returns, never that the hook
-# calls it, so the two end-to-end cases at the end of this section drive the
-# hook through its real stdin contract and pin the call site.
-ac10_src=$(awk '/^resolve_project_root\(\)/,/^\}/' "$HOOK")
+# The five criteria below drive the HOOK, through its real stdin contract, on
+# four fixture roots — so what they observe is the root the hook resolved and
+# acted on, never a reimplementation of the walk.
+#
+# THE EXTRACTION THIS PARAGRAPH USED TO DESCRIBE IS GONE (close-out finding
+# A-43, removed at T8). `ac10_src=$(awk '/^resolve_project_root\(\)/,/^\}/' ...)`
+# was assigned here and never read, and it had been evaluating to the EMPTY
+# STRING for as long as it stood: this hook defines no `resolve_project_root`
+# — it calls `project_root`, which lib/root.sh owns. A dead assignment whose
+# value was also empty is two kinds of nothing, and the comment above it was
+# describing a seam the section does not use.
 
 # main: a repo WITH .bionic/ (untracked, so the worktree checkout has none).
 # wt:   a linked worktree of main, given its own .bionic/ on purpose — the
@@ -843,8 +848,8 @@ run_write "$ac10_nb/.bionic/docs/plans/epic-01-demo/never-existed.plan.md" "$MIS
 # A worktree-local .bionic/ is NOT the project's tree: resolution answers with
 # main, so main's docs root does not contain this path.
 #
-# Slice 1 left this as an exit-0 pass-through and flagged it as the exact
-# misplacement class slice 3 was to close. It is now a BLOCK naming main's
+# Task 1 left this as an exit-0 pass-through and flagged it as the exact
+# misplacement class task 3 was to close. It is now a BLOCK naming main's
 # docs root — every worktree of one repo shares one tree (AC-10), so an
 # artifact written into a worktree-local .bionic/docs/ belongs in the parent
 # repo's tree and the hook says where.
@@ -881,7 +886,7 @@ run_write_oldgit() {  # like run_write, with the old-git shim first on PATH and 
     HOOK_EXIT=$?
   fi
   HOOK_STDERR=$(cat "$tmp_err")
-  # THE SAME CALL AGAIN, WITH THE KNOB (slice 13, ruling D-1): the values this suite
+  # THE SAME CALL AGAIN, WITH THE KNOB (task 13, ruling D-1): the values this suite
   # reads off the refusal are `detail` now. Guarded on the refusal and `|| true` because
   # the suite runs under `set -e` and the hook exits 2 when it refuses.
   HOOK_VSTDERR=""
@@ -907,7 +912,7 @@ assert_contains "ac10_e2e_oldgit names the artifact's own repo, not the session 
 # AC-11 / AC-12: tree creation on first lifecycle use
 # ============================================================
 #
-# Slice 2 (F4): creation hangs off the SAME frontmatter this hook already
+# Task 2 (F4): creation hangs off the SAME frontmatter this hook already
 # parses — a write carrying `governing-skill: canonical-sdlc` — not a
 # SessionStart hook, which would create .bionic/ in every repo the user
 # opens a session in. "First lifecycle use" is the first canonical-sdlc
@@ -961,7 +966,7 @@ ac11_p2=$(make_bare_project)
 run_write "$ac11_p2/README.md" "just some notes"
 assert_eq "ac11_c4a write allowed (not an enforced artifact)" 0 "$HOOK_EXIT"
 
-# A7 REGRESSION. Slice 2 gated creation on `governing-skill: canonical-sdlc` —
+# A7 REGRESSION. Task 2 gated creation on `governing-skill: canonical-sdlc` —
 # the artifact-AUTHOR field — and this case asserted the inverse of what is
 # below: that a plan authored by another skill created NO tree.
 #
@@ -1090,7 +1095,7 @@ assert_eq "ac12_c4 ...and says nothing on stderr" "" "$HOOK_STDERR"
 # The fail-open this closes: an artifact that DECLARES itself a canonical-sdlc
 # artifact but lives outside the project's computed docs root used to fall out
 # of the `case "$FILE_PATH"` scope check and exit 0 — written, ungated, in the
-# wrong place. Slice 1 replaced the ancestor walk with resolve_project_root(),
+# wrong place. Task 1 replaced the ancestor walk with resolve_project_root(),
 # which always answers, so the historical `exit 0`-on-no-root is unreachable;
 # the surviving fail-open is the scope check itself.
 #
@@ -1101,7 +1106,7 @@ assert_eq "ac12_c4 ...and says nothing on stderr" "" "$HOOK_STDERR"
 #
 # "Outside the docs root" is the whole docs root, not just the four enforced
 # subdirectories. `.bionic/docs/spikes/` and `.bionic/docs/record/` hold real
-# files carrying canonical-sdlc frontmatter (slice 6 put them there); they are
+# files carrying canonical-sdlc frontmatter (task 6 put them there); they are
 # placed, and c8 pins that they stay unblocked.
 echo
 section "AC-13: misplacement blocks; absence never does"
@@ -1198,7 +1203,7 @@ run_write "$ac13_cfg/custom/docs/plans/epic-01-demo/wave-01-x.plan.md" "$VALID_F
 assert_eq "ac13_c9 configured location passes" 0 "$HOOK_EXIT"
 
 echo "AC-13 c10: a project reached through a SYMLINK is the same project"
-# Slice 1 flagged this and handed it here: `git` answers with the PHYSICAL
+# Task 1 flagged this and handed it here: `git` answers with the PHYSICAL
 # root while FILE_PATH arrives as whatever path the session used. Under the
 # old pass-through that mismatch was a silent bypass — artifacts quietly
 # stopped being gated. Under AC-13's fail-closed rule the same mismatch would
@@ -1229,12 +1234,12 @@ assert_contains "ac13_c10 misplaced-via-symlink names the real docs root" \
 #   (a) no `context.md`-shaped session-state file exists under the new layout;
 #   (b) no shipped surface instructs anything to write one.
 #
-# `.bionic/docs/record/context.md` is EXEMPT: slice 6 relocated the old file
+# `.bionic/docs/record/context.md` is EXEMPT: task 6 relocated the old file
 # there as an operational record of what happened, not as live state. The
 # whole point of the AC is that nothing reads or writes it as session state.
 #
 # This lives in the governing-skill suite because AC-13 and AC-14 are one
-# slice and this suite is the slice's surface; the assertion is about the
+# task and this suite is the task's surface; the assertion is about the
 # repo's shipped text, not about this hook. Homed here rather than in a new
 # suite so `tests/run.sh`'s suite count is unchanged.
 echo
@@ -1844,7 +1849,7 @@ assert_contains "ac14_phantom names the pinned root (the real workspace tree)" \
   "Pinned root: $ac14_ws/.bionic" "$HOOK_VSTDERR"
 
 # ============================================ WALLS: parallel-budget + worktree cwd
-# (spec AC-14 and AC-26; plan slice WALLS.)
+# (spec AC-14 and AC-26; plan task WALLS.)
 #
 # TWO FACTS, one about the header this hook validates and one about where the write
 # was made from.
@@ -1883,7 +1888,7 @@ run_write_from() {
     HOOK_EXIT=$?
   fi
   HOOK_STDERR=$(cat "$tmp_err")
-  # THE SAME CALL AGAIN, WITH THE KNOB (slice 13, ruling D-1): the values this suite
+  # THE SAME CALL AGAIN, WITH THE KNOB (task 13, ruling D-1): the values this suite
   # reads off the refusal are `detail` now. Guarded on the refusal and `|| true` because
   # the suite runs under `set -e` and the hook exits 2 when it refuses.
   HOOK_VSTDERR=""
@@ -2094,7 +2099,7 @@ run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id]
   fi
   HOOK_STDOUT=$(cat "$tmp_out")
   HOOK_STDERR=$(cat "$tmp_err")
-  # THE SAME CALL AGAIN, WITH THE KNOB (slice 13, ruling D-1): the values this suite
+  # THE SAME CALL AGAIN, WITH THE KNOB (task 13, ruling D-1): the values this suite
   # reads off the refusal are `detail` now. Guarded on the refusal and `|| true` because
   # the suite runs under `set -e` and the hook exits 2 when it refuses.
   HOOK_VSTDERR=""
@@ -2476,7 +2481,7 @@ user settings at Step 0, the contract at Step 3, and the premise before the buil
 # .bionic/docs/specs/epic-22-plugin-only/wave-01-plugin-only.spec.md (gitignored,
 # machine-local, same reason k5d's copy is literal). The real file's design wall is
 # satisfied by an in-place '## Design' section (not reproduced here — this fixture is
-# about the Goal arm, not the design wall, which slices 16/17/18 already cover in depth);
+# about the Goal arm, not the design wall, which tasks 16/17/18 already cover in depth);
 # a waiver substitutes, the same pattern SPEC_DESIGN_WAIVER already uses above for
 # fixtures that are not about design.
 K54_SPEC_EXEMPLAR='---
@@ -2586,5 +2591,85 @@ assert_contains "E1.5 …and the value found is in the detail, behind the knob" 
 assert_eq "E1.5 …with the one line still first" \
   "bionic: write refused — this artifact declares an unsupported version (set the supported version)" \
   "$(printf '%s\n' "$HOOK_VSTDERR" | /usr/bin/grep -m1 '^bionic: ')"
+
+# ============================================================
+section "REQ-1e AC-1e.5: the Step-3 wall on the '## Tasks' table"
+# ============================================================
+#
+# fails-when: a plan whose Tasks table has an unknown status, a dangling dep, or a
+# missing column is written at sdlc-step >= 3.
+#
+# THE WALL IS THE PLAN SIDE OF WHAT units.sh OWNS. The evidence gate catches a broken
+# table at COMMIT time, which is one round trip and a refused commit too late: the
+# orchestrator has already briefed writers off it. This arm runs `units_validate` on the
+# content being written, at the same step boundary and the same scale carve-out as the
+# Verification Matrix arm above — the table is a Step-3 artifact, and a task-scale plan
+# carries the five-column registration ledger instead, which this schema does not widen.
+#
+# AN ABSENT TABLE IS NOT A VIOLATION HERE. A plan mid-authoring may not have written its
+# table yet, and the D7 PRESENCE rule already lives in the evidence gate at commit time
+# (validate_dispatch_ledger). This arm judges a table that is there.
+
+gs_1e_project=$(make_project)
+gs_1e_plan="$gs_1e_project/.bionic/docs/plans/epic-01-demo/tasks.plan.md"
+
+# A valid ten-column table, and the three fixtures AC-1e.5 names, each one cell away
+# from it. Appended to build_plan's body, which already satisfies every other arm.
+gs_tasks_good='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 5 | verify | the verify | auditor | T1 | 30m | REQ-x | b.sh | pending |
+'
+gs_tasks_bad_status="${gs_tasks_good/| b.sh | pending |/| b.sh | doing |}"
+gs_tasks_dangling="${gs_tasks_good/| auditor | T1 |/| auditor | T99 |}"
+gs_tasks_missing_col='
+## Tasks
+
+| id | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|
+| T1 | build | the build | implementor | — | 30m | REQ-x | a.sh | landed |
+'
+
+echo "1e.5a: a valid Tasks table at sdlc-step 3 → allow"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_good"
+assert_eq "1e.5a exit 0" 0 "$HOOK_EXIT"
+assert_eq "1e.5a silent" "" "$HOOK_STDERR"
+
+echo "1e.5b: a status nobody defines → refused, naming the id and the rule"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_bad_status"
+assert_eq "1e.5b exit 2" 2 "$HOOK_EXIT"
+assert_contains "1e.5b the detail names the offending id" "T2" "$HOOK_VSTDERR"
+assert_contains "1e.5b …and the rule it broke" "status doing is not one of" "$HOOK_VSTDERR"
+
+echo "1e.5c: a dep naming no row → refused, naming the dep"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_dangling"
+assert_eq "1e.5c exit 2" 2 "$HOOK_EXIT"
+assert_contains "1e.5c the detail names the dangling dep" "T99" "$HOOK_VSTDERR"
+
+echo "1e.5d: a header short of the ten columns → refused, naming the column"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_missing_col"
+assert_eq "1e.5d exit 2" 2 "$HOOK_EXIT"
+assert_contains "1e.5d the detail names the absent column" "missing column step" "$HOOK_VSTDERR"
+
+echo "1e.5e: the same broken table at sdlc-step 2 → allow (the wall opens at 3)"
+run_write "$gs_1e_plan" "$(build_plan step=2 matrix=no)$gs_tasks_bad_status"
+assert_eq "1e.5e exit 0" 0 "$HOOK_EXIT"
+
+echo "1e.5f: a task-scale plan is out of scope (its ledger is the five-column one)"
+run_write "$gs_1e_plan" "$(build_plan scale=task matrix=no)$gs_tasks_bad_status"
+assert_eq "1e.5f exit 0" 0 "$HOOK_EXIT"
+
+echo "1e.5g: a plan with no Tasks table at all → allow (presence is the gate's rule)"
+run_write "$gs_1e_plan" "$(build_plan)"
+assert_eq "1e.5g exit 0" 0 "$HOOK_EXIT"
+assert_eq "1e.5g silent" "" "$HOOK_STDERR"
+
+# The live wave plan's own table is pinned hermetically by fixture 22e1 in
+# tests/canonical-sdlc-evidence-gate.test.sh, not read off disk here: `.bionic/` is
+# machine-local and absent from a fresh clone, so a fixture reading it would degrade to a
+# vacuous pass on exactly the machines this arm protects (Section 38f's rule).
 
 finish

@@ -1,5 +1,5 @@
 # payload/scripts/lib/session.sh — the one session-id function (bionic 1.4.0
-# wave, spec AC-2, plan slice L-SESSION; design-ledger S2).
+# wave, spec AC-2, plan task L-SESSION; design-ledger S2).
 #
 # THE RULE. The environment value (`$CLAUDE_CODE_SESSION_ID`) is primary,
 # every payload `session_id` field is a witness only. All twenty readers call

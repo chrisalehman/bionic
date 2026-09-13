@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/impact.test.sh — the impacted-suite derivation, and its planted-edit proof.
-# wave-01-verification-cannot-lie slice S12; spec AC-18 (the derivation) and
+# wave-01-verification-cannot-lie task S12; spec AC-18 (the derivation) and
 # AC-19 (completeness by planted edit).
 #
 # WHAT IS UNDER TEST. `tests/lib/impact.sh <file>...` prints the gating suites
@@ -665,7 +665,7 @@ PROBE
   # The five classes AC-19 names, each with the suite whose whole subject is the
   # mutated file, and a maximal edit: a small edit makes a small red set and a
   # correspondingly weak superset claim.
-  plant "a hook"                      "hooks/protect-main.sh"         early-exit protect-main.test.sh
+  plant "a hook"                      "hooks/bash-walls.sh"           early-exit bash-walls.test.sh
   plant "a lib the doctor sources"    "payload/scripts/lib/width.sh"  early-exit width.test.sh
   plant "a tests/lib helper"          "tests/lib/bound-marker.sh"     wipe       session-start.test.sh
   plant "tests/run.sh"                "tests/run.sh"                  wipe       version-compare.test.sh

@@ -32,7 +32,18 @@ set -uo pipefail
 . "$(dirname "$0")/lib/resolve-roots.sh"
 . "$(dirname "$0")/lib/assert.sh"
 
-HOOK="${BIONIC_PATROL_DUTIES_GATE_UNDER_TEST:-${BIONIC_HOOKS_DIR}/patrol-duties-gate.sh}"
+# THE MERGED ENTRY POINT (epic-23 wave-11, T12). This gate is a FUNCTION now —
+# `stop_patrol_duties` in payload/scripts/lib/stop.sh — and the process that runs it is
+# hooks/stop.sh, registered once on Stop and once on SubagentStop. Every fixture below
+# drives that process, so each assertion is now a claim about the verdict this gate
+# contributes to the composed one rather than about a hook of its own.
+HOOK="${BIONIC_PATROL_DUTIES_GATE_UNDER_TEST:-${BIONIC_HOOKS_DIR}/stop.sh}"
+
+# THE SOURCE THE THREE FILE-READING ARMS BELOW ASK (epic-23 wave-11, T12). This
+# gate's body lives in payload/scripts/lib/stop.sh now; $HOOK is the process that
+# runs it. An arm that reads TEXT reads the library, an arm that DRIVES drives the
+# hook, and the two are named separately so neither can silently read the other.
+HOOK_SRC="${BIONIC_PATROL_DUTIES_GATE_SRC_UNDER_TEST:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
 
 # pass/fail were pure-rename shadows of the framework's ok/no; the suite's own
 # explicit TOTAL=$((TOTAL + 1)) lines (including the two inside expect_allow/
@@ -172,7 +183,7 @@ stdin_for() {  # <project> <transcript-path> [event] [stop_hook_active]
 # same mirroring hooks/stop-guard.sh's and dispatch-preflight's suites already do.
 fire() {  # <project> [event] [stop_hook_active]
   HOOK_OUT=$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$HOOK" <<< "$(stdin_for "$1" "$1/transcript.jsonl" "${2:-Stop}" "${3:-false}")" 2>"${PE1_ERRFILE:-/dev/null}")
-  # THE USER STREAM, kept for the AC-E1.3 section at the end (slice 13). The JSON reason
+  # THE USER STREAM, kept for the AC-E1.3 section at the end (task 13). The JSON reason
   # on stdout is what every arm above reads; this is the one line a reader is shown.
   HOOK_ERR_USER=$(cat "${PE1_ERRFILE:-/dev/null}" 2>/dev/null)
   HOOK_RC=$?
@@ -375,14 +386,14 @@ fi
 # and no registration is the exact shape the landing sweep spent a wave being:
 # installed, syntactically fine, green in its own suite, and never fired.
 # A hook with a suite, a run line and no registration is installed, green in its own
-# suite, and never fired. THE CHANNEL MOVED (bionic 1.4.0, slice ADOPT, spec AC-7): this
+# suite, and never fired. THE CHANNEL MOVED (bionic 1.4.0, task ADOPT, spec AC-7): this
 # gate was registered in the governing skill's frontmatter so it would be live exactly
 # while that skill was, and that coupling is the defect — a `/clear`, a compaction or a
 # session the skill was never invoked in left the wall installed and not running, while
 # the duty it binds went on existing. Both halves are asserted, because either alone is a
 # wall in the wrong place: a lingering frontmatter entry fires it twice per turn (the CLI
 # does not deduplicate across the two manifests), and a missing manifest entry not at all.
-if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/patrol-duties-gate\.sh' \
+if grep -q '\${CLAUDE_PLUGIN_ROOT}/hooks/stop\.sh' \
      "${BIONIC_HOOKS_DIR}/hooks.json"; then
   ok "25: hooks/hooks.json registers the gate on the Stop channel, always on"
 else
@@ -404,7 +415,7 @@ fi
 # S10 (critic C-2); this is the same correction on the other hook that makes it,
 # pinned the same way — as a PAIR, so the absence rests on an extractor proven to
 # find text in this very file.
-if grep -q 'never consecutive' "$HOOK"; then
+if grep -q 'never consecutive' "$HOOK_SRC"; then
   ok "26: the header states why the CLI's consecutive-block override cannot engage here"
 else
   no "26: the header does not say why the consecutive-block override cannot engage"
@@ -491,12 +502,12 @@ fire "$d"; expect_allow "35: a sidechain CronCreate does not count against the r
 section "Section 5: the third duty — a printed FILL is answered (AC-29)"
 
 # THE CONTRACT. `session-poker.sh tick` can compute the gap between the plan's budget and
-# the roster and name the slices that are ready, but it cannot dispatch — and a
+# the roster and name the tasks that are ready, but it cannot dispatch — and a
 # recommendation nobody is obliged to answer is how this repo's own 1.4.0 wave ran six
 # writers against a budget of twenty-two. The turn's END is the only moment at which "the
 # FILL went unanswered" is a fact, so it is the moment this gate asks.
 #
-# ANSWERED = an `Agent` tool_use naming the slice, or an explicit `fill-declined: <reason>`
+# ANSWERED = an `Agent` tool_use naming the task, or an explicit `fill-declined: <reason>`
 # anywhere in the turn. The decline is the point, not a loophole: there are good reasons not
 # to fill and every one is worth one line in the record. What is refused is SILENCE.
 #
@@ -512,7 +523,7 @@ u_tick_out() {  # <dir> <text>
     >> "$1/transcript.jsonl"
 }
 
-# One Agent dispatch, shaped as the harness sends it: the slice id may land in the name, the
+# One Agent dispatch, shaped as the harness sends it: the task id may land in the name, the
 # description or the prompt, and this gate reads all of them.
 a_agent() {  # <dir> <name> [prompt]
   jq -nc --arg n "$2" --arg p "${3:-}" \
@@ -544,26 +555,26 @@ both_duties() {  # <dir> — the two standing duties, so §5 measures the THIRD 
 
 FILL_MARK="fill unanswered"
 
-# 36: every named slice dispatched -> allow.
+# 36: every named task dispatched -> allow.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-a_agent "$d" "W-ALPHA" "Slice ALPHA, senior-implementor."
-a_agent "$d" "W-BETA" "Slice BETA, implementor."
-fire "$d"; expect_allow "36: a FILL whose every slice was dispatched passes"
+a_agent "$d" "W-ALPHA" "Task ALPHA, senior-implementor."
+a_agent "$d" "W-BETA" "Task BETA, implementor."
+fire "$d"; expect_allow "36: a FILL whose every task was dispatched passes"
 
 # 37: one of two dispatched -> block, naming the one that was not, and NOT the one that was.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-a_agent "$d" "W-ALPHA" "Slice ALPHA, senior-implementor."
-fire "$d"; expect_block "37: a half-answered FILL blocks, naming the slice left out" "BETA" "ALPHA"
+a_agent "$d" "W-ALPHA" "Task ALPHA, senior-implementor."
+fire "$d"; expect_block "37: a half-answered FILL blocks, naming the task left out" "BETA" "ALPHA"
 
 # 38: neither dispatched nor declined -> block, naming both.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-fire "$d"; expect_block "38a: an unanswered FILL blocks, naming the first slice" "ALPHA"
+fire "$d"; expect_block "38a: an unanswered FILL blocks, naming the first task" "ALPHA"
 fire "$d"; expect_block "38b: …and the second" "BETA"
 fire "$d"; expect_block "38c: …and says what would answer it" "fill-declined"
 
 # 39: the DECLINE answers it. Not a loophole — a reason in the record is the point.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-a_text "$d" "fill-declined: ADOPT has not merged, so neither slice can base off the wave head."
+a_text "$d" "fill-declined: ADOPT has not merged, so neither task can base off the wave head."
 fire "$d"; expect_allow "39: an explicit fill-declined line answers the FILL"
 
 # 40: the decline may be written anywhere the orchestrator writes — including a plan-ledger
@@ -591,7 +602,7 @@ fire "$d"; expect_block "43: a sidechain Agent does not answer the orchestrator'
 # 44: WORD BOUNDARY. A dispatch that merely CONTAINS the id inside a longer word has not
 # named it — the difference between matching `ONE` and matching `PHONE`.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ONE"
-a_agent "$d" "W-PHONE" "Slice PHONEBOOK, implementor."
+a_agent "$d" "W-PHONE" "Task PHONEBOOK, implementor."
 fire "$d"; expect_block "44: an id inside a longer word does not answer the FILL" "ONE"
 
 # 45: BLOCKS ONCE, through the existing stop_hook_active valve — no new bookkeeping.
@@ -604,7 +615,7 @@ expect_allow "45: stop_hook_active true passes the same unanswered FILL"
 # design, so a duty not named in the first refusal is a duty never named at all.
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; u_tick_out "$d" "poker: FILL ALPHA"
 fire "$d"; expect_block "46a: a turn missing a standing duty AND a fill names the duty" "$TL_MISSING"
-fire "$d"; expect_block "46b: …and names the unanswered slice in the same refusal" "ALPHA"
+fire "$d"; expect_block "46b: …and names the unanswered task in the same refusal" "ALPHA"
 
 # 47: a non-tick turn is never asked, whatever its transcript contains.
 d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
@@ -681,19 +692,19 @@ fire "$d"; expect_block "54: a sidechain assistant's decline does not answer the
 # is scoped would make the third duty unreachable. §36-§47 all rest on this; asserted here
 # so the F2 scoping cannot be widened onto it by a later edit without a red test.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL ALPHA BETA"
-a_agent "$d" "W-ALPHA" "Slice ALPHA, implementor."
+a_agent "$d" "W-ALPHA" "Task ALPHA, implementor."
 fire "$d"; expect_block "55: the FILL line is still read out of the tick's tool result" "BETA" "ALPHA"
 
-section "Section 7: a dot in a slice id is a dot, not a wildcard (review correctness F1)"
+section "Section 7: a dot in a task id is a dot, not a wildcard (review correctness F1)"
 #
-# THE DEFECT. The word-boundary test splices the slice id into a DYNAMIC awk regex:
+# THE DEFECT. The word-boundary test splices the task id into a DYNAMIC awk regex:
 #   agents ~ ("(^|[^A-Za-z0-9_.-])" id "([^A-Za-z0-9_.-]|$)")
-# The validity filter one line above admits `.` as a legal slice-id character, and in a
+# The validity filter one line above admits `.` as a legal task-id character, and in a
 # regex `.` is not a dot — it matches any single character. So a FILL naming `a.b` was
 # answered by a dispatch that named `axb` and never named `a.b` at all. That is a FALSE
 # NEGATIVE on FILL_MISSING, which passes a turn this wall exists to refuse: the fail-open
 # direction. Latent in this wave — every id it dispatched is letters, digits and hyphens —
-# and reachable the moment anyone names a slice `4.2`, which the filter says is legal.
+# and reachable the moment anyone names a task `4.2`, which the filter says is legal.
 #
 # `.` is the ONE extended-regex metacharacter reachable through `[A-Za-z0-9_.-]`: `-` is
 # special only inside a bracket expression and is spliced outside one here, and `_` is
@@ -702,19 +713,19 @@ section "Section 7: a dot in a slice id is a dot, not a wildcard (review correct
 # 56: THE BUG'S OWN SHAPE. `a.b` against a dispatch naming `axb` — same length, differing
 # only where the dot is. Answered under a wildcard read; unanswered under a literal one.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
-a_agent "$d" "W-AXB" "Slice axb, implementor."
+a_agent "$d" "W-AXB" "Task axb, implementor."
 fire "$d"; expect_block "56: a dispatch naming axb does not answer a FILL for a.b" "a.b"
 
 # 57: THE PAIRED POSITIVE, which is what keeps 56 from passing by over-escaping: the same
 # id, named literally, still answers.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
-a_agent "$d" "W-AB" "Slice a.b, implementor."
+a_agent "$d" "W-AB" "Task a.b, implementor."
 fire "$d"; expect_allow "57: …and a dispatch naming a.b does answer it"
 
 # 58: the word boundary still holds around a dotted id — `a.b` is not found inside
 # `xa.by`, exactly as §44's `ONE` is not found inside `PHONE`.
 d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: FILL a.b"
-a_agent "$d" "W-XABY" "Slice xa.by, implementor."
+a_agent "$d" "W-XABY" "Task xa.by, implementor."
 fire "$d"; expect_block "58: a dotted id inside a longer word does not answer the FILL" "a.b"
 
 # 59: a hyphen in an id is a literal too, and the id is echoed back verbatim in the reason.
@@ -764,7 +775,7 @@ fire "$d"; expect_allow "61: a marker beyond the window reads as no marker — t
 # 62: THE BOUND IS NAMED AND IS A CONSTANT. A window that regresses to an unbounded read
 # is invisible in every behavioural test above — 60 and 61 both still pass without a
 # `tail` if the whole file is small. This is the assertion that the bound exists at all.
-if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK" && grep -q 'tail -n "\$SCAN_WINDOW_LINES"' "$HOOK"; then
+if grep -q '^SCAN_WINDOW_LINES=[0-9][0-9]*$' "$HOOK_SRC" && grep -q 'tail -n "\$SCAN_WINDOW_LINES"' "$HOOK_SRC"; then
   ok "62: the transcript scan is bounded by a named SCAN_WINDOW_LINES constant"
 else
   no "62: the transcript scan has no named line bound — it reads from byte zero"

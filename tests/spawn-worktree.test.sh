@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPAWN-WORKTREE — epic-17 wave-03 slice S2 (spec AC-10, design ledger D4).
+# SPAWN-WORKTREE — epic-17 wave-03 task S2 (spec AC-10, design ledger D4).
 #
 # WHAT THIS SUITE OWNS. One payload script:
 #

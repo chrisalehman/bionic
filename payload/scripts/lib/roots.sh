@@ -24,7 +24,7 @@
 # but the first had an agreement test, and the one that did could not see its own
 # fifth copy. A wall and a script that disagree about where a contracted artifact
 # lives is not a cosmetic defect: epic-17 W6 S15 measured three readers of one
-# sentence, two of them wrong, and one slice wrote a duplicate file at the repo root
+# sentence, two of them wrong, and one task wrote a duplicate file at the repo root
 # to satisfy the reader that was wrong. (Surfaces map §C.1–C.4.)
 #
 # THE PIN. tests/cross-gate-agreement.test.sh §Roots asserts each name below is
@@ -103,8 +103,8 @@ fi
 #
 # FOUR KEYS STILL HAND-ROLL THEIR OWN PIPELINE — `rigor-floor:` in
 # canonical-sdlc-governing-skill.sh, `farm-out-mode:` in farm-out-reminder.sh,
-# `poker-interval:` in session-poker.sh. Those hooks are other slices' files in this
-# wave; the conversion is named in this slice's report and is not taken here.
+# `poker-interval:` in session-poker.sh. Those hooks are other tasks' files in this
+# wave; the conversion is named in this task's report and is not taken here.
 config_value() {
   local root="$1" key="$2" default="$3"
   local config="$root/.bionic/config.yaml"
@@ -159,7 +159,7 @@ docs_root() {
 }
 
 # tmp_root <root> -> <root>/.bionic/tmp, where every session-keyed state file lives.
-# NEW: this root had no resolver at all and 41 bare literals. This slice converts the
+# NEW: this root had no resolver at all and 41 bare literals. This task converts the
 # call sites it already touches for another resolver; the rest are named in its
 # report as later work.
 tmp_root() {
@@ -209,7 +209,7 @@ transcripts_dir() {
 # registry cannot answer. That is "which copy did the CLI install", this is "which
 # copy is running"; on a developer machine driving a directory source they routinely
 # differ, and collapsing them would make doctor report the registry's answer for the
-# files it is actually reading. See this slice's report, Assumptions.
+# files it is actually reading. See this task's report, Assumptions.
 plugin_root() {
   if [ -n "${BIONIC_PLUGIN_ROOT:-}" ]; then printf '%s\n' "$BIONIC_PLUGIN_ROOT"; return; fi
   if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then printf '%s\n' "$CLAUDE_PLUGIN_ROOT"; return; fi

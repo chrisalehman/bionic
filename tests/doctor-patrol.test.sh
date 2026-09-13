@@ -187,7 +187,7 @@ plant_agent_dispatch() {  # <transcript> <tool_use_id>
   jq -nc --arg id "$tid" \
     '{type:"assistant",isSidechain:false,
       message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"Agent",
-        input:{description:"fixture slice",subagent_type:"general-purpose",
+        input:{description:"fixture task",subagent_type:"general-purpose",
                prompt:"Do the fixture work and report back."}}]}}' \
     >> "$t"
   jq -nc --arg id "$tid" \
@@ -440,7 +440,7 @@ expect_match "32: an undatable transcript, present roster — only the launches 
 
 section "Section 9: one cure, two surfaces — and the column budget"
 
-# ONE CURE, ONE SURFACE NOW (bionic 1.4.0, slice ADOPT). This used to be a two-reader
+# ONE CURE, ONE SURFACE NOW (bionic 1.4.0, task ADOPT). This used to be a two-reader
 # agreement: hooks/session-poker.sh decided `wall-blind` at tick time and named the
 # repair, and doctor named the same repair hours later off the same `patrol-wall/v1`
 # record. The tick's decision is retired — it inferred a dead dispatch wall from
@@ -531,7 +531,7 @@ section "Section 10: a firing Patrol with NO roster file and NOTHING dispatched"
 # tool_uses. `blind` is the field that separates the two (`agents - rostered -
 # refused`), and a session with no launches has nothing unrecorded.
 #
-# 1.3.0 printed `0 open dispatches` here and that number was TRUE. This slice
+# 1.3.0 printed `0 open dispatches` here and that number was TRUE. This task
 # exists to stop doctor claiming a count nobody dispatched; saying "launches
 # unrecorded" over a session that launched nothing is the same error pointed the
 # other way. This section is the control that keeps the fix from overshooting,
@@ -651,7 +651,7 @@ plant_agent_dispatch_at() {  # <transcript> <tool_use_id> <iso ts>
   jq -nc --arg id "$tid" --arg ts "$ts" \
     '{type:"assistant",isSidechain:false,timestamp:$ts,
       message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"Agent",
-        input:{description:"fixture slice",subagent_type:"general-purpose",
+        input:{description:"fixture task",subagent_type:"general-purpose",
                prompt:"Do the fixture work and report back."}}]}}' \
     >> "$t"
   jq -nc --arg id "$tid" --arg ts "$ts" \
@@ -1019,7 +1019,7 @@ expect_match "64: …while the live session's attestation still renders there" \
 # THE FIX LINE, RE-POINTED TO THE AUTO-SWEEP'S OWN FAILURE MARKER (R2, ticket-30;
 # this section pinned the OLD unconditional line — "N dead sessions left state
 # under .bionic/tmp", one per dead session, count == dead sessions — until this
-# slice's own dead-session-state row change, which is what closed ticket-30's
+# task's own dead-session-state row change, which is what closed ticket-30's
 # actual defect: hooks/session-start.sh sweeps this residue routinely now
 # (REQ-R2), so "N dead sessions have residue right now" stopped being a problem
 # doctor should keep naming forever between one `/clear` and the next session

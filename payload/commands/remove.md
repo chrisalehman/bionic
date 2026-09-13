@@ -1,6 +1,7 @@
 ---
 allowed-tools: Bash(bash ${CLAUDE_PLUGIN_ROOT}/scripts/remove.sh:*)
 description: Consented teardown of the bionic machine footprint, finishing with the native plugin uninstall.
+disable-model-invocation: true
 ---
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered from agents-src/templates/commands/remove.md.tmpl and the shared blocks in

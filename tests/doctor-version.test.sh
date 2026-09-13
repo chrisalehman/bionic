@@ -290,8 +290,8 @@ section "Section 5: every line doctor prints fits the column budget"
 # tests/doctor.test.sh was deleted at 8582861 (epic-18 wave-03). The row F5 added
 # is what found the gap: on the wave's own T3 capture it measured 104 columns,
 # because `unknown — ${LATEST_CAUSE}` interpolates free text nobody bounded.
-# Slice 4/3 had built exactly this wall for setup.sh (tests/command-relay.test.sh
-# Group B) one slice earlier. This is that wall, on the other script, driving the
+# Task 4/3 had built exactly this wall for setup.sh (tests/command-relay.test.sh
+# Group B) one task earlier. This is that wall, on the other script, driving the
 # four feed-kind arms above plus the worst case below.
 #
 # THE RULER IS THE PRODUCT'S OWN (`bionic_cols`, payload/scripts/lib/width.sh) —
@@ -703,11 +703,20 @@ expect_false "48: …and no longer ships the old integrity/agents.sha256" \
 # names (the repo reaches those through payload/agents and payload/skills/* symlinks).
 make_plugin_root() {
   local dir; dir="$(mktemp -d -p "$TMP")"
-  mkdir -p "$dir/integrity" "$dir/agents" "$dir/commands" "$dir/skills/canonical-sdlc"
+  mkdir -p "$dir/integrity" "$dir/agents" "$dir/commands" "$dir/context" \
+           "$dir/skills/canonical-sdlc/steps"
   cp "$RENDERED_MANIFEST" "$dir/integrity/" || return 1
   cp "${REPO}"/agents/*.md "$dir/agents/" || return 1
   cp "${REPO}"/payload/commands/*.md "$dir/commands/" || return 1
+  # wave-11 1c: the once-rendered dispatch terms are a manifest row like any other.
+  cp "${REPO}"/payload/context/*.md "$dir/context/" || return 1
+  # THE SKILL IS TWELVE FILES SINCE ROW 1b. A plugin root carrying only SKILL.md is missing
+  # eleven files the manifest has rows for, and every one of them would read as modified —
+  # so 49's "an untouched install reads as stock" would fail on the fixture rather than on
+  # the defect it exists to catch.
   cp "${REPO}/skills/canonical-sdlc/SKILL.md" "$dir/skills/canonical-sdlc/" || return 1
+  cp "${REPO}/skills/canonical-sdlc/dispatch.md" "$dir/skills/canonical-sdlc/" || return 1
+  cp "${REPO}"/skills/canonical-sdlc/steps/*.md "$dir/skills/canonical-sdlc/steps/" || return 1
   printf '%s' "$dir"
 }
 
@@ -719,7 +728,12 @@ integrity_line() {
 PROOT_STOCK="$(make_plugin_root)"
 LINE_STOCK="$(integrity_line "$PROOT_STOCK")"
 expect_match "49: an untouched install reads as stock" "*state=stock*" "$LINE_STOCK"
-expect_match "50: …over all twelve rendered files, not just the six roles" "*total=12*" "$LINE_STOCK"
+# RE-POINTED AT THIS MERGE (wave-11 1c + row 1b): twenty-four — payload/context/survival.md
+# joined the manifest (1c, +1) and the split skill's eleven further finals joined it too
+# (row 1b: dispatch.md and steps/0.md … steps/9.md, +11), on the twelve this suite pinned
+# before either landed. Measured on the merged tree by counting the manifest's rows, not
+# carried forward from either pre-merge side.
+expect_match "50: …over all twenty-four rendered files, not just the six roles" "*total=24*" "$LINE_STOCK"
 expect_match "51: …with nothing named as modified" "*modified=0 names=-*" "$LINE_STOCK"
 
 # THE DEFECT CONTROL. `stock` above is worth nothing unless the same reader turns on a
@@ -730,7 +744,7 @@ LINE_ROLE="$(integrity_line "$PROOT_ROLE")"
 expect_match "52: one doctored ROLE file reads as modified" "*state=modified*" "$LINE_ROLE"
 expect_match "53: …and is named" "*names=critic.md*" "$LINE_ROLE"
 
-# THE WIDENING ITSELF: before this slice a doctored skill file or command page was
+# THE WIDENING ITSELF: before this task a doctored skill file or command page was
 # invisible to this line, because the manifest had no row for either.
 PROOT_SKILL="$(make_plugin_root)"
 printf '\nlocally added line\n' >> "$PROOT_SKILL/skills/canonical-sdlc/SKILL.md"

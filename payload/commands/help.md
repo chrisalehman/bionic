@@ -1,5 +1,6 @@
 ---
 description: bionic overview — what it is, the command roster, and where to start.
+disable-model-invocation: true
 ---
 <!-- GENERATED FILE — DO NOT EDIT.
      Rendered from agents-src/templates/commands/help.md.tmpl and the shared blocks in
@@ -63,9 +64,9 @@ Six roles canonical-sdlc dispatches by step. The model and effort each one runs 
 | --- | --- | --- |
 | `auditor` | opus · high | Independent Step-5 verification auditor — falsifies evidence at its declared tier, never reviews code |
 | `critic` | opus · high | Independent Step-6 adversarial critic — falsifies the code and the claim it is ready to merge |
-| `implementor` | sonnet · high | MECHANICAL slice execution under TDD discipline — the plan is literal, tests define done, ambiguity means stop and surface |
+| `implementor` | sonnet · high | MECHANICAL task execution under TDD discipline — the plan is literal, tests define done, ambiguity means stop and surface |
 | `researcher` | opus · high | Read-only codebase/docs exploration returning structured summaries with file:line citations |
-| `senior-implementor` | opus · high | DISCRETIONARY slice execution under TDD discipline — judgment and taste licensed within slice scope, every resolution logged to the plan's Assumptions before commit |
+| `senior-implementor` | opus · high | DISCRETIONARY task execution under TDD discipline — judgment and taste licensed within task scope, every resolution logged to the wave's `record/<wave>/assumptions.md` before commit |
 | `test-runner` | haiku · medium | Mechanical test-suite execution and full result reporting |
 
 ## Installed by setup (third party)

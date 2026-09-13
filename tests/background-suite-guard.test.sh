@@ -46,8 +46,15 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 PAYLOAD_HOOKS="$REPO_ROOT/payload/hooks"
-GUARD="$PAYLOAD_HOOKS/background-suite-guard.sh"
-CTX_GUARD="$PAYLOAD_HOOKS/agent-context-guard.sh"
+# THE SEAM IS hooks/bash-walls.sh (epic-23 wave-11-lean-spine, T23), and there is no
+# longer a WRAPPER to drive through. This wall is `wall_background_suite_guard` in
+# payload/scripts/lib/walls.sh, and the partition hooks/agent-context-guard.sh used to
+# apply in front of it — an agent context, an armed session — is the first thing that
+# function asks. A wrapper around the compound would have silenced protect-main,
+# protect-database, the evidence gate and farm-out-reminder on every main-thread call,
+# so the predicate moved inside and the wrapper's Bash-side registration is gone. The
+# guard file itself stays, registered on SubagentStop, untouched.
+GUARD="$PAYLOAD_HOOKS/bash-walls.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/bg-suite-guard-test.XXXXXX")" && pwd -P)"
 cleanup() { rm -rf "$SANDBOX"; }
@@ -85,6 +92,15 @@ add_row() {
   roster_row_fixture "session=$SID" "$@" >> "$repo/.bionic/tmp/roster-$SID.state"
 }
 
+# `agent_type` TRAVELS WITH `agent_id` (T23). A dispatched agent's tool-class payload
+# carries both — the type or the teammate name in `agent_type`
+# (record/session-20260815-landing-supervision/t1-probe-report.md §2.1) and the transcript
+# id in `agent_id` — and the fixture omitted the first because the wall it drove reads
+# only the second. Now that one process carries all five walls it matters:
+# hooks/farm-out-reminder.sh's function leaves on a non-empty `agent_type`, and a payload
+# without it is a MAIN-THREAD payload by that wall's own rule, so every suite command
+# below would draw a farm-out deny beside this wall's verdict. The field is added rather
+# than the expectations changed, because an agent-context payload really does carry it.
 mk_payload() {  # <cwd> <command> [agent_id] [run_in_background:true|false|omit]
   local bg="${4:-omit}"
   jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" --arg a "${3:-}" --arg bg "$bg" \
@@ -94,7 +110,7 @@ mk_payload() {  # <cwd> <command> [agent_id] [run_in_background:true|false|omit]
       tool_input:({command:$cmd}
                   + (if $bg == "omit" then {} else {run_in_background: ($bg == "true")} end)),
       tool_use_id:"toolu_01s13budget"}
-     + (if $a == "" then {} else {agent_id:$a} end)'
+     + (if $a == "" then {} else {agent_id:$a, agent_type:"test-runner"} end)'
 }
 
 OUT=""; ERR=""; ST=0
@@ -116,28 +132,28 @@ run_hook() {  # <payload> <hook> [args...]
 # and a wall proved only when driven straight is a wall nobody proved.
 VERR=""
 guarded() {  # <repo> <command> [agent_id] [bg]
-  # TWO DRIVES OF THE SAME CALL, and the pair is what slice 13's ruling D-1 made
+  # TWO DRIVES OF THE SAME CALL, and the pair is what task 13's ruling D-1 made
   # necessary. The user stream is ONE line now — `bionic: <verb> refused — <fact>
   # (<fix>)` — and everything this suite used to read off it (the suite asked for, the
   # recorded set, the word BUDGET, the standing ruling) is `detail`, which reaches a
   # reader only under BIONIC_WALL_VERBOSE=1. So `$ERR` is asserted for the LINE and
   # `$VERR` for the detail; asserting the detail on `$ERR` would now be asserting that
   # the wall leaks it.
-  run_hook "$(mk_payload "$1" "$2" "${3-$ACTOR}" "${4:-omit}")" "$CTX_GUARD" "$GUARD"
+  run_hook "$(mk_payload "$1" "$2" "${3-$ACTOR}" "${4:-omit}")" "$GUARD"
   local _st="$ST" _out="$OUT" _err="$ERR" _saved="$EXTRA_ENV"
   VERR=""
   # ONLY WHEN THE FIRST DRIVE REFUSED, so an allowed command is never run twice.
   if [ "$_st" -ne 0 ]; then
     EXTRA_ENV="$EXTRA_ENV BIONIC_WALL_VERBOSE=1"
-    run_hook "$(mk_payload "$1" "$2" "${3-$ACTOR}" "${4:-omit}")" "$CTX_GUARD" "$GUARD"
+    run_hook "$(mk_payload "$1" "$2" "${3-$ACTOR}" "${4:-omit}")" "$GUARD"
     VERR="$ERR"
   fi
   EXTRA_ENV="$_saved"; ST="$_st"; OUT="$_out"; ERR="$_err"
 }
 
 section "B0 — the hook exists and parses"
-if [ -f "$GUARD" ]; then ok "hooks/background-suite-guard.sh is on disk"; else
-  no "hooks/background-suite-guard.sh is on disk" "$GUARD"
+if [ -f "$GUARD" ]; then ok "hooks/bash-walls.sh is on disk"; else
+  no "hooks/bash-walls.sh is on disk" "$GUARD"
 fi
 if bash -n "$GUARD" 2>"$SANDBOX/.syn"; then ok "it parses (bash -n)"; else
   no "it parses (bash -n)" "$(cat "$SANDBOX/.syn")"
@@ -296,26 +312,37 @@ section "B6 — scope: the arm is the AGENT's, and the session must be engaged"
 # A main-thread payload has no top-level agent_id (t1-probe-report.md §3). The
 # orchestrator's own thread is hooks/farm-out-reminder.sh's, which answers the same
 # question differently, so this arm never speaks there.
-run_hook "$(mk_payload "$R1" 'bash tests/gamma.test.sh' "")" "$CTX_GUARD" "$GUARD"
+# SILENT FOR THIS WALL, WHICH IS NOT THE SAME AS AN EMPTY STREAM (T23). A main-thread
+# suite command is hooks/farm-out-reminder.sh's business and it denies it — that is the
+# sentence below about the orchestrator's own thread, and in one process its answer shares
+# these streams. So the assertion is that THIS wall said nothing, by its own words, rather
+# than that nobody did.
+run_hook "$(mk_payload "$R1" 'bash tests/gamma.test.sh' "")" "$GUARD"
 expect_eq "B6a a MAIN-THREAD payload leaves the budget arm silent" "0" "$ST"
-expect_empty "B6a …silently" "$OUT$ERR"
+expect_absent "B6a …with no budget refusal in it" "budget" "$ERR"
+expect_absent "B6a …and no backgrounded-suite refusal either" "never read" "$ERR"
 # POSITIVE CONTROL: the same command, same repo, from an agent context, refuses — so B6a
 # is the partition and not a dud fixture.
 guarded "$R1" 'bash tests/gamma.test.sh'
 expect_eq "B6a control: the same command from an agent context REFUSES" "2" "$ST"
 
-# DRIVEN STRAIGHT, with no agent_id: the wall owns its own scope and does not depend on
-# the guard in front remembering to check.
-run_hook "$(mk_payload "$R1" 'bash tests/gamma.test.sh' "")" "$GUARD"
-expect_eq "B6b …and driven straight into the wall, still silent" "0" "$ST"
-expect_empty "B6b …silently" "$OUT$ERR"
+# THE SAME PAYLOAD BACKGROUNDED, which is the arm the wrapper used to scope. Driven
+# straight into the wall before T23 this refused on the main thread and only the wrapper
+# in front stopped it; the predicate is inside the function now, so the main thread is
+# silent here and the control below shows the arm is alive in an agent context.
+run_hook "$(mk_payload "$R1" 'bash tests/gamma.test.sh' "" true)" "$GUARD"
+expect_eq "B6b …and a MAIN-THREAD backgrounded suite is silent too" "0" "$ST"
+expect_absent "B6b …the backgrounded-suite refusal does not fire there" \
+  "a backgrounded suite's result is never read" "$ERR"
+guarded "$R1" 'bash tests/gamma.test.sh' "$ACTOR" true
+expect_eq "B6b control: backgrounded from an agent context, REFUSED" "2" "$ST"
 
 # UNENGAGED: bionic's walls bind only a session that invoked canonical-sdlc.
 rm -f "$R1/.bionic/tmp/engaged-$SID.state"
 guarded "$R1" 'bash tests/gamma.test.sh'
 expect_eq "B6c an unengaged session is silent even off-budget (through the guard)" "0" "$ST"
 run_hook "$(mk_payload "$R1" 'bash tests/gamma.test.sh' "$ACTOR")" "$GUARD"
-expect_eq "B6c …and driven straight into the wall" "0" "$ST"
+expect_eq "B6c …and with an agent context as well" "0" "$ST"
 expect_empty "B6c …silently" "$OUT$ERR"
 : > "$R1/.bionic/tmp/engaged-$SID.state"
 guarded "$R1" 'bash tests/gamma.test.sh'
@@ -386,14 +413,14 @@ guarded_from() {  # <cwd for the hook process> <repo> <command>
   OUT=$(cd "$_dir" && printf '%s' "$_payload" | env HOME="$FAKE_HOME" \
           CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
           CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= \
-          bash "$CTX_GUARD" "$GUARD" 2>"$SANDBOX/.err")
+          bash "$GUARD" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
-  # The same call again with the knob, for the arms that read `detail` (slice 13, D-1).
+  # The same call again with the knob, for the arms that read `detail` (task 13, D-1).
   VERR=$(cd "$_dir" && printf '%s' "$_payload" | env HOME="$FAKE_HOME" \
           CLAUDE_CONFIG_DIR="$FAKE_HOME/.claude" BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" \
           CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= BIONIC_WALL_VERBOSE=1 \
-          bash "$CTX_GUARD" "$GUARD" 2>&1 >/dev/null)
+          bash "$GUARD" 2>&1 >/dev/null)
   return 0
 }
 guarded_from "$BSG_GLOBDIR" "$R1" 'bash tests/*.test.sh'
@@ -443,7 +470,7 @@ expect_eq "B9f control: an ordinary off-budget suite still refuses" "2" "$ST"
 expect_contains "B9f …and its label carries no space before the colon" "You asked for:" "$VERR"
 expect_absent "B9f …the stray space is gone" "You asked for :" "$ERR"
 
-section "B10 — every site that turns a session id into a roster path carries the shape rule (A-10)"
+section "B10 — the shape rule is applied ONCE, and every path-forming site asks for it (A-10, REQ-1h)"
 # THE INCONSISTENCY. `session_id` (payload/scripts/lib/session.sh) prefers
 # CLAUDE_CODE_SESSION_ID, falls back to the payload value, and returns whichever it got
 # VERBATIM — it validates nothing. Two hooks that build a roster path apply the shape rule
@@ -451,29 +478,56 @@ section "B10 — every site that turns a session id into a roster path carries t
 # hooks/landing-gate.sh:284 states the rationale for `agent_id`: a key carrying path
 # separators does not trip the symlink guards, it reads outside what those guards protect.
 #
-# WHY THIS IS A SOURCE ASSERTION AND NOT A DRIVEN ONE, said plainly. The line is
-# UNREACHABLE through the supported path: `engaged_session` (payload/scripts/lib/run.sh:566)
-# applies the identical case to the same id ~70 lines earlier, so a malformed id exits the
-# hook at the engagement switch and never reaches the path. A test that piped a malformed
-# id into this hook and watched it pass would be asserting the ENGAGEMENT check while
-# claiming to assert this one — a green that proves a different line than the one it names,
-# which is the exact class this wave exists to close. What IS true and checkable is the
-# family property A-10 names: the same rule, at every path-forming site.
-B10_HOOKS="background-suite-guard.sh execution-recorder.sh agent-context-guard.sh"
+# WHY THIS IS A SOURCE ASSERTION AND NOT A DRIVEN ONE, said plainly. The rule is
+# UNREACHABLE through the supported path: it is applied to the same id ~70 lines before any
+# roster path is formed, so a malformed id leaves the hook at the engagement switch and
+# never reaches the path. A test that piped a malformed id into this hook and watched it
+# pass would be asserting the ENGAGEMENT check while claiming to assert this one — a green
+# that proves a different line than the one it names, which is the exact class this wave
+# exists to close. What IS true and checkable is the family property A-10 names.
+#
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1h). A-10's property was "the same rule at
+# every path-forming site", and three hooks each carried their own copy of it. The property
+# is now stronger and cheaper to hold: there is ONE rule, in `bionic_context`
+# (payload/scripts/lib/context.sh), applied to the RESOLVED id, and a hook that fails it
+# exits rather than blanking the variable and carrying on. So the family row below asks
+# whether each hook takes its id from that one call — which is the same question A-10 asked,
+# put to the site that can now answer it — and the row after it pins the rule itself.
+B10_LIB="$REPO_ROOT/payload/scripts/lib/context.sh"
+B10_HOOKS="bash-walls.sh execution-recorder.sh agent-context-guard.sh"
 B10_RULE='case .*\[!A-Za-z0-9_-\]\*\)'
 for _h in $B10_HOOKS; do
-  expect_regex "B10 $_h shape-checks the session id" "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/$_h")"
+  expect_regex "B10 $_h takes its session id from the one call that shape-checks it" \
+    'bionic_context' "$(cat "$PAYLOAD_HOOKS/$_h")"
+  expect_eq "B10 …and restates the rule nowhere in its own body" "0" \
+    "$(/usr/bin/grep -cE "$B10_RULE" "$PAYLOAD_HOOKS/$_h" | tr -d ' ')"
 done
-# NON-VACUITY: the pattern is not one that matches any shell file. A hook with no such rule
-# fails it, so the loop above is reading the rule and not the language.
+# THE RULE ITSELF, at the one site that now owns it.
+expect_regex "B10 lib/context.sh carries the shape rule" "$B10_RULE" "$(cat "$B10_LIB")"
+# NON-VACUITY: the pattern is not one that matches any shell file. A file with no such rule
+# fails it, so the rows above are reading the rule and not the language.
 expect_no_regex "B10 …and the pattern discriminates (a hook without the rule fails it)" \
-  "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/farm-out-reminder.sh")"
-# AND THE RULE IS AT THIS HOOK'S OWN PATH-FORMING SITE, not merely somewhere in the file:
-# the roster path is built on the line after it. A rule that drifted away from the line it
-# protects is the state A-10 found, spelled differently.
-B10_ADJACENT=$(/usr/bin/grep -A1 'case "\$BSG_SID" in' "$GUARD" | tail -1)
-expect_match "B10 …on the line immediately before the roster path is formed" \
-  'ROSTER_FILE=*' "$B10_ADJACENT"
+  "$B10_RULE" "$(cat "$PAYLOAD_HOOKS/engage.sh")"
+# AND IT IS APPLIED BEFORE THIS HOOK'S OWN PATH-FORMING SITE, not merely somewhere in the
+# file. A rule that drifted away from the line it protects is the state A-10 found, spelled
+# differently — so the ORDER is what is pinned, by line number, and an absent literal fails
+# loudly rather than comparing two empty strings.
+# THE ORDER IS STRUCTURAL NOW, AND STILL PINNED. The call and the path-forming site used
+# to be two line numbers in one file; they are in two files since T23 — `bionic_context`
+# runs once in hooks/bash-walls.sh, before `bionic_fold` calls any wall, and the roster
+# path is formed inside `wall_background_suite_guard` in the library the hook sources.
+# The hook cannot reach a wall without passing the call, so what is pinned is that each
+# site exists exactly once and on the side it belongs to.
+B10_WALLS="$REPO_ROOT/payload/scripts/lib/walls.sh"
+expect_eq "B10 anchor: the hook calls bionic_context at column 0, once" "1" \
+  "$(/usr/bin/grep -c '^bionic_context' "$GUARD" | tr -d ' ')"
+expect_eq "B10 anchor: the library forms exactly one roster path" "1" \
+  "$(/usr/bin/grep -c '^ROSTER_FILE=' "$B10_WALLS" | tr -d ' ')"
+expect_eq "B10 …and the wall forms none of its own outside that one site" "0" \
+  "$(/usr/bin/grep -c '^ROSTER_FILE=' "$GUARD" | tr -d ' ')"
+expect_eq "B10 …the call precedes the fold that reaches every wall" "yes" \
+  "$([ "$(/usr/bin/grep -n '^bionic_context' "$GUARD" | head -1 | cut -d: -f1)" \
+      -lt "$(/usr/bin/grep -n '^bionic_fold' "$GUARD" | head -1 | cut -d: -f1)" ] && echo yes || echo no)"
 
 section "B11 — AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 #

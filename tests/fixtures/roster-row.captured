@@ -12,7 +12,7 @@
 # PROVENANCE. Both lines are verbatim from the live session roster
 #   .bionic/tmp/roster-c04c2d44-2eac-41af-bfef-b109aeed728a.state
 # (machine-local, gitignored) of the session that dispatched S14 itself, captured
-# 2026-09-06 while the pre-S14 payload was the one on disk. Both name THIS slice, which is
+# 2026-09-06 while the pre-S14 payload was the one on disk. Both name THIS task, which is
 # why they were chosen: the rows and the change they pin have one traceable origin.
 #
 #   INTENDED  — `hooks/dispatch-preflight.sh`'s `ROW=` (:1822), the launch-time writer.

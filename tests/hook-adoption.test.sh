@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/hook-adoption.test.sh — ADOPT: every hook on the library spine, always-on.
-# (bionic 1.4.0, wave-bionic-1.4.0-update slice ADOPT; spec AC-7, AC-8, AC-9, AC-12,
+# (bionic 1.4.0, wave-bionic-1.4.0-update task ADOPT; spec AC-7, AC-8, AC-9, AC-12,
 # AC-16; design §2 "order in every hook: load, active_run, own work".)
 #
 # WHAT IS UNDER TEST. Not a library — a CONVENTION, held across eighteen files that
@@ -87,20 +87,29 @@ trap 'rm -rf "$SANDBOX"' EXIT
 # stop-guard read nothing out of the plan: they are the roster lifecycle, which begins
 # before a plan exists (a run's Step 0 precedes its plan) and outlives the run that
 # created it, so their `active_run` reads are gone and their rows say `no`.
+# THE FIVE PreToolUse|Bash WALLS ARE ONE ROW (epic-23 wave-11-lean-spine, T23).
+# protect-main, protect-database, the evidence gate, farm-out-reminder and
+# background-suite-guard are functions of payload/scripts/lib/walls.sh behind
+# hooks/bash-walls.sh, so the file that adopts the preamble is the compound.
+#
+# ITS CLASS IS `closed`, WHICH IS THE UNION AND NOT AN AVERAGE. Two of the five refuse
+# when the library will not load and three step aside; in one process the loader either
+# answers or does not, so the compound takes the stricter of the two — and it is
+# protect-main's arm that runs, because protect-main's is unconditional in every project
+# on the machine. Section 6 drives it and section 6b drives its reach.
+#
+# ITS SCOPE COLUMN IS `no`, for the reason section 5's own preamble gives about
+# hooks/stop.sh: the five disagree. The evidence gate is run-scoped and exits on a closed
+# run; protect-main guards a push whether a plan exists or not. A process carrying both
+# cannot be silent on a closed run, and saying it is would assert a thing the design says
+# is false. Each wall's own scoping is driven in its own suite, through this process.
 ADOPTED='
-protect-main|closed|no
-protect-database|open|no
-canonical-sdlc-evidence-gate|closed|yes
-farm-out-reminder|open|no
-background-suite-guard|open|no
+bash-walls|closed|no
 dispatch-preflight|open|yes
 canonical-sdlc-governing-skill|open|yes
-landing-gate|open|no
+stop|open|no
 execution-recorder|open|no
 stop-guard|open|no
-context-spend|open|yes
-patrol-duties-gate|open|yes
-patrol-revive|open|yes
 agent-context-guard|open|no
 preflight-probe|open|no
 stop-orders|open|no
@@ -170,19 +179,35 @@ EOF
 section "2 — one root: no hook restates the walk"
 #
 # The eight `resolve_project_root` copies this replaces were byte-identical by
-# assertion and divergent by history; the library ends the family. Slice POKER
-# converted the last carrier (session-poker.sh) in parallel with this slice, so the
+# assertion and divergent by history; the library ends the family. Task POKER
+# converted the last carrier (session-poker.sh) in parallel with this task, so the
 # family is empty; this assertion is what notices a copy creeping back.
 STRAGGLERS=$(grep -ln '^resolve_project_root()' "$HOOKS"/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
 expect_eq "no hook still defines a private resolve_project_root (POKER landed the poker on the spine)" \
   "" "$STRAGGLERS"
 
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). This row was written against a tree
+# where every hook resolved its own root, and it asked each one for a `project_root` call.
+# Fifteen hooks ask `bionic_context` now and never name the resolver; the drift it was
+# written for — a hook restating the walk — is caught by the straggler row above and by
+# tests/cross-gate-agreement.test.sh §CTX, which requires the inline sequence in ZERO hook
+# bodies. What this row still owns is that each hook gets its root from SOMEWHERE shared,
+# so the ask is now either call, and a hook that resolves no root at all still fails.
+# ONE LINE, and it has to be: the membership test below is a `case` glob on `" $name "`,
+# and a newline between two names is not the space that pattern needs.
+CTX_CALLERS=" agent-context-guard bash-walls canonical-sdlc-governing-skill dispatch-preflight execution-recorder session-start stop stop-guard "
 while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || continue
-  case "$name" in
-    protect-main|background-suite-guard) continue ;;  # neither reads a root
+  case "$CTX_CALLERS" in
+    *" $name "*)
+      if grep -q '^bionic_context' "$f"; then
+        ok "$name resolves its root through the library (bionic_context)"
+      else
+        no "$name resolves its root through the library (bionic_context)" "no bionic_context call in $f"
+      fi
+      continue ;;
   esac
   if grep -qE '=\$\(project_root |=\$\(project_root$|project_root "' "$f"; then
     ok "$name resolves its root through the library"
@@ -200,9 +225,28 @@ section "3 — one session id: every reader asks the library"
 # over the record, which is the divergence R-1 measured. So: every hook that
 # derives a session id calls `session_id`, and the payload read that remains is
 # the ARGUMENT to that call, never the answer.
-SID_READERS='agent-context-guard preflight-probe stop-orders session-sweeper stop-check landing-gate execution-recorder dispatch-preflight patrol-revive context-spend farm-out-reminder session-start engage patrol-duties-gate stop-guard
-canonical-sdlc-evidence-gate canonical-sdlc-governing-skill protect-main protect-database background-suite-guard'
-for name in $SID_READERS; do
+# RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f/REQ-1h). The property is unchanged — a
+# hook must not read `.session_id` straight out of its payload and call that the record —
+# but the fifteen preamble hooks reach `session_id` THROUGH `bionic_context` now, which
+# also applies the one shape guard they used to carry six copies of between them. So each
+# hook is asked for whichever call is its own, and the roster below is split on that line
+# rather than the list being shortened: a hook that asks for NEITHER still fails.
+SID_VIA_LIB='agent-context-guard bash-walls
+canonical-sdlc-governing-skill dispatch-preflight execution-recorder
+stop session-start stop-guard'
+SID_DIRECT='preflight-probe stop-orders session-sweeper stop-check engage'
+SID_READERS="$SID_VIA_LIB
+$SID_DIRECT"
+for name in $SID_VIA_LIB; do
+  f="$HOOKS/$name.sh"
+  [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
+  if grep -q '^bionic_context' "$f"; then
+    ok "$name takes its session id from the library, through bionic_context"
+  else
+    no "$name takes its session id from the library, through bionic_context" "no bionic_context call in $f"
+  fi
+done
+for name in $SID_DIRECT; do
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || { no "$name.sh exists" "$f"; continue; }
   if grep -q 'session_id "' "$f"; then
@@ -218,18 +262,26 @@ done
 # unpinned by this list until the line above — so the roster is now also DERIVED from the
 # tree and compared to the hand-written one, byte for byte, the same technique used above
 # for the private-resolver family (`ADOPTED`/no-stragglers, §1).
+# DERIVED ON BOTH SIDES OF THE SPLIT, so neither half can quietly gain a member. The
+# direct-caller set is the one that shrank when the preamble moved into the library, and
+# it is the one a new hand-rolled reading would land in.
 SID_ACTUAL=$(grep -l 'session_id "' "$HOOKS"/*.sh 2>/dev/null \
   | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
-SID_EXPECTED=$(printf '%s\n' $SID_READERS | sort | tr '\n' ' ' | sed 's/ $//')
-expect_eq "the session-id reader roster names every hook that calls session_id, and no other" \
-  "$SID_EXPECTED" "$SID_ACTUAL"
+SID_DIRECT_EXPECTED=$(printf '%s\n' $SID_DIRECT | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the direct session-id reader roster names every hook that calls session_id, and no other" \
+  "$SID_DIRECT_EXPECTED" "$SID_ACTUAL"
+SID_CTX_ACTUAL=$(grep -l '^bionic_context' "$HOOKS"/*.sh 2>/dev/null \
+  | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
+SID_CTX_EXPECTED=$(printf '%s\n' $SID_VIA_LIB | sort | tr '\n' ' ' | sed 's/ $//')
+expect_eq "…and the via-the-library roster names every hook that calls bionic_context, and no other" \
+  "$SID_CTX_EXPECTED" "$SID_CTX_ACTUAL"
 
 section "4 — one run predicate: no hook restates it, the run-scoped ones call it"
 #
 # has_sdlc_state() was a five-copy family plus one merged reimplementation, and every
 # one of them answered "is there a run" by restating the algorithm. The library answers
 # it once. session-poker.sh was the last carrier — named here rather than excused — and
-# slice SCHED deleted its copy (POKER/2, ratified 2026-09-03), so the family is now EMPTY.
+# task SCHED deleted its copy (POKER/2, ratified 2026-09-03), so the family is now EMPTY.
 # The second row is the one with teeth: an empty grep also describes a fleet that lost the
 # predicate altogether, so the tick is asked to name the library functions it calls instead.
 HS_CARRIERS=$(grep -ln '^has_sdlc_state()' "$HOOKS"/*.sh 2>/dev/null | xargs -n1 basename 2>/dev/null | sort | tr '\n' ' ' | sed 's/ $//')
@@ -269,10 +321,16 @@ while IFS='|' read -r name class scoped; do
   [ -n "$name" ] || continue
   f="$HOOKS/$name.sh"
   [ -f "$f" ] || continue
-  if grep -q 'session_run "' "$f"; then found=yes; else found=no; fi
-  if grep -qE 'active_run "|session_run "' "$f"; then found_any=yes; else found_any=no; fi
+  # RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f). The verdict is still `session_run`'s
+  # and still per-session; what moved is WHERE it is asked. A preamble hook takes it from
+  # `bionic_context`, which calls `session_run "$BIONIC_ROOT" "$BIONIC_SID"` once and hands
+  # back the word and the path — so the proxy for "run-scoped" is a read of BIONIC_RUN_WORD
+  # or BIONIC_RUN_PLAN, and for a hook outside the preamble it is still the call itself.
+  # A hook that reverted to the PROJECT-keyed `active_run` fails either way.
+  if grep -qE 'session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN' "$f"; then found=yes; else found=no; fi
+  if grep -qE 'active_run "|session_run "|BIONIC_RUN_WORD|BIONIC_RUN_PLAN' "$f"; then found_any=yes; else found_any=no; fi
   case "$scoped" in
-    yes) expect_eq "$name gates on session_run, the session-keyed predicate" "yes" "$found" ;;
+    yes) expect_eq "$name gates on the session-keyed run verdict" "yes" "$found" ;;
     no)  expect_eq "$name is NOT run-scoped and reads neither run predicate" "no" "$found_any" ;;
   esac
 done <<EOF
@@ -286,10 +344,20 @@ EOF
 # is also the thing a reader would delete as redundant — so the roster of hooks still
 # calling the project-keyed reader is derived from the tree and pinned by value. A second
 # hook picking the call back up shows here.
-AR_CALLERS=$(grep -l 'active_run "' "$HOOKS"/*.sh 2>/dev/null \
+# THE SET IS DERIVED OVER THE LIBRARY TOO (T23). The evidence gate's fallback arm is a
+# function in payload/scripts/lib/walls.sh now, so a grep over hooks/ alone would answer
+# "nobody calls it" and this pin would go quietly vacuous on the exact regression it
+# exists to catch — a second caller picking the project-keyed reader back up.
+AR_LIBDIR="$HOOKS/../payload/scripts/lib"
+[ -d "$AR_LIBDIR" ] || AR_LIBDIR="$HOOKS/../scripts/lib"
+# lib/run.sh IS THE OWNER, NOT A CALLER. It defines `active_run` and `active_plan` and
+# uses them inside its own body; counting the definition site as a consumer would make
+# both pins unfalsifiable, since the owner can never leave the set.
+AR_CALLERS=$(grep -l 'active_run "' "$HOOKS"/*.sh "$AR_LIBDIR"/*.sh 2>/dev/null \
+  | grep -v '/run\.sh$' \
   | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
-expect_eq "canonical-sdlc-evidence-gate is the ONLY hook still calling active_run, and it is the AC-3 fallback arm" \
-  "canonical-sdlc-evidence-gate" "$AR_CALLERS"
+expect_eq "the evidence gate's AC-3 fallback arm is the ONLY caller of active_run, wherever it lives" \
+  "walls" "$AR_CALLERS"
 
 # THE SAME PIN FOR `active_plan`, WHICH HAD NONE (S10a, review D3). `active_run` is one of
 # TWO project-keyed readers this wave left standing, and only one of them was held to a set.
@@ -299,10 +367,11 @@ expect_eq "canonical-sdlc-evidence-gate is the ONLY hook still calling active_ru
 # still needs a plan to read DISARM out of. Three separate pins name the tick's call by hand
 # and nothing named the gate's, so a THIRD hook picking up the project-keyed selector — the
 # exact regression this section exists to catch for `active_run` — showed up nowhere.
-AP_CALLERS=$(grep -l 'active_plan "' "$HOOKS"/*.sh 2>/dev/null \
+AP_CALLERS=$(grep -l 'active_plan "' "$HOOKS"/*.sh "$AR_LIBDIR"/*.sh 2>/dev/null \
+  | grep -v '/run\.sh$' \
   | xargs -n1 basename 2>/dev/null | sed 's/\.sh$//' | sort | tr '\n' ' ' | sed 's/ $//')
 expect_eq "active_plan has exactly TWO callers, and both are named exceptions" \
-  "canonical-sdlc-evidence-gate session-poker" "$AP_CALLERS"
+  "session-poker walls" "$AP_CALLERS"
 
 # ENGAGE IS THE WRITER, NOT A CONSUMER, and the roster's `no` above must not be read as
 # "engage ignores the session". It reads the marker's `plan=` FIELD through `session_plan` to
@@ -392,7 +461,7 @@ seed_hook() {  # <hook> <root>
   mkdir -p "$root/.bionic/tmp" 2>/dev/null || true
   : > "$root/.bionic/tmp/engaged-$SID.state"
   case "$hook" in
-    landing-gate|execution-recorder|stop-guard)
+    stop|execution-recorder|stop-guard|agent-context-guard|bash-walls)
       {
         roster_header
         roster_row_fixture status=intended session="$SID" name=w1-impl agent_id= \
@@ -407,7 +476,7 @@ seed_hook() {  # <hook> <root>
           tool_use_id=toolu_ADOPT1
       } > "$root/.bionic/tmp/roster-$SID.state"
       ;;
-    patrol-revive)
+    stop2)
       # A stale stamp against a one-second interval: staleness is an MTIME, never a sleep.
       printf 'poker-interval: 1s\n' > "$root/.bionic/config.yaml"
       printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID" \
@@ -416,6 +485,17 @@ seed_hook() {  # <hook> <root>
       touch -t "$ts" "$root/.bionic/tmp/patrol-$SID.state"
       ;;
   esac
+  # THE MERGED PROCESS RUNS FOUR VERDICTS (epic-23 wave-11, T12), so its fixture seeds
+  # every precondition the four need rather than one arm's: the roster arm above already
+  # ran for it, and the Patrol stamp is seeded here. A fixture that armed only one arm
+  # would leave three of the four silent for a reason that has nothing to do with scoping.
+  if [ "$hook" = "stop" ]; then
+    printf 'poker-interval: 1s\n' > "$root/.bionic/config.yaml"
+    printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID" \
+      > "$root/.bionic/tmp/patrol-$SID.state"
+    ts="$(date -v-600S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-600 seconds" +%Y%m%d%H%M.%S)"
+    touch -t "$ts" "$root/.bionic/tmp/patrol-$SID.state"
+  fi
 }
 
 # drive <hook> <payload-json> [extra-env...]  -> DRV_ST / DRV_OUT / DRV_ERR
@@ -448,10 +528,11 @@ printf '%s\n' \
 payload_for() {
   local hook="$1" cwd="$2"
   case "$hook" in
-    canonical-sdlc-evidence-gate)
+    bash-walls)
+      # THE EVIDENCE GATE'S PAYLOAD, and deliberately not one of the other four's: a
+      # commit is the only Bash command of the five walls' subjects that exactly one of
+      # them answers, which is what lets section 5 read a silence as that wall's.
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"git commit -m wip"}}' ;;
-    farm-out-reminder)
-      jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"bash tests/run.sh"}}' ;;
     stop-guard)
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"TaskStop",tool_input:{task_id:"w1-impl"}}' ;;
     execution-recorder)
@@ -466,13 +547,7 @@ payload_for() {
                          agentId:"aw1impl-1111111111111111", description:"a dispatch",
                          resolvedModel:"claude-sonnet-5", prompt:"go"},
           tool_use_id:"toolu_ADOPT1", duration_ms:6}' ;;
-    context-spend)
-      jq -n --arg s "$SID" --arg c "$cwd" --arg t "$TICK_TR" '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop"}' ;;
-    patrol-duties-gate)
-      jq -n --arg s "$SID" --arg c "$cwd" --arg t "$TICK_TR" '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop",stop_hook_active:false}' ;;
-    patrol-revive)
-      jq -n --arg s "$SID" --arg c "$cwd" --arg t "$TICK_TR" '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop",stop_hook_active:false}' ;;
-    landing-gate)
+    stop)
       # `background_tasks` is what makes a Stop payload legible to the sweep — it is the
       # list of what is STILL RUNNING, and the gate exits before anything else without it.
       jq -n --arg s "$SID" --arg c "$cwd" --arg t "$TICK_TR" '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}' ;;
@@ -480,6 +555,13 @@ payload_for() {
       jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Agent",tool_input:{description:"d",subagent_type:"implementor",prompt:"Do the thing.\nExpected artifact: '"$cwd"'/.bionic/docs/record/x.md\n"}}' ;;
     canonical-sdlc-governing-skill)
       jq -n --arg s "$SID" --arg c "$cwd" --arg p "$cwd/.bionic/docs/plans/epic-99/wave-01.plan.md" '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Write",tool_input:{file_path:$p,content:"x"}}' ;;
+    # THE FIVE §5 AND §5c NEVER DROVE, added by T10 for §5d. Each is the smallest payload
+    # that reaches that hook's own work: an agent context for the two agent-scoped guards,
+    # a refusable command for the two damage walls, and a startup event for the reporter.
+    agent-context-guard)
+      jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,agent_id:"aw1impl-1111111111111111",hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"echo hi"}}' ;;
+    session-start)
+      jq -n --arg s "$SID" --arg c "$cwd" '{session_id:$s,cwd:$c,hook_event_name:"SessionStart",source:"startup"}' ;;
   esac
 }
 
@@ -500,7 +582,23 @@ payload_for() {
 # knowing a suite command belongs in a subagent needs no plan, and the sessions most in need
 # of the reminder are the ones in Step 0 through Step 3 that have not written one. The
 # paired arms live in tests/cmd-class.test.sh §R-1.
-RUN_SCOPED='canonical-sdlc-evidence-gate context-spend patrol-revive'
+# THE MERGED TURN-END PROCESS IS NOT A MEMBER, and that is a statement about it rather
+# than an omission (epic-23 wave-11, T12). hooks/stop.sh runs four verdicts and they do
+# not agree on this question: `stop_context_spend` and `stop_patrol_revive` are run-scoped
+# and exit on a closed run, while `stop_landing_gate` and `stop_patrol_duties` act for an
+# ENGAGED session whether or not a plan is on disk — the AC-23 change §5's own header
+# describes, which is why those two left this loop before the merge. A process that
+# carries both cannot be silent on a closed run, so asserting that it is would be asserting
+# a thing the design says is false. Each verdict's own scoping is driven in its own suite,
+# through this process: tests/context-spend.test.sh §12 and tests/patrol-revive.test.sh §11.
+# THE RUN-SCOPED MEMBER IS THE COMPOUND, DRIVEN ON THE GATE'S OWN PAYLOAD (T23). The
+# property has not changed — a wall that reads the plan for data says nothing when there is
+# no open run to read — but the file that carries it is hooks/bash-walls.sh, and what makes
+# the row honest is the payload: `git commit -m wip` is the evidence gate's business and
+# nobody else's, so a silence here is that wall's silence and not four walls having nothing
+# to say. The anti-vacuity mutant below shims `active_run` after the library is sourced, so
+# it reaches `wall_evidence_gate`'s own call.
+RUN_SCOPED='bash-walls'
 
 # unrun_mutant <hook> -> a copy of the hook with the run predicate neutralised
 #
@@ -586,7 +684,7 @@ section "5c — THE ENGAGEMENT SWITCH gates every hook, uniformly (task-engaged-
 # The roster is the seven hooks task-engaged-session T2 moved behind the switch.
 # canonical-sdlc-evidence-gate, canonical-sdlc-governing-skill and farm-out-reminder are
 # T3's and join this list with their own guard, in their own commit.
-ENGAGEMENT_SCOPED='dispatch-preflight landing-gate execution-recorder stop-guard patrol-duties-gate patrol-revive context-spend'
+ENGAGEMENT_SCOPED='dispatch-preflight execution-recorder stop-guard stop'
 
 for hook in $ENGAGEMENT_SCOPED; do
   # an OPEN run, every precondition seeded, and the marker deliberately removed
@@ -668,6 +766,126 @@ drive canonical-sdlc-governing-skill "$(jq -n --arg s "$SID" --arg c "$GS_FIRST"
 expect_eq "a project's FIRST artifact, written into .bionic before any run exists, is gated" \
   "2" "$DRV_ST"
 
+section "5d — ONE session-id guard: a malformed or empty key silences all fifteen (REQ-1h, AC-1h.2)"
+#
+# (epic-23 wave-11-lean-spine, added by T10.)
+#
+# WHAT THIS IS FOR. The T10 census measured the shape guard
+# `case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac` in exactly SIX of the fifteen preamble
+# hooks; nine had no shape check at all, background-suite-guard blanked the variable instead
+# of exiting, and two substituted the literal `unknown` and carried on. REQ-1h says there is
+# one guard and every hook takes it, so the property is asserted here the only way a
+# convention can be — by DRIVING all fifteen, not by grepping for a `case`.
+#
+# THE FIXTURE IS THE STRONGEST ONE, not the weakest: an OPEN run with every precondition
+# seeded and the engagement marker present. The ONLY thing wrong with it is the session key.
+# A fixture with no `.bionic` would be silent for a reason that has nothing to do with the
+# guard, and this section would pass over air — which is what the control pair below exists
+# to disprove.
+#
+# STDOUT, NOT STDERR. session-start is the one reader that deliberately does NOT suppress
+# lib/session.sh's diagnostic (plan assumption ADOPT/3, pinned at
+# tests/cross-gate-agreement.test.sh §P2), so a "no session id in env or payload" line on
+# stderr is correct behaviour for an empty key and is not what this section is about. What
+# must be uniform is that no hook ACTS: exit 0, nothing on the user stream, no state written.
+
+GUARD_FIFTEEN='agent-context-guard bash-walls
+canonical-sdlc-governing-skill dispatch-preflight execution-recorder
+stop session-start stop-guard'
+
+# A wall for agent-context-guard to hand its payload to: it takes the wall's path as $1 and
+# exits 0 without one, so every row below it would be silent for the wrong reason.
+GUARD_WALL="$SANDBOX/guard-wall.sh"
+printf '#!/bin/bash\nprintf "the wall ran\\n"\nexit 0\n' > "$GUARD_WALL"
+chmod +x "$GUARD_WALL"
+
+# drive_sid <hook> <root> <env-sid> <payload-sid> -> GS_ST / GS_OUT / GS_ERR
+#
+# The two channels are driven SEPARATELY because the library prefers the environment and
+# treats the payload as a witness: a guard applied to the payload read rather than to the
+# resolved value would pass every row here with the env channel clean.
+drive_sid() {
+  local hook="$1" root="$2" esid="$3" psid="$4" pay args
+  pay=$(payload_for "$hook" "$root" | jq --arg s "$psid" '.session_id=$s')
+  args=()
+  [ "$hook" = "agent-context-guard" ] && args=("$GUARD_WALL")
+  GS_OUT=$(printf '%s' "$pay" | env HOME="$SANDBOX/home" \
+      BIONIC_PLUGINS_DIR="$SANDBOX/plugins" CLAUDE_CODE_SESSION_ID="$esid" \
+      bash "$HOOKS/$hook.sh" "${args[@]+"${args[@]}"}" 2>"$SANDBOX/.gerr")
+  GS_ST=$?
+  GS_ERR=$(cat "$SANDBOX/.gerr")
+  return 0
+}
+
+# sidguard_fixture <hook> <name> -> a seeded OPEN-run root for §5d
+#
+# SESSION-START IS THE ONE THAT SPEAKS TO A BYSTANDER, so its fixture is the one state in
+# which it has anything to say: an open run that this session has NOT engaged. Over an
+# engaged run it is correctly silent, and a control that cannot produce output cannot
+# discriminate the silence the two rows below assert. Every other hook is the other way
+# round — it acts only once engaged — so the marker stays for all fourteen.
+sidguard_fixture() {
+  local hook="$1" root
+  root=$(mk_root "$2" open)
+  seed_hook "$hook" "$root"
+  [ "$hook" = "session-start" ] && rm -f "$root/.bionic/tmp/engaged-$SID.state"
+  printf '%s' "$root"
+}
+
+for hook in $GUARD_FIFTEEN; do
+  # ── the CONTROL first, so a silence below is known to be the guard's doing ──
+  # The same fixture, the same payload, a WELL-FORMED key. Something must happen: a
+  # refusal, a line, or a write. A hook that is silent here cannot say anything about the
+  # two rows that follow it.
+  r_ok=$(sidguard_fixture "$hook" "sidguard-$hook-ok")
+  drive_sid "$hook" "$r_ok" "$SID" "$SID"
+  ctl_wrote=""
+  [ -n "$(ls -A "$r_ok/.bionic/tmp" 2>/dev/null | /usr/bin/grep -v '^patrol-\|^roster-\|^engaged-' || true)" ] && ctl_wrote="state"
+  /usr/bin/grep -q 'status=identified\|status=confirmed\|landing-swept' "$r_ok/.bionic/tmp/roster-$SID.state" 2>/dev/null && ctl_wrote="roster"
+  if [ "$GS_ST" -ne 0 ] || [ -n "$GS_OUT" ] || [ -n "$GS_ERR" ] || [ -n "$ctl_wrote" ]; then
+    ok "$hook: control — a well-formed key over this fixture is NOT silent"
+  else
+    no "$hook: control — a well-formed key over this fixture is NOT silent" \
+       "exit $GS_ST, no output, no state — the two guard rows below prove nothing"
+  fi
+
+  # ── MALFORMED: a path separator in a filename position ──
+  # Every state path in this tree is built by interpolating this key, so `bad/../id`
+  # addresses a file outside the state directory entirely.
+  r_bad=$(sidguard_fixture "$hook" "sidguard-$hook-bad")
+  drive_sid "$hook" "$r_bad" 'bad/../id' 'bad/../id'
+  expect_eq "$hook: a malformed session id -> exit 0" "0" "$GS_ST"
+  expect_empty "$hook: a malformed session id -> no stdout" "$GS_OUT"
+
+  # ── EMPTY: no key in either channel ──
+  r_empty=$(sidguard_fixture "$hook" "sidguard-$hook-empty")
+  drive_sid "$hook" "$r_empty" '' ''
+  expect_eq "$hook: an empty session id -> exit 0" "0" "$GS_ST"
+  expect_empty "$hook: an empty session id -> no stdout" "$GS_OUT"
+done
+
+# ── stop-guard's SECOND key, which the guard above cannot see ────────────────
+#
+# The census measured stop-guard reading its session key TWICE from two sources: the
+# resolved value for the engagement guard, and a raw payload read further down that builds
+# the roster filename. With a clean environment value and a malformed payload value the
+# engagement guard passes on the good key and the roster path is built from the bad one —
+# so the guard rows above are all green while the hook addresses a file outside the state
+# directory. AC-1h.2 names this one hook for that reason.
+SG_DIV=$(sidguard_fixture stop-guard "sidguard-stopguard-divergent")
+drive_sid stop-guard "$SG_DIV" "$SID" 'bad/../id'
+expect_absent "stop-guard: a malformed PAYLOAD key never reaches a path it builds" \
+  "bad/../id" "$GS_OUT$GS_ERR"
+# `bad/../id` interpolated into `<root>/.bionic/tmp/roster-<sid>.state` resolves to
+# `<root>/.bionic/tmp/id.state` — one directory up from where the key was supposed to keep
+# it. Nothing may appear there.
+expect_eq "stop-guard: …and the traversed key addressed no file" "no" \
+  "$([ -e "$SG_DIV/.bionic/tmp/id.state" ] && echo yes || echo no)"
+# THE STATIC HALF, which is what actually closes it (AC-1h.2's own measurement): the raw
+# read is gone, so there is one source and the divergence has nowhere to enter.
+expect_eq "stop-guard reads no raw .session_id out of its payload any more" "0" \
+  "$(/usr/bin/grep -c "_jq '.session_id'" "$HOOKS/stop-guard.sh")"
+
 section "6 — a missing library: refused by cost, never by uniformity"
 #
 # The lockout this wave is named for (R-1 §5): a wall that refused everything had no
@@ -685,11 +903,11 @@ section "6 — a missing library: refused by cost, never by uniformity"
 BROKEN="$SANDBOX/broken-plugin"
 mkdir -p "$BROKEN/hooks" "$SANDBOX/plugins-empty"
 BROKEN_REAL="$(cd "$BROKEN" && pwd -P)"
-for h in protect-main canonical-sdlc-evidence-gate landing-gate; do
+for h in bash-walls stop; do
   cp "$HOOKS/$h.sh" "$BROKEN/hooks/$h.sh"
 done
 
-# TWO DRIVES OF THE SAME CALL, and the pair is what slice 13's ruling D-1 made necessary.
+# TWO DRIVES OF THE SAME CALL, and the pair is what task 13's ruling D-1 made necessary.
 # `loader_fail_closed` puts ONE line on the user stream — `bionic: load refused — <hook>
 # cannot load the bionic library (run /bionic:doctor)` — and the four permitted repair
 # commands, the library it wanted and the candidates it tried are `detail`, emitted only
@@ -719,25 +937,28 @@ bash_payload_at() {  # <command> <cwd>
     '{session_id:$s,cwd:$c,hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:$m}}'
 }
 
-# THE CLOSED CLASS IS TWO WALLS WITH DIFFERENT REACH, and each is driven where it is
-# armed. hooks/protect-main.sh guards a push in EVERY project on the machine, wave or
-# no wave, so its closed arm is driven from a cwd with no `.bionic` at all — exactly
-# where it must still refuse. hooks/canonical-sdlc-evidence-gate.sh is RUN-SCOPED: it
-# has nothing to say outside a run, and a library it cannot load does not give it
-# something to say. Its closed arm is therefore driven from a cwd where a run COULD
-# exist — a real `.bionic` above it. §6b drives the other side of that line, which is
-# the case this wave got wrong.
+# THE CLOSED CLASS IS ONE PROCESS NOW, AND ITS REACH IS THE UNION (epic-23
+# wave-11-lean-spine, T23). Two of the five PreToolUse|Bash walls refuse when the library
+# will not load — protect-main and the evidence gate — and they had different REACH:
+# protect-main guards a push in EVERY project on the machine, wave or no wave, with no
+# pre-check at all, while the gate first asked the one on-disk question a broken plugin
+# still allows (could a run exist HERE?) and stayed silent where the answer was no.
+#
+# In one process there is one arm, and it is protect-main's, because protect-main's is
+# unconditional and first in manifest order. The gate's narrower walk is unreachable behind
+# it and was deleted rather than kept as code that can never run. What this costs is
+# ATTRIBUTION and not reach: with a broken library every Bash command in every project was
+# already refused — by protect-main — which is what §6b's own differential control has
+# always pinned. So the compound is driven from a cwd with no `.bionic` at all, exactly
+# where protect-main must still refuse, and §6b keeps driving the rows that say so.
 GATEPROJ="$SANDBOX/gate-with-bionic"
 mkdir -p "$GATEPROJ/.bionic"
 closed_cwd() {  # <hook> -> the cwd at which that wall's closed arm is armed
-  case "$1" in
-    canonical-sdlc-evidence-gate) printf '%s\n' "$GATEPROJ" ;;
-    *) printf '%s\n' "$SANDBOX" ;;
-  esac
+  printf '%s\n' "$SANDBOX"
 }
 
 # CLOSED CLASS, refusing: a push the wall can no longer read.
-for h in protect-main canonical-sdlc-evidence-gate; do
+for h in bash-walls; do
   CCWD="$(closed_cwd "$h")"
   drive_broken "$h" "$(bash_payload_at 'git push origin main' "$CCWD")"
   expect_eq "$h with no library refuses a push (exit 2)" "2" "$DRV_ST"
@@ -758,9 +979,9 @@ for h in protect-main canonical-sdlc-evidence-gate; do
 done
 
 # OPEN CLASS: one line on stderr, exit 0, nothing on stdout.
-drive_broken landing-gate "$(jq -n --arg s "$SID" --arg c "$SANDBOX" --arg t "$TICK_TR" \
+drive_broken stop "$(jq -n --arg s "$SID" --arg c "$SANDBOX" --arg t "$TICK_TR" \
   '{session_id:$s,cwd:$c,transcript_path:$t,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')"
-expect_eq "landing-gate with no library steps aside (exit 0)" "0" "$DRV_ST"
+expect_eq "stop with no library steps aside (exit 0)" "0" "$DRV_ST"
 expect_empty "…writing nothing to stdout" "$DRV_OUT"
 expect_eq "…and exactly one line on stderr" "1" "$(printf '%s\n' "$DRV_ERR" | grep -c .)"
 expect_contains "…naming what it could not find" "library" "$DRV_ERR"
@@ -812,44 +1033,53 @@ drive_broken_home() {  # <hook> <home> <payload>
 # NO `.bionic` ON THE WALK: the user loses nothing, not even `ls`. The push is in this
 # list on purpose — this gate is not protect-main, and protect-main is separately
 # always-on and still refuses it (the control at the end of this section).
+# WHAT THIS SECTION PINS SINCE T23. The gate's own narrow arm is gone, and the rows below
+# assert the property that replaced it and the one that survived it. THE REACH A USER MEETS
+# IS UNCHANGED — with a broken library every Bash command in every project is refused — and
+# the four commands that used to be the gate's silence rows are driven here as the
+# compound's refusal rows, which is what they always produced on this machine: protect-main
+# answered them long before the gate was consulted.
 for c in 'ls' 'npm test' 'git commit -m x' 'git push origin main'; do
-  drive_broken_home canonical-sdlc-evidence-gate "$FH" "$(bash_payload_at "$c" "$FH/plain/deep")"
-  expect_eq "evidence gate, no library, no .bionic: [$c] passes (exit 0)" "0" "$DRV_ST"
-  expect_empty "…saying nothing on stderr — [$c]" "$DRV_ERR"
+  drive_broken_home bash-walls "$FH" "$(bash_payload_at "$c" "$FH/plain/deep")"
+  expect_eq "the compound, no library, no .bionic: [$c] is REFUSED (exit 2)" "2" "$DRV_ST"
+  expect_contains "…in the ruled one line — [$c]" \
+    "cannot load the bionic library (run /bionic:doctor)" "$DRV_ERR"
   expect_empty "…and nothing on stdout — [$c]" "$DRV_OUT"
 done
 
-# RULE 4, driven from $HOME ITSELF: the `.bionic` planted there is not a root.
-drive_broken_home canonical-sdlc-evidence-gate "$FH" "$(bash_payload_at 'ls' "$FH")"
-expect_eq "evidence gate, no library, a .bionic AT \$HOME: [ls] passes (exit 0)" "0" "$DRV_ST"
-expect_empty "…silently" "$DRV_ERR"
+# RULE 4 and RULE 3 NO LONGER DISCRIMINATE, and the rows say so rather than being deleted.
+# `.bionic` at $HOME and a SYMLINKED `.bionic` were the two shapes the gate's walk had to
+# get right; protect-main never consulted a walk at all, so the compound answers the same
+# way in both — refused — and the fixtures stay, because the day a narrower arm comes back
+# these are the two it will have to get right again.
+drive_broken_home bash-walls "$FH" "$(bash_payload_at 'ls' "$FH")"
+expect_eq "the compound, no library, a .bionic AT \$HOME: [ls] REFUSED (exit 2)" "2" "$DRV_ST"
+drive_broken_home bash-walls "$FH" "$(bash_payload_at 'ls' "$FH/symproj")"
+expect_eq "the compound, no library, SYMLINKED .bionic: [ls] REFUSED (exit 2)" "2" "$DRV_ST"
 
-# RULE 3: a `.bionic` SYMLINK is not a `.bionic` directory (user, 2026-09-02:
-# "symlinks to .bionic have been problematic"), so it does not arm the wall either.
-drive_broken_home canonical-sdlc-evidence-gate "$FH" "$(bash_payload_at 'ls' "$FH/symproj")"
-expect_eq "evidence gate, no library, SYMLINKED .bionic: [ls] passes (exit 0)" "0" "$DRV_ST"
-expect_empty "…silently" "$DRV_ERR"
-
-# THE ANTI-VACUITY CONTROL. A hook that exited 0 at line 1 would pass everything above.
-# A real `.bionic` ABOVE the cwd arms the wall, and then even `ls` is refused — the
-# unchanged fail-closed behaviour, named repair commands and all.
-drive_broken_home canonical-sdlc-evidence-gate "$FH" "$(bash_payload_at 'ls' "$FH/proj/sub")"
-expect_eq "evidence gate, no library, real .bionic above the cwd: [ls] REFUSED (exit 2)" "2" "$DRV_ST"
+# THE ANTI-VACUITY CONTROL, which is now the OTHER direction: a process that refused
+# everything would pass every row above, so the repair allowlist is what discriminates.
+# A real `.bionic` above the cwd changes nothing, and the four repair commands still pass.
+drive_broken_home bash-walls "$FH" "$(bash_payload_at 'ls' "$FH/proj/sub")"
+expect_eq "the compound, no library, real .bionic above the cwd: [ls] REFUSED (exit 2)" "2" "$DRV_ST"
 expect_contains "…in the ruled one line" "cannot load the bionic library (run /bionic:doctor)" "$DRV_ERR"
 expect_contains "…naming the repair verb" "claude plugin update bionic@bionic" "$DRV_VERR"
 expect_contains "…and doctor" "bash $BROKEN_REAL/scripts/doctor.sh" "$DRV_VERR"
-# …and the repair allowlist still fires from inside such a project.
-drive_broken_home canonical-sdlc-evidence-gate "$FH" \
+drive_broken_home bash-walls "$FH" \
   "$(bash_payload_at "bash $BROKEN_REAL/scripts/doctor.sh" "$FH/proj/sub")"
-expect_eq "…and the doctor repair is still PERMITTED there (exit 0)" "0" "$DRV_ST"
+expect_eq "…and the doctor repair is PERMITTED there (exit 0)" "0" "$DRV_ST"
 expect_empty "…silently" "$DRV_ERR"
+drive_broken_home bash-walls "$FH" \
+  "$(bash_payload_at "bash $BROKEN_REAL/scripts/doctor.sh" "$FH/plain/deep")"
+expect_eq "…and in a directory with no .bionic at all, which is the reach that matters" "0" "$DRV_ST"
+expect_empty "…silently there too" "$DRV_ERR"
 
-# THE DIFFERENTIAL CONTROL: protect-main's reach is deliberately every-project, so the
-# same cwd that makes the gate silent leaves protect-main refusing. If this row ever
-# goes green-by-exit-0 the walk was copied into the wrong wall.
-drive_broken_home protect-main "$FH" "$(bash_payload_at 'git push origin main' "$FH/plain/deep")"
-expect_eq "protect-main keeps its every-project reach: push refused with no .bionic (exit 2)" "2" "$DRV_ST"
-drive_broken_home protect-main "$FH" "$(bash_payload_at 'ls' "$FH/plain/deep")"
+# THE REACH CONTROL, kept and re-aimed. protect-main's every-project arm is what the
+# compound inherited, so the same two payloads that used to prove protect-main outran the
+# gate now prove the compound carries protect-main's reach rather than the gate's.
+drive_broken_home bash-walls "$FH" "$(bash_payload_at 'git push origin main' "$FH/plain/deep")"
+expect_eq "the compound keeps protect-main's every-project reach: push refused with no .bionic (exit 2)" "2" "$DRV_ST"
+drive_broken_home bash-walls "$FH" "$(bash_payload_at 'ls' "$FH/plain/deep")"
 expect_eq "…and refuses [ls] there too — it cannot read the command it must classify" "2" "$DRV_ST"
 
 # ---------------------------------------------------------------------------

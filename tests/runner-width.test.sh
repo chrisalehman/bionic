@@ -8,7 +8,7 @@
 # ceiling. `BIONIC_TEST_JOBS` is retired as an input; a caller who still sets it is told once,
 # on stderr, and ignored.
 #
-# THE ONLY SAFE WAY TO DRIVE THIS is `tests/run.sh --dry-run` (added by this same slice):
+# THE ONLY SAFE WAY TO DRIVE THIS is `tests/run.sh --dry-run` (added by this same task):
 # it reads the rung the ring already carries and prints it, without launching the
 # 40-plus-suite roster a real run would. Every case below drives the REAL runner script
 # this way; nothing here reimplements the width computation.
@@ -56,13 +56,22 @@ ring_of() {
 # dry_run <ring> <probe-sample> [ceiling-env-assignment]
 # Runs the REAL tests/run.sh --dry-run with the ring, clock and probe pinned so its own
 # internal pressure_sample call agrees with the band the pre-seeded ring already carries.
+#
+# THE CEILING KNOB IS SCRUBBED FIRST, ALWAYS (A-71). Case (c) asserts the DEFAULT ceiling,
+# which is only the default when nothing in the environment names one — and this suite runs
+# under a floor that exports `BIONIC_TEST_JOBS_CEILING=1` to every child, which made 1c read
+# `JOBS=1` and call the runner broken. `env -u` deletes the inherited value; the optional
+# assignment that follows it still wins, because `env` applies its options before its
+# assignments. A case that wants a ceiling passes one; a case that wants the default now
+# gets the default no matter who launched the suite.
 DRY_OUT=""; DRY_ERR=""; DRY_ST=0
 dry_run() {
   local ring="$1" sample="$2" ceiling_env="${3:-}"
   local f s l c
   IFS='|' read -r f s l c <<<"$sample"
   DRY_OUT=$(cd "$BIONIC_SCRIPTS_DIR" && \
-    env BIONIC_PRESSURE_RING="$ring" BIONIC_NOW_EPOCH="$NOW" \
+    env -u BIONIC_TEST_JOBS_CEILING \
+        BIONIC_PRESSURE_RING="$ring" BIONIC_NOW_EPOCH="$NOW" \
         BIONIC_PROBE_FREE_PCT="$f" BIONIC_PROBE_SWAP_PCT="$s" BIONIC_PROBE_LOAD_1M="$l" \
         ${ceiling_env:+BIONIC_TEST_JOBS_CEILING="$ceiling_env"} \
         bash "$RUN" --dry-run 2>"$TMPROOT/.err")

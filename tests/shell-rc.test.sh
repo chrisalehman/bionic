@@ -12,7 +12,7 @@
 #
 # `env.sh`'s `rc_file` is a separate, pre-existing resolver with its own
 # stricter posture (it refuses on an unrecognized shell) and is out of scope:
-# it was not one of the two functions this slice was asked to unify.
+# it was not one of the two functions this task was asked to unify.
 #
 # HERMETIC. No real $HOME is read or written; every check runs in a
 # subshell with HOME pointed at a fixture directory. `_detect_shell_rc` and

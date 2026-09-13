@@ -12,8 +12,8 @@
 # turned into two by the terminal and the whole table stops being a table
 # (doctor.sh's format rules, spec AC-15). The wall that used to enforce it —
 # tests/doctor.test.sh — was deleted at 8582861 (epic-18 wave-03) and nothing
-# replaced it. Slice 4/3 of this wave then built a budget for setup.sh, and
-# slice 4/4 added a row to doctor.sh whose detail field interpolates unbounded
+# replaced it. Task 4/3 of this wave then built a budget for setup.sh, and
+# task 4/4 added a row to doctor.sh whose detail field interpolates unbounded
 # free text: on the wave's own T3 capture that row came out at 104 columns, and
 # a git feed with a missing manifest puts it past 130. Two scripts, the same
 # number written twice, and the copy nothing walled was the one that broke. The
@@ -24,7 +24,7 @@
 # one CHARACTER at a time (`${s%?}`) until the count fits. It is not
 # `printf '%.*s'`, and that is a correction, not a preference: precision on
 # `%s` counts BYTES, so a length test in characters against a cut in bytes
-# slices a multi-byte glyph in half and emits invalid UTF-8. The wave's Step-6
+# tasks a multi-byte glyph in half and emits invalid UTF-8. The wave's Step-6
 # critic reproduced exactly that in `_setup_trunc` — 3 of 5 cut offsets
 # corrupted, on any `$HOME` carrying an accent — and the truncator this file
 # replaces had been deleted four commits earlier carrying a comment warning

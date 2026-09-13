@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/commands.test.sh — /bionic:version, driven through its own rendered command body
-# (epic-22 wave-01 slice 14, spec AC-E2.1).
+# (epic-22 wave-01 task 14, spec AC-E2.1).
 #
 # WHAT THIS SUITE OWNS. `payload/commands/version.md` is a GENERATED file (agents-src/
 # render.sh) whose body is one line of markdown naming a script: `bash ${CLAUDE_PLUGIN_ROOT}/

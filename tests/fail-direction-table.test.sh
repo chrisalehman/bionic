@@ -1,5 +1,5 @@
 #!/bin/bash
-# THE §7 FAIL-DIRECTION TABLE, PINNED AS BEHAVIOUR — epic-15 wave-01R, slice 4/6.
+# THE §7 FAIL-DIRECTION TABLE, PINNED AS BEHAVIOUR — epic-15 wave-01R, task 4/6.
 #
 # Serves AC-10. Governing design: design/orchestrator-subagent-coordination.md §7.
 # Known-failure checklist A10: "fail-open/fail-closed direction differs between
@@ -98,10 +98,10 @@ make_world() {
   # `$base/cfg`, in the layout the platform uses:
   # <config>/projects/<repo-slug>/<session>/subagents. The stop gate reaches it
   # from the payload's transcript path, and the OBSERVATION reaches it by
-  # slugifying its cwd — since slice 4/4 the observed rows run the real producer,
+  # slugifying its cwd — since task 4/4 the observed rows run the real producer,
   # so a fixture only the gate can reach would prove nothing about the pair.
   # The session directory is named by the SESSION ID, because that is what the
-  # platform does and, since slice 4/9, what ownership reads: an agent under
+  # platform does and, since task 4/9, what ownership reads: an agent under
   # <session>/subagents/ was launched by <session>. A world whose directory was
   # named anything else would classify every target foreign, and the rows below
   # would be answering a question about the roster instead of the one they name.
@@ -145,8 +145,8 @@ plant_agent() {  # <subagents-dir> <agent-id> <name>
     > "$1/agent-$2.jsonl"
 }
 
-# The session roster (slice 4/3's writer, row shape field-for-field from
-# hooks/dispatch-preflight.sh). Since slice 4/9 the roster no longer decides
+# The session roster (task 4/3's writer, row shape field-for-field from
+# hooks/dispatch-preflight.sh). Since task 4/9 the roster no longer decides
 # ownership — the session directory does — so a row here carries the CONTRACT and,
 # when it is `confirmed`, reaches a target outside this session's own directory.
 # RENAMED OFF THE WRITER'S NAME (S17): `roster_row` is the production writer
@@ -163,7 +163,7 @@ fd_roster_row() {  # <repo> <sid> <name> <agent-id> [progress] [status]
 }
 
 # THE RECORDED ListAgents ANSWER — the live set (wave-roster-lifecycle S6, design ledger
-# D1′). Since that slice BOTH stop scripts resolve a target against the newest recorded
+# D1′). Since that task BOTH stop scripts resolve a target against the newest recorded
 # ListAgents answer in a session's transcript, and the session-directory scan that used to
 # do it is gone. A fixture transcript is therefore no longer `{}`: a world whose transcript
 # carries no answer cannot resolve ANY target, so every stop row driven against it would
@@ -194,7 +194,7 @@ payload() {  # <tool_name> <sid|-> <transcript|-> <cwd> <task_id-or-command|->
   local tool="$1" sid="$2" tr="$3" cwd="$4" arg="$5"
   local input='{}'
   case "$tool" in
-    # The brief carries its labeled contract fields (slice 4/3): the start gate
+    # The brief carries its labeled contract fields (task 4/3): the start gate
     # now journals every launch to the session roster and warns on stderr when a
     # brief names none of them. The `start|attested` row below is THE POSITIVE
     # PAIR — an ordinary, well-formed dispatch — and its §7 direction is
@@ -242,7 +242,7 @@ plant_agent "$I_SUB" "aworker-1111111111111111" "worker"
 IFS='|' read -r N_REPO N_TR N_SUB <<< "$(make_world nocurrent nocurrent)"
 plant_agent "$N_SUB" "aworker-1111111111111111" "worker"
 
-# An attested active world — the start gate's positive pair. slice 4/2 (D-5): the
+# An attested active world — the start gate's positive pair. task 4/2 (D-5): the
 # attestation lives at the PER-SESSION filename the gate actually reads; the old shared
 # single-slot path is not consulted, so a fixture written there attests to nothing.
 IFS='|' read -r T_REPO T_TR T_SUB <<< "$(make_world attested yes)"
@@ -291,7 +291,7 @@ printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$T_SLUG/$SID_A.jsonl"
 
 # An observed active world — the stop gate's positive pair. The observation is
 # RECORDED BY THE REAL WRITER, never hand-written: the row must be discharged by
-# the real producer→recorder→gate path. Since slice 4/4 that writer is
+# the real producer→recorder→gate path. Since task 4/4 that writer is
 # hooks/execution-recorder.sh on PostToolUse, and it copies the machine line
 # hooks/stop-check.sh prints — so the producer is genuinely run here.
 IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world observed yes)"
@@ -375,7 +375,7 @@ fd_live "$X_TR" worker
 fd_live "$X_TR_B" worker
 observe "$SID_A" "$X_TR_B" "$X_REPO" "worker"
 
-# A look taken by somebody else (slice 4/6, D-3): the record is fresh, this
+# A look taken by somebody else (task 4/6, D-3): the record is fresh, this
 # session's, and about the right target — and it is not the stopper's own.
 IFS='|' read -r B_REPO B_TR B_SUB <<< "$(make_world borrowedlook yes)"
 plant_agent "$B_SUB" "aworker-1111111111111111" "worker"
@@ -383,7 +383,7 @@ fd_roster_row "$B_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 fd_live "$B_TR" worker
 observe "$SID_A" "$B_TR" "$B_REPO" "worker" "asubagent-2020202020202020"
 
-# The contracted progress artifact written after the look (slice 4/6, D-6): the
+# The contracted progress artifact written after the look (task 4/6, D-6): the
 # working log is untouched, so this is the channel D-1 alone could not see.
 IFS='|' read -r G_REPO G_TR G_SUB <<< "$(make_world progressstale yes)"
 plant_agent "$G_SUB" "aworker-1111111111111111" "worker"
@@ -452,7 +452,7 @@ canonical_sdlc_version: 14
 
 current: 4
 
-- Step 4: slices in flight
+- Step 4: tasks in flight
 A2PLAN
 # Its own project root, so it needs its own engagement marker — `make_world` planted none
 # here (task-engaged-session). NO Patrol stamp, deliberately: this row's refusal IS the
@@ -657,7 +657,7 @@ section "the producer's two rows (§7 rows 4 and 5)"
 P_REPO="$SANDBOX/w/producer/repo"; mkdir -p "$P_REPO/.bionic/tmp"
 git -C "$P_REPO" init -q 2>/dev/null
 
-# slice 4/2 (D-5): both rows are about what a run does to an attestation ALREADY on
+# task 4/2 (D-5): both rows are about what a run does to an attestation ALREADY on
 # disk, so each fixture must sit at the per-session filename that run actually governs.
 # Left at the old shared slot these rows stayed green for the wrong reason — the probe
 # now prunes that legacy file unconditionally, so "no attestation is on disk" below was
@@ -668,7 +668,7 @@ PRIOR_SUM=$(shasum "$PRIOR_B")
 
 # Row 4 — no session key: REFUSE, and state is LEFT UNTOUCHED. An unkeyed run
 # cannot tell whose attestation is on disk, so deleting it would destroy another
-# session's valid stamp (slice 4/1 resolution).
+# session's valid stamp (task 4/1 resolution).
 OUT=$( cd "$P_REPO" && env -u CLAUDE_CODE_SESSION_ID ANTHROPIC_API_KEY=x \
        HOME="$HOME" CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR" bash "$PROBE" 2>&1 ); ST=$?
 expect_eq "environment check with no session key REFUSES (exit 3)" "3" "$ST"

@@ -5,7 +5,7 @@ Each statement below claims the system blocks something, and each is unmarked.
 
 The flag floor forbids shopping rigor below a derivable floor.
 
-A slice cannot be dispatched without a red test.
+A task cannot be dispatched without a red test.
 
 You can't merge a wave while a matrix row is REFUTED.
 
