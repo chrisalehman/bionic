@@ -1049,4 +1049,73 @@ expect_eq "…paired: the identically-shaped plan while still FRESH binds" "$P22
 # built here; E9(d) and E9(e) above are the proof, re-affirmed for the record.
 
 # ============================================================
+section "E11 (D4, wave-12-fixit-171 T4, AC-3.1/AC-3.3) — engagement arms the Patrol stamp"
+# ============================================================
+#
+# task-engaged-session's marker answers "is this session inside bionic"; the Patrol stamp
+# (hooks/session-poker.sh, `arm`/`tick`) answers a different question — "is something
+# WATCHING it" — and until this task the only writer of that second file was a hand step
+# (`session-poker.sh arm`) the operator was expected to run after engaging. Measured
+# 2026-09-13: the very first dispatch of a fresh session was refused with "no Patrol stamp
+# exists" because that hand step had not happened yet (AC-3.2). D4 (spec §Design, P-A) makes
+# the hook do the chore itself: after the binding write, engage.sh runs
+# `session-poker.sh arm` with this session's id, so the stamp exists before any dispatch is
+# attempted. FAILURE IS ADVISORY, same fail-open posture as everything else in this hook: a
+# stamp that could not be written is reported on stderr and never turns engagement itself
+# into a refusal (AC-3.1's "arm" half is new; AC-3.3 pins that the STALENESS suite,
+# tests/patrol-stale.test.sh, is untouched by this task).
+
+patrol_path() { printf '%s/.bionic/tmp/patrol-%s.state' "$1" "$2"; }
+
+# (a) POSITIVE: a fresh engage in an otherwise-untouched sandbox project arms the stamp.
+R30="$(make_repo_planless)"
+SID30="a4med030-1111-2222-3333-444444444444"
+P30="$(patrol_path "$R30" "$SID30")"
+
+if [ -e "$P30" ] || [ -L "$P30" ]; then
+  no "…pre-condition: no patrol stamp exists yet for this fixture" "one is already there"
+else
+  ok "…pre-condition: no patrol stamp exists yet for this fixture"
+fi
+
+fire "$SID30" "$(skill_payload "$SID30" "$R30" "bionic:canonical-sdlc")"
+expect_eq "a fresh engagement still exits 0" "0" "$HOOK_RC"
+if [ -f "$P30" ] && [ ! -L "$P30" ]; then
+  ok "…and it writes a real (non-symlink) patrol stamp file"
+else
+  no "…and it writes a real (non-symlink) patrol stamp file" "missing or a symlink at $P30"
+fi
+expect_match "…and the stamp's first line carries the patrol-stamp/v1 schema" \
+  "patrol-stamp/v1*" "$(head -n1 "$P30" 2>/dev/null)"
+
+# (b) NEGATIVE, paired on the same shape: a symlink planted at the patrol path is refused,
+# not followed — the same guard write_patrol_stamp already applies to `arm`/`tick`
+# themselves (session-poker.sh:608) — and engagement still exits 0 regardless, because
+# arming failure is advisory (D4: "failure logged, never fatal").
+R31="$(make_repo_planless)"
+SID31="b4med031-1111-2222-3333-444444444444"
+P31="$(patrol_path "$R31" "$SID31")"
+PLANTED_TARGET="$SANDBOX/.planted-patrol-target-$$"
+
+mkdir -p "$(dirname "$P31")"
+ln -s "$PLANTED_TARGET" "$P31"
+
+fire "$SID31" "$(skill_payload "$SID31" "$R31" "bionic:canonical-sdlc")"
+expect_eq "…engagement over a symlinked patrol path still exits 0" "0" "$HOOK_RC"
+if [ -L "$P31" ]; then
+  ok "…and the planted symlink is left standing, not replaced"
+else
+  no "…and the planted symlink is left standing, not replaced" "no longer a symlink at $P31"
+fi
+if [ -e "$PLANTED_TARGET" ]; then
+  no "…and nothing was ever written through the symlink to its target" \
+    "$PLANTED_TARGET now exists"
+else
+  ok "…and nothing was ever written through the symlink to its target"
+fi
+
+# (c) tests/patrol-stale.test.sh is UNCHANGED by this task (AC-3.3): this suite does not
+# edit it, and CI/the wave floor re-runs it verbatim alongside this one.
+
+# ============================================================
 finish
