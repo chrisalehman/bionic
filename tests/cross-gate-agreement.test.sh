@@ -9651,4 +9651,92 @@ expect_eq "AP.5 …and the pin goes red on it: two texts, not one" "2" \
   "$(printf '%s\n' "$AP_MUT_SUMS" | /usr/bin/grep -c .)"
 
 # ============================================================
+section "needs-resolve — every canonical-sdlc needs: entry names a real skill (dead-route drift, epic-23 wave-12-fixit-171 REQ-7)"
+# ============================================================
+#
+# WHY. `needs:` in skills/canonical-sdlc/SKILL.md is read as "route here for this
+# phase" — a name that resolves nowhere is a route to nothing, and the miss surfaces
+# only when an agent tries to follow it. Six such names (`shape`, `polish`,
+# `critique`, `audit`, `harden`, `normalize`) sat in the template with no skill
+# behind any of them: not a directory under skills/, not a payload plugin
+# dependency, not even an entry in this repo's own marketplace. T7 removes them from
+# the template; this section is the pin against a seventh landing unnoticed the
+# same way.
+#
+# RESOLUTION, offline and repo-local only — no ~/.claude, no network, no installed
+# plugins (a dispatch cannot assume the machine it runs on has any):
+#   (a) a BARE name (no `:`) resolves if it is a directory under skills/ in this
+#       repo, OR if it exactly names a plugin declared in
+#       .claude-plugin/marketplace.json. The second half is what keeps `impeccable`
+#       legal: marketplace.json describes it as "installed the first time a route
+#       needs it, never as a mandatory dependency" — a deliberate on-demand route,
+#       unlike the six fabricated names, which match neither a skills/ directory
+#       nor any plugin the marketplace has ever heard of.
+#   (b) a `<plugin>:<skill>` name resolves if <plugin> is named in
+#       payload/.claude-plugin/plugin.json's `dependencies` array (today:
+#       superpowers, agent-skills). The skill half is taken on trust — confirming
+#       it exists would mean reading that plugin's own tree, which this repo does
+#       not carry and must not require to run this suite.
+#   Anything else FAILS, and the failure names the entry (AC-7.2).
+
+NR_SKILL_MD="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
+NR_PLUGIN_JSON="$BIONIC_SCRIPTS_DIR/payload/.claude-plugin/plugin.json"
+NR_MARKETPLACE_JSON="$BIONIC_SCRIPTS_DIR/.claude-plugin/marketplace.json"
+
+# --- the needs: list, exactly as the frontmatter states it: every `  - entry` line
+# between the top-level `needs:` key and the next top-level key. ---
+nr_needs_entries() {
+  awk '
+    /^needs:$/ { active=1; next }
+    active && /^[A-Za-z]/ { active=0 }
+    active && /^  - / { e=$0; sub(/^  - /,"",e); print e }
+  ' "$1"
+}
+
+NR_DEP_NAMES="$(jq -r '.dependencies[].name' "$NR_PLUGIN_JSON" 2>/dev/null)"
+NR_PLUGIN_NAMES="$(jq -r '.plugins[].name' "$NR_MARKETPLACE_JSON" 2>/dev/null)"
+
+# nr_resolves <entry> — exit 0 iff <entry> resolves by rule (a) or (b) above.
+nr_resolves() {
+  local entry="$1" plugin
+  case "$entry" in
+    *:*)
+      plugin="${entry%%:*}"
+      printf '%s\n' "$NR_DEP_NAMES" | grep -qxF "$plugin"
+      ;;
+    *)
+      [ -d "$BIONIC_SKILLS_DIR/$entry" ] && return 0
+      printf '%s\n' "$NR_PLUGIN_NAMES" | grep -qxF "$entry"
+      ;;
+  esac
+}
+
+# --- (a) THE SELF-TEST, before the real file is asked anything: known-good and
+# known-bad inputs against the resolver itself, so a resolver that always says yes
+# (or always says no) cannot pass this section by accident. ---
+expect_true "NR.1 a repo skills/ directory resolves (browser-verify)" \
+  nr_resolves "browser-verify"
+expect_true "NR.2 a declared-dependency <plugin>:<skill> resolves (agent-skills:context-engineering)" \
+  nr_resolves "agent-skills:context-engineering"
+expect_true "NR.3 a marketplace-declared, non-mandatory plugin resolves (impeccable)" \
+  nr_resolves "impeccable"
+expect_false "NR.4 a bare name matching no skills/ dir and no marketplace plugin does NOT resolve" \
+  nr_resolves "zzz-not-a-real-skill-zzz"
+expect_false "NR.5 a <plugin>:<skill> whose plugin is not a declared dependency does NOT resolve" \
+  nr_resolves "not-a-dependency:some-skill"
+
+# --- (b) THE REAL FILE. Every needs: entry in the rendered SKILL.md, checked
+# against the same resolver the self-test above just proved discriminates. ---
+NR_ENTRIES="$(nr_needs_entries "$NR_SKILL_MD")"
+expect_nonempty "NR.6 the rendered SKILL.md has a needs: list to check" "$NR_ENTRIES"
+
+NR_DEAD=""
+while IFS= read -r nr_e; do
+  [ -n "$nr_e" ] || continue
+  nr_resolves "$nr_e" || NR_DEAD="${NR_DEAD}${NR_DEAD:+ }${nr_e}"
+done <<< "$NR_ENTRIES"
+
+expect_empty "NR.7 every needs: entry in skills/canonical-sdlc/SKILL.md resolves" "$NR_DEAD"
+
+# ============================================================
 finish

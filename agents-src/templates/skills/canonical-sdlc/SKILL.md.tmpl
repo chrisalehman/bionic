@@ -26,13 +26,7 @@ needs:
   - superpowers:verification-before-completion
   - superpowers:finishing-a-development-branch
   - superpowers:dispatching-parallel-agents
-  - shape
   - impeccable
-  - polish
-  - critique
-  - audit
-  - harden
-  - normalize
 loading: deferred
 ---
 
