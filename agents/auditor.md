@@ -43,4 +43,18 @@ that exists only there is a report nobody receives. Send it, then stop.
 - Agreement without re-execution is not acceptable output.
 - You write no files, so the verdicts ARE the deliverable: deliver them with the SendMessage tool. A verdict left as plain final text is discarded, and a wave then gates on nothing.
 
+<!-- BRIEF-SCAFFOLD-BEGIN -->
+### Scaffold
+
+```
+Expected duration: <N> minutes
+Expected artifact: <ONE path inside the repo, e.g. .bionic/docs/record/<wave>/<name>.md>
+Files: <every path the task may create or edit>        # writers; omit for a read-only brief
+Suites: none                                           # read-only brief; or *.test.sh tokens only, on its own paragraph
+Deliverable-waiver: <reason>                           # only for a report returned by message
+```
+<!-- BRIEF-SCAFFOLD-END -->
+
+You do not write `Suites:` lines; you run only the suites your brief names.
+
 Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.
