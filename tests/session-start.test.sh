@@ -680,4 +680,54 @@ hasnt "15.3 no quiet-count line — nothing is quiet" "quiet open run(s)" "$OUT"
 has   "15.4 the predecessor roster still prints, exactly as today" "roster-$OLD_SID.state" "$OUT"
 eq    "15.5 wrote nothing" "$S15_BEFORE" "$(snap "$P15")"
 
+section "16 — 400 aged predecessor files: bounded, not a linear scan (AC-6.1, AC-6.2)"
+# THE FIELD DEFECT (carry-over P9, REQ-6): both the roster loop (:427) and the
+# patrol-stamp loop (:504) spawn a subprocess PER FILE (an `awk` for open_rows,
+# a `stat` for the stamp's age) with no upper bound on how many predecessor
+# files can accumulate under .bionic/tmp — measured ~10.4s at 400 dead sessions
+# against the CLI's 10s hook timeout. This section plants exactly that shape
+# and times ONE drive with `date +%s` (whole seconds, per the task's own
+# tolerance — sub-second timing needs python3, not a portability bet worth
+# taking here).
+#
+# WHAT MUST STILL WORK (AC-6.2): a predecessor this run has no reason to treat
+# as settled — a FRESH roster/stamp pair under its own sid, never backdated —
+# is read and listed exactly as it would be with zero aged files beside it, and
+# THIS session's own files are still excluded exactly as every section above
+# already proves. The 400 aged files are the ones REQ-6 allows the loops to
+# skip; they are backdated 7 days (604800s), an age no interval/multiplier
+# combination anywhere in this file's own constants could mistake for "still
+# worth an individual read".
+P16=$(make_env 1s)
+DEAD_I=1
+while [ "$DEAD_I" -le 400 ]; do
+  DEAD_SID=$(printf 'dead0000-dead-dead-dead-%012d' "$DEAD_I")
+  roster_rows "$P16/.bionic/tmp/roster-$DEAD_SID.state" "$DEAD_SID" "W-DEAD$DEAD_I"
+  backdate "$P16/.bionic/tmp/roster-$DEAD_SID.state" 604800
+  write_stamp "$P16" "$DEAD_SID"
+  backdate "$P16/.bionic/tmp/patrol-$DEAD_SID.state" 604800
+  DEAD_I=$((DEAD_I + 1))
+done
+FRESH_SID="fedcba98-7654-3210-fedc-ba9876543210"
+roster_rows "$P16/.bionic/tmp/roster-$FRESH_SID.state" "$FRESH_SID" "W-FRESH"
+write_stamp "$P16" "$FRESH_SID"
+roster_rows "$P16/.bionic/tmp/roster-$CUR_SID.state" "$CUR_SID" "W-MINE"
+write_stamp "$P16" "$CUR_SID"
+
+T16_START=$(date +%s)
+OUT=$(drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+T16_END=$(date +%s)
+T16_ELAPSED=$((T16_END - T16_START))
+
+eq    "16.1 exit 0" "0" "$(rc)"
+expect_true "16.2 the drive finishes in under 2 seconds against 400 aged predecessors" \
+  test "$T16_ELAPSED" -lt 2
+has   "16.3 the fresh predecessor roster is still listed" "roster-$FRESH_SID.state" "$OUT"
+has   "16.4 the predecessor stamps section still appears" "predecessor stamps:" "$OUT"
+has   "16.5 …naming the fresh predecessor by its short id" "${FRESH_SID:0:8}" "$OUT"
+hasnt "16.6 THIS session's own roster is never listed as a predecessor" \
+  "roster-$CUR_SID.state" "$OUT"
+hasnt "16.7 THIS session's own stamp is never listed as a predecessor" \
+  "  ${CUR_SID:0:8} " "$OUT"
+
 finish

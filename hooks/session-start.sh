@@ -385,8 +385,39 @@ done
 # two discharges `adopt_fold` in hooks/session-poker.sh applies, mirrored here
 # rather than shelled out to, because task POKER owns that file and this hook must
 # read the same disk with or without its `--report-only` verb.
-open_rows() {  # <roster file> <ack ledger file|""> -> a count
-  awk -v ackfile="$2" '
+#
+# ONE AWK PROCESS FOR EVERY PREDECESSOR ROSTER, not one per file (REQ-6, carry-over
+# P9). The per-file shape below — `for RF in …; do N="$(open_rows "$RF" …)"; done` —
+# forked an `awk` per roster file with no bound on how many can accumulate under
+# `.bionic/tmp`: measured ~10.4s at 400 dead sessions against the CLI's 10s hook
+# timeout (2,041ms already at 14 files — subprocess-per-file cost dominates well
+# before any file count a real project ever carries deliberately). The FILTERING
+# loop below stays pure bash builtins (glob + `[ -f ]`/`[ -L ]`, no fork), and
+# builds a tab-separated manifest of every SURVIVING (osid, roster, ledger) triple;
+# ONE awk invocation then walks the manifest and, for each row, reads that roster
+# file and its ledger with `getline < file` (awk's own multi-file idiom, not a
+# subprocess), resetting its per-file `seen`/`met`/`acked` arrays between rows —
+# the exact per-file reset the old per-invocation `awk` got for free by exiting.
+# Output is unchanged: one `osid<TAB>count<TAB>roster-path` line per roster with at
+# least one open row, read back below into the same `ROSTERS` text as today.
+sid8() { printf '%.8s' "${1:-}"; }
+
+ROSTER_MANIFEST=""
+for RF in "$TMP"/roster-*.state; do
+  [ -f "$RF" ] || continue
+  [ -L "$RF" ] && continue        # symlinks are not followed, as everywhere in tmp
+  OSID="${RF##*/}"; OSID="${OSID#roster-}"; OSID="${OSID%.state}"
+  [ -n "$OSID" ] || continue
+  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
+  LEDGER="$TMP/sweeper-$OSID.state"
+  if [ ! -f "$LEDGER" ] || [ -L "$LEDGER" ]; then LEDGER=""; fi
+  ROSTER_MANIFEST="${ROSTER_MANIFEST}${OSID}	${RF}	${LEDGER}
+"
+done
+
+ROSTERS=""
+if [ -n "$ROSTER_MANIFEST" ]; then
+  ROSTER_RAW="$(printf '%s' "$ROSTER_MANIFEST" | awk -F'\t' '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
       for (i = 1; i <= n; i++) {
@@ -397,47 +428,43 @@ open_rows() {  # <roster file> <ack ledger file|""> -> a count
       }
       return ""
     }
-    BEGIN {
-      if (ackfile != "") {
-        while ((getline l < ackfile) > 0) {
+    {
+      osid = $1; rf = $2; ledger = $3
+      delete seen; delete met; delete acked
+      if (ledger != "") {
+        while ((getline l < ledger) > 0) {
           if (l !~ /^sweeper-ledger\/v1\|/) continue
           if (kv(l, "event") != "ack") continue
           an = kv(l, "name"); if (an != "") acked[an] = 1
         }
-        close(ackfile)
+        close(ledger)
       }
-    }
-    /^roster-state\/v1\|/ { n = kv($0, "name"); if (n != "") seen[n] = 1; next }
-    /^landing-swept\/v1\|/ {
-      n = kv($0, "name")
-      if (n != "" && kv($0, "state") == "MET") met[n] = 1
-      next
-    }
-    END {
+      while ((getline l < rf) > 0) {
+        if (l ~ /^roster-state\/v1\|/) {
+          n = kv(l, "name"); if (n != "") seen[n] = 1
+          continue
+        }
+        if (l ~ /^landing-swept\/v1\|/) {
+          n = kv(l, "name")
+          if (n != "" && kv(l, "state") == "MET") met[n] = 1
+        }
+      }
+      close(rf)
       c = 0
       for (n in seen) { if (n in met) continue; if (n in acked) continue; c++ }
-      print c
+      if (c > 0) printf "%s\t%s\t%s\n", osid, c, rf
     }
-  ' "$1" 2>/dev/null
-}
-
-sid8() { printf '%.8s' "${1:-}"; }
-
-ROSTERS=""
-for RF in "$TMP"/roster-*.state; do
-  [ -f "$RF" ] || continue
-  [ -L "$RF" ] && continue        # symlinks are not followed, as everywhere in tmp
-  OSID="${RF##*/}"; OSID="${OSID#roster-}"; OSID="${OSID%.state}"
-  [ -n "$OSID" ] || continue
-  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
-  LEDGER="$TMP/sweeper-$OSID.state"
-  if [ ! -f "$LEDGER" ] || [ -L "$LEDGER" ]; then LEDGER=""; fi
-  N="$(open_rows "$RF" "$LEDGER")"
-  case "$N" in ''|*[!0-9]*) continue ;; esac
-  [ "$N" -gt 0 ] || continue
-  ROSTERS="${ROSTERS}  $(sid8 "$OSID") — $N open row(s) — ${RF##*/}
+  ' 2>/dev/null)"
+  if [ -n "$ROSTER_RAW" ]; then
+    while IFS="$(printf '\t')" read -r OSID N RF; do
+      [ -n "$OSID" ] || continue
+      ROSTERS="${ROSTERS}  $(sid8 "$OSID") — $N open row(s) — ${RF##*/}
 "
-done
+    done <<EOF
+$ROSTER_RAW
+EOF
+  fi
+fi
 
 # ---------------------------------------------------------------- predecessor stamps
 #
@@ -501,19 +528,55 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep
 STAMPS=""
 LIMIT=$(( $(ss_interval) * PATROL_STALE_MULTIPLIER ))
 NOW="$(date -u +%s 2>/dev/null || echo 0)"
+
+# ONE `stat` INVOCATION FOR EVERY PREDECESSOR STAMP, not one per file (REQ-6,
+# same defect and the same fix shape as the roster loop above, and the same
+# batched-stat idiom the sweep gate further down already established — one
+# flavour probe, then a single `xargs` pass over every candidate path rather
+# than a `stat` fork per file). The filtering loop stays pure bash builtins
+# (glob + `[ -f ]`/`[ -L ]`, no fork) and records each survivor's path in
+# ORDER; `stat`'s own output preserves that order one line per input, so the
+# second loop below zips path[i] back to mtime[i] positionally rather than
+# re-deriving anything from the filename.
+STAMP_FILES=""
+STAMP_OSIDS=""
 for SF in "$TMP"/patrol-*.state; do
   [ -f "$SF" ] || continue
   [ -L "$SF" ] && continue
   OSID="${SF##*/}"; OSID="${OSID#patrol-}"; OSID="${OSID%.state}"
   [ -n "$OSID" ] || continue
   if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
-  MT="$(stat -f %m "$SF" 2>/dev/null || stat -c %Y "$SF" 2>/dev/null)"
-  case "$MT" in ''|*[!0-9]*) continue ;; esac
-  AGE=$(( NOW - MT )); [ "$AGE" -ge 0 ] || AGE=0
-  if [ "$AGE" -gt "$LIMIT" ]; then STATE="stale"; else STATE="fresh"; fi
-  STAMPS="${STAMPS}  $(sid8 "$OSID") — ${AGE}s old (stale past ${LIMIT}s) — $STATE
+  STAMP_FILES="${STAMP_FILES}${SF}
+"
+  STAMP_OSIDS="${STAMP_OSIDS}${OSID}
 "
 done
+
+if [ -n "$STAMP_FILES" ]; then
+  case "$(stat -c %Y /dev/null 2>/dev/null)" in
+    ''|*[!0-9]*)
+      STAMP_MTS="$(printf '%s' "$STAMP_FILES" | tr '\n' '\0' | xargs -0 stat -f %m 2>/dev/null)"
+      ;;
+    *)
+      STAMP_MTS="$(printf '%s' "$STAMP_FILES" | tr '\n' '\0' | xargs -0 stat -c %Y 2>/dev/null)"
+      ;;
+  esac
+  exec 8<<EOF_OSIDS
+$STAMP_OSIDS
+EOF_OSIDS
+  exec 9<<EOF_MTS
+$STAMP_MTS
+EOF_MTS
+  while IFS= read -r OSID <&8 && IFS= read -r MT <&9; do
+    [ -n "$OSID" ] || continue
+    case "$MT" in ''|*[!0-9]*) continue ;; esac
+    AGE=$(( NOW - MT )); [ "$AGE" -ge 0 ] || AGE=0
+    if [ "$AGE" -gt "$LIMIT" ]; then STATE="stale"; else STATE="fresh"; fi
+    STAMPS="${STAMPS}  $(sid8 "$OSID") — ${AGE}s old (stale past ${LIMIT}s) — $STATE
+"
+  done
+  exec 8<&- 9<&-
+fi
 
 # ---------------------------------------------------------------- legacy symlinks
 LINKS=""

@@ -1800,15 +1800,14 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # the identical reason: every reader in the fleet already treats a symlinked state file as
 # absent, so there is nothing to clear, and a hostile repo must not gain a delete through a
 # path it aimed. A directory at one of these names is refused too: this verb removes files.
-sweep_unlink() {  # <path> -> 0 removed, 1 left alone
-  local f="$1"
-  [ -L "$f" ] && return 1
-  [ -f "$f" ] || return 1
-  rm -f "$f" 2>/dev/null
-  [ -e "$f" ] && return 1
-  return 0
-}
-
+#
+# NO LONGER A FUNCTION (REQ-6). This used to be `sweep_unlink`, called once per
+# candidate file — a `rm -f` subprocess per call, the dominant cost at 400 dead
+# sessions once session-start.sh's own report loops were bounded. The `sweep`
+# verb below now queues every non-symlink candidate (never a symlink; never
+# rewritten here) and deletes them all in ONE `xargs -0 rm -f` pass, then
+# confirms each with a plain `[ -e ]` — no second `rm`, no per-file function
+# call. See the verb's own comments for the full shape.
 
 # ---------------------------------------------------------------- verbs
 
@@ -2397,7 +2396,21 @@ EOF
     # `patrol_dead_sessions` is handed this session's own key as an additional
     # live id: it is live by construction, and naming it by hand is what stops an
     # unreadable claude-home from letting a session sweep its own state.
-    SWEEP_DEAD_IDS="$(patrol_dead_sessions "$REPO_REAL" "$SESSION_ID")"
+    # LIVE, NOT DEAD (REQ-6). `patrol_dead_sessions` is the library's own answer
+    # to "which sessions are dead", but it computes that by walking EVERY
+    # session-keyed state file under `.bionic/tmp` itself
+    # (`patrol_state_session_ids`) and subtracting the live set — exactly the
+    # walk the loop below already does, a second time, for the same directory.
+    # At 400 dead sessions that second walk was a measurable chunk of this
+    # verb's own cost. `patrol_live_session_ids` walks a DIFFERENT, much
+    # smaller set (`${CLAUDE_CONFIG_DIR}/sessions/*.json`, one file per
+    # currently-running process) and costs nothing proportional to residue
+    # under `.bionic/tmp`, so classifying against IT — live if a member (or
+    # this session's own id, live by construction), dead otherwise — reaches
+    # the identical verdict `patrol_dead_sessions` would have, once, not twice.
+    SWEEP_LIVE_IDS="$(patrol_live_session_ids)"
+    [ -z "$SESSION_ID" ] || SWEEP_LIVE_IDS="${SWEEP_LIVE_IDS}${SWEEP_LIVE_IDS:+
+}${SESSION_ID}"
 
     SWEEP_SCANNED=0
     SWEEP_DEAD=0
@@ -2406,24 +2419,50 @@ EOF
     SWEEP_REMOVED=0
     SWEEP_REFUSED=0
 
+    # ONE PASS OVER THE DISK, not two (REQ-6, carry-over P9). The shape this
+    # replaces called `sweep_unlink` — a `rm -f` subprocess — once per candidate
+    # file inside this very loop; at 400 dead sessions (two files apiece in the
+    # fixture that surfaced this) that fork-per-file cost was the dominant cost
+    # left once session-start.sh's own report loops were bounded. The fix is
+    # NOT "walk the directory once to delete, again to report" — a second walk
+    # runs against a directory the first has already emptied, and
+    # `patrol_session_state_files`/`patrol_state_session_ids` only ever name
+    # paths that still exist, so a dead session whose last file this verb just
+    # removed vanishes from the SECOND walk entirely: `SWEEP_DEAD` undercounts,
+    # and a run that swept everything reports "all sessions are LIVE" and
+    # refuses (exit 1) over its own successful work. Caught empirically against
+    # this exact 400-session fixture before it ever reached RED evidence.
+    #
+    # So: ONE walk, building the ENTIRE report text (`SWEEP_OUT`) as it goes,
+    # with a `?`-prefixed placeholder line standing in for any file this pass
+    # QUEUES for deletion (into `SWEEP_BULK`) rather than deletes immediately.
+    # Every OTHER line — a "live, kept" line, a dead session's header, a
+    # symlink's "refused" line, and every report-only line — is final the
+    # moment it is written, exactly as today. Only after this loop completes
+    # does the ONE `xargs -0 rm -f` pass run, and only then are the `?`
+    # placeholders resolved, by checking each path once more against disk (no
+    # second `rm`) — see the two blocks below.
+    SWEEP_OUT=""
+    SWEEP_BULK=""
     while IFS= read -r SWEEP_SID; do
       [ -n "$SWEEP_SID" ] || continue
       SWEEP_SCANNED=$((SWEEP_SCANNED + 1))
 
-      # Newline-delimited containment against the DEAD set: an id counts as dead
-      # only as a whole line, so a live session whose id is a prefix of a dead
-      # one is not mistaken for it.
+      # Newline-delimited containment against the LIVE set: an id counts as
+      # live only as a whole line, so a dead session whose id is a prefix of a
+      # live one is not mistaken for it.
       case "
-$SWEEP_DEAD_IDS
+$SWEEP_LIVE_IDS
 " in
         *"
 $SWEEP_SID
-"*) ;;
-        *)
+"*)
           SWEEP_KEPT=$((SWEEP_KEPT + 1))
-          say "$SWEEP_SID — live, kept"
+          SWEEP_OUT="${SWEEP_OUT}$SWEEP_SID — live, kept
+"
           continue
           ;;
+        *) ;;
       esac
 
       SWEEP_DEAD=$((SWEEP_DEAD + 1))
@@ -2447,26 +2486,70 @@ $SWEEP_SID
           fi
           continue
         fi
-        if sweep_unlink "$SWEEP_F"; then
-          SWEEP_REMOVED=$((SWEEP_REMOVED + 1))
-          SWEEP_LINES="${SWEEP_LINES}  $SWEEP_F
-"
-        else
+        if [ -L "$SWEEP_F" ]; then
           SWEEP_REFUSED=$((SWEEP_REFUSED + 1))
           SWEEP_LINES="${SWEEP_LINES}  refused (symlink or not a file, left alone): $SWEEP_F
+"
+        else
+          SWEEP_BULK="${SWEEP_BULK}${SWEEP_F}
+"
+          SWEEP_LINES="${SWEEP_LINES}?${SWEEP_F}
 "
         fi
       done <<EOF
 $(patrol_session_state_files "$REPO_REAL" "$SWEEP_SID")
 EOF
 
-      say "$SWEEP_SID — dead, $SWEEP_N file(s)"
-      printf '%s' "$SWEEP_LINES" | while IFS= read -r SWEEP_L; do
-        [ -n "$SWEEP_L" ] && say "$SWEEP_L"
-      done
+      SWEEP_OUT="${SWEEP_OUT}$SWEEP_SID — dead, $SWEEP_N file(s)
+${SWEEP_LINES}"
     done <<EOF
 $(patrol_state_session_ids "$REPO_REAL")
 EOF
+
+    # THE ONE DELETE. Nothing above ever appends to `SWEEP_BULK` when
+    # `SWEEP_REPORT_ONLY=yes` (that branch `continue`s before reaching the
+    # `else`), so report-only reaches here with an empty list and this is a
+    # no-op for it, exactly as before.
+    if [ -n "$SWEEP_BULK" ]; then
+      printf '%s' "$SWEEP_BULK" | tr '\n' '\0' | xargs -0 rm -f -- 2>/dev/null
+    fi
+
+    # RESOLVE THE PLACEHOLDERS. Every `?`-prefixed line named a file that was
+    # NOT a symlink at enumeration time and was just queued in the one `rm`
+    # pass above; the only question left is whether that `rm` actually removed
+    # it (the ordinary case) or left it behind (permissions, a concurrent
+    # writer) — decided with a plain existence check, never a second `rm`. Every
+    # other line already carries its final wording and passes through as-is.
+    if [ -n "$SWEEP_OUT" ]; then
+      SWEEP_RESOLVED=""
+      while IFS= read -r SWEEP_L; do
+        case "$SWEEP_L" in
+          '?'*)
+            SWEEP_RF="${SWEEP_L#?}"
+            if [ ! -e "$SWEEP_RF" ]; then
+              SWEEP_REMOVED=$((SWEEP_REMOVED + 1))
+              SWEEP_RESOLVED="${SWEEP_RESOLVED}  $SWEEP_RF
+"
+            else
+              SWEEP_REFUSED=$((SWEEP_REFUSED + 1))
+              SWEEP_RESOLVED="${SWEEP_RESOLVED}  refused (symlink or not a file, left alone): $SWEEP_RF
+"
+            fi
+            ;;
+          *)
+            SWEEP_RESOLVED="${SWEEP_RESOLVED}${SWEEP_L}
+"
+            ;;
+        esac
+      done <<EOF
+$SWEEP_OUT
+EOF
+      SWEEP_OUT="$SWEEP_RESOLVED"
+    fi
+
+    printf '%s' "$SWEEP_OUT" | while IFS= read -r SWEEP_L; do
+      [ -n "$SWEEP_L" ] && say "$SWEEP_L"
+    done
 
     printf '%s|at=%s|session=%s|mode=%s|scanned=%s|dead=%s|live=%s|files=%s|removed=%s|refused=%s\n' \
       "$SWEEP_SCHEMA" "$(iso_now)" "${SESSION_ID:-none}" \
