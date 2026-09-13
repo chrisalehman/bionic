@@ -261,8 +261,24 @@ fi
 
 # Block 3: Any push while on main/master branch (catches implicit pushes
 # like "git push origin", "git push origin HEAD", bare "git push")
-# [WALL: tests/protect-main.test.sh]
-CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+#
+# THE BRANCH ASKED ABOUT IS THE PAYLOAD'S, NOT THE HOOK PROCESS'S OWN (D2, REQ-5;
+# P-B: a wall reads facts from its input, never from ambient process state). BIONIC_CWD
+# is `bionic_context`'s resolved payload cwd (lib/context.sh rung 2), set once in
+# hooks/bash-walls.sh before any wall runs. The hook process's own `pwd` is an accident
+# of how the CLI launched it and is ordinarily the same directory (A2) — which is why
+# this bug was invisible outside a test that deliberately makes the two differ.
+#
+# THE FALLBACK IS TODAY'S EXACT BEHAVIOUR, kept for the one case BIONIC_CWD cannot rule
+# out: an empty or non-existent value. In practice `bionic_context`'s own rung 3 already
+# defaults to `pwd`, so this branch is a defensive mirror of that default rather than a
+# path this wall expects to take on its own.
+# [WALL: tests/protect-main.test.sh, tests/bash-walls.test.sh §cwd-split]
+if [ -n "${BIONIC_CWD:-}" ] && [ -d "${BIONIC_CWD:-}" ]; then
+  CURRENT_BRANCH=$(git -C "$BIONIC_CWD" symbolic-ref --short HEAD 2>/dev/null || echo "")
+else
+  CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+fi
 if [ -n "$CURRENT_BRANCH" ] && git_branch_protected "$CURRENT_BRANCH"; then
   fold_block exit2 push "the current branch is protected" "switch to a feature branch" \
     "The current branch is \"$CURRENT_BRANCH\". Switch to a feature branch, or push by hand from your own terminal."
