@@ -474,18 +474,40 @@ PATROL_STAMP_FILE="$STATE_DIR/patrol-${BIONIC_SID}.state"
 POKER_SCRIPT="${HOOK_DIR}/session-poker.sh"
 [ -f "$POKER_SCRIPT" ] || POKER_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
 
-patrol_deny() {  # <fact> <fix> <state line>...
-  local fact="$1" fix="$2"; shift 2
+# THE TWO ARMS HAVE DIFFERENT REMEDIES, so the Fix block is an argument rather than a
+# constant in the frame (wave-12 T2, spec D4).
+#
+# NEVER ARMED asks for one act and it is the CronCreate. The stamp is not a hand step any
+# more: hooks/engage.sh runs `session-poker.sh arm` itself, with the session id and the
+# project root it already holds, immediately after writing the engagement marker (T4). A
+# refusal that still ordered `session-poker.sh arm` would be telling the model to do work
+# the machine has already been given — principle P-A at its own wall — and would teach the
+# hand step back into the next brief that quotes it.
+#
+# ARMED AND STOPPED FIRING is the other half and keeps both: the clock is what died, the
+# stamp is stale rather than absent, and re-engaging is not what an operator does about a
+# cron job that stopped. `arm` is offered there because a fresh stamp is what proves the
+# revived clock is landing.
+PATROL_FIX_NEVER="Fix: CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
+  reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch). That is the
+  one half this model owns. The stamp is the other half and it is written for you:
+  hooks/engage.sh arms it as the session engages canonical-sdlc, so a session that engaged
+  has one. Engage the skill again in this session if it is still missing."
+
+PATROL_FIX_STOPPED="Fix: re-arm the Patrol — both halves, the clock and the stamp:
+  1. CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
+     reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch).
+  2. bash ${POKER_SCRIPT} arm"
+
+patrol_deny() {  # <fact> <fix> <fix-block> <state line>...
+  local fact="$1" fix="$2" fixblock="$3"; shift 3
   local reasons="" line
   for line in "$@"; do reasons="${reasons}${line}
 "; done
   refuse exit2 dispatch "$fact" "$fix" "${reasons}
 A dispatch with no Patrol behind it is an agent nobody is waiting on.
 
-Fix: re-arm the Patrol — both halves, the clock and the stamp:
-  1. CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
-     reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch).
-  2. bash ${POKER_SCRIPT} arm
+${fixblock}
 
 Then retry the dispatch."
 }
@@ -529,7 +551,8 @@ fi
 # UNCONDITIONAL, and that is the C-2 fix in one word: this arm asks whether anything armed
 # the Patrol, a question with no threshold in it.
 if [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
-  patrol_deny "no Patrol stamp exists for this session" "arm the Patrol, both halves" \
+  patrol_deny "no Patrol stamp exists for this session" "CronCreate the Patrol job" \
+    "$PATROL_FIX_NEVER" \
     "There is no Patrol stamp for this session at:" \
     "    ${PATROL_STAMP_FILE}" \
     "The Patrol was never armed on this session (a symbolic link at that path is never" \
@@ -564,6 +587,7 @@ else
       [ "$PATROL_AGE" -lt 0 ] && PATROL_AGE=0
       if [ "$PATROL_AGE" -gt "$PATROL_MAX_AGE" ]; then
         patrol_deny "the Patrol was armed and stopped firing" "re-arm the Patrol, both halves" \
+          "$PATROL_FIX_STOPPED" \
           "The Patrol was armed on this session and has stopped firing." \
           "Its last stamp is ${PATROL_AGE}s old — past the ${PATROL_MAX_AGE}s limit," \
           "which is 2x ${PATROL_INTERVAL_WORDS}:" \
@@ -1651,6 +1675,83 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 [ -n "$C_DURATION" ]    || add_absent duration
 [ -n "$C_PROGRESS" ]    || add_absent progress
 
+# ================================= THE BRIEF-SHAPE FINDINGS LIST (D3, principle P-A)
+#
+# THE INCIDENT. Six dispatch attempts to spawn one researcher (2026-09-13). Every
+# brief-shape arm below used to `refuse exit2` where it stood, so an author learned
+# exactly ONE fault per attempt and the next attempt found the next one — a loop whose
+# length is the number of faults in a brief the author was holding, whole, the entire
+# time. Principle P-A reads the same way at a wall as at a precondition: where the
+# machine already has the facts, the machine reports them; asking the model to
+# rediscover them one round trip at a time is a chore on the normal path.
+#
+# THE SPLIT IS BRIEF SHAPE versus STATE, and it is not a matter of taste. A11 (several
+# paths), A12 (outside the repo), A13 (no deliverable), A14 (no instrument) and A16
+# (`Files:` with no derivation) are all defects in ONE artifact — the brief — readable
+# in one pass, fixable in one edit, and independent of each other. They collect here.
+# Every STATE arm above and below keeps its early exit: a missing attestation, an
+# unarmed Patrol, an unapproved plan, a dispatch from a worktree, a full budget, a
+# second full-tree run. None of those is a property of the brief, none is fixed by
+# reading the next one, and several of them mean the gate cannot trust what it reads
+# next — reporting "no Patrol" alongside a comma in a label would put a broken
+# environment and a typo in one list and train the reader past both.
+#
+# A15 (the impact command did not answer) STAYS AN EARLY EXIT for that second reason: a
+# derivation that overran its bound is a fact about the machine, not the brief, and the
+# fields below it are unfilled rather than wrong.
+#
+# ONE FINDING RENDERS AS ONE REFUSAL, byte for byte what the arm emitted before — the
+# fact, the fix and the detail it already wrote.
+#
+# SEVERAL FINDINGS KEEP THE FIRST ARM'S USER LINE and put the whole list in `detail`,
+# and that split is forced rather than chosen. AC-E1.3 gives the line one fact (100
+# columns) and one fix (six words, 40 columns), and the widest arm here already spends
+# 99 of the 100 — so a line that also carried a count, or named the other faults, would
+# be REFUSED BY THE RENDERER as malformed. Between a line that says "this brief has 3
+# shape faults" and one that names a fault an author can act on, the second is worth
+# more on a wire that carries nothing else: `refuse`'s channel table ships `exit2` with
+# `detail_to_user=no` (ruling D-1), so `detail` reaches a reader only under
+# BIONIC_WALL_VERBOSE=1 or out of this hook's log. The findings list is therefore whole
+# where it can be whole, and the sentence the model reads is still one it can act on.
+# THE OPERATOR WIN IS LIMITED BY THAT TABLE, NOT BY THIS LIST: whatever puts `detail` on
+# the exit2 wire — the verbose knob, a hook log the model reads, or moving this gate to
+# the `deny` channel, which measures `model_only=yes` — turns "the first of three" into
+# "all three" here with no change to this function.
+DP_FINDING_N=0
+DP_FINDINGS=""
+DP_FIRST_FACT=""
+DP_FIRST_FIX=""
+DP_FIRST_DETAIL=""
+
+dp_finding() {  # <fact> <fix> <detail> — record one brief-shape fault. NEVER exits.
+  DP_FINDING_N=$((DP_FINDING_N + 1))
+  if [ "$DP_FINDING_N" -eq 1 ]; then
+    DP_FIRST_FACT="$1"; DP_FIRST_FIX="$2"; DP_FIRST_DETAIL="$3"
+  fi
+  DP_FINDINGS="${DP_FINDINGS}${DP_FINDINGS:+
+}── ${DP_FINDING_N}. $1 ($2)
+
+$3
+"
+}
+
+# dp_refuse_findings — emit the whole list as ONE refusal and exit 2, or return having
+# done nothing at all. Called once, after the last brief-shape arm; `refuse` owns the
+# exit, so a caller cannot fall through it into the journal with findings outstanding.
+dp_refuse_findings() {
+  [ "$DP_FINDING_N" -gt 0 ] || return 0
+  if [ "$DP_FINDING_N" -eq 1 ]; then
+    refuse exit2 dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
+  fi
+  refuse exit2 dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
+    "THIS BRIEF HAS $DP_FINDING_N SHAPE FAULTS. The line above names the first of them; all
+$DP_FINDING_N are below, in the order the gate reads the brief, each with its own Fix:
+block. They are independent, and a brief that repairs all $DP_FINDING_N dispatches —
+there is no further fault waiting behind these.
+
+$DP_FINDINGS"
+}
+
 # ======================================================= THE AMBIGUITY WALL
 # (Step-6 R6 critic R6-1; plan assumption 71, completing assumption 48.)
 #
@@ -1687,7 +1788,7 @@ Fix: name exactly one deliverable path in the label —
   own line, under Read first: or Scope constraint:, or after a blank line.
 
 Then retry the dispatch."
-  refuse exit2 dispatch "the deliverable label names several paths" "name exactly one deliverable" "$_dp_detail"
+  dp_finding "the deliverable label names several paths" "name exactly one deliverable" "$_dp_detail"
 fi
 
 # ========================================================= THE CONTAINMENT WALL
@@ -1770,7 +1871,7 @@ Fix: name a repo-relative artifact path in the brief —
     Expected artifact: .bionic/docs/record/my-task-notes.md
 
 Then retry the dispatch."
-      refuse exit2 dispatch "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"
+      dp_finding "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"
       ;;
   esac
 fi
@@ -1817,7 +1918,7 @@ Or waive it — the reason is recorded on the session roster either way:
     Deliverable-waiver: <why this dispatch produces nothing durable>
 
 Then retry the dispatch."
-  refuse exit2 dispatch "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
+  dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
 fi
 
 # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
@@ -1869,7 +1970,7 @@ its command the same way — a name that is still a variable when a hook sees it
 be neither derived from nor checked against anything.
 
 Then retry the dispatch."
-  refuse exit2 dispatch "this brief declares no Files: and no Suites:" "declare Files: or Suites:" "$_dp_detail"
+  dp_finding "this brief declares no Files: and no Suites:" "declare Files: or Suites:" "$_dp_detail"
 fi
 
 # ---------- the derivation ----------
@@ -1896,6 +1997,15 @@ SUITES_SOURCE=""
 if [ -n "$C_SUITES" ]; then
   SUITES_ALLOWED="$C_SUITES"
   SUITES_SOURCE="declared"
+elif [ -z "$C_FILES" ]; then
+  # NOTHING TO DERIVE FROM, AND THE ABSENCE IS ALREADY A FINDING. Before the arms
+  # collected, this branch was unreachable: the wall above exited on a brief carrying
+  # neither label, so anything past it held at least one of them. It is reachable now,
+  # and it must stay silent — running the derivation over an empty argument list would
+  # warn that "the impact command derived no suites" (it was never asked), and falling
+  # into the arm below would report a missing `impact-command:` as a SECOND fault when
+  # the brief's own missing `Files:` is the one the author fixes. One fault, one finding.
+  :
 elif [ -n "$IMPACT_COMMAND" ]; then
   _old_ifs="$IFS"; IFS=','; set -f
   # shellcheck disable=SC2086
@@ -1977,8 +2087,17 @@ Or configure the derivation once, in .bionic/config.yaml —
     impact-command: bash tests/lib/impact.sh
 
 Then retry the dispatch."
-  refuse exit2 dispatch "no impact command is configured here" "set impact-command in config.yaml" "$_dp_detail"
+  dp_finding "no impact command is configured here" "set impact-command in config.yaml" "$_dp_detail"
 fi
+
+# ===================================== THE ONE REFUSAL, FOR EVERY BRIEF-SHAPE FAULT
+#
+# THE LAST BRIEF-SHAPE ARM IS ABOVE THIS LINE, and everything below reads the ROW rather
+# than the brief. So this is where the list is spent: one refusal carrying every fault the
+# five arms found, in file order, or a silent return when they found none. It sits ABOVE
+# the one-regression wall and the journal for the same reason each arm used to exit where
+# it stood — a brief the gate is about to refuse must never be journalled as a launch.
+dp_refuse_findings
 
 # ============================================= THE ONE-REGRESSION WALL (AC-24)
 # (seed item 4; the standing ruling "one regression means one" made mechanical.)
