@@ -3984,4 +3984,63 @@ expect_absent "no current: line at all — no FILL" "poker: FILL" "$OUT"
 expect_contains "…named as unreadable, with an empty value" \
   "no FILL — plan current: unreadable (none)" "$OUT"
 
+section "23 — sweep: prunes dead predecessors in one pass, keeps live and self (REQ-6)"
+# THE FIRST DIRECT COVERAGE of the `sweep` verb — prior coverage was only
+# indirect, through tests/session-start.test.sh's own auto-sweep call. Added
+# alongside REQ-6's rewrite of this verb's internals: deletion is now one
+# `xargs -0 rm -f` pass instead of one `rm -f` fork per candidate file, and the
+# report counts are read off a SINGLE walk rather than a second walk of a
+# directory the first has already emptied. That second-walk shape was a real
+# bug this rewrite fixed, caught before it ever reached RED evidence: because
+# `patrol_session_state_files`/`patrol_state_session_ids` only ever name paths
+# that still exist, re-deriving the report AFTER deleting undercounted every
+# dead session whose last file the delete pass had just removed, and could
+# refuse "nothing swept: all sessions are LIVE" over a run that had in fact
+# just swept everything.
+DEAD_SID="dead0000-0000-0000-0000-000000000001"
+LIVE_SID="1ive0000-0000-0000-0000-000000000002"
+R23="$(make_repo s23-sweep)"
+
+# THIS session's own files (SID) — kept, live by construction, no pid file
+# needed (the verb adds its own caller's session id to the live set by hand).
+new_roster "$R23"
+mkrow name=self-agent launched_at="$(iso_ago 10)" >> "$(roster_of "$R23")"
+: > "$R23/.bionic/tmp/patrol-$SID.state"
+
+# A DEAD predecessor: roster + patrol under a session with no pid file
+# anywhere — `patrol_live_session_ids` never names it, so it is dead by
+# omission, the ordinary "the previous conversation ended" case.
+: > "$R23/.bionic/tmp/roster-$DEAD_SID.state"
+: > "$R23/.bionic/tmp/patrol-$DEAD_SID.state"
+
+# A LIVE predecessor: the SAME shape, but its pid.json names THIS TEST
+# PROCESS'S OWN pid ($$) — genuinely running for this suite's whole life —
+# under the fixture's own `BIONIC_CLAUDE_HOME`, exactly what
+# `patrol_live_sessions` reads.
+: > "$R23/.bionic/tmp/roster-$LIVE_SID.state"
+: > "$R23/.bionic/tmp/patrol-$LIVE_SID.state"
+mkdir -p "$TMPROOT/s23-home/sessions"
+printf '{"pid":%s,"sessionId":"%s","cwd":"%s"}\n' "$$" "$LIVE_SID" "$R23" \
+  > "$TMPROOT/s23-home/sessions/$$.json"
+
+( cd "$R23" && exec env CLAUDE_CODE_SESSION_ID="$SID" \
+    BIONIC_CLAUDE_HOME="$TMPROOT/s23-home" bash "$POKER" sweep ) \
+  > "$TMPROOT/poke23.out" 2>&1
+RC=$?; OUT="$(cat "$TMPROOT/poke23.out")"
+
+expect_eq "23.1 exit 0 — at least one session was dead" "0" "$RC"
+expect_contains "23.2 the summary names what it swept" "swept" "$OUT"
+expect_false "23.3 the dead predecessor's roster is gone" \
+  test -e "$R23/.bionic/tmp/roster-$DEAD_SID.state"
+expect_false "23.4 …and its patrol stamp too" \
+  test -e "$R23/.bionic/tmp/patrol-$DEAD_SID.state"
+expect_true "23.5 the live predecessor's roster survives" \
+  test -e "$R23/.bionic/tmp/roster-$LIVE_SID.state"
+expect_true "23.6 …and its patrol stamp too" \
+  test -e "$R23/.bionic/tmp/patrol-$LIVE_SID.state"
+expect_true "23.7 THIS session's own roster survives" \
+  test -f "$(roster_of "$R23")"
+expect_true "23.8 …and its own patrol stamp too" \
+  test -f "$R23/.bionic/tmp/patrol-$SID.state"
+
 finish
