@@ -698,7 +698,16 @@ section "16 — 400 aged predecessor files: bounded, not a linear scan (AC-6.1, 
 # skip; they are backdated 7 days (604800s), an age no interval/multiplier
 # combination anywhere in this file's own constants could mistake for "still
 # worth an individual read".
-P16=$(make_env 1s)
+#
+# 3600s, NOT a tiny interval: see §1's comment and §9/§12's own use of the same
+# value — a generous interval keeps FRESH_SID's just-written files out of the
+# auto-sweep's reach deterministically (R2's age gate defers the WHOLE sweep
+# for this run if any dead session anywhere has a file younger than the
+# interval). A tiny interval here would race this section's own timing against
+# whether the sweep decides to run, which is REQ-R2's feature and not this
+# section's subject — §16 is timing the two REPORT loops this task bounds, not
+# the sweep further down.
+P16=$(make_env 3600s)
 DEAD_I=1
 while [ "$DEAD_I" -le 400 ]; do
   DEAD_SID=$(printf 'dead0000-dead-dead-dead-%012d' "$DEAD_I")
@@ -714,14 +723,21 @@ write_stamp "$P16" "$FRESH_SID"
 roster_rows "$P16/.bionic/tmp/roster-$CUR_SID.state" "$CUR_SID" "W-MINE"
 write_stamp "$P16" "$CUR_SID"
 
-T16_START=$(date +%s)
+# SUB-SECOND, via python3 — a whole-second `date +%s` difference is off by up
+# to a full second either way from where the two calls happen to straddle a
+# tick, which is exactly wide enough to misjudge a genuine ~1.something-second
+# run as "2". python3's wall clock is what every timing comment elsewhere in
+# this suite already reasons in when precision matters; this is the one
+# section short enough (~1-2s) for that boundary to matter.
+T16_PY() { python3 -c 'import time; print(time.time())' 2>/dev/null; }
+T16_START="$(T16_PY)"
 OUT=$(drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
-T16_END=$(date +%s)
-T16_ELAPSED=$((T16_END - T16_START))
+T16_END="$(T16_PY)"
+T16_ELAPSED="$(python3 -c "print(f'{${T16_END:-0} - ${T16_START:-0}:.3f}')" 2>/dev/null || echo 999)"
 
 eq    "16.1 exit 0" "0" "$(rc)"
-expect_true "16.2 the drive finishes in under 2 seconds against 400 aged predecessors" \
-  test "$T16_ELAPSED" -lt 2
+expect_true "16.2 the drive finishes in under 2 seconds against 400 aged predecessors (${T16_ELAPSED}s)" \
+  python3 -c "import sys; sys.exit(0 if ${T16_ELAPSED:-999} < 2 else 1)"
 has   "16.3 the fresh predecessor roster is still listed" "roster-$FRESH_SID.state" "$OUT"
 has   "16.4 the predecessor stamps section still appears" "predecessor stamps:" "$OUT"
 has   "16.5 …naming the fresh predecessor by its short id" "${FRESH_SID:0:8}" "$OUT"
