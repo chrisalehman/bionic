@@ -2375,11 +2375,23 @@ Expected artifact: ../../../../../../etc/hosts
 Expected duration: ~15 minutes.
 Suites: tests/widget.test.sh'
 
-for _wall in containment absent ambiguous; do
+# THE THREE-FAULT BRIEF (wave-12 T2, spec D3, AC-1.1/AC-1.2). One brief that trips three
+# brief-shape arms at once: the deliverable label offers two candidates (A11), which leaves
+# `deliverable=` empty with no waiver behind it (A13), and no instrument is declared at all
+# (A14). It is the shape Chris met on 2026-09-13 — six dispatches to spawn one researcher,
+# because the gate exited at the first fault every time — and the §combined section below
+# reads the whole refusal. It is defined HERE because the self-consistency loop below is the
+# first thing that drives it.
+BRIEF_THREE_FAULTS='Your task: review the wave.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Expected duration: 20 minutes'
+
+for _wall in containment absent ambiguous combined; do
   case "$_wall" in
     containment) _b="$BRIEF_OUT_OF_REPO" ;;
     absent)      _b="$BRIEF_NOTHING" ;;
     ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE" ;;
+    combined)    _b="$BRIEF_THREE_FAULTS" ;;
   esac
   REPO=$(make_repo "r18h-$_wall" yes)
   write_attestation "$REPO" "$SID_A"
@@ -2569,7 +2581,13 @@ expect_status "an ABSENT Patrol stamp refuses the dispatch" "2" "$GATE_ST"
 expect_contains "…in the checkpoint house style, not an alarm word" \
   "bionic: dispatch refused — no Patrol stamp exists for this session" "$GATE_ERR"
 expect_contains "…naming the state it found" "never armed" "$GATE_VERR"
-expect_contains "…and naming the exact re-arm command, resolved" "session-poker.sh arm" "$GATE_VERR"
+# REWORKED, NOT WEAKENED (wave-12 T2, spec D4). This arm used to demand the refusal name
+# `session-poker.sh arm` as the second step of a two-step re-arm. hooks/engage.sh runs that
+# command itself now, at engagement (T4) — so the refusal that still ordered it would be
+# instructing the model to do the machine's work. What the never-armed arm must name is the
+# half the model DOES own, and where the other half comes from; §a3-text drives both
+# directions, and the STALE arm below still names the hand command it still needs.
+expect_contains "…and naming engagement as what writes the stamp" "engage" "$GATE_VERR"
 expect_contains "…and the CronCreate half, so the stamp is not re-armed into a dead clock" \
   "CronCreate" "$GATE_VERR"
 expect_contains "…and says what to do after" "retry the dispatch" "$GATE_VERR"
@@ -4287,6 +4305,285 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w31f" "claude-sonne
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "31f task-scale current: T3 with no approved-by is refused (any n >= 1, not just T1)" "2" "$GATE_ST"
 
+
+# ============================================================================
+section "§combined — one refusal, every brief-shape fault (wave-12 T2, D3, AC-1.1/AC-1.2)"
+# ============================================================================
+#
+# THE INCIDENT THIS SECTION IS BUILT FROM. On 2026-09-13 six dispatch attempts were spent
+# spawning one researcher: the gate exited at the FIRST failing brief-shape arm, so each
+# attempt taught the author exactly one fault and the next attempt found the next one. The
+# faults were all in the brief — the one artifact the author was holding — and all readable
+# in a single pass.
+#
+# WHAT CHANGED (spec D3, principle P-A). The five BRIEF-SHAPE arms — A11 several paths,
+# A12 outside the repo, A13 no deliverable, A14 no Files:/Suites:, A16 Files: with no
+# impact command — no longer refuse where they stand. Each appends its finding (fact, fix
+# and its own verbatim `Fix:` block) to a list, and ONE `refuse exit2` after the last of
+# them emits the list in file order and exits 2 once. The STATE arms are untouched: a
+# missing attestation, an unarmed Patrol, an unapproved plan, a worktree cwd, a full
+# budget and a second full-tree dispatch each still exit where they stand, because none of
+# them is a defect in the brief and none is fixed by reading the next one.
+#
+# fails-when: a three-fault brief is refused for fewer than three faults, or refused more
+# than once, or the second attempt — written from the first refusal's own `Fix:` examples —
+# is refused for a fault the first refusal never named.
+
+REPO=$(make_repo rcomb yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "combobot")"
+
+expect_status "§combined a brief with three shape faults is REFUSED" "2" "$GATE_ST"
+
+# ONE REFUSAL, NOT THREE. `refuse` exits, so a second refusal object cannot be emitted by
+# the same process — but a wall that printed its findings as it went would show three
+# `bionic: ` lines, and a wall that kept exiting at the first arm would show one line and
+# one finding. The count of refusal lines and the count of findings are therefore both
+# read, and they are different numbers on purpose.
+expect_eq "§combined …exactly once: one refusal line reaches the user" "1" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_eq "§combined …and the detail carries one refusal, not three stacked" "1" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^bionic: dispatch refused' || true)"
+
+# THE USER LINE IS THE FIRST ARM'S OWN, and the detail says how many there are. AC-E1.3
+# gives the line one fact and one six-word fix, and the widest arm here already spends 99
+# of its 100 columns — so a line that also carried a count would be refused by the
+# renderer as malformed. The count lives one line into the detail instead, where there is
+# room for it and for every fault behind it.
+expect_eq "§combined …the user line stays the first arm's own sentence" \
+  "bionic: dispatch refused — the deliverable label names several paths (name exactly one deliverable)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "§combined …and the detail opens by saying how many faults there are" \
+  "THIS BRIEF HAS 3 SHAPE FAULTS" "$GATE_VERR"
+
+# ALL THREE FACTS, each in the words its own arm already used.
+expect_contains "§combined …naming the ambiguity fault (A11)" "several paths" "$GATE_VERR"
+expect_contains "§combined …naming the absent-deliverable fault (A13)" \
+  "names no deliverable" "$GATE_VERR"
+expect_contains "§combined …naming the absent-instrument fault (A14)" \
+  "declares no Files" "$GATE_VERR"
+
+# EACH WITH ITS OWN `Fix:` BLOCK. The fix is the half an author acts on; three facts over
+# one shared fix would be the same one-fault-per-attempt loop wearing a longer message.
+expect_eq "§combined …each fault carrying its own Fix: block" "3" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
+expect_contains "§combined …the ambiguity fix, verbatim" \
+  "name exactly one deliverable path in the label" "$GATE_VERR"
+expect_contains "§combined …the absent-deliverable fix, verbatim" \
+  "declare a durable artifact path with a canonical label" "$GATE_VERR"
+expect_contains "§combined …the instrument fix, verbatim" \
+  "declare the files this task will touch" "$GATE_VERR"
+# The findings are in FILE ORDER — the order the gate reads the brief in — so an author
+# fixing them top to bottom walks the same path the wall does.
+expect_status "§combined …in file order: the ambiguity finding before the instrument one" "0" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/awk '
+     /several paths/   && !a { a = NR }
+     /declares no Files/ && !b { b = NR }
+     END { exit !(a && b && a < b) }' && echo 0 || echo 1)"
+
+# AND NOTHING WAS LAUNCHED. A refused dispatch is not a launch, however many faults it had.
+expect_status "§combined …and journals no roster row" "0" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- the second attempt, written from the first refusal's own examples ----
+#
+# THE WHOLE POINT, AND THE ONLY ARM THAT CAN CARRY IT. Three facts in one message are worth
+# nothing if acting on all three still leaves a fault the message never mentioned. The
+# examples are read back OUT of the stderr rather than typed here, so this stays true when
+# the wording is next edited.
+COMB_ART=$(fix_example "$GATE_VERR")
+COMB_SUITES=$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 -E '^[[:space:]]+Suites: tests' \
+  | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+expect_status "§combined the refusal really recommended an artifact path" "0" \
+  "$([ -n "$COMB_ART" ] && echo 0 || echo 1)"
+expect_status "§combined …and a Suites: line" "0" \
+  "$([ -n "$COMB_SUITES" ] && echo 0 || echo 1)"
+expect_absent "§combined …neither carrying a slot the walls themselves refuse" "<" "$COMB_ART"
+
+REPO=$(make_repo rcomb2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected artifact: $COMB_ART
+Expected duration: 20 minutes
+$COMB_SUITES" "combobot2")"
+expect_status "§combined attempt 2, following every Fix: example, PASSES" "0" "$GATE_ST"
+expect_status "§combined …with the recommended path as the contract" \
+  "$COMB_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+
+# ---- the discriminator: fixing ONE fault leaves the other two named, and only them ----
+#
+# Without this arm a wall that simply printed all five arms' text unconditionally would pass
+# every assertion above. The instrument fault is repaired and nothing else is touched: the
+# count of findings must fall by exactly one, and the repaired fault must stop being named.
+REPO=$(make_repo rcomb3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS
+Suites: tests/widget.test.sh" "combobot3")"
+expect_status "§combined a two-fault brief is still refused" "2" "$GATE_ST"
+expect_eq "§combined …with exactly two findings, not three" "2" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
+expect_absent "§combined …and the repaired fault is no longer named" \
+  "declares no Files" "$GATE_VERR"
+expect_contains "§combined …while the two that remain still are" "several paths" "$GATE_VERR"
+
+# ---- and a ONE-fault brief is refused exactly as it always was ----
+#
+# AC-1.3 from the other side: collecting must not re-word the single-fault refusal every
+# other section in this file reads. One finding renders as one finding — the arm's own fact,
+# its own fix, its own detail — and the user line is the one the E1.3 table pins.
+REPO=$(make_repo rcomb4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected duration: ~15 minutes.
+Suites: tests/widget.test.sh" "combobot4")"
+expect_eq "§combined a single-fault brief keeps the arm's own line, unchanged" \
+  "bionic: dispatch refused — this brief names no deliverable (add an Expected artifact: line)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_eq "§combined …and renders exactly one Fix: block" "1" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
+
+# ============================================================================
+section "§scaffold-verbatim — the shipped brief scaffold dispatches as written (AC-2.2)"
+# ============================================================================
+#
+# WHAT THIS PINS. `agents-src/blocks/brief-scaffold.md` renders into seven surfaces, one of
+# which is skills/canonical-sdlc/dispatch.md; an orchestrator writes its brief by filling
+# that block in. A scaffold whose filled form the gate refuses teaches the wrong grammar to
+# every dispatch in the tree, and nothing but a drive can tell you which it is.
+#
+# THE BLOCK IS READ OUT OF THE SHIPPED FILE, never transcribed here: a copy in this suite
+# would go on passing after the source drifted, which is the exact failure this pins against.
+# Only two things are done to it — the trailing `  # …` annotations are stripped (they are
+# guidance to the author, not brief text) and each `<placeholder>` span is replaced with a
+# real value, keeping the label spelling and the surrounding text the file wrote.
+#
+# fails-when: the rendered scaffold, filled in, is refused by the gate it is written for.
+
+SCAFFOLD_FILE="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
+
+scaffold_block() {  # <file> -> the fenced scaffold lines, one per line
+  /usr/bin/awk '
+    /^### Scaffold/            { inb = 1; next }
+    inb && /^```/              { fence++; if (fence == 2) exit; next }
+    inb && fence == 1          { print }
+  ' "$1"
+}
+
+scaffold_fill() {  # <suites|files> -> the scaffold as a brief, placeholders filled
+  local mode="$1" line label value
+  printf 'Your task: build the widget.\n'
+  while IFS= read -r line; do
+    line="${line%%  #*}"
+    line="$(printf '%s' "$line" | sed 's/[[:space:]]*$//')"
+    [ -n "$line" ] || continue
+    label="${line%%:*}"
+    case "$label" in
+      "Deliverable-waiver") continue ;;
+      "Files")  [ "$mode" = "files" ]  || continue ;;
+      "Suites") [ "$mode" = "suites" ] || continue ;;
+    esac
+    case "$label" in
+      "Expected duration") value="20" ;;
+      "Expected artifact") value=".bionic/docs/record/w99-scaffold.md" ;;
+      "Files")             value="payload/scripts/lib/widget.sh" ;;
+      "Suites")            value="none" ;;
+      *)                   value="" ;;
+    esac
+    case "$line" in
+      *"<"*">"*) line="${line%%<*}${value}${line##*>}" ;;
+    esac
+    printf '%s\n' "$line"
+  done < <(scaffold_block "$SCAFFOLD_FILE")
+}
+
+# ANTI-VACUITY FIRST: a block that could not be found would make every drive below a drive
+# of the two lines this helper prepends, and they would pass.
+SCAFFOLD_RAW="$(scaffold_block "$SCAFFOLD_FILE")"
+expect_status "§scaffold the shipped dispatch.md really carries a fenced scaffold" "0" \
+  "$([ "$(printf '%s\n' "$SCAFFOLD_RAW" | /usr/bin/grep -c .)" -ge 3 ] && echo 0 || echo 1)"
+expect_contains "§scaffold …carrying the deliverable label the gate reads" \
+  "Expected artifact:" "$SCAFFOLD_RAW"
+
+SCAFFOLD_SUITES="$(scaffold_fill suites)"
+SCAFFOLD_FILES="$(scaffold_fill files)"
+expect_absent "§scaffold the filled brief leaves no placeholder behind" "<" "$SCAFFOLD_SUITES"
+expect_absent "§scaffold …in either variant" "<" "$SCAFFOLD_FILES"
+expect_contains "§scaffold …and still spells the labels the way the file does" \
+  "Expected artifact: .bionic/docs/record/" "$SCAFFOLD_SUITES"
+
+# ---- variant 1: the waiver form of the instrument line ----
+REPO=$(make_repo rscaff1 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$SCAFFOLD_SUITES" "scaffoldbot1")"
+expect_status "§scaffold the rendered scaffold, filled in, DISPATCHES" "0" "$GATE_ST"
+expect_status "§scaffold …with the named artifact as the contract" \
+  ".bionic/docs/record/w99-scaffold.md" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+
+# ---- variant 2: the `Files:` form, where a derivation exists to consume it ----
+REPO=$(make_repo rscaff2 yes)
+write_attestation "$REPO" "$SID_A"
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$SCAFFOLD_FILES" "scaffoldbot2")"
+expect_status "§scaffold the Files: variant DISPATCHES where a derivation is configured" \
+  "0" "$GATE_ST"
+expect_status "§scaffold …and the budget is the derived one" "widget.test.sh" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+# ---- the discriminator: the scaffold UNFILLED is refused ----
+#
+# So "it dispatches" is a fact about the filling, not about a gate that waves anything
+# carrying the right labels through.
+REPO=$(make_repo rscaff3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
+$SCAFFOLD_RAW" "scaffoldbot3")"
+expect_status "§scaffold the scaffold with its placeholders still in it is REFUSED" \
+  "2" "$GATE_ST"
+
+# ============================================================================
+section "§a3-text — the Patrol stamp is armed at engagement, not by hand (D4, REQ-3)"
+# ============================================================================
+#
+# WHY THE TEXT MOVED. Until this wave the A3 refusal handed the model a two-step re-arm and
+# step 2 was `session-poker.sh arm` — a command the operator was expected to type after
+# engaging. hooks/engage.sh now runs it itself, with the session id and the project root it
+# already holds, right after writing the engagement marker (T4, spec D4). A refusal that
+# still ordered the hand step would be instructing the model to do the machine's work, which
+# is principle P-A read at its own wall.
+#
+# THE ARM ITSELF IS UNCHANGED — an absent stamp still refuses, in the same words, and still
+# names the CronCreate half, which IS the model's step: engagement writes the stamp, nothing
+# but the model can create the recurring job that keeps writing it.
+#
+# fails-when: the never-armed refusal still names `session-poker.sh arm` as a step to run,
+# or stops naming engagement as what writes the stamp.
+
+REPO=$(make_repo ra3 yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "§a3 an absent stamp still refuses the dispatch" "2" "$GATE_ST"
+expect_contains "§a3 …in the same words as before" \
+  "bionic: dispatch refused — no Patrol stamp exists for this session" "$GATE_ERR"
+expect_contains "§a3 …and the fix names engagement as what writes the stamp" \
+  "engage" "$GATE_VERR"
+expect_absent "§a3 …and no longer orders the hand-run arm" \
+  "session-poker.sh arm" "$GATE_VERR"
+expect_contains "§a3 …while still naming the one half the model owns" "CronCreate" "$GATE_VERR"
+
+# THE PAIRED ARM, and the anti-vacuity one. A4 (armed, then stopped firing) is a different
+# finding with a different remedy — the clock died, the stamp did not — and it keeps both
+# halves. It also proves the absence above is a fact about A3's text rather than about a
+# string this suite can no longer produce at all.
+REPO=$(make_repo ra3b yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "§a3 the STALE arm is untouched by the A3 rewording" "2" "$GATE_ST"
+expect_contains "§a3 …still naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
+expect_contains "§a3 …and still offering the hand re-arm, which is A4's remedy" \
+  "session-poker.sh arm" "$GATE_VERR"
 
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 
