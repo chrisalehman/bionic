@@ -634,4 +634,83 @@ run_hook "$(mk_payload "$R_PLAIN" 'bash tests/run.sh')" CLAUDE_PROJECT_DIR="$R_N
 expect_status "12g: an unengaged session is still silent through the fall-through" 0 "$ST"
 expect_empty "12h: …on both streams" "$OUT$ERR"
 
+# ---------------------------------------------------------------------------
+section "13 — §cwd-split: the push wall judges the payload's cwd, not the hook process's own (D2, REQ-5)"
+#
+# walls.sh:265 used to ask `git symbolic-ref --short HEAD` with no `-C`, which answers
+# about the directory the HOOK PROCESS happens to be running in — an accident of how the
+# CLI launched the hook — rather than the directory the PAYLOAD names (P-B: a wall reads
+# facts from its input, never from ambient process state). Every other row in this file
+# lets the hook inherit this suite's own cwd, so the two are always the same directory
+# and the bug is invisible (A2). This section is the one place they are made to differ
+# on purpose.
+#
+# run_hook_in <dir> <payload> [env...] — like run_hook, but the HOOK PROCESS itself
+# starts in <dir> rather than wherever this suite runs from.
+run_hook_in() {
+  local dir="$1" payload="$2"; shift 2
+  OUT=$(cd "$dir" && printf '%s' "$payload" | env HOME="$FAKE_HOME" \
+          BIONIC_PLUGINS_DIR="$SANDBOX/no-plugins" CLAUDE_CODE_SESSION_ID="$SID" \
+          CLAUDE_PROJECT_DIR= "$@" bash "$HOOK" 2>"$SANDBOX/.err")
+  ST=$?
+  ERR=$(cat "$SANDBOX/.err")
+  return 0
+}
+
+# mk_cwd_repo <name> <branch> <engaged:yes|no> — a real repo pinned to <branch> by
+# `git init -b`, never mk_repo's automatic `feature/t23` checkout, because this section
+# needs BOTH a main-branch and a feature-branch repo under its own control.
+mk_cwd_repo() {
+  local repo="$SANDBOX/$1"
+  mkdir -p "$repo/.bionic/tmp"
+  git -C "$repo" init -q -b "$2" 2>/dev/null
+  git -C "$repo" config user.email t@example.com
+  git -C "$repo" config user.name "T"
+  printf 'seed\n' > "$repo/README.md"
+  git -C "$repo" add README.md
+  git -C "$repo" commit -qm seed 2>/dev/null
+  [ "$3" = yes ] && : > "$repo/.bionic/tmp/engaged-$SID.state"
+  printf '%s' "$repo"
+}
+
+# THE LAUNCH REPOS — where the hook PROCESS starts. Not engaged: engagement is resolved
+# from the PAYLOAD's cwd (CLAUDE_PROJECT_DIR is empty in every row below, same as the
+# rest of this file), so these two never need the marker.
+CWD_LAUNCH_MAIN="$(mk_cwd_repo cwd-launch-main main no)"
+CWD_LAUNCH_FEATURE="$(mk_cwd_repo cwd-launch-feature feature/launch no)"
+
+# THE PAYLOAD REPOS — the directory `.cwd` names. Engaged, because this is the root
+# `bionic_context` resolves and the engagement guard in hooks/bash-walls.sh reads it
+# before any wall runs.
+CWD_PAYLOAD_FEATURE="$(mk_cwd_repo cwd-payload-feature feature/payload yes)"
+CWD_PAYLOAD_MAIN="$(mk_cwd_repo cwd-payload-main main yes)"
+CWD_FALLBACK="$(mk_cwd_repo cwd-fallback main yes)"
+
+expect_eq "13-setup: the launch repo is on main" "main" \
+  "$(git -C "$CWD_LAUNCH_MAIN" symbolic-ref --short HEAD 2>/dev/null)"
+expect_eq "13-setup: the other launch repo is on a feature branch" "feature/launch" \
+  "$(git -C "$CWD_LAUNCH_FEATURE" symbolic-ref --short HEAD 2>/dev/null)"
+
+# (a) Process on a main checkout, payload cwd a sandbox on a feature branch → ALLOWED.
+# `git push origin HEAD` (no explicit destination name) reaches Block 3 only — the block
+# a fix must scope to the PAYLOAD's branch, not the launch directory's.
+run_hook_in "$CWD_LAUNCH_MAIN" "$(mk_payload "$CWD_PAYLOAD_FEATURE" 'git push origin HEAD')"
+expect_status "13a: process on main + payload cwd on a feature branch — allowed" 0 "$ST"
+expect_empty "13b: …silently, on both streams" "$OUT$ERR"
+
+# (b) The reverse — process on a feature checkout, payload cwd a sandbox on main →
+# REFUSED, in the existing words. Before the fix this row passed the current directory's
+# OWN branch (feature/launch, not protected) and let the push through.
+run_hook_in "$CWD_LAUNCH_FEATURE" "$(mk_payload "$CWD_PAYLOAD_MAIN" 'git push origin HEAD')"
+expect_status "13c: process on a feature branch + payload cwd on main — refused" 2 "$ST"
+expect_contains "13d: …in the existing words" "the current branch is protected" "$ERR"
+
+# (c) A payload with no usable cwd — today's outcome, UNCHANGED. `bionic_context`'s own
+# rung 3 falls back to `pwd` when the payload names nothing usable, so launching the hook
+# FROM the engaged repo and handing it an empty `.cwd` reproduces exactly the behaviour
+# this wall always had (AC-5.4): the branch it judges is the directory it is standing in.
+run_hook_in "$CWD_FALLBACK" "$(mk_payload "" 'git push origin HEAD')"
+expect_status "13e: no usable payload cwd — falls back to the hook's own directory, refused" 2 "$ST"
+expect_contains "13f: …in the existing words" "the current branch is protected" "$ERR"
+
 finish
