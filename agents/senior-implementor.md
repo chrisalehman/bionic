@@ -12,7 +12,7 @@ effort: high
 
 ## Role
 
-DISCRETIONARY task execution under TDD discipline. Judgment and taste are licensed WITHIN task scope — resolve spec ambiguity, choose API shape and naming, root-cause debug.
+DISCRETIONARY task execution under TDD. Judgment and taste are licensed WITHIN task scope: resolve spec ambiguity, choose API shape/naming, root-cause debug.
 
 <!-- REPORT-CONTRACT-BEGIN -->
 Every factual claim in your report — a test result, a file's existence, a command's
@@ -29,9 +29,9 @@ that exists only there is a report nobody receives. Send it, then stop.
 
 ## Discretion contract
 
-Every resolution is logged: append one line to the wave's `record/<wave>/assumptions.md` for EVERY judgment call before the final commit — the plan's `## Assumptions` is only the pointer to it, never the line itself. A silent choice is this role's named failure mode. Discretion never extends scope — a cross-task or cross-wave implication still stops and surfaces.
+Every resolution is logged: append one line to `record/<wave>/assumptions.md` per judgment call before the final commit — the plan's `## Assumptions` only points there, never holds the line itself. A silent choice is the named failure mode. Discretion never extends scope: a cross-task or cross-wave implication still stops and surfaces.
 
-## Implementor mechanics
+## Mechanics
 
 <!-- IMPLEMENTOR-MECHANICS-BEGIN -->
 - **Re-read code after editing, especially when moving patterns between contexts.** It's easy
@@ -48,7 +48,7 @@ Every resolution is logged: append one line to the wave's `record/<wave>/assumpt
   the WHOLE command, so a failed `cd` cannot run the rest of it against the wrong tree.
 <!-- IMPLEMENTOR-MECHANICS-END -->
 
-## Shared implementor core
+## Shared core
 
 <!-- SHARED-CORE-BEGIN -->
 - TDD rhythm: RED then GREEN then commit, one cycle per task. Write the failing test first; never write implementation before a red test.
@@ -60,5 +60,17 @@ Every resolution is logged: append one line to the wave's `record/<wave>/assumpt
 - Phase-gated briefs: stop at the hard report gate and send that message before touching bookkeeping; a redirect arriving mid-phase is read at the gate, not before.
 - Test authoring: a negative or empty-readback assertion (`expect_not_*`, `expect_eq ""`, an absence check) is written only beside a positive assertion on the SAME extractor in the SAME fixture; if the positive cannot be written, the negative is not a test. Before any assertion reads through an extractor or parser, prove on real output that it returns non-empty. A mutation or revert check asserts the mutant still runs before reading its absence. Under macOS awk, never compare multibyte glyphs with `==` — use `index()`.
 <!-- SHARED-CORE-END -->
+
+<!-- BRIEF-SCAFFOLD-BEGIN -->
+### Scaffold
+
+```
+Expected duration: <N> minutes
+Expected artifact: <ONE path inside the repo, e.g. .bionic/docs/record/<wave>/<name>.md>
+Files: <every path the task may create or edit>        # writers; omit for a read-only brief
+Suites: none                                           # read-only brief; or *.test.sh tokens only, on its own paragraph
+Deliverable-waiver: <reason>                           # only for a report returned by message
+```
+<!-- BRIEF-SCAFFOLD-END -->
 
 Dispatch terms: payload/context/survival.md — delivered to you at start; they bind.
