@@ -54,37 +54,6 @@
 # [WALL: tests/farm-out-reminder.test.sh]
 # [WALL: tests/background-suite-guard.test.sh]
 
-# ─── FILE SCOPE: the one helper two of the five carried a copy of ────────────
-#
-# Incident 0001: the audit stream must live where a consuming project cannot commit
-# it, regardless of that project's .gitignore. $HOME-rooted, per-project, durable —
-# the same $HOME/.claude/ audit path the archived epic-10 poker used (that work is
-# recoverable at tag archive/epic-10-never-die).
-# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
-# collision-resistant across same-named projects under different parents.
-# cksum and basename are POSIX — no new dependency.
-#
-# ONE DEFINITION PER PROCESS, AND THERE ARE THREE PROCESSES. The evidence gate and
-# farm-out-reminder each carried a copy whose headers said "byte-identical to the
-# copies in …, divergence would give one project two audit files". Two copies in one
-# shell is a drift the shell itself would resolve, silently and in whichever order the
-# file happened to be read; folding those walls into this library left one.
-#
-# THE OTHER TWO COPIES, NAMED BECAUSE A HEADER THAT NAMES A DELETED FILE IS WORSE THAN
-# NO HEADER: payload/scripts/lib/stop.sh (the turn-end process) and
-# hooks/canonical-sdlc-governing-skill.sh (the PreToolUse|Write process). Three copies,
-# three processes, one body — pinned by tests/cross-gate-agreement.test.sh §AP, which
-# compares the three bodies by checksum and carries a mutation arm proving the
-# comparison discriminates. Consolidation to one owner is promoted, not done here.
-# [INSTRUMENT]
-audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
-  [ -n "${HOME:-}" ] || return 1
-  local base sum
-  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
-  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
-}
-
 # ─── THE PER-WALL LIBRARY DECLARATION (A-56.1, A-56.2) ───────────────────────
 #
 # ONE TABLE, TWO READERS, AND IT IS WHY THE COMPOUND DOES NOT FAIL CLOSED ON A
@@ -807,24 +776,6 @@ if [ ! -f "$PLAN" ]; then
   exit 0
 fi
 
-# Normalize a plan file's line endings to plain \n on stdout. Strips a trailing
-# \r from each record (CRLF: \r\n → \n) and converts any remaining lone \r
-# (classic-Mac CR-only: \r without \n) into a real newline. Every parse below is
-# line-anchored, so it must see real newlines.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-#
-# `tr -d '\r'` (the prior normalization) merely DELETED every \r. On a CRLF file
-# that happened to work, but on a CR-only file it removed every line break,
-# collapsing the whole plan to ONE line beginning with the frontmatter `---`.
-# The line-anchored `/^## SDLC State/` presence check then never matched, the
-# hook exited 0 as "not a canonical-sdlc plan", and every commit passed ungated.
-# awk splits on \n by default, so a CR-only file arrives as a single record that
-# gsub re-splits into real lines; LF and CRLF files are unaffected.
-# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-normalize_newlines() {
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
-}
-
 # The newest plan has no ## SDLC State section → not a canonical-sdlc run.
 # Fence-aware (matches the SECTION extraction below): a `## SDLC State` heading
 # that appears ONLY inside a ``` fenced example is documentation, not state, so
@@ -914,28 +865,26 @@ audit_root() {
   if [ -d "$r/.bionic" ]; then printf '%s\n' "$r"; else printf '%s\n' "$BIONIC_ROOT"; fi
 }
 
-# `audit_path` IS AT FILE SCOPE NOW (T23) — one definition for the two walls that
-# carried a byte-identical copy, which is the guarantee the copies' headers asked for.
-# hooks/canonical-sdlc-governing-skill.sh is a different process and keeps its own.
-
-# Log-only finding channel (D14): append one line to the durable audit file
-# AND echo to stderr, then return 0 — floor/ledger/merge-target findings never
-# block this wave. Twin of the governing-skill hook's helper (hook name differs:
-# `evidence-gate`). mkdir + append are fail-open. audit_root() still selects
-# WHICH project the finding belongs to; incident 0001 moved WHERE the file for
-# that project lives — $HOME/.claude/logs/<project-slug>/, outside every
-# consuming project tree, never .bionic/memory/ again. An unwritable
-# destination drops the line; there is deliberately no fallback branch.
+# `audit_path` AND `log_finding` LIVE IN payload/scripts/lib/root.sh NOW (epic-23
+# wave-12-fixit-171, REQ-8, spec D6) — one definition each for the three processes that used
+# to carry a copy, COUNTED rather than compared by tests/cross-gate-agreement.test.sh §AP.
+# hooks/bash-walls.sh sources root.sh at :205, above this library at :217, so both are in
+# hand here and no library list widened to make that true.
+#
+# WHAT STAYS BEHIND IS THIS GATE'S HALF OF log_finding's CONTRACT: the three values that
+# made the two copies differ — the channel name, the subject, and the root — declared once,
+# here, where `$PLAN` is already resolved and `audit_root` is already defined.
+#
+# `audit_root` (directly above) still selects WHICH project a finding belongs to, and it
+# stays a FUNCTION rather than a captured value because it walks up from the plan's own
+# directory and costs a subprocess: the shared log_finding resolves it only when a finding
+# actually fires, never on every judged command. Incident 0001 moved WHERE the file for that
+# project lives — $HOME/.claude/logs/<project-slug>/, outside every consuming project tree,
+# never .bionic/memory/ again.
 # [INSTRUMENT]
-log_finding() {  # $1=check-id  $2=detail
-  local f
-  if f=$(audit_path "$(audit_root)"); then
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) evidence-gate $1: $2 ($PLAN)"
-    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
-  fi
-  echo "canonical-sdlc [$1]: $2" >&2
-  return 0
-}
+BIONIC_FINDING_CHANNEL="evidence-gate"
+BIONIC_FINDING_SUBJECT="$PLAN"
+bionic_finding_root() { audit_root; }
 
 # Normalize a task row's rigor cell to its effective rigor lane. Whole-value
 # `case` equality against the rigor enum (bash-3.2 safe — no associative arrays,

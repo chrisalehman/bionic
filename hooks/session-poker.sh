@@ -856,12 +856,12 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
 # live wave, which nothing recovers. The asymmetry is the whole design.
 
 # CRLF and CR-only line endings TRANSLATED, never deleted: a deleted CR would join two
-# lines into one and hand `current:` a value that was never written. This is a TEXT utility,
-# not a plan reader — the plan reader is the library's — and it survives the POKER/2
-# unification because the section read below still has to see real newlines.
-normalize_newlines() {
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
-}
+# lines into one and hand `current:` a value that was never written. That text utility is
+# `normalize_newlines`, and it is payload/scripts/lib/run.sh's now (epic-23
+# wave-12-fixit-171, REQ-8, spec D6) — sourced at :255, above every reader below. It had
+# three definitions, two of them taking a file argument like this one and one reading stdin;
+# `"$@"` is what made them one body rather than one of them winning. run.sh was already in
+# this hook's `BIONIC_LIB_WANT`, so nothing widened to reach it.
 
 # THE TWO FIELDS, AND NOTHING ELSE. `current:` and the `Step 9:` line are read out of the
 # fence-aware `## SDLC State` section exactly as the evidence gate reads them, so a plan
