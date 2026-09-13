@@ -154,41 +154,21 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
-# library cannot load itself, so the duplication is the design and
-# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
-# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
-#
-# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
-# on a line above this block. Afterwards exactly one of these is non-empty:
-#   BIONIC_LIB          a readable directory holding every wanted basename
-#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
-# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
-#
-# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
-# healthy hook pays nothing for the healing path — not a jq, not a registry read.
-#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
-#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
-#      siblings, and the repo, where payload/hooks is a symlink to the top-level
-#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
-#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
-#      would find nothing in a directory-source session.
-#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
-#      plugin was installed from; that marketplace's source.path in
-#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
-#      a fork installs under its own name.
-#  (3) the newest version directory in that marketplace's plugin cache, by
-#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
-# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
-# upstream-broken publish breaks every location equally and is not covered.
-#
-# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
-# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
+# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
+# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
+# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
+# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
+# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
+# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
+# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
+# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
+# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
+# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
 BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"
-_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
 _bl_try() {
   [ -n "${1:-}" ] || return 1
   if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
@@ -197,13 +177,8 @@ _bl_try() {
   BIONIC_LIB="$1"
 }
 if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
-  _bl_mk=""
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
   if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    # First key only, and the prefix stripped by parameter expansion rather than
-    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
-    # `jq` runs with its stderr closed, so a machine missing jq degrades to
-    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
     _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
     _bl_mk="${_bl_keys%%
 *}"
@@ -233,25 +208,13 @@ BIONIC_LOADER_VER
   fi
 fi
 if [ -z "$BIONIC_LIB" ]; then
-  # The name in the message is the first library this hook asked for. A candidate
-  # directory qualifies only when it holds ALL of them, so with none qualifying the
-  # first wanted name is the honest thing to hand the reader.
   BIONIC_LIB_MISSING="${_bl_want%% *}"
   [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
 fi
-# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
-# stand aside. Blocking reversible work because a file is missing buys no safety and
-# costs the session.
 loader_fail_open() {
   echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
   exit 0
 }
-# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
-# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
-# here, before the hook sources anything. Whole-string and not prefix, so
-# `claude plugin update bionic@bionic; git push origin main` is refused like any
-# other push. There is no env-var override: a variable an agent turn can set on
-# itself is not a wall.
 loader_fail_closed() {
   _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
   [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
@@ -261,25 +224,9 @@ loader_fail_closed() {
     "bash $_bl_root/scripts/doctor.sh"|\
     "bash $_bl_root/scripts/setup.sh") exit 0 ;;
   esac
-  # THE ONE LINE, AND THE ONE PLACE IN THE TREE THAT SPELLS IT WITHOUT
-  # scripts/lib/refuse.sh. Every other wall calls `refuse`; this one cannot, because
-  # refuse.sh is IN the library this function exists to report missing. So the row-1
-  # wording (record/wave-01-plugin-only/s12-refusal-wording-draft.md §1) is written
-  # out here by hand, in the renderer's exact format, and tests/loader.test.sh §F
-  # drives it against AC-E1.3's own regex so the two spellings cannot drift.
-  #
-  # THE NAME IS BOUNDED IN PURE BASH for the same reason: `bionic_trunc` is in the
-  # missing library. 23 columns of prefix, 31 of fact after the name, 3 of brackets
-  # and 18 of fix leaves 25 for the hook's name, and the longest caller
-  # (`canonical-sdlc-evidence-gate`, 28) is over it — F-8's runtime-width hazard,
-  # arriving at the one site that cannot ask the truncator. The ellipsis is spent
-  # from inside the budget, exactly as bionic_trunc spends it.
   _bl_who="${1:-a bionic hook}"
   if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
   printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  # THE DETAIL, on the knob only. Ruling D-1: the reader who is interrupted gets one
-  # sentence; the rest is for whoever asks. There is no hook log to write here — the
-  # library that owns logging is the one that did not load.
   if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
     cat >&2 <<BIONIC_LOADER_REFUSE
 A wall that cannot read a command refuses it rather than waving it through.
@@ -314,6 +261,10 @@ BIONIC_LOADER_REFUSE
 # `adopt` writes a `roster-state/v1` row, and `roster_row` is the one writer of that
 # shape — the same function hooks/dispatch-preflight.sh calls (spec AC-25, ledger D3).
 . "$BIONIC_LIB/roster.sh"
+# THE ONE READER OF `## Tasks` (REQ-1e, spec §2 D3). The FILL arm takes its ready set
+# from here; this hook parses no plan table of its own.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/units.sh"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
@@ -860,24 +811,11 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
   ' "$1" 2>/dev/null
 }
 
-# One row per dispatch, and only the row the WALL itself writes: `status=intended` is
-# hooks/dispatch-preflight.sh's own append (its ROW, one per Agent PreToolUse). The later
-# `status=confirmed` / `status=identified` copies hooks/execution-recorder.sh appends are
-# the SAME dispatch re-stated on an append-only file, so counting them would inflate the
-# rostered side threefold and hide every real gap. Schema-prefix filtered first, the same
-# discipline every other roster reader in the fleet follows.
-count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
-  [ -f "$1" ] || { printf '0'; return 0; }
-  grep -F "roster-state/v1|" "$1" 2>/dev/null \
-    | grep -F "|session=$2|" \
-    | grep -c -F "|status=intended|"
-}
-
 # ---------------------------------------------------------------- the run's own state
 #
 # WHAT THE TICK COULD NOT SEE UNTIL NOW. `open == 0` is not "this run is finished" — it is
 # "nothing is dispatched at this instant", which is equally the gap between two batches of a
-# live wave: every writer of one slice landed, the next slice not yet briefed. DISARM is
+# live wave: every writer of one task landed, the next task not yet briefed. DISARM is
 # terminal by doctrine (skills/canonical-sdlc/SKILL.md §Dispatch: "DISARM also ends the
 # Patrol"), so taking it in that gap ended the supervision of a run with days of work left,
 # silently, and the next stretch of the wave ran unwatched. That is measured on this repo's
@@ -896,7 +834,7 @@ count_rostered_dispatches() {  # <roster file> <session-id> -> count on stdout
 # `has_sdlc_state()`, `resolve_docs_root()`, `normalize_newlines()`'s selection loop inside
 # `newest_sdlc_plan()` — bounded at depth 2 and fence-aware, while the library walked 3.
 # tests/cross-gate-agreement.test.sh §S.3d pinned that disagreement rather than papering over
-# it, and slice SCHED closed it by moving the library to depth 2 and deleting the copy. Two
+# it, and task SCHED closed it by moving the library to depth 2 and deleting the copy. Two
 # plan readers with different bounds is the exact drift this wave exists to end.
 #
 # WHAT THE COPY WAS PROTECTING IS UNCHANGED, because the library carries it: the candidate
@@ -935,7 +873,7 @@ normalize_newlines() {
 # ---------------------------------------------------------------- whose run is this?
 #
 # THE TICK HAS TWO PLAN READERS — the run-state read below and the FILL scheduler's budget
-# and slice table — and before wave-session-bound-run both asked the ROOT: `active_plan`, the
+# and task table — and before wave-session-bound-run both asked the ROOT: `active_plan`, the
 # newest plan carrying an unfenced `## SDLC State`. A root with two runs in it has one newest
 # plan and two sessions, so one of them was always reading the other's run: the session whose
 # run was mid-flight DISARMed off the neighbour's close-out, and the session whose run had
@@ -1115,7 +1053,7 @@ run_state() {  # <project root> <arming-record path, may be empty> <session id> 
 #   HOLD       free memory or load past the warning line -> no fills this tick, with the
 #              measurement printed beside the verdict (a HOLD with no number is
 #              indistinguishable from a bug).
-#   FILL       otherwise -> the ready slices, up to the gap between the RUNG and the rows
+#   FILL       otherwise -> the ready tasks, up to the gap between the RUNG and the rows
 #              already open on this session's roster.
 #
 # AND ONE REPORT, ON EVERY TICK: `rung=<n>/<ceiling> writers=<w> test_jobs=<j>`. The rung is
@@ -1149,7 +1087,7 @@ space_field() {  # <record> <key> -> value on stdout, empty if absent
 #
 # THE LEADING FRONTMATTER BLOCK ONLY, byte-for-byte the read hooks/dispatch-preflight.sh's
 # budget arm takes: a `parallel-budget:` inside the plan BODY is prose — this wave's own
-# plan quotes the header in a slice description — and a reader that took a quotation for
+# plan quotes the header in a task description — and a reader that took a quotation for
 # configuration would fill against a number nobody set.
 plan_budget_line() {  # <plan> -> the value after `parallel-budget:`, or empty
   awk '
@@ -1168,84 +1106,15 @@ budget_int() {  # <budget line> <key> -> a non-negative integer, or empty
   case "${v:-}" in ''|*[!0-9]*) printf '' ;; *) printf '%s' "$v" ;; esac
 }
 
-# THE SLICE TABLE, read out of the active plan.
-#
-# WHAT IT LOOKS FOR is a table HEADER row naming `id`, `deps` and `status`, not a heading
-# and not a column count. The plan's `## Slices (machine-readable …)` section is where it
-# lives today and its shipped shape is four columns — `| id | deps | complexity | status |`
-# — but a reader keyed on position breaks the first time a column is inserted, and a reader
-# keyed on the heading breaks on a plan that words it differently. Column INDICES are taken
-# from the header row by name, so both stay ordinary edits.
-#
-# FENCE-AWARE, for the reason every other plan read in this file is: a table inside a ```
-# example is documentation about the schema, and filling a wave off a documented example is
-# the newest-race incident in a new costume.
-#
-# Emits one `id<TAB>deps<TAB>status` record per row, in TABLE ORDER, which is the order the
-# FILL line prints in — the plan's own dependency ordering, maintained by the orchestrator,
-# rather than an ordering this hook invents.
-slice_table() {  # <plan> -> id<TAB>deps<TAB>status, one per row
-  normalize_newlines "$1" 2>/dev/null | awk '
-    function trim(v) { sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); return v }
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    !intable {
-      if ($0 !~ /^[[:space:]]*\|/) next
-      n = split($0, c, "|")
-      idc = 0; depc = 0; stc = 0
-      for (i = 1; i <= n; i++) {
-        t = trim(c[i])
-        if (t == "id") idc = i
-        else if (t == "deps") depc = i
-        else if (t == "status") stc = i
-      }
-      if (idc && depc && stc) intable = 1
-      next
-    }
-    {
-      if ($0 !~ /^[[:space:]]*\|/) exit
-      n = split($0, c, "|")
-      id = trim(c[idc])
-      # The |---|---| separator row, and any row whose id cell is empty or punctuation.
-      if (id == "" || id ~ /^[-: ]+$/) next
-      printf "%s\t%s\t%s\n", id, trim(c[depc]), trim(c[stc])
-    }'
-}
-
-# READY = a `pending` row whose EVERY dependency is `landed`.
-#
-# A dependency cell is a comma-separated list of ids, or an em dash / hyphen / empty cell
-# for "none". An id this table does not carry is NOT ready: an unresolvable dependency is a
-# dependency this reader cannot confirm landed, and the fill direction here is the cautious
-# one — a slice held back costs a batch, a slice dispatched onto an unlanded dependency
-# costs the writer's whole run.
-slice_ready() {  # <table> -> the ready ids, one per line, in table order
-  # ONE PASS TO REMEMBER, one to decide, over the same stream: a dependency may be named
-  # before or after the row that depends on it, so nothing can be answered until the whole
-  # table has been read. Table order is preserved by indexing on NR.
-  printf '%s\n' "$1" | awk -F'\t' '
-    $1 == "" { next }
-    { n = n + 1; id[n] = $1; dep[n] = $2; st[$1] = $3 }
-    END {
-      for (i = 1; i <= n; i++) {
-        if (st[id[i]] != "pending") continue
-        deps = dep[i]
-        gsub(/[[:space:]]/, "", deps)
-        # A cell with no alphanumeric character names no dependency: the empty cell, the
-        # hyphen and the em dash the plan actually uses are all spelled this one way, and
-        # matching the dash byte-for-byte would put a Unicode literal in a bash 3.2 awk
-        # program for no gain.
-        if (deps !~ /[A-Za-z0-9]/) { print id[i]; continue }
-        m = split(deps, d, ",")
-        ready = 1
-        for (j = 1; j <= m; j++) {
-          if (d[j] == "" || d[j] !~ /[A-Za-z0-9]/) continue
-          if (st[d[j]] != "landed") { ready = 0; break }
-        }
-        if (ready) print id[i]
-      }
-    }'
-}
+# THE TASK TABLE IS NOT READ HERE ANY MORE (REQ-1e, spec §2 D3). `slice_table` and
+# `slice_ready` — a header-keyed `id`/`deps`/`status` parse and the readiness pass over it
+# — lived at this point in the file and are now `units_rows` and `units_ready` in
+# payload/scripts/lib/units.sh, sourced above. The idiom is theirs, unchanged: column
+# indices from the header row by NAME, fence-aware, table order preserved, and the cautious
+# fill direction (an id the table does not carry is NOT ready, because a task held back
+# costs a batch and a task dispatched onto an unlanded dependency costs the writer's whole
+# run). What the move buys is the STEP: the widened table carries one, so a tick at
+# `current: 5` fills Step-5 rows and not the Step-6 rows sitting ready behind them.
 
 # ---------------------------------------------------------------- the rung report
 #
@@ -1268,9 +1137,9 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 }
 
 # ── THE APPROVAL GATE (epic-21 T4, AC-5). A printed FILL is a dispatch instruction — the
-# duties gate (hooks/patrol-duties-gate.sh) refuses the turn until every named slice is
+# duties gate (hooks/patrol-duties-gate.sh) refuses the turn until every named task is
 # either dispatched or explicitly declined — and dispatching into a plan that has not
-# reached Step 4 sends a writer against a slice table nobody has ratified: Steps 0-3 are
+# reached Step 4 sends a writer against a task table nobody has ratified: Steps 0-3 are
 # research/spec/plan/REVIEW, and `current:` only reaches 4 once Step 3's approval is given
 # (SKILL.md §Steps). Observed 2026-09-05T17:54Z: the tick printed `FILL S1 S2 S3 S4 S12 S14
 # S15 S16` against the wave-01 plan sitting at `current: 3`.
@@ -1745,7 +1614,7 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   fi
   # EVERY FIELD THROUGH `clean()`, `session=` INCLUDED (Step-6 security review S-4). It was
   # the one interpolation of the thirteen that took its value raw, which is character for
-  # character the defect this wave fixed on the other row writer one slice earlier
+  # character the defect this wave fixed on the other row writer one task earlier
   # (hooks/dispatch-preflight.sh: "a value carrying a `|` or a newline forges a segment …
   # the asymmetry between the two writers was itself the defect"). Every by-key reader in
   # the fleet takes the FIRST match, so a forged `name=` ahead of the real one wins outright.
@@ -3097,7 +2966,7 @@ EOF
     # this Patrol's arming (R-13: an older one is the previous run's close-out, still newest
     # while the new run's plan does not exist yet). "No open row" alone was the whole
     # predicate until 1.3.2, and it is also exactly what a live wave looks like between two
-    # batches: every writer of a slice landed, the next not yet briefed. The tick ended the
+    # batches: every writer of a task landed, the next not yet briefed. The tick ended the
     # Patrol there, terminally, and the rest of the wave ran unsupervised (epic-20 W1
     # dogfood, idea §B-4; R-4, AC-13/AC-14). The first conjunct still generalizes the spec's
     # literal "disarmed on empty roster" to a roster whose every row is MET/WAIVED/acked (S2
@@ -3202,9 +3071,9 @@ EOF
     # the same missing line. A budget is a ceiling a run opts into.
     #
     # THE SAME RUN THE DECISION ABOVE WAS TAKEN ON. `resolve_run` answers once per tick, so
-    # a session bound to its own plan fills from its own slice table and quotes its own
+    # a session bound to its own plan fills from its own task table and quotes its own
     # ceiling — a tick that stood its ground correctly and then filled the neighbour's
-    # slices would be worse than either failure alone (AC-1).
+    # tasks would be worse than either failure alone (AC-1).
     sched_budget_read "$REPO_REAL" "$SESSION_ID"
 
     if [ "$SCHED_STATE" = emergency ]; then
@@ -3235,7 +3104,7 @@ EOF
       [ "$SCHED_STATE" = hold ] && \
         say "HOLD free_mb=${SCHED_FREE} load_1m=${SCHED_LOAD} — no fills"
     else
-      # ── FILL. gap = the RUNG − RUNNING, ready = pending slices whose deps all landed.
+      # ── FILL. gap = the RUNG − RUNNING, ready = pending tasks whose deps all landed.
       #
       # RUNNING IS `open` (WALLS/2): the rows already counted above, on THIS session's
       # roster — a `status=intended` row with no `landing-swept/v1` marker and no ack. It is
@@ -3244,7 +3113,7 @@ EOF
       #
       # THE APPROVAL GATE COMES FIRST, ahead of the budget/readiness checks below (AC-5). A
       # plan below `current: 4` has not passed Step 3, and no reading of the budget or the
-      # slice table changes that — so this is a wall in front of the rest of the arm, not one
+      # task table changes that — so this is a wall in front of the rest of the arm, not one
       # more branch beside them.
       #
       # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
@@ -3265,7 +3134,7 @@ EOF
         say "no FILL — plan at current: ${SCHED_CURRENT}, Step-3 approval pending"
       elif [ -z "$SCHED_WRITERS" ]; then
         if [ -z "$SCHED_PLAN" ]; then
-          say "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a slice table from."
+          say "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
         else
           say "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
         fi
@@ -3283,12 +3152,21 @@ EOF
         if [ "$SCHED_GAP" -eq 0 ]; then
           say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} and ${OPEN} open row(s): the budget is full."
         else
-          SCHED_READY="$(slice_ready "$(slice_table "$SCHED_PLAN")")"
+          # READY IS ASKED AT THE STEP THE PLAN IS ON (REQ-1e, AC-1e.4). The widened
+          # `## Tasks` table covers Steps 3-9 in one schedule, so "pending with every
+          # dependency landed" is no longer the whole question: a Step-6 review row
+          # whose deps happen to be landed is ready in the dependency sense and is
+          # still not this step's work. `units_ready` takes the step as its second
+          # argument and `SCHED_CURRENT` is the step this run is on — already read
+          # and already proven numeric by the approval gate above, which is why this
+          # needs no second parse and no fallback: a `current:` that would not parse
+          # took the withhold arm and never reached here.
+          SCHED_READY="$(units_ready "$SCHED_PLAN" "$SCHED_CURRENT")"
           SCHED_IDS=""; SCHED_N=0
-          while IFS= read -r SLICE_ID; do
-            [ -n "$SLICE_ID" ] || continue
+          while IFS= read -r TASK_ID; do
+            [ -n "$TASK_ID" ] || continue
             [ "$SCHED_N" -lt "$SCHED_GAP" ] || break
-            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(clean "$SLICE_ID")"
+            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(clean "$TASK_ID")"
             SCHED_N=$((SCHED_N + 1))
           done <<EOF
 $SCHED_READY
@@ -3296,7 +3174,7 @@ EOF
           if [ "$SCHED_N" -gt 0 ]; then
             say "FILL ${SCHED_IDS}"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending slice has all its dependencies landed."
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending step-${SCHED_CURRENT} task has all its dependencies landed."
           fi
         fi
       fi

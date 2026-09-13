@@ -1,5 +1,5 @@
 #!/bin/bash
-# THE RC ITEM — epic-18 wave-03 slice 4/7 (spec §R6, AC-5, AC-6, AC-7).
+# THE RC ITEM — epic-18 wave-03 task 4/7 (spec §R6, AC-5, AC-6, AC-7).
 #
 # WHAT THIS SUITE OWNS. The `claude()` shell proxy as a SETUP-MANAGED ITEM: the
 # marker-delimited block bionic owns in the user's shell rc, the roster and the
@@ -406,7 +406,7 @@ section "the two doors answer the same question the same way"
 #
 # THE THIRD FIXTURE IS THE ONLY ONE THAT SEPARATES THEM: bionic's markers around
 # an OLDER payload's proxy text, which is the state every install already on disk
-# entered the day `rc_default`'s line changed (epic-19 W1 slice 4/1 changed it).
+# entered the day `rc_default`'s line changed (epic-19 W1 task 4/1 changed it).
 # A marker-only predicate calls that machine done; a line-comparing predicate
 # calls it pending. Whoever is wrong, they must not be wrong differently — this
 # is the agreement pin the Step-6 DUPLICATION review found missing.

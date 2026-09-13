@@ -137,12 +137,6 @@ _dep_ccstatusline_config_dir() {
   echo "${t%/*}"
 }
 
-# Byte-identical, the same word AC-1 uses and the same tool
-# claude-bootstrap.sh's ccstatusline-config step used (`diff -q`) — not `cmp`,
-# so a hermetic suite need not add a second comparison binary to its curated
-# PATH beside the one every writer path already needs.
-_dep_files_match() { [ -f "${1:-}" ] && [ -f "${2:-}" ] && diff -q "$1" "$2" >/dev/null 2>&1; }
-
 # THE LAYOUT MATCH IGNORES THE SCHEMA VERSION (Chris 2026-09-03: "Why the hell
 # is ccstatusline not installing?? I just installed it!"). ccstatusline
 # migrates its own settings file in place the first time it renders — 2.2.29
@@ -191,7 +185,7 @@ _dep_excalidraw_refs() {
   echo "${root}/skills/excalidraw-diagram/references"
 }
 
-# THE VENV'S OWN STABLE PATH (VENV slice, spec AC-17). `_dep_excalidraw_refs`
+# THE VENV'S OWN STABLE PATH (VENV task, spec AC-17). `_dep_excalidraw_refs`
 # above names the SOURCE tree `uv sync --project` reads `pyproject.toml` and
 # `uv.lock` from, and that tree is plugin-root-relative — it moves to a new,
 # version-numbered directory every time bionic updates. Before AC-17 the venv
@@ -493,19 +487,6 @@ dep_marketplace_source() {  # <name>
   esac
 }
 
-# The rows a given catalog serves. bionic's own answer is what marketplace.json
-# is rendered from and what tests/plugin-lib.test.sh Group 18 used to pin in
-# both directions; that suite was deleted at 8582861 (epic-18 wave-03) and
-# nothing replaced the pin.
-dep_names_marketplace() {  # <catalog>
-  local want="${1:-}" n
-  while IFS= read -r n; do
-    [ -n "$n" ] || continue
-    [ "$(dep_marketplace "$n" 2>/dev/null)" = "$want" ] && echo "$n"
-  done <<< "$(dep_names_kind native)"
-  return 0
-}
-
 # THE ID THE CLI KNOWS BIONIC BY, and the one place it is composed (bionic
 # 1.4.4 fixit phase 4, review-b B-7). `<name>@<catalog>` is the key `claude
 # plugin list` prints and the argument an install command takes. Three files
@@ -558,18 +539,6 @@ dep_plugin_id() {  # -> the <name>@<catalog> id this machine knows bionic by
 # nothing left to compare.
 dep_core_repair_route() {  # -> the command that re-resolves bionic's declared dependencies
   echo "claude plugin install $(dep_plugin_id)"
-}
-
-# Reports any row whose field count is not exactly 7. Silence means the table
-# is well-formed; the suite asserts on the silence.
-dep_table_field_count_report() {
-  local line n
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    n="$(printf '%s' "$line" | tr -cd '|' | wc -c | tr -d ' ')"
-    [ "$n" = "6" ] || echo "${line} (has $((n + 1)) fields, want 7)"
-  done <<< "$BIONIC_DEP_TABLE"
-  return 0
 }
 
 # ─── Version comparison ──────────────────────────────────────────────────────
@@ -900,7 +869,7 @@ _dep_check_playwright_browser() {
 # whether `uv` is on PATH — that is the `uv` row's question, and answering this row with it
 # would report a renderer as ready on a machine that has never synced the project.
 #
-# THE VENV LIVES AT THE STABLE PATH NOW, NOT `<refs>/.venv` (VENV slice, AC-17). `refs` still
+# THE VENV LIVES AT THE STABLE PATH NOW, NOT `<refs>/.venv` (VENV task, AC-17). `refs` still
 # names the SOURCE tree — where `pyproject.toml` and `uv.lock` are read from — but the venv
 # itself is checked at `_dep_excalidraw_venv_dir`, which does not move when the plugin
 # updates. `refs` is still needed here for exactly one thing: reading the SHIPPED `uv.lock`
@@ -919,7 +888,7 @@ _dep_check_playwright_browser() {
 # now shipped is not the same fact as a venv that was never built — collapsing the two into
 # one `no` would tell setup to ask the "not installed, install now?" question over a machine
 # that plainly has a working renderer sitting on it, one lockfile update behind. The
-# comparison is skippable-safe: no hash file (an upgrade from before this slice, or a tool
+# comparison is skippable-safe: no hash file (an upgrade from before this task, or a tool
 # lookup failure) or no shipped lock to compare against both fall through to `yes` rather than
 # manufacturing a mismatch neither side can actually support.
 _dep_check_uv_project() {
@@ -1477,7 +1446,7 @@ install_dep() {  # <name>
   # file; the user sees one line per item. stderr stays, so a failure still
   # shows its reason.
   local quiet_log="${BIONIC_INSTALL_LOG:-${TMPDIR:-/tmp}/bionic-install.log}"
-  # VENV slice, AC-17: `uv sync` is told where to put the venv by an
+  # VENV task, AC-17: `uv sync` is told where to put the venv by an
   # environment variable, not by the directory it is pointed `--project` at —
   # so it has to be EXPORTED here, into this shell, before the argv runs
   # (a `_dep_install_argv` line cannot export into its caller; it runs in a
@@ -1571,7 +1540,7 @@ _dep_marketplace_known() {  # <catalog>
 
 # ─── The row the registry lost, and the cache that outlived it ───────────────
 #
-# WHY THIS IS NOT A SECOND INSTALLER (plan A-15; slice-0 ruling §8, the open
+# WHY THIS IS NOT A SECOND INSTALLER (plan A-15; task-0 ruling §8, the open
 # question it left the orchestrator). D1 rules that a natively-installed plugin
 # has exactly one installer — the CLI — and `install_dep` refuses every native
 # row on that ground. Nothing below installs anything. No network is touched, no
@@ -1606,7 +1575,7 @@ _dep_plugin_cache_dir() {  # <name> -> the cache directory for this row
 # materialises a bare-sha directory for every sha-pinned plugin in the catalog
 # without registering any of them (measured directly — the sha directory appears
 # on a machine whose row stays absent across that command; see the probe in this
-# slice's report). Newest-first alone therefore picks the CLI's leftover over the
+# task's report). Newest-first alone therefore picks the CLI's leftover over the
 # build the machine was actually running, which is how the first cut of this
 # function restored a row naming a directory that had not existed ten seconds
 # earlier.
@@ -2049,7 +2018,7 @@ remove_dep() {  # <name>
       ;;
     # THE VENV AND ITS HASH FILE, AND NOTHING ELSE. The skill's own files ship inside
     # the plugin, so they leave when the plugin does; what a teardown has to account
-    # for here is the stable-path venv `uv sync` built (VENV slice, AC-17 — it is no
+    # for here is the stable-path venv `uv sync` built (VENV task, AC-17 — it is no
     # longer inside the plugin's own tree, so no plugin uninstall knows about it
     # either) and the lock-hash file written beside it.
     uv-project)

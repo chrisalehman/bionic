@@ -304,7 +304,7 @@ active_run() {
 # THE WALK IS SHARED NOW (wave-roster-lifecycle S1, spec AC-22). It was restated here for one
 # wave, because tests/cross-gate-agreement.test.sh §S.2 pinned `active_plan`'s body by
 # substring and the extraction would have emptied those pins rather than failed them. §S.2 is
-# behavioural as of this slice, so `_run_candidates` above is the only walk in this file and
+# behavioural as of this task, so `_run_candidates` above is the only walk in this file and
 # this function is a filter over its output. run-predicate R6e still drives the three
 # properties — two trees, depth 2, fence-aware — through `open_runs` and checks the answer
 # against `active_plan`'s, which is now an agreement between two callers of one walk rather
@@ -317,7 +317,7 @@ active_run() {
 # 104 candidates from 1.33s to 1.45s, because bash copies a 46 KB plan through the capture,
 # the argument and the callee's local where the streamed pipe copies it none. The read that
 # is actually worth removing is the one inside `run_open`, which reads its own text four
-# more times through here-strings; that is the awk-rewrite promoted out of this slice.
+# more times through here-strings; that is the awk-rewrite promoted out of this task.
 open_runs() {
   local root="$1"
   local droot

@@ -1,0 +1,18 @@
+<!-- GENERATED-HEADER -->
+
+### Step 6 — Review
+
+**Stance 1 — 6-axis self-review, always.** Correctness, readability, architecture, security, performance, duplication; every axis gets an explicit PASS / FLAG / FAIL. Run the axes in parallel. All review agents dispatch at exec-complex regardless of who wrote the code — verification is never cheaper than authorship. Security flags escalate to `agent-skills:security-and-hardening`; performance flags to `agent-skills:performance-optimization`.
+
+**Architecture-axis closure check:** for each new primitive added this wave, trace user input → new code, and confirm the Step-5 T3 readback reached the same code. No callsite reaching it means the substrate is dead and the axis is FAIL.
+
+<!-- INJECT: duplication-axis -->
+
+Neither of these is a wall. **No hook sees the duplication axis or the agreement-test obligation** — they are carried by the reviewer and critic mandates and enforced by judgment, which is the whole reason the ownership table is authored at Step 2 where a human ratifies it.
+
+**Stance 2 — adversarial critic.** Mandatory at `audited`. Must be an **independent** agent (`subagent_type: bionic:critic`) — never the author, never self-graded. Distinct from the Step-5 auditor: the critic falsifies the *code*, the auditor falsifies the *evidence*. Prompt template:
+
+<!-- INJECT: critic-template -->
+
+Incident framing: does the fix mask a deeper issue, and is the monitoring-gap analysis honest. Sycophantic output is not evidence.
+

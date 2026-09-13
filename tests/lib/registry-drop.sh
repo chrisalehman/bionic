@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/lib/registry-drop.sh — the registry-drop protocol (epic-22 wave-01 slice 0; REQ-S0/AC-S0.1).
+# tests/lib/registry-drop.sh — the registry-drop protocol (epic-22 wave-01 task 0; REQ-S0/AC-S0.1).
 #
 # THE QUESTION. `.bionic/docs/ideas/dependent-plugin-registry-drop.md` records an
 # observation on Chris's machine: `impeccable@bionic` was installed, its plugin
@@ -306,7 +306,7 @@ arm_setup_restores() {
   # question. `setup --all` opens by asking the CLI to install bionic, and that
   # command MATERIALISES a bare-sha directory for every sha-pinned plugin in the
   # catalog while registering none of them — measured on its own, with impeccable's
-  # row absent before and still absent after (slice 9's report, the sha-directory
+  # row absent before and still absent after (task 9's report, the sha-directory
   # probe). A new directory therefore appears on every run of this arm no matter
   # what bionic does about the row, and a whole-listing comparison reported that as
   # "re-downloaded" and could never have flipped.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# THE EXECUTION-CONFIRMATION RECORDER — epic-15 wave-03, slice 4/4.
+# THE EXECUTION-CONFIRMATION RECORDER — epic-15 wave-03, task 4/4.
 #
 # ONE script, THREE registrations, one job: write down what ACTUALLY RAN.
 #
@@ -29,7 +29,7 @@
 # did. Here there is no second reader. The observation prints one machine line on
 # its success path and this script copies it; a command that was refused, that
 # exited non-zero, or that merely MENTIONS stop-check.sh prints no such line and
-# leaves nothing behind. Slice 4/1's probe confirmed the harness never fires this
+# leaves nothing behind. Task 4/1's probe confirmed the harness never fires this
 # event for a call it blocked pre-dispatch, so the gating is the platform's, not
 # ours (record/w3-slice1-posttooluse-probe.md §5).
 #
@@ -62,8 +62,8 @@ MAX_RECORDS=200
 MACHINE_SCHEMA="stop-check-observation/v1"
 ROSTER_VERSION="v1"
 
-INPUT=$(cat)
-_jq() { printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null; }
+BIONIC_INPUT=$(cat)
+_jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 
 TOOL_NAME=$(_jq '.tool_name')
 # THE THIRD ARM'S EVENT CARRIES NO TOOL NAME AT ALL (capture probe §3-C): a
@@ -157,12 +157,12 @@ if [ -n "$IS_START" ]; then
   START_ID=$(_jq '.agent_id')
   [ -n "$START_ID" ] || exit 0
 elif [ "$TOOL_NAME" = "Bash" ]; then
-  # A Bash tool_response is an object carrying stdout/stderr (slice 4/1 capture
+  # A Bash tool_response is an object carrying stdout/stderr (task 4/1 capture
   # A); a failed call can hand back a bare string instead, and `tostring` keeps
   # that case parseable rather than crashing jq. Only STDOUT is searched — the
   # machine line is printed there, and searching stderr would let a quoted error
   # message masquerade as evidence.
-  STDOUT=$(printf '%s' "$INPUT" \
+  STDOUT=$(printf '%s' "$BIONIC_INPUT" \
     | jq -r 'if (.tool_response | type) == "object" then (.tool_response.stdout // "")
              else (.tool_response // "" | tostring) end' 2>/dev/null)
   MLINES=$(printf '%s\n' "$STDOUT" | grep "^${MACHINE_SCHEMA}|")
@@ -213,49 +213,27 @@ else
   [ -n "$AGENT_ID" ] && [ -n "$TOOL_USE_ID" ] || exit 0
 fi
 
-CWD=$(_jq '.cwd')
-[ -n "$CWD" ] || exit 0
 # ---------- the library ----------
 #
 # One loader idiom, byte-identical in every hook (spec AC-16); its source of truth is
 # payload/scripts/lib/loader.sh. FAIL OPEN: the roster row is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="root.sh run.sh session.sh resources.sh"
+BIONIC_LIB_WANT="context.sh root.sh run.sh session.sh resources.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
-# library cannot load itself, so the duplication is the design and
-# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
-# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
-#
-# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
-# on a line above this block. Afterwards exactly one of these is non-empty:
-#   BIONIC_LIB          a readable directory holding every wanted basename
-#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
-# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
-#
-# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
-# healthy hook pays nothing for the healing path — not a jq, not a registry read.
-#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
-#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
-#      siblings, and the repo, where payload/hooks is a symlink to the top-level
-#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
-#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
-#      would find nothing in a directory-source session.
-#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
-#      plugin was installed from; that marketplace's source.path in
-#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
-#      a fork installs under its own name.
-#  (3) the newest version directory in that marketplace's plugin cache, by
-#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
-# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
-# upstream-broken publish breaks every location equally and is not covered.
-#
-# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
-# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
+# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
+# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
+# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
+# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
+# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
+# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
+# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
+# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
+# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
+# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
 BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"
-_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
 _bl_try() {
   [ -n "${1:-}" ] || return 1
   if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
@@ -264,13 +242,8 @@ _bl_try() {
   BIONIC_LIB="$1"
 }
 if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
-  _bl_mk=""
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
   if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    # First key only, and the prefix stripped by parameter expansion rather than
-    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
-    # `jq` runs with its stderr closed, so a machine missing jq degrades to
-    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
     _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
     _bl_mk="${_bl_keys%%
 *}"
@@ -300,25 +273,13 @@ BIONIC_LOADER_VER
   fi
 fi
 if [ -z "$BIONIC_LIB" ]; then
-  # The name in the message is the first library this hook asked for. A candidate
-  # directory qualifies only when it holds ALL of them, so with none qualifying the
-  # first wanted name is the honest thing to hand the reader.
   BIONIC_LIB_MISSING="${_bl_want%% *}"
   [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
 fi
-# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
-# stand aside. Blocking reversible work because a file is missing buys no safety and
-# costs the session.
 loader_fail_open() {
   echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
   exit 0
 }
-# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
-# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
-# here, before the hook sources anything. Whole-string and not prefix, so
-# `claude plugin update bionic@bionic; git push origin main` is refused like any
-# other push. There is no env-var override: a variable an agent turn can set on
-# itself is not a wall.
 loader_fail_closed() {
   _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
   [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
@@ -328,25 +289,9 @@ loader_fail_closed() {
     "bash $_bl_root/scripts/doctor.sh"|\
     "bash $_bl_root/scripts/setup.sh") exit 0 ;;
   esac
-  # THE ONE LINE, AND THE ONE PLACE IN THE TREE THAT SPELLS IT WITHOUT
-  # scripts/lib/refuse.sh. Every other wall calls `refuse`; this one cannot, because
-  # refuse.sh is IN the library this function exists to report missing. So the row-1
-  # wording (record/wave-01-plugin-only/s12-refusal-wording-draft.md §1) is written
-  # out here by hand, in the renderer's exact format, and tests/loader.test.sh §F
-  # drives it against AC-E1.3's own regex so the two spellings cannot drift.
-  #
-  # THE NAME IS BOUNDED IN PURE BASH for the same reason: `bionic_trunc` is in the
-  # missing library. 23 columns of prefix, 31 of fact after the name, 3 of brackets
-  # and 18 of fix leaves 25 for the hook's name, and the longest caller
-  # (`canonical-sdlc-evidence-gate`, 28) is over it — F-8's runtime-width hazard,
-  # arriving at the one site that cannot ask the truncator. The ellipsis is spent
-  # from inside the budget, exactly as bionic_trunc spends it.
   _bl_who="${1:-a bionic hook}"
   if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
   printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  # THE DETAIL, on the knob only. Ruling D-1: the reader who is interrupted gets one
-  # sentence; the rest is for whoever asks. There is no hook log to write here — the
-  # library that owns logging is the one that did not load.
   if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
     cat >&2 <<BIONIC_LOADER_REFUSE
 A wall that cannot read a command refuses it rather than waving it through.
@@ -371,6 +316,8 @@ BIONIC_LOADER_REFUSE
 # --- bionic-loader/v2 END
 if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 # shellcheck source=/dev/null
+. "$BIONIC_LIB/context.sh"
+# shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
@@ -385,21 +332,15 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "execution-recorder"; fi
 # every row in silence, exactly where a wave most needs it. `project_root` maps a linked
 # worktree onto its main repository and walks for the nearest real `.bionic`, so the
 # reader and the writer land on one address space.
-REPO=$(project_root "$CWD")
-[ -n "$REPO" ] && [ -d "$REPO" ] || exit 0
-
-# THE SESSION KEY, from the library (design §1): env primary, payload witness. The roster
-# filename is built from it, so the writer and every reader have to spell one session one
-# way — two spellings produced two rosters, and a row nobody could find.
-SID=$(session_id "$(_jq '.session_id')" 2>/dev/null) || SID=""
-[ -n "$SID" ] || exit 0
-# SHAPE-CHECKED BEFORE IT BECOMES A PATH, exactly as hooks/dispatch-preflight.sh checks it.
-# This value is interpolated into the roster path below and this script APPENDS to that
-# file. The symlink guards check `.bionic`, the state directory and the exact filenames, so
-# a key carrying path separators does not trip a guard — it writes outside the directory the
-# guards protect. Session ids are harness-minted UUIDs today; every other payload value on
-# this write path is sanitized and this one was not (Step-6 review S-4).
-case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
+# THE SESSION KEY comes back from the same call (design §1): env primary, payload
+# witness, and SHAPE-CHECKED BEFORE IT BECOMES A PATH. The roster filename is built from
+# it and this script APPENDS to that file; the symlink guards check `.bionic`, the state
+# directory and the exact filenames, so a key carrying path separators does not trip a
+# guard — it writes outside the directory the guards protect (Step-6 review S-4). That
+# rule is `bionic_context`'s now, applied for all fifteen, so the writer and every reader
+# spell one session one way by construction rather than by four hooks agreeing.
+bionic_context 2>/dev/null || exit 0
+[ -d "$BIONIC_ROOT" ] || exit 0
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
@@ -410,7 +351,7 @@ case "$SID" in *[!A-Za-z0-9_-]*) exit 0 ;; esac
 # absent, symlink, foreign sid, `unknown` — reads as NOT engaged. Silent, exit 0: the
 # direction §7 gives every start-side ambiguity, and here it is the consent boundary itself
 # (1.3.2 close-out ruling — the arming partition IS the consent boundary).
-engaged_session "$REPO" "$SID" || exit 0
+[ "$BIONIC_ENGAGED" = 1 ] || exit 0
 
 # ---------- THE PRESSURE SAMPLE (wave-roster-lifecycle S9, spec AC-15, R4) ----------
 #
@@ -465,10 +406,10 @@ fi
 # level redirects our write outside the repo — the proven arbitrary-file-overwrite
 # shape. Refuse rather than follow; refusing to RECORD only makes the later stop
 # refuse, which is the safe direction.
-STATE_DIR="$REPO/.bionic/tmp"
+STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
 STATE_FILE="$STATE_DIR/stop-check.state"
-ROSTER_FILE="$STATE_DIR/roster-${SID}.state"
-[ -L "$REPO/.bionic" ] && exit 0
+ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
+[ -L "$BIONIC_ROOT/.bionic" ] && exit 0
 [ -L "$STATE_DIR" ] && exit 0
 
 # ONE LAUNCH REFERENCE PER AGENT ID, EVER (epic-16 wave-02 S6; AC-5; R6; spec
@@ -507,7 +448,7 @@ prior_launch_for_agent() {  # <agent-id> -> earliest launched_at for that id thi
       *) continue ;;
     esac
     [ "$(line_field "$line" agent_id)" = "$aid" ] || continue
-    [ "$(line_field "$line" session)" = "$SID" ] || continue
+    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
     found=$(line_field "$line" launched_at)
     [ -n "$found" ] || continue
     printf '%s' "$found"
@@ -521,9 +462,9 @@ prior_launch_for_agent() {  # <agent-id> -> earliest launched_at for that id thi
 # ============================================================
 #
 # The launch half wrote an `intended` row at PreToolUse, keyed by `tool_use_id`
-# because no agent id exists yet at that moment (slice 4/3). This event carries
+# because no agent id exists yet at that moment (task 4/3). This event carries
 # the same `tool_use_id` and an id for the agent that spawned — and WHICH id
-# depends on the dispatch mode, which is the whole of epic-16 slice 0.
+# depends on the dispatch mode, which is the whole of epic-16 task 0.
 #
 # THE ID NAMESPACES DO NOT MEET. An async launch returns the transcript-form id
 # (`a26bd30bf8616411b`) — the same form every later observation of that agent
@@ -594,7 +535,7 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     esac
     [ "$(line_field "$line" tool_use_id)" = "$TOOL_USE_ID" ] || continue
     [ "$(line_field "$line" status)" = "intended" ] || continue
-    [ "$(line_field "$line" session)" = "$SID" ] || continue
+    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
     ROW="$line"
   done < "$ROSTER_FILE"
   [ -n "$ROW" ] || exit 0
@@ -729,6 +670,52 @@ fi
 # cadence, waiver — off that row alone. A row that dropped a field would not
 # merely be terse; it would silently retract the contract it inherited.
 if [ -n "$IS_START" ]; then
+  # ---------- SURVIVAL TERMS DELIVERY (wave-11 1c-b, design D2, probe P2) ----------
+  #
+  # D2 (spec §2, "Dispatcher ↔ agent"): this hook already reads `agent_type` on every
+  # SubagentStart; for `bionic:*` it now prints `payload/context/survival.md` as
+  # `additionalContext`, so a dispatched bionic agent receives the dispatch terms by PUSH
+  # rather than by pulling a file it might skip. Third-party and harness agent types get
+  # nothing. Probe P2 (record/wave-11-lean-spine/step2-probe-premises.md §2) proved this
+  # exact stdout shape reaches a live subagent's transcript as a `<system-reminder>` and is
+  # acted on — this is that shape, unchanged:
+  #   {"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":"<text>"}}
+  #
+  # THE FIELD, and why `agent_type` alone is the right test here even though the comment
+  # above (THE FIELD THAT IDENTIFIES A TEAMMATE) says it is not one field with one meaning.
+  # That caution is about using it as a NAME for a roster join; this is a TYPE test, and
+  # `agent_type` is the only field this payload carries that could ever hold a subagent
+  # TYPE string like `bionic:senior-implementor`. A teammate dispatch that puts a dispatch
+  # NAME there instead is not a bionic type either way this reads it — worst case, one
+  # dispatch literally named after a bionic role does not receive terms it does not need
+  # a hook to hand it, which is the same class of residual ARM 3 already accepts below.
+  #
+  # PLACED BEFORE THE ROSTER, deliberately — delivery must not depend on this session's
+  # roster carrying a row to join (a bionic agent dispatched outside that bookkeeping would
+  # otherwise silently lose its dispatch terms), and every existing arm below this line is
+  # untouched: this prints to stdout only and returns to falling through unchanged.
+  #
+  # RESOLVED THROUGH THE HOOK'S OWN LIB ROOT, never a hard-coded path. `$BIONIC_LIB` is
+  # `<root>/scripts/lib` in both shapes the loader above already normalized (the installed
+  # plugin root, and this repo's `payload/`), so its grandparent is that same root, and
+  # `context/survival.md` sits directly under it (payload/context/survival.md on disk).
+  #
+  # NEVER FAILS THE HOOK (PostToolUse invariant, restated at the top of this file): a
+  # missing or unreadable file prints nothing and logs one stderr line rather than
+  # touching the exit code below.
+  case "$(sanitize "$START_TYPE" 200)" in
+    bionic:*)
+      SURVIVAL_FILE="$BIONIC_LIB/../../context/survival.md"
+      if [ -r "$SURVIVAL_FILE" ]; then
+        jq -cn --rawfile _sf_c "$SURVIVAL_FILE" \
+          '{hookSpecificOutput:{hookEventName:"SubagentStart",additionalContext:$_sf_c}}' \
+          2>/dev/null
+      else
+        echo "execution-recorder: survival terms not found at $SURVIVAL_FILE — printing nothing" >&2
+      fi
+      ;;
+  esac
+
   [ -f "$ROSTER_FILE" ] || exit 0
   [ -L "$ROSTER_FILE" ] && exit 0
 
@@ -756,7 +743,7 @@ if [ -n "$IS_START" ]; then
     esac
     [ "$(line_field "$line" agent_id)" = "$START_ID" ] || continue
     case "$(line_field "$line" status)" in intended|confirmed) : ;; *) continue ;; esac
-    [ "$(line_field "$line" session)" = "$SID" ] || continue
+    [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
     ROW="$line"
   done < "$ROSTER_FILE"
 
@@ -786,7 +773,7 @@ if [ -n "$IS_START" ]; then
   # an async dispatch (t1-probe-report.md §2.1, both measured on one live session).
   # THE CORRECTED HISTORY (Step-6 review flag 1-A; the prior text here had it
   # backwards). This join is not new and was never unscoped: it was WRITTEN at
-  # `47e8961` (epic-16 w1 slice 1/7) with the same predicates as today's — `name=`
+  # `47e8961` (epic-16 w1 task 1/7) with the same predicates as today's — `name=`
   # equality, `intended|confirmed`, session-scoped (`git show
   # 47e8961:hooks/execution-recorder.sh`) — then DELETED at `27a8e4c`, whose own
   # message gives the cause: "the execution recorder's identification arm keyed on
@@ -829,7 +816,7 @@ if [ -n "$IS_START" ]; then
       esac
       [ "$(line_field "$line" name)" = "$START_TYPE" ] || continue
       case "$(line_field "$line" status)" in intended|confirmed) : ;; *) continue ;; esac
-      [ "$(line_field "$line" session)" = "$SID" ] || continue
+      [ "$(line_field "$line" session)" = "$BIONIC_SID" ] || continue
       ROW="$line"
     done < "$ROSTER_FILE"
   fi
@@ -876,7 +863,7 @@ fi
 TRANSCRIPT=$(_jq '.transcript_path')
 SUB=$(session_subagents_dir "$TRANSCRIPT") || exit 0
 
-# THE OBSERVER (slice 4/1, assumption A resolved FULL). A top-level `agent_id` is
+# THE OBSERVER (task 4/1, assumption A resolved FULL). A top-level `agent_id` is
 # present on subagent-invoked payloads and absent on the orchestrator's — that is
 # the entire discriminator, and it is positive rather than inferential: present
 # means "this subagent made the call, and here is which one". Absence is rendered
@@ -990,7 +977,7 @@ write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <pro
       {
         while IFS= read -r line; do
           case "$line" in '#'*|'') continue ;; esac
-          [ "$(line_field "$line" session)" = "$SID" ] \
+          [ "$(line_field "$line" session)" = "$BIONIC_SID" ] \
             && [ "$(line_field "$line" target)" = "$tid" ] && continue
           local rlog rdir
           rlog=$(line_field "$line" log); rdir="${rlog%/agent-*}"
@@ -1003,11 +990,11 @@ write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <pro
     # already reads; `observer` and the D-6 progress snapshot are additive, and
     # the gate's by-key reader is inert to fields it does not know (checklist A6),
     # which is why this is still `v1` rather than a version bump that would refuse
-    # every record until its reader caught up. Slice 4/5 adds `classification` and
+    # every record until its reader caught up. Task 4/5 adds `classification` and
     # the two contract-source fields the same way — copied verbatim from the
     # producer's own machine line, additive, still `v1`.
     printf '%s|session=%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|observer=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \
-      "$STATE_VERSION" "$SID" "$tid" "$typed" "$log" "$mt" "$sz" "$OBSERVER" "$dl" "$pp" "$pm" "$ps" "$cl" "$dsrc" "$psrc"
+      "$STATE_VERSION" "$BIONIC_SID" "$tid" "$typed" "$log" "$mt" "$sz" "$OBSERVER" "$dl" "$pp" "$pm" "$ps" "$cl" "$dsrc" "$psrc"
   } > "$tmp" 2>/dev/null
   mv -f "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
   rm -rf "$lock"

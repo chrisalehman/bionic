@@ -8,7 +8,7 @@
 # green right up until someone edits five of the six. Here there is one copy of each block
 # and the finals are generated, so they cannot disagree: identity by CONSTRUCTION.
 #
-# THREE RENDER UNITS, ONE PIPELINE:
+# FOUR RENDER UNITS, ONE PIPELINE:
 #
 #   agents-src/templates/          -> agents/              the six agent role files. Shared
 #                                                          duty text: the reporting contract
@@ -26,6 +26,20 @@
 #                                                          duplication axis, the terminal-
 #                                                          disposition rule, and the
 #                                                          orchestrator's dispatch body.
+#   agents-src/templates/context/  -> payload/context/     the dispatch terms, ONE shipped
+#                                                          file (wave-11 REQ-1c). Shared
+#                                                          text: the survival block, which
+#                                                          used to render into all six role
+#                                                          files.
+#
+# WHY THE DISPATCH TERMS ARE THEIR OWN UNIT (wave-11 1c). The survival block is the one
+# shared text that varies by NOTHING — not by role, not by step — and it was the largest:
+# 33,222 B of the 57,013 B role surface was six copies of it, re-read in full at every
+# dispatch. A role file is now the role, and the terms are one shipped file the
+# SubagentStart hook pushes. The unit exists rather than a hand-written file for the same
+# reason every other one does: a hand-written copy of a block is a promise, an injection is
+# a fact. The output is NOT under agents/ because every `.md` there loads as an agent
+# definition; payload/context/ is a plain shipped directory with no such meaning.
 #
 # WHY THE SKILL FILE IS A RENDER TARGET (wave-02 DD-2). Until this unit existed the skill
 # file was hand-written, and four of its passages were hand-copied into role files under
@@ -141,10 +155,18 @@ OUT_ROOT="$REPO_DIR"
 # THE UNIT TABLE: one row per (templates dir -> output dir), both repo-relative. Adding a
 # third rendered surface is a row here and nothing else; every loop below is driven from it,
 # so a new unit cannot be half-wired — rendered by the write path and invisible to --check.
+#
+# THE STEPS ROW (wave-11 row 1b) is a row rather than a widened glob for the reason the
+# maxdepth note below gives: every unit's template glob is one level deep, so the per-step
+# files under templates/skills/canonical-sdlc/steps/ are invisible to the unit above them
+# and name their own directory instead. `dispatch.md.tmpl` needs no row at all — it sits
+# beside SKILL.md.tmpl in the unit that already globs that directory.
 RENDER_UNITS="
 agents-src/templates|agents
 agents-src/templates/commands|payload/commands
 agents-src/templates/skills/canonical-sdlc|skills/canonical-sdlc
+agents-src/templates/context|payload/context
+agents-src/templates/skills/canonical-sdlc/steps|skills/canonical-sdlc/steps
 "
 
 ROLES="auditor critic implementor researcher senior-implementor test-runner"
@@ -159,8 +181,8 @@ ROLES="auditor critic implementor researcher senior-implementor test-runner"
 # here as well: an output path under payload/ loses that prefix, and one outside payload/ is
 # already the name the plugin root carries.
 #
-# IT COVERS EVERY RENDERING, one row per output of every unit — the six role files, the four
-# command files, and the skill file. Widening it past the role files was wave-02 AC-8's own
+# IT COVERS EVERY RENDERING, one row per output of every unit — the six role files, the five
+# command files, the skill file, and the dispatch terms. Widening it past the role files was wave-02 AC-8's own
 # acceptance criterion, not a side effect: a manifest that answered for three of eleven
 # rendered files would report a doctored command page or a doctored method as stock. Rows
 # are emitted in unit-table order and, within a unit, in glob order, so the file a write
@@ -258,6 +280,21 @@ EOF
 # HEADER IS WORDED DIFFERENTLY" above.
 generated_header() {
   case "$1" in
+    agents-src/templates/skills/canonical-sdlc/steps/* | \
+    agents-src/templates/skills/canonical-sdlc/SKILL.md.tmpl | \
+    agents-src/templates/skills/canonical-sdlc/dispatch.md.tmpl)
+      # ONE LINE across the whole split-skill surface — core, dispatch reference and the
+      # ten step files alike — and the reason is the budget the split exists to serve.
+      # REQ-1b's byte caps (docs-pins Section 17) are measured against exactly these
+      # files, and the four-line warning below would cost ~290 B on each of twelve of
+      # them for a warning the one line already gives in full: --check goes red on a
+      # hand edit either way, so nothing enforceable is lost (2026-09-11 cap ruling,
+      # "no growth" total). Ratified 2026-09-11 for the core and dispatch reference too,
+      # after the T5-report §3 prunable-narrative estimate proved too small on its own.
+      cat <<EOF
+<!-- GENERATED FILE — DO NOT EDIT. Rendered by agents-src/render.sh from $1. -->
+EOF
+      ;;
     agents-src/templates/commands/*)
       cat <<EOF
 <!-- GENERATED FILE — DO NOT EDIT.

@@ -9,9 +9,11 @@
 # helper at `:3372`) — none of them going through the production writer, so none of them could
 # catch a marker shape hooks/landing-gate.sh stopped producing.
 #
-# WHY EXTRACTED, NOT SOURCED FROM A LIB. `swept_marker_write` is defined directly inside
-# hooks/landing-gate.sh, beside the `SWEPT_SCHEMA` it uses — not in a payload/scripts/lib
-# file. A hook is free to source root.sh/run.sh/session.sh from the loader's own registry
+# WHY EXTRACTED AND NOT SOURCED. `swept_marker_write` moved with the rest of the landing
+# sweep into `payload/scripts/lib/stop.sh` (epic-23 wave-11, T12), where it still sits at
+# COLUMN ZERO beside the `SWEPT_SCHEMA` it uses. Sourcing that file would pull the four
+# verdict functions and their own dependencies into every suite that wants one marker, so
+# the extraction stays. A hook is free to source root.sh/run.sh/session.sh from the loader's own registry
 # fallback for state that changes rarely, but that fallback answers with whatever was last
 # LANDED, not this worktree's own tree — so a NEW lib function (or a change to an existing
 # one) is invisible to any hook copy the loader resolves out-of-tree until the wave lands.
@@ -21,21 +23,25 @@
 # — never a second printf, never a dependency on the loader resolving anything.
 #
 # swept_marker_write <roster file> <at> <session> <name> <agent id> <state> -> the function
-# extracted from hooks/landing-gate.sh, real source, real call.
+# extracted from payload/scripts/lib/stop.sh, real source, real call.
+#
+# BIONIC_SWEPT_SOURCE overrides the file it reads, for the one suite that drives a
+# deliberately reformatted copy (tests/landing-gate.test.sh §17).
 #
 # swept_marker_field <line> <key> -> the value of one field, by key, off a raw marker line —
 # the same by-key idiom every production reader uses (hooks/landing-gate.sh's own `_field`),
 # so a suite asserting on a captured or produced marker does not hand-roll the pipeline.
 
+BIONIC_SWEPT_SOURCE="${BIONIC_SWEPT_SOURCE:-${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh}"
 if ! declare -p SWEPT_SCHEMA >/dev/null 2>&1; then
-  eval "$(grep -m1 '^SWEPT_SCHEMA=' "${BIONIC_HOOKS_DIR}/landing-gate.sh")"
+  eval "$(grep -m1 '^SWEPT_SCHEMA=' "${BIONIC_SWEPT_SOURCE}")"
 fi
 if ! type -t swept_marker_write >/dev/null 2>&1; then
-  eval "$(awk '/^swept_marker_write\(\)/,/^\}/' "${BIONIC_HOOKS_DIR}/landing-gate.sh")"
+  eval "$(awk '/^swept_marker_write\(\)/,/^\}/' "${BIONIC_SWEPT_SOURCE}")"
 fi
 
 # THE EXTRACTION IS CHECKED (review-b B-12). Both `eval`s above obtain their subject by
-# matching SOURCE TEXT of hooks/landing-gate.sh at column 0 — `^SWEPT_SCHEMA=` and
+# matching SOURCE TEXT of payload/scripts/lib/stop.sh at column 0 — `^SWEPT_SCHEMA=` and
 # `^swept_marker_write()`. Indent the function, move the constant, and both become `eval ""`:
 # a silent no-op, after which the builder simply does not exist and the failure surfaces
 # as `command not found` under the runner's stderr-strict arm, in a suite whose own tally
@@ -43,7 +49,7 @@ fi
 # `swept_marker_write` is not in `_tf_scan`'s token set — so the check is here, beside the
 # extraction, and it names the file it failed to read.
 if ! declare -p SWEPT_SCHEMA >/dev/null 2>&1; then
-  echo "tests/lib/swept-marker.sh: no '^SWEPT_SCHEMA=' line in ${BIONIC_HOOKS_DIR}/landing-gate.sh — the constant could not be extracted (the hook was reformatted, or the name moved)." >&2
+  echo "tests/lib/swept-marker.sh: no '^SWEPT_SCHEMA=' line in ${BIONIC_SWEPT_SOURCE} — the constant could not be extracted (the file was reformatted, or the name moved)." >&2
   exit 1
 fi
 require_helpers swept_marker_write

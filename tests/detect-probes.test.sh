@@ -1,5 +1,5 @@
 #!/bin/bash
-# DETECT PROBES — epic-17 wave-06 slice S2 (spec R5/AC-8, AC-9; R8/AC-13).
+# DETECT PROBES — epic-17 wave-06 task S2 (spec R5/AC-8, AC-9; R8/AC-13).
 #
 # WHAT THIS SUITE OWNS. The two read-only probes added to
 # payload/scripts/lib/detect.sh at W6, and nothing else:
@@ -11,12 +11,12 @@
 # at 8582861, epic-18 wave-03; the rationale below is historical). Different
 # fixture regime. Every other detect function is driven against a fixture
 # TREE; these two are driven against a captured CLI TRANSCRIPT and a planted
-# registry, and the transcript fixtures are the evidence for the whole slice.
+# registry, and the transcript fixtures are the evidence for the whole task.
 # Same reasoning that split spawn-worktree.test.sh out of plugin-lib.
 #
-# FIXTURE FIDELITY — THE POINT OF THIS SLICE, AND IT CAUGHT A REAL DEFECT.
+# FIXTURE FIDELITY — THE POINT OF THIS TASK, AND IT CAUGHT A REAL DEFECT.
 #
-# The slice was planned to build its fixtures from the `claude plugin list`
+# The task was planned to build its fixtures from the `claude plugin list`
 # output quoted in record/epic-17-w5/f12-runtime-report.md:84-132. It did, the
 # first parser passed 50/50 against them, and then the same parser was pointed
 # at the real CLI on this machine and answered `absent` for a plugin that was
@@ -156,7 +156,7 @@ expect_match "…and the dependency Error line beneath it" \
 
 # The two families are DIFFERENT SHAPES, and the suite says so out loud — if a
 # later edit "tidied" one into the other, the reason both exist would vanish
-# silently and the regression this slice caught could come straight back.
+# silently and the regression this task caught could come straight back.
 expect_eq "the measured fixture is a block format: the id line carries no status" \
   "0" "$(/usr/bin/grep -c '❯.*Status:' "$FIX_HEALTHY")"
 expect_eq "…and the report's rendering is a one-line format: id and status together" \
@@ -178,7 +178,7 @@ expect_eq "…and so is a dependency in the same listing (not a bionic-only pars
   "load-state=loaded error=-" \
   "$(probe_run BIONIC_PLUGIN_LIST_CMD="cat $FIX_HEALTHY" -- detect_plugin_load_state superpowers@bionic)"
 
-# THE ROW THIS SLICE EXISTS FOR (W5 F12): installed, green, and loading nothing.
+# THE ROW THIS TASK EXISTS FOR (W5 F12): installed, green, and loading nothing.
 expect_eq "dep-broken listing: bionic@bionic failed, with the CLI's own error verbatim" \
   'load-state=failed error=Dependency "superpowers@bionic" is not installed — run `claude plugin install superpowers@bionic`, …' \
   "$(probe_run BIONIC_PLUGIN_LIST_CMD="cat $FIX_BROKEN" -- detect_plugin_load_state bionic@bionic)"

@@ -129,7 +129,7 @@ expect_eq "docs_root: a quoted value comes back unquoted" "$P/alt3" "$(call docs
 # trim in `config_value`, so a quoted value with a trailing space keeps its closing quote.
 # tests/run-predicate.test.sh R9h pinned exactly this on the two readers that used to exist
 # separately, as the thing holding them in agreement. There is one reader now, so the wart
-# is one wart — and it is pinned here too, because a future slice that fixes it should have
+# is one wart — and it is pinned here too, because a future task that fixes it should have
 # to come past a row that says so rather than discover it in a hook.
 printf 'docs-root: "alt4" \n' > "$P/.bionic/config.yaml"
 expect_eq "docs_root: a quoted value with a trailing space keeps its closing quote" \
@@ -423,7 +423,7 @@ section "2c — the governing-skill hook SCAFFOLDS under docs-root: (the live de
 # missing one frontmatter flag proves nothing about the scaffold. The session id is pinned
 # in the environment as well as the payload because `session_id` prefers the environment,
 # and an unpinned call would engage against the id of whatever session is running the suite.
-# IT ALSO OPENS WITH `## Goal`, for the same reason: K5.4 (wave-01 slice 21) made that the
+# IT ALSO OPENS WITH `## Goal`, for the same reason: K5.4 (wave-01 task 21) made that the
 # first section every canonical-sdlc artifact carries, and content without it meets this
 # hook's own write refusal before the scaffold at `exit 0` is ever reached.
 

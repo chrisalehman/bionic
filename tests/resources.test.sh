@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/resources.test.sh — payload/scripts/lib/resources.sh and the attestation v2 it feeds.
 #
-# WHAT THIS SUITE PINS (spec AC-24, AC-25, AC-30 thresholds; wave 1.4.0 slice L-RESOURCES).
+# WHAT THIS SUITE PINS (spec AC-24, AC-25, AC-30 thresholds; wave 1.4.0 task L-RESOURCES).
 # The parallel budget stopped being a number a human guessed and became a function of the
 # machine. Three questions, three functions, one file:
 #
@@ -37,7 +37,7 @@
 #   * The pressure readings are INJECTED, chosen to sit either side of the constants. The
 #     emergency figure is anchored on the measured ~188 MB kill.
 #   * The v1 attestation fixture is a real record shape: the field set hooks/preflight-probe.sh
-#     wrote before this slice, which tests/preflight-probe.test.sh already drives.
+#     wrote before this task, which tests/preflight-probe.test.sh already drives.
 #   * session ids are SHAPE-ONLY well-formed uuids, the same convention
 #     tests/preflight-probe.test.sh uses.
 #
@@ -97,7 +97,7 @@ expect_eq   "HOLD_LOAD_FACTOR"  "1.5"  "${HOLD_LOAD_FACTOR:-unset}"
 expect_eq   "EMERGENCY_FREE_MB" "256"  "${EMERGENCY_FREE_MB:-unset}"
 
 # The datum is the point of the constant. A number with no provenance is the thing this
-# slice exists to remove, so every assignment above must carry a trailing comment.
+# task exists to remove, so every assignment above must carry a trailing comment.
 for _c in MEM_RESERVE_GB MEM_PER_SUITE_GB CORES_PER_SUITE DISK_PER_TREE_GB WRITERS_EXTRA \
           TEST_JOBS_MIN TEST_JOBS_MAX WORKTREES_MIN WORKTREES_MAX WRITERS_MIN WRITERS_MAX \
           HOLD_FREE_MB HOLD_LOAD_FACTOR EMERGENCY_FREE_MB; do
@@ -322,7 +322,7 @@ expect_true "reader accepts the v2 record it just wrote" [ "$?" -eq 0 ]
 expect_true "reader echoes the budget line" grep -q "^budget=" "$TMPROOT/read.out"
 
 # fixture-fidelity: a v1 record — the exact field set hooks/preflight-probe.sh wrote before
-# this slice, which tests/preflight-probe.test.sh drives today.
+# this task, which tests/preflight-probe.test.sh drives today.
 V1="$TMPROOT/preflight-$SESSION_V1.state"
 cat > "$V1" <<EOF
 # bionic environment attestation — machine-local, safe to delete

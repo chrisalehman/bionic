@@ -49,7 +49,7 @@
 #
 # EVERY REFUSAL AND EVERY MOVE PRINTS EXACTLY ONE LINE ON STDOUT — the line Step 9's
 # `archived:` evidence line is built from (agents-src/templates/skills/canonical-sdlc/
-# SKILL.md.tmpl, this slice). Exit status: 0 for a move or a benign no-op (opt-out, an
+# SKILL.md.tmpl, this task). Exit status: 0 for a move or a benign no-op (opt-out, an
 # open sibling, nothing under specs/plans/adrs for the slug); 1 for a refusal. A caller
 # that only checks "did anything go wrong" needs nothing but the exit status; a caller
 # that reports to a human takes the line too.

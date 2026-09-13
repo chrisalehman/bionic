@@ -522,11 +522,11 @@ expect_contains "missing→written: the paired positive is MET" "state=MET" "$OU
 
 # --- a RELATIVE deliverable resolves the way every brief spells it (A-6.6 (c)) ---
 #
-# WHAT WAS WRONG, measured on this wave's own dispatches. Slice briefs write
+# WHAT WAS WRONG, measured on this wave's own dispatches. Task briefs write
 # `Expected artifact: record/epic-NN-wM/x.md`, because that is the spelling the Step-5
 # contract and canonical-sdlc-evidence-gate.sh publish for an artifact under the docs root.
 # This gate resolved it against the REPO root, looked at `<repo>/record/…`, found nothing
-# and called the row missing while the file sat exactly where the brief meant. One slice
+# and called the row missing while the file sat exactly where the brief meant. One task
 # answered that by writing a second copy at the repo root to satisfy the gate — which is
 # what a wrong gate costs: it does not merely misreport, it teaches the work to be wrong.
 #
@@ -737,7 +737,7 @@ sweep "$RVY" verdict
 expect_eq "a symlinked roster refuses (exit 2), it does not report a clean session" "2" "$RC"
 
 # ============================================================
-section "Section 6: ack — the UNMET warning (epic-16 w1 slice 3)"
+section "Section 6: ack — the UNMET warning (epic-16 w1 task 3)"
 # ============================================================
 #
 # Ack does NOT reach the verdict: an acked row is re-stat'd like any

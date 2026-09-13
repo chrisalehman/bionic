@@ -133,39 +133,19 @@ esac
 # diagnosis down with the thing being diagnosed.
 BIONIC_LIB_WANT="roots.sh root.sh session.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
-# library cannot load itself, so the duplication is the design and
-# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
-# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
-#
-# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
-# on a line above this block. Afterwards exactly one of these is non-empty:
-#   BIONIC_LIB          a readable directory holding every wanted basename
-#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
-# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
-#
-# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
-# healthy hook pays nothing for the healing path — not a jq, not a registry read.
-#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
-#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
-#      siblings, and the repo, where payload/hooks is a symlink to the top-level
-#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
-#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
-#      would find nothing in a directory-source session.
-#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
-#      plugin was installed from; that marketplace's source.path in
-#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
-#      a fork installs under its own name.
-#  (3) the newest version directory in that marketplace's plugin cache, by
-#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
-# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
-# upstream-broken publish breaks every location equally and is not covered.
-#
-# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
-# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
+# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
+# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
+# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
+# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
+# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
+# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
+# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
+# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
+# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
+# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
 BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"
-_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
 _bl_try() {
   [ -n "${1:-}" ] || return 1
   if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
@@ -174,13 +154,8 @@ _bl_try() {
   BIONIC_LIB="$1"
 }
 if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
-  _bl_mk=""
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
   if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    # First key only, and the prefix stripped by parameter expansion rather than
-    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
-    # `jq` runs with its stderr closed, so a machine missing jq degrades to
-    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
     _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
     _bl_mk="${_bl_keys%%
 *}"
@@ -210,25 +185,13 @@ BIONIC_LOADER_VER
   fi
 fi
 if [ -z "$BIONIC_LIB" ]; then
-  # The name in the message is the first library this hook asked for. A candidate
-  # directory qualifies only when it holds ALL of them, so with none qualifying the
-  # first wanted name is the honest thing to hand the reader.
   BIONIC_LIB_MISSING="${_bl_want%% *}"
   [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
 fi
-# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
-# stand aside. Blocking reversible work because a file is missing buys no safety and
-# costs the session.
 loader_fail_open() {
   echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
   exit 0
 }
-# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
-# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
-# here, before the hook sources anything. Whole-string and not prefix, so
-# `claude plugin update bionic@bionic; git push origin main` is refused like any
-# other push. There is no env-var override: a variable an agent turn can set on
-# itself is not a wall.
 loader_fail_closed() {
   _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
   [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
@@ -238,25 +201,9 @@ loader_fail_closed() {
     "bash $_bl_root/scripts/doctor.sh"|\
     "bash $_bl_root/scripts/setup.sh") exit 0 ;;
   esac
-  # THE ONE LINE, AND THE ONE PLACE IN THE TREE THAT SPELLS IT WITHOUT
-  # scripts/lib/refuse.sh. Every other wall calls `refuse`; this one cannot, because
-  # refuse.sh is IN the library this function exists to report missing. So the row-1
-  # wording (record/wave-01-plugin-only/s12-refusal-wording-draft.md §1) is written
-  # out here by hand, in the renderer's exact format, and tests/loader.test.sh §F
-  # drives it against AC-E1.3's own regex so the two spellings cannot drift.
-  #
-  # THE NAME IS BOUNDED IN PURE BASH for the same reason: `bionic_trunc` is in the
-  # missing library. 23 columns of prefix, 31 of fact after the name, 3 of brackets
-  # and 18 of fix leaves 25 for the hook's name, and the longest caller
-  # (`canonical-sdlc-evidence-gate`, 28) is over it — F-8's runtime-width hazard,
-  # arriving at the one site that cannot ask the truncator. The ellipsis is spent
-  # from inside the budget, exactly as bionic_trunc spends it.
   _bl_who="${1:-a bionic hook}"
   if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
   printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  # THE DETAIL, on the knob only. Ruling D-1: the reader who is interrupted gets one
-  # sentence; the rest is for whoever asks. There is no hook log to write here — the
-  # library that owns logging is the one that did not load.
   if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
     cat >&2 <<BIONIC_LOADER_REFUSE
 A wall that cannot read a command refuses it rather than waving it through.
@@ -318,7 +265,7 @@ fi
 #
 # THE DOCS ROOT, AND WHY THIS HOOK SUDDENLY NEEDS ONE (epic-17 W6 S15, A-6.6 (c)).
 # A roster deliverable is brief prose: `Expected artifact: record/epic-17-w6/x.md` is what
-# every slice brief in this epic actually writes, because that is the spelling the Step-5
+# every task brief in this epic actually writes, because that is the spelling the Step-5
 # contract and `canonical-sdlc-evidence-gate.sh` established for an artifact under the docs
 # root. This gate resolved it against the REPO root, looked at `<repo>/record/…`, found
 # nothing, and reported the row missing while the file sat where the brief meant. One wave

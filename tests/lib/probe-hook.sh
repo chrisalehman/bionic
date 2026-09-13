@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # tests/lib/probe-hook.sh
 #
-# E1 measurement probe (epic-22 wave-01 slice 10). Emits a distinguishable,
+# E1 measurement probe (epic-22 wave-01 task 10). Emits a distinguishable,
 # mode-keyed marker through one of five hook emission channels, so a scratch
 # `claude -p` run can measure what a terminal capture shows the user and what
 # a --output-format stream-json transcript shows the model, per channel.

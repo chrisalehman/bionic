@@ -1,5 +1,5 @@
 #!/bin/bash
-# SEAM RESOLUTION CATCH-PROOF — epic-17 wave-02 slice S1 (spec AC-4).
+# SEAM RESOLUTION CATCH-PROOF — epic-17 wave-02 task S1 (spec AC-4).
 #
 # WHAT THE SEAM IS. `tests/lib/resolve-roots.sh` is a sourced helper owning one
 # question: where do the scripts under test live. It exports three per-class root
@@ -62,10 +62,15 @@ mkdir -p "$DOC/hooks" "$DOC/skills/canonical-sdlc" "$DOC/root"
 # hooks class — the real pin-sync subject. The repo copy says
 # SUPPORTED_SDLC_VERSION=14; the doctored copy says 99999. Neither value can be
 # read from the other file, so the named check's ANSWER names which file it read.
-cp "$REPO/hooks/canonical-sdlc-evidence-gate.sh" "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
-sed -i.bak 's/^SUPPORTED_SDLC_VERSION=.*/SUPPORTED_SDLC_VERSION=99999/' "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
-rm -f "$DOC/hooks/canonical-sdlc-evidence-gate.sh.bak"
-printf '# %s\n' "$MARKER" >> "$DOC/hooks/canonical-sdlc-evidence-gate.sh"
+# THE VERSION LITERAL MOVED WITH THE GATE'S BODY (T23): it is in
+# payload/scripts/lib/walls.sh now, inside `_eg_body`, still at column zero. The doctored
+# seam therefore carries a doctored LIBRARY beside an untouched hook.
+cp "$REPO/hooks/bash-walls.sh" "$DOC/hooks/bash-walls.sh"
+mkdir -p "$DOC/scripts/lib"
+cp "$REPO"/payload/scripts/lib/*.sh "$DOC/scripts/lib/" 2>/dev/null
+sed -i.bak 's/^SUPPORTED_SDLC_VERSION=.*/SUPPORTED_SDLC_VERSION=99999/' "$DOC/scripts/lib/walls.sh"
+rm -f "$DOC/scripts/lib/walls.sh.bak"
+printf '# %s\n' "$MARKER" >> "$DOC/scripts/lib/walls.sh"
 
 # skills class — the real SKILL.md, marker appended.
 cp "$REPO/skills/canonical-sdlc/SKILL.md" "$DOC/skills/canonical-sdlc/SKILL.md"
@@ -98,9 +103,16 @@ case "$2" in
   var-scripts)  printf '%s\n' "${BIONIC_SCRIPTS_DIR:-UNSET}" ;;
   # The named check, verbatim in the shape S2 gives the pin-sync rows: read the
   # evidence gate's version constant through BIONIC_HOOKS_DIR.
-  read-hooks)   grep -o 'SUPPORTED_SDLC_VERSION=[0-9]*' "${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh" | head -1 ;;
+  # THE LIBRARY BESIDE THE HOOKS, IN EITHER SPELLING. A repo checkout keeps it at
+  # payload/scripts/lib and an installed plugin at scripts/lib; the readable one is chosen
+  # by a TEST and not by `||` after a pipeline, whose status is `head`'s and never fails.
+  read-hooks)   _sr_w="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
+                [ -r "$_sr_w" ] || _sr_w="${BIONIC_HOOKS_DIR}/../scripts/lib/walls.sh"
+                grep -o 'SUPPORTED_SDLC_VERSION=[0-9]*' "$_sr_w" | head -1 ;;
   # Marker reads: did the consumer land in the doctored copy or the repo copy?
-  mark-hooks)   grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_HOOKS_DIR}/canonical-sdlc-evidence-gate.sh" ;;
+  mark-hooks)   _sr_w="${BIONIC_HOOKS_DIR}/../payload/scripts/lib/walls.sh"
+                [ -r "$_sr_w" ] || _sr_w="${BIONIC_HOOKS_DIR}/../scripts/lib/walls.sh"
+                grep -c 'SEAM-DOCTORED-MARKER-b7f3' "$_sr_w" ;;
   mark-skills)  grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md" ;;
   mark-scripts) grep -c 'SEAM-DOCTORED-MARKER-b7f3' "${BIONIC_SCRIPTS_DIR}/wsl-setup.sh" ;;
   *) echo "PROBE-UNKNOWN-CHECK"; exit 4 ;;

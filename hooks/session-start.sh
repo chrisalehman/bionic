@@ -1,7 +1,7 @@
 #!/bin/bash
 # SESSION-START — what the previous conversation left on this project, and nothing
 # else (bionic 1.4.0, spec AC-1; AC-4's "the SessionStart block runs the report";
-# AC-11's legacy-symlink listing; plan slice SSTART).
+# AC-11's legacy-symlink listing; plan task SSTART).
 #
 # WHAT `/clear` ACTUALLY DOES, measured (probe record, .bionic/docs/record/
 # wave-1.4.0-probe.md). The process does not restart: same pid, same
@@ -58,41 +58,21 @@
 
 set -u
 
-BIONIC_LIB_WANT="root.sh session.sh patrol.sh run.sh"
+BIONIC_LIB_WANT="context.sh root.sh session.sh patrol.sh run.sh"
 # --- bionic-loader/v2 BEGIN
-# Find the bionic library. This text is pasted BYTE-IDENTICALLY into every hook; a
-# library cannot load itself, so the duplication is the design and
-# tests/cross-gate-agreement.test.sh pins every copy against `bionic_loader_pin` in
-# payload/scripts/lib/loader.sh. Behaviour: tests/loader.test.sh.
-#
-# CONTRACT. Set BIONIC_LIB_WANT to the space-separated basenames this hook sources,
-# on a line above this block. Afterwards exactly one of these is non-empty:
-#   BIONIC_LIB          a readable directory holding every wanted basename
-#   BIONIC_LIB_MISSING  the library this hook wanted and did not get
-# BIONIC_LIB_CANDS always lists, in order, every location that was tried.
-#
-# CANDIDATES. Later classes are evaluated only after the earlier ones fail, so a
-# healthy hook pays nothing for the healing path — not a jq, not a registry read.
-#  (1) beside the hook. TWO SPELLINGS OF ONE DIRECTORY, because the shipped tree has
-#      two real shapes: the installed plugin root, where hooks/ and scripts/ are
-#      siblings, and the repo, where payload/hooks is a symlink to the top-level
-#      hooks/ and the library lives under payload/scripts/lib. "$0" is textual and
-#      `..` is resolved by the kernel AFTER the symlink, so the first spelling alone
-#      would find nothing in a directory-source session.
-#  (2) the marketplace SOURCE TREE. installed_plugins.json names the marketplace this
-#      plugin was installed from; that marketplace's source.path in
-#      known_marketplaces.json is the tree. The marketplace is read, never assumed:
-#      a fork installs under its own name.
-#  (3) the newest version directory in that marketplace's plugin cache, by
-#      THREE-INTEGER compare — 1.10.0 beats 1.3.2, which a lexical sort gets backwards.
-# (2) and (3) heal a partial breakage: one location damaged, a sibling intact. An
-# upstream-broken publish breaks every location equally and is not covered.
-#
-# TESTS OVERRIDE THE MACHINE, never the reverse. BIONIC_PLUGINS_DIR (default
-# "$HOME/.claude/plugins") is the only door to the registry and the cache.
+# Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
+# cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
+# long form; §N.1 of tests/cross-gate-agreement.test.sh pins and caps every copy, and
+# tests/loader.test.sh drives the behaviour. BIONIC_LIB_WANT, set on the line above, names
+# the basenames this hook sources; afterwards exactly one of BIONIC_LIB (a directory holding
+# all of them) and BIONIC_LIB_MISSING is non-empty. CANDIDATES, each class reached only when
+# the earlier one fails: (1) beside the hook in BOTH spellings, since `..` resolves after the
+# payload/hooks symlink; (2) the marketplace source tree, read from the registry and never
+# assumed; (3) the newest version in that marketplace's cache, by THREE-INTEGER compare —
+# 1.10.0 beats 1.3.2, which a lexical sort gets backwards. (2) and (3) heal a partly damaged
+# install, so one broken location cannot lock the user out of the repair (R-1 §(5)).
 BIONIC_LIB=""; BIONIC_LIB_MISSING=""; BIONIC_LIB_CANDS=""
-_bl_dir="$(dirname "$0")"
-_bl_want="${BIONIC_LIB_WANT:-}"
+_bl_dir="$(dirname "$0")"; _bl_want="${BIONIC_LIB_WANT:-}"
 _bl_try() {
   [ -n "${1:-}" ] || return 1
   if [ -z "$BIONIC_LIB_CANDS" ]; then BIONIC_LIB_CANDS="$1"; else BIONIC_LIB_CANDS="$BIONIC_LIB_CANDS, $1"; fi
@@ -101,13 +81,8 @@ _bl_try() {
   BIONIC_LIB="$1"
 }
 if ! _bl_try "$_bl_dir/../scripts/lib" && ! _bl_try "$_bl_dir/../payload/scripts/lib"; then
-  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"
-  _bl_mk=""
+  _bl_pd="${BIONIC_PLUGINS_DIR:-${HOME:-/nonexistent}/.claude/plugins}"; _bl_mk=""
   if [ -r "$_bl_pd/installed_plugins.json" ]; then
-    # First key only, and the prefix stripped by parameter expansion rather than
-    # `sed | head`: the block's only external commands are `dirname` and `jq`, and
-    # `jq` runs with its stderr closed, so a machine missing jq degrades to
-    # BIONIC_LIB_MISSING in silence instead of printing a shell diagnostic.
     _bl_keys="$(jq -r '(.plugins // {}) | keys[] | select(startswith("bionic@"))' "$_bl_pd/installed_plugins.json" 2>/dev/null)"
     _bl_mk="${_bl_keys%%
 *}"
@@ -137,25 +112,13 @@ BIONIC_LOADER_VER
   fi
 fi
 if [ -z "$BIONIC_LIB" ]; then
-  # The name in the message is the first library this hook asked for. A candidate
-  # directory qualifies only when it holds ALL of them, so with none qualifying the
-  # first wanted name is the honest thing to hand the reader.
   BIONIC_LIB_MISSING="${_bl_want%% *}"
   [ -n "$BIONIC_LIB_MISSING" ] || BIONIC_LIB_MISSING="scripts/lib"
 fi
-# FAIL OPEN — for every hook whose work is advisory or reversible. One line, then
-# stand aside. Blocking reversible work because a file is missing buys no safety and
-# costs the session.
 loader_fail_open() {
   echo "$1: library ${BIONIC_LIB_MISSING:-the bionic library} not found at ${BIONIC_LIB_CANDS:-(no candidate)} — hook stepping aside; run /bionic:doctor" >&2
   exit 0
 }
-# FAIL CLOSED — for a wall over an irreversible action. Refuse, but never lock the
-# user out of the repair: four commands are permitted by WHOLE-STRING match, checked
-# here, before the hook sources anything. Whole-string and not prefix, so
-# `claude plugin update bionic@bionic; git push origin main` is refused like any
-# other push. There is no env-var override: a variable an agent turn can set on
-# itself is not a wall.
 loader_fail_closed() {
   _bl_root="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || _bl_root=""
   [ -n "$_bl_root" ] || _bl_root="$(dirname "$0")/.."
@@ -165,25 +128,9 @@ loader_fail_closed() {
     "bash $_bl_root/scripts/doctor.sh"|\
     "bash $_bl_root/scripts/setup.sh") exit 0 ;;
   esac
-  # THE ONE LINE, AND THE ONE PLACE IN THE TREE THAT SPELLS IT WITHOUT
-  # scripts/lib/refuse.sh. Every other wall calls `refuse`; this one cannot, because
-  # refuse.sh is IN the library this function exists to report missing. So the row-1
-  # wording (record/wave-01-plugin-only/s12-refusal-wording-draft.md §1) is written
-  # out here by hand, in the renderer's exact format, and tests/loader.test.sh §F
-  # drives it against AC-E1.3's own regex so the two spellings cannot drift.
-  #
-  # THE NAME IS BOUNDED IN PURE BASH for the same reason: `bionic_trunc` is in the
-  # missing library. 23 columns of prefix, 31 of fact after the name, 3 of brackets
-  # and 18 of fix leaves 25 for the hook's name, and the longest caller
-  # (`canonical-sdlc-evidence-gate`, 28) is over it — F-8's runtime-width hazard,
-  # arriving at the one site that cannot ask the truncator. The ellipsis is spent
-  # from inside the budget, exactly as bionic_trunc spends it.
   _bl_who="${1:-a bionic hook}"
   if [ "${#_bl_who}" -gt 25 ]; then _bl_who="${_bl_who:0:24}…"; fi
   printf 'bionic: load refused — %s cannot load the bionic library (run /bionic:doctor)\n' "$_bl_who" >&2
-  # THE DETAIL, on the knob only. Ruling D-1: the reader who is interrupted gets one
-  # sentence; the rest is for whoever asks. There is no hook log to write here — the
-  # library that owns logging is the one that did not load.
   if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
     cat >&2 <<BIONIC_LOADER_REFUSE
 A wall that cannot read a command refuses it rather than waving it through.
@@ -210,6 +157,7 @@ BIONIC_LOADER_REFUSE
 # The library, or nothing. `loader_fail_open` prints one stderr line and exits 0 —
 # a detector that cannot read the disk reports nothing rather than guessing.
 [ -n "$BIONIC_LIB" ] || loader_fail_open "session-start"
+. "$BIONIC_LIB/context.sh" || exit 0   # bionic_context, bionic_jq
 . "$BIONIC_LIB/root.sh"    || exit 0   # project_root
 . "$BIONIC_LIB/session.sh" || exit 0   # session_id, and its one divergence warning
 . "$BIONIC_LIB/patrol.sh"  || exit 0   # PATROL_STALE_MULTIPLIER
@@ -217,33 +165,43 @@ BIONIC_LOADER_REFUSE
 
 # The tree this hook was launched from — printed absolute in the re-arm line, and
 # the tree whose poker is asked for the interval. `$(dirname "$0")/..` and `pwd -P`
-# rather than `realpath`, which stock macOS does not ship (L-LOADER/5, L-ROOT/2).
+# rather than `realpath`, which stock macOS does not ship (L-LOADER/5, L-BIONIC_ROOT/2).
 HOOK_ROOT="$(cd "$(dirname "$0")/.." 2>/dev/null && pwd -P)" || HOOK_ROOT=""
 [ -n "$HOOK_ROOT" ] || HOOK_ROOT="$(dirname "$0")/.."
 
-# ---------------------------------------------------------------- the payload
-INPUT=""
-[ -t 0 ] || INPUT="$(cat)"
+# ------------------------------------------------- the payload, and the context
+#
+# ONE CALL (REQ-1f, lib/context.sh): the payload read at most once and only when
+# stdin is not a terminal, the cwd by the ONE ladder, the root from it, the session
+# id past the ONE guard, engagement and the run verdict as VALUES.
+#
+# THE REDIRECTION IS NOT HERE, and that is this hook's one deviation from the shape
+# the other fourteen use. lib/session.sh prints a line when the payload and the
+# environment disagree about the session id, and this hook is the single reader that
+# must SHOW that line — the L-SESSION contract, pinned at
+# tests/cross-gate-agreement.test.sh §P2. Suppression belongs at the call site, so
+# the other fourteen write `bionic_context 2>/dev/null || exit 0` and this one does
+# not.
+#
+# THE LADDER USED TO BE REVERSED HERE, and REQ-1h ended that: this hook is on the
+# library's one ladder now, in the library's order, like every other hook. The rungs
+# are named once, in lib/context.sh, and deliberately not restated here — a comment
+# naming a channel its file no longer reads is how the next reader learns the wrong
+# thing.
+bionic_context || exit 0
 
 pfield() {  # <jq path> -> the field, or empty
   command -v jq >/dev/null 2>&1 || return 0
-  printf '%s' "$INPUT" | jq -r "$1 // empty" 2>/dev/null
+  bionic_jq "$1"
 }
 SOURCE="$(pfield .source)"
-PAYLOAD_SID="$(pfield .session_id)"
-CWD="$(pfield .cwd)"
-[ -n "$CWD" ] && [ -d "$CWD" ] || CWD="${CLAUDE_PROJECT_DIR:-$PWD}"
-[ -d "$CWD" ] || CWD="$PWD"
 
 # ---------------------------------------------------------------- the project
-# One root, from the one owner (spec §3). A `.bionic` that is a SYMLINK is never a
-# root (ledger C2) — which is exactly the legacy link this hook reports further
-# down, so a worktree carrying one resolves to the main checkout and reports the
-# main checkout's state, not a second copy of it.
-ROOT="$(project_root "$CWD" 2>/dev/null)" || ROOT=""
-[ -n "$ROOT" ] || exit 0
-[ -d "$ROOT/.bionic" ] && [ ! -L "$ROOT/.bionic" ] || exit 0
-TMP="$ROOT/.bionic/tmp"
+# A `.bionic` that is a SYMLINK is never a root (ledger C2) — which is exactly the
+# legacy link this hook reports further down, so a worktree carrying one resolves to
+# the main checkout and reports the main checkout's state, not a second copy of it.
+[ -d "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic" ] || exit 0
+TMP="$BIONIC_ROOT/.bionic/tmp"
 
 # ---------------------------------------------------------------- the three channels
 #
@@ -253,16 +211,18 @@ TMP="$ROOT/.bionic/tmp"
 # probe's finding that they agree on a plain `/clear` is a measurement of one CLI
 # build, not a guarantee.
 ENV_SID="${CLAUDE_CODE_SESSION_ID:-}"
+# THE PAYLOAD'S OWN VALUE, read here rather than taken from `BIONIC_SID`. They are
+# different questions: `BIONIC_SID` is the RESOLVED id — the environment's, with the
+# payload as a witness — and this is the witness itself, printed beside the other two
+# so a reader can tell an agreement from a coincidence. Reading the resolved value
+# into this slot would make the three channels agree by construction and report
+# nothing.
+PAYLOAD_SID="$(pfield .session_id)"
 PID_SID=""
 PIDFILE="$(claude_home)/sessions/$PPID.json"
 if [ -f "$PIDFILE" ] && [ ! -L "$PIDFILE" ] && command -v jq >/dev/null 2>&1; then
   PID_SID="$(jq -r '.sessionId // empty' "$PIDFILE" 2>/dev/null)"
 fi
-
-# The current session id, through the one function every other reader calls. Its
-# stderr warning on a divergent payload is deliberately NOT suppressed: that line
-# is the L-SESSION contract, and this hook is one of the twenty readers.
-CUR="$(session_id "$PAYLOAD_SID")" || CUR=""
 
 # ---------------------------------------------------------------- engagement
 #
@@ -284,7 +244,7 @@ CUR="$(session_id "$PAYLOAD_SID")" || CUR=""
 # bound to a run that has since closed) gets the same listing prepended to
 # today's engaged block rather than a silent guess — it is not exited early,
 # because the roster/stamp/re-arm report still belongs to an engaged reader.
-RUNS="$(open_runs "$ROOT")" || RUNS=""
+RUNS="$(open_runs "$BIONIC_ROOT")" || RUNS=""
 N=$(printf '%s\n' "$RUNS" | grep -c '.')
 
 # LIVE VS OPEN (spec AC-1/AC-3, S3). `live_runs` is a FILTER over `open_runs` — see
@@ -292,7 +252,7 @@ N=$(printf '%s\n' "$RUNS" | grep -c '.')
 # unchanged) while the listing itself shows only the LIVE subset; the quiet remainder is
 # reported as one count, not a second listing, because a bystander acts on a live plan by
 # name and on a quiet one only by knowing it exists at all.
-LIVE="$(live_runs "$ROOT")" || LIVE=""
+LIVE="$(live_runs "$BIONIC_ROOT")" || LIVE=""
 LIVE_N=$(printf '%s\n' "$LIVE" | grep -c '.')
 QUIET=$((N - LIVE_N))
 
@@ -310,7 +270,7 @@ QUIET=$((N - LIVE_N))
 # still reachable: `bind` takes any open plan by name, listed or not. The HEADER above each
 # call still names the true count, so the cap never understates what is here.
 #
-# PATHS ARE RELATIVE TO THE DOCS ROOT. Every one of them shares the same long prefix (47
+# PATHS ARE RELATIVE TO THE DOCS BIONIC_ROOT. Every one of them shares the same long prefix (47
 # characters here), and a listed line PASTES STRAIGHT INTO THE BIND VERB named on the header
 # line above it: `bind` takes an operand that is absolute, project-root-relative or
 # docs-root-relative, trying the project root first and the docs root when that misses
@@ -318,7 +278,7 @@ QUIET=$((N - LIVE_N))
 # paths are printed whole rather than mangled by a prefix strip that would eat a leading
 # slash.
 RUN_LIST_CAP=8
-DOCS="$(docs_root "$ROOT" 2>/dev/null)" || DOCS=""
+DOCS="$(docs_root "$BIONIC_ROOT" 2>/dev/null)" || DOCS=""
 print_runs() {  # <newline-separated runs> -> the capped, docs-root-relative listing
   local runs="$1" total shown=0 _p
   total=$(printf '%s\n' "$runs" | grep -c '.')
@@ -360,30 +320,43 @@ print_bound_line() {  # <verdict "bound-open <plan>">
   step="$(grep -m1 '^current:' "$bplan" 2>/dev/null | tr -dc '0-9T')"
   if [ -n "$DOCS" ]; then relplan="${bplan#"$DOCS"/}"; else relplan="$bplan"; fi
   printf 'bionic: bound to %s — current: %s\n' "$relplan" "$step"
+  # THE STEP FILE, NAMED RATHER THAN INJECTED (wave-11 row 1b, design D1). The governing
+  # skill is a core plus one file per step, and the core's own rule is to read `steps/N.md`
+  # before acting at step N. Nothing enforces that — no hook can see whether a model read a
+  # file — so this line does the one thing a hook honestly can: it puts the path in front of
+  # the session at the moment the step is known, so the read is a glance away rather than a
+  # lookup. `$HOOK_ROOT` is the tree this hook was launched from, the same root the re-arm
+  # line prints and the same one `ss_interval` asks for the poker, so the path names a file
+  # in the plugin that is actually running rather than in whichever one is installed.
+  #
+  # ONLY FOR A NUMERIC STEP. A task-scale plan reads `current: T<n>`, which names no step
+  # file, and a plan with no readable `current:` leaves `$step` empty; printing
+  # `steps/T3.md` or `steps/.md` would send a reader at a path that does not exist.
+  case "$step" in
+    [0-9]|[0-9][0-9]) printf '  step file: %s/skills/canonical-sdlc/steps/%s.md\n' "$HOOK_ROOT" "$step" ;;
+  esac
 }
 
 if [ "$N" -eq 1 ]; then
   PLAN="$RUNS"
-  if ! engaged_session "$ROOT" "$CUR"; then
+  if [ "$BIONIC_ENGAGED" != 1 ]; then
     printf 'bionic: an open run exists here (%s) — invoke /bionic:canonical-sdlc to engage it\n' "$PLAN"
     exit 0
   else
-    VERDICT="$(session_run "$ROOT" "$CUR" 2>/dev/null)"
-    case "$VERDICT" in
-      bound-open\ *) print_bound_line "$VERDICT" ;;
+    case "$BIONIC_RUN_WORD" in
+      bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN" ;;
     esac
   fi
 elif [ "$N" -ge 2 ]; then
-  if ! engaged_session "$ROOT" "$CUR"; then
+  if [ "$BIONIC_ENGAGED" != 1 ]; then
     printf 'bionic: %s open runs exist here — invoke /bionic:canonical-sdlc, then bind the one you mean with: bash %s/hooks/session-poker.sh bind <plan>\n' \
       "$N" "$HOOK_ROOT"
     print_runs "$LIVE"
     print_quiet_line
     exit 0
   else
-    VERDICT="$(session_run "$ROOT" "$CUR" 2>/dev/null)"
-    case "$VERDICT" in
-      bound-open\ *) print_bound_line "$VERDICT" ;;
+    case "$BIONIC_RUN_WORD" in
+      bound-open) print_bound_line "$BIONIC_RUN_WORD $BIONIC_RUN_PLAN" ;;
       *)
         printf 'bionic: %s open runs exist here and this session is not bound to one — bind with: bash %s/hooks/session-poker.sh bind <plan>\n' \
           "$N" "$HOOK_ROOT"
@@ -410,7 +383,7 @@ done
 # A name is CLOSED when the landing gate journalled a `landing-swept/v1|…|state=MET`
 # marker for it, or when the sweeper's ledger carries an `ack` for it — the same
 # two discharges `adopt_fold` in hooks/session-poker.sh applies, mirrored here
-# rather than shelled out to, because slice POKER owns that file and this hook must
+# rather than shelled out to, because task POKER owns that file and this hook must
 # read the same disk with or without its `--report-only` verb.
 open_rows() {  # <roster file> <ack ledger file|""> -> a count
   awk -v ackfile="$2" '
@@ -456,7 +429,7 @@ for RF in "$TMP"/roster-*.state; do
   [ -L "$RF" ] && continue        # symlinks are not followed, as everywhere in tmp
   OSID="${RF##*/}"; OSID="${OSID#roster-}"; OSID="${OSID%.state}"
   [ -n "$OSID" ] || continue
-  if [ -n "$CUR" ] && [ "$OSID" = "$CUR" ]; then continue; fi
+  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
   LEDGER="$TMP/sweeper-$OSID.state"
   if [ ! -f "$LEDGER" ] || [ -L "$LEDGER" ]; then LEDGER=""; fi
   N="$(open_rows "$RF" "$LEDGER")"
@@ -477,7 +450,7 @@ done
 ss_interval() {
   local poker="$HOOK_ROOT/hooks/session-poker.sh" s=""
   if [ -f "$poker" ]; then
-    s="$( cd "$ROOT" 2>/dev/null && bash "$poker" interval 2>/dev/null )"
+    s="$( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" interval 2>/dev/null )"
     case "$s" in ''|*[!0-9]*) s="" ;; esac
     if [ -z "$s" ]; then
       s="$( bash "$poker" interval-default 2>/dev/null )"
@@ -503,7 +476,7 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep
   : > "$out" 2>/dev/null || out="/dev/null"
   case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
   set -m
-  ( cd "$ROOT" 2>/dev/null && bash "$poker" sweep ) </dev/null >"$out" 2>/dev/null &
+  ( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" sweep ) </dev/null >"$out" 2>/dev/null &
   pid=$!
   [ "$had_monitor" = "yes" ] || set +m
   if command -v sleep >/dev/null 2>&1; then
@@ -533,7 +506,7 @@ for SF in "$TMP"/patrol-*.state; do
   [ -L "$SF" ] && continue
   OSID="${SF##*/}"; OSID="${OSID#patrol-}"; OSID="${OSID%.state}"
   [ -n "$OSID" ] || continue
-  if [ -n "$CUR" ] && [ "$OSID" = "$CUR" ]; then continue; fi
+  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
   MT="$(stat -f %m "$SF" 2>/dev/null || stat -c %Y "$SF" 2>/dev/null)"
   case "$MT" in ''|*[!0-9]*) continue ;; esac
   AGE=$(( NOW - MT )); [ "$AGE" -ge 0 ] || AGE=0
@@ -544,9 +517,9 @@ done
 
 # ---------------------------------------------------------------- legacy symlinks
 LINKS=""
-for LN in "$ROOT"/.worktrees/*/.bionic; do
+for LN in "$BIONIC_ROOT"/.worktrees/*/.bionic; do
   [ -L "$LN" ] || continue
-  LINKS="${LINKS}  ${LN#"$ROOT"/} -> $(readlink "$LN" 2>/dev/null)
+  LINKS="${LINKS}  ${LN#"$BIONIC_ROOT"/} -> $(readlink "$LN" 2>/dev/null)
 "
 done
 
@@ -599,7 +572,7 @@ done
 # stops being reported the moment sweeping actually works again.
 SWEEP_FAIL_LINE=""
 if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
-  SS_DEAD_IDS="$(patrol_dead_sessions "$ROOT" "$CUR" 2>/dev/null)"
+  SS_DEAD_IDS="$(patrol_dead_sessions "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)"
   SS_YOUNG=no
   if [ -n "$SS_DEAD_IDS" ]; then
     SS_LIMIT="$(ss_interval)"
@@ -620,7 +593,7 @@ if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
     # whole set rather than one per session.
     SS_FILES="$(while IFS= read -r SS_SID; do
         [ -n "$SS_SID" ] || continue
-        patrol_session_state_files "$ROOT" "$SS_SID"
+        patrol_session_state_files "$BIONIC_ROOT" "$SS_SID"
       done <<EOF
 $SS_DEAD_IDS
 EOF

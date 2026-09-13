@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/doctor-reads.test.sh — the facts doctor gathered and never printed, and
-# the pnpm-store diagnosis (bionic 1.4.0, wave-bionic-1.4.0-update slice DOCTOR
+# the pnpm-store diagnosis (bionic 1.4.0, wave-bionic-1.4.0-update task DOCTOR
 # handoff 4.6, spec AC-23).
 #
 # THE TWO CONTRACTS UNDER TEST.
@@ -182,7 +182,7 @@ expect_match "7: and it carries a repair" "*installed agent*/bionic:setup*" "$OU
 section "Section 4: legacy hook files on disk reach the page"
 
 mkdir -p "${CHOME}/hooks"
-cp "${PAYLOAD}/hooks/protect-main.sh" "${CHOME}/hooks/protect-main.sh" 2>/dev/null
+cp "${PAYLOAD}/hooks/bash-walls.sh" "${CHOME}/hooks/bash-walls.sh" 2>/dev/null
 cp "${PAYLOAD}/hooks/stop-guard.sh" "${CHOME}/hooks/stop-guard.sh" 2>/dev/null
 
 OUT4="$(run_doctor "BIONIC_PNPM_STORE=${FULL_STORE}")"
@@ -460,7 +460,7 @@ expect_match "12f9: both renders report a problem count" \
 expect_eq "12f10: …and the core-absent machine carries exactly two more ✗ dependency rows" \
   "2" "$(( D6F_ROWS_BAD - D6F_ROWS_OK ))"
 # THE HEADLINE COUNT AGAINST THE ROWS IT STANDS FOR (1.4.4 A-10, folded in at
-# wave-01 S4 as this slice's one agreement assertion). The 1.4.4 walk measured a
+# wave-01 S4 as this task's one agreement assertion). The 1.4.4 walk measured a
 # machine whose headline said 21 while 24 ✗ rows were printed under it — the
 # collapse arithmetic subtracting one line per collapsed CLASS while the rows it
 # stood for were counted somewhere else. Two numbers on one page, disagreeing,
@@ -517,7 +517,7 @@ expect_true "12f13: …and a headline core line (the rows below are not vacuous)
 
 # THE ROW carries the moved catalog, and only its first thirteen columns: at this name
 # length `bionic_line` has no budget left for the instruction slot and truncates the route
-# with the rest of the tail (review-a A-1, promoted out of this slice — the row still tells
+# with the rest of the tail (review-a A-1, promoted out of this task — the row still tells
 # the truth about which catalog it means, and the headline below carries the command whole).
 # What this row pins is the derivation, which is what B-10 found unpinned.
 expect_match "12f14: the row's route names the re-pointed catalog" \
@@ -539,17 +539,17 @@ section "Section 7: nothing this file gathers is left unrendered"
 # THE STRUCTURAL HALF, and it is the one that keeps this class of defect from
 # coming back: a top-level assignment in doctor.sh whose name is never read
 # anywhere else in the file is a probe that ran for nobody. Four such reads are
-# what this slice was dispatched about; the assertion is that the count does not
+# what this task was dispatched about; the assertion is that the count does not
 # GROW, which is what a hardcoded allow-list gives and a bare zero would not
 # (the roster-footprint block and the dependency tallies are dead too, are out of
-# this slice, and are named here so the wall is honest about what it tolerates).
+# this task, and are named here so the wall is honest about what it tolerates).
 # WHAT THIS WALL DELIBERATELY TOLERATES, and it is a bigger list than the four
-# reads this slice was dispatched about. `DEP_ROWS` is the whole DEPENDENCIES
+# reads this task was dispatched about. `DEP_ROWS` is the whole DEPENDENCIES
 # table and `ROSTER_ROWS` the whole roster-footprint table: both are built row by
 # row on every invocation and NEITHER IS EVER PRINTED — doctor's own header still
 # describes "three tables", and only two of them reach the page. The five
 # dependency tallies and `TODO_STATE` are dead beside them. Rendering or deleting
-# those is a decision about what the report IS, not a cosmetic read, so this slice
+# those is a decision about what the report IS, not a cosmetic read, so this task
 # names them here rather than settling them quietly (DOCTOR report, concerns).
 KNOWN_DEAD="N_PRESENT N_ABSENT N_UNKNOWN N_VIOLATION N_ABSENT_WHEN_NEEDED ROSTER_TOTAL ROSTER_TOTAL_KNOWN ROSTER_ZERO TODO_STATE DEP_ROWS ROSTER_ROWS"
 if ! command -v python3 >/dev/null 2>&1; then
@@ -688,14 +688,15 @@ expect_eq "18.7: …and after" "$D10_ROWS_AFTER" "$D10_N_AFTER"
 section "Section 19: dead-session state — the fix line follows the auto-sweep's OWN failure, not mere residue (R2, ticket-30, AC-R2.4)"
 
 # THIS ROW'S TEST LIVES HERE, NOT IN tests/doctor-patrol.test.sh's Section 16
-# (plan slice 4/R4's file, which plants dead-session state and — before this
-# slice — asserted the OLD unconditional fix line; slice 4 lands after this one
+# (plan task 4/R4's file, which plants dead-session state and — before this
+# task — asserted the OLD unconditional fix line; task 4 lands after this one
 # per the plan's own dispatch note and reconciles that section against the
 # behaviour below). This suite already carries the N_FIX/headline mechanics the
 # row participates in — Section 18's own comment names "the dead-session line" as
 # one of the collapses that mechanic covers — so the row's OWN test belongs
-# beside them rather than in doctor-walls.test.sh, which is scoped to the four
-# fail-closed wall hooks and carries no dead-session fixture machinery at all.
+# beside them rather than in doctor-walls.test.sh, which is scoped to the Bash
+# walls — five of them, through ONE compound process now, two fail-closed and
+# three advisory (A-57) — and carries no dead-session fixture machinery at all.
 #
 # A PRIVATE PROJECT ROOT, NOT $REPO. Every other section in this file drives
 # doctor from inside the real bionic checkout ($REPO) because none of them reads
@@ -732,12 +733,12 @@ expect_no_match "19.1: no failure marker → no fix line naming the auto-sweep" 
 expect_no_match "19.2: …and the old unconditional line is gone too" \
   "*dead session* left state under .bionic/tmp*" "$OUT19A"
 
-# ---------- THE REGRESSION THIS SLICE CLOSES: dead-session RESIDUE alone, no
+# ---------- THE REGRESSION THIS TASK CLOSES: dead-session RESIDUE alone, no
 # failure marker, must NOT earn a fix line either — this is the exact shape the
 # pre-R2 detector fired on (`[ -n "$(patrol_dead_sessions …)" ]`), which is what
 # made ticket-30's "N problems" never reach zero between one `/clear` and the
 # next session start. The per-session PATROL `predecessor …` line still renders
-# (doctor's per-session listing is untouched by this slice) but no longer as a
+# (doctor's per-session listing is untouched by this task) but no longer as a
 # ✗ row: 12f18/18.6/18.7 above pin "every ✗ row is a problem, count >= rows on
 # the whole page" over THIS repo's own live ambient .bionic/tmp state, and a
 # predecessor line marked ✗ while contributing nothing to N_FIX (once the fix
