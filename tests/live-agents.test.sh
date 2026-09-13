@@ -37,7 +37,8 @@
 # expensive failure mode is a silent empty set: a reader that returns zero teammates from
 # a body it did not understand tells the dispatch wall the roster is clear and tells the
 # stop guard its target is dead. So a body carrying none of the three section markers the
-# harness writes is NONE — the callers' refuse-and-name-the-fix path — while a body that
+# harness writes is NONE — which the stop callers turn into refuse-and-name-the-fix, and
+# the dispatch budget into a fall back to its own roster (wave-12 D1) — while a body that
 # IS recognisably a ListAgents answer and simply lists no teammates is FRESH with zero
 # lines. §D and §F are that pair, and they are the reason both exist.
 #
@@ -326,7 +327,8 @@ section "§F — (f) an unparseable answer body is NONE, never 'all gone'"
 # The tool call WAS ListAgents and the id joins, so §J's forgery rule is not what is
 # under test here: this is a body the reader does not recognise. Returning zero
 # teammates would tell the dispatch wall the roster is clear and the stop guard its
-# target is dead. It must be NONE, which is the callers' refuse-and-name-the-fix path.
+# target is dead. It must be NONE: the stop callers refuse and name the fix, and the
+# dispatch budget counts its open roster rows instead (wave-12 D1).
 T_GARBAGE="$SANDBOX/garbage.jsonl"
 {
   entry_prompt      "2026-09-05T00:50:00.000Z" "who is running"
@@ -964,8 +966,9 @@ section "§Q — an ARRAY-shaped user prompt is a prompt (Step-6 review S-1 = C-
 #
 # THE RULE NOW. A user entry whose content is an array is a PROMPT when the array
 # carries at least one `text` block and NO `tool_result` block. Over-counting prompts
-# fails toward STALE, which is the safe side: a stale reading refuses a dispatch and
-# refuses a stop, and both refusals name their own repair.
+# fails toward STALE, which is the safe side: a stale reading refuses a stop and names its
+# repair, and makes the dispatch budget count every open roster row rather than trust a
+# reading nobody took (wave-12 D1). Both directions spend, neither hands budget away.
 #
 # FIXTURE FIDELITY. The array shape below is the real one — measured in this project's
 # own transcripts, where user entries with array content and no tool_result block occur

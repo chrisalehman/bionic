@@ -259,6 +259,20 @@ run_gate() {  # <payload-json>
   GATE_ST=$?
   GATE_TIME=$(( $(date +%s) - _t0 ))
   GATE_ERR=$(cat "$SANDBOX/.err")
+  # §no-listagents SWEEP (wave-12 T1; spec D1, AC-4.1). NOT a per-arm assertion: the
+  # criterion is "no brief in ANY state", and an arm-by-arm check would only ever cover
+  # the states somebody remembered to write. Every payload this suite drives passes
+  # through here, allowed and refused alike, and the counter is read once in the
+  # §no-listagents section at the end of the file.
+  #
+  # IT SITS ABOVE THE AC-E1.3 BLOCK ON PURPOSE. That block returns early for a refusal
+  # carrying no `bionic: ` line — which was precisely the shape of the live-agents
+  # freshness refusal this task retires. A sweep placed after it would have been blind to
+  # the one refusal it exists to hunt, and would have read empty for the wrong reason.
+  DP_NLA_SWEPT=$(( ${DP_NLA_SWEPT:-0} + 1 ))
+  case "$GATE_ERR" in
+    *"call ListAgents"*) DP_NLA_HITS="${DP_NLA_HITS:-}[$GATE_ERR] " ;;
+  esac
   # AC-E1.3, SWEPT AT THE DRIVER. Every refusal this suite produces is checked for the
   # criterion's shape as it happens, so no site can be migrated without an eval and no
   # arm has to be written twice. The counters are read in the AC-E1.3 section at the end.
@@ -305,6 +319,14 @@ run_gate() {  # <payload-json>
       GATE_VERR=$(printf '%s' "$1" | env $GATE_ENV BIONIC_WALL_VERBOSE=1 bash "$GATE" 2>&1 >/dev/null)
     fi
   fi
+  # §no-listagents SWEEP (wave-12 T1; spec D1, AC-4.1). NOT a per-arm assertion: the
+  # criterion is "no brief in ANY state", and an arm-by-arm check would only ever cover
+  # the states somebody remembered to write. Every payload this suite drives passes
+  # through here — allowed and refused alike, line and detail — and the counter is read
+  # once in the §no-listagents section at the end of the file.
+  case "$GATE_VERR" in
+    *"call ListAgents"*) DP_NLA_HITS="${DP_NLA_HITS:-}[detail: $GATE_VERR] " ;;
+  esac
   GATE_ENV="${GATE_ENV% CLAUDE_CODE_SESSION_ID=*}"
   return 0
 }
@@ -2933,36 +2955,121 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-s
 expect_status "r22jb r1 present in the fresh answer -> open=1, REFUSED" "2" "$GATE_ST"
 expect_contains "…naming the count" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
-# (c) no FRESH answer this turn — STALE and NONE both — REFUSES the whole dispatch,
-# naming the fix, before the budget arm is ever consulted (AC-8). Same roster/budget
-# as (a)/(b) so the only variable is the transcript.
-REPO=$(make_repo r22jc yes)
+# ======================== S22b-nla: A LISTAGENTS ANSWER IS NOT A PRECONDITION
+# (wave-12 T1; spec D1 and principle P-A; Chris 2026-09-13 "What the hell. I don't want
+# this to happen to begin with!" — AC-4.1, AC-4.2.)
+#
+# WHAT MOVED. Until 1.7.0 a transcript carrying no fresh ListAgents answer refused the
+# WHOLE dispatch and told the orchestrator to go call the tool first. That is a chore on
+# the normal path, and it asks for a fact the machine already holds: the roster. N deduped
+# `status=intended` rows ARE N open writers until some reading says otherwise, so the
+# count falls back to the roster and the dispatch is JUDGED rather than deferred.
+#
+# THE DISCRIMINATOR IS THE CEILING, NOT THE EXIT CODE. Each pair below holds the repo, the
+# roster and the transcript fixed and moves ONLY the writers ceiling across N+1. A rule
+# that counted 0 would pass both halves; a rule that still refused on freshness would fail
+# both; only a rule that counts exactly N passes one and refuses the other.
+
+section "S22b-nla: with no ListAgents answer the count is the open roster rows"
+
+# (a) N=2 rows, NO answer in the transcript at all, ceiling 3 -> 2+1 = 3 fits: ALLOWED.
+REPO=$(make_repo r22nla yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+R22NLA_NONE="$SANDBOX/.r22nla-none.jsonl"
+mk_transcript "$R22NLA_NONE" none
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLA_NONE")"
+expect_status "r22nla 2 open rows, no answer, ceiling 3 -> judged against 2, ALLOWED" \
+  "0" "$GATE_ST"
+expect_absent "…and nothing is said about a missing live-agents answer" \
+  "live-agents:" "$GATE_ERR"
+expect_absent "…and no tool call is demanded of the dispatcher" \
+  "call ListAgents" "$GATE_ERR"
+
+# (b) THE SAME two rows and the same empty transcript; only the ceiling moves to 2 ->
+# 2+1 = 3 passes it: REFUSED, and the count it names is the roster's own N.
+REPO=$(make_repo r22nlb yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLA_NONE")"
+expect_status "r22nlb the same two rows against a ceiling of 2 -> REFUSED on the BUDGET" \
+  "2" "$GATE_ST"
+# THE LINE, NOT ONLY THE DETAIL. A freshness refusal carries no `bionic: ` line at all, so
+# this row is what says the budget arm is the one that spoke — and, because run_gate only
+# re-drives for the detail when a `bionic: ` line was printed, it is also what keeps the
+# rows below from reading a GATE_VERR left over from an earlier arm.
+expect_contains "…and it is the budget arm that speaks, in the one line" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…naming the roster count as the live-agent count" \
+  "writers: budget=2 open=2 with-this-dispatch=3" "$GATE_VERR"
+expect_absent "…and never asking for a ListAgents call first" \
+  "call ListAgents" "$GATE_VERR"
+expect_absent "…nor refusing for want of a fresh answer" "live-agents: none" "$GATE_VERR"
+
+# (c) N IS READ, NOT ASSUMED. Three rows, same empty transcript, ceiling 3 -> open=3.
+# Without this arm a hard-coded 2 would pass (a) and (b) both.
+REPO=$(make_repo r22nlc yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+s22_roster_row "$REPO" "$SID_A" "n3"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLA_NONE")"
+expect_status "r22nlc three open rows against a ceiling of 3 -> REFUSED" "2" "$GATE_ST"
+expect_contains "…on the budget, in the one line" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…counting three, because three is what the roster holds" \
+  "writers: budget=3 open=3 with-this-dispatch=4" "$GATE_VERR"
+
+# (d) A STALE ANSWER READS THE SAME WAY. Freshness is a property of the transcript, so a
+# stale answer tells this wall nothing about any row — and telling the operator to go
+# refresh it is the very chore D1 struck. Same two rows, same ceiling of 2 as (b).
+REPO=$(make_repo r22nld yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+R22NLD_STALE="$SANDBOX/.r22nld-stale.jsonl"
+mk_transcript "$R22NLD_STALE" stale n1 n2
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLD_STALE")"
+expect_status "r22nld a STALE answer is judged against the roster too -> REFUSED" "2" "$GATE_ST"
+expect_contains "…on the budget, in the one line" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…on the budget, with the same count" \
+  "writers: budget=2 open=2 with-this-dispatch=3" "$GATE_VERR"
+expect_absent "…not on the staleness" "call ListAgents" "$GATE_VERR"
+
+# (e) THE FALLBACK IS A FALLBACK, not a new rule. When the answer IS fresh it still
+# decides: the same two rows, a fresh answer naming neither of them, and a ceiling of 1 —
+# open=0 and the dispatch is allowed. A rule that had simply started counting every row
+# would refuse here.
+REPO=$(make_repo r22nle yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-s22_roster_row "$REPO" "$SID_A" "r1"
-R22JC_STALE="$SANDBOX/.r22jc-stale.jsonl"
-mk_transcript "$R22JC_STALE" stale r1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_STALE")"
-expect_status "r22jc a STALE answer REFUSES the dispatch" "2" "$GATE_ST"
-expect_contains "…naming the state and the fix" \
-  "live-agents: stale age=" "$GATE_ERR"
-expect_contains "…the fix" "call ListAgents, then dispatch" "$GATE_ERR"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+R22NLE_FRESH="$SANDBOX/.r22nle-fresh.jsonl"
+mk_transcript "$R22NLE_FRESH" fresh W-OTHER
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLE_FRESH")"
+expect_status "r22nle a FRESH answer naming neither row still closes both -> ALLOWED" \
+  "0" "$GATE_ST"
+expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 
-R22JC_NONE="$SANDBOX/.r22jc-none.jsonl"
-mk_transcript "$R22JC_NONE" none
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_NONE")"
-expect_status "r22jc …and NONE (no ListAgents answer at all) REFUSES the same way" "2" "$GATE_ST"
-expect_contains "…naming the state" "live-agents: none age=none" "$GATE_ERR"
-expect_contains "…and the fix" "call ListAgents, then dispatch" "$GATE_ERR"
-
-# The paired negative: an EMPTY roster (no `status=intended` rows at all) needs no
-# live reading, so the same STALE transcript decides nothing — no roster row's
-# openness is in question, and refusing every dispatch on an unrelated repo would be
-# refusing dispatches that have nothing to do with the budget wall at all.
+# The paired negative: an EMPTY roster (no `status=intended` rows at all) needs no live
+# reading at all, so a STALE transcript never even reaches the reader — the loop that
+# would call it has nothing to iterate. The row below is what keeps the fallback in
+# §S22b-nla from being read as "a stale answer makes the wall say something": with no
+# rows there is nothing to count and nothing to say.
 REPO=$(make_repo r22jd yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_STALE")"
+R22JD_STALE="$SANDBOX/.r22jd-stale.jsonl"
+mk_transcript "$R22JD_STALE" stale r1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JD_STALE")"
 expect_status "r22jd an empty roster needs no live reading -> the same STALE transcript passes" \
   "0" "$GATE_ST"
 expect_absent "…and says nothing about live-agents" "live-agents:" "$GATE_ERR"
@@ -2994,73 +3101,6 @@ BUDGET_FN_BODY_MUT="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE_MUT
 expect_contains "…and the doctored body now DOES carry the token (the pin above discriminates)" \
   "landing-swept" "$BUDGET_FN_BODY_MUT"
 rm -rf "$GATE_MUT_ROOT"
-
-# ============================ S22b2: WHOSE TRANSCRIPT IT IS DECIDES THE FIX NAMED
-# (F-2 ruling, Chris 2026-09-05: dispatch is an AUTHORITY the orchestrator holds alone,
-# not a capability gated by freshness.)
-#
-# WHEN the refusal fires is unchanged — every arm in S22b above still refuses on exactly
-# the same freshness reading. What changes is the FIX it names when the dispatching
-# transcript is a SUBAGENT's own: "call ListAgents, then dispatch" is advice a dispatched
-# agent cannot follow, because ListAgents is not in its tool roster. The Step-5 auditor hit
-# precisely that, live and unplanned (auditor-report.md F-2). It is now told the thing it
-# CAN do instead: ask the orchestrator.
-#
-# A subagent's transcript is the harness's own shape — `<session-uuid>/subagents/agent-<name>-<hash>.jsonl`
-# beside the orchestrator's `<session-uuid>.jsonl`.
-#
-# THE PAIR IS THE POINT. Both halves below use the same repo shape, the same budget, the
-# same roster row and the same STALE answer. Only the transcript's own PATH differs, so
-# nothing but the path can be what moves the text.
-#
-# MUTATION NOTE: make the subagent branch of the refusal in hooks/dispatch-preflight.sh
-# print the orchestrator line again (delete the branch, keep one echo) and r22jf's two
-# text arms go red while every r22jg arm stays green. Captured in s18-mutation.log.
-
-section "S22b2: a subagent is told to ask, not to call a tool it lacks"
-
-REPO=$(make_repo r22jf yes)
-write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-s22_roster_row "$REPO" "$SID_A" "r1"
-mkdir -p "$SANDBOX/.r22jf/subagents"
-R22JF_SUB="$SANDBOX/.r22jf/subagents/agent-w99-impl-9b70c3a4dc62ba69.jsonl"
-mk_transcript "$R22JF_SUB" stale r1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JF_SUB")"
-expect_status "r22jf a SUBAGENT own transcript, same STALE answer -> still REFUSED" "2" "$GATE_ST"
-expect_contains "...keeping the live-agents prefix with the state and age every consumer parses" \
-  "live-agents: stale age=" "$GATE_ERR"
-expect_contains "...but the fix names the authority, not the tool call" \
-  "subagents do not dispatch; dispatch is the orchestrator's authority — SendMessage the orchestrator (to: main) naming what you need" \
-  "$GATE_ERR"
-expect_absent "...and never names a tool a subagent does not hold" \
-  "call ListAgents, then dispatch" "$GATE_ERR"
-
-# The orchestrator half of the pair: same staleness, a session-level transcript path, and
-# the text is the one every existing arm above already pins, byte for byte.
-REPO=$(make_repo r22jg yes)
-write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-s22_roster_row "$REPO" "$SID_A" "r1"
-R22JG_MAIN="$SANDBOX/.r22jg-session.jsonl"
-mk_transcript "$R22JG_MAIN" stale r1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JG_MAIN")"
-expect_status "r22jg the orchestrator own transcript, same STALE answer -> REFUSED" "2" "$GATE_ST"
-expect_contains "...naming the state and age the same way" "live-agents: stale age=" "$GATE_ERR"
-expect_contains "...and the orchestrator fix unchanged" "call ListAgents, then dispatch" "$GATE_ERR"
-expect_absent "...saying nothing about subagents" "subagents do not dispatch" "$GATE_ERR"
-
-# THE DISCRIMINATOR. The `subagents/` directory is what the harness uses; a file that
-# merely happens to be named `agent-*.jsonl` somewhere else is not a subagent transcript,
-# and must still get the orchestrator text. Without this arm a match on the basename alone
-# would pass the two arms above.
-mkdir -p "$SANDBOX/.r22jg-lookalike"
-R22JG_LOOKALIKE="$SANDBOX/.r22jg-lookalike/agent-not-under-subagents.jsonl"
-mk_transcript "$R22JG_LOOKALIKE" stale r1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JG_LOOKALIKE")"
-expect_status "r22jg an agent-*.jsonl NOT under subagents/ is not a subagent -> REFUSED" "2" "$GATE_ST"
-expect_contains "...with the orchestrator fix, not the subagent one" \
-  "call ListAgents, then dispatch" "$GATE_ERR"
 
 # ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
 # (spec R2, AC-27; task S16, closing the Step-5 auditor's F-1.)
@@ -3133,8 +3173,11 @@ expect_status "r22kc the same name listed TWICE is unresolvable -> still counted
 expect_contains "…open=1 on the safe direction, even though neither copy reads running" \
   "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
-# (d) FRESHNESS STILL COMES FIRST. A STALE answer refuses the whole dispatch before any
-# status is consulted — an idle row on a stale answer says nothing about now.
+# (d) A STALE `idle` IS NOT AN `idle` (wave-12 T1, D1). The status arms above all read a
+# FRESH answer. On a stale one the word says nothing about now, so the row is not closed
+# by it — it falls back to the roster and counts OPEN, and the BUDGET is what refuses.
+# Before D1 this arm refused on the staleness itself and never reached a count; the
+# outcome is the same exit, for a reason the operator can act on without a tool call.
 REPO=$(make_repo r22kd yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
@@ -3142,8 +3185,11 @@ s22_roster_row "$REPO" "$SID_A" "r1"
 R22KD_T="$SANDBOX/.r22kd.jsonl"
 mk_transcript "$R22KD_T" stale "r1:idle"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KD_T")"
-expect_status "r22kd a STALE answer refuses before the status is read" "2" "$GATE_ST"
-expect_contains "…naming the state and the fix" "call ListAgents, then dispatch" "$GATE_ERR"
+expect_status "r22kd a STALE idle does not close the row -> REFUSED on the budget" "2" "$GATE_ST"
+expect_contains "…by the budget arm, not by the staleness" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…counting the row the stale answer could not speak for" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
 # (e) THE REAL ANSWER, byte-verbatim. Everything above is synthesised from the harness's
 # shape; this arm drives the shipped hook against a body captured from this project's own
@@ -4241,6 +4287,28 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w31f" "claude-sonne
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "31f task-scale current: T3 with no approved-by is refused (any n >= 1, not just T1)" "2" "$GATE_ST"
 
+
+section "§no-listagents — no brief, in any session state, is told to call ListAgents"
+
+# READ OF THE DRIVER SWEEP INSTALLED IN run_gate. Every payload this file drives — every
+# brief shape, every roster, every transcript state, allowed and refused, line and
+# detail — has passed through that case statement by the time this runs. AC-4.1 is "any
+# brief in any state", and this is the only assertion in the suite that can carry it.
+expect_eq "no dispatch this suite drove asked for a ListAgents call" "" "${DP_NLA_HITS:-}"
+
+# THE TWO ANTI-VACUITY ARMS. An empty counter proves nothing unless the sweep both RAN
+# and DISCRIMINATES. The first says it ran over real traffic — a run_gate that never
+# reached the case statement would leave this at zero. The second says the predicate
+# still catches the retired string, so the row above is empty because no dispatch
+# printed it, not because the test stopped looking.
+expect_eq "…having swept every payload this suite drove (the sweep is not dead code)" \
+  "yes" "$([ "${DP_NLA_SWEPT:-0}" -gt 100 ] && echo yes || echo "no: ${DP_NLA_SWEPT:-0}")"
+DP_NLA_PROBE=""
+case "bionic: dispatch refused — call ListAgents, then dispatch" in
+  *"call ListAgents"*) DP_NLA_PROBE="caught" ;;
+esac
+expect_eq "…and the sweep's own predicate still catches that string when it is present" \
+  "caught" "$DP_NLA_PROBE"
 
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 
