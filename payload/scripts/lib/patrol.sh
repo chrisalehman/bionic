@@ -166,8 +166,23 @@ PATROL_STATE_ARMED_SUFFIX=".armed"
 # one of these paths is a thing the reader has to see in order to refuse it out
 # loud, and a walk that skipped it would report a session as clean while an aimed
 # path sat in the directory.
+#
+# DEDUP IS ONE `sort -u` PASS, NOT A GROWING-STRING SCAN (T16, REQ-6 follow-up).
+# The shape this replaces built a space-delimited `seen` list and re-scanned
+# the WHOLE thing (`case " $seen " in *" $sid "*)`) for every candidate id — an
+# O(n^2) cost that dominated a 400-dead-session sweep once the per-file forks
+# elsewhere in the same call chain were fixed (T6). A session id can repeat
+# here only ACROSS classes (roster-X and patrol-X both name X), never within
+# one class's glob, so nothing about ORDER is a contract: no caller reads these
+# ids as anything but a set (`patrol_dead_sessions`' containment check and
+# `hooks/session-poker.sh`'s `sweep` verb both walk the result as an unordered
+# id list; confirmed against every session-start and session-poker fixture,
+# none of which assert a position). Collecting the whole (possibly
+# duplicate-carrying) list first and deduping ONCE via `sort -u` is therefore
+# behaviour-preserving and O(n log n) instead of O(n^2). Bash 3.2 target (the
+# repo's own floor) is why this is `sort -u` and not an associative array.
 patrol_state_session_ids() {  # <root> -> one session id per line
-  local d c f base sid seen=""; d="$(tmp_root "${1:-}")"
+  local d c f base sid ids=""; d="$(tmp_root "${1:-}")"
   [ -d "$d" ] || return 0
   for c in $PATROL_STATE_CLASSES; do
     for f in "$d/$c"-*.state "$d/$c"-*.state"$PATROL_STATE_ARMED_SUFFIX"; do
@@ -178,11 +193,12 @@ patrol_state_session_ids() {  # <root> -> one session id per line
       sid="${sid%.state}"
       [ -n "$sid" ] || continue
       case "$sid" in *"/"*|.|..) continue ;; esac
-      case " $seen " in *" $sid "*) continue ;; esac
-      seen="$seen $sid"
-      printf '%s\n' "$sid"
+      ids="${ids}${sid}
+"
     done
   done
+  [ -n "$ids" ] || return 0
+  printf '%s' "$ids" | sort -u
 }
 
 # ONE SESSION'S FILES, BY EXACT PATH AND NEVER BY GLOB. The ids come off the
