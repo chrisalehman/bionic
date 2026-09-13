@@ -70,14 +70,40 @@ if ! declare -F docs_root >/dev/null 2>&1; then
   . "$(cd "$(_run_self_dir)" && pwd -P)/roots.sh"
 fi
 
-# _run_lines <file> -> the file with its line endings TRANSLATED to \n, never deleted.
-# A trailing \r is stripped from each record (CRLF) and any remaining lone \r becomes a
-# real newline (classic-Mac CR-only). Every read in this file is line-anchored, so it
-# must see real newlines: `tr -d '\r'` would collapse a CR-only plan to one line, every
-# match would miss, and the run would read as CLOSED while it was live — the
-# fail-dangerous direction (.claude/rules/hook-authoring.md).
+# normalize_newlines [file] -> that document with its line endings TRANSLATED to \n, never
+# deleted. A trailing \r is stripped from each record (CRLF: \r\n → \n) and any remaining
+# lone \r becomes a real newline (classic-Mac CR-only). Called with NO argument it reads
+# STDIN, which is the shape hooks/canonical-sdlc-governing-skill.sh needs; awk's own
+# no-file-operand behaviour is what lets one body serve both callers.
+#
+# ONE DEFINITION, HERE, SINCE epic-23 wave-12-fixit-171 (REQ-8, spec D6). There were three.
+# payload/scripts/lib/walls.sh and hooks/session-poker.sh each took a file argument; the
+# governing-skill hook defined a nested STDIN twin inside one arm. That difference in SHAPE
+# is why the three were never compared the way the audit_path copies at least were, and
+# `"$@"` is what removes it rather than picking a winner and migrating callers.
+#
+# WHY run.sh AND NOT walls.sh, which the ownership table named: this is a plan/document
+# read, `_run_lines` directly below was already a private fourth copy of the same awk, and
+# run.sh is already in the `BIONIC_LIB_WANT` of all four processes that carried or wanted a
+# copy — where walls.sh, at 3,461 lines, is in none of theirs.
+#
+# WHY IT TRANSLATES AND NEVER DELETES. Every read in this file is line-anchored, so
+# `tr -d '\r'` would collapse a CR-only plan to ONE line, every match would miss, and the
+# run would read as CLOSED while it was live — the fail-dangerous direction
+# (.claude/rules/hook-authoring.md). The evidence gate carried the same bug for the same
+# reason: a CR-only plan parsed as "not a canonical-sdlc plan" and every commit passed
+# ungated. awk splits on \n by default, so a CR-only file arrives as a single record that
+# gsub re-splits into real lines; LF and CRLF files are unaffected either way.
+normalize_newlines() {  # [file] -> LF-split text on stdout; no argument reads stdin
+  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$@"
+}
+
+# _run_lines <file> -> the same read, with an unreadable file kept SILENT. The readers below
+# walk candidate paths that can vanish between the find and the read, so this caller
+# swallows awk's complaint. The shared function above does not, because its stdin caller has
+# no file to fail on and would only be hiding a real error.
 _run_lines() {
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1" 2>/dev/null
+  normalize_newlines "$1" 2>/dev/null
 }
 
 # _run_candidates <droot> -> every file under <droot>/plans and <droot>/incidents (each
