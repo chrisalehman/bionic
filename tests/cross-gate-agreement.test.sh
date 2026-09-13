@@ -8510,14 +8510,17 @@ section "CG — the current: GRAMMAR: sched_plan_current agrees with run.sh's ru
 # awkward abstraction over two unrelated call shapes. An agreement test is the fit.
 #
 # Both parties are called FOR REAL, not compared as text — sched_plan_current's own body
-# calls _sched_plan_current_field and normalize_newlines, so all three are extracted and
-# eval'd together (§I.1's precedent, `q_poker` above); run_open is sourced from RUN_LIB
-# exactly as §PC below sources it.
+# calls _sched_plan_current_field and normalize_newlines, so the poker's two are extracted
+# and eval'd together (§I.1's precedent, `q_poker` above). `normalize_newlines` is no longer
+# among them: since epic-23 wave-12-fixit-171 (REQ-8, spec D6) it has ONE definition, in
+# payload/scripts/lib/run.sh, which this section already had in hand as RUN_LIB — so it is
+# sourced rather than extracted, which is also what the shipped poker does. run_open is
+# sourced from the same RUN_LIB exactly as §PC below sources it.
 cg_extract_fn() {  # <fn-name> -> that function's body text, from session-poker.sh (PARTY_PK)
   awk -v n="$1" '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$PARTY_PK"
 }
 cg_sched_current() {  # <plan path> -> sched_plan_current's real answer, called for real
-  ( eval "$(cg_extract_fn normalize_newlines)"
+  ( . "$RUN_LIB" >/dev/null 2>&1            # normalize_newlines is run.sh's since REQ-8/D6
     eval "$(cg_extract_fn _sched_plan_current_field)"
     eval "$(cg_extract_fn sched_plan_current)"
     sched_plan_current "$1" ) 2>/dev/null
@@ -8595,8 +8598,7 @@ LC_ALL=C awk '{
 expect_eq "CG.4 the mutant differs from the shipped file by exactly the strip line" \
   "1" "$(diff "$PARTY_PK" "$CG_MUT" | grep -c '^< ')"
 cg_sched_current_mut() {  # <plan path> -> sched_plan_current's answer off the MUTANT copy
-  ( eval "$(awk -v n=normalize_newlines \
-      '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
+  ( . "$RUN_LIB" >/dev/null 2>&1            # ditto: the mutant is a poker copy, not a lib copy
     eval "$(awk -v n=_sched_plan_current_field \
       '$0 ~ "^" n "\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$CG_MUT")"
     eval "$(awk -v n=sched_plan_current \
@@ -9602,70 +9604,137 @@ expect_eq "Refuse the user line's format string is written exactly once" "1" \
 
 
 # ============================================================
-section "AP — audit_path: three copies, one body, and a pin that goes red when they part (duplication F-2)"
+section "AP — audit_path, normalize_newlines, log_finding: ONE definition each, tree-wide (epic-23 wave-12-fixit-171 REQ-8, D6)"
 # ============================================================
 #
-# WHY THERE ARE THREE. The audit stream has to land where a consuming project cannot commit
-# it, so its path is `$HOME`-rooted and slugged from the project root — and a project that
-# got two different slugs would get two audit files, which is the whole reason each carrier
-# was given its own copy rather than a shared one. Every copy's header has said "byte-
-# identical to the copies in …" since incident 0001. NOTHING TESTED IT. T12 and T23 each
-# gave a new library a fresh copy and the count went from four hooks to three files without
-# any of them being compared, while the headers went on naming files that no longer exist.
+# WHAT THIS SECTION USED TO SAY, AND WHY IT CHANGED. Until this wave it pinned three
+# audit_path copies as AGREEING — one body by checksum, plus a mutation arm proving the
+# comparison discriminated — because consolidation to one owner had been PROMOTED (A-69)
+# rather than done, beside `normalize_newlines` ×2 and `log_finding` ×2. D6 does it. An
+# agreement pin is the best available guarantee while copies exist; it is strictly weaker
+# than the copies not existing, because copies that agree can always part again and the pin
+# only reports it after the fact.
 #
-# NOT CONSOLIDATED, DELIBERATELY (A-69). One owner is the right end state and it is promoted
-# with a charter, beside `normalize_newlines` ×2 and `log_finding` ×2. What lands here is the
-# agreement the headers have been claiming: one body, and a red pin the moment they differ.
+# WHERE THEY LIVE NOW, and why not walls.sh. The ownership table named
+# `payload/scripts/lib/walls.sh` as the default owner. It is 3,461 lines and neither
+# hooks/session-poker.sh nor hooks/canonical-sdlc-governing-skill.sh sources it or any of
+# its prerequisites, so making it the owner would have added it to two more hooks'
+# `BIONIC_LIB_WANT` — a FAIL-CLOSED list, where an absent library refuses everything the
+# hook judges — and parsed 3,461 lines per tick and per Write for three small functions.
+# `root.sh` (200 lines) and `run.sh` (602 lines) are already in the WANT of all four
+# processes and already sourced ABOVE every use site, so nothing widened to get here:
 #
-# BODIES, NOT DEFINITIONS — §I.1's rule and `fn_body`'s reason for existing. Each carrier
-# explains its copy in its own words, so the comments above the signature legitimately
-# differ; only the executable text may not.
+#   audit_path          payload/scripts/lib/root.sh   — a pure function of a project root,
+#                                                       beside project_root which resolves it
+#   log_finding         payload/scripts/lib/root.sh   — audit_path's caller; the audit
+#                                                       stream stays with the path that names it
+#   normalize_newlines  payload/scripts/lib/run.sh    — a plan/document text read, beside
+#                                                       _run_lines, which now delegates to it
+#
+# THE PIN IS A COUNT, NOT A COMPARISON. A copy that cannot exist cannot part. The three
+# directories are named rather than globbed (§N.1's reason), and `payload/hooks` is
+# deliberately NOT among them: it is a symlink to `hooks/`, so walking it would count every
+# hook twice and turn "exactly one" into a number nobody could read.
+#
+# NON-VACUITY IS SEPARATE AND COMES FIRST. "Exactly one definition" is also satisfied by a
+# tree where the function was deleted and one stub remains, so each function is CALLED FOR
+# REAL off its owner below — the slug's arithmetic, both line-ending shapes, and a finding
+# written to a fake $HOME — before the count is allowed to mean anything.
 
 AP_TREE="$(cd "$BIONIC_HOOKS_DIR/.." && pwd -P)"
 AP_LIB="$AP_TREE/payload/scripts/lib"
 [ -d "$AP_LIB" ] || AP_LIB="$AP_TREE/scripts/lib"
-AP_PARTIES="$AP_LIB/walls.sh $AP_LIB/stop.sh $AP_TREE/hooks/canonical-sdlc-governing-skill.sh"
+AP_SCRIPTS="$(dirname "$AP_LIB")"
+AP_H="$SANDBOX/ap-home"; mkdir -p "$AP_H"
 
-# --- (a) NON-VACUITY. `fn_body` returns nothing for a name it cannot find, and three
-# nothings have one md5 too. Each party is on disk, defines the name exactly once at column
-# zero, and yields a body that carries the slug's own arithmetic. ---
-for _apf in $AP_PARTIES; do
-  expect_eq "AP.1 $(basename "$_apf") is on disk" "yes" \
-    "$([ -r "$_apf" ] && echo yes || echo no)"
-  expect_eq "AP.1 …defining audit_path exactly once, at column zero" "1" \
-    "$(/usr/bin/grep -cE '^audit_path\(\)' "$_apf")"
-  expect_contains "AP.1 …and its body is the real one, not an empty extraction" \
-    "cksum" "$(fn_body "$_apf" audit_path)"
+ap_count() {  # <fn> <dir>… -> how many DISTINCT files in those dirs define <fn> at column zero
+  local fn="$1"; shift
+  local d pats=""
+  for d in "$@"; do pats="$pats $d/*.sh"; done
+  # shellcheck disable=SC2086
+  /usr/bin/grep -lE "^$fn\\(\\)" $pats 2>/dev/null | sort -u | wc -l | tr -d " "
+}
+ap_where() {  # <fn> -> the one file defining it, or every one of them, newline-separated
+  local fn="$1"
+  /usr/bin/grep -lE "^$fn\(\)" \
+    "$AP_TREE/hooks"/*.sh "$AP_SCRIPTS"/*.sh "$AP_LIB"/*.sh 2>/dev/null | sort -u
+}
+
+# --- (a) THE COUNT, one row per function, with the owner named. ---
+expect_eq "AP.1 audit_path is defined in exactly one file under hooks/ + payload/" \
+  "1" "$(ap_count audit_path "$AP_TREE/hooks" "$AP_SCRIPTS" "$AP_LIB")"
+expect_eq "AP.1 …and that file is payload/scripts/lib/root.sh" \
+  "$AP_LIB/root.sh" "$(ap_where audit_path)"
+expect_eq "AP.1 normalize_newlines is defined in exactly one file under hooks/ + payload/" \
+  "1" "$(ap_count normalize_newlines "$AP_TREE/hooks" "$AP_SCRIPTS" "$AP_LIB")"
+expect_eq "AP.1 …and that file is payload/scripts/lib/run.sh" \
+  "$AP_LIB/run.sh" "$(ap_where normalize_newlines)"
+expect_eq "AP.1 log_finding is defined in exactly one file under hooks/ + payload/" \
+  "1" "$(ap_count log_finding "$AP_TREE/hooks" "$AP_SCRIPTS" "$AP_LIB")"
+expect_eq "AP.1 …and that file is payload/scripts/lib/root.sh" \
+  "$AP_LIB/root.sh" "$(ap_where log_finding)"
+
+# --- (b) THE FORMER CARRIERS CARRY NOTHING. Named one by one rather than inferred from the
+# count, so that a re-introduced copy says WHICH file grew it back. ---
+expect_eq "AP.2 walls.sh defines none of the three" "0" \
+  "$(/usr/bin/grep -cE '^(audit_path|normalize_newlines|log_finding)\(\)' "$AP_LIB/walls.sh")"
+expect_eq "AP.2 lib/stop.sh defines none of the three" "0" \
+  "$(/usr/bin/grep -cE '^(audit_path|normalize_newlines|log_finding)\(\)' "$AP_LIB/stop.sh")"
+expect_eq "AP.2 canonical-sdlc-governing-skill.sh defines none of the three" "0" \
+  "$(/usr/bin/grep -cE '^(audit_path|normalize_newlines|log_finding)\(\)' \
+       "$AP_TREE/hooks/canonical-sdlc-governing-skill.sh")"
+expect_eq "AP.2 session-poker.sh defines none of the three" "0" \
+  "$(/usr/bin/grep -cE '^(audit_path|normalize_newlines|log_finding)\(\)' \
+       "$AP_TREE/hooks/session-poker.sh")"
+
+# --- (c) NON-VACUITY: each function CALLED FOR REAL off its owner. A count is satisfied by
+# a stub; these are not. ---
+AP_PROJ="/tmp/ap fixture/My Proj!"
+AP_SUM="$(printf '%s' "$AP_PROJ" | cksum | cut -d' ' -f1)"
+expect_eq "AP.3 audit_path slugs the basename and cksums the whole path" \
+  "$AP_H/.claude/logs/My-Proj--$AP_SUM/sdlc-audit.md" \
+  "$( ( HOME="$AP_H"; . "$AP_LIB/root.sh" >/dev/null 2>&1; audit_path "$AP_PROJ" ) 2>/dev/null )"
+( HOME=""; . "$AP_LIB/root.sh" >/dev/null 2>&1; audit_path "$AP_PROJ" ) >/dev/null 2>&1
+expect_eq "AP.3 …and with no \$HOME it withholds rather than naming a relative path" \
+  "1" "$?"
+
+printf 'a\r\nb\r\n' > "$SANDBOX/ap-crlf.txt"
+printf 'a\rb\r'      > "$SANDBOX/ap-cr.txt"
+expect_eq "AP.3 normalize_newlines TRANSLATES CRLF, file argument" "a|b|" \
+  "$( ( . "$RUN_LIB" >/dev/null 2>&1; normalize_newlines "$SANDBOX/ap-crlf.txt" ) | tr '\n' '|' )"
+expect_eq "AP.3 …and CR-only, which a deleting \`tr -d\` would collapse to one line" "a|b|" \
+  "$( ( . "$RUN_LIB" >/dev/null 2>&1; normalize_newlines "$SANDBOX/ap-cr.txt" ) | tr '\n' '|' )"
+expect_eq "AP.3 …and the same body serves the STDIN caller the governing hook is" "a|b|" \
+  "$( ( . "$RUN_LIB" >/dev/null 2>&1; normalize_newlines < "$SANDBOX/ap-cr.txt" ) | tr '\n' '|' )"
+
+AP_LF_ERR="$( ( HOME="$AP_H"
+    . "$AP_LIB/root.sh" >/dev/null 2>&1
+    BIONIC_FINDING_CHANNEL="ap-fixture"
+    BIONIC_FINDING_SUBJECT="$AP_PROJ/plan.md"
+    bionic_finding_root() { printf '%s' "$AP_PROJ"; }
+    log_finding ap-check "a detail" ) 2>&1 >/dev/null )"
+expect_contains "AP.3 log_finding echoes the finding to stderr" \
+  "canonical-sdlc [ap-check]: a detail" "$AP_LF_ERR"
+expect_contains "AP.3 …and appends it to the audit file the caller's contract addressed" \
+  "ap-fixture ap-check: a detail ($AP_PROJ/plan.md)" \
+  "$(cat "$AP_H/.claude/logs/My-Proj--$AP_SUM/sdlc-audit.md" 2>/dev/null)"
+
+# --- (d) THE MUTATION ARM: the count discriminates. A throwaway tree laid out like the
+# shipped one, with ONE extra carrier re-growing all three definitions — the exact drift
+# this section replaced an agreement pin to prevent — must read 2, not 1. Without this arm
+# a `grep` that silently matched nothing would report "exactly one" as a pass at zero. ---
+AP_MUT="$SANDBOX/ap-second-definition-mutant"
+rm -rf "$AP_MUT"; mkdir -p "$AP_MUT/hooks" "$AP_MUT/scripts/lib"
+cp "$AP_LIB/root.sh" "$AP_LIB/run.sh" "$AP_MUT/scripts/lib/"
+{ printf '#!/bin/bash\n'
+  printf 'audit_path() {\n  :\n}\n'
+  printf 'normalize_newlines() {\n  :\n}\n'
+  printf 'log_finding() {\n  :\n}\n'
+} > "$AP_MUT/hooks/a-carrier-that-grew-them-back.sh"
+for _apfn in audit_path normalize_newlines log_finding; do
+  expect_eq "AP.4 a second carrier of $_apfn reads as 2, so AP.1 can go red" \
+    "2" "$(ap_count "$_apfn" "$AP_MUT/hooks" "$AP_MUT/scripts" "$AP_MUT/scripts/lib")"
 done
-
-# --- (b) THE PIN. One body across the three, by checksum. ---
-AP_SUMS="$(for _apf in $AP_PARTIES; do fn_body "$_apf" audit_path | shasum | cut -d' ' -f1; done | sort -u)"
-expect_eq "AP.2 the three audit_path bodies are one text" "1" \
-  "$(printf '%s\n' "$AP_SUMS" | /usr/bin/grep -c .)"
-
-# --- (c) THE COUNT. Exactly three, tree-wide — so a fourth copy has to be added to this
-# pin rather than drifting outside it, which is precisely how the count reached three
-# unnoticed. The three directories are named rather than globbed, for §N.1's reason. ---
-expect_eq "AP.3 audit_path is defined in exactly three files across hooks/, scripts/ and scripts/lib/" \
-  "3" "$(/usr/bin/grep -lE '^audit_path\(\)' \
-           "$AP_TREE/hooks"/*.sh "$(dirname "$AP_LIB")"/*.sh "$AP_LIB"/*.sh 2>/dev/null \
-           | sort -u | wc -l | tr -d ' ')"
-
-# --- (d) THE MUTATION ARM, which is the half §R never had: it BUILT a mutant and asserted
-# nothing about it. Doctor one copy in a throwaway tree — the slug's separator, a one-
-# character change that would give one project two audit files and nothing else — and the
-# comparison above must go red. The doctoring is itself asserted, so a sed that matched
-# nothing cannot be mistaken for a pin that discriminates. ---
-AP_MUT="$SANDBOX/audit-path-mutant"; mkdir -p "$AP_MUT"
-for _apf in $AP_PARTIES; do cp "$_apf" "$AP_MUT/$(basename "$_apf")"; done
-AP_VICTIM="$AP_MUT/walls.sh"
-sed -e "s|'%s/.claude/logs/%s-%s/sdlc-audit.md'|'%s/.claude/logs/%s_%s/sdlc-audit.md'|" \
-    "$AP_VICTIM" > "$AP_VICTIM.new" && mv "$AP_VICTIM.new" "$AP_VICTIM"
-expect_ne "AP.4 the mutant's audit_path really was doctored" \
-  "$(fn_body "$AP_LIB/walls.sh" audit_path)" "$(fn_body "$AP_VICTIM" audit_path)"
-AP_MUT_SUMS="$(for _apf in "$AP_MUT"/*.sh; do fn_body "$_apf" audit_path | shasum | cut -d' ' -f1; done | sort -u)"
-expect_eq "AP.5 …and the pin goes red on it: two texts, not one" "2" \
-  "$(printf '%s\n' "$AP_MUT_SUMS" | /usr/bin/grep -c .)"
 
 # ============================================================
 section "needs-resolve — every canonical-sdlc needs: entry names a real skill (dead-route drift, epic-23 wave-12-fixit-171 REQ-7)"
