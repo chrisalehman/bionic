@@ -83,33 +83,19 @@ fi
 
 # ─── FILE SCOPE: hooks/context-spend.sh's audit path ─────────────────────────
 #
-# Carried over at COLUMN ZERO and byte-identical to the two other copies in the
-# tree — divergence would give one project two audit files, which is the whole
-# reason three copies are deliberate rather than shared.
-
-
-# Incident 0001: the audit stream must live where a consuming project cannot
-# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
-# durable — the same $HOME/.claude/ audit path the archived epic-10 poker used
-# (that work is recoverable at tag archive/epic-10-never-die).
-# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
-# collision-resistant across same-named projects under different parents.
-# cksum and basename are POSIX — no new dependency.
-# THREE COPIES, ONE BODY, AND THE OTHER TWO ARE NAMED HERE:
-# payload/scripts/lib/walls.sh (the PreToolUse|Bash process) and
-# hooks/canonical-sdlc-governing-skill.sh (the PreToolUse|Write process). This one
-# serves the turn-end process. Divergence would give one project two audit files;
-# tests/cross-gate-agreement.test.sh §AP compares the three bodies by checksum and
-# proves by mutation that the comparison discriminates. Deliberate duplication, one
-# copy per process, no shared lib — consolidation is promoted, not done here.
-# [INSTRUMENT]
-audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
-  [ -n "${HOME:-}" ] || return 1
-  local base sum
-  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
-  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
-}
+# `audit_path` LIVES IN root.sh NOW (epic-23 wave-12-fixit-171, REQ-8, spec D6). This file
+# carried the third of three byte-identical copies, at column zero, under a header asking
+# each next reader to keep them identical. tests/cross-gate-agreement.test.sh §AP is a COUNT
+# now — exactly one definition under hooks/ and payload/ — rather than a checksum comparison
+# of three bodies that could always part again.
+#
+# SOURCED THE WAY fold.sh IS, ten lines above, and for the same reason: hooks/stop.sh already
+# sources root.sh at :153, above this library at :165, so in the shipped process this guard
+# never fires. It is here for the suites that drive this file directly.
+if ! declare -F audit_path >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/root.sh"
+fi
 
 # ─── FILE SCOPE: hooks/landing-gate.sh's constants and helpers ───────────────
 #

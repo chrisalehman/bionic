@@ -470,28 +470,14 @@ esac
 
 DOCS_ROOT=$(docs_root "$PROJECT_ROOT_FROM_PATH")
 
-# Incident 0001: the audit stream must live where a consuming project cannot
-# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
-# durable — the same $HOME/.claude/ audit path the archived epic-10 poker used
-# (that work is recoverable at tag archive/epic-10-never-die).
-# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
-# collision-resistant across same-named projects under different parents.
-# cksum and basename are POSIX — no new dependency.
-# THREE COPIES, ONE BODY, AND THE OTHER TWO ARE NAMED HERE:
-# payload/scripts/lib/walls.sh (the PreToolUse|Bash process) and
-# payload/scripts/lib/stop.sh (the turn-end process). This one serves the
-# PreToolUse|Write process. Divergence would give one project two audit files;
-# tests/cross-gate-agreement.test.sh §AP compares the three bodies by checksum and
-# proves by mutation that the comparison discriminates. Deliberate duplication, one
-# copy per process, no shared lib — consolidation is promoted, not done here.
-# [INSTRUMENT]
-audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
-  [ -n "${HOME:-}" ] || return 1
-  local base sum
-  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
-  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
-}
+# `audit_path` IS payload/scripts/lib/root.sh's NOW (epic-23 wave-12-fixit-171, REQ-8, spec
+# D6), sourced at :286, well above this point. This hook carried one of three byte-identical
+# copies under a header asking each next reader to keep them identical. Incident 0001's rule
+# is unchanged — the audit stream is $HOME-rooted, per-project and durable, so a consuming
+# project cannot commit it whatever its .gitignore says, and the slug is still
+# <basename>-<cksum of the absolute path>. What changed is that there is one body to keep
+# right instead of three to keep equal, and tests/cross-gate-agreement.test.sh §AP counts
+# definitions now instead of comparing bodies.
 
 BASENAME=$(basename "$FILE_PATH")
 ENFORCE=0
@@ -827,16 +813,18 @@ rigor_rank() {
     *) echo -1 ;;
   esac
 }
-log_finding() {  # $1=check-id $2=detail — never blocks, always returns 0
-  local f
-  if f=$(audit_path "$PROJECT_ROOT_FROM_PATH"); then
-    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) governing-skill $1: $2 ($FILE_PATH)"
-    mkdir -p "$(dirname "$f")" 2>/dev/null \
-      && printf '%s\n' "$line" >> "$f" 2>/dev/null
-  fi
-  echo "canonical-sdlc [$1]: $2" >&2
-  return 0
-}
+
+# `log_finding` IS payload/scripts/lib/root.sh's NOW (epic-23 wave-12-fixit-171, REQ-8, spec
+# D6), sourced at :286. It had two definitions — this one and the evidence gate's — and they
+# were NOT byte-identical: one body, three different values. Those three are the caller's
+# now, declared here, where `$PROJECT_ROOT_FROM_PATH` and `$FILE_PATH` are both already
+# resolved. The root is declared as a FUNCTION rather than a value because the gate's costs a
+# subprocess and must stay lazy; this hook's is a plain variable, so its resolver is one
+# printf. The findings below are unchanged: log-only, never blocking, every read fail-open.
+# [INSTRUMENT]
+BIONIC_FINDING_CHANNEL="governing-skill"
+BIONIC_FINDING_SUBJECT="$FILE_PATH"
+bionic_finding_root() { printf '%s' "$PROJECT_ROOT_FROM_PATH"; }
 
 # rigor-override: <user> <date> derived=<v> chosen=<v> (epic-14 AC-10/AC-11).
 # Only PRESENCE of the key is detected — the fields are never validated,
@@ -1179,17 +1167,17 @@ A wave- or epic-scale spec must satisfy one of three:
       }
 
       # The pointer target is read off disk, so it needs the same normalization
-      # `$CONTENT` got at the top of this hook — the stdin twin of the evidence
-      # gate's normalize_newlines(). The template this arm follows was copied for
-      # its path half and not its read half: CRLF survives a line-anchored grep
-      # (`[[:space:]]` eats the trailing \r), but a CR-only document arrives as
-      # ONE record, so no `## Design` is ever at a line start and a legitimate
-      # target false-BLOCKs. CRLF coverage does not catch this class — see
+      # `$CONTENT` got at the top of this hook. `normalize_newlines` is
+      # payload/scripts/lib/run.sh's now (epic-23 wave-12-fixit-171, REQ-8, spec D6),
+      # sourced at :288, and with no argument it reads STDIN — which is exactly the shape
+      # this arm used to define a nested twin for, and the reason the three copies were
+      # never compared: they differed in SHAPE, not in body. The template this arm follows
+      # was copied for its path half and not its read half: CRLF survives a line-anchored
+      # grep (`[[:space:]]` eats the trailing \r), but a CR-only document arrives as ONE
+      # record, so no `## Design` is ever at a line start and a legitimate target
+      # false-BLOCKs. CRLF coverage does not catch this class — see
       # `.claude/rules/hook-authoring.md`, and c14 for the case that does.
       # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-      normalize_newlines() {  # a document on stdin → the same document, LF-split
-        awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }'
-      }
 
       DESIGN_POINTER=$(yaml_get design)
       # Presence-only, matching the `rigor-override:` waiver precedent: the
