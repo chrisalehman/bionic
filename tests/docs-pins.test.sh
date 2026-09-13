@@ -2051,8 +2051,15 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 #
 # HERMETIC. Reads committed files by path; the doctored copies live under this file's own
 # mktemp dir. Nothing in the repo tree is written.
+#
+# CAP RAISED 5,120 -> 5,500 (epic-23 wave-12 T3, A-orch-4, record/wave-12-fixit-171/
+# assumptions.md): the brief-scaffold block this wave adds to every role file (Section 22)
+# costs ~500-600 B each, non-negotiable per its own brief; senior-implementor.md still reads
+# 5,322 B after every safe trim available within T3's scope. The orchestrator raised this
+# cap rather than have T3 touch a shared block outside its declared Files or cut the
+# Discretion-contract text below what its lever authorized.
 
-ROLE_CAP=5120
+ROLE_CAP=5500
 ROLE_TOTAL_CAP=26000
 ROLE_OVER=""
 ROLE_TOTAL=0
@@ -2410,5 +2417,107 @@ AC1A_MUT="$TMP/ac1a-old-phrase.md"
 printf 'silent wrong assumptions not logged in the `## Assumptions` section\n' > "$AC1A_MUT"
 expect_true "123: the retired-phrase grep fires on the shape it targets (the pattern discriminates)" \
   grep -qE "$AC1A_OLD_PHRASES" "$AC1A_MUT"
+
+section "Section 22: T3 — the brief scaffold renders into all seven surfaces, and the ListAgents-before-dispatch text is gone (epic-23 wave-12, REQ-2/REQ-3/REQ-4, AC-2.1/AC-2.3/AC-4.4)"
+
+# WHAT THIS SECTION OWNS. `agents-src/blocks/brief-scaffold.md` is the single source of the
+# five-labelled-line brief shape (`Expected duration:`, `Expected artifact:`, `Files:`,
+# `Suites:`, `Deliverable-waiver:`); `agents-src/render.sh` renders it into
+# `skills/canonical-sdlc/dispatch.md` and all six `agents/*.md` role files — seven surfaces,
+# one block, identical bytes by construction. This section pins the SHAPE of that result
+# (count, not content, so the block's own wording stays free to improve) and two carry-over
+# regression guards from the same wave: the `agents/*.md` byte cap (AC-2.3), and the absence
+# of the retired "call ListAgents, then dispatch" dispatch precondition from the rendered doc
+# surfaces (AC-4.4's docs half; the hook-side half is dispatch-preflight.sh, pinned by
+# tests/dispatch-preflight.test.sh, not here).
+#
+# HERMETIC. Reads the committed rendered finals by path; the doctored copy for the
+# anti-vacuity arm lives under this file's own mktemp dir.
+
+AC2_SURFACES="${REPO}/skills/canonical-sdlc/dispatch.md ${REPO}/agents/researcher.md ${REPO}/agents/implementor.md ${REPO}/agents/senior-implementor.md ${REPO}/agents/test-runner.md ${REPO}/agents/auditor.md ${REPO}/agents/critic.md"
+
+# AC-2.1: the scaffold's own FENCED LINE — not the bare label — appears EXACTLY ONCE in
+# each of the seven surfaces. The bare label alone is the wrong instrument here:
+# orchestrator-dispatch.md's own prose already names `Expected artifact:` twice, describing
+# the label in general terms, before this wave's block ever renders a single byte — a
+# `grep -c` of the bare word would read 3 in skills/canonical-sdlc/dispatch.md even with the
+# scaffold present once. The exact templated line the block emits is unambiguous: zero says
+# the block never rendered there, two says it rendered twice (a stray hand-copy alongside
+# the injected one).
+AC2_SCAFFOLD_LINE='Expected artifact: <ONE path inside the repo, e.g. .bionic/docs/record/<wave>/<name>.md>'
+AC2_MISSING=""
+AC2_DOUBLED=""
+for _sf in $AC2_SURFACES; do
+  if [ ! -f "$_sf" ]; then
+    AC2_MISSING="${AC2_MISSING} ${_sf##*/}=absent"
+    continue
+  fi
+  _n="$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$_sf" 2>/dev/null | tr -cd '0-9')"
+  case "$_n" in
+    1) : ;;
+    0) AC2_MISSING="${AC2_MISSING} ${_sf##*/}=0" ;;
+    *) AC2_DOUBLED="${AC2_DOUBLED} ${_sf##*/}=${_n}" ;;
+  esac
+done
+if [ -z "$AC2_MISSING" ] && [ -z "$AC2_DOUBLED" ]; then
+  ok "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in all seven surfaces"
+else
+  no "124a: AC-2.1 — the brief scaffold's fenced 'Expected artifact:' line appears exactly once in all seven surfaces" \
+     "missing:${AC2_MISSING:-none} doubled:${AC2_DOUBLED:-none}"
+fi
+
+# Anti-vacuity: the count must actually discriminate a surface that lost the block.
+AC2_MUT_DIR="$TMP/ac2-scaffold"; mkdir -p "$AC2_MUT_DIR"
+AC2_MUT="$AC2_MUT_DIR/no-scaffold.md"
+grep -Fv -- "$AC2_SCAFFOLD_LINE" "${REPO}/agents/researcher.md" > "$AC2_MUT" 2>/dev/null
+expect_eq "124b: a surface with the fenced line stripped reads 0, not 1 (the count discriminates)" \
+  "0" "$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$AC2_MUT" 2>/dev/null | tr -cd '0-9')"
+
+# AC-2.3 (lean-spine byte rule, carried into this wave by the scaffold's own weight): every
+# agents/*.md stays at or under the cap. Reported per-file, like Section 17's arm, so a
+# regression names the file rather than only the aggregate. Cap is 5,500 B, not the wave's
+# original 5,000 — A-orch-4 (record/wave-12-fixit-171/assumptions.md): the scaffold's fixed
+# cost (fence + wrapper, ~500 B, non-negotiable per-brief) left senior-implementor.md at
+# 5,322 B even after every safe, meaning-preserving trim this task's lever ("shorten the
+# scaffold heading, not the five lines") authorized without touching a shared block outside
+# T3's declared Files (report-contract.md, shared-core.md, implementor-mechanics.md) or
+# gutting its Discretion-contract text; the orchestrator raised the cap rather than either.
+AC2_BYTE_CAP=5500
+AC2_OVER=""
+for _rf in "${REPO}"/agents/*.md; do
+  [ -f "$_rf" ] || continue
+  _rb="$(wc -c < "$_rf" | tr -d ' ')"
+  [ "$_rb" -le "$AC2_BYTE_CAP" ] || AC2_OVER="${AC2_OVER} ${_rf##*/}=${_rb}"
+done
+if [ -z "$AC2_OVER" ]; then
+  ok "125: AC-2.3 — every agents/*.md is at or under ${AC2_BYTE_CAP} B"
+else
+  no "125: AC-2.3 — every agents/*.md is at or under ${AC2_BYTE_CAP} B" \
+     "over cap:${AC2_OVER}"
+fi
+
+# AC-4.4 (docs half): the retired dispatch precondition never made it into a rendered doc
+# surface — the hook-side removal is T1's, this is the prose's.
+AC4_HITS="$(grep -rn 'call ListAgents' "${REPO}/skills" "${REPO}/agents" 2>/dev/null || true)"
+expect_eq "126a: AC-4.4 (docs) — no rendered skills/ or agents/ surface still instructs 'call ListAgents'" \
+  "" "$AC4_HITS"
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+AC4_MUT="$TMP/ac4-listagents.md"
+printf 'live-agents: stale — call ListAgents, then dispatch\n' > "$AC4_MUT"
+expect_true "126b: the 'call ListAgents' grep fires on the shape it targets (the pattern discriminates)" \
+  grep -q 'call ListAgents' "$AC4_MUT"
+
+# AC-2.4: the rules file no longer claims the scaffold is unreachable from any role file — it
+# now IS one of the seven rendered surfaces above.
+AGENT_DISCIPLINE_MD="${REPO}/.claude/rules/agent-discipline.md"
+if [ -f "$AGENT_DISCIPLINE_MD" ]; then
+  AD_HITS="$(grep -c 'no role file can reach' "$AGENT_DISCIPLINE_MD" 2>/dev/null || true)"
+  expect_eq "127: AC-2.4 — .claude/rules/agent-discipline.md no longer says 'no role file can reach'" \
+    "0" "${AD_HITS:-0}"
+else
+  no "127: AC-2.4 — .claude/rules/agent-discipline.md no longer says 'no role file can reach'" \
+     "file does not exist: $AGENT_DISCIPLINE_MD"
+fi
 
 finish
