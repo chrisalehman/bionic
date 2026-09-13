@@ -864,17 +864,23 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # nobody has taken, while an `idle` row is a reading the harness made and this wall
   # believes.
   #
-  # ON A STALE OR MISSING ANSWER (exit 3/4) this function refuses to answer at all —
-  # printing `<state> <age>` instead of `<open> <claimed>` and returning that same
-  # exit code — because every remaining row would read the same way (freshness is a
-  # property of the TRANSCRIPT, not of any one name), and the CALLER turns that into
-  # AC-8's whole-dispatch refusal before any budget arm is measured. An EMPTY roster
-  # (no `status=intended` row at all) never calls the reader and can never hit this:
-  # there is nothing whose openness a stale answer would leave in doubt.
+  # ON A STALE OR MISSING ANSWER (exit 3/4) THIS FUNCTION STILL ANSWERS (D1, wave-12).
+  # It used to refuse to — printing `<state> <age>` and returning 3/4, which the caller
+  # turned into a whole-dispatch refusal naming a ListAgents call as the repair. That made
+  # a chore a PRECONDITION of a judgement, and it is struck: no hook requires the model to
+  # perform an act before it will judge one (spec P-A). The fallback is the roster itself,
+  # which this wall already owns and already reads — every remaining deduped
+  # `status=intended` row counts OPEN, which is the same fail-closed direction the
+  # ambiguity arm takes. So the answer is ALWAYS `<open> <claimed>` and the exit is ALWAYS
+  # 0; a dispatch is judged against a count that may be generous, never deferred.
+  #
+  # THE READER IS NOT DEMOTED, only made optional. A FRESH answer still decides every row
+  # it can speak to — an `idle` row still closes, an absent row still closes — and the
+  # Patrol tick still consumes the same reader unchanged. Only the case where there is
+  # nothing to read has stopped being an error.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
-                            #   or "<stale|none> <age|none>" (exit 3/4, not fresh)
-    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed=""
-    local la_out la_rc la_rest la_state la_age
+    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
+    local la_out la_rc
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -884,6 +890,15 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       case "$seen" in *"|${nm}|"*) continue ;; esac
       seen="${seen}${nm}|"
 
+      # ONCE THE ANSWER IS UNREADABLE, STOP ASKING. Freshness is a property of the
+      # TRANSCRIPT, so a reader that said STALE or NONE for one row will say it for every
+      # row after it. Asking again would re-pay the reader's miss per row and could not
+      # change a verdict. From here the roster is the answer: each remaining row counts
+      # OPEN (`la_rc=0` below), which is what "the count of open rows IS the live-agent
+      # count" means when there is no live answer to consult.
+      if [ -n "$notfresh" ]; then
+        la_rc=0
+      else
       # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
       # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
       # size and mtime — but the per-row call below runs inside a command substitution, and
@@ -908,6 +923,14 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       # prints nothing on stdout, so this capture is that line and nothing else.
       la_rc=0
       la_out=$( { live_row_open "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
+      # STALE (3) AND NONE (4) BECOME OPEN, not a refusal. The reader's own stderr line
+      # stays captured in `la_out` and discarded: it named a ListAgents call as the
+      # repair, which is no longer anybody's job, and letting it out would put the
+      # retired chore back in front of the operator by another route.
+      case "$la_rc" in
+        3|4) notfresh=1; la_rc=0 ;;
+      esac
+      fi
       case "$la_rc" in
         0)
           open=$(( open + 1 ))
@@ -915,13 +938,6 @@ if [ -n "$PARALLEL_BUDGET" ]; then
           [ -n "$claims" ] && claimed=$(( claimed + 1 ))
           ;;
         1) : ;;
-        3|4)
-          la_rest="${la_out#live-agents: }"
-          la_state="${la_rest%% *}"
-          la_age="${la_rest#*age=}"
-          printf '%s %s' "$la_state" "$la_age"
-          return "$la_rc"
-          ;;
       esac
     done < "$f"
     printf '%s %s' "$open" "$claimed"
@@ -957,42 +973,20 @@ standdown\` computes the batch), or re-run Step 0's probe and raise the line if 
 machine genuinely has the room."
   }
 
-  # WHOSE TRANSCRIPT IS IT (F-2 ruling, 2026-09-05). The harness writes a dispatched
-  # agent's own transcript to `<session-uuid>/subagents/agent-<name>-<hash>.jsonl`, beside
-  # the orchestrator's `<session-uuid>.jsonl`. Both the directory and the filename are
-  # required: a file merely named `agent-*.jsonl` somewhere else is a session's, not a
-  # subagent's.
-  budget_is_subagent() {  # <transcript path> -> 0 when the path is a dispatched agent's own
-    case "$1" in
-      */subagents/agent-*.jsonl) return 0 ;;
-      *)                         return 1 ;;
-    esac
-  }
-
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
   # field every other liveness reader in this wave keys off (context-spend.sh,
   # execution-recorder.sh, patrol-duties-gate.sh, stop-guard.sh).
   BUDGET_TRANSCRIPT=$(_jq '.transcript_path')
 
+  # NO ARM BETWEEN THE COUNT AND THE CEILINGS (D1, wave-12; Chris 2026-09-13 "I don't
+  # want this to happen to begin with"). There used to be one here: a STALE or absent
+  # ListAgents answer refused the whole dispatch, telling the orchestrator to call the
+  # tool and come back — and telling a dispatched agent, which holds no such tool, to ask
+  # the orchestrator instead. Both halves are gone. `budget_roster_counts` now always
+  # answers `<open> <claimed>`, falling back to the roster's own open rows when there is
+  # no answer to read, so the three ceilings below are the only thing left between a
+  # brief and its dispatch.
   BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE" "$BUDGET_TRANSCRIPT")
-  BUDGET_RC=$?
-  if [ "$BUDGET_RC" -eq 3 ] || [ "$BUDGET_RC" -eq 4 ]; then
-    # A STALE or NONE answer means no roster row's openness can be trusted either
-    # way — refuse the WHOLE dispatch and name the fix, rather than guess (AC-8).
-    #
-    # WHICH fix depends on who is dispatching. Dispatch is an AUTHORITY the orchestrator
-    # holds alone, not a capability gated by freshness (F-2 ruling, 2026-09-05): a
-    # dispatched agent never dispatches, it asks. Telling one to "call ListAgents" names a
-    # tool that is not in its roster — no act available to it can ever satisfy the
-    # precondition — so it is told what it CAN do. The `live-agents:` prefix and the
-    # state/age fields are the same on both branches, because every consumer parses those.
-    if budget_is_subagent "$BUDGET_TRANSCRIPT"; then
-      echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — subagents do not dispatch; dispatch is the orchestrator's authority — SendMessage the orchestrator (to: main) naming what you need" >&2
-    else
-      echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — call ListAgents, then dispatch" >&2
-    fi
-    exit 2
-  fi
   BUDGET_OPEN="${BUDGET_COUNTS%% *}"
   BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
   BUDGET_UNMEASURED=""
