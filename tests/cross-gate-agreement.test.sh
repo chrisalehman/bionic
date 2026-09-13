@@ -3954,8 +3954,13 @@ N_SRC_VALUES=$(grep -oE '^[[:space:]]*C_SOURCE="[a-z]*"' "$DP_N" \
 
 # Driven, not just grepped: three briefs, three routes to a path, and what the writer does with
 # each now that it never guesses. A LABELED slot-free path is `declared` and lands; an UNLABELED
-# prose path and a TEMPLATED `<slot>` are both REFUSED at dispatch (exit 2, no roster row) —
-# the withdrawal, asserted from the writer's own output in the paired exit-AND-inventory shape.
+# prose path and a TEMPLATED `<slot>` are both REFUSED at dispatch (no roster row) — the
+# withdrawal, asserted from the writer's own output in the paired verdict-AND-inventory shape.
+#
+# THE REFUSAL IS A `deny` VERDICT, NOT AN EXIT STATUS (wave-12 T17). Both refused briefs above
+# carry a second shape fault — neither declares `Files:` or `Suites:` — and the wall now spends
+# a multi-fault brief as ONE PreToolUse deny on stdout, exit 0, so the model reads every fault
+# rather than the first. A row reading the status alone would call that an ALLOW.
 NSRC=$(new_repo "source-vocab")
 write_plan "$NSRC/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 # Run in the CURRENT shell (never a command-substitution subshell) so the wall's own exit
@@ -3966,18 +3971,29 @@ n_dispatch() {  # <name> <prompt> — runs the wall in this shell; its exit is t
       hook_event_name:"PreToolUse", tool_name:"Agent",
       tool_input:{description:"a dispatch", subagent_type:"implementor", name:$n, prompt:$p},
       tool_use_id:("toolu_01" + $n)}' \
-    | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
+    | "${NENV[@]}" bash "$PARTY_DP" 2>/dev/null
+}
+# n_verdict <status> <stdout> -> allow | exit2 | deny — both of the wall's wires, read together.
+n_verdict() {
+  case "$2" in *'"permissionDecision":"deny"'*) printf 'deny'; return 0 ;; esac
+  case "$1" in
+    0) printf 'allow' ;;
+    2) printf 'exit2' ;;
+    *) printf 'exit%s' "$1" ;;
+  esac
 }
 n_row() { grep -F "|name=$1|" "$NSRC/.bionic/tmp/roster-$SID_A.state" 2>/dev/null | tail -1; }
 
-n_dispatch declaring 'Expected artifact: .bionic/docs/record/declared.md
-Suites: tests/widget.test.sh'; N_ST=$?
-expect_eq "a LABELED slot-free path passes the wall" "0" "$N_ST"
+N_OUT=$(n_dispatch declaring 'Expected artifact: .bionic/docs/record/declared.md
+Suites: tests/widget.test.sh'); N_ST=$?
+expect_eq "a LABELED slot-free path passes the wall" "allow" "$(n_verdict "$N_ST" "$N_OUT")"
 expect_contains "…and records source=declared" "|source=declared|" "$(n_row declaring)"
-n_dispatch inferring 'the notes go in .bionic/docs/record/inferred.md when done'; N_ST=$?
-expect_eq "an UNLABELED record/ path is REFUSED at dispatch (no inference)" "2" "$N_ST"
-n_dispatch filling 'Expected artifact: .bionic/docs/record/<name>.md'; N_ST=$?
-expect_eq "a TEMPLATED <slot> path is REFUSED at dispatch (no fill)" "2" "$N_ST"
+N_OUT=$(n_dispatch inferring 'the notes go in .bionic/docs/record/inferred.md when done'); N_ST=$?
+expect_eq "an UNLABELED record/ path is REFUSED at dispatch (no inference)" "deny" \
+  "$(n_verdict "$N_ST" "$N_OUT")"
+N_OUT=$(n_dispatch filling 'Expected artifact: .bionic/docs/record/<name>.md'); N_ST=$?
+expect_eq "a TEMPLATED <slot> path is REFUSED at dispatch (no fill)" "deny" \
+  "$(n_verdict "$N_ST" "$N_OUT")"
 
 # ------------------------------------------------- N.5 the ghost row, asked of every writer
 #
@@ -4002,9 +4018,10 @@ N_REFUSED=$(jq -n --arg s "$SID_A" --arg c "$NGH" \
     tool_input:{description:"a dispatch", subagent_type:"implementor", name:"ghosted",
                 prompt:"Go and do the thing. Report back when you are finished."},
     tool_use_id:"toolu_01GHOST"}')
-printf '%s' "$N_REFUSED" | "${NENV[@]}" bash "$PARTY_DP" >/dev/null 2>&1
+N_WALL_OUT=$(printf '%s' "$N_REFUSED" | "${NENV[@]}" bash "$PARTY_DP" 2>/dev/null)
 N_WALL_ST=$?
-expect_eq "the wall refuses a brief naming no inferable deliverable" "2" "$N_WALL_ST"
+expect_eq "the wall refuses a brief naming no inferable deliverable" "deny" \
+  "$(n_verdict "$N_WALL_ST" "$N_WALL_OUT")"
 N_INV_BEFORE=$(cat "$NGH/.bionic/tmp/roster-$SID_A.state" 2>/dev/null; echo "[no roster]")
 
 # Now both stop-side writers, for the dispatch that never happened.
