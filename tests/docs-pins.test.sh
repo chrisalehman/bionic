@@ -2520,4 +2520,34 @@ else
      "file does not exist: $AGENT_DISCIPLINE_MD"
 fi
 
+# T15 (record/wave-12-fixit-171/assumptions.md, A-orch-5): the scaffold's own `Suites:` line
+# comment must carry no token ending in `.test.sh`. The dispatch wall lifts any such token from
+# a line starting `Suites:` as the agent's suite budget, so a brief that pastes this block
+# verbatim would record the literal glob `*.test.sh` — a budget the wall's substring match can
+# never expand, refusing the agent every suite. Pins the ABSENCE of that shape across all seven
+# rendered surfaces, not just the source block, since render.sh is what a session actually reads.
+AC2_SUITES_HITS=""
+for _sf in $AC2_SURFACES; do
+  if [ ! -f "$_sf" ]; then
+    AC2_SUITES_HITS="${AC2_SUITES_HITS} ${_sf##*/}=absent"
+    continue
+  fi
+  _hit="$(grep -n '^Suites:' "$_sf" 2>/dev/null | grep -o '[^[:space:]]*\.test\.sh' || true)"
+  if [ -n "$_hit" ]; then
+    AC2_SUITES_HITS="${AC2_SUITES_HITS} ${_sf##*/}=${_hit}"
+  fi
+done
+if [ -z "$AC2_SUITES_HITS" ]; then
+  ok "128a: T15 — the scaffold's 'Suites:' line carries no .test.sh token in any of the seven surfaces"
+else
+  no "128a: T15 — the scaffold's 'Suites:' line carries no .test.sh token in any of the seven surfaces" \
+     "hits:${AC2_SUITES_HITS}"
+fi
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+AC2_SUITES_MUT="$TMP/ac2-suites-token.md"
+printf 'Suites: none   # or *.test.sh tokens only\n' > "$AC2_SUITES_MUT"
+expect_true "128b: the .test.sh-token grep fires on the shape it targets (the pattern discriminates)" \
+  grep -qE '^Suites:.*\.test\.sh' "$AC2_SUITES_MUT"
+
 finish
