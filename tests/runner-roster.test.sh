@@ -464,4 +464,124 @@ rr_drive "$T7" "--dry-run"
 expect_eq "7.8 --dry-run refuses too" "2" "$RR_RC"
 expect_absent "7.9 …and prints no width" "JOBS=" "$RR_OUT"
 
+# ============================================================
+section "§8 a suite marked \`# runner: solo\` is held out of the parallel batch (T20, A-orch-28)"
+# ============================================================
+#
+# THE DEFECT (why-session-start-slow.md, floor-057caa2-run2.txt): tests/run.sh drains its
+# roster through `xargs -P "$JOBS"`, up to eight-wide, and a suite bounding wall-clock
+# seconds of ONE drive is dilated by however many siblings share the CPU with it — measured
+# 1.270s alone, 3.395s inside an eight-wide batch on a quiet machine, same tree. A suite that
+# declares itself timing-bound with a `# runner: solo` header comment (within its first 30
+# lines) must run ALONE, after the rest of the batch has fully drained, so its own bound
+# measures its own drive rather than a batch it happens to share.
+#
+# THE FIXTURE. Three trivial siblings each claim a marker under $RR8_MARKS/running/ for the
+# full second they sleep, then remove it. One suite — named "aaa-solo" so the roster's
+# alphabetical order puts it FIRST, guaranteeing xargs bundles it into the very first
+# concurrent round under the OLD scheduler — polls for 1.2s (24 x 0.05s) and records whether
+# it EVER saw a sibling's marker. Under the unfixed runner all four suites launch together at
+# width 2, so aaa-solo's poll window (1.2s) overlaps the siblings' 1s sleep and it fails its
+# own assertion — RED. Fixed, aaa-solo is excluded from the parallel batch entirely and only
+# launched once the batch (and every sibling's cleanup) has finished, so it observes nothing —
+# GREEN. This is a real concurrency observation, not a timing guess: no wall clock is bounded
+# here, only "was a sibling ever alive while I ran".
+
+T8="$TMPROOT/t8"
+rr_tree "$T8"
+RR8_RING="$TMPROOT/t8-ring"
+mkdir -p "$(dirname "$RR8_RING")"
+# A CLEAR reading (band 0) at ceiling 2 -> JOBS=2, so the first round is two-wide and the
+# alphabetically-first suite (aaa-solo, under the unfixed runner) is bundled with a sibling.
+printf '%s|44|0|0.1|2\n' "$RR_NOW" > "$RR8_RING"
+
+RR8_MARKS="$TMPROOT/t8-marks"
+mkdir -p "$RR8_MARKS/running"
+
+# rr8_sibling <name> — claims $RR8_MARKS/running/<name> for a full second, a marker any
+# concurrently-running suite can observe, then a trivial green assertion.
+rr8_sibling() {
+  local dir="$1" name="$2"
+  { printf '#!/bin/bash\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf ': > "$RR8_MARKS/running/%s"\n' "$name"
+    printf 'sleep 1\n'
+    printf 'rm -f "$RR8_MARKS/running/%s"\n' "$name"
+    printf 'section "%s"\n' "$name"
+    printf 'expect_eq "%s ran" "x" "x"\n' "$name"
+    printf 'finish\n'
+  } > "$dir/tests/$name.test.sh"
+}
+for RR8_N in sib-a sib-b sib-c; do rr8_sibling "$T8" "$RR8_N"; done
+
+# THE SOLO SUITE ITSELF — declares itself with the marker convention verbatim, then polls.
+{ printf '#!/bin/bash\n'
+  printf '# runner: solo\n'
+  printf 'set -uo pipefail\n'
+  printf '. "$(dirname "$0")/lib/assert.sh"\n'
+  printf 'SEEN=no\n'
+  printf 'RR8_I=0\n'
+  printf 'while [ "$RR8_I" -lt 24 ]; do\n'
+  printf '  if ls "$RR8_MARKS"/running/* >/dev/null 2>&1; then SEEN=yes; fi\n'
+  printf '  sleep 0.05\n'
+  printf '  RR8_I=$((RR8_I + 1))\n'
+  printf 'done\n'
+  printf ': > "$RR8_MARKS/solo.ran"\n'
+  printf 'section "aaa-solo"\n'
+  printf 'expect_eq "aaa-solo never observed a live sibling drive" "no" "$SEEN"\n'
+  printf 'finish\n'
+} > "$T8/tests/aaa-solo.test.sh"
+expect_contains "8.1 the solo suite really carries the marker convention verbatim" \
+  "# runner: solo" "$(cat "$T8/tests/aaa-solo.test.sh")"
+
+rm -f "$RR8_MARKS"/solo.ran
+RR8_OUT="$( cd "$T8" && \
+  RR8_MARKS="$RR8_MARKS" \
+  BIONIC_PRESSURE_RING="$RR8_RING" \
+  BIONIC_NOW_EPOCH="$RR_NOW" \
+  BIONIC_TEST_JOBS_CEILING="2" \
+  bash tests/run.sh 2>&1 )"
+RR8_RC=$?
+
+expect_eq "8.2 the solo suite really ran (its own marker exists)" "yes" \
+  "$([ -f "$RR8_MARKS/solo.ran" ] && echo yes || echo no)"
+expect_eq "8.3 the run is green: aaa-solo never shared the CPU with a live sibling" "0" "$RR8_RC"
+expect_absent "8.4 …and its own assertion did not fail" \
+  "FAIL: aaa-solo never observed a live sibling drive" "$RR8_OUT"
+expect_contains "8.5 …the whole tally is four passed, none failed" \
+  "Gating: 4 passed, 0 failed" "$RR8_OUT"
+# THE ROSTER-ORDER PRINTING IS UNCHANGED (must keep working unchanged): the printed labels
+# are still exactly the glob, as a set, solo suite included.
+expect_eq "8.6 the printed labels are still exactly the glob (solo suite included)" \
+  "$(rr_glob "$T8")" "$(rr_labels "$RR8_OUT")"
+
+# --serial ALREADY runs one at a time in roster order, so the marker changes nothing there —
+# proved rather than assumed: the same tree under --serial is green too, aaa-solo included.
+rm -f "$RR8_MARKS"/solo.ran
+RR8_SERIAL_OUT="$( cd "$T8" && \
+  RR8_MARKS="$RR8_MARKS" \
+  BIONIC_PRESSURE_RING="$RR8_RING" \
+  BIONIC_NOW_EPOCH="$RR_NOW" \
+  BIONIC_TEST_JOBS_CEILING="2" \
+  bash tests/run.sh --serial 2>&1 )"
+RR8_SERIAL_RC=$?
+expect_eq "8.7 --serial is unaffected by the marker: still green" "0" "$RR8_SERIAL_RC"
+expect_eq "8.8 …and the solo suite still ran under --serial" "yes" \
+  "$([ -f "$RR8_MARKS/solo.ran" ] && echo yes || echo no)"
+
+# --dry-run lists a solo suite as such, rather than folding it silently into the width line.
+RR8_DRY_OUT="$( cd "$T8" && \
+  RR8_MARKS="$RR8_MARKS" \
+  BIONIC_PRESSURE_RING="$RR8_RING" \
+  BIONIC_NOW_EPOCH="$RR_NOW" \
+  BIONIC_TEST_JOBS_CEILING="2" \
+  bash tests/run.sh --dry-run 2>&1 )"
+expect_contains "8.9 --dry-run still prints the width" "JOBS=2" "$RR8_DRY_OUT"
+expect_contains "8.10 …and lists the solo suite by name" "aaa-solo.test.sh" "$RR8_DRY_OUT"
+expect_contains "8.11 …labelled solo, not folded silently into the width" "solo" "$RR8_DRY_OUT"
+# PAIRED NEGATIVE: a plain sibling is not mislabelled solo.
+expect_absent "8.12 …and an ordinary sibling is not listed as solo" "sib-a.test.sh" \
+  "$(printf '%s\n' "$RR8_DRY_OUT" | grep -i solo)"
+
 finish

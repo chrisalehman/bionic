@@ -263,6 +263,28 @@ if [ -n "$_roster_refusals" ]; then
   exit 2
 fi
 
+# ── TIMING-BOUND SUITES RUN SOLO (T20, A-orch-28; why-session-start-slow.md) ──
+#
+# THE DEFECT. The default mode drains its roster through `xargs -P "$JOBS"`, up to
+# eight-wide, and a suite that bounds WALL-CLOCK SECONDS of one drive is dilated by
+# however many siblings share the CPU with it during that drive — measured 1.270s
+# alone, 3.395s inside an eight-wide batch on an otherwise-quiet machine, same tree
+# (floor-057caa2-run2.txt). The bound is right to keep; the scheduling is what was
+# wrong.
+#
+# THE MARKER. A suite that declares itself timing-bound carries a header comment
+# line, verbatim, `# runner: solo`, within its first 30 lines. Such a suite is held
+# out of the parallel batch and run alone, one at a time, AFTER the batch has fully
+# drained — on the runner's own otherwise-idle process — so its wall-clock assertion
+# measures its own drive rather than a batch it happens to share. This changes
+# SCHEDULING ONLY: roster-order printing, the tally, and the `--serial` path (which
+# already runs one suite at a time, in roster order, and therefore never shares a
+# solo suite's drive with anything) are unaffected.
+_is_solo_suite() {  # <file> -> 0 if it declares `# runner: solo` in its first 30 lines
+  [ -r "$1" ] || return 1
+  head -n 30 "$1" 2>/dev/null | grep -qE '^# runner: solo[[:space:]]*$'
+}
+
 # ── job width from the machine's own pressure rung (S9, spec AC-15, R4) ──────
 # Sample now, then read the median-smoothed rung over the ceiling Step 0 derived
 # (BIONIC_TEST_JOBS_CEILING; the old literal default of 8 is the fallback for a
@@ -308,6 +330,11 @@ case "$JOBS" in ''|*[!0-9]*) JOBS=8 ;; esac
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "JOBS=$JOBS"
+  # A DRY RUN LISTS SOLO SUITES AS SUCH (T20) — the width line alone would fold a
+  # timing-bound suite silently into the parallel count it is in fact held out of.
+  for _dry_file in "$@"; do
+    _is_solo_suite "$_dry_file" && echo "solo: ${_dry_file##*/}"
+  done
   exit 0
 fi
 
@@ -367,6 +394,10 @@ echo "$ENV_STAMP"
 
 QUEUE="$TMP/queue"; : >"$QUEUE"
 export BIONIC_TEST_QUEUE="$QUEUE" BIONIC_TEST_WORK="$TMP"
+# SOLO is the sub-list of QUEUE's labels (T20) that carry the `# runner: solo`
+# marker: still enqueued into QUEUE, for the roster-order report walk, but held out
+# of the parallel LAUNCH file below and run afterward, one at a time.
+SOLO="$TMP/solo"; : >"$SOLO"
 
 # ── THE ADOPTION WALL (wave-01 verification-cannot-lie S10, spec AC-12) ──────
 #
@@ -529,6 +560,12 @@ run() {  # run <label> <cmd...>   — gating
     _verdict "$label" "$rc" "$TMP/${label}.out"
   else
     printf '%s\t%s\n' "$label" "$*" >>"$QUEUE"
+    # SOLO SUITES ARE STILL ENQUEUED (roster-order printing depends on QUEUE
+    # holding every label), but also named here so the drain below can hold them
+    # out of the parallel LAUNCH file (T20).
+    if [ -n "$_suite" ] && _is_solo_suite "$_suite"; then
+      printf '%s\n' "$label" >>"$SOLO"
+    fi
   fi
 }
 echo "Gating suites:"
@@ -556,9 +593,22 @@ if [ "$SERIAL" -eq 0 ]; then
   while IFS="$(printf '\t')" read -r label _queued_cmd; do
     [ -n "$label" ] || continue
     [ -f "$TMP/${label}.refused" ] && continue
+    # SOLO SUITES SKIP THE PARALLEL LAUNCH FILE (T20) — they run below, alone,
+    # once this batch has drained.
+    grep -qxF "$label" "$SOLO" 2>/dev/null && continue
     printf '%s\n' "$label" >>"$LAUNCH"
   done <"$QUEUE"
   [ -s "$LAUNCH" ] && xargs -P "$JOBS" -n1 bash "$SELF" --one <"$LAUNCH"
+  # THEN THE SOLO SUITES, ONE AT A TIME, ON THE NOW-IDLE RUNNER (T20, A-orch-28).
+  # Reuses the exact `--one` worker every parallel suite already runs through —
+  # same capture files, same PASS/FAIL shape — just launched serially instead of
+  # under xargs, so nothing else is contending for the CPU during its drive.
+  if [ -s "$SOLO" ]; then
+    while IFS= read -r _solo_label; do
+      [ -n "$_solo_label" ] || continue
+      bash "$SELF" --one "$_solo_label"
+    done <"$SOLO"
+  fi
   while IFS="$(printf '\t')" read -r label _queued_cmd; do
     [ -n "$label" ] || continue
     _label "$label"
