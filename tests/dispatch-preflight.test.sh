@@ -4120,6 +4120,69 @@ S27K_ROW_DELIV=$(roster_field "$ROW" deliverable)
 expect_eq "27k …but its deliverable= is cut at exactly its own 300-char cap" \
   "300" "${#S27K_ROW_DELIV}"
 
+# --- S27l: A 70-SUITE BUDGET LANDS WHOLE — the item-COUNT cap, raised (T19, A-orch-19.1) ---
+#
+# S27i/j proved the CHAR cut is gone (T18). This is the separate, third layer the walk
+# found: `suite_names()`'s own token-COUNT bound, `SUITES_MAX` — the exact "your own suite
+# is off your budget" shape that bit T9 at 70 declared suites. 70 is chosen to match that
+# incident directly; the cap this task raises (200) holds it with room to spare.
+S27L_SUITES=""; S27L_EXPECT=""
+for _s27l in $(seq -w 1 70); do
+  _s27l_name="count-cap-suite-${_s27l}.test.sh"
+  S27L_SUITES="${S27L_SUITES}tests/${_s27l_name}, "
+  S27L_EXPECT="${S27L_EXPECT:+$S27L_EXPECT }${_s27l_name}"
+done
+S27L_SUITES="${S27L_SUITES%, }"
+REPO=$(make_repo r27l yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27l.md
+Expected duration: 5 minutes
+Progress: .bionic/docs/record/w27-progress.md, cadence 5 minutes
+Suites: ${S27L_SUITES}" "w27-count-70")"
+expect_status "27l a brief declaring 70 real suites PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27L_ROW_SUITES=$(roster_field "$ROW" suites_allowed)
+expect_eq "27l …and suites_allowed= carries all 70, none dropped" \
+  "$S27L_EXPECT" "$S27L_ROW_SUITES"
+expect_status "27l …the 70th specifically" "0" \
+  "$(printf '%s\n' "$S27L_ROW_SUITES" | tr ' ' '\n' | grep -qxF 'count-cap-suite-70.test.sh' && echo 0 || echo 1)"
+expect_absent "27l …no WARN, because 70 is under the raised cap" "WARN" "$GATE_ERR"
+
+# --- S27m: OVER THE RAISED CAP IS LOUD — a WARN naming the cap and what it dropped ---
+#
+# 201 tokens (SUITES_MAX + 1) so the cap this task sets (200) is exercised at its own
+# boundary. The prior behaviour here was a SILENT exit 0 (A-orch-19.1) — the same class of
+# bug T9 fixed on the char cut and T18 fixed on the preflight-sanitize char cut, now fixed
+# on the count cap. `expect_absent` on the OLD (silent) shape would pass vacuously if the
+# WARN plumbing were simply missing, so this checks both the cap enforcement (200 kept, the
+# 201st absent from the row) AND the WARN naming that exact 201st token.
+S27M_SUITES=""
+for _s27m in $(seq -w 1 201); do
+  S27M_SUITES="${S27M_SUITES}tests/count-cap-over-${_s27m}.test.sh, "
+done
+S27M_SUITES="${S27M_SUITES%, }"
+REPO=$(make_repo r27m yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27m.md
+Expected duration: 5 minutes
+Progress: .bionic/docs/record/w27-progress.md, cadence 5 minutes
+Suites: ${S27M_SUITES}" "w27-count-201")"
+expect_status "27m a 201-suite brief still PASSES (the cap warns, it does not refuse)" \
+  "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27M_ROW_SUITES=$(roster_field "$ROW" suites_allowed)
+expect_status "27m …suites_allowed= holds exactly the cap, 200" "200" \
+  "$(printf '%s\n' "$S27M_ROW_SUITES" | tr ' ' '\n' | grep -c 'count-cap-over-')"
+expect_absent "27m …the 201st is NOT on the row" "count-cap-over-201.test.sh" "$S27M_ROW_SUITES"
+expect_contains "27m …and dispatch WARNs, naming the cap" "WARN" "$GATE_ERR"
+expect_contains "27m …by number" "200" "$GATE_ERR"
+expect_contains "27m …naming the dropped 201st token specifically" \
+  "count-cap-over-201.test.sh" "$GATE_ERR"
+expect_status "27m …never a SILENT exit 0 — stderr is non-empty" "0" \
+  "$([ -n "$GATE_ERR" ] && echo 0 || echo 1)"
+
 # ============================================================================
 section "S28: one regression per run (AC-24)"
 # ============================================================================

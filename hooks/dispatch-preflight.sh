@@ -1330,7 +1330,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # "Expected artifact: a written report. Put it at PATH when done." named a path under
     # a canonical label and was refused for naming none (R6-4). The span is the one the
     # label owns, bounded at the next label or a blank line as every other field is.
-    function span_paths(h) { return paths(spanof(h), DELIV_MAX) }
+    function span_paths(h) { return paths(spanof(h), DELIV_MAX, "") }
     # The declared deliverable: walk EVERY deliverable-kind label hit in position order
     # and return the paths of the first that yields any. Iterating (rather than taking
     # only firsthit) recovers a real labeled line that an earlier, pathless
@@ -1373,8 +1373,20 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # THE WAIVER IS A WHOLE WORD, matched on the collapsed span rather than anywhere
     # in it: a brief reading `Suites: none` waives, and one reading
     # `Suites: tests/a.test.sh — none of the others` declares one suite and does not.
-    function suite_names(s,   n, arr, i, t, b, out, seen, c) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
+    # A CAP HIT IS LOUD (T19, A-orch-19.1). SUITES_MAX/FILES_MAX bound a ROW FIELD, not a
+    # judgment, and this repo has grown past the old 60-token bound on its own suite roster —
+    # so the count cap silently dropping the 61st-and-up suite reproduced the exact "your own
+    # suite is off your budget" refusal T9/T18 already fixed on the CHAR side.
+    #
+    # THE WARNING RIDES THE SAME PIPE AS EVERY OTHER LIFTED FIELD, never awks own stderr:
+    # this whole awk program is invoked under a trailing 2>/dev/null (below) so a malformed
+    # brief cannot leak an awk runtime diagnostic onto the real hook stderr, and that redirect
+    # would silence a print to /dev/stderr here just as thoroughly (both resolve to the SAME
+    # underlying fd 2 the shell already pointed at /dev/null). Printing a `<kind>_capwarn=`
+    # line instead puts it on stdout, where the bash side field_of and warn() -- the same
+    # path the ABSENT-field warning already uses -- carry it to the real stderr untouched.
+    function suite_names(s,   n, arr, i, t, b, out, seen, c, dropped) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
         if (t == "" || istemplate(t)) continue
@@ -1382,21 +1394,27 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         if (b !~ /\.test\.sh$/ && !(b == "run.sh" && index(t, "/") > 0)) continue
         if (seen[b]) continue
         seen[b] = 1
-        out = (out == "" ? b : out " " b)
-        if (++c >= SUITES_MAX) break
+        if (c < SUITES_MAX) { out = (out == "" ? b : out " " b); c++ }
+        else { dropped = (dropped == "" ? b : dropped " " b) }
+      }
+      if (dropped != "") {
+        print "suites_capwarn=Suites: line exceeds the " SUITES_MAX "-suite cap — dropped: " dropped
       }
       if (out != "") return out
       if (tolower(collapse(s)) ~ /^none([^a-z0-9]|$)/) return "none"
       return ""
     }
-    function paths(s, maxn,   n, arr, i, t, out, seen, c) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
+    function paths(s, maxn, warnlabel,   n, arr, i, t, out, seen, c, dropped) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
         if (!ispath(t) || seen[t]) continue
         seen[t] = 1
-        out = (out == "" ? t : out "," t)
-        if (++c >= maxn) break
+        if (c < maxn) { out = (out == "" ? t : out "," t); c++ }
+        else if (warnlabel != "") { dropped = (dropped == "" ? t : dropped " " t) }
+      }
+      if (warnlabel != "" && dropped != "") {
+        print "files_capwarn=" warnlabel " line exceeds the " maxn "-path cap — dropped: " dropped
       }
       return out
     }
@@ -1409,10 +1427,15 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # How many paths a `Files:` span reports and how many basenames a `Suites:`
       # span reports. Both are bounds on a ROW FIELD, not on a judgment: the row is
       # one line the fleet parses by key, and a brief that names a hundred files has
-      # a problem the wall cannot fix. Wide enough that no real task brief in this
-      # repo has ever reached either.
-      FILES_MAX = 60
-      SUITES_MAX = 60
+      # a problem the wall cannot fix.
+      #
+      # RAISED 60 -> 200 (T19, A-orch-19.1): the old 60-token bound silently dropped the
+      # 61st-and-up suite of a real budget — this repo carries 70+ suites of its own, so 60
+      # was already narrower than the whole roster with no headroom left. 200 holds the
+      # whole roster with room to grow, and hitting IT is loud: see warncap() below, never a
+      # silent exit 0.
+      FILES_MAX = 200
+      SUITES_MAX = 200
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
       #
@@ -1551,7 +1574,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # absent one warns — so a templated or missing progress path lifts nothing and is
       # warned, never filled (the deliverable rule applied to the field with no wall).
       h = firsthit("progress")
-      if (h > 0) { v = paths(spanof(h), 1); if (v != "") print "progress=" v }
+      if (h > 0) { v = paths(spanof(h), 1, ""); if (v != "") print "progress=" v }
       # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the one
       # label with a relaxed separator — whitespace will do, because the contract writes
       # it inside the progress sentence rather than on a line of its own — and that
@@ -1582,7 +1605,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # ambiguity: a task touches a set, and the wall does not have to choose
       # among them, it hands the whole set to the impact command.
       h = firsthit("files")
-      if (h > 0) { v = paths(spanof(h), FILES_MAX); if (v != "") print "files=" v }
+      if (h > 0) { v = paths(spanof(h), FILES_MAX, "Files:"); if (v != "") print "files=" v }
       # THE SUITES THE BRIEF DECLARES, NORMALISED TO BASENAMES at the moment they
       # are lifted, so the declared spelling and the derived one are the same
       # spelling on the row and the writer-side guard compares one alphabet. The
@@ -1639,6 +1662,14 @@ LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')")
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
 }
+# The count-cap WARN (T19, A-orch-19.1): `suite_names()`/`paths()` print these as ordinary
+# LIFTED lines rather than to awk's own stderr (see the comment beside them) — surfaced here,
+# unsanitized, through the same `warn()` every other loud-but-passing condition in this file
+# uses. Read before anything below narrows `$LIFTED` to a single field.
+C_SUITES_CAPWARN=$(field_of suites_capwarn)
+[ -n "$C_SUITES_CAPWARN" ] && warn "$C_SUITES_CAPWARN"
+C_FILES_CAPWARN=$(field_of files_capwarn)
+[ -n "$C_FILES_CAPWARN" ] && warn "$C_FILES_CAPWARN"
 C_DELIVERABLE=$(sanitize "$(field_of deliverable)" 300)
 # Never both: the extractor prints ONE of these two, so a non-empty list here means
 # `deliverable=` is empty and the ambiguity wall below owns the dispatch.

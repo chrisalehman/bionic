@@ -823,8 +823,10 @@ fi
 # THE ORDER IS THE INSTRUCTION. CronList first, because a predecessor's recurring
 # job survives `/clear` and keeps firing (A-probe-4); creating before deleting
 # leaves two clocks on one project, which is the 1.3.2 B-8 bug by another route.
-printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → bash %s/hooks/session-poker.sh arm → adopt\n' \
-  "$HOOK_ROOT"
+# T19 (A-orch-19.3): the stamp now arms itself at engagement (hooks/engage.sh, D4), so the
+# hand step after CronCreate is `adopt` alone — this line no longer names `session-poker.sh
+# arm`, which would send the model to redo a step engage.sh already did.
+printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → adopt\n'
 [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
 
 exit 0
