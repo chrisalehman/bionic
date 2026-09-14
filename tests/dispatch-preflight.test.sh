@@ -4340,6 +4340,46 @@ expect_contains "29c …with the operator warned at the moment the config is fix
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "29c …and the row records the empty third state" "" "$(roster_field "$ROW" suites_allowed)"
 
+# --- 29d/29e: the overrun refusal keeps whatever brief-shape faults were already
+# collected (review-c19c16e F3, wave-12 T23, AC-1.1's fails-when). A15 sat between the
+# five collecting arms and dp_refuse_findings and refused on the spot, discarding
+# DP_FINDINGS — an ambiguous-label brief with a slow impact command was told about the
+# label alone on attempt 1, and the impact overrun alone (with no memory of the label) on
+# attempt 2. That is the exact one-fault-per-attempt loop T2 built dp_finding to end.
+
+BRIEF_T23_COMBINED_IMPACT='Your task: review the wave.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Expected duration: 20 minutes
+Files: payload/scripts/lib/widget.sh'
+
+# --- 29d: the ambiguous-label brief + an overrunning impact command -> ONE refusal, BOTH faults ---
+REPO=$(make_repo r29d yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 30
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_T23_COMBINED_IMPACT" "w29d-slow")"
+expect_eq "29d an ambiguous label + an overrunning impact command is refused ONCE" "deny" "$GATE_VERDICT"
+expect_eq "29d …exactly one refusal line reaches the user" "1" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_contains "29d …naming the multi-path fault (A11)" "several paths" "$GATE_VERR"
+expect_contains "29d …AND naming the impact-overrun fault (A15), in the SAME message" \
+  "the impact command did not answer" "$GATE_VERR"
+expect_contains "29d …with the impact fault's own Fix:, not dropped" \
+  "fix impact-command in config.yaml" "$GATE_VERR"
+expect_status "29d …and journalled no roster row at all" "0" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# --- 29e: CONTROL — the same brief, a fast impact command -> the multi-path fault named,
+# the impact fault absent: nothing overran, so there is nothing to append.
+REPO=$(make_repo r29e yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 0
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_T23_COMBINED_IMPACT" "w29e-fast")"
+expect_eq "29e control: the same brief, a fast impact command, is still refused" \
+  "deny" "$GATE_VERDICT"
+expect_contains "29e …naming the multi-path fault (A11)" "several paths" "$GATE_VERR"
+expect_absent "29e …and NOT naming the impact fault: nothing overran" \
+  "the impact command did not answer" "$GATE_VERR"
+
 
 # ===========================================================================
 section "S30: the approval checkpoint — a writer needs an approved plan (epic-22 K2, AC-K2.4)"
