@@ -2628,27 +2628,23 @@ printf 'Its first ratification is **Context and Problem, for a stranger**\n' > "
 expect_true "129b: the 'for a stranger' grep fires on the shape it targets (the pattern discriminates)" \
   grep -q 'for a stranger' "$AC81_MUT"
 
-# --- AC-8.2: the gate word is "approve*", never "ratif*", anywhere in the rendered skill ---
+# --- AC-8.2: the gate word is "approve*", never "ratif*", on the gate-asking surfaces ---
 #
-# fails-when: grep -rci 'ratif' payload/skills/canonical-sdlc/ sums to more than 0, or a
-# docs-pins assertion still pins a "ratif" phrase there. SCOPED to the eight surfaces T2's
-# Files declared (SKILL.md, dispatch.md, steps/{0,1,2,3,5,6}.md) — operational-rules.md,
-# same directory, carries its own "ratif" occurrences inside dated historical entries
-# ("user-ratified, 2026-07-18") that are NOT in T2's Files and are a standing open question
-# (record/wave-13-fixit-180/assumptions.md, A-T2 pending) rather than a silent narrowing of
-# the AC: a directory-wide grep here would fail on a file this task was never told to touch.
-NORATIF_FILES="$SKILL_MD $DISPATCH_MD $STEP0_MD $STEP1_MD $STEP2_MD $STEP3_MD $STEP5_MD $STEP6_MD"
-NORATIF_HITS=""
-for _nf in $NORATIF_FILES; do
-  _n="$(grep -ci 'ratif' "$_nf" 2>/dev/null | tr -cd '0-9')"
-  [ -n "$_n" ] || _n=0
-  [ "$_n" -eq 0 ] || NORATIF_HITS="${NORATIF_HITS} ${_nf##*/}=${_n}"
-done
-if [ -z "$NORATIF_HITS" ]; then
-  ok "130: AC-8.2 — none of T2's eight rendered surfaces still reads 'ratif' (case-insensitive)"
+# fails-when: `grep -rci 'ratif'` over SKILL.md, dispatch.md and steps/ sums to more than 0,
+# or a docs-pins assertion still pins a "ratif" phrase there. SCOPED per A-orch-16 (ruling,
+# recorded in assumptions.md, the requirements and the plan): `operational-rules.md`, same
+# directory, is OUT of T2's scope — its dated historical attributions stay by the AC's own
+# exception, and its seven undated prose uses move to T7. The three gate-asking surfaces
+# below are the whole of AC-8.2's actual scope, not a narrowing of it: `steps/` is the WHOLE
+# directory (all ten rendered step files), not only the six this task's Files declared —
+# 4/7/8/9 never carried the word to begin with, verified before this pin shipped.
+NORATIF_TARGETS="${SKILL_DIR}/SKILL.md ${SKILL_DIR}/dispatch.md ${SKILL_DIR}/steps"
+NORATIF_SUM="$(grep -rci 'ratif' $NORATIF_TARGETS 2>/dev/null | awk -F: '{s+=$NF} END{print s+0}')"
+if [ "$NORATIF_SUM" -eq 0 ] 2>/dev/null; then
+  ok "130: AC-8.2 — SKILL.md, dispatch.md and steps/ read 'ratif' nowhere (case-insensitive)"
 else
-  no "130: AC-8.2 — none of T2's eight rendered surfaces still reads 'ratif' (case-insensitive)" \
-     "hits:${NORATIF_HITS}"
+  no "130: AC-8.2 — SKILL.md, dispatch.md and steps/ read 'ratif' nowhere (case-insensitive)" \
+     "sum=${NORATIF_SUM}: $(grep -rci 'ratif' $NORATIF_TARGETS 2>/dev/null | grep -v ':0$')"
 fi
 
 # Anti-vacuity: the grep must fire on the shape it targets.
