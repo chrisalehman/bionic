@@ -26,6 +26,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 REC="$HERE/execution-recorder.sh"
@@ -1183,6 +1184,93 @@ expect_contains "…and the correlation key" "tool_use_id=toolu_01IDENTA" "$I1_R
 expect_eq "exactly one identified row is appended" \
   "1" "$(grep -c 'status=identified' "$I1_ROSTER")"
 
+# ---------- T22: A SECOND START FOR ONE ID IS RECORDED, NOT REFUSED ----------
+#
+# (T22, A-orch-33.) One agent id that starts twice in one session is a RESUMED COPY: the
+# harness loses the agent table across a `/clear` but keeps the teammate table, so a
+# SendMessage or a resume aimed at a transcript id brings up a second process against a
+# contract the first is still working. The roster is the identity register, and this is the
+# register noticing.
+#
+# WHY IT IS A RECORD AND NOT A WALL, measured rather than assumed. The installed CLI's own
+# hook-event contract for this event reads, verbatim:
+#     SubagentStart … Exit code 0 - JSON additionalContext shown to subagent
+#                     Exit code 2 - show stderr to user only
+#                     Other exit codes - show stderr to user only
+# and the binary's hookSpecificOutput switch consumes only `additionalContext` for
+# SubagentStart — there is no `permissionDecision` branch for it, as there is for
+# PreToolUse. A SubagentStart hook cannot block. So the second start is journalled
+# `status=duplicate-start` and the Patrol tick is what names it; the door that CAN close
+# is the dispatch wall's name-in-flight arm, one event earlier.
+#
+# IT IS ADDITIVE. Before this, a second start for an already-`identified` id joined nothing
+# at all — the id loop accepts `intended|confirmed` only — and exited silently. The silence
+# is what is replaced.
+
+IFS='|' read -r ID_REPO ID_TR ID_SUB ID_CFG <<< "$(make_world identdup yes)"
+seed_roster_full "$ID_REPO" "$SID_A" "probemate" "toolu_01IDENTDUP" confirmed "$START_ID"
+ID_ROSTER="$ID_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$ID_TR" "$ID_REPO" "general-purpose" "$START_ID")"
+expect_eq "T22-dup: the FIRST start identifies, exactly once" \
+  "1" "$(grep -c 'status=identified' "$ID_ROSTER")"
+expect_eq "…and records no duplicate" \
+  "0" "$(grep -c 'status=duplicate-start' "$ID_ROSTER")"
+
+run_rec "$(mk_subagent_start "$SID_A" "$ID_TR" "$ID_REPO" "general-purpose" "$START_ID")"
+ID_DUP=$(grep 'status=duplicate-start' "$ID_ROSTER" 2>/dev/null)
+expect_contains "T22-dup: a SECOND start for the same id is journalled as a duplicate" \
+  "status=duplicate-start" "$ID_DUP"
+expect_contains "…carrying the id that started twice" "agent_id=$START_ID" "$ID_DUP"
+expect_contains "…and the name the contract was dispatched under" "name=probemate" "$ID_DUP"
+expect_eq "…and it does not identify a second time" \
+  "1" "$(grep -c 'status=identified' "$ID_ROSTER")"
+
+# THE EXIT IS STILL ZERO. This hook cannot block and must not pretend to: a non-zero exit
+# here would put stderr in front of the human for a condition only the tick can act on.
+expect_eq "T22-dup: the recorder still exits 0 — a start hook cannot block" "0" "$REC_ST"
+
+# THE CONTROL. A row CLOSED by a MET marker is a finished lineage, and a start against a
+# finished lineage is not a live duplicate — it is a name being reused, which the dispatch
+# wall already allowed. No duplicate row.
+IFS='|' read -r IDC_REPO IDC_TR IDC_SUB IDC_CFG <<< "$(make_world identdupclosed yes)"
+seed_roster_full "$IDC_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPC" confirmed "$START_ID"
+IDC_ROSTER="$IDC_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$IDC_TR" "$IDC_REPO" "general-purpose" "$START_ID")"
+swept_marker_write "$IDC_ROSTER" 2026-08-08T09:30:00Z "$SID_A" probemate "$START_ID" MET
+run_rec "$(mk_subagent_start "$SID_A" "$IDC_TR" "$IDC_REPO" "general-purpose" "$START_ID")"
+expect_eq "T22-dup: a start against a lineage already swept MET records no duplicate" \
+  "0" "$(grep -c 'status=duplicate-start' "$IDC_ROSTER")"
+
+# THE LANDED-THEN-RELAUNCHED LINEAGE (delta review C1). The control above proves a MET
+# marker frees the name; this proves the marker does NOT free it forever. `probemate` runs
+# under one id, lands, and is dispatched again under the SAME name and a NEW id — which the
+# dispatch wall allows, because the marker closed the first contract. A second start under
+# the SECOND id is a live duplicate and must be journalled.
+#
+# WHY IT NEEDS ITS OWN CASE. `met[]` was filled from ANY marker for the name, anywhere in
+# the file, so one landing silenced the duplicate arm for that name for the rest of the
+# session — and the control above, whose marker is the LAST thing said about the name,
+# cannot tell a position-blind reading from a position-aware one. The rule is that the
+# LATEST contract decides.
+START_ID_R2="aprobemate-8c17f42b0d6e5591"
+IFS='|' read -r IDR_REPO IDR_TR IDR_SUB IDR_CFG <<< "$(make_world identduprelaunch yes)"
+seed_roster_full "$IDR_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPR1" confirmed "$START_ID"
+IDR_ROSTER="$IDR_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$IDR_TR" "$IDR_REPO" "general-purpose" "$START_ID")"
+swept_marker_write "$IDR_ROSTER" 2026-08-08T09:30:00Z "$SID_A" probemate "$START_ID" MET
+# …the relaunch: a fresh contract for the same NAME under a new id, written after the marker.
+seed_roster_full "$IDR_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPR2" confirmed "$START_ID_R2"
+run_rec "$(mk_subagent_start "$SID_A" "$IDR_TR" "$IDR_REPO" "general-purpose" "$START_ID_R2")"
+expect_eq "T22-dup: the relaunched lineage identifies once and records no duplicate yet" \
+  "0" "$(grep -c 'status=duplicate-start' "$IDR_ROSTER")"
+run_rec "$(mk_subagent_start "$SID_A" "$IDR_TR" "$IDR_REPO" "general-purpose" "$START_ID_R2")"
+IDR_DUP=$(grep 'status=duplicate-start' "$IDR_ROSTER" 2>/dev/null)
+expect_contains "T22-dup: a second start against the RELAUNCHED lineage is journalled" \
+  "status=duplicate-start" "$IDR_DUP"
+expect_contains "…carrying the relaunch's id, not the landed one" \
+  "agent_id=$START_ID_R2" "$IDR_DUP"
+expect_eq "…exactly once" "1" "$(grep -c 'status=duplicate-start' "$IDR_ROSTER")"
+
 # ---------- the full chain: intended → confirmed → identified ----------
 #
 # The async dispatch lifecycle, which is the one the id join can span end to end:
@@ -1771,16 +1859,28 @@ run_rec_counted() {  # <payload-json> — run_rec_pressure with a counting jq on
 run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo four" "four")"
 expect_status "13f an ordinary Bash call still exits 0" "0" "$REC_ST"
 expect_eq "13f …and the sample still landed on it" "3" "$(wc -l < "$P_RING" | tr -d ' ')"
-expect_eq "13f …and the hook stopped right after the sample: four payload reads, not six" \
-  "4" "$(wc -c < "$P_JQC" | tr -d ' ')"
+# THE CONSTANT MOVED FROM 4 TO 3 (epic-23 wave-12-fixit-171, T11, REQ-10), and the
+# discrimination this section makes did not. `bionic_context` used to spend two `jq`
+# processes on the payload — one for `.cwd`, one for `.session_id` — and now spends one
+# on the whole field roster (lib/context.sh, `_bionic_jq_fill`). Every hook that calls
+# `bionic_context` therefore makes exactly one fewer payload read than it did, this one
+# included, on BOTH sides of the early exit: three with it and five without, where it
+# was four and six. What this assertion is for — that the exit stops the hook before
+# the transcript/subagents resolution below it — is unchanged, and the control
+# immediately below still measures it as a strict increase over this number.
+P_JQ_WITH_EXIT=3
+expect_eq "13f …and the hook stopped right after the sample: three payload reads, not five" \
+  "$P_JQ_WITH_EXIT" "$(wc -c < "$P_JQC" | tr -d ' ')"
 
 # The other direction: a Bash call that DOES carry a machine line must not take the exit.
 P_MLINE="stop-check-observation/v1|agent=w99-none|log=$SANDBOX/pressure/nolog|mtime=1|size=1"
 : > "$P_JQC"
 run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "bash stop-check.sh" "$P_MLINE")"
 expect_status "13f a Bash call carrying a machine line still exits 0" "0" "$REC_ST"
+# AGAINST THE NUMBER ABOVE, NOT A SECOND LITERAL: the two are the same measurement on
+# either side of the exit, and a hard-coded bound here could only drift away from it.
 expect_eq "13f …and it does NOT take the early exit — the arms below it run" "yes" \
-  "$([ "$(wc -c < "$P_JQC" | tr -d ' ')" -gt 4 ] && echo yes || echo no)"
+  "$([ "$(wc -c < "$P_JQC" | tr -d ' ')" -gt "$P_JQ_WITH_EXIT" ] && echo yes || echo no)"
 
 # ============================================================
 section "Section 14: the BUDGET FIELDS survive both rebuilds, byte for byte (review-b B-4)"
@@ -1868,6 +1968,47 @@ expect_contains "14c the LAST row carrying the id is the one the guard would rea
   "agent_id=$START_ID" "$B2_LAST"
 expect_contains "14c …and it states the budget the dispatch derived" \
   "|suites_allowed=$S14_SUITES|" "$B2_LAST"
+
+# --- 14d: A WIDE budget survives both rebuilds too (T18, REQ-9/D7) ---
+#
+# A-orch-16 named this file's confirmed→identified copy-forward as one of two writers it
+# suspected still capped `suites_allowed=`/`files=` at 400 chars, alongside
+# `hooks/dispatch-preflight.sh`'s launch row (fixed at T18, `tests/dispatch-preflight.test.sh`
+# §S27i/§S27j). Investigated here directly: both rewrites in THIS file build the row
+# FIELD-WISE with `RS = "|"` and substitute only `status=`/`agent_id=`/`name=`/
+# `teammate_id=`/`launched_at=` — every other field, `suites_allowed=`/`files=` included,
+# passes through as `f = $0` with no length operation anywhere in either awk block. That
+# is confirmed here rather than assumed: a budget well past any cap this repo has ever
+# used on this field (900, the widest — and past 400, T9's own reader-side number) rebuilds
+# whole through BOTH arms. This section was already green before T18 touched anything; it
+# is added as the permanent regression guard the investigation justified, not as a fix.
+S14D_SUITES=""
+for _s14d in $(seq -w 1 70); do
+  S14D_SUITES="${S14D_SUITES:+$S14D_SUITES }wide-budget-suite-basename-number-${_s14d}.test.sh"
+done
+expect_status "14d fixture non-vacuity: the planted budget really exceeds 900 chars" \
+  "0" "$([ "${#S14D_SUITES}" -gt 900 ] && echo 0 || echo 1)"
+
+IFS='|' read -r B3_REPO B3_TR B3_SUB B3_CFG <<< "$(make_world budgetwide yes)"
+B3_ROSTER="$B3_REPO/.bionic/tmp/roster-${SID_A}.state"
+mkdir -p "$B3_REPO/.bionic/tmp"
+roster_header > "$B3_ROSTER"
+roster_row_fixture status=intended session="$SID_A" name="w14d-impl" agent_id="" \
+  launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+  deliverable=.bionic/docs/record/w14d-budget.md duration='~25 minutes.' \
+  progress=.bionic/tmp/w14d.progress tool_use_id="toolu_01BUDGETWIDE01" \
+  files="payload/scripts/lib/widget.sh" "suites_allowed=$S14D_SUITES" \
+  suites_source=derived >> "$B3_ROSTER"
+
+run_rec "$(mk_agent_post "$SID_A" "$B3_TR" "$B3_REPO" "w14d-impl" "aw14dwidebudget001" "toolu_01BUDGETWIDE01")"
+B3_CONFIRMED=$(grep 'status=confirmed' "$B3_ROSTER" 2>/dev/null | tr '|' '\n' | grep '^suites_allowed=' | cut -d= -f2-)
+expect_eq "14d ARM 2 (confirmation) carries the WIDE budget forward whole" \
+  "$S14D_SUITES" "$B3_CONFIRMED"
+
+run_rec "$(mk_subagent_start "$SID_A" "$B3_TR" "$B3_REPO" "general-purpose" "aw14dwidebudget001")"
+B3_IDENTIFIED=$(grep 'status=identified' "$B3_ROSTER" 2>/dev/null | tr '|' '\n' | grep '^suites_allowed=' | cut -d= -f2-)
+expect_eq "14d ARM 3 (identification) carries the WIDE budget forward whole too" \
+  "$S14D_SUITES" "$B3_IDENTIFIED"
 
 # ============================================================
 section "Section 15: dispatch-terms delivery — SubagentStart pushes survival.md to bionic agents (wave-11 1c-b, design D2, probe P2)"

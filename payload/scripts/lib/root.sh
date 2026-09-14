@@ -198,3 +198,75 @@ project_root_candidates() {
 project_root() {
   _bionic_root_report "${1:-$PWD}" | awk -F'\t' '{ p = $1 } END { if (p != "") print p }'
 }
+
+# ─── THE AUDIT STREAM: where a project's findings land, and who writes one ───
+#
+# ONE DEFINITION EACH, HERE, SINCE epic-23 wave-12-fixit-171 (REQ-8, spec D6). `audit_path`
+# had three copies — payload/scripts/lib/walls.sh, payload/scripts/lib/stop.sh and
+# hooks/canonical-sdlc-governing-skill.sh — and `log_finding` had two. Every copy's header
+# asked the next reader to keep them identical; nothing enforced it until wave-11 pinned the
+# three audit_path bodies by checksum (tests/cross-gate-agreement.test.sh §AP) and promoted
+# the consolidation rather than doing it. This is it. §AP is now a COUNT — exactly one
+# definition of each under hooks/ and payload/ — because copies that agree can part again
+# and copies that do not exist cannot.
+#
+# WHY THIS LIBRARY AND NOT walls.sh, WHICH THE OWNERSHIP TABLE NAMED. walls.sh is 3,461
+# lines, and neither hooks/session-poker.sh nor hooks/canonical-sdlc-governing-skill.sh
+# sources it or its prerequisites. Owning these there would have added walls.sh to two more
+# hooks' `BIONIC_LIB_WANT` — a FAIL-CLOSED list, where one absent file refuses everything
+# that hook judges — and parsed all 3,461 lines per Patrol tick and per Write, for three
+# small functions. root.sh is already in the WANT of every process that carried a copy and
+# is already sourced ABOVE every use site, so this move widened no library list and added no
+# source line anywhere.
+#
+# AND WHY HERE SPECIFICALLY: `audit_path` is a pure function of a project root, and the
+# project root is this file's whole subject. The wave's third shared function,
+# `normalize_newlines`, is a document read and went to run.sh beside `_run_lines` instead.
+
+# Incident 0001: the audit stream must live where a consuming project cannot commit it,
+# whatever that project's .gitignore says. $HOME-rooted, per-project, durable.
+# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
+# collision-resistant across same-named projects under different parents. cksum and
+# basename are POSIX — no new dependency. A project that resolved two different slugs would
+# get two audit files, which is the exact divergence the three copies' headers feared.
+# [INSTRUMENT]
+audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
+  [ -n "${HOME:-}" ] || return 1
+  local base sum
+  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
+  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
+}
+
+# Log-only finding channel (D14): append one line to the durable audit file AND echo it to
+# stderr, then return 0 — a finding NEVER blocks. The mkdir and the append are both
+# fail-open; an unwritable destination drops the line and there is deliberately no fallback
+# branch, because a fallback is how a finding ends up inside a consuming project's tree.
+#
+# THE THREE VALUES THAT MADE THE TWO COPIES DIFFERENT ARE NOW THE CALLER'S, declared once
+# beside its own resolvers. They are the whole reason the copies were not byte-identical, so
+# folding them together silently would have been a behaviour change wearing a
+# deduplication's clothes. The caller declares:
+#
+#   BIONIC_FINDING_CHANNEL   the hook name written into the line — `evidence-gate` for
+#                            walls.sh's gate, `governing-skill` for the PreToolUse|Write hook
+#   BIONIC_FINDING_SUBJECT   the artifact the finding is about ($PLAN there, $FILE_PATH here)
+#   bionic_finding_root      a FUNCTION printing the project root the finding belongs to
+#
+# THE ROOT IS A FUNCTION WHERE THE SUBJECT IS A VARIABLE, and the asymmetry is deliberate.
+# The subject is already in hand at the declaration site and costs nothing to copy. The root
+# costs a SUBPROCESS in walls.sh — `audit_root` walks up from the plan's own directory — so
+# it stays lazy and is resolved only when a finding actually fires, never on every judged
+# command. Both are read through `:-` defaults: these hooks run under `set -u`, and a
+# log-only channel that aborted its own hook over a missing declaration would be the one
+# fail direction this design has never allowed.
+# [INSTRUMENT]
+log_finding() {  # $1=check-id  $2=detail — never blocks, always returns 0
+  local f
+  if f=$(audit_path "$(bionic_finding_root)"); then
+    local line="- $(date -u +%Y-%m-%dT%H:%M:%SZ) ${BIONIC_FINDING_CHANNEL:-} $1: $2 (${BIONIC_FINDING_SUBJECT:-})"
+    mkdir -p "$(dirname "$f")" 2>/dev/null && printf '%s\n' "$line" >> "$f" 2>/dev/null
+  fi
+  echo "canonical-sdlc [$1]: $2" >&2
+  return 0
+}

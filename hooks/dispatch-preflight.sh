@@ -474,18 +474,40 @@ PATROL_STAMP_FILE="$STATE_DIR/patrol-${BIONIC_SID}.state"
 POKER_SCRIPT="${HOOK_DIR}/session-poker.sh"
 [ -f "$POKER_SCRIPT" ] || POKER_SCRIPT="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-poker.sh"
 
-patrol_deny() {  # <fact> <fix> <state line>...
-  local fact="$1" fix="$2"; shift 2
+# THE TWO ARMS HAVE DIFFERENT REMEDIES, so the Fix block is an argument rather than a
+# constant in the frame (wave-12 T2, spec D4).
+#
+# NEVER ARMED asks for one act and it is the CronCreate. The stamp is not a hand step any
+# more: hooks/engage.sh runs `session-poker.sh arm` itself, with the session id and the
+# project root it already holds, immediately after writing the engagement marker (T4). A
+# refusal that still ordered `session-poker.sh arm` would be telling the model to do work
+# the machine has already been given — principle P-A at its own wall — and would teach the
+# hand step back into the next brief that quotes it.
+#
+# ARMED AND STOPPED FIRING is the other half and keeps both: the clock is what died, the
+# stamp is stale rather than absent, and re-engaging is not what an operator does about a
+# cron job that stopped. `arm` is offered there because a fresh stamp is what proves the
+# revived clock is landing.
+PATROL_FIX_NEVER="Fix: CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
+  reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch). That is the
+  one half this model owns. The stamp is the other half and it is written for you:
+  hooks/engage.sh arms it as the session engages canonical-sdlc, so a session that engaged
+  has one. Engage the skill again in this session if it is still missing."
+
+PATROL_FIX_STOPPED="Fix: re-arm the Patrol — both halves, the clock and the stamp:
+  1. CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
+     reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch).
+  2. bash ${POKER_SCRIPT} arm"
+
+patrol_deny() {  # <fact> <fix> <fix-block> <state line>...
+  local fact="$1" fix="$2" fixblock="$3"; shift 3
   local reasons="" line
   for line in "$@"; do reasons="${reasons}${line}
 "; done
   refuse exit2 dispatch "$fact" "$fix" "${reasons}
 A dispatch with no Patrol behind it is an agent nobody is waiting on.
 
-Fix: re-arm the Patrol — both halves, the clock and the stamp:
-  1. CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
-     reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch).
-  2. bash ${POKER_SCRIPT} arm
+${fixblock}
 
 Then retry the dispatch."
 }
@@ -529,7 +551,8 @@ fi
 # UNCONDITIONAL, and that is the C-2 fix in one word: this arm asks whether anything armed
 # the Patrol, a question with no threshold in it.
 if [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
-  patrol_deny "no Patrol stamp exists for this session" "arm the Patrol, both halves" \
+  patrol_deny "no Patrol stamp exists for this session" "CronCreate the Patrol job" \
+    "$PATROL_FIX_NEVER" \
     "There is no Patrol stamp for this session at:" \
     "    ${PATROL_STAMP_FILE}" \
     "The Patrol was never armed on this session (a symbolic link at that path is never" \
@@ -564,6 +587,7 @@ else
       [ "$PATROL_AGE" -lt 0 ] && PATROL_AGE=0
       if [ "$PATROL_AGE" -gt "$PATROL_MAX_AGE" ]; then
         patrol_deny "the Patrol was armed and stopped firing" "re-arm the Patrol, both halves" \
+          "$PATROL_FIX_STOPPED" \
           "The Patrol was armed on this session and has stopped firing." \
           "Its last stamp is ${PATROL_AGE}s old — past the ${PATROL_MAX_AGE}s limit," \
           "which is 2x ${PATROL_INTERVAL_WORDS}:" \
@@ -864,17 +888,23 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # nobody has taken, while an `idle` row is a reading the harness made and this wall
   # believes.
   #
-  # ON A STALE OR MISSING ANSWER (exit 3/4) this function refuses to answer at all —
-  # printing `<state> <age>` instead of `<open> <claimed>` and returning that same
-  # exit code — because every remaining row would read the same way (freshness is a
-  # property of the TRANSCRIPT, not of any one name), and the CALLER turns that into
-  # AC-8's whole-dispatch refusal before any budget arm is measured. An EMPTY roster
-  # (no `status=intended` row at all) never calls the reader and can never hit this:
-  # there is nothing whose openness a stale answer would leave in doubt.
+  # ON A STALE OR MISSING ANSWER (exit 3/4) THIS FUNCTION STILL ANSWERS (D1, wave-12).
+  # It used to refuse to — printing `<state> <age>` and returning 3/4, which the caller
+  # turned into a whole-dispatch refusal naming a ListAgents call as the repair. That made
+  # a chore a PRECONDITION of a judgement, and it is struck: no hook requires the model to
+  # perform an act before it will judge one (spec P-A). The fallback is the roster itself,
+  # which this wall already owns and already reads — every remaining deduped
+  # `status=intended` row counts OPEN, which is the same fail-closed direction the
+  # ambiguity arm takes. So the answer is ALWAYS `<open> <claimed>` and the exit is ALWAYS
+  # 0; a dispatch is judged against a count that may be generous, never deferred.
+  #
+  # THE READER IS NOT DEMOTED, only made optional. A FRESH answer still decides every row
+  # it can speak to — an `idle` row still closes, an absent row still closes — and the
+  # Patrol tick still consumes the same reader unchanged. Only the case where there is
+  # nothing to read has stopped being an error.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
-                            #   or "<stale|none> <age|none>" (exit 3/4, not fresh)
-    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed=""
-    local la_out la_rc la_rest la_state la_age
+    local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
+    local la_out la_rc
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -884,30 +914,47 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       case "$seen" in *"|${nm}|"*) continue ;; esac
       seen="${seen}${nm}|"
 
-      # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
-      # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
-      # size and mtime — but the per-row call below runs inside a command substitution, and
-      # a subshell INHERITS its parent's variables while its own writes die with it. So the
-      # first row would warm a cache nobody sees and every row would pay a full parse: two
-      # whole-file jq passes and nine spawns, 1.22 s for twelve rows on a 4.1 MB transcript.
-      # One call here, in the shell the loop actually runs in, warms it for every subshell
-      # that follows. It is done lazily rather than before the loop so a roster with no
-      # `status=intended` row still reads the transcript zero times. Its own answer is
-      # discarded: this line is a cache fill, and the row's verdict is the predicate's.
-      if [ -z "$primed" ]; then
-        primed=1
-        live_agents "$transcript" >/dev/null 2>&1 || :
-      fi
+      # ONCE THE ANSWER IS UNREADABLE, STOP ASKING. Freshness is a property of the
+      # TRANSCRIPT, so a reader that said STALE or NONE for one row will say it for every
+      # row after it. Asking again would re-pay the reader's miss per row and could not
+      # change a verdict. From here the roster is the answer: each remaining row counts
+      # OPEN (`la_rc=0` below), which is what "the count of open rows IS the live-agent
+      # count" means when there is no live answer to consult.
+      if [ -n "$notfresh" ]; then
+        la_rc=0
+      else
+        # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
+        # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
+        # size and mtime — but the per-row call below runs inside a command substitution, and
+        # a subshell INHERITS its parent's variables while its own writes die with it. So the
+        # first row would warm a cache nobody sees and every row would pay a full parse: two
+        # whole-file jq passes and nine spawns, 1.22 s for twelve rows on a 4.1 MB transcript.
+        # One call here, in the shell the loop actually runs in, warms it for every subshell
+        # that follows. It is done lazily rather than before the loop so a roster with no
+        # `status=intended` row still reads the transcript zero times. Its own answer is
+        # discarded: this line is a cache fill, and the row's verdict is the predicate's.
+        if [ -z "$primed" ]; then
+          primed=1
+          live_agents "$transcript" >/dev/null 2>&1 || :
+        fi
 
-      # THE PREDICATE IS NOT SPELLED HERE. It is `live_row_open`
-      # (payload/scripts/lib/agents.sh), and its header says why the rule is an inversion.
-      #
-      # The reader's own stderr passes through here unchanged — one line,
-      # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the
-      # STALE/NONE case below can hand its pieces to the caller verbatim. The predicate
-      # prints nothing on stdout, so this capture is that line and nothing else.
-      la_rc=0
-      la_out=$( { live_row_open "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
+        # THE PREDICATE IS NOT SPELLED HERE. It is `live_row_open`
+        # (payload/scripts/lib/agents.sh), and its header says why the rule is an inversion.
+        #
+        # The reader's own stderr passes through here unchanged — one line,
+        # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the
+        # STALE/NONE case below can hand its pieces to the caller verbatim. The predicate
+        # prints nothing on stdout, so this capture is that line and nothing else.
+        la_rc=0
+        la_out=$( { live_row_open "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
+        # STALE (3) AND NONE (4) BECOME OPEN, not a refusal. The reader's own stderr line
+        # stays captured in `la_out` and discarded: it named a ListAgents call as the
+        # repair, which is no longer anybody's job, and letting it out would put the
+        # retired chore back in front of the operator by another route.
+        case "$la_rc" in
+          3|4) notfresh=1; la_rc=0 ;;
+        esac
+      fi
       case "$la_rc" in
         0)
           open=$(( open + 1 ))
@@ -915,13 +962,6 @@ if [ -n "$PARALLEL_BUDGET" ]; then
           [ -n "$claims" ] && claimed=$(( claimed + 1 ))
           ;;
         1) : ;;
-        3|4)
-          la_rest="${la_out#live-agents: }"
-          la_state="${la_rest%% *}"
-          la_age="${la_rest#*age=}"
-          printf '%s %s' "$la_state" "$la_age"
-          return "$la_rc"
-          ;;
       esac
     done < "$f"
     printf '%s %s' "$open" "$claimed"
@@ -957,42 +997,20 @@ standdown\` computes the batch), or re-run Step 0's probe and raise the line if 
 machine genuinely has the room."
   }
 
-  # WHOSE TRANSCRIPT IS IT (F-2 ruling, 2026-09-05). The harness writes a dispatched
-  # agent's own transcript to `<session-uuid>/subagents/agent-<name>-<hash>.jsonl`, beside
-  # the orchestrator's `<session-uuid>.jsonl`. Both the directory and the filename are
-  # required: a file merely named `agent-*.jsonl` somewhere else is a session's, not a
-  # subagent's.
-  budget_is_subagent() {  # <transcript path> -> 0 when the path is a dispatched agent's own
-    case "$1" in
-      */subagents/agent-*.jsonl) return 0 ;;
-      *)                         return 1 ;;
-    esac
-  }
-
   # THE TRANSCRIPT (spec AC-7, AC-8): the payload's own `transcript_path`, the same
   # field every other liveness reader in this wave keys off (context-spend.sh,
   # execution-recorder.sh, patrol-duties-gate.sh, stop-guard.sh).
   BUDGET_TRANSCRIPT=$(_jq '.transcript_path')
 
+  # NO ARM BETWEEN THE COUNT AND THE CEILINGS (D1, wave-12; Chris 2026-09-13 "I don't
+  # want this to happen to begin with"). There used to be one here: a STALE or absent
+  # ListAgents answer refused the whole dispatch, telling the orchestrator to call the
+  # tool and come back — and telling a dispatched agent, which holds no such tool, to ask
+  # the orchestrator instead. Both halves are gone. `budget_roster_counts` now always
+  # answers `<open> <claimed>`, falling back to the roster's own open rows when there is
+  # no answer to read, so the three ceilings below are the only thing left between a
+  # brief and its dispatch.
   BUDGET_COUNTS=$(budget_roster_counts "$ROSTER_FILE" "$BUDGET_TRANSCRIPT")
-  BUDGET_RC=$?
-  if [ "$BUDGET_RC" -eq 3 ] || [ "$BUDGET_RC" -eq 4 ]; then
-    # A STALE or NONE answer means no roster row's openness can be trusted either
-    # way — refuse the WHOLE dispatch and name the fix, rather than guess (AC-8).
-    #
-    # WHICH fix depends on who is dispatching. Dispatch is an AUTHORITY the orchestrator
-    # holds alone, not a capability gated by freshness (F-2 ruling, 2026-09-05): a
-    # dispatched agent never dispatches, it asks. Telling one to "call ListAgents" names a
-    # tool that is not in its roster — no act available to it can ever satisfy the
-    # precondition — so it is told what it CAN do. The `live-agents:` prefix and the
-    # state/age fields are the same on both branches, because every consumer parses those.
-    if budget_is_subagent "$BUDGET_TRANSCRIPT"; then
-      echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — subagents do not dispatch; dispatch is the orchestrator's authority — SendMessage the orchestrator (to: main) naming what you need" >&2
-    else
-      echo "live-agents: ${BUDGET_COUNTS%% *} age=${BUDGET_COUNTS##* } — call ListAgents, then dispatch" >&2
-    fi
-    exit 2
-  fi
   BUDGET_OPEN="${BUDGET_COUNTS%% *}"
   BUDGET_CLAIMED="${BUDGET_COUNTS##* }"
   BUDGET_UNMEASURED=""
@@ -1037,11 +1055,27 @@ warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
 
 # Values are pipe-delimited on one line, so a field carrying a newline or a `|`
 # would forge a row. Never a refusal — the ledger normalizes and records.
-sanitize() {  # <value> <max-chars>
-  printf '%s' "$1" \
+#
+# THE THIRD ARGUMENT IS THE FIELD NAME (T18, REQ-9/D7 — the write-side half of the fix
+# `hooks/session-poker.sh`'s `clean()` already carries for the reader side, task T9).
+# `files=` and `suites_allowed=` are LIST-valued — a space- or comma-joined set — and a
+# dispatch declaring enough files or naming enough suites overflows even this file's
+# widest cap (900) on a perfectly ordinary brief: a 70-suite `Suites:` line runs to
+# 1.7-1.8 KB. The cut then silently drops suites off the end, narrowing a budget the wall
+# never agreed to. Every OTHER field this hook sanitizes — name, deliverable, duration,
+# progress, cadence, claims, waiver, the ambiguity candidates, the plan path — is prose or
+# a single path, where even the smallest existing cap is already more than any real value
+# needs, so they keep the cut. Callers that pass no field name (every one but the two
+# `C_FILES`/`C_SUITES` call sites) get today's behaviour exactly, caps unchanged.
+sanitize() {  # <value> <max-chars> [<field name>]
+  local out
+  out="$(printf '%s' "$1" \
     | tr '\n\r\t|' '    ' \
-    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//' \
-    | cut -c "1-$2"
+    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')"
+  case "${3:-}" in
+    files|suites_allowed) printf '%s' "$out" ;;
+    *) printf '%s' "$out" | cut -c "1-$2" ;;
+  esac
 }
 
 # ---------- contract-state extraction ----------
@@ -1296,7 +1330,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # "Expected artifact: a written report. Put it at PATH when done." named a path under
     # a canonical label and was refused for naming none (R6-4). The span is the one the
     # label owns, bounded at the next label or a blank line as every other field is.
-    function span_paths(h) { return paths(spanof(h), DELIV_MAX) }
+    function span_paths(h) { return paths(spanof(h), DELIV_MAX, "") }
     # The declared deliverable: walk EVERY deliverable-kind label hit in position order
     # and return the paths of the first that yields any. Iterating (rather than taking
     # only firsthit) recovers a real labeled line that an earlier, pathless
@@ -1339,8 +1373,20 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # THE WAIVER IS A WHOLE WORD, matched on the collapsed span rather than anywhere
     # in it: a brief reading `Suites: none` waives, and one reading
     # `Suites: tests/a.test.sh — none of the others` declares one suite and does not.
-    function suite_names(s,   n, arr, i, t, b, out, seen, c) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
+    # A CAP HIT IS LOUD (T19, A-orch-19.1). SUITES_MAX/FILES_MAX bound a ROW FIELD, not a
+    # judgment, and this repo has grown past the old 60-token bound on its own suite roster —
+    # so the count cap silently dropping the 61st-and-up suite reproduced the exact "your own
+    # suite is off your budget" refusal T9/T18 already fixed on the CHAR side.
+    #
+    # THE WARNING RIDES THE SAME PIPE AS EVERY OTHER LIFTED FIELD, never awks own stderr:
+    # this whole awk program is invoked under a trailing 2>/dev/null (below) so a malformed
+    # brief cannot leak an awk runtime diagnostic onto the real hook stderr, and that redirect
+    # would silence a print to /dev/stderr here just as thoroughly (both resolve to the SAME
+    # underlying fd 2 the shell already pointed at /dev/null). Printing a `<kind>_capwarn=`
+    # line instead puts it on stdout, where the bash side field_of and warn() -- the same
+    # path the ABSENT-field warning already uses -- carry it to the real stderr untouched.
+    function suite_names(s,   n, arr, i, t, b, out, seen, c, dropped) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
         if (t == "" || istemplate(t)) continue
@@ -1348,21 +1394,27 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         if (b !~ /\.test\.sh$/ && !(b == "run.sh" && index(t, "/") > 0)) continue
         if (seen[b]) continue
         seen[b] = 1
-        out = (out == "" ? b : out " " b)
-        if (++c >= SUITES_MAX) break
+        if (c < SUITES_MAX) { out = (out == "" ? b : out " " b); c++ }
+        else { dropped = (dropped == "" ? b : dropped " " b) }
+      }
+      if (dropped != "") {
+        print "suites_capwarn=Suites: line exceeds the " SUITES_MAX "-suite cap — dropped: " dropped
       }
       if (out != "") return out
       if (tolower(collapse(s)) ~ /^none([^a-z0-9]|$)/) return "none"
       return ""
     }
-    function paths(s, maxn,   n, arr, i, t, out, seen, c) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0
+    function paths(s, maxn, warnlabel,   n, arr, i, t, out, seen, c, dropped) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
         if (!ispath(t) || seen[t]) continue
         seen[t] = 1
-        out = (out == "" ? t : out "," t)
-        if (++c >= maxn) break
+        if (c < maxn) { out = (out == "" ? t : out "," t); c++ }
+        else if (warnlabel != "") { dropped = (dropped == "" ? t : dropped " " t) }
+      }
+      if (warnlabel != "" && dropped != "") {
+        print "files_capwarn=" warnlabel " line exceeds the " maxn "-path cap — dropped: " dropped
       }
       return out
     }
@@ -1375,10 +1427,15 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # How many paths a `Files:` span reports and how many basenames a `Suites:`
       # span reports. Both are bounds on a ROW FIELD, not on a judgment: the row is
       # one line the fleet parses by key, and a brief that names a hundred files has
-      # a problem the wall cannot fix. Wide enough that no real task brief in this
-      # repo has ever reached either.
-      FILES_MAX = 60
-      SUITES_MAX = 60
+      # a problem the wall cannot fix.
+      #
+      # RAISED 60 -> 200 (T19, A-orch-19.1): the old 60-token bound silently dropped the
+      # 61st-and-up suite of a real budget — this repo carries 70+ suites of its own, so 60
+      # was already narrower than the whole roster with no headroom left. 200 holds the
+      # whole roster with room to grow, and hitting IT is loud: see warncap() below, never a
+      # silent exit 0.
+      FILES_MAX = 200
+      SUITES_MAX = 200
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
       #
@@ -1517,7 +1574,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # absent one warns — so a templated or missing progress path lifts nothing and is
       # warned, never filled (the deliverable rule applied to the field with no wall).
       h = firsthit("progress")
-      if (h > 0) { v = paths(spanof(h), 1); if (v != "") print "progress=" v }
+      if (h > 0) { v = paths(spanof(h), 1, ""); if (v != "") print "progress=" v }
       # CADENCE IS POSITIONAL, not merely lexical (Step-6 critic F-2). It is the one
       # label with a relaxed separator — whitespace will do, because the contract writes
       # it inside the progress sentence rather than on a line of its own — and that
@@ -1548,7 +1605,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # ambiguity: a task touches a set, and the wall does not have to choose
       # among them, it hands the whole set to the impact command.
       h = firsthit("files")
-      if (h > 0) { v = paths(spanof(h), FILES_MAX); if (v != "") print "files=" v }
+      if (h > 0) { v = paths(spanof(h), FILES_MAX, "Files:"); if (v != "") print "files=" v }
       # THE SUITES THE BRIEF DECLARES, NORMALISED TO BASENAMES at the moment they
       # are lifted, so the declared spelling and the derived one are the same
       # spelling on the row and the writer-side guard compares one alphabet. The
@@ -1600,11 +1657,109 @@ AGENT_NAME=$(sanitize "$(_jq '.tool_input.name')" 200)
 SUBAGENT_TYPE=$(sanitize "$(_jq '.tool_input.subagent_type')" 200)
 AGENT_MODEL=$(sanitize "$(_jq '.tool_input.model')" 200)
 TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
+
+# ======================================================= THE NAME-IN-FLIGHT ARM
+# (T22, A-orch-33; AC-4.4's prevention half. Chris, first principles: the roster is the
+# identity register.)
+#
+# ONE NAME, ONE AGENT, PER SESSION. Everything downstream keys on the name: the stop gate
+# resolves one, `session-poker.sh adopt` prints one as the message address, the landing
+# sweep folds the roster to the latest row per name. A second dispatch under a name this
+# session already handed out puts two agents behind one row and one address — which is how
+# the stop gate came to carry an ambiguity arm, and how a SendMessage reaches the wrong
+# process. The cure is the door, not the downstream: refuse here, and none of them ever
+# has to choose.
+#
+# OPEN IS A ROSTER READING, AND ONLY A ROSTER READING (ADR-024, P-A/P-B). `intended`,
+# `confirmed` and `identified` are the three live states a dispatch passes through; a name
+# is FREE again once the landing gate has journalled a `landing-swept/v1|…|state=MET` marker
+# for it, which is the same discharge `hooks/session-start.sh`'s `open_rows` and the poker's
+# `adopt_fold` apply. No transcript is read, no live set is consulted, and nothing is asked
+# of the model: the fix names a free name rather than a chore.
+#
+# THE SCOPE IS THIS SESSION. Another session's roster reserves nothing here — names are
+# unique per session because the roster is per session, which is the scope every other
+# reader in the fleet already uses, and a predecessor's finished names must be reusable or a
+# long-lived project runs out of them.
+#
+# PLACED ABOVE THE BRIEF LIFT so a brief the gate is about to refuse for its name is not
+# also parsed, and far above the journal, so a refused dispatch never writes a row.
+#
+# AN UNNAMED DISPATCH IS NOT JUDGED HERE. There is no name to be in flight, and the async
+# dispatches that carry none are exactly the ones nothing addresses by name.
+if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
+  # ONE PASS, TWO FACTS: does a live-status row of this name exist, and has a MET marker
+  # closed it. `awk` rather than two greps because the marker may sit either side of the row
+  # and WHICH side is the answer — see the latest-contract reading below, which is the half of
+  # this arm that was position-blind until T26 and therefore inert for every landed name.
+  DP_INFLIGHT=$(awk -F'|' -v want="$AGENT_NAME" '
+    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
+    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
+    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
+    # one text held byte-identical in the two files that need it, rather than a library: the
+    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
+    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
+    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
+    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
+    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
+    # that row is an open contract with a live process behind it. Read as a set, the MET flag
+    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
+    # session, which is precisely the case they exist for (a task being re-run). So a live row
+    # RETIRES the marker above it, and only a marker with no live row after it still closes.
+    function contract_note(line,   nm) {
+      if (index(line, "landing-swept/v1|") == 1) {
+        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
+        return
+      }
+      nm = kv(line, "name")
+      if (live_status(kv(line, "status"))) delete MET[nm]
+    }
+    function contract_closed(nm) { return (nm in MET) }
+    # ---- END latest-contract reading ----
+    /^roster-state\/v1\|/ {
+      contract_note($0)
+      if (kv($0, "name") != want) next
+      st = kv($0, "status")
+      if (live_status(st)) { open = 1; last = st }
+      next
+    }
+    /^landing-swept\/v1\|/ { contract_note($0); next }
+    END { if (open && !contract_closed(want)) print last }
+  ' "$ROSTER_FILE" 2>/dev/null) || DP_INFLIGHT=""
+  if [ -n "$DP_INFLIGHT" ]; then
+    refuse exit2 dispatch "that name is in flight" "use the FILL line's name" \
+      "    name: ${AGENT_NAME}   ·   its row on this session's roster: ${DP_INFLIGHT}
+
+A name is an identity here. The stop gate resolves one, \`session-poker.sh adopt\` prints
+one as the message address, and the landing sweep folds this roster to the latest row per
+name — so two agents under one name is one contract, one address and two processes.
+
+Fix: dispatch under the name the Patrol tick's FILL line printed for this task. It derives
+one that is free: the task id, or \`<id>-r<n>\` when that id has already had a run. You never
+choose a name yourself. If this row is finished, land it (its marker frees the name)."
+  fi
+fi
+
 LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')")
 
 field_of() {  # <kind>
   printf '%s\n' "$LIFTED" | grep -m1 "^$1=" | cut -d= -f2-
 }
+# The count-cap WARN (T19, A-orch-19.1): `suite_names()`/`paths()` print these as ordinary
+# LIFTED lines rather than to awk's own stderr (see the comment beside them) — surfaced here,
+# unsanitized, through the same `warn()` every other loud-but-passing condition in this file
+# uses. Read before anything below narrows `$LIFTED` to a single field.
+C_SUITES_CAPWARN=$(field_of suites_capwarn)
+[ -n "$C_SUITES_CAPWARN" ] && warn "$C_SUITES_CAPWARN"
+C_FILES_CAPWARN=$(field_of files_capwarn)
+[ -n "$C_FILES_CAPWARN" ] && warn "$C_FILES_CAPWARN"
 C_DELIVERABLE=$(sanitize "$(field_of deliverable)" 300)
 # Never both: the extractor prints ONE of these two, so a non-empty list here means
 # `deliverable=` is empty and the ambiguity wall below owns the dispatch.
@@ -1615,11 +1770,16 @@ C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
 # THE TWO INSTRUMENT FIELDS (spec AC-20). `Files:` is the declared INTENT — the paths this
-# task will touch — and `Suites:` the declared CONSEQUENCE. The caps are the widest on the
-# row because both are lists rather than single values, and truncating a list silently
-# narrows a budget: 900 is what the ambiguity candidates already allow.
-C_FILES=$(sanitize "$(field_of files)" 900)
-C_SUITES=$(sanitize "$(field_of suites)" 900)
+# task will touch — and `Suites:` the declared CONSEQUENCE. Both are LIST-valued, and (T18,
+# REQ-9/D7) neither is cut at all any more — the max-chars argument below is vestigial for
+# these two calls, kept only because `sanitize` requires one positionally; the field name in
+# the third argument is what actually exempts them. A brief naming enough files or suites to
+# overflow even the widest single-value cap this file has (900) is not a hypothetical: a
+# 70-suite `Suites:` line runs to 1.7-1.8 KB, and truncating it silently narrows a budget the
+# wall never agreed to. This is the write-side half of the fix `hooks/session-poker.sh`'s
+# `clean()` already carries on the read/adopt side (task T9).
+C_FILES=$(sanitize "$(field_of files)" 900 files)
+C_SUITES=$(sanitize "$(field_of suites)" 900 suites_allowed)
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
@@ -1657,6 +1817,103 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 [ -n "$C_DURATION" ]    || add_absent duration
 [ -n "$C_PROGRESS" ]    || add_absent progress
 
+# ================================= THE BRIEF-SHAPE FINDINGS LIST (D3, principle P-A)
+#
+# THE INCIDENT. Six dispatch attempts to spawn one researcher (2026-09-13). Every
+# brief-shape arm below used to `refuse exit2` where it stood, so an author learned
+# exactly ONE fault per attempt and the next attempt found the next one — a loop whose
+# length is the number of faults in a brief the author was holding, whole, the entire
+# time. Principle P-A reads the same way at a wall as at a precondition: where the
+# machine already has the facts, the machine reports them; asking the model to
+# rediscover them one round trip at a time is a chore on the normal path.
+#
+# THE SPLIT IS BRIEF SHAPE versus STATE, and it is not a matter of taste. A11 (several
+# paths), A12 (outside the repo), A13 (no deliverable), A14 (no instrument) and A16
+# (`Files:` with no derivation) are all defects in ONE artifact — the brief — readable
+# in one pass, fixable in one edit, and independent of each other. They collect here.
+# Every STATE arm above and below keeps its early exit: a missing attestation, an
+# unarmed Patrol, an unapproved plan, a dispatch from a worktree, a full budget, a
+# second full-tree run. None of those is a property of the brief, none is fixed by
+# reading the next one, and several of them mean the gate cannot trust what it reads
+# next — reporting "no Patrol" alongside a comma in a label would put a broken
+# environment and a typo in one list and train the reader past both.
+#
+# A15 (the impact command did not answer) STAYS AN EARLY EXIT for that second reason: a
+# derivation that overran its bound is a fact about the machine, not the brief, and the
+# fields below it are unfilled rather than wrong.
+#
+# ONE FINDING RENDERS AS ONE REFUSAL, byte for byte what the arm emitted before — the
+# fact, the fix and the detail it already wrote.
+#
+# SEVERAL FINDINGS KEEP THE FIRST ARM'S USER LINE and put the whole list in `detail`,
+# and that split is forced rather than chosen. AC-E1.3 gives the line one fact (100
+# columns) and one fix (six words, 40 columns), and the widest arm here already spends
+# 99 of the 100 — so a line that also carried a count, or named the other faults, would
+# be REFUSED BY THE RENDERER as malformed. Between a line that says "this brief has 3
+# shape faults" and one that names a fault an author can act on, the second is worth
+# more. The findings list is therefore whole where it can be whole, and the sentence the
+# reader is interrupted by is still one they can act on.
+#
+# AND THE LIST GOES OUT ON `deny`, WHICH IS THE HALF T2 COULD NOT REACH (its finding
+# A-T2.2; ruling A-orch-10, 2026-09-13). On `exit2` there is ONE wire: `refuse`'s channel
+# table ships it `detail_to_user=no` under ruling D-1, and what the user stream carries is
+# what the model's synthetic tool_result carries — so a collected list emitted there was
+# read by nobody, and the six-attempt loop went on running behind a better-built wall.
+# `deny` is the same table's row 2: a PreToolUse verdict whose `permissionDecisionReason`
+# reaches the model VERBATIM (`model_only=yes`) while the user stream stays the one line.
+# The model reads every fault; the reader is still interrupted by a sentence with a
+# pointer; neither half is a knob somebody has to know to set.
+#
+# ONE FINDING STAYS ON `exit2`, in its arm's own words and on its arm's own channel. The
+# channel moves for the refusal D-1's single wire was STARVING — a list — and a lone fact
+# with a six-word fix is not starved by being a sentence. Keeping it there also keeps the
+# blast radius of this change at the one shape that needed it: every single-fault refusal
+# in this file, brief-shape and state alike, is byte-for-byte and status-for-status what
+# it was.
+#
+# `deny` EXITS 0, AND THAT IS THE BLOCK. The verdict on stdout is what refuses the tool
+# call; the status is not. Two consequences this file must respect: nothing else may print
+# to stdout on the way here (every other message in this hook is on stderr, deliberately),
+# and this call still must sit above the journal, because a refused dispatch that exits 0
+# is exactly the shape that would otherwise be recorded as a launch.
+DP_FINDING_N=0
+DP_FINDINGS=""
+DP_FIRST_FACT=""
+DP_FIRST_FIX=""
+DP_FIRST_DETAIL=""
+
+dp_finding() {  # <fact> <fix> <detail> — record one brief-shape fault. NEVER exits.
+  DP_FINDING_N=$((DP_FINDING_N + 1))
+  if [ "$DP_FINDING_N" -eq 1 ]; then
+    DP_FIRST_FACT="$1"; DP_FIRST_FIX="$2"; DP_FIRST_DETAIL="$3"
+  fi
+  DP_FINDINGS="${DP_FINDINGS}${DP_FINDINGS:+
+}── ${DP_FINDING_N}. $1 ($2)
+
+$3
+"
+}
+
+# dp_refuse_findings — emit the whole list as ONE refusal and exit, or return having done
+# nothing at all. Called once, after the last brief-shape arm; `refuse` owns the exit, so a
+# caller cannot fall through it into the journal with findings outstanding. ONE finding
+# refuses on `exit2` exactly as its arm always did; SEVERAL refuse on `deny`, where the
+# whole list reaches the model (see the channel note above). The exit STATUS therefore
+# differs by fault count — 2 for one, 0-with-a-deny-verdict for several — and both block.
+dp_refuse_findings() {
+  [ "$DP_FINDING_N" -gt 0 ] || return 0
+  if [ "$DP_FINDING_N" -eq 1 ]; then
+    refuse exit2 dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
+  fi
+  refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
+    "THIS BRIEF HAS $DP_FINDING_N SHAPE FAULTS. The line above names the first of them; all
+$DP_FINDING_N are below, in the order the gate reads the brief, each with its own Fix:
+block. They are independent, and a brief that repairs all $DP_FINDING_N dispatches —
+there is no further fault waiting behind these.
+
+$DP_FINDINGS"
+}
+
 # ======================================================= THE AMBIGUITY WALL
 # (Step-6 R6 critic R6-1; plan assumption 71, completing assumption 48.)
 #
@@ -1693,7 +1950,7 @@ Fix: name exactly one deliverable path in the label —
   own line, under Read first: or Scope constraint:, or after a blank line.
 
 Then retry the dispatch."
-  refuse exit2 dispatch "the deliverable label names several paths" "name exactly one deliverable" "$_dp_detail"
+  dp_finding "the deliverable label names several paths" "name exactly one deliverable" "$_dp_detail"
 fi
 
 # ========================================================= THE CONTAINMENT WALL
@@ -1776,7 +2033,7 @@ Fix: name a repo-relative artifact path in the brief —
     Expected artifact: .bionic/docs/record/my-task-notes.md
 
 Then retry the dispatch."
-      refuse exit2 dispatch "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"
+      dp_finding "the deliverable is outside this repository" "name a path inside the repo" "$_dp_detail"
       ;;
   esac
 fi
@@ -1823,7 +2080,7 @@ Or waive it — the reason is recorded on the session roster either way:
     Deliverable-waiver: <why this dispatch produces nothing durable>
 
 Then retry the dispatch."
-  refuse exit2 dispatch "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
+  dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
 fi
 
 # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
@@ -1875,7 +2132,7 @@ its command the same way — a name that is still a variable when a hook sees it
 be neither derived from nor checked against anything.
 
 Then retry the dispatch."
-  refuse exit2 dispatch "this brief declares no Files: and no Suites:" "declare Files: or Suites:" "$_dp_detail"
+  dp_finding "this brief declares no Files: and no Suites:" "declare Files: or Suites:" "$_dp_detail"
 fi
 
 # ---------- the derivation ----------
@@ -1902,6 +2159,15 @@ SUITES_SOURCE=""
 if [ -n "$C_SUITES" ]; then
   SUITES_ALLOWED="$C_SUITES"
   SUITES_SOURCE="declared"
+elif [ -z "$C_FILES" ]; then
+  # NOTHING TO DERIVE FROM, AND THE ABSENCE IS ALREADY A FINDING. Before the arms
+  # collected, this branch was unreachable: the wall above exited on a brief carrying
+  # neither label, so anything past it held at least one of them. It is reachable now,
+  # and it must stay silent — running the derivation over an empty argument list would
+  # warn that "the impact command derived no suites" (it was never asked), and falling
+  # into the arm below would report a missing `impact-command:` as a SECOND fault when
+  # the brief's own missing `Files:` is the one the author fixes. One fault, one finding.
+  :
 elif [ -n "$IMPACT_COMMAND" ]; then
   _old_ifs="$IFS"; IFS=','; set -f
   # shellcheck disable=SC2086
@@ -1956,7 +2222,8 @@ the wall defeated by the cost of the wall. So the derivation is bounded here.
 Fix: narrow \`Files:\` to the paths this task really writes, or name the closed set
 directly with \`Suites:\` — a declared set needs no derivation at all. If the command
 itself has become slow, that is the thing to fix: it runs on every dispatch."
-      refuse exit2 dispatch "the impact command did not answer" "fix impact-command in config.yaml" "$_dp_detail"
+      dp_finding "the impact command did not answer" "fix impact-command in config.yaml" "$_dp_detail"
+      dp_refuse_findings
     fi
     _impact_out=$(cat "$_impact_tmp" 2>/dev/null) || _impact_out=""
     rm -f "$_impact_tmp"
@@ -1983,8 +2250,17 @@ Or configure the derivation once, in .bionic/config.yaml —
     impact-command: bash tests/lib/impact.sh
 
 Then retry the dispatch."
-  refuse exit2 dispatch "no impact command is configured here" "set impact-command in config.yaml" "$_dp_detail"
+  dp_finding "no impact command is configured here" "set impact-command in config.yaml" "$_dp_detail"
 fi
+
+# ===================================== THE ONE REFUSAL, FOR EVERY BRIEF-SHAPE FAULT
+#
+# THE LAST BRIEF-SHAPE ARM IS ABOVE THIS LINE, and everything below reads the ROW rather
+# than the brief. So this is where the list is spent: one refusal carrying every fault the
+# five arms found, in file order, or a silent return when they found none. It sits ABOVE
+# the one-regression wall and the journal for the same reason each arm used to exit where
+# it stood — a brief the gate is about to refuse must never be journalled as a launch.
+dp_refuse_findings
 
 # ============================================= THE ONE-REGRESSION WALL (AC-24)
 # (seed item 4; the standing ruling "one regression means one" made mechanical.)

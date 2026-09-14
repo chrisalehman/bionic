@@ -83,33 +83,46 @@ fi
 
 # ─── FILE SCOPE: hooks/context-spend.sh's audit path ─────────────────────────
 #
-# Carried over at COLUMN ZERO and byte-identical to the two other copies in the
-# tree — divergence would give one project two audit files, which is the whole
-# reason three copies are deliberate rather than shared.
+# `audit_path` LIVES IN root.sh NOW (epic-23 wave-12-fixit-171, REQ-8, spec D6). This file
+# carried the third of three byte-identical copies, at column zero, under a header asking
+# each next reader to keep them identical. tests/cross-gate-agreement.test.sh §AP is a COUNT
+# now — exactly one definition under hooks/ and payload/ — rather than a checksum comparison
+# of three bodies that could always part again.
+#
+# SOURCED THE WAY fold.sh IS, ten lines above, and for the same reason: hooks/stop.sh already
+# sources root.sh at :153, above this library at :165, so in the shipped process this guard
+# never fires. It is here for the suites that drive this file directly.
+if ! declare -F audit_path >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/root.sh"
+fi
 
-
-# Incident 0001: the audit stream must live where a consuming project cannot
-# commit it, regardless of that project's .gitignore. $HOME-rooted, per-project,
-# durable — the same $HOME/.claude/ audit path the archived epic-10 poker used
-# (that work is recoverable at tag archive/epic-10-never-die).
-# Slug = <basename>-<cksum of the absolute path>: readable, deterministic, and
-# collision-resistant across same-named projects under different parents.
-# cksum and basename are POSIX — no new dependency.
-# THREE COPIES, ONE BODY, AND THE OTHER TWO ARE NAMED HERE:
-# payload/scripts/lib/walls.sh (the PreToolUse|Bash process) and
-# hooks/canonical-sdlc-governing-skill.sh (the PreToolUse|Write process). This one
-# serves the turn-end process. Divergence would give one project two audit files;
-# tests/cross-gate-agreement.test.sh §AP compares the three bodies by checksum and
-# proves by mutation that the comparison discriminates. Deliberate duplication, one
-# copy per process, no shared lib — consolidation is promoted, not done here.
-# [INSTRUMENT]
-audit_path() {  # $1=project root → absolute audit-file path; rc 1 if no $HOME
-  [ -n "${HOME:-}" ] || return 1
-  local base sum
-  base=$(basename "$1" | sed 's/[^A-Za-z0-9._-]/-/g')
-  sum=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-  printf '%s/.claude/logs/%s-%s/sdlc-audit.md' "$HOME" "$base" "$sum"
+# ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
+#
+# THREE VERDICTS ASKED THE SAME QUESTION THREE TIMES (REQ-10, T11): `stop_landing_gate`
+# for its sibling sweeper, `stop_patrol_duties` and `stop_patrol_revive` for the poker
+# they name in a message. Each spelled it `"$(cd "$(dirname "$0")" && pwd)"` — a
+# `dirname` fork, a subshell and a `cd` per ask, five forks across one Stop for a value
+# that cannot change inside one process, because `$0` is the hook however deep the call
+# is.
+#
+# TWO ANSWERS, NOT ONE, because the three call sites did not agree on the fallback and
+# collapsing them would be a silent behaviour change. `_STOP_HOOK_DIR_ABS` is the
+# `cd … && pwd` answer and stays EMPTY when the directory cannot be entered — which is
+# exactly what `SWEEPER` interpolated. `_STOP_HOOK_DIR_RAW` is `dirname`'s own answer,
+# which the two `HOOK_DIR` sites fall back to when the first is empty.
+#
+# NO `dirname` FORK AT ALL. `${0%/*}` is dirname's answer for every path carrying a
+# slash, `.` for one that does not, and `/` for a path whose only slash is the leading
+# one; a hook is always invoked by path, so this is the same string the fork returned.
+_stop_hook_dirname() {  # -> _STOP_HOOK_DIR_RAW, dirname "$0" without the fork
+  case "$0" in
+    */*) _STOP_HOOK_DIR_RAW="${0%/*}"; [ -n "$_STOP_HOOK_DIR_RAW" ] || _STOP_HOOK_DIR_RAW="/" ;;
+    *)   _STOP_HOOK_DIR_RAW="." ;;
+  esac
 }
+_stop_hook_dirname
+_STOP_HOOK_DIR_ABS="$(cd "$_STOP_HOOK_DIR_RAW" 2>/dev/null && pwd)"
 
 # ─── FILE SCOPE: hooks/landing-gate.sh's constants and helpers ───────────────
 #
@@ -255,7 +268,7 @@ _lg_path_declared() {  # <diff path> <comma-joined declared files>
 
 stop_context_spend() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
-  local TRANSCRIPT PLAN STEP _row MODEL OCCUPIED STATE_DIR STATE
+  local TRANSCRIPT PLAN STEP _row MODEL OCCUPIED STATE_DIR STATE _plan_txt
   local s_plan s_sess s_step s_occ DELTA LINE AUDIT_FILE
 
   # THE EVENT GUARD THE HOOK NEVER HAD — see this file's header. Stop only, and an
@@ -317,22 +330,37 @@ esac
 # current: from ## SDLC State — CR-normalized, fence-aware (the evidence-gate
 # defect class: fenced skeletons quoting `current:` must stay invisible).
 # [INSTRUMENT]
-STEP=$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$PLAN" | awk '
+#
+# THE CR PASS IS THE SHELL'S NOW (REQ-10, T11). It was a whole `awk` process whose only
+# job was to turn CRLF into LF and a lone CR into LF before the parse below could see
+# lines at all; two parameter expansions over the file text do exactly that, in the same
+# order, and the parsing `awk` is unchanged. `$(< … )` reads the file without forking
+# `cat`, and the here-string hands the normalised text to the one remaining process.
+_plan_txt=$(< "$PLAN")
+_plan_txt="${_plan_txt//$'\r\n'/$'\n'}"
+_plan_txt="${_plan_txt//$'\r'/$'\n'}"
+STEP=$(awk '
   /^```/ { fence = !fence; next }
   fence { next }
   /^## SDLC State/ { insec = 1; next }
   insec && /^## / { insec = 0 }
   insec && /^current:[[:space:]]*/ { sub(/^current:[[:space:]]*/, ""); sub(/[[:space:]]*$/, ""); print; exit }
-')
+' <<< "$_plan_txt")
 [ -n "$STEP" ] || return "$_adv"
 
 # Last assistant entry with usage, from a bounded tail. fromjson? swallows
 # malformed lines. Emits "model<TAB>occupied" for the last qualifying entry.
+#
+# THE TRAILING `| tail -1` IS AN EXPANSION NOW (REQ-10, T11). jq emits one line per
+# qualifying entry and the last one is wanted; `${_row##*$'\n'}` is that line, and it
+# is the whole string when jq emitted exactly one. The command substitution has already
+# stripped the trailing newline, so there is no empty last line to guard against.
 _row=$(tail -n 400 "$TRANSCRIPT" 2>/dev/null | jq -Rr '
   fromjson? | select(.type == "assistant") | .message | select(.usage != null) |
   [(.model // "unknown"),
    ((.usage.input_tokens // 0) + (.usage.cache_creation_input_tokens // 0) + (.usage.cache_read_input_tokens // 0))] | @tsv
-' 2>/dev/null | tail -1) || _row=""
+' 2>/dev/null) || _row=""
+_row="${_row##*$'\n'}"
 [ -n "$_row" ] || return "$_adv"
 MODEL=${_row%	*}
 OCCUPIED=${_row##*	}
@@ -583,9 +611,20 @@ if [ "$MODE" = "sweep" ]; then
   # set: an empty array means every dispatch has finished (the payload says so on every turn
   # where nothing is running), while a missing key means this is not a payload that can tell
   # us, and judging on it would hold running agents to contracts they are still working on.
-  [ "$(printf '%s' "$BIONIC_INPUT" | jq -r 'if has("background_tasks") then "yes" else empty end' 2>/dev/null)" = "yes" ] || return "$_adv"
-  LIVE_IDS="|$(printf '%s' "$BIONIC_INPUT" \
-    | jq -r '[.background_tasks[]?.id // empty] | join("|")' 2>/dev/null | tr -d '\n')|"
+  #
+  # THROUGH `bionic_jq`, NOT A PRIVATE `jq` (REQ-10, T11). Both expressions are
+  # unchanged, character for character — they are now on lib/context.sh's roster,
+  # so the one payload read that hook already made answers them and these two
+  # lines fork nothing. Off the roster (a hook that never called
+  # `bionic_context`) `bionic_jq` runs the same `jq -r '<expr> // empty'` these
+  # lines ran, which is the same answer: appending `// empty` to either
+  # expression cannot change a value it already produced.
+  [ "$(bionic_jq 'if has("background_tasks") then "yes" else empty end')" = "yes" ] || return "$_adv"
+  # `tr -d '\n'` IS GONE, replaced by the expansion below. It existed to flatten an
+  # id that carried a newline; the `//$'\n'/` expansion does that in the shell, and
+  # the command substitution around the read strips the trailing newline as before.
+  LIVE_IDS=$(bionic_jq '[.background_tasks[]?.id // empty] | join("|")')
+  LIVE_IDS="|${LIVE_IDS//$'\n'/}|"
 else
   # THE LANDING ARM READS NO LIVE SET, and that is the point of it rather than an omission.
   # This payload carries `background_tasks[]` too, and the stopping teammate is STILL IN IT —
@@ -654,7 +693,7 @@ ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 # hooks/ that hooks/hooks.json roots at ${CLAUDE_PLUGIN_ROOT}. No PATH
 # lookup (a hook's PATH is not ours to trust) and no environment override (a seam on the
 # path under test would leave the production path unverified).
-SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
+SWEEPER="${_STOP_HOOK_DIR_ABS}/session-sweeper.sh"
 [ -f "$SWEEPER" ] || return "$_adv"
 
 # ONE PASS OVER THE ROSTER, and it is the only cost this script pays on a turn where nothing
@@ -1188,8 +1227,8 @@ TRANSCRIPT=$(bionic_jq .transcript_path)
 # THIS SCRIPT'S OWN DIRECTORY, so the poker the ritual message names is the same
 # file a model would actually run — resolved the way hooks/patrol-revive.sh
 # resolves its sibling, never through PATH and never a placeholder.
-HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+HOOK_DIR="$_STOP_HOOK_DIR_ABS"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$_STOP_HOOK_DIR_RAW"
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
 # task-engaged-session: bionic's walls are the RUN's, not the repo's, and a run is entered
@@ -1243,7 +1282,10 @@ case "$BIONIC_RUN_WORD" in
     ;;
 esac
 PLAN_NAME=""
-[ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="$(basename "$PLAN")"
+# `${PLAN##*/}` IS `basename`'s ANSWER WITHOUT THE FORK (REQ-10, T11). `$PLAN` here is a
+# plan path `session_run` produced from a `find -type f`, so it names a regular file and
+# carries no trailing slash — the one case the two spellings disagree about.
+[ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="${PLAN##*/}"
 
 # ---------- the plan's BASENAME ----------
 #
@@ -1416,16 +1458,28 @@ fi
 # firing into this conversation after a /clear is not this session's tick either.
 TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 
-# TICK / LISTAGENTS / TASKLIST, folded over the last turn.
+# TICK / TASKLIST, folded over the last turn.
+#
+# THE LISTAGENTS DUTY IS GONE (T22, A-orch-33; AC-4.4). This fold had a second limb: a tick
+# turn was refused until the transcript showed a main-thread `ListAgents` call. That is a
+# chore demanded of the model before a gate will let its turn end — ADR-024's P-A, the rule
+# this wave finishes — and it never named a single thing to DO about what the panel showed.
+# The obligation behind it was real, and it moved to where the fact already lives: the tick
+# reads the roster and prints `poker: TASKSTOP <name>` for every MET lineage still open on
+# it. A tell with a name in it beats a wall that asks for a look.
+#
+# WHAT SURVIVES is the TASK-LIST REFRESH, which is not a look: it is the orchestrator writing
+# down where the run has got to, and a turn that ends without it leaves the ledger behind the
+# work. `both` and `listagents` go with the limb; `tasklist` is now the only verdict that
+# refuses.
 VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" '
   $1 == "USER" {
     t = $2; sub(/^[ \t]+/, "", t)
     tick = (index(t, mark) == 1)
-    la = 0; tl = 0
+    tl = 0
     next
   }
   $1 == "TOOL" {
-    if ($2 == "ListAgents") { la = 1; next }
     if ($2 == "TaskList")   { tl = 1; next }
     if (plan != "" && index($3, plan) > 0) {
       if ($2 == "Edit" || $2 == "Write" || $2 == "NotebookEdit" || $2 == "Bash") tl = 1
@@ -1434,9 +1488,7 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
   }
   END {
     if (!tick) { print "quiet"; exit }
-    if (la && tl) { print "quiet"; exit }
-    if (!la && !tl) { print "both"; exit }
-    if (!la) { print "listagents"; exit }
+    if (tl) { print "quiet"; exit }
     print "tasklist"
   }
 ')
@@ -1531,12 +1583,6 @@ fi
 # THE FACT AND THE FIX COME FROM THE VERDICT, one row per duty missed (table rows
 # 111-113); the existing paragraph stays whole as `detail`.
 case "$VERDICT" in
-  both)
-    FACT='no ListAgents and no task-list refresh'; FIX='do both, then stop again'
-    REASON='Patrol duties incomplete: no ListAgents call, and no task-list refresh — TaskList or a plan-ledger write. Do both, then stop again — this gate blocks once.' ;;
-  listagents)
-    FACT='no ListAgents call since this Patrol tick'; FIX='call ListAgents, then stop'
-    REASON='Patrol duties incomplete: no ListAgents call since this Patrol tick. Refresh the subagent panel, then stop again — this gate blocks once.' ;;
   tasklist)
     FACT='no task-list refresh since this tick'; FIX='refresh it, then stop again'
     REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.' ;;
@@ -1723,8 +1769,8 @@ stop_patrol_revive() {  # <event> -> 0 nothing · 1 advisory · 2 block
 # its sibling, never through PATH (a hook's PATH is not ours to trust) and never
 # through an env seam (a seam on the path under test leaves the production path
 # unverified).
-HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+HOOK_DIR="$_STOP_HOOK_DIR_ABS"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$_STOP_HOOK_DIR_RAW"
 [ -d "$BIONIC_ROOT" ] || return "$_adv"
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------

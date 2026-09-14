@@ -350,6 +350,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep      delete every DEAD session's leftover state under this project's .bionic/tmp"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --report-only   the same files, listed, with nothing deleted"
+  die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   exit 2
 }
@@ -357,15 +358,23 @@ usage() {  # [message]
 [ $# -ge 1 ] || usage "a verb is required."
 VERB="$1"; shift
 
-# `--report-only` IS THE ONE FLAG IN THIS FILE, and `adopt` and `sweep` are the two verbs
-# that take it — the same word for the same promise on both, so an operator who has learned
-# it once has learned it. `bind` is the ONE verb that takes an operand, and it is required;
-# `sweep` deliberately takes NONE (it answers "clear what nobody can act on here", a
-# question about the directory rather than about a session anyone would have to name).
+# `--report-only` IS THE ONE FLAG MOST VERBS TAKE, and `adopt` and `sweep` are the two that
+# take it — the same word for the same promise on both, so an operator who has learned it
+# once has learned it. `bind` is the ONE verb that takes an operand, and it is required.
 # Everything else keeps the old surface exactly — one word, nothing after it — so a stray
 # argument is still the usage error it always was rather than something silently ignored.
+#
+# `sweep` ALSO TAKES `--window` (REQ-9/D5's prune half, T9) — OPT-IN, never the default.
+# Without it, `sweep` still "answers 'clear what nobody can act on here', a question about
+# the directory rather than about a session anyone would have to name": PID-liveness alone,
+# every dead session's files gone in one pass, exactly as `tests/session-sweep.test.sh`
+# pins today (sections 1-6, none of which ever pass this flag — that suite is untouched by
+# this addition). WITH it, each dead session's OWN newest file must also be older than the
+# poker interval, or that one session — and only that one — is deferred and named in the
+# report; see the verb's own comments. The two flags combine freely, in either order.
 ADOPT_REPORT_ONLY=no
 SWEEP_REPORT_ONLY=no
+SWEEP_WINDOWED=no
 BIND_ARG=""
 case "$VERB" in
   adopt)
@@ -377,12 +386,28 @@ case "$VERB" in
     fi
     ;;
   sweep)
-    if [ $# -eq 1 ]; then
-      [ "$1" = "--report-only" ] || usage "unknown flag for sweep: $1"
-      SWEEP_REPORT_ONLY=yes
-    elif [ $# -gt 1 ]; then
-      usage "sweep takes at most one flag."
+    # THE WORDING "at most one flag" IS PINNED VERBATIM (tests/session-sweep.test.sh
+    # §6.7, from when this verb took only one possible flag). Repeating either flag still
+    # refuses with that exact phrase — accurate under the wider surface too, read as "at
+    # most one of each" — so that pin holds unchanged; only a genuinely UNKNOWN flag or too
+    # many total tokens gets a different message.
+    if [ $# -gt 2 ]; then
+      usage "sweep takes at most two flags, and at most one flag of each kind."
     fi
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --report-only)
+          [ "$SWEEP_REPORT_ONLY" = no ] || usage "sweep takes at most one flag of each kind (repeated: --report-only)."
+          SWEEP_REPORT_ONLY=yes
+          ;;
+        --window)
+          [ "$SWEEP_WINDOWED" = no ] || usage "sweep takes at most one flag of each kind (repeated: --window)."
+          SWEEP_WINDOWED=yes
+          ;;
+        *) usage "unknown flag for sweep: $1" ;;
+      esac
+      shift
+    done
     ;;
   bind)
     # THE OPERAND IS THE WHOLE POINT OF THE VERB, so its absence is a refusal rather than a
@@ -431,9 +456,25 @@ line_field() {  # <line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }
 
-clean() {  # <value>
-  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
+clean() {  # <value> [<field name>]
+  local out
+  out="$(printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
+    -e 's/^ *//' -e 's/ *$//')"
+  # THE CUT IS PER-FIELD, NOT UNIVERSAL (REQ-9, carry-over P2). Every caller still gets
+  # control characters and `|` folded to spaces — that half of this function is unchanged
+  # and applies with no exception. What used to be unconditional is the trailing
+  # `cut -c 1-400`: `suites_allowed=` and `files=` are LIST-valued fields (a space- or
+  # comma-joined set, S13's suite-allowance wall and the impact-derived budget), and a
+  # dispatch touching enough files or naming enough suites overflows 400 characters on a
+  # perfectly ordinary brief — the cut then silently drops suites off the end, which is a
+  # budget the wall never agreed to and the operator never asked for. Every OTHER field
+  # (name, deliverable, progress, waiver, …) is prose or a path, where a length this
+  # generous is already more than any real value needs, so the cut stays for them. Callers
+  # that pass no field name (every one but the two below) get today's behaviour exactly.
+  case "${2:-}" in
+    suites_allowed|files) printf '%s' "$out" ;;
+    *) printf '%s' "$out" | cut -c 1-400 ;;
+  esac
 }
 
 # The prose duration/cadence parser. Deliberate limits, each a refusal rather than a guess —
@@ -856,12 +897,12 @@ count_refused_dispatches() {  # <transcript> [<since ISO>] -> count on stdout
 # live wave, which nothing recovers. The asymmetry is the whole design.
 
 # CRLF and CR-only line endings TRANSLATED, never deleted: a deleted CR would join two
-# lines into one and hand `current:` a value that was never written. This is a TEXT utility,
-# not a plan reader — the plan reader is the library's — and it survives the POKER/2
-# unification because the section read below still has to see real newlines.
-normalize_newlines() {
-  awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$1"
-}
+# lines into one and hand `current:` a value that was never written. That text utility is
+# `normalize_newlines`, and it is payload/scripts/lib/run.sh's now (epic-23
+# wave-12-fixit-171, REQ-8, spec D6) — sourced at :255, above every reader below. It had
+# three definitions, two of them taking a file argument like this one and one reading stdin;
+# `"$@"` is what made them one body rather than one of them winning. run.sh was already in
+# this hook's `BIONIC_LIB_WANT`, so nothing widened to reach it.
 
 # THE TWO FIELDS, AND NOTHING ELSE. `current:` and the `Step 9:` line are read out of the
 # fence-aware `## SDLC State` section exactly as the evidence gate reads them, so a plan
@@ -1267,6 +1308,47 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 #
 # YOUNGEST, because the rung is a kill floor and the youngest writer has the least work to
 # lose. `launched_at` is an ISO-8601 Z stamp, so a lexical max IS a chronological max.
+# ---------------------------------------------------------------- the agent name
+#
+# THE NAME A DISPATCH USES IS DERIVED, NEVER CHOSEN (T22, A-orch-33; Chris, first
+# principles: the roster is the identity register).
+#
+# THE DEFECT IT ENDS. A name is an identity everywhere downstream — `hooks/stop-guard.sh`
+# resolves one, `adopt` prints one as the message address, the landing sweep folds the
+# roster to the latest row per name. When a model invented a name for a task that had
+# already had a run, two agents ended up behind one row and one address, and the stop gate
+# carried a whole ambiguity arm to survive it. Prevention beats the arm: the tick prints the
+# name, the orchestrator copies it, and `hooks/dispatch-preflight.sh` refuses anything else.
+#
+# THE ROSTER IS WHAT "SPENT" MEANS, not the plan. The plan's `## Tasks` row keeps its id —
+# `T5` is still `T5` to a human reading the ledger — and the roster is the record of which
+# names THIS SESSION has actually handed out. A name is spent if any row carries it, in any
+# state: an open row obviously cannot be reused, and a CLOSED one is the common case (a
+# landed task being run again) where reuse would put a second lineage on a name the sweep
+# has already discharged.
+#
+# PER SESSION, exactly as the dispatch wall's in-flight arm reads it, so the two cannot
+# disagree about which names are available. A predecessor's roster reserves nothing.
+#
+# THE COUNT IS A SEARCH, NOT AN INCREMENT: `-r2`, then `-r3`, until a name no row carries.
+# A rule that always appended `-r2` would hand out a taken name on the third run.
+fill_name() {  # <roster file> <task id> -> the agent name to dispatch under
+  local f="$1" id="$2" n=2 cand
+  [ -n "$id" ] || return 0
+  if [ ! -f "$f" ] || [ -L "$f" ] || ! grep -qF "|name=${id}|" "$f" 2>/dev/null; then
+    printf '%s' "$id"; return 0
+  fi
+  # A bound, so a corrupt roster cannot spin here. Ninety-eight runs of one task is a
+  # different problem than this function can solve, and printing the id back is the
+  # fail-visible answer: the dispatch wall refuses it and says the name is in flight.
+  while [ "$n" -le 99 ]; do
+    cand="${id}-r${n}"
+    grep -qF "|name=${cand}|" "$f" 2>/dev/null || { printf '%s' "$cand"; return 0; }
+    n=$((n + 1))
+  done
+  printf '%s' "$id"
+}
+
 youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
   local roster="$1" sid="$2" swept cands live_cands live_ok tr lrc name tab RL RN CL
   [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
@@ -1632,8 +1714,8 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # does not carry.
   INSTRUMENT_FIELDS=()
   if [ -n "$files" ] || [ -n "$sallow" ] || [ -n "$ssrc" ]; then
-    INSTRUMENT_FIELDS=("files=$(clean "$files")" \
-                       "suites_allowed=$(clean "$sallow")" \
+    INSTRUMENT_FIELDS=("files=$(clean "$files" files)" \
+                       "suites_allowed=$(clean "$sallow" suites_allowed)" \
                        "suites_source=$(clean "$ssrc")")
   fi
   # THE ROW IS BUILT BY `roster_row` (payload/scripts/lib/roster.sh), not by a format string
@@ -1795,19 +1877,14 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # list here is exactly how that drift arrives. The library's own header carries
 # the class table and the reason the unkeyed files are unreachable.
 
-# A SYMLINK IS NOT A FILE THIS SCRIPT WROTE, so it is refused rather than followed and left
-# in place rather than unlinked — the identical posture `remove_patrol_stamp` takes, and for
-# the identical reason: every reader in the fleet already treats a symlinked state file as
-# absent, so there is nothing to clear, and a hostile repo must not gain a delete through a
-# path it aimed. A directory at one of these names is refused too: this verb removes files.
-sweep_unlink() {  # <path> -> 0 removed, 1 left alone
-  local f="$1"
-  [ -L "$f" ] && return 1
-  [ -f "$f" ] || return 1
-  rm -f "$f" 2>/dev/null
-  [ -e "$f" ] && return 1
-  return 0
-}
+# NO LONGER A FUNCTION (REQ-9/D5's prune half). This used to be `sweep_unlink`, called once
+# per candidate file — one `rm -f` subprocess per call, the dominant cost once
+# hooks/session-start.sh's own report loops were bounded (T6/T16). The `sweep` verb below
+# now queues every non-symlink candidate from every session it decides is old enough (never
+# a symlink; never rewritten here) and deletes them all in ONE `xargs -0 rm -f` pass, then
+# confirms each with a plain `[ -e ]` — no second `rm`, no per-file function call. See the
+# verb's own comments for the full shape, including the per-session age gate that decides
+# which sessions reach the delete list at all.
 
 
 # ---------------------------------------------------------------- verbs
@@ -2235,7 +2312,14 @@ case "$VERB" in
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
-          printf '  message     : SendMessage to:%s\n' "$RID"
+          # THE MESSAGE ADDRESS IS THE NAME (T22, A-orch-33), and the id keeps the two lines
+          # it is genuinely the key for — the observe path above and the stop below. It was
+          # the transcript-form id here until 2026-09-14, when a SendMessage to an id a
+          # `/clear` had re-keyed made the harness RESUME A COPY of the agent while the
+          # original was still running: two processes, one contract, one roster row. The
+          # agent table does not survive a `/clear`; the TEAMMATE table, keyed on the name,
+          # does — so the name is the address that keeps meaning the same agent.
+          printf '  message     : SendMessage to:%s\n' "$(clean "$RNAME")"
           # THE ADDRESS THE PLATFORM ACCEPTS, not the one this verb happens to hold. The id
           # on the roster is the TRANSCRIPT form; the stop primitive takes
           # `<name>@session-<id8>` for a teammate and rejects the transcript form (capture
@@ -2267,7 +2351,7 @@ case "$VERB" in
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
-          printf '  message     : SendMessage to:%s\n' "$RID"
+          printf '  message     : SendMessage to:%s\n' "$(clean "$RNAME")"
           if [ "$PARTITION" = other ]; then
             printf '  stop        : not adopted — this row belongs to another run in this root\n'
             printf '                (%s), and ownership stays with the session working it.\n' "${RPLAN:-none}"
@@ -2285,7 +2369,7 @@ case "$VERB" in
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
-          printf '  message     : SendMessage to:%s\n' "$RID"
+          printf '  message     : SendMessage to:%s\n' "$(clean "$RNAME")"
           printf '  stop        : unavailable — this adoption was NOT journalled to\n'
           printf '                %s\n' "$ADOPT_OWN_ROSTER"
           printf '  cure        : both stop gates take ownership from THIS session'"'"'s roster, so\n'
@@ -2348,7 +2432,8 @@ EOF
   # engagement would refuse hardest on the machines carrying the most residue. The guard the
   # other verbs take exists so bionic decides nothing about a session that never asked it to;
   # this verb decides nothing about any session at all — it removes files whose owners the
-  # kernel says are gone.
+  # kernel says are gone AND whose newest file is old enough that nobody dispatching it a
+  # moment ago could still be looking at it (below).
   #
   # IT TAKES NO SESSION ID, and that is the surface staying closed rather than an omission.
   # The question is "what here can nobody act on any more", which is a question about the
@@ -2356,13 +2441,31 @@ EOF
   # could do with it that the walk does not already do is name a session the walk skipped —
   # which is exactly the live one this verb refuses.
   #
+  # PER-SESSION AGE IS OPT-IN, VIA `--window` (REQ-6/D5's prune half, moved here from T6).
+  # Without the flag this verb is exactly what `tests/session-sweep.test.sh` has always
+  # pinned it as (sections 1-6, none of which ever pass it): PID-liveness alone decides
+  # dead-or-live, and every dead session's files go in one pass, aged or not — a question
+  # about the directory, not about time. `hooks/session-start.sh`'s own auto-sweep gate
+  # asks a cruder, SEPARATE question before it ever calls this verb at all: is ANY file
+  # anywhere under `.bionic/tmp` younger than a poker interval, and if so, skip calling
+  # `sweep` for the WHOLE run — every dead session's files, ancient or brand new, wait
+  # together for the next session start (that gate is unchanged by this task; it is not in
+  # this file). A batch dying by the hour meant `.bionic/tmp` only grew: the newest corpse
+  # always blocked the oldest one's cleanup. `--window` is this verb's own, finer answer to
+  # the SAME question, FOR A CALLER THAT ASKS FOR IT: each dead session's own newest file
+  # must itself be older than the poker interval, or that one session — and only that one
+  # — is deferred and named in the report, instead of the whole directory waiting on it.
+  #
   # THE EXIT CODE SAYS WHETHER ANYTHING IS LEFT THAT THIS VERB MAY NOT TOUCH:
   #   0  the sweep completed — dead state removed (or listed), or there was none to begin with
+  #      (with `--window`, a dead session deferred for being too young is not a fault either)
   #   1  nothing swept: every session with state here is LIVE, so there was nothing to remove
   #   2  usage, or a `.bionic/tmp` this verb will not delete inside
   # A live session's state is not a fault and the 1 is not a scolding — it is the one answer
   # a caller cannot read off "0 files removed", which is also what a live-only run and an
-  # empty directory would otherwise share.
+  # empty directory would otherwise share. A dead-but-deferred session (`--window` only) is
+  # reported by name (never silently folded into either bucket) and does not turn a real
+  # sweep into a 1: the 1 means "everything here is LIVE", not "nothing was old enough yet".
   sweep)
     # The current session's own key, when it has one. It is not required — this verb answers
     # for the DIRECTORY, not for a session — but when it is present the session is live by
@@ -2393,40 +2496,138 @@ EOF
       exit 0
     fi
 
-    # THE JUDGMENT IS TAKEN ONCE, BY THE LIBRARY, and this loop only renders it.
-    # `patrol_dead_sessions` is handed this session's own key as an additional
-    # live id: it is live by construction, and naming it by hand is what stops an
-    # unreadable claude-home from letting a session sweep its own state.
-    SWEEP_DEAD_IDS="$(patrol_dead_sessions "$REPO_REAL" "$SESSION_ID")"
+    # LIVE, NOT DEAD — one walk, not two (T6, 63405b0, reused: ownership moved here at
+    # T6-fixup/971afdb). `patrol_dead_sessions` would answer this by calling
+    # `patrol_state_session_ids` a second time internally and subtracting the live set; this
+    # verb already walks that same id set once below, so asking the LIVE side once here and
+    # comparing inline reaches the identical verdict without the second walk.
+    # `patrol_live_session_ids` costs nothing proportional to residue under `.bionic/tmp` (it
+    # reads `${CLAUDE_CONFIG_DIR}/sessions/*.json`, one file per running process, a
+    # different and much smaller set). This session's own key is added by hand, live by
+    # construction, so an unreadable claude-home can never let a session sweep itself.
+    SWEEP_LIVE_IDS="$(patrol_live_session_ids)"
+    [ -z "$SESSION_ID" ] || SWEEP_LIVE_IDS="${SWEEP_LIVE_IDS}${SWEEP_LIVE_IDS:+
+}${SESSION_ID}"
+
+    # THE WINDOW — read only when `--window` asked for it, so a plain `sweep` call costs
+    # nothing extra and touches no new fact. This session's own poker interval, the exact
+    # knob hooks/session-start.sh's own auto-sweep gate reads through a subprocess call to
+    # this same verb. A malformed `.bionic/config.yaml` REFUSES the `interval` verb
+    # elsewhere in this file, which is right for a caller that needs an exact answer; here
+    # it must not disable pruning altogether, so a bad override falls back to this script's
+    # own built-in default instead (a dead session's files still eventually clear rather
+    # than accumulating forever behind a typo).
+    SWEEP_WINDOW=0
+    SWEEP_NOW=0
+    SWEEP_STAT_GNU=no
+    if [ "$SWEEP_WINDOWED" = yes ]; then
+      SWEEP_WINDOW="$(poker_interval_seconds 2>/dev/null)"
+      case "$SWEEP_WINDOW" in ''|*[!0-9]*) SWEEP_WINDOW="$(parse_seconds "$POKER_INTERVAL_DEFAULT" 2>/dev/null)" ;; esac
+      case "$SWEEP_WINDOW" in ''|*[!0-9]*) SWEEP_WINDOW=1200 ;; esac
+      SWEEP_NOW="$(now_epoch)"
+
+      # THE STAT FLAVOUR, PROBED ONCE — the identical GNU/BSD discrimination
+      # hooks/session-start.sh's own age gate uses (its own comment there has the full
+      # rationale: GNU's `-f` is a different flag, `--file-system`, so trying the BSD form
+      # first and treating any non-empty capture as success reads a filesystem report as a
+      # timestamp). Duplicated rather than sourced: the two hooks share no process to read
+      # one answer from.
+      case "$(stat -c %Y /dev/null 2>/dev/null)" in
+        ''|*[!0-9]*) SWEEP_STAT_GNU=no ;;
+        *) SWEEP_STAT_GNU=yes ;;
+      esac
+    fi
 
     SWEEP_SCANNED=0
     SWEEP_DEAD=0
     SWEEP_KEPT=0
+    SWEEP_YOUNG=0
     SWEEP_FILES=0
     SWEEP_REMOVED=0
     SWEEP_REFUSED=0
 
+    # ONE PASS OVER THE DISK TO DECIDE AND DESCRIBE, ONE MORE TO DELETE — never a second
+    # walk to RE-DERIVE the report (T6, A-T6.3: a two-walk shape that deletes first and then
+    # re-lists a now-emptied directory undercounts every dead session to zero files, and at
+    # "everything just got swept" can misreport "nothing swept: all sessions are LIVE").
+    # `SWEEP_OUT` accumulates the WHOLE report as this loop goes, with a `?`-prefixed
+    # placeholder standing in for any file this pass QUEUES (into `SWEEP_BULK`) rather than
+    # deletes immediately. Every other line — live-kept, deferred, a symlink refused — is
+    # final the moment it is written. Only after the loop does ONE `xargs -0 rm -f` pass run,
+    # and only then are the placeholders resolved, by checking each path once more against
+    # disk (never a second `rm`).
+    SWEEP_OUT=""
+    SWEEP_BULK=""
     while IFS= read -r SWEEP_SID; do
       [ -n "$SWEEP_SID" ] || continue
       SWEEP_SCANNED=$((SWEEP_SCANNED + 1))
 
-      # Newline-delimited containment against the DEAD set: an id counts as dead
-      # only as a whole line, so a live session whose id is a prefix of a dead
+      # Newline-delimited containment against the LIVE set: an id counts as live
+      # only as a whole line, so a dead session whose id is a prefix of a live
       # one is not mistaken for it.
       case "
-$SWEEP_DEAD_IDS
+$SWEEP_LIVE_IDS
 " in
         *"
 $SWEEP_SID
-"*) ;;
-        *)
+"*)
           SWEEP_KEPT=$((SWEEP_KEPT + 1))
-          say "$SWEEP_SID — live, kept"
+          SWEEP_OUT="${SWEEP_OUT}$SWEEP_SID — live, kept
+"
           continue
           ;;
+        *) ;;
       esac
 
       SWEEP_DEAD=$((SWEEP_DEAD + 1))
+      SWEEP_SESSION_FILES="$(patrol_session_state_files "$REPO_REAL" "$SWEEP_SID")"
+
+      # THIS SESSION'S OWN NEWEST FILE, and nobody else's — the whole of the "per-session,
+      # not all-or-nothing" fix, and gated on `--window` so a plain `sweep` never pays for
+      # or exhibits it (see the verb's own header comment). A session dies once and its own
+      # files age together, so one newest mtime among ITS files (never compared across
+      # sessions) is the one fact this decision needs. Batched per session (one
+      # flavour-probed `xargs stat` call for however many of the five classes this one
+      # session actually left) rather than one `stat` fork per file — the exact shape that
+      # made 400 dead sessions' worth of per-file forking the dominant cost T6/T16 spent
+      # this wave cutting down elsewhere in this same call chain.
+      if [ "$SWEEP_WINDOWED" = yes ]; then
+        SWEEP_NEWEST=0
+        if [ -n "$SWEEP_SESSION_FILES" ]; then
+          if [ "$SWEEP_STAT_GNU" = yes ]; then
+            SWEEP_SESSION_MTS="$(printf '%s\n' "$SWEEP_SESSION_FILES" | tr '\n' '\0' | xargs -0 stat -c %Y 2>/dev/null)"
+          else
+            SWEEP_SESSION_MTS="$(printf '%s\n' "$SWEEP_SESSION_FILES" | tr '\n' '\0' | xargs -0 stat -f %m 2>/dev/null)"
+          fi
+          while IFS= read -r SWEEP_MT; do
+            case "$SWEEP_MT" in ''|*[!0-9]*) continue ;; esac
+            [ "$SWEEP_MT" -gt "$SWEEP_NEWEST" ] && SWEEP_NEWEST="$SWEEP_MT"
+          done <<EOF
+$SWEEP_SESSION_MTS
+EOF
+        fi
+
+        # YOUNGER THAN THE WINDOW: DEFER THIS SESSION, INDIVIDUALLY. Nothing about any
+        # OTHER dead session is touched by this — the property the all-or-nothing shape did
+        # not have. A session whose files could not be stat'd at all (`SWEEP_NEWEST` still
+        # 0, the empty-file-list or every-stat-failed case) is treated as old enough rather
+        # than perpetually deferred: an age gate exists to protect a session that JUST
+        # died, not to withhold state this verb can no longer even measure.
+        if [ "$SWEEP_NEWEST" -gt 0 ] && [ $(( SWEEP_NOW - SWEEP_NEWEST )) -lt "$SWEEP_WINDOW" ]; then
+          SWEEP_YOUNG=$((SWEEP_YOUNG + 1))
+          SWEEP_N=0
+          while IFS= read -r SWEEP_F; do
+            [ -n "$SWEEP_F" ] || continue
+            SWEEP_N=$((SWEEP_N + 1))
+          done <<EOF
+$SWEEP_SESSION_FILES
+EOF
+          SWEEP_OUT="${SWEEP_OUT}$SWEEP_SID — dead, deferred ($SWEEP_N file(s) younger than the ${SWEEP_WINDOW}s window)
+"
+          continue
+        fi
+      fi
+
       SWEEP_N=0
       SWEEP_LINES=""
       while IFS= read -r SWEEP_F; do
@@ -2447,31 +2648,84 @@ $SWEEP_SID
           fi
           continue
         fi
-        if sweep_unlink "$SWEEP_F"; then
-          SWEEP_REMOVED=$((SWEEP_REMOVED + 1))
-          SWEEP_LINES="${SWEEP_LINES}  $SWEEP_F
-"
-        else
+        # A SYMLINK IS NOT A FILE THIS SCRIPT WROTE, so it is refused rather than followed
+        # and left in place rather than unlinked — the identical posture `remove_patrol_stamp`
+        # takes, and for the identical reason: every reader in the fleet already treats a
+        # symlinked state file as absent, so there is nothing to clear, and a hostile repo
+        # must not gain a delete through a path it aimed. Everything else is queued for the
+        # ONE bulk delete below, never removed here one fork at a time.
+        if [ -L "$SWEEP_F" ]; then
           SWEEP_REFUSED=$((SWEEP_REFUSED + 1))
           SWEEP_LINES="${SWEEP_LINES}  refused (symlink or not a file, left alone): $SWEEP_F
 "
+        else
+          SWEEP_BULK="${SWEEP_BULK}${SWEEP_F}
+"
+          SWEEP_LINES="${SWEEP_LINES}?${SWEEP_F}
+"
         fi
       done <<EOF
-$(patrol_session_state_files "$REPO_REAL" "$SWEEP_SID")
+$SWEEP_SESSION_FILES
 EOF
 
-      say "$SWEEP_SID — dead, $SWEEP_N file(s)"
-      printf '%s' "$SWEEP_LINES" | while IFS= read -r SWEEP_L; do
-        [ -n "$SWEEP_L" ] && say "$SWEEP_L"
-      done
+      SWEEP_OUT="${SWEEP_OUT}$SWEEP_SID — dead, $SWEEP_N file(s)
+${SWEEP_LINES}"
     done <<EOF
 $(patrol_state_session_ids "$REPO_REAL")
 EOF
 
-    printf '%s|at=%s|session=%s|mode=%s|scanned=%s|dead=%s|live=%s|files=%s|removed=%s|refused=%s\n' \
+    # THE ONE DELETE. Nothing above ever appends to `SWEEP_BULK` when `SWEEP_REPORT_ONLY=yes`
+    # or when a session was deferred (both `continue` before reaching it), so report-only and
+    # an all-deferred run both reach here with an empty list and this is a no-op for them.
+    if [ -n "$SWEEP_BULK" ]; then
+      printf '%s' "$SWEEP_BULK" | tr '\n' '\0' | xargs -0 rm -f -- 2>/dev/null
+    fi
+
+    # RESOLVE THE PLACEHOLDERS. Every `?`-prefixed line named a file that was NOT a symlink
+    # at enumeration time and was just queued in the one `rm` pass above; the only question
+    # left is whether that `rm` actually removed it (the ordinary case) or left it behind
+    # (permissions, a concurrent writer) — decided with a plain existence check, never a
+    # second `rm`. Every other line already carries its final wording and passes through as-is.
+    if [ -n "$SWEEP_OUT" ]; then
+      SWEEP_RESOLVED=""
+      while IFS= read -r SWEEP_L; do
+        case "$SWEEP_L" in
+          '?'*)
+            SWEEP_RF="${SWEEP_L#?}"
+            if [ ! -e "$SWEEP_RF" ]; then
+              SWEEP_REMOVED=$((SWEEP_REMOVED + 1))
+              SWEEP_RESOLVED="${SWEEP_RESOLVED}  $SWEEP_RF
+"
+            else
+              SWEEP_REFUSED=$((SWEEP_REFUSED + 1))
+              SWEEP_RESOLVED="${SWEEP_RESOLVED}  refused (symlink or not a file, left alone): $SWEEP_RF
+"
+            fi
+            ;;
+          *)
+            SWEEP_RESOLVED="${SWEEP_RESOLVED}${SWEEP_L}
+"
+            ;;
+        esac
+      done <<EOF
+$SWEEP_OUT
+EOF
+      SWEEP_OUT="$SWEEP_RESOLVED"
+    fi
+
+    printf '%s' "$SWEEP_OUT" | while IFS= read -r SWEEP_L; do
+      [ -n "$SWEEP_L" ] && say "$SWEEP_L"
+    done
+
+    # `deferred=` IS APPENDED AFTER `refused=`, never inserted between the six original
+    # fields (AC-9.2's spirit extended to this line): `tests/session-sweep.test.sh` pins
+    # several of them as ADJACENT substrings (`|dead=2|live=1|`, and so on), and a plain
+    # `sweep` call — which never sets `SWEEP_YOUNG` above 0 — must keep emitting a byte-
+    # identical line up through `refused=` for those pins to hold.
+    printf '%s|at=%s|session=%s|mode=%s|scanned=%s|dead=%s|live=%s|files=%s|removed=%s|refused=%s|deferred=%s\n' \
       "$SWEEP_SCHEMA" "$(iso_now)" "${SESSION_ID:-none}" \
       "$([ "$SWEEP_REPORT_ONLY" = yes ] && printf 'report-only' || printf 'sweep')" \
-      "$SWEEP_SCANNED" "$SWEEP_DEAD" "$SWEEP_KEPT" "$SWEEP_FILES" "$SWEEP_REMOVED" "$SWEEP_REFUSED"
+      "$SWEEP_SCANNED" "$SWEEP_DEAD" "$SWEEP_KEPT" "$SWEEP_FILES" "$SWEEP_REMOVED" "$SWEEP_REFUSED" "$SWEEP_YOUNG"
 
     if [ "$SWEEP_SCANNED" -eq 0 ]; then
       say "nothing to sweep — no session-keyed state under $SWEEP_DIR."
@@ -2484,13 +2738,24 @@ EOF
       exit 1
     fi
 
+    # BOTH SUMMARY LINES NAME THE DEFERRED COUNT SEPARATELY FROM THE DEAD ONE. `SWEEP_DEAD`
+    # counts every session the liveness check ruled dead, deferred ones included — the exit-1
+    # refusal above depends on that (a batch that is ALL deferred is not "everything here is
+    # live" and must not read as one). The dead-session count in these two prose lines is
+    # `SWEEP_DEAD - SWEEP_YOUNG`, on purpose: it is the count of sessions this run actually
+    # acted on (swept, or listed to be), so it still says "0" rather than a number that
+    # includes sessions nothing happened to.
     if [ "$SWEEP_REPORT_ONLY" = yes ]; then
-      say "report-only: $SWEEP_FILES file(s) across $SWEEP_DEAD dead session(s) would be deleted — nothing was written."
+      say "report-only: $SWEEP_FILES file(s) across $((SWEEP_DEAD - SWEEP_YOUNG)) dead session(s) would be deleted — nothing was written."
+      [ "$SWEEP_YOUNG" -gt 0 ] \
+        && say "$SWEEP_YOUNG dead session(s) deferred — their files are younger than the ${SWEEP_WINDOW}s window."
       say "run 'sweep' to delete them."
       exit 0
     fi
 
-    say "swept $SWEEP_REMOVED file(s) across $SWEEP_DEAD dead session(s); $SWEEP_KEPT live session(s) kept."
+    say "swept $SWEEP_REMOVED file(s) across $((SWEEP_DEAD - SWEEP_YOUNG)) dead session(s); $SWEEP_KEPT live session(s) kept."
+    [ "$SWEEP_YOUNG" -gt 0 ] \
+      && say "$SWEEP_YOUNG dead session(s) deferred — their files are younger than the ${SWEEP_WINDOW}s window."
     [ "$SWEEP_REFUSED" -gt 0 ] \
       && say "$SWEEP_REFUSED path(s) refused and left alone — a symlink under .bionic/tmp is never followed."
     exit 0
@@ -2734,6 +2999,24 @@ EOF
     fi
 
     TOTAL=0; OPEN=0; NOTIFY_ROWS=""; NOTIFY_DETAIL=""
+    # THE MET LINEAGES THIS SESSION HAS NOT CLOSED (T22, A-orch-33). `payload/scripts/lib/stop.sh`
+    # used to refuse the end of a Patrol turn until the transcript showed a ListAgents call —
+    # a chore demanded of the model before a gate would judge, which is the rule ADR-024
+    # exists to end. The obligation behind it was real: eighteen finished agents once sat
+    # idle on one panel because nobody stopped them. It is answered here instead, from the
+    # roster, by the one process that already walks every row and every verdict.
+    TASKSTOP_NAMES=""
+    # THE SWEPT SET IS READ ONCE, BEFORE THE WALK (Step-6 delta review P1). The membership
+    # test below used to be `grep -F … "$ROSTER_FILE" | grep -qF …` INSIDE the per-row loop:
+    # a whole-file read and two forks per MET row, on a file that grows monotonically for the
+    # life of the session — O(MET x roster), and MET rows are the majority of a wave by its
+    # close. One read, then an in-shell `case`, costs the same on the first row and nothing on
+    # the rest. Adds no `jq` call and no transcript read: the §19i pin is untouched.
+    #
+    # THE MATCH STAYS LITERAL. `grep -qF` treated the name as a fixed string; a `case` pattern
+    # does too as long as the variable is QUOTED inside it, which is what keeps a roster name
+    # carrying `*` or `?` from globbing against this blob.
+    SWEPT_ALL="$(grep -F "$SWEPT_SCHEMA|" "$ROSTER_FILE" 2>/dev/null)"
     # The names of the rows the verdict leaves open, kept so the live set can trim them
     # AFTER this walk rather than inside it: one transcript resolution per tick, not one
     # per row, and the roster count survives as its own number (S19).
@@ -2768,7 +3051,20 @@ EOF
       [ "$(line_field "$LINE" acked)" = "yes" ] && continue
 
       case "$RSTATE" in
-        MET|WAIVED) : ;;                      # closed — not open
+        MET|WAIVED)
+          # NAMED ONLY WHILE THE AGENT IS STILL THERE. A `landing-swept/v1` marker is written
+          # when the agent DISAPPEARED from the harness's task list (or, for a teammate, at
+          # its own SubagentStop), so a swept row is a lineage already gone and naming it
+          # would be the noise that teaches a reader to skip the line. MET-and-unswept is a
+          # contract that landed while its agent is still addressable — the one case where
+          # somebody has to act, and the act is a TaskStop.
+          if [ "$RSTATE" = "MET" ]; then
+            case "$SWEPT_ALL" in
+              *"|name=${RNAME}|"*) : ;;   # already swept — the lineage is gone
+              *) TASKSTOP_NAMES="${TASKSTOP_NAMES}${TASKSTOP_NAMES:+ }$(clean "$RNAME")" ;;
+            esac
+          fi
+          ;;                                  # closed — not open
         *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
                     OPEN_NAMES="${OPEN_NAMES}${RNAME}
 " ;;
@@ -2799,6 +3095,19 @@ EOF
     done <<EOF
 $VERDICT_OUT
 EOF
+
+    # ---------- THE PANEL IS REFRESHED FROM THE ROSTER, NOT FROM A TOOL CALL (T22) -------
+    #
+    # One line per MET lineage still on this session's register. It is a TELL: the tick holds
+    # no authority (ADR-003), stops nothing, writes nothing, and refuses nothing. What it
+    # replaces is `stop_patrol_duties`'s ListAgents duty, which asked the model to look at a
+    # panel so that a gate would let the turn end — and never named a single thing to do
+    # about what it saw.
+    if [ -n "$TASKSTOP_NAMES" ]; then
+      for TS_NAME in $TASKSTOP_NAMES; do
+        say "TASKSTOP ${TS_NAME} — contract MET and the lineage is still open on this roster; stop it"
+      done
+    fi
 
     # ---------- THE LIVE SET TRIMS `open=` AND THE FILL (S19, auditor F-14) ----------
     #
@@ -2872,6 +3181,63 @@ EOF
 $OPEN_NAMES
 EOF
         [ -n "$TICK_LIVE_STATE" ] || OPEN="$TICK_OPEN_LIVE"
+
+        # ---------- THE DUPLICATE-SESSION TELL (AC-4.3, T21) ----------
+        #
+        # THE CLAIM WAS PROSE ONLY. skills/canonical-sdlc/dispatch.md promises "A listed agent
+        # with NO ledger row is surfaced as a duplicate-session tell, never silently stopped",
+        # and nothing computed it. Chris, 2026-09-14 (A-orch-29): "Add a test" — the tell
+        # becomes tick machinery, with its own test.
+        #
+        # THE QUESTION, for every name THIS session's ListAgents answer calls live: does ANY
+        # roster under this PROJECT's `.bionic/tmp` — not only this session's own — carry a row
+        # for it, by `name=` or `agent_id=` (payload/scripts/lib/roster.sh)? A live agent no
+        # roster remembers is either another session's dispatch (never rostered here) or a
+        # resumed copy of a finished one — either way this session cannot tell which, so it
+        # NAMES the gap and stops there: no stop, no roster write, no effect on FILL, QUIET or
+        # NOTIFY. `ANY roster`, not `open`: a landed/MET row still proves the wall once knew the
+        # agent, so a closed row clears the name exactly as an open one would.
+        #
+        # THE ALREADY-WARMED SLOT, NOT A SECOND CALL (S19I's own pin, P-4). The priming line
+        # above filled `agents.sh`'s one-process cache directly (no subshell), and the loop
+        # that follows it only ever reads that cache through subshelled predicate calls whose
+        # writes die with them — so the cache this process holds is still exactly what the
+        # priming line put there. A second call to `live_agents "$TICK_TR"` here would normally
+        # be a cache HIT and cost nothing — but S19I's own anti-vacuity arm proves the opposite
+        # case by deleting the priming line and nothing else, and against THAT doctored copy a
+        # second `live_agents` call would pay its own full parse (the row loop's cache writes
+        # are already lost to their subshells, so nothing upstream would have warmed it either)
+        # and move the "twelve, not two" pin it exists to hold. Reading the cache SLOT directly
+        # copies neither cost: a real tick sees exactly what the priming line read (correct data,
+        # zero extra jq calls), and a doctored one — where nothing ever warmed it — sees empty
+        # (no tell, and still zero extra calls; S19I is not testing this feature).
+        #
+        # ONLY WHEN THE ANSWER CARRIES A SET. NONE reads as an empty set here exactly as it
+        # does for the trim above (AC-4.1: the tick never demands a ListAgents call), and a
+        # STALE answer still names a real — if possibly outdated — live set worth surfacing,
+        # the same asymmetry `live_agents`'s own header documents.
+        TICK_DUP_SET="$_LA_CACHE_OUT"
+        if [ -n "$TICK_DUP_SET" ]; then
+          while IFS='|' read -r TICK_DUP_NAME TICK_DUP_TYPE TICK_DUP_STATUS; do
+            [ -n "$TICK_DUP_NAME" ] || continue
+            TICK_DUP_FOUND=0
+            for TICK_DUP_RF in "$REPO_REAL/.bionic/tmp"/roster-*.state; do
+              [ -f "$TICK_DUP_RF" ] || continue
+              # Symlinks are not followed, the same posture every other .bionic/tmp reader
+              # in this file takes.
+              [ -L "$TICK_DUP_RF" ] && continue
+              if grep -qF "|name=${TICK_DUP_NAME}|" "$TICK_DUP_RF" 2>/dev/null \
+                 || grep -qF "|agent_id=${TICK_DUP_NAME}|" "$TICK_DUP_RF" 2>/dev/null; then
+                TICK_DUP_FOUND=1
+                break
+              fi
+            done
+            [ "$TICK_DUP_FOUND" -eq 1 ] \
+              || say "DUPLICATE-SESSION ${TICK_DUP_NAME} — live here, on no roster of this project (another session's dispatch or a resumed copy); never stop it silently"
+          done <<EOF
+$TICK_DUP_SET
+EOF
+        fi
       fi
       if [ -n "$TICK_LIVE_STATE" ]; then
         say "live set $TICK_LIVE_STATE — open= counted from the roster; ListAgents before any dispatch"
@@ -2880,6 +3246,40 @@ EOF
         # contracts is a number with no story. Only when it actually moved: a tick whose
         # live set agrees with its roster has nothing to explain.
         say "live set fresh — ${OPEN_ROSTER} open row(s) on this roster, ${OPEN} still live; open= and any fill are sized from the live set"
+      fi
+    fi
+
+    # ---------- THE DUPLICATE-START TELL (T22 row (d), delta review C2) ----------
+    #
+    # hooks/execution-recorder.sh journals `status=duplicate-start` when one agent id starts a
+    # SECOND time in this session — a resumed copy working a contract the first process still
+    # holds. That row was accepted as the answer BECAUSE a SubagentStart hook cannot block
+    # (A-T22.4): the door that closes is the dispatch wall, one event earlier, and the record
+    # exists so that somebody SEES the case the door was not asked about. Until this block
+    # nothing read the field: the DUPLICATE-SESSION tell above asks a different question — a
+    # live name NO roster of this project carries — and a duplicate start is carried by `name=`
+    # AND by `agent_id=`, so that tell is silent on exactly this row.
+    #
+    # ROSTER-ONLY, AND OUTSIDE THE LIVE-SET ARM. The fact is on disk. A tell that needed a
+    # ListAgents answer, or an open row to trim, would go quiet in precisely the degraded
+    # session that produces the row — one that just lost its agent table across a `/clear`.
+    #
+    # ONE LINE PER ROW, NOT PER NAME: two duplicate starts are two events, and collapsing them
+    # would hide the second. It is a TELL and nothing else — no stop, no roster write, no
+    # effect on FILL, QUIET, NOTIFY or `open=`.
+    if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
+      DUP_START_ROWS="$(grep -F "|status=duplicate-start|" "$ROSTER_FILE" 2>/dev/null)"
+      if [ -n "$DUP_START_ROWS" ]; then
+        while IFS= read -r DS_LINE; do
+          # The schema prefix is checked here as every other roster reader in this file checks
+          # it: `|status=` is not unique to a roster-state row by construction, only in practice.
+          case "$DS_LINE" in "roster-state/v1|"*) : ;; *) continue ;; esac
+          DS_NAME="$(clean "$(line_field "$DS_LINE" name)")"
+          [ -n "$DS_NAME" ] || continue
+          say "DUPLICATE-START ${DS_NAME} — a second start under an id that already has a live row; the dispatch wall is the door that closes"
+        done <<EOF
+$DUP_START_ROWS
+EOF
       fi
     fi
 
@@ -3166,7 +3566,12 @@ EOF
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
             [ "$SCHED_N" -lt "$SCHED_GAP" ] || break
-            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(clean "$TASK_ID")"
+            # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
+            # same string for a task that has never run, which is why every fixture and every
+            # doc example still reads `FILL T1 T2`. They diverge when the id is already spent,
+            # and then the ONLY safe token to print is the free one: see `fill_name` for why
+            # the roster, and not the plan, is what "spent" is read from.
+            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(fill_name "$ROSTER_FILE" "$(clean "$TASK_ID")")"
             SCHED_N=$((SCHED_N + 1))
           done <<EOF
 $SCHED_READY

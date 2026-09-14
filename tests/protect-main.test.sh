@@ -85,8 +85,16 @@ FAKE_BIN=$(mktemp -d)
 cat > "$FAKE_BIN/git" << 'FAKEGIT'
 #!/bin/bash
 # Intercept "git symbolic-ref --short HEAD" and return $FAKE_BRANCH.
-# Pass everything else through to real git.
-if [[ "$*" == "symbolic-ref --short HEAD" ]]; then
+# Also intercept the same call prefixed with "-C <dir>" (T5, D2: the wall now
+# asks for the branch of the payload's resolved cwd via `git -C "$BIONIC_CWD"
+# symbolic-ref --short HEAD`, not the hook process's own cwd) — strip a
+# leading "-C <dir>" pair before matching. Pass everything else through to
+# real git.
+args=("$@")
+if [[ "${args[0]:-}" == "-C" ]]; then
+  args=("${args[@]:2}")
+fi
+if [[ "${args[*]}" == "symbolic-ref --short HEAD" ]]; then
   echo "${FAKE_BRANCH:-main}"
   exit 0
 fi
