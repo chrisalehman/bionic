@@ -3440,13 +3440,16 @@ expect_contains "…naming the main checkout" "main checkout: $S23_MAIN" "$GATE_
 expect_contains "…and the tree it was made from" "$S23_TREE" "$GATE_VERR"
 
 # The settings-channel spelling of an agent context.
+# A DISTINCT NAME per dispatch from here (T22): r23a's ALLOWED dispatch journalled a
+# `w99-impl` row on this repo's roster, and a name with an open row cannot be handed out
+# twice — which is the arm under test in §T22-name-in-flight, not this section's subject.
 GATE_ENV="$GATE_ENV BIONIC_HOOK_CHANNEL=agent-context"
-run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE")"
+run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-c")"
 GATE_ENV="${GATE_ENV% BIONIC_HOOK_CHANNEL=agent-context}"
 expect_status "r23c the same dispatch in an agent context (BIONIC_HOOK_CHANNEL) is allowed" "0" "$GATE_ST"
 
 # The payload spelling.
-S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" | jq '. + {agent_type:"senior-implementor"}')
+S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-d" | jq '. + {agent_type:"senior-implementor"}')
 run_gate "$S23_AGENT_PAYLOAD"
 expect_status "r23d …and so is one whose payload carries agent_type" "0" "$GATE_ST"
 
@@ -4938,6 +4941,103 @@ expect_status "§a3 the STALE arm is untouched by the A3 rewording" "2" "$GATE_S
 expect_contains "§a3 …still naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
 expect_contains "§a3 …and still offering the hand re-arm, which is A4's remedy" \
   "session-poker.sh arm" "$GATE_VERR"
+
+# ======================== §T22-name-in-flight: A NAME IN FLIGHT IS REFUSED AT DISPATCH
+# (T22, A-orch-33; AC-4.4's prevention half.)
+#
+# THE ROSTER IS THE IDENTITY REGISTER. Two agents of one name in one session is the
+# condition every downstream ambiguity was built to survive: the stop gate carried a whole
+# arm for it ("several live agents answer to that name"), and a message addressed to a name
+# that resolves to two agents reaches the wrong one. The cure is at the door — a name with
+# an OPEN row on THIS session's roster is not available, and the FILL line already names a
+# free one.
+#
+# OPEN IS A ROSTER READING AND ONLY A ROSTER READING (P-A). `intended`, `confirmed` and
+# `identified` are open; a name closed by a `landing-swept/v1|…|state=MET` marker is free
+# again. No transcript, no live set, no tool call: every fixture below leaves the transcript
+# in the `none` state deliberately, so a gate that reached for an answer would refuse the
+# control rows too.
+
+section "§T22-name-in-flight: a dispatch cannot reuse a name that is still open"
+
+T22NF_NONE="$SANDBOX/.t22nf-none.jsonl"
+mk_transcript "$T22NF_NONE" none
+
+# (a) THE REFUSAL. One open `intended` row named `T5`; a dispatch that names `T5` again.
+REPO=$(make_repo t22nfa yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfa a name with an open intended row is REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the fact" "that name is in flight" "$GATE_ERR"
+expect_contains "…and the fix points at the FILL line" "use the FILL line's name" "$GATE_ERR"
+expect_contains "…and the detail names the name and its status" "T5" "$GATE_VERR"
+
+# (b) A CONFIRMED ROW IS OPEN TOO. The three live statuses are one class here.
+REPO=$(make_repo t22nfb yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+roster_row_no_plan status=confirmed "session=$SID_A" name=T6 agent_id=aT6-1111111111111111 \
+  launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T6 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T6 >> "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T6" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfb a name with an open confirmed row is REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the same fact" "that name is in flight" "$GATE_ERR"
+
+# (c) AN IDENTIFIED ROW IS OPEN TOO.
+REPO=$(make_repo t22nfc yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+roster_row_no_plan status=identified "session=$SID_A" name=T7 agent_id=aT7-2222222222222222 \
+  launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T7 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T7 >> "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T7" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfc a name with an open identified row is REFUSED" "2" "$GATE_ST"
+
+# (d) THE CONTROL THAT MAKES IT A RULE AND NOT A BAN. The SAME roster, the SAME transcript,
+# a DIFFERENT name: allowed. A gate that refused every dispatch once a roster existed would
+# pass (a)-(c) and fail here.
+REPO=$(make_repo t22nfd yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5-r2" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfd the name the FILL line would derive instead is ALLOWED" "0" "$GATE_ST"
+expect_absent "…and nothing is said about a name in flight" "in flight" "$GATE_ERR"
+
+# (e) A CLOSED NAME IS FREE AGAIN — the MET marker is what reopens it. Same name, same
+# roster, one marker's difference.
+REPO=$(make_repo t22nfe yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T8"
+s22_sweep "$REPO" "$SID_A" "T8"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T8" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfe a name closed by a MET marker is free to dispatch again" "0" "$GATE_ST"
+expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
+
+# (f) ANOTHER SESSION'S ROSTER IS NOT THIS ONE'S REGISTER. The row is planted under SID_B;
+# SID_A dispatches the same name and is allowed. Names are unique per SESSION, which is the
+# scope every other roster reader in the fleet already uses.
+REPO=$(make_repo t22nff yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_B" "T9"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T9" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nff a predecessor session's row does not reserve the name here" "0" "$GATE_ST"
+
+# (g) AN UNNAMED DISPATCH IS NOT JUDGED BY THIS ARM AT ALL — there is no name to be in
+# flight, and an arm that refused one would break every unnamed async dispatch in the fleet.
+REPO=$(make_repo t22nfg yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "-" "claude-sonnet-5" "$T22NF_NONE")"
+expect_absent "t22nfg an unnamed dispatch is never refused for a name in flight" \
+  "in flight" "$GATE_ERR"
 
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 

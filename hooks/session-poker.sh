@@ -1308,6 +1308,47 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 #
 # YOUNGEST, because the rung is a kill floor and the youngest writer has the least work to
 # lose. `launched_at` is an ISO-8601 Z stamp, so a lexical max IS a chronological max.
+# ---------------------------------------------------------------- the agent name
+#
+# THE NAME A DISPATCH USES IS DERIVED, NEVER CHOSEN (T22, A-orch-33; Chris, first
+# principles: the roster is the identity register).
+#
+# THE DEFECT IT ENDS. A name is an identity everywhere downstream — `hooks/stop-guard.sh`
+# resolves one, `adopt` prints one as the message address, the landing sweep folds the
+# roster to the latest row per name. When a model invented a name for a task that had
+# already had a run, two agents ended up behind one row and one address, and the stop gate
+# carried a whole ambiguity arm to survive it. Prevention beats the arm: the tick prints the
+# name, the orchestrator copies it, and `hooks/dispatch-preflight.sh` refuses anything else.
+#
+# THE ROSTER IS WHAT "SPENT" MEANS, not the plan. The plan's `## Tasks` row keeps its id —
+# `T5` is still `T5` to a human reading the ledger — and the roster is the record of which
+# names THIS SESSION has actually handed out. A name is spent if any row carries it, in any
+# state: an open row obviously cannot be reused, and a CLOSED one is the common case (a
+# landed task being run again) where reuse would put a second lineage on a name the sweep
+# has already discharged.
+#
+# PER SESSION, exactly as the dispatch wall's in-flight arm reads it, so the two cannot
+# disagree about which names are available. A predecessor's roster reserves nothing.
+#
+# THE COUNT IS A SEARCH, NOT AN INCREMENT: `-r2`, then `-r3`, until a name no row carries.
+# A rule that always appended `-r2` would hand out a taken name on the third run.
+fill_name() {  # <roster file> <task id> -> the agent name to dispatch under
+  local f="$1" id="$2" n=2 cand
+  [ -n "$id" ] || return 0
+  if [ ! -f "$f" ] || [ -L "$f" ] || ! grep -qF "|name=${id}|" "$f" 2>/dev/null; then
+    printf '%s' "$id"; return 0
+  fi
+  # A bound, so a corrupt roster cannot spin here. Ninety-eight runs of one task is a
+  # different problem than this function can solve, and printing the id back is the
+  # fail-visible answer: the dispatch wall refuses it and says the name is in flight.
+  while [ "$n" -le 99 ]; do
+    cand="${id}-r${n}"
+    grep -qF "|name=${cand}|" "$f" 2>/dev/null || { printf '%s' "$cand"; return 0; }
+    n=$((n + 1))
+  done
+  printf '%s' "$id"
+}
+
 youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
   local roster="$1" sid="$2" swept cands live_cands live_ok tr lrc name tab RL RN CL
   [ -n "$roster" ] && [ -f "$roster" ] && [ ! -L "$roster" ] || return 0
@@ -2271,7 +2312,14 @@ case "$VERB" in
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
-          printf '  message     : SendMessage to:%s\n' "$RID"
+          # THE MESSAGE ADDRESS IS THE NAME (T22, A-orch-33), and the id keeps the two lines
+          # it is genuinely the key for — the observe path above and the stop below. It was
+          # the transcript-form id here until 2026-09-14, when a SendMessage to an id a
+          # `/clear` had re-keyed made the harness RESUME A COPY of the agent while the
+          # original was still running: two processes, one contract, one roster row. The
+          # agent table does not survive a `/clear`; the TEAMMATE table, keyed on the name,
+          # does — so the name is the address that keeps meaning the same agent.
+          printf '  message     : SendMessage to:%s\n' "$(clean "$RNAME")"
           # THE ADDRESS THE PLATFORM ACCEPTS, not the one this verb happens to hold. The id
           # on the roster is the TRANSCRIPT form; the stop primitive takes
           # `<name>@session-<id8>` for a teammate and rejects the transcript form (capture
@@ -2303,7 +2351,7 @@ case "$VERB" in
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
-          printf '  message     : SendMessage to:%s\n' "$RID"
+          printf '  message     : SendMessage to:%s\n' "$(clean "$RNAME")"
           if [ "$PARTITION" = other ]; then
             printf '  stop        : not adopted — this row belongs to another run in this root\n'
             printf '                (%s), and ownership stays with the session working it.\n' "${RPLAN:-none}"
@@ -2321,7 +2369,7 @@ case "$VERB" in
           printf '  agent id    : %s\n' "$RID"
           printf '  observe     : %s (%s)\n' "$TX" \
             "$([ "$TX_PRESENT" = yes ] && echo 'on disk' || echo 'not on disk')"
-          printf '  message     : SendMessage to:%s\n' "$RID"
+          printf '  message     : SendMessage to:%s\n' "$(clean "$RNAME")"
           printf '  stop        : unavailable — this adoption was NOT journalled to\n'
           printf '                %s\n' "$ADOPT_OWN_ROSTER"
           printf '  cure        : both stop gates take ownership from THIS session'"'"'s roster, so\n'
@@ -2951,6 +2999,13 @@ EOF
     fi
 
     TOTAL=0; OPEN=0; NOTIFY_ROWS=""; NOTIFY_DETAIL=""
+    # THE MET LINEAGES THIS SESSION HAS NOT CLOSED (T22, A-orch-33). `payload/scripts/lib/stop.sh`
+    # used to refuse the end of a Patrol turn until the transcript showed a ListAgents call —
+    # a chore demanded of the model before a gate would judge, which is the rule ADR-024
+    # exists to end. The obligation behind it was real: eighteen finished agents once sat
+    # idle on one panel because nobody stopped them. It is answered here instead, from the
+    # roster, by the one process that already walks every row and every verdict.
+    TASKSTOP_NAMES=""
     # The names of the rows the verdict leaves open, kept so the live set can trim them
     # AFTER this walk rather than inside it: one transcript resolution per tick, not one
     # per row, and the roster count survives as its own number (S19).
@@ -2985,7 +3040,18 @@ EOF
       [ "$(line_field "$LINE" acked)" = "yes" ] && continue
 
       case "$RSTATE" in
-        MET|WAIVED) : ;;                      # closed — not open
+        MET|WAIVED)
+          # NAMED ONLY WHILE THE AGENT IS STILL THERE. A `landing-swept/v1` marker is written
+          # when the agent DISAPPEARED from the harness's task list (or, for a teammate, at
+          # its own SubagentStop), so a swept row is a lineage already gone and naming it
+          # would be the noise that teaches a reader to skip the line. MET-and-unswept is a
+          # contract that landed while its agent is still addressable — the one case where
+          # somebody has to act, and the act is a TaskStop.
+          if [ "$RSTATE" = "MET" ] \
+             && ! grep -F "$SWEPT_SCHEMA|" "$ROSTER_FILE" 2>/dev/null | grep -qF "|name=${RNAME}|"; then
+            TASKSTOP_NAMES="${TASKSTOP_NAMES}${TASKSTOP_NAMES:+ }$(clean "$RNAME")"
+          fi
+          ;;                                  # closed — not open
         *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
                     OPEN_NAMES="${OPEN_NAMES}${RNAME}
 " ;;
@@ -3016,6 +3082,19 @@ EOF
     done <<EOF
 $VERDICT_OUT
 EOF
+
+    # ---------- THE PANEL IS REFRESHED FROM THE ROSTER, NOT FROM A TOOL CALL (T22) -------
+    #
+    # One line per MET lineage still on this session's register. It is a TELL: the tick holds
+    # no authority (ADR-003), stops nothing, writes nothing, and refuses nothing. What it
+    # replaces is `stop_patrol_duties`'s ListAgents duty, which asked the model to look at a
+    # panel so that a gate would let the turn end — and never named a single thing to do
+    # about what it saw.
+    if [ -n "$TASKSTOP_NAMES" ]; then
+      for TS_NAME in $TASKSTOP_NAMES; do
+        say "TASKSTOP ${TS_NAME} — contract MET and the lineage is still open on this roster; stop it"
+      done
+    fi
 
     # ---------- THE LIVE SET TRIMS `open=` AND THE FILL (S19, auditor F-14) ----------
     #
@@ -3383,7 +3462,12 @@ EOF
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
             [ "$SCHED_N" -lt "$SCHED_GAP" ] || break
-            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(clean "$TASK_ID")"
+            # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
+            # same string for a task that has never run, which is why every fixture and every
+            # doc example still reads `FILL T1 T2`. They diverge when the id is already spent,
+            # and then the ONLY safe token to print is the free one: see `fill_name` for why
+            # the roster, and not the plan, is what "spent" is read from.
+            SCHED_IDS="${SCHED_IDS}${SCHED_IDS:+ }$(fill_name "$ROSTER_FILE" "$(clean "$TASK_ID")")"
             SCHED_N=$((SCHED_N + 1))
           done <<EOF
 $SCHED_READY

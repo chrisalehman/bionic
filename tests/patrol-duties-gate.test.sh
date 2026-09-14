@@ -246,11 +246,14 @@ d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents
 fire "$d"; expect_block "2: tick + ListAgents only blocks, naming TaskList or a plan-ledger write" \
   "$TL_MISSING" "$LA_MISSING"
 
-# 3: tick + task-list refresh only -> block naming ListAgents, and NOT naming
-# TaskList (which was done).
+# 3: THE LISTAGENTS DUTY IS RETIRED (T22, A-orch-33; AC-4.4). A tick turn used to be
+# refused until the transcript showed a main-thread `ListAgents` call — a chore demanded of
+# the model before this gate would let its turn end, which is ADR-024's P-A. The obligation
+# it stood for moved to the tick, which reads the roster and prints `poker: TASKSTOP <name>`
+# for every MET lineage still open on it (tests/session-poker.test.sh §12a-T22-e). One duty
+# remains here, and a tick that discharged it ends its turn.
 d=$(make_env); u_tick "$d"; a_tool "$d" TaskList
-fire "$d"; expect_block "3: tick + TaskList only blocks, naming ListAgents" \
-  "$LA_MISSING" "TaskList"
+fire "$d"; expect_allow "3: tick + TaskList alone now passes — the panel duty is retired"
 
 # 4: the version-gated fallback — a write naming the active plan file stands in
 # for TaskList, because in a session without the task tools the plan ledger IS
@@ -270,18 +273,18 @@ fire "$d" Stop true; expect_allow "6: stop_hook_active true passes the same inco
 
 section "Section 2: discrimination — what counts, and when"
 
-# 7: neither duty -> the reason names BOTH.
+# 7: no duty at all -> the reason names the one that is left, and never the retired one.
 d=$(make_env); u_tick "$d"
-fire "$d"; expect_block "7a: tick + neither blocks, naming ListAgents" "$LA_MISSING"
-fire "$d"; expect_block "7b: the same block also names TaskList or a plan-ledger write" "$TL_MISSING"
+fire "$d"; expect_block "7a: tick + no refresh blocks, naming the task list" "$TL_MISSING"
+fire "$d"; expect_block "7b: …and the retired panel duty is never named" "$TL_MISSING" "$LA_MISSING"
 
 # 8: ORDERING. Both duties performed BEFORE the tick arrived satisfy nothing —
 # the panel and the task list are stale by exactly the interval the tick exists
 # to cover. Without this the wall passes every tick in any session that ever
 # called ListAgents once.
 d=$(make_env); a_tool "$d" ListAgents; a_tool "$d" TaskList; u_tick "$d"
-fire "$d"; expect_block "8a: duties performed BEFORE the tick do not count (ListAgents)" "$LA_MISSING"
-fire "$d"; expect_block "8b: duties performed BEFORE the tick do not count (task list)" "$TL_MISSING"
+fire "$d"; expect_block "8a: a refresh performed BEFORE the tick does not count" "$TL_MISSING"
+fire "$d"; expect_block "8b: …and the retired panel duty is not named either" "$TL_MISSING" "$LA_MISSING"
 
 # 9/10: the fallback's other two shapes.
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Write "$d/.bionic/docs/plans/$PLAN_REL"
@@ -295,13 +298,14 @@ fire "$d"; expect_allow "10: a Bash command naming the plan satisfies the task-l
 d=$(make_env); u_tick "$d"; a_tool "$d" ListAgents; a_tool "$d" Edit "$d/notes.md"
 fire "$d"; expect_block "11: an Edit naming a different file does not satisfy it" "$TL_MISSING" "$LA_MISSING"
 
-# 12/13: agent-context calls are not the orchestrator's. A subagent that ran
-# ListAgents did not refresh the orchestrator's panel.
-d=$(make_env); u_tick "$d"; a_tool_sidechain "$d" ListAgents; a_tool "$d" TaskList
-fire "$d"; expect_block "12: a sidechain ListAgents does not count" "$LA_MISSING" "TaskList"
+# 12/13: agent-context calls are not the orchestrator's — RE-POINTED at the duty that is
+# left (T22). The claim is about the SCOPE of the fold, not about which tool it looks for:
+# a subagent's TaskList did not refresh the orchestrator's ledger, so it satisfies nothing.
+d=$(make_env); u_tick "$d"; a_tool_sidechain "$d" TaskList
+fire "$d"; expect_block "12: a sidechain TaskList does not count" "$TL_MISSING" "$LA_MISSING"
 
-d=$(make_env); u_tick "$d"; a_tool_agentid "$d" ListAgents; a_tool "$d" TaskList
-fire "$d"; expect_block "13: a ListAgents carrying an agentId does not count" "$LA_MISSING" "TaskList"
+d=$(make_env); u_tick "$d"; a_tool_agentid "$d" TaskList
+fire "$d"; expect_block "13: a TaskList carrying an agentId does not count" "$TL_MISSING" "$LA_MISSING"
 
 # 14: a tool_result carrier is not a prompt. The turn's boundary is the last
 # PROMPT; if results reset it, a tick whose duties are separated by any tool
@@ -787,7 +791,7 @@ fi
 
 # 63: the ordinary refusing fixture, engaged -> blocks.
 d=$(make_env); u_tick "$d"
-fire "$d"; expect_block "63: engaged: a tick with neither duty blocks" "$LA_MISSING"
+fire "$d"; expect_block "63: engaged: a tick with neither duty blocks" "$TL_MISSING"
 
 # 64: the SAME fixture with the marker removed -> nothing at all.
 rm -f "$d/.bionic/tmp/engaged-$SID.state"
@@ -805,7 +809,7 @@ fire "$d"; expect_allow "66: another session's marker is not this session's enga
 
 # 67: restoring this session's marker restores the refusal, word for word.
 : > "$d/.bionic/tmp/engaged-$SID.state"
-fire "$d"; expect_block "67: re-engaged, the refusal returns unchanged" "$LA_MISSING"
+fire "$d"; expect_block "67: re-engaged, the refusal returns unchanged" "$TL_MISSING"
 
 # ---------- Group 26: WHAT COUNTS AS A TICK (T6, AC-22) ----------
 #
@@ -825,7 +829,7 @@ fire "$d"; expect_allow "68: the injected SKILL.md body is not a Patrol tick"
 # 69: THE PAIRED POSITIVE, so 68 is not silence-by-vacuity: the same fixture with the real
 # marker at the front of the row refuses.
 d=$(make_env); u_tick "$d"
-fire "$d"; expect_block "69: …while a row led by the patrol marker is" "$LA_MISSING"
+fire "$d"; expect_block "69: …while a row led by the patrol marker is" "$TL_MISSING"
 
 # 70: ANOTHER session's marker leads the row -> a predecessor's cron firing into this
 # conversation after a /clear is not this session's tick.
