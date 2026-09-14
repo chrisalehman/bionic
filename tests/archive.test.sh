@@ -257,6 +257,96 @@ fi
 chmod 700 "$RO_BASE" 2>/dev/null || true
 
 # ============================================================
+section "binding — AC-4.2: the destination approval fixed at Step 0 binds the move"
+# ============================================================
+#
+# epic-23 wave-13-fixit-180, REQ-4 / AC-4.2, design ledger D6. `archive-root:` in the
+# PLAN's frontmatter is what Step 0's approval recorded; `archive-root:` in
+# `.bionic/config.yaml` is what the machine says today. When they disagree the
+# destination somebody approved is not the destination the move would use, and a move
+# is the one act in this library that cannot be undone by re-running it — so the
+# disagreement refuses in one line naming BOTH values and nothing moves.
+#
+# THE CHECK IS INSIDE archive_run, not inside its caller, so every caller gets it —
+# `close-out.sh` is the first, and the second one will not have to remember. It reads
+# the newest `*.plan.md` directly under the run directory; a run whose plans predate
+# the key (no `archive-root:` line at all) is not drifted, it is silent, and silence is
+# not a refusal — those runs archive exactly as they did before.
+#
+# fixture_binding_plan <file> <archive-root> — fixture_plan's shape plus the one
+# frontmatter key this section is about, written as a CLOSED run so the open-run scan
+# never gets to answer first.
+fixture_binding_plan() {
+  local file="$1" aroot="$2"
+  mkdir -p "$(dirname "$file")"
+  {
+    printf -- '---\ncanonical_sdlc_version: 14\narchive-root: %s\n---\n\n' "$aroot"
+    printf -- '## SDLC State\n\ncurrent: 9\n\n- Step 9: delivered: yes\n'
+  } > "$file"
+}
+
+# --- drifted: the plan names one root, the live config another ---
+PB1="$(new_project pbind1)"
+export HOME="$SANDBOX/home-pbind1"; mkdir -p "$HOME"
+BIND_APPROVED="$SANDBOX/bind-approved"
+BIND_LIVE="$SANDBOX/bind-live"
+printf 'archive-root: %s\n' "$BIND_LIVE" > "$PB1/.bionic/config.yaml"
+mkdir -p "$PB1/.bionic/docs/plans/epic-bind" "$PB1/.bionic/docs/specs/epic-bind"
+fixture_binding_plan "$PB1/.bionic/docs/plans/epic-bind/wave-01.plan.md" "$BIND_APPROVED"
+printf 'spec\n' > "$PB1/.bionic/docs/specs/epic-bind/wave-01.spec.md"
+
+OUTB1="$(call_archive "$PB1" "$PB1/.bionic/docs/plans/epic-bind")"
+RCB1=$?
+
+expect_eq "b1: AC-4.2 — a drifted archive root refuses" "1" "$RCB1"
+expect_eq "b2: …in exactly one line" "1" "$(printf '%s\n' "$OUTB1" | wc -l | tr -d ' ')"
+expect_eq "b3: …naming the value the plan's approval fixed" "yes" \
+  "$(contains "$OUTB1" "$BIND_APPROVED")"
+expect_eq "b4: …and the value the live config carries" "yes" "$(contains "$OUTB1" "$BIND_LIVE")"
+expect_eq "b5: …nothing moved: plans/epic-bind is still in the project" "yes" \
+  "$([ -f "$PB1/.bionic/docs/plans/epic-bind/wave-01.plan.md" ] && echo yes || echo no)"
+expect_eq "b6: …and neither did its spec sibling" "yes" \
+  "$([ -f "$PB1/.bionic/docs/specs/epic-bind/wave-01.spec.md" ] && echo yes || echo no)"
+expect_eq "b7: …nothing was created under either root" "no" \
+  "$([ -e "$BIND_LIVE/pbind1" ] || [ -e "$BIND_APPROVED/pbind1" ] && echo yes || echo no)"
+
+# --- agreed: the same value on both sides moves, exactly as it always did ---
+PB2="$(new_project pbind2)"
+export HOME="$SANDBOX/home-pbind2"; mkdir -p "$HOME"
+BIND_OK="$SANDBOX/bind-ok"
+printf 'archive-root: %s\n' "$BIND_OK" > "$PB2/.bionic/config.yaml"
+mkdir -p "$PB2/.bionic/docs/plans/epic-bind" "$PB2/.bionic/docs/specs/epic-bind"
+fixture_binding_plan "$PB2/.bionic/docs/plans/epic-bind/wave-01.plan.md" "$BIND_OK"
+printf 'spec\n' > "$PB2/.bionic/docs/specs/epic-bind/wave-01.spec.md"
+
+OUTB2="$(call_archive "$PB2" "$PB2/.bionic/docs/plans/epic-bind")"
+RCB2=$?
+
+expect_eq "b8: AC-4.2 — an agreeing archive root moves" "0" "$RCB2"
+expect_eq "b9: …the source is gone from the project (a rename, not a copy)" "no" \
+  "$([ -d "$PB2/.bionic/docs/plans/epic-bind" ] && echo yes || echo no)"
+expect_eq "b10: …and it landed under the approved root" "yes" \
+  "$([ -f "$BIND_OK/pbind2/.bionic/docs/plans/epic-bind/wave-01.plan.md" ] && echo yes || echo no)"
+expect_eq "b11: …with the line naming the move" "yes" "$(contains "$OUTB2" "bionic: archived ")"
+
+# --- a plan that never carried the key is not drifted (older runs keep working) ---
+PB3="$(new_project pbind3)"
+export HOME="$SANDBOX/home-pbind3"; mkdir -p "$HOME"
+BIND_SILENT="$SANDBOX/bind-silent"
+printf 'archive-root: %s\n' "$BIND_SILENT" > "$PB3/.bionic/config.yaml"
+mkdir -p "$PB3/.bionic/docs/plans/epic-bind"
+fixture_plan "$PB3/.bionic/docs/plans/epic-bind/wave-01.plan.md" 9 yes
+
+OUTB3="$(call_archive "$PB3" "$PB3/.bionic/docs/plans/epic-bind")"
+RCB3=$?
+
+expect_eq "b12: a plan with no archive-root: key is not a drift" "0" "$RCB3"
+expect_eq "b13: …and it moved to the live root" "yes" \
+  "$([ -f "$BIND_SILENT/pbind3/.bionic/docs/plans/epic-bind/wave-01.plan.md" ] && echo yes || echo no)"
+expect_eq "b14: …with no binding refusal in the output" "no" \
+  "$(contains "$OUTB3" "archive-root")"
+
+# ============================================================
 section "4 — AC-C.4: an origin-file mismatch (basename collision) refuses"
 # ============================================================
 
