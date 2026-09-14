@@ -400,15 +400,25 @@ case "$RAW" in *@*) ALIAS_SUFFIX="${RAW##*@}" ;; esac
 # that the agent exists, which is the whole of what D1′ moved.
 ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
 ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
-# A ROSTER THIS GATE CANNOT READ THROUGH IS NOT A LICENCE TO PASS (T22). The roster is
-# repo-controlled state, and a symlink at its own path would let a repo choose which file
+# A ROSTER THIS GATE CANNOT READ IS NOT A LICENCE TO PASS (T22; delta review S1). The roster
+# is repo-controlled state, and a symlink at its own path would let a repo choose which file
 # answers the question this gate asks — the OPEN direction §8 forbids a repo from reaching.
 # It is not read through, exactly as before; what changes is that the unreadability now has
 # to be carried, because standing used to come from the live set and no longer can. An
 # unreadable register gives the gate standing and leaves the id unestablished, which lands
 # on the closed side with the fact named ("no agent id") rather than on a silent passthrough.
+#
+# A SYMLINK IS ONE WAY A REGISTER GOES UNREADABLE; A MODE IS ANOTHER. A file that EXISTS and
+# this process cannot open — mode 000, an unreadable parent, a hook running under a uid that
+# is not the one that wrote it — yields the same nothing as a link refused on purpose, and
+# the sentence above was only true of the first. Until T26 the second left ROW_BY_NAME empty
+# and ROSTER_UNREADABLE empty, so EVERY bare-name stop of every agent this session dispatched
+# took the passthrough, silently, announcing that the target "appears on no roster row". At
+# c19c16e that hole was closed by accident (standing came from the live set); T22 made the
+# register the only source of standing, which is what turned the accident into a licence.
 ROSTER_UNREADABLE=""
 [ -L "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1
+[ -e "$ROSTER_FILE" ] && [ ! -r "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1
 # TWO ROWS CAN CARRY ONE AGENT. The dispatch writes the CONTRACT and the recorder writes the
 # id one state later, so the last row of a name is the current statement about it while the
 # id may sit on an earlier one. They are collected separately rather than picking one row and
@@ -419,6 +429,9 @@ roster_walk() {  # <key-name>
   ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
   [ -f "$ROSTER_FILE" ] || return 0
   [ -L "$ROSTER_FILE" ] && return 0
+  # Not read, rather than read and failing: an unopenable file would put the shell's own
+  # "Permission denied" on the gate's stderr, where every byte is a refusal a reader parses.
+  [ -r "$ROSTER_FILE" ] || return 0
   while IFS= read -r rline; do
     case "$rline" in '#'*|'') continue ;; esac
     case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac

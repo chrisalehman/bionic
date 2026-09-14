@@ -1241,6 +1241,36 @@ run_rec "$(mk_subagent_start "$SID_A" "$IDC_TR" "$IDC_REPO" "general-purpose" "$
 expect_eq "T22-dup: a start against a lineage already swept MET records no duplicate" \
   "0" "$(grep -c 'status=duplicate-start' "$IDC_ROSTER")"
 
+# THE LANDED-THEN-RELAUNCHED LINEAGE (delta review C1). The control above proves a MET
+# marker frees the name; this proves the marker does NOT free it forever. `probemate` runs
+# under one id, lands, and is dispatched again under the SAME name and a NEW id — which the
+# dispatch wall allows, because the marker closed the first contract. A second start under
+# the SECOND id is a live duplicate and must be journalled.
+#
+# WHY IT NEEDS ITS OWN CASE. `met[]` was filled from ANY marker for the name, anywhere in
+# the file, so one landing silenced the duplicate arm for that name for the rest of the
+# session — and the control above, whose marker is the LAST thing said about the name,
+# cannot tell a position-blind reading from a position-aware one. The rule is that the
+# LATEST contract decides.
+START_ID_R2="aprobemate-8c17f42b0d6e5591"
+IFS='|' read -r IDR_REPO IDR_TR IDR_SUB IDR_CFG <<< "$(make_world identduprelaunch yes)"
+seed_roster_full "$IDR_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPR1" confirmed "$START_ID"
+IDR_ROSTER="$IDR_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$IDR_TR" "$IDR_REPO" "general-purpose" "$START_ID")"
+swept_marker_write "$IDR_ROSTER" 2026-08-08T09:30:00Z "$SID_A" probemate "$START_ID" MET
+# …the relaunch: a fresh contract for the same NAME under a new id, written after the marker.
+seed_roster_full "$IDR_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPR2" confirmed "$START_ID_R2"
+run_rec "$(mk_subagent_start "$SID_A" "$IDR_TR" "$IDR_REPO" "general-purpose" "$START_ID_R2")"
+expect_eq "T22-dup: the relaunched lineage identifies once and records no duplicate yet" \
+  "0" "$(grep -c 'status=duplicate-start' "$IDR_ROSTER")"
+run_rec "$(mk_subagent_start "$SID_A" "$IDR_TR" "$IDR_REPO" "general-purpose" "$START_ID_R2")"
+IDR_DUP=$(grep 'status=duplicate-start' "$IDR_ROSTER" 2>/dev/null)
+expect_contains "T22-dup: a second start against the RELAUNCHED lineage is journalled" \
+  "status=duplicate-start" "$IDR_DUP"
+expect_contains "…carrying the relaunch's id, not the landed one" \
+  "agent_id=$START_ID_R2" "$IDR_DUP"
+expect_eq "…exactly once" "1" "$(grep -c 'status=duplicate-start' "$IDR_ROSTER")"
+
 # ---------- the full chain: intended → confirmed → identified ----------
 #
 # The async dispatch lifecycle, which is the one the id join can span end to end:

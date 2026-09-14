@@ -897,6 +897,37 @@ expect_status "a symlinked roster refuses the stop" 2 "$GUARD_ST"
 expect_contains "…because it was not read through: the id claim is never made" \
   "no agent id" "$GUARD_VERR"
 
+# A ROSTER THAT EXISTS AND CANNOT BE READ IS THE SAME FACT (delta review S1). The symlink
+# above is one way the register goes unreadable; a mode the gate's own uid cannot open is
+# another, and the code's comment ("A roster this gate cannot read through is not a licence
+# to pass") claimed both while the predicate tested only the first. At c19c16e this was
+# closed by accident — standing came from the live set, so an unreadable roster left a live
+# name refused for its missing id — and T22's move to the register turned the accident into
+# a hole: every bare-name stop of every agent this session dispatched passed unguarded.
+#
+# THE DEGRADED MODE IS REAL: a hook process running under a different uid (a sandbox, a
+# `sudo` shell, a half-finished permission repair) reads nothing and says nothing.
+#
+# ROOT READS THROUGH ANY MODE, so under uid 0 there is no unreadable file to make and the
+# case is announced rather than faked — a mode-000 fixture that root can read would assert
+# the OPPOSITE of this rule and pass for the wrong reason.
+if [ "$(id -u)" -ne 0 ]; then
+  IFS='|' read -r UR_REPO UR_TR UR_SUB <<< "$(make_world unreadroster yes)"
+  plant_agent "$UR_SUB" "avictim2-1919191919191919" "victim2"
+  sg_roster_row "$UR_REPO" "$SID_A" "victim2" "avictim2-1919191919191919" "" "identified"
+  chmod 000 "$UR_REPO/.bionic/tmp/roster-$SID_A.state"
+  run_guard "$(mk_stop_payload "$SID_A" "$UR_TR" "$UR_REPO" "victim2")"
+  chmod 644 "$UR_REPO/.bionic/tmp/roster-$SID_A.state"
+  expect_status "an UNREADABLE roster refuses the stop, exactly as a symlinked one does" \
+    2 "$GUARD_ST"
+  expect_contains "…because it was not read: the id claim is never made" \
+    "no agent id" "$GUARD_VERR"
+  expect_absent "…and it is never waved through as nobody's dispatch" \
+    "PASSTHROUGH" "$GUARD_ERR"
+else
+  printf 'SKIPPED: the unreadable-roster case needs a non-root uid (root reads mode 000)\n' >&2
+fi
+
 # Unpredictable temp names: mktemp with an X-template, and no PID-based name.
 expect_regex "temp files use an mktemp X-template" 'mktemp.*XXXXXX' "$(cat "$GUARD")"
 expect_absent "no PID-based temp filename" '.tmp.$$' "$(cat "$GUARD")"
@@ -1109,11 +1140,6 @@ expect_absent "…nothing calls the double file ambiguous" "ambiguous" "$GUARD_E
 # (b) A NAME THE ANSWER DOES NOT CARRY is not live, and the refusal says so. `ghost` is on
 # disk in this world's other session directory and in nobody's live set.
 plant_agent "$LV_SUB_B" "aghost-9999999999999999" "ghost"
-# RE-POINTED AT THE ROSTER (T22). The live set is gone from this gate: `ghost` wears an
-# agent-address shape, so the gate has standing over it, and what it has no row for is the
-# AGENT ID — the key the observation channel is filed under. That is the fact the refusal
-# names now. The old arm refused it for want of a fresh panel reading, which was a
-# statement about the transcript rather than about this target.
 # RE-POINTED AT THE ROSTER (T22). The live set is gone from this gate, so what answers an
 # `@session-` target is the alias rule — is there a roster in this root, belonging to the
 # session the suffix names, carrying this name? For `ghost` there is not, and that is the
@@ -1469,9 +1495,6 @@ expect_contains "…and the refusal is the observation demand, not an unresolved
 plant_agent "$AD_SUB_B" "astranger-4444444444444444" "stranger"
 plant_live "$AD_TR" fresh "adoptee" "adoptee2"
 sg_roster_row "$AD_REPO" "$SID_A" "stranger" "astranger-4444444444444444" "" "identified"
-# RE-POINTED (T22): the scope is THIS SESSION'S ROSTER, not the harness's answer. `stranger`
-# has an `identified` row here, so it resolves — and meets the ceremony, which is the same
-# closed direction the old live-set arm took by a different route.
 # RE-POINTED (T22): the scope is THIS SESSION'S ROSTER, not the harness's answer. `stranger`
 # has a row here but NOT on the roster of the session its alias names, so the alias rule —
 # which has always been a roster reading — is what refuses it. Closed side either way; what

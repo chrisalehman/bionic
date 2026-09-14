@@ -4345,4 +4345,39 @@ expect_contains "a STALE answer's live name on no roster is still surfaced" \
   "$OUT"
 expect_eq "…and the tick still exits 0 — an observation, not a refusal" "0" "$RC"
 
+# ---------- 25f: a `duplicate-start` row is NAMED on the tick (T22 row (d), review C2) ----
+# hooks/execution-recorder.sh journals `status=duplicate-start` when one agent id starts a
+# second time — the fallback accepted BECAUSE a SubagentStart hook cannot block (A-T22.4),
+# whose whole point is that somebody sees it. Until this case nothing read the field: the
+# DUPLICATE-SESSION tell above asks a different question (a live name NO roster carries),
+# and a duplicate start is carried by name AND by agent_id, so that tell is silent on it.
+#
+# ROSTER-ONLY, LIKE THE ROW ITSELF. No ListAgents answer is planted (`none`), because the
+# fact is on disk and a tell that needed a live set would go quiet in exactly the degraded
+# session — one that just lost its agent table across a `/clear` — that produces the row.
+R25F="$(make_repo s25-dupstart)"; new_roster "$R25F"
+add_row "$R25F" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R25F" name=twinned status=identified agent_id=atwinned-2525252525252525 \
+  deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R25F" name=twinned status=duplicate-start agent_id=atwinned-2525252525252525 \
+  deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer none
+poke_pressure "$R25F" 8192 1.0 tick
+expect_contains "a duplicate-start row is named on the tick" \
+  "poker: DUPLICATE-START twinned — a second start under an id that already has a live row; the dispatch wall is the door that closes" \
+  "$OUT"
+expect_eq "…and the tick still exits 0 — an observation, not a refusal" "0" "$RC"
+
+# ---------- 25g: the paired control — the same roster without the row draws no tell -------
+# `twinned` keeps its `identified` row and loses only the `duplicate-start` one. A tell that
+# fired on any second row of a name, or on the mere presence of a name twice, would pass 25f
+# and fail here.
+R25G="$(make_repo s25-no-dupstart)"; new_roster "$R25G"
+add_row "$R25G" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R25G" name=twinned status=identified agent_id=atwinned-2525252525252525 \
+  deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer none
+poke_pressure "$R25G" 8192 1.0 tick
+expect_absent "no duplicate-start row, no tell (25f discriminates)" "DUPLICATE-START" "$OUT"
+
 finish

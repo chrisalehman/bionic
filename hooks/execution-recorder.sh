@@ -745,8 +745,8 @@ if [ -n "$IS_START" ]; then
   # `hooks/dispatch-preflight.sh`'s name-in-flight arm.
   #
   # THE PREDICATE IS THE ROSTER'S OWN OPEN/CLOSED READING, not a second liveness truth. A row
-  # already `identified` for this id, with no `landing-swept/v1|…|state=MET` marker for its
-  # name, is a lineage that has started and has not finished — the same discharge
+  # already `identified` for this id, with no `landing-swept/v1|…|state=MET` marker closing its
+  # name's LATEST contract, is a lineage that has started and has not finished — the same discharge
   # `hooks/session-start.sh`'s `open_rows`, the poker's `adopt_fold` and the dispatch wall's
   # in-flight arm all apply. A lineage already swept MET is a finished one, and a start
   # against a finished one is a name being reused, which is allowed.
@@ -757,12 +757,38 @@ if [ -n "$IS_START" ]; then
   # was joined a second time and a second `identified` row appended. Both of those are what
   # this replaces.
   DUP_PRIOR=$(awk -F'|' -v id="$START_ID" -v sid="$BIONIC_SID" '
+    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
+    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
+    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
+    # one text held byte-identical in the two files that need it, rather than a library: the
+    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
+    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
     function kv(line, key,   i, n, parts) {
       n = split(line, parts, "|")
       for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
       return ""
     }
+    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
+    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
+    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
+    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
+    # that row is an open contract with a live process behind it. Read as a set, the MET flag
+    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
+    # session, which is precisely the case they exist for (a task being re-run). So a live row
+    # RETIRES the marker above it, and only a marker with no live row after it still closes.
+    function contract_note(line,   nm) {
+      if (index(line, "landing-swept/v1|") == 1) {
+        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
+        return
+      }
+      nm = kv(line, "name")
+      if (live_status(kv(line, "status"))) delete MET[nm]
+    }
+    function contract_closed(nm) { return (nm in MET) }
+    # ---- END latest-contract reading ----
     /^roster-state\/v1\|/ {
+      contract_note($0)
       if (kv($0, "agent_id") != id) next
       if (kv($0, "session") != sid) next
       # THE LAST ROW OF THIS ID, WHATEVER ITS STATUS. A RESUME is a fresh
@@ -774,12 +800,12 @@ if [ -n "$IS_START" ]; then
       row = $0; nm = kv($0, "name"); st = kv($0, "status")
       next
     }
-    /^landing-swept\/v1\|/ { if (kv($0, "state") == "MET") met[kv($0, "name")] = 1; next }
+    /^landing-swept\/v1\|/ { contract_note($0); next }
     # A DUPLICATE-START ROW IS NOT A RE-CONTRACT EITHER. The predicate is "nothing has
     # re-opened a contract for this id since it started": `identified` is the first start,
     # `duplicate-start` is the second, and a third start is the third. Only an `intended` or
     # `confirmed` row — written by the dispatch wall and ARM 2 — is a fresh cycle.
-    END { if (row != "" && (st == "identified" || st == "duplicate-start") && !(nm in met)) print row }
+    END { if (row != "" && (st == "identified" || st == "duplicate-start") && !contract_closed(nm)) print row }
   ' "$ROSTER_FILE" 2>/dev/null) || DUP_PRIOR=""
   if [ -n "$DUP_PRIOR" ]; then
     # EVERY FIELD CARRIED FORWARD, exactly as the identification below does: the row is a

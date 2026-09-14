@@ -1690,24 +1690,48 @@ TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
 if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
   # ONE PASS, TWO FACTS: does a live-status row of this name exist, and has a MET marker
   # closed it. `awk` rather than two greps because the marker may sit either side of the row
-  # and both have to be seen before either is believed.
+  # and WHICH side is the answer — see the latest-contract reading below, which is the half of
+  # this arm that was position-blind until T26 and therefore inert for every landed name.
   DP_INFLIGHT=$(awk -F'|' -v want="$AGENT_NAME" '
+    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
+    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
+    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
+    # one text held byte-identical in the two files that need it, rather than a library: the
+    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
+    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
     function kv(line, key,   i, n, parts) {
       n = split(line, parts, "|")
       for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
       return ""
     }
+    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
+    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
+    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
+    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
+    # that row is an open contract with a live process behind it. Read as a set, the MET flag
+    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
+    # session, which is precisely the case they exist for (a task being re-run). So a live row
+    # RETIRES the marker above it, and only a marker with no live row after it still closes.
+    function contract_note(line,   nm) {
+      if (index(line, "landing-swept/v1|") == 1) {
+        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
+        return
+      }
+      nm = kv(line, "name")
+      if (live_status(kv(line, "status"))) delete MET[nm]
+    }
+    function contract_closed(nm) { return (nm in MET) }
+    # ---- END latest-contract reading ----
     /^roster-state\/v1\|/ {
+      contract_note($0)
       if (kv($0, "name") != want) next
       st = kv($0, "status")
-      if (st == "intended" || st == "confirmed" || st == "identified") { open = 1; last = st }
+      if (live_status(st)) { open = 1; last = st }
       next
     }
-    /^landing-swept\/v1\|/ {
-      if (kv($0, "name") == want && kv($0, "state") == "MET") met = 1
-      next
-    }
-    END { if (open && !met) print last }
+    /^landing-swept\/v1\|/ { contract_note($0); next }
+    END { if (open && !contract_closed(want)) print last }
   ' "$ROSTER_FILE" 2>/dev/null) || DP_INFLIGHT=""
   if [ -n "$DP_INFLIGHT" ]; then
     refuse exit2 dispatch "that name is in flight" "use the FILL line's name" \
