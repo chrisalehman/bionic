@@ -1709,14 +1709,31 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # 99 of the 100 — so a line that also carried a count, or named the other faults, would
 # be REFUSED BY THE RENDERER as malformed. Between a line that says "this brief has 3
 # shape faults" and one that names a fault an author can act on, the second is worth
-# more on a wire that carries nothing else: `refuse`'s channel table ships `exit2` with
-# `detail_to_user=no` (ruling D-1), so `detail` reaches a reader only under
-# BIONIC_WALL_VERBOSE=1 or out of this hook's log. The findings list is therefore whole
-# where it can be whole, and the sentence the model reads is still one it can act on.
-# THE OPERATOR WIN IS LIMITED BY THAT TABLE, NOT BY THIS LIST: whatever puts `detail` on
-# the exit2 wire — the verbose knob, a hook log the model reads, or moving this gate to
-# the `deny` channel, which measures `model_only=yes` — turns "the first of three" into
-# "all three" here with no change to this function.
+# more. The findings list is therefore whole where it can be whole, and the sentence the
+# reader is interrupted by is still one they can act on.
+#
+# AND THE LIST GOES OUT ON `deny`, WHICH IS THE HALF T2 COULD NOT REACH (its finding
+# A-T2.2; ruling A-orch-10, 2026-09-13). On `exit2` there is ONE wire: `refuse`'s channel
+# table ships it `detail_to_user=no` under ruling D-1, and what the user stream carries is
+# what the model's synthetic tool_result carries — so a collected list emitted there was
+# read by nobody, and the six-attempt loop went on running behind a better-built wall.
+# `deny` is the same table's row 2: a PreToolUse verdict whose `permissionDecisionReason`
+# reaches the model VERBATIM (`model_only=yes`) while the user stream stays the one line.
+# The model reads every fault; the reader is still interrupted by a sentence with a
+# pointer; neither half is a knob somebody has to know to set.
+#
+# ONE FINDING STAYS ON `exit2`, in its arm's own words and on its arm's own channel. The
+# channel moves for the refusal D-1's single wire was STARVING — a list — and a lone fact
+# with a six-word fix is not starved by being a sentence. Keeping it there also keeps the
+# blast radius of this change at the one shape that needed it: every single-fault refusal
+# in this file, brief-shape and state alike, is byte-for-byte and status-for-status what
+# it was.
+#
+# `deny` EXITS 0, AND THAT IS THE BLOCK. The verdict on stdout is what refuses the tool
+# call; the status is not. Two consequences this file must respect: nothing else may print
+# to stdout on the way here (every other message in this hook is on stderr, deliberately),
+# and this call still must sit above the journal, because a refused dispatch that exits 0
+# is exactly the shape that would otherwise be recorded as a launch.
 DP_FINDING_N=0
 DP_FINDINGS=""
 DP_FIRST_FACT=""
@@ -1735,15 +1752,18 @@ $3
 "
 }
 
-# dp_refuse_findings — emit the whole list as ONE refusal and exit 2, or return having
-# done nothing at all. Called once, after the last brief-shape arm; `refuse` owns the
-# exit, so a caller cannot fall through it into the journal with findings outstanding.
+# dp_refuse_findings — emit the whole list as ONE refusal and exit, or return having done
+# nothing at all. Called once, after the last brief-shape arm; `refuse` owns the exit, so a
+# caller cannot fall through it into the journal with findings outstanding. ONE finding
+# refuses on `exit2` exactly as its arm always did; SEVERAL refuse on `deny`, where the
+# whole list reaches the model (see the channel note above). The exit STATUS therefore
+# differs by fault count — 2 for one, 0-with-a-deny-verdict for several — and both block.
 dp_refuse_findings() {
   [ "$DP_FINDING_N" -gt 0 ] || return 0
   if [ "$DP_FINDING_N" -eq 1 ]; then
     refuse exit2 dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
   fi
-  refuse exit2 dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
+  refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
     "THIS BRIEF HAS $DP_FINDING_N SHAPE FAULTS. The line above names the first of them; all
 $DP_FINDING_N are below, in the order the gate reads the brief, each with its own Fix:
 block. They are independent, and a brief that repairs all $DP_FINDING_N dispatches —

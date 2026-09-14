@@ -1771,16 +1771,28 @@ run_rec_counted() {  # <payload-json> — run_rec_pressure with a counting jq on
 run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo four" "four")"
 expect_status "13f an ordinary Bash call still exits 0" "0" "$REC_ST"
 expect_eq "13f …and the sample still landed on it" "3" "$(wc -l < "$P_RING" | tr -d ' ')"
-expect_eq "13f …and the hook stopped right after the sample: four payload reads, not six" \
-  "4" "$(wc -c < "$P_JQC" | tr -d ' ')"
+# THE CONSTANT MOVED FROM 4 TO 3 (epic-23 wave-12-fixit-171, T11, REQ-10), and the
+# discrimination this section makes did not. `bionic_context` used to spend two `jq`
+# processes on the payload — one for `.cwd`, one for `.session_id` — and now spends one
+# on the whole field roster (lib/context.sh, `_bionic_jq_fill`). Every hook that calls
+# `bionic_context` therefore makes exactly one fewer payload read than it did, this one
+# included, on BOTH sides of the early exit: three with it and five without, where it
+# was four and six. What this assertion is for — that the exit stops the hook before
+# the transcript/subagents resolution below it — is unchanged, and the control
+# immediately below still measures it as a strict increase over this number.
+P_JQ_WITH_EXIT=3
+expect_eq "13f …and the hook stopped right after the sample: three payload reads, not five" \
+  "$P_JQ_WITH_EXIT" "$(wc -c < "$P_JQC" | tr -d ' ')"
 
 # The other direction: a Bash call that DOES carry a machine line must not take the exit.
 P_MLINE="stop-check-observation/v1|agent=w99-none|log=$SANDBOX/pressure/nolog|mtime=1|size=1"
 : > "$P_JQC"
 run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "bash stop-check.sh" "$P_MLINE")"
 expect_status "13f a Bash call carrying a machine line still exits 0" "0" "$REC_ST"
+# AGAINST THE NUMBER ABOVE, NOT A SECOND LITERAL: the two are the same measurement on
+# either side of the exit, and a hard-coded bound here could only drift away from it.
 expect_eq "13f …and it does NOT take the early exit — the arms below it run" "yes" \
-  "$([ "$(wc -c < "$P_JQC" | tr -d ' ')" -gt 4 ] && echo yes || echo no)"
+  "$([ "$(wc -c < "$P_JQC" | tr -d ' ')" -gt "$P_JQ_WITH_EXIT" ] && echo yes || echo no)"
 
 # ============================================================
 section "Section 14: the BUDGET FIELDS survive both rebuilds, byte for byte (review-b B-4)"
