@@ -1690,6 +1690,24 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
         END { exit !found }' "$f" 2>/dev/null; then
     return 0
   fi
+  # A LIVE NAME NEVER GETS A SECOND LIVE ROW (T6, AC-6.1; research R1 §5). The idempotence
+  # check above is by agent_id — a SECOND agent, under a DIFFERENT id, adopted under the SAME
+  # name is not caught by it, and two live rows of one name is exactly the ambiguity
+  # `hooks/stop-guard.sh`'s own stop refusal exists to police (T29 §7). `live_ids_of_name` is
+  # that refusal's own predicate, moved to the one library both files source
+  # (`payload/scripts/lib/roster.sh`): a non-empty answer means this name is already live
+  # here, so this adopt takes the `-r<n>` search (`fill_name`, already this file's own
+  # convention for a spent id, :1335) instead of the name it was asked for, and says so once
+  # on stderr — this call site is otherwise silent.
+  local ROSTER_FILE="$f"
+  if [ -n "$(live_ids_of_name "$name")" ]; then
+    local renamed
+    renamed="$(fill_name "$f" "$name")"
+    if [ -n "$renamed" ] && [ "$renamed" != "$name" ]; then
+      echo "adopt: '${name}' is already live on this session's roster — writing this row as '${renamed}'" >&2
+      name="$renamed"
+    fi
+  fi
   mkdir -p "$d" 2>/dev/null || return 1
   if [ ! -e "$f" ]; then
     roster_header >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
@@ -3261,7 +3279,7 @@ EOF
         fi
       fi
       if [ -n "$TICK_LIVE_STATE" ]; then
-        say "live set $TICK_LIVE_STATE — open= counted from the roster; ListAgents before any dispatch"
+        say "live set $TICK_LIVE_STATE — open= counted from the roster"
       elif [ "$OPEN" -ne "$OPEN_ROSTER" ]; then
         # THE TRIM IS SAID OUT LOUD, or `open=0` over a roster carrying two unmet
         # contracts is a number with no story. Only when it actually moved: a tick whose
@@ -3364,8 +3382,16 @@ EOF
     # AN UNKNOWN PANEL IS NOT AN EMPTY ONE. With no usable answer (`none` — the state of
     # every session before its first ListAgents) the tick does NEITHER thing: it neither
     # names a row for a stop it cannot justify nor closes one on evidence it does not have.
-    # FRESH and STALE both count, the same asymmetry the DUPLICATE-SESSION arm takes: a stale
-    # answer still names a real, if slightly old, set of agents.
+    #
+    # FRESH ONLY (A-orch-31, T6). This arm used to take the same FRESH/STALE asymmetry the
+    # read-only DUPLICATE-SESSION tell above takes — "a stale answer still names a real, if
+    # slightly old, set of agents" — but that reasoning does not survive contact with a WRITE.
+    # Measured 20:55Z: a STALE reading (the panel's last-known answer, not a fresh one) still
+    # named a MET row and wrote a SECOND stop order for an agent the Patrol's own prior order
+    # had already had stopped eighteen minutes earlier. A tell can afford to be a little old;
+    # an order and an ack cannot — both are acts this arm cannot take back. So STALE now reads
+    # the same as NONE: the arm defers rather than guesses, naming nothing, ordering nothing,
+    # acking nothing, and saying once that the next tick's fresh ListAgents will decide.
     if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ]; then
       # THE ALREADY-WARMED PARSE, or one read of our own — never a second parse of a
       # transcript this tick has already read. `live_agents` memoizes per process on the
@@ -3379,7 +3405,7 @@ EOF
         SD_LRC=0
         live_agents "$TICK_TR" >/dev/null 2>&1 || SD_LRC=$?
         case "$SD_LRC" in
-          0|3)
+          0)
             SD_PANEL_KNOWN=1
             # The cache SLOT, read directly for the reason the DUPLICATE-SESSION arm states
             # above it: a second call would be a hit on a real tick and a full parse against
@@ -3438,6 +3464,11 @@ EOF
                     bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ) \
             || say "NOTIFY ${SD_NAME} — a duplicate start whose agent is gone could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
         done
+      else
+        # A-orch-31: something WOULD have been decided (a MET row, or a duplicate start,
+        # is sitting in the candidate sets above) but the panel reading is not fresh enough
+        # to trust with a write. One line, said once, never a STANDDOWN, an order or an ack.
+        say "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
       fi
     fi
 

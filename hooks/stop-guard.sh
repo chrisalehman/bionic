@@ -166,7 +166,7 @@ state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsaf
 # payload/scripts/lib/loader.sh. FAIL OPEN: the stop verdict is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh roster.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -268,6 +268,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-guard"; fi
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
+# `live_ids_of_name` (T6, A-orch-32) — the one definition, shared with
+# `hooks/session-poker.sh`'s `adopt_write_row`.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roster.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
@@ -638,43 +642,13 @@ fi
 #
 # AFTER STANDING, so a target this gate has no business guarding is never trapped by it, and
 # BEFORE the alias clause, so an ambiguous alias is told which fault it has.
-live_ids_of_name() {  # <name> -> the agent ids currently under an open contract, one per line
-  local f="$ROSTER_FILE"
-  [ -f "$f" ] || return 0
-  [ -L "$f" ] && return 0
-  [ -r "$f" ] || return 0
-  awk -v want="$1" -v ver="$ROSTER_VERSION" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # A MET MARKER FOR THIS NAME DISCHARGES EVERY ID ABOVE IT, and the generation counter is
-    # how that is spelled without `delete arr` — which is not in the one-true-awk this
-    # machine runs as /usr/bin/awk. Rows below the marker start a fresh set.
-    index($0, "landing-swept/v1|") == 1 {
-      if (kv($0, "name") == want && kv($0, "state") == "MET") { n = 0; gen++ }
-      next
-    }
-    index($0, "roster-state/" ver "|") == 1 {
-      if (kv($0, "name") != want) next
-      if (!live_status(kv($0, "status"))) next
-      id = kv($0, "agent_id")
-      # An `intended` row carries no id yet — the recorder writes it one state later — and a
-      # lifecycle (intended → confirmed → identified) is ONE identity, so ids are counted
-      # DISTINCT. Neither an unidentified row nor a re-stated one is a second agent.
-      if (id == "") next
-      if ((gen SUBSEP id) in seen) next
-      seen[gen SUBSEP id] = 1
-      ids[++n] = id
-      next
-    }
-    END { for (i = 1; i <= n; i++) print ids[i] }
-  ' "$f" 2>/dev/null
-  return 0
-}
-
+#
+# `live_ids_of_name` MOVED TO `payload/scripts/lib/roster.sh` (T6, A-orch-32; research R1
+# §5): `adopt_write_row` (hooks/session-poker.sh) needs the identical distinct-id, MET-
+# discharge answer to keep an adopt from ever putting two live rows under one name, and two
+# copies of this awk agreeing by construction is the defect `roster_row` already ends for the
+# row's shape. This gate is the function's one call site, unchanged; the rule it applies is
+# documented at its new definition.
 AMBIG_IDS=""
 [ -z "$TYPED_AS_ID" ] && AMBIG_IDS=$(live_ids_of_name "$BASE")
 AMBIG_N=0
