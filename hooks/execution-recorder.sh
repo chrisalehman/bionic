@@ -725,6 +725,78 @@ if [ -n "$IS_START" ]; then
   START_ID=$(sanitize "$START_ID" 200)
   [ -n "$START_ID" ] || exit 0
 
+  # ---------- T22: A SECOND START FOR ONE ID IS A RESUMED COPY ----------
+  #
+  # (A-orch-33; AC-4.4's start-side half.) One agent id that starts TWICE in one session is
+  # not a lifecycle this machinery has any other name for: the harness loses the agent table
+  # across a `/clear` and keeps the teammate one, so a resume aimed at a transcript id brings
+  # a second process up against a contract the first is still working. Both answer to one
+  # roster row, one name and one address.
+  #
+  # IT IS RECORDED, NOT REFUSED, AND THAT IS MEASURED RATHER THAN ASSUMED. The installed
+  # CLI's own hook-event contract for this event reads, verbatim:
+  #     SubagentStart … Exit code 0 - JSON additionalContext shown to subagent
+  #                     Exit code 2 - show stderr to user only
+  #                     Other exit codes - show stderr to user only
+  # and the binary's `hookSpecificOutput` switch consumes only `additionalContext` for
+  # SubagentStart — there is no `permissionDecision` branch for it as there is for PreToolUse.
+  # A SubagentStart hook CANNOT block. So this journals the fact and `session-poker.sh tick`
+  # is what names it; the door that can actually close is one event earlier, at
+  # `hooks/dispatch-preflight.sh`'s name-in-flight arm.
+  #
+  # THE PREDICATE IS THE ROSTER'S OWN OPEN/CLOSED READING, not a second liveness truth. A row
+  # already `identified` for this id, with no `landing-swept/v1|…|state=MET` marker for its
+  # name, is a lineage that has started and has not finished — the same discharge
+  # `hooks/session-start.sh`'s `open_rows`, the poker's `adopt_fold` and the dispatch wall's
+  # in-flight arm all apply. A lineage already swept MET is a finished one, and a start
+  # against a finished one is a name being reused, which is allowed.
+  #
+  # IT IS PURELY ADDITIVE. Before this, a second start for an already-`identified` id matched
+  # neither join below (both accept `intended|confirmed` only) and exited silently — except
+  # where the ORIGINAL `confirmed` row was still on the append-only roster, in which case it
+  # was joined a second time and a second `identified` row appended. Both of those are what
+  # this replaces.
+  DUP_PRIOR=$(awk -F'|' -v id="$START_ID" -v sid="$BIONIC_SID" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    /^roster-state\/v1\|/ {
+      if (kv($0, "agent_id") != id) next
+      if (kv($0, "session") != sid) next
+      # THE LAST ROW OF THIS ID, WHATEVER ITS STATUS. A RESUME is a fresh
+      # intended/confirmed cycle for the same id, written moments ago by the dispatch wall
+      # and ARM 2 — a contract deliberately re-opened, which this event is then the ordinary
+      # identification of. A DUPLICATE START has no such cycle: the last thing said about
+      # this id is that it already started. That difference is the whole predicate, and it
+      # is read off the ordering of an append-only file.
+      row = $0; nm = kv($0, "name"); st = kv($0, "status")
+      next
+    }
+    /^landing-swept\/v1\|/ { if (kv($0, "state") == "MET") met[kv($0, "name")] = 1; next }
+    # A DUPLICATE-START ROW IS NOT A RE-CONTRACT EITHER. The predicate is "nothing has
+    # re-opened a contract for this id since it started": `identified` is the first start,
+    # `duplicate-start` is the second, and a third start is the third. Only an `intended` or
+    # `confirmed` row — written by the dispatch wall and ARM 2 — is a fresh cycle.
+    END { if (row != "" && (st == "identified" || st == "duplicate-start") && !(nm in met)) print row }
+  ' "$ROSTER_FILE" 2>/dev/null) || DUP_PRIOR=""
+  if [ -n "$DUP_PRIOR" ]; then
+    # EVERY FIELD CARRIED FORWARD, exactly as the identification below does: the row is a
+    # CONTRACT, and a row that dropped a field would silently retract what it inherited.
+    # Only `status=` moves, to a value no other reader recognises — which is deliberate:
+    # every roster reader in the fleet filters by status, so a `duplicate-start` row is
+    # inert to the budget, to the sweep and to both stop gates, and visible to the tick,
+    # which is the one surface that should say something about it.
+    printf '%s\n' "$DUP_PRIOR" | awk '
+      BEGIN { RS = "|"; ORS = "" }
+      { f = $0; sub(/\n$/, "", f)
+        if (f ~ /^status=/) f = "status=duplicate-start"
+        printf "%s%s", (NR > 1 ? "|" : ""), f }
+      END { printf "\n" }' >> "$ROSTER_FILE" 2>/dev/null
+    exit 0
+  fi
+
   ROW=""
   while IFS= read -r line; do
     case "$line" in '#'*|'') continue ;; esac
