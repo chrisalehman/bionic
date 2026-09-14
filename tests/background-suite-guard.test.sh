@@ -101,13 +101,21 @@ add_row() {
 # without it is a MAIN-THREAD payload by that wall's own rule, so every suite command
 # below would draw a farm-out deny beside this wall's verdict. The field is added rather
 # than the expectations changed, because an agent-context payload really does carry it.
+# A FIXED, HUGE `timeout` ON EVERY PAYLOAD (T3, REQ-3, D4). `wall_background_suite_guard`
+# gained a repair arm between ARM 1 and ARM 2 that rewrites ANY suite call whose timeout is
+# absent or below the harness maximum — and this file's fixtures never declared one, which
+# is exactly the shape that arm now repairs. This suite tests the BUDGET arm (ARM 2) and the
+# backgrounded-suite arm (ARM 1) only; a timeout the repair can never treat as "too low"
+# keeps its assertions reading the same verdict they always did — tests/bash-walls.test.sh
+# §14 is where the repair itself is proved. 86400000 (24h) is comfortably above any ceiling
+# this suite's environment could set (none of its rows touch `BASH_MAX_TIMEOUT_MS`).
 mk_payload() {  # <cwd> <command> [agent_id] [run_in_background:true|false|omit]
   local bg="${4:-omit}"
   jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" --arg a "${3:-}" --arg bg "$bg" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       permission_mode:"bypassPermissions",
       hook_event_name:"PreToolUse", tool_name:"Bash",
-      tool_input:({command:$cmd}
+      tool_input:({command:$cmd, timeout: 86400000}
                   + (if $bg == "omit" then {} else {run_in_background: ($bg == "true")} end)),
       tool_use_id:"toolu_01s13budget"}
      + (if $a == "" then {} else {agent_id:$a, agent_type:"test-runner"} end)'

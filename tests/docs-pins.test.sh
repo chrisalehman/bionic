@@ -2588,4 +2588,46 @@ printf 'Suites: none   # or *.test.sh tokens only\n' > "$AC2_SUITES_MUT"
 expect_true "128b: the .test.sh-token grep fires on the shape it targets (the pattern discriminates)" \
   grep -qE '^Suites:.*\.test\.sh' "$AC2_SUITES_MUT"
 
+# ---------------------------------------------------------------------------
+section "Section 24: T3 — the repair rule reaches the rendered survival text (REQ-3, AC-3.3)"
+#
+# WHAT THIS OWNS. AC-3.3 (epic-23 wave-13-fixit-180 spec): "payload/context/survival.md
+# lacks the rule" is a fail condition on its own — independent of the §AC2 byte-cap arms
+# above (111b/125), which pin the SIX ROLE FILES' size. Those are a different set of files
+# entirely: the survival text renders ONCE, to payload/context/survival.md, and never into
+# any agents/*.md (record/wave-13-fixit-180/research-R2-walls.md §6), so this sentence adds
+# no bytes there and those caps are unaffected by it.
+
+PIN_REPAIR="sized to the harness maximum"
+SURVIVAL_BLOCK_T3="${REPO}/agents-src/blocks/survival.md"
+SURVIVAL_SHIPPED_T3="${REPO}/payload/context/survival.md"
+
+if has_pin "$SURVIVAL_BLOCK_T3" "$PIN_REPAIR"; then
+  ok "129a: agents-src/blocks/survival.md (the SOURCE) carries the repair rule"
+else
+  no "129a: agents-src/blocks/survival.md (the SOURCE) carries the repair rule" \
+     "file: $SURVIVAL_BLOCK_T3"
+fi
+
+# The render is the delivery mechanism (same reasoning as assertion 12 above) — a pin on
+# the source alone would pass on a repo whose render never ran, which is the state a
+# dispatched writer who edited the block but skipped `render.sh` would be in.
+if has_pin "$SURVIVAL_SHIPPED_T3" "$PIN_REPAIR"; then
+  ok "129b: the rendered payload/context/survival.md carries the repair rule (render is current)"
+else
+  no "129b: the rendered payload/context/survival.md carries the repair rule (render is current)" \
+     "file: $SURVIVAL_SHIPPED_T3 — run 'bash agents-src/render.sh'"
+fi
+
+# Anti-vacuity: the pin must discriminate against a mutated copy.
+anchor "$SURVIVAL_BLOCK_T3" "$PIN_REPAIR" 1
+DOCTORED_REPAIR="$TMP/survival-repair-mutated.md"
+sed 's/sized to the harness maximum/sized however feels right/' "$SURVIVAL_BLOCK_T3" > "$DOCTORED_REPAIR"
+if has_pin "$DOCTORED_REPAIR" "$PIN_REPAIR"; then
+  no "129c: a doctored survival.md fails the repair-rule pin (pin discriminates)" \
+     "the mutated copy still matched — the pin is vacuous"
+else
+  ok "129c: a doctored survival.md fails the repair-rule pin (pin discriminates)"
+fi
+
 finish
