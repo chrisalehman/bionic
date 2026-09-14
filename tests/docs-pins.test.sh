@@ -2062,9 +2062,17 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # 5,322 B after every safe trim available within T3's scope. The orchestrator raised this
 # cap rather than have T3 touch a shared block outside its declared Files or cut the
 # Discretion-contract text below what its lever authorized.
+#
+# ROLE_TOTAL_CAP RAISED 26,000 -> 26,300 (epic-23 wave-13 T17, A-T17.1, R6 finding 3): the
+# scaffold's two new lines (`Progress artifact:`, `Cadence:`) render into all six role files
+# identically, at their shortest label-legal form (no trailing comment, unlike Files:/Suites:
+# — T17's Files did not authorize touching the labels the dispatch wall reads, so there is no
+# further trim available). +43 B/file × 6 = +258 B put the measured total at 26,221 B, 221 B
+# over the old cap with only 37 B of headroom to spend against; same shape of ratchet as the
+# per-file raise above, same reason.
 
 ROLE_CAP=5500
-ROLE_TOTAL_CAP=26000
+ROLE_TOTAL_CAP=26300
 ROLE_OVER=""
 ROLE_TOTAL=0
 ROLE_COUNT=0
@@ -2445,8 +2453,9 @@ expect_true "123: the retired-phrase grep fires on the shape it targets (the pat
 section "Section 22: T3 — the brief scaffold renders into all seven surfaces, and the ListAgents-before-dispatch text is gone (epic-23 wave-12, REQ-2/REQ-3/REQ-4, AC-2.1/AC-2.3/AC-4.4)"
 
 # WHAT THIS SECTION OWNS. `agents-src/blocks/brief-scaffold.md` is the single source of the
-# five-labelled-line brief shape (`Expected duration:`, `Expected artifact:`, `Files:`,
-# `Suites:`, `Deliverable-waiver:`); `agents-src/render.sh` renders it into
+# labelled brief shape (`Expected duration:`, `Expected artifact:`, `Progress artifact:`,
+# `Cadence:` — T17, R6 finding 3 — `Files:`, `Suites:`, `Deliverable-waiver:`);
+# `agents-src/render.sh` renders it into
 # `skills/canonical-sdlc/dispatch.md` and all six `agents/*.md` role files — seven surfaces,
 # one block, identical bytes by construction. This section pins the SHAPE of that result
 # (count, not content, so the block's own wording stays free to improve) and two carry-over
