@@ -193,7 +193,7 @@ EPIC
 }
 
 # mk_fixture <name> -> an initialised project at $SANDBOX/<name>, echoed. Contains:
-# a git repo whose `wave/01-fixture` is merged into `main`, a `wt/x` branch holding no
+# a git repo whose `wave/01-fixture` is merged into `main`, a `wt/01-x` branch holding no
 # commit `main` has not taken, `.bionic/tmp/` with three files, the plan at Step 8, an
 # open epic plan with a shipped-wave table, and the matrix's evidence file.
 mk_fixture() {
@@ -231,21 +231,36 @@ mk_fixture() {
     git checkout -q -b wave/01-fixture
     printf 'work\n' >> file.txt
     git commit -q -am "wave work" >/dev/null 2>&1
-    git branch wt/x
+    git branch wt/01-x
     git checkout -q main
     git merge -q --no-ff -m "merge wave" wave/01-fixture >/dev/null 2>&1
   )
   printf '%s\n' "$p"
 }
 
-# add_unreached_branch <project> -> plants `wt/y` carrying one commit the working branch
-# never took: `git cherry wave/01-fixture wt/y` answers with a `+` line.
+# add_unreached_branch <project> -> plants `wt/01-y` carrying one commit the working branch
+# never took: `git cherry wave/01-fixture wt/01-y` answers with a `+` line.
 add_unreached_branch() {
   (
     in_fixture "$1" || exit 1
-    git checkout -q -b wt/y wave/01-fixture
+    git checkout -q -b wt/01-y wave/01-fixture
     printf 'never landed\n' >> file.txt
     git commit -q -am "unreached" >/dev/null 2>&1
+    git checkout -q main
+  )
+}
+
+# add_foreign_unreached_branch <project> -> plants `wt/07-z`, a DIFFERENT wave's writer,
+# carrying one commit `main` never took. The census this task scopes to `wt/01-*` (this
+# fixture's own wave number) must never see it: not refused on, not deleted. Built off
+# `main` rather than `wave/01-fixture` so it exists independent of that branch entirely —
+# the shape of a foreign wave's leftover worktree, not a sibling of this wave's own.
+add_foreign_unreached_branch() {
+  (
+    in_fixture "$1" || exit 1
+    git checkout -q -b wt/07-z main
+    printf 'foreign wave work\n' >> file.txt
+    git commit -q -am "foreign unreached" >/dev/null 2>&1
     git checkout -q main
   )
 }
@@ -321,8 +336,8 @@ branch_exists() {
 }
 
 require_helpers in_fixture fixture_git contains fixture_plan_text fixture_epic_text mk_fixture \
-                add_unreached_branch run_close gate_rc run_open_rc tmp_entries \
-                sha_of branch_exists
+                add_unreached_branch add_foreign_unreached_branch run_close gate_rc \
+                run_open_rc tmp_entries sha_of branch_exists
 
 # ============================================================
 section "0 — the script exists, parses, and refuses an unusable call"
@@ -346,6 +361,19 @@ run_close "$P0" "fly"
 expect_eq "0c: an unknown verb exits 2" "2" "$CO_RC"
 expect_eq "0d: …and says which verbs there are" "yes" "$(contains "$CO_OUT" "check")"
 
+# 0h/0i/0j — R6 finding 1 (architecture FAIL, T16): the worktree census must be scoped to
+# THIS wave's `wt/NN-*` branches, derived from the plan's own working-branch. A working
+# branch that is not `wave/<digits>-<slug>` shaped has no wave number to scope to, and the
+# preflight refuses rather than falling back to a repo-wide census.
+P0H="$(mk_fixture p0h)"
+sed -i.bak 's#^working-branch: wave/01-fixture$#working-branch: main#' "$P0H/$PLAN_REL"
+rm -f "$P0H/$PLAN_REL.bak"
+run_close "$P0H" check
+expect_eq "0h: a non-wave-shaped working-branch refuses in preflight" "2" "$CO_RC"
+expect_eq "0i: …naming the branch" "yes" "$(contains "$CO_OUT" "working-branch 'main'")"
+expect_eq "0j: …and the expected shape" "yes" \
+  "$(contains "$CO_OUT" "wave/<digits>-<slug>")"
+
 # ============================================================
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"
 # ============================================================
@@ -360,8 +388,8 @@ expect_eq "1b: act 1 — merge: reports the ancestry readback" "yes" \
 expect_eq "1c: …naming the integration branch it is reachable from" "yes" \
   "$(contains "$CO_OUT" "reachable from main @ ")"
 expect_eq "1d: act 2 — worktree-removed: names the branch it deleted" "yes" \
-  "$(contains "$CO_OUT" "worktree-removed: wt/x")"
-expect_eq "1e: …and wt/x is actually gone" "no" "$(branch_exists "$P1" "wt/x")"
+  "$(contains "$CO_OUT" "worktree-removed: wt/01-x")"
+expect_eq "1e: …and wt/01-x is actually gone" "no" "$(branch_exists "$P1" "wt/01-x")"
 expect_eq "1f: act 3 — tmp-wiped: counts what it removed" "yes" \
   "$(contains "$CO_OUT" "tmp-wiped: 3 entries")"
 expect_eq "1g: …and .bionic/tmp/ is empty afterwards" "0" "$(tmp_entries "$P1")"
@@ -431,10 +459,10 @@ run_close "$P2" run
 
 expect_eq "2a: the run exits 2" "2" "$CO_RC"
 expect_eq "2b: …and the refusal names the branch that is not reachable" "yes" \
-  "$(contains "$CO_OUT" "wt/y")"
-expect_eq "2c: …wt/y survives" "yes" "$(branch_exists "$P2" "wt/y")"
-expect_eq "2d: …and so does wt/x — a refusal deletes nothing at all" "yes" \
-  "$(branch_exists "$P2" "wt/x")"
+  "$(contains "$CO_OUT" "wt/01-y")"
+expect_eq "2c: …wt/01-y survives" "yes" "$(branch_exists "$P2" "wt/01-y")"
+expect_eq "2d: …and so does wt/01-x — a refusal deletes nothing at all" "yes" \
+  "$(branch_exists "$P2" "wt/01-x")"
 expect_eq "2e: …the tmp wipe never ran" "3" "$(tmp_entries "$P2")"
 expect_eq "2f: …no continuation was written" "no" \
   "$([ -f "$P2/$CONT_REL" ] && echo yes || echo no)"
@@ -442,10 +470,29 @@ expect_eq "2g: …and the plan is byte-for-byte what it was" "$PLAN_BEFORE" \
   "$(sha_of "$P2/$PLAN_REL")"
 
 # The same fixture with the offending branch gone: the reachable one is deleted.
-fixture_git "$P2" branch -D wt/y >/dev/null 2>&1
+fixture_git "$P2" branch -D wt/01-y >/dev/null 2>&1
 run_close "$P2" run
-expect_eq "2h: with wt/y gone the run exits 0" "0" "$CO_RC"
-expect_eq "2i: …and the fully reachable wt/x is deleted" "no" "$(branch_exists "$P2" "wt/x")"
+expect_eq "2h: with wt/01-y gone the run exits 0" "0" "$CO_RC"
+expect_eq "2i: …and the fully reachable wt/01-x is deleted" "no" "$(branch_exists "$P2" "wt/01-x")"
+
+# 2j–2o — R6 finding 1 (architecture FAIL, T16): the census is scoped to THIS wave's
+# `wt/01-*`. A DIFFERENT wave's leftover branch (`wt/07-z`, carrying a commit `main`
+# never took) is outside that scope entirely — `run` must not refuse on it or delete it,
+# and `check`'s report line must name the scoped prefix rather than a repo-wide one.
+P2F="$(mk_fixture p2f)"
+add_foreign_unreached_branch "$P2F"
+run_close "$P2F" check
+expect_eq "2j: check does not refuse over a foreign wt/07-z" "0" "$CO_RC"
+expect_eq "2k: …and the census line names this wave's scoped prefix" "yes" \
+  "$(contains "$CO_OUT" "worktree-removed: wt/01-*")"
+expect_eq "2l: …never naming the foreign branch" "no" "$(contains "$CO_OUT" "wt/07-z")"
+
+run_close "$P2F" run
+expect_eq "2m: run does not refuse on the foreign branch either" "0" "$CO_RC"
+expect_eq "2n: …wt/07-z survives — a foreign wave's tree is not this run's to judge" "yes" \
+  "$(branch_exists "$P2F" "wt/07-z")"
+expect_eq "2o: …while this wave's own wt/01-x is still deleted as before" "no" \
+  "$(branch_exists "$P2F" "wt/01-x")"
 
 # ============================================================
 section "3 — AC-4.4: a second run is a no-op"
@@ -493,6 +540,6 @@ expect_eq "4g: the epic plan is untouched" "$EPIC4_SHA" "$(sha_of "$P4/$EPIC_REL
 expect_eq "4h: no continuation was written" "no" \
   "$([ -f "$P4/$CONT_REL" ] && echo yes || echo no)"
 expect_eq "4i: .bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P4")"
-expect_eq "4j: wt/x still exists" "yes" "$(branch_exists "$P4" "wt/x")"
+expect_eq "4j: wt/01-x still exists" "yes" "$(branch_exists "$P4" "wt/01-x")"
 
 finish

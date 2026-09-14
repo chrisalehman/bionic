@@ -215,6 +215,20 @@ command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry
 [ -n "$INTEGRATION" ] || _co_refuse "the plan's ## SDLC State names no integration-branch:"
 [ -n "$WORKING" ]     || _co_refuse "the plan's ## SDLC State names no working-branch:"
 
+# THE WORKTREE CENSUS IS SCOPED TO THIS WAVE, NEVER THE WHOLE REPO (R6 finding 1,
+# architecture FAIL). A `wt/*` glob picks up every writer this project has ever spawned —
+# 113 in this repository at review time, 13 of them this wave's, 32 foreign ones carrying
+# commits this wave's working branch never took (A-orch-45) — and would refuse act 2 on
+# branches no one in this wave created, or delete historical ones a refusal-free run
+# pruned past. The prefix is this wave's own number, read off the working branch this
+# script already has: `wave/NN-<slug>` names NN, and `wt/NN-*` is exactly the set this
+# task's plan spawned. A working branch that is not wave/<digits>-shaped has no such
+# number to scope to — falling back to the repo-wide census there would be the defect
+# wearing a guard, not a fix, so this refuses instead.
+WT_NUM="$(printf '%s' "$WORKING" | sed -nE 's#^wave/([0-9]+)-.*#\1#p')"
+[ -n "$WT_NUM" ] || _co_refuse "the plan's working-branch '$WORKING' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to"
+WT_PREFIX="wt/$WT_NUM-"
+
 # THE BINDING, ASKED BEFORE THE FIRST ACT (AC-4.2, D6). `archive_run` carries this check
 # too — that is where it belongs, so every caller inherits it — but by the time the move
 # is asked for, eight acts have already happened. A destination that drifted since Step 0
@@ -251,7 +265,7 @@ act_merge() {
 # anyone could have noticed.
 WT_LINE=""
 wt_branches() {
-  git -C "$ROOT" for-each-ref --format='%(refname:short)' 'refs/heads/wt/*' 2>/dev/null
+  git -C "$ROOT" for-each-ref --format='%(refname:short)' "refs/heads/${WT_PREFIX}*" 2>/dev/null
   return 0
 }
 
@@ -632,7 +646,7 @@ insert_archived() {
 # usually a refusal, because the block `run` is about to write is not written yet. That is
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
-  local ws is verdict unreached branches count hook sid marker input rc
+  local ws is verdict unreached branches wt_list wt_count count hook sid marker input rc
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
@@ -642,12 +656,18 @@ do_check() {
   fi
   say "merge: $verdict"
 
+  # THE CENSUS NAMES THE SCOPE IT READ, NOT JUST THE RESULT. `wt_branches` is already
+  # scoped to `${WT_PREFIX}*` (preflight); the report says so explicitly — the prefix and
+  # how many branches it found there — so a reader can tell this is a wave-scoped count,
+  # never the repo-wide one R6 flagged.
+  wt_list="$(wt_branches)"
+  wt_count="$(printf '%s\n' "$wt_list" | grep -c '[^[:space:]]')"
   unreached="$(wt_unreached)"
-  branches="$(wt_branches | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')"
+  branches="$(printf '%s' "$wt_list" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')"
   if [ -n "$unreached" ]; then
-    say "worktree-removed: WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took"
+    say "worktree-removed: ${WT_PREFIX}* (${wt_count} branch(es) in scope) WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took"
   else
-    say "worktree-removed: ${branches:-none}"
+    say "worktree-removed: ${WT_PREFIX}* (${wt_count} branch(es) in scope): ${branches:-none}"
   fi
 
   count="$(tmp_count)"
