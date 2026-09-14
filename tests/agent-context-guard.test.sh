@@ -195,6 +195,7 @@ run_guard() {  # <payload> <target...>
           ANTHROPIC_API_KEY=sk-fixture-marker bash "$GUARD" "$@" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
+  read_verdict "$ST" "$OUT"
   return 0
 }
 
@@ -216,6 +217,24 @@ run_guard_verbose() {  # <payload> <target...> -> sets VERR
   return 0
 }
 
+# THE DISPATCH WALL DOES NOT ALWAYS BLOCK BY STATUS (wave-12 T17). A brief with SEVERAL
+# shape faults is refused once, on the `deny` channel — a PreToolUse verdict on stdout with
+# exit 0 — so that every fault reaches the model instead of the first one only. A row that
+# read `$ST` alone would score that refusal an ALLOW and go green over a wall that had
+# stopped firing. `$VERDICT` is the reading of BOTH wires, and the rows below that drive a
+# deliverable-less brief (which declares no instrument either: two faults) ask for `deny`.
+VERDICT="allow"
+read_verdict() {  # <status> <stdout> -> sets VERDICT
+  case "$2" in
+    *'"permissionDecision":"deny"'*) VERDICT="deny"; return 0 ;;
+  esac
+  case "$1" in
+    0) VERDICT="allow" ;;
+    2) VERDICT="exit2" ;;
+    *) VERDICT="exit$1" ;;
+  esac
+}
+
 run_wall() {  # <payload> <wall> — the positive control: straight in, no guard
   local payload="$1" wall="$2"
   local _sid; _sid=$(printf '%s' "$payload" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
@@ -224,6 +243,7 @@ run_wall() {  # <payload> <wall> — the positive control: straight in, no guard
           ANTHROPIC_API_KEY=sk-fixture-marker bash "$wall" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
+  read_verdict "$ST" "$OUT"
   return 0
 }
 
@@ -239,7 +259,7 @@ REPO_D=$(make_repo dispatch)
 # --- cell (1,1): an agent context in an armed session — THE ONE THAT FIRES.
 arm_roster "$REPO_D"
 run_guard "$(mk_agent_payload "$REPO_D" yes)" "$DISPATCH_WALL"
-expect_status "G1.1 agent_id + roster: the dispatch wall runs and REFUSES a deliverable-less brief" 2 "$ST"
+expect_eq "G1.1 agent_id + roster: the dispatch wall runs and REFUSES a deliverable-less brief" deny "$VERDICT"
 
 # --- cell (0,1): the MAIN THREAD of the same armed session. The settings channel
 # delivers this event too (t1 §3, MAIN rows), and the skill channel already
@@ -248,7 +268,7 @@ run_guard "$(mk_agent_payload "$REPO_D" no)" "$DISPATCH_WALL"
 expect_status "G1.2 no agent_id (main thread), roster present: silent pass" 0 "$ST"
 expect_empty "G1.2 …and says nothing at all" "$ERR$OUT"
 run_wall "$(mk_agent_payload "$REPO_D" no)" "$DISPATCH_WALL"
-expect_status "G1.2 positive control: that same payload IS refused by the wall itself" 2 "$ST"
+expect_eq "G1.2 positive control: that same payload IS refused by the wall itself" deny "$VERDICT"
 
 # --- cell (1,0): an agent context in an UNARMED session — the machine-wide case.
 disarm_roster "$REPO_D"
@@ -256,7 +276,7 @@ run_guard "$(mk_agent_payload "$REPO_D" yes)" "$DISPATCH_WALL"
 expect_status "G1.3 agent_id, no roster (unarmed session): silent pass" 0 "$ST"
 expect_empty "G1.3 …and says nothing at all" "$ERR$OUT"
 run_wall "$(mk_agent_payload "$REPO_D" yes)" "$DISPATCH_WALL"
-expect_status "G1.3 positive control: the wall itself would have refused it" 2 "$ST"
+expect_eq "G1.3 positive control: the wall itself would have refused it" deny "$VERDICT"
 
 # --- cell (0,0): an ordinary unarmed session's main thread. Every Agent dispatch
 # on this machine takes this path, and it must cost one stat and no words.
@@ -300,7 +320,7 @@ expect_status "G3.1 a FOREIGN session's roster does not arm this one" 0 "$ST"
 expect_empty "G3.1 …silently" "$ERR$OUT"
 arm_roster "$REPO_S"
 run_guard "$(mk_agent_payload "$REPO_S" yes)" "$DISPATCH_WALL"
-expect_status "G3.2 …and this session's own roster does" 2 "$ST"
+expect_eq "G3.2 …and this session's own roster does" deny "$VERDICT"
 
 # A session key shaped like a path would leave the guarded directory entirely —
 # the same belt hooks/dispatch-preflight.sh wears, taken in the same direction.
@@ -448,6 +468,7 @@ run_mutant() {  # <mutant> <payload> <target>
           ANTHROPIC_API_KEY=sk-fixture-marker bash "$1" "$3" 2>"$SANDBOX/.err")
   ST=$?
   ERR=$(cat "$SANDBOX/.err")
+  read_verdict "$ST" "$OUT"
   return 0
 }
 
@@ -460,7 +481,7 @@ arm_roster "$REPO_M"
 mutate_guard noctx '^\[ -n "\$\(_jq '"'"'\.agent_id'"'"'\)" \] \|\| exit 0$' \
   "/^\[ -n \"\$(_jq '\.agent_id')\" \] || exit 0$/d"
 run_mutant "$MUTANT" "$(mk_agent_payload "$REPO_M" no)" "$DISPATCH_WALL"
-expect_status "G7.1 without the agent_id test the guard fires on the MAIN thread (double-fire)" 2 "$ST"
+expect_eq "G7.1 without the agent_id test the guard fires on the MAIN thread (double-fire)" deny "$VERDICT"
 run_guard "$(mk_agent_payload "$REPO_M" no)" "$DISPATCH_WALL"
 expect_status "G7.1 …and the shipped guard does not" 0 "$ST"
 
@@ -471,7 +492,7 @@ mutate_guard noarm '^\[ ! -L "\$ROSTER_FILE" \] && \[ -f "\$ROSTER_FILE" \] \|\|
   '/^\[ ! -L "\$ROSTER_FILE" \] && \[ -f "\$ROSTER_FILE" \] || exit 0$/d'
 disarm_roster "$REPO_M"
 run_mutant "$MUTANT" "$(mk_agent_payload "$REPO_M" yes)" "$DISPATCH_WALL"
-expect_status "G7.2 without the roster test the guard fires in an UNARMED session" 2 "$ST"
+expect_eq "G7.2 without the roster test the guard fires in an UNARMED session" deny "$VERDICT"
 run_guard "$(mk_agent_payload "$REPO_M" yes)" "$DISPATCH_WALL"
 expect_status "G7.2 …and the shipped guard does not" 0 "$ST"
 
@@ -505,7 +526,7 @@ expect_eq "G8.2 ...nothing on stderr" "" "$ERR"
 # refused again. Without this row G8 would also pass on a guard that had simply died.
 : > "$REPO_U/.bionic/tmp/engaged-$SID.state"
 run_guard "$(mk_agent_payload "$REPO_U" yes)" "$DISPATCH_WALL"
-expect_eq "G8.3 control: restore the marker and the dispatch wall REFUSES again" "2" "$ST"
+expect_eq "G8.3 control: restore the marker and the dispatch wall REFUSES again" "deny" "$VERDICT"
 
 section "G9 — the BUDGET arm's partition, now that it is not this guard's (S13, AC-21)"
 #

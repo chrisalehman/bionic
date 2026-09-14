@@ -489,6 +489,27 @@ expect_status "4q block: the same detail parses on the block wire" "0" "$?"
 expect_contains "4r block: …and the bytes survive there too" "$CTRL" "$CTRL_BACK"
 expect_absent "4s block: …and no raw control byte is on the wire" "$CTRL" "$DRV_OUT"
 
+# A MANY-LINE DETAIL ON THE `deny` WIRE (wave-12 T17). The dispatch gate's combined
+# brief-shape refusal is a FINDINGS LIST — a count header and one block per fault, tens of
+# lines — and it rides this field because it is the one the measurement proved reaches the
+# model in full. Three properties it depends on, pinned here rather than inferred from the
+# newline arm above: the verdict is ONE line of output whatever the detail's shape, no raw
+# newline survives onto the wire, and the list comes back from a parser byte-identical,
+# blank lines and indentation included. A wall whose JSON spanned several lines would be a
+# wall the CLI cannot read, and `deny` exits 0 — the fail-OPEN direction.
+MANY="$(printf 'THIS BRIEF HAS 3 SHAPE FAULTS.\n\n── 1. a fact (a fix)\n\nFix: do the thing —\n    Expected artifact: .bionic/docs/record/x.md\n\n── 2. another fact (another fix)\n\nFix: do the other thing\n')"
+drive "$LIB" deny "$FX_VERB" "$FX_FACT" "$FX_FIX" "$MANY"
+expect_status "4u deny: a many-line findings list is emitted as ONE line of JSON" "1" \
+  "$(printf '%s\n' "$DRV_OUT" | grep -c . || true)"
+expect_absent "4v deny: …with no raw newline left on the wire" "$(printf '\n── 1.')" "$DRV_OUT"
+MANY_BACK="$(json_field hookSpecificOutput.permissionDecisionReason "$DRV_OUT")"
+expect_status "4w deny: …and the verdict parses" "0" "$?"
+expect_contains "4x deny: …carrying the whole list back byte-identical" "$MANY" "$MANY_BACK"
+expect_eq "4y deny: …with every line of it, blank lines included" \
+  "$(printf '%s\n' "$MANY" | wc -l | tr -d ' ')" \
+  "$(printf '%s\n' "$MANY_BACK" | sed -n '3,$p' | wc -l | tr -d ' ')"
+expect_status "4z deny: …and the status is still 0, because the verdict is the block" "0" "$DRV_RC"
+
 # THE ESCAPER IS STILL PARAMETER EXPANSION, not `jq`. refuse.sh's header gives the
 # reason — `jq` is a dependency this machine can lose and a wall that cannot format
 # its refusal must not therefore fail open — and F-1's fix must not buy validity by
