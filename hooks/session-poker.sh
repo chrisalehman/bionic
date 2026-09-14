@@ -3089,6 +3089,63 @@ EOF
 $OPEN_NAMES
 EOF
         [ -n "$TICK_LIVE_STATE" ] || OPEN="$TICK_OPEN_LIVE"
+
+        # ---------- THE DUPLICATE-SESSION TELL (AC-4.3, T21) ----------
+        #
+        # THE CLAIM WAS PROSE ONLY. skills/canonical-sdlc/dispatch.md promises "A listed agent
+        # with NO ledger row is surfaced as a duplicate-session tell, never silently stopped",
+        # and nothing computed it. Chris, 2026-09-14 (A-orch-29): "Add a test" — the tell
+        # becomes tick machinery, with its own test.
+        #
+        # THE QUESTION, for every name THIS session's ListAgents answer calls live: does ANY
+        # roster under this PROJECT's `.bionic/tmp` — not only this session's own — carry a row
+        # for it, by `name=` or `agent_id=` (payload/scripts/lib/roster.sh)? A live agent no
+        # roster remembers is either another session's dispatch (never rostered here) or a
+        # resumed copy of a finished one — either way this session cannot tell which, so it
+        # NAMES the gap and stops there: no stop, no roster write, no effect on FILL, QUIET or
+        # NOTIFY. `ANY roster`, not `open`: a landed/MET row still proves the wall once knew the
+        # agent, so a closed row clears the name exactly as an open one would.
+        #
+        # THE ALREADY-WARMED SLOT, NOT A SECOND CALL (S19I's own pin, P-4). The priming line
+        # above filled `agents.sh`'s one-process cache directly (no subshell), and the loop
+        # that follows it only ever reads that cache through subshelled predicate calls whose
+        # writes die with them — so the cache this process holds is still exactly what the
+        # priming line put there. A second call to `live_agents "$TICK_TR"` here would normally
+        # be a cache HIT and cost nothing — but S19I's own anti-vacuity arm proves the opposite
+        # case by deleting the priming line and nothing else, and against THAT doctored copy a
+        # second `live_agents` call would pay its own full parse (the row loop's cache writes
+        # are already lost to their subshells, so nothing upstream would have warmed it either)
+        # and move the "twelve, not two" pin it exists to hold. Reading the cache SLOT directly
+        # copies neither cost: a real tick sees exactly what the priming line read (correct data,
+        # zero extra jq calls), and a doctored one — where nothing ever warmed it — sees empty
+        # (no tell, and still zero extra calls; S19I is not testing this feature).
+        #
+        # ONLY WHEN THE ANSWER CARRIES A SET. NONE reads as an empty set here exactly as it
+        # does for the trim above (AC-4.1: the tick never demands a ListAgents call), and a
+        # STALE answer still names a real — if possibly outdated — live set worth surfacing,
+        # the same asymmetry `live_agents`'s own header documents.
+        TICK_DUP_SET="$_LA_CACHE_OUT"
+        if [ -n "$TICK_DUP_SET" ]; then
+          while IFS='|' read -r TICK_DUP_NAME TICK_DUP_TYPE TICK_DUP_STATUS; do
+            [ -n "$TICK_DUP_NAME" ] || continue
+            TICK_DUP_FOUND=0
+            for TICK_DUP_RF in "$REPO_REAL/.bionic/tmp"/roster-*.state; do
+              [ -f "$TICK_DUP_RF" ] || continue
+              # Symlinks are not followed, the same posture every other .bionic/tmp reader
+              # in this file takes.
+              [ -L "$TICK_DUP_RF" ] && continue
+              if grep -qF "|name=${TICK_DUP_NAME}|" "$TICK_DUP_RF" 2>/dev/null \
+                 || grep -qF "|agent_id=${TICK_DUP_NAME}|" "$TICK_DUP_RF" 2>/dev/null; then
+                TICK_DUP_FOUND=1
+                break
+              fi
+            done
+            [ "$TICK_DUP_FOUND" -eq 1 ] \
+              || say "DUPLICATE-SESSION ${TICK_DUP_NAME} — live here, on no roster of this project (another session's dispatch or a resumed copy); never stop it silently"
+          done <<EOF
+$TICK_DUP_SET
+EOF
+        fi
       fi
       if [ -n "$TICK_LIVE_STATE" ]; then
         say "live set $TICK_LIVE_STATE — open= counted from the roster; ListAgents before any dispatch"

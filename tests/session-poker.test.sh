@@ -4138,4 +4138,72 @@ expect_contains "…and its removal is what the second sweep reports" \
 
 if [ -n "$S24_REAL_CFG" ]; then export CLAUDE_CONFIG_DIR="$S24_REAL_CFG"; else unset CLAUDE_CONFIG_DIR; fi
 
+# ============================================================
+section "Section 25: the duplicate-session tell — machinery, not prose (AC-4.3, T21)"
+# ============================================================
+#
+# THE CLAIM WAS PROSE ONLY. skills/canonical-sdlc/dispatch.md promises: "A listed agent with
+# NO ledger row is surfaced as a duplicate-session tell, never silently stopped" — and until
+# this section, nothing computed it. Chris, 2026-09-14 (A-orch-29, "Add a test"): the tell
+# becomes tick machinery with its own test.
+#
+# THE QUESTION: for every name THIS session's ListAgents answer calls live, does ANY roster
+# under this project's `.bionic/tmp` — not only this session's own — carry a row for it, by
+# `name=` or `agent_id=`? A live agent no roster remembers is either another session's
+# dispatch (never rostered here) or a resumed copy of a finished one — either way, this is an
+# OBSERVATION, never an act: no stop, no roster write, no effect on FILL/QUIET/NOTIFY.
+#
+# THE FIXTURE SHAPE FOLLOWS SECTION 19's: a transcript carrying a ListAgents answer, planted
+# under $S19_CFG exactly as `s19_answer` plants it (CLAUDE_CONFIG_DIR is still pointed there —
+# nothing in Section 20 through 24 tore it down permanently, and 24's own restore put it back).
+export CLAUDE_CONFIG_DIR="$S19_CFG"
+
+# ---------- 25a: an answer naming an agent absent from every roster -> the tell fires ----------
+R25A="$(make_repo s25-orphan)"; new_roster "$R25A"
+add_row "$R25A" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "live-writer:running" "stray-agent:running"
+poke_pressure "$R25A" 8192 1.0 tick
+expect_contains "a live name on no roster in this project is surfaced" \
+  "poker: DUPLICATE-SESSION stray-agent — live here, on no roster of this project (another session's dispatch or a resumed copy); never stop it silently" \
+  "$OUT"
+expect_eq "…and the tick still exits 0 — an observation, not a refusal" "0" "$RC"
+
+# ---------- 25b: the paired control — a live name WITH a row draws no tell ----------
+R25B="$(make_repo s25-rostered)"; new_roster "$R25B"
+add_row "$R25B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "live-writer:running"
+poke_pressure "$R25B" 8192 1.0 tick
+expect_absent "a live name WITH a roster row draws no tell (25a discriminates)" \
+  "DUPLICATE-SESSION" "$OUT"
+
+# ---------- 25c: the row can be on ANOTHER session's roster, and by agent_id= too ----------
+# Two more ways a name can be "ours": adopted onto a predecessor's file (never this session's
+# own roster-$SID.state), and matched by the harness's own agent_id= rather than the label the
+# dispatching session chose. Both clear the tell.
+R25C="$(make_repo s25-other-roster)"; new_roster "$R25C"
+S25C_PRED="55555555-aaaa-4bbb-8ccc-0000000025c1"
+add_row_to "$R25C" "$S25C_PRED" name=predecessor-writer status=identified \
+  agent_id=apredecessor-writer-25c111111111 duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "predecessor-writer:running" "apredecessor-writer-25c111111111:running"
+poke_pressure "$R25C" 8192 1.0 tick
+expect_absent "a name on ANOTHER session's roster draws no tell" \
+  "DUPLICATE-SESSION predecessor-writer" "$OUT"
+expect_absent "…and a name matching agent_id= (not name=) draws no tell either" \
+  "DUPLICATE-SESSION apredecessor-writer-25c111111111" "$OUT"
+
+# ---------- 25d: no ListAgents answer at all -> no tell, no refusal, decision unchanged ----------
+# AC-4.1: the tick never DEMANDS a ListAgents call. A session that has not made one yet — the
+# ordinary first tick — gets exactly today's decision, silently, on this axis. The transcript
+# EXISTS (a plain prompt entry) but carries no ListAgents tool_use at all — `s19_answer none`'s
+# shape, which is what "no answer" means (distinct from Section 19f2's absent-file case, already
+# proven elsewhere).
+R25D="$(make_repo s25-no-answer)"; new_roster "$R25D"
+add_row "$R25D" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer none
+poke_pressure "$R25D" 8192 1.0 tick
+expect_absent "no recorded answer at all -> no tell" "DUPLICATE-SESSION" "$OUT"
+expect_eq "…and the tick still exits 0, not a refusal" "0" "$RC"
+expect_contains "…and the ordinary decision is unchanged (open=1, no live set consulted)" \
+  "|open=1" "$OUT"
+
 finish
