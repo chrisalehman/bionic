@@ -286,6 +286,44 @@ expect_status "a second live entry of one name no longer blocks the observation"
 expect_contains "…it resolves to the id the ROSTER carries" "a567bd5c6d1e03d67" "$OUT"
 expect_absent_ci "…and nothing is called ambiguous" "ambiguous" "$OUT"
 
+# (c5) A TYPED AGENT ID RECORDS THE OBSERVATION FOR THE ROW IT NAMES, NEVER THE LAST ROW OF
+# ITS NAME (T32; A-T31.2 — hooks/stop-guard.sh:507-509 carries the identical fix, T31 delta
+# review D1). `ROW_WITH_ID` above is the last confirmed/identified row of the NAME, which is
+# right for a bare name and wrong for an id, which names ONE row by construction. Before this
+# fix, an observation typed as either twin's id recorded `target=` off whichever row is last
+# — so `stop-check <id A>` and `stop-check <id B>` produced the SAME machine line, and the
+# look this producer exists to take could never discharge the twin it was actually typed for.
+IFS='|' read -r H1C R1C S1C <<< "$(make_world w1c)"
+AIDA="atypedid-1111111111111111"
+AIDB="atypedid-2222222222222222"
+make_agent "$H1C" "$S1C" "11111111-1111-1111-1111-111111111111" \
+  "$AIDA" "typedid" "the id-A twin" >/dev/null
+make_agent "$H1C" "$S1C" "11111111-1111-1111-1111-111111111111" \
+  "$AIDB" "typedid" "the id-B twin" >/dev/null
+
+OUT=$(run_check "$H1C" "$R1C" "$AIDA"); ST=$?
+M=$(printf '%s\n' "$OUT" | grep '^stop-check-observation/')
+expect_status "an id typed for the FIRST twin: still resolves" 0 "$ST"
+expect_contains "…and the machine line records ITS OWN id" "target=$AIDA" "$M"
+expect_absent "…never the id of the twin nobody typed" "$AIDB" "$M"
+
+OUT=$(run_check "$H1C" "$R1C" "$AIDB"); ST=$?
+M=$(printf '%s\n' "$OUT" | grep '^stop-check-observation/')
+expect_status "…and typed for the SECOND twin: also resolves" 0 "$ST"
+expect_contains "…records ITS OWN id, not the roster's last row" "target=$AIDB" "$M"
+expect_absent "…never the first twin's id" "$AIDA" "$M"
+
+# THE CONTROL: a bare name on a SINGLE-row roster is unaffected — this fix is an override for
+# the id-typed case only, and a bare name still resolves to the row the roster carries.
+IFS='|' read -r H1D R1D S1D <<< "$(make_world w1d)"
+AIDSOLO="asoloagent-3333333333333333"
+make_agent "$H1D" "$S1D" "11111111-1111-1111-1111-111111111111" \
+  "$AIDSOLO" "soloagent" "the only row" >/dev/null
+OUT=$(run_check "$H1D" "$R1D" "soloagent"); ST=$?
+M=$(printf '%s\n' "$OUT" | grep '^stop-check-observation/')
+expect_status "a bare name on a single-row roster: unchanged" 0 "$ST"
+expect_contains "…still records that row's id" "target=$AIDSOLO" "$M"
+
 # A NAME THE ROSTER DOES NOT CARRY does not resolve, whatever the live set says. `departed`
 # has a full set of metadata and a working log and no `confirmed`/`identified` row here, so
 # there is no id and no evidence tier to print — the roster's own arm, unchanged.

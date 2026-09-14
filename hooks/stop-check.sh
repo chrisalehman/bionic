@@ -458,7 +458,16 @@ roster_walk() {  # <key>
   return 0
 }
 roster_walk "$TARGET_BASE"
+# WHICH SPELLING THE OPERATOR TYPED IS A FACT THE RE-WALK BELOW DESTROYS (T32; A-T31.2 —
+# hooks/stop-guard.sh:473-484 carries the identical construction, T31 delta review D1).
+# `roster_walk` clears all three ROW_ variables on entry, so once an id has been translated
+# into the name it shares with the row a later re-walk finds, the row the operator actually
+# named is gone — and on an ambiguous roster the name alone cannot pick it back out. Keeping
+# it here is what lets the override below re-point onto it rather than onto the roster's
+# last row of that name.
+TYPED_ROW=""
 if [ -n "$ROW_BY_ID" ]; then
+  TYPED_ROW="$ROW_BY_ID"
   TARGET_BASE=$(line_field "$ROW_BY_ID" name)
   roster_walk "$TARGET_BASE"
 fi
@@ -509,6 +518,21 @@ AGENT_NAME="$TARGET_BASE"
 AGENT_ID=$(line_field "$ROW_WITH_ID" agent_id)
 ADOPTED_FROM=$(line_field "$ROSTER_ROW" adopted_from)
 case "$ADOPTED_FROM" in *[!A-Za-z0-9-]*) ADOPTED_FROM="" ;; esac
+
+# AN AGENT ID RESOLVES TO THE ROW THAT CARRIES IT, NEVER TO THE LAST ROW OF ITS NAME (T32;
+# A-T31.2 sibling of hooks/stop-guard.sh:507-509, T31 delta review D1). `ROW_WITH_ID` above is
+# the last confirmed/identified row of the NAME — right for a bare name, wrong for an id,
+# which names ONE row by construction. With two live rows of one name, an observation typed
+# as either twin's id used to record `target=` off whichever row is last, so the working-log
+# path, deliverable/progress/claims/cadence and the adopted-session note all belonged to the
+# OTHER agent — the look this producer exists to take could never discharge the twin it was
+# actually typed for.
+if [ -n "$TYPED_ROW" ]; then
+  ROSTER_ROW="$TYPED_ROW"
+  AGENT_ID=$(line_field "$TYPED_ROW" agent_id)
+  ADOPTED_FROM=$(line_field "$TYPED_ROW" adopted_from)
+  case "$ADOPTED_FROM" in *[!A-Za-z0-9-]*) ADOPTED_FROM="" ;; esac
+fi
 
 if [ -z "$AGENT_ID" ]; then
   echo "Resolved:      live, but no agent id — this session's roster carries no \`confirmed\` or"
