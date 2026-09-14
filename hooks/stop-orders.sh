@@ -76,8 +76,8 @@ die() { printf 'stop-orders: %s\n' "$1" >&2; }
 usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
-  die "  bash ${HOOK_DIR}/stop-orders.sh order <target> [--at <epoch>]"
-  die "        record a human's stop order and print what stopping gives up"
+  die "  bash ${HOOK_DIR}/stop-orders.sh order <target> [--at <epoch>] [--by human|patrol]"
+  die "        record a stop order and print what stopping gives up"
   die "  bash ${HOOK_DIR}/stop-orders.sh standdown"
   die "        list every landed row with an address you can stop it by"
   exit 2
@@ -88,6 +88,17 @@ VERB="$1"; shift
 
 ORDER_TARGET=""
 ORDER_AT=""
+# WHO SAID STOP (bionic 1.8.0, REQ-1 D1). An order used to mean exactly one thing — a human
+# said stop — and that is still the default, because a caller that names no author is a
+# person at a terminal. What widened is the SET of things that may say it: the Patrol writes
+# an order for a row whose contract is MET while the harness still lists its agent, so the
+# TaskStop it asks for in the same breath is not refused by the stop gate a moment later.
+# The two are different facts about one act, the reader discharges either, and the line says
+# which — so a stop nobody remembers typing is explicable afterwards.
+#
+# A CLOSED SET, not free text: the value is printed back to a reader by hooks/stop-guard.sh,
+# and a free-text field would let a caller write whatever it liked into that sentence.
+ORDER_BY="human"
 case "$VERB" in
   order)
     [ $# -ge 1 ] || usage "order needs a target."
@@ -103,6 +114,13 @@ case "$VERB" in
           [ $# -ge 2 ] || usage "--at needs an epoch."
           case "$2" in ''|*[!0-9]*) usage "--at takes epoch seconds; got '$2'." ;; esac
           ORDER_AT="$2"; shift 2 ;;
+        --by)
+          [ $# -ge 2 ] || usage "--by needs a value."
+          case "$2" in
+            human|patrol) ORDER_BY="$2" ;;
+            *) usage "--by takes human or patrol; got '$2'." ;;
+          esac
+          shift 2 ;;
         *) usage "unknown argument: $1" ;;
       esac
     done
@@ -450,8 +468,11 @@ case "$VERB" in
     _at="${ORDER_AT:-$(now_epoch)}"
     [ -f "$ORDERS_FILE" ] || printf '# bionic stop orders — schema %s — machine-local, safe to delete\n' \
       "$ORDER_SCHEMA" >> "$ORDERS_FILE" 2>/dev/null
-    if ! printf '%s|at=%s|epoch=%s|session=%s|target=%s\n' \
-         "$ORDER_SCHEMA" "$(iso_now)" "$_at" "$SESSION_ID" "$_target" >> "$ORDERS_FILE" 2>/dev/null; then
+    # `by=` SITS BEFORE `target=`, and that is load-bearing rather than cosmetic: `target=`
+    # is the last field on the line, which is what lets the reader's anchored greps (and
+    # tests/stop-orders.test.sh's `|target=<name>$`) stay exact while the line grows.
+    if ! printf '%s|at=%s|epoch=%s|session=%s|by=%s|target=%s\n' \
+         "$ORDER_SCHEMA" "$(iso_now)" "$_at" "$SESSION_ID" "$ORDER_BY" "$_target" >> "$ORDERS_FILE" 2>/dev/null; then
       die "REFUSED — the order could not be written to $ORDERS_FILE."
       die "An unrecorded order is one the stop gate will never see, so the failure is"
       die "reported rather than assumed away."

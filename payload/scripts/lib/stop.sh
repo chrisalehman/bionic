@@ -1349,6 +1349,15 @@ PLAN_NAME=""
 # the closing quote of the JSON string the line is embedded in — so the record carries the
 # FILL line and nothing that followed it.
 #
+# THE STAND-DOWN LINE (T1, D1) arrives the same way and is read off the RAW line for the same
+# reason. It differs from the FILL in one respect: the tick prints ONE LINE PER NAME, so every
+# occurrence in the record is SCANNED rather than the first one split out of it — a
+# stand-down of three agents is three lines inside one tool result. Its decline —
+# `standdown-declined: <name> <reason>` — is read only out of AUTHORED text, exactly as
+# `fill-declined:` is and for the identical reason: a file the orchestrator merely READ that
+# happens to carry the literal must not discharge a duty nobody answered. The decline is per
+# AGENT because the instruction is per agent, so the name is captured with it.
+#
 # THE WINDOW (review, performance finding 1). This used to read the whole transcript on
 # every Stop of an open run — one jq pass from byte zero, ~85 ms of CPU per MB, 4.3 s over
 # the 50 MB a long wave session reaches, rising monotonically for the life of the run. Every
@@ -1386,6 +1395,8 @@ STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$TRANSCRIPT" 2>/dev/null | jq -Rr '
        "FILL\t" + (($line | split("poker: FILL ")[1] | split("\\n")[0] | split("\"")[0]))
      else empty end),
     (if (($auth // "") | contains("fill-declined:")) then "DECLINE\t1" else empty end),
+    ($line | [scan("poker: STANDDOWN ([A-Za-z0-9_.-]+)")] | .[] | "STANDDOWN\t" + .[0]),
+    (($auth // "") | [scan("standdown-declined:[ \t]*([A-Za-z0-9_.-]+)")] | .[] | "SD-DECLINE\t" + .[0]),
     (
       ($r // empty)
       | select((.isSidechain // false) != true)
@@ -1401,7 +1412,8 @@ STREAM=$(tail -n "$SCAN_WINDOW_LINES" "$TRANSCRIPT" 2>/dev/null | jq -Rr '
           | select(.type == "tool_use")
           | "TOOL\t" + (.name // "")
             + "\t" + (((.input.file_path // .input.path // .input.command // "") | tostring) | gsub("[\n\t\r]"; " "))
-            + "\t" + (([.input.name?, .input.description?, .input.subagent_type?, .input.prompt?]
+            + "\t" + (([.input.name?, .input.description?, .input.subagent_type?, .input.prompt?,
+                        .input.task_id?]
                        | map(select(. != null) | tostring) | join(" ")) | gsub("[\n\t\r]"; " "))
         else empty
         end
@@ -1465,8 +1477,10 @@ TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 # chore demanded of the model before a gate will let its turn end — ADR-024's P-A, the rule
 # this wave finishes — and it never named a single thing to DO about what the panel showed.
 # The obligation behind it was real, and it moved to where the fact already lives: the tick
-# reads the roster and prints `poker: TASKSTOP <name>` for every MET lineage still open on
-# it. A tell with a name in it beats a wall that asks for a look.
+# reads the roster and prints `poker: STANDDOWN <name>` for every MET lineage whose agent the
+# panel still lists — writing the stop order as it does (T1, D1) — and closes the moot ones
+# itself. A tell with a name in it beats a wall that asks for a look; a tell that also makes
+# the act legal beats the tell.
 #
 # WHAT SURVIVES is the TASK-LIST REFRESH, which is not a look: it is the orchestrator writing
 # down where the run has got to, and a turn that ends without it leaves the ledger behind the
@@ -1558,13 +1572,88 @@ else
   FILL_REASON=""
 fi
 
+# ---------- THE FOURTH DUTY: a printed STANDDOWN is answered before the turn ends ------
+#
+# (AC-1.2; T1, D1.) The mirror of the FILL, and it exists for the same reason. The tick can
+# see that a contract landed while its agent is still on the panel, and it can write the stop
+# order that makes the stop legal — but it cannot stop anything, and a recommendation nobody
+# is obliged to answer is how eighteen finished agents came to sit idle on one panel while a
+# wave ran around them. The turn END is the only moment at which "the stand-down went
+# unanswered" is a fact.
+#
+# ANSWERED MEANS EITHER: a `TaskStop` tool_use naming the agent — by its name or by the
+# `name@session-xxxxxxxx` address the roster carries, which contains the name and so matches
+# the same word-boundary test — or an explicit `standdown-declined: <name> <reason>` line.
+# The decline is not a loophole, it is the point: an agent still writing its record is a good
+# reason not to stop it, and that reason is worth one line in the record. What is refused is
+# SILENCE.
+#
+# NAMED, NOT COUNTED, and per agent: a turn that stopped two of three is missing one, and the
+# reason says which. Same boundary rules as the fill fold below it — ids are validated
+# against `[A-Za-z0-9_.-]+` before they are echoed back, and a `.` inside one is escaped to a
+# literal before it is spliced into the boundary pattern.
+STANDDOWN_MISSING=$(printf '%s\n' "$STREAM" | awk -F'\t' -v mark="$TICK_MARK" '
+  $1 == "USER" {
+    t = $2; sub(/^[ \t]+/, "", t)
+    tick = (index(t, mark) == 1)
+    names = " "; answered = " "
+    next
+  }
+  $1 == "STANDDOWN"  { if (index(names, " " $2 " ") == 0) names = names $2 " "; next }
+  $1 == "SD-DECLINE" { answered = answered $2 " "; next }
+  $1 == "TOOL" {
+    if ($2 == "TaskStop") answered = answered $3 " " $4 " "
+    next
+  }
+  END {
+    if (!tick || names == " ") exit
+    n = split(names, want, /[ \t]+/)
+    missing = ""
+    for (i = 1; i <= n; i++) {
+      id = want[i]
+      if (id == "" || id !~ /^[A-Za-z0-9_.-]+$/) continue
+      pat = id
+      gsub(/\./, "[.]", pat)
+      if (answered ~ ("(^|[^A-Za-z0-9_.-])" pat "([^A-Za-z0-9_.-]|$)")) continue
+      if (index(" " missing " ", " " id " ") > 0) continue
+      missing = missing (missing == "" ? "" : " ") id
+    }
+    if (missing != "") print missing
+  }
+')
+
+if [ -n "$STANDDOWN_MISSING" ]; then
+  STANDDOWN_REASON="Patrol stand-down unanswered: the tick printed STANDDOWN and this turn neither stopped nor declined ${STANDDOWN_MISSING}. TaskStop each, or write a line \"standdown-declined: <name> <reason>\", then stop again — this gate blocks once."
+else
+  STANDDOWN_REASON=""
+fi
+
+# THE TWO TELL-ANSWERING DUTIES TRAVEL TOGETHER from here, joined exactly as the task-list
+# duty joins them below: a turn that left a FILL and a stand-down unanswered is told both
+# things once, because the next stop passes by design and a duty not named in the first
+# refusal is a duty never named at all.
+TELL_REASON="$FILL_REASON"
+[ -n "$STANDDOWN_REASON" ] && TELL_REASON="${TELL_REASON}${TELL_REASON:+ }${STANDDOWN_REASON}"
+
 # The two folds are judged TOGETHER, so a turn that skipped a duty AND left a FILL
 # unanswered is told both things once. Blocking on one and staying silent about the other
 # would hide the second behind the one-shot: the next stop passes by design.
 if [ "$VERDICT" = "quiet" ] || [ -z "$VERDICT" ]; then
-  if [ -n "$FILL_REASON" ]; then
-    fold_block block stop "the tick printed FILL and nothing answered" "dispatch each task, or decline" \
-      "$FILL_REASON"
+  if [ -n "$TELL_REASON" ]; then
+    # THE FACT NAMES WHICH TELL WENT UNANSWERED, and the pair keeps the FILL wording it
+    # always had. Both halves are budgeted: `bionic: stop refused — <fact> (<fix>)` is capped
+    # at 100 columns and the fix at six words (payload/scripts/lib/refuse.sh), which is why
+    # these read as tightly as they do.
+    if [ -n "$FILL_REASON" ] && [ -n "$STANDDOWN_REASON" ]; then
+      fold_block block stop "a FILL and a STANDDOWN went unanswered" \
+        "dispatch, stop, or decline" "$TELL_REASON"
+    elif [ -n "$FILL_REASON" ]; then
+      fold_block block stop "the tick printed FILL and nothing answered" "dispatch each task, or decline" \
+        "$TELL_REASON"
+    else
+      fold_block block stop "a printed STANDDOWN went unanswered" "stop each agent, or decline" \
+        "$TELL_REASON"
+    fi
     return 2
   fi
   return "$_adv"
@@ -1589,7 +1678,7 @@ case "$VERDICT" in
   *)
     return "$_adv" ;;
 esac
-[ -n "$FILL_REASON" ] && REASON="$REASON $FILL_REASON"
+[ -n "$TELL_REASON" ] && REASON="$REASON $TELL_REASON"
 
 # The JSON decision payload on STDOUT with return "$_adv", the form Design (T5) names.
 # (hooks/landing-gate.sh refuses through exit 2 + stderr instead; both are live

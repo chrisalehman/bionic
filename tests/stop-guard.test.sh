@@ -1500,6 +1500,21 @@ expect_status "precondition — unmet and unordered: REFUSED" 2 "$GUARD_ST"
 order_stop "$O_REPO" "$SID_A" "ordered"
 run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "ordered")"
 expect_status "a user-ordered stop EXECUTES: permitted, no observation" 0 "$GUARD_ST"
+expect_contains "…and the line says who ordered it" "STOP ORDERED (by human)" "$GUARD_ERR"
+
+# WHO ORDERED IT IS PART OF THE REPORT (AC-1.1; T1, D1). An order means one of two things
+# now — a human said stop, or a verified landing did (the Patrol writes one for a MET row
+# whose agent is still on the panel, so the TaskStop it asks for is not refused a moment
+# later). The gate's reading is unchanged: it discharges either. What changes is that the one
+# line it prints back names the author, so a stop nobody remembers typing is explicable.
+plant_agent "$O_SUB" "apatrolled-44444444444" "patrolled"
+sg_roster_row "$O_REPO" "$SID_A" "patrolled" "apatrolled-44444444444" "" "confirmed" \
+  ".bionic/docs/record/patrolled.md"
+order_stop "$O_REPO" "$SID_A" "patrolled" --by patrol
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "patrolled")"
+expect_status "a PATROL-ordered stop executes exactly as a human's does" 0 "$GUARD_ST"
+expect_contains "…and the line says the Patrol ordered it" "STOP ORDERED (by patrol)" "$GUARD_ERR"
+expect_contains "…and still says what is being given up" "giving up" "$GUARD_ERR"
 
 # An order names ONE target. A stop of a different agent is not covered by it.
 plant_agent "$O_SUB" "aunordered-22222222222" "unordered"
