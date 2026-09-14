@@ -4294,7 +4294,15 @@ expect_absent "a live name WITH a roster row draws no tell (25a discriminates)" 
 # Two more ways a name can be "ours": adopted onto a predecessor's file (never this session's
 # own roster-$SID.state), and matched by the harness's own agent_id= rather than the label the
 # dispatching session chose. Both clear the tell.
+#
+# THIS SESSION'S OWN ROSTER ALSO CARRIES AN OPEN ROW (audit-c19c16e-ac43.md item 4, T25). The
+# predecessor's row alone left `roster-$SID.state` header-only, so `OPEN_ROSTER` read 0 and the
+# whole tell block — cross-roster glob and `agent_id=` branch both — never ran; both assertions
+# below passed for a reason that had nothing to do with either clearing path. `own-live-writer`
+# is not named in the ListAgents answer below, so it neither draws a tell of its own nor changes
+# which names the loop below considers — it exists only to make `OPEN_ROSTER > 0` true.
 R25C="$(make_repo s25-other-roster)"; new_roster "$R25C"
+add_row "$R25C" name=own-live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
 S25C_PRED="55555555-aaaa-4bbb-8ccc-0000000025c1"
 add_row_to "$R25C" "$S25C_PRED" name=predecessor-writer status=identified \
   agent_id=apredecessor-writer-25c111111111 duration="4 hours" launched_at="$(iso_ago 60)"
@@ -4319,5 +4327,22 @@ expect_absent "no recorded answer at all -> no tell" "DUPLICATE-SESSION" "$OUT"
 expect_eq "…and the tick still exits 0, not a refusal" "0" "$RC"
 expect_contains "…and the ordinary decision is unchanged (open=1, no live set consulted)" \
   "|open=1" "$OUT"
+
+# ---------- 25e: a STALE answer still names a live agent on no roster (review Q2) ----------
+# hooks/session-poker.sh:3124 documents the asymmetry: "a STALE answer still names a real —
+# if possibly outdated — live set worth surfacing." The trim above falls back to the roster
+# count on stale (Section 19e), but the tell is a DIFFERENT read of the same cached set
+# (`TICK_DUP_SET="$_LA_CACHE_OUT"`, populated whether `_la_ensure` returns fresh or stale) —
+# so staleness silences the FILL arithmetic without silencing this observation. Before this
+# case, Section 25 drove `s19_answer fresh` (25a-25c) and `s19_answer none` (25d) only; a
+# change narrowing the tell to fresh-only left every existing assertion here green.
+R25E="$(make_repo s25-stale)"; new_roster "$R25E"
+add_row "$R25E" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer stale "stray-agent:running"
+poke_pressure "$R25E" 8192 1.0 tick
+expect_contains "a STALE answer's live name on no roster is still surfaced" \
+  "poker: DUPLICATE-SESSION stray-agent — live here, on no roster of this project (another session's dispatch or a resumed copy); never stop it silently" \
+  "$OUT"
+expect_eq "…and the tick still exits 0 — an observation, not a refusal" "0" "$RC"
 
 finish
