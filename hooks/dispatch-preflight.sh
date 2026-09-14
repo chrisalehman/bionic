@@ -1894,24 +1894,57 @@ $3
 "
 }
 
+# dp_scaffold_marked — the shipped brief scaffold, verbatim, with every label line whose
+# field THIS brief left empty suffixed " <ADD>" and every label it already carries left
+# exactly as `dispatch.md` wrote it (design ledger D3, D11). Read from the RENDERED
+# dispatch.md at refusal time, never transcribed here, with the identical awk
+# tests/dispatch-preflight.test.sh's §scaffold-verbatim uses to pull the same block out of
+# the same `### Scaffold` fence — so the wire tracks the shipped scaffold's own drift
+# instead of a second copy of it. The five labels read the same parsed fields the walls
+# above already computed; no brief text is re-scanned.
+dp_scaffold_marked() {
+  local file="${HOOK_DIR}/../skills/canonical-sdlc/dispatch.md" line label
+  [ -r "$file" ] || return 0
+  while IFS= read -r line; do
+    label="${line%%:*}"
+    case "$label" in
+      "Expected duration")  [ -n "$C_DURATION" ]    || line="${line} <ADD>" ;;
+      "Expected artifact")  [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
+      "Files")               [ -n "$C_FILES" ]       || line="${line} <ADD>" ;;
+      "Suites")              [ -n "$C_SUITES" ]      || line="${line} <ADD>" ;;
+      "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || line="${line} <ADD>" ;;
+    esac
+    printf '%s\n' "$line"
+  done < <(/usr/bin/awk '
+    /^### Scaffold/            { inb = 1; next }
+    inb && /^```/              { fence++; if (fence == 2) exit; next }
+    inb && fence == 1          { print }
+  ' "$file")
+}
+
 # dp_refuse_findings — emit the whole list as ONE refusal and exit, or return having done
 # nothing at all. Called once, after the last brief-shape arm; `refuse` owns the exit, so a
 # caller cannot fall through it into the journal with findings outstanding. ONE finding
 # refuses on `exit2` exactly as its arm always did; SEVERAL refuse on `deny`, where the
-# whole list reaches the model (see the channel note above). The exit STATUS therefore
+# marked scaffold reaches the model (see the channel note above). The exit STATUS therefore
 # differs by fault count — 2 for one, 0-with-a-deny-verdict for several — and both block.
+#
+# THE SEVERAL-FAULT WIRE IS ONE LINE, THE MARKED SCAFFOLD, AND A POINTER — NO RATIONALE
+# (D3, D11). The prior shape repeated a `<detail>` paragraph per fault; a reader with three
+# faults got three lectures before a single fix. Each `dp_finding` call above still carries
+# its `<detail>` argument — that text stays in the source as the documentation of WHY each
+# arm fires, and `refuse`'s single-fault path (`exit2`) still emits it unchanged — but it is
+# no longer collected onto the several-fault wire. What replaces it is the same scaffold an
+# author would have started from, marked with exactly what this brief is still missing.
 dp_refuse_findings() {
   [ "$DP_FINDING_N" -gt 0 ] || return 0
   if [ "$DP_FINDING_N" -eq 1 ]; then
     refuse exit2 dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
   fi
   refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
-    "THIS BRIEF HAS $DP_FINDING_N SHAPE FAULTS. The line above names the first of them; all
-$DP_FINDING_N are below, in the order the gate reads the brief, each with its own Fix:
-block. They are independent, and a brief that repairs all $DP_FINDING_N dispatches —
-there is no further fault waiting behind these.
+    "$(dp_scaffold_marked)
 
-$DP_FINDINGS"
+See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
 }
 
 # ======================================================= THE AMBIGUITY WALL

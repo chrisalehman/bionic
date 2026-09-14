@@ -154,6 +154,17 @@ Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `inten
 | 9 Close-out | `steps/9.md` | `agent-skills:shipping-and-launch` | Checklist + rollback; `continuation.md` written |
 
 **Before any Step-N action, read `steps/N.md`. Before Step 4's first action and before the first dispatch, read `dispatch.md`. The load-time announcement names the file just read.**
+<!-- BRIEF-SCAFFOLD-BEGIN -->
+### Scaffold
+
+```
+Expected duration: <N> minutes
+Expected artifact: <ONE path inside the repo, e.g. .bionic/docs/record/<wave>/<name>.md>
+Files: <every path the task may create or edit>        # writers; omit for a read-only brief
+Suites: none                                           # read-only brief; or test-file names only, on its own paragraph
+Deliverable-waiver: <reason>                           # only for a report returned by message
+```
+<!-- BRIEF-SCAFFOLD-END -->
 
 Committing is a cross-cutting rhythm (~once per step), not a numbered step. Update `## SDLC State` **before staging** — the gate reads the file, not the diff. Do not add a `commit:` field; the SHA lives in git.
 
@@ -180,7 +191,7 @@ One evidence artifact per step under `Step N:` in `## SDLC State`. The gate vali
 
 **Placeholder ban.** These exact values are rejected anywhere evidence is required: `todo`, `pending`, `in progress`, `inprogress`, `xxx`, `tbd`, `placeholder`.
 
-**Handoff.** A plan spanning sessions carries a `## Handoff` section — resume point (step, sub-task, branch, last commit), decisions ratified this session (reset each time), tried-and-rejected and discovered surprises (persist), open blockers, uncommitted work, and a literal resume instruction. Rewritten in place, never appended. Nothing writes or checks it. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
+**Handoff.** A plan spanning sessions carries a `## Handoff` section — resume point (step, sub-task, branch, last commit), decisions approved this session (reset each time), tried-and-rejected and discovered surprises (persist), open blockers, uncommitted work, and a literal resume instruction. Rewritten in place, never appended. Nothing writes or checks it. At Step 9 write `continuation.md` — wave completed, integration branch + merge SHA, next wave, open carry-overs.
 
 ## Hooks
 
