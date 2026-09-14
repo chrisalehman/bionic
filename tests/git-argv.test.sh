@@ -2,7 +2,7 @@
 # Tests for scripts/lib/git-argv.sh — the shared "read a Bash command the way
 # git reads it" library, and the two walls that source it.
 #
-# Four subjects, in the order a reader needs them:
+# Five subjects, in the order a reader needs them:
 #
 #   Section 1  the library itself: segmentation, quoting, heredoc-body removal,
 #              global-option skipping, refspec destination parsing (spec R-3).
@@ -17,6 +17,12 @@
 #              git global-option commit spellings and stays silent on prose and
 #              heredoc bodies. It lives here, not in the evidence-gate suite,
 #              because the behaviour under test is this library.
+#   Section 6  payload/scripts/lib/walls.sh's `_wall_mentions_git` screen (review
+#              S1/Q1, A-T11.3) is coupled to every fixture command Sections 1b,
+#              4 and 4b already assert this file's own parser recognises as a
+#              git invocation — read out of this file's own source, never
+#              retyped, so a fixture added to any of those sections later is
+#              asked of the screen automatically.
 #
 # Usage: bash tests/git-argv.test.sh
 
@@ -662,5 +668,84 @@ eq "wall_protect_main asks the library, at both of its checks" "1" \
 # The words may still appear in its prose; a TEST against them may not.
 eq "wall_protect_main compares against no quoted branch literal" "0" \
   "$(grep -c '= "main"\|= "master"' "$GA_WALLS")"
+
+# ============================================================
+# Section 6: _wall_mentions_git couples to every recognised fixture
+# ============================================================
+#
+# Review S1/Q1 (record/wave-12-fixit-171/review-c19c16e.md) and A-T11.3
+# (record/wave-12-fixit-171/assumptions.md): `_wall_mentions_git`
+# (payload/scripts/lib/walls.sh:190) is the cheap screen `wall_protect_main`
+# and the evidence gate's commit detector both run BEFORE the real parser —
+# and nothing in tests/ coupled it to the parser it stands in front of; the
+# obligation was a sentence in the record, not a red test.
+#
+# THE LIST IS READ OUT OF THIS FILE, NEVER RETYPED. Copying the fixture
+# commands into a second array by hand is exactly the failure mode this
+# section exists to close — a hand-picked subset drifts the moment someone
+# adds a disguised form to Section 1b, 4 or 4b and forgets the second list.
+# Instead, `sed` pulls every command those sections already assert the real
+# parser recognises straight out of this file's own text via "$0": Section
+# 1b's positive `parse_cmd '…' &&`/`parse_cmd "…" &&` global-option forms,
+# Section 4b's disguised `has_push` "yes" forms (R-12), and Section 4's
+# disguised `gate_fires` commit forms (R-12). A fixture added to any of the
+# three later is asked of the screen here with no second edit.
+#
+# GIT_ARGV_SELF_EXTRACT_BOUNDARY — the line below is the marker the extraction
+# reads up to (never past), so this section's OWN sed/grep/has_push/gate_fires
+# text can never be mistaken for a fixture of itself.
+
+section "Section 6: _wall_mentions_git couples to every recognised fixture"
+
+WALLS_LIB="$(dirname "$LIB")/walls.sh"
+
+if [ ! -r "$WALLS_LIB" ]; then
+  no "walls.sh found beside git-argv.sh for the screen coupling" "not readable at $WALLS_LIB"
+else
+  # shellcheck source=/dev/null
+  . "$WALLS_LIB"
+
+  # Everything ABOVE the boundary marker only — this section's own code below
+  # it must never be scanned for fixtures of itself.
+  _garv_src=$(awk '/^# GIT_ARGV_SELF_EXTRACT_BOUNDARY/{exit} {print}' "$0")
+
+  GIT_RECOGNIZED_FIXTURES=()
+  while IFS= read -r _garv_cmd; do
+    [ -n "$_garv_cmd" ] && GIT_RECOGNIZED_FIXTURES+=("$_garv_cmd")
+  done < <(
+    {
+      printf '%s\n' "$_garv_src" | sed -n "s/^parse_cmd '\(.*\)' && eq .*/\1/p"
+      printf '%s\n' "$_garv_src" | sed -n 's/^parse_cmd "\(.*\)" && eq .*/\1/p'
+      printf '%s\n' "$_garv_src" | grep -F '"yes"' | grep -F "has_push '" | sed -n "s/.*has_push '\(.*\)')\".*/\1/p"
+      printf '%s\n' "$_garv_src" | grep -F '"yes"' | grep -F 'has_push "' | sed -n 's/.*has_push "\(.*\)")".*/\1/p'
+      printf '%s\n' "$_garv_src" | grep -E '^gate_fires' | grep -F "'" | sed -n "s/^gate_fires  *\"[^\"]*\"  *'\(.*\)'\$/\1/p"
+      printf '%s\n' "$_garv_src" | grep -E '^gate_fires' | sed -n 's/^gate_fires  *"[^"]*"  *"\(.*\)"$/\1/p'
+    } | sort -u
+  )
+
+  # NOT VACUOUS: the extraction really found the fixtures, not an empty grep
+  # that would make every assertion below pass by never running.
+  if [ "${#GIT_RECOGNIZED_FIXTURES[@]}" -ge 20 ]; then
+    ok "the fixture list read from this file's own source is non-empty (${#GIT_RECOGNIZED_FIXTURES[@]} found)"
+  else
+    no "the fixture list read from this file's own source is non-empty" \
+       "only ${#GIT_RECOGNIZED_FIXTURES[@]} found — the extraction regressed"
+  fi
+
+  for _garv_cmd in "${GIT_RECOGNIZED_FIXTURES[@]}"; do
+    if _wall_mentions_git "$_garv_cmd"; then
+      ok "_wall_mentions_git sees: $_garv_cmd"
+    else
+      no "_wall_mentions_git sees: $_garv_cmd" "returned 1 — the screen would short-circuit the wall before the parser ever ran"
+    fi
+  done
+
+  # Control: a command that mentions no git at all is screened OUT.
+  if _wall_mentions_git 'ls -la'; then
+    no "_wall_mentions_git returns non-zero for a command with no git mention" "returned 0"
+  else
+    ok "_wall_mentions_git returns non-zero for a command with no git mention"
+  fi
+fi
 
 finish

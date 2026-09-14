@@ -923,37 +923,37 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       if [ -n "$notfresh" ]; then
         la_rc=0
       else
-      # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
-      # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
-      # size and mtime — but the per-row call below runs inside a command substitution, and
-      # a subshell INHERITS its parent's variables while its own writes die with it. So the
-      # first row would warm a cache nobody sees and every row would pay a full parse: two
-      # whole-file jq passes and nine spawns, 1.22 s for twelve rows on a 4.1 MB transcript.
-      # One call here, in the shell the loop actually runs in, warms it for every subshell
-      # that follows. It is done lazily rather than before the loop so a roster with no
-      # `status=intended` row still reads the transcript zero times. Its own answer is
-      # discarded: this line is a cache fill, and the row's verdict is the predicate's.
-      if [ -z "$primed" ]; then
-        primed=1
-        live_agents "$transcript" >/dev/null 2>&1 || :
-      fi
+        # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
+        # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
+        # size and mtime — but the per-row call below runs inside a command substitution, and
+        # a subshell INHERITS its parent's variables while its own writes die with it. So the
+        # first row would warm a cache nobody sees and every row would pay a full parse: two
+        # whole-file jq passes and nine spawns, 1.22 s for twelve rows on a 4.1 MB transcript.
+        # One call here, in the shell the loop actually runs in, warms it for every subshell
+        # that follows. It is done lazily rather than before the loop so a roster with no
+        # `status=intended` row still reads the transcript zero times. Its own answer is
+        # discarded: this line is a cache fill, and the row's verdict is the predicate's.
+        if [ -z "$primed" ]; then
+          primed=1
+          live_agents "$transcript" >/dev/null 2>&1 || :
+        fi
 
-      # THE PREDICATE IS NOT SPELLED HERE. It is `live_row_open`
-      # (payload/scripts/lib/agents.sh), and its header says why the rule is an inversion.
-      #
-      # The reader's own stderr passes through here unchanged — one line,
-      # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the
-      # STALE/NONE case below can hand its pieces to the caller verbatim. The predicate
-      # prints nothing on stdout, so this capture is that line and nothing else.
-      la_rc=0
-      la_out=$( { live_row_open "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
-      # STALE (3) AND NONE (4) BECOME OPEN, not a refusal. The reader's own stderr line
-      # stays captured in `la_out` and discarded: it named a ListAgents call as the
-      # repair, which is no longer anybody's job, and letting it out would put the
-      # retired chore back in front of the operator by another route.
-      case "$la_rc" in
-        3|4) notfresh=1; la_rc=0 ;;
-      esac
+        # THE PREDICATE IS NOT SPELLED HERE. It is `live_row_open`
+        # (payload/scripts/lib/agents.sh), and its header says why the rule is an inversion.
+        #
+        # The reader's own stderr passes through here unchanged — one line,
+        # `live-agents: <state> age=<n|none>` — captured rather than left to leak so the
+        # STALE/NONE case below can hand its pieces to the caller verbatim. The predicate
+        # prints nothing on stdout, so this capture is that line and nothing else.
+        la_rc=0
+        la_out=$( { live_row_open "$transcript" "$nm"; } 2>&1 ) || la_rc=$?
+        # STALE (3) AND NONE (4) BECOME OPEN, not a refusal. The reader's own stderr line
+        # stays captured in `la_out` and discarded: it named a ListAgents call as the
+        # repair, which is no longer anybody's job, and letting it out would put the
+        # retired chore back in front of the operator by another route.
+        case "$la_rc" in
+          3|4) notfresh=1; la_rc=0 ;;
+        esac
       fi
       case "$la_rc" in
         0)
@@ -2198,7 +2198,8 @@ the wall defeated by the cost of the wall. So the derivation is bounded here.
 Fix: narrow \`Files:\` to the paths this task really writes, or name the closed set
 directly with \`Suites:\` — a declared set needs no derivation at all. If the command
 itself has become slow, that is the thing to fix: it runs on every dispatch."
-      refuse exit2 dispatch "the impact command did not answer" "fix impact-command in config.yaml" "$_dp_detail"
+      dp_finding "the impact command did not answer" "fix impact-command in config.yaml" "$_dp_detail"
+      dp_refuse_findings
     fi
     _impact_out=$(cat "$_impact_tmp" 2>/dev/null) || _impact_out=""
     rm -f "$_impact_tmp"
