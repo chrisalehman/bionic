@@ -1388,14 +1388,18 @@ expect_absent "75b: …and names the deleted manifest nowhere" \
 # byte-for-byte, the same `has_pin` idiom §1-§5 use.
 section "Section 6: K3 — premise text (Context/Problem first, Mechanisms inherited)"
 
-# AC-K3.1: Context and Problem, for a stranger, is the FIRST thing the frame
-# ratifies — ahead of the orchestrator's own design intuition and every decision
-# below it. Pinned as one substring spanning the frame's opening clause straight
-# into the Context-and-Problem sentence, so the pin itself IS an adjacency (hence
-# order) check: it can only match a copy where nothing has been inserted, or
-# swapped in, between "before any question." and "Its first ratification is
-# **Context and Problem".
-PIN_K3_FIRST='**Open with the frame**, before any question. Its first ratification is **Context and Problem, for a stranger**'
+# AC-K3.1: Context and Problem is the FIRST thing the frame approves — ahead of
+# the orchestrator's own design intuition and every decision below it. Pinned as
+# one substring spanning the frame's opening clause straight into the
+# Context-and-Problem sentence, so the pin itself IS an adjacency (hence order)
+# check: it can only match a copy where nothing has been inserted, or swapped
+# in, between "before any question." and "Its first approval is
+# **Context and Problem". RE-ANCHORED (epic-23 wave-13 T2, AC-8.1/AC-8.2): the
+# heading lost its ", for a stranger" clause — the explanation itself
+# ("written as if for a reader who has never opened this repo") stays, just not
+# folded into the bold span — and "ratification" became "approval" (the T2
+# ratif→approv sweep).
+PIN_K3_FIRST='**Open with the frame**, before any question. Its first approval is **Context and Problem**'
 
 # AC-K3.2, half 1: the frame carries a "Mechanisms inherited" item, each line
 # marked kept or questioned.
@@ -1406,9 +1410,9 @@ PIN_K3_MECH='**Mechanisms inherited**, one line per substrate or mechanism the d
 PIN_K3_STRATEGIC='placing a test cohort in a tier, a job on a runtime surface, or a workload on hardware is **strategic by rule**'
 
 if has_pin "$STEP2_MD" "$PIN_K3_FIRST"; then
-  ok "76: SKILL.md's Step-2 frame ratifies Context and Problem, for a stranger, first"
+  ok "76: SKILL.md's Step-2 frame approves Context and Problem first"
 else
-  no "76: SKILL.md's Step-2 frame ratifies Context and Problem, for a stranger, first" "file: $STEP2_MD"
+  no "76: SKILL.md's Step-2 frame approves Context and Problem first" "file: $STEP2_MD"
 fi
 
 if has_pin "$STEP2_MD" "$PIN_K3_MECH"; then
@@ -1429,22 +1433,22 @@ fi
 # Context-and-Problem sentence and the Design-intuition sentence in place — the
 # literal shape of "the order is reversed" — rather than deleting anything, so a
 # pin that merely checked PRESENCE of both phrases would stay green through it.
-anchor -E "$STEP2_MD" 'Its first ratification is \*\*Context and Problem, for a stranger\*\*' 1
+anchor -E "$STEP2_MD" 'Its first approval is \*\*Context and Problem\*\*' 1
 DOCTORED_K3_ORDER="$TMP/skill-k3-order-reversed.md"
 sed -E '
-s/(\*\*Open with the frame\*\*, before any question\. )(Its first ratification is \*\*Context and Problem, for a stranger\*\*: the problem and the goal, written as if for a reader who has never opened this repo; this comes before your own design intuition and before every decision in the frame below it — a change not yet explainable to someone who was not there is not yet understood\. )(Then your own \*\*Design intuition\*\*, the shape you expect to be right, stated so the user can push on it; )/\1\3\2/
+s/(\*\*Open with the frame\*\*, before any question\. )(Its first approval is \*\*Context and Problem\*\*: the problem and the goal, written as if for a reader who has never opened this repo; this comes before your own design intuition and before every decision in the frame below it — a change not yet explainable to someone who was not there is not yet understood\. )(Then your own \*\*Design intuition\*\*, the shape you expect to be right, stated so the user can push on it; )/\1\3\2/
 ' "$STEP2_MD" > "$DOCTORED_K3_ORDER"
 if has_pin "$DOCTORED_K3_ORDER" "$PIN_K3_FIRST"; then
-  no "79: order-reversed SKILL.md fails the first-ratification pin (pin discriminates)" \
+  no "79: order-reversed SKILL.md fails the first-approval pin (pin discriminates)" \
      "the mutated copy still matched — the pin does not see the reorder"
 else
-  ok "79: order-reversed SKILL.md fails the first-ratification pin (pin discriminates)"
+  ok "79: order-reversed SKILL.md fails the first-approval pin (pin discriminates)"
 fi
 # Control: prove the doctored copy really moved Design intuition ahead of
 # Context and Problem, rather than merely mangling the text into something that
 # happens to fail the pin for an unrelated reason.
 expect_contains "79b: …and the doctored copy really does read Design intuition, then Context and Problem" \
-  'Then your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; Its first ratification is **Context and Problem' \
+  'Then your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; Its first approval is **Context and Problem' \
   "$(cat "$DOCTORED_K3_ORDER")"
 
 # 80: Mechanisms inherited ABSENT (AC-K3.2's fails-when). The strategic-by-rule
@@ -1703,12 +1707,12 @@ done
 #
 # One word is the gate. The ratified sentence is a QUESTION plus the literal reply, and
 # a look-closer line beneath it; the bare footer menu it replaced was rejected by name.
-expect_contains "95a: the Step-1 card asks the ratified question" \
-  'Do you approve these requirements? Reply "approved" to ratify it.' "$CARD1"
-expect_contains "95b: the Step-2 card asks the ratified question" \
-  'Do you approve this design? Reply "approved" to ratify it.' "$CARD2"
-expect_contains "95c: the Step-3 card asks the ratified question" \
-  'Do you approve this plan? Reply "approved" to ratify it.' "$CARD3"
+expect_contains "95a: the Step-1 card asks the approved question" \
+  'Do you approve these requirements? Reply "approved" to approve it.' "$CARD1"
+expect_contains "95b: the Step-2 card asks the approved question" \
+  'Do you approve this design? Reply "approved" to approve it.' "$CARD2"
+expect_contains "95c: the Step-3 card asks the approved question" \
+  'Do you approve this plan? Reply "approved" to approve it.' "$CARD3"
 expect_contains "95d: the Step-2 card's look-closer line opens one requirement's evals" \
   'show evals <req>' "$CARD2"
 expect_contains "95e: the Step-3 card's look-closer line opens one task" \
@@ -2200,15 +2204,21 @@ section "Section 18: REQ-1b — the split skill's byte caps and the core's step 
 # moved nothing.
 #
 # THE CAPS ARE THE RATIFIED NUMBERS, not measurements of what happened to land: core 25,000 ·
-# each step file 14,000 · dispatch 35,000 · the three together 108,652 (today's exact size —
-# "no growth," literally), from the requirements file's AC table as AMENDED 2026-09-11 (user
-# ruling "Ok, option 1": caps measure the loaded surface; the prose cut is a chartered later
-# wave) and RE-AMENDED the same day once the T5-report §3 prunable-narrative estimate proved
-# too small to reach a tighter pair of caps on its own: dispatch to the measured cut (35,000,
-# still below today's 35,366) and total to the measured no-growth line (108,652), reached by
-# giving the core and dispatch reference the same one-line GENERATED header the step files
-# already use, not by cutting more prose. A fifth cap, also from the 2026-09-11 ruling, pins
-# the loaded surface itself: core + the largest single steps/N.md ≤ 36,000 B, since that pair
+# each step file 14,000 · dispatch 35,000 · the three together 108,652 (2026-09-11's exact
+# size — "no growth," literally), from the requirements file's AC table as AMENDED 2026-09-11
+# (user ruling "Ok, option 1": caps measure the loaded surface; the prose cut is a chartered
+# later wave) and RE-AMENDED the same day once the T5-report §3 prunable-narrative estimate
+# proved too small to reach a tighter pair of caps on its own: dispatch to the measured cut
+# (35,000, still below that day's 35,366) and total to the measured no-growth line (108,652),
+# reached by giving the core and dispatch reference the same one-line GENERATED header the
+# step files already use, not by cutting more prose. RE-RAISED to 109,118 (epic-23 wave-13
+# T2, 2026-09-14): the brief scaffold injected into SKILL.md (AC-2.2, +508 B) and the Step-3
+# card's conditional governing-design slot (AC-8.3) are both chartered growth this same wave
+# approved, not drift — the requirements file records neither the old nor the new total as a
+# ratified number of its own, so this comment carries the amendment instead; a future wave
+# that needs the cap raised again still raises it in the requirements first. A fifth cap,
+# also from the 2026-09-11 ruling, pins the loaded surface itself: core + the largest single
+# steps/N.md ≤ 36,000 B, since that pair
 # is what a session actually carries at a step boundary — the whole-surface total below it
 # does not measure that. Headroom under a cap is not a reason to move the cap down, and a
 # future wave that needs a cap raised raises it in the requirements first.
@@ -2279,12 +2289,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth)" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 108652 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth) ($SPLIT_TOTAL B ≤ 108652 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 109,118 B (no growth)" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 109118 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 109,118 B (no growth) ($SPLIT_TOTAL B ≤ 109118 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth)" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 108652)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 109,118 B (no growth)" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 109118)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
@@ -2587,5 +2597,120 @@ AC2_SUITES_MUT="$TMP/ac2-suites-token.md"
 printf 'Suites: none   # or *.test.sh tokens only\n' > "$AC2_SUITES_MUT"
 expect_true "128b: the .test.sh-token grep fires on the shape it targets (the pattern discriminates)" \
   grep -qE '^Suites:.*\.test\.sh' "$AC2_SUITES_MUT"
+
+section "Section 23: T2 — refusal scaffold in SKILL.md, the gate word, the Step-3 conditional design slot (epic-23 wave-13, REQ-2/REQ-8, AC-8.1/AC-8.2/AC-8.3)"
+
+# WHAT THIS SECTION OWNS. Three independent AC-8 pins that all landed with T2: the Step-2
+# frame heading dropped ", for a stranger" (AC-8.1); every step template, SKILL.md.tmpl and
+# orchestrator-dispatch.md swapped "ratif*" for "approv*" (AC-8.2); the Step-3 card's
+# "governing design" line moved from unconditional prose into a conditional slot inside the
+# card template itself (AC-8.3). The scaffold's SECOND home — SKILL.md, via the new
+# `<!-- INJECT: brief-scaffold -->` in SKILL.md.tmpl — is pinned here too, beside 124a's
+# seven-surface count, because SKILL.md was never one of the AC2_SURFACES loop's seven.
+#
+# HERMETIC. Reads the committed rendered finals by path; doctored copies live under $TMP.
+
+# --- AC-8.1: "for a stranger" is gone from every surface that could carry it ---
+#
+# fails-when (plan Verification Matrix): grep 'for a stranger' over agents-src, payload,
+# tests hits, or render.sh produces a diff, or §76 no longer asserts first position (§76/§79
+# above, re-anchored to the new heading, already cover the second half). EXCLUDES this suite's
+# own file from the tests/ half of the sweep — its comments quote the retired phrase verbatim
+# as the pin's own documentation of what was removed, the same reason $TMP mutants never count
+# against a section's own grep elsewhere in this file.
+AC81_HITS="$(grep -rl --exclude='docs-pins.test.sh' 'for a stranger' "${REPO}/agents-src" "${REPO}/payload" "${REPO}/tests" 2>/dev/null || true)"
+expect_empty "129: AC-8.1 — no file under agents-src/, payload/ or tests/ (excluding this suite's own commentary) still reads 'for a stranger'" \
+  "$AC81_HITS"
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+AC81_MUT="$TMP/ac81-for-a-stranger.md"
+printf 'Its first ratification is **Context and Problem, for a stranger**\n' > "$AC81_MUT"
+expect_true "129b: the 'for a stranger' grep fires on the shape it targets (the pattern discriminates)" \
+  grep -q 'for a stranger' "$AC81_MUT"
+
+# --- AC-8.2: the gate word is "approve*", never "ratif*", anywhere in the rendered skill ---
+#
+# fails-when: grep -rci 'ratif' payload/skills/canonical-sdlc/ sums to more than 0, or a
+# docs-pins assertion still pins a "ratif" phrase there. SCOPED to the eight surfaces T2's
+# Files declared (SKILL.md, dispatch.md, steps/{0,1,2,3,5,6}.md) — operational-rules.md,
+# same directory, carries its own "ratif" occurrences inside dated historical entries
+# ("user-ratified, 2026-07-18") that are NOT in T2's Files and are a standing open question
+# (record/wave-13-fixit-180/assumptions.md, A-T2 pending) rather than a silent narrowing of
+# the AC: a directory-wide grep here would fail on a file this task was never told to touch.
+NORATIF_FILES="$SKILL_MD $DISPATCH_MD $STEP0_MD $STEP1_MD $STEP2_MD $STEP3_MD $STEP5_MD $STEP6_MD"
+NORATIF_HITS=""
+for _nf in $NORATIF_FILES; do
+  _n="$(grep -ci 'ratif' "$_nf" 2>/dev/null | tr -cd '0-9')"
+  [ -n "$_n" ] || _n=0
+  [ "$_n" -eq 0 ] || NORATIF_HITS="${NORATIF_HITS} ${_nf##*/}=${_n}"
+done
+if [ -z "$NORATIF_HITS" ]; then
+  ok "130: AC-8.2 — none of T2's eight rendered surfaces still reads 'ratif' (case-insensitive)"
+else
+  no "130: AC-8.2 — none of T2's eight rendered surfaces still reads 'ratif' (case-insensitive)" \
+     "hits:${NORATIF_HITS}"
+fi
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+NORATIF_MUT="$TMP/ac82-ratif.md"
+printf 'Reply "approved" to ratify it.\n' > "$NORATIF_MUT"
+expect_true "130b: the case-insensitive ratif grep fires on the shape it targets (the pattern discriminates)" \
+  grep -qi 'ratif' "$NORATIF_MUT"
+
+# --- AC-8.2 (SKILL scaffold-presence, beside 124a): SKILL.md carries the injected scaffold ---
+#
+# AC2_SCAFFOLD_LINE and AC2_SURFACES are Section 22's; SKILL.md was never one of the seven
+# AC2_SURFACES (it renders from a different template, with its own byte cap), so this is a
+# SEPARATE presence pin over an eighth surface, not a widening of 124a's loop.
+SKILL_SCAFFOLD_N="$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$SKILL_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$SKILL_SCAFFOLD_N" ] || SKILL_SCAFFOLD_N=0
+expect_eq "131: AC-2.2/AC-2.3 — SKILL.md carries the injected brief scaffold's fenced 'Expected artifact:' line exactly once" \
+  "1" "$SKILL_SCAFFOLD_N"
+
+# Anti-vacuity: a SKILL.md with the block stripped reads 0, not 1.
+SKILL_SCAFFOLD_MUT="$TMP/skill-no-scaffold.md"
+grep -Fv -- "$AC2_SCAFFOLD_LINE" "$SKILL_MD" > "$SKILL_SCAFFOLD_MUT" 2>/dev/null
+expect_eq "131b: a SKILL.md with the fenced line stripped reads 0, not 1 (the count discriminates)" \
+  "0" "$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$SKILL_SCAFFOLD_MUT" 2>/dev/null | tr -cd '0-9')"
+
+# --- AC-8.3: the governing-design line is a conditional slot INSIDE the Step-3 card ---
+#
+# fails-when: the rendered steps/3.md still instructs a governing-design line outside the
+# card or unconditionally, or its card template lacks the conditional slot.
+PIN_GOV_SLOT='governing design <the spec'"'"'s `design:` pointer target, or the word "waived">'
+if has_pin "$STEP3_MD" "$PIN_GOV_SLOT"; then
+  ok "132: AC-8.3 — the Step-3 card carries the governing-design line as a slot under Artifacts"
+else
+  no "132: AC-8.3 — the Step-3 card carries the governing-design line as a slot under Artifacts" \
+     "file: $STEP3_MD"
+fi
+
+PIN_GOV_OMIT='omit this line when the spec carries its own ## Design'
+if has_pin "$STEP3_MD" "$PIN_GOV_OMIT"; then
+  ok "132b: …and the slot names its own omission condition (a spec's own ## Design prints nothing extra)"
+else
+  no "132b: …and the slot names its own omission condition (a spec's own ## Design prints nothing extra)" \
+     "file: $STEP3_MD"
+fi
+
+# The retired unconditional sentence must be gone, not just superseded — a template that
+# kept both would print the governing-design line twice on every card.
+GOV_OLD_HITS="$(grep -c 'It names the governing design on one line' "$STEP3_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$GOV_OLD_HITS" ] || GOV_OLD_HITS=0
+expect_eq "132c: …and the old unconditional 'It names the governing design on one line' sentence is gone" \
+  "0" "$GOV_OLD_HITS"
+
+# Anti-vacuity: the slot pin must discriminate a card with the line stripped. Stripped by
+# the "governing design" anchor, not by the (flattened, single-spaced) PIN_GOV_SLOT itself —
+# the shipped line double-spaces its label column to align with its Artifacts siblings, and
+# `grep -F` reads the raw file, unflattened.
+GOV_MUT="$TMP/step3-no-gov-slot.md"
+grep -v 'governing design' "$STEP3_MD" > "$GOV_MUT" 2>/dev/null
+if has_pin "$GOV_MUT" "$PIN_GOV_SLOT"; then
+  no "132d: a Step-3 card with the governing-design slot stripped still passes the slot pin (pin discriminates)" \
+     "the mutated copy still matched — the pin does not see the removal"
+else
+  ok "132d: a Step-3 card with the governing-design slot stripped still passes the slot pin (pin discriminates)"
+fi
 
 finish
