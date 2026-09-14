@@ -99,9 +99,14 @@ done
 # be missing from exactly the record that needed it most.
 say() { printf '%s\n' "$*"; }
 
-# refuse <sentence> -> the one line and exit 2. `archive_run`'s own refusals are passed
-# through verbatim instead (they are already in this shape), never re-wrapped.
-refuse() {
+# _co_refuse <sentence> -> the one line and exit 2. `archive_run`'s own refusals are
+# passed through verbatim instead (they are already in this shape), never re-wrapped.
+# Named `_co_refuse`, not the bare `refuse` this file used before: the renderer in
+# payload/scripts/lib/refuse.sh already owns that name (cross-gate-agreement.test.sh
+# §Refuse(e), "Refuse refuse() is defined exactly once in the tree"), and the two are
+# not interchangeable — the renderer takes five arguments, this one takes a sentence.
+# Same rename spawn-worktree.sh's private helper took (`_wt_refuse`, ruling D-6).
+_co_refuse() {
   printf 'bionic: close-out refused — %s\n' "$*"
   exit 2
 }
@@ -118,16 +123,16 @@ PLAN="${1:-}"
 VERB="${2:-}"
 if [ -z "$PLAN" ] || [ -z "$VERB" ]; then
   usage
-  refuse "this call names no plan, or no verb — the verbs are run and check"
+  _co_refuse "this call names no plan, or no verb — the verbs are run and check"
 fi
 case "$VERB" in
   run|check) : ;;
   *)
     usage
-    refuse "unknown verb '$VERB' — the verbs are run and check"
+    _co_refuse "unknown verb '$VERB' — the verbs are run and check"
     ;;
 esac
-[ -f "$PLAN" ] || refuse "no plan file at $PLAN"
+[ -f "$PLAN" ] || _co_refuse "no plan file at $PLAN"
 # Absolutised without `dirname`, the same way this file locates itself: `${PLAN%/*}` is
 # the parent for any path carrying a slash, and `.` for a bare filename.
 case "$PLAN" in
@@ -135,14 +140,14 @@ case "$PLAN" in
   *)   _co_plan_dir="." ;;
 esac
 PLAN="$(cd "$_co_plan_dir" 2>/dev/null && pwd -P)/${PLAN##*/}"
-[ -f "$PLAN" ] || refuse "no plan file at $PLAN"
+[ -f "$PLAN" ] || _co_refuse "no plan file at $PLAN"
 
 # ─── Where everything is ─────────────────────────────────────────────────────
 
 PLANS_DIR="${PLAN%/*}"
 ROOT="$(project_root "$PLANS_DIR")"
 [ -n "$ROOT" ] || ROOT="$(project_root)"
-[ -n "$ROOT" ] || refuse "no project root above $PLAN"
+[ -n "$ROOT" ] || _co_refuse "no project root above $PLAN"
 
 DROOT="$(docs_root "$ROOT")"
 TMP_DIR="$(tmp_root "$ROOT")"
@@ -191,7 +196,7 @@ sdlc_header() {
 }
 
 SECTION="$(sdlc_section)"
-[ -n "$SECTION" ] || refuse "$PLAN carries no ## SDLC State section"
+[ -n "$SECTION" ] || _co_refuse "$PLAN carries no ## SDLC State section"
 INTEGRATION="$(sdlc_header integration-branch "$SECTION")"
 WORKING="$(sdlc_header working-branch "$SECTION")"
 
@@ -205,10 +210,10 @@ if grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' <<< "$(normalize_ne
   exit 0
 fi
 
-command -v git >/dev/null 2>&1 || refuse "git is not on PATH"
-command -v jq  >/dev/null 2>&1 || refuse "jq is not on PATH — the gate dry-run cannot be built without it"
-[ -n "$INTEGRATION" ] || refuse "the plan's ## SDLC State names no integration-branch:"
-[ -n "$WORKING" ]     || refuse "the plan's ## SDLC State names no working-branch:"
+command -v git >/dev/null 2>&1 || _co_refuse "git is not on PATH"
+command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry-run cannot be built without it"
+[ -n "$INTEGRATION" ] || _co_refuse "the plan's ## SDLC State names no integration-branch:"
+[ -n "$WORKING" ]     || _co_refuse "the plan's ## SDLC State names no working-branch:"
 
 # THE BINDING, ASKED BEFORE THE FIRST ACT (AC-4.2, D6). `archive_run` carries this check
 # too — that is where it belongs, so every caller inherits it — but by the time the move
@@ -227,13 +232,13 @@ act_merge() {
   local ws is
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
-  [ -n "$ws" ] || refuse "the plan's working-branch '$WORKING' is not a branch in $ROOT"
-  [ -n "$is" ] || refuse "the plan's integration-branch '$INTEGRATION' is not a branch in $ROOT"
+  [ -n "$ws" ] || _co_refuse "the plan's working-branch '$WORKING' is not a branch in $ROOT"
+  [ -n "$is" ] || _co_refuse "the plan's integration-branch '$INTEGRATION' is not a branch in $ROOT"
   if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
     MERGE_LINE="$WORKING @ $ws reachable from $INTEGRATION @ $is"
     return 0
   fi
-  refuse "$WORKING @ $ws is not reachable from $INTEGRATION @ $is — merge the working branch before the tail runs"
+  _co_refuse "$WORKING @ $ws is not reachable from $INTEGRATION @ $is — merge the working branch before the tail runs"
 }
 
 # ─── Act 2: worktree branches ────────────────────────────────────────────────
@@ -272,7 +277,7 @@ act_worktrees() {
   local unreached b removed="" wt_dir
   unreached="$(wt_unreached)"
   if [ -n "$unreached" ]; then
-    refuse "$(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took (git cherry) — nothing was deleted, and nothing else was done"
+    _co_refuse "$(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took (git cherry) — nothing was deleted, and nothing else was done"
   fi
 
   while IFS= read -r b; do
@@ -289,7 +294,7 @@ act_worktrees() {
     git -C "$ROOT" branch -D "$b" >/dev/null 2>&1
     # The readback: the act's own result, asked of git rather than assumed from a status.
     if git -C "$ROOT" rev-parse --verify --quiet "refs/heads/$b" >/dev/null 2>&1; then
-      refuse "$b survived its deletion — the branch is still in $ROOT"
+      _co_refuse "$b survived its deletion — the branch is still in $ROOT"
     fi
     removed="${removed:+$removed, }$b"
   done <<< "$(wt_branches)"
@@ -317,7 +322,7 @@ act_tmp() {
     find "$TMP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null
   fi
   after="$(tmp_count)"
-  [ "$after" = "0" ] || refuse "$after entries remain under $TMP_DIR after the wipe"
+  [ "$after" = "0" ] || _co_refuse "$after entries remain under $TMP_DIR after the wipe"
   TMP_LINE="$before entries under $TMP_DIR (the whole directory; the spare list binds a running run, not a closed one)"
 }
 
@@ -375,7 +380,7 @@ act_continuation() {
   fi
   mkdir -p "${CONT%/*}" 2>/dev/null
   continuation_template > "$CONT" 2>/dev/null
-  [ -s "$CONT" ] || refuse "could not write the continuation at $CONT"
+  [ -s "$CONT" ] || _co_refuse "could not write the continuation at $CONT"
   CONT_LINE="$CONT_REL written from the close-out template (<fill> marks what only the orchestrator knows)"
 }
 
@@ -422,10 +427,10 @@ act_epic() {
   ' "$EPIC_PLAN" > "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp"
-    refuse "could not rewrite ${EPIC_PLAN##*/} to add the wave $WAVE_NUM row"
+    _co_refuse "could not rewrite ${EPIC_PLAN##*/} to add the wave $WAVE_NUM row"
   fi
   mv "$tmp" "$EPIC_PLAN"
-  epic_has_row || refuse "the wave $WAVE_NUM row did not land in ${EPIC_PLAN##*/}"
+  epic_has_row || _co_refuse "the wave $WAVE_NUM row did not land in ${EPIC_PLAN##*/}"
   EPIC_LINE="wave $WAVE_NUM appended to ${EPIC_PLAN##*/}"
 }
 
@@ -517,7 +522,7 @@ write_plan_blocks() {
 
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp"
-    refuse "could not rewrite $PLAN"
+    _co_refuse "could not rewrite $PLAN"
   fi
   mv "$tmp" "$PLAN"
 
@@ -529,12 +534,12 @@ write_plan_blocks() {
 
   # The readback, act by act: every line this function claims to have written, asked for
   # back out of the file.
-  grep -qE '^- Step 8: CLOSED ' "$PLAN" || refuse "the Step-8 line did not land in $PLAN"
-  grep -qE '^  attested-by: close-out.sh ' "$PLAN" || refuse "the attestation did not land in $PLAN"
+  grep -qE '^- Step 8: CLOSED ' "$PLAN" || _co_refuse "the Step-8 line did not land in $PLAN"
+  grep -qE '^  attested-by: close-out.sh ' "$PLAN" || _co_refuse "the attestation did not land in $PLAN"
   grep -qE '^[[:space:]]*-?[[:space:]]*Step 9:.*delivered:' "$PLAN" \
-    || refuse "the Step-9 delivered: line did not land in $PLAN"
-  grep -qE '^current: 9$' "$PLAN" || refuse "current: did not advance to 9 in $PLAN"
-  grep -q 'resume point: NONE — DELIVERED at ' "$PLAN" || refuse "the handoff was not rewritten in $PLAN"
+    || _co_refuse "the Step-9 delivered: line did not land in $PLAN"
+  grep -qE '^current: 9$' "$PLAN" || _co_refuse "current: did not advance to 9 in $PLAN"
+  grep -q 'resume point: NONE — DELIVERED at ' "$PLAN" || _co_refuse "the handoff was not rewritten in $PLAN"
 }
 
 # ─── The gate dry-run ────────────────────────────────────────────────────────
@@ -542,11 +547,11 @@ write_plan_blocks() {
 gate_dry_run() {
   local hook sid marker input err rc
   hook="$(plugin_root)/hooks/bash-walls.sh"
-  [ -f "$hook" ] || refuse "no bash-walls.sh at $hook — the blocks cannot be attested"
+  [ -f "$hook" ] || _co_refuse "no bash-walls.sh at $hook — the blocks cannot be attested"
 
   sid="closeout-$$"
   marker="$(engaged_marker_path "$ROOT" "$sid")" \
-    || refuse "could not build an engagement marker path for the dry-run"
+    || _co_refuse "could not build an engagement marker path for the dry-run"
   mkdir -p "${marker%/*}" 2>/dev/null
   : > "$marker"
 
@@ -570,7 +575,7 @@ gate_dry_run() {
     return 0
   fi
   [ -n "$err" ] && printf '%s\n' "$err"
-  refuse "the commit gate refused the blocks this run wrote (rc=$rc) — the plan edits are left in place, because they are what to fix"
+  _co_refuse "the commit gate refused the blocks this run wrote (rc=$rc) — the plan edits are left in place, because they are what to fix"
 }
 
 # ─── Act 7: the archive ──────────────────────────────────────────────────────
@@ -588,7 +593,7 @@ act_archive() {
   ARCHIVED_LINE="$(printf '%s' "$out" | tr '\n' '\036' | sed -E 's/\036$//; s/\036/; /g')"
   if [ "$rc" -ne 0 ]; then
     say "$out"
-    refuse "the archive step refused; the plan is closed and the refusal above is what to fix"
+    _co_refuse "the archive step refused; the plan is closed and the refusal above is what to fix"
   fi
   return 0
 }
@@ -605,7 +610,7 @@ insert_archived() {
       | head -1)"
     [ -n "$moved" ] && [ -f "$moved/${PLAN##*/}" ] && target="$moved/${PLAN##*/}"
   fi
-  [ -f "$target" ] || refuse "the plan is no longer at $PLAN and the archive line does not say where it went"
+  [ -f "$target" ] || _co_refuse "the plan is no longer at $PLAN and the archive line does not say where it went"
 
   tmp="$target.close-out.$$"
   CO_ARCHIVED="  archived: $ARCHIVED_LINE" awk '
@@ -614,10 +619,10 @@ insert_archived() {
   ' "$target" > "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp"
-    refuse "could not write the archived: line into $target"
+    _co_refuse "could not write the archived: line into $target"
   fi
   mv "$tmp" "$target"
-  grep -qE '^  archived: ' "$target" || refuse "the archived: line did not land in $target"
+  grep -qE '^  archived: ' "$target" || _co_refuse "the archived: line did not land in $target"
 }
 
 # ─── check ───────────────────────────────────────────────────────────────────
