@@ -1469,6 +1469,49 @@ expect_status "16j: a diff path carrying a glob metacharacter still refuses" "2"
 expect_eq "16j: …and the impact command received the path from the DIFF, unexpanded" \
   'undeclared/a*.sh' "$(cat "$ARGS16J" 2>/dev/null)"
 
+# --- 16k: THE WORKTREE ALIAS (D7, wave-13-fixit-180, AC-7.1). A dispatched writer inside a
+# spawned tree writes its record's deliverable path RELATIVE, with a plain shell redirect —
+# no hook in the loop. Without the `.bionic` alias that write creates a file physically
+# INSIDE the worktree, orphaned from the main checkout's docs root the sweeper's abs_path
+# resolves against (cwd in the payload is the MAIN repo, as every fixture in this section
+# uses) — so the landing verdict is UNMET. Planting the alias — exactly what
+# spawn-worktree.sh create now does — makes the SAME relative write land, physically, in the
+# main checkout, and the verdict flips to MET with no gate code touched.
+#
+# 16k (NO alias) is built with a PLAIN `git worktree add` — that world exists whether or not
+# `create` plants an alias, and is the honest control. 16l (WITH alias) is built through the
+# REAL `spawn-worktree.sh create`, not a hand-planted symlink: the thing under test is whether
+# CREATE itself plants the alias, and a fixture that plants its own link would pass on
+# ordinary filesystem behaviour regardless of what create does.
+
+SPAWN_WT="${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh"
+
+R16K="$(make_git_wave_repo r16k)"
+WT16K=$(make_slice_tree "$R16K" slice16k)
+( cd "$WT16K" && mkdir -p .bionic/docs/record/w16k && printf 'evidence\n' > .bionic/docs/record/w16k/x.md )
+add_row "$R16K" name=slice16k agent_id="$AID_A" deliverable=.bionic/docs/record/w16k/x.md \
+  launched_at="$(iso_ago 600)"
+expect_false "16k: without the alias, the relative write never reaches the main tree" \
+  test -f "${R16K}/.bionic/docs/record/w16k/x.md"
+run_gate "$GATE" "$(stop_payload "$R16K" "$SID" false)"
+expect_status "16k: …so the landing verdict is UNMET (refused)" "2" "$RC"
+
+# The REAL dispatcher act, on an otherwise-identical fixture — this is D7's own plant, not a
+# fixture-planted stand-in.
+R16L="$(make_git_wave_repo r16l)"
+SHA16L="$(git -C "$R16L" rev-parse HEAD)"
+( cd "$R16L" && bash "$SPAWN_WT" create "$SHA16L" slice16l >/dev/null 2>&1 )
+WT16L="${R16L}/.worktrees/slice16l"
+( cd "$WT16L" && mkdir -p .bionic/docs/record/w16l && printf 'evidence\n' > .bionic/docs/record/w16l/x.md )
+expect_true "16l: with the alias, the SAME relative write lands in the main tree" \
+  test -f "${R16L}/.bionic/docs/record/w16l/x.md"
+add_row "$R16L" name=slice16l agent_id="$AID_A" deliverable=.bionic/docs/record/w16l/x.md \
+  launched_at="$(iso_ago 600)"
+run_gate "$GATE" "$(stop_payload "$R16L" "$SID" false)"
+expect_status "16l: …so the landing verdict is MET" "0" "$RC"
+expect_empty "16l: …silently" "$OUT_STDERR"
+expect_eq "16l: …and the row was processed" "1" "$(swept_count "$R16L")"
+
 section "Section 17: the swept-marker extraction fails LOUDLY, or not at all (review-b B-12)"
 # tests/lib/swept-marker.sh obtains both the constant and the writer by matching SOURCE TEXT
 # of payload/scripts/lib/stop.sh at column 0 — `^SWEPT_SCHEMA=` and `^swept_marker_write()`. Indent the
