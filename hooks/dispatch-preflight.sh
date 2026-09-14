@@ -1055,11 +1055,27 @@ warn() { printf 'dispatch-preflight: WARN %s\n' "$1" >&2; }
 
 # Values are pipe-delimited on one line, so a field carrying a newline or a `|`
 # would forge a row. Never a refusal — the ledger normalizes and records.
-sanitize() {  # <value> <max-chars>
-  printf '%s' "$1" \
+#
+# THE THIRD ARGUMENT IS THE FIELD NAME (T18, REQ-9/D7 — the write-side half of the fix
+# `hooks/session-poker.sh`'s `clean()` already carries for the reader side, task T9).
+# `files=` and `suites_allowed=` are LIST-valued — a space- or comma-joined set — and a
+# dispatch declaring enough files or naming enough suites overflows even this file's
+# widest cap (900) on a perfectly ordinary brief: a 70-suite `Suites:` line runs to
+# 1.7-1.8 KB. The cut then silently drops suites off the end, narrowing a budget the wall
+# never agreed to. Every OTHER field this hook sanitizes — name, deliverable, duration,
+# progress, cadence, claims, waiver, the ambiguity candidates, the plan path — is prose or
+# a single path, where even the smallest existing cap is already more than any real value
+# needs, so they keep the cut. Callers that pass no field name (every one but the two
+# `C_FILES`/`C_SUITES` call sites) get today's behaviour exactly, caps unchanged.
+sanitize() {  # <value> <max-chars> [<field name>]
+  local out
+  out="$(printf '%s' "$1" \
     | tr '\n\r\t|' '    ' \
-    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//' \
-    | cut -c "1-$2"
+    | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')"
+  case "${3:-}" in
+    files|suites_allowed) printf '%s' "$out" ;;
+    *) printf '%s' "$out" | cut -c "1-$2" ;;
+  esac
 }
 
 # ---------- contract-state extraction ----------
@@ -1633,11 +1649,16 @@ C_CADENCE=$(sanitize "$(field_of cadence)" 80)
 C_CLAIMS=$(sanitize "$(field_of claims)" 300)
 C_WAIVER=$(sanitize "$(field_of waiver)" 300)
 # THE TWO INSTRUMENT FIELDS (spec AC-20). `Files:` is the declared INTENT — the paths this
-# task will touch — and `Suites:` the declared CONSEQUENCE. The caps are the widest on the
-# row because both are lists rather than single values, and truncating a list silently
-# narrows a budget: 900 is what the ambiguity candidates already allow.
-C_FILES=$(sanitize "$(field_of files)" 900)
-C_SUITES=$(sanitize "$(field_of suites)" 900)
+# task will touch — and `Suites:` the declared CONSEQUENCE. Both are LIST-valued, and (T18,
+# REQ-9/D7) neither is cut at all any more — the max-chars argument below is vestigial for
+# these two calls, kept only because `sanitize` requires one positionally; the field name in
+# the third argument is what actually exempts them. A brief naming enough files or suites to
+# overflow even the widest single-value cap this file has (900) is not a hypothetical: a
+# 70-suite `Suites:` line runs to 1.7-1.8 KB, and truncating it silently narrows a budget the
+# wall never agreed to. This is the write-side half of the fix `hooks/session-poker.sh`'s
+# `clean()` already carries on the read/adopt side (task T9).
+C_FILES=$(sanitize "$(field_of files)" 900 files)
+C_SUITES=$(sanitize "$(field_of suites)" 900 suites_allowed)
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
