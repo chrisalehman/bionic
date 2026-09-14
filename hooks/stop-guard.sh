@@ -814,8 +814,15 @@ take_verdict() {
 # and a standing order would open this gate for a name some later dispatch reuses. The
 # window is generous, the fail direction is the closed one (an expired order leaves the
 # ceremony exactly where it was), and the writer is hooks/stop-orders.sh.
+# WHO ORDERED IT, carried out of the read for the one line below (bionic 1.8.0, REQ-1 D1).
+# The READING is unchanged — an order is an order, and this gate discharges a stop for
+# either author at the same boundary — but since 1.8.0 an order can be written by the Patrol
+# as well as by a person, and a reader owed "executing" is also owed "on whose word". Absent
+# on a line written before 1.8.0, which reads back as the default the writer had then.
+ORDER_BY=""
 order_current() {
   local f="$ORDERS_FILE" line t e now delta
+  ORDER_BY=""
   [ -L "$f" ] && return 1
   [ -f "$f" ] || return 1
   now=$(date -u +%s)
@@ -832,7 +839,11 @@ order_current() {
     delta=$((now - e))
     # A future-dated order is a skewed clock or a hand-edited file; a small tolerance
     # absorbs the first and nothing here honours the second indefinitely.
-    [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ] && return 0
+    if [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ]; then
+      ORDER_BY=$(record_field "$line" by)
+      case "$ORDER_BY" in human|patrol) : ;; *) ORDER_BY=human ;; esac
+      return 0
+    fi
   done < "$f"
   return 1
 }
@@ -843,11 +854,11 @@ if order_current; then
   # user-ordered stop executes at once; what an unmet contract earns is a sentence naming
   # what is being given up, never a refusal.
   if [ -z "$V_STATE" ]; then
-    echo "STOP ORDERED — executing. No contract row of this name is on the session roster." >&2
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. No contract row of this name is on the session roster." >&2
   elif [ "$V_STATE" = "MET" ] || [ "$V_STATE" = "WAIVED" ]; then
-    echo "STOP ORDERED — executing. Its contract stands ${V_STATE}: nothing is given up." >&2
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. Its contract stands ${V_STATE}: nothing is given up." >&2
   else
-    echo "STOP ORDERED — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
   fi
   exit 0
 fi
