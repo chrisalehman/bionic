@@ -552,17 +552,28 @@ section "G9 — the BUDGET arm's partition, now that it is not this guard's (S13
 # that the wall's own arms behave is tests/background-suite-guard.test.sh's.
 SUITE_WALL="$HOOKS_DIR/bash-walls.sh"
 
-mk_suite_payload() {  # <cwd> <command> <with-agent-id:yes|no>
+mk_suite_payload() {  # <cwd> <command> <with-agent-id:yes|no> [timeout]
   # `agent_type` TRAVELS WITH `agent_id`. A dispatched agent's tool-class payload carries
   # both, and without the first the compound's farm-out function reads this as a
   # MAIN-THREAD suite command and denies it beside the verdict this section is about.
+  #
+  # `timeout` IS OMITTED BY DEFAULT and that is deliberate (T13). A real dispatched worker's
+  # Bash call carries no `timeout` key at all unless it named one, and that shape is what
+  # sends this wall through ARM R, the timeout repair, on its way to the budget arm — so the
+  # REFUSING rows below state none, and the wall's arm order is under test every time they
+  # run. A row that wants the budget arm's verdict ALONE, with no repair beside it, passes a
+  # `timeout` already at the ceiling: repairing is then a no-op and this file asserts one
+  # arm at a time. The repair itself, and its interaction with the budget, belong to
+  # tests/bash-walls.test.sh §14, which owns the composed wire.
   jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" --arg a "$AGENT_ID" \
+    --arg to "${4:-omit}" \
     --argjson withid "$([ "$3" = yes ] && echo true || echo false)" \
     '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
       prompt_id:"f3cd7d62-305d-47ed-9eaf-46fb12d4f4ed",
       permission_mode:"bypassPermissions", effort:{level:"high"},
       hook_event_name:"PreToolUse", tool_name:"Bash",
-      tool_input:{command:$cmd},
+      tool_input:({command:$cmd}
+                  + (if $to == "omit" then {} else {timeout: ($to | tonumber)} end)),
       tool_use_id:"toolu_01budgetarm"}
      + (if $withid then {agent_id:$a, agent_type:"test-runner"} else {agent_type:"test-runner"} end)'
 }
@@ -597,7 +608,13 @@ expect_contains "G9.1 …naming the recorded set" "alpha.test.sh" "$VERR"
 
 # …and the same process lets an ON-budget suite through, so G9.1 is the budget and not a
 # wall refusing everything it is handed.
-run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/alpha.test.sh' yes)" "$SUITE_WALL"
+#
+# THE ONE ROW THAT STATES A `timeout`, and it states the ceiling (T13). This is a control
+# for the BUDGET arm — "it is not refusing everything" — and at the ceiling the repair arm
+# has nothing to do, so the silence asserted below is the budget arm's own and nothing
+# else's. An on-budget call with NO timeout is allowed too, but not silently: it is repaired
+# on the way out, which is tests/bash-walls.test.sh §14x-14z's row, not this file's.
+run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/alpha.test.sh' yes 1800000)" "$SUITE_WALL"
 expect_eq "G9.1 control: an ON-budget suite passes the same process" "0" "$ST"
 expect_empty "G9.1 …silently" "$OUT$ERR"
 
