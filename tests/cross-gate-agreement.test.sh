@@ -9201,9 +9201,17 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # with one anchor, 37->38/38->39. The split itself moved no count: the four structural
 # assertions it rewrote replaced one anchor with one anchor, and the 99 re-pointed rows
 # changed which file a pin reads, never how many mutants the suite builds.
-expect_eq "S19.3 docs-pins holds 38 doctoring sites" "38" \
+#
+# 39->40 at epic-23 wave-13 (2026-09-14): T3 (Section 24, "the repair rule reaches the
+# rendered survival text") added one more doctoring site, DOCTORED_REPAIR, declared by
+# one anchor call. RE-DERIVED BY DIRECT GREP over the merged docs-pins.test.sh at THIS
+# commit (T12, fold-in), not carried forward: A-orch-25 named this a pre-existing
+# drift from before the wave's own T1 landed, and A-orch-35 attributed the added site
+# to T2 — direct measurement (`git diff b8b6bd6 8b80980 -- tests/docs-pins.test.sh`)
+# shows it lands with T3's merge instead; corrected here against the grep, not the note.
+expect_eq "S19.3 docs-pins holds 39 doctoring sites" "39" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 39 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant)" "39" \
+expect_eq "S19.3 …declared by 40 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant)" "40" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -9252,6 +9260,9 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # never carried forward from any pre-merge side, which is the whole reason this literal
 # exists.
 #
+# 70 at epic-23 wave-13 (2026-09-14, T12 fold-in): 40 + 26 + 1 + 3, the docs-pins term
+# alone moving for the reason the row above this one now names (T3's DOCTORED_REPAIR).
+#
 # tests/refuse.test.sh IS NOT IN THIS CENSUS, and that is a Step-9 disposition rather
 # than an oversight. It carries ONE anchor call site, reached three times: its
 # `mutant()` helper calls `anchor` before every `sed`, so a mutant cannot be added
@@ -9259,7 +9270,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …69 anchor call sites across the four doctoring suites, all told" "69" \
+expect_eq "S19.3 …70 anchor call sites across the four doctoring suites, all told" "70" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
