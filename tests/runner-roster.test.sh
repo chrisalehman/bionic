@@ -33,7 +33,14 @@
 #
 # FIXTURE DISCIPLINE. `BIONIC_PRESSURE_RING` points under this suite's own
 # mktemp root on every drive and `BIONIC_NOW_EPOCH` pins the clock, so no drive
-# reads or writes the machine's real pressure ring.
+# reads or writes the machine's real pressure ring. Every non-dry `bash
+# tests/run.sh` drive also pins `BIONIC_PROBE_FREE_PCT` / `BIONIC_PROBE_SWAP_PCT`
+# / `BIONIC_PROBE_LOAD_1M` to the same calm reading §8.9's ring is seeded with
+# (44/0/0.1, resources.sh's `_res_free_pct` / `_res_swap_pct` / `_res_load_1m`
+# overrides): `tests/run.sh` samples the machine's LIVE pressure into that ring
+# on every non-dry invocation (tests/run.sh:320), so an unpinned drive on a
+# loaded machine appends a real sample and can move a later `pressure_level`
+# read off the fixture's own band (floor-e199431 §8.9, T28).
 #
 # Usage: bash tests/runner-roster.test.sh
 
@@ -86,6 +93,9 @@ rr_drive() {
     BIONIC_PRESSURE_RING="$TMPROOT/ring" \
     BIONIC_NOW_EPOCH="$RR_NOW" \
     BIONIC_TEST_JOBS_CEILING="2" \
+    BIONIC_PROBE_FREE_PCT="44" \
+    BIONIC_PROBE_SWAP_PCT="0" \
+    BIONIC_PROBE_LOAD_1M="0.1" \
     bash tests/run.sh ${mode:+"$mode"} 2>&1 )"
   RR_RC=$?
 }
@@ -541,6 +551,9 @@ RR8_OUT="$( cd "$T8" && \
   BIONIC_PRESSURE_RING="$RR8_RING" \
   BIONIC_NOW_EPOCH="$RR_NOW" \
   BIONIC_TEST_JOBS_CEILING="2" \
+  BIONIC_PROBE_FREE_PCT="44" \
+  BIONIC_PROBE_SWAP_PCT="0" \
+  BIONIC_PROBE_LOAD_1M="0.1" \
   bash tests/run.sh 2>&1 )"
 RR8_RC=$?
 
@@ -564,6 +577,9 @@ RR8_SERIAL_OUT="$( cd "$T8" && \
   BIONIC_PRESSURE_RING="$RR8_RING" \
   BIONIC_NOW_EPOCH="$RR_NOW" \
   BIONIC_TEST_JOBS_CEILING="2" \
+  BIONIC_PROBE_FREE_PCT="44" \
+  BIONIC_PROBE_SWAP_PCT="0" \
+  BIONIC_PROBE_LOAD_1M="0.1" \
   bash tests/run.sh --serial 2>&1 )"
 RR8_SERIAL_RC=$?
 expect_eq "8.7 --serial is unaffected by the marker: still green" "0" "$RR8_SERIAL_RC"
@@ -576,6 +592,9 @@ RR8_DRY_OUT="$( cd "$T8" && \
   BIONIC_PRESSURE_RING="$RR8_RING" \
   BIONIC_NOW_EPOCH="$RR_NOW" \
   BIONIC_TEST_JOBS_CEILING="2" \
+  BIONIC_PROBE_FREE_PCT="44" \
+  BIONIC_PROBE_SWAP_PCT="0" \
+  BIONIC_PROBE_LOAD_1M="0.1" \
   bash tests/run.sh --dry-run 2>&1 )"
 expect_contains "8.9 --dry-run still prints the width" "JOBS=2" "$RR8_DRY_OUT"
 expect_contains "8.10 …and lists the solo suite by name" "aaa-solo.test.sh" "$RR8_DRY_OUT"
