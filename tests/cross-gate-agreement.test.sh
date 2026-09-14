@@ -8826,8 +8826,12 @@ expect_eq "S13.4 …because the one library that may is the one that does" "1" \
 # "no second speller" and not "nobody writes it".
 expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
   "$(grep -c '"suites_allowed=\${SUITES_ALLOWED}"' "$S13_DP")"
+# SPELLING UPDATED (T9, REQ-9/D7): `clean()` now takes the field name so the two
+# LIST-valued fields it exempts from the 400-char cut (`suites_allowed=`, `files=`) survive
+# whole; the call site's literal text changed, the property this pin checks (one group,
+# one call) did not.
 expect_eq "S13.4 …and session-poker builds its three as one group" "1" \
-  "$(grep -c 'suites_allowed=\$(clean "\$sallow")' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+  "$(grep -c 'suites_allowed=\$(clean "\$sallow" suites_allowed)' "$BIONIC_HOOKS_DIR/session-poker.sh")"
 
 # --- §S13.5 the field the wall writes is the field the guard reads ---
 #

@@ -3984,4 +3984,158 @@ expect_absent "no current: line at all — no FILL" "poker: FILL" "$OUT"
 expect_contains "…named as unreadable, with an empty value" \
   "no FILL — plan current: unreadable (none)" "$OUT"
 
+# ============================================================
+section "Section 23: clean() — list fields survive the 400-char cut (REQ-9, D7)"
+# ============================================================
+#
+# THE BUG (carry-over P2). `clean()`'s trailing `cut -c 1-400` applied to every field it
+# rendered, `suites_allowed=` and `files=` included — the two LIST-valued fields (S13's
+# suite-allowance wall), where a perfectly ordinary brief overflows 400 characters just by
+# naming enough files or suites. The cut then silently dropped suites off the end: a budget
+# the wall never agreed to and the operator never asked for. `clean()` now takes the field
+# name and skips the cut for exactly these two; every other field, and every caller that
+# passes none, keeps the same 400-character cap as before (§23c, below).
+
+R23="$(make_repo s23-long-field)"; new_roster "$R23"
+S23_PRED="55555555-aaaa-4bbb-8ccc-000000000023"
+S23_LONG="$(printf '%*s' 600 '' | tr ' ' 'x')"
+expect_eq "fixture meta: the long value really is 600 characters" "600" \
+  "$(printf '%s' "$S23_LONG" | wc -c | tr -d ' ')"
+
+# ---------- 23a: the round trip through `adopt` ----------
+add_row_to "$R23" "$S23_PRED" name=long-budget status=identified \
+  agent_id=along-budget-2323232323232323 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23/.bionic/docs/record/long-budget.md" \
+  files="$S23_LONG" suites_allowed="$S23_LONG" suites_source=derived
+
+poke "$R23" adopt
+OWN_ROSTER_23="$(roster_of "$R23")"
+LONG_ROW="$(grep -F "|name=long-budget|" "$OWN_ROSTER_23" | tail -1)"
+expect_contains "23a meta: the row IS adopted (not vacuous)" "|adopted_from=$S23_PRED|" "$LONG_ROW"
+
+# `awk length`, not `wc -c` — `wc -c` counts the trailing newline `grep`'s own output line
+# carries, off by one on every call; `awk` strips it before measuring, same as every other
+# fixture-length check in this file (`fixture meta` above uses `printf … | wc -c` on a value
+# with NO trailing newline of its own, which is why that one call is safe as written).
+field_len() {  # <row> <key> -> the character count of key= in a |-delimited row
+  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2- | awk '{ print length }'
+}
+expect_eq "a 600-char suites_allowed= reads back whole through adopt" "600" \
+  "$(field_len "$LONG_ROW" suites_allowed)"
+expect_eq "…and so does a 600-char files=" "600" \
+  "$(field_len "$LONG_ROW" files)"
+
+# ---------- 23b: and through the tick's rendering — a later tick does not re-cut it ----------
+#
+# `tick` never rewrites an adopted row's instrument fields, but this is the case that would
+# have caught it if some future change routed them back through an un-fixed `clean()` a
+# second time: the SAME roster file, read again after a real tick invocation, still carries
+# the whole 600 characters, not a second, silent truncation.
+poke "$R23" tick
+expect_ne "a tick against this roster does not refuse outright" "2" "$RC"
+LONG_ROW_AFTER_TICK="$(grep -F "|name=long-budget|" "$OWN_ROSTER_23" | tail -1)"
+expect_eq "…the roster's own copy is still 600 characters after a tick" "600" \
+  "$(field_len "$LONG_ROW_AFTER_TICK" suites_allowed)"
+
+# ---------- 23c: existing clean() behaviour is unchanged for an ordinary field (AC-9.2) ----------
+#
+# The CUT half, specifically — Section 21 already pins the FOLD half (control characters
+# and `|` still stripped everywhere, `session=` included). A field that is not one of the
+# two list fields still stops at 400 characters, exactly as before this task.
+S23_OVERLONG_NAME="$(printf '%*s' 500 '' | tr ' ' 'y')"
+add_row_to "$R23" "$S23_PRED" name="$S23_OVERLONG_NAME" status=identified \
+  agent_id=aoverlong-name-2323232323232323 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23/.bionic/docs/record/overlong-name.md"
+poke "$R23" adopt
+OVERLONG_ROW="$(grep -F "|deliverable=$R23/.bionic/docs/record/overlong-name.md|" "$OWN_ROSTER_23" | tail -1)"
+expect_contains "23c meta: this row too is adopted (not vacuous)" \
+  "|adopted_from=$S23_PRED|" "$OVERLONG_ROW"
+expect_eq "an ordinary (non-list) field is still cut at 400 characters" "400" \
+  "$(field_len "$OVERLONG_ROW" name)"
+
+# ============================================================
+section "Section 24: sweep — per-session pruning, not all-or-nothing (D5's prune half, T9)"
+# ============================================================
+#
+# THE BUG. `sweep` judged every dead session identically (PID-liveness alone, no age at
+# all); the age protection for a session that JUST died lived entirely in the CALLER
+# (hooks/session-start.sh's own auto-sweep gate), which could only ask ONE question for the
+# WHOLE directory — "is any file anywhere younger than the interval" — and skip calling this
+# verb AT ALL when the answer was yes. One freshly-dead session therefore deferred every
+# OTHER dead session's cleanup too. `sweep` now asks the age question itself, per session: a
+# dead session's OWN newest file decides whether IT sweeps, and nothing about any other one.
+
+R24="$(make_repo s24-sweep)"; new_roster "$R24"
+C24="$(fake_config_dir s24)"
+S24_REAL_CFG="${CLAUDE_CONFIG_DIR:-}"
+export CLAUDE_CONFIG_DIR="$C24"
+printf 'poker-interval: 2s\n' > "$R24/.bionic/config.yaml"
+
+S24_AGED="44444444-aaaa-4bbb-8ccc-000000000024"
+S24_FRESH="33333333-aaaa-4bbb-8ccc-000000000024"
+
+add_row_to "$R24" "$S24_AGED" name=aged-one status=identified \
+  agent_id=aaged-one-2424242424242424 subagent_type=bionic:implementor \
+  duration="10 minutes" cadence="10 minutes"
+backdate "$(roster_of "$R24" "$S24_AGED")" 10
+
+add_row_to "$R24" "$S24_FRESH" name=fresh-one status=identified \
+  agent_id=afresh-one-2424242424242424 subagent_type=bionic:implementor \
+  duration="10 minutes" cadence="10 minutes"
+# NOT backdated — its mtime is "now", inside the 2-second window. CLOCK DISCIPLINE: the
+# window is fixture data (a throwaway .bionic/config.yaml override), never a real sleep.
+
+expect_eq "24 meta: the aged predecessor's file exists before sweep" "yes" \
+  "$([ -f "$(roster_of "$R24" "$S24_AGED")" ] && echo yes || echo no)"
+expect_eq "24 meta: the fresh predecessor's file exists before sweep" "yes" \
+  "$([ -f "$(roster_of "$R24" "$S24_FRESH")" ] && echo yes || echo no)"
+
+poke "$R24" sweep --window
+expect_eq "sweep exits 0 — something real was swept" "0" "$RC"
+
+expect_eq "the AGED dead session's file is gone" "no" \
+  "$([ -e "$(roster_of "$R24" "$S24_AGED")" ] && echo yes || echo no)"
+expect_eq "the FRESH dead session's file is KEPT — deferred, not swept" "yes" \
+  "$([ -f "$(roster_of "$R24" "$S24_FRESH")" ] && echo yes || echo no)"
+expect_eq "the LIVE session's own roster is never touched" "yes" \
+  "$([ -f "$(roster_of "$R24")" ] && echo yes || echo no)"
+
+expect_contains "the aged session is reported swept" "$S24_AGED — dead, 1 file(s)" "$OUT"
+expect_contains "the fresh session is named as deferred, individually" \
+  "$S24_FRESH — dead, deferred (1 file(s) younger than the 2s window)" "$OUT"
+expect_absent "…the fresh session is never reported as removed" \
+  "$S24_FRESH — dead, 1 file(s)" "$OUT"
+expect_contains "…and the live session is reported kept" "$SID — live, kept" "$OUT"
+
+# `deferred=` is APPENDED after `refused=`, never inserted between the six fields a plain
+# `sweep` call has always emitted (AC-9.2's spirit, extended to this line — see the schema
+# print's own comment): it is the LAST field, no trailing `|` after it.
+expect_contains "the schema line counts one deferred session" "|deferred=1" "$OUT"
+expect_contains "…two dead sessions total (the aged one plus the deferred fresh one)" \
+  "|dead=2|live=1|" "$OUT"
+expect_contains "…exactly one file actually removed" "|removed=1|refused=0|deferred=1" "$OUT"
+
+# The prose summary excludes the deferred session from its dead-session count — it reads
+# "1 dead session" (the one actually swept), not "2", and calls the deferral out separately.
+expect_contains "the prose summary names only the session actually swept" \
+  "swept 1 file(s) across 1 dead session(s)" "$OUT"
+expect_contains "…and separately calls out the deferral" \
+  "1 dead session(s) deferred — their files are younger than the 2s window." "$OUT"
+
+# ---------- 24b: the SAME session sweeps once it ages past the window ----------
+#
+# CLOCK DISCIPLINE HOLDS: backdating the file, not waiting out the interval, is what proves
+# a session deferred a moment ago sweeps on its own once it qualifies.
+backdate "$(roster_of "$R24" "$S24_FRESH")" 10
+poke "$R24" sweep --window
+expect_eq "the second sweep exits 0" "0" "$RC"
+expect_eq "the now-aged FRESH session's file is gone too" "no" \
+  "$([ -e "$(roster_of "$R24" "$S24_FRESH")" ] && echo yes || echo no)"
+expect_contains "…and its removal is what the second sweep reports" \
+  "$S24_FRESH — dead, 1 file(s)" "$OUT"
+
+if [ -n "$S24_REAL_CFG" ]; then export CLAUDE_CONFIG_DIR="$S24_REAL_CFG"; else unset CLAUDE_CONFIG_DIR; fi
+
 finish

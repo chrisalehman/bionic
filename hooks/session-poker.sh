@@ -350,6 +350,7 @@ usage() {  # [message]
   die "  bash ${HOOK_DIR}/session-poker.sh adopt --report-only   the same rows, with the adoption itself not taken (writes nothing)"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep      delete every DEAD session's leftover state under this project's .bionic/tmp"
   die "  bash ${HOOK_DIR}/session-poker.sh sweep --report-only   the same files, listed, with nothing deleted"
+  die "  bash ${HOOK_DIR}/session-poker.sh sweep --window   defer a dead session whose own newest file is younger than the poker interval"
   die "  bash ${HOOK_DIR}/session-poker.sh bind <plan>   name the open run this session is working (rewrites its binding)"
   exit 2
 }
@@ -357,15 +358,23 @@ usage() {  # [message]
 [ $# -ge 1 ] || usage "a verb is required."
 VERB="$1"; shift
 
-# `--report-only` IS THE ONE FLAG IN THIS FILE, and `adopt` and `sweep` are the two verbs
-# that take it — the same word for the same promise on both, so an operator who has learned
-# it once has learned it. `bind` is the ONE verb that takes an operand, and it is required;
-# `sweep` deliberately takes NONE (it answers "clear what nobody can act on here", a
-# question about the directory rather than about a session anyone would have to name).
+# `--report-only` IS THE ONE FLAG MOST VERBS TAKE, and `adopt` and `sweep` are the two that
+# take it — the same word for the same promise on both, so an operator who has learned it
+# once has learned it. `bind` is the ONE verb that takes an operand, and it is required.
 # Everything else keeps the old surface exactly — one word, nothing after it — so a stray
 # argument is still the usage error it always was rather than something silently ignored.
+#
+# `sweep` ALSO TAKES `--window` (REQ-9/D5's prune half, T9) — OPT-IN, never the default.
+# Without it, `sweep` still "answers 'clear what nobody can act on here', a question about
+# the directory rather than about a session anyone would have to name": PID-liveness alone,
+# every dead session's files gone in one pass, exactly as `tests/session-sweep.test.sh`
+# pins today (sections 1-6, none of which ever pass this flag — that suite is untouched by
+# this addition). WITH it, each dead session's OWN newest file must also be older than the
+# poker interval, or that one session — and only that one — is deferred and named in the
+# report; see the verb's own comments. The two flags combine freely, in either order.
 ADOPT_REPORT_ONLY=no
 SWEEP_REPORT_ONLY=no
+SWEEP_WINDOWED=no
 BIND_ARG=""
 case "$VERB" in
   adopt)
@@ -377,12 +386,28 @@ case "$VERB" in
     fi
     ;;
   sweep)
-    if [ $# -eq 1 ]; then
-      [ "$1" = "--report-only" ] || usage "unknown flag for sweep: $1"
-      SWEEP_REPORT_ONLY=yes
-    elif [ $# -gt 1 ]; then
-      usage "sweep takes at most one flag."
+    # THE WORDING "at most one flag" IS PINNED VERBATIM (tests/session-sweep.test.sh
+    # §6.7, from when this verb took only one possible flag). Repeating either flag still
+    # refuses with that exact phrase — accurate under the wider surface too, read as "at
+    # most one of each" — so that pin holds unchanged; only a genuinely UNKNOWN flag or too
+    # many total tokens gets a different message.
+    if [ $# -gt 2 ]; then
+      usage "sweep takes at most two flags, and at most one flag of each kind."
     fi
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --report-only)
+          [ "$SWEEP_REPORT_ONLY" = no ] || usage "sweep takes at most one flag of each kind (repeated: --report-only)."
+          SWEEP_REPORT_ONLY=yes
+          ;;
+        --window)
+          [ "$SWEEP_WINDOWED" = no ] || usage "sweep takes at most one flag of each kind (repeated: --window)."
+          SWEEP_WINDOWED=yes
+          ;;
+        *) usage "unknown flag for sweep: $1" ;;
+      esac
+      shift
+    done
     ;;
   bind)
     # THE OPERAND IS THE WHOLE POINT OF THE VERB, so its absence is a refusal rather than a
@@ -431,9 +456,25 @@ line_field() {  # <line> <key>
   printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
 }
 
-clean() {  # <value>
-  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
+clean() {  # <value> [<field name>]
+  local out
+  out="$(printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
+    -e 's/^ *//' -e 's/ *$//')"
+  # THE CUT IS PER-FIELD, NOT UNIVERSAL (REQ-9, carry-over P2). Every caller still gets
+  # control characters and `|` folded to spaces — that half of this function is unchanged
+  # and applies with no exception. What used to be unconditional is the trailing
+  # `cut -c 1-400`: `suites_allowed=` and `files=` are LIST-valued fields (a space- or
+  # comma-joined set, S13's suite-allowance wall and the impact-derived budget), and a
+  # dispatch touching enough files or naming enough suites overflows 400 characters on a
+  # perfectly ordinary brief — the cut then silently drops suites off the end, which is a
+  # budget the wall never agreed to and the operator never asked for. Every OTHER field
+  # (name, deliverable, progress, waiver, …) is prose or a path, where a length this
+  # generous is already more than any real value needs, so the cut stays for them. Callers
+  # that pass no field name (every one but the two below) get today's behaviour exactly.
+  case "${2:-}" in
+    suites_allowed|files) printf '%s' "$out" ;;
+    *) printf '%s' "$out" | cut -c 1-400 ;;
+  esac
 }
 
 # The prose duration/cadence parser. Deliberate limits, each a refusal rather than a guess —
@@ -1632,8 +1673,8 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # does not carry.
   INSTRUMENT_FIELDS=()
   if [ -n "$files" ] || [ -n "$sallow" ] || [ -n "$ssrc" ]; then
-    INSTRUMENT_FIELDS=("files=$(clean "$files")" \
-                       "suites_allowed=$(clean "$sallow")" \
+    INSTRUMENT_FIELDS=("files=$(clean "$files" files)" \
+                       "suites_allowed=$(clean "$sallow" suites_allowed)" \
                        "suites_source=$(clean "$ssrc")")
   fi
   # THE ROW IS BUILT BY `roster_row` (payload/scripts/lib/roster.sh), not by a format string
@@ -1795,19 +1836,14 @@ SWEEP_SCHEMA="poker-sweep/v1"
 # list here is exactly how that drift arrives. The library's own header carries
 # the class table and the reason the unkeyed files are unreachable.
 
-# A SYMLINK IS NOT A FILE THIS SCRIPT WROTE, so it is refused rather than followed and left
-# in place rather than unlinked — the identical posture `remove_patrol_stamp` takes, and for
-# the identical reason: every reader in the fleet already treats a symlinked state file as
-# absent, so there is nothing to clear, and a hostile repo must not gain a delete through a
-# path it aimed. A directory at one of these names is refused too: this verb removes files.
-sweep_unlink() {  # <path> -> 0 removed, 1 left alone
-  local f="$1"
-  [ -L "$f" ] && return 1
-  [ -f "$f" ] || return 1
-  rm -f "$f" 2>/dev/null
-  [ -e "$f" ] && return 1
-  return 0
-}
+# NO LONGER A FUNCTION (REQ-9/D5's prune half). This used to be `sweep_unlink`, called once
+# per candidate file — one `rm -f` subprocess per call, the dominant cost once
+# hooks/session-start.sh's own report loops were bounded (T6/T16). The `sweep` verb below
+# now queues every non-symlink candidate from every session it decides is old enough (never
+# a symlink; never rewritten here) and deletes them all in ONE `xargs -0 rm -f` pass, then
+# confirms each with a plain `[ -e ]` — no second `rm`, no per-file function call. See the
+# verb's own comments for the full shape, including the per-session age gate that decides
+# which sessions reach the delete list at all.
 
 
 # ---------------------------------------------------------------- verbs
@@ -2348,7 +2384,8 @@ EOF
   # engagement would refuse hardest on the machines carrying the most residue. The guard the
   # other verbs take exists so bionic decides nothing about a session that never asked it to;
   # this verb decides nothing about any session at all — it removes files whose owners the
-  # kernel says are gone.
+  # kernel says are gone AND whose newest file is old enough that nobody dispatching it a
+  # moment ago could still be looking at it (below).
   #
   # IT TAKES NO SESSION ID, and that is the surface staying closed rather than an omission.
   # The question is "what here can nobody act on any more", which is a question about the
@@ -2356,13 +2393,31 @@ EOF
   # could do with it that the walk does not already do is name a session the walk skipped —
   # which is exactly the live one this verb refuses.
   #
+  # PER-SESSION AGE IS OPT-IN, VIA `--window` (REQ-6/D5's prune half, moved here from T6).
+  # Without the flag this verb is exactly what `tests/session-sweep.test.sh` has always
+  # pinned it as (sections 1-6, none of which ever pass it): PID-liveness alone decides
+  # dead-or-live, and every dead session's files go in one pass, aged or not — a question
+  # about the directory, not about time. `hooks/session-start.sh`'s own auto-sweep gate
+  # asks a cruder, SEPARATE question before it ever calls this verb at all: is ANY file
+  # anywhere under `.bionic/tmp` younger than a poker interval, and if so, skip calling
+  # `sweep` for the WHOLE run — every dead session's files, ancient or brand new, wait
+  # together for the next session start (that gate is unchanged by this task; it is not in
+  # this file). A batch dying by the hour meant `.bionic/tmp` only grew: the newest corpse
+  # always blocked the oldest one's cleanup. `--window` is this verb's own, finer answer to
+  # the SAME question, FOR A CALLER THAT ASKS FOR IT: each dead session's own newest file
+  # must itself be older than the poker interval, or that one session — and only that one
+  # — is deferred and named in the report, instead of the whole directory waiting on it.
+  #
   # THE EXIT CODE SAYS WHETHER ANYTHING IS LEFT THAT THIS VERB MAY NOT TOUCH:
   #   0  the sweep completed — dead state removed (or listed), or there was none to begin with
+  #      (with `--window`, a dead session deferred for being too young is not a fault either)
   #   1  nothing swept: every session with state here is LIVE, so there was nothing to remove
   #   2  usage, or a `.bionic/tmp` this verb will not delete inside
   # A live session's state is not a fault and the 1 is not a scolding — it is the one answer
   # a caller cannot read off "0 files removed", which is also what a live-only run and an
-  # empty directory would otherwise share.
+  # empty directory would otherwise share. A dead-but-deferred session (`--window` only) is
+  # reported by name (never silently folded into either bucket) and does not turn a real
+  # sweep into a 1: the 1 means "everything here is LIVE", not "nothing was old enough yet".
   sweep)
     # The current session's own key, when it has one. It is not required — this verb answers
     # for the DIRECTORY, not for a session — but when it is present the session is live by
@@ -2393,40 +2448,138 @@ EOF
       exit 0
     fi
 
-    # THE JUDGMENT IS TAKEN ONCE, BY THE LIBRARY, and this loop only renders it.
-    # `patrol_dead_sessions` is handed this session's own key as an additional
-    # live id: it is live by construction, and naming it by hand is what stops an
-    # unreadable claude-home from letting a session sweep its own state.
-    SWEEP_DEAD_IDS="$(patrol_dead_sessions "$REPO_REAL" "$SESSION_ID")"
+    # LIVE, NOT DEAD — one walk, not two (T6, 63405b0, reused: ownership moved here at
+    # T6-fixup/971afdb). `patrol_dead_sessions` would answer this by calling
+    # `patrol_state_session_ids` a second time internally and subtracting the live set; this
+    # verb already walks that same id set once below, so asking the LIVE side once here and
+    # comparing inline reaches the identical verdict without the second walk.
+    # `patrol_live_session_ids` costs nothing proportional to residue under `.bionic/tmp` (it
+    # reads `${CLAUDE_CONFIG_DIR}/sessions/*.json`, one file per running process, a
+    # different and much smaller set). This session's own key is added by hand, live by
+    # construction, so an unreadable claude-home can never let a session sweep itself.
+    SWEEP_LIVE_IDS="$(patrol_live_session_ids)"
+    [ -z "$SESSION_ID" ] || SWEEP_LIVE_IDS="${SWEEP_LIVE_IDS}${SWEEP_LIVE_IDS:+
+}${SESSION_ID}"
+
+    # THE WINDOW — read only when `--window` asked for it, so a plain `sweep` call costs
+    # nothing extra and touches no new fact. This session's own poker interval, the exact
+    # knob hooks/session-start.sh's own auto-sweep gate reads through a subprocess call to
+    # this same verb. A malformed `.bionic/config.yaml` REFUSES the `interval` verb
+    # elsewhere in this file, which is right for a caller that needs an exact answer; here
+    # it must not disable pruning altogether, so a bad override falls back to this script's
+    # own built-in default instead (a dead session's files still eventually clear rather
+    # than accumulating forever behind a typo).
+    SWEEP_WINDOW=0
+    SWEEP_NOW=0
+    SWEEP_STAT_GNU=no
+    if [ "$SWEEP_WINDOWED" = yes ]; then
+      SWEEP_WINDOW="$(poker_interval_seconds 2>/dev/null)"
+      case "$SWEEP_WINDOW" in ''|*[!0-9]*) SWEEP_WINDOW="$(parse_seconds "$POKER_INTERVAL_DEFAULT" 2>/dev/null)" ;; esac
+      case "$SWEEP_WINDOW" in ''|*[!0-9]*) SWEEP_WINDOW=1200 ;; esac
+      SWEEP_NOW="$(now_epoch)"
+
+      # THE STAT FLAVOUR, PROBED ONCE — the identical GNU/BSD discrimination
+      # hooks/session-start.sh's own age gate uses (its own comment there has the full
+      # rationale: GNU's `-f` is a different flag, `--file-system`, so trying the BSD form
+      # first and treating any non-empty capture as success reads a filesystem report as a
+      # timestamp). Duplicated rather than sourced: the two hooks share no process to read
+      # one answer from.
+      case "$(stat -c %Y /dev/null 2>/dev/null)" in
+        ''|*[!0-9]*) SWEEP_STAT_GNU=no ;;
+        *) SWEEP_STAT_GNU=yes ;;
+      esac
+    fi
 
     SWEEP_SCANNED=0
     SWEEP_DEAD=0
     SWEEP_KEPT=0
+    SWEEP_YOUNG=0
     SWEEP_FILES=0
     SWEEP_REMOVED=0
     SWEEP_REFUSED=0
 
+    # ONE PASS OVER THE DISK TO DECIDE AND DESCRIBE, ONE MORE TO DELETE — never a second
+    # walk to RE-DERIVE the report (T6, A-T6.3: a two-walk shape that deletes first and then
+    # re-lists a now-emptied directory undercounts every dead session to zero files, and at
+    # "everything just got swept" can misreport "nothing swept: all sessions are LIVE").
+    # `SWEEP_OUT` accumulates the WHOLE report as this loop goes, with a `?`-prefixed
+    # placeholder standing in for any file this pass QUEUES (into `SWEEP_BULK`) rather than
+    # deletes immediately. Every other line — live-kept, deferred, a symlink refused — is
+    # final the moment it is written. Only after the loop does ONE `xargs -0 rm -f` pass run,
+    # and only then are the placeholders resolved, by checking each path once more against
+    # disk (never a second `rm`).
+    SWEEP_OUT=""
+    SWEEP_BULK=""
     while IFS= read -r SWEEP_SID; do
       [ -n "$SWEEP_SID" ] || continue
       SWEEP_SCANNED=$((SWEEP_SCANNED + 1))
 
-      # Newline-delimited containment against the DEAD set: an id counts as dead
-      # only as a whole line, so a live session whose id is a prefix of a dead
+      # Newline-delimited containment against the LIVE set: an id counts as live
+      # only as a whole line, so a dead session whose id is a prefix of a live
       # one is not mistaken for it.
       case "
-$SWEEP_DEAD_IDS
+$SWEEP_LIVE_IDS
 " in
         *"
 $SWEEP_SID
-"*) ;;
-        *)
+"*)
           SWEEP_KEPT=$((SWEEP_KEPT + 1))
-          say "$SWEEP_SID — live, kept"
+          SWEEP_OUT="${SWEEP_OUT}$SWEEP_SID — live, kept
+"
           continue
           ;;
+        *) ;;
       esac
 
       SWEEP_DEAD=$((SWEEP_DEAD + 1))
+      SWEEP_SESSION_FILES="$(patrol_session_state_files "$REPO_REAL" "$SWEEP_SID")"
+
+      # THIS SESSION'S OWN NEWEST FILE, and nobody else's — the whole of the "per-session,
+      # not all-or-nothing" fix, and gated on `--window` so a plain `sweep` never pays for
+      # or exhibits it (see the verb's own header comment). A session dies once and its own
+      # files age together, so one newest mtime among ITS files (never compared across
+      # sessions) is the one fact this decision needs. Batched per session (one
+      # flavour-probed `xargs stat` call for however many of the five classes this one
+      # session actually left) rather than one `stat` fork per file — the exact shape that
+      # made 400 dead sessions' worth of per-file forking the dominant cost T6/T16 spent
+      # this wave cutting down elsewhere in this same call chain.
+      if [ "$SWEEP_WINDOWED" = yes ]; then
+        SWEEP_NEWEST=0
+        if [ -n "$SWEEP_SESSION_FILES" ]; then
+          if [ "$SWEEP_STAT_GNU" = yes ]; then
+            SWEEP_SESSION_MTS="$(printf '%s\n' "$SWEEP_SESSION_FILES" | tr '\n' '\0' | xargs -0 stat -c %Y 2>/dev/null)"
+          else
+            SWEEP_SESSION_MTS="$(printf '%s\n' "$SWEEP_SESSION_FILES" | tr '\n' '\0' | xargs -0 stat -f %m 2>/dev/null)"
+          fi
+          while IFS= read -r SWEEP_MT; do
+            case "$SWEEP_MT" in ''|*[!0-9]*) continue ;; esac
+            [ "$SWEEP_MT" -gt "$SWEEP_NEWEST" ] && SWEEP_NEWEST="$SWEEP_MT"
+          done <<EOF
+$SWEEP_SESSION_MTS
+EOF
+        fi
+
+        # YOUNGER THAN THE WINDOW: DEFER THIS SESSION, INDIVIDUALLY. Nothing about any
+        # OTHER dead session is touched by this — the property the all-or-nothing shape did
+        # not have. A session whose files could not be stat'd at all (`SWEEP_NEWEST` still
+        # 0, the empty-file-list or every-stat-failed case) is treated as old enough rather
+        # than perpetually deferred: an age gate exists to protect a session that JUST
+        # died, not to withhold state this verb can no longer even measure.
+        if [ "$SWEEP_NEWEST" -gt 0 ] && [ $(( SWEEP_NOW - SWEEP_NEWEST )) -lt "$SWEEP_WINDOW" ]; then
+          SWEEP_YOUNG=$((SWEEP_YOUNG + 1))
+          SWEEP_N=0
+          while IFS= read -r SWEEP_F; do
+            [ -n "$SWEEP_F" ] || continue
+            SWEEP_N=$((SWEEP_N + 1))
+          done <<EOF
+$SWEEP_SESSION_FILES
+EOF
+          SWEEP_OUT="${SWEEP_OUT}$SWEEP_SID — dead, deferred ($SWEEP_N file(s) younger than the ${SWEEP_WINDOW}s window)
+"
+          continue
+        fi
+      fi
+
       SWEEP_N=0
       SWEEP_LINES=""
       while IFS= read -r SWEEP_F; do
@@ -2447,31 +2600,84 @@ $SWEEP_SID
           fi
           continue
         fi
-        if sweep_unlink "$SWEEP_F"; then
-          SWEEP_REMOVED=$((SWEEP_REMOVED + 1))
-          SWEEP_LINES="${SWEEP_LINES}  $SWEEP_F
-"
-        else
+        # A SYMLINK IS NOT A FILE THIS SCRIPT WROTE, so it is refused rather than followed
+        # and left in place rather than unlinked — the identical posture `remove_patrol_stamp`
+        # takes, and for the identical reason: every reader in the fleet already treats a
+        # symlinked state file as absent, so there is nothing to clear, and a hostile repo
+        # must not gain a delete through a path it aimed. Everything else is queued for the
+        # ONE bulk delete below, never removed here one fork at a time.
+        if [ -L "$SWEEP_F" ]; then
           SWEEP_REFUSED=$((SWEEP_REFUSED + 1))
           SWEEP_LINES="${SWEEP_LINES}  refused (symlink or not a file, left alone): $SWEEP_F
 "
+        else
+          SWEEP_BULK="${SWEEP_BULK}${SWEEP_F}
+"
+          SWEEP_LINES="${SWEEP_LINES}?${SWEEP_F}
+"
         fi
       done <<EOF
-$(patrol_session_state_files "$REPO_REAL" "$SWEEP_SID")
+$SWEEP_SESSION_FILES
 EOF
 
-      say "$SWEEP_SID — dead, $SWEEP_N file(s)"
-      printf '%s' "$SWEEP_LINES" | while IFS= read -r SWEEP_L; do
-        [ -n "$SWEEP_L" ] && say "$SWEEP_L"
-      done
+      SWEEP_OUT="${SWEEP_OUT}$SWEEP_SID — dead, $SWEEP_N file(s)
+${SWEEP_LINES}"
     done <<EOF
 $(patrol_state_session_ids "$REPO_REAL")
 EOF
 
-    printf '%s|at=%s|session=%s|mode=%s|scanned=%s|dead=%s|live=%s|files=%s|removed=%s|refused=%s\n' \
+    # THE ONE DELETE. Nothing above ever appends to `SWEEP_BULK` when `SWEEP_REPORT_ONLY=yes`
+    # or when a session was deferred (both `continue` before reaching it), so report-only and
+    # an all-deferred run both reach here with an empty list and this is a no-op for them.
+    if [ -n "$SWEEP_BULK" ]; then
+      printf '%s' "$SWEEP_BULK" | tr '\n' '\0' | xargs -0 rm -f -- 2>/dev/null
+    fi
+
+    # RESOLVE THE PLACEHOLDERS. Every `?`-prefixed line named a file that was NOT a symlink
+    # at enumeration time and was just queued in the one `rm` pass above; the only question
+    # left is whether that `rm` actually removed it (the ordinary case) or left it behind
+    # (permissions, a concurrent writer) — decided with a plain existence check, never a
+    # second `rm`. Every other line already carries its final wording and passes through as-is.
+    if [ -n "$SWEEP_OUT" ]; then
+      SWEEP_RESOLVED=""
+      while IFS= read -r SWEEP_L; do
+        case "$SWEEP_L" in
+          '?'*)
+            SWEEP_RF="${SWEEP_L#?}"
+            if [ ! -e "$SWEEP_RF" ]; then
+              SWEEP_REMOVED=$((SWEEP_REMOVED + 1))
+              SWEEP_RESOLVED="${SWEEP_RESOLVED}  $SWEEP_RF
+"
+            else
+              SWEEP_REFUSED=$((SWEEP_REFUSED + 1))
+              SWEEP_RESOLVED="${SWEEP_RESOLVED}  refused (symlink or not a file, left alone): $SWEEP_RF
+"
+            fi
+            ;;
+          *)
+            SWEEP_RESOLVED="${SWEEP_RESOLVED}${SWEEP_L}
+"
+            ;;
+        esac
+      done <<EOF
+$SWEEP_OUT
+EOF
+      SWEEP_OUT="$SWEEP_RESOLVED"
+    fi
+
+    printf '%s' "$SWEEP_OUT" | while IFS= read -r SWEEP_L; do
+      [ -n "$SWEEP_L" ] && say "$SWEEP_L"
+    done
+
+    # `deferred=` IS APPENDED AFTER `refused=`, never inserted between the six original
+    # fields (AC-9.2's spirit extended to this line): `tests/session-sweep.test.sh` pins
+    # several of them as ADJACENT substrings (`|dead=2|live=1|`, and so on), and a plain
+    # `sweep` call — which never sets `SWEEP_YOUNG` above 0 — must keep emitting a byte-
+    # identical line up through `refused=` for those pins to hold.
+    printf '%s|at=%s|session=%s|mode=%s|scanned=%s|dead=%s|live=%s|files=%s|removed=%s|refused=%s|deferred=%s\n' \
       "$SWEEP_SCHEMA" "$(iso_now)" "${SESSION_ID:-none}" \
       "$([ "$SWEEP_REPORT_ONLY" = yes ] && printf 'report-only' || printf 'sweep')" \
-      "$SWEEP_SCANNED" "$SWEEP_DEAD" "$SWEEP_KEPT" "$SWEEP_FILES" "$SWEEP_REMOVED" "$SWEEP_REFUSED"
+      "$SWEEP_SCANNED" "$SWEEP_DEAD" "$SWEEP_KEPT" "$SWEEP_FILES" "$SWEEP_REMOVED" "$SWEEP_REFUSED" "$SWEEP_YOUNG"
 
     if [ "$SWEEP_SCANNED" -eq 0 ]; then
       say "nothing to sweep — no session-keyed state under $SWEEP_DIR."
@@ -2484,13 +2690,24 @@ EOF
       exit 1
     fi
 
+    # BOTH SUMMARY LINES NAME THE DEFERRED COUNT SEPARATELY FROM THE DEAD ONE. `SWEEP_DEAD`
+    # counts every session the liveness check ruled dead, deferred ones included — the exit-1
+    # refusal above depends on that (a batch that is ALL deferred is not "everything here is
+    # live" and must not read as one). The dead-session count in these two prose lines is
+    # `SWEEP_DEAD - SWEEP_YOUNG`, on purpose: it is the count of sessions this run actually
+    # acted on (swept, or listed to be), so it still says "0" rather than a number that
+    # includes sessions nothing happened to.
     if [ "$SWEEP_REPORT_ONLY" = yes ]; then
-      say "report-only: $SWEEP_FILES file(s) across $SWEEP_DEAD dead session(s) would be deleted — nothing was written."
+      say "report-only: $SWEEP_FILES file(s) across $((SWEEP_DEAD - SWEEP_YOUNG)) dead session(s) would be deleted — nothing was written."
+      [ "$SWEEP_YOUNG" -gt 0 ] \
+        && say "$SWEEP_YOUNG dead session(s) deferred — their files are younger than the ${SWEEP_WINDOW}s window."
       say "run 'sweep' to delete them."
       exit 0
     fi
 
-    say "swept $SWEEP_REMOVED file(s) across $SWEEP_DEAD dead session(s); $SWEEP_KEPT live session(s) kept."
+    say "swept $SWEEP_REMOVED file(s) across $((SWEEP_DEAD - SWEEP_YOUNG)) dead session(s); $SWEEP_KEPT live session(s) kept."
+    [ "$SWEEP_YOUNG" -gt 0 ] \
+      && say "$SWEEP_YOUNG dead session(s) deferred — their files are younger than the ${SWEEP_WINDOW}s window."
     [ "$SWEEP_REFUSED" -gt 0 ] \
       && say "$SWEEP_REFUSED path(s) refused and left alone — a symlink under .bionic/tmp is never followed."
     exit 0
