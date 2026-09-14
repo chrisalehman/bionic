@@ -732,7 +732,7 @@ else
        "only ${#GIT_RECOGNIZED_FIXTURES[@]} found — the extraction regressed"
   fi
 
-  for _garv_cmd in "${GIT_RECOGNIZED_FIXTURES[@]}"; do
+  for _garv_cmd in ${GIT_RECOGNIZED_FIXTURES[@]+"${GIT_RECOGNIZED_FIXTURES[@]}"}; do
     if _wall_mentions_git "$_garv_cmd"; then
       ok "_wall_mentions_git sees: $_garv_cmd"
     else
