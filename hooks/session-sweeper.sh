@@ -97,7 +97,8 @@ usage() {  # [message]
   [ $# -gt 0 ] && die "$1"
   die "Usage:"
   die "  $VERDICT_COMMAND [<name>]         did the contract land? (read-only)"
-  die "  $ACK_COMMAND <name> [<name> ...]   close those rows: done, verified"
+  die "  $ACK_COMMAND <name> [<name> ...] [--by human|patrol] [--reason <word>]"
+  die "        close those rows: done, verified"
   exit 2
 }
 
@@ -107,10 +108,49 @@ usage() {  # [message]
 VERB="$1"; shift
 VERDICT_NAME=""
 
+# WHO CLOSED THE ROW, AND ON WHAT EVIDENCE (bionic 1.8.0, REQ-1 D2). An ack used to mean
+# exactly one thing — the orchestrator verified this agent's completion by hand — and that is
+# still the default, because a caller that names no author is a person at a terminal. What
+# widened is the set of things that may close a row: the Patrol closes one whose contract is
+# MET (or whose status is `duplicate-start`) once the panel no longer lists its agent, and
+# `reason=moot-and-gone` is the evidence it read. Both ride the ledger line, because the
+# ledger is the durable record of every row a session closed and "who closed this, and why"
+# is the first question a reader asks of a row closed without its contract landing.
+#
+# NEITHER IS A SECOND CLASS OF ACK. The row is closed for every reader either way; the
+# attribution is a fact about the ACT, never a qualifier on its effect.
+ACK_BY="human"
+ACK_REASON=""
+ACK_NAMES=()
 case "$VERB" in
   ack)
-    # The names stay in "$@" for the verb block below; nothing is shifted here.
     [ $# -ge 1 ] || usage "ack needs at least one roster row name."
+    # THE FLAGS ARE PARSED OFF, NOT LEFT IN "$@": the verb block walks the names, and a
+    # caller that mistyped a flag must not quietly close a row called `--bye`.
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --by)
+          [ $# -ge 2 ] || usage "--by needs a value."
+          case "$2" in
+            human|patrol) ACK_BY="$2" ;;
+            *) usage "--by takes human or patrol; got '$2'." ;;
+          esac
+          shift 2 ;;
+        --reason)
+          [ $# -ge 2 ] || usage "--reason needs a value."
+          # ONE WORD, because it is read back by machine as often as by eye — the field is
+          # a key on a `|`-delimited line, and a value carrying a space or a separator is a
+          # value some later reader will split in the wrong place.
+          case "$2" in
+            ''|*[[:space:]]*|*"|"*) usage "--reason takes one word; got '$2'." ;;
+            *) ACK_REASON="$2" ;;
+          esac
+          shift 2 ;;
+        -*) usage "unknown argument: $1" ;;
+        *) ACK_NAMES+=("$1"); shift ;;
+      esac
+    done
+    [ "${#ACK_NAMES[@]}" -ge 1 ] || usage "ack needs at least one roster row name."
     ;;
   verdict)
     # ONE name at most, on purpose. `verdict a b` is far likelier to be a caller that meant
@@ -953,7 +993,9 @@ EOF
     # pid 1234.
     _before="$(ledger_count "|event=ack|.*|pid=$$|")"
     _recorded=""; _unknown=""
-    for _name in "$@"; do
+    _ack_attr="|by=${ACK_BY}"
+    [ -n "$ACK_REASON" ] && _ack_attr="${_ack_attr}|reason=${ACK_REASON}"
+    for _name in "${ACK_NAMES[@]}"; do
       _name="$(clean "$_name")"
       [ -n "$_name" ] || continue
       printf '%s\n' "$_known" | grep -qxF -- "$_name" \
@@ -972,7 +1014,10 @@ EOF
           _ack_suffix="|verdict=UNMET|detail=$(clean "$VERDICT_DETAIL")"
         fi
       fi
-      ledger_write "${LEDGER_SCHEMA}|event=ack|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|session=${SESSION_ID}|name=${_name}${_ack_suffix}"
+      # THE ATTRIBUTION SITS BETWEEN THE NAME AND THE UNMET SUFFIX. `name=` stays where every
+      # existing reader finds it (the field read is by key, not by position), and `detail=` —
+      # the one field that can carry a sentence — stays last.
+      ledger_write "${LEDGER_SCHEMA}|event=ack|at=$(iso_now)|epoch=$(now_epoch)|pid=$$|session=${SESSION_ID}|name=${_name}${_ack_attr}${_ack_suffix}"
       _recorded="${_recorded}${_recorded:+, }${_name}"
     done
     [ -n "$_recorded" ] || usage "ack needs at least one non-empty row name."
