@@ -222,6 +222,13 @@ mk_bash_payload() {  # <sid> <cwd>  — an irrelevant tool, for the A7 hoist tes
 }
 
 GATE_OUT=""; GATE_ERR=""; GATE_VERR=""; GATE_ST=0
+# THE DENY CHANNEL (wave-12 T17). The combined brief-shape refusal does not exit 2: it
+# prints a PreToolUse deny verdict on STDOUT and exits 0, because `permissionDecisionReason`
+# is the one field the E1 measurement proved reaches the MODEL in full (refuse.sh's channel
+# table, `model_only=yes`). A driver that read the exit status alone would score that an
+# ALLOW. `$GATE_VERDICT` is what a refusal arm asks for now — `deny`, `exit2` or `allow` —
+# and `$GATE_REASON` is the model's own wire, parsed out of the JSON rather than grepped.
+GATE_DENY=""; GATE_REASON=""; GATE_VERDICT="allow"
 # Set to a directory to drive the gate with a sandboxed CLAUDE_CONFIG_DIR — the
 # roster prune's liveness lookup reads <config>/projects/*/<session>.jsonl, and
 # the operator's REAL config dir would decide which fixtures survive otherwise.
@@ -259,6 +266,26 @@ run_gate() {  # <payload-json>
   GATE_ST=$?
   GATE_TIME=$(( $(date +%s) - _t0 ))
   GATE_ERR=$(cat "$SANDBOX/.err")
+  # THE VERDICT, read off both wires. `jq` rather than a grep for the reason: a reason the
+  # escaper mangled must come back EMPTY here, not as text that happens to hold the right
+  # words — the escaping is refuse.sh's own responsibility and needs a parser to check it.
+  GATE_DENY=""; GATE_REASON=""
+  case "$GATE_OUT" in
+    *'"permissionDecision":"deny"'*)
+      GATE_DENY=1
+      GATE_REASON=$(printf '%s' "$GATE_OUT" \
+        | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null) || GATE_REASON=""
+      ;;
+  esac
+  if [ -n "$GATE_DENY" ]; then
+    GATE_VERDICT="deny"
+  else
+    case "$GATE_ST" in
+      0) GATE_VERDICT="allow" ;;
+      2) GATE_VERDICT="exit2" ;;
+      *) GATE_VERDICT="exit$GATE_ST" ;;
+    esac
+  fi
   # §no-listagents SWEEP (wave-12 T1; spec D1, AC-4.1). NOT a per-arm assertion: the
   # criterion is "no brief in ANY state", and an arm-by-arm check would only ever cover
   # the states somebody remembered to write. Every payload this suite drives passes
@@ -276,7 +303,10 @@ run_gate() {  # <payload-json>
   # AC-E1.3, SWEPT AT THE DRIVER. Every refusal this suite produces is checked for the
   # criterion's shape as it happens, so no site can be migrated without an eval and no
   # arm has to be written twice. The counters are read in the AC-E1.3 section at the end.
-  if [ "$GATE_ST" = "2" ]; then
+  # BOTH BLOCKING CHANNELS. A deny verdict exits 0, so a sweep gated on status 2 alone would
+  # stop reading the user line of every refusal T17 moved — the criterion is about the LINE,
+  # and the line is on stderr in both modes.
+  if [ "$GATE_ST" = "2" ] || [ -n "$GATE_DENY" ]; then
     _dp_line=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ' || true)
     if [ -z "$_dp_line" ]; then
       # THE ONE REFUSAL SITE THE RULED WORDING TABLE DOES NOT COVER. `live-agents:` at
@@ -308,8 +338,11 @@ run_gate() {  # <payload-json>
   # second drive of an accepted call would append a second row and every counting arm in
   # this suite would read two where the gate wrote one. Measured, not guessed: an
   # ungated second drive turned "exactly one row was appended" into two.
+  # ON A DENY TOO (T17). The gate exits 0 there, and the reason a second drive is gated at
+  # all is that an ALLOWED dispatch journals a roster row — a deny journals nothing, because
+  # the findings are spent above the journal.
   GATE_VERR=""
-  if [ "$GATE_ST" -ne 0 ]; then
+  if [ "$GATE_ST" -ne 0 ] || [ -n "$GATE_DENY" ]; then
     if [ -n "$GATE_CONFIG_DIR" ]; then
       # shellcheck disable=SC2086
       GATE_VERR=$(printf '%s' "$1" | env $GATE_ENV BIONIC_WALL_VERBOSE=1 \
@@ -1680,8 +1713,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r13c2 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LABEL_RUNON" "runonbot")"
-expect_status "C-2: a run-on labelled span naming four paths is REFUSED as ambiguous (R7)" \
-  "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "C-2: a run-on labelled span naming four paths is REFUSED as ambiguous (R7)" \
+  "deny" "$GATE_VERDICT"
 expect_contains "C-2: …the refusal names the declared artifact" \
   "record/w99-report.md" "$GATE_VERR"
 expect_contains "C-2: …and the 'read …' input path, so neither is chosen for the author" \
@@ -2116,8 +2152,17 @@ for _case in nodeliverable outofrepo; do
 Expected artifact: ../../../../../../etc/hosts
 Expected duration: ~15 minutes.' ;;
   esac
+  # THE CHANNEL DIFFERS BY FAULT COUNT (T17), and these two cases sit either side of it:
+  # the deliverable-less brief has ONE shape fault and refuses on exit2 as it always did,
+  # while the out-of-repo one declares no instrument either — two faults, one refusal, and
+  # a deny verdict so the model reads both. Refused is refused; the roster arms below are
+  # what this section is actually about and neither is touched.
+  case "$_case" in
+    outofrepo) _want=deny ;;
+    *)         _want=exit2 ;;
+  esac
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_brief" "ghost-$_case")"
-  expect_status "AC-12 ($_case): the dispatch is refused" "2" "$GATE_ST"
+  expect_eq "AC-12 ($_case): the dispatch is refused" "$_want" "$GATE_VERDICT"
   expect_status "AC-12 ($_case): the roster is byte-identical across the refusal" \
     "$BEFORE" "$(cat "$RP" 2>/dev/null)"
   expect_status "AC-12 ($_case): …and still holds only the accepted dispatch's row" \
@@ -2183,8 +2228,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18a yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_SHAPE" "shapebot")"
-expect_status "R6-1 CASE 9: a deliverable span naming two paths is REFUSED, never resolved" \
-  "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "R6-1 CASE 9: a deliverable span naming two paths is REFUSED, never resolved" \
+  "deny" "$GATE_VERDICT"
 expect_contains "R6-1 CASE 9: …the refusal names the reference path" \
   ".bionic/docs/record/w2-critic-report.md" "$GATE_VERR"
 expect_contains "R6-1 CASE 9: …and the real artifact, so neither is silently contracted" \
@@ -2202,7 +2250,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18b yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_READ" "readproducebot")"
-expect_status "R6-1 CASE 10: read-X-then-produce-Y is REFUSED, not contracted to X" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "R6-1 CASE 10: read-X-then-produce-Y is REFUSED, not contracted to X" \
+  "deny" "$GATE_VERDICT"
 expect_contains "R6-1 CASE 10: …the auditors report is named as a candidate, not taken" \
   ".bionic/docs/record/w2-auditor-report.md" "$GATE_VERR"
 expect_contains "R6-1 CASE 10: …alongside the artifact the agent was actually sent to write" \
@@ -2336,7 +2388,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18twoline yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_ON_ONE_LINE" "twolinebot")"
-expect_status "S18b two paths on the deliverable label OWN line are still REFUSED" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "S18b two paths on the deliverable label OWN line are still REFUSED" \
+  "deny" "$GATE_VERDICT"
 expect_contains "S18b …and the refusal still names both candidates" "w99-two.log" "$GATE_VERR"
 
 # A prose continuation line (no label head) still belongs to the span — the R6-4 window
@@ -2387,17 +2443,29 @@ Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/r
 Expected duration: 20 minutes'
 
 for _wall in containment absent ambiguous combined; do
+  # EACH BRIEF WITH THE CHANNEL ITS REFUSAL LANDS ON (wave-12 T17), declared beside the
+  # brief because that is what decides it: a brief with ONE shape fault refuses on exit2,
+  # where the detail is the knob's; a brief with several refuses with a deny verdict, where
+  # the whole list is on the model's own wire. The two ambiguous-label briefs have two and
+  # three faults — a label offering candidates leaves `deliverable=` empty behind it.
   case "$_wall" in
-    containment) _b="$BRIEF_OUT_OF_REPO" ;;
-    absent)      _b="$BRIEF_NOTHING" ;;
-    ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE" ;;
-    combined)    _b="$BRIEF_THREE_FAULTS" ;;
+    containment) _b="$BRIEF_OUT_OF_REPO";    _want=exit2 ;;
+    absent)      _b="$BRIEF_NOTHING";        _want=exit2 ;;
+    ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE"; _want=deny ;;
+    combined)    _b="$BRIEF_THREE_FAULTS";    _want=deny ;;
   esac
   REPO=$(make_repo "r18h-$_wall" yes)
   write_attestation "$REPO" "$SID_A"
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_b" "fixline-$_wall")"
-  expect_status "self-consistency ($_wall): the wall refuses" "2" "$GATE_ST"
-  _ex=$(fix_example "$GATE_VERR")
+  # AND EACH WALL IS READ WHERE ITS REFUSAL ACTUALLY LANDS: the exit2 ones off the verbose
+  # stderr, the deny ones off `permissionDecisionReason` — the model's own wire, with no knob
+  # set. An author, or a model, only ever gets to follow a Fix: line it can see.
+  case "$_want" in
+    deny) _src="$GATE_REASON" ;;
+    *)    _src="$GATE_VERR" ;;
+  esac
+  expect_eq "self-consistency ($_wall): the wall refuses" "$_want" "$GATE_VERDICT"
+  _ex=$(fix_example "$_src")
   expect_status "self-consistency ($_wall): its Fix: block recommends a labeled example" "0" \
     "$([ -n "$_ex" ] && echo 0 || echo 1)"
   expect_absent "self-consistency ($_wall): …carrying no slot the walls themselves refuse" \
@@ -2519,7 +2587,11 @@ expect_status "…and writes NO roster row (the ledger stays at depth one)" "1" 
 # at depth, which is the entire point of the second registration.
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Canonical-sdlc Step 4. Do the thing.
 Exit condition: the suite is green.')"
-expect_status "a deliverable-less dispatch in an agent context is still REFUSED" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "a deliverable-less dispatch in an agent context is still REFUSED" \
+  "deny" "$GATE_VERDICT"
 expect_contains "…by the absent-deliverable wall, in its own words" \
   "bionic: dispatch refused — this brief names no deliverable" "$GATE_ERR"
 GATE_ENV="$S20_SAVED_ENV"
@@ -3399,7 +3471,10 @@ S24_MARK="$S24_REPO/.bionic/tmp/engaged-$SID_A.state"
 # exactly as it was before this wave existed.
 S24_BARE='Go and do the thing. No contract fields at all.'
 run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
-expect_status "r24a engaged: a dispatch with no deliverable is REFUSED" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "r24a engaged: a dispatch with no deliverable is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "…at the absent-deliverable wall" "Expected artifact" "$GATE_ERR"
 S24_REFUSAL="$GATE_ERR"
 
@@ -3470,7 +3545,10 @@ expect_contains "…naming the Patrol" "Patrol" "$GATE_ERR"
 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID_A" > "$S24_NOPLAN/.bionic/tmp/patrol-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$S24_NOPLAN" "$S24_BARE")"
-expect_status "r24g engaged, no plan, no deliverable -> REFUSED" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "r24g engaged, no plan, no deliverable -> REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "…at the absent-deliverable wall" "Expected artifact" "$GATE_ERR"
 
 # the BUDGET wall is plan-bound: it measures against a ceiling only a plan can declare,
@@ -4333,7 +4411,11 @@ REPO=$(make_repo rcomb yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "combobot")"
 
-expect_status "§combined a brief with three shape faults is REFUSED" "2" "$GATE_ST"
+# THE CHANNEL IS THE VERDICT, NOT THE STATUS (wave-12 T17). A combined refusal exits 0 and
+# blocks with a PreToolUse deny verdict, so this arm reads `$GATE_VERDICT` — the driver's
+# reading of both wires — where it used to read exit 2. §combined-deny below is where that
+# channel is pinned in full; here it only has to be a REFUSAL for the counts to mean anything.
+expect_eq "§combined a brief with three shape faults is REFUSED" "deny" "$GATE_VERDICT"
 
 # ONE REFUSAL, NOT THREE. `refuse` exits, so a second refusal object cannot be emitted by
 # the same process — but a wall that printed its findings as it went would show three
@@ -4419,7 +4501,7 @@ REPO=$(make_repo rcomb3 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS
 Suites: tests/widget.test.sh" "combobot3")"
-expect_status "§combined a two-fault brief is still refused" "2" "$GATE_ST"
+expect_eq "§combined a two-fault brief is still refused" "deny" "$GATE_VERDICT"
 expect_eq "§combined …with exactly two findings, not three" "2" \
   "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
 expect_absent "§combined …and the repaired fault is no longer named" \
@@ -4441,6 +4523,142 @@ expect_eq "§combined a single-fault brief keeps the arm's own line, unchanged" 
   "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
 expect_eq "§combined …and renders exactly one Fix: block" "1" \
   "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
+
+# ============================================================================
+section "§combined-deny — the combined refusal reaches the MODEL (wave-12 T17, AC-1.1)"
+# ============================================================================
+#
+# WHAT T2 LEFT OPEN (its finding A-T2.2; ruling A-orch-10, 2026-09-13). The five brief-shape
+# arms already collect into ONE refusal — and it went out on `exit2`, where refuse.sh's
+# channel table ships `detail_to_user=no` under ruling D-1 AND there is only one wire: what
+# the user stream carries is what the model's synthetic tool_result carries. So the author
+# read one sentence and THE MODEL READ THE SAME ONE SENTENCE. The findings list existed and
+# no dispatching model ever saw it, which is the six-attempt loop of 2026-09-13 still
+# running behind a better-built wall.
+#
+# WHAT THIS PINS. The combined refusal goes out on `deny`: a PreToolUse verdict on STDOUT
+# whose `permissionDecisionReason` the same measurement proved reaches the model verbatim
+# (`model_only=yes`), with exit 0 because the JSON is the block rather than the status. D-1
+# is NOT reversed — the human still gets exactly one line on stderr — and the knob is not
+# involved anywhere below: these arms run with BIONIC_WALL_VERBOSE unset, which is the state
+# a real dispatch runs in.
+#
+# THE ARM THAT CARRIES THE CLAIM is the last one: attempt two is written from the examples
+# read back out of the MODEL'S OWN WIRE, `permissionDecisionReason`, and must dispatch. Three
+# facts on a channel the model reads are worth nothing if acting on all three still leaves a
+# fault the message never named.
+#
+# fails-when: the three-fault brief exits 2; or its stdout is not one parseable deny verdict;
+# or the reason names fewer than three facts or carries fewer than three `Fix:` blocks; or
+# the human's one line grows a detail behind it; or the single-fault brief follows it onto
+# the JSON channel.
+
+expect_empty "§combined-deny the verbose knob is UNSET for every arm here" "${BIONIC_WALL_VERBOSE:-}"
+
+REPO=$(make_repo rcombdeny yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot")"
+
+expect_status "§combined-deny a three-fault brief exits 0 — the verdict is the block" \
+  "0" "$GATE_ST"
+expect_eq "§combined-deny …and the verdict is a deny, not an allow" "deny" "$GATE_VERDICT"
+expect_eq "§combined-deny …stdout is ONE object and nothing else" "1" \
+  "$(printf '%s\n' "$GATE_OUT" | /usr/bin/grep -c . || true)"
+expect_eq "§combined-deny …naming the PreToolUse event it answers" "PreToolUse" \
+  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.hookEventName' 2>/dev/null || echo PARSE-FAILED)"
+expect_eq "§combined-deny …with permissionDecision=deny" "deny" \
+  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null || echo PARSE-FAILED)"
+
+# THE REASON IS THE MODEL'S WIRE. Every assertion below reads `$GATE_REASON`, which the
+# driver parsed out of the JSON with `jq` — so an escaper that broke on the findings list's
+# newlines reads EMPTY here rather than passing on a grep of the raw bytes.
+expect_eq "§combined-deny the reason opens with the refusal's one line" \
+  "bionic: dispatch refused — the deliverable label names several paths (name exactly one deliverable)" \
+  "$(printf '%s\n' "$GATE_REASON" | sed -n '1p')"
+expect_contains "§combined-deny …then says how many faults there are" \
+  "THIS BRIEF HAS 3 SHAPE FAULTS" "$GATE_REASON"
+expect_contains "§combined-deny …naming the ambiguity fault (A11)" "several paths" "$GATE_REASON"
+expect_contains "§combined-deny …naming the absent-deliverable fault (A13)" \
+  "names no deliverable" "$GATE_REASON"
+expect_contains "§combined-deny …naming the absent-instrument fault (A14)" \
+  "declares no Files" "$GATE_REASON"
+expect_eq "§combined-deny …each with its own Fix: block, on the model's wire" "3" \
+  "$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -c '^Fix: ' || true)"
+expect_eq "§combined-deny …and each fault's one-line fix beside its fact" "3" \
+  "$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -cE '^── [0-9]+\. .+ \(.+\)$' || true)"
+
+# AND THE HUMAN IS STILL INTERRUPTED BY ONE SENTENCE (ruling D-1). The split is the whole
+# reason this channel was chosen over flipping `detail_to_user`: the model reads everything,
+# the reader reads one line, and neither is a setting.
+expect_eq "§combined-deny the user stream carries exactly one refusal line" "1" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_eq "§combined-deny …the first arm's own sentence, unchanged" \
+  "bionic: dispatch refused — the deliverable label names several paths (name exactly one deliverable)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_absent "§combined-deny …with no findings list behind it" "Fix: " "$GATE_ERR"
+expect_absent "§combined-deny …and no count header either" "SHAPE FAULTS" "$GATE_ERR"
+
+# NOTHING WAS LAUNCHED. A deny exits 0, which is the one status a wall must never let mean
+# "allowed" by accident: the roster is where that would show.
+expect_status "§combined-deny …and journals no roster row" "0" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- the discriminator: a ONE-fault brief stays on exit2, untouched ----
+#
+# Without this arm, moving every refusal in the file to `deny` would pass everything above.
+# The channel changes for the COMBINED refusal, which is the one D-1's single wire was
+# starving; a single fault is a sentence with a pointer and stays exactly where it was —
+# and its stdout must stay EMPTY, because a state refusal above it has no JSON to print.
+REPO=$(make_repo rcombdeny2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected duration: ~15 minutes.
+Suites: tests/widget.test.sh" "denybot2")"
+expect_eq "§combined-deny a single-fault brief still refuses on exit2" "exit2" "$GATE_VERDICT"
+expect_empty "§combined-deny …printing no verdict on stdout" "$GATE_OUT"
+expect_eq "§combined-deny …with its arm's own line, unchanged" \
+  "bionic: dispatch refused — this brief names no deliverable (add an Expected artifact: line)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+
+# ---- and a STATE refusal is not on the JSON channel either ----
+#
+# THE SPLIT T2 DREW IS A SPLIT IN THE ARTIFACT, and this arm keeps T17 from blurring it: the
+# arming wall fires on the SAME three-fault brief, above every brief-shape arm, and it is a
+# fact about the machine rather than the brief. It refuses where it stands, on exit2, and
+# prints no verdict — so the channel tracks "a list of brief faults", not "a refusal".
+REPO=$(make_repo rcombdeny3 yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot3")"
+expect_eq "§combined-deny a STATE refusal (the unarmed Patrol) stays on exit2" \
+  "exit2" "$GATE_VERDICT"
+expect_empty "§combined-deny …and prints no verdict on stdout" "$GATE_OUT"
+expect_contains "§combined-deny …refusing for the state, not for the brief" \
+  "Patrol" "$GATE_ERR$GATE_VERR"
+
+# ---- the claim: attempt two, written from the MODEL'S wire, dispatches ----
+REPO=$(make_repo rcombdeny4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot4")"
+DENY_ART=$(fix_example "$GATE_REASON")
+DENY_SUITES=$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -m1 -E '^[[:space:]]+Suites: tests' \
+  | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+expect_status "§combined-deny the reason really recommended an artifact path" "0" \
+  "$([ -n "$DENY_ART" ] && echo 0 || echo 1)"
+expect_status "§combined-deny …and a Suites: line" "0" \
+  "$([ -n "$DENY_SUITES" ] && echo 0 || echo 1)"
+expect_absent "§combined-deny …neither carrying a slot the walls themselves refuse" "<" "$DENY_ART"
+
+REPO=$(make_repo rcombdeny5 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected artifact: $DENY_ART
+Expected duration: 20 minutes
+$DENY_SUITES" "denybot5")"
+expect_eq "§combined-deny attempt 2, from the reason alone, is ALLOWED" "allow" "$GATE_VERDICT"
+expect_status "§combined-deny …and the recommended path is the contract on the row" \
+  "$DENY_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+
 
 # ============================================================================
 section "§scaffold-verbatim — the shipped brief scaffold dispatches as written (AC-2.2)"
