@@ -2758,7 +2758,68 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-section "Section 25: T7 — the worktree alias, and operational-rules.md's own ratif sweep (REQ-7, AC-7.4, AC-8.2)"
+section "Section 25: T5 — the no-row stop refusal doctrine (REQ-5, D8, AC-5.4)"
+#
+# WHAT THIS SECTION OWNS. Two sentences in agents-src/blocks/orchestrator-dispatch.md,
+# rendered into skills/canonical-sdlc/dispatch.md (and its payload/ symlink). The doctrine
+# sentence used to say a no-row name "passes through — not this gate's to guard; the refusal
+# returns in 1.8.0."; it now states the refusal itself (D8, AC-5.4). The Panel-refresh
+# bullet named the retired `poker: TASKSTOP <name>` line; it now names the `poker: STANDDOWN
+# <name>` line T1 actually shipped (A-T1.11 — owed by this row, not T1's).
+
+DISPATCH_BLOCK_T5="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
+
+PIN_T5_REFUSAL='A name with no row on this session'"'"'s roster is refused unless address- or bash-task-shaped.'
+if has_pin "$DISPATCH_MD" "$PIN_T5_REFUSAL"; then
+  ok "134a: dispatch.md carries the no-row REFUSAL sentence verbatim (D8, AC-5.4)"
+else
+  no "134a: dispatch.md carries the no-row REFUSAL sentence verbatim (D8, AC-5.4)" "file: $DISPATCH_MD"
+fi
+
+# THE SOURCE, NOT ONLY THE OUTPUT — same reasoning as 126e: a pin that read only the render
+# product would stay green over a hand-edit that the next render.sh silently reverts.
+if has_pin "$DISPATCH_BLOCK_T5" "$PIN_T5_REFUSAL"; then
+  ok "134b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the refusal sentence"
+else
+  no "134b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the refusal sentence" \
+     "file: $DISPATCH_BLOCK_T5"
+fi
+
+# AC-5.4's own grep: no surface that could ship the stale doctrine still carries it.
+T5_STALE_HITS="$(grep -rl 'roster passes through' "${REPO}/agents-src" "${REPO}/skills" "${REPO}/payload/skills" 2>/dev/null || true)"
+expect_eq "134c: AC-5.4 — no agents-src/, skills/ or payload/skills/ surface still says 'roster passes through'" \
+  "" "$T5_STALE_HITS"
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+T5_STALE_MUT="$TMP/t5-stale-doctrine.md"
+printf "A name with no row on this session's roster passes through — not this gate's to guard.\n" > "$T5_STALE_MUT"
+expect_true "134d: the 'roster passes through' grep fires on the shape it targets (the pattern discriminates)" \
+  grep -q 'roster passes through' "$T5_STALE_MUT"
+
+PIN_T5_STANDDOWN='the tick prints `poker: STANDDOWN <name>` per MET lineage still open on the roster and orders it, so one TaskStop passes'
+if has_pin "$DISPATCH_MD" "$PIN_T5_STANDDOWN"; then
+  ok "135a: dispatch.md's Panel-refresh bullet says STANDDOWN, not the retired TASKSTOP (A-T1.11)"
+else
+  no "135a: dispatch.md's Panel-refresh bullet says STANDDOWN, not the retired TASKSTOP (A-T1.11)" \
+     "file: $DISPATCH_MD"
+fi
+
+if has_pin "$DISPATCH_BLOCK_T5" "$PIN_T5_STANDDOWN"; then
+  ok "135b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the STANDDOWN sentence"
+else
+  no "135b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the STANDDOWN sentence" \
+     "file: $DISPATCH_BLOCK_T5"
+fi
+
+# The retired sentence must be gone, not just superseded — a template carrying both would
+# print the wrong instruction on every tick that reads it.
+T5_TASKSTOP_HITS="$(grep -c 'poker: TASKSTOP <name>' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$T5_TASKSTOP_HITS" ] || T5_TASKSTOP_HITS=0
+expect_eq "135c: …and the retired 'poker: TASKSTOP <name>' line is gone from dispatch.md" \
+  "0" "$T5_TASKSTOP_HITS"
+
+# ---------------------------------------------------------------------------
+section "Section 26: T7 — the worktree alias, and operational-rules.md's own ratif sweep (REQ-7, AC-7.4, AC-8.2)"
 #
 # WHAT THIS OWNS. AC-7.4 (epic-23 wave-13-fixit-180 spec): the rendered dispatch.md carries
 # a positive sentence about the one docs tree, and spawn-worktree.sh no longer carries the
@@ -2775,16 +2836,16 @@ SPAWN_WORKTREE="${REPO}/payload/scripts/spawn-worktree.sh"
 ONEDOCS_N="$(grep -c 'one docs tree' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
 [ -n "$ONEDOCS_N" ] || ONEDOCS_N=0
 if [ "$ONEDOCS_N" -ge 1 ] 2>/dev/null; then
-  ok "134: AC-7.4 — the rendered dispatch.md names the one docs tree a relative worktree write lands in"
+  ok "137: AC-7.4 — the rendered dispatch.md names the one docs tree a relative worktree write lands in"
 else
-  no "134: AC-7.4 — the rendered dispatch.md names the one docs tree a relative worktree write lands in" \
+  no "137: AC-7.4 — the rendered dispatch.md names the one docs tree a relative worktree write lands in" \
      "count=${ONEDOCS_N} file=$DISPATCH_MD"
 fi
 
 # Anti-vacuity: a dispatch.md with the sentence stripped reads 0.
 ONEDOCS_MUT="$TMP/dispatch-no-onedocs.md"
 grep -v 'one docs tree' "$DISPATCH_MD" > "$ONEDOCS_MUT" 2>/dev/null
-expect_eq "134b: a dispatch.md with the sentence stripped reads 0, not ≥1 (the count discriminates)" \
+expect_eq "137b: a dispatch.md with the sentence stripped reads 0, not ≥1 (the count discriminates)" \
   "0" "$(grep -c 'one docs tree' "$ONEDOCS_MUT" 2>/dev/null | tr -cd '0-9')"
 
 # --- AC-7.4b: spawn-worktree.sh no longer carries the retired C2 sentence ---
@@ -2792,13 +2853,13 @@ expect_eq "134b: a dispatch.md with the sentence stripped reads 0, not ≥1 (the
 # fails-when: spawn-worktree.sh still says "NO SYMLINK, AND THAT IS THE POINT".
 NOSYMLINK_N="$(grep -c 'NO SYMLINK, AND THAT IS THE POINT' "$SPAWN_WORKTREE" 2>/dev/null | tr -cd '0-9')"
 [ -n "$NOSYMLINK_N" ] || NOSYMLINK_N=0
-expect_eq "135: AC-7.4 — spawn-worktree.sh no longer says 'NO SYMLINK, AND THAT IS THE POINT'" \
+expect_eq "138: AC-7.4 — spawn-worktree.sh no longer says 'NO SYMLINK, AND THAT IS THE POINT'" \
   "0" "$NOSYMLINK_N"
 
 # Anti-vacuity: the grep must fire on the shape it targets.
 NOSYMLINK_MUT="$TMP/spawn-worktree-old-header.md"
 printf '# NO SYMLINK, AND THAT IS THE POINT (bionic 1.4.0, design ledger C2).\n' > "$NOSYMLINK_MUT"
-expect_true "135b: the NO-SYMLINK grep fires on the shape it targets (the pattern discriminates)" \
+expect_true "138b: the NO-SYMLINK grep fires on the shape it targets (the pattern discriminates)" \
   grep -q 'NO SYMLINK, AND THAT IS THE POINT' "$NOSYMLINK_MUT"
 
 # --- AC-8.2 (A-orch-16): operational-rules.md's seven UNDATED "ratif*" prose uses are gone;
@@ -2811,9 +2872,9 @@ expect_true "135b: the NO-SYMLINK grep fires on the shape it targets (the patter
 OPRULES_UNDATED_N="$(grep -i 'ratif' "$OPRULES" 2>/dev/null | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -c .)"
 [ -n "$OPRULES_UNDATED_N" ] || OPRULES_UNDATED_N=0
 if [ "$OPRULES_UNDATED_N" -eq 0 ] 2>/dev/null; then
-  ok "136: AC-8.2 — operational-rules.md carries no undated 'ratif' line (dated historical attributions untouched)"
+  ok "139: AC-8.2 — operational-rules.md carries no undated 'ratif' line (dated historical attributions untouched)"
 else
-  no "136: AC-8.2 — operational-rules.md carries no undated 'ratif' line (dated historical attributions untouched)" \
+  no "139: AC-8.2 — operational-rules.md carries no undated 'ratif' line (dated historical attributions untouched)" \
      "count=${OPRULES_UNDATED_N}: $(grep -in 'ratif' "$OPRULES" 2>/dev/null | grep -viE '2026-[0-9]{2}-[0-9]{2}')"
 fi
 
@@ -2822,7 +2883,7 @@ fi
 # explicit that dated historical attributions stay byte-identical).
 OPRULES_DATED_N="$(grep -i 'ratif' "$OPRULES" 2>/dev/null | grep -ciE '2026-[0-9]{2}-[0-9]{2}')"
 [ -n "$OPRULES_DATED_N" ] || OPRULES_DATED_N=0
-expect_true "136b: …and at least one dated historical attribution survives (this pin narrows, never widens)" \
+expect_true "139b: …and at least one dated historical attribution survives (this pin narrows, never widens)" \
   test "$OPRULES_DATED_N" -ge 1
 
 # Anti-vacuity: the discriminator must actually tell dated from undated.
@@ -2830,9 +2891,9 @@ UNDATED_MUT="$TMP/opr-undated.md"
 printf 'It is guidance ratified in conversation.\n' > "$UNDATED_MUT"
 DATED_MUT="$TMP/opr-dated.md"
 printf 'Epic integration-branch convention (user-ratified, 2026-07-18): a true epic.\n' > "$DATED_MUT"
-expect_true "136c: an undated ratif line is caught by the discriminator" \
+expect_true "139c: an undated ratif line is caught by the discriminator" \
   bash -c "grep -i ratif '$UNDATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
-expect_false "136d: …a dated one is not (the discriminator does not over-fire)" \
+expect_false "139d: …a dated one is not (the discriminator does not over-fire)" \
   bash -c "grep -i ratif '$DATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
 
 finish
