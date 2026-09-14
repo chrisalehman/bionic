@@ -57,7 +57,7 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 
   **Version ruling: tightened v11 IN PLACE, no `v12`, no allowlist growth.** v11 was unreleased with zero v11 plans in existence at the time of this tightening — nothing in-flight to grandfather, so the "never retrofit a newer version onto an older plan" rule (which exists to protect in-flight plans from a version bump they didn't sign up for) does not apply here: there was no prior real-world v11 behavior for any plan to be retrofitted away from. Promoting D12's task-ledger checks to blocking within the same `canonical_sdlc_version: 11` is therefore a same-version tightening, not a version bump. The shipped docs (SKILL.md/README.md) describe only the resulting v11 contract as current — this rationale (unreleased, zero adopting plans) stays here in memory, not in shipped content.
 
-  Wave-1 lessons still operational: (a) empirical-gate overrides only via explicit user re-ratification, recorded + counted (AC-W3 waived at 91.5% vs 95% after 3 study runs — the waiver-fatigue watch counts it); (b) decision records (ADR ledger cells) drift independently of corrected prose — after any correction, sweep ALL artifacts cross-referencing the corrected value (stance-2 critic caught adr-002 reintroducing the critic-placement error the R8 correction had just killed); (c) `tune` fired zero times on this repo's corpus as of wave 3 — unvalidated until consumer pilots. Design record: `.bionic/docs/ideas/canonical-sdlc-mode-redesign.md`.
+  Wave-1 lessons still operational: (a) empirical-gate overrides only via explicit user re-approval, recorded + counted (AC-W3 waived at 91.5% vs 95% after 3 study runs — the waiver-fatigue watch counts it); (b) decision records (ADR ledger cells) drift independently of corrected prose — after any correction, sweep ALL artifacts cross-referencing the corrected value (stance-2 critic caught adr-002 reintroducing the critic-placement error the R8 correction had just killed); (c) `tune` fired zero times on this repo's corpus as of wave 3 — unvalidated until consumer pilots. Design record: `.bionic/docs/ideas/canonical-sdlc-mode-redesign.md`.
 
 - **Epic integration-branch convention (user-ratified, 2026-07-18): a true epic owns branch `epic/NN-<slug>`** — waves merge into the epic branch; the epic branch merges to main once at epic close (user push gate). Prior epics 01–06 were single waves merging straight to main; epic-07 is the first user of the convention. Wave plans under an epic set `integration-branch: epic/NN-<slug>`, not `main`.
 
@@ -164,7 +164,7 @@ or lets it stand. The menu suggests, and that is all it does.
 
 **Nothing enforces the rung, deliberately.** The three-way wall already accepts every one of
 them — in place as a `## Design` section, or by pointer to whatever the standalone form produced
-— so form selection cannot fail a gate and was never going to. It is guidance ratified in
+— so form selection cannot fail a gate and was never going to. It is guidance approved in
 conversation, and the whole cost of getting it wrong is a design in a shape that does not fit
 its readers.
 
@@ -203,7 +203,7 @@ lines, one or two sentences each — the whole thing is a screen, not a document
 - **Artifact form** — the rung derived from the menu above, printed as a suggested default with
   its one-line reason.
 
-Then question 1, which ratifies the frame and nothing else. Worked, at wave scale:
+Then question 1, which approves the frame and nothing else. Worked, at wave scale:
 
 > **Problem.** Two hooks each hard-code the supported version; nothing makes them move together.
 > **Goal.** One owner for that value, and a test that goes red when any rendering site drifts.
@@ -238,7 +238,7 @@ question. The shape is: what A buys and costs, what B buys and costs, which way 
 — which hands the user something to disagree with inside one turn.
 
 **A tactical choice you may default**, which is what the mark is for, but a default is never
-silent. State it the turn you take it, or at the latest in the closing ratification, in the form
+silent. State it the turn you take it, or at the latest in the closing approval, in the form
 "I defaulted X to Y because Z; say the word and it changes." A tactical default nobody ever saw
 is the same defect as an unlogged assumption, one step earlier.
 
@@ -309,7 +309,7 @@ eval with no nameable "Fails when" is refused at the card. This is how to fill o
 - **Eval type is the ladder in words** — static · unit · hermetic · live · human, T0–T4. Words
   rather than tier codes because the Step-2 card counts types per requirement and a user
   reading `T0 T0 T2` learns nothing they can push back on. The tier code still travels into the
-  plan's matrix, which is machine-read; this column is the one a person ratifies.
+  plan's matrix, which is machine-read; this column is the one a person approves.
 - **Eval is `command → expected observation`,** both halves. A command with no expected
   observation is a thing you ran, not an eval — the reader cannot tell a pass from a crash — and
   an observation with no command is a hope. The observation is what the terminal shows, not the
@@ -362,7 +362,7 @@ shape when an inherited design is right about the domain but silent on this wave
 the pointer names what governs, the local section carries only the delta. The local section does
 not excuse the pointer: a `design:` that is present is resolved, existence-checked and
 `..`-refused whatever else the spec carries, because the path it names is the one the approval
-display prints for the user to open. Whether the inherited design suffices is judgment, ratified
+display prints for the user to open. Whether the inherited design suffices is judgment, approved
 at the Step-3 approval alongside everything else.
 
 `design-waived:` is not a lighter version of the pointer. Waived means no design governs this
@@ -449,7 +449,7 @@ definition in `payload/scripts/lib/archive.sh`; SKILL.md §Step 9 names the call
 
 - **CORRECTED 2026-07-27 (epic-12 wave-01): the always-loaded project-notebook tier this rule described no longer exists.** The old rule ("memory sweep must be recursive — read `INDEX.md` AND every Deep Context pointer") named a load mechanism that epic-12 deleted. What survives is the lesson underneath it, which was never about recursion: **a catalogue entry is not the knowledge.** The 2026-04-16 dry-run that produced the original rule picked a stale design (SessionEnd option C) because the better approach lived one pointer deeper than the entry point that was read.
 
-- **Design-time memory check — the live form of that lesson.** Before ratifying a mechanism at Step 1/2, grep the mechanism's moving parts against the recorded operational record (`.bionic/docs/record/`, `.bionic/docs/ideas/`) and the always-loaded fact bank. Epic-06 shipped "run old playwright CLI under system node" while epic-04's hang lesson sat unread in the record — every downstream gate then verified a doomed design. For anything that executes external binaries, the Verification Matrix needs one live-execution row at Step 5, pre-merge: T2-with-stubbed-binaries cannot catch version-pair incompatibilities.
+- **Design-time memory check — the live form of that lesson.** Before approving a mechanism at Step 1/2, grep the mechanism's moving parts against the recorded operational record (`.bionic/docs/record/`, `.bionic/docs/ideas/`) and the always-loaded fact bank. Epic-06 shipped "run old playwright CLI under system node" while epic-04's hang lesson sat unread in the record — every downstream gate then verified a doomed design. For anything that executes external binaries, the Verification Matrix needs one live-execution row at Step 5, pre-merge: T2-with-stubbed-binaries cannot catch version-pair incompatibilities.
 
 ## Arming doctrine (standing, ratified 2026-08-15 — landing-supervision run)
 
