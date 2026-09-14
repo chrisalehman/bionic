@@ -409,13 +409,23 @@ ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
 # on the closed side with the fact named ("no agent id") rather than on a silent passthrough.
 #
 # A SYMLINK IS ONE WAY A REGISTER GOES UNREADABLE; A MODE IS ANOTHER. A file that EXISTS and
-# this process cannot open — mode 000, an unreadable parent, a hook running under a uid that
-# is not the one that wrote it — yields the same nothing as a link refused on purpose, and
-# the sentence above was only true of the first. Until T26 the second left ROW_BY_NAME empty
+# this process cannot open — mode 000, or a hook running under a uid that is not the one that
+# wrote it — yields the same nothing as a link refused on purpose, and the sentence above was
+# only true of the first. Until T26 the second left ROW_BY_NAME empty
 # and ROSTER_UNREADABLE empty, so EVERY bare-name stop of every agent this session dispatched
 # took the passthrough, silently, announcing that the target "appears on no roster row". At
 # c19c16e that hole was closed by accident (standing came from the live set); T22 made the
 # register the only source of standing, which is what turned the accident into a licence.
+#
+# AN UNREADABLE PARENT IS NOT THIS PREDICATE'S CASE, AND DOES NOT NEED TO BE (T31; delta
+# review S2). `[ -e ]` is a stat of the path, and a stat through a directory this process
+# cannot search FAILS — so with `.bionic/tmp` at mode 000 the test below is false and
+# ROSTER_UNREADABLE stays empty, exactly as if no roster existed. Nothing is lost by that:
+# the engagement marker is a file in that same directory, so a gate that cannot read the
+# directory has already DISARMED several screens above this one and never reaches the roster
+# at all. The mode-000 directory is a silent pass by the arming partition's own rule, not by
+# an oversight here, and a link refused on purpose and a file this uid cannot open are the
+# whole of what the two lines below are for.
 ROSTER_UNREADABLE=""
 [ -L "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1
 [ -e "$ROSTER_FILE" ] && [ ! -r "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1
@@ -462,8 +472,14 @@ roster_walk "$BASE"
 # an agent id names ONE row by construction and must keep resolving, which is the whole
 # reason that arm can offer it as the fix.
 TYPED_AS_ID=""
+TYPED_ROW=""
 if [ -n "$ROW_BY_ID" ]; then
   TYPED_AS_ID=1
+  # AND THE ROW ITSELF IS KEPT, not just the fact that one was typed (T31; delta review D1).
+  # The re-walk below is by NAME and clears all three ROW_ variables on entry, so the row the
+  # operator actually named is gone the moment it has been translated — and on an ambiguous
+  # roster the name no longer picks it back out.
+  TYPED_ROW="$ROW_BY_ID"
   BASE=$(record_field "$ROW_BY_ID" name)
   roster_walk "$BASE"
 fi
@@ -472,6 +488,27 @@ AGENT_NAME="$BASE"
 ROSTER_ROW="$ROW_BY_NAME"
 AGENT_ID=""
 [ -n "$ROW_WITH_ID" ] && AGENT_ID=$(record_field "$ROW_WITH_ID" agent_id)
+
+# AN AGENT ID RESOLVES TO THE ROW THAT CARRIES IT, NEVER TO THE LAST ROW OF ITS NAME (T31;
+# delta review D1). `ROW_WITH_ID` is the last confirmed/identified row of the NAME, which is
+# the right answer for a bare name — it is the current statement about an identity the
+# register holds one of — and the wrong one for an id, which names ONE row by construction.
+# With two live rows of one name, both ids used to land on whichever row is last: the
+# observation channel, the contract row, the deliverable and progress paths and the working
+# log all belonged to the other agent, so a look at one twin discharged a stop of the other.
+# The arm below refuses an ambiguous NAME and prints the ids as the way out of it (§7 — a
+# stop is irreversible), and this is what makes that way out arrive where it says it does.
+#
+# WITHIN ONE LIFECYCLE THIS CHANGES NOTHING, which is why it is an override and not a fourth
+# walk. A lifecycle is `intended` (the dispatch's contract, no id yet) → `confirmed` →
+# `identified` (hooks/execution-recorder.sh, both carrying the id), so the LAST row of a name
+# with one lifecycle is the row with the id and `ROW_BY_NAME` and `TYPED_ROW` are the same
+# line. They diverge only where a second lifecycle exists — which is the defect's whole
+# domain.
+if [ -n "$TYPED_ROW" ]; then
+  ROSTER_ROW="$TYPED_ROW"
+  AGENT_ID=$(record_field "$TYPED_ROW" agent_id)
+fi
 
 # THE ROSTER DECIDES (T22, A-orch-33; AC-4.4). This gate used to ask `live_agents_has` —
 # the newest recorded ListAgents answer — whether exactly one live teammate answered to the

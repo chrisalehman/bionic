@@ -5129,6 +5129,43 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-
 expect_status "t22nfi a relaunch closed by its OWN marker frees the name again" "0" "$GATE_ST"
 expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
 
+# (j) ADOPTION RE-OPENS A NAME THIS SESSION HAD LANDED — deliberate, and nothing drove it
+# (delta review S1; A-T26.2). `contract_note` retires a MET marker on ANY live row of the name
+# that follows it, whatever `session=` that row carries — symmetrical with how the marker is
+# set, and the reading (h) needs. Its consequence is the case below: `session-poker.sh`'s
+# `adopt_write_row` journals a PREDECESSOR session's agent onto THIS session's roster as
+# `status=identified` with `adopted_from=`, so a session that ran and landed a `T5` of its own
+# and then adopts a predecessor's `T5` has a live `T5` row again, and the next dispatch under
+# that name is refused. The refusal is true on its own terms — this register does carry an
+# open row of the name — and (j2) is the way out.
+REPO=$(make_repo t22nfj yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+s22_sweep "$REPO" "$SID_A" "T5"
+# The ADOPT-SHAPED row, and the one field that separates it from (h)'s ordinary relaunch:
+# `adopted_from=` naming the session that launched the agent this one took over.
+roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-4444444444444444 \
+  launched_at=2026-09-02T01:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= "adopted_from=$SID_B" tool_use_id=t-T5d \
+  >> "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfj an ADOPTED live row re-opens a name this session had landed: REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "…naming the same fact" "that name is in flight" "$GATE_ERR"
+expect_contains "…and the status it names is the adopted row's" "identified" "$GATE_VERR"
+
+# (j2) THE PAIRED CONTROL, and the recovery — which is the LANDING MARKER, not an ack.
+# `session-sweeper.sh ack` journals to `sweeper-<session>.state`; this arm reads the ROSTER,
+# and only the `roster-state/v1|` and `landing-swept/v1|` schemas on it, so an ack cannot
+# reach it. Landing the adopted row frees the name, exactly as (e) and (i) free an ordinary
+# one — and without this row (j) is green on a wall that refuses the name forever.
+s22_sweep "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfj2 landing the adopted row frees the name again" "0" "$GATE_ST"
+expect_absent "…and no in-flight refusal is left" "in flight" "$GATE_ERR"
+
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 
 # READ OF THE DRIVER SWEEP INSTALLED IN run_gate. Every payload this file drives — every

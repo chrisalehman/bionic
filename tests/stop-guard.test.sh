@@ -1224,6 +1224,46 @@ expect_status "…while the full agent id resolves and meets the ordinary ceremo
 expect_contains "…which is the observation demand, not an ambiguity" "No observation" "$GUARD_VERR"
 expect_absent "…nothing calls the id ambiguous" "more than one live row" "$GUARD_ERR"
 
+# (c5) THE ID THE AMBIGUITY REFUSAL PRESCRIBES REACHES THE ROW IT NAMES (T31; delta review D1).
+#
+# (c3) proves an agent id is not REFUSED. It never proved the id RESOLVES to its own row, and
+# until T31 it did not: `AGENT_ID` came off `ROW_WITH_ID`, the LAST confirmed/identified row
+# of the NAME, which the second walk recomputes once an id has been translated into that name.
+# On an ambiguous roster both ids therefore landed on whichever row is last — so the
+# observation channel, the contract row and the working-log path all belonged to the OTHER
+# agent, and the way out this refusal prints ("name the full agent id") led straight into it:
+# a look at one twin discharged a stop of the other. That is an irreversible act on an agent
+# nobody looked at, in exactly the state §7 puts this gate on the CLOSED side of.
+#
+# The world below is (c3)'s state with ONE look taken: `atwin-2222…` has been observed and
+# `atwin-1111…` has not. The id that was not looked at must be refused; the id that was must
+# spend its own look. Before T31 the first drive PERMITTED the stop and consumed the other
+# agent's record, which is the two halves failing together.
+IFS='|' read -r TI_REPO TI_TR TI_SUB <<< "$(make_world typedid yes)"
+plant_agent "$TI_SUB" "atwin-1111111111111111" "twin"
+plant_agent "$TI_SUB" "atwin-2222222222222222" "twin"
+sg_roster_row "$TI_REPO" "$SID_A" "twin" "atwin-1111111111111111" "" "identified"
+sg_roster_row "$TI_REPO" "$SID_A" "twin" "atwin-2222222222222222" "" "identified"
+observe "$SID_A" "$TI_TR" "$TI_REPO" "atwin-2222222222222222"
+
+run_guard "$(mk_stop_payload "$SID_A" "$TI_TR" "$TI_REPO" "atwin-1111111111111111")"
+expect_status "the id of the UNOBSERVED twin: REFUSED, never discharged by its twin's look" \
+  2 "$GUARD_ST"
+# The id inside the parentheses is what the gate RESOLVED. Printing the typed id back beside
+# itself is the whole claim: before T31 this line read `(atwin-2222222222222222)`, naming the
+# row the look belonged to while permitting a stop of the other one.
+expect_contains "…and the demand names the id that was typed, resolved to itself" \
+  "No observation of 'atwin-1111111111111111' (atwin-1111111111111111)" "$GUARD_VERR"
+expect_absent "…and the other row's id is nowhere in the refusal" \
+  "atwin-2222222222222222" "$GUARD_VERR"
+
+# THE PAIRED CONTROL, and what makes the arm above a RESOLUTION rule rather than a ban on
+# ids: the id that WAS observed still spends its own look. A gate that refused every id on an
+# ambiguous roster passes all three assertions above and fails this one.
+run_guard "$(mk_stop_payload "$SID_A" "$TI_TR" "$TI_REPO" "atwin-2222222222222222")"
+expect_status "…while the id that WAS observed spends its own look" 0 "$GUARD_ST"
+expect_empty "…and does so in silence" "$GUARD_ERR"
+
 # (c4) THE CONTROL — A LANDED ROW BESIDE A LIVE ONE IS NOT AN AMBIGUITY (T26's reading).
 #
 # A name that landed and was dispatched AGAIN carries two rows and two ids, and only the row
