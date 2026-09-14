@@ -555,6 +555,9 @@ drive() {  # <condition>
 # session-20260815-landing-cleanup: a TaskStop target that resolves to no agent
 # AND wears no agent-address shape is not this gate's business) — distinct from
 # SILENT-WITH-ANNOUNCE, whose announce line is the auto-probe's, not this one's.
+# RE-PINNED (epic-23 wave-13-fixit-180, T14, D8): `stop|unresolvable` no longer
+# passes through — an unrostered, non-address-shaped, non-bash-task-shaped
+# target is now REFUSED (2, loud), matching T5's restored no-row stop refusal.
 # ============================================================
 TABLE='
 start|irrelevant-tool|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
@@ -580,7 +583,7 @@ stop|no-session-key|2|loud|Payload missing its session key, environment carries 
 stop|no-session-key-anywhere|0|silent|No session key on EITHER channel — engagement unprovable, so the switch is open by absence (task-engaged-session)
 stop|empty-target|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|no-transcript|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|unresolvable|0|passthrough|Stop gate — T4 carve: an unresolved target wearing no agent-address shape passes through, OPEN
+stop|unresolvable|2|loud|Stop gate — D8 (wave-13-fixit-180 T5): an unresolved target wearing no agent-address shape is REFUSED, CLOSED
 stop|unresolvable-addressed|2|loud|Stop gate — T4 carve: an unresolved target that DOES wear an agent-address shape still refuses, CLOSED
 stop|ambiguous|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|no-observation|2|loud|Stop gate — after the verdict: CLOSED, loud
