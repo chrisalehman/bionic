@@ -137,15 +137,23 @@ expect_true "the worktree directory exists"            test -d "${R1}/.worktrees
 expect_eq   "the worktree HEAD is the requested base"  "$SHA1" "$(sha_of "${R1}/.worktrees/feat-alpha")"
 expect_eq   "the branch was created at the base"       "$SHA1" "$(git -C "$R1" rev-parse refs/heads/feat-alpha)"
 expect_eq   "the worktree is ON that branch"           "feat-alpha" "$(git -C "${R1}/.worktrees/feat-alpha" rev-parse --abbrev-ref HEAD)"
-# C2 (bionic 1.4.0): the `.bionic` symlink is RETIRED. A writer in a spawned
-# tree reaches the state directory through project_root's git-common-dir
-# mapping instead, so nothing is planted and nothing is attested about a plant.
-expect_false "no .bionic symlink is planted"           test -L "${R1}/.worktrees/feat-alpha/.bionic"
-expect_false "no .bionic entry of any kind is planted" test -e "${R1}/.worktrees/feat-alpha/.bionic"
-expect_eq "create adds NOTHING to the worktree tree beyond the checkout" \
-  "" "$(cd "${R1}/.worktrees/feat-alpha" && ls -A | grep -v -e '^\.git$' -e '^file.txt$' -e '^\.gitignore$')"
-expect_eq "the attestation carries no bionic-symlink field" "0" \
-  "$(printf '%s\n' "$(spawn_out "$R1" create "$SHA1" feat-alpha-3)" | grep -c 'bionic-symlink')"
+# D7 (wave-13, reopens C2): the `.bionic` alias is PLANTED again. A writer in
+# a spawned tree still reaches the state directory through project_root's
+# git-common-dir mapping for every HOOK read — that is unchanged — but a
+# plain relative shell write now also lands there, through the link.
+expect_true "a .bionic symlink IS planted"              test -L "${R1}/.worktrees/feat-alpha/.bionic"
+expect_eq   "…and it resolves to the main checkout's .bionic" \
+  "${R1}/.bionic" "$(cd "${R1}/.worktrees/feat-alpha/.bionic" && pwd -P)"
+expect_eq "create adds NOTHING to the worktree tree beyond the checkout and the alias" \
+  "" "$(cd "${R1}/.worktrees/feat-alpha" && ls -A | grep -v -e '^\.git$' -e '^file.txt$' -e '^\.gitignore$' -e '^\.bionic$')"
+expect_match "the attestation carries an alias= field naming the resolved target" \
+  "*alias=${R1}/.bionic" "$(spawn_out "$R1" create "$SHA1" feat-alpha-3)"
+# A relative write from INSIDE the worktree, exactly as a dispatched writer
+# makes it, must land through the alias in the MAIN checkout — this is the
+# whole point of D7 (AC-7.1).
+( cd "${R1}/.worktrees/feat-alpha" && mkdir -p .bionic/docs/record/w7 && printf 'evidence\n' > .bionic/docs/record/w7/x.md )
+expect_eq "a relative record write from the worktree lands in the main tree" \
+  "evidence" "$(cat "${R1}/.bionic/docs/record/w7/x.md" 2>/dev/null)"
 
 section "Group 4: create — base resolution and the older-commit arm"
 #
@@ -196,8 +204,9 @@ section "Group 6: create — spawning from INSIDE a linked worktree"
 #
 # The nesting accident this repo actually suffered. A dispatcher running inside
 # a worktree must produce a SIBLING under the main checkout, not a worktree
-# inside a worktree. Since C2 there is no symlink to get wrong; what remains is
-# the sibling rule itself, and the absence of a plant in the child too.
+# inside a worktree. `main_root` is resolved via --git-common-dir regardless of
+# cwd, so the sibling's alias points at the MAIN checkout's `.bionic`, same as
+# if it had been spawned from the main checkout directly (D7).
 
 R4="$(new_repo "$TMP/r4")"
 SHA4="$(sha_of "$R4")"
@@ -205,8 +214,10 @@ spawn_out "$R4" create "$SHA4" first >/dev/null
 OUT4="$(spawn_out "${R4}/.worktrees/first" create "$SHA4" second)"
 expect_match "a worktree spawned from inside a worktree is a SIBLING" \
   "*path=${R4}/.worktrees/second *" "$OUT4"
-expect_false "the sibling carries no .bionic entry either" \
-  test -e "${R4}/.worktrees/second/.bionic"
+expect_true "the sibling carries the alias too" \
+  test -L "${R4}/.worktrees/second/.bionic"
+expect_eq "…resolving to the MAIN checkout's .bionic, not the parent worktree's" \
+  "${R4}/.bionic" "$(cd "${R4}/.worktrees/second/.bionic" && pwd -P)"
 expect_false "no nested .worktrees directory was created" test -d "${R4}/.worktrees/first/.worktrees"
 
 section "Group 7: create — refusals"
@@ -267,14 +278,16 @@ mkdir -p "$NB/.bionic"
 expect_match "the same repo is accepted once .bionic exists (the arm discriminates)" \
   "spawn-worktree: OK *" "$(spawn_out "$NB" create "$NBSHA" nostate)"
 
-section "Group 8: create — a tracked .bionic in the branch is no longer a refusal"
+section "Group 8: create — a tracked .bionic in the branch is left alone, no alias planted"
 #
 # Until C2 this fixture was the self-verification failure: `git worktree add`
 # checks the tracked `.bionic` out, the plant target is occupied, and the
-# contract verified-undid-refused. With no plant there is no target and no
-# conflict — the tree simply carries its own `.bionic`, which is the branch's
-# content and none of this script's business. The cleanup-on-failure behaviour
-# that fixture used to drive is proven by Group 10's mutation 3 instead.
+# contract verified-undid-refused. D7 (wave-13) restores the plant, but the
+# same precedent still governs: a branch that already tracks something at
+# `.bionic` owns that path, so `create` leaves it exactly alone rather than
+# clobbering it with the alias — the OK line carries no `alias=` field for
+# this tree. The cleanup-on-failure behaviour that fixture used to drive is
+# proven by Group 10's mutation 3 instead.
 
 R6="$TMP/r6"; mkdir -p "$R6/.bionic"
 git -C "$R6" init --quiet
@@ -294,6 +307,32 @@ expect_true  "its .bionic is the branch's own DIRECTORY, not a link" \
 expect_false "and it is not a symlink"   test -L "${R6}/.worktrees/tracked-state/.bionic"
 expect_eq    "the branch's own state file is what is there" "tracked state" \
   "$(cat "${R6}/.worktrees/tracked-state/.bionic/tracked.md")"
+expect_eq    "the attestation carries no alias= field for this tree" "0" \
+  "$(printf '%s\n' "$OUT6" | grep -c 'alias=')"
+
+# The near-miss: a branch tracking `.bionic` as a SYMLINK (pointing anywhere,
+# even elsewhere) is the same case as a tracked directory — the branch's own
+# content, left exactly alone. `create` never overwrites a pre-existing
+# `.bionic` of any shape.
+R6B="$TMP/r6b"; mkdir -p "$R6B"
+git -C "$R6B" init --quiet
+git -C "$R6B" symbolic-ref HEAD refs/heads/main
+mkdir -p "$TMP/elsewhere-target"; echo elsewhere > "$TMP/elsewhere-target/note.md"
+ln -s "$TMP/elsewhere-target" "$R6B/.bionic"
+echo x > "$R6B/f"
+git -C "$R6B" add .bionic f
+git -C "$R6B" commit --quiet -m "c1, .bionic TRACKED as a symlink"
+R6B="$(cd "$R6B" && pwd -P)"
+SHA6B="$(sha_of "$R6B")"
+OUT6B="$(spawn_out "$R6B" create "$SHA6B" mispointed)"
+expect_match "create still succeeds" "spawn-worktree: OK *" "$OUT6B"
+expect_true "a pre-existing symlink at .bionic is left exactly alone" \
+  test -L "${R6B}/.worktrees/mispointed/.bionic"
+expect_eq "…still resolving where it always did, not to the main checkout" \
+  "$(cd "$TMP/elsewhere-target" && pwd -P)" \
+  "$(cd "${R6B}/.worktrees/mispointed/.bionic" && pwd -P)"
+expect_eq "the attestation carries no alias= field here either" "0" \
+  "$(printf '%s\n' "$OUT6B" | grep -c 'alias=')"
 
 section "Group 9: remove — the companion verb"
 #
@@ -304,6 +343,9 @@ section "Group 9: remove — the companion verb"
 R7="$(new_repo "$TMP/r7")"
 SHA7="$(sha_of "$R7")"
 spawn_out "$R7" create "$SHA7" temp-work >/dev/null
+# D7: create planted a real alias — prove it is there before remove takes it,
+# so the assertions below show something real was torn down.
+expect_true "the alias exists before remove" test -L "${R7}/.worktrees/temp-work/.bionic"
 OUT7="$(spawn_out "$R7" remove "${R7}/.worktrees/temp-work")"
 
 expect_match "remove reports success" "spawn-worktree: REMOVED *" "$OUT7"

@@ -13,11 +13,16 @@
 # SOURCED, NOT EXECUTED. Function names are prefixed `worktree_` (public) or
 # `_wt_` (internal); nothing here runs at source time and nothing here exits.
 #
-# THE SYMLINK IS RETIRED (C2). `<worktree>/.bionic -> <main-root>/.bionic` is no
-# longer planted by anything; a writer in a spawned tree reaches the state
-# directory through project_root's git-common-dir mapping instead. What remains
-# is the cleanup: `worktree_legacy_links` lists the ones an older bionic left
-# behind, and the teardown verbs delete one when they meet it.
+# THE SYMLINK IS BACK (D7, wave-13-fixit-180, reopens C2).
+# `<worktree>/.bionic -> <main-root>/.bionic` is planted again by
+# `spawn-worktree.sh create`, so a plain relative shell write — no hook in the
+# loop — lands in the one project memory instead of being orphaned inside the
+# tree; every HOOK read still reaches the state directory through
+# project_root's git-common-dir mapping, unaffected. `worktree_legacy_links`
+# lists only a link that resolves somewhere OTHER than the main root's
+# `.bionic` — a correctly-pointing alias is the expected state, not a finding
+# — and the teardown verbs (`remove`, `land`) delete whichever kind they meet,
+# same as before.
 #
 # NO `--force`, ANYWHERE. git's refusal to discard uncommitted work is the
 # feature; a land that forced would be a lease that ate a writer's work.
@@ -68,18 +73,25 @@ _wt_branch_protected() {  # <branch> -> 0 protected, 1 not, 2 unknowable
 }
 
 
-# Every legacy `<main-root>/.worktrees/*/.bionic` that is a SYMLINK, absolute,
-# one per line. A real `.bionic` directory in a tree is the branch's own content
-# and is never listed: the difference between deleting a dead link and deleting
-# a writer's state is this test.
+# Every MIS-POINTED `<main-root>/.worktrees/*/.bionic` symlink, absolute, one
+# per line (D7). A link resolving to the main root's OWN `.bionic` — exactly
+# what `spawn-worktree.sh create` plants — is the expected, constructive state
+# and is never listed; only a link some other bionic version, or some other
+# hand, pointed SOMEWHERE ELSE (including a broken target that resolves to
+# nothing) is stale. A real `.bionic` directory in a tree is the branch's own
+# content and is never listed either: the difference between deleting a dead
+# link and deleting a writer's state is this test.
 worktree_legacy_links() {  # <main-root> -> <abs path> per line
-  local root d link
+  local root d link resolved expected
   root="$(_wt_abs "${1:-}")" || return 0
   [ -d "${root}/.worktrees" ] || return 0
+  expected="$(cd "${root}/.bionic" 2>/dev/null && pwd -P)"
   for d in "${root}/.worktrees"/*; do
     [ -d "$d" ] || continue
     link="${d}/.bionic"
     [ -L "$link" ] || continue
+    resolved="$(cd "$link" 2>/dev/null && pwd -P)"
+    [ -n "$resolved" ] && [ "$resolved" = "$expected" ] && continue
     printf '%s\n' "$link"
   done
 }

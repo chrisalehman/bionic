@@ -2216,7 +2216,13 @@ section "Section 18: REQ-1b — the split skill's byte caps and the core's step 
 # card's conditional governing-design slot (AC-8.3) are both chartered growth this same wave
 # approved, not drift — the requirements file records neither the old nor the new total as a
 # ratified number of its own, so this comment carries the amendment instead; a future wave
-# that needs the cap raised again still raises it in the requirements first. A fifth cap,
+# that needs the cap raised again still raises it in the requirements first. RE-RAISED AGAIN
+# to 109,293 (epic-23 wave-13 T7, 2026-09-14, +175 B): the one-sentence "one docs tree"
+# addition AC-7.4 requires in orchestrator-dispatch.md (a positive statement that a worktree
+# writer's relative record path lands in the project's docs tree by construction) is this
+# wave's own chartered growth too — cut to the shortest wording that still carries a
+# grep-pinnable "one docs tree" phrase (Section 25 below), with T2's zero-slack total
+# leaving no room to add it for free. A fifth cap,
 # also from the 2026-09-11 ruling, pins the loaded surface itself: core + the largest single
 # steps/N.md ≤ 36,000 B, since that pair
 # is what a session actually carries at a step boundary — the whole-surface total below it
@@ -2289,12 +2295,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 109,118 B (no growth)" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 109118 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 109,118 B (no growth) ($SPLIT_TOTAL B ≤ 109118 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 109,293 B (no growth)" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 109293 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 109,293 B (no growth) ($SPLIT_TOTAL B ≤ 109293 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 109,118 B (no growth)" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 109118)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 109,293 B (no growth)" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 109293)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
@@ -2750,5 +2756,83 @@ if has_pin "$DOCTORED_REPAIR" "$PIN_REPAIR"; then
 else
   ok "133c: a doctored survival.md fails the repair-rule pin (pin discriminates)"
 fi
+
+# ---------------------------------------------------------------------------
+section "Section 25: T7 — the worktree alias, and operational-rules.md's own ratif sweep (REQ-7, AC-7.4, AC-8.2)"
+#
+# WHAT THIS OWNS. AC-7.4 (epic-23 wave-13-fixit-180 spec): the rendered dispatch.md carries
+# a positive sentence about the one docs tree, and spawn-worktree.sh no longer carries the
+# retired C2 sentence — both independent of T2's Section 23 pins, which cover the other
+# three ratif→approv surfaces. AC-8.2's OWN scope split (Section 23's pin comment, line
+# ~2634): operational-rules.md's seven UNDATED "ratif*" prose uses were explicitly OUT of
+# T2's span and move here (A-orch-16) — this is that arm.
+
+SPAWN_WORKTREE="${REPO}/payload/scripts/spawn-worktree.sh"
+
+# --- AC-7.4a: the rendered dispatch.md carries the "one docs tree" sentence ---
+#
+# fails-when: grep -c "one docs tree" dispatch.md is 0.
+ONEDOCS_N="$(grep -c 'one docs tree' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$ONEDOCS_N" ] || ONEDOCS_N=0
+if [ "$ONEDOCS_N" -ge 1 ] 2>/dev/null; then
+  ok "134: AC-7.4 — the rendered dispatch.md names the one docs tree a relative worktree write lands in"
+else
+  no "134: AC-7.4 — the rendered dispatch.md names the one docs tree a relative worktree write lands in" \
+     "count=${ONEDOCS_N} file=$DISPATCH_MD"
+fi
+
+# Anti-vacuity: a dispatch.md with the sentence stripped reads 0.
+ONEDOCS_MUT="$TMP/dispatch-no-onedocs.md"
+grep -v 'one docs tree' "$DISPATCH_MD" > "$ONEDOCS_MUT" 2>/dev/null
+expect_eq "134b: a dispatch.md with the sentence stripped reads 0, not ≥1 (the count discriminates)" \
+  "0" "$(grep -c 'one docs tree' "$ONEDOCS_MUT" 2>/dev/null | tr -cd '0-9')"
+
+# --- AC-7.4b: spawn-worktree.sh no longer carries the retired C2 sentence ---
+#
+# fails-when: spawn-worktree.sh still says "NO SYMLINK, AND THAT IS THE POINT".
+NOSYMLINK_N="$(grep -c 'NO SYMLINK, AND THAT IS THE POINT' "$SPAWN_WORKTREE" 2>/dev/null | tr -cd '0-9')"
+[ -n "$NOSYMLINK_N" ] || NOSYMLINK_N=0
+expect_eq "135: AC-7.4 — spawn-worktree.sh no longer says 'NO SYMLINK, AND THAT IS THE POINT'" \
+  "0" "$NOSYMLINK_N"
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+NOSYMLINK_MUT="$TMP/spawn-worktree-old-header.md"
+printf '# NO SYMLINK, AND THAT IS THE POINT (bionic 1.4.0, design ledger C2).\n' > "$NOSYMLINK_MUT"
+expect_true "135b: the NO-SYMLINK grep fires on the shape it targets (the pattern discriminates)" \
+  grep -q 'NO SYMLINK, AND THAT IS THE POINT' "$NOSYMLINK_MUT"
+
+# --- AC-8.2 (A-orch-16): operational-rules.md's seven UNDATED "ratif*" prose uses are gone;
+# every DATED historical attribution stays byte-identical (this pin does not touch those). ---
+#
+# "Undated" = the line containing "ratif" carries no 2026-NN-NN date pattern anywhere on it
+# — the same discriminator Section 23's comment describes and this task's brief measured
+# (lines ~60, 167, 206, 241, 312, 365, 452 before the sweep). A dated line ("user-ratified,
+# 2026-07-18", "ratified 2026-08-15") is untouched by design and must remain.
+OPRULES_UNDATED_N="$(grep -i 'ratif' "$OPRULES" 2>/dev/null | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -c .)"
+[ -n "$OPRULES_UNDATED_N" ] || OPRULES_UNDATED_N=0
+if [ "$OPRULES_UNDATED_N" -eq 0 ] 2>/dev/null; then
+  ok "136: AC-8.2 — operational-rules.md carries no undated 'ratif' line (dated historical attributions untouched)"
+else
+  no "136: AC-8.2 — operational-rules.md carries no undated 'ratif' line (dated historical attributions untouched)" \
+     "count=${OPRULES_UNDATED_N}: $(grep -in 'ratif' "$OPRULES" 2>/dev/null | grep -viE '2026-[0-9]{2}-[0-9]{2}')"
+fi
+
+# The dated lines must still be there — this pin narrows AC-8.2's scope, it does not widen
+# it into a second copy of Section 23's "ratif" ban over the whole file (A-orch-16 is
+# explicit that dated historical attributions stay byte-identical).
+OPRULES_DATED_N="$(grep -i 'ratif' "$OPRULES" 2>/dev/null | grep -ciE '2026-[0-9]{2}-[0-9]{2}')"
+[ -n "$OPRULES_DATED_N" ] || OPRULES_DATED_N=0
+expect_true "136b: …and at least one dated historical attribution survives (this pin narrows, never widens)" \
+  test "$OPRULES_DATED_N" -ge 1
+
+# Anti-vacuity: the discriminator must actually tell dated from undated.
+UNDATED_MUT="$TMP/opr-undated.md"
+printf 'It is guidance ratified in conversation.\n' > "$UNDATED_MUT"
+DATED_MUT="$TMP/opr-dated.md"
+printf 'Epic integration-branch convention (user-ratified, 2026-07-18): a true epic.\n' > "$DATED_MUT"
+expect_true "136c: an undated ratif line is caught by the discriminator" \
+  bash -c "grep -i ratif '$UNDATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
+expect_false "136d: …a dated one is not (the discriminator does not over-fire)" \
+  bash -c "grep -i ratif '$DATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
 
 finish

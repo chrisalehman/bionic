@@ -28,15 +28,20 @@
 # failure it removes what it created and refuses. There is never an unattested
 # worktree: no half-built tree, no orphan branch.
 #
-# NO SYMLINK, AND THAT IS THE POINT (bionic 1.4.0, design ledger C2). This
-# script used to plant `<worktree>/.bionic` -> `<main-root>/.bionic` so a writer
-# in a spawned tree reached the same plan, ledger and record files as everyone
-# else. It reaches them now through `project_root`, which maps a linked
-# worktree to the main checkout by `--git-common-dir` — the same answer without
-# a link in the tree to be followed by the wrong reader, chased by a cleanup, or
-# checked out over. `create` plants nothing; `remove` and `land` DELETE a legacy
-# link an older bionic left behind, and `worktree_legacy_links` in
-# payload/scripts/lib/worktree.sh lists them for doctor.
+# ONE MEMORY, ONE LINK (D7, wave-13-fixit-180, reopens design ledger C2). Every
+# HOOK read still reaches the state directory through `project_root`'s
+# `--git-common-dir` mapping, unchanged since C2. But a plain relative shell
+# write — the shape a dispatched writer actually uses, no hook in the loop —
+# physically lands wherever cwd says, and C2 left that write orphaned inside
+# the worktree. So `create` plants `<worktree>/.bionic -> <main-root>/.bionic`
+# again: the writer-side reason C2's retirement note did not have. The link
+# never enters the index (`.gitignore:43` ignores `.bionic` in either shape),
+# so it changes nothing about how a HOOK resolves a path — only about where a
+# plain write physically goes. `remove` and `land` still delete it on the way
+# out, exactly as they deleted a legacy link before; `worktree_legacy_links` in
+# payload/scripts/lib/worktree.sh now lists only a link that resolves
+# somewhere OTHER than the main root's `.bionic` — the correctly-pointing kind
+# this script plants is the expected state, not a finding for doctor.
 #
 # THE MAIN ROOT, NOT THE CURRENT ONE. Paths resolve against the main checkout,
 # found through `--git-common-dir` rather than `--show-toplevel`, and a
@@ -113,11 +118,13 @@ Usage:
   spawn-worktree.sh land   <worktree-path>
 
 create  makes the branch AND the worktree at exactly <base-sha>, verifies
-        both, and prints one OK attestation line. Nothing is planted in the
-        tree. Default parent: <main-root>/.worktrees. A relative parent
-        resolves against the main root, never against pwd.
-remove  removes the worktree and KEEPS the branch, deleting a legacy
-        <worktree>/.bionic symlink first if an older bionic left one.
+        both, plants <worktree>/.bionic -> <main-root>/.bionic (D7; unless the
+        branch already tracks something at that path), and prints one OK
+        attestation line. Default parent: <main-root>/.worktrees. A relative
+        parent resolves against the main root, never against pwd.
+remove  removes the worktree and KEEPS the branch, deleting the
+        <worktree>/.bionic link first (the one create planted, or a legacy
+        one an older bionic left).
 land    ends the lease in one act: merges the tree's branch --no-ff into the
         main checkout's CURRENT branch, removes the tree, prunes. Keeps the
         branch. Refuses — naming why — on a dirty tree, on nothing to land,
@@ -140,9 +147,9 @@ main_root=""; wt=""; branch=""; created=0
 
 cleanup_partial() {
   [ -n "$wt" ] || return 0
-  # A legacy link (C2) would make git refuse the removal below; nothing here
-  # plants one any more, but an aborted create on a tree that already had one
-  # must still come away clean.
+  # The alias this create call may have just planted (D7) — or a legacy link
+  # an older bionic left — would make git refuse the removal below; either way
+  # an aborted create must come away clean.
   if [ -L "${wt}/.bionic" ]; then rm -f "${wt}/.bionic"; fi
   if [ -n "$main_root" ] && [ -d "$wt" ]; then
     git -C "$main_root" worktree remove --force "$wt" >/dev/null 2>&1 || rm -rf "$wt"
@@ -213,15 +220,32 @@ cmd_create() {
 
   # Read everything back. Nothing below is taken from an argument. A `.bionic`
   # path the branch itself carries is checked out here like any other tracked
-  # content and is left exactly alone: since C2 this script plants nothing into
-  # the tree, so there is no target for it to occupy.
+  # content and is left exactly alone — the plant below only ever targets a
+  # path that is not there yet.
   local head
   head="$(git -C "$wt" rev-parse HEAD 2>/dev/null)"
   [ "$head" = "$base_sha" ] || abort_created head-mismatch
   [ "$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$branch" ] \
     || abort_created branch-mismatch
 
-  contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}"
+  # D7 (wave-13-fixit-180, reopens C2): plant the ONE-MEMORY alias, so a plain
+  # relative shell write from inside this tree — no hook in the loop — lands in
+  # the main checkout's `.bionic` rather than being orphaned inside the tree.
+  # Only when nothing is there already: a `.bionic` the branch itself tracks
+  # (directory or symlink, working or broken) is the branch's own content and
+  # is left exactly alone, same as before D7.
+  local alias_field=""
+  if [ ! -e "${wt}/.bionic" ] && [ ! -L "${wt}/.bionic" ]; then
+    local bionic_state resolved expected
+    bionic_state="$(bionic_root "$main_root")"
+    ln -s "$bionic_state" "${wt}/.bionic" 2>/dev/null || abort_created alias-uncreatable
+    resolved="$(cd "${wt}/.bionic" 2>/dev/null && pwd -P)"
+    expected="$(cd "$bionic_state" 2>/dev/null && pwd -P)"
+    [ -n "$resolved" ] && [ "$resolved" = "$expected" ] || abort_created alias-mismatch
+    alias_field=" alias=${resolved}"
+  fi
+
+  contract "OK path=${wt} branch=${branch} head=${head} base=${base_sha}${alias_field}"
 }
 
 cmd_remove() {
@@ -241,11 +265,11 @@ cmd_remove() {
   local root; root="$(worktree_root "$wt_abs")"
   [ -n "$root" ] || _wt_refuse repo-root-unresolvable
 
-  # A LEGACY link (C2) — one an older bionic planted, since nothing plants one
-  # now. git reads it as an untracked file and would refuse to remove the tree
-  # over it, so it is taken away first, and it is NOT put back: the retirement
-  # is the point, and a refusal that restored it would leave the next call to
-  # meet the same obstacle.
+  # THE ALIAS (D7) — the one `create` planted, or a legacy link an older
+  # bionic left — is untracked as far as git is concerned and would refuse to
+  # remove the tree over it, so it is taken away first, and it is NOT put
+  # back: the tree is going away, and a refusal that restored it would leave
+  # the next call to meet the same obstacle.
   if [ -L "${wt_abs}/.bionic" ]; then
     rm -f "${wt_abs}/.bionic"
   fi
