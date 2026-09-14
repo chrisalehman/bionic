@@ -5079,6 +5079,56 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "-" "claude-sonnet-5
 expect_absent "t22nfg an unnamed dispatch is never refused for a name in flight" \
   "in flight" "$GATE_ERR"
 
+# (h) THE LANDED-THEN-RELAUNCHED NAME — the case the arm was built for and missed
+# (delta review C1/S2). `T5` runs, lands, and its MET marker frees the name; the SAME name
+# is then dispatched again (which (e) proves is allowed) and that second lineage reaches
+# `identified`. A THIRD dispatch under `T5` while that lineage is live must be refused.
+#
+# WHY IT NEEDS ITS OWN CASE. `met` was a file-global flag set by ANY marker for the name,
+# so one landing turned the arm off for that name for the rest of the session — and (e)'s
+# fixture, which stops at the marker, cannot tell a position-blind reading from a
+# position-aware one. The rule is that the LATEST contract decides: a marker older than the
+# newest intended/confirmed/identified row of that name does not close it.
+REPO=$(make_repo t22nfh yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-1111111111111111 \
+  launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T5 >> "$(roster_path "$REPO" "$SID_A")"
+s22_sweep "$REPO" "$SID_A" "T5"
+# …the relaunch: a fresh contract for the same name, AFTER the marker.
+s22_roster_row "$REPO" "$SID_A" "T5"
+roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-2222222222222222 \
+  launched_at=2026-09-02T01:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T5b >> "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfh a name RELAUNCHED after its MET marker is in flight again: REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "…naming the fact" "that name is in flight" "$GATE_ERR"
+expect_contains "…and the status it names is the LATEST row's, not the first lineage's" \
+  "identified" "$GATE_VERR"
+
+# (i) THE PAIRED CONTROL — the SAME five rows plus the relaunch's OWN marker. The latest
+# contract is closed, so the name is free again. An arm that simply ignored MET markers
+# once a name had ever been open would pass (h) and fail here.
+REPO=$(make_repo t22nfi yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+s22_sweep "$REPO" "$SID_A" "T5"
+s22_roster_row "$REPO" "$SID_A" "T5"
+roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-3333333333333333 \
+  launched_at=2026-09-02T01:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T5c >> "$(roster_path "$REPO" "$SID_A")"
+s22_sweep "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfi a relaunch closed by its OWN marker frees the name again" "0" "$GATE_ST"
+expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
+
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 
 # READ OF THE DRIVER SWEEP INSTALLED IN run_gate. Every payload this file drives — every

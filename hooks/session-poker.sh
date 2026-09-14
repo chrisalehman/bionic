@@ -3006,6 +3006,17 @@ EOF
     # idle on one panel because nobody stopped them. It is answered here instead, from the
     # roster, by the one process that already walks every row and every verdict.
     TASKSTOP_NAMES=""
+    # THE SWEPT SET IS READ ONCE, BEFORE THE WALK (Step-6 delta review P1). The membership
+    # test below used to be `grep -F … "$ROSTER_FILE" | grep -qF …` INSIDE the per-row loop:
+    # a whole-file read and two forks per MET row, on a file that grows monotonically for the
+    # life of the session — O(MET x roster), and MET rows are the majority of a wave by its
+    # close. One read, then an in-shell `case`, costs the same on the first row and nothing on
+    # the rest. Adds no `jq` call and no transcript read: the §19i pin is untouched.
+    #
+    # THE MATCH STAYS LITERAL. `grep -qF` treated the name as a fixed string; a `case` pattern
+    # does too as long as the variable is QUOTED inside it, which is what keeps a roster name
+    # carrying `*` or `?` from globbing against this blob.
+    SWEPT_ALL="$(grep -F "$SWEPT_SCHEMA|" "$ROSTER_FILE" 2>/dev/null)"
     # The names of the rows the verdict leaves open, kept so the live set can trim them
     # AFTER this walk rather than inside it: one transcript resolution per tick, not one
     # per row, and the roster count survives as its own number (S19).
@@ -3047,9 +3058,11 @@ EOF
           # would be the noise that teaches a reader to skip the line. MET-and-unswept is a
           # contract that landed while its agent is still addressable — the one case where
           # somebody has to act, and the act is a TaskStop.
-          if [ "$RSTATE" = "MET" ] \
-             && ! grep -F "$SWEPT_SCHEMA|" "$ROSTER_FILE" 2>/dev/null | grep -qF "|name=${RNAME}|"; then
-            TASKSTOP_NAMES="${TASKSTOP_NAMES}${TASKSTOP_NAMES:+ }$(clean "$RNAME")"
+          if [ "$RSTATE" = "MET" ]; then
+            case "$SWEPT_ALL" in
+              *"|name=${RNAME}|"*) : ;;   # already swept — the lineage is gone
+              *) TASKSTOP_NAMES="${TASKSTOP_NAMES}${TASKSTOP_NAMES:+ }$(clean "$RNAME")" ;;
+            esac
           fi
           ;;                                  # closed — not open
         *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
@@ -3233,6 +3246,40 @@ EOF
         # contracts is a number with no story. Only when it actually moved: a tick whose
         # live set agrees with its roster has nothing to explain.
         say "live set fresh — ${OPEN_ROSTER} open row(s) on this roster, ${OPEN} still live; open= and any fill are sized from the live set"
+      fi
+    fi
+
+    # ---------- THE DUPLICATE-START TELL (T22 row (d), delta review C2) ----------
+    #
+    # hooks/execution-recorder.sh journals `status=duplicate-start` when one agent id starts a
+    # SECOND time in this session — a resumed copy working a contract the first process still
+    # holds. That row was accepted as the answer BECAUSE a SubagentStart hook cannot block
+    # (A-T22.4): the door that closes is the dispatch wall, one event earlier, and the record
+    # exists so that somebody SEES the case the door was not asked about. Until this block
+    # nothing read the field: the DUPLICATE-SESSION tell above asks a different question — a
+    # live name NO roster of this project carries — and a duplicate start is carried by `name=`
+    # AND by `agent_id=`, so that tell is silent on exactly this row.
+    #
+    # ROSTER-ONLY, AND OUTSIDE THE LIVE-SET ARM. The fact is on disk. A tell that needed a
+    # ListAgents answer, or an open row to trim, would go quiet in precisely the degraded
+    # session that produces the row — one that just lost its agent table across a `/clear`.
+    #
+    # ONE LINE PER ROW, NOT PER NAME: two duplicate starts are two events, and collapsing them
+    # would hide the second. It is a TELL and nothing else — no stop, no roster write, no
+    # effect on FILL, QUIET, NOTIFY or `open=`.
+    if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
+      DUP_START_ROWS="$(grep -F "|status=duplicate-start|" "$ROSTER_FILE" 2>/dev/null)"
+      if [ -n "$DUP_START_ROWS" ]; then
+        while IFS= read -r DS_LINE; do
+          # The schema prefix is checked here as every other roster reader in this file checks
+          # it: `|status=` is not unique to a roster-state row by construction, only in practice.
+          case "$DS_LINE" in "roster-state/v1|"*) : ;; *) continue ;; esac
+          DS_NAME="$(clean "$(line_field "$DS_LINE" name)")"
+          [ -n "$DS_NAME" ] || continue
+          say "DUPLICATE-START ${DS_NAME} — a second start under an id that already has a live row; the dispatch wall is the door that closes"
+        done <<EOF
+$DUP_START_ROWS
+EOF
       fi
     fi
 
