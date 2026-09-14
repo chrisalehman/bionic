@@ -345,9 +345,20 @@ iso_epoch() {  # <ISO-8601 Z> -> epoch seconds, empty if unreadable
 # Values reaching a pipe-delimited record are roster-sourced prose and operator-supplied
 # paths; a `|`, newline or control character inside one would forge a field. Normalized
 # rather than refused, exactly as hooks/stop-check.sh normalizes its machine line.
+#
+# THE SECOND ARGUMENT IS THE POKER'S OWN ADDITION (T9, REQ-9), carried here so the two
+# copies stay code-identical (tests/cross-gate-agreement.test.sh §O) — this file never
+# calls clean() with one, since none of its own values are the list-valued fields
+# (`suites_allowed=`, `files=`) the poker's `adopt_write_row` exempts from the cut. Every
+# call in THIS file stays on the `*)` branch below, cut at 400 exactly as before.
 clean() {  # <value>
-  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
+  local out
+  out="$(printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
+    -e 's/^ *//' -e 's/ *$//')"
+  case "${2:-}" in
+    suites_allowed|files) printf '%s' "$out" ;;
+    *) printf '%s' "$out" | cut -c 1-400 ;;
+  esac
 }
 
 # THE ONE RESOLUTION RULE, and it is not this file's (epic-17 W6 S15, A-6.S15.4). Body for
