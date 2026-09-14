@@ -534,6 +534,58 @@ expect_match "31g: the long path was elided" "*…*" "$LINE13"
 expect_match "31h: …and the OTHER-checkout verdict survived the cut whole" \
   "*\[OTHER checkout — the CLI loads the plugin from THERE\]" "$LINE13"
 
+echo "--- 7f: a sibling worktree of the SAME repository qualifies the OTHER-checkout verdict (AC-6.4) ---"
+
+# detect_checkout_verdict IS CALLED DIRECTLY HERE, never through doctor.sh. doctor's own
+# DOCTOR_REPO_ROOT (doctor.sh:126) resolves to wherever doctor.sh physically lives on
+# THIS machine — its own script location, not overridable by any fixture — so the only
+# hermetic way to hold BOTH sides of a "same repository, different worktree" comparison
+# under test is to build a fully sandboxed main-repo/worktree pair and call the function
+# with it directly, never touching the real checkout running this suite (test-harness
+# rule: no git fixture may run inside the real repo).
+DCV_MAIN="${TMP}/dcv-main"
+mkdir -p "$DCV_MAIN"
+( cd "$DCV_MAIN" && git init -q . && git -c user.email=t@t -c user.name=t \
+    commit -q --allow-empty -m "dcv main" ) >/dev/null 2>&1
+DCV_WT="${TMP}/dcv-wt"
+( cd "$DCV_MAIN" && git worktree add -q "$DCV_WT" -b dcv-wt-branch ) >/dev/null 2>&1
+
+dcv_verdict() {  # <claude-home> <compare-root> -> detect_checkout_verdict's answer
+  ( BIONIC_CLAUDE_HOME="$1" DCV_CMP="$2" bash -c \
+      '. "$1/scripts/lib/detect.sh"; detect_checkout_verdict "$DCV_CMP"' _ "$PAYLOAD" )
+}
+
+HOME_DCV1="$(make_registry_home)"
+write_known_marketplaces "$HOME_DCV1" '{"source":"directory","path":"'"$DCV_WT"'"}' "$DCV_WT"
+VERDICT_DCV1="$(dcv_verdict "$HOME_DCV1" "$DCV_MAIN")"
+expect_eq "31i: a sibling worktree of the same repository reads the qualified verdict" \
+  "OTHER checkout (worktree of this repo)" "$VERDICT_DCV1"
+
+# NOT RE-PROVEN THROUGH doctor.sh's OWN RENDERING HERE: `DOCTOR_REPO_ROOT`
+# (doctor.sh:126) resolves from doctor.sh's OWN on-disk location
+# (`${BASH_SOURCE[0]}`), "never from BIONIC_PLUGIN_ROOT" by that line's own
+# header — so there is no hermetic way to make it answer with a sandboxed root
+# without copying doctor.sh's whole lib/ tree out of the real repo, which is
+# more fixture than this row needs. §7b (31c) already proves the bracket
+# renders `detect_checkout_verdict`'s return value VERBATIM for the plain
+# "OTHER checkout" case; the substitution below (doctor.sh's `if`/`else`) is
+# unchanged generic interpolation, so 31i's direct proof of the STRING plus
+# 31c's proof of the RENDERING is the full claim, without a git fixture inside
+# this suite's own real checkout.
+
+echo "--- 7g: an unrelated separate clone — a git repo, but NOT a worktree of this one — carries no qualifier (AC-6.4 control) ---"
+
+DCV_OTHER="${TMP}/dcv-other"
+mkdir -p "$DCV_OTHER"
+( cd "$DCV_OTHER" && git init -q . && git -c user.email=t@t -c user.name=t \
+    commit -q --allow-empty -m "dcv other" ) >/dev/null 2>&1
+
+HOME_DCV2="$(make_registry_home)"
+write_known_marketplaces "$HOME_DCV2" '{"source":"directory","path":"'"$DCV_OTHER"'"}' "$DCV_OTHER"
+VERDICT_DCV2="$(dcv_verdict "$HOME_DCV2" "$DCV_MAIN")"
+expect_eq "31j: an unrelated separate clone reads the PLAIN verdict, no qualifier" \
+  "OTHER checkout" "$VERDICT_DCV2"
+
 section "Section 8: feed kind is keyed on the installed plugin's own marketplace name (AC-18, L-DETECT/4.1)"
 
 # THE DEFECT. detect_marketplace_feed_kind used to key known_marketplaces.json

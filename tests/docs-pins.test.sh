@@ -2229,6 +2229,14 @@ section "Section 18: REQ-1b — the split skill's byte caps and the core's step 
 # does not measure that. Headroom under a cap is not a reason to move the cap down, and a
 # future wave that needs a cap raised raises it in the requirements first.
 #
+# SET TO 110,000 (epic-23 wave-13 T11, 2026-09-14, A-orch-29): Chris ruled
+# "Option 2" on the aggregate cap directly, not another chartered-growth
+# increment — a RATCHET WITH AN OWNER, moved only by a named ruling with its
+# reason, the number itself the recommended one Chris accepted with the
+# option. This is not headroom for a specific sentence the way the two raises
+# above were; it is the ceiling itself changing, recorded here in AC-2.2
+# (requirements + plan) as well as in this comment's own established pattern.
+#
 # AC-1b.5 is the structural half, and it is what makes the byte caps mean anything: a core
 # that still carried its `### Step N` sections would be under no cap at all, and a core that
 # dropped the sections without naming the files would leave the model with no way to find
@@ -2295,12 +2303,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 109,293 B (no growth)" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 109293 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 109,293 B (no growth) ($SPLIT_TOTAL B ≤ 109293 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 110000 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B ($SPLIT_TOTAL B ≤ 110000 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 109,293 B (no growth)" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 109293)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 110000)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
