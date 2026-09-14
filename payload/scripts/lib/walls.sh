@@ -127,6 +127,73 @@ wall_libs() {  # <wall name> <basename>… -> 0 all sourced · 1 one named, call
   return 0
 }
 
+# ─── _wall_flatten — the one-line form of a command, without a pipeline ──────
+#
+# Sets `_WALL_FLAT` to `$1` with every run of whitespace collapsed to one space
+# and the ends trimmed. It replaces, character for character in its output, the
+# three-fork pipeline two walls carried:
+#
+#     printf '%s' "$c" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' \
+#       | tr '\n' ' ' | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//'
+#
+# THE CR PASS DISAPPEARS BECAUSE THE SQUEEZE SWALLOWS IT (REQ-10, T11). awk
+# turned CRLF into one newline and a lone CR into another, `tr` turned every
+# newline into a space, and `sed` then collapsed every run of whitespace to a
+# single space — so the CR normalisation could only ever decide whether a run of
+# whitespace was one character or two, which the squeeze erases either way. What
+# is left is exactly "split on whitespace, join with one space", and that is
+# shell word-splitting.
+#
+# IFS CARRIES ALL SIX CHARACTERS `[[:space:]]` NAMES — space, tab, newline,
+# carriage return, vertical tab, form feed — because `sed`'s squeeze did, and a
+# narrower IFS would leave a form feed sitting inside a token that used to be a
+# separator.
+#
+# `set -f` IS NOT OPTIONAL. Unquoted word-splitting also globs, and this function
+# is handed command lines: `ls *.sh` would come back as the directory listing. The
+# previous setting is restored rather than assumed, so a caller that had already
+# disabled globbing keeps it disabled.
+#
+# IT ASSIGNS RATHER THAN PRINTS, so no caller needs a command substitution: the
+# pipeline it replaces cost three forks and the `$( )` around it a fourth.
+_WALL_FLAT=""
+_wall_flatten() {  # <text> -> sets _WALL_FLAT
+  local _w _out="" _glob=0 IFS=$' \t\n\r\v\f'
+  case $- in *f*) _glob=1 ;; esac
+  set -f
+  for _w in $1; do
+    if [ -z "$_out" ]; then _out="$_w"; else _out="$_out $_w"; fi
+  done
+  [ "$_glob" = 1 ] || set +f
+  _WALL_FLAT="$_out"
+}
+
+# ─── _wall_mentions_git — the cheap superset of "this could be a git command" ─
+#
+# 0 when `git` could still be argv[0] of some segment of `$1`, 1 when the parser
+# in payload/scripts/lib/git-argv.sh provably cannot find one (REQ-10, T11).
+#
+# WHY A SUPERSET IS SOUND HERE, AND WHY IT IS SPELLED LIKE THIS. `git_argv_parse`
+# accepts argv[0] only as the literal `git` or a path ending `/git`
+# (git-argv.sh's `git|*/git) shift`), and the only transformation between the
+# command TEXT and that token is unquoting: the parser strips backslashes and
+# quote characters and does not expand variables, globs or `$'…'`. So the three
+# characters `git` must survive in the text with nothing but backslashes and
+# quotes between them — which is what removing those three characters first and
+# then looking for the substring tests. `\g\i\t push`, `'g'it push` and
+# `"gi"t push` all still reach the parser; a command with no `git` in it at any
+# spelling the parser can read skips two full awk passes.
+#
+# IT IS A SCREEN, NEVER A VERDICT. A hit runs the real parser and the parser
+# decides; only a miss short-circuits, and a miss is the case the parser was
+# always going to answer "no push, no commit" to.
+_wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
+  local _p="$1"
+  _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
+  case "$_p" in *git*) return 0 ;; esac
+  return 1
+}
+
 # ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
 #
 # HARD BLOCK: Prevents AI from pushing to main/master branches.
@@ -187,6 +254,14 @@ wall_protect_main() {  # <event> -> 0 nothing · 2 block
 # of any `sh -c` / `eval` string, which the segment list on its own leaves as a
 # single opaque token (R-12, critic C-1/C-5).
 local IS_PUSH=0 segment rest dest CURRENT_BRANCH
+
+# THE SCREEN BEFORE THE PARSE (REQ-10, T11). `git_argv_expand` is an awk pass over
+# the whole command line and this wall runs on EVERY Bash tool call; a command that
+# cannot contain a git invocation at all does not need one. `_wall_mentions_git`
+# states the superset argument. `IS_PUSH` would have stayed 0 through the loop
+# below and this function returns 0 either way.
+_wall_mentions_git "$COMMAND" || return 0
+
 while IFS= read -r segment; do
   [ -n "$segment" ] || continue
   git_argv_parse "$segment" || continue
@@ -294,11 +369,32 @@ wall_protect_database() {  # <event> -> 0 nothing · 2 block
 
 
 # Uppercase for case-insensitive matching
-local CMD_UPPER stmt stmt_upper
-CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
+#
+# COMPUTED WHERE IT IS FIRST NEEDED, NOT AT THE TOP (REQ-10, T11). `tr` is a fork
+# and this wall runs on every Bash tool call; every use of CMD_UPPER below sits
+# behind a test on the RAW command, so the overwhelmingly common command — one
+# that mentions no database client and no destructive SQL verb — now pays nothing
+# for an uppercase copy nothing reads.
+local CMD_UPPER="" stmt stmt_upper _db_maybe
 
 # Check if this involves a database CLI
-if echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-client|cqlsh|cockroach sql|pg_|mariadb)\b'; then
+#
+# THE BUILTIN SCREEN IS A SUPERSET OF THE GREP BELOW (REQ-10, T11). `grep -qEi`
+# can only match when one of its literal alternatives appears in the command,
+# case-insensitively; the `case` states exactly that and nothing more, so a miss
+# is a guaranteed grep miss and a hit still hands the decision to the grep, which
+# keeps the word-boundary rule. The bracket spelling is how bash 3.2 asks a
+# case-insensitive question without `shopt -s nocasematch`, which is process-wide
+# state this wall has no business changing.
+case "$COMMAND" in
+  *[Pp][Ss][Qq][Ll]*|*[Mm][Yy][Ss][Qq][Ll]*|*[Ss][Qq][Ll][Ii][Tt][Ee]3*|\
+  *[Mm][Oo][Nn][Gg][Oo]*|*[Cc][Ll][Ii][Cc][Kk][Hh][Oo][Uu][Ss][Ee]-[Cc][Ll][Ii][Ee][Nn][Tt]*|\
+  *[Cc][Qq][Ll][Ss][Hh]*|*[Cc][Oo][Cc][Kk][Rr][Oo][Aa][Cc][Hh]\ [Ss][Qq][Ll]*|\
+  *[Pp][Gg]_*|*[Mm][Aa][Rr][Ii][Aa][Dd][Bb]*) _db_maybe=1 ;;
+  *) _db_maybe=0 ;;
+esac
+if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-client|cqlsh|cockroach sql|pg_|mariadb)\b'; then
+  CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
 
   # DROP TABLE / DATABASE / SCHEMA / INDEX / COLLECTION / VIEW / FUNCTION / TRIGGER / PROCEDURE / SEQUENCE / TYPE
   # [WALL: tests/protect-database.test.sh]
@@ -344,7 +440,22 @@ fi
 
 # Also catch raw SQL piped or passed inline (e.g., echo "DROP TABLE..." | psql)
 # [WALL: tests/protect-database.test.sh]
-if echo "$CMD_UPPER" | grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|FUNCTION|TRIGGER|PROCEDURE)|TRUNCATE\s)' && echo "$COMMAND" | grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )'; then
+#
+# THE TWO CONJUNCTS ARE REORDERED AND SCREENED (REQ-10, T11). `&&` is commutative
+# over two pure predicates — neither grep writes anything — so which one is asked
+# first is a cost decision, not a behaviour one, and the verdict is identical
+# either way. The `case` is the builtin superset of the FIRST conjunct: the grep
+# needs the literal `DROP` or `TRUNCATE` (uppercased, so any case in the raw
+# text), and without one of them in the command no uppercase copy is made and
+# neither grep runs.
+case "$COMMAND" in
+  *[Dd][Rr][Oo][Pp]*|*[Tt][Rr][Uu][Nn][Cc][Aa][Tt][Ee]*) _db_maybe=1 ;;
+  *) _db_maybe=0 ;;
+esac
+if [ "$_db_maybe" = 1 ]; then
+  [ -n "$CMD_UPPER" ] || CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
+fi
+if [ "$_db_maybe" = 1 ] && echo "$CMD_UPPER" | grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|FUNCTION|TRIGGER|PROCEDURE)|TRUNCATE\s)' && echo "$COMMAND" | grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )'; then
   fold_block exit2 sql "destructive SQL is piped to a db client" "run the migration yourself" \
     "The matched pattern is a DROP or TRUNCATE piped or heredoc-fed into psql, mysql, sqlite3 or mongosh. Piping hides the statement from the argv check."
   return 2
@@ -501,7 +612,10 @@ _eg_body() {
 # body naming a commit stay silent.
 # [WALL: tests/git-argv.test.sh]
 IS_COMMIT=0
-if git_argv_has_sub "$COMMAND" commit; then
+# THE SAME SCREEN wall_protect_main takes (REQ-10, T11) — `git_argv_has_sub` runs
+# `git_argv_expand`, a second awk pass over the same command line, and a command
+# with no readable `git` token in it has no commit for the parser to find.
+if _wall_mentions_git "$COMMAND" && git_argv_has_sub "$COMMAND" commit; then
   IS_COMMIT=1
 fi
 
@@ -2930,8 +3044,10 @@ fi
 [ "$MODE" = "off" ] && return 0
 
 # Normalized single-line form for matching + the scrubbed deny reason (CR translate).
-FLAT=$(printf '%s' "$CMD" | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
-  | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
+# THREE FORKS AND A SUBSHELL BECOME ONE BUILTIN LOOP (REQ-10, T11) — see
+# `_wall_flatten` at the top of this file for why the CR pass was redundant once
+# the whitespace squeeze ran.
+_wall_flatten "$CMD"; FLAT="$_WALL_FLAT"
 
 # `audit_path` IS AT FILE SCOPE NOW, once for the two walls that carried a copy — see
 # the top of this file. The copies were byte-identical and had to be, or one project
@@ -3033,7 +3149,17 @@ emit_tier1() {  # $1=class $2=role — deny, or downgrade to a nudge under advis
 }
 
 classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
+  # THREE ANCHORED REGEXES, THREE FORKS, AND ALMOST ALWAYS THREE MISSES (REQ-10,
+  # T11). Every one is anchored at `^`, so the command has to START with the
+  # matcher's first word for any of them to fire; the `case` asks exactly that
+  # with a builtin and lets the greps decide only when one of them still can.
+  # A command that begins with none of the four words is the overwhelming case
+  # and now costs nothing.
   local c="$1"
+  case "$c" in
+    git*|docker*|npx*|uvx*) : ;;
+    *) return 1 ;;
+  esac
   if printf '%s' "$c" | grep -qE '^git +clone([;&| ]|$)'; then CLASS="clone"; ROLE="implementor"; return 0; fi
   if printf '%s' "$c" | grep -qE '^docker +(run|pull)([;&| ]|$)'; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
   if printf '%s' "$c" | grep -qE '^(npx|uvx) +'; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
@@ -3056,16 +3182,23 @@ nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = 
 # (`cd x && FARM_OUT_ALLOW=1 bash tests/run.sh`) — not only in leading
 # position. W4's false fire was exactly this shape: a 2-segment &&-chain hit
 # the single-command tier-1 arm before the old leading-only case ever ran.
-if printf '%s' "$FLAT" | grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)'; then
-  log_event "override" "user-sanctioned"; return 0
-fi
+#
+# SCREENED ON THE LITERAL TOKEN FIRST (REQ-10, T11). The regex cannot match
+# without `FARM_OUT_ALLOW=1` present verbatim — the surrounding groups only test
+# what borders it — so a command without that substring skips the grep, and a
+# command with it still gets the full positional answer.
+case "$FLAT" in
+  *FARM_OUT_ALLOW=1*)
+    if printf '%s' "$FLAT" | grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)'; then
+      log_event "override" "user-sanctioned"; return 0
+    fi
+    ;;
+esac
 
 # The heredoc-free form of the command. Chain segmentation and the tier-2 matcher read
 # it rather than FLAT, so a `&&` or an `npx` inside a heredoc body cannot reshape the
 # decision any more than it can classify.
-SAFE_FLAT=$(cmd_strip_heredocs "$CMD" \
-  | awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' | tr '\n' ' ' \
-  | sed 's/[[:space:]]\{1,\}/ /g; s/^ //; s/ $//')
+_wall_flatten "$(cmd_strip_heredocs "$CMD")"; SAFE_FLAT="$_WALL_FLAT"
 
 TARGET=$(cmd_unwrap_head "$SAFE_FLAT")
 CLASS=""; ROLE=""
