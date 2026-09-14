@@ -3068,17 +3068,16 @@ EOF
 
       case "$RSTATE" in
         MET|WAIVED)
-          # NAMED ONLY WHILE THE AGENT IS STILL THERE. A `landing-swept/v1` marker is written
-          # when the agent DISAPPEARED from the harness's task list (or, for a teammate, at
-          # its own SubagentStop), so a swept row is a lineage already gone and naming it
-          # would be the noise that teaches a reader to skip the line. MET-and-unswept is a
-          # contract that landed while its agent is still addressable — the one case where
-          # somebody has to act, and the act is a TaskStop.
+          # EVERY MET ROW IS A CANDIDATE, SWEPT OR NOT (T10, A-orch-20). A `landing-swept/v1`
+          # marker records that a landing was SEEN, not that the agent LEFT: for a teammate it
+          # is written at its own SubagentStop — the moment it reports — while it is still on
+          # the panel. Excluding a swept name here made the common shape at the end of a batch
+          # (every writer landed, still idle on the panel) print nothing, which is the 1.7.1
+          # pile-up this arm exists to end. Presence is the panel's fact alone (spec
+          # §Assumptions); `$SWEPT_ALL` is read only inside the decision below, to tell a row
+          # already closed by its own sweep from one that is merely moot-and-gone.
           if [ "$RSTATE" = "MET" ]; then
-            case "$SWEPT_ALL" in
-              *"|name=${RNAME}|"*) : ;;   # already swept — the lineage is gone
-              *) STANDDOWN_NAMES="${STANDDOWN_NAMES}${STANDDOWN_NAMES:+ }$(clean "$RNAME")" ;;
-            esac
+            STANDDOWN_NAMES="${STANDDOWN_NAMES}${STANDDOWN_NAMES:+ }$(clean "$RNAME")"
           fi
           ;;                                  # closed — not open
         *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
@@ -3337,19 +3336,26 @@ EOF
     # and the adopted agent's SubagentStop belongs to the session that launched it), so it
     # was named on every tick, forever, for an agent that had been gone for hours.
     #
-    # THE PANEL IS WHAT SEPARATES THEM, and it is the fact this tick already holds:
+    # THE PANEL IS WHAT SEPARATES THEM, and it is the fact this tick already holds — read
+    # alone, never stood in for by the `landing-swept/v1` marker (T10, A-orch-20): that marker
+    # records a landing SEEN, and for a teammate it is written at its own SubagentStop while it
+    # is still on the panel, so "swept" is not "gone".
     #
-    #   MET, unswept, STILL LISTED -> somebody has to stop it. The tick says so by name AND
-    #     writes the stop order (hooks/stop-orders.sh order <name> --by patrol), so the
+    #   MET, STILL LISTED -> somebody has to stop it, swept marker or not. The tick says so by
+    #     name AND writes the stop order (hooks/stop-orders.sh order <name> --by patrol), so the
     #     TaskStop that answers is not refused by the stop gate. `by=patrol` is the honest
     #     label: an order used to mean "a human said stop" and now means "a human or a
     #     verified landing said stop" (D1).
-    #   MET, unswept, NOT LISTED, or a `duplicate-start` row whose agent is gone -> there is
-    #     nobody to stop. The row is moot and the world says so, so the tick closes it the
-    #     way a human would: `session-sweeper.sh ack <name> --by patrol --reason
-    #     moot-and-gone` (D2). Nothing is printed — a stand-down tell for an agent that does
-    #     not exist is the noise this arm exists to remove — and the evidence is the ledger
-    #     line, which names the author and what it was read off.
+    #   MET, NOT LISTED, already carrying a `landing-swept/v1` marker -> the row is closed
+    #     already; a second closing act would be a ledger line that says nothing new. Nothing
+    #     is printed and nothing is acked (A-T1.9, extended: the predicate that matters is
+    #     ABSENT, not unswept).
+    #   MET, NOT LISTED, no marker, or a `duplicate-start` row whose agent is gone -> there is
+    #     nobody to stop and no prior close on record. The row is moot and the world says so,
+    #     so the tick closes it the way a human would: `session-sweeper.sh ack <name> --by
+    #     patrol --reason moot-and-gone` (D2). Nothing is printed — a stand-down tell for an
+    #     agent that does not exist is the noise this arm exists to remove — and the evidence
+    #     is the ledger line, which names the author and what it was read off.
     #
     # THE TICK STILL STOPS NOTHING (ADR-003, unchanged). An order is a permission and an ack
     # is a bookkeeping fact; neither ends a process. The one act this arm performs on a
@@ -3409,6 +3415,11 @@ EOF
             *)
               case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
               SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
+              # ALREADY SWEPT -> ALREADY CLOSED (T10, A-orch-20). The marker means a landing
+              # was seen, not that this arm is first to notice the agent is gone; a second ack
+              # here would be a ledger line saying nothing new. Silent, same as an ack that
+              # succeeds — the row was closed once, just not by this tick.
+              case "$SWEPT_ALL" in *"|name=${SD_NAME}|"*) continue ;; esac
               SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
                         CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
                         bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ) \
