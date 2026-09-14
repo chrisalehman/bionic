@@ -455,7 +455,15 @@ roster_walk "$BASE"
 # asked about. This keeps the by-id spelling working — it is unambiguous by construction,
 # which is why it was the escape hatch — without giving it a second resolution path. The
 # second walk is by that NAME, so the contract comes off the same row it would for a bare one.
+#
+# WHICH SPELLING THE OPERATOR TYPED IS A FACT THE SECOND WALK DESTROYS (T29). `roster_walk`
+# clears all three ROW_ variables on entry, so after the re-walk `ROW_BY_ID` says nothing
+# about the typed reference any more — and the ambiguity arm below turns on exactly that:
+# an agent id names ONE row by construction and must keep resolving, which is the whole
+# reason that arm can offer it as the fix.
+TYPED_AS_ID=""
 if [ -n "$ROW_BY_ID" ]; then
+  TYPED_AS_ID=1
   BASE=$(record_field "$ROW_BY_ID" name)
   roster_walk "$BASE"
 fi
@@ -478,9 +486,14 @@ AGENT_ID=""
 # (ADR-024, P-A), and there is no reading here that can be stale in a way the model has to
 # repair.
 #
-# WHERE THE AMBIGUITY WENT. It was never a property of stopping — it was the door standing
-# open at dispatch. One name meaning two agents is refused one event earlier now, by the
-# preflight's in-flight arm, so by the time a stop is typed a name means one row.
+# WHERE THE AMBIGUITY WENT — AND WHERE IT CAME BACK (T29). Most of it was never a property
+# of stopping: it was the door standing open at dispatch, and a second DISPATCH under a live
+# name is refused one event earlier now by the preflight's in-flight arm. What that door does
+# not cover is the OTHER writer of live rows — `hooks/session-poker.sh`'s `adopt_write_row`,
+# whose idempotence check is `agent_id` + `adopted_from` and never asks whether this session
+# already carries a live row of that NAME. So the arm below counts the ambiguity on the
+# register, after the resolution above rather than instead of it, and §7's cell is unchanged:
+# a stop is irreversible, so the ambiguous case is what this gate is for.
 
 # THE SHAPE CARVE (T4, AC-6, session-20260815-landing-cleanup). The live set only ever named
 # AGENTS, so any OTHER kind of TaskStop target — chief among them a background bash task id
@@ -537,6 +550,84 @@ if ! guard_has_standing; then
   # unconditional `exit 2` in another function forty lines away did not.
   echo "PASSTHROUGH: '${RAW}' appears on no roster row of this session and wears no agent-address shape — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
   exit 0
+fi
+
+# ---------- AMBIGUITY, COUNTED ON THE REGISTER (T29; §7 — CLOSED and loud) ----------
+#
+# THE QUESTION, IN THE REGISTER'S OWN TERMS. Two rows of one name are an ambiguity when BOTH
+# are under an open contract — `intended`/`confirmed`/`identified` with no
+# `landing-swept/v1|…|state=MET` marker closing them — and they carry DIFFERENT agent ids.
+# That is one name, two live contracts, two processes, and a stop typed as that name would
+# pick whichever row happens to be last. A stop is irreversible; it must not guess.
+#
+# THE ORDERING IS THE ANSWER, exactly as it is in the two roster walls that share the
+# `latest-contract reading` (hooks/dispatch-preflight.sh, hooks/execution-recorder.sh; pinned
+# byte-equal by tests/cross-gate-agreement.test.sh §LC). A MET marker closes the contract it
+# was written for and NOTHING after it, so a name that landed and was dispatched again is not
+# two identities — it is one, below the marker. This reading is NOT a third copy of that span:
+# the two walls compute a per-NAME boolean ("is this name under an open contract"), and what
+# is needed here is the per-ID SET underneath it, which the marker clears rather than latches.
+# Same file, same rule, a different question — stated here so an editor of either can see it.
+#
+# NOT FOR AN AGENT ID. An id names exactly one row by construction, which is why it was the
+# escape hatch before T22 and why it is the fix this refusal prints; refusing it would leave
+# an ambiguous name with no spelling at all. Every OTHER spelling reaches here, the
+# `@session-` alias included: the suffix names the session that LAUNCHED an agent, so it
+# cannot separate two rows of one name on one session's own roster. That is the same
+# direction the retired live-set arm took, for the same reason.
+#
+# AFTER STANDING, so a target this gate has no business guarding is never trapped by it, and
+# BEFORE the alias clause, so an ambiguous alias is told which fault it has.
+live_ids_of_name() {  # <name> -> the agent ids currently under an open contract, one per line
+  local f="$ROSTER_FILE"
+  [ -f "$f" ] || return 0
+  [ -L "$f" ] && return 0
+  [ -r "$f" ] || return 0
+  awk -v want="$1" -v ver="$ROSTER_VERSION" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+    # A MET MARKER FOR THIS NAME DISCHARGES EVERY ID ABOVE IT, and the generation counter is
+    # how that is spelled without `delete arr` — which is not in the one-true-awk this
+    # machine runs as /usr/bin/awk. Rows below the marker start a fresh set.
+    index($0, "landing-swept/v1|") == 1 {
+      if (kv($0, "name") == want && kv($0, "state") == "MET") { n = 0; gen++ }
+      next
+    }
+    index($0, "roster-state/" ver "|") == 1 {
+      if (kv($0, "name") != want) next
+      if (!live_status(kv($0, "status"))) next
+      id = kv($0, "agent_id")
+      # An `intended` row carries no id yet — the recorder writes it one state later — and a
+      # lifecycle (intended → confirmed → identified) is ONE identity, so ids are counted
+      # DISTINCT. Neither an unidentified row nor a re-stated one is a second agent.
+      if (id == "") next
+      if ((gen SUBSEP id) in seen) next
+      seen[gen SUBSEP id] = 1
+      ids[++n] = id
+      next
+    }
+    END { for (i = 1; i <= n; i++) print ids[i] }
+  ' "$f" 2>/dev/null
+  return 0
+}
+
+AMBIG_IDS=""
+[ -z "$TYPED_AS_ID" ] && AMBIG_IDS=$(live_ids_of_name "$BASE")
+AMBIG_N=0
+[ -n "$AMBIG_IDS" ] && AMBIG_N=$(printf '%s\n' "$AMBIG_IDS" | grep -c .)
+if [ "$AMBIG_N" -gt 1 ]; then
+  deny "that name has more than one live row" "name the full agent id" \
+       "Target '${RAW}' is ambiguous: ${AMBIG_N} rows of this session's roster are live for '${BASE}'." \
+       "The agent ids they carry, each of which names exactly one of them:" \
+       "$(printf '%s\n' "$AMBIG_IDS" | sed 's/^/    /')" \
+       "A name is an identity here, and two open contracts are carrying this one. The" \
+       "@session- alias cannot separate them: it names the session that LAUNCHED an agent," \
+       "and this is that session's own roster. Stop the one you mean by its agent id above," \
+       "or land the row that is finished — its landing-swept marker frees the name."
 fi
 
 # ---------- AC-11: `name@session-<launcher>` IS AN ALIAS, AND ONLY THAT ----------

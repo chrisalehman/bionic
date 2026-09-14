@@ -230,11 +230,14 @@ seen — making "an examination happened" a fact rather than a memory. Never: st
 judge anything.
 
 **The stop gate** (gate, stop). On every stop request during an active wave: resolve the
-typed name (P5), find an observation of that target from this session, check freshness
-(D-1). Any failure — no record, foreign session, unresolvable or ambiguous name, staleness
-— refuses, naming the observation command. Never: pass on ambiguity once a wave is active
-(a stop is irreversible; the ambiguous case is the wall's purpose); wall a machine with no
-wave running.
+typed name against this session's roster, which is the identity register (P5), find an
+observation of that target from this session, check freshness (D-1). Any failure — no
+record, foreign session, unresolvable or ambiguous name, staleness — refuses, naming the
+observation command. AMBIGUOUS means more than one row of that name is under an open
+contract, carrying different agent ids; the refusal prints those ids, since an agent id
+names one row by construction and is therefore the spelling that separates them. Never:
+pass on ambiguity once a wave is active (a stop is irreversible; the ambiguous case is the
+wall's purpose); wall a machine with no wave running.
 
 Realization: environment check → `hooks/preflight-probe.sh` · start gate →
 `hooks/dispatch-preflight.sh` · observation → `hooks/stop-check.sh` · stop gate →
