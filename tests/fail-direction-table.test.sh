@@ -229,12 +229,19 @@ plant_agent "$A_SUB" "aworker-1111111111111111" "worker"
 plant_agent "$A_SUB" "atwin-2222222222222222" "twin"
 plant_agent "$A_SUB" "atwin-3333333333333333" "twin"
 fd_roster_row "$A_REPO" "$SID_A" "worker" "aworker-1111111111111111"
-# THE AMBIGUITY IS IN THE ANSWER, NOT ON DISK (S6, D2′). Two `agent-<id>.meta.json` files of
-# one name used to make `twin` ambiguous because the resolver scanned the session directory;
-# it no longer scans anything, so the ambiguity this world exists to drive has to be what it
-# now is — one name appearing more than once in the recorded ListAgents answer. `worker` is
-# in the same answer because every other stop row driven against this world resolves it.
-fd_live "$A_TR" worker twin twin
+# THE AMBIGUITY IS ON THE ROSTER (T22/T29). It has been re-pointed twice, because the thing
+# that resolves a typed name has moved twice. It was two `agent-<id>.meta.json` files found by
+# a directory scan; then, at S6/D2′, one name appearing more than once in the recorded
+# ListAgents answer. The stop gate reads NEITHER now — T22 made this session's roster its
+# identity register — so the ambiguity this world exists to drive is what it now is: TWO ROWS
+# of one name both under an OPEN contract (intended/confirmed/identified, with no
+# `landing-swept/v1|…|state=MET` marker closing them), carrying two different agent ids.
+# `worker` keeps its single row because every other stop row driven against this world
+# resolves it, and it stays in the live answer for the same reason the answer is still
+# written at all: the START-gate rows of this world are driven against the same transcript.
+fd_roster_row "$A_REPO" "$SID_A" "twin" "atwin-2222222222222222"
+fd_roster_row "$A_REPO" "$SID_A" "twin" "atwin-3333333333333333"
+fd_live "$A_TR" worker twin
 
 IFS='|' read -r I_REPO I_TR I_SUB <<< "$(make_world inert no)"
 plant_agent "$I_SUB" "aworker-1111111111111111" "worker"
@@ -627,6 +634,27 @@ while IFS='|' read -r surface cond want_exit want_loud row; do
 done <<EOF
 $(printf '%s' "$TABLE")
 EOF
+
+# ============================================================
+section "the ambiguity row says WHICH fault it is (T29)"
+# ============================================================
+#
+# THE DIRECTION COLUMN CANNOT SEE A REASON, and for this one row that is not enough.
+# `stop|ambiguous` shares its §7 cell — CLOSED, loud — with eleven other stop rows, so an
+# exit of 2 is satisfied by any of them: the world above refuses `twin` for want of an
+# observation whether or not this gate can count an ambiguity at all. That is exactly how the
+# row would have been repaired by moving the fixture alone, green on a gate with no ambiguity
+# arm in it. So this row carries its own discriminator, and it is the only claim in this file
+# that reads a refusal's TEXT rather than its direction — the refusal's FULL reasoning is
+# pinned where the gate's own suite pins it (tests/stop-guard.test.sh §10(c3)/(c4)).
+drive stop:ambiguous
+expect_eq "the ambiguous row is refused" "2" "$DRV_ST"
+if printf '%s' "$DRV_ERR" | grep -qF 'more than one live row'; then
+  ok "…for the AMBIGUITY itself, naming the fault — not for want of an observation"
+else
+  no "…for the AMBIGUITY itself, naming the fault — not for want of an observation" \
+     "stderr: $(printf '%s' "$DRV_ERR" | head -1)"
+fi
 
 # ============================================================
 section "the asymmetry itself: ONE missing field, TWO directions"

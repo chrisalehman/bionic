@@ -26,6 +26,11 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+# THE LANDING SWEEP'S OWN MARKER WRITER (S15, tests/lib/swept-marker.sh). §10(c4) needs a
+# `landing-swept/v1|…|state=MET` line on a fixture roster — the thing that CLOSES a name's
+# contract — and a hand-rolled printf of it would be a second spelling of a schema this repo
+# holds to one writer, which is exactly what that library exists to stop.
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 GUARD="$HERE/stop-guard.sh"
@@ -1174,6 +1179,80 @@ expect_absent "…nothing calls it ambiguous any more" "ambiguous" "$GUARD_ERR"
 run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin@session-${SID_A:0:8}")"
 expect_status "…and the alias spelling resolves the same way" 2 "$GUARD_ST"
 expect_contains "…to the same observation demand" "No observation" "$GUARD_VERR"
+
+# (c3) TWO LIVE ROWS, ONE BARE NAME — THE AMBIGUITY TRANSLATED TO THE REGISTER (T29).
+#
+# The arm (c) retired was the LIVE SET's: two teammates of one name in the harness's answer,
+# and nothing on the roster. §7's cell never moved — the stop gate is CLOSED and loud on an
+# ambiguous identity, because a stop is irreversible — so what had to move with the resolver
+# is where the ambiguity is COUNTED. On the register it is two rows of one name both under an
+# OPEN contract (intended/confirmed/identified, no `landing-swept/v1|…|state=MET` marker
+# closing them) carrying two different agent ids: one name, two live contracts, two processes.
+#
+# IT IS REACHABLE AT THIS HEAD, which is why this is an arm and not a retirement. The
+# dispatch wall's name-in-flight arm shuts the door on a second DISPATCH under a live name,
+# but it is not the only writer of live rows: `hooks/session-poker.sh`'s `adopt_write_row`
+# journals a predecessor's agent onto this session's roster as `status=identified`, and its
+# idempotence check is `agent_id` + `adopted_from` — never whether this session already
+# carries a live row of that NAME. A session that dispatched `twin` and then adopted a
+# predecessor which had also run one produces exactly the file below.
+sg_roster_row "$TW_REPO" "$SID_A" "twin" "atwin-2222222222222222" "" "identified" \
+  "" "" "" "$SID_B"
+run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin")"
+expect_status "a bare name carrying TWO live roster rows: REFUSED (§7 — CLOSED, loud)" 2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'more than one live row' "$GUARD_ERR"
+expect_contains "…and the detail calls the target ambiguous" "is ambiguous" "$GUARD_VERR"
+expect_contains "…and names the first agent id as an unambiguous spelling" \
+  "atwin-1111111111111111" "$GUARD_VERR"
+expect_contains "…and the second one too" "atwin-2222222222222222" "$GUARD_VERR"
+expect_absent "…and it is not the observation demand: resolution never got that far" \
+  "No observation" "$GUARD_VERR"
+
+# …and the ALIAS cannot separate them, exactly as it could not separate two live teammates:
+# the suffix names the session that LAUNCHED an agent, and both of these rows are addressed
+# from here. The spelling that does separate them is the agent id, which is what the refusal
+# offers.
+run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin@session-${SID_A:0:8}")"
+expect_status "…and the @session- alias of an ambiguous name: REFUSED too" 2 "$GUARD_ST"
+expect_regex "…with the same fault, not the alias rule" 'more than one live row' "$GUARD_ERR"
+
+# …while the ID spelling resolves, because it is the escape hatch the refusal names. An
+# agent id is unambiguous against the register by construction: exactly one row carries it.
+# Without this row the arm above is equally green on a gate that refuses every spelling.
+run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "atwin-2222222222222222")"
+expect_status "…while the full agent id resolves and meets the ordinary ceremony" 2 "$GUARD_ST"
+expect_contains "…which is the observation demand, not an ambiguity" "No observation" "$GUARD_VERR"
+expect_absent "…nothing calls the id ambiguous" "more than one live row" "$GUARD_ERR"
+
+# (c4) THE CONTROL — A LANDED ROW BESIDE A LIVE ONE IS NOT AN AMBIGUITY (T26's reading).
+#
+# A name that landed and was dispatched AGAIN carries two rows and two ids, and only the row
+# BELOW the MET marker is under an open contract. Read as a set that file is (c3); read in
+# ORDER — which is what T26 fixed in both roster walls — the marker closes the id above it
+# and the live row below it is the one identity there is. Without this row the arm above is
+# green on a gate that refuses every re-run of every task, which is the latch C1 named.
+IFS='|' read -r RL_REPO RL_TR RL_SUB <<< "$(make_world relaunched yes)"
+plant_agent "$RL_SUB" "arerun-1111111111111111" "rerun"
+plant_agent "$RL_SUB" "arerun-2222222222222222" "rerun"
+sg_roster_row "$RL_REPO" "$SID_A" "rerun" "arerun-1111111111111111"
+swept_marker_write "$RL_REPO/.bionic/tmp/roster-$SID_A.state" \
+  "2026-09-14T00:00:00Z" "$SID_A" "rerun" "arerun-1111111111111111" "MET"
+sg_roster_row "$RL_REPO" "$SID_A" "rerun" "arerun-2222222222222222"
+# ONE OBSERVATION EXISTS IN THIS REPO, OF SOMEBODY ELSE. The gate refuses an empty state file
+# before it has resolved anything — a repo-wide fact, not a statement about this target — and
+# a world with no observation at all would therefore answer this case without ever reading the
+# roster. The bystander's look is what carries the refusal down to the per-target stage, where
+# the id the gate resolved is the thing it prints.
+plant_agent "$RL_SUB" "abystander-3333333333333333" "bystander"
+sg_roster_row "$RL_REPO" "$SID_A" "bystander" "abystander-3333333333333333"
+observe "$SID_A" "$RL_TR" "$RL_REPO" "bystander"
+run_guard "$(mk_stop_payload "$SID_A" "$RL_TR" "$RL_REPO" "rerun")"
+expect_status "a landed row beside the re-run's live row: NOT ambiguous — the ordinary ceremony" \
+  2 "$GUARD_ST"
+expect_absent "…nothing calls the re-run ambiguous" "more than one live row" "$GUARD_ERR"
+expect_contains "…and resolution lands on the LIVE row's id" \
+  "arerun-2222222222222222" "$GUARD_VERR"
+expect_absent "…never on the id the MET marker closed" "arerun-1111111111111111" "$GUARD_VERR"
 
 # (c2) A NAME CARRYING A REGEX METACHARACTER must count and list ONLY its own two entries,
 # never a bystander name that merely LOOKS like it under BRE matching (Step-6 security review
