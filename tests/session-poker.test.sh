@@ -2432,11 +2432,14 @@ expect_contains "12a-T22-d a predecessor's roster does not spend a name here" "p
 # it NAMES the lineages whose contract is MET and whose agent has not yet gone. Nothing is
 # refused and nothing is stopped — the tick holds no authority (ADR-003).
 #
-# MET AND NOT YET SWEPT is the predicate. A `landing-swept/v1` marker is written when the
-# agent DISAPPEARED from the harness's task list, so a swept row's agent is already gone
-# and naming it would be the noise that teaches a reader to skip the line.
+# EVERY MET ROW IS A CANDIDATE (T10, A-orch-20 — corrects T1's own §12 fixture). A
+# `landing-swept/v1` marker records that a landing was SEEN, not that the agent left: for a
+# teammate it is written at its own SubagentStop, the moment it reports, while it is still on
+# the panel. So "swept" and "still there" are not opposites, and the marker is read only
+# inside the decision below, to close a row the panel already shows gone — never to exclude a
+# candidate the panel still lists.
 #
-# THE PANEL IS THE SECOND HALF OF THE PREDICATE, AND THE TELL IS A DOER NOW (T1; D1, D2).
+# THE PANEL IS THE WHOLE PREDICATE, AND THE TELL IS A DOER NOW (T1; D1, D2).
 # `poker: TASKSTOP <name>` named a MET lineage and left the operator to go and find its
 # address; from 1.8.0 the tick prints `poker: STANDDOWN <name>` for a MET row whose agent the
 # harness STILL LISTS and writes the stop order for it in the same breath, so the TaskStop
@@ -2467,7 +2470,11 @@ expect_contains "12a-T22-e3 …and the order is on disk, attributed to the Patro
   "|by=patrol|target=done-writer" \
   "$(cat "$R12ET/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
 
-# The control: the SAME row, swept. One marker's difference, and the tell goes quiet.
+# THE MARKER RECORDS THAT A LANDING WAS SEEN, NOT THAT THE AGENT LEFT (T10, A-orch-20). For a
+# teammate `landing-swept/v1` is written at its own SubagentStop — the moment it reports —
+# while it is still on the panel, so a swept row and a live row are not opposites. Presence is
+# the panel's fact alone (spec §Assumptions): the marker never stands in for it, here or
+# anywhere else in this arm.
 R12FT="$(make_repo s12-taskstop-swept)"; new_roster "$R12FT"; armed_ago "$R12FT"; delivered_plan "$R12FT"
 DEL_F="$R12FT/delivered.md"; echo "done" > "$DEL_F"
 add_row "$R12FT" name=done-writer deliverable="$DEL_F" duration="1 minute" \
@@ -2475,10 +2482,29 @@ add_row "$R12FT" name=done-writer deliverable="$DEL_F" duration="1 minute" \
 swept_marker_write "$(roster_of "$R12FT")" "$(iso_ago 30)" "$SID" done-writer a000 MET
 s12_answer fresh "done-writer:running"
 poke "$R12FT" tick
-expect_absent "12a-T22-f a swept row's agent is already gone, so nothing is named" \
+expect_contains "12a-T22-f a swept row whose agent the panel still lists is stood down all the same" \
+  "poker: STANDDOWN done-writer" "$OUT"
+expect_contains "12a-T22-f2 …and the order is written, same as the unswept case" \
+  "|by=patrol|target=done-writer" \
+  "$(cat "$R12FT/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
+
+# THE TRUE SILENT CASE: the same swept row, but the panel no longer lists it. The landing that
+# swept it already closed the row — a stand-down here would name an agent that is gone, and an
+# ack here would close the row a second time for no new fact. Both are the noise this arm exists
+# to remove.
+R12FG="$(make_repo s12-taskstop-swept-gone)"; new_roster "$R12FG"; armed_ago "$R12FG"; delivered_plan "$R12FG"
+DEL_FG="$R12FG/delivered.md"; echo "done" > "$DEL_FG"
+add_row "$R12FG" name=done-writer deliverable="$DEL_FG" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12FG")" "$(iso_ago 30)" "$SID" done-writer a000 MET
+s12_answer fresh "some-other-agent:running"
+poke "$R12FG" tick
+expect_absent "12a-T22-f3 a swept row whose agent the panel no longer lists draws no stand-down" \
   "poker: STANDDOWN" "$OUT"
-expect_eq "12a-T22-f2 …and no order is written for a row the sweep already closed" "no" \
-  "$([ -f "$R12FT/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
+expect_eq "12a-T22-f4 …and no order is written for it" "no" \
+  "$([ -f "$R12FG/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
+expect_eq "12a-T22-f5 …and it is not acked either — the landing already closed it" "no" \
+  "$([ -f "$R12FG/.bionic/tmp/sweeper-$SID.state" ] && echo yes || echo no)"
 
 # The second control: an OPEN row is not a MET lineage and is never named.
 R12GT="$(make_repo s12-taskstop-open)"; new_roster "$R12GT"; armed_ago "$R12GT"; delivered_plan "$R12GT"
