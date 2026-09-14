@@ -1881,6 +1881,47 @@ expect_contains "14c the LAST row carrying the id is the one the guard would rea
 expect_contains "14c …and it states the budget the dispatch derived" \
   "|suites_allowed=$S14_SUITES|" "$B2_LAST"
 
+# --- 14d: A WIDE budget survives both rebuilds too (T18, REQ-9/D7) ---
+#
+# A-orch-16 named this file's confirmed→identified copy-forward as one of two writers it
+# suspected still capped `suites_allowed=`/`files=` at 400 chars, alongside
+# `hooks/dispatch-preflight.sh`'s launch row (fixed at T18, `tests/dispatch-preflight.test.sh`
+# §S27i/§S27j). Investigated here directly: both rewrites in THIS file build the row
+# FIELD-WISE with `RS = "|"` and substitute only `status=`/`agent_id=`/`name=`/
+# `teammate_id=`/`launched_at=` — every other field, `suites_allowed=`/`files=` included,
+# passes through as `f = $0` with no length operation anywhere in either awk block. That
+# is confirmed here rather than assumed: a budget well past any cap this repo has ever
+# used on this field (900, the widest — and past 400, T9's own reader-side number) rebuilds
+# whole through BOTH arms. This section was already green before T18 touched anything; it
+# is added as the permanent regression guard the investigation justified, not as a fix.
+S14D_SUITES=""
+for _s14d in $(seq -w 1 70); do
+  S14D_SUITES="${S14D_SUITES:+$S14D_SUITES }wide-budget-suite-basename-number-${_s14d}.test.sh"
+done
+expect_status "14d fixture non-vacuity: the planted budget really exceeds 900 chars" \
+  "0" "$([ "${#S14D_SUITES}" -gt 900 ] && echo 0 || echo 1)"
+
+IFS='|' read -r B3_REPO B3_TR B3_SUB B3_CFG <<< "$(make_world budgetwide yes)"
+B3_ROSTER="$B3_REPO/.bionic/tmp/roster-${SID_A}.state"
+mkdir -p "$B3_REPO/.bionic/tmp"
+roster_header > "$B3_ROSTER"
+roster_row_fixture status=intended session="$SID_A" name="w14d-impl" agent_id="" \
+  launched_at=2026-08-08T09:00:00Z model=claude-opus-5 \
+  deliverable=.bionic/docs/record/w14d-budget.md duration='~25 minutes.' \
+  progress=.bionic/tmp/w14d.progress tool_use_id="toolu_01BUDGETWIDE01" \
+  files="payload/scripts/lib/widget.sh" "suites_allowed=$S14D_SUITES" \
+  suites_source=derived >> "$B3_ROSTER"
+
+run_rec "$(mk_agent_post "$SID_A" "$B3_TR" "$B3_REPO" "w14d-impl" "aw14dwidebudget001" "toolu_01BUDGETWIDE01")"
+B3_CONFIRMED=$(grep 'status=confirmed' "$B3_ROSTER" 2>/dev/null | tr '|' '\n' | grep '^suites_allowed=' | cut -d= -f2-)
+expect_eq "14d ARM 2 (confirmation) carries the WIDE budget forward whole" \
+  "$S14D_SUITES" "$B3_CONFIRMED"
+
+run_rec "$(mk_subagent_start "$SID_A" "$B3_TR" "$B3_REPO" "general-purpose" "aw14dwidebudget001")"
+B3_IDENTIFIED=$(grep 'status=identified' "$B3_ROSTER" 2>/dev/null | tr '|' '\n' | grep '^suites_allowed=' | cut -d= -f2-)
+expect_eq "14d ARM 3 (identification) carries the WIDE budget forward whole too" \
+  "$S14D_SUITES" "$B3_IDENTIFIED"
+
 # ============================================================
 section "Section 15: dispatch-terms delivery — SubagentStart pushes survival.md to bionic agents (wave-11 1c-b, design D2, probe P2)"
 # ============================================================
