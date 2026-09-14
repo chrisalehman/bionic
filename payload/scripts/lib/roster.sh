@@ -144,3 +144,66 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   printf '%s\n' "$out"
   return 0
 }
+
+# ---------- THE ONE READER OF "IS THIS NAME LIVE" (moved from hooks/stop-guard.sh, T6, ----
+# ---------- A-orch-32; research R1 §5) --------------------------------------------------
+#
+# MOVED, NOT RE-SPELLED. `hooks/stop-guard.sh`'s own stop-ambiguity refusal (T29 §7) and
+# `hooks/session-poker.sh`'s `adopt_write_row` (T6, AC-6.1) both need the identical answer to
+# "does this name already name an open contract on this roster" — the first to refuse a stop
+# that could not tell which of two live rows it meant, the second to keep an adopt from ever
+# putting two live rows under one name in the first place. Two copies of this awk agreeing by
+# construction is the same defect `roster_row` above already ends for the ROW's shape; this
+# is that fix for the QUESTION asked of one.
+#
+# THE QUESTION, IN THE REGISTER'S OWN TERMS. Two rows of one name are an ambiguity — "this
+# name is live twice" — when BOTH are under an open contract: `intended`/`confirmed`/
+# `identified`, with no `landing-swept/v1|…|state=MET` marker closing them, and DIFFERENT
+# agent ids. A MET marker for this name discharges every id above it (the generation counter
+# below is how that is spelled without `delete arr`, which is not in the one-true-awk this
+# machine runs as `/usr/bin/awk`); rows below the marker start a fresh set. An `intended` row
+# carries no id yet — the recorder writes it one state later — and a lifecycle (intended ->
+# confirmed -> identified) is ONE identity, so ids are counted DISTINCT: neither an
+# unidentified row nor a re-stated one is a second agent.
+#
+# READS `$ROSTER_FILE` (required, caller-set — every hook in the fleet already sets it
+# before touching its own roster) and `$ROSTER_VERSION` (optional; defaults to this
+# library's own `$ROSTER_SCHEMA_VERSION` above, so a caller that has never had reason to
+# declare its own roster-schema constant, e.g. `adopt_write_row`, does not need to grow one
+# just to call this).
+live_ids_of_name() {  # <name> -> the agent ids currently under an open contract, one per line
+  local f="$ROSTER_FILE" ver="${ROSTER_VERSION:-$ROSTER_SCHEMA_VERSION}"
+  [ -f "$f" ] || return 0
+  [ -L "$f" ] && return 0
+  [ -r "$f" ] || return 0
+  awk -v want="$1" -v ver="$ver" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+    # A MET MARKER FOR THIS NAME DISCHARGES EVERY ID ABOVE IT, and the generation counter is
+    # how that is spelled without `delete arr` — which is not in the one-true-awk this
+    # machine runs as /usr/bin/awk. Rows below the marker start a fresh set.
+    index($0, "landing-swept/v1|") == 1 {
+      if (kv($0, "name") == want && kv($0, "state") == "MET") { n = 0; gen++ }
+      next
+    }
+    index($0, "roster-state/" ver "|") == 1 {
+      if (kv($0, "name") != want) next
+      if (!live_status(kv($0, "status"))) next
+      id = kv($0, "agent_id")
+      # An `intended` row carries no id yet — the recorder writes it one state later — and a
+      # lifecycle (intended → confirmed → identified) is ONE identity, so ids are counted
+      # DISTINCT. Neither an unidentified row nor a re-stated one is a second agent.
+      if (id == "") next
+      if ((gen SUBSEP id) in seen) next
+      seen[gen SUBSEP id] = 1
+      ids[++n] = id
+      next
+    }
+    END { for (i = 1; i <= n; i++) print ids[i] }
+  ' "$f" 2>/dev/null
+  return 0
+}
