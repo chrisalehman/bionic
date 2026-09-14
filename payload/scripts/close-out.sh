@@ -339,10 +339,12 @@ TASKS_LINE="mark every 4/*, 5–9 entry completed (TaskUpdate)"
 # destroyed.
 CONT_LINE=""
 continuation_template() {
+  local sha
+  sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   cat <<CONT_TEMPLATE
 # continuation — $WAVE_SLUG (bionic $VERSION)
 
-Closed $NOW. Main at <fill: main SHA>. Wave branch \`$WORKING\` merged into
+Closed $NOW. $INTEGRATION at ${sha:-<fill: SHA>}. Wave branch \`$WORKING\` merged into
 \`$INTEGRATION\`: <fill: task count> tasks, every one RED→GREEN; <fill: floor result>.
 <fill: reviews, audits, ADRs>.
 
@@ -384,12 +386,17 @@ act_continuation() {
 # prose somebody may reword, and `| wave |` is the table's own first cell.
 EPIC_LINE=""
 epic_row() {
-  local spec
+  local spec sha
   spec="$(plan_frontmatter_get "$PLAN" "spec")"
   spec="${spec##*/}"
   [ -n "$spec" ] || spec="$WAVE_SLUG.spec.md"
-  printf '| %s | %s | `%s` | `%s`, `.requirements.md` | <fill: ADRs> | %s, %s @ <fill: SHA> |\n' \
-    "$WAVE_NUM" "$VERSION" "${PLAN##*/}" "$spec" "$TODAY" "$INTEGRATION"
+  # THE SHA IS FILLED, NOT MARKED. Act 1 has already proved the working branch reachable
+  # from the integration branch, so the integration head is a fact this script holds; only
+  # the ADR column stays `<fill>`, because which ADRs a wave shipped is not on disk in any
+  # form this row could read. A `<fill>` over a knowable fact is just work moved.
+  sha="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
+  printf '| %s | %s | `%s` | `%s`, `.requirements.md` | <fill: ADRs> | %s, %s @ %s |\n' \
+    "$WAVE_NUM" "$VERSION" "${PLAN##*/}" "$spec" "$TODAY" "$INTEGRATION" "${sha:-<fill: SHA>}"
 }
 
 epic_has_row() {
