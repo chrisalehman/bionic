@@ -1252,15 +1252,24 @@ expect_eq "C1 gate discharges the stop on that record" "permitted" "$(q_gate sol
 # so nothing may be dischargeable. ---
 plant "$RPROJ/$SID_A/subagents" "adup-2222222222222222" "dup"
 plant "$RPROJ/$SID_A/subagents" "adup-3333333333333333" "dup"
-# RE-POINTED (T22): the register resolves it, and a state this fixture can still plant is
-# one the system can no longer reach — `hooks/dispatch-preflight.sh` refuses a dispatch whose
-# name already has an open row here, so two rows of one name cannot both be open. What the
-# roster does with a fixture that plants them anyway is its ordinary rule: the last row of a
-# name is its current statement. The GATE still refuses, one line down, for want of an
-# observation — which is the agreement this case is really about.
+# RE-POINTED TWICE (T22, then T29). T22 moved resolution onto the register and read the state
+# this fixture plants as unreachable — `hooks/dispatch-preflight.sh` refuses a DISPATCH whose
+# name already has an open row here. T29 found the other writer: `session-poker.sh adopt`
+# journals a predecessor's agent as a live row without asking whether this session already
+# carries one of that name, so two live rows of one name is a state the system does reach,
+# and the two parties answer it DIFFERENTLY — on purpose, and that difference is this case.
+#
+# The OBSERVATION decides nothing, so it shows the operator the latest row and says so. The
+# GATE is the irreversible one, so it refuses without choosing — and since T29 it refuses for
+# the ambiguity itself rather than for want of an observation one line further down. Both
+# halves are pinned, because "refused" alone was equally true of the gate before the arm
+# existed.
 expect_eq "C2 observation resolves a name the roster carries twice, latest row wins" \
   "resolved" "$(q_observation dup)"
 expect_eq "C2 gate refuses it" "refused" "$(q_gate dup)"
+expect_contains "C2 …and the gate refuses for the AMBIGUITY, not for want of a look (T29)" \
+  "more than one live row" \
+  "$(mk_stop_payload "$SID_A" "$RTR" "$RREPO" dup | bash "$PARTY_SG" 2>&1 >/dev/null)"
 
 # --- case 3: resolves only in ANOTHER session of this project. A KNOWN,
 # PINNED divergence, not a defect: the observation is project-wide because it has
@@ -1799,6 +1808,18 @@ section "G — the roster FILENAME is one pattern with five sites (6-axis D-1)"
 # than a restatement — a suffix change goes red here in four places at once.
 G_ROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
 G_MUTANT="$IREPO/.bionic/tmp/roster-$SID_A.txt"
+
+# THE LINEAGE §F LEFT OPEN IS LANDED FIRST (T29). §F planted an `identified` row for
+# `w99-impl` under its own agent id, and `g_confirm` below completes a row for that same NAME
+# under a different one — two rows of one name, both live. Since T29 the stop gate refuses
+# that as an ambiguity, one step BEFORE the refusal this section measures, so the leg would
+# answer about the ambiguity arm instead of about the roster filename. On the machine two live
+# rows of one name are reached only by adoption; here they were reached by two sections
+# sharing a fixture name. The marker is the real landing writer and it states what happened
+# between the two sections: §F's agent finished, which is what frees the name for §G to use
+# again — the exact discharge T26's latest-contract reading was built to honour.
+swept_marker_write "$G_ROSTER" "2026-09-14T00:00:00Z" "$SID_A" "w99-impl" \
+  "aw99impl-8888888888888888" "MET"
 
 # READER 1 — the recorder's completion arm. At the canonical name a dispatch's
 # `intended` row reaches `confirmed`; at any other name there is no row to
