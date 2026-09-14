@@ -211,9 +211,13 @@ TARGET_BASE="${TARGET%@*}"
 # agent's metadata is filed under two session directories at once (proven on this machine,
 # research-code-map §4.4), which the walk reported as two agents.
 #
-# What decides now is `live_agents_has` on the session's own transcript — the newest recorded
-# ListAgents answer, the harness's own statement about which teammates exist this turn. One
-# function, called by this script and by the gate, so a change to the reader moves both.
+# What decides now is THIS SESSION'S ROSTER (T22, A-orch-33). Between S6 and 1.7.1 it was
+# `live_agents_has` on the session's own transcript — a reading only the model can ask for,
+# so an observation taken before the turn's first ListAgents call printed nothing and told
+# the operator to go take one. The roster answers the same question from state the system
+# already wrote, and one name means one row because the dispatch wall refuses a second.
+# The same walk runs in hooks/stop-guard.sh, deliberately duplicated per TDD §9 and held
+# together by tests/cross-gate-agreement.test.sh.
 
 # Candidate project slugs, in order: the cwd, then the enclosing repo root.
 # Claude Code names a project directory by slugifying its path — every
@@ -454,7 +458,16 @@ roster_walk() {  # <key>
   return 0
 }
 roster_walk "$TARGET_BASE"
+# WHICH SPELLING THE OPERATOR TYPED IS A FACT THE RE-WALK BELOW DESTROYS (T32; A-T31.2 —
+# hooks/stop-guard.sh:473-484 carries the identical construction, T31 delta review D1).
+# `roster_walk` clears all three ROW_ variables on entry, so once an id has been translated
+# into the name it shares with the row a later re-walk finds, the row the operator actually
+# named is gone — and on an ambiguous roster the name alone cannot pick it back out. Keeping
+# it here is what lets the override below re-point onto it rather than onto the roster's
+# last row of that name.
+TYPED_ROW=""
 if [ -n "$ROW_BY_ID" ]; then
+  TYPED_ROW="$ROW_BY_ID"
   TARGET_BASE=$(line_field "$ROW_BY_ID" name)
   roster_walk "$TARGET_BASE"
 fi
@@ -467,18 +480,6 @@ ROSTER_ROW="$ROW_BY_NAME"
 # half the whole C6 closure rests on — prints no machine line, because an operator who was
 # shown no evidence tier must leave the recorder nothing to copy.
 echo "OBSERVATION — target as typed: ${TARGET}"
-
-LIVE_LINE=""; LIVE_RC=0
-if [ -n "$OWN_TRANSCRIPT" ]; then
-  LIVE_LINE=$(live_agents_has "$OWN_TRANSCRIPT" "$TARGET_BASE" 2>&1 >/dev/null) || LIVE_RC=$?
-else
-  LIVE_RC=4
-  LIVE_LINE="live-agents: none age=none"
-fi
-LIVE_STATE="${LIVE_LINE#live-agents: }"; LIVE_STATE="${LIVE_STATE%% *}"
-LIVE_AGE="${LIVE_LINE##*age=}"
-case "$LIVE_STATE" in fresh|stale|none) : ;; *) LIVE_STATE="none" ;; esac
-case "$LIVE_AGE" in ''|*[!0-9]*) LIVE_AGE="none" ;; esac
 
 # EVERY ROSTER IN THIS REPO THAT CARRIES THIS NAME, as the addresses the platform's stop
 # primitive takes. This is the one spelling hooks/stop-guard.sh accepts as an alias and
@@ -498,43 +499,15 @@ accepted_addresses() {  # -> one "    <name>@session-xxxxxxxx" line per launcher
   printf '%s' "$out"
 }
 
-case "$LIVE_RC" in
-  3|4)
-    echo "Resolved:      unresolved — no fresh ListAgents answer for this session."
-    echo "               newest answer: ${LIVE_STATE}   ·   age: ${LIVE_AGE}"
-    echo ""
-    echo "The live set belongs to the harness and only the model can ask for it (D1′), so"
-    echo "this command reads the recorded answer rather than walking metadata on disk —"
-    echo "which outlives the agents that wrote it. call ListAgents, then observe again."
-    echo "This command decides nothing."
-    exit 1
-    ;;
-  2)
-    # MATCHED BY FIELD EQUALITY, never as a regular expression (Step-6 security review S-5).
-    # `TARGET_BASE` is the operator's typed target; a `.`, `*` or `[` in it would over-match
-    # and this refusal would report a count that is not the ambiguity it actually found.
-    LIVE_DUPES=$(live_agents "$OWN_TRANSCRIPT" 2>/dev/null \
-                 | awk -F'|' -v want="$TARGET_BASE" '$1 == want') || LIVE_DUPES=""
-    LIVE_N=0
-    [ -n "$LIVE_DUPES" ] && LIVE_N=$(printf '%s\n' "$LIVE_DUPES" | grep -c .)
-    echo "Resolved:      ambiguous — ${LIVE_N} live agents answer to '${TARGET_BASE}':"
-    printf '%s\n' "$LIVE_DUPES" | sed 's/^/  /'
-    accepted_addresses | sed 's/^ *//;s/^/  /'
-    echo ""
-    echo "A name is not an identity, and the @session- alias cannot separate these either —"
-    echo "hooks/stop-guard.sh accepts it only when the bare name resolves to exactly ONE live"
-    echo "entry. This command decides nothing."
-    exit 1
-    ;;
-  1)
-    echo "Resolved:      not live — the fresh ListAgents answer names no teammate '${TARGET_BASE}'."
-    echo ""
-    echo "An agent that is not in the answer is not evidence of anything: it may have finished,"
-    echo "or the name may be misspelled. Metadata on disk is not consulted — it outlives the"
-    echo "agents that wrote it, which is the defect this replaced. This command decides nothing."
-    exit 1
-    ;;
-esac
+# THE ROSTER RESOLVED IT, AND THE ROSTER IS ALL THAT RESOLVES IT (T22, A-orch-33; AC-4.4).
+# Three arms stood here between wave-roster-lifecycle S6 and 1.7.1, all three driven off
+# `live_agents_has`: a STALE or absent ListAgents answer printed a demand for a fresh panel
+# reading and exited 1; two live entries of one name printed an ambiguity; a name the
+# answer did not carry printed "not live". They are gone with the gate's copies of them. A
+# NAME now means one row on this session's roster, because `hooks/dispatch-preflight.sh`
+# refuses a dispatch that would make it mean two; the row carries the id; and this command,
+# which decides nothing, has nothing left to be unable to resolve except a missing id — the
+# arm immediately below, which was always the roster's own.
 
 # ---------- resolved: the id, the session it is filed under, and its files ----------
 #
@@ -545,6 +518,21 @@ AGENT_NAME="$TARGET_BASE"
 AGENT_ID=$(line_field "$ROW_WITH_ID" agent_id)
 ADOPTED_FROM=$(line_field "$ROSTER_ROW" adopted_from)
 case "$ADOPTED_FROM" in *[!A-Za-z0-9-]*) ADOPTED_FROM="" ;; esac
+
+# AN AGENT ID RESOLVES TO THE ROW THAT CARRIES IT, NEVER TO THE LAST ROW OF ITS NAME (T32;
+# A-T31.2 sibling of hooks/stop-guard.sh:507-509, T31 delta review D1). `ROW_WITH_ID` above is
+# the last confirmed/identified row of the NAME — right for a bare name, wrong for an id,
+# which names ONE row by construction. With two live rows of one name, an observation typed
+# as either twin's id used to record `target=` off whichever row is last, so the working-log
+# path, deliverable/progress/claims/cadence and the adopted-session note all belonged to the
+# OTHER agent — the look this producer exists to take could never discharge the twin it was
+# actually typed for.
+if [ -n "$TYPED_ROW" ]; then
+  ROSTER_ROW="$TYPED_ROW"
+  AGENT_ID=$(line_field "$TYPED_ROW" agent_id)
+  ADOPTED_FROM=$(line_field "$TYPED_ROW" adopted_from)
+  case "$ADOPTED_FROM" in *[!A-Za-z0-9-]*) ADOPTED_FROM="" ;; esac
+fi
 
 if [ -z "$AGENT_ID" ]; then
   echo "Resolved:      live, but no agent id — this session's roster carries no \`confirmed\` or"

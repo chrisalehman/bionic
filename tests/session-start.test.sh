@@ -1,4 +1,13 @@
 #!/bin/bash
+# runner: solo
+# TIMING-BOUND (T20, A-orch-28): §16.2 below bounds one hook drive's WALL-CLOCK
+# seconds against 400 aged predecessors. The bound is right; sharing the CPU with
+# seven other suites in tests/run.sh's parallel batch is not — measured 1.270s
+# alone, 3.395s inside an eight-wide batch on a quiet machine, same tree
+# (record/wave-12-fixit-171/floor-057caa2-run2.txt). The marker above holds this
+# suite out of that batch; it runs alone, after the batch drains. See
+# record/wave-12-fixit-171/why-session-start-slow.md for the full mechanism.
+#
 # Tests for hooks/session-start.sh — THE POST-`/clear` DETECTOR (bionic 1.4.0,
 # spec AC-1, AC-4's "the block runs the report", AC-11's symlink listing; plan
 # task SSTART).
@@ -258,7 +267,13 @@ hasnt "1.5 …and THIS session's own open roster is not a predecessor" "roster-$
 has  "1.6 the re-arm sequence: CronList first" "re-arm: CronList" "$OUT"
 has  "1.7 …then the stray delete" "delete bionic-patrol session=" "$OUT"
 has  "1.8 …then CronCreate" "CronCreate" "$OUT"
-has  "1.9 …then arm, by absolute path" "$(cd "$(dirname "$HOOK")/.." && pwd -P)/hooks/session-poker.sh arm" "$OUT"
+# T19 (A-orch-19.3): the stamp now arms itself at engagement (hooks/engage.sh, D4), so the
+# ritual's hand step after CronCreate is `adopt` alone — `session-poker.sh arm` is gone from
+# the line entirely, not just reworded.
+hasnt "1.9 …no arm hand step — the stamp arms itself at engagement (D4)" \
+  "session-poker.sh arm" "$OUT"
+has  "1.9b …the re-arm line itself, exactly: CronCreate hands straight to adopt" \
+  "re-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → adopt" "$OUT"
 has  "1.10 …then adopt" "adopt" "$OUT"
 has  "1.11 the session-id triple agrees" "— agree" "$OUT"
 eq   "1.12 the hook wrote nothing under .bionic" "$S1_BEFORE" "$(snap "$P1")"
@@ -679,5 +694,71 @@ hasnt "15.2 no bound line — this session never bound" "bionic: bound to" "$OUT
 hasnt "15.3 no quiet-count line — nothing is quiet" "quiet open run(s)" "$OUT"
 has   "15.4 the predecessor roster still prints, exactly as today" "roster-$OLD_SID.state" "$OUT"
 eq    "15.5 wrote nothing" "$S15_BEFORE" "$(snap "$P15")"
+
+section "16 — 400 aged predecessor files: bounded, not a linear scan (AC-6.1, AC-6.2)"
+# THE FIELD DEFECT (carry-over P9, REQ-6): both the roster loop (:427) and the
+# patrol-stamp loop (:504) spawn a subprocess PER FILE (an `awk` for open_rows,
+# a `stat` for the stamp's age) with no upper bound on how many predecessor
+# files can accumulate under .bionic/tmp — measured ~10.4s at 400 dead sessions
+# against the CLI's 10s hook timeout. This section plants exactly that shape
+# and times ONE drive with `date +%s` (whole seconds, per the task's own
+# tolerance — sub-second timing needs python3, not a portability bet worth
+# taking here).
+#
+# WHAT MUST STILL WORK (AC-6.2): a predecessor this run has no reason to treat
+# as settled — a FRESH roster/stamp pair under its own sid, never backdated —
+# is read and listed exactly as it would be with zero aged files beside it, and
+# THIS session's own files are still excluded exactly as every section above
+# already proves. The 400 aged files are the ones REQ-6 allows the loops to
+# skip; they are backdated 7 days (604800s), an age no interval/multiplier
+# combination anywhere in this file's own constants could mistake for "still
+# worth an individual read".
+#
+# 3600s, NOT a tiny interval: see §1's comment and §9/§12's own use of the same
+# value — a generous interval keeps FRESH_SID's just-written files out of the
+# auto-sweep's reach deterministically (R2's age gate defers the WHOLE sweep
+# for this run if any dead session anywhere has a file younger than the
+# interval). A tiny interval here would race this section's own timing against
+# whether the sweep decides to run, which is REQ-R2's feature and not this
+# section's subject — §16 is timing the two REPORT loops this task bounds, not
+# the sweep further down.
+P16=$(make_env 3600s)
+DEAD_I=1
+while [ "$DEAD_I" -le 400 ]; do
+  DEAD_SID=$(printf 'dead0000-dead-dead-dead-%012d' "$DEAD_I")
+  roster_rows "$P16/.bionic/tmp/roster-$DEAD_SID.state" "$DEAD_SID" "W-DEAD$DEAD_I"
+  backdate "$P16/.bionic/tmp/roster-$DEAD_SID.state" 604800
+  write_stamp "$P16" "$DEAD_SID"
+  backdate "$P16/.bionic/tmp/patrol-$DEAD_SID.state" 604800
+  DEAD_I=$((DEAD_I + 1))
+done
+FRESH_SID="fedcba98-7654-3210-fedc-ba9876543210"
+roster_rows "$P16/.bionic/tmp/roster-$FRESH_SID.state" "$FRESH_SID" "W-FRESH"
+write_stamp "$P16" "$FRESH_SID"
+roster_rows "$P16/.bionic/tmp/roster-$CUR_SID.state" "$CUR_SID" "W-MINE"
+write_stamp "$P16" "$CUR_SID"
+
+# SUB-SECOND, via python3 — a whole-second `date +%s` difference is off by up
+# to a full second either way from where the two calls happen to straddle a
+# tick, which is exactly wide enough to misjudge a genuine ~1.something-second
+# run as "2". python3's wall clock is what every timing comment elsewhere in
+# this suite already reasons in when precision matters; this is the one
+# section short enough (~1-2s) for that boundary to matter.
+T16_PY() { python3 -c 'import time; print(time.time())' 2>/dev/null; }
+T16_START="$(T16_PY)"
+OUT=$(drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+T16_END="$(T16_PY)"
+T16_ELAPSED="$(python3 -c "print(f'{${T16_END:-0} - ${T16_START:-0}:.3f}')" 2>/dev/null || echo 999)"
+
+eq    "16.1 exit 0" "0" "$(rc)"
+expect_true "16.2 the drive finishes in under 2 seconds against 400 aged predecessors (${T16_ELAPSED}s)" \
+  python3 -c "import sys; sys.exit(0 if ${T16_ELAPSED:-999} < 2 else 1)"
+has   "16.3 the fresh predecessor roster is still listed" "roster-$FRESH_SID.state" "$OUT"
+has   "16.4 the predecessor stamps section still appears" "predecessor stamps:" "$OUT"
+has   "16.5 …naming the fresh predecessor by its short id" "${FRESH_SID:0:8}" "$OUT"
+hasnt "16.6 THIS session's own roster is never listed as a predecessor" \
+  "roster-$CUR_SID.state" "$OUT"
+hasnt "16.7 THIS session's own stamp is never listed as a predecessor" \
+  "  ${CUR_SID:0:8} " "$OUT"
 
 finish

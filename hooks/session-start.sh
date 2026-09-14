@@ -385,8 +385,66 @@ done
 # two discharges `adopt_fold` in hooks/session-poker.sh applies, mirrored here
 # rather than shelled out to, because task POKER owns that file and this hook must
 # read the same disk with or without its `--report-only` verb.
-open_rows() {  # <roster file> <ack ledger file|""> -> a count
-  awk -v ackfile="$2" '
+#
+# ONE AWK PROCESS FOR EVERY PREDECESSOR ROSTER, not one per file (REQ-6, carry-over
+# P9). The per-file shape below — `for RF in …; do N="$(open_rows "$RF" …)"; done` —
+# forked an `awk` per roster file with no bound on how many can accumulate under
+# `.bionic/tmp`: measured ~10.4s at 400 dead sessions against the CLI's 10s hook
+# timeout (2,041ms already at 14 files — subprocess-per-file cost dominates well
+# before any file count a real project ever carries deliberately). The FILTERING
+# loop below stays pure bash builtins (glob + `[ -f ]`/`[ -L ]`, no fork), and
+# builds a tab-separated manifest of every SURVIVING (osid, roster, ledger) triple;
+# ONE awk invocation then walks the manifest and, for each row, reads that roster
+# file and its ledger with `getline < file` (awk's own multi-file idiom, not a
+# subprocess), resetting its per-file `seen`/`met`/`acked` arrays between rows —
+# the exact per-file reset the old per-invocation `awk` got for free by exiting.
+# Output is unchanged: one `osid<TAB>count<TAB>roster-path` line per roster with at
+# least one open row, read back below into the same `ROSTERS` text as today.
+# A PARAMETER EXPANSION, NOT A FUNCTION CALLED THROUGH `$(...)` (T16, follow-up
+# to T6, AC-6.1). `sid8` used to be invoked as `$(sid8 "$OSID")` at both its
+# call sites below, each inside a loop that runs once per predecessor — a COMMAND
+# SUBSTITUTION forks a subshell to capture ANY command's stdout, even a plain shell
+# function doing one `printf`. Measured (a synthetic 401-iteration loop, `time`):
+# ~0.20s forking per call vs ~0.003s for the equivalent `${var:0:8}` substring — a
+# ~70x difference that, at 401 predecessors across the two loops below, accounted for
+# a real chunk of AC-6.1's remaining latency once the sweep-side costs were fixed.
+# `${1:0:8}` is `sid8`'s own body in expansion form: a substring never errors short
+# (an id under 8 chars returns however many it has, exactly like `printf '%.8s'`), so
+# nothing about the OUTPUT changes — only the fork is gone. Kept as a function (never
+# called through this file's two hot loops) for any future one-off caller that wants
+# the name.
+sid8() { printf '%.8s' "${1:-}"; }
+
+# `ss_interval()` STARTS NOW, IN THE BACKGROUND (T16, follow-up to T6,
+# AC-6.1). It forks a whole `bash session-poker.sh interval`
+# subprocess to read one config value, and nothing it reads or returns depends
+# on — or is depended on by — the roster/stamp report below: it touches only
+# `.bionic/config.yaml`, never a predecessor's state file, so unlike the sweep
+# (which this file's own comments elsewhere are careful to run only AFTER the
+# report is read off disk, to avoid racing a delete against a read) there is no
+# ordering hazard in starting it early and collecting the answer once `LIMIT`
+# actually needs it, further down. Overlapping its ~0.1s against the roster
+# loop's own real work below hides most or all of it.
+SS_INTERVAL_OUT="${TMPDIR:-/tmp}/bionic-interval.$$.out"
+( ss_interval > "$SS_INTERVAL_OUT" 2>/dev/null ) &
+SS_INTERVAL_PID=$!
+
+ROSTER_MANIFEST=""
+for RF in "$TMP"/roster-*.state; do
+  [ -f "$RF" ] || continue
+  [ -L "$RF" ] && continue        # symlinks are not followed, as everywhere in tmp
+  OSID="${RF##*/}"; OSID="${OSID#roster-}"; OSID="${OSID%.state}"
+  [ -n "$OSID" ] || continue
+  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
+  LEDGER="$TMP/sweeper-$OSID.state"
+  if [ ! -f "$LEDGER" ] || [ -L "$LEDGER" ]; then LEDGER=""; fi
+  ROSTER_MANIFEST="${ROSTER_MANIFEST}${OSID}	${RF}	${LEDGER}
+"
+done
+
+ROSTERS=""
+if [ -n "$ROSTER_MANIFEST" ]; then
+  ROSTER_RAW="$(printf '%s' "$ROSTER_MANIFEST" | awk -F'\t' '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
       for (i = 1; i <= n; i++) {
@@ -397,47 +455,43 @@ open_rows() {  # <roster file> <ack ledger file|""> -> a count
       }
       return ""
     }
-    BEGIN {
-      if (ackfile != "") {
-        while ((getline l < ackfile) > 0) {
+    {
+      osid = $1; rf = $2; ledger = $3
+      delete seen; delete met; delete acked
+      if (ledger != "") {
+        while ((getline l < ledger) > 0) {
           if (l !~ /^sweeper-ledger\/v1\|/) continue
           if (kv(l, "event") != "ack") continue
           an = kv(l, "name"); if (an != "") acked[an] = 1
         }
-        close(ackfile)
+        close(ledger)
       }
-    }
-    /^roster-state\/v1\|/ { n = kv($0, "name"); if (n != "") seen[n] = 1; next }
-    /^landing-swept\/v1\|/ {
-      n = kv($0, "name")
-      if (n != "" && kv($0, "state") == "MET") met[n] = 1
-      next
-    }
-    END {
+      while ((getline l < rf) > 0) {
+        if (l ~ /^roster-state\/v1\|/) {
+          n = kv(l, "name"); if (n != "") seen[n] = 1
+          continue
+        }
+        if (l ~ /^landing-swept\/v1\|/) {
+          n = kv(l, "name")
+          if (n != "" && kv(l, "state") == "MET") met[n] = 1
+        }
+      }
+      close(rf)
       c = 0
       for (n in seen) { if (n in met) continue; if (n in acked) continue; c++ }
-      print c
+      if (c > 0) printf "%s\t%s\t%s\n", osid, c, rf
     }
-  ' "$1" 2>/dev/null
-}
-
-sid8() { printf '%.8s' "${1:-}"; }
-
-ROSTERS=""
-for RF in "$TMP"/roster-*.state; do
-  [ -f "$RF" ] || continue
-  [ -L "$RF" ] && continue        # symlinks are not followed, as everywhere in tmp
-  OSID="${RF##*/}"; OSID="${OSID#roster-}"; OSID="${OSID%.state}"
-  [ -n "$OSID" ] || continue
-  if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
-  LEDGER="$TMP/sweeper-$OSID.state"
-  if [ ! -f "$LEDGER" ] || [ -L "$LEDGER" ]; then LEDGER=""; fi
-  N="$(open_rows "$RF" "$LEDGER")"
-  case "$N" in ''|*[!0-9]*) continue ;; esac
-  [ "$N" -gt 0 ] || continue
-  ROSTERS="${ROSTERS}  $(sid8 "$OSID") — $N open row(s) — ${RF##*/}
+  ' 2>/dev/null)"
+  if [ -n "$ROSTER_RAW" ]; then
+    while IFS="$(printf '\t')" read -r OSID N RF; do
+      [ -n "$OSID" ] || continue
+      ROSTERS="${ROSTERS}  ${OSID:0:8} — $N open row(s) — ${RF##*/}
 "
-done
+    done <<EOF
+$ROSTER_RAW
+EOF
+  fi
+fi
 
 # ---------------------------------------------------------------- predecessor stamps
 #
@@ -470,8 +524,23 @@ ss_interval() {
 # wants root/session/patrol/run only (BIONIC_LIB_WANT above), and a fifth required
 # library would fail the whole DETECTOR closed on a machine that lacks it, to buy
 # a bound only the one `sweep` call below needs.
+# POLL GRANULARITY IS 0.1s, NOT 1s (T16, follow-up to T6, AC-6.1). The
+# bound (`limit`, whole seconds — the external contract `BIONIC_SWEEP_BOUND_SECONDS`
+# keeps) used to be measured by a `sleep 1`-per-tick counter: a sweep that actually
+# finishes in, say, 1.1s is invisible to a `kill -0` check that only runs once a
+# second, so this loop waited out a full SECOND boundary it happened to straddle —
+# up to ~1s of pure polling latency added on top of the sweep's own real duration,
+# confirmed by `EPOCHREALTIME` checkpoints either side of each `sleep` (a 400-dead
+# fixture: the sweep itself measured ~1s once REQ-6/T16's other fixes landed, but
+# this loop still cost ~2s end to end). `SS_POLL_TICKS_PER_SEC` scales the SAME
+# `limit` into finer ticks so the bound is still honoured in whole seconds
+# (tests/session-sweep.test.sh §7e's hang case only asserts "well under 30s", never a
+# specific tick count) while completion is now detected within one 0.1s window
+# instead of one whole second.
+SS_POLL_TICKS_PER_SEC=10
 ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep, 124 on timeout
-  local poker="$1" limit="$2" pid waited=0 rc out had_monitor
+  local poker="$1" limit="$2" pid ticks=0 max_ticks rc out had_monitor
+  max_ticks=$(( limit * SS_POLL_TICKS_PER_SEC ))
   out="${TMPDIR:-/tmp}/bionic-sweep.$$.out"
   : > "$out" 2>/dev/null || out="/dev/null"
   case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
@@ -481,15 +550,15 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep
   [ "$had_monitor" = "yes" ] || set +m
   if command -v sleep >/dev/null 2>&1; then
     while kill -0 "$pid" 2>/dev/null; do
-      if [ "$waited" -ge "$limit" ]; then
+      if [ "$ticks" -ge "$max_ticks" ]; then
         kill -TERM "-${pid}" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
         wait "$pid" 2>/dev/null
         [ -s "$out" ] && cat "$out"
         rm -f "$out" 2>/dev/null
         return 124
       fi
-      sleep 1
-      waited=$((waited + 1))
+      sleep 0.1
+      ticks=$((ticks + 1))
     done
   fi
   wait "$pid"; rc=$?
@@ -499,21 +568,64 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep
 }
 
 STAMPS=""
-LIMIT=$(( $(ss_interval) * PATROL_STALE_MULTIPLIER ))
+# COLLECT THE BACKGROUND `ss_interval()` STARTED ABOVE, not a fresh call: the
+# fork already happened before the roster loop; this just joins it and reads
+# the file it wrote. A wait on an already-finished job returns immediately.
+wait "$SS_INTERVAL_PID" 2>/dev/null
+SS_INTERVAL_VAL="$(cat "$SS_INTERVAL_OUT" 2>/dev/null)"
+rm -f "$SS_INTERVAL_OUT" 2>/dev/null
+case "$SS_INTERVAL_VAL" in ''|*[!0-9]*) SS_INTERVAL_VAL="$(ss_interval)" ;; esac
+LIMIT=$(( SS_INTERVAL_VAL * PATROL_STALE_MULTIPLIER ))
 NOW="$(date -u +%s 2>/dev/null || echo 0)"
+
+# ONE `stat` INVOCATION FOR EVERY PREDECESSOR STAMP, not one per file (REQ-6,
+# same defect and the same fix shape as the roster loop above, and the same
+# batched-stat idiom the sweep gate further down already established — one
+# flavour probe, then a single `xargs` pass over every candidate path rather
+# than a `stat` fork per file). The filtering loop stays pure bash builtins
+# (glob + `[ -f ]`/`[ -L ]`, no fork) and records each survivor's path in
+# ORDER; `stat`'s own output preserves that order one line per input, so the
+# second loop below zips path[i] back to mtime[i] positionally rather than
+# re-deriving anything from the filename.
+STAMP_FILES=""
+STAMP_OSIDS=""
 for SF in "$TMP"/patrol-*.state; do
   [ -f "$SF" ] || continue
   [ -L "$SF" ] && continue
   OSID="${SF##*/}"; OSID="${OSID#patrol-}"; OSID="${OSID%.state}"
   [ -n "$OSID" ] || continue
   if [ -n "$BIONIC_SID" ] && [ "$OSID" = "$BIONIC_SID" ]; then continue; fi
-  MT="$(stat -f %m "$SF" 2>/dev/null || stat -c %Y "$SF" 2>/dev/null)"
-  case "$MT" in ''|*[!0-9]*) continue ;; esac
-  AGE=$(( NOW - MT )); [ "$AGE" -ge 0 ] || AGE=0
-  if [ "$AGE" -gt "$LIMIT" ]; then STATE="stale"; else STATE="fresh"; fi
-  STAMPS="${STAMPS}  $(sid8 "$OSID") — ${AGE}s old (stale past ${LIMIT}s) — $STATE
+  STAMP_FILES="${STAMP_FILES}${SF}
+"
+  STAMP_OSIDS="${STAMP_OSIDS}${OSID}
 "
 done
+
+if [ -n "$STAMP_FILES" ]; then
+  case "$(stat -c %Y /dev/null 2>/dev/null)" in
+    ''|*[!0-9]*)
+      STAMP_MTS="$(printf '%s' "$STAMP_FILES" | tr '\n' '\0' | xargs -0 stat -f %m 2>/dev/null)"
+      ;;
+    *)
+      STAMP_MTS="$(printf '%s' "$STAMP_FILES" | tr '\n' '\0' | xargs -0 stat -c %Y 2>/dev/null)"
+      ;;
+  esac
+  exec 8<<EOF_OSIDS
+$STAMP_OSIDS
+EOF_OSIDS
+  exec 9<<EOF_MTS
+$STAMP_MTS
+EOF_MTS
+  while IFS= read -r OSID <&8 && IFS= read -r MT <&9; do
+    [ -n "$OSID" ] || continue
+    case "$MT" in ''|*[!0-9]*) continue ;; esac
+    AGE=$(( NOW - MT )); [ "$AGE" -ge 0 ] || AGE=0
+    if [ "$AGE" -gt "$LIMIT" ]; then STATE="stale"; else STATE="fresh"; fi
+    STAMPS="${STAMPS}  ${OSID:0:8} — ${AGE}s old (stale past ${LIMIT}s) — $STATE
+"
+  done
+  exec 8<&- 9<&-
+fi
 
 # ---------------------------------------------------------------- legacy symlinks
 LINKS=""
@@ -586,14 +698,34 @@ if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
     # runs AFTER the report is built, so a CLI timeout here discards the report — on
     # exactly the residue-heavy project the report is most useful on.
     #
-    # THE FILE LIST IS STILL THE LIBRARY'S ANSWER. `patrol_session_state_files` is
-    # asked the same question about the same sessions; only the mtime read is
-    # batched, so "who is dead and what did they leave" cannot come apart between
-    # this hook, the verb and doctor. The collection loop is ONE subshell for the
-    # whole set rather than one per session.
+    # THE FILE LIST IS STILL THE LIBRARY'S ANSWER, BY CONSTANT, NOT BY CALL (T16,
+    # follow-up to T6, AC-6.1). This used to call
+    # `patrol_session_state_files "$BIONIC_ROOT" "$SS_SID"` once per dead session —
+    # itself no globbing (every candidate is an exact path), but its first line,
+    # `d="$(tmp_root "${1:-}")"`, is a COMMAND SUBSTITUTION, and `tmp_root` itself
+    # is `printf '%s\n' "$(bionic_root "$1")/tmp"` — a SECOND command substitution
+    # inside the first. Two forks per call, 401 calls: 802 forks measured (via
+    # EPOCHREALTIME checkpoints either side of this loop) at ~0.64s of AC-6.1's
+    # remaining budget, the largest single cost left once the sweep-side and
+    # roster/stamp-loop costs were fixed. `$TMP` is already this exact hook's own
+    # `$BIONIC_ROOT/.bionic/tmp` (set once, near the top of this file) — the same
+    # answer `tmp_root` computes, at zero additional cost — so walking
+    # `$PATROL_STATE_CLASSES`/`$PATROL_STATE_ARMED_SUFFIX` directly against it
+    # reaches the identical path list `patrol_session_state_files` would have,
+    # without calling it or forking at all. "Who is dead and what did they leave"
+    # still cannot come apart between this hook, the verb and doctor: the CLASSES
+    # and the ARMED SUFFIX remain the library's one definition, read here as
+    # constants rather than through a per-session function call. The collection
+    # loop is still ONE subshell for the whole set, exactly as before.
     SS_FILES="$(while IFS= read -r SS_SID; do
         [ -n "$SS_SID" ] || continue
-        patrol_session_state_files "$BIONIC_ROOT" "$SS_SID"
+        for SS_C in $PATROL_STATE_CLASSES; do
+          for SS_F in "$TMP/$SS_C-$SS_SID.state" \
+                      "$TMP/$SS_C-$SS_SID.state$PATROL_STATE_ARMED_SUFFIX"; do
+            [ -e "$SS_F" ] || [ -L "$SS_F" ] || continue
+            printf '%s\n' "$SS_F"
+          done
+        done
       done <<EOF
 $SS_DEAD_IDS
 EOF
@@ -691,8 +823,10 @@ fi
 # THE ORDER IS THE INSTRUCTION. CronList first, because a predecessor's recurring
 # job survives `/clear` and keeps firing (A-probe-4); creating before deleting
 # leaves two clocks on one project, which is the 1.3.2 B-8 bug by another route.
-printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → bash %s/hooks/session-poker.sh arm → adopt\n' \
-  "$HOOK_ROOT"
+# T19 (A-orch-19.3): the stamp now arms itself at engagement (hooks/engage.sh, D4), so the
+# hand step after CronCreate is `adopt` alone — this line no longer names `session-poker.sh
+# arm`, which would send the model to redo a step engage.sh already did.
+printf 're-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → adopt\n'
 [ -n "$SWEEP_FAIL_LINE" ] && printf '%s\n' "$SWEEP_FAIL_LINE"
 
 exit 0

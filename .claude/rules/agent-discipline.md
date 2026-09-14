@@ -42,7 +42,11 @@ at session start, so AC-2 is unaffected. The cost is ~8 KB whenever a matching f
 > `agents-src/blocks/survival.md`, rendered into all six `agents/*.md` role files, so a
 > dispatched agent carries them in its own role definition instead of reading them here.
 > Live readback and the propagation measurement: `.bionic/docs/record/epic-17-w4/s3-report.md`.
-> What stays below is addressed to whoever writes the brief, which no role file can reach.
+> **Updated (epic-23 wave-12 T3, 2026-09-13).** The brief scaffold itself now also lives in the
+> role files and in `skills/canonical-sdlc/dispatch.md` (`agents-src/blocks/brief-scaffold.md`,
+> rendered into all seven surfaces). What stays below is the guidance those seven surfaces
+> cannot carry — brief-authoring judgment addressed to whoever writes the dispatch, not the
+> scaffold's own shape.
 
 ## Skill-creator pitfalls
 

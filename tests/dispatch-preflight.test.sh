@@ -222,6 +222,13 @@ mk_bash_payload() {  # <sid> <cwd>  — an irrelevant tool, for the A7 hoist tes
 }
 
 GATE_OUT=""; GATE_ERR=""; GATE_VERR=""; GATE_ST=0
+# THE DENY CHANNEL (wave-12 T17). The combined brief-shape refusal does not exit 2: it
+# prints a PreToolUse deny verdict on STDOUT and exits 0, because `permissionDecisionReason`
+# is the one field the E1 measurement proved reaches the MODEL in full (refuse.sh's channel
+# table, `model_only=yes`). A driver that read the exit status alone would score that an
+# ALLOW. `$GATE_VERDICT` is what a refusal arm asks for now — `deny`, `exit2` or `allow` —
+# and `$GATE_REASON` is the model's own wire, parsed out of the JSON rather than grepped.
+GATE_DENY=""; GATE_REASON=""; GATE_VERDICT="allow"
 # Set to a directory to drive the gate with a sandboxed CLAUDE_CONFIG_DIR — the
 # roster prune's liveness lookup reads <config>/projects/*/<session>.jsonl, and
 # the operator's REAL config dir would decide which fixtures survive otherwise.
@@ -259,10 +266,47 @@ run_gate() {  # <payload-json>
   GATE_ST=$?
   GATE_TIME=$(( $(date +%s) - _t0 ))
   GATE_ERR=$(cat "$SANDBOX/.err")
+  # THE VERDICT, read off both wires. `jq` rather than a grep for the reason: a reason the
+  # escaper mangled must come back EMPTY here, not as text that happens to hold the right
+  # words — the escaping is refuse.sh's own responsibility and needs a parser to check it.
+  GATE_DENY=""; GATE_REASON=""
+  case "$GATE_OUT" in
+    *'"permissionDecision":"deny"'*)
+      GATE_DENY=1
+      GATE_REASON=$(printf '%s' "$GATE_OUT" \
+        | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null) || GATE_REASON=""
+      ;;
+  esac
+  if [ -n "$GATE_DENY" ]; then
+    GATE_VERDICT="deny"
+  else
+    case "$GATE_ST" in
+      0) GATE_VERDICT="allow" ;;
+      2) GATE_VERDICT="exit2" ;;
+      *) GATE_VERDICT="exit$GATE_ST" ;;
+    esac
+  fi
+  # §no-listagents SWEEP (wave-12 T1; spec D1, AC-4.1). NOT a per-arm assertion: the
+  # criterion is "no brief in ANY state", and an arm-by-arm check would only ever cover
+  # the states somebody remembered to write. Every payload this suite drives passes
+  # through here, allowed and refused alike, and the counter is read once in the
+  # §no-listagents section at the end of the file.
+  #
+  # IT SITS ABOVE THE AC-E1.3 BLOCK ON PURPOSE. That block returns early for a refusal
+  # carrying no `bionic: ` line — which was precisely the shape of the live-agents
+  # freshness refusal this task retires. A sweep placed after it would have been blind to
+  # the one refusal it exists to hunt, and would have read empty for the wrong reason.
+  DP_NLA_SWEPT=$(( ${DP_NLA_SWEPT:-0} + 1 ))
+  case "$GATE_ERR" in
+    *"call ListAgents"*) DP_NLA_HITS="${DP_NLA_HITS:-}[$GATE_ERR] " ;;
+  esac
   # AC-E1.3, SWEPT AT THE DRIVER. Every refusal this suite produces is checked for the
   # criterion's shape as it happens, so no site can be migrated without an eval and no
   # arm has to be written twice. The counters are read in the AC-E1.3 section at the end.
-  if [ "$GATE_ST" = "2" ]; then
+  # BOTH BLOCKING CHANNELS. A deny verdict exits 0, so a sweep gated on status 2 alone would
+  # stop reading the user line of every refusal T17 moved — the criterion is about the LINE,
+  # and the line is on stderr in both modes.
+  if [ "$GATE_ST" = "2" ] || [ -n "$GATE_DENY" ]; then
     _dp_line=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ' || true)
     if [ -z "$_dp_line" ]; then
       # THE ONE REFUSAL SITE THE RULED WORDING TABLE DOES NOT COVER. `live-agents:` at
@@ -294,8 +338,11 @@ run_gate() {  # <payload-json>
   # second drive of an accepted call would append a second row and every counting arm in
   # this suite would read two where the gate wrote one. Measured, not guessed: an
   # ungated second drive turned "exactly one row was appended" into two.
+  # ON A DENY TOO (T17). The gate exits 0 there, and the reason a second drive is gated at
+  # all is that an ALLOWED dispatch journals a roster row — a deny journals nothing, because
+  # the findings are spent above the journal.
   GATE_VERR=""
-  if [ "$GATE_ST" -ne 0 ]; then
+  if [ "$GATE_ST" -ne 0 ] || [ -n "$GATE_DENY" ]; then
     if [ -n "$GATE_CONFIG_DIR" ]; then
       # shellcheck disable=SC2086
       GATE_VERR=$(printf '%s' "$1" | env $GATE_ENV BIONIC_WALL_VERBOSE=1 \
@@ -305,6 +352,14 @@ run_gate() {  # <payload-json>
       GATE_VERR=$(printf '%s' "$1" | env $GATE_ENV BIONIC_WALL_VERBOSE=1 bash "$GATE" 2>&1 >/dev/null)
     fi
   fi
+  # §no-listagents SWEEP (wave-12 T1; spec D1, AC-4.1). NOT a per-arm assertion: the
+  # criterion is "no brief in ANY state", and an arm-by-arm check would only ever cover
+  # the states somebody remembered to write. Every payload this suite drives passes
+  # through here — allowed and refused alike, line and detail — and the counter is read
+  # once in the §no-listagents section at the end of the file.
+  case "$GATE_VERR" in
+    *"call ListAgents"*) DP_NLA_HITS="${DP_NLA_HITS:-}[detail: $GATE_VERR] " ;;
+  esac
   GATE_ENV="${GATE_ENV% CLAUDE_CODE_SESSION_ID=*}"
   return 0
 }
@@ -1658,8 +1713,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r13c2 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LABEL_RUNON" "runonbot")"
-expect_status "C-2: a run-on labelled span naming four paths is REFUSED as ambiguous (R7)" \
-  "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "C-2: a run-on labelled span naming four paths is REFUSED as ambiguous (R7)" \
+  "deny" "$GATE_VERDICT"
 expect_contains "C-2: …the refusal names the declared artifact" \
   "record/w99-report.md" "$GATE_VERR"
 expect_contains "C-2: …and the 'read …' input path, so neither is chosen for the author" \
@@ -2094,8 +2152,17 @@ for _case in nodeliverable outofrepo; do
 Expected artifact: ../../../../../../etc/hosts
 Expected duration: ~15 minutes.' ;;
   esac
+  # THE CHANNEL DIFFERS BY FAULT COUNT (T17), and these two cases sit either side of it:
+  # the deliverable-less brief has ONE shape fault and refuses on exit2 as it always did,
+  # while the out-of-repo one declares no instrument either — two faults, one refusal, and
+  # a deny verdict so the model reads both. Refused is refused; the roster arms below are
+  # what this section is actually about and neither is touched.
+  case "$_case" in
+    outofrepo) _want=deny ;;
+    *)         _want=exit2 ;;
+  esac
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_brief" "ghost-$_case")"
-  expect_status "AC-12 ($_case): the dispatch is refused" "2" "$GATE_ST"
+  expect_eq "AC-12 ($_case): the dispatch is refused" "$_want" "$GATE_VERDICT"
   expect_status "AC-12 ($_case): the roster is byte-identical across the refusal" \
     "$BEFORE" "$(cat "$RP" 2>/dev/null)"
   expect_status "AC-12 ($_case): …and still holds only the accepted dispatch's row" \
@@ -2161,8 +2228,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18a yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_SHAPE" "shapebot")"
-expect_status "R6-1 CASE 9: a deliverable span naming two paths is REFUSED, never resolved" \
-  "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "R6-1 CASE 9: a deliverable span naming two paths is REFUSED, never resolved" \
+  "deny" "$GATE_VERDICT"
 expect_contains "R6-1 CASE 9: …the refusal names the reference path" \
   ".bionic/docs/record/w2-critic-report.md" "$GATE_VERR"
 expect_contains "R6-1 CASE 9: …and the real artifact, so neither is silently contracted" \
@@ -2180,7 +2250,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18b yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_READ" "readproducebot")"
-expect_status "R6-1 CASE 10: read-X-then-produce-Y is REFUSED, not contracted to X" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "R6-1 CASE 10: read-X-then-produce-Y is REFUSED, not contracted to X" \
+  "deny" "$GATE_VERDICT"
 expect_contains "R6-1 CASE 10: …the auditors report is named as a candidate, not taken" \
   ".bionic/docs/record/w2-auditor-report.md" "$GATE_VERR"
 expect_contains "R6-1 CASE 10: …alongside the artifact the agent was actually sent to write" \
@@ -2314,7 +2388,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18twoline yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_ON_ONE_LINE" "twolinebot")"
-expect_status "S18b two paths on the deliverable label OWN line are still REFUSED" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "S18b two paths on the deliverable label OWN line are still REFUSED" \
+  "deny" "$GATE_VERDICT"
 expect_contains "S18b …and the refusal still names both candidates" "w99-two.log" "$GATE_VERR"
 
 # A prose continuation line (no label head) still belongs to the span — the R6-4 window
@@ -2353,17 +2431,41 @@ Expected artifact: ../../../../../../etc/hosts
 Expected duration: ~15 minutes.
 Suites: tests/widget.test.sh'
 
-for _wall in containment absent ambiguous; do
+# THE THREE-FAULT BRIEF (wave-12 T2, spec D3, AC-1.1/AC-1.2). One brief that trips three
+# brief-shape arms at once: the deliverable label offers two candidates (A11), which leaves
+# `deliverable=` empty with no waiver behind it (A13), and no instrument is declared at all
+# (A14). It is the shape Chris met on 2026-09-13 — six dispatches to spawn one researcher,
+# because the gate exited at the first fault every time — and the §combined section below
+# reads the whole refusal. It is defined HERE because the self-consistency loop below is the
+# first thing that drives it.
+BRIEF_THREE_FAULTS='Your task: review the wave.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Expected duration: 20 minutes'
+
+for _wall in containment absent ambiguous combined; do
+  # EACH BRIEF WITH THE CHANNEL ITS REFUSAL LANDS ON (wave-12 T17), declared beside the
+  # brief because that is what decides it: a brief with ONE shape fault refuses on exit2,
+  # where the detail is the knob's; a brief with several refuses with a deny verdict, where
+  # the whole list is on the model's own wire. The two ambiguous-label briefs have two and
+  # three faults — a label offering candidates leaves `deliverable=` empty behind it.
   case "$_wall" in
-    containment) _b="$BRIEF_OUT_OF_REPO" ;;
-    absent)      _b="$BRIEF_NOTHING" ;;
-    ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE" ;;
+    containment) _b="$BRIEF_OUT_OF_REPO";    _want=exit2 ;;
+    absent)      _b="$BRIEF_NOTHING";        _want=exit2 ;;
+    ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE"; _want=deny ;;
+    combined)    _b="$BRIEF_THREE_FAULTS";    _want=deny ;;
   esac
   REPO=$(make_repo "r18h-$_wall" yes)
   write_attestation "$REPO" "$SID_A"
   run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$_b" "fixline-$_wall")"
-  expect_status "self-consistency ($_wall): the wall refuses" "2" "$GATE_ST"
-  _ex=$(fix_example "$GATE_VERR")
+  # AND EACH WALL IS READ WHERE ITS REFUSAL ACTUALLY LANDS: the exit2 ones off the verbose
+  # stderr, the deny ones off `permissionDecisionReason` — the model's own wire, with no knob
+  # set. An author, or a model, only ever gets to follow a Fix: line it can see.
+  case "$_want" in
+    deny) _src="$GATE_REASON" ;;
+    *)    _src="$GATE_VERR" ;;
+  esac
+  expect_eq "self-consistency ($_wall): the wall refuses" "$_want" "$GATE_VERDICT"
+  _ex=$(fix_example "$_src")
   expect_status "self-consistency ($_wall): its Fix: block recommends a labeled example" "0" \
     "$([ -n "$_ex" ] && echo 0 || echo 1)"
   expect_absent "self-consistency ($_wall): …carrying no slot the walls themselves refuse" \
@@ -2485,7 +2587,11 @@ expect_status "…and writes NO roster row (the ledger stays at depth one)" "1" 
 # at depth, which is the entire point of the second registration.
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Canonical-sdlc Step 4. Do the thing.
 Exit condition: the suite is green.')"
-expect_status "a deliverable-less dispatch in an agent context is still REFUSED" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "a deliverable-less dispatch in an agent context is still REFUSED" \
+  "deny" "$GATE_VERDICT"
 expect_contains "…by the absent-deliverable wall, in its own words" \
   "bionic: dispatch refused — this brief names no deliverable" "$GATE_ERR"
 GATE_ENV="$S20_SAVED_ENV"
@@ -2547,7 +2653,13 @@ expect_status "an ABSENT Patrol stamp refuses the dispatch" "2" "$GATE_ST"
 expect_contains "…in the checkpoint house style, not an alarm word" \
   "bionic: dispatch refused — no Patrol stamp exists for this session" "$GATE_ERR"
 expect_contains "…naming the state it found" "never armed" "$GATE_VERR"
-expect_contains "…and naming the exact re-arm command, resolved" "session-poker.sh arm" "$GATE_VERR"
+# REWORKED, NOT WEAKENED (wave-12 T2, spec D4). This arm used to demand the refusal name
+# `session-poker.sh arm` as the second step of a two-step re-arm. hooks/engage.sh runs that
+# command itself now, at engagement (T4) — so the refusal that still ordered it would be
+# instructing the model to do the machine's work. What the never-armed arm must name is the
+# half the model DOES own, and where the other half comes from; §a3-text drives both
+# directions, and the STALE arm below still names the hand command it still needs.
+expect_contains "…and naming engagement as what writes the stamp" "engage" "$GATE_VERR"
 expect_contains "…and the CronCreate half, so the stamp is not re-armed into a dead clock" \
   "CronCreate" "$GATE_VERR"
 expect_contains "…and says what to do after" "retry the dispatch" "$GATE_VERR"
@@ -2933,36 +3045,121 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-s
 expect_status "r22jb r1 present in the fresh answer -> open=1, REFUSED" "2" "$GATE_ST"
 expect_contains "…naming the count" "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
-# (c) no FRESH answer this turn — STALE and NONE both — REFUSES the whole dispatch,
-# naming the fix, before the budget arm is ever consulted (AC-8). Same roster/budget
-# as (a)/(b) so the only variable is the transcript.
-REPO=$(make_repo r22jc yes)
+# ======================== S22b-nla: A LISTAGENTS ANSWER IS NOT A PRECONDITION
+# (wave-12 T1; spec D1 and principle P-A; Chris 2026-09-13 "What the hell. I don't want
+# this to happen to begin with!" — AC-4.1, AC-4.2.)
+#
+# WHAT MOVED. Until 1.7.0 a transcript carrying no fresh ListAgents answer refused the
+# WHOLE dispatch and told the orchestrator to go call the tool first. That is a chore on
+# the normal path, and it asks for a fact the machine already holds: the roster. N deduped
+# `status=intended` rows ARE N open writers until some reading says otherwise, so the
+# count falls back to the roster and the dispatch is JUDGED rather than deferred.
+#
+# THE DISCRIMINATOR IS THE CEILING, NOT THE EXIT CODE. Each pair below holds the repo, the
+# roster and the transcript fixed and moves ONLY the writers ceiling across N+1. A rule
+# that counted 0 would pass both halves; a rule that still refused on freshness would fail
+# both; only a rule that counts exactly N passes one and refuses the other.
+
+section "S22b-nla: with no ListAgents answer the count is the open roster rows"
+
+# (a) N=2 rows, NO answer in the transcript at all, ceiling 3 -> 2+1 = 3 fits: ALLOWED.
+REPO=$(make_repo r22nla yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+R22NLA_NONE="$SANDBOX/.r22nla-none.jsonl"
+mk_transcript "$R22NLA_NONE" none
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLA_NONE")"
+expect_status "r22nla 2 open rows, no answer, ceiling 3 -> judged against 2, ALLOWED" \
+  "0" "$GATE_ST"
+expect_absent "…and nothing is said about a missing live-agents answer" \
+  "live-agents:" "$GATE_ERR"
+expect_absent "…and no tool call is demanded of the dispatcher" \
+  "call ListAgents" "$GATE_ERR"
+
+# (b) THE SAME two rows and the same empty transcript; only the ceiling moves to 2 ->
+# 2+1 = 3 passes it: REFUSED, and the count it names is the roster's own N.
+REPO=$(make_repo r22nlb yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLA_NONE")"
+expect_status "r22nlb the same two rows against a ceiling of 2 -> REFUSED on the BUDGET" \
+  "2" "$GATE_ST"
+# THE LINE, NOT ONLY THE DETAIL. A freshness refusal carries no `bionic: ` line at all, so
+# this row is what says the budget arm is the one that spoke — and, because run_gate only
+# re-drives for the detail when a `bionic: ` line was printed, it is also what keeps the
+# rows below from reading a GATE_VERR left over from an earlier arm.
+expect_contains "…and it is the budget arm that speaks, in the one line" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…naming the roster count as the live-agent count" \
+  "writers: budget=2 open=2 with-this-dispatch=3" "$GATE_VERR"
+expect_absent "…and never asking for a ListAgents call first" \
+  "call ListAgents" "$GATE_VERR"
+expect_absent "…nor refusing for want of a fresh answer" "live-agents: none" "$GATE_VERR"
+
+# (c) N IS READ, NOT ASSUMED. Three rows, same empty transcript, ceiling 3 -> open=3.
+# Without this arm a hard-coded 2 would pass (a) and (b) both.
+REPO=$(make_repo r22nlc yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=3 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+s22_roster_row "$REPO" "$SID_A" "n3"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLA_NONE")"
+expect_status "r22nlc three open rows against a ceiling of 3 -> REFUSED" "2" "$GATE_ST"
+expect_contains "…on the budget, in the one line" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…counting three, because three is what the roster holds" \
+  "writers: budget=3 open=3 with-this-dispatch=4" "$GATE_VERR"
+
+# (d) A STALE ANSWER READS THE SAME WAY. Freshness is a property of the transcript, so a
+# stale answer tells this wall nothing about any row — and telling the operator to go
+# refresh it is the very chore D1 struck. Same two rows, same ceiling of 2 as (b).
+REPO=$(make_repo r22nld yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=2 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+R22NLD_STALE="$SANDBOX/.r22nld-stale.jsonl"
+mk_transcript "$R22NLD_STALE" stale n1 n2
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLD_STALE")"
+expect_status "r22nld a STALE answer is judged against the roster too -> REFUSED" "2" "$GATE_ST"
+expect_contains "…on the budget, in the one line" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…on the budget, with the same count" \
+  "writers: budget=2 open=2 with-this-dispatch=3" "$GATE_VERR"
+expect_absent "…not on the staleness" "call ListAgents" "$GATE_VERR"
+
+# (e) THE FALLBACK IS A FALLBACK, not a new rule. When the answer IS fresh it still
+# decides: the same two rows, a fresh answer naming neither of them, and a ceiling of 1 —
+# open=0 and the dispatch is allowed. A rule that had simply started counting every row
+# would refuse here.
+REPO=$(make_repo r22nle yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-s22_roster_row "$REPO" "$SID_A" "r1"
-R22JC_STALE="$SANDBOX/.r22jc-stale.jsonl"
-mk_transcript "$R22JC_STALE" stale r1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_STALE")"
-expect_status "r22jc a STALE answer REFUSES the dispatch" "2" "$GATE_ST"
-expect_contains "…naming the state and the fix" \
-  "live-agents: stale age=" "$GATE_ERR"
-expect_contains "…the fix" "call ListAgents, then dispatch" "$GATE_ERR"
+s22_roster_row "$REPO" "$SID_A" "n1"
+s22_roster_row "$REPO" "$SID_A" "n2"
+R22NLE_FRESH="$SANDBOX/.r22nle-fresh.jsonl"
+mk_transcript "$R22NLE_FRESH" fresh W-OTHER
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22NLE_FRESH")"
+expect_status "r22nle a FRESH answer naming neither row still closes both -> ALLOWED" \
+  "0" "$GATE_ST"
+expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 
-R22JC_NONE="$SANDBOX/.r22jc-none.jsonl"
-mk_transcript "$R22JC_NONE" none
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_NONE")"
-expect_status "r22jc …and NONE (no ListAgents answer at all) REFUSES the same way" "2" "$GATE_ST"
-expect_contains "…naming the state" "live-agents: none age=none" "$GATE_ERR"
-expect_contains "…and the fix" "call ListAgents, then dispatch" "$GATE_ERR"
-
-# The paired negative: an EMPTY roster (no `status=intended` rows at all) needs no
-# live reading, so the same STALE transcript decides nothing — no roster row's
-# openness is in question, and refusing every dispatch on an unrelated repo would be
-# refusing dispatches that have nothing to do with the budget wall at all.
+# The paired negative: an EMPTY roster (no `status=intended` rows at all) needs no live
+# reading at all, so a STALE transcript never even reaches the reader — the loop that
+# would call it has nothing to iterate. The row below is what keeps the fallback in
+# §S22b-nla from being read as "a stale answer makes the wall say something": with no
+# rows there is nothing to count and nothing to say.
 REPO=$(make_repo r22jd yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JC_STALE")"
+R22JD_STALE="$SANDBOX/.r22jd-stale.jsonl"
+mk_transcript "$R22JD_STALE" stale r1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JD_STALE")"
 expect_status "r22jd an empty roster needs no live reading -> the same STALE transcript passes" \
   "0" "$GATE_ST"
 expect_absent "…and says nothing about live-agents" "live-agents:" "$GATE_ERR"
@@ -2994,73 +3191,6 @@ BUDGET_FN_BODY_MUT="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE_MUT
 expect_contains "…and the doctored body now DOES carry the token (the pin above discriminates)" \
   "landing-swept" "$BUDGET_FN_BODY_MUT"
 rm -rf "$GATE_MUT_ROOT"
-
-# ============================ S22b2: WHOSE TRANSCRIPT IT IS DECIDES THE FIX NAMED
-# (F-2 ruling, Chris 2026-09-05: dispatch is an AUTHORITY the orchestrator holds alone,
-# not a capability gated by freshness.)
-#
-# WHEN the refusal fires is unchanged — every arm in S22b above still refuses on exactly
-# the same freshness reading. What changes is the FIX it names when the dispatching
-# transcript is a SUBAGENT's own: "call ListAgents, then dispatch" is advice a dispatched
-# agent cannot follow, because ListAgents is not in its tool roster. The Step-5 auditor hit
-# precisely that, live and unplanned (auditor-report.md F-2). It is now told the thing it
-# CAN do instead: ask the orchestrator.
-#
-# A subagent's transcript is the harness's own shape — `<session-uuid>/subagents/agent-<name>-<hash>.jsonl`
-# beside the orchestrator's `<session-uuid>.jsonl`.
-#
-# THE PAIR IS THE POINT. Both halves below use the same repo shape, the same budget, the
-# same roster row and the same STALE answer. Only the transcript's own PATH differs, so
-# nothing but the path can be what moves the text.
-#
-# MUTATION NOTE: make the subagent branch of the refusal in hooks/dispatch-preflight.sh
-# print the orchestrator line again (delete the branch, keep one echo) and r22jf's two
-# text arms go red while every r22jg arm stays green. Captured in s18-mutation.log.
-
-section "S22b2: a subagent is told to ask, not to call a tool it lacks"
-
-REPO=$(make_repo r22jf yes)
-write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-s22_roster_row "$REPO" "$SID_A" "r1"
-mkdir -p "$SANDBOX/.r22jf/subagents"
-R22JF_SUB="$SANDBOX/.r22jf/subagents/agent-w99-impl-9b70c3a4dc62ba69.jsonl"
-mk_transcript "$R22JF_SUB" stale r1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JF_SUB")"
-expect_status "r22jf a SUBAGENT own transcript, same STALE answer -> still REFUSED" "2" "$GATE_ST"
-expect_contains "...keeping the live-agents prefix with the state and age every consumer parses" \
-  "live-agents: stale age=" "$GATE_ERR"
-expect_contains "...but the fix names the authority, not the tool call" \
-  "subagents do not dispatch; dispatch is the orchestrator's authority — SendMessage the orchestrator (to: main) naming what you need" \
-  "$GATE_ERR"
-expect_absent "...and never names a tool a subagent does not hold" \
-  "call ListAgents, then dispatch" "$GATE_ERR"
-
-# The orchestrator half of the pair: same staleness, a session-level transcript path, and
-# the text is the one every existing arm above already pins, byte for byte.
-REPO=$(make_repo r22jg yes)
-write_attestation "$REPO" "$SID_A"
-s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
-s22_roster_row "$REPO" "$SID_A" "r1"
-R22JG_MAIN="$SANDBOX/.r22jg-session.jsonl"
-mk_transcript "$R22JG_MAIN" stale r1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JG_MAIN")"
-expect_status "r22jg the orchestrator own transcript, same STALE answer -> REFUSED" "2" "$GATE_ST"
-expect_contains "...naming the state and age the same way" "live-agents: stale age=" "$GATE_ERR"
-expect_contains "...and the orchestrator fix unchanged" "call ListAgents, then dispatch" "$GATE_ERR"
-expect_absent "...saying nothing about subagents" "subagents do not dispatch" "$GATE_ERR"
-
-# THE DISCRIMINATOR. The `subagents/` directory is what the harness uses; a file that
-# merely happens to be named `agent-*.jsonl` somewhere else is not a subagent transcript,
-# and must still get the orchestrator text. Without this arm a match on the basename alone
-# would pass the two arms above.
-mkdir -p "$SANDBOX/.r22jg-lookalike"
-R22JG_LOOKALIKE="$SANDBOX/.r22jg-lookalike/agent-not-under-subagents.jsonl"
-mk_transcript "$R22JG_LOOKALIKE" stale r1
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22JG_LOOKALIKE")"
-expect_status "r22jg an agent-*.jsonl NOT under subagents/ is not a subagent -> REFUSED" "2" "$GATE_ST"
-expect_contains "...with the orchestrator fix, not the subagent one" \
-  "call ListAgents, then dispatch" "$GATE_ERR"
 
 # ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
 # (spec R2, AC-27; task S16, closing the Step-5 auditor's F-1.)
@@ -3133,8 +3263,11 @@ expect_status "r22kc the same name listed TWICE is unresolvable -> still counted
 expect_contains "…open=1 on the safe direction, even though neither copy reads running" \
   "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
-# (d) FRESHNESS STILL COMES FIRST. A STALE answer refuses the whole dispatch before any
-# status is consulted — an idle row on a stale answer says nothing about now.
+# (d) A STALE `idle` IS NOT AN `idle` (wave-12 T1, D1). The status arms above all read a
+# FRESH answer. On a stale one the word says nothing about now, so the row is not closed
+# by it — it falls back to the roster and counts OPEN, and the BUDGET is what refuses.
+# Before D1 this arm refused on the staleness itself and never reached a count; the
+# outcome is the same exit, for a reason the operator can act on without a tool call.
 REPO=$(make_repo r22kd yes)
 write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
@@ -3142,8 +3275,11 @@ s22_roster_row "$REPO" "$SID_A" "r1"
 R22KD_T="$SANDBOX/.r22kd.jsonl"
 mk_transcript "$R22KD_T" stale "r1:idle"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22KD_T")"
-expect_status "r22kd a STALE answer refuses before the status is read" "2" "$GATE_ST"
-expect_contains "…naming the state and the fix" "call ListAgents, then dispatch" "$GATE_ERR"
+expect_status "r22kd a STALE idle does not close the row -> REFUSED on the budget" "2" "$GATE_ST"
+expect_contains "…by the budget arm, not by the staleness" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…counting the row the stale answer could not speak for" \
+  "writers: budget=1 open=1 with-this-dispatch=2" "$GATE_VERR"
 
 # (e) THE REAL ANSWER, byte-verbatim. Everything above is synthesised from the harness's
 # shape; this arm drives the shipped hook against a body captured from this project's own
@@ -3304,13 +3440,16 @@ expect_contains "…naming the main checkout" "main checkout: $S23_MAIN" "$GATE_
 expect_contains "…and the tree it was made from" "$S23_TREE" "$GATE_VERR"
 
 # The settings-channel spelling of an agent context.
+# A DISTINCT NAME per dispatch from here (T22): r23a's ALLOWED dispatch journalled a
+# `w99-impl` row on this repo's roster, and a name with an open row cannot be handed out
+# twice — which is the arm under test in §T22-name-in-flight, not this section's subject.
 GATE_ENV="$GATE_ENV BIONIC_HOOK_CHANNEL=agent-context"
-run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE")"
+run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-c")"
 GATE_ENV="${GATE_ENV% BIONIC_HOOK_CHANNEL=agent-context}"
 expect_status "r23c the same dispatch in an agent context (BIONIC_HOOK_CHANNEL) is allowed" "0" "$GATE_ST"
 
 # The payload spelling.
-S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" | jq '. + {agent_type:"senior-implementor"}')
+S23_AGENT_PAYLOAD=$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-d" | jq '. + {agent_type:"senior-implementor"}')
 run_gate "$S23_AGENT_PAYLOAD"
 expect_status "r23d …and so is one whose payload carries agent_type" "0" "$GATE_ST"
 
@@ -3335,7 +3474,10 @@ S24_MARK="$S24_REPO/.bionic/tmp/engaged-$SID_A.state"
 # exactly as it was before this wave existed.
 S24_BARE='Go and do the thing. No contract fields at all.'
 run_gate "$(mk_agent_payload "$SID_A" "$S24_REPO" "$S24_BARE")"
-expect_status "r24a engaged: a dispatch with no deliverable is REFUSED" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "r24a engaged: a dispatch with no deliverable is REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "…at the absent-deliverable wall" "Expected artifact" "$GATE_ERR"
 S24_REFUSAL="$GATE_ERR"
 
@@ -3406,7 +3548,10 @@ expect_contains "…naming the Patrol" "Patrol" "$GATE_ERR"
 printf 'patrol-stamp/v1|at=%s|session=%s|verb=arm\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SID_A" > "$S24_NOPLAN/.bionic/tmp/patrol-$SID_A.state"
 run_gate "$(mk_agent_payload "$SID_A" "$S24_NOPLAN" "$S24_BARE")"
-expect_status "r24g engaged, no plan, no deliverable -> REFUSED" "2" "$GATE_ST"
+# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
+# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
+# unchanged; only the channel the wall blocks on is.
+expect_eq "r24g engaged, no plan, no deliverable -> REFUSED" "deny" "$GATE_VERDICT"
 expect_contains "…at the absent-deliverable wall" "Expected artifact" "$GATE_ERR"
 
 # the BUDGET wall is plan-bound: it measures against a ceiling only a plan can declare,
@@ -3905,6 +4050,142 @@ Expected artifact: .bionic/docs/record/w27h.md
 $S27_FIX" "w27-followed")"
 expect_status "27h a brief following that Fix: line verbatim PASSES" "0" "$GATE_ST"
 
+# --- S27i: A WIDE DECLARED BUDGET SURVIVES WHOLE ON THE ROW (T18, REQ-9/D7 write side) ---
+#
+# T9 exempted `suites_allowed=`/`files=` from `clean()`'s 400-char cut on the READER side
+# (`hooks/session-poker.sh`'s `adopt_write_row`). This is the same defect's WRITE side: the
+# two `sanitize()` calls that build `C_FILES`/`C_SUITES` from a brief's own `Files:`/
+# `Suites:` line still capped at 900 (the widest cap this file had, per the comment they
+# used to carry — "truncating a list silently narrows a budget"). `SUITES_MAX`/`FILES_MAX`
+# (60, `lift_contract_fields`'s own token-count bound, a SEPARATE and deliberate limit — see
+# A-T18.2) cap the item COUNT the extraction stage lifts at all, so this fixture stays at
+# exactly that many items and makes each one long enough that 60 of them still overflow the
+# 900-char cap this task removes — a real budget this wide is not a hypothetical (A-orch-16).
+S27I_SUITES=""; S27I_EXPECT=""
+for _s27i in $(seq -w 1 60); do
+  _s27i_name="very-long-suite-basename-for-the-budget-cut-test-number-${_s27i}.test.sh"
+  S27I_SUITES="${S27I_SUITES}tests/${_s27i_name}, "
+  S27I_EXPECT="${S27I_EXPECT:+$S27I_EXPECT }${_s27i_name}"
+done
+S27I_SUITES="${S27I_SUITES%, }"
+expect_status "27i fixture non-vacuity: the declared line really overflows 900 chars" \
+  "0" "$([ "${#S27I_SUITES}" -gt 900 ] && echo 0 || echo 1)"
+REPO=$(make_repo r27i yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27i.md
+Suites: ${S27I_SUITES}" "w27-wide-declared")"
+expect_status "27i a brief declaring a 60-suite, >900-char budget PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27I_ROW_SUITES=$(roster_field "$ROW" suites_allowed)
+expect_eq "27i …and the row's suites_allowed= carries the WHOLE set, byte for byte" \
+  "$S27I_EXPECT" "$S27I_ROW_SUITES"
+expect_status "27i …the LAST one specifically — the one 900 chars would have cut" \
+  "0" "$(printf '%s\n' "$S27I_ROW_SUITES" | tr ' ' '\n' | grep -qxF 'very-long-suite-basename-for-the-budget-cut-test-number-60.test.sh' && echo 0 || echo 1)"
+expect_status "27i …every one of the 60, none dropped" \
+  "60" "$(printf '%s\n' "$S27I_ROW_SUITES" | tr ' ' '\n' | grep -c 'very-long-suite-basename')"
+
+# --- S27j: A WIDE DECLARED Files: LIST SURVIVES WHOLE TOO (same fix, `files=`) ---
+S27J_FILES=""; S27J_EXPECT=""
+for _s27j in $(seq -w 1 60); do
+  _s27j_path="payload/scripts/lib/a-fairly-long-widget-module-name-number-${_s27j}.sh"
+  S27J_FILES="${S27J_FILES}${_s27j_path}, "
+  S27J_EXPECT="${S27J_EXPECT:+$S27J_EXPECT,}${_s27j_path}"
+done
+S27J_FILES="${S27J_FILES%, }"
+expect_status "27j fixture non-vacuity: the declared line really overflows 900 chars" \
+  "0" "$([ "${#S27J_FILES}" -gt 900 ] && echo 0 || echo 1)"
+REPO=$(make_repo r27j yes)
+write_attestation "$REPO" "$SID_A"
+s27_impact "$REPO" alpha.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27j.md
+Files: ${S27J_FILES}" "w27-wide-files")"
+expect_status "27j a brief declaring 60 long files PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27J_ROW_FILES=$(roster_field "$ROW" files)
+expect_eq "27j …and files= carries the WHOLE declared list, byte for byte (no cut at all)" \
+  "$S27J_EXPECT" "$S27J_ROW_FILES"
+
+# --- S27k: CONTROL — an ORDINARY field still cuts, unaffected by the fix above ---
+#
+# `deliverable=` keeps its own pre-existing 300-char cap: the fix is scoped to the two
+# LIST-valued fields, exactly as `clean()`'s exemption was on the reader side.
+S27K_LONG=$(printf 'x%.0s' $(seq 1 500))
+REPO=$(make_repo r27k yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27k-${S27K_LONG}.md
+Suites: tests/one.test.sh" "w27-control-cut")"
+expect_status "27k a 500-char deliverable still PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27K_ROW_DELIV=$(roster_field "$ROW" deliverable)
+expect_eq "27k …but its deliverable= is cut at exactly its own 300-char cap" \
+  "300" "${#S27K_ROW_DELIV}"
+
+# --- S27l: A 70-SUITE BUDGET LANDS WHOLE — the item-COUNT cap, raised (T19, A-orch-19.1) ---
+#
+# S27i/j proved the CHAR cut is gone (T18). This is the separate, third layer the walk
+# found: `suite_names()`'s own token-COUNT bound, `SUITES_MAX` — the exact "your own suite
+# is off your budget" shape that bit T9 at 70 declared suites. 70 is chosen to match that
+# incident directly; the cap this task raises (200) holds it with room to spare.
+S27L_SUITES=""; S27L_EXPECT=""
+for _s27l in $(seq -w 1 70); do
+  _s27l_name="count-cap-suite-${_s27l}.test.sh"
+  S27L_SUITES="${S27L_SUITES}tests/${_s27l_name}, "
+  S27L_EXPECT="${S27L_EXPECT:+$S27L_EXPECT }${_s27l_name}"
+done
+S27L_SUITES="${S27L_SUITES%, }"
+REPO=$(make_repo r27l yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27l.md
+Expected duration: 5 minutes
+Progress: .bionic/docs/record/w27-progress.md, cadence 5 minutes
+Suites: ${S27L_SUITES}" "w27-count-70")"
+expect_status "27l a brief declaring 70 real suites PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27L_ROW_SUITES=$(roster_field "$ROW" suites_allowed)
+expect_eq "27l …and suites_allowed= carries all 70, none dropped" \
+  "$S27L_EXPECT" "$S27L_ROW_SUITES"
+expect_status "27l …the 70th specifically" "0" \
+  "$(printf '%s\n' "$S27L_ROW_SUITES" | tr ' ' '\n' | grep -qxF 'count-cap-suite-70.test.sh' && echo 0 || echo 1)"
+expect_absent "27l …no WARN, because 70 is under the raised cap" "WARN" "$GATE_ERR"
+
+# --- S27m: OVER THE RAISED CAP IS LOUD — a WARN naming the cap and what it dropped ---
+#
+# 201 tokens (SUITES_MAX + 1) so the cap this task sets (200) is exercised at its own
+# boundary. The prior behaviour here was a SILENT exit 0 (A-orch-19.1) — the same class of
+# bug T9 fixed on the char cut and T18 fixed on the preflight-sanitize char cut, now fixed
+# on the count cap. `expect_absent` on the OLD (silent) shape would pass vacuously if the
+# WARN plumbing were simply missing, so this checks both the cap enforcement (200 kept, the
+# 201st absent from the row) AND the WARN naming that exact 201st token.
+S27M_SUITES=""
+for _s27m in $(seq -w 1 201); do
+  S27M_SUITES="${S27M_SUITES}tests/count-cap-over-${_s27m}.test.sh, "
+done
+S27M_SUITES="${S27M_SUITES%, }"
+REPO=$(make_repo r27m yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27m.md
+Expected duration: 5 minutes
+Progress: .bionic/docs/record/w27-progress.md, cadence 5 minutes
+Suites: ${S27M_SUITES}" "w27-count-201")"
+expect_status "27m a 201-suite brief still PASSES (the cap warns, it does not refuse)" \
+  "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27M_ROW_SUITES=$(roster_field "$ROW" suites_allowed)
+expect_status "27m …suites_allowed= holds exactly the cap, 200" "200" \
+  "$(printf '%s\n' "$S27M_ROW_SUITES" | tr ' ' '\n' | grep -c 'count-cap-over-')"
+expect_absent "27m …the 201st is NOT on the row" "count-cap-over-201.test.sh" "$S27M_ROW_SUITES"
+expect_contains "27m …and dispatch WARNs, naming the cap" "WARN" "$GATE_ERR"
+expect_contains "27m …by number" "200" "$GATE_ERR"
+expect_contains "27m …naming the dropped 201st token specifically" \
+  "count-cap-over-201.test.sh" "$GATE_ERR"
+expect_status "27m …never a SILENT exit 0 — stderr is non-empty" "0" \
+  "$([ -n "$GATE_ERR" ] && echo 0 || echo 1)"
+
 # ============================================================================
 section "S28: one regression per run (AC-24)"
 # ============================================================================
@@ -4061,6 +4342,46 @@ expect_contains "29c …with the operator warned at the moment the config is fix
   "derived no suites" "$GATE_ERR"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "29c …and the row records the empty third state" "" "$(roster_field "$ROW" suites_allowed)"
+
+# --- 29d/29e: the overrun refusal keeps whatever brief-shape faults were already
+# collected (review-c19c16e F3, wave-12 T23, AC-1.1's fails-when). A15 sat between the
+# five collecting arms and dp_refuse_findings and refused on the spot, discarding
+# DP_FINDINGS — an ambiguous-label brief with a slow impact command was told about the
+# label alone on attempt 1, and the impact overrun alone (with no memory of the label) on
+# attempt 2. That is the exact one-fault-per-attempt loop T2 built dp_finding to end.
+
+BRIEF_T23_COMBINED_IMPACT='Your task: review the wave.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Expected duration: 20 minutes
+Files: payload/scripts/lib/widget.sh'
+
+# --- 29d: the ambiguous-label brief + an overrunning impact command -> ONE refusal, BOTH faults ---
+REPO=$(make_repo r29d yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 30
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_T23_COMBINED_IMPACT" "w29d-slow")"
+expect_eq "29d an ambiguous label + an overrunning impact command is refused ONCE" "deny" "$GATE_VERDICT"
+expect_eq "29d …exactly one refusal line reaches the user" "1" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_contains "29d …naming the multi-path fault (A11)" "several paths" "$GATE_VERR"
+expect_contains "29d …AND naming the impact-overrun fault (A15), in the SAME message" \
+  "the impact command did not answer" "$GATE_VERR"
+expect_contains "29d …with the impact fault's own Fix:, not dropped" \
+  "fix impact-command in config.yaml" "$GATE_VERR"
+expect_status "29d …and journalled no roster row at all" "0" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# --- 29e: CONTROL — the same brief, a fast impact command -> the multi-path fault named,
+# the impact fault absent: nothing overran, so there is nothing to append.
+REPO=$(make_repo r29e yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 0
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_T23_COMBINED_IMPACT" "w29e-fast")"
+expect_eq "29e control: the same brief, a fast impact command, is still refused" \
+  "deny" "$GATE_VERDICT"
+expect_contains "29e …naming the multi-path fault (A11)" "several paths" "$GATE_VERR"
+expect_absent "29e …and NOT naming the impact fault: nothing overran" \
+  "the impact command did not answer" "$GATE_VERR"
 
 
 # ===========================================================================
@@ -4241,6 +4562,631 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w31f" "claude-sonne
                              "$S5_LIVE_TRANSCRIPT" "bionic:implementor")"
 expect_status "31f task-scale current: T3 with no approved-by is refused (any n >= 1, not just T1)" "2" "$GATE_ST"
 
+
+# ============================================================================
+section "§combined — one refusal, every brief-shape fault (wave-12 T2, D3, AC-1.1/AC-1.2)"
+# ============================================================================
+#
+# THE INCIDENT THIS SECTION IS BUILT FROM. On 2026-09-13 six dispatch attempts were spent
+# spawning one researcher: the gate exited at the FIRST failing brief-shape arm, so each
+# attempt taught the author exactly one fault and the next attempt found the next one. The
+# faults were all in the brief — the one artifact the author was holding — and all readable
+# in a single pass.
+#
+# WHAT CHANGED (spec D3, principle P-A). The five BRIEF-SHAPE arms — A11 several paths,
+# A12 outside the repo, A13 no deliverable, A14 no Files:/Suites:, A16 Files: with no
+# impact command — no longer refuse where they stand. Each appends its finding (fact, fix
+# and its own verbatim `Fix:` block) to a list, and ONE `refuse exit2` after the last of
+# them emits the list in file order and exits 2 once. The STATE arms are untouched: a
+# missing attestation, an unarmed Patrol, an unapproved plan, a worktree cwd, a full
+# budget and a second full-tree dispatch each still exit where they stand, because none of
+# them is a defect in the brief and none is fixed by reading the next one.
+#
+# fails-when: a three-fault brief is refused for fewer than three faults, or refused more
+# than once, or the second attempt — written from the first refusal's own `Fix:` examples —
+# is refused for a fault the first refusal never named.
+
+REPO=$(make_repo rcomb yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "combobot")"
+
+# THE CHANNEL IS THE VERDICT, NOT THE STATUS (wave-12 T17). A combined refusal exits 0 and
+# blocks with a PreToolUse deny verdict, so this arm reads `$GATE_VERDICT` — the driver's
+# reading of both wires — where it used to read exit 2. §combined-deny below is where that
+# channel is pinned in full; here it only has to be a REFUSAL for the counts to mean anything.
+expect_eq "§combined a brief with three shape faults is REFUSED" "deny" "$GATE_VERDICT"
+
+# ONE REFUSAL, NOT THREE. `refuse` exits, so a second refusal object cannot be emitted by
+# the same process — but a wall that printed its findings as it went would show three
+# `bionic: ` lines, and a wall that kept exiting at the first arm would show one line and
+# one finding. The count of refusal lines and the count of findings are therefore both
+# read, and they are different numbers on purpose.
+expect_eq "§combined …exactly once: one refusal line reaches the user" "1" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_eq "§combined …and the detail carries one refusal, not three stacked" "1" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^bionic: dispatch refused' || true)"
+
+# THE USER LINE IS THE FIRST ARM'S OWN, and the detail says how many there are. AC-E1.3
+# gives the line one fact and one six-word fix, and the widest arm here already spends 99
+# of its 100 columns — so a line that also carried a count would be refused by the
+# renderer as malformed. The count lives one line into the detail instead, where there is
+# room for it and for every fault behind it.
+expect_eq "§combined …the user line stays the first arm's own sentence" \
+  "bionic: dispatch refused — the deliverable label names several paths (name exactly one deliverable)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "§combined …and the detail opens by saying how many faults there are" \
+  "THIS BRIEF HAS 3 SHAPE FAULTS" "$GATE_VERR"
+
+# ALL THREE FACTS, each in the words its own arm already used.
+expect_contains "§combined …naming the ambiguity fault (A11)" "several paths" "$GATE_VERR"
+expect_contains "§combined …naming the absent-deliverable fault (A13)" \
+  "names no deliverable" "$GATE_VERR"
+expect_contains "§combined …naming the absent-instrument fault (A14)" \
+  "declares no Files" "$GATE_VERR"
+
+# EACH WITH ITS OWN `Fix:` BLOCK. The fix is the half an author acts on; three facts over
+# one shared fix would be the same one-fault-per-attempt loop wearing a longer message.
+expect_eq "§combined …each fault carrying its own Fix: block" "3" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
+expect_contains "§combined …the ambiguity fix, verbatim" \
+  "name exactly one deliverable path in the label" "$GATE_VERR"
+expect_contains "§combined …the absent-deliverable fix, verbatim" \
+  "declare a durable artifact path with a canonical label" "$GATE_VERR"
+expect_contains "§combined …the instrument fix, verbatim" \
+  "declare the files this task will touch" "$GATE_VERR"
+# The findings are in FILE ORDER — the order the gate reads the brief in — so an author
+# fixing them top to bottom walks the same path the wall does.
+expect_status "§combined …in file order: the ambiguity finding before the instrument one" "0" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/awk '
+     /several paths/   && !a { a = NR }
+     /declares no Files/ && !b { b = NR }
+     END { exit !(a && b && a < b) }' && echo 0 || echo 1)"
+
+# AND NOTHING WAS LAUNCHED. A refused dispatch is not a launch, however many faults it had.
+expect_status "§combined …and journals no roster row" "0" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- the second attempt, written from the first refusal's own examples ----
+#
+# THE WHOLE POINT, AND THE ONLY ARM THAT CAN CARRY IT. Three facts in one message are worth
+# nothing if acting on all three still leaves a fault the message never mentioned. The
+# examples are read back OUT of the stderr rather than typed here, so this stays true when
+# the wording is next edited.
+COMB_ART=$(fix_example "$GATE_VERR")
+COMB_SUITES=$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 -E '^[[:space:]]+Suites: tests' \
+  | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+expect_status "§combined the refusal really recommended an artifact path" "0" \
+  "$([ -n "$COMB_ART" ] && echo 0 || echo 1)"
+expect_status "§combined …and a Suites: line" "0" \
+  "$([ -n "$COMB_SUITES" ] && echo 0 || echo 1)"
+expect_absent "§combined …neither carrying a slot the walls themselves refuse" "<" "$COMB_ART"
+
+REPO=$(make_repo rcomb2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected artifact: $COMB_ART
+Expected duration: 20 minutes
+$COMB_SUITES" "combobot2")"
+expect_status "§combined attempt 2, following every Fix: example, PASSES" "0" "$GATE_ST"
+expect_status "§combined …with the recommended path as the contract" \
+  "$COMB_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+
+# ---- the discriminator: fixing ONE fault leaves the other two named, and only them ----
+#
+# Without this arm a wall that simply printed all five arms' text unconditionally would pass
+# every assertion above. The instrument fault is repaired and nothing else is touched: the
+# count of findings must fall by exactly one, and the repaired fault must stop being named.
+REPO=$(make_repo rcomb3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS
+Suites: tests/widget.test.sh" "combobot3")"
+expect_eq "§combined a two-fault brief is still refused" "deny" "$GATE_VERDICT"
+expect_eq "§combined …with exactly two findings, not three" "2" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
+expect_absent "§combined …and the repaired fault is no longer named" \
+  "declares no Files" "$GATE_VERR"
+expect_contains "§combined …while the two that remain still are" "several paths" "$GATE_VERR"
+
+# ---- and a ONE-fault brief is refused exactly as it always was ----
+#
+# AC-1.3 from the other side: collecting must not re-word the single-fault refusal every
+# other section in this file reads. One finding renders as one finding — the arm's own fact,
+# its own fix, its own detail — and the user line is the one the E1.3 table pins.
+REPO=$(make_repo rcomb4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected duration: ~15 minutes.
+Suites: tests/widget.test.sh" "combobot4")"
+expect_eq "§combined a single-fault brief keeps the arm's own line, unchanged" \
+  "bionic: dispatch refused — this brief names no deliverable (add an Expected artifact: line)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_eq "§combined …and renders exactly one Fix: block" "1" \
+  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
+
+# ============================================================================
+section "§combined-deny — the combined refusal reaches the MODEL (wave-12 T17, AC-1.1)"
+# ============================================================================
+#
+# WHAT T2 LEFT OPEN (its finding A-T2.2; ruling A-orch-10, 2026-09-13). The five brief-shape
+# arms already collect into ONE refusal — and it went out on `exit2`, where refuse.sh's
+# channel table ships `detail_to_user=no` under ruling D-1 AND there is only one wire: what
+# the user stream carries is what the model's synthetic tool_result carries. So the author
+# read one sentence and THE MODEL READ THE SAME ONE SENTENCE. The findings list existed and
+# no dispatching model ever saw it, which is the six-attempt loop of 2026-09-13 still
+# running behind a better-built wall.
+#
+# WHAT THIS PINS. The combined refusal goes out on `deny`: a PreToolUse verdict on STDOUT
+# whose `permissionDecisionReason` the same measurement proved reaches the model verbatim
+# (`model_only=yes`), with exit 0 because the JSON is the block rather than the status. D-1
+# is NOT reversed — the human still gets exactly one line on stderr — and the knob is not
+# involved anywhere below: these arms run with BIONIC_WALL_VERBOSE unset, which is the state
+# a real dispatch runs in.
+#
+# THE ARM THAT CARRIES THE CLAIM is the last one: attempt two is written from the examples
+# read back out of the MODEL'S OWN WIRE, `permissionDecisionReason`, and must dispatch. Three
+# facts on a channel the model reads are worth nothing if acting on all three still leaves a
+# fault the message never named.
+#
+# fails-when: the three-fault brief exits 2; or its stdout is not one parseable deny verdict;
+# or the reason names fewer than three facts or carries fewer than three `Fix:` blocks; or
+# the human's one line grows a detail behind it; or the single-fault brief follows it onto
+# the JSON channel.
+
+expect_empty "§combined-deny the verbose knob is UNSET for every arm here" "${BIONIC_WALL_VERBOSE:-}"
+
+REPO=$(make_repo rcombdeny yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot")"
+
+expect_status "§combined-deny a three-fault brief exits 0 — the verdict is the block" \
+  "0" "$GATE_ST"
+expect_eq "§combined-deny …and the verdict is a deny, not an allow" "deny" "$GATE_VERDICT"
+expect_eq "§combined-deny …stdout is ONE object and nothing else" "1" \
+  "$(printf '%s\n' "$GATE_OUT" | /usr/bin/grep -c . || true)"
+expect_eq "§combined-deny …naming the PreToolUse event it answers" "PreToolUse" \
+  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.hookEventName' 2>/dev/null || echo PARSE-FAILED)"
+expect_eq "§combined-deny …with permissionDecision=deny" "deny" \
+  "$(printf '%s' "$GATE_OUT" | jq -r '.hookSpecificOutput.permissionDecision' 2>/dev/null || echo PARSE-FAILED)"
+
+# THE REASON IS THE MODEL'S WIRE. Every assertion below reads `$GATE_REASON`, which the
+# driver parsed out of the JSON with `jq` — so an escaper that broke on the findings list's
+# newlines reads EMPTY here rather than passing on a grep of the raw bytes.
+expect_eq "§combined-deny the reason opens with the refusal's one line" \
+  "bionic: dispatch refused — the deliverable label names several paths (name exactly one deliverable)" \
+  "$(printf '%s\n' "$GATE_REASON" | sed -n '1p')"
+expect_contains "§combined-deny …then says how many faults there are" \
+  "THIS BRIEF HAS 3 SHAPE FAULTS" "$GATE_REASON"
+expect_contains "§combined-deny …naming the ambiguity fault (A11)" "several paths" "$GATE_REASON"
+expect_contains "§combined-deny …naming the absent-deliverable fault (A13)" \
+  "names no deliverable" "$GATE_REASON"
+expect_contains "§combined-deny …naming the absent-instrument fault (A14)" \
+  "declares no Files" "$GATE_REASON"
+expect_eq "§combined-deny …each with its own Fix: block, on the model's wire" "3" \
+  "$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -c '^Fix: ' || true)"
+expect_eq "§combined-deny …and each fault's one-line fix beside its fact" "3" \
+  "$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -cE '^── [0-9]+\. .+ \(.+\)$' || true)"
+
+# AND THE HUMAN IS STILL INTERRUPTED BY ONE SENTENCE (ruling D-1). The split is the whole
+# reason this channel was chosen over flipping `detail_to_user`: the model reads everything,
+# the reader reads one line, and neither is a setting.
+expect_eq "§combined-deny the user stream carries exactly one refusal line" "1" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_eq "§combined-deny …the first arm's own sentence, unchanged" \
+  "bionic: dispatch refused — the deliverable label names several paths (name exactly one deliverable)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_absent "§combined-deny …with no findings list behind it" "Fix: " "$GATE_ERR"
+expect_absent "§combined-deny …and no count header either" "SHAPE FAULTS" "$GATE_ERR"
+
+# NOTHING WAS LAUNCHED. A deny exits 0, which is the one status a wall must never let mean
+# "allowed" by accident: the roster is where that would show.
+expect_status "§combined-deny …and journals no roster row" "0" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- the discriminator: a ONE-fault brief stays on exit2, untouched ----
+#
+# Without this arm, moving every refusal in the file to `deny` would pass everything above.
+# The channel changes for the COMBINED refusal, which is the one D-1's single wire was
+# starving; a single fault is a sentence with a pointer and stays exactly where it was —
+# and its stdout must stay EMPTY, because a state refusal above it has no JSON to print.
+REPO=$(make_repo rcombdeny2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected duration: ~15 minutes.
+Suites: tests/widget.test.sh" "denybot2")"
+expect_eq "§combined-deny a single-fault brief still refuses on exit2" "exit2" "$GATE_VERDICT"
+expect_empty "§combined-deny …printing no verdict on stdout" "$GATE_OUT"
+expect_eq "§combined-deny …with its arm's own line, unchanged" \
+  "bionic: dispatch refused — this brief names no deliverable (add an Expected artifact: line)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+
+# ---- and a STATE refusal is not on the JSON channel either ----
+#
+# THE SPLIT T2 DREW IS A SPLIT IN THE ARTIFACT, and this arm keeps T17 from blurring it: the
+# arming wall fires on the SAME three-fault brief, above every brief-shape arm, and it is a
+# fact about the machine rather than the brief. It refuses where it stands, on exit2, and
+# prints no verdict — so the channel tracks "a list of brief faults", not "a refusal".
+REPO=$(make_repo rcombdeny3 yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot3")"
+expect_eq "§combined-deny a STATE refusal (the unarmed Patrol) stays on exit2" \
+  "exit2" "$GATE_VERDICT"
+expect_empty "§combined-deny …and prints no verdict on stdout" "$GATE_OUT"
+expect_contains "§combined-deny …refusing for the state, not for the brief" \
+  "Patrol" "$GATE_ERR$GATE_VERR"
+
+# ---- the claim: attempt two, written from the MODEL'S wire, dispatches ----
+REPO=$(make_repo rcombdeny4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot4")"
+DENY_ART=$(fix_example "$GATE_REASON")
+DENY_SUITES=$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -m1 -E '^[[:space:]]+Suites: tests' \
+  | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+expect_status "§combined-deny the reason really recommended an artifact path" "0" \
+  "$([ -n "$DENY_ART" ] && echo 0 || echo 1)"
+expect_status "§combined-deny …and a Suites: line" "0" \
+  "$([ -n "$DENY_SUITES" ] && echo 0 || echo 1)"
+expect_absent "§combined-deny …neither carrying a slot the walls themselves refuse" "<" "$DENY_ART"
+
+REPO=$(make_repo rcombdeny5 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected artifact: $DENY_ART
+Expected duration: 20 minutes
+$DENY_SUITES" "denybot5")"
+expect_eq "§combined-deny attempt 2, from the reason alone, is ALLOWED" "allow" "$GATE_VERDICT"
+expect_status "§combined-deny …and the recommended path is the contract on the row" \
+  "$DENY_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+
+
+# ============================================================================
+section "§scaffold-verbatim — the shipped brief scaffold dispatches as written (AC-2.2)"
+# ============================================================================
+#
+# WHAT THIS PINS. `agents-src/blocks/brief-scaffold.md` renders into seven surfaces, one of
+# which is skills/canonical-sdlc/dispatch.md; an orchestrator writes its brief by filling
+# that block in. A scaffold whose filled form the gate refuses teaches the wrong grammar to
+# every dispatch in the tree, and nothing but a drive can tell you which it is.
+#
+# THE BLOCK IS READ OUT OF THE SHIPPED FILE, never transcribed here: a copy in this suite
+# would go on passing after the source drifted, which is the exact failure this pins against.
+# Only two things are done to it — the trailing `  # …` annotations are stripped (they are
+# guidance to the author, not brief text) and each `<placeholder>` span is replaced with a
+# real value, keeping the label spelling and the surrounding text the file wrote.
+#
+# fails-when: the rendered scaffold, filled in, is refused by the gate it is written for.
+
+SCAFFOLD_FILE="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
+
+scaffold_block() {  # <file> -> the fenced scaffold lines, one per line
+  /usr/bin/awk '
+    /^### Scaffold/            { inb = 1; next }
+    inb && /^```/              { fence++; if (fence == 2) exit; next }
+    inb && fence == 1          { print }
+  ' "$1"
+}
+
+scaffold_fill() {  # <suites|files> -> the scaffold as a brief, placeholders filled
+  local mode="$1" line label value
+  printf 'Your task: build the widget.\n'
+  while IFS= read -r line; do
+    line="${line%%  #*}"
+    line="$(printf '%s' "$line" | sed 's/[[:space:]]*$//')"
+    [ -n "$line" ] || continue
+    label="${line%%:*}"
+    case "$label" in
+      "Deliverable-waiver") continue ;;
+      "Files")  [ "$mode" = "files" ]  || continue ;;
+      "Suites") [ "$mode" = "suites" ] || continue ;;
+    esac
+    case "$label" in
+      "Expected duration") value="20" ;;
+      "Expected artifact") value=".bionic/docs/record/w99-scaffold.md" ;;
+      "Files")             value="payload/scripts/lib/widget.sh" ;;
+      "Suites")            value="none" ;;
+      *)                   value="" ;;
+    esac
+    case "$line" in
+      *"<"*">"*) line="${line%%<*}${value}${line##*>}" ;;
+    esac
+    printf '%s\n' "$line"
+  done < <(scaffold_block "$SCAFFOLD_FILE")
+}
+
+# ANTI-VACUITY FIRST: a block that could not be found would make every drive below a drive
+# of the two lines this helper prepends, and they would pass.
+SCAFFOLD_RAW="$(scaffold_block "$SCAFFOLD_FILE")"
+expect_status "§scaffold the shipped dispatch.md really carries a fenced scaffold" "0" \
+  "$([ "$(printf '%s\n' "$SCAFFOLD_RAW" | /usr/bin/grep -c .)" -ge 3 ] && echo 0 || echo 1)"
+expect_contains "§scaffold …carrying the deliverable label the gate reads" \
+  "Expected artifact:" "$SCAFFOLD_RAW"
+
+SCAFFOLD_SUITES="$(scaffold_fill suites)"
+SCAFFOLD_FILES="$(scaffold_fill files)"
+expect_absent "§scaffold the filled brief leaves no placeholder behind" "<" "$SCAFFOLD_SUITES"
+expect_absent "§scaffold …in either variant" "<" "$SCAFFOLD_FILES"
+expect_contains "§scaffold …and still spells the labels the way the file does" \
+  "Expected artifact: .bionic/docs/record/" "$SCAFFOLD_SUITES"
+
+# ---- variant 1: the waiver form of the instrument line ----
+REPO=$(make_repo rscaff1 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$SCAFFOLD_SUITES" "scaffoldbot1")"
+expect_status "§scaffold the rendered scaffold, filled in, DISPATCHES" "0" "$GATE_ST"
+expect_status "§scaffold …with the named artifact as the contract" \
+  ".bionic/docs/record/w99-scaffold.md" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+
+# ---- variant 2: the `Files:` form, where a derivation exists to consume it ----
+REPO=$(make_repo rscaff2 yes)
+write_attestation "$REPO" "$SID_A"
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$SCAFFOLD_FILES" "scaffoldbot2")"
+expect_status "§scaffold the Files: variant DISPATCHES where a derivation is configured" \
+  "0" "$GATE_ST"
+expect_status "§scaffold …and the budget is the derived one" "widget.test.sh" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+# ---- the discriminator: the scaffold UNFILLED is refused ----
+#
+# So "it dispatches" is a fact about the filling, not about a gate that waves anything
+# carrying the right labels through.
+REPO=$(make_repo rscaff3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
+$SCAFFOLD_RAW" "scaffoldbot3")"
+expect_status "§scaffold the scaffold with its placeholders still in it is REFUSED" \
+  "2" "$GATE_ST"
+
+# ============================================================================
+section "§a3-text — the Patrol stamp is armed at engagement, not by hand (D4, REQ-3)"
+# ============================================================================
+#
+# WHY THE TEXT MOVED. Until this wave the A3 refusal handed the model a two-step re-arm and
+# step 2 was `session-poker.sh arm` — a command the operator was expected to type after
+# engaging. hooks/engage.sh now runs it itself, with the session id and the project root it
+# already holds, right after writing the engagement marker (T4, spec D4). A refusal that
+# still ordered the hand step would be instructing the model to do the machine's work, which
+# is principle P-A read at its own wall.
+#
+# THE ARM ITSELF IS UNCHANGED — an absent stamp still refuses, in the same words, and still
+# names the CronCreate half, which IS the model's step: engagement writes the stamp, nothing
+# but the model can create the recurring job that keeps writing it.
+#
+# fails-when: the never-armed refusal still names `session-poker.sh arm` as a step to run,
+# or stops naming engagement as what writes the stamp.
+
+REPO=$(make_repo ra3 yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "§a3 an absent stamp still refuses the dispatch" "2" "$GATE_ST"
+expect_contains "§a3 …in the same words as before" \
+  "bionic: dispatch refused — no Patrol stamp exists for this session" "$GATE_ERR"
+expect_contains "§a3 …and the fix names engagement as what writes the stamp" \
+  "engage" "$GATE_VERR"
+expect_absent "§a3 …and no longer orders the hand-run arm" \
+  "session-poker.sh arm" "$GATE_VERR"
+expect_contains "§a3 …while still naming the one half the model owns" "CronCreate" "$GATE_VERR"
+
+# THE PAIRED ARM, and the anti-vacuity one. A4 (armed, then stopped firing) is a different
+# finding with a different remedy — the clock died, the stamp did not — and it keeps both
+# halves. It also proves the absence above is a fact about A3's text rather than about a
+# string this suite can no longer produce at all.
+REPO=$(make_repo ra3b yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
+run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+expect_status "§a3 the STALE arm is untouched by the A3 rewording" "2" "$GATE_ST"
+expect_contains "§a3 …still naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
+expect_contains "§a3 …and still offering the hand re-arm, which is A4's remedy" \
+  "session-poker.sh arm" "$GATE_VERR"
+
+# ======================== §T22-name-in-flight: A NAME IN FLIGHT IS REFUSED AT DISPATCH
+# (T22, A-orch-33; AC-4.4's prevention half.)
+#
+# THE ROSTER IS THE IDENTITY REGISTER. Two agents of one name in one session is the
+# condition every downstream ambiguity was built to survive: the stop gate carried a whole
+# arm for it ("several live agents answer to that name"), and a message addressed to a name
+# that resolves to two agents reaches the wrong one. The cure is at the door — a name with
+# an OPEN row on THIS session's roster is not available, and the FILL line already names a
+# free one.
+#
+# OPEN IS A ROSTER READING AND ONLY A ROSTER READING (P-A). `intended`, `confirmed` and
+# `identified` are open; a name closed by a `landing-swept/v1|…|state=MET` marker is free
+# again. No transcript, no live set, no tool call: every fixture below leaves the transcript
+# in the `none` state deliberately, so a gate that reached for an answer would refuse the
+# control rows too.
+
+section "§T22-name-in-flight: a dispatch cannot reuse a name that is still open"
+
+T22NF_NONE="$SANDBOX/.t22nf-none.jsonl"
+mk_transcript "$T22NF_NONE" none
+
+# (a) THE REFUSAL. One open `intended` row named `T5`; a dispatch that names `T5` again.
+REPO=$(make_repo t22nfa yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfa a name with an open intended row is REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the fact" "that name is in flight" "$GATE_ERR"
+expect_contains "…and the fix points at the FILL line" "use the FILL line's name" "$GATE_ERR"
+expect_contains "…and the detail names the name and its status" "T5" "$GATE_VERR"
+
+# (b) A CONFIRMED ROW IS OPEN TOO. The three live statuses are one class here.
+REPO=$(make_repo t22nfb yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+roster_row_no_plan status=confirmed "session=$SID_A" name=T6 agent_id=aT6-1111111111111111 \
+  launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T6 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T6 >> "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T6" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfb a name with an open confirmed row is REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the same fact" "that name is in flight" "$GATE_ERR"
+
+# (c) AN IDENTIFIED ROW IS OPEN TOO.
+REPO=$(make_repo t22nfc yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+roster_row_no_plan status=identified "session=$SID_A" name=T7 agent_id=aT7-2222222222222222 \
+  launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T7 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T7 >> "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T7" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfc a name with an open identified row is REFUSED" "2" "$GATE_ST"
+
+# (d) THE CONTROL THAT MAKES IT A RULE AND NOT A BAN. The SAME roster, the SAME transcript,
+# a DIFFERENT name: allowed. A gate that refused every dispatch once a roster existed would
+# pass (a)-(c) and fail here.
+REPO=$(make_repo t22nfd yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5-r2" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfd the name the FILL line would derive instead is ALLOWED" "0" "$GATE_ST"
+expect_absent "…and nothing is said about a name in flight" "in flight" "$GATE_ERR"
+
+# (e) A CLOSED NAME IS FREE AGAIN — the MET marker is what reopens it. Same name, same
+# roster, one marker's difference.
+REPO=$(make_repo t22nfe yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T8"
+s22_sweep "$REPO" "$SID_A" "T8"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T8" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfe a name closed by a MET marker is free to dispatch again" "0" "$GATE_ST"
+expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
+
+# (f) ANOTHER SESSION'S ROSTER IS NOT THIS ONE'S REGISTER. The row is planted under SID_B;
+# SID_A dispatches the same name and is allowed. Names are unique per SESSION, which is the
+# scope every other roster reader in the fleet already uses.
+REPO=$(make_repo t22nff yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_B" "T9"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T9" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nff a predecessor session's row does not reserve the name here" "0" "$GATE_ST"
+
+# (g) AN UNNAMED DISPATCH IS NOT JUDGED BY THIS ARM AT ALL — there is no name to be in
+# flight, and an arm that refused one would break every unnamed async dispatch in the fleet.
+REPO=$(make_repo t22nfg yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "-" "claude-sonnet-5" "$T22NF_NONE")"
+expect_absent "t22nfg an unnamed dispatch is never refused for a name in flight" \
+  "in flight" "$GATE_ERR"
+
+# (h) THE LANDED-THEN-RELAUNCHED NAME — the case the arm was built for and missed
+# (delta review C1/S2). `T5` runs, lands, and its MET marker frees the name; the SAME name
+# is then dispatched again (which (e) proves is allowed) and that second lineage reaches
+# `identified`. A THIRD dispatch under `T5` while that lineage is live must be refused.
+#
+# WHY IT NEEDS ITS OWN CASE. `met` was a file-global flag set by ANY marker for the name,
+# so one landing turned the arm off for that name for the rest of the session — and (e)'s
+# fixture, which stops at the marker, cannot tell a position-blind reading from a
+# position-aware one. The rule is that the LATEST contract decides: a marker older than the
+# newest intended/confirmed/identified row of that name does not close it.
+REPO=$(make_repo t22nfh yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-1111111111111111 \
+  launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T5 >> "$(roster_path "$REPO" "$SID_A")"
+s22_sweep "$REPO" "$SID_A" "T5"
+# …the relaunch: a fresh contract for the same name, AFTER the marker.
+s22_roster_row "$REPO" "$SID_A" "T5"
+roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-2222222222222222 \
+  launched_at=2026-09-02T01:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T5b >> "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfh a name RELAUNCHED after its MET marker is in flight again: REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "…naming the fact" "that name is in flight" "$GATE_ERR"
+expect_contains "…and the status it names is the LATEST row's, not the first lineage's" \
+  "identified" "$GATE_VERR"
+
+# (i) THE PAIRED CONTROL — the SAME five rows plus the relaunch's OWN marker. The latest
+# contract is closed, so the name is free again. An arm that simply ignored MET markers
+# once a name had ever been open would pass (h) and fail here.
+REPO=$(make_repo t22nfi yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+s22_sweep "$REPO" "$SID_A" "T5"
+s22_roster_row "$REPO" "$SID_A" "T5"
+roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-3333333333333333 \
+  launched_at=2026-09-02T01:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= tool_use_id=t-T5c >> "$(roster_path "$REPO" "$SID_A")"
+s22_sweep "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfi a relaunch closed by its OWN marker frees the name again" "0" "$GATE_ST"
+expect_absent "…and no in-flight refusal" "in flight" "$GATE_ERR"
+
+# (j) ADOPTION RE-OPENS A NAME THIS SESSION HAD LANDED — deliberate, and nothing drove it
+# (delta review S1; A-T26.2). `contract_note` retires a MET marker on ANY live row of the name
+# that follows it, whatever `session=` that row carries — symmetrical with how the marker is
+# set, and the reading (h) needs. Its consequence is the case below: `session-poker.sh`'s
+# `adopt_write_row` journals a PREDECESSOR session's agent onto THIS session's roster as
+# `status=identified` with `adopted_from=`, so a session that ran and landed a `T5` of its own
+# and then adopts a predecessor's `T5` has a live `T5` row again, and the next dispatch under
+# that name is refused. The refusal is true on its own terms — this register does carry an
+# open row of the name — and (j2) is the way out.
+REPO=$(make_repo t22nfj yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T5"
+s22_sweep "$REPO" "$SID_A" "T5"
+# The ADOPT-SHAPED row, and the one field that separates it from (h)'s ordinary relaunch:
+# `adopted_from=` naming the session that launched the agent this one took over.
+roster_row_no_plan status=identified "session=$SID_A" name=T5 agent_id=aT5-4444444444444444 \
+  launched_at=2026-09-02T01:00:00Z subagent_type=implementor model= \
+  deliverable=/tmp/d-T5 source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= "adopted_from=$SID_B" tool_use_id=t-T5d \
+  >> "$(roster_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfj an ADOPTED live row re-opens a name this session had landed: REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "…naming the same fact" "that name is in flight" "$GATE_ERR"
+expect_contains "…and the status it names is the adopted row's" "identified" "$GATE_VERR"
+
+# (j2) THE PAIRED CONTROL, and the recovery — which is the LANDING MARKER, not an ack.
+# `session-sweeper.sh ack` journals to `sweeper-<session>.state`; this arm reads the ROSTER,
+# and only the `roster-state/v1|` and `landing-swept/v1|` schemas on it, so an ack cannot
+# reach it. Landing the adopted row frees the name, exactly as (e) and (i) free an ordinary
+# one — and without this row (j) is green on a wall that refuses the name forever.
+s22_sweep "$REPO" "$SID_A" "T5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfj2 landing the adopted row frees the name again" "0" "$GATE_ST"
+expect_absent "…and no in-flight refusal is left" "in flight" "$GATE_ERR"
+
+section "§no-listagents — no brief, in any session state, is told to call ListAgents"
+
+# READ OF THE DRIVER SWEEP INSTALLED IN run_gate. Every payload this file drives — every
+# brief shape, every roster, every transcript state, allowed and refused, line and
+# detail — has passed through that case statement by the time this runs. AC-4.1 is "any
+# brief in any state", and this is the only assertion in the suite that can carry it.
+expect_eq "no dispatch this suite drove asked for a ListAgents call" "" "${DP_NLA_HITS:-}"
+
+# THE TWO ANTI-VACUITY ARMS. An empty counter proves nothing unless the sweep both RAN
+# and DISCRIMINATES. The first says it ran over real traffic — a run_gate that never
+# reached the case statement would leave this at zero. The second says the predicate
+# still catches the retired string, so the row above is empty because no dispatch
+# printed it, not because the test stopped looking.
+expect_eq "…having swept every payload this suite drove (the sweep is not dead code)" \
+  "yes" "$([ "${DP_NLA_SWEPT:-0}" -gt 100 ] && echo yes || echo "no: ${DP_NLA_SWEPT:-0}")"
+DP_NLA_PROBE=""
+case "bionic: dispatch refused — call ListAgents, then dispatch" in
+  *"call ListAgents"*) DP_NLA_PROBE="caught" ;;
+esac
+expect_eq "…and the sweep's own predicate still catches that string when it is present" \
+  "caught" "$DP_NLA_PROBE"
 
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 

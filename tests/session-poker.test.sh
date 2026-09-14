@@ -509,7 +509,14 @@ add_row "$R3M" name=overdue-agent-2 deliverable="$R3M/absent-2.md" \
 poke "$R3M" tick
 expect_eq "a mixed roster still resolves to NOTIFY (exit 1)" "1" "$RC"
 expect_contains "…names the overdue row" "rows=overdue-agent-2" "$OUT"
-expect_absent   "…never names the already-landed row" "already-landed" "$OUT"
+# NARROWED TO THE NOTIFY SET (T22). The claim was always about NOTIFY — a landed row is not
+# overdue work — and it was written as a sweep of the whole tick output because nothing else
+# named a MET row. Something does now: the TASKSTOP tell names exactly the MET lineages the
+# sweep has not closed, which is this row. So the assertion reads the decision line it is
+# about, and the tell gets its own cases in Section 12.
+expect_absent   "…never names the already-landed row in the NOTIFY set" \
+  "rows=already-landed" "$OUT"
+expect_absent   "…nor in the NOTIFY detail" "already-landed:" "$OUT"
 expect_contains "…open=1 (the landed row is not open)" "open=1" "$OUT"
 
 # --- UNMET with an unreadable duration -> fail open, QUIET, never a guessed threshold ---
@@ -1147,7 +1154,16 @@ _own_after="$(cksum < "$(roster_of "$R8")")"
 expect_contains "the landed agent's id is printed" "$ID_LANDED" "$OUT"
 expect_contains "the observe address is the predecessor's own subagent transcript" \
   "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_LANDED}.jsonl" "$OUT"
-expect_contains "the message address is a SendMessage by id" "SendMessage to:$ID_LANDED" "$OUT"
+# THE MESSAGE ADDRESS IS THE NAME (T22, A-orch-33). It was the transcript-form id until
+# 2026-09-14, when a SendMessage to an id that a `/clear` had re-keyed made the harness
+# RESUME A COPY of the agent while the original was still running — two agents, one
+# contract, one roster row. The agent table is lost across a `/clear`; the TEAMMATE table,
+# which is keyed on the name, is not. So the id keeps the two lines it is actually the key
+# for — the observe path and the stop — and the address a human or a model types is the
+# bare name.
+expect_contains "the message address is a SendMessage by NAME" "SendMessage to:landed-one" "$OUT"
+expect_absent "…never by transcript id, which resumes a copy after a /clear" \
+  "SendMessage to:$ID_LANDED" "$OUT"
 # THE ADDRESS THE PLATFORM ACCEPTS, and not the one this verb happens to hold. The id
 # `adopt` reads off the roster is the TRANSCRIPT form (`aname-<hex>`); the stop primitive
 # takes `<name>@session-<id8>` for a teammate (capture
@@ -2315,6 +2331,104 @@ expect_eq "a filling tick exits 0" "0" "$RC"
 expect_contains "three ready and a gap of two fills exactly two, in table order" \
   "poker: FILL ONE TWO" "$OUT"
 expect_absent "…and does not reach the third" "THREE" "$OUT"
+
+# ---------- 12a-T22: THE FILL LINE PRINTS THE NAME, NOT THE TASK ID ----------
+#
+# (T22, A-orch-33 — "names are derived, not invented".) The orchestrator copies the token
+# the FILL line prints and uses it as the agent's name. For a task whose id has never been
+# on this session's roster the two are the same string, which is why every fixture above
+# still reads `FILL ONE TWO`. They diverge exactly when the id is already spent: a second
+# run of `ONE` cannot be called `ONE`, because the stop gate, the message address and the
+# dispatch wall all key on the name, and one name that means two agents is the ambiguity
+# this whole task removes. So the tick derives `ONE-r2` and prints THAT.
+#
+# WHY THE ROSTER IS THE REGISTER and not the plan: the plan's `## Tasks` row keeps its id
+# (`ONE` is still `ONE` to a human reading the ledger), and the roster is what actually
+# records which names this session has handed out. A name is spent when a row carries it,
+# whatever state that row is in — a closed row is the common case (a landed task being run
+# again), and an open one cannot be reused either.
+
+# 12a-T22-a: the id is free -> the name IS the id (this is the invariant every other
+# fixture in this section rests on, asserted here rather than assumed).
+R12AT="$(make_repo s12-fill-name-free)"; new_roster "$R12AT"
+wave_plan "$R12AT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+poke_pressure "$R12AT" 8192 1.0 tick
+expect_contains "12a-T22-a an unspent id is its own agent name" "poker: FILL ONE" "$OUT"
+
+# 12a-T22-b: the id already has a CLOSED row -> the name is `ONE-r2`.
+R12BT="$(make_repo s12-fill-name-r2)"; new_roster "$R12BT"
+wave_plan "$R12BT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+add_row "$R12BT" name=ONE deliverable=a.md duration="15m" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12BT")" "$(iso_ago 30)" "$SID" ONE a000 MET
+poke_pressure "$R12BT" 8192 1.0 tick
+expect_contains "12a-T22-b a spent id derives the next run's name" "poker: FILL ONE-r2" "$OUT"
+
+# 12a-T22-c: `ONE` and `ONE-r2` both spent -> `ONE-r3`. The derivation counts, it does not
+# guess: a rule that always appended `-r2` would pass (b) and hand out a name already taken.
+R12CT="$(make_repo s12-fill-name-r3)"; new_roster "$R12CT"
+# writers=4: the two spent rows below are still OPEN to the budget (their deliverable was
+# never written), so a ceiling of 2 would close the gap and this case would prove nothing
+# about naming.
+wave_plan "$R12CT" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+add_row "$R12CT" name=ONE deliverable=a.md duration="15m" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12CT")" "$(iso_ago 30)" "$SID" ONE a000 MET
+add_row "$R12CT" name=ONE-r2 deliverable=a.md duration="15m" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12CT")" "$(iso_ago 30)" "$SID" ONE-r2 a000 MET
+poke_pressure "$R12CT" 8192 1.0 tick
+expect_contains "12a-T22-c a spent derived name derives the next one" "poker: FILL ONE-r3" "$OUT"
+expect_absent "…and never re-offers the taken one" "poker: FILL ONE-r2" "$OUT"
+
+# 12a-T22-d: ANOTHER SESSION'S ROSTER DOES NOT SPEND THIS SESSION'S NAMES — the same scope
+# the dispatch wall's in-flight arm uses, so the two cannot disagree about which names are
+# available.
+R12DT="$(make_repo s12-fill-name-other)"; new_roster "$R12DT"
+wave_plan "$R12DT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+add_row_to "$R12DT" "other-session-id" name=ONE deliverable=a.md duration="15m"
+poke_pressure "$R12DT" 8192 1.0 tick
+expect_contains "12a-T22-d a predecessor's roster does not spend a name here" "poker: FILL ONE" "$OUT"
+
+# ---------- 12a-T22-e: THE PANEL REFRESH IS A ROSTER READING, NOT A TOOL CALL ----------
+#
+# (T22, A-orch-33.) `payload/scripts/lib/stop.sh` used to refuse the end of a Patrol turn
+# until the transcript showed a ListAgents call — a chore demanded of the model before a
+# gate would judge, which is exactly what ADR-024 rules out. The obligation behind it was
+# real (eighteen finished agents once sat idle on one panel because nobody stopped them),
+# and it is answered here instead: the tick already walks every row and every verdict, so
+# it NAMES the lineages whose contract is MET and whose agent has not yet gone. Nothing is
+# refused and nothing is stopped — the tick holds no authority (ADR-003).
+#
+# MET AND NOT YET SWEPT is the predicate. A `landing-swept/v1` marker is written when the
+# agent DISAPPEARED from the harness's task list, so a swept row's agent is already gone
+# and naming it would be the noise that teaches a reader to skip the line.
+
+R12ET="$(make_repo s12-taskstop-met)"; new_roster "$R12ET"; armed_ago "$R12ET"; delivered_plan "$R12ET"
+DEL_E="$R12ET/delivered.md"; echo "done" > "$DEL_E"
+add_row "$R12ET" name=done-writer deliverable="$DEL_E" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+poke "$R12ET" tick
+expect_contains "12a-T22-e a MET row the sweep has not closed is named for a TaskStop" \
+  "poker: TASKSTOP done-writer" "$OUT"
+
+# The control: the SAME row, swept. One marker's difference, and the tell goes quiet.
+R12FT="$(make_repo s12-taskstop-swept)"; new_roster "$R12FT"; armed_ago "$R12FT"; delivered_plan "$R12FT"
+DEL_F="$R12FT/delivered.md"; echo "done" > "$DEL_F"
+add_row "$R12FT" name=done-writer deliverable="$DEL_F" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12FT")" "$(iso_ago 30)" "$SID" done-writer a000 MET
+poke "$R12FT" tick
+expect_absent "12a-T22-f a swept row's agent is already gone, so nothing is named" \
+  "poker: TASKSTOP" "$OUT"
+
+# The second control: an OPEN row is not a MET lineage and is never named.
+R12GT="$(make_repo s12-taskstop-open)"; new_roster "$R12GT"; armed_ago "$R12GT"; delivered_plan "$R12GT"
+add_row "$R12GT" name=live-writer deliverable="$R12GT/never-written.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+poke "$R12GT" tick
+expect_absent "12a-T22-g an open row is never named for a stop" "poker: TASKSTOP" "$OUT"
 
 # ---------- 12b: the gap closes as rows open ----------
 #
@@ -3983,5 +4097,287 @@ expect_eq "a plan with no current: line still ticks cleanly (exit 0)" "0" "$RC"
 expect_absent "no current: line at all — no FILL" "poker: FILL" "$OUT"
 expect_contains "…named as unreadable, with an empty value" \
   "no FILL — plan current: unreadable (none)" "$OUT"
+
+# ============================================================
+section "Section 23: clean() — list fields survive the 400-char cut (REQ-9, D7)"
+# ============================================================
+#
+# THE BUG (carry-over P2). `clean()`'s trailing `cut -c 1-400` applied to every field it
+# rendered, `suites_allowed=` and `files=` included — the two LIST-valued fields (S13's
+# suite-allowance wall), where a perfectly ordinary brief overflows 400 characters just by
+# naming enough files or suites. The cut then silently dropped suites off the end: a budget
+# the wall never agreed to and the operator never asked for. `clean()` now takes the field
+# name and skips the cut for exactly these two; every other field, and every caller that
+# passes none, keeps the same 400-character cap as before (§23c, below).
+
+R23="$(make_repo s23-long-field)"; new_roster "$R23"
+S23_PRED="55555555-aaaa-4bbb-8ccc-000000000023"
+S23_LONG="$(printf '%*s' 600 '' | tr ' ' 'x')"
+expect_eq "fixture meta: the long value really is 600 characters" "600" \
+  "$(printf '%s' "$S23_LONG" | wc -c | tr -d ' ')"
+
+# ---------- 23a: the round trip through `adopt` ----------
+add_row_to "$R23" "$S23_PRED" name=long-budget status=identified \
+  agent_id=along-budget-2323232323232323 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23/.bionic/docs/record/long-budget.md" \
+  files="$S23_LONG" suites_allowed="$S23_LONG" suites_source=derived
+
+poke "$R23" adopt
+OWN_ROSTER_23="$(roster_of "$R23")"
+LONG_ROW="$(grep -F "|name=long-budget|" "$OWN_ROSTER_23" | tail -1)"
+expect_contains "23a meta: the row IS adopted (not vacuous)" "|adopted_from=$S23_PRED|" "$LONG_ROW"
+
+# `awk length`, not `wc -c` — `wc -c` counts the trailing newline `grep`'s own output line
+# carries, off by one on every call; `awk` strips it before measuring, same as every other
+# fixture-length check in this file (`fixture meta` above uses `printf … | wc -c` on a value
+# with NO trailing newline of its own, which is why that one call is safe as written).
+field_len() {  # <row> <key> -> the character count of key= in a |-delimited row
+  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2- | awk '{ print length }'
+}
+expect_eq "a 600-char suites_allowed= reads back whole through adopt" "600" \
+  "$(field_len "$LONG_ROW" suites_allowed)"
+expect_eq "…and so does a 600-char files=" "600" \
+  "$(field_len "$LONG_ROW" files)"
+
+# ---------- 23b: and through the tick's rendering — a later tick does not re-cut it ----------
+#
+# `tick` never rewrites an adopted row's instrument fields, but this is the case that would
+# have caught it if some future change routed them back through an un-fixed `clean()` a
+# second time: the SAME roster file, read again after a real tick invocation, still carries
+# the whole 600 characters, not a second, silent truncation.
+poke "$R23" tick
+expect_ne "a tick against this roster does not refuse outright" "2" "$RC"
+LONG_ROW_AFTER_TICK="$(grep -F "|name=long-budget|" "$OWN_ROSTER_23" | tail -1)"
+expect_eq "…the roster's own copy is still 600 characters after a tick" "600" \
+  "$(field_len "$LONG_ROW_AFTER_TICK" suites_allowed)"
+
+# ---------- 23c: existing clean() behaviour is unchanged for an ordinary field (AC-9.2) ----------
+#
+# The CUT half, specifically — Section 21 already pins the FOLD half (control characters
+# and `|` still stripped everywhere, `session=` included). A field that is not one of the
+# two list fields still stops at 400 characters, exactly as before this task.
+S23_OVERLONG_NAME="$(printf '%*s' 500 '' | tr ' ' 'y')"
+add_row_to "$R23" "$S23_PRED" name="$S23_OVERLONG_NAME" status=identified \
+  agent_id=aoverlong-name-2323232323232323 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R23/.bionic/docs/record/overlong-name.md"
+poke "$R23" adopt
+OVERLONG_ROW="$(grep -F "|deliverable=$R23/.bionic/docs/record/overlong-name.md|" "$OWN_ROSTER_23" | tail -1)"
+expect_contains "23c meta: this row too is adopted (not vacuous)" \
+  "|adopted_from=$S23_PRED|" "$OVERLONG_ROW"
+expect_eq "an ordinary (non-list) field is still cut at 400 characters" "400" \
+  "$(field_len "$OVERLONG_ROW" name)"
+
+# ============================================================
+section "Section 24: sweep — per-session pruning, not all-or-nothing (D5's prune half, T9)"
+# ============================================================
+#
+# THE BUG. `sweep` judged every dead session identically (PID-liveness alone, no age at
+# all); the age protection for a session that JUST died lived entirely in the CALLER
+# (hooks/session-start.sh's own auto-sweep gate), which could only ask ONE question for the
+# WHOLE directory — "is any file anywhere younger than the interval" — and skip calling this
+# verb AT ALL when the answer was yes. One freshly-dead session therefore deferred every
+# OTHER dead session's cleanup too. `sweep` now asks the age question itself, per session: a
+# dead session's OWN newest file decides whether IT sweeps, and nothing about any other one.
+
+R24="$(make_repo s24-sweep)"; new_roster "$R24"
+C24="$(fake_config_dir s24)"
+S24_REAL_CFG="${CLAUDE_CONFIG_DIR:-}"
+export CLAUDE_CONFIG_DIR="$C24"
+printf 'poker-interval: 2s\n' > "$R24/.bionic/config.yaml"
+
+S24_AGED="44444444-aaaa-4bbb-8ccc-000000000024"
+S24_FRESH="33333333-aaaa-4bbb-8ccc-000000000024"
+
+add_row_to "$R24" "$S24_AGED" name=aged-one status=identified \
+  agent_id=aaged-one-2424242424242424 subagent_type=bionic:implementor \
+  duration="10 minutes" cadence="10 minutes"
+backdate "$(roster_of "$R24" "$S24_AGED")" 10
+
+add_row_to "$R24" "$S24_FRESH" name=fresh-one status=identified \
+  agent_id=afresh-one-2424242424242424 subagent_type=bionic:implementor \
+  duration="10 minutes" cadence="10 minutes"
+# NOT backdated — its mtime is "now", inside the 2-second window. CLOCK DISCIPLINE: the
+# window is fixture data (a throwaway .bionic/config.yaml override), never a real sleep.
+
+expect_eq "24 meta: the aged predecessor's file exists before sweep" "yes" \
+  "$([ -f "$(roster_of "$R24" "$S24_AGED")" ] && echo yes || echo no)"
+expect_eq "24 meta: the fresh predecessor's file exists before sweep" "yes" \
+  "$([ -f "$(roster_of "$R24" "$S24_FRESH")" ] && echo yes || echo no)"
+
+poke "$R24" sweep --window
+expect_eq "sweep exits 0 — something real was swept" "0" "$RC"
+
+expect_eq "the AGED dead session's file is gone" "no" \
+  "$([ -e "$(roster_of "$R24" "$S24_AGED")" ] && echo yes || echo no)"
+expect_eq "the FRESH dead session's file is KEPT — deferred, not swept" "yes" \
+  "$([ -f "$(roster_of "$R24" "$S24_FRESH")" ] && echo yes || echo no)"
+expect_eq "the LIVE session's own roster is never touched" "yes" \
+  "$([ -f "$(roster_of "$R24")" ] && echo yes || echo no)"
+
+expect_contains "the aged session is reported swept" "$S24_AGED — dead, 1 file(s)" "$OUT"
+expect_contains "the fresh session is named as deferred, individually" \
+  "$S24_FRESH — dead, deferred (1 file(s) younger than the 2s window)" "$OUT"
+expect_absent "…the fresh session is never reported as removed" \
+  "$S24_FRESH — dead, 1 file(s)" "$OUT"
+expect_contains "…and the live session is reported kept" "$SID — live, kept" "$OUT"
+
+# `deferred=` is APPENDED after `refused=`, never inserted between the six fields a plain
+# `sweep` call has always emitted (AC-9.2's spirit, extended to this line — see the schema
+# print's own comment): it is the LAST field, no trailing `|` after it.
+expect_contains "the schema line counts one deferred session" "|deferred=1" "$OUT"
+expect_contains "…two dead sessions total (the aged one plus the deferred fresh one)" \
+  "|dead=2|live=1|" "$OUT"
+expect_contains "…exactly one file actually removed" "|removed=1|refused=0|deferred=1" "$OUT"
+
+# The prose summary excludes the deferred session from its dead-session count — it reads
+# "1 dead session" (the one actually swept), not "2", and calls the deferral out separately.
+expect_contains "the prose summary names only the session actually swept" \
+  "swept 1 file(s) across 1 dead session(s)" "$OUT"
+expect_contains "…and separately calls out the deferral" \
+  "1 dead session(s) deferred — their files are younger than the 2s window." "$OUT"
+
+# ---------- 24b: the SAME session sweeps once it ages past the window ----------
+#
+# CLOCK DISCIPLINE HOLDS: backdating the file, not waiting out the interval, is what proves
+# a session deferred a moment ago sweeps on its own once it qualifies.
+backdate "$(roster_of "$R24" "$S24_FRESH")" 10
+poke "$R24" sweep --window
+expect_eq "the second sweep exits 0" "0" "$RC"
+expect_eq "the now-aged FRESH session's file is gone too" "no" \
+  "$([ -e "$(roster_of "$R24" "$S24_FRESH")" ] && echo yes || echo no)"
+expect_contains "…and its removal is what the second sweep reports" \
+  "$S24_FRESH — dead, 1 file(s)" "$OUT"
+
+if [ -n "$S24_REAL_CFG" ]; then export CLAUDE_CONFIG_DIR="$S24_REAL_CFG"; else unset CLAUDE_CONFIG_DIR; fi
+
+# ============================================================
+section "Section 25: the duplicate-session tell — machinery, not prose (AC-4.3, T21)"
+# ============================================================
+#
+# THE CLAIM WAS PROSE ONLY. skills/canonical-sdlc/dispatch.md promises: "A listed agent with
+# NO ledger row is surfaced as a duplicate-session tell, never silently stopped" — and until
+# this section, nothing computed it. Chris, 2026-09-14 (A-orch-29, "Add a test"): the tell
+# becomes tick machinery with its own test.
+#
+# THE QUESTION: for every name THIS session's ListAgents answer calls live, does ANY roster
+# under this project's `.bionic/tmp` — not only this session's own — carry a row for it, by
+# `name=` or `agent_id=`? A live agent no roster remembers is either another session's
+# dispatch (never rostered here) or a resumed copy of a finished one — either way, this is an
+# OBSERVATION, never an act: no stop, no roster write, no effect on FILL/QUIET/NOTIFY.
+#
+# THE FIXTURE SHAPE FOLLOWS SECTION 19's: a transcript carrying a ListAgents answer, planted
+# under $S19_CFG exactly as `s19_answer` plants it (CLAUDE_CONFIG_DIR is still pointed there —
+# nothing in Section 20 through 24 tore it down permanently, and 24's own restore put it back).
+export CLAUDE_CONFIG_DIR="$S19_CFG"
+
+# ---------- 25a: an answer naming an agent absent from every roster -> the tell fires ----------
+R25A="$(make_repo s25-orphan)"; new_roster "$R25A"
+add_row "$R25A" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "live-writer:running" "stray-agent:running"
+poke_pressure "$R25A" 8192 1.0 tick
+expect_contains "a live name on no roster in this project is surfaced" \
+  "poker: DUPLICATE-SESSION stray-agent — live here, on no roster of this project (another session's dispatch or a resumed copy); never stop it silently" \
+  "$OUT"
+expect_eq "…and the tick still exits 0 — an observation, not a refusal" "0" "$RC"
+
+# ---------- 25b: the paired control — a live name WITH a row draws no tell ----------
+R25B="$(make_repo s25-rostered)"; new_roster "$R25B"
+add_row "$R25B" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "live-writer:running"
+poke_pressure "$R25B" 8192 1.0 tick
+expect_absent "a live name WITH a roster row draws no tell (25a discriminates)" \
+  "DUPLICATE-SESSION" "$OUT"
+
+# ---------- 25c: the row can be on ANOTHER session's roster, and by agent_id= too ----------
+# Two more ways a name can be "ours": adopted onto a predecessor's file (never this session's
+# own roster-$SID.state), and matched by the harness's own agent_id= rather than the label the
+# dispatching session chose. Both clear the tell.
+#
+# THIS SESSION'S OWN ROSTER ALSO CARRIES AN OPEN ROW (audit-c19c16e-ac43.md item 4, T25). The
+# predecessor's row alone left `roster-$SID.state` header-only, so `OPEN_ROSTER` read 0 and the
+# whole tell block — cross-roster glob and `agent_id=` branch both — never ran; both assertions
+# below passed for a reason that had nothing to do with either clearing path. `own-live-writer`
+# is not named in the ListAgents answer below, so it neither draws a tell of its own nor changes
+# which names the loop below considers — it exists only to make `OPEN_ROSTER > 0` true.
+R25C="$(make_repo s25-other-roster)"; new_roster "$R25C"
+add_row "$R25C" name=own-live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+S25C_PRED="55555555-aaaa-4bbb-8ccc-0000000025c1"
+add_row_to "$R25C" "$S25C_PRED" name=predecessor-writer status=identified \
+  agent_id=apredecessor-writer-25c111111111 duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "predecessor-writer:running" "apredecessor-writer-25c111111111:running"
+poke_pressure "$R25C" 8192 1.0 tick
+expect_absent "a name on ANOTHER session's roster draws no tell" \
+  "DUPLICATE-SESSION predecessor-writer" "$OUT"
+expect_absent "…and a name matching agent_id= (not name=) draws no tell either" \
+  "DUPLICATE-SESSION apredecessor-writer-25c111111111" "$OUT"
+
+# ---------- 25d: no ListAgents answer at all -> no tell, no refusal, decision unchanged ----------
+# AC-4.1: the tick never DEMANDS a ListAgents call. A session that has not made one yet — the
+# ordinary first tick — gets exactly today's decision, silently, on this axis. The transcript
+# EXISTS (a plain prompt entry) but carries no ListAgents tool_use at all — `s19_answer none`'s
+# shape, which is what "no answer" means (distinct from Section 19f2's absent-file case, already
+# proven elsewhere).
+R25D="$(make_repo s25-no-answer)"; new_roster "$R25D"
+add_row "$R25D" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer none
+poke_pressure "$R25D" 8192 1.0 tick
+expect_absent "no recorded answer at all -> no tell" "DUPLICATE-SESSION" "$OUT"
+expect_eq "…and the tick still exits 0, not a refusal" "0" "$RC"
+expect_contains "…and the ordinary decision is unchanged (open=1, no live set consulted)" \
+  "|open=1" "$OUT"
+
+# ---------- 25e: a STALE answer still names a live agent on no roster (review Q2) ----------
+# hooks/session-poker.sh:3124 documents the asymmetry: "a STALE answer still names a real —
+# if possibly outdated — live set worth surfacing." The trim above falls back to the roster
+# count on stale (Section 19e), but the tell is a DIFFERENT read of the same cached set
+# (`TICK_DUP_SET="$_LA_CACHE_OUT"`, populated whether `_la_ensure` returns fresh or stale) —
+# so staleness silences the FILL arithmetic without silencing this observation. Before this
+# case, Section 25 drove `s19_answer fresh` (25a-25c) and `s19_answer none` (25d) only; a
+# change narrowing the tell to fresh-only left every existing assertion here green.
+R25E="$(make_repo s25-stale)"; new_roster "$R25E"
+add_row "$R25E" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer stale "stray-agent:running"
+poke_pressure "$R25E" 8192 1.0 tick
+expect_contains "a STALE answer's live name on no roster is still surfaced" \
+  "poker: DUPLICATE-SESSION stray-agent — live here, on no roster of this project (another session's dispatch or a resumed copy); never stop it silently" \
+  "$OUT"
+expect_eq "…and the tick still exits 0 — an observation, not a refusal" "0" "$RC"
+
+# ---------- 25f: a `duplicate-start` row is NAMED on the tick (T22 row (d), review C2) ----
+# hooks/execution-recorder.sh journals `status=duplicate-start` when one agent id starts a
+# second time — the fallback accepted BECAUSE a SubagentStart hook cannot block (A-T22.4),
+# whose whole point is that somebody sees it. Until this case nothing read the field: the
+# DUPLICATE-SESSION tell above asks a different question (a live name NO roster carries),
+# and a duplicate start is carried by name AND by agent_id, so that tell is silent on it.
+#
+# ROSTER-ONLY, LIKE THE ROW ITSELF. No ListAgents answer is planted (`none`), because the
+# fact is on disk and a tell that needed a live set would go quiet in exactly the degraded
+# session — one that just lost its agent table across a `/clear` — that produces the row.
+R25F="$(make_repo s25-dupstart)"; new_roster "$R25F"
+add_row "$R25F" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R25F" name=twinned status=identified agent_id=atwinned-2525252525252525 \
+  deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R25F" name=twinned status=duplicate-start agent_id=atwinned-2525252525252525 \
+  deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer none
+poke_pressure "$R25F" 8192 1.0 tick
+expect_contains "a duplicate-start row is named on the tick" \
+  "poker: DUPLICATE-START twinned — a second start under an id that already has a live row; the dispatch wall is the door that closes" \
+  "$OUT"
+expect_eq "…and the tick still exits 0 — an observation, not a refusal" "0" "$RC"
+
+# ---------- 25g: the paired control — the same roster without the row draws no tell -------
+# `twinned` keeps its `identified` row and loses only the `duplicate-start` one. A tell that
+# fired on any second row of a name, or on the mere presence of a name twice, would pass 25f
+# and fail here.
+R25G="$(make_repo s25-no-dupstart)"; new_roster "$R25G"
+add_row "$R25G" name=live-writer deliverable=a.md duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R25G" name=twinned status=identified agent_id=atwinned-2525252525252525 \
+  deliverable=b.md duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer none
+poke_pressure "$R25G" 8192 1.0 tick
+expect_absent "no duplicate-start row, no tell (25f discriminates)" "DUPLICATE-START" "$OUT"
 
 finish

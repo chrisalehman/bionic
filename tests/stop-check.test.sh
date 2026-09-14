@@ -20,6 +20,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 CHECK="${BIONIC_HOOKS_DIR}/stop-check.sh"
 # The roster's WRITER. Section 8 reads rows; §8(g) drives this script to produce
@@ -269,42 +270,69 @@ expect_contains "resolves a target typed as name@team" "aw1r-task-4-3-3202dd476c
 OUT=$(run_check "$H1" "$R1" "no-such-agent"); ST=$?
 expect_status "unresolvable target exits 1" 1 "$ST"
 
-# Ambiguity: one name, TWO live teammates — two lines in the Teammates block, which is what
-# two sessions in one root launching same-named agents looks like to the harness (D2′).
+# THE AMBIGUITY ARM IS RETIRED (T22, A-orch-33). One name, two live teammates was the shape
+# this command could not resolve — and it existed only because nothing closed the door at
+# dispatch. `hooks/dispatch-preflight.sh` now refuses a dispatch whose name already has an
+# open row on this session's roster, so a name means one row and the row carries the id.
+# THE SAME FIXTURE, resolved: the second live entry changes nothing, because the live set is
+# no longer consulted for resolution at all.
 make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
   "a567bd5c6d1e03d67" "w1r-task-4-3" "older run" >/dev/null
 OUT=$(run_check "$H1" "$R1" "w1r-task-4-3"); ST=$?
-expect_status "ambiguous target exits 1" 1 "$ST"
-expect_contains "the ambiguity is counted out of the live set" \
-  "2 live agents answer to 'w1r-task-4-3'" "$OUT"
-expect_regex "…and both entries are printed as the harness reported them" \
-  'w1r-task-4-3\|bionic:senior-implementor\|running' "$OUT"
-expect_contains "…beside an address the stop primitive accepts" \
-  "w1r-task-4-3@session-11111111" "$OUT"
+expect_status "a second live entry of one name no longer blocks the observation" 0 "$ST"
+# The roster is append-only and the LAST row of a name is its current statement, so the id
+# printed is the second agent's — the same "latest row wins" rule every roster reader in the
+# fleet keeps. What matters here is that it resolves at all.
+expect_contains "…it resolves to the id the ROSTER carries" "a567bd5c6d1e03d67" "$OUT"
+expect_absent_ci "…and nothing is called ambiguous" "ambiguous" "$OUT"
 
-# A NAME IS NOT A PATTERN (Step-6 security review S-5). The ambiguity arm counts the live
-# entries by dropping the typed target into a basic regular expression, so a `.`, `*` or `[`
-# in it over-matches and the refusal reports a count that is not the ambiguity it found. The
-# target below genuinely answers to two live agents; the four `w1r-task-4-3` entries beside
-# it are what its `.` would have swallowed.
-make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
-  "a111dotted111111a" "w1r.task-4-3" "dotted one" >/dev/null
-make_agent "$H1" "$S1" "11111111-1111-1111-1111-111111111111" \
-  "a222dotted222222b" "w1r.task-4-3" "dotted two" >/dev/null
-OUT=$(run_check "$H1" "$R1" "w1r.task-4-3"); ST=$?
-expect_status "a metacharacter target is still resolved as ambiguous" 1 "$ST"
-expect_contains "…and counted LITERALLY: two, not the four its pattern would have matched" \
-  "2 live agents answer to 'w1r.task-4-3'" "$OUT"
-expect_absent_ci "…so the neighbour the \`.\` would have swallowed is never listed under it" \
-  "w1r-task-4-3 " "$OUT"
+# (c5) A TYPED AGENT ID RECORDS THE OBSERVATION FOR THE ROW IT NAMES, NEVER THE LAST ROW OF
+# ITS NAME (T32; A-T31.2 — hooks/stop-guard.sh:507-509 carries the identical fix, T31 delta
+# review D1). `ROW_WITH_ID` above is the last confirmed/identified row of the NAME, which is
+# right for a bare name and wrong for an id, which names ONE row by construction. Before this
+# fix, an observation typed as either twin's id recorded `target=` off whichever row is last
+# — so `stop-check <id A>` and `stop-check <id B>` produced the SAME machine line, and the
+# look this producer exists to take could never discharge the twin it was actually typed for.
+IFS='|' read -r H1C R1C S1C <<< "$(make_world w1c)"
+AIDA="atypedid-1111111111111111"
+AIDB="atypedid-2222222222222222"
+make_agent "$H1C" "$S1C" "11111111-1111-1111-1111-111111111111" \
+  "$AIDA" "typedid" "the id-A twin" >/dev/null
+make_agent "$H1C" "$S1C" "11111111-1111-1111-1111-111111111111" \
+  "$AIDB" "typedid" "the id-B twin" >/dev/null
 
-# A NAME THE ANSWER DOES NOT CARRY is not live, whatever is on disk. `departed` has a full
-# set of metadata and a working log; the harness does not name it, so it does not resolve.
-MK_AGENT_ROW=yes make_agent "$H1" "$S1" "33333333-3333-3333-3333-333333333333" \
+OUT=$(run_check "$H1C" "$R1C" "$AIDA"); ST=$?
+M=$(printf '%s\n' "$OUT" | grep '^stop-check-observation/')
+expect_status "an id typed for the FIRST twin: still resolves" 0 "$ST"
+expect_contains "…and the machine line records ITS OWN id" "target=$AIDA" "$M"
+expect_absent "…never the id of the twin nobody typed" "$AIDB" "$M"
+
+OUT=$(run_check "$H1C" "$R1C" "$AIDB"); ST=$?
+M=$(printf '%s\n' "$OUT" | grep '^stop-check-observation/')
+expect_status "…and typed for the SECOND twin: also resolves" 0 "$ST"
+expect_contains "…records ITS OWN id, not the roster's last row" "target=$AIDB" "$M"
+expect_absent "…never the first twin's id" "$AIDA" "$M"
+
+# THE CONTROL: a bare name on a SINGLE-row roster is unaffected — this fix is an override for
+# the id-typed case only, and a bare name still resolves to the row the roster carries.
+IFS='|' read -r H1D R1D S1D <<< "$(make_world w1d)"
+AIDSOLO="asoloagent-3333333333333333"
+make_agent "$H1D" "$S1D" "11111111-1111-1111-1111-111111111111" \
+  "$AIDSOLO" "soloagent" "the only row" >/dev/null
+OUT=$(run_check "$H1D" "$R1D" "soloagent"); ST=$?
+M=$(printf '%s\n' "$OUT" | grep '^stop-check-observation/')
+expect_status "a bare name on a single-row roster: unchanged" 0 "$ST"
+expect_contains "…still records that row's id" "target=$AIDSOLO" "$M"
+
+# A NAME THE ROSTER DOES NOT CARRY does not resolve, whatever the live set says. `departed`
+# has a full set of metadata and a working log and no `confirmed`/`identified` row here, so
+# there is no id and no evidence tier to print — the roster's own arm, unchanged.
+make_agent "$H1" "$S1" "33333333-3333-3333-3333-333333333333" \
   "adeparted-4444444444444444" "departed" "finished long ago" >/dev/null
 OUT=$(run_check "$H1" "$R1" "departed"); ST=$?
-expect_status "an agent on disk but absent from the live set exits 1" 1 "$ST"
-expect_contains "…and says it is not live" "not live" "$OUT"
+expect_status "an agent on disk with no roster row exits 1" 1 "$ST"
+expect_contains "…and says which fact is missing" "no agent id" "$OUT"
+expect_absent_ci "…and never asks for a ListAgents call" "ListAgents" "$OUT"
 
 # ============================================================
 section "Section 2: the evidence tier is printed (AC-3)"
@@ -618,13 +646,14 @@ check_no_line "a second --progress prints no machine line" \
 check_no_line "a --progress with no value prints no machine line" machine --progress
 check_no_line "an UNRESOLVED target prints no machine line" no-such-agent
 
-# Ambiguity: two agents answering to one name. The operator gets a candidate list
-# and no evidence tier, so there is nothing to record.
-make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+# A NAME WITH NO ROSTER ROW resolves no id, so there is no evidence tier and nothing to
+# record. (This case was an AMBIGUITY until T22; the two live entries below no longer
+# decide anything, and what still refuses is the missing register entry.)
+MK_AGENT_ROW=no make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
   "atwin-1111111111111111" "twin" "working" >/dev/null
-make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
+MK_AGENT_ROW=no make_agent "$H7" "$S7" "77777777-7777-7777-7777-777777777777" \
   "atwin-2222222222222222" "twin" "working" >/dev/null
-check_no_line "an AMBIGUOUS target prints no machine line" twin
+check_no_line "a target with no id on the register prints no machine line" twin
 
 # The line is pipe-delimited and read by key, so no operator-supplied value may
 # carry a `|` into it and forge a field.
@@ -684,7 +713,8 @@ expect_contains "OURS+override: machine line carries progress_source=args" "prog
 make_agent "$H8" "$S8" "$FOREIGN8" "aforeign8-2222222222222222" "foreign-target" "hi" >/dev/null
 OUT8C=$(run_check_as "$OWN8" "$H8" "$R8" "foreign-target"); ST=$?
 expect_status "another session's agent does not resolve here: exits 1" 1 "$ST"
-expect_contains "…and says what was actually looked at: the live set" "not live" "$OUT8C"
+expect_contains "…and says what was actually looked at: this session's register" \
+  "no agent id" "$OUT8C"
 expect_absent_ci "…and prints no machine line, so the recorder has nothing to copy" \
   "stop-check-observation/" "$OUT8C"
 
@@ -696,15 +726,16 @@ make_agent "$H8" "$S8" "$DEAD8" "adead8-3333333333333333" "dead-target" "old run
 rm -f "$H8/.claude/projects/$S8/$DEAD8.jsonl"
 OUT8D=$(run_check_as "$OWN8" "$H8" "$R8" "dead-target"); ST=$?
 expect_status "a dead session's agent does not resolve either: exits 1" 1 "$ST"
-expect_contains "…for the same stated reason" "not live" "$OUT8D"
+expect_contains "…for the same stated reason" "no agent id" "$OUT8D"
 
 # --- (e) NO OWN SESSION ID at all: there is no transcript to read, so there is no live set
 # and nothing is guessed. Classification used to report UNKNOWN and carry on; now the run
 # refuses before it resolves anything, which is the honest answer to "whose teammates?".
 OUT8E=$(run_check_nosid "$H8" "$R8" "ours-target"); ST=$?
 expect_status "with no session key of its own the observation exits 1" 1 "$ST"
-expect_contains "…naming the fix the model is the only one that can apply" \
-  "call ListAgents" "$OUT8E"
+expect_contains "…naming the fact, which is that there is no register to read" \
+  "no agent id" "$OUT8E"
+expect_absent_ci "…and never a tool call (T22, AC-4.4)" "ListAgents" "$OUT8E"
 expect_absent_ci "…and printing no machine line" "stop-check-observation/" "$OUT8E"
 
 # --- (f) P2: claimed-process liveness via an explicit --claims pattern, a REAL process ---
@@ -780,6 +811,13 @@ Expected duration: ~30 minutes. Progress: $R8/prog-g.progress, cadence ~6m.
 Subprocess claim: \`$MARKER2\` → $H8/claims-out.log
 Exit condition: the artifact exists.
 Suites: tests/widget.test.sh"
+# THE PLANTED LINEAGE IS LANDED FIRST (T22). `make_agent` journals an `identified` row for
+# this name, and since the name-in-flight arm a dispatch cannot reuse a name whose row is
+# still open — so the planted lineage is closed with the marker that frees it, exactly as a
+# landed task's would be, and the dispatch below is the second run under that name. The row
+# this case reads is still the one the real start gate wrote.
+swept_marker_write "$R8/.bionic/tmp/roster-${OWN8}.state" 2026-08-05T01:00:00Z "$OWN8" \
+  ours-claims aours-4444444444444444 MET
 jq -n --arg s "$OWN8" --arg c "$R8" --arg p "$BRIEF_G" \
   '{session_id:$s, transcript_path:"/irrelevant.jsonl", cwd:$c,
     hook_event_name:"PreToolUse", tool_name:"Agent",
@@ -1087,17 +1125,17 @@ expect_contains "…it is the same id either way" "atwinned-1111111111111111" "$
 expect_contains "…and the evidence printed is the LIVE copy's" "the live copy" "$OUT11"
 expect_absent_ci "…nothing calls the double file ambiguous" "ambiguous" "$OUT11"
 
-# THE PAIRED NEGATIVE: two DISTINCT live agents under one name is a real ambiguity and still
-# refuses. Nothing here widens what resolves; the count simply comes from the answer.
-make_agent "$H11" "$S11" "$OWNRUN11" "areal-2222222222222222" "genuine" "one" >/dev/null
-make_agent "$H11" "$S11" "$OWNRUN11" "areal-3333333333333333" "genuine" "two" >/dev/null
+# THE PAIRED NEGATIVE, RE-POINTED (T22). Two distinct live agents under one name used to be
+# "a real ambiguity" here. It is now a state this session cannot produce — the dispatch wall
+# refuses the second name — and what this fixture still proves is the half that survives:
+# an agent with no `confirmed`/`identified` row on this session's roster resolves no id, so
+# there is no evidence tier and no machine line, however many of them the harness lists.
+MK_AGENT_ROW=no make_agent "$H11" "$S11" "$OWNRUN11" "areal-2222222222222222" "genuine" "one" >/dev/null
+MK_AGENT_ROW=no make_agent "$H11" "$S11" "$OWNRUN11" "areal-3333333333333333" "genuine" "two" >/dev/null
 OUT11B=$(run_check "$H11" "$R11" "genuine"); ST11B=$?
-expect_status "two DIFFERENT agents under one name still refuse" 1 "$ST11B"
-expect_contains "…counted out of the live set" "2 live agents answer to 'genuine'" "$OUT11B"
-# And the candidate list names an address the stopper can actually use — the one spelling
-# hooks/stop-guard.sh accepts as an alias and `session-poker.sh adopt` prints (Section R).
-expect_contains "…listing an address the stop primitive accepts" \
-  "genuine@session-bbbbbbbb" "$OUT11B"
+expect_status "a name with no row on this session's register still refuses" 1 "$ST11B"
+expect_contains "…naming the missing fact, not a count of live entries" "no agent id" "$OUT11B"
+expect_absent_ci "…and nothing is called ambiguous" "ambiguous" "$OUT11B"
 expect_absent_ci "…and no machine line, because no evidence tier was shown" \
   "stop-check-observation/" "$OUT11B"
 
