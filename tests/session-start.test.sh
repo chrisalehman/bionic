@@ -258,7 +258,13 @@ hasnt "1.5 …and THIS session's own open roster is not a predecessor" "roster-$
 has  "1.6 the re-arm sequence: CronList first" "re-arm: CronList" "$OUT"
 has  "1.7 …then the stray delete" "delete bionic-patrol session=" "$OUT"
 has  "1.8 …then CronCreate" "CronCreate" "$OUT"
-has  "1.9 …then arm, by absolute path" "$(cd "$(dirname "$HOOK")/.." && pwd -P)/hooks/session-poker.sh arm" "$OUT"
+# T19 (A-orch-19.3): the stamp now arms itself at engagement (hooks/engage.sh, D4), so the
+# ritual's hand step after CronCreate is `adopt` alone — `session-poker.sh arm` is gone from
+# the line entirely, not just reworded.
+hasnt "1.9 …no arm hand step — the stamp arms itself at engagement (D4)" \
+  "session-poker.sh arm" "$OUT"
+has  "1.9b …the re-arm line itself, exactly: CronCreate hands straight to adopt" \
+  "re-arm: CronList → delete bionic-patrol session=<other> jobs → CronCreate → adopt" "$OUT"
 has  "1.10 …then adopt" "adopt" "$OUT"
 has  "1.11 the session-id triple agrees" "— agree" "$OUT"
 eq   "1.12 the hook wrote nothing under .bionic" "$S1_BEFORE" "$(snap "$P1")"
