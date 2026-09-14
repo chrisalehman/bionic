@@ -817,4 +817,48 @@ expect_eq "14r: a non-numeric timeout repairs the same as an absent one" "600000
 expect_contains "14s: …logged as 'absent', the contract's own shape for it" \
   "repaired from=absent to=600000 agent=$ACTOR" "$ERR"
 
+# (i) THE ARM ORDER (T13, A-orch-39) — the BUDGET arm decides BEFORE the repair arm, so an
+# OFF-BUDGET suite call carrying no `timeout` is REFUSED, not repaired and allowed.
+#
+# THIS IS THE DISCRIMINATING PAYLOAD and it is why the fixture above states no `timeout`:
+# ARM R shipped (T3) between ARM 1 and ARM 2 and `return`ed the moment it staged a rewrite,
+# so this exact shape — the one a dispatched worker's Bash call carries when it names no
+# ceiling — never reached the budget at all. Give the row a timeout and the defect vanishes
+# from the fixture along with the test for it.
+#
+# THREE WIRES, NOT ONE. `fold.sh` drops a staged `updatedInput` whenever anything blocked,
+# so 14w alone would pass even with the arms in the wrong order; 14v is the assertion that
+# cannot be satisfied by the fold, because `log_finding`'s stderr line (and its audit write)
+# leave the process before the fold ever renders a verdict.
+R_ORDER="$(mk_repo armorder)"
+arm_roster "$R_ORDER"
+# Through the one production writer, same as tests/agent-context-guard.test.sh §G9: a field
+# this fixture believes in that `roster_row` stopped emitting fails loudly instead of
+# quietly budgeting nothing.
+. "$(dirname "$0")/lib/roster-row.sh"
+roster_row_fixture "session=$SID" name=t13writer "agent_id=$ACTOR" \
+  suites_allowed=alpha.test.sh suites_source=declared files= \
+  >> "$R_ORDER/.bionic/tmp/roster-$SID.state"
+
+run_hook "$(mk_payload "$R_ORDER" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash test-runner)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_status "14t: off-budget + NO timeout: refused — the budget arm runs before the repair" \
+  2 "$ST"
+expect_contains "14u: …in the budget arm's own words" \
+  "that suite is not on this agent's budget" "$ERR"
+expect_absent "14v: …and a REFUSED call is never repaired — no repair line on stderr" \
+  "suite-timeout" "$ERR"
+expect_eq "14w: …and no updatedInput on stdout either" "no" "$(has_updated_input)"
+
+# (j) ITS PAIR — the same payload shape ON the budget is still repaired exactly as T3
+# shipped it. Without this row, 14t-14w are satisfied by a wall that simply stopped
+# repairing anything.
+run_hook "$(mk_payload "$R_ORDER" 'bash tests/alpha.test.sh' "$ACTOR" omit Bash test-runner)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_status "14x: on-budget + no timeout: allowed — reaching the repair arm at all proves the budget arm passed it" 0 "$ST"
+expect_eq "14y: …updatedInput.timeout still raised to the harness maximum" "600000" \
+  "$(updated_timeout_of)"
+expect_contains "14z: …and the repair is still logged, naming the agent" \
+  "repaired from=absent to=600000 agent=$ACTOR" "$ERR"
+
 finish
