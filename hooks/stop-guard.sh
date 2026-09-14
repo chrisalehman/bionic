@@ -550,6 +550,15 @@ is_address_shaped() {  # <typed> -> 0 if it wears an agent-address shape
   return 1
 }
 
+# A BACKGROUND BASH TASK ID (D8, T5; A-D4 probe evidence: t1o3yxz7p, tvivnv41s, tlfh9woyt,
+# t5triyxvo). It never gets an agent-*.meta.json and never opens a roster row — it names no
+# Agent-tool dispatch at all, so it is the one shape that still gets out of this gate's way
+# with no row of any kind (REQ-5). The leading `t` is load-bearing: it is what keeps this
+# carve from ever widening to a bare name that merely happens to be short and lowercase.
+is_bash_task_shaped() {  # <typed> -> 0 if it wears a background-bash-task-id shape
+  printf '%s' "$1" | grep -qE '^t[a-z0-9]{8,}$'
+}
+
 # EVERY ROSTER IN THIS BIONIC_ROOT THAT CARRIES THIS NAME, as the addresses the platform's stop
 # primitive takes. It is the one spelling this gate prints and the one it accepts (Section R),
 # and it is built from the roster FILENAME because that is the session that wrote the row.
@@ -572,9 +581,17 @@ accepted_addresses() {  # -> "    <name>@session-xxxxxxxx" per launcher, newline
 # whatever it is spelled like — which is what lets a BARE NAME be refused rather than waved
 # through, and a bare name is the spelling the whole of B-2 is about.
 #
-# NOT OURS IS A PASSTHROUGH, NOT A REFUSAL, and it always was: a target this gate has no
-# standing over must not be trapped here, or the escape hatch this gate's own header
-# advertises (a human's order executes) would be unreachable for it.
+# NOT OURS IS A REFUSAL NOW (D8, T5 — it was a passthrough through 1.7.1, and the doctrine
+# always said the refusal would return). A target this gate has no standing over is, for
+# every OTHER shape, still a stop this gate can name and decline: refusing it in one line
+# beats waving it through silently, because the wave-through was never provable to have been
+# a deliberate choice rather than a typo or a stray target. The one exception is a
+# BACKGROUND BASH TASK ID (is_bash_task_shaped): it never carries agent metadata and never
+# opens a roster row by construction, so it is not an Agent-tool dispatch at all and keeps
+# the passthrough this gate always gave it — logged once, never silent. A roster this
+# session cannot read is a THIRD, unrelated case: ROSTER_UNREADABLE grants standing above,
+# so it never reaches this branch, and the escape hatch this gate's own header advertises (a
+# human's order executes) is unaffected either way — deny() below still ends with it.
 guard_has_standing() {
   is_address_shaped "$RAW" && return 0
   [ -n "$ROW_BY_NAME" ] && return 0
@@ -582,11 +599,17 @@ guard_has_standing() {
   return 1
 }
 if ! guard_has_standing; then
-  # STRUCTURAL, not remote-controlled (Step-6 review flag 2-B): reachable only when standing
-  # is absent, and the `if` keeps that true regardless of what `deny()` does — which an
-  # unconditional `exit 2` in another function forty lines away did not.
-  echo "PASSTHROUGH: '${RAW}' appears on no roster row of this session and wears no agent-address shape — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
-  exit 0
+  if is_bash_task_shaped "$RAW"; then
+    # STRUCTURAL, not remote-controlled (Step-6 review flag 2-B): reachable only when standing
+    # is absent, and the `if` keeps that true regardless of what `deny()` does — which an
+    # unconditional `exit 2` in another function forty lines away did not.
+    echo "PASSTHROUGH: '${RAW}' wears a background-bash-task-id shape and carries no agent metadata — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
+    exit 0
+  fi
+  deny "this target is on no roster row of this session" "name a rostered agent or id" \
+       "Target '${RAW}' is on no roster row of this session and wears no agent-address or" \
+       "background-bash-task-id shape, so this gate cannot tell which Agent-tool dispatch," \
+       "if any, it names (REQ-5, D8)."
 fi
 
 # ---------- AMBIGUITY, COUNTED ON THE REGISTER (T29; §7 — CLOSED and loud) ----------

@@ -2751,4 +2751,65 @@ else
   ok "133c: a doctored survival.md fails the repair-rule pin (pin discriminates)"
 fi
 
+# ---------------------------------------------------------------------------
+section "Section 25: T5 — the no-row stop refusal doctrine (REQ-5, D8, AC-5.4)"
+#
+# WHAT THIS SECTION OWNS. Two sentences in agents-src/blocks/orchestrator-dispatch.md,
+# rendered into skills/canonical-sdlc/dispatch.md (and its payload/ symlink). The doctrine
+# sentence used to say a no-row name "passes through — not this gate's to guard; the refusal
+# returns in 1.8.0."; it now states the refusal itself (D8, AC-5.4). The Panel-refresh
+# bullet named the retired `poker: TASKSTOP <name>` line; it now names the `poker: STANDDOWN
+# <name>` line T1 actually shipped (A-T1.11 — owed by this row, not T1's).
+
+DISPATCH_BLOCK_T5="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
+
+PIN_T5_REFUSAL='A name with no row on this session'"'"'s roster is refused unless address- or bash-task-shaped.'
+if has_pin "$DISPATCH_MD" "$PIN_T5_REFUSAL"; then
+  ok "134a: dispatch.md carries the no-row REFUSAL sentence verbatim (D8, AC-5.4)"
+else
+  no "134a: dispatch.md carries the no-row REFUSAL sentence verbatim (D8, AC-5.4)" "file: $DISPATCH_MD"
+fi
+
+# THE SOURCE, NOT ONLY THE OUTPUT — same reasoning as 126e: a pin that read only the render
+# product would stay green over a hand-edit that the next render.sh silently reverts.
+if has_pin "$DISPATCH_BLOCK_T5" "$PIN_T5_REFUSAL"; then
+  ok "134b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the refusal sentence"
+else
+  no "134b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the refusal sentence" \
+     "file: $DISPATCH_BLOCK_T5"
+fi
+
+# AC-5.4's own grep: no surface that could ship the stale doctrine still carries it.
+T5_STALE_HITS="$(grep -rl 'roster passes through' "${REPO}/agents-src" "${REPO}/skills" "${REPO}/payload/skills" 2>/dev/null || true)"
+expect_eq "134c: AC-5.4 — no agents-src/, skills/ or payload/skills/ surface still says 'roster passes through'" \
+  "" "$T5_STALE_HITS"
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+T5_STALE_MUT="$TMP/t5-stale-doctrine.md"
+printf "A name with no row on this session's roster passes through — not this gate's to guard.\n" > "$T5_STALE_MUT"
+expect_true "134d: the 'roster passes through' grep fires on the shape it targets (the pattern discriminates)" \
+  grep -q 'roster passes through' "$T5_STALE_MUT"
+
+PIN_T5_STANDDOWN='the tick prints `poker: STANDDOWN <name>` per MET lineage still open on the roster and orders it, so one TaskStop passes'
+if has_pin "$DISPATCH_MD" "$PIN_T5_STANDDOWN"; then
+  ok "135a: dispatch.md's Panel-refresh bullet says STANDDOWN, not the retired TASKSTOP (A-T1.11)"
+else
+  no "135a: dispatch.md's Panel-refresh bullet says STANDDOWN, not the retired TASKSTOP (A-T1.11)" \
+     "file: $DISPATCH_MD"
+fi
+
+if has_pin "$DISPATCH_BLOCK_T5" "$PIN_T5_STANDDOWN"; then
+  ok "135b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the STANDDOWN sentence"
+else
+  no "135b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the STANDDOWN sentence" \
+     "file: $DISPATCH_BLOCK_T5"
+fi
+
+# The retired sentence must be gone, not just superseded — a template carrying both would
+# print the wrong instruction on every tick that reads it.
+T5_TASKSTOP_HITS="$(grep -c 'poker: TASKSTOP <name>' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$T5_TASKSTOP_HITS" ] || T5_TASKSTOP_HITS=0
+expect_eq "135c: …and the retired 'poker: TASKSTOP <name>' line is gone from dispatch.md" \
+  "0" "$T5_TASKSTOP_HITS"
+
 finish
