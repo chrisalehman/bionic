@@ -537,18 +537,19 @@ run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "")"
 expect_status "active wave + empty task_id: REFUSED" 2 "$GUARD_ST"
 
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "no-such-agent")"
-expect_status "active wave + unresolvable name (not address-shaped): PASSES THROUGH (T4)" 0 "$GUARD_ST"
-expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
+expect_status "active wave + unresolvable name (not address-shaped): REFUSED (D8, T5)" 2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'no roster row of this session' "$GUARD_ERR"
 
-# THE SAME FIXTURE, RE-POINTED (T22). Two live agents answering to one name used to refuse
-# as an ambiguity. The register decides now, and neither of these two has a row on it — so
-# this is the ordinary no-standing passthrough, and the ambiguity it used to produce is
-# prevented one event earlier, at the dispatch wall.
+# THE SAME FIXTURE, RE-POINTED (T22, then D8/T5). Two live agents answering to one name used
+# to refuse as an ambiguity. The register decides now, and neither of these two has a row on
+# it — so this is the ordinary no-standing case, and the ambiguity it used to produce is
+# prevented one event earlier, at the dispatch wall. No-standing REFUSES since D8 (T5); the
+# passthrough it used to be survives only for a bash-task-shaped target (§4a below).
 plant_agent "$W4_SUB" "adouble-5555555555555555" "twin"
 plant_agent "$W4_SUB" "adouble-6666666666666666" "twin"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "twin")"
-expect_status "two same-named agents on no roster row of this session: PASSES THROUGH" 0 "$GUARD_ST"
-expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
+expect_status "two same-named agents on no roster row of this session: REFUSED (D8, T5)" 2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'no roster row of this session' "$GUARD_ERR"
 
 # A plan with CR-only line endings is still a plan. `tr -d` on those separators
 # collapses the file to one line, the run-state marker goes unseen, and the gate
@@ -592,6 +593,14 @@ section "Section 4a: unsupervised-target passthrough (T4, AC-6)"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "t5triyxvo")"
 expect_status "a bash-task-shaped target with no metadata: PASSES THROUGH" 0 "$GUARD_ST"
 expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
+
+# (a2) AC-5.2: a nine-character lowercase-alnum name leading `a` (not `t`) is NOT
+# bash-task-shaped by construction — `is_bash_task_shaped` requires the `t` prefix — so shape
+# alone never waves it through. It happens to also satisfy `is_address_shaped`'s hex-id
+# pattern (digits 1-8 are valid hex digits), so it is refused on the same unresolved-address
+# path as (c) below rather than the new no-row path; either way it is exit 2, never a pass.
+run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "a12345678")"
+expect_status "a nine-character name leading 'a': REFUSED, never passes on shape alone (AC-5.2)" 2 "$GUARD_ST"
 
 # (b) An addressing-form target (`name@session-xxxx`) with no metadata IS
 # address-shaped: stays REFUSED, the verbatim unresolved-target message unchanged.
@@ -1317,15 +1326,16 @@ expect_absent "…never widened to the bystander name the dot happens to match" 
 # log is `<session>/subagents/agent-<id>.jsonl` and the roster row is the only thing that
 # knows the id once the directory scan is gone. It is refused, and the refusal says which
 # fact is missing rather than demanding a look that cannot be taken.
-# RE-POINTED (T22). A bare name with NO row of any status on this session's roster is not
-# this session's dispatch — the preflight opens a row before it allows one — so the gate has
-# no standing over it and the T4/AC-6 carve applies, exactly as it does to `no-such-agent`
-# and to a background bash task id. What still refuses for the missing id is a name the
-# register DOES carry, on the `intended` row below.
+# RE-POINTED (T22), then RE-POINTED AGAIN (D8, T5). A bare name with NO row of any status on
+# this session's roster is not this session's dispatch — the preflight opens a row before it
+# allows one — so the gate has no standing over it, and since D8 that is a REFUSAL rather than
+# a passthrough: only a background bash task id still gets the T4/AC-6 carve (§4a). What still
+# refuses for the missing id, on a DIFFERENT fact, is a name the register DOES carry, on the
+# `intended` row below.
 plant_agent "$LV_SUB" "aunrostered-8888888888888888" "unrostered"
 run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "unrostered")"
-expect_status "a bare name on no roster row of this session: PASSES THROUGH" 0 "$GUARD_ST"
-expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
+expect_status "a bare name on no roster row of this session: REFUSED (D8, T5)" 2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'no roster row of this session' "$GUARD_ERR"
 
 # …and an `intended` row is still not an ownership claim: its id is a claim about a launch
 # nothing has observed. Unchanged from task 4/9, on the channel that now carries it.
@@ -1451,10 +1461,11 @@ ln -sf "$SANDBOX/elsewhere/ledger.state" "$F_REPO/.bionic/tmp/sweeper-$SID_A.sta
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "linked-ledger")"
 rm -f "$F_REPO/.bionic/tmp/sweeper-$SID_A.state"
 
-# --- no roster row at all: unchanged ---
+# --- no roster row at all: no standing, and since D8 (T5) that REFUSES ---
 plant_agent "$F_SUB" "aunrostered-777777777777" "unrostered"
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "unrostered")"
-expect_status "a target on no roster row is unchanged by any of this: no standing (T22)" 0 "$GUARD_ST"
+expect_status "a target on no roster row is unchanged by any of this: no standing (T22, D8)" 2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'no roster row of this session' "$GUARD_ERR"
 
 # --- an ack for a name NO ROSTER ROW carries closes nothing here (epic-16 w2 S9) ---
 #
@@ -1469,14 +1480,15 @@ expect_status "a target on no roster row is unchanged by any of this: no standin
 # landing gate has always passed such a stop for an unrelated reason (a name on no row makes
 # the verb exit 0 and the gate fail open), and the stand-down never sees one, so this is the
 # reading all three now share.
-# RE-POINTED (T22): a name on no roster row has no standing here at all, so the ack cannot
-# discharge anything because there is nothing to discharge — the stop is not this gate's.
-# The ack-over-a-real-row case, which is the one the discharge rule is about, is above.
+# RE-POINTED (T22), then RE-POINTED AGAIN (D8, T5): a name on no roster row has no standing
+# here at all, so the ack cannot discharge anything because there is nothing to discharge —
+# and since D8 "not this gate's" is a REFUSAL, not a wave-through. The ack-over-a-real-row
+# case, which is the one the discharge rule is about, is above.
 plant_agent "$F_SUB" "aackless-9999999999999999" "acked-but-rowless"
 ack_row "$F_REPO" "$SID_A" "acked-but-rowless"
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "acked-but-rowless")"
-expect_status "an ack over a name no roster row carries reaches no discharge rule at all" 0 "$GUARD_ST"
-expect_regex "…because the gate has no standing over it" 'PASSTHROUGH' "$GUARD_ERR"
+expect_status "an ack over a name no roster row carries reaches no discharge rule at all" 2 "$GUARD_ST"
+expect_regex "…because the gate has no standing over it" 'no roster row of this session' "$GUARD_ERR"
 # The paired positive is one case up: the SAME ack verb, over a name that HAS a row, passes
 # the same gate silently ("ACKED row: the stop passes though the contract is UNMET").
 
@@ -1781,12 +1793,14 @@ run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "registered")"
 expect_status "T22-1 a name with one identified row and a MET contract: PERMITTED" 0 "$GUARD_ST"
 expect_empty "…silently" "$GUARD_ERR"
 
-# (2) NO ROW ON ANY ROSTER OF THIS SESSION, and no agent-address shape: NOT OURS. The stop
-# is not refused and not judged — it proceeds, loudly enough to be traceable.
+# (2) NO ROW ON ANY ROSTER OF THIS SESSION, no agent-address shape, and (D8, T5) no
+# bash-task-id shape either ("bash-task-42" carries a hyphen and a leading "b" — neither
+# `is_address_shaped` nor `is_bash_task_shaped` accepts it): NOT OURS, and since D8 that is a
+# REFUSAL, named in one line rather than waved through.
 run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "bash-task-42")"
-expect_status "T22-2 a target on no roster of this session is not ours: the stop proceeds" \
-  0 "$GUARD_ST"
-expect_contains "…and says so rather than passing in silence" "PASSTHROUGH" "$GUARD_ERR"
+expect_status "T22-2 a target on no roster of this session is not ours: REFUSED (D8, T5)" \
+  2 "$GUARD_ST"
+expect_contains "…and says so, naming the fact rather than passing in silence" "no roster row of this session" "$GUARD_ERR"
 
 # (3) AN `intended` ROW IS NOT AN IDENTITY. Its id is a claim about a launch nothing has
 # observed, so it resolves no id and the refusal names the missing fact (Step-6 review C-2,
