@@ -115,18 +115,25 @@ Step 5: TODO" > "$1/.bionic/docs/plans/active.md"
 # for the backgrounded-suite arm, which is the arm this suite drives.
 arm_roster() { : > "$1/.bionic/tmp/roster-$SID.state"; }
 
-# mk_payload <cwd> <command> [agent_id] [run_in_background] [tool_name] [agent_type]
+# mk_payload <cwd> <command> [agent_id] [run_in_background] [tool_name] [agent_type] [timeout]
 #
 # `agent_type` IS A SEPARATE FIELD FROM `agent_id` and the two walls read different ones:
 # hooks/farm-out-reminder.sh leaves on a non-empty `agent_type` (it moves work OFF the
 # orchestrator thread, so the thread it moved work TO must not be nudged), while the
 # agent-context predicate is `agent_id`. A row that wants ONE wall to answer sets both.
+#
+# `timeout` (T3, REQ-3, D4): omitted by default, matching the CLI's own shape — the Bash
+# tool input schema declares it optional and the harness drops the key rather than send a
+# null (record/wave-13-fixit-180/research-R2-walls.md §4). A row driving the repair arm
+# passes a bare integer string; `tonumber` gives it the JSON number type a real payload
+# carries, not a quoted string a real one never would.
 mk_payload() {
   jq -n --arg s "$SID" --arg c "$1" --arg cmd "$2" --arg a "${3:-}" \
-        --arg bg "${4:-omit}" --arg t "${5:-Bash}" --arg at "${6:-}" \
+        --arg bg "${4:-omit}" --arg t "${5:-Bash}" --arg at "${6:-}" --arg to "${7:-omit}" \
     '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:$t,
       tool_input:({command:$cmd}
-                  + (if $bg == "omit" then {} else {run_in_background: ($bg == "true")} end)),
+                  + (if $bg == "omit" then {} else {run_in_background: ($bg == "true")} end)
+                  + (if $to == "omit" then {} else {timeout: ($to | tonumber)} end)),
       tool_use_id:"toolu_01t23walls"}
      + (if $a == "" then {} else {agent_id:$a} end)
      + (if $at == "" then {} else {agent_type:$at} end)'
@@ -148,11 +155,16 @@ run_hook() {  # <payload> [extra env assignments...]
 json_docs()   { printf '%s' "$OUT" | jq -s 'length' 2>/dev/null; }
 deny_reason() { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // ""' 2>/dev/null; }
 context_of()  { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null; }
+# updated_timeout_of / has_updated_input — T3 readers. `has_updated_input` distinguishes
+# "no updatedInput key at all" from "updatedInput.timeout happens to be empty", which
+# `updated_timeout_of` alone cannot: both read "" from jq's `// empty`.
+updated_timeout_of()  { printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.timeout // empty' 2>/dev/null; }
+has_updated_input()   { printf '%s' "$OUT" | jq -e '.hookSpecificOutput.updatedInput' >/dev/null 2>&1 && echo yes || echo no; }
 # line_of <regex> — the 1-based line of the first stderr line matching, or empty.
 line_of()     { printf '%s\n' "$ERR" | awk -v re="$1" '$0 ~ re {print NR; exit}'; }
 
 require_helpers mk_repo block_plan arm_roster mk_payload run_hook json_docs deny_reason \
-                context_of line_of
+                context_of line_of updated_timeout_of has_updated_input
 
 setup_section "the repos"
 R_QUIET="$(mk_repo quiet)"
@@ -712,5 +724,97 @@ expect_contains "13d: …in the existing words" "the current branch is protected
 run_hook_in "$CWD_FALLBACK" "$(mk_payload "" 'git push origin HEAD')"
 expect_status "13e: no usable payload cwd — falls back to the hook's own directory, refused" 2 "$ST"
 expect_contains "13f: …in the existing words" "the current branch is protected" "$ERR"
+
+# ---------------------------------------------------------------------------
+section "14 — repair: a suite call's timeout is raised to the harness maximum (T3, REQ-3, D4)"
+#
+# THE NEW ARM, between ARM 1 (backgrounded → refuse) and ARM 2 (the budget). It never
+# refuses: a subagent's suite call whose `timeout` is absent, non-numeric, or below
+# `BASH_MAX_TIMEOUT_MS` is rewritten via `hookSpecificOutput.updatedInput` and allowed to
+# proceed, so every row here that repairs still exits 0.
+#
+# `agent_type: test-runner` on every repairing row, same as section 2j's convention: it
+# silences farm-out-reminder so exactly one wall answers and these assertions are not
+# reading a composed verdict by accident.
+
+R_REPAIR="$(mk_repo repair)"
+arm_roster "$R_REPAIR"
+
+# (a) no `timeout` at all — the harness's own default (two minutes) is what kills a real
+# suite, and this is the shape a dispatched worker's Bash call carries when it names none.
+run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_status "14a: a subagent suite call with no timeout is not refused" 0 "$ST"
+expect_eq "14b: …updatedInput.timeout is raised to the harness maximum" "600000" "$(updated_timeout_of)"
+expect_contains "14c: …command and tool_name ride through unchanged" "bash tests/x.test.sh" \
+  "$(printf '%s' "$OUT" | jq -r '.hookSpecificOutput.updatedInput.command // ""' 2>/dev/null)"
+expect_contains "14d: …the repair is logged, naming the agent" \
+  "canonical-sdlc [suite-timeout]: repaired from=absent to=600000 agent=$ACTOR" "$ERR"
+# `log_finding`'s CHANNEL/SUBJECT/ROOT are declared lazily by the evidence gate's own
+# internal body, reached only along a commit-class path a suite call never takes — a
+# repair firing without its own declaration calls an undefined `bionic_finding_root`,
+# which fails "command not found" on stderr beside the log line `expect_contains` above
+# would still find. This is the ONE line that would have caught it.
+expect_eq "14e0: …and stderr is EXACTLY that one log line — no stray shell error beside it" \
+  "canonical-sdlc [suite-timeout]: repaired from=absent to=600000 agent=$ACTOR" "$ERR"
+
+# (b) a timeout BELOW the maximum — raised, not left alone.
+run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 3000)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_eq "14e: a timeout below the maximum is raised to it" "600000" "$(updated_timeout_of)"
+expect_contains "14f: …logged with the ORIGINAL value, not the repaired one" \
+  "repaired from=3000 to=600000 agent=$ACTOR" "$ERR"
+
+# (c) a timeout AT the maximum — nothing to repair, and ARM 2's budget arm decides the call
+# instead (an empty roster row passes in silence, same as section 7's unarmed-suite rows).
+run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_status "14g: a suite call already at the harness maximum is not refused" 0 "$ST"
+expect_eq "14h: …and carries no updatedInput — there is nothing to repair" "no" "$(has_updated_input)"
+expect_empty "14i: …no repair logged either" "$ERR"
+
+# (d) ARM 1 UNCHANGED — a backgrounded suite is still refused, and the repair arm (which
+# sits textually after ARM 1) never gets a chance to speak for it.
+run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" true Bash test-runner)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_status "14j: a backgrounded suite is still refused — ARM 1's own verdict, unchanged" 2 "$ST"
+expect_contains "14k: …in ARM 1's own words" "a backgrounded suite's result is never read" "$ERR"
+expect_eq "14l: …and carries no updatedInput" "no" "$(has_updated_input)"
+
+# (e) MAIN-THREAD CONTROL — no `agent_id` at all. The partition above ARM 1 already
+# returns before the repair arm is reached; whatever else fires on this payload (farm-out-
+# reminder's own tier-1 deny, unrelated to this wall), no updatedInput ever appears.
+run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh')" BASH_MAX_TIMEOUT_MS=600000
+expect_eq "14m: a main-thread suite call carries no updatedInput — the repair never reaches it" \
+  "no" "$(has_updated_input)"
+
+# (f) SUBAGENT, NON-SUITE CONTROL — `cmd_class` never answers "suite", so the whole
+# function returns before ARM 1 or the repair arm, exactly as section 1's `ls -la` row.
+run_hook "$(mk_payload "$R_REPAIR" 'ls -la' "$ACTOR" omit Bash test-runner)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_status "14n: a subagent's non-suite command is untouched" 0 "$ST"
+expect_eq "14o: …no updatedInput — cmd_class never reaches 'suite'" "no" "$(has_updated_input)"
+expect_empty "14p: …and nothing on either stream" "$OUT$ERR"
+
+# (g) THE CEILING ITSELF MOVES — bionic setup's 30-minute ceiling, not the 600000 stock
+# default, is what a repair on an armed machine raises to.
+run_hook "$(mk_payload "$R_REPAIR" 'bash tests/x.test.sh' "$ACTOR" omit Bash test-runner)" \
+  BASH_MAX_TIMEOUT_MS=1800000
+expect_eq "14q: a wider harness ceiling (bionic setup's 30 minutes) is the value repaired to" \
+  "1800000" "$(updated_timeout_of)"
+
+# (h) NON-NUMERIC — a `timeout` that is not a plain integer repairs exactly like an absent
+# one (D4: "absent, non-numeric, or < MAX" all repair the same way), and the log line's own
+# two-shape contract (`from=<absent|n>`) has no third case for a name it cannot show, so it
+# reads "absent" rather than the unusable text.
+NONNUM_PAYLOAD=$(jq -n --arg s "$SID" --arg c "$R_REPAIR" --arg a "$ACTOR" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"bash tests/x.test.sh", timeout:"soon"},
+    tool_use_id:"toolu_01t23nonnum", agent_id:$a, agent_type:"test-runner"}')
+run_hook "$NONNUM_PAYLOAD" BASH_MAX_TIMEOUT_MS=600000
+expect_eq "14r: a non-numeric timeout repairs the same as an absent one" "600000" \
+  "$(updated_timeout_of)"
+expect_contains "14s: …logged as 'absent', the contract's own shape for it" \
+  "repaired from=absent to=600000 agent=$ACTOR" "$ERR"
 
 finish
