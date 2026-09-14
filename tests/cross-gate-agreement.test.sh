@@ -822,14 +822,13 @@ run_battery() {
     d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
     cnorm="${c%%:*}"; cval=""
     [ "$cnorm" = "yes" ] && cval="${c#*:}"
-    # T4 (session-20260815-landing-cleanup): verdict_sg always drives stop-guard
-    # with the fixed target "no-such-agent" — non-address-shaped. With a wave
-    # active, MATCH_COUNT=0 + the shape carve now PASSES THROUGH instead of
-    # refusing, a ratified divergence (design ¶T4), not a defect. Only
-    # stop-guard's expectation moves here; the other four parties' semantics
-    # are unchanged by T4, so their comparisons still read "$want" directly.
+    # T4 (session-20260815-landing-cleanup) DIVERGED stop-guard from the other four
+    # parties here; D8 (T5, epic-23 wave-13) RE-CONVERGED it. verdict_sg always drives
+    # stop-guard with the fixed target "no-such-agent" — non-address-shaped and
+    # non-bash-task-shaped — and since D8 a target wearing neither shape is REFUSED
+    # rather than waved through, so stop-guard's verdict agrees with the other four
+    # parties on every fixture again, exactly as it did before T4 opened the divergence.
     want_sg="$want"
-    [ "$want" = "yes" ] && want_sg="other:pass-with-output"
     # WHAT THE PARTIES AGREE ABOUT CHANGED AT task-engaged-session, and the change is the
     # point of that wave. Four of the five no longer read the plan at all: they are scoped
     # by ENGAGEMENT, and every fixture in this battery is engaged (see `arm_patrol`), so
@@ -839,7 +838,7 @@ run_battery() {
     # exactly what a future edit could silently undo. The evidence gate is the one party
     # that still derives the plan's `current:`, so it keeps the discriminating column and
     # the derived-value check below.
-    want_dp="yes"; want_er="yes"; want_lg="yes"; want_sg="other:pass-with-output"
+    want_dp="yes"; want_er="yes"; want_lg="yes"; want_sg="yes"
     if [ "$mode" = "assert" ]; then
       if [ "$a" = "$want_dp" ] && [ "$b" = "$want_sg" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want_er" ] && [ "$e" = "$want_lg" ]; then
         ok "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want"
@@ -1044,11 +1043,10 @@ section "A3 — the one KNOWN divergence, pinned so it cannot drift silently"
 TREPO=$(new_repo "known-divergence")
 write_plan "$TREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: T4"
 expect_eq "T-token, wave scale: the start gate reads an active wave"  "yes" "$(verdict_dp "$TREPO")"
-# T4 (session-20260815-landing-cleanup): the stop gate still READS this as an
-# active wave (it reaches the MATCH_COUNT/shape-carve code at all), but
-# verdict_sg's fixed target "no-such-agent" is non-address-shaped, so the
-# ratified shape carve now passes it through instead of refusing.
-expect_eq "T-token, wave scale: the stop gate reads an active wave"   "other:pass-with-output" "$(verdict_sg "$TREPO")"
+# T4 (session-20260815-landing-cleanup) used to diverge here (verdict_sg's fixed target
+# "no-such-agent" passed through, non-address-shaped); D8 (T5) re-converged it — the same
+# target is non-bash-task-shaped too, so it is refused like the other four parties now.
+expect_eq "T-token, wave scale: the stop gate reads an active wave"   "yes" "$(verdict_sg "$TREPO")"
 
 # ============================================================
 section "B — the session-identity key: producer and BOTH consumers agree"
@@ -1872,9 +1870,12 @@ g_stop_reason() {  # -> which refusal the gate reaches for an unobserved target
   case "$out" in
     *"carries no agent id"*) echo unidentified ;;
     *"No observation"*)      echo identified ;;
-    # T22: with the roster gone the gate has no standing over a bare name at all — the
-    # register is what makes a target ours, so a renamed roster is not a target it refuses,
-    # it is a target it does not guard. Same direction, one step earlier.
+    # T22, then D8 (T5): with the roster gone the gate has no standing over a bare name at
+    # all — the register is what makes a target ours. Through 1.7.1 that was a passthrough
+    # (a target it does not guard); since D8 it is a REFUSAL naming the same fact (a target
+    # this gate cannot identify), one step earlier than the passthrough used to sit. Either
+    # wire lands on the same label here — what moved is the verb, not the diagnosis.
+    *"no roster row of this session"*) echo unrostered ;;
     *PASSTHROUGH*)           echo unrostered ;;
     *)                       echo "other" ;;
   esac
@@ -6777,10 +6778,12 @@ LA_GG=$(la_guard la-ghost)
 expect_contains "a name the roster does not carry resolves no id for the observation" \
   "no agent id" "$LA_CG"
 expect_absent "…and carries no agent id with it" "$LA_TID" "$LA_CG"
-expect_contains "…and the stop guard passes it through, having no standing over it" \
+# D8 (T5): a bare name with no roster row and no agent-address or bash-task-id shape used to
+# pass through (T22); it is refused now, naming the same fact one step earlier.
+expect_absent "…and the stop guard refuses it, having no standing over it (D8, T5)" \
   "PASSTHROUGH" "$LA_GG"
 expect_contains "…saying so in the register's own words" \
-  "appears on no roster row of this session" "$LA_GG"
+  "no roster row of this session" "$LA_GG"
 
 # --- LA.3 THE DISCRIMINATOR: mutate the parser's awk, all three answers move ----
 #
