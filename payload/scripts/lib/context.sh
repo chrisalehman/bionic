@@ -149,7 +149,113 @@ fi
 # answer a cheap relevance question ABOVE the loader block, where `$BIONIC_LIB`
 # does not yet have a value and no library function exists to call. Every read
 # BELOW the loader goes through this one.
+#
+# ONE FORK FOR THE WHOLE ROSTER (REQ-10, T11). The line above is still the
+# answer for any expression this file does not know; what changed is that the
+# dozen expressions the hooks actually ask for are read by ONE `jq` and served
+# from shell variables afterwards. T10 measured the cost being cut: library
+# parsing is ~12–14% of a hook's runtime and external forks are the rest, at
+# 5–8 ms each — `hooks/bash-walls.sh` asked `jq` seven times about one payload
+# it had already read into memory, and `hooks/stop.sh` asked eight.
+#
+# THE FILL IS EAGER AND IT HAPPENS IN `bionic_context`, NEVER HERE. Almost every
+# call site spells `X=$(bionic_jq .field)`, and a cache filled inside that
+# command substitution dies with the subshell — the next field would refill it,
+# and the hook would pay MORE forks than before, not fewer. `bionic_context`
+# runs in the hook's own shell (`bionic_context 2>/dev/null || exit 0`), so the
+# fill it performs is visible to every later subshell. A hook that never calls
+# `bionic_context` never fills, and every read it makes forks exactly as it did
+# before this change.
+#
+# THE FALLBACK IS THE WHOLE SAFETY ARGUMENT. `_bionic_jq_fill` writes one line
+# per roster entry and then a sentinel; if the sentinel is not where it is
+# expected — an embedded newline in a value, a payload jq cannot parse, an
+# expression that errors on this shape of input — the cache is marked `bad` and
+# every read falls through to the per-call fork above. The cache can therefore
+# only ever be a speed-up: it is consulted when it is known-good and ignored
+# otherwise, and no value is ever synthesised.
+#
+# THE ROSTER DELIBERATELY OMITS `.tool_input.command`. It is the one payload
+# field that routinely carries newlines (a heredoc, a multi-line pipeline), and
+# a line-oriented record cannot hold it without an escaping scheme this file
+# would then have to reverse. The two hooks that need it read it once, above the
+# loader, for `loader_fail_closed`'s allowlist (R1) — so it is already read
+# exactly once without any help from here.
+_BIONIC_JQ_STATE=""
+_BIONIC_JQ_END="__bionic_jq_end__"
+
+# Each entry below is a jq expression the roster serves, paired with the shell
+# variable that holds it. The `s()` wrapper reproduces `<expr> // empty`
+# exactly: null and false become the empty string, everything else is its own
+# string. The three entries that do NOT go through `s()` are spelled out as
+# their call sites spell them — `|tostring` renders an absent
+# `run_in_background` as the literal `null`, which is what the uncached read
+# has always returned, and the two `background_tasks` reads are the payload
+# questions `payload/scripts/lib/stop.sh` used to ask with its own private `jq`.
+_bionic_jq_fill() {
+  local _out _rest _line
+  _BIONIC_JQ_STATE=bad
+  [ -n "${BIONIC_INPUT:-}" ] || return 1
+  _out=$(printf '%s' "$BIONIC_INPUT" | jq -r '
+    def s(f): (try f catch null) as $v
+      | if ($v == null or $v == false) then "" else ($v | tostring) end;
+    s(.cwd),
+    s(.session_id),
+    s(.hook_event_name),
+    s(.tool_name),
+    s(.agent_type),
+    s(.agent_id),
+    s(.transcript_path),
+    s(.stop_hook_active),
+    ((try (.tool_input.run_in_background) catch null) | tostring),
+    (if (try (has("background_tasks")) catch false) then "yes" else "" end),
+    ((try ([.background_tasks[]?.id // empty] | join("|")) catch "") | tostring),
+    "'"$_BIONIC_JQ_END"'"
+  ' 2>/dev/null) || return 1
+
+  # SPLIT BY PARAMETER EXPANSION, not by `read`: a here-string opens a temp file
+  # per read and a pipeline would put the assignments in a subshell. Twelve
+  # builtin expansions cost nothing measurable and stay in this shell.
+  _rest="$_out"
+  _BIONIC_JQ_CWD="${_rest%%$'\n'*}"       ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_SID="${_rest%%$'\n'*}"       ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_EVENT="${_rest%%$'\n'*}"     ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_TOOL="${_rest%%$'\n'*}"      ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_AGENTTYPE="${_rest%%$'\n'*}" ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_AGENTID="${_rest%%$'\n'*}"   ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_TRANSCR="${_rest%%$'\n'*}"   ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_STOPACT="${_rest%%$'\n'*}"   ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_BG="${_rest%%$'\n'*}"        ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_HASBT="${_rest%%$'\n'*}"     ; _rest="${_rest#*$'\n'}"
+  _BIONIC_JQ_BTIDS="${_rest%%$'\n'*}"     ; _rest="${_rest#*$'\n'}"
+  _line="${_rest%%$'\n'*}"
+
+  # THE SENTINEL IS THE CHECK. Eleven values plus this line is the whole record;
+  # anything else means a value carried a newline (or jq wrote nothing at all),
+  # and a cache that cannot prove its own alignment must not be read.
+  [ "$_line" = "$_BIONIC_JQ_END" ] || return 1
+  _BIONIC_JQ_STATE=ok
+}
+
 bionic_jq() {
+  if [ "${_BIONIC_JQ_STATE:-}" = ok ]; then
+    case "$1" in
+      .cwd)             printf '%s' "$_BIONIC_JQ_CWD" ; return 0 ;;
+      .session_id)      printf '%s' "$_BIONIC_JQ_SID" ; return 0 ;;
+      .hook_event_name) printf '%s' "$_BIONIC_JQ_EVENT" ; return 0 ;;
+      .tool_name)       printf '%s' "$_BIONIC_JQ_TOOL" ; return 0 ;;
+      .agent_type)      printf '%s' "$_BIONIC_JQ_AGENTTYPE" ; return 0 ;;
+      .agent_id)        printf '%s' "$_BIONIC_JQ_AGENTID" ; return 0 ;;
+      .transcript_path) printf '%s' "$_BIONIC_JQ_TRANSCR" ; return 0 ;;
+      .stop_hook_active) printf '%s' "$_BIONIC_JQ_STOPACT" ; return 0 ;;
+      '.tool_input.run_in_background|tostring')
+                        printf '%s' "$_BIONIC_JQ_BG" ; return 0 ;;
+      'if has("background_tasks") then "yes" else empty end')
+                        printf '%s' "$_BIONIC_JQ_HASBT" ; return 0 ;;
+      '[.background_tasks[]?.id // empty] | join("|")')
+                        printf '%s' "$_BIONIC_JQ_BTIDS" ; return 0 ;;
+    esac
+  fi
   printf '%s' "${BIONIC_INPUT:-}" | jq -r "$1 // empty" 2>/dev/null
 }
 
@@ -165,7 +271,7 @@ bionic_jq() {
 # BIONIC_CWD is assigned before the root can fail, and BIONIC_SID is blanked
 # before the guard returns.
 bionic_context() {
-  local _pcwd _sid _verdict _root=""
+  local _pcwd _sid _verdict _cands _last _root=""
 
   # 1. THE PAYLOAD, ONCE.
   if [ -z "${BIONIC_INPUT+x}" ]; then
@@ -178,12 +284,30 @@ bionic_context() {
     fi
   fi
 
+  # 1b. THE PAYLOAD'S FIELDS, ONCE (REQ-10, T11). One `jq` for the whole roster,
+  # here in the caller's own shell so every later `$(bionic_jq …)` reads a
+  # variable instead of forking. A failure is not an error: `_bionic_jq_fill`
+  # marks the cache unusable and `bionic_jq` forks per read exactly as it did
+  # before, so nothing below this line depends on it succeeding.
+  _bionic_jq_fill || :
+
   # 2. THE ONE LADDER. Rung 1 asks for a PROJECT (see the docblock); the walk it
   # makes is the same walk rung 3 would make, so it is kept rather than repeated.
   BIONIC_CWD=""
   if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "${CLAUDE_PROJECT_DIR:-}" ]; then
-    _root="$(project_root_candidates "$CLAUDE_PROJECT_DIR" 2>/dev/null \
-             | awk -F'\t' 'END { if ($2 == "chosen") print $1 }')"
+    # THE TERMINAL LINE, READ BY EXPANSION RATHER THAN BY `awk` (REQ-10, T11).
+    # `project_root_candidates` emits exactly two tab-separated fields per line
+    # (lib/root.sh's `_bionic_root_report`), and the rung takes the LAST line and
+    # accepts it only when its tag is `chosen` — which is what the `awk -F'\t'
+    # END` block said and what the three expansions below say. A line carrying no
+    # tab is not a report line and is refused, as `$2 == "chosen"` refused it.
+    # Rung 1 is the rung the CLI actually takes, so this fork was paid on every
+    # hook event of every session.
+    _cands="$(project_root_candidates "$CLAUDE_PROJECT_DIR" 2>/dev/null)"
+    _last="${_cands##*$'\n'}"
+    case "$_last" in
+      *$'\t'*) [ "${_last#*$'\t'}" = "chosen" ] && _root="${_last%%$'\t'*}" ;;
+    esac
     [ -n "$_root" ] && BIONIC_CWD="$CLAUDE_PROJECT_DIR"
   fi
   if [ -z "$BIONIC_CWD" ]; then

@@ -97,6 +97,33 @@ if ! declare -F audit_path >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/root.sh"
 fi
 
+# ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
+#
+# THREE VERDICTS ASKED THE SAME QUESTION THREE TIMES (REQ-10, T11): `stop_landing_gate`
+# for its sibling sweeper, `stop_patrol_duties` and `stop_patrol_revive` for the poker
+# they name in a message. Each spelled it `"$(cd "$(dirname "$0")" && pwd)"` — a
+# `dirname` fork, a subshell and a `cd` per ask, five forks across one Stop for a value
+# that cannot change inside one process, because `$0` is the hook however deep the call
+# is.
+#
+# TWO ANSWERS, NOT ONE, because the three call sites did not agree on the fallback and
+# collapsing them would be a silent behaviour change. `_STOP_HOOK_DIR_ABS` is the
+# `cd … && pwd` answer and stays EMPTY when the directory cannot be entered — which is
+# exactly what `SWEEPER` interpolated. `_STOP_HOOK_DIR_RAW` is `dirname`'s own answer,
+# which the two `HOOK_DIR` sites fall back to when the first is empty.
+#
+# NO `dirname` FORK AT ALL. `${0%/*}` is dirname's answer for every path carrying a
+# slash, `.` for one that does not, and `/` for a path whose only slash is the leading
+# one; a hook is always invoked by path, so this is the same string the fork returned.
+_stop_hook_dirname() {  # -> _STOP_HOOK_DIR_RAW, dirname "$0" without the fork
+  case "$0" in
+    */*) _STOP_HOOK_DIR_RAW="${0%/*}"; [ -n "$_STOP_HOOK_DIR_RAW" ] || _STOP_HOOK_DIR_RAW="/" ;;
+    *)   _STOP_HOOK_DIR_RAW="." ;;
+  esac
+}
+_stop_hook_dirname
+_STOP_HOOK_DIR_ABS="$(cd "$_STOP_HOOK_DIR_RAW" 2>/dev/null && pwd)"
+
 # ─── FILE SCOPE: hooks/landing-gate.sh's constants and helpers ───────────────
 #
 # AT COLUMN ZERO, DELIBERATELY. `SWEPT_SCHEMA` and `swept_marker_write` are read
@@ -241,7 +268,7 @@ _lg_path_declared() {  # <diff path> <comma-joined declared files>
 
 stop_context_spend() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
-  local TRANSCRIPT PLAN STEP _row MODEL OCCUPIED STATE_DIR STATE
+  local TRANSCRIPT PLAN STEP _row MODEL OCCUPIED STATE_DIR STATE _plan_txt
   local s_plan s_sess s_step s_occ DELTA LINE AUDIT_FILE
 
   # THE EVENT GUARD THE HOOK NEVER HAD — see this file's header. Stop only, and an
@@ -303,22 +330,37 @@ esac
 # current: from ## SDLC State — CR-normalized, fence-aware (the evidence-gate
 # defect class: fenced skeletons quoting `current:` must stay invisible).
 # [INSTRUMENT]
-STEP=$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$PLAN" | awk '
+#
+# THE CR PASS IS THE SHELL'S NOW (REQ-10, T11). It was a whole `awk` process whose only
+# job was to turn CRLF into LF and a lone CR into LF before the parse below could see
+# lines at all; two parameter expansions over the file text do exactly that, in the same
+# order, and the parsing `awk` is unchanged. `$(< … )` reads the file without forking
+# `cat`, and the here-string hands the normalised text to the one remaining process.
+_plan_txt=$(< "$PLAN")
+_plan_txt="${_plan_txt//$'\r\n'/$'\n'}"
+_plan_txt="${_plan_txt//$'\r'/$'\n'}"
+STEP=$(awk '
   /^```/ { fence = !fence; next }
   fence { next }
   /^## SDLC State/ { insec = 1; next }
   insec && /^## / { insec = 0 }
   insec && /^current:[[:space:]]*/ { sub(/^current:[[:space:]]*/, ""); sub(/[[:space:]]*$/, ""); print; exit }
-')
+' <<< "$_plan_txt")
 [ -n "$STEP" ] || return "$_adv"
 
 # Last assistant entry with usage, from a bounded tail. fromjson? swallows
 # malformed lines. Emits "model<TAB>occupied" for the last qualifying entry.
+#
+# THE TRAILING `| tail -1` IS AN EXPANSION NOW (REQ-10, T11). jq emits one line per
+# qualifying entry and the last one is wanted; `${_row##*$'\n'}` is that line, and it
+# is the whole string when jq emitted exactly one. The command substitution has already
+# stripped the trailing newline, so there is no empty last line to guard against.
 _row=$(tail -n 400 "$TRANSCRIPT" 2>/dev/null | jq -Rr '
   fromjson? | select(.type == "assistant") | .message | select(.usage != null) |
   [(.model // "unknown"),
    ((.usage.input_tokens // 0) + (.usage.cache_creation_input_tokens // 0) + (.usage.cache_read_input_tokens // 0))] | @tsv
-' 2>/dev/null | tail -1) || _row=""
+' 2>/dev/null) || _row=""
+_row="${_row##*$'\n'}"
 [ -n "$_row" ] || return "$_adv"
 MODEL=${_row%	*}
 OCCUPIED=${_row##*	}
@@ -569,9 +611,20 @@ if [ "$MODE" = "sweep" ]; then
   # set: an empty array means every dispatch has finished (the payload says so on every turn
   # where nothing is running), while a missing key means this is not a payload that can tell
   # us, and judging on it would hold running agents to contracts they are still working on.
-  [ "$(printf '%s' "$BIONIC_INPUT" | jq -r 'if has("background_tasks") then "yes" else empty end' 2>/dev/null)" = "yes" ] || return "$_adv"
-  LIVE_IDS="|$(printf '%s' "$BIONIC_INPUT" \
-    | jq -r '[.background_tasks[]?.id // empty] | join("|")' 2>/dev/null | tr -d '\n')|"
+  #
+  # THROUGH `bionic_jq`, NOT A PRIVATE `jq` (REQ-10, T11). Both expressions are
+  # unchanged, character for character — they are now on lib/context.sh's roster,
+  # so the one payload read that hook already made answers them and these two
+  # lines fork nothing. Off the roster (a hook that never called
+  # `bionic_context`) `bionic_jq` runs the same `jq -r '<expr> // empty'` these
+  # lines ran, which is the same answer: appending `// empty` to either
+  # expression cannot change a value it already produced.
+  [ "$(bionic_jq 'if has("background_tasks") then "yes" else empty end')" = "yes" ] || return "$_adv"
+  # `tr -d '\n'` IS GONE, replaced by the expansion below. It existed to flatten an
+  # id that carried a newline; the `//$'\n'/` expansion does that in the shell, and
+  # the command substitution around the read strips the trailing newline as before.
+  LIVE_IDS=$(bionic_jq '[.background_tasks[]?.id // empty] | join("|")')
+  LIVE_IDS="|${LIVE_IDS//$'\n'/}|"
 else
   # THE LANDING ARM READS NO LIVE SET, and that is the point of it rather than an omission.
   # This payload carries `background_tasks[]` too, and the stopping teammate is STILL IN IT —
@@ -640,7 +693,7 @@ ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 # hooks/ that hooks/hooks.json roots at ${CLAUDE_PLUGIN_ROOT}. No PATH
 # lookup (a hook's PATH is not ours to trust) and no environment override (a seam on the
 # path under test would leave the production path unverified).
-SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
+SWEEPER="${_STOP_HOOK_DIR_ABS}/session-sweeper.sh"
 [ -f "$SWEEPER" ] || return "$_adv"
 
 # ONE PASS OVER THE ROSTER, and it is the only cost this script pays on a turn where nothing
@@ -1174,8 +1227,8 @@ TRANSCRIPT=$(bionic_jq .transcript_path)
 # THIS SCRIPT'S OWN DIRECTORY, so the poker the ritual message names is the same
 # file a model would actually run — resolved the way hooks/patrol-revive.sh
 # resolves its sibling, never through PATH and never a placeholder.
-HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+HOOK_DIR="$_STOP_HOOK_DIR_ABS"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$_STOP_HOOK_DIR_RAW"
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
 #
 # task-engaged-session: bionic's walls are the RUN's, not the repo's, and a run is entered
@@ -1229,7 +1282,10 @@ case "$BIONIC_RUN_WORD" in
     ;;
 esac
 PLAN_NAME=""
-[ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="$(basename "$PLAN")"
+# `${PLAN##*/}` IS `basename`'s ANSWER WITHOUT THE FORK (REQ-10, T11). `$PLAN` here is a
+# plan path `session_run` produced from a `find -type f`, so it names a regular file and
+# carries no trailing slash — the one case the two spellings disagree about.
+[ -n "$PLAN" ] && [ -f "$PLAN" ] && PLAN_NAME="${PLAN##*/}"
 
 # ---------- the plan's BASENAME ----------
 #
@@ -1709,8 +1765,8 @@ stop_patrol_revive() {  # <event> -> 0 nothing · 1 advisory · 2 block
 # its sibling, never through PATH (a hook's PATH is not ours to trust) and never
 # through an env seam (a seam on the path under test leaves the production path
 # unverified).
-HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-[ -n "$HOOK_DIR" ] || HOOK_DIR="$(dirname "$0")"
+HOOK_DIR="$_STOP_HOOK_DIR_ABS"
+[ -n "$HOOK_DIR" ] || HOOK_DIR="$_STOP_HOOK_DIR_RAW"
 [ -d "$BIONIC_ROOT" ] || return "$_adv"
 
 # ---------- THE ENGAGEMENT SWITCH — asked before anything else ----------
