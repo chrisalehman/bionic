@@ -4047,6 +4047,79 @@ Expected artifact: .bionic/docs/record/w27h.md
 $S27_FIX" "w27-followed")"
 expect_status "27h a brief following that Fix: line verbatim PASSES" "0" "$GATE_ST"
 
+# --- S27i: A WIDE DECLARED BUDGET SURVIVES WHOLE ON THE ROW (T18, REQ-9/D7 write side) ---
+#
+# T9 exempted `suites_allowed=`/`files=` from `clean()`'s 400-char cut on the READER side
+# (`hooks/session-poker.sh`'s `adopt_write_row`). This is the same defect's WRITE side: the
+# two `sanitize()` calls that build `C_FILES`/`C_SUITES` from a brief's own `Files:`/
+# `Suites:` line still capped at 900 (the widest cap this file had, per the comment they
+# used to carry — "truncating a list silently narrows a budget"). `SUITES_MAX`/`FILES_MAX`
+# (60, `lift_contract_fields`'s own token-count bound, a SEPARATE and deliberate limit — see
+# A-T18.2) cap the item COUNT the extraction stage lifts at all, so this fixture stays at
+# exactly that many items and makes each one long enough that 60 of them still overflow the
+# 900-char cap this task removes — a real budget this wide is not a hypothetical (A-orch-16).
+S27I_SUITES=""; S27I_EXPECT=""
+for _s27i in $(seq -w 1 60); do
+  _s27i_name="very-long-suite-basename-for-the-budget-cut-test-number-${_s27i}.test.sh"
+  S27I_SUITES="${S27I_SUITES}tests/${_s27i_name}, "
+  S27I_EXPECT="${S27I_EXPECT:+$S27I_EXPECT }${_s27i_name}"
+done
+S27I_SUITES="${S27I_SUITES%, }"
+expect_status "27i fixture non-vacuity: the declared line really overflows 900 chars" \
+  "0" "$([ "${#S27I_SUITES}" -gt 900 ] && echo 0 || echo 1)"
+REPO=$(make_repo r27i yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27i.md
+Suites: ${S27I_SUITES}" "w27-wide-declared")"
+expect_status "27i a brief declaring a 60-suite, >900-char budget PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27I_ROW_SUITES=$(roster_field "$ROW" suites_allowed)
+expect_eq "27i …and the row's suites_allowed= carries the WHOLE set, byte for byte" \
+  "$S27I_EXPECT" "$S27I_ROW_SUITES"
+expect_status "27i …the LAST one specifically — the one 900 chars would have cut" \
+  "0" "$(printf '%s\n' "$S27I_ROW_SUITES" | tr ' ' '\n' | grep -qxF 'very-long-suite-basename-for-the-budget-cut-test-number-60.test.sh' && echo 0 || echo 1)"
+expect_status "27i …every one of the 60, none dropped" \
+  "60" "$(printf '%s\n' "$S27I_ROW_SUITES" | tr ' ' '\n' | grep -c 'very-long-suite-basename')"
+
+# --- S27j: A WIDE DECLARED Files: LIST SURVIVES WHOLE TOO (same fix, `files=`) ---
+S27J_FILES=""; S27J_EXPECT=""
+for _s27j in $(seq -w 1 60); do
+  _s27j_path="payload/scripts/lib/a-fairly-long-widget-module-name-number-${_s27j}.sh"
+  S27J_FILES="${S27J_FILES}${_s27j_path}, "
+  S27J_EXPECT="${S27J_EXPECT:+$S27J_EXPECT,}${_s27j_path}"
+done
+S27J_FILES="${S27J_FILES%, }"
+expect_status "27j fixture non-vacuity: the declared line really overflows 900 chars" \
+  "0" "$([ "${#S27J_FILES}" -gt 900 ] && echo 0 || echo 1)"
+REPO=$(make_repo r27j yes)
+write_attestation "$REPO" "$SID_A"
+s27_impact "$REPO" alpha.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27j.md
+Files: ${S27J_FILES}" "w27-wide-files")"
+expect_status "27j a brief declaring 60 long files PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27J_ROW_FILES=$(roster_field "$ROW" files)
+expect_eq "27j …and files= carries the WHOLE declared list, byte for byte (no cut at all)" \
+  "$S27J_EXPECT" "$S27J_ROW_FILES"
+
+# --- S27k: CONTROL — an ORDINARY field still cuts, unaffected by the fix above ---
+#
+# `deliverable=` keeps its own pre-existing 300-char cap: the fix is scoped to the two
+# LIST-valued fields, exactly as `clean()`'s exemption was on the reader side.
+S27K_LONG=$(printf 'x%.0s' $(seq 1 500))
+REPO=$(make_repo r27k yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27k-${S27K_LONG}.md
+Suites: tests/one.test.sh" "w27-control-cut")"
+expect_status "27k a 500-char deliverable still PASSES" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+S27K_ROW_DELIV=$(roster_field "$ROW" deliverable)
+expect_eq "27k …but its deliverable= is cut at exactly its own 300-char cap" \
+  "300" "${#S27K_ROW_DELIV}"
+
 # ============================================================================
 section "S28: one regression per run (AC-24)"
 # ============================================================================
