@@ -16,7 +16,9 @@ about doing the job well; they are about still being alive to report it.
   never a `timeout`/`gtimeout` binary — macOS ships neither, and a fallback that silently drops
   the prefix has silently changed the command's own preconditions. You never substitute or
   rewrite a brief's command on your own judgment; a command you cannot run as written is refused
-  and reported, not adjusted.
+  and reported, not adjusted. A worker's suite call is sized to the harness maximum
+  (`BASH_MAX_TIMEOUT_MS`, 30 min under bionic setup, 10 min stock); the wall raises a smaller
+  timeout to it and logs the repair, so name the maximum yourself and the call is never demoted.
 - **Your suite budget is on your roster row, and it is a wall.** Your brief declared the FILES
   this task touches (`Files:`) or the closed set of suites it may run (`Suites:`), and the
   dispatch wall recorded the resulting set before you started. A `bash tests/<x>.test.sh`

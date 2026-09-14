@@ -627,6 +627,111 @@ u_tick_out "$d" "poker: FILL ALPHA"
 fire "$d"; expect_allow "47: a turn the user started is not asked about a FILL"
 
 
+section "Section 5b: the fourth duty — a printed STANDDOWN is answered (AC-1.2; T1, D1)"
+#
+# THE CONTRACT. `session-poker.sh tick` prints `poker: STANDDOWN <name>` for every row whose
+# contract is MET and whose agent the harness still lists, and writes the stop order that
+# makes the TaskStop pass the stop gate. It cannot stop anything — the tick holds no
+# authority (ADR-003) — so the instruction it prints is a tell like the FILL, and the same
+# thing is true of both: a recommendation nobody is obliged to answer is how eighteen
+# finished agents came to sit idle on one panel. The turn's END is the only moment at which
+# "the stand-down went unanswered" is a fact.
+#
+# ANSWERED = a `TaskStop` tool_use naming the agent (by its name or by the address the
+# roster carries for it), or an explicit `standdown-declined: <name> <reason>` line. The
+# decline is the point, not a loophole: an agent still writing its record is a good reason
+# not to stop it, and it is worth one line in the record.
+#
+# THE STANDDOWN LINE reaches the transcript exactly as the FILL does — as the CONTENT of the
+# tick's Bash tool result — and these fixtures carry it that way. One line per name, because
+# the tick prints one line per name.
+
+# The stop itself, shaped as the harness sends it: the id may be the agent's name or the
+# `name@session-xxxxxxxx` address the launch response handed back.
+a_taskstop() {  # <dir> <task-id>
+  jq -nc --arg t "$2" \
+    '{type:"assistant",isSidechain:false,
+      message:{role:"assistant",content:[{type:"tool_use",id:"toolu_7",name:"TaskStop",
+        input:{task_id:$t}}]}}' \
+    >> "$1/transcript.jsonl"
+}
+
+sd_line() {  # <name> -> the tick's own line, verbatim in shape
+  printf 'poker: STANDDOWN %s — contract MET and the agent is still on the panel; TaskStop it (the order is written)' "$1"
+}
+
+SD_MISSING="stand-down unanswered"
+
+# 48: neither stopped nor declined -> block, naming the agent and the way out.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+fire "$d"; expect_block "48a: an unanswered STANDDOWN blocks, naming the agent" "W-ALPHA"
+fire "$d"; expect_block "48b: …and says what would answer it" "standdown-declined"
+fire "$d"; expect_block "48c: …and says the gate blocks once" "this gate blocks once"
+
+# 49: the TaskStop answers it.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+a_taskstop "$d" "W-ALPHA"
+fire "$d"; expect_allow "49: a TaskStop of the named agent answers the stand-down"
+
+# 49b: the ADDRESS is what an operator actually types, and it carries the name.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+a_taskstop "$d" "W-ALPHA@session-11111111"
+fire "$d"; expect_allow "49b: a TaskStop by the roster address answers it too"
+
+# 50: the DECLINE answers it — a reason in the record is the point.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+a_text "$d" "standdown-declined: W-ALPHA is still writing its record, one more cadence."
+fire "$d"; expect_allow "50: an explicit standdown-declined line answers the stand-down"
+
+# 51: NAMED, NOT COUNTED. Two stood down, one stopped -> the refusal names the other one
+# and not the one that was answered.
+d=$(make_env); u_tick "$d"; both_duties "$d"
+u_tick_out "$d" "$(sd_line W-ALPHA)"; u_tick_out "$d" "$(sd_line W-BETA)"
+a_taskstop "$d" "W-ALPHA"
+fire "$d"; expect_block "51: a half-answered stand-down names the agent left running" "W-BETA" "W-ALPHA"
+
+# 52: a decline for ANOTHER name does not answer this one. The decline is per agent, because
+# the instruction is: `standdown-declined: <name> <reason>`.
+d=$(make_env); u_tick "$d"; both_duties "$d"
+u_tick_out "$d" "$(sd_line W-ALPHA)"; u_tick_out "$d" "$(sd_line W-BETA)"
+a_taskstop "$d" "W-ALPHA"
+a_text "$d" "standdown-declined: W-GAMMA is not even on this roster."
+fire "$d"; expect_block "52: a decline naming a third agent leaves this one unanswered" "W-BETA"
+
+# 53: INERT with no STANDDOWN line — every turn in every session whose tick prints none.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET — 0 open row(s)"
+fire "$d"; expect_allow "53: a tick that printed no STANDDOWN is not asked about one"
+
+# 54: ORDERING. A stand-down printed in an EARLIER turn is not this turn's to answer.
+d=$(make_env); u_tick "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"; u_tick "$d"; both_duties "$d"
+fire "$d"; expect_allow "54: a stand-down from a previous turn does not bind this one"
+
+# 55: a non-tick turn is never asked, whatever its transcript contains.
+d=$(make_env); u_prompt "$d" "run the suite and tell me what broke"
+u_tick_out "$d" "$(sd_line W-ALPHA)"
+fire "$d"; expect_allow "55: a turn the user started is not asked about a stand-down"
+
+# 56: BLOCKS ONCE, through the same stop_hook_active valve the other three duties use.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+fire "$d" Stop true
+expect_allow "56: stop_hook_active true passes the same unanswered stand-down"
+
+# 57: an agent-context TaskStop is not the orchestrator's — the same exclusion every other
+# arm of this gate makes.
+d=$(make_env); u_tick "$d"; both_duties "$d"; u_tick_out "$d" "$(sd_line W-ALPHA)"
+jq -nc '{type:"assistant",isSidechain:true,
+         message:{role:"assistant",content:[{type:"tool_use",id:"toolu_7",name:"TaskStop",
+           input:{task_id:"W-ALPHA"}}]}}' >> "$d/transcript.jsonl"
+fire "$d"; expect_block "57: a sidechain TaskStop does not answer the orchestrator's stand-down" "W-ALPHA"
+
+# 58: BOTH UNANSWERED DUTIES ARE TOLD AT ONCE. Blocking on the FILL and staying silent about
+# the stand-down would hide the second behind the one-shot: the next stop passes by design.
+d=$(make_env); u_tick "$d"; both_duties "$d"
+u_tick_out "$d" "poker: FILL ALPHA"; u_tick_out "$d" "$(sd_line W-BETA)"
+fire "$d"; expect_block "58a: an unanswered FILL and stand-down together name the task" "ALPHA"
+fire "$d"; expect_block "58b: …and the agent, in the same refusal" "W-BETA"
+
+# ============================================================
 section "Section 6: marker scope — a file the agent merely READ is not a decline (review F2)"
 #
 # THE DEFECT. `fill-declined:` and the two clear/resume markers were read as a raw-text

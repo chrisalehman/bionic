@@ -167,12 +167,34 @@ ${1:-}"
   fi
 }
 
+# fold_update_input <json-object> — stage a MEANING-PRESERVING rewrite of `tool_input`:
+# text that must ride `hookSpecificOutput.updatedInput` on stdout (epic-23 wave-13-fixit-180
+# T3, spec D4). The argument is already-built JSON (an object), never text to be escaped —
+# the one caller (`wall_background_suite_guard`'s repair arm) builds it with `jq` because
+# the shape is `tool_input` plus one changed field, not a string this file has any business
+# constructing.
+#
+# WHY A SEPARATE VERB FROM `fold_context`. The two channels are not the same claim: a nudge
+# is a sentence for the model to read and act on NEXT turn; a repair is a change to THIS
+# call, already decided, that the harness applies before the tool runs. Merging them into
+# one staged string would make `_fold_emit_context` guess which one it was holding.
+#
+# LAST WRITE WINS, undecorated — unlike `fold_context`'s accumulation. Exactly one of the
+# five walls ever calls this (background-suite-guard), so there is only ever one write; a
+# second caller would need this file to also invent an ORDER for two rewrites of the same
+# `tool_input`, which nothing here is asked to do yet.
+fold_update_input() {
+  _BF_PEND_UPDATED_INPUT="${1:-}"
+}
+
 _fold_clear_pending() {
   _BF_PEND_MODE=""; _BF_PEND_VERB=""; _BF_PEND_FACT=""
   _BF_PEND_FIX=""; _BF_PEND_DETAIL=""; _BF_PEND_ADVICE=""; _BF_PEND_CONTEXT=""
+  _BF_PEND_UPDATED_INPUT=""
 }
 
-# _fold_emit_context <event> <text> — the one object, on stdout.
+# _fold_emit_context <event> <context-text> [<updated-input-json>] — the one object, on
+# stdout, whichever of the two staged channels is present.
 #
 # THROUGH `jq`, DELIBERATELY, where refuse.sh escapes JSON by hand. The two have
 # different callers: refuse.sh must format a refusal on a machine that has lost `jq`,
@@ -180,10 +202,29 @@ _fold_clear_pending() {
 # an ADVISORY — losing it costs a nudge — and going through `jq` keeps the bytes
 # identical to the emitter this replaces, which is what makes the merge a refactor on
 # the one payload where a single wall speaks. With no `jq` the text is not dropped:
-# the caller puts it on the user's stream instead.
+# the caller puts it on the user's stream instead (`updatedInput` has no such fallback
+# — see `bionic_fold`'s own comment on that, below).
+#
+# BOTH ARGUMENTS CAN BE NON-EMPTY (T3, D4):
+# farm-out-reminder's `additionalContext` reads `agent_type`, background-suite-guard's
+# `updatedInput` reads `agent_id`, and a payload that carries one field without the other
+# is not ruled out (research-R2-walls.md §4 measured only `agent_id` as confirmed present
+# on a subagent call). One `jq -n` builds whichever fields are non-empty into one document
+# rather than letting two callers each own the wire and the second overwrite the first.
 _fold_emit_context() {
-  jq -n --arg e "${1:-}" --arg c "${2:-}" \
-    '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}' 2>/dev/null
+  local _e="${1:-}" _c="${2:-}" _u="${3:-}"
+  if [ -n "$_u" ]; then
+    if [ -n "$_c" ]; then
+      jq -n --arg e "$_e" --arg c "$_c" --argjson u "$_u" \
+        '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c,updatedInput:$u}}' 2>/dev/null
+    else
+      jq -n --arg e "$_e" --argjson u "$_u" \
+        '{hookSpecificOutput:{hookEventName:$e,updatedInput:$u}}' 2>/dev/null
+    fi
+  else
+    jq -n --arg e "$_e" --arg c "$_c" \
+      '{hookSpecificOutput:{hookEventName:$e,additionalContext:$c}}' 2>/dev/null
+  fi
 }
 
 # ─── The fold ────────────────────────────────────────────────────────────────
@@ -206,6 +247,7 @@ bionic_fold() {
   BIONIC_FOLD_DETAIL=""
   BIONIC_FOLD_ADVICE=""
   BIONIC_FOLD_CONTEXT=""
+  BIONIC_FOLD_UPDATED_INPUT=""
   BIONIC_FOLD_LINES=""
 
   local _fn _rc _m _errf _out _rrc _ctx _bline
@@ -290,19 +332,31 @@ $_BF_PEND_ADVICE"
 $_BF_PEND_CONTEXT"
         fi
       fi
+      # THE REPAIR HALF (T3, D4). Last write wins — see fold_update_input's own docblock
+      # for why that is the whole rule with one caller.
+      if [ -n "${_BF_PEND_UPDATED_INPUT:-}" ]; then
+        BIONIC_FOLD_UPDATED_INPUT="$_BF_PEND_UPDATED_INPUT"
+      fi
     fi
   done
   _fold_clear_pending
 
   # ── NOTHING BLOCKED ─────────────────────────────────────────────────────────
+  #
+  # A REPAIR ONLY EVER RIDES THIS BRANCH (T3, D4). `BIONIC_FOLD_UPDATED_INPUT` is read
+  # nowhere else in this function: a call some OTHER wall blocked never runs, so rewriting
+  # its `timeout` would repair a command the harness is about to refuse anyway — a
+  # confusing wire nobody needs. `BIONIC_FOLD_BLOCKS -eq 0` here is that boundary.
   if [ "$BIONIC_FOLD_BLOCKS" -eq 0 ]; then
-    if [ -n "$BIONIC_FOLD_CONTEXT" ]; then
-      _out=$(_fold_emit_context "$_event" "$BIONIC_FOLD_CONTEXT")
+    if [ -n "$BIONIC_FOLD_CONTEXT" ] || [ -n "$BIONIC_FOLD_UPDATED_INPUT" ]; then
+      _out=$(_fold_emit_context "$_event" "$BIONIC_FOLD_CONTEXT" "$BIONIC_FOLD_UPDATED_INPUT")
       if [ -n "$_out" ]; then
         printf '%s\n' "$_out"
       else
-        # NO `jq`, SO NO OBJECT — and the words are put where they can still be read
-        # rather than dropped in silence.
+        # NO `jq`, SO NO OBJECT. A nudge degrades to a line a person can still read; a
+        # repair has no such fallback and is simply not applied — the same unrepaired
+        # state the wall found the call in. Unreachable in practice: hooks/bash-walls.sh's
+        # own preamble already refuses to source this file without `jq` on the PATH.
         BIONIC_FOLD_ADVICE="${BIONIC_FOLD_ADVICE}${BIONIC_FOLD_ADVICE:+
 }$BIONIC_FOLD_CONTEXT"
       fi

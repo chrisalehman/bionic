@@ -84,6 +84,60 @@ _archive_leaf() {
   esac
 }
 
+# _archive_newest_plan <dir> -> the newest `*.plan.md` directly under <dir>, or nothing.
+# THE COMPARATOR IS `active_plan`'s, character for character: the shell's `-nt`, which is
+# whole seconds under /bin/bash 3.2. A finer one here would disagree with the selection
+# every other reader in this tree makes for plans written inside one second, and this
+# function answers the same question about the same files.
+_archive_newest_plan() {
+  local dir="$1" f newest=""
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' f; do
+    if [ -z "$newest" ] || [ "$f" -nt "$newest" ]; then
+      newest="$f"
+    fi
+  done < <(find "$dir" -maxdepth 1 -type f -name '*.plan.md' -print0 2>/dev/null)
+  [ -n "$newest" ] && printf '%s\n' "$newest"
+  return 0
+}
+
+# archive_binding_check <project-root> <run-dir> -> 0 and silent when the destination the
+# run's approval fixed is the destination this machine would use today; 1 and ONE line
+# naming both when they differ (epic-23 wave-13-fixit-180, REQ-4/AC-4.2, ledger D6).
+#
+# WHY IT IS IN THIS LIBRARY AND NOT IN ITS CALLER. The move is the one act here that
+# re-running cannot undo, and `archive-root:` is a Step-0 approval — the destination a
+# person agreed to when the run opened. `.bionic/config.yaml` is what the machine says
+# NOW, and a machine's config can be edited by anything at any time between Step 0 and
+# Step 9. So the two can disagree, and when they do the honest answer is neither of them:
+# it is a refusal that shows both and moves nothing. Putting the check inside `archive_run`
+# means every caller inherits it — `close-out.sh` is the first, and the second will not
+# have to remember.
+#
+# SILENCE IS NOT DRIFT. A run whose plans predate the key carries no `archive-root:` at
+# all; there is no approval to honour and this returns 0 without a word, so every older
+# run archives exactly as it did before. The value is read from the NEWEST plan in the run
+# directory, because in a container epic the older waves' frontmatter records where THEY
+# were going, which is not a fact about this close.
+#
+# BOTH SIDES ARE JOINED THE SAME WAY (`_roots_join`, via `archive_root` for the live side
+# and explicitly for the plan's), so `archive-root: ../arch` in a plan and the identical
+# line in a config compare equal instead of reading as a drift between a relative path and
+# an absolute one.
+archive_binding_check() {
+  local root="$1" run_dir="$2" plan approved live
+  plan="$(_archive_newest_plan "$run_dir")"
+  [ -n "$plan" ] || return 0
+  approved="$(plan_frontmatter_get "$plan" "archive-root")"
+  [ -n "$approved" ] || return 0
+  approved="$(_roots_join "$root" "$approved")"
+  live="$(archive_root "$root")"
+  [ "$approved" = "$live" ] && return 0
+  printf 'bionic: archive refused — archive-root drifted: %s approved %s, this project config says %s\n' \
+    "$(_archive_leaf "$plan")" "$approved" "$live"
+  return 1
+}
+
 # archive_run <run-dir> -> see the file header. Prints one line, returns 0 (moved or a
 # benign no-op) or 1 (refused).
 archive_run() {
@@ -123,6 +177,14 @@ archive_run() {
       return 1
       ;;
   esac
+
+  # THE BINDING, CHECKED BEFORE THE OPEN-RUN SCAN (AC-4.2, D6). A drifted destination is
+  # a fault in the CALL, not a fact about whether anything would have moved — so it is
+  # answered before the scan that would otherwise report a benign skip and hide it. Its
+  # one line is printed by the function itself; this arm only carries the status out.
+  if ! archive_binding_check "$root" "$run_dir"; then
+    return 1
+  fi
 
   # THE ONE OPEN-RUN CHECK (see header: this is the whole epic-close/standalone/
   # open-epic distinction). Every *.plan.md directly under plans/<slug>/, asked
