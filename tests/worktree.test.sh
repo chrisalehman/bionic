@@ -105,20 +105,36 @@ expect_true "worktree_legacy_links is defined"    declare -f worktree_legacy_lin
 expect_true "worktree_land is defined"            declare -f worktree_land
 expect_true "worktree_lease_overruns is defined"  declare -f worktree_lease_overruns
 
-section "Group 2: worktree_legacy_links — what C2 retired, listed"
+section "Group 2: worktree_legacy_links — D7: only a MIS-POINTED link is listed"
 #
-# The link is gone from `create`, so the only ones left on a machine are the
-# ones an older bionic planted. Listing them is how doctor and the SessionStart
-# block report a footprint this version no longer makes.
+# D7 (wave-13-fixit-180, reopens C2): `create` plants
+# `<wt>/.bionic -> <main-root>/.bionic` again. A link resolving there is the
+# expected, constructive state and is never listed; only a link some other
+# bionic version — or some other hand — pointed SOMEWHERE ELSE is stale.
 
 L1="$(new_repo "$TMP/legacy")"
 T1="$(new_tree "$L1" alpha)"
 T2="$(new_tree "$L1" beta)"
 expect_eq "a tree farm with no links lists nothing" "" "$(worktree_legacy_links "$L1")"
+
+# A CORRECTLY-POINTING alias — exactly what create plants — is never listed.
 ln -s "${L1}/.bionic" "${T1}/.bionic"
-expect_eq "one planted link is listed by absolute path" "${T1}/.bionic" "$(worktree_legacy_links "$L1")"
-ln -s "${L1}/.bionic" "${T2}/.bionic"
-expect_eq "two links are listed, one per line" "2" "$(worktree_legacy_links "$L1" | grep -c .)"
+expect_eq "a link resolving to the main root's .bionic is not listed" \
+  "" "$(worktree_legacy_links "$L1")"
+
+# A MIS-POINTED link — pointing anywhere else — IS listed.
+MISDIR="$TMP/elsewhere-legacy"; mkdir -p "$MISDIR"
+ln -s "$MISDIR" "${T2}/.bionic"
+expect_eq "a link pointing elsewhere is listed by absolute path" \
+  "${T2}/.bionic" "$(worktree_legacy_links "$L1")"
+
+# A BROKEN link (target does not exist) certainly does not resolve to the
+# main root's .bionic either, so it is listed too.
+T3="$(new_tree "$L1" gamma)"
+ln -s "${L1}/.bionic-does-not-exist" "${T3}/.bionic"
+expect_eq "the correctly-pointing alias plus two stale/broken links: two listed" \
+  "2" "$(worktree_legacy_links "$L1" | grep -c .)"
+
 # A real `.bionic` DIRECTORY in a tree is not a legacy link and must never be
 # offered up for deletion: the difference between `rm -f <link>` and losing a
 # writer's state directory is this test.
@@ -163,6 +179,27 @@ worktree_land "$HT2" >/dev/null
 expect_eq "the landing went onto the branch the main checkout was on" "other-line" \
   "$(git -C "$H" rev-parse --abbrev-ref HEAD)"
 expect_eq "and beta is an ancestor of it" "0" "$(git -C "$H" rev-list --count HEAD..beta)"
+
+section "Group 3b: worktree_land — §land-with-alias (D7)"
+#
+# D7 plants the alias `create` now leaves in every spawned tree. A tree whose
+# ONLY untracked entry is that alias must land exactly as it always did — the
+# dirty-tree check reads `.gitignore:43`'s `.bionic` entry, unaffected by
+# whether it names a directory or a symlink — and `_wt_drop_legacy_link`
+# already deletes the link on the way in, before the dirty check runs.
+
+LA="$(new_repo "$TMP/land-alias")"
+LAT="$(new_tree "$LA" withalias)"
+ln -s "${LA}/.bionic" "${LAT}/.bionic"
+expect_true "the alias is present before land, and IS a symlink" test -L "${LAT}/.bionic"
+expect_eq "the tree is clean despite the alias (gitignored either shape)" \
+  "" "$(git -C "$LAT" status --porcelain)"
+OUTLA="$(worktree_land "$LAT")"
+expect_match "a tree whose only untracked entry is the alias lands" \
+  "spawn-worktree: LANDED branch=withalias merge=* removed=${LAT}" "$OUTLA"
+expect_false "the tree — alias included — is gone after landing" test -e "$LAT"
+expect_true "the state directory the alias pointed at survived" \
+  test -f "${LA}/.bionic/docs/note.md"
 
 section "Group 4: worktree_land — the refusals, each naming why"
 #
