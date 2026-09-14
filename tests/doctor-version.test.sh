@@ -483,12 +483,24 @@ plugin_source_line() {  # <full-output>
 
 echo "--- 7a: this checkout ---"
 
+# NOT ASSERTED AGAINST THE FULL LITERAL $REPO (fold-in T15, A-orch-40). The
+# bracket verdict is what `bionic_line` guarantees survives — the path is what
+# it shortens (doctor.sh:2084-2090's own doctrine, proved for the OTHER-
+# checkout case two blocks down by 31g/31h). `bionic_line`'s budget for this
+# exact row is 100-col line width minus the fixed "plugin source: " prefix
+# (15) minus the fixed " [this checkout]" tail (16) = 69 columns, of which
+# `bionic_trunc` keeps the FRONT 68 and appends one ellipsis character when the
+# path overflows — so a 40-char prefix of $REPO survives truncation at any
+# checkout path length, short or long, while the full path only survives when
+# $REPO itself is short. Measured RED under a 210-char clone path
+# (record/wave-13-fixit-180/T15-red.log): the rendered line ended "…435e0…
+# [this checkout]", bracket intact, path elided — exactly this doctrine.
 HOME9="$(make_registry_home)"
 write_known_marketplaces "$HOME9" '{"source":"directory","path":"'"$REPO"'"}' "$REPO"
 OUT9="$(run_doctor "$HOME9")"
 LINE9="$(plugin_source_line "$OUT9")"
 expect_match "31: a registration naming this checkout's own root reads [this checkout]" \
-  "*${REPO}*\[this checkout\]" "$LINE9"
+  "*${REPO:0:40}*\[this checkout\]" "$LINE9"
 expect_no_match "31b: …and never carries the OTHER-checkout warning" "*OTHER checkout*" "$LINE9"
 
 echo "--- 7b: OTHER checkout ---"
