@@ -112,11 +112,12 @@ live_home() {  # <label> <sid> -> sets $CLAUDE_HOME
   CLAUDE_HOME="$(make_claude_home "$1" "$2" "$LIVE_PID")"
 }
 
-# The five session-keyed classes, planted for one session id. `patrol` gets its `.armed`
-# sibling too — six files per session, the full set the verb has to reach.
+# The six session-keyed classes, planted for one session id. `patrol` gets its `.armed`
+# sibling too — seven files per session, the full set the verb has to reach (AC-6.2,
+# wave-13: `stop-orders` joined the list PATROL_STATE_CLASSES duplicates, patrol.sh:161).
 plant_session() {  # <repo> <sid> [class...]
   local r="$1" sid="$2" c; shift 2
-  [ $# -gt 0 ] || set -- roster preflight engaged sweeper patrol
+  [ $# -gt 0 ] || set -- roster preflight engaged sweeper patrol stop-orders
   for c in "$@"; do
     printf '%s state for %s\n' "$c" "$sid" > "$r/.bionic/tmp/$c-$sid.state"
     [ "$c" = patrol ] \
@@ -178,6 +179,7 @@ expect_contains "1.7 …its engaged file is listed"               "$(f_of "$R1" 
 expect_contains "1.8 …its sweeper file is listed"               "$(f_of "$R1" sweeper "$SID_DEAD")"   "$OUT"
 expect_contains "1.9 …its patrol stamp is listed"               "$(f_of "$R1" patrol "$SID_DEAD")"    "$OUT"
 expect_contains "1.10 …and the stamp's .armed sibling is listed" "$(f_of "$R1" patrol "$SID_DEAD").armed" "$OUT"
+expect_contains "1.10b …and its stop-orders file is listed (AC-6.2)" "$(f_of "$R1" stop-orders "$SID_DEAD")" "$OUT"
 
 # NOTHING ELSE. The live session's files and the three unkeyed ones are the "and nothing
 # else" half of AC-9, and they are asserted as PATHS rather than as ids — the live session's
@@ -219,9 +221,9 @@ poke "$R2" "$H2" "$SID_SELF" sweep
 
 expect_eq "2.1 a sweep over dead state completes (exit 0)" "0" "$RC"
 expect_contains "2.2 the machine line reports the mode"    "|mode=sweep|" "$OUT"
-expect_contains "2.3 …and removes twelve files"            "|files=12|removed=12|" "$OUT"
+expect_contains "2.3 …and removes fourteen files"           "|files=14|removed=14|" "$OUT"
 expect_contains "2.4 the tail counts what it swept and what it kept" \
-  "swept 12 file(s) across 2 dead session(s); 1 live session(s) kept." "$OUT"
+  "swept 14 file(s) across 2 dead session(s); 1 live session(s) kept." "$OUT"
 
 # GONE — every class, both dead sessions.
 expect_false "2.5 the first dead session's roster is gone"    test -e "$(f_of "$R2" roster "$SID_DEAD")"
@@ -230,17 +232,19 @@ expect_false "2.7 …its engaged marker is gone"                test -e "$(f_of 
 expect_false "2.8 …its ack ledger is gone"                    test -e "$(f_of "$R2" sweeper "$SID_DEAD")"
 expect_false "2.9 …its patrol stamp is gone"                  test -e "$(f_of "$R2" patrol "$SID_DEAD")"
 expect_false "2.10 …and the stamp's .armed sibling is gone"   test -e "$(f_of "$R2" patrol "$SID_DEAD").armed"
+expect_false "2.10b …its stop-orders file is gone (AC-6.2)"   test -e "$(f_of "$R2" stop-orders "$SID_DEAD")"
 expect_false "2.11 the second dead session's roster is gone"  test -e "$(f_of "$R2" roster "$SID_DEAD2")"
 expect_false "2.12 …and its patrol .armed sibling is gone"    test -e "$(f_of "$R2" patrol "$SID_DEAD2").armed"
 
 # STILL THERE — the live session, and the three unkeyed files. Each negative above has its
-# positive here: the same walk that removed twelve files left nine alone.
+# positive here: the same walk that removed fourteen files left ten alone.
 expect_true "2.13 the live session's roster survives"    test -f "$(f_of "$R2" roster "$SID_LIVE")"
 expect_true "2.14 …its preflight survives"              test -f "$(f_of "$R2" preflight "$SID_LIVE")"
 expect_true "2.15 …its engaged marker survives"         test -f "$(f_of "$R2" engaged "$SID_LIVE")"
 expect_true "2.16 …its ack ledger survives"             test -f "$(f_of "$R2" sweeper "$SID_LIVE")"
 expect_true "2.17 …its patrol stamp survives"           test -f "$(f_of "$R2" patrol "$SID_LIVE")"
 expect_true "2.18 …and the stamp's .armed sibling survives" test -f "$(f_of "$R2" patrol "$SID_LIVE").armed"
+expect_true "2.18b …and its stop-orders file survives (AC-6.2)" test -f "$(f_of "$R2" stop-orders "$SID_LIVE")"
 expect_true "2.19 context-spend.state survives"         test -f "$R2/.bionic/tmp/context-spend.state"
 expect_true "2.20 farm-out.state survives"              test -f "$R2/.bionic/tmp/farm-out.state"
 expect_true "2.21 stop-check.state survives"            test -f "$R2/.bionic/tmp/stop-check.state"
@@ -358,7 +362,7 @@ expect_true "4.11 …and the aimed-at file is untouched" \
 section "5. every session-keyed class, and only those"
 # =============================================================================
 #
-# The five classes are the verb's whole reach. A session that left only ONE of them behind
+# The six classes are the verb's whole reach. A session that left only ONE of them behind
 # is swept for that one — which is the shape the defect's own herd-app tmp had (six rosters,
 # six preflights, five engaged markers: the counts do not line up, so no class may depend on
 # another being present).
@@ -391,6 +395,22 @@ rm -rf "$R5C/.bionic/tmp"
 poke "$R5C" "$H5" "$SID_SELF" sweep
 expect_eq "5.9 a project with no .bionic/tmp sweeps nothing (exit 0)" "0" "$RC"
 expect_contains "5.10 …and says which directory it did not find" "no .bionic/tmp" "$OUT"
+
+# THE stop-orders CLASS ON ITS OWN (AC-6.2, wave-13-fixit-180). REQ-6's own RED: a dead
+# session's order queue used to be one of the "unreachable" unkeyed files patrol.sh's own
+# header claimed (research R1 §6) — it is `<class>-<sid>.state` shaped like every other
+# class, so it belongs in PATROL_STATE_CLASSES rather than surviving every sweep forever.
+R5D="$(make_repo r5d)"
+live_home 5d "$SID_LIVE"; H5D="$CLAUDE_HOME"
+plant_session "$R5D" "$SID_LIVE" stop-orders
+plant_session "$R5D" "$SID_DEAD" stop-orders
+
+poke "$R5D" "$H5D" "$SID_SELF" sweep
+expect_eq "5.11 a sweep over a stop-orders-only session completes (exit 0)" "0" "$RC"
+expect_false "5.12 a dead session's stop-orders state is swept" \
+  test -e "$(f_of "$R5D" stop-orders "$SID_DEAD")"
+expect_true "5.13 …and a live session's stop-orders state is kept" \
+  test -f "$(f_of "$R5D" stop-orders "$SID_LIVE")"
 
 # =============================================================================
 section "6. the surface: one verb, one flag, no operand, no engagement gate"

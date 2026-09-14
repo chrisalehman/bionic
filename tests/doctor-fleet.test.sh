@@ -314,16 +314,26 @@ PRED_LINES="$(printf '%s\n' "$OUT6" | awk '/predecessor/')"
 expect_no_match "15: a LIVE session's roster is not called a predecessor" \
   "*${SID_V2%%-*}*" "$PRED_LINES"
 
-section "Section 6: legacy .bionic symlinks under .worktrees/"
+section "Section 6: legacy .bionic symlinks under .worktrees/ (narrowed AC-11/AC-7.1, A-orch-24)"
 
-mkdir -p "${PROJ}/.worktrees/alpha" "${PROJ}/.worktrees/beta"
-ln -s "${PROJ}/.bionic" "${PROJ}/.worktrees/alpha/.bionic"
+# `alpha` resolves SOMEWHERE ELSE — a mis-pointed link, the genuine legacy shape.
+# `beta` is a real directory, never a symlink at all. `gamma` resolves to THIS
+# project's own `.bionic` — exactly what `spawn-worktree.sh create` plants on
+# purpose (D7) — so it must NOT be reported: worktree_legacy_links (lib/
+# worktree.sh) is the one predicate deciding this, the same one spawn-worktree.sh
+# itself reads back after planting the alias.
+mkdir -p "${PROJ}/.worktrees/alpha" "${PROJ}/.worktrees/beta" "${PROJ}/.worktrees/gamma"
+mkdir -p "${PROJ}/elsewhere/.bionic"
+ln -s "${PROJ}/elsewhere/.bionic" "${PROJ}/.worktrees/alpha/.bionic"
 mkdir -p "${PROJ}/.worktrees/beta/.bionic"   # a real directory is not a legacy link
+ln -s "${PROJ}/.bionic" "${PROJ}/.worktrees/gamma/.bionic"
 
 OUT7="$(run_doctor)"
 
-expect_match "16: the symlinked worktree is listed" "*legacy .bionic symlink*alpha*" "$OUT7"
+expect_match "16: a mis-pointed symlinked worktree is listed" "*legacy .bionic symlink*alpha*" "$OUT7"
 expect_no_match "17: a real .bionic directory is not" "*legacy .bionic symlink*beta*" "$OUT7"
+expect_no_match "17b: an alias correctly pointing at the main root's .bionic is not (D7)" \
+  "*legacy .bionic symlink*gamma*" "$OUT7"
 expect_match "18: and the row carries a repair" "*legacy .bionic symlink*1*" "$OUT7"
 
 section "Section 6b: the attestation set is THIS PROJECT's, not the machine's"
