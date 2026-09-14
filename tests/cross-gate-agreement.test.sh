@@ -9923,4 +9923,87 @@ done <<< "$NR_ENTRIES"
 expect_empty "NR.7 every needs: entry in skills/canonical-sdlc/SKILL.md resolves" "$NR_DEAD"
 
 # ============================================================
+section "LC — THE LATEST-CONTRACT READING: one text, two roster walls, byte for byte (epic-23 wave-12-fixit-171 T26, delta review C1/S2)"
+# ============================================================
+#
+# THE TWO WALLS. hooks/dispatch-preflight.sh refuses a dispatch under a name whose contract is
+# still open; hooks/execution-recorder.sh journals a second start under an id whose contract is
+# still open. Different events, different keys (name vs agent_id), different outputs — and one
+# shared question underneath: given an APPEND-ONLY roster, is this name currently under an open
+# contract, or did a `landing-swept/v1|…|state=MET` marker close the last one?
+#
+# WHY THE DUPLICATION IS DELIBERATE. The recorder loads no library that parses a roster, and
+# `BIONIC_LIB_WANT` is a FAIL-CLOSED list — an absent library refuses everything the hook
+# judges — so putting four awk functions behind one would add a file to the SubagentStart path
+# for every dispatch in the fleet. The repo's answer to a shape two files must share is this
+# suite (§A2, §N, §AP's predecessor): hold the copies byte-equal, and prove the holding
+# discriminates.
+#
+# WHAT IT COST TO NOT HAVE THIS PIN. Both programs read the MET markers as a SET, so one
+# landing latched the flag for that name and BOTH walls went inert for it for the rest of the
+# session — the dispatch wall in the exact case it was built for (a task being re-run) and the
+# recorder's fallback beneath it. One defect, two files, found once. T26 fixed it in one text.
+
+LC_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+LC_ER="$BIONIC_HOOKS_DIR/execution-recorder.sh"
+lc_span() {  # <file> -> the shared reading, BEGIN and END markers included
+  sed -n '/---- BEGIN latest-contract reading/,/---- END latest-contract reading/p' "$1"
+}
+LC_SPAN_DP="$(lc_span "$LC_DP")"
+LC_SPAN_ER="$(lc_span "$LC_ER")"
+
+# --- (a) BOTH SPANS EXIST AND ARE THE WHOLE READING. A missing marker would make the two
+# extractions empty, and two empty strings compare equal — the vacuous pass this arm forbids
+# before the comparison below is allowed to mean anything. ---
+expect_nonempty "LC.1 hooks/dispatch-preflight.sh carries the delimited shared reading" "$LC_SPAN_DP"
+expect_nonempty "LC.1 hooks/execution-recorder.sh carries the delimited shared reading" "$LC_SPAN_ER"
+expect_eq "LC.1 …exactly one BEGIN marker in dispatch-preflight.sh" \
+  "1" "$(/usr/bin/grep -c -- '---- BEGIN latest-contract reading' "$LC_DP")"
+expect_eq "LC.1 …exactly one BEGIN marker in execution-recorder.sh" \
+  "1" "$(/usr/bin/grep -c -- '---- BEGIN latest-contract reading' "$LC_ER")"
+expect_eq "LC.1 …and the span carries all four functions (dispatch-preflight)" "4" \
+  "$(printf '%s\n' "$LC_SPAN_DP" | /usr/bin/grep -cE '^ *function (kv|live_status|contract_note|contract_closed)\(')"
+expect_eq "LC.1 …and all four in the recorder too" "4" \
+  "$(printf '%s\n' "$LC_SPAN_ER" | /usr/bin/grep -cE '^ *function (kv|live_status|contract_note|contract_closed)\(')"
+
+# --- (b) BYTE FOR BYTE. Not "code-identical": the whole point of a shared text is that a
+# reader of either file is reading the same argument, comments included (§O's distinction,
+# taken the other way). ---
+expect_eq "LC.2 the two walls carry the SAME latest-contract reading, byte for byte" \
+  "$(printf '%s\n' "$LC_SPAN_DP" | shasum | cut -d' ' -f1)" \
+  "$(printf '%s\n' "$LC_SPAN_ER" | shasum | cut -d' ' -f1)"
+
+# --- (c) THE DECISIVE LINE IS IN IT. "Byte-equal" is also satisfied by two copies of a
+# reading that lost the rule — the latch that C1 named — so the line that retires a marker
+# when a live row follows it is pinned by content, in both files. ---
+expect_contains "LC.3 the reading retires a MET marker that a live row follows (dispatch-preflight)" \
+  'if (live_status(kv(line, "status"))) delete MET[nm]' "$LC_SPAN_DP"
+expect_contains "LC.3 …and in the recorder" \
+  'if (live_status(kv(line, "status"))) delete MET[nm]' "$LC_SPAN_ER"
+
+# --- (d) THE COMPARISON DISCRIMINATES. A doctored copy of one span — the decisive line
+# removed, nothing else touched — must NOT match the other. Without this, LC.2 is consistent
+# with a comparison that always says yes. ---
+LC_MUT="$(printf '%s\n' "$LC_SPAN_DP" | /usr/bin/grep -v 'delete MET\[nm\]')"
+expect_ne "LC.4 the byte-comparison really compares (a doctored span does not match)" \
+  "$(printf '%s\n' "$LC_MUT" | shasum | cut -d' ' -f1)" \
+  "$(printf '%s\n' "$LC_SPAN_ER" | shasum | cut -d' ' -f1)"
+expect_eq "LC.4 meta: the doctoring removed exactly one line" "1" \
+  "$(( $(printf '%s\n' "$LC_SPAN_DP" | wc -l) - $(printf '%s\n' "$LC_MUT" | wc -l) ))"
+
+# --- (e) BOTH WALLS ACTUALLY ASK IT. A shared text neither program calls is a comment. ---
+expect_eq "LC.5 the dispatch wall notes every row through the shared reading" "2" \
+  "$(/usr/bin/grep -c 'contract_note($0)' "$LC_DP")"
+# The END rule itself, not a bare mention: `contract_closed` is also the name of a function
+# the shared span DEFINES, so a count would be satisfied by the definition alone.
+expect_contains "LC.5 …and the dispatch wall DECIDES on it" \
+  'if (open && !contract_closed(want)) print last' "$(cat "$LC_DP")"
+expect_eq "LC.5 the recorder notes every row through the shared reading" "2" \
+  "$(/usr/bin/grep -c 'contract_note($0)' "$LC_ER")"
+expect_contains "LC.5 …and the recorder DECIDES on it" \
+  '&& !contract_closed(nm)) print row' "$(cat "$LC_ER")"
+expect_eq "LC.5 no private MET latch survives in either file" "0" \
+  "$(/usr/bin/grep -cE '!\(nm in met\)|&& !met\b' "$LC_DP" "$LC_ER" | awk -F: '{t += $2} END { print t + 0 }')"
+
+# ============================================================
 finish
