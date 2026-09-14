@@ -150,7 +150,7 @@ DOCTOR_REPO_ROOT="$(cd "${DOCTOR_LIB}/../../.." && pwd -P)"
 # same trace, one frame deeper — and they are part of what a complete payload
 # means for this script too.
 for _doctor_lib in detect.sh env.sh patrol.sh width.sh loader.sh root.sh run.sh \
-                   resources.sh checks.sh deps.sh shell.sh; do
+                   resources.sh checks.sh deps.sh shell.sh worktree.sh; do
   if [ ! -f "${DOCTOR_LIB}/${_doctor_lib}" ]; then
     echo "doctor.sh: cannot find ${DOCTOR_LIB}/${_doctor_lib} — the payload looks incomplete." >&2
     echo "           reinstall with: claude plugin install bionic@bionic" >&2
@@ -211,6 +211,13 @@ done
 # so sourcing it changes nothing about this page's central promise.
 # shellcheck source=/dev/null
 . "${DOCTOR_LIB}/checks.sh"
+# worktree.sh, for `worktree_legacy_links` alone (AC-11/AC-7.1, A-orch-24) — the
+# one predicate that tells a correctly-pointing `.bionic` alias (D7) apart from a
+# mis-pointed or broken link, so this page and hooks/session-start.sh's own report
+# agree with the very code that plants the alias instead of each re-deriving the
+# comparison. Its other exports (the worktree lease) are unused here.
+# shellcheck source=/dev/null
+. "${DOCTOR_LIB}/worktree.sh"
 
 # The standalone removal door (design D5a: the remover must not depend on the
 # thing it removes). Printed as TEXT for the user to run — doctor never fetches
@@ -1597,22 +1604,22 @@ if bionic_check_fires dead-session-state; then
   fix "the automatic dead-session sweep failed (rc=${_doctor_sweep_rc:-?}) → $(bionic_check_hint dead-session-state)"
 fi
 
-# LEGACY `.bionic` SYMLINKS (AC-11). spawn-worktree.sh used to plant
-# `<wt>/.bionic -> <main>/.bionic`. lib/root.sh now steps OVER such a link and
-# never roots on it (design-ledger C2), so one left on disk is a second path to
-# the same state that nothing reads and nobody expects. Listed by name; the
-# worktree verb that deletes them is the repair, and it is named on the row.
-#
-# `-L` BEFORE `-d`, because a symlink to a directory satisfies both — the same
-# order lib/root.sh's own walk tests them in.
+# LEGACY `.bionic` SYMLINKS (AC-11, narrowed by AC-7.1/A-orch-24, wave-13-fixit-180).
+# spawn-worktree.sh USED TO plant `<wt>/.bionic -> <main>/.bionic` as a mistake
+# lib/root.sh stepped over (design-ledger C2); D7 (wave-13) brought the same link
+# BACK on purpose, as the one memory a plain relative write reaches from inside a
+# worktree. A link is a finding now only when it resolves SOMEWHERE ELSE — the
+# broken or mis-pointed shape — never when it is the alias `spawn-worktree.sh
+# create` itself plants. `worktree_legacy_links` (lib/worktree.sh) is the ONE
+# predicate that tells the two apart; this row and hooks/session-start.sh's own
+# report both call it rather than keeping a second copy of the comparison.
 _doctor_links=""; _doctor_link_n=0
-for _wt in "${DOCTOR_ROOT}/.worktrees/"*; do
-  [ -d "$_wt" ] || continue
-  [ -L "${_wt}/.bionic" ] || continue
+while IFS= read -r _wt_link; do
+  [ -n "$_wt_link" ] || continue
   _doctor_link_n=$((_doctor_link_n + 1))
-  _wt_name="${_wt##*/}"
+  _wt_name="${_wt_link%/.bionic}"; _wt_name="${_wt_name##*/}"
   _doctor_links="${_doctor_links}${_doctor_links:+, }${_wt_name}"
-done
+done < <(worktree_legacy_links "${DOCTOR_ROOT}")
 if [ "$_doctor_link_n" -gt 0 ]; then
   _run_add "$(_doctor_item "$DOCTOR_BAD" "legacy .bionic symlinks" \
     "${_doctor_link_n} under .worktrees/ (${_doctor_links})")"
@@ -2086,12 +2093,21 @@ echo "Bionic Doctor — payload ${PLUGIN_VERSION} @ ${PAYLOAD_SHA}"
 # (epic-22 wave-01 task 14) — the realpath comparison used to live here alone;
 # it is now the same function `/bionic:version` calls, so the two surfaces can
 # never disagree about what "this checkout" means.
+#
+# THE WORKTREE QUALIFIER (AC-6.4, wave-13-fixit-180). "OTHER checkout" now comes
+# back in two shapes — a bare stranger, or one sharing this repository's own
+# git-common-dir, which `detect_checkout_verdict` spells
+# "OTHER checkout (worktree of this repo)". Both still take the OTHER-checkout
+# branch below; the verdict's own text carries the qualifier straight into the
+# bracket, so this `if` reads only the fixed three-way enum ("this checkout" or
+# not) and never re-derives the worktree fact itself.
 if [ "$MP_SOURCE_STATE" -eq 0 ] && [ -n "$MP_SOURCE_PATH" ]; then
-  if [ "$(detect_checkout_verdict "$DOCTOR_REPO_ROOT")" = "this checkout" ]; then
+  _doctor_checkout_verdict="$(detect_checkout_verdict "$DOCTOR_REPO_ROOT")"
+  if [ "$_doctor_checkout_verdict" = "this checkout" ]; then
     printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" " [this checkout]")")"
   else
     printf '%s\n' "$(_doctor_rtrim "$(bionic_line "plugin source: " "$MP_SOURCE_PATH" \
-      " [OTHER checkout — the CLI loads the plugin from THERE]")")"
+      " [${_doctor_checkout_verdict} — the CLI loads the plugin from THERE]")")"
   fi
 else
   echo "plugin source: unregistered"

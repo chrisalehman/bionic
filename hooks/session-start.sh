@@ -157,11 +157,12 @@ BIONIC_LOADER_REFUSE
 # The library, or nothing. `loader_fail_open` prints one stderr line and exits 0 —
 # a detector that cannot read the disk reports nothing rather than guessing.
 [ -n "$BIONIC_LIB" ] || loader_fail_open "session-start"
-. "$BIONIC_LIB/context.sh" || exit 0   # bionic_context, bionic_jq
-. "$BIONIC_LIB/root.sh"    || exit 0   # project_root
-. "$BIONIC_LIB/session.sh" || exit 0   # session_id, and its one divergence warning
-. "$BIONIC_LIB/patrol.sh"  || exit 0   # PATROL_STALE_MULTIPLIER
-. "$BIONIC_LIB/run.sh"     || exit 0   # active_run, engaged_session
+. "$BIONIC_LIB/context.sh"  || exit 0   # bionic_context, bionic_jq
+. "$BIONIC_LIB/root.sh"     || exit 0   # project_root
+. "$BIONIC_LIB/session.sh"  || exit 0   # session_id, and its one divergence warning
+. "$BIONIC_LIB/patrol.sh"   || exit 0   # PATROL_STALE_MULTIPLIER
+. "$BIONIC_LIB/run.sh"      || exit 0   # active_run, engaged_session
+. "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
 
 # The tree this hook was launched from — printed absolute in the re-arm line, and
 # the tree whose poker is asked for the interval. `$(dirname "$0")/..` and `pwd -P`
@@ -628,12 +629,21 @@ EOF_MTS
 fi
 
 # ---------------------------------------------------------------- legacy symlinks
+#
+# NARROWED (AC-11/AC-7.1, A-orch-24, wave-13-fixit-180). D7 brought `.bionic`
+# aliasing back on purpose: `spawn-worktree.sh create` now plants
+# `<wt>/.bionic -> <main-root>/.bionic` so a plain relative write from inside a
+# worktree lands in the one project memory. A link is worth reporting here only
+# when it resolves somewhere OTHER than that main root — `worktree_legacy_links`
+# (lib/worktree.sh) is the one predicate that tells the two apart, the same one
+# doctor.sh's own report now calls, so neither surface keeps a second copy of
+# the comparison.
 LINKS=""
-for LN in "$BIONIC_ROOT"/.worktrees/*/.bionic; do
-  [ -L "$LN" ] || continue
+while IFS= read -r LN; do
+  [ -n "$LN" ] || continue
   LINKS="${LINKS}  ${LN#"$BIONIC_ROOT"/} -> $(readlink "$LN" 2>/dev/null)
 "
-done
+done < <(worktree_legacy_links "$BIONIC_ROOT")
 
 # ---------------------------------------------------------------- the silent auto-sweep
 #
