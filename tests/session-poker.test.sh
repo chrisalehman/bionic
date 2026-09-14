@@ -1916,6 +1916,37 @@ wave_plan_at() {  # <repo> <path under <docs-root>/plans> <budget or "-"> <table
 
 # The poker under an injected pressure reading. The two knobs are exported for exactly one
 # invocation and unset afterwards, so no case can leak a reading into the next.
+# ---------- the live answer, planted where `session_transcript` looks for it ----------
+#
+# Any project directory of CLAUDE_CONFIG_DIR, file `<session-id>.jsonl`. Section 19 owns the
+# NARRATIVE (it is the section that made the tick read one) and used to own the code too;
+# Section 12's stand-down cases need the same primitive, and a second copy of it there would
+# be two ideas of what a ListAgents answer looks like. The BODY is always composed by
+# tests/lib/live-answer.sh out of the committed corpus, never hand-typed, so separators and
+# ref suffixes are the harness's rather than this suite's guess about them.
+plant_answer() {  # <transcript file> <state: fresh|stale|none> <name[:status]>...
+  local tr="$1" state="$2"; shift 2
+  local body
+  mkdir -p "$(dirname "$tr")"
+  if [ "$state" = "none" ]; then
+    printf '{"type":"user","timestamp":"2026-09-05T00:50:00.000Z","message":{"role":"user","content":"go"}}\n' \
+      > "$tr"
+    return 0
+  fi
+  body="$(live_answer_body "$@")"
+  {
+    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
+    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
+      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S19LISTAGENTS",name:"ListAgents",input:{}}]}}'
+    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S19LISTAGENTS",content:$b}]}}'
+    [ "$state" = "stale" ] && jq -nc --arg ts "2026-09-05T00:55:00.000Z" \
+      '{type:"user",timestamp:$ts,message:{role:"user",content:"anything else?"}}'
+  } > "$tr"
+  return 0
+}
+
 poke_pressure() {  # <repo> <free_mb> <load_1m> <args...>
   local repo="$1" free="$2" load="$3"; shift 3
   BIONIC_PROBE_FREE_MB="$free" BIONIC_PROBE_LOAD_1M="$load" poke "$repo" "$@"
@@ -2404,14 +2435,37 @@ expect_contains "12a-T22-d a predecessor's roster does not spend a name here" "p
 # MET AND NOT YET SWEPT is the predicate. A `landing-swept/v1` marker is written when the
 # agent DISAPPEARED from the harness's task list, so a swept row's agent is already gone
 # and naming it would be the noise that teaches a reader to skip the line.
+#
+# THE PANEL IS THE SECOND HALF OF THE PREDICATE, AND THE TELL IS A DOER NOW (T1; D1, D2).
+# `poker: TASKSTOP <name>` named a MET lineage and left the operator to go and find its
+# address; from 1.8.0 the tick prints `poker: STANDDOWN <name>` for a MET row whose agent the
+# harness STILL LISTS and writes the stop order for it in the same breath, so the TaskStop
+# that answers it is never refused by the stop gate. The same row with its agent GONE is not
+# a stand-down at all — nobody is there to stop — and is closed by an ack instead (§26).
+#
+# So every case below carries a ListAgents answer, planted where `session_transcript` looks
+# for it. WITHOUT one the tick cannot tell "still there" from "gone" and does neither thing:
+# that is the no-answer direction, pinned in §26 rather than here.
+S12_CFG="$(fake_config_dir s12-standdown)"
+export CLAUDE_CONFIG_DIR="$S12_CFG"
+s12_answer() {  # <state> <name[:status]>...
+  plant_answer "$S12_CFG/projects/-fixture-project/$SID.jsonl" "$@"
+}
 
 R12ET="$(make_repo s12-taskstop-met)"; new_roster "$R12ET"; armed_ago "$R12ET"; delivered_plan "$R12ET"
 DEL_E="$R12ET/delivered.md"; echo "done" > "$DEL_E"
 add_row "$R12ET" name=done-writer deliverable="$DEL_E" duration="1 minute" \
   launched_at="$(iso_ago 600)"
+s12_answer fresh "done-writer:running"
 poke "$R12ET" tick
-expect_contains "12a-T22-e a MET row the sweep has not closed is named for a TaskStop" \
-  "poker: TASKSTOP done-writer" "$OUT"
+OUT_12E="$OUT"
+expect_contains "12a-T22-e a MET row whose agent is still listed is stood down by name" \
+  "poker: STANDDOWN done-writer" "$OUT"
+expect_contains "12a-T22-e2 …and the tell says the order is already written" \
+  "TaskStop it (the order is written)" "$OUT"
+expect_contains "12a-T22-e3 …and the order is on disk, attributed to the Patrol" \
+  "|by=patrol|target=done-writer" \
+  "$(cat "$R12ET/.bionic/tmp/stop-orders-$SID.state" 2>/dev/null)"
 
 # The control: the SAME row, swept. One marker's difference, and the tell goes quiet.
 R12FT="$(make_repo s12-taskstop-swept)"; new_roster "$R12FT"; armed_ago "$R12FT"; delivered_plan "$R12FT"
@@ -2419,16 +2473,33 @@ DEL_F="$R12FT/delivered.md"; echo "done" > "$DEL_F"
 add_row "$R12FT" name=done-writer deliverable="$DEL_F" duration="1 minute" \
   launched_at="$(iso_ago 600)"
 swept_marker_write "$(roster_of "$R12FT")" "$(iso_ago 30)" "$SID" done-writer a000 MET
+s12_answer fresh "done-writer:running"
 poke "$R12FT" tick
 expect_absent "12a-T22-f a swept row's agent is already gone, so nothing is named" \
-  "poker: TASKSTOP" "$OUT"
+  "poker: STANDDOWN" "$OUT"
+expect_eq "12a-T22-f2 …and no order is written for a row the sweep already closed" "no" \
+  "$([ -f "$R12FT/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
 
 # The second control: an OPEN row is not a MET lineage and is never named.
 R12GT="$(make_repo s12-taskstop-open)"; new_roster "$R12GT"; armed_ago "$R12GT"; delivered_plan "$R12GT"
 add_row "$R12GT" name=live-writer deliverable="$R12GT/never-written.md" duration="4 hours" \
   launched_at="$(iso_ago 60)"
+s12_answer fresh "live-writer:running"
 poke "$R12GT" tick
-expect_absent "12a-T22-g an open row is never named for a stop" "poker: TASKSTOP" "$OUT"
+expect_absent "12a-T22-g an open row is never named for a stop" "poker: STANDDOWN" "$OUT"
+expect_eq "12a-T22-g2 …and an open row draws no order either" "no" \
+  "$([ -f "$R12GT/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
+
+# THE RETIRED TELL, asserted gone rather than assumed: `TASKSTOP` was the 1.7.x spelling, and
+# a reader (or a gate) still keyed on it would go silently blind. Asserted against the tick
+# that DID stand a row down — the one output where the old tell would have appeared.
+expect_absent "12a-T22-h the retired TASKSTOP tell is not printed beside the new one" \
+  "TASKSTOP" "$OUT_12E"
+
+# THE CONFIG DIR IS HANDED BACK. Every case after this one is an ordinary fill case with no
+# live answer of its own, and leaving the pointer here would let THIS section's transcript
+# decide their `open=` — the trim would read every open row as gone and every gap as wide.
+unset CLAUDE_CONFIG_DIR
 
 # ---------- 12b: the gap closes as rows open ----------
 #
@@ -3473,25 +3544,7 @@ S19_CFG="$TMPROOT/s19-config"
 mkdir -p "$S19_CFG/projects/-fixture-project"
 
 s19_answer() {  # <state: fresh|stale|none> <name[:status]>... -> plants this session's transcript
-  local state="$1"; shift
-  local tr="$S19_CFG/projects/-fixture-project/$SID.jsonl" body
-  if [ "$state" = "none" ]; then
-    printf '{"type":"user","timestamp":"2026-09-05T00:50:00.000Z","message":{"role":"user","content":"go"}}\n' \
-      > "$tr"
-    return 0
-  fi
-  body="$(live_answer_body "$@")"
-  {
-    jq -nc --arg ts "2026-09-05T00:50:00.000Z" \
-      '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}'
-    jq -nc --arg ts "2026-09-05T00:51:00.000Z" \
-      '{type:"assistant",timestamp:$ts,message:{role:"assistant",content:[{type:"tool_use",id:"toolu_01S19LISTAGENTS",name:"ListAgents",input:{}}]}}'
-    jq -nc --arg ts "2026-09-05T00:52:23.349Z" --arg b "$body" \
-      '{type:"user",timestamp:$ts,message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_01S19LISTAGENTS",content:$b}]}}'
-    [ "$state" = "stale" ] && jq -nc --arg ts "2026-09-05T00:55:00.000Z" \
-      '{type:"user",timestamp:$ts,message:{role:"user",content:"anything else?"}}'
-  } > "$tr"
-  return 0
+  plant_answer "$S19_CFG/projects/-fixture-project/$SID.jsonl" "$@"
 }
 
 # THE FILL IS COMPARED EXACTLY, never with a substring. `poker: FILL ONE` is a PREFIX of
@@ -4379,5 +4432,125 @@ add_row "$R25G" name=twinned status=identified agent_id=atwinned-252525252525252
 s19_answer none
 poke_pressure "$R25G" 8192 1.0 tick
 expect_absent "no duplicate-start row, no tell (25f discriminates)" "DUPLICATE-START" "$OUT"
+
+# ============================================================
+section "Section 26: the Patrol closes a moot row — the ack it writes itself (AC-1.3; T1, D2)"
+# ============================================================
+#
+# THE DEFECT, from the 1.7.1 close-out. Two kinds of row survive every sweep and are named on
+# every tick for the life of the session, forever, with nothing anybody can do about them
+# except type an `ack` by hand:
+#
+#   AN ADOPTED MET ROW. `adopt_fold` excludes any name carrying a MET marker, so an adopted
+#   row never arrives with one; the Stop-sweep skips every teammate row that is not already
+#   UNMET; and the adopted agent's own SubagentStop belongs to the session that launched it,
+#   not to this one. Nothing will ever write `landing-swept/v1` for it. Its contract reads MET
+#   off the disk, it is unswept, and so it was named for a stop on every tick.
+#
+#   A `duplicate-start` ROW. hooks/execution-recorder.sh journals one when an id starts a
+#   second time; the reader applied no ack filter, no swept filter and no liveness test, and
+#   the roster is append-only — so the tell repeated for the life of the session too.
+#
+# THE RULE (D2). The Patrol may CLOSE a row when the world shows it moot: the contract is MET
+# (or the row is a duplicate start) AND the panel no longer lists the agent. It closes it the
+# way a human would — through the one ack verb — and the ledger line says who closed it and
+# on what evidence: `by=patrol|reason=moot-and-gone`. There is nothing to stand down, so
+# nothing is printed; the acted-on fact is the ledger, and the row is closed for every reader.
+#
+# WHAT IT MAY NOT DO is close a row on no evidence. With no answer at all the panel is
+# UNKNOWN — not empty — and the tick neither stands the row down nor acks it (26e).
+
+ack_ledger_of() { printf '%s/.bionic/tmp/sweeper-%s.state' "$1" "${2:-$SID}"; }
+
+# ---------- 26a: an ADOPTED MET row whose agent the panel no longer lists ----------
+#
+# The row is adopted through the REAL verb off a predecessor's roster, because "adopted" is
+# exactly the state no sweep will ever mark and a hand-written row carrying `adopted_from=`
+# would be this suite's idea of the shape rather than the writer's.
+PRED_26="d6d6d6d6-1111-4bbb-8ccc-000000000026"
+ID_26="agone-writer-26262626262626"
+R26A="$(make_repo s26-adopted-met)"; new_roster "$R26A"
+DEL_26A="$R26A/delivered-26a.md"; echo "done" > "$DEL_26A"
+add_row_to "$R26A" "$PRED_26" name=gone-writer status=identified agent_id="$ID_26" \
+  subagent_type=bionic:implementor deliverable="$DEL_26A" duration="45 minutes" \
+  cadence="10 minutes"
+poke "$R26A" adopt
+expect_contains "26a meta: the fixture row really was adopted onto this session's roster" \
+  "adopted_from=" "$(grep -F "|name=gone-writer|" "$(roster_of "$R26A")" | tail -1)"
+expect_absent "26a meta: …and no sweep has ever marked it" "landing-swept/v1" \
+  "$(cat "$(roster_of "$R26A")")"
+
+s19_answer fresh "some-other-agent:running"
+poke "$R26A" tick
+expect_eq "26a the tick still exits 0 — closing a moot row is not a refusal" "0" "$RC"
+expect_contains "26a an adopted MET row whose agent is gone is acked by the Patrol" \
+  "|name=gone-writer|by=patrol|reason=moot-and-gone" \
+  "$(cat "$(ack_ledger_of "$R26A")" 2>/dev/null)"
+expect_contains "26a2 …through the real ack verb, on the schema its one reader reads" \
+  "sweeper-ledger/v1|event=ack|" "$(cat "$(ack_ledger_of "$R26A")" 2>/dev/null)"
+expect_absent "26a3 …and nothing is stood down: there is nobody left to stop" \
+  "STANDDOWN" "$OUT"
+
+# ---------- 26b: the second tick is SILENT, and acks nothing twice ----------
+poke "$R26A" tick
+expect_absent "26b the second tick names the closed row for no stop" "STANDDOWN gone-writer" "$OUT"
+expect_absent "26b2 …nor under the retired tell" "TASKSTOP" "$OUT"
+expect_eq "26b3 …and the row is acked exactly once, not once per tick" "1" \
+  "$(grep -c '|event=ack|' "$(ack_ledger_of "$R26A")" 2>/dev/null | tr -d ' ')"
+
+# ---------- 26c: a duplicate-start row whose agent the panel no longer lists ----------
+#
+# The tell still fires on the tick that finds it — the fact is new to this reader — and the
+# SAME tick closes the row, so the session is told once instead of every ten minutes.
+R26C="$(make_repo s26-dupstart-gone)"; new_roster "$R26C"
+add_row "$R26C" name=twinned status=identified agent_id=atwinned-2626262626262626 \
+  deliverable="$R26C/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R26C" name=twinned status=duplicate-start agent_id=atwinned-2626262626262626 \
+  deliverable="$R26C/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "some-other-agent:running"
+poke "$R26C" tick
+expect_contains "26c the duplicate-start tell still fires on the tick that finds it" \
+  "poker: DUPLICATE-START twinned" "$OUT"
+expect_contains "26c2 …and the same tick closes the row, on the evidence that it is moot" \
+  "|name=twinned|by=patrol|reason=moot-and-gone" \
+  "$(cat "$(ack_ledger_of "$R26C")" 2>/dev/null)"
+
+poke "$R26C" tick
+expect_absent "26c3 the second tick repeats neither the tell…" "DUPLICATE-START" "$OUT"
+expect_eq "26c4 …nor the ack" "1" \
+  "$(grep -c '|event=ack|' "$(ack_ledger_of "$R26C")" 2>/dev/null | tr -d ' ')"
+
+# ---------- 26d: the panel STILL lists it — nothing is closed ----------
+#
+# The discriminator for both arms above. A row whose agent is still there is the stand-down
+# case, never the ack case: closing it would throw away the contract while its author is
+# still working, which is the one thing an ack can never be taken back from.
+R26D="$(make_repo s26-dupstart-live)"; new_roster "$R26D"
+add_row "$R26D" name=twinned status=identified agent_id=atwinned-2d2d2d2d2d2d2d2d \
+  deliverable="$R26D/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+add_row "$R26D" name=twinned status=duplicate-start agent_id=atwinned-2d2d2d2d2d2d2d2d \
+  deliverable="$R26D/never-written.md" duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer fresh "twinned:running"
+poke "$R26D" tick
+expect_contains "26d a live duplicate-start row is still told about" \
+  "poker: DUPLICATE-START twinned" "$OUT"
+expect_eq "26d2 …and nothing acks it while its agent is still on the panel" "no" \
+  "$([ -f "$(ack_ledger_of "$R26D")" ] && echo yes || echo no)"
+
+# ---------- 26e: NO answer is not an empty panel ----------
+#
+# `none` means the transcript carries no ListAgents answer at all — the state of every
+# session before its first one, and of any session whose panel scrolled out of the window.
+# An unknown panel is not evidence that anybody is gone, so the tick does neither thing.
+R26E="$(make_repo s26-no-answer)"; new_roster "$R26E"; armed_ago "$R26E"; delivered_plan "$R26E"
+DEL_26E="$R26E/delivered-26e.md"; echo "done" > "$DEL_26E"
+add_row "$R26E" name=done-writer deliverable="$DEL_26E" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+s19_answer none
+poke "$R26E" tick
+expect_eq "26e a tick with no panel answer still exits 0" "0" "$RC"
+expect_absent "26e2 …stands nothing down on an answer it does not have" "STANDDOWN" "$OUT"
+expect_eq "26e3 …and closes nothing on it either" "no" \
+  "$([ -f "$(ack_ledger_of "$R26E")" ] && echo yes || echo no)"
 
 finish

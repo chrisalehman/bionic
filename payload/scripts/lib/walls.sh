@@ -3382,6 +3382,75 @@ timeout you can set, say so in your report and stop — do not background it."
   return 2
 fi
 
+# ---------- ARM R (REQ-3, D4): repair a suite timeout below the harness maximum ----------
+#
+# NOT A SAFETY WALL — A REPAIR. `agents-src/blocks/survival.md` names two minutes as the
+# default when a caller sets no `timeout` at all, and that default kills a real suite
+# before it finishes: the evidence a dispatched task exists to produce is a truncated log,
+# the same failure ARM 1 exists for by a different door. The fix costs nothing to apply and
+# nothing to undo — it changes how long the caller waits, never what the command does
+# (record/wave-13-fixit-180/prototype-hook-rewrite-timeout.md: the harness honors a
+# PreToolUse hook's `updatedInput`, measured on CLI 2.1.270) — so this arm corrects the call
+# rather than refusing it.
+#
+# BOTH GATES THIS ARM NEEDS ARE ALREADY PAID: `$ACTOR` is non-empty (the partition above,
+# repeated right before ARM 1) and `cmd_class "$COMMAND"` = suite (just above ARM 1). A
+# main-thread call never reaches here — it returned at the partition, long before ARM 1.
+#
+# `.tool_input.timeout` IS READ RAW, not through the small cache table `bionic_jq` answers
+# from memory (context.sh:240-257) — this key is not one of the cached ones, so the call
+# falls through to that function's generic `jq -r '<path> // empty'` arm, same as any other
+# not-yet-cached field. ABSENT, NON-NUMERIC AND UNDER THE MAX ALL REPAIR THE SAME WAY: a
+# caller that named no ceiling and one that named a low one are both a worker about to be
+# killed before its suite finishes, and the fix is identical either way.
+local _BSG_MAX _BSG_TIMEOUT _BSG_UPDATED
+_BSG_MAX="${BASH_MAX_TIMEOUT_MS:-600000}"
+_BSG_TIMEOUT=$(bionic_jq '.tool_input.timeout')
+case "$_BSG_TIMEOUT" in
+  ''|*[!0-9]*) _BSG_TIMEOUT="" ;;
+esac
+if [ -z "$_BSG_TIMEOUT" ] || [ "$_BSG_TIMEOUT" -lt "$_BSG_MAX" ]; then
+  # BUILT FROM THE ORIGINAL `tool_input`, WHOLE — `command`, `run_in_background` (`false`
+  # here; ARM 1 above already returned on `true`) and anything else the call carried ride
+  # through unchanged, so the repair is meaning-preserving by construction rather than by a
+  # field list this arm has to keep in step with the Bash tool's own schema. `$BIONIC_INPUT`
+  # is read directly, not through `bionic_jq`: that helper appends `// empty` to whatever
+  # filter it is given and returns text through `-r`, neither of which this arm wants for
+  # building an object.
+  _BSG_UPDATED=$(printf '%s' "${BIONIC_INPUT:-}" | jq -c --argjson t "$_BSG_MAX" \
+    '.tool_input + {timeout: $t}' 2>/dev/null)
+  if [ -n "$_BSG_UPDATED" ]; then
+    # STAGED, NEVER PRINTED DIRECTLY (fold.sh's contract, header comment above `wall_libs`
+    # earlier in this file). This function shares one shell and one stdout with four other
+    # walls; `fold_update_input` is the seam fold.sh gained (T3, D4) so this object and
+    # farm-out-reminder's `additionalContext` can both reach the wire without one silently
+    # overwriting the other — see fold.sh `_fold_emit_context`. `return 1`, not `return 0`:
+    # the fold discards a function's staged text on a silent `return 0`, so a repair must
+    # answer as an advisory to survive the fold at all, even though nothing here is refused.
+    fold_update_input "$_BSG_UPDATED"
+    # `log_finding`'s CHANNEL, SUBJECT AND ROOT (root.sh:251-267) ARE NOT GLOBAL DEFAULTS —
+    # they are DECLARED LAZILY, as a side effect of `_eg_body` (this file's evidence-gate
+    # body, above) reaching its own commit-class validation far enough to need them. A
+    # suite command never takes that path, so `bionic_finding_root` is undefined in this
+    # process by the time this arm runs (measured: calling `log_finding` without this guard
+    # fails `bionic_finding_root: command not found`, from inside the `$(…)` `log_finding`
+    # itself swallows — the stderr line this arm exists to print still appears, but the
+    # audit-file half silently never writes, plus a stray error a reader would have to
+    # explain). Declared here, the same way hooks/canonical-sdlc-governing-skill.sh declares
+    # its own copy at its own top level, naming THIS wall rather than leaving whatever
+    # evidence-gate last set (or never set) on a finding it did not produce.
+    BIONIC_FINDING_CHANNEL="background-suite-guard"
+    BIONIC_FINDING_SUBJECT="$COMMAND"
+    bionic_finding_root() { printf '%s' "$BIONIC_ROOT"; }
+    log_finding suite-timeout "repaired from=${_BSG_TIMEOUT:-absent} to=$_BSG_MAX agent=$ACTOR"
+    return 1
+  fi
+  # `jq` BUILT NOTHING — a payload shape no earlier reader in this hook caught either.
+  # Falling through to ARM 2 is the same unreachable this file leaves every other builder
+  # failure to: `jq` is confirmed on PATH before this hook sources anything at all
+  # (hooks/bash-walls.sh's own preamble), so this line is not expected to run.
+fi
+
 # ---------- ARM 2 (S13, AC-21): THE BUDGET ARM ----------
 #
 # INSIDE A DISPATCHED AGENT ONLY. `hooks/dispatch-preflight.sh` wrote this agent`s budget
