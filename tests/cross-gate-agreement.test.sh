@@ -3244,6 +3244,75 @@ IFS='|' read -r EX_REPO EX_TR <<< "$(mk_order_world "order-expiry" "expired" "ae
 OUT=$(mk_stop_payload "$SID_A" "$EX_TR" "$EX_REPO" "expired" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "an order just outside it does not — the ceremony is where it was" "2" "$ST"
 
+# --- M.4b the order's AUTHOR crosses the same seam (AC-1.1; T1, D1) ---
+#
+# The order widened from "a human said stop" to "a human OR a verified landing said stop",
+# and the writer stamps which. The reader's rule is unchanged — an order is an order — and
+# that is the property here: a Patrol-written order discharges the stop exactly as a human's
+# does, at the same boundary. Writer and reader are different scripts, so no per-component
+# suite can see it; stop-orders.test.sh proves the field is written, stop-guard.test.sh
+# proves the line names it, and only this one proves they are the same field.
+IFS='|' read -r PT_REPO PT_TR <<< "$(mk_order_world "order-patrol" "patrolled" "apatrolled-3333333333333333")"
+( cd "$PT_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order patrolled --by patrol ) >/dev/null 2>&1
+expect_contains "the writer stamped the author on the line the gate reads" "|by=patrol|target=patrolled" \
+  "$(cat "$PT_REPO/.bionic/tmp/stop-orders-$SID_A.state" 2>/dev/null)"
+OUT=$(mk_stop_payload "$SID_A" "$PT_TR" "$PT_REPO" "patrolled" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "a PATROL-written order discharges the stop, exactly as a human's does" "0" "$ST"
+expect_contains "…and the gate reports the author it read, not one it assumed" "by patrol" "$OUT"
+
+# The paired negative at the SAME boundary: attribution is not a second window. A patrol
+# order outside the shared window is as expired as a human's.
+IFS='|' read -r PX_REPO PX_TR <<< "$(mk_order_world "order-patrol-expiry" "patrol-expired" "apatrolx-4444444444444444")"
+( cd "$PX_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order patrol-expired --by patrol --at $((_now - _ttl - 60)) ) >/dev/null 2>&1
+OUT=$(mk_stop_payload "$SID_A" "$PX_TR" "$PX_REPO" "patrol-expired" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "…and an expired one does not, whoever wrote it" "2" "$ST"
+
+# --- M.6 the ack's AUTHOR crosses it too (AC-1.3; T1, D2) ---
+#
+# The ack widened the same way: the Patrol writes one for a row the world shows moot
+# (`by=patrol|reason=moot-and-gone`). ONE OWNER still writes the ledger and the three
+# consumers still read the `acked=` field off the verdict line — so a patrol ack must close
+# a row for all three, and the field must be on the line the real writer wrote. An ack that
+# closed a row for the stop gate but not for the landing gate would be two answers to one
+# question, which is what this whole section exists to forbid.
+AREPO=$(new_repo "ack-by-agreement")
+ASLUG=$(printf '%s' "$AREPO" | sed 's/[^a-zA-Z0-9]/-/g')
+APROJ="$CLAUDE_CONFIG_DIR/projects/$ASLUG"
+ASUB="$APROJ/$SID_A/subagents"
+mkdir -p "$ASUB" "$AREPO/.bionic/tmp"
+ATR="$APROJ/$SID_A.jsonl"
+printf '{}\n' > "$ATR"
+plant "$ASUB" "amoot-5555555555555555" "moot"
+write_plan "$AREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+roster_row_fixture status=confirmed session="$SID_A" name=moot \
+  agent_id=amoot-5555555555555555 launched_at=2026-08-05T00:00:00Z \
+  deliverable=.bionic/docs/record/never.md \
+  teammate_id="moot@session-$(printf '%s' "$SID_A" | cut -c1-8)" \
+  >> "$AREPO/.bionic/tmp/roster-$SID_A.state"
+
+a_vline() {
+  ( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict moot 2>/dev/null ) \
+    | grep -F 'landing-verdict/v1|' | head -1
+}
+expect_contains "before the patrol ack: the one line all three read says acked=no" \
+  "|acked=no|" "$(a_vline)"
+OUT=$(mk_stop_payload "$SID_A" "$ATR" "$AREPO" "moot" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "before the patrol ack: the stop gate refuses" "2" "$ST"
+
+( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" ack moot --by patrol --reason moot-and-gone ) >/dev/null 2>&1
+expect_contains "the one owner wrote the author and the evidence onto its own line" \
+  "|name=moot|by=patrol|reason=moot-and-gone" \
+  "$(cat "$AREPO/.bionic/tmp/sweeper-$SID_A.state" 2>/dev/null)"
+expect_contains "after the patrol ack: the one line all three read says acked=yes" \
+  "|acked=yes|" "$(a_vline)"
+expect_contains "…while the contract itself is still UNMET, computed from the disk alone" \
+  "|state=UNMET|" "$(a_vline)"
+OUT=$(mk_stop_payload "$SID_A" "$ATR" "$AREPO" "moot" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "after the patrol ack: the stop gate passes, as it does for a human's" "0" "$ST"
+OUT=$( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
+expect_contains "…and the stand-down puts it in the batch, as it does for a human's" \
+  "1 row(s) have landed" "$OUT"
+
 # ============================================================
 section "N — the wave-02 facts: one root, one vocabulary, one launch reference (S9)"
 # ============================================================

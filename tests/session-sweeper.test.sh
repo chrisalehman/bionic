@@ -457,6 +457,63 @@ expect_contains "…and journals it" "name=late-row" \
 sweep "$R7" ack another-row
 expect_contains "a later invocation counts the earlier ack too" "2 row(s) acked" "$OUT"
 
+# --- the ack's ATTRIBUTION: who closed the row, and on what evidence (AC-1.3; T1, D2) ---
+#
+# An ack used to mean one thing: the orchestrator verified this agent's completion by hand.
+# From 1.8.0 the Patrol writes one too — for a row whose contract is MET (or whose status is
+# `duplicate-start`) once the panel no longer lists its agent — and the two are not the same
+# fact. The line says which, and what it was read off: `by=human|patrol` and `reason=<word>`.
+# The default is `human`, because a caller that names no author is a person at a terminal.
+#
+# WHY IT IS ON THE LEDGER LINE and not inferred: the ledger is the durable record of every
+# row this session closed, it outlives the session, and "who closed this and why" is the one
+# question a reader asks of a row that was closed without its contract landing.
+R8A="$(make_repo s8ackby)"; new_roster "$R8A"
+add_row "$R8A" name=by-default duration="1 minute" launched_at="$(iso_ago 600)" \
+        deliverable="$R8A/absent-d.md"
+add_row "$R8A" name=by-patrol duration="1 minute" launched_at="$(iso_ago 600)" \
+        deliverable="$R8A/absent-p.md"
+
+sweep "$R8A" ack by-default
+expect_eq "an ack with no --by exits 0" "0" "$RC"
+expect_contains "…and is attributed to a human, which is what an unattributed ack is" \
+  "|name=by-default|by=human" "$(cat "$(ledger_of "$R8A")" 2>/dev/null)"
+
+sweep "$R8A" ack by-patrol --by patrol --reason moot-and-gone
+expect_eq "an ack the Patrol writes exits 0" "0" "$RC"
+expect_contains "…and carries both the author and the evidence, in that order" \
+  "|name=by-patrol|by=patrol|reason=moot-and-gone" "$(cat "$(ledger_of "$R8A")" 2>/dev/null)"
+
+# The row is CLOSED by it exactly as a hand ack closes one — the attribution is a fact about
+# the ack, never a second class of ack.
+expect_contains "a patrol ack closes the row for every reader" "|acked=yes|" \
+  "$( cd "$R8A" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict by-patrol 2>/dev/null \
+      | grep -F 'landing-verdict/v1|' )"
+
+# THE FLAGS ARE NOT NAMES. A caller that meant a flag and mistyped it must not quietly close
+# a row called `--bye`.
+sweep "$R8A" ack by-default --by nobody
+expect_eq "--by takes human or patrol, and refuses anything else" "2" "$RC"
+sweep "$R8A" ack by-default --by
+expect_eq "--by with no value is a usage error" "2" "$RC"
+sweep "$R8A" ack --by patrol --reason moot-and-gone
+expect_eq "flags alone, with no name, are still a usage error" "2" "$RC"
+
+# The reason is one word, because it is read back by machine as well as by eye.
+sweep "$R8A" ack by-default --reason "two words"
+expect_eq "--reason takes one word" "2" "$RC"
+
+# Several names in one call share the one attribution — the Patrol closes a set on one
+# reading of the panel, not a set of separately-argued rows.
+R8B="$(make_repo s8ackby-many)"; new_roster "$R8B"
+for n in one two; do
+  add_row "$R8B" name="row-$n" duration="1 minute" launched_at="$(iso_ago 600)" \
+          deliverable="$R8B/absent-$n.md"
+done
+sweep "$R8B" ack row-one row-two --by patrol --reason moot-and-gone
+expect_eq "…and both lines carry it" "2" \
+  "$(grep -c '|by=patrol|reason=moot-and-gone' "$(ledger_of "$R8B")" 2>/dev/null | tr -d ' ')"
+
 # ============================================================
 section "Section 5: verdict — the landing readback (epic-16 w1 AC-3, AC-4)"
 # ============================================================
