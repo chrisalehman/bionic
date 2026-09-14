@@ -752,6 +752,25 @@ detect_marketplace_source_path() {
   return 0
 }
 
+# THE COMMON GIT DIRECTORY OF A DIRECTORY, or empty when it names no repository at all.
+# `--path-format=absolute` needs git >= 2.31 (the same floor lib/root.sh's own
+# `_bionic_root_start` documents); the fallback absolutizes a relative answer against
+# <dir> for anything older. Two checkouts share this value exactly when one is the
+# other's linked worktree, or both are — the cheapest git question for "same
+# repository, different worktree" (research R1 §7), and the one this codebase already
+# asks the same way in lib/root.sh and lib/roots.sh's `worktree_root`.
+_detect_git_common_dir() {  # <dir> -> absolute path, or empty
+  local dir="${1:-}" common
+  [ -n "$dir" ] || return 0
+  common="$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
+  if [ -z "$common" ]; then
+    common="$(git -C "$dir" rev-parse --git-common-dir 2>/dev/null)" || common=""
+    case "$common" in ""|/*) ;; *) common="$dir/$common" ;; esac
+  fi
+  [ -n "$common" ] && printf '%s\n' "$common"
+  return 0
+}
+
 # THE "THIS CHECKOUT / OTHER checkout / unregistered" VERDICT — ONE SITE FOR THE RULE
 # (epic-22 wave-01 task 14, E2). `detect_marketplace_source_path`'s own header says that
 # comparison is the CALLER's to make; this function IS that caller, so that doctor.sh and
@@ -763,14 +782,27 @@ detect_marketplace_source_path() {
 # resolves it from its own script location; version.sh does the same) — never derived
 # here, because "which tree is asking" is a fact only the caller has.
 #
-# THREE ANSWERS, never a guess between them:
-#   "unregistered"    no marketplace registration names a source path at all
-#   "this checkout"   the registration's path resolves to the caller's own root
-#   "OTHER checkout"   it resolves to a real, different directory — OR it is a git-feed
-#                      registration naming no filesystem path (a `source.repo` string,
-#                      which can never equal a realpath) — either way, not this tree.
-detect_checkout_verdict() {  # <realpath to compare against> -> one of the three answers
-  local compare_root="${1:-}" mp_path st mp_real
+# FOUR ANSWERS, never a guess between them:
+#   "unregistered"                        no marketplace registration names a source
+#                                          path at all
+#   "this checkout"                       the registration's path resolves to the
+#                                          caller's own root
+#   "OTHER checkout (worktree of this repo)"
+#                                          it resolves to a real, different directory
+#                                          THAT SHARES THIS REPOSITORY'S OWN git-common-
+#                                          dir (AC-6.4, wave-13-fixit-180) — a linked
+#                                          worktree of the very repo the caller is
+#                                          asking about, not a stranger. The enum stays
+#                                          path-based: no SHA or commit is compared, so
+#                                          two worktrees on different commits still read
+#                                          this, and a same-commit fact never appears.
+#   "OTHER checkout"                      any other real, different directory — OR a
+#                                          git-feed registration naming no filesystem
+#                                          path (a `source.repo` string, which can never
+#                                          equal a realpath) — either way, an unrelated
+#                                          tree.
+detect_checkout_verdict() {  # <realpath to compare against> -> one of the four answers
+  local compare_root="${1:-}" mp_path st mp_real gc_mp gc_cmp
   mp_path="$(detect_marketplace_source_path)"; st=$?
   if [ "$st" -ne 0 ] || [ -z "$mp_path" ]; then
     printf 'unregistered\n'
@@ -783,9 +815,17 @@ detect_checkout_verdict() {  # <realpath to compare against> -> one of the three
   fi
   if [ -n "$mp_real" ] && [ -n "$compare_root" ] && [ "$mp_real" = "$compare_root" ]; then
     printf 'this checkout\n'
-  else
-    printf 'OTHER checkout\n'
+    return 0
   fi
+  if [ -n "$mp_real" ] && [ -n "$compare_root" ]; then
+    gc_mp="$(_detect_git_common_dir "$mp_real")"
+    gc_cmp="$(_detect_git_common_dir "$compare_root")"
+    if [ -n "$gc_mp" ] && [ -n "$gc_cmp" ] && [ "$gc_mp" = "$gc_cmp" ]; then
+      printf 'OTHER checkout (worktree of this repo)\n'
+      return 0
+    fi
+  fi
+  printf 'OTHER checkout\n'
   return 0
 }
 
