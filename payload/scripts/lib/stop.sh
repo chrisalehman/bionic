@@ -1458,16 +1458,28 @@ fi
 # firing into this conversation after a /clear is not this session's tick either.
 TICK_MARK="bionic-patrol session=${BIONIC_SID:0:8}"
 
-# TICK / LISTAGENTS / TASKLIST, folded over the last turn.
+# TICK / TASKLIST, folded over the last turn.
+#
+# THE LISTAGENTS DUTY IS GONE (T22, A-orch-33; AC-4.4). This fold had a second limb: a tick
+# turn was refused until the transcript showed a main-thread `ListAgents` call. That is a
+# chore demanded of the model before a gate will let its turn end — ADR-024's P-A, the rule
+# this wave finishes — and it never named a single thing to DO about what the panel showed.
+# The obligation behind it was real, and it moved to where the fact already lives: the tick
+# reads the roster and prints `poker: TASKSTOP <name>` for every MET lineage still open on
+# it. A tell with a name in it beats a wall that asks for a look.
+#
+# WHAT SURVIVES is the TASK-LIST REFRESH, which is not a look: it is the orchestrator writing
+# down where the run has got to, and a turn that ends without it leaves the ledger behind the
+# work. `both` and `listagents` go with the limb; `tasklist` is now the only verdict that
+# refuses.
 VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TICK_MARK" '
   $1 == "USER" {
     t = $2; sub(/^[ \t]+/, "", t)
     tick = (index(t, mark) == 1)
-    la = 0; tl = 0
+    tl = 0
     next
   }
   $1 == "TOOL" {
-    if ($2 == "ListAgents") { la = 1; next }
     if ($2 == "TaskList")   { tl = 1; next }
     if (plan != "" && index($3, plan) > 0) {
       if ($2 == "Edit" || $2 == "Write" || $2 == "NotebookEdit" || $2 == "Bash") tl = 1
@@ -1476,9 +1488,7 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
   }
   END {
     if (!tick) { print "quiet"; exit }
-    if (la && tl) { print "quiet"; exit }
-    if (!la && !tl) { print "both"; exit }
-    if (!la) { print "listagents"; exit }
+    if (tl) { print "quiet"; exit }
     print "tasklist"
   }
 ')
@@ -1573,12 +1583,6 @@ fi
 # THE FACT AND THE FIX COME FROM THE VERDICT, one row per duty missed (table rows
 # 111-113); the existing paragraph stays whole as `detail`.
 case "$VERDICT" in
-  both)
-    FACT='no ListAgents and no task-list refresh'; FIX='do both, then stop again'
-    REASON='Patrol duties incomplete: no ListAgents call, and no task-list refresh — TaskList or a plan-ledger write. Do both, then stop again — this gate blocks once.' ;;
-  listagents)
-    FACT='no ListAgents call since this Patrol tick'; FIX='call ListAgents, then stop'
-    REASON='Patrol duties incomplete: no ListAgents call since this Patrol tick. Refresh the subagent panel, then stop again — this gate blocks once.' ;;
   tasklist)
     FACT='no task-list refresh since this tick'; FIX='refresh it, then stop again'
     REASON='Patrol duties incomplete: no task-list refresh since this Patrol tick — TaskList or a plan-ledger write. Do one, then stop again — this gate blocks once.' ;;

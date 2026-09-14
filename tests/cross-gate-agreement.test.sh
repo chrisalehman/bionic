@@ -1252,8 +1252,14 @@ expect_eq "C1 gate discharges the stop on that record" "permitted" "$(q_gate sol
 # so nothing may be dischargeable. ---
 plant "$RPROJ/$SID_A/subagents" "adup-2222222222222222" "dup"
 plant "$RPROJ/$SID_A/subagents" "adup-3333333333333333" "dup"
-expect_eq "C2 observation reports the cross-session name as AMBIGUOUS" \
-  "ambiguous" "$(q_observation dup)"
+# RE-POINTED (T22): the register resolves it, and a state this fixture can still plant is
+# one the system can no longer reach — `hooks/dispatch-preflight.sh` refuses a dispatch whose
+# name already has an open row here, so two rows of one name cannot both be open. What the
+# roster does with a fixture that plants them anyway is its ordinary rule: the last row of a
+# name is its current statement. The GATE still refuses, one line down, for want of an
+# observation — which is the agreement this case is really about.
+expect_eq "C2 observation resolves a name the roster carries twice, latest row wins" \
+  "resolved" "$(q_observation dup)"
 expect_eq "C2 gate refuses it" "refused" "$(q_gate dup)"
 
 # --- case 3: resolves only in ANOTHER session of this project. A KNOWN,
@@ -1298,8 +1304,13 @@ expect_eq "C4 observation reports an unknown name unresolved" "unresolved" "$(q_
 HOMEPROJ="$HOME/.claude/projects/$RSLUG"
 mkdir -p "$HOMEPROJ/$SID_A/subagents"
 plant "$HOMEPROJ/$SID_A/subagents" "adecoy-6666666666666666" "decoy"
-expect_eq "C5 observation ignores metadata under \$HOME/.claude when CLAUDE_CONFIG_DIR names another root" \
-  "unresolved" "$(q_observation decoy)"
+# RE-POINTED (T22): resolution no longer reads a metadata ROOT at all — it reads this
+# session's roster, which `plant` writes into $RREPO whichever directory the metadata went
+# to. So the decoy resolves, and the claim this case still carries is the one that matters:
+# the evidence tier is read from a log path derived from the OWN transcript, never from
+# whatever $HOME happens to hold.
+expect_eq "C5 observation resolves from the roster, not from a metadata root" \
+  "resolved" "$(q_observation decoy)"
 
 # --- case 6: the ARGUMENT GRAMMAR itself — RESIDUAL CLOSED at task 4/4.
 #
@@ -1591,11 +1602,18 @@ expect_contains "the recorder forwards that classification into the record" \
 # therefore has nothing to copy. That is a stronger agreement than a shared label: there is
 # no second reading of it to drift. ---
 plant "$RPROJ/$SID_B/subagents" "acorpse-aaaaaaaaaaaaaaaa" "corpse"
+# `plant` journals an `identified` row as a side effect; this case is about a name the
+# roster carries ONLY on an unconfirmed row, so that row is removed and the unconfirmed one
+# left standing. Before T22 the live set decided this and the row was decoration; the row is
+# the decision now, so the fixture has to mean what the case says (T22).
+grep -v 'status=identified|.*|name=corpse|' "$RREPO/.bionic/tmp/roster-$SID_A.state" \
+  > "$RREPO/.bionic/tmp/roster-$SID_A.state.tmp" \
+  && mv "$RREPO/.bionic/tmp/roster-$SID_A.state.tmp" "$RREPO/.bionic/tmp/roster-$SID_A.state"
 cg_roster_row "$RREPO" "$SID_A" "corpse" "" "" intended
 E5_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" corpse 2>&1 )
 E5_MLINE=$(printf '%s\n' "$E5_OUT" | grep '^stop-check-observation/')
 expect_contains "an unconfirmed row's NAME does not make another session's agent ours" \
-  "Resolved:      not live" "$E5_OUT"
+  "no agent id" "$E5_OUT"
 expect_eq "the recorder is given nothing to forward, because no tier was shown" \
   "" "$E5_MLINE"
 
@@ -1605,8 +1623,10 @@ expect_eq "the recorder is given nothing to forward, because no tier was shown" 
 # established", and ownership is no longer a thing this command decides. ---
 E4_OUT=$( cd "$RREPO" && env -u CLAUDE_CODE_SESSION_ID bash "$OBSERVE" worker 2>&1 )
 E4_MLINE=$(printf '%s\n' "$E4_OUT" | grep '^stop-check-observation/')
-expect_contains "with no own session id the producer refuses, naming the fix" \
-  "call ListAgents" "$E4_OUT"
+# RE-POINTED (T22): with no session key there is no roster to read, so the refusal names
+# the fact — no id on the register — rather than a tool call nobody is obliged to make.
+expect_contains "with no own session id the producer refuses, naming the fact" \
+  "no agent id" "$E4_OUT"
 expect_eq "…and prints no machine line at all" "" "$E4_MLINE"
 rm -f "$RREPO/.bionic/tmp/stop-check.state"
 mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh worker" "$E4_OUT" \
@@ -1831,14 +1851,18 @@ g_stop_reason() {  # -> which refusal the gate reaches for an unobserved target
   case "$out" in
     *"carries no agent id"*) echo unidentified ;;
     *"No observation"*)      echo identified ;;
+    # T22: with the roster gone the gate has no standing over a bare name at all — the
+    # register is what makes a target ours, so a renamed roster is not a target it refuses,
+    # it is a target it does not guard. Same direction, one step earlier.
+    *PASSTHROUGH*)           echo unrostered ;;
     *)                       echo "other" ;;
   esac
 }
 expect_eq "the stop gate identifies its target through the canonical roster" \
   "identified" "$(g_stop_reason)"
 mv "$G_ROSTER" "$G_MUTANT"
-expect_eq "…and cannot identify it at all when the roster is named anything else" \
-  "unidentified" "$(g_stop_reason)"
+expect_eq "…and has no standing over it at all when the roster is named anything else" \
+  "unrostered" "$(g_stop_reason)"
 mv "$G_MUTANT" "$G_ROSTER"
 
 # READER 4 — the probe's roster coverage, which scans OTHER live sessions' roster
@@ -2629,8 +2653,17 @@ expect_eq "…silently — nothing is demanded of a stop the disk already answer
 mk_start_payload "$SID_A" "$KTR" "$KREPO" "w16-chain" "$KID" \
   | bash "$PARTY_ER" >/dev/null 2>&1
 K_IDENT2=$(grep 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
-expect_eq "a second start writes a second identified row" \
-  "2" "$(grep -c 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tr -d ' ')"
+# RE-POINTED (T22). A second start for an id whose LAST row is already `identified` is a
+# resumed copy, not a state advance, and the recorder journals it `duplicate-start` instead
+# of identifying it twice. The chain claim survives whole — the row it writes still carries
+# the id it joined on, the original dispatch tool_use_id and every contract field — and the
+# row that used to prove it is the duplicate row itself.
+K_DUP=$(grep 'status=duplicate-start|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tail -1)
+expect_eq "a second start does NOT write a second identified row" \
+  "1" "$(grep -c 'status=identified|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tr -d ' ')"
+expect_eq "…it journals the duplicate start instead" \
+  "1" "$(grep -c 'status=duplicate-start|.*|name=w16-chain|' "$KROSTER" 2>/dev/null | tr -d ' ')"
+K_IDENT2="$K_DUP"
 expect_contains "…carrying the id it joined on" "agent_id=$KID" "$K_IDENT2"
 expect_contains "…still carrying the original dispatch's tool_use_id" \
   "tool_use_id=toolu_01CHAIN" "$K_IDENT2"
@@ -3921,6 +3954,11 @@ expect_eq "…with no phantom .bionic in the worktree from the gate either" "no"
 
 # THE DISCRIMINATING HALF: remove the record and the same dispatch announces. Without it the
 # assertions above would pass over a wall that had simply stopped announcing anything.
+# A FRESH NAME (T22): the dispatch above journalled a `w99-impl` row, and since the
+# name-in-flight arm a second dispatch under an open name is refused — which is that arm's
+# subject, not this section's.
+N_AGENT_PAYLOAD() { mk_agent_payload "$SID_A" "$NWT" \
+  | jq '.tool_input.name = "w99-impl-r5" | . + {agent_type:"implementor"}'; }
 rm -f "$NATT"
 N_OUT=$(N_AGENT_PAYLOAD | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_ST=$?
 expect_eq "with the record gone the dispatch still passes (R5: attestation never blocks)" "0" "$N_ST"
@@ -4170,8 +4208,17 @@ n_cycle toolu_01CYCLEB
 N_RESUMED_ROW=$(n_latest_row)
 expect_eq "the resume kept the ORIGINAL launch reference, through the real hooks" "$N_T0" \
   "$(printf '%s' "$N_RESUMED_ROW" | tr '|' '\n' | grep '^launched_at=' | cut -d= -f2-)"
-expect_eq "…and appended its own row rather than rewriting one" "2" \
+# RE-POINTED (T22). This "resume" is a BARE second SubagentStart: cycle B's Agent payload
+# carries a tool_use_id no dispatch row exists for, so ARM 2 journals nothing and the last
+# row of the id is still `identified` when the start arrives. That is the resumed-copy shape
+# exactly, and the recorder now journals it `duplicate-start` instead of appending a second
+# identified row. The claim the case came for is unchanged — the row is an APPEND, nothing is
+# rewritten — and it is now asserted over the row the second start actually wrote.
+expect_eq "…and appended its own row rather than rewriting one" "1" \
+  "$(grep -cF '|status=duplicate-start|' "$NLR/.bionic/tmp/roster-$SID_A.state")"
+expect_eq "…leaving the identified row it did not rewrite" "1" \
   "$(grep -cF '|status=identified|' "$NLR/.bionic/tmp/roster-$SID_A.state")"
+N_RESUMED_ROW=$(grep -F '|status=identified|' "$NLR/.bionic/tmp/roster-$SID_A.state" | tail -1)
 expect_eq "…so the reader still calls the delivered contract MET over that row" \
   "MET" "$(n_state_of_row "$N_RESUMED_ROW")"
 
@@ -4191,8 +4238,14 @@ expect_eq "…so the reader still calls the delivered contract MET over that row
 # resume (same agent id, two tool_use_ids — arguably ONE contract resumed, not two dispatched)
 # is a change to a wave-01 remediation and to S6's own keying rule, which is a cross-task
 # decision this task surfaces rather than takes.
-expect_eq "on the LIVE roster the resumed name reads AMBIGUOUS, not MET (recorded finding)" \
-  "AMBIGUOUS" "$(n_state)"
+# THE RECORDED FINDING IS CLOSED (T22). It read AMBIGUOUS because the second start appended a
+# second contract-shaped row under one name and `verdict` counts contracts. A
+# `duplicate-start` row is a status no reader in the fleet recognises — it is inert to the
+# verdict, to the budget, to the sweep and to both stop gates, and visible only to the tick —
+# so one name now carries one contract again and the name reads MET. What was pinned as an
+# honest loss of AC-5's sharpness is pinned here as its recovery.
+expect_eq "on the LIVE roster the resumed name now reads MET (the recorded finding is closed)" \
+  "MET" "$(n_state)"
 
 # THE DISCRIMINATING HALF, by mutation of the middle party: with the override removed the
 # resume re-stamps, the artifact predates the fresh stamp, and the verdict manufactures the
@@ -4202,12 +4255,30 @@ N_MUT_ER="$SANDBOX/fx/unpinned-recorder.sh"
 awk '{ if (index($0, "PRIOR_LAUNCH=$(prior_launch_for_agent") > 0)
          sub(/prior_launch_for_agent/, "true prior_launch_for_agent")
        print }' "$BIONIC_HOOKS_DIR/execution-recorder.sh" > "$N_MUT_ER"
+expect_eq "the mutation really applies (the mutant is not the shipped recorder)" "no" \
+  "$(cmp -s "$BIONIC_HOOKS_DIR/execution-recorder.sh" "$N_MUT_ER" && echo yes || echo no)"
 n_saved_er="$PARTY_ER"; PARTY_ER="$N_MUT_ER"
 n_cycle toolu_01CYCLEC
-N_UNPINNED_ROW=$(n_latest_row)
-expect_eq "…and the reader then calls the SAME delivered artifact stale — the field case" \
-  "UNMET" "$(n_state_of_row "$N_UNPINNED_ROW")"
 PARTY_ER="$n_saved_er"
+# RE-POINTED, AND THE FINDING IS STRONGER THAN THE PIN IT REPLACES (T22).
+#
+# The mutation removes the launch-reference override, so a resume that IDENTIFIES re-stamps
+# `launched_at` and the delivered artifact reads stale — the field case. It cannot reach that
+# state any more, and not because the pin got weaker: a bare repeat start for an id whose
+# last row is already `identified` no longer writes a contract row AT ALL. It writes a
+# `duplicate-start` row, a status no verdict reader recognises, so there is no fresh launch
+# reference for the mutation to move and the delivered contract still reads MET.
+#
+# What is asserted here is therefore the immunity itself, with its mechanism named: the
+# mutant recorder ran (above), it wrote its row, and the row it wrote is inert.
+# ASSERTED AT THE MECHANISM, not at a row count: the claim is that no row on this roster
+# carries a launch reference other than the original, which is the fact the field case turned
+# on. A mutant that had re-stamped one would put a second `launched_at=` value here.
+expect_eq "…and no row on the roster carries a launch reference the mutation moved" \
+  "1" "$(grep -oE 'launched_at=[^|]*' "$NLR/.bionic/tmp/roster-$SID_A.state" \
+         | sort -u | grep -c .)"
+expect_eq "…so the SAME delivered artifact is still MET — the field case is unreachable" \
+  "MET" "$(n_state)"
 
 # ============================================================
 section "O — session-poker's copied primitives, CODE-identical (6-axis D-1)"
@@ -6481,7 +6552,7 @@ expect_eq "…and the doctored gate now fails the very pin above (the arm goes r
 rm -rf "$LR_GATE_MUT_ROOT"
 
 # ============================================================
-section "LA — THE LIVE-AGENT SET: one parser, three readers"
+section "LA — THE LIVE-AGENT SET: one parser, and who still reads it (T22)"
 # ============================================================
 #
 # THE OWNERSHIP-TABLE ROW (spec §Design §3): "live agent set · owning module `live_agents`
@@ -6497,10 +6568,21 @@ section "LA — THE LIVE-AGENT SET: one parser, three readers"
 # what that hook does with it. What is only visible HERE is that the three hooks are reading
 # the SAME parser — which is proved by breaking it once and watching all three answers move.
 #
-# THE THREE READERS ARE ASKED THROUGH THEIR OWN SURFACES, never by calling the library:
+# WHO READS IT NOW (T22, A-orch-33). The stop path left this row: `hooks/stop-guard.sh` and
+# `hooks/stop-check.sh` resolve a typed target on THIS SESSION'S ROSTER, because the live set
+# is a reading only the model can ask for and a stop that waited for one was a chore in front
+# of a judgement (ADR-024, P-A). What survives is the reader that was never a precondition —
+# the dispatch budget — and `hooks/session-poker.sh`'s tick, which owns AC-4.3's tell.
+#
+# SO THIS SECTION NOW PROVES TWO THINGS AT ONCE, and the mutation battery below proves both
+# with the same doctored parser: the budget MOVES when the parser breaks (it reads it), and
+# the stop path DOES NOT (it reads the roster). A shared parser with one reader would pass
+# the first half; a stop path that had quietly kept a private copy would fail the second.
+#
+# THE SURFACES, never the library:
 #   · dispatch-preflight — its budget refusal, which counts the roster's open rows against
 #     the live set (`open=` in the BLOCKED line)
-#   · stop-guard          — its resolution of a typed target on the Stop path
+#   · stop-guard          — its resolution of a typed target on the Stop path (roster-only)
 #   · stop-check          — the operator's listing, whose `Resolved:` line is the answer
 #
 # TWO NAMES, ONE ROSTER, FOR A REASON. The budget walks `status=intended` rows and
@@ -6599,13 +6681,16 @@ expect_absent "…and it does not call the target absent from the recorded answe
 # be resolving from something other than the live set.
 LA_CG=$(la_check la-ghost)
 LA_GG=$(la_guard la-ghost)
-expect_contains "a name the live set does not carry is NOT live to the observation" \
-  "not live" "$LA_CG"
+# RE-POINTED (T22): what separates `la-target` from `la-ghost` on the stop path is a ROSTER
+# ROW, not a line of the harness's answer — both names are equally absent from this session's
+# register, and `la-ghost` has no row.
+expect_contains "a name the roster does not carry resolves no id for the observation" \
+  "no agent id" "$LA_CG"
 expect_absent "…and carries no agent id with it" "$LA_TID" "$LA_CG"
 expect_contains "…and the stop guard passes it through, having no standing over it" \
   "PASSTHROUGH" "$LA_GG"
-expect_contains "…saying so in the live set's own words" \
-  "names no live agent of this session" "$LA_GG"
+expect_contains "…saying so in the register's own words" \
+  "appears on no roster row of this session" "$LA_GG"
 
 # --- LA.3 THE DISCRIMINATOR: mutate the parser's awk, all three answers move ----
 #
@@ -6637,12 +6722,18 @@ LA_TREE="$BIONIC_HOOKS_DIR/.."
 
 expect_absent "mutated parser: the dispatch wall no longer counts the seat as open" \
   "open=1" "$LA_B1"
-expect_absent "mutated parser: the observation no longer resolves the target" "$LA_TID" "$LA_C1"
-expect_contains "…it reports it as absent from the live set instead" "not live" "$LA_C1"
-expect_contains "mutated parser: the stop guard now calls the same target not live" \
-  "Target 'la-target' is not live" "$LA_G1"
-expect_contains "…in the parser's own terms: the answer names no such teammate" \
-  "names no teammate 'la-target'" "$LA_G1"
+# THE OTHER HALF OF THE DISCRIMINATOR (T22). The budget moved, one line up, because it reads
+# the parser. The stop path must NOT move, because it reads the roster — and the strongest
+# statement of that is byte equality of the whole channel across the mutation.
+expect_contains "mutated parser: the observation still resolves the target from the ROSTER" \
+  "$LA_TID" "$LA_C1"
+expect_absent "…and never reports it as absent from a set it no longer consults" \
+  "not live" "$LA_C1"
+la_norm_m() { printf '%s\n' "$1" | sed 's#/[^ ]*/hooks/#TREE/#g'; }
+expect_eq "mutated parser: the stop guard's whole channel is unchanged — it reads no parser" \
+  "$(la_norm_m "$LA_G0")" "$(la_norm_m "$LA_G1")"
+expect_contains "…and that channel is a real refusal, not an empty string (not vacuous)" \
+  "bionic: " "$LA_G1"
 
 # --- LA.4 restored: the shipped tree answers as it did before the mutation ------
 # The observation prints an AGE, which moves by a second between two runs of the same
@@ -6750,10 +6841,13 @@ LA_B5B=$(la_budget)
 LA_TREE="$BIONIC_HOOKS_DIR/.."
 [ -d "$LA_TREE/scripts/lib" ] || LA_TREE="$BIONIC_HOOKS_DIR/../payload"
 
-expect_contains "mutation B: the guard loses the finished agent it exists to stop" \
+# RE-POINTED (T22). Filtering `idle` out inside the reader was the WRONG place for S16's
+# rule, and the reason it was wrong is that it took the finished agent away from the gate
+# whose whole job is stopping it. The gate no longer reads the parser at all, so the mutation
+# cannot reach it — which is the same finding stated as an immunity rather than a loss.
+expect_absent "mutation B: the guard does not lose the finished agent it exists to stop" \
   "names no teammate 'la-target'" "$LA_G5B"
-# Standing is broader than liveness (LA.1) — the identified roster row alone earns a
-# BLOCK — so what moves here is the REASON, and the shipped parser never gives it.
+expect_contains "…it still has standing and still refuses on the evidence" "bionic: " "$LA_G5B"
 expect_absent "…a sentence the shipped parser never said of the same target" \
   "names no teammate" "$LA_G5"
 expect_absent "mutation B: the wall's count is unchanged — it read idle as closed already" \
