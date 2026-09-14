@@ -1355,6 +1355,42 @@ _marker_dup_after="$(grep -F "${SWEPT_SCHEMA}|" "$OWN_ROSTER" | grep -c -F '|nam
 expect_eq "a second adopt appends no second row for the same agent" "$_dup_before" "$_dup_after"
 expect_eq "…nor a second copy of the carried marker" "$_marker_dup_before" "$_marker_dup_after"
 
+# ---------- 8h: A NAME ALREADY LIVE HERE NEVER GETS A SECOND LIVE ROW (T6, AC-6.1) --------
+#
+# The idempotence check above is BY AGENT ID — a second agent, under a DIFFERENT id, adopted
+# under the SAME name is not what it catches. Two live rows of one name is exactly the
+# ambiguity `hooks/stop-guard.sh`'s own stop refusal exists to police (T29 §7); this proves
+# the write side never manufactures it in the first place.
+R8N="$(make_repo s8-live-name-collision)"; new_roster "$R8N"
+ID_LIVE_OWN="alreadylive-88888888888888"
+ID_PRED_DUP="predecessor-dup-8888888888"
+PRED_8N="d8d8d8d8-1111-4bbb-8ccc-000000000088"
+# THIS SESSION'S OWN roster already carries a LIVE row named dup-writer.
+add_row "$R8N" name=dup-writer status=identified agent_id="$ID_LIVE_OWN" \
+  deliverable="$R8N/own.md" duration="4 hours" launched_at="$(iso_ago 60)"
+# A PREDECESSOR's roster carries a DIFFERENT agent under the identical name, still open.
+add_row_to "$R8N" "$PRED_8N" name=dup-writer status=identified agent_id="$ID_PRED_DUP" \
+  deliverable="$R8N/pred.md" duration="4 hours" launched_at="$(iso_ago 90)"
+poke "$R8N" adopt
+OWN_ROSTER_8N="$(cat "$(roster_of "$R8N")")"
+expect_contains "a name already live here adopts under the next free -r<n>, not the name asked for" \
+  "|name=dup-writer-r2|" "$OWN_ROSTER_8N"
+expect_contains "…and the renamed row is the adopted one" \
+  "adopted_from=$PRED_8N" "$(grep -F '|name=dup-writer-r2|' "$(roster_of "$R8N")")"
+expect_eq "…exactly one live row still carries the bare name" "1" \
+  "$(printf '%s\n' "$OWN_ROSTER_8N" | grep -cF '|name=dup-writer|')"
+expect_contains "…and the tick says so once, on stderr" \
+  "adopt: 'dup-writer' is already live on this session's roster — writing this row as 'dup-writer-r2'" \
+  "$OUT"
+
+# THE RENAME IS STILL IDEMPOTENT: a second `adopt` for the SAME predecessor id appends
+# nothing new, by the SAME agent_id+adopted_from check every other adopt idempotence proves.
+_dup8n_before="$(grep -cF '|name=dup-writer-r2|' "$(roster_of "$R8N")")"
+poke "$R8N" adopt
+_dup8n_after="$(grep -cF '|name=dup-writer-r2|' "$(roster_of "$R8N")")"
+expect_eq "a second adopt of the same predecessor id renames nothing twice" \
+  "$_dup8n_before" "$_dup8n_after"
+
 # ---------- 8f: nothing to adopt, and no session key ----------
 R8B="$(make_repo s8-alone)"; new_roster "$R8B"
 add_row "$R8B" name=only-mine status=identified agent_id=aonly-mine-6666666666666666
@@ -2522,6 +2558,31 @@ expect_eq "12a-T22-g2 …and an open row draws no order either" "no" \
 expect_absent "12a-T22-h the retired TASKSTOP tell is not printed beside the new one" \
   "TASKSTOP" "$OUT_12E"
 
+# ---------- 12a-T22-i: A STALE PANEL DEFERS RATHER THAN GUESSES (A-orch-31, T6) ----------
+#
+# Measured 20:55Z: a STALE reading (the panel's last-known answer, not a fresh one) still
+# named a MET row for a stand-down and wrote a SECOND order for an agent a prior, human-
+# issued stop order had already had stopped eighteen minutes earlier. A tell can afford to
+# be a little old; an order and an ack cannot — the arm defers instead of guessing: no
+# STANDDOWN, no order, no ack, and exactly one line saying the next tick decides.
+R12ST="$(make_repo s12-taskstop-stale)"; new_roster "$R12ST"; armed_ago "$R12ST"; delivered_plan "$R12ST"
+DEL_ST="$R12ST/delivered.md"; echo "done" > "$DEL_ST"
+add_row "$R12ST" name=done-writer deliverable="$DEL_ST" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+s12_answer stale "done-writer:idle"
+poke "$R12ST" tick
+expect_absent "12a-T22-i a MET row under a STALE panel reading draws no stand-down" \
+  "poker: STANDDOWN" "$OUT"
+expect_eq "12a-T22-i2 …and no order is written for it" "no" \
+  "$([ -f "$R12ST/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
+expect_eq "12a-T22-i3 …and it is not acked either — a stale reading is not evidence it is gone" "no" \
+  "$([ -f "$R12ST/.bionic/tmp/sweeper-$SID.state" ] && echo yes || echo no)"
+expect_contains "12a-T22-i4 …and the tick says exactly why, once" \
+  "poker: stand-down deferred — the panel reading is stale; ListAgents and the next tick decides" \
+  "$OUT"
+expect_eq "12a-T22-i5 …and only once" "1" \
+  "$(printf '%s\n' "$OUT" | grep -c 'stand-down deferred' | tr -d ' ')"
+
 # THE CONFIG DIR IS HANDED BACK. Every case after this one is an ordinary fill case with no
 # live answer of its own, and leaving the pointer here would let THIS section's transcript
 # decide their `open=` — the trim would read every open row as gone and every gap as wide.
@@ -3652,7 +3713,9 @@ s19_answer stale "live-writer:idle"
 poke_pressure "$R19E" 8192 1.0 tick
 expect_eq "a STALE answer falls back to the roster count" "ONE" "$(s19_fill "$OUT")"
 expect_contains "…and names the state in one line" \
-  "poker: live set stale — open= counted from the roster; ListAgents before any dispatch" "$OUT"
+  "poker: live set stale — open= counted from the roster" "$OUT"
+expect_absent "…and the retired ListAgents clause is gone (T6, AC-6.5)" \
+  "ListAgents before any dispatch" "$OUT"
 expect_eq "…and the tick still exits 0 rather than refusing" "0" "$RC"
 
 # ---------- 19f: NONE — no usable answer in the transcript ----------
@@ -3663,7 +3726,9 @@ s19_answer none
 poke_pressure "$R19F" 8192 1.0 tick
 expect_eq "an unreadable live set falls back to the roster count too" "ONE" "$(s19_fill "$OUT")"
 expect_contains "…naming that state instead" \
-  "poker: live set none — open= counted from the roster; ListAgents before any dispatch" "$OUT"
+  "poker: live set none — open= counted from the roster" "$OUT"
+expect_absent "…and the retired ListAgents clause is gone here too (T6, AC-6.5)" \
+  "ListAgents before any dispatch" "$OUT"
 
 # THE SAME, with no transcript for this session at all — the ordinary first tick of a
 # session, and the case that must not become a refusal.

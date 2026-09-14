@@ -4806,6 +4806,22 @@ ROOTS_PLANT2
 expect_eq "Roots …a second claude_home planted in a LIBRARY goes red too" "2" \
   "$(roots_defcount "$ROOTS_MUT" claude_home)"
 
+# --- ONE DEFINITION OF live_ids_of_name() (T6, A-orch-32; research R1 §5) --------------
+#
+# hooks/stop-guard.sh's stop-ambiguity refusal (T29 §7) and hooks/session-poker.sh's
+# adopt_write_row (AC-6.1) both need the identical DISTINCT-id, MET-discharge answer to
+# "is this name already live on this roster". T6 moved the one body out of stop-guard.sh
+# into payload/scripts/lib/roster.sh so the two callers share it instead of drifting the
+# way `roots_defcount` above exists to catch a second copy of any name doing.
+expect_eq "live_ids_of_name() is defined exactly once across hooks/, scripts/ and scripts/lib/" \
+  "1" "$(roots_defcount "$ROOTS_TREE" live_ids_of_name)"
+expect_eq "…and that one definition is roster.sh's" "1" \
+  "$(/usr/bin/grep -cE '^live_ids_of_name\(\)' "$ROOTS_LIB_DIR/roster.sh")"
+expect_eq "…hooks/stop-guard.sh defines none of its own any more" "0" \
+  "$(/usr/bin/grep -cE '^live_ids_of_name\(\)' "$ROOTS_TREE/hooks/stop-guard.sh")"
+expect_eq "…and still calls it — the one call site is unchanged" "1" \
+  "$(/usr/bin/grep -cE '(^|[^a-z_])live_ids_of_name \"' "$ROOTS_TREE/hooks/stop-guard.sh")"
+
 # ============================================================
 section "V — SUPPORTED_SDLC_VERSION: one owner, four carriers, five renderings (AC-19)"
 # ============================================================
