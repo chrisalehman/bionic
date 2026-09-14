@@ -1,4 +1,13 @@
 #!/bin/bash
+# runner: solo
+# TIMING-BOUND (T20, A-orch-28): §16.2 below bounds one hook drive's WALL-CLOCK
+# seconds against 400 aged predecessors. The bound is right; sharing the CPU with
+# seven other suites in tests/run.sh's parallel batch is not — measured 1.270s
+# alone, 3.395s inside an eight-wide batch on a quiet machine, same tree
+# (record/wave-12-fixit-171/floor-057caa2-run2.txt). The marker above holds this
+# suite out of that batch; it runs alone, after the batch drains. See
+# record/wave-12-fixit-171/why-session-start-slow.md for the full mechanism.
+#
 # Tests for hooks/session-start.sh — THE POST-`/clear` DETECTOR (bionic 1.4.0,
 # spec AC-1, AC-4's "the block runs the report", AC-11's symlink listing; plan
 # task SSTART).
