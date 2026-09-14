@@ -1657,6 +1657,72 @@ AGENT_NAME=$(sanitize "$(_jq '.tool_input.name')" 200)
 SUBAGENT_TYPE=$(sanitize "$(_jq '.tool_input.subagent_type')" 200)
 AGENT_MODEL=$(sanitize "$(_jq '.tool_input.model')" 200)
 TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
+
+# ======================================================= THE NAME-IN-FLIGHT ARM
+# (T22, A-orch-33; AC-4.4's prevention half. Chris, first principles: the roster is the
+# identity register.)
+#
+# ONE NAME, ONE AGENT, PER SESSION. Everything downstream keys on the name: the stop gate
+# resolves one, `session-poker.sh adopt` prints one as the message address, the landing
+# sweep folds the roster to the latest row per name. A second dispatch under a name this
+# session already handed out puts two agents behind one row and one address — which is how
+# the stop gate came to carry an ambiguity arm, and how a SendMessage reaches the wrong
+# process. The cure is the door, not the downstream: refuse here, and none of them ever
+# has to choose.
+#
+# OPEN IS A ROSTER READING, AND ONLY A ROSTER READING (ADR-024, P-A/P-B). `intended`,
+# `confirmed` and `identified` are the three live states a dispatch passes through; a name
+# is FREE again once the landing gate has journalled a `landing-swept/v1|…|state=MET` marker
+# for it, which is the same discharge `hooks/session-start.sh`'s `open_rows` and the poker's
+# `adopt_fold` apply. No transcript is read, no live set is consulted, and nothing is asked
+# of the model: the fix names a free name rather than a chore.
+#
+# THE SCOPE IS THIS SESSION. Another session's roster reserves nothing here — names are
+# unique per session because the roster is per session, which is the scope every other
+# reader in the fleet already uses, and a predecessor's finished names must be reusable or a
+# long-lived project runs out of them.
+#
+# PLACED ABOVE THE BRIEF LIFT so a brief the gate is about to refuse for its name is not
+# also parsed, and far above the journal, so a refused dispatch never writes a row.
+#
+# AN UNNAMED DISPATCH IS NOT JUDGED HERE. There is no name to be in flight, and the async
+# dispatches that carry none are exactly the ones nothing addresses by name.
+if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
+  # ONE PASS, TWO FACTS: does a live-status row of this name exist, and has a MET marker
+  # closed it. `awk` rather than two greps because the marker may sit either side of the row
+  # and both have to be seen before either is believed.
+  DP_INFLIGHT=$(awk -F'|' -v want="$AGENT_NAME" '
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    /^roster-state\/v1\|/ {
+      if (kv($0, "name") != want) next
+      st = kv($0, "status")
+      if (st == "intended" || st == "confirmed" || st == "identified") { open = 1; last = st }
+      next
+    }
+    /^landing-swept\/v1\|/ {
+      if (kv($0, "name") == want && kv($0, "state") == "MET") met = 1
+      next
+    }
+    END { if (open && !met) print last }
+  ' "$ROSTER_FILE" 2>/dev/null) || DP_INFLIGHT=""
+  if [ -n "$DP_INFLIGHT" ]; then
+    refuse exit2 dispatch "that name is in flight" "use the FILL line's name" \
+      "    name: ${AGENT_NAME}   ·   its row on this session's roster: ${DP_INFLIGHT}
+
+A name is an identity here. The stop gate resolves one, \`session-poker.sh adopt\` prints
+one as the message address, and the landing sweep folds this roster to the latest row per
+name — so two agents under one name is one contract, one address and two processes.
+
+Fix: dispatch under the name the Patrol tick's FILL line printed for this task. It derives
+one that is free: the task id, or \`<id>-r<n>\` when that id has already had a run. You never
+choose a name yourself. If this row is finished, land it (its marker frees the name)."
+  fi
+fi
+
 LIFTED=$(lift_contract_fields "$(_jq '.tool_input.prompt')")
 
 field_of() {  # <kind>

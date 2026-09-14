@@ -26,6 +26,7 @@ set -uo pipefail
 . "$(dirname "$0")/lib/assert.sh"
 . "$(dirname "$0")/lib/live-answer.sh"
 . "$(dirname "$0")/lib/roster-row.sh"
+. "$(dirname "$0")/lib/swept-marker.sh"
 
 HERE="${BIONIC_HOOKS_DIR}"
 REC="$HERE/execution-recorder.sh"
@@ -1182,6 +1183,63 @@ expect_contains "…the waiver field the absent-deliverable wall writes" "waiver
 expect_contains "…and the correlation key" "tool_use_id=toolu_01IDENTA" "$I1_ROW"
 expect_eq "exactly one identified row is appended" \
   "1" "$(grep -c 'status=identified' "$I1_ROSTER")"
+
+# ---------- T22: A SECOND START FOR ONE ID IS RECORDED, NOT REFUSED ----------
+#
+# (T22, A-orch-33.) One agent id that starts twice in one session is a RESUMED COPY: the
+# harness loses the agent table across a `/clear` but keeps the teammate table, so a
+# SendMessage or a resume aimed at a transcript id brings up a second process against a
+# contract the first is still working. The roster is the identity register, and this is the
+# register noticing.
+#
+# WHY IT IS A RECORD AND NOT A WALL, measured rather than assumed. The installed CLI's own
+# hook-event contract for this event reads, verbatim:
+#     SubagentStart … Exit code 0 - JSON additionalContext shown to subagent
+#                     Exit code 2 - show stderr to user only
+#                     Other exit codes - show stderr to user only
+# and the binary's hookSpecificOutput switch consumes only `additionalContext` for
+# SubagentStart — there is no `permissionDecision` branch for it, as there is for
+# PreToolUse. A SubagentStart hook cannot block. So the second start is journalled
+# `status=duplicate-start` and the Patrol tick is what names it; the door that CAN close
+# is the dispatch wall's name-in-flight arm, one event earlier.
+#
+# IT IS ADDITIVE. Before this, a second start for an already-`identified` id joined nothing
+# at all — the id loop accepts `intended|confirmed` only — and exited silently. The silence
+# is what is replaced.
+
+IFS='|' read -r ID_REPO ID_TR ID_SUB ID_CFG <<< "$(make_world identdup yes)"
+seed_roster_full "$ID_REPO" "$SID_A" "probemate" "toolu_01IDENTDUP" confirmed "$START_ID"
+ID_ROSTER="$ID_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$ID_TR" "$ID_REPO" "general-purpose" "$START_ID")"
+expect_eq "T22-dup: the FIRST start identifies, exactly once" \
+  "1" "$(grep -c 'status=identified' "$ID_ROSTER")"
+expect_eq "…and records no duplicate" \
+  "0" "$(grep -c 'status=duplicate-start' "$ID_ROSTER")"
+
+run_rec "$(mk_subagent_start "$SID_A" "$ID_TR" "$ID_REPO" "general-purpose" "$START_ID")"
+ID_DUP=$(grep 'status=duplicate-start' "$ID_ROSTER" 2>/dev/null)
+expect_contains "T22-dup: a SECOND start for the same id is journalled as a duplicate" \
+  "status=duplicate-start" "$ID_DUP"
+expect_contains "…carrying the id that started twice" "agent_id=$START_ID" "$ID_DUP"
+expect_contains "…and the name the contract was dispatched under" "name=probemate" "$ID_DUP"
+expect_eq "…and it does not identify a second time" \
+  "1" "$(grep -c 'status=identified' "$ID_ROSTER")"
+
+# THE EXIT IS STILL ZERO. This hook cannot block and must not pretend to: a non-zero exit
+# here would put stderr in front of the human for a condition only the tick can act on.
+expect_eq "T22-dup: the recorder still exits 0 — a start hook cannot block" "0" "$REC_ST"
+
+# THE CONTROL. A row CLOSED by a MET marker is a finished lineage, and a start against a
+# finished lineage is not a live duplicate — it is a name being reused, which the dispatch
+# wall already allowed. No duplicate row.
+IFS='|' read -r IDC_REPO IDC_TR IDC_SUB IDC_CFG <<< "$(make_world identdupclosed yes)"
+seed_roster_full "$IDC_REPO" "$SID_A" "probemate" "toolu_01IDENTDUPC" confirmed "$START_ID"
+IDC_ROSTER="$IDC_REPO/.bionic/tmp/roster-${SID_A}.state"
+run_rec "$(mk_subagent_start "$SID_A" "$IDC_TR" "$IDC_REPO" "general-purpose" "$START_ID")"
+swept_marker_write "$IDC_ROSTER" 2026-08-08T09:30:00Z "$SID_A" probemate "$START_ID" MET
+run_rec "$(mk_subagent_start "$SID_A" "$IDC_TR" "$IDC_REPO" "general-purpose" "$START_ID")"
+expect_eq "T22-dup: a start against a lineage already swept MET records no duplicate" \
+  "0" "$(grep -c 'status=duplicate-start' "$IDC_ROSTER")"
 
 # ---------- the full chain: intended → confirmed → identified ----------
 #

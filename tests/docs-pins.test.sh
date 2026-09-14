@@ -2498,9 +2498,47 @@ fi
 
 # AC-4.4 (docs half): the retired dispatch precondition never made it into a rendered doc
 # surface — the hook-side removal is T1's, this is the prose's.
-AC4_HITS="$(grep -rn 'call ListAgents' "${REPO}/skills" "${REPO}/agents" 2>/dev/null || true)"
-expect_eq "126a: AC-4.4 (docs) — no rendered skills/ or agents/ surface still instructs 'call ListAgents'" \
+# WIDENED TO THE WHOLE TREE (T22, A-orch-33). The span Chris ratified is `hooks payload
+# agents skills` — every surface, not the dispatch half — so the stop path is inside it now:
+# the roster resolves a name to an id, and nothing on any path asks the model for a panel
+# reading before it will judge.
+AC4_HITS="$(grep -rn 'call ListAgents' "${REPO}/hooks" "${REPO}/payload" "${REPO}/skills" "${REPO}/agents" 2>/dev/null || true)"
+expect_eq "126a: AC-4.4 — no hooks/, payload/, skills/ or agents/ surface still instructs 'call ListAgents'" \
   "" "$AC4_HITS"
+
+# ---------- T22: the roster is the identity register — the doctrine, published ----------
+#
+# Two sentences the dispatching model reads before it invents anything. The name comes off
+# the tick's FILL line and nowhere else, and a message is addressed to a NAME: a SendMessage
+# to a transcript id after a /clear makes the harness resume a COPY while the original keeps
+# running (measured 2026-09-14). Both are rendered from agents-src/blocks/orchestrator-dispatch.md
+# through agents-src/templates/skills/canonical-sdlc/dispatch.md.tmpl, so the pin is on the
+# RENDERED surface — a hand-edit to the output, or a render that never ran, both read here.
+PIN_T22_NAME='**The name is the FILL line'"'"'s; you never choose one.**'
+PIN_T22_ADDR='**Messages go to names, never ids.**'
+
+if has_pin "$DISPATCH_MD" "$PIN_T22_NAME"; then
+  ok "126c: dispatch.md carries the derived-name doctrine verbatim (T22 (a))"
+else
+  no "126c: dispatch.md carries the derived-name doctrine verbatim (T22 (a))" "file: $DISPATCH_MD"
+fi
+
+if has_pin "$DISPATCH_MD" "$PIN_T22_ADDR"; then
+  ok "126d: dispatch.md carries the message-address doctrine verbatim (T22 (c))"
+else
+  no "126d: dispatch.md carries the message-address doctrine verbatim (T22 (c))" "file: $DISPATCH_MD"
+fi
+
+# THE SOURCE, NOT ONLY THE OUTPUT. `agents/` and `skills/` are render products; a pin that
+# read only them would stay green over a hand-edit that the next `render.sh` silently
+# reverts. Both sentences must be in the block the renderer reads.
+T22_BLOCK="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
+if has_pin "$T22_BLOCK" "$PIN_T22_NAME" && has_pin "$T22_BLOCK" "$PIN_T22_ADDR"; then
+  ok "126e: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of both T22 sentences"
+else
+  no "126e: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of both T22 sentences" \
+     "file: $T22_BLOCK"
+fi
 
 # Anti-vacuity: the grep must fire on the shape it targets.
 AC4_MUT="$TMP/ac4-listagents.md"

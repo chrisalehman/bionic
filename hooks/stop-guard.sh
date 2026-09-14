@@ -93,10 +93,15 @@ file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || ech
 # once (proven on this machine, research-code-map §4.4), so a bare name went ambiguous while
 # the agent was still running and its contract had landed. That is the reported defect.
 #
-# What decides now is `live_agents_has` (scripts/lib/agents.sh): the newest recorded
-# ListAgents answer, which is the harness's own statement about which teammates exist THIS
-# TURN. `adopted_subagent_dirs` went with the scan — the widening it performed was a way to
-# resolve a predecessor's agents, and a successor's live set names them without it.
+# WHAT DECIDES NOW IS THIS SESSION'S ROSTER (T22). Between S6 and 1.7.1 it was
+# `live_agents_has` — the newest recorded ListAgents answer — which fixed the double-file
+# defect but bought a precondition with it: a stop taken before the turn's first ListAgents
+# call was refused for want of a reading, and the model was told to go take one. The roster
+# answers the same question from state the system already wrote, so the `/clear` defect stays
+# fixed and the chore is gone (ADR-024, P-A). `adopted_subagent_dirs` went with the scan —
+# the widening it performed was a way to resolve a predecessor's agents, and `adopt` now
+# journals those rows onto this session's own roster, which is the same widening done once,
+# in writing, by the verb whose job it is.
 #
 # The session's own subagent directory, from the payload's transcript_path.
 # §2.5 of record/epic-15-kill-interception-experiment.md captures the layout
@@ -161,7 +166,7 @@ state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsaf
 # payload/scripts/lib/loader.sh. FAIL OPEN: the stop verdict is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh agents.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -267,12 +272,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-guard"; fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
-# THE ONE READER OF THE LIVE SET (wave-roster-lifecycle S4/S6, D1′). `live_agents_has` is
-# this gate's whole resolution rule now, and hooks/stop-check.sh calls the same function on
-# the same transcript — which is what makes the two agree by construction rather than by a
-# duplicated loop held together with an agreement test (AC-10).
-# shellcheck source=/dev/null
-. "$BIONIC_LIB/agents.sh"
+# THE LIVE-SET READER IS NOT SOURCED HERE ANY MORE (T22, AC-4.4). `agents.sh` was this
+# gate's whole resolution rule between wave-roster-lifecycle S6 and 1.7.1; the roster is now,
+# and a library a file does not read is a library it must not load — loading it would leave
+# the next reader of this header believing the answer still decides something.
 
 # THE ROOT (spec AC-10, lib/root.sh). `git rev-parse --show-toplevel` answered with the
 # WORKTREE's own root, so a stop raised from a linked worktree looked for the roster
@@ -397,6 +400,15 @@ case "$RAW" in *@*) ALIAS_SUFFIX="${RAW##*@}" ;; esac
 # that the agent exists, which is the whole of what D1′ moved.
 ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
 ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
+# A ROSTER THIS GATE CANNOT READ THROUGH IS NOT A LICENCE TO PASS (T22). The roster is
+# repo-controlled state, and a symlink at its own path would let a repo choose which file
+# answers the question this gate asks — the OPEN direction §8 forbids a repo from reaching.
+# It is not read through, exactly as before; what changes is that the unreadability now has
+# to be carried, because standing used to come from the live set and no longer can. An
+# unreadable register gives the gate standing and leaves the id unestablished, which lands
+# on the closed side with the fact named ("no agent id") rather than on a silent passthrough.
+ROSTER_UNREADABLE=""
+[ -L "$ROSTER_FILE" ] && ROSTER_UNREADABLE=1
 # TWO ROWS CAN CARRY ONE AGENT. The dispatch writes the CONTRACT and the recorder writes the
 # id one state later, so the last row of a name is the current statement about it while the
 # id may sit on an earlier one. They are collected separately rather than picking one row and
@@ -440,20 +452,26 @@ ROSTER_ROW="$ROW_BY_NAME"
 AGENT_ID=""
 [ -n "$ROW_WITH_ID" ] && AGENT_ID=$(record_field "$ROW_WITH_ID" agent_id)
 
-# THE LIVE SET DECIDES. `live_agents_has` returns 0 for exactly one live teammate of this
-# name, 1 for none, 2 for more than one, and propagates 3 (STALE) / 4 (NONE) unchanged; its
-# one stderr line carries the state and the newest answer's age, which is what a refusal owes
-# the operator. Captured rather than printed: this gate speaks in refusals, not in diagnostics.
-LIVE_LINE=""; LIVE_RC=0
-LIVE_LINE=$(live_agents_has "$TRANSCRIPT" "$BASE" 2>&1 >/dev/null) || LIVE_RC=$?
-LIVE_STATE="${LIVE_LINE#live-agents: }"; LIVE_STATE="${LIVE_STATE%% *}"
-LIVE_AGE="${LIVE_LINE##*age=}"
-case "$LIVE_STATE" in fresh|stale|none) : ;; *) LIVE_STATE="none" ;; esac
-case "$LIVE_AGE" in ''|*[!0-9]*) LIVE_AGE="none" ;; esac
+# THE ROSTER DECIDES (T22, A-orch-33; AC-4.4). This gate used to ask `live_agents_has` —
+# the newest recorded ListAgents answer — whether exactly one live teammate answered to the
+# typed name, and it refused when the answer was STALE or absent, when the name was in it
+# twice, and when the name was not in it at all. Chris's ruling, 2026-09-14: the live set is
+# IMMATERIAL to stopping. The gate only ever used it for two things — turning a bare name
+# into an agent id, and refusing an ambiguity — and this session's roster answers both. The
+# roster is the identity register: `hooks/dispatch-preflight.sh` opens a row per dispatch,
+# `hooks/execution-recorder.sh` writes the id onto it at SubagentStart, `session-poker.sh
+# adopt` journals a predecessor's rows onto it, and every one of those writes is a fact the
+# system recorded for itself. No act is demanded of the model before this gate will judge
+# (ADR-024, P-A), and there is no reading here that can be stale in a way the model has to
+# repair.
+#
+# WHERE THE AMBIGUITY WENT. It was never a property of stopping — it was the door standing
+# open at dispatch. One name meaning two agents is refused one event earlier now, by the
+# preflight's in-flight arm, so by the time a stop is typed a name means one row.
 
-# THE SHAPE CARVE (T4, AC-6, session-20260815-landing-cleanup). The live set only ever names
+# THE SHAPE CARVE (T4, AC-6, session-20260815-landing-cleanup). The live set only ever named
 # AGENTS, so any OTHER kind of TaskStop target — chief among them a background bash task id
-# (A-D4) — is absent from it forever, with no code path back to order_current() below: the
+# (A-D4) — was absent from it forever, with no code path back to order_current() below: the
 # deny() call is an unconditional `exit 2`, so the escape hatch this gate documents in its own
 # header (a human's order executes) would be permanently unreachable for a target of that kind
 # (step2-research-a1-a3.md §A3). The carve is by SHAPE, not by trying harder to resolve: refuse
@@ -485,77 +503,28 @@ accepted_addresses() {  # -> "    <name>@session-xxxxxxxx" per launcher, newline
   printf '%s' "$out"
 }
 
-# THE CARVE IS ASKED BEFORE THE ANSWER'S STATE (T4), and it has TWO limbs now.
+# STANDING IS TWO FACTS, either of which is enough, and NEITHER NEEDS A TRANSCRIPT (T22).
+# A target wearing an AGENT-ADDRESS shape could only ever have named an Agent-tool dispatch.
+# And a target this session's own roster carries a row for is one this session dispatched,
+# whatever it is spelled like — which is what lets a BARE NAME be refused rather than waved
+# through, and a bare name is the spelling the whole of B-2 is about.
 #
-# It used to be asked only where the directory scan had found nothing, which is the shape
-# `LIVE_RC=1` has here. But the live set can also be UNREADABLE — no ListAgents answer this
-# turn — and a target this gate has no standing over must not be trapped by that: a
-# background bash task id (A-D4) would otherwise be refused by every stop taken before the
-# first ListAgents call of a turn, and the refusal is an unconditional exit, so the escape
-# hatch this gate's own header advertises (a human's order executes) would be unreachable for
-# it (step2-research-a1-a3.md §A3).
-#
-# STANDING IS TWO FACTS, either of which is enough. A target wearing an AGENT-ADDRESS shape
-# could only ever have named an Agent-tool dispatch. And a target this session's own roster
-# carries a row for is one this session dispatched, whatever it is spelled like — which is
-# what lets a BARE NAME be refused rather than waved through, and a bare name is the spelling
-# the whole of B-2 is about. Neither fact needs the live set, so both survive its absence.
+# NOT OURS IS A PASSTHROUGH, NOT A REFUSAL, and it always was: a target this gate has no
+# standing over must not be trapped here, or the escape hatch this gate's own header
+# advertises (a human's order executes) would be unreachable for it.
 guard_has_standing() {
   is_address_shaped "$RAW" && return 0
   [ -n "$ROW_BY_NAME" ] && return 0
+  [ -n "$ROSTER_UNREADABLE" ] && return 0
   return 1
 }
-if [ "$LIVE_RC" -ne 0 ] && [ "$LIVE_RC" -ne 2 ] && ! guard_has_standing; then
+if ! guard_has_standing; then
   # STRUCTURAL, not remote-controlled (Step-6 review flag 2-B): reachable only when standing
   # is absent, and the `if` keeps that true regardless of what `deny()` does — which an
   # unconditional `exit 2` in another function forty lines away did not.
-  echo "PASSTHROUGH: '${RAW}' names no live agent of this session, wears no agent-address shape and appears on no roster row of this session — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
+  echo "PASSTHROUGH: '${RAW}' appears on no roster row of this session and wears no agent-address shape — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
   exit 0
 fi
-
-case "$LIVE_RC" in
-  3|4)
-    # A STALE OR ABSENT ANSWER IS NOT AN EMPTY SET. The reader still prints a stale answer's
-    # teammates, deliberately, so that a caller which misread the status over-counts rather
-    # than concluding "all gone" — but only a FRESH answer is a statement about now, and this
-    # gate refuses on anything else. The model is the only thing that can ask again, so the
-    # fix is named and the newest answer's age is printed with it.
-    deny "no fresh ListAgents answer names it" "call ListAgents, then retry" "Target '${RAW}' cannot be resolved: this session has no fresh ListAgents answer." \
-         "    newest answer: ${LIVE_STATE}   ·   age: ${LIVE_AGE}" \
-         "The live set belongs to the harness and only the model can ask for it (D1′), so this" \
-         "gate reads the answer rather than guessing at it: call ListAgents, then stop." \
-         "An answer recorded before the last user prompt is not a statement about now."
-    ;;
-  2)
-    # TWO LIVE TEAMMATES OF ONE NAME. The alias cannot rescue this: it must resolve to the
-    # same SINGLE entry as the bare name (D2′), so there is no spelling of this target the
-    # gate can accept. Both entries are printed as the harness reported them.
-    #
-    # MATCHED BY FIELD EQUALITY, never as a regular expression (Step-6 security review S-5,
-    # third instance — stop-orders.sh and stop-check.sh carry the same fix). `BASE` is the
-    # operator's typed target; a `.`, `*` or `[` in it would over-match and this refusal
-    # would report a count and a listing that are not the ambiguity it actually found.
-    LIVE_DUPES=$(live_agents "$TRANSCRIPT" 2>/dev/null | awk -F'|' -v want="$BASE" '$1 == want') || LIVE_DUPES=""
-    LIVE_N=0
-    [ -n "$LIVE_DUPES" ] && LIVE_N=$(printf '%s\n' "$LIVE_DUPES" | grep -c .)
-    deny "several live agents answer to that name" "name the full agent id" "Target '${RAW}' is ambiguous: ${LIVE_N} live agents answer to '${BASE}'." \
-         "The harness reports them as:" \
-         "$(printf '%s\n' "$LIVE_DUPES" | sed 's/^/    /')" \
-         "A name is not an identity, and the @session- alias cannot separate these either — it" \
-         "is accepted only when the bare name resolves to exactly ONE live entry. Stop it" \
-         "yourself, or record a human order for the one you mean."
-    ;;
-  1)
-    # Naming the SCOPE is what makes this refusal clearable (Step-6 review R4). Only a target
-    # this gate has standing over reaches here — the carve above returned for every other.
-    deny "no live teammate answers to that name" "call ListAgents, then stop again" "Target '${RAW}' is not live: the fresh ListAgents answer names no teammate '${BASE}'." \
-         "The platform hands this gate the name AS TYPED and resolves nothing for it (P5)." \
-         "What resolves here is the harness's own answer about which teammates exist now —" \
-         "not metadata on disk, which outlives the agents that wrote it. An agent that has" \
-         "already finished is not in that answer and does not need stopping. If you expected" \
-         "it there, call ListAgents and read what came back."
-    ;;
-esac
 
 # ---------- AC-11: `name@session-<launcher>` IS AN ALIAS, AND ONLY THAT ----------
 #
@@ -764,7 +733,7 @@ esac
 # it cannot establish. The refusal names the missing fact instead of demanding a look that
 # cannot be taken, and both other ways past this gate are printed beneath it as always.
 if [ -z "$AGENT_ID" ]; then
-  deny "the session roster carries no id for it" "call ListAgents, then retry" "Target '${RAW}' is live, but this session's roster carries no agent id for '${AGENT_NAME}'." \
+  deny "the session roster carries no id for it" "stop it yourself or order it" "Target '${RAW}' is not on this session's register: the roster carries no agent id for '${AGENT_NAME}'." \
        "An observation is a look at a particular agent's working log, and the log is filed" \
        "under its agent id — which a dispatch records on its roster row when the agent starts" \
        "(status \`identified\`), and which nothing else in this repo knows. Without it there is" \

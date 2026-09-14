@@ -509,7 +509,14 @@ add_row "$R3M" name=overdue-agent-2 deliverable="$R3M/absent-2.md" \
 poke "$R3M" tick
 expect_eq "a mixed roster still resolves to NOTIFY (exit 1)" "1" "$RC"
 expect_contains "…names the overdue row" "rows=overdue-agent-2" "$OUT"
-expect_absent   "…never names the already-landed row" "already-landed" "$OUT"
+# NARROWED TO THE NOTIFY SET (T22). The claim was always about NOTIFY — a landed row is not
+# overdue work — and it was written as a sweep of the whole tick output because nothing else
+# named a MET row. Something does now: the TASKSTOP tell names exactly the MET lineages the
+# sweep has not closed, which is this row. So the assertion reads the decision line it is
+# about, and the tell gets its own cases in Section 12.
+expect_absent   "…never names the already-landed row in the NOTIFY set" \
+  "rows=already-landed" "$OUT"
+expect_absent   "…nor in the NOTIFY detail" "already-landed:" "$OUT"
 expect_contains "…open=1 (the landed row is not open)" "open=1" "$OUT"
 
 # --- UNMET with an unreadable duration -> fail open, QUIET, never a guessed threshold ---
@@ -1147,7 +1154,16 @@ _own_after="$(cksum < "$(roster_of "$R8")")"
 expect_contains "the landed agent's id is printed" "$ID_LANDED" "$OUT"
 expect_contains "the observe address is the predecessor's own subagent transcript" \
   "$C8/projects/-fixture-project/$ADOPT_A/subagents/agent-${ID_LANDED}.jsonl" "$OUT"
-expect_contains "the message address is a SendMessage by id" "SendMessage to:$ID_LANDED" "$OUT"
+# THE MESSAGE ADDRESS IS THE NAME (T22, A-orch-33). It was the transcript-form id until
+# 2026-09-14, when a SendMessage to an id that a `/clear` had re-keyed made the harness
+# RESUME A COPY of the agent while the original was still running — two agents, one
+# contract, one roster row. The agent table is lost across a `/clear`; the TEAMMATE table,
+# which is keyed on the name, is not. So the id keeps the two lines it is actually the key
+# for — the observe path and the stop — and the address a human or a model types is the
+# bare name.
+expect_contains "the message address is a SendMessage by NAME" "SendMessage to:landed-one" "$OUT"
+expect_absent "…never by transcript id, which resumes a copy after a /clear" \
+  "SendMessage to:$ID_LANDED" "$OUT"
 # THE ADDRESS THE PLATFORM ACCEPTS, and not the one this verb happens to hold. The id
 # `adopt` reads off the roster is the TRANSCRIPT form (`aname-<hex>`); the stop primitive
 # takes `<name>@session-<id8>` for a teammate (capture
@@ -2315,6 +2331,104 @@ expect_eq "a filling tick exits 0" "0" "$RC"
 expect_contains "three ready and a gap of two fills exactly two, in table order" \
   "poker: FILL ONE TWO" "$OUT"
 expect_absent "…and does not reach the third" "THREE" "$OUT"
+
+# ---------- 12a-T22: THE FILL LINE PRINTS THE NAME, NOT THE TASK ID ----------
+#
+# (T22, A-orch-33 — "names are derived, not invented".) The orchestrator copies the token
+# the FILL line prints and uses it as the agent's name. For a task whose id has never been
+# on this session's roster the two are the same string, which is why every fixture above
+# still reads `FILL ONE TWO`. They diverge exactly when the id is already spent: a second
+# run of `ONE` cannot be called `ONE`, because the stop gate, the message address and the
+# dispatch wall all key on the name, and one name that means two agents is the ambiguity
+# this whole task removes. So the tick derives `ONE-r2` and prints THAT.
+#
+# WHY THE ROSTER IS THE REGISTER and not the plan: the plan's `## Tasks` row keeps its id
+# (`ONE` is still `ONE` to a human reading the ledger), and the roster is what actually
+# records which names this session has handed out. A name is spent when a row carries it,
+# whatever state that row is in — a closed row is the common case (a landed task being run
+# again), and an open one cannot be reused either.
+
+# 12a-T22-a: the id is free -> the name IS the id (this is the invariant every other
+# fixture in this section rests on, asserted here rather than assumed).
+R12AT="$(make_repo s12-fill-name-free)"; new_roster "$R12AT"
+wave_plan "$R12AT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+poke_pressure "$R12AT" 8192 1.0 tick
+expect_contains "12a-T22-a an unspent id is its own agent name" "poker: FILL ONE" "$OUT"
+
+# 12a-T22-b: the id already has a CLOSED row -> the name is `ONE-r2`.
+R12BT="$(make_repo s12-fill-name-r2)"; new_roster "$R12BT"
+wave_plan "$R12BT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+add_row "$R12BT" name=ONE deliverable=a.md duration="15m" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12BT")" "$(iso_ago 30)" "$SID" ONE a000 MET
+poke_pressure "$R12BT" 8192 1.0 tick
+expect_contains "12a-T22-b a spent id derives the next run's name" "poker: FILL ONE-r2" "$OUT"
+
+# 12a-T22-c: `ONE` and `ONE-r2` both spent -> `ONE-r3`. The derivation counts, it does not
+# guess: a rule that always appended `-r2` would pass (b) and hand out a name already taken.
+R12CT="$(make_repo s12-fill-name-r3)"; new_roster "$R12CT"
+# writers=4: the two spent rows below are still OPEN to the budget (their deliverable was
+# never written), so a ceiling of 2 would close the gap and this case would prove nothing
+# about naming.
+wave_plan "$R12CT" "writers=4 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+add_row "$R12CT" name=ONE deliverable=a.md duration="15m" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12CT")" "$(iso_ago 30)" "$SID" ONE a000 MET
+add_row "$R12CT" name=ONE-r2 deliverable=a.md duration="15m" launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12CT")" "$(iso_ago 30)" "$SID" ONE-r2 a000 MET
+poke_pressure "$R12CT" 8192 1.0 tick
+expect_contains "12a-T22-c a spent derived name derives the next one" "poker: FILL ONE-r3" "$OUT"
+expect_absent "…and never re-offers the taken one" "poker: FILL ONE-r2" "$OUT"
+
+# 12a-T22-d: ANOTHER SESSION'S ROSTER DOES NOT SPEND THIS SESSION'S NAMES — the same scope
+# the dispatch wall's in-flight arm uses, so the two cannot disagree about which names are
+# available.
+R12DT="$(make_repo s12-fill-name-other)"; new_roster "$R12DT"
+wave_plan "$R12DT" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| ONE | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+add_row_to "$R12DT" "other-session-id" name=ONE deliverable=a.md duration="15m"
+poke_pressure "$R12DT" 8192 1.0 tick
+expect_contains "12a-T22-d a predecessor's roster does not spend a name here" "poker: FILL ONE" "$OUT"
+
+# ---------- 12a-T22-e: THE PANEL REFRESH IS A ROSTER READING, NOT A TOOL CALL ----------
+#
+# (T22, A-orch-33.) `payload/scripts/lib/stop.sh` used to refuse the end of a Patrol turn
+# until the transcript showed a ListAgents call — a chore demanded of the model before a
+# gate would judge, which is exactly what ADR-024 rules out. The obligation behind it was
+# real (eighteen finished agents once sat idle on one panel because nobody stopped them),
+# and it is answered here instead: the tick already walks every row and every verdict, so
+# it NAMES the lineages whose contract is MET and whose agent has not yet gone. Nothing is
+# refused and nothing is stopped — the tick holds no authority (ADR-003).
+#
+# MET AND NOT YET SWEPT is the predicate. A `landing-swept/v1` marker is written when the
+# agent DISAPPEARED from the harness's task list, so a swept row's agent is already gone
+# and naming it would be the noise that teaches a reader to skip the line.
+
+R12ET="$(make_repo s12-taskstop-met)"; new_roster "$R12ET"; armed_ago "$R12ET"; delivered_plan "$R12ET"
+DEL_E="$R12ET/delivered.md"; echo "done" > "$DEL_E"
+add_row "$R12ET" name=done-writer deliverable="$DEL_E" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+poke "$R12ET" tick
+expect_contains "12a-T22-e a MET row the sweep has not closed is named for a TaskStop" \
+  "poker: TASKSTOP done-writer" "$OUT"
+
+# The control: the SAME row, swept. One marker's difference, and the tell goes quiet.
+R12FT="$(make_repo s12-taskstop-swept)"; new_roster "$R12FT"; armed_ago "$R12FT"; delivered_plan "$R12FT"
+DEL_F="$R12FT/delivered.md"; echo "done" > "$DEL_F"
+add_row "$R12FT" name=done-writer deliverable="$DEL_F" duration="1 minute" \
+  launched_at="$(iso_ago 600)"
+swept_marker_write "$(roster_of "$R12FT")" "$(iso_ago 30)" "$SID" done-writer a000 MET
+poke "$R12FT" tick
+expect_absent "12a-T22-f a swept row's agent is already gone, so nothing is named" \
+  "poker: TASKSTOP" "$OUT"
+
+# The second control: an OPEN row is not a MET lineage and is never named.
+R12GT="$(make_repo s12-taskstop-open)"; new_roster "$R12GT"; armed_ago "$R12GT"; delivered_plan "$R12GT"
+add_row "$R12GT" name=live-writer deliverable="$R12GT/never-written.md" duration="4 hours" \
+  launched_at="$(iso_ago 60)"
+poke "$R12GT" tick
+expect_absent "12a-T22-g an open row is never named for a stop" "poker: TASKSTOP" "$OUT"
 
 # ---------- 12b: the gap closes as rows open ----------
 #

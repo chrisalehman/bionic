@@ -535,13 +535,15 @@ run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "no-such-agent")"
 expect_status "active wave + unresolvable name (not address-shaped): PASSES THROUGH (T4)" 0 "$GUARD_ST"
 expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
 
-# Ambiguity: two live agents answering to the same name — two lines in the Teammates block,
-# which is what two sessions in one root launching same-named agents looks like (D2′).
+# THE SAME FIXTURE, RE-POINTED (T22). Two live agents answering to one name used to refuse
+# as an ambiguity. The register decides now, and neither of these two has a row on it — so
+# this is the ordinary no-standing passthrough, and the ambiguity it used to produce is
+# prevented one event earlier, at the dispatch wall.
 plant_agent "$W4_SUB" "adouble-5555555555555555" "twin"
 plant_agent "$W4_SUB" "adouble-6666666666666666" "twin"
 run_guard "$(mk_stop_payload "$SID_A" "$W4_TR" "$W4_REPO" "twin")"
-expect_status "active wave + ambiguous name: REFUSED" 2 "$GUARD_ST"
-expect_contains "…and the refusal says how many answer to it" "2 live agents answer to 'twin'" "$GUARD_VERR"
+expect_status "two same-named agents on no roster row of this session: PASSES THROUGH" 0 "$GUARD_ST"
+expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
 
 # A plan with CR-only line endings is still a plan. `tr -d` on those separators
 # collapses the file to one line, the run-state marker goes unseen, and the gate
@@ -1107,10 +1109,22 @@ expect_absent "…nothing calls the double file ambiguous" "ambiguous" "$GUARD_E
 # (b) A NAME THE ANSWER DOES NOT CARRY is not live, and the refusal says so. `ghost` is on
 # disk in this world's other session directory and in nobody's live set.
 plant_agent "$LV_SUB_B" "aghost-9999999999999999" "ghost"
+# RE-POINTED AT THE ROSTER (T22). The live set is gone from this gate: `ghost` wears an
+# agent-address shape, so the gate has standing over it, and what it has no row for is the
+# AGENT ID — the key the observation channel is filed under. That is the fact the refusal
+# names now. The old arm refused it for want of a fresh panel reading, which was a
+# statement about the transcript rather than about this target.
+# RE-POINTED AT THE ROSTER (T22). The live set is gone from this gate, so what answers an
+# `@session-` target is the alias rule — is there a roster in this root, belonging to the
+# session the suffix names, carrying this name? For `ghost` there is not, and that is the
+# fact. The old arm refused it for want of a fresh panel reading, which was a statement
+# about the transcript rather than about this target.
 run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "ghost@session-${SID_B:0:8}")"
-expect_status "a target absent from the live set: REFUSED" 2 "$GUARD_ST"
-expect_contains "…and the refusal says it is not live" "is not live" "$GUARD_VERR"
+expect_status "an alias naming a session whose roster never carried it: REFUSED" 2 "$GUARD_ST"
+expect_contains "…and the refusal names the register's own answer" \
+  "is not an accepted alias" "$GUARD_VERR"
 expect_absent "…and never calls it foreign — that rule is gone" "FOREIGN" "$GUARD_ERR"
+expect_absent "…and never asks for a ListAgents call" "ListAgents" "$GUARD_VERR"
 
 # (c) TWO LIVE ENTRIES OF ONE NAME. The refusal names both, and it does NOT offer the
 # `@session-` alias as a way out: an alias must resolve to the same SINGLE entry (AC-11), so
@@ -1119,14 +1133,21 @@ IFS='|' read -r TW_REPO TW_TR TW_SUB <<< "$(make_world twolaunchers yes)"
 plant_agent "$TW_SUB" "atwin-1111111111111111" "twin"
 plant_agent "$TW_SUB" "atwin-2222222222222222" "twin"
 sg_roster_row "$TW_REPO" "$SID_A" "twin" "atwin-1111111111111111"
+# THE AMBIGUITY ARM IS RETIRED (T22). It existed because a NAME was not an identity: the
+# live set could carry two `twin`s and the gate had no way to choose. The door is shut one
+# event earlier now — `hooks/dispatch-preflight.sh` refuses a dispatch whose name already
+# has an open row on this session's roster — so one name means one row, the row carries the
+# id, and there is nothing left here to be ambiguous about. The same fixture that used to
+# produce an ambiguity refusal now resolves through the roster and meets the ordinary
+# ceremony.
 run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin")"
-expect_status "a name the live set carries twice: REFUSED" 2 "$GUARD_ST"
-expect_contains "…the refusal counts them" "2 live agents answer to 'twin'" "$GUARD_VERR"
-expect_regex "…and prints both entries as the harness reported them" \
-  'twin\|bionic:senior-implementor\|running' "$GUARD_VERR"
+expect_status "a name the live set carries twice resolves on the ROSTER: the ceremony, not an ambiguity" \
+  2 "$GUARD_ST"
+expect_contains "…and the refusal is the observation demand" "No observation" "$GUARD_VERR"
+expect_absent "…nothing calls it ambiguous any more" "ambiguous" "$GUARD_ERR"
 run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin@session-${SID_A:0:8}")"
-expect_status "…and the alias spelling of an ambiguous name is refused too" 2 "$GUARD_ST"
-expect_contains "…for the ambiguity, not for the alias" "2 live agents answer to 'twin'" "$GUARD_VERR"
+expect_status "…and the alias spelling resolves the same way" 2 "$GUARD_ST"
+expect_contains "…to the same observation demand" "No observation" "$GUARD_VERR"
 
 # (c2) A NAME CARRYING A REGEX METACHARACTER must count and list ONLY its own two entries,
 # never a bystander name that merely LOOKS like it under BRE matching (Step-6 security review
@@ -1137,12 +1158,13 @@ plant_agent "$RX_SUB" "arxa-1111111111111111" "a.b"
 plant_agent "$RX_SUB" "arxb-2222222222222222" "a.b"
 plant_agent "$RX_SUB" "arxc-3333333333333333" "axb"
 sg_roster_row "$RX_REPO" "$SID_A" "a.b" "arxa-1111111111111111"
+# THE METACHARACTER ROW SURVIVES THE ARM IT WAS WRITTEN FOR (T22). Its point was that a
+# `.` in a typed name must never widen a match, and the roster walk it now runs through
+# compares by FIELD EQUALITY exactly as the retired listing did — `a.b` resolves to the row
+# named `a.b` and never to the bystander `axb`.
 run_guard "$(mk_stop_payload "$SID_A" "$RX_TR" "$RX_REPO" "a.b")"
-expect_status "a name with a regex metacharacter, two live entries: REFUSED" 2 "$GUARD_ST"
-expect_contains "…the refusal counts exactly the two of that exact name" \
-  "2 live agents answer to 'a.b'" "$GUARD_VERR"
-expect_regex "…and prints both entries as the harness reported them" \
-  'a\.b\|bionic:senior-implementor\|running' "$GUARD_VERR"
+expect_status "a name with a regex metacharacter resolves on the roster: the ceremony" 2 "$GUARD_ST"
+expect_contains "…and the refusal is the observation demand" "No observation" "$GUARD_VERR"
 expect_absent "…never widened to the bystander name the dot happens to match" \
   "axb" "$GUARD_ERR"
 
@@ -1150,10 +1172,15 @@ expect_absent "…never widened to the bystander name the dot happens to match" 
 # log is `<session>/subagents/agent-<id>.jsonl` and the roster row is the only thing that
 # knows the id once the directory scan is gone. It is refused, and the refusal says which
 # fact is missing rather than demanding a look that cannot be taken.
+# RE-POINTED (T22). A bare name with NO row of any status on this session's roster is not
+# this session's dispatch — the preflight opens a row before it allows one — so the gate has
+# no standing over it and the T4/AC-6 carve applies, exactly as it does to `no-such-agent`
+# and to a background bash task id. What still refuses for the missing id is a name the
+# register DOES carry, on the `intended` row below.
 plant_agent "$LV_SUB" "aunrostered-8888888888888888" "unrostered"
 run_guard "$(mk_stop_payload "$SID_A" "$LV_TR" "$LV_REPO" "unrostered")"
-expect_status "a live agent with no confirmed id on the roster: REFUSED" 2 "$GUARD_ST"
-expect_contains "…and the refusal names the missing fact" "no agent id" "$GUARD_VERR"
+expect_status "a bare name on no roster row of this session: PASSES THROUGH" 0 "$GUARD_ST"
+expect_regex "…and the passthrough is logged, never silent" 'PASSTHROUGH' "$GUARD_ERR"
 
 # …and an `intended` row is still not an ownership claim: its id is a claim about a launch
 # nothing has observed. Unchanged from task 4/9, on the channel that now carries it.
@@ -1282,7 +1309,7 @@ rm -f "$F_REPO/.bionic/tmp/sweeper-$SID_A.state"
 # --- no roster row at all: unchanged ---
 plant_agent "$F_SUB" "aunrostered-777777777777" "unrostered"
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "unrostered")"
-expect_status "a target on no roster row is unchanged by any of this" 2 "$GUARD_ST"
+expect_status "a target on no roster row is unchanged by any of this: no standing (T22)" 0 "$GUARD_ST"
 
 # --- an ack for a name NO ROSTER ROW carries closes nothing here (epic-16 w2 S9) ---
 #
@@ -1297,10 +1324,14 @@ expect_status "a target on no roster row is unchanged by any of this" 2 "$GUARD_
 # landing gate has always passed such a stop for an unrelated reason (a name on no row makes
 # the verb exit 0 and the gate fail open), and the stand-down never sees one, so this is the
 # reading all three now share.
+# RE-POINTED (T22): a name on no roster row has no standing here at all, so the ack cannot
+# discharge anything because there is nothing to discharge — the stop is not this gate's.
+# The ack-over-a-real-row case, which is the one the discharge rule is about, is above.
 plant_agent "$F_SUB" "aackless-9999999999999999" "acked-but-rowless"
 ack_row "$F_REPO" "$SID_A" "acked-but-rowless"
 run_guard "$(mk_stop_payload "$SID_A" "$F_TR" "$F_REPO" "acked-but-rowless")"
-expect_status "an ack over a name no roster row carries does not discharge the stop" 2 "$GUARD_ST"
+expect_status "an ack over a name no roster row carries reaches no discharge rule at all" 0 "$GUARD_ST"
+expect_regex "…because the gate has no standing over it" 'PASSTHROUGH' "$GUARD_ERR"
 # The paired positive is one case up: the SAME ack verb, over a name that HAS a row, passes
 # the same gate silently ("ACKED row: the stop passes though the contract is UNMET").
 
@@ -1438,17 +1469,33 @@ expect_contains "…and the refusal is the observation demand, not an unresolved
 plant_agent "$AD_SUB_B" "astranger-4444444444444444" "stranger"
 plant_live "$AD_TR" fresh "adoptee" "adoptee2"
 sg_roster_row "$AD_REPO" "$SID_A" "stranger" "astranger-4444444444444444" "" "identified"
+# RE-POINTED (T22): the scope is THIS SESSION'S ROSTER, not the harness's answer. `stranger`
+# has an `identified` row here, so it resolves — and meets the ceremony, which is the same
+# closed direction the old live-set arm took by a different route.
+# RE-POINTED (T22): the scope is THIS SESSION'S ROSTER, not the harness's answer. `stranger`
+# has a row here but NOT on the roster of the session its alias names, so the alias rule —
+# which has always been a roster reading — is what refuses it. Closed side either way; what
+# changed is that the reason is now a fact about the register instead of about a transcript.
 run_guard "$(mk_stop_payload "$SID_A" "$AD_TR" "$AD_REPO" "stranger@session-${SID_B:0:8}")"
-expect_status "an agent on disk but absent from the live set: REFUSED" 2 "$GUARD_ST"
-expect_contains "…because it is not live, whatever the disk says" "is not live" "$GUARD_VERR"
+expect_status "an alias whose named session's roster never carried it: REFUSED" 2 "$GUARD_ST"
+expect_contains "…for the alias, which the roster answers" "is not an accepted alias" "$GUARD_VERR"
+expect_absent "…and never for a liveness reading" "not live" "$GUARD_VERR"
 
-section "Section 15: the answer must be FRESH, and a refusal names the fix (AC-9, D1′)"
+section "Section 15: the transcript's freshness is not a precondition of a stop (T22, AC-4.4)"
 #
-# The live set is only a statement about NOW if it was recorded this turn. A stale answer
-# still prints its teammates — S4's reader says so deliberately — so this gate must branch on
-# the exit STATUS and never on an empty set. What a stale or absent answer earns is a refusal
-# that names the fix and prints the newest answer's age, because the model is the only thing
-# that can ask the question again.
+# WHAT THIS SECTION USED TO BE. The live set was only a statement about NOW if it was
+# recorded this turn, so a STALE or absent ListAgents answer refused the whole stop and told
+# the model to go call the tool. That is a chore demanded before a gate will judge a
+# different act — ADR-024's P-A, the rule this wave finishes — and Chris's ruling
+# (2026-09-14, A-orch-33) is that the live set is IMMATERIAL to stopping: the two things the
+# gate ever used it for were resolving a bare name to an id and refusing ambiguity, and the
+# roster answers both.
+#
+# WHAT IT IS NOW. The same four transcript states, driven against the same roster, all
+# PERMITTED. Freshness moved out of the resolution entirely; what still has to be fresh is
+# the OBSERVATION, which is D-1's activity boundary and is tested in its own sections.
+# Three of these four rows are the whole RED of this change: a gate that still read the
+# answer's state fails them and passes the first.
 
 IFS='|' read -r FR_REPO FR_TR FR_SUB <<< "$(make_world freshness yes)"
 plant_agent "$FR_SUB" "aworker-1111111111111111" "worker"
@@ -1463,17 +1510,16 @@ expect_status "a fresh answer naming the target: PERMITTED" 0 "$GUARD_ST"
 observe "$SID_A" "$FR_TR" "$FR_REPO" "worker"
 plant_live "$FR_TR" stale "worker"
 run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
-expect_status "a STALE answer refuses the stop even though the target is in it" 2 "$GUARD_ST"
-expect_contains "…and the refusal names the fix" "call ListAgents" "$GUARD_ERR"
-expect_contains "…and says the answer is stale" "stale" "$GUARD_VERR"
-expect_regex "…and prints the newest answer's age" 'age' "$GUARD_VERR"
+expect_status "a STALE answer does not stand between a roster row and its stop" 0 "$GUARD_ST"
+expect_absent "…and nothing asks for a ListAgents call" "ListAgents" "$GUARD_ERR"
 
-# NONE — no ListAgents answer in the transcript at all.
+# NONE — no ListAgents answer in the transcript at all. This is the FIRST stop of every
+# session, and it used to be refused.
 : > "$FR_TR"
+observe "$SID_A" "$FR_TR" "$FR_REPO" "worker"
 run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
-expect_status "no answer at all refuses the stop" 2 "$GUARD_ST"
-expect_contains "…and names the same fix" "call ListAgents" "$GUARD_ERR"
-expect_contains "…reporting no answer was found" "none" "$GUARD_VERR"
+expect_status "a transcript with no answer at all does not stand in the way either" 0 "$GUARD_ST"
+expect_absent "…and names no tool call" "ListAgents" "$GUARD_ERR"
 
 # A GARBLED newest answer is `none`, never "all gone" (S4 §F): the reader recognises no
 # section marker, so the gate refuses rather than reading an empty roster out of it.
@@ -1484,14 +1530,17 @@ plant_live "$FR_TR" fresh "worker"
 FR_HDR="$(live_answer_block_header 1)"
 sed -i.bak "s/${FR_HDR}/Tea mates (1):/; s/This session is /Thus session is /" "$FR_TR"
 rm -f "$FR_TR.bak"
+observe "$SID_A" "$FR_TR" "$FR_REPO" "worker"
 run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
-expect_status "a garbled newest answer refuses the stop, it does not read as an empty set" 2 "$GUARD_ST"
-expect_contains "…with the same named fix" "call ListAgents" "$GUARD_ERR"
+expect_status "a garbled answer is not read at all, so it cannot refuse a stop" 0 "$GUARD_ST"
+expect_absent "…and nothing on the user stream mentions the panel" "ListAgents" "$GUARD_ERR"
 
-# The paired positive, restored: the fixture is not simply broken.
+# The paired positive: the fixture is not simply broken — the restored answer changes
+# nothing, which is exactly the claim ("immaterial to stopping").
 plant_live "$FR_TR" fresh "worker"
+observe "$SID_A" "$FR_TR" "$FR_REPO" "worker"
 run_guard "$(mk_stop_payload "$SID_A" "$FR_TR" "$FR_REPO" "worker")"
-expect_status "…and with the answer restored the same stop is PERMITTED again" 0 "$GUARD_ST"
+expect_status "…and with the answer restored the same stop is PERMITTED, unchanged" 0 "$GUARD_ST"
 
 section "Section 16: an IDLE agent is exactly the one you stop (spec R2, AC-27; S16)"
 #
@@ -1530,12 +1579,14 @@ run_guard "$(mk_stop_payload "$SID_A" "$I_TR" "$I_REPO" "finished-writer")"
 expect_status "…the same stop with the same name RUNNING also passes (status is not the gate)" \
   0 "$GUARD_ST"
 
-# AND THE PAIRED NEGATIVE that keeps both of those from passing vacuously: absent from the
-# newest answer is still unresolvable, idle or not. Only presence resolves.
+# RE-POINTED (T22). "Absent from the newest answer" is no longer a fact this gate consults:
+# the roster resolves the name and the MET contract discharges the stop, whatever the panel
+# happens to say. The vacuity guard the old row provided is carried by `idle-slacker` below,
+# whose UNMET contract refuses on the same roster.
 plant_live "$I_TR" fresh "somebody-else"
 run_guard "$(mk_stop_payload "$SID_A" "$I_TR" "$I_REPO" "finished-writer")"
-expect_status "…while a name ABSENT from the newest answer still does not resolve: REFUSED" \
-  2 "$GUARD_ST"
+expect_status "…and a name ABSENT from the newest answer stops exactly the same way" \
+  0 "$GUARD_ST"
 
 # An idle agent whose contract is UNMET keeps the whole ceremony. Being finished is not a
 # discharge — the artifact is, or the ack is — so `idle` must not become a third one.
@@ -1547,6 +1598,66 @@ run_guard "$(mk_stop_payload "$SID_A" "$I_TR" "$I_REPO" "idle-slacker")"
 expect_status "an IDLE agent with an UNMET contract still meets the ceremony: REFUSED" 2 "$GUARD_ST"
 expect_contains "…with the observation refusal, not a resolution one" \
   "No observation has been recorded" "$GUARD_VERR"
+
+section "Section T22: the roster is the identity register (AC-4.4, A-orch-33)"
+#
+# The whole of resolution, in three rows and their controls. A NAME is resolved against THIS
+# session's roster — the recorder's `identified`/`confirmed` rows, and the rows `adopt`
+# journalled for a predecessor's agents. One row resolves it. No row on any roster of this
+# session, and no agent-address shape, means the target is not this gate's to guard and the
+# stop proceeds untouched.
+#
+# NOTHING HERE READS A TRANSCRIPT ANSWER. Every world below is driven with the transcript in
+# whatever state it happens to be; the assertions never plant one, and the sweep at the end
+# of this suite proves no refusal anywhere in it names a ListAgents call.
+
+IFS='|' read -r T22_REPO T22_TR T22_SUB <<< "$(make_world t22register yes)"
+mkdir -p "$T22_REPO/.bionic/docs/record"
+
+# (1) ONE ROW RESOLVES IT — and a MET contract discharges the stop with no observation and
+# no panel reading at all.
+plant_agent "$T22_SUB" "aregistered-1010101010101010" "registered"
+echo "the delivered artifact" > "$T22_REPO/.bionic/docs/record/registered.md"
+sg_roster_row "$T22_REPO" "$SID_A" "registered" "aregistered-1010101010101010" "" "identified" \
+  ".bionic/docs/record/registered.md"
+run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "registered")"
+expect_status "T22-1 a name with one identified row and a MET contract: PERMITTED" 0 "$GUARD_ST"
+expect_empty "…silently" "$GUARD_ERR"
+
+# (2) NO ROW ON ANY ROSTER OF THIS SESSION, and no agent-address shape: NOT OURS. The stop
+# is not refused and not judged — it proceeds, loudly enough to be traceable.
+run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "bash-task-42")"
+expect_status "T22-2 a target on no roster of this session is not ours: the stop proceeds" \
+  0 "$GUARD_ST"
+expect_contains "…and says so rather than passing in silence" "PASSTHROUGH" "$GUARD_ERR"
+
+# (3) AN `intended` ROW IS NOT AN IDENTITY. Its id is a claim about a launch nothing has
+# observed, so it resolves no id and the refusal names the missing fact (Step-6 review C-2,
+# unchanged by this task — the status filter is the one thing resolution always keyed on).
+sg_roster_row "$T22_REPO" "$SID_A" "claimed" "aclaimed-2020202020202020" "" "intended" \
+  ".bionic/docs/record/claimed.md"
+run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "claimed")"
+expect_status "T22-3 an intended row resolves no id: REFUSED" 2 "$GUARD_ST"
+expect_contains "…naming the register's own gap" "no agent id" "$GUARD_VERR"
+
+# (4) THE TRANSCRIPT IS IRRELEVANT, PROVEN BY SUBSTITUTION. The same target, the same
+# roster, the same contract — driven once with no transcript file at all and once with a
+# fresh answer that does not name it. Both behave identically, which is what "immaterial to
+# stopping" means as a testable claim.
+echo "the delivered artifact" > "$T22_REPO/.bionic/docs/record/registered2.md"
+plant_agent "$T22_SUB" "aregistered2-3030303030303030" "registered2"
+sg_roster_row "$T22_REPO" "$SID_A" "registered2" "aregistered2-3030303030303030" "" "confirmed" \
+  ".bionic/docs/record/registered2.md"
+: > "$T22_TR"
+run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "registered2")"
+expect_status "T22-4a an empty transcript: PERMITTED" 0 "$GUARD_ST"
+plant_live "$T22_TR" fresh "somebody-else"
+run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "registered2")"
+expect_status "T22-4b an answer naming somebody else: PERMITTED, identically" 0 "$GUARD_ST"
+
+# (5) THE SOURCE ITSELF. AC-4.4's grep, over the one file this section is about.
+expect_eq "T22-5 hooks/stop-guard.sh instructs no ListAgents call anywhere" \
+  "0" "$(grep -c 'call ListAgents' "$GUARD")"
 
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 
@@ -1607,9 +1718,13 @@ expect_eq "E1.3 row 15 (no target) is the table's line" \
 run_guard "$(mk_stop_payload "$SID_A" "$S_TR" "$S_REPO" "victim")"
 expect_eq "E1.3 row 18 (a symlinked state path) is the table's line" \
   "bionic: stop refused — the observation state path is a symlink (remove that symlink)" "$GUARD_ERR"
-run_guard "$(mk_stop_payload "$SID_A" "$TW_TR" "$TW_REPO" "twin")"
-expect_eq "E1.3 row 20 (an ambiguous name) is the table's line" \
-  "bionic: stop refused — several live agents answer to that name (name the full agent id)" "$GUARD_ERR"
+# ROW 20 IS RETIRED WITH ITS ARM (T22). The ruled table's ambiguous-name line had exactly
+# one site and that site is gone; the third shape of reason is now the roster's own — a
+# target this session's register carries no id for.
+run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "claimed")"
+expect_eq "E1.3 the third shape (no id on the register) is the table's line" \
+  "bionic: stop refused — the session roster carries no id for it (stop it yourself or order it)" \
+  "$GUARD_ERR"
 
 # AC-E1.5, the pair: the frame's twelve lines are off the user stream and on the knob.
 expect_absent "E1.5 the pasteable observe command is NOT on the user stream" \
@@ -1618,7 +1733,7 @@ expect_contains "E1.5 …and BIONIC_WALL_VERBOSE=1 puts it back" "Fix: " "$GUARD
 expect_contains "E1.5 …along with the human-order route the frame teaches" \
   "If a human ordered this stop" "$GUARD_VERR"
 expect_eq "E1.5 …with the one line still first" \
-  "bionic: stop refused — several live agents answer to that name (name the full agent id)" \
+  "bionic: stop refused — the session roster carries no id for it (stop it yourself or order it)" \
   "$(printf '%s\n' "$GUARD_VERR" | head -1)"
 
 finish
