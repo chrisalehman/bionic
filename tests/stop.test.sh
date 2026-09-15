@@ -244,4 +244,109 @@ expect_empty "5c: …and nothing at all on stderr, advisories included" "$STOP_E
 fire "$D" Stop false
 expect_nonempty "5d: …while the same fixture without the flag does refuse" "$STOP_OUT$STOP_ERR"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "6: the derivation bound has ONE owner (REQ-7, AC-7.4)"
+
+# WHAT CHANGED, AND WHY THE NUMBER MOVED (spec D4). `tests/lib/impact.sh` used
+# to rebuild its whole edge graph on every invocation — ~4.2 s at quiet load,
+# argument-independent to 13 ms (R2 Q8) — so the number bounding it was doing
+# two jobs at once: paying for a cost nobody had removed, and guarding against a
+# command that never returns. The graph is cached per tree state now. That
+# leaves the bound one job, and one honest value for it: 20 s, a HANG GUARD.
+#
+# TWO COPIES IS THE DEFECT THIS SECTION EXISTS FOR. The sweep's bound at
+# lib/stop.sh:886 and the dispatch wall's at dispatch-preflight.sh:2225 were the
+# same 6 s, written twice, in two files, with two independent budgets — so a
+# wave that moved one of them shipped a tree whose two legs disagreed about what
+# "bounded" means, and neither file said the other existed. There is one
+# definition now, in payload/scripts/lib/bounds.sh, and both consumers read it.
+#
+# STATIC, BY THE SPEC'S OWN EVAL DESIGN (AC-7.4, eval type `static`). Observing
+# the value through the sweep would mean hanging a real derivation for 20 s to
+# read one number out of one message, and would still say nothing about the
+# second consumer. So these rows read the files — and because a grep against a
+# file is exactly the assertion that keeps passing after its pattern has
+# drifted, each reading is PAIRED with a mutation that removes what it looks for.
+BOUNDS_SH="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh"
+STOP_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/stop.sh"
+
+expect_true "6a: payload/scripts/lib/bounds.sh exists" test -f "$BOUNDS_SH"
+expect_true "6b: …and parses under bash -n" bash -n "$BOUNDS_SH"
+
+# THE VALUE IS READ BY SOURCING, not by grepping a literal back out of the file:
+# what a consumer gets is what sourcing gives it.
+expect_eq "6c: sourcing it defines IMPACT_BOUND_S=20" "20" \
+  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
+
+# NOT VACUOUS: the row above reads the file rather than agreeing with a constant
+# typed into this suite, and a copy carrying a different number proves it.
+B_MUTD="$(mktemp -d)"
+anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=20$' 1
+sed 's/^IMPACT_BOUND_S=20$/IMPACT_BOUND_S=3/' "$BOUNDS_SH" >"$B_MUTD/bounds.sh"
+expect_eq "6d: …and a copy carrying 3 answers 3, so 6c read the file" "3" \
+  "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$B_MUTD/bounds.sh" 2>/dev/null)"
+
+# THE HEADER SAYS WHAT THE NUMBER IS FOR. Without that sentence the next reader
+# who meets a slow derivation tunes this number, which is the habit D4 retires.
+# Case-tolerant on purpose: the file says it in a heading (HANG GUARD) and a
+# reviewer who rewords the heading in lower case has not weakened anything.
+expect_regex "6e: …and its header names the number a hang guard" \
+  "[Hh][Aa][Nn][Gg][ -][Gg][Uu][Aa][Rr][Dd]" "$(cat "$BOUNDS_SH" 2>/dev/null)"
+
+# ONE DEFINITION IN THE LIBRARY TREE (AC-7.4, this task's half). A DEFINITION is
+# a literal number; a consumer's `LG_IMPACT_BOUND_S="$IMPACT_BOUND_S"` is a READ
+# and is not counted, which is the distinction the criterion's "defined in two
+# places" turns on — the criterion's own spelling, `grep -rn 'IMPACT_BOUND_S='`,
+# matches both and can never reach one.
+#
+# SCOPED TO payload/scripts/, AND THE SCOPE IS THE POINT. The other consumer is
+# hooks/dispatch-preflight.sh, which still carries its own `IMPACT_BOUND_S=6`
+# until T6 re-points it; that file's row belongs to
+# tests/dispatch-preflight.test.sh, and a count here that spanned both would be
+# pinning a transitional state — green today only because T6 has not landed, red
+# the moment it does. What this suite owns is that the LIBRARY has one owner.
+#
+# AND THE FLEET-WIDE SWEEP MUST NAME hooks/ SEPARATELY. `payload/hooks` is a
+# symlink to `../hooks`, and neither `grep -r` nor `grep -R` descends through a
+# symlinked directory met during recursion — so AC-7.4's literal command over
+# `payload/` cannot see the preflight's definition at all, and would report "one"
+# while two exist. Whoever discharges AC-7.4 at Step 5 scans
+# `payload/scripts/` and `hooks/`, or `find -L`.
+B_DEFS="$(/usr/bin/grep -rnE '^[[:space:]]*[A-Z_]*IMPACT_BOUND_S=[0-9]' \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
+expect_eq "6f: exactly one numeric definition of the bound in payload/scripts/" \
+  "1" "$(printf '%s\n' "$B_DEFS" | /usr/bin/grep -c .)"
+expect_contains "6g: …and it is the one in lib/bounds.sh" "lib/bounds.sh" "$B_DEFS"
+# NOT VACUOUS: the sweep reaches a file it could have missed, and the READ in
+# lib/stop.sh is inside its span and deliberately uncounted.
+expect_nonempty "6f2: the sweep reaches lib/stop.sh, whose READ it declines to count" \
+  "$(/usr/bin/grep -rn 'IMPACT_BOUND_S' "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null \
+     | /usr/bin/grep 'lib/stop.sh')"
+
+# THIS CONSUMER READS IT. The dispatch wall is the other, pinned in its own
+# suite; what stop.test.sh owns is the sweep's side.
+STOP_SRC="$(cat "$STOP_LIB")"
+expect_nonempty "6h: lib/stop.sh sources lib/bounds.sh" \
+  "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$STOP_LIB")"
+expect_regex "6i: …and takes the sweep's bound from that constant" \
+  'LG_IMPACT_BOUND_S="?\$\{?IMPACT_BOUND_S' "$STOP_SRC"
+expect_no_regex "6j: …leaving no literal bound of its own behind" \
+  '^[[:space:]]*LG_IMPACT_BOUND_S=[0-9]' "$STOP_SRC"
+
+# THE TICK BUDGET IS THE BOUND, IN TENTHS. A bound that moved while the ticks
+# stayed at 60 would leave the sweep still stopping at 6 s while both of its
+# messages (lib/stop.sh:1000, :1027) quoted 20 — a lie in the one place an
+# operator is told why the suites were not derived.
+expect_no_regex "6k: …and the tick budget is derived from the bound, not written twice" \
+  '^[[:space:]]*LG_IMPACT_TICKS_LEFT=[0-9]' "$STOP_SRC"
+
+# NOT VACUOUS: a copy with the source line cut has nothing for 6h to find, so
+# 6h discriminates rather than matching any mention of the name anywhere.
+S_MUTD="$(mktemp -d)"
+anchor -E "$STOP_LIB" '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' 1
+/usr/bin/grep -vE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$STOP_LIB" \
+  >"$S_MUTD/stop.sh"
+expect_empty "6l: …and a copy with that line cut has no source line left to find" \
+  "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$S_MUTD/stop.sh")"
+
 finish

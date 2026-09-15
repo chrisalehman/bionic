@@ -396,6 +396,28 @@ for s in doctor-fleet doctor-patrol doctor-reads doctor-restart doctor-version \
     "$s.test.sh" "$RT_WIDTH"
 done
 
+# AC-7.3 — `payload/scripts/close-out.sh` derives `tests/close-out.test.sh`.
+# A REGRESSION PIN THAT IS GREEN THE DAY IT IS WRITTEN, and that is the honest
+# description of it: the wave-14 seed recorded this mapping as MISSING, and R2
+# finding 4 established why it no longer is — tests/close-out.test.sh did not
+# exist when the seed was written (wave-13 T4 created it), and a suite that does
+# not exist cannot be derived. So there is nothing to fix here; there is
+# something to HOLD, and what it holds is the STRENGTH of the edge. close-out's
+# own suite names the script's path, which is a `path-ref`; every whole-payload
+# copier reaches the same file two ranks weaker. A silent drop to `payload-copy`
+# would mean the suite stopped naming what it tests and started reaching it only
+# by copying the tree — the same invisibility the seed complained about.
+RT_CLOSEOUT="$(oneline "$REPO" payload/scripts/close-out.sh)"
+expect_contains "real: close-out.sh derives tests/close-out.test.sh (AC-7.3)" \
+  "close-out.test.sh" "$RT_CLOSEOUT"
+expect_eq "real: …by NAMING the path, not merely by copying the payload" \
+  "path-ref" "$(reason_for "$REPO" close-out.test.sh payload/scripts/close-out.sh | cut -d: -f1)"
+# NOT VACUOUS. The row above would pass against a program that reported one
+# constant reason for this suite, so the complement is asserted over the same
+# suite: a payload file close-out.test.sh does NOT name answers `payload-copy`.
+expect_eq "real: …while a payload file that suite does NOT name is only a payload-copy" \
+  "payload-copy" "$(reason_for "$REPO" close-out.test.sh payload/scripts/lib/width.sh | cut -d: -f1)"
+
 # THE REGISTRATION-PIN CENSUS IS GONE (fixit 1.5.1, D-3). It derived the set of
 # suites asserting their own `run "<self>"` line in tests/run.sh and required
 # impact.sh to reach every one of them FROM tests/run.sh. Both halves ceased to
@@ -674,5 +696,102 @@ PROBE
   echo
   echo "planted-edit log: $PLOG"
 fi
+
+
+# ── §G the derivation cache ─────────────────────────────────────────────────
+# REQ-7 / spec D4: the edge graph is a pure function of the tree, so it is built
+# once per TREE STATE and reused. What this section has to prove is not that a
+# cache exists — that is trivially visible — but that it CANNOT LIE. Three
+# properties, and the middle one is the whole point:
+#
+#   1. a hit is cheap                (the reason REQ-7 exists at all)
+#   2. a hit answers what a miss answers, byte for byte, INCLUDING for an
+#      argument the cached run never saw (the graph is argument-independent;
+#      R2 Q8 measured that independence at 13 ms across two different queries)
+#   3. a tree that changed is not answered from the old graph
+#
+# (2) is the soundness claim. This derivation is the single owner of "which
+# suites read this change" for three consumers (the dispatch wall, the writer
+# budget guard, the landing reconcile), so a stale or wrong hit is a missed
+# regression in all three at once — which is why the answer is compared against
+# a deliberately UNCACHED run rather than against itself.
+#
+# WHY THE REAL TREE FOR THE TIMING ROWS. The fixture is eleven files and derives
+# in a fraction of a second with no cache at all, so a fixture timing row would
+# pass against a program that cached nothing. The cost REQ-7 removes is the real
+# repo's — R2 Q8 measured 4.2 s at quiet load, argument-independent — and that is
+# what the cold/warm pair below is measured over, with the cache pointed at this
+# suite's own temp directory so the pair is one this section created itself.
+section "§G the derivation cache"
+
+G_CACHE="$TMP/impact-cache"
+rm -rf "$G_CACHE"
+
+# timed_ms <outfile> <cmd>… — run the command with stdout captured to <outfile>;
+# print its wall time in whole milliseconds. python3 for the reason
+# tests/bench/hook-latency.sh gives: macOS ships no `date +%s%N`, and bash's
+# `time` writes to a tty rather than to a variable.
+timed_ms() {
+  python3 -c '
+import subprocess, sys, time
+with open(sys.argv[1], "wb") as f:
+    t = time.time()
+    subprocess.run(sys.argv[2:], stdout=f, stderr=subprocess.DEVNULL)
+    ms = int((time.time() - t) * 1000)
+print(ms)
+' "$@"
+}
+
+# python3 is a floor dependency already (nine gating suites call it). If it were
+# gone `timed_ms` would answer nothing, the `:-` default below would read
+# 999999, and the timing row would FAIL rather than quietly pass — which is the
+# direction a missing instrument has to fail in.
+G_COLD_MS="$(timed_ms "$TMP/g.cold" env BIONIC_IMPACT_CACHE_DIR="$G_CACHE" \
+  bash "$IMPACT" payload/scripts/close-out.sh)"
+G_WARM_MS="$(timed_ms "$TMP/g.warm" env BIONIC_IMPACT_CACHE_DIR="$G_CACHE" \
+  bash "$IMPACT" payload/scripts/close-out.sh)"
+
+# NOT VACUOUS: a program that printed nothing would satisfy "identical" below.
+expect_nonempty "cache: the cold call answers at all" "$(cat "$TMP/g.cold")"
+expect_eq "cache: the warm answer is byte-identical to the cold one" \
+  "$(cat "$TMP/g.cold")" "$(cat "$TMP/g.warm")"
+
+if [ "${G_WARM_MS:-999999}" -le 500 ]; then
+  ok "cache: a second derivation at the same tree state costs <= 500 ms (cold ${G_COLD_MS} ms, warm ${G_WARM_MS} ms)"
+else
+  no "cache: a second derivation at the same tree state costs <= 500 ms" \
+     "cold ${G_COLD_MS} ms, warm ${G_WARM_MS} ms — the edge graph is still being rebuilt per call"
+fi
+
+expect_true "cache: the cold call left a keyed entry under the cache directory" \
+  bash -c '[ -d "$0" ] && [ -n "$(ls -A "$0" 2>/dev/null)" ]' "$G_CACHE"
+
+# THE SOUNDNESS ROW. A different argument against the same cached graph — the
+# cache was written by a close-out.sh query and is now asked about width.sh —
+# must answer exactly what a run with no cache at all answers.
+G_OTHER_UNCACHED="$(BIONIC_IMPACT_CACHE_DIR="" bash "$IMPACT" payload/scripts/lib/width.sh 2>/dev/null)"
+G_OTHER_CACHED="$(BIONIC_IMPACT_CACHE_DIR="$G_CACHE" bash "$IMPACT" payload/scripts/lib/width.sh 2>/dev/null)"
+expect_nonempty "cache: the uncached control answers at all" "$G_OTHER_UNCACHED"
+expect_eq "cache: an argument the cached run never saw answers what an UNCACHED run answers" \
+  "$G_OTHER_UNCACHED" "$G_OTHER_CACHED"
+expect_eq "cache: …and turning the cache off changes nothing about the first answer" \
+  "$(cat "$TMP/g.cold")" "$(BIONIC_IMPACT_CACHE_DIR="" bash "$IMPACT" payload/scripts/close-out.sh 2>/dev/null)"
+
+# INVALIDATION, over the fixture, because it needs a tree that may be written to.
+# `tests/i.test.sh` is new and pins hooks/h2.sh by name; before it exists nothing
+# in the fixture names h2 at all (c and g reach it only through a directory).
+G_FXC="$TMP/impact-cache-fx"
+rm -rf "$G_FXC"
+G_H2_BEFORE="$(BIONIC_IMPACT_CACHE_DIR="$G_FXC" BIONIC_IMPACT_ROOT="$FX" \
+  bash "$IMPACT" hooks/h2.sh 2>/dev/null | cut -f1 | tr '\n' ' ')"
+printf '#!/bin/bash\n. "$(dirname "$0")/lib/resolve-roots.sh"\ngrep -q hello "${BIONIC_HOOKS_DIR}/h2.sh"\n' \
+  >"$FX/tests/i.test.sh"
+G_H2_AFTER="$(BIONIC_IMPACT_CACHE_DIR="$G_FXC" BIONIC_IMPACT_ROOT="$FX" \
+  bash "$IMPACT" hooks/h2.sh 2>/dev/null | cut -f1 | tr '\n' ' ')"
+rm -f "$FX/tests/i.test.sh"
+expect_nonempty "cache: the fixture answers for hooks/h2.sh before the edit" "$G_H2_BEFORE"
+expect_absent "cache: …and no suite reads it BY NAME yet" "i.test.sh" "$G_H2_BEFORE"
+expect_contains "cache: a tree change invalidates — the new reader is derived" \
+  "i.test.sh" "$G_H2_AFTER"
 
 finish
