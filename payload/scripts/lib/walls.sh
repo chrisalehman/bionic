@@ -194,6 +194,92 @@ _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
   return 1
 }
 
+# ─── _wall_cmd_fill — ONE fill for the farm-out wall's three classifier readings ─
+#
+# THE THREE READINGS ARE ONE COMMAND READ THREE WAYS (epic-23 wave-14 T17, REQ-4;
+# T4 §5 / A-T4.2). `wall_farm_out` asks the classifier three questions — the whole
+# command's class (tier 1), each `&&` segment's class (the chain arm) and the
+# reduced head (tier 2) — and each one used to arrive through its own command
+# substitution over its own string: `$(cmd_strip_heredocs …)`, `$(cmd_unwrap_head …)`,
+# an `awk` and a `grep` for the chain split, and a `sed` per segment to trim it.
+# Measured on the bench payload (`ls -la`, tests/bench/hook-latency.sh), that was
+# TWO awk execs and four bash forks on the hottest path in the tree, of which
+# exactly one awk exec — the class reading — could change the answer.
+#
+# THIS FUNCTION ASSIGNS RATHER THAN PRINTS, the way `_wall_flatten` does, so no
+# caller needs a command substitution to read it. It sets four values:
+#
+#   _WALL_SAFE_FLAT   the heredoc-free, whitespace-squeezed one-line command
+#   _WALL_HEAD        the tier-2 head reduction, or "" when tier 2 provably cannot fire
+#   _WALL_CHAIN_SEGS  the `&&` segments, newline-joined, untrimmed
+#   _WALL_CHAIN_COUNT how many of them carry a non-blank character
+#
+# WHAT IS SKIPPED, AND WHY EACH SKIP IS SOUND — none of them is a new reading, and
+# none of them narrows what the wall can see:
+#
+#  1. `cmd_strip_heredocs` IS THE IDENTITY for a command whose text holds no `<<`;
+#     its own fast path says so and byte-identically (cmd-class.sh). So the `$( )`
+#     around it is skipped for such a command rather than made to return its input.
+#
+#  2. THE HEAD REDUCTION IS COMPUTED ONLY WHEN TIER 2 COULD STILL FIRE, screened the
+#     way `_wall_mentions_git` screens the git parser. `classify_tier2`'s own first
+#     act is `case "$c" in git*|docker*|npx*|uvx*)` — all four matchers are anchored
+#     at `^`, so nothing else can match — and the head reduction is a SUBSTRING of
+#     the flattened command with at most one leading and one trailing quote
+#     character removed: `strip_leading`, `skip_opts`, `drop_word` and `after_exec`
+#     all return suffixes, and `unwrap_runner` returns a suffix, a `dequote_whole`
+#     of one, or the literal prefix `bash `. So if the head starts with one of those
+#     four words, those letters survive in the text with nothing but quotes and
+#     backslashes between them — which is exactly what removing those characters and
+#     then looking for the substring tests. A miss cannot be a tier-2 match, and the
+#     empty head it leaves takes `classify_tier2`'s own `*) return 1` arm.
+#
+#  3. THE `&&` SPLIT IS SHELL, NOT `awk` + `grep`. `_WALL_SAFE_FLAT` has been through
+#     `_wall_flatten`, whose IFS carries all six characters `[[:space:]]` names — so
+#     it holds no newline, tab, CR, VT or FF at all, and the newline-joined segment
+#     list is unambiguous by construction. The split is left-to-right and
+#     non-overlapping on the literal two characters `&&`, which is what
+#     `gsub(/&&/, "\n")` did, `&&&&` included; the count is of segments carrying a
+#     non-blank character, which is what `grep -cE '[^[:space:]]'` counted.
+#
+# IT IS A FILL, NEVER A VERDICT. Every class this wall acts on still comes from
+# `cmd_class` — one reader, cmd-class.sh — over the same strings as before.
+_WALL_SAFE_FLAT=""; _WALL_HEAD=""; _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
+_wall_cmd_fill() {  # <raw command text> -> sets the four values above
+  local _p _rest _seg _segs=""
+
+  case "$1" in
+    *'<<'*) _wall_flatten "$(cmd_strip_heredocs "$1")" ;;
+    *)      _wall_flatten "$1" ;;
+  esac
+  _WALL_SAFE_FLAT="$_WALL_FLAT"
+
+  _p="$_WALL_SAFE_FLAT"
+  _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
+  case "$_p" in
+    *git*|*docker*|*npx*|*uvx*) _WALL_HEAD=$(cmd_unwrap_head "$_WALL_SAFE_FLAT") ;;
+    *)                          _WALL_HEAD="" ;;
+  esac
+
+  _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
+  case "$_WALL_SAFE_FLAT" in
+    *"&&"*)
+      _rest="$_WALL_SAFE_FLAT"
+      while :; do
+        case "$_rest" in
+          *"&&"*) _seg="${_rest%%&&*}"; _rest="${_rest#*&&}" ;;
+          *)      _seg="$_rest"; _rest=""; _segs="$_segs$_seg"
+                  case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
+                  break ;;
+        esac
+        _segs="$_segs$_seg"$'\n'
+        case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
+      done
+      _WALL_CHAIN_SEGS="$_segs"
+      ;;
+  esac
+}
+
 # ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
 #
 # HARD BLOCK: Prevents AI from pushing to main/master branches.
@@ -3398,23 +3484,17 @@ case "$FLAT" in
     ;;
 esac
 
-# The heredoc-free form of the command. Chain segmentation and the tier-2 matcher read
-# it rather than FLAT, so a `&&` or an `npx` inside a heredoc body cannot reshape the
-# decision any more than it can classify.
-_wall_flatten "$(cmd_strip_heredocs "$CMD")"; SAFE_FLAT="$_WALL_FLAT"
-
-TARGET=$(cmd_unwrap_head "$SAFE_FLAT")
+# THE HEREDOC-FREE FORM, THE TIER-2 HEAD AND THE CHAIN SEGMENTS, IN ONE FILL
+# (epic-23 wave-14 T17, REQ-4; T4 §5 / A-T4.2). Chain segmentation and the tier-2
+# matcher read the heredoc-free form rather than FLAT, so a `&&` or an `npx` inside a
+# heredoc body cannot reshape the decision any more than it can classify. All three
+# readings now arrive from `_wall_cmd_fill` — see it at the top of this file for what
+# each skip costs and why none of them can narrow what the wall sees. Nothing here forks.
+_wall_cmd_fill "$CMD"
+SAFE_FLAT="$_WALL_SAFE_FLAT"
+TARGET="$_WALL_HEAD"
+CHAIN_SEGS="$_WALL_CHAIN_SEGS"; CHAIN_COUNT="$_WALL_CHAIN_COUNT"
 CLASS=""; ROLE=""
-
-# Chain segmentation (≥3 &&-joined segments) feeds both chain arms below;
-# compute the segment list once. Empty/0 when no `&&` is present.
-CHAIN_SEGS=""; CHAIN_COUNT=0
-case "$SAFE_FLAT" in
-  *"&&"*)
-    CHAIN_SEGS=$(printf '%s' "$SAFE_FLAT" | awk '{ gsub(/&&/, "\n"); print }')
-    CHAIN_COUNT=$(printf '%s\n' "$CHAIN_SEGS" | grep -cE '[^[:space:]]')
-    ;;
-esac
 
 # Tier-1 single command → deny (advisory-downgrades to a nudge inside emit_tier1).
 # A ≥3-segment && chain defers to the chain tier-1 arm below so it keeps its
@@ -3429,7 +3509,16 @@ fi
 if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   CHAIN_ROLE=""
   while IFS= read -r _seg; do
-    _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
+    # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
+    # either end is single spaces.
+    while :; do
+      case "$_seg" in
+        ' '*) _seg="${_seg# }" ;;
+        *' ') _seg="${_seg% }" ;;
+        *)    break ;;
+      esac
+    done
     [ -n "$_seg" ] || continue
     if classify_tier1 "$_seg"; then
       CHAIN_ROLE="$ROLE"; break
@@ -3450,10 +3539,26 @@ fi
 if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   _has_nonexempt=""
   while IFS= read -r _seg; do
-    _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
+    # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
+    # either end is single spaces.
+    while :; do
+      case "$_seg" in
+        ' '*) _seg="${_seg# }" ;;
+        *' ') _seg="${_seg% }" ;;
+        *)    break ;;
+      esac
+    done
     [ -n "$_seg" ] || continue
-    printf '%s' "$_seg" | grep -qE '^(git|ls|cat|head|tail|wc|grep|rg|find|awk|sed|mkdir|cp|mv|rm|touch|echo|printf|test|cd|pwd|which|command|true|false) ' \
-      || { _has_nonexempt=1; break; }
+    # THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over
+    # literal words each followed by a literal space, which is exactly what these
+    # patterns are — a bare `git` with no argument stays non-exempt in both spellings.
+    case "$_seg" in
+      'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
+      'sed '*|'mkdir '*|'cp '*|'mv '*|'rm '*|'touch '*|'echo '*|'printf '*|'test '*|\
+      'cd '*|'pwd '*|'which '*|'command '*|'true '*|'false '*) : ;;
+      *) _has_nonexempt=1; break ;;
+    esac
   done <<EOF
 $CHAIN_SEGS
 EOF
