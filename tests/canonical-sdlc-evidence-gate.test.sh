@@ -247,6 +247,33 @@ run_hook_with_project() {
   rm -f "$tmp_err"
 }
 
+# THE PAYLOAD CWD AND CLAUDE_PROJECT_DIR PULL APART (wave-14 REQ-2, A-T2.5). Every runner
+# above posts the SAME directory as both, which is a fixture choice and not how a dispatched
+# writer's Bash call arrives: `bionic_context`'s ladder takes CLAUDE_PROJECT_DIR first
+# (lib/context.sh:294-320), so on a real writer the environment names the session's project —
+# the MAIN checkout — while the payload's own `.cwd` is the worktree the writer is standing
+# in. That is the seam the row-step arm has to read, and a runner that could not express it
+# would prove the arm works only on inputs the CLI never sends.
+run_hook_cwd() {  # <home> <project_dir> <payload cwd> <command>
+  local home_dir="$1" project_dir="$2" payload_cwd="$3" command="$4"
+  local input tmp_err
+  input=$(jq -n --arg c "$command" --arg cwd "$payload_cwd" --arg s "$EG_SID" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
+  tmp_err=$(mktemp)
+  if HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+    HOOK_EXIT=0
+  else
+    HOOK_EXIT=$?
+  fi
+  split_stderr "$tmp_err"
+  HOOK_VSTDERR=""
+  if [ "$HOOK_EXIT" -ne 0 ]; then
+    eg_knob "$(HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" \
+      BIONIC_WALL_VERBOSE=1 bash "$HOOK" <<< "$input" 2>&1 >/dev/null || true)"
+  fi
+  rm -f "$tmp_err"
+}
+
 expect_allow() {
   local label="$1" home_dir="$2" command="$3"
   run_hook "$home_dir" "$command"
@@ -4198,6 +4225,145 @@ if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
   ok "25g(b) …so the evidence-gate allows the commit"
 else
   no "25g(b) …so the evidence-gate allows the commit" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+fi
+
+echo "-- 25g(c)-(f): THE ROW'S STEP IS THE JUDGMENT (wave-14 REQ-2, ADR-027, AC-2.1-2.4).
+# Parallel writers broke the gate's one assumption: several tasks are in flight at once, each
+# at its own step, each in its own tree, and every one of them was judged against the run's
+# single `current:`. A Step-4 writer committing while the run sits at Step 5 was refused for
+# evidence that cannot exist yet, and in wave-13 the orchestrator regressed `current:` by hand
+# to land it. ADR-027 makes the `## Tasks` table the register: the row names the tree, the
+# gate reads the row, and the commit is judged at THAT row's step.
+#
+# THE FIXTURE IS ONE PLAN, DRIVEN FROM THREE PLACES — that is the whole discrimination. The
+# same `current: 5` plan carries a Step-5 block that is NOT green (pass 331 of 332), so a
+# main-root commit must still be refused for it; a commit from the tree row T3 owns must be
+# judged at Step 4 and allowed; and a commit from the tree row T9 owns, whose step is AHEAD
+# of the run, must be refused naming the row and both steps. One plan, three verdicts. --"
+
+s25r_step4="  worktree: .worktrees/wt-T3
+  base-sha: 0fe69ed
+  branch: wt/14-T3"
+
+# NOT GREEN, deliberately: this is the byte that makes 25g(d) a real control rather than a
+# second copy of 25g(c).
+s25r_step5_red="  cmd: bash test.sh
+  pass: 331
+  total: 332
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+
+# The register. The `worktree` cell sits between `Files` and `status`, where this wave's own
+# plan carries it.
+s25r_tasks="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T3 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-2 | a.sh | wt-T3 | active |
+| T9 | 6 | review | the review the run has not reached | critic | T3 | 30m | REQ-2 | b.sh | wt-T9 | pending |"
+
+s25r_plan() {
+  printf '%s\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-14T00:00Z "approved"\nStep 4:\n%s\nStep 5:\n%s\n\n%s\n\n%s\n' \
+    "$(matrix_frontmatter true none true)" "$s25r_step4" "$s25r_step5_red" "$s25r_tasks" "$matrix_w25g"
+}
+
+s25r_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25r_tmp")
+s25r_main="$s25r_tmp/main"
+mkdir -p "$s25r_main/.bionic/docs/plans" "$s25r_main/.bionic/docs/record/w25g"
+printf 'evidence\n' > "$s25r_main/.bionic/docs/record/w25g/x.md"
+git -C "$s25r_main" init -q .
+git -C "$s25r_main" commit -q --allow-empty -m init
+engage "$s25r_main"
+s25r_plan > "$s25r_main/.bionic/docs/plans/wave-01-x.plan.md"
+
+# REAL LINKED WORKTREES, never a hand-planted `.git` file: the name the arm reads is the one
+# git itself chose for the tree, out of `<main>/.git/worktrees/<name>`.
+git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T3" -b s25r-t3
+git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T9" -b s25r-t9
+git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-stray" -b s25r-stray
+
+expect_eq "25g(c) the fixture's tree really is a LINKED worktree (its .git is a file)" "file" \
+  "$(if [ -f "$s25r_tmp/wt-T3/.git" ]; then echo file; elif [ -d "$s25r_tmp/wt-T3/.git" ]; then echo dir; else echo none; fi)"
+expect_contains "25g(c) …whose gitdir names the tree the plan row names" "/worktrees/wt-T3" \
+  "$(cat "$s25r_tmp/wt-T3/.git")"
+
+# --- 25g(c) / AC-2.1: the worktree commit is judged at its row's step ---------------------
+#
+# CLAUDE_PROJECT_DIR is the MAIN checkout and the payload's `.cwd` is the worktree — the
+# arrangement A-T2.5 names, and the one that makes BIONIC_WORKTREE read EMPTY. An arm that
+# leaned on that variable alone would pass this case only when the fixture lied about the
+# environment.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T3" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  ok "25g(c) AC-2.1 a commit from row T3's tree is judged at the row's step 4 and allowed"
+else
+  no "25g(c) AC-2.1 a commit from row T3's tree is judged at the row's step 4 and allowed" \
+    "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(d) / AC-2.2: the main root is untouched ------------------------------------------
+run_hook_with_project "$(make_home)" "$s25r_main" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR"; then
+  ok "25g(d) AC-2.2 the SAME plan still refuses a main-root commit at current: 5 for pass != total"
+else
+  no "25g(d) AC-2.2 the SAME plan still refuses a main-root commit at current: 5 for pass != total" \
+    "expected block naming pass=331; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(e) / AC-2.3: a row AHEAD of the run is refused, naming both steps ----------------
+#
+# The fail-safe direction. A tree whose row sits at Step 6 while the run is at Step 5 is not
+# a writer running early; it is a tree the register says nobody should be committing from
+# yet, and the refusal has to say which row and which two steps or the reader cannot act.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T9" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -q "T9" <<<"$HOOK_VSTDERR" \
+   && grep -qE "(^|[^0-9])6([^0-9]|$)" <<<"$HOOK_VSTDERR" \
+   && grep -qE "(^|[^0-9])5([^0-9]|$)" <<<"$HOOK_VSTDERR"; then
+  ok "25g(e) AC-2.3 a commit from a tree whose row is ahead of current: is refused, naming T9, 6 and 5"
+else
+  no "25g(e) AC-2.3 a commit from a tree whose row is ahead of current: is refused, naming T9, 6 and 5" \
+    "expected block naming T9/6/5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(f): a tree no row owns keeps today's behaviour, and says so ----------------------
+#
+# FAIL-SAFE, NOT FAIL-OPEN: the commit is judged at `current:` exactly as it is today — so it
+# is refused for the same not-green Step-5 block 25g(d) is refused for — and one line on
+# stderr names the tree, so a writer whose row was never ledgered finds out from the wall
+# rather than from the verdict.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-stray" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+   && grep -q "wt-stray" <<<"$HOOK_STDERR"; then
+  ok "25g(f) a tree no ## Tasks row names is judged at current: and the note names the tree"
+else
+  no "25g(f) a tree no ## Tasks row names is judged at current: and the note names the tree" \
+    "expected block at current: 5 plus a note naming wt-stray; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(g): `git -C <worktree>` from the main root is the worktree's commit --------------
+#
+# The payload's cwd is the MAIN checkout and the tree is named by the command instead. The
+# commit still happens in row T3's tree, so it is still row T3's commit.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "git -C $s25r_tmp/wt-T3 commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  ok "25g(g) a 'git -C <worktree> commit' from the main root is judged at row T3's step too"
+else
+  no "25g(g) a 'git -C <worktree> commit' from the main root is judged at row T3's step too" \
+    "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(h): the shape every bionic brief mandates — `cd <tree> || exit 1; git commit` -----
+#
+# A writer's Bash call carries the tree in the COMMAND, not in the payload: the harness posts
+# the session's cwd, and the `cd` runs afterwards. Without this arm the dominant real shape
+# would take the main-root path and AC-2.1 would hold only for fixtures.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "cd $s25r_tmp/wt-T3 || exit 1; git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  ok "25g(h) a leading 'cd <worktree> || exit 1' before the commit is judged at row T3's step"
+else
+  no "25g(h) a leading 'cd <worktree> || exit 1' before the commit is judged at row T3's step" \
+    "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # ============================================================

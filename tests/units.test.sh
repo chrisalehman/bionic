@@ -6,8 +6,10 @@
 # checks and its prototype check, the tick's FILL, and the governing-skill Step-3 wall — so
 # that none of them carries a parser of its own. Three questions, one per function:
 #
-#   §1 units_rows <plan>          the ten fields, in the FIXED order, whatever order the
+#   §1 units_rows <plan>          the eleven fields, in the FIXED order, whatever order the
 #                                 table's columns are written in
+#   §10 the `worktree` cell        slot 11, OPTIONAL: a table without the column is valid
+#                                 and reads it empty (wave-14 REQ-2, ADR-027)
 #   §4 units_ready <plan> <step>  which rows at that step may be dispatched now
 #   §5 units_validate <plan>      which of the Task invariants the table breaks
 #
@@ -250,18 +252,22 @@ expect_eq "sourcing units.sh prints nothing on stdout" "" "$(bash -c '. "$1"' _ 
 expect_eq "…and nothing on stderr" "" "$(bash -c '. "$1"' _ "$LIB" 2>&1 >/dev/null)"
 
 # ============================================================
-section "1 — units_rows: the live table, ten fields per row, in the fixed order"
+section "1 — units_rows: the live table, eleven fields per row, in the fixed order"
 # ============================================================
 
 expect_eq "the live specimen yields one line per data row (22)" "22" "$(nlines "$ROWS_LIVE")"
 
-expect_eq "every line carries exactly ten tab-separated fields" "22" \
-  "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' 'NF == 10 { n++ } END { print n + 0 }')"
+# ELEVEN, NOT TEN, SINCE wave-14 REQ-2 — and the specimen carries no `worktree` column, so
+# every one of the 22 lines ends in an EMPTY eleventh field rather than stopping at ten. A
+# record whose width depended on which columns the table happened to carry would put every
+# caller back to counting cells, which is the whole of what this reader exists to stop.
+expect_eq "every line carries exactly eleven tab-separated fields" "22" \
+  "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' 'NF == 11 { n++ } END { print n + 0 }')"
 
 # THE FIRST ROW, WHOLE. Written out by hand from the plan, which is the point: a row asserted
 # against a value the reader itself produced would pass on any consistent misreading.
-expect_eq "T1 renders id·step·kind·task·agent·deps·size·serves·Files·status in that order" \
-  "$(printf 'T1\t3\tdoc\tPlan, Tasks and matrix written; Step-3 card approved\torchestrator\t—\t30m\tall\tplan\tlanded')" \
+expect_eq "T1 renders id·step·kind·task·agent·deps·size·serves·Files·status·worktree in that order" \
+  "$(printf 'T1\t3\tdoc\tPlan, Tasks and matrix written; Step-3 card approved\torchestrator\t—\t30m\tall\tplan\tlanded\t')" \
   "$(printf '%s\n' "$ROWS_LIVE" | sed -n '1p')"
 
 # THE COLLISION measure §4.3 names, asserted field by field. In the shipped five-column
@@ -808,8 +814,8 @@ ESCAPED_EOF
 ROWS_ESC="$(call units_rows "$SANDBOX/escaped-cell.md")"
 
 expect_eq "three data rows, escapes and all" "3" "$(nlines "$ROWS_ESC")"
-expect_eq "every row still carries exactly ten fields" "3" \
-  "$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' 'NF == 10 { n++ } END { print n + 0 }')"
+expect_eq "every row still carries exactly eleven fields" "3" \
+  "$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' 'NF == 11 { n++ } END { print n + 0 }')"
 
 # THE WHOLE ROW, field by field. The shift this section exists for moves every cell AFTER
 # the escape, so asserting the escaped cell alone would pass on a reader that recovered the
@@ -896,5 +902,87 @@ expect_eq "T23's deps is the deps"     "T12"                "$(printf '%s\n' "$E
 expect_eq "T23's status is the status" "landed"             "$(printf '%s\n' "$ESC_T23" | cut -f10)"
 expect_contains "T23's task cell keeps its pipe" "PreToolUse|Bash" \
   "$(printf '%s\n' "$ESC_T23" | cut -f4)"
+
+# ============================================================
+section "10 — the `worktree` cell: slot 11, header-keyed, and OPTIONAL (wave-14 REQ-2, ADR-027)"
+# ============================================================
+#
+# WHY THE COLUMN EXISTS. ADR-027 makes the `## Tasks` table the register of in-flight units:
+# the dispatcher writes the tree it created into the row, and the evidence gate reads the row
+# back to judge a worktree commit at that row's step. This library is the only reader, so the
+# cell is a slot here or it is a second parser somewhere else.
+#
+# OPTIONAL, AND THAT IS A RULE, NOT AN OMISSION. Every plan written before this wave — and
+# every solo-writer plan after it — carries no `worktree` column, and none of them becomes
+# invalid for it. An absent column reads as an empty cell on every row and raises NO
+# `missing column` violation, which is the one place slot 11 differs from the ten required
+# slots §7 covers.
+
+cat > "$SANDBOX/worktree-column.md" <<'WT_COL_EOF'
+---
+current: 4
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-2 | a.sh | 14-T1 | landed |
+| T2 | 4 | build | the build that has no tree yet | implementor | T1 | 30m | REQ-2 | b.sh | — | active |
+| T3 | 6 | review | the review | critic | T1, T2 | 30m | REQ-2 | c.sh | 14-T3 | pending |
+
+## Verification Matrix
+WT_COL_EOF
+
+ROWS_WT="$(call units_rows "$SANDBOX/worktree-column.md")"
+
+expect_eq "the widened table yields one line per data row (3)" "3" "$(nlines "$ROWS_WT")"
+expect_eq "…each carrying eleven fields" "3" \
+  "$(printf '%s\n' "$ROWS_WT" | awk -F'\t' 'NF == 11 { n++ } END { print n + 0 }')"
+
+# THE CELL ITSELF, through the accessor the gate uses — never by number.
+expect_eq "units_field reads T1's worktree cell by name" "14-T1" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_WT" | sed -n 1p)" worktree)"
+expect_eq "…and T3's" "14-T3" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_WT" | sed -n 3p)" worktree)"
+
+# THE DISCRIMINATOR. The column sits BETWEEN `Files` and `status`, which is where this
+# wave's own plan carries it: a reader that took `status` positionally now reads `14-T1`
+# as a status and refuses every row. Slot 10 must still be the status cell.
+expect_eq "inserting the column ahead of status does not shift status" "landed" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_WT" | sed -n 1p)" status)"
+expect_eq "…nor Files" "a.sh" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_WT" | sed -n 1p)" Files)"
+
+# A row whose tree is an em dash is a row with NO tree — the same "none" spelling `deps`
+# uses — and it comes through as the literal cell, not as an error.
+expect_eq "a row with no tree yet reads its cell literally" "—" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_WT" | sed -n 2p)" worktree)"
+
+expect_eq "the widened table breaks no invariant" "" \
+  "$(call units_validate "$SANDBOX/worktree-column.md")"
+expect_eq "…and exits 0" "0" "$(call_rc units_validate "$SANDBOX/worktree-column.md")"
+
+# ---------- the column is OPTIONAL: the live specimen carries none ----------
+#
+# §7's `missing column` rule holds for the ten required slots and must NOT reach this one.
+# The live specimen is the proof: 22 rows, no `worktree` header cell, and a clean validate
+# (§5 already asserts the clean part — this asserts that widening the contract did not
+# quietly make every pre-wave plan invalid).
+expect_eq "a table with no worktree column raises no missing-column violation" "" \
+  "$(call units_validate "$SANDBOX/live.md" | grep 'worktree' || true)"
+expect_eq "…and its rows read the absent cell as empty" "" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_LIVE" | sed -n 1p)" worktree)"
+expect_eq "…while a REQUIRED column absent is still a violation (the rule discriminates)" \
+  "## Tasks: missing column step" \
+  "$(call units_validate "$SANDBOX/missing-column.md" | grep 'missing column')"
+
+# ---------- header-keyed, proved the same name-blind way §2 proves it ----------
+reverse_cells "$SANDBOX/worktree-column.md" > "$SANDBOX/worktree-column-reversed.md"
+expect_eq "the reversed widened fixture's header starts at status and ends at id" \
+  "| status | worktree | Files | serves | size | deps | agent | task | kind | step | id |" \
+  "$(grep -n '^| status' "$SANDBOX/worktree-column-reversed.md" | head -1 | cut -d: -f2-)"
+expect_eq "reversing every column of the widened table changes not one byte of the TSV" \
+  "$ROWS_WT" "$(call units_rows "$SANDBOX/worktree-column-reversed.md")"
 
 finish
