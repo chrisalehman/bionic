@@ -2245,6 +2245,12 @@ section "Section 18: REQ-1b — the split skill's byte caps and the core's step 
 # above were; it is the ceiling itself changing, recorded here in AC-2.2
 # (requirements + plan) as well as in this comment's own established pattern.
 #
+# RAISED to 110,500 — Chris 2026-09-14 "Option 2" (wave-14 T14): the two
+# remaining Step-2 row shapes — the Ownership row and the Eval-design row,
+# left unannotated by T10 for lack of headroom (A-T10.1) — are now annotated
+# with their own printf format beside the card, same pattern and same named
+# ruling as the raise directly above: the ceiling itself moves, owned here.
+#
 # AC-1b.5 is the structural half, and it is what makes the byte caps mean anything: a core
 # that still carried its `### Step N` sections would be under no cap at all, and a core that
 # dropped the sections without naming the files would leave the model with no way to find
@@ -2311,12 +2317,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 110000 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B ($SPLIT_TOTAL B ≤ 110000 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 110,500 B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 110500 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 110,500 B ($SPLIT_TOTAL B ≤ 110500 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 110000)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 110,500 B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 110500)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
@@ -3010,6 +3016,18 @@ else
   no "145: AC-9.4 — the pre-T10 staggered Decisions shape is caught by the 143 discriminator" \
      "fixture: $OLD_STAGGERED_DECISIONS"
 fi
+
+# --- AC-9.1 (fold-in, T14): the Step-2 card's Ownership and Eval-design rows also name
+# their own printf format beside the card — the two row shapes T10 left unannotated for
+# lack of aggregate-cap headroom (A-T10.1; Chris 2026-09-14 "Option 2" at the T10 landing,
+# wave-14 T14). Verbatim checks, the same idiom as 141a/141b/141c above.
+OWNERSHIP_ROW_LINE='Ownership row: `    %-20s owner %-42s surfaces %-44s test %s` (concept, owner, surfaces, test) (printf).'
+expect_contains "146: AC-9.1 — steps/2.md names the Ownership row's printf format verbatim (T14 fold-in)" \
+  "$OWNERSHIP_ROW_LINE" "$(cat "$STEP2_MD" 2>/dev/null)"
+
+EVAL_DESIGN_ROW_LINE='Eval-design row: `    %-8s %-58s %6s %5s %9s %5s %6s` (requirement, approach, static, unit, hermetic, live, human) (printf).'
+expect_contains "147: AC-9.1 — steps/2.md names the Eval-design row's printf format verbatim (T14 fold-in)" \
+  "$EVAL_DESIGN_ROW_LINE" "$(cat "$STEP2_MD" 2>/dev/null)"
 
 # AC-9.3 (render clean, byte caps hold) is discharged by Section 11's `--check` arms and
 # Section 18's byte-cap arms against these same rendered finals — both already read
