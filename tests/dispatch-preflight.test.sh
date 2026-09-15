@@ -273,9 +273,33 @@ GATE_ENV=""
 # bytes and one column, so a byte count would pass a line that wraps.
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh"
 GATE_TIME=0
+# dp_hires_cs_since <epoch-float> -> whole hundredths of a second elapsed since it.
+#
+# SUB-SECOND, via python3, for the same reason tests/session-start.test.sh §16 reaches for
+# it: a whole-second `date +%s` difference is off by up to a full second either way
+# depending on where the two reads straddle a tick. Two arms in this file claim the gate
+# "stopped waiting at the bound", and at a 20s bound the thing they have to tell apart is a
+# 20s wait from a 23s one — three seconds, of which a whole-second clock can lose one at
+# each end. That is how a tick-counted wait ran 15% long underneath these two arms for a
+# whole wave without either of them noticing (wave-14 T34).
+#
+# HUNDREDTHS, AS AN INTEGER, so the comparison stays in bash arithmetic and no arm has to
+# fork a second interpreter to decide. A host with no python3 answers 999999, which fails
+# both arms loudly rather than passing them blind.
+dp_hires_cs_since() {
+  python3 -c 'import sys,time; print(int((time.time()-float(sys.argv[1]))*100))' "$1" 2>/dev/null \
+    || echo 999999
+}
+
 run_gate() {  # <payload-json>
   local _sid _t0; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   _t0=$(date +%s)
+  # OPT-IN, AND ONLY OVER THE FIRST DRIVE. Set `GATE_HIRES=1` before a call to have
+  # `$GATE_TIME_CS` measured to the hundredth; every other caller pays nothing, which
+  # matters on a driver this file runs a few hundred times. The two python3 forks land
+  # outside the timed span on the way in and immediately after `$?` on the way out.
+  GATE_TIME_CS=""
+  [ -z "${GATE_HIRES:-}" ] || _gate_hires_t0=$(python3 -c 'import time; print(time.time())' 2>/dev/null)
   GATE_ENV="$GATE_ENV CLAUDE_CODE_SESSION_ID=$_sid"
   if [ -n "$GATE_CONFIG_DIR" ]; then
     # shellcheck disable=SC2086
@@ -285,6 +309,7 @@ run_gate() {  # <payload-json>
     GATE_OUT=$(printf '%s' "$1" | env $GATE_ENV bash "$GATE" 2>"$SANDBOX/.err")
   fi
   GATE_ST=$?
+  [ -z "${GATE_HIRES:-}" ] || GATE_TIME_CS=$(dp_hires_cs_since "${_gate_hires_t0:-0}")
   GATE_TIME=$(( $(date +%s) - _t0 ))
   GATE_ERR=$(cat "$SANDBOX/.err")
   # THE VERDICT, read off both wires. `jq` rather than a grep for the reason: a reason the
@@ -4623,11 +4648,13 @@ REPO=$(make_repo r29a yes)
 write_attestation "$REPO" "$SID_A"
 s29_impact "$REPO" $(( S29_BOUND + 10 ))
 S29_T0=$(date +%s)
+GATE_HIRES=1
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w29-slow")"
+GATE_HIRES=""
 # THE WALL'S OWN COST, not the suite's: `run_gate` drives the call a second time with
 # BIONIC_WALL_VERBOSE=1 to read `detail`, and that second bounded derivation would double
 # the number measured here. `$GATE_TIME` is the first drive alone.
-S29_ELAPSED="$GATE_TIME"
+S29_ELAPSED="$GATE_TIME_CS"
 expect_status "29a a derivation that outruns the bound REFUSES the dispatch" "2" "$GATE_ST"
 expect_contains "29a …naming the bound it outran" "bound:   ${S29_BOUND}s" "$GATE_VERR"
 expect_contains "29a …naming the command that was slow" "impact-stub.sh" "$GATE_VERR"
@@ -4646,11 +4673,22 @@ expect_contains "29a …and saying why an unbounded one would be worse" "no rost
 # gate directly and has no CLI timeout, so AC-7.2 is discharged here and the gap is NOT.
 # Whoever closes it moves one of the two numbers; both are ratified and neither is this
 # task's to move.
-if [ "$S29_ELAPSED" -lt $(( S29_BOUND + 8 )) ]; then
-  ok "29a …and it stopped waiting at the bound, not at the sleep (${S29_ELAPSED}s)"
+# EIGHT SECONDS OF SLACK WAS ENOUGH TO HIDE THE DEFECT IT WAS WATCHING (wave-14 T34). This
+# read `< S29_BOUND + 8` over a whole-second clock. The gate's wait was denominated in
+# `sleep 0.1` polls costing 115 ms each, so a stated 20s bound waited 23.0-23.2s — comfortably
+# inside `+8`, and therefore green, for as long as the drift stayed under eight seconds,
+# which is to say for as long as nobody was under enough load to care. Measured: 22s here
+# and 22s at §hanging-impact on the tick-counted wait, against 20s and 21s on the clock.
+#
+# THE SLACK IS ONE SECOND NOW, AND THE CLOCK CAN SEE IT. `$GATE_TIME_CS` is the first
+# drive in hundredths (`GATE_HIRES` above), so what is left to absorb is the gate's own
+# non-waiting work rather than a second of rounding at each end. A wait denominated in
+# anything that stretches under load misses by seconds and fails here.
+if [ "$S29_ELAPSED" -le $(( (S29_BOUND + 1) * 100 )) ]; then
+  ok "29a …and it stopped waiting at the bound, not at the sleep ($(( S29_ELAPSED / 100 )).$(printf '%02d' $(( S29_ELAPSED % 100 )))s)"
 else
   no "29a …and it stopped waiting at the bound, not at the sleep" \
-    "took ${S29_ELAPSED}s against a ${S29_BOUND}s bound"
+    "took $(( S29_ELAPSED / 100 )).$(printf '%02d' $(( S29_ELAPSED % 100 )))s against a ${S29_BOUND}s bound"
 fi
 # FAIL-CLOSED MEANS NO ROW. A refused dispatch journals nothing, so there is no row a
 # writer-side guard could read as "no budget was stated" and stand aside on.
@@ -5957,11 +5995,21 @@ expect_eq "§slow-impact …and the row carries the derivation's own answer" "al
 # arm and any refusal it produced would be refusing for some unrelated reason.
 #
 # HOW THE BOUND IS FORCED. dispatch-preflight.sh sources lib/bounds.sh only when
-# IMPACT_BOUND_S is unset (`[ -z "${IMPACT_BOUND_S:-}" ]`, :2484) — an env value already
+# IMPACT_BOUND_S is unset (`[ -z "${IMPACT_BOUND_S:-}" ]`, :2509) — an env value already
 # set on entry wins and the library is never read. GATE_ENV is the driver's own channel
 # for exactly this (see probe_env_on above, which does the same thing for
 # ANTHROPIC_API_KEY and HOME); saved and restored around the one call so no later arm in
 # this file inherits a forced bound.
+#
+# WHY 5 AGAINST 5.6 IS A REAL MARGIN NOW, AND WAS NOT (wave-14 T34). As written this arm
+# was a coin flip, green at T29's head and red at 89f6944's on the same machine at lower
+# load. Nothing about the override was at fault — instrumentation caught the arm reading
+# `bound=5` exactly as intended — but the gate spent that bound as fifty `sleep 0.1` polls
+# costing 115 ms each, so the "5 second" wait ran 5.77 s against a 5.6 s derivation and the
+# fixture won about half the time. The wait is a wall-clock one now and ends in
+# [4 s, 5 s], which is 0.6 s clear of the sleep and, being a clock, does not narrow under
+# load. The 0.4 s the arm was written with was never the margin it looked like; measure
+# before shortening it further.
 #
 # fails-when: the forced-5s call is ADMITTED, or its refusal does not name the forced
 # number (`bound:   5s`, the arm's own wire spacing — a wire naming a different number
@@ -6009,18 +6057,23 @@ expect_nonempty "§hanging-impact the shipped bound is readable from lib/bounds.
 REPO=$(make_repo rhangimp yes)
 write_attestation "$REPO" "$SID_A"
 s29_impact "$REPO" 60
+GATE_HIRES=1
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-hang-imp")"
-HANG_ELAPSED="$GATE_TIME"
+GATE_HIRES=""
+HANG_ELAPSED="$GATE_TIME_CS"
 expect_status "§hanging-impact a 60s derivation is REFUSED" "2" "$GATE_ST"
 expect_contains "§hanging-impact …naming the bound it outran, as the library defines it" \
   "${BOUND_S}s" "$GATE_VERR"
-# THE CLOCK IS THE CLAIM. `$GATE_TIME` is the first drive alone (run_gate drives a second
-# time under the verbose knob, which would double any number read across both).
-if [ "$HANG_ELAPSED" -lt $(( BOUND_S + 8 )) ]; then
-  ok "§hanging-impact …and it stopped waiting at the bound, not at the sleep (${HANG_ELAPSED}s)"
+# THE CLOCK IS THE CLAIM. `$GATE_TIME_CS` is the first drive alone (run_gate drives a
+# second time under the verbose knob, which would double any number read across both).
+# ONE SECOND OF SLACK, NOT EIGHT, AND READ IN HUNDREDTHS — the same re-pinning as 29a, for
+# the same reason and against the same defect (wave-14 T34): the tick-counted wait ran
+# 23.0-23.2s here too, and a whole-second clock with eight seconds of slack called it fine.
+if [ "$HANG_ELAPSED" -le $(( (BOUND_S + 1) * 100 )) ]; then
+  ok "§hanging-impact …and it stopped waiting at the bound, not at the sleep ($(( HANG_ELAPSED / 100 )).$(printf '%02d' $(( HANG_ELAPSED % 100 )))s)"
 else
   no "§hanging-impact …and it stopped waiting at the bound, not at the sleep" \
-    "took ${HANG_ELAPSED}s against a ${BOUND_S}s bound"
+    "took $(( HANG_ELAPSED / 100 )).$(printf '%02d' $(( HANG_ELAPSED % 100 )))s against a ${BOUND_S}s bound"
 fi
 expect_status "§hanging-impact …and journalled no row at all" \
   "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
@@ -6038,9 +6091,9 @@ section "§bound-one-owner — the derivation bound is defined once, fleet-wide 
 # spelling over `payload/` cannot see this file's definition at all and would report one
 # while two existed (T9 report §6).
 #
-# A DEFINITION IS A LITERAL NUMBER. `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))` is a
-# READ and is not counted; that distinction is the whole of what "defined in two places"
-# means.
+# A DEFINITION IS A LITERAL NUMBER. A line that READS the constant — the wait's own
+# `[ "$SECONDS" -ge "$IMPACT_BOUND_S" ]` — is not counted; that distinction is the whole of
+# what "defined in two places" means.
 #
 # TWO BOUNDS, ONE OWNER EACH (re-spelled by wave-14 T16 against T15). This arm counted every
 # definition matching `[A-Z_]*IMPACT_BOUND_S=`, which was one until T15 landed
@@ -6068,10 +6121,18 @@ expect_nonempty "§bound-one-owner the sweep reaches dispatch-preflight.sh, whos
 DP_GATE_SRC="$(cat "$GATE")"
 expect_nonempty "§bound-one-owner the preflight sources lib/bounds.sh" \
   "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$GATE")"
-expect_regex "§bound-one-owner …and derives its tick budget from the constant, not a second literal" \
-  'IMPACT_BOUND_TICKS=\$\(\([[:space:]]*IMPACT_BOUND_S' "$DP_GATE_SRC"
-expect_no_regex "§bound-one-owner …leaving no literal tick budget behind" \
-  '^[[:space:]]*IMPACT_BOUND_TICKS=[0-9]' "$DP_GATE_SRC"
+# RE-SPELLED ONTO THE CLOCK (wave-14 T34). This pair used to read the hook's tick budget,
+# `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))`, and assert it was DERIVED from the
+# constant rather than typed as a second literal. The budget is gone: a count of `sleep
+# 0.1` polls cost 115 ms a poll, so spending it waited ~1.15x the bound the refusal quoted
+# (T34 §2-3), and the wait now ends on `SECONDS` against the constant itself. The intent
+# survives intact and gets stronger — the strongest form of "not a second number" is no
+# second number at all — so the positive arm reads the stop condition and the negative one
+# stands guard over the mechanism that was removed.
+expect_regex "§bound-one-owner …and its wait ends on the constant itself, not on a derived second number" \
+  '\[[[:space:]]*"\$SECONDS"[[:space:]]*-ge[[:space:]]*"\$IMPACT_BOUND_S"[[:space:]]*\]' "$DP_GATE_SRC"
+expect_no_regex "§bound-one-owner …leaving no tick budget behind to drift against it" \
+  '^[[:space:]]*IMPACT_BOUND_TICKS=' "$DP_GATE_SRC"
 
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 
