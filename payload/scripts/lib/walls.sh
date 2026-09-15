@@ -1675,6 +1675,209 @@ case "$EG_VERDICT" in
   *)            active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
 esac
 
+# ---------- THE ROW'S STEP IS THE JUDGMENT (wave-14 REQ-2, ADR-027) ----------
+#
+# WHAT THIS FIXES. Everything above judges the commit against the run's single `current:`,
+# which was true while one writer worked at a time. Parallel writers broke it: several tasks
+# are in flight at once, each at its own step, each in its own worktree, and a Step-4 writer
+# committing while the run sits at Step 5 was refused for Step-5 evidence that cannot exist
+# yet. In wave-13 the orchestrator regressed `current:` BY HAND to land such a commit
+# (A-orch-43) — a run-wide fact edited to clear one writer, which is the damage this arm
+# removes.
+#
+# THE REGISTER IS THE `## Tasks` TABLE (ADR-027). The dispatcher writes the tree it created
+# into the row's `worktree` cell at the moment it creates it, so the binding from a checkout
+# to the task that owns it lives in the one place that already knows the task's step and
+# status, readable by `lib/units.sh`, which every other consumer already parses the plan
+# through.
+#
+# FOUR CASES, AND THE THREE THAT ARE NOT THE FIRST ARE WHY THIS IS SAFE:
+#   · the commit is made from a linked worktree a row owns, at a step BEHIND `current:`
+#     → judge at the row's step (the `Step N:` lookup below, the placeholder ban and
+#       `dispatch` all run against it);
+#   · that row's step is AHEAD of `current:` → refuse, naming the row and both steps: the
+#     register says nobody should be committing from that tree yet;
+#   · a linked worktree no row owns → judge at `current:`, today's behaviour exactly, plus
+#     one line on stderr naming the tree, so a writer whose row was never ledgered learns it
+#     from the wall rather than from the verdict;
+#   · the MAIN checkout → not one byte of this block runs.
+#
+# IT SITS BELOW THE RUN PREDICATE on purpose. A closed run gates nothing, and a refusal owed
+# to a register is owed only while there is a run to be at a step of.
+#
+# WHY NOT `BIONIC_WORKTREE` ALONE (A-T2.5, T2's own seam). `lib/root.sh` publishes it, but
+# for the cwd the CONTEXT LADDER took — and rung 1 is `CLAUDE_PROJECT_DIR`, which on a real
+# dispatched writer names the session's project, the MAIN checkout. The variable then reads
+# empty while the writer is standing in a worktree. The honest signal is the payload's own
+# `.cwd`, already cached by `_bionic_jq_fill`, so reading it costs no fork; `BIONIC_WORKTREE`
+# is taken as a fast path only where it cannot disagree — when the ladder's cwd and the
+# payload's cwd are the same directory.
+#
+# NO NEW `git` CALL, ANYWHERE IN HERE (REQ-4, AC-4.3 caps root resolution at one ask per hook
+# invocation). A linked worktree's `.git` is a FILE holding one `gitdir:` line, and its
+# basename is the name git itself gave the tree. Reading it is one bash `read`.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+
+# _eg_wt_name <dir> -> the LINKED WORKTREE's name for that directory, empty otherwise.
+#
+# Walks up to the nearest `.git` entry, exactly as git does. A DIRECTORY there is an ordinary
+# checkout (the main one, or a standalone clone) and answers empty — that is the main-root
+# case, and it is the one that must cost nothing and change nothing. A FILE there is a linked
+# worktree, a submodule, or something else entirely, so the `gitdir:` target is required to
+# carry a `/worktrees/` segment before its basename is believed: a submodule's
+# `<super>/.git/modules/<name>` is not a worktree and must not be read as one.
+_eg_wt_name() {
+  local _d="${1:-}" _g
+  case "$_d" in /*) : ;; *) return 0 ;; esac
+  while [ -n "$_d" ] && [ "$_d" != "/" ]; do
+    if [ -d "$_d/.git" ]; then
+      return 0
+    elif [ -f "$_d/.git" ]; then
+      IFS= read -r _g < "$_d/.git" 2>/dev/null || return 0
+      case "$_g" in gitdir:*) _g="${_g#gitdir:}" ;; *) return 0 ;; esac
+      while [ "${_g# }" != "$_g" ]; do _g="${_g# }"; done
+      _g="${_g%$'\r'}"
+      while [ "${_g% }" != "$_g" ]; do _g="${_g% }"; done
+      _g="${_g%/}"
+      case "$_g" in */worktrees/*) printf '%s' "${_g##*/}" ;; esac
+      return 0
+    fi
+    _d="${_d%/*}"
+  done
+  return 0
+}
+
+# _eg_commit_cwd -> the directory the commit is made IN.
+#
+# THREE SPELLINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
+#   1. `git -C <dir> commit` — git's own cwd override, and it wins over everything;
+#   2. a LEADING `cd <absolute dir>` — the shape every bionic writer brief mandates
+#      (`cd <worktree> || exit 1` as the first statement). The harness posts the SESSION's
+#      cwd in the payload and the `cd` runs afterwards, so without this the dominant real
+#      shape would read as a main-root commit and REQ-2 would hold only for fixtures;
+#   3. the payload's `.cwd`.
+# Only an ABSOLUTE path is taken from the command: a relative `cd` is resolved against a cwd
+# this hook would have to re-derive, and guessing it wrong is how a commit gets judged at
+# another task's step. Anything unreadable falls through to (3), which is today's answer.
+_eg_commit_cwd() {
+  local _line _oldifs _hadf _p _c
+  # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
+  case " $COMMAND " in
+    *" -C "*|*" -C"[\"\']*)
+      _oldifs="$IFS"; _hadf=0
+      while IFS= read -r _line; do
+        [ -n "$_line" ] || continue
+        git_argv_parse "$_line" || continue
+        [ "$GIT_SUB" = commit ] || continue
+        _git_argv_skip "$_line"
+        [ -n "$GIT_ARGV_REST" ] || break
+        case "$-" in *f*) _hadf=1 ;; esac
+        set -f
+        IFS="$GIT_ARGV_US"
+        # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+        set -- $GIT_ARGV_REST
+        IFS="$_oldifs"
+        [ "$_hadf" -eq 1 ] || set +f
+        shift   # argv[0], the git binary
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            -C) shift; [ $# -gt 0 ] && printf '%s' "$1"; return 0 ;;
+            -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
+              shift; [ $# -gt 0 ] && shift ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        break
+      done <<< "$(git_argv_expand "$COMMAND")"
+      ;;
+  esac
+  # (2) — the leading `cd`, read off the front of the command and nowhere else.
+  _c="$COMMAND"
+  while [ "${_c# }" != "$_c" ]; do _c="${_c# }"; done
+  while [ "${_c#	}" != "$_c" ]; do _c="${_c#	}"; done
+  case "$_c" in
+    'cd '*|'cd	'*)
+      _p="${_c#cd}"
+      while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
+      while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
+      _p="${_p%%[;&|$'\n']*}"
+      while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+      case "$_p" in
+        '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
+        "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
+      esac
+      case "$_p" in
+        /*) if [ -d "$_p" ]; then printf '%s' "$_p"; return 0; fi ;;
+      esac
+      ;;
+  esac
+  # (3)
+  printf '%s' "$(bionic_jq .cwd)"
+}
+
+# _eg_row_for_worktree <name> -> "<id><TAB><step>" of the first `## Tasks` row whose
+# `worktree` cell names that tree, empty when no row does.
+#
+# THE CELL IS COMPARED BY BASENAME on the row's side, so a plan that spells the tree as a
+# path (`.worktrees/14-T3`) or as its branch (`wt/14-T3`) still resolves to the tree git
+# named `14-T3`. The comparison is never loosened on the DERIVED side: that value is git's
+# own, and matching it loosely is how a commit reaches another task's step.
+_eg_row_for_worktree() {
+  local _want="${1:-}" _rows _line _cell
+  [ -n "$_want" ] || return 0
+  _rows="$(units_rows "$PLAN")" || return 1
+  [ -n "$_rows" ] || return 0
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    _cell="$(units_field "$_line" worktree)"
+    [ -n "$_cell" ] || continue
+    _cell="${_cell%/}"
+    [ "${_cell##*/}" = "$_want" ] || continue
+    printf '%s\t%s' "$(units_field "$_line" id)" "$(units_field "$_line" step)"
+    return 0
+  done <<< "$_rows"
+  return 0
+}
+
+_EG_WT=""
+_EG_CWD="$(_eg_commit_cwd)"
+if [ -n "$BIONIC_WORKTREE" ] && [ "$_EG_CWD" = "$BIONIC_CWD" ]; then
+  _EG_WT="$BIONIC_WORKTREE"          # the ladder already answered for this very directory
+elif [ -n "$_EG_CWD" ]; then
+  _EG_WT="$(_eg_wt_name "$_EG_CWD")"
+fi
+
+if [ -n "$_EG_WT" ]; then
+  # A plan with NO `## Tasks` table has no register, and there is nothing to say about a tree
+  # it does not claim to track — `_eg_row_for_worktree` returns 1 for that, and this arm stays
+  # silent, which is what keeps a solo-writer project's worktree commits byte-identical to
+  # today's.
+  _EG_ROW="$(_eg_row_for_worktree "$_EG_WT")"; _EG_REG=$?
+  if [ "$_EG_REG" -eq 0 ] && [ -z "$_EG_ROW" ]; then
+    printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
+      "$_EG_WT" "$CURRENT" >&2
+  elif [ -n "$_EG_ROW" ]; then
+    _EG_RID="${_EG_ROW%%	*}"
+    _EG_RSTEP="${_EG_ROW#*	}"
+    _EG_CURNUM="${CURRENT%[ab]}"
+    case "$_EG_RSTEP" in
+      ''|*[!0-9]*) : ;;   # a row whose step cell is unusable decides nothing; units_validate
+                          # is what reports it, at the step that writes the plan
+      *)
+        if [ "$_EG_RSTEP" -lt "$_EG_CURNUM" ] 2>/dev/null; then
+          CURRENT="$_EG_RSTEP"
+        elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null; then
+          _eg_detail="canonical-sdlc worktree '${_EG_WT}' belongs to '## Tasks' row ${_EG_RID}, whose step is ${_EG_RSTEP}; the run is at current: ${CURRENT}.
+Plan: $PLAN
+Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not reached it — advance the run to step ${_EG_RSTEP}, or correct row ${_EG_RID}'s step cell, before committing from ${_EG_WT}."
+          refuse exit2 commit "that worktree's task is ahead of the run" "advance the run first" "$_eg_detail"
+        fi
+        ;;
+    esac
+  fi
+fi
+
 # Find the evidence line for the current step: a "Step N:" line, with or
 # without a leading list marker.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]

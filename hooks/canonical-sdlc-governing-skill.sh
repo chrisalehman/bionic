@@ -1041,6 +1041,15 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
           # REQ-1e does not widen; validating it against the ten-column schema would
           # refuse every task-scale plan for eight columns it was never asked to carry.
           #
+          # THE `worktree` COLUMN IS ACCEPTED, NEVER DEMANDED (wave-14 REQ-2, ADR-027).
+          # The table is the register of in-flight units, so a dispatched row names the
+          # tree its writer works in and the evidence gate reads that cell back to judge
+          # the writer's commit at the row's step. This wall needed no arm for it —
+          # `units_validate` is header-keyed and slot 11 is the one OPTIONAL slot, so a
+          # plan that carries the column passes and the far larger set that does not is
+          # untouched. It is named in the Fix line below because a writer repairing a row
+          # against a column list that omitted it would delete the dispatcher's work.
+          #
           # AN ABSENT TABLE IS NOT A VIOLATION HERE. A plan mid-authoring may not have
           # written its table yet, and the D7 PRESENCE rule already lives in the gate at
           # commit time. `units_rows` answers non-zero for "no table" and this arm stops
@@ -1068,7 +1077,7 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
                 _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) has a '## Tasks' table that breaks the Task invariants:
 ${_gs_units_bad}
 Path: $FILE_PATH
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status."
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status, plus an optional worktree cell."
                 refuse exit2 write "this plan's Tasks table is invalid" "fix the row the detail names" "$_gs_detail"
               fi
             fi
