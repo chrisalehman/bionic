@@ -2913,4 +2913,107 @@ expect_true "139c: an undated ratif line is caught by the discriminator" \
 expect_false "139d: …a dated one is not (the discriminator does not over-fire)" \
   bash -c "grep -i ratif '$DATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
 
+# ---------------------------------------------------------------------------
+section "Section 27: T10 — card row formats at fixed widths (REQ-9: AC-9.1, AC-9.2, AC-9.3, AC-9.4)"
+#
+# WHAT THIS SECTION OWNS. wave-14-tune-181 D9: a card row with a trailing column (the
+# Step-1 requirement row, the Step-2 decision row, the Step-3 task row) used to be padded
+# by eye — no stated width — which is why the user saw a column drift out of alignment
+# ("Why is the implied third column Acceptance Criteria not left justified anymore?").
+# Each of the three rendered step files now carries, beside its card, the row's printf
+# format and one shared rule line (identical text in all three); AC-9.4 additionally
+# requires the Step-2 decision row and the Step-3 task row to be a single line per row —
+# trailing columns on the row's own first line, never staggered onto a line below it.
+#
+# WHY GREP 'printf', NOT THE EXACT FORMAT STRING. The spec's own Eval design row (§REQ-9
+# "format lines") states the eval as `grep -c 'printf' … ≥ 1 each` — the format STRING is
+# incidental to a particular width choice, the literal word `printf` is what a reader (or a
+# future editor) can hold the row to: it says a stated format governs this row, not eyeballed
+# spacing. AC-9.2 is what pins the rule line's own exact wording, with a mutation arm.
+#
+# HERMETIC. Reads the committed rendered finals by path; the mutation arms work on TMP copies.
+
+# --- AC-9.1a: each of the three rendered step files names a printf format ---
+for _pair in "140a:$STEP1_MD:steps/1.md" "140b:$STEP2_MD:steps/2.md" "140c:$STEP3_MD:steps/3.md"; do
+  _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
+  _cnt="$(grep -c 'printf' "$_file" 2>/dev/null | tr -cd '0-9')"
+  [ -n "$_cnt" ] || _cnt=0
+  if [ "$_cnt" -ge 1 ] 2>/dev/null; then
+    ok "${_n}: AC-9.1 — ${_which} names its card row's printf format at least once"
+  else
+    no "${_n}: AC-9.1 — ${_which} names its card row's printf format at least once" "count=$_cnt file=$_file"
+  fi
+done
+
+# --- AC-9.1b / AC-9.2: the shared rule line, verbatim, in all three -----------------------
+CARD_RULE_LINE='Rows are rendered by that format, never padded by hand.'
+for _pair in "141a:$STEP1_MD:steps/1.md" "141b:$STEP2_MD:steps/2.md" "141c:$STEP3_MD:steps/3.md"; do
+  _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
+  expect_contains "${_n}: AC-9.1/AC-9.2 — ${_which} carries the shared rule line verbatim" \
+    "$CARD_RULE_LINE" "$(cat "$_file" 2>/dev/null)"
+done
+
+# 142: Anti-vacuity (AC-9.2's own mutation arm) — a copy of steps/1.md with the rule line
+# stripped must make 141a's check go red.
+anchor "$STEP1_MD" "$CARD_RULE_LINE" 1
+DOCTORED_NO_RULE="$TMP/step1-no-rule-line.md"
+grep -v -F "$CARD_RULE_LINE" "$STEP1_MD" > "$DOCTORED_NO_RULE"
+case "$(cat "$DOCTORED_NO_RULE")" in
+  *"$CARD_RULE_LINE"*) no "142: AC-9.2 — a copy of steps/1.md missing the rule line still 'has' it (pin is vacuous)" ;;
+  *) ok "142: AC-9.2 — a copy of steps/1.md missing the rule line fails the rule-line check (pin discriminates)" ;;
+esac
+
+# --- AC-9.4: the Step-2 decision row and the Step-3 task row are single-line rows,
+# trailing columns on the row's own first line, never staggered onto a line below it. ---
+#
+# THE ANTI-PATTERN. Before this task, the Step-2 card's Decisions row was two physical
+# lines: the decision text on one, then a line starting with whitespace and the bare word
+# "serves" (its trailing columns) on the next — staggered, not on the row's own first line.
+# A staggered trailing-column line reads as whitespace, then the FIRST WORD of the line is
+# one of the row's own trailing-column names — never true of a header line, where the
+# column names sit to the right of a section label ("Decisions … serves … ADR").
+staggered_trailing() {
+  # $1 = card body, $2.. = trailing column names to check as a staggered line's first word
+  local _body="$1"; shift
+  local _col
+  for _col in "$@"; do
+    if printf '%s\n' "$_body" | grep -qE "^[[:space:]]+${_col}([[:space:]]|\$)"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if staggered_trailing "$CARD2" "serves" "ADR"; then
+  no "143: AC-9.4 — the Step-2 card's decision row keeps serves/ADR on the row's first line (no staggered line found 'serves'/'ADR' as a line's first word)" \
+     "card body: $CARD2"
+else
+  ok "143: AC-9.4 — the Step-2 card's decision row keeps serves/ADR on the row's first line (no staggered second line)"
+fi
+
+if staggered_trailing "$CARD3" "kind" "depends" "agent"; then
+  no "144: AC-9.4 — the Step-3 card's task row keeps kind/depends/agent on the row's first line (no staggered line found)" \
+     "card body: $CARD3"
+else
+  ok "144: AC-9.4 — the Step-3 card's task row keeps kind/depends/agent on the row's first line (no staggered second line)"
+fi
+
+# 145: Anti-vacuity — the pre-T10 staggered shape (D<n> line, then a line whose first word
+# is "serves") must make 143's check discriminate: fed the OLD Step-2 decision row shape,
+# staggered_trailing must return true (found).
+OLD_STAGGERED_DECISIONS='  Decisions
+    D<n>   <the decision in one line>
+           serves <REQ ids>                                    ADR <file | none>'
+if staggered_trailing "$OLD_STAGGERED_DECISIONS" "serves" "ADR"; then
+  ok "145: AC-9.4 — the pre-T10 staggered Decisions shape is caught by the 143 discriminator (pin is not vacuous)"
+else
+  no "145: AC-9.4 — the pre-T10 staggered Decisions shape is caught by the 143 discriminator" \
+     "fixture: $OLD_STAGGERED_DECISIONS"
+fi
+
+# AC-9.3 (render clean, byte caps hold) is discharged by Section 11's `--check` arms and
+# Section 18's byte-cap arms against these same rendered finals — both already read
+# steps/1.md, steps/2.md and steps/3.md unconditionally, so no separate pin is needed here;
+# a cap regression from this task's own additions shows up there, not in this section.
+
 finish
