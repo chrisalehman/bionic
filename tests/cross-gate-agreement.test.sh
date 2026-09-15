@@ -10151,10 +10151,24 @@ expect_eq "LC.4 meta: the doctoring removed exactly one line" "1" \
 # --- (e) BOTH WALLS ACTUALLY ASK IT. A shared text neither program calls is a comment. ---
 expect_eq "LC.5 the dispatch wall notes every row through the shared reading" "2" \
   "$(/usr/bin/grep -c 'contract_note($0)' "$LC_DP")"
-# The END rule itself, not a bare mention: `contract_closed` is also the name of a function
-# the shared span DEFINES, so a count would be satisfied by the definition alone.
+# THE VERDICT ITSELF, NOT A BARE MENTION: `contract_closed` is also the name of a function the
+# shared span DEFINES, so a count would be satisfied by the definition alone. Two lines carry
+# the decision and BOTH are pinned — the line where the wall's answer is COMPUTED from the
+# shared reading, and the line where the arm that refuses ACTS on it. A pin on only the first
+# is satisfied by a wall that computes the verdict and throws it away.
+#
+# RE-SPELLED BY WAVE-14 T16, AGAINST WAVE-14 T5 (ffe3265). Until T5 the dispatch side decided
+# in an awk END rule — `if (open && !contract_closed(want)) print last` — and this arm pinned
+# that literal. T5 moved the reading into `dp_roster_contracts` because the BUDGET wall needed
+# the same answer and two spellings of one question are two answers; that function prints a
+# verdict PER ROW, so the decision is now the printf's ternary and the name-in-flight arm
+# selects on the `open` it printed. What is pinned is unchanged: the dispatch wall decides on
+# open rows through the shared reading, and through nothing else. The behaviour across the
+# move is driven, not inferred — tests/dispatch-preflight.test.sh §T22-name-in-flight (a)–(k2).
 expect_contains "LC.5 …and the dispatch wall DECIDES on it" \
-  'if (open && !contract_closed(want)) print last' "$(cat "$LC_DP")"
+  '(contract_closed(nm) || ack_closes(nm, born[nm])) ? "closed" : "open"' "$(cat "$LC_DP")"
+expect_contains "LC.5 …and the arm that refuses a re-used name ACTS on that verdict" \
+  '$1 == want && $3 == "open"' "$(cat "$LC_DP")"
 expect_eq "LC.5 the recorder notes every row through the shared reading" "2" \
   "$(/usr/bin/grep -c 'contract_note($0)' "$LC_ER")"
 expect_contains "LC.5 …and the recorder DECIDES on it" \
