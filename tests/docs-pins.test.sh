@@ -898,10 +898,20 @@ section "Section 6: Step 8's tmp wipe spares session-keyed state"
 # and it contradicts the same file's own sentence that "the marker is never removed during
 # the session once written". The Step 8 line now names what it spares.
 #
+# RE-SPELLED (epic-23 wave-14 T28, review-duplication-d3930dd.md F3). The sentence above
+# used to say "every session-keyed file" and enumerated five classes; that went stale
+# twice over. (1) T1/REQ-1 (this wave) changed the rule itself: close-out now spares only
+# a LIVE neighbour session's keyed files and removes a dead one's, so "every" was already
+# wrong going into this wave. (2) `PATROL_STATE_CLASSES` (payload/scripts/lib/patrol.sh:162)
+# grew a sixth member, `stop-orders`, at wave-13 — the prose enumeration never followed.
+# The re-spelled sentence names all six classes and the live/dead distinction, and 44b/44c/
+# 44d below pin the class list against `PATROL_STATE_CLASSES` directly so the two cannot
+# drift apart again without one of them turning red.
+#
 # THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
 # evidence key the gate parses, not prose; renaming it would be an interface change and is
 # not what the finding asked for.
-PIN_TMP_SPARE='sparing every session-keyed file — `engaged-*.state`, `roster-*.state`, `patrol-*.state*`, `preflight-*.state`, `sweeper-*.state`'
+PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the six \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
 PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
 
 if has_pin "$STEP8_MD" "$PIN_TMP_SPARE"; then
@@ -926,14 +936,63 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40.
-anchor "$STEP8_MD" 'sparing every session-keyed file' 1
+anchor "$STEP8_MD" "sparing a LIVE neighbour session" 1
 DOCTORED_TMP="$TMP/skill-tmp-wipe-mutated.md"
-sed 's/sparing every session-keyed file/taking every file/' "$STEP8_MD" > "$DOCTORED_TMP"
+sed "s/sparing a LIVE neighbour session/taking every neighbour session/" "$STEP8_MD" > "$DOCTORED_TMP"
 if has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
   no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
   ok "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)"
+fi
+
+# 44b/44c/44d — T28: the class list steps/8.md names must not drift from patrol.sh's own
+# PATROL_STATE_CLASSES again (F3's second divergence — the prose was short one class, and
+# nothing agreement-checked the two against each other). Read the SSoT directly rather than
+# hand-copying a count into this suite, so a future class added to patrol.sh is caught here
+# instead of relying on a human to remember to update this pin too.
+PATROL_LIB_T28="${REPO}/payload/scripts/lib/patrol.sh"
+PATROL_CLASSES_ACTUAL="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$PATROL_LIB_T28")"
+expect_nonempty "44a: patrol.sh's PATROL_STATE_CLASSES line is readable (the 44b/44c comparisons have something to measure)" "$PATROL_CLASSES_ACTUAL"
+
+PATROL_CLASSES_MISSING=""
+for _pc in $PATROL_CLASSES_ACTUAL; do
+  if ! grep -qF "\`${_pc}\`" "$STEP8_MD"; then
+    PATROL_CLASSES_MISSING="${PATROL_CLASSES_MISSING} ${_pc}"
+  fi
+done
+if [ -z "$PATROL_CLASSES_MISSING" ]; then
+  ok "44b: every patrol.sh PATROL_STATE_CLASSES name (${PATROL_CLASSES_ACTUAL}) appears in steps/8.md's spare-rule sentence"
+else
+  no "44b: every patrol.sh PATROL_STATE_CLASSES name (${PATROL_CLASSES_ACTUAL}) appears in steps/8.md's spare-rule sentence" \
+     "missing from steps/8.md:${PATROL_CLASSES_MISSING}"
+fi
+
+PATROL_CLASSES_COUNT="$(printf '%s\n' "$PATROL_CLASSES_ACTUAL" | wc -w | tr -d ' ')"
+PATROL_ALT_T28="$(printf '%s' "$PATROL_CLASSES_ACTUAL" | tr ' ' '|')"
+STEP8_CLASS_MENTIONS="$(grep -oE "\`(${PATROL_ALT_T28})\`" "$STEP8_MD" | sort -u | wc -l | tr -d ' ')"
+if [ "$STEP8_CLASS_MENTIONS" = "$PATROL_CLASSES_COUNT" ]; then
+  ok "44c: steps/8.md names exactly ${PATROL_CLASSES_COUNT} distinct classes, matching patrol.sh's PATROL_STATE_CLASSES count"
+else
+  no "44c: steps/8.md names exactly ${PATROL_CLASSES_COUNT} distinct classes, matching patrol.sh's PATROL_STATE_CLASSES count" \
+     "steps/8.md names ${STEP8_CLASS_MENTIONS} distinct classes from the current list, patrol.sh has ${PATROL_CLASSES_COUNT}"
+fi
+
+# Anti-vacuity for 44c: a patrol.sh with a class ADDED must desync the count this arm
+# compares, proving 44c is a live comparison against the SSoT and not a hardcoded "6".
+DOCTORED_PATROL_T28="$TMP/patrol-classes-mutated.sh"
+sed "s/^PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL}\"\$/PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL} extra-class\"/" \
+  "$PATROL_LIB_T28" > "$DOCTORED_PATROL_T28"
+DOCTORED_CLASSES_T28="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$DOCTORED_PATROL_T28")"
+DOCTORED_COUNT_T28="$(printf '%s\n' "$DOCTORED_CLASSES_T28" | wc -w | tr -d ' ')"
+if [ "$DOCTORED_CLASSES_T28" = "$PATROL_CLASSES_ACTUAL" ]; then
+  no "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)" \
+     "the sed mutation did not change PATROL_STATE_CLASSES — anchor moved, mutation is a no-op"
+elif [ "$DOCTORED_COUNT_T28" != "$STEP8_CLASS_MENTIONS" ]; then
+  ok "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)"
+else
+  no "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)" \
+     "doctored count ${DOCTORED_COUNT_T28} still equalled steps/8.md's ${STEP8_CLASS_MENTIONS}"
 fi
 
 section "Section 7: bind's operand takes the spelling session-start prints"
