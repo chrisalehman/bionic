@@ -3860,7 +3860,7 @@ budget_refuse() {  # <suite basename>
   case "$1" in
     *'$'*|*'`'*)
       fold_block exit2 suite-run \
-        "$(_budget_wire_fact "unexpanded name; budget: " suite-run "spell each suite literally" "$2")" \
+        "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
         "spell each suite literally" \
         "The name as read: $1
 
@@ -3876,7 +3876,7 @@ On the budget: ${2:-(nothing — this brief declared Suites: none)}"
       return 2 ;;
   esac
   fold_block exit2 suite-run \
-    "$(_budget_wire_fact "off budget: " suite-run "run only the budgeted suites" "$2")" \
+    "$(_budget_wire_fact "allowed: " suite-run "run only the budgeted suites" "$2")" \
     "run only the budgeted suites" \
     "This is a BUDGET arm, not a safety wall: an extra suite run breaks nothing, it spends
 forty minutes of a machine nobody else can use. The set was recorded on this agent's
@@ -3907,7 +3907,7 @@ for _target in $_TARGETS; do
       *" run.sh "*) continue ;;
     esac
     fold_block exit2 suite-run \
-      "$(_budget_wire_fact "full tree off budget: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
+      "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
       "This is a BUDGET arm, not a safety wall. One regression means one: the whole tree is
 proved once per run, by one dispatched runner whose row carries tests/run.sh, at
