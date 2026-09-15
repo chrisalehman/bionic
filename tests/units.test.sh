@@ -904,7 +904,7 @@ expect_contains "T23's task cell keeps its pipe" "PreToolUse|Bash" \
   "$(printf '%s\n' "$ESC_T23" | cut -f4)"
 
 # ============================================================
-section "10 — the `worktree` cell: slot 11, header-keyed, and OPTIONAL (wave-14 REQ-2, ADR-027)"
+section "10 — the worktree cell: slot 11, header-keyed, and OPTIONAL (wave-14 REQ-2, ADR-027)"
 # ============================================================
 #
 # WHY THE COLUMN EXISTS. ADR-027 makes the `## Tasks` table the register of in-flight units:
