@@ -221,7 +221,7 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
 # the preamble's most expensive value and most hooks never read the answer. This gate reads it at
-# :285-286 to scope itself to the bound run.
+# :291-292 to scope itself to the bound run.
 BIONIC_CONTEXT_WANT_RUN=1
 
 # ---------- THE ROOT AND THE SESSION KEY, from one call ----------
@@ -1197,7 +1197,14 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       if [ -n "$closed" ]; then
         while IFS='|' read -r nm claims; do
           [ -n "$nm" ] || continue
-          printf '%s\n' "$closed" | /usr/bin/grep -qxF -- "$nm" || continue
+          # A HERE-STRING, NOT A PIPE (correctness review F8; memory
+          # grep-q-sigpipe-under-pipefail). `grep -q` exits at its first match; under this
+          # file's `set -uo pipefail` (:67), a `printf | grep -qxF` pipeline SIGPIPEs the
+          # producer whenever the match sits ahead of enough trailing data to still be
+          # queued when `grep` closes its read end, and `pipefail` promotes that 141 over
+          # grep's own 0 — a closed row reads as still open. A here-string has no second
+          # process to lose.
+          /usr/bin/grep -qxF -- "$nm" <<< "$closed" || continue
           open=$(( open - 1 ))
           [ -n "$claims" ] && claimed=$(( claimed - 1 ))
         done <<DARK
@@ -2138,7 +2145,13 @@ dp_scaffold_marked() {
       # spelled. `Suites:` keeps the plain rule: a derivation is not a declaration, and this
       # gate is where a repo with no impact command learns to name its set.
       "Expected duration")  [ -n "$C_DURATION" ]    || line="${line} <ADD>" ;;
-      "Expected artifact")  [ -n "$C_DELIVERABLE" ] || [ -n "$C_WAIVER" ] || line="${line} <ADD>" ;;
+      # A LABEL WHOSE SPAN WAS READ AND REJECTED IS NOT AN ABSENT LABEL (critic Issue 3,
+      # wave-14 T26, pre-existing at 0fe69ed). Several candidates leaves C_DELIVERABLE
+      # empty on the SAME contract as zero candidates, but the two are not the same fault
+      # — the ambiguity arm above already refused this brief, and marking the line <ADD>
+      # here would tell the author to add a line they already wrote.
+      "Expected artifact")  [ -n "$C_DELIVERABLE" ] || [ -n "$C_WAIVER" ] || \
+                             [ -n "$C_DELIVERABLE_CANDIDATES" ] || line="${line} <ADD>" ;;
       "Files")               [ -n "$C_FILES" ]       || [ -n "$C_SUITES" ] || line="${line} <ADD>" ;;
       "Suites")              [ -n "$C_SUITES" ]      || line="${line} <ADD>" ;;
       "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
@@ -2347,7 +2360,18 @@ fi
 # journal step bail early — the same reasoning §8 applies to the attestation
 # path, read here in the refuse direction.
 if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
-  _dp_detail="An agent with nothing durable to produce cannot be checked on: there is no
+  if [ -n "$C_DELIVERABLE_CANDIDATES" ]; then
+    # THE AMBIGUITY ARM ALREADY REFUSED THIS BRIEF (critic Issue 3, wave-14 T26;
+    # pre-existing at 0fe69ed — both arms already called `dp_finding` there). A label
+    # offering several candidates leaves C_DELIVERABLE empty on purpose, because the
+    # ambiguity arm above never guesses among them — and this arm's own "nothing was
+    # declared" fact would then contradict the one already on the wire: "the deliverable
+    # label names several paths" and "this brief names no deliverable" cannot both be
+    # true. D3's own rule applies to this pair too: an arm whose input is another arm's
+    # product says so instead of guessing.
+    dp_not_checked "deliverable" "one path"
+  else
+    _dp_detail="An agent with nothing durable to produce cannot be checked on: there is no
 path to stat when it reports done, and nothing left behind if it dies quietly.
 
 Fix: declare a durable artifact path with a canonical label —
@@ -2359,7 +2383,8 @@ Or waive it — the reason is recorded on the session roster either way:
     Deliverable-waiver: <why this dispatch produces nothing durable>
 
 Then retry the dispatch."
-  dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
+    dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
+  fi
 fi
 
 # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
@@ -2525,6 +2550,14 @@ itself has become slow, that is the thing to fix: it runs on every dispatch."
       # below reads this set for `run.sh`; an overrun leaves it unbuilt, and the author
       # deserves to know that wall is still waiting rather than to meet it next attempt.
       dp_not_checked "one-regression" "a suite set"
+      # THIS SPEND IS EARLY (Step-6 architecture review §2.2). Every other arm pools into
+      # one `dp_refuse_findings` at the bottom of the file; this branch spends here instead
+      # because the overrun destroys the one-regression wall's own input and there is
+      # nothing below THIS branch (in file order) but that wall. That is true only by arm
+      # order, not by construction — an arm added below this point that does NOT depend on
+      # the derivation would be silently skipped on every overrun, with no test to catch
+      # it. Any arm added below here must be dependent on the derivation, or must be
+      # pooled above this spend instead.
       dp_refuse_findings
     fi
     _impact_out=$(cat "$_impact_tmp" 2>/dev/null) || _impact_out=""
