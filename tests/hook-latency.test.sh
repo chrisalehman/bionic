@@ -558,6 +558,24 @@ expect_eq "7d: BENCH_EXTRA_CANDIDATES unset reports candidates=1" "1" "$BENCH_CA
 
 rm -rf "$BENCH_SANDBOX_0"
 
+# 7e: A LEADING ZERO PASSES THE DIGITS-ONLY VALIDATOR AND THEN BREAKS ARITHMETIC (correctness
+# review F9, wave-14 T26). `case "$BENCH_EXTRA_CANDIDATES" in ''|*[!0-9]*)` accepts `08` — every
+# character IS a digit — and the script used to fail later at `$(( 1 + BENCH_EXTRA_CANDIDATES ))`,
+# where bash reads a leading `0` as an octal prefix and `08` is not a valid octal number
+# ("value too great for base"). The fix strips the leading-zero run once, right after
+# validation, so n=08 behaves exactly as n=8.
+BENCH_OUT_LZ=$(BENCH_EXTRA_CANDIDATES=08 bash "$BENCH_SCRIPT" --candidates-only 2>&1)
+BENCH_LZ_RC=$?
+BENCH_CANDIDATES_LZ=$(printf '%s\n' "$BENCH_OUT_LZ" | sed -n 's/^hook-latency: candidates=\([0-9]*\)$/\1/p')
+BENCH_SANDBOX_LZ=$(printf '%s\n' "$BENCH_OUT_LZ" | sed -n 's/^hook-latency: sandbox=//p')
+
+expect_eq "7e: BENCH_EXTRA_CANDIDATES=08 does not crash on octal arithmetic" "0" "$BENCH_LZ_RC"
+expect_eq "7e: …and reads as decimal 8, reporting candidates=9" "9" "$BENCH_CANDIDATES_LZ"
+expect_absent "7e: …with no bash 'value too great for base' error on stderr" \
+  "value too great for base" "$BENCH_OUT_LZ"
+
+rm -rf "$BENCH_SANDBOX_LZ"
+
 # ─────────────────────────────────────────────────────────────────────────────
 section "8: the bench names the interpreter it forks the hooks with"
 

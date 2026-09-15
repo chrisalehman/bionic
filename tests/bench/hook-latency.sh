@@ -113,6 +113,13 @@ case "$BENCH_EXTRA_CANDIDATES" in
     exit 1
     ;;
 esac
+# LEADING ZEROS STRIPPED (correctness review F9). A value like `08` passes the digits-only
+# check above and then breaks bash's own arithmetic context below (`$(( 1 + BENCH_EXTRA_
+# CANDIDATES ))` reads a leading `0` as an octal prefix and `08`/`09` are not valid octal
+# digits — "value too great for base"; `007` would silently mean 7, not seven). Stripping
+# the leading-zero run here, once, means every later arithmetic use reads a plain decimal.
+BENCH_EXTRA_CANDIDATES="${BENCH_EXTRA_CANDIDATES#"${BENCH_EXTRA_CANDIDATES%%[!0]*}"}"
+[ -n "$BENCH_EXTRA_CANDIDATES" ] || BENCH_EXTRA_CANDIDATES=0
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
