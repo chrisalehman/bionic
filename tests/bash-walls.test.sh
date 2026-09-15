@@ -845,7 +845,9 @@ run_hook "$(mk_payload "$R_ORDER" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash 
 expect_status "14t: off-budget + NO timeout: refused — the budget arm runs before the repair" \
   2 "$ST"
 expect_contains "14u: …in the budget arm's own words" \
-  "that suite is not on this agent's budget" "$ERR"
+  "off budget:" "$ERR"
+expect_contains "14u2: …and AC-5.2's set: the row's own allowed token is on this line, not just detail" \
+  "alpha.test.sh" "$ERR"
 expect_absent "14v: …and a REFUSED call is never repaired — no repair line on stderr" \
   "suite-timeout" "$ERR"
 expect_eq "14w: …and no updatedInput on stdout either" "no" "$(has_updated_input)"
@@ -860,5 +862,107 @@ expect_eq "14y: …updatedInput.timeout still raised to the harness maximum" "60
   "$(updated_timeout_of)"
 expect_contains "14z: …and the repair is still logged, naming the agent" \
   "repaired from=absent to=600000 agent=$ACTOR" "$ERR"
+
+# ---------------------------------------------------------------------------
+section "15 — §budget-on-the-wire (T8, AC-5.2): the allowed set reaches exit-2 stderr"
+#
+# T7's repro (record/wave-14-tune-181/T7-req5-repro.md §4, ruling D-1): "On the budget: …"
+# lived only in `detail`, and refuse.sh's channel table marks exit2's `detail_to_user`
+# `no` — a dispatched writer's own tool_result on a budget refusal never carried the
+# recorded set, only the one-line fact/fix, and that line named no set. AC-5.2's
+# fails-when is exactly this: "the stderr the harness relays on exit 2 carries no suite
+# tokens." This section drives all three call sites `budget_refuse` (walls.sh) folds
+# through and proves each one now does, on the DEFAULT (non-verbose) channel — never
+# through $VERR, which section 14 and tests/agent-context-guard.test.sh §G9 already cover.
+
+R15="$(mk_repo budgetwire)"
+: > "$R15/.bionic/tmp/roster-$SID.state"
+. "$(dirname "$0")/lib/roster-row.sh"
+roster_row_fixture "session=$SID" name=t15writer "agent_id=$ACTOR" \
+  "suites_allowed=archive.test.sh run.sh" suites_source=derived files= \
+  >> "$R15/.bionic/tmp/roster-$SID.state"
+
+WIRE_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
+
+# (a) the ordinary per-suite refusal — the primary AC-5.2 site (walls.sh's own line
+# number for "On the budget:" cited by the wave plan).
+run_hook "$(mk_payload "$R15" 'bash tests/close-out.test.sh' "$ACTOR" omit Bash test-runner)"
+expect_status "15a: an off-budget suite is still refused" 2 "$ST"
+expect_contains "15a2: …and the DEFAULT (non-verbose) exit-2 stderr carries the FIRST allowed token" \
+  "archive.test.sh" "$ERR"
+expect_contains "15a3: …and the SECOND" "run.sh" "$ERR"
+expect_eq "15a4: …still exactly one line" "1" "$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')"
+if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
+  ok "15a5: …and still in AC-E1.3's one-line shape"
+else
+  no "15a5: …and still in AC-E1.3's one-line shape" "line=[$ERR]"
+fi
+
+# (b) the shell-variable-name case — an unexpanded `$s.test.sh` cannot be checked against
+# the budget, but the budget it WOULD have checked against still belongs on the wire.
+run_hook "$(mk_payload "$R15" 'for s in a b; do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+expect_status "15b: an unexpanded suite name is still refused" 2 "$ST"
+expect_contains "15b2: …and the recorded budget is on the DEFAULT stderr too" \
+  "archive.test.sh" "$ERR"
+
+# (c) the full-tree case (`tests/run.sh`, not on this row's budget). A FRESH row: R15's
+# own set literally contains the token "run.sh" as one of its two allowed SUITE NAMES,
+# which is also the one token that waives this exact arm (walls.sh: `*" run.sh "*)
+# continue`) — reusing it here would test nothing.
+R15R="$(mk_repo budgetwirerun)"
+: > "$R15R/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" name=t15run "agent_id=$ACTOR" \
+  suites_allowed=archive.test.sh suites_source=declared files= \
+  >> "$R15R/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15R" 'bash tests/run.sh' "$ACTOR" omit Bash test-runner)"
+expect_status "15c: the full tree is refused when the row does not carry it" 2 "$ST"
+expect_contains "15c2: …and the recorded budget is on the DEFAULT stderr" \
+  "archive.test.sh" "$ERR"
+
+# (d) THE PAIRED NEGATIVE — a brief that declared `Suites: none` carries no fabricated
+# token, and the wire says so honestly rather than silently going quiet about it.
+R15N="$(mk_repo budgetwirenone)"
+: > "$R15N/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" name=t15none "agent_id=$ACTOR" \
+  suites_allowed=none suites_source=declared files= \
+  >> "$R15N/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15N" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash test-runner)"
+expect_status "15d: a Suites: none row still refuses" 2 "$ST"
+expect_contains "15d2: …and the DEFAULT stderr says so honestly — 'none' on the wire" \
+  "none" "$ERR"
+expect_absent "15d3: …never a fabricated suite token" "gamma.test.sh" "$ERR"
+
+# (e) A WIDE BUDGET (A-orch-17's own incident: "the row carried a 38-suite set") still
+# fits ONE line — token boundaries, not a mid-name cut, and a "+N more" count for what
+# does not fit.
+R15W="$(mk_repo budgetwirewide)"
+: > "$R15W/.bionic/tmp/roster-$SID.state"
+WIDE_SET=""
+for i in $(seq 1 38); do WIDE_SET="$WIDE_SET s${i}.test.sh"; done
+WIDE_SET="${WIDE_SET# }"
+roster_row_fixture "session=$SID" name=t15wide "agent_id=$ACTOR" \
+  "suites_allowed=$WIDE_SET" suites_source=derived files= \
+  >> "$R15W/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15W" 'bash tests/zzz-off-budget.test.sh' "$ACTOR" omit Bash test-runner)"
+expect_status "15e: an off-budget suite against a 38-suite row is refused" 2 "$ST"
+expect_eq "15e2: …still exactly one line" "1" "$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')"
+if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
+  ok "15e3: …still in AC-E1.3's one-line shape (never overflows past refuse()'s own cap)"
+else
+  no "15e3: …still in AC-E1.3's one-line shape (never overflows past refuse()'s own cap)" "line=[$ERR]"
+fi
+expect_contains "15e4: …and it names at least one real suite token, not a mid-name ellipsis" \
+  "s1.test.sh" "$ERR"
+expect_contains "15e5: …with an honest count of what did not fit" "more" "$ERR"
+
+# (f) CONTROL — an on-budget suite is still silent on both streams; the change above is
+# additive to the refusal only, never a new nudge on the allowed path. A payload timeout
+# pinned to the SAME value this call sets `BASH_MAX_TIMEOUT_MS` to keeps ARM R's
+# repair-and-log silent too (section 14c: "a timeout AT the maximum — nothing to
+# repair"), regardless of whatever ceiling the calling shell happens to have exported.
+run_hook "$(mk_payload "$R15" 'bash tests/archive.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
+expect_empty "15f2: …and both streams stay empty" "$OUT$ERR"
 
 finish
