@@ -313,17 +313,27 @@ OUT=$(drive "$P4b" clear "$CUR_SID" "$PAY_SID" "-")
 has "4.7 an absent pid file is reported absent" "pidfile=absent" "$OUT"
 has "4.8 …and two channels that still disagree still DIVERGE" "DIVERGE" "$OUT"
 
-section "5 — a legacy .bionic symlink under .worktrees (AC-11, ledger C2)"
+section "5 — a legacy .bionic symlink under .worktrees (AC-11/AC-7.1, ledger C2, narrowed A-orch-24)"
+# `wt-one` resolves SOMEWHERE ELSE — a mis-pointed link, the genuine legacy shape.
+# `wt-two` is a real directory, never a symlink. `wt-three` resolves to THIS
+# project's own `.bionic` — the alias `spawn-worktree.sh create` plants on
+# purpose (D7) — so it must NOT be reported: `worktree_legacy_links` (lib/
+# worktree.sh) is the one predicate this hook and doctor.sh's own report both
+# call, rather than each keeping its own copy of the comparison.
 P5=$(make_env 1s)
-mkdir -p "$P5/.worktrees/wt-one"
-ln -s "$P5/.bionic" "$P5/.worktrees/wt-one/.bionic"
+mkdir -p "$P5/.worktrees/wt-one" "$P5/.worktrees/wt-three"
+mkdir -p "$P5/elsewhere/.bionic"
+ln -s "$P5/elsewhere/.bionic" "$P5/.worktrees/wt-one/.bionic"
 mkdir -p "$P5/.worktrees/wt-two/.bionic"   # a REAL dir there is not a legacy link
+ln -s "$P5/.bionic" "$P5/.worktrees/wt-three/.bionic"
 S5_BEFORE=$(snap "$P5")
 OUT=$(drive "$P5" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 eq  "5.1 exit 0" "0" "$(rc)"
 has "5.2 the legacy link is listed" "legacy .bionic symlinks:" "$OUT"
 has "5.3 …by its path" ".worktrees/wt-one/.bionic" "$OUT"
 hasnt "5.4 …and a real directory beside it is not" ".worktrees/wt-two/.bionic" "$OUT"
+hasnt "5.4b …and an alias correctly pointing at the main root's .bionic is not (D7)" \
+  ".worktrees/wt-three/.bionic" "$OUT"
 eq  "5.5 wrote nothing" "$S5_BEFORE" "$(snap "$P5")"
 
 section "6 — predecessor stamps: stale past PATROL_STALE_MULTIPLIER x interval"

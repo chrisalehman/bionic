@@ -1388,14 +1388,18 @@ expect_absent "75b: …and names the deleted manifest nowhere" \
 # byte-for-byte, the same `has_pin` idiom §1-§5 use.
 section "Section 6: K3 — premise text (Context/Problem first, Mechanisms inherited)"
 
-# AC-K3.1: Context and Problem, for a stranger, is the FIRST thing the frame
-# ratifies — ahead of the orchestrator's own design intuition and every decision
-# below it. Pinned as one substring spanning the frame's opening clause straight
-# into the Context-and-Problem sentence, so the pin itself IS an adjacency (hence
-# order) check: it can only match a copy where nothing has been inserted, or
-# swapped in, between "before any question." and "Its first ratification is
-# **Context and Problem".
-PIN_K3_FIRST='**Open with the frame**, before any question. Its first ratification is **Context and Problem, for a stranger**'
+# AC-K3.1: Context and Problem is the FIRST thing the frame approves — ahead of
+# the orchestrator's own design intuition and every decision below it. Pinned as
+# one substring spanning the frame's opening clause straight into the
+# Context-and-Problem sentence, so the pin itself IS an adjacency (hence order)
+# check: it can only match a copy where nothing has been inserted, or swapped
+# in, between "before any question." and "Its first approval is
+# **Context and Problem". RE-ANCHORED (epic-23 wave-13 T2, AC-8.1/AC-8.2): the
+# heading lost its ", for a stranger" clause — the explanation itself
+# ("written as if for a reader who has never opened this repo") stays, just not
+# folded into the bold span — and "ratification" became "approval" (the T2
+# ratif→approv sweep).
+PIN_K3_FIRST='**Open with the frame**, before any question. Its first approval is **Context and Problem**'
 
 # AC-K3.2, half 1: the frame carries a "Mechanisms inherited" item, each line
 # marked kept or questioned.
@@ -1406,9 +1410,9 @@ PIN_K3_MECH='**Mechanisms inherited**, one line per substrate or mechanism the d
 PIN_K3_STRATEGIC='placing a test cohort in a tier, a job on a runtime surface, or a workload on hardware is **strategic by rule**'
 
 if has_pin "$STEP2_MD" "$PIN_K3_FIRST"; then
-  ok "76: SKILL.md's Step-2 frame ratifies Context and Problem, for a stranger, first"
+  ok "76: SKILL.md's Step-2 frame approves Context and Problem first"
 else
-  no "76: SKILL.md's Step-2 frame ratifies Context and Problem, for a stranger, first" "file: $STEP2_MD"
+  no "76: SKILL.md's Step-2 frame approves Context and Problem first" "file: $STEP2_MD"
 fi
 
 if has_pin "$STEP2_MD" "$PIN_K3_MECH"; then
@@ -1429,22 +1433,22 @@ fi
 # Context-and-Problem sentence and the Design-intuition sentence in place — the
 # literal shape of "the order is reversed" — rather than deleting anything, so a
 # pin that merely checked PRESENCE of both phrases would stay green through it.
-anchor -E "$STEP2_MD" 'Its first ratification is \*\*Context and Problem, for a stranger\*\*' 1
+anchor -E "$STEP2_MD" 'Its first approval is \*\*Context and Problem\*\*' 1
 DOCTORED_K3_ORDER="$TMP/skill-k3-order-reversed.md"
 sed -E '
-s/(\*\*Open with the frame\*\*, before any question\. )(Its first ratification is \*\*Context and Problem, for a stranger\*\*: the problem and the goal, written as if for a reader who has never opened this repo; this comes before your own design intuition and before every decision in the frame below it — a change not yet explainable to someone who was not there is not yet understood\. )(Then your own \*\*Design intuition\*\*, the shape you expect to be right, stated so the user can push on it; )/\1\3\2/
+s/(\*\*Open with the frame\*\*, before any question\. )(Its first approval is \*\*Context and Problem\*\*: the problem and the goal, written as if for a reader who has never opened this repo; this comes before your own design intuition and before every decision in the frame below it — a change not yet explainable to someone who was not there is not yet understood\. )(Then your own \*\*Design intuition\*\*, the shape you expect to be right, stated so the user can push on it; )/\1\3\2/
 ' "$STEP2_MD" > "$DOCTORED_K3_ORDER"
 if has_pin "$DOCTORED_K3_ORDER" "$PIN_K3_FIRST"; then
-  no "79: order-reversed SKILL.md fails the first-ratification pin (pin discriminates)" \
+  no "79: order-reversed SKILL.md fails the first-approval pin (pin discriminates)" \
      "the mutated copy still matched — the pin does not see the reorder"
 else
-  ok "79: order-reversed SKILL.md fails the first-ratification pin (pin discriminates)"
+  ok "79: order-reversed SKILL.md fails the first-approval pin (pin discriminates)"
 fi
 # Control: prove the doctored copy really moved Design intuition ahead of
 # Context and Problem, rather than merely mangling the text into something that
 # happens to fail the pin for an unrelated reason.
 expect_contains "79b: …and the doctored copy really does read Design intuition, then Context and Problem" \
-  'Then your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; Its first ratification is **Context and Problem' \
+  'Then your own **Design intuition**, the shape you expect to be right, stated so the user can push on it; Its first approval is **Context and Problem' \
   "$(cat "$DOCTORED_K3_ORDER")"
 
 # 80: Mechanisms inherited ABSENT (AC-K3.2's fails-when). The strategic-by-rule
@@ -1703,12 +1707,12 @@ done
 #
 # One word is the gate. The ratified sentence is a QUESTION plus the literal reply, and
 # a look-closer line beneath it; the bare footer menu it replaced was rejected by name.
-expect_contains "95a: the Step-1 card asks the ratified question" \
-  'Do you approve these requirements? Reply "approved" to ratify it.' "$CARD1"
-expect_contains "95b: the Step-2 card asks the ratified question" \
-  'Do you approve this design? Reply "approved" to ratify it.' "$CARD2"
-expect_contains "95c: the Step-3 card asks the ratified question" \
-  'Do you approve this plan? Reply "approved" to ratify it.' "$CARD3"
+expect_contains "95a: the Step-1 card asks the approved question" \
+  'Do you approve these requirements? Reply "approved" to approve it.' "$CARD1"
+expect_contains "95b: the Step-2 card asks the approved question" \
+  'Do you approve this design? Reply "approved" to approve it.' "$CARD2"
+expect_contains "95c: the Step-3 card asks the approved question" \
+  'Do you approve this plan? Reply "approved" to approve it.' "$CARD3"
 expect_contains "95d: the Step-2 card's look-closer line opens one requirement's evals" \
   'show evals <req>' "$CARD2"
 expect_contains "95e: the Step-3 card's look-closer line opens one task" \
@@ -2058,9 +2062,17 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # 5,322 B after every safe trim available within T3's scope. The orchestrator raised this
 # cap rather than have T3 touch a shared block outside its declared Files or cut the
 # Discretion-contract text below what its lever authorized.
+#
+# ROLE_TOTAL_CAP RAISED 26,000 -> 26,300 (epic-23 wave-13 T17, A-T17.1, R6 finding 3): the
+# scaffold's two new lines (`Progress artifact:`, `Cadence:`) render into all six role files
+# identically, at their shortest label-legal form (no trailing comment, unlike Files:/Suites:
+# — T17's Files did not authorize touching the labels the dispatch wall reads, so there is no
+# further trim available). +43 B/file × 6 = +258 B put the measured total at 26,221 B, 221 B
+# over the old cap with only 37 B of headroom to spend against; same shape of ratchet as the
+# per-file raise above, same reason.
 
 ROLE_CAP=5500
-ROLE_TOTAL_CAP=26000
+ROLE_TOTAL_CAP=26300
 ROLE_OVER=""
 ROLE_TOTAL=0
 ROLE_COUNT=0
@@ -2200,18 +2212,38 @@ section "Section 18: REQ-1b — the split skill's byte caps and the core's step 
 # moved nothing.
 #
 # THE CAPS ARE THE RATIFIED NUMBERS, not measurements of what happened to land: core 25,000 ·
-# each step file 14,000 · dispatch 35,000 · the three together 108,652 (today's exact size —
-# "no growth," literally), from the requirements file's AC table as AMENDED 2026-09-11 (user
-# ruling "Ok, option 1": caps measure the loaded surface; the prose cut is a chartered later
-# wave) and RE-AMENDED the same day once the T5-report §3 prunable-narrative estimate proved
-# too small to reach a tighter pair of caps on its own: dispatch to the measured cut (35,000,
-# still below today's 35,366) and total to the measured no-growth line (108,652), reached by
-# giving the core and dispatch reference the same one-line GENERATED header the step files
-# already use, not by cutting more prose. A fifth cap, also from the 2026-09-11 ruling, pins
-# the loaded surface itself: core + the largest single steps/N.md ≤ 36,000 B, since that pair
+# each step file 14,000 · dispatch 35,000 · the three together 108,652 (2026-09-11's exact
+# size — "no growth," literally), from the requirements file's AC table as AMENDED 2026-09-11
+# (user ruling "Ok, option 1": caps measure the loaded surface; the prose cut is a chartered
+# later wave) and RE-AMENDED the same day once the T5-report §3 prunable-narrative estimate
+# proved too small to reach a tighter pair of caps on its own: dispatch to the measured cut
+# (35,000, still below that day's 35,366) and total to the measured no-growth line (108,652),
+# reached by giving the core and dispatch reference the same one-line GENERATED header the
+# step files already use, not by cutting more prose. RE-RAISED to 109,118 (epic-23 wave-13
+# T2, 2026-09-14): the brief scaffold injected into SKILL.md (AC-2.2, +508 B) and the Step-3
+# card's conditional governing-design slot (AC-8.3) are both chartered growth this same wave
+# approved, not drift — the requirements file records neither the old nor the new total as a
+# ratified number of its own, so this comment carries the amendment instead; a future wave
+# that needs the cap raised again still raises it in the requirements first. RE-RAISED AGAIN
+# to 109,293 (epic-23 wave-13 T7, 2026-09-14, +175 B): the one-sentence "one docs tree"
+# addition AC-7.4 requires in orchestrator-dispatch.md (a positive statement that a worktree
+# writer's relative record path lands in the project's docs tree by construction) is this
+# wave's own chartered growth too — cut to the shortest wording that still carries a
+# grep-pinnable "one docs tree" phrase (Section 25 below), with T2's zero-slack total
+# leaving no room to add it for free. A fifth cap,
+# also from the 2026-09-11 ruling, pins the loaded surface itself: core + the largest single
+# steps/N.md ≤ 36,000 B, since that pair
 # is what a session actually carries at a step boundary — the whole-surface total below it
 # does not measure that. Headroom under a cap is not a reason to move the cap down, and a
 # future wave that needs a cap raised raises it in the requirements first.
+#
+# SET TO 110,000 (epic-23 wave-13 T11, 2026-09-14, A-orch-29): Chris ruled
+# "Option 2" on the aggregate cap directly, not another chartered-growth
+# increment — a RATCHET WITH AN OWNER, moved only by a named ruling with its
+# reason, the number itself the recommended one Chris accepted with the
+# option. This is not headroom for a specific sentence the way the two raises
+# above were; it is the ceiling itself changing, recorded here in AC-2.2
+# (requirements + plan) as well as in this comment's own established pattern.
 #
 # AC-1b.5 is the structural half, and it is what makes the byte caps mean anything: a core
 # that still carried its `### Step N` sections would be under no cap at all, and a core that
@@ -2279,12 +2311,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth)" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 108652 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth) ($SPLIT_TOTAL B ≤ 108652 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 110000 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B ($SPLIT_TOTAL B ≤ 110000 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 108,652 B (no growth)" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 108652)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 110000)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
@@ -2421,8 +2453,9 @@ expect_true "123: the retired-phrase grep fires on the shape it targets (the pat
 section "Section 22: T3 — the brief scaffold renders into all seven surfaces, and the ListAgents-before-dispatch text is gone (epic-23 wave-12, REQ-2/REQ-3/REQ-4, AC-2.1/AC-2.3/AC-4.4)"
 
 # WHAT THIS SECTION OWNS. `agents-src/blocks/brief-scaffold.md` is the single source of the
-# five-labelled-line brief shape (`Expected duration:`, `Expected artifact:`, `Files:`,
-# `Suites:`, `Deliverable-waiver:`); `agents-src/render.sh` renders it into
+# labelled brief shape (`Expected duration:`, `Expected artifact:`, `Progress artifact:`,
+# `Cadence:` — T17, R6 finding 3 — `Files:`, `Suites:`, `Deliverable-waiver:`);
+# `agents-src/render.sh` renders it into
 # `skills/canonical-sdlc/dispatch.md` and all six `agents/*.md` role files — seven surfaces,
 # one block, identical bytes by construction. This section pins the SHAPE of that result
 # (count, not content, so the block's own wording stays free to improve) and two carry-over
@@ -2587,5 +2620,297 @@ AC2_SUITES_MUT="$TMP/ac2-suites-token.md"
 printf 'Suites: none   # or *.test.sh tokens only\n' > "$AC2_SUITES_MUT"
 expect_true "128b: the .test.sh-token grep fires on the shape it targets (the pattern discriminates)" \
   grep -qE '^Suites:.*\.test\.sh' "$AC2_SUITES_MUT"
+
+section "Section 23: T2 — refusal scaffold in SKILL.md, the gate word, the Step-3 conditional design slot (epic-23 wave-13, REQ-2/REQ-8, AC-8.1/AC-8.2/AC-8.3)"
+
+# WHAT THIS SECTION OWNS. Three independent AC-8 pins that all landed with T2: the Step-2
+# frame heading dropped ", for a stranger" (AC-8.1); every step template, SKILL.md.tmpl and
+# orchestrator-dispatch.md swapped "ratif*" for "approv*" (AC-8.2); the Step-3 card's
+# "governing design" line moved from unconditional prose into a conditional slot inside the
+# card template itself (AC-8.3). The scaffold's SECOND home — SKILL.md, via the new
+# `<!-- INJECT: brief-scaffold -->` in SKILL.md.tmpl — is pinned here too, beside 124a's
+# seven-surface count, because SKILL.md was never one of the AC2_SURFACES loop's seven.
+#
+# HERMETIC. Reads the committed rendered finals by path; doctored copies live under $TMP.
+
+# --- AC-8.1: "for a stranger" is gone from every surface that could carry it ---
+#
+# fails-when (plan Verification Matrix): grep 'for a stranger' over agents-src, payload,
+# tests hits, or render.sh produces a diff, or §76 no longer asserts first position (§76/§79
+# above, re-anchored to the new heading, already cover the second half). EXCLUDES this suite's
+# own file from the tests/ half of the sweep — its comments quote the retired phrase verbatim
+# as the pin's own documentation of what was removed, the same reason $TMP mutants never count
+# against a section's own grep elsewhere in this file.
+AC81_HITS="$(grep -rl --exclude='docs-pins.test.sh' 'for a stranger' "${REPO}/agents-src" "${REPO}/payload" "${REPO}/tests" 2>/dev/null || true)"
+expect_empty "129: AC-8.1 — no file under agents-src/, payload/ or tests/ (excluding this suite's own commentary) still reads 'for a stranger'" \
+  "$AC81_HITS"
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+AC81_MUT="$TMP/ac81-for-a-stranger.md"
+printf 'Its first ratification is **Context and Problem, for a stranger**\n' > "$AC81_MUT"
+expect_true "129b: the 'for a stranger' grep fires on the shape it targets (the pattern discriminates)" \
+  grep -q 'for a stranger' "$AC81_MUT"
+
+# --- AC-8.2: the gate word is "approve*", never "ratif*", on the gate-asking surfaces ---
+#
+# fails-when: `grep -rci 'ratif'` over SKILL.md, dispatch.md and steps/ sums to more than 0,
+# or a docs-pins assertion still pins a "ratif" phrase there. SCOPED per A-orch-16 (ruling,
+# recorded in assumptions.md, the requirements and the plan): `operational-rules.md`, same
+# directory, is OUT of T2's scope — its dated historical attributions stay by the AC's own
+# exception, and its seven undated prose uses move to T7. The three gate-asking surfaces
+# below are the whole of AC-8.2's actual scope, not a narrowing of it: `steps/` is the WHOLE
+# directory (all ten rendered step files), not only the six this task's Files declared —
+# 4/7/8/9 never carried the word to begin with, verified before this pin shipped.
+NORATIF_TARGETS="${SKILL_DIR}/SKILL.md ${SKILL_DIR}/dispatch.md ${SKILL_DIR}/steps"
+NORATIF_SUM="$(grep -rci 'ratif' $NORATIF_TARGETS 2>/dev/null | awk -F: '{s+=$NF} END{print s+0}')"
+if [ "$NORATIF_SUM" -eq 0 ] 2>/dev/null; then
+  ok "130: AC-8.2 — SKILL.md, dispatch.md and steps/ read 'ratif' nowhere (case-insensitive)"
+else
+  no "130: AC-8.2 — SKILL.md, dispatch.md and steps/ read 'ratif' nowhere (case-insensitive)" \
+     "sum=${NORATIF_SUM}: $(grep -rci 'ratif' $NORATIF_TARGETS 2>/dev/null | grep -v ':0$')"
+fi
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+NORATIF_MUT="$TMP/ac82-ratif.md"
+printf 'Reply "approved" to ratify it.\n' > "$NORATIF_MUT"
+expect_true "130b: the case-insensitive ratif grep fires on the shape it targets (the pattern discriminates)" \
+  grep -qi 'ratif' "$NORATIF_MUT"
+
+# --- AC-8.2 (SKILL scaffold-presence, beside 124a): SKILL.md carries the injected scaffold ---
+#
+# AC2_SCAFFOLD_LINE and AC2_SURFACES are Section 22's; SKILL.md was never one of the seven
+# AC2_SURFACES (it renders from a different template, with its own byte cap), so this is a
+# SEPARATE presence pin over an eighth surface, not a widening of 124a's loop.
+SKILL_SCAFFOLD_N="$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$SKILL_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$SKILL_SCAFFOLD_N" ] || SKILL_SCAFFOLD_N=0
+expect_eq "131: AC-2.2/AC-2.3 — SKILL.md carries the injected brief scaffold's fenced 'Expected artifact:' line exactly once" \
+  "1" "$SKILL_SCAFFOLD_N"
+
+# Anti-vacuity: a SKILL.md with the block stripped reads 0, not 1.
+SKILL_SCAFFOLD_MUT="$TMP/skill-no-scaffold.md"
+grep -Fv -- "$AC2_SCAFFOLD_LINE" "$SKILL_MD" > "$SKILL_SCAFFOLD_MUT" 2>/dev/null
+expect_eq "131b: a SKILL.md with the fenced line stripped reads 0, not 1 (the count discriminates)" \
+  "0" "$(grep -Fc -- "$AC2_SCAFFOLD_LINE" "$SKILL_SCAFFOLD_MUT" 2>/dev/null | tr -cd '0-9')"
+
+# --- AC-8.3: the governing-design line is a conditional slot INSIDE the Step-3 card ---
+#
+# fails-when: the rendered steps/3.md still instructs a governing-design line outside the
+# card or unconditionally, or its card template lacks the conditional slot.
+PIN_GOV_SLOT='governing design <the spec'"'"'s `design:` pointer target, or the word "waived">'
+if has_pin "$STEP3_MD" "$PIN_GOV_SLOT"; then
+  ok "132: AC-8.3 — the Step-3 card carries the governing-design line as a slot under Artifacts"
+else
+  no "132: AC-8.3 — the Step-3 card carries the governing-design line as a slot under Artifacts" \
+     "file: $STEP3_MD"
+fi
+
+PIN_GOV_OMIT='omit this line when the spec carries its own ## Design'
+if has_pin "$STEP3_MD" "$PIN_GOV_OMIT"; then
+  ok "132b: …and the slot names its own omission condition (a spec's own ## Design prints nothing extra)"
+else
+  no "132b: …and the slot names its own omission condition (a spec's own ## Design prints nothing extra)" \
+     "file: $STEP3_MD"
+fi
+
+# The retired unconditional sentence must be gone, not just superseded — a template that
+# kept both would print the governing-design line twice on every card.
+GOV_OLD_HITS="$(grep -c 'It names the governing design on one line' "$STEP3_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$GOV_OLD_HITS" ] || GOV_OLD_HITS=0
+expect_eq "132c: …and the old unconditional 'It names the governing design on one line' sentence is gone" \
+  "0" "$GOV_OLD_HITS"
+
+# Anti-vacuity: the slot pin must discriminate a card with the line stripped. Stripped by
+# the "governing design" anchor, not by the (flattened, single-spaced) PIN_GOV_SLOT itself —
+# the shipped line double-spaces its label column to align with its Artifacts siblings, and
+# `grep -F` reads the raw file, unflattened.
+GOV_MUT="$TMP/step3-no-gov-slot.md"
+grep -v 'governing design' "$STEP3_MD" > "$GOV_MUT" 2>/dev/null
+if has_pin "$GOV_MUT" "$PIN_GOV_SLOT"; then
+  no "132d: a Step-3 card with the governing-design slot stripped still passes the slot pin (pin discriminates)" \
+     "the mutated copy still matched — the pin does not see the removal"
+else
+  ok "132d: a Step-3 card with the governing-design slot stripped still passes the slot pin (pin discriminates)"
+fi
+
+# ---------------------------------------------------------------------------
+section "Section 24: T3 — the repair rule reaches the rendered survival text (REQ-3, AC-3.3)"
+#
+# WHAT THIS OWNS. AC-3.3 (epic-23 wave-13-fixit-180 spec): "payload/context/survival.md
+# lacks the rule" is a fail condition on its own — independent of the §AC2 byte-cap arms
+# above (111b/125), which pin the SIX ROLE FILES' size. Those are a different set of files
+# entirely: the survival text renders ONCE, to payload/context/survival.md, and never into
+# any agents/*.md (record/wave-13-fixit-180/research-R2-walls.md §6), so this sentence adds
+# no bytes there and those caps are unaffected by it.
+
+PIN_REPAIR="sized to the harness maximum"
+SURVIVAL_BLOCK_T3="${REPO}/agents-src/blocks/survival.md"
+SURVIVAL_SHIPPED_T3="${REPO}/payload/context/survival.md"
+
+if has_pin "$SURVIVAL_BLOCK_T3" "$PIN_REPAIR"; then
+  ok "133a: agents-src/blocks/survival.md (the SOURCE) carries the repair rule"
+else
+  no "133a: agents-src/blocks/survival.md (the SOURCE) carries the repair rule" \
+     "file: $SURVIVAL_BLOCK_T3"
+fi
+
+# The render is the delivery mechanism (same reasoning as assertion 12 above) — a pin on
+# the source alone would pass on a repo whose render never ran, which is the state a
+# dispatched writer who edited the block but skipped `render.sh` would be in.
+if has_pin "$SURVIVAL_SHIPPED_T3" "$PIN_REPAIR"; then
+  ok "133b: the rendered payload/context/survival.md carries the repair rule (render is current)"
+else
+  no "133b: the rendered payload/context/survival.md carries the repair rule (render is current)" \
+     "file: $SURVIVAL_SHIPPED_T3 — run 'bash agents-src/render.sh'"
+fi
+
+# Anti-vacuity: the pin must discriminate against a mutated copy.
+anchor "$SURVIVAL_BLOCK_T3" "$PIN_REPAIR" 1
+DOCTORED_REPAIR="$TMP/survival-repair-mutated.md"
+sed 's/sized to the harness maximum/sized however feels right/' "$SURVIVAL_BLOCK_T3" > "$DOCTORED_REPAIR"
+if has_pin "$DOCTORED_REPAIR" "$PIN_REPAIR"; then
+  no "133c: a doctored survival.md fails the repair-rule pin (pin discriminates)" \
+     "the mutated copy still matched — the pin is vacuous"
+else
+  ok "133c: a doctored survival.md fails the repair-rule pin (pin discriminates)"
+fi
+
+# ---------------------------------------------------------------------------
+section "Section 25: T5 — the no-row stop refusal doctrine (REQ-5, D8, AC-5.4)"
+#
+# WHAT THIS SECTION OWNS. Two sentences in agents-src/blocks/orchestrator-dispatch.md,
+# rendered into skills/canonical-sdlc/dispatch.md (and its payload/ symlink). The doctrine
+# sentence used to say a no-row name "passes through — not this gate's to guard; the refusal
+# returns in 1.8.0."; it now states the refusal itself (D8, AC-5.4). The Panel-refresh
+# bullet named the retired `poker: TASKSTOP <name>` line; it now names the `poker: STANDDOWN
+# <name>` line T1 actually shipped (A-T1.11 — owed by this row, not T1's).
+
+DISPATCH_BLOCK_T5="${REPO}/agents-src/blocks/orchestrator-dispatch.md"
+
+PIN_T5_REFUSAL='A name with no row on this session'"'"'s roster is refused unless address- or bash-task-shaped.'
+if has_pin "$DISPATCH_MD" "$PIN_T5_REFUSAL"; then
+  ok "134a: dispatch.md carries the no-row REFUSAL sentence verbatim (D8, AC-5.4)"
+else
+  no "134a: dispatch.md carries the no-row REFUSAL sentence verbatim (D8, AC-5.4)" "file: $DISPATCH_MD"
+fi
+
+# THE SOURCE, NOT ONLY THE OUTPUT — same reasoning as 126e: a pin that read only the render
+# product would stay green over a hand-edit that the next render.sh silently reverts.
+if has_pin "$DISPATCH_BLOCK_T5" "$PIN_T5_REFUSAL"; then
+  ok "134b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the refusal sentence"
+else
+  no "134b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the refusal sentence" \
+     "file: $DISPATCH_BLOCK_T5"
+fi
+
+# AC-5.4's own grep: no surface that could ship the stale doctrine still carries it.
+T5_STALE_HITS="$(grep -rl 'roster passes through' "${REPO}/agents-src" "${REPO}/skills" "${REPO}/payload/skills" 2>/dev/null || true)"
+expect_eq "134c: AC-5.4 — no agents-src/, skills/ or payload/skills/ surface still says 'roster passes through'" \
+  "" "$T5_STALE_HITS"
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+T5_STALE_MUT="$TMP/t5-stale-doctrine.md"
+printf "A name with no row on this session's roster passes through — not this gate's to guard.\n" > "$T5_STALE_MUT"
+expect_true "134d: the 'roster passes through' grep fires on the shape it targets (the pattern discriminates)" \
+  grep -q 'roster passes through' "$T5_STALE_MUT"
+
+PIN_T5_STANDDOWN='the tick prints `poker: STANDDOWN <name>` per MET lineage still open on the roster and orders it, so one TaskStop passes'
+if has_pin "$DISPATCH_MD" "$PIN_T5_STANDDOWN"; then
+  ok "135a: dispatch.md's Panel-refresh bullet says STANDDOWN, not the retired TASKSTOP (A-T1.11)"
+else
+  no "135a: dispatch.md's Panel-refresh bullet says STANDDOWN, not the retired TASKSTOP (A-T1.11)" \
+     "file: $DISPATCH_MD"
+fi
+
+if has_pin "$DISPATCH_BLOCK_T5" "$PIN_T5_STANDDOWN"; then
+  ok "135b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the STANDDOWN sentence"
+else
+  no "135b: agents-src/blocks/orchestrator-dispatch.md is the SOURCE of the STANDDOWN sentence" \
+     "file: $DISPATCH_BLOCK_T5"
+fi
+
+# The retired sentence must be gone, not just superseded — a template carrying both would
+# print the wrong instruction on every tick that reads it.
+T5_TASKSTOP_HITS="$(grep -c 'poker: TASKSTOP <name>' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$T5_TASKSTOP_HITS" ] || T5_TASKSTOP_HITS=0
+expect_eq "135c: …and the retired 'poker: TASKSTOP <name>' line is gone from dispatch.md" \
+  "0" "$T5_TASKSTOP_HITS"
+
+# ---------------------------------------------------------------------------
+section "Section 26: T7 — the worktree alias, and operational-rules.md's own ratif sweep (REQ-7, AC-7.4, AC-8.2)"
+#
+# WHAT THIS OWNS. AC-7.4 (epic-23 wave-13-fixit-180 spec): the rendered dispatch.md carries
+# a positive sentence about the one docs tree, and spawn-worktree.sh no longer carries the
+# retired C2 sentence — both independent of T2's Section 23 pins, which cover the other
+# three ratif→approv surfaces. AC-8.2's OWN scope split (Section 23's pin comment, line
+# ~2634): operational-rules.md's seven UNDATED "ratif*" prose uses were explicitly OUT of
+# T2's span and move here (A-orch-16) — this is that arm.
+
+SPAWN_WORKTREE="${REPO}/payload/scripts/spawn-worktree.sh"
+
+# --- AC-7.4a: the rendered dispatch.md carries the "one docs tree" sentence ---
+#
+# fails-when: grep -c "one docs tree" dispatch.md is 0.
+ONEDOCS_N="$(grep -c 'one docs tree' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+[ -n "$ONEDOCS_N" ] || ONEDOCS_N=0
+if [ "$ONEDOCS_N" -ge 1 ] 2>/dev/null; then
+  ok "137: AC-7.4 — the rendered dispatch.md names the one docs tree a relative worktree write lands in"
+else
+  no "137: AC-7.4 — the rendered dispatch.md names the one docs tree a relative worktree write lands in" \
+     "count=${ONEDOCS_N} file=$DISPATCH_MD"
+fi
+
+# Anti-vacuity: a dispatch.md with the sentence stripped reads 0.
+ONEDOCS_MUT="$TMP/dispatch-no-onedocs.md"
+grep -v 'one docs tree' "$DISPATCH_MD" > "$ONEDOCS_MUT" 2>/dev/null
+expect_eq "137b: a dispatch.md with the sentence stripped reads 0, not ≥1 (the count discriminates)" \
+  "0" "$(grep -c 'one docs tree' "$ONEDOCS_MUT" 2>/dev/null | tr -cd '0-9')"
+
+# --- AC-7.4b: spawn-worktree.sh no longer carries the retired C2 sentence ---
+#
+# fails-when: spawn-worktree.sh still says "NO SYMLINK, AND THAT IS THE POINT".
+NOSYMLINK_N="$(grep -c 'NO SYMLINK, AND THAT IS THE POINT' "$SPAWN_WORKTREE" 2>/dev/null | tr -cd '0-9')"
+[ -n "$NOSYMLINK_N" ] || NOSYMLINK_N=0
+expect_eq "138: AC-7.4 — spawn-worktree.sh no longer says 'NO SYMLINK, AND THAT IS THE POINT'" \
+  "0" "$NOSYMLINK_N"
+
+# Anti-vacuity: the grep must fire on the shape it targets.
+NOSYMLINK_MUT="$TMP/spawn-worktree-old-header.md"
+printf '# NO SYMLINK, AND THAT IS THE POINT (bionic 1.4.0, design ledger C2).\n' > "$NOSYMLINK_MUT"
+expect_true "138b: the NO-SYMLINK grep fires on the shape it targets (the pattern discriminates)" \
+  grep -q 'NO SYMLINK, AND THAT IS THE POINT' "$NOSYMLINK_MUT"
+
+# --- AC-8.2 (A-orch-16): operational-rules.md's seven UNDATED "ratif*" prose uses are gone;
+# every DATED historical attribution stays byte-identical (this pin does not touch those). ---
+#
+# "Undated" = the line containing "ratif" carries no 2026-NN-NN date pattern anywhere on it
+# — the same discriminator Section 23's comment describes and this task's brief measured
+# (lines ~60, 167, 206, 241, 312, 365, 452 before the sweep). A dated line ("user-ratified,
+# 2026-07-18", "ratified 2026-08-15") is untouched by design and must remain.
+OPRULES_UNDATED_N="$(grep -i 'ratif' "$OPRULES" 2>/dev/null | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -c .)"
+[ -n "$OPRULES_UNDATED_N" ] || OPRULES_UNDATED_N=0
+if [ "$OPRULES_UNDATED_N" -eq 0 ] 2>/dev/null; then
+  ok "139: AC-8.2 — operational-rules.md carries no undated 'ratif' line (dated historical attributions untouched)"
+else
+  no "139: AC-8.2 — operational-rules.md carries no undated 'ratif' line (dated historical attributions untouched)" \
+     "count=${OPRULES_UNDATED_N}: $(grep -in 'ratif' "$OPRULES" 2>/dev/null | grep -viE '2026-[0-9]{2}-[0-9]{2}')"
+fi
+
+# The dated lines must still be there — this pin narrows AC-8.2's scope, it does not widen
+# it into a second copy of Section 23's "ratif" ban over the whole file (A-orch-16 is
+# explicit that dated historical attributions stay byte-identical).
+OPRULES_DATED_N="$(grep -i 'ratif' "$OPRULES" 2>/dev/null | grep -ciE '2026-[0-9]{2}-[0-9]{2}')"
+[ -n "$OPRULES_DATED_N" ] || OPRULES_DATED_N=0
+expect_true "139b: …and at least one dated historical attribution survives (this pin narrows, never widens)" \
+  test "$OPRULES_DATED_N" -ge 1
+
+# Anti-vacuity: the discriminator must actually tell dated from undated.
+UNDATED_MUT="$TMP/opr-undated.md"
+printf 'It is guidance ratified in conversation.\n' > "$UNDATED_MUT"
+DATED_MUT="$TMP/opr-dated.md"
+printf 'Epic integration-branch convention (user-ratified, 2026-07-18): a true epic.\n' > "$DATED_MUT"
+expect_true "139c: an undated ratif line is caught by the discriminator" \
+  bash -c "grep -i ratif '$UNDATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
+expect_false "139d: …a dated one is not (the discriminator does not over-fire)" \
+  bash -c "grep -i ratif '$DATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
 
 finish

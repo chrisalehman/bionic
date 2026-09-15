@@ -147,18 +147,19 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #
 # THE CLASSES, each `<class>-<session id>.state` under `<root>/.bionic/tmp`:
 #
-#   roster     hooks/dispatch-preflight.sh   the dispatch ledger
-#   preflight  hooks/preflight-probe.sh      the budget attestation
-#   engaged    scripts/lib/binding.sh        the engagement marker
-#   sweeper    hooks/session-sweeper.sh      the ack ledger
-#   patrol     hooks/session-poker.sh        the Patrol stamp, plus its `.armed` sibling
+#   roster       hooks/dispatch-preflight.sh   the dispatch ledger
+#   preflight    hooks/preflight-probe.sh      the budget attestation
+#   engaged      scripts/lib/binding.sh        the engagement marker
+#   sweeper      hooks/session-sweeper.sh      the ack ledger
+#   patrol       hooks/session-poker.sh        the Patrol stamp, plus its `.armed` sibling
+#   stop-orders  hooks/stop-orders.sh          the per-session order queue (AC-6.2, wave-13)
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE UNREACHABLE THROUGH THESE FUNCTIONS,
 # and that is a property of the shape rather than a list anyone maintains:
 # `context-spend.state`, `farm-out.state` and `stop-check.state` carry no session
 # id in their names, so no id derived here can address one. A non-session file
 # added later is safe on arrival for the same reason.
-PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol"
+PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
 # EVERY SESSION ID WITH STATE HERE, each once, in class-then-name order. Symlinks

@@ -27,6 +27,27 @@ set -uo pipefail
 
 GATE="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 PROBE_SRC="${BIONIC_HOOKS_DIR}/preflight-probe.sh"
+# The rendered dispatch.md the gate itself reads at refusal time (T2, D3/D11) — the same
+# file `dp_scaffold_marked` in hooks/dispatch-preflight.sh resolves via `$HOOK_DIR/..`.
+DISPATCH_FILE="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
+
+# scaffold_block <file> -> the fenced scaffold lines, one per line. Defined at the TOP of
+# this file, not beside the section that first needed it, because the several-fault wire's
+# marked scaffold (T2, D3/D11) is read out of the shipped file by sections throughout —
+# every one of them needs the same extractor §scaffold-verbatim drives further down.
+scaffold_block() {
+  /usr/bin/awk '
+    /^### Scaffold/            { inb = 1; next }
+    inb && /^```/              { fence++; if (fence == 2) exit; next }
+    inb && fence == 1          { print }
+  ' "$1"
+}
+
+# scaffold_raw_line <file> <label> -> that label's own line, verbatim, out of the shipped
+# scaffold — what a marked line looks like before its ` <ADD>` suffix, if any.
+scaffold_raw_line() {
+  scaffold_block "$1" | /usr/bin/grep -m1 -E "^${2}:"
+}
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-test.XXXXXX")" && pwd)"
 BG_PIDS=""
@@ -1718,11 +1739,13 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LABEL_RUNON" "runonbot")"
 # unchanged; only the channel the wall blocks on is.
 expect_eq "C-2: a run-on labelled span naming four paths is REFUSED as ambiguous (R7)" \
   "deny" "$GATE_VERDICT"
-expect_contains "C-2: …the refusal names the declared artifact" \
-  "record/w99-report.md" "$GATE_VERR"
-expect_contains "C-2: …and the 'read …' input path, so neither is chosen for the author" \
-  "record/legacy-notes.md" "$GATE_VERR"
-expect_contains "C-2: …and the 'do not touch' suite runner" "tests/run.sh" "$GATE_VERR"
+# T2 (D3, D11): the several-fault wire no longer echoes candidate paths back — no rationale
+# survives on it at all, the marked scaffold does — so "which four paths did the wall see"
+# is proven the other way round, by "C-2 paired positive" right below: submitted ALONE, the
+# declared artifact (record/w99-report.md) is accepted, so it was never rejected as a bad
+# path, only as one candidate among several this labelled span never disambiguated.
+expect_contains "C-2: …the Expected artifact: line is marked <ADD> (still ambiguous)" \
+  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
 expect_status "C-2: …and no roster row demands any of the four" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
@@ -2233,10 +2256,11 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_SHAPE" "shapebot
 # unchanged; only the channel the wall blocks on is.
 expect_eq "R6-1 CASE 9: a deliverable span naming two paths is REFUSED, never resolved" \
   "deny" "$GATE_VERDICT"
-expect_contains "R6-1 CASE 9: …the refusal names the reference path" \
-  ".bionic/docs/record/w2-critic-report.md" "$GATE_VERR"
-expect_contains "R6-1 CASE 9: …and the real artifact, so neither is silently contracted" \
-  ".bionic/docs/record/w2-probe-frd.md" "$GATE_VERR"
+# T2 (D3, D11): the several-fault wire no longer echoes either candidate path — see the
+# C-2 comment above for the full reasoning; the marked scaffold's Expected artifact: line
+# is the observable now, and "neither is silently contracted" is the roster check below.
+expect_contains "R6-1 CASE 9: …the Expected artifact: line is marked <ADD> (still ambiguous)" \
+  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
 expect_contains "R6-1 CASE 9: …and asks for exactly one" "exactly one" "$GATE_ERR"
 expect_status "R6-1 CASE 9: …and no roster row contracts the agent to either" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
@@ -2255,17 +2279,16 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_READ" "readprodu
 # unchanged; only the channel the wall blocks on is.
 expect_eq "R6-1 CASE 10: read-X-then-produce-Y is REFUSED, not contracted to X" \
   "deny" "$GATE_VERDICT"
-expect_contains "R6-1 CASE 10: …the auditors report is named as a candidate, not taken" \
-  ".bionic/docs/record/w2-auditor-report.md" "$GATE_VERR"
-expect_contains "R6-1 CASE 10: …alongside the artifact the agent was actually sent to write" \
-  ".bionic/docs/record/w2-probe-frd2.md" "$GATE_VERR"
+# T2 (D3, D11): as CASE 9 above — neither path is echoed on the several-fault wire any
+# more; the marked scaffold plus "no row is written for either" is the new observable.
+expect_contains "R6-1 CASE 10: …the Expected artifact: line is marked <ADD> (still ambiguous)" \
+  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
 expect_status "R6-1 CASE 10: …and no row is written for either" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
 # ---- the refusal DIAGNOSES ambiguity, and is not the absent-deliverable message ----
 expect_absent "the ambiguity refusal is not misfiled as an absent deliverable" \
   "names no deliverable" "$GATE_ERR"
-expect_contains "…it says where references belong instead" "outside" "$GATE_VERR"
 
 # ---- THE RESUBMISSION: CASE 9 with one path in the label and the reference moved out ----
 BRIEF_TWO_PATHS_FIXED='You are reviewing the wave.
@@ -2393,7 +2416,9 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_ON_ONE_LINE" "twolineb
 # unchanged; only the channel the wall blocks on is.
 expect_eq "S18b two paths on the deliverable label OWN line are still REFUSED" \
   "deny" "$GATE_VERDICT"
-expect_contains "S18b …and the refusal still names both candidates" "w99-two.log" "$GATE_VERR"
+# T2 (D3, D11): as C-2/R6-1 above — the several-fault wire no longer echoes candidates.
+expect_contains "S18b …and the Expected artifact: line is marked <ADD> (still ambiguous)" \
+  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
 
 # A prose continuation line (no label head) still belongs to the span — the R6-4 window
 # stays open, so a path named in a later sentence is still found.
@@ -2420,10 +2445,27 @@ expect_status "S18b …and its path is the contract" \
 # no test read a Fix: line. This pin reads each walls own recommendation back out of its
 # stderr and DRIVES IT: an author who follows the Fix: line verbatim must not be refused.
 # It never hardcodes the example, so it holds when the wording is next edited.
-fix_example() {  # <stderr> -> the artifact path the Fix: block recommends
-  printf '%s\n' "$1" \
-    | grep -m1 -E '^[[:space:]]+Expected artifact: ' \
-    | sed -e 's/^[[:space:]]*Expected artifact: //' -e 's/[[:space:]]*$//'
+#
+# TWO SHAPES, since T2 (D3, D11). A single-fault refusal (`exit2`: containment, absent) still
+# carries the OLD indented Fix: block, unchanged. A several-fault refusal (`deny`: ambiguous,
+# combined) now carries the MARKED SCAFFOLD instead — its own `Expected artifact:` line is a
+# placeholder with an embedded `e.g. …` example, not a recommendation typed for this brief, so
+# the nested `<wave>`/`<name>` placeholders are filled the same way §scaffold-verbatim's own
+# `scaffold_fill()` fills them, and any trailing ` <ADD>` this brief earned is stripped.
+fix_example() {  # <stderr-or-reason> -> the artifact path the wall's own text recommends
+  local line ex
+  line=$(printf '%s\n' "$1" | grep -m1 -E '^[[:space:]]+Expected artifact: ')
+  if [ -n "$line" ]; then
+    printf '%s\n' "$line" | sed -e 's/^[[:space:]]*Expected artifact: //' -e 's/[[:space:]]*$//'
+    return
+  fi
+  line=$(printf '%s\n' "$1" | grep -m1 -E '^Expected artifact: ')
+  [ -n "$line" ] || return 0
+  ex=$(printf '%s\n' "$line" \
+    | sed -e 's/^Expected artifact: .*e\.g\. //' -e 's/>[[:space:]]*<ADD>[[:space:]]*$//' -e 's/>[[:space:]]*$//')
+  ex="${ex//<wave>/w99}"
+  ex="${ex//<name>/scaffold-note}"
+  printf '%s\n' "$ex"
 }
 
 BRIEF_OUT_OF_REPO='Your task: build it.
@@ -4364,10 +4406,17 @@ expect_eq "29d an ambiguous label + an overrunning impact command is refused ONC
 expect_eq "29d …exactly one refusal line reaches the user" "1" \
   "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
 expect_contains "29d …naming the multi-path fault (A11)" "several paths" "$GATE_VERR"
-expect_contains "29d …AND naming the impact-overrun fault (A15), in the SAME message" \
-  "the impact command did not answer" "$GATE_VERR"
-expect_contains "29d …with the impact fault's own Fix:, not dropped" \
-  "fix impact-command in config.yaml" "$GATE_VERR"
+# T2 (D3, D11) NARROWS WHAT THIS CAN STILL PROVE. The several-fault wire no longer carries
+# ANY per-finding rationale — not just the brief-shape kind C-2/R6-1/S18b above lost, but
+# A15's config-shaped fact and Fix: too, since neither is one of the five scaffold labels
+# and there is nowhere left on the wire to put it. What survives A11+A15 firing TOGETHER is
+# the SAME observable as A11 alone would leave: the marked scaffold, one refusal, deny. The
+# discriminator that A15 specifically fired — not just A11 — is what 29a already covers on
+# its own single-fault (exit2, unchanged) path; this pair no longer distinguishes it from a
+# combined-brief-fault-only refusal on the WIRE, which is a real narrowing this task surfaces
+# rather than papers over (A-T2, assumptions.md).
+expect_contains "29d …the Expected artifact: line is marked <ADD> (still ambiguous)" \
+  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
 expect_status "29d …and journalled no roster row at all" "0" \
   "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
 
@@ -4380,8 +4429,12 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_T23_COMBINED_IMPACT" "w29e
 expect_eq "29e control: the same brief, a fast impact command, is still refused" \
   "deny" "$GATE_VERDICT"
 expect_contains "29e …naming the multi-path fault (A11)" "several paths" "$GATE_VERR"
-expect_absent "29e …and NOT naming the impact fault: nothing overran" \
-  "the impact command did not answer" "$GATE_VERR"
+# T2 (D3, D11): the "nothing overran, nothing to append" half of this control is now
+# vacuous by construction — the several-fault wire never carries A15's text either way,
+# see the 29d comment above — so this control is left asserting only what still
+# discriminates: the ambiguous-artifact fault is still the one named, unchanged either way.
+expect_contains "29e …the Expected artifact: line is marked <ADD> (still ambiguous)" \
+  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
 
 
 # ===========================================================================
@@ -4614,33 +4667,41 @@ expect_eq "§combined …and the detail carries one refusal, not three stacked" 
 expect_eq "§combined …the user line stays the first arm's own sentence" \
   "bionic: dispatch refused — the deliverable label names several paths (name exactly one deliverable)" \
   "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
-expect_contains "§combined …and the detail opens by saying how many faults there are" \
-  "THIS BRIEF HAS 3 SHAPE FAULTS" "$GATE_VERR"
+# THE MARKED SCAFFOLD REPLACES THE OLD RATIONALE (T2, D3/D11). No fault-count header
+# sentence, no per-fault `── N.` heading, no `Fix:` block — the several-fault wire is the
+# scaffold read live out of the shipped dispatch.md, each label the brief left empty
+# suffixed ` <ADD>`, closed by one pointer line. Every string compared against below is
+# read out of $DISPATCH_FILE at run time, never transcribed, so this stays true when the
+# scaffold's own wording next changes.
+expect_absent "§combined …no fault-count header sentence" "SHAPE FAULTS" "$GATE_VERR"
+expect_absent "§combined …no per-fault '── N.' heading" "── " "$GATE_VERR"
+expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
+# RAISED 8 -> 10 (T17, R6 finding 3): the scaffold gained two lines (`Progress artifact:`,
+# `Cadence:`), and dp_scaffold_marked reproduces every scaffold line verbatim — marked or
+# not — so the wire grows by exactly as many lines as the scaffold does. Not a widened
+# tolerance; the cap tracks the scaffold's own line count by construction.
+expect_status "§combined …the wire is at most 10 lines (wc -l on the model's own reason)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 10 ] && echo 0 || echo 1)"
 
-# ALL THREE FACTS, each in the words its own arm already used.
-expect_contains "§combined …naming the ambiguity fault (A11)" "several paths" "$GATE_VERR"
-expect_contains "§combined …naming the absent-deliverable fault (A13)" \
-  "names no deliverable" "$GATE_VERR"
-expect_contains "§combined …naming the absent-instrument fault (A14)" \
-  "declares no Files" "$GATE_VERR"
-
-# EACH WITH ITS OWN `Fix:` BLOCK. The fix is the half an author acts on; three facts over
-# one shared fix would be the same one-fault-per-attempt loop wearing a longer message.
-expect_eq "§combined …each fault carrying its own Fix: block" "3" \
-  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
-expect_contains "§combined …the ambiguity fix, verbatim" \
-  "name exactly one deliverable path in the label" "$GATE_VERR"
-expect_contains "§combined …the absent-deliverable fix, verbatim" \
-  "declare a durable artifact path with a canonical label" "$GATE_VERR"
-expect_contains "§combined …the instrument fix, verbatim" \
-  "declare the files this task will touch" "$GATE_VERR"
-# The findings are in FILE ORDER — the order the gate reads the brief in — so an author
-# fixing them top to bottom walks the same path the wall does.
-expect_status "§combined …in file order: the ambiguity finding before the instrument one" "0" \
-  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/awk '
-     /several paths/   && !a { a = NR }
-     /declares no Files/ && !b { b = NR }
-     END { exit !(a && b && a < b) }' && echo 0 || echo 1)"
+# EACH LABEL, MARKED BY WHETHER THIS BRIEF CARRIES IT — not by which wall fired. The
+# ambiguous Expected artifact:, the absent Files: and the absent Deliverable-waiver: lines
+# all earn ` <ADD>`; the present Expected duration: line is left exactly as shipped.
+COMB_ART_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact")"
+COMB_FILES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
+COMB_DURATION_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected duration")"
+COMB_WAIVER_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Deliverable-waiver")"
+expect_contains "§combined …the still-ambiguous Expected artifact: line is marked <ADD>" \
+  "${COMB_ART_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§combined …the absent Files: line is marked <ADD>" \
+  "${COMB_FILES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§combined …the absent Deliverable-waiver: line is marked <ADD>" \
+  "${COMB_WAIVER_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§combined …the present Expected duration: line is left exactly as shipped" \
+  "$COMB_DURATION_LINE" "$GATE_VERR"
+expect_absent "§combined …and carries no <ADD> of its own" \
+  "${COMB_DURATION_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§combined …and closes with the pointer line" \
+  "See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required." "$GATE_VERR"
 
 # AND NOTHING WAS LAUNCHED. A refused dispatch is not a launch, however many faults it had.
 expect_status "§combined …and journals no roster row" "0" \
@@ -4653,8 +4714,8 @@ expect_status "§combined …and journals no roster row" "0" \
 # examples are read back OUT of the stderr rather than typed here, so this stays true when
 # the wording is next edited.
 COMB_ART=$(fix_example "$GATE_VERR")
-COMB_SUITES=$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 -E '^[[:space:]]+Suites: tests' \
-  | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+COMB_SUITES=$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -m1 -E '^Suites:' \
+  | sed -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*<ADD>[[:space:]]*$//' -e 's/[[:space:]]*$//')
 expect_status "§combined the refusal really recommended an artifact path" "0" \
   "$([ -n "$COMB_ART" ] && echo 0 || echo 1)"
 expect_status "§combined …and a Suites: line" "0" \
@@ -4667,25 +4728,28 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
 Expected artifact: $COMB_ART
 Expected duration: 20 minutes
 $COMB_SUITES" "combobot2")"
-expect_status "§combined attempt 2, following every Fix: example, PASSES" "0" "$GATE_ST"
+expect_status "§combined attempt 2, following every scaffold-line example, PASSES" "0" "$GATE_ST"
 expect_status "§combined …with the recommended path as the contract" \
   "$COMB_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
 
-# ---- the discriminator: fixing ONE fault leaves the other two named, and only them ----
+# ---- the discriminator: declaring ONE field un-marks only that field's line ----
 #
-# Without this arm a wall that simply printed all five arms' text unconditionally would pass
-# every assertion above. The instrument fault is repaired and nothing else is touched: the
-# count of findings must fall by exactly one, and the repaired fault must stop being named.
+# Without this arm a wall that printed the scaffold with every line marked unconditionally
+# would pass every assertion above. Suites: is now declared and nothing else is touched: its
+# line must stop carrying <ADD> while Files: (still absent) and Expected artifact: (still
+# ambiguous) keep theirs — proof the marking tracks this brief's own fields, not a static list.
 REPO=$(make_repo rcomb3 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS
 Suites: tests/widget.test.sh" "combobot3")"
+COMB_SUITES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Suites")"
 expect_eq "§combined a two-fault brief is still refused" "deny" "$GATE_VERDICT"
-expect_eq "§combined …with exactly two findings, not three" "2" \
-  "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
-expect_absent "§combined …and the repaired fault is no longer named" \
-  "declares no Files" "$GATE_VERR"
-expect_contains "§combined …while the two that remain still are" "several paths" "$GATE_VERR"
+expect_absent "§combined …and the now-declared Suites: line lost its <ADD>" \
+  "${COMB_SUITES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§combined …while the still-absent Files: line keeps its <ADD>" \
+  "${COMB_FILES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§combined …and the still-ambiguous Expected artifact: line keeps its <ADD>" \
+  "${COMB_ART_LINE} <ADD>" "$GATE_VERR"
 
 # ---- and a ONE-fault brief is refused exactly as it always was ----
 #
@@ -4754,17 +4818,19 @@ expect_eq "§combined-deny …with permissionDecision=deny" "deny" \
 expect_eq "§combined-deny the reason opens with the refusal's one line" \
   "bionic: dispatch refused — the deliverable label names several paths (name exactly one deliverable)" \
   "$(printf '%s\n' "$GATE_REASON" | sed -n '1p')"
-expect_contains "§combined-deny …then says how many faults there are" \
-  "THIS BRIEF HAS 3 SHAPE FAULTS" "$GATE_REASON"
-expect_contains "§combined-deny …naming the ambiguity fault (A11)" "several paths" "$GATE_REASON"
-expect_contains "§combined-deny …naming the absent-deliverable fault (A13)" \
-  "names no deliverable" "$GATE_REASON"
-expect_contains "§combined-deny …naming the absent-instrument fault (A14)" \
-  "declares no Files" "$GATE_REASON"
-expect_eq "§combined-deny …each with its own Fix: block, on the model's wire" "3" \
-  "$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -c '^Fix: ' || true)"
-expect_eq "§combined-deny …and each fault's one-line fix beside its fact" "3" \
-  "$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -cE '^── [0-9]+\. .+ \(.+\)$' || true)"
+# NO RATIONALE ON THE MODEL'S WIRE EITHER (T2, D3/D11) — the marked scaffold replaces it,
+# read live out of $DISPATCH_FILE, the same way §combined checks GATE_VERR.
+expect_absent "§combined-deny …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
+expect_absent "§combined-deny …no per-fault '── N.' heading" "── " "$GATE_REASON"
+expect_absent "§combined-deny …no Fix: block" "Fix: " "$GATE_REASON"
+expect_contains "§combined-deny …the still-ambiguous Expected artifact: line is marked <ADD>" \
+  "${COMB_ART_LINE} <ADD>" "$GATE_REASON"
+expect_contains "§combined-deny …the absent Files: line is marked <ADD>" \
+  "${COMB_FILES_LINE} <ADD>" "$GATE_REASON"
+expect_contains "§combined-deny …the present Expected duration: line is left exactly as shipped" \
+  "$COMB_DURATION_LINE" "$GATE_REASON"
+expect_contains "§combined-deny …and closes with the pointer line" \
+  "See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required." "$GATE_REASON"
 
 # AND THE HUMAN IS STILL INTERRUPTED BY ONE SENTENCE (ruling D-1). The split is the whole
 # reason this channel was chosen over flipping `detail_to_user`: the model reads everything,
@@ -4820,8 +4886,8 @@ REPO=$(make_repo rcombdeny4 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot4")"
 DENY_ART=$(fix_example "$GATE_REASON")
-DENY_SUITES=$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -m1 -E '^[[:space:]]+Suites: tests' \
-  | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+DENY_SUITES=$(printf '%s\n' "$GATE_REASON" | /usr/bin/grep -m1 -E '^Suites:' \
+  | sed -e 's/[[:space:]]*#.*$//' -e 's/[[:space:]]*<ADD>[[:space:]]*$//' -e 's/[[:space:]]*$//')
 expect_status "§combined-deny the reason really recommended an artifact path" "0" \
   "$([ -n "$DENY_ART" ] && echo 0 || echo 1)"
 expect_status "§combined-deny …and a Suites: line" "0" \
@@ -4856,15 +4922,11 @@ section "§scaffold-verbatim — the shipped brief scaffold dispatches as writte
 #
 # fails-when: the rendered scaffold, filled in, is refused by the gate it is written for.
 
-SCAFFOLD_FILE="${BIONIC_SKILLS_DIR}/canonical-sdlc/dispatch.md"
+SCAFFOLD_FILE="$DISPATCH_FILE"
 
-scaffold_block() {  # <file> -> the fenced scaffold lines, one per line
-  /usr/bin/awk '
-    /^### Scaffold/            { inb = 1; next }
-    inb && /^```/              { fence++; if (fence == 2) exit; next }
-    inb && fence == 1          { print }
-  ' "$1"
-}
+# scaffold_block is defined earlier in this file (beside fix_example, ~line 2440), shared
+# with §combined/§combined-deny — not redefined here. Both it and scaffold_fill below read
+# the file named by $SCAFFOLD_FILE, reassigned for the SKILL.md second pass further down.
 
 scaffold_fill() {  # <suites|files> -> the scaffold as a brief, placeholders filled
   local mode="$1" line label value
@@ -4882,6 +4944,8 @@ scaffold_fill() {  # <suites|files> -> the scaffold as a brief, placeholders fil
     case "$label" in
       "Expected duration") value="20" ;;
       "Expected artifact") value=".bionic/docs/record/w99-scaffold.md" ;;
+      "Progress artifact") value=".bionic/docs/record/w99-scaffold.progress" ;;
+      "Cadence")           value="15" ;;
       "Files")             value="payload/scripts/lib/widget.sh" ;;
       "Suites")            value="none" ;;
       *)                   value="" ;;
@@ -4917,6 +4981,19 @@ expect_status "§scaffold …with the named artifact as the contract" \
   ".bionic/docs/record/w99-scaffold.md" \
   "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
 
+# T17 (R6 finding 3, A-orch-36 walk item 2): a brief built strictly from the scaffold used to
+# warn "absent brief field(s): … progress" by construction, because the shipped block had no
+# `Progress artifact:`/`Cadence:` line to fill in. The scaffold now carries both, so the
+# filled brief leaves nothing absent and the roster row records both fields.
+expect_absent "§scaffold …and prints no absent-field warning naming progress (T17)" \
+  "absent brief field(s)" "$GATE_ERR"
+expect_status "§scaffold …the roster row's progress artifact is filled (T17)" \
+  ".bionic/docs/record/w99-scaffold.progress" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" progress)"
+expect_status "§scaffold …and its cadence is filled alongside it (T17)" \
+  "15 min" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" cadence)"
+
 # ---- variant 2: the `Files:` form, where a derivation exists to consume it ----
 REPO=$(make_repo rscaff2 yes)
 write_attestation "$REPO" "$SID_A"
@@ -4937,6 +5014,35 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
 $SCAFFOLD_RAW" "scaffoldbot3")"
 expect_status "§scaffold the scaffold with its placeholders still in it is REFUSED" \
   "2" "$GATE_ST"
+
+# ---- the SECOND home: SKILL.md carries the same scaffold, injected (T2, AC-2.2/AC-2.3) ----
+#
+# `SKILL.md.tmpl` gained its own `<!-- INJECT: brief-scaffold -->` beside the
+# dispatch-pointer sentence, so an orchestrator who never opens dispatch.md still meets a
+# fillable scaffold on the page it reads every Step-4 dispatch from. Same drives, same
+# extractor, a different file — proof the second copy is byte-identical in shape, not just
+# present (docs-pins.test.sh's 131/131b pin presence; this pins that it DISPATCHES).
+SCAFFOLD_FILE="${BIONIC_SKILLS_DIR}/canonical-sdlc/SKILL.md"
+
+SCAFFOLD_RAW="$(scaffold_block "$SCAFFOLD_FILE")"
+expect_status "§scaffold …and SKILL.md's own copy really carries a fenced scaffold" "0" \
+  "$([ "$(printf '%s\n' "$SCAFFOLD_RAW" | /usr/bin/grep -c .)" -ge 3 ] && echo 0 || echo 1)"
+
+SCAFFOLD_SUITES="$(scaffold_fill suites)"
+
+REPO=$(make_repo rscaff4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$SCAFFOLD_SUITES" "scaffoldbot4")"
+expect_status "§scaffold …SKILL.md's rendered scaffold, filled in, DISPATCHES" "0" "$GATE_ST"
+expect_status "§scaffold …with the named artifact as the contract" \
+  ".bionic/docs/record/w99-scaffold.md" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+
+REPO=$(make_repo rscaff5 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
+$SCAFFOLD_RAW" "scaffoldbot5")"
+expect_status "§scaffold …SKILL.md's scaffold, unfilled, is REFUSED the same way" "2" "$GATE_ST"
 
 # ============================================================================
 section "§a3-text — the Patrol stamp is armed at engagement, not by hand (D4, REQ-3)"

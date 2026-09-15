@@ -166,7 +166,7 @@ state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsaf
 # payload/scripts/lib/loader.sh. FAIL OPEN: the stop verdict is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh roster.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -268,6 +268,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-guard"; fi
 . "$BIONIC_LIB/refuse.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/root.sh"
+# `live_ids_of_name` (T6, A-orch-32) — the one definition, shared with
+# `hooks/session-poker.sh`'s `adopt_write_row`.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roster.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
@@ -550,6 +554,15 @@ is_address_shaped() {  # <typed> -> 0 if it wears an agent-address shape
   return 1
 }
 
+# A BACKGROUND BASH TASK ID (D8, T5; A-D4 probe evidence: t1o3yxz7p, tvivnv41s, tlfh9woyt,
+# t5triyxvo). It never gets an agent-*.meta.json and never opens a roster row — it names no
+# Agent-tool dispatch at all, so it is the one shape that still gets out of this gate's way
+# with no row of any kind (REQ-5). The leading `t` is load-bearing: it is what keeps this
+# carve from ever widening to a bare name that merely happens to be short and lowercase.
+is_bash_task_shaped() {  # <typed> -> 0 if it wears a background-bash-task-id shape
+  printf '%s' "$1" | grep -qE '^t[a-z0-9]{8,}$'
+}
+
 # EVERY ROSTER IN THIS BIONIC_ROOT THAT CARRIES THIS NAME, as the addresses the platform's stop
 # primitive takes. It is the one spelling this gate prints and the one it accepts (Section R),
 # and it is built from the roster FILENAME because that is the session that wrote the row.
@@ -572,9 +585,17 @@ accepted_addresses() {  # -> "    <name>@session-xxxxxxxx" per launcher, newline
 # whatever it is spelled like — which is what lets a BARE NAME be refused rather than waved
 # through, and a bare name is the spelling the whole of B-2 is about.
 #
-# NOT OURS IS A PASSTHROUGH, NOT A REFUSAL, and it always was: a target this gate has no
-# standing over must not be trapped here, or the escape hatch this gate's own header
-# advertises (a human's order executes) would be unreachable for it.
+# NOT OURS IS A REFUSAL NOW (D8, T5 — it was a passthrough through 1.7.1, and the doctrine
+# always said the refusal would return). A target this gate has no standing over is, for
+# every OTHER shape, still a stop this gate can name and decline: refusing it in one line
+# beats waving it through silently, because the wave-through was never provable to have been
+# a deliberate choice rather than a typo or a stray target. The one exception is a
+# BACKGROUND BASH TASK ID (is_bash_task_shaped): it never carries agent metadata and never
+# opens a roster row by construction, so it is not an Agent-tool dispatch at all and keeps
+# the passthrough this gate always gave it — logged once, never silent. A roster this
+# session cannot read is a THIRD, unrelated case: ROSTER_UNREADABLE grants standing above,
+# so it never reaches this branch, and the escape hatch this gate's own header advertises (a
+# human's order executes) is unaffected either way — deny() below still ends with it.
 guard_has_standing() {
   is_address_shaped "$RAW" && return 0
   [ -n "$ROW_BY_NAME" ] && return 0
@@ -582,11 +603,17 @@ guard_has_standing() {
   return 1
 }
 if ! guard_has_standing; then
-  # STRUCTURAL, not remote-controlled (Step-6 review flag 2-B): reachable only when standing
-  # is absent, and the `if` keeps that true regardless of what `deny()` does — which an
-  # unconditional `exit 2` in another function forty lines away did not.
-  echo "PASSTHROUGH: '${RAW}' appears on no roster row of this session and wears no agent-address shape — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
-  exit 0
+  if is_bash_task_shaped "$RAW"; then
+    # STRUCTURAL, not remote-controlled (Step-6 review flag 2-B): reachable only when standing
+    # is absent, and the `if` keeps that true regardless of what `deny()` does — which an
+    # unconditional `exit 2` in another function forty lines away did not.
+    echo "PASSTHROUGH: '${RAW}' wears a background-bash-task-id shape and carries no agent metadata — not an Agent-tool dispatch this gate has standing to guard. The stop proceeds." >&2
+    exit 0
+  fi
+  deny "this target is on no roster row of this session" "name a rostered agent or id" \
+       "Target '${RAW}' is on no roster row of this session and wears no agent-address or" \
+       "background-bash-task-id shape, so this gate cannot tell which Agent-tool dispatch," \
+       "if any, it names (REQ-5, D8)."
 fi
 
 # ---------- AMBIGUITY, COUNTED ON THE REGISTER (T29; §7 — CLOSED and loud) ----------
@@ -615,43 +642,13 @@ fi
 #
 # AFTER STANDING, so a target this gate has no business guarding is never trapped by it, and
 # BEFORE the alias clause, so an ambiguous alias is told which fault it has.
-live_ids_of_name() {  # <name> -> the agent ids currently under an open contract, one per line
-  local f="$ROSTER_FILE"
-  [ -f "$f" ] || return 0
-  [ -L "$f" ] && return 0
-  [ -r "$f" ] || return 0
-  awk -v want="$1" -v ver="$ROSTER_VERSION" '
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # A MET MARKER FOR THIS NAME DISCHARGES EVERY ID ABOVE IT, and the generation counter is
-    # how that is spelled without `delete arr` — which is not in the one-true-awk this
-    # machine runs as /usr/bin/awk. Rows below the marker start a fresh set.
-    index($0, "landing-swept/v1|") == 1 {
-      if (kv($0, "name") == want && kv($0, "state") == "MET") { n = 0; gen++ }
-      next
-    }
-    index($0, "roster-state/" ver "|") == 1 {
-      if (kv($0, "name") != want) next
-      if (!live_status(kv($0, "status"))) next
-      id = kv($0, "agent_id")
-      # An `intended` row carries no id yet — the recorder writes it one state later — and a
-      # lifecycle (intended → confirmed → identified) is ONE identity, so ids are counted
-      # DISTINCT. Neither an unidentified row nor a re-stated one is a second agent.
-      if (id == "") next
-      if ((gen SUBSEP id) in seen) next
-      seen[gen SUBSEP id] = 1
-      ids[++n] = id
-      next
-    }
-    END { for (i = 1; i <= n; i++) print ids[i] }
-  ' "$f" 2>/dev/null
-  return 0
-}
-
+#
+# `live_ids_of_name` MOVED TO `payload/scripts/lib/roster.sh` (T6, A-orch-32; research R1
+# §5): `adopt_write_row` (hooks/session-poker.sh) needs the identical distinct-id, MET-
+# discharge answer to keep an adopt from ever putting two live rows under one name, and two
+# copies of this awk agreeing by construction is the defect `roster_row` already ends for the
+# row's shape. This gate is the function's one call site, unchanged; the rule it applies is
+# documented at its new definition.
 AMBIG_IDS=""
 [ -z "$TYPED_AS_ID" ] && AMBIG_IDS=$(live_ids_of_name "$BASE")
 AMBIG_N=0
@@ -814,8 +811,15 @@ take_verdict() {
 # and a standing order would open this gate for a name some later dispatch reuses. The
 # window is generous, the fail direction is the closed one (an expired order leaves the
 # ceremony exactly where it was), and the writer is hooks/stop-orders.sh.
+# WHO ORDERED IT, carried out of the read for the one line below (bionic 1.8.0, REQ-1 D1).
+# The READING is unchanged — an order is an order, and this gate discharges a stop for
+# either author at the same boundary — but since 1.8.0 an order can be written by the Patrol
+# as well as by a person, and a reader owed "executing" is also owed "on whose word". Absent
+# on a line written before 1.8.0, which reads back as the default the writer had then.
+ORDER_BY=""
 order_current() {
   local f="$ORDERS_FILE" line t e now delta
+  ORDER_BY=""
   [ -L "$f" ] && return 1
   [ -f "$f" ] || return 1
   now=$(date -u +%s)
@@ -832,7 +836,11 @@ order_current() {
     delta=$((now - e))
     # A future-dated order is a skewed clock or a hand-edited file; a small tolerance
     # absorbs the first and nothing here honours the second indefinitely.
-    [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ] && return 0
+    if [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ]; then
+      ORDER_BY=$(record_field "$line" by)
+      case "$ORDER_BY" in human|patrol) : ;; *) ORDER_BY=human ;; esac
+      return 0
+    fi
   done < "$f"
   return 1
 }
@@ -843,11 +851,11 @@ if order_current; then
   # user-ordered stop executes at once; what an unmet contract earns is a sentence naming
   # what is being given up, never a refusal.
   if [ -z "$V_STATE" ]; then
-    echo "STOP ORDERED — executing. No contract row of this name is on the session roster." >&2
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. No contract row of this name is on the session roster." >&2
   elif [ "$V_STATE" = "MET" ] || [ "$V_STATE" = "WAIVED" ]; then
-    echo "STOP ORDERED — executing. Its contract stands ${V_STATE}: nothing is given up." >&2
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. Its contract stands ${V_STATE}: nothing is given up." >&2
   else
-    echo "STOP ORDERED — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
   fi
   exit 0
 fi
