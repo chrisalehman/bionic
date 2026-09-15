@@ -771,4 +771,181 @@ hasnt "16.6 THIS session's own roster is never listed as a predecessor" \
 hasnt "16.7 THIS session's own stamp is never listed as a predecessor" \
   "  ${CUR_SID:0:8} " "$OUT"
 
+
+section "17 — the sweep's own bound: the fork's noise, and the bound without a group (T23)"
+#
+# THE SAME DEFECT AS T22, ONE LAYER UP. `ss_bounded_sweep` in the hook is a deliberate
+# local copy of `detect_bounded` (payload/scripts/lib/detect.sh) — this hook's loader wants
+# four libraries, not five — and it carried both of the faults T22 fixed in the original:
+#
+#   (1) the FORKING SHELL's stderr was this hook's own, so bash's
+#       `child setpgid (N to N): Operation not permitted` — which bash prints from inside
+#       the fork wherever the kernel refuses the new process group — would land on a
+#       SessionStart hook's stderr, i.e. in front of the user at the top of a session;
+#   (2) the timeout arm signalled `-$pid`, a process group the job leads only where that
+#       same setpgid SUCCEEDED. Where it is refused the group kill fails, the old
+#       `|| kill -TERM $pid` fallback TERMs the direct child alone, and the sweep's
+#       grandchildren survive the bound — and `sweep` is `bash session-poker.sh`, which
+#       forks, so the grandchild is not hypothetical.
+#
+# WHAT CAN AND CANNOT BE PINNED HERE, SAID PLAINLY. NO FIXTURE CAN REFUSE setpgid ON THIS
+# MACHINE: T22 measured 960 forks and eight parallel doctor-suite runs under this harness
+# and produced zero warnings. So the noise half is pinned STRUCTURALLY — the fork must run
+# inside a compound carrying its own stderr — beside a behavioural trio proving that
+# isolation is SURGICAL (scoped to the compound) rather than a blanket discard laid over
+# the hook, which is the fix a later reader is most likely to reach for and the one that
+# would silence lib/session.sh's divergence warning in §4.6 along with it.
+#
+# THE KILL HALF NEEDS NO SEAM. A background job started WITHOUT `set -m` is in its caller's
+# process group, which is exactly where a refusal leaves it; the arm reaches that state by
+# not asking for a group rather than by substituting anything the code under test reads,
+# and it asserts the precondition (`leader=no`) before asserting the reap.
+#
+# THE SUBJECT IS THE REAL FUNCTION. The hook is a script, not a library, so its bound
+# helpers are extracted out of it with `awk` and `eval`ed into each driver — the
+# tests/lib/swept-marker.sh idiom, for the same reason: a second spelling of the code under
+# test can only ever pass. The extraction is CHECKED; reformat the hook and the check fails
+# loudly rather than this section passing over nothing.
+
+S17_LIB="$WORK/s17-bound.sh"
+{
+  grep -m1 '^SS_POLL_TICKS_PER_SEC=' "$HOOK"
+  awk '/^ss_bound_kill_tree\(\)/,/^\}/' "$HOOK"
+  awk '/^ss_bound_kill\(\)/,/^\}/'      "$HOOK"
+  awk '/^ss_bounded_sweep\(\)/,/^\}/'   "$HOOK"
+} > "$S17_LIB"
+# Only the two that exist BEFORE this task are hard preconditions. The kill helper's
+# absence is the RED this section was written against, and it is reported by the drivers
+# below as a failing arm — never as a suite that refused to run.
+grep -q '^SS_POLL_TICKS_PER_SEC=' "$S17_LIB" || {
+  echo "session-start §17: no '^SS_POLL_TICKS_PER_SEC=' line in $HOOK — the tick constant could not be extracted (the file was reformatted, or the name moved)." >&2; exit 1; }
+grep -q '^ss_bounded_sweep()' "$S17_LIB" || {
+  echo "session-start §17: no '^ss_bounded_sweep()' definition in $HOOK — the bounded runner could not be extracted (the file was reformatted, or the name moved)." >&2; exit 1; }
+
+# ---- the structural half: the fork's own stderr -------------------------------------
+# These are the pins that fail if the shell's job-control warning can reach this hook's
+# stderr again. Remove either and every behavioural arm below goes on passing on a machine
+# where setpgid succeeds — which is exactly how this defect reached a floor in detect.sh.
+expect_true "17.1 the sweep's fork runs inside a compound with its OWN stderr, so a shell job-control warning cannot reach the hook" \
+  /usr/bin/grep -q '} 9>&2 2>/dev/null' "$HOOK"
+expect_true "17.2 …and the hook's real stderr is carried on fd 9 and CLOSED in the child, never inherited by the sweep" \
+  /usr/bin/grep -q '2>/dev/null 9>&- &' "$HOOK"
+
+# ---- the behavioural trio: pass-through, and isolation that is surgical --------------
+cat > "$WORK/s17-poker.sh" <<'S17POKER'
+#!/bin/bash
+# `ss_bounded_sweep` invokes `bash <poker> sweep`; the verb is ignored here.
+echo SWEEP_STDOUT_OK
+echo SWEEP_SAID_THIS >&2
+exit "${S17_POKER_RC:-0}"
+S17POKER
+
+cat > "$WORK/s17-passthru.sh" <<'S17PT'
+#!/bin/bash
+# $1 = the extracted bound helpers, $2 = the poker stub, $3 = a root to cd into.
+. "$1" || { echo "source-failed"; exit 2; }
+BIONIC_ROOT="$3"
+echo CALLER_STDERR_BEFORE >&2
+S17_OUT="$(ss_bounded_sweep "$2" 5)"; S17_RC=$?
+echo CALLER_STDERR_AFTER >&2
+# Is the carrier still open in the CALLER? It must not be: `} 9>&2` scopes it to the
+# compound, where an `exec 9>&2` (or an `exec 2>/dev/null`) would leak it over the hook.
+fd9=no; { : >&9; } 2>/dev/null && fd9=yes
+echo "out=$S17_OUT rc=$S17_RC fd9_open=$fd9"
+S17PT
+
+S17_E1="$WORK/s17-passthru.err"
+S17_R1="$(bash "$WORK/s17-passthru.sh" "$S17_LIB" "$WORK/s17-poker.sh" "$WORK" 2>"$S17_E1")"
+has "17.3 the sweep's stdout is passed through unchanged" "out=SWEEP_STDOUT_OK" "$S17_R1"
+has "17.4 …and its exit status is mirrored" "rc=0" "$S17_R1"
+hasnt "17.5 …while the sweep's OWN stderr never reaches this hook's stderr, as it never has: a subprocess's noise is not the user's business at a session start" \
+  "SWEEP_SAID_THIS" "$(cat "$S17_E1")"
+has "17.6 the hook's own stderr is still live BEFORE the bounded fork — the discard is the fork's, not the hook's" \
+  "CALLER_STDERR_BEFORE" "$(cat "$S17_E1")"
+has "17.7 …and still live AFTER it: nothing here is an \`exec 2>/dev/null\` over the whole hook" \
+  "CALLER_STDERR_AFTER" "$(cat "$S17_E1")"
+has "17.8 …and the fd-9 carrier is scoped to the compound, not left open on the hook" \
+  "fd9_open=no" "$S17_R1"
+
+S17_R1B="$(S17_POKER_RC=7 bash "$WORK/s17-passthru.sh" "$S17_LIB" "$WORK/s17-poker.sh" "$WORK" 2>/dev/null)"
+has "17.9 a failing sweep's own exit status still reaches the caller, which is what the sweep-failed marker is written from" \
+  "rc=7" "$S17_R1B"
+
+# ---- the kill half, behavioural, on a stand-in with no seam -------------------------
+cat > "$WORK/s17-kid.sh" <<'S17KID'
+#!/bin/sh
+# A job with a grandchild — the shape `sweep` really has (it is `bash session-poker.sh`,
+# which forks), and the shape a bound that signals only the direct child fails to stop.
+sleep 40 &
+echo $! > "$1"
+wait
+S17KID
+
+cat > "$WORK/s17-nogroup.sh" <<'S17NG'
+#!/bin/bash
+# The refused-setpgid stand-in: a background job started WITHOUT `set -m`, which leaves it
+# in its caller's process group — the same place a refusal leaves it.
+. "$1" || { echo "source-failed"; exit 2; }
+# NAMED BEFORE IT IS CALLED. An absent helper is a missing command, which bash reports on a
+# stderr this driver discards and then walks straight past — the arm would then measure a
+# 40-second `wait` and read as a pass. Say so instead, and let both arms fail. (T22 found
+# exactly this vacuity in its own first driver; it is not hypothetical either.)
+command -v ss_bound_kill >/dev/null 2>&1 || { echo "kill_helper=missing"; exit 3; }
+gcfile="$2"; kidscript="$3"; rm -f "$gcfile"
+sh "$kidscript" "$gcfile" </dev/null >/dev/null 2>&1 &
+kid=$!
+sleep 1
+kid_pgid="$(ps -o pgid= -p "$kid" 2>/dev/null | tr -d ' ')"
+gc="$(cat "$gcfile" 2>/dev/null)"
+leader=no; [ "$kid_pgid" = "$kid" ] && leader=yes
+ss_bound_kill "$kid"
+wait "$kid" 2>/dev/null
+sleep 1
+alive=no
+if [ -n "$gc" ] && kill -0 "$gc" 2>/dev/null; then alive=yes; kill -TERM "$gc" 2>/dev/null; fi
+echo "kid=$kid kid_pgid=$kid_pgid leader=$leader grandchild=$gc grandchild_alive=$alive"
+S17NG
+
+S17_NG="$(bash "$WORK/s17-nogroup.sh" "$S17_LIB" "$WORK/s17-gc" "$WORK/s17-kid.sh" 2>/dev/null)"
+has "17.10 the stand-in really is the no-group state: the job does not lead a group of its own" \
+  "leader=no" "$S17_NG"
+has "17.11 …and the bound reaps its grandchild there anyway, where the group signal alone reached nothing" \
+  "grandchild_alive=no" "$S17_NG"
+echo "      (no-group arm: $S17_NG)"
+
+# ---- end to end: a sweep that outruns its bound ------------------------------------
+cat > "$WORK/s17-poker-hang.sh" <<'S17PH'
+#!/bin/bash
+# A sweep that never returns, with a grandchild of its own.
+sleep 40 &
+echo $! > "$S17_GCFILE"
+wait
+S17PH
+
+cat > "$WORK/s17-timeout.sh" <<'S17TO'
+#!/bin/bash
+# $1 = helpers, $2 = grandchild-pid file, $3 = the hanging poker, $4 = root to cd into.
+. "$1" || { echo "source-failed"; exit 2; }
+BIONIC_ROOT="$4"
+gcfile="$2"; rm -f "$gcfile"
+export S17_GCFILE="$gcfile"
+start="$(date +%s)"
+ss_bounded_sweep "$3" 2 >/dev/null 2>/dev/null
+rc=$?
+elapsed=$(( $(date +%s) - start ))
+gc="$(cat "$gcfile" 2>/dev/null)"
+sleep 1
+alive=no
+if [ -n "$gc" ] && kill -0 "$gc" 2>/dev/null; then alive=yes; kill -TERM "$gc" 2>/dev/null; fi
+echo "rc=$rc elapsed=${elapsed}s grandchild=$gc grandchild_alive=$alive"
+S17TO
+
+S17_TO="$(bash "$WORK/s17-timeout.sh" "$S17_LIB" "$WORK/s17-gc2" "$WORK/s17-poker-hang.sh" "$WORK" 2>/dev/null)"
+has "17.12 a sweep that outruns its bound is cut off, and says so with 124" "rc=124" "$S17_TO"
+expect_true "17.13 …inside the bound rather than at the sweep's own pace" \
+  bash -c 'case "$1" in *elapsed=[0-9]s*) exit 0 ;; *) exit 1 ;; esac' _ "$S17_TO"
+has "17.14 …and its grandchild is not left running on the machine afterwards" \
+  "grandchild_alive=no" "$S17_TO"
+echo "      (timeout arm: $S17_TO, bound=2s, sweep sleeps 40s)"
+
 finish
