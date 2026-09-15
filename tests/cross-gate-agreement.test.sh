@@ -9240,9 +9240,33 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # commits touching the file (63054a1 T10, c821781 T14) and exactly one of them, 63054a1,
 # adds a `DOCTORED…="$TMP/` line and an `anchor` line; T14's docs commit adds neither.
 # RE-DERIVED BY DIRECT GREP at THIS commit, as every number in this section is.
-expect_eq "S19.3 docs-pins holds 40 doctoring sites" "40" \
+#
+# 41->41 (sites move, anchors DON'T) at epic-23 wave-14-tune-181 (2026-09-15, T32 fold-in):
+# `git log -p 0eb4e8b..3ac952b -- tests/docs-pins.test.sh` shows two commits touching the
+# file — 395320a (T31) and eb49bcc (T28) — and only ONE of them touches a DOCTORED… or
+# anchor line: `git show 395320a -- tests/docs-pins.test.sh | grep -E
+# '^[+-](DOCTORED[A-Z0-9_]*="\$TMP/|[[:space:]]*anchor[[:space:]])'` is EMPTY — T31's pins
+# 148-152 render a card's own printf format against its sample values and compare, no
+# doctored copy, no `anchor` call, so it moves neither term (this corrects the dispatch
+# note that named T31 as a second contributor; measured against the diff, not assumed).
+# `git show eb49bcc -- tests/docs-pins.test.sh | grep -E
+# '^[+-](DOCTORED[A-Z0-9_]*="\$TMP/|[[:space:]]*anchor[[:space:]])'` shows T28 adds ONE
+# doctoring site, `DOCTORED_PATROL_T28="$TMP/patrol-classes-mutated.sh"` (44d, the
+# anti-vacuity arm for 44c's class-list agreement pin), and REWRITES an existing anchor
+# line in place (`anchor "$STEP8_MD" 'sparing every session-keyed file' 1` ->
+# `anchor "$STEP8_MD" "sparing a LIVE neighbour session" 1`, the T1 spare-rule sentence)
+# rather than adding a new one. Net: sites 40->41, anchor CALLS unmoved at 41 — the two
+# terms now read EQUAL rather than the +1 (Section 8's two-sentence rewrite) offset every
+# earlier entry in this history describes, for a DIFFERENT reason: DOCTORED_PATROL_T28 was
+# built without its own `anchor` precondition (44d's if/elif chain checks the mutation
+# took effect inline, but not through the `anchor` helper this census counts). That is a
+# real gap in tests/docs-pins.test.sh, OUT OF THIS TASK'S Files: (cross-gate-agreement.test.sh
+# only) — see A-T32.2, routed the same way A-T24.7 and A-T27.9 routed the same shape of
+# finding. §S19.4 (below) is the row that catches it, and stays red here on purpose: an
+# invariant a real defect trips is not re-pinned to match the defect.
+expect_eq "S19.3 docs-pins holds 41 doctoring sites" "41" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 41 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant)" "41" \
+expect_eq "S19.3 …declared by 41 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change)" "41" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
