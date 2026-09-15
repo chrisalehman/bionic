@@ -4086,7 +4086,12 @@ _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> 
 # _budget_wire_fact <label, ending ": "> <verb> <fix> <allowed set> -> a `fact`
 # string carrying `label` plus as much of `allowed` as fits beside `verb` and
 # `fix` inside refuse()'s one line. Computed fresh each call (not a hardcoded
-# column count) so a future reword of `fix` cannot silently overrun the budget.
+# column count), so a reword of `fix` cannot silently overrun the budget AT THIS
+# CALL — the safety this buys is real but partial: `fix` is spelled a second time at
+# each call site, once as this function's own argument and once as `fold_block`'s
+# (`:4114`/`:4115`, `:4130`/`:4131`, `:4161`/`:4162`), and rewording one without the
+# other still miscomputes the room silently. Keeping the two literals in step at
+# each site is on the caller.
 _budget_wire_fact() {
   local label="$1" verb="$2" fix="$3" allowed="$4"
   local prefix="bionic: $verb refused — " suffix=" ($fix)"

@@ -41,7 +41,7 @@
 # WHY THE CALLER'S SHELL, AND NOT A SUBSHELL. A subshell per function would be the
 # obvious way to contain a stray `exit`, and it would cost three things that matter
 # more: state one function sets could not be read by the next (the four Stop
-# functions share `bionic_context`'s seven values and one of them reads a file
+# functions share `bionic_context`'s eight values and one of them reads a file
 # another may have just written), a staged refusal could not be seen by the fold at
 # all — the staging variables would die with the subshell — and the violation above
 # would look like a clean `return` instead of the truncation it is. So the functions

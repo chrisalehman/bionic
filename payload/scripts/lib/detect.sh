@@ -1336,8 +1336,9 @@ detect_plugin_latest() {  # -> one line, always exit 0
 # bound the product does not have, so it lives here now, beside the probe, and
 # both scripts call it.
 #
-# ONE MECHANISM, ONE BOUND: a background job in its own process group, plus a
-# poll that signals the group when the limit is up. It runs shell functions and
+# ONE MECHANISM, ONE BOUND: a background job, plus a poll that signals it and every
+# descendant when the limit is up — the group where the kernel granted one, the process
+# tree where it did not (T22). It runs shell functions and
 # external commands alike, which `timeout(1)` cannot, and it reaches a forked
 # grandchild, which `timeout(1)` also cannot — see `detect_bounded` below for
 # why that second one is the difference between a bound and a bound that binds.
@@ -1371,9 +1372,11 @@ detect_probe_seconds() { echo "${BIONIC_DOCTOR_PROBE_SECONDS:-15}"; }
 # this function alone reads, after the wait is over: whatever the grandchild does
 # next, it does to a file nobody is waiting on. That is what makes the bound bind.
 #
-# AND THE GROUP IS WHAT GETS SIGNALLED. `set -m` puts the job in a process group
-# of its own (pgid == pid), so `kill -TERM -$pid` reaches the grandchild too and
-# a probe that timed out is not left running on the machine afterwards. Monitor
+# AND THE DESCENDANTS ARE WHAT GET SIGNALLED (T22 narrowed this claim; see
+# `_detect_bound_kill` below). `set -m` ASKS for a group of its own (pgid == pid); where
+# the kernel grants it, `kill -TERM -$pid` reaches the grandchild too. Where it refuses,
+# `_detect_bound_kill` reads the job's real group and TERMs the tree by name instead.
+# Either way a probe that timed out is not left running on the machine afterwards. Monitor
 # mode is restored immediately: it is on for the launch, not for the script.
 #
 # ONE MECHANISM, NOT TWO. This used to hand external commands to `timeout` when
