@@ -844,8 +844,11 @@ run_hook "$(mk_payload "$R_ORDER" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash 
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14t: off-budget + NO timeout: refused — the budget arm runs before the repair" \
   2 "$ST"
+# Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25): "off budget:" inverted its own
+# meaning (the set printed is the ALLOWED set, not what is off it) — the label is now
+# "allowed:".
 expect_contains "14u: …in the budget arm's own words" \
-  "off budget:" "$ERR"
+  "allowed:" "$ERR"
 expect_contains "14u2: …and AC-5.2's set: the row's own allowed token is on this line, not just detail" \
   "alpha.test.sh" "$ERR"
 expect_absent "14v: …and a REFUSED call is never repaired — no repair line on stderr" \
@@ -865,6 +868,14 @@ expect_contains "14z: …and the repair is still logged, naming the agent" \
 
 # ---------------------------------------------------------------------------
 section "15 — §budget-on-the-wire (T8, AC-5.2): the allowed set reaches exit-2 stderr"
+#
+# Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25): T25 renamed the three fact labels
+# ("off budget: " -> "allowed: ", "full tree off budget: " -> "full tree refused; allowed: ",
+# "unexpanded name; budget: " -> "unexpanded name; allowed: ") because the old wording put
+# the ALLOWED set right after the words "off budget", which reads backwards, and rendered
+# an empty set as "off budget: none" — "nothing is off budget" on a line that is refusing.
+# Every assertion below checks a TOKEN or COUNT, never the label text itself, so none of
+# their values change; only this note and 14u (which pinned the label) needed a re-spell.
 #
 # T7's repro (record/wave-14-tune-181/T7-req5-repro.md §4, ruling D-1): "On the budget: …"
 # lived only in `detail`, and refuse.sh's channel table marks exit2's `detail_to_user`
