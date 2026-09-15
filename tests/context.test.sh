@@ -20,8 +20,11 @@
 #   BIONIC_SID        session_id, past the one shape guard
 #   BIONIC_ENGAGED    0 or 1 — a VALUE, because session-start prints a bystander
 #                     line where the other fourteen exit
-#   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none
-#   BIONIC_RUN_PLAN   the plan path the verdict names, empty for `none`
+#   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none — or `unset`,
+#                     the sentinel for a caller that did not set
+#                     BIONIC_CONTEXT_WANT_RUN=1 (wave-14 REQ-4; section 4)
+#   BIONIC_RUN_PLAN   the plan path the verdict names, empty for `none` and for
+#                     the `unset` sentinel
 #   BIONIC_WORKTREE   the linked worktree the root was mapped from, empty when
 #                     the walk mapped none (epic-23 wave-14 REQ-2, spec D5)
 #
@@ -181,7 +184,11 @@ section "1 — the eight values, from one well-formed payload"
 # at all. This row is the happy path, read field by field.
 
 R_OPEN=$(mk_repo one open)
-REC=$(probe "$SANDBOX" "$(payload "$R_OPEN")" CLAUDE_CODE_SESSION_ID="$SID")
+# THE VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4). `BIONIC_CONTEXT_WANT_RUN=1` is what
+# hooks/stop.sh, hooks/dispatch-preflight.sh and hooks/session-start.sh set before their
+# own call, and this row reads the eight values a caller that wants all eight gets. The
+# row that reads them WITHOUT the flag is section 4's, below.
+REC=$(probe "$SANDBOX" "$(payload "$R_OPEN")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=1)
 
 expect_eq "a well-formed payload identifies the session (return 0)" "0" "$(field "$REC" rc)"
 expect_eq "BIONIC_CWD is the payload's cwd"      "$R_OPEN" "$(field "$REC" cwd)"
@@ -381,7 +388,7 @@ section "4 — the run verdict is a VALUE, one word plus the path it names"
 # ============================================================
 
 R_CLOSED=$(mk_repo verdict-closed closed)
-REC=$(probe "$SANDBOX" "$(payload "$R_CLOSED")" CLAUDE_CODE_SESSION_ID="$SID")
+REC=$(probe "$SANDBOX" "$(payload "$R_CLOSED")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=1)
 expect_eq "a closed run still identifies the session (return 0)" "0" "$(field "$REC" rc)"
 expect_eq "…and reports the verdict rather than acting on it" "none" "$(field "$REC" run_word)"
 expect_eq "…with no plan path on the 'none' verdict" "" "$(field "$REC" run_plan)"
@@ -390,7 +397,7 @@ expect_eq "…with no plan path on the 'none' verdict" "" "$(field "$REC" run_pl
 R_BOUND=$(mk_repo verdict-bound open)
 printf 'plan=%s\n' "$R_BOUND/.bionic/docs/plans/epic-99/wave-01.plan.md" \
   > "$R_BOUND/.bionic/tmp/engaged-$SID.state"
-REC=$(probe "$SANDBOX" "$(payload "$R_BOUND")" CLAUDE_CODE_SESSION_ID="$SID")
+REC=$(probe "$SANDBOX" "$(payload "$R_BOUND")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=1)
 expect_eq "a bound session over an open plan reads bound-open" "bound-open" "$(field "$REC" run_word)"
 expect_eq "…and names the bound plan" \
   "$R_BOUND/.bionic/docs/plans/epic-99/wave-01.plan.md" "$(field "$REC" run_plan)"
@@ -401,9 +408,52 @@ expect_eq "…and names the bound plan" \
 R_BC=$(mk_repo verdict-bound-closed closed)
 printf 'plan=%s\n' "$R_BC/.bionic/docs/plans/epic-99/wave-01.plan.md" \
   > "$R_BC/.bionic/tmp/engaged-$SID.state"
-REC=$(probe "$SANDBOX" "$(payload "$R_BC")" CLAUDE_CODE_SESSION_ID="$SID")
+REC=$(probe "$SANDBOX" "$(payload "$R_BC")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=1)
 expect_eq "bound-closed is reported, not acted on" "bound-closed" "$(field "$REC" run_word)"
 expect_eq "…and the session is still identified (return 0)" "0" "$(field "$REC" rc)"
+
+# ---- THE VERDICT IS OPT-IN (epic-23 wave-14 REQ-4, spec D5 "Hook context") ----
+#
+# The scan behind this one value walks every candidate under `plans/` and `incidents/`
+# and reads each one — 28.0 ms on a one-plan fixture, about 2.8 ms more per plan a repo
+# accumulates (research R3 §6-§7) — and `payload/scripts/lib/walls.sh` holds not one
+# reference to either variable, so the five Bash walls paid all of it for an answer none
+# of them read. A caller that wants the verdict now says so.
+#
+# THE SENTINEL IS THE WHOLE SAFETY OF THE CUT, and these rows exist to pin it rather than
+# the saving. `none` is a REAL verdict — "this session is in no run" — and a caller that
+# met the empty string where it expected a word would take the `none` branch and believe
+# it had been told something. `unset` is outside the closed vocabulary, so a `case` over
+# it falls to its own arm and a comparison with any real verdict fails: the reader finds
+# out it did not ask, which is the fail-closed direction.
+R_OPTIN=$(mk_repo verdict-optin open)
+printf 'plan=%s\n' "$R_OPTIN/.bionic/docs/plans/epic-99/wave-01.plan.md" \
+  > "$R_OPTIN/.bionic/tmp/engaged-$SID.state"
+
+REC_OFF=$(probe "$SANDBOX" "$(payload "$R_OPTIN")" CLAUDE_CODE_SESSION_ID="$SID")
+expect_eq "without the flag the verdict is the sentinel, NOT a verdict word" \
+  "unset" "$(field "$REC_OFF" run_word)"
+expect_true "…and it is a WORD, never the empty string a reader could mistake for none" \
+  test -n "$(field "$REC_OFF" run_word)"
+expect_eq "…with no plan path beside it" "" "$(field "$REC_OFF" run_plan)"
+expect_eq "…and the session is identified exactly as before (return 0)" \
+  "0" "$(field "$REC_OFF" rc)"
+expect_eq "…and every other value is unaffected by not asking" \
+  "$R_OPTIN 1" "$(field "$REC_OFF" root) $(field "$REC_OFF" engaged)"
+
+# THE DIFFERENTIAL: same fixture, same payload, one variable. Without it these rows
+# would pass against a library that had simply stopped computing the verdict at all.
+REC_ON=$(probe "$SANDBOX" "$(payload "$R_OPTIN")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=1)
+expect_eq "with the flag the same session reads its real verdict" \
+  "bound-open" "$(field "$REC_ON" run_word)"
+expect_eq "…and names the plan the sentinel row withheld" \
+  "$R_OPTIN/.bionic/docs/plans/epic-99/wave-01.plan.md" "$(field "$REC_ON" run_plan)"
+
+# A FLAG THAT IS NOT `1` IS NOT AN ASK. The test is equality with `1`, not emptiness, so
+# an inherited `BIONIC_CONTEXT_WANT_RUN=0` from an enclosing session cannot turn the scan
+# back on by accident.
+REC_ZERO=$(probe "$SANDBOX" "$(payload "$R_OPTIN")" CLAUDE_CODE_SESSION_ID="$SID" BIONIC_CONTEXT_WANT_RUN=0)
+expect_eq "BIONIC_CONTEXT_WANT_RUN=0 is not an ask" "unset" "$(field "$REC_ZERO" run_word)"
 
 # ============================================================
 section "5 — engagement is a VALUE too, 0 or 1"
