@@ -255,13 +255,15 @@ section "6: the derivation bound has ONE owner (REQ-7, AC-7.4)"
 # tree state now, which leaves the bound one job: a HANG GUARD.
 #
 # BUT A HANG GUARD IS ONLY AS LONG AS ITS HOST WILL WAIT, and the two legs have
-# different hosts. hooks/dispatch-preflight.sh is a PreToolUse hook with room to
-# wait, so 20 s is the honest guard there. The sweep runs inside hooks/stop.sh,
-# registered at `"timeout": 10` on Stop and SubagentStop (hooks/hooks.json:94) —
-# a 20 s bound there is never reached, because the CLI kills the hook at 10 s
-# with exit 124 and a hook killed on the harness's timeout does NOT exit 2. The
-# refusal becomes a pass, which is the one thing the gate must never do.
-# tests/landing-gate.test.sh §16i measures exactly that, live, and caught it.
+# different hosts. THE RULE IS THE SAME FOR BOTH (wave-14 D2, ratified): every
+# inner bound sits strictly under its own hook's registration, margin named —
+# the wall's 10 s under dispatch-preflight.sh's 15 s registration, the sweep's
+# 6 s under hooks/stop.sh's `"timeout": 10` on Stop and SubagentStop. A bound at
+# or above its registration is never reached, because the CLI kills the hook at
+# the registration and a hook killed on the harness's timeout does NOT exit 2:
+# the refusal becomes a pass, which is the one thing the gate must never do.
+# tests/landing-gate.test.sh §16i measures exactly that, live, and caught it;
+# tests/cross-gate-agreement.test.sh §L.4c pins both pairs against hooks.json.
 # So lib/bounds.sh owns TWO named bounds and each consumer reads its own.
 #
 # TWO COPIES IS STILL THE DEFECT THIS SECTION EXISTS FOR — two numbers under one
@@ -285,7 +287,7 @@ expect_true "6b: …and parses under bash -n" bash -n "$BOUNDS_SH"
 
 # THE VALUES ARE READ BY SOURCING, not by grepping literals back out of the file:
 # what a consumer gets is what sourcing gives it.
-expect_eq "6c: sourcing it defines IMPACT_BOUND_S=20, the dispatch wall's guard" "20" \
+expect_eq "6c: sourcing it defines IMPACT_BOUND_S=10, the dispatch wall's guard, under its own 15s registration" "10" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
 expect_eq "6d: …and LG_IMPACT_BOUND_S=6, the landing gate's, inside a 10s hook" "6" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$BOUNDS_SH" 2>/dev/null)"
@@ -309,9 +311,9 @@ fi
 # NOT VACUOUS: the rows above read the file rather than agreeing with constants
 # typed into this suite, and a copy carrying different numbers proves it.
 B_MUTD="$(mktemp -d)"
-anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=20$' 1
+anchor -E "$BOUNDS_SH" '^IMPACT_BOUND_S=10$' 1
 anchor -E "$BOUNDS_SH" '^LG_IMPACT_BOUND_S=6$' 1
-sed -e 's/^IMPACT_BOUND_S=20$/IMPACT_BOUND_S=3/' \
+sed -e 's/^IMPACT_BOUND_S=10$/IMPACT_BOUND_S=3/' \
     -e 's/^LG_IMPACT_BOUND_S=6$/LG_IMPACT_BOUND_S=4/' "$BOUNDS_SH" >"$B_MUTD/bounds.sh"
 expect_eq "6g: …and a copy carrying 3 answers 3, so 6c read the file" "3" \
   "$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ "$B_MUTD/bounds.sh" 2>/dev/null)"
@@ -368,26 +370,37 @@ expect_nonempty "6o: the sweep reaches lib/stop.sh, whose READ it declines to co
 # THIS CONSUMER READS IT, AND READS THE GATE'S. The dispatch wall is the other,
 # pinned in its own suite; what stop.test.sh owns is the sweep's side. The name
 # matters as much as the number: reading IMPACT_BOUND_S here would put the
-# preflight's 20 s inside a hook the CLI kills at 10 (§16i).
+# preflight's bound — sized for ITS registration — inside a hook the CLI kills
+# at 10 (§16i).
 STOP_SRC="$(cat "$STOP_LIB")"
 expect_nonempty "6p: lib/stop.sh sources lib/bounds.sh" \
   "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$STOP_LIB")"
 expect_no_regex "6q: …and defines neither bound itself — the value it uses is the library's" \
   '^[[:space:]]*(local[[:space:]]+)?(LG_)?IMPACT_BOUND_S=' "$STOP_SRC"
 # THE PAIRED POSITIVE for 6q, so the row above cannot pass on a file that stopped
-# mentioning the bound at all: the sweep's tick budget is computed FROM the name,
-# and both refusal messages quote it.
-expect_regex "6r: …deriving the sweep's tick budget from LG_IMPACT_BOUND_S" \
-  'LG_IMPACT_TICKS_LEFT=\$\(\([[:space:]]*LG_IMPACT_BOUND_S' "$STOP_SRC"
+# mentioning the bound at all: the sweep's wait ends on the NAME, and both refusal
+# messages quote it.
+#
+# RE-SPELLED ONTO THE CLOCK (wave-14 T35, carrying T34's fix across). This read the
+# sweep's tick budget, `LG_IMPACT_TICKS_LEFT=$(( LG_IMPACT_BOUND_S * 10 ))`, and asserted
+# it was DERIVED from the constant rather than typed as a second literal. The budget is
+# gone: a count of `sleep 0.1` polls cost 115 ms a poll, so spending six seconds of them
+# waited ~6.9 s inside a 10 s registration — the margin the shorter bound exists to keep,
+# eaten by the spending of it, and by more under load. The wait now ends on `SECONDS`
+# against the constant itself, which is the strongest form of "not a second number":
+# no second number at all.
+expect_regex "6r: …and the sweep's wait ends on LG_IMPACT_BOUND_S itself, not on a derived second number" \
+  '\[[[:space:]]*"\$SECONDS"[[:space:]]*-ge[[:space:]]*"\$LG_IMPACT_BOUND_S"[[:space:]]*\]' "$STOP_SRC"
 expect_eq "6s: …and both refusal messages quote the bound they actually used" "2" \
   "$(/usr/bin/grep -c '\${LG_IMPACT_BOUND_S}s' "$STOP_LIB" | tr -d ' ')"
 
-# THE TICK BUDGET IS THE BOUND, IN TENTHS. A bound that moved while the ticks
-# stayed at 60 would leave the sweep still stopping at six seconds while both of
-# its messages quoted whatever the constant now says — a lie in the one place an
-# operator is told why the suites were not derived.
-expect_no_regex "6t: …and the tick budget is derived, not written twice" \
-  '^[[:space:]]*LG_IMPACT_TICKS_LEFT=[0-9]' "$STOP_SRC"
+# AND NO TICK BUDGET IS LEFT TO DRIFT AGAINST IT. A count of polls beside a bound in
+# seconds is two numbers meaning one thing, and the poll is not a tenth of a second: it
+# is a fork, an exec and a tenth of a second. LINE-ANCHORED on purpose — the removed
+# expression survives inside the comment that explains why it went, and a pin that could
+# match a comment would go green on a file that still ran one.
+expect_no_regex "6t: …leaving no tick budget behind to drift against it" \
+  '^[[:space:]]*LG_IMPACT_TICKS_LEFT=' "$STOP_SRC"
 
 # NOT VACUOUS: a copy with the source line cut has nothing for 6p to find, so
 # 6p discriminates rather than matching any mention of the name anywhere.
