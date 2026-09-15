@@ -3794,19 +3794,35 @@ case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
 # soft-sourced width.sh (hooks/bash-walls.sh sources refuse.sh before walls.sh,
 # `:202`/`:213`) — nothing new is sourced, and refuse.sh itself is unchanged.
 #
-# TOKEN BOUNDARIES, NOT A CHARACTER CUT. A budget of 38 suites (A-orch-17's own
+# TOKEN BOUNDARIES, NEVER A CHARACTER CUT. A budget of 38 suites (A-orch-17's own
 # incident) cannot fit on any one line; showing the first few WHOLE tokens plus a
 # "+N more" count (research-R2-preflight.md Q6) beats a mid-name ellipsis, which
-# would print a truncated, unrunnable suite name.
+# would print a truncated, unrunnable suite name. `none` is reserved for a
+# genuinely EMPTY set — a non-empty set that has no room at all (cols<=0, or not
+# even its first token fits) renders as a bare count ("N suites") instead, which
+# is honest either way `none` is not: it does not claim the budget is empty, and
+# it does not cut a name mid-word. Review-correctness-d3930dd.md F3 (mid-name
+# ellipsis via `bionic_trunc`) and F7 (`none` for a non-empty set at cols<=0) are
+# both this shape; fixed together here rather than patched at each call site.
 _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> text
   local set="${1:-}" cols="${2:-0}"
-  if [ -z "$set" ] || [ "$cols" -le 0 ]; then printf 'none'; return; fi
+  if [ -z "$set" ]; then printf 'none'; return; fi
+  local total=0 tok
+  for tok in $set; do total=$((total + 1)); done
+  local word=suites
+  [ "$total" -eq 1 ] && word=suite
+  if [ "$cols" -le 0 ]; then
+    # NO ROOM AT ALL (F7). The set is NOT empty, so `none` would lie; name the
+    # count instead. `_budget_wire_fact`'s caller-side self-refuse (refuse.sh's
+    # own line-width check) is what catches an overlong line from here, per
+    # A-T8.1 — this function's job is to be honest, not to guarantee a fit.
+    printf '%d %s' "$total" "$word"
+    return
+  fi
   if [ "$(bionic_cols "$set")" -le "$cols" ]; then
     printf '%s' "$set"
     return
   fi
-  local total=0 tok
-  for tok in $set; do total=$((total + 1)); done
   local out="" shown=0 cand remain tail
   for tok in $set; do
     if [ -z "$out" ]; then cand="$tok"; else cand="$out $tok"; fi
@@ -3822,14 +3838,17 @@ _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> 
   remain=$((total - shown))
   if [ -z "$out" ]; then
     # Not even one whole token fits ALONGSIDE its own "+N more" count. Try the
-    # first token bare, count dropped, before falling back to a character cut —
-    # a real (if partial) suite name beats a truncated one.
+    # first token bare, count dropped — a real suite name beats one padded
+    # with a count it has no room for.
     set -- $set
     if [ "$(bionic_cols "$1")" -le "$cols" ]; then
       printf '%s' "$1"
       return
     fi
-    printf '%s' "$(bionic_trunc "$set" "$cols")"
+    # NOT EVEN ONE TOKEN FITS BARE (F3). A character cut here would print a
+    # truncated, unrunnable suite name — exactly what token-boundary rendering
+    # exists to avoid — so the honest floor is the bare count, same as cols<=0.
+    printf '%d %s' "$total" "$word"
   elif [ "$remain" -gt 0 ]; then
     printf '%s +%d more' "$out" "$remain"
   else
@@ -3860,7 +3879,7 @@ budget_refuse() {  # <suite basename>
   case "$1" in
     *'$'*|*'`'*)
       fold_block exit2 suite-run \
-        "$(_budget_wire_fact "unexpanded name; budget: " suite-run "spell each suite literally" "$2")" \
+        "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
         "spell each suite literally" \
         "The name as read: $1
 
@@ -3876,7 +3895,7 @@ On the budget: ${2:-(nothing — this brief declared Suites: none)}"
       return 2 ;;
   esac
   fold_block exit2 suite-run \
-    "$(_budget_wire_fact "off budget: " suite-run "run only the budgeted suites" "$2")" \
+    "$(_budget_wire_fact "allowed: " suite-run "run only the budgeted suites" "$2")" \
     "run only the budgeted suites" \
     "This is a BUDGET arm, not a safety wall: an extra suite run breaks nothing, it spends
 forty minutes of a machine nobody else can use. The set was recorded on this agent's
@@ -3907,7 +3926,7 @@ for _target in $_TARGETS; do
       *" run.sh "*) continue ;;
     esac
     fold_block exit2 suite-run \
-      "$(_budget_wire_fact "full tree off budget: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
+      "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
       "This is a BUDGET arm, not a safety wall. One regression means one: the whole tree is
 proved once per run, by one dispatched runner whose row carries tests/run.sh, at
