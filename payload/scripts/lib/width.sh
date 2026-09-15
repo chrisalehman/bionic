@@ -1,11 +1,14 @@
 #!/bin/bash
-# width.sh — the ONE column budget for everything bionic prints, and the two
+# width.sh — the ONE column budget for everything bionic prints, and the
 # functions that hold a line inside it (epic-19 W1 S9, Step-6 ARCHITECTURE b.1 /
 # DUPLICATION flag).
 #
 # WHAT THIS FILE OWNS. How wide a printed line may be, how wide a string IS, and
-# how to shorten one that is too wide. Three questions, one owner, consumed by
-# both doors that print a table: `scripts/setup.sh` and `scripts/doctor.sh`.
+# what to do with one that is too wide — SHORTEN it (`bionic_trunc`, which cuts
+# and marks the cut) or FOLD it (`bionic_wrap`, which keeps every word and puts
+# the overflow on a continuation line). Four questions, one owner, consumed by
+# the three doors that print a table: `scripts/setup.sh`, `scripts/doctor.sh`
+# and `scripts/card.sh`.
 #
 # WHY IT EXISTS. The rule is doctor's, and it is older than this file:
 # *nothing printed may exceed 100 columns*, because a wrapped line is one row
@@ -143,4 +146,108 @@ bionic_line() {  # <prefix> <tail> [<instruction that must survive>]
     return 0
   fi
   printf '%s%s%s' "$prefix" "$(bionic_trunc "$tail" "$budget")" "$keep"
+}
+
+# ── THE THIRD ANSWER TO "TOO WIDE": FOLD IT ──────────────────────────────────
+#
+# WHY A FOLD AND NOT A CUT (wave-14 T36, REQ-9; Chris 2026-09-15 "D4: I want the
+# wrapped version"). `bionic_trunc` shortens a string by THROWING SOME AWAY, which
+# is right for a diagnostic row whose tail is a path and wrong for a card cell
+# whose content IS the display: a requirement elided at 44 columns is a Step-1
+# card that withholds the requirement. A card's free-text cell folds instead —
+# every word kept, the overflow carried to a continuation line indented under the
+# cell, the trailing columns left on the row's own first line. `scripts/card.sh`
+# is the caller and owns the layout; the measuring stays here, beside the budget
+# and the truncator, because a fold that measured its own way would disagree with
+# the cut on the same string.
+#
+# MEASURED EXACTLY AS THE CUT IS, `LC_ALL=C` INCLUDED. The closed glyph set, and
+# the CONSERVATIVE reading of a glyph outside it (three bytes, not one column),
+# are this file's rulings already — tests/width.test.sh:7n: "short of the budget,
+# never over it, and the same in both places". A cell carrying a glyph the set
+# does not know folds one word early rather than one column wide, and it folds
+# the same way in a hook's stripped C locale as in a terminal's UTF-8 one.
+
+# The first whole CHARACTERS of a string that fit a column budget, and the rest.
+# Sets BIONIC_HEAD and BIONIC_TAIL rather than printing them, because the caller
+# is a loop and a subshell per split is the cost this file already refuses once
+# (`_bionic_cols_into`, above).
+_bionic_head_cols() {  # <string> <column-budget> — sets BIONIC_HEAD / BIONIC_TAIL
+  local s="${1:-}" max="${2:-1}"
+  local LC_ALL=C
+  local ch r
+  BIONIC_HEAD=""; BIONIC_TAIL="$s"
+  while [ -n "$BIONIC_TAIL" ]; do
+    # One whole character: a lead byte and every continuation byte after it. The
+    # walk is the same one bionic_trunc makes in the other direction, and it is
+    # here for the same reason — under `LC_ALL=C` a single-byte step lands in the
+    # middle of a three-byte glyph and emits a fragment.
+    ch="${BIONIC_TAIL:0:1}"; r="${BIONIC_TAIL:1}"
+    while [ -n "$r" ]; do
+      case "$r" in
+        [$'\200'-$'\277']*) ch="${ch}${r:0:1}"; r="${r:1}" ;;
+        *) break ;;
+      esac
+    done
+    _bionic_cols_into "${BIONIC_HEAD}${ch}"
+    [ "$BIONIC_COLS" -le "$max" ] || break
+    BIONIC_HEAD="${BIONIC_HEAD}${ch}"
+    BIONIC_TAIL="$r"
+  done
+  # ONE CHARACTER ALWAYS GOES. A glyph measured wider than the whole budget (a
+  # three-byte character outside the closed set, in a narrow column) would
+  # otherwise take nothing on every pass and the caller's loop would not end.
+  if [ -z "$BIONIC_HEAD" ] && [ -n "$BIONIC_TAIL" ]; then
+    ch="${BIONIC_TAIL:0:1}"; r="${BIONIC_TAIL:1}"
+    while [ -n "$r" ]; do
+      case "$r" in
+        [$'\200'-$'\277']*) ch="${ch}${r:0:1}"; r="${r:1}" ;;
+        *) break ;;
+      esac
+    done
+    BIONIC_HEAD="$ch"; BIONIC_TAIL="$r"
+  fi
+}
+
+# One string, folded to lines no wider than a column budget, broken on word
+# boundaries. Whitespace inside the string is layout, not content, so runs of it
+# collapse to one space; a word wider than the whole budget is SPLIT at the
+# budget rather than dropped, because a row that silently lost a long path would
+# be worse than one that broke it. An empty string folds to ONE EMPTY LINE, never
+# to nothing: a card row with an empty free cell is still a row.
+#
+# A budget of 0 or less means "unbounded", the same ruling `bionic_trunc` makes
+# one function up and for the same reason.
+bionic_wrap() {  # <string> <column-budget> -> the folded lines, one per line
+  local s="${1:-}" max="${2:-0}"
+  local LC_ALL=C
+  local out="" line="" word rest cand
+  case "$max" in ''|*[!0-9-]*) max=0 ;; esac
+  [ "$max" -gt 0 ] || { printf '%s\n' "$s"; return 0; }
+  rest="$s"
+  while [ -n "$rest" ]; do
+    case "$rest" in
+      ' '*|'	'*) rest="${rest#?}"; continue ;;
+    esac
+    word="${rest%%[ 	]*}"
+    rest="${rest#"$word"}"
+    if [ -z "$line" ]; then cand="$word"; else cand="${line} ${word}"; fi
+    _bionic_cols_into "$cand"
+    if [ "$BIONIC_COLS" -le "$max" ]; then line="$cand"; continue; fi
+    # The word does not fit beside what the line already holds: close the line.
+    if [ -n "$line" ]; then out="${out}${line}
+"; line=""; fi
+    # …and if it does not fit ALONE either, split it at the budget, whole
+    # characters at a time, until what is left does.
+    _bionic_cols_into "$word"
+    while [ "$BIONIC_COLS" -gt "$max" ]; do
+      _bionic_head_cols "$word" "$max"
+      out="${out}${BIONIC_HEAD}
+"
+      word="$BIONIC_TAIL"
+      _bionic_cols_into "$word"
+    done
+    line="$word"
+  done
+  printf '%s%s\n' "$out" "$line"
 }
