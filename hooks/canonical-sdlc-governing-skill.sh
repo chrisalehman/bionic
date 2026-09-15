@@ -631,7 +631,7 @@ FRONTMATTER=$(echo "$CONTENT" | awk '
 # business, wherever it lives — which is why an ordinary file in an ordinary
 # project, in a project with no `.bionic/` at all, passes untouched.
 if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
-  if echo "$FRONTMATTER" | grep -qE '^[[:space:]]*(canonical_sdlc_version[[:space:]]*:|governing-skill[[:space:]]*:[[:space:]]*canonical-sdlc[[:space:]]*$)'; then
+  if grep -qE '^[[:space:]]*(canonical_sdlc_version[[:space:]]*:|governing-skill[[:space:]]*:[[:space:]]*canonical-sdlc[[:space:]]*$)' <<< "$FRONTMATTER"; then
     case "$BASENAME" in
       *.spec.md|*.requirements.md) MISPLACED_SUBDIR=specs ;;
       adr-*.md)                    MISPLACED_SUBDIR=adrs ;;
@@ -975,7 +975,7 @@ REQUIRED_DISCRIMINATORS=("surface_type" "language" "has_ui" "multi_agent" "deplo
 
 MISSING=()
 for flag in "${REQUIRED_OPT_IN[@]}" "${REQUIRED_DISCRIMINATORS[@]}"; do
-  if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*${flag}[[:space:]]*:"; then
+  if ! grep -qE "^[[:space:]]*${flag}[[:space:]]*:" <<< "$FRONTMATTER"; then
     MISSING+=("$flag")
   fi
 done
@@ -983,7 +983,7 @@ done
 # `model_plan` (the Step-0 model-tier decision) is checked as a separate
 # conditional grep — NOT an array element — to stay safe under `set -u` with
 # bash 3.2's empty-array expansion behaviour.
-if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
+if ! grep -qE "^[[:space:]]*model_plan[[:space:]]*:" <<< "$FRONTMATTER"; then
   MISSING+=("model_plan")
 fi
 
@@ -1018,7 +1018,7 @@ case "$BASENAME" in
       ''|*[!0-9]*) ;;  # non-numeric or empty sdlc-step → not in scope
       *)
         if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ]; then
-          if ! echo "$CONTENT" | grep -qE '^## Verification Matrix'; then
+          if ! grep -qE '^## Verification Matrix' <<< "$CONTENT"; then
             _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section.
 Path: $FILE_PATH
 Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval."
@@ -1194,7 +1194,7 @@ A wave- or epic-scale spec must satisfy one of three:
       # rather than yaml_get so that a bare `design-waived:` — a malformed
       # waiver, but unmistakably a user's waiver — still counts as present.
       DESIGN_WAIVED=0
-      if echo "$FRONTMATTER" | grep -qE '^[[:space:]]*design-waived[[:space:]]*:'; then
+      if grep -qE '^[[:space:]]*design-waived[[:space:]]*:' <<< "$FRONTMATTER"; then
         DESIGN_WAIVED=1
       fi
 
@@ -1223,7 +1223,7 @@ A wave- or epic-scale spec must satisfy one of three:
         # the walk arm: a design named by climbing out of the directory it was
         # named relative to is a spelling nobody should have to audit, and the
         # refusal holds even when the climb would land on a real design.
-        if echo "$DESIGN_POINTER" | grep -qE '(^|/)\.\.(/|$)'; then
+        if grep -qE '(^|/)\.\.(/|$)' <<< "$DESIGN_POINTER"; then
           block_design "design: '$DESIGN_POINTER' climbs out with a '..' component and is refused."
         fi
         DESIGN_ABS=$(resolve_design_path "$DESIGN_POINTER")
@@ -1286,7 +1286,7 @@ case "$BASENAME" in
               }
               while IFS= read -r ADR_ONE; do
                 [ -n "$ADR_ONE" ] || continue
-                if echo "$ADR_ONE" | grep -qE '(^|/)\.\.(/|$)'; then
+                if grep -qE '(^|/)\.\.(/|$)' <<< "$ADR_ONE"; then
                   _gs_detail="canonical-sdlc spec '$BASENAME' (sdlc-step ${ADRS_STEP}): adrs: '$ADR_ONE' climbs out with a '..' component and is refused.
 Path: $FILE_PATH"
                   refuse exit2 write "the adrs: path climbs out with '..'" "name it under the docs root" "$_gs_detail"
@@ -1370,7 +1370,7 @@ case "$BASENAME" in
             ingoal && /^## / { exit }
             ingoal { print }
           ')
-          if ! printf '%s\n' "$GOAL_SECTION_BODY" | grep -qE '[^[:space:]]'; then
+          if ! grep -qE '[^[:space:]]' <<< "$GOAL_SECTION_BODY"; then
             _gs_detail="canonical-sdlc artifact '$BASENAME' (scale: $SCALE): the 'Goal' section is empty.
 Path: $FILE_PATH
 Fix: write one concise paragraph describing the goal under '## Goal'."

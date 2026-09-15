@@ -7740,6 +7740,86 @@ expect_contains "…and at run time it leaks its own source text instead of answ
 expect_eq "…but the grep catches it" "yes" \
   "$([ -n "$(LC_ALL=C grep -nE "$BP_RE" "$BP_INLINE_MUT")" ] && echo yes || echo no)"
 
+# THE THIRD SHAPE, WHICH NEITHER `-n` NOR A RUN CAN SEE UNTIL THE DATA GROWS (wave-14 T37).
+# `echo "$VAR" | grep -q PAT` parses, and answers correctly, for as long as $VAR fits in the
+# 64 KB pipe buffer. Past that the producer is still writing when `grep -q` exits at its
+# FIRST match; it takes SIGPIPE and exits 141, and under `set -o pipefail` — which
+# hooks/bash-walls.sh (:86) and hooks/stop-guard.sh (:46) both set — the pipeline reports
+# 141 rather than grep's 0. So `if ! …` reads a MATCH as a failure, and the wall inverts.
+# This is not hypothetical: the evidence gate refused EVERY commit in this repo once the
+# plan's `## Verification Matrix` section passed 64 KB, on a plan whose `stack-health:` line
+# was present and valid (tests/canonical-sdlc-evidence-gate.test.sh Section 40 pins the
+# behaviour; this row pins the IDIOM, which is what stops it coming back).
+#
+# The fix is a here-string, which has no second process to lose, so the rule is: no wall
+# library and no hook reads a variable through a pipe into a quitting `grep`. Tests are NOT
+# swept — a fixture builder is not a wall, and several here legitimately pipe.
+# Like $BP_RE above, the pattern is written in bracket classes so this file's own source
+# does not match the rule it enforces.
+# A literal `$` the printf builders below plant into fixture files without this file's own
+# expansion reaching it — same device $BP_DOL uses for §BP's inline-case mutant.
+BP_Q_DOL='$'
+BP_Q_RE='(echo|printf)[^|]*"[$][{A-Za-z_][^|]*[|][[:space:]]*(/usr/bin/)?grep[[:space:]]+-[A-Za-z]*q'
+BP_Q_FILES="$(cd "$BIONIC_SCRIPTS_DIR" && find hooks payload/scripts/lib -name '*.sh' -type f \
+  2>/dev/null | LC_ALL=C sort)"
+expect_eq "the quitting-grep sweep found shell files to check" "yes" \
+  "$([ -n "$BP_Q_FILES" ] && echo yes || echo no)"
+# CODE LINES ONLY. A WHOLE-LINE COMMENT IS EXEMPT, and it has to be: the fix in
+# walls.sh explains the defect by SPELLING the banned idiom, and a rule that forbids
+# documenting what it bans would be paid for in silence. A comment executes nothing, so
+# the exemption costs the rule no power — and it is narrow, dropping only lines whose
+# FIRST non-blank character is `#`, never a code line that carries the idiom with a
+# comment after it. The pair of rows below pins both halves of that.
+# `-H` IS FORCED ON EVERY CALL, not decoration: BSD and GNU grep both omit the filename
+# when given exactly ONE file, so a single-file planted fixture would print `2:  # …`
+# while the multi-file sweep prints `path:2:  # …`. One output shape means one filter.
+bp_q_code_only() {  # <grep -nH output> -> the same rows minus whole-line comments
+  LC_ALL=C grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true
+}
+BP_Q_HITS="$(cd "$BIONIC_SCRIPTS_DIR" && LC_ALL=C grep -nHE "$BP_Q_RE" \
+  $(printf '%s\n' "$BP_Q_FILES" | tr '\n' ' ') 2>/dev/null | bp_q_code_only)"
+expect_eq "no hook or wall library pipes a variable into a quitting \`grep -q\`" "" "$BP_Q_HITS"
+
+# THE EXEMPTION IS NARROW, both directions, on planted lines rather than on the tree.
+BP_Q_CMT="$SANDBOX/bp-q-comment.sh"
+printf '#!/bin/bash\n  # echo "%sBIG" | grep -qE needle  <- a comment, not a site\nx=1\n' \
+  "$BP_Q_DOL" > "$BP_Q_CMT"
+expect_eq "…and a whole-line COMMENT spelling the idiom is not a site" "" \
+  "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_CMT" | bp_q_code_only)"
+expect_eq "…though the raw grep did match it, so the exemption is what dropped it" "yes" \
+  "$([ -n "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_CMT")" ] && echo yes || echo no)"
+BP_Q_TRAIL="$SANDBOX/bp-q-trailing.sh"
+printf '#!/bin/bash\nif echo "%sBIG" | grep -qE needle ; then :; fi  # still a site\n' \
+  "$BP_Q_DOL" > "$BP_Q_TRAIL"
+expect_eq "…while a CODE line carrying the idiom is still caught, comment or not" "yes" \
+  "$([ -n "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_TRAIL" | bp_q_code_only)" ] && echo yes || echo no)"
+
+# THE MUTATION ARM, in two halves. The first proves the grep discriminates; the second
+# proves the defect it stands for is REAL under pipefail, so the row is not a style pin.
+BP_Q_MUT="$SANDBOX/bp-quitting-grep.sh"
+printf '#!/bin/bash\nset -uo pipefail\nBIG="%s1"\nif ! echo "%sBIG" | grep -qE "^needle" ; then\n  echo REFUSED\nelse\n  echo ALLOWED\nfi\n' \
+  "$BP_Q_DOL" "$BP_Q_DOL" > "$BP_Q_MUT"
+expect_eq "the mutation arm: the planted idiom PARSES, so -n cannot catch it" "0" \
+  "$(/bin/bash -n "$BP_Q_MUT" >/dev/null 2>&1; echo $?)"
+expect_eq "…and the grep catches it" "yes" \
+  "$([ -n "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_MUT")" ] && echo yes || echo no)"
+# The same planted file, run twice on the SAME needle, differing only in how much data
+# trails the match: under the buffer it answers ALLOWED, over it the wall inverts.
+BP_Q_SMALL="$(/bin/bash "$BP_Q_MUT" "$(printf 'needle\npadding\n')")"
+BP_Q_BIG="$(/bin/bash "$BP_Q_MUT" "$(printf 'needle\n'; LC_ALL=C awk 'BEGIN{for(i=0;i<9000;i++) print "padding padding padding padding padding padding"}')")"
+expect_eq "…the planted idiom answers correctly while the subject fits the pipe buffer" \
+  "ALLOWED" "$BP_Q_SMALL"
+expect_eq "…and INVERTS once it does not: a present needle read as absent" \
+  "REFUSED" "$BP_Q_BIG"
+# The here-string the sweep requires instead, on the same oversized subject, does not.
+BP_Q_FIX="$SANDBOX/bp-herestring.sh"
+printf '#!/bin/bash\nset -uo pipefail\nBIG="%s1"\nif ! grep -qE "^needle" <<< "%sBIG" ; then\n  echo REFUSED\nelse\n  echo ALLOWED\nfi\n' \
+  "$BP_Q_DOL" "$BP_Q_DOL" > "$BP_Q_FIX"
+expect_eq "…while the here-string answers ALLOWED on the SAME oversized subject" "ALLOWED" \
+  "$(/bin/bash "$BP_Q_FIX" "$(printf 'needle\n'; LC_ALL=C awk 'BEGIN{for(i=0;i<9000;i++) print "padding padding padding padding padding padding"}')")"
+expect_eq "…and the sweep does not flag the here-string form" "" \
+  "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_FIX")"
+
 # ------------------------------------------------ §DS OWNERSHIP: the fix hint and the roster
 #
 # ONE TABLE, TWO RENDERERS, FOUR WAYS OF ASKING WHETHER THEY AGREE (fixit 1.5.1).
