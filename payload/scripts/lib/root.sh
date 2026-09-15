@@ -104,6 +104,48 @@
 # Falls back up the chain when the path does not exist yet: a hook is handed a
 # cwd from a tool payload, and a deleted or not-yet-created directory must still
 # resolve to the nearest real ancestor rather than aborting the caller.
+#
+# THE SUBSHELL IS SKIPPED WHEN THE PATH IS ALREADY ITS OWN PHYSICAL PATH (epic-23
+# wave-14 REQ-4, research R3 §8 cut 5). This function is called four times per root
+# walk and `( cd … && pwd -P )` forks a subshell every time — ~3 ms per hook event
+# to re-derive a path that was already absolute, already free of `.`, `..` and `//`,
+# and already free of symlinks, which is the ordinary case on every checkout.
+#
+# THE PRECHECK IS NOT "IS IT ABSOLUTE". `pwd -P` does three things: it resolves
+# symlinks, it collapses `.`/`..`/`//`, and it makes the path absolute. Skipping it
+# is only sound when ALL THREE are already true, so the precheck refuses a path
+# carrying any of those components and tests EVERY prefix of the rest with `[ -L ]`
+# — a builtin lstat, no fork. Symlink resolution is the point of this function and
+# `skipped-symlink` is a named rule in this file`s own tag vocabulary; a precheck
+# that tested only the leaf would hand back a path through a symlinked ANCESTOR and
+# every `.bionic` decision below it would be made about the wrong directory.
+#
+# WHEN IN DOUBT IT FALLS THROUGH TO THE SUBSHELL, which is the old behaviour exactly.
+# tests/root.test.sh's seven topologies — the symlinked-root one included — are the
+# wall this fast path has to keep green.
+_bionic_root_phys() {  # <absolute path> -> 0 when `pwd -P` could not change it
+  local p="$1" rest comp acc
+  case "$p" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$p" in
+    */|*/./*|*/../*|*/.|*/..|*//*) return 1 ;;
+  esac
+  acc=""
+  rest="${p#/}"
+  while [ -n "$rest" ]; do
+    comp="${rest%%/*}"
+    acc="$acc/$comp"
+    [ -L "$acc" ] && return 1
+    case "$rest" in
+      */*) rest="${rest#*/}" ;;
+      *)   rest="" ;;
+    esac
+  done
+  return 0
+}
+
 _bionic_root_abs() {
   local p="$1"
   [ -n "$p" ] || p="$PWD"
@@ -114,6 +156,10 @@ _bionic_root_abs() {
   while [ -n "$p" ] && [ "$p" != "/" ] && [ ! -d "$p" ]; do
     p="$(dirname "$p")"
   done
+  if _bionic_root_phys "$p"; then
+    printf '%s\n' "$p"
+    return 0
+  fi
   ( cd "$p" 2>/dev/null && pwd -P ) || printf '%s\n' "$p"
 }
 

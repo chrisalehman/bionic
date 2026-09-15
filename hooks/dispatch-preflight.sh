@@ -218,6 +218,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
 
+# THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
+# computes it only for a caller that sets this, because the plan scan behind it is
+# the preamble's most expensive value and most hooks never read the answer. This gate reads it at
+# :285-286 to scope itself to the bound run.
+BIONIC_CONTEXT_WANT_RUN=1
+
 # ---------- THE ROOT AND THE SESSION KEY, from one call ----------
 #
 # THE ROOT (spec AC-10). Every path this gate owns hangs off the answer: the

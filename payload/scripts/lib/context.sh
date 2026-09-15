@@ -16,8 +16,10 @@
 #   BIONIC_ROOT       project_root "$BIONIC_CWD"
 #   BIONIC_SID        the session id, past the ONE shape guard
 #   BIONIC_ENGAGED    0 or 1
-#   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none
-#   BIONIC_RUN_PLAN   the plan path the verdict names; empty for `none`
+#   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none — or the
+#                     sentinel `unset` when the caller did not ask for it (§6)
+#   BIONIC_RUN_PLAN   the plan path the verdict names; empty for `none` and for
+#                     the `unset` sentinel
 #   BIONIC_WORKTREE   the linked worktree the root was mapped from, empty when
 #                     the walk mapped none (epic-23 wave-14 REQ-2, spec D5)
 #
@@ -31,6 +33,12 @@
 # notice exactly where the other fourteen exit. Fourteen hooks spell the decision
 # `[ "$BIONIC_ENGAGED" = 1 ] || exit 0` in their own bodies, one line each, and
 # session-start reads the 0 and reports.
+#
+# THE RUN VERDICT IS OPT-IN (epic-23 wave-14 REQ-4, spec D5): it is computed only
+# when the caller set `BIONIC_CONTEXT_WANT_RUN=1` before the call, and otherwise
+# BIONIC_RUN_WORD is the sentinel `unset` — a word outside the verdict vocabulary,
+# so a reader that meets it cannot mistake it for `none`. §6 carries the reasoning
+# and the list of callers that ask.
 #
 # THE RUN VERDICT IS A VALUE for a sharper reason (census §4.2, T10-pins §5.5).
 # The four hooks carrying the 4-branch `case` do DIFFERENT things on
@@ -361,15 +369,45 @@ bionic_context() {
     BIONIC_ENGAGED=0
   fi
 
-  # 6. THE RUN VERDICT, AS A VALUE. `session_run` returns 2 on `bound-closed` and
-  # 1 on `none`; both are identified sessions, so neither may become this
-  # function's return code.
-  _verdict="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || :
-  BIONIC_RUN_WORD="${_verdict%% *}"
-  case "$_verdict" in
-    *\ *) BIONIC_RUN_PLAN="${_verdict#* }" ;;
-    *)    BIONIC_RUN_PLAN="" ;;
-  esac
+  # 6. THE RUN VERDICT, AS A VALUE — AND ONLY FOR A CALLER THAT ASKED FOR IT
+  # (epic-23 wave-14 REQ-4, spec D5 "Hook context"). `session_run` returns 2 on
+  # `bound-closed` and 1 on `none`; both are identified sessions, so neither may
+  # become this function's return code.
+  #
+  # WHY IT IS OPT-IN. This is the most expensive value the preamble computes —
+  # the scan walks every candidate under `plans/` and `incidents/` and reads each
+  # one, measured at 28.0 ms on a one-plan fixture and growing ~2.8 ms per plan
+  # the repo accumulates (research R3 §6-§7). `payload/scripts/lib/walls.sh`
+  # holds ZERO references to either variable, so on the hottest path in the tree
+  # — a PreToolUse Bash call, five walls — every millisecond of it was spent on
+  # an answer nobody read.
+  #
+  # THE SENTINEL IS NOT THE EMPTY STRING, and that is the whole safety of this
+  # cut. `none` is a real verdict ("this session is in no run"); an unasked
+  # verdict is a different state, and a wall written later that read an empty
+  # string where it expected a word would silently take the `none` branch — the
+  # fail-dangerous direction, and one no test would catch because the value LOOKS
+  # answered. `unset` is outside the closed verdict vocabulary
+  # (bound-open | bound-closed | fallback | none), so a `case` over it falls to
+  # its own `*)` arm and a comparison against any real verdict fails.
+  #
+  # A CALLER THAT WANTS THE VERDICT SETS `BIONIC_CONTEXT_WANT_RUN=1` BEFORE THE
+  # CALL. Today that is the three hooks whose own bodies or libraries branch on
+  # it: hooks/stop.sh (lib/stop.sh's spend, patrol-duties and patrol-revive),
+  # hooks/dispatch-preflight.sh and hooks/session-start.sh. A hook that starts
+  # reading the verdict sets the flag too — and reads `unset` as "I did not ask",
+  # never as "no run".
+  if [ "${BIONIC_CONTEXT_WANT_RUN:-0}" = 1 ]; then
+    _verdict="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || :
+    BIONIC_RUN_WORD="${_verdict%% *}"
+    case "$_verdict" in
+      *\ *) BIONIC_RUN_PLAN="${_verdict#* }" ;;
+      *)    BIONIC_RUN_PLAN="" ;;
+    esac
+  else
+    BIONIC_RUN_WORD="unset"
+    BIONIC_RUN_PLAN=""
+  fi
 
   return 0
 }
