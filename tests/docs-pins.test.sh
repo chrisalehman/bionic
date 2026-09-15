@@ -980,6 +980,7 @@ fi
 
 # Anti-vacuity for 44c: a patrol.sh with a class ADDED must desync the count this arm
 # compares, proving 44c is a live comparison against the SSoT and not a hardcoded "6".
+anchor "$PATROL_LIB_T28" "PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL}\"" 1
 DOCTORED_PATROL_T28="$TMP/patrol-classes-mutated.sh"
 sed "s/^PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL}\"\$/PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL} extra-class\"/" \
   "$PATROL_LIB_T28" > "$DOCTORED_PATROL_T28"
