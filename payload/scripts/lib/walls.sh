@@ -184,11 +184,22 @@ _wall_flatten() {  # <text> -> sets _WALL_FLAT
 # `"gi"t push` all still reach the parser; a command with no `git` in it at any
 # spelling the parser can read skips two full awk passes.
 #
+# THE ONE TRANSFORMATION THAT IS NOT UNQUOTING (wave-14 T24, security 1b). A backslash
+# followed by a NEWLINE is a line continuation: the shell joins the two lines and the
+# newline goes with the backslash. Removing the backslash alone left the newline standing
+# between `g` and `it`, so the screen answered "provably not" for `g\<newline>it commit`
+# while `git_argv_has_sub` answered `commit` for the same string — the whole evidence gate
+# skipped for a real commit, and a `g\<newline>it push origin main` invisible to
+# protect-main. The pair is removed FIRST, before the lone backslashes, because after they
+# are gone the continuation is indistinguishable from a newline that separates two
+# commands. Both readers of this screen are fixed by that one line.
+#
 # IT IS A SCREEN, NEVER A VERDICT. A hit runs the real parser and the parser
 # decides; only a miss short-circuits, and a miss is the case the parser was
 # always going to answer "no push, no commit" to.
 _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
   local _p="$1"
+  _p="${_p//\\$'\n'/}"
   _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
   case "$_p" in *git*) return 0 ;; esac
   return 1
@@ -1799,9 +1810,16 @@ esac
 # is taken as a fast path only where it cannot disagree — when the ladder's cwd and the
 # payload's cwd are the same directory.
 #
-# NO NEW `git` CALL, ANYWHERE IN HERE (REQ-4, AC-4.3 caps root resolution at one ask per hook
-# invocation). A linked worktree's `.git` is a FILE holding one `gitdir:` line, and its
-# basename is the name git itself gave the tree. Reading it is one bash `read`.
+# ONE `git` CALL, AND ONLY WHERE A COMMIT IS BEING JUDGED (REQ-4, AC-4.3 caps ROOT
+# RESOLUTION at one ask per hook invocation; this is not that ask). A linked worktree's
+# `.git` is a FILE holding one `gitdir:` line, and reading it is one bash `read` — but a
+# file is text, and wave-14's security review drove a hand-written one that named a plan
+# row's tree, pointed at a path no repository has ever had, and lowered `current:` for a
+# commit landing in the main checkout. So the read stays as the PRE-FILTER it is good at,
+# where it costs the main-root path nothing, and git answers the question the row lookup
+# keys on (`_eg_git_wt_name`). Every non-commit Bash event still leaves this file having
+# forked git exactly once, for the root walk, because none of them reach this block:
+# `_eg_body` exits at IS_COMMIT long before it.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 
 # _eg_wt_name <dir> -> the LINKED WORKTREE's name for that directory, empty otherwise.
@@ -1812,6 +1830,13 @@ esac
 # worktree, a submodule, or something else entirely, so the `gitdir:` target is required to
 # carry a `/worktrees/` segment before its basename is believed: a submodule's
 # `<super>/.git/modules/<name>` is not a worktree and must not be read as one.
+#
+# IT IS A PRE-FILTER AND NOT THE ANSWER (wave-14 T24). Its whole value is what it rules out
+# for the price of one `read` and no fork — the main checkout, every submodule, every
+# ordinary directory — which is what keeps a main-root commit free. What it CANNOT do is
+# establish that a directory is a worktree, or that it is THIS repository's: the file it
+# reads is ordinary text and anyone who can write the command can write the file. A name it
+# answers is a candidate; `_eg_git_wt_name` turns a candidate into an answer.
 _eg_wt_name() {
   local _d="${1:-}" _g
   case "$_d" in /*) : ;; *) return 0 ;; esac
@@ -1833,7 +1858,125 @@ _eg_wt_name() {
   return 0
 }
 
-# _eg_commit_cwd -> the directory the commit is made IN.
+# _eg_git_wt_name <dir> -> sets _EG_GITWT to the name GIT gives that directory as a linked
+# worktree OF THIS REPOSITORY, empty for everything else. One `git` fork, commit path only.
+#
+# THE DEFECT IT CLOSES (security 1a, HIGH). The arm judged a commit at a plan row's step,
+# and it picked the row from a name it took out of a `.git` FILE — so the OBJECT of the
+# judgement (a commit, landing in some tree) and its SUBJECT (a row, chosen from a string)
+# were two different things and nothing reconciled them. A directory holding the single line
+# `gitdir: /nowhere/at/all/.git/worktrees/14-T6` was accepted as row T6's tree although git
+# never made it, the target does not exist, and the directory need not even be inside the
+# repository. Against the live plan that lowered `current:` from 5 to 4 for a MAIN-checkout
+# commit, and step 4 takes the gate's early exit, so the entire Step-5 verify shape was
+# never reached — with no artifact left behind: the plan still read `current: 5`.
+#
+# WHAT GIT IS ASKED, AND WHY THOSE TWO PATHS ANSWER IT:
+#   · `--git-common-dir` is the repository every worktree of it shares. It must be THIS
+#     repository's, or the tree belongs to another repository (or to none) and this plan's
+#     register has nothing to say about it;
+#   · `--git-dir` inside a linked worktree is `<main>/.git/worktrees/<name>` — so it differs
+#     from the common dir, carries a `/worktrees/` segment, and its basename IS the name
+#     `git worktree list` prints and `spawn-worktree.sh` created the tree under. That
+#     basename, not the file's, is what the row lookup keys on.
+# One line back is not two answers: it would read as "git dir equals common dir" and demote
+# a linked worktree to an ordinary checkout, so it is declined instead.
+#
+# THE MAIN ROOT'S COMMON DIR COSTS NO SECOND FORK in the ordinary topology — `$BIONIC_ROOT/.git`
+# is a directory in every checkout that is not itself a linked worktree, and the root walk
+# already maps a worktree cwd back to the main root. The `else` exists for the topology where
+# it is not (a project root that is itself a linked worktree) and is the only path in this
+# file that can fork git twice. The comparison falls back to `-ef` — same device, same inode,
+# a shell builtin and no fork — so a symlinked root, a `//` or a `..` in either path compares
+# as the directory it is rather than as the string it was spelled with.
+#
+# EVERY FAILURE IS A DECLINE, never a lowered step: no git, an older git with no
+# `--path-format`, a deleted directory, another repository's tree, a bare repository. The
+# caller then judges at `current:` and says so, which is what the gate did before this
+# register existed.
+_EG_GITWT=""
+_eg_git_wt_name() {
+  local _d="${1:-}" _both _common _gitdir _main
+  _EG_GITWT=""
+  case "$_d" in /*) : ;; *) return 0 ;; esac
+  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 0
+  _common="${_both%%$'\n'*}"
+  _gitdir="${_both#*$'\n'}"
+  [ "$_common" != "$_both" ] || return 0
+  [ -n "$_common" ] && [ -n "$_gitdir" ] || return 0
+  [ "$_common" != "$_gitdir" ] || return 0
+  case "$_gitdir" in */worktrees/*) : ;; *) return 0 ;; esac
+  if [ -d "$BIONIC_ROOT/.git" ]; then
+    _main="$BIONIC_ROOT/.git"
+  else
+    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+    _main="${_main%%$'\n'*}"
+  fi
+  [ -n "$_main" ] || return 0
+  [ "$_common" = "$_main" ] || [ "$_common" -ef "$_main" ] || return 0
+  _EG_GITWT="${_gitdir##*/}"
+  return 0
+}
+
+# _eg_cd_second <command text> -> sets _EG_CD2 to the SECOND directory the text changes into
+# before the commit, empty when the text names only one.
+#
+# WHY A SECOND `cd` IS A REFUSAL AND NOT A TIE-BREAK (critic issue 1, FAIL-OPEN). Branch (2)
+# below reads the LEADING `cd` and truncates at the first `;`, `&`, `|` or newline, so every
+# later `cd` in the command was invisible to it — and `cd <worktree> && cd <main> && git
+# commit` was attributed to the worktree while the commit landed in main, at the worktree
+# row's lower step. Nothing in the TEXT says which directory the shell is standing in when
+# the commit finally runs: a `||`, a failed `cd`, a subshell and a plain `&&` all read alike
+# here, and this repo's own dispatch block warns about the neighbouring hazard (A-46, "a
+# failed cd with `;`-chained commands runs them in the main checkout"). So the arm stops
+# guessing: two named directories is an ambiguity the writer can spell away, and a wall that
+# cannot tell refuses.
+#
+# ONLY WHAT PRECEDES THE COMMIT COUNTS. A `cd` after the commit cannot move a commit that has
+# already run, so the scan stops at the first `git` in the text. If the text carries none this
+# reader can see — a spelling only `git_argv_expand` resolves — the whole remainder is
+# scanned, which refuses rather than allows.
+_EG_CD2=""
+_eg_cd_second() {
+  local _t="${1:-}" _rest _seg _p
+  _EG_CD2=""
+  case "$_t" in
+    *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
+    *) return 0 ;;
+  esac
+  case "$_rest" in *git*) _rest="${_rest%%git*}" ;; esac
+  while [ -n "$_rest" ]; do
+    case "$_rest" in
+      *[\;\&\|$'\n']*) _seg="${_rest%%[;&|$'\n']*}"; _rest="${_rest#*[;&|$'\n']}" ;;
+      *) _seg="$_rest"; _rest="" ;;
+    esac
+    while [ -n "$_seg" ]; do
+      case "$_seg" in
+        ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
+        *) break ;;
+      esac
+    done
+    case "$_seg" in
+      'cd'|'cd '*|'cd	'*)
+        _p="${_seg#cd}"
+        while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
+        while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
+        while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+        case "$_p" in
+          '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
+          "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
+        esac
+        [ -n "$_p" ] || _p='~'
+        _EG_CD2="$_p"
+        return 0
+        ;;
+    esac
+  done
+  return 0
+}
+
+# _eg_commit_cwd -> sets _EG_CWD (the directory the commit is made IN), _EG_CWD_SRC (which
+# of the three spellings answered) and, through `_eg_cd_second`, _EG_CD2.
 #
 # THREE SPELLINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
 #   1. `git -C <dir> commit` — git's own cwd override, and it wins over everything;
@@ -1842,11 +1985,24 @@ _eg_wt_name() {
 #      cwd in the payload and the `cd` runs afterwards, so without this the dominant real
 #      shape would read as a main-root commit and REQ-2 would hold only for fixtures;
 #   3. the payload's `.cwd`.
-# Only an ABSOLUTE path is taken from the command: a relative `cd` is resolved against a cwd
+# Only an ABSOLUTE path is taken from the command: a relative path is resolved against a cwd
 # this hook would have to re-derive, and guessing it wrong is how a commit gets judged at
 # another task's step. Anything unreadable falls through to (3), which is today's answer.
+#
+# A RELATIVE `-C` FALLS THROUGH RATHER THAN ANSWERING (critic issue 2, wave-14 T24). Branch
+# (1) used to return `.` or `sub` verbatim; `_eg_wt_name` then rejected it for not starting
+# with `/` and the row was LOST, so `git -C . commit` from inside a worktree was refused for
+# Step-5 evidence that cannot exist yet — the exact failure REQ-2 exists to remove, and the
+# same commit spelled `git commit` was allowed. A relative `-C` resolves against the shell's
+# cwd at that moment, which is precisely what (2) and (3) answer, so it defers to them.
+#
+# IT ASSIGNS RATHER THAN PRINTS (the `_wall_flatten` pattern, and now a correctness
+# requirement rather than a saved fork): two of its three answers are facts about the
+# COMMAND that only the caller can act on — an ambiguously named directory is a refusal, not
+# a cwd — and a command substitution would leave them behind in a subshell.
 _eg_commit_cwd() {
   local _line _oldifs _hadf _p _c
+  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CD2=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   case " $COMMAND " in
     *" -C "*|*" -C"[\"\']*)
@@ -1867,7 +2023,11 @@ _eg_commit_cwd() {
         shift   # argv[0], the git binary
         while [ $# -gt 0 ]; do
           case "$1" in
-            -C) shift; [ $# -gt 0 ] && printf '%s' "$1"; return 0 ;;
+            -C) shift
+                if [ $# -gt 0 ]; then
+                  case "$1" in /*) _EG_CWD="$1"; _EG_CWD_SRC="-C"; return 0 ;; esac
+                fi
+                break ;;
             -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
               shift; [ $# -gt 0 ] && shift ;;
             -*) shift ;;
@@ -1894,23 +2054,44 @@ _eg_commit_cwd() {
         "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
       esac
       case "$_p" in
-        /*) if [ -d "$_p" ]; then printf '%s' "$_p"; return 0; fi ;;
+        /*) if [ -d "$_p" ]; then
+              _EG_CWD="$_p"; _EG_CWD_SRC="cd"
+              _eg_cd_second "$_c"
+              return 0
+            fi ;;
       esac
       ;;
   esac
   # (3)
-  printf '%s' "$(bionic_jq .cwd)"
+  _EG_CWD="$(bionic_jq .cwd)"
+  _EG_CWD_SRC="payload"
+  return 0
 }
 
-# _eg_row_for_worktree <name> -> "<id><TAB><step>" of the first `## Tasks` row whose
-# `worktree` cell names that tree, empty when no row does.
+# _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step>" for the ONE `## Tasks` row
+# whose `worktree` cell names that tree, and _EG_ROW_DUP to the ids when more than one does.
+# Returns 1 for "this plan has no register", 3 for "the register is ambiguous", 0 otherwise.
 #
 # THE CELL IS COMPARED BY BASENAME on the row's side, so a plan that spells the tree as a
 # path (`.worktrees/14-T3`) or as its branch (`wt/14-T3`) still resolves to the tree git
 # named `14-T3`. The comparison is never loosened on the DERIVED side: that value is git's
 # own, and matching it loosely is how a commit reaches another task's step.
+#
+# AND THAT LOOSENING IS EXACTLY WHY A COLLISION IS POSSIBLE (correctness F4, wave-14 T24).
+# `wt/14-T6` and `.worktrees/14-T6` are different cells with one basename, the spec's domain
+# model states "a worktree names at most one unit" as an invariant, and `units_validate`
+# deliberately declines to enforce it (units.sh's own note) — so the register CAN say two
+# things and the plan is the only place that can be repaired. Taking the first row in table
+# order picked a step by the accident of write order and said nothing: if the second row were
+# the real owner and it sat AHEAD of the run, the refusal AC-2.3 exists for would never fire.
+# A wall that cannot tell which row owns the tree does not choose one; it declines to the
+# run's own `current:` and names both rows so the table can be fixed.
+#
+# IT ASSIGNS RATHER THAN PRINTS for the reason `_eg_commit_cwd` does: the collision is a
+# second answer, and a command substitution would strand it in a subshell.
 _eg_row_for_worktree() {
-  local _want="${1:-}" _rows _line _cell
+  local _want="${1:-}" _rows _line _cell _id
+  _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
   [ -n "$_want" ] || return 0
   _rows="$(units_rows "$PLAN")" || return 1
   [ -n "$_rows" ] || return 0
@@ -1920,27 +2101,62 @@ _eg_row_for_worktree() {
     [ -n "$_cell" ] || continue
     _cell="${_cell%/}"
     [ "${_cell##*/}" = "$_want" ] || continue
-    printf '%s\t%s' "$(units_field "$_line" id)" "$(units_field "$_line" step)"
-    return 0
+    _id="$(units_field "$_line" id)"
+    if [ -z "$_EG_ROW" ]; then
+      _EG_ROW="$_id	$(units_field "$_line" step)"
+      _EG_ROW_DUP="$_id"
+    else
+      _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
+      _EG_ROW_COLLIDED=1
+    fi
   done <<< "$_rows"
+  if [ "${_EG_ROW_COLLIDED:-0}" = 1 ]; then
+    _EG_ROW=""
+    return 3
+  fi
+  _EG_ROW_DUP=""
   return 0
 }
 
 _EG_WT=""
-_EG_CWD="$(_eg_commit_cwd)"
+_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CD2
 if [ -n "$BIONIC_WORKTREE" ] && [ "$_EG_CWD" = "$BIONIC_CWD" ]; then
-  _EG_WT="$BIONIC_WORKTREE"          # the ladder already answered for this very directory
-elif [ -n "$_EG_CWD" ]; then
-  _EG_WT="$(_eg_wt_name "$_EG_CWD")"
+  _EG_WT="$BIONIC_WORKTREE"          # the ladder already asked GIT about this very directory
+elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
+  # THE FILE READ SCREENS, GIT ANSWERS (wave-14 T24, security 1a). `_eg_wt_name` has said the
+  # directory MIGHT be a linked worktree, for the price of one `read` and no fork; every
+  # main-root commit and every ordinary directory has already left without paying for a git
+  # call. What remains is the small set worth one fork, and git decides it.
+  _eg_git_wt_name "$_EG_CWD"
+  _EG_WT="$_EG_GITWT"
+  if [ -z "$_EG_WT" ]; then
+    # NOT SILENCE. A `.git` file that names a worktree git does not know is an anomaly
+    # wherever it came from — a moved tree, another repository's, or a planted one — and the
+    # reader needs to know the register was not consulted for this commit.
+    printf 'evidence-gate: %s is not a linked worktree of this repository — judging at current: %s\n' \
+      "$_EG_CWD" "$CURRENT" >&2
+  fi
 fi
 
 if [ -n "$_EG_WT" ]; then
+  # THE TREE IS GIT'S, BUT IS IT THE ONE THE COMMIT LANDS IN? (critic issue 1.) When the
+  # command text named a second directory before the commit, no reading of the text answers
+  # that, so the arm refuses and names both rather than judging at the first one's row.
+  if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CD2" ]; then
+    _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD2}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
+Plan: $PLAN
+Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
+    refuse exit2 commit "two directories are named before the commit" "name one directory" "$_eg_detail"
+  fi
   # A plan with NO `## Tasks` table has no register, and there is nothing to say about a tree
   # it does not claim to track — `_eg_row_for_worktree` returns 1 for that, and this arm stays
   # silent, which is what keeps a solo-writer project's worktree commits byte-identical to
   # today's.
-  _EG_ROW="$(_eg_row_for_worktree "$_EG_WT")"; _EG_REG=$?
-  if [ "$_EG_REG" -eq 0 ] && [ -z "$_EG_ROW" ]; then
+  _eg_row_for_worktree "$_EG_WT"; _EG_REG=$?
+  if [ "$_EG_REG" -eq 3 ]; then
+    printf 'evidence-gate: worktree %s is named by more than one ## Tasks row (%s) — judging at current: %s\n' \
+      "$_EG_WT" "$_EG_ROW_DUP" "$CURRENT" >&2
+  elif [ "$_EG_REG" -eq 0 ] && [ -z "$_EG_ROW" ]; then
     printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
       "$_EG_WT" "$CURRENT" >&2
   elif [ -n "$_EG_ROW" ]; then
@@ -1952,6 +2168,17 @@ if [ -n "$_EG_WT" ]; then
                           # is what reports it, at the step that writes the plan
       *)
         if [ "$_EG_RSTEP" -lt "$_EG_CURNUM" ] 2>/dev/null; then
+          # THE ALLOW PATH SPEAKS TOO (architecture review §4.1). Until this line the gate
+          # announced the case where it DECLINED to use the register and went silent on the
+          # case where it used it — so the only place in the fleet where a wall substitutes a
+          # different value for the run's declared `current:` was the one place with no record
+          # of having done so, and the operator who cannot explain why a commit passed had the
+          # same two choices as the one wave-13's A-orch-43 incident left: read the source, or
+          # edit the plan. Printed BEFORE the substitution, so the line names the step the run
+          # declared. Where the row's step EQUALS `current:` nothing was substituted and
+          # nothing is printed — that is the common case and it stays byte-identical.
+          printf "evidence-gate: judged at row %s's step %s (run at current: %s)\n" \
+            "$_EG_RID" "$_EG_RSTEP" "$CURRENT" >&2
           CURRENT="$_EG_RSTEP"
         elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null; then
           _eg_detail="canonical-sdlc worktree '${_EG_WT}' belongs to '## Tasks' row ${_EG_RID}, whose step is ${_EG_RSTEP}; the run is at current: ${CURRENT}.
@@ -3794,19 +4021,35 @@ case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
 # soft-sourced width.sh (hooks/bash-walls.sh sources refuse.sh before walls.sh,
 # `:202`/`:213`) — nothing new is sourced, and refuse.sh itself is unchanged.
 #
-# TOKEN BOUNDARIES, NOT A CHARACTER CUT. A budget of 38 suites (A-orch-17's own
+# TOKEN BOUNDARIES, NEVER A CHARACTER CUT. A budget of 38 suites (A-orch-17's own
 # incident) cannot fit on any one line; showing the first few WHOLE tokens plus a
 # "+N more" count (research-R2-preflight.md Q6) beats a mid-name ellipsis, which
-# would print a truncated, unrunnable suite name.
+# would print a truncated, unrunnable suite name. `none` is reserved for a
+# genuinely EMPTY set — a non-empty set that has no room at all (cols<=0, or not
+# even its first token fits) renders as a bare count ("N suites") instead, which
+# is honest either way `none` is not: it does not claim the budget is empty, and
+# it does not cut a name mid-word. Review-correctness-d3930dd.md F3 (mid-name
+# ellipsis via `bionic_trunc`) and F7 (`none` for a non-empty set at cols<=0) are
+# both this shape; fixed together here rather than patched at each call site.
 _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> text
   local set="${1:-}" cols="${2:-0}"
-  if [ -z "$set" ] || [ "$cols" -le 0 ]; then printf 'none'; return; fi
+  if [ -z "$set" ]; then printf 'none'; return; fi
+  local total=0 tok
+  for tok in $set; do total=$((total + 1)); done
+  local word=suites
+  [ "$total" -eq 1 ] && word=suite
+  if [ "$cols" -le 0 ]; then
+    # NO ROOM AT ALL (F7). The set is NOT empty, so `none` would lie; name the
+    # count instead. `_budget_wire_fact`'s caller-side self-refuse (refuse.sh's
+    # own line-width check) is what catches an overlong line from here, per
+    # A-T8.1 — this function's job is to be honest, not to guarantee a fit.
+    printf '%d %s' "$total" "$word"
+    return
+  fi
   if [ "$(bionic_cols "$set")" -le "$cols" ]; then
     printf '%s' "$set"
     return
   fi
-  local total=0 tok
-  for tok in $set; do total=$((total + 1)); done
   local out="" shown=0 cand remain tail
   for tok in $set; do
     if [ -z "$out" ]; then cand="$tok"; else cand="$out $tok"; fi
@@ -3822,14 +4065,17 @@ _budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> 
   remain=$((total - shown))
   if [ -z "$out" ]; then
     # Not even one whole token fits ALONGSIDE its own "+N more" count. Try the
-    # first token bare, count dropped, before falling back to a character cut —
-    # a real (if partial) suite name beats a truncated one.
+    # first token bare, count dropped — a real suite name beats one padded
+    # with a count it has no room for.
     set -- $set
     if [ "$(bionic_cols "$1")" -le "$cols" ]; then
       printf '%s' "$1"
       return
     fi
-    printf '%s' "$(bionic_trunc "$set" "$cols")"
+    # NOT EVEN ONE TOKEN FITS BARE (F3). A character cut here would print a
+    # truncated, unrunnable suite name — exactly what token-boundary rendering
+    # exists to avoid — so the honest floor is the bare count, same as cols<=0.
+    printf '%d %s' "$total" "$word"
   elif [ "$remain" -gt 0 ]; then
     printf '%s +%d more' "$out" "$remain"
   else
@@ -3860,7 +4106,7 @@ budget_refuse() {  # <suite basename>
   case "$1" in
     *'$'*|*'`'*)
       fold_block exit2 suite-run \
-        "$(_budget_wire_fact "unexpanded name; budget: " suite-run "spell each suite literally" "$2")" \
+        "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
         "spell each suite literally" \
         "The name as read: $1
 
@@ -3876,7 +4122,7 @@ On the budget: ${2:-(nothing — this brief declared Suites: none)}"
       return 2 ;;
   esac
   fold_block exit2 suite-run \
-    "$(_budget_wire_fact "off budget: " suite-run "run only the budgeted suites" "$2")" \
+    "$(_budget_wire_fact "allowed: " suite-run "run only the budgeted suites" "$2")" \
     "run only the budgeted suites" \
     "This is a BUDGET arm, not a safety wall: an extra suite run breaks nothing, it spends
 forty minutes of a machine nobody else can use. The set was recorded on this agent's
@@ -3907,7 +4153,7 @@ for _target in $_TARGETS; do
       *" run.sh "*) continue ;;
     esac
     fold_block exit2 suite-run \
-      "$(_budget_wire_fact "full tree off budget: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
+      "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
       "run your brief's suites" \
       "This is a BUDGET arm, not a safety wall. One regression means one: the whole tree is
 proved once per run, by one dispatched runner whose row carries tests/run.sh, at
