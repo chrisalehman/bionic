@@ -31,11 +31,35 @@
 # found the normal loader way, `<hooks-dir>/../payload/scripts/lib`, so the override
 # only makes sense pointed at a full checkout, not a bare hooks/ directory.
 #
-# Usage: bash tests/bench/hook-latency.sh [--hooks-dir DIR]
+# BENCH_EXTRA_CANDIDATES=<n> (env, default 0): after building the one-plan fixture,
+# write <n> more plan-shaped files into the same sandbox plans/ directory — same
+# shape as the shipped fixture (front matter + a flush-left `## SDLC State` heading),
+# so `_run_candidates` (payload/scripts/lib/run.sh) walks and reads every one of
+# them, not just the first. This is the repo-scale reading research R3 §7 and T4/T17
+# each reproduced by hand with a scratchpad copy of this script; it is now first
+# class. The bench always prints `hook-latency: candidates=<1+n>` before the timing
+# lines, so a reader can see what was measured. At n=0 nothing else changes: no extra
+# files are written and the timing output is byte-identical to the shipped default
+# apart from that one new line.
+#
+#     BENCH_EXTRA_CANDIDATES=16 bash tests/bench/hook-latency.sh
+#
+# (17 = this repo's own plan-plus-incident count today, per T4/T17's repo-scale
+# reading — see record/wave-14-tune-181/bench-T17-a0f043f.txt.)
+#
+# --candidates-only: build the fixture (extra candidates included), print the
+# candidates line and `hook-latency: sandbox=<path>`, then exit WITHOUT running
+# either hook and WITHOUT cleaning up the sandbox — the caller owns removing it.
+# This is tests/hook-latency.test.sh §7's own minimal-run switch: that pin checks
+# the FIXTURE the knob builds, not hook timing, and the two hook runs this script
+# otherwise makes are ten invocations each it has no reason to pay for.
+#
+# Usage: bash tests/bench/hook-latency.sh [--hooks-dir DIR] [--candidates-only]
 
 set -uo pipefail
 
 HOOKS_DIR=""
+CANDIDATES_ONLY=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --hooks-dir)
@@ -47,8 +71,12 @@ while [ $# -gt 0 ]; do
       HOOKS_DIR="${1#*=}"
       shift
       ;;
+    --candidates-only)
+      CANDIDATES_ONLY=1
+      shift
+      ;;
     -h|--help)
-      sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -57,6 +85,14 @@ while [ $# -gt 0 ]; do
       ;;
   esac
 done
+
+BENCH_EXTRA_CANDIDATES="${BENCH_EXTRA_CANDIDATES:-0}"
+case "$BENCH_EXTRA_CANDIDATES" in
+  ''|*[!0-9]*)
+    echo "hook-latency: BENCH_EXTRA_CANDIDATES must be a non-negative integer: $BENCH_EXTRA_CANDIDATES" >&2
+    exit 1
+    ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
@@ -76,8 +112,12 @@ STOP_HOOK="$HOOKS_DIR/stop.sh"
 [ -f "$STOP_HOOK" ] || { echo "hook-latency: no hook at $STOP_HOOK" >&2; exit 1; }
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/hook-latency-bench.XXXXXX")" && pwd -P)"
-cleanup() { rm -rf "$SANDBOX"; }
-trap cleanup EXIT
+# --candidates-only skips this cleanup deliberately (see the flag's own header doc
+# above) so its caller can inspect the fixture files before removing them itself.
+if [ "$CANDIDATES_ONLY" -eq 0 ]; then
+  cleanup() { rm -rf "$SANDBOX"; }
+  trap cleanup EXIT
+fi
 
 SID="be4c4570-1eb4-4c1a-9c1a-1a2b3c4d5e6f"
 
@@ -98,6 +138,25 @@ git -C "$PROJECT" checkout -q -b feature/bench 2>/dev/null
 : > "$PROJECT/.bionic/tmp/engaged-$SID.state"
 printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4\n' \
   > "$PROJECT/.bionic/docs/plans/wave-01.plan.md"
+
+# BENCH_EXTRA_CANDIDATES extra plan-shaped files, same shape as the one above —
+# front matter plus a flush-left `## SDLC State` heading, so `_run_candidates`
+# (payload/scripts/lib/run.sh) walks and reads every one of them. Depth 1 under
+# plans/, well inside the walk's own maxdepth 2 bound. At the default of 0 this
+# loop never runs and the fixture is byte-identical to the shipped one.
+_extra=1
+while [ "$_extra" -le "$BENCH_EXTRA_CANDIDATES" ]; do
+  printf -- '---\ncanonical_sdlc_version: 14\n---\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4\n' \
+    > "$PROJECT/.bionic/docs/plans/extra-$_extra.plan.md"
+  _extra=$((_extra + 1))
+done
+
+echo "hook-latency: candidates=$((1 + BENCH_EXTRA_CANDIDATES))"
+
+if [ "$CANDIDATES_ONLY" -eq 1 ]; then
+  echo "hook-latency: sandbox=$SANDBOX"
+  exit 0
+fi
 
 FAKE_HOME="$SANDBOX/home"
 mkdir -p "$FAKE_HOME"

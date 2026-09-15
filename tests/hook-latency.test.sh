@@ -467,4 +467,53 @@ expect_true "6-pre: the governing-skill trace reached its run verdict" \
 expect_eq "6a: exactly one plan-directory walk on the governing-skill path" \
   "1" "$GS_WALKS"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "7: BENCH_EXTRA_CANDIDATES writes plan-shaped candidates into the sandbox fixture"
+
+# THIS PIN OWNS THE BENCH'S OWN FIXTURE KNOB (epic-23 wave-14 T19, REQ-4). The
+# repo-scale reading T4 and T17 each had to reproduce by hand with a scratchpad copy
+# of tests/bench/hook-latency.sh is now first-class: the shipped script honours
+# `BENCH_EXTRA_CANDIDATES=<n>` and writes n extra plan-shaped candidates into its own
+# sandbox fixture alongside the one it always wrote. This pin drives the bench
+# BINARY, not a hook — it is not part of the §1-6 hook-tracing suite above.
+#
+# WHY `--candidates-only`. The bench's job is ten-times-two hook invocations; this
+# pin's job is the FIXTURE the bench builds before it ever calls a hook. Timing that
+# to check a file count would make an O(1) question cost the suite real seconds for
+# nothing it asserts on. `--candidates-only` builds the fixture, honours the env
+# knob, prints "hook-latency: candidates=<n>" and "hook-latency: sandbox=<path>",
+# and exits before running either hook — this pin's own minimal-run switch, added
+# alongside the knob it exists to test. It also skips the sandbox's own cleanup trap
+# so this section can inspect the files before deleting them itself.
+BENCH_SCRIPT="$(dirname "$0")/bench/hook-latency.sh"
+[ -f "$BENCH_SCRIPT" ] || { echo "hook-latency: no bench at $BENCH_SCRIPT — suite refuses to run"; exit 1; }
+
+# n=2 -> candidates=3, and three plan-shaped files actually sitting in the sandbox's
+# plans/ directory, each carrying the flush-left `## SDLC State` heading
+# `_run_candidates` (payload/scripts/lib/run.sh) filters on — the same property that
+# makes them real candidates on the hooks' own scan, not merely three more files.
+BENCH_OUT_2=$(BENCH_EXTRA_CANDIDATES=2 bash "$BENCH_SCRIPT" --candidates-only)
+BENCH_CANDIDATES_2=$(printf '%s\n' "$BENCH_OUT_2" | sed -n 's/^hook-latency: candidates=\([0-9]*\)$/\1/p')
+BENCH_SANDBOX_2=$(printf '%s\n' "$BENCH_OUT_2" | sed -n 's/^hook-latency: sandbox=//p')
+
+expect_eq "7a: BENCH_EXTRA_CANDIDATES=2 reports candidates=3" "3" "$BENCH_CANDIDATES_2"
+
+BENCH_PLAN_FILES_2=$(find "$BENCH_SANDBOX_2/proj/.bionic/docs/plans" -maxdepth 2 -type f -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+expect_eq "7b: the sandbox holds three plan-shaped files" "3" "$BENCH_PLAN_FILES_2"
+
+BENCH_SDLC_FILES_2=$(grep -lE '^## SDLC State' "$BENCH_SANDBOX_2/proj/.bionic/docs/plans"/*.md 2>/dev/null | wc -l | tr -d ' ')
+expect_eq "7c: all three carry a flush-left '## SDLC State' heading, the scan's own filter" \
+  "3" "$BENCH_SDLC_FILES_2"
+
+rm -rf "$BENCH_SANDBOX_2"
+
+# unset -> candidates=1, the shipped default's shape, unchanged.
+BENCH_OUT_0=$(bash "$BENCH_SCRIPT" --candidates-only)
+BENCH_CANDIDATES_0=$(printf '%s\n' "$BENCH_OUT_0" | sed -n 's/^hook-latency: candidates=\([0-9]*\)$/\1/p')
+BENCH_SANDBOX_0=$(printf '%s\n' "$BENCH_OUT_0" | sed -n 's/^hook-latency: sandbox=//p')
+
+expect_eq "7d: BENCH_EXTRA_CANDIDATES unset reports candidates=1" "1" "$BENCH_CANDIDATES_0"
+
+rm -rf "$BENCH_SANDBOX_0"
+
 finish
