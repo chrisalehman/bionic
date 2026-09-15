@@ -99,17 +99,26 @@ fi
 
 # ─── FILE SCOPE: the derivation bound, which this file does not own ──────────
 #
-# `IMPACT_BOUND_S` is defined once, in lib/bounds.sh, and read by this library
-# and by hooks/dispatch-preflight.sh (epic-23 wave-14-tune-181, REQ-7, D4). It
-# used to be a second copy of the dispatch wall's number, six seconds written
-# twice; the sweep's use of it is at stop_landing_gate's derivation loop below.
+# `LG_IMPACT_BOUND_S` is defined once, in lib/bounds.sh, beside the dispatch
+# wall's own `IMPACT_BOUND_S` (epic-23 wave-14-tune-181, REQ-7, D4). It used to
+# be a second copy of the dispatch wall's number, six seconds written twice; the
+# sweep's use of it is at stop_landing_gate's derivation loop below.
+#
+# THIS FILE READS THE GATE'S BOUND, NOT THE WALL'S, and the distinction is the
+# whole of wave-14 T15. The sweep runs inside hooks/stop.sh, registered at
+# `"timeout": 10` on Stop and SubagentStop; the wall runs in a PreToolUse hook
+# with room to wait. Reading `IMPACT_BOUND_S` here would put the wall's 20 s
+# inside a 10 s registration, where the harness kills the hook at 10 with exit
+# 124 and the refusal in flight becomes a pass (tests/landing-gate.test.sh §16i).
+# lib/bounds.sh's header carries the reasoning; what this file owes is the right
+# NAME.
 #
 # SOURCED THE WAY fold.sh AND root.sh ARE, and guarded the same way — on the
-# thing it defines, so a caller that already has it pays nothing. There is no
+# thing this file uses, so a caller that already has it pays nothing. There is no
 # numeric fallback on purpose: a default here would be the third copy of the
 # constant this file exists to stop having, and a missing library is the loader's
 # failure to report, not this file's to paper over.
-if [ -z "${IMPACT_BOUND_S:-}" ]; then
+if [ -z "${LG_IMPACT_BOUND_S:-}" ]; then
   # shellcheck source=/dev/null
   . "$_STOP_LIB_DIR/bounds.sh"
 fi
@@ -599,7 +608,9 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local EVENT MODE STOP_AGENT_ID STOP_AGENT_NAME LIVE_IDS ROSTER_FILE SWEEPER
   local CANDIDATES LINE REFUSALS REFUSE_KIND NOW AID NAME KIND CFILES
   local VERDICT VERDICT_RC STATE
-  local LG_IMPACT_BOUND_S LG_IMPACT_TICKS_LEFT LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY
+  # LG_IMPACT_BOUND_S IS NOT LOCALISED: it is the library's file-scope constant,
+  # and a `local` of that name here would shadow it with the empty string.
+  local LG_IMPACT_TICKS_LEFT LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY
   local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP
   local LG_IMPACT_PID LG_TICKS LG_OVERRAN
 
@@ -903,12 +914,19 @@ REFUSE_KIND=""
 #
 # THE NUMBER IS NOT THIS FILE'S (wave-14-tune-181, REQ-7, D4). It was `6` here and `6` again
 # at dispatch-preflight.sh:2225, two copies with two headers and no line linking them. It
-# comes from lib/bounds.sh now — one definition, read by both legs, and a HANG GUARD rather
-# than a cost budget: tests/lib/impact.sh caches its edge graph per tree state, so a
-# derivation that is merely slow is no longer a thing this number has to pay for. The ticks
-# are the bound in tenths, DERIVED, because a bound that moved while a hardcoded 60 stayed
-# put would stop the sweep at six seconds while both messages below quoted twenty.
-LG_IMPACT_BOUND_S="$IMPACT_BOUND_S"
+# comes from lib/bounds.sh now — sourced at file scope above, never re-declared here — and
+# it is a HANG GUARD rather than a cost budget: tests/lib/impact.sh caches its edge graph per
+# tree state, so a derivation that is merely slow is no longer a thing this number has to pay
+# for.
+#
+# AND IT IS THE GATE'S BOUND, NOT THE WALL'S (T15). `LG_IMPACT_BOUND_S` is six seconds
+# because this loop runs inside a hook registered at `"timeout": 10`; `IMPACT_BOUND_S` is
+# twenty because the dispatch wall's hook can afford to wait. Wiring this loop to the wall's
+# number is what wave-14 T9 did, and the sweep then outlived its own registration: the
+# harness killed the hook at 10 s with exit 124, which is not the exit 2 the refusal below
+# spells, so a row that should have been REFUSED passed. The ticks are the bound in tenths,
+# DERIVED, because a bound that moved while a hardcoded 60 stayed put would stop the sweep at
+# six seconds while both messages below quoted something else.
 LG_IMPACT_TICKS_LEFT=$(( LG_IMPACT_BOUND_S * 10 ))   # tenths of a second, shared by the sweep
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
