@@ -97,6 +97,23 @@ if ! declare -F audit_path >/dev/null 2>&1; then
   . "$_STOP_LIB_DIR/root.sh"
 fi
 
+# ─── FILE SCOPE: the derivation bound, which this file does not own ──────────
+#
+# `IMPACT_BOUND_S` is defined once, in lib/bounds.sh, and read by this library
+# and by hooks/dispatch-preflight.sh (epic-23 wave-14-tune-181, REQ-7, D4). It
+# used to be a second copy of the dispatch wall's number, six seconds written
+# twice; the sweep's use of it is at stop_landing_gate's derivation loop below.
+#
+# SOURCED THE WAY fold.sh AND root.sh ARE, and guarded the same way — on the
+# thing it defines, so a caller that already has it pays nothing. There is no
+# numeric fallback on purpose: a default here would be the third copy of the
+# constant this file exists to stop having, and a missing library is the loader's
+# failure to report, not this file's to paper over.
+if [ -z "${IMPACT_BOUND_S:-}" ]; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/bounds.sh"
+fi
+
 # ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
 #
 # THREE VERDICTS ASKED THE SAME QUESTION THREE TIMES (REQ-10, T11): `stop_landing_gate`
@@ -874,17 +891,25 @@ REFUSALS=""
 REFUSE_KIND=""
 
 # ONE DERIVATION BUDGET FOR THE WHOLE SWEEP (review-c C-17). The impact command below is
-# the same call hooks/dispatch-preflight.sh makes and costs the same ~2.6-6.5 s, but it
-# sits inside this per-candidate loop, and this hook is registered at "timeout": 10 on both
-# Stop and SubagentStop. N offending rows would pay N x that. So the budget is spent across
-# the loop rather than granted per row: whatever is left when a row asks, and nothing once
-# it is gone. A row that gets no derivation still REFUSES — it names its files and says the
-# suites were not derived. The one thing this must never become is a silent pass.
+# the same call hooks/dispatch-preflight.sh makes, but it sits inside this per-candidate
+# loop, and this hook is registered at "timeout": 10 on both Stop and SubagentStop. N
+# offending rows would pay N x that. So the budget is spent across the loop rather than
+# granted per row: whatever is left when a row asks, and nothing once it is gone. A row that
+# gets no derivation still REFUSES — it names its files and says the suites were not
+# derived. The one thing this must never become is a silent pass.
 #
 # BUILT, NOT BORROWED, for the same reason as the dispatch site: bionic's command discipline
 # forbids a `timeout`/`gtimeout` binary and macOS ships neither.
-LG_IMPACT_BOUND_S=6
-LG_IMPACT_TICKS_LEFT=60          # 60 x 0.1s, shared by every candidate in this sweep
+#
+# THE NUMBER IS NOT THIS FILE'S (wave-14-tune-181, REQ-7, D4). It was `6` here and `6` again
+# at dispatch-preflight.sh:2225, two copies with two headers and no line linking them. It
+# comes from lib/bounds.sh now — one definition, read by both legs, and a HANG GUARD rather
+# than a cost budget: tests/lib/impact.sh caches its edge graph per tree state, so a
+# derivation that is merely slow is no longer a thing this number has to pay for. The ticks
+# are the bound in tenths, DERIVED, because a bound that moved while a hardcoded 60 stayed
+# put would stop the sweep at six seconds while both messages below quoted twenty.
+LG_IMPACT_BOUND_S="$IMPACT_BOUND_S"
+LG_IMPACT_TICKS_LEFT=$(( LG_IMPACT_BOUND_S * 10 ))   # tenths of a second, shared by the sweep
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 while IFS=$'\t' read -r AID NAME KIND CFILES; do
