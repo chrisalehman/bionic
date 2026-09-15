@@ -207,6 +207,17 @@ run_hook "$(mk_payload "$R_QUIET" 'git push origin main')"
 expect_status "2a: protect-main still refuses a push to main" 2 "$ST"
 expect_contains "2b: …in its own words" "main is a protected branch here" "$ERR"
 
+# THE SCREEN AND THE PARSER MUST AGREE (wave-14 T24, security 1b). `_wall_mentions_git` is a
+# cheap superset in front of `git_argv_*`: it strips backslashes and quotes and looks for the
+# substring `git`, and only a MISS short-circuits. A backslash-NEWLINE is a line continuation
+# — the backslash goes and a newline is left standing between `g` and `it` — so the screen
+# said "provably not a git command" for a command the parser reads as a push. Both readers of
+# the screen are in this one process: protect-main (here) and the evidence gate's IS_COMMIT
+# (25g(n) in tests/canonical-sdlc-evidence-gate.test.sh), so one repair has to serve both.
+run_hook "$(mk_payload "$R_QUIET" "$(printf 'g\\\n''it push origin main')")"
+expect_status "2b1: a 'g\<newline>it push' is a push — the screen does not hide it from protect-main" 2 "$ST"
+expect_contains "2b2: …refused in protect-main's own words" "main is a protected branch here" "$ERR"
+
 run_hook "$(mk_payload "$R_QUIET" 'psql -c "DROP TABLE users"')"
 expect_status "2c: protect-database still refuses a DROP" 2 "$ST"
 expect_contains "2d: …in its own words" "this command DROPs a database object" "$ERR"
