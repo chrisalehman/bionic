@@ -97,8 +97,9 @@ done
 . "${CO_LIB}/patrol.sh"
 
 # CO_SID -> this script's own identity, read from the ambient environment BEFORE
-# anything below ever touches CLAUDE_CODE_SESSION_ID (the gate dry-run at :583/:710
-# overrides it with a SYNTHETIC id for its own purposes and must never be allowed to
+# anything below ever touches CLAUDE_CODE_SESSION_ID (the gate dry-run's two
+# `CLAUDE_CODE_SESSION_ID=` overrides, at :661 and :788, exist for its own
+# purposes and must never be allowed to
 # shadow the real one first). REQ-1's tmp-spare rule (act_tmp, D2) keys on this: an
 # entry under `.bionic/tmp` belonging to a DIFFERENT, still-live session is a running
 # run's state and is spared; this session's own keyed state is removed like any other
@@ -388,6 +389,13 @@ act_tmp() {
       owner="$(_co_tmp_owner "${entry##*/}")"
       [ -n "$owner" ] || continue
       [ "$owner" = "$CO_SID" ] && continue
+      # SET MEMBERSHIP, SPELLED IN `case`. Both lists here are newline-delimited, so a
+      # name is "in" the list when the list — wrapped in a leading and trailing newline
+      # — contains that name wrapped in a leading and trailing newline too: the wrapper
+      # is what keeps "ab" from matching a list entry "a" or "b" on a bare substring
+      # test. `$dead_ids` gets both wrappers spelled here; the second case below (testing
+      # `$spare_list`) already ends in one from how `spare_list` is built, so only the
+      # leading newline is added there — same idiom, one wrapper already paid for.
       case "
 $dead_ids
 " in

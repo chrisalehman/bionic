@@ -167,7 +167,7 @@ BIONIC_LOADER_REFUSE
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
 # the preamble's most expensive value and most hooks never read the answer. The greeting prints the bound
-# line from it (:347-348, :359-360).
+# line from it (:353-354, :365-366).
 BIONIC_CONTEXT_WANT_RUN=1
 
 # The tree this hook was launched from — printed absolute in the re-arm line, and

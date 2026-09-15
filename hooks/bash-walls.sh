@@ -216,7 +216,7 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_closed "bash-walls" "$COMMAND"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/walls.sh"
 
-# THE SEVEN VALUES, ONCE (REQ-1h, lib/context.sh). All five functions read the root,
+# THE EIGHT VALUES, ONCE (REQ-1h, lib/context.sh). All five functions read the root,
 # the session key, the engagement answer and the run verdict out of this one call — and
 # it ADOPTS the BIONIC_INPUT already read above rather than reaching for a stdin that is
 # spent. Five hooks each spelling the cwd ladder their own way could attribute one
