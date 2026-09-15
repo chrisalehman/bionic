@@ -4137,6 +4137,69 @@ else
   no "25d non-repo project dir resolves to itself, plan still found" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
 fi
 
+echo "-- 25g: THE WORKTREE ALIAS (D7, wave-13-fixit-180, AC-7.2). An 'evidence:' file written
+# RELATIVE from inside a spawned worktree, with a plain shell redirect — no hook in the
+# loop, exactly how a dispatched writer makes it. project_root already folds the gate's OWN
+# resolution onto the main checkout (25a proves that), but that does not help a file that
+# was never physically written there: without the alias the write lands INSIDE the
+# worktree, invisible to the gate. With the alias — spawn-worktree.sh create's own act,
+# planted before any writer touches the tree — the SAME relative write lands, physically,
+# in the main checkout, and the gate allows the commit. --"
+
+matrix_w25g="## Verification Matrix
+
+stack-health: process restarts 0 → 0 across walk; no crash/OOM state change
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  evidence: record/w25g/x.md
+  tier-run: bash test.sh — unit suite
+  readback: 1/1 asserted"
+
+s25g_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25g_tmp")
+s25g_main="$s25g_tmp/main"
+mkdir -p "$s25g_main/.bionic/docs/plans"
+git -C "$s25g_main" init -q .
+git -C "$s25g_main" commit -q --allow-empty -m init
+engage "$s25g_main"
+plan 5 "$step5_base" "$matrix_w25g" > "$s25g_main/.bionic/docs/plans/wave-01-x.plan.md"
+
+# (a) NO alias: a PLAIN `git worktree add` — this world exists whether or not `create` plants
+# an alias, and is the honest control — the record written relative from inside it lands
+# inside the worktree, orphaned from the main tree the gate resolves against.
+git -C "$s25g_main" worktree add -q "$s25g_tmp/wt-noalias" -b s25g-noalias
+s25g_wt_a="$s25g_tmp/wt-noalias"
+( cd "$s25g_wt_a" && mkdir -p .bionic/docs/record/w25g && printf 'evidence\n' > .bionic/docs/record/w25g/x.md )
+expect_false "25g(a) without the alias, the relative write never reaches the main tree" \
+  test -f "${s25g_main}/.bionic/docs/record/w25g/x.md"
+run_hook_with_project "$(make_home)" "$s25g_wt_a" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ]; then
+  ok "25g(a) …so the evidence-gate block names the missing file"
+else
+  no "25g(a) …so the evidence-gate block names the missing file" \
+    "expected block; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+fi
+
+# (b) THE REAL `spawn-worktree.sh create` (not a hand-planted symlink — the thing under test
+# is whether CREATE itself plants the alias) on a second, otherwise identical worktree — the
+# same relative write now lands in the main checkout.
+s25g_sha="$(git -C "$s25g_main" rev-parse HEAD)"
+( cd "$s25g_main" && bash "${BIONIC_SCRIPTS_DIR}/payload/scripts/spawn-worktree.sh" create "$s25g_sha" s25g-alias >/dev/null 2>&1 )
+s25g_wt_b="${s25g_main}/.worktrees/s25g-alias"
+( cd "$s25g_wt_b" && mkdir -p .bionic/docs/record/w25g && printf 'evidence\n' > .bionic/docs/record/w25g/x.md )
+expect_true "25g(b) with the alias, the SAME relative write lands in the main tree" \
+  test -f "${s25g_main}/.bionic/docs/record/w25g/x.md"
+run_hook_with_project "$(make_home)" "$s25g_wt_b" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  ok "25g(b) …so the evidence-gate allows the commit"
+else
+  no "25g(b) …so the evidence-gate allows the commit" "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR'"
+fi
+
 # ============================================================
 # Section 26: the walk-artifact arm (AC-1, AC-2)
 # ============================================================

@@ -1690,6 +1690,24 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
         END { exit !found }' "$f" 2>/dev/null; then
     return 0
   fi
+  # A LIVE NAME NEVER GETS A SECOND LIVE ROW (T6, AC-6.1; research R1 §5). The idempotence
+  # check above is by agent_id — a SECOND agent, under a DIFFERENT id, adopted under the SAME
+  # name is not caught by it, and two live rows of one name is exactly the ambiguity
+  # `hooks/stop-guard.sh`'s own stop refusal exists to police (T29 §7). `live_ids_of_name` is
+  # that refusal's own predicate, moved to the one library both files source
+  # (`payload/scripts/lib/roster.sh`): a non-empty answer means this name is already live
+  # here, so this adopt takes the `-r<n>` search (`fill_name`, already this file's own
+  # convention for a spent id, :1335) instead of the name it was asked for, and says so once
+  # on stderr — this call site is otherwise silent.
+  local ROSTER_FILE="$f"
+  if [ -n "$(live_ids_of_name "$name")" ]; then
+    local renamed
+    renamed="$(fill_name "$f" "$name")"
+    if [ -n "$renamed" ] && [ "$renamed" != "$name" ]; then
+      echo "adopt: '${name}' is already live on this session's roster — writing this row as '${renamed}'" >&2
+      name="$renamed"
+    fi
+  fi
   mkdir -p "$d" 2>/dev/null || return 1
   if [ ! -e "$f" ]; then
     roster_header >> "$f" 2>/dev/null && chmod 600 "$f" 2>/dev/null
@@ -2960,6 +2978,11 @@ EOF
       die "REFUSED — sibling hooks/session-sweeper.sh not found; nothing was read."
       exit 2
     fi
+    # THE ORDER WRITER, resolved the same way and NOT required to exist. The tick's whole
+    # value is the reading it does from the roster; a missing sibling costs the stand-down
+    # its order (and says so, once, on the row it was for) rather than costing the session
+    # its tick. The sweeper above is required because nothing can be decided without it.
+    ORDERS="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/stop-orders.sh"
 
     REPO="$(project_root "$PWD")"
     REPO_REAL="$(cd "$REPO" 2>/dev/null && pwd -P)"
@@ -3005,7 +3028,15 @@ EOF
     # exists to end. The obligation behind it was real: eighteen finished agents once sat
     # idle on one panel because nobody stopped them. It is answered here instead, from the
     # roster, by the one process that already walks every row and every verdict.
-    TASKSTOP_NAMES=""
+    STANDDOWN_NAMES=""
+    # THE NAMES THIS SESSION HAS ALREADY CLOSED, carried out of the walk (T1, D2). Two
+    # readers below need it — the stand-down arm, which must not close a row twice, and the
+    # DUPLICATE-START tell, which repeated for the life of the session because it applied no
+    # ack filter at all. The verdict line this loop is already reading is the one place that
+    # says so: the ack ledger has exactly ONE reader in the fleet and it is not this file
+    # (hooks/session-sweeper.sh:817). `clean` has already folded `|` out of every name, so a
+    # `|`-delimited blob cannot be forged by a roster value.
+    TICK_ACKED_NAMES="|"
     # THE SWEPT SET IS READ ONCE, BEFORE THE WALK (Step-6 delta review P1). The membership
     # test below used to be `grep -F … "$ROSTER_FILE" | grep -qF …` INSIDE the per-row loop:
     # a whole-file read and two forks per MET row, on a file that grows monotonically for the
@@ -3048,21 +3079,23 @@ EOF
       #
       # TOTAL still counts an acked row: it is on the roster, and "how many contracts does
       # this session carry" is not the question the ack answers. Only `open=` moves.
-      [ "$(line_field "$LINE" acked)" = "yes" ] && continue
+      if [ "$(line_field "$LINE" acked)" = "yes" ]; then
+        TICK_ACKED_NAMES="${TICK_ACKED_NAMES}$(clean "$RNAME")|"
+        continue
+      fi
 
       case "$RSTATE" in
         MET|WAIVED)
-          # NAMED ONLY WHILE THE AGENT IS STILL THERE. A `landing-swept/v1` marker is written
-          # when the agent DISAPPEARED from the harness's task list (or, for a teammate, at
-          # its own SubagentStop), so a swept row is a lineage already gone and naming it
-          # would be the noise that teaches a reader to skip the line. MET-and-unswept is a
-          # contract that landed while its agent is still addressable — the one case where
-          # somebody has to act, and the act is a TaskStop.
+          # EVERY MET ROW IS A CANDIDATE, SWEPT OR NOT (T10, A-orch-20). A `landing-swept/v1`
+          # marker records that a landing was SEEN, not that the agent LEFT: for a teammate it
+          # is written at its own SubagentStop — the moment it reports — while it is still on
+          # the panel. Excluding a swept name here made the common shape at the end of a batch
+          # (every writer landed, still idle on the panel) print nothing, which is the 1.7.1
+          # pile-up this arm exists to end. Presence is the panel's fact alone (spec
+          # §Assumptions); `$SWEPT_ALL` is read only inside the decision below, to tell a row
+          # already closed by its own sweep from one that is merely moot-and-gone.
           if [ "$RSTATE" = "MET" ]; then
-            case "$SWEPT_ALL" in
-              *"|name=${RNAME}|"*) : ;;   # already swept — the lineage is gone
-              *) TASKSTOP_NAMES="${TASKSTOP_NAMES}${TASKSTOP_NAMES:+ }$(clean "$RNAME")" ;;
-            esac
+            STANDDOWN_NAMES="${STANDDOWN_NAMES}${STANDDOWN_NAMES:+ }$(clean "$RNAME")"
           fi
           ;;                                  # closed — not open
         *)          OPEN=$((OPEN + 1))        # STILL-LIVE, UNMET, AMBIGUOUS — open
@@ -3099,15 +3132,18 @@ EOF
     # ---------- THE PANEL IS REFRESHED FROM THE ROSTER, NOT FROM A TOOL CALL (T22) -------
     #
     # One line per MET lineage still on this session's register. It is a TELL: the tick holds
-    # no authority (ADR-003), stops nothing, writes nothing, and refuses nothing. What it
-    # replaces is `stop_patrol_duties`'s ListAgents duty, which asked the model to look at a
-    # panel so that a gate would let the turn end — and never named a single thing to do
-    # about what it saw.
-    if [ -n "$TASKSTOP_NAMES" ]; then
-      for TS_NAME in $TASKSTOP_NAMES; do
-        say "TASKSTOP ${TS_NAME} — contract MET and the lineage is still open on this roster; stop it"
-      done
-    fi
+    # no authority (ADR-003), stops nothing, and refuses nothing. What it replaces is
+    # `stop_patrol_duties`'s ListAgents duty, which asked the model to look at a panel so
+    # that a gate would let the turn end — and never named a single thing to do about what
+    # it saw.
+    #
+    # THE ARM MOVED DOWN (T1, D1/D2). It used to print here, from the roster alone, and say
+    # `TASKSTOP <name>`. The roster alone cannot tell the two cases apart: a MET row whose
+    # agent is STILL LISTED is somebody's TaskStop to make, and a MET row whose agent is GONE
+    # is a row nothing will ever close — the adopted-MET case, named on every tick forever
+    # until a human typed an `ack`. Both readings need the PANEL, which is warmed a few lines
+    # below, so the decision is taken there and `$STANDDOWN_NAMES` is what carries the
+    # candidates to it.
 
     # ---------- THE LIVE SET TRIMS `open=` AND THE FILL (S19, auditor F-14) ----------
     #
@@ -3139,6 +3175,9 @@ EOF
     # number this is and point at the gate that will insist.
     OPEN_ROSTER="$OPEN"
     TICK_LIVE_STATE=""
+    # RESOLVED AT MOST ONCE PER TICK, by whichever arm needs it first: the trim below, or the
+    # stand-down arm after it. A tick with nothing open and nothing MET reads no transcript.
+    TICK_TR=""
     if [ "$OPEN_ROSTER" -gt 0 ]; then
       TICK_TR="$(session_transcript "$SESSION_ID")" || TICK_TR=""
       if [ -z "$TICK_TR" ]; then
@@ -3240,7 +3279,7 @@ EOF
         fi
       fi
       if [ -n "$TICK_LIVE_STATE" ]; then
-        say "live set $TICK_LIVE_STATE — open= counted from the roster; ListAgents before any dispatch"
+        say "live set $TICK_LIVE_STATE — open= counted from the roster"
       elif [ "$OPEN" -ne "$OPEN_ROSTER" ]; then
         # THE TRIM IS SAID OUT LOUD, or `open=0` over a roster carrying two unmet
         # contracts is a number with no story. Only when it actually moved: a tick whose
@@ -3267,6 +3306,17 @@ EOF
     # ONE LINE PER ROW, NOT PER NAME: two duplicate starts are two events, and collapsing them
     # would hide the second. It is a TELL and nothing else — no stop, no roster write, no
     # effect on FILL, QUIET, NOTIFY or `open=`.
+    #
+    # THE TWO MARKS THAT CLOSE A ROW CLOSE THIS TELL TOO (T1, D2). Until 1.8.0 this loop
+    # applied NO ack filter and NO swept filter, and the roster is append-only with nothing
+    # that ever supersedes the row — so the tell repeated on every tick for the life of the
+    # session, long after the duplicate process was gone, and no act available to the reader
+    # could quiet it. It is the same closing rule the rest of this file already keeps
+    # (session-poker.sh: "A ROW IS CLOSED BY A LANDED MARKER OR BY AN ACK, and by nothing
+    # else"), applied here for the first time. The stand-down arm below writes that ack when
+    # the panel shows the agent gone, so the ordinary life of a duplicate start is now: told
+    # once, closed in the same tick, silent after it.
+    DUP_START_NAMES="|"
     if [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
       DUP_START_ROWS="$(grep -F "|status=duplicate-start|" "$ROSTER_FILE" 2>/dev/null)"
       if [ -n "$DUP_START_ROWS" ]; then
@@ -3276,10 +3326,149 @@ EOF
           case "$DS_LINE" in "roster-state/v1|"*) : ;; *) continue ;; esac
           DS_NAME="$(clean "$(line_field "$DS_LINE" name)")"
           [ -n "$DS_NAME" ] || continue
+          case "$TICK_ACKED_NAMES" in *"|${DS_NAME}|"*) continue ;; esac
+          case "$SWEPT_ALL" in *"|name=${DS_NAME}|"*) continue ;; esac
+          # ONE LINE PER ROW, NOT PER NAME (unchanged): two duplicate starts are two events.
+          # The CANDIDATE set below is per NAME, because an ack closes a name and writing two
+          # for one row would be two ledger lines saying the same thing.
           say "DUPLICATE-START ${DS_NAME} — a second start under an id that already has a live row; the dispatch wall is the door that closes"
+          case "$DUP_START_NAMES" in
+            *"|${DS_NAME}|"*) : ;;
+            *) DUP_START_NAMES="${DUP_START_NAMES}${DS_NAME}|" ;;
+          esac
         done <<EOF
 $DUP_START_ROWS
 EOF
+      fi
+    fi
+    [ "$DUP_START_NAMES" = "|" ] && DUP_START_NAMES=""
+
+    # ---------- THE STAND-DOWN: the tick names it, and writes the order (T1; D1, D2) ------
+    #
+    # THE DEFECT IT ENDS. `TASKSTOP <name>` was a tell and nothing else. The reader who acted
+    # on it then met the stop gate, which refuses a stop of a live agent whose contract it
+    # cannot see discharged — so the instruction the Patrol printed was routinely refused by
+    # the wall one turn later, and the operator learned to ack rows by hand instead. Worse,
+    # the tell could not tell a stoppable row from a moot one: an ADOPTED MET row is never
+    # swept by anything (adopt_fold excludes MET names, the Stop-sweep skips teammate rows,
+    # and the adopted agent's SubagentStop belongs to the session that launched it), so it
+    # was named on every tick, forever, for an agent that had been gone for hours.
+    #
+    # THE PANEL IS WHAT SEPARATES THEM, and it is the fact this tick already holds — read
+    # alone, never stood in for by the `landing-swept/v1` marker (T10, A-orch-20): that marker
+    # records a landing SEEN, and for a teammate it is written at its own SubagentStop while it
+    # is still on the panel, so "swept" is not "gone".
+    #
+    #   MET, STILL LISTED -> somebody has to stop it, swept marker or not. The tick says so by
+    #     name AND writes the stop order (hooks/stop-orders.sh order <name> --by patrol), so the
+    #     TaskStop that answers is not refused by the stop gate. `by=patrol` is the honest
+    #     label: an order used to mean "a human said stop" and now means "a human or a
+    #     verified landing said stop" (D1).
+    #   MET, NOT LISTED, already carrying a `landing-swept/v1` marker -> the row is closed
+    #     already; a second closing act would be a ledger line that says nothing new. Nothing
+    #     is printed and nothing is acked (A-T1.9, extended: the predicate that matters is
+    #     ABSENT, not unswept).
+    #   MET, NOT LISTED, no marker, or a `duplicate-start` row whose agent is gone -> there is
+    #     nobody to stop and no prior close on record. The row is moot and the world says so,
+    #     so the tick closes it the way a human would: `session-sweeper.sh ack <name> --by
+    #     patrol --reason moot-and-gone` (D2). Nothing is printed — a stand-down tell for an
+    #     agent that does not exist is the noise this arm exists to remove — and the evidence
+    #     is the ledger line, which names the author and what it was read off.
+    #
+    # THE TICK STILL STOPS NOTHING (ADR-003, unchanged). An order is a permission and an ack
+    # is a bookkeeping fact; neither ends a process. The one act this arm performs on a
+    # RUNNING agent is to make the operator's stop legal.
+    #
+    # AN UNKNOWN PANEL IS NOT AN EMPTY ONE. With no usable answer (`none` — the state of
+    # every session before its first ListAgents) the tick does NEITHER thing: it neither
+    # names a row for a stop it cannot justify nor closes one on evidence it does not have.
+    #
+    # FRESH ONLY (A-orch-31, T6). This arm used to take the same FRESH/STALE asymmetry the
+    # read-only DUPLICATE-SESSION tell above takes — "a stale answer still names a real, if
+    # slightly old, set of agents" — but that reasoning does not survive contact with a WRITE.
+    # Measured 20:55Z: a STALE reading (the panel's last-known answer, not a fresh one) still
+    # named a MET row and wrote a SECOND stop order for an agent the Patrol's own prior order
+    # had already had stopped eighteen minutes earlier. A tell can afford to be a little old;
+    # an order and an ack cannot — both are acts this arm cannot take back. So STALE now reads
+    # the same as NONE: the arm defers rather than guesses, naming nothing, ordering nothing,
+    # acking nothing, and saying once that the next tick's fresh ListAgents will decide.
+    if [ -n "$STANDDOWN_NAMES" ] || [ -n "$DUP_START_NAMES" ]; then
+      # THE ALREADY-WARMED PARSE, or one read of our own — never a second parse of a
+      # transcript this tick has already read. `live_agents` memoizes per process on the
+      # transcript's path, size and mtime, and the trim above primes it IN THIS SHELL, so on
+      # a roster with open rows the call below is a cache hit costing nothing. On a roster
+      # whose every row is MET (`OPEN_ROSTER = 0`, the common shape at the end of a batch)
+      # the trim never ran and this is the tick's one and only parse.
+      [ -n "$TICK_TR" ] || TICK_TR="$(session_transcript "$SESSION_ID")" || TICK_TR=""
+      SD_PANEL=""; SD_PANEL_KNOWN=0
+      if [ -n "$TICK_TR" ]; then
+        SD_LRC=0
+        live_agents "$TICK_TR" >/dev/null 2>&1 || SD_LRC=$?
+        case "$SD_LRC" in
+          0)
+            SD_PANEL_KNOWN=1
+            # The cache SLOT, read directly for the reason the DUPLICATE-SESSION arm states
+            # above it: a second call would be a hit on a real tick and a full parse against
+            # §19i's doctored copy, which is not this arm's property to move.
+            while IFS='|' read -r SD_PN SD_PT SD_PS; do
+              [ -n "$SD_PN" ] || continue
+              SD_PANEL="${SD_PANEL}${SD_PN}|"
+            done <<EOF
+$_LA_CACHE_OUT
+EOF
+            [ -n "$SD_PANEL" ] && SD_PANEL="|${SD_PANEL}"
+            ;;
+        esac
+      fi
+
+      if [ "$SD_PANEL_KNOWN" -eq 1 ]; then
+        # ONE ACK PER NAME PER TICK. A name can be a MET candidate and a duplicate-start row
+        # at once; two ledger lines would say the same thing twice.
+        SD_CLOSED="|"
+        for SD_NAME in $STANDDOWN_NAMES; do
+          case "$SD_PANEL" in
+            *"|${SD_NAME}|"*)
+              say "STANDDOWN ${SD_NAME} — contract MET and the agent is still on the panel; TaskStop it (the order is written)"
+              if [ -f "$ORDERS" ]; then
+                SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                          CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                          bash "$ORDERS" order "$SD_NAME" --by patrol 2>&1 ) \
+                  || say "STANDDOWN ${SD_NAME} — the order could NOT be written, so the stop gate will still ask: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+              else
+                say "STANDDOWN ${SD_NAME} — sibling hooks/stop-orders.sh not found, so no order was written; order it yourself before stopping."
+              fi
+              ;;
+            *)
+              case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
+              SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
+              # ALREADY SWEPT -> ALREADY CLOSED (T10, A-orch-20). The marker means a landing
+              # was seen, not that this arm is first to notice the agent is gone; a second ack
+              # here would be a ledger line saying nothing new. Silent, same as an ack that
+              # succeeds — the row was closed once, just not by this tick.
+              case "$SWEPT_ALL" in *"|name=${SD_NAME}|"*) continue ;; esac
+              SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                        CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                        bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ) \
+                || say "NOTIFY ${SD_NAME} — contract MET, the agent is gone, and the row could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+              ;;
+          esac
+        done
+        SD_DUPS="${DUP_START_NAMES}"
+        SD_DUPS="${SD_DUPS//|/ }"
+        for SD_NAME in $SD_DUPS; do
+          case "$SD_PANEL" in *"|${SD_NAME}|"*) continue ;; esac
+          case "$SD_CLOSED" in *"|${SD_NAME}|"*) continue ;; esac
+          SD_CLOSED="${SD_CLOSED}${SD_NAME}|"
+          SD_OUT=$( cd "$REPO_REAL" 2>/dev/null || exit 9
+                    CLAUDE_CODE_SESSION_ID="$SESSION_ID" \
+                    bash "$SWEEPER" ack "$SD_NAME" --by patrol --reason moot-and-gone 2>&1 ) \
+            || say "NOTIFY ${SD_NAME} — a duplicate start whose agent is gone could NOT be closed: $(clean "$(printf '%s' "$SD_OUT" | head -1)")"
+        done
+      else
+        # A-orch-31: something WOULD have been decided (a MET row, or a duplicate start,
+        # is sitting in the candidate sets above) but the panel reading is not fresh enough
+        # to trust with a write. One line, said once, never a STANDDOWN, an order or an ack.
+        say "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
       fi
     fi
 

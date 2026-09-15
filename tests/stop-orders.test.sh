@@ -130,6 +130,56 @@ expect_status "an order over a MET contract is recorded too" 0 "$ST"
 run_orders "$R3" order ghost
 expect_status "an order for an unknown name is still recorded" 0 "$ST"
 
+# ---------- the order's ATTRIBUTION: who said stop (AC-1.1; T1, D1) ----------
+#
+# An order used to mean one thing: a human said stop. From 1.8.0 it means one of two things —
+# a human said stop, or a VERIFIED LANDING did (the Patrol writes one for every row whose
+# contract is MET while its agent is still on the panel, so the TaskStop it asks for is not
+# refused by the stop gate a moment later). The two are not the same fact and the line says
+# which: `by=human` or `by=patrol`. The default is `human`, because a caller that names no
+# author is a person at a terminal.
+
+R3B="$(make_repo order-by)"
+so_roster_row "$R3B" "attributed" ".bionic/docs/record/attributed.md"
+ORDERS_FILE_B="$R3B/.bionic/tmp/stop-orders-$SID.state"
+
+run_orders "$R3B" order attributed
+expect_status "an order with no --by is recorded" 0 "$ST"
+expect_contains "…and is attributed to a human, which is what an unattributed order is" \
+  "|by=human|target=attributed" "$(cat "$ORDERS_FILE_B" 2>/dev/null)"
+
+run_orders "$R3B" order patrolled --by patrol
+expect_status "an order the Patrol places is recorded" 0 "$ST"
+expect_contains "…and says so on the line the stop gate reads" \
+  "|by=patrol|target=patrolled" "$(cat "$ORDERS_FILE_B" 2>/dev/null)"
+
+run_orders "$R3B" order explicit --by human
+expect_status "an explicitly human order is recorded" 0 "$ST"
+expect_contains "…and reads exactly as the default does" \
+  "|by=human|target=explicit" "$(cat "$ORDERS_FILE_B" 2>/dev/null)"
+
+# THE VALUE IS A CLOSED SET. `by=` is an attribution the stop gate will print back to a
+# reader; a free-text value would let a caller write whatever it liked into that sentence.
+run_orders "$R3B" order someone --by nobody
+expect_status "--by takes human or patrol, and refuses anything else" 2 "$ST"
+run_orders "$R3B" order someone --by
+expect_status "--by with no value is a usage error" 2 "$ST"
+expect_absent "…and a refused order writes nothing" "target=someone" \
+  "$(cat "$ORDERS_FILE_B" 2>/dev/null)"
+
+# THE TARGET STILL COMES FIRST, and an option in its place is still refused: the flag added
+# here must not turn the target into something optional.
+run_orders "$R3B" order --by patrol
+expect_status "the target still comes first, before any option" 2 "$ST"
+
+# --at and --by compose, in either order.
+run_orders "$R3B" order both --at 1788000000 --by patrol
+expect_status "--at and --by compose" 0 "$ST"
+expect_contains "…and both land on the one line" "|epoch=1788000000|" \
+  "$(grep -F "|target=both" "$ORDERS_FILE_B" 2>/dev/null)"
+expect_contains "…in the order the reader parses" "|by=patrol|target=both" \
+  "$(cat "$ORDERS_FILE_B" 2>/dev/null)"
+
 # ============================================================
 section "Section 3: standdown — the batch, and what it leaves alone (AC-11, R8)"
 # ============================================================

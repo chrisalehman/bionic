@@ -767,8 +767,8 @@ printf 'sweep-failed/v1|at=2026-09-07T00:00:00Z|rc=2\n' > "$DS_R2_B/.bionic/tmp/
 OUT19B="$(ds_r2_doctor "$DS_R2_B")"
 expect_match "19.3: a failure marker earns exactly one fix line naming the rc" \
   "*the automatic dead-session sweep failed (rc=2)*" "$OUT19B"
-expect_match "19.4: …with the manual fallback as the hint" \
-  "*the automatic dead-session sweep failed (rc=2) → session-poker.sh sweep*" "$OUT19B"
+expect_match "19.4: …with the session-start auto-sweep as the hint, not a raw script (AC-6.3)" \
+  "*the automatic dead-session sweep failed (rc=2) → start a new session — its auto-sweep retries this*" "$OUT19B"
 DS_R2_B_HITS="$(printf '%s\n' "$OUT19B" | grep -c 'automatic dead-session sweep failed')"
 expect_eq "19.5: …and only once on the page" "1" "$DS_R2_B_HITS"
 

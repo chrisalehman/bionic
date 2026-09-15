@@ -477,8 +477,8 @@ bionic_check_wall_unloadable() {  # <row id>
 #
 # WHAT THIS ROW USED TO FIRE ON, AND WHY THAT IS GONE. Before R2 the detector was
 # `[ -n "$(patrol_dead_sessions …)" ]` — any dead session's leftover state, every
-# time — which is exactly the shape ticket-30 filed against: doctor named the raw
-# script `session-poker.sh sweep` as the fix, and nothing in the product could
+# time — which is exactly the shape ticket-30 filed against: doctor named
+# session-poker.sh's raw `sweep` verb as the fix, and nothing in the product could
 # invoke it, so the row was permanent nagging with no button behind it. Now
 # hooks/session-start.sh calls that same verb itself, silently, once per session
 # start (REQ-R2) — so a dead session's residue is routinely gone again within one
@@ -654,9 +654,12 @@ _bionic_checks_build() {
   # reaches a reader through a FIX line rather than through a row of its own name.
   # R2 (ticket-30) narrowed WHAT fires it — session-start.sh's own auto-sweep is
   # the ordinary cure now, so this row is silent unless that auto-sweep itself
-  # failed — but the hint stays the manual verb: it is the one thing left for a
-  # reader to type when the automatic cure did not work on its own.
-  _bionic_checks_emit "dead-session-state" "" "bionic_check_dead_session_state" "user" "" "session-poker.sh sweep"
+  # failed. THE HINT NO LONGER NAMES A RAW SCRIPT (AC-6.3, wave-13-fixit-180):
+  # a reader with no shell in front of them could not have typed the old
+  # session-poker.sh `sweep` verb fix anyway, and the auto-sweep already
+  # retries itself on every session start — so the hint now names THAT
+  # mechanism instead of a command line.
+  _bionic_checks_emit "dead-session-state" "" "bionic_check_dead_session_state" "user" "" "start a new session — its auto-sweep retries this"
 
   # THE WALLS ARE THE CLI'S TO REPAIR, not setup's. A wall missing from the
   # payload, or one that cannot reach its library, is a broken install — the same

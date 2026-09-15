@@ -822,14 +822,13 @@ run_battery() {
     d=$(verdict_er "$repo"); e=$(verdict_lg "$repo")
     cnorm="${c%%:*}"; cval=""
     [ "$cnorm" = "yes" ] && cval="${c#*:}"
-    # T4 (session-20260815-landing-cleanup): verdict_sg always drives stop-guard
-    # with the fixed target "no-such-agent" — non-address-shaped. With a wave
-    # active, MATCH_COUNT=0 + the shape carve now PASSES THROUGH instead of
-    # refusing, a ratified divergence (design ¶T4), not a defect. Only
-    # stop-guard's expectation moves here; the other four parties' semantics
-    # are unchanged by T4, so their comparisons still read "$want" directly.
+    # T4 (session-20260815-landing-cleanup) DIVERGED stop-guard from the other four
+    # parties here; D8 (T5, epic-23 wave-13) RE-CONVERGED it. verdict_sg always drives
+    # stop-guard with the fixed target "no-such-agent" — non-address-shaped and
+    # non-bash-task-shaped — and since D8 a target wearing neither shape is REFUSED
+    # rather than waved through, so stop-guard's verdict agrees with the other four
+    # parties on every fixture again, exactly as it did before T4 opened the divergence.
     want_sg="$want"
-    [ "$want" = "yes" ] && want_sg="other:pass-with-output"
     # WHAT THE PARTIES AGREE ABOUT CHANGED AT task-engaged-session, and the change is the
     # point of that wave. Four of the five no longer read the plan at all: they are scoped
     # by ENGAGEMENT, and every fixture in this battery is engaged (see `arm_patrol`), so
@@ -839,7 +838,7 @@ run_battery() {
     # exactly what a future edit could silently undo. The evidence gate is the one party
     # that still derives the plan's `current:`, so it keeps the discriminating column and
     # the derived-value check below.
-    want_dp="yes"; want_er="yes"; want_lg="yes"; want_sg="other:pass-with-output"
+    want_dp="yes"; want_er="yes"; want_lg="yes"; want_sg="yes"
     if [ "$mode" = "assert" ]; then
       if [ "$a" = "$want_dp" ] && [ "$b" = "$want_sg" ] && [ "$cnorm" = "$want" ] && [ "$d" = "$want_er" ] && [ "$e" = "$want_lg" ]; then
         ok "all five parties agree on '$name': engagement-scoped four constant, evidence gate $want"
@@ -1044,11 +1043,10 @@ section "A3 — the one KNOWN divergence, pinned so it cannot drift silently"
 TREPO=$(new_repo "known-divergence")
 write_plan "$TREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: T4"
 expect_eq "T-token, wave scale: the start gate reads an active wave"  "yes" "$(verdict_dp "$TREPO")"
-# T4 (session-20260815-landing-cleanup): the stop gate still READS this as an
-# active wave (it reaches the MATCH_COUNT/shape-carve code at all), but
-# verdict_sg's fixed target "no-such-agent" is non-address-shaped, so the
-# ratified shape carve now passes it through instead of refusing.
-expect_eq "T-token, wave scale: the stop gate reads an active wave"   "other:pass-with-output" "$(verdict_sg "$TREPO")"
+# T4 (session-20260815-landing-cleanup) used to diverge here (verdict_sg's fixed target
+# "no-such-agent" passed through, non-address-shaped); D8 (T5) re-converged it — the same
+# target is non-bash-task-shaped too, so it is refused like the other four parties now.
+expect_eq "T-token, wave scale: the stop gate reads an active wave"   "yes" "$(verdict_sg "$TREPO")"
 
 # ============================================================
 section "B — the session-identity key: producer and BOTH consumers agree"
@@ -1872,9 +1870,12 @@ g_stop_reason() {  # -> which refusal the gate reaches for an unobserved target
   case "$out" in
     *"carries no agent id"*) echo unidentified ;;
     *"No observation"*)      echo identified ;;
-    # T22: with the roster gone the gate has no standing over a bare name at all — the
-    # register is what makes a target ours, so a renamed roster is not a target it refuses,
-    # it is a target it does not guard. Same direction, one step earlier.
+    # T22, then D8 (T5): with the roster gone the gate has no standing over a bare name at
+    # all — the register is what makes a target ours. Through 1.7.1 that was a passthrough
+    # (a target it does not guard); since D8 it is a REFUSAL naming the same fact (a target
+    # this gate cannot identify), one step earlier than the passthrough used to sit. Either
+    # wire lands on the same label here — what moved is the verb, not the diagnosis.
+    *"no roster row of this session"*) echo unrostered ;;
     *PASSTHROUGH*)           echo unrostered ;;
     *)                       echo "other" ;;
   esac
@@ -3243,6 +3244,75 @@ IFS='|' read -r EX_REPO EX_TR <<< "$(mk_order_world "order-expiry" "expired" "ae
 ( cd "$EX_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order expired --at $((_now - _ttl - 60)) ) >/dev/null 2>&1
 OUT=$(mk_stop_payload "$SID_A" "$EX_TR" "$EX_REPO" "expired" | bash "$SG_M" 2>&1); ST=$?
 expect_eq "an order just outside it does not — the ceremony is where it was" "2" "$ST"
+
+# --- M.4b the order's AUTHOR crosses the same seam (AC-1.1; T1, D1) ---
+#
+# The order widened from "a human said stop" to "a human OR a verified landing said stop",
+# and the writer stamps which. The reader's rule is unchanged — an order is an order — and
+# that is the property here: a Patrol-written order discharges the stop exactly as a human's
+# does, at the same boundary. Writer and reader are different scripts, so no per-component
+# suite can see it; stop-orders.test.sh proves the field is written, stop-guard.test.sh
+# proves the line names it, and only this one proves they are the same field.
+IFS='|' read -r PT_REPO PT_TR <<< "$(mk_order_world "order-patrol" "patrolled" "apatrolled-3333333333333333")"
+( cd "$PT_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order patrolled --by patrol ) >/dev/null 2>&1
+expect_contains "the writer stamped the author on the line the gate reads" "|by=patrol|target=patrolled" \
+  "$(cat "$PT_REPO/.bionic/tmp/stop-orders-$SID_A.state" 2>/dev/null)"
+OUT=$(mk_stop_payload "$SID_A" "$PT_TR" "$PT_REPO" "patrolled" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "a PATROL-written order discharges the stop, exactly as a human's does" "0" "$ST"
+expect_contains "…and the gate reports the author it read, not one it assumed" "by patrol" "$OUT"
+
+# The paired negative at the SAME boundary: attribution is not a second window. A patrol
+# order outside the shared window is as expired as a human's.
+IFS='|' read -r PX_REPO PX_TR <<< "$(mk_order_world "order-patrol-expiry" "patrol-expired" "apatrolx-4444444444444444")"
+( cd "$PX_REPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" order patrol-expired --by patrol --at $((_now - _ttl - 60)) ) >/dev/null 2>&1
+OUT=$(mk_stop_payload "$SID_A" "$PX_TR" "$PX_REPO" "patrol-expired" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "…and an expired one does not, whoever wrote it" "2" "$ST"
+
+# --- M.6 the ack's AUTHOR crosses it too (AC-1.3; T1, D2) ---
+#
+# The ack widened the same way: the Patrol writes one for a row the world shows moot
+# (`by=patrol|reason=moot-and-gone`). ONE OWNER still writes the ledger and the three
+# consumers still read the `acked=` field off the verdict line — so a patrol ack must close
+# a row for all three, and the field must be on the line the real writer wrote. An ack that
+# closed a row for the stop gate but not for the landing gate would be two answers to one
+# question, which is what this whole section exists to forbid.
+AREPO=$(new_repo "ack-by-agreement")
+ASLUG=$(printf '%s' "$AREPO" | sed 's/[^a-zA-Z0-9]/-/g')
+APROJ="$CLAUDE_CONFIG_DIR/projects/$ASLUG"
+ASUB="$APROJ/$SID_A/subagents"
+mkdir -p "$ASUB" "$AREPO/.bionic/tmp"
+ATR="$APROJ/$SID_A.jsonl"
+printf '{}\n' > "$ATR"
+plant "$ASUB" "amoot-5555555555555555" "moot"
+write_plan "$AREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
+roster_row_fixture status=confirmed session="$SID_A" name=moot \
+  agent_id=amoot-5555555555555555 launched_at=2026-08-05T00:00:00Z \
+  deliverable=.bionic/docs/record/never.md \
+  teammate_id="moot@session-$(printf '%s' "$SID_A" | cut -c1-8)" \
+  >> "$AREPO/.bionic/tmp/roster-$SID_A.state"
+
+a_vline() {
+  ( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" verdict moot 2>/dev/null ) \
+    | grep -F 'landing-verdict/v1|' | head -1
+}
+expect_contains "before the patrol ack: the one line all three read says acked=no" \
+  "|acked=no|" "$(a_vline)"
+OUT=$(mk_stop_payload "$SID_A" "$ATR" "$AREPO" "moot" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "before the patrol ack: the stop gate refuses" "2" "$ST"
+
+( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SWEEPER" ack moot --by patrol --reason moot-and-gone ) >/dev/null 2>&1
+expect_contains "the one owner wrote the author and the evidence onto its own line" \
+  "|name=moot|by=patrol|reason=moot-and-gone" \
+  "$(cat "$AREPO/.bionic/tmp/sweeper-$SID_A.state" 2>/dev/null)"
+expect_contains "after the patrol ack: the one line all three read says acked=yes" \
+  "|acked=yes|" "$(a_vline)"
+expect_contains "…while the contract itself is still UNMET, computed from the disk alone" \
+  "|state=UNMET|" "$(a_vline)"
+OUT=$(mk_stop_payload "$SID_A" "$ATR" "$AREPO" "moot" | bash "$SG_M" 2>&1); ST=$?
+expect_eq "after the patrol ack: the stop gate passes, as it does for a human's" "0" "$ST"
+OUT=$( cd "$AREPO" && CLAUDE_CODE_SESSION_ID="$SID_A" bash "$SO_M" standdown 2>&1 )
+expect_contains "…and the stand-down puts it in the batch, as it does for a human's" \
+  "1 row(s) have landed" "$OUT"
 
 # ============================================================
 section "N — the wave-02 facts: one root, one vocabulary, one launch reference (S9)"
@@ -4735,6 +4805,22 @@ ROOTS_PLANT2
 
 expect_eq "Roots …a second claude_home planted in a LIBRARY goes red too" "2" \
   "$(roots_defcount "$ROOTS_MUT" claude_home)"
+
+# --- ONE DEFINITION OF live_ids_of_name() (T6, A-orch-32; research R1 §5) --------------
+#
+# hooks/stop-guard.sh's stop-ambiguity refusal (T29 §7) and hooks/session-poker.sh's
+# adopt_write_row (AC-6.1) both need the identical DISTINCT-id, MET-discharge answer to
+# "is this name already live on this roster". T6 moved the one body out of stop-guard.sh
+# into payload/scripts/lib/roster.sh so the two callers share it instead of drifting the
+# way `roots_defcount` above exists to catch a second copy of any name doing.
+expect_eq "live_ids_of_name() is defined exactly once across hooks/, scripts/ and scripts/lib/" \
+  "1" "$(roots_defcount "$ROOTS_TREE" live_ids_of_name)"
+expect_eq "…and that one definition is roster.sh's" "1" \
+  "$(/usr/bin/grep -cE '^live_ids_of_name\(\)' "$ROOTS_LIB_DIR/roster.sh")"
+expect_eq "…hooks/stop-guard.sh defines none of its own any more" "0" \
+  "$(/usr/bin/grep -cE '^live_ids_of_name\(\)' "$ROOTS_TREE/hooks/stop-guard.sh")"
+expect_eq "…and still calls it — the one call site is unchanged" "1" \
+  "$(/usr/bin/grep -cE '(^|[^a-z_])live_ids_of_name \"' "$ROOTS_TREE/hooks/stop-guard.sh")"
 
 # ============================================================
 section "V — SUPPORTED_SDLC_VERSION: one owner, four carriers, five renderings (AC-19)"
@@ -6708,10 +6794,12 @@ LA_GG=$(la_guard la-ghost)
 expect_contains "a name the roster does not carry resolves no id for the observation" \
   "no agent id" "$LA_CG"
 expect_absent "…and carries no agent id with it" "$LA_TID" "$LA_CG"
-expect_contains "…and the stop guard passes it through, having no standing over it" \
+# D8 (T5): a bare name with no roster row and no agent-address or bash-task-id shape used to
+# pass through (T22); it is refused now, naming the same fact one step earlier.
+expect_absent "…and the stop guard refuses it, having no standing over it (D8, T5)" \
   "PASSTHROUGH" "$LA_GG"
 expect_contains "…saying so in the register's own words" \
-  "appears on no roster row of this session" "$LA_GG"
+  "no roster row of this session" "$LA_GG"
 
 # --- LA.3 THE DISCRIMINATOR: mutate the parser's awk, all three answers move ----
 #
@@ -9113,9 +9201,17 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # with one anchor, 37->38/38->39. The split itself moved no count: the four structural
 # assertions it rewrote replaced one anchor with one anchor, and the 99 re-pointed rows
 # changed which file a pin reads, never how many mutants the suite builds.
-expect_eq "S19.3 docs-pins holds 38 doctoring sites" "38" \
+#
+# 39->40 at epic-23 wave-13 (2026-09-14): T3 (Section 24, "the repair rule reaches the
+# rendered survival text") added one more doctoring site, DOCTORED_REPAIR, declared by
+# one anchor call. RE-DERIVED BY DIRECT GREP over the merged docs-pins.test.sh at THIS
+# commit (T12, fold-in), not carried forward: A-orch-25 named this a pre-existing
+# drift from before the wave's own T1 landed, and A-orch-35 attributed the added site
+# to T2 — direct measurement (`git diff b8b6bd6 8b80980 -- tests/docs-pins.test.sh`)
+# shows it lands with T3's merge instead; corrected here against the grep, not the note.
+expect_eq "S19.3 docs-pins holds 39 doctoring sites" "39" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 39 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant)" "39" \
+expect_eq "S19.3 …declared by 40 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant)" "40" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -9164,6 +9260,9 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # never carried forward from any pre-merge side, which is the whole reason this literal
 # exists.
 #
+# 70 at epic-23 wave-13 (2026-09-14, T12 fold-in): 40 + 26 + 1 + 3, the docs-pins term
+# alone moving for the reason the row above this one now names (T3's DOCTORED_REPAIR).
+#
 # tests/refuse.test.sh IS NOT IN THIS CENSUS, and that is a Step-9 disposition rather
 # than an oversight. It carries ONE anchor call site, reached three times: its
 # `mutant()` helper calls `anchor` before every `sed`, so a mutant cannot be added
@@ -9171,7 +9270,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …69 anchor call sites across the four doctoring suites, all told" "69" \
+expect_eq "S19.3 …70 anchor call sites across the four doctoring suites, all told" "70" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"

@@ -1047,8 +1047,8 @@ OUT16M="$(run_doctor "$HOME16" "$REPO16")"
 
 expect_contains "67: with the marker, the page names the failure and its rc" \
   "the automatic dead-session sweep failed (rc=2)" "$OUT16M"
-expect_contains "68: …and the verb still comes from the check table's hint" \
-  "the automatic dead-session sweep failed (rc=2) → session-poker.sh sweep" "$OUT16M"
+expect_contains "68: …and the hint still comes from the check table, naming the auto-sweep, not a raw script (AC-6.3)" \
+  "the automatic dead-session sweep failed (rc=2) → start a new session — its auto-sweep retries this" "$OUT16M"
 expect_eq "69: …exactly once, regardless of how many dead sessions are on this page" \
   "1" "$(printf '%s\n' "$OUT16M" | grep -c 'automatic dead-session sweep failed')"
 expect_absent "70: …and never sends the reader to setup, which has no project concept" \

@@ -106,6 +106,45 @@ _run_lines() {
   normalize_newlines "$1" 2>/dev/null
 }
 
+# plan_frontmatter_get <plan> <key> -> the value of that leading-frontmatter key, one
+# quote layer stripped and trailing whitespace trimmed; empty when the key is absent, the
+# plan has no frontmatter, or the file cannot be read.
+#
+# THE GRAMMAR IS THE EVIDENCE GATE'S, MOVED HERE RATHER THAN COPIED (epic-23
+# wave-13-fixit-180 T4, REQ-4/D6). `payload/scripts/lib/walls.sh` has read plan
+# frontmatter since v14 — `FRONTMATTER` captured at :916 and the nested `frontmatter_get`
+# at :918 — but that pair is defined INSIDE `_eg_body`, so it exists only while the gate
+# is running and sourcing walls.sh does not define it. The third caller (close-out.sh's
+# archive binding, and `archive_run` itself) therefore had nowhere to reuse it from. It
+# lives here because this file already owns the plan as a document: `normalize_newlines`
+# is its line-ending rule and `run_open` already lifts the frontmatter block with this
+# exact awk. Two spellings of one grammar is what this avoids; walls.sh's own nested copy
+# stays where it is, because moving a wall's parse mid-wave changes what the wall reads.
+#
+# LEADING BLOCK ONLY, LIKE EVERY OTHER FRONTMATTER READER IN THE TREE: the awk arms at
+# line 1 and exits at the closing `---`, so a `---` inside the body is prose.
+#
+# THE FRONTMATTER IS CAPTURED BEFORE IT IS SEARCHED, never `producer | grep | head` on a
+# live pipe: every caller of this file runs under `set -o pipefail`, where `head -1`'s
+# early exit can leave the producer with SIGPIPE and promote 141 to the pipeline's status
+# (run_open's own note, §R4). A here-string is fully written before the reader starts. The
+# status is 0 whatever the key's fate — an absent key is an empty value, not a failure.
+plan_frontmatter_get() {
+  local plan="$1" key="$2" fm
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+  [ -n "$key" ] || return 0
+  fm=$(_run_lines "$plan" | awk '
+        NR == 1 && $0 == "---" { f = 1; next }
+        f && $0 == "---" { exit }
+        f { print }')
+  grep -E "^[[:space:]]*${key}[[:space:]]*:" <<< "$fm" \
+    | head -1 \
+    | sed -E "s/^[[:space:]]*${key}[[:space:]]*:[[:space:]]*//" \
+    | sed -E 's/[[:space:]]+$//' \
+    | sed -E "s/^['\"]//;s/['\"]\$//"
+  return 0
+}
+
 # _run_candidates <droot> -> every file under <droot>/plans and <droot>/incidents (each
 # walked to depth <= 2) that carries a flush-left `## SDLC State`, NUL-separated, in walk
 # order: plans/ then incidents/, and within each whatever order `find` produced. Prints
