@@ -9264,9 +9264,17 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # only) — see A-T32.2, routed the same way A-T24.7 and A-T27.9 routed the same shape of
 # finding. §S19.4 (below) is the row that catches it, and stays red here on purpose: an
 # invariant a real defect trips is not re-pinned to match the defect.
+#
+# 41->42 (anchors move, sites DON'T) at epic-23 wave-14-tune-181 (2026-09-15, T33 fold-in):
+# wave-14 T28 (`eb49bcc`) added `DOCTORED_PATROL_T28` without its own `anchor` precondition
+# — the gap T32 found and routed via A-T32.2. T33 closes it, adding one `anchor` call (the
+# un-doctored `PATROL_STATE_CLASSES="…"` line in payload/scripts/lib/patrol.sh, matched
+# once, immediately above the site's `sed`) and nothing else — 44a-44d are unchanged. Sites
+# stay 41 (T33 adds no new `DOCTORED…="$TMP/…"` assignment); anchor CALLS move 41->42.
+# RE-DERIVED BY DIRECT GREP over docs-pins.test.sh at THIS commit.
 expect_eq "S19.3 docs-pins holds 41 doctoring sites" "41" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 41 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change)" "41" \
+expect_eq "S19.3 …declared by 42 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor)" "42" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -9334,6 +9342,11 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # this one. docs-pins, agent-context-guard and landing-gate are unmoved and were
 # re-measured, not assumed.
 #
+# 73 at epic-23 wave-14-tune-181 (2026-09-15, T33 fold-in): 42 + 27 + 1 + 3, the
+# docs-pins term alone moving again — T33's `DOCTORED_PATROL_T28` anchor, the row above
+# this one (§S19.3's second row). cross-gate-agreement.test.sh, agent-context-guard and
+# landing-gate are unmoved and were re-measured, not assumed.
+#
 # tests/refuse.test.sh IS NOT IN THIS CENSUS, and that is a Step-9 disposition rather
 # than an oversight. It carries ONE anchor call site, reached three times: its
 # `mutant()` helper calls `anchor` before every `sed`, so a mutant cannot be added
@@ -9341,7 +9354,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …72 anchor call sites across the four doctoring suites, all told" "72" \
+expect_eq "S19.3 …73 anchor call sites across the four doctoring suites, all told" "73" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
