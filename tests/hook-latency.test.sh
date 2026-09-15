@@ -558,4 +558,36 @@ expect_eq "7d: BENCH_EXTRA_CANDIDATES unset reports candidates=1" "1" "$BENCH_CA
 
 rm -rf "$BENCH_SANDBOX_0"
 
+# ─────────────────────────────────────────────────────────────────────────────
+section "8: the bench names the interpreter it forks the hooks with"
+
+# THIS PIN OWNS THE FORK-SITE FIX (epic-23 wave-14 T30, REQ-4; A-orch-47). The bench
+# used to time `subprocess.run(["bash", hook], …)` — a PATH-resolved `bash`, which on
+# this machine is Homebrew 5.3 — while the CLI invokes every hook BY PATH and lets the
+# kernel honour its own `#!/bin/bash` shebang (the floor's interpreter, 3.2.57). The
+# bench was therefore timing a production nobody runs, and 5.3's readings are the
+# noisier of the two (A-orch-47: five medians spanning 6.6 ms under 5.3 vs 0.2 ms
+# under 3.2). §8 does not re-time anything — timing is `--candidates-only`'s job to
+# stay cheap here too — it asserts the bench SAYS which interpreter it is about to
+# fork, and that the name is the hook's own shebang binary, not whatever `bash` PATH
+# would hand it.
+EXPECTED_INTERP=$(sed -n '1s/^#!//p' "$BASH_WALLS_HOOK" | awk '{print $1}')
+[ -n "$EXPECTED_INTERP" ] || { echo "hook-latency: could not parse a shebang from $BASH_WALLS_HOOK — suite refuses to run"; exit 1; }
+
+BENCH_OUT_8=$(bash "$BENCH_SCRIPT" --candidates-only)
+BENCH_SANDBOX_8=$(printf '%s\n' "$BENCH_OUT_8" | sed -n 's/^hook-latency: sandbox=//p')
+INTERP_LINE=$(printf '%s\n' "$BENCH_OUT_8" | grep '^hook-latency: interpreter=')
+
+echo "hook-latency: expected interpreter (bash-walls.sh shebang) = $EXPECTED_INTERP"
+echo "hook-latency: bench interpreter line = $INTERP_LINE"
+
+# NOT VACUOUS: an empty line would make 8b's grep -F vacuously fail rather than pass,
+# but 8a pins the presence separately so a reader sees which half broke.
+expect_true "8a: the bench prints an interpreter header line" \
+  test -n "$INTERP_LINE"
+expect_true "8b: the header names the hook's own shebang binary, not PATH's bash" \
+  test -n "$(printf '%s' "$INTERP_LINE" | grep -F "interpreter=$EXPECTED_INTERP ")"
+
+rm -rf "$BENCH_SANDBOX_8"
+
 finish
