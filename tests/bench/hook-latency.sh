@@ -48,11 +48,31 @@
 # reading — see record/wave-14-tune-181/bench-T17-a0f043f.txt.)
 #
 # --candidates-only: build the fixture (extra candidates included), print the
-# candidates line and `hook-latency: sandbox=<path>`, then exit WITHOUT running
-# either hook and WITHOUT cleaning up the sandbox — the caller owns removing it.
-# This is tests/hook-latency.test.sh §7's own minimal-run switch: that pin checks
-# the FIXTURE the knob builds, not hook timing, and the two hook runs this script
-# otherwise makes are ten invocations each it has no reason to pay for.
+# candidates line, the interpreter line (below), and `hook-latency: sandbox=<path>`,
+# then exit WITHOUT running either hook and WITHOUT cleaning up the sandbox — the
+# caller owns removing it. This is tests/hook-latency.test.sh §7's own minimal-run
+# switch: that pin checks the FIXTURE the knob builds, not hook timing, and the two
+# hook runs this script otherwise makes are ten invocations each it has no reason to
+# pay for. §8 reuses the same switch to check the interpreter line without paying
+# for those ten invocations either.
+#
+# THE INTERPRETER LINE, AND WHY THE FORK SITE CHANGED (epic-23 wave-14 T30, REQ-4;
+# A-orch-47). This bench used to time `subprocess.run(["bash", hook], …)` — a
+# PATH-resolved `bash`, Homebrew 5.3 on this machine — while the CLI invokes every
+# hook BY PATH and lets the kernel read its own `#!/bin/bash` shebang (3.2.57, the
+# floor's interpreter; hooks.json invokes each hook by path). That measured a
+# production nobody runs, and 5.3's readings are the noisier of the two (A-orch-47:
+# five medians spanning 6.6 ms under 5.3 vs 0.2 ms under 3.2). `run_n` below now
+# execs the hook BY ITS OWN PATH — `subprocess.run([hook], …)` puts the hook path in
+# argv[0], so the kernel takes the shebang exactly as the CLI does — and, once per
+# capture, before any timing line, this script prints:
+#
+#     hook-latency: interpreter=<path> <version line>
+#
+# <path> is parsed from bash-walls.sh's own `#!` line, never PATH's `bash`; <version
+# line> is that binary's own `--version | head -1`. Printed under --candidates-only
+# too, so a reader — or a suite pin — can see what the bench is ABOUT to fork without
+# paying for the runs that would prove it.
 #
 # Usage: bash tests/bench/hook-latency.sh [--hooks-dir DIR] [--candidates-only]
 
@@ -153,6 +173,21 @@ done
 
 echo "hook-latency: candidates=$((1 + BENCH_EXTRA_CANDIDATES))"
 
+# ---------- the interpreter header (T30) ----------
+#
+# Parsed from bash-walls.sh's own shebang line, never from PATH's `bash` — that is
+# the whole point of this line existing. `sed -n '1s/^#!//p'` strips the `#!`
+# marker only on line 1 and prints nothing if line 1 isn't a shebang at all; `awk
+# '{print $1}'` then drops any trailing interpreter args (e.g. a `-x` some other
+# hook might carry) and leading/trailing whitespace along with it.
+_interp_path=$(sed -n '1s/^#!//p' "$BASH_WALLS_HOOK" | awk '{print $1}')
+if [ -n "$_interp_path" ] && [ -x "$_interp_path" ]; then
+  _interp_version=$("$_interp_path" --version 2>&1 | head -1)
+else
+  _interp_version="(unknown — no executable found at parsed shebang path)"
+fi
+echo "hook-latency: interpreter=$_interp_path $_interp_version"
+
 if [ "$CANDIDATES_ONLY" -eq 1 ]; then
   echo "hook-latency: sandbox=$SANDBOX"
   exit 0
@@ -205,7 +240,12 @@ for k in ("BIONIC_BENCH_HOOK", "BIONIC_BENCH_PAYLOAD", "BIONIC_BENCH_N",
 times_ms = []
 for _ in range(n):
     start = time.time()
-    subprocess.run(["bash", hook], input=payload,
+    # Fork the hook BY ITS OWN PATH (argv[0] == hook), not "bash <hook>" — that puts
+    # the hook's path in argv[0] so the kernel reads its own `#!/bin/bash` shebang,
+    # exactly as the CLI does when it invokes a hook by path (T30, A-orch-47).
+    # "bash <hook>" instead forks whatever `bash` PATH resolves first, bypassing the
+    # shebang entirely and timing an interpreter production never runs.
+    subprocess.run([hook], input=payload,
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
     times_ms.append((time.time() - start) * 1000.0)
 
