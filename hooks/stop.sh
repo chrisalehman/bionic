@@ -164,6 +164,13 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/stop.sh"
 
+# THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
+# computes it only for a caller that sets this, because the plan scan behind it is
+# the preamble's most expensive value and most hooks never read the answer. Three of the four
+# verdict functions in `payload/scripts/lib/stop.sh` branch on it (:314-315, :1270-1271,
+# :1893-1894).
+BIONIC_CONTEXT_WANT_RUN=1
+
 # THE SEVEN VALUES, ONCE (REQ-1h, lib/context.sh). All four functions read the root,
 # the session key, the engagement answer and the run verdict out of this one call.
 # Four hooks each spelling the cwd ladder their own way could attribute one session's
