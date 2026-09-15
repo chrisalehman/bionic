@@ -546,6 +546,134 @@ echo "      (discriminator: a fixture keyed literally 'bionic' also returns '$LI
 echo "       passing on the fallback name, not on name-resolution; the fork fixture above is"
 echo "       what actually exercises _detect_marketplace_name's jq path)"
 
+section "Group 6d: the bound's own noise, and the bound without a group (T22)"
+#
+# WHAT LANDED ON A USER-FACING PAGE. `detect_bounded` turns job control on to put its
+# probe in a process group of its own, so that a timeout can signal the GROUP and reach a
+# grandchild. Where the kernel refuses that group, bash prints its own diagnostic from
+# inside the fork —
+#   payload/scripts/lib/detect.sh: child setpgid (34923 to 34923): Operation not permitted
+# — 151 columns of it, on the stderr this function inherited from its caller. Two of the
+# four call sites capture `detect_bounded` with no stderr split, so the line reached
+# doctor's page and failed the 100-column arms of doctor-fleet (§20) and doctor-walls
+# (§12.2) at the wave-14 floor, as though the renderer had printed an over-budget row.
+#
+# AND THE SAME REFUSAL MADE THE BOUND WEAKER IN SILENCE. No group means `kill -- -$pid`
+# names a group that does not exist; the old `||` fallback then TERMed the direct child
+# and left the grandchild running — the exact outcome the group signal was added for.
+#
+# WHAT CAN AND CANNOT BE PINNED HERE, SAID PLAINLY. A real setpgid refusal cannot be
+# manufactured on this machine: 960 forks and eight parallel doctor-suite runs under the
+# harness sandbox produced zero warnings. So the noise half is pinned STRUCTURALLY — the
+# fork must run with its own stderr — beside a behavioural pair proving that isolation is
+# surgical rather than a blanket discard. The kill half IS pinned behaviourally, on an
+# honest stand-in: a job left in its caller's process group with a grandchild of its own
+# is precisely the state a refused setpgid produces, and it is reached here by not asking
+# for a group at all rather than by substituting anything the code under test reads.
+
+T22_BIN="$TMP/t22-bin"
+mkdir -p "$T22_BIN"
+for f in "$BASE_BIN"/*; do ln -sf "$(readlink "$f")" "${T22_BIN}/${f##*/}" 2>/dev/null; done
+# The bound polls with `sleep`, reads the job's real group with `ps`, and these arms time
+# themselves with `date`; without them the arms would measure a degradation, not the bound.
+for _t22_extra in sleep ps date; do
+  _t22_p="$(command -v "$_t22_extra" 2>/dev/null)" \
+    && ln -sf "$_t22_p" "${T22_BIN}/${_t22_extra}" 2>/dev/null
+done
+
+t22_bounded() {  # <stderr-file> <seconds> <command...> — one hermetic detect_bounded call
+  local errf="$1"; shift
+  env -i HOME="$TMP/home" PATH="$T22_BIN" TMPDIR="$TMP" \
+    bash -c '. "$1"; shift; detect_bounded "$@"' _ "$DETECT_SH" "$@" 2>"$errf"
+}
+
+T22_E1="$TMP/t22-probe.err"
+T22_O1="$(t22_bounded "$T22_E1" 5 sh -c 'echo STDOUT_OK; echo PROBE_SAID_THIS >&2')"
+expect_eq "a bounded probe's stdout is passed through unchanged" "STDOUT_OK" "$T22_O1"
+expect_match "…and the probe's OWN stderr still reaches the caller" \
+  "*PROBE_SAID_THIS*" "$(cat "$T22_E1")"
+
+T22_E2="$TMP/t22-quiet.err"
+t22_bounded "$T22_E2" 5 sh -c 'echo quiet' >/dev/null
+expect_eq "…while a probe that says nothing leaves the caller's stderr empty: the fork adds none of its own" \
+  "" "$(cat "$T22_E2")"
+
+# THE STRUCTURAL HALF. These two are the pin that fails if the shell's job-control
+# warning can reach a caller's capture again: the fork must run inside a group whose own
+# stderr is discarded, and the probe must be handed the caller's real stderr explicitly.
+# Remove either and the arm above goes on passing on a machine where setpgid succeeds,
+# which is exactly how this defect reached a floor.
+expect_true "the fork runs with its own stderr, so a shell job-control warning cannot reach the caller" \
+  /usr/bin/grep -q '} 9>&2 2>/dev/null' "$DETECT_SH"
+expect_true "…and the probe is handed the caller's stderr through fd 9 rather than losing it" \
+  /usr/bin/grep -q '2>&9 9>&-' "$DETECT_SH"
+
+cat > "$TMP/t22-kid.sh" <<'T22KID'
+#!/bin/sh
+# A job with a grandchild — the shape both real probes have (`brew` runs Ruby, `npm`
+# runs node), and the shape a bound that signals only the child fails to stop.
+sleep 40 &
+echo $! > "$1"
+wait
+T22KID
+
+cat > "$TMP/t22-nogroup.sh" <<'T22NG'
+#!/bin/bash
+# The refused-setpgid stand-in: a background job started WITHOUT `set -m`, which leaves
+# it in its caller's process group — the same place a refusal leaves it.
+. "$1" >/dev/null 2>&1 || { echo "source-failed"; exit 2; }
+# NAMED BEFORE IT IS CALLED. An absent helper is a missing command, which bash reports
+# on a stderr this driver discards and then walks straight past — the arm would then
+# measure a 40-second `wait` and read as a pass. Say so instead, and let both arms fail.
+command -v _detect_bound_kill >/dev/null 2>&1 || { echo "kill_helper=missing"; exit 3; }
+gcfile="$2"; kidscript="$3"; rm -f "$gcfile"
+sh "$kidscript" "$gcfile" </dev/null >/dev/null 2>&1 &
+kid=$!
+sleep 1
+kid_pgid="$(ps -o pgid= -p "$kid" 2>/dev/null | tr -d ' ')"
+gc="$(cat "$gcfile" 2>/dev/null)"
+leader=no; [ "$kid_pgid" = "$kid" ] && leader=yes
+_detect_bound_kill "$kid"
+wait "$kid" 2>/dev/null
+sleep 1
+alive=no
+if [ -n "$gc" ] && kill -0 "$gc" 2>/dev/null; then alive=yes; kill -TERM "$gc" 2>/dev/null; fi
+echo "kid=$kid kid_pgid=$kid_pgid leader=$leader grandchild=$gc grandchild_alive=$alive"
+T22NG
+
+T22_NG="$(PATH="$T22_BIN:$PATH" bash "$TMP/t22-nogroup.sh" \
+  "$DETECT_SH" "$TMP/t22-gc" "$TMP/t22-kid.sh" 2>/dev/null)"
+expect_match "the stand-in really is the no-group state: the job does not lead a group of its own" \
+  "*leader=no*" "$T22_NG"
+expect_match "…and the bound reaps its grandchild there anyway, where the group signal alone reached nothing" \
+  "*grandchild_alive=no*" "$T22_NG"
+echo "      (no-group arm: $T22_NG)"
+
+cat > "$TMP/t22-timeout.sh" <<'T22TO'
+#!/bin/bash
+. "$1" >/dev/null 2>&1 || { echo "source-failed"; exit 2; }
+gcfile="$2"; kidscript="$3"; rm -f "$gcfile"
+start="$(date +%s)"
+detect_bounded 2 sh "$kidscript" "$gcfile" >/dev/null 2>/dev/null
+rc=$?
+elapsed=$(( $(date +%s) - start ))
+gc="$(cat "$gcfile" 2>/dev/null)"
+sleep 1
+alive=no
+if [ -n "$gc" ] && kill -0 "$gc" 2>/dev/null; then alive=yes; kill -TERM "$gc" 2>/dev/null; fi
+echo "rc=$rc elapsed=${elapsed}s grandchild=$gc grandchild_alive=$alive"
+T22TO
+
+T22_TO="$(PATH="$T22_BIN:$PATH" bash "$TMP/t22-timeout.sh" \
+  "$DETECT_SH" "$TMP/t22-gc2" "$TMP/t22-kid.sh" 2>/dev/null)"
+expect_match "a probe that outruns its bound is cut off, and says so with 124" "*rc=124*" "$T22_TO"
+expect_true "…inside the bound rather than at the probe's own pace" \
+  bash -c 'case "$1" in *elapsed=[0-9]s*) exit 0 ;; *) exit 1 ;; esac' _ "$T22_TO"
+expect_match "…and its grandchild is not left running on the machine afterwards" \
+  "*grandchild_alive=no*" "$T22_TO"
+echo "      (timeout arm: $T22_TO, bound=2s, probe sleeps 40s)"
+
+
 section "Group 7: read-only is a contract, not an intention"
 #
 # Same wall the rest of detect.sh lives under: fingerprint the inputs, run
