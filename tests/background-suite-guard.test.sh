@@ -447,7 +447,7 @@ section "B9 — a suite named by a shell VARIABLE is a different refusal (C-5, A
 guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
 expect_eq "B9a a variable-named suite is still REFUSED" "2" "$ST"
 expect_contains "B9a …saying the name could not be resolved at hook time" \
-  "the suite name here is a shell variable" "$ERR"
+  "unexpanded name; budget: alpha.test.sh" "$ERR"
 expect_contains "B9a …and telling the reader what to type instead" \
   "Spell the suite literally, one per call" "$VERR"
 # THE HEADLINE THE READER ACTS ON must not claim the suite is off a budget the hook never
@@ -458,11 +458,11 @@ expect_absent "B9a …never claiming it is off the budget" "is not on this agent
 guarded "$R1" 'bash "tests/${s}.test.sh"'
 expect_eq "B9b the brace spelling reads the same way" "2" "$ST"
 expect_contains "B9b …with the same refusal" \
-  "the suite name here is a shell variable" "$ERR"
+  "unexpanded name; budget: alpha.test.sh" "$ERR"
 guarded "$R1" 'bash tests/`suite_name`.test.sh'
 expect_eq "B9c a command substitution reads the same way" "2" "$ST"
 expect_contains "B9c …with the same refusal" \
-  "the suite name here is a shell variable" "$ERR"
+  "unexpanded name; budget: alpha.test.sh" "$ERR"
 
 # CONTROL: the literal spelling the refusal asks for is allowed, so B9a is about the
 # spelling and not about the suite.
@@ -564,25 +564,29 @@ b11_line "B11a row 11 (backgrounded)" \
 
 guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
 b11_line "B11b row 12 (an unexpanded name)" \
-  "bionic: suite-run refused — the suite name here is a shell variable (spell each suite literally)"
+  "bionic: suite-run refused — unexpanded name; budget: alpha.test.sh (spell each suite literally)"
 
 guarded "$R1" 'bash tests/gamma.test.sh'
 b11_line "B11c row 13 (off the budget)" \
-  "bionic: suite-run refused — that suite is not on this agent's budget (run only the budgeted suites)"
+  "bionic: suite-run refused — off budget: alpha.test.sh beta.test.sh (run only the budgeted suites)"
 
 guarded "$R1" 'bash tests/run.sh'
 b11_line "B11d row 14 (the full tree)" \
-  "bionic: suite-run refused — the full tree is not on this agent's budget (run your brief's suites)"
+  "bionic: suite-run refused — full tree off budget: alpha.test.sh +1 more (run your brief's suites)"
 
-# AC-E1.5, the pair. The same call, knob off and knob on: the budget set is the value
-# the one line had no room for, and the knob is the only thing that puts it back.
+# AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 moved the set onto the fact line;
+# re-spelled by T18). What the knob gates has moved: the compact fact line now carries
+# the allowed set on the DEFAULT stream too (AC-5.2's own fix), so the split this pair
+# still proves is the explanatory PROSE ("On the budget:"/"You asked for:") — present in
+# the verbose detail only, never on the one-line default.
 guarded "$R1" 'bash tests/gamma.test.sh'
-expect_absent "B11e without the knob the recorded set is NOT on the user stream" \
+expect_contains "B11e even without the knob the allowed set now reaches the DEFAULT stream" \
   "alpha.test.sh beta.test.sh" "$ERR"
-expect_contains "B11e …and with BIONIC_WALL_VERBOSE=1 it is" \
-  "alpha.test.sh beta.test.sh" "$VERR"
+expect_absent "B11e …but the explanatory PROSE does not" "On the budget:" "$ERR"
+expect_contains "B11e …and with BIONIC_WALL_VERBOSE=1 the prose is there too" \
+  "On the budget: alpha.test.sh beta.test.sh" "$VERR"
 expect_eq "B11e …with the one line still first" \
-  "bionic: suite-run refused — that suite is not on this agent's budget (run only the budgeted suites)" \
+  "bionic: suite-run refused — off budget: alpha.test.sh beta.test.sh (run only the budgeted suites)" \
   "$(printf '%s\n' "$VERR" | head -1)"
 
 finish
