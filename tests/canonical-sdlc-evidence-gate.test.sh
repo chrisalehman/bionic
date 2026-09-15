@@ -4366,6 +4366,96 @@ else
     "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
+# --- 25g(i): THE WORKTREE-DERIVATION AGREEMENT (Step-6 duplication review F2, epic-23
+# wave-14-tune-181 T27). lib/root.sh's project_root publishes BIONIC_WORKTREE for the cwd the
+# LADDER took; lib/walls.sh's _eg_wt_name (A-T2.5's fast-path partner, walls.sh:1808-1821)
+# answers the same question for the PAYLOAD's cwd, reading the tree's `.git` file directly
+# rather than asking git. walls.sh's own fast path (walls.sh:1931) takes BIONIC_WORKTREE
+# UNCHECKED whenever the ladder's cwd and the payload's cwd are the SAME directory — so
+# nothing has ever compared the two derivations' answers on a directory where both can
+# answer; every fixture in this suite stays green whichever one is wrong.
+#
+# OWNER: THIS SUITE, not tests/root.test.sh. root.test.sh's own header names it "the ONE
+# reader for 'which project root is this cwd in'" (tests/root.test.sh:2-3) — a single-library
+# charter §10 already holds to, sourcing nothing but root.sh — and pulling walls.sh's
+# _eg_wt_name into it would break that charter for one arm. This suite already imports a copy
+# of walls.sh for a doctored-file mutation (Section 30's H30G_LIB) and already builds the REAL
+# linked worktrees (wt-T3, wt-T9, wt-stray) this arm reads, rather than fixturing a fourth
+# `git worktree add` purely for this comparison.
+EGWT_ROOT_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/root.sh"
+EGWT_WALLS="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
+
+# eg_wt_root_at <cwd> -> BIONIC_WORKTREE after one project_root call from inside <cwd> —
+# tests/root.test.sh's own `wt_at` idiom (§10), subshelled so no variable it sets leaks here.
+eg_wt_root_at() {
+  ( cd "$1" 2>/dev/null || exit 1
+    HOME="$(make_home)"; export HOME
+    . "$EGWT_ROOT_LIB" || exit 1
+    project_root >/dev/null
+    printf '%s' "${BIONIC_WORKTREE-}" )
+}
+
+# eg_wt_extract <file> -> _eg_wt_name's body, eval'd into the CURRENT shell. The extraction
+# idiom tests/cross-gate-agreement.test.sh's fn_body and tests/lib/swept-marker.sh both use:
+# `awk` at column zero, eval'd — never sourced whole, because walls.sh runs MODULE-LEVEL code
+# at its own bottom (`_EG_WT=…`, walls.sh:1929) that wants $COMMAND/$PLAN/$BIONIC_CWD already
+# set, none of which this arm has any business setting up just to reach one function.
+eg_wt_extract() {
+  eval "$(awk '/^_eg_wt_name\(\)/,/^\}/' "$1")"
+}
+eg_wt_extract "$EGWT_WALLS"
+expect_true "25g(i) _eg_wt_name extracts from walls.sh (not vacuous)" \
+  type -t _eg_wt_name
+
+# THE ARM. Read from the SAME real linked worktree 25g(c) already built and already proved is
+# a linked worktree (its `.git` is a file naming `/worktrees/wt-T3`) — the arrangement where
+# the ladder's cwd and the payload's cwd are identical, because both derivations are asked
+# about the exact same directory.
+expect_eq "25g(i) root.sh's BIONIC_WORKTREE and walls.sh's _eg_wt_name name the SAME linked worktree" \
+  "$(eg_wt_root_at "$s25r_tmp/wt-T3")" "$(_eg_wt_name "$s25r_tmp/wt-T3")"
+expect_eq "25g(i) …and both really answer 'wt-T3' — not two empties agreeing vacuously" \
+  "wt-T3" "$(eg_wt_root_at "$s25r_tmp/wt-T3")"
+# THE FALSE CASE, so the pin above cannot be two derivations that always agree by returning a
+# constant: for the ORDINARY main checkout both derivations answer EMPTY, not a second name.
+expect_eq "25g(i) …and for the ordinary main checkout both derivations agree on EMPTY" \
+  "$(eg_wt_root_at "$s25r_main")" "$(_eg_wt_name "$s25r_main")"
+expect_eq "25g(i) …empty, specifically — not two non-empty values that happen to match" \
+  "" "$(eg_wt_root_at "$s25r_main")"
+
+# THE MUTATION ARM (F2's own suggested shape: "a doctored copy of one derivation"). A DOCTORED
+# COPY of walls.sh — never the shipped file, the same H30G_LIB pattern Section 30 already uses
+# — with _eg_wt_name's one basename expansion changed to a DIRNAME expansion: a real drift
+# shape (a maintainer re-deriving "the tail of the gitdir path" reaches for the wrong
+# parameter expansion) that still recognises a worktree gitdir — the `*/worktrees/*` guard is
+# untouched — but names the wrong thing. `anchor` first: the needle must occur exactly once in
+# walls.sh, or the `sed` below is a no-op and the mutant is a silent copy of the real file.
+egwt_sed_escape() {  # <text> -> the same text, safe as either half of a sed s@..@..@ over BRE
+  printf '%s' "$1" | sed -e 's/[][\/.*^$]/\\&/g'
+}
+EGWT_NEEDLE="printf '%s' \"\${_g##*/}\""
+EGWT_MUT_NEEDLE="printf '%s' \"\${_g%/*}\""
+anchor "$EGWT_WALLS" "$EGWT_NEEDLE" 1
+EGWT_MUT="$s25r_tmp/25g-i-mutant-walls.sh"
+sed "s@$(egwt_sed_escape "$EGWT_NEEDLE")@$(egwt_sed_escape "$EGWT_MUT_NEEDLE")@" \
+  "$EGWT_WALLS" > "$EGWT_MUT"
+if ! diff -q "$EGWT_WALLS" "$EGWT_MUT" > /dev/null 2>&1; then
+  ok "25g(i) meta: the doctored copy differs from the real walls.sh (mutation landed)"
+else
+  no "25g(i) meta: the doctored copy differs from the real walls.sh (mutation landed)" \
+    "the basename->dirname mutation did not apply — the sed anchor moved, so the arm below proves nothing"
+fi
+
+unset -f _eg_wt_name
+eg_wt_extract "$EGWT_MUT"
+expect_ne "25g(i) …and the SAME comparison calls the doctored copy a drift (basename -> dirname)" \
+  "$(eg_wt_root_at "$s25r_tmp/wt-T3")" "$(_eg_wt_name "$s25r_tmp/wt-T3")"
+
+# Restore-proof: the real extraction still agrees after the mutation proof.
+unset -f _eg_wt_name
+eg_wt_extract "$EGWT_WALLS"
+expect_eq "25g(i) …and the real copy still agrees, restored after the mutation proof" \
+  "$(eg_wt_root_at "$s25r_tmp/wt-T3")" "$(_eg_wt_name "$s25r_tmp/wt-T3")"
+
 # ============================================================
 # Section 26: the walk-artifact arm (AC-1, AC-2)
 # ============================================================
