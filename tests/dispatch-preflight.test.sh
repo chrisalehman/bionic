@@ -5864,6 +5864,41 @@ expect_absent "§slow-impact …with no bound line anywhere on the wire" "bound:
 SLOW_SET="$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
 expect_eq "§slow-impact …and the row carries the derivation's own answer" "alpha.test.sh" "$SLOW_SET"
 
+# ---- THE PAIRED ARM (T29, AC-7.1 discrimination) ----
+#
+# WHY THE ARM ABOVE PROVES NOTHING ALONE. §slow-impact's claim is that the SHIPPED bound
+# (20s, T9/D4) is what admits a 5.6s derivation — not that any bound would. At the
+# superseded 6s bound the same 5.6s sleep cleared by only 0.4s, so this section passed
+# there too (T6-one-refusal.md §3; auditor finding AC-7.1, UNVERIFIABLE at d3930dd): the
+# observation is identical with the bound move absent. The missing control is the SAME
+# 5.6s derivation, on the SAME fixture, forced under a bound BELOW the sleep — it must
+# refuse, and its refusal must name the forced number, or the override never reached the
+# arm and any refusal it produced would be refusing for some unrelated reason.
+#
+# HOW THE BOUND IS FORCED. dispatch-preflight.sh sources lib/bounds.sh only when
+# IMPACT_BOUND_S is unset (`[ -z "${IMPACT_BOUND_S:-}" ]`, :2484) — an env value already
+# set on entry wins and the library is never read. GATE_ENV is the driver's own channel
+# for exactly this (see probe_env_on above, which does the same thing for
+# ANTHROPIC_API_KEY and HOME); saved and restored around the one call so no later arm in
+# this file inherits a forced bound.
+#
+# fails-when: the forced-5s call is ADMITTED, or its refusal does not name the forced
+# number (`bound:   5s`, the arm's own wire spacing — a wire naming a different number
+# would mean the override never reached the arm at all).
+_S29_GATE_ENV_SAVE="$GATE_ENV"
+GATE_ENV="$GATE_ENV IMPACT_BOUND_S=5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-slow-imp-forced5")"
+GATE_ENV="$_S29_GATE_ENV_SAVE"
+expect_status "§slow-impact …the SAME 5.6s derivation, forced to a 5s bound, is REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "§slow-impact …naming the FORCED bound, proving the override reached the arm" \
+  "bound:   5s" "$GATE_VERR"
+# THE ROSTER IS THE CONTROL: still exactly the one row the ADMITTED call above wrote —
+# not two, which would mean the forced-bound call was admitted after all and only the
+# assertion above was wrong.
+expect_status "§slow-impact …and journalled no row for the refused dispatch" \
+  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
 # THE SAME DISPATCH AT QUIET LOAD, same set. This is AC-7.1's second half: the derived set
 # is a property of the tree and the brief, never of how long the machine took to say it.
 REPO=$(make_repo rslowimp2 yes)
