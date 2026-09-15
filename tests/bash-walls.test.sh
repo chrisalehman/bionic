@@ -976,4 +976,53 @@ run_hook "$(mk_payload "$R15" 'bash tests/archive.test.sh' "$ACTOR" omit Bash te
 expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
 expect_empty "15f2: …and both streams stay empty" "$OUT$ERR"
 
+# (g) T25 fold-in (review-correctness-d3930dd.md F3, F7): THE HONEST FLOOR WHEN THERE IS NO
+# ROOM AT ALL. (e) above proves the wide-budget case (a whole token plus a "+N more" count);
+# these two prove the two ways that can still fail — a single token too long to fit even
+# BARE (F3 — used to fall through to a character cut, printing a truncated, unrunnable
+# suite name) and a column budget of zero or less on a NON-EMPTY set (F7 — used to print
+# the literal `none`, the same word an EMPTY set gets). Both now render a bare count
+# ("N suites") instead: never a cut name, never a false `none`.
+
+# (g1) F3 — one suite name longer than the unexpanded-name label's own room (17 columns at
+# this wave's other two literals in force) drives the deepest fallback for real, through
+# the production hook.
+R15L="$(mk_repo budgetwirelong)"
+: > "$R15L/.bionic/tmp/roster-$SID.state"
+LONG_SUITE="tests/a-suite-name-far-too-long-to-fit-even-bare-on-one-refusal-line.test.sh"
+roster_row_fixture "session=$SID" name=t15long "agent_id=$ACTOR" \
+  "suites_allowed=$LONG_SUITE" suites_source=derived files= \
+  >> "$R15L/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15L" 'for s in a b; do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+expect_status "15g1: an unexpanded name against a too-long single suite is still refused" 2 "$ST"
+expect_contains "15g1: …and the line falls back to an honest count, never a cut name" \
+  "1 suite" "$ERR"
+expect_absent "15g1: …never a mid-name character cut (the ellipsis glyph)" "…" "$ERR"
+expect_absent "15g1: …and never the truncated fragment itself" \
+  "tests/a-suite-name-far" "$ERR"
+if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
+  ok "15g1: …still in AC-E1.3's one-line shape"
+else
+  no "15g1: …still in AC-E1.3's one-line shape" "line=[$ERR]"
+fi
+
+# (g2) F7 — a column budget of zero (or less) is not reachable through any live call site
+# today (all three labels leave positive room — 17/18/32 columns, this report), so this
+# drives `_budget_wire_list` directly. It is a NESTED function (defined only when
+# `wall_background_suite_guard` itself runs, per bash scoping — confirmed: sourcing
+# walls.sh alone registers the outer wall functions but not this one), so it is extracted
+# the way cross-gate-agreement.test.sh already extracts nested/inline bodies for a
+# unit-level pin: `awk` between its own `()` line and its closing `}`, then `eval`.
+G7_LIB="$WALLS_LIB"
+G7_NONEMPTY=$(bash -c '. "'"$G7_LIB"'/refuse.sh"; . "'"$G7_LIB"'/fold.sh"; \
+  eval "$(awk "/^_budget_wire_list\(\)/,/^}/" "'"$G7_LIB"'/walls.sh")"; \
+  _budget_wire_list "tests/a.test.sh tests/b.test.sh" 0')
+expect_eq "15g2: a non-empty set at cols<=0 renders an honest count, never a false 'none'" \
+  "2 suites" "$G7_NONEMPTY"
+G7_EMPTY=$(bash -c '. "'"$G7_LIB"'/refuse.sh"; . "'"$G7_LIB"'/fold.sh"; \
+  eval "$(awk "/^_budget_wire_list\(\)/,/^}/" "'"$G7_LIB"'/walls.sh")"; \
+  _budget_wire_list "" 0')
+expect_eq "15g2: …and a GENUINELY empty set still says 'none' (the control this pin needs)" \
+  "none" "$G7_EMPTY"
+
 finish
