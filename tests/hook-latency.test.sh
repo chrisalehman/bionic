@@ -35,8 +35,9 @@
 # SECTION 4 IS A SECOND TRACER AND A DIFFERENT QUESTION (epic-23 wave-14, REQ-4,
 # AC-4.3). `set -x` writes to stderr, and both hooks call `bionic_context 2>/dev/null`
 # — so the tracer above is BLIND to everything the preamble does, and the counts in
-# §1/§2 are counts of what remains visible. §4 routes xtrace to a dedicated fd through
-# BASH_XTRACEFD, which sees the whole invocation, and asserts two facts that are about
+# §1/§2 are counts of what remains visible. §4 traces to a PRIVATE FD instead — one the
+# hooks' own stderr suppression cannot reach, on bash 3.2 as well as on 5.3 (T20) — which
+# sees the whole invocation, and asserts two facts that are about
 # SHAPE rather than volume: exactly one `git` fork per hook (the root walk's single
 # `rev-parse`, REQ-2), and no plan-directory scan on the bash-walls path, where not one
 # of the five walls reads the run verdict. It does not touch §1/§2's caps: those are
@@ -259,14 +260,43 @@ section "4: the trace-fd trace — one git call, and no plan scan where nobody r
 #
 # THE PRELUDE runs through BASH_ENV, which bash sources when it starts
 # non-interactively to run a script — i.e. exactly once per hook invocation, before
-# the hook's first line. `EPOCHREALTIME` in PS4 costs no fork. The FUNCNAME field is
-# what makes the no-scan assertion readable: a trace line raised inside
-# `_run_candidates` carries its name, whatever file it was reached from.
+# the hook's first line. The FUNCNAME field is what makes the no-scan assertion
+# readable: a trace line raised inside `_run_candidates` carries its name, whatever
+# file it was reached from.
+#
+# WHY NOT BASH_XTRACEFD (epic-23 wave-14 T20). `/bin/bash` on a Mac is 3.2.57 — the
+# interpreter every hook's shebang names, and the one `tests/run.sh`'s interpreter pin
+# (ADR-001) puts first on PATH for every `bash` a suite types, so it is what runs the
+# hooks under the floor. BASH_XTRACEFD arrived in bash 4.1; 3.2 accepts the assignment,
+# ignores it, and leaves xtrace on stderr — which `trace_fd_hook` sends to /dev/null. The
+# trace therefore came back EMPTY and nine assertions failed honestly under the floor
+# while this same suite passed by hand, where a bare `bash` is Homebrew's 5.3. The fd is
+# claimed a different way now, one BOTH interpreters honour:
+#
+#   * `exec 2>&9` points stderr itself at the trace file, so plain `set -x` writes there;
+#   * a DEBUG trap re-asserts it, because `bionic_context 2>/dev/null` points fd 2 back
+#     at /dev/null for the length of the call. The trap fires before each command inside
+#     that call and restores fd 2 to the trace file first, so the preamble traces in full
+#     — which is the whole reason this section exists. `set -T` is what carries the trap
+#     into functions and subshells; `exec` is a builtin, so the trap costs no fork.
+#
+# THE TRAP IS TRACED TOO, one `+… exec` line before each command it precedes, so a LINE
+# TOTAL on this trace is roughly twice what the BASH_XTRACEFD tracer reported for the same
+# invocation (bash-walls: 872 -> 2255) and the two are not comparable as totals. Nothing
+# asserted here is a line total: every count in §4-§6 is anchored to a command word, or is
+# a zero, or is a non-zero — and `exec` is not a word any of them match.
+#
+# WHAT THE FD CARRIES BESIDES THE TRACE. The hooks' own stderr, which used to be
+# discarded, now lands in the same file. So every count below matches only lines this
+# suite's PS4 raised (`$XT`, below) — a hook that printed the word `git` on stderr can
+# neither inflate nor deflate a count.
 TRACE_PRELUDE="$SANDBOX/xtrace-prelude.sh"
 cat > "$TRACE_PRELUDE" <<'PRELUDE'
 exec 9>>"$BIONIC_TRACE_OUT"
-BASH_XTRACEFD=9
-PS4='+|${BASH_SOURCE##*/}:${LINENO}|${FUNCNAME[0]:-MAIN}| '
+exec 2>&9
+PS4='+|BIONIC|${BASH_SOURCE##*/}:${LINENO}|${FUNCNAME[0]:-MAIN}| '
+set -T
+trap 'exec 2>&9' DEBUG
 set -x
 PRELUDE
 
@@ -286,28 +316,40 @@ count_lines() {
   printf '%s' "${c:-0}"
 }
 
-# NOT VACUOUS: a trace that came back empty (a prelude that failed to source, a
-# BASH_XTRACEFD an older bash ignored) would make every count below zero and certify
-# both claims for the wrong reason. Each trace must carry the preamble itself.
+# THE MARKER ANCHOR (T20). `$XT` opens a line this suite's own PS4 raised, at any nesting
+# depth — `set -x` replicates PS4's FIRST character per level, so the `BIONIC` field lands
+# after one or more `+`. `$XT_CMD` runs on through the `<file>:<line>` and `<function>`
+# fields to the command word itself. Every count in §4-§6 is built from one of the two, so
+# a line of hook stderr sharing the fd cannot be mistaken for a trace line.
+XT='^\++\|BIONIC\|'
+XT_CMD="$XT"'[^|]*\|[^|]*\| '
+
+# NOT VACUOUS: a trace that came back empty (a prelude that failed to source, an fd the
+# interpreter under test would not honour) would make every count below zero and certify
+# both claims for the wrong reason. Each trace must carry the preamble itself — and
+# `bionic_context` is the one place fd 2 is suppressed, so these two rows are also the
+# proof that the DEBUG trap defeated the suppression on THIS interpreter.
 FD_WALLS="$SANDBOX/tracefd-bash-walls.txt"
 FD_STOP="$SANDBOX/tracefd-stop.txt"
 trace_fd_hook "$BASH_WALLS_HOOK" "$BASH_WALLS_PAYLOAD" "$FD_WALLS"
 trace_fd_hook "$STOP_HOOK" "$STOP_PAYLOAD" "$FD_STOP"
 
+echo "hook-latency: hooks traced under bash $(bash -c 'echo "$BASH_VERSION"' 2>/dev/null) ($(command -v bash))"
+
 expect_true "4-pre-a: the bash-walls trace-fd trace is non-empty" \
-  test "$(count_lines "$FD_WALLS" '\|bionic_context\|')" -gt 0
+  test "$(count_lines "$FD_WALLS" "$XT"'[^|]*\|bionic_context\|')" -gt 0
 expect_true "4-pre-b: the stop trace-fd trace is non-empty" \
-  test "$(count_lines "$FD_STOP" '\|bionic_context\|')" -gt 0
+  test "$(count_lines "$FD_STOP" "$XT"'[^|]*\|bionic_context\|')" -gt 0
 
 # THE COMMAND WORD IS `git`, and `rev-parse` is an ARGUMENT — `git -C <dir> rev-parse`
 # puts two words between them, so a `git rev-parse` string match would count zero and
 # pass forever. The count is of every `git` fork in the whole invocation, which is
 # strictly stronger than AC-4.3's "one `git rev-parse`": the one call that remains is
 # the root walk's, and a second git call of any kind fails this row.
-WALLS_GIT=$(count_lines "$FD_WALLS" '\| git( |$)')
-STOP_GIT=$(count_lines "$FD_STOP" '\| git( |$)')
-WALLS_REVPARSE=$(count_lines "$FD_WALLS" '\| git .*rev-parse')
-STOP_REVPARSE=$(count_lines "$FD_STOP" '\| git .*rev-parse')
+WALLS_GIT=$(count_lines "$FD_WALLS" "$XT_CMD"'git( |$)')
+STOP_GIT=$(count_lines "$FD_STOP" "$XT_CMD"'git( |$)')
+WALLS_REVPARSE=$(count_lines "$FD_WALLS" "$XT_CMD"'git .*rev-parse')
+STOP_REVPARSE=$(count_lines "$FD_STOP" "$XT_CMD"'git .*rev-parse')
 
 echo "hook-latency: trace-fd bash-walls.sh git=$WALLS_GIT (rev-parse=$WALLS_REVPARSE) lines=$(wc -l < "$FD_WALLS" | tr -d ' ')"
 echo "hook-latency: trace-fd stop.sh       git=$STOP_GIT (rev-parse=$STOP_REVPARSE) lines=$(wc -l < "$FD_STOP" | tr -d ' ')"
@@ -316,7 +358,7 @@ echo "hook-latency: trace-fd stop.sh       git=$STOP_GIT (rev-parse=$STOP_REVPAR
 histogram_fd() {  # <trace-file> — "<cmd>=<count>" per external that fired, for the record
   local trace="$1" cmd c
   for cmd in $EXTERNAL_CMDS; do
-    c=$(grep -cE "\| ${cmd}( |\$)" "$trace" 2>/dev/null || true)
+    c=$(grep -cE "${XT_CMD}${cmd}( |\$)" "$trace" 2>/dev/null || true)
     [ "${c:-0}" -gt 0 ] && printf '%s=%s ' "$cmd" "${c:-0}"
   done
   printf '\n'
@@ -338,9 +380,9 @@ expect_eq "4b: stop.sh forks git exactly once, and it is the root walk's rev-par
 # is work whose answer is discarded, and its cost grows with every plan the repo
 # accumulates. `stop.sh` is NOT asserted here: three of its four verdict functions
 # genuinely branch on the verdict, so it opts in and scans on purpose.
-WALLS_SCAN=$(count_lines "$FD_WALLS" '\|_run_candidates\|')
-WALLS_SESSION_RUN=$(count_lines "$FD_WALLS" '\|session_run\|')
-STOP_SCAN=$(count_lines "$FD_STOP" '\|_run_candidates\|')
+WALLS_SCAN=$(count_lines "$FD_WALLS" "$XT"'[^|]*\|_run_candidates\|')
+WALLS_SESSION_RUN=$(count_lines "$FD_WALLS" "$XT"'[^|]*\|session_run\|')
+STOP_SCAN=$(count_lines "$FD_STOP" "$XT"'[^|]*\|_run_candidates\|')
 
 echo "hook-latency: trace-fd _run_candidates lines — bash-walls=$WALLS_SCAN stop=$STOP_SCAN"
 
@@ -375,12 +417,12 @@ section "5: the classifier is read once — no second awk for a head nobody can 
 # was computed and that the wall still spoke.
 
 count_mode() {  # <trace> <mode> -> classifier awk forks in that mode
-  count_lines "$1" "\| awk -v mode=$2( |\$)"
+  count_lines "$1" "${XT_CMD}awk -v mode=$2( |\$)"
 }
 
 WALLS_HEAD_FORKS=$(count_mode "$FD_WALLS" head)
 WALLS_LINES_FORKS=$(count_mode "$FD_WALLS" lines)
-WALLS_CHAIN_AWK=$(count_lines "$FD_WALLS" 'gsub\(/&&/')
+WALLS_CHAIN_AWK=$(count_lines "$FD_WALLS" "$XT"'.*gsub\(/&&/')
 
 echo "hook-latency: classifier forks on 'ls -la' — mode=head=$WALLS_HEAD_FORKS mode=lines=$WALLS_LINES_FORKS chain-split-awk=$WALLS_CHAIN_AWK"
 
@@ -420,10 +462,10 @@ CHAIN_OUT=$(printf '%s' "$CHAIN_PAYLOAD" | env HOME="$FAKE_HOME" CLAUDE_CODE_SES
 FD_CHAIN="$SANDBOX/tracefd-chain.txt"
 trace_fd_hook "$BASH_WALLS_HOOK" "$CHAIN_PAYLOAD" "$FD_CHAIN"
 
-echo "hook-latency: chain payload — chain-split-awk=$(count_lines "$FD_CHAIN" 'gsub\(/&&/') sed=$(count_lines "$FD_CHAIN" '\| sed( |$)')"
+echo "hook-latency: chain payload — chain-split-awk=$(count_lines "$FD_CHAIN" "$XT"'.*gsub\(/&&/') sed=$(count_lines "$FD_CHAIN" "$XT_CMD"'sed( |$)')"
 
 expect_eq "5d: the && split forks no awk of its own" \
-  "0" "$(count_lines "$FD_CHAIN" 'gsub\(/&&/')"
+  "0" "$(count_lines "$FD_CHAIN" "$XT"'.*gsub\(/&&/')"
 expect_true "5d2: …and the chain still raises its nudge" \
   test -n "$CHAIN_OUT"
 
@@ -457,13 +499,13 @@ GS_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
 FD_GS="$SANDBOX/tracefd-governing-skill.txt"
 trace_fd_hook "$GOVERNING_SKILL_HOOK" "$GS_PAYLOAD" "$FD_GS"
 
-GS_WALKS=$(count_lines "$FD_GS" '\|_run_candidates\| find')
+GS_WALKS=$(count_lines "$FD_GS" "$XT"'[^|]*\|_run_candidates\| find')
 echo "hook-latency: trace-fd governing-skill plan walks=$GS_WALKS lines=$(wc -l < "$FD_GS" | tr -d ' ')"
 
 # NOT VACUOUS: a trace that never reached the verdict at all would report zero walks
 # and certify the row for the wrong reason.
 expect_true "6-pre: the governing-skill trace reached its run verdict" \
-  test "$(count_lines "$FD_GS" '\|session_run\|')" -gt 0
+  test "$(count_lines "$FD_GS" "$XT"'[^|]*\|session_run\|')" -gt 0
 expect_eq "6a: exactly one plan-directory walk on the governing-skill path" \
   "1" "$GS_WALKS"
 

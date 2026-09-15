@@ -4230,13 +4230,13 @@ fi
 echo "-- 25g(c)-(f): THE ROW'S STEP IS THE JUDGMENT (wave-14 REQ-2, ADR-027, AC-2.1-2.4).
 # Parallel writers broke the gate's one assumption: several tasks are in flight at once, each
 # at its own step, each in its own tree, and every one of them was judged against the run's
-# single `current:`. A Step-4 writer committing while the run sits at Step 5 was refused for
-# evidence that cannot exist yet, and in wave-13 the orchestrator regressed `current:` by hand
-# to land it. ADR-027 makes the `## Tasks` table the register: the row names the tree, the
+# single \`current:\`. A Step-4 writer committing while the run sits at Step 5 was refused for
+# evidence that cannot exist yet, and in wave-13 the orchestrator regressed \`current:\` by hand
+# to land it. ADR-027 makes the \`## Tasks\` table the register: the row names the tree, the
 # gate reads the row, and the commit is judged at THAT row's step.
 #
 # THE FIXTURE IS ONE PLAN, DRIVEN FROM THREE PLACES — that is the whole discrimination. The
-# same `current: 5` plan carries a Step-5 block that is NOT green (pass 331 of 332), so a
+# same \`current: 5\` plan carries a Step-5 block that is NOT green (pass 331 of 332), so a
 # main-root commit must still be refused for it; a commit from the tree row T3 owns must be
 # judged at Step 4 and allowed; and a commit from the tree row T9 owns, whose step is AHEAD
 # of the run, must be refused naming the row and both steps. One plan, three verdicts. --"
