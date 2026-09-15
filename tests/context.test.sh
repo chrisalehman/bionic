@@ -11,7 +11,7 @@
 # actions on an empty id; REQ-1h says that residue goes to zero rather than being
 # preserved per hook, so THIS suite is where the one reading is written down.
 #
-# THE SEVEN VALUES, and the fact that each is a VALUE and not an action:
+# THE EIGHT VALUES, and the fact that each is a VALUE and not an action:
 #
 #   BIONIC_INPUT      the payload text, read from stdin at most once
 #   BIONIC_CWD        the one ladder: CLAUDE_PROJECT_DIR if it names a PROJECT,
@@ -22,6 +22,8 @@
 #                     line where the other fourteen exit
 #   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none
 #   BIONIC_RUN_PLAN   the plan path the verdict names, empty for `none`
+#   BIONIC_WORKTREE   the linked worktree the root was mapped from, empty when
+#                     the walk mapped none (epic-23 wave-14 REQ-2, spec D5)
 #
 # WHY THE VERDICT IS A VALUE AND NOT A DECISION (census §4.2, pins §5.5). The four
 # hooks carrying the 4-branch `case` do DIFFERENT things on `bound-closed`: two exit
@@ -95,6 +97,29 @@ PLAN
   printf '%s' "$root"
 }
 
+# mk_wt_repo <name> -> "<main-root>TAB<worktree-dir>". The MAIN checkout carries the
+# .bionic and the engagement marker; the linked worktree carries neither, so rule 1 of
+# lib/root.sh has to map it before the walk can find anything at all. The worktree's
+# directory name and its branch name differ on purpose — the eighth value is the
+# worktree's, and a reading that parsed the branch would answer the other one.
+mk_wt_repo() {
+  # ONE `local` PER DERIVED VALUE. `local a="$1" b="$a"` expands every right-hand
+  # side before the builtin assigns any of them, so `$a` there is the caller's `a`,
+  # not this one — under `set -u` that is an unbound-variable abort, not a subtle
+  # wrong answer, which is the only reason it did not ship silently.
+  local name="$1"
+  local root="$SANDBOX/repos/$name"
+  local wt="$SANDBOX/repos/$name-tree"
+  mkdir -p "$root/.bionic/tmp"
+  git -c init.defaultBranch=main init -q "$root" >/dev/null 2>&1
+  ( cd "$root" && : > .keep && git add .keep >/dev/null 2>&1 &&
+    git -c user.name=t -c user.email=t@example.invalid commit -q -m init >/dev/null 2>&1 )
+  git -C "$root" worktree add -q -b "$name-branch" "$wt" >/dev/null 2>&1
+  : > "$root/.bionic/tmp/engaged-$SID.state"
+  mkdir -p "$wt/sub"
+  printf '%s\t%s' "$root" "$wt"
+}
+
 payload() {  # <cwd> [sid] -> the payload text
   local cwd="$1" sid="${2-$SID}"
   printf '{"session_id":"%s","cwd":"%s","hook_event_name":"PreToolUse"}' "$sid" "$cwd"
@@ -131,6 +156,7 @@ PROBE_BODY='
   printf "engaged=%s\n"   "${BIONIC_ENGAGED-<unset>}"
   printf "run_word=%s\n"  "${BIONIC_RUN_WORD-<unset>}"
   printf "run_plan=%s\n"  "${BIONIC_RUN_PLAN-<unset>}"
+  printf "worktree=%s\n" "${BIONIC_WORKTREE-<unset>}"
   printf "input=%s\n"     "${BIONIC_INPUT-<unset>}"
 '
 
@@ -144,10 +170,10 @@ probe() {
 # field <record> <key> -> that value
 field() { printf '%s\n' "$1" | sed -n "s/^$2=//p"; }
 
-require_helpers mk_repo payload probe field
+require_helpers mk_repo mk_wt_repo payload probe field
 
 # ============================================================
-section "1 — the seven values, from one well-formed payload"
+section "1 — the eight values, from one well-formed payload"
 # ============================================================
 #
 # The anti-vacuity row of this whole suite: every other section varies ONE input and
@@ -166,6 +192,32 @@ expect_eq "BIONIC_RUN_WORD is the verdict word alone" "fallback" "$(field "$REC"
 expect_eq "BIONIC_RUN_PLAN is the plan the verdict names" \
   "$R_OPEN/.bionic/docs/plans/epic-99/wave-01.plan.md" "$(field "$REC" run_plan)"
 expect_eq "BIONIC_INPUT holds the payload it read" "$(payload "$R_OPEN")" "$(field "$REC" input)"
+
+# THE EIGHTH VALUE (epic-23 wave-14 REQ-2, spec D5 "Hook context"). `lib/root.sh`
+# already knows whether the walk mapped a linked worktree onto its main repository;
+# the preamble carries that name so the evidence gate can find the plan row that
+# owns a worktree writer's commit without asking git a second time.
+#
+# EMPTY, NOT `<unset>`: fifteen hooks read these values under `set -u`, and an
+# eighth value that only sometimes exists would abort the wall that read it.
+expect_eq "BIONIC_WORKTREE is empty when the root is an ordinary directory" \
+  "" "$(field "$REC" worktree)"
+
+# The positive half, against a real linked worktree — without it the row above
+# passes just as well against a library that never assigns the value anything.
+WT_PAIR=$(mk_wt_repo eighth)
+WT_MAIN="${WT_PAIR%%$'\t'*}"
+WT_DIR="${WT_PAIR#*$'\t'}"
+REC_WT=$(probe "$SANDBOX" "$(payload "$WT_DIR/sub")" CLAUDE_CODE_SESSION_ID="$SID")
+
+expect_eq "a payload cwd inside a linked worktree still resolves to the MAIN root" \
+  "$WT_MAIN" "$(field "$REC_WT" root)"
+expect_eq "BIONIC_WORKTREE names the worktree the root was mapped from" \
+  "eighth-tree" "$(field "$REC_WT" worktree)"
+expect_ne "BIONIC_WORKTREE is not the branch name" \
+  "eighth-branch" "$(field "$REC_WT" worktree)"
+expect_eq "the session is still identified from inside the worktree (return 0)" \
+  "0" "$(field "$REC_WT" rc)"
 
 # ============================================================
 section "2 — ONE cwd ladder (AC-1h.1): env, then the payload, then pwd"
