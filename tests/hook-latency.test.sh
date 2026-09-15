@@ -43,6 +43,14 @@
 # spec D8's ratified numbers rated against the other tracer, and re-pointing them at
 # this one would re-rate a cap rather than measure a regression.
 #
+# SECTIONS 5 AND 6 ARE SHAPE TOO, on the same trace-fd tracer (epic-23 wave-14 T17).
+# §5 counts the CLASSIFIER readings by mode — `_cmd_class_awk` carries its mode in the
+# awk command line — and drives both directions, because a screen that skipped the head
+# reduction for every command would read as a clean pass while the tier-2 nudge went
+# silent. §6 adds a THIRD hook to this suite, hooks/canonical-sdlc-governing-skill.sh,
+# for one question only: how many times it walks the plans directory. It is a pin on a
+# property that already holds, not a cut — see the section for what it refuses.
+#
 # HERMETIC. Same fixture shape as tests/bash-walls.test.sh's `mk_repo` and
 # tests/stop.test.sh's `mkfix`: a real git init and a real `.bionic` tree under a
 # mktemp sandbox, engaged for this suite's own synthetic session id — no real
@@ -344,5 +352,119 @@ expect_eq "4d: and no run-verdict computation to reach it" "0" "$WALLS_SESSION_R
 # verdicts — would read as a clean pass on 4c.
 expect_true "4e: stop.sh, which reads the verdict, still scans" \
   test "$STOP_SCAN" -gt 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "5: the classifier is read once — no second awk for a head nobody can match"
+
+# WHAT THIS SECTION OWNS (epic-23 wave-14 T17, REQ-4; T4 §5 / A-T4.2). The farm-out
+# wall asks the classifier three questions — the whole command's class, each `&&`
+# segment's class, and the reduced head tier 2 matches on — and each one used to
+# arrive through its own command substitution. On the fixed `ls -la` payload that was
+# TWO `awk` execs, of which exactly one, the class reading, could change the answer:
+# `classify_tier2` matches only `^git`, `^docker` and `^(npx|uvx)`, and `ls -la`
+# begins with none of them at any spelling.
+#
+# THE COUNT IS BY MODE, which is what makes it readable rather than arithmetic:
+# `_cmd_class_awk` puts its mode in the awk command line (`awk -v mode=head`), so the
+# trace says which reading forked, not merely how many did.
+#
+# AND IT IS ASSERTED IN BOTH DIRECTIONS. A screen that skipped the head reduction
+# for every command would read as a clean pass here while the tier-2 nudge went
+# silent — the fail-dangerous direction, and the one a fork count alone cannot see.
+# So 5c drives a command that DOES reach tier 2 and asserts both that the reduction
+# was computed and that the wall still spoke.
+
+count_mode() {  # <trace> <mode> -> classifier awk forks in that mode
+  count_lines "$1" "\| awk -v mode=$2( |\$)"
+}
+
+WALLS_HEAD_FORKS=$(count_mode "$FD_WALLS" head)
+WALLS_LINES_FORKS=$(count_mode "$FD_WALLS" lines)
+WALLS_CHAIN_AWK=$(count_lines "$FD_WALLS" 'gsub\(/&&/')
+
+echo "hook-latency: classifier forks on 'ls -la' — mode=head=$WALLS_HEAD_FORKS mode=lines=$WALLS_LINES_FORKS chain-split-awk=$WALLS_CHAIN_AWK"
+
+expect_eq "5a: no head reduction is computed for a command tier 2 cannot match" \
+  "0" "$WALLS_HEAD_FORKS"
+expect_eq "5b: the class reading is still made, exactly once" \
+  "1" "$WALLS_LINES_FORKS"
+
+# THE OTHER DIRECTION. `sudo git clone …` is class=none at tier 1 (git is in none of
+# `cmd_class`'s arms), so it reaches tier 2 — and only reaches it through the head
+# reduction, because `sudo ` sits in front of the word the matcher anchors on.
+TIER2_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"sudo git clone https://example.invalid/r.git"}, tool_use_id:"toolu_t17_tier2"}')
+# THE UNTRACED RUN GOES FIRST, and the order is load-bearing: `nudge_once` speaks ONCE
+# per (session, class) and suppresses every repeat, so a second invocation of the same
+# payload under the same session id is silent by design. The trace that follows is
+# suppressed instead — which costs it nothing, because every fork this section counts is
+# made before the suppression check.
+TIER2_OUT=$(printf '%s' "$TIER2_PAYLOAD" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" \
+  CLAUDE_PROJECT_DIR="" BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash "$BASH_WALLS_HOOK" 2>/dev/null)
+FD_TIER2="$SANDBOX/tracefd-tier2.txt"
+trace_fd_hook "$BASH_WALLS_HOOK" "$TIER2_PAYLOAD" "$FD_TIER2"
+
+expect_eq "5c: a command that CAN reach tier 2 still gets its head reduction" \
+  "1" "$(count_mode "$FD_TIER2" head)"
+expect_true "5c2: …and the wall still speaks for it — the screen is not a silence" \
+  test -n "$TIER2_OUT"
+
+# THE CHAIN SPLIT IS SHELL NOW, not an `awk` plus a `grep` plus a `sed` per segment.
+# Driven, not merely counted: the same chain must still raise the chain nudge.
+CHAIN_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Bash",
+    tool_input:{command:"cd a && ls -l && npx cowsay hi"}, tool_use_id:"toolu_t17_chain"}')
+CHAIN_OUT=$(printf '%s' "$CHAIN_PAYLOAD" | env HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$SID" \
+  CLAUDE_PROJECT_DIR="" BIONIC_PLUGINS_DIR="$NO_PLUGINS" bash "$BASH_WALLS_HOOK" 2>/dev/null)
+FD_CHAIN="$SANDBOX/tracefd-chain.txt"
+trace_fd_hook "$BASH_WALLS_HOOK" "$CHAIN_PAYLOAD" "$FD_CHAIN"
+
+echo "hook-latency: chain payload — chain-split-awk=$(count_lines "$FD_CHAIN" 'gsub\(/&&/') sed=$(count_lines "$FD_CHAIN" '\| sed( |$)')"
+
+expect_eq "5d: the && split forks no awk of its own" \
+  "0" "$(count_lines "$FD_CHAIN" 'gsub\(/&&/')"
+expect_true "5d2: …and the chain still raises its nudge" \
+  test -n "$CHAIN_OUT"
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "6: the governing-skill hook walks the plans directory exactly once"
+
+# WHY THIS PIN EXISTS AND WHAT IT REFUSES (epic-23 wave-14 T17). T4 left
+# hooks/canonical-sdlc-governing-skill.sh:431 computing its own `session_run`, and the
+# obvious-looking follow-up is to set `BIONIC_CONTEXT_WANT_RUN=1` on this hook the way
+# hooks/stop.sh, hooks/dispatch-preflight.sh and hooks/session-start.sh do, then read
+# the preamble's verdict at :431. MEASURED, that is strictly worse in both halves:
+#
+#   * IT DOUBLES THE SCAN, it does not remove one. The hook makes ONE walk today. With
+#     the flag set and :431 left alone it makes two — 15 `_run_candidates` trace lines
+#     became 30, one `find` fork became two, on this fixture.
+#   * AND THE TWO VERDICTS ARE NOT THE SAME VERDICT. `bionic_context` resolves against
+#     `BIONIC_ROOT`, which is the SESSION's cwd; :431 resolves against
+#     `PROJECT_ROOT_FROM_PATH`, which is the ARTIFACT's own root. The hook's header says
+#     why in as many words: "a hook that scoped itself by the session's cwd and enforced
+#     against the artifact's root would go quiet exactly where it was added to bind."
+#     tests/canonical-sdlc-governing-skill.test.sh drives that difference; this row
+#     catches the cheaper half, the second walk, wherever it comes from.
+GOVERNING_SKILL_HOOK="${BIONIC_GOVERNING_SKILL_UNDER_TEST:-${BIONIC_HOOKS_DIR}/canonical-sdlc-governing-skill.sh}"
+[ -f "$GOVERNING_SKILL_HOOK" ] || { echo "hook-latency: no hook at $GOVERNING_SKILL_HOOK — suite refuses to run"; exit 1; }
+
+GS_PAYLOAD=$(jq -nc --arg s "$SID" --arg c "$PROJECT" \
+  --arg f "$PROJECT/.bionic/docs/plans/wave-01.plan.md" \
+  '{session_id:$s, cwd:$c, hook_event_name:"PreToolUse", tool_name:"Write",
+    tool_input:{file_path:$f, content:"---\ngoverning-skill: superpowers:writing-plans\n---\n"},
+    tool_use_id:"toolu_t17_gs"}')
+FD_GS="$SANDBOX/tracefd-governing-skill.txt"
+trace_fd_hook "$GOVERNING_SKILL_HOOK" "$GS_PAYLOAD" "$FD_GS"
+
+GS_WALKS=$(count_lines "$FD_GS" '\|_run_candidates\| find')
+echo "hook-latency: trace-fd governing-skill plan walks=$GS_WALKS lines=$(wc -l < "$FD_GS" | tr -d ' ')"
+
+# NOT VACUOUS: a trace that never reached the verdict at all would report zero walks
+# and certify the row for the wrong reason.
+expect_true "6-pre: the governing-skill trace reached its run verdict" \
+  test "$(count_lines "$FD_GS" '\|session_run\|')" -gt 0
+expect_eq "6a: exactly one plan-directory walk on the governing-skill path" \
+  "1" "$GS_WALKS"
 
 finish
