@@ -9,7 +9,7 @@
 # thing. `bionic_context` says it once. Each hook then does its OWN work, and
 # nothing here decides any of it.
 #
-# THE SEVEN VALUES. Every one is a VALUE the caller reads, never an action:
+# THE EIGHT VALUES. Every one is a VALUE the caller reads, never an action:
 #
 #   BIONIC_INPUT      the payload text, read from stdin at most once
 #   BIONIC_CWD        the ONE ladder (below)
@@ -18,6 +18,8 @@
 #   BIONIC_ENGAGED    0 or 1
 #   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none
 #   BIONIC_RUN_PLAN   the plan path the verdict names; empty for `none`
+#   BIONIC_WORKTREE   the linked worktree the root was mapped from, empty when
+#                     the walk mapped none (epic-23 wave-14 REQ-2, spec D5)
 #
 # THE RETURN CODE IS THE WHOLE CONTRACT. 1 when the session cannot be identified
 # — no root, no session id, or a session id carrying a character outside
@@ -261,7 +263,7 @@ bionic_jq() {
 
 # ─── The one preamble ────────────────────────────────────────────────────────
 #
-# bionic_context -> sets the seven values; 0 when the session is identified, 1
+# bionic_context -> sets the eight values; 0 when the session is identified, 1
 # when it is not. Silent on both streams either way, because fourteen of the
 # fifteen callers turn a 1 into `exit 0` and a bystander session must not learn
 # that bionic is installed.
@@ -303,7 +305,13 @@ bionic_context() {
     # tab is not a report line and is refused, as `$2 == "chosen"` refused it.
     # Rung 1 is the rung the CLI actually takes, so this fork was paid on every
     # hook event of every session.
-    _cands="$(project_root_candidates "$CLAUDE_PROJECT_DIR" 2>/dev/null)"
+    # NOT A COMMAND SUBSTITUTION (REQ-2). The walk also publishes BIONIC_WORKTREE
+    # in the shell it runs in (lib/root.sh), and a `$(…)` is a subprocess: the
+    # eighth value would be born and die inside it. The report is taken from the
+    # return channel instead and the printed copy is discarded — `printf` to
+    # /dev/null is a builtin, so this costs nothing the substitution did not.
+    project_root_candidates "$CLAUDE_PROJECT_DIR" >/dev/null 2>&1
+    _cands="${_BIONIC_ROOT_REPORT%$'\n'}"
     _last="${_cands##*$'\n'}"
     case "$_last" in
       *$'\t'*) [ "${_last#*$'\t'}" = "chosen" ] && _root="${_last%%$'\t'*}" ;;
@@ -327,7 +335,11 @@ bionic_context() {
   if [ -n "$_root" ]; then
     BIONIC_ROOT="$_root"
   else
-    BIONIC_ROOT="$(project_root "$BIONIC_CWD" 2>/dev/null)"
+    # Same shape, same reason as rung 1: in the caller's shell, so the walk's
+    # BIONIC_WORKTREE survives it. `project_root` returns 0 whatever it finds, so
+    # an empty answer is still the test, exactly as the substitution's was.
+    project_root "$BIONIC_CWD" >/dev/null 2>&1
+    BIONIC_ROOT="$_BIONIC_ROOT_ANSWER"
   fi
   [ -n "$BIONIC_ROOT" ] || return 1
 
