@@ -164,6 +164,12 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/run.sh"      || exit 0   # active_run, engaged_session
 . "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
 
+# THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
+# computes it only for a caller that sets this, because the plan scan behind it is
+# the preamble's most expensive value and most hooks never read the answer. The greeting prints the bound
+# line from it (:347-348, :359-360).
+BIONIC_CONTEXT_WANT_RUN=1
+
 # The tree this hook was launched from — printed absolute in the re-arm line, and
 # the tree whose poker is asked for the interval. `$(dirname "$0")/..` and `pwd -P`
 # rather than `realpath`, which stock macOS does not ship (L-LOADER/5, L-BIONIC_ROOT/2).
