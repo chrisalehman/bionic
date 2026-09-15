@@ -9256,7 +9256,12 @@ expect_eq "S19.3 …declared by 41 anchor calls (Section 8's doctoring rewrites 
 # lines it strips from a scratch copy of protect-main.sh before stripping them, so a
 # rename of that hook's refusal text cannot leave the "a migrated hook drops out of the
 # set" arm passing over an unmutated file.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 26 more" "26" \
+#
+# 27 at epic-23 wave-14-tune-181 (2026-09-15, T27 fold-in, duplication review F1): §BR's
+# generation-cap mutant (detect.sh's `_detect_bound_kill_tree`, doctored from 16 to 1)
+# anchors its one needle before the `sed`. RE-DERIVED BY DIRECT GREP over this file at
+# THIS commit, as every number in this section is.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 27 more" "27" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9300,6 +9305,11 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # this wave's landings touch cross-gate-agreement.test.sh and landing-gate.test.sh in prose
 # and in numbers, never by adding or removing an `anchor` call.
 #
+# 72 at epic-23 wave-14-tune-181 (2026-09-15, T27 fold-in): 41 + 27 + 1 + 3, the
+# cross-gate-agreement.test.sh term alone moving — §BR's own anchor call, the row above
+# this one. docs-pins, agent-context-guard and landing-gate are unmoved and were
+# re-measured, not assumed.
+#
 # tests/refuse.test.sh IS NOT IN THIS CENSUS, and that is a Step-9 disposition rather
 # than an oversight. It carries ONE anchor call site, reached three times: its
 # `mutant()` helper calls `anchor` before every `sed`, so a mutant cannot be added
@@ -9307,7 +9317,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …71 anchor call sites across the four doctoring suites, all told" "71" \
+expect_eq "S19.3 …72 anchor call sites across the four doctoring suites, all told" "72" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -10175,6 +10185,85 @@ expect_contains "LC.5 …and the recorder DECIDES on it" \
   '&& !contract_closed(nm)) print row' "$(cat "$LC_ER")"
 expect_eq "LC.5 no private MET latch survives in either file" "0" \
   "$(/usr/bin/grep -cE '!\(nm in met\)|&& !met\b' "$LC_DP" "$LC_ER" | awk -F: '{t += $2} END { print t + 0 }')"
+
+# ============================================================
+section "BR — the bounded-runner copies: detect.sh and session-start.sh, CODE-identical (Step-6 duplication review F1, epic-23 wave-14 T27)"
+# ============================================================
+#
+# hooks/session-start.sh:525-533 declares its own kill helpers "A DELIBERATE DUPLICATE of
+# `_detect_bound_kill` / `_detect_bound_kill_tree` in payload/scripts/lib/detect.sh … The two
+# copies are meant to stay in step — change one and change the other." Nothing anywhere
+# compared them: this is the exact shape §O already exists to close, on a different pair of
+# files (T22 fixed both faults in detect.sh; T23 then had to find and fix the SAME two faults
+# in this copy by hand, as a separate floor fold-in — a pin at T22 would have made T23 a red
+# row instead of a discovery).
+DETECT="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/detect.sh"
+SSTART="$BIONIC_HOOKS_DIR/session-start.sh"
+
+expect_nonempty "BR detect.sh's _detect_bound_kill_tree() body is extractable at all" \
+  "$(fn_body "$DETECT" _detect_bound_kill_tree)"
+expect_nonempty "BR session-start.sh's ss_bound_kill_tree() body is extractable at all" \
+  "$(fn_body "$SSTART" ss_bound_kill_tree)"
+expect_nonempty "BR detect.sh's _detect_bound_kill() body is extractable at all" \
+  "$(fn_body "$DETECT" _detect_bound_kill)"
+expect_nonempty "BR session-start.sh's ss_bound_kill() body is extractable at all" \
+  "$(fn_body "$SSTART" ss_bound_kill)"
+
+# br_code <file> <fn> -> §O's fn_code (pure-comment lines stripped, §O's own normalisation)
+# PLUS the one normalisation §O's pair never needed: the function's own NAME PREFIX, so
+# ss_bound_kill_tree's self-call inside ss_bound_kill lines up against
+# _detect_bound_kill_tree's. Used for session-start.sh's two copies only — detect.sh, the
+# original, is read through fn_code alone. NOTHING ELSE is touched: not whitespace beyond
+# what fn_code already trims, not the executable text, not any other identifier.
+br_code() {  # <file> <fn name as it is spelled IN THAT FILE>
+  fn_code "$1" "$2" | sed 's/^ss_bound_kill/_detect_bound_kill/g'
+}
+
+expect_eq "BR the tree-walker: session-start's copy is detect.sh's, code for code" \
+  "$(fn_code "$DETECT" _detect_bound_kill_tree)" "$(br_code "$SSTART" ss_bound_kill_tree)"
+expect_eq "BR the kill primitive: session-start's copy is detect.sh's, code for code" \
+  "$(fn_code "$DETECT" _detect_bound_kill)" "$(br_code "$SSTART" ss_bound_kill)"
+
+# THE DISCRIMINATING HALF (§O's own shape, turned the other way): a pin over two strings that
+# were ALREADY identical before normalisation proves nothing about the normalisation. The
+# tree-walker is the pair that is not byte-identical — session-start.sh:547-549 re-wraps
+# detect.sh:1414-1415's one rationale comment across three lines instead of two, a line-length
+# artefact of the file it was copied into, not a content change — so it is the one driven
+# here.
+expect_ne "BR …the two tree-walker bodies are NOT byte-identical (session-start.sh re-wraps one comment)" \
+  "$(fn_body "$DETECT" _detect_bound_kill_tree)" \
+  "$(fn_body "$SSTART" ss_bound_kill_tree | sed 's/^ss_bound_kill/_detect_bound_kill/g')"
+expect_eq "BR …and it IS code-identical, which is what the two expect_eq above compare" \
+  "$(fn_code "$DETECT" _detect_bound_kill_tree)" "$(br_code "$SSTART" ss_bound_kill_tree)"
+# …and the byte difference really is a comment, line for line: every line the two bodies
+# differ by starts with `#`.
+expect_empty "BR …and every line the two tree-walker bodies differ by is a comment line" \
+  "$(diff <(fn_body "$DETECT" _detect_bound_kill_tree) \
+          <(fn_body "$SSTART" ss_bound_kill_tree | sed 's/^ss_bound_kill/_detect_bound_kill/g') \
+      | grep -E '^[<>]' | sed 's/^[<>] //' | grep -v '^#')"
+expect_nonempty "BR …over a diff that really is non-empty (the filter is not eating it all)" \
+  "$(diff <(fn_body "$DETECT" _detect_bound_kill_tree) \
+          <(fn_body "$SSTART" ss_bound_kill_tree | sed 's/^ss_bound_kill/_detect_bound_kill/g') | grep -cE '^[<>]')"
+
+# THE MUTATION ARM. A pin over two files that agree today passes just as loudly if the
+# comparison itself is broken, so ONE copy of detect.sh is doctored in the SANDBOX — never
+# the shipped file — and the SAME comparison is re-run against it. The needle is the
+# generation cap `_detect_bound_kill_tree` walks the process table under, doctored from 16 to
+# 1: a REAL drift shape (this exact family shipped it once — T22 fixed detect.sh's copy, T23
+# found the same fault still live in session-start.sh's). At `-lt 1` the descendant walk stops
+# one generation in, so a grandchild a `sweep` fork spawns survives the kill. `anchor` first
+# (§S19's own precondition idiom): the needle must occur exactly once in detect.sh, or the
+# `sed` below is a no-op and BR_MUT is a silent copy of the real file.
+BR_NEEDLE='"$generations" -lt 16'
+BR_MUT_NEEDLE='"$generations" -lt 1'
+anchor "$DETECT" "$BR_NEEDLE" 1
+BR_MUT="$SANDBOX/br-mutant-detect.sh"
+sed "s/-lt 16/-lt 1/" "$DETECT" > "$BR_MUT"
+
+expect_ne "BR …and the SAME comparison calls the doctored copy a drift (the generation cap moved)" \
+  "$(fn_code "$BR_MUT" _detect_bound_kill_tree)" "$(br_code "$SSTART" ss_bound_kill_tree)"
+expect_eq "BR …while the OTHER primitive in the doctored copy still agrees (one function moved, not the file)" \
+  "$(fn_code "$BR_MUT" _detect_bound_kill)" "$(br_code "$SSTART" ss_bound_kill)"
 
 # ============================================================
 finish
