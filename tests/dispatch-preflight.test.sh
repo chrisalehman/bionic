@@ -4240,6 +4240,41 @@ expect_status "27f …while still recording the files the brief declared" \
 expect_status "27f …non-vacuity: an impact command WAS configured for this repo" "0" \
   "$([ -f "$REPO/.bionic/config.yaml" ] && echo 0 || echo 1)"
 
+# --- §declared-new-suite (T8, AC-5.1) — a declared suite ABSENT ON DISK lands verbatim ---
+#
+# T7's repro (record/wave-14-tune-181/T7-req5-repro.md §3, RUN 2) drove this exact shape —
+# Files: + a Suites: paragraph naming a suite the task itself is about to create, path-
+# prefixed, own paragraph — against the REAL hook and found it already passing: lift
+# (`lift_contract_fields`/`suite_names()`, :1388-1406) performs no on-disk existence check,
+# and selection (`:2192-2194`) takes the declared set whole. This is that RUN, kept as a
+# PIN beside 27f rather than a new implementation — 27f's own "declared wins whole"
+# assertion is unchanged by it. Per the T8 brief: if this never goes red against the
+# parent, it is reported as a pin, not as RED→GREEN.
+REPO=$(make_repo r27new yes)
+write_attestation "$REPO" "$SID_A"
+s27_impact "$REPO" archive.test.sh run.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Canonical-sdlc Step 4, task 4/4 of epic-23 wave-13; build · audited · wave.
+Your task: the close-out script (D5, D6).
+Expected artifact: .bionic/docs/record/wave-13-fixit-180/T4-close-out.md
+Expected duration: ~120 minutes.
+Files: payload/scripts/close-out.sh, payload/scripts/lib/archive.sh, tests/close-out.test.sh, tests/archive.test.sh, payload/scripts/lib/run.sh
+
+Suites: tests/close-out.test.sh, tests/run-predicate.test.sh' "w27-newsuite")"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "declared-new-suite a Files:+Suites: brief naming a suite absent on disk PASSES" \
+  "0" "$GATE_ST"
+expect_status "declared-new-suite …the row carries BOTH declared tokens, verbatim" \
+  "close-out.test.sh run-predicate.test.sh" "$(roster_field "$ROW" suites_allowed)"
+expect_status "declared-new-suite …suites_source= is declared, not derived" \
+  "declared" "$(roster_field "$ROW" suites_source)"
+# NON-VACUITY: the file really is absent from this fixture repo, and the impact command
+# really was configured (so a wall that fell through to derivation would answer
+# "archive.test.sh run.sh" instead, not this pair).
+expect_status "declared-new-suite …non-vacuity: tests/close-out.test.sh is absent on disk" \
+  "1" "$([ -f "$REPO/tests/close-out.test.sh" ] && echo 0 || echo 1)"
+expect_status "declared-new-suite …non-vacuity: an impact command WAS configured for this repo" \
+  "0" "$([ -f "$REPO/.bionic/config.yaml" ] && echo 0 || echo 1)"
+
 # --- S27g: the row's three fields never disturb the ones already on it ---
 REPO=$(make_repo r27g yes)
 write_attestation "$REPO" "$SID_A"
