@@ -898,10 +898,20 @@ section "Section 6: Step 8's tmp wipe spares session-keyed state"
 # and it contradicts the same file's own sentence that "the marker is never removed during
 # the session once written". The Step 8 line now names what it spares.
 #
+# RE-SPELLED (epic-23 wave-14 T28, review-duplication-d3930dd.md F3). The sentence above
+# used to say "every session-keyed file" and enumerated five classes; that went stale
+# twice over. (1) T1/REQ-1 (this wave) changed the rule itself: close-out now spares only
+# a LIVE neighbour session's keyed files and removes a dead one's, so "every" was already
+# wrong going into this wave. (2) `PATROL_STATE_CLASSES` (payload/scripts/lib/patrol.sh:162)
+# grew a sixth member, `stop-orders`, at wave-13 — the prose enumeration never followed.
+# The re-spelled sentence names all six classes and the live/dead distinction, and 44b/44c/
+# 44d below pin the class list against `PATROL_STATE_CLASSES` directly so the two cannot
+# drift apart again without one of them turning red.
+#
 # THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
 # evidence key the gate parses, not prose; renaming it would be an interface change and is
 # not what the finding asked for.
-PIN_TMP_SPARE='sparing every session-keyed file — `engaged-*.state`, `roster-*.state`, `patrol-*.state*`, `preflight-*.state`, `sweeper-*.state`'
+PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the six \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
 PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
 
 if has_pin "$STEP8_MD" "$PIN_TMP_SPARE"; then
@@ -926,14 +936,63 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40.
-anchor "$STEP8_MD" 'sparing every session-keyed file' 1
+anchor "$STEP8_MD" "sparing a LIVE neighbour session" 1
 DOCTORED_TMP="$TMP/skill-tmp-wipe-mutated.md"
-sed 's/sparing every session-keyed file/taking every file/' "$STEP8_MD" > "$DOCTORED_TMP"
+sed "s/sparing a LIVE neighbour session/taking every neighbour session/" "$STEP8_MD" > "$DOCTORED_TMP"
 if has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
   no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
   ok "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)"
+fi
+
+# 44b/44c/44d — T28: the class list steps/8.md names must not drift from patrol.sh's own
+# PATROL_STATE_CLASSES again (F3's second divergence — the prose was short one class, and
+# nothing agreement-checked the two against each other). Read the SSoT directly rather than
+# hand-copying a count into this suite, so a future class added to patrol.sh is caught here
+# instead of relying on a human to remember to update this pin too.
+PATROL_LIB_T28="${REPO}/payload/scripts/lib/patrol.sh"
+PATROL_CLASSES_ACTUAL="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$PATROL_LIB_T28")"
+expect_nonempty "44a: patrol.sh's PATROL_STATE_CLASSES line is readable (the 44b/44c comparisons have something to measure)" "$PATROL_CLASSES_ACTUAL"
+
+PATROL_CLASSES_MISSING=""
+for _pc in $PATROL_CLASSES_ACTUAL; do
+  if ! grep -qF "\`${_pc}\`" "$STEP8_MD"; then
+    PATROL_CLASSES_MISSING="${PATROL_CLASSES_MISSING} ${_pc}"
+  fi
+done
+if [ -z "$PATROL_CLASSES_MISSING" ]; then
+  ok "44b: every patrol.sh PATROL_STATE_CLASSES name (${PATROL_CLASSES_ACTUAL}) appears in steps/8.md's spare-rule sentence"
+else
+  no "44b: every patrol.sh PATROL_STATE_CLASSES name (${PATROL_CLASSES_ACTUAL}) appears in steps/8.md's spare-rule sentence" \
+     "missing from steps/8.md:${PATROL_CLASSES_MISSING}"
+fi
+
+PATROL_CLASSES_COUNT="$(printf '%s\n' "$PATROL_CLASSES_ACTUAL" | wc -w | tr -d ' ')"
+PATROL_ALT_T28="$(printf '%s' "$PATROL_CLASSES_ACTUAL" | tr ' ' '|')"
+STEP8_CLASS_MENTIONS="$(grep -oE "\`(${PATROL_ALT_T28})\`" "$STEP8_MD" | sort -u | wc -l | tr -d ' ')"
+if [ "$STEP8_CLASS_MENTIONS" = "$PATROL_CLASSES_COUNT" ]; then
+  ok "44c: steps/8.md names exactly ${PATROL_CLASSES_COUNT} distinct classes, matching patrol.sh's PATROL_STATE_CLASSES count"
+else
+  no "44c: steps/8.md names exactly ${PATROL_CLASSES_COUNT} distinct classes, matching patrol.sh's PATROL_STATE_CLASSES count" \
+     "steps/8.md names ${STEP8_CLASS_MENTIONS} distinct classes from the current list, patrol.sh has ${PATROL_CLASSES_COUNT}"
+fi
+
+# Anti-vacuity for 44c: a patrol.sh with a class ADDED must desync the count this arm
+# compares, proving 44c is a live comparison against the SSoT and not a hardcoded "6".
+DOCTORED_PATROL_T28="$TMP/patrol-classes-mutated.sh"
+sed "s/^PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL}\"\$/PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL} extra-class\"/" \
+  "$PATROL_LIB_T28" > "$DOCTORED_PATROL_T28"
+DOCTORED_CLASSES_T28="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$DOCTORED_PATROL_T28")"
+DOCTORED_COUNT_T28="$(printf '%s\n' "$DOCTORED_CLASSES_T28" | wc -w | tr -d ' ')"
+if [ "$DOCTORED_CLASSES_T28" = "$PATROL_CLASSES_ACTUAL" ]; then
+  no "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)" \
+     "the sed mutation did not change PATROL_STATE_CLASSES — anchor moved, mutation is a no-op"
+elif [ "$DOCTORED_COUNT_T28" != "$STEP8_CLASS_MENTIONS" ]; then
+  ok "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)"
+else
+  no "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)" \
+     "doctored count ${DOCTORED_COUNT_T28} still equalled steps/8.md's ${STEP8_CLASS_MENTIONS}"
 fi
 
 section "Section 7: bind's operand takes the spelling session-start prints"
@@ -3021,13 +3080,203 @@ fi
 # their own printf format beside the card — the two row shapes T10 left unannotated for
 # lack of aggregate-cap headroom (A-T10.1; Chris 2026-09-14 "Option 2" at the T10 landing,
 # wave-14 T14). Verbatim checks, the same idiom as 141a/141b/141c above.
-OWNERSHIP_ROW_LINE='Ownership row: `    %-20s owner %-42s surfaces %-44s test %s` (concept, owner, surfaces, test) (printf).'
-expect_contains "146: AC-9.1 — steps/2.md names the Ownership row's printf format verbatim (T14 fold-in)" \
+# RE-SPELLED (wave-14 T10 63054a1 -> T14 c821781 -> T31): T31 re-cut the Ownership and
+# Eval-design widths (below) so their SAMPLE rows fit inside the repo's own 100-column rule
+# (payload/scripts/lib/width.sh:11/:43) — 133 and 107 columns empty, before this task, even
+# with every field blank. The verbatim strings below move with that cut.
+OWNERSHIP_ROW_LINE='Ownership row: `    %-12s owner %-14s surfaces %-22s test %s` (concept, owner, surfaces, test) (printf).'
+expect_contains "146: AC-9.1 — steps/2.md names the Ownership row's printf format verbatim (T14 fold-in, re-spelled T31)" \
   "$OWNERSHIP_ROW_LINE" "$(cat "$STEP2_MD" 2>/dev/null)"
 
-EVAL_DESIGN_ROW_LINE='Eval-design row: `    %-8s %-58s %6s %5s %9s %5s %6s` (requirement, approach, static, unit, hermetic, live, human) (printf).'
-expect_contains "147: AC-9.1 — steps/2.md names the Eval-design row's printf format verbatim (T14 fold-in)" \
+EVAL_DESIGN_ROW_LINE='Eval-design row: `    %-8s %-36s %6s %5s %9s %5s %6s` (requirement, approach, static, unit, hermetic, live, human) (printf).'
+expect_contains "147: AC-9.1 — steps/2.md names the Eval-design row's printf format verbatim (T14 fold-in, re-spelled T31)" \
   "$EVAL_DESIGN_ROW_LINE" "$(cat "$STEP2_MD" 2>/dev/null)"
+
+# --- AC-9.1/AC-9.4 (T31, wave-14 fold-in — correctness F2, readability HIGH 2): every card's
+# own fenced header and sample row must land exactly where the card's OWN declared printf
+# format puts them, so header and format cannot drift apart again the way they did before this
+# task (Decisions header said serves@57/ADR@75, the format put them at @77/@92; Ownership and
+# Eval-design exceeded 100 columns even empty). Each arm below re-derives the format straight
+# off the rendered file (never a copy pasted twice), renders it against the card's own sample
+# values, and checks the row it gets is BYTE-IDENTICAL to what ships, is <=100 columns, and —
+# for the three cards with a column header above the row — that each header label starts at
+# the exact column its field starts at. A pin that only compared two copies of the same
+# hand-typed number could not have caught the original drift; this one recomputes the
+# right-hand side from the format every run.
+#
+# str_index <haystack> <needle> -> 1-indexed column of the first occurrence, 0 if absent.
+str_index() { awk -v s="$1" -v n="$2" 'BEGIN{print index(s,n)}'; }
+
+# extract_backtick_fmts <file> <line-regex> -> each backtick-quoted format on the first
+# matching line, one per output line (a card row's format comment may carry more than one,
+# e.g. the Step-1 requirement row's two-line format).
+extract_backtick_fmts() {
+  grep -m1 -E "$2" "$1" 2>/dev/null | grep -oE '`[^`]*`' | sed -e 's/^`//' -e 's/`$//'
+}
+
+# fmt_field_starts <fmt> <val1> <val2> ... -> one 1-indexed start column per %s field, in
+# order, computed from the format's own literal text and each field's declared width against
+# the ACTUAL value length (printf pads a short value to width and never truncates a long one,
+# so a value wider than its column shifts every field after it — the same "padded past" case
+# the brief calls out; this walk accounts for it rather than assuming the nominal width).
+fmt_field_starts() {
+  local fmt="$1"; shift
+  local -a vals=("$@")
+  local rest="$fmt" col=1 i=0
+  local -a out=()
+  while [[ "$rest" =~ ^([^%]*)%(-)?([0-9]*)s(.*)$ ]]; do
+    local lit="${BASH_REMATCH[1]}" w="${BASH_REMATCH[3]}"
+    rest="${BASH_REMATCH[4]}"
+    col=$(( col + ${#lit} ))
+    out+=("$col")
+    local val="${vals[$i]:-}" vlen eff
+    vlen=${#val}; eff=$vlen
+    if [ -n "$w" ] && [ "$w" -gt "$vlen" ]; then eff=$w; fi
+    col=$(( col + eff ))
+    i=$(( i + 1 ))
+  done
+  printf '%s\n' "${out[@]}"
+}
+
+# fmt_render <fmt> <val1> <val2> ... -> the row rendered by hand, one field at a time, NEVER
+# through printf's own %s width padding. printf pads by BYTE length, not character length —
+# payload/scripts/lib/width.sh's "PRINTF PADS BYTES; A TERMINAL LAYS OUT COLUMNS" note is this
+# exact pitfall — so a multi-byte glyph in a value (the Tasks card's depends column carries
+# "—", 3 UTF-8 bytes / 1 column) comes out under-padded by printf though `${#val}` is already
+# character-aware (proven against fmt_field_starts above, which uses `${#val}` and agrees with
+# the shipped file). This function pads with `${#val}` too, so the two never disagree.
+fmt_render() {
+  local fmt="$1"; shift
+  local -a vals=("$@")
+  local rest="$fmt" i=0
+  local out=""
+  while [[ "$rest" =~ ^([^%]*)%(-)?([0-9]*)s(.*)$ ]]; do
+    local lit="${BASH_REMATCH[1]}" dash="${BASH_REMATCH[2]}" w="${BASH_REMATCH[3]}"
+    rest="${BASH_REMATCH[4]}"
+    out="${out}${lit}"
+    local val="${vals[$i]:-}" vlen n pad=""
+    vlen=${#val}
+    if [ -n "$w" ] && [ "$w" -gt "$vlen" ]; then
+      n=$(( w - vlen )); pad="$(printf '%*s' "$n" '')"
+    fi
+    if [ "$dash" = "-" ]; then out="${out}${val}${pad}"; else out="${out}${pad}${val}"; fi
+    i=$(( i + 1 ))
+  done
+  printf '%s' "${out}${rest}"
+}
+
+# 148: Step-1 requirement row (two physical lines, no separate column header — "provenance"
+# and "ACs" are literal words baked into the format itself, so a row rendered by the format
+# cannot drift from them; the check is row == printf(fmt, samples) and both lines <=100 cols).
+REQ1_FMTS=()
+while IFS= read -r _line; do REQ1_FMTS+=("$_line"); done < <(extract_backtick_fmts "$STEP1_MD" '^Requirement row:')
+REQ1_LINE_A="$(grep -m1 '^    REQ-<id>' "$STEP1_MD" 2>/dev/null)"
+REQ1_LINE_B="$(grep -m1 'provenance <user quote' "$STEP1_MD" 2>/dev/null)"
+REQ1_RENDERED_A="$(fmt_render "${REQ1_FMTS[0]:-}" "REQ-<id>" "<the requirement in one line>")"
+REQ1_RENDERED_B="$(fmt_render "${REQ1_FMTS[1]:-}" "<user quote | spec section | ticket | report>" "<n>")"
+expect_eq "148a: AC-9.1/AC-9.4 — steps/1.md's requirement line is exactly its own printf format applied to the card's sample values" \
+  "$REQ1_RENDERED_A" "$REQ1_LINE_A"
+expect_eq "148b: AC-9.1/AC-9.4 — steps/1.md's provenance/ACs line is exactly its own printf format applied to the card's sample values" \
+  "$REQ1_RENDERED_B" "$REQ1_LINE_B"
+if [ "${#REQ1_RENDERED_A}" -le 100 ] && [ "${#REQ1_RENDERED_B}" -le 100 ]; then
+  ok "148c: AC-9.1 — steps/1.md's requirement row fits within 100 columns with the sample values (${#REQ1_RENDERED_A} / ${#REQ1_RENDERED_B})"
+else
+  no "148c: AC-9.1 — steps/1.md's requirement row fits within 100 columns with the sample values" \
+     "line A=${#REQ1_RENDERED_A} line B=${#REQ1_RENDERED_B}"
+fi
+
+# 149: Step-2 Decision row + its "serves"/"ADR" column header.
+DEC_FMT="$(extract_backtick_fmts "$STEP2_MD" '^Decision row:')"
+DEC_HEADER_LINE="$(grep -m1 '^  Decisions' "$STEP2_MD" 2>/dev/null)"
+DEC_ROW_LINE="$(grep -m1 '^    D<n>' "$STEP2_MD" 2>/dev/null)"
+DEC_VALS=("D<n>" "<the decision in one line>" "<REQ ids>" "<file | none>")
+DEC_RENDERED="$(fmt_render "$DEC_FMT" "${DEC_VALS[@]}")"
+expect_eq "149a: AC-9.1/AC-9.4 — steps/2.md's decision row is exactly its own printf format applied to the card's sample values" \
+  "$DEC_RENDERED" "$DEC_ROW_LINE"
+if [ "${#DEC_RENDERED}" -le 100 ]; then
+  ok "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values (${#DEC_RENDERED})"
+else
+  no "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values" "width=${#DEC_RENDERED}"
+fi
+DEC_STARTS=()
+while IFS= read -r _line; do DEC_STARTS+=("$_line"); done < <(fmt_field_starts "$DEC_FMT" "${DEC_VALS[@]}")
+expect_eq "149c: AC-9.4 — steps/2.md's Decisions header 'serves' label starts at the row format's serves column" \
+  "${DEC_STARTS[2]:-}" "$(str_index "$DEC_HEADER_LINE" "serves")"
+expect_eq "149d: AC-9.4 — steps/2.md's Decisions header 'ADR' label starts at the row format's ADR column" \
+  "${DEC_STARTS[3]:-}" "$(str_index "$DEC_HEADER_LINE" "ADR")"
+
+# 150: Step-2 Ownership row — "owner"/"surfaces"/"test" are literal words inside the format
+# itself (no separate header line to drift from it), so equality + width is the whole check.
+OWN_FMT="$(extract_backtick_fmts "$STEP2_MD" '^Ownership row:')"
+OWN_ROW_LINE="$(grep -m1 '^    <concept>' "$STEP2_MD" 2>/dev/null)"
+OWN_RENDERED="$(fmt_render "$OWN_FMT" "<concept>" "<module>" "<where it renders>" "<suite>")"
+expect_eq "150a: AC-9.1 — steps/2.md's ownership row is exactly its own printf format applied to the card's sample values" \
+  "$OWN_RENDERED" "$OWN_ROW_LINE"
+if [ "${#OWN_RENDERED}" -le 100 ]; then
+  ok "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values (${#OWN_RENDERED})"
+else
+  no "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values" "width=${#OWN_RENDERED}"
+fi
+
+# 151: Step-2 Eval-design row + its static/unit/hermetic/live/human column header, both
+# REQ-<id> rows and the "total" row.
+EVAL_FMT="$(extract_backtick_fmts "$STEP2_MD" '^Eval-design row:')"
+EVAL_HEADER_LINE="$(grep -m1 '^  Eval design' "$STEP2_MD" 2>/dev/null)"
+EVAL_REQ_LINES=()
+while IFS= read -r _line; do EVAL_REQ_LINES+=("$_line"); done < <(grep '^    REQ-<id>' "$STEP2_MD" 2>/dev/null)
+EVAL_TOTAL_LINE="$(grep -m1 '^    total' "$STEP2_MD" 2>/dev/null)"
+EVAL_VALS1=("REQ-<id>" "<how it is proven, one line>" "2" "1" "3" "0" "1")
+EVAL_VALS2=("REQ-<id>" "<how it is proven, one line>" "1" "0" "2" "1" "0")
+EVAL_VALS_T=("total" "" "3" "1" "5" "1" "1")
+EVAL_RENDERED1="$(fmt_render "$EVAL_FMT" "${EVAL_VALS1[@]}")"
+EVAL_RENDERED2="$(fmt_render "$EVAL_FMT" "${EVAL_VALS2[@]}")"
+EVAL_RENDERED_T="$(fmt_render "$EVAL_FMT" "${EVAL_VALS_T[@]}")"
+expect_eq "151a: AC-9.1 — steps/2.md's first eval-design REQ row is exactly its own printf format applied to its sample values" \
+  "$EVAL_RENDERED1" "${EVAL_REQ_LINES[0]:-}"
+expect_eq "151b: AC-9.1 — steps/2.md's second eval-design REQ row is exactly its own printf format applied to its sample values" \
+  "$EVAL_RENDERED2" "${EVAL_REQ_LINES[1]:-}"
+expect_eq "151c: AC-9.1 — steps/2.md's eval-design total row is exactly its own printf format applied to its sample values" \
+  "$EVAL_RENDERED_T" "$EVAL_TOTAL_LINE"
+if [ "${#EVAL_RENDERED1}" -le 100 ]; then
+  ok "151d: AC-9.1 — steps/2.md's eval-design row fits within 100 columns with the sample values (${#EVAL_RENDERED1})"
+else
+  no "151d: AC-9.1 — steps/2.md's eval-design row fits within 100 columns with the sample values" "width=${#EVAL_RENDERED1}"
+fi
+EVAL_STARTS=()
+while IFS= read -r _line; do EVAL_STARTS+=("$_line"); done < <(fmt_field_starts "$EVAL_FMT" "${EVAL_VALS1[@]}")
+for _pair in "static:2" "unit:3" "hermetic:4" "live:5" "human:6"; do
+  _label="${_pair%%:*}"; _idx="${_pair##*:}"
+  expect_eq "151e-${_label}: AC-9.4 — steps/2.md's Eval design header '${_label}' label starts at the row format's ${_label} column" \
+    "${EVAL_STARTS[$_idx]:-}" "$(str_index "$EVAL_HEADER_LINE" "$_label")"
+done
+
+# 152: Step-3 Task row + its kind/depends/agent column header, both sample task rows.
+TASK_FMT="$(extract_backtick_fmts "$STEP3_MD" '^Task row:')"
+TASK_HEADER_LINE="$(grep -m1 '^  Tasks' "$STEP3_MD" 2>/dev/null)"
+TASK_ROW_LINES=()
+while IFS= read -r _line; do TASK_ROW_LINES+=("$_line"); done < <(grep '^    <n>' "$STEP3_MD" 2>/dev/null)
+TASK_VALS1=("<n>" "<the task in one line>" "build" "—" "senior-implementor")
+TASK_VALS2=("<n>" "<the task in one line>" "test" "<n>" "implementor")
+TASK_RENDERED1="$(fmt_render "$TASK_FMT" "${TASK_VALS1[@]}")"
+TASK_RENDERED2="$(fmt_render "$TASK_FMT" "${TASK_VALS2[@]}")"
+expect_eq "152a: AC-9.1/AC-9.4 — steps/3.md's first task row is exactly its own printf format applied to its sample values" \
+  "$TASK_RENDERED1" "${TASK_ROW_LINES[0]:-}"
+expect_eq "152b: AC-9.1/AC-9.4 — steps/3.md's second task row is exactly its own printf format applied to its sample values" \
+  "$TASK_RENDERED2" "${TASK_ROW_LINES[1]:-}"
+if [ "${#TASK_RENDERED1}" -le 100 ] && [ "${#TASK_RENDERED2}" -le 100 ]; then
+  ok "152c: AC-9.1 — steps/3.md's task row fits within 100 columns with the sample values (${#TASK_RENDERED1} / ${#TASK_RENDERED2})"
+else
+  no "152c: AC-9.1 — steps/3.md's task row fits within 100 columns with the sample values" \
+     "row1=${#TASK_RENDERED1} row2=${#TASK_RENDERED2}"
+fi
+TASK_STARTS=()
+while IFS= read -r _line; do TASK_STARTS+=("$_line"); done < <(fmt_field_starts "$TASK_FMT" "${TASK_VALS1[@]}")
+expect_eq "152d: AC-9.4 — steps/3.md's Tasks header 'kind' label starts at the row format's kind column" \
+  "${TASK_STARTS[2]:-}" "$(str_index "$TASK_HEADER_LINE" "kind")"
+expect_eq "152e: AC-9.4 — steps/3.md's Tasks header 'depends' label starts at the row format's depends column" \
+  "${TASK_STARTS[3]:-}" "$(str_index "$TASK_HEADER_LINE" "depends")"
+expect_eq "152f: AC-9.4 — steps/3.md's Tasks header 'agent' label starts at the row format's agent column" \
+  "${TASK_STARTS[4]:-}" "$(str_index "$TASK_HEADER_LINE" "agent")"
 
 # AC-9.3 (render clean, byte caps hold) is discharged by Section 11's `--check` arms and
 # Section 18's byte-cap arms against these same rendered finals — both already read

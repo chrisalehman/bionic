@@ -444,10 +444,13 @@ section "B9 — a suite named by a shell VARIABLE is a different refusal (C-5, A
 # 10(b), a fresh agent on its first attempt). The correct behaviour is still to refuse;
 # the wrong thing was the sentence.
 
+# Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25): the label "unexpanded name; budget: "
+# read as if the SET named the budget rather than the set of what is ALLOWED; renamed to
+# "unexpanded name; allowed: ".
 guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
 expect_eq "B9a a variable-named suite is still REFUSED" "2" "$ST"
 expect_contains "B9a …saying the name could not be resolved at hook time" \
-  "unexpanded name; budget: alpha.test.sh" "$ERR"
+  "unexpanded name; allowed: alpha.test.sh" "$ERR"
 expect_contains "B9a …and telling the reader what to type instead" \
   "Spell the suite literally, one per call" "$VERR"
 # THE HEADLINE THE READER ACTS ON must not claim the suite is off a budget the hook never
@@ -458,11 +461,11 @@ expect_absent "B9a …never claiming it is off the budget" "is not on this agent
 guarded "$R1" 'bash "tests/${s}.test.sh"'
 expect_eq "B9b the brace spelling reads the same way" "2" "$ST"
 expect_contains "B9b …with the same refusal" \
-  "unexpanded name; budget: alpha.test.sh" "$ERR"
+  "unexpanded name; allowed: alpha.test.sh" "$ERR"
 guarded "$R1" 'bash tests/`suite_name`.test.sh'
 expect_eq "B9c a command substitution reads the same way" "2" "$ST"
 expect_contains "B9c …with the same refusal" \
-  "unexpanded name; budget: alpha.test.sh" "$ERR"
+  "unexpanded name; allowed: alpha.test.sh" "$ERR"
 
 # CONTROL: the literal spelling the refusal asks for is allowed, so B9a is about the
 # spelling and not about the suite.
@@ -562,23 +565,31 @@ guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" true
 b11_line "B11a row 11 (backgrounded)" \
   "bionic: suite-run refused — a backgrounded suite's result is never read (run it in the foreground)"
 
+# Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25): T25 renamed all three labels because
+# the old wording put the ALLOWED set right after the words "off budget"/"budget:", which
+# reads as the opposite of what it means — see record/wave-14-tune-181/review-readability-
+# d3930dd.md half (b) item 1. "off budget: " -> "allowed: ", "unexpanded name; budget: " ->
+# "unexpanded name; allowed: ", "full tree off budget: " -> "full tree refused; allowed: ".
+# The longer full-tree label leaves six fewer columns for the set, which is why B11d's line
+# now shows one token instead of "alpha.test.sh +1 more" — recomputed through
+# `_budget_wire_fact`, not hand-guessed (T25 report).
 guarded "$R1" 'for s in alpha beta; do bash "tests/$s.test.sh"; done'
 b11_line "B11b row 12 (an unexpanded name)" \
-  "bionic: suite-run refused — unexpanded name; budget: alpha.test.sh (spell each suite literally)"
+  "bionic: suite-run refused — unexpanded name; allowed: alpha.test.sh (spell each suite literally)"
 
 guarded "$R1" 'bash tests/gamma.test.sh'
 b11_line "B11c row 13 (off the budget)" \
-  "bionic: suite-run refused — off budget: alpha.test.sh beta.test.sh (run only the budgeted suites)"
+  "bionic: suite-run refused — allowed: alpha.test.sh beta.test.sh (run only the budgeted suites)"
 
 guarded "$R1" 'bash tests/run.sh'
 b11_line "B11d row 14 (the full tree)" \
-  "bionic: suite-run refused — full tree off budget: alpha.test.sh +1 more (run your brief's suites)"
+  "bionic: suite-run refused — full tree refused; allowed: alpha.test.sh (run your brief's suites)"
 
-# AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 moved the set onto the fact line;
-# re-spelled by T18). What the knob gates has moved: the compact fact line now carries
-# the allowed set on the DEFAULT stream too (AC-5.2's own fix), so the split this pair
-# still proves is the explanatory PROSE ("On the budget:"/"You asked for:") — present in
-# the verbose detail only, never on the one-line default.
+# AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 → T18 fcd5a16 → T25). What the knob
+# gates has moved: the compact fact line now carries the allowed set on the DEFAULT stream
+# too (AC-5.2's own fix), so the split this pair still proves is the explanatory PROSE
+# ("On the budget:"/"You asked for:") — present in the verbose detail only, never on the
+# one-line default. The label on the default line is now "allowed:", not "off budget:".
 guarded "$R1" 'bash tests/gamma.test.sh'
 expect_contains "B11e even without the knob the allowed set now reaches the DEFAULT stream" \
   "alpha.test.sh beta.test.sh" "$ERR"
@@ -586,7 +597,7 @@ expect_absent "B11e …but the explanatory PROSE does not" "On the budget:" "$ER
 expect_contains "B11e …and with BIONIC_WALL_VERBOSE=1 the prose is there too" \
   "On the budget: alpha.test.sh beta.test.sh" "$VERR"
 expect_eq "B11e …with the one line still first" \
-  "bionic: suite-run refused — off budget: alpha.test.sh beta.test.sh (run only the budgeted suites)" \
+  "bionic: suite-run refused — allowed: alpha.test.sh beta.test.sh (run only the budgeted suites)" \
   "$(printf '%s\n' "$VERR" | head -1)"
 
 finish
