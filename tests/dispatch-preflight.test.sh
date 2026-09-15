@@ -2939,6 +2939,22 @@ s22_sweep() {
   swept_marker_write "$(roster_path "$1" "$2")" 2026-09-02T00:00:00Z "$2" "$3" "" MET
 }
 
+# s22_ack <repo> <sid> <name> [at] — one `event=ack` line on the sweeper's OWN ledger,
+# `.bionic/tmp/sweeper-<sid>.state`, which is where `session-sweeper.sh ack` journals the
+# orchestrator's judgement that a row is closed (that verb's write, :1020). The SCHEMA is
+# read out of the writer rather than transcribed here — §S15b's idiom for `SWEPT_SCHEMA`,
+# and for the same reason: a prefix that drifted would leave this fixture writing lines no
+# reader believes, silently and greenly. `at` defaults to a moment AFTER the launch stamp
+# `s22_roster_row` writes (2026-09-02T00:00:00Z), because an ack only closes a row it
+# postdates.
+S22_LEDGER_SCHEMA="$(/usr/bin/grep -m1 '^LEDGER_SCHEMA=' "${BIONIC_HOOKS_DIR}/session-sweeper.sh" | cut -d'"' -f2)"
+s22_ack() {
+  local f="$1/.bionic/tmp/sweeper-$2.state"
+  mkdir -p "$(dirname "$f")"
+  printf '%s|event=ack|at=%s|epoch=1756771200|pid=%s|session=%s|name=%s|by=human\n' \
+    "$S22_LEDGER_SCHEMA" "${4:-2026-09-03T00:00:00Z}" "$$" "$2" "$3" >> "$f"
+}
+
 # s22_fake_tree <repo> <dir> — a linked worktree's on-disk signature: a `.git` FILE.
 s22_fake_tree() {
   mkdir -p "$1/.worktrees/$2"
@@ -3206,33 +3222,189 @@ expect_status "r22jd an empty roster needs no live reading -> the same STALE tra
   "0" "$GATE_ST"
 expect_absent "…and says nothing about live-agents" "live-agents:" "$GATE_ERR"
 
-# (e) THE TOKEN ITSELF IS GONE, NOT MERELY UNCONSULTED (AC-7 "no landing-swept marker is
-# consulted"). r22ja/r22jb pin the BEHAVIOUR — presence in the fresh live set is what
-# opens or closes a row — but nothing above pins the IMPLEMENTATION: that the retired
-# marker cannot quietly become a second, competing signal inside this same function on
-# some future edit. A token pin on the function's own body is the only way to close that.
+# (e) THE CLOSING MARKER IS UNREACHABLE WHILE THE PANEL IS FRESH (wave-14 AC-3.4,
+# narrowing wave-12 AC-7).
+#
+# WHAT THE OLD PIN SAID. AC-7 retired `landing-swept` as this wall's closing signal
+# outright and pinned the retirement on the function's own body at the TOKEN level, so the
+# marker could not quietly come back as a second, competing signal on some future edit.
+# r22ja/r22jb pin the BEHAVIOUR — presence in the fresh live set is what opens or closes a
+# row — and this arm pinned the implementation beside them.
+#
+# WHAT WAVE-14 NARROWS, AND WHY (D7, REQ-3). The retirement is kept whole for the case it
+# was written for: WHILE THE PANEL IS FRESH THE PANEL IS THE TRUTH AND NO MARKER IS
+# CONSULTED. It is lifted on the one path wave-12 left counting every `status=intended` row
+# open forever — a STALE or ABSENT panel, where there is no reading to prefer and nine
+# landed rows held nine writer slots for the rest of the session (§budget-markers below).
+# The precedent is in this same file: the name-in-flight arm has read the same marker off
+# the same roster to answer the same question since T26.
+#
+# SO THE PIN MOVES from "the token is absent from the body" to "the token is UNREACHABLE on
+# the fresh path", and it is held by a delimited span: everything the count does when the
+# panel HAS spoken for a row sits between `BEGIN fresh-panel branch` and `END fresh-panel
+# branch`, and no closing reading may appear inside it. The mutation arm plants one there.
 BUDGET_FN_BODY="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE")"
 expect_eq "…and the extracted span is non-empty (the pin is not vacuously true)" "1" \
   "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'budget_roster_counts() {' || true)"
-expect_eq "budget_roster_counts's own body carries no landing-swept token" "0" \
-  "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'landing-swept' || true)"
+# THE NARROWING IS REAL IN BOTH DIRECTIONS. The count DOES consult the closing reading —
+# once, through the one owner both roster walls share — so a body that had simply dropped
+# the marker again (and taken §budget-markers red) fails here too.
+expect_eq "budget_roster_counts consults the closing reading exactly once, through its one owner" "1" \
+  "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'dp_roster_contracts' || true)"
+BUDGET_FRESH_SPAN="$(printf '%s\n' "$BUDGET_FN_BODY" \
+  | /usr/bin/awk '/BEGIN fresh-panel branch/, /END fresh-panel branch/')"
+expect_nonempty "…and the fresh-panel branch is delimited (the span pin is not vacuous)" \
+  "$BUDGET_FRESH_SPAN"
+expect_eq "the fresh-panel branch consults no landing marker at all (never while FRESH)" "0" \
+  "$(printf '%s\n' "$BUDGET_FRESH_SPAN" | /usr/bin/grep -cE 'landing-swept|dp_roster_contracts' || true)"
 
-# THE ANTI-VACUITY ARM: a doctored copy that re-adds the token inside the SAME function
-# body must fail the pin above. The doctor inserts one inert statement right after the
-# function's own opening line — not a comment change to the signature, which would move
-# the extractor's own anchor and prove nothing.
+# THE ANTI-VACUITY ARM: a doctored copy that reads a marker INSIDE the fresh-panel branch
+# must fail the pin above. The doctor inserts one inert statement right after the span's own
+# opening delimiter — not a comment change to the function signature, which would move the
+# extractor's anchor and prove nothing.
 GATE_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-swept-mut.XXXXXX")"
 GATE_MUT="$GATE_MUT_ROOT/dispatch-preflight.sh"
 awk '
   { print }
-  /^  budget_roster_counts\(\) \{  #/ { print "    : # landing-swept/v1 reintroduced by mutation (test-only)" }
+  /---- BEGIN fresh-panel branch/ { print "        : \"$(dp_roster_contracts \"$f\")\" # landing-swept read on the FRESH path (test-only)" }
 ' "$GATE" > "$GATE_MUT"
 expect_eq "swept-mut meta: the doctor's re-added line landed (the anchor still matches)" "1" \
-  "$(/usr/bin/grep -c 'reintroduced by mutation' "$GATE_MUT")"
+  "$(/usr/bin/grep -c 'landing-swept read on the FRESH path' "$GATE_MUT")"
 BUDGET_FN_BODY_MUT="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE_MUT")"
-expect_contains "…and the doctored body now DOES carry the token (the pin above discriminates)" \
-  "landing-swept" "$BUDGET_FN_BODY_MUT"
+BUDGET_FRESH_SPAN_MUT="$(printf '%s\n' "$BUDGET_FN_BODY_MUT" \
+  | /usr/bin/awk '/BEGIN fresh-panel branch/, /END fresh-panel branch/')"
+expect_contains "…and the doctored fresh branch now DOES read a marker (the pin above discriminates)" \
+  "dp_roster_contracts" "$BUDGET_FRESH_SPAN_MUT"
 rm -rf "$GATE_MUT_ROOT"
+
+# ================= §budget-markers: A LANDED ROW HOLDS NO WRITER SLOT ON A DARK PANEL
+# (wave-14 REQ-3, design D7; seed C18; A-orch-23.)
+#
+# WHAT S22b-nla LEFT. The fallback above judges a dark panel against the roster's own
+# `status=intended` rows — every one of them, because nothing there asks whether a row
+# FINISHED. On a wave of nine tasks that is nine writers for the rest of the session: the
+# panel goes stale for one turn and the next dispatch is refused on a budget that eight
+# landed rows are still holding. The roster already carries the closing fact — the
+# `landing-swept/v1|…|state=MET` marker the name-in-flight arm has read since T26 — and the
+# sweeper's ledger carries the other, for a row the sweep cannot verdict (a row that
+# declared nothing durable stats MET vacuously).
+#
+# THE RULE (D7). A row is open iff `status=intended` and, WHEN THE PANEL IS STALE OR ABSENT,
+# no landing marker and no ack closes its latest contract. A FRESH panel is still the whole
+# truth and no marker is consulted at all — that is (c).
+#
+# EACH ARM MOVES ONE THING. (a) and (b) share the roster, the ceiling and the stale panel and
+# differ only in whether the markers are there; (b) and (c) share the markers and differ only
+# in the panel's freshness; (d) and (e) share the acks and differ only in WHEN they were taken.
+
+section "§budget-markers: a landed row holds no writer slot on a dark panel"
+
+S22MK_NAMES="m1 m2 m3 m4 m5 m6 m7 m8 m9"
+S22MK_LANDED="m1 m2 m3 m4 m5 m6 m7"
+
+expect_nonempty "§budget-markers meta: the ack fixture read a ledger schema out of the writer" \
+  "$S22_LEDGER_SCHEMA"
+
+# (a) AC-3.1 — nine intended rows, seven carrying the landing marker, a STALE panel, and a
+# ceiling of eight writers: open=2, this dispatch is the third, ALLOWED.
+REPO=$(make_repo r22mka yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+R22MK_STALE="$SANDBOX/.r22mk-stale.jsonl"
+# shellcheck disable=SC2086
+mk_transcript "$R22MK_STALE" stale $S22MK_NAMES
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mka nine rows, seven landed, STALE panel, writers=8 -> ALLOWED" "0" "$GATE_ST"
+expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
+expect_absent "…and nothing is said about the panel's staleness" "live-agents:" "$GATE_ERR"
+
+# (b) AC-3.2 — THE CONTROL, and the discriminator for (a): the same nine rows, the same
+# stale panel and the same ceiling, with NO markers written. open=9 and the dispatch is
+# refused, naming the budget. A rule that had simply stopped counting would pass both.
+REPO=$(make_repo r22mkb yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mkb the same nine rows UNMARKED on the same stale panel -> REFUSED" "2" "$GATE_ST"
+expect_contains "…on the budget, in the one line" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…naming the count the roster holds" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
+
+# (c) AC-3.3 — THE PANEL WINS WHEN IT IS FRESH. The same nine rows and the same seven
+# markers as (a); only the panel changes, to a FRESH answer naming all nine as live. The
+# markers say landed, the panel says working, and the panel is the truth: open=9, REFUSED.
+REPO=$(make_repo r22mkc yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+R22MK_FRESH="$SANDBOX/.r22mk-fresh.jsonl"
+# shellcheck disable=SC2086
+mk_transcript "$R22MK_FRESH" fresh $S22MK_NAMES
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_FRESH")"
+expect_status "r22mkc a FRESH panel naming all nine live is not overridden by seven markers -> REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "…counting all nine open, because the panel said so" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
+
+# (d) THE ACK IS THE SECOND CLOSING TRUTH (REQ-3: "a landing marker or an ack"). The same
+# nine rows and the same stale panel as (b), no markers at all — seven rows acked on the
+# sweeper's own ledger instead. open=2, ALLOWED.
+REPO=$(make_repo r22mkd yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_ack "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mkd seven rows ACKED on a stale panel, writers=8 -> ALLOWED" "0" "$GATE_ST"
+expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
+
+# (e) AN ACK CLOSES THE ROW IT POSTDATES, NOT THE NAME FOREVER. Byte-for-byte (d)'s
+# fixture with the acks dated BEFORE the rows were launched — the shape a name re-dispatched
+# after its ack leaves behind. The ledger holds no ordering against the roster, so the
+# comparison is by time, and an ack that predates the launch closes nothing: open=9, REFUSED.
+REPO=$(make_repo r22mke yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_ack "$REPO" "$SID_A" "$_n" 2026-09-01T00:00:00Z; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mke acks dated BEFORE the rows were launched close nothing -> REFUSED" "2" "$GATE_ST"
+expect_contains "…counting all nine open" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
+
+# (f) A MARKER IS NOT A LATCH (the C1/S2 defect, in this wall's own terms). (a)'s fixture
+# with every landed name DISPATCHED AGAIN below its marker: a fresh `status=intended` row
+# retires the marker above it, so all nine are open once more and the ceiling of eight
+# refuses. This is what makes the reading above a LATEST-CONTRACT reading and not a set.
+REPO=$(make_repo r22mkf yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mkf a name re-dispatched below its own marker is open again -> REFUSED" "2" "$GATE_ST"
+expect_contains "…counting all nine open" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
+
+# (g) THE CLAIM GOES BACK WITH THE SLOT. A landed row's subprocess claim is not spent
+# either: nine rows each claiming a suite, seven landed, a stale panel and a ceiling of two
+# suites — claimed=2, so this dispatch is the third and the SUITE arm allows it. Without the
+# claim half of the subtraction the same fixture refuses on `suites:`.
+REPO=$(make_repo r22mkg yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=3 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n" "bash tests/widget.test.sh"; done
+for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mkg seven landed rows give their suite claims back too -> ALLOWED at suites=3" \
+  "0" "$GATE_ST"
+expect_absent "…and no suite count is printed" "suites:" "$GATE_ERR"
 
 # ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
 # (spec R2, AC-27; task S16, closing the Step-5 auditor's F-1.)
@@ -4732,12 +4904,20 @@ expect_status "§combined attempt 2, following every scaffold-line example, PASS
 expect_status "§combined …with the recommended path as the contract" \
   "$COMB_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
 
-# ---- the discriminator: declaring ONE field un-marks only that field's line ----
+# ---- the discriminator: declaring one field un-marks that field's PAIR, and nothing else ----
 #
 # Without this arm a wall that printed the scaffold with every line marked unconditionally
-# would pass every assertion above. Suites: is now declared and nothing else is touched: its
-# line must stop carrying <ADD> while Files: (still absent) and Expected artifact: (still
-# ambiguous) keep theirs — proof the marking tracks this brief's own fields, not a static list.
+# would pass every assertion above. Suites: is now declared and nothing else is touched.
+#
+# AMENDED BY WAVE-14 REQ-6/D8. Until 1.8.1 this arm also pinned that the absent Files: line
+# KEPT its <ADD> here — the literal-presence rule, which read this brief as lacking a label
+# it does not need. `Suites:` and `Files:` are the two halves of one declaration (the
+# suite-allowance wall refuses only when BOTH are absent), so a brief that declared its
+# suites is asking for nothing when it omits its files: this is precisely the read-only
+# shape §scaffold-marks (a) names. The row's expected outcome moves with the rule; what the
+# arm exists to discriminate does not, because the still-ambiguous Expected artifact: line
+# (and the Deliverable-waiver: line beside it) keep their marks on the same wire, and
+# §scaffold-marks (b)/(d) hold a fixture where the Files: line is still marked.
 REPO=$(make_repo rcomb3 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS
@@ -4746,8 +4926,12 @@ COMB_SUITES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Suites")"
 expect_eq "§combined a two-fault brief is still refused" "deny" "$GATE_VERDICT"
 expect_absent "§combined …and the now-declared Suites: line lost its <ADD>" \
   "${COMB_SUITES_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§combined …while the still-absent Files: line keeps its <ADD>" \
+expect_absent "§combined …and the Files: line its declared Suites: satisfies loses its <ADD> too" \
   "${COMB_FILES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§combined …while the Files: line itself is still rendered, exactly as shipped" \
+  "$COMB_FILES_LINE" "$GATE_VERR"
+expect_contains "§combined …and the unsatisfied Deliverable-waiver: line keeps its <ADD>" \
+  "${COMB_WAIVER_LINE} <ADD>" "$GATE_VERR"
 expect_contains "§combined …and the still-ambiguous Expected artifact: line keeps its <ADD>" \
   "${COMB_ART_LINE} <ADD>" "$GATE_VERR"
 
@@ -4767,6 +4951,119 @@ expect_eq "§combined a single-fault brief keeps the arm's own line, unchanged" 
 expect_eq "§combined …and renders exactly one Fix: block" "1" \
   "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
 
+# ============================================================================
+section "§scaffold-marks — the scaffold marks what the brief LACKS, not what it omits (wave-14 REQ-6, D8)"
+# ============================================================================
+#
+# WHAT A MARK MEANS. `dp_scaffold_marked` reproduces the shipped scaffold and suffixes
+# ` <ADD>` to the lines this brief still needs. Until wave-14 it asked only "did this brief
+# spell this label", which is A-T2.1's literal-presence rule — and three of the scaffold's
+# labels are not standalone requirements at all. The scaffold says so itself: `Files:` is
+# "writers; omit for a read-only brief", `Deliverable-waiver:` is "only for a report returned
+# by message". So a read-only brief that had correctly declared `Suites:` was told to add
+# files it will not touch, and a brief that had declared its artifact was told to waive it —
+# an instruction that, followed, would make the dispatch worse. Two of the three items on
+# wave-13's walk.
+#
+# THE RULE (D8). `Files:` is marked only when `C_FILES` and `C_SUITES` are BOTH empty — the
+# suite-allowance wall's own condition, so the mark appears exactly when that wall fires.
+# `Expected artifact:` and `Deliverable-waiver:` are each marked only when `C_DELIVERABLE`
+# and `C_WAIVER` are both empty — the absent-deliverable wall's own condition, and the pair
+# is symmetric because either one satisfies the contract.
+#
+# KEYED ON THE LIFTED FIELDS, NEVER ON LITERAL LINE PRESENCE (R2 Q7). `BRIEF_THREE_FAULTS`
+# below carries an `Expected artifact:` line whose span names two paths: the extractor emits
+# candidates and leaves `C_DELIVERABLE` empty, so the brief HAS the label and still needs it.
+# A rule keyed on the label's presence would unmark it and take (c) — and §combined's own
+# pin — red.
+#
+# EVERY EXPECTED STRING IS READ OUT OF THE SHIPPED dispatch.md at run time, never
+# transcribed, exactly as §combined does it.
+
+SM_ART_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact")"
+SM_FILES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
+SM_SUITES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Suites")"
+SM_WAIVER_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Deliverable-waiver")"
+expect_nonempty "§scaffold-marks meta: the four scaffold lines were read out of dispatch.md" \
+  "${SM_ART_LINE}${SM_FILES_LINE}${SM_SUITES_LINE}${SM_WAIVER_LINE}"
+
+# (a) AC-6.1 — A READ-ONLY BRIEF DECLARES ITS INSTRUMENT THE OTHER WAY. `Suites: none` is
+# the read-only waiver, so `Files:` is satisfied and must not be marked. The brief carries
+# two faults of its own (an ambiguous deliverable label, and no deliverable behind it) so the
+# refusal takes the several-fault wire, which is where the scaffold is rendered.
+REPO=$(make_repo rsm-readonly yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Expected duration: 20 minutes
+Suites: none" "smbot1")"
+expect_status "§scaffold-marks (a) the read-only brief refuses on the several-fault wire" "0" \
+  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
+expect_absent "§scaffold-marks (a) …and its Files: line is NOT marked — Suites: none declared it" \
+  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (a) …the Files: line is still rendered, exactly as shipped" \
+  "$SM_FILES_LINE" "$GATE_VERR"
+expect_absent "§scaffold-marks (a) …nor is the declared Suites: line marked" \
+  "${SM_SUITES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (a) …while the still-ambiguous Expected artifact: line IS marked" \
+  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
+
+# (b) AC-6.2 — A DECLARED ARTIFACT SATISFIES THE WAIVER'S HALF OF THE PAIR. The deliverable
+# resolves outside the repo and the brief declares no instrument: two faults, and a
+# `C_DELIVERABLE` that is non-empty. Nothing here needs a waiver.
+REPO=$(make_repo rsm-artifact yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: ../../../../../../etc/hosts
+Expected duration: ~15 minutes." "smbot2")"
+expect_status "§scaffold-marks (b) the artifact-bearing brief refuses on the several-fault wire" "0" \
+  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
+expect_absent "§scaffold-marks (b) …and the Deliverable-waiver: line is NOT marked beside a declared artifact" \
+  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (b) …the Deliverable-waiver: line is still rendered, as shipped" \
+  "$SM_WAIVER_LINE" "$GATE_VERR"
+expect_absent "§scaffold-marks (b) …nor is the declared Expected artifact: line marked" \
+  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (b) …while the absent Files: line IS marked (no instrument either way)" \
+  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
+
+# (c) AC-6.2, THE OTHER DIRECTION. A declared waiver satisfies the artifact's half of the
+# same pair: the brief reports by message, so `Expected artifact:` is not something it
+# lacks. Its two faults are the ambiguous label and the missing instrument — the
+# absent-deliverable wall is waived, which is what the waiver is for.
+REPO=$(make_repo rsm-waiver yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Deliverable-waiver: nothing durable — this dispatch reports by message
+Expected duration: 20 minutes" "smbot3")"
+expect_status "§scaffold-marks (c) the waived brief refuses on the several-fault wire" "0" \
+  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
+expect_absent "§scaffold-marks (c) …and the Expected artifact: line is NOT marked beside a declared waiver" \
+  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
+expect_absent "§scaffold-marks (c) …nor is the declared Deliverable-waiver: line marked" \
+  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (c) …while the absent Files: line IS marked" \
+  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
+
+# (d) AC-6.3 — BOTH ABSENT, BOTH MARKED. `BRIEF_THREE_FAULTS` is §combined's own fixture and
+# this is its pin restated where the rule now lives: neither half of either pair is
+# satisfied, so every one of the four lines earns its mark. A rule keyed on literal label
+# presence would unmark the `Expected artifact:` line here, which is the mistake this arm
+# exists to catch.
+REPO=$(make_repo rsm-both yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "smbot4")"
+expect_status "§scaffold-marks (d) the three-fault brief refuses on the several-fault wire" "0" \
+  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
+expect_contains "§scaffold-marks (d) both absent -> the Expected artifact: line is marked" \
+  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (d) both absent -> the Deliverable-waiver: line is marked" \
+  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (d) neither instrument -> the Files: line is marked" \
+  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (d) neither instrument -> the Suites: line is marked" \
+  "${SM_SUITES_LINE} <ADD>" "$GATE_VERR"
 # ============================================================================
 section "§combined-deny — the combined refusal reaches the MODEL (wave-12 T17, AC-1.1)"
 # ============================================================================
