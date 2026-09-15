@@ -278,10 +278,12 @@ GATE_TIME=0
 # SUB-SECOND, via python3, for the same reason tests/session-start.test.sh §16 reaches for
 # it: a whole-second `date +%s` difference is off by up to a full second either way
 # depending on where the two reads straddle a tick. Two arms in this file claim the gate
-# "stopped waiting at the bound", and at a 20s bound the thing they have to tell apart is a
-# 20s wait from a 23s one — three seconds, of which a whole-second clock can lose one at
-# each end. That is how a tick-counted wait ran 15% long underneath these two arms for a
-# whole wave without either of them noticing (wave-14 T34).
+# "stopped waiting at the bound", and what they have to tell apart is a wait that ended on
+# the bound from one that ran 15% past it — at the 20s bound of the time, 20s from 23s, of
+# which a whole-second clock can lose one second at each end. That is how a tick-counted
+# wait ran 15% long underneath these two arms for a whole wave without either of them
+# noticing (wave-14 T34). The margin shrinks with the bound, which is why the slack below
+# is stated against `$S29_BOUND` rather than left at a fixed number of seconds.
 #
 # HUNDREDTHS, AS AN INTEGER, so the comparison stays in bash arithmetic and no arm has to
 # fork a second interpreter to decide. A host with no python3 answers 999999, which fails
@@ -4612,8 +4614,8 @@ expect_contains "28f …and the wall still reports zero causes" "Recorded causes
 section "SECTION 29 — the derivation is BOUNDED, and the overrun is a refusal (review-c C-16)"
 # THE DEFECT. The impact command is the whole of this gate's cost — ~0.3 s without it,
 # ~2.9-3.1 s with it on an idle tree, 5.06-6.51 s measured while this wave's own writers
-# were running. hooks/hooks.json registers the hook at "timeout": 10 and the call had no
-# bound of its own. A PreToolUse hook killed on the CLI's timeout does NOT exit 2: the
+# were running. hooks/hooks.json registers the hook at a timeout of its own and the call
+# had no bound of its own. A PreToolUse hook killed on the CLI's timeout does NOT exit 2: the
 # dispatch proceeds, NO ROSTER ROW IS WRITTEN, and the writer runs with no budget at all —
 # the wall defeated by the cost of the wall. So the bound is built here, and it refuses.
 #
@@ -4666,13 +4668,14 @@ expect_contains "29a …and saying why an unbounded one would be worse" "no rost
 #
 # THIS ASSERTION USED TO READ `< 10`, THE HOOK'S OWN REGISTRATION IN hooks/hooks.json, and
 # it is re-pinned to the bound instead (wave-14 T6, A-T6.5) — NOT because the registration
-# stopped mattering. `IMPACT_BOUND_S` is 20 and dispatch-preflight.sh is registered at
-# `"timeout": 10`, so on the machine the CLI kills this hook before its own bound can fire,
-# and a hook killed on the CLI timeout does not exit 2 — which is the exact failure the
-# bound exists to prevent, written out in lib/bounds.sh's own header. The suite drives the
-# gate directly and has no CLI timeout, so AC-7.2 is discharged here and the gap is NOT.
-# Whoever closes it moves one of the two numbers; both are ratified and neither is this
-# task's to move.
+# stopped mattering. THE GAP A-T6.5 NAMED IS CLOSED (wave-14 T35, D1 by Chris): the bound
+# was 20 under a registration of 10, so on the machine the CLI killed this hook before its
+# own bound could fire, and a hook killed on the CLI timeout does not exit 2 — the exact
+# failure the bound exists to prevent, invisible here because a suite has no CLI timeout.
+# Both numbers moved: the registration to 15, the bound to 10, five seconds clear. What
+# this file discharges is AC-7.2, that the wait ends when the bound says so; that the bound
+# sits strictly UNDER its registration is a two-file claim neither file can make alone, and
+# tests/cross-gate-agreement.test.sh §L.4c is where it is pinned.
 # EIGHT SECONDS OF SLACK WAS ENOUGH TO HIDE THE DEFECT IT WAS WATCHING (wave-14 T34). This
 # read `< S29_BOUND + 8` over a whole-second clock. The gate's wait was denominated in
 # `sleep 0.1` polls costing 115 ms each, so a stated 20s bound waited 23.0-23.2s — comfortably
@@ -5986,7 +5989,8 @@ expect_eq "§slow-impact …and the row carries the derivation's own answer" "al
 # ---- THE PAIRED ARM (T29, AC-7.1 discrimination) ----
 #
 # WHY THE ARM ABOVE PROVES NOTHING ALONE. §slow-impact's claim is that the SHIPPED bound
-# (20s, T9/D4) is what admits a 5.6s derivation — not that any bound would. At the
+# (10s since T35's D1 move, 20s as T9/D4 first set it) is what admits a 5.6s derivation —
+# not that any bound would. At the
 # superseded 6s bound the same 5.6s sleep cleared by only 0.4s, so this section passed
 # there too (T6-one-refusal.md §3; auditor finding AC-7.1, UNVERIFIABLE at d3930dd): the
 # observation is identical with the bound move absent. The missing control is the SAME
@@ -6042,9 +6046,10 @@ section "§hanging-impact — a hang is still bounded, and the bound is named (w
 # ============================================================================
 #
 # WHAT IS LEFT FOR A BOUND TO DO once the cost is cached: an impact command that never
-# returns. hooks/hooks.json registers this hook at "timeout": 10 and a hook killed on the
-# CLI's own timeout does NOT exit 2 — the dispatch proceeds with no roster row and
-# therefore no budget at all — so the wait has to end on OUR terms.
+# returns. A hook killed on the CLI's own timeout does NOT exit 2 — the dispatch proceeds
+# with no roster row and therefore no budget at all — so the wait has to end on OUR terms,
+# strictly inside the registration hooks/hooks.json gives this hook (§L.4c in
+# cross-gate-agreement pins the pair; both numbers are read from their own files).
 #
 # NO SEAM. The bound is the shipped constant, read from lib/bounds.sh; the fixture simply
 # outruns it. A test that shortened the bound would prove a value it had itself supplied.

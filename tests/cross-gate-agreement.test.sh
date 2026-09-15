@@ -2919,7 +2919,7 @@ HOOKS_JSON_ROWS=$(jq -r '
 L2_EXPECTED='
 PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/bash-walls.sh|10
 PreToolUse|TaskStop|${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10
-PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10
+PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|15
 PreToolUse|Write|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Bash|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
@@ -2968,8 +2968,18 @@ L4_HJ_TOTAL=$(jq '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$HOOK
 L4_HJ_TIMED=$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(has("timeout"))] | length' "$HOOKS_JSON_SRC")
 expect_eq "the manifest: EVERY hook entry carries a timeout key — none unbounded" \
   "$L4_HJ_TOTAL" "$L4_HJ_TIMED"
-expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
-  "$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(.timeout != 10)] | length' "$HOOKS_JSON_SRC")"
+# TEN IS THE CEILING FOR EVERY HOOK BUT ONE (wave-14 T35, ledger D1). The dispatch wall
+# is registered at 15 because its own inner bound is 10 and an inner bound must sit
+# STRICTLY under its registration or it can never fire (§L.4c below, which pins that pair
+# against lib/bounds.sh). The exception is named here by the hook it belongs to rather
+# than counted away, so a SECOND hook drifting off the ceiling fails this row.
+expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10, the dispatch wall excepted" "0" \
+  "$(jq '[.hooks | to_entries[] | .value[] | .hooks[]
+         | select(.timeout != 10)
+         | select((.command | test("/dispatch-preflight\\.sh( |$)")) | not)] | length' "$HOOKS_JSON_SRC")"
+expect_eq "…and the one exception is the dispatch wall, at 15, so its 10s bound can fire before the CLI kills the hook" "15" \
+  "$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[]
+            | select(.command | test("/dispatch-preflight\\.sh( |$)")) | .timeout] | unique | .[]' "$HOOKS_JSON_SRC")"
 
 # --- L.5 THE GUARD SURVIVES WHERE ITS PURPOSE SURVIVES ---
 #
@@ -2983,9 +2993,96 @@ expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
 # `resume`. The timeout is always the last field, so read it as the last field; a matcher
 # may not be. The cross-CHANNEL half of this check retired with the frontmatter block:
 # there is one channel now, and §L.1 asserts the other is empty.
-L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $NF}' | sort -u)
-expect_eq "the manifest renders exactly one timeout value across all its rows" \
-  "10" "$L4B_HJ_VALUES"
+L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $NF}' | sort -u \
+  | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the manifest renders exactly the two timeout values the fleet has, read as the LAST field" \
+  "10 15" "$L4B_HJ_VALUES"
+
+# --- L.4c EVERY INNER BOUND SITS STRICTLY UNDER ITS HOOK'S REGISTRATION ---
+#
+# THE INVARIANT (epic-23 wave-14-tune-181, REQ-7; D2 ratified "(a)", D1 in-wave). A hook
+# that waits on something slow owns an INNER bound: the second at which it stops waiting
+# and refuses on its own terms. The manifest above registers that same hook at an OUTER
+# timeout. If the inner bound is not STRICTLY under the outer registration it can never
+# fire — the CLI kills the hook first, a killed hook exits 124 rather than the 2 a refusal
+# spells, and the refusal that was in flight silently becomes a PASS. That is the one
+# failure both of bionic's bounded gates exist to prevent.
+#
+# AND IT IS INVISIBLE TO EVERY SUITE THAT DRIVES A GATE DIRECTLY. A suite has no CLI
+# timeout, so the two numbers can disagree for a whole release while each side's own
+# section stays green: tests/dispatch-preflight.test.sh drove a 20 s bound to a refusal
+# hundreds of times under a 10 s registration that would have killed it on the machine
+# (A-T6.5, four reviewers). The gap is only visible where the two FILES meet, which is
+# here.
+#
+# BOTH SIDES ARE READ, NEITHER IS TRANSCRIBED. The registration comes out of
+# hooks/hooks.json by the hook's own COMMAND PATH — never by array index, because the
+# order of entries in a JSON array is nobody's contract and an index silently reads a
+# different hook the moment one is inserted above it. The bound comes out of
+# payload/scripts/lib/bounds.sh by SOURCING it, because what a consumer gets is what
+# sourcing gives it. A wave that moves either number without the other turns this red.
+L4C_BOUNDS="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh"
+
+# l4c_registration <hook filename> -> the timeout(s) hooks.json registers that command at,
+# one per line, de-duplicated. Matched on the path segment so `stop.sh` cannot match
+# `stop-guard.sh`, and every entry naming the hook is read — the landing sweep is
+# registered twice (Stop straight, SubagentStop behind the guard) and BOTH registrations
+# bound the same inner number, so a wave that moved one of them alone must fail here.
+l4c_registration() {
+  jq -r --arg h "$1" '[.hooks | to_entries[] | .value[] | .hooks[]
+      | select(.command | test("/" + ($h | gsub("\\."; "\\.")) + "( |$)"))
+      | .timeout] | unique | .[]' "$HOOKS_JSON_SRC" 2>/dev/null
+}
+
+# l4c_bound <bounds file> <variable> -> the value sourcing that file gives that name.
+l4c_bound() {
+  bash -c '. "$1" 2>/dev/null; eval "printf %s \"\${$2:-}\""' _ "$1" "$2" 2>/dev/null
+}
+
+# l4c_verdict <bounds file> <variable> <registration> -> `under` or `NOT under`.
+# STRICTLY under: a bound EQUAL to the registration is the failure, not the boundary case.
+# The hook needs the difference to spend on everything it does that is not waiting.
+l4c_verdict() {
+  local _v; _v="$(l4c_bound "$1" "$2")"
+  if [ -n "$_v" ] && [ -n "$3" ] && [ "$_v" -lt "$3" ] 2>/dev/null; then
+    printf 'under'
+  else
+    printf 'NOT under'
+  fi
+}
+
+for _l4c_pair in "dispatch-preflight.sh|IMPACT_BOUND_S|the dispatch wall" \
+                 "stop.sh|LG_IMPACT_BOUND_S|the landing sweep"; do
+  _l4c_hook="${_l4c_pair%%|*}"
+  _l4c_rest="${_l4c_pair#*|}"
+  _l4c_var="${_l4c_rest%%|*}"
+  _l4c_who="${_l4c_rest#*|}"
+  _l4c_regs="$(l4c_registration "$_l4c_hook")"
+  _l4c_reg="$(printf '%s\n' "$_l4c_regs" | /usr/bin/grep -c .)"
+  expect_eq "L.4c hooks/hooks.json registers ${_l4c_hook} at ONE timeout value, however many events name it" \
+    "1" "$_l4c_reg"
+  _l4c_reg="$(printf '%s\n' "$_l4c_regs" | head -1)"
+  _l4c_val="$(l4c_bound "$L4C_BOUNDS" "$_l4c_var")"
+  expect_nonempty "L.4c …and lib/bounds.sh answers for ${_l4c_var} (not vacuous: both sides were read)" \
+    "$_l4c_val"
+  expect_eq "L.4c ${_l4c_who}: ${_l4c_var}=${_l4c_val}s sits strictly under ${_l4c_hook}'s ${_l4c_reg}s registration, margin $(( ${_l4c_reg:-0} - ${_l4c_val:-0} ))s" \
+    "under" "$(l4c_verdict "$L4C_BOUNDS" "$_l4c_var" "$_l4c_reg")"
+done
+
+# NOT VACUOUS: a bounds.sh whose inner numbers sit exactly AT their registrations must be
+# judged `NOT under` by the same derivation the rows above ran. At the registration is the
+# real shape of the defect — a bound of 20 under a registration of 10 is only its loudest
+# form — so that is what the mutant carries.
+anchor -E "$L4C_BOUNDS" '^IMPACT_BOUND_S=[0-9]+$' 1
+anchor -E "$L4C_BOUNDS" '^LG_IMPACT_BOUND_S=[0-9]+$' 1
+DOCTORED_L4C="$SANDBOX/bounds-at-the-registration.sh"
+sed -e "s/^IMPACT_BOUND_S=[0-9]*$/IMPACT_BOUND_S=$(l4c_registration dispatch-preflight.sh | head -1)/" \
+    -e "s/^LG_IMPACT_BOUND_S=[0-9]*$/LG_IMPACT_BOUND_S=$(l4c_registration stop.sh | head -1)/" \
+    "$L4C_BOUNDS" > "$DOCTORED_L4C"
+expect_eq "L.4c …and a bounds.sh carrying the wall's bound AT its registration reads NOT under" \
+  "NOT under" "$(l4c_verdict "$DOCTORED_L4C" IMPACT_BOUND_S "$(l4c_registration dispatch-preflight.sh | head -1)")"
+expect_eq "L.4c …and the same for the sweep's, so both rows above discriminate" \
+  "NOT under" "$(l4c_verdict "$DOCTORED_L4C" LG_IMPACT_BOUND_S "$(l4c_registration stop.sh | head -1)")"
 
 # hooks/agent-context-guard.sh runs the wall behind it only for a payload carrying a
 # top-level agent_id in a session that has a roster on disk. It fronted four entries,
@@ -9293,7 +9390,14 @@ expect_eq "S19.3 …declared by 42 anchor calls (Section 8's doctoring rewrites 
 # generation-cap mutant (detect.sh's `_detect_bound_kill_tree`, doctored from 16 to 1)
 # anchors its one needle before the `sed`. RE-DERIVED BY DIRECT GREP over this file at
 # THIS commit, as every number in this section is.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 27 more" "27" \
+#
+# 29 at epic-23 wave-14-tune-181 (2026-09-15, T35 fold-in): §L.4c's `DOCTORED_L4C` — a
+# copy of lib/bounds.sh carrying each inner bound AT its hook's registration, the mutant
+# that proves the invariant rows discriminate — anchors BOTH lines its one `sed` rewrites,
+# `^IMPACT_BOUND_S=[0-9]+$` and `^LG_IMPACT_BOUND_S=[0-9]+$`. Two anchor calls for one
+# doctored file, which is what the helper's per-LINE count means: +2, 27 -> 29. RE-DERIVED
+# BY DIRECT GREP over this file at THIS commit.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 29 more" "29" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9347,6 +9451,13 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # this one (§S19.3's second row). cross-gate-agreement.test.sh, agent-context-guard and
 # landing-gate are unmoved and were re-measured, not assumed.
 #
+# 75 at epic-23 wave-14-tune-181 (2026-09-15, T35 fold-in): 42 + 29 + 1 + 3, the
+# cross-gate-agreement.test.sh term alone moving — §L.4c's two anchors on the
+# bounds-at-the-registration mutant, the row above this one. docs-pins,
+# agent-context-guard and landing-gate are unmoved and were re-measured, not assumed:
+# T35 touches landing-gate §16i in prose, in its clock and in its cap, and adds no
+# `anchor` call there.
+#
 # tests/refuse.test.sh IS NOT IN THIS CENSUS, and that is a Step-9 disposition rather
 # than an oversight. It carries ONE anchor call site, reached three times: its
 # `mutant()` helper calls `anchor` before every `sed`, so a mutant cannot be added
@@ -9354,7 +9465,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …73 anchor call sites across the four doctoring suites, all told" "73" \
+expect_eq "S19.3 …75 anchor call sites across the four doctoring suites, all told" "75" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"

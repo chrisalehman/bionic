@@ -2479,10 +2479,10 @@ elif [ -n "$IMPACT_COMMAND" ]; then
   set +f; IFS="$_old_ifs"
   _impact_out=""
   if [ "$#" -gt 0 ]; then
-    # A BOUND THE HOOK BUILDS ITSELF (review-c C-16). hooks/hooks.json registers this hook
-    # at "timeout": 10, and the derivation is the whole of the gate's cost: ~0.3 s without
-    # it, ~2.9-3.1 s with it on an idle tree, and 5.06-6.51 s measured while this wave's own
-    # writers were running — which is exactly the condition under which a wave dispatches.
+    # A BOUND THE HOOK BUILDS ITSELF (review-c C-16). The derivation is the whole of the
+    # gate's cost: ~0.3 s without it, ~2.9-3.1 s with it on an idle tree, and 5.06-6.51 s
+    # measured while this wave's own writers were running — which is exactly the condition
+    # under which a wave dispatches.
     #
     # WHY THE BOUND IS A REFUSAL AND NOT A FALLBACK. A PreToolUse hook killed on the CLI's
     # timeout does NOT exit 2. The dispatch proceeds, no roster row is written, and the
@@ -2490,6 +2490,13 @@ elif [ -n "$IMPACT_COMMAND" ]; then
     # the one failure this arm cannot have, so the overrun is refused here, in time, with a
     # message. The other derivation failures stay as they were (empty budget + a warning):
     # a command that answers nothing has still answered.
+    #
+    # WHICH IS WHY THE BOUND MUST SIT STRICTLY UNDER THIS HOOK'S REGISTRATION, MARGIN NAMED
+    # (wave-14 D2, ratified; D1 moved both numbers). hooks/hooks.json registers this hook at
+    # `"timeout": 15` and `IMPACT_BOUND_S` is 10, five seconds clear. A bound above the
+    # registration cannot refuse anything in production, however many times this file's
+    # suite drives it to a refusal — the suite has no CLI timeout and the machine does
+    # (A-T6.5). The pair is pinned where the two files meet: cross-gate-agreement §L.4c.
     #
     # BUILT, NOT BORROWED. bionic's command discipline forbids a `timeout`/`gtimeout` binary
     # and macOS ships neither, so the bound is a backgrounded child and a `kill -0` poll.
@@ -2561,10 +2568,11 @@ elif [ -n "$IMPACT_COMMAND" ]; then
     if [ "$_impact_overran" -eq 1 ]; then
       rm -f "$_impact_tmp"
       _dp_detail="The command named by \`impact-command:\` in .bionic/config.yaml turns the paths this
-brief declared into the set of suites the agent may run. This hook is registered at a
-10-second timeout, and a hook killed on that timeout does NOT refuse: the dispatch
-would proceed with no roster row at all, and the writer would run with no budget —
-the wall defeated by the cost of the wall. So the derivation is bounded here.
+brief declared into the set of suites the agent may run. This hook is registered with a
+timeout of its own in hooks/hooks.json, and a hook killed on that timeout does NOT refuse:
+the dispatch would proceed with no roster row at all, and the writer would run with no
+budget — the wall defeated by the cost of the wall. So the derivation is bounded here,
+strictly under that registration.
 
   command: $IMPACT_COMMAND
   paths:   $*
