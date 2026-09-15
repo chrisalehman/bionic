@@ -631,7 +631,7 @@ FRONTMATTER=$(echo "$CONTENT" | awk '
 # business, wherever it lives — which is why an ordinary file in an ordinary
 # project, in a project with no `.bionic/` at all, passes untouched.
 if [ "$UNDER_DOCS_ROOT" -eq 0 ]; then
-  if echo "$FRONTMATTER" | grep -qE '^[[:space:]]*(canonical_sdlc_version[[:space:]]*:|governing-skill[[:space:]]*:[[:space:]]*canonical-sdlc[[:space:]]*$)'; then
+  if grep -qE '^[[:space:]]*(canonical_sdlc_version[[:space:]]*:|governing-skill[[:space:]]*:[[:space:]]*canonical-sdlc[[:space:]]*$)' <<< "$FRONTMATTER"; then
     case "$BASENAME" in
       *.spec.md|*.requirements.md) MISPLACED_SUBDIR=specs ;;
       adr-*.md)                    MISPLACED_SUBDIR=adrs ;;
@@ -975,7 +975,7 @@ REQUIRED_DISCRIMINATORS=("surface_type" "language" "has_ui" "multi_agent" "deplo
 
 MISSING=()
 for flag in "${REQUIRED_OPT_IN[@]}" "${REQUIRED_DISCRIMINATORS[@]}"; do
-  if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*${flag}[[:space:]]*:"; then
+  if ! grep -qE "^[[:space:]]*${flag}[[:space:]]*:" <<< "$FRONTMATTER"; then
     MISSING+=("$flag")
   fi
 done
@@ -983,7 +983,7 @@ done
 # `model_plan` (the Step-0 model-tier decision) is checked as a separate
 # conditional grep — NOT an array element — to stay safe under `set -u` with
 # bash 3.2's empty-array expansion behaviour.
-if ! echo "$FRONTMATTER" | grep -qE "^[[:space:]]*model_plan[[:space:]]*:"; then
+if ! grep -qE "^[[:space:]]*model_plan[[:space:]]*:" <<< "$FRONTMATTER"; then
   MISSING+=("model_plan")
 fi
 
@@ -1018,7 +1018,7 @@ case "$BASENAME" in
       ''|*[!0-9]*) ;;  # non-numeric or empty sdlc-step → not in scope
       *)
         if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ]; then
-          if ! echo "$CONTENT" | grep -qE '^## Verification Matrix'; then
+          if ! grep -qE '^## Verification Matrix' <<< "$CONTENT"; then
             _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) is missing a '## Verification Matrix' section.
 Path: $FILE_PATH
 Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix') and lock it at Step 3 approval."
@@ -1040,6 +1040,15 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
           # five-column registration ledger the evidence gate has read since D12, which
           # REQ-1e does not widen; validating it against the ten-column schema would
           # refuse every task-scale plan for eight columns it was never asked to carry.
+          #
+          # THE `worktree` COLUMN IS ACCEPTED, NEVER DEMANDED (wave-14 REQ-2, ADR-027).
+          # The table is the register of in-flight units, so a dispatched row names the
+          # tree its writer works in and the evidence gate reads that cell back to judge
+          # the writer's commit at the row's step. This wall needed no arm for it —
+          # `units_validate` is header-keyed and slot 11 is the one OPTIONAL slot, so a
+          # plan that carries the column passes and the far larger set that does not is
+          # untouched. It is named in the Fix line below because a writer repairing a row
+          # against a column list that omitted it would delete the dispatcher's work.
           #
           # AN ABSENT TABLE IS NOT A VIOLATION HERE. A plan mid-authoring may not have
           # written its table yet, and the D7 PRESENCE rule already lives in the gate at
@@ -1068,7 +1077,7 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
                 _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) has a '## Tasks' table that breaks the Task invariants:
 ${_gs_units_bad}
 Path: $FILE_PATH
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status."
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status, plus an optional worktree cell."
                 refuse exit2 write "this plan's Tasks table is invalid" "fix the row the detail names" "$_gs_detail"
               fi
             fi
@@ -1185,7 +1194,7 @@ A wave- or epic-scale spec must satisfy one of three:
       # rather than yaml_get so that a bare `design-waived:` — a malformed
       # waiver, but unmistakably a user's waiver — still counts as present.
       DESIGN_WAIVED=0
-      if echo "$FRONTMATTER" | grep -qE '^[[:space:]]*design-waived[[:space:]]*:'; then
+      if grep -qE '^[[:space:]]*design-waived[[:space:]]*:' <<< "$FRONTMATTER"; then
         DESIGN_WAIVED=1
       fi
 
@@ -1214,7 +1223,7 @@ A wave- or epic-scale spec must satisfy one of three:
         # the walk arm: a design named by climbing out of the directory it was
         # named relative to is a spelling nobody should have to audit, and the
         # refusal holds even when the climb would land on a real design.
-        if echo "$DESIGN_POINTER" | grep -qE '(^|/)\.\.(/|$)'; then
+        if grep -qE '(^|/)\.\.(/|$)' <<< "$DESIGN_POINTER"; then
           block_design "design: '$DESIGN_POINTER' climbs out with a '..' component and is refused."
         fi
         DESIGN_ABS=$(resolve_design_path "$DESIGN_POINTER")
@@ -1277,7 +1286,7 @@ case "$BASENAME" in
               }
               while IFS= read -r ADR_ONE; do
                 [ -n "$ADR_ONE" ] || continue
-                if echo "$ADR_ONE" | grep -qE '(^|/)\.\.(/|$)'; then
+                if grep -qE '(^|/)\.\.(/|$)' <<< "$ADR_ONE"; then
                   _gs_detail="canonical-sdlc spec '$BASENAME' (sdlc-step ${ADRS_STEP}): adrs: '$ADR_ONE' climbs out with a '..' component and is refused.
 Path: $FILE_PATH"
                   refuse exit2 write "the adrs: path climbs out with '..'" "name it under the docs root" "$_gs_detail"
@@ -1361,7 +1370,7 @@ case "$BASENAME" in
             ingoal && /^## / { exit }
             ingoal { print }
           ')
-          if ! printf '%s\n' "$GOAL_SECTION_BODY" | grep -qE '[^[:space:]]'; then
+          if ! grep -qE '[^[:space:]]' <<< "$GOAL_SECTION_BODY"; then
             _gs_detail="canonical-sdlc artifact '$BASENAME' (scale: $SCALE): the 'Goal' section is empty.
 Path: $FILE_PATH
 Fix: write one concise paragraph describing the goal under '## Goal'."

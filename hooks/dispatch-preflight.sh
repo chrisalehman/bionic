@@ -218,6 +218,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
 
+# THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
+# computes it only for a caller that sets this, because the plan scan behind it is
+# the preamble's most expensive value and most hooks never read the answer. This gate reads it at
+# :291-292 to scope itself to the bound run.
+BIONIC_CONTEXT_WANT_RUN=1
+
 # ---------- THE ROOT AND THE SESSION KEY, from one call ----------
 #
 # THE ROOT (spec AC-10). Every path this gate owns hangs off the answer: the
@@ -347,6 +353,68 @@ attested() {
   local sid
   sid=$(grep -m1 '^session_id=' "$STATE_FILE" 2>/dev/null | cut -d= -f2-)
   [ -n "$sid" ] && [ "$sid" = "$BIONIC_SID" ]
+}
+
+# ================================ THE FINDINGS LIST, DECLARED BEFORE THE FIRST ARM (D3)
+#
+# WHY IT IS UP HERE. Every wall below this line records into it, and the first of them —
+# the arming wall — is two hundred lines above where this list used to be declared. It was
+# declared beside the brief-shape arms because they were the only callers; wave-14 REQ-8
+# made the state arms callers too, so the declaration moves to the top of the range it
+# serves. The SPENDING point has not moved up with it: `dp_refuse_findings` is defined
+# beside the scaffold it renders and called once, below the last arm and above the journal.
+#
+# WHAT IS ABOVE IT, AND STAYS ABOVE IT. The attestation arm (the combined preflight, next
+# section) refuses where it stands, first and alone. A repo that cannot be written, or a
+# redirected state directory, makes every later disk read meaningless — the roster, the
+# stamp, the plan, the transcript are all read out of the tree that arm is checking — so a
+# list that mixed its verdict with theirs would be reporting facts it had just been told
+# not to trust. Relevance, the loader, the root and the engagement switch are above it for
+# the same kind of reason and are not refusals at all.
+DP_FINDING_N=0
+DP_FAULT_LINES=""
+DP_NOTCHECKED=""
+DP_FIRST_FACT=""
+DP_FIRST_FIX=""
+DP_FIRST_DETAIL=""
+
+# dp_finding <fact> <fix> <detail> — record one fault. NEVER exits.
+#
+# THE FIRST FAULT CONTRIBUTES NO LINE OF ITS OWN, and that is the line budget in one
+# sentence (AC-8.3). `refuse` renders the first fault as the user line — `bionic: dispatch
+# refused — <fact> (<fix>)` — at the top of the model's wire, so a list that repeated it
+# would spend a line saying what the reader just read. Faults two and up cost exactly one
+# line each, in the same `<fact> (<fix>)` shape, which is what "one line per additional
+# fault" means and what tests/dispatch-preflight.test.sh §three-arms measures.
+#
+# THE `<detail>` OF EVERY FAULT IS STILL PASSED and still carried, because a LONE fault
+# refuses in its arm's own words with its own detail block — byte for byte what that arm
+# emitted before this list existed. It is the SEVERAL-fault wire that drops the details:
+# a reader with three faults met three lectures before a single fix (wave-13, D11).
+dp_finding() {  # <fact> <fix> <detail> — record one fault. NEVER exits.
+  DP_FINDING_N=$((DP_FINDING_N + 1))
+  if [ "$DP_FINDING_N" -eq 1 ]; then
+    DP_FIRST_FACT="$1"; DP_FIRST_FIX="$2"; DP_FIRST_DETAIL="$3"
+    return 0
+  fi
+  DP_FAULT_LINES="${DP_FAULT_LINES}$1 ($2)
+"
+}
+
+# dp_not_checked <arm> <what it needs> — record that an arm could not be evaluated (AC-8.2).
+#
+# AN ARM WHOSE INPUT IS ANOTHER ARM'S PRODUCT CANNOT ANSWER, and the failure this records is
+# the arm going QUIET about it: the author fixes every fault named, dispatches again, and
+# meets a refusal from a wall that was standing there the whole time unable to speak. The
+# line says which wall and what it is waiting for, so a second refusal is expected rather
+# than a surprise. Its shape is the one the budget wall's per-field reading already uses.
+#
+# THESE LINES RIDE THE SEVERAL-FAULT WIRE ONLY (A-T6.1). A one-fault refusal keeps its arm's
+# own detail byte-identical — wave-13 pins that verbatim — and an author holding one fault
+# gets the dependent arm's verdict on the very next attempt anyway.
+dp_not_checked() {  # <arm> <what it needs>
+  DP_NOTCHECKED="${DP_NOTCHECKED}not checked: $1, needs $2
+"
 }
 
 # ==================================================== THE COMBINED PREFLIGHT
@@ -499,12 +567,16 @@ PATROL_FIX_STOPPED="Fix: re-arm the Patrol — both halves, the clock and the st
      reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch).
   2. bash ${POKER_SCRIPT} arm"
 
+# RECORDS, NEVER EXITS (wave-14 REQ-8, D3). The frame is unchanged down to the byte — a
+# lone Patrol fault still refuses on `exit2` with exactly this text, because that is what
+# `dp_refuse_findings` does with a list of one. What changed is that a dispatch with an
+# unarmed Patrol AND a full budget AND a broken label now learns all three at once.
 patrol_deny() {  # <fact> <fix> <fix-block> <state line>...
   local fact="$1" fix="$2" fixblock="$3"; shift 3
   local reasons="" line
   for line in "$@"; do reasons="${reasons}${line}
 "; done
-  refuse exit2 dispatch "$fact" "$fix" "${reasons}
+  dp_finding "$fact" "$fix" "${reasons}
 A dispatch with no Patrol behind it is an agent nobody is waiting on.
 
 ${fixblock}
@@ -550,7 +622,9 @@ fi
 #
 # UNCONDITIONAL, and that is the C-2 fix in one word: this arm asks whether anything armed
 # the Patrol, a question with no threshold in it.
+PATROL_STAMPED=1
 if [ -L "$PATROL_STAMP_FILE" ] || [ ! -f "$PATROL_STAMP_FILE" ]; then
+  PATROL_STAMPED=0
   patrol_deny "no Patrol stamp exists for this session" "CronCreate the Patrol job" \
     "$PATROL_FIX_NEVER" \
     "There is no Patrol stamp for this session at:" \
@@ -564,7 +638,13 @@ fi
 # unreachable on BOTH lanes, which is what a machine looks like once the legacy
 # `${CLAUDE_CONFIG_DIR}/hooks/` copies are torn down and the sibling lane misses too —
 # says which half did not run rather than letting the whole wall go quiet.
-if [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
+# THE STALENESS HALF NEEDS A STAMP TO AGE. Until REQ-8 the never-armed arm above exited,
+# so reaching here meant the file was there; it records and carries on now, and a `stat` of
+# a file that is not there would print "the stamp's age could not be read" as though
+# something had gone wrong with a stamp nobody ever wrote. Absent is absent, once.
+if [ "$PATROL_STAMPED" = "0" ]; then
+  :
+elif [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
   echo "dispatch-preflight: no Patrol interval could be obtained (${POKER_SCRIPT} is not readable on either lane); the staleness half of the arming wall did not run, though the never-armed half did." >&2
 else
   # THE MULTIPLIER IS THE LIBRARY'S (spec AC-22). "Twice the interval" was a literal 2
@@ -655,6 +735,13 @@ case "$DP_SUBAGENT" in
           case "$DP_STEP" in ''|*[!0-9]*) DP_STEP="" ;; esac
           ;;
       esac
+      # THE DEPENDENCY, NAMED (AC-8.2). `current:` decides whether this arm applies at all,
+      # and an unreadable one leaves it unmeasured rather than passed. Said on the wire only
+      # when something else refuses — a dispatch that is otherwise clean is allowed, exactly
+      # as it always was, and is told nothing.
+      if [ -z "$DP_STEP" ]; then
+        dp_not_checked "approval" "a plan with a readable current:"
+      fi
       if [ -n "$DP_STEP" ] && [ "$DP_STEP" -ge 4 ]; then
         DP_APPROVED=$(awk '
           /^## SDLC State/ { st = 1; next }
@@ -664,7 +751,7 @@ case "$DP_SUBAGENT" in
             sub(/[[:space:]]+$/, ""); print; exit }
         ' "$PLAN" 2>/dev/null) || DP_APPROVED=""
         if [ -z "$DP_APPROVED" ]; then
-          refuse exit2 dispatch "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
+          dp_finding "the plan this writer builds is unapproved" "get the Step-3 plan approved" \
             "Role: ${DP_SUBAGENT}
 Plan: ${PLAN}
 Step: ${DP_CURRENT} — writers run against an APPROVED plan, and nothing recorded one.
@@ -734,6 +821,116 @@ ROSTER_SUFFIX=".state"
 # STATE_DIR is set above, at the arming wall — the first thing on this path to need it.
 ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${BIONIC_SID}${ROSTER_SUFFIX}"
 
+# The sweeper's own ledger, named the way ROSTER_FILE is and for the same reason: a reader
+# copy of `hooks/session-sweeper.sh`'s `LEDGER_SCHEMA` prefix (`sweeper-`, :341), spelled
+# once here rather than at the one site that reads it. Only the budget wall below reads it,
+# and only when the live panel has gone dark.
+ACK_LEDGER_FILE="$STATE_DIR/sweeper-${BIONIC_SID}.state"
+
+# ─── THE ROSTER'S OPEN CONTRACTS — ONE READING, TWO WALLS ──────────────────────────────
+#
+# WHO ASKS. The budget wall below counts the run's open rows; the name-in-flight arm further
+# down asks whether ONE name is still under an open contract. Both questions are the same
+# question asked of the same append-only file, and until wave-14 only the second consulted the
+# closing markers — inline, in its own awk. Two walls carrying one reading is the shape that
+# drifts: cross-gate §LC found it once already, as a LATCH both roster walls shared. So the
+# reading is spelled ONCE, here, and both callers consume its answer.
+#
+# WHAT IT PRINTS: one line per name that ever held a live row, in the order the names first
+# appear —
+#
+#     <name>|<its last live status>|open      still under contract
+#     <name>|<its last live status>|closed    landed, or acked after it was launched
+#
+# CLOSED MEANS THE LATEST CONTRACT IS CLOSED, never the file read as a set: a
+# `landing-swept/v1|…|state=MET` marker closes the contract it was written for and nothing
+# after it, so a name dispatched AGAIN below its marker is open again. That rule is the
+# delimited reading below, held byte-equal with hooks/execution-recorder.sh.
+#
+# THE ACK IS THE SECOND CLOSING TRUTH, AND IT IS OPTIONAL (wave-14 REQ-3, D7).
+# `session-sweeper.sh ack` closes a row the sweep cannot verdict — a row that declared nothing
+# durable stats MET vacuously — and it journals to its OWN file, so the row ordering that
+# decides a marker is not available to it. It is compared by TIME instead: an ack closes a name
+# only when it was taken AFTER that name's last live row was launched, which gives a
+# re-dispatched name the same second life a marker's does. An unreadable stamp on either side
+# closes nothing, because the safe direction here is to spend a slot on a row that MIGHT still
+# be working (rule fail-closed-constants). The ledger is passed by the budget wall alone; the
+# in-flight arm's own header says why it asks without one.
+dp_roster_contracts() {  # <roster file> [ack ledger] -> "<name>|<status>|open|closed" per name
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  /usr/bin/awk -F'|' -v ledger="${2:-}" '
+    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
+    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
+    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
+    # one text held byte-identical in the two files that need it, rather than a library: the
+    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
+    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
+    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
+    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
+    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
+    # that row is an open contract with a live process behind it. Read as a set, the MET flag
+    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
+    # session, which is precisely the case they exist for (a task being re-run). So a live row
+    # RETIRES the marker above it, and only a marker with no live row after it still closes.
+    function contract_note(line,   nm) {
+      if (index(line, "landing-swept/v1|") == 1) {
+        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
+        return
+      }
+      nm = kv(line, "name")
+      if (live_status(kv(line, "status"))) delete MET[nm]
+    }
+    function contract_closed(nm) { return (nm in MET) }
+    # ---- END latest-contract reading ----
+    # THE ACK LEDGER, read by key exactly as the roster is, through the same `kv` — a
+    # `sweeper-ledger/v1|event=ack|…|name=<n>` line, and the LATEST `at=` per name wins. An
+    # entry with no name or no stamp is dropped rather than believed: an empty name compared
+    # loosely would read as closing the whole roster at once, in silence (the same validation
+    # `read_acked` states in the writer of this file).
+    function ack_closes(nm, born) {
+      if (born == "" || !(nm in ACK)) return 0
+      return (ACK[nm] > born)
+    }
+    BEGIN {
+      if (ledger != "") {
+        while ((getline aline < ledger) > 0) {
+          if (index(aline, "sweeper-ledger/v1|") != 1) continue
+          if (kv(aline, "event") != "ack") continue
+          anm = kv(aline, "name"); if (anm == "") continue
+          aat = kv(aline, "at");   if (aat == "") continue
+          if (!(anm in ACK) || aat > ACK[anm]) ACK[anm] = aat
+        }
+        close(ledger)
+      }
+    }
+    /^roster-state\/v1\|/ {
+      contract_note($0)
+      nm = kv($0, "name")
+      if (nm != "" && live_status(kv($0, "status"))) {
+        if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
+        last[nm] = kv($0, "status")
+        born[nm] = kv($0, "launched_at")
+      }
+      next
+    }
+    /^landing-swept\/v1\|/ { contract_note($0); next }
+    END {
+      for (i = 1; i <= n; i++) {
+        nm = order[i]
+        printf "%s|%s|%s\n", nm, last[nm], \
+          ((contract_closed(nm) || ack_closes(nm, born[nm])) ? "closed" : "open")
+      }
+    }
+  ' "$1" 2>/dev/null
+}
+
 # ============================================ THE LEASE WALL AND THE BUDGET WALL
 # (spec AC-14 and AC-26; plan task WALLS; assumptions WALLS/2, WALLS/3, WALLS/4, WALLS/6.)
 #
@@ -788,7 +985,7 @@ if ! is_agent_context; then
     LEASE_MAIN=""
     [ -n "$LEASE_COMMON" ] && LEASE_MAIN=$( cd "$LEASE_COMMON/.." 2>/dev/null && pwd -P )
     if [ -n "$LEASE_MAIN" ] && [ "$LEASE_MAIN" != "$LEASE_TOP" ]; then
-      refuse exit2 dispatch "this dispatch came from a worktree" "dispatch from the main checkout" \
+      dp_finding "this dispatch came from a worktree" "dispatch from the main checkout" \
         "    cwd:           ${BIONIC_CWD}
     worktree:      ${LEASE_TOP}
     main checkout: ${LEASE_MAIN}
@@ -893,10 +1090,24 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # turned into a whole-dispatch refusal naming a ListAgents call as the repair. That made
   # a chore a PRECONDITION of a judgement, and it is struck: no hook requires the model to
   # perform an act before it will judge one (spec P-A). The fallback is the roster itself,
-  # which this wall already owns and already reads — every remaining deduped
-  # `status=intended` row counts OPEN, which is the same fail-closed direction the
-  # ambiguity arm takes. So the answer is ALWAYS `<open> <claimed>` and the exit is ALWAYS
-  # 0; a dispatch is judged against a count that may be generous, never deferred.
+  # which this wall already owns and already reads. So the answer is ALWAYS `<open>
+  # <claimed>` and the exit is ALWAYS 0; a dispatch is judged against a count that may be
+  # generous, never deferred.
+  #
+  # AND ON THAT DARK PATH THE ROSTER ANSWERS WITH EVERYTHING IT KNOWS (wave-14 D7, REQ-3).
+  # Wave-12 counted every remaining deduped `status=intended` row OPEN, full stop — which on
+  # a wave of nine tasks held nine writer slots for the rest of the session, because a row
+  # that LANDED still reads `status=intended` (nothing ever transitions it). The roster
+  # carries the closing fact beside the row: the `landing-swept/v1|…|state=MET` marker the
+  # landing gate writes, and the ack the orchestrator journals for a row the sweep cannot
+  # verdict. Both are read through `dp_roster_contracts` above, once, AFTER the loop, and
+  # only for the rows the panel could not speak for — the generous direction is kept for
+  # every row the roster says nothing about, which is what keeps this fail-closed.
+  #
+  # NEVER WHILE THE PANEL IS FRESH (AC-3.3, AC-3.4). A fresh answer is the truth about who is
+  # working, and a marker is a claim about who FINISHED — where both can speak, the panel
+  # decides, and the fresh branch below is delimited so that a marker read can never be added
+  # inside it unnoticed (tests/dispatch-preflight.test.sh's narrowed token pin).
   #
   # THE READER IS NOT DEMOTED, only made optional. A FRESH answer still decides every row
   # it can speak to — an `idle` row still closes, an absent row still closes — and the
@@ -904,7 +1115,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # nothing to read has stopped being an error.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
     local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
-    local la_out la_rc
+    local la_out la_rc row_dark dark="" closed
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -920,9 +1131,13 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       # change a verdict. From here the roster is the answer: each remaining row counts
       # OPEN (`la_rc=0` below), which is what "the count of open rows IS the live-agent
       # count" means when there is no live answer to consult.
+      row_dark=""
       if [ -n "$notfresh" ]; then
         la_rc=0
+        row_dark=1
       else
+        # ---- BEGIN fresh-panel branch — the panel decides, and no closing marker is read
+        # here (wave-14 AC-3.4, narrowing wave-12 AC-7) ----
         # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
         # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
         # size and mtime — but the per-row call below runs inside a command substitution, and
@@ -952,18 +1167,52 @@ if [ -n "$PARALLEL_BUDGET" ]; then
         # repair, which is no longer anybody's job, and letting it out would put the
         # retired chore back in front of the operator by another route.
         case "$la_rc" in
-          3|4) notfresh=1; la_rc=0 ;;
+          3|4) notfresh=1; la_rc=0; row_dark=1 ;;
         esac
+        # ---- END fresh-panel branch ----
       fi
       case "$la_rc" in
         0)
           open=$(( open + 1 ))
           claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
           [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+          # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list with
+          # its claim, and the block below asks the roster whether it has since closed. A
+          # row the panel spoke for never lands here, which is what makes that question
+          # unreachable on the fresh path.
+          [ -n "$row_dark" ] && dark="${dark}${nm}|${claims}
+"
           ;;
         1) : ;;
       esac
     done < "$f"
+
+    # THE DARK ROWS, SETTLED IN ONE PASS (wave-14 REQ-3, D7). One read of the roster and one
+    # of the ack ledger, for every dark row at once — never per row, and never at all on a
+    # turn where the panel answered for every row. A landed row gives its writer slot back
+    # AND the suite its brief claimed: a finished agent runs nothing.
+    if [ -n "$dark" ]; then
+      closed=$(dp_roster_contracts "$f" "$ACK_LEDGER_FILE" \
+        | /usr/bin/awk -F'|' '$3 == "closed" { print $1 }')
+      if [ -n "$closed" ]; then
+        while IFS='|' read -r nm claims; do
+          [ -n "$nm" ] || continue
+          # A HERE-STRING, NOT A PIPE (correctness review F8; memory
+          # grep-q-sigpipe-under-pipefail). `grep -q` exits at its first match; under this
+          # file's `set -uo pipefail` (:67), a `printf | grep -qxF` pipeline SIGPIPEs the
+          # producer whenever the match sits ahead of enough trailing data to still be
+          # queued when `grep` closes its read end, and `pipefail` promotes that 141 over
+          # grep's own 0 — a closed row reads as still open. A here-string has no second
+          # process to lose.
+          /usr/bin/grep -qxF -- "$nm" <<< "$closed" || continue
+          open=$(( open - 1 ))
+          [ -n "$claims" ] && claimed=$(( claimed - 1 ))
+        done <<DARK
+$dark
+DARK
+      fi
+    fi
+
     printf '%s %s' "$open" "$claimed"
   }
 
@@ -980,10 +1229,19 @@ if [ -n "$PARALLEL_BUDGET" ]; then
     printf '%s' "$n"
   }
 
+  # FIRST CEILING WINS, STILL (wave-14 REQ-8, D3). The three ceilings are three readings of
+  # ONE wall and one repair — "land or stand down a row" clears whichever of them fired — so
+  # reporting all three would spend three lines of the refusal's budget to say one thing
+  # three ways. The guard keeps the arm's pre-REQ-8 behaviour exactly: the first ceiling
+  # passed is the one named. What changed is that the wall records instead of exiting, so
+  # the arms after it are read in the same pass.
+  BUDGET_DENIED=""
   budget_deny() {  # <fact> <the one line naming the resource, its ceiling and its count>
     # ONE FIX FOR ALL THREE ARMS (rows 43-45): the fact names which ceiling was passed
     # and the repair is the same act whichever it was.
-    refuse exit2 dispatch "$1" "land or stand down a row" \
+    [ -z "$BUDGET_DENIED" ] || return 0
+    BUDGET_DENIED=1
+    dp_finding "$1" "land or stand down a row" \
       "    $2
 
 budget: ${PARALLEL_BUDGET}
@@ -1048,6 +1306,11 @@ machine genuinely has the room."
   if [ -n "$BUDGET_UNMEASURED" ]; then
     printf 'dispatch-preflight: WARN the plan'"'"'s parallel-budget line carries no readable%s field; %s unmeasured. Line: %s\n' \
       "$BUDGET_UNMEASURED" "${BUDGET_UNMEASURED# }" "$PARALLEL_BUDGET" >&2
+    # AND ON THE REFUSAL'S OWN WIRE (AC-8.2). The WARN above is the pass path's; a dispatch
+    # being refused for something else needs the same fact where the model reads, or the
+    # author repairs three faults and meets a ceiling that was never measured. This is R2's
+    # per-field shape, which AC-8.2 names as the one the rest of the file should copy.
+    dp_not_checked "budget" "the parallel-budget: line to carry${BUDGET_UNMEASURED}"
   fi
 fi
 
@@ -1688,53 +1951,22 @@ TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
 # AN UNNAMED DISPATCH IS NOT JUDGED HERE. There is no name to be in flight, and the async
 # dispatches that carry none are exactly the ones nothing addresses by name.
 if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
-  # ONE PASS, TWO FACTS: does a live-status row of this name exist, and has a MET marker
-  # closed it. `awk` rather than two greps because the marker may sit either side of the row
-  # and WHICH side is the answer — see the latest-contract reading below, which is the half of
-  # this arm that was position-blind until T26 and therefore inert for every landed name.
-  DP_INFLIGHT=$(awk -F'|' -v want="$AGENT_NAME" '
-    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
-    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
-    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
-    # one text held byte-identical in the two files that need it, rather than a library: the
-    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
-    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
-    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
-    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
-    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
-    # that row is an open contract with a live process behind it. Read as a set, the MET flag
-    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
-    # session, which is precisely the case they exist for (a task being re-run). So a live row
-    # RETIRES the marker above it, and only a marker with no live row after it still closes.
-    function contract_note(line,   nm) {
-      if (index(line, "landing-swept/v1|") == 1) {
-        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
-        return
-      }
-      nm = kv(line, "name")
-      if (live_status(kv(line, "status"))) delete MET[nm]
-    }
-    function contract_closed(nm) { return (nm in MET) }
-    # ---- END latest-contract reading ----
-    /^roster-state\/v1\|/ {
-      contract_note($0)
-      if (kv($0, "name") != want) next
-      st = kv($0, "status")
-      if (live_status(st)) { open = 1; last = st }
-      next
-    }
-    /^landing-swept\/v1\|/ { contract_note($0); next }
-    END { if (open && !contract_closed(want)) print last }
-  ' "$ROSTER_FILE" 2>/dev/null) || DP_INFLIGHT=""
+  # ONE READING, ASKED OF ONE NAME. `dp_roster_contracts` (defined beside ROSTER_FILE above)
+  # walks this roster once and answers, per name, what its LATEST contract says — the half of
+  # this arm that was position-blind until T26 and therefore inert for every landed name. It
+  # lives up there rather than here because the budget wall needs the same answer and two
+  # spellings of one question are two answers; its header carries the argument.
+  #
+  # NO ACK LEDGER IS PASSED. This arm asks who holds the NAME, and an ack is the
+  # orchestrator's judgement about a DELIVERABLE: a row acked while its agent is still
+  # working still holds its name, and handing that name to a second dispatch is the one
+  # collision this wall exists to prevent.
+  DP_INFLIGHT=$(dp_roster_contracts "$ROSTER_FILE" \
+    | /usr/bin/awk -F'|' -v want="$AGENT_NAME" \
+        '$1 == want && $3 == "open" { st = $2 } END { if (st != "") print st }' 2>/dev/null) \
+    || DP_INFLIGHT=""
   if [ -n "$DP_INFLIGHT" ]; then
-    refuse exit2 dispatch "that name is in flight" "use the FILL line's name" \
+    dp_finding "that name is in flight" "use the FILL line's name" \
       "    name: ${AGENT_NAME}   ·   its row on this session's roster: ${DP_INFLIGHT}
 
 A name is an identity here. The stop gate resolves one, \`session-poker.sh adopt\` prints
@@ -1817,42 +2049,46 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 [ -n "$C_DURATION" ]    || add_absent duration
 [ -n "$C_PROGRESS" ]    || add_absent progress
 
-# ================================= THE BRIEF-SHAPE FINDINGS LIST (D3, principle P-A)
+# ============================================ THE POOL IS SPENT BELOW (D3, principle P-A)
 #
-# THE INCIDENT. Six dispatch attempts to spawn one researcher (2026-09-13). Every
-# brief-shape arm below used to `refuse exit2` where it stood, so an author learned
-# exactly ONE fault per attempt and the next attempt found the next one — a loop whose
-# length is the number of faults in a brief the author was holding, whole, the entire
-# time. Principle P-A reads the same way at a wall as at a precondition: where the
-# machine already has the facts, the machine reports them; asking the model to
-# rediscover them one round trip at a time is a chore on the normal path.
+# THE INCIDENT, AND THE HALF OF IT WAVE-12 DID NOT FIX. Six dispatch attempts to spawn one
+# researcher (2026-09-13). Wave-12 T2 pooled the five BRIEF-SHAPE arms and left every STATE
+# arm refusing where it stood, on the argument that a broken environment and a typo in a
+# label do not belong in one list. The measurement says otherwise: the six refusals Chris
+# counted were the arming wall, then the budget, then the suite allowance — three DIFFERENT
+# arms, one fault per attempt, each of them a fact the gate had already read off disk before
+# it refused for the one above. The split was drawn in the right place for the wrong
+# quantity. What makes two faults reportable together is not that they live in one artifact;
+# it is that reading one did not depend on the other being clean (wave-14 REQ-8, D3).
 #
-# THE SPLIT IS BRIEF SHAPE versus STATE, and it is not a matter of taste. A11 (several
-# paths), A12 (outside the repo), A13 (no deliverable), A14 (no instrument) and A16
-# (`Files:` with no derivation) are all defects in ONE artifact — the brief — readable
-# in one pass, fixable in one edit, and independent of each other. They collect here.
-# Every STATE arm above and below keeps its early exit: a missing attestation, an
-# unarmed Patrol, an unapproved plan, a dispatch from a worktree, a full budget, a
-# second full-tree run. None of those is a property of the brief, none is fixed by
-# reading the next one, and several of them mean the gate cannot trust what it reads
-# next — reporting "no Patrol" alongside a comma in a label would put a broken
-# environment and a typo in one list and train the reader past both.
+# SO EVERYTHING BELOW THE ATTESTATION POOLS. The arming wall, the approval checkpoint, the
+# lease wall, the budget, the name-in-flight arm, the five brief-shape arms and the
+# one-regression wall all call `dp_finding` and carry on. Principle P-A reads the same way
+# at a wall as at a precondition: where the machine already has the facts, the machine
+# reports them; asking the model to rediscover them one round trip at a time is a chore on
+# the normal path.
 #
-# A15 (the impact command did not answer) STAYS AN EARLY EXIT for that second reason: a
-# derivation that overran its bound is a fact about the machine, not the brief, and the
-# fields below it are unfilled rather than wrong.
+# THE ONE ARM THAT STAYS FIRST AND ALONE is the attestation (the combined preflight, far
+# above). Its subject is the tree every other arm reads out of — the roster, the stamp, the
+# plan, the transcript — so a list that set its verdict beside theirs would be reporting
+# facts it had just been told not to trust. That is a dependency, not a category.
+#
+# AN ARM WHOSE INPUT IS ANOTHER ARM'S PRODUCT says so instead of guessing: `dp_not_checked`
+# (above) puts `not checked: <arm>, needs <what>` on the same wire, so a second refusal is
+# announced rather than sprung (AC-8.2). The containment arm and the ambiguity arm are the
+# one pair that can never appear together, and that is by construction rather than by
+# ordering: the extractor emits `deliverable=` XOR `deliverable_ambiguous=`.
 #
 # ONE FINDING RENDERS AS ONE REFUSAL, byte for byte what the arm emitted before — the
-# fact, the fix and the detail it already wrote.
+# fact, the fix and the detail it already wrote, on `exit2`, its own channel.
 #
-# SEVERAL FINDINGS KEEP THE FIRST ARM'S USER LINE and put the whole list in `detail`,
-# and that split is forced rather than chosen. AC-E1.3 gives the line one fact (100
-# columns) and one fix (six words, 40 columns), and the widest arm here already spends
-# 99 of the 100 — so a line that also carried a count, or named the other faults, would
-# be REFUSED BY THE RENDERER as malformed. Between a line that says "this brief has 3
-# shape faults" and one that names a fault an author can act on, the second is worth
-# more. The findings list is therefore whole where it can be whole, and the sentence the
-# reader is interrupted by is still one they can act on.
+# SEVERAL FINDINGS KEEP THE FIRST ARM'S USER LINE and put one line per remaining fault, the
+# not-checked lines and the marked scaffold in `detail`, and that split is forced rather
+# than chosen. AC-E1.3 gives the line one fact (100 columns) and one fix (six words, 40
+# columns), and the widest arm here already spends 99 of the 100 — so a line that also
+# carried a count, or named the other faults, would be REFUSED BY THE RENDERER as
+# malformed. Between a line that says "this brief has 3 faults" and one that names a fault
+# an author can act on, the second is worth more.
 #
 # AND THE LIST GOES OUT ON `deny`, WHICH IS THE HALF T2 COULD NOT REACH (its finding
 # A-T2.2; ruling A-orch-10, 2026-09-13). On `exit2` there is ONE wire: `refuse`'s channel
@@ -1876,23 +2112,6 @@ add_absent() { ABSENT="${ABSENT:+$ABSENT,}$1"; }
 # to stdout on the way here (every other message in this hook is on stderr, deliberately),
 # and this call still must sit above the journal, because a refused dispatch that exits 0
 # is exactly the shape that would otherwise be recorded as a launch.
-DP_FINDING_N=0
-DP_FINDINGS=""
-DP_FIRST_FACT=""
-DP_FIRST_FIX=""
-DP_FIRST_DETAIL=""
-
-dp_finding() {  # <fact> <fix> <detail> — record one brief-shape fault. NEVER exits.
-  DP_FINDING_N=$((DP_FINDING_N + 1))
-  if [ "$DP_FINDING_N" -eq 1 ]; then
-    DP_FIRST_FACT="$1"; DP_FIRST_FIX="$2"; DP_FIRST_DETAIL="$3"
-  fi
-  DP_FINDINGS="${DP_FINDINGS}${DP_FINDINGS:+
-}── ${DP_FINDING_N}. $1 ($2)
-
-$3
-"
-}
 
 # dp_scaffold_marked — the shipped brief scaffold, verbatim, with every label line whose
 # field THIS brief left empty suffixed " <ADD>" and every label it already carries left
@@ -1908,11 +2127,34 @@ dp_scaffold_marked() {
   while IFS= read -r line; do
     label="${line%%:*}"
     case "$label" in
+      # A MARK IS WHAT THIS BRIEF LACKS, NOT WHAT IT OMITS (wave-14 REQ-6, D8). Three of
+      # these labels are halves of a pair, and the scaffold's own comments say so: `Files:`
+      # is "writers; omit for a read-only brief", `Deliverable-waiver:` is "only for a report
+      # returned by message". Marking each one purely because its own field came back empty
+      # told a read-only author to declare files it will not touch and an artifact-bearing
+      # author to waive the artifact it just declared — an instruction that, followed, makes
+      # the dispatch worse. Each pair is now marked only when NEITHER half is satisfied,
+      # which is exactly the condition of the wall that refuses it: the suite-allowance wall
+      # asks `-z "$C_FILES" && -z "$C_SUITES"`, the absent-deliverable wall asks
+      # `-z "$C_DELIVERABLE" && -z "$C_WAIVER"`.
+      #
+      # KEYED ON THE LIFTED FIELDS, NEVER ON A LITERAL LINE (A-T2.1 read the other way; R2
+      # Q7). A brief whose `Expected artifact:` span names two paths HAS the label and still
+      # needs it — the extractor emits candidates and leaves `C_DELIVERABLE` empty — so the
+      # question the mark asks is what the walls above already computed, not what the text
+      # spelled. `Suites:` keeps the plain rule: a derivation is not a declaration, and this
+      # gate is where a repo with no impact command learns to name its set.
       "Expected duration")  [ -n "$C_DURATION" ]    || line="${line} <ADD>" ;;
-      "Expected artifact")  [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
-      "Files")               [ -n "$C_FILES" ]       || line="${line} <ADD>" ;;
+      # A LABEL WHOSE SPAN WAS READ AND REJECTED IS NOT AN ABSENT LABEL (critic Issue 3,
+      # wave-14 T26, pre-existing at 0fe69ed). Several candidates leaves C_DELIVERABLE
+      # empty on the SAME contract as zero candidates, but the two are not the same fault
+      # — the ambiguity arm above already refused this brief, and marking the line <ADD>
+      # here would tell the author to add a line they already wrote.
+      "Expected artifact")  [ -n "$C_DELIVERABLE" ] || [ -n "$C_WAIVER" ] || \
+                             [ -n "$C_DELIVERABLE_CANDIDATES" ] || line="${line} <ADD>" ;;
+      "Files")               [ -n "$C_FILES" ]       || [ -n "$C_SUITES" ] || line="${line} <ADD>" ;;
       "Suites")              [ -n "$C_SUITES" ]      || line="${line} <ADD>" ;;
-      "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || line="${line} <ADD>" ;;
+      "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
     esac
     printf '%s\n' "$line"
   done < <(/usr/bin/awk '
@@ -1929,20 +2171,37 @@ dp_scaffold_marked() {
 # marked scaffold reaches the model (see the channel note above). The exit STATUS therefore
 # differs by fault count — 2 for one, 0-with-a-deny-verdict for several — and both block.
 #
-# THE SEVERAL-FAULT WIRE IS ONE LINE, THE MARKED SCAFFOLD, AND A POINTER — NO RATIONALE
-# (D3, D11). The prior shape repeated a `<detail>` paragraph per fault; a reader with three
-# faults got three lectures before a single fix. Each `dp_finding` call above still carries
-# its `<detail>` argument — that text stays in the source as the documentation of WHY each
-# arm fires, and `refuse`'s single-fault path (`exit2`) still emits it unchanged — but it is
-# no longer collected onto the several-fault wire. What replaces it is the same scaffold an
-# author would have started from, marked with exactly what this brief is still missing.
+# THE SEVERAL-FAULT WIRE IS ONE LINE PER FAULT, THE NOT-CHECKED LINES, THE MARKED SCAFFOLD
+# AND A POINTER — NO RATIONALE (D3, D11, wave-14 REQ-8). The shape wave-13 retired repeated
+# a `<detail>` paragraph per fault; a reader with three faults got three lectures before a
+# single fix. Each `dp_finding` call above still carries its `<detail>` argument — that text
+# stays in the source as the documentation of WHY each arm fires, and `refuse`'s
+# single-fault path (`exit2`) still emits it unchanged — but it is not collected here.
+#
+# WHAT WAVE-14 ADDS IS THE FAULT LINES, and they are the reason this wire exists at all.
+# Until now the several-fault wire named NO fault except through the scaffold's `<ADD>`
+# markers, which can say "this brief has no Files: line" and cannot say "the Patrol is not
+# armed" or "the writer budget is full" — and those are precisely the arms REQ-8 pooled.
+# One line each, `<fact> (<fix>)`, the same two fields the user line is built from.
+#
+# THE ARITHMETIC OF AC-8.3, WRITTEN OUT, because the cap in the suite is a formula and a
+# reader who cannot rebuild it will widen it instead. One refusal line + one blank + seven
+# scaffold lines + one blank + one pointer is wave-13's ten (`wc -l` on the model's reason,
+# which counts newlines, so eleven rendered lines read as ten). The first fault IS the
+# refusal line and costs nothing. Every fault after it costs one line; so does every
+# not-checked line. There is deliberately NO blank between the fault block and the
+# scaffold: a separator there would cost a line the budget does not have, and the two
+# blocks are already told apart by the scaffold's own labels.
 dp_refuse_findings() {
   [ "$DP_FINDING_N" -gt 0 ] || return 0
   if [ "$DP_FINDING_N" -eq 1 ]; then
     refuse exit2 dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" "$DP_FIRST_DETAIL"
   fi
+  # `DP_FAULT_LINES` and `DP_NOTCHECKED` each end in their own newline when non-empty and
+  # are empty strings otherwise, so this interpolation adds no blank line when either is
+  # absent — a two-fault brief with nothing unchecked renders exactly one extra line.
   refuse deny dispatch "$DP_FIRST_FACT" "$DP_FIRST_FIX" \
-    "$(dp_scaffold_marked)
+    "${DP_FAULT_LINES}${DP_NOTCHECKED}$(dp_scaffold_marked)
 
 See skills/canonical-sdlc/dispatch.md §Dispatch for why each line is required."
 }
@@ -2101,7 +2360,18 @@ fi
 # journal step bail early — the same reasoning §8 applies to the attestation
 # path, read here in the refuse direction.
 if [ -z "$C_DELIVERABLE" ] && [ -z "$C_WAIVER" ]; then
-  _dp_detail="An agent with nothing durable to produce cannot be checked on: there is no
+  if [ -n "$C_DELIVERABLE_CANDIDATES" ]; then
+    # THE AMBIGUITY ARM ALREADY REFUSED THIS BRIEF (critic Issue 3, wave-14 T26;
+    # pre-existing at 0fe69ed — both arms already called `dp_finding` there). A label
+    # offering several candidates leaves C_DELIVERABLE empty on purpose, because the
+    # ambiguity arm above never guesses among them — and this arm's own "nothing was
+    # declared" fact would then contradict the one already on the wire: "the deliverable
+    # label names several paths" and "this brief names no deliverable" cannot both be
+    # true. D3's own rule applies to this pair too: an arm whose input is another arm's
+    # product says so instead of guessing.
+    dp_not_checked "deliverable" "one path"
+  else
+    _dp_detail="An agent with nothing durable to produce cannot be checked on: there is no
 path to stat when it reports done, and nothing left behind if it dies quietly.
 
 Fix: declare a durable artifact path with a canonical label —
@@ -2113,7 +2383,8 @@ Or waive it — the reason is recorded on the session roster either way:
     Deliverable-waiver: <why this dispatch produces nothing durable>
 
 Then retry the dispatch."
-  dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
+    dp_finding "this brief names no deliverable" "add an Expected artifact: line" "$_dp_detail"
+  fi
 fi
 
 # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
@@ -2208,10 +2479,10 @@ elif [ -n "$IMPACT_COMMAND" ]; then
   set +f; IFS="$_old_ifs"
   _impact_out=""
   if [ "$#" -gt 0 ]; then
-    # A BOUND THE HOOK BUILDS ITSELF (review-c C-16). hooks/hooks.json registers this hook
-    # at "timeout": 10, and the derivation is the whole of the gate's cost: ~0.3 s without
-    # it, ~2.9-3.1 s with it on an idle tree, and 5.06-6.51 s measured while this wave's own
-    # writers were running — which is exactly the condition under which a wave dispatches.
+    # A BOUND THE HOOK BUILDS ITSELF (review-c C-16). The derivation is the whole of the
+    # gate's cost: ~0.3 s without it, ~2.9-3.1 s with it on an idle tree, and 5.06-6.51 s
+    # measured while this wave's own writers were running — which is exactly the condition
+    # under which a wave dispatches.
     #
     # WHY THE BOUND IS A REFUSAL AND NOT A FALLBACK. A PreToolUse hook killed on the CLI's
     # timeout does NOT exit 2. The dispatch proceeds, no roster row is written, and the
@@ -2220,33 +2491,88 @@ elif [ -n "$IMPACT_COMMAND" ]; then
     # message. The other derivation failures stay as they were (empty budget + a warning):
     # a command that answers nothing has still answered.
     #
+    # WHICH IS WHY THE BOUND MUST SIT STRICTLY UNDER THIS HOOK'S REGISTRATION, MARGIN NAMED
+    # (wave-14 D2, ratified; D1 moved both numbers). hooks/hooks.json registers this hook at
+    # `"timeout": 15` and `IMPACT_BOUND_S` is 10, five seconds clear. A bound above the
+    # registration cannot refuse anything in production, however many times this file's
+    # suite drives it to a refusal — the suite has no CLI timeout and the machine does
+    # (A-T6.5). The pair is pinned where the two files meet: cross-gate-agreement §L.4c.
+    #
     # BUILT, NOT BORROWED. bionic's command discipline forbids a `timeout`/`gtimeout` binary
     # and macOS ships neither, so the bound is a backgrounded child and a `kill -0` poll.
-    IMPACT_BOUND_S=6
-    IMPACT_BOUND_TICKS=60          # 60 x 0.1s; the tick is the poll, the product is the bound
+    # THE BOUND IS NOT THIS FILE'S (wave-14 REQ-7, D4). `IMPACT_BOUND_S` lives in
+    # lib/bounds.sh and is read by both legs of the fleet — this wall, once per dispatch,
+    # and lib/stop.sh's landing sweep, once per sweep. Both carried their own `6` under
+    # their own header, and two copies of a constant do not disagree loudly: they disagree
+    # the next time a wave moves one of them, and what ships is a tree whose two legs mean
+    # different things by "bounded" while every message quotes its own half (R2 Q8 found the
+    # twin). Read the library's header before touching the number — it is a HANG GUARD now,
+    # not a cost budget, and the answer to a slow derivation is the cache, never this.
+    #
+    # SOURCED THE WAY lib/stop.sh SOURCES IT, guarded on the thing it defines so a caller
+    # that already has it pays nothing, and LAZILY — here, at the one arm that spends it,
+    # rather than at file scope beside the loader's own seven libraries. Every dispatch that
+    # declares `Suites:` outright reaches neither this branch nor this read.
+    if [ -z "${IMPACT_BOUND_S:-}" ]; then
+      # shellcheck source=/dev/null
+      . "$BIONIC_LIB/bounds.sh"
+    fi
+    # THE WAIT ENDS ON A CLOCK, NOT ON A COUNT OF POLLS (wave-14 T34). This loop used to
+    # spend a tick budget — `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))`, one tick per
+    # `sleep 0.1` — and call the budget the bound. It is not the bound. `sleep` is an
+    # external binary, so every tick pays a fork and an exec on top of the 100 ms it
+    # sleeps: measured at 115.3 ms a tick on a quiet Mac (T34 §2), which makes a stated
+    # 20 s bound a 23.0-23.2 s wait and a stated 5 s bound a 5.77 s wait, while the
+    # refusal below quotes the stated number. That is the same lie the derived budget was
+    # written to prevent, one layer down — the literal was fixed, the RATE was not.
+    #
+    # AND THE ERROR IS PROPORTIONAL, WHICH IS THE PART THAT MATTERS. A fixed 15% would
+    # only be untidy. Under the load 8-12 a wave actually dispatches at, each tick costs
+    # more and the realized wait grows with it — so the one guard whose job is to stop a
+    # wedged session waiting gets slower exactly when the session is wedged. A hang guard
+    # cannot be denominated in a unit that stretches under the condition it guards.
+    #
+    # `SECONDS` IS THE CLOCK, AND IT COSTS NOTHING. Assigning it zeroes bash's own
+    # elapsed-time counter and reading it is a shell builtin — no second fork per tick, on
+    # a path this wave is measuring for latency. /bin/bash is 3.2 on a Mac, which has
+    # neither `EPOCHREALTIME` nor `printf %(%s)T`, and bionic's command discipline forbids
+    # a `timeout` binary; `date +%s` would cost a fork per tick to buy the same
+    # whole-second resolution `SECONDS` gives free. Nothing else in this hook or in the
+    # libraries it sources reads `SECONDS`, so zeroing it here takes nothing from anyone.
+    #
+    # THE RESOLUTION IS A WHOLE SECOND, AND IT ROUNDS TOWARD WAITING LESS. `SECONDS` is
+    # integer, and the assignment below lands at an arbitrary point inside a second, so the
+    # wait ends somewhere in [bound-1, bound] — never past the number the refusal quotes.
+    # For a hang guard that is the correct direction to be wrong in: a guard that fires a
+    # little early costs a re-dispatch, and one that fires late costs the thing the guard
+    # exists for. The bound itself is NOT this file's to move (lib/bounds.sh, D4); this
+    # changes only whether the wait honours it.
+    #
+    # `sleep 0.1` STAYS the poll cadence. It is what makes a prompt derivation noticed
+    # promptly, and with the clock deciding, its cost no longer accumulates into the bound.
     _impact_tmp="${TMPDIR:-/tmp}/bionic-impact-$$-${RANDOM}.out"
     # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
     ( cd "$BIONIC_ROOT" 2>/dev/null && $IMPACT_COMMAND "$@" >"$_impact_tmp" 2>/dev/null ) &
     _impact_pid=$!
-    _impact_ticks=0
+    SECONDS=0
     _impact_overran=0
     while kill -0 "$_impact_pid" 2>/dev/null; do
-      if [ "$_impact_ticks" -ge "$IMPACT_BOUND_TICKS" ]; then
+      if [ "$SECONDS" -ge "$IMPACT_BOUND_S" ]; then
         kill -TERM "$_impact_pid" 2>/dev/null
         _impact_overran=1
         break
       fi
       sleep 0.1
-      _impact_ticks=$((_impact_ticks + 1))
     done
     wait "$_impact_pid" 2>/dev/null
     if [ "$_impact_overran" -eq 1 ]; then
       rm -f "$_impact_tmp"
       _dp_detail="The command named by \`impact-command:\` in .bionic/config.yaml turns the paths this
-brief declared into the set of suites the agent may run. This hook is registered at a
-10-second timeout, and a hook killed on that timeout does NOT refuse: the dispatch
-would proceed with no roster row at all, and the writer would run with no budget —
-the wall defeated by the cost of the wall. So the derivation is bounded here.
+brief declared into the set of suites the agent may run. This hook is registered with a
+timeout of its own in hooks/hooks.json, and a hook killed on that timeout does NOT refuse:
+the dispatch would proceed with no roster row at all, and the writer would run with no
+budget — the wall defeated by the cost of the wall. So the derivation is bounded here,
+strictly under that registration.
 
   command: $IMPACT_COMMAND
   paths:   $*
@@ -2256,6 +2582,18 @@ Fix: narrow \`Files:\` to the paths this task really writes, or name the closed 
 directly with \`Suites:\` — a declared set needs no derivation at all. If the command
 itself has become slow, that is the thing to fix: it runs on every dispatch."
       dp_finding "the impact command did not answer" "fix impact-command in config.yaml" "$_dp_detail"
+      # NOTHING DERIVED MEANS NOTHING TO JUDGE AGAINST (AC-8.2). The one-regression wall
+      # below reads this set for `run.sh`; an overrun leaves it unbuilt, and the author
+      # deserves to know that wall is still waiting rather than to meet it next attempt.
+      dp_not_checked "one-regression" "a suite set"
+      # THIS SPEND IS EARLY (Step-6 architecture review §2.2). Every other arm pools into
+      # one `dp_refuse_findings` at the bottom of the file; this branch spends here instead
+      # because the overrun destroys the one-regression wall's own input and there is
+      # nothing below THIS branch (in file order) but that wall. That is true only by arm
+      # order, not by construction — an arm added below this point that does NOT depend on
+      # the derivation would be silently skipped on every overrun, with no test to catch
+      # it. Any arm added below here must be dependent on the derivation, or must be
+      # pooled above this spend instead.
       dp_refuse_findings
     fi
     _impact_out=$(cat "$_impact_tmp" 2>/dev/null) || _impact_out=""
@@ -2285,15 +2623,6 @@ Or configure the derivation once, in .bionic/config.yaml —
 Then retry the dispatch."
   dp_finding "no impact command is configured here" "set impact-command in config.yaml" "$_dp_detail"
 fi
-
-# ===================================== THE ONE REFUSAL, FOR EVERY BRIEF-SHAPE FAULT
-#
-# THE LAST BRIEF-SHAPE ARM IS ABOVE THIS LINE, and everything below reads the ROW rather
-# than the brief. So this is where the list is spent: one refusal carrying every fault the
-# five arms found, in file order, or a silent return when they found none. It sits ABOVE
-# the one-regression wall and the journal for the same reason each arm used to exit where
-# it stood — a brief the gate is about to refuse must never be journalled as a launch.
-dp_refuse_findings
 
 # ============================================= THE ONE-REGRESSION WALL (AC-24)
 # (seed item 4; the standing ruling "one regression means one" made mechanical.)
@@ -2344,6 +2673,12 @@ regression_causes() {  # -> how many `regression-cause:` lines the plan carries 
     END { print c + 0 }
   ' "$PLAN" 2>/dev/null
 }
+# THE ARM'S OWN DEPENDENCY, STATED (AC-8.2). This wall's whole input is the set built
+# above — declared or derived — and a brief that produced none leaves it unable to answer
+# rather than answering "no". R2 Q2 lists it as the clearest case in the file.
+if [ -z "$SUITES_ALLOWED" ]; then
+  dp_not_checked "one-regression" "a suite set"
+fi
 case " $SUITES_ALLOWED " in
   *" run.sh "*)
     if [ -n "$PLAN" ]; then
@@ -2362,11 +2697,29 @@ Fix: record why this one is needed, under \`## SDLC State\` in —
 
 Then retry the dispatch. A narrower brief needs no cause: name only the suites
 the change actually reaches."
-        refuse exit2 dispatch "this run already ran the full tree" "record the cause on the plan" "$_dp_detail"
+        dp_finding "this run already ran the full tree" "record the cause on the plan" "$_dp_detail"
       fi
     fi
     ;;
 esac
+
+# ================================================ THE ONE REFUSAL, FOR EVERY FAULT
+#
+# THE LAST ARM THAT CAN FIND A FAULT IS ABOVE THIS LINE, and everything below is the
+# LEDGER. So this is where the list is spent: one refusal carrying every fault every arm
+# from the arming wall down found, in file order, or a silent return when they found none.
+#
+# IT MOVED DOWN PAST THE ONE-REGRESSION WALL (wave-14 REQ-8). It used to sit between the
+# brief-shape arms and that wall, which was right while only the brief-shape arms pooled
+# and wrong the moment the state arms joined them: a dispatch over budget AND re-running
+# the full tree was refused for the budget, and met the regression wall on the next
+# attempt — the exact shape AC-8.1 forbids ("fixing the first alone produces a refusal
+# naming a fault the first could have named").
+#
+# IT STAYS ABOVE THE JOURNAL, for the reason each arm used to exit where it stood: a
+# dispatch the gate is about to refuse must never be journalled as a launch — and `deny`
+# exits 0, which is exactly the status the ledger below would otherwise read as a launch.
+dp_refuse_findings
 
 # ---------- THE LEDGER STOPS AT DEPTH ONE ----------
 # (session-20260815-landing-supervision T6; design D1 "writers stay put".)

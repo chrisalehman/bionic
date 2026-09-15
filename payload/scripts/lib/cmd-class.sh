@@ -425,7 +425,24 @@ _cmd_class_awk() {  # <mode> ; command on stdin
 }
 
 cmd_strip_heredocs() {  # <command> -> the command with every heredoc body removed
-  printf '%s' "${1-}" | _cmd_class_awk heredoc
+  # THE FORK IS SKIPPED FOR A COMMAND THAT OPENS NO HEREDOC (epic-23 wave-14 REQ-4).
+  # `heredoc_tag()` can only return a tag from a `<<` — it scans for exactly that pair
+  # and returns "" from every other character — so for a command whose text does not
+  # contain `<<` at all, step 1 is the identity and this whole awk pass is 3.3 ms
+  # (measured, research R3 §3) spent copying the input to the output. The test is
+  # deliberately the CRUDE one: a `<<` inside quotes, or a here-STRING `<<<`, opens no
+  # body either, but reading that correctly is the awk's job and misreading it in the
+  # fast path is how a wall goes blind. `<<` present means ask awk.
+  #
+  # AND THE ANSWER IS BYTE-IDENTICAL, not merely equivalent. On this path awk would
+  # emit each input record followed by "\n" — the input with one trailing newline
+  # guaranteed. Every caller in the tree reads this through `$( )`, which strips
+  # trailing newlines from both spellings alike, so the two differ nowhere a caller
+  # can see. tests/cmd-class.test.sh's heredoc rows keep both directions honest.
+  case "${1-}" in
+    *'<<'*) printf '%s' "${1-}" | _cmd_class_awk heredoc ;;
+    *)      printf '%s' "${1-}" ;;
+  esac
 }
 
 cmd_unwrap_head() {  # <command> -> the command reduced to what argv[0] reads
@@ -479,10 +496,42 @@ cmd_suite_targets() {  # <command> [<repo root>] -> the suite BASENAME each suit
 }
 
 cmd_class() {  # <command> -> suite|bootstrap|install|build|none, by priority
-  local classes c
-  classes=$(cmd_class_lines "${1-}" | awk -F'\t' '{print $1}')
+  # FIVE FORKS LESS THAN IT USED TO COST (epic-23 wave-14 REQ-4; research R3 §3
+  # measured 6.4 ms of `classify_tier1`'s 13.1 on this function alone). The reading
+  # is unchanged — the SAME lines from the SAME awk, still by priority and not by
+  # position — but the class column is now split by parameter expansion and matched
+  # by `case`, where it was one `awk -F'\t'` plus one `grep -qx` PER CLASS NAME over
+  # a handful of lines. Four greps to ask four questions of one small string is four
+  # process spawns on the hottest path in the tree.
+  #
+  # EXACT-LINE SEMANTICS, WHICH IS WHAT `grep -qx` GAVE. The set is assembled with a
+  # newline on BOTH sides of every class word, and each pattern carries a newline on
+  # both sides of the word it looks for, so `suite` matches the whole field `suite`
+  # and never a field that merely contains it. A `case` pattern would otherwise be a
+  # substring test, which is exactly the direction `-x` existed to refuse: without
+  # the anchors a class column reading `not-suite` would answer `suite`, and the
+  # farm-out wall would deny a command it has no business denying.
+  #
+  # THE FIELD SPLIT MATCHES awk's. `${line%%<tab>*}` on a line carrying no tab yields
+  # the whole line, which is what `awk -F'\t' '{print $1}'` printed for such a line.
+  local lines rest line cls seen c
+  lines=$(cmd_class_lines "${1-}")
+  seen=$'\n'
+  rest="$lines"
+  while [ -n "$rest" ]; do
+    line="${rest%%$'\n'*}"
+    case "$rest" in
+      *$'\n'*) rest="${rest#*$'\n'}" ;;
+      *)        rest="" ;;
+    esac
+    cls="${line%%$'\t'*}"
+    [ -n "$cls" ] || continue
+    seen="$seen$cls"$'\n'
+  done
   for c in suite bootstrap install build; do
-    if printf '%s\n' "$classes" | grep -qx "$c"; then printf '%s' "$c"; return 0; fi
+    case "$seen" in
+      *$'\n'"$c"$'\n'*) printf '%s' "$c"; return 0 ;;
+    esac
   done
   printf 'none'
 }

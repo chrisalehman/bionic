@@ -2919,7 +2919,7 @@ HOOKS_JSON_ROWS=$(jq -r '
 L2_EXPECTED='
 PreToolUse|Bash|${CLAUDE_PLUGIN_ROOT}/hooks/bash-walls.sh|10
 PreToolUse|TaskStop|${CLAUDE_PLUGIN_ROOT}/hooks/stop-guard.sh|10
-PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|10
+PreToolUse|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-preflight.sh|15
 PreToolUse|Write|Edit|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Write|${CLAUDE_PLUGIN_ROOT}/hooks/canonical-sdlc-governing-skill.sh|10
 PostToolUse|Bash|Agent|${CLAUDE_PLUGIN_ROOT}/hooks/execution-recorder.sh|10
@@ -2968,8 +2968,18 @@ L4_HJ_TOTAL=$(jq '[.hooks | to_entries[] | .value[] | .hooks[]] | length' "$HOOK
 L4_HJ_TIMED=$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(has("timeout"))] | length' "$HOOKS_JSON_SRC")
 expect_eq "the manifest: EVERY hook entry carries a timeout key — none unbounded" \
   "$L4_HJ_TOTAL" "$L4_HJ_TIMED"
-expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
-  "$(jq '[.hooks | to_entries[] | .value[] | .hooks[] | select(.timeout != 10)] | length' "$HOOKS_JSON_SRC")"
+# TEN IS THE CEILING FOR EVERY HOOK BUT ONE (wave-14 T35, ledger D1). The dispatch wall
+# is registered at 15 because its own inner bound is 10 and an inner bound must sit
+# STRICTLY under its registration or it can never fire (§L.4c below, which pins that pair
+# against lib/bounds.sh). The exception is named here by the hook it belongs to rather
+# than counted away, so a SECOND hook drifting off the ceiling fails this row.
+expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10, the dispatch wall excepted" "0" \
+  "$(jq '[.hooks | to_entries[] | .value[] | .hooks[]
+         | select(.timeout != 10)
+         | select((.command | test("/dispatch-preflight\\.sh( |$)")) | not)] | length' "$HOOKS_JSON_SRC")"
+expect_eq "…and the one exception is the dispatch wall, at 15, so its 10s bound can fire before the CLI kills the hook" "15" \
+  "$(jq -r '[.hooks | to_entries[] | .value[] | .hooks[]
+            | select(.command | test("/dispatch-preflight\\.sh( |$)")) | .timeout] | unique | .[]' "$HOOKS_JSON_SRC")"
 
 # --- L.5 THE GUARD SURVIVES WHERE ITS PURPOSE SURVIVES ---
 #
@@ -2983,9 +2993,96 @@ expect_eq "…each bounded by the ceiling the Step-6 review demanded: 10" "0" \
 # `resume`. The timeout is always the last field, so read it as the last field; a matcher
 # may not be. The cross-CHANNEL half of this check retired with the frontmatter block:
 # there is one channel now, and §L.1 asserts the other is empty.
-L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $NF}' | sort -u)
-expect_eq "the manifest renders exactly one timeout value across all its rows" \
-  "10" "$L4B_HJ_VALUES"
+L4B_HJ_VALUES=$(printf '%s\n' "$HOOKS_JSON_ROWS" | awk -F'|' '{print $NF}' | sort -u \
+  | tr '\n' ' ' | sed 's/ $//')
+expect_eq "the manifest renders exactly the two timeout values the fleet has, read as the LAST field" \
+  "10 15" "$L4B_HJ_VALUES"
+
+# --- L.4c EVERY INNER BOUND SITS STRICTLY UNDER ITS HOOK'S REGISTRATION ---
+#
+# THE INVARIANT (epic-23 wave-14-tune-181, REQ-7; D2 ratified "(a)", D1 in-wave). A hook
+# that waits on something slow owns an INNER bound: the second at which it stops waiting
+# and refuses on its own terms. The manifest above registers that same hook at an OUTER
+# timeout. If the inner bound is not STRICTLY under the outer registration it can never
+# fire — the CLI kills the hook first, a killed hook exits 124 rather than the 2 a refusal
+# spells, and the refusal that was in flight silently becomes a PASS. That is the one
+# failure both of bionic's bounded gates exist to prevent.
+#
+# AND IT IS INVISIBLE TO EVERY SUITE THAT DRIVES A GATE DIRECTLY. A suite has no CLI
+# timeout, so the two numbers can disagree for a whole release while each side's own
+# section stays green: tests/dispatch-preflight.test.sh drove a 20 s bound to a refusal
+# hundreds of times under a 10 s registration that would have killed it on the machine
+# (A-T6.5, four reviewers). The gap is only visible where the two FILES meet, which is
+# here.
+#
+# BOTH SIDES ARE READ, NEITHER IS TRANSCRIBED. The registration comes out of
+# hooks/hooks.json by the hook's own COMMAND PATH — never by array index, because the
+# order of entries in a JSON array is nobody's contract and an index silently reads a
+# different hook the moment one is inserted above it. The bound comes out of
+# payload/scripts/lib/bounds.sh by SOURCING it, because what a consumer gets is what
+# sourcing gives it. A wave that moves either number without the other turns this red.
+L4C_BOUNDS="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh"
+
+# l4c_registration <hook filename> -> the timeout(s) hooks.json registers that command at,
+# one per line, de-duplicated. Matched on the path segment so `stop.sh` cannot match
+# `stop-guard.sh`, and every entry naming the hook is read — the landing sweep is
+# registered twice (Stop straight, SubagentStop behind the guard) and BOTH registrations
+# bound the same inner number, so a wave that moved one of them alone must fail here.
+l4c_registration() {
+  jq -r --arg h "$1" '[.hooks | to_entries[] | .value[] | .hooks[]
+      | select(.command | test("/" + ($h | gsub("\\."; "\\.")) + "( |$)"))
+      | .timeout] | unique | .[]' "$HOOKS_JSON_SRC" 2>/dev/null
+}
+
+# l4c_bound <bounds file> <variable> -> the value sourcing that file gives that name.
+l4c_bound() {
+  bash -c '. "$1" 2>/dev/null; eval "printf %s \"\${$2:-}\""' _ "$1" "$2" 2>/dev/null
+}
+
+# l4c_verdict <bounds file> <variable> <registration> -> `under` or `NOT under`.
+# STRICTLY under: a bound EQUAL to the registration is the failure, not the boundary case.
+# The hook needs the difference to spend on everything it does that is not waiting.
+l4c_verdict() {
+  local _v; _v="$(l4c_bound "$1" "$2")"
+  if [ -n "$_v" ] && [ -n "$3" ] && [ "$_v" -lt "$3" ] 2>/dev/null; then
+    printf 'under'
+  else
+    printf 'NOT under'
+  fi
+}
+
+for _l4c_pair in "dispatch-preflight.sh|IMPACT_BOUND_S|the dispatch wall" \
+                 "stop.sh|LG_IMPACT_BOUND_S|the landing sweep"; do
+  _l4c_hook="${_l4c_pair%%|*}"
+  _l4c_rest="${_l4c_pair#*|}"
+  _l4c_var="${_l4c_rest%%|*}"
+  _l4c_who="${_l4c_rest#*|}"
+  _l4c_regs="$(l4c_registration "$_l4c_hook")"
+  _l4c_reg="$(printf '%s\n' "$_l4c_regs" | /usr/bin/grep -c .)"
+  expect_eq "L.4c hooks/hooks.json registers ${_l4c_hook} at ONE timeout value, however many events name it" \
+    "1" "$_l4c_reg"
+  _l4c_reg="$(printf '%s\n' "$_l4c_regs" | head -1)"
+  _l4c_val="$(l4c_bound "$L4C_BOUNDS" "$_l4c_var")"
+  expect_nonempty "L.4c …and lib/bounds.sh answers for ${_l4c_var} (not vacuous: both sides were read)" \
+    "$_l4c_val"
+  expect_eq "L.4c ${_l4c_who}: ${_l4c_var}=${_l4c_val}s sits strictly under ${_l4c_hook}'s ${_l4c_reg}s registration, margin $(( ${_l4c_reg:-0} - ${_l4c_val:-0} ))s" \
+    "under" "$(l4c_verdict "$L4C_BOUNDS" "$_l4c_var" "$_l4c_reg")"
+done
+
+# NOT VACUOUS: a bounds.sh whose inner numbers sit exactly AT their registrations must be
+# judged `NOT under` by the same derivation the rows above ran. At the registration is the
+# real shape of the defect — a bound of 20 under a registration of 10 is only its loudest
+# form — so that is what the mutant carries.
+anchor -E "$L4C_BOUNDS" '^IMPACT_BOUND_S=[0-9]+$' 1
+anchor -E "$L4C_BOUNDS" '^LG_IMPACT_BOUND_S=[0-9]+$' 1
+DOCTORED_L4C="$SANDBOX/bounds-at-the-registration.sh"
+sed -e "s/^IMPACT_BOUND_S=[0-9]*$/IMPACT_BOUND_S=$(l4c_registration dispatch-preflight.sh | head -1)/" \
+    -e "s/^LG_IMPACT_BOUND_S=[0-9]*$/LG_IMPACT_BOUND_S=$(l4c_registration stop.sh | head -1)/" \
+    "$L4C_BOUNDS" > "$DOCTORED_L4C"
+expect_eq "L.4c …and a bounds.sh carrying the wall's bound AT its registration reads NOT under" \
+  "NOT under" "$(l4c_verdict "$DOCTORED_L4C" IMPACT_BOUND_S "$(l4c_registration dispatch-preflight.sh | head -1)")"
+expect_eq "L.4c …and the same for the sweep's, so both rows above discriminate" \
+  "NOT under" "$(l4c_verdict "$DOCTORED_L4C" LG_IMPACT_BOUND_S "$(l4c_registration stop.sh | head -1)")"
 
 # hooks/agent-context-guard.sh runs the wall behind it only for a payload carrying a
 # top-level agent_id in a session that has a roster on disk. It fronted four entries,
@@ -4064,7 +4161,14 @@ expect_eq "…writing it back to the same path the consumer reads" "yes" \
 # same root N.1 measured — while the agent payload three lines up passes through the same
 # wall. Asserted here rather than only in tests/dispatch-preflight.test.sh because the root
 # in the refusal is the library's answer, which is this suite's whole subject.
-N_LEASE_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_LEASE_ST=$?
+# A FRESH NAME, for the reason N.3 above already states and this arm now needs too
+# (wave-14 REQ-8, T6): the passing dispatches above journalled `w99-impl`, and with the
+# gate's arms pooled a re-used name would put the name-in-flight fault beside the lease
+# fault and refuse for both at once — one refusal on the deny channel, where this arm reads
+# an exit status. The lease wall is what AC-14 is about.
+N_LEASE_OUT=$(mk_agent_payload "$SID_A" "$NWT" \
+  | jq -c '.tool_input.name = "w99-impl-lease"' \
+  | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_LEASE_ST=$?
 expect_eq "a MAIN-THREAD dispatch from the same worktree is refused (AC-14)" "2" "$N_LEASE_ST"
 expect_contains "…naming the main checkout the library already resolves to" \
   "main checkout: $NMAIN" "$N_LEASE_OUT"
@@ -6729,9 +6833,24 @@ roster_identify "$LA_REPO" "$SID_A" "la-target" "$LA_TID"
 # hook from `$LA_TREE/hooks`, whose `../scripts/lib` is the library those hooks resolve
 # first, so pointing `LA_TREE` at a doctored copy swaps the PARSER under all three at once
 # without the shipped files being touched.
+# A FRESH DISPATCH NAME PER DRIVE (wave-14 REQ-8, T6). Some of the drives below are
+# ALLOWED — that is half of what the mutation battery measures — and an allowed dispatch
+# JOURNALS its name on this roster. With the gate's arms pooled, the next drive under the
+# same name is refused for the budget AND for the name being in flight, which is a true
+# answer to a question this section is not asking: the channel it compares would then carry
+# two faults and no per-fault detail. The counter is a file because every call site spends
+# this function inside `$( )`, where a shell variable's increment does not survive.
+LA_NAME_SEQ="$SANDBOX/.la-name-seq"
+printf '0' > "$LA_NAME_SEQ"
+la_next_name() {
+  local n; n=$(( $(cat "$LA_NAME_SEQ" 2>/dev/null || echo 0) + 1 ))
+  printf '%s' "$n" > "$LA_NAME_SEQ"
+  printf 'la-w%s' "$n"
+}
 la_budget() {  # -> the dispatch wall's whole channel
   mk_agent_payload "$SID_A" "$LA_REPO" \
-    | jq -c --arg t "$LA_TR" '.transcript_path = $t' \
+    | jq -c --arg t "$LA_TR" --arg n "$(la_next_name)" \
+        '.transcript_path = $t | .tool_input.name = $n' \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$LA_TREE/hooks/dispatch-preflight.sh" 2>&1
   return 0
 }
@@ -7620,6 +7739,86 @@ expect_contains "…and at run time it leaks its own source text instead of answ
   "esac)" "$(/bin/bash "$BP_INLINE_MUT" abc 2>/dev/null)"
 expect_eq "…but the grep catches it" "yes" \
   "$([ -n "$(LC_ALL=C grep -nE "$BP_RE" "$BP_INLINE_MUT")" ] && echo yes || echo no)"
+
+# THE THIRD SHAPE, WHICH NEITHER `-n` NOR A RUN CAN SEE UNTIL THE DATA GROWS (wave-14 T37).
+# `echo "$VAR" | grep -q PAT` parses, and answers correctly, for as long as $VAR fits in the
+# 64 KB pipe buffer. Past that the producer is still writing when `grep -q` exits at its
+# FIRST match; it takes SIGPIPE and exits 141, and under `set -o pipefail` — which
+# hooks/bash-walls.sh (:86) and hooks/stop-guard.sh (:46) both set — the pipeline reports
+# 141 rather than grep's 0. So `if ! …` reads a MATCH as a failure, and the wall inverts.
+# This is not hypothetical: the evidence gate refused EVERY commit in this repo once the
+# plan's `## Verification Matrix` section passed 64 KB, on a plan whose `stack-health:` line
+# was present and valid (tests/canonical-sdlc-evidence-gate.test.sh Section 40 pins the
+# behaviour; this row pins the IDIOM, which is what stops it coming back).
+#
+# The fix is a here-string, which has no second process to lose, so the rule is: no wall
+# library and no hook reads a variable through a pipe into a quitting `grep`. Tests are NOT
+# swept — a fixture builder is not a wall, and several here legitimately pipe.
+# Like $BP_RE above, the pattern is written in bracket classes so this file's own source
+# does not match the rule it enforces.
+# A literal `$` the printf builders below plant into fixture files without this file's own
+# expansion reaching it — same device $BP_DOL uses for §BP's inline-case mutant.
+BP_Q_DOL='$'
+BP_Q_RE='(echo|printf)[^|]*"[$][{A-Za-z_][^|]*[|][[:space:]]*(/usr/bin/)?grep[[:space:]]+-[A-Za-z]*q'
+BP_Q_FILES="$(cd "$BIONIC_SCRIPTS_DIR" && find hooks payload/scripts/lib -name '*.sh' -type f \
+  2>/dev/null | LC_ALL=C sort)"
+expect_eq "the quitting-grep sweep found shell files to check" "yes" \
+  "$([ -n "$BP_Q_FILES" ] && echo yes || echo no)"
+# CODE LINES ONLY. A WHOLE-LINE COMMENT IS EXEMPT, and it has to be: the fix in
+# walls.sh explains the defect by SPELLING the banned idiom, and a rule that forbids
+# documenting what it bans would be paid for in silence. A comment executes nothing, so
+# the exemption costs the rule no power — and it is narrow, dropping only lines whose
+# FIRST non-blank character is `#`, never a code line that carries the idiom with a
+# comment after it. The pair of rows below pins both halves of that.
+# `-H` IS FORCED ON EVERY CALL, not decoration: BSD and GNU grep both omit the filename
+# when given exactly ONE file, so a single-file planted fixture would print `2:  # …`
+# while the multi-file sweep prints `path:2:  # …`. One output shape means one filter.
+bp_q_code_only() {  # <grep -nH output> -> the same rows minus whole-line comments
+  LC_ALL=C grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true
+}
+BP_Q_HITS="$(cd "$BIONIC_SCRIPTS_DIR" && LC_ALL=C grep -nHE "$BP_Q_RE" \
+  $(printf '%s\n' "$BP_Q_FILES" | tr '\n' ' ') 2>/dev/null | bp_q_code_only)"
+expect_eq "no hook or wall library pipes a variable into a quitting \`grep -q\`" "" "$BP_Q_HITS"
+
+# THE EXEMPTION IS NARROW, both directions, on planted lines rather than on the tree.
+BP_Q_CMT="$SANDBOX/bp-q-comment.sh"
+printf '#!/bin/bash\n  # echo "%sBIG" | grep -qE needle  <- a comment, not a site\nx=1\n' \
+  "$BP_Q_DOL" > "$BP_Q_CMT"
+expect_eq "…and a whole-line COMMENT spelling the idiom is not a site" "" \
+  "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_CMT" | bp_q_code_only)"
+expect_eq "…though the raw grep did match it, so the exemption is what dropped it" "yes" \
+  "$([ -n "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_CMT")" ] && echo yes || echo no)"
+BP_Q_TRAIL="$SANDBOX/bp-q-trailing.sh"
+printf '#!/bin/bash\nif echo "%sBIG" | grep -qE needle ; then :; fi  # still a site\n' \
+  "$BP_Q_DOL" > "$BP_Q_TRAIL"
+expect_eq "…while a CODE line carrying the idiom is still caught, comment or not" "yes" \
+  "$([ -n "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_TRAIL" | bp_q_code_only)" ] && echo yes || echo no)"
+
+# THE MUTATION ARM, in two halves. The first proves the grep discriminates; the second
+# proves the defect it stands for is REAL under pipefail, so the row is not a style pin.
+BP_Q_MUT="$SANDBOX/bp-quitting-grep.sh"
+printf '#!/bin/bash\nset -uo pipefail\nBIG="%s1"\nif ! echo "%sBIG" | grep -qE "^needle" ; then\n  echo REFUSED\nelse\n  echo ALLOWED\nfi\n' \
+  "$BP_Q_DOL" "$BP_Q_DOL" > "$BP_Q_MUT"
+expect_eq "the mutation arm: the planted idiom PARSES, so -n cannot catch it" "0" \
+  "$(/bin/bash -n "$BP_Q_MUT" >/dev/null 2>&1; echo $?)"
+expect_eq "…and the grep catches it" "yes" \
+  "$([ -n "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_MUT")" ] && echo yes || echo no)"
+# The same planted file, run twice on the SAME needle, differing only in how much data
+# trails the match: under the buffer it answers ALLOWED, over it the wall inverts.
+BP_Q_SMALL="$(/bin/bash "$BP_Q_MUT" "$(printf 'needle\npadding\n')")"
+BP_Q_BIG="$(/bin/bash "$BP_Q_MUT" "$(printf 'needle\n'; LC_ALL=C awk 'BEGIN{for(i=0;i<9000;i++) print "padding padding padding padding padding padding"}')")"
+expect_eq "…the planted idiom answers correctly while the subject fits the pipe buffer" \
+  "ALLOWED" "$BP_Q_SMALL"
+expect_eq "…and INVERTS once it does not: a present needle read as absent" \
+  "REFUSED" "$BP_Q_BIG"
+# The here-string the sweep requires instead, on the same oversized subject, does not.
+BP_Q_FIX="$SANDBOX/bp-herestring.sh"
+printf '#!/bin/bash\nset -uo pipefail\nBIG="%s1"\nif ! grep -qE "^needle" <<< "%sBIG" ; then\n  echo REFUSED\nelse\n  echo ALLOWED\nfi\n' \
+  "$BP_Q_DOL" "$BP_Q_DOL" > "$BP_Q_FIX"
+expect_eq "…while the here-string answers ALLOWED on the SAME oversized subject" "ALLOWED" \
+  "$(/bin/bash "$BP_Q_FIX" "$(printf 'needle\n'; LC_ALL=C awk 'BEGIN{for(i=0;i<9000;i++) print "padding padding padding padding padding padding"}')")"
+expect_eq "…and the sweep does not flag the here-string form" "" \
+  "$(LC_ALL=C grep -nHE "$BP_Q_RE" "$BP_Q_FIX")"
 
 # ------------------------------------------------ §DS OWNERSHIP: the fix hint and the roster
 #
@@ -9209,9 +9408,65 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # drift from before the wave's own T1 landed, and A-orch-35 attributed the added site
 # to T2 — direct measurement (`git diff b8b6bd6 8b80980 -- tests/docs-pins.test.sh`)
 # shows it lands with T3's merge instead; corrected here against the grep, not the note.
-expect_eq "S19.3 docs-pins holds 39 doctoring sites" "39" \
+#
+# 40->41 at epic-23 wave-14-tune-181 (2026-09-15, T15 fold-in): T10 (Section 27, "card row
+# formats at fixed widths", REQ-9) added one more doctoring site, DOCTORED_NO_RULE — the
+# copy of steps/1.md with the shared card rule line stripped, which is AC-9.2's own
+# mutation arm — declared by one anchor call on $CARD_RULE_LINE. ATTRIBUTED FROM THE DIFF,
+# not from the task list: `git log -p 0fe69ed..HEAD -- tests/docs-pins.test.sh` shows two
+# commits touching the file (63054a1 T10, c821781 T14) and exactly one of them, 63054a1,
+# adds a `DOCTORED…="$TMP/` line and an `anchor` line; T14's docs commit adds neither.
+# RE-DERIVED BY DIRECT GREP at THIS commit, as every number in this section is.
+#
+# 41->41 (sites move, anchors DON'T) at epic-23 wave-14-tune-181 (2026-09-15, T32 fold-in):
+# `git log -p 0eb4e8b..3ac952b -- tests/docs-pins.test.sh` shows two commits touching the
+# file — 395320a (T31) and eb49bcc (T28) — and only ONE of them touches a DOCTORED… or
+# anchor line: `git show 395320a -- tests/docs-pins.test.sh | grep -E
+# '^[+-](DOCTORED[A-Z0-9_]*="\$TMP/|[[:space:]]*anchor[[:space:]])'` is EMPTY — T31's pins
+# 148-152 render a card's own printf format against its sample values and compare, no
+# doctored copy, no `anchor` call, so it moves neither term (this corrects the dispatch
+# note that named T31 as a second contributor; measured against the diff, not assumed).
+# `git show eb49bcc -- tests/docs-pins.test.sh | grep -E
+# '^[+-](DOCTORED[A-Z0-9_]*="\$TMP/|[[:space:]]*anchor[[:space:]])'` shows T28 adds ONE
+# doctoring site, `DOCTORED_PATROL_T28="$TMP/patrol-classes-mutated.sh"` (44d, the
+# anti-vacuity arm for 44c's class-list agreement pin), and REWRITES an existing anchor
+# line in place (`anchor "$STEP8_MD" 'sparing every session-keyed file' 1` ->
+# `anchor "$STEP8_MD" "sparing a LIVE neighbour session" 1`, the T1 spare-rule sentence)
+# rather than adding a new one. Net: sites 40->41, anchor CALLS unmoved at 41 — the two
+# terms now read EQUAL rather than the +1 (Section 8's two-sentence rewrite) offset every
+# earlier entry in this history describes, for a DIFFERENT reason: DOCTORED_PATROL_T28 was
+# built without its own `anchor` precondition (44d's if/elif chain checks the mutation
+# took effect inline, but not through the `anchor` helper this census counts). That is a
+# real gap in tests/docs-pins.test.sh, OUT OF THIS TASK'S Files: (cross-gate-agreement.test.sh
+# only) — see A-T32.2, routed the same way A-T24.7 and A-T27.9 routed the same shape of
+# finding. §S19.4 (below) is the row that catches it, and stays red here on purpose: an
+# invariant a real defect trips is not re-pinned to match the defect.
+#
+# 41->42 (anchors move, sites DON'T) at epic-23 wave-14-tune-181 (2026-09-15, T33 fold-in):
+# wave-14 T28 (`eb49bcc`) added `DOCTORED_PATROL_T28` without its own `anchor` precondition
+# — the gap T32 found and routed via A-T32.2. T33 closes it, adding one `anchor` call (the
+# un-doctored `PATROL_STATE_CLASSES="…"` line in payload/scripts/lib/patrol.sh, matched
+# once, immediately above the site's `sed`) and nothing else — 44a-44d are unchanged. Sites
+# stay 41 (T33 adds no new `DOCTORED…="$TMP/…"` assignment); anchor CALLS move 41->42.
+# 41->42 SITES and 42->43 ANCHORS at epic-23 wave-14-tune-181 (2026-09-15, T36): T36
+# retires the printf format lines from the three approval cards for a real renderer
+# (payload/scripts/card.sh, which FOLDS the free-text cell — Chris 2026-09-15 "D4: I want
+# the wrapped version"), and re-spells docs-pins Section 27 onto it. Section 27 keeps its
+# one existing site (DOCTORED_NO_RULE, re-pointed from the old card rule line to the new
+# pointer line) and adds ONE: DOCTORED_CARD_ROW, the Step-2 decision row nudged one column
+# right, which is the discriminator for the block of rows that now compare each card's
+# header and sample rows against what card.sh actually prints. It carries its own `anchor`
+# immediately above it, so both terms move together, +1 each. Section 27's OTHER new
+# mutation arm is deliberately NOT a site: `REPLANTED_FMT` APPENDS a format line to a copy
+# rather than stripping one, and an append cannot silently match nothing — the same call
+# §Roots makes, for the same reason, and the reason this census counts strips.
+# RE-DERIVED BY DIRECT GREP over docs-pins.test.sh at THIS commit, as every number in this
+# section is:
+#   grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' tests/docs-pins.test.sh        -> 42
+#   grep -cE '^[[:space:]]*anchor[[:space:]]' tests/docs-pins.test.sh     -> 43
+expect_eq "S19.3 docs-pins holds 42 doctoring sites" "42" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 40 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant)" "40" \
+expect_eq "S19.3 …declared by 43 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor; wave-14 T36 adds one, the nudged-card-row discriminator)" "43" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -9225,7 +9480,19 @@ expect_eq "S19.3 …declared by 40 anchor calls (Section 8's doctoring rewrites 
 # lines it strips from a scratch copy of protect-main.sh before stripping them, so a
 # rename of that hook's refusal text cannot leave the "a migrated hook drops out of the
 # set" arm passing over an unmutated file.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 26 more" "26" \
+#
+# 27 at epic-23 wave-14-tune-181 (2026-09-15, T27 fold-in, duplication review F1): §BR's
+# generation-cap mutant (detect.sh's `_detect_bound_kill_tree`, doctored from 16 to 1)
+# anchors its one needle before the `sed`. RE-DERIVED BY DIRECT GREP over this file at
+# THIS commit, as every number in this section is.
+#
+# 29 at epic-23 wave-14-tune-181 (2026-09-15, T35 fold-in): §L.4c's `DOCTORED_L4C` — a
+# copy of lib/bounds.sh carrying each inner bound AT its hook's registration, the mutant
+# that proves the invariant rows discriminate — anchors BOTH lines its one `sed` rewrites,
+# `^IMPACT_BOUND_S=[0-9]+$` and `^LG_IMPACT_BOUND_S=[0-9]+$`. Two anchor calls for one
+# doctored file, which is what the helper's per-LINE count means: +2, 27 -> 29. RE-DERIVED
+# BY DIRECT GREP over this file at THIS commit.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 29 more" "29" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9263,6 +9530,37 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # 70 at epic-23 wave-13 (2026-09-14, T12 fold-in): 40 + 26 + 1 + 3, the docs-pins term
 # alone moving for the reason the row above this one now names (T3's DOCTORED_REPAIR).
 #
+# 71 at epic-23 wave-14-tune-181 (2026-09-15, T15 fold-in): 41 + 26 + 1 + 3, the docs-pins
+# term alone moving again — T10's Section 27 rule-line mutant, attributed from the diff in
+# the paragraph above. The other three terms are unmoved and were re-measured, not assumed:
+# this wave's landings touch cross-gate-agreement.test.sh and landing-gate.test.sh in prose
+# and in numbers, never by adding or removing an `anchor` call.
+#
+# 72 at epic-23 wave-14-tune-181 (2026-09-15, T27 fold-in): 41 + 27 + 1 + 3, the
+# cross-gate-agreement.test.sh term alone moving — §BR's own anchor call, the row above
+# this one. docs-pins, agent-context-guard and landing-gate are unmoved and were
+# re-measured, not assumed.
+#
+# 73 at epic-23 wave-14-tune-181 (2026-09-15, T33 fold-in): 42 + 27 + 1 + 3, the
+# docs-pins term alone moving again — T33's `DOCTORED_PATROL_T28` anchor, the row above
+# this one (§S19.3's second row). cross-gate-agreement.test.sh, agent-context-guard and
+# landing-gate are unmoved and were re-measured, not assumed.
+#
+# 75 at epic-23 wave-14-tune-181 (2026-09-15, T35 fold-in): 42 + 29 + 1 + 3, the
+# cross-gate-agreement.test.sh term alone moving — §L.4c's two anchors on the
+# bounds-at-the-registration mutant, the row above this one. docs-pins,
+# agent-context-guard and landing-gate are unmoved and were re-measured, not assumed:
+# T35 touches landing-gate §16i in prose, in its clock and in its cap, and adds no
+# `anchor` call there.
+#
+# 76 at epic-23 wave-14-tune-181 (2026-09-15, T36, MEASURED AT THE MERGE): 43 + 29 + 1 + 3,
+# the docs-pins term alone moving on top of T35's — T36's `DOCTORED_CARD_ROW` anchor, the
+# discriminator for the rows that now compare each card against what payload/scripts/card.sh
+# prints (§S19.3's first two rows). T35 and T36 were written in parallel off 89f6944 and each
+# predicted a total the other's landing invalidated (74 and 75); this number is neither
+# prediction but a fresh grep over the four files AT THE MERGED HEAD, which is the only
+# reading this literal has ever accepted.
+#
 # tests/refuse.test.sh IS NOT IN THIS CENSUS, and that is a Step-9 disposition rather
 # than an oversight. It carries ONE anchor call site, reached three times: its
 # `mutant()` helper calls `anchor` before every `sed`, so a mutant cannot be added
@@ -9270,7 +9568,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …70 anchor call sites across the four doctoring suites, all told" "70" \
+expect_eq "S19.3 …76 anchor call sites across the four doctoring suites, all told" "76" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -10114,16 +10412,109 @@ expect_eq "LC.4 meta: the doctoring removed exactly one line" "1" \
 # --- (e) BOTH WALLS ACTUALLY ASK IT. A shared text neither program calls is a comment. ---
 expect_eq "LC.5 the dispatch wall notes every row through the shared reading" "2" \
   "$(/usr/bin/grep -c 'contract_note($0)' "$LC_DP")"
-# The END rule itself, not a bare mention: `contract_closed` is also the name of a function
-# the shared span DEFINES, so a count would be satisfied by the definition alone.
+# THE VERDICT ITSELF, NOT A BARE MENTION: `contract_closed` is also the name of a function the
+# shared span DEFINES, so a count would be satisfied by the definition alone. Two lines carry
+# the decision and BOTH are pinned — the line where the wall's answer is COMPUTED from the
+# shared reading, and the line where the arm that refuses ACTS on it. A pin on only the first
+# is satisfied by a wall that computes the verdict and throws it away.
+#
+# RE-SPELLED BY WAVE-14 T16, AGAINST WAVE-14 T5 (ffe3265). Until T5 the dispatch side decided
+# in an awk END rule — `if (open && !contract_closed(want)) print last` — and this arm pinned
+# that literal. T5 moved the reading into `dp_roster_contracts` because the BUDGET wall needed
+# the same answer and two spellings of one question are two answers; that function prints a
+# verdict PER ROW, so the decision is now the printf's ternary and the name-in-flight arm
+# selects on the `open` it printed. What is pinned is unchanged: the dispatch wall decides on
+# open rows through the shared reading, and through nothing else. The behaviour across the
+# move is driven, not inferred — tests/dispatch-preflight.test.sh §T22-name-in-flight (a)–(k2).
 expect_contains "LC.5 …and the dispatch wall DECIDES on it" \
-  'if (open && !contract_closed(want)) print last' "$(cat "$LC_DP")"
+  '(contract_closed(nm) || ack_closes(nm, born[nm])) ? "closed" : "open"' "$(cat "$LC_DP")"
+expect_contains "LC.5 …and the arm that refuses a re-used name ACTS on that verdict" \
+  '$1 == want && $3 == "open"' "$(cat "$LC_DP")"
 expect_eq "LC.5 the recorder notes every row through the shared reading" "2" \
   "$(/usr/bin/grep -c 'contract_note($0)' "$LC_ER")"
 expect_contains "LC.5 …and the recorder DECIDES on it" \
   '&& !contract_closed(nm)) print row' "$(cat "$LC_ER")"
 expect_eq "LC.5 no private MET latch survives in either file" "0" \
   "$(/usr/bin/grep -cE '!\(nm in met\)|&& !met\b' "$LC_DP" "$LC_ER" | awk -F: '{t += $2} END { print t + 0 }')"
+
+# ============================================================
+section "BR — the bounded-runner copies: detect.sh and session-start.sh, CODE-identical (Step-6 duplication review F1, epic-23 wave-14 T27)"
+# ============================================================
+#
+# hooks/session-start.sh:525-533 declares its own kill helpers "A DELIBERATE DUPLICATE of
+# `_detect_bound_kill` / `_detect_bound_kill_tree` in payload/scripts/lib/detect.sh … The two
+# copies are meant to stay in step — change one and change the other." Nothing anywhere
+# compared them: this is the exact shape §O already exists to close, on a different pair of
+# files (T22 fixed both faults in detect.sh; T23 then had to find and fix the SAME two faults
+# in this copy by hand, as a separate floor fold-in — a pin at T22 would have made T23 a red
+# row instead of a discovery).
+DETECT="$BIONIC_SCRIPTS_DIR/payload/scripts/lib/detect.sh"
+SSTART="$BIONIC_HOOKS_DIR/session-start.sh"
+
+expect_nonempty "BR detect.sh's _detect_bound_kill_tree() body is extractable at all" \
+  "$(fn_body "$DETECT" _detect_bound_kill_tree)"
+expect_nonempty "BR session-start.sh's ss_bound_kill_tree() body is extractable at all" \
+  "$(fn_body "$SSTART" ss_bound_kill_tree)"
+expect_nonempty "BR detect.sh's _detect_bound_kill() body is extractable at all" \
+  "$(fn_body "$DETECT" _detect_bound_kill)"
+expect_nonempty "BR session-start.sh's ss_bound_kill() body is extractable at all" \
+  "$(fn_body "$SSTART" ss_bound_kill)"
+
+# br_code <file> <fn> -> §O's fn_code (pure-comment lines stripped, §O's own normalisation)
+# PLUS the one normalisation §O's pair never needed: the function's own NAME PREFIX, so
+# ss_bound_kill_tree's self-call inside ss_bound_kill lines up against
+# _detect_bound_kill_tree's. Used for session-start.sh's two copies only — detect.sh, the
+# original, is read through fn_code alone. NOTHING ELSE is touched: not whitespace beyond
+# what fn_code already trims, not the executable text, not any other identifier.
+br_code() {  # <file> <fn name as it is spelled IN THAT FILE>
+  fn_code "$1" "$2" | sed 's/^ss_bound_kill/_detect_bound_kill/g'
+}
+
+expect_eq "BR the tree-walker: session-start's copy is detect.sh's, code for code" \
+  "$(fn_code "$DETECT" _detect_bound_kill_tree)" "$(br_code "$SSTART" ss_bound_kill_tree)"
+expect_eq "BR the kill primitive: session-start's copy is detect.sh's, code for code" \
+  "$(fn_code "$DETECT" _detect_bound_kill)" "$(br_code "$SSTART" ss_bound_kill)"
+
+# THE DISCRIMINATING HALF (§O's own shape, turned the other way): a pin over two strings that
+# were ALREADY identical before normalisation proves nothing about the normalisation. The
+# tree-walker is the pair that is not byte-identical — session-start.sh:547-549 re-wraps
+# detect.sh:1414-1415's one rationale comment across three lines instead of two, a line-length
+# artefact of the file it was copied into, not a content change — so it is the one driven
+# here.
+expect_ne "BR …the two tree-walker bodies are NOT byte-identical (session-start.sh re-wraps one comment)" \
+  "$(fn_body "$DETECT" _detect_bound_kill_tree)" \
+  "$(fn_body "$SSTART" ss_bound_kill_tree | sed 's/^ss_bound_kill/_detect_bound_kill/g')"
+expect_eq "BR …and it IS code-identical, which is what the two expect_eq above compare" \
+  "$(fn_code "$DETECT" _detect_bound_kill_tree)" "$(br_code "$SSTART" ss_bound_kill_tree)"
+# …and the byte difference really is a comment, line for line: every line the two bodies
+# differ by starts with `#`.
+expect_empty "BR …and every line the two tree-walker bodies differ by is a comment line" \
+  "$(diff <(fn_body "$DETECT" _detect_bound_kill_tree) \
+          <(fn_body "$SSTART" ss_bound_kill_tree | sed 's/^ss_bound_kill/_detect_bound_kill/g') \
+      | grep -E '^[<>]' | sed 's/^[<>] //' | grep -v '^#')"
+expect_nonempty "BR …over a diff that really is non-empty (the filter is not eating it all)" \
+  "$(diff <(fn_body "$DETECT" _detect_bound_kill_tree) \
+          <(fn_body "$SSTART" ss_bound_kill_tree | sed 's/^ss_bound_kill/_detect_bound_kill/g') | grep -cE '^[<>]')"
+
+# THE MUTATION ARM. A pin over two files that agree today passes just as loudly if the
+# comparison itself is broken, so ONE copy of detect.sh is doctored in the SANDBOX — never
+# the shipped file — and the SAME comparison is re-run against it. The needle is the
+# generation cap `_detect_bound_kill_tree` walks the process table under, doctored from 16 to
+# 1: a REAL drift shape (this exact family shipped it once — T22 fixed detect.sh's copy, T23
+# found the same fault still live in session-start.sh's). At `-lt 1` the descendant walk stops
+# one generation in, so a grandchild a `sweep` fork spawns survives the kill. `anchor` first
+# (§S19's own precondition idiom): the needle must occur exactly once in detect.sh, or the
+# `sed` below is a no-op and BR_MUT is a silent copy of the real file.
+BR_NEEDLE='"$generations" -lt 16'
+BR_MUT_NEEDLE='"$generations" -lt 1'
+anchor "$DETECT" "$BR_NEEDLE" 1
+BR_MUT="$SANDBOX/br-mutant-detect.sh"
+sed "s/-lt 16/-lt 1/" "$DETECT" > "$BR_MUT"
+
+expect_ne "BR …and the SAME comparison calls the doctored copy a drift (the generation cap moved)" \
+  "$(fn_code "$BR_MUT" _detect_bound_kill_tree)" "$(br_code "$SSTART" ss_bound_kill_tree)"
+expect_eq "BR …while the OTHER primitive in the doctored copy still agrees (one function moved, not the file)" \
+  "$(fn_code "$BR_MUT" _detect_bound_kill)" "$(br_code "$SSTART" ss_bound_kill)"
 
 # ============================================================
 finish

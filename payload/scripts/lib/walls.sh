@@ -42,6 +42,24 @@
 # `fold_context`, which is the channel this wave added to the fold for exactly this
 # wall (A-53, T23 ruling R3).
 #
+# NO PRODUCER PROCESS MAY OUTLIVE A QUITTING `grep -q` (T37, wave-14). Every membership
+# test in this file reads its subject from a HERE-STRING — `grep -qE PAT <<< "$VAR"` —
+# and never from `echo "$VAR" | grep -q`. hooks/bash-walls.sh sources this file under
+# `set -uo pipefail` (:86). `grep -q` exits at its FIRST match; when the subject is
+# larger than the 64 KB pipe buffer the producer is still writing, takes SIGPIPE, and
+# exits 141 — and `pipefail` promotes that 141 over grep's own 0, so `if !` reads a
+# MATCH as a failure. That is not theoretical: the evidence gate refused every commit in
+# this repo once the plan's `## Verification Matrix` section passed 64 KB, on a plan
+# whose `stack-health:` line was present and valid. A here-string has no second process
+# to lose, and it forks one fewer than the pipeline did. The same rule holds in
+# hooks/dispatch-preflight.sh (:1200) and hooks/stop-guard.sh, the other readers under
+# `pipefail`; tests/cross-gate-agreement.test.sh pins the idiom's absence repo-wide.
+#
+# ONE CAVEAT THE PIPELINE DID NOT HAVE: `<<<` APPENDS A NEWLINE to its word, so an empty
+# subject becomes one empty line. Only a pattern that can match empty notices — in
+# practice `grep -qxF -- "$needle"` with an empty needle — so a whole-line membership
+# test guards its needle as well as its haystack (hooks/session-sweeper.sh `row_acked`).
+#
 # BASH 3.2. SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME — the rule every
 # library in this directory follows, for lib/context.sh's reason: callers read library
 # answers through `$( )` and anything printed on the way in corrupts the first field
@@ -184,14 +202,111 @@ _wall_flatten() {  # <text> -> sets _WALL_FLAT
 # `"gi"t push` all still reach the parser; a command with no `git` in it at any
 # spelling the parser can read skips two full awk passes.
 #
+# THE ONE TRANSFORMATION THAT IS NOT UNQUOTING (wave-14 T24, security 1b). A backslash
+# followed by a NEWLINE is a line continuation: the shell joins the two lines and the
+# newline goes with the backslash. Removing the backslash alone left the newline standing
+# between `g` and `it`, so the screen answered "provably not" for `g\<newline>it commit`
+# while `git_argv_has_sub` answered `commit` for the same string — the whole evidence gate
+# skipped for a real commit, and a `g\<newline>it push origin main` invisible to
+# protect-main. The pair is removed FIRST, before the lone backslashes, because after they
+# are gone the continuation is indistinguishable from a newline that separates two
+# commands. Both readers of this screen are fixed by that one line.
+#
 # IT IS A SCREEN, NEVER A VERDICT. A hit runs the real parser and the parser
 # decides; only a miss short-circuits, and a miss is the case the parser was
 # always going to answer "no push, no commit" to.
 _wall_mentions_git() {  # <command text> -> 0 maybe · 1 provably not
   local _p="$1"
+  _p="${_p//\\$'\n'/}"
   _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
   case "$_p" in *git*) return 0 ;; esac
   return 1
+}
+
+# ─── _wall_cmd_fill — ONE fill for the farm-out wall's three classifier readings ─
+#
+# THE THREE READINGS ARE ONE COMMAND READ THREE WAYS (epic-23 wave-14 T17, REQ-4;
+# T4 §5 / A-T4.2). `wall_farm_out` asks the classifier three questions — the whole
+# command's class (tier 1), each `&&` segment's class (the chain arm) and the
+# reduced head (tier 2) — and each one used to arrive through its own command
+# substitution over its own string: `$(cmd_strip_heredocs …)`, `$(cmd_unwrap_head …)`,
+# an `awk` and a `grep` for the chain split, and a `sed` per segment to trim it.
+# Measured on the bench payload (`ls -la`, tests/bench/hook-latency.sh), that was
+# TWO awk execs and four bash forks on the hottest path in the tree, of which
+# exactly one awk exec — the class reading — could change the answer.
+#
+# THIS FUNCTION ASSIGNS RATHER THAN PRINTS, the way `_wall_flatten` does, so no
+# caller needs a command substitution to read it. It sets four values:
+#
+#   _WALL_SAFE_FLAT   the heredoc-free, whitespace-squeezed one-line command
+#   _WALL_HEAD        the tier-2 head reduction, or "" when tier 2 provably cannot fire
+#   _WALL_CHAIN_SEGS  the `&&` segments, newline-joined, untrimmed
+#   _WALL_CHAIN_COUNT how many of them carry a non-blank character
+#
+# WHAT IS SKIPPED, AND WHY EACH SKIP IS SOUND — none of them is a new reading, and
+# none of them narrows what the wall can see:
+#
+#  1. `cmd_strip_heredocs` IS THE IDENTITY for a command whose text holds no `<<`;
+#     its own fast path says so and byte-identically (cmd-class.sh). So the `$( )`
+#     around it is skipped for such a command rather than made to return its input.
+#
+#  2. THE HEAD REDUCTION IS COMPUTED ONLY WHEN TIER 2 COULD STILL FIRE, screened the
+#     way `_wall_mentions_git` screens the git parser. `classify_tier2`'s own first
+#     act is `case "$c" in git*|docker*|npx*|uvx*)` — all four matchers are anchored
+#     at `^`, so nothing else can match — and the head reduction is a SUBSTRING of
+#     the flattened command with at most one leading and one trailing quote
+#     character removed: `strip_leading`, `skip_opts`, `drop_word` and `after_exec`
+#     all return suffixes, and `unwrap_runner` returns a suffix, a `dequote_whole`
+#     of one, or the literal prefix `bash `. So if the head starts with one of those
+#     four words, those letters survive in the text with nothing but quotes and
+#     backslashes between them — which is exactly what removing those characters and
+#     then looking for the substring tests. A miss cannot be a tier-2 match, and the
+#     empty head it leaves takes `classify_tier2`'s own `*) return 1` arm.
+#
+#  3. THE `&&` SPLIT IS SHELL, NOT `awk` + `grep`. `_WALL_SAFE_FLAT` has been through
+#     `_wall_flatten`, whose IFS carries all six characters `[[:space:]]` names — so
+#     it holds no newline, tab, CR, VT or FF at all, and the newline-joined segment
+#     list is unambiguous by construction. The split is left-to-right and
+#     non-overlapping on the literal two characters `&&`, which is what
+#     `gsub(/&&/, "\n")` did, `&&&&` included; the count is of segments carrying a
+#     non-blank character, which is what `grep -cE '[^[:space:]]'` counted.
+#
+# IT IS A FILL, NEVER A VERDICT. Every class this wall acts on still comes from
+# `cmd_class` — one reader, cmd-class.sh — over the same strings as before.
+_WALL_SAFE_FLAT=""; _WALL_HEAD=""; _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
+_wall_cmd_fill() {  # <raw command text> -> sets the four values above
+  local _p _rest _seg _segs=""
+
+  case "$1" in
+    *'<<'*) _wall_flatten "$(cmd_strip_heredocs "$1")" ;;
+    *)      _wall_flatten "$1" ;;
+  esac
+  _WALL_SAFE_FLAT="$_WALL_FLAT"
+
+  _p="$_WALL_SAFE_FLAT"
+  _p="${_p//\\/}"; _p="${_p//\'/}"; _p="${_p//\"/}"
+  case "$_p" in
+    *git*|*docker*|*npx*|*uvx*) _WALL_HEAD=$(cmd_unwrap_head "$_WALL_SAFE_FLAT") ;;
+    *)                          _WALL_HEAD="" ;;
+  esac
+
+  _WALL_CHAIN_SEGS=""; _WALL_CHAIN_COUNT=0
+  case "$_WALL_SAFE_FLAT" in
+    *"&&"*)
+      _rest="$_WALL_SAFE_FLAT"
+      while :; do
+        case "$_rest" in
+          *"&&"*) _seg="${_rest%%&&*}"; _rest="${_rest#*&&}" ;;
+          *)      _seg="$_rest"; _rest=""; _segs="$_segs$_seg"
+                  case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
+                  break ;;
+        esac
+        _segs="$_segs$_seg"$'\n'
+        case "$_seg" in *[![:space:]]*) _WALL_CHAIN_COUNT=$(( _WALL_CHAIN_COUNT + 1 )) ;; esac
+      done
+      _WALL_CHAIN_SEGS="$_segs"
+      ;;
+  esac
 }
 
 # ─── wall_protect_main — hooks/protect-main.sh ───────────────────────────────
@@ -393,19 +508,19 @@ case "$COMMAND" in
   *[Pp][Gg]_*|*[Mm][Aa][Rr][Ii][Aa][Dd][Bb]*) _db_maybe=1 ;;
   *) _db_maybe=0 ;;
 esac
-if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-client|cqlsh|cockroach sql|pg_|mariadb)\b'; then
+if [ "$_db_maybe" = 1 ] && grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-client|cqlsh|cockroach sql|pg_|mariadb)\b' <<< "$COMMAND"; then
   CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
 
   # DROP TABLE / DATABASE / SCHEMA / INDEX / COLLECTION / VIEW / FUNCTION / TRIGGER / PROCEDURE / SEQUENCE / TYPE
   # [WALL: tests/protect-database.test.sh]
-  if echo "$CMD_UPPER" | grep -qE 'DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|COLLECTION|VIEW|FUNCTION|TRIGGER|PROCEDURE|SEQUENCE|TYPE)'; then
+  if grep -qE 'DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|COLLECTION|VIEW|FUNCTION|TRIGGER|PROCEDURE|SEQUENCE|TYPE)' <<< "$CMD_UPPER"; then
     fold_block exit2 sql "this command DROPs a database object" "run the migration yourself" \
       "The matched pattern is a DROP of a table, database, schema, index, collection, view, function, trigger, procedure, sequence or type. A migration run from your own terminal is the route."
     return 2
   fi
 
   # TRUNCATE [WALL: tests/protect-database.test.sh]
-  if echo "$CMD_UPPER" | grep -qE 'TRUNCATE\s'; then
+  if grep -qE 'TRUNCATE\s' <<< "$CMD_UPPER"; then
     fold_block exit2 sql "this command TRUNCATEs a table" "run the migration yourself" \
       "The matched pattern is TRUNCATE. A migration run from your own terminal is the route."
     return 2
@@ -415,7 +530,7 @@ if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mong
   # [WALL: tests/protect-database.test.sh]
   while IFS= read -r stmt; do
     stmt_upper=$(echo "$stmt" | tr '[:lower:]' '[:upper:]')
-    if echo "$stmt_upper" | grep -qE 'DELETE\s+FROM\s' && ! echo "$stmt_upper" | grep -qE 'DELETE\s+FROM\s+\S+\s+WHERE\s'; then
+    if grep -qE 'DELETE\s+FROM\s' <<< "$stmt_upper" && ! grep -qE 'DELETE\s+FROM\s+\S+\s+WHERE\s' <<< "$stmt_upper"; then
       fold_block exit2 sql "this DELETE has no WHERE clause" "add a WHERE clause" \
         "The matched pattern is a DELETE FROM with no WHERE in the same statement. An unbounded DELETE empties the table."
       return 2
@@ -423,7 +538,7 @@ if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mong
   done <<< "$(echo "$CMD_UPPER" | tr ';' '\n')"
 
   # ALTER TABLE ... DROP COLUMN [WALL: tests/protect-database.test.sh]
-  if echo "$CMD_UPPER" | grep -qE 'ALTER\s+TABLE\s+.*DROP\s'; then
+  if grep -qE 'ALTER\s+TABLE\s+.*DROP\s' <<< "$CMD_UPPER"; then
     fold_block exit2 sql "this ALTER TABLE drops a column or key" "run the migration yourself" \
       "The matched pattern is an ALTER TABLE that DROPs. A migration run from your own terminal is the route."
     return 2
@@ -431,7 +546,7 @@ if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mong
 
   # MongoDB destructive operations (JavaScript method calls)
   # [WALL: tests/protect-database.test.sh]
-  if echo "$COMMAND" | grep -qEi '(\.drop\(\)|\.dropDatabase\(\)|\.deleteMany\(\s*\{\s*\}\s*\))'; then
+  if grep -qEi '(\.drop\(\)|\.dropDatabase\(\)|\.deleteMany\(\s*\{\s*\}\s*\))' <<< "$COMMAND"; then
     fold_block exit2 sql "this drops or wipes a MongoDB collection" "run it from your own terminal" \
       "The matched pattern is a collection drop, a database drop, or an unfiltered many-document delete. Run it from your own terminal if you mean it."
     return 2
@@ -455,7 +570,7 @@ esac
 if [ "$_db_maybe" = 1 ]; then
   [ -n "$CMD_UPPER" ] || CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
 fi
-if [ "$_db_maybe" = 1 ] && echo "$CMD_UPPER" | grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|FUNCTION|TRIGGER|PROCEDURE)|TRUNCATE\s)' && echo "$COMMAND" | grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )'; then
+if [ "$_db_maybe" = 1 ] && grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|FUNCTION|TRIGGER|PROCEDURE)|TRUNCATE\s)' <<< "$CMD_UPPER" && grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )' <<< "$COMMAND"; then
   fold_block exit2 sql "destructive SQL is piped to a db client" "run the migration yourself" \
     "The matched pattern is a DROP or TRUNCATE piped or heredoc-fed into psql, mysql, sqlite3 or mongosh. Piping hides the statement from the argv check."
   return 2
@@ -1081,14 +1196,14 @@ matrix_auditor_required() {
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 is_proof_shaped() {  # $1 = evidence value
   local v="$1"
-  echo "$v" | grep -qE '[0-9]' || return 1
-  if echo "$v" | grep -q '`'; then
+  grep -qE '[0-9]' <<< "$v" || return 1
+  if grep -q '`' <<< "$v"; then
     return 0
   fi
-  if echo "$v" | grep -qF '/'; then
+  if grep -qF '/' <<< "$v"; then
     return 0
   fi
-  if echo "$v" | grep -Ewq 'bash|sh|npm|pnpm|yarn|make|pytest|go|cargo|git|test'; then
+  if grep -Ewq 'bash|sh|npm|pnpm|yarn|make|pytest|go|cargo|git|test' <<< "$v"; then
     return 0
   fi
   return 1
@@ -1124,7 +1239,7 @@ Fix: replace the '- ${id}:' evidence with the actual command invocation and resu
   if [ "$status" = "done" ]; then
     case "$eff" in
       peer-reviewed|audited)
-        if ! echo "$ev" | grep -Ewq 'auditor'; then
+        if ! grep -Ewq 'auditor' <<< "$ev"; then
           _eg_detail="canonical-sdlc task ${id} is done at rigor '${eff}' but its evidence has no 'auditor' verdict ('${ev}').
 Plan: $PLAN
 Fix: record the independent auditor's verdict in the '- ${id}:' evidence line before marking done."
@@ -1133,7 +1248,7 @@ Fix: record the independent auditor's verdict in the '- ${id}:' evidence line be
         ;;
     esac
     if [ "$eff" = "audited" ]; then
-      if ! echo "$ev" | grep -Ewq 'critic'; then
+      if ! grep -Ewq 'critic' <<< "$ev"; then
         _eg_detail="canonical-sdlc task ${id} is done at rigor 'audited' but its evidence has no 'critic' verdict ('${ev}').
 Plan: $PLAN
 Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line before marking done."
@@ -1168,7 +1283,7 @@ Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line bef
 enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
   local id="$1" eff="$2" ev="$3"
   [ "$(rigor_ord "$eff")" -lt "$(rigor_ord "$RIGOR")" ] || return 0
-  if echo "$ev" | grep -Ewq 'waiver'; then
+  if grep -Ewq 'waiver' <<< "$ev"; then
     return 0  # recorded downgrade — proceed at the lower cell lane
   fi
   _eg_detail="canonical-sdlc task ${id} lowers rigor from '${RIGOR}' to '${eff}', below the plan's floor.
@@ -1526,7 +1641,7 @@ validate_fails_when() {
 
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    echo "$line" | grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' && continue
+    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
     ac=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
     [ "$ac" = "AC" ] && continue
     [ -n "$ac" ] || continue
@@ -1593,7 +1708,7 @@ validate_prototype_no_matrix_row() {
 
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    echo "$line" | grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' && continue
+    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
     ac=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
     [ "$ac" = "AC" ] && continue
     [ -n "$ac" ] || continue
@@ -1631,7 +1746,7 @@ CURRENT=$(echo "$SECTION" \
 # directly). A `current: T<n>` on a non-task plan is NOT accepted here; it falls
 # through to the numeric check below and blocks (T-format is scale: task only).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SCALE" = "task" ]; then
+if grep -qE '^T[0-9]+$' <<< "$CURRENT" && [ "$SCALE" = "task" ]; then
   validate_task_ledger
   validate_approved_by
   validate_fails_when
@@ -1639,7 +1754,7 @@ if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SCALE" = "task" ]; then
   exit 0
 fi
 
-if [ -z "$CURRENT" ] || ! echo "$CURRENT" | grep -qE '^[0-9]+[ab]?$'; then
+if [ -z "$CURRENT" ] || ! grep -qE '^[0-9]+[ab]?$' <<< "$CURRENT"; then
   _eg_detail="canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line.
 Plan: $PLAN
 Fix: add a line like 'current: 5' (or 'current: 8b') before committing."
@@ -1674,6 +1789,425 @@ case "$EG_VERDICT" in
   bound-closed) exit 0 ;;
   *)            active_run "$BIONIC_ROOT" >/dev/null || exit 0 ;;
 esac
+
+# ---------- THE ROW'S STEP IS THE JUDGMENT (wave-14 REQ-2, ADR-027) ----------
+#
+# WHAT THIS FIXES. Everything above judges the commit against the run's single `current:`,
+# which was true while one writer worked at a time. Parallel writers broke it: several tasks
+# are in flight at once, each at its own step, each in its own worktree, and a Step-4 writer
+# committing while the run sits at Step 5 was refused for Step-5 evidence that cannot exist
+# yet. In wave-13 the orchestrator regressed `current:` BY HAND to land such a commit
+# (A-orch-43) — a run-wide fact edited to clear one writer, which is the damage this arm
+# removes.
+#
+# THE REGISTER IS THE `## Tasks` TABLE (ADR-027). The dispatcher writes the tree it created
+# into the row's `worktree` cell at the moment it creates it, so the binding from a checkout
+# to the task that owns it lives in the one place that already knows the task's step and
+# status, readable by `lib/units.sh`, which every other consumer already parses the plan
+# through.
+#
+# FOUR CASES, AND THE THREE THAT ARE NOT THE FIRST ARE WHY THIS IS SAFE:
+#   · the commit is made from a linked worktree a row owns, at a step BEHIND `current:`
+#     → judge at the row's step (the `Step N:` lookup below, the placeholder ban and
+#       `dispatch` all run against it);
+#   · that row's step is AHEAD of `current:` → refuse, naming the row and both steps: the
+#     register says nobody should be committing from that tree yet;
+#   · a linked worktree no row owns → judge at `current:`, today's behaviour exactly, plus
+#     one line on stderr naming the tree, so a writer whose row was never ledgered learns it
+#     from the wall rather than from the verdict;
+#   · the MAIN checkout → not one byte of this block runs.
+#
+# IT SITS BELOW THE RUN PREDICATE on purpose. A closed run gates nothing, and a refusal owed
+# to a register is owed only while there is a run to be at a step of.
+#
+# WHY NOT `BIONIC_WORKTREE` ALONE (A-T2.5, T2's own seam). `lib/root.sh` publishes it, but
+# for the cwd the CONTEXT LADDER took — and rung 1 is `CLAUDE_PROJECT_DIR`, which on a real
+# dispatched writer names the session's project, the MAIN checkout. The variable then reads
+# empty while the writer is standing in a worktree. The honest signal is the payload's own
+# `.cwd`, already cached by `_bionic_jq_fill`, so reading it costs no fork; `BIONIC_WORKTREE`
+# is taken as a fast path only where it cannot disagree — when the ladder's cwd and the
+# payload's cwd are the same directory.
+#
+# ONE `git` CALL, AND ONLY WHERE A COMMIT IS BEING JUDGED (REQ-4, AC-4.3 caps ROOT
+# RESOLUTION at one ask per hook invocation; this is not that ask). A linked worktree's
+# `.git` is a FILE holding one `gitdir:` line, and reading it is one bash `read` — but a
+# file is text, and wave-14's security review drove a hand-written one that named a plan
+# row's tree, pointed at a path no repository has ever had, and lowered `current:` for a
+# commit landing in the main checkout. So the read stays as the PRE-FILTER it is good at,
+# where it costs the main-root path nothing, and git answers the question the row lookup
+# keys on (`_eg_git_wt_name`). Every non-commit Bash event still leaves this file having
+# forked git exactly once, for the root walk, because none of them reach this block:
+# `_eg_body` exits at IS_COMMIT long before it.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+
+# _eg_wt_name <dir> -> the LINKED WORKTREE's name for that directory, empty otherwise.
+#
+# Walks up to the nearest `.git` entry, exactly as git does. A DIRECTORY there is an ordinary
+# checkout (the main one, or a standalone clone) and answers empty — that is the main-root
+# case, and it is the one that must cost nothing and change nothing. A FILE there is a linked
+# worktree, a submodule, or something else entirely, so the `gitdir:` target is required to
+# carry a `/worktrees/` segment before its basename is believed: a submodule's
+# `<super>/.git/modules/<name>` is not a worktree and must not be read as one.
+#
+# IT IS A PRE-FILTER AND NOT THE ANSWER (wave-14 T24). Its whole value is what it rules out
+# for the price of one `read` and no fork — the main checkout, every submodule, every
+# ordinary directory — which is what keeps a main-root commit free. What it CANNOT do is
+# establish that a directory is a worktree, or that it is THIS repository's: the file it
+# reads is ordinary text and anyone who can write the command can write the file. A name it
+# answers is a candidate; `_eg_git_wt_name` turns a candidate into an answer.
+_eg_wt_name() {
+  local _d="${1:-}" _g
+  case "$_d" in /*) : ;; *) return 0 ;; esac
+  while [ -n "$_d" ] && [ "$_d" != "/" ]; do
+    if [ -d "$_d/.git" ]; then
+      return 0
+    elif [ -f "$_d/.git" ]; then
+      IFS= read -r _g < "$_d/.git" 2>/dev/null || return 0
+      case "$_g" in gitdir:*) _g="${_g#gitdir:}" ;; *) return 0 ;; esac
+      while [ "${_g# }" != "$_g" ]; do _g="${_g# }"; done
+      _g="${_g%$'\r'}"
+      while [ "${_g% }" != "$_g" ]; do _g="${_g% }"; done
+      _g="${_g%/}"
+      case "$_g" in */worktrees/*) printf '%s' "${_g##*/}" ;; esac
+      return 0
+    fi
+    _d="${_d%/*}"
+  done
+  return 0
+}
+
+# _eg_git_wt_name <dir> -> sets _EG_GITWT to the name GIT gives that directory as a linked
+# worktree OF THIS REPOSITORY, empty for everything else. One `git` fork, commit path only.
+#
+# THE DEFECT IT CLOSES (security 1a, HIGH). The arm judged a commit at a plan row's step,
+# and it picked the row from a name it took out of a `.git` FILE — so the OBJECT of the
+# judgement (a commit, landing in some tree) and its SUBJECT (a row, chosen from a string)
+# were two different things and nothing reconciled them. A directory holding the single line
+# `gitdir: /nowhere/at/all/.git/worktrees/14-T6` was accepted as row T6's tree although git
+# never made it, the target does not exist, and the directory need not even be inside the
+# repository. Against the live plan that lowered `current:` from 5 to 4 for a MAIN-checkout
+# commit, and step 4 takes the gate's early exit, so the entire Step-5 verify shape was
+# never reached — with no artifact left behind: the plan still read `current: 5`.
+#
+# WHAT GIT IS ASKED, AND WHY THOSE TWO PATHS ANSWER IT:
+#   · `--git-common-dir` is the repository every worktree of it shares. It must be THIS
+#     repository's, or the tree belongs to another repository (or to none) and this plan's
+#     register has nothing to say about it;
+#   · `--git-dir` inside a linked worktree is `<main>/.git/worktrees/<name>` — so it differs
+#     from the common dir, carries a `/worktrees/` segment, and its basename IS the name
+#     `git worktree list` prints and `spawn-worktree.sh` created the tree under. That
+#     basename, not the file's, is what the row lookup keys on.
+# One line back is not two answers: it would read as "git dir equals common dir" and demote
+# a linked worktree to an ordinary checkout, so it is declined instead.
+#
+# THE MAIN ROOT'S COMMON DIR COSTS NO SECOND FORK in the ordinary topology — `$BIONIC_ROOT/.git`
+# is a directory in every checkout that is not itself a linked worktree, and the root walk
+# already maps a worktree cwd back to the main root. The `else` exists for the topology where
+# it is not (a project root that is itself a linked worktree) and is the only path in this
+# file that can fork git twice. The comparison falls back to `-ef` — same device, same inode,
+# a shell builtin and no fork — so a symlinked root, a `//` or a `..` in either path compares
+# as the directory it is rather than as the string it was spelled with.
+#
+# EVERY FAILURE IS A DECLINE, never a lowered step: no git, an older git with no
+# `--path-format`, a deleted directory, another repository's tree, a bare repository. The
+# caller then judges at `current:` and says so, which is what the gate did before this
+# register existed.
+_EG_GITWT=""
+_eg_git_wt_name() {
+  local _d="${1:-}" _both _common _gitdir _main
+  _EG_GITWT=""
+  case "$_d" in /*) : ;; *) return 0 ;; esac
+  _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 0
+  _common="${_both%%$'\n'*}"
+  _gitdir="${_both#*$'\n'}"
+  [ "$_common" != "$_both" ] || return 0
+  [ -n "$_common" ] && [ -n "$_gitdir" ] || return 0
+  [ "$_common" != "$_gitdir" ] || return 0
+  case "$_gitdir" in */worktrees/*) : ;; *) return 0 ;; esac
+  if [ -d "$BIONIC_ROOT/.git" ]; then
+    _main="$BIONIC_ROOT/.git"
+  else
+    _main="$(git -C "$BIONIC_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
+    _main="${_main%%$'\n'*}"
+  fi
+  [ -n "$_main" ] || return 0
+  [ "$_common" = "$_main" ] || [ "$_common" -ef "$_main" ] || return 0
+  _EG_GITWT="${_gitdir##*/}"
+  return 0
+}
+
+# _eg_cd_second <command text> -> sets _EG_CD2 to the SECOND directory the text changes into
+# before the commit, empty when the text names only one.
+#
+# WHY A SECOND `cd` IS A REFUSAL AND NOT A TIE-BREAK (critic issue 1, FAIL-OPEN). Branch (2)
+# below reads the LEADING `cd` and truncates at the first `;`, `&`, `|` or newline, so every
+# later `cd` in the command was invisible to it — and `cd <worktree> && cd <main> && git
+# commit` was attributed to the worktree while the commit landed in main, at the worktree
+# row's lower step. Nothing in the TEXT says which directory the shell is standing in when
+# the commit finally runs: a `||`, a failed `cd`, a subshell and a plain `&&` all read alike
+# here, and this repo's own dispatch block warns about the neighbouring hazard (A-46, "a
+# failed cd with `;`-chained commands runs them in the main checkout"). So the arm stops
+# guessing: two named directories is an ambiguity the writer can spell away, and a wall that
+# cannot tell refuses.
+#
+# ONLY WHAT PRECEDES THE COMMIT COUNTS. A `cd` after the commit cannot move a commit that has
+# already run, so the scan stops at the first `git` in the text. If the text carries none this
+# reader can see — a spelling only `git_argv_expand` resolves — the whole remainder is
+# scanned, which refuses rather than allows.
+_EG_CD2=""
+_eg_cd_second() {
+  local _t="${1:-}" _rest _seg _p
+  _EG_CD2=""
+  case "$_t" in
+    *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
+    *) return 0 ;;
+  esac
+  case "$_rest" in *git*) _rest="${_rest%%git*}" ;; esac
+  while [ -n "$_rest" ]; do
+    case "$_rest" in
+      *[\;\&\|$'\n']*) _seg="${_rest%%[;&|$'\n']*}"; _rest="${_rest#*[;&|$'\n']}" ;;
+      *) _seg="$_rest"; _rest="" ;;
+    esac
+    while [ -n "$_seg" ]; do
+      case "$_seg" in
+        ' '*|'	'*|'('*|'{'*) _seg="${_seg#?}" ;;
+        *) break ;;
+      esac
+    done
+    case "$_seg" in
+      'cd'|'cd '*|'cd	'*)
+        _p="${_seg#cd}"
+        while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
+        while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
+        while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+        case "$_p" in
+          '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
+          "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
+        esac
+        [ -n "$_p" ] || _p='~'
+        _EG_CD2="$_p"
+        return 0
+        ;;
+    esac
+  done
+  return 0
+}
+
+# _eg_commit_cwd -> sets _EG_CWD (the directory the commit is made IN), _EG_CWD_SRC (which
+# of the three spellings answered) and, through `_eg_cd_second`, _EG_CD2.
+#
+# THREE SPELLINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
+#   1. `git -C <dir> commit` — git's own cwd override, and it wins over everything;
+#   2. a LEADING `cd <absolute dir>` — the shape every bionic writer brief mandates
+#      (`cd <worktree> || exit 1` as the first statement). The harness posts the SESSION's
+#      cwd in the payload and the `cd` runs afterwards, so without this the dominant real
+#      shape would read as a main-root commit and REQ-2 would hold only for fixtures;
+#   3. the payload's `.cwd`.
+# Only an ABSOLUTE path is taken from the command: a relative path is resolved against a cwd
+# this hook would have to re-derive, and guessing it wrong is how a commit gets judged at
+# another task's step. Anything unreadable falls through to (3), which is today's answer.
+#
+# A RELATIVE `-C` FALLS THROUGH RATHER THAN ANSWERING (critic issue 2, wave-14 T24). Branch
+# (1) used to return `.` or `sub` verbatim; `_eg_wt_name` then rejected it for not starting
+# with `/` and the row was LOST, so `git -C . commit` from inside a worktree was refused for
+# Step-5 evidence that cannot exist yet — the exact failure REQ-2 exists to remove, and the
+# same commit spelled `git commit` was allowed. A relative `-C` resolves against the shell's
+# cwd at that moment, which is precisely what (2) and (3) answer, so it defers to them.
+#
+# IT ASSIGNS RATHER THAN PRINTS (the `_wall_flatten` pattern, and now a correctness
+# requirement rather than a saved fork): two of its three answers are facts about the
+# COMMAND that only the caller can act on — an ambiguously named directory is a refusal, not
+# a cwd — and a command substitution would leave them behind in a subshell.
+_eg_commit_cwd() {
+  local _line _oldifs _hadf _p _c
+  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CD2=""
+  # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
+  case " $COMMAND " in
+    *" -C "*|*" -C"[\"\']*)
+      _oldifs="$IFS"; _hadf=0
+      while IFS= read -r _line; do
+        [ -n "$_line" ] || continue
+        git_argv_parse "$_line" || continue
+        [ "$GIT_SUB" = commit ] || continue
+        _git_argv_skip "$_line"
+        [ -n "$GIT_ARGV_REST" ] || break
+        case "$-" in *f*) _hadf=1 ;; esac
+        set -f
+        IFS="$GIT_ARGV_US"
+        # shellcheck disable=SC2086  # deliberate split on US with globbing disabled
+        set -- $GIT_ARGV_REST
+        IFS="$_oldifs"
+        [ "$_hadf" -eq 1 ] || set +f
+        shift   # argv[0], the git binary
+        while [ $# -gt 0 ]; do
+          case "$1" in
+            -C) shift
+                if [ $# -gt 0 ]; then
+                  case "$1" in /*) _EG_CWD="$1"; _EG_CWD_SRC="-C"; return 0 ;; esac
+                fi
+                break ;;
+            -c|--namespace|--git-dir|--work-tree|--exec-path|--config-env|--super-prefix)
+              shift; [ $# -gt 0 ] && shift ;;
+            -*) shift ;;
+            *) break ;;
+          esac
+        done
+        break
+      done <<< "$(git_argv_expand "$COMMAND")"
+      ;;
+  esac
+  # (2) — the leading `cd`, read off the front of the command and nowhere else.
+  _c="$COMMAND"
+  while [ "${_c# }" != "$_c" ]; do _c="${_c# }"; done
+  while [ "${_c#	}" != "$_c" ]; do _c="${_c#	}"; done
+  case "$_c" in
+    'cd '*|'cd	'*)
+      _p="${_c#cd}"
+      while [ "${_p# }" != "$_p" ]; do _p="${_p# }"; done
+      while [ "${_p#	}" != "$_p" ]; do _p="${_p#	}"; done
+      _p="${_p%%[;&|$'\n']*}"
+      while [ "${_p% }" != "$_p" ]; do _p="${_p% }"; done
+      case "$_p" in
+        '"'*'"') _p="${_p#\"}"; _p="${_p%\"}" ;;
+        "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
+      esac
+      case "$_p" in
+        /*) if [ -d "$_p" ]; then
+              _EG_CWD="$_p"; _EG_CWD_SRC="cd"
+              _eg_cd_second "$_c"
+              return 0
+            fi ;;
+      esac
+      ;;
+  esac
+  # (3)
+  _EG_CWD="$(bionic_jq .cwd)"
+  _EG_CWD_SRC="payload"
+  return 0
+}
+
+# _eg_row_for_worktree <name> -> sets _EG_ROW to "<id><TAB><step>" for the ONE `## Tasks` row
+# whose `worktree` cell names that tree, and _EG_ROW_DUP to the ids when more than one does.
+# Returns 1 for "this plan has no register", 3 for "the register is ambiguous", 0 otherwise.
+#
+# THE CELL IS COMPARED BY BASENAME on the row's side, so a plan that spells the tree as a
+# path (`.worktrees/14-T3`) or as its branch (`wt/14-T3`) still resolves to the tree git
+# named `14-T3`. The comparison is never loosened on the DERIVED side: that value is git's
+# own, and matching it loosely is how a commit reaches another task's step.
+#
+# AND THAT LOOSENING IS EXACTLY WHY A COLLISION IS POSSIBLE (correctness F4, wave-14 T24).
+# `wt/14-T6` and `.worktrees/14-T6` are different cells with one basename, the spec's domain
+# model states "a worktree names at most one unit" as an invariant, and `units_validate`
+# deliberately declines to enforce it (units.sh's own note) — so the register CAN say two
+# things and the plan is the only place that can be repaired. Taking the first row in table
+# order picked a step by the accident of write order and said nothing: if the second row were
+# the real owner and it sat AHEAD of the run, the refusal AC-2.3 exists for would never fire.
+# A wall that cannot tell which row owns the tree does not choose one; it declines to the
+# run's own `current:` and names both rows so the table can be fixed.
+#
+# IT ASSIGNS RATHER THAN PRINTS for the reason `_eg_commit_cwd` does: the collision is a
+# second answer, and a command substitution would strand it in a subshell.
+_eg_row_for_worktree() {
+  local _want="${1:-}" _rows _line _cell _id
+  _EG_ROW=""; _EG_ROW_DUP=""; _EG_ROW_COLLIDED=0
+  [ -n "$_want" ] || return 0
+  _rows="$(units_rows "$PLAN")" || return 1
+  [ -n "$_rows" ] || return 0
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    _cell="$(units_field "$_line" worktree)"
+    [ -n "$_cell" ] || continue
+    _cell="${_cell%/}"
+    [ "${_cell##*/}" = "$_want" ] || continue
+    _id="$(units_field "$_line" id)"
+    if [ -z "$_EG_ROW" ]; then
+      _EG_ROW="$_id	$(units_field "$_line" step)"
+      _EG_ROW_DUP="$_id"
+    else
+      _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
+      _EG_ROW_COLLIDED=1
+    fi
+  done <<< "$_rows"
+  if [ "${_EG_ROW_COLLIDED:-0}" = 1 ]; then
+    _EG_ROW=""
+    return 3
+  fi
+  _EG_ROW_DUP=""
+  return 0
+}
+
+_EG_WT=""
+_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CD2
+if [ -n "$BIONIC_WORKTREE" ] && [ "$_EG_CWD" = "$BIONIC_CWD" ]; then
+  _EG_WT="$BIONIC_WORKTREE"          # the ladder already asked GIT about this very directory
+elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
+  # THE FILE READ SCREENS, GIT ANSWERS (wave-14 T24, security 1a). `_eg_wt_name` has said the
+  # directory MIGHT be a linked worktree, for the price of one `read` and no fork; every
+  # main-root commit and every ordinary directory has already left without paying for a git
+  # call. What remains is the small set worth one fork, and git decides it.
+  _eg_git_wt_name "$_EG_CWD"
+  _EG_WT="$_EG_GITWT"
+  if [ -z "$_EG_WT" ]; then
+    # NOT SILENCE. A `.git` file that names a worktree git does not know is an anomaly
+    # wherever it came from — a moved tree, another repository's, or a planted one — and the
+    # reader needs to know the register was not consulted for this commit.
+    printf 'evidence-gate: %s is not a linked worktree of this repository — judging at current: %s\n' \
+      "$_EG_CWD" "$CURRENT" >&2
+  fi
+fi
+
+if [ -n "$_EG_WT" ]; then
+  # THE TREE IS GIT'S, BUT IS IT THE ONE THE COMMIT LANDS IN? (critic issue 1.) When the
+  # command text named a second directory before the commit, no reading of the text answers
+  # that, so the arm refuses and names both rather than judging at the first one's row.
+  if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CD2" ]; then
+    _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD2}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
+Plan: $PLAN
+Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
+    refuse exit2 commit "two directories are named before the commit" "name one directory" "$_eg_detail"
+  fi
+  # A plan with NO `## Tasks` table has no register, and there is nothing to say about a tree
+  # it does not claim to track — `_eg_row_for_worktree` returns 1 for that, and this arm stays
+  # silent, which is what keeps a solo-writer project's worktree commits byte-identical to
+  # today's.
+  _eg_row_for_worktree "$_EG_WT"; _EG_REG=$?
+  if [ "$_EG_REG" -eq 3 ]; then
+    printf 'evidence-gate: worktree %s is named by more than one ## Tasks row (%s) — judging at current: %s\n' \
+      "$_EG_WT" "$_EG_ROW_DUP" "$CURRENT" >&2
+  elif [ "$_EG_REG" -eq 0 ] && [ -z "$_EG_ROW" ]; then
+    printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
+      "$_EG_WT" "$CURRENT" >&2
+  elif [ -n "$_EG_ROW" ]; then
+    _EG_RID="${_EG_ROW%%	*}"
+    _EG_RSTEP="${_EG_ROW#*	}"
+    _EG_CURNUM="${CURRENT%[ab]}"
+    case "$_EG_RSTEP" in
+      ''|*[!0-9]*) : ;;   # a row whose step cell is unusable decides nothing; units_validate
+                          # is what reports it, at the step that writes the plan
+      *)
+        if [ "$_EG_RSTEP" -lt "$_EG_CURNUM" ] 2>/dev/null; then
+          # THE ALLOW PATH SPEAKS TOO (architecture review §4.1). Until this line the gate
+          # announced the case where it DECLINED to use the register and went silent on the
+          # case where it used it — so the only place in the fleet where a wall substitutes a
+          # different value for the run's declared `current:` was the one place with no record
+          # of having done so, and the operator who cannot explain why a commit passed had the
+          # same two choices as the one wave-13's A-orch-43 incident left: read the source, or
+          # edit the plan. Printed BEFORE the substitution, so the line names the step the run
+          # declared. Where the row's step EQUALS `current:` nothing was substituted and
+          # nothing is printed — that is the common case and it stays byte-identical.
+          printf "evidence-gate: judged at row %s's step %s (run at current: %s)\n" \
+            "$_EG_RID" "$_EG_RSTEP" "$CURRENT" >&2
+          CURRENT="$_EG_RSTEP"
+        elif [ "$_EG_RSTEP" -gt "$_EG_CURNUM" ] 2>/dev/null; then
+          _eg_detail="canonical-sdlc worktree '${_EG_WT}' belongs to '## Tasks' row ${_EG_RID}, whose step is ${_EG_RSTEP}; the run is at current: ${CURRENT}.
+Plan: $PLAN
+Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not reached it — advance the run to step ${_EG_RSTEP}, or correct row ${_EG_RID}'s step cell, before committing from ${_EG_WT}."
+          refuse exit2 commit "that worktree's task is ahead of the run" "advance the run first" "$_eg_detail"
+        fi
+        ;;
+    esac
+  fi
+fi
 
 # Find the evidence line for the current step: a "Step N:" line, with or
 # without a leading list marker.
@@ -1818,7 +2352,7 @@ Fix: add 'requirements: specs/<epic>/<wave>.requirements.md' to the Step 1 line,
     refuse exit2 commit "Step 1's evidence names no requirements file" "add a 'requirements:' field" "$_eg_detail"
   fi
 
-  if echo "$raw" | grep -qE '(^|/)\.\.(/|$)'; then
+  if grep -qE '(^|/)\.\.(/|$)' <<< "$raw"; then
     _eg_detail="canonical-sdlc step ${CURRENT} — Step 1 'requirements: ${raw}' climbs out with a '..' component.
 Plan: $PLAN
 Fix: name the requirements file relative to the docs root, e.g. 'requirements: specs/<epic>/<wave>.requirements.md'."
@@ -1863,7 +2397,7 @@ block_get() {
 }
 
 block_has() {
-  echo "$BLOCK" | grep -qE "^[[:space:]]*$1[[:space:]]*:"
+  grep -qE "^[[:space:]]*$1[[:space:]]*:" <<< "$BLOCK"
 }
 
 block_has_na() {
@@ -1903,7 +2437,7 @@ validate_tests_block() {
   pass=$(block_get pass)
   total=$(block_get total)
   prefix=$(step_prefix "$step")
-  if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
+  if ! grep -qE '^[0-9]+$' <<< "$pass" || ! grep -qE '^[0-9]+$' <<< "$total"; then
     _eg_detail="${prefix} 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}').
 Plan: $PLAN"
     refuse exit2 commit "'pass:' and 'total:' are not both integers" "write both as integers" "$_eg_detail"
@@ -2151,7 +2685,10 @@ validate_matrix() {
   fi
 
   # stack-health: non-empty proof, or `n/a: <reason>` with a reason.
-  if ! echo "$MATRIX" | grep -qE '^[[:space:]]*stack-health[[:space:]]*:'; then
+  # A HERE-STRING, NOT A PIPE — see the header. $MATRIX is a whole plan section and
+  # routinely exceeds the pipe buffer; `echo "$MATRIX" | grep -q` turned a present
+  # stack-health line into a refusal of every commit (T37).
+  if ! grep -qE '^[[:space:]]*stack-health[[:space:]]*:' <<< "$MATRIX"; then
     block_matrix "the matrix says nothing about stack health" "add a before/after snapshot" \
       "'## Verification Matrix' is missing the 'stack-health:' line." \
       "add 'stack-health: <before/after snapshot>' or 'stack-health: n/a: <reason>' above the table."
@@ -2168,8 +2705,8 @@ validate_matrix() {
   # false-green two-part rule: any `false-green:` entry must have a paired
   # `rewritten:` entry, or the gate blocks (Assumption 12a).
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if echo "$MATRIX" | grep -qE '^[[:space:]]*false-green[[:space:]]*:'; then
-    if ! echo "$MATRIX" | grep -qE '^[[:space:]]*rewritten[[:space:]]*:'; then
+  if grep -qE '^[[:space:]]*false-green[[:space:]]*:' <<< "$MATRIX"; then
+    if ! grep -qE '^[[:space:]]*rewritten[[:space:]]*:' <<< "$MATRIX"; then
       block_matrix "a false green is logged but never rewritten" "rewrite it, then say where" \
         "a 'false-green:' entry in the matrix has no paired 'rewritten:' entry." \
         "add 'rewritten: <commit/test ref>' for the false-green test — a logged-but-unfixed false green is a blocking defect."
@@ -2186,7 +2723,7 @@ validate_matrix() {
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     # separator row (only pipes/dashes/colons/spaces) → skip
-    echo "$line" | grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' && continue
+    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
     ncols=$(echo "$line" | awk -F'|' '{print NF}')
     ac=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
     tier=$(echo "$line"   | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$3); print $3}')
@@ -2202,7 +2739,7 @@ validate_matrix() {
         "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
     fi
     # tier enum
-    if ! echo "$tier" | grep -qE '^T[0-4]$'; then
+    if ! grep -qE '^T[0-4]$' <<< "$tier"; then
       block_matrix "${ac}'s tier is unknown" "use T0 through T4" \
         "matrix row for '${ac}' has an invalid tier '${tier}' (want T0..T4)." \
         "set the tier cell to one of T0, T1, T2, T3, T4."
@@ -2227,8 +2764,8 @@ validate_matrix() {
     # the per-tier key loop has always demanded its evidence anyway.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     row_is_waived=0
-    if echo "$ev" | grep -qE 'waiver:' \
-       || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+    if grep -qE 'waiver:' <<< "$ev" \
+       || grep -qE '^[[:space:]]*waiver[[:space:]]*:' <<< "$block_txt"; then
       row_is_waived=1
     fi
     # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
@@ -2312,7 +2849,7 @@ validate_matrix() {
       :
     else
       for key in $(keys_for_tier "$tier"); do
-        if ! echo "$block_txt" | grep -qE "^[[:space:]]*${key}[[:space:]]*:"; then
+        if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
           block_matrix "row ${ac} has no ${key} evidence" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) is missing evidence key '${key}' in its AC block." \
             "add '${key}: <evidence>' to the '${ac}:' block, or waive the row via the Waiver Protocol."
@@ -2356,7 +2893,7 @@ validate_matrix() {
         # key first; this branch only bites a block that was otherwise complete.
         # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
         if [ "$key" = "evidence" ]; then
-          if echo "$val" | grep -qE '(^|/)\.\.(/|$)'; then
+          if grep -qE '(^|/)\.\.(/|$)' <<< "$val"; then
             block_matrix "${ac}'s evidence path climbs out of record/" "name it under record/" \
               "matrix row '${ac}' evidence '${val}' climbs out of the record directory and so does not resolve under ${DOCS_ROOT}/record/." \
               "point '${ac}:' evidence at a path under record/, e.g. 'evidence: record/<wave>/evidence/${ac}.md'."
@@ -2527,7 +3064,7 @@ validate_walk_artifact() {
   # Containment. A `..` component is refused outright rather than normalized:
   # the artifact belongs in record/, and a path that climbs out of it is a
   # placement error whatever it lands on.
-  if echo "$raw" | grep -qE '(^|/)\.\.(/|$)'; then
+  if grep -qE '(^|/)\.\.(/|$)' <<< "$raw"; then
     block_matrix "the walk file's path climbs out of record/" "name it under record/" \
       "the walk gate: walk-artifact '${raw}' climbs out of the record directory and so does not resolve under ${DOCS_ROOT}/record/." \
       "name the walk narration relative to the docs root, e.g. 'walk-artifact: record/<file>.md'."
@@ -3160,9 +3697,9 @@ classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
     git*|docker*|npx*|uvx*) : ;;
     *) return 1 ;;
   esac
-  if printf '%s' "$c" | grep -qE '^git +clone([;&| ]|$)'; then CLASS="clone"; ROLE="implementor"; return 0; fi
-  if printf '%s' "$c" | grep -qE '^docker +(run|pull)([;&| ]|$)'; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
-  if printf '%s' "$c" | grep -qE '^(npx|uvx) +'; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
+  if grep -qE '^git +clone([;&| ]|$)' <<< "$c"; then CLASS="clone"; ROLE="implementor"; return 0; fi
+  if grep -qE '^docker +(run|pull)([;&| ]|$)' <<< "$c"; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
+  if grep -qE '^(npx|uvx) +' <<< "$c"; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
   return 1
 }
 
@@ -3189,29 +3726,23 @@ nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = 
 # command with it still gets the full positional answer.
 case "$FLAT" in
   *FARM_OUT_ALLOW=1*)
-    if printf '%s' "$FLAT" | grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)'; then
+    if grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)' <<< "$FLAT"; then
       log_event "override" "user-sanctioned"; return 0
     fi
     ;;
 esac
 
-# The heredoc-free form of the command. Chain segmentation and the tier-2 matcher read
-# it rather than FLAT, so a `&&` or an `npx` inside a heredoc body cannot reshape the
-# decision any more than it can classify.
-_wall_flatten "$(cmd_strip_heredocs "$CMD")"; SAFE_FLAT="$_WALL_FLAT"
-
-TARGET=$(cmd_unwrap_head "$SAFE_FLAT")
+# THE HEREDOC-FREE FORM, THE TIER-2 HEAD AND THE CHAIN SEGMENTS, IN ONE FILL
+# (epic-23 wave-14 T17, REQ-4; T4 §5 / A-T4.2). Chain segmentation and the tier-2
+# matcher read the heredoc-free form rather than FLAT, so a `&&` or an `npx` inside a
+# heredoc body cannot reshape the decision any more than it can classify. All three
+# readings now arrive from `_wall_cmd_fill` — see it at the top of this file for what
+# each skip costs and why none of them can narrow what the wall sees. Nothing here forks.
+_wall_cmd_fill "$CMD"
+SAFE_FLAT="$_WALL_SAFE_FLAT"
+TARGET="$_WALL_HEAD"
+CHAIN_SEGS="$_WALL_CHAIN_SEGS"; CHAIN_COUNT="$_WALL_CHAIN_COUNT"
 CLASS=""; ROLE=""
-
-# Chain segmentation (≥3 &&-joined segments) feeds both chain arms below;
-# compute the segment list once. Empty/0 when no `&&` is present.
-CHAIN_SEGS=""; CHAIN_COUNT=0
-case "$SAFE_FLAT" in
-  *"&&"*)
-    CHAIN_SEGS=$(printf '%s' "$SAFE_FLAT" | awk '{ gsub(/&&/, "\n"); print }')
-    CHAIN_COUNT=$(printf '%s\n' "$CHAIN_SEGS" | grep -cE '[^[:space:]]')
-    ;;
-esac
 
 # Tier-1 single command → deny (advisory-downgrades to a nudge inside emit_tier1).
 # A ≥3-segment && chain defers to the chain tier-1 arm below so it keeps its
@@ -3226,7 +3757,16 @@ fi
 if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   CHAIN_ROLE=""
   while IFS= read -r _seg; do
-    _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
+    # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
+    # either end is single spaces.
+    while :; do
+      case "$_seg" in
+        ' '*) _seg="${_seg# }" ;;
+        *' ') _seg="${_seg% }" ;;
+        *)    break ;;
+      esac
+    done
     [ -n "$_seg" ] || continue
     if classify_tier1 "$_seg"; then
       CHAIN_ROLE="$ROLE"; break
@@ -3247,10 +3787,26 @@ fi
 if [ "${CHAIN_COUNT:-0}" -ge 3 ]; then
   _has_nonexempt=""
   while IFS= read -r _seg; do
-    _seg=$(printf '%s' "$_seg" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    # TRIMMED IN THE SHELL, not through a `sed` per segment: `_WALL_SAFE_FLAT` has
+    # been squeezed by `_wall_flatten`, so the only whitespace a segment can carry at
+    # either end is single spaces.
+    while :; do
+      case "$_seg" in
+        ' '*) _seg="${_seg# }" ;;
+        *' ') _seg="${_seg% }" ;;
+        *)    break ;;
+      esac
+    done
     [ -n "$_seg" ] || continue
-    printf '%s' "$_seg" | grep -qE '^(git|ls|cat|head|tail|wc|grep|rg|find|awk|sed|mkdir|cp|mv|rm|touch|echo|printf|test|cd|pwd|which|command|true|false) ' \
-      || { _has_nonexempt=1; break; }
+    # THE SAME EXEMPT SET, ASKED WITH A BUILTIN. The regex was anchored at `^` over
+    # literal words each followed by a literal space, which is exactly what these
+    # patterns are — a bare `git` with no argument stays non-exempt in both spellings.
+    case "$_seg" in
+      'git '*|'ls '*|'cat '*|'head '*|'tail '*|'wc '*|'grep '*|'rg '*|'find '*|'awk '*|\
+      'sed '*|'mkdir '*|'cp '*|'mv '*|'rm '*|'touch '*|'echo '*|'printf '*|'test '*|\
+      'cd '*|'pwd '*|'which '*|'command '*|'true '*|'false '*) : ;;
+      *) _has_nonexempt=1; break ;;
+    esac
   done <<EOF
 $CHAIN_SEGS
 EOF
@@ -3472,6 +4028,100 @@ fi
 # below refuses every target it is handed.
 case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
 
+# ---------- AC-5.2: the allowed set on the WIRE, not just in `detail` ----------
+#
+# T7's repro (record/wave-14-tune-181/T7-req5-repro.md §4): "On the budget: …" has
+# lived in `detail` since c789e22, and refuse.sh's channel table marks exit2's
+# `detail_to_user` `no` (ruling D-1) — a dispatched writer's own tool_result on a
+# budget refusal never carried it, only the fact/fix ONE LINE did, and that line
+# named no set. This puts the set (or as much as the line has room for) onto
+# `fact`, which exit2 DOES relay (refuse.sh:271-278) — the whole line stays under
+# `BIONIC_LINE_WIDTH` because `refuse()` still checks it, so a wrong estimate here
+# self-refuses loudly (refuse.sh's own `_refuse_selfrefuse`) rather than silently
+# overflowing. `bionic_cols`/`bionic_trunc`/`BIONIC_LINE_WIDTH` are refuse.sh's own
+# soft-sourced width.sh (hooks/bash-walls.sh sources refuse.sh before walls.sh,
+# `:202`/`:213`) — nothing new is sourced, and refuse.sh itself is unchanged.
+#
+# TOKEN BOUNDARIES, NEVER A CHARACTER CUT. A budget of 38 suites (A-orch-17's own
+# incident) cannot fit on any one line; showing the first few WHOLE tokens plus a
+# "+N more" count (research-R2-preflight.md Q6) beats a mid-name ellipsis, which
+# would print a truncated, unrunnable suite name. `none` is reserved for a
+# genuinely EMPTY set — a non-empty set that has no room at all (cols<=0, or not
+# even its first token fits) renders as a bare count ("N suites") instead, which
+# is honest either way `none` is not: it does not claim the budget is empty, and
+# it does not cut a name mid-word. Review-correctness-d3930dd.md F3 (mid-name
+# ellipsis via `bionic_trunc`) and F7 (`none` for a non-empty set at cols<=0) are
+# both this shape; fixed together here rather than patched at each call site.
+_budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> text
+  local set="${1:-}" cols="${2:-0}"
+  if [ -z "$set" ]; then printf 'none'; return; fi
+  local total=0 tok
+  for tok in $set; do total=$((total + 1)); done
+  local word=suites
+  [ "$total" -eq 1 ] && word=suite
+  if [ "$cols" -le 0 ]; then
+    # NO ROOM AT ALL (F7). The set is NOT empty, so `none` would lie; name the
+    # count instead. `_budget_wire_fact`'s caller-side self-refuse (refuse.sh's
+    # own line-width check) is what catches an overlong line from here, per
+    # A-T8.1 — this function's job is to be honest, not to guarantee a fit.
+    printf '%d %s' "$total" "$word"
+    return
+  fi
+  if [ "$(bionic_cols "$set")" -le "$cols" ]; then
+    printf '%s' "$set"
+    return
+  fi
+  local out="" shown=0 cand remain tail
+  for tok in $set; do
+    if [ -z "$out" ]; then cand="$tok"; else cand="$out $tok"; fi
+    remain=$((total - shown - 1))
+    tail=""
+    [ "$remain" -gt 0 ] && tail=" +$remain more"
+    if [ "$(bionic_cols "$cand$tail")" -le "$cols" ]; then
+      out="$cand"; shown=$((shown + 1))
+    else
+      break
+    fi
+  done
+  remain=$((total - shown))
+  if [ -z "$out" ]; then
+    # Not even one whole token fits ALONGSIDE its own "+N more" count. Try the
+    # first token bare, count dropped — a real suite name beats one padded
+    # with a count it has no room for.
+    set -- $set
+    if [ "$(bionic_cols "$1")" -le "$cols" ]; then
+      printf '%s' "$1"
+      return
+    fi
+    # NOT EVEN ONE TOKEN FITS BARE (F3). A character cut here would print a
+    # truncated, unrunnable suite name — exactly what token-boundary rendering
+    # exists to avoid — so the honest floor is the bare count, same as cols<=0.
+    printf '%d %s' "$total" "$word"
+  elif [ "$remain" -gt 0 ]; then
+    printf '%s +%d more' "$out" "$remain"
+  else
+    printf '%s' "$out"
+  fi
+}
+
+# _budget_wire_fact <label, ending ": "> <verb> <fix> <allowed set> -> a `fact`
+# string carrying `label` plus as much of `allowed` as fits beside `verb` and
+# `fix` inside refuse()'s one line. Computed fresh each call (not a hardcoded
+# column count), so a reword of `fix` cannot silently overrun the budget AT THIS
+# CALL — the safety this buys is real but partial: `fix` is spelled a second time at
+# each call site, once as this function's own argument and once as `fold_block`'s
+# (`:4114`/`:4115`, `:4130`/`:4131`, `:4161`/`:4162`), and rewording one without the
+# other still miscomputes the room silently. Keeping the two literals in step at
+# each site is on the caller.
+_budget_wire_fact() {
+  local label="$1" verb="$2" fix="$3" allowed="$4"
+  local prefix="bionic: $verb refused — " suffix=" ($fix)"
+  local overhead=$(( $(bionic_cols "$prefix") + $(bionic_cols "$label") + $(bionic_cols "$suffix") ))
+  local room=$((BIONIC_LINE_WIDTH - overhead))
+  [ "$room" -gt 0 ] || room=0
+  printf '%s%s' "$label" "$(_budget_wire_list "$allowed" "$room")"
+}
+
 budget_refuse() {  # <suite basename>
   # A NAME THE SHELL HAS NOT EXPANDED YET IS A DIFFERENT REFUSAL (review-c C-5, A-35c). A
   # hook sees the command TEXT, so `for s in a b; do bash "tests/$s.test.sh"; done` reaches
@@ -3481,7 +4131,9 @@ budget_refuse() {  # <suite basename>
   # the problem. Two readers hit it before this branch existed.
   case "$1" in
     *'$'*|*'`'*)
-      fold_block exit2 suite-run "the suite name here is a shell variable" "spell each suite literally" \
+      fold_block exit2 suite-run \
+        "$(_budget_wire_fact "unexpanded name; allowed: " suite-run "spell each suite literally" "$2")" \
+        "spell each suite literally" \
         "The name as read: $1
 
 This command names its suite with a shell variable, and this wall reads your command
@@ -3495,7 +4147,9 @@ Spell the suite literally, one per call:
 On the budget: ${2:-(nothing — this brief declared Suites: none)}"
       return 2 ;;
   esac
-  fold_block exit2 suite-run "that suite is not on this agent's budget" "run only the budgeted suites" \
+  fold_block exit2 suite-run \
+    "$(_budget_wire_fact "allowed: " suite-run "run only the budgeted suites" "$2")" \
+    "run only the budgeted suites" \
     "This is a BUDGET arm, not a safety wall: an extra suite run breaks nothing, it spends
 forty minutes of a machine nobody else can use. The set was recorded on this agent's
 roster row at dispatch, from the files its brief declared.
@@ -3524,7 +4178,9 @@ for _target in $_TARGETS; do
     case " $SUITES_ALLOWED " in
       *" run.sh "*) continue ;;
     esac
-    fold_block exit2 suite-run "the full tree is not on this agent's budget" "run your brief's suites" \
+    fold_block exit2 suite-run \
+      "$(_budget_wire_fact "full tree refused; allowed: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
+      "run your brief's suites" \
       "This is a BUDGET arm, not a safety wall. One regression means one: the whole tree is
 proved once per run, by one dispatched runner whose row carries tests/run.sh, at
 integration close. A second full run costs forty minutes and proves what the first one

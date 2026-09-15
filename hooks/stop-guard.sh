@@ -549,8 +549,8 @@ fi
 is_address_shaped() {  # <typed> -> 0 if it wears an agent-address shape
   local t="$1"
   case "$t" in *@session-*) return 0 ;; esac
-  printf '%s' "$t" | grep -qE '^a[0-9a-f]+$' && return 0
-  printf '%s' "$t" | grep -qE '^a.+-[0-9a-f]{16}$' && return 0
+  grep -qE '^a[0-9a-f]+$' <<< "$t" && return 0
+  grep -qE '^a.+-[0-9a-f]{16}$' <<< "$t" && return 0
   return 1
 }
 
@@ -560,7 +560,7 @@ is_address_shaped() {  # <typed> -> 0 if it wears an agent-address shape
 # with no row of any kind (REQ-5). The leading `t` is load-bearing: it is what keeps this
 # carve from ever widening to a bare name that merely happens to be short and lowercase.
 is_bash_task_shaped() {  # <typed> -> 0 if it wears a background-bash-task-id shape
-  printf '%s' "$1" | grep -qE '^t[a-z0-9]{8,}$'
+  grep -qE '^t[a-z0-9]{8,}$' <<< "$1"
 }
 
 # EVERY ROSTER IN THIS BIONIC_ROOT THAT CARRIES THIS NAME, as the addresses the platform's stop

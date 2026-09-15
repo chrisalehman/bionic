@@ -166,4 +166,105 @@ case "$LINE" in
   *) no "9: the instruction was eaten by the cut" "$(printf '%.120s' "$LINE")" ;;
 esac
 
+section "Section 5: bionic_wrap folds a string inside a column budget"
+
+# WHY THIS FUNCTION EXISTS (wave-14 T36, REQ-9; Chris 2026-09-15 "D4: I want the
+# wrapped version"). The two functions above SHORTEN a string that does not fit:
+# `bionic_trunc` cuts it and marks the cut with an ellipsis. A card row cannot do
+# that — the free-text cell of a Step-1/2/3 card IS the content, and a requirement
+# elided at 44 columns is a card that withholds the thing it is displaying. The
+# third answer is to fold: keep every word, put the overflow on a continuation line,
+# and leave the trailing columns to the row's own first line. `payload/scripts/card.sh`
+# is the caller; the budget, the measuring and now the fold all stay in this file,
+# which is the file that owns "how wide is this, and what do I do when it is too wide".
+#
+# MEASURED THE SAME WAY THE CUT IS, and that is the point of putting it here: the
+# closed glyph set, the conservative reading of a glyph outside it, and the pinned
+# `LC_ALL=C` are already this file's rulings (Section 3, 7n). A fold that measured
+# its own way would disagree with the truncator on the same string.
+
+wrap_lines() {  # <string> <budget> -> how many lines the fold produced
+  bionic_wrap "${1:-}" "${2:-0}" | wc -l | tr -d ' '
+}
+
+if ! type bionic_wrap >/dev/null 2>&1; then
+  no "10: width.sh defines bionic_wrap" "no such function in $WIDTH_SH"
+  no "10a: every row in this section needs it" "skipped: bionic_wrap is not defined"
+else
+  ok "10: width.sh defines bionic_wrap"
+
+  # THE ORDINARY CASE. A sentence longer than its column, folded at word boundaries.
+  WRAP_S='A decision whose text runs well past the forty-four column limit'
+  WRAPPED="$(bionic_wrap "$WRAP_S" 44)"
+  expect_eq "11: a sentence longer than its budget folds onto two lines" "2" "$(wrap_lines "$WRAP_S" 44)"
+  expect_eq "11a: …and the fold falls on a word boundary" \
+    'A decision whose text runs well past the
+forty-four column limit' "$WRAPPED"
+
+  # NO LINE OVER THE BUDGET, and NO WORD LOST — the two halves of "folded", each
+  # asserted on its own so a function that dropped the tail cannot pass the first.
+  WRAP_BAD=""
+  while IFS= read -r _l; do
+    [ "$(bionic_cols "$_l")" -le 44 ] || WRAP_BAD="${WRAP_BAD}${WRAP_BAD:+ | }$(bionic_cols "$_l"):${_l}"
+  done < <(printf '%s\n' "$WRAPPED")
+  expect_empty "12: no folded line exceeds the budget" "$WRAP_BAD"
+  expect_eq "12a: every word comes back, in order" "$WRAP_S" \
+    "$(printf '%s\n' "$WRAPPED" | tr '\n' ' ' | sed -e 's/ *$//')"
+
+  # A WORD WIDER THAN THE WHOLE COLUMN. It is split AT the budget rather than
+  # dropped or allowed to overflow: a path or an identifier is the commonest cell
+  # this happens to, and a row that silently lost one would be worse than a broken word.
+  LONGWORD='payload/scripts/lib/a-single-unbreakable-path-longer-than-its-column.sh'
+  LW="$(bionic_wrap "$LONGWORD" 20)"
+  expect_eq "13: an over-long word is split at the budget, never dropped" "$LONGWORD" \
+    "$(printf '%s\n' "$LW" | tr -d '\n')"
+  LW_BAD=""
+  while IFS= read -r _l; do
+    [ "$(bionic_cols "$_l")" -le 20 ] || LW_BAD="${LW_BAD}${LW_BAD:+ | }$(bionic_cols "$_l"):${_l}"
+  done < <(printf '%s\n' "$LW")
+  expect_empty "13a: …and no piece of it exceeds the budget" "$LW_BAD"
+
+  # A STRING THAT ALREADY FITS comes back as itself, on one line.
+  expect_eq "14: a string inside its budget is unchanged" "short enough" "$(bionic_wrap "short enough" 44)"
+  expect_eq "14a: …on exactly one line" "1" "$(wrap_lines "short enough" 44)"
+
+  # THE EMPTY CELL IS ONE EMPTY LINE, not zero lines. A card row with an empty free
+  # cell still has a row: a fold that returned nothing would delete it.
+  expect_eq "15: an empty string folds to one empty line" "1" "$(wrap_lines "" 44)"
+  expect_eq "15a: …and that line is empty" "" "$(bionic_wrap "" 44)"
+
+  # A BUDGET OF ZERO OR LESS MEANS UNBOUNDED, which is bionic_trunc's own ruling
+  # one function up ("a caller whose prefix already ate the whole line still gets
+  # its content"). The two say the same thing about the same input.
+  expect_eq "16: a budget of 0 means unbounded, as it does for the truncator" "$WRAP_S" "$(bionic_wrap "$WRAP_S" 0)"
+  expect_eq "16a: …and a negative budget too" "$WRAP_S" "$(bionic_wrap "$WRAP_S" -5)"
+
+  # THE GLYPH SET, AT THE FOLD. An em dash is one column and three bytes: a fold
+  # that measured bytes would break the line two words early. Asserted against the
+  # ASCII twin of the same sentence, so the number is not hand-computed.
+  EM_S='an em — dash inside a cell that must fold at its own column boundary'
+  ASCII_S='an em x dash inside a cell that must fold at its own column boundary'
+  expect_eq "17: an em dash is measured at one column by the fold" \
+    "$(bionic_wrap "$ASCII_S" 30 | sed -e 's/x/—/')" "$(bionic_wrap "$EM_S" 30)"
+
+  # A GLYPH OUTSIDE THE CLOSED SET is measured conservatively and IDENTICALLY in
+  # both locales — 7n's ruling, one function down. Short of the budget, never over.
+  wrap_c() {  # <string> <budget> -> the fold, made under the C locale
+    LC_ALL=C bash -c '. "$1"; bionic_wrap "$2" "$3"' _ "$WIDTH_SH" "${1:-}" "${2:-0}"
+  }
+  STAR_S='ab★cd ef★gh ij★kl mn★op'
+  expect_eq "18: the C and the UTF-8 fold are the same string" "$(bionic_wrap "$STAR_S" 12)" "$(wrap_c "$STAR_S" 12)"
+  if printf '%s' "$(bionic_wrap "$STAR_S" 12)" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+    ok "18a: the fold leaves valid UTF-8"
+  else
+    no "18a: the fold split a multi-byte character" \
+       "$(printf '%s' "$(bionic_wrap "$STAR_S" 12)" | od -An -tx1 | tr -s ' ')"
+  fi
+
+  # RUNS OF WHITESPACE COLLAPSE. A cell is content, not layout: two spaces between
+  # words in a TSV cell must not become a two-space gap at a fold boundary.
+  expect_eq "19: a run of whitespace inside the cell collapses to one space" "a b c" \
+    "$(bionic_wrap "  a   b		c  " 44)"
+fi
+
 finish

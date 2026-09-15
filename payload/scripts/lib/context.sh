@@ -9,15 +9,19 @@
 # thing. `bionic_context` says it once. Each hook then does its OWN work, and
 # nothing here decides any of it.
 #
-# THE SEVEN VALUES. Every one is a VALUE the caller reads, never an action:
+# THE EIGHT VALUES. Every one is a VALUE the caller reads, never an action:
 #
 #   BIONIC_INPUT      the payload text, read from stdin at most once
 #   BIONIC_CWD        the ONE ladder (below)
 #   BIONIC_ROOT       project_root "$BIONIC_CWD"
 #   BIONIC_SID        the session id, past the ONE shape guard
 #   BIONIC_ENGAGED    0 or 1
-#   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none
-#   BIONIC_RUN_PLAN   the plan path the verdict names; empty for `none`
+#   BIONIC_RUN_WORD   bound-open | bound-closed | fallback | none — or the
+#                     sentinel `unset` when the caller did not ask for it (§6)
+#   BIONIC_RUN_PLAN   the plan path the verdict names; empty for `none` and for
+#                     the `unset` sentinel
+#   BIONIC_WORKTREE   the linked worktree the root was mapped from, empty when
+#                     the walk mapped none (epic-23 wave-14 REQ-2, spec D5)
 #
 # THE RETURN CODE IS THE WHOLE CONTRACT. 1 when the session cannot be identified
 # — no root, no session id, or a session id carrying a character outside
@@ -29,6 +33,12 @@
 # notice exactly where the other fourteen exit. Fourteen hooks spell the decision
 # `[ "$BIONIC_ENGAGED" = 1 ] || exit 0` in their own bodies, one line each, and
 # session-start reads the 0 and reports.
+#
+# THE RUN VERDICT IS OPT-IN (epic-23 wave-14 REQ-4, spec D5): it is computed only
+# when the caller set `BIONIC_CONTEXT_WANT_RUN=1` before the call, and otherwise
+# BIONIC_RUN_WORD is the sentinel `unset` — a word outside the verdict vocabulary,
+# so a reader that meets it cannot mistake it for `none`. §6 carries the reasoning
+# and the list of callers that ask.
 #
 # THE RUN VERDICT IS A VALUE for a sharper reason (census §4.2, T10-pins §5.5).
 # The four hooks carrying the 4-branch `case` do DIFFERENT things on
@@ -261,7 +271,7 @@ bionic_jq() {
 
 # ─── The one preamble ────────────────────────────────────────────────────────
 #
-# bionic_context -> sets the seven values; 0 when the session is identified, 1
+# bionic_context -> sets the eight values; 0 when the session is identified, 1
 # when it is not. Silent on both streams either way, because fourteen of the
 # fifteen callers turn a 1 into `exit 0` and a bystander session must not learn
 # that bionic is installed.
@@ -303,7 +313,13 @@ bionic_context() {
     # tab is not a report line and is refused, as `$2 == "chosen"` refused it.
     # Rung 1 is the rung the CLI actually takes, so this fork was paid on every
     # hook event of every session.
-    _cands="$(project_root_candidates "$CLAUDE_PROJECT_DIR" 2>/dev/null)"
+    # NOT A COMMAND SUBSTITUTION (REQ-2). The walk also publishes BIONIC_WORKTREE
+    # in the shell it runs in (lib/root.sh), and a `$(…)` is a subprocess: the
+    # eighth value would be born and die inside it. The report is taken from the
+    # return channel instead and the printed copy is discarded — `printf` to
+    # /dev/null is a builtin, so this costs nothing the substitution did not.
+    project_root_candidates "$CLAUDE_PROJECT_DIR" >/dev/null 2>&1
+    _cands="${_BIONIC_ROOT_REPORT%$'\n'}"
     _last="${_cands##*$'\n'}"
     case "$_last" in
       *$'\t'*) [ "${_last#*$'\t'}" = "chosen" ] && _root="${_last%%$'\t'*}" ;;
@@ -327,7 +343,11 @@ bionic_context() {
   if [ -n "$_root" ]; then
     BIONIC_ROOT="$_root"
   else
-    BIONIC_ROOT="$(project_root "$BIONIC_CWD" 2>/dev/null)"
+    # Same shape, same reason as rung 1: in the caller's shell, so the walk's
+    # BIONIC_WORKTREE survives it. `project_root` returns 0 whatever it finds, so
+    # an empty answer is still the test, exactly as the substitution's was.
+    project_root "$BIONIC_CWD" >/dev/null 2>&1
+    BIONIC_ROOT="$_BIONIC_ROOT_ANSWER"
   fi
   [ -n "$BIONIC_ROOT" ] || return 1
 
@@ -349,15 +369,45 @@ bionic_context() {
     BIONIC_ENGAGED=0
   fi
 
-  # 6. THE RUN VERDICT, AS A VALUE. `session_run` returns 2 on `bound-closed` and
-  # 1 on `none`; both are identified sessions, so neither may become this
-  # function's return code.
-  _verdict="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || :
-  BIONIC_RUN_WORD="${_verdict%% *}"
-  case "$_verdict" in
-    *\ *) BIONIC_RUN_PLAN="${_verdict#* }" ;;
-    *)    BIONIC_RUN_PLAN="" ;;
-  esac
+  # 6. THE RUN VERDICT, AS A VALUE — AND ONLY FOR A CALLER THAT ASKED FOR IT
+  # (epic-23 wave-14 REQ-4, spec D5 "Hook context"). `session_run` returns 2 on
+  # `bound-closed` and 1 on `none`; both are identified sessions, so neither may
+  # become this function's return code.
+  #
+  # WHY IT IS OPT-IN. This is the most expensive value the preamble computes —
+  # the scan walks every candidate under `plans/` and `incidents/` and reads each
+  # one, measured at 28.0 ms on a one-plan fixture and growing ~2.8 ms per plan
+  # the repo accumulates (research R3 §6-§7). `payload/scripts/lib/walls.sh`
+  # holds ZERO references to either variable, so on the hottest path in the tree
+  # — a PreToolUse Bash call, five walls — every millisecond of it was spent on
+  # an answer nobody read.
+  #
+  # THE SENTINEL IS NOT THE EMPTY STRING, and that is the whole safety of this
+  # cut. `none` is a real verdict ("this session is in no run"); an unasked
+  # verdict is a different state, and a wall written later that read an empty
+  # string where it expected a word would silently take the `none` branch — the
+  # fail-dangerous direction, and one no test would catch because the value LOOKS
+  # answered. `unset` is outside the closed verdict vocabulary
+  # (bound-open | bound-closed | fallback | none), so a `case` over it falls to
+  # its own `*)` arm and a comparison against any real verdict fails.
+  #
+  # A CALLER THAT WANTS THE VERDICT SETS `BIONIC_CONTEXT_WANT_RUN=1` BEFORE THE
+  # CALL. Today that is the three hooks whose own bodies or libraries branch on
+  # it: hooks/stop.sh (lib/stop.sh's spend, patrol-duties and patrol-revive),
+  # hooks/dispatch-preflight.sh and hooks/session-start.sh. A hook that starts
+  # reading the verdict sets the flag too — and reads `unset` as "I did not ask",
+  # never as "no run".
+  if [ "${BIONIC_CONTEXT_WANT_RUN:-0}" = 1 ]; then
+    _verdict="$(session_run "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)" || :
+    BIONIC_RUN_WORD="${_verdict%% *}"
+    case "$_verdict" in
+      *\ *) BIONIC_RUN_PLAN="${_verdict#* }" ;;
+      *)    BIONIC_RUN_PLAN="" ;;
+    esac
+  else
+    BIONIC_RUN_WORD="unset"
+    BIONIC_RUN_PLAN=""
+  fi
 
   return 0
 }
