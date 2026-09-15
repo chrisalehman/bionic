@@ -2510,24 +2510,52 @@ elif [ -n "$IMPACT_COMMAND" ]; then
       # shellcheck source=/dev/null
       . "$BIONIC_LIB/bounds.sh"
     fi
-    # THE TICK BUDGET IS THE BOUND, IN TENTHS, AND IS DERIVED. A literal 60 beside a bound
-    # that had moved would leave the loop stopping at six seconds while both messages below
-    # quoted twenty — a lie in the one place an operator is told why the dispatch was refused.
-    IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))   # the tick is the poll, the product is the bound
+    # THE WAIT ENDS ON A CLOCK, NOT ON A COUNT OF POLLS (wave-14 T34). This loop used to
+    # spend a tick budget — `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))`, one tick per
+    # `sleep 0.1` — and call the budget the bound. It is not the bound. `sleep` is an
+    # external binary, so every tick pays a fork and an exec on top of the 100 ms it
+    # sleeps: measured at 115.3 ms a tick on a quiet Mac (T34 §2), which makes a stated
+    # 20 s bound a 23.0-23.2 s wait and a stated 5 s bound a 5.77 s wait, while the
+    # refusal below quotes the stated number. That is the same lie the derived budget was
+    # written to prevent, one layer down — the literal was fixed, the RATE was not.
+    #
+    # AND THE ERROR IS PROPORTIONAL, WHICH IS THE PART THAT MATTERS. A fixed 15% would
+    # only be untidy. Under the load 8-12 a wave actually dispatches at, each tick costs
+    # more and the realized wait grows with it — so the one guard whose job is to stop a
+    # wedged session waiting gets slower exactly when the session is wedged. A hang guard
+    # cannot be denominated in a unit that stretches under the condition it guards.
+    #
+    # `SECONDS` IS THE CLOCK, AND IT COSTS NOTHING. Assigning it zeroes bash's own
+    # elapsed-time counter and reading it is a shell builtin — no second fork per tick, on
+    # a path this wave is measuring for latency. /bin/bash is 3.2 on a Mac, which has
+    # neither `EPOCHREALTIME` nor `printf %(%s)T`, and bionic's command discipline forbids
+    # a `timeout` binary; `date +%s` would cost a fork per tick to buy the same
+    # whole-second resolution `SECONDS` gives free. Nothing else in this hook or in the
+    # libraries it sources reads `SECONDS`, so zeroing it here takes nothing from anyone.
+    #
+    # THE RESOLUTION IS A WHOLE SECOND, AND IT ROUNDS TOWARD WAITING LESS. `SECONDS` is
+    # integer, and the assignment below lands at an arbitrary point inside a second, so the
+    # wait ends somewhere in [bound-1, bound] — never past the number the refusal quotes.
+    # For a hang guard that is the correct direction to be wrong in: a guard that fires a
+    # little early costs a re-dispatch, and one that fires late costs the thing the guard
+    # exists for. The bound itself is NOT this file's to move (lib/bounds.sh, D4); this
+    # changes only whether the wait honours it.
+    #
+    # `sleep 0.1` STAYS the poll cadence. It is what makes a prompt derivation noticed
+    # promptly, and with the clock deciding, its cost no longer accumulates into the bound.
     _impact_tmp="${TMPDIR:-/tmp}/bionic-impact-$$-${RANDOM}.out"
     # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
     ( cd "$BIONIC_ROOT" 2>/dev/null && $IMPACT_COMMAND "$@" >"$_impact_tmp" 2>/dev/null ) &
     _impact_pid=$!
-    _impact_ticks=0
+    SECONDS=0
     _impact_overran=0
     while kill -0 "$_impact_pid" 2>/dev/null; do
-      if [ "$_impact_ticks" -ge "$IMPACT_BOUND_TICKS" ]; then
+      if [ "$SECONDS" -ge "$IMPACT_BOUND_S" ]; then
         kill -TERM "$_impact_pid" 2>/dev/null
         _impact_overran=1
         break
       fi
       sleep 0.1
-      _impact_ticks=$((_impact_ticks + 1))
     done
     wait "$_impact_pid" 2>/dev/null
     if [ "$_impact_overran" -eq 1 ]; then
