@@ -502,7 +502,7 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
     s|sec|secs|second|seconds)   mult=1 ;;
     *) return 1 ;;
   esac
-  printf '%s' "$s" | grep -qE '[0-9]+\.[0-9]+' && return 1
+  grep -qE '[0-9]+\.[0-9]+' <<< "$s" && return 1
   allnums="$(printf '%s' "$s" | grep -oE '[0-9]+')"
   [ "$(printf '%s\n' "$allnums" | grep -c '[0-9]')" -eq "$(printf '%s\n' "$nums" | grep -c '[0-9]')" ] \
     || return 1
