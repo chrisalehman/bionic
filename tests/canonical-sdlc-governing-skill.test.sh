@@ -2314,6 +2314,28 @@ assert_contains "v3 a session bound to a closed plan is told, and never falls th
   "$HOOK_STDERR"
 assert_eq "v3 ...and still passes" 0 "$HOOK_EXIT"
 
+# v4 (epic-23 wave-14 T17): THE VERDICT FOLLOWS THE ARTIFACT'S ROOT, NEVER THE SESSION'S.
+#
+# WHAT THIS REFUSES, AND WHY IT IS WORTH A ROW OF ITS OWN. `bionic_context` can compute a
+# run verdict for a caller that asks (`BIONIC_CONTEXT_WANT_RUN=1`), and three hooks do —
+# hooks/stop.sh, hooks/dispatch-preflight.sh, hooks/session-start.sh. It resolves against
+# `BIONIC_ROOT`, which is the SESSION's cwd. This hook resolves against
+# `PROJECT_ROOT_FROM_PATH`, which is the ARTIFACT's own root, and its header says why in
+# as many words: "a hook that scoped itself by the session's cwd and enforced against the
+# artifact's root would go quiet exactly where it was added to bind." The two look
+# interchangeable in every fixture where the session sits in the project it is writing to,
+# which is most of them — so the swap is a plausible-looking latency cut that would pass
+# this whole suite except here. Two projects, one plan each, the write aimed at one and
+# the session sitting in the other: only the artifact's plan may be named.
+v_art=$(make_project)
+v_cwd=$(make_project)
+plant_plan "$v_art/.bionic/docs/plans/epic-01-demo/wave-11-artifact.plan.md" open
+plant_plan "$v_cwd/.bionic/docs/plans/epic-01-demo/wave-22-cwd.plan.md" open
+run_write_from "$v_art/.bionic/docs/record/probe.md" '# operational note' "$v_cwd"
+assert_contains "v4 the run verdict names the ARTIFACT's plan"   "$v_art/.bionic/docs/plans/epic-01-demo/wave-11-artifact.plan.md" "$HOOK_STDERR"
+expect_absent "v4 ...and never the plan of the project the session happens to sit in"   "wave-22-cwd.plan.md" "$HOOK_STDERR"
+assert_eq "v4 ...and passes" 0 "$HOOK_EXIT"
+
 section "K5/AC-K5.1: *.requirements.md gets the frontmatter contract, minus the design rule"
 
 # K5: requirements.md is the Step-1 artifact (design ledger K5; ADR-001), living beside the
