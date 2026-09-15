@@ -1398,6 +1398,53 @@ _detect_bound_read() {  # <file> — pass on what the probe managed to say, then
   return 0
 }
 
+# THE GROUP IS CHECKED, NEVER ASSUMED (T22). `set -m` ASKS for pgid == pid; where the
+# kernel refuses, the job stays in the CALLER's group and `kill -- -$pid` names a group
+# that does not exist. Measured on a stand-in for that state (a child left in the
+# caller's group, with a `sleep` grandchild of its own): the group kill fails with "no
+# such process group", the old `||` fallback TERMed the direct child only, and the
+# grandchild the group signal exists to reach went on running. The bound still released
+# its caller on time — the out-file above does that — but "a probe that timed out is not
+# left running on the machine afterwards", the claim this function's header makes, was
+# silently untrue on exactly the machines where the warning above appears. One refusal,
+# two faults. So the job's REAL group is read before the group signal is used, and where
+# there is no group to signal, the descendants are TERMed by name instead.
+_detect_bound_kill_tree() {  # <pid> — TERM <pid> and every descendant of it
+  local root="$1" table frontier next generations=0 victims victim
+  # `-A` is the POSIX spelling both BSD and procps answer; one snapshot is walked
+  # generation by generation rather than one `ps` per level. The generation cap is a
+  # safety rail on a table read from outside this script, not a depth anyone reaches.
+  table="$(ps -Ao pid=,ppid= 2>/dev/null)"
+  victims="$root"; frontier="$root"
+  while [ -n "$frontier" ] && [ "$generations" -lt 16 ]; do
+    next="$(printf '%s\n' "$table" | awk -v parents="$frontier" \
+      'BEGIN { n = split(parents, a, " "); for (i = 1; i <= n; i++) P[a[i]] = 1 }
+       P[$2] { print $1 }')"
+    [ -n "$next" ] || break
+    victims="$victims $next"
+    frontier="$next"
+    generations=$((generations + 1))
+  done
+  # The root first, so a job still spawning cannot outrun the sweep.
+  for victim in $victims; do kill -TERM "$victim" 2>/dev/null; done
+  return 0
+}
+
+_detect_bound_kill() {  # <pid> — stop the bounded job and its children, group or no group
+  local pid="${1:-}" pgid
+  [ -n "$pid" ] || return 0
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null)"
+  pgid="${pgid//[!0-9]/}"
+  # EMPTY means `ps` could not answer, not that there is no group — on a machine
+  # without it the group signal is still the right first move, and a failure there
+  # is itself the evidence that no group was ever created.
+  if [ -z "$pgid" ] || [ "$pgid" = "$pid" ]; then
+    kill -TERM "-${pid}" 2>/dev/null && return 0
+  fi
+  _detect_bound_kill_tree "$pid"
+  return 0
+}
+
 detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on timeout
   local limit="${1:-15}"; shift
   local pid waited=0 rc out_file had_monitor
@@ -1407,10 +1454,29 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
   : > "$out_file" 2>/dev/null || out_file="/dev/null"
 
   case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
-  set -m
-  "$@" </dev/null > "$out_file" &
-  pid=$!
-  [ "$had_monitor" = "yes" ] || set +m
+  # THE FORK'S OWN DIAGNOSTICS ARE NOT THE CALLER'S OUTPUT (T22). `set -m` ASKS the
+  # kernel for a new process group, and where that is refused bash prints its own
+  # `child setpgid (N to N): Operation not permitted` from inside the fork. That line
+  # is bash's, not this repo's, and it went wherever the caller's stderr went — two
+  # call sites capture this function with no stderr split (doctor's load-state read,
+  # and `detect_plugin_duplicates` below), so a 151-column shell diagnostic landed in
+  # doctor's PAGE and failed the 100-column arms of doctor-fleet (§20) and
+  # doctor-walls (§12.2) as though the renderer had printed a second over-budget row.
+  # The emitting shell names itself: a non-interactive bash prefixes the message with
+  # BASH_SOURCE[0], which inside this function is this file.
+  #
+  # SO THE FORK GETS ITS OWN STDERR AND THE PROBE KEEPS THE CALLER'S. The braces run
+  # with stderr on /dev/null — the only writer there is the shell's job-control
+  # machinery, measured at 0 bytes otherwise under both bash 3.2 and bash 5 — while
+  # fd 9 carries the caller's real stderr into the child explicitly, so a probe's own
+  # error message passes through exactly as before and is closed in the child after
+  # it is duplicated. This is not a filter over the page: no text is inspected here,
+  # and no caller's capture is widened.
+  { set -m
+    "$@" </dev/null > "$out_file" 2>&9 9>&- &
+    pid=$!
+    [ "$had_monitor" = "yes" ] || set +m
+  } 9>&2 2>/dev/null
 
   if ! command -v sleep >/dev/null 2>&1; then
     wait "$pid"; rc=$?
@@ -1419,9 +1485,7 @@ detect_bounded() {  # <seconds> <command...> — passes stdout through; 124 on t
   fi
   while kill -0 "$pid" 2>/dev/null; do
     if [ "$waited" -ge "$limit" ]; then
-      # The group first — `-$pid` is the process group `set -m` gave this job —
-      # and the bare pid as the fallback for a kernel that refused the group.
-      kill -TERM "-${pid}" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+      _detect_bound_kill "$pid"
       wait "$pid" 2>/dev/null
       _detect_bound_read "$out_file"
       return 124
