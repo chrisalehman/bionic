@@ -43,7 +43,15 @@ RUN_LIB="$REPO_ROOT/payload/scripts/lib/run.sh"
 HOOK="${BIONIC_HOOKS_DIR}/bash-walls.sh"
 
 SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/close-out-test.XXXXXX")" && pwd -P)"
-cleanup() { rm -rf "$SANDBOX"; }
+# TS_LIVE_PIDS -> processes §tmp-spares spawns to stand in for a live neighbour session
+# (session-sweep.test.sh:79's trick: a real `kill -0`-able pid, never this shell's own).
+# The EXIT trap kills every one; nothing here waits on them.
+TS_LIVE_PIDS=""
+cleanup() {
+  local p
+  for p in $TS_LIVE_PIDS; do kill -9 "$p" 2>/dev/null; done
+  rm -rf "$SANDBOX"
+}
 trap cleanup EXIT
 
 SB_HOME="$SANDBOX/home"
@@ -281,13 +289,51 @@ run_close() {
   # BIONIC_PLUGIN_ROOT is pinned to THIS checkout's payload, so the script's own
   # `plugin_root` (and therefore the hook it dry-runs and the version it attests) is the
   # copy under test rather than whatever the CLI happens to have installed on the machine
-  # running the suite.
+  # running the suite. BIONIC_CLAUDE_HOME (REQ-1: close-out.sh now sources lib/patrol.sh,
+  # whose liveness reads land under claude_home()) is pinned the same way and for the
+  # same reason `tests/session-sweep.test.sh`'s `poke()` pins it rather than trusting
+  # HOME alone — claude_home()'s own override chain reads CLAUDE_CONFIG_DIR BEFORE HOME,
+  # and this suite's own session (this very shell) has that set, so HOME redirection on
+  # its own is not hermetic against the real machine's live sessions.
   ( in_fixture "$proj" || exit 9
     HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" \
+      BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
       bash "$SCRIPT" "$proj/$PLAN_REL" "$verb" ) > "$f" 2>&1
   CO_RC=$?
   CO_OUT="$(cat "$f")"
   rm -f "$f"
+}
+
+# run_close_as <sid> <project> <verb> -> like run_close, but pins CLAUDE_CODE_SESSION_ID
+# to <sid> for the call — this is the script's own identity (`CO_SID`), the input REQ-1's
+# tmp-spare rule reads to tell "this session's own state" from "a live neighbour's".
+run_close_as() {
+  local sid="$1" proj="$2" verb="$3" f="$SANDBOX/co-out"
+  ( in_fixture "$proj" || exit 9
+    HOME="$SB_HOME" CLAUDE_PROJECT_DIR="" BIONIC_PLUGIN_ROOT="$REPO_ROOT/payload" \
+      BIONIC_CLAUDE_HOME="$SB_HOME/.claude" \
+      CLAUDE_CODE_SESSION_ID="$sid" \
+      bash "$SCRIPT" "$proj/$PLAN_REL" "$verb" ) > "$f" 2>&1
+  CO_RC=$?
+  CO_OUT="$(cat "$f")"
+  rm -f "$f"
+}
+
+# plant_tmp_session <project> <sid> -> the five session-keyed classes AC-1.1 names
+# (`engaged-`, `roster-`, `patrol-`, `preflight-`, `sweeper-`), one file per class,
+# under <project>/.bionic/tmp — the shape tests/session-sweep.test.sh's plant_session
+# builder plants for the same classes, minus that suite's `stop-orders` and the
+# `patrol-*.state.armed` sibling (neither is load-bearing for what this section proves).
+plant_tmp_session() {
+  local p="$1" sid="$2" c
+  for c in engaged roster patrol preflight sweeper; do
+    printf '%s state for %s\n' "$c" "$sid" > "$p/.bionic/tmp/$c-$sid.state"
+  done
+}
+
+# tmp_file_exists <project> <class> <sid> -> yes|no, whether one planted file survived.
+tmp_file_exists() {
+  if [ -f "$1/.bionic/tmp/$2-$3.state" ]; then printf 'yes'; else printf 'no'; fi
 }
 
 # gate_rc <project> -> the real hooks/bash-walls.sh verdict on a `git commit` payload,
@@ -336,8 +382,8 @@ branch_exists() {
 }
 
 require_helpers in_fixture fixture_git contains fixture_plan_text fixture_epic_text mk_fixture \
-                add_unreached_branch add_foreign_unreached_branch run_close gate_rc \
-                run_open_rc tmp_entries sha_of branch_exists
+                add_unreached_branch add_foreign_unreached_branch run_close run_close_as gate_rc \
+                run_open_rc tmp_entries sha_of branch_exists plant_tmp_session tmp_file_exists
 
 # ============================================================
 section "0 — the script exists, parses, and refuses an unusable call"
@@ -392,7 +438,7 @@ expect_eq "1d: act 2 — worktree-removed: names the branch it deleted" "yes" \
 expect_eq "1e: …and wt/01-x is actually gone" "no" "$(branch_exists "$P1" "wt/01-x")"
 expect_eq "1f: act 3 — tmp-wiped: counts what it removed" "yes" \
   "$(contains "$CO_OUT" "tmp-wiped: 3 entries")"
-expect_eq "1g: …and .bionic/tmp/ is empty afterwards" "0" "$(tmp_entries "$P1")"
+expect_eq "1g: …and .bionic/tmp/ is empty afterwards (REQ-1: this fixture's ids read as dead, so nothing is spared — §tmp-spares below covers a live one)" "0" "$(tmp_entries "$P1")"
 expect_eq "1h: act 4 — tasks-completed: is the TaskUpdate instruction" "yes" \
   "$(contains "$CO_OUT" "tasks-completed: mark every 4/*, 5–9 entry completed (TaskUpdate)")"
 expect_eq "1i: act 5 — continuation: names the file it wrote" "yes" \
@@ -541,5 +587,75 @@ expect_eq "4h: no continuation was written" "no" \
   "$([ -f "$P4/$CONT_REL" ] && echo yes || echo no)"
 expect_eq "4i: .bionic/tmp/ still holds its three entries" "3" "$(tmp_entries "$P4")"
 expect_eq "4j: wt/01-x still exists" "yes" "$(branch_exists "$P4" "wt/01-x")"
+
+# ============================================================
+section "5 — REQ-1 (AC-1.1–1.3): a close-out spares a live neighbour's session state"
+# ============================================================
+#
+# TWO SESSIONS SHARE ONE ROOT. A closes over its own run (session A, identified to
+# close-out.sh by CLAUDE_CODE_SESSION_ID, the way the real CLI always sets it); B is a
+# DIFFERENT, still-running session with its own five session-keyed files here — the shape
+# AC-1.1's provenance names verbatim (`engaged-`, `roster-`, `patrol-`, `preflight-` and
+# `sweeper-`). "Live" is proven the same way tests/session-sweep.test.sh:79 proves it: a
+# real process (`sleep`, backgrounded) this machine's own `kill -0` will find, named in a
+# session file under the sandboxed claude-home `HOME` (`$SB_HOME`) already resolves to.
+
+TS_SID_A="closeout-suite-session-a1a1a1a1"
+TS_SID_B="closeout-suite-session-b2b2b2b2"
+
+# ---------- AC-1.1 / AC-1.2: B is live, and is spared; A and the unkeyed/dead entries
+# ---------- are removed, with the tmp-wiped: line naming both counts.
+
+P5="$(mk_fixture p5)"
+plant_tmp_session "$P5" "$TS_SID_A"
+plant_tmp_session "$P5" "$TS_SID_B"
+
+sleep 3600 &
+TS_B_PID=$!
+TS_LIVE_PIDS="${TS_LIVE_PIDS} ${TS_B_PID}"
+mkdir -p "$SB_HOME/.claude/sessions"
+jq -nc --arg sid "$TS_SID_B" --argjson pid "$TS_B_PID" --arg cwd "$P5" \
+  '{sessionId:$sid,pid:$pid,cwd:$cwd}' > "$SB_HOME/.claude/sessions/${TS_SID_B}.json"
+
+# baseline 3 (mk_fixture) + A's 5 + B's 5.
+expect_eq "5.0: the fixture starts with 13 entries under .bionic/tmp/ (3 baseline + 5 A + 5 B)" \
+  "13" "$(tmp_entries "$P5")"
+
+run_close_as "$TS_SID_A" "$P5" run
+expect_eq "5.1: run (as A, with B live) exits 0" "0" "$CO_RC"
+
+for c in engaged roster patrol preflight sweeper; do
+  expect_eq "5.2 ($c): B's $c-keyed file survives A's close-out" "yes" \
+    "$(tmp_file_exists "$P5" "$c" "$TS_SID_B")"
+done
+for c in engaged roster patrol preflight sweeper; do
+  expect_eq "5.3 ($c): A's own $c-keyed file is removed" "no" \
+    "$(tmp_file_exists "$P5" "$c" "$TS_SID_A")"
+done
+# the baseline's unkeyed scratch.txt and its "fixture"-sid files (dead — no live session
+# named "fixture" was ever registered) go with A's own state.
+expect_eq "5.4: only B's 5 spared files remain under .bionic/tmp/" "5" "$(tmp_entries "$P5")"
+expect_eq "5.5: tmp-wiped: names the total scanned" "yes" \
+  "$(contains "$CO_OUT" "tmp-wiped: 13 entries under")"
+expect_eq "5.6: …and the removed/spared counts (8 removed: A's 5 + the 3 baseline; 5 spared: B's)" \
+  "yes" "$(contains "$CO_OUT" "8 removed, 5 spared")"
+
+# ---------- AC-1.3: a same-shaped neighbour whose session is DEAD is not spared — the
+# ---------- sweeper's verdict (patrol_dead_sessions), not mere sparing-by-default, decides.
+
+TS_SID_D="closeout-suite-session-d4d4d4d4"
+P6="$(mk_fixture p6)"
+plant_tmp_session "$P6" "$TS_SID_A"
+plant_tmp_session "$P6" "$TS_SID_D"
+# TS_SID_D is never registered in $SB_HOME/.claude/sessions/ — it reads dead by
+# construction, the same as the baseline fixture's "fixture" sid above.
+
+run_close_as "$TS_SID_A" "$P6" run
+expect_eq "5.7: run (as A, with D dead) exits 0" "0" "$CO_RC"
+for c in engaged roster patrol preflight sweeper; do
+  expect_eq "5.8 ($c): D's dead $c-keyed file is removed, not spared" "no" \
+    "$(tmp_file_exists "$P6" "$c" "$TS_SID_D")"
+done
+expect_eq "5.9: .bionic/tmp/ is empty afterwards — nothing here is live" "0" "$(tmp_entries "$P6")"
 
 finish
