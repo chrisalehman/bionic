@@ -3675,6 +3675,76 @@ fi
 # below refuses every target it is handed.
 case "$SUITES_ALLOWED" in none) SUITES_ALLOWED="" ;; *) : ;; esac
 
+# ---------- AC-5.2: the allowed set on the WIRE, not just in `detail` ----------
+#
+# T7's repro (record/wave-14-tune-181/T7-req5-repro.md §4): "On the budget: …" has
+# lived in `detail` since c789e22, and refuse.sh's channel table marks exit2's
+# `detail_to_user` `no` (ruling D-1) — a dispatched writer's own tool_result on a
+# budget refusal never carried it, only the fact/fix ONE LINE did, and that line
+# named no set. This puts the set (or as much as the line has room for) onto
+# `fact`, which exit2 DOES relay (refuse.sh:271-278) — the whole line stays under
+# `BIONIC_LINE_WIDTH` because `refuse()` still checks it, so a wrong estimate here
+# self-refuses loudly (refuse.sh's own `_refuse_selfrefuse`) rather than silently
+# overflowing. `bionic_cols`/`bionic_trunc`/`BIONIC_LINE_WIDTH` are refuse.sh's own
+# soft-sourced width.sh (hooks/bash-walls.sh sources refuse.sh before walls.sh,
+# `:202`/`:213`) — nothing new is sourced, and refuse.sh itself is unchanged.
+#
+# TOKEN BOUNDARIES, NOT A CHARACTER CUT. A budget of 38 suites (A-orch-17's own
+# incident) cannot fit on any one line; showing the first few WHOLE tokens plus a
+# "+N more" count (research-R2-preflight.md Q6) beats a mid-name ellipsis, which
+# would print a truncated, unrunnable suite name.
+_budget_wire_list() {  # <space-separated set, may be empty> <column budget> -> text
+  local set="${1:-}" cols="${2:-0}"
+  if [ -z "$set" ] || [ "$cols" -le 0 ]; then printf 'none'; return; fi
+  if [ "$(bionic_cols "$set")" -le "$cols" ]; then
+    printf '%s' "$set"
+    return
+  fi
+  local total=0 tok
+  for tok in $set; do total=$((total + 1)); done
+  local out="" shown=0 cand remain tail
+  for tok in $set; do
+    if [ -z "$out" ]; then cand="$tok"; else cand="$out $tok"; fi
+    remain=$((total - shown - 1))
+    tail=""
+    [ "$remain" -gt 0 ] && tail=" +$remain more"
+    if [ "$(bionic_cols "$cand$tail")" -le "$cols" ]; then
+      out="$cand"; shown=$((shown + 1))
+    else
+      break
+    fi
+  done
+  remain=$((total - shown))
+  if [ -z "$out" ]; then
+    # Not even one whole token fits ALONGSIDE its own "+N more" count. Try the
+    # first token bare, count dropped, before falling back to a character cut —
+    # a real (if partial) suite name beats a truncated one.
+    set -- $set
+    if [ "$(bionic_cols "$1")" -le "$cols" ]; then
+      printf '%s' "$1"
+      return
+    fi
+    printf '%s' "$(bionic_trunc "$set" "$cols")"
+  elif [ "$remain" -gt 0 ]; then
+    printf '%s +%d more' "$out" "$remain"
+  else
+    printf '%s' "$out"
+  fi
+}
+
+# _budget_wire_fact <label, ending ": "> <verb> <fix> <allowed set> -> a `fact`
+# string carrying `label` plus as much of `allowed` as fits beside `verb` and
+# `fix` inside refuse()'s one line. Computed fresh each call (not a hardcoded
+# column count) so a future reword of `fix` cannot silently overrun the budget.
+_budget_wire_fact() {
+  local label="$1" verb="$2" fix="$3" allowed="$4"
+  local prefix="bionic: $verb refused — " suffix=" ($fix)"
+  local overhead=$(( $(bionic_cols "$prefix") + $(bionic_cols "$label") + $(bionic_cols "$suffix") ))
+  local room=$((BIONIC_LINE_WIDTH - overhead))
+  [ "$room" -gt 0 ] || room=0
+  printf '%s%s' "$label" "$(_budget_wire_list "$allowed" "$room")"
+}
+
 budget_refuse() {  # <suite basename>
   # A NAME THE SHELL HAS NOT EXPANDED YET IS A DIFFERENT REFUSAL (review-c C-5, A-35c). A
   # hook sees the command TEXT, so `for s in a b; do bash "tests/$s.test.sh"; done` reaches
@@ -3684,7 +3754,9 @@ budget_refuse() {  # <suite basename>
   # the problem. Two readers hit it before this branch existed.
   case "$1" in
     *'$'*|*'`'*)
-      fold_block exit2 suite-run "the suite name here is a shell variable" "spell each suite literally" \
+      fold_block exit2 suite-run \
+        "$(_budget_wire_fact "unexpanded name; budget: " suite-run "spell each suite literally" "$2")" \
+        "spell each suite literally" \
         "The name as read: $1
 
 This command names its suite with a shell variable, and this wall reads your command
@@ -3698,7 +3770,9 @@ Spell the suite literally, one per call:
 On the budget: ${2:-(nothing — this brief declared Suites: none)}"
       return 2 ;;
   esac
-  fold_block exit2 suite-run "that suite is not on this agent's budget" "run only the budgeted suites" \
+  fold_block exit2 suite-run \
+    "$(_budget_wire_fact "off budget: " suite-run "run only the budgeted suites" "$2")" \
+    "run only the budgeted suites" \
     "This is a BUDGET arm, not a safety wall: an extra suite run breaks nothing, it spends
 forty minutes of a machine nobody else can use. The set was recorded on this agent's
 roster row at dispatch, from the files its brief declared.
@@ -3727,7 +3801,9 @@ for _target in $_TARGETS; do
     case " $SUITES_ALLOWED " in
       *" run.sh "*) continue ;;
     esac
-    fold_block exit2 suite-run "the full tree is not on this agent's budget" "run your brief's suites" \
+    fold_block exit2 suite-run \
+      "$(_budget_wire_fact "full tree off budget: " suite-run "run your brief's suites" "$SUITES_ALLOWED")" \
+      "run your brief's suites" \
       "This is a BUDGET arm, not a safety wall. One regression means one: the whole tree is
 proved once per run, by one dispatched runner whose row carries tests/run.sh, at
 integration close. A second full run costs forty minutes and proves what the first one
