@@ -4676,8 +4676,12 @@ expect_eq "§combined …the user line stays the first arm's own sentence" \
 expect_absent "§combined …no fault-count header sentence" "SHAPE FAULTS" "$GATE_VERR"
 expect_absent "§combined …no per-fault '── N.' heading" "── " "$GATE_VERR"
 expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
-expect_status "§combined …the wire is at most 8 lines (wc -l on the model's own reason)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 8 ] && echo 0 || echo 1)"
+# RAISED 8 -> 10 (T17, R6 finding 3): the scaffold gained two lines (`Progress artifact:`,
+# `Cadence:`), and dp_scaffold_marked reproduces every scaffold line verbatim — marked or
+# not — so the wire grows by exactly as many lines as the scaffold does. Not a widened
+# tolerance; the cap tracks the scaffold's own line count by construction.
+expect_status "§combined …the wire is at most 10 lines (wc -l on the model's own reason)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 10 ] && echo 0 || echo 1)"
 
 # EACH LABEL, MARKED BY WHETHER THIS BRIEF CARRIES IT — not by which wall fired. The
 # ambiguous Expected artifact:, the absent Files: and the absent Deliverable-waiver: lines
@@ -4940,6 +4944,8 @@ scaffold_fill() {  # <suites|files> -> the scaffold as a brief, placeholders fil
     case "$label" in
       "Expected duration") value="20" ;;
       "Expected artifact") value=".bionic/docs/record/w99-scaffold.md" ;;
+      "Progress artifact") value=".bionic/docs/record/w99-scaffold.progress" ;;
+      "Cadence")           value="15" ;;
       "Files")             value="payload/scripts/lib/widget.sh" ;;
       "Suites")            value="none" ;;
       *)                   value="" ;;
@@ -4974,6 +4980,19 @@ expect_status "§scaffold the rendered scaffold, filled in, DISPATCHES" "0" "$GA
 expect_status "§scaffold …with the named artifact as the contract" \
   ".bionic/docs/record/w99-scaffold.md" \
   "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
+
+# T17 (R6 finding 3, A-orch-36 walk item 2): a brief built strictly from the scaffold used to
+# warn "absent brief field(s): … progress" by construction, because the shipped block had no
+# `Progress artifact:`/`Cadence:` line to fill in. The scaffold now carries both, so the
+# filled brief leaves nothing absent and the roster row records both fields.
+expect_absent "§scaffold …and prints no absent-field warning naming progress (T17)" \
+  "absent brief field(s)" "$GATE_ERR"
+expect_status "§scaffold …the roster row's progress artifact is filled (T17)" \
+  ".bionic/docs/record/w99-scaffold.progress" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" progress)"
+expect_status "§scaffold …and its cadence is filled alongside it (T17)" \
+  "15 min" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" cadence)"
 
 # ---- variant 2: the `Files:` form, where a derivation exists to consume it ----
 REPO=$(make_repo rscaff2 yes)
