@@ -6919,6 +6919,64 @@ write_plan "$h39e" "$(plan 5 "$step5_base" "$evidence_matrix_pending")" > /dev/n
 expect_allow "39e pending row, no evidence: key at all → allow (exempt, mid-discharge)" \
   "$h39e" 'git commit -m "x"'
 
+# ============================================================
+section "Section 40: the matrix survives a section larger than the pipe buffer (T37)"
+# ============================================================
+#
+# THE DEFECT THIS SECTION EXISTS FOR. walls.sh tested for the `stack-health:` line with
+# `echo "$MATRIX" | grep -qE …` under hooks/bash-walls.sh's `set -uo pipefail` (:86).
+# `grep -q` exits at its FIRST match — the second line of the section — while `echo` is
+# still writing the rest; past the 64 KB pipe buffer the producer has not drained, takes
+# SIGPIPE, and exits 141, and `pipefail` promotes that 141 over grep's own 0. `if !` then
+# reads a MATCH as a failure and the gate refuses. On 2026-09-15 this refused EVERY commit
+# in this repo, on a plan carrying a valid stack-health line, once its matrix section
+# reached 80,294 B (PIPESTATUS=141 0, record/wave-14-tune-181/T37-red.log).
+#
+# WHAT THE FIXTURE PADS, AND WHY IT IS NOT A DOCTORED LINE. The stack-health line itself is
+# untouched — doctoring it would test a different thing. The padding is a long operator
+# note appended to the last AC evidence block: indented prose, no `key:` at line start, no
+# leading `|`, no fence, so every parser in the matrix validator sees exactly the fixture
+# it saw before, only further away from the line under test. That is the whole variable:
+# distance between the match and the end of the data.
+t37_pad="$(LC_ALL=C awk 'BEGIN{for(i=1;i<=800;i++) printf "  the operator note for this row continues, line %d, padding this evidence block past the pipe buffer with prose that carries no key of its own\n", i}')"
+matrix_t37_big="$matrix_complete
+$t37_pad"
+
+# ANTI-VACUITY: if the pad ever stopped clearing the buffer, every row below would pass for
+# the wrong reason. 64 KB is the pipe buffer this defect turns on.
+expect_eq "40a the padded matrix section really does exceed the 64 KB pipe buffer" "yes" \
+  "$([ "${#matrix_t37_big}" -gt 65536 ] && echo yes || echo no)"
+expect_contains "40a …and the stack-health line is present and valid, not doctored" \
+  "stack-health: process restarts" "$matrix_t37_big"
+
+# 40b — the whole point: an oversized matrix with a VALID stack-health line, at current: 7,
+# commits. This is the row that was red before the fix, with the stack-health refusal.
+h40b=$(make_home)
+write_plan "$h40b" "$(plan 7 "$v9_step7_body" "$matrix_t37_big")" > /dev/null
+expect_allow "40b oversized matrix, valid stack-health, current: 7 → allow" \
+  "$h40b" 'git commit -m "x"'
+
+# 40c — THE ARM KEEPS ITS POWER. The same oversized fixture with the stack-health line
+# REMOVED must still refuse, and for the stack-health reason. Without this row the fix
+# could have been "stop checking", which would pass 40b and protect nothing.
+matrix_t37_big_nosh="$(printf '%s\n' "$matrix_t37_big" | sed '/^stack-health:/d')"
+expect_eq "40c the mutant really did lose the stack-health line (not vacuous)" "1" \
+  "$(( $(printf '%s\n' "$matrix_t37_big" | /usr/bin/grep -c '^stack-health:') \
+     - $(printf '%s\n' "$matrix_t37_big_nosh" | /usr/bin/grep -c '^stack-health:') ))"
+expect_eq "40c …and it is still oversized, so the refusal is not the buffer's doing" "yes" \
+  "$([ "${#matrix_t37_big_nosh}" -gt 65536 ] && echo yes || echo no)"
+h40c=$(make_home)
+write_plan "$h40c" "$(plan 7 "$v9_step7_body" "$matrix_t37_big_nosh")" > /dev/null
+expect_block "40c oversized matrix with NO stack-health line → still blocks" \
+  "$h40c" 'git commit -m "x"' "stack-health"
+
+# 40d — THE SAME FIXTURE UNPADDED still allows, so 40b's allow is not the padding's doing
+# and the two differ in exactly one thing.
+h40d=$(make_home)
+write_plan "$h40d" "$(plan 7 "$v9_step7_body" "$matrix_complete")" > /dev/null
+expect_allow "40d the same matrix UNPADDED, current: 7 → allow (the only variable is size)" \
+  "$h40d" 'git commit -m "x"'
+
 section "AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 
 # fails-when: a refusal reaches the user as more than one line, or in any shape but

@@ -42,6 +42,24 @@
 # `fold_context`, which is the channel this wave added to the fold for exactly this
 # wall (A-53, T23 ruling R3).
 #
+# NO PRODUCER PROCESS MAY OUTLIVE A QUITTING `grep -q` (T37, wave-14). Every membership
+# test in this file reads its subject from a HERE-STRING — `grep -qE PAT <<< "$VAR"` —
+# and never from `echo "$VAR" | grep -q`. hooks/bash-walls.sh sources this file under
+# `set -uo pipefail` (:86). `grep -q` exits at its FIRST match; when the subject is
+# larger than the 64 KB pipe buffer the producer is still writing, takes SIGPIPE, and
+# exits 141 — and `pipefail` promotes that 141 over grep's own 0, so `if !` reads a
+# MATCH as a failure. That is not theoretical: the evidence gate refused every commit in
+# this repo once the plan's `## Verification Matrix` section passed 64 KB, on a plan
+# whose `stack-health:` line was present and valid. A here-string has no second process
+# to lose, and it forks one fewer than the pipeline did. The same rule holds in
+# hooks/dispatch-preflight.sh (:1200) and hooks/stop-guard.sh, the other readers under
+# `pipefail`; tests/cross-gate-agreement.test.sh pins the idiom's absence repo-wide.
+#
+# ONE CAVEAT THE PIPELINE DID NOT HAVE: `<<<` APPENDS A NEWLINE to its word, so an empty
+# subject becomes one empty line. Only a pattern that can match empty notices — in
+# practice `grep -qxF -- "$needle"` with an empty needle — so a whole-line membership
+# test guards its needle as well as its haystack (hooks/session-sweeper.sh `row_acked`).
+#
 # BASH 3.2. SOURCED, NEVER EXECUTED, AND SILENT AT SOURCE TIME — the rule every
 # library in this directory follows, for lib/context.sh's reason: callers read library
 # answers through `$( )` and anything printed on the way in corrupts the first field
@@ -490,19 +508,19 @@ case "$COMMAND" in
   *[Pp][Gg]_*|*[Mm][Aa][Rr][Ii][Aa][Dd][Bb]*) _db_maybe=1 ;;
   *) _db_maybe=0 ;;
 esac
-if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-client|cqlsh|cockroach sql|pg_|mariadb)\b'; then
+if [ "$_db_maybe" = 1 ] && grep -qEi '(psql|mysql|sqlite3|mongosh|mongo |clickhouse-client|cqlsh|cockroach sql|pg_|mariadb)\b' <<< "$COMMAND"; then
   CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
 
   # DROP TABLE / DATABASE / SCHEMA / INDEX / COLLECTION / VIEW / FUNCTION / TRIGGER / PROCEDURE / SEQUENCE / TYPE
   # [WALL: tests/protect-database.test.sh]
-  if echo "$CMD_UPPER" | grep -qE 'DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|COLLECTION|VIEW|FUNCTION|TRIGGER|PROCEDURE|SEQUENCE|TYPE)'; then
+  if grep -qE 'DROP\s+(TABLE|DATABASE|SCHEMA|INDEX|COLLECTION|VIEW|FUNCTION|TRIGGER|PROCEDURE|SEQUENCE|TYPE)' <<< "$CMD_UPPER"; then
     fold_block exit2 sql "this command DROPs a database object" "run the migration yourself" \
       "The matched pattern is a DROP of a table, database, schema, index, collection, view, function, trigger, procedure, sequence or type. A migration run from your own terminal is the route."
     return 2
   fi
 
   # TRUNCATE [WALL: tests/protect-database.test.sh]
-  if echo "$CMD_UPPER" | grep -qE 'TRUNCATE\s'; then
+  if grep -qE 'TRUNCATE\s' <<< "$CMD_UPPER"; then
     fold_block exit2 sql "this command TRUNCATEs a table" "run the migration yourself" \
       "The matched pattern is TRUNCATE. A migration run from your own terminal is the route."
     return 2
@@ -512,7 +530,7 @@ if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mong
   # [WALL: tests/protect-database.test.sh]
   while IFS= read -r stmt; do
     stmt_upper=$(echo "$stmt" | tr '[:lower:]' '[:upper:]')
-    if echo "$stmt_upper" | grep -qE 'DELETE\s+FROM\s' && ! echo "$stmt_upper" | grep -qE 'DELETE\s+FROM\s+\S+\s+WHERE\s'; then
+    if grep -qE 'DELETE\s+FROM\s' <<< "$stmt_upper" && ! grep -qE 'DELETE\s+FROM\s+\S+\s+WHERE\s' <<< "$stmt_upper"; then
       fold_block exit2 sql "this DELETE has no WHERE clause" "add a WHERE clause" \
         "The matched pattern is a DELETE FROM with no WHERE in the same statement. An unbounded DELETE empties the table."
       return 2
@@ -520,7 +538,7 @@ if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mong
   done <<< "$(echo "$CMD_UPPER" | tr ';' '\n')"
 
   # ALTER TABLE ... DROP COLUMN [WALL: tests/protect-database.test.sh]
-  if echo "$CMD_UPPER" | grep -qE 'ALTER\s+TABLE\s+.*DROP\s'; then
+  if grep -qE 'ALTER\s+TABLE\s+.*DROP\s' <<< "$CMD_UPPER"; then
     fold_block exit2 sql "this ALTER TABLE drops a column or key" "run the migration yourself" \
       "The matched pattern is an ALTER TABLE that DROPs. A migration run from your own terminal is the route."
     return 2
@@ -528,7 +546,7 @@ if [ "$_db_maybe" = 1 ] && echo "$COMMAND" | grep -qEi '(psql|mysql|sqlite3|mong
 
   # MongoDB destructive operations (JavaScript method calls)
   # [WALL: tests/protect-database.test.sh]
-  if echo "$COMMAND" | grep -qEi '(\.drop\(\)|\.dropDatabase\(\)|\.deleteMany\(\s*\{\s*\}\s*\))'; then
+  if grep -qEi '(\.drop\(\)|\.dropDatabase\(\)|\.deleteMany\(\s*\{\s*\}\s*\))' <<< "$COMMAND"; then
     fold_block exit2 sql "this drops or wipes a MongoDB collection" "run it from your own terminal" \
       "The matched pattern is a collection drop, a database drop, or an unfiltered many-document delete. Run it from your own terminal if you mean it."
     return 2
@@ -552,7 +570,7 @@ esac
 if [ "$_db_maybe" = 1 ]; then
   [ -n "$CMD_UPPER" ] || CMD_UPPER=$(echo "$COMMAND" | tr '[:lower:]' '[:upper:]')
 fi
-if [ "$_db_maybe" = 1 ] && echo "$CMD_UPPER" | grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|FUNCTION|TRIGGER|PROCEDURE)|TRUNCATE\s)' && echo "$COMMAND" | grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )'; then
+if [ "$_db_maybe" = 1 ] && grep -qE '(DROP\s+(TABLE|DATABASE|SCHEMA|VIEW|FUNCTION|TRIGGER|PROCEDURE)|TRUNCATE\s)' <<< "$CMD_UPPER" && grep -qEi '(\|\s*(psql|mysql|sqlite3|mongosh)|<< )' <<< "$COMMAND"; then
   fold_block exit2 sql "destructive SQL is piped to a db client" "run the migration yourself" \
     "The matched pattern is a DROP or TRUNCATE piped or heredoc-fed into psql, mysql, sqlite3 or mongosh. Piping hides the statement from the argv check."
   return 2
@@ -1178,14 +1196,14 @@ matrix_auditor_required() {
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 is_proof_shaped() {  # $1 = evidence value
   local v="$1"
-  echo "$v" | grep -qE '[0-9]' || return 1
-  if echo "$v" | grep -q '`'; then
+  grep -qE '[0-9]' <<< "$v" || return 1
+  if grep -q '`' <<< "$v"; then
     return 0
   fi
-  if echo "$v" | grep -qF '/'; then
+  if grep -qF '/' <<< "$v"; then
     return 0
   fi
-  if echo "$v" | grep -Ewq 'bash|sh|npm|pnpm|yarn|make|pytest|go|cargo|git|test'; then
+  if grep -Ewq 'bash|sh|npm|pnpm|yarn|make|pytest|go|cargo|git|test' <<< "$v"; then
     return 0
   fi
   return 1
@@ -1221,7 +1239,7 @@ Fix: replace the '- ${id}:' evidence with the actual command invocation and resu
   if [ "$status" = "done" ]; then
     case "$eff" in
       peer-reviewed|audited)
-        if ! echo "$ev" | grep -Ewq 'auditor'; then
+        if ! grep -Ewq 'auditor' <<< "$ev"; then
           _eg_detail="canonical-sdlc task ${id} is done at rigor '${eff}' but its evidence has no 'auditor' verdict ('${ev}').
 Plan: $PLAN
 Fix: record the independent auditor's verdict in the '- ${id}:' evidence line before marking done."
@@ -1230,7 +1248,7 @@ Fix: record the independent auditor's verdict in the '- ${id}:' evidence line be
         ;;
     esac
     if [ "$eff" = "audited" ]; then
-      if ! echo "$ev" | grep -Ewq 'critic'; then
+      if ! grep -Ewq 'critic' <<< "$ev"; then
         _eg_detail="canonical-sdlc task ${id} is done at rigor 'audited' but its evidence has no 'critic' verdict ('${ev}').
 Plan: $PLAN
 Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line before marking done."
@@ -1265,7 +1283,7 @@ Fix: record the adversarial critic's verdict in the '- ${id}:' evidence line bef
 enforce_rigor_floor() {  # $1=id  $2=effective-rigor  $3=evidence-value
   local id="$1" eff="$2" ev="$3"
   [ "$(rigor_ord "$eff")" -lt "$(rigor_ord "$RIGOR")" ] || return 0
-  if echo "$ev" | grep -Ewq 'waiver'; then
+  if grep -Ewq 'waiver' <<< "$ev"; then
     return 0  # recorded downgrade — proceed at the lower cell lane
   fi
   _eg_detail="canonical-sdlc task ${id} lowers rigor from '${RIGOR}' to '${eff}', below the plan's floor.
@@ -1623,7 +1641,7 @@ validate_fails_when() {
 
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    echo "$line" | grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' && continue
+    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
     ac=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
     [ "$ac" = "AC" ] && continue
     [ -n "$ac" ] || continue
@@ -1690,7 +1708,7 @@ validate_prototype_no_matrix_row() {
 
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    echo "$line" | grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' && continue
+    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
     ac=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
     [ "$ac" = "AC" ] && continue
     [ -n "$ac" ] || continue
@@ -1728,7 +1746,7 @@ CURRENT=$(echo "$SECTION" \
 # directly). A `current: T<n>` on a non-task plan is NOT accepted here; it falls
 # through to the numeric check below and blocks (T-format is scale: task only).
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SCALE" = "task" ]; then
+if grep -qE '^T[0-9]+$' <<< "$CURRENT" && [ "$SCALE" = "task" ]; then
   validate_task_ledger
   validate_approved_by
   validate_fails_when
@@ -1736,7 +1754,7 @@ if echo "$CURRENT" | grep -qE '^T[0-9]+$' && [ "$SCALE" = "task" ]; then
   exit 0
 fi
 
-if [ -z "$CURRENT" ] || ! echo "$CURRENT" | grep -qE '^[0-9]+[ab]?$'; then
+if [ -z "$CURRENT" ] || ! grep -qE '^[0-9]+[ab]?$' <<< "$CURRENT"; then
   _eg_detail="canonical-sdlc plan file's '## SDLC State' section is missing a valid 'current: N' line.
 Plan: $PLAN
 Fix: add a line like 'current: 5' (or 'current: 8b') before committing."
@@ -2334,7 +2352,7 @@ Fix: add 'requirements: specs/<epic>/<wave>.requirements.md' to the Step 1 line,
     refuse exit2 commit "Step 1's evidence names no requirements file" "add a 'requirements:' field" "$_eg_detail"
   fi
 
-  if echo "$raw" | grep -qE '(^|/)\.\.(/|$)'; then
+  if grep -qE '(^|/)\.\.(/|$)' <<< "$raw"; then
     _eg_detail="canonical-sdlc step ${CURRENT} — Step 1 'requirements: ${raw}' climbs out with a '..' component.
 Plan: $PLAN
 Fix: name the requirements file relative to the docs root, e.g. 'requirements: specs/<epic>/<wave>.requirements.md'."
@@ -2379,7 +2397,7 @@ block_get() {
 }
 
 block_has() {
-  echo "$BLOCK" | grep -qE "^[[:space:]]*$1[[:space:]]*:"
+  grep -qE "^[[:space:]]*$1[[:space:]]*:" <<< "$BLOCK"
 }
 
 block_has_na() {
@@ -2419,7 +2437,7 @@ validate_tests_block() {
   pass=$(block_get pass)
   total=$(block_get total)
   prefix=$(step_prefix "$step")
-  if ! echo "$pass" | grep -qE '^[0-9]+$' || ! echo "$total" | grep -qE '^[0-9]+$'; then
+  if ! grep -qE '^[0-9]+$' <<< "$pass" || ! grep -qE '^[0-9]+$' <<< "$total"; then
     _eg_detail="${prefix} 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}').
 Plan: $PLAN"
     refuse exit2 commit "'pass:' and 'total:' are not both integers" "write both as integers" "$_eg_detail"
@@ -2667,7 +2685,10 @@ validate_matrix() {
   fi
 
   # stack-health: non-empty proof, or `n/a: <reason>` with a reason.
-  if ! echo "$MATRIX" | grep -qE '^[[:space:]]*stack-health[[:space:]]*:'; then
+  # A HERE-STRING, NOT A PIPE — see the header. $MATRIX is a whole plan section and
+  # routinely exceeds the pipe buffer; `echo "$MATRIX" | grep -q` turned a present
+  # stack-health line into a refusal of every commit (T37).
+  if ! grep -qE '^[[:space:]]*stack-health[[:space:]]*:' <<< "$MATRIX"; then
     block_matrix "the matrix says nothing about stack health" "add a before/after snapshot" \
       "'## Verification Matrix' is missing the 'stack-health:' line." \
       "add 'stack-health: <before/after snapshot>' or 'stack-health: n/a: <reason>' above the table."
@@ -2684,8 +2705,8 @@ validate_matrix() {
   # false-green two-part rule: any `false-green:` entry must have a paired
   # `rewritten:` entry, or the gate blocks (Assumption 12a).
   # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-  if echo "$MATRIX" | grep -qE '^[[:space:]]*false-green[[:space:]]*:'; then
-    if ! echo "$MATRIX" | grep -qE '^[[:space:]]*rewritten[[:space:]]*:'; then
+  if grep -qE '^[[:space:]]*false-green[[:space:]]*:' <<< "$MATRIX"; then
+    if ! grep -qE '^[[:space:]]*rewritten[[:space:]]*:' <<< "$MATRIX"; then
       block_matrix "a false green is logged but never rewritten" "rewrite it, then say where" \
         "a 'false-green:' entry in the matrix has no paired 'rewritten:' entry." \
         "add 'rewritten: <commit/test ref>' for the false-green test — a logged-but-unfixed false green is a blocking defect."
@@ -2702,7 +2723,7 @@ validate_matrix() {
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     # separator row (only pipes/dashes/colons/spaces) → skip
-    echo "$line" | grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' && continue
+    grep -qE '^[[:space:]]*\|[-|:[:space:]]*$' <<< "$line" && continue
     ncols=$(echo "$line" | awk -F'|' '{print NF}')
     ac=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}')
     tier=$(echo "$line"   | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$3); print $3}')
@@ -2718,7 +2739,7 @@ validate_matrix() {
         "write the row as '| AC | tier | status | evidence | auditor |' with exactly five cells and no literal pipe inside any cell."
     fi
     # tier enum
-    if ! echo "$tier" | grep -qE '^T[0-4]$'; then
+    if ! grep -qE '^T[0-4]$' <<< "$tier"; then
       block_matrix "${ac}'s tier is unknown" "use T0 through T4" \
         "matrix row for '${ac}' has an invalid tier '${tier}' (want T0..T4)." \
         "set the tier cell to one of T0, T1, T2, T3, T4."
@@ -2743,8 +2764,8 @@ validate_matrix() {
     # the per-tier key loop has always demanded its evidence anyway.
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     row_is_waived=0
-    if echo "$ev" | grep -qE 'waiver:' \
-       || echo "$block_txt" | grep -qE '^[[:space:]]*waiver[[:space:]]*:'; then
+    if grep -qE 'waiver:' <<< "$ev" \
+       || grep -qE '^[[:space:]]*waiver[[:space:]]*:' <<< "$block_txt"; then
       row_is_waived=1
     fi
     # provenance arm (epic-14 W1, AC-5): the literal value `provenance:
@@ -2828,7 +2849,7 @@ validate_matrix() {
       :
     else
       for key in $(keys_for_tier "$tier"); do
-        if ! echo "$block_txt" | grep -qE "^[[:space:]]*${key}[[:space:]]*:"; then
+        if ! grep -qE "^[[:space:]]*${key}[[:space:]]*:" <<< "$block_txt"; then
           block_matrix "row ${ac} has no ${key} evidence" "record it, or waive the row" \
             "matrix row '${ac}' (${tier}) is missing evidence key '${key}' in its AC block." \
             "add '${key}: <evidence>' to the '${ac}:' block, or waive the row via the Waiver Protocol."
@@ -2872,7 +2893,7 @@ validate_matrix() {
         # key first; this branch only bites a block that was otherwise complete.
         # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
         if [ "$key" = "evidence" ]; then
-          if echo "$val" | grep -qE '(^|/)\.\.(/|$)'; then
+          if grep -qE '(^|/)\.\.(/|$)' <<< "$val"; then
             block_matrix "${ac}'s evidence path climbs out of record/" "name it under record/" \
               "matrix row '${ac}' evidence '${val}' climbs out of the record directory and so does not resolve under ${DOCS_ROOT}/record/." \
               "point '${ac}:' evidence at a path under record/, e.g. 'evidence: record/<wave>/evidence/${ac}.md'."
@@ -3043,7 +3064,7 @@ validate_walk_artifact() {
   # Containment. A `..` component is refused outright rather than normalized:
   # the artifact belongs in record/, and a path that climbs out of it is a
   # placement error whatever it lands on.
-  if echo "$raw" | grep -qE '(^|/)\.\.(/|$)'; then
+  if grep -qE '(^|/)\.\.(/|$)' <<< "$raw"; then
     block_matrix "the walk file's path climbs out of record/" "name it under record/" \
       "the walk gate: walk-artifact '${raw}' climbs out of the record directory and so does not resolve under ${DOCS_ROOT}/record/." \
       "name the walk narration relative to the docs root, e.g. 'walk-artifact: record/<file>.md'."
@@ -3676,9 +3697,9 @@ classify_tier2() {  # $1=flat cmd → sets CLASS ROLE, rc 0 on match
     git*|docker*|npx*|uvx*) : ;;
     *) return 1 ;;
   esac
-  if printf '%s' "$c" | grep -qE '^git +clone([;&| ]|$)'; then CLASS="clone"; ROLE="implementor"; return 0; fi
-  if printf '%s' "$c" | grep -qE '^docker +(run|pull)([;&| ]|$)'; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
-  if printf '%s' "$c" | grep -qE '^(npx|uvx) +'; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
+  if grep -qE '^git +clone([;&| ]|$)' <<< "$c"; then CLASS="clone"; ROLE="implementor"; return 0; fi
+  if grep -qE '^docker +(run|pull)([;&| ]|$)' <<< "$c"; then CLASS="docker-run"; ROLE="implementor"; return 0; fi
+  if grep -qE '^(npx|uvx) +' <<< "$c"; then CLASS="pkg-exec"; ROLE="implementor"; return 0; fi
   return 1
 }
 
@@ -3705,7 +3726,7 @@ nudge_once() {  # $1=class $2=role — ONE nudge per (session, class); repeat = 
 # command with it still gets the full positional answer.
 case "$FLAT" in
   *FARM_OUT_ALLOW=1*)
-    if printf '%s' "$FLAT" | grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)'; then
+    if grep -qE '(^|[;&| ])FARM_OUT_ALLOW=1([;&| ]|$)' <<< "$FLAT"; then
       log_event "override" "user-sanctioned"; return 0
     fi
     ;;
