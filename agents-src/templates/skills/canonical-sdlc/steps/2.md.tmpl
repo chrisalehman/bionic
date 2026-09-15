@@ -94,5 +94,8 @@ Do you approve this design? Reply "approved" to approve it.
 show evals <req> · explain <decision>
 ```
 
-Decision row: `    %-4s %-66s %-14s %s` (id, decision, serves, ADR) (printf). Rows are rendered by that format, never padded by hand.
+Decision row: `    %-4s %-66s %-14s %s` (id, decision, serves, ADR) (printf).
+Ownership row: `    %-20s owner %-42s surfaces %-44s test %s` (concept, owner, surfaces, test) (printf).
+Eval-design row: `    %-8s %-58s %6s %5s %9s %5s %6s` (requirement, approach, static, unit, hermetic, live, human) (printf).
+Rows are rendered by that format, never padded by hand.
 
