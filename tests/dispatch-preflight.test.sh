@@ -5665,6 +5665,47 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-
 expect_status "t22nfj2 landing the adopted row frees the name again" "0" "$GATE_ST"
 expect_absent "…and no in-flight refusal is left" "in flight" "$GATE_ERR"
 
+# (k) AN ACK DOES NOT FREE A NAME — DRIVEN, not asserted in a comment (wave-14 T16, REQ-3).
+#
+# WHY IT NEEDS ITS OWN ARM. Wave-14 T5 (ffe3265) moved this arm's reading into
+# `dp_roster_contracts`, whose per-row verdict is `contract_closed(nm) || ack_closes(nm, ...)`
+# — a marker OR a post-launch ack closes a row. The ack half exists for the BUDGET wall, which
+# passes the sweeper's ledger; THIS arm passes none, deliberately, because an ack is the
+# orchestrator's judgement about a DELIVERABLE and a row acked while its agent is still working
+# still holds its NAME. Handing that name to a second dispatch is the one collision this wall
+# exists to prevent. (j2)'s header states that; nothing drove it. So the two consumers of one
+# reading disagree about the ack BY DESIGN, and this pair is the wall that keeps them
+# disagreeing: a later "simplification" that handed this arm the ledger passes every other arm
+# in this section and fails here. The other half — that the same ack DOES close a row at the
+# budget wall — is r22mkd, with r22mke as its stale-dated control.
+#
+# fails-when: an ack reaches this arm, or the marker stops freeing the name.
+REPO=$(make_repo t22nfk yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T16-k"
+s22_ack "$REPO" "$SID_A" "T16-k"
+# META, and the anti-vacuity arm: the ack really is on the ledger, under the schema its WRITER
+# declares (s22_ack reads `LEDGER_SCHEMA` out of hooks/session-sweeper.sh), and it postdates the
+# launch stamp `s22_roster_row` wrote — so (k) below is green because the arm declines to read
+# it, never because the fixture wrote nothing a reader would believe.
+expect_contains "t22nfk meta: the ack is on the sweeper's ledger, for this name" \
+  "name=T16-k" "$(cat "$REPO/.bionic/tmp/sweeper-$SID_A.state")"
+expect_contains "t22nfk meta: …and it postdates the row's launched_at" \
+  "at=2026-09-03T00:00:00Z" "$(cat "$REPO/.bionic/tmp/sweeper-$SID_A.state")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T16-k" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfk a post-launch ACK does not free the name: still REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the fact" "that name is in flight" "$GATE_ERR"
+expect_contains "…and the status it names is the open row's" "intended" "$GATE_VERR"
+
+# (k2) THE PAIRED CONTROL, and the recovery: the MARKER, on the SAME fixture the ack could not
+# close. One line's difference between a refusal and a pass — without it, (k) is green on a
+# wall that refuses this name for any reason at all.
+s22_sweep "$REPO" "$SID_A" "T16-k"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T16-k" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfk2 …and the MET marker, on that same fixture, does free it" "0" "$GATE_ST"
+expect_absent "…and no in-flight refusal is left" "in flight" "$GATE_ERR"
+
 section "§three-arms — one refusal names every fault, across arms (wave-14 REQ-8, D3, AC-8.1/AC-8.3)"
 # ============================================================================
 #
@@ -5884,11 +5925,26 @@ section "§bound-one-owner — the derivation bound is defined once, fleet-wide 
 # A DEFINITION IS A LITERAL NUMBER. `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))` is a
 # READ and is not counted; that distinction is the whole of what "defined in two places"
 # means.
-DP_BOUND_DEFS="$(/usr/bin/grep -rnE '^[[:space:]]*[A-Z_]*IMPACT_BOUND_S=[0-9]' \
+#
+# TWO BOUNDS, ONE OWNER EACH (re-spelled by wave-14 T16 against T15). This arm counted every
+# definition matching `[A-Z_]*IMPACT_BOUND_S=`, which was one until T15 landed
+# `LG_IMPACT_BOUND_S=6` — the LANDING GATE's bound, a different number that moves for a
+# different reason (lib/bounds.sh states both, and tests/stop.test.sh §6 owns that one). The
+# loose prefix read T15's ratified second constant as a second definition of THIS one. So the
+# count below is of the exact name, and the arm under it keeps the intent the prefix was there
+# for: no hook re-spells a derivation bound under its own header, whatever it calls it — every
+# `*IMPACT_BOUND_S=` definition in the fleet lives in lib/bounds.sh, and there are exactly two.
+DP_BOUND_DEFS="$(/usr/bin/grep -rnE '^[[:space:]]*IMPACT_BOUND_S=[0-9]' \
   "${BIONIC_SCRIPTS_DIR}/hooks" "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
 expect_eq "§bound-one-owner exactly one numeric definition across hooks/ and payload/scripts/" \
   "1" "$(printf '%s\n' "$DP_BOUND_DEFS" | /usr/bin/grep -c . )"
 expect_contains "§bound-one-owner …and it is the one in lib/bounds.sh" "lib/bounds.sh" "$DP_BOUND_DEFS"
+DP_BOUND_ANY="$(/usr/bin/grep -rnE '^[[:space:]]*[A-Z_]*IMPACT_BOUND_S=[0-9]' \
+  "${BIONIC_SCRIPTS_DIR}/hooks" "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
+expect_eq "§bound-one-owner …and NO other file defines a bound under any prefix" "0" \
+  "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -v '/lib/bounds\.sh:' | /usr/bin/grep -c . )"
+expect_eq "§bound-one-owner …lib/bounds.sh owning exactly the two the fleet has (T15's is the second)" \
+  "2" "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -c '/lib/bounds\.sh:')"
 # NOT VACUOUS: the sweep reaches this hook, whose READ it declines to count.
 expect_nonempty "§bound-one-owner the sweep reaches dispatch-preflight.sh, whose READ is uncounted" \
   "$(/usr/bin/grep -rn 'IMPACT_BOUND_S' "${BIONIC_SCRIPTS_DIR}/hooks" 2>/dev/null \
