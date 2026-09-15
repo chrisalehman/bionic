@@ -4260,7 +4260,8 @@ s25r_tasks="## Tasks
 | id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
 |---|---|---|---|---|---|---|---|---|---|---|
 | T3 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-2 | a.sh | wt-T3 | active |
-| T9 | 6 | review | the review the run has not reached | critic | T3 | 30m | REQ-2 | b.sh | wt-T9 | pending |"
+| T9 | 6 | review | the review the run has not reached | critic | T3 | 30m | REQ-2 | b.sh | wt-T9 | pending |
+| T5 | 5 | build | the row standing exactly where the run stands | implementor | — | 20m | REQ-2 | c.sh | wt-T5 | active |"
 
 s25r_plan() {
   printf '%s\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-14T00:00Z "approved"\nStep 4:\n%s\nStep 5:\n%s\n\n%s\n\n%s\n' \
@@ -4281,6 +4282,15 @@ s25r_plan > "$s25r_main/.bionic/docs/plans/wave-01-x.plan.md"
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T3" -b s25r-t3
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T9" -b s25r-t9
 git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-stray" -b s25r-stray
+git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T5" -b s25r-t5
+
+# THE ALLOW-PATH NOTE, SPELLED ONCE (T24 item (c), architecture review \u00a74.1). Before this
+# wave the gate spoke when it DECLINED to use the register (25g(f)) and stayed silent when it
+# used it \u2014 so the one case where a wall substitutes a different value for the run's declared
+# `current:` was the one case with no record of having done it. Every allow below that is
+# judged behind `current:` now carries this exact line, and 25g(k) is the control: where the
+# row's step EQUALS `current:` nothing was substituted and nothing is printed.
+s25r_note_T3="evidence-gate: judged at row T3's step 4 (run at current: 5)"
 
 expect_eq "25g(c) the fixture's tree really is a LINKED worktree (its .git is a file)" "file" \
   "$(if [ -f "$s25r_tmp/wt-T3/.git" ]; then echo file; elif [ -d "$s25r_tmp/wt-T3/.git" ]; then echo dir; else echo none; fi)"
@@ -4294,11 +4304,11 @@ expect_contains "25g(c) …whose gitdir names the tree the plan row names" "/wor
 # leaned on that variable alone would pass this case only when the fixture lied about the
 # environment.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T3" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
-  ok "25g(c) AC-2.1 a commit from row T3's tree is judged at the row's step 4 and allowed"
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(c) AC-2.1 a commit from row T3's tree is judged at the row's step 4, allowed, and the note says so"
 else
-  no "25g(c) AC-2.1 a commit from row T3's tree is judged at the row's step 4 and allowed" \
-    "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(c) AC-2.1 a commit from row T3's tree is judged at the row's step 4, allowed, and the note says so" \
+    "expected allow + the note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # --- 25g(d) / AC-2.2: the main root is untouched ------------------------------------------
@@ -4346,11 +4356,11 @@ fi
 # The payload's cwd is the MAIN checkout and the tree is named by the command instead. The
 # commit still happens in row T3's tree, so it is still row T3's commit.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "git -C $s25r_tmp/wt-T3 commit -m \"x\""
-if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
   ok "25g(g) a 'git -C <worktree> commit' from the main root is judged at row T3's step too"
 else
   no "25g(g) a 'git -C <worktree> commit' from the main root is judged at row T3's step too" \
-    "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+    "expected allow + the note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # --- 25g(h): the shape every bionic brief mandates — `cd <tree> || exit 1; git commit` -----
@@ -4359,11 +4369,152 @@ fi
 # the session's cwd, and the `cd` runs afterwards. Without this arm the dominant real shape
 # would take the main-root path and AC-2.1 would hold only for fixtures.
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "cd $s25r_tmp/wt-T3 || exit 1; git commit -m \"x\""
-if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
   ok "25g(h) a leading 'cd <worktree> || exit 1' before the commit is judged at row T3's step"
 else
   no "25g(h) a leading 'cd <worktree> || exit 1' before the commit is judged at row T3's step" \
-    "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+    "expected allow + the note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(i)-(n): THE ARM RECONCILES ITS SUBJECT WITH GIT (wave-14 T24, REQ-2) -------------
+#
+# WHAT WENT WRONG, IN ONE SENTENCE. The arm named the tree it judged from the command TEXT
+# and from a `.git` FILE, and never reconciled either with the tree the commit lands in — so
+# the OBJECT of the judgement (the commit) and the SUBJECT of it (a directory named in a
+# string) were two different things, and a main-checkout commit could be judged at a Step-4
+# row's step and skip the whole Step-5 verify shape, leaving no artifact behind: the plan
+# still reads `current: 5`, the commit still lands in main, and the only record is a
+# transcript line.
+#
+# THE FOUR CASES BELOW ARE THE FOUR WAYS IT COULD BE WRONG, and each is driven against the
+# SAME `current: 5` fixture 25g(c)-(h) drive, so the discrimination is the input and nothing
+# else:
+#   (i) the tree is not git's       — a hand-written `.git` file naming any row's cell;
+#   (j) the text names two trees    — `cd <tree> && cd <main> && git commit`;
+#   (k) the row stands where the run stands — the note must NOT print;
+#   (l) two rows name one tree      — the register is ambiguous, not resolvable by order;
+#   (m) `git -C <relative>`         — a real worktree commit that used to lose its row;
+#   (n) `g\<newline>it commit`      — a real commit the cheap screen called "provably not".
+
+# --- 25g(i): a directory git never made is not a worktree, whatever its `.git` file says --
+#
+# The security review's own repro, verbatim in shape: the file names row T3's tree, the
+# gitdir target does not exist and belongs to no repository, and the directory need not even
+# be inside this repo. The FILE READ IS A PRE-FILTER and nothing more from here on — git is
+# asked, git says no, the arm declines, and the commit is judged at `current: 5` exactly as
+# a main-root commit is. 25g(c) is the control: the SAME derived name, from a tree git made,
+# still resolves to row T3.
+s25r_forged="$s25r_tmp/forged"
+mkdir -p "$s25r_forged"
+printf 'gitdir: /nowhere/at/all/.git/worktrees/wt-T3\n' > "$s25r_forged/.git"
+expect_eq "25g(i) the forged tree really does answer row T3's name to a file read" "wt-T3" \
+  "$(_g=$(head -1 "$s25r_forged/.git"); _g="${_g#gitdir: }"; printf '%s' "${_g##*/}")"
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "cd $s25r_forged || exit 1; git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+   && ! grep -q "judged at row" <<<"$HOOK_STDERR"; then
+  ok "25g(i) a forged .git naming row T3's tree is declined and the commit is judged at current: 5"
+else
+  no "25g(i) a forged .git naming row T3's tree is declined and the commit is judged at current: 5" \
+    "expected the Step-5 refusal and no row note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(j): two directories named before the commit is an ambiguity, not a first one -----
+#
+# The critic's issue 1, and the one the reconcile alone does NOT close: wt-T3 is a REAL
+# linked worktree of this repo, so git confirms it — and the commit still lands in main.
+# The text names two trees and the arm cannot know which one obeys, so it refuses and names
+# both rather than trusting the one that happens to come first.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "cd $s25r_tmp/wt-T3 && cd $s25r_main && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "$s25r_tmp/wt-T3" <<<"$HOOK_VSTDERR" \
+   && grep -qF "$s25r_main" <<<"$HOOK_VSTDERR"; then
+  ok "25g(j) 'cd <tree> && cd <main> && git commit' is refused as ambiguous, naming both directories"
+else
+  no "25g(j) 'cd <tree> && cd <main> && git commit' is refused as ambiguous, naming both directories" \
+    "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(k): where the row stands exactly where the run stands, nothing was substituted ---
+#
+# THE CONTROL FOR THE NOTE, and the reason it can be added at all. Row T5 is at step 5 and
+# the run is at `current: 5`, so the arm changes nothing — and a wall that says nothing when
+# it did nothing is the byte-identical common case. A note here would put a line on every
+# ordinary worktree commit in every project whose row is current.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T5" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+   && ! grep -q "judged at row" <<<"$HOOK_STDERR"; then
+  ok "25g(k) a row whose step EQUALS current: is judged there in silence — no note"
+else
+  no "25g(k) a row whose step EQUALS current: is judged there in silence — no note" \
+    "expected the Step-5 refusal and no row note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(m): `git -C .` inside a worktree keeps its row -----------------------------------
+#
+# The critic's issue 2, the fail-SAFE half of the same defect: branch (1) returned the
+# relative path verbatim, `_eg_wt_name` rejected it for not starting with `/`, and the row
+# was lost — a Step-4 writer refused for Step-5 evidence that cannot exist yet, which is the
+# exact failure REQ-2 exists to remove. A relative `-C` resolves against the shell's cwd,
+# which is what branches (2) and (3) already answer, so it falls through to them.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T3" 'git -C . commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(m) a 'git -C . commit' from inside row T3's tree is still judged at the row's step 4"
+else
+  no "25g(m) a 'git -C . commit' from inside row T3's tree is still judged at the row's step 4" \
+    "expected allow + the note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(n): a line continuation inside the word `git` is still a commit ------------------
+#
+# `_wall_mentions_git` (walls.sh) strips backslashes and quotes and looks for the substring
+# `git`. A backslash-NEWLINE is a line continuation: the backslash goes and a newline is left
+# standing between `g` and `it`, so the screen answered "provably not a git command" while
+# `git_argv_has_sub` answered `commit` for the same string — and the whole evidence gate was
+# skipped for a real commit. Driven from the MAIN root, where the verdict is unambiguous.
+s25r_cont="g\\
+it commit -m \"x\""
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "$s25r_cont"
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR"; then
+  ok "25g(n) a 'g\\<newline>it commit' reaches the gate and is refused like any other commit"
+else
+  no "25g(n) a 'g\\<newline>it commit' reaches the gate and is refused like any other commit" \
+    "expected the Step-5 refusal; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(l): two rows naming one tree is an ambiguous register, not a race to be first ----
+#
+# Correctness F4. The cell is compared by BASENAME, so `wt/14-TC` and `.worktrees/14-TC`
+# collide, and the arm used to take the first row in table order and say nothing — if the
+# SECOND row were the real owner, and it is the one at step 6, the ahead-of-run refusal
+# 25g(e) exists for would never fire. Nothing forbids the collision at write time
+# (`units_validate` declines to, deliberately), so the gate declines to resolve it: judged
+# at `current:`, with a note naming both rows so the register can be repaired.
+s25c_tasks="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| TA | 4 | build | the row that happens to be written first | implementor | — | 20m | REQ-2 | a.sh | wt/14-TC | active |
+| TB | 6 | review | the row that may be the real owner | critic | TA | 20m | REQ-2 | b.sh | .worktrees/14-TC | pending |"
+
+s25c_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25c_tmp")
+s25c_main="$s25c_tmp/main"
+mkdir -p "$s25c_main/.bionic/docs/plans" "$s25c_main/.bionic/docs/record/w25g"
+printf 'evidence\n' > "$s25c_main/.bionic/docs/record/w25g/x.md"
+git -C "$s25c_main" init -q .
+git -C "$s25c_main" commit -q --allow-empty -m init
+engage "$s25c_main"
+printf '%s\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-14T00:00Z "approved"\nStep 4:\n%s\nStep 5:\n%s\n\n%s\n\n%s\n' \
+  "$(matrix_frontmatter true none true)" "$s25r_step4" "$s25r_step5_red" "$s25c_tasks" "$matrix_w25g" \
+  > "$s25c_main/.bionic/docs/plans/wave-01-x.plan.md"
+git -C "$s25c_main" worktree add -q "$s25c_main/.worktrees/14-TC" -b s25c-tc
+
+run_hook_cwd "$(make_home)" "$s25c_main" "$s25c_main/.worktrees/14-TC" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+   && grep -q "TA" <<<"$HOOK_STDERR" && grep -q "TB" <<<"$HOOK_STDERR"; then
+  ok "25g(l) two ## Tasks rows naming one tree decline to resolve, and the note names both"
+else
+  no "25g(l) two ## Tasks rows naming one tree decline to resolve, and the note names both" \
+    "expected the Step-5 refusal plus a note naming TA and TB; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # ============================================================
