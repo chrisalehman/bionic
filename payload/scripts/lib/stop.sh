@@ -105,11 +105,13 @@ fi
 # sweep's use of it is at stop_landing_gate's derivation loop below.
 #
 # THIS FILE READS THE GATE'S BOUND, NOT THE WALL'S, and the distinction is the
-# whole of wave-14 T15. The sweep runs inside hooks/stop.sh, registered at
-# `"timeout": 10` on Stop and SubagentStop; the wall runs in a PreToolUse hook
-# with room to wait. Reading `IMPACT_BOUND_S` here would put the wall's 20 s
-# inside a 10 s registration, where the harness kills the hook at 10 with exit
-# 124 and the refusal in flight becomes a pass (tests/landing-gate.test.sh §16i).
+# whole of wave-14 T15. Every inner bound sits strictly under its own hook's
+# registration, margin named (D2's invariant): the sweep runs inside hooks/stop.sh,
+# registered at `"timeout": 10`, so its bound is 6 with 4 to spare; the wall runs
+# in a PreToolUse hook registered at 15, so its bound is 10 with 5 to spare.
+# Reading `IMPACT_BOUND_S` here would put the WALL's margin inside the SWEEP's
+# registration, where the harness kills the hook at 10 with exit 124 and the
+# refusal in flight becomes a pass (tests/landing-gate.test.sh §16i).
 # lib/bounds.sh's header carries the reasoning; what this file owes is the right
 # NAME.
 #
@@ -610,9 +612,13 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local VERDICT VERDICT_RC STATE
   # LG_IMPACT_BOUND_S IS NOT LOCALISED: it is the library's file-scope constant,
   # and a `local` of that name here would shadow it with the empty string.
-  local LG_IMPACT_TICKS_LEFT LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY
+  # NEITHER IS `SECONDS`, for a stronger reason: it is the shell's own elapsed-time
+  # builtin, and `local SECONDS` turns it into an ordinary variable that never counts.
+  # The derivation window below zeroes it; nothing else in this file or in hooks/stop.sh
+  # reads it.
+  local LG_IMPACT_CLOCK LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY
   local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP
-  local LG_IMPACT_PID LG_TICKS LG_OVERRAN
+  local LG_IMPACT_PID LG_OVERRAN
 
 # ---------- relevance first: the cheapest checks, before any git resolution ----------
 
@@ -919,15 +925,41 @@ REFUSE_KIND=""
 # tree state, so a derivation that is merely slow is no longer a thing this number has to pay
 # for.
 #
-# AND IT IS THE GATE'S BOUND, NOT THE WALL'S (T15). `LG_IMPACT_BOUND_S` is six seconds
-# because this loop runs inside a hook registered at `"timeout": 10`; `IMPACT_BOUND_S` is
-# twenty because the dispatch wall's hook can afford to wait. Wiring this loop to the wall's
-# number is what wave-14 T9 did, and the sweep then outlived its own registration: the
-# harness killed the hook at 10 s with exit 124, which is not the exit 2 the refusal below
-# spells, so a row that should have been REFUSED passed. The ticks are the bound in tenths,
-# DERIVED, because a bound that moved while a hardcoded 60 stayed put would stop the sweep at
-# six seconds while both messages below quoted something else.
-LG_IMPACT_TICKS_LEFT=$(( LG_IMPACT_BOUND_S * 10 ))   # tenths of a second, shared by the sweep
+# AND IT IS THE GATE'S BOUND, NOT THE WALL'S (T15). Each is strictly under its own hook's
+# registration, margin named (D2's invariant, lib/bounds.sh's header): `LG_IMPACT_BOUND_S`
+# is six because this loop runs inside a hook registered at `"timeout": 10`, and
+# `IMPACT_BOUND_S` is ten because the dispatch wall's hook is registered at 15. Wiring this
+# loop to the wall's number is what wave-14 T9 did, and the sweep then outlived its own
+# registration: the harness killed the hook at 10 s with exit 124, which is not the exit 2
+# the refusal below spells, so a row that should have been REFUSED passed.
+#
+# THE BUDGET IS A CLOCK, NOT A COUNT OF POLLS (wave-14 T35, carrying T34's fix across).
+# It used to be `LG_IMPACT_TICKS_LEFT=$(( LG_IMPACT_BOUND_S * 10 ))`, one tick per
+# `sleep 0.1`, decremented by what each row spent. `sleep` is an external binary, so a tick
+# costs a fork and an exec on top of the 100 ms it sleeps — 115.3 ms measured (T34 §2) —
+# and the six seconds both messages below quote realized as ~6.9 s inside a 10 s
+# registration, eating the margin the shorter bound exists to keep. Worse, the error is
+# PROPORTIONAL: under load each tick costs more, so the guard gets slower exactly when the
+# session it is guarding is wedged. A hang guard cannot be denominated in a unit that
+# stretches under the condition it guards.
+#
+# `SECONDS` IS THE CLOCK, AND IT COSTS NOTHING: assigning it zeroes bash's own elapsed
+# counter and reading it is a builtin, where `date +%s` would cost a fork per poll for the
+# same whole-second resolution. /bin/bash is 3.2 on a Mac (no `EPOCHREALTIME`, no
+# `printf %(%s)T`) and bionic's command discipline forbids a `timeout` binary. Nothing else
+# in this file, in hooks/stop.sh, or in the libraries either sources reads `SECONDS`.
+#
+# ONE WINDOW FOR THE SWEEP, OPENED AT THE FIRST DERIVATION. The budget is still spent
+# across the loop rather than granted per row, but it is now an ELAPSED window rather than
+# an accumulator: the clock starts when the first row asks for a derivation, and every
+# later row is judged against the same clock. Two consequences, both deliberate. A row that
+# asks late finds the window closed even if the earlier derivations were quick, because
+# what the registration bounds is wall time, not derivation time. And the window can never
+# overshoot — a whole-second accumulator would charge 0 for a 0.9 s derivation and let N
+# rows spend N x 0.9 s against a six-second budget, which is the wrong direction for a hang
+# guard. `SECONDS` being whole-second, each wait ends in [bound-1, bound]: it can fire a
+# little early, where the ticks fired late.
+LG_IMPACT_CLOCK=""   # the sweep's derivation window: empty until the first row opens it
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 while IFS=$'\t' read -r AID NAME KIND CFILES; do
@@ -1039,7 +1071,7 @@ LGDIFF
           LG_SUITES=""
           LG_SUITES_NOTE=""
           if [ -n "$LG_IMPACT_CMD" ]; then
-            if [ "$LG_IMPACT_TICKS_LEFT" -le 0 ]; then
+            if [ -n "$LG_IMPACT_CLOCK" ] && [ "$SECONDS" -ge "$LG_IMPACT_BOUND_S" ]; then
               LG_SUITES_NOTE=" (this sweep's ${LG_IMPACT_BOUND_S}s derivation budget was spent on earlier rows, so the suites these files imply are NOT named here — derive them by hand)"
             else
               LG_IMPACT_TMP="${TMPDIR:-/tmp}/bionic-lg-impact-$$-${RANDOM}.out"
@@ -1048,24 +1080,27 @@ LGDIFF
               # otherwise be pathname-expanded against $BIONIC_ROOT and hand the command files
               # that were never in the diff. The dispatch site guards the identical
               # construction; this one did not.
+              # THE WINDOW OPENS HERE, at the first row that actually launches a
+              # derivation, and not at the top of the sweep: a sweep whose earlier rows
+              # never reached this branch must not arrive with its budget already spent.
+              [ -n "$LG_IMPACT_CLOCK" ] || { SECONDS=0; LG_IMPACT_CLOCK=1; }
               set -f
               # shellcheck disable=SC2086  # the COMMAND is configuration and is meant to split
               ( cd "$BIONIC_ROOT" 2>/dev/null && $LG_IMPACT_CMD $LG_OUTSIDE >"$LG_IMPACT_TMP" 2>/dev/null ) &
               LG_IMPACT_PID=$!
               set +f
-              LG_TICKS=0
               LG_OVERRAN=0
+              # `sleep 0.1` STAYS the poll cadence — it is what makes a prompt derivation
+              # noticed promptly. What it no longer is, is the unit the bound is counted in.
               while kill -0 "$LG_IMPACT_PID" 2>/dev/null; do
-                if [ "$LG_TICKS" -ge "$LG_IMPACT_TICKS_LEFT" ]; then
+                if [ "$SECONDS" -ge "$LG_IMPACT_BOUND_S" ]; then
                   kill -TERM "$LG_IMPACT_PID" 2>/dev/null
                   LG_OVERRAN=1
                   break
                 fi
                 sleep 0.1
-                LG_TICKS=$((LG_TICKS + 1))
               done
               wait "$LG_IMPACT_PID" 2>/dev/null
-              LG_IMPACT_TICKS_LEFT=$((LG_IMPACT_TICKS_LEFT - LG_TICKS))
               if [ "$LG_OVERRAN" -eq 1 ]; then
                 LG_SUITES_NOTE=" (the impact command did not answer within this sweep's ${LG_IMPACT_BOUND_S}s derivation budget, so the suites these files imply are NOT named here — derive them by hand)"
               else
