@@ -734,6 +734,116 @@ ROSTER_SUFFIX=".state"
 # STATE_DIR is set above, at the arming wall — the first thing on this path to need it.
 ROSTER_FILE="$STATE_DIR/${ROSTER_PREFIX}${BIONIC_SID}${ROSTER_SUFFIX}"
 
+# The sweeper's own ledger, named the way ROSTER_FILE is and for the same reason: a reader
+# copy of `hooks/session-sweeper.sh`'s `LEDGER_SCHEMA` prefix (`sweeper-`, :341), spelled
+# once here rather than at the one site that reads it. Only the budget wall below reads it,
+# and only when the live panel has gone dark.
+ACK_LEDGER_FILE="$STATE_DIR/sweeper-${BIONIC_SID}.state"
+
+# ─── THE ROSTER'S OPEN CONTRACTS — ONE READING, TWO WALLS ──────────────────────────────
+#
+# WHO ASKS. The budget wall below counts the run's open rows; the name-in-flight arm further
+# down asks whether ONE name is still under an open contract. Both questions are the same
+# question asked of the same append-only file, and until wave-14 only the second consulted the
+# closing markers — inline, in its own awk. Two walls carrying one reading is the shape that
+# drifts: cross-gate §LC found it once already, as a LATCH both roster walls shared. So the
+# reading is spelled ONCE, here, and both callers consume its answer.
+#
+# WHAT IT PRINTS: one line per name that ever held a live row, in the order the names first
+# appear —
+#
+#     <name>|<its last live status>|open      still under contract
+#     <name>|<its last live status>|closed    landed, or acked after it was launched
+#
+# CLOSED MEANS THE LATEST CONTRACT IS CLOSED, never the file read as a set: a
+# `landing-swept/v1|…|state=MET` marker closes the contract it was written for and nothing
+# after it, so a name dispatched AGAIN below its marker is open again. That rule is the
+# delimited reading below, held byte-equal with hooks/execution-recorder.sh.
+#
+# THE ACK IS THE SECOND CLOSING TRUTH, AND IT IS OPTIONAL (wave-14 REQ-3, D7).
+# `session-sweeper.sh ack` closes a row the sweep cannot verdict — a row that declared nothing
+# durable stats MET vacuously — and it journals to its OWN file, so the row ordering that
+# decides a marker is not available to it. It is compared by TIME instead: an ack closes a name
+# only when it was taken AFTER that name's last live row was launched, which gives a
+# re-dispatched name the same second life a marker's does. An unreadable stamp on either side
+# closes nothing, because the safe direction here is to spend a slot on a row that MIGHT still
+# be working (rule fail-closed-constants). The ledger is passed by the budget wall alone; the
+# in-flight arm's own header says why it asks without one.
+dp_roster_contracts() {  # <roster file> [ack ledger] -> "<name>|<status>|open|closed" per name
+  [ -f "$1" ] && [ ! -L "$1" ] || return 0
+  /usr/bin/awk -F'|' -v ledger="${2:-}" '
+    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
+    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
+    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
+    # one text held byte-identical in the two files that need it, rather than a library: the
+    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
+    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
+    function kv(line, key,   i, n, parts) {
+      n = split(line, parts, "|")
+      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
+      return ""
+    }
+    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
+    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
+    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
+    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
+    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
+    # that row is an open contract with a live process behind it. Read as a set, the MET flag
+    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
+    # session, which is precisely the case they exist for (a task being re-run). So a live row
+    # RETIRES the marker above it, and only a marker with no live row after it still closes.
+    function contract_note(line,   nm) {
+      if (index(line, "landing-swept/v1|") == 1) {
+        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
+        return
+      }
+      nm = kv(line, "name")
+      if (live_status(kv(line, "status"))) delete MET[nm]
+    }
+    function contract_closed(nm) { return (nm in MET) }
+    # ---- END latest-contract reading ----
+    # THE ACK LEDGER, read by key exactly as the roster is, through the same `kv` — a
+    # `sweeper-ledger/v1|event=ack|…|name=<n>` line, and the LATEST `at=` per name wins. An
+    # entry with no name or no stamp is dropped rather than believed: an empty name compared
+    # loosely would read as closing the whole roster at once, in silence (the same validation
+    # `read_acked` states in the writer of this file).
+    function ack_closes(nm, born) {
+      if (born == "" || !(nm in ACK)) return 0
+      return (ACK[nm] > born)
+    }
+    BEGIN {
+      if (ledger != "") {
+        while ((getline aline < ledger) > 0) {
+          if (index(aline, "sweeper-ledger/v1|") != 1) continue
+          if (kv(aline, "event") != "ack") continue
+          anm = kv(aline, "name"); if (anm == "") continue
+          aat = kv(aline, "at");   if (aat == "") continue
+          if (!(anm in ACK) || aat > ACK[anm]) ACK[anm] = aat
+        }
+        close(ledger)
+      }
+    }
+    /^roster-state\/v1\|/ {
+      contract_note($0)
+      nm = kv($0, "name")
+      if (nm != "" && live_status(kv($0, "status"))) {
+        if (!(nm in seen)) { seen[nm] = 1; order[++n] = nm }
+        last[nm] = kv($0, "status")
+        born[nm] = kv($0, "launched_at")
+      }
+      next
+    }
+    /^landing-swept\/v1\|/ { contract_note($0); next }
+    END {
+      for (i = 1; i <= n; i++) {
+        nm = order[i]
+        printf "%s|%s|%s\n", nm, last[nm], \
+          ((contract_closed(nm) || ack_closes(nm, born[nm])) ? "closed" : "open")
+      }
+    }
+  ' "$1" 2>/dev/null
+}
+
 # ============================================ THE LEASE WALL AND THE BUDGET WALL
 # (spec AC-14 and AC-26; plan task WALLS; assumptions WALLS/2, WALLS/3, WALLS/4, WALLS/6.)
 #
@@ -893,10 +1003,24 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # turned into a whole-dispatch refusal naming a ListAgents call as the repair. That made
   # a chore a PRECONDITION of a judgement, and it is struck: no hook requires the model to
   # perform an act before it will judge one (spec P-A). The fallback is the roster itself,
-  # which this wall already owns and already reads — every remaining deduped
-  # `status=intended` row counts OPEN, which is the same fail-closed direction the
-  # ambiguity arm takes. So the answer is ALWAYS `<open> <claimed>` and the exit is ALWAYS
-  # 0; a dispatch is judged against a count that may be generous, never deferred.
+  # which this wall already owns and already reads. So the answer is ALWAYS `<open>
+  # <claimed>` and the exit is ALWAYS 0; a dispatch is judged against a count that may be
+  # generous, never deferred.
+  #
+  # AND ON THAT DARK PATH THE ROSTER ANSWERS WITH EVERYTHING IT KNOWS (wave-14 D7, REQ-3).
+  # Wave-12 counted every remaining deduped `status=intended` row OPEN, full stop — which on
+  # a wave of nine tasks held nine writer slots for the rest of the session, because a row
+  # that LANDED still reads `status=intended` (nothing ever transitions it). The roster
+  # carries the closing fact beside the row: the `landing-swept/v1|…|state=MET` marker the
+  # landing gate writes, and the ack the orchestrator journals for a row the sweep cannot
+  # verdict. Both are read through `dp_roster_contracts` above, once, AFTER the loop, and
+  # only for the rows the panel could not speak for — the generous direction is kept for
+  # every row the roster says nothing about, which is what keeps this fail-closed.
+  #
+  # NEVER WHILE THE PANEL IS FRESH (AC-3.3, AC-3.4). A fresh answer is the truth about who is
+  # working, and a marker is a claim about who FINISHED — where both can speak, the panel
+  # decides, and the fresh branch below is delimited so that a marker read can never be added
+  # inside it unnoticed (tests/dispatch-preflight.test.sh's narrowed token pin).
   #
   # THE READER IS NOT DEMOTED, only made optional. A FRESH answer still decides every row
   # it can speak to — an `idle` row still closes, an absent row still closes — and the
@@ -904,7 +1028,7 @@ if [ -n "$PARALLEL_BUDGET" ]; then
   # nothing to read has stopped being an error.
   budget_roster_counts() {  # <roster file> <transcript> -> "<open> <claimed>" (exit 0)
     local f="$1" transcript="$2" line nm claims seen open=0 claimed=0 primed="" notfresh=""
-    local la_out la_rc
+    local la_out la_rc row_dark dark="" closed
     if [ ! -f "$f" ] || [ -L "$f" ]; then printf '0 0'; return 0; fi
     seen="|"
     while IFS= read -r line || [ -n "$line" ]; do
@@ -920,9 +1044,13 @@ if [ -n "$PARALLEL_BUDGET" ]; then
       # change a verdict. From here the roster is the answer: each remaining row counts
       # OPEN (`la_rc=0` below), which is what "the count of open rows IS the live-agent
       # count" means when there is no live answer to consult.
+      row_dark=""
       if [ -n "$notfresh" ]; then
         la_rc=0
+        row_dark=1
       else
+        # ---- BEGIN fresh-panel branch — the panel decides, and no closing marker is read
+        # here (wave-14 AC-3.4, narrowing wave-12 AC-7) ----
         # PRIME THE READER'S PER-PROCESS PARSE, ONCE, IN THIS SHELL (Step-6 review P-1).
         # `live_agents` memoizes its parse in shell variables keyed on the transcript's path,
         # size and mtime — but the per-row call below runs inside a command substitution, and
@@ -952,18 +1080,45 @@ if [ -n "$PARALLEL_BUDGET" ]; then
         # repair, which is no longer anybody's job, and letting it out would put the
         # retired chore back in front of the operator by another route.
         case "$la_rc" in
-          3|4) notfresh=1; la_rc=0 ;;
+          3|4) notfresh=1; la_rc=0; row_dark=1 ;;
         esac
+        # ---- END fresh-panel branch ----
       fi
       case "$la_rc" in
         0)
           open=$(( open + 1 ))
           claims=$(printf '%s' "$line" | tr '|' '\n' | sed -n 's/^claims=//p' | head -1)
           [ -n "$claims" ] && claimed=$(( claimed + 1 ))
+          # COUNTED BY THE FALLBACK, NOT BY A READING. The row goes on the dark list with
+          # its claim, and the block below asks the roster whether it has since closed. A
+          # row the panel spoke for never lands here, which is what makes that question
+          # unreachable on the fresh path.
+          [ -n "$row_dark" ] && dark="${dark}${nm}|${claims}
+"
           ;;
         1) : ;;
       esac
     done < "$f"
+
+    # THE DARK ROWS, SETTLED IN ONE PASS (wave-14 REQ-3, D7). One read of the roster and one
+    # of the ack ledger, for every dark row at once — never per row, and never at all on a
+    # turn where the panel answered for every row. A landed row gives its writer slot back
+    # AND the suite its brief claimed: a finished agent runs nothing.
+    if [ -n "$dark" ]; then
+      closed=$(dp_roster_contracts "$f" "$ACK_LEDGER_FILE" \
+        | /usr/bin/awk -F'|' '$3 == "closed" { print $1 }')
+      if [ -n "$closed" ]; then
+        while IFS='|' read -r nm claims; do
+          [ -n "$nm" ] || continue
+          printf '%s\n' "$closed" | /usr/bin/grep -qxF -- "$nm" || continue
+          open=$(( open - 1 ))
+          [ -n "$claims" ] && claimed=$(( claimed - 1 ))
+        done <<DARK
+$dark
+DARK
+      fi
+    fi
+
     printf '%s %s' "$open" "$claimed"
   }
 
@@ -1688,51 +1843,20 @@ TOOL_USE_ID=$(sanitize "$(_jq '.tool_use_id')" 200)
 # AN UNNAMED DISPATCH IS NOT JUDGED HERE. There is no name to be in flight, and the async
 # dispatches that carry none are exactly the ones nothing addresses by name.
 if [ -n "$AGENT_NAME" ] && [ -f "$ROSTER_FILE" ] && [ ! -L "$ROSTER_FILE" ]; then
-  # ONE PASS, TWO FACTS: does a live-status row of this name exist, and has a MET marker
-  # closed it. `awk` rather than two greps because the marker may sit either side of the row
-  # and WHICH side is the answer — see the latest-contract reading below, which is the half of
-  # this arm that was position-blind until T26 and therefore inert for every landed name.
-  DP_INFLIGHT=$(awk -F'|' -v want="$AGENT_NAME" '
-    # ---- BEGIN latest-contract reading — byte-equal in both roster walls (cross-gate §LC) ----
-    # Both programs ask one question of an append-only file — is this name CURRENTLY under an
-    # open contract — and the ORDERING of the rows is the whole of the answer. The reading is
-    # one text held byte-identical in the two files that need it, rather than a library: the
-    # recorder loads no library that parses a roster, and BIONIC_LIB_WANT is a fail-closed
-    # list, not somewhere to add a file on the SubagentStart path for four awk functions.
-    function kv(line, key,   i, n, parts) {
-      n = split(line, parts, "|")
-      for (i = 1; i <= n; i++) if (index(parts[i], key "=") == 1) return substr(parts[i], length(key) + 2)
-      return ""
-    }
-    function live_status(st) { return (st == "intended" || st == "confirmed" || st == "identified") }
-    # THE LATEST CONTRACT DECIDES, NEVER THE FILE READ AS A SET (delta review C1/S2). A
-    # landing-swept/v1 marker in state MET closes the contract it was written for and nothing
-    # after it: a name that landed and was then dispatched AGAIN — which the marker is exactly
-    # what permits — carries a fresh intended/confirmed/identified row BELOW its marker, and
-    # that row is an open contract with a live process behind it. Read as a set, the MET flag
-    # was a LATCH: one landing turned both of these walls off for that name for the rest of the
-    # session, which is precisely the case they exist for (a task being re-run). So a live row
-    # RETIRES the marker above it, and only a marker with no live row after it still closes.
-    function contract_note(line,   nm) {
-      if (index(line, "landing-swept/v1|") == 1) {
-        if (kv(line, "state") == "MET") MET[kv(line, "name")] = 1
-        return
-      }
-      nm = kv(line, "name")
-      if (live_status(kv(line, "status"))) delete MET[nm]
-    }
-    function contract_closed(nm) { return (nm in MET) }
-    # ---- END latest-contract reading ----
-    /^roster-state\/v1\|/ {
-      contract_note($0)
-      if (kv($0, "name") != want) next
-      st = kv($0, "status")
-      if (live_status(st)) { open = 1; last = st }
-      next
-    }
-    /^landing-swept\/v1\|/ { contract_note($0); next }
-    END { if (open && !contract_closed(want)) print last }
-  ' "$ROSTER_FILE" 2>/dev/null) || DP_INFLIGHT=""
+  # ONE READING, ASKED OF ONE NAME. `dp_roster_contracts` (defined beside ROSTER_FILE above)
+  # walks this roster once and answers, per name, what its LATEST contract says — the half of
+  # this arm that was position-blind until T26 and therefore inert for every landed name. It
+  # lives up there rather than here because the budget wall needs the same answer and two
+  # spellings of one question are two answers; its header carries the argument.
+  #
+  # NO ACK LEDGER IS PASSED. This arm asks who holds the NAME, and an ack is the
+  # orchestrator's judgement about a DELIVERABLE: a row acked while its agent is still
+  # working still holds its name, and handing that name to a second dispatch is the one
+  # collision this wall exists to prevent.
+  DP_INFLIGHT=$(dp_roster_contracts "$ROSTER_FILE" \
+    | /usr/bin/awk -F'|' -v want="$AGENT_NAME" \
+        '$1 == want && $3 == "open" { st = $2 } END { if (st != "") print st }' 2>/dev/null) \
+    || DP_INFLIGHT=""
   if [ -n "$DP_INFLIGHT" ]; then
     refuse exit2 dispatch "that name is in flight" "use the FILL line's name" \
       "    name: ${AGENT_NAME}   ·   its row on this session's roster: ${DP_INFLIGHT}
@@ -1908,11 +2032,28 @@ dp_scaffold_marked() {
   while IFS= read -r line; do
     label="${line%%:*}"
     case "$label" in
+      # A MARK IS WHAT THIS BRIEF LACKS, NOT WHAT IT OMITS (wave-14 REQ-6, D8). Three of
+      # these labels are halves of a pair, and the scaffold's own comments say so: `Files:`
+      # is "writers; omit for a read-only brief", `Deliverable-waiver:` is "only for a report
+      # returned by message". Marking each one purely because its own field came back empty
+      # told a read-only author to declare files it will not touch and an artifact-bearing
+      # author to waive the artifact it just declared — an instruction that, followed, makes
+      # the dispatch worse. Each pair is now marked only when NEITHER half is satisfied,
+      # which is exactly the condition of the wall that refuses it: the suite-allowance wall
+      # asks `-z "$C_FILES" && -z "$C_SUITES"`, the absent-deliverable wall asks
+      # `-z "$C_DELIVERABLE" && -z "$C_WAIVER"`.
+      #
+      # KEYED ON THE LIFTED FIELDS, NEVER ON A LITERAL LINE (A-T2.1 read the other way; R2
+      # Q7). A brief whose `Expected artifact:` span names two paths HAS the label and still
+      # needs it — the extractor emits candidates and leaves `C_DELIVERABLE` empty — so the
+      # question the mark asks is what the walls above already computed, not what the text
+      # spelled. `Suites:` keeps the plain rule: a derivation is not a declaration, and this
+      # gate is where a repo with no impact command learns to name its set.
       "Expected duration")  [ -n "$C_DURATION" ]    || line="${line} <ADD>" ;;
-      "Expected artifact")  [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
-      "Files")               [ -n "$C_FILES" ]       || line="${line} <ADD>" ;;
+      "Expected artifact")  [ -n "$C_DELIVERABLE" ] || [ -n "$C_WAIVER" ] || line="${line} <ADD>" ;;
+      "Files")               [ -n "$C_FILES" ]       || [ -n "$C_SUITES" ] || line="${line} <ADD>" ;;
       "Suites")              [ -n "$C_SUITES" ]      || line="${line} <ADD>" ;;
-      "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || line="${line} <ADD>" ;;
+      "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
     esac
     printf '%s\n' "$line"
   done < <(/usr/bin/awk '
