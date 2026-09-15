@@ -4064,7 +4064,14 @@ expect_eq "…writing it back to the same path the consumer reads" "yes" \
 # same root N.1 measured — while the agent payload three lines up passes through the same
 # wall. Asserted here rather than only in tests/dispatch-preflight.test.sh because the root
 # in the refusal is the library's answer, which is this suite's whole subject.
-N_LEASE_OUT=$(mk_agent_payload "$SID_A" "$NWT" | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_LEASE_ST=$?
+# A FRESH NAME, for the reason N.3 above already states and this arm now needs too
+# (wave-14 REQ-8, T6): the passing dispatches above journalled `w99-impl`, and with the
+# gate's arms pooled a re-used name would put the name-in-flight fault beside the lease
+# fault and refuse for both at once — one refusal on the deny channel, where this arm reads
+# an exit status. The lease wall is what AC-14 is about.
+N_LEASE_OUT=$(mk_agent_payload "$SID_A" "$NWT" \
+  | jq -c '.tool_input.name = "w99-impl-lease"' \
+  | "${NENV[@]}" bash "$PARTY_DP" 2>&1); N_LEASE_ST=$?
 expect_eq "a MAIN-THREAD dispatch from the same worktree is refused (AC-14)" "2" "$N_LEASE_ST"
 expect_contains "…naming the main checkout the library already resolves to" \
   "main checkout: $NMAIN" "$N_LEASE_OUT"
@@ -6729,9 +6736,24 @@ roster_identify "$LA_REPO" "$SID_A" "la-target" "$LA_TID"
 # hook from `$LA_TREE/hooks`, whose `../scripts/lib` is the library those hooks resolve
 # first, so pointing `LA_TREE` at a doctored copy swaps the PARSER under all three at once
 # without the shipped files being touched.
+# A FRESH DISPATCH NAME PER DRIVE (wave-14 REQ-8, T6). Some of the drives below are
+# ALLOWED — that is half of what the mutation battery measures — and an allowed dispatch
+# JOURNALS its name on this roster. With the gate's arms pooled, the next drive under the
+# same name is refused for the budget AND for the name being in flight, which is a true
+# answer to a question this section is not asking: the channel it compares would then carry
+# two faults and no per-fault detail. The counter is a file because every call site spends
+# this function inside `$( )`, where a shell variable's increment does not survive.
+LA_NAME_SEQ="$SANDBOX/.la-name-seq"
+printf '0' > "$LA_NAME_SEQ"
+la_next_name() {
+  local n; n=$(( $(cat "$LA_NAME_SEQ" 2>/dev/null || echo 0) + 1 ))
+  printf '%s' "$n" > "$LA_NAME_SEQ"
+  printf 'la-w%s' "$n"
+}
 la_budget() {  # -> the dispatch wall's whole channel
   mk_agent_payload "$SID_A" "$LA_REPO" \
-    | jq -c --arg t "$LA_TR" '.transcript_path = $t' \
+    | jq -c --arg t "$LA_TR" --arg n "$(la_next_name)" \
+        '.transcript_path = $t | .tool_input.name = $n' \
     | env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$LA_TREE/hooks/dispatch-preflight.sh" 2>&1
   return 0
 }
