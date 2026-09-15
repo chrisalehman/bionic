@@ -51,7 +51,7 @@
 #      toplevel of the start directory, else the cwd, and `active_run` is
 #      necessarily false at either.
 #
-# TWO FUNCTIONS, ONE WALK. `project_root_candidates` prints the whole walk;
+# TWO FUNCTIONS, ONE WALK, AND IT RUNS IN THE CALLER. `project_root_candidates` prints the whole walk;
 # `project_root` prints the path on its last line. They are the same traversal
 # by construction, so the answer and the explanation can never disagree — which
 # is the property the tick's absent-roster refusal (2.4) and doctor's root row
@@ -60,6 +60,21 @@
 #   project_root [cwd]             -> one absolute path on stdout, exit 0 always
 #   project_root_candidates [cwd]  -> one line per considered path:
 #                                     <path>TAB<tag>
+#
+# AND THREE VALUES IN THE CALLER'S SHELL, set by either entry point (epic-23
+# wave-14 REQ-2, spec D5 "Hook context"). They are the return channel for a
+# caller that wants a VALUE rather than a line, and the pattern is the one
+# `_bionic_jq_fill`/`_BIONIC_JQ_*` already uses one library over:
+#
+#   _BIONIC_ROOT_REPORT   the report the call printed, newline-terminated
+#   _BIONIC_ROOT_ANSWER   the terminal line's path — what `project_root` prints
+#   BIONIC_WORKTREE       the LINKED WORKTREE's name when rule 1 mapped one away,
+#                         empty otherwise; `bionic_context` carries it as its
+#                         eighth value so the evidence gate can find the plan row
+#                         that owns a worktree writer's commit
+#
+# They describe the LAST walk, so a caller that resolves two roots reads the
+# second one's answer. `bionic_context` walks exactly once per hook event.
 #
 # THE TAG VOCABULARY IS CLOSED. Exactly six, and the last line of a report is
 # always one of the three terminal tags:
@@ -89,6 +104,48 @@
 # Falls back up the chain when the path does not exist yet: a hook is handed a
 # cwd from a tool payload, and a deleted or not-yet-created directory must still
 # resolve to the nearest real ancestor rather than aborting the caller.
+#
+# THE SUBSHELL IS SKIPPED WHEN THE PATH IS ALREADY ITS OWN PHYSICAL PATH (epic-23
+# wave-14 REQ-4, research R3 §8 cut 5). This function is called four times per root
+# walk and `( cd … && pwd -P )` forks a subshell every time — ~3 ms per hook event
+# to re-derive a path that was already absolute, already free of `.`, `..` and `//`,
+# and already free of symlinks, which is the ordinary case on every checkout.
+#
+# THE PRECHECK IS NOT "IS IT ABSOLUTE". `pwd -P` does three things: it resolves
+# symlinks, it collapses `.`/`..`/`//`, and it makes the path absolute. Skipping it
+# is only sound when ALL THREE are already true, so the precheck refuses a path
+# carrying any of those components and tests EVERY prefix of the rest with `[ -L ]`
+# — a builtin lstat, no fork. Symlink resolution is the point of this function and
+# `skipped-symlink` is a named rule in this file`s own tag vocabulary; a precheck
+# that tested only the leaf would hand back a path through a symlinked ANCESTOR and
+# every `.bionic` decision below it would be made about the wrong directory.
+#
+# WHEN IN DOUBT IT FALLS THROUGH TO THE SUBSHELL, which is the old behaviour exactly.
+# tests/root.test.sh's seven topologies — the symlinked-root one included — are the
+# wall this fast path has to keep green.
+_bionic_root_phys() {  # <absolute path> -> 0 when `pwd -P` could not change it
+  local p="$1" rest comp acc
+  case "$p" in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  case "$p" in
+    */|*/./*|*/../*|*/.|*/..|*//*) return 1 ;;
+  esac
+  acc=""
+  rest="${p#/}"
+  while [ -n "$rest" ]; do
+    comp="${rest%%/*}"
+    acc="$acc/$comp"
+    [ -L "$acc" ] && return 1
+    case "$rest" in
+      */*) rest="${rest#*/}" ;;
+      *)   rest="" ;;
+    esac
+  done
+  return 0
+}
+
 _bionic_root_abs() {
   local p="$1"
   [ -n "$p" ] || p="$PWD"
@@ -99,6 +156,10 @@ _bionic_root_abs() {
   while [ -n "$p" ] && [ "$p" != "/" ] && [ ! -d "$p" ]; do
     p="$(dirname "$p")"
   done
+  if _bionic_root_phys "$p"; then
+    printf '%s\n' "$p"
+    return 0
+  fi
   ( cd "$p" 2>/dev/null && pwd -P ) || printf '%s\n' "$p"
 }
 
@@ -114,11 +175,25 @@ _bionic_root_is_home_or_above() {
   return 1
 }
 
-# _bionic_root_start <abs cwd> -> the directory the walk begins at (rule 1)
+# _bionic_root_start <abs cwd> -> RETURNED BY VARIABLE, not on stdout:
+#
+#   _BIONIC_ROOT_START   the directory the walk begins at (rule 1)
+#   BIONIC_WORKTREE      the linked worktree's NAME when rule 1 mapped one away,
+#                        empty in every other topology — including a worktree of
+#                        a BARE repo, which the exception below does not map
+#
+# WHY BY VARIABLE (epic-23 wave-14 REQ-2). A `$(…)` is a subprocess, and a value
+# assigned inside one is gone when it closes. `bionic_context` is four command
+# substitutions above this function, so a `BIONIC_WORKTREE` set here could never
+# have reached the hook that has to read it. The walk sets its values in the
+# caller's shell instead and prints what it always printed.
 #
 # `--path-format=absolute` needs git >= 2.31; the second arm resolves a relative
 # answer against the cwd for anything older. A repository is a linked worktree
-# exactly when its git dir and its common git dir differ.
+# exactly when its git dir and its common git dir differ. The two answers are
+# split on the first newline, so a git directory whose own path CONTAINS a
+# newline is read as a non-repository — the same degenerate path the rest of this
+# library's `case` patterns already decline to model.
 #
 # BARE EXCEPTION (critic-findings.md wave-1.4.0 issue 2). `dirname(common)` is the
 # main repo's working root only when the main repo HAS a working tree. When the
@@ -128,58 +203,101 @@ _bionic_root_is_home_or_above() {
 # checkout. In that case the linked worktree IS the only working tree there is, so
 # the walk starts at the cwd instead, exactly as it would with no mapping applied.
 _bionic_root_start() {
-  local cwd="$1" common gitdir
-  common="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common=""
-  gitdir="$(git -C "$cwd" rev-parse --path-format=absolute --git-dir 2>/dev/null)" || gitdir=""
+  local cwd="$1" both common gitdir
+
+  _BIONIC_ROOT_START="$cwd"
+  BIONIC_WORKTREE=""
+
+  # ONE ASK, TWO ANSWERS. `git rev-parse` prints one line per path option, in the
+  # order the options were given, so the two questions rule 1 has always asked cost
+  # one process instead of two. Measured at the parent (R3 §5): 11.7 ms + 10.8 ms,
+  # 19% of the whole bash-walls run, on EVERY hook event of every session.
+  both="$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || both=""
+  common="${both%%$'\n'*}"
+  gitdir="${both#*$'\n'}"
+  # Fewer than two lines is not an answer: a one-line `both` splits into two copies
+  # of itself, which would read as "git dir equals common dir" — a linked worktree
+  # silently demoted to an ordinary checkout. Blank both and let the arm below ask.
+  [ "$common" = "$both" ] && { common=""; gitdir=""; }
+
   if [ -z "$common" ] || [ -z "$gitdir" ]; then
-    common="$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null)" || common=""
-    gitdir="$(git -C "$cwd" rev-parse --git-dir 2>/dev/null)" || gitdir=""
+    # OLDER GIT (< 2.31) HAS NO `--path-format`, so the whole call above failed and
+    # this arm asks again without it; the answers may be relative to the cwd.
+    both="$(git -C "$cwd" rev-parse --git-common-dir --git-dir 2>/dev/null)" || both=""
+    common="${both%%$'\n'*}"
+    gitdir="${both#*$'\n'}"
+    [ "$common" = "$both" ] && { common=""; gitdir=""; }
     case "$common" in ""|/*) ;; *) common="$cwd/$common" ;; esac
     case "$gitdir" in ""|/*) ;; *) gitdir="$cwd/$gitdir" ;; esac
   fi
-  if [ -n "$common" ] && [ -n "$gitdir" ]; then
-    common="$(_bionic_root_abs "$common")"
-    gitdir="$(_bionic_root_abs "$gitdir")"
-    if [ "$common" != "$gitdir" ]; then
-      if [ "$(git -C "$common" rev-parse --is-bare-repository 2>/dev/null)" != "true" ]; then
-        printf '%s\n' "$(dirname "$common")"
-        return 0
-      fi
-    fi
-  fi
-  printf '%s\n' "$cwd"
+
+  [ -n "$common" ] && [ -n "$gitdir" ] || return 0
+  common="$(_bionic_root_abs "$common")"
+  gitdir="$(_bionic_root_abs "$gitdir")"
+  [ "$common" != "$gitdir" ] || return 0
+  [ "$(git -C "$common" rev-parse --is-bare-repository 2>/dev/null)" != "true" ] || return 0
+
+  # THE NAME WAS ALWAYS IN HAND AND ALWAYS DISCARDED. `<main>/.git/worktrees/<name>`
+  # is what `--git-dir` answers inside a linked worktree, so its last segment IS the
+  # worktree's name — the name `git worktree list` prints and the name
+  # `spawn-worktree.sh` created the tree under. The evidence gate needs it to find
+  # the plan row that owns a worktree writer's commit without asking git again.
+  BIONIC_WORKTREE="${gitdir##*/}"
+  _BIONIC_ROOT_START="$(dirname "$common")"
+  return 0
 }
 
-# _bionic_root_report [cwd] -> the walk, one `<path>TAB<tag>` line each. The
-# last line is always terminal (chosen | git-toplevel-fallback | cwd-fallback).
+# _bionic_root_report [cwd] -> the walk, one `<path>TAB<tag>` line each, on
+# stdout. The last line is always terminal (chosen | git-toplevel-fallback |
+# cwd-fallback).
+#
+# AND, IN THE CALLER'S SHELL, the same three values every entry point below
+# leaves behind (REQ-2): `_BIONIC_ROOT_REPORT` (what it printed),
+# `_BIONIC_ROOT_ANSWER` (the terminal line's path) and `BIONIC_WORKTREE`. The
+# report is BUILT rather than streamed for exactly that reason — a caller that
+# wants a value instead of a line no longer has to open a subshell to get one,
+# which is what `bionic_context` does now for the root AND the worktree.
 _bionic_root_report() {
-  local cwd start home p top
+  local cwd start home p top out="" tab=$'\t' nl=$'\n'
+
+  _BIONIC_ROOT_REPORT=""
+  _BIONIC_ROOT_ANSWER=""
+
   cwd="$(_bionic_root_abs "${1:-$PWD}")"
-  start="$(_bionic_root_start "$cwd")"
+  _bionic_root_start "$cwd"          # sets _BIONIC_ROOT_START and BIONIC_WORKTREE
+  start="$_BIONIC_ROOT_START"
   home=""
   [ -n "${HOME:-}" ] && home="$(_bionic_root_abs "$HOME")"
 
   p="$start"
   while [ -n "$p" ] && [ "$p" != "/" ]; do
     if _bionic_root_is_home_or_above "$p" "$home"; then
-      printf '%s\t%s\n' "$p" "above-home"
+      out="$out$p$tab""above-home$nl"
     elif [ -L "$p/.bionic" ]; then
-      printf '%s\t%s\n' "$p" "skipped-symlink"
+      out="$out$p$tab""skipped-symlink$nl"
     elif [ -d "$p/.bionic" ]; then
-      printf '%s\t%s\n' "$p" "chosen"
+      out="$out$p$tab""chosen$nl"
+      _BIONIC_ROOT_REPORT="$out"
+      _BIONIC_ROOT_ANSWER="$p"
+      printf '%s' "$out"
       return 0
     else
-      printf '%s\t%s\n' "$p" "candidate"
+      out="$out$p$tab""candidate$nl"
     fi
     p="$(dirname "$p")"
   done
 
   top="$(git -C "$start" rev-parse --show-toplevel 2>/dev/null)" || top=""
   if [ -n "$top" ]; then
-    printf '%s\t%s\n' "$(_bionic_root_abs "$top")" "git-toplevel-fallback"
+    top="$(_bionic_root_abs "$top")"
+    out="$out$top$tab""git-toplevel-fallback$nl"
+    _BIONIC_ROOT_ANSWER="$top"
   else
-    printf '%s\t%s\n' "$cwd" "cwd-fallback"
+    out="$out$cwd$tab""cwd-fallback$nl"
+    _BIONIC_ROOT_ANSWER="$cwd"
   fi
+  _BIONIC_ROOT_REPORT="$out"
+  printf '%s' "$out"
   return 0
 }
 
@@ -194,9 +312,13 @@ project_root_candidates() {
 # project_root [cwd] -> the one project root, absolute, exit 0.
 #
 # Read off the report's terminal line rather than recomputed, so the two
-# functions cannot drift apart.
+# functions cannot drift apart. The walk records that line as it emits it, so the
+# reading no longer costs an `awk` in a pipeline — and, because a pipeline stage
+# is a subprocess, that is also what lets `BIONIC_WORKTREE` survive this call.
 project_root() {
-  _bionic_root_report "${1:-$PWD}" | awk -F'\t' '{ p = $1 } END { if (p != "") print p }'
+  _bionic_root_report "${1:-$PWD}" >/dev/null
+  [ -n "$_BIONIC_ROOT_ANSWER" ] && printf '%s\n' "$_BIONIC_ROOT_ANSWER"
+  return 0
 }
 
 # ─── THE AUDIT STREAM: where a project's findings land, and who writes one ───

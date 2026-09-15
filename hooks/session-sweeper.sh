@@ -465,7 +465,7 @@ parse_seconds() {  # <prose> -> seconds on stdout; nonzero exit if it cannot be 
   # A decimal anywhere in the cleaned string fails outright; a mismatch between every digit
   # run in the string and the digit run(s) actually captured inside the matched pair catches
   # the glued case, because nothing legitimate is a digit run OUTSIDE the one pair.
-  printf '%s' "$s" | grep -qE '[0-9]+\.[0-9]+' && return 1
+  grep -qE '[0-9]+\.[0-9]+' <<< "$s" && return 1
   allnums="$(printf '%s' "$s" | grep -oE '[0-9]+')"
   [ "$(printf '%s\n' "$allnums" | grep -c '[0-9]')" -eq "$(printf '%s\n' "$nums" | grep -c '[0-9]')" ] \
     || return 1
@@ -528,8 +528,13 @@ read_acked() {
 
 # Whole-line match, never a substring: `w4-s1` must not be closed by an ack of `w4-s10`.
 row_acked() {  # <row name>
+  # BOTH operands are guarded, and the second guard is the here-string's (T37). `<<<`
+  # appends a newline to its word, so a ledger ending in one presents a trailing EMPTY
+  # line that `grep -qxF -- ""` matches — where the `printf '%s' | grep` this replaced
+  # emitted no such line and answered 1. An empty row name is not an acked row.
   [ -n "$ACKED_NAMES" ] || return 1
-  printf '%s' "$ACKED_NAMES" | grep -qxF -- "$1"
+  [ -n "$1" ] || return 1
+  grep -qxF -- "$1" <<< "$ACKED_NAMES"
 }
 
 # Every name the roster declares, one per line. Read for the ack verb's "is this a row I
@@ -619,7 +624,7 @@ landing_conjunct() {  # <path, as the roster spells it> <launched epoch|""> <lau
   # A relative deliverable that climbs out of the root it is relative to is a placement
   # error whatever it happens to land on, and normalizing it would hide which root the
   # brief meant.
-  if echo "$raw" | grep -qE '(^|/)\.\.(/|$)'; then
+  if grep -qE '(^|/)\.\.(/|$)' <<< "$raw"; then
     CONJUNCT="refused=$raw (a deliverable path may not climb out of the project with '..' — name it as record/<file>, a project-relative path, or an absolute one)"
     return 1
   fi
@@ -998,7 +1003,7 @@ EOF
     for _name in "${ACK_NAMES[@]}"; do
       _name="$(clean "$_name")"
       [ -n "$_name" ] || continue
-      printf '%s\n' "$_known" | grep -qxF -- "$_name" \
+      grep -qxF -- "$_name" <<< "$_known" \
         || _unknown="${_unknown}${_unknown:+, }${_name}"
 
       # A row's verdict is a fact about the disk; ack is a fact about the ORCHESTRATOR'S

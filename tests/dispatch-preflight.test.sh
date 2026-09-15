@@ -273,9 +273,35 @@ GATE_ENV=""
 # bytes and one column, so a byte count would pass a line that wraps.
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh"
 GATE_TIME=0
+# dp_hires_cs_since <epoch-float> -> whole hundredths of a second elapsed since it.
+#
+# SUB-SECOND, via python3, for the same reason tests/session-start.test.sh §16 reaches for
+# it: a whole-second `date +%s` difference is off by up to a full second either way
+# depending on where the two reads straddle a tick. Two arms in this file claim the gate
+# "stopped waiting at the bound", and what they have to tell apart is a wait that ended on
+# the bound from one that ran 15% past it — at the 20s bound of the time, 20s from 23s, of
+# which a whole-second clock can lose one second at each end. That is how a tick-counted
+# wait ran 15% long underneath these two arms for a whole wave without either of them
+# noticing (wave-14 T34). The margin shrinks with the bound, which is why the slack below
+# is stated against `$S29_BOUND` rather than left at a fixed number of seconds.
+#
+# HUNDREDTHS, AS AN INTEGER, so the comparison stays in bash arithmetic and no arm has to
+# fork a second interpreter to decide. A host with no python3 answers 999999, which fails
+# both arms loudly rather than passing them blind.
+dp_hires_cs_since() {
+  python3 -c 'import sys,time; print(int((time.time()-float(sys.argv[1]))*100))' "$1" 2>/dev/null \
+    || echo 999999
+}
+
 run_gate() {  # <payload-json>
   local _sid _t0; _sid=$(printf '%s' "$1" | jq -r '.session_id // ""' 2>/dev/null) || _sid=""
   _t0=$(date +%s)
+  # OPT-IN, AND ONLY OVER THE FIRST DRIVE. Set `GATE_HIRES=1` before a call to have
+  # `$GATE_TIME_CS` measured to the hundredth; every other caller pays nothing, which
+  # matters on a driver this file runs a few hundred times. The two python3 forks land
+  # outside the timed span on the way in and immediately after `$?` on the way out.
+  GATE_TIME_CS=""
+  [ -z "${GATE_HIRES:-}" ] || _gate_hires_t0=$(python3 -c 'import time; print(time.time())' 2>/dev/null)
   GATE_ENV="$GATE_ENV CLAUDE_CODE_SESSION_ID=$_sid"
   if [ -n "$GATE_CONFIG_DIR" ]; then
     # shellcheck disable=SC2086
@@ -285,6 +311,7 @@ run_gate() {  # <payload-json>
     GATE_OUT=$(printf '%s' "$1" | env $GATE_ENV bash "$GATE" 2>"$SANDBOX/.err")
   fi
   GATE_ST=$?
+  [ -z "${GATE_HIRES:-}" ] || GATE_TIME_CS=$(dp_hires_cs_since "${_gate_hires_t0:-0}")
   GATE_TIME=$(( $(date +%s) - _t0 ))
   GATE_ERR=$(cat "$SANDBOX/.err")
   # THE VERDICT, read off both wires. `jq` rather than a grep for the reason: a reason the
@@ -1734,18 +1761,15 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r13c2 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_LABEL_RUNON" "runonbot")"
-# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
-# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
-# unchanged; only the channel the wall blocks on is.
+# T26 (critic Issue 3): this brief declares Suites:, so ambiguity is its only fault (the
+# absent-deliverable arm now recognises the candidate list as ANOTHER arm's product and
+# stays quiet rather than repeating it) — the ordinary single-arm exit2 wire, which keeps
+# the ambiguity arm's own verbatim detail. "which four paths did the wall see" is proven
+# the same way as before: submitted ALONE, the declared artifact (record/w99-report.md) is
+# accepted by "C-2 paired positive" right below, so it was never rejected as a bad path,
+# only as one candidate among several this labelled span never disambiguated.
 expect_eq "C-2: a run-on labelled span naming four paths is REFUSED as ambiguous (R7)" \
-  "deny" "$GATE_VERDICT"
-# T2 (D3, D11): the several-fault wire no longer echoes candidate paths back — no rationale
-# survives on it at all, the marked scaffold does — so "which four paths did the wall see"
-# is proven the other way round, by "C-2 paired positive" right below: submitted ALONE, the
-# declared artifact (record/w99-report.md) is accepted, so it was never rejected as a bad
-# path, only as one candidate among several this labelled span never disambiguated.
-expect_contains "C-2: …the Expected artifact: line is marked <ADD> (still ambiguous)" \
-  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
+  "exit2" "$GATE_VERDICT"
 expect_status "C-2: …and no roster row demands any of the four" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
@@ -2251,16 +2275,18 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18a yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_SHAPE" "shapebot")"
-# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
-# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
-# unchanged; only the channel the wall blocks on is.
+# T26 (critic Issue 3): this brief used to trip TWO brief-shape arms — the ambiguity arm
+# and the absent-deliverable arm, since C_DELIVERABLE stays empty either way — which
+# printed "this brief names no deliverable" beside "the deliverable label names several
+# paths", a straight contradiction (the several-fault deny wire). The absent-deliverable
+# arm now recognises a non-empty candidate list as ANOTHER arm's product and stays quiet
+# (`not checked: deliverable`) rather than repeating a false "nothing was declared". A
+# `Suites:`-carrying brief with candidates is therefore back to exactly ONE fault, which
+# keeps its own arm's verbatim detail on the ordinary exit2 wire — the shape wave-13 gave
+# every lone fault, and the shape this fixture had before REQ-8/D3 pooled several faults
+# onto one deny wire.
 expect_eq "R6-1 CASE 9: a deliverable span naming two paths is REFUSED, never resolved" \
-  "deny" "$GATE_VERDICT"
-# T2 (D3, D11): the several-fault wire no longer echoes either candidate path — see the
-# C-2 comment above for the full reasoning; the marked scaffold's Expected artifact: line
-# is the observable now, and "neither is silently contracted" is the roster check below.
-expect_contains "R6-1 CASE 9: …the Expected artifact: line is marked <ADD> (still ambiguous)" \
-  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
+  "exit2" "$GATE_VERDICT"
 expect_contains "R6-1 CASE 9: …and asks for exactly one" "exactly one" "$GATE_ERR"
 expect_status "R6-1 CASE 9: …and no roster row contracts the agent to either" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
@@ -2274,15 +2300,11 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18b yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_PATHS_READ" "readproducebot")"
-# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
-# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
-# unchanged; only the channel the wall blocks on is.
+# T26 (critic Issue 3): as CASE 9 above — one fault, not two, once the absent-deliverable
+# arm stops repeating the ambiguity arm's own refusal — so this is the ordinary single-arm
+# exit2 wire, not a pooled deny.
 expect_eq "R6-1 CASE 10: read-X-then-produce-Y is REFUSED, not contracted to X" \
-  "deny" "$GATE_VERDICT"
-# T2 (D3, D11): as CASE 9 above — neither path is echoed on the several-fault wire any
-# more; the marked scaffold plus "no row is written for either" is the new observable.
-expect_contains "R6-1 CASE 10: …the Expected artifact: line is marked <ADD> (still ambiguous)" \
-  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
+  "exit2" "$GATE_VERDICT"
 expect_status "R6-1 CASE 10: …and no row is written for either" "1" \
   "$([ -f "$(roster_path "$REPO" "$SID_A")" ] && echo 0 || echo 1)"
 
@@ -2411,14 +2433,9 @@ Suites: tests/widget.test.sh'
 REPO=$(make_repo r18twoline yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_TWO_ON_ONE_LINE" "twolinebot")"
-# T17: this brief trips SEVERAL brief-shape arms, so its one refusal is a deny verdict
-# on stdout with exit 0, not exit 2. The refusal itself — and every assertion below — is
-# unchanged; only the channel the wall blocks on is.
+# T26 (critic Issue 3): as C-2/R6-1 above — one fault, the ordinary single-arm exit2 wire.
 expect_eq "S18b two paths on the deliverable label OWN line are still REFUSED" \
-  "deny" "$GATE_VERDICT"
-# T2 (D3, D11): as C-2/R6-1 above — the several-fault wire no longer echoes candidates.
-expect_contains "S18b …and the Expected artifact: line is marked <ADD> (still ambiguous)" \
-  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
+  "exit2" "$GATE_VERDICT"
 
 # A prose continuation line (no label head) still belongs to the span — the R6-4 window
 # stays open, so a path named in a later sentence is still found.
@@ -2488,12 +2505,14 @@ for _wall in containment absent ambiguous combined; do
   # EACH BRIEF WITH THE CHANNEL ITS REFUSAL LANDS ON (wave-12 T17), declared beside the
   # brief because that is what decides it: a brief with ONE shape fault refuses on exit2,
   # where the detail is the knob's; a brief with several refuses with a deny verdict, where
-  # the whole list is on the model's own wire. The two ambiguous-label briefs have two and
-  # three faults — a label offering candidates leaves `deliverable=` empty behind it.
+  # the whole list is on the model's own wire. "ambiguous" is one fault now (T26, critic
+  # Issue 3): its candidates leave `deliverable=` empty, and the absent-deliverable arm
+  # recognises that as the ambiguity arm's own product rather than repeating the fault —
+  # `BRIEF_THREE_FAULTS` still carries the extra "no Files:/no Suites:" fault beside it.
   case "$_wall" in
     containment) _b="$BRIEF_OUT_OF_REPO";    _want=exit2 ;;
     absent)      _b="$BRIEF_NOTHING";        _want=exit2 ;;
-    ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE"; _want=deny ;;
+    ambiguous)   _b="$BRIEF_TWO_PATHS_SHAPE"; _want=exit2 ;;
     combined)    _b="$BRIEF_THREE_FAULTS";    _want=deny ;;
   esac
   REPO=$(make_repo "r18h-$_wall" yes)
@@ -2939,6 +2958,22 @@ s22_sweep() {
   swept_marker_write "$(roster_path "$1" "$2")" 2026-09-02T00:00:00Z "$2" "$3" "" MET
 }
 
+# s22_ack <repo> <sid> <name> [at] — one `event=ack` line on the sweeper's OWN ledger,
+# `.bionic/tmp/sweeper-<sid>.state`, which is where `session-sweeper.sh ack` journals the
+# orchestrator's judgement that a row is closed (that verb's write, :1020). The SCHEMA is
+# read out of the writer rather than transcribed here — §S15b's idiom for `SWEPT_SCHEMA`,
+# and for the same reason: a prefix that drifted would leave this fixture writing lines no
+# reader believes, silently and greenly. `at` defaults to a moment AFTER the launch stamp
+# `s22_roster_row` writes (2026-09-02T00:00:00Z), because an ack only closes a row it
+# postdates.
+S22_LEDGER_SCHEMA="$(/usr/bin/grep -m1 '^LEDGER_SCHEMA=' "${BIONIC_HOOKS_DIR}/session-sweeper.sh" | cut -d'"' -f2)"
+s22_ack() {
+  local f="$1/.bionic/tmp/sweeper-$2.state"
+  mkdir -p "$(dirname "$f")"
+  printf '%s|event=ack|at=%s|epoch=1756771200|pid=%s|session=%s|name=%s|by=human\n' \
+    "$S22_LEDGER_SCHEMA" "${4:-2026-09-03T00:00:00Z}" "$$" "$2" "$3" >> "$f"
+}
+
 # s22_fake_tree <repo> <dir> — a linked worktree's on-disk signature: a `.git` FILE.
 s22_fake_tree() {
   mkdir -p "$1/.worktrees/$2"
@@ -3017,8 +3052,12 @@ write_attestation "$REPO" "$SID_A"
 s22_set_budget "$REPO" "writers=9 suites=9 worktrees=1 test_jobs=4 source=probe"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r22h worktrees=1 with no tree standing → passes (the control)" "0" "$GATE_ST"
+# A DISTINCT NAME, because the control above was ALLOWED and journalled `w99-impl` on this
+# repo's roster (wave-14 REQ-8). Re-using it would put the name-in-flight arm's fault beside
+# the worktree ceiling's, and since the arms pool now that is one refusal naming two
+# things — a true answer to a question this section is not asking.
 s22_fake_tree "$REPO" "one"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl-b")"
 expect_status "…one live tree against worktrees=1 → REFUSED" "2" "$GATE_ST"
 expect_contains "…naming the tree count" "worktrees: budget=1 live=1 with-this-dispatch=2" "$GATE_VERR"
 # A plain directory under .worktrees is not a leased tree — only a linked one is.
@@ -3206,33 +3245,262 @@ expect_status "r22jd an empty roster needs no live reading -> the same STALE tra
   "0" "$GATE_ST"
 expect_absent "…and says nothing about live-agents" "live-agents:" "$GATE_ERR"
 
-# (e) THE TOKEN ITSELF IS GONE, NOT MERELY UNCONSULTED (AC-7 "no landing-swept marker is
-# consulted"). r22ja/r22jb pin the BEHAVIOUR — presence in the fresh live set is what
-# opens or closes a row — but nothing above pins the IMPLEMENTATION: that the retired
-# marker cannot quietly become a second, competing signal inside this same function on
-# some future edit. A token pin on the function's own body is the only way to close that.
+# (e) THE CLOSING MARKER IS UNREACHABLE WHILE THE PANEL IS FRESH (wave-14 AC-3.4,
+# narrowing wave-12 AC-7).
+#
+# WHAT THE OLD PIN SAID. AC-7 retired `landing-swept` as this wall's closing signal
+# outright and pinned the retirement on the function's own body at the TOKEN level, so the
+# marker could not quietly come back as a second, competing signal on some future edit.
+# r22ja/r22jb pin the BEHAVIOUR — presence in the fresh live set is what opens or closes a
+# row — and this arm pinned the implementation beside them.
+#
+# WHAT WAVE-14 NARROWS, AND WHY (D7, REQ-3). The retirement is kept whole for the case it
+# was written for: WHILE THE PANEL IS FRESH THE PANEL IS THE TRUTH AND NO MARKER IS
+# CONSULTED. It is lifted on the one path wave-12 left counting every `status=intended` row
+# open forever — a STALE or ABSENT panel, where there is no reading to prefer and nine
+# landed rows held nine writer slots for the rest of the session (§budget-markers below).
+# The precedent is in this same file: the name-in-flight arm has read the same marker off
+# the same roster to answer the same question since T26.
+#
+# SO THE PIN MOVES from "the token is absent from the body" to "the token is UNREACHABLE on
+# the fresh path", and it is held by a delimited span: everything the count does when the
+# panel HAS spoken for a row sits between `BEGIN fresh-panel branch` and `END fresh-panel
+# branch`, and no closing reading may appear inside it. The mutation arm plants one there.
 BUDGET_FN_BODY="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE")"
 expect_eq "…and the extracted span is non-empty (the pin is not vacuously true)" "1" \
   "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'budget_roster_counts() {' || true)"
-expect_eq "budget_roster_counts's own body carries no landing-swept token" "0" \
-  "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'landing-swept' || true)"
+# THE NARROWING IS REAL IN BOTH DIRECTIONS. The count DOES consult the closing reading —
+# once, through the one owner both roster walls share — so a body that had simply dropped
+# the marker again (and taken §budget-markers red) fails here too.
+expect_eq "budget_roster_counts consults the closing reading exactly once, through its one owner" "1" \
+  "$(printf '%s\n' "$BUDGET_FN_BODY" | /usr/bin/grep -c 'dp_roster_contracts' || true)"
+BUDGET_FRESH_SPAN="$(printf '%s\n' "$BUDGET_FN_BODY" \
+  | /usr/bin/awk '/BEGIN fresh-panel branch/, /END fresh-panel branch/')"
+expect_nonempty "…and the fresh-panel branch is delimited (the span pin is not vacuous)" \
+  "$BUDGET_FRESH_SPAN"
+expect_eq "the fresh-panel branch consults no landing marker at all (never while FRESH)" "0" \
+  "$(printf '%s\n' "$BUDGET_FRESH_SPAN" | /usr/bin/grep -cE 'landing-swept|dp_roster_contracts' || true)"
 
-# THE ANTI-VACUITY ARM: a doctored copy that re-adds the token inside the SAME function
-# body must fail the pin above. The doctor inserts one inert statement right after the
-# function's own opening line — not a comment change to the signature, which would move
-# the extractor's own anchor and prove nothing.
+# THE ANTI-VACUITY ARM: a doctored copy that reads a marker INSIDE the fresh-panel branch
+# must fail the pin above. The doctor inserts one inert statement right after the span's own
+# opening delimiter — not a comment change to the function signature, which would move the
+# extractor's anchor and prove nothing.
 GATE_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dispatch-preflight-swept-mut.XXXXXX")"
 GATE_MUT="$GATE_MUT_ROOT/dispatch-preflight.sh"
 awk '
   { print }
-  /^  budget_roster_counts\(\) \{  #/ { print "    : # landing-swept/v1 reintroduced by mutation (test-only)" }
+  /---- BEGIN fresh-panel branch/ { print "        : \"$(dp_roster_contracts \"$f\")\" # landing-swept read on the FRESH path (test-only)" }
 ' "$GATE" > "$GATE_MUT"
 expect_eq "swept-mut meta: the doctor's re-added line landed (the anchor still matches)" "1" \
-  "$(/usr/bin/grep -c 'reintroduced by mutation' "$GATE_MUT")"
+  "$(/usr/bin/grep -c 'landing-swept read on the FRESH path' "$GATE_MUT")"
 BUDGET_FN_BODY_MUT="$(sed -n '/^  budget_roster_counts() {/,/^  }$/p' "$GATE_MUT")"
-expect_contains "…and the doctored body now DOES carry the token (the pin above discriminates)" \
-  "landing-swept" "$BUDGET_FN_BODY_MUT"
+BUDGET_FRESH_SPAN_MUT="$(printf '%s\n' "$BUDGET_FN_BODY_MUT" \
+  | /usr/bin/awk '/BEGIN fresh-panel branch/, /END fresh-panel branch/')"
+expect_contains "…and the doctored fresh branch now DOES read a marker (the pin above discriminates)" \
+  "dp_roster_contracts" "$BUDGET_FRESH_SPAN_MUT"
 rm -rf "$GATE_MUT_ROOT"
+
+# ================= §budget-markers: A LANDED ROW HOLDS NO WRITER SLOT ON A DARK PANEL
+# (wave-14 REQ-3, design D7; seed C18; A-orch-23.)
+#
+# WHAT S22b-nla LEFT. The fallback above judges a dark panel against the roster's own
+# `status=intended` rows — every one of them, because nothing there asks whether a row
+# FINISHED. On a wave of nine tasks that is nine writers for the rest of the session: the
+# panel goes stale for one turn and the next dispatch is refused on a budget that eight
+# landed rows are still holding. The roster already carries the closing fact — the
+# `landing-swept/v1|…|state=MET` marker the name-in-flight arm has read since T26 — and the
+# sweeper's ledger carries the other, for a row the sweep cannot verdict (a row that
+# declared nothing durable stats MET vacuously).
+#
+# THE RULE (D7). A row is open iff `status=intended` and, WHEN THE PANEL IS STALE OR ABSENT,
+# no landing marker and no ack closes its latest contract. A FRESH panel is still the whole
+# truth and no marker is consulted at all — that is (c).
+#
+# EACH ARM MOVES ONE THING. (a) and (b) share the roster, the ceiling and the stale panel and
+# differ only in whether the markers are there; (b) and (c) share the markers and differ only
+# in the panel's freshness; (d) and (e) share the acks and differ only in WHEN they were taken.
+
+section "§budget-markers: a landed row holds no writer slot on a dark panel"
+
+S22MK_NAMES="m1 m2 m3 m4 m5 m6 m7 m8 m9"
+S22MK_LANDED="m1 m2 m3 m4 m5 m6 m7"
+
+expect_nonempty "§budget-markers meta: the ack fixture read a ledger schema out of the writer" \
+  "$S22_LEDGER_SCHEMA"
+
+# (a) AC-3.1 — nine intended rows, seven carrying the landing marker, a STALE panel, and a
+# ceiling of eight writers: open=2, this dispatch is the third, ALLOWED.
+REPO=$(make_repo r22mka yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+R22MK_STALE="$SANDBOX/.r22mk-stale.jsonl"
+# shellcheck disable=SC2086
+mk_transcript "$R22MK_STALE" stale $S22MK_NAMES
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mka nine rows, seven landed, STALE panel, writers=8 -> ALLOWED" "0" "$GATE_ST"
+expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
+expect_absent "…and nothing is said about the panel's staleness" "live-agents:" "$GATE_ERR"
+
+# (b) AC-3.2 — THE CONTROL, and the discriminator for (a): the same nine rows, the same
+# stale panel and the same ceiling, with NO markers written. open=9 and the dispatch is
+# refused, naming the budget. A rule that had simply stopped counting would pass both.
+REPO=$(make_repo r22mkb yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mkb the same nine rows UNMARKED on the same stale panel -> REFUSED" "2" "$GATE_ST"
+expect_contains "…on the budget, in the one line" \
+  "bionic: dispatch refused — this passes the run's writer budget" "$GATE_ERR"
+expect_contains "…naming the count the roster holds" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
+
+# (c) AC-3.3 — THE PANEL WINS WHEN IT IS FRESH. The same nine rows and the same seven
+# markers as (a); only the panel changes, to a FRESH answer naming all nine as live. The
+# markers say landed, the panel says working, and the panel is the truth: open=9, REFUSED.
+REPO=$(make_repo r22mkc yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+R22MK_FRESH="$SANDBOX/.r22mk-fresh.jsonl"
+# shellcheck disable=SC2086
+mk_transcript "$R22MK_FRESH" fresh $S22MK_NAMES
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_FRESH")"
+expect_status "r22mkc a FRESH panel naming all nine live is not overridden by seven markers -> REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "…counting all nine open, because the panel said so" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
+
+# (d) THE ACK IS THE SECOND CLOSING TRUTH (REQ-3: "a landing marker or an ack"). The same
+# nine rows and the same stale panel as (b), no markers at all — seven rows acked on the
+# sweeper's own ledger instead. open=2, ALLOWED.
+REPO=$(make_repo r22mkd yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_ack "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mkd seven rows ACKED on a stale panel, writers=8 -> ALLOWED" "0" "$GATE_ST"
+expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
+
+# (e) AN ACK CLOSES THE ROW IT POSTDATES, NOT THE NAME FOREVER. Byte-for-byte (d)'s
+# fixture with the acks dated BEFORE the rows were launched — the shape a name re-dispatched
+# after its ack leaves behind. The ledger holds no ordering against the roster, so the
+# comparison is by time, and an ack that predates the launch closes nothing: open=9, REFUSED.
+REPO=$(make_repo r22mke yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_ack "$REPO" "$SID_A" "$_n" 2026-09-01T00:00:00Z; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mke acks dated BEFORE the rows were launched close nothing -> REFUSED" "2" "$GATE_ST"
+expect_contains "…counting all nine open" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
+
+# (f) A MARKER IS NOT A LATCH (the C1/S2 defect, in this wall's own terms). (a)'s fixture
+# with every landed name DISPATCHED AGAIN below its marker: a fresh `status=intended` row
+# retires the marker above it, so all nine are open once more and the ceiling of eight
+# refuses. This is what makes the reading above a LATEST-CONTRACT reading and not a set.
+REPO=$(make_repo r22mkf yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=9 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK_LANDED; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mkf a name re-dispatched below its own marker is open again -> REFUSED" "2" "$GATE_ST"
+expect_contains "…counting all nine open" \
+  "writers: budget=8 open=9 with-this-dispatch=10" "$GATE_VERR"
+
+# (g) THE CLAIM GOES BACK WITH THE SLOT. A landed row's subprocess claim is not spent
+# either: nine rows each claiming a suite, seven landed, a stale panel and a ceiling of two
+# suites — claimed=2, so this dispatch is the third and the SUITE arm allows it. Without the
+# claim half of the subtraction the same fixture refuses on `suites:`.
+REPO=$(make_repo r22mkg yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=3 worktrees=9 test_jobs=4 source=probe"
+for _n in $S22MK_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n" "bash tests/widget.test.sh"; done
+for _n in $S22MK_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK_STALE")"
+expect_status "r22mkg seven landed rows give their suite claims back too -> ALLOWED at suites=3" \
+  "0" "$GATE_ST"
+expect_absent "…and no suite count is printed" "suites:" "$GATE_ERR"
+
+# (h) THE CLOSED-SET LOOKUP DOES NOT LOSE A ROW TO ITS OWN PIPE (correctness review F8,
+# wave-14 T26; memory grep-q-sigpipe-under-pipefail). `budget_roster_counts`'s dark-rows
+# settlement asked `printf '%s\n' "$closed" | grep -qxF -- "$nm"` under this file's own
+# `set -uo pipefail` (:67). `grep -q` exits at its first match; when `$closed` is large
+# enough that the match leaves more queued than the pipe buffer holds, `printf` takes
+# SIGPIPE, `pipefail` promotes that 141 over grep's own 0, and `|| continue` reads a name
+# that WAS found as though it were not — a landed row keeps holding its writer slot.
+#
+# THE FIXTURE NEEDS THE FAILURE MODE, NOT A ROUND NUMBER. F8's own measurement put the
+# threshold at roughly 4,000-6,000 short lines on this machine; six thousand rows, every
+# one landed, is the margin this pin uses — and the first-inserted name is checked first
+# against a `$closed` list that also starts with it, which is the worst case (the biggest
+# possible queued tail behind an early match). Built through the real roster and
+# landing-swept writers (`roster_row_no_plan`, `swept_marker_write`), never hand-rolled —
+# ONE real row and ONE real marker captured with a placeholder name, then mechanically
+# substituted six thousand times each, so the suite pays one production-writer call per
+# shape rather than twelve thousand subprocess spawns for an equivalent loop.
+section "§budget-markers-pipe: a closed name past the pipe buffer is still recognised"
+
+R22MKH_N=6000
+REPO=$(make_repo r22mkh yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+
+R22MKH_F="$(roster_path "$REPO" "$SID_A")"
+mkdir -p "$(dirname "$R22MKH_F")"
+
+R22MKH_ROW_TMPL="$(roster_row_no_plan status=intended "session=$SID_A" "name=%%NM%%" \
+  agent_id= launched_at=2026-09-02T00:00:00Z subagent_type=implementor model= \
+  "deliverable=/tmp/d-%%NM%%" source=declared "duration=~10 minutes" progress= \
+  claims= cadence= absent= waiver= "tool_use_id=t-%%NM%%")"
+R22MKH_MARK_ONE="$SANDBOX/.r22mkh-mark-one.txt"
+swept_marker_write "$R22MKH_MARK_ONE" 2026-09-02T00:00:01Z "$SID_A" "%%NM%%" "" MET
+R22MKH_MARK_TMPL="$(cat "$R22MKH_MARK_ONE" 2>/dev/null)"
+
+expect_nonempty "§budget-markers-pipe meta: the row template came from the real writer" \
+  "$R22MKH_ROW_TMPL"
+expect_nonempty "§budget-markers-pipe meta: the marker template came from the real writer" \
+  "$R22MKH_MARK_TMPL"
+
+/usr/bin/awk -v tmpl="$R22MKH_ROW_TMPL" -v n="$R22MKH_N" '
+  BEGIN {
+    for (i = 0; i < n; i++) {
+      nm = sprintf("f%05d", i)
+      row = tmpl
+      gsub(/%%NM%%/, nm, row)
+      print row
+    }
+  }
+' >> "$R22MKH_F"
+/usr/bin/awk -v tmpl="$R22MKH_MARK_TMPL" -v n="$R22MKH_N" '
+  BEGIN {
+    for (i = 0; i < n; i++) {
+      nm = sprintf("f%05d", i)
+      row = tmpl
+      gsub(/%%NM%%/, nm, row)
+      print row
+    }
+  }
+' >> "$R22MKH_F"
+
+expect_eq "§budget-markers-pipe meta: the fixture really wrote six thousand roster rows" \
+  "$R22MKH_N" "$(/usr/bin/grep -c "^roster-state/${ROSTER_SCHEMA_VERSION}|status=intended|" "$R22MKH_F" 2>/dev/null || echo 0)"
+expect_eq "§budget-markers-pipe meta: …and six thousand landing markers" \
+  "$R22MKH_N" "$(/usr/bin/grep -c "^${SWEPT_SCHEMA}|" "$R22MKH_F" 2>/dev/null || echo 0)"
+
+R22MKH_STALE="$SANDBOX/.r22mkh-stale.jsonl"
+mk_transcript "$R22MKH_STALE" stale f00000
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MKH_STALE")"
+expect_status "r22mkh six thousand landed rows on a stale panel, writers=1 -> ALLOWED" \
+  "0" "$GATE_ST"
+expect_absent "…so no writers count is printed at all" "writers:" "$GATE_ERR"
 
 # ============================== S22c: A FINISHED-BUT-UNSTOPPED AGENT IS NOT A WRITER
 # (spec R2, AC-27; task S16, closing the Step-5 auditor's F-1.)
@@ -3476,7 +3744,11 @@ S23_MAIN=$( cd "$REPO" && pwd -P )
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "r23a a dispatch from the MAIN checkout passes (the control)" "0" "$GATE_ST"
 
-run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE")"
+# A DISTINCT NAME from r23a's, for the reason r23c states below and this arm now needs too:
+# r23a was ALLOWED and journalled `w99-impl`, and with the arms pooled (wave-14 REQ-8) a
+# re-used name would add the name-in-flight fault to the lease fault and refuse for both at
+# once. The lease wall is what this arm is about.
+run_gate "$(mk_agent_payload "$SID_A" "$S23_TREE" "$BRIEF_FULL" "w99-impl-b")"
 expect_status "r23b the same dispatch from inside the linked worktree is REFUSED" "2" "$GATE_ST"
 expect_contains "…naming the main checkout" "main checkout: $S23_MAIN" "$GATE_VERR"
 expect_contains "…and the tree it was made from" "$S23_TREE" "$GATE_VERR"
@@ -4060,6 +4332,41 @@ expect_status "27f …while still recording the files the brief declared" \
 expect_status "27f …non-vacuity: an impact command WAS configured for this repo" "0" \
   "$([ -f "$REPO/.bionic/config.yaml" ] && echo 0 || echo 1)"
 
+# --- §declared-new-suite (T8, AC-5.1) — a declared suite ABSENT ON DISK lands verbatim ---
+#
+# T7's repro (record/wave-14-tune-181/T7-req5-repro.md §3, RUN 2) drove this exact shape —
+# Files: + a Suites: paragraph naming a suite the task itself is about to create, path-
+# prefixed, own paragraph — against the REAL hook and found it already passing: lift
+# (`lift_contract_fields`/`suite_names()`, :1388-1406) performs no on-disk existence check,
+# and selection (`:2192-2194`) takes the declared set whole. This is that RUN, kept as a
+# PIN beside 27f rather than a new implementation — 27f's own "declared wins whole"
+# assertion is unchanged by it. Per the T8 brief: if this never goes red against the
+# parent, it is reported as a pin, not as RED→GREEN.
+REPO=$(make_repo r27new yes)
+write_attestation "$REPO" "$SID_A"
+s27_impact "$REPO" archive.test.sh run.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Canonical-sdlc Step 4, task 4/4 of epic-23 wave-13; build · audited · wave.
+Your task: the close-out script (D5, D6).
+Expected artifact: .bionic/docs/record/wave-13-fixit-180/T4-close-out.md
+Expected duration: ~120 minutes.
+Files: payload/scripts/close-out.sh, payload/scripts/lib/archive.sh, tests/close-out.test.sh, tests/archive.test.sh, payload/scripts/lib/run.sh
+
+Suites: tests/close-out.test.sh, tests/run-predicate.test.sh' "w27-newsuite")"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "declared-new-suite a Files:+Suites: brief naming a suite absent on disk PASSES" \
+  "0" "$GATE_ST"
+expect_status "declared-new-suite …the row carries BOTH declared tokens, verbatim" \
+  "close-out.test.sh run-predicate.test.sh" "$(roster_field "$ROW" suites_allowed)"
+expect_status "declared-new-suite …suites_source= is declared, not derived" \
+  "declared" "$(roster_field "$ROW" suites_source)"
+# NON-VACUITY: the file really is absent from this fixture repo, and the impact command
+# really was configured (so a wall that fell through to derivation would answer
+# "archive.test.sh run.sh" instead, not this pair).
+expect_status "declared-new-suite …non-vacuity: tests/close-out.test.sh is absent on disk" \
+  "1" "$([ -f "$REPO/tests/close-out.test.sh" ] && echo 0 || echo 1)"
+expect_status "declared-new-suite …non-vacuity: an impact command WAS configured for this repo" \
+  "0" "$([ -f "$REPO/.bionic/config.yaml" ] && echo 0 || echo 1)"
+
 # --- S27g: the row's three fields never disturb the ones already on it ---
 REPO=$(make_repo r27g yes)
 write_attestation "$REPO" "$SID_A"
@@ -4307,14 +4614,23 @@ expect_contains "28f …and the wall still reports zero causes" "Recorded causes
 section "SECTION 29 — the derivation is BOUNDED, and the overrun is a refusal (review-c C-16)"
 # THE DEFECT. The impact command is the whole of this gate's cost — ~0.3 s without it,
 # ~2.9-3.1 s with it on an idle tree, 5.06-6.51 s measured while this wave's own writers
-# were running. hooks/hooks.json registers the hook at "timeout": 10 and the call had no
-# bound of its own. A PreToolUse hook killed on the CLI's timeout does NOT exit 2: the
+# were running. hooks/hooks.json registers the hook at a timeout of its own and the call
+# had no bound of its own. A PreToolUse hook killed on the CLI's timeout does NOT exit 2: the
 # dispatch proceeds, NO ROSTER ROW IS WRITTEN, and the writer runs with no budget at all —
 # the wall defeated by the cost of the wall. So the bound is built here, and it refuses.
 #
-# NO SEAM. The bound is the shipped 6 seconds, not a value this suite hands the hook; the
+# NO SEAM. The bound is the shipped constant, not a value this suite hands the hook; the
 # stub below simply outruns it. A test that shortened the bound would prove a constant it
 # had itself supplied and leave the production path unverified.
+#
+# AND THE CONSTANT IS READ, NOT TRANSCRIBED (wave-14 REQ-7, D4). It moved from a literal in
+# the hook to `payload/scripts/lib/bounds.sh`, which both this wall and the landing sweep
+# source; a number typed here would go stale the first time the library's does, and the
+# assertions below would then be pinning this file's memory of the bound rather than the
+# bound. `s29_impact`'s sleep is derived from it for the same reason.
+S29_BOUND="$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh" 2>/dev/null)"
+expect_nonempty "29 the shipped bound is readable from lib/bounds.sh" "$S29_BOUND"
 
 # s29_impact <repo> <sleep seconds> — an impact command that answers correctly, but late.
 s29_impact() {
@@ -4332,24 +4648,50 @@ s29_impact() {
 # --- 29a: a derivation that outruns the bound REFUSES, and refuses in time ---
 REPO=$(make_repo r29a yes)
 write_attestation "$REPO" "$SID_A"
-s29_impact "$REPO" 30
+s29_impact "$REPO" $(( S29_BOUND + 10 ))
 S29_T0=$(date +%s)
+GATE_HIRES=1
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w29-slow")"
+GATE_HIRES=""
 # THE WALL'S OWN COST, not the suite's: `run_gate` drives the call a second time with
 # BIONIC_WALL_VERBOSE=1 to read `detail`, and that second bounded derivation would double
 # the number measured here. `$GATE_TIME` is the first drive alone.
-S29_ELAPSED="$GATE_TIME"
+S29_ELAPSED="$GATE_TIME_CS"
 expect_status "29a a derivation that outruns the bound REFUSES the dispatch" "2" "$GATE_ST"
-expect_contains "29a …naming the bound it outran" "bound:   6s" "$GATE_VERR"
+expect_contains "29a …naming the bound it outran" "bound:   ${S29_BOUND}s" "$GATE_VERR"
 expect_contains "29a …naming the command that was slow" "impact-stub.sh" "$GATE_VERR"
 expect_contains "29a …naming the paths it was asked about" "payload/scripts/lib/widget.sh" "$GATE_VERR"
 expect_contains "29a …and saying why an unbounded one would be worse" "no roster row" "$GATE_VERR"
-# THE POINT OF THE BOUND IS THE CLOCK. The hook is registered at a 10-second timeout, so a
-# refusal that arrives after it is no refusal at all.
-if [ "$S29_ELAPSED" -lt 10 ]; then
-  ok "29a …and it refused inside the hook's own 10s registration (${S29_ELAPSED}s)"
+# THE POINT OF THE BOUND IS THE CLOCK: the wait ends when the bound says so and not when
+# the command finishes. The stub sleeps ten seconds longer than the bound, so a gate that
+# waited for it would be caught here.
+#
+# THIS ASSERTION USED TO READ `< 10`, THE HOOK'S OWN REGISTRATION IN hooks/hooks.json, and
+# it is re-pinned to the bound instead (wave-14 T6, A-T6.5) — NOT because the registration
+# stopped mattering. THE GAP A-T6.5 NAMED IS CLOSED (wave-14 T35, D1 by Chris): the bound
+# was 20 under a registration of 10, so on the machine the CLI killed this hook before its
+# own bound could fire, and a hook killed on the CLI timeout does not exit 2 — the exact
+# failure the bound exists to prevent, invisible here because a suite has no CLI timeout.
+# Both numbers moved: the registration to 15, the bound to 10, five seconds clear. What
+# this file discharges is AC-7.2, that the wait ends when the bound says so; that the bound
+# sits strictly UNDER its registration is a two-file claim neither file can make alone, and
+# tests/cross-gate-agreement.test.sh §L.4c is where it is pinned.
+# EIGHT SECONDS OF SLACK WAS ENOUGH TO HIDE THE DEFECT IT WAS WATCHING (wave-14 T34). This
+# read `< S29_BOUND + 8` over a whole-second clock. The gate's wait was denominated in
+# `sleep 0.1` polls costing 115 ms each, so a stated 20s bound waited 23.0-23.2s — comfortably
+# inside `+8`, and therefore green, for as long as the drift stayed under eight seconds,
+# which is to say for as long as nobody was under enough load to care. Measured: 22s here
+# and 22s at §hanging-impact on the tick-counted wait, against 20s and 21s on the clock.
+#
+# THE SLACK IS ONE SECOND NOW, AND THE CLOCK CAN SEE IT. `$GATE_TIME_CS` is the first
+# drive in hundredths (`GATE_HIRES` above), so what is left to absorb is the gate's own
+# non-waiting work rather than a second of rounding at each end. A wait denominated in
+# anything that stretches under load misses by seconds and fails here.
+if [ "$S29_ELAPSED" -le $(( (S29_BOUND + 1) * 100 )) ]; then
+  ok "29a …and it stopped waiting at the bound, not at the sleep ($(( S29_ELAPSED / 100 )).$(printf '%02d' $(( S29_ELAPSED % 100 )))s)"
 else
-  no "29a …and it refused inside the hook's own 10s registration" "took ${S29_ELAPSED}s"
+  no "29a …and it stopped waiting at the bound, not at the sleep" \
+    "took $(( S29_ELAPSED / 100 )).$(printf '%02d' $(( S29_ELAPSED % 100 )))s against a ${S29_BOUND}s bound"
 fi
 # FAIL-CLOSED MEANS NO ROW. A refused dispatch journals nothing, so there is no row a
 # writer-side guard could read as "no budget was stated" and stand aside on.
@@ -4409,13 +4751,16 @@ expect_contains "29d …naming the multi-path fault (A11)" "several paths" "$GAT
 # T2 (D3, D11) NARROWS WHAT THIS CAN STILL PROVE. The several-fault wire no longer carries
 # ANY per-finding rationale — not just the brief-shape kind C-2/R6-1/S18b above lost, but
 # A15's config-shaped fact and Fix: too, since neither is one of the five scaffold labels
-# and there is nowhere left on the wire to put it. What survives A11+A15 firing TOGETHER is
-# the SAME observable as A11 alone would leave: the marked scaffold, one refusal, deny. The
-# discriminator that A15 specifically fired — not just A11 — is what 29a already covers on
-# its own single-fault (exit2, unchanged) path; this pair no longer distinguishes it from a
-# combined-brief-fault-only refusal on the WIRE, which is a real narrowing this task surfaces
-# rather than papers over (A-T2, assumptions.md).
-expect_contains "29d …the Expected artifact: line is marked <ADD> (still ambiguous)" \
+# and there is nowhere left on the wire to put it.
+# T26 (critic Issue 3) NARROWS IT FURTHER STILL: the Expected artifact: line is no longer
+# marked <ADD> even here, because `dp_scaffold_marked` now treats a non-empty candidate
+# list as a label that WAS populated, just ambiguously — the same reasoning that keeps the
+# absent-deliverable arm quiet on this brief (see A11 above; the second fault here is A15,
+# not the absent-deliverable arm). The discriminator that A15 specifically fired — not just
+# A11 — is what 29a already covers on its own single-fault (exit2, unchanged) path; this
+# pair no longer distinguishes it from a combined-brief-fault-only refusal on the WIRE,
+# which is a real narrowing this task surfaces rather than papers over (A-T2, assumptions.md).
+expect_absent "29d …the Expected artifact: line is NOT marked <ADD> (a populated, ambiguous label)" \
   "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
 expect_status "29d …and journalled no roster row at all" "0" \
   "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
@@ -4426,15 +4771,12 @@ REPO=$(make_repo r29e yes)
 write_attestation "$REPO" "$SID_A"
 s29_impact "$REPO" 0
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_T23_COMBINED_IMPACT" "w29e-fast")"
+# T26 (critic Issue 3): nothing overran, and A11 is now this brief's ONLY fault (Files:
+# is declared, so the no-Files/no-Suites arm does not fire either) — the ordinary
+# single-arm exit2 wire, not a pooled deny.
 expect_eq "29e control: the same brief, a fast impact command, is still refused" \
-  "deny" "$GATE_VERDICT"
-expect_contains "29e …naming the multi-path fault (A11)" "several paths" "$GATE_VERR"
-# T2 (D3, D11): the "nothing overran, nothing to append" half of this control is now
-# vacuous by construction — the several-fault wire never carries A15's text either way,
-# see the 29d comment above — so this control is left asserting only what still
-# discriminates: the ambiguous-artifact fault is still the one named, unchanged either way.
-expect_contains "29e …the Expected artifact: line is marked <ADD> (still ambiguous)" \
-  "$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact") <ADD>" "$GATE_VERR"
+  "exit2" "$GATE_VERDICT"
+expect_contains "29e …naming the multi-path fault (A11)" "several paths" "$GATE_ERR"
 
 
 # ===========================================================================
@@ -4680,18 +5022,37 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # `Cadence:`), and dp_scaffold_marked reproduces every scaffold line verbatim — marked or
 # not — so the wire grows by exactly as many lines as the scaffold does. Not a widened
 # tolerance; the cap tracks the scaffold's own line count by construction.
-expect_status "§combined …the wire is at most 10 lines (wc -l on the model's own reason)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 10 ] && echo 0 || echo 1)"
+#
+# RAISED 10 -> 13 (wave-14 T6, REQ-8/AC-8.3, A-T6.2), and by a formula rather than a
+# feeling. Ten is still the fixed part — one refusal line, a blank, seven scaffold lines, a
+# blank, the pointer. On top of it this brief buys three lines and no more, though WHICH
+# three moved at T26 (critic Issue 3): the ambiguity fault IS the refusal line and costs
+# nothing; "this brief declares no Files: and no Suites:" is the second fault and costs one
+# line; and two `not checked:` lines now ride the wire instead of one — `deliverable, needs
+# one path` (the absent-deliverable arm recognising the ambiguity arm's own candidates,
+# rather than repeating the fault) and `one-regression, needs a suite set` (unchanged). The
+# general form is still 10 + (faults - 1) + not-checked lines, and the total is unchanged
+# at 13 because a line only moved from the fault column to the not-checked column.
+# §three-arms holds the criterion's own case — three faults, nothing unchecked, twelve —
+# where this arm holds the canonical brief. Widening either without moving a fault count is
+# the mistake to catch.
+expect_status "§combined …the wire is at most 13 lines (10 + 1 extra fault + 2 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 13 ] && echo 0 || echo 1)"
 
 # EACH LABEL, MARKED BY WHETHER THIS BRIEF CARRIES IT — not by which wall fired. The
-# ambiguous Expected artifact:, the absent Files: and the absent Deliverable-waiver: lines
-# all earn ` <ADD>`; the present Expected duration: line is left exactly as shipped.
+# absent Files: and the absent Deliverable-waiver: lines earn ` <ADD>`; the present
+# Expected duration: line is left exactly as shipped. The ambiguous Expected artifact:
+# line does NOT earn one (T26, critic Issue 3) — the label was read and rejected as
+# ambiguous, which is not the same fault as an empty label, and the wire's own
+# `not checked: deliverable, needs one path` line (below) says so instead.
 COMB_ART_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact")"
 COMB_FILES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
 COMB_DURATION_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected duration")"
 COMB_WAIVER_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Deliverable-waiver")"
-expect_contains "§combined …the still-ambiguous Expected artifact: line is marked <ADD>" \
+expect_absent "§combined …the still-ambiguous Expected artifact: line is NOT marked <ADD>" \
   "${COMB_ART_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§combined …and its not-checked line names the deliverable arm instead" \
+  "not checked: deliverable, needs one path" "$GATE_VERR"
 expect_contains "§combined …the absent Files: line is marked <ADD>" \
   "${COMB_FILES_LINE} <ADD>" "$GATE_VERR"
 expect_contains "§combined …the absent Deliverable-waiver: line is marked <ADD>" \
@@ -4732,24 +5093,34 @@ expect_status "§combined attempt 2, following every scaffold-line example, PASS
 expect_status "§combined …with the recommended path as the contract" \
   "$COMB_ART" "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" deliverable)"
 
-# ---- the discriminator: declaring ONE field un-marks only that field's line ----
+# ---- the discriminator: declaring one field discharges that field's PAIR, and nothing else ----
 #
 # Without this arm a wall that printed the scaffold with every line marked unconditionally
-# would pass every assertion above. Suites: is now declared and nothing else is touched: its
-# line must stop carrying <ADD> while Files: (still absent) and Expected artifact: (still
-# ambiguous) keep theirs — proof the marking tracks this brief's own fields, not a static list.
+# would pass every assertion above.
+#
+# RENARROWED BY WAVE-14 T26 (critic Issue 3). This arm used to declare `Suites:` against
+# $BRIEF_THREE_FAULTS and check that the Files:/Suites: pair lost its <ADD> while the
+# Expected artifact:/Deliverable-waiver: pair — still unresolved by an AMBIGUOUS label —
+# kept theirs, on a deny wire the ambiguity finding and a separately-firing "this brief
+# names no deliverable" finding kept alive together. That second finding is exactly critic
+# Issue 3's contradiction (fixed above: an ambiguous label is one fault, not two), so
+# $BRIEF_THREE_FAULTS with `Suites:` added now carries the ambiguity fault ALONE — the
+# ordinary single-arm exit2 wire, with no scaffold on it at all (§combined a two-fault
+# brief... below reads that exact fixture). What this arm can still discriminate is
+# narrower and cleaner: a GENUINELY absent (non-ambiguous) deliverable is a real,
+# independent fault from "no Files: and no Suites:" — declaring `Suites:` discharges only
+# the second and leaves the first exactly where it was.
 REPO=$(make_repo rcomb3 yes)
 write_attestation "$REPO" "$SID_A"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected duration: 20 minutes
 Suites: tests/widget.test.sh" "combobot3")"
-COMB_SUITES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Suites")"
-expect_eq "§combined a two-fault brief is still refused" "deny" "$GATE_VERDICT"
-expect_absent "§combined …and the now-declared Suites: line lost its <ADD>" \
-  "${COMB_SUITES_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§combined …while the still-absent Files: line keeps its <ADD>" \
-  "${COMB_FILES_LINE} <ADD>" "$GATE_VERR"
-expect_contains "§combined …and the still-ambiguous Expected artifact: line keeps its <ADD>" \
-  "${COMB_ART_LINE} <ADD>" "$GATE_VERR"
+expect_eq "§combined declaring Suites: discharges the Files:/Suites: fault, leaving the other" \
+  "exit2" "$GATE_VERDICT"
+expect_contains "§combined …the surviving fault is the genuinely absent deliverable" \
+  "this brief names no deliverable" "$GATE_ERR"
+expect_absent "§combined …and the Files:/Suites: fault is really gone, not merely unmarked" \
+  "Files:" "$GATE_ERR"
 
 # ---- and a ONE-fault brief is refused exactly as it always was ----
 #
@@ -4767,6 +5138,126 @@ expect_eq "§combined a single-fault brief keeps the arm's own line, unchanged" 
 expect_eq "§combined …and renders exactly one Fix: block" "1" \
   "$(printf '%s\n' "$GATE_VERR" | /usr/bin/grep -c '^Fix: ' || true)"
 
+# ============================================================================
+section "§scaffold-marks — the scaffold marks what the brief LACKS, not what it omits (wave-14 REQ-6, D8)"
+# ============================================================================
+#
+# WHAT A MARK MEANS. `dp_scaffold_marked` reproduces the shipped scaffold and suffixes
+# ` <ADD>` to the lines this brief still needs. Until wave-14 it asked only "did this brief
+# spell this label", which is A-T2.1's literal-presence rule — and three of the scaffold's
+# labels are not standalone requirements at all. The scaffold says so itself: `Files:` is
+# "writers; omit for a read-only brief", `Deliverable-waiver:` is "only for a report returned
+# by message". So a read-only brief that had correctly declared `Suites:` was told to add
+# files it will not touch, and a brief that had declared its artifact was told to waive it —
+# an instruction that, followed, would make the dispatch worse. Two of the three items on
+# wave-13's walk.
+#
+# THE RULE (D8). `Files:` is marked only when `C_FILES` and `C_SUITES` are BOTH empty — the
+# suite-allowance wall's own condition, so the mark appears exactly when that wall fires.
+# `Expected artifact:` and `Deliverable-waiver:` are each marked only when `C_DELIVERABLE`
+# and `C_WAIVER` are both empty — the absent-deliverable wall's own condition, and the pair
+# is symmetric because either one satisfies the contract.
+#
+# KEYED ON THE LIFTED FIELDS, NEVER ON LITERAL LINE PRESENCE (R2 Q7). `BRIEF_THREE_FAULTS`
+# below carries an `Expected artifact:` line whose span names two paths: the extractor emits
+# candidates and leaves `C_DELIVERABLE` empty, so the brief HAS the label and still needs it.
+# A rule keyed on the label's presence would unmark it and take (c) — and §combined's own
+# pin — red.
+#
+# EVERY EXPECTED STRING IS READ OUT OF THE SHIPPED dispatch.md at run time, never
+# transcribed, exactly as §combined does it.
+
+SM_ART_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Expected artifact")"
+SM_FILES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Files")"
+SM_SUITES_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Suites")"
+SM_WAIVER_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Deliverable-waiver")"
+expect_nonempty "§scaffold-marks meta: the four scaffold lines were read out of dispatch.md" \
+  "${SM_ART_LINE}${SM_FILES_LINE}${SM_SUITES_LINE}${SM_WAIVER_LINE}"
+
+# (a) AC-6.1 — A READ-ONLY BRIEF DECLARES ITS INSTRUMENT THE OTHER WAY. `Suites: none` is
+# the read-only waiver, so `Files:`/`Suites:` are satisfied and must not be marked.
+#
+# RENARROWED BY WAVE-14 T26 (critic Issue 3). This fixture used to pair an ambiguous
+# deliverable label with an empty one for a two-fault deny — the exact duplicate-counting
+# bug Issue 3 names (see the §combined rewrite above for the full reasoning). With that
+# collapsed to one fault, and `Suites: none` discharging the OTHER pooled arm this file has
+# (no independent third arm can fire alongside a satisfied Files:/Suites: pair and a
+# deliverable-field fault — every other brief-shape arm reads the same field), this brief
+# is down to its ordinary single-arm exit2 wire, where `dp_scaffold_marked` never renders
+# at all. What still discriminates: the refusal names ONLY the deliverable fault, and
+# never so much as mentions Files:/Suites:/impact-command — proving the pair was read as
+# satisfied rather than merely unmarked on a wire this fixture can no longer reach.
+REPO=$(make_repo rsm-readonly yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected duration: 20 minutes
+Suites: none" "smbot1")"
+expect_eq "§scaffold-marks (a) the read-only brief refuses on its own single-arm wire" \
+  "exit2" "$GATE_VERDICT"
+expect_contains "§scaffold-marks (a) …naming the absent deliverable" \
+  "this brief names no deliverable" "$GATE_ERR"
+expect_absent "§scaffold-marks (a) …and never mentioning Files: — Suites: none satisfied it" \
+  "Files:" "$GATE_ERR"
+expect_absent "§scaffold-marks (a) …nor Suites: — it was declared, not missing" \
+  "no impact command" "$GATE_ERR"
+
+# (b) AC-6.2 — A DECLARED ARTIFACT SATISFIES THE WAIVER'S HALF OF THE PAIR. The deliverable
+# resolves outside the repo and the brief declares no instrument: two faults, and a
+# `C_DELIVERABLE` that is non-empty. Nothing here needs a waiver.
+REPO=$(make_repo rsm-artifact yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: ../../../../../../etc/hosts
+Expected duration: ~15 minutes." "smbot2")"
+expect_status "§scaffold-marks (b) the artifact-bearing brief refuses on the several-fault wire" "0" \
+  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
+expect_absent "§scaffold-marks (b) …and the Deliverable-waiver: line is NOT marked beside a declared artifact" \
+  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (b) …the Deliverable-waiver: line is still rendered, as shipped" \
+  "$SM_WAIVER_LINE" "$GATE_VERR"
+expect_absent "§scaffold-marks (b) …nor is the declared Expected artifact: line marked" \
+  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (b) …while the absent Files: line IS marked (no instrument either way)" \
+  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
+
+# (c) AC-6.2, THE OTHER DIRECTION. A declared waiver satisfies the artifact's half of the
+# same pair: the brief reports by message, so `Expected artifact:` is not something it
+# lacks. Its two faults are the ambiguous label and the missing instrument — the
+# absent-deliverable wall is waived, which is what the waiver is for.
+REPO=$(make_repo rsm-waiver yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Deliverable-waiver: nothing durable — this dispatch reports by message
+Expected duration: 20 minutes" "smbot3")"
+expect_status "§scaffold-marks (c) the waived brief refuses on the several-fault wire" "0" \
+  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
+expect_absent "§scaffold-marks (c) …and the Expected artifact: line is NOT marked beside a declared waiver" \
+  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
+expect_absent "§scaffold-marks (c) …nor is the declared Deliverable-waiver: line marked" \
+  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (c) …while the absent Files: line IS marked" \
+  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
+
+# (d) AC-6.3 — NEITHER INSTRUMENT DECLARED, BOTH THOSE LINES MARKED. `BRIEF_THREE_FAULTS`
+# is §combined's own fixture: `Files:`/`Suites:` are both absent (marked), and
+# `Deliverable-waiver:` is absent too (marked). `Expected artifact:` is NOT marked (T26,
+# critic Issue 3) — the label was read and rejected as ambiguous, which `dp_scaffold_marked`
+# now treats as a populated-but-unresolved label rather than an empty one; the wire's
+# `not checked: deliverable, needs one path` line (§combined above) is where that reads.
+REPO=$(make_repo rsm-both yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "smbot4")"
+expect_status "§scaffold-marks (d) the three-fault brief refuses on the several-fault wire" "0" \
+  "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
+expect_absent "§scaffold-marks (d) the still-ambiguous Expected artifact: line is NOT marked" \
+  "${SM_ART_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (d) both absent -> the Deliverable-waiver: line is marked" \
+  "${SM_WAIVER_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (d) neither instrument -> the Files: line is marked" \
+  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "§scaffold-marks (d) neither instrument -> the Suites: line is marked" \
+  "${SM_SUITES_LINE} <ADD>" "$GATE_VERR"
 # ============================================================================
 section "§combined-deny — the combined refusal reaches the MODEL (wave-12 T17, AC-1.1)"
 # ============================================================================
@@ -4823,8 +5314,10 @@ expect_eq "§combined-deny the reason opens with the refusal's one line" \
 expect_absent "§combined-deny …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
 expect_absent "§combined-deny …no per-fault '── N.' heading" "── " "$GATE_REASON"
 expect_absent "§combined-deny …no Fix: block" "Fix: " "$GATE_REASON"
-expect_contains "§combined-deny …the still-ambiguous Expected artifact: line is marked <ADD>" \
+expect_absent "§combined-deny …the still-ambiguous Expected artifact: line is NOT marked <ADD>" \
   "${COMB_ART_LINE} <ADD>" "$GATE_REASON"
+expect_contains "§combined-deny …and its not-checked line names the deliverable arm instead" \
+  "not checked: deliverable, needs one path" "$GATE_REASON"
 expect_contains "§combined-deny …the absent Files: line is marked <ADD>" \
   "${COMB_FILES_LINE} <ADD>" "$GATE_REASON"
 expect_contains "§combined-deny …the present Expected duration: line is left exactly as shipped" \
@@ -4865,21 +5358,43 @@ expect_eq "§combined-deny …with its arm's own line, unchanged" \
   "bionic: dispatch refused — this brief names no deliverable (add an Expected artifact: line)" \
   "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
 
-# ---- and a STATE refusal is not on the JSON channel either ----
+# ---- and a LONE refusal is not on the JSON channel either, whatever arm it came from ----
 #
-# THE SPLIT T2 DREW IS A SPLIT IN THE ARTIFACT, and this arm keeps T17 from blurring it: the
-# arming wall fires on the SAME three-fault brief, above every brief-shape arm, and it is a
-# fact about the machine rather than the brief. It refuses where it stands, on exit2, and
-# prints no verdict — so the channel tracks "a list of brief faults", not "a refusal".
+# CHANGED, WITH ATTRIBUTION (wave-14 T6, REQ-8/D3, A-T6.4). This arm used to drive
+# `BRIEF_THREE_FAULTS` with the Patrol unarmed and assert exit2, on wave-12's reading that
+# the channel tracks "a list of BRIEF faults" and a state fault is a different kind of
+# thing. REQ-8 overturns that reading: the arming wall now pools with the rest, so that
+# fixture carries FOUR faults and the several-fault wire is where all four belong — the
+# whole point being that the model reads them in one pass. What the arm was really
+# protecting is that a LONE fault keeps its arm's own sentence, its own `exit2` and an empty
+# stdout, and that claim is stronger when the lone fault is a STATE one, so that is what it
+# drives now: a clean brief whose only defect is the unarmed Patrol.
 REPO=$(make_repo rcombdeny3 yes)
 write_attestation "$REPO" "$SID_A"
 rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot3")"
-expect_eq "§combined-deny a STATE refusal (the unarmed Patrol) stays on exit2" \
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "denybot3")"
+expect_eq "§combined-deny a LONE state fault (the unarmed Patrol) stays on exit2" \
   "exit2" "$GATE_VERDICT"
 expect_empty "§combined-deny …and prints no verdict on stdout" "$GATE_OUT"
-expect_contains "§combined-deny …refusing for the state, not for the brief" \
+expect_contains "§combined-deny …refusing for the state, in the arming wall's own words" \
   "Patrol" "$GATE_ERR$GATE_VERR"
+
+# THE PAIRED CONTROL, and it is the half REQ-8 added: the SAME unarmed Patrol beside brief
+# faults is one refusal on the model's wire, naming both kinds. Without this row the arm
+# above reads as "state refusals never reach the deny channel", which is what stopped being
+# true.
+REPO=$(make_repo rcombdeny3b yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_THREE_FAULTS" "denybot3b")"
+expect_eq "§combined-deny the same state fault BESIDE brief faults refuses once, on deny" \
+  "deny" "$GATE_VERDICT"
+expect_eq "§combined-deny …with exactly one refusal line on the user stream" "1" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+expect_contains "§combined-deny …the model's wire naming the state fault" \
+  "no Patrol stamp exists for this session" "$GATE_REASON"
+expect_contains "§combined-deny …and a brief fault beside it" \
+  "this brief declares no Files: and no Suites:" "$GATE_REASON"
 
 # ---- the claim: attempt two, written from the MODEL'S wire, dispatches ----
 REPO=$(make_repo rcombdeny4 yes)
@@ -5271,6 +5786,358 @@ s22_sweep "$REPO" "$SID_A" "T5"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T5" "claude-sonnet-5" "$T22NF_NONE")"
 expect_status "t22nfj2 landing the adopted row frees the name again" "0" "$GATE_ST"
 expect_absent "…and no in-flight refusal is left" "in flight" "$GATE_ERR"
+
+# (k) AN ACK DOES NOT FREE A NAME — DRIVEN, not asserted in a comment (wave-14 T16, REQ-3).
+#
+# WHY IT NEEDS ITS OWN ARM. Wave-14 T5 (ffe3265) moved this arm's reading into
+# `dp_roster_contracts`, whose per-row verdict is `contract_closed(nm) || ack_closes(nm, ...)`
+# — a marker OR a post-launch ack closes a row. The ack half exists for the BUDGET wall, which
+# passes the sweeper's ledger; THIS arm passes none, deliberately, because an ack is the
+# orchestrator's judgement about a DELIVERABLE and a row acked while its agent is still working
+# still holds its NAME. Handing that name to a second dispatch is the one collision this wall
+# exists to prevent. (j2)'s header states that; nothing drove it. So the two consumers of one
+# reading disagree about the ack BY DESIGN, and this pair is the wall that keeps them
+# disagreeing: a later "simplification" that handed this arm the ledger passes every other arm
+# in this section and fails here. The other half — that the same ack DOES close a row at the
+# budget wall — is r22mkd, with r22mke as its stale-dated control.
+#
+# fails-when: an ack reaches this arm, or the marker stops freeing the name.
+REPO=$(make_repo t22nfk yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=9 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "T16-k"
+s22_ack "$REPO" "$SID_A" "T16-k"
+# META, and the anti-vacuity arm: the ack really is on the ledger, under the schema its WRITER
+# declares (s22_ack reads `LEDGER_SCHEMA` out of hooks/session-sweeper.sh), and it postdates the
+# launch stamp `s22_roster_row` wrote — so (k) below is green because the arm declines to read
+# it, never because the fixture wrote nothing a reader would believe.
+expect_contains "t22nfk meta: the ack is on the sweeper's ledger, for this name" \
+  "name=T16-k" "$(cat "$REPO/.bionic/tmp/sweeper-$SID_A.state")"
+expect_contains "t22nfk meta: …and it postdates the row's launched_at" \
+  "at=2026-09-03T00:00:00Z" "$(cat "$REPO/.bionic/tmp/sweeper-$SID_A.state")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T16-k" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfk a post-launch ACK does not free the name: still REFUSED" "2" "$GATE_ST"
+expect_contains "…naming the fact" "that name is in flight" "$GATE_ERR"
+expect_contains "…and the status it names is the open row's" "intended" "$GATE_VERR"
+
+# (k2) THE PAIRED CONTROL, and the recovery: the MARKER, on the SAME fixture the ack could not
+# close. One line's difference between a refusal and a pass — without it, (k) is green on a
+# wall that refuses this name for any reason at all.
+s22_sweep "$REPO" "$SID_A" "T16-k"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "T16-k" "claude-sonnet-5" "$T22NF_NONE")"
+expect_status "t22nfk2 …and the MET marker, on that same fixture, does free it" "0" "$GATE_ST"
+expect_absent "…and no in-flight refusal is left" "in flight" "$GATE_ERR"
+
+section "§three-arms — one refusal names every fault, across arms (wave-14 REQ-8, D3, AC-8.1/AC-8.3)"
+# ============================================================================
+#
+# THE INCIDENT, ONE WAVE ON. Wave-12 T2 pooled the five BRIEF-SHAPE arms and left every
+# STATE arm exiting where it stood, on the argument that a broken environment and a typo
+# do not belong in one list. The 2026-09-13 loop is the measurement that overturned it:
+# the six refusals Chris counted were the arming wall, then the budget, then the suite
+# allowance — three DIFFERENT arms, one per attempt, each holding a fact the gate had
+# already read. D3 keeps arm 6 (attestation) first and alone, because a repo that cannot
+# be written makes every later disk read meaningless, and pools everything else.
+#
+# fails-when: the refusal names fewer than three faults, or fixing the first alone
+# produces a refusal naming a fault the first refusal could have named.
+
+# ONE SHAPE FAULT, not three: BRIEF_THREE_FAULTS would put five faults on the wire and the
+# arm below could not tell "the pool works" from "the shape pool works". This is the
+# §combined-deny single-fault brief — a declared Suites: and no artifact — so the only
+# brief-shape arm that fires is A13.
+BRIEF_ONE_SHAPE_FAULT='Your task: build it.
+Expected duration: ~15 minutes.
+Suites: tests/widget.test.sh'
+
+REPO=$(make_repo r3arms yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"                      # fault 1: arm 7a, the Patrol
+s22_set_budget "$REPO" "writers=1 suites=9 worktrees=9 test_jobs=4 source=probe"
+s22_roster_row "$REPO" "$SID_A" "W-ONE"                          # fault 2: arm 10, the budget
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONE_SHAPE_FAULT" "w3arms")"
+
+expect_eq "§three-arms a brief faulting in three arms is REFUSED" "deny" "$GATE_VERDICT"
+expect_eq "§three-arms …exactly once: one refusal line reaches the user" "1" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep -c '^bionic: ' || true)"
+# THE USER LINE IS THE FIRST ARM'S OWN, unchanged — the Patrol runs first in file order,
+# and AC-E1.3 leaves no room on that line for a count or a second fault.
+expect_eq "§three-arms …the user line stays the first arm's own sentence" \
+  "bionic: dispatch refused — no Patrol stamp exists for this session (CronCreate the Patrol job)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+# ALL THREE ON THE MODEL'S OWN WIRE. `$GATE_REASON` is parsed out of the deny verdict, so
+# what is asserted here is what the model actually reads.
+expect_contains "§three-arms …the model's wire names the Patrol fault" \
+  "no Patrol stamp exists for this session" "$GATE_REASON"
+expect_contains "§three-arms …and the budget fault" \
+  "this passes the run's writer budget" "$GATE_REASON"
+expect_contains "§three-arms …and the brief-shape fault" \
+  "this brief names no deliverable" "$GATE_REASON"
+
+# AC-8.3 — THE LINE BUDGET IS A FORMULA NOW, not a tolerance. Wave-13's cap is ten lines
+# (one refusal line, a blank, the seven scaffold lines, a blank, the pointer) and it tracks
+# the scaffold's own length by construction. REQ-8 adds ONE line per ADDITIONAL fault: the
+# first fault is already the user line and costs nothing, faults 2..N cost a line each, and
+# so does every `not checked:` line. Three faults, no not-checked line: ten plus two.
+expect_status "§three-arms …and the wire is at most 12 lines (10 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 12 ] && echo 0 || echo 1)"
+# NOT VACUOUS: a wire that named nothing extra would also be under twelve. It has to have
+# GROWN by exactly the two lines the two extra faults bought.
+expect_status "§three-arms …and it really grew: more than the ten-line single-arm wire" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -ge 11 ] && echo 0 || echo 1)"
+# THE SHAPE BANS OF WAVE-13 STAND: no per-fault heading, no fault-count sentence, no
+# stacked `Fix:` paragraphs. One line per fault is a LINE, not a section.
+expect_absent "§three-arms …no fault-count header sentence" "SHAPE FAULTS" "$GATE_REASON"
+expect_absent "§three-arms …no per-fault '── N.' heading" "── " "$GATE_REASON"
+expect_absent "§three-arms …and no stacked Fix: blocks" "Fix: " "$GATE_REASON"
+# THE FIXTURE'S OWN ROW STANDS AND NOTHING WAS ADDED TO IT. A refused dispatch is not a
+# launch, however many arms it faulted in — and the budget fixture above wrote exactly one.
+expect_status "§three-arms …and appends no row for the refused dispatch" "1" \
+  "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- THE CLAIM: fixing the first fault surfaces NOTHING the first refusal withheld ----
+#
+# This is the arm that makes the section mean something. Arm the Patrol and dispatch the
+# same brief into the same repo: the refusal must name the remaining two and must not
+# name a THIRD that was readable all along.
+write_attestation "$REPO" "$SID_A"
+printf 'armed\n' > "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONE_SHAPE_FAULT" "w3arms2")"
+expect_eq "§three-arms attempt 2, the Patrol armed, is still refused" "deny" "$GATE_VERDICT"
+expect_absent "§three-arms …and the Patrol fault is gone" \
+  "no Patrol stamp exists for this session" "$GATE_REASON"
+expect_contains "§three-arms …naming the budget fault the first refusal already named" \
+  "this passes the run's writer budget" "$GATE_REASON"
+expect_contains "§three-arms …and the brief-shape fault it already named too" \
+  "this brief names no deliverable" "$GATE_REASON"
+
+# ---- AND ONE FAULT IS STILL ONE SENTENCE, on its arm's own channel ----
+#
+# The discriminator wave-12 T17 installed, kept whole: pooling the state arms must not
+# migrate a LONE state refusal onto the JSON wire. A clean brief with nothing wrong but
+# the Patrol refuses on exit2, in the arming wall's own words, printing no verdict.
+REPO=$(make_repo r3arms3 yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w3arms3")"
+expect_eq "§three-arms a LONE state fault still refuses on exit2" "exit2" "$GATE_VERDICT"
+expect_empty "§three-arms …printing no verdict on stdout" "$GATE_OUT"
+expect_eq "§three-arms …in the arming wall's own words, unchanged" \
+  "bionic: dispatch refused — no Patrol stamp exists for this session (CronCreate the Patrol job)" \
+  "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+
+section "§not-checked — a dependent arm says so, rather than going quiet (wave-14 REQ-8, AC-8.2)"
+# ============================================================================
+#
+# SOME ARMS GENUINELY CANNOT ANSWER until an earlier one has produced something. The
+# one-regression wall reads `SUITES_ALLOWED` for `run.sh`; a brief that declares neither
+# `Files:` nor `Suites:` produces no set at all, so the wall has nothing to read. Silence
+# there is the thing AC-8.2 forbids: the author fixes the pooled faults, dispatches again,
+# and meets a refusal the gate could have TOLD them was coming. The shape is the one the
+# budget wall's per-field reading already uses — name the arm, name what it needs.
+#
+# fails-when: a dependent arm is silently skipped.
+
+BRIEF_NO_SET='Your task: review the wave.
+Expected duration: 20 minutes.'
+
+REPO=$(make_repo rnotchk yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_NO_SET" "wnotchk")"
+expect_eq "§not-checked a brief with no Files: and no Suites: is refused" "deny" "$GATE_VERDICT"
+expect_contains "§not-checked …naming the suite-allowance fault" \
+  "this brief declares no Files: and no Suites:" "$GATE_REASON"
+expect_contains "§not-checked …and saying the one-regression wall was not checked, and why" \
+  "not checked: one-regression, needs a suite set" "$GATE_REASON"
+# THE CONTROL, and it is what stops this from pinning a constant string. It has to be a
+# refusal on the SAME wire — two faults, so the several-fault wire is what is read — over a
+# brief that DOES declare a suite set, which leaves the one-regression wall checkable. An
+# unarmed Patrol supplies the second fault without touching the brief.
+REPO=$(make_repo rnotchk2 yes)
+write_attestation "$REPO" "$SID_A"
+rm -f "$(s21_stamp_path "$REPO" "$SID_A")"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ONE_SHAPE_FAULT" "wnotchk2")"
+expect_eq "§not-checked control: a two-fault brief that DECLARES Suites: is refused too" \
+  "deny" "$GATE_VERDICT"
+expect_absent "§not-checked …with no not-checked line for a wall that COULD be checked" \
+  "not checked: one-regression" "$GATE_REASON"
+
+section "§slow-impact — a slow derivation is admitted, and derives the same set (wave-14 REQ-7, AC-7.1)"
+# ============================================================================
+#
+# THE STANDING WORKAROUND THIS RETIRES. `IMPACT_BOUND_S` was six seconds and
+# tests/lib/impact.sh cost 4.2 s at quiet load, so an ordinary dispatch under load 8-12
+# took 5.6 s and was refused for the cost of asking its own question (A-orch-46). The
+# operator's answer was to declare `Suites:` by hand on every dispatch during a floor.
+# The bound is a HANG GUARD now (lib/bounds.sh), the cost is gone to T9's cache, and a
+# derivation that merely takes 5.6 s is admitted.
+#
+# THE SLEEP IS THE LOAD. AC-7.1 states the cost in seconds; a load generator would prove
+# the same thing with a fixture nobody can run twice the same way. What matters is that
+# the gate waits for a derivation of that length and records its answer.
+#
+# fails-when: the loaded case is refused with the bound line, or the two derived sets differ.
+REPO=$(make_repo rslowimp yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 5.6
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-slow-imp")"
+expect_status "§slow-impact a 5.6s derivation is ADMITTED" "0" "$GATE_ST"
+expect_absent "§slow-impact …with no bound line anywhere on the wire" "bound:" "$GATE_ERR"
+SLOW_SET="$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+expect_eq "§slow-impact …and the row carries the derivation's own answer" "alpha.test.sh" "$SLOW_SET"
+
+# ---- THE PAIRED ARM (T29, AC-7.1 discrimination) ----
+#
+# WHY THE ARM ABOVE PROVES NOTHING ALONE. §slow-impact's claim is that the SHIPPED bound
+# (10s since T35's D1 move, 20s as T9/D4 first set it) is what admits a 5.6s derivation —
+# not that any bound would. At the
+# superseded 6s bound the same 5.6s sleep cleared by only 0.4s, so this section passed
+# there too (T6-one-refusal.md §3; auditor finding AC-7.1, UNVERIFIABLE at d3930dd): the
+# observation is identical with the bound move absent. The missing control is the SAME
+# 5.6s derivation, on the SAME fixture, forced under a bound BELOW the sleep — it must
+# refuse, and its refusal must name the forced number, or the override never reached the
+# arm and any refusal it produced would be refusing for some unrelated reason.
+#
+# HOW THE BOUND IS FORCED. dispatch-preflight.sh sources lib/bounds.sh only when
+# IMPACT_BOUND_S is unset (`[ -z "${IMPACT_BOUND_S:-}" ]`, :2509) — an env value already
+# set on entry wins and the library is never read. GATE_ENV is the driver's own channel
+# for exactly this (see probe_env_on above, which does the same thing for
+# ANTHROPIC_API_KEY and HOME); saved and restored around the one call so no later arm in
+# this file inherits a forced bound.
+#
+# WHY 5 AGAINST 5.6 IS A REAL MARGIN NOW, AND WAS NOT (wave-14 T34). As written this arm
+# was a coin flip, green at T29's head and red at 89f6944's on the same machine at lower
+# load. Nothing about the override was at fault — instrumentation caught the arm reading
+# `bound=5` exactly as intended — but the gate spent that bound as fifty `sleep 0.1` polls
+# costing 115 ms each, so the "5 second" wait ran 5.77 s against a 5.6 s derivation and the
+# fixture won about half the time. The wait is a wall-clock one now and ends in
+# [4 s, 5 s], which is 0.6 s clear of the sleep and, being a clock, does not narrow under
+# load. The 0.4 s the arm was written with was never the margin it looked like; measure
+# before shortening it further.
+#
+# fails-when: the forced-5s call is ADMITTED, or its refusal does not name the forced
+# number (`bound:   5s`, the arm's own wire spacing — a wire naming a different number
+# would mean the override never reached the arm at all).
+_S29_GATE_ENV_SAVE="$GATE_ENV"
+GATE_ENV="$GATE_ENV IMPACT_BOUND_S=5"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-slow-imp-forced5")"
+GATE_ENV="$_S29_GATE_ENV_SAVE"
+expect_status "§slow-impact …the SAME 5.6s derivation, forced to a 5s bound, is REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "§slow-impact …naming the FORCED bound, proving the override reached the arm" \
+  "bound:   5s" "$GATE_VERR"
+# THE ROSTER IS THE CONTROL: still exactly the one row the ADMITTED call above wrote —
+# not two, which would mean the forced-bound call was admitted after all and only the
+# assertion above was wrong.
+expect_status "§slow-impact …and journalled no row for the refused dispatch" \
+  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# THE SAME DISPATCH AT QUIET LOAD, same set. This is AC-7.1's second half: the derived set
+# is a property of the tree and the brief, never of how long the machine took to say it.
+REPO=$(make_repo rslowimp2 yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 0
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-quiet-imp")"
+expect_status "§slow-impact control: the same brief with no sleep is admitted too" "0" "$GATE_ST"
+expect_eq "§slow-impact …and derives the SAME set" "$SLOW_SET" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+section "§hanging-impact — a hang is still bounded, and the bound is named (wave-14 REQ-7, AC-7.2)"
+# ============================================================================
+#
+# WHAT IS LEFT FOR A BOUND TO DO once the cost is cached: an impact command that never
+# returns. A hook killed on the CLI's own timeout does NOT exit 2 — the dispatch proceeds
+# with no roster row and therefore no budget at all — so the wait has to end on OUR terms,
+# strictly inside the registration hooks/hooks.json gives this hook (§L.4c in
+# cross-gate-agreement pins the pair; both numbers are read from their own files).
+#
+# NO SEAM. The bound is the shipped constant, read from lib/bounds.sh; the fixture simply
+# outruns it. A test that shortened the bound would prove a value it had itself supplied.
+#
+# fails-when: the preflight waits past the stated bound, or the refusal does not name it.
+BOUND_S="$(bash -c '. "$1" 2>/dev/null && printf "%s" "${IMPACT_BOUND_S:-}"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh" 2>/dev/null)"
+expect_nonempty "§hanging-impact the shipped bound is readable from lib/bounds.sh" "$BOUND_S"
+
+REPO=$(make_repo rhangimp yes)
+write_attestation "$REPO" "$SID_A"
+s29_impact "$REPO" 60
+GATE_HIRES=1
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FILES" "w-hang-imp")"
+GATE_HIRES=""
+HANG_ELAPSED="$GATE_TIME_CS"
+expect_status "§hanging-impact a 60s derivation is REFUSED" "2" "$GATE_ST"
+expect_contains "§hanging-impact …naming the bound it outran, as the library defines it" \
+  "${BOUND_S}s" "$GATE_VERR"
+# THE CLOCK IS THE CLAIM. `$GATE_TIME_CS` is the first drive alone (run_gate drives a
+# second time under the verbose knob, which would double any number read across both).
+# ONE SECOND OF SLACK, NOT EIGHT, AND READ IN HUNDREDTHS — the same re-pinning as 29a, for
+# the same reason and against the same defect (wave-14 T34): the tick-counted wait ran
+# 23.0-23.2s here too, and a whole-second clock with eight seconds of slack called it fine.
+if [ "$HANG_ELAPSED" -le $(( (BOUND_S + 1) * 100 )) ]; then
+  ok "§hanging-impact …and it stopped waiting at the bound, not at the sleep ($(( HANG_ELAPSED / 100 )).$(printf '%02d' $(( HANG_ELAPSED % 100 )))s)"
+else
+  no "§hanging-impact …and it stopped waiting at the bound, not at the sleep" \
+    "took $(( HANG_ELAPSED / 100 )).$(printf '%02d' $(( HANG_ELAPSED % 100 )))s against a ${BOUND_S}s bound"
+fi
+expect_status "§hanging-impact …and journalled no row at all" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+section "§bound-one-owner — the derivation bound is defined once, fleet-wide (wave-14 REQ-7, AC-7.4)"
+# ============================================================================
+#
+# T9's own suite pins the LIBRARY's half (tests/stop.test.sh §6). This is the other half,
+# and the one AC-7.4 names: the preflight carried its own `IMPACT_BOUND_S=6` under its own
+# header, so the two legs of the fleet meant different things by "bounded" while each
+# message quoted its own number.
+#
+# THE REAL PATHS, NOT `payload/`. `payload/hooks` is a symlink to `../hooks`, and grep -r
+# does not descend through a symlinked directory met during recursion — AC-7.4's own
+# spelling over `payload/` cannot see this file's definition at all and would report one
+# while two existed (T9 report §6).
+#
+# A DEFINITION IS A LITERAL NUMBER. A line that READS the constant — the wait's own
+# `[ "$SECONDS" -ge "$IMPACT_BOUND_S" ]` — is not counted; that distinction is the whole of
+# what "defined in two places" means.
+#
+# TWO BOUNDS, ONE OWNER EACH (re-spelled by wave-14 T16 against T15). This arm counted every
+# definition matching `[A-Z_]*IMPACT_BOUND_S=`, which was one until T15 landed
+# `LG_IMPACT_BOUND_S=6` — the LANDING GATE's bound, a different number that moves for a
+# different reason (lib/bounds.sh states both, and tests/stop.test.sh §6 owns that one). The
+# loose prefix read T15's ratified second constant as a second definition of THIS one. So the
+# count below is of the exact name, and the arm under it keeps the intent the prefix was there
+# for: no hook re-spells a derivation bound under its own header, whatever it calls it — every
+# `*IMPACT_BOUND_S=` definition in the fleet lives in lib/bounds.sh, and there are exactly two.
+DP_BOUND_DEFS="$(/usr/bin/grep -rnE '^[[:space:]]*IMPACT_BOUND_S=[0-9]' \
+  "${BIONIC_SCRIPTS_DIR}/hooks" "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
+expect_eq "§bound-one-owner exactly one numeric definition across hooks/ and payload/scripts/" \
+  "1" "$(printf '%s\n' "$DP_BOUND_DEFS" | /usr/bin/grep -c . )"
+expect_contains "§bound-one-owner …and it is the one in lib/bounds.sh" "lib/bounds.sh" "$DP_BOUND_DEFS"
+DP_BOUND_ANY="$(/usr/bin/grep -rnE '^[[:space:]]*[A-Z_]*IMPACT_BOUND_S=[0-9]' \
+  "${BIONIC_SCRIPTS_DIR}/hooks" "${BIONIC_SCRIPTS_DIR}/payload/scripts" 2>/dev/null)"
+expect_eq "§bound-one-owner …and NO other file defines a bound under any prefix" "0" \
+  "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -v '/lib/bounds\.sh:' | /usr/bin/grep -c . )"
+expect_eq "§bound-one-owner …lib/bounds.sh owning exactly the two the fleet has (T15's is the second)" \
+  "2" "$(printf '%s\n' "$DP_BOUND_ANY" | /usr/bin/grep -c '/lib/bounds\.sh:')"
+# NOT VACUOUS: the sweep reaches this hook, whose READ it declines to count.
+expect_nonempty "§bound-one-owner the sweep reaches dispatch-preflight.sh, whose READ is uncounted" \
+  "$(/usr/bin/grep -rn 'IMPACT_BOUND_S' "${BIONIC_SCRIPTS_DIR}/hooks" 2>/dev/null \
+     | /usr/bin/grep 'dispatch-preflight.sh')"
+DP_GATE_SRC="$(cat "$GATE")"
+expect_nonempty "§bound-one-owner the preflight sources lib/bounds.sh" \
+  "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$GATE")"
+# RE-SPELLED ONTO THE CLOCK (wave-14 T34). This pair used to read the hook's tick budget,
+# `IMPACT_BOUND_TICKS=$(( IMPACT_BOUND_S * 10 ))`, and assert it was DERIVED from the
+# constant rather than typed as a second literal. The budget is gone: a count of `sleep
+# 0.1` polls cost 115 ms a poll, so spending it waited ~1.15x the bound the refusal quoted
+# (T34 §2-3), and the wait now ends on `SECONDS` against the constant itself. The intent
+# survives intact and gets stronger — the strongest form of "not a second number" is no
+# second number at all — so the positive arm reads the stop condition and the negative one
+# stands guard over the mechanism that was removed.
+expect_regex "§bound-one-owner …and its wait ends on the constant itself, not on a derived second number" \
+  '\[[[:space:]]*"\$SECONDS"[[:space:]]*-ge[[:space:]]*"\$IMPACT_BOUND_S"[[:space:]]*\]' "$DP_GATE_SRC"
+expect_no_regex "§bound-one-owner …leaving no tick budget behind to drift against it" \
+  '^[[:space:]]*IMPACT_BOUND_TICKS=' "$DP_GATE_SRC"
 
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 

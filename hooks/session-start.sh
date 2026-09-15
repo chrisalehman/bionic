@@ -164,6 +164,12 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/run.sh"      || exit 0   # active_run, engaged_session
 . "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
 
+# THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
+# computes it only for a caller that sets this, because the plan scan behind it is
+# the preamble's most expensive value and most hooks never read the answer. The greeting prints the bound
+# line from it (:353-354, :365-366).
+BIONIC_CONTEXT_WANT_RUN=1
+
 # The tree this hook was launched from — printed absolute in the re-arm line, and
 # the tree whose poker is asked for the interval. `$(dirname "$0")/..` and `pwd -P`
 # rather than `realpath`, which stock macOS does not ship (L-LOADER/5, L-BIONIC_ROOT/2).
@@ -516,10 +522,67 @@ ss_interval() {
   printf '%s' "$s"
 }
 
+# THE GROUP IS CHECKED, NEVER ASSUMED (T23, the same fix detect.sh took at T22).
+# A DELIBERATE DUPLICATE of `_detect_bound_kill` / `_detect_bound_kill_tree` in
+# payload/scripts/lib/detect.sh, which is the ORIGINAL and carries the full
+# reasoning and the measurements. Copied rather than sourced for the reason the
+# header below already gives for the runner itself: this hook's loader wants
+# root/session/patrol/run only (BIONIC_LIB_WANT), and a fifth required library
+# would fail the whole DETECTOR closed on a machine that lacks it, to buy a kill
+# only the one `sweep` call needs. The two copies are meant to stay in step —
+# change one and change the other.
+#
+# WHY THE CHECK EXISTS. `set -m` ASKS the kernel for a new process group; where
+# that is refused the job stays in THIS HOOK's group, and `kill -TERM -$pid` then
+# names a group that does not exist. Measured on a stand-in for that state (T22):
+# the group kill fails, the old `|| kill -TERM $pid` fallback TERMs the direct
+# child only, and the grandchild the group signal exists to reach goes on running.
+# `sweep` is `bash session-poker.sh`, which forks, so that grandchild is not
+# hypothetical. Both helpers run on the TIMEOUT path only: the ordinary sweep
+# finishes and never reaches an external `ps`.
+ss_bound_kill_tree() {  # <pid> — TERM <pid> and every descendant of it
+  local root="$1" table frontier next generations=0 victims victim
+  # `-A` is the POSIX spelling both BSD and procps answer; one snapshot is walked
+  # generation by generation rather than one `ps` per level. The generation cap is
+  # a safety rail on a table read from outside this script, not a depth anyone
+  # reaches.
+  table="$(ps -Ao pid=,ppid= 2>/dev/null)"
+  victims="$root"; frontier="$root"
+  while [ -n "$frontier" ] && [ "$generations" -lt 16 ]; do
+    next="$(printf '%s\n' "$table" | awk -v parents="$frontier" \
+      'BEGIN { n = split(parents, a, " "); for (i = 1; i <= n; i++) P[a[i]] = 1 }
+       P[$2] { print $1 }')"
+    [ -n "$next" ] || break
+    victims="$victims $next"
+    frontier="$next"
+    generations=$((generations + 1))
+  done
+  # The root first, so a job still spawning cannot outrun the sweep.
+  for victim in $victims; do kill -TERM "$victim" 2>/dev/null; done
+  return 0
+}
+
+ss_bound_kill() {  # <pid> — stop the bounded sweep and its children, group or no group
+  local pid="${1:-}" pgid
+  [ -n "$pid" ] || return 0
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null)"
+  pgid="${pgid//[!0-9]/}"
+  # EMPTY means `ps` could not answer, not that there is no group — on a machine
+  # without it the group signal is still the right first move, and a failure there
+  # is itself the evidence that no group was ever created.
+  if [ -z "$pgid" ] || [ "$pgid" = "$pid" ]; then
+    kill -TERM "-${pid}" 2>/dev/null && return 0
+  fi
+  ss_bound_kill_tree "$pid"
+  return 0
+}
+
 # BOUNDED, THE SAME MECHANISM detect_bounded USES (payload/scripts/lib/detect.sh):
-# a background job of its own process group, a poll that signals the GROUP (never
-# just the child — a grandchild inherits the caller's own stdout pipe otherwise)
-# when the bound is up, and stdout captured to a file this shell alone reads
+# a background job of its own process group, a poll that signals the whole
+# DESCENDANT SET when the bound is up (never just the direct child — a grandchild
+# inherits the caller's own stdout pipe otherwise; `ss_bound_kill` above signals
+# the group where the job really leads one and walks the process tree where it
+# does not), and stdout captured to a file this shell alone reads
 # afterwards so a run that outlives its bound can never hold this hook's own
 # stdout open. Kept LOCAL rather than sourced from detect.sh: this hook's loader
 # wants root/session/patrol/run only (BIONIC_LIB_WANT above), and a fifth required
@@ -545,14 +608,39 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep
   out="${TMPDIR:-/tmp}/bionic-sweep.$$.out"
   : > "$out" 2>/dev/null || out="/dev/null"
   case "$-" in *m*) had_monitor=yes ;; *) had_monitor=no ;; esac
-  set -m
-  ( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" sweep ) </dev/null >"$out" 2>/dev/null &
-  pid=$!
-  [ "$had_monitor" = "yes" ] || set +m
+  # THE FORK'S OWN DIAGNOSTICS ARE NOT THIS HOOK'S OUTPUT (T23, detect.sh's T22 fix
+  # one layer up). `set -m` asks the kernel for a new process group, and where that
+  # is refused bash prints its own `child setpgid (N to N): Operation not permitted`
+  # from inside the fork. That line is bash's, not this repo's — and this is a
+  # SessionStart hook, whose stderr is the user's screen at the top of a session, so
+  # it would land in front of the user with nothing on the page to explain it.
+  #
+  # SO THE FORK GETS ITS OWN STDERR AND THE HOOK KEEPS ITS REAL ONE. The braces run
+  # with stderr on /dev/null — the only writer there is the shell's job-control
+  # machinery, measured at 0 bytes otherwise under both bash 3.2 and bash 5 (T22) —
+  # while fd 9 keeps this hook's REAL stderr reachable inside the compound. That is
+  # what makes the discard SURGICAL rather than a blanket `exec 2>/dev/null`, which
+  # would also swallow lib/session.sh's divergence warning and every other line this
+  # hook legitimately writes to the user.
+  #
+  # ONE DELIBERATE DIFFERENCE FROM detect.sh. There the probe's own stderr is carried
+  # into the child on fd 9 (`2>&9`), because a probe's error text belongs to its
+  # caller. Here the sweep's stderr has always been discarded at the job itself and
+  # it STAYS discarded: putting a `sweep` subprocess's stderr onto a SessionStart
+  # hook's stderr is the very class of noise this change removes, and the sweep
+  # already reports failure the way this hook reads it — through the exit status
+  # below and the sweep-failed marker. fd 9 is CLOSED in the child for the same
+  # reason the out-file exists: a sweep that outlives its bound must not be left
+  # holding any of this hook's own streams open.
+  { set -m
+    ( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" sweep ) </dev/null >"$out" 2>/dev/null 9>&- &
+    pid=$!
+    [ "$had_monitor" = "yes" ] || set +m
+  } 9>&2 2>/dev/null
   if command -v sleep >/dev/null 2>&1; then
     while kill -0 "$pid" 2>/dev/null; do
       if [ "$ticks" -ge "$max_ticks" ]; then
-        kill -TERM "-${pid}" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+        ss_bound_kill "$pid"
         wait "$pid" 2>/dev/null
         [ -s "$out" ] && cat "$out"
         rm -f "$out" 2>/dev/null

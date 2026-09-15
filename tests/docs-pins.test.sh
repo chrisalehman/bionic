@@ -898,10 +898,20 @@ section "Section 6: Step 8's tmp wipe spares session-keyed state"
 # and it contradicts the same file's own sentence that "the marker is never removed during
 # the session once written". The Step 8 line now names what it spares.
 #
+# RE-SPELLED (epic-23 wave-14 T28, review-duplication-d3930dd.md F3). The sentence above
+# used to say "every session-keyed file" and enumerated five classes; that went stale
+# twice over. (1) T1/REQ-1 (this wave) changed the rule itself: close-out now spares only
+# a LIVE neighbour session's keyed files and removes a dead one's, so "every" was already
+# wrong going into this wave. (2) `PATROL_STATE_CLASSES` (payload/scripts/lib/patrol.sh:162)
+# grew a sixth member, `stop-orders`, at wave-13 — the prose enumeration never followed.
+# The re-spelled sentence names all six classes and the live/dead distinction, and 44b/44c/
+# 44d below pin the class list against `PATROL_STATE_CLASSES` directly so the two cannot
+# drift apart again without one of them turning red.
+#
 # THE FIELD NAME `tmp-wiped:` IS DELIBERATELY UNTOUCHED (§Evidence, step 8 row). It is an
 # evidence key the gate parses, not prose; renaming it would be an interface change and is
 # not what the finding asked for.
-PIN_TMP_SPARE='sparing every session-keyed file — `engaged-*.state`, `roster-*.state`, `patrol-*.state*`, `preflight-*.state`, `sweeper-*.state`'
+PIN_TMP_SPARE="sparing a LIVE neighbour session's keyed files across the six \`PATROL_STATE_CLASSES\` (\`roster\`/\`preflight\`/\`engaged\`/\`sweeper\`/\`patrol\`/\`stop-orders\`), because one root can hold another session's live run and a blanket wipe would take its engagement marker, roster and Patrol stamp with it, un-engaging it mid-run; a dead neighbour's keyed files are removed, not spared"
 PIN_TMP_BLANKET='wipe `.bionic/tmp/*`;'
 
 if has_pin "$STEP8_MD" "$PIN_TMP_SPARE"; then
@@ -926,14 +936,64 @@ else
 fi
 
 # Anti-vacuity, same pattern as 35/36/40.
-anchor "$STEP8_MD" 'sparing every session-keyed file' 1
+anchor "$STEP8_MD" "sparing a LIVE neighbour session" 1
 DOCTORED_TMP="$TMP/skill-tmp-wipe-mutated.md"
-sed 's/sparing every session-keyed file/taking every file/' "$STEP8_MD" > "$DOCTORED_TMP"
+sed "s/sparing a LIVE neighbour session/taking every neighbour session/" "$STEP8_MD" > "$DOCTORED_TMP"
 if has_pin "$DOCTORED_TMP" "$PIN_TMP_SPARE"; then
   no "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)" \
      "the pin matched a copy that says the opposite"
 else
   ok "44: a doctored SKILL.md fails the spare-list pin (pin discriminates)"
+fi
+
+# 44b/44c/44d — T28: the class list steps/8.md names must not drift from patrol.sh's own
+# PATROL_STATE_CLASSES again (F3's second divergence — the prose was short one class, and
+# nothing agreement-checked the two against each other). Read the SSoT directly rather than
+# hand-copying a count into this suite, so a future class added to patrol.sh is caught here
+# instead of relying on a human to remember to update this pin too.
+PATROL_LIB_T28="${REPO}/payload/scripts/lib/patrol.sh"
+PATROL_CLASSES_ACTUAL="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$PATROL_LIB_T28")"
+expect_nonempty "44a: patrol.sh's PATROL_STATE_CLASSES line is readable (the 44b/44c comparisons have something to measure)" "$PATROL_CLASSES_ACTUAL"
+
+PATROL_CLASSES_MISSING=""
+for _pc in $PATROL_CLASSES_ACTUAL; do
+  if ! grep -qF "\`${_pc}\`" "$STEP8_MD"; then
+    PATROL_CLASSES_MISSING="${PATROL_CLASSES_MISSING} ${_pc}"
+  fi
+done
+if [ -z "$PATROL_CLASSES_MISSING" ]; then
+  ok "44b: every patrol.sh PATROL_STATE_CLASSES name (${PATROL_CLASSES_ACTUAL}) appears in steps/8.md's spare-rule sentence"
+else
+  no "44b: every patrol.sh PATROL_STATE_CLASSES name (${PATROL_CLASSES_ACTUAL}) appears in steps/8.md's spare-rule sentence" \
+     "missing from steps/8.md:${PATROL_CLASSES_MISSING}"
+fi
+
+PATROL_CLASSES_COUNT="$(printf '%s\n' "$PATROL_CLASSES_ACTUAL" | wc -w | tr -d ' ')"
+PATROL_ALT_T28="$(printf '%s' "$PATROL_CLASSES_ACTUAL" | tr ' ' '|')"
+STEP8_CLASS_MENTIONS="$(grep -oE "\`(${PATROL_ALT_T28})\`" "$STEP8_MD" | sort -u | wc -l | tr -d ' ')"
+if [ "$STEP8_CLASS_MENTIONS" = "$PATROL_CLASSES_COUNT" ]; then
+  ok "44c: steps/8.md names exactly ${PATROL_CLASSES_COUNT} distinct classes, matching patrol.sh's PATROL_STATE_CLASSES count"
+else
+  no "44c: steps/8.md names exactly ${PATROL_CLASSES_COUNT} distinct classes, matching patrol.sh's PATROL_STATE_CLASSES count" \
+     "steps/8.md names ${STEP8_CLASS_MENTIONS} distinct classes from the current list, patrol.sh has ${PATROL_CLASSES_COUNT}"
+fi
+
+# Anti-vacuity for 44c: a patrol.sh with a class ADDED must desync the count this arm
+# compares, proving 44c is a live comparison against the SSoT and not a hardcoded "6".
+anchor "$PATROL_LIB_T28" "PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL}\"" 1
+DOCTORED_PATROL_T28="$TMP/patrol-classes-mutated.sh"
+sed "s/^PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL}\"\$/PATROL_STATE_CLASSES=\"${PATROL_CLASSES_ACTUAL} extra-class\"/" \
+  "$PATROL_LIB_T28" > "$DOCTORED_PATROL_T28"
+DOCTORED_CLASSES_T28="$(sed -n 's/^PATROL_STATE_CLASSES="\(.*\)"$/\1/p' "$DOCTORED_PATROL_T28")"
+DOCTORED_COUNT_T28="$(printf '%s\n' "$DOCTORED_CLASSES_T28" | wc -w | tr -d ' ')"
+if [ "$DOCTORED_CLASSES_T28" = "$PATROL_CLASSES_ACTUAL" ]; then
+  no "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)" \
+     "the sed mutation did not change PATROL_STATE_CLASSES — anchor moved, mutation is a no-op"
+elif [ "$DOCTORED_COUNT_T28" != "$STEP8_CLASS_MENTIONS" ]; then
+  ok "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)"
+else
+  no "44d: a patrol.sh with a class added desyncs the 44c count (pin discriminates)" \
+     "doctored count ${DOCTORED_COUNT_T28} still equalled steps/8.md's ${STEP8_CLASS_MENTIONS}"
 fi
 
 section "Section 7: bind's operand takes the spelling session-start prints"
@@ -2245,6 +2305,21 @@ section "Section 18: REQ-1b — the split skill's byte caps and the core's step 
 # above were; it is the ceiling itself changing, recorded here in AC-2.2
 # (requirements + plan) as well as in this comment's own established pattern.
 #
+# RAISED to 110,500 — Chris 2026-09-14 "Option 2" (wave-14 T14): the two
+# remaining Step-2 row shapes — the Ownership row and the Eval-design row,
+# left unannotated by T10 for lack of headroom (A-T10.1) — are now annotated
+# with their own printf format beside the card, same pattern and same named
+# ruling as the raise directly above: the ceiling itself moves, owned here.
+#
+# LOWERED to 110,000 — Chris 2026-09-15 "option 1 - renderer script and cap at
+# 110k" (wave-14 T36): the printf format lines (646 B) left the templates for
+# payload/scripts/card.sh, which owns them. Same pattern and same named ruling as
+# the two moves above — the ceiling itself moves, owned here — and it moves DOWN,
+# which is the direction a ratchet with an owner is allowed to go only by his
+# word. The 500 B T14 bought for the two Step-2 format lines is returned with the
+# lines themselves; the renderer's three pointer lines are paid for out of what is
+# left, and the total is measured in the report, not predicted.
+#
 # AC-1b.5 is the structural half, and it is what makes the byte caps mean anything: a core
 # that still carried its `### Step N` sections would be under no cap at all, and a core that
 # dropped the sections without naming the files would leave the model with no way to find
@@ -2912,5 +2987,280 @@ expect_true "139c: an undated ratif line is caught by the discriminator" \
   bash -c "grep -i ratif '$UNDATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
 expect_false "139d: …a dated one is not (the discriminator does not over-fire)" \
   bash -c "grep -i ratif '$DATED_MUT' | grep -viE '2026-[0-9]{2}-[0-9]{2}' | grep -q ."
+
+# ---------------------------------------------------------------------------
+section "Section 27: T10 — card row formats at fixed widths (REQ-9: AC-9.1, AC-9.2, AC-9.3, AC-9.4)"
+#
+# WHAT THIS SECTION OWNS. wave-14-tune-181 D9: a card row with a trailing column (the
+# Step-1 requirement row, the Step-2 decision row, the Step-3 task row) used to be padded
+# by eye — no stated width — which is why the user saw a column drift out of alignment
+# ("Why is the implied third column Acceptance Criteria not left justified anymore?").
+# Each of the three rendered step files now carries, beside its card, the row's printf
+# format and one shared rule line (identical text in all three); AC-9.4 additionally
+# requires the Step-2 decision row and the Step-3 task row to be a single line per row —
+# trailing columns on the row's own first line, never staggered onto a line below it.
+#
+# WHY GREP 'printf', NOT THE EXACT FORMAT STRING. The spec's own Eval design row (§REQ-9
+# "format lines") states the eval as `grep -c 'printf' … ≥ 1 each` — the format STRING is
+# incidental to a particular width choice, the literal word `printf` is what a reader (or a
+# future editor) can hold the row to: it says a stated format governs this row, not eyeballed
+# spacing. AC-9.2 is what pins the rule line's own exact wording, with a mutation arm.
+#
+# HERMETIC. Reads the committed rendered finals by path; the mutation arms work on TMP copies.
+
+# --- AC-9.1a: each of the three rendered step files names the RENDERER that owns its format ---
+#
+# RE-SPELLED AT wave-14 T36 (Chris 2026-09-15: "D4: I want the wrapped version", then
+# "option 1 - renderer script and cap at 110k"). The formats no longer live beside the
+# cards for a model to apply by hand. `payload/scripts/card.sh` owns them, and it FOLDS the
+# free-text cell inside its own column — the thing a printf format cannot do, which is why
+# a long requirement used to push its trailing columns off the row (126 and 165 columns,
+# measured, before T31 re-cut the widths; re-cutting the widths never fixed it, it only
+# moved the sentence that overflows). So what each card must carry is no longer the word
+# `printf`, it is the NAME OF THE RENDERER, and the inverse is pinned immediately below:
+# a format line left behind beside a card is worse than none at all, because it is a second
+# owner of a number only one file owns now.
+for _pair in "140a:$STEP1_MD:steps/1.md" "140b:$STEP2_MD:steps/2.md" "140c:$STEP3_MD:steps/3.md"; do
+  _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
+  _cnt="$(grep -c 'card\.sh' "$_file" 2>/dev/null | tr -cd '0-9')"
+  [ -n "$_cnt" ] || _cnt=0
+  if [ "$_cnt" -ge 1 ] 2>/dev/null; then
+    ok "${_n}: AC-9.1 — ${_which} names the renderer that owns its card row format (card.sh)"
+  else
+    no "${_n}: AC-9.1 — ${_which} names the renderer that owns its card row format (card.sh)" "count=$_cnt file=$_file"
+  fi
+done
+
+# --- AC-9.1b / AC-9.2: the shared rule, verbatim, in all three -----------------------
+# The sentence survived the rewrite by design: "never padded by hand" was always the rule,
+# and what changed is only WHO does the padding. The tail below is identical in all three
+# pointer lines, which is what makes it one rule rather than three.
+CARD_RULE_LINE=', TSV in; cell folds, never padded by hand.'
+for _pair in "141a:$STEP1_MD:steps/1.md" "141b:$STEP2_MD:steps/2.md" "141c:$STEP3_MD:steps/3.md"; do
+  _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
+  expect_contains "${_n}: AC-9.1/AC-9.2 — ${_which} carries the shared pointer rule verbatim" \
+    "$CARD_RULE_LINE" "$(cat "$_file" 2>/dev/null)"
+done
+
+# 142: Anti-vacuity (AC-9.2's own mutation arm) — a copy of steps/1.md with the rule line
+# stripped must make 141a's check go red.
+anchor "$STEP1_MD" "$CARD_RULE_LINE" 1
+DOCTORED_NO_RULE="$TMP/step1-no-rule-line.md"
+grep -v -F "$CARD_RULE_LINE" "$STEP1_MD" > "$DOCTORED_NO_RULE"
+case "$(cat "$DOCTORED_NO_RULE")" in
+  *"$CARD_RULE_LINE"*) no "142: AC-9.2 — a copy of steps/1.md missing the rule line still 'has' it (pin is vacuous)" ;;
+  *) ok "142: AC-9.2 — a copy of steps/1.md missing the rule line fails the rule-line check (pin discriminates)" ;;
+esac
+
+# --- AC-9.1c (T36): THE INVERSE — no format line survives beside a card ------------------
+#
+# WHY AN ABSENCE IS PINNED AT ALL. The positive rows above are satisfied by a file that
+# names card.sh AND still carries the old `%-44s` line underneath it. That file has two
+# owners for one number, and the stale one is the one a reader believes, because it is the
+# one that states a width. The three cards carried five such lines and 645 B of them at
+# 89f6944; this row is what keeps them gone.
+for _pair in "142a:$STEP1_MD:steps/1.md" "142b:$STEP2_MD:steps/2.md" "142c:$STEP3_MD:steps/3.md"; do
+  _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
+  _cnt="$(grep -c 'printf' "$_file" 2>/dev/null | tr -cd '0-9')"
+  [ -n "$_cnt" ] || _cnt=0
+  if [ "$_cnt" = "0" ]; then
+    ok "${_n}: AC-9.1 — ${_which} carries no printf format line beside its card (the renderer owns the widths)"
+  else
+    no "${_n}: AC-9.1 — ${_which} carries no printf format line beside its card" \
+       "found $_cnt: $(grep -n 'printf' "$_file" 2>/dev/null | head -3 | tr '\n' ' ')"
+  fi
+done
+
+# 142d: Anti-vacuity for the inverse. The mutation is an APPEND, not a strip, so it carries
+# no `anchor` — an anchor exists to catch a pattern-based rewrite that silently matched
+# nothing, and an append cannot no-op (§Roots in tests/cross-gate-agreement.test.sh makes
+# the same call for the same reason). A copy of steps/2.md with T31's Ownership format line
+# put back must make the absence check above fire.
+REPLANTED_FMT="$TMP/step2-format-replanted.md"
+cp "$STEP2_MD" "$REPLANTED_FMT"
+printf 'Ownership row: `    %%-12s owner %%-14s surfaces %%-22s test %%s` (concept, owner, surfaces, test) (printf).\n' \
+  >> "$REPLANTED_FMT"
+expect_eq "142d: AC-9.1 — a copy of steps/2.md with a format line replanted is caught by the absence check (pin is not vacuous)" \
+  "1" "$(grep -c 'printf' "$REPLANTED_FMT" 2>/dev/null | tr -cd '0-9')"
+
+# --- AC-9.4: the Step-2 decision row and the Step-3 task row are single-line rows,
+# trailing columns on the row's own first line, never staggered onto a line below it. ---
+#
+# THE ANTI-PATTERN. Before this task, the Step-2 card's Decisions row was two physical
+# lines: the decision text on one, then a line starting with whitespace and the bare word
+# "serves" (its trailing columns) on the next — staggered, not on the row's own first line.
+# A staggered trailing-column line reads as whitespace, then the FIRST WORD of the line is
+# one of the row's own trailing-column names — never true of a header line, where the
+# column names sit to the right of a section label ("Decisions … serves … ADR").
+staggered_trailing() {
+  # $1 = card body, $2.. = trailing column names to check as a staggered line's first word
+  local _body="$1"; shift
+  local _col
+  for _col in "$@"; do
+    if printf '%s\n' "$_body" | grep -qE "^[[:space:]]+${_col}([[:space:]]|\$)"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+if staggered_trailing "$CARD2" "serves" "ADR"; then
+  no "143: AC-9.4 — the Step-2 card's decision row keeps serves/ADR on the row's first line (no staggered line found 'serves'/'ADR' as a line's first word)" \
+     "card body: $CARD2"
+else
+  ok "143: AC-9.4 — the Step-2 card's decision row keeps serves/ADR on the row's first line (no staggered second line)"
+fi
+
+if staggered_trailing "$CARD3" "kind" "depends" "agent"; then
+  no "144: AC-9.4 — the Step-3 card's task row keeps kind/depends/agent on the row's first line (no staggered line found)" \
+     "card body: $CARD3"
+else
+  ok "144: AC-9.4 — the Step-3 card's task row keeps kind/depends/agent on the row's first line (no staggered second line)"
+fi
+
+# 145: Anti-vacuity — the pre-T10 staggered shape (D<n> line, then a line whose first word
+# is "serves") must make 143's check discriminate: fed the OLD Step-2 decision row shape,
+# staggered_trailing must return true (found).
+OLD_STAGGERED_DECISIONS='  Decisions
+    D<n>   <the decision in one line>
+           serves <REQ ids>                                    ADR <file | none>'
+if staggered_trailing "$OLD_STAGGERED_DECISIONS" "serves" "ADR"; then
+  ok "145: AC-9.4 — the pre-T10 staggered Decisions shape is caught by the 143 discriminator (pin is not vacuous)"
+else
+  no "145: AC-9.4 — the pre-T10 staggered Decisions shape is caught by the 143 discriminator" \
+     "fixture: $OLD_STAGGERED_DECISIONS"
+fi
+
+# --- AC-9.1 (T36): the two Step-2 row shapes T14 annotated are annotated NO LONGER --------
+# T14 raised the aggregate cap by 500 B to buy the Ownership and Eval-design format lines a
+# place beside the card (Chris 2026-09-14 "Option 2"); T36 spends that room the other way,
+# on the renderer, and Chris moved the cap back to 110,000 with it. The two verbatim strings
+# below are T31's own spelling of those lines, kept here as the thing that must now be
+# ABSENT — the strongest form of "it was removed", since a re-added line is caught by its
+# exact text rather than by a pattern that might drift.
+OWNERSHIP_ROW_LINE='Ownership row: `    %-12s owner %-14s surfaces %-22s test %s` (concept, owner, surfaces, test) (printf).'
+expect_absent "146: AC-9.1 — steps/2.md no longer states the Ownership row's printf format (card.sh owns it)" \
+  "$OWNERSHIP_ROW_LINE" "$(cat "$STEP2_MD" 2>/dev/null)"
+
+EVAL_DESIGN_ROW_LINE='Eval-design row: `    %-8s %-36s %6s %5s %9s %5s %6s` (requirement, approach, static, unit, hermetic, live, human) (printf).'
+expect_absent "147: AC-9.1 — steps/2.md no longer states the Eval-design row's printf format (card.sh owns it)" \
+  "$EVAL_DESIGN_ROW_LINE" "$(cat "$STEP2_MD" 2>/dev/null)"
+
+# --- AC-9.1/AC-9.4 (T31, re-pointed at T36): every card's own header and sample rows are
+# exactly what the RENDERER prints for the card's own sample values. -----------------------
+#
+# WHAT CHANGED AND WHAT DID NOT. T31 built these arms to stop a card's header and its stated
+# printf format drifting apart (the Decisions header said serves@57/ADR@75 while the format
+# put them at @77/@92). The drift they exist to catch is unchanged; the right-hand side is.
+# It used to be the format re-derived off the same file — which could only ever prove the
+# file agreed with itself — and it is now the OUTPUT OF payload/scripts/card.sh, the file
+# that renders these rows for real. So the card in the skill is held to the renderer a
+# session is told to run, and a width changed in card.sh and not in the card (or the other
+# way round) turns these rows red. tests/card.test.sh holds card.sh to the printf formats
+# the cards carried at 89f6944, so the widths themselves cannot drift silently either: two
+# suites, one number, neither of them the file's own copy of it.
+#
+# HERMETIC: runs a committed script in this checkout against literal values; no network,
+# no fixtures, nothing written.
+CARD_SH="${REPO}/payload/scripts/card.sh"
+card_rows() {  # <kind> — TSV rows on stdin -> the rendered header and rows
+  bash "$CARD_SH" "$1" 2>/dev/null
+}
+card_cols() {  # <line> -> its width in terminal columns, through width.sh
+  ( . "${REPO}/payload/scripts/lib/width.sh" 2>/dev/null && bionic_cols "${1:-}" ) || printf '0'
+}
+expect_true "147a: the card renderer the three cards now point at exists" test -f "$CARD_SH"
+
+# 148: Step-1 requirement row — two physical lines per row, no separate column header.
+REQ1_LINE_A="$(grep -m1 '^    REQ-<id>' "$STEP1_MD" 2>/dev/null)"
+REQ1_LINE_B="$(grep -m1 'provenance <user quote' "$STEP1_MD" 2>/dev/null)"
+REQ1_RENDERED="$(printf '%s\t%s\t%s\t%s\n' \
+  'REQ-<id>' '<the requirement in one line>' '<user quote | spec section | ticket | report>' '<n>' \
+  | card_rows requirement)"
+expect_eq "148: AC-9.1/AC-9.4 — steps/1.md's Requirements header and row are exactly what card.sh renders" \
+  "$(printf '%s\n' '  Requirements' "$REQ1_LINE_A" "$REQ1_LINE_B")" "$REQ1_RENDERED"
+if [ "$(card_cols "$REQ1_LINE_A")" -le 100 ] && [ "$(card_cols "$REQ1_LINE_B")" -le 100 ]; then
+  ok "148c: AC-9.1 — steps/1.md's requirement row fits within 100 columns with the sample values ($(card_cols "$REQ1_LINE_A") / $(card_cols "$REQ1_LINE_B"))"
+else
+  no "148c: AC-9.1 — steps/1.md's requirement row fits within 100 columns with the sample values" \
+     "line A=$(card_cols "$REQ1_LINE_A") line B=$(card_cols "$REQ1_LINE_B")"
+fi
+
+# 149: Step-2 Decision row and its serves/ADR column header, rendered together.
+DEC_HEADER_LINE="$(grep -m1 '^  Decisions' "$STEP2_MD" 2>/dev/null)"
+DEC_ROW_LINE="$(grep -m1 '^    D<n>' "$STEP2_MD" 2>/dev/null)"
+DEC_RENDERED="$(printf '%s\t%s\t%s\t%s\n' 'D<n>' '<the decision in one line>' '<REQ ids>' '<file | none>' \
+  | card_rows decision)"
+expect_eq "149: AC-9.1/AC-9.4 — steps/2.md's Decisions header and row are exactly what card.sh renders" \
+  "$(printf '%s\n' "$DEC_HEADER_LINE" "$DEC_ROW_LINE")" "$DEC_RENDERED"
+if [ "$(card_cols "$DEC_ROW_LINE")" -le 100 ]; then
+  ok "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values ($(card_cols "$DEC_ROW_LINE"))"
+else
+  no "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values" "width=$(card_cols "$DEC_ROW_LINE")"
+fi
+
+# 150: Step-2 Ownership row — its labels are literals inside the format, so the header is
+# the bare section name and the row is the whole check.
+OWN_ROW_LINE="$(grep -m1 '^    <concept>' "$STEP2_MD" 2>/dev/null)"
+OWN_RENDERED="$(printf '%s\t%s\t%s\t%s\n' '<concept>' '<module>' '<where it renders>' '<suite>' \
+  | card_rows ownership)"
+expect_eq "150: AC-9.1 — steps/2.md's Ownership header and row are exactly what card.sh renders" \
+  "$(printf '%s\n' '  Ownership' "$OWN_ROW_LINE")" "$OWN_RENDERED"
+if [ "$(card_cols "$OWN_ROW_LINE")" -le 100 ]; then
+  ok "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values ($(card_cols "$OWN_ROW_LINE"))"
+else
+  no "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values" "width=$(card_cols "$OWN_ROW_LINE")"
+fi
+
+# 151: Step-2 Eval-design header, both REQ rows and the total row — five RIGHT-aligned
+# count columns, which is the one kind whose fields are not all left-padded.
+EVAL_HEADER_LINE="$(grep -m1 '^  Eval design' "$STEP2_MD" 2>/dev/null)"
+EVAL_REQ_LINES=()
+while IFS= read -r _line; do EVAL_REQ_LINES+=("$_line"); done < <(grep '^    REQ-<id>' "$STEP2_MD" 2>/dev/null)
+EVAL_TOTAL_LINE="$(grep -m1 '^    total' "$STEP2_MD" 2>/dev/null)"
+EVAL_RENDERED="$( { printf '%s\t%s\t2\t1\t3\t0\t1\n' 'REQ-<id>' '<how it is proven, one line>'
+                    printf '%s\t%s\t1\t0\t2\t1\t0\n' 'REQ-<id>' '<how it is proven, one line>'
+                    printf 'total\t\t3\t1\t5\t1\t1\n'; } | card_rows eval-design)"
+expect_eq "151: AC-9.1 — steps/2.md's Eval design header and three rows are exactly what card.sh renders" \
+  "$(printf '%s\n' "$EVAL_HEADER_LINE" "${EVAL_REQ_LINES[0]:-}" "${EVAL_REQ_LINES[1]:-}" "$EVAL_TOTAL_LINE")" \
+  "$EVAL_RENDERED"
+if [ "$(card_cols "${EVAL_REQ_LINES[0]:-}")" -le 100 ]; then
+  ok "151d: AC-9.1 — steps/2.md's eval-design row fits within 100 columns with the sample values ($(card_cols "${EVAL_REQ_LINES[0]:-}"))"
+else
+  no "151d: AC-9.1 — steps/2.md's eval-design row fits within 100 columns with the sample values" \
+     "width=$(card_cols "${EVAL_REQ_LINES[0]:-}")"
+fi
+
+# 152: Step-3 Task header and both sample task rows. The `depends` cell of the first row
+# carries an em dash — three bytes, one column — which is the cell that proves the renderer
+# pads in COLUMNS: a byte-padded row puts `agent` two columns left of its header here.
+TASK_HEADER_LINE="$(grep -m1 '^  Tasks' "$STEP3_MD" 2>/dev/null)"
+TASK_ROW_LINES=()
+while IFS= read -r _line; do TASK_ROW_LINES+=("$_line"); done < <(grep '^    <n>' "$STEP3_MD" 2>/dev/null)
+TASK_RENDERED="$( { printf '%s\t%s\tbuild\t—\tsenior-implementor\n' '<n>' '<the task in one line>'
+                    printf '%s\t%s\ttest\t<n>\timplementor\n' '<n>' '<the task in one line>'; } | card_rows task)"
+expect_eq "152: AC-9.1/AC-9.4 — steps/3.md's Tasks header and both rows are exactly what card.sh renders" \
+  "$(printf '%s\n' "$TASK_HEADER_LINE" "${TASK_ROW_LINES[0]:-}" "${TASK_ROW_LINES[1]:-}")" "$TASK_RENDERED"
+if [ "$(card_cols "${TASK_ROW_LINES[0]:-}")" -le 100 ] && [ "$(card_cols "${TASK_ROW_LINES[1]:-}")" -le 100 ]; then
+  ok "152c: AC-9.1 — steps/3.md's task row fits within 100 columns with the sample values ($(card_cols "${TASK_ROW_LINES[0]:-}") / $(card_cols "${TASK_ROW_LINES[1]:-}"))"
+else
+  no "152c: AC-9.1 — steps/3.md's task row fits within 100 columns with the sample values" \
+     "row1=$(card_cols "${TASK_ROW_LINES[0]:-}") row2=$(card_cols "${TASK_ROW_LINES[1]:-}")"
+fi
+
+# 153: THE PAIRED DISCRIMINATOR for 148-152. A card row nudged by one column must make the
+# equality above fail — without this, a renderer that printed nothing at all, or a
+# comparison that compared two empty strings, would pass every row in this block.
+anchor -E "$STEP2_MD" '^    D<n> ' 1
+DOCTORED_CARD_ROW="$TMP/step2-decision-row-nudged.md"
+sed -e 's|^    D<n> |    D<n>  |' "$STEP2_MD" > "$DOCTORED_CARD_ROW"
+expect_eq "153: AC-9.4 — a decision row nudged one column right no longer matches what card.sh renders (pin is not vacuous)" \
+  "no" \
+  "$([ "$(grep -m1 '^    D<n>' "$DOCTORED_CARD_ROW")" = "$DEC_ROW_LINE" ] && echo yes || echo no)"
+
+# AC-9.3 (render clean, byte caps hold) is discharged by Section 11's `--check` arms and
+# Section 18's byte-cap arms against these same rendered finals — both already read
+# steps/1.md, steps/2.md and steps/3.md unconditionally, so no separate pin is needed here;
+# a cap regression from this task's own additions shows up there, not in this section.
 
 finish

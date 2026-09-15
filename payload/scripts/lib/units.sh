@@ -6,8 +6,8 @@
 # at Steps 3–9 — and the three questions asked of it. Pure functions of a file; nothing here
 # writes, and nothing here runs at source time:
 #
-#   units_rows <plan>          one TSV line per row, the ten fields in the FIXED order
-#                              id·step·kind·task·agent·deps·size·serves·Files·status,
+#   units_rows <plan>          one TSV line per row, the eleven fields in the FIXED order
+#                              id·step·kind·task·agent·deps·size·serves·Files·status·worktree,
 #                              in TABLE order. Exit 1 and silent when the plan carries no
 #                              `## Tasks` table.
 #   units_ready <plan> <step>  the ids of rows whose status is `pending`, whose step is
@@ -58,6 +58,25 @@
 # BASH 3.2 (macOS /bin/bash). No associative arrays, no `${var^^}`, no `mapfile`, and the
 # awk programs stay inside POSIX awk — no `gensub`, no `length(array)`, no sorting built-in.
 #
+# SLOT 11 IS `worktree`, AND IT IS THE ONE OPTIONAL SLOT (wave-14 REQ-2, ADR-027). The
+# `## Tasks` table is the register of in-flight units: the dispatcher writes the tree it
+# created into the row, and the evidence gate reads the row back to judge a commit made from
+# that tree at THAT row's step rather than at the run's single `current:`. The cell belongs
+# here because this library is the only reader of the table, and a second parser for one cell
+# is the thing REQ-1e existed to remove.
+#
+# OPTIONAL MEANS NO `missing column` VIOLATION, and that asymmetry is deliberate. Every plan
+# written before this wave carries no `worktree` header, and so does every solo-writer plan
+# after it; none of them is invalid for it. An absent column reads as an empty cell on every
+# row — the same answer a present column with an empty cell gives — and the gate's arm treats
+# "no tree named" and "this row names no tree" identically, so the two cannot disagree. The
+# ten slots above stay REQUIRED: a table missing `step` is a table whose rows cannot be
+# scheduled, which is a fault, while a table missing `worktree` is a table nobody dispatched
+# into trees.
+#
+# THE RECORD IS ALWAYS ELEVEN FIELDS WIDE even when the column is absent, because a record
+# whose width depended on the table's shape would put every caller back to counting cells.
+#
 # A CELL MAY CONTAIN A PIPE, AND MARKDOWN SPELLS IT `\|` (critic Issue 1, A-84). The
 # earlier claim here — that no cell ever holds one, so there is nothing to unescape — was
 # true of the raw byte and false of the table: `\|` is the one escape GFM defines for a
@@ -107,8 +126,8 @@ _units_read() {
       # lower-cased text a header cell is matched against.
       disp[1] = "id";    disp[2] = "step";   disp[3] = "kind";   disp[4] = "task"
       disp[5] = "agent"; disp[6] = "deps";   disp[7] = "size";   disp[8] = "serves"
-      disp[9] = "Files"; disp[10] = "status"
-      for (k = 1; k <= 10; k++) want[k] = tolower(disp[k])
+      disp[9] = "Files"; disp[10] = "status"; disp[11] = "worktree"
+      for (k = 1; k <= 11; k++) want[k] = tolower(disp[k])
       alt[3] = "rigor"   # slot 3 as the task-scale ledger spells it
       state = 0   # 0 before the section · 1 in it, header not yet seen · 2 in the table · 3 done
     }
@@ -135,7 +154,7 @@ _units_read() {
       for (i = 1; i <= n; i++) {
         t = tolower(trim(c[i]))
         if (t == "") continue
-        for (k = 1; k <= 10; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
+        for (k = 1; k <= 11; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
       }
       if (col[1] == 0) next          # no `id` cell — not the header row
       found = 1
@@ -151,7 +170,7 @@ _units_read() {
       # The |---|---| separator, and any row whose id cell is empty or punctuation.
       if (id == "" || id ~ /^[-: ]+$/) next
       line = ""
-      for (k = 1; k <= 10; k++) {
+      for (k = 1; k <= 11; k++) {
         f = (col[k] > 0 && col[k] <= n) ? trim(c[col[k]]) : ""
         line = (k == 1) ? f : line "\t" f
       }
@@ -163,6 +182,8 @@ _units_read() {
     END {
       if (!found) exit 1
       missing = ""
+      # THE LOOP STOPS AT 10, NOT 11: slot 11 (`worktree`) is optional, and an absent
+      # optional column is not a fault to report.
       for (k = 1; k <= 10; k++) if (col[k] == 0) missing = (missing == "") ? disp[k] : missing " " disp[k]
       printf "# %s\n", missing
       for (i = 1; i <= nr; i++) print row[i]
@@ -190,6 +211,7 @@ units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on 
   case "${2:-}" in
     id) n=1 ;;    step) n=2 ;;   kind|rigor) n=3 ;; task) n=4 ;;  agent) n=5 ;;
     deps) n=6 ;;  size) n=7 ;;   serves) n=8 ;;     Files) n=9 ;;  status) n=10 ;;
+    worktree) n=11 ;;
     *) return 1 ;;
   esac
   while [ "$n" -gt 1 ]; do
@@ -203,8 +225,9 @@ units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on 
 }
 
 
-# units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status, tab-separated,
-#                      one line per row, in TABLE order. Exit 1 when there is no table.
+# units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree,
+#                      tab-separated, one line per row, in TABLE order. Exit 1 when there is
+#                      no table.
 #
 # TABLE ORDER, NOT ID ORDER, and never sorted: the sequence is the orchestrator's own
 # dependency ordering, and a reader that re-sorted would answer the dispatch question in an
@@ -258,6 +281,12 @@ units_ready() {
 }
 
 # units_validate <plan> -> one line per broken invariant; exit 1 if any, else 0.
+#
+# `worktree` HAS NO INVARIANT. It is a free-form name written by the dispatcher — whatever
+# git called the tree — and there is nothing here that could check it against the machine
+# without this library growing a git dependency it has never had. The gate resolves a name it
+# cannot match to a row by judging at `current:` and saying so, which is the fail-safe
+# direction; a wall here would refuse plans for trees that had simply been torn down.
 #
 # THE INVARIANTS (spec Design §1 "Task", verbatim): id unique and matching `^T[0-9]+$`; step
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;

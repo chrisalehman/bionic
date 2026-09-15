@@ -31,9 +31,11 @@
 # automated the exact failure this task exists to end.
 #
 # THE DRY-RUN ARMS ITS OWN ENGAGEMENT, for its own synthetic session id, and takes it
-# away again. It has to: act 3 wipes the whole of `.bionic/tmp/` (Chris 2026-09-14 — the
-# tmp directory is disposable after close; the running-session spare list in steps/8.md
-# binds a RUNNING run), and the engagement marker lives there. Without this the gate would
+# away again. It has to: act 3 wipes this session's own keyed state under `.bionic/tmp/`
+# (Chris 2026-09-14 — the tmp directory is disposable after close; a LIVE neighbour's
+# state is spared instead, REQ-1/D2, because that spare list binds a running run and a
+# concurrent session sharing this root IS one), and the engagement marker lives there.
+# Without this the gate would
 # find an unengaged session, do nothing, exit 0, and hand back a `gate: ok` that had
 # checked nothing at all — the arming partition's fail direction turned into a lie. A
 # SYNTHETIC id, never the live one: removing the live session's marker at the end would
@@ -77,7 +79,7 @@ CO_LIB="$CO_SCRIPTS/lib"
 # The payload-integrity guard setup.sh and doctor.sh both carry. The list is what THIS
 # script sources, not what the payload contains: a missing library here has no report to
 # print, and the alternative is the interpreter's own error trace.
-for _co_lib in roots.sh root.sh run.sh archive.sh; do
+for _co_lib in roots.sh root.sh run.sh archive.sh patrol.sh; do
   if [ ! -f "${CO_LIB}/${_co_lib}" ]; then
     echo "close-out.sh: cannot find ${CO_LIB}/${_co_lib} — the payload looks incomplete." >&2
     echo "              reinstall with: claude plugin install bionic@bionic" >&2
@@ -91,6 +93,20 @@ done
 . "${CO_LIB}/run.sh"
 # shellcheck source=/dev/null
 . "${CO_LIB}/archive.sh"
+# shellcheck source=/dev/null
+. "${CO_LIB}/patrol.sh"
+
+# CO_SID -> this script's own identity, read from the ambient environment BEFORE
+# anything below ever touches CLAUDE_CODE_SESSION_ID (the gate dry-run's two
+# `CLAUDE_CODE_SESSION_ID=` overrides, at :661 and :788, exist for its own
+# purposes and must never be allowed to
+# shadow the real one first). REQ-1's tmp-spare rule (act_tmp, D2) keys on this: an
+# entry under `.bionic/tmp` belonging to a DIFFERENT, still-live session is a running
+# run's state and is spared; this session's own keyed state is removed like any other
+# closed run's. Empty when the script runs with no session id in its environment (a
+# manual invocation) — every entry then falls to the live/dead check on its own merits,
+# never to an "own session" exemption that cannot apply.
+CO_SID="${CLAUDE_CODE_SESSION_ID:-}"
 
 # ─── Voice ───────────────────────────────────────────────────────────────────
 #
@@ -318,26 +334,96 @@ act_worktrees() {
 
 # ─── Act 3: the tmp wipe ─────────────────────────────────────────────────────
 #
-# THE WHOLE DIRECTORY, not the ephemera (Chris 2026-09-14). `steps/8.md` spares every
-# session-keyed file by name because another session's LIVE run shares the root; that
-# spare list binds a running run, and this runs after delivery, when there is no run left
-# to protect. The gate dry-run below re-arms its own marker precisely because this act
-# takes the one that was there.
+# ITS OWN STATE, DEAD SESSIONS' STATE, AND THE EPHEMERA — NEVER A LIVE NEIGHBOUR'S
+# (REQ-1, D2; corrected 2026-09-15 — Chris 2026-09-14's "the whole directory" ruling
+# assumed a close-out is always the LAST session sharing this root, and that is not so:
+# a concurrent session — a different wave, a different worktree — can be live under the
+# same `.bionic/tmp` at the same instant, and its keyed state is a RUNNING run's, exactly
+# the class `steps/8.md`'s spare list already protects). `CO_SID` (above) is this
+# session's own identity. An entry keyed to another session (`<class>-<sid>.state[.armed]`,
+# the classes `lib/patrol.sh`'s `PATROL_STATE_CLASSES` owns) is spared only while
+# `patrol_dead_sessions` still counts that session live; this session's own keyed state,
+# every dead session's, and every unkeyed entry (`context-spend.state`, `farm-out.state`,
+# …) are removed exactly as before. The gate dry-run below re-arms its own marker
+# regardless, because this act still takes the one that was there for THIS session.
 TMP_LINE=""
 tmp_count() {
   find "$TMP_DIR" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' '
   return 0
 }
 
+# _co_tmp_owner <basename> -> the session id a tmp entry's basename is keyed to on
+# stdout, or nothing at all when the entry is not session-keyed (an ephemera file, or
+# anything shaped outside `PATROL_STATE_CLASSES`). One definition, walking the SAME
+# class list `patrol_session_state_files` builds its own paths from, so a class added
+# there is recognised here without a second list to keep in step.
+_co_tmp_owner() {
+  local base="$1" class owner
+  for class in $PATROL_STATE_CLASSES; do
+    case "$base" in
+      "$class"-*.state|"$class"-*.state"$PATROL_STATE_ARMED_SUFFIX")
+        owner="${base#"$class"-}"
+        owner="${owner%"$PATROL_STATE_ARMED_SUFFIX"}"
+        owner="${owner%.state}"
+        [ -n "$owner" ] && printf '%s\n' "$owner"
+        return 0
+        ;;
+    esac
+  done
+  return 0
+}
+
 act_tmp() {
-  local before after
+  local before after entry owner dead_ids spare_list="" removed=0 spared=0 is_spared
   before="$(tmp_count)"
+
   if [ -d "$TMP_DIR" ]; then
-    find "$TMP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null
+    dead_ids="$(patrol_dead_sessions "$ROOT")"
+
+    # Build the spare set FIRST, as full paths — every file keyed to a session other
+    # than CO_SID that patrol_dead_sessions does not name. This session's own keyed
+    # state is never in it (it is removed like a closed run's own, whatever the
+    # sweeper's verdict on this pid would be), and neither is anything unkeyed.
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      owner="$(_co_tmp_owner "${entry##*/}")"
+      [ -n "$owner" ] || continue
+      [ "$owner" = "$CO_SID" ] && continue
+      # SET MEMBERSHIP, SPELLED IN `case`. Both lists here are newline-delimited, so a
+      # name is "in" the list when the list — wrapped in a leading and trailing newline
+      # — contains that name wrapped in a leading and trailing newline too: the wrapper
+      # is what keeps "ab" from matching a list entry "a" or "b" on a bare substring
+      # test. `$dead_ids` gets both wrappers spelled here; the second case below (testing
+      # `$spare_list`) already ends in one from how `spare_list` is built, so only the
+      # leading newline is added there — same idiom, one wrapper already paid for.
+      case "
+$dead_ids
+" in
+        *"
+$owner
+"*) continue ;;   # dead — falls through to the removal pass below
+      esac
+      spare_list="${spare_list}${entry}
+"
+      spared=$((spared + 1))
+    done <<< "$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)"
+
+    while IFS= read -r entry; do
+      [ -n "$entry" ] || continue
+      is_spared="no"
+      case "
+$spare_list" in
+        *"
+$entry
+"*) is_spared="yes" ;;
+      esac
+      [ "$is_spared" = "yes" ] || { rm -rf "$entry"; removed=$((removed + 1)); }
+    done <<< "$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 2>/dev/null)"
   fi
+
   after="$(tmp_count)"
-  [ "$after" = "0" ] || _co_refuse "$after entries remain under $TMP_DIR after the wipe"
-  TMP_LINE="$before entries under $TMP_DIR (the whole directory; the spare list binds a running run, not a closed one)"
+  [ "$after" = "$spared" ] || _co_refuse "$after entries remain under $TMP_DIR after the wipe ($spared expected, for a live neighbour's spared state)"
+  TMP_LINE="$before entries under $TMP_DIR ($removed removed, $spared spared for a live neighbour session; this session's own state and every dead session's are never spared)"
 }
 
 # ─── Act 4: the task list ────────────────────────────────────────────────────

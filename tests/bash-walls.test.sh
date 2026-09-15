@@ -207,6 +207,17 @@ run_hook "$(mk_payload "$R_QUIET" 'git push origin main')"
 expect_status "2a: protect-main still refuses a push to main" 2 "$ST"
 expect_contains "2b: …in its own words" "main is a protected branch here" "$ERR"
 
+# THE SCREEN AND THE PARSER MUST AGREE (wave-14 T24, security 1b). `_wall_mentions_git` is a
+# cheap superset in front of `git_argv_*`: it strips backslashes and quotes and looks for the
+# substring `git`, and only a MISS short-circuits. A backslash-NEWLINE is a line continuation
+# — the backslash goes and a newline is left standing between `g` and `it` — so the screen
+# said "provably not a git command" for a command the parser reads as a push. Both readers of
+# the screen are in this one process: protect-main (here) and the evidence gate's IS_COMMIT
+# (25g(n) in tests/canonical-sdlc-evidence-gate.test.sh), so one repair has to serve both.
+run_hook "$(mk_payload "$R_QUIET" "$(printf 'g\\\n''it push origin main')")"
+expect_status "2b1: a 'g\<newline>it push' is a push — the screen does not hide it from protect-main" 2 "$ST"
+expect_contains "2b2: …refused in protect-main's own words" "main is a protected branch here" "$ERR"
+
 run_hook "$(mk_payload "$R_QUIET" 'psql -c "DROP TABLE users"')"
 expect_status "2c: protect-database still refuses a DROP" 2 "$ST"
 expect_contains "2d: …in its own words" "this command DROPs a database object" "$ERR"
@@ -844,8 +855,13 @@ run_hook "$(mk_payload "$R_ORDER" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash 
   BASH_MAX_TIMEOUT_MS=600000
 expect_status "14t: off-budget + NO timeout: refused — the budget arm runs before the repair" \
   2 "$ST"
+# Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25): "off budget:" inverted its own
+# meaning (the set printed is the ALLOWED set, not what is off it) — the label is now
+# "allowed:".
 expect_contains "14u: …in the budget arm's own words" \
-  "that suite is not on this agent's budget" "$ERR"
+  "allowed:" "$ERR"
+expect_contains "14u2: …and AC-5.2's set: the row's own allowed token is on this line, not just detail" \
+  "alpha.test.sh" "$ERR"
 expect_absent "14v: …and a REFUSED call is never repaired — no repair line on stderr" \
   "suite-timeout" "$ERR"
 expect_eq "14w: …and no updatedInput on stdout either" "no" "$(has_updated_input)"
@@ -860,5 +876,164 @@ expect_eq "14y: …updatedInput.timeout still raised to the harness maximum" "60
   "$(updated_timeout_of)"
 expect_contains "14z: …and the repair is still logged, naming the agent" \
   "repaired from=absent to=600000 agent=$ACTOR" "$ERR"
+
+# ---------------------------------------------------------------------------
+section "15 — §budget-on-the-wire (T8, AC-5.2): the allowed set reaches exit-2 stderr"
+#
+# Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25): T25 renamed the three fact labels
+# ("off budget: " -> "allowed: ", "full tree off budget: " -> "full tree refused; allowed: ",
+# "unexpanded name; budget: " -> "unexpanded name; allowed: ") because the old wording put
+# the ALLOWED set right after the words "off budget", which reads backwards, and rendered
+# an empty set as "off budget: none" — "nothing is off budget" on a line that is refusing.
+# Every assertion below checks a TOKEN or COUNT, never the label text itself, so none of
+# their values change; only this note and 14u (which pinned the label) needed a re-spell.
+#
+# T7's repro (record/wave-14-tune-181/T7-req5-repro.md §4, ruling D-1): "On the budget: …"
+# lived only in `detail`, and refuse.sh's channel table marks exit2's `detail_to_user`
+# `no` — a dispatched writer's own tool_result on a budget refusal never carried the
+# recorded set, only the one-line fact/fix, and that line named no set. AC-5.2's
+# fails-when is exactly this: "the stderr the harness relays on exit 2 carries no suite
+# tokens." This section drives all three call sites `budget_refuse` (walls.sh) folds
+# through and proves each one now does, on the DEFAULT (non-verbose) channel — never
+# through $VERR, which section 14 and tests/agent-context-guard.test.sh §G9 already cover.
+
+R15="$(mk_repo budgetwire)"
+: > "$R15/.bionic/tmp/roster-$SID.state"
+. "$(dirname "$0")/lib/roster-row.sh"
+roster_row_fixture "session=$SID" name=t15writer "agent_id=$ACTOR" \
+  "suites_allowed=archive.test.sh run.sh" suites_source=derived files= \
+  >> "$R15/.bionic/tmp/roster-$SID.state"
+
+WIRE_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
+
+# (a) the ordinary per-suite refusal — the primary AC-5.2 site (walls.sh's own line
+# number for "On the budget:" cited by the wave plan).
+run_hook "$(mk_payload "$R15" 'bash tests/close-out.test.sh' "$ACTOR" omit Bash test-runner)"
+expect_status "15a: an off-budget suite is still refused" 2 "$ST"
+expect_contains "15a2: …and the DEFAULT (non-verbose) exit-2 stderr carries the FIRST allowed token" \
+  "archive.test.sh" "$ERR"
+expect_contains "15a3: …and the SECOND" "run.sh" "$ERR"
+expect_eq "15a4: …still exactly one line" "1" "$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')"
+if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
+  ok "15a5: …and still in AC-E1.3's one-line shape"
+else
+  no "15a5: …and still in AC-E1.3's one-line shape" "line=[$ERR]"
+fi
+
+# (b) the shell-variable-name case — an unexpanded `$s.test.sh` cannot be checked against
+# the budget, but the budget it WOULD have checked against still belongs on the wire.
+run_hook "$(mk_payload "$R15" 'for s in a b; do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+expect_status "15b: an unexpanded suite name is still refused" 2 "$ST"
+expect_contains "15b2: …and the recorded budget is on the DEFAULT stderr too" \
+  "archive.test.sh" "$ERR"
+
+# (c) the full-tree case (`tests/run.sh`, not on this row's budget). A FRESH row: R15's
+# own set literally contains the token "run.sh" as one of its two allowed SUITE NAMES,
+# which is also the one token that waives this exact arm (walls.sh: `*" run.sh "*)
+# continue`) — reusing it here would test nothing.
+R15R="$(mk_repo budgetwirerun)"
+: > "$R15R/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" name=t15run "agent_id=$ACTOR" \
+  suites_allowed=archive.test.sh suites_source=declared files= \
+  >> "$R15R/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15R" 'bash tests/run.sh' "$ACTOR" omit Bash test-runner)"
+expect_status "15c: the full tree is refused when the row does not carry it" 2 "$ST"
+expect_contains "15c2: …and the recorded budget is on the DEFAULT stderr" \
+  "archive.test.sh" "$ERR"
+
+# (d) THE PAIRED NEGATIVE — a brief that declared `Suites: none` carries no fabricated
+# token, and the wire says so honestly rather than silently going quiet about it.
+R15N="$(mk_repo budgetwirenone)"
+: > "$R15N/.bionic/tmp/roster-$SID.state"
+roster_row_fixture "session=$SID" name=t15none "agent_id=$ACTOR" \
+  suites_allowed=none suites_source=declared files= \
+  >> "$R15N/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15N" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash test-runner)"
+expect_status "15d: a Suites: none row still refuses" 2 "$ST"
+expect_contains "15d2: …and the DEFAULT stderr says so honestly — 'none' on the wire" \
+  "none" "$ERR"
+expect_absent "15d3: …never a fabricated suite token" "gamma.test.sh" "$ERR"
+
+# (e) A WIDE BUDGET (A-orch-17's own incident: "the row carried a 38-suite set") still
+# fits ONE line — token boundaries, not a mid-name cut, and a "+N more" count for what
+# does not fit.
+R15W="$(mk_repo budgetwirewide)"
+: > "$R15W/.bionic/tmp/roster-$SID.state"
+WIDE_SET=""
+for i in $(seq 1 38); do WIDE_SET="$WIDE_SET s${i}.test.sh"; done
+WIDE_SET="${WIDE_SET# }"
+roster_row_fixture "session=$SID" name=t15wide "agent_id=$ACTOR" \
+  "suites_allowed=$WIDE_SET" suites_source=derived files= \
+  >> "$R15W/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15W" 'bash tests/zzz-off-budget.test.sh' "$ACTOR" omit Bash test-runner)"
+expect_status "15e: an off-budget suite against a 38-suite row is refused" 2 "$ST"
+expect_eq "15e2: …still exactly one line" "1" "$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')"
+if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
+  ok "15e3: …still in AC-E1.3's one-line shape (never overflows past refuse()'s own cap)"
+else
+  no "15e3: …still in AC-E1.3's one-line shape (never overflows past refuse()'s own cap)" "line=[$ERR]"
+fi
+expect_contains "15e4: …and it names at least one real suite token, not a mid-name ellipsis" \
+  "s1.test.sh" "$ERR"
+expect_contains "15e5: …with an honest count of what did not fit" "more" "$ERR"
+
+# (f) CONTROL — an on-budget suite is still silent on both streams; the change above is
+# additive to the refusal only, never a new nudge on the allowed path. A payload timeout
+# pinned to the SAME value this call sets `BASH_MAX_TIMEOUT_MS` to keeps ARM R's
+# repair-and-log silent too (section 14c: "a timeout AT the maximum — nothing to
+# repair"), regardless of whatever ceiling the calling shell happens to have exported.
+run_hook "$(mk_payload "$R15" 'bash tests/archive.test.sh' "$ACTOR" omit Bash test-runner 600000)" \
+  BASH_MAX_TIMEOUT_MS=600000
+expect_status "15f: an on-budget suite is still allowed" 0 "$ST"
+expect_empty "15f2: …and both streams stay empty" "$OUT$ERR"
+
+# (g) T25 fold-in (review-correctness-d3930dd.md F3, F7): THE HONEST FLOOR WHEN THERE IS NO
+# ROOM AT ALL. (e) above proves the wide-budget case (a whole token plus a "+N more" count);
+# these two prove the two ways that can still fail — a single token too long to fit even
+# BARE (F3 — used to fall through to a character cut, printing a truncated, unrunnable
+# suite name) and a column budget of zero or less on a NON-EMPTY set (F7 — used to print
+# the literal `none`, the same word an EMPTY set gets). Both now render a bare count
+# ("N suites") instead: never a cut name, never a false `none`.
+
+# (g1) F3 — one suite name longer than the unexpanded-name label's own room (17 columns at
+# this wave's other two literals in force) drives the deepest fallback for real, through
+# the production hook.
+R15L="$(mk_repo budgetwirelong)"
+: > "$R15L/.bionic/tmp/roster-$SID.state"
+LONG_SUITE="tests/a-suite-name-far-too-long-to-fit-even-bare-on-one-refusal-line.test.sh"
+roster_row_fixture "session=$SID" name=t15long "agent_id=$ACTOR" \
+  "suites_allowed=$LONG_SUITE" suites_source=derived files= \
+  >> "$R15L/.bionic/tmp/roster-$SID.state"
+run_hook "$(mk_payload "$R15L" 'for s in a b; do bash "tests/$s.test.sh"; done' "$ACTOR" omit Bash test-runner)"
+expect_status "15g1: an unexpanded name against a too-long single suite is still refused" 2 "$ST"
+expect_contains "15g1: …and the line falls back to an honest count, never a cut name" \
+  "1 suite" "$ERR"
+expect_absent "15g1: …never a mid-name character cut (the ellipsis glyph)" "…" "$ERR"
+expect_absent "15g1: …and never the truncated fragment itself" \
+  "tests/a-suite-name-far" "$ERR"
+if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
+  ok "15g1: …still in AC-E1.3's one-line shape"
+else
+  no "15g1: …still in AC-E1.3's one-line shape" "line=[$ERR]"
+fi
+
+# (g2) F7 — a column budget of zero (or less) is not reachable through any live call site
+# today (all three labels leave positive room — 17/18/32 columns, this report), so this
+# drives `_budget_wire_list` directly. It is a NESTED function (defined only when
+# `wall_background_suite_guard` itself runs, per bash scoping — confirmed: sourcing
+# walls.sh alone registers the outer wall functions but not this one), so it is extracted
+# the way cross-gate-agreement.test.sh already extracts nested/inline bodies for a
+# unit-level pin: `awk` between its own `()` line and its closing `}`, then `eval`.
+G7_LIB="$WALLS_LIB"
+G7_NONEMPTY=$(bash -c '. "'"$G7_LIB"'/refuse.sh"; . "'"$G7_LIB"'/fold.sh"; \
+  eval "$(awk "/^_budget_wire_list\(\)/,/^}/" "'"$G7_LIB"'/walls.sh")"; \
+  _budget_wire_list "tests/a.test.sh tests/b.test.sh" 0')
+expect_eq "15g2: a non-empty set at cols<=0 renders an honest count, never a false 'none'" \
+  "2 suites" "$G7_NONEMPTY"
+G7_EMPTY=$(bash -c '. "'"$G7_LIB"'/refuse.sh"; . "'"$G7_LIB"'/fold.sh"; \
+  eval "$(awk "/^_budget_wire_list\(\)/,/^}/" "'"$G7_LIB"'/walls.sh")"; \
+  _budget_wire_list "" 0')
+expect_eq "15g2: …and a GENUINELY empty set still says 'none' (the control this pin needs)" \
+  "none" "$G7_EMPTY"
 
 finish

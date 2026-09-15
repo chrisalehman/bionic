@@ -600,8 +600,12 @@ roster_row_fixture "session=$SID" name=t6nested "agent_id=$AGENT_ID" \
 # CELL 1: agent context + armed -> the arm runs, and refuses the off-budget suite.
 run_wall "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
 expect_eq "G9.1 agent context + armed: the budget arm REFUSES an off-budget suite" "2" "$ST"
+# Re-spelled (wave-14 T8 c088189 → T18 fcd5a16 → T25: "off budget:" inverted its meaning —
+# the set printed is what IS allowed, not what is off budget — renamed to "allowed:").
 expect_contains "G9.1 …in the ruled one line, and it is the BUDGET arm's" \
-  "suite-run refused — that suite is not on this agent's budget" "$ERR"
+  "suite-run refused — allowed:" "$ERR"
+expect_contains "G9.1 …and the row's own token now reaches the DEFAULT stderr (T8, AC-5.2)" \
+  "alpha.test.sh" "$ERR"
 run_wall_verbose "$(mk_suite_payload "$REPO_S" 'bash tests/gamma.test.sh' yes)" "$SUITE_WALL"
 expect_contains "G9.1 …in the arm's own words" "BUDGET" "$VERR"
 expect_contains "G9.1 …naming the recorded set" "alpha.test.sh" "$VERR"

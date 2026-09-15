@@ -12,6 +12,13 @@
 #                                  above-home | git-toplevel-fallback |
 #                                  cwd-fallback
 #
+# AND ONE VALUE THE SAME WALK PUBLISHES (§10, epic-23 wave-14 REQ-2/REQ-4):
+#
+#   BIONIC_WORKTREE                the linked worktree's NAME when rule 1 mapped
+#                                  one, empty in every other topology, and set in
+#                                  the CALLER's shell so a hook can read it after
+#                                  `bionic_context` — never printed on the report.
+#
 # WHY IT EXISTS. Eight byte-identical `resolve_project_root` copies in hooks/
 # ask git FIRST and walk for a `.bionic` ancestor only when no repository
 # exists at all, so a git repo nested inside a plain `.bionic` workspace always
@@ -423,5 +430,103 @@ section "9 — the tag vocabulary is closed, and every tag in it is reachable"
 VOCAB="above-home candidate chosen cwd-fallback git-toplevel-fallback skipped-symlink"
 seen="$(sort -u "$TAGS_SEEN" | tr '\n' ' ' | sed 's/ *$//')"
 expect_eq "8: the tags emitted across all seven topologies are exactly the vocabulary" "$VOCAB" "$seen"
+
+# ============================================================
+section "10 — the linked worktree's NAME is published as BIONIC_WORKTREE"
+# ============================================================
+# epic-23 wave-14 REQ-2 / REQ-4 (spec D1 and D5 cut 2, research R1 Q3(a)). Rule 1
+# already asks git for `--git-dir` and `--git-common-dir`; the tail of the git dir
+# IS the linked worktree's name, and the library computed it and threw it away. The
+# evidence gate needs it to find the plan row that owns a worktree writer's commit
+# (T3), and publishing it costs no fork.
+#
+# THE NAME IS A VALUE, NOT AN ACTION. It says which worktree the walk mapped FROM;
+# it never changes which root the walk answers. §1-§8 above are the other half of
+# that claim, and they are unchanged.
+#
+# `<unset>` IS DISTINGUISHED FROM EMPTY on purpose. "The library never assigned it"
+# and "the library assigned the empty string" are different contract claims, and a
+# reader under `set -u` — every hook in the spine — can only rely on the second.
+
+# wt_at <cwd> <home> -> BIONIC_WORKTREE after one project_root call from inside
+# <cwd>; the literal `<unset>` when the library never assigned it.
+wt_at() {
+  ( cd "$1" 2>/dev/null || { echo "wt_at: no such dir $1"; exit 1; }
+    HOME="$2"; export HOME
+    GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig"; GIT_CONFIG_NOSYSTEM=1; export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+    . "$LIB" || exit 1
+    project_root >/dev/null
+    printf '%s' "${BIONIC_WORKTREE-<unset>}" )
+}
+
+expect_eq "10: from deep inside a linked worktree, BIONIC_WORKTREE is the worktree's name" \
+  "wt-a" "$(wt_at "$SANDBOX/t2/wt-a/sub" "$HOME_DEFAULT")"
+expect_eq "10: an ordinary checkout publishes an EMPTY name, not an unset variable" \
+  "" "$(wt_at "$SANDBOX/t1/ws/repo/src" "$HOME_DEFAULT")"
+expect_eq "10: a worktree of a BARE repo publishes empty — rule 1's bare exception did not map it" \
+  "" "$(wt_at "$SANDBOX/t8/wt-of-bare/sub" "$HOME_DEFAULT")"
+expect_eq "10: outside any repository at all, the name is empty" \
+  "" "$(wt_at "$SANDBOX/t7/plain/deep" "$HOME_DEFAULT")"
+
+# ---- 10b differential: the name is the WORKTREE's, never the branch's ----
+# §2's fixture names its branch and its directory alike, so it cannot tell the two
+# apart. `spawn-worktree.sh` does not enforce that a branch name ends in a row id
+# (R1 Q3(b)), which is exactly why the key must be the worktree, and this fixture
+# is the shape where a branch-name reading would answer differently.
+mkdir -p "$SANDBOX/t10"
+gitinit "$SANDBOX/t10/main"
+gitcommit "$SANDBOX/t10/main"
+mkdir -p "$SANDBOX/t10/main/.bionic/docs"
+git -C "$SANDBOX/t10/main" worktree add -q -b t10-branch "$SANDBOX/t10/tree-dir" >/dev/null 2>&1
+mkdir -p "$SANDBOX/t10/tree-dir/sub"
+
+if [ -d "$SANDBOX/t10/tree-dir/sub" ]; then ok "10b: the branch≠directory fixture built"; else
+  no "10b: the branch≠directory fixture built" "git worktree add produced no $SANDBOX/t10/tree-dir"
+fi
+
+expect_eq "10b: with a branch named differently from the directory, the DIRECTORY name is published" \
+  "tree-dir" "$(wt_at "$SANDBOX/t10/tree-dir/sub" "$HOME_DEFAULT")"
+expect_ne "10b: and it is NOT the branch name" \
+  "t10-branch" "$(wt_at "$SANDBOX/t10/tree-dir/sub" "$HOME_DEFAULT")"
+expect_eq "10b: the root is still the main checkout — publishing the name moved no answer" \
+  "$SANDBOX/t10/main" "$(root_at "$SANDBOX/t10/tree-dir/sub" "$HOME_DEFAULT")"
+
+# ---- 10c: rule 1 asks git ONCE (REQ-4, AC-4.3's first half, at the layer it lives) ----
+# R3 §5 measured the two `git rev-parse` calls at 22.5 ms together, 19% of the
+# bash-walls run. One combined `rev-parse --git-common-dir --git-dir` answers both.
+# Counted with a `git` on PATH that logs its own invocation and execs the real one,
+# so this reads the forks the library actually makes rather than reading its source.
+GIT_SHIM="$SANDBOX/shim"
+mkdir -p "$GIT_SHIM"
+REAL_GIT="$(command -v git)"
+cat > "$GIT_SHIM/git" <<SHIM
+#!/bin/bash
+printf '%s\n' "\$*" >> "\$BIONIC_GIT_CALL_LOG"
+exec "$REAL_GIT" "\$@"
+SHIM
+chmod +x "$GIT_SHIM/git"
+
+# git_calls <cwd> <home> -> how many times one project_root call forked git
+GIT_CALL_LOG="$SANDBOX/.git-calls"
+git_calls() {
+  : > "$GIT_CALL_LOG"
+  ( cd "$1" 2>/dev/null || exit 1
+    HOME="$2"; export HOME
+    GIT_CONFIG_GLOBAL="$SANDBOX/gitconfig"; GIT_CONFIG_NOSYSTEM=1; export GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
+    PATH="$GIT_SHIM:$PATH"; export PATH
+    BIONIC_GIT_CALL_LOG="$GIT_CALL_LOG"; export BIONIC_GIT_CALL_LOG
+    . "$LIB" || exit 1
+    project_root >/dev/null )
+  awk 'END { print NR }' "$GIT_CALL_LOG"
+}
+
+expect_eq "10c: the shim sees git at all (the counter is not reading an empty file for the wrong reason)" \
+  "1" "$( : > "$GIT_CALL_LOG"; PATH="$GIT_SHIM:$PATH" BIONIC_GIT_CALL_LOG="$GIT_CALL_LOG" git --version >/dev/null 2>&1; awk 'END { print NR }' "$GIT_CALL_LOG" )"
+expect_eq "10c: an ordinary checkout costs ONE git call for the whole root resolution" \
+  "1" "$(git_calls "$SANDBOX/t1/ws/repo/src" "$HOME_DEFAULT")"
+expect_eq "10c: a linked worktree costs TWO — the one rev-parse plus rule 1's bare check" \
+  "2" "$(git_calls "$SANDBOX/t2/wt-a/sub" "$HOME_DEFAULT")"
+expect_eq "10c: the one call asks for both paths at once" \
+  "1" "$(git_calls "$SANDBOX/t1/ws/repo/src" "$HOME_DEFAULT" >/dev/null; grep -c -- '--git-common-dir .*--git-dir' "$GIT_CALL_LOG")"
 
 finish

@@ -1415,8 +1415,20 @@ expect_contains "16h: control: …and the diff outside Files: refuses" "undeclar
 # and this hook is registered at "timeout": 10 on Stop and SubagentStop, with the call
 # inside the per-candidate loop. The budget is spent across the sweep; a row that gets no
 # derivation still REFUSES and says the suites were not named. The one thing it must never
-# become is a silent pass. NO SEAM: the bound is the shipped 6 seconds, and the stub simply
-# outruns it.
+# become is a silent pass. NO SEAM: the bound is the shipped one, READ from lib/bounds.sh
+# rather than typed here, and the stub simply outruns it.
+#
+# lg_hires_cs_since <epoch-float> -> whole hundredths of a second elapsed since it.
+# SUB-SECOND, via python3, the idiom of tests/session-start.test.sh §16 and — for this
+# exact purpose — tests/dispatch-preflight.test.sh's `dp_hires_cs_since` (wave-14 T34). A
+# whole-second `date +%s` difference is off by up to a full second either way depending on
+# where its two reads straddle a tick, and the thing this arm has to tell apart is a sweep
+# that ended on its bound from one that ran 15% past it. A host with no python3 answers
+# 999999, which fails the arm loudly rather than passing it blind.
+lg_hires_cs_since() {
+  python3 -c 'import sys,time; print(int((time.time()-float(sys.argv[1]))*100))' "$1" 2>/dev/null \
+    || echo 999999
+}
 R16I="$(make_git_wave_repo r16i)"
 WT16I=$(make_slice_tree "$R16I" slice16i)
 commit_files "$WT16I" "out of scope" undeclared/slow.sh
@@ -1428,19 +1440,52 @@ printf 'impact-command: bash %s\n' "$STUB16I" > "$R16I/.bionic/config.yaml"
 add_row "$R16I" name=slice16i agent_id="$AID_A" deliverable=.bionic/docs/record/s16i.md \
   files="declared/" launched_at="$(iso_ago 600)"
 deliver "$R16I" .bionic/docs/record/s16i.md
-T16I=$(date +%s)
+# THE BOUND IS READ, NOT TRANSCRIBED (wave-14 T35). `LG_IMPACT_BOUND_S` lives in
+# payload/scripts/lib/bounds.sh with the dispatch wall's beside it; a `6` typed here would
+# go stale the first time the library's number moved and this arm would then be pinning
+# the suite's memory of the bound rather than the bound.
+B16I="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/bounds.sh"
+LG16I_BOUND="$(bash -c '. "$1" 2>/dev/null && printf "%s" "${LG_IMPACT_BOUND_S:-}"' _ "$B16I" 2>/dev/null)"
+expect_nonempty "16i: the sweep's bound is readable from lib/bounds.sh" "$LG16I_BOUND"
+T16I=$(python3 -c 'import time; print(time.time())' 2>/dev/null || echo 0)
 run_gate "$GATE" "$(stop_payload "$R16I" "$SID" false)"
-E16I=$(( $(date +%s) - T16I ))
+E16I_CS=$(lg_hires_cs_since "$T16I")
 expect_status "16i: a slow derivation does not turn the refusal into a pass" "2" "$RC"
 expect_contains "16i: …the offending file is still named" "undeclared/slow.sh" "$OUT_VSTDERR"
 expect_contains "16i: …and the reader is told the suites were NOT derived" \
   "are NOT named here" "$OUT_VSTDERR"
 expect_absent "16i: …never the answer the command would eventually have given" \
   "never.test.sh" "$OUT_STDERR"
-if [ "$E16I" -lt 10 ]; then
-  ok "16i: …and the sweep finished inside the hook's own 10s registration (${E16I}s)"
+# THE SLACK IS ONE SECOND, ON A HUNDREDTHS CLOCK (wave-14 T35, re-pinning T34's shape).
+# This read `< 10` — the hook's own registration — over a whole-second clock, so it could
+# not tell a sweep that stopped on its 6 s bound from one that ran to 6.9 s and was eating
+# the very margin the registration is supposed to leave. The sweep spent its bound as a
+# count of `sleep 0.1` polls, each costing 115 ms as an external fork (T34 §2), so the
+# realized wait was ~1.15x the number both refusal messages quote, and grew with load.
+#
+# MEASURED, AND THE MARGIN IS HONEST. On the tick loop this arm read 7.03 s and 6.96 s on
+# the same machine — one side of the 7.00 s cap each time, because a 15% overrun of SIX
+# seconds is 0.9 s and the slack is 1 s. On the clock it reads 6.37 s. So this row catches
+# the old loop about half the time and will catch it every time under the load that made
+# it worth fixing, but it is NOT what proves the loop changed: tests/stop.test.sh 6r/6t
+# pin the source directly (the wait ends on `$SECONDS` against the constant; no tick
+# budget remains) and are RED against the old loop deterministically. What THIS row owns
+# is the live claim — that a sweep facing a derivation which never returns ends on its own
+# bound, with the rest of the hook's registration still unspent.
+#
+# WHAT THE ONE SECOND HAS TO ABSORB is the rest of this hook — four verdicts, the git
+# reconciliation, the journal — around ONE derivation that runs to the bound. A whole
+# second of it is generous on the fixture below and still catches a wait denominated in
+# anything that stretches; a sweep that misses this by seconds is the defect, not the noise.
+# The registration claim the old row made survives inside this one: bound + 1 is 7, which
+# is strictly under the 10 that hooks.json registers (§L.4c in cross-gate-agreement pins
+# that pair itself, both numbers read from their own files).
+E16I_CAP=$(( (${LG16I_BOUND:-0} + 1) * 100 ))
+if [ "$E16I_CS" -le "$E16I_CAP" ]; then
+  ok "16i: …and the sweep stopped on its ${LG16I_BOUND}s bound, inside the hook's own 10s registration ($(( E16I_CS / 100 )).$(printf '%02d' $(( E16I_CS % 100 )))s)"
 else
-  no "16i: …and the sweep finished inside the hook's own 10s registration" "took ${E16I}s"
+  no "16i: …and the sweep stopped on its ${LG16I_BOUND}s bound, inside the hook's own 10s registration" \
+    "took $(( E16I_CS / 100 )).$(printf '%02d' $(( E16I_CS % 100 )))s against a $(( E16I_CAP / 100 ))s cap"
 fi
 
 # --- 16j: `set -f` AROUND THE DIFF-PATH SPLIT (review-a A-11). `$LG_OUTSIDE` comes from
