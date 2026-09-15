@@ -90,7 +90,11 @@
 # process substitution, no GNU-only flags.
 #
 # Environment:
-#   BIONIC_IMPACT_ROOT   the tree to derive over (default: this file's repo)
+#   BIONIC_IMPACT_ROOT        the tree to derive over (default: this file's repo)
+#   BIONIC_IMPACT_CACHE_DIR   where the per-tree-state graph cache lives (default:
+#                             <root>/.bionic/tmp/impact-cache when that tree has a
+#                             .bionic, and nowhere otherwise). Set it to the empty
+#                             string to derive from scratch every call.
 
 set -uo pipefail
 
@@ -206,6 +210,179 @@ _canon() {
   esac
   _dealias "$(_norm "$p")"
 }
+
+# ── the query, answered off the finished graph ───────────────────────────────
+# DEFINED HERE, ABOVE THE GRAPH THAT FEEDS IT, because there are two ways to
+# reach it: a cache hit answers from a graph this process never built, and a
+# cache miss answers from one it just built. Both call this, and it is the only
+# copy — the byte-for-byte agreement between a hit and a miss is a property of
+# there being one answering path, not of two being kept in step.
+#
+# It reads exactly three things: "$@", $WORK/all, and the alias map through
+# _canon. Everything else the build below produces is scaffolding.
+_impact_answer() {
+  local a c
+  : >"$WORK/query"
+  for a in "$@"; do
+    c="$(_canon "$a")"
+    [ -n "$c" ] || continue
+    printf '%s\n' "$c" >>"$WORK/query"
+    # A DIRECTORY ARGUMENT COVERS ITS FILES (review-a A-3; see DIRECTORIES EXPAND
+    # above). `-L` because the four root aliases are symlinked directories and a
+    # caller asking about `payload` is asking about `hooks/` too; each result is
+    # de-aliased back to the one canonical spelling, so `payload/hooks/x.sh` and
+    # `hooks/x.sh` do not both enter the query as separate paths. Textual, not
+    # _canon: everything under $ROOT/$c is already repo-relative by construction,
+    # and a per-file `cd`/`dirname` would put three forks on a hook's 10 s budget.
+    if [ -d "$ROOT/$c" ]; then
+      find -L "$ROOT/$c" -type f 2>/dev/null \
+        | while IFS= read -r _f; do
+            _dealias "$(_norm "${_f#"$ROOT"/}")"
+          done >>"$WORK/query"
+    fi
+  done
+  sort -u "$WORK/query" -o "$WORK/query"
+
+  awk -F'\t' '
+    function rank(k) {
+      if (k == "self") return 1
+      if (k == "source") return 2
+      if (k == "anchor") return 3
+      if (k == "pin") return 4
+      if (k == "path-ref") return 5
+      if (k == "transitive-lib") return 6
+      if (k == "transitive-doctor") return 7
+      if (k == "transitive-script") return 8
+      if (k == "transitive-hook") return 9
+      if (k == "payload-copy") return 10
+      return 11
+    }
+    function better(suite, k, q,   r) {
+      r = rank(k)
+      if (!(suite in BEST) || r < BEST[suite] || (r == BEST[suite] && q < BESTQ[suite])) {
+        BEST[suite] = r; BESTK[suite] = k; BESTQ[suite] = q
+      }
+    }
+    FILENAME == QF { Q[++nq] = $0; next }
+    {
+      suite = $1; kind = $2; path = $3
+      if (path ~ /^F:/) {
+        p = substr(path, 3)
+        for (i = 1; i <= nq; i++) if (Q[i] == p) better(suite, kind, Q[i])
+      } else {
+        d = substr(path, 3)
+        for (i = 1; i <= nq; i++)
+          if (Q[i] == d || index(Q[i], d "/") == 1) better(suite, kind, Q[i])
+      }
+    }
+    END { for (s in BEST) print s "\t" BESTK[s] ":" BESTQ[s] }
+  ' QF="$WORK/query" "$WORK/query" "$WORK/all" | sort
+}
+
+# ── the cache: one graph per tree state ──────────────────────────────────────
+# WHAT IS CACHED AND WHY IT IS SOUND. Everything between here and "answer the
+# query" builds $WORK/all, the suite-to-file edge graph, and reads NOTHING but
+# the tree — `"$@"` is first touched in _impact_answer. So the graph is a pure
+# function of the tree state, one graph serves every possible query at that
+# state, and reusing it cannot change an answer. R2 Q8 measured the consequence
+# of not reusing it: 4.2 s per call at quiet load, 4.2 s again for a completely
+# different argument, 13 ms apart. The dispatch wall paid that on every brief and
+# refused writers under load for the cost of asking its own question.
+#
+# THE KEY IS THE TREE, spelled out rather than sampled, because a key that misses
+# a change answers the NEXT question with the LAST tree's graph — and this
+# derivation is the single owner of "which suites read this change" for three
+# consumers (the dispatch wall, the writer budget guard, the landing reconcile),
+# so one stale hit is a missed regression in all three at once. Four parts:
+#
+#   HEAD                 `git rev-parse`, ~15 ms. Strictly redundant against the
+#                        content hash below — same content, same graph, whatever
+#                        the commit — so it can only cost a hit, never buy a
+#                        wrong one. It is in the key because the plan named it
+#                        and because a cheap second opinion on "same tree" is
+#                        worth 15 ms.
+#   the path listing     every path in the checkout, one `find`, ~9 ms. This is
+#                        the part a content hash alone would miss: the build
+#                        tests EXISTENCE (`[ -f ]` settles the `source?`
+#                        candidates) and DIRECTORY-NESS (`[ -d ]` decides which
+#                        edges expand), so a file appearing or a directory being
+#                        created changes the graph without changing one byte of
+#                        any file the extraction reads. lib/bounds.sh landing
+#                        beside lib/stop.sh is exactly that case.
+#   the alias map        link and target, built just above; a re-pointed symlink
+#                        rewrites every path in the graph.
+#   the owners' content  every file the extraction awk reads, hashed whole,
+#                        ~57 ms for 5.5 MB. Names are hashed with the contents so
+#                        a rename is a change.
+#
+# ~90 ms in total against the 4.2 s it skips.
+#
+# EXCLUSIONS. `.git`, `.worktrees` and `.bionic` are outside the listing. The
+# first two the build already ignores; `.bionic` is the machine-local tree that
+# holds this very cache, and listing it would make every write invalidate the
+# next read. Nothing under `.bionic` is a suite or a payload file, so no edge
+# reaches it.
+#
+# WHERE IT LIVES. `$ROOT/.bionic/tmp/impact-cache/<key>`, one file per tree
+# state, and under `.bionic/tmp` deliberately: close-out wipes that tree, so a
+# stale entry has a scheduled death and nothing here prunes. THE DIRECTORY IS
+# NOT CREATED WHERE IT DOES NOT BELONG — no `.bionic`, no cache, silently — which
+# keeps a fixture tree (every suite below §D builds one) uncached and
+# byte-identical to what it was before this existed.
+#
+# Set BIONIC_IMPACT_CACHE_DIR to put the cache somewhere else; set it to the
+# empty string to turn it off. Writes are `mktemp` + `mv` within the cache
+# directory, so a reader never sees a half-written graph and two writers racing
+# at one key both leave a whole one.
+LIBDIRS="$(find "$ROOT" -type d -name lib \
+  -not -path "$ROOT/.git/*" -not -path "$ROOT/.worktrees/*" 2>/dev/null \
+  | sed "s|^$ROOT/||" | sort -u | tr '\n' ' ')"
+
+# HOOKS ARE OWNERS TOO. A suite that runs `hooks/session-start.sh` reads every
+# library that hook sources, and the planted-edit proof measured the cost of
+# leaving them out: wiping payload/scripts/lib/patrol.sh turned four suites red
+# that the derivation could not see, all of them reading it through a hook.
+EXTRACT_FILES=""
+for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/lib/*.sh \
+         "$ROOT"/payload/scripts/*.sh "$ROOT"/hooks/*.sh; do
+  [ -f "$f" ] && EXTRACT_FILES="$EXTRACT_FILES $f"
+done
+
+CACHE_DIR="${BIONIC_IMPACT_CACHE_DIR-}"
+if [ -z "${BIONIC_IMPACT_CACHE_DIR+set}" ]; then
+  [ -d "$ROOT/.bionic" ] && CACHE_DIR="$ROOT/.bionic/tmp/impact-cache"
+fi
+
+# NO HASH, NO CACHE. Guessing a key from mtimes when the hashers are absent would
+# trade a soundness claim for a few seconds; recomputing is always correct.
+HASH_CMD=""
+if command -v shasum >/dev/null 2>&1; then HASH_CMD="shasum -a 256"
+elif command -v sha256sum >/dev/null 2>&1; then HASH_CMD="sha256sum"
+fi
+
+CACHE_FILE=""
+if [ -n "$CACHE_DIR" ] && [ -n "$HASH_CMD" ]; then
+  # shellcheck disable=SC2086  # both are deliberate word splits
+  CACHE_KEY="$( {
+      printf 'impact-graph/v1\n'
+      printf 'head\t%s\n' "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo none)"
+      find "$ROOT" \
+        -not -path "$ROOT/.git" -not -path "$ROOT/.git/*" \
+        -not -path "$ROOT/.worktrees" -not -path "$ROOT/.worktrees/*" \
+        -not -path "$ROOT/.bionic" -not -path "$ROOT/.bionic/*" 2>/dev/null \
+        | sed "s|^$ROOT/||" | sort
+      cat "$WORK/aliases"
+      printf '%s\n' $EXTRACT_FILES | sed "s|^$ROOT/||"
+      cat $EXTRACT_FILES
+    } 2>/dev/null | $HASH_CMD | awk '{print $1}' )"
+  if [ -n "$CACHE_KEY" ]; then
+    CACHE_FILE="$CACHE_DIR/$CACHE_KEY"
+    if [ -f "$CACHE_FILE" ] && cp "$CACHE_FILE" "$WORK/all" 2>/dev/null; then
+      _impact_answer "$@"
+      exit 0
+    fi
+  fi
+fi
 
 # ── the raw extraction ───────────────────────────────────────────────────────
 # One awk pass over every suite, every tests/lib helper and every payload script.
@@ -344,21 +521,6 @@ FNR == 1 {
 }
 AWK
 
-# Every library directory in the tree, repo-relative — the candidate roots for a
-# source line whose directory cannot be read statically.
-LIBDIRS="$(find "$ROOT" -type d -name lib \
-  -not -path "$ROOT/.git/*" -not -path "$ROOT/.worktrees/*" 2>/dev/null \
-  | sed "s|^$ROOT/||" | sort -u | tr '\n' ' ')"
-
-# HOOKS ARE OWNERS TOO. A suite that runs `hooks/session-start.sh` reads every
-# library that hook sources, and the planted-edit proof measured the cost of
-# leaving them out: wiping payload/scripts/lib/patrol.sh turned four suites red
-# that the derivation could not see, all of them reading it through a hook.
-EXTRACT_FILES=""
-for f in "$ROOT"/tests/*.test.sh "$ROOT"/tests/lib/*.sh \
-         "$ROOT"/payload/scripts/*.sh "$ROOT"/hooks/*.sh; do
-  [ -f "$f" ] && EXTRACT_FILES="$EXTRACT_FILES $f"
-done
 # shellcheck disable=SC2086  # deliberate split of the file list
 awk -v ROOTRE="$ROOT" -v LIBDIRS="$LIBDIRS" -f "$WORK/extract.awk" \
   $EXTRACT_FILES 2>/dev/null >"$WORK/raw" || :
@@ -506,59 +668,21 @@ awk -F'\t' -v OFS='\t' '
 ' CF="$WORK/dircov" "$WORK/dircov" "$WORK/all" | sort -u >"$WORK/all.flagged"
 mv "$WORK/all.flagged" "$WORK/all"
 
-# ── answer the query ─────────────────────────────────────────────────────────
-: >"$WORK/query"
-for a in "$@"; do
-  c="$(_canon "$a")"
-  [ -n "$c" ] || continue
-  printf '%s\n' "$c" >>"$WORK/query"
-  # A DIRECTORY ARGUMENT COVERS ITS FILES (review-a A-3; see DIRECTORIES EXPAND
-  # above). `-L` because the four root aliases are symlinked directories and a
-  # caller asking about `payload` is asking about `hooks/` too; each result is
-  # de-aliased back to the one canonical spelling, so `payload/hooks/x.sh` and
-  # `hooks/x.sh` do not both enter the query as separate paths. Textual, not
-  # _canon: everything under $ROOT/$c is already repo-relative by construction,
-  # and a per-file `cd`/`dirname` would put three forks on a hook's 10 s budget.
-  if [ -d "$ROOT/$c" ]; then
-    find -L "$ROOT/$c" -type f 2>/dev/null \
-      | while IFS= read -r _f; do
-          _dealias "$(_norm "${_f#"$ROOT"/}")"
-        done >>"$WORK/query"
+# ── store the graph for the next call at this tree state ─────────────────────
+# mktemp-then-rename inside the cache directory: the rename is atomic on the same
+# filesystem, so a concurrent reader sees either no entry or a whole one, and two
+# writers racing at one key leave a complete graph either way. Every failure here
+# — no permission, a full disk, a cache directory that vanished — is silent and
+# costs the next call a rebuild, which is the answer it would have given anyway.
+if [ -n "$CACHE_FILE" ] && mkdir -p "$CACHE_DIR" 2>/dev/null; then
+  _cache_tmp="$(mktemp "$CACHE_DIR/.tmp.XXXXXX" 2>/dev/null)" || _cache_tmp=""
+  if [ -n "$_cache_tmp" ]; then
+    if cp "$WORK/all" "$_cache_tmp" 2>/dev/null; then
+      mv -f "$_cache_tmp" "$CACHE_FILE" 2>/dev/null || rm -f "$_cache_tmp"
+    else
+      rm -f "$_cache_tmp"
+    fi
   fi
-done
-sort -u "$WORK/query" -o "$WORK/query"
+fi
 
-awk -F'\t' '
-  function rank(k) {
-    if (k == "self") return 1
-    if (k == "source") return 2
-    if (k == "anchor") return 3
-    if (k == "pin") return 4
-    if (k == "path-ref") return 5
-    if (k == "transitive-lib") return 6
-    if (k == "transitive-doctor") return 7
-    if (k == "transitive-script") return 8
-    if (k == "transitive-hook") return 9
-    if (k == "payload-copy") return 10
-    return 11
-  }
-  function better(suite, k, q,   r) {
-    r = rank(k)
-    if (!(suite in BEST) || r < BEST[suite] || (r == BEST[suite] && q < BESTQ[suite])) {
-      BEST[suite] = r; BESTK[suite] = k; BESTQ[suite] = q
-    }
-  }
-  FILENAME == QF { Q[++nq] = $0; next }
-  {
-    suite = $1; kind = $2; path = $3
-    if (path ~ /^F:/) {
-      p = substr(path, 3)
-      for (i = 1; i <= nq; i++) if (Q[i] == p) better(suite, kind, Q[i])
-    } else {
-      d = substr(path, 3)
-      for (i = 1; i <= nq; i++)
-        if (Q[i] == d || index(Q[i], d "/") == 1) better(suite, kind, Q[i])
-    }
-  }
-  END { for (s in BEST) print s "\t" BESTK[s] ":" BESTQ[s] }
-' QF="$WORK/query" "$WORK/query" "$WORK/all" | sort
+_impact_answer "$@"
