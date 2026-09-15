@@ -9209,9 +9209,18 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # drift from before the wave's own T1 landed, and A-orch-35 attributed the added site
 # to T2 — direct measurement (`git diff b8b6bd6 8b80980 -- tests/docs-pins.test.sh`)
 # shows it lands with T3's merge instead; corrected here against the grep, not the note.
-expect_eq "S19.3 docs-pins holds 39 doctoring sites" "39" \
+#
+# 40->41 at epic-23 wave-14-tune-181 (2026-09-15, T15 fold-in): T10 (Section 27, "card row
+# formats at fixed widths", REQ-9) added one more doctoring site, DOCTORED_NO_RULE — the
+# copy of steps/1.md with the shared card rule line stripped, which is AC-9.2's own
+# mutation arm — declared by one anchor call on $CARD_RULE_LINE. ATTRIBUTED FROM THE DIFF,
+# not from the task list: `git log -p 0fe69ed..HEAD -- tests/docs-pins.test.sh` shows two
+# commits touching the file (63054a1 T10, c821781 T14) and exactly one of them, 63054a1,
+# adds a `DOCTORED…="$TMP/` line and an `anchor` line; T14's docs commit adds neither.
+# RE-DERIVED BY DIRECT GREP at THIS commit, as every number in this section is.
+expect_eq "S19.3 docs-pins holds 40 doctoring sites" "40" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 40 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant)" "40" \
+expect_eq "S19.3 …declared by 41 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant)" "41" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -9263,6 +9272,12 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # 70 at epic-23 wave-13 (2026-09-14, T12 fold-in): 40 + 26 + 1 + 3, the docs-pins term
 # alone moving for the reason the row above this one now names (T3's DOCTORED_REPAIR).
 #
+# 71 at epic-23 wave-14-tune-181 (2026-09-15, T15 fold-in): 41 + 26 + 1 + 3, the docs-pins
+# term alone moving again — T10's Section 27 rule-line mutant, attributed from the diff in
+# the paragraph above. The other three terms are unmoved and were re-measured, not assumed:
+# this wave's landings touch cross-gate-agreement.test.sh and landing-gate.test.sh in prose
+# and in numbers, never by adding or removing an `anchor` call.
+#
 # tests/refuse.test.sh IS NOT IN THIS CENSUS, and that is a Step-9 disposition rather
 # than an oversight. It carries ONE anchor call site, reached three times: its
 # `mutant()` helper calls `anchor` before every `sed`, so a mutant cannot be added
@@ -9270,7 +9285,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …70 anchor call sites across the four doctoring suites, all told" "70" \
+expect_eq "S19.3 …71 anchor call sites across the four doctoring suites, all told" "71" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
