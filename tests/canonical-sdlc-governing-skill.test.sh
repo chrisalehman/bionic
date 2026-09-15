@@ -2662,6 +2662,31 @@ echo "1e.5f: a task-scale plan is out of scope (its ledger is the five-column on
 run_write "$gs_1e_plan" "$(build_plan scale=task matrix=no)$gs_tasks_bad_status"
 assert_eq "1e.5f exit 0" 0 "$HOOK_EXIT"
 
+# 1e.5h/1e.5i — THE `worktree` COLUMN (wave-14 REQ-2, ADR-027). The dispatcher writes the
+# tree it created into the row, so the Step-3 write-time wall has to accept a plan that
+# carries the cell. It is OPTIONAL: this wall must neither refuse a plan for carrying it nor
+# refuse the far larger set of plans that do not.
+gs_tasks_worktree='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30m | REQ-x | a.sh | 14-T1 | landed |
+| T2 | 5 | verify | the verify | auditor | T1 | 30m | REQ-x | b.sh | — | pending |
+'
+gs_tasks_worktree_bad="${gs_tasks_worktree/| b.sh | — | pending |/| b.sh | — | doing |}"
+
+echo "1e.5h: an eleven-column table carrying worktree at sdlc-step 3 → allow"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_worktree"
+assert_eq "1e.5h exit 0" 0 "$HOOK_EXIT"
+assert_eq "1e.5h silent" "" "$HOOK_STDERR"
+
+echo "1e.5i: …and the wall still reads the status cell past the new column (not shifted)"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_worktree_bad"
+assert_eq "1e.5i exit 2" 2 "$HOOK_EXIT"
+assert_contains "1e.5i the detail names the offending id" "T2" "$HOOK_VSTDERR"
+assert_contains "1e.5i …and the rule it broke" "status doing is not one of" "$HOOK_VSTDERR"
+
 echo "1e.5g: a plan with no Tasks table at all → allow (presence is the gate's rule)"
 run_write "$gs_1e_plan" "$(build_plan)"
 assert_eq "1e.5g exit 0" 0 "$HOOK_EXIT"
