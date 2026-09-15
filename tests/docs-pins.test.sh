@@ -2311,6 +2311,15 @@ section "Section 18: REQ-1b — the split skill's byte caps and the core's step 
 # with their own printf format beside the card, same pattern and same named
 # ruling as the raise directly above: the ceiling itself moves, owned here.
 #
+# LOWERED to 110,000 — Chris 2026-09-15 "option 1 - renderer script and cap at
+# 110k" (wave-14 T36): the printf format lines (646 B) left the templates for
+# payload/scripts/card.sh, which owns them. Same pattern and same named ruling as
+# the two moves above — the ceiling itself moves, owned here — and it moves DOWN,
+# which is the direction a ratchet with an owner is allowed to go only by his
+# word. The 500 B T14 bought for the two Step-2 format lines is returned with the
+# lines themselves; the renderer's three pointer lines are paid for out of what is
+# left, and the total is measured in the report, not predicted.
+#
 # AC-1b.5 is the structural half, and it is what makes the byte caps mean anything: a core
 # that still carried its `### Step N` sections would be under no cap at all, and a core that
 # dropped the sections without naming the files would leave the model with no way to find
@@ -2377,12 +2386,12 @@ for _f in "$SPLIT_CORE" "$SPLIT_DISPATCH" \
     SPLIT_TOTAL=$((SPLIT_TOTAL + _b)); fi
 done
 if [ -n "$SPLIT_TOTAL_MISSING" ]; then
-  no "115: AC-1b.4 — core + steps + dispatch at or under 110,500 B" "missing:$SPLIT_TOTAL_MISSING"
-elif [ "$SPLIT_TOTAL" -le 110500 ]; then
-  ok "115: AC-1b.4 — core + steps + dispatch at or under 110,500 B ($SPLIT_TOTAL B ≤ 110500 B)"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" "missing:$SPLIT_TOTAL_MISSING"
+elif [ "$SPLIT_TOTAL" -le 110000 ]; then
+  ok "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B ($SPLIT_TOTAL B ≤ 110000 B)"
 else
-  no "115: AC-1b.4 — core + steps + dispatch at or under 110,500 B" \
-     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 110500)) B"
+  no "115: AC-1b.4 — core + steps + dispatch at or under 110,000 B" \
+     "$SPLIT_TOTAL B exceeds the cap by $((SPLIT_TOTAL - 110000)) B"
 fi
 
 # The LOADED surface — core + the largest single step file — is what a session actually
@@ -2999,23 +3008,37 @@ section "Section 27: T10 — card row formats at fixed widths (REQ-9: AC-9.1, AC
 #
 # HERMETIC. Reads the committed rendered finals by path; the mutation arms work on TMP copies.
 
-# --- AC-9.1a: each of the three rendered step files names a printf format ---
+# --- AC-9.1a: each of the three rendered step files names the RENDERER that owns its format ---
+#
+# RE-SPELLED AT wave-14 T36 (Chris 2026-09-15: "D4: I want the wrapped version", then
+# "option 1 - renderer script and cap at 110k"). The formats no longer live beside the
+# cards for a model to apply by hand. `payload/scripts/card.sh` owns them, and it FOLDS the
+# free-text cell inside its own column — the thing a printf format cannot do, which is why
+# a long requirement used to push its trailing columns off the row (126 and 165 columns,
+# measured, before T31 re-cut the widths; re-cutting the widths never fixed it, it only
+# moved the sentence that overflows). So what each card must carry is no longer the word
+# `printf`, it is the NAME OF THE RENDERER, and the inverse is pinned immediately below:
+# a format line left behind beside a card is worse than none at all, because it is a second
+# owner of a number only one file owns now.
 for _pair in "140a:$STEP1_MD:steps/1.md" "140b:$STEP2_MD:steps/2.md" "140c:$STEP3_MD:steps/3.md"; do
   _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
-  _cnt="$(grep -c 'printf' "$_file" 2>/dev/null | tr -cd '0-9')"
+  _cnt="$(grep -c 'card\.sh' "$_file" 2>/dev/null | tr -cd '0-9')"
   [ -n "$_cnt" ] || _cnt=0
   if [ "$_cnt" -ge 1 ] 2>/dev/null; then
-    ok "${_n}: AC-9.1 — ${_which} names its card row's printf format at least once"
+    ok "${_n}: AC-9.1 — ${_which} names the renderer that owns its card row format (card.sh)"
   else
-    no "${_n}: AC-9.1 — ${_which} names its card row's printf format at least once" "count=$_cnt file=$_file"
+    no "${_n}: AC-9.1 — ${_which} names the renderer that owns its card row format (card.sh)" "count=$_cnt file=$_file"
   fi
 done
 
-# --- AC-9.1b / AC-9.2: the shared rule line, verbatim, in all three -----------------------
-CARD_RULE_LINE='Rows are rendered by that format, never padded by hand.'
+# --- AC-9.1b / AC-9.2: the shared rule, verbatim, in all three -----------------------
+# The sentence survived the rewrite by design: "never padded by hand" was always the rule,
+# and what changed is only WHO does the padding. The tail below is identical in all three
+# pointer lines, which is what makes it one rule rather than three.
+CARD_RULE_LINE=', TSV in; cell folds, never padded by hand.'
 for _pair in "141a:$STEP1_MD:steps/1.md" "141b:$STEP2_MD:steps/2.md" "141c:$STEP3_MD:steps/3.md"; do
   _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
-  expect_contains "${_n}: AC-9.1/AC-9.2 — ${_which} carries the shared rule line verbatim" \
+  expect_contains "${_n}: AC-9.1/AC-9.2 — ${_which} carries the shared pointer rule verbatim" \
     "$CARD_RULE_LINE" "$(cat "$_file" 2>/dev/null)"
 done
 
@@ -3028,6 +3051,37 @@ case "$(cat "$DOCTORED_NO_RULE")" in
   *"$CARD_RULE_LINE"*) no "142: AC-9.2 — a copy of steps/1.md missing the rule line still 'has' it (pin is vacuous)" ;;
   *) ok "142: AC-9.2 — a copy of steps/1.md missing the rule line fails the rule-line check (pin discriminates)" ;;
 esac
+
+# --- AC-9.1c (T36): THE INVERSE — no format line survives beside a card ------------------
+#
+# WHY AN ABSENCE IS PINNED AT ALL. The positive rows above are satisfied by a file that
+# names card.sh AND still carries the old `%-44s` line underneath it. That file has two
+# owners for one number, and the stale one is the one a reader believes, because it is the
+# one that states a width. The three cards carried five such lines and 645 B of them at
+# 89f6944; this row is what keeps them gone.
+for _pair in "142a:$STEP1_MD:steps/1.md" "142b:$STEP2_MD:steps/2.md" "142c:$STEP3_MD:steps/3.md"; do
+  _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
+  _cnt="$(grep -c 'printf' "$_file" 2>/dev/null | tr -cd '0-9')"
+  [ -n "$_cnt" ] || _cnt=0
+  if [ "$_cnt" = "0" ]; then
+    ok "${_n}: AC-9.1 — ${_which} carries no printf format line beside its card (the renderer owns the widths)"
+  else
+    no "${_n}: AC-9.1 — ${_which} carries no printf format line beside its card" \
+       "found $_cnt: $(grep -n 'printf' "$_file" 2>/dev/null | head -3 | tr '\n' ' ')"
+  fi
+done
+
+# 142d: Anti-vacuity for the inverse. The mutation is an APPEND, not a strip, so it carries
+# no `anchor` — an anchor exists to catch a pattern-based rewrite that silently matched
+# nothing, and an append cannot no-op (§Roots in tests/cross-gate-agreement.test.sh makes
+# the same call for the same reason). A copy of steps/2.md with T31's Ownership format line
+# put back must make the absence check above fire.
+REPLANTED_FMT="$TMP/step2-format-replanted.md"
+cp "$STEP2_MD" "$REPLANTED_FMT"
+printf 'Ownership row: `    %%-12s owner %%-14s surfaces %%-22s test %%s` (concept, owner, surfaces, test) (printf).\n' \
+  >> "$REPLANTED_FMT"
+expect_eq "142d: AC-9.1 — a copy of steps/2.md with a format line replanted is caught by the absence check (pin is not vacuous)" \
+  "1" "$(grep -c 'printf' "$REPLANTED_FMT" 2>/dev/null | tr -cd '0-9')"
 
 # --- AC-9.4: the Step-2 decision row and the Step-3 task row are single-line rows,
 # trailing columns on the row's own first line, never staggered onto a line below it. ---
@@ -3077,207 +3131,132 @@ else
      "fixture: $OLD_STAGGERED_DECISIONS"
 fi
 
-# --- AC-9.1 (fold-in, T14): the Step-2 card's Ownership and Eval-design rows also name
-# their own printf format beside the card — the two row shapes T10 left unannotated for
-# lack of aggregate-cap headroom (A-T10.1; Chris 2026-09-14 "Option 2" at the T10 landing,
-# wave-14 T14). Verbatim checks, the same idiom as 141a/141b/141c above.
-# RE-SPELLED (wave-14 T10 63054a1 -> T14 c821781 -> T31): T31 re-cut the Ownership and
-# Eval-design widths (below) so their SAMPLE rows fit inside the repo's own 100-column rule
-# (payload/scripts/lib/width.sh:11/:43) — 133 and 107 columns empty, before this task, even
-# with every field blank. The verbatim strings below move with that cut.
+# --- AC-9.1 (T36): the two Step-2 row shapes T14 annotated are annotated NO LONGER --------
+# T14 raised the aggregate cap by 500 B to buy the Ownership and Eval-design format lines a
+# place beside the card (Chris 2026-09-14 "Option 2"); T36 spends that room the other way,
+# on the renderer, and Chris moved the cap back to 110,000 with it. The two verbatim strings
+# below are T31's own spelling of those lines, kept here as the thing that must now be
+# ABSENT — the strongest form of "it was removed", since a re-added line is caught by its
+# exact text rather than by a pattern that might drift.
 OWNERSHIP_ROW_LINE='Ownership row: `    %-12s owner %-14s surfaces %-22s test %s` (concept, owner, surfaces, test) (printf).'
-expect_contains "146: AC-9.1 — steps/2.md names the Ownership row's printf format verbatim (T14 fold-in, re-spelled T31)" \
+expect_absent "146: AC-9.1 — steps/2.md no longer states the Ownership row's printf format (card.sh owns it)" \
   "$OWNERSHIP_ROW_LINE" "$(cat "$STEP2_MD" 2>/dev/null)"
 
 EVAL_DESIGN_ROW_LINE='Eval-design row: `    %-8s %-36s %6s %5s %9s %5s %6s` (requirement, approach, static, unit, hermetic, live, human) (printf).'
-expect_contains "147: AC-9.1 — steps/2.md names the Eval-design row's printf format verbatim (T14 fold-in, re-spelled T31)" \
+expect_absent "147: AC-9.1 — steps/2.md no longer states the Eval-design row's printf format (card.sh owns it)" \
   "$EVAL_DESIGN_ROW_LINE" "$(cat "$STEP2_MD" 2>/dev/null)"
 
-# --- AC-9.1/AC-9.4 (T31, wave-14 fold-in — correctness F2, readability HIGH 2): every card's
-# own fenced header and sample row must land exactly where the card's OWN declared printf
-# format puts them, so header and format cannot drift apart again the way they did before this
-# task (Decisions header said serves@57/ADR@75, the format put them at @77/@92; Ownership and
-# Eval-design exceeded 100 columns even empty). Each arm below re-derives the format straight
-# off the rendered file (never a copy pasted twice), renders it against the card's own sample
-# values, and checks the row it gets is BYTE-IDENTICAL to what ships, is <=100 columns, and —
-# for the three cards with a column header above the row — that each header label starts at
-# the exact column its field starts at. A pin that only compared two copies of the same
-# hand-typed number could not have caught the original drift; this one recomputes the
-# right-hand side from the format every run.
+# --- AC-9.1/AC-9.4 (T31, re-pointed at T36): every card's own header and sample rows are
+# exactly what the RENDERER prints for the card's own sample values. -----------------------
 #
-# str_index <haystack> <needle> -> 1-indexed column of the first occurrence, 0 if absent.
-str_index() { awk -v s="$1" -v n="$2" 'BEGIN{print index(s,n)}'; }
-
-# extract_backtick_fmts <file> <line-regex> -> each backtick-quoted format on the first
-# matching line, one per output line (a card row's format comment may carry more than one,
-# e.g. the Step-1 requirement row's two-line format).
-extract_backtick_fmts() {
-  grep -m1 -E "$2" "$1" 2>/dev/null | grep -oE '`[^`]*`' | sed -e 's/^`//' -e 's/`$//'
+# WHAT CHANGED AND WHAT DID NOT. T31 built these arms to stop a card's header and its stated
+# printf format drifting apart (the Decisions header said serves@57/ADR@75 while the format
+# put them at @77/@92). The drift they exist to catch is unchanged; the right-hand side is.
+# It used to be the format re-derived off the same file — which could only ever prove the
+# file agreed with itself — and it is now the OUTPUT OF payload/scripts/card.sh, the file
+# that renders these rows for real. So the card in the skill is held to the renderer a
+# session is told to run, and a width changed in card.sh and not in the card (or the other
+# way round) turns these rows red. tests/card.test.sh holds card.sh to the printf formats
+# the cards carried at 89f6944, so the widths themselves cannot drift silently either: two
+# suites, one number, neither of them the file's own copy of it.
+#
+# HERMETIC: runs a committed script in this checkout against literal values; no network,
+# no fixtures, nothing written.
+CARD_SH="${REPO}/payload/scripts/card.sh"
+card_rows() {  # <kind> — TSV rows on stdin -> the rendered header and rows
+  bash "$CARD_SH" "$1" 2>/dev/null
 }
-
-# fmt_field_starts <fmt> <val1> <val2> ... -> one 1-indexed start column per %s field, in
-# order, computed from the format's own literal text and each field's declared width against
-# the ACTUAL value length (printf pads a short value to width and never truncates a long one,
-# so a value wider than its column shifts every field after it — the same "padded past" case
-# the brief calls out; this walk accounts for it rather than assuming the nominal width).
-fmt_field_starts() {
-  local fmt="$1"; shift
-  local -a vals=("$@")
-  local rest="$fmt" col=1 i=0
-  local -a out=()
-  while [[ "$rest" =~ ^([^%]*)%(-)?([0-9]*)s(.*)$ ]]; do
-    local lit="${BASH_REMATCH[1]}" w="${BASH_REMATCH[3]}"
-    rest="${BASH_REMATCH[4]}"
-    col=$(( col + ${#lit} ))
-    out+=("$col")
-    local val="${vals[$i]:-}" vlen eff
-    vlen=${#val}; eff=$vlen
-    if [ -n "$w" ] && [ "$w" -gt "$vlen" ]; then eff=$w; fi
-    col=$(( col + eff ))
-    i=$(( i + 1 ))
-  done
-  printf '%s\n' "${out[@]}"
+card_cols() {  # <line> -> its width in terminal columns, through width.sh
+  ( . "${REPO}/payload/scripts/lib/width.sh" 2>/dev/null && bionic_cols "${1:-}" ) || printf '0'
 }
+expect_true "147a: the card renderer the three cards now point at exists" test -f "$CARD_SH"
 
-# fmt_render <fmt> <val1> <val2> ... -> the row rendered by hand, one field at a time, NEVER
-# through printf's own %s width padding. printf pads by BYTE length, not character length —
-# payload/scripts/lib/width.sh's "PRINTF PADS BYTES; A TERMINAL LAYS OUT COLUMNS" note is this
-# exact pitfall — so a multi-byte glyph in a value (the Tasks card's depends column carries
-# "—", 3 UTF-8 bytes / 1 column) comes out under-padded by printf though `${#val}` is already
-# character-aware (proven against fmt_field_starts above, which uses `${#val}` and agrees with
-# the shipped file). This function pads with `${#val}` too, so the two never disagree.
-fmt_render() {
-  local fmt="$1"; shift
-  local -a vals=("$@")
-  local rest="$fmt" i=0
-  local out=""
-  while [[ "$rest" =~ ^([^%]*)%(-)?([0-9]*)s(.*)$ ]]; do
-    local lit="${BASH_REMATCH[1]}" dash="${BASH_REMATCH[2]}" w="${BASH_REMATCH[3]}"
-    rest="${BASH_REMATCH[4]}"
-    out="${out}${lit}"
-    local val="${vals[$i]:-}" vlen n pad=""
-    vlen=${#val}
-    if [ -n "$w" ] && [ "$w" -gt "$vlen" ]; then
-      n=$(( w - vlen )); pad="$(printf '%*s' "$n" '')"
-    fi
-    if [ "$dash" = "-" ]; then out="${out}${val}${pad}"; else out="${out}${pad}${val}"; fi
-    i=$(( i + 1 ))
-  done
-  printf '%s' "${out}${rest}"
-}
-
-# 148: Step-1 requirement row (two physical lines, no separate column header — "provenance"
-# and "ACs" are literal words baked into the format itself, so a row rendered by the format
-# cannot drift from them; the check is row == printf(fmt, samples) and both lines <=100 cols).
-REQ1_FMTS=()
-while IFS= read -r _line; do REQ1_FMTS+=("$_line"); done < <(extract_backtick_fmts "$STEP1_MD" '^Requirement row:')
+# 148: Step-1 requirement row — two physical lines per row, no separate column header.
 REQ1_LINE_A="$(grep -m1 '^    REQ-<id>' "$STEP1_MD" 2>/dev/null)"
 REQ1_LINE_B="$(grep -m1 'provenance <user quote' "$STEP1_MD" 2>/dev/null)"
-REQ1_RENDERED_A="$(fmt_render "${REQ1_FMTS[0]:-}" "REQ-<id>" "<the requirement in one line>")"
-REQ1_RENDERED_B="$(fmt_render "${REQ1_FMTS[1]:-}" "<user quote | spec section | ticket | report>" "<n>")"
-expect_eq "148a: AC-9.1/AC-9.4 — steps/1.md's requirement line is exactly its own printf format applied to the card's sample values" \
-  "$REQ1_RENDERED_A" "$REQ1_LINE_A"
-expect_eq "148b: AC-9.1/AC-9.4 — steps/1.md's provenance/ACs line is exactly its own printf format applied to the card's sample values" \
-  "$REQ1_RENDERED_B" "$REQ1_LINE_B"
-if [ "${#REQ1_RENDERED_A}" -le 100 ] && [ "${#REQ1_RENDERED_B}" -le 100 ]; then
-  ok "148c: AC-9.1 — steps/1.md's requirement row fits within 100 columns with the sample values (${#REQ1_RENDERED_A} / ${#REQ1_RENDERED_B})"
+REQ1_RENDERED="$(printf '%s\t%s\t%s\t%s\n' \
+  'REQ-<id>' '<the requirement in one line>' '<user quote | spec section | ticket | report>' '<n>' \
+  | card_rows requirement)"
+expect_eq "148: AC-9.1/AC-9.4 — steps/1.md's Requirements header and row are exactly what card.sh renders" \
+  "$(printf '%s\n' '  Requirements' "$REQ1_LINE_A" "$REQ1_LINE_B")" "$REQ1_RENDERED"
+if [ "$(card_cols "$REQ1_LINE_A")" -le 100 ] && [ "$(card_cols "$REQ1_LINE_B")" -le 100 ]; then
+  ok "148c: AC-9.1 — steps/1.md's requirement row fits within 100 columns with the sample values ($(card_cols "$REQ1_LINE_A") / $(card_cols "$REQ1_LINE_B"))"
 else
   no "148c: AC-9.1 — steps/1.md's requirement row fits within 100 columns with the sample values" \
-     "line A=${#REQ1_RENDERED_A} line B=${#REQ1_RENDERED_B}"
+     "line A=$(card_cols "$REQ1_LINE_A") line B=$(card_cols "$REQ1_LINE_B")"
 fi
 
-# 149: Step-2 Decision row + its "serves"/"ADR" column header.
-DEC_FMT="$(extract_backtick_fmts "$STEP2_MD" '^Decision row:')"
+# 149: Step-2 Decision row and its serves/ADR column header, rendered together.
 DEC_HEADER_LINE="$(grep -m1 '^  Decisions' "$STEP2_MD" 2>/dev/null)"
 DEC_ROW_LINE="$(grep -m1 '^    D<n>' "$STEP2_MD" 2>/dev/null)"
-DEC_VALS=("D<n>" "<the decision in one line>" "<REQ ids>" "<file | none>")
-DEC_RENDERED="$(fmt_render "$DEC_FMT" "${DEC_VALS[@]}")"
-expect_eq "149a: AC-9.1/AC-9.4 — steps/2.md's decision row is exactly its own printf format applied to the card's sample values" \
-  "$DEC_RENDERED" "$DEC_ROW_LINE"
-if [ "${#DEC_RENDERED}" -le 100 ]; then
-  ok "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values (${#DEC_RENDERED})"
+DEC_RENDERED="$(printf '%s\t%s\t%s\t%s\n' 'D<n>' '<the decision in one line>' '<REQ ids>' '<file | none>' \
+  | card_rows decision)"
+expect_eq "149: AC-9.1/AC-9.4 — steps/2.md's Decisions header and row are exactly what card.sh renders" \
+  "$(printf '%s\n' "$DEC_HEADER_LINE" "$DEC_ROW_LINE")" "$DEC_RENDERED"
+if [ "$(card_cols "$DEC_ROW_LINE")" -le 100 ]; then
+  ok "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values ($(card_cols "$DEC_ROW_LINE"))"
 else
-  no "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values" "width=${#DEC_RENDERED}"
+  no "149b: AC-9.1 — steps/2.md's decision row fits within 100 columns with the sample values" "width=$(card_cols "$DEC_ROW_LINE")"
 fi
-DEC_STARTS=()
-while IFS= read -r _line; do DEC_STARTS+=("$_line"); done < <(fmt_field_starts "$DEC_FMT" "${DEC_VALS[@]}")
-expect_eq "149c: AC-9.4 — steps/2.md's Decisions header 'serves' label starts at the row format's serves column" \
-  "${DEC_STARTS[2]:-}" "$(str_index "$DEC_HEADER_LINE" "serves")"
-expect_eq "149d: AC-9.4 — steps/2.md's Decisions header 'ADR' label starts at the row format's ADR column" \
-  "${DEC_STARTS[3]:-}" "$(str_index "$DEC_HEADER_LINE" "ADR")"
 
-# 150: Step-2 Ownership row — "owner"/"surfaces"/"test" are literal words inside the format
-# itself (no separate header line to drift from it), so equality + width is the whole check.
-OWN_FMT="$(extract_backtick_fmts "$STEP2_MD" '^Ownership row:')"
+# 150: Step-2 Ownership row — its labels are literals inside the format, so the header is
+# the bare section name and the row is the whole check.
 OWN_ROW_LINE="$(grep -m1 '^    <concept>' "$STEP2_MD" 2>/dev/null)"
-OWN_RENDERED="$(fmt_render "$OWN_FMT" "<concept>" "<module>" "<where it renders>" "<suite>")"
-expect_eq "150a: AC-9.1 — steps/2.md's ownership row is exactly its own printf format applied to the card's sample values" \
-  "$OWN_RENDERED" "$OWN_ROW_LINE"
-if [ "${#OWN_RENDERED}" -le 100 ]; then
-  ok "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values (${#OWN_RENDERED})"
+OWN_RENDERED="$(printf '%s\t%s\t%s\t%s\n' '<concept>' '<module>' '<where it renders>' '<suite>' \
+  | card_rows ownership)"
+expect_eq "150: AC-9.1 — steps/2.md's Ownership header and row are exactly what card.sh renders" \
+  "$(printf '%s\n' '  Ownership' "$OWN_ROW_LINE")" "$OWN_RENDERED"
+if [ "$(card_cols "$OWN_ROW_LINE")" -le 100 ]; then
+  ok "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values ($(card_cols "$OWN_ROW_LINE"))"
 else
-  no "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values" "width=${#OWN_RENDERED}"
+  no "150b: AC-9.1 — steps/2.md's ownership row fits within 100 columns with the sample values" "width=$(card_cols "$OWN_ROW_LINE")"
 fi
 
-# 151: Step-2 Eval-design row + its static/unit/hermetic/live/human column header, both
-# REQ-<id> rows and the "total" row.
-EVAL_FMT="$(extract_backtick_fmts "$STEP2_MD" '^Eval-design row:')"
+# 151: Step-2 Eval-design header, both REQ rows and the total row — five RIGHT-aligned
+# count columns, which is the one kind whose fields are not all left-padded.
 EVAL_HEADER_LINE="$(grep -m1 '^  Eval design' "$STEP2_MD" 2>/dev/null)"
 EVAL_REQ_LINES=()
 while IFS= read -r _line; do EVAL_REQ_LINES+=("$_line"); done < <(grep '^    REQ-<id>' "$STEP2_MD" 2>/dev/null)
 EVAL_TOTAL_LINE="$(grep -m1 '^    total' "$STEP2_MD" 2>/dev/null)"
-EVAL_VALS1=("REQ-<id>" "<how it is proven, one line>" "2" "1" "3" "0" "1")
-EVAL_VALS2=("REQ-<id>" "<how it is proven, one line>" "1" "0" "2" "1" "0")
-EVAL_VALS_T=("total" "" "3" "1" "5" "1" "1")
-EVAL_RENDERED1="$(fmt_render "$EVAL_FMT" "${EVAL_VALS1[@]}")"
-EVAL_RENDERED2="$(fmt_render "$EVAL_FMT" "${EVAL_VALS2[@]}")"
-EVAL_RENDERED_T="$(fmt_render "$EVAL_FMT" "${EVAL_VALS_T[@]}")"
-expect_eq "151a: AC-9.1 — steps/2.md's first eval-design REQ row is exactly its own printf format applied to its sample values" \
-  "$EVAL_RENDERED1" "${EVAL_REQ_LINES[0]:-}"
-expect_eq "151b: AC-9.1 — steps/2.md's second eval-design REQ row is exactly its own printf format applied to its sample values" \
-  "$EVAL_RENDERED2" "${EVAL_REQ_LINES[1]:-}"
-expect_eq "151c: AC-9.1 — steps/2.md's eval-design total row is exactly its own printf format applied to its sample values" \
-  "$EVAL_RENDERED_T" "$EVAL_TOTAL_LINE"
-if [ "${#EVAL_RENDERED1}" -le 100 ]; then
-  ok "151d: AC-9.1 — steps/2.md's eval-design row fits within 100 columns with the sample values (${#EVAL_RENDERED1})"
+EVAL_RENDERED="$( { printf '%s\t%s\t2\t1\t3\t0\t1\n' 'REQ-<id>' '<how it is proven, one line>'
+                    printf '%s\t%s\t1\t0\t2\t1\t0\n' 'REQ-<id>' '<how it is proven, one line>'
+                    printf 'total\t\t3\t1\t5\t1\t1\n'; } | card_rows eval-design)"
+expect_eq "151: AC-9.1 — steps/2.md's Eval design header and three rows are exactly what card.sh renders" \
+  "$(printf '%s\n' "$EVAL_HEADER_LINE" "${EVAL_REQ_LINES[0]:-}" "${EVAL_REQ_LINES[1]:-}" "$EVAL_TOTAL_LINE")" \
+  "$EVAL_RENDERED"
+if [ "$(card_cols "${EVAL_REQ_LINES[0]:-}")" -le 100 ]; then
+  ok "151d: AC-9.1 — steps/2.md's eval-design row fits within 100 columns with the sample values ($(card_cols "${EVAL_REQ_LINES[0]:-}"))"
 else
-  no "151d: AC-9.1 — steps/2.md's eval-design row fits within 100 columns with the sample values" "width=${#EVAL_RENDERED1}"
+  no "151d: AC-9.1 — steps/2.md's eval-design row fits within 100 columns with the sample values" \
+     "width=$(card_cols "${EVAL_REQ_LINES[0]:-}")"
 fi
-EVAL_STARTS=()
-while IFS= read -r _line; do EVAL_STARTS+=("$_line"); done < <(fmt_field_starts "$EVAL_FMT" "${EVAL_VALS1[@]}")
-for _pair in "static:2" "unit:3" "hermetic:4" "live:5" "human:6"; do
-  _label="${_pair%%:*}"; _idx="${_pair##*:}"
-  expect_eq "151e-${_label}: AC-9.4 — steps/2.md's Eval design header '${_label}' label starts at the row format's ${_label} column" \
-    "${EVAL_STARTS[$_idx]:-}" "$(str_index "$EVAL_HEADER_LINE" "$_label")"
-done
 
-# 152: Step-3 Task row + its kind/depends/agent column header, both sample task rows.
-TASK_FMT="$(extract_backtick_fmts "$STEP3_MD" '^Task row:')"
+# 152: Step-3 Task header and both sample task rows. The `depends` cell of the first row
+# carries an em dash — three bytes, one column — which is the cell that proves the renderer
+# pads in COLUMNS: a byte-padded row puts `agent` two columns left of its header here.
 TASK_HEADER_LINE="$(grep -m1 '^  Tasks' "$STEP3_MD" 2>/dev/null)"
 TASK_ROW_LINES=()
 while IFS= read -r _line; do TASK_ROW_LINES+=("$_line"); done < <(grep '^    <n>' "$STEP3_MD" 2>/dev/null)
-TASK_VALS1=("<n>" "<the task in one line>" "build" "—" "senior-implementor")
-TASK_VALS2=("<n>" "<the task in one line>" "test" "<n>" "implementor")
-TASK_RENDERED1="$(fmt_render "$TASK_FMT" "${TASK_VALS1[@]}")"
-TASK_RENDERED2="$(fmt_render "$TASK_FMT" "${TASK_VALS2[@]}")"
-expect_eq "152a: AC-9.1/AC-9.4 — steps/3.md's first task row is exactly its own printf format applied to its sample values" \
-  "$TASK_RENDERED1" "${TASK_ROW_LINES[0]:-}"
-expect_eq "152b: AC-9.1/AC-9.4 — steps/3.md's second task row is exactly its own printf format applied to its sample values" \
-  "$TASK_RENDERED2" "${TASK_ROW_LINES[1]:-}"
-if [ "${#TASK_RENDERED1}" -le 100 ] && [ "${#TASK_RENDERED2}" -le 100 ]; then
-  ok "152c: AC-9.1 — steps/3.md's task row fits within 100 columns with the sample values (${#TASK_RENDERED1} / ${#TASK_RENDERED2})"
+TASK_RENDERED="$( { printf '%s\t%s\tbuild\t—\tsenior-implementor\n' '<n>' '<the task in one line>'
+                    printf '%s\t%s\ttest\t<n>\timplementor\n' '<n>' '<the task in one line>'; } | card_rows task)"
+expect_eq "152: AC-9.1/AC-9.4 — steps/3.md's Tasks header and both rows are exactly what card.sh renders" \
+  "$(printf '%s\n' "$TASK_HEADER_LINE" "${TASK_ROW_LINES[0]:-}" "${TASK_ROW_LINES[1]:-}")" "$TASK_RENDERED"
+if [ "$(card_cols "${TASK_ROW_LINES[0]:-}")" -le 100 ] && [ "$(card_cols "${TASK_ROW_LINES[1]:-}")" -le 100 ]; then
+  ok "152c: AC-9.1 — steps/3.md's task row fits within 100 columns with the sample values ($(card_cols "${TASK_ROW_LINES[0]:-}") / $(card_cols "${TASK_ROW_LINES[1]:-}"))"
 else
   no "152c: AC-9.1 — steps/3.md's task row fits within 100 columns with the sample values" \
-     "row1=${#TASK_RENDERED1} row2=${#TASK_RENDERED2}"
+     "row1=$(card_cols "${TASK_ROW_LINES[0]:-}") row2=$(card_cols "${TASK_ROW_LINES[1]:-}")"
 fi
-TASK_STARTS=()
-while IFS= read -r _line; do TASK_STARTS+=("$_line"); done < <(fmt_field_starts "$TASK_FMT" "${TASK_VALS1[@]}")
-expect_eq "152d: AC-9.4 — steps/3.md's Tasks header 'kind' label starts at the row format's kind column" \
-  "${TASK_STARTS[2]:-}" "$(str_index "$TASK_HEADER_LINE" "kind")"
-expect_eq "152e: AC-9.4 — steps/3.md's Tasks header 'depends' label starts at the row format's depends column" \
-  "${TASK_STARTS[3]:-}" "$(str_index "$TASK_HEADER_LINE" "depends")"
-expect_eq "152f: AC-9.4 — steps/3.md's Tasks header 'agent' label starts at the row format's agent column" \
-  "${TASK_STARTS[4]:-}" "$(str_index "$TASK_HEADER_LINE" "agent")"
+
+# 153: THE PAIRED DISCRIMINATOR for 148-152. A card row nudged by one column must make the
+# equality above fail — without this, a renderer that printed nothing at all, or a
+# comparison that compared two empty strings, would pass every row in this block.
+anchor -E "$STEP2_MD" '^    D<n> ' 1
+DOCTORED_CARD_ROW="$TMP/step2-decision-row-nudged.md"
+sed -e 's|^    D<n> |    D<n>  |' "$STEP2_MD" > "$DOCTORED_CARD_ROW"
+expect_eq "153: AC-9.4 — a decision row nudged one column right no longer matches what card.sh renders (pin is not vacuous)" \
+  "no" \
+  "$([ "$(grep -m1 '^    D<n>' "$DOCTORED_CARD_ROW")" = "$DEC_ROW_LINE" ] && echo yes || echo no)"
 
 # AC-9.3 (render clean, byte caps hold) is discharged by Section 11's `--check` arms and
 # Section 18's byte-cap arms against these same rendered finals — both already read
