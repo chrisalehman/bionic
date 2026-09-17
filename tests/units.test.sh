@@ -904,6 +904,119 @@ expect_contains "T23's task cell keeps its pipe" "PreToolUse|Bash" \
   "$(printf '%s\n' "$ESC_T23" | cut -f4)"
 
 # ============================================================
+section "9b — a RAW pipe in a cell is NAMED, once, and the shifted row is not accused of the shift"
+# ============================================================
+#
+# §9 is about `\|`, the escape a writer got right. This section is about the one they did
+# not: a RAW `|` typed into a cell. `esc()` folds only the escaped form, so a raw pipe stays
+# an ordinary separator — it opens a field the header does not have and every cell after it
+# is read one slot early. What came back before this section existed was three violations
+# against cells that were correct, and no mention of the pipe at all (measured at c0e2c18,
+# record/wave-15-fixit-182/step1-research-rows.md Row 8):
+#
+#   T2: status b.sh is not one of pending active landed dropped
+#   T2: dep pipe names no row in the table
+#   T2: step 5 does not depend transitively on step-4 row T1
+#
+# THE ROW BELOW IS THAT MEASUREMENT'S OWN ROW, byte for byte. One line must come back, it must
+# name the pipe and the repair, and none of those three may survive beside it — a reader who
+# acts on any of them edits a cell that was never wrong.
+#
+# THE TWO NUMBERS ARE `|`-DELIMITED FIELD COUNTS, both sides taken the same way (the split
+# arity less the trailing empty field), so they are one greater than the cells a human counts.
+# What a reader acts on is that the first exceeds the second; the fixture pins the arithmetic
+# so it cannot drift between the library and the two gates that print its line.
+
+cat > "$SANDBOX/raw-pipe.md" <<'RAW_PIPE_EOF'
+---
+current: 4
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | do a | implementor | — | 30m | REQ-1 | a.sh | landed |
+| T2 | 5 | verify | do b | a raw | pipe | T1 | S | REQ-1 | b.sh | pending |
+RAW_PIPE_EOF
+
+VAL_RAW="$(call units_validate "$SANDBOX/raw-pipe.md")"
+
+expect_eq "the shifted row draws exactly one violation" "1" "$(nlines "$VAL_RAW")"
+expect_eq "…and it names the row, both counts, the pipe and the repair" \
+  'T2: 12 cells for 11 columns — a raw | inside a cell? escape it as \|' "$VAL_RAW"
+expect_eq "…and units_validate still exits 1" "1" "$(call_rc units_validate "$SANDBOX/raw-pipe.md")"
+expect_eq "none of the three misleading lines the shift used to produce survives" "0" \
+  "$(printf '%s\n' "$VAL_RAW" | grep -cE 'is not one of|names no row|does not depend' | tr -d ' ')"
+
+# SUPPRESSION IS PER ROW, not per table. A second row breaking an ordinary invariant must
+# still be named, or the single line would have been bought by saying less.
+cat > "$SANDBOX/raw-pipe-mixed.md" <<'RAW_MIXED_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | do a | implementor | — | 30m | REQ-1 | a.sh | landed |
+| T2 | 4 | build | do b | a raw | pipe | T1 | S | REQ-1 | b.sh | pending |
+| T3 | 4 | build | do c | implementor | — | 10m | REQ-1 | c.sh | doing |
+RAW_MIXED_EOF
+
+VAL_MIXED="$(call units_validate "$SANDBOX/raw-pipe-mixed.md")"
+expect_eq "a shifted row and a bad status in one table yield exactly two lines" "2" \
+  "$(nlines "$VAL_MIXED")"
+expect_contains "…the shifted row named once, for the pipe" \
+  "T2: 12 cells for 11 columns" "$VAL_MIXED"
+expect_contains "…and the row that is merely wrong still named for its own fault" \
+  "T3: status doing is not one of" "$VAL_MIXED"
+
+# THE DISCRIMINATOR: FEWER cells is NOT this fault. A short row is a row with empty cells,
+# which the per-column rules already name accurately; only a row WIDER than the header can be
+# carrying a raw pipe, and printing the advice for a short row would be a guess.
+cat > "$SANDBOX/short-row.md" <<'SHORT_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | do a | implementor | — | 30m | REQ-1 | a.sh | landed |
+| T2 | 4 | build | truncated |
+SHORT_EOF
+
+VAL_SHORT="$(call units_validate "$SANDBOX/short-row.md")"
+expect_eq "a row SHORTER than the header draws no raw-pipe line" "0" \
+  "$(printf '%s\n' "$VAL_SHORT" | grep -c 'a raw' | tr -d ' ')"
+expect_contains "…and is named by the ordinary rules instead" \
+  "T2: status (empty) is not one of" "$VAL_SHORT"
+
+# THE ESCAPE IS STILL THE ESCAPE (AC-8.3). §9's fixture carries three escaped pipes under the
+# same header: the fold happens BEFORE the count, so not one of them may look like this fault.
+expect_eq "the escaped form draws no raw-pipe line" "" \
+  "$(call units_validate "$SANDBOX/escaped-cell.md" | grep 'a raw' || true)"
+
+# THE FOLD RUNS BEFORE THE COUNT ON THE SAME ROW, which a second fixture cannot show: a cell
+# carrying BOTH an escape and a raw pipe must be named for the raw one exactly once. If the
+# count were taken on the unfolded record the escape would inflate it, and the advice would be
+# "escape it" about a pipe that already is.
+cat > "$SANDBOX/raw-and-escaped.md" <<'BOTH_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | a \| b and a raw | pipe | implementor | — | 30m | REQ-1 | a.sh | landed |
+BOTH_EOF
+
+VAL_BOTH="$(call units_validate "$SANDBOX/raw-and-escaped.md")"
+expect_eq "a row carrying an escape AND a raw pipe is named once, for the raw one" \
+  'T1: 12 cells for 11 columns — a raw | inside a cell? escape it as \|' "$VAL_BOTH"
+
+# units_rows IS UNTOUCHED BY THE RULE. The shifted row is still emitted with its eleven
+# fields: the violation is advice to whoever wrote the plan, not a reason to hide a row from
+# the schedulers that can still read most of it.
+ROWS_RAW="$(call units_rows "$SANDBOX/raw-pipe.md")"
+expect_eq "both rows still come through units_rows" "2" "$(nlines "$ROWS_RAW")"
+expect_eq "…each carrying eleven fields" "2" \
+  "$(printf '%s\n' "$ROWS_RAW" | awk -F'\t' 'NF == 11 { n++ } END { print n + 0 }')"
+
+# ============================================================
 section "10 — the worktree cell: slot 11, header-keyed, and OPTIONAL (wave-14 REQ-2, ADR-027)"
 # ============================================================
 #

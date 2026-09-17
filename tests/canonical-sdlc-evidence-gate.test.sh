@@ -3114,6 +3114,27 @@ write_plan "$h22e4" "$(d7_wave_plan "$tasks_bad_status" "- T1: bash suite 9/9 gr
 expect_block "22e4 status 'done' in the widened schema → block (the four are pending active landed dropped)" \
   "$h22e4" 'git commit -m "x"' "status done is not one of"
 
+# 22e5 — A RAW `|` IN A CELL (REQ-8, AC-8.3). The gate and the Step-3 write-time wall
+# read the SAME library, so a table whose only fault is an unescaped pipe must be refused
+# here with the SAME line the hook prints — one that names the pipe and the repair instead
+# of the three violations the shift used to raise against cells that were correct. The row
+# below is tests/units.test.sh §9b's own row and the counts are pinned identically: if the
+# two ever drift, a writer repairing a plan against the gate's advice would be told
+# something the hook does not say.
+tasks_raw_pipe="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | do b | a raw | pipe | T1 | S | REQ-x | b.sh | landed |"
+h22e5=$(make_home)
+write_plan "$h22e5" "$(d7_wave_plan "$tasks_raw_pipe" "- T1: bash suite 9/9 green
+- T2: bash suite 9/9 green")" > /dev/null
+expect_block "22e5 AC-8.3 a raw pipe in a Tasks cell → block, naming the pipe not the shift" \
+  "$h22e5" 'git commit -m "x"' "T2: 12 cells for 11 columns"
+expect_block "22e5b …and the same line carries the repair" \
+  "$h22e5" 'git commit -m "x"' "escape it as"
+
 # ---- 22d: per-row rigor resolution (task 4/4, R4) ------------------------
 #
 # effective_row_rigor resolves cell-first: a non-empty, enum-valid cell wins
