@@ -6464,6 +6464,107 @@ expect_contains "32j …which splits a roster LINE, not a markdown table" \
 expect_eq "32j …and no arm of this hook scans for a ## Tasks heading of its own" \
   "0" "$(/usr/bin/grep -cE '/\^#+ *Tasks/' "$S32_HOOK")"
 
+# ============================================================================
+section "S33: an auditor brief may not waive Suites: (REQ-4 AC-4.3/AC-4.4, D6)"
+# ============================================================================
+#
+# THE INCIDENT THIS ARM PREVENTS. `Suites: none` is a legitimate waiver for a role
+# that never runs a suite at all — a researcher reads, a test-runner reports — and
+# both pass through this wall unchanged. An auditor's Step-5 job is to FALSIFY the
+# matrix's evidence, which for a hermetic-tier row means RE-RUNNING the suite the
+# row names; an auditor brief that waives every suite has nothing to re-run.
+#
+# ROLE MATCHED WHOLE, ON subagent_type — never on the brief's prose (handoff rule).
+# Both spellings this repo's briefs actually carry are covered: the fully-qualified
+# `bionic:auditor` and the bare `auditor`.
+#
+# fails-when: an auditor brief with Suites: none is admitted; a researcher or
+# test-runner brief with Suites: none is refused by THIS arm; an auditor brief that
+# names real suites is refused by this arm.
+
+S33_WAIVED_BRIEF='Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w33-audit.md
+Expected duration: ~30 minutes.
+Suites: none'
+
+S33_DECLARED_BRIEF='Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w33-audit2.md
+Expected duration: ~30 minutes.
+Suites: tests/widget.test.sh, tests/gadget.test.sh'
+
+# ---- AC-4.3: bionic:auditor + Suites: none is refused, fix names the suites ----
+REPO=$(make_repo r33a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_WAIVED_BRIEF" "w33-auditor" \
+                             "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "33a a bionic:auditor brief with Suites: none is REFUSED" "2" "$GATE_ST"
+expect_contains "33a …the one line names the fault" \
+  "auditor" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "33a …and the fix names what to declare" \
+  "name the suites" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_status "33a …and no roster row was journalled for the refused dispatch" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- AC-4.3: the bare role word ("auditor", no bionic: prefix) is caught too ----
+REPO=$(make_repo r33b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_WAIVED_BRIEF" "w33-auditor-bare" \
+                             "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "auditor")"
+expect_status "33b a bare 'auditor' subagent_type with Suites: none is REFUSED too" \
+  "2" "$GATE_ST"
+
+# ---- AC-4.3: the CONTROL — an auditor brief that names real suites passes ----
+REPO=$(make_repo r33c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_DECLARED_BRIEF" "w33-auditor-ok" \
+                             "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "33c control: an auditor brief that DECLARES suites PASSES" "0" "$GATE_ST"
+expect_absent "33c …with no refusal printed" "BLOCKED" "$GATE_ERR"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "33c …and the row carries the declared set" \
+  "widget.test.sh gadget.test.sh" "$(roster_field "$ROW" suites_allowed)"
+
+# ---- AC-4.4: the two other reading roles are UNCHANGED by this arm ----
+for _role in bionic:researcher bionic:test-runner; do
+  REPO=$(make_repo "r33d-${_role##*:}" yes)
+  write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_WAIVED_BRIEF" "w33-reader" \
+                               "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "$_role")"
+  expect_status "33d a ${_role} brief with Suites: none is UNCHANGED — still admitted" \
+    "0" "$GATE_ST"
+done
+
+# ---- AC-4.1 end-to-end (T4): a not-yet-existing tests/*.test.sh under Files: gets
+# its self edge on the roster row, driven through the REAL tests/lib/impact.sh (the
+# tool T4 changed) rather than the S27 stub — this row proves the two tasks meet.
+# BIONIC_IMPACT_CACHE_DIR is forced empty so the real tree's own impact-cache under
+# .bionic/tmp is never written to by this fixture run (impact.sh's own contract for
+# turning the cache off).
+s33_real_impact() {  # <repo> — point .bionic/config.yaml at the real impact.sh
+  mkdir -p "$1/.bionic"
+  printf 'impact-command: env BIONIC_IMPACT_CACHE_DIR= bash %s/tests/lib/impact.sh\n' \
+    "${BIONIC_SCRIPTS_DIR}" > "$1/.bionic/config.yaml"
+}
+
+S33_NEWSUITE_BRIEF='Your task: add a brand-new suite.
+Expected artifact: .bionic/docs/record/w33-newsuite.md
+Expected duration: ~20 minutes.
+Files: tests/brand-new.test.sh'
+
+REPO=$(make_repo r33e yes)
+write_attestation "$REPO" "$SID_A"
+s33_real_impact "$REPO"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_NEWSUITE_BRIEF" "w33-newsuite")"
+expect_status "33e a Files: tests/brand-new.test.sh (absent) brief is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_contains "33e …and the roster row's suites_allowed carries the new suite's self edge" \
+  "brand-new.test.sh" "$(roster_field "$ROW" suites_allowed)"
+expect_status "33e …the derived set is exactly the real tree's answer (self + 3 dir-refs)" \
+  "brand-new.test.sh cross-gate-agreement.test.sh docs-pins.test.sh seam-resolution.test.sh" \
+  "$(roster_field "$ROW" suites_allowed)"
+expect_status "33e …and the row says the set was DERIVED, not declared" \
+  "derived" "$(roster_field "$ROW" suites_source)"
+
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 
 # READ OF THE DRIVER SWEEP INSTALLED IN run_gate. Every payload this file drives — every
