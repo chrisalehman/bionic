@@ -416,4 +416,331 @@ expect_eq "40: ownership — surfaces starts on the same column for both owner w
 expect_eq "41: ownership — test starts on the same column for both owner widths" \
   "$(cols "${OWN_ROW1%%test a*}")" "$(cols "${OWN_ROW2%%test b*}")"
 
+
+section "Section 7: T11 — REQ-10, a whole approval card rendered from the step's artifact"
+
+# WHAT THIS SECTION IS FOR. Until this task the three cards were rendered by the
+# MODEL: it read the step file's picture, extracted the rows from the artifact by
+# eye, and fed card.sh one TSV row at a time — so card.sh owned the WIDTHS and the
+# model still owned the CONTENT. Every card was therefore a transcription, and a
+# transcription can differ from its source without anything going red: a REQ text
+# shortened in the retelling, an AC count off by one, a provenance dropped. The
+# card is what an approval binds, so the card being a retelling of the artifact
+# rather than a rendering of it is a correctness problem, not a tidiness one
+# (memory routing-means-invocation-not-citation: the steps files CITED the
+# renderer, and a citation is not an invocation).
+#
+# So the artifact is now the SSoT for card content (spec §3 "Card content") and
+# `card.sh step1|step2|step3 <artifact>` is the one renderer. The rows below pin
+# the two halves that matter: the card is COMPLETE from the artifact alone (no
+# stdin, no second source), and its rows are BYTE-IDENTICAL to the same content
+# fed through the row kinds — one fold and one pad, not two.
+#
+# HERMETIC. Every fixture is a file under one mktemp sandbox; nothing here reads
+# the repository's own specs or plans.
+
+CARD_SANDBOX="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/card-test.XXXXXX")" && pwd -P)"
+card_cleanup() { [ -n "${CARD_SANDBOX:-}" ] && rm -rf "$CARD_SANDBOX"; }
+trap card_cleanup EXIT
+
+# whole_card — the verb under test, with STDIN CLOSED. Not `< /dev/null`: a
+# closed descriptor is what proves the renderer never READS stdin, where
+# /dev/null would let a `while read` that still exists simply see EOF.
+#
+# IT SETS GLOBALS AND PRINTS NOTHING, which is not a style choice: a helper
+# called as `X="$(whole_card …)"` runs in a SUBSHELL, so an exit status it
+# assigned there would never reach the assertion — every status row would read
+# the initialised 0 and pass no matter what the renderer did. Caught here at RED
+# (rows 42 and 63-66 passed against a renderer that has no step verbs at all).
+WC_RC=0; WC_ERR=""; WC_OUT=""
+whole_card() {  # <verb> [artifact] — sets WC_OUT, WC_RC, WC_ERR
+  WC_RC=0
+  bash "$CARD_SH" "$@" >"${CARD_SANDBOX}/.out" 2>"${CARD_SANDBOX}/.err" 0<&- || WC_RC=$?
+  WC_OUT="$(cat "${CARD_SANDBOX}/.out" 2>/dev/null)"
+  WC_ERR="$(cat "${CARD_SANDBOX}/.err" 2>/dev/null)"
+}
+
+# ── the fixtures ─────────────────────────────────────────────────────────────
+REQ_FIX="${CARD_SANDBOX}/wave-99-fixture.requirements.md"
+cat > "$REQ_FIX" <<'FIXEOF'
+---
+sdlc-step: 1
+working-branch: wave/99-fixture
+integration-branch: main
+base-sha: abc1234
+---
+
+# fixture wave 99 · requirements
+
+## Goal
+
+Ship the fixture wave so the whole-card renderer has an artifact to read, and so
+this suite can tell a rendered card from a transcribed one.
+
+## Context
+
+Not part of any card; here so the parser has a section to walk past.
+
+## Not Doing
+
+- The excluded item, and the one-line reason it is out.
+- A second excluded item.
+
+## Requirements and acceptance criteria
+
+### REQ-1 — the first requirement in one line
+
+provenance: user 2026-09-16 "do the thing"
+- AC-1.1 the first criterion. Fails when: it does not hold.
+- AC-1.2 the second criterion. Fails when: it does not hold.
+
+### REQ-2 — the second requirement in one line
+
+provenance: seed row 2; research row 2
+- AC-2.1 the only criterion here. Fails when: it does not hold.
+FIXEOF
+
+REQ_NOBRANCH="${CARD_SANDBOX}/nobranch.requirements.md"
+sed -e '/^working-branch:/d' -e '/^integration-branch:/d' -e '/^base-sha:/d' \
+  "$REQ_FIX" > "$REQ_NOBRANCH"
+
+REQ_NOGOAL="${CARD_SANDBOX}/nogoal.requirements.md"
+sed -e 's/^## Goal$/## Purpose/' "$REQ_FIX" > "$REQ_NOGOAL"
+
+REQ_NOPROV="${CARD_SANDBOX}/noprov.requirements.md"
+sed -e '/^provenance: seed row 2; research row 2$/d' "$REQ_FIX" > "$REQ_NOPROV"
+
+SPEC_FIX="${CARD_SANDBOX}/wave-99-fixture.spec.md"
+cat > "$SPEC_FIX" <<'FIXEOF'
+---
+sdlc-step: 2
+working-branch: wave/99-fixture
+integration-branch: main
+base-sha: abc1234
+---
+
+# fixture wave 99 · spec
+
+## Goal
+
+Answer the fixture's two requirements with a design small enough to read whole.
+
+## Design
+
+### 1. Domain model
+
+- **Fixture** — a file this suite writes and reads back.
+
+### 2. Component boundaries and interfaces
+
+- **`lib/first.sh`** owns the first thing, and hands the second thing to its
+  caller rather than doing it itself. (D1; REQ-1)
+- **`lib/second.sh`** owns the second thing. (D2; REQ-2)
+
+### 3. Ownership table
+
+| concept | owning module (SSoT) | rendering surfaces | agreement test |
+|---|---|---|---|
+| first thing | `lib/first.sh` | `card.sh` rows | `tests/first.test.sh` |
+| second thing | `lib/second.sh` | the fixture card | `tests/second.test.sh` |
+
+### 4. Rejected alternatives
+
+- Doing it by hand — lost to doing it in one place.
+
+### ADR pointers
+
+- ADR-099 — the fixture ruling: `adrs/epic-99/adr-099-fixture.md` (D1).
+
+## Eval design
+
+| Requirement | Approach | Criterion | Eval type | Eval | Fails when |
+|---|---|---|---|---|---|
+| REQ-1 | source pin | AC-1.1 the first criterion | static | `grep` | the pin is gone |
+| REQ-1 | fixture run | AC-1.2 the second criterion | hermetic | `bash tests/first.test.sh` | it reds |
+| REQ-2 | fixture run | AC-2.1 the only criterion | unit | `bash tests/second.test.sh` | it reds |
+FIXEOF
+
+PLAN_FIX="${CARD_SANDBOX}/wave-99-fixture.plan.md"
+cat > "$PLAN_FIX" <<'FIXEOF'
+---
+sdlc-step: 3
+walk: required
+rigor: peer-reviewed
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
+working-branch: wave/99-fixture
+integration-branch: main
+base-sha: abc1234
+---
+
+# fixture wave 99 · plan
+
+## Goal
+
+Land the fixture's two requirements under the fixture spec's design, on the
+fixture branch, with one floor at the integration head.
+
+## SDLC State
+
+integration-branch: main
+current: 4
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | REQ-1: the first task in one line. It also has a second sentence the card does not show. complexity: standard | implementor | — | 30 | REQ-1 | lib/first.sh | .worktrees/99-T1 | pending |
+| T2 | 4 | test | REQ-2: the second task in one line. complexity: complex | senior-implementor | T1 | 45 | REQ-2 | lib/second.sh | — | pending |
+
+## Verification Matrix
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1.1 | T0 | pending | — | — |
+| AC-1.2 | T2 | pending | — | — |
+| AC-2.1 | T1 | pending | — | — |
+FIXEOF
+
+# ── AC-10.1: the Step-1 card, whole, from the artifact alone ─────────────────
+whole_card step1 "$REQ_FIX"; S1="$WC_OUT"
+expect_eq "42: step1 exits 0 on a well-formed requirements artifact" "0" "$WC_RC"
+expect_contains "42a: …and opens with the card's own title" "Step 1 · Requirements" "$S1"
+expect_contains "43: Purpose carries the artifact's first ## Goal paragraph" \
+  "Ship the fixture wave so the whole-card renderer has an artifact to read" "$S1"
+expect_contains "43a: …and the Purpose section is labelled" "  Purpose" "$S1"
+expect_contains "44: Branches names the working branch from the frontmatter" \
+  "working       wave/99-fixture" "$S1"
+expect_contains "44a: …and the integration branch" "integration   main" "$S1"
+expect_contains "44b: …and the base sha the working branch came from" "abc1234" "$S1"
+
+# Every REQ row, whole: id, text, provenance and AC COUNT, each read from the
+# artifact. The count is the row most likely to drift in a transcription and the
+# one a reader cannot check without opening the file.
+expect_contains "45: the REQ-1 row carries its id and its one-line text" \
+  "REQ-1   the first requirement in one line" "$S1"
+expect_contains "45a: …and its provenance verbatim" \
+  'provenance user 2026-09-16 "do the thing"' "$S1"
+expect_contains "45b: …and its AC count, which is 2" "ACs 2" "$S1"
+expect_contains "46: the REQ-2 row carries its id and text" \
+  "REQ-2   the second requirement in one line" "$S1"
+expect_contains "46a: …and its own provenance" "provenance seed row 2; research row 2" "$S1"
+expect_contains "46b: …and its AC count, which is 1" "ACs 1" "$S1"
+
+expect_contains "47: Not Doing carries the artifact's first bullet" \
+  "The excluded item, and the one-line reason it is out." "$S1"
+expect_contains "47a: …and its second" "A second excluded item." "$S1"
+expect_contains "48: Artifacts names the artifact it was rendered from" "$REQ_FIX" "$S1"
+expect_contains "49: the card ends at its own approval question" \
+  'Do you approve these requirements? Reply "approved" to approve it.' "$S1"
+expect_contains "49a: …and offers the explain affordance" "explain <requirement>" "$S1"
+
+# NO STDIN. `whole_card` runs with descriptor 0 CLOSED, so a renderer that still
+# read rows from stdin would have failed above; this row says so in its own name
+# and pins the exit status a closed stdin produces.
+expect_eq "50: the card is complete with stdin CLOSED, not merely empty" "0" "$WC_RC"
+expect_empty "50a: …and nothing is written to stderr on a good artifact" "$WC_ERR"
+
+# Branches absent from the frontmatter say so rather than inventing one.
+whole_card step1 "$REQ_NOBRANCH"; S1_NB="$WC_OUT"
+expect_eq "51: an artifact with no branch keys still renders" "0" "$WC_RC"
+expect_contains "51a: …and the working branch reads 'not declared'" \
+  "working       not declared" "$S1_NB"
+expect_contains "51b: …and so does the integration branch" \
+  "integration   not declared" "$S1_NB"
+
+# ── AC-10.3: the whole-card row IS the row kind's row, byte for byte ─────────
+# The Requirements block of the whole card, against the same two rows fed to
+# `card.sh requirement` as TSV. Not a spot check of one cell: `cmp` over the
+# whole block, so a different fold, a different pad, a different batch width or
+# a different header all fail here rather than being discovered on a card.
+printf 'REQ-1\tthe first requirement in one line\tuser 2026-09-16 "do the thing"\t2\nREQ-2\tthe second requirement in one line\tseed row 2; research row 2\t1\n' \
+  | card requirement > "${CARD_SANDBOX}/tsv.txt"
+printf '%s\n' "$S1" | sed -n '/^  Requirements$/,/^$/p' | sed -e '/^$/d' \
+  > "${CARD_SANDBOX}/whole.txt"
+if cmp -s "${CARD_SANDBOX}/tsv.txt" "${CARD_SANDBOX}/whole.txt"; then
+  ok "52: AC-10.3 — the whole card's Requirements block is byte-identical to the TSV-fed rows"
+else
+  no "52: AC-10.3 — the whole card's Requirements block is byte-identical to the TSV-fed rows" \
+    "$(diff "${CARD_SANDBOX}/tsv.txt" "${CARD_SANDBOX}/whole.txt" | head -8)"
+fi
+
+# ── AC-10.2: the Step-2 and Step-3 cards from their own artifacts ────────────
+whole_card step2 "$SPEC_FIX"; S2="$WC_OUT"
+expect_eq "53: step2 exits 0 on a well-formed spec artifact" "0" "$WC_RC"
+expect_contains "53a: …and opens with the Step-2 title" "Step 2 · Design" "$S2"
+expect_contains "54: the Decisions section carries D1 with its serves cell" "D1" "$S2"
+expect_contains "54a: …and D1's ADR pointer rather than 'none'" "adr-099-fixture.md" "$S2"
+expect_contains "54b: …and D2, whose serves cell is REQ-2" "D2" "$S2"
+expect_contains "55: the Ownership section carries the spec's own table rows" \
+  "owner lib/first.sh" "$S2"
+expect_contains "55a: …and the second concept's test suite" "tests/second.test.sh" "$S2"
+expect_contains "56: the Eval design section counts REQ-1's criteria by type" "REQ-1" "$S2"
+expect_contains "56a: …and carries a total row" "total" "$S2"
+expect_contains "57: the Step-2 card ends at its own approval question" \
+  'Do you approve this design? Reply "approved" to approve it.' "$S2"
+
+whole_card step3 "$PLAN_FIX"; S3="$WC_OUT"
+expect_eq "58: step3 exits 0 on a well-formed plan artifact" "0" "$WC_RC"
+expect_contains "58a: …and opens with the Step-3 title" "Step 3 · Plan" "$S3"
+# The ledger cell's FIRST SENTENCE, folded inside the task column like any other
+# free cell — so the assertion is against the first chunk, and the sentence the
+# card must NOT carry is asserted absent beside it. A card that printed the whole
+# ledger cell would pass a `contains` on the opening words and fail here, which
+# is the failure worth catching: the ledger cell is a brief, the card is a line.
+expect_contains "59: the Tasks section carries T1's text, folded in its column" \
+  "REQ-1: the first task in one" "$S3"
+expect_absent "59d: …and not the rest of the ledger cell's brief" \
+  "second sentence the card does not show" "$S3"
+expect_absent "59e: …nor the ledger's own complexity tag" "complexity: standard" "$S3"
+expect_contains "59a: …and T1's kind, depends and agent cells" "implementor" "$S3"
+expect_contains "59b: …and T2, whose depends cell is T1" "T2" "$S3"
+expect_contains "60: Parallel width reads the plan's own writer budget" "8 writers" "$S3"
+expect_contains "61: Verification counts the matrix rows" "3 matrix rows" "$S3"
+expect_contains "61a: …and names the walk and the auditor rigor" "peer-reviewed" "$S3"
+expect_contains "62: the Step-3 card ends at its own approval question" \
+  'Do you approve this plan? Reply "approved" to approve it.' "$S3"
+
+# ── AC-10.4: a defective artifact is a usage error, never half a card ────────
+whole_card step1 "$REQ_NOGOAL"; S1_NG="$WC_OUT"
+expect_eq "63: an artifact with no ## Goal exits 64" "64" "$WC_RC"
+expect_empty "63a: …and prints no card at all, not half of one" "$S1_NG"
+expect_contains "63b: …and names the missing piece on stderr" "## Goal" "$WC_ERR"
+
+whole_card step1 "$REQ_NOPROV"; S1_NP="$WC_OUT"
+expect_eq "64: a REQ heading with no provenance: line exits 64" "64" "$WC_RC"
+expect_empty "64a: …and prints no card" "$S1_NP"
+expect_contains "64b: …and names the requirement that lacks it" "REQ-2" "$WC_ERR"
+expect_contains "64c: …and says what is missing" "provenance" "$WC_ERR"
+
+whole_card step1 "${CARD_SANDBOX}/there-is-no-such-file.md"; S1_MISSING="$WC_OUT"
+expect_eq "65: a step verb with an unreadable artifact exits 64" "64" "$WC_RC"
+expect_empty "65a: …and prints nothing on stdout" "$S1_MISSING"
+
+whole_card step1; S1_NOARG="$WC_OUT"
+expect_eq "66: a step verb with no artifact path exits 64" "64" "$WC_RC"
+expect_empty "66a: …and prints nothing on stdout" "$S1_NOARG"
+
+# EVERY EMITTED LINE STILL FITS THE BUDGET, on a whole card as on a row: the
+# fixed sections are folded by the same width.sh the rows are padded by.
+#
+# THE ARTIFACTS BLOCK IS EXEMPT, AND THAT IS width.sh's OWN RULE, not a hole cut
+# for a failing row. An artifact line is a PATH — the thing the reader opens —
+# and `bionic_line` already exists because "the end of a bionic row is where the
+# thing to TYPE lives": a path folded across two lines cannot be copied and a
+# path truncated to fit cannot be opened, so a long docs root wins over the
+# column budget here and nowhere else. The exemption is paid for by row 68,
+# which pins the path out WHOLE, on one line, with nothing elided (A-T11.3).
+no_artifacts() { printf '%s\n' "$1" | sed -e '/^  Artifacts$/,/^$/d'; }
+expect_empty "67: no line of the Step-1 card exceeds the budget" \
+  "$(over_budget "$(no_artifacts "$S1")")"
+expect_empty "67a: …nor of the Step-2 card" "$(over_budget "$(no_artifacts "$S2")")"
+expect_empty "67b: …nor of the Step-3 card" "$(over_budget "$(no_artifacts "$S3")")"
+
+# The exemption's other half: the path is printed WHOLE, on ONE line, however
+# long the docs root is — never folded, never elided with the truncator's ….
+S1_ART="$(printf '%s\n' "$S1" | grep -F "$REQ_FIX")"
+expect_eq "68: the artifact path is printed on exactly one line" "1" \
+  "$(printf '%s\n' "$S1_ART" | grep -c . | tr -d ' ')"
+expect_eq "68a: …and whole, with nothing elided" "    requirements  ${REQ_FIX}" "$S1_ART"
+
 finish
