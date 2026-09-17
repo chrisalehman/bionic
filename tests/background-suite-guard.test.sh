@@ -600,4 +600,57 @@ expect_eq "B11e …with the one line still first" \
   "bionic: suite-run refused — allowed: alpha.test.sh beta.test.sh (run only the budgeted suites)" \
   "$(printf '%s\n' "$VERR" | head -1)"
 
+section "B12 — a shell-backgrounded suite is caught like a tool-backgrounded one (D8, REQ-6)"
+# THE GAP RESEARCH ROW 6 MEASURED. ARM 1 used to read only the Bash tool's
+# `run_in_background` flag; every one of these six forms backgrounds the suite through
+# ordinary shell syntax instead, with the flag left UNSET (never declared false — the CLI
+# omits the key, and `guarded`'s default bg arg is "omit", the same shape). ARM 1 fires
+# regardless of budget (B7), so R1's off-budget row is reused rather than a fresh repo.
+for sp in 'bash tests/run.sh &' \
+          'nohup bash tests/run.sh &' \
+          'while :; do bash tests/run.sh; done &' \
+          '( bash tests/run.sh ) &' \
+          'bash tests/run.sh > /tmp/bg-x.log 2>&1 &' \
+          'bash tests/run.sh & disown'; do
+  guarded "$R1" "$sp"
+  expect_eq "B12a shell-backgrounded [$sp] is REFUSED" "2" "$ST"
+  expect_contains "B12a …by the same B-9 fact" \
+    "a backgrounded suite's result is never read" "$ERR"
+done
+
+# AC-6.2: setsid alone (no trailing &) is caught too — cmd_class classifies it `suite`
+# (tests/cmd-class.test.sh C1/C9 own the classifier fact) and ARM 1 refuses it here.
+guarded "$R1" 'setsid bash tests/run.sh'
+expect_eq "B12b setsid (no &) is REFUSED" "2" "$ST"
+expect_contains "B12b …by the same B-9 fact" \
+  "a backgrounded suite's result is never read" "$ERR"
+
+# AC-6.3: the foreground forms are untouched. alpha.test.sh is ON R1's budget so a false
+# refusal here can only be this new arm, never ARM 2.
+guarded "$R1" 'bash tests/alpha.test.sh'
+expect_eq "B12c a plain foreground suite is ALLOWED" "0" "$ST"
+expect_empty "B12c …silently" "$OUT$ERR"
+
+guarded "$R1" 'bash tests/alpha.test.sh > /tmp/bg-log 2>&1; echo rc=$?'
+expect_eq "B12d a redirected foreground suite (2>&1, no trailing &) is ALLOWED" "0" "$ST"
+expect_empty "B12d …silently" "$OUT$ERR"
+
+guarded "$R1" 'bash tests/alpha.test.sh && echo done'
+expect_eq "B12e a suite followed by && is ALLOWED" "0" "$ST"
+expect_empty "B12e …silently" "$OUT$ERR"
+
+guarded "$R1" 'bash tests/alpha.test.sh --note "a & b"'
+expect_eq "B12f a & INSIDE QUOTES is not read as backgrounding" "0" "$ST"
+expect_empty "B12f …silently" "$OUT$ERR"
+
+# AC-6.4: main-thread calls (no agent_id) are unchanged by this arm. THIS arm's own
+# engagement-guard predicate returns 0 in silence for a main-thread payload (no `agent_id`)
+# regardless of IS_BACKGROUND — but farm-out-reminder.sh, a SIBLING arm in the same
+# compound (hooks/bash-walls.sh), independently refuses a suite-class command on the
+# orchestrator thread for its own reason. So the observable here is not silence; it is
+# that THIS arm's fact never speaks — the refusal that does reach the user is farm-out's.
+guarded "$R1" 'bash tests/run.sh &' ""
+expect_absent "B12g the main thread never hears this arm's fact" \
+  "a backgrounded suite's result is never read" "$OUT$ERR"
+
 finish

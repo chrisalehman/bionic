@@ -1463,15 +1463,18 @@ expect_absent "16i: …never the answer the command would eventually have given"
 # count of `sleep 0.1` polls, each costing 115 ms as an external fork (T34 §2), so the
 # realized wait was ~1.15x the number both refusal messages quote, and grew with load.
 #
-# MEASURED, AND THE MARGIN IS HONEST. On the tick loop this arm read 7.03 s and 6.96 s on
-# the same machine — one side of the 7.00 s cap each time, because a 15% overrun of SIX
-# seconds is 0.9 s and the slack is 1 s. On the clock it reads 6.37 s. So this row catches
-# the old loop about half the time and will catch it every time under the load that made
-# it worth fixing, but it is NOT what proves the loop changed: tests/stop.test.sh 6r/6t
-# pin the source directly (the wait ends on `$SECONDS` against the constant; no tick
-# budget remains) and are RED against the old loop deterministically. What THIS row owns
-# is the live claim — that a sweep facing a derivation which never returns ends on its own
-# bound, with the rest of the hook's registration still unspent.
+# MEASURED, AND THE MARGIN IS HONEST — BUT NOT A GATE (REQ-7, wave-15 T8). On the tick
+# loop this arm read 7.03 s and 6.96 s on the same machine — one side of the 7.00 s cap
+# each time, because a 15% overrun of SIX seconds is 0.9 s and the slack is 1 s. On the
+# clock it reads 6.37 s. So a wall-clock row here caught the old loop about half the time,
+# which is not what proves the loop changed: tests/stop.test.sh 6r/6t pin the source
+# directly (the wait ends on `$SECONDS` against the constant; no tick budget remains) and
+# are RED against the old loop deterministically. This row now reports the measurement as
+# `info:` and never fails the suite on it — a slow host or a loaded machine no longer reds
+# landing-gate.test.sh over a timing that 6r/6s/6t already prove correct at the source.
+# `E16I_CAP` honors a pre-set environment value (a forced-miss fixture) before falling
+# back to the derived cap, so AC-7.1 can prove the never-fails claim without waiting out a
+# real slow run.
 #
 # WHAT THE ONE SECOND HAS TO ABSORB is the rest of this hook — four verdicts, the git
 # reconciliation, the journal — around ONE derivation that runs to the bound. A whole
@@ -1480,13 +1483,8 @@ expect_absent "16i: …never the answer the command would eventually have given"
 # The registration claim the old row made survives inside this one: bound + 1 is 7, which
 # is strictly under the 10 that hooks.json registers (§L.4c in cross-gate-agreement pins
 # that pair itself, both numbers read from their own files).
-E16I_CAP=$(( (${LG16I_BOUND:-0} + 1) * 100 ))
-if [ "$E16I_CS" -le "$E16I_CAP" ]; then
-  ok "16i: …and the sweep stopped on its ${LG16I_BOUND}s bound, inside the hook's own 10s registration ($(( E16I_CS / 100 )).$(printf '%02d' $(( E16I_CS % 100 )))s)"
-else
-  no "16i: …and the sweep stopped on its ${LG16I_BOUND}s bound, inside the hook's own 10s registration" \
-    "took $(( E16I_CS / 100 )).$(printf '%02d' $(( E16I_CS % 100 )))s against a $(( E16I_CAP / 100 ))s cap"
-fi
+: "${E16I_CAP:=$(( (${LG16I_BOUND:-0} + 1) * 100 ))}"
+echo "info: 16i derivation ${E16I_CS} cs (cap ${E16I_CAP} cs)"
 
 # --- 16j: `set -f` AROUND THE DIFF-PATH SPLIT (review-a A-11). `$LG_OUTSIDE` comes from
 # `git diff --name-only` and was expanded unquoted with no `set -f`, so a committed path
