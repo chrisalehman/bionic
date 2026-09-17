@@ -321,7 +321,12 @@ run_rec "$(mk_bash_post "$SID_A" "$W1_TR" "$W1_REPO" "ls -la && git status" "REA
 # spends on an unrelated Bash call today is the git resolution and, below the
 # pressure sample, the state-path resolution, the symlink guards and the roster
 # read — so those are what the order pin names.
-_rel_line=$(grep -n 'MLINES=' "$REC" | head -1 | cut -d: -f1)
+# RE-POINTED AGAIN (epic-23 wave-15, REQ-2). The cheap relevance test WAS the machine-line
+# grep over the tool's whole stdout; the observation record is deleted and a Bash payload now
+# reaches the pressure sample and leaves. What still has to come before the git resolution is
+# the arm dispatch itself — the read that decides which of the two remaining arms, if either,
+# this payload belongs to.
+_rel_line=$(grep -n '^IS_START=""' "$REC" | head -1 | cut -d: -f1)
 # RE-POINTED (epic-23 wave-11-lean-spine, REQ-1f): the git resolution is `bionic_context`'s
 # now, and the literal this line greps for is the call rather than the assignment it
 # replaced. The `expect_nonempty` below is what stops the same silent-empty failure this
@@ -332,14 +337,14 @@ _root_line=$(grep -n '^bionic_context' "$REC" | head -1 | cut -d: -f1)
 # comment, and a planted regression that MOVED the exit block below the state
 # paths left the banner where it was and the pin stayed green. A source-order pin
 # has to grep the line that runs.
-_exit_line=$(grep -nF 'if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ] && [ -z "$MLINES" ]; then' "$REC" | head -1 | cut -d: -f1)
+_exit_line=$(grep -nF 'if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ]; then' "$REC" | head -1 | cut -d: -f1)
 _state_line=$(grep -n 'STATE_DIR="$BIONIC_ROOT/.bionic/tmp"' "$REC" | head -1 | cut -d: -f1)
 
 # Every line number is asserted non-empty BEFORE it is compared: a grep that
 # finds nothing yields the empty string, and `test "" -lt ""` is an error rather
 # than a comparison — an order pin over two empty values pins nothing, which is
 # exactly what this section had.
-expect_nonempty "the cheap relevance test is findable in the recorder's source (MLINES=)" "$_rel_line"
+expect_nonempty "the cheap relevance test is findable in the recorder's source (the arm dispatch)" "$_rel_line"
 expect_nonempty "the git resolution is findable in the recorder's source (bionic_context)" "$_root_line"
 expect_nonempty "the restored early exit is findable in the recorder's source" "$_exit_line"
 expect_nonempty "the state-path resolution is findable in the recorder's source" "$_state_line"
@@ -366,228 +371,33 @@ expect_nonempty "…and the same pattern DOES find the walk in a hook that walks
 # the inertness this section names was never the reason for the silence. With
 # the row planted, the only difference between this world and the paired
 # positive below is the active wave.
-IFS='|' read -r NW_REPO NW_TR NW_SUB NW_CFG <<< "$(make_world nowave no)"
-plant_agent "$NW_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer" "$NW_REPO"
-observe "$SID_A" "$NW_CFG" "$NW_REPO" "$NW_TR" quiet-reviewer
-expect_no_file "outside an active wave the recorder writes no state" "$NW_REPO/$STATE_REL"
-
-# THE PAIRED POSITIVE for that absence, over the same builder and the same
-# drive, differing only in the wave flag: an absence assertion whose producer
-# never ran passes just as loudly.
-IFS='|' read -r AW_REPO AW_TR AW_SUB AW_CFG <<< "$(make_world nowave-control yes)"
-plant_agent "$AW_SUB" "aquiet-reviewer-deadbeefdeadbeef" "quiet-reviewer" "$AW_REPO"
-observe "$SID_A" "$AW_CFG" "$AW_REPO" "$AW_TR" quiet-reviewer
-expect_file "…while the SAME drive inside an active wave does record (paired positive)" \
-  "$AW_REPO/$STATE_REL"
+# THE INERTNESS CLAIM MOVED TO THE ARM THAT STILL WRITES (epic-23 wave-15, REQ-2). It was
+# driven here on the Bash channel — an observation outside an active wave recorded nothing —
+# and that channel writes nothing at all now, so the assertion would pass just as loudly on a
+# recorder that had stopped working entirely. Section 12 carries it: (a) and (b) are the same
+# dispatch over the same roster, differing only in the engagement marker, and the scope this
+# family shares is engagement rather than the plan.
 
 # ============================================================
-section "Section 2: a run that produced evidence is recorded (AC-3, positive)"
-# ============================================================
-
-observe "$SID_A" "$W1_CFG" "$W1_REPO" "$W1_TR" quiet-reviewer
-expect_file "an observation run writes state" "$W1_REPO/$STATE_REL"
-STATE=$(cat "$W1_REPO/$STATE_REL" 2>/dev/null)
-expect_contains "the record names the RESOLVED target" "aquiet-reviewer-deadbeefdeadbeef" "$STATE"
-expect_contains "the record names the observing session" "$SID_A" "$STATE"
-expect_contains "the record names the target AS TYPED" "typed=quiet-reviewer" "$STATE"
-expect_regex "the record carries the activity level seen (log mtime)" 'mtime=[0-9]+' "$STATE"
-expect_regex "the record carries the activity level seen (log size)" 'size=[0-9]+' "$STATE"
-
-# THE FILE FACTS ARE THE PRODUCER'S, NOT A SECOND COMPUTATION. What the operator
-# read as the working log's size is the number stored, because there is only one
-# reader of that file now (the F-1 divergence class has no second parser left to
-# diverge).
-OBS_SIZE=$(printf '%s' "$OBS_OUT" | grep -E '^  size:' | grep -oE '[0-9]+' | head -1)
-REC_SIZE=$(printf '%s' "$STATE" | grep -F 'target=aquiet-reviewer-deadbeefdeadbeef' \
-  | tr '|' '\n' | grep '^size=' | cut -d= -f2)
-expect_eq "the size the observation PRINTED is the size the recorder STORED" "$OBS_SIZE" "$REC_SIZE"
-
-# Two chained runs in one Bash call print two machine lines and record two
-# observations.
-IFS='|' read -r W2_REPO W2_TR W2_SUB W2_CFG <<< "$(make_world w2 yes)"
-plant_agent "$W2_SUB" "aone-1111111111111111" "one" "$W2_REPO"
-plant_agent "$W2_SUB" "atwo-2222222222222222" "two" "$W2_REPO"
-run_observation "$SID_A" "$W2_CFG" "$W2_REPO" one;  CHAIN="$OBS_OUT"
-run_observation "$SID_A" "$W2_CFG" "$W2_REPO" two;  CHAIN="$CHAIN
-$OBS_OUT"
-run_rec "$(mk_bash_post "$SID_A" "$W2_TR" "$W2_REPO" \
-  "bash ~/.claude/hooks/stop-check.sh one && bash ~/.claude/hooks/stop-check.sh two" "$CHAIN")"
-STATE=$(cat "$W2_REPO/$STATE_REL" 2>/dev/null)
-expect_contains "two chained runs record the first target" "aone-1111111111111111" "$STATE"
-expect_contains "two chained runs record the second target" "atwo-2222222222222222" "$STATE"
-
-# The contract state the observation displayed rides into the record: tasks 4/5
-# and 4/6 compare the progress artifact's mtime against the look, so the look has
-# to have written down what it saw (D-6).
-IFS='|' read -r D6_REPO D6_TR D6_SUB D6_CFG <<< "$(make_world d6 yes)"
-plant_agent "$D6_SUB" "aworker-1111111111111111" "worker" "$D6_REPO"
-mkdir -p "$D6_REPO/.bionic/tmp"
-printf 'stage 1\n' > "$D6_REPO/.bionic/tmp/w.progress"
-printf 'a report\n' > "$D6_REPO/report.md"
-observe "$SID_A" "$D6_CFG" "$D6_REPO" "$D6_TR" worker report.md missing.md --progress "$D6_REPO/.bionic/tmp/w.progress"
-STATE=$(cat "$D6_REPO/$STATE_REL" 2>/dev/null)
-expect_contains "the record carries each deliverable's state" "present:report.md" "$STATE"
-expect_contains "the record carries an absent deliverable as absent" "absent:missing.md" "$STATE"
-expect_contains "the record carries the progress artifact's state" "progress_state=present" "$STATE"
-expect_regex "the record carries the progress artifact's mtime" 'progress_mtime=[0-9]+' "$STATE"
-
-# A contract that named NO progress artifact is distinguishable from one whose
-# artifact is missing — the D-6 distinction a blank value would erase.
-observe "$SID_A" "$W1_CFG" "$W1_REPO" "$W1_TR" quiet-reviewer
-expect_contains "an unnamed progress artifact is its own state, not a blank" \
-  "progress_state=unnamed" "$(cat "$W1_REPO/$STATE_REL")"
-
-# Credential-leak class (§8, AC-8): no command text reaches the state file.
-run_observation "$SID_A" "$W2_CFG" "$W2_REPO" one
-run_rec "$(mk_bash_post "$SID_A" "$W2_TR" "$W2_REPO" \
-  "AWS_SECRET=hunter2 bash ~/.claude/hooks/stop-check.sh one" "$OBS_OUT")"
-
-# ============================================================
-section "Section 3: no successful run, no record (AC-3, the C6 closure)"
+setup_section "Sections 2-5: THE OBSERVATION RECORD IS GONE (epic-23 wave-15, REQ-2; ADR-028)"
 # ============================================================
 #
-# This is the section the task exists for. The predecessor recorded from
-# PreToolUse by re-parsing the command TEXT, so a command the operator watched
-# FAIL still left a record naming a live agent, carrying that agent's log mtime
-# and size — the exact facts the stop gate spends (critic finding A, pinned as a
-# residual in tests/cross-gate-agreement.test.sh §C case 6). Every row below is a
-# command whose operator saw a refusal and no evidence tier.
-
-IFS='|' read -r C6_REPO C6_TR C6_SUB C6_CFG <<< "$(make_world c6 yes)"
-plant_agent "$C6_SUB" "aworker-7777777777777777" "worker" "$C6_REPO"
-plant_agent "$C6_SUB" "asolo-1111111111111111" "solo" "$C6_REPO"
-GPROG="$C6_REPO/.bionic/tmp/w-grammar.progress"
-mkdir -p "$C6_REPO/.bionic/tmp"; printf 'step 1\n' > "$GPROG"
-
-recorded_target() {  # -> the agent id recorded, or "nothing"
-  local rec
-  rec=$(grep '^v1|' "$C6_REPO/$STATE_REL" 2>/dev/null \
-    | tr '|' '\n' | grep '^target=' | cut -d= -f2 | head -1)
-  [ -n "$rec" ] && echo "$rec" || echo nothing
-}
-
-for bad in \
-  "worker --progres $GPROG" \
-  "worker --progress=$GPROG" \
-  "--progress $GPROG worker" \
-  "--progress solo worker" \
-  "worker --unknown-flag" \
-  "ghost" \
-  ""
-do
-  rm -f "$C6_REPO/$STATE_REL"
-  # shellcheck disable=SC2086
-  observe "$SID_A" "$C6_CFG" "$C6_REPO" "$C6_TR" $bad
-done
-
-# The positive pair for the same grammar, so this is a discriminating wall rather
-# than one that refuses everything (TDD §9): the documented interface line
-# records, and records the agent the operator actually looked at.
-rm -f "$C6_REPO/$STATE_REL"
-observe "$SID_A" "$C6_CFG" "$C6_REPO" "$C6_TR" worker report.md --progress "$GPROG"
-expect_eq "the documented command line still records its target (C6 positive pair)" \
-  "aworker-7777777777777777" "$(recorded_target)"
-
-# A MENTION IS NOT A RUN, and now for a structural reason rather than a parsed
-# one: a command that names the script without running it produces no machine
-# line, so there is nothing to copy. No command-word grammar is involved.
-for mention in \
-  "cat hooks/stop-check.sh" \
-  "echo stop-check.sh worker" \
-  "grep -n stop-check.sh hooks/stop-guard.sh" \
-  "# bash ~/.claude/hooks/stop-check.sh worker"
-do
-  rm -f "$C6_REPO/$STATE_REL"
-  run_rec "$(mk_bash_post "$SID_A" "$C6_TR" "$C6_REPO" "$mention" "$mention")"
-done
-
-# A command that was never dispatched at all fires no PostToolUse event — task
-# 4/1 §5 captured the harness rejecting one and neither hook firing. The
-# equivalent here is the absence of any call into this script; asserted as the
-# invariant it is, that state on disk is unchanged by an event that never arrives.
-rm -f "$C6_REPO/$STATE_REL"
-
-# An observation that resolved for the OPERATOR but names another session's agent
-# is not dischargeable evidence here: a session can only stop its own tasks, so a
-# record the gate could never match must not be written.
-IFS='|' read -r FS_REPO FS_TR FS_SUB FS_CFG <<< "$(make_world foreignsub yes)"
-plant_agent "${FS_TR%/*}/$SID_B/subagents" "aforeign-3333333333333333" "foreign"
-observe "$SID_A" "$FS_CFG" "$FS_REPO" "$FS_TR" foreign
-
-# ============================================================
-section "Section 4: the observer (AC-3's third field, task 4/1 assumption A)"
-# ============================================================
+# Four sections drove the arm this script no longer has: that a run of hooks/stop-check.sh
+# produced a record (§2), that a refused or mistyped one produced none (§3), that the record
+# named its observer (§4), and that the file was versioned, key-addressed and bounded (§5).
 #
-# Capture A vs capture B: the same command, the same session, the same turn,
-# differing only in a top-level `agent_id`. That single key is what lets task
-# 4/6 refuse a stop discharged by somebody else's look (D-3).
-
-IFS='|' read -r OB_REPO OB_TR OB_SUB OB_CFG <<< "$(make_world observer yes)"
-plant_agent "$OB_SUB" "aworker-1111111111111111" "worker" "$OB_REPO"
-
-run_observation "$SID_A" "$OB_CFG" "$OB_REPO" worker
-run_rec "$(mk_bash_post "$SID_A" "$OB_TR" "$OB_REPO" "bash ~/.claude/hooks/stop-check.sh worker" "$OBS_OUT")"
-expect_contains "a payload with NO agent_id records the orchestrator as observer" \
-  "observer=orchestrator" "$(cat "$OB_REPO/$STATE_REL")"
-
-run_observation "$SID_A" "$OB_CFG" "$OB_REPO" worker
-run_rec "$(mk_bash_post "$SID_A" "$OB_TR" "$OB_REPO" "bash ~/.claude/hooks/stop-check.sh worker" "$OBS_OUT" "$SUB_AGENT_ID")"
-expect_contains "a payload WITH agent_id records that subagent as observer" \
-  "observer=$SUB_AGENT_ID" "$(cat "$OB_REPO/$STATE_REL")"
-
-# ============================================================
-section "Section 5: the record is VERSIONED, key-addressed and BOUNDED"
-# ============================================================
-
-STATE=$(cat "$OB_REPO/$STATE_REL")
-expect_regex "the record leads with a schema version token" '(^|\|)v1(\||$)' "$STATE"
-expect_regex "fields are key=value, not positional" 'target=' "$STATE"
-expect_contains "the file carries its schema in a header comment" \
-  "schema stop-check-state/v1" "$STATE"
-
-# One live record per (session, target): re-observing REPLACES, so a second stop
-# can never find a second copy of the same look (D-2's precondition).
-COUNT=$(grep -c "target=aworker-1111111111111111" "$OB_REPO/$STATE_REL")
-expect_eq "re-observing the same target REPLACES its record" "1" "$COUNT"
-
-# P2: the state must not grow without bound — every stop walks it line by line.
-IFS='|' read -r P2_REPO P2_TR P2_SUB P2_CFG <<< "$(make_world p2 yes)"
-plant_agent "$P2_SUB" "akeeper-7777777777777777" "keeper" "$P2_REPO"
-mkdir -p "$P2_REPO/.bionic/tmp"
-{
-  printf '# bionic observation records — schema stop-check-state/v1\n'
-  _i=0
-  while [ "$_i" -lt 300 ]; do
-    # live-looking foreign records: their session directory still exists, so only
-    # the hard cap can drop them
-    printf 'v1|session=dead-%s|target=aghost-%s|typed=ghost|log=%s/agent-aghost-%s.jsonl|mtime=1|size=1\n' \
-      "$_i" "$_i" "$P2_SUB" "$_i"
-    _i=$((_i + 1))
-  done
-} > "$P2_REPO/$STATE_REL"
-observe "$SID_A" "$P2_CFG" "$P2_REPO" "$P2_TR" keeper
-P2_COUNT=$(grep -c '^v1|' "$P2_REPO/$STATE_REL" 2>/dev/null || echo 0)
-if [ "$P2_COUNT" -le 200 ]; then
-  ok "the observation state is bounded, not unbounded (P2): $P2_COUNT records"
-else
-  no "the observation state is bounded, not unbounded (P2)" "$P2_COUNT records retained"
-fi
-expect_contains "the record just written survives the bound" \
-  "akeeper-7777777777777777" "$(cat "$P2_REPO/$STATE_REL" 2>/dev/null)"
-
-# A record whose session's subagents directory is gone can never discharge
-# anything — the gate resolves targets only through that directory — so it is
-# inert weight and gets dropped on the next write.
-IFS='|' read -r P2B_REPO P2B_TR P2B_SUB P2B_CFG <<< "$(make_world p2b yes)"
-plant_agent "$P2B_SUB" "alive-8888888888888888" "alive" "$P2B_REPO"
-mkdir -p "$P2B_REPO/.bionic/tmp"
-printf '# bionic observation records — schema stop-check-state/v1\nv1|session=gone|target=avanished-9999999999999999|typed=vanished|log=/no/such/session/subagents/agent-avanished-9999999999999999.jsonl|mtime=1|size=1\n' \
-  > "$P2B_REPO/$STATE_REL"
-observe "$SID_A" "$P2B_CFG" "$P2B_REPO" "$P2B_TR" alive
-expect_absent "a record whose session directory is gone is pruned (P2)" \
-  "avanished-9999999999999999" "$(cat "$P2B_REPO/$STATE_REL" 2>/dev/null)"
-expect_contains "pruning does not disturb the record being written" \
-  "alive-8888888888888888" "$(cat "$P2B_REPO/$STATE_REL" 2>/dev/null)"
+# The record existed for one reader, hooks/stop-guard.sh, which spent it to admit a stop. That
+# gate takes its own look now — `observe_agent` in payload/scripts/lib/observe.sh, in process,
+# at the instant of the stop — because a record is a claim about a PAST look and the wall was
+# refusing correct stops on the strength of one nobody had taken (2026-09-15; ADR-028). With
+# no reader there is nothing to write, and one writer of a state nobody reads is a state that
+# should not exist.
+#
+# WHAT CARRIES THESE CLAIMS FORWARD. tests/stop-guard.test.sh §5 drives the look itself, over
+# the same worlds these sections built; tests/stop-check.test.sh §7 still pins the machine
+# line the verb prints for a reader's own eyes. What is NOT carried forward is anything about
+# a record's provenance, freshness or ownership — those questions are answered by construction
+# once the reader takes its own look.
 
 # ============================================================
 section "Section 6: the roster arm — intended → confirmed (AC-1, confirmation half)"
@@ -786,43 +596,30 @@ section "Section 7: hostile repo (AC-8, TDD §8, checklist A2/A3)"
 # real `.bionic/tmp`. It has to record, or none of the refusals below mean
 # anything.
 #
-# THE ROSTER ROW IS PLANTED IN EVERY WORLD HERE (S11). Until this task the three
-# hostile worlds called plant_agent WITHOUT the repo argument, so no roster row
-# carried the agent id, the observation resolved nothing, and the recorder had
-# nothing to write with or without a symlink in the way. The guards were never
-# reached by this section at all.
-IFS='|' read -r SOK_REPO SOK_TR SOK_SUB SOK_CFG <<< "$(make_world secok yes)"
-plant_agent "$SOK_SUB" "avictim-ffffffffffffffff" "victim" "$SOK_REPO"
-observe "$SID_A" "$SOK_CFG" "$SOK_REPO" "$SOK_TR" victim
-expect_file "the control: the same drive with no symlink in the way DOES record" \
-  "$SOK_REPO/$STATE_REL"
-expect_contains "…naming the same agent the hostile worlds plant" \
-  "avictim-ffffffffffffffff" "$(cat "$SOK_REPO/$STATE_REL" 2>/dev/null)"
-
-IFS='|' read -r S_REPO S_TR S_SUB S_CFG <<< "$(make_world sec yes)"
-plant_agent "$S_SUB" "avictim-ffffffffffffffff" "victim" "$S_REPO"
-mkdir -p "$S_REPO/.bionic/tmp"
-VICTIM_FILE="$SANDBOX/sec-outside-file.txt"
-echo "ORIGINAL CONTENT" > "$VICTIM_FILE"
-ln -s "$VICTIM_FILE" "$S_REPO/$STATE_REL"
-observe "$SID_A" "$S_CFG" "$S_REPO" "$S_TR" victim
-expect_eq "a symlinked state FILE is not written through — the file outside keeps its bytes" \
-  "ORIGINAL CONTENT" "$(cat "$VICTIM_FILE" 2>/dev/null)"
-expect_eq "…and the outside file is still one line long (nothing was appended either)" \
-  "1" "$(wc -l < "$VICTIM_FILE" | tr -d ' ')"
-
+# THE HOSTILE WORLDS THAT GUARDED THE OBSERVATION RECORD ARE GONE WITH IT (epic-23 wave-15,
+# REQ-2). Three of them stood here — a control that recorded, a symlinked state FILE and a
+# symlinked state DIRECTORY, each asserting that a repo cannot redirect this script's write
+# outside itself. The write they guarded does not happen any more. What this script still
+# writes is the ROSTER row, and the two levels of that path — the state directory and the
+# roster file itself — are what the worlds below drive.
+#
+# THE DIRECTORY LEVEL, on the arm that still writes. A repo that points `.bionic/tmp` at a
+# directory outside itself must not have this script append a confirmation row there.
 IFS='|' read -r S2_REPO S2_TR S2_SUB S2_CFG <<< "$(make_world sec2 yes)"
-plant_agent "$S2_SUB" "avictim-ffffffffffffffff" "victim" "$S2_REPO"
 OUTSIDE_DIR="$SANDBOX/sec2-outside-dir"
-mkdir -p "$OUTSIDE_DIR" "$S2_REPO/.bionic"
+mkdir -p "$OUTSIDE_DIR"
+seed_roster "$SANDBOX/sec2-seed" "$SID_A" "w99-impl" "$TUID"
+cp "$SANDBOX/sec2-seed/.bionic/tmp/roster-${SID_A}.state" "$OUTSIDE_DIR/roster-${SID_A}.state"
+: > "$OUTSIDE_DIR/engaged-$SID_A.state"
+OUTSIDE_BEFORE="$(cat "$OUTSIDE_DIR/roster-${SID_A}.state")"
+rm -rf "$S2_REPO/.bionic/tmp"
 ln -s "$OUTSIDE_DIR" "$S2_REPO/.bionic/tmp"
-observe "$SID_A" "$S2_CFG" "$S2_REPO" "$S2_TR" victim
-expect_no_file "a symlinked state DIRECTORY is not written through" \
-  "$OUTSIDE_DIR/stop-check.state"
-expect_empty "…and the directory outside the repo is still empty" \
-  "$(ls -A "$OUTSIDE_DIR" 2>/dev/null)"
+run_rec "$(mk_agent_post "$SID_A" "$S2_TR" "$S2_REPO" "w99-impl" "$NEW_AID" "$TUID")"
+expect_eq "a symlinked state DIRECTORY is not written through — the roster outside keeps its bytes" \
+  "$OUTSIDE_BEFORE" "$(cat "$OUTSIDE_DIR/roster-${SID_A}.state" 2>/dev/null)"
+expect_status "…and the arm still exits 0 rather than failing loudly" "0" "$REC_ST"
 
-# The roster path gets the same treatment: a symlinked roster is never appended
+# The roster path gets the same treatment: a symlinked roster is never appended# The roster path gets the same treatment: a symlinked roster is never appended
 # through, so a hostile repo cannot turn a dispatch into a write anywhere it likes.
 # THE FILE OUTSIDE IS A PLAUSIBLE ROSTER, not a line of prose (S11). It used to
 # hold `ROSTER ORIGINAL`, which carries no row this dispatch could complete — so
@@ -852,39 +649,12 @@ run_rec "$(mk_agent_post "$SID_A" "$S3OK_TR" "$S3OK_REPO" "w99-impl" "$NEW_AID" 
 expect_contains "the control: a REAL roster does get the confirmation row appended" \
   "status=confirmed" "$(cat "$S3OK_REPO/.bionic/tmp/roster-${SID_A}.state" 2>/dev/null)"
 
-# Unpredictable temp names: mktemp with an X-template, and no PID-based name.
-
-# A field-forging value must not be able to manufacture a second record. The
-# producer normalizes `|` out of every operator-supplied value; this asserts the
-# consumer is not the only thing standing between a crafted name and a forged row.
-IFS='|' read -r FG_REPO FG_TR FG_SUB FG_CFG <<< "$(make_world forge yes)"
-plant_agent "$FG_SUB" "aworker-1111111111111111" "worker" "$FG_REPO"
-
-# THE CONTROL FOR THE TWO FORGERIES, first and over the same world: a WELL-FORMED
-# machine line naming a log inside this session's subagents directory IS stored.
-# Both rows below are absences, and an absence over a recorder that stores
-# nothing here would pass without the guards existing.
-run_rec "$(mk_bash_post "$SID_A" "$FG_TR" "$FG_REPO" "bash stop-check.sh x" \
-  "stop-check-observation/v1|target=aworker-1111111111111111|typed=x|log=$FG_SUB/agent-aworker-1111111111111111.jsonl|mtime=1|size=1|deliverables=|progress=|progress_mtime=0|progress_state=unnamed")"
-expect_contains "the control: a well-formed machine line IS stored" \
-  "target=aworker-1111111111111111" "$(cat "$FG_REPO/$STATE_REL" 2>/dev/null)"
-
-rm -f "$FG_REPO/$STATE_REL"
-run_rec "$(mk_bash_post "$SID_A" "$FG_TR" "$FG_REPO" "bash stop-check.sh x" \
-  "stop-check-observation/v1|target=aworker-1111111111111111|typed=x|log=$FG_SUB/agent-aworker-1111111111111111.jsonl|mtime=notanumber|size=1|deliverables=|progress=|progress_mtime=0|progress_state=unnamed")"
-expect_absent "a non-numeric mtime never becomes a stored fact" \
-  "mtime=notanumber" "$(cat "$FG_REPO/$STATE_REL" 2>/dev/null)"
-
-# A machine line naming a log OUTSIDE this session's subagents directory is not
-# dischargeable evidence and is not stored, however well-formed it is.
-rm -f "$FG_REPO/$STATE_REL"
-run_rec "$(mk_bash_post "$SID_A" "$FG_TR" "$FG_REPO" "bash stop-check.sh x" \
-  "stop-check-observation/v1|target=aelsewhere-2222222222222222|typed=x|log=/etc/passwd|mtime=1|size=1|deliverables=|progress=|progress_mtime=0|progress_state=unnamed")"
-FG_OUTSIDE=$(cat "$FG_REPO/$STATE_REL" 2>/dev/null)
-expect_absent "a log outside this session's subagents directory is not stored" \
-  "log=/etc/passwd" "$FG_OUTSIDE"
-expect_absent "…and neither is the agent id that came with it" \
-  "aelsewhere-2222222222222222" "$FG_OUTSIDE"
+# THE FORGED-MACHINE-LINE WORLD IS GONE WITH THE ARM THAT READ ONE (epic-23 wave-15, REQ-2).
+# Four cases stood here: a well-formed line was stored, a non-numeric mtime was not, a log
+# outside this session's subagents directory was not, and neither was the id that came with
+# it. All four were about a record this script no longer writes, and the residual they
+# managed — stdout is not a trusted channel — is closed at its root rather than narrowed,
+# because nothing reads stdout any more.
 
 # ============================================================
 section "Section 8: it never blocks, whatever happens (PostToolUse invariant)"
@@ -917,33 +687,13 @@ run_bounded() {  # <secs> <payload> -> sets BOUNDED_ST (137 = killed)
   return 0
 }
 
-IFS='|' read -r LK_REPO LK_TR LK_SUB LK_CFG <<< "$(make_world lock yes)"
-plant_agent "$LK_SUB" "awedged-6666666666666666" "wedged" "$LK_REPO"
-mkdir -p "$LK_REPO/.bionic/tmp"
-run_observation "$SID_A" "$LK_CFG" "$LK_REPO" wedged
-chmod 500 "$LK_REPO/.bionic/tmp"
-run_bounded 12 "$(mk_bash_post "$SID_A" "$LK_TR" "$LK_REPO" \
-  "bash ~/.claude/hooks/stop-check.sh wedged" "$OBS_OUT")"
-# THE ASSERTION, NOT JUST THE FAILURE BRANCH (S11, AC-16). This section used to
-# call `no` inside `if [ "$BOUNDED_ST" = "137" ]` and nothing else: on the healthy
-# path it counted nothing, so it could never contribute a PASS and a recorder that
-# had stopped running altogether would have looked identical to one that exits
-# cleanly. `expect_status` reports both directions of the same fact — 137 is the
-# kill this bound applies after 12 s, and any non-zero is a block.
-expect_status "the recorder terminates and exits 0 when the lock cannot be taken" \
-  "0" "$BOUNDED_ST"
-chmod 700 "$LK_REPO/.bionic/tmp"
-
-# THE HEALTHY-PATH POSITIVE for the same bounded driver, over the same world with
-# the state directory writable again: the driver reaches the script, the script
-# finishes inside the bound, and it records. Without this the row above passes on
-# a payload that never started a process at all.
-run_bounded 12 "$(mk_bash_post "$SID_A" "$LK_TR" "$LK_REPO" \
-  "bash ~/.claude/hooks/stop-check.sh wedged" "$OBS_OUT")"
-expect_status "…and the same bounded drive on a WRITABLE state directory also exits 0" \
-  "0" "$BOUNDED_ST"
-expect_file "…having actually recorded, so the bound is measuring a real run" \
-  "$LK_REPO/$STATE_REL"
+# THE LOCK IS GONE WITH THE RECORD IT SERIALIZED (epic-23 wave-15, REQ-2). This world drove
+# the one place a naive implementation spins forever — `mkdir` fails for reasons no reclaim
+# can fix, and `rm -rf` of an absent path succeeds — and the read-modify-write it protected
+# was the observation record's. The roster arm has never taken a lock (a single O_APPEND
+# write of well under a pipe buffer), so there is no wait left in this script to bound. The
+# bounded driver above stays: the malformed-payload rows below still use it, and it is what
+# proves this hook terminates on a payload shape nobody planned for.
 
 # Malformed payloads: this script is fed by the platform, and a shape it does not
 # expect must be inert rather than fatal. Each one is asserted: PostToolUse cannot
@@ -993,34 +743,12 @@ expect_eq "a newline in the platform's agentId cannot split the row it writes" \
 expect_contains "…the id is normalized into the row instead, as the writer would" \
   "agent_id=aevil-3333333333333333 ${ROSTER_ROW_SCHEMA}|" "$(cat "$S1_ROSTER" 2>/dev/null)"
 
-IFS='|' read -r S1B_REPO S1B_TR S1B_SUB S1B_CFG <<< "$(make_world sanparityobs yes)"
-plant_agent "$S1B_SUB" "aworker-1111111111111111" "worker" "$S1B_REPO"
-S1B_EVIL="aobserver-5555555555555555
-v1"
-run_observation "$SID_A" "$S1B_CFG" "$S1B_REPO" worker >/dev/null 2>&1
-run_rec "$(mk_bash_post "$SID_A" "$S1B_TR" "$S1B_REPO" "bash stop-check.sh worker" "$OBS_OUT" "$S1B_EVIL")"
-expect_eq "a newline in the payload's agent_id cannot split the record it writes" \
-  "1" "$(grep -c '^v1|' "$S1B_REPO/$STATE_REL" 2>/dev/null)"
-expect_contains "…the observer is normalized into the record instead" \
-  "observer=aobserver-5555555555555555 v1" "$(cat "$S1B_REPO/$STATE_REL" 2>/dev/null)"
-
-# S-2. The recorder's disclosed residual — a command that PRINTS a well-formed
-# machine line produces a record — argued that forging one costs the target's
-# CURRENT log mtime and size, "which the gate re-checks against the live file".
-# The re-check is real, and it has a hole the disclosure did not name: when the
-# target's log does not exist, the gate reads mtime 0 / size 0, so a forged line
-# carrying mtime=0|size=0 matches it exactly. A record for a log that is not on
-# disk can never be honest evidence anyway — the observation just stat'ed that
-# file — so it is refused at the door.
-IFS='|' read -r S2_REPO S2_TR S2_SUB S2_CFG <<< "$(make_world logexists yes)"
-plant_agent "$S2_SUB" "areal-7777777777777777" "real" "$S2_REPO"
-run_rec "$(mk_bash_post "$SID_A" "$S2_TR" "$S2_REPO" "echo forged" \
-  "stop-check-observation/v1|target=aphantom-8888888888888888|typed=phantom|log=$S2_SUB/agent-aphantom-8888888888888888.jsonl|mtime=0|size=0|deliverables=|progress=|progress_mtime=0|progress_state=unnamed|classification=ours|deliverable_source=none|progress_source=none")"
-# The real path is untouched — the producer stat'ed the file it named, so it is there.
-run_observation "$SID_A" "$S2_CFG" "$S2_REPO" real >/dev/null 2>&1
-run_rec "$(mk_bash_post "$SID_A" "$S2_TR" "$S2_REPO" "bash stop-check.sh real" "$OBS_OUT")"
-expect_contains "a real observation of a real log is still recorded" \
-  "areal-7777777777777777" "$(cat "$S2_REPO/$STATE_REL" 2>/dev/null)"
+# S-1's OBSERVATION HALF AND S-2 ARE GONE WITH THE RECORD (epic-23 wave-15, REQ-2). The
+# sanitizer parity above was asserted twice, once per artifact this script wrote: the roster
+# row (immediately above, and still driven) and the observation record. S-2 was the
+# log-existence guard that closed the match-by-zero forgery — a line carrying `mtime=0|size=0`
+# matched a gate reading a log that was not on disk. Neither artifact exists; the gate stats
+# the log itself now, so there is no line to forge and no zero to match.
 
 # P (performance). This arm rescans the whole roster on every dispatch, and the
 # roster grows two rows per dispatch for the life of the session. The cost was
@@ -1859,28 +1587,30 @@ run_rec_counted() {  # <payload-json> — run_rec_pressure with a counting jq on
 run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "echo four" "four")"
 expect_status "13f an ordinary Bash call still exits 0" "0" "$REC_ST"
 expect_eq "13f …and the sample still landed on it" "3" "$(wc -l < "$P_RING" | tr -d ' ')"
-# THE CONSTANT MOVED FROM 4 TO 3 (epic-23 wave-12-fixit-171, T11, REQ-10), and the
-# discrimination this section makes did not. `bionic_context` used to spend two `jq`
-# processes on the payload — one for `.cwd`, one for `.session_id` — and now spends one
-# on the whole field roster (lib/context.sh, `_bionic_jq_fill`). Every hook that calls
-# `bionic_context` therefore makes exactly one fewer payload read than it did, this one
-# included, on BOTH sides of the early exit: three with it and five without, where it
-# was four and six. What this assertion is for — that the exit stops the hook before
-# the transcript/subagents resolution below it — is unchanged, and the control
-# immediately below still measures it as a strict increase over this number.
-P_JQ_WITH_EXIT=3
-expect_eq "13f …and the hook stopped right after the sample: three payload reads, not five" \
+# THE CONSTANT HAS MOVED TWICE, and each move made the hot path cheaper rather than changing
+# what this row is for. 4 -> 3 at epic-23 wave-12-fixit-171 T11: `bionic_context` stopped
+# spending two `jq` processes on the payload and spends one on the whole field roster
+# (lib/context.sh, `_bionic_jq_fill`). 3 -> 2 at epic-23 wave-15 (REQ-2): the read this arm
+# spent pulling the tool's whole stdout out of the payload, so it could be grepped for a
+# machine line, is gone with the observation record — nothing reads a tool's output here now.
+# Two reads is the floor: the tool name, and the context fill.
+P_JQ_WITH_EXIT=2
+expect_eq "13f …and the hook stopped right after the sample: two payload reads, not four" \
   "$P_JQ_WITH_EXIT" "$(wc -c < "$P_JQC" | tr -d ' ')"
 
-# The other direction: a Bash call that DOES carry a machine line must not take the exit.
+# THE OTHER DIRECTION IS GONE, AND ITS ABSENCE IS THE CLAIM (epic-23 wave-15, REQ-2). A Bash
+# call that carried a machine line used to skip the exit and run the arms below it, at a
+# strictly higher payload-read count — the measurement this section made. Nothing reads a
+# tool's stdout any more, so the two calls are INDISTINGUISHABLE to this hook, and that is
+# what the pair below asserts: the same count either way, which is the observation arm being
+# gone rather than merely quiet.
 P_MLINE="stop-check-observation/v1|agent=w99-none|log=$SANDBOX/pressure/nolog|mtime=1|size=1"
 : > "$P_JQC"
 run_rec_counted "$(mk_bash_post "$SID_A" "$P_TR" "$P_REPO" "bash stop-check.sh" "$P_MLINE")"
-expect_status "13f a Bash call carrying a machine line still exits 0" "0" "$REC_ST"
-# AGAINST THE NUMBER ABOVE, NOT A SECOND LITERAL: the two are the same measurement on
-# either side of the exit, and a hard-coded bound here could only drift away from it.
-expect_eq "13f …and it does NOT take the early exit — the arms below it run" "yes" \
-  "$([ "$(wc -c < "$P_JQC" | tr -d ' ')" -gt "$P_JQ_WITH_EXIT" ] && echo yes || echo no)"
+expect_status "13f a Bash call whose output LOOKS like a machine line still exits 0" "0" "$REC_ST"
+expect_eq "13f …and costs exactly the same payload reads: nothing reads stdout" \
+  "$P_JQ_WITH_EXIT" "$(wc -c < "$P_JQC" | tr -d ' ')"
+expect_no_file "13f …and writes no record for it" "$P_REPO/$STATE_REL"
 
 # ============================================================
 section "Section 14: the BUDGET FIELDS survive both rebuilds, byte for byte (review-b B-4)"
