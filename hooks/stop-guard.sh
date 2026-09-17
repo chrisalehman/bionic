@@ -1,14 +1,25 @@
 #!/bin/bash
-# THE STOP GATE — epic-15 wave-01R, extended at wave-03 task 4/6. ONE
-# registration, PreToolUse|TaskStop. A stop during an active wave is permitted
-# only against an observation that is:
+# THE STOP GATE — epic-15 wave-01R; re-founded at epic-23 wave-15-fixit-182 (REQ-2, D2).
+# ONE registration, PreToolUse|TaskStop. A stop during an active wave is refused when, and
+# only when, THIS GATE CAN SEE that the target is still working and has delivered nothing.
 #
-#   OURS      — this session's (D-1), and the STOPPER'S OWN look, not another
-#               actor's borrowed one (D-3, task 4/6);
-#   FRESH     — on both activity channels: the target's working log (D-1) and,
-#               where the work contract named one, its progress artifact (D-6,
-#               task 4/6);
-#   SPENT     — one observation discharges exactly one stop (D-2).
+# THE LOOK IS THE GATE'S OWN (ADR-028). It reads the target's working log, its contracted
+# progress artifact and its contracted deliverables at the instant of the stop, through
+# `observe_agent` in payload/scripts/lib/observe.sh — the same function hooks/stop-check.sh
+# prints. What it refuses is one observed state: `alive` (a channel moved inside the row's
+# declared cadence) with the contract undelivered. `idle`, `delivered` and a landed row all
+# pass, with the look on stderr.
+#
+# WHAT THIS REPLACES, AND WHY. Until 1.8.1 this gate admitted a stop only against a RECORD of
+# an earlier look — written by hooks/execution-recorder.sh from the verb's machine line,
+# owned by an actor (D-3), staled by activity on either channel (D-1, D-6) and consumed once
+# (D-2). Every one of those rules was sound about the record and none of them was about the
+# TARGET: on 2026-09-15 the gate refused a correct stop with "no observation exists in this
+# repo" because nobody had run the verb. The wall asserted a condition it had not observed.
+# ADR-028 rules that a wall asserts only what it can observe at the moment of the act, from
+# data it can reach itself, so the record, its writer arm, the consume lock and the
+# D-1/D-2/D-3/D-6 accounting over it are deleted. A reader who comes looking for those rules
+# will find them there.
 #
 # And it is a stop of an agent THIS SESSION LAUNCHED. A target the session roster
 # does not record is refused when addressed by name and permitted when addressed
@@ -17,20 +28,10 @@
 # Why a gate at all: a stop is irreversible, and the failure mode it guards is
 # the orchestrator's own judgment lapsing mid-drift — so the guarantee cannot
 # live in the orchestrator's context (design/orchestrator-subagent-coordination.md
-# §3.1). The gate reads state and decides; it never judges. Every judgment
-# belongs upstream, in the observation.
+# §3.1). The gate reads state and decides; it never judges.
 #
-# THIS SCRIPT NO LONGER WRITES THE RECORDS IT SPENDS (task 4/4). It used to
-# carry a second arm on PreToolUse|Bash that watched for hooks/stop-check.sh in a
-# command line and recorded an observation from the command TEXT. That arm fired
-# BEFORE the command ran, so it could never know whether one had — and it paid
-# for that twice: once when its command-line grammar diverged from the producer's
-# and the record named an agent nobody had examined (Step-6 review F-1), and once
-# as the standing residual where a refused or mistyped invocation still left a
-# consumable record (critic finding A). Recording now happens once, in
-# hooks/execution-recorder.sh on PostToolUse, from the machine line the
-# observation itself prints. There is exactly ONE writer of this state and this
-# gate is purely its reader.
+# THE HUMAN ORDER IS THE SOLE OVERRIDE (hooks/stop-orders.sh, TTL-bounded, `by=human|patrol`)
+# and it is untouched by any of this.
 #
 # FAIL DIRECTIONS (TDD §7, pinned by tests/stop-guard.test.sh):
 #   - the gate is OPEN and SILENT before the active-wave verdict (an
@@ -45,16 +46,12 @@
 
 set -uo pipefail
 
-STATE_VERSION="v1"
 # The session roster's schema token. Written by hooks/dispatch-preflight.sh at
 # launch and completed by hooks/execution-recorder.sh at execution confirmation;
-# read here, and by hooks/stop-check.sh, never written. A row this gate cannot
-# read is a row it will not guess at — an unknown version simply does not match,
-# which lands on the closed side.
+# read here, and by payload/scripts/lib/observe.sh, never written. A row this gate
+# cannot read is a row it will not guess at — an unknown version simply does not
+# match, which lands on the closed side.
 ROSTER_VERSION="v1"
-# The bound on this file's length lives with its WRITER, hooks/execution-recorder.sh
-# — this gate only reads it, and a reader that also capped it would be a second
-# opinion about how much evidence a session may hold.
 # THIS SCRIPT'S OWN DIRECTORY, and therefore its siblings'. hooks/stop-check.sh and
 # hooks/stop-orders.sh ship beside this gate, so `$0` resolves them identically in a repo
 # checkout, in a bootstrap-installed ~/.claude/hooks/, and in an installed plugin payload.
@@ -77,13 +74,10 @@ _jq() { printf '%s' "$BIONIC_INPUT" | jq -r "$1 // empty" 2>/dev/null; }
 TOOL_NAME=$(_jq '.tool_name')
 
 # ---------- portable file facts ----------
-# DELIBERATELY DUPLICATED from hooks/stop-check.sh, byte for byte. A shared
-# library is rejected by design (TDD §9): a sourced file the installer misses is
-# a silently inert wall. The copies are held together by the resolver agreement
-# battery in tests/cross-gate-agreement.test.sh §C, which drives both copies —
-# the observation's and this one — over one fixture world.
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
-file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
+# `file_mtime`, `file_size` and `line_field` were defined here and, byte for byte, in
+# hooks/stop-check.sh — the price of the no-library rule, held together by the resolver
+# agreement battery in tests/cross-gate-agreement.test.sh §C. They are one definition now,
+# in payload/scripts/lib/observe.sh, which this gate sources for the look itself (REQ-2).
 
 # RESOLUTION IS NO LONGER A DIRECTORY SCAN (wave-roster-lifecycle S6, D2/D2′). This file
 # used to carry `scan_subagent_dirs` — a walk of `agent-*.meta.json` matching a typed
@@ -116,14 +110,9 @@ session_subagents_dir() {  # <transcript-path>
   printf '%s/subagents\n' "${tr%.jsonl}"
 }
 
-# One field out of a versioned record, BY KEY. Never by position: the discarded
-# run's fixed-field-order parser broke undiagnosably the moment a field was
-# added (checklist A6), so an unknown extra field must be inert here.
-record_field() {  # <record-line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
-}
-
-record_version() { printf '%s' "$1" | cut -d'|' -f1; }
+# ONE FIELD OUT OF A VERSIONED LINE, BY KEY, is `line_field` in the library now. This gate
+# carried its own `record_field` with the identical body — the same rule, spelled twice — and
+# `record_version`, which only the deleted record loop ever called.
 
 _bionic_symlink_in_repo() {  # <repo> -> 0 iff $repo/.bionic resolves under this repo's own root
   # spawn-worktree.sh links every spawned tree's .bionic to the main checkout's so a wave
@@ -137,20 +126,22 @@ _bionic_symlink_in_repo() {  # <repo> -> 0 iff $repo/.bionic resolves under this
   case "$target/" in "$root"/*) return 0 ;; *) return 1 ;; esac
 }
 
-state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsafe
+state_dir() {  # <repo> -> echoes the state directory; nonzero if unsafe
   local repo="$1"
-  # A hostile repo controls its own .bionic/ contents (TDD §8). A symlink at
-  # any level lets a repo choose which file this gate reads its evidence out of —
-  # the OPEN direction, which §8 forbids a repo from reaching. Refuse rather than
-  # follow: this gate refuses the stop, which is the safe side. The one exception
-  # is the spawned-worktree link, accepted only when it stays inside this repo.
+  # A hostile repo controls its own .bionic/ contents (TDD §8). A symlink at any level lets a
+  # repo choose which files this gate reads its roster, its orders and its contracts out of —
+  # the OPEN direction, which §8 forbids a repo from reaching. Refuse rather than follow:
+  # this gate refuses the stop, which is the safe side. The one exception is the
+  # spawned-worktree link, accepted only when it stays inside this repo.
+  #
+  # THE THIRD LEVEL WENT WITH THE RECORD (REQ-2). A symlink on the observation record's own
+  # path was refused here because that file was the gate's evidence; the record is deleted,
+  # so the two levels that remain are the two this gate still reads through.
   if [ -L "$repo/.bionic" ]; then
     _bionic_symlink_in_repo "$repo" || return 1
   fi
   [ -L "$repo/.bionic/tmp" ] && return 1
-  local dir="$repo/.bionic/tmp"
-  [ -L "$dir/stop-check.state" ] && return 1
-  printf '%s|%s\n' "$dir" "$dir/stop-check.state"
+  printf '%s\n' "$repo/.bionic/tmp"
 }
 
 # ============================================================
@@ -166,7 +157,7 @@ state_paths() {  # <repo> -> echoes "<state-dir>|<state-file>"; nonzero if unsaf
 # payload/scripts/lib/loader.sh. FAIL OPEN: the stop verdict is advisory or repeatable, and a
 # hook that refused because a file was missing would hold every turn in every session
 # on the machine hostage to it.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh roster.sh run.sh session.sh"
+BIONIC_LIB_WANT="context.sh observe.sh refuse.sh root.sh roots.sh roster.sh run.sh session.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -276,6 +267,14 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-guard"; fi
 . "$BIONIC_LIB/run.sh"
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/session.sh"
+# THE DOCS ROOT, for the one thing that needs it: a contract spelled `record/<wave>/x.md`,
+# which is how every task brief in this epic names an artifact under the docs root.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/roots.sh"
+# THE OBSERVATION (REQ-2, D2; ADR-028) — the look this gate takes for itself, and the file
+# helpers that used to be duplicated here.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/observe.sh"
 # THE LIVE-SET READER IS NOT SOURCED HERE ANY MORE (T22, AC-4.4). `agents.sh` was this
 # gate's whole resolution rule between wave-roster-lifecycle S6 and 1.7.1; the roster is now,
 # and a library a file does not read is a library it must not load — loading it would leave
@@ -356,19 +355,23 @@ deny() {  # <fact> <fix> <reason line>...
   # reader is interrupted on. Now the caller's FACT and FIX — the ruled wording, one row
   # per reason, s12-refusal-wording-draft.md §1 rows 15-36 — render as the single user
   # line, and everything the frame used to print becomes `detail`: the pasteable observe
-  # command, the one-observation-one-stop rule, and the human-order route. The verb is
-  # `stop` for all three Stop hooks (D-3); the fact discriminates the gate.
+  # command and the human-order route. The verb is `stop` for all three Stop hooks (D-3);
+  # the fact discriminates the gate.
+  #
+  # THE FRAME NO LONGER DEMANDS A LOOK (REQ-2). It used to end "A stop needs a fresh
+  # observation of its target" and teach D-1 and D-2 — a chore this gate now performs for
+  # itself. What the verb is still good for is the reader's own eyes, on an evidence tier
+  # richer than one line, so it stays here as an offer rather than a precondition.
   local fact="$1" fix="$2"; shift 2
   local reasons="" line
   for line in "$@"; do reasons="${reasons}${line}
 "; done
-  refuse exit2 stop "$fact" "$fix" "${reasons}A stop needs a fresh observation of its target, and a wave is active.
+  refuse exit2 stop "$fact" "$fix" "${reasons}A stop is irreversible, and a wave is active.
+
+This gate took its own look at the target. To read the whole evidence tier yourself:
 
 Fix: ${OBSERVE_CMD} ${FIX_TARGET}${FIX_EXTRA}
      (pass each contracted deliverable path as a further argument)
-Then read what it prints, and stop again if the evidence supports it.
-One observation discharges exactly one stop (D-2), and it goes stale the
-moment the target writes again (D-1).
 
 If a human ordered this stop, it executes — record the order and stop again:
      ${ORDER_CMD} ${FIX_TARGET}
@@ -383,12 +386,11 @@ SUB=$(session_subagents_dir "$TRANSCRIPT") \
 
 # ---------- RESOLUTION AGAINST THE LIVE SET (D1′/D2′, AC-9…AC-11) ----------
 #
-# The state paths are taken FIRST, because resolution now reads the roster — for the agent
-# id, and for the rosters an `@session-` alias is checked against. `state_paths` declines a
-# symlinked state path, which is the same refusal it always made, one step earlier.
-PATHS=$(state_paths "$BIONIC_ROOT") \
-  || deny "the observation state path is a symlink" "remove that symlink" "The observation state path is a symlink; nothing here will read or write through it."
-STATE_DIR="${PATHS%|*}"; STATE_FILE="${PATHS#*|}"
+# The state directory is taken FIRST, because resolution reads the roster — for the agent
+# id, and for the rosters an `@session-` alias is checked against. `state_dir` declines a
+# symlinked one, which is the same refusal it always made.
+STATE_DIR=$(state_dir "$BIONIC_ROOT") \
+  || deny "the state directory is a symlink" "remove that symlink" "This repo's .bionic state directory is a symlink; nothing here will read through it."
 
 # THE TYPED REFERENCE, split. `TaskStop` hands this gate the operator's string as typed and
 # resolves nothing for it (P5). Three spellings reach here: a bare name, that name with an
@@ -449,11 +451,11 @@ roster_walk() {  # <key-name>
   while IFS= read -r rline; do
     case "$rline" in '#'*|'') continue ;; esac
     case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-    rid=$(record_field "$rline" agent_id)
-    rname=$(record_field "$rline" name)
+    rid=$(line_field "$rline" agent_id)
+    rname=$(line_field "$rline" name)
     # `confirmed` or `identified`, never `intended` (Step-6 review C-2): the id on an
     # unconfirmed row is a claim about a launch nothing has observed.
-    case "$(record_field "$rline" status)" in
+    case "$(line_field "$rline" status)" in
       confirmed|identified)
         [ -n "$rid" ] && [ "$rid" = "$key" ] && ROW_BY_ID="$rline"
         [ -n "$rid" ] && [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_WITH_ID="$rline"
@@ -484,14 +486,14 @@ if [ -n "$ROW_BY_ID" ]; then
   # operator actually named is gone the moment it has been translated — and on an ambiguous
   # roster the name no longer picks it back out.
   TYPED_ROW="$ROW_BY_ID"
-  BASE=$(record_field "$ROW_BY_ID" name)
+  BASE=$(line_field "$ROW_BY_ID" name)
   roster_walk "$BASE"
 fi
 
 AGENT_NAME="$BASE"
 ROSTER_ROW="$ROW_BY_NAME"
 AGENT_ID=""
-[ -n "$ROW_WITH_ID" ] && AGENT_ID=$(record_field "$ROW_WITH_ID" agent_id)
+[ -n "$ROW_WITH_ID" ] && AGENT_ID=$(line_field "$ROW_WITH_ID" agent_id)
 
 # AN AGENT ID RESOLVES TO THE ROW THAT CARRIES IT, NEVER TO THE LAST ROW OF ITS NAME (T31;
 # delta review D1). `ROW_WITH_ID` is the last confirmed/identified row of the NAME, which is
@@ -511,7 +513,7 @@ AGENT_ID=""
 # domain.
 if [ -n "$TYPED_ROW" ]; then
   ROSTER_ROW="$TYPED_ROW"
-  AGENT_ID=$(record_field "$TYPED_ROW" agent_id)
+  AGENT_ID=$(line_field "$TYPED_ROW" agent_id)
 fi
 
 # THE ROSTER DECIDES (T22, A-orch-33; AC-4.4). This gate used to ask `live_agents_has` —
@@ -675,7 +677,7 @@ fi
 # platform prints, so the filename is matched by prefix — or this session's own row, whose
 # `teammate_id=` records the exact address `adopt` printed for a taken-over agent.
 if [ -n "$ALIAS_SUFFIX" ]; then
-  ROSTER_TEAMMATE=$(record_field "$ROSTER_ROW" teammate_id)
+  ROSTER_TEAMMATE=$(line_field "$ROSTER_ROW" teammate_id)
   ALIAS_OK=0
   if [ -n "$ROSTER_TEAMMATE" ] && [ "$RAW" = "$ROSTER_TEAMMATE" ]; then
     ALIAS_OK=1
@@ -716,23 +718,19 @@ fi
 # ---------- WHERE THE WORKING LOG IS, once the target has resolved ----------
 #
 # The id and the session the log is filed under both come from the ROSTER ROW, which is the
-# only record that ever knew them: the harness's answer lists names, and the directory scan
-# that used to supply an id is what this task deleted. `adopted_from` names the session that
-# LAUNCHED an agent this one took over after a `/clear` — the log stays filed there, and the
-# row is where that fact was written down (session-poker.sh `adopt`).
-AFROM=$(record_field "$ROSTER_ROW" adopted_from)
+# only record that ever knew them. `adopted_from` names the session that LAUNCHED an agent
+# this one took over after a `/clear` — the log stays filed there, and the row is where that
+# fact was written down (session-poker.sh `adopt`). THE PATH ITSELF IS DERIVED BY THE LIBRARY
+# NOW (REQ-2): `observe_agent` applies the same rule to the same row, so the log this gate
+# looks at and the log hooks/stop-check.sh prints are one derivation.
+AFROM=$(line_field "$ROSTER_ROW" adopted_from)
 case "$AFROM" in *[!A-Za-z0-9-]*) AFROM="" ;; esac
-if [ -n "$AFROM" ]; then
-  LOG_DIR="${TRANSCRIPT%/*}/$AFROM/subagents"
-else
-  LOG_DIR="$SUB"
-fi
 
 # HOW THE OPERATOR ADDRESSES THIS AGENT, in a form the platform's stop primitive accepts
 # (epic-16 wave-02 task S3, from field data 2026-08-11). The roster's recorded teammate
 # address wins; the constructed form is the fallback, and it is built from the session that
 # launched the agent, because that is the session the address names.
-ROSTER_TEAMMATE=$(record_field "$ROSTER_ROW" teammate_id)
+ROSTER_TEAMMATE=$(line_field "$ROSTER_ROW" teammate_id)
 STOP_ADDRESS="$ROSTER_TEAMMATE"
 if [ -z "$STOP_ADDRESS" ]; then
   STOP_ADDRESS="${AGENT_NAME}@session-$(printf '%s' "${AFROM:-$BIONIC_SID}" | cut -c1-8)"
@@ -798,9 +796,9 @@ take_verdict() {
          CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "$SWEEPER" verdict "$AGENT_NAME" 2>/dev/null )
   line=$(printf '%s\n' "$out" | grep -F 'landing-verdict/v1|' | head -1)
   [ -n "$line" ] || return 0
-  V_STATE=$(record_field "$line" state)
-  V_DETAIL=$(record_field "$line" detail)
-  V_ACKED=$(record_field "$line" acked)
+  V_STATE=$(line_field "$line" state)
+  V_DETAIL=$(line_field "$line" detail)
+  V_ACKED=$(line_field "$line" acked)
   return 0
 }
 
@@ -825,19 +823,19 @@ order_current() {
   now=$(date -u +%s)
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in "stop-order/v1|"*) : ;; *) continue ;; esac
-    t=$(record_field "$line" target)
+    t=$(line_field "$line" target)
     [ -n "$t" ] || continue
     # The order may name what the operator typed, the agent's name, or its id: all three
     # are things a human says out loud, and an order that resolved to none of them would be
     # a wall built out of spelling.
     [ "$t" = "$RAW" ] || [ "$t" = "$AGENT_NAME" ] || [ "$t" = "$AGENT_ID" ] || continue
-    e=$(record_field "$line" epoch)
+    e=$(line_field "$line" epoch)
     case "$e" in ''|*[!0-9]*) continue ;; esac
     delta=$((now - e))
     # A future-dated order is a skewed clock or a hand-edited file; a small tolerance
     # absorbs the first and nothing here honours the second indefinitely.
     if [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ]; then
-      ORDER_BY=$(record_field "$line" by)
+      ORDER_BY=$(line_field "$line" by)
       case "$ORDER_BY" in human|patrol) : ;; *) ORDER_BY=human ;; esac
       return 0
     fi
@@ -864,7 +862,7 @@ take_verdict
 [ "$V_ACKED" = "yes" ] && exit 0
 case "$V_STATE" in
   WAIVED) exit 0 ;;
-  MET)    [ -n "$(record_field "$ROSTER_ROW" deliverable)" ] && exit 0 ;;
+  MET)    [ -n "$(line_field "$ROSTER_ROW" deliverable)" ] && exit 0 ;;
 esac
 
 # ---------- THE OBSERVATION CHANNEL NEEDS AN AGENT ID, AND THE ROSTER OWNS IT ----------
@@ -890,204 +888,56 @@ if [ -z "$AGENT_ID" ]; then
        "If this agent was launched outside bionic's dispatch, stop it yourself or record an order."
 fi
 
-LOG="$LOG_DIR/agent-${AGENT_ID}.jsonl"
+# ---------- THE LOOK: what is observably true of this target, right now ----------
+#
+# ONE FUNCTION OF THE ROSTER ROW AND THE FILE SYSTEM (ADR-028, REQ-2). `observe_agent`
+# resolves the id to its working log — the predecessor's directory when the row says this
+# session ADOPTED the agent — stats that log, stats the contracted progress artifact and
+# every contracted deliverable, reads the row's declared cadence, and classifies:
+#
+#   alive      a channel moved inside the declared cadence, and the contract is undelivered
+#   delivered  every contracted artifact is on disk with something in it
+#   idle       neither channel moved inside the cadence, and nothing was delivered
+#
+# IT IS CALLED WITH THE AGENT ID, not the typed reference. An id names exactly one roster row
+# by construction, so the look lands on the row this gate resolved rather than re-deriving a
+# name whose ambiguity the arm above has already refused.
+#
+# IN PROCESS, NEVER A SUBPROCESS. The alternative — run the verb and parse its machine line —
+# is a text seam between these two parties, and that seam broke once already on this very
+# path (Step-6 review F-1). A stop is irreversible; it does not get a parser in the middle.
+OBSERVE_ROOT="$BIONIC_ROOT"
+OBSERVE_SESSION="$BIONIC_SID"
+OBSERVE_TRANSCRIPT="$TRANSCRIPT"
+OBSERVE_DOCS_ROOT="$(docs_root "$BIONIC_ROOT")"
+OBSERVE_ROSTER="$ROSTER_FILE"
+OBSERVE_PROGRESS_ARG=""
+OBSERVE_CLAIMS_ARG=""
+observe_agent "$AGENT_ID"
 
-[ -f "$STATE_FILE" ] \
-  || deny "no observation exists in this repo" "observe it with stop-check" "No observation has been recorded in this repo at all."
+# THE LOOK IN ONE LINE, and it is the same line either way: a reader who disagrees with the
+# verdict needs the evidence the verdict was made on, not the verdict again.
+LOOK="$(observe_look_line)"
 
-# Find this target's record. A record for the target under another session key
-# or another schema version is reported for what it is — never guessed at.
-RECORD=""; FOREIGN=""; BAD_VERSION=""
-while IFS= read -r line; do
-  case "$line" in '#'*|'') continue ;; esac
-  [ "$(record_field "$line" target)" = "$AGENT_ID" ] || continue
-  if [ "$(record_version "$line")" != "$STATE_VERSION" ]; then
-    BAD_VERSION=$(record_version "$line"); continue
-  fi
-  if [ "$(record_field "$line" session)" != "$BIONIC_SID" ]; then
-    FOREIGN=$(record_field "$line" session); continue
-  fi
-  RECORD="$line"
-done < "$STATE_FILE"
-
-if [ -z "$RECORD" ]; then
-  [ -n "$BAD_VERSION" ] && deny "the observation record is unreadable" "observe it with stop-check" \
-    "The only observation of '${RAW}' carries schema version '${BAD_VERSION}', which this gate does not read." \
-    "A record it cannot read is a record it will not trust. Observe again."
-  [ -n "$FOREIGN" ] && deny "that observation is another session's" "observe it with stop-check" \
-    "The only observation of '${RAW}' was recorded by a different session (${FOREIGN})." \
-    "Another session's look is not evidence that I looked."
-  deny "this session has not observed it" "observe it with stop-check" "No observation of '${RAW}' (${AGENT_ID}) has been recorded by this session."
+if [ "$OBS_CLASS" = "alive" ]; then
+  # THE ONE CASE THIS WALL EXISTS FOR. The target wrote inside the window its own dispatch
+  # declared, and the artifact that dispatch exists for is not on disk — so a stop here ends
+  # work that has not landed anywhere. The refusal prints the four facts it was made of
+  # (ADR-028: a wall that asserts only what it observes must be able to say what it observed),
+  # and the human order below it is the way past a verdict the operator disagrees with.
+  deny "it is still working, nothing delivered" "let it finish, or order it" \
+       "'${RAW}' (${AGENT_ID}) is ALIVE and its contract is undelivered." \
+       "    working log:  ${OBS_LOG}" \
+       "    last write:   $(fmt_age "$OBS_LOG_AGE") ago, inside the declared cadence of ${OBS_CADENCE_S}s (${OBS_CADENCE_SOURCE})" \
+       "    progress:     ${OBS_PROGRESS_STATE}${OBS_PROGRESS:+ — ${OBS_PROGRESS}}" \
+       "    deliverable:  ${OBS_DELIV_STATE}${OBS_DELIV_PATHS:+ — ${OBS_DELIV_PATHS}}" \
+       "This is what this gate can see at the moment of the stop, and it is the whole of what" \
+       "it refuses on: an agent that has gone quiet past its own cadence, or that has landed" \
+       "its artifact, is stoppable."
 fi
 
-# ---------- D-3: the look must be the STOPPER'S OWN (AC-4) ----------
-#
-# D-1 made an observation perishable. It never made one ATTRIBUTABLE: any record
-# for the target discharged any actor's stop, so a subagent's look could pay for
-# the orchestrator's stop and neither had seen what the other saw. Same session,
-# so the session key above says nothing about it — the actor is a finer grain
-# than the session, and it is the grain the judgment happens at, because the
-# reader of the evidence is who decides.
-#
-# A record with no observer at all cannot prove this either way, and unprovable
-# lands on the closed side (§7): the cost is one re-observation.
-REC_OBSERVER=$(record_field "$RECORD" observer)
-if [ -z "$REC_OBSERVER" ]; then
-  deny "the observation records no observer" "observe it with stop-check" "The observation of '${RAW}' records no observer, so it cannot be shown to be yours." \
-       "A look nobody signed is not evidence that YOU looked (D-3). Observe again."
-fi
-if [ "$REC_OBSERVER" != "$ACTOR" ]; then
-  deny "another actor made that observation" "observe it yourself, then stop" "The observation of '${RAW}' was made by a different actor." \
-       "    it was looked at by:  ${REC_OBSERVER}" \
-       "    this stop comes from: ${ACTOR}" \
-       "A look you did not take is not evidence that you looked (D-3): the reader of the" \
-       "evidence is who decides, and that reader has to be you. Take your own look."
-fi
-
-# ---------- D-1: freshness by ACTIVITY BOUNDARY ----------
-#
-# An observation is a snapshot of the evidence tier; it stops being true the
-# moment the evidence changes, and the working log says precisely when that is —
-# the agent's next write. No clock window appears anywhere in this comparison:
-# dormant since the observation is valid HOWEVER OLD, and one write after it is
-# stale immediately. Any difference in the log counts, not only a later mtime —
-# a rewritten or truncated log is a changed log.
-
-REC_LOG=$(record_field "$RECORD" log)
-REC_MTIME=$(record_field "$RECORD" mtime)
-REC_SIZE=$(record_field "$RECORD" size)
-
-NOW_MTIME=0; NOW_SIZE=0
-if [ -f "$LOG" ]; then NOW_MTIME=$(file_mtime "$LOG"); NOW_SIZE=$(file_size "$LOG"); fi
-
-if [ "$REC_LOG" != "$LOG" ]; then
-  deny "the observation names another working log" "observe it with stop-check" "The observation of '${RAW}' recorded a different working log than the one that resolves now." \
-       "Something about this target's identity changed since you looked."
-fi
-
-if [ "$NOW_MTIME" != "$REC_MTIME" ] || [ "$NOW_SIZE" != "$REC_SIZE" ]; then
-  deny "it has written since your observation" "observe it again, then stop" "'${RAW}' has written to its working log SINCE your observation, so that observation is stale." \
-       "(Any CHANGE counts, not only a later write: a truncated or rewritten log is a changed log.)" \
-       "Its evidence tier now includes work you have not seen — which may be the very work a stop would destroy." \
-       "This is an activity boundary, not a timer: an agent dormant since your look stays stoppable however long ago it was."
-fi
-
-# ---------- D-6: the contracted progress artifact is the SECOND activity channel (AC-5) ----------
-#
-# The comparison above watches one channel, and an agent that spends forty
-# minutes inside a single tool call writes nothing to it. "Dormant since your
-# look" is then true of a wedged agent and a working one alike — and the work
-# contract's own progress artifact, the one thing that separates them, counted
-# for nothing here. The rule is the log's rule, applied to the second channel:
-# any activity after the look stales the look.
-#
-# THE PATH COMES OUT OF THE RECORD, not out of a second resolution. The
-# observation already resolved it under the precedence task 4/5 fixed (an
-# explicit --progress overrides the roster's row), and re-deriving it here would
-# be a second parser answering the same question — the F-1 divergence class this
-# wave closed elsewhere. What the roster is still consulted for is the one thing
-# the record cannot say: that a contracted channel was never looked at at all.
-#
-# A relative path is resolved against the BIONIC_ROOT ROOT, which is where the contract
-# is written from and where the observation runs; the resolved path is printed in
-# the refusal so the comparison is never a hidden one.
-REC_PROGRESS=$(record_field "$RECORD" progress)
-REC_PMTIME=$(record_field "$RECORD" progress_mtime)
-REC_PSTATE=$(record_field "$RECORD" progress_state)
-
-abs_progress() {  # <path> -> absolute
-  case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$BIONIC_ROOT" "$1" ;; esac
-}
-
-case "$REC_PSTATE" in
-  present|absent)
-    if [ -n "$REC_PROGRESS" ]; then
-      PROG_ABS=$(abs_progress "$REC_PROGRESS")
-      NOW_PSTATE="absent"; NOW_PMTIME=0
-      if [ -e "$PROG_ABS" ]; then NOW_PSTATE="present"; NOW_PMTIME=$(file_mtime "$PROG_ABS"); fi
-      if [ "$NOW_PSTATE" != "$REC_PSTATE" ] || [ "$NOW_PMTIME" != "$REC_PMTIME" ]; then
-        deny "its progress artifact changed since you looked" "observe it again" "'${RAW}' has written to its contracted PROGRESS ARTIFACT since your observation," \
-             "so that observation is stale." \
-             "    artifact: ${PROG_ABS}" \
-             "    at your look: ${REC_PSTATE} (mtime ${REC_PMTIME})   ·   now: ${NOW_PSTATE} (mtime ${NOW_PMTIME})" \
-             "This is the second activity channel (D-6): a long-running command silences the" \
-             "working log for its whole duration, and the progress artifact is what tells a" \
-             "wedged agent from a working one. It is an activity boundary, not a timer."
-      fi
-    fi
-    ;;
-  *)
-    # The look never opened a contracted channel. An artifact nobody looked at can
-    # never go stale, so without this the check above is dodgeable by simply
-    # looking wrong — which is the ordinary case whenever the observation ran
-    # without its own session key and so never saw the roster at all.
-    if [ -n "$ROSTER_ROW" ]; then
-      ROSTER_PROGRESS=$(record_field "$ROSTER_ROW" progress)
-      if [ -n "$ROSTER_PROGRESS" ]; then
-        FIX_EXTRA=" --progress ${ROSTER_PROGRESS}"
-        deny "your observation skipped the progress artifact" "observe with --progress" "The work contract for '${RAW}' names a progress artifact your observation never looked at." \
-             "    contracted progress: ${ROSTER_PROGRESS}   (from this session's roster)" \
-             "An observation that skips a contracted channel cannot be staled by it, so it is" \
-             "not evidence about the work this stop would end (D-6). Look at it, then stop."
-      fi
-    fi
-    ;;
-esac
-
-# ---------- D-2: consume on stop ----------
-#
-# One observation is evidence about one target at one moment. Letting the record
-# ride for repeated stops re-admits staleness through the side door, so it is
-# spent here, before the stop happens. A REFUSED stop consumes nothing: every
-# path above exits without touching the file.
-
-LOCK="$STATE_DIR/.stop-check.lock"
-tries=0
-reclaimed=0
-# The wait is BOUNDED: one stale-lock reclaim, then a refusal. `mkdir` fails for
-# reasons no reclaim can fix — an unwritable $STATE_DIR is repo-controlled — and
-# `rm -rf` of an absent path succeeds, so an unbounded reclaim-and-retry loop
-# never terminates and this gate would render no verdict at all (Step-6 review
-# S2/A3). §7 gives this side its direction: after the active-wave verdict the
-# stop gate is CLOSED and loud, so a wait that runs out refuses.
-while ! mkdir "$LOCK" 2>/dev/null; do
-  tries=$((tries + 1))
-  if [ "$tries" -gt 20 ]; then
-    if [ "$reclaimed" -eq 0 ] && [ -d "$LOCK" ]; then
-      now=$(date -u +%s)
-      if [ $((now - $(file_mtime "$LOCK"))) -gt 30 ]; then
-        reclaimed=1; tries=0
-        rm -rf "$LOCK" 2>/dev/null
-        continue
-      fi
-    fi
-    deny "the state lock is held, so nothing was consumed" "retry in a moment" "The observation record could not be consumed (the state lock at $STATE_DIR could not be taken), and an unconsumed record would discharge a second stop." \
-         "Either another writer holds it, or this repo's .bionic/tmp is not writable by you."
-  fi
-  sleep 0.1 2>/dev/null || sleep 1
-done
-
-TMP=$(mktemp "$STATE_DIR/.stop-check.XXXXXX" 2>/dev/null) || {
-  rm -rf "$LOCK"
-  deny "no writable temp file, so nothing was consumed" "free space, then retry" "The observation record could not be consumed (no writable temp file), and an unconsumed record would discharge a second stop."
-}
-{
-  printf '# bionic observation records — schema stop-check-state/%s\n' "$STATE_VERSION"
-  while IFS= read -r line; do
-    case "$line" in '#'*|'') continue ;; esac
-    [ "$line" = "$RECORD" ] && continue
-    printf '%s\n' "$line"
-  done < "$STATE_FILE"
-} > "$TMP" 2>/dev/null
-# The rename is the third way the consume can fail, and it fails the same way as
-# its two siblings above: CLOSED. Permitting the stop here would leave the record
-# intact, and that one observation would then discharge every later stop of this
-# target — D-2 broken at the only line that can break it (Step-6 review C3/A2).
-mv -f "$TMP" "$STATE_FILE" 2>/dev/null || {
-  rm -f "$TMP"
-  rm -rf "$LOCK"
-  deny "the state file could not be replaced" "retry in a moment" "The observation record could not be consumed (the state file could not be replaced), and an unconsumed record would discharge a second stop."
-}
-rm -rf "$LOCK"
-
+# PERMITTED, AND THE LOOK GOES WITH IT. The operator no longer runs the verb before a stop,
+# so a stop that goes through is the one chance to show them what the gate saw. One line,
+# stderr, exit 0 — information, never a verdict on the operator.
+echo "STOP PERMITTED — ${AGENT_NAME} is ${OBS_CLASS}: ${LOOK}" >&2
 exit 0

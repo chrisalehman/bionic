@@ -73,16 +73,24 @@ expect_eq "4: limit = interval * PATROL_STALE_MULTIPLIER" \
 expect_eq "5: with the real last-resort default and the real multiplier, limit is 2400" \
   "2400" "$LIMIT"
 
-section "Section 4: the constant's three readers agree (spec AC-22)"
+section "Section 4: the constant's readers agree (spec AC-22; epic-23 wave-15 REQ-1)"
 #
-# THREE READERS BY DESIGN (ownership table, spec §3): patrol.sh's own
-# `patrol_stamp_state` (Section 2), the poker's `adopt` liveness window, and the
-# dispatch wall's Patrol-stamp staleness arm. Only the first two name the
-# constant today. Rather than pin a spelling the wall has not adopted yet — a row
-# that would be red for a whole wave and then need editing on the day it goes
-# green — this section reads whichever multiplier the wall actually uses and
-# asserts it equals the exported one. It goes red the day the two diverge, which
-# is the agreement AC-22 asks for, and it survives the wall's switch untouched.
+# THE THIRD READER IS GONE, AND THAT IS THE POINT (amended at wave-15 T1, ADR-028). This
+# section read three: `patrol_stamp_state` (Section 2), the poker's `adopt` liveness
+# window, and the dispatch wall's Patrol-stamp staleness arm — the last of which it read
+# leniently, in "whichever spelling the wall actually uses", against the day the wall would
+# adopt the constant.
+#
+# The wall did not adopt it; the wall stopped asking the question. Staleness there is no
+# longer a multiple of the interval at all: a session cron fires only while the session is
+# idle, so age past a threshold could not distinguish a dead job from a busy orchestrator,
+# and the wall now calls `patrol_verdict` — an idle-time predicate over the transcript —
+# whose own threshold is one FIRE WINDOW (interval plus a tenth for jitter), computed once
+# in `patrol_fire_window`. So the rows below assert what is true now: two readers of the
+# constant, and a wall that reads neither the constant nor a literal of its own.
+#
+# PATROL_STALE_MULTIPLIER ITSELF STAYS, with two readers and no third. Sections 1 and 2
+# above are untouched.
 SP="${BIONIC_HOOKS_DIR}/session-poker.sh"
 DP="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 
@@ -91,14 +99,15 @@ expect_eq "7: the poker's liveness window reads the constant, not its own litera
 expect_eq "8: …and it loads the library that owns the constant" "yes" \
   "$(grep -qF 'BIONIC_LIB/patrol.sh' "$SP" && echo yes || echo no)"
 
-# The wall's arithmetic, in whichever of the two spellings it is written.
-DP_MULT_TOKEN="$(grep -E 'PATROL_MAX_AGE=\$\(\(' "$DP" | head -1 \
-  | sed -E 's/.*PATROL_INTERVAL[[:space:]]*\*[[:space:]]*([A-Za-z_0-9]+).*/\1/')"
-case "$DP_MULT_TOKEN" in
-  PATROL_STALE_MULTIPLIER) DP_MULT="$MULT" ;;
-  *)                       DP_MULT="$DP_MULT_TOKEN" ;;
-esac
-expect_eq "9: the dispatch wall measures staleness with the same multiplier" \
-  "$MULT" "$DP_MULT"
+# THE WALL NO LONGER MULTIPLIES ANYTHING. Both spellings the old row accepted are absent:
+# the constant, and a literal in its place.
+expect_eq "9: the dispatch wall no longer measures staleness with a multiplier" "0" \
+  "$(grep -cE 'PATROL_INTERVAL[[:space:]]*\*[[:space:]]*[A-Za-z_0-9]+' "$DP" || true)"
+# …because it asks the predicate instead. Paired with 9, so the absence above rests on a
+# file this suite can prove it read.
+expect_eq "10: …it calls patrol_verdict, which owns the threshold" "yes" \
+  "$(grep -qF 'patrol_verdict' "$DP" && echo yes || echo no)"
+expect_eq "11: …and the fire window is computed in the library, once" "1" \
+  "$(grep -c 'iv / 10' "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/patrol.sh" || true)"
 
 finish

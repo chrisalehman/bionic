@@ -296,17 +296,21 @@ printf '{}\n' > "$CLAUDE_CONFIG_DIR/projects/$T_SLUG/$SID_A.jsonl"
 # nag was deleted with the watcher, so silence is now the gate's own answer and this world
 # needs no live process standing behind it.
 
-# An observed active world — the stop gate's positive pair. The observation is
-# RECORDED BY THE REAL WRITER, never hand-written: the row must be discharged by
-# the real producer→recorder→gate path. Since task 4/4 that writer is
-# hooks/execution-recorder.sh on PostToolUse, and it copies the machine line
-# hooks/stop-check.sh prints — so the producer is genuinely run here.
+# THE STOP GATE'S POSITIVE PAIR, re-founded (epic-23 wave-15, REQ-2; ADR-028). It used to be
+# a world with an observation RECORDED through the real producer→recorder→gate path, because
+# the gate admitted a stop only against such a record. The gate observes its target itself
+# now and refuses exactly one state — alive and undelivered — so what makes a stop pass is a
+# target that is not in it. This world's agent has gone quiet past its cadence, which is the
+# case the whole wall exists to let through.
 IFS='|' read -r O_REPO O_TR O_SUB <<< "$(make_world observed yes)"
 plant_agent "$O_SUB" "aworker-1111111111111111" "worker"
 fd_roster_row "$O_REPO" "$SID_A" "worker" "aworker-1111111111111111"
 # Both halves of the pair resolve through the live set (S6): the PRODUCER needs it to reach
 # an evidence tier at all, and the gate needs it to reach the observation record.
 fd_live "$O_TR" worker
+# `touch -t` reads a LOCAL-time stamp, so a far-past literal is used rather than a computed
+# offset — the reading under test is "older than any cadence", not a particular age.
+touch -t 202601010000 "$O_SUB/agent-aworker-1111111111111111.jsonl"
 # <observer> is the agent id of whoever RAN the observation — empty for the
 # orchestrator, which is how the platform renders it (the payload field is simply
 # absent). The producer's own session key travels on CLAUDE_CODE_SESSION_ID: it
@@ -594,7 +598,7 @@ stop|symlinked-state|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|unidentified-by-name|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|borrowed-look|2|loud|Stop gate — after the verdict: CLOSED, loud
 stop|progress-stale|2|loud|Stop gate — after the verdict: CLOSED, loud
-stop|observed|0|silent|Stop gate — the positive pair: a fresh observation permits
+stop|observed|0|silent-with-announce|Stop gate — the positive pair: a target quiet past its cadence is stoppable, and the gate announces the look it permitted on (epic-23 wave-15, REQ-2)
 stop|unrostered-full-id|2|loud|Stop gate — after the verdict: CLOSED, loud
 '
 
