@@ -5115,8 +5115,18 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # §three-arms holds the criterion's own case — three faults, nothing unchecked, twelve —
 # where this arm holds the canonical brief. Widening either without moving a fault count is
 # the mistake to catch.
-expect_status "§combined …the wire is at most 13 lines (10 + 1 extra fault + 2 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 13 ] && echo 0 || echo 1)"
+#
+# RAISED 13 -> 14 (wave-15 T5, REQ-5, A-T5.2), and by the same formula. The floor-once wall
+# is a SECOND arm keyed on `run.sh` in the derived suite set, so a brief that produces no
+# set leaves two walls unable to answer rather than one, and AC-8.2's rule is that each of
+# them says so. The fault count did not move — the third `not checked:` line is a new wall
+# declaring itself, which is the growth this cap is meant to permit.
+expect_status "§combined …the wire is at most 14 lines (10 + 1 extra fault + 3 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 14 ] && echo 0 || echo 1)"
+# AND THE THIRD LINE IS THE NEW WALL'S, NAMED — a cap raised without saying which line
+# filled it is a widened tolerance, which is the mistake the comment above warns about.
+expect_contains "§combined …and the line that filled it is the floor-once wall's" \
+  "not checked: floor-once, needs a suite set" "$GATE_REASON"
 
 # EACH LABEL, MARKED BY WHETHER THIS BRIEF CARRIES IT — not by which wall fired. The
 # absent Files: and the absent Deliverable-waiver: lines earn ` <ADD>`; the present
@@ -6217,6 +6227,242 @@ expect_regex "§bound-one-owner …and its wait ends on the constant itself, not
   '\[[[:space:]]*"\$SECONDS"[[:space:]]*-ge[[:space:]]*"\$IMPACT_BOUND_S"[[:space:]]*\]' "$DP_GATE_SRC"
 expect_no_regex "§bound-one-owner …leaving no tick budget behind to drift against it" \
   '^[[:space:]]*IMPACT_BOUND_TICKS=' "$DP_GATE_SRC"
+
+# ============================================================================
+section "S32: the floor-once wall — a second full floor waits for Step 4 (REQ-5, D7)"
+# ============================================================================
+#
+# THE RULE MADE MECHANICAL. `skills/canonical-sdlc/dispatch.md:12` has said for three
+# releases that the full tree belongs on one row per run, the Step-5 runner's. Nothing
+# enforced the half that matters most: a floor run WHILE Step-4 rows are still open
+# proves a tree that no longer exists by the time those rows land, and wave-14 paid for
+# it six times (seed row 5, Chris DevX item 1).
+#
+# THE SIBLING WALL IS NOT THIS ONE. S28 above counts full-tree rows on the ROSTER and
+# asks for one written cause per extra run; it says nothing about whether the work being
+# proved is finished. This wall reads the PLAN's `## Tasks` ledger and asks whether any
+# step-4 or fold-in row is still `pending` or `active`. Both can fire on one dispatch and
+# they pool into one refusal like every other pair of arms in this file.
+#
+# THE LEDGER IS READ THROUGH `units_rows`, THE ONE TASKS PARSER (AC-5.5). The static pins
+# at the end of this section are what hold that; a second table split in this hook is the
+# defect REQ-1e existed to remove and it would land back here first.
+#
+# fails-when: a run.sh brief is admitted with an open step-4 row and no recorded cause;
+# an all-landed ledger is refused; a recorded cause does not release the dispatch; a
+# non-floor brief, an unbound session or a plan with no `## Tasks` is touched by this arm.
+
+# s32_row <id> <step> <status> [task text] -> one `## Tasks` data row
+s32_row() {
+  printf '| %s | %s | build | %s | implementor | — | 30 | REQ-1 | payload/scripts/lib/widget.sh | — | %s |' \
+    "$1" "$2" "${4:-does the thing}" "$3"
+}
+
+# s32_plan <repo> <regression-cause text, or empty> <row>... — rewrite the fixture plan
+#
+# WRITTEN WHOLE, NOT APPENDED. `## Tasks` is a section heading, so it CLOSES
+# `## SDLC State`: a cause line appended to the end of a plan that carries a Tasks table
+# is outside the ledger and neither this wall nor S28's counts it (S28f pins that reading
+# from the other side). The cause therefore has to be placed inside the state section
+# when the file is built, which is what this helper is for.
+s32_plan() {
+  local repo="$1" cause="$2"; shift 2
+  local plan="$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  local row
+  {
+    printf -- '---\n'
+    printf 'governing-skill: canonical-sdlc\n'
+    printf 'canonical_sdlc_version: 14\n'
+    printf 'intent: build\n'
+    printf 'rigor: audited\n'
+    printf 'scale: wave\n'
+    printf -- '---\n\n'
+    printf '# Test wave plan\n\n'
+    printf '## SDLC State\n\n'
+    printf 'integration-branch: main\n'
+    printf 'current: 4\n\n'
+    printf -- '- Step 4: tasks in flight\n'
+    [ -z "$cause" ] || printf 'regression-cause: %s\n' "$cause"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
+    printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for row in "$@"; do printf '%s\n' "$row"; done
+  } > "$plan"
+}
+
+S32_FLOOR_BRIEF='Your task: run the tests floor.
+Expected artifact: .bionic/docs/record/w32-floor.log
+Expected duration: ~40 minutes.
+Suites: tests/run.sh'
+
+S32_NARROW_BRIEF='Your task: fix the widget.
+Expected artifact: .bionic/docs/record/w32-widget.md
+Expected duration: ~15 minutes.
+Suites: tests/widget.test.sh'
+
+# ---- AC-5.1: an open step-4 row refuses the floor, and the refusal names it ----
+REPO=$(make_repo r32a yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)" \
+  "$(s32_row T12 5 pending 'Step-5 floor at the integration head')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-one")"
+expect_status "32a a full-tree brief is REFUSED while a step-4 row is pending" "2" "$GATE_ST"
+expect_contains "32a …and the one line names the open row by id" \
+  "T3" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "32a …saying what is open" "Step-4 rows open" "$GATE_ERR"
+expect_contains "32a …the detail gives the row its step and status" "step 4, pending" "$GATE_VERR"
+expect_contains "32a …and names the plan the cause would go on" \
+  "wave-01-test.plan.md" "$GATE_VERR"
+expect_contains "32a …and the line to write" "regression-cause:" "$GATE_VERR"
+# THE STEP-5 ROW IS NOT THE FLOOR'S BUSINESS. T12 is `pending` at step 5 — the runner row
+# this very dispatch would fill — and a wall that counted it would refuse every floor
+# forever, which is the failure mode this arm is one assertion away from.
+expect_absent "32a …and the step-5 runner row is NOT counted against the floor" \
+  "T12" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_status "32a …and the refused dispatch journalled no row" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- AC-5.1: an ACTIVE row counts too, and several are all named ----
+REPO=$(make_repo r32b yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T2 4 active)" \
+  "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-two")"
+expect_status "32b an ACTIVE step-4 row refuses the floor as well as a pending one" "2" "$GATE_ST"
+S32B_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')
+expect_contains "32b …and BOTH open rows are named on the one line" "T2" "$S32B_LINE"
+expect_contains "32b …the second one too" "T3" "$S32B_LINE"
+expect_absent "32b …and the landed row is not" "T1" "$S32B_LINE"
+
+# ---- AC-5.1: a FOLD-IN row at a later step counts (the plan's own vocabulary) ----
+#
+# A fold-in is work that lands AFTER the step it is folded into — wave-14 carried eleven
+# of them at steps 5 and 6, and every one of them changed the tree the floor had proved.
+# The predicate is the plan's own word (A-T5.1): a row whose `step` cell is 4, or whose
+# task text names a fold-in.
+REPO=$(make_repo r32c yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T20 6 pending 'Step-6 fold-in (review F1): re-spell the pin')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-foldin")"
+expect_status "32c an open FOLD-IN row at step 6 refuses the floor" "2" "$GATE_ST"
+expect_contains "32c …naming it" "T20" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+# THE CONTROL that keeps the row above from passing on the step cell: an ordinary step-6
+# row with the same status and no fold-in in its text is NOT counted.
+REPO=$(make_repo r32c2 yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T20 6 pending 'Step-6 six-axis review at the audited head')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-plain6")"
+expect_status "32c control: an ordinary open step-6 row does NOT refuse the floor" "0" "$GATE_ST"
+
+# ---- AC-5.2: every step-4 row landed or dropped, and the floor is admitted ----
+REPO=$(make_repo r32d yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T2 4 dropped)" \
+  "$(s32_row T3 4 landed)" \
+  "$(s32_row T12 5 pending 'Step-5 floor at the integration head')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-clear")"
+expect_status "32d the floor is ADMITTED once every step-4 row is landed or dropped" "0" "$GATE_ST"
+expect_absent "32d …with nothing from this arm on the wire" "Step-4 rows open" "$GATE_ERR"
+expect_status "32d …and it is journalled" \
+  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- AC-5.3: a recorded cause releases the floor with rows still open ----
+#
+# WRITTEN AS A PAIR (A-T5.5). The positive half alone is vacuous at a parent that has no
+# wall: exit 0 is what an absent arm gives too. Its discriminator is the second half —
+# the SAME ledger without the cause line, on a fresh repo, must refuse — so the block goes
+# red at a parent where the wall is missing and green only where the override is read.
+REPO=$(make_repo r32e yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "the merge changed the loader; the tree must be re-proved" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-caused")"
+expect_status "32e a recorded regression-cause: admits the floor with T3 still pending" "0" "$GATE_ST"
+expect_absent "32e …with nothing from this arm on the wire" "Step-4 rows open" "$GATE_ERR"
+REPO=$(make_repo r32e2 yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-uncaused")"
+expect_status "32e discriminator: the SAME ledger without the cause line is refused" "2" "$GATE_ST"
+# AND THE CAUSE IS READ WHERE S28 READS ITS OWN: under `## SDLC State`, nowhere else.
+REPO=$(make_repo r32e3 yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)"
+printf 'regression-cause: written after the table, outside the ledger\n' \
+  >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-outside")"
+expect_status "32e …a cause written below the Tasks table is outside ## SDLC State and does not count" \
+  "2" "$GATE_ST"
+
+# ---- AC-5.4: the arm is silent on everything that is not a floor ----
+REPO=$(make_repo r32f yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_NARROW_BRIEF" "w32-narrow")"
+expect_status "32f a brief that does not name tests/run.sh is untouched by this arm" "0" "$GATE_ST"
+expect_absent "32f …silently" "Step-4 rows open" "$GATE_ERR"
+
+# A PLAN WITH NO `## Tasks` TABLE is open and silent — which is every fixture above this
+# section, and the reason none of them changed when this wall landed.
+REPO=$(make_repo r32g yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-no-table")"
+expect_status "32g a bound plan with no ## Tasks table admits the floor" "0" "$GATE_ST"
+expect_absent "32g …silently" "Step-4 rows open" "$GATE_ERR"
+
+# NO BOUND PLAN AT ALL: nowhere to read a ledger and nowhere to write a cause.
+REPO=$(make_repo r32h yes)
+write_attestation "$REPO" "$SID_A"
+rm -rf "$REPO/.bionic/docs/plans"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-unbound")"
+expect_status "32h an unbound session admits the floor" "0" "$GATE_ST"
+expect_absent "32h …silently" "Step-4 rows open" "$GATE_ERR"
+
+# ---- AC-5.4: and the arm says so when it cannot answer (wave-14 AC-8.2's shape) ----
+REPO=$(make_repo r32i yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: review the wave.
+Expected duration: 20 minutes.' "w32-no-set")"
+expect_contains "32i a brief with no suite set leaves this arm unable to answer, and it says so" \
+  "not checked: floor-once, needs a suite set" "$GATE_REASON"
+
+# ---- AC-5.5: one Tasks parser, and it is the library's ----
+S32_HOOK="$GATE"
+expect_status "32j the hook reads the ledger through units_rows" "yes" \
+  "$([ "$(/usr/bin/grep -c 'units_rows' "$S32_HOOK")" -ge 1 ] && echo yes || echo no)"
+expect_status "32j …and declares units.sh in its own BIONIC_LIB_WANT" "yes" \
+  "$(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$S32_HOOK" | head -1 \
+     | tr ' ' '\n' | /usr/bin/grep -qx 'units.sh' && echo yes || echo no)"
+# NO SECOND TABLE PARSER. The matrix spelled this pin as "`split(` on `|` is zero", which
+# was written against a `grep -r payload/` that returns nothing at all (payload/hooks is a
+# SYMLINK and `grep -r` does not follow one — A-T5.4). The hook has carried exactly one
+# split-on-pipe since epic-16: `dp_roster_contracts` reading a roster-state LINE, which is
+# not a markdown table. So the pin is re-spelled (A-T5.3): the count stays at one, that one
+# is the roster reader, and nothing in this hook scans for a `## Tasks` heading.
+expect_eq "32j …and carries exactly one awk split on a pipe, the roster-line reader" \
+  "1" "$(/usr/bin/grep -cE 'split\([^)]*\|' "$S32_HOOK")"
+expect_contains "32j …which splits a roster LINE, not a markdown table" \
+  "split(line, parts" "$(/usr/bin/grep -hE 'split\([^)]*\|' "$S32_HOOK")"
+expect_eq "32j …and no arm of this hook scans for a ## Tasks heading of its own" \
+  "0" "$(/usr/bin/grep -cE '/\^#+ *Tasks/' "$S32_HOOK")"
 
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 
