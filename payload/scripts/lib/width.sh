@@ -56,7 +56,7 @@ BIONIC_LINE_WIDTH=100
 # added to a report and not to this list measures three columns too wide, and
 # the effect is a column that pads short, never a line that overflows.
 #
-# §, “, ” — ADDED AT bionic 1.8.2 (REQ-9, AC-9.1/AC-9.2; Chris's screenshot
+# §, “, ” (and × at T11) — ADDED AT bionic 1.8.2 (REQ-9, AC-9.1/AC-9.2; Chris's screenshot
 # 2026-09-16 "Content is still not being rendered properly"). All three are
 # TWO- or THREE-byte glyphs `card.sh`'s provenance and quoted-text cells
 # already carried, and none was in this list: a provenance cell with one `§`
@@ -73,6 +73,14 @@ _bionic_cols_into() {  # <string> — sets BIONIC_COLS; no subshell, for the loo
   s="${s//✓/.}"; s="${s//✗/.}"; s="${s//–/.}"; s="${s//—/.}"
   s="${s//≥/.}"; s="${s//…/.}"; s="${s//·/.}"
   s="${s//§/.}"; s="${s//“/.}"; s="${s//”/.}"
+  # × — ADDED AT bionic 1.8.2 T11 (REQ-10 fold-in, A-orch-17, from T10's
+  # A-T10.2). The multiplication sign is two bytes and one column, and it is not
+  # decoration: a provenance cell counts runs with it ("five reorders × 12 tool
+  # calls"), so the FIRST card `card.sh step1` renders from a real requirements
+  # artifact carries one. Outside the set it measured two, that row padded one
+  # column short, and its trailing columns landed left of every other row's —
+  # the same drift the three glyphs above closed, found by the same reproduction.
+  s="${s//×/.}"
   # THE ARROW AND THE BULLET, ADDED AT bionic 1.4.0 (spec AC-23). The arrow is
   # the most-printed non-ASCII glyph bionic has — it opens every FIX line and it
   # is the first character of the instruction `bionic_line` is asked to protect
