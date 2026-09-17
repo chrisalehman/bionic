@@ -121,6 +121,9 @@ case_is suite 'env nohup timeout 30 bash tests/run.sh'
 case_is suite "bash -c 'bash tests/run.sh'"
 case_is suite '/usr/local/bin/pytest tests/'
 
+# --- D8/REQ-6: setsid joins the suite wrappers (research row 6: was `none`) ---
+case_is suite 'setsid bash tests/run.sh'
+
 case_is build 'make'
 case_is build 'make widget'
 case_is build 'npm run build'
@@ -966,5 +969,46 @@ targets_in_are 'run.sh'          'bash tests/run.sh --serial'
 # --- the unscoped call is unchanged: no root, the legacy basename answer ---
 expect_eq "C8 with no root the answer is the bare basename, as before" \
   "probe2.test.sh" "$(targets_of 'bash /tmp/critic-probe/probe2.test.sh')"
+
+section "C9 — cmd_backgrounded: a shell-backgrounded suite is caught like a tool-backgrounded one (D8, REQ-6)"
+# research row 6: cmd_class already reads every one of these as suite-class; the gap is
+# that nothing asked whether the TEXT itself backgrounds it. cmd_backgrounded is the new,
+# single answer to that question — 0 (true) when the command backgrounds, 1 otherwise —
+# read positionally (a bare `&` control operator, never one folded into `&&` or a `2>&1`
+# redirect; or a `nohup`/`setsid` wrapper), the same discipline as every other reading in
+# this file.
+bg_of() {  # <command> -> "yes"/"no" per cmd_backgrounded's exit status
+  printf '%s' "$1" | bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    if cmd_backgrounded "$(cat)"; then echo yes; else echo no; fi
+  ' _ "$LIB" 2>&1
+}
+bg_is() {  # <expected: yes|no> <command> [label]
+  local want="$1" cmd="$2" got
+  got=$(bg_of "$cmd")
+  expect_eq "${3:-$want: $cmd}" "$want" "$got"
+}
+
+# --- the six shell-backgrounded forms (AC-6.1) ---
+bg_is yes 'bash tests/run.sh &'
+bg_is yes 'nohup bash tests/run.sh &'
+bg_is yes 'while :; do bash tests/run.sh; done &'
+bg_is yes '( bash tests/run.sh ) &'
+bg_is yes 'bash tests/run.sh > /tmp/x.log 2>&1 &'
+bg_is yes 'bash tests/run.sh & disown'
+
+# --- the wrapper form (AC-6.2): setsid alone, no trailing & at all ---
+bg_is yes 'setsid bash tests/run.sh'
+
+# --- foreground forms untouched (AC-6.3) ---
+bg_is no 'bash tests/run.sh'
+bg_is no 'bash tests/x.test.sh > /tmp/log 2>&1; echo rc=$?'
+bg_is no 'bash tests/run.sh && echo done'
+# a `&` INSIDE QUOTES is not a separator — it is an argument, or prose, never backgrounding
+bg_is no 'bash tests/run.sh --note "a & b"'
+bg_is no 'echo "sudo bash tests/run.sh &"'
+# `2>&1` alone, with no trailing bare `&`, backgrounds nothing
+bg_is no 'bash tests/run.sh 2>&1 | tee /tmp/evidence.log'
 
 finish

@@ -2705,6 +2705,48 @@ s21_backdate() {  # <file> <seconds ago>
   touch -t "$ts" "$1"
 }
 
+# ---------- the transcript the staleness half reads (REQ-1, AC-1.1/1.2) ----------
+#
+# THE STALENESS HALF IS AN IDLE-TIME PREDICATE NOW (ADR-028). A session cron fires only
+# while the session is idle, so a stamp past the fire window is a DEATH only when an idle
+# gap at least that long has passed since it with no tick in it; a stamp that went stale
+# under a long busy turn is an advisory and the dispatch proceeds. Every armed-but-dead
+# fixture below therefore carries a transcript with a real gap, and the busy fixture carries
+# one without. The suite's default transcript (`S5_LIVE_TRANSCRIPT`, fixed 2026-09-05
+# timestamps) predates every stamp this section backdates, so it reads as BUSY and is the
+# right default for every fixture here that is not about the staleness half at all.
+#
+# RELATIVE TO NOW, REBUILT AT EACH CALL: the gap has to fall after the stamp, and the stamp
+# is backdated by between 50 and 4000 seconds. Nothing here sleeps.
+s21_iso() {  # <seconds ago>
+  date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
+}
+
+s21_idle_tr() {  # -> path of a transcript whose last turn opened after a long idle gap
+  { printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
+      "$(s21_iso 10000)"
+    printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"carry on"}}\n' \
+      "$(s21_iso 1)"
+  } > "$SANDBOX/.s21-idle.jsonl"
+  printf '%s' "$SANDBOX/.s21-idle.jsonl"
+}
+
+s21_busy_tr() {  # -> path of a transcript holding one continuous 2500s turn
+  { printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"a long piece of work"}}\n' \
+      "$(s21_iso 2500)"
+    for _s21_s in 2400 2100 1800 1500 1200 900 600 300 120 30 5; do
+      printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
+        "$(s21_iso "$_s21_s")"
+    done
+  } > "$SANDBOX/.s21-busy.jsonl"
+  printf '%s' "$SANDBOX/.s21-busy.jsonl"
+}
+
+s21_stale_payload() {  # <sid> <repo> -> a dispatch payload carrying the idle transcript
+  mk_agent_payload "$1" "$2" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$(s21_idle_tr)"
+}
+
 # ---------- absent stamp: never armed ----------
 REPO=$(make_repo r21a yes)
 write_attestation "$REPO" "$SID_A"
@@ -2730,12 +2772,39 @@ expect_status "…and journals nothing: a refused dispatch is not a launch" "0" 
 # ---------- stale stamp: armed, then died ----------
 REPO=$(make_repo r21b yes)
 write_attestation "$REPO" "$SID_A"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1200s default
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # past the 1320s fire window
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "a STALE Patrol stamp refuses the dispatch" "2" "$GATE_ST"
 expect_contains "…and names the armed-but-dead state, not the never-armed one" \
   "stopped firing" "$GATE_ERR"
 expect_absent "…so the two arms cannot be confused in a transcript" "never armed" "$GATE_ERR"
+
+# ---------- stale stamp, busy session: an advisory, and the dispatch proceeds ----------
+#
+# AC-1.1, at the wall that blocks mid-turn by construction. The SAME 4000s stamp as r21b,
+# and the only thing that differs is the transcript: one continuous turn with no idle gap
+# in it, so the cron had no opportunity to fire and its silence proves nothing. This is the
+# 2026-09-15 field case — a dispatch refused because the orchestrator was working.
+REPO=$(make_repo r21b2 yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$(s21_busy_tr)")"
+expect_status "a stale stamp under a BUSY session lets the dispatch through" "0" "$GATE_ST"
+expect_absent "…and does not claim the Patrol stopped firing" "stopped firing" "$GATE_ERR"
+expect_contains "…but says the stamp is stale and why that is not a verdict" \
+  "busy" "$GATE_ERR"
+
+# ---------- stale stamp, unreadable idle time: an advisory naming the reason ----------
+#
+# AC-1.3 at this wall. The transcript path in the payload names a file that is not there;
+# a wall that cannot observe the thing it refuses on does not refuse.
+REPO=$(make_repo r21b3 yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$SANDBOX/.s21-absent.jsonl")"
+expect_status "a stale stamp whose idle time cannot be read lets the dispatch through" \
+  "0" "$GATE_ST"
+expect_contains "…naming the reason it could not measure" "no readable transcript" "$GATE_ERR"
 
 # ---------- fresh stamp: passes, silently ----------
 REPO=$(make_repo r21c yes)
@@ -2761,22 +2830,28 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "with NO wave active an unarmed Patrol is not this gate's business" "0" "$GATE_ST"
 expect_empty "…and the gate is silent, as it is for every other check outside a wave" "$GATE_ERR"
 
-# ---------- the threshold is 2x the poker-interval, and follows the config knob ----------
+# ---------- the threshold is ONE FIRE WINDOW, and follows the config knob ----------
+#
+# AMENDED at REQ-1 (T1). The threshold was 2x the poker-interval (120s for this fixture's
+# 1m); it is the FIRE WINDOW now — the interval plus the scheduler's jitter, a tenth of the
+# period, so 66s — and the two fixtures move with it. The assertion is the same one either
+# side of the boundary: inside it the stamp is not stale at all, past it the transcript
+# decides.
 REPO=$(make_repo r21f yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 1m\n' > "$REPO/.bionic/config.yaml"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100     # inside 2 x 60s
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 50      # inside the 66s fire window
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "a stamp inside 2x the CONFIGURED interval passes (100s of 120s)" "0" "$GATE_ST"
+expect_status "a stamp inside the CONFIGURED fire window passes (50s of 66s)" "0" "$GATE_ST"
 
 REPO=$(make_repo r21g yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 1m\n' > "$REPO/.bionic/config.yaml"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 200     # past 2 x 60s
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 200     # past the 66s fire window
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "…and one past it refuses, on the same fixture the default would have passed" \
   "2" "$GATE_ST"
-expect_contains "…naming the interval it measured against" "120s" "$GATE_VERR"
+expect_contains "…naming the fire window it measured against" "66s fire window" "$GATE_VERR"
 
 # ---------- a symlinked stamp is refused, never followed ----------
 REPO=$(make_repo r21h yes)
@@ -2827,8 +2902,8 @@ expect_contains "…the never-armed arm still fires" "never armed" "$GATE_VERR"
 REPO=$(make_repo r21k yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1200s default
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # past the 1320s default window
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "a stale stamp under an unreadable interval refuses at the DEFAULT threshold" \
   "2" "$GATE_ST"
 expect_contains "…naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
@@ -2868,10 +2943,14 @@ write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
 s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100   # fresh at 1200s, ancient at 10s
 S21_SAVED_GATE="$GATE"; GATE="$S21_TREE_HOOKS/dispatch-preflight.sh"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "r21l the fallback threshold moves with the POKER's constant, not the gate's" \
   "2" "$GATE_ST"
-expect_contains "…and measures against 2x the doctored default" "20s" "$GATE_VERR"
+# AMENDED at REQ-1 (T1): the threshold is the fire window, so the doctored 10s default is
+# measured against as 11s rather than as 2x10s. The fact under test is unchanged — the
+# number moves with the POKER's constant and not with one typed in the gate.
+expect_contains "…and measures against the doctored default's own fire window" \
+  "11s fire window" "$GATE_VERR"
 GATE="$S21_SAVED_GATE"
 
 # r21m — THE POKER ITSELF UNREACHABLE. `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/` is the
@@ -5036,8 +5115,18 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # §three-arms holds the criterion's own case — three faults, nothing unchecked, twelve —
 # where this arm holds the canonical brief. Widening either without moving a fault count is
 # the mistake to catch.
-expect_status "§combined …the wire is at most 13 lines (10 + 1 extra fault + 2 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 13 ] && echo 0 || echo 1)"
+#
+# RAISED 13 -> 14 (wave-15 T5, REQ-5, A-T5.2), and by the same formula. The floor-once wall
+# is a SECOND arm keyed on `run.sh` in the derived suite set, so a brief that produces no
+# set leaves two walls unable to answer rather than one, and AC-8.2's rule is that each of
+# them says so. The fault count did not move — the third `not checked:` line is a new wall
+# declaring itself, which is the growth this cap is meant to permit.
+expect_status "§combined …the wire is at most 14 lines (10 + 1 extra fault + 3 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 14 ] && echo 0 || echo 1)"
+# AND THE THIRD LINE IS THE NEW WALL'S, NAMED — a cap raised without saying which line
+# filled it is a widened tolerance, which is the mistake the comment above warns about.
+expect_contains "§combined …and the line that filled it is the floor-once wall's" \
+  "not checked: floor-once, needs a suite set" "$GATE_REASON"
 
 # EACH LABEL, MARKED BY WHETHER THIS BRIEF CARRIES IT — not by which wall fired. The
 # absent Files: and the absent Deliverable-waiver: lines earn ` <ADD>`; the present
@@ -5597,7 +5686,7 @@ expect_contains "§a3 …while still naming the one half the model owns" "CronCr
 REPO=$(make_repo ra3b yes)
 write_attestation "$REPO" "$SID_A"
 s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "§a3 the STALE arm is untouched by the A3 rewording" "2" "$GATE_ST"
 expect_contains "§a3 …still naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
 expect_contains "§a3 …and still offering the hand re-arm, which is A4's remedy" \
@@ -6138,6 +6227,343 @@ expect_regex "§bound-one-owner …and its wait ends on the constant itself, not
   '\[[[:space:]]*"\$SECONDS"[[:space:]]*-ge[[:space:]]*"\$IMPACT_BOUND_S"[[:space:]]*\]' "$DP_GATE_SRC"
 expect_no_regex "§bound-one-owner …leaving no tick budget behind to drift against it" \
   '^[[:space:]]*IMPACT_BOUND_TICKS=' "$DP_GATE_SRC"
+
+# ============================================================================
+section "S32: the floor-once wall — a second full floor waits for Step 4 (REQ-5, D7)"
+# ============================================================================
+#
+# THE RULE MADE MECHANICAL. `skills/canonical-sdlc/dispatch.md:12` has said for three
+# releases that the full tree belongs on one row per run, the Step-5 runner's. Nothing
+# enforced the half that matters most: a floor run WHILE Step-4 rows are still open
+# proves a tree that no longer exists by the time those rows land, and wave-14 paid for
+# it six times (seed row 5, Chris DevX item 1).
+#
+# THE SIBLING WALL IS NOT THIS ONE. S28 above counts full-tree rows on the ROSTER and
+# asks for one written cause per extra run; it says nothing about whether the work being
+# proved is finished. This wall reads the PLAN's `## Tasks` ledger and asks whether any
+# step-4 or fold-in row is still `pending` or `active`. Both can fire on one dispatch and
+# they pool into one refusal like every other pair of arms in this file.
+#
+# THE LEDGER IS READ THROUGH `units_rows`, THE ONE TASKS PARSER (AC-5.5). The static pins
+# at the end of this section are what hold that; a second table split in this hook is the
+# defect REQ-1e existed to remove and it would land back here first.
+#
+# fails-when: a run.sh brief is admitted with an open step-4 row and no recorded cause;
+# an all-landed ledger is refused; a recorded cause does not release the dispatch; a
+# non-floor brief, an unbound session or a plan with no `## Tasks` is touched by this arm.
+
+# s32_row <id> <step> <status> [task text] -> one `## Tasks` data row
+s32_row() {
+  printf '| %s | %s | build | %s | implementor | — | 30 | REQ-1 | payload/scripts/lib/widget.sh | — | %s |' \
+    "$1" "$2" "${4:-does the thing}" "$3"
+}
+
+# s32_plan <repo> <regression-cause text, or empty> <row>... — rewrite the fixture plan
+#
+# WRITTEN WHOLE, NOT APPENDED. `## Tasks` is a section heading, so it CLOSES
+# `## SDLC State`: a cause line appended to the end of a plan that carries a Tasks table
+# is outside the ledger and neither this wall nor S28's counts it (S28f pins that reading
+# from the other side). The cause therefore has to be placed inside the state section
+# when the file is built, which is what this helper is for.
+s32_plan() {
+  local repo="$1" cause="$2"; shift 2
+  local plan="$repo/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+  local row
+  {
+    printf -- '---\n'
+    printf 'governing-skill: canonical-sdlc\n'
+    printf 'canonical_sdlc_version: 14\n'
+    printf 'intent: build\n'
+    printf 'rigor: audited\n'
+    printf 'scale: wave\n'
+    printf -- '---\n\n'
+    printf '# Test wave plan\n\n'
+    printf '## SDLC State\n\n'
+    printf 'integration-branch: main\n'
+    printf 'current: 4\n\n'
+    printf -- '- Step 4: tasks in flight\n'
+    [ -z "$cause" ] || printf 'regression-cause: %s\n' "$cause"
+    printf '\n## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
+    printf -- '|---|---|---|---|---|---|---|---|---|---|---|\n'
+    for row in "$@"; do printf '%s\n' "$row"; done
+  } > "$plan"
+}
+
+S32_FLOOR_BRIEF='Your task: run the tests floor.
+Expected artifact: .bionic/docs/record/w32-floor.log
+Expected duration: ~40 minutes.
+Suites: tests/run.sh'
+
+S32_NARROW_BRIEF='Your task: fix the widget.
+Expected artifact: .bionic/docs/record/w32-widget.md
+Expected duration: ~15 minutes.
+Suites: tests/widget.test.sh'
+
+# ---- AC-5.1: an open step-4 row refuses the floor, and the refusal names it ----
+REPO=$(make_repo r32a yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)" \
+  "$(s32_row T12 5 pending 'Step-5 floor at the integration head')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-one")"
+expect_status "32a a full-tree brief is REFUSED while a step-4 row is pending" "2" "$GATE_ST"
+expect_contains "32a …and the one line names the open row by id" \
+  "T3" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "32a …saying what is open" "Step-4 rows open" "$GATE_ERR"
+expect_contains "32a …the detail gives the row its step and status" "step 4, pending" "$GATE_VERR"
+expect_contains "32a …and names the plan the cause would go on" \
+  "wave-01-test.plan.md" "$GATE_VERR"
+expect_contains "32a …and the line to write" "regression-cause:" "$GATE_VERR"
+# THE STEP-5 ROW IS NOT THE FLOOR'S BUSINESS. T12 is `pending` at step 5 — the runner row
+# this very dispatch would fill — and a wall that counted it would refuse every floor
+# forever, which is the failure mode this arm is one assertion away from.
+expect_absent "32a …and the step-5 runner row is NOT counted against the floor" \
+  "T12" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_status "32a …and the refused dispatch journalled no row" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- AC-5.1: an ACTIVE row counts too, and several are all named ----
+REPO=$(make_repo r32b yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T2 4 active)" \
+  "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-two")"
+expect_status "32b an ACTIVE step-4 row refuses the floor as well as a pending one" "2" "$GATE_ST"
+S32B_LINE=$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')
+expect_contains "32b …and BOTH open rows are named on the one line" "T2" "$S32B_LINE"
+expect_contains "32b …the second one too" "T3" "$S32B_LINE"
+expect_absent "32b …and the landed row is not" "T1" "$S32B_LINE"
+
+# ---- AC-5.1: a FOLD-IN row at a later step counts (the plan's own vocabulary) ----
+#
+# A fold-in is work that lands AFTER the step it is folded into — wave-14 carried eleven
+# of them at steps 5 and 6, and every one of them changed the tree the floor had proved.
+# The predicate is the plan's own word (A-T5.1): a row whose `step` cell is 4, or whose
+# task text names a fold-in.
+REPO=$(make_repo r32c yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T20 6 pending 'Step-6 fold-in (review F1): re-spell the pin')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-foldin")"
+expect_status "32c an open FOLD-IN row at step 6 refuses the floor" "2" "$GATE_ST"
+expect_contains "32c …naming it" "T20" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+# THE CONTROL that keeps the row above from passing on the step cell: an ordinary step-6
+# row with the same status and no fold-in in its text is NOT counted.
+REPO=$(make_repo r32c2 yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T20 6 pending 'Step-6 six-axis review at the audited head')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-plain6")"
+expect_status "32c control: an ordinary open step-6 row does NOT refuse the floor" "0" "$GATE_ST"
+
+# ---- AC-5.2: every step-4 row landed or dropped, and the floor is admitted ----
+REPO=$(make_repo r32d yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T2 4 dropped)" \
+  "$(s32_row T3 4 landed)" \
+  "$(s32_row T12 5 pending 'Step-5 floor at the integration head')"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-clear")"
+expect_status "32d the floor is ADMITTED once every step-4 row is landed or dropped" "0" "$GATE_ST"
+expect_absent "32d …with nothing from this arm on the wire" "Step-4 rows open" "$GATE_ERR"
+expect_status "32d …and it is journalled" \
+  "1" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- AC-5.3: a recorded cause releases the floor with rows still open ----
+#
+# WRITTEN AS A PAIR (A-T5.5). The positive half alone is vacuous at a parent that has no
+# wall: exit 0 is what an absent arm gives too. Its discriminator is the second half —
+# the SAME ledger without the cause line, on a fresh repo, must refuse — so the block goes
+# red at a parent where the wall is missing and green only where the override is read.
+REPO=$(make_repo r32e yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "the merge changed the loader; the tree must be re-proved" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-caused")"
+expect_status "32e a recorded regression-cause: admits the floor with T3 still pending" "0" "$GATE_ST"
+expect_absent "32e …with nothing from this arm on the wire" "Step-4 rows open" "$GATE_ERR"
+REPO=$(make_repo r32e2 yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-uncaused")"
+expect_status "32e discriminator: the SAME ledger without the cause line is refused" "2" "$GATE_ST"
+# AND THE CAUSE IS READ WHERE S28 READS ITS OWN: under `## SDLC State`, nowhere else.
+REPO=$(make_repo r32e3 yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)"
+printf 'regression-cause: written after the table, outside the ledger\n' \
+  >> "$REPO/.bionic/docs/plans/epic-99-test/wave-01-test.plan.md"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-floor-outside")"
+expect_status "32e …a cause written below the Tasks table is outside ## SDLC State and does not count" \
+  "2" "$GATE_ST"
+
+# ---- AC-5.4: the arm is silent on everything that is not a floor ----
+REPO=$(make_repo r32f yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" \
+  "$(s32_row T1 4 landed)" \
+  "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_NARROW_BRIEF" "w32-narrow")"
+expect_status "32f a brief that does not name tests/run.sh is untouched by this arm" "0" "$GATE_ST"
+expect_absent "32f …silently" "Step-4 rows open" "$GATE_ERR"
+
+# A PLAN WITH NO `## Tasks` TABLE is open and silent — which is every fixture above this
+# section, and the reason none of them changed when this wall landed.
+REPO=$(make_repo r32g yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-no-table")"
+expect_status "32g a bound plan with no ## Tasks table admits the floor" "0" "$GATE_ST"
+expect_absent "32g …silently" "Step-4 rows open" "$GATE_ERR"
+
+# NO BOUND PLAN AT ALL: nowhere to read a ledger and nowhere to write a cause.
+REPO=$(make_repo r32h yes)
+write_attestation "$REPO" "$SID_A"
+rm -rf "$REPO/.bionic/docs/plans"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S32_FLOOR_BRIEF" "w32-unbound")"
+expect_status "32h an unbound session admits the floor" "0" "$GATE_ST"
+expect_absent "32h …silently" "Step-4 rows open" "$GATE_ERR"
+
+# ---- AC-5.4: and the arm says so when it cannot answer (wave-14 AC-8.2's shape) ----
+REPO=$(make_repo r32i yes)
+write_attestation "$REPO" "$SID_A"
+s32_plan "$REPO" "" "$(s32_row T3 4 pending)"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: review the wave.
+Expected duration: 20 minutes.' "w32-no-set")"
+expect_contains "32i a brief with no suite set leaves this arm unable to answer, and it says so" \
+  "not checked: floor-once, needs a suite set" "$GATE_REASON"
+
+# ---- AC-5.5: one Tasks parser, and it is the library's ----
+S32_HOOK="$GATE"
+expect_status "32j the hook reads the ledger through units_rows" "yes" \
+  "$([ "$(/usr/bin/grep -c 'units_rows' "$S32_HOOK")" -ge 1 ] && echo yes || echo no)"
+expect_status "32j …and declares units.sh in its own BIONIC_LIB_WANT" "yes" \
+  "$(sed -n 's/^BIONIC_LIB_WANT="\(.*\)"$/\1/p' "$S32_HOOK" | head -1 \
+     | tr ' ' '\n' | /usr/bin/grep -qx 'units.sh' && echo yes || echo no)"
+# NO SECOND TABLE PARSER. The matrix spelled this pin as "`split(` on `|` is zero", which
+# was written against a `grep -r payload/` that returns nothing at all (payload/hooks is a
+# SYMLINK and `grep -r` does not follow one — A-T5.4). The hook has carried exactly one
+# split-on-pipe since epic-16: `dp_roster_contracts` reading a roster-state LINE, which is
+# not a markdown table. So the pin is re-spelled (A-T5.3): the count stays at one, that one
+# is the roster reader, and nothing in this hook scans for a `## Tasks` heading.
+expect_eq "32j …and carries exactly one awk split on a pipe, the roster-line reader" \
+  "1" "$(/usr/bin/grep -cE 'split\([^)]*\|' "$S32_HOOK")"
+expect_contains "32j …which splits a roster LINE, not a markdown table" \
+  "split(line, parts" "$(/usr/bin/grep -hE 'split\([^)]*\|' "$S32_HOOK")"
+expect_eq "32j …and no arm of this hook scans for a ## Tasks heading of its own" \
+  "0" "$(/usr/bin/grep -cE '/\^#+ *Tasks/' "$S32_HOOK")"
+
+# ============================================================================
+section "S33: an auditor brief may not waive Suites: (REQ-4 AC-4.3/AC-4.4, D6)"
+# ============================================================================
+#
+# THE INCIDENT THIS ARM PREVENTS. `Suites: none` is a legitimate waiver for a role
+# that never runs a suite at all — a researcher reads, a test-runner reports — and
+# both pass through this wall unchanged. An auditor's Step-5 job is to FALSIFY the
+# matrix's evidence, which for a hermetic-tier row means RE-RUNNING the suite the
+# row names; an auditor brief that waives every suite has nothing to re-run.
+#
+# ROLE MATCHED WHOLE, ON subagent_type — never on the brief's prose (handoff rule).
+# Both spellings this repo's briefs actually carry are covered: the fully-qualified
+# `bionic:auditor` and the bare `auditor`.
+#
+# fails-when: an auditor brief with Suites: none is admitted; a researcher or
+# test-runner brief with Suites: none is refused by THIS arm; an auditor brief that
+# names real suites is refused by this arm.
+
+S33_WAIVED_BRIEF='Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w33-audit.md
+Expected duration: ~30 minutes.
+Suites: none'
+
+S33_DECLARED_BRIEF='Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w33-audit2.md
+Expected duration: ~30 minutes.
+Suites: tests/widget.test.sh, tests/gadget.test.sh'
+
+# ---- AC-4.3: bionic:auditor + Suites: none is refused, fix names the suites ----
+REPO=$(make_repo r33a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_WAIVED_BRIEF" "w33-auditor" \
+                             "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "33a a bionic:auditor brief with Suites: none is REFUSED" "2" "$GATE_ST"
+expect_contains "33a …the one line names the fault" \
+  "auditor" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "33a …and the fix names what to declare" \
+  "name the suites" "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
+expect_status "33a …and no roster row was journalled for the refused dispatch" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+# ---- AC-4.3: the bare role word ("auditor", no bionic: prefix) is caught too ----
+REPO=$(make_repo r33b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_WAIVED_BRIEF" "w33-auditor-bare" \
+                             "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "auditor")"
+expect_status "33b a bare 'auditor' subagent_type with Suites: none is REFUSED too" \
+  "2" "$GATE_ST"
+
+# ---- AC-4.3: the CONTROL — an auditor brief that names real suites passes ----
+REPO=$(make_repo r33c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_DECLARED_BRIEF" "w33-auditor-ok" \
+                             "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "33c control: an auditor brief that DECLARES suites PASSES" "0" "$GATE_ST"
+expect_absent "33c …with no refusal printed" "BLOCKED" "$GATE_ERR"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "33c …and the row carries the declared set" \
+  "widget.test.sh gadget.test.sh" "$(roster_field "$ROW" suites_allowed)"
+
+# ---- AC-4.4: the two other reading roles are UNCHANGED by this arm ----
+for _role in bionic:researcher bionic:test-runner; do
+  REPO=$(make_repo "r33d-${_role##*:}" yes)
+  write_attestation "$REPO" "$SID_A"
+  run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_WAIVED_BRIEF" "w33-reader" \
+                               "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "$_role")"
+  expect_status "33d a ${_role} brief with Suites: none is UNCHANGED — still admitted" \
+    "0" "$GATE_ST"
+done
+
+# ---- AC-4.1 end-to-end (T4): a not-yet-existing tests/*.test.sh under Files: gets
+# its self edge on the roster row, driven through the REAL tests/lib/impact.sh (the
+# tool T4 changed) rather than the S27 stub — this row proves the two tasks meet.
+# BIONIC_IMPACT_CACHE_DIR is forced empty so the real tree's own impact-cache under
+# .bionic/tmp is never written to by this fixture run (impact.sh's own contract for
+# turning the cache off).
+s33_real_impact() {  # <repo> — point .bionic/config.yaml at the real impact.sh
+  mkdir -p "$1/.bionic"
+  printf 'impact-command: env BIONIC_IMPACT_CACHE_DIR= bash %s/tests/lib/impact.sh\n' \
+    "${BIONIC_SCRIPTS_DIR}" > "$1/.bionic/config.yaml"
+}
+
+S33_NEWSUITE_BRIEF='Your task: add a brand-new suite.
+Expected artifact: .bionic/docs/record/w33-newsuite.md
+Expected duration: ~20 minutes.
+Files: tests/brand-new.test.sh'
+
+REPO=$(make_repo r33e yes)
+write_attestation "$REPO" "$SID_A"
+s33_real_impact "$REPO"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_NEWSUITE_BRIEF" "w33-newsuite")"
+expect_status "33e a Files: tests/brand-new.test.sh (absent) brief is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_contains "33e …and the roster row's suites_allowed carries the new suite's self edge" \
+  "brand-new.test.sh" "$(roster_field "$ROW" suites_allowed)"
+expect_status "33e …the derived set is exactly the real tree's answer (self + 3 dir-refs)" \
+  "brand-new.test.sh cross-gate-agreement.test.sh docs-pins.test.sh seam-resolution.test.sh" \
+  "$(roster_field "$ROW" suites_allowed)"
+expect_status "33e …and the row says the set was DERIVED, not declared" \
+  "derived" "$(roster_field "$ROW" suites_source)"
 
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 

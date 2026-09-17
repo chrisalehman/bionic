@@ -134,9 +134,79 @@ mtime_of() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
 
 # ---------- driving the hook ----------
 
+# ---------- the transcript the verdict reads (REQ-1, AC-1.1/1.2/1.3) ----------
+#
+# THE VERDICT IS AN IDLE-TIME PREDICATE NOW, not a wall-clock threshold: a session cron
+# fires only while the session is idle, so a stamp older than one fire window proves
+# nothing on its own and the hook goes on to read the transcript for an idle gap. Every
+# fixture that expects a NOTICE therefore has to carry a transcript with a real gap in it,
+# and the four other shapes below are the fixtures for the busy, tick and unreadable
+# verdicts. `transcript_path` used to be the literal /dev/null, which is now the
+# `unreadable` case and would have made every blocking assertion in this file advisory.
+#
+# RELATIVE TO NOW, REBUILT PER DRIVE, for the reason `backdate` exists: the gap has to fall
+# AFTER the reference instant, and the reference instant is a stamp this suite backdates by
+# between 50 and 4000 seconds. A file written once at suite start would drift out from
+# under the later groups. Nothing here sleeps.
+PR_TRANSCRIPT="$(mktemp)"
+PR_TRANSCRIPT_MODE=idle
+
+pr_iso() {  # <seconds ago> -> ISO-8601 Z
+  date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
+}
+
+pr_assistant() {  # <seconds ago>
+  printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
+    "$(pr_iso "$1")"
+}
+
+pr_user() {  # <seconds ago> <text>
+  printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"%s"}}\n' \
+    "$(pr_iso "$1")" "$2"
+}
+
+pr_build_transcript() {
+  case "$PR_TRANSCRIPT_MODE" in
+    # ONE IDLE GAP, OPEN AT THE FAR END. The assistant record is older than any stamp this
+    # suite backdates and the user record is a second ago, so the gap the predicate measures
+    # is (stamp age - 1s) whatever the fixture chose — decisively past every fire window
+    # driven here, and past none that is not.
+    idle)   { pr_assistant 10000; pr_user 1 "carry on"; } > "$PR_TRANSCRIPT" ;;
+    # ONE CONTINUOUS 2500s TURN: a prompt, then assistant records all the way to now. There
+    # is no user record after the prompt, so no idle gap exists to measure and the session
+    # was demonstrably working the whole time.
+    busy)   { pr_user 2500 "a long piece of work"
+              for _pr_s in 2400 2100 1800 1500 1200 900 600 300 120 30 5; do
+                pr_assistant "$_pr_s"
+              done ; } > "$PR_TRANSCRIPT" ;;
+    # THE TICK ITSELF, inside what would otherwise be an idle gap: the Patrol fired, so the
+    # reference instant moves to the tick and there is nothing left to be dead about.
+    # AND THE TICK'S OWN DUTY IS DISCHARGED IN IT. `stop_patrol_duties` — the OTHER Stop
+    # verdict in this library — refuses a stop that follows a tick with no task-list
+    # refresh in it, so a fixture carrying a bare tick would be blocked by that gate and
+    # this one's silence would be unobservable. A TaskList after the tick is what a healthy
+    # session actually does.
+    tick)   { pr_assistant 10000
+              pr_user 2 "bionic-patrol session=11111111 — patrol tick"
+              printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"tool_use","name":"TaskList","input":{}}]}}\n' \
+                "$(pr_iso 1)"
+            } > "$PR_TRANSCRIPT" ;;
+    # NO USER RECORD IN THE WINDOW — the first of AC-1.3's three unreadable shapes.
+    nouser) { pr_assistant 900; pr_assistant 60; } > "$PR_TRANSCRIPT" ;;
+    # A RECORD THAT CANNOT BE DATED — the third.
+    notime) printf '{"type":"user","message":{"role":"user","content":"when was this"}}\n' \
+              > "$PR_TRANSCRIPT" ;;
+    # NO TRANSCRIPT AT ALL — the second.
+    none)   rm -f "$PR_TRANSCRIPT" ;;
+  esac
+}
+
 stdin_for() {  # <cwd> [session] [event] [stop_hook_active]
+  pr_build_transcript
   jq -nc --arg c "$1" --arg s "${2:-$SID}" --arg e "${3:-Stop}" --argjson a "${4:-false}" \
-    '{session_id:$s,transcript_path:"/dev/null",cwd:$c,
+    --arg t "$PR_TRANSCRIPT" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,
       hook_event_name:$e,stop_hook_active:$a}'
 }
 
@@ -210,9 +280,14 @@ fire "$D"; expect_quiet "2: a FRESH stamp is silent"
 D=$(make_env)
 fire "$D"; expect_quiet "3: an ABSENT stamp is silent — never armed is not death"
 
-# 4: the boundary is 2x the interval, and it follows the project's own knob.
-D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 100
-fire "$D"; expect_quiet "4: 100s old against a 1m interval (limit 120s) is silent"
+# 4: the boundary is ONE FIRE WINDOW — the interval plus the scheduler's jitter, a tenth
+# of the period — and it follows the project's own knob. AMENDED at REQ-1 (T1): it read
+# "100s old against a 1m interval (limit 120s)" while the limit was 2x the interval. The
+# limit is 66s now, so 100s is past it and this fixture would reach the transcript; 50s is
+# the same assertion — inside the window, silent without reading anything else — against
+# the threshold that now exists.
+D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 50
+fire "$D"; expect_quiet "4: 50s old against a 1m interval (66s fire window) is silent"
 
 D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 200
 fire "$D"; expect_block "5: 200s old against a 1m interval (limit 120s) blocks"
@@ -476,7 +551,10 @@ if [[ "$R22_REASON" =~ [0-9]+s\ old ]]; then
 else
   no "22: the notice states no age" "$R22_REASON"
 fi
-expect_reason_names "22b: …against the limit this project's interval sets" "120s limit"
+# AMENDED at REQ-1 (T1): the notice measured against a "120s limit", 2x the interval. It
+# measures against the FIRE WINDOW now — the interval plus a tenth for the scheduler's
+# jitter, 66s for this fixture's 1m — and the number it quotes is that.
+expect_reason_names "22b: …against the fire window this project's interval sets" "66s fire window"
 expect_reason_names "22c: …naming that interval as its source" "60s poker-interval"
 
 # Why the operator is seeing this at all: the cron table is in process memory and
@@ -672,10 +750,13 @@ fire "$D"; expect_quiet "34: …and one stale window later there is still no not
 D=$(make_env 1m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 600
 fire "$D"
 expect_block "35: the stale fixture blocks, so there is a notice to read"
-expect_reason_names "36: step 2 is conditional on step 1 in the text itself" \
-  "ONLY IF step 1 succeeded"
+# AMENDED at REQ-1 (T1): the re-arm is three steps now, because the notice LOOKS before it
+# creates (CronList is step 1, AC-1.2). The conditional and the refusal direction are
+# unchanged in substance — they moved one step down with the half they guard.
+expect_reason_names "36: step 3 is conditional on step 2 in the text itself" \
+  "ONLY IF step 2 succeeded"
 expect_reason_names "37: …and a refused CronCreate is told to stop, not to arm" \
-  "do NOT run step 2"
+  "do NOT run step 3"
 expect_reason_names "38: …and the deliberate-stop path is named, not left to be guessed" \
   "session-poker.sh disarm"
 
@@ -719,7 +800,12 @@ FINDING_TEXT="a second live Patrol stamp for session"
 
 # 40: TWO fresh stamps — this session's own, and another's — is a finding naming
 # the other session's first 8 characters.
-D=$(make_env); write_stamp "$D" "$SID"; write_stamp "$D" "$OTHER_SID"
+# A 1m INTERVAL, NOT THE 1s THE FIRST GROUPS USE (amended at REQ-1, T1). "Live" for a
+# rival stamp is now "stamped inside one fire window" rather than "inside 2x the interval",
+# and one fire window off a 1s interval is one second — a race with the machine for a stamp
+# this fixture wrote a moment ago. 66s is the same assertion with the clock taken out of it,
+# the way Group 3 already does it for its own fresh side.
+D=$(make_env 1m); write_stamp "$D" "$SID"; write_stamp "$D" "$OTHER_SID"
 fire_stderr "$D"
 case "$HOOK_ERR" in
   *"patrol-revive: $FINDING_TEXT ${OTHER_SID:0:8}"*"one clock per run"*"delete the stray job and stamp"*)
@@ -728,7 +814,7 @@ case "$HOOK_ERR" in
 esac
 
 # 41: ONE stamp (this session's own alone) — silent on this arm.
-D=$(make_env); write_stamp "$D" "$SID"
+D=$(make_env 1m); write_stamp "$D" "$SID"
 fire_stderr "$D"
 case "$HOOK_ERR" in
   *"$FINDING_TEXT"*) no "41: a lone stamp wrongly produced the second-stamp finding" "$HOOK_ERR" ;;
@@ -737,7 +823,7 @@ esac
 
 # 42: the other stamp is STALE, not fresh — a dead predecessor is not "a second
 # LIVE Patrol stamp"; this arm speaks only about a live duplicate clock.
-D=$(make_env); write_stamp "$D" "$SID"; write_stamp "$D" "$OTHER_SID"
+D=$(make_env 1m); write_stamp "$D" "$SID"; write_stamp "$D" "$OTHER_SID"
 backdate "$(stamp_path "$D" "$OTHER_SID")" 600
 fire_stderr "$D"
 case "$HOOK_ERR" in
@@ -747,8 +833,8 @@ esac
 
 # 43: a symlinked second stamp is not a stamp, same posture as this session's own
 # (never followed — a hostile repo can close this arm and never open one).
-D=$(make_env); write_stamp "$D" "$SID"
-OTHERD=$(make_env); write_stamp "$OTHERD" "$OTHER_SID"
+D=$(make_env 1m); write_stamp "$D" "$SID"
+OTHERD=$(make_env 1m); write_stamp "$OTHERD" "$OTHER_SID"
 ln -s "$(stamp_path "$OTHERD" "$OTHER_SID")" "$(stamp_path "$D" "$OTHER_SID")"
 fire_stderr "$D"
 case "$HOOK_ERR" in
@@ -796,8 +882,15 @@ rm -f "$E/.bionic/tmp/engaged-$SID.state" "$E_DECOY"
 # switch, and pinning it would make this assertion fail on a slow machine and nowhere else.
 : > "$E/.bionic/tmp/engaged-$SID.state"
 fire "$E"
-E_FINDING_N=$(printf '%s' "$E_FINDING" | sed -E 's/stamp is [0-9]+s old/stamp is Ns old/')
-HOOK_OUT_N=$(printf '%s' "$HOOK_OUT" | sed -E 's/stamp is [0-9]+s old/stamp is Ns old/')
+# TWO CLOCKS NOW, NOT ONE (amended at REQ-1, T1). The notice quotes the idle gap it
+# measured as well as the stamp's age, and the gap moves with the same second the age does
+# — the fixture's transcript is rebuilt relative to `now` at each drive. Both are
+# normalised out for the reason the paragraph above gives for the first: a digit that
+# changes because a second elapsed says nothing about the engagement switch this case is
+# driving, and pinning it would fail on a slow machine and nowhere else.
+E_NORM='s/stamp is [0-9]+s old/stamp is Ns old/; s/idle for [0-9]+s/idle for Ns/'
+E_FINDING_N=$(printf '%s' "$E_FINDING" | sed -E "$E_NORM")
+HOOK_OUT_N=$(printf '%s' "$HOOK_OUT" | sed -E "$E_NORM")
 E_FINDING="$E_FINDING_N"; HOOK_OUT="$HOOK_OUT_N"
 if [ "$HOOK_OUT" = "$E_FINDING" ]; then
   ok "47: re-engaged, the finding is byte-identical"
@@ -958,5 +1051,121 @@ expect_absent "E1.5 the paragraph the model reads is NOT on the user stream" \
   "blocks once per turn" "$HOOK_ERR_USER"
 expect_contains "E1.5 …and the model still gets it whole, on the JSON wire" \
   "blocks once per turn" "$(reason_of)"
+
+section "Group 13: the verdict is idle time, not wall time (REQ-1, AC-1.1/1.2/1.3)"
+#
+# THE DEFECT THIS GROUP PINS. A session cron fires only while the session is IDLE, so a
+# stamp older than the threshold says one of two things and the old arithmetic could not
+# tell them apart: the job is gone, or the orchestrator has been working. On 2026-09-15
+# this notice blocked a healthy session on a 2459s stamp against a 2400s limit while its
+# orchestrator was simply busy. The verdict reads the transcript now — the idle gaps
+# between an activity record and the next turn-starting user record — and only a gap at
+# least one fire window long, with no tick in it, is a death (ADR-028).
+
+# ---------- AC-1.1: stale, and every second of it accounted for by busy turns ----------
+#
+# The field fixture, to the number: a 2459s stamp against a 1200s interval (a 1320s fire
+# window) and a transcript holding one continuous 2500s turn. Blocked before this wave.
+D=$(make_env 20m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 2459
+PR_TRANSCRIPT_MODE=busy
+fire "$D"
+expect_quiet "51: a stamp past the fire window whose staleness is all busy turns does not block"
+fire_stderr "$D"
+case "$HOOK_ERR" in
+  *"busy"*) ok "52: …and the advisory says the session was busy" ;;
+  *)        no "52: the stale-but-busy advisory does not name the state" "$HOOK_ERR" ;;
+esac
+
+# THE DISCRIMINATION, on the SAME stamp and the same fixture: change the transcript alone
+# and the same drive blocks. Without this, 51 is a silence anyone could get by breaking the
+# hook.
+PR_TRANSCRIPT_MODE=idle
+fire "$D"
+expect_block "52b: …and that same stale stamp WITH an idle gap in the transcript blocks"
+
+# ---------- AC-1.2: an idle gap of a full fire window, and no tick in it ----------
+D=$(make_env 20m); write_stamp "$D" "$SID"; backdate "$(stamp_path "$D" "$SID")" 1500
+PR_TRANSCRIPT_MODE=idle
+fire "$D"
+expect_block "53: an idle gap of a full fire window since the stamp, with no tick, blocks"
+
+# THE FIX LOOKS BEFORE IT CREATES. A second CronCreate over a job that is still listed is
+# two clocks on one run — the condition Group 8's finding exists to report. The listing is
+# free and the creation is refusable, so the order is a safety property, not a style.
+expect_reason_names "54: …and the fix names CronList" "CronList"
+R54="$(reason_of)"
+R54_LIST="${R54%%CronList*}"
+R54_CREATE="${R54%%CronCreate*}"
+if [ "${#R54_LIST}" -lt "${#R54_CREATE}" ]; then
+  ok "55: …with CronList BEFORE CronCreate in the text a model acts on"
+else
+  no "55: the fix orders CronCreate before CronList" "$R54"
+fi
+
+# THE TICK IS THE PROOF OF LIFE. A `bionic-patrol session=` prompt after the stamp is the
+# cron firing, whatever the stamp's own mtime says, so the reference instant moves to it and
+# there is no gap left to be dead about.
+PR_TRANSCRIPT_MODE=tick
+fire "$D"
+expect_quiet "56: a tick prompt since the stamp is the Patrol firing — no notice"
+
+# ---------- AC-1.3: idle time that cannot be read is advisory, with the reason ----------
+#
+# Three shapes, one direction: a wall that cannot observe the thing it refuses on does not
+# refuse. Each says WHICH of the three it hit, so the advisory is a finding rather than a
+# shrug.
+PR_TRANSCRIPT_MODE=none
+fire "$D"; expect_quiet "57: no transcript at that path — advisory, never a block"
+fire_stderr "$D"
+case "$HOOK_ERR" in
+  *"no readable transcript"*) ok "58: …naming the reason it could not read idle time" ;;
+  *) no "58: the unreadable advisory does not name the missing transcript" "$HOOK_ERR" ;;
+esac
+
+PR_TRANSCRIPT_MODE=nouser
+fire "$D"; expect_quiet "59: no user record inside the scan window — advisory, never a block"
+fire_stderr "$D"
+case "$HOOK_ERR" in
+  *"no user record"*) ok "60: …naming the empty window as the reason" ;;
+  *) no "60: the unreadable advisory does not name the empty window" "$HOOK_ERR" ;;
+esac
+
+PR_TRANSCRIPT_MODE=notime
+fire "$D"; expect_quiet "61: a record that cannot be dated — advisory, never a block"
+fire_stderr "$D"
+case "$HOOK_ERR" in
+  *"no readable timestamp"*) ok "62: …naming the undatable record as the reason" ;;
+  *) no "62: the unreadable advisory does not name the undatable record" "$HOOK_ERR" ;;
+esac
+
+# AND THE PAIRED POSITIVE for all three: the same fixture, the same stamp, a readable
+# transcript with a gap in it — and the notice is back. Three silences with one control.
+PR_TRANSCRIPT_MODE=idle
+fire "$D"; expect_block "63: …and with a readable transcript that same fixture blocks again"
+
+# ---------- the helper both blocking readers share ----------
+#
+# ONE PREDICATE, TWO CALLERS (spec §3, ownership table). The dispatch wall's staleness half
+# is the other blocking site and it is driven in tests/dispatch-preflight.test.sh S21; what
+# is asserted here is that the predicate is a function of lib/patrol.sh and not a second
+# copy grown inside the stop library. tests/cross-gate-agreement.test.sh §Patrol-verdict
+# pins the pair.
+PR_LIB_DIR="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+[ -d "$PR_LIB_DIR" ] || PR_LIB_DIR="${BIONIC_SCRIPTS_DIR}/scripts/lib"
+if grep -q '^patrol_verdict()' "$PR_LIB_DIR/patrol.sh"; then
+  ok "64: patrol_verdict is defined in lib/patrol.sh"
+else
+  no "64: lib/patrol.sh does not define patrol_verdict"
+fi
+if grep -q 'patrol_verdict' "$HOOK_SRC"; then
+  ok "65: …and the stop library calls it rather than carrying its own arithmetic"
+else
+  no "65: the stop library does not call patrol_verdict"
+fi
+if grep -q 'INTERVAL \* 2' "$HOOK_SRC"; then
+  no "66: the literal 2x multiplier survives in the stop library (AC-1.4)"
+else
+  ok "66: …and the literal 2x multiplier is gone from the stop library (AC-1.4)"
+fi
 
 finish

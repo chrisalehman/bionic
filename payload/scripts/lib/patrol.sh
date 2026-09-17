@@ -156,9 +156,10 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE UNREACHABLE THROUGH THESE FUNCTIONS,
 # and that is a property of the shape rather than a list anyone maintains:
-# `context-spend.state`, `farm-out.state` and `stop-check.state` carry no session
-# id in their names, so no id derived here can address one. A non-session file
-# added later is safe on arrival for the same reason.
+# `context-spend.state` and `farm-out.state` carry no session id in their names,
+# so no id derived here can address one. A non-session file added later is safe on
+# arrival for the same reason. (`stop-check.state` was a third of these until
+# epic-23 wave-15 deleted the observation record itself — ADR-028.)
 PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
@@ -484,6 +485,219 @@ patrol_stamp_state() {  # <repo-root> <sid> -> state=…|age=…|limit=…|inter
   fi
   printf 'state=%s|age=%s|limit=%s|interval=%s|source=%s|path=%s' \
     "$state" "$age" "$limit" "$secs" "$src" "$f"
+}
+
+# ─── THE PATROL VERDICT: idle time, never wall time (epic-23 wave-15 REQ-1, ADR-028) ──
+#
+# WHAT WENT WRONG WITH THE STAMP'S AGE. A session cron fires only while the session is
+# IDLE. So a stamp older than any threshold says one of two things and the arithmetic
+# could not tell them apart: the job is gone, or the orchestrator has been working. On
+# 2026-09-15 the death notice blocked a healthy session on a 2459s stamp against a 2400s
+# limit because its orchestrator was busy — the wall asserted a condition it had not
+# observed, from a proxy that could not distinguish the guarded case from an innocent one.
+#
+# WHAT IS OBSERVABLE INSTEAD. A cron leaves a trace the hook can read: the tick prompt in
+# the session transcript, and the transcript dates every record. So the question "could
+# this job have fired and did not" is answerable — find an idle stretch long enough for
+# one firing, and look for the firing in it.
+#
+# THE THREE VERDICTS, and only one of them blocks:
+#   dead        an idle gap at least one fire window long has passed since the reference
+#               instant with no tick in it
+#   busy        every idle gap since the reference instant is shorter than one fire window
+#   unreadable  no transcript, no user record inside the scan window, or a record that
+#               cannot be dated — the wall cannot observe, so it does not refuse
+#
+# WHY A GAP ENDS AT A TURN-STARTING USER RECORD AND STARTS AT ANY RECORD AT ALL. The
+# design says "the span between an assistant record and the next non-sidechain user
+# record". A turn's tool results are `type: "user"` records carrying no text, and a
+# thirty-minute foreground suite run is bracketed by an assistant tool_use and the tool
+# result it produces with nothing in between — so counting every user record as the end of
+# a gap would read that one command as half an hour of idleness, which is the same false
+# positive one layer down. The gap therefore CLOSES only on a user record that carries
+# text (a turn a human or a cron started) and OPENS at the last record of any kind, tool
+# results included. Both rules move the verdict toward `busy`, which is the fail-open
+# direction this wall owes.
+#
+# THE SCAN WINDOW IS BOUNDED BY LINES, NOT BY A CLOCK, and deliberately carries no
+# `detect_bounded` wrapper: `_patrol_scan` above needs one because it reads a transcript
+# from byte zero, where this reads a fixed 2000-line tail — the same window
+# `stop_patrol_duties` takes, and for the same reason (a long wave transcript reaches tens
+# of megabytes). Bounded work does not need a timeout to be bounded. Where the window is
+# too short to hold one fire window, the verdict is `unreadable` and advisory.
+PATROL_VERDICT_SCAN_LINES=2000
+
+# ONE STREAMING PASS, emitting one record per interesting line: a kind and an ISO instant.
+# MAIN THREAD ONLY, by `_patrol_scan`'s own two rules above — `isSidechain` says a
+# subagent's turn, and an entry carrying an explicit agent-id key is somebody's agent turn
+# and not this thread's. A verdict about the orchestrator's clock read off a worker's turns
+# would be a different session's idleness.
+#   T  a tick prompt — a user record whose text begins `bionic-patrol session=`
+#   U  a turn-starting user record — a user record carrying text
+#   A  anything else on the main thread: assistant records, tool results
+_patrol_verdict_jq='
+  . as $line
+  | (($line | fromjson?) // null) as $r
+  | if $r == null then empty
+    elif (($r.isSidechain // false) == true) then empty
+    elif (((($r.agentId // $r.agent_id) // "") | tostring) != "") then empty
+    elif (($r.type != "user") and ($r.type != "assistant")) then empty
+    else
+      (($r.timestamp // "") | tostring) as $ts
+      | ( if $r.type != "user" then ""
+          elif ($r.message.content | type) == "string" then ($r.message.content // "")
+          else ([$r.message.content[]? | select(.type == "text") | .text] | join(" "))
+          end ) as $t
+      | ( if (($t // "") | startswith("bionic-patrol session=")) then "T"
+          elif (($t // "") != "") then "U"
+          else "A" end ) as $k
+      | $k + "\t" + $ts
+    end
+'
+
+# THE DATES ARE CONVERTED IN awk, NOT BY `date`. A 2000-line window can hold hundreds of
+# records and a fork per record is a per-turn cost nobody would accept; the civil-days
+# arithmetic below is Howard Hinnant's, exact for every date this will ever see, and needs
+# no interpreter beyond POSIX awk. NO INTERVAL EXPRESSIONS IN A REGEX either (`[0-9]{4}`),
+# because the awk macOS ships does not carry them — the shape is checked position by
+# position instead.
+#
+# AN UNDATABLE RECORD POISONS THE WHOLE ANSWER, on purpose: a verdict computed over a
+# window it could only partly read is a guess wearing an observation's clothes, and this
+# file's whole subject is not doing that. It is also the fail-open direction — `unreadable`
+# never blocks — and the advisory names it, so the degradation is visible rather than
+# silent.
+_patrol_verdict_awk='
+function alldig(s,   i, c) {
+  if (length(s) == 0) return 0
+  for (i = 1; i <= length(s); i++) { c = substr(s, i, 1); if (c < "0" || c > "9") return 0 }
+  return 1
+}
+function days_from_civil(y, m, d,   era, yoe, doy, doe) {
+  if (m <= 2) y = y - 1
+  era = int((y >= 0 ? y : y - 399) / 400)
+  yoe = y - era * 400
+  doy = int((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1
+  doe = yoe * 365 + int(yoe / 4) - int(yoe / 100) + doy
+  return era * 146097 + doe - 719468
+}
+function iso2epoch(s,   y, mo, d, h, mi, se, tail) {
+  if (length(s) < 19) return -1
+  if (substr(s, 5, 1) != "-" || substr(s, 8, 1) != "-") return -1
+  if (substr(s, 11, 1) != "T" || substr(s, 14, 1) != ":" || substr(s, 17, 1) != ":") return -1
+  if (!alldig(substr(s, 1, 4)) || !alldig(substr(s, 6, 2)) || !alldig(substr(s, 9, 2))) return -1
+  if (!alldig(substr(s, 12, 2)) || !alldig(substr(s, 15, 2)) || !alldig(substr(s, 18, 2))) return -1
+  tail = substr(s, 20, 1)
+  if (tail != "" && tail != "Z" && tail != ".") return -1
+  y = substr(s, 1, 4) + 0; mo = substr(s, 6, 2) + 0; d = substr(s, 9, 2) + 0
+  h = substr(s, 12, 2) + 0; mi = substr(s, 15, 2) + 0; se = substr(s, 18, 2) + 0
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59 || se > 60) return -1
+  return days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + se
+}
+{
+  e = iso2epoch($2)
+  if (e < 0) { bad = 1; next }
+  n++; kind[n] = $1; ep[n] = e
+  if ($1 == "U" || $1 == "T") users++
+}
+END {
+  if (bad) {
+    print "unreadable|0|0|a record in the scanned window carries no readable timestamp"
+    exit
+  }
+  if (n == 0 || users == 0) {
+    print "unreadable|0|0|no user record in the scanned window"
+    exit
+  }
+  ref = ref0
+  for (i = 1; i <= n; i++) if (kind[i] == "T" && ep[i] > ref) ref = ep[i]
+  haslast = 0; last = 0; gap = 0
+  for (i = 1; i <= n; i++) {
+    if (kind[i] == "U" && haslast) {
+      start = (last > ref ? last : ref)
+      if (ep[i] > start && ep[i] - start > gap) gap = ep[i] - start
+    }
+    last = ep[i]; haslast = 1
+  }
+  if (gap >= window) print "dead|" ref "|" gap "|"
+  else print "busy|" ref "|" gap "|"
+}
+'
+
+# ONE FIRE WINDOW — the longest idle span during which a session cron is GUARANTEED one
+# opportunity to fire: the interval plus the scheduler's jitter, which the CronCreate
+# contract bounds at a tenth of the period (spec assumption 2). This is the only place in
+# the payload where that arithmetic is written; `patrol_verdict` reads it, and so does
+# every caller that needs to know whether a stamp is stale enough to be worth a transcript
+# scan. A reader that recomputed it would be the literal `INTERVAL * 2` back under another
+# name, which is the defect wave-15 removed.
+patrol_fire_window() {  # <interval seconds> -> seconds, or empty on a bad interval
+  local iv="${1:-}"
+  case "$iv" in ''|*[!0-9]*) printf ''; return 1 ;; esac
+  [ "$iv" -gt 0 ] || { printf ''; return 1; }
+  printf '%s' "$(( iv + iv / 10 ))"
+}
+
+_patrol_verdict_line() {  # <verdict> <ref> <gap> <window> <reason>
+  printf 'verdict=%s|ref=%s|gap=%s|window=%s|reason=%s' \
+    "${1:-unreadable}" "${2:-0}" "${3:-0}" "${4:-0}" "$(_patrol_clean "${5:-}" 200)"
+}
+
+# THE PREDICATE ITSELF. Prints one line and RETURNS 0 whatever it found: "I cannot tell"
+# is an answer here, not an error, and a caller that had to distinguish a failed call from
+# an `unreadable` verdict would have two ways to spell one outcome.
+patrol_verdict() {  # <stamp-file> <transcript-path> <interval-s> -> verdict=…|ref=…|gap=…|window=…|reason=…
+  local stamp="${1:-}" tr="${2:-}" iv="${3:-}"
+  local window mt out verdict ref gap reason
+
+  window="$(patrol_fire_window "$iv")" || window=""
+  if [ -z "$window" ]; then
+    _patrol_verdict_line unreadable 0 0 0 "the Patrol interval is not a readable number"
+    return 0
+  fi
+
+  # THE REFERENCE INSTANT starts at the stamp's own mtime — the verdict never looks before
+  # the last thing that proved the Patrol alive. A symlink is not a stamp, the posture
+  # every other reader of .bionic/tmp takes.
+  mt=""
+  if [ -n "$stamp" ] && [ ! -L "$stamp" ] && [ -f "$stamp" ]; then
+    mt="$(_patrol_mtime "$stamp")"
+    case "$mt" in ''|*[!0-9]*) mt="" ;; esac
+  fi
+  if [ -z "$mt" ]; then
+    _patrol_verdict_line unreadable 0 0 "$window" "the Patrol stamp's mtime could not be read"
+    return 0
+  fi
+  ref="$mt"
+
+  if [ -z "$tr" ] || [ -L "$tr" ] || [ ! -f "$tr" ]; then
+    _patrol_verdict_line unreadable "$ref" 0 "$window" "no readable transcript at that path"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    _patrol_verdict_line unreadable "$ref" 0 "$window" "jq is not on PATH, so no record can be read"
+    return 0
+  fi
+
+  out="$( tail -n "$PATROL_VERDICT_SCAN_LINES" "$tr" 2>/dev/null \
+            | jq -Rr "$_patrol_verdict_jq" 2>/dev/null \
+            | awk -F'\t' -v ref0="$ref" -v window="$window" "$_patrol_verdict_awk" 2>/dev/null )" \
+    || out=""
+
+  verdict=""; gap=0; reason=""
+  IFS='|' read -r verdict ref gap reason <<EOF
+$out
+EOF
+  case "$verdict" in
+    dead|busy) : ;;
+    unreadable) : ;;
+    *) _patrol_verdict_line unreadable "$mt" 0 "$window" "the transcript could not be read back"
+       return 0 ;;
+  esac
+  case "$ref" in ''|*[!0-9]*) ref="$mt" ;; esac
+  case "$gap" in ''|*[!0-9]*) gap=0 ;; esac
+  _patrol_verdict_line "$verdict" "$ref" "$gap" "$window" "$reason"
+  return 0
 }
 
 # THE ROSTER, COUNTED THE WAY IT IS WRITTEN. The file is append-only and a row

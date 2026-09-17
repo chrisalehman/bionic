@@ -70,6 +70,12 @@
 #                                that `make widget && bash tests/run.sh` still routes to
 #                                the test-runner, which is how the regex classifier that
 #                                came before it ordered its arms.
+#   cmd_backgrounded   <cmd>  -> exit 0 when the TEXT backgrounds it (D8, REQ-6): a bare
+#                                `&` control operator outside quotes, never one folded
+#                                into `&&` or a redirect, or a `nohup`/`setsid` wrapper.
+#                                The `run_in_background` TOOL FLAG is a different fact,
+#                                read by the caller (lib/walls.sh ARM 1) and OR'd with
+#                                this one — a command can background itself either way.
 #
 # [WALL: tests/cmd-class.test.sh]
 
@@ -144,7 +150,13 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           if (nx == "&") { arr[++k] = cur; cur = ""; i++; continue }
           # a redirection, not a separator: 2>&1, >&2, &>log
           if (nx == ">" || pv == ">" || pv == "<") { cur = cur c; continue }
-          arr[++k] = cur; cur = ""; continue
+          # A BARE & IS THE ONLY ONE THAT BACKGROUNDS (D8, REQ-6). `&&` above closes a
+          # segment too, but synchronously — nothing after it is detached. SEPKIND is a
+          # GLOBAL, deliberately not a local: cmd_backgrounded (mode="bg", below) is the
+          # only reader, and it wants to know, for the segment just closed, which control
+          # operator closed it — a question no caller of class_seg ever asks, so it costs
+          # them nothing.
+          arr[++k] = cur; cur = ""; SEPKIND[k] = "&"; continue
         }
         if (c == "|") {
           nx = substr(s, i + 1, 1)
@@ -215,7 +227,15 @@ _cmd_class_awk() {  # <mode> ; command on stdin
           s = trim(consume_value(s, RLENGTH + 1))
         } else if (match(s, /^[({})!][ \t]*/)) {
           s = trim(substr(s, RLENGTH + 1))
-        } else if (match(s, /^(then|else|elif|do|done|fi|if|while|until|env|nohup|command|exec)([ \t]+|$)/)) {
+        } else if (match(s, /^(then|else|elif|do|done|fi|if|while|until|env|command|exec)([ \t]+|$)/)) {
+          s = trim(substr(s, RLENGTH + 1))
+        } else if (match(s, /^(nohup|setsid)([ \t]+|$)/)) {
+          # A WRAPPER, NOT JUST AN OPENER (D8, REQ-6). Stripped the same way env/exec are —
+          # setsid NOW JOINS nohup so `setsid bash tests/run.sh` reaches the bash/sh arm
+          # instead of falling through to none with argv[0]=setsid — but the strip also
+          # SETS A FLAG, because cmd_backgrounded (below) needs to know a wrapper was here
+          # even though classify_argv never sees the word again. One reading, two answers.
+          SAW_WRAPPER = 1
           s = trim(substr(s, RLENGTH + 1))
         } else if (match(s, /^time([ \t]+-p)?([ \t]+|$)/)) {
           s = trim(substr(s, RLENGTH + 1))
@@ -396,6 +416,26 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         printf "%s", strip_leading(unwrap_runner(hd1))
         exit
       }
+      # mode=bg: cmd_backgrounded (D8, REQ-6) — "1" when the TEXT backgrounds the
+      # command, "0" otherwise. TOP-LEVEL ONLY, no class_seg/unwrap_runner recursion:
+      # every AC-6 form types the wrapper or the trailing `&` where segments() already
+      # sees it, and going deeper (through an sh -c layer, say) would answer a question
+      # nobody asked yet — this predicate reads backgrounding, not suite-ness, and
+      # `cmd_class` already owns the "is this a suite at all" half.
+      if (mode == "bg") {
+        k = segments(out, bgseg)
+        bg = 0
+        for (i = 1; i <= k; i++) {
+          if (SEPKIND[i] == "&") bg = 1
+          t = trim(bgseg[i])
+          if (t == "") continue
+          SAW_WRAPPER = 0
+          strip_leading(t)
+          if (SAW_WRAPPER) bg = 1
+        }
+        printf "%s", (bg ? "1" : "0")
+        exit
+      }
       k = segments(out, seg)
       CD_SEEN = 0
       for (i = 1; i <= k; i++) {
@@ -447,6 +487,16 @@ cmd_strip_heredocs() {  # <command> -> the command with every heredoc body remov
 
 cmd_unwrap_head() {  # <command> -> the command reduced to what argv[0] reads
   printf '%s' "${1-}" | _cmd_class_awk head
+}
+
+cmd_backgrounded() {  # <command> -> 0 when the TEXT backgrounds it, 1 otherwise (D8, REQ-6)
+  # A BARE `&` control operator outside quotes and not folded into `&&` or a redirect
+  # (`2>&1`, `&>log`), OR a `nohup`/`setsid` wrapper — READ, never string-matched, by the
+  # same segmentation and strip_leading this file uses for everything else. This is the
+  # half `.tool_input.run_in_background` cannot see: the CLI only sets that flag for its
+  # own `run_in_background: true` parameter, never for a command that backgrounds itself
+  # inside the shell. `lib/walls.sh` ARM 1 ORs the two together.
+  [ "$(printf '%s' "${1-}" | _cmd_class_awk bg)" = "1" ]
 }
 
 cmd_class_lines() {  # <command> -> "<class>\t<segment>" per non-empty segment

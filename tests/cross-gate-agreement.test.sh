@@ -77,6 +77,11 @@ PARTY_ER="${W1R_PARTY_ER:-$BIONIC_HOOKS_DIR/execution-recorder.sh}"
 
 PROBE="$BIONIC_HOOKS_DIR/preflight-probe.sh"
 OBSERVE="$BIONIC_HOOKS_DIR/stop-check.sh"
+# THE OBSERVATION'S OWN LIBRARY (epic-23 wave-15, REQ-2; ADR-028). The resolution, the file
+# facts and the classification moved out of the verb and out of hooks/stop-guard.sh into one
+# sourced file, so the copies this suite used to hold to each other are one definition — and
+# the comparisons below point at it rather than at whichever carrier they were written for.
+OBSERVE_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/observe.sh"
 SWEEPER="$BIONIC_HOOKS_DIR/session-sweeper.sh"
 # The landing gate (epic-16 wave-01) is a fifth party and an overridable one for
 # the same reason the four above are: §J drives a MUTATED COPY of it to prove the
@@ -1135,19 +1140,26 @@ expect_eq "start gate: a foreign session is refused" "2" "$ST"
 # Both sessions get a row so that the roster is not what differs between the two
 # stops below: the ONLY thing that differs is the session value carried by the
 # record and the payload, which is what this section is about.
+# THE ARTIFACT THE AGREEMENT RIDES ON CHANGED (epic-23 wave-15, REQ-2). It used to be the
+# observation record: the recorder stamped `session=` into it and the gate compared that
+# against its own payload. The record is gone — the gate observes its target directly — and
+# the state this family still keys by session is the ROSTER, written by the recorder's
+# confirmation arm and read by the gate for the agent id. Same fact, same two parties, the
+# artifact that survives.
 cg_roster_row "$IREPO" "$SID_A" "worker" "aworker-1111111111111111"
-cg_roster_row "$IREPO" "${SID_A%?}0" "worker" "aworker-1111111111111111"
-run_pair "$IREPO" "$ITR" "$SID_A" worker
-SGSTATE="$IREPO/.bionic/tmp/stop-check.state"
-expect_eq "the recorder wrote an observation record" "yes" "$([ -f "$SGSTATE" ] && echo yes || echo no)"
-expect_contains "the recorder keys the record with the same session value" \
-  "session=$SID_A" "$(cat "$SGSTATE")"
+SGROSTER="$IREPO/.bionic/tmp/roster-$SID_A.state"
+expect_eq "the writer keyed its roster by this session" "yes" \
+  "$([ -f "$SGROSTER" ] && echo yes || echo no)"
+expect_contains "…and the rows in it carry the same session value" \
+  "session=$SID_A" "$(cat "$SGROSTER")"
+# The target has gone quiet, so the only thing left to decide the stop is whether the gate
+# found this session's roster — which is exactly what this section is about.
+touch -t 202601010000 "$ISUB/agent-aworker-1111111111111111.jsonl" 2>/dev/null
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "worker" | bash "$PARTY_SG" 2>&1); ST=$?
-expect_eq "stop gate: the same session's observation discharges the stop" "0" "$ST"
+expect_eq "stop gate: the session whose roster carries the row is answered" "0" "$ST"
 
-# Re-observe (the first record was consumed by the permitted stop, D-2), then
-# prove a one-character-different session cannot spend it.
-run_pair "$IREPO" "$ITR" "$SID_A" worker
+# …and a one-character-different session reads a roster that does not exist, so it has no id
+# for the name and refuses.
 OUT=$(mk_stop_payload "${SID_A%?}0" "$ITR" "$IREPO" "worker" | bash "$PARTY_SG" 2>&1); ST=$?
 expect_eq "stop gate: a one-character-different session is refused (exact compare)" "2" "$ST"
 
@@ -1199,8 +1211,24 @@ plant() {  # <subagents-dir> <agent-id> <name> [repo, default $RREPO]
     > "$1/agent-$2.meta.json"
   printf '{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}\n' \
     > "$1/agent-$2.jsonl"
+  # THE PLANTED AGENT IS QUIET (epic-23 wave-15, REQ-2). Since the stop gate takes its own
+  # look, a log written a moment ago makes every target in this battery ALIVE and every gate
+  # answer a refusal about liveness — which is not what any case here is asking. Aged, the
+  # gate's answer is about RESOLUTION, which is the agreement this section exists for.
+  touch -t 202601010000 "$1/agent-$2.jsonl"
   cg_live "${1%/subagents}.jsonl" "$3"
   roster_identify "${4:-$RREPO}" "$SID_A" "$3" "$2"
+}
+
+# THE OTHER DIRECTION, for the sections whose precondition is a refusal (epic-23 wave-15,
+# REQ-2). `plant` leaves a target quiet so that a gate answer is about resolution; a section
+# asking what DISCHARGES a stop needs the stop to be refused without the discharge, and since
+# the gate looks for itself that means a target that is visibly working.
+wake() {  # <subagents-dir> <agent-id>
+  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"still here"}]}}\n' \
+    >> "$1/agent-$2.jsonl"
+  touch "$1/agent-$2.jsonl"
+  return 0
 }
 
 # The three questions, each asked of the REAL party.
@@ -1220,16 +1248,18 @@ q_observation() {  # <typed> -> resolved|ambiguous|unresolved
     *) echo "other" ;;
   esac
 }
-q_recorder() {  # <typed> -> recorded|nothing
-  rm -f "$RREPO/.bionic/tmp/stop-check.state"
+# THE SECOND PARTY IS THE PRODUCER'S OWN OUTPUT NOW (epic-23 wave-15, REQ-2). It used to be
+# the record hooks/execution-recorder.sh wrote from that output; with the record gone, what
+# the machine line still has to agree with the gate about is WHICH AGENT was resolved, and
+# the line is where that answer is published for any reader at all.
+q_producer() {  # <typed> -> printed|nothing
   run_pair "$RREPO" "$RTR" "$SID_A" "$1"
-  if grep -q '^v1|' "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null; then
-    echo recorded
-  else
-    echo nothing
-  fi
+  case "$PAIR_OUT" in
+    *"stop-check-observation/v1|"*) echo printed ;;
+    *) echo nothing ;;
+  esac
 }
-q_gate() {  # <typed> -> permitted|refused   (asked AFTER q_recorder, on its state)
+q_gate() {  # <typed> -> permitted|refused   (the gate's own look, taken in its own process)
   mk_stop_payload "$SID_A" "$RTR" "$RREPO" "$1" | bash "$PARTY_SG" >/dev/null 2>&1
   [ "$?" -eq 0 ] && echo permitted || echo refused
 }
@@ -1241,8 +1271,8 @@ plant "$RPROJ/$SID_A/subagents" "asolo-1111111111111111" "solo"
 # holds this case fixed on the RESOLUTION question the three parties are answering.
 cg_roster_row "$RREPO" "$SID_A" "solo" "asolo-1111111111111111"
 expect_eq "C1 observation resolves a uniquely-named agent" "resolved" "$(q_observation solo)"
-expect_eq "C1 recorder records the same agent" "recorded" "$(q_recorder solo)"
-expect_eq "C1 gate discharges the stop on that record" "permitted" "$(q_gate solo)"
+expect_eq "C1 the producer publishes an evidence tier for it" "printed" "$(q_producer solo)"
+expect_eq "C1 gate resolves the same agent and permits the stop" "permitted" "$(q_gate solo)"
 
 # --- case 2: TWO LIVE TEAMMATES answering to one name — which is what "the same name in two
 # sessions of this project" became at S6, because the count comes from the harness's answer
@@ -1349,11 +1379,15 @@ g_observation() {  # <args…> -> the agent id the OBSERVATION resolved, or "ref
   if [ "$st" -ne 0 ] && printf '%s' "$out" | grep -qF 'Usage:'; then echo refused; return; fi
   printf '%s' "$out" | grep -E '^Resolved:' | grep -oE 'a[a-z0-9-]*-[0-9a-f]{16}' | head -1
 }
-g_recorder() {  # <args…> -> the agent id the RECORDER wrote, or "nothing"
-  rm -f "$RREPO/.bionic/tmp/stop-check.state"
+# THE MACHINE LINE IS WHAT ANY MACHINE READS (epic-23 wave-15, REQ-2). This used to read the
+# record hooks/execution-recorder.sh wrote from that line; with the record gone the line is
+# the whole of the published answer, and the property C6 is about — that the target the
+# operator was SHOWN and the target a machine takes away are the same one — is a property of
+# the line itself.
+g_published() {  # <args…> -> the agent id the MACHINE LINE names, or "nothing"
   run_pair "$RREPO" "$RTR" "$SID_A" "$@"
   local rec
-  rec=$(grep '^v1|' "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null \
+  rec=$(printf '%s\n' "$PAIR_OUT" | grep '^stop-check-observation/v1|' \
     | tr '|' '\n' | grep '^target=' | cut -d= -f2 | head -1)
   [ -n "$rec" ] && echo "$rec" || echo nothing
 }
@@ -1363,9 +1397,9 @@ g_recorder() {  # <args…> -> the agent id the RECORDER wrote, or "nothing"
 # it been written for the trailing form only.
 expect_eq "C6 trailing form — the observation resolves the typed target" \
   "aworker-7777777777777777" "$(g_observation worker report.md --progress "$GPROG")"
-expect_eq "C6 trailing form — the recorder records the SAME agent from the same line" \
+expect_eq "C6 trailing form — the machine line publishes the SAME agent" \
   "aworker-7777777777777777" \
-  "$(g_recorder worker report.md --progress "$GPROG")"
+  "$(g_published worker report.md --progress "$GPROG")"
 
 # The leading form, which is what diverged. Both halves refuse together — the
 # producer with a usage error, the recorder because a usage error prints no
@@ -1406,22 +1440,26 @@ for form in "worker --unknown-flag" "--progress" "ghost" "worker@" ; do
     :
   else
     # shellcheck disable=SC2086
-    expect_eq "C6 CLOSED — an evidence tier IS recorded: '$form'" \
-      "aworker-7777777777777777" "$(g_recorder $form)"
+    expect_eq "C6 CLOSED — an evidence tier IS published: '$form'" \
+      "aworker-7777777777777777" "$(g_published $form)"
   fi
 done
 
 # The derived FILE FACTS agree too: what the observation shows the reader as the
 # working log's size is what the recorder writes down as the activity level. Two
 # computations of one truth, previously untested together (D2).
+# THE TWO RENDERINGS ARE THE PROSE AND THE LINE (epic-23 wave-15, REQ-2). The consumer half
+# of this claim used to be the record; both halves come out of one `observe_agent` call now,
+# which is what makes the property structural rather than a comparison two parsers have to
+# keep passing.
 plant "$RPROJ/$SID_A/subagents" "afacts-5555555555555555" "facts"
 OBS_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" facts 2>&1 )
 OBS_SIZE=$(printf '%s' "$OBS_OUT" | grep -E '^  size:' | grep -oE '[0-9]+' | head -1)
-q_recorder facts >/dev/null
-REC_SIZE=$(grep -F 'target=afacts-5555555555555555' "$RREPO/.bionic/tmp/stop-check.state" \
+REC_SIZE=$(printf '%s\n' "$OBS_OUT" | grep '^stop-check-observation/v1|' \
   | tr '|' '\n' | grep '^size=' | cut -d= -f2)
-expect_eq "the size the observation PRINTS is the size the recorder STORES" \
+expect_eq "the size the observation PRINTS is the size its machine line CARRIES" \
   "$OBS_SIZE" "$REC_SIZE"
+expect_nonempty "…and that size is a real reading, not two empties compared" "$OBS_SIZE"
 
 # ============================================================
 section "D — cross-script security regressions (AC-8, TDD §8)"
@@ -1471,10 +1509,11 @@ mk_stop_payload "$SID_A" "$STR" "$SREPO" "$SECRET" | bash "$PARTY_SG" >/dev/null
 
 LEAKS=$(grep -rlF "$SECRET" "$SREPO" "$SANDBOX/home" 2>/dev/null | grep -c . | tr -d ' ')
 
-# The recorder DOES record the typed target — that is its contract — so the
-# check above must not be passing merely because nothing was written at all.
-expect_contains "…and the state file the sweep covered is genuinely populated" \
-  "target=" "$(cat "$SREPO/.bionic/tmp/stop-check.state" 2>/dev/null)"
+# The sweep must not be passing merely because nothing was written at all. The artifact this
+# family writes is the ROSTER (the observation record went with epic-23 wave-15, REQ-2), and
+# the fixture seeded it above — so the grep that found no secret was reading a populated tree.
+expect_contains "…and the state the sweep covered is genuinely populated" \
+  "name=worker" "$(cat "$SREPO/.bionic/tmp/roster-$SID_A.state" 2>/dev/null)"
 
 # Temp-name unpredictability, all four scripts (AC-8). Static pins first: the
 # A2 defect was a literal `"${X}.tmp.$$"`.
@@ -1576,14 +1615,18 @@ E_OUT=$( cd "$RREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" work
 E_MLINE=$(printf '%s\n' "$E_OUT" | grep '^stop-check-observation/')
 expect_contains "the machine line carries classification=ours" "classification=ours" "$E_MLINE"
 
-mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh worker" "$E_OUT" \
-  | bash "$PARTY_ER" >/dev/null 2>&1
-E_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
-expect_contains "the recorded observation agrees: classification=ours" \
-  "classification=ours" "$E_STATE"
-expect_contains "the recorded observation carries deliverable_source=none (no CLI arg, no roster deliverable)" \
-  "deliverable_source=none" "$E_STATE"
-expect_contains "the recorded observation carries progress_source=none" "progress_source=none" "$E_STATE"
+# THE CONSUMER IS THE GATE, NOT A RECORD (epic-23 wave-15, REQ-2). There is no second parser
+# left to diverge: the same `observe_agent` call produces the line the operator reads and the
+# facts the gate decides on. What is still worth pinning is that the line carries the three
+# fields — a reader outside this repo may take them — and that the gate, asked about the same
+# target in its own process, reaches the same contract.
+expect_contains "the machine line carries deliverable_source=none (no CLI arg, no roster deliverable)" \
+  "deliverable_source=none" "$E_MLINE"
+expect_contains "the machine line carries progress_source=none" "progress_source=none" "$E_MLINE"
+E_GATE=$(mk_stop_payload "$SID_A" "$RTR" "$RREPO" "worker" \
+  | env BIONIC_WALL_VERBOSE=1 bash "$PARTY_SG" 2>&1 >/dev/null)
+expect_contains "…and the gate's own look reaches the same agent" \
+  "aworker-7777777777777777" "$E_GATE"
 
 # --- an UNROSTERED target under this session's OWN directory: OURS, because the
 # metadata's own filing is what ownership reads (task 4/9). Before that fix this
@@ -1595,11 +1638,12 @@ E3_MLINE=$(printf '%s\n' "$E3_OUT" | grep '^stop-check-observation/')
 expect_contains "an unrostered target under this session's own directory classifies OURS" \
   "|classification=ours|" "$E3_MLINE"
 
-mk_bash_post "$SID_A" "$RTR" "$RREPO" "bash ~/.claude/hooks/stop-check.sh loner" "$E3_OUT" \
-  | bash "$PARTY_ER" >/dev/null 2>&1
-E3_STATE=$(cat "$RREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
-expect_contains "the recorder forwards that classification into the record" \
-  "|classification=ours|" "$E3_STATE"
+# …and the gate, which never sees that line, answers about the same agent — the agreement
+# that used to be "the recorder forwards it", now made by construction.
+E3_GATE=$(mk_stop_payload "$SID_A" "$RTR" "$RREPO" "loner" \
+  | env BIONIC_WALL_VERBOSE=1 bash "$PARTY_SG" 2>&1 >/dev/null)
+expect_contains "the gate's own look reaches the same agent" \
+  "aloner-9999999999999999" "$E3_GATE"
 
 # --- and the not-ours direction, on the shape that really produced it: a target filed under
 # ANOTHER session's directory, carrying a name this session's roster also carries on an
@@ -1678,18 +1722,15 @@ expect_contains "…and takes the contracted progress path from it" \
 expect_contains "…recording where the contract came from" "progress_source=roster" "$F_MLINE"
 expect_contains "…and the state it found the artifact in" "progress_state=present" "$F_MLINE"
 
-mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$F_OUT" \
-  | bash "$PARTY_ER" >/dev/null 2>&1
-F_STATE=$(cat "$IREPO/.bionic/tmp/stop-check.state" 2>/dev/null)
-expect_contains "the recorder copies the progress path into the record verbatim" \
-  "progress=.bionic/tmp/w99.progress" "$F_STATE"
-expect_contains "…and the progress state beside it" "progress_state=present" "$F_STATE"
-expect_contains "…and the observer, which only it can see" "observer=orchestrator" "$F_STATE"
-
-# The gate now reads that record. Same row, same path, same answer: nothing has
-# moved, so the stop stands.
-ST=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" >/dev/null 2>&1; echo $?)
-expect_eq "the gate agrees the target is OURS and spends the record" "0" "$ST"
+# THE GATE TAKES THE SAME CONTRACT OFF THE SAME ROW (epic-23 wave-15, REQ-2). The record
+# this used to pass through is gone, and the claim is stronger without it: the gate reads the
+# roster's progress path itself, at the moment of the stop, so a divergence between what the
+# writer lifted from the brief and what the gate measures cannot exist.
+F_GATE=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
+  | env BIONIC_WALL_VERBOSE=1 bash "$PARTY_SG" 2>&1 >/dev/null); F_GST=$?
+expect_contains "the gate reads the same contracted progress path off the same row" \
+  ".bionic/tmp/w99.progress" "$F_GATE"
+expect_eq "…and refuses the stop, because that artifact just moved" "2" "$F_GST"
 
 # …and a write to THAT path — the one the writer named, the producer resolved and
 # the recorder stored — is what the gate calls stale. A disagreement anywhere in
@@ -1769,21 +1810,20 @@ printf 'stage 3\n' >> "$IREPO/.bionic/tmp/w99.progress"
 OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
 expect_eq "the D-6 staleness wall still refuses past the old cap (critic F-1)" "2" "$ST"
 
-# THE OBSERVER FIELD, both ends. The recorder learns who looked from its own
-# payload's top-level `agent_id` (absent = the orchestrator); the gate learns who
-# is stopping from ITS payload's identical field. One key, two payloads.
-F3_OUT=$( cd "$IREPO" && env CLAUDE_CODE_SESSION_ID="$SID_A" bash "$OBSERVE" w99-impl 2>&1 )
-mk_bash_post "$SID_A" "$ITR" "$IREPO" "bash ~/.claude/hooks/stop-check.sh w99-impl" "$F3_OUT" \
+# WHO IS STOPPING NO LONGER CHANGES THE ANSWER (epic-23 wave-15, REQ-2; ADR-028). D-3 asked
+# whether the recorded look was the STOPPER'S OWN: any record for the target used to discharge
+# any actor's stop, so a subagent's look could pay for the orchestrator's. Both halves of that
+# rule are gone with the record — every stop takes its own look, in its own process — and the
+# agreement worth pinning is the one that replaced it: the SAME target answered IDENTICALLY
+# whichever actor asks, because the answer is a fact about the target and not about who looked.
+F3_ORCH=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
+  | bash "$PARTY_SG" 2>&1 >/dev/null); F3_OST=$?
+F3_SUB=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
   | jq '. + {agent_id:"asubagent-2020202020202020", agent_type:"general-purpose"}' \
-  | bash "$PARTY_ER" >/dev/null 2>&1
-expect_contains "a subagent-invoked observation records that subagent as observer" \
-  "observer=asubagent-2020202020202020" "$(cat "$IREPO/.bionic/tmp/stop-check.state" 2>/dev/null)"
-OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1); ST=$?
-expect_eq "the orchestrator cannot spend a subagent's look" "2" "$ST"
-OUT=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" \
-      | jq '. + {agent_id:"asubagent-2020202020202020", agent_type:"general-purpose"}' \
-      | bash "$PARTY_SG" 2>&1); ST=$?
-expect_eq "the subagent that looked can" "0" "$ST"
+  | bash "$PARTY_SG" 2>&1 >/dev/null); F3_SST=$?
+expect_eq "a subagent's stop and the orchestrator's reach the same verdict" "$F3_OST" "$F3_SST"
+expect_eq "…and it is the same line, word for word" "$F3_ORCH" "$F3_SUB"
+expect_eq "…which is the refusal this target's own state earns" "2" "$F3_OST"
 
 # The field NAMES themselves, stated as the agreement they are — so a rename
 # breaks this suite with a legible reason rather than turning a wall inert.
@@ -1869,7 +1909,14 @@ g_stop_reason() {  # -> which refusal the gate reaches for an unobserved target
   out=$(mk_stop_payload "$SID_A" "$ITR" "$IREPO" "w99-impl" | bash "$PARTY_SG" 2>&1)
   case "$out" in
     *"carries no agent id"*) echo unidentified ;;
+    # IDENTIFIED IS NOW A VERDICT ABOUT THE TARGET (epic-23 wave-15, REQ-2). With the roster
+    # at its canonical name the gate resolves the id and then answers on what it observes —
+    # a refusal when the agent is working, a permit when it is not — and either answer is
+    # the register having been found. What distinguishes this leg from the one below it is
+    # that the gate got as far as having an opinion about the AGENT at all.
     *"No observation"*)      echo identified ;;
+    *"still working"*)       echo identified ;;
+    *"STOP PERMITTED"*)      echo identified ;;
     # T22, then D8 (T5): with the roster gone the gate has no standing over a bare name at
     # all — the register is what makes a target ours. Through 1.7.1 that was a passthrough
     # (a target it does not guard); since D8 it is a REFUSAL naming the same fact (a target
@@ -1944,8 +1991,12 @@ expect_contains "the writer lifted the cadence declared beside the progress path
 
 # The field NAMES, both ends — a rename fails here rather than turning the
 # display silently blank, which is how this defect shipped in the first place.
-expect_contains "the observation reads that same key" 'line_field "$ROSTER_ROW" claims' "$(cat "$OBSERVE")"
-expect_contains "the observation reads that same key" 'line_field "$ROSTER_ROW" cadence' "$(cat "$OBSERVE")"
+# THE READER MOVED INTO THE LIBRARY (epic-23 wave-15, REQ-2): one `observe_agent` reads the
+# contract off the row for both the verb that prints it and the gate that decides on it.
+expect_contains "the observation library reads that same key" \
+  'line_field "$OBS_ROW" claims' "$(cat "$OBSERVE_LIB")"
+expect_contains "the observation library reads that same key" \
+  'line_field "$OBS_ROW" cadence' "$(cat "$OBSERVE_LIB")"
 
 # ============================================================
 section "I — DONE-DETECTION, and the primitives the sweeper says it copied (6-axis D-2, R-1)"
@@ -1989,10 +2040,15 @@ fn_body() {  # <file> <function name> -> the function's body, signature and its 
   ' "$1"
 }
 
-for _fn in file_mtime line_field claims_live; do
-  expect_eq "the sweeper's ${_fn}() is the stop gate's, body for body" \
-    "$(fn_body "$OBSERVE" "$_fn")" "$(fn_body "$SWEEPER" "$_fn")"
+for _fn in file_mtime line_field; do
+  expect_eq "the sweeper's ${_fn}() is the observation library's, body for body" \
+    "$(fn_body "$OBSERVE_LIB" "$_fn")" "$(fn_body "$SWEEPER" "$_fn")"
 done
+# `claims_live` kept its body and lost its name: the library prefixes every function it
+# exports, because a sourced file lands its names in the caller's shell and a bare
+# `claims_live` there would shadow whatever else defines one. The body is the comparison.
+expect_eq "the sweeper's claims_live() is the library's observe_claims_live(), body for body" \
+  "$(fn_body "$OBSERVE_LIB" observe_claims_live)" "$(fn_body "$SWEEPER" claims_live)"
 # Same body, different name: the sweeper normalizes its findings exactly as the stop gate
 # normalizes its machine line, and says so in its comment.
 
@@ -2025,8 +2081,8 @@ field1_via() {  # <file> <line> <key> -> landing-gate.sh's ONE-argument _field()
 I1_LINE="${ROSTER_ROW_SCHEMA}|status=confirmed|name=w4-i1|agent_id=ai1test0000000000|deliverable=.bionic/docs/record/i1.md|state=UNMET"
 for _key in status name agent_id deliverable state; do
   I1_WANT=$(field2_via "$SWEEPER" line_field "$I1_LINE" "$_key")
-  expect_eq "…and stop-check's line_field(${_key}), called for real, agrees" \
-    "$I1_WANT" "$(field2_via "$OBSERVE" line_field "$I1_LINE" "$_key")"
+  expect_eq "…and the observation library's line_field(${_key}), called for real, agrees" \
+    "$I1_WANT" "$(field2_via "$OBSERVE_LIB" line_field "$I1_LINE" "$_key")"
 done
 
 # THE DISCRIMINATING HALF: a copy of landing-gate.sh with the anchor dropped from _field()'s
@@ -3214,6 +3270,7 @@ mkdir -p "$MSUB" "$MREPO/.bionic/tmp"
 MTR="$MPROJ/$SID_A.jsonl"
 printf '{}\n' > "$MTR"
 plant "$MSUB" "afinished-1111111111111111" "finished"
+wake "$MSUB" "afinished-1111111111111111"
 write_plan "$MREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 # A contract that will NEVER land: the artifact is not written, so every party's verdict is
 # UNMET and the ack is the only thing that can discharge anything. A fixture whose contract
@@ -3327,6 +3384,7 @@ mk_order_world() {  # <label> <name> <agent-id> -> "<repo>|<transcript>"
   tr="$proj/$SID_A.jsonl"
   printf '{}\n' > "$tr"
   plant "$sub" "$3" "$2"
+  wake "$sub" "$3"
   write_plan "$repo/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
   cg_roster_row "$repo" "$SID_A" "$2" "$3"
   printf '%s|%s\n' "$repo" "$tr"
@@ -3381,6 +3439,7 @@ mkdir -p "$ASUB" "$AREPO/.bionic/tmp"
 ATR="$APROJ/$SID_A.jsonl"
 printf '{}\n' > "$ATR"
 plant "$ASUB" "amoot-5555555555555555" "moot"
+wake "$ASUB" "amoot-5555555555555555"
 write_plan "$AREPO/.bionic/docs/plans/epic-99/wave-01.md" "current: 4"
 roster_row_fixture status=confirmed session="$SID_A" name=moot \
   agent_id=amoot-5555555555555555 launched_at=2026-08-05T00:00:00Z \
@@ -5413,10 +5472,16 @@ expect_eq "the stop gate accepts the address adopt printed, discharged by the ac
 # THE CONSTRUCTION ITSELF, at all three sites: eight characters of a session id, cut the
 # same way. A site that starts spelling it differently — a full uuid, a different width —
 # splits from the other two here rather than in the field.
-for _f in "$PARTY_SG" "$OBSERVE" "$SPO"; do
+# TWO SITES, NOT THREE (epic-23 wave-15, REQ-2). hooks/stop-check.sh carried an
+# `accepted_addresses` of its own that nothing had called since T22 retired the unresolved
+# arms it printed for; it went with the resolution that moved into the library. Its absence
+# is asserted rather than assumed, so a copy that comes back comes back visibly.
+for _f in "$PARTY_SG" "$SPO"; do
   expect_true "$(basename "$_f") builds the address as @session-<first 8 of a session id>" \
     grep -qE '@session-\$\(printf .%s. "\$[A-Za-z_]+" \| cut -c1-8\)' "$_f"
 done
+expect_absent "…and the observation builds no address at all: its dead copy is gone" \
+  "accepted_addresses" "$(cat "$OBSERVE")"
 
 # ============================================================
 section "S — which plan answers for the run: the tick reads what the gate reads (wave-1.3.2 4/4, AC-13/AC-14)"
@@ -6957,7 +7022,13 @@ expect_contains "mutated parser: the observation still resolves the target from 
   "$LA_TID" "$LA_C1"
 expect_absent "…and never reports it as absent from a set it no longer consults" \
   "not live" "$LA_C1"
-la_norm_m() { printf '%s\n' "$1" | sed 's#/[^ ]*/hooks/#TREE/#g'; }
+# THE AGE IS A READING, NOT A RENDERING (epic-23 wave-15, REQ-2). Since the gate looks for
+# itself its refusal carries how long ago the target last wrote, so two drives a second apart
+# spell the same channel differently. The normalizer folds the reading and keeps everything
+# this section is about — which arm spoke, about which target, on which channel.
+la_norm_m() {
+  printf '%s\n' "$1" | sed -e 's#/[^ ]*/hooks/#TREE/#g' -e 's/last write:.*$/last write: AGE/'
+}
 expect_eq "mutated parser: the stop guard's whole channel is unchanged — it reads no parser" \
   "$(la_norm_m "$LA_G0")" "$(la_norm_m "$LA_G1")"
 expect_contains "…and that channel is a real refusal, not an empty string (not vacuous)" \
@@ -7026,7 +7097,12 @@ expect_contains "…and refuses on it" "bionic: " "$LA_B5A"
 # The guard's channel quotes the tree it was loaded from in its `Fix:` lines, so the
 # compare normalises that one path away and is byte-exact on everything else — including
 # the verdict, which is the thing under test.
-la_norm() { printf '%s\n' "$1" | sed 's#/[^ ]*/hooks/#TREE/#g'; }
+# …and the same age fold LA.4 needs, for the same reason (epic-23 wave-15, REQ-2): the
+# guard's channel carries a reading of how long ago the target wrote, which is a fact about
+# the clock rather than about the arm that spoke.
+la_norm() {
+  printf '%s\n' "$1" | sed -e 's#/[^ ]*/hooks/#TREE/#g' -e 's/last write:.*$/last write: AGE/'
+}
 expect_eq "…while the guard's whole channel is otherwise unchanged — presence never moved" \
   "$(la_norm "$LA_G5")" "$(la_norm "$LA_G5A")"
 expect_contains "…and the normaliser really did rewrite that path (not comparing raw text)" \
@@ -7084,7 +7160,10 @@ expect_absent "mutation B: the wall's count is unchanged — it read idle as clo
 # RESTORED, on the idle fixture: neither mutation left anything behind.
 expect_eq "restored: the wall answers the idle fixture as it did before both mutations" \
   "$LA_B5" "$(la_budget)"
-expect_eq "…and so does the guard" "$LA_G5" "$(la_guard la-target)"
+# THE SAME FOLD AS LA.4's (epic-23 wave-15, REQ-2): the guard's channel now carries how long
+# ago the target last wrote, and the claim here is that the mutations left nothing behind —
+# not that two clocks a second apart read alike.
+expect_eq "…and so does the guard" "$(la_norm_m "$LA_G5")" "$(la_norm_m "$(la_guard la-target)")"
 
 # --- LA.6 ONE PREDICATE, TWO CONSUMERS: the budget and the tick count the same (S19) ---
 #
@@ -9492,7 +9571,13 @@ expect_eq "S19.3 …declared by 43 anchor calls (Section 8's doctoring rewrites 
 # `^IMPACT_BOUND_S=[0-9]+$` and `^LG_IMPACT_BOUND_S=[0-9]+$`. Two anchor calls for one
 # doctored file, which is what the helper's per-LINE count means: +2, 27 -> 29. RE-DERIVED
 # BY DIRECT GREP over this file at THIS commit.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 29 more" "29" \
+#
+# 30 at epic-23 wave-15-fixit-182 (2026-09-17, T1): §PV — the Patrol verdict's single
+# definition — anchors `^patrol_verdict\(\)` in lib/patrol.sh before asserting the
+# tree-wide count, so a second definition grown in a hook cannot make that row pass by
+# moving what it reads. One anchor call, 29 -> 30. RE-DERIVED BY DIRECT GREP over this file
+# at THIS commit, as every number in this section is.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 30 more" "30" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9568,7 +9653,9 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …76 anchor call sites across the four doctoring suites, all told" "76" \
+# 77 at epic-23 wave-15-fixit-182 (2026-09-17, T1): +1 from §PV's anchor above; the other
+# three files are untouched by that task.
+expect_eq "S19.3 …77 anchor call sites across the four doctoring suites, all told" "77" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -10515,6 +10602,65 @@ expect_ne "BR …and the SAME comparison calls the doctored copy a drift (the ge
   "$(fn_code "$BR_MUT" _detect_bound_kill_tree)" "$(br_code "$SSTART" ss_bound_kill_tree)"
 expect_eq "BR …while the OTHER primitive in the doctored copy still agrees (one function moved, not the file)" \
   "$(fn_code "$BR_MUT" _detect_bound_kill)" "$(br_code "$SSTART" ss_bound_kill)"
+
+# ============================================================
+section "PV — the Patrol verdict: ONE predicate, two blocking readers (epic-23 wave-15 REQ-1, AC-1.4)"
+# ============================================================
+#
+# THE DEFECT THIS SECTION EXISTS FOR. "How stale is stale" was a judgment call typed out at
+# three sites. lib/patrol.sh exported PATROL_STALE_MULTIPLIER to hold two of them together;
+# the third — the stop library's own death notice — typed `INTERVAL * 2` as a literal, so a
+# change to the judgment moved two readers and left the one that BLOCKS A TURN measuring
+# against a threshold nobody configured (research row 1, wave-15).
+#
+# ADR-028 replaced the threshold with an observation: the verdict is an idle-time predicate
+# over the session transcript, and it lives in lib/patrol.sh as `patrol_verdict`. Both
+# readers that can REFUSE on it — the stop library's revive notice and the dispatch wall's
+# staleness half — call that one function. This section pins the pair the way §Roots pins a
+# resolver: one definition, every caller, no private arithmetic.
+
+PV_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+[ -d "$PV_LIB" ] || PV_LIB="${BIONIC_SCRIPTS_DIR}/scripts/lib"
+PV_PATROL="$PV_LIB/patrol.sh"
+PV_STOP="$PV_LIB/stop.sh"
+PV_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+
+# ONE DEFINITION, and it is the library's. Counted over every shell file the payload ships,
+# so a second copy grown in a hook is a failure here rather than a divergence discovered in
+# the field.
+PV_DEFS=$( { grep -l '^patrol_verdict()' "$PV_LIB"/*.sh 2>/dev/null
+             grep -l '^patrol_verdict()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null
+           } | sort -u | wc -l | tr -d ' ' )
+expect_eq "PV patrol_verdict is defined exactly once in the tree" "1" "$PV_DEFS"
+anchor -E "$PV_PATROL" '^patrol_verdict\(\)' 1
+
+# BOTH BLOCKING READERS CALL IT.
+if grep -q 'patrol_verdict' "$PV_STOP"; then
+  ok "PV the stop library's revive notice calls patrol_verdict"
+else
+  no "PV the stop library's revive notice calls patrol_verdict" "no call in $PV_STOP"
+fi
+if grep -q 'patrol_verdict' "$PV_DP"; then
+  ok "PV …and so does the dispatch wall's staleness half"
+else
+  no "PV …and so does the dispatch wall's staleness half" "no call in $PV_DP"
+fi
+
+# AND NEITHER TYPES A MULTIPLIER. The literal the stop library carried, and the exported
+# constant the dispatch wall read: the arithmetic is inside the predicate now, so both are
+# absent from both readers. PATROL_STALE_MULTIPLIER itself stays exported for the poker's
+# `adopt` liveness window, which is a different question with a different answer.
+expect_eq "PV the literal 2x multiplier is gone from the stop library" "0" \
+  "$(grep -c 'INTERVAL \* 2' "$PV_STOP" || true)"
+expect_eq "PV …and the dispatch wall no longer reads PATROL_STALE_MULTIPLIER either" "0" \
+  "$(grep -c 'PATROL_STALE_MULTIPLIER' "$PV_DP" || true)"
+
+# THE FIRE WINDOW IS THE LIBRARY'S ARITHMETIC, spelled once. A reader that recomputed it
+# would be the literal back under another name.
+expect_eq "PV the fire window is computed in exactly one place" "1" \
+  "$(grep -c 'iv / 10' "$PV_PATROL" || true)"
+expect_eq "PV …and neither reader recomputes it" "0" \
+  "$(( $(grep -c '/ 10' "$PV_STOP" || true) + $(grep -c '/ 10' "$PV_DP" || true) ))"
 
 # ============================================================
 finish

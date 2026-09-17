@@ -1166,12 +1166,11 @@ return 2
 # THE PATROL-DUTIES WALL — task-dispatch-wall-channel-loss, T5.
 #
 # Stop. On every orchestrator turn end: if the turn was started by a PATROL TICK,
-# refuse the stop once unless the tick's THREE standing duties were performed
-# inside it — a subagent-panel refresh (`ListAgents`), a task-list refresh
-# (`TaskList`, or a write naming the active plan file), and an ANSWER to any
-# `poker: FILL` line the tick printed (the named dispatches, or an explicit
-# `fill-declined: <reason>`). Any other turn passes untouched, as does any
-# ambiguity along the way.
+# refuse the stop once unless the tick's TWO standing duties were performed
+# inside it — a task-list refresh (`TaskList`, or a write naming the active plan
+# file), and an ANSWER to any `poker: FILL` line the tick printed (the named
+# dispatches, or an explicit `fill-declined: <reason>`). Any other turn passes
+# untouched, as does any ambiguity along the way.
 #
 # WHY A WALL AND NOT BETTER WORDING. The duties live in the Patrol prompt today,
 # and a prompt is text: it asks. Every rule in this repo that actually binds is a
@@ -1926,8 +1925,9 @@ return 2
 
 stop_patrol_revive() {  # <event> -> 0 nothing · 1 advisory · 2 block
   local _ev="${1:-}" _adv=0
-  local HOOK_DIR _RUN_PLAN STAMP_FILE POKER INTERVAL LIMIT MTIME AGE REASON
+  local HOOK_DIR _RUN_PLAN STAMP_FILE POKER INTERVAL WINDOW MTIME AGE REASON
   local _rival_now _rival_sf _rival_sid _rival_mt _rival_age
+  local TRANSCRIPT VERDICT VLINE GAP WHY
 
   case "$_ev" in Stop) : ;; *) return 0 ;; esac
 
@@ -2021,15 +2021,42 @@ if [ -z "$INTERVAL" ] || [ "$INTERVAL" -le 0 ]; then
 fi
 [ -n "$INTERVAL" ] && [ "$INTERVAL" -gt 0 ] || return "$_adv"
 
-# 2x, exactly as the arming wall measures it: a Patrol firing on its interval is,
-# at any random instant, up to one whole interval stale while perfectly healthy.
-LIMIT=$(( INTERVAL * 2 ))
+# ---------- one fire window, from the library that owns the arithmetic ----------
+#
+# THIS USED TO BE TWICE THE INTERVAL, THE MULTIPLIER TYPED HERE (wave-15 REQ-1, ADR-028).
+# "How stale is stale" was a judgment call written out at three sites; lib/patrol.sh exported
+# PATROL_STALE_MULTIPLIER to hold two of them together and this one — the site that BLOCKS
+# A TURN — kept its own literal, so a change to the judgment moved two readers and left the
+# third measuring against a threshold nobody configured.
+#
+# It is not a multiplier at all now. The window is the longest idle span in which a session
+# cron is GUARANTEED one opportunity to fire — the interval plus the scheduler's jitter,
+# which the CronCreate contract bounds at a tenth of the period — and `patrol_fire_window`
+# is the one place that arithmetic exists. Past it the stamp is worth READING THE
+# TRANSCRIPT about; it is not, on its own, a verdict.
+#
+# SOURCED HERE AND NOT AT FILE SCOPE, the way bounds.sh above is sourced and guarded on the
+# thing this file uses: three of the four verdict functions in this library never ask the
+# Patrol anything, and a bystander turn should not pay to parse a library it will not call.
+if ! declare -F patrol_verdict >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/patrol.sh" 2>/dev/null || :
+fi
+declare -F patrol_verdict >/dev/null 2>&1 || return "$_adv"
+WINDOW="$(patrol_fire_window "$INTERVAL")" || WINDOW=""
+[ -n "$WINDOW" ] || return "$_adv"
 
 # ---------- the second-stamp finding (AC-3): one clock per run ----------
 #
 # Every OTHER patrol-*.state beside this session's own, in the same .bionic/tmp,
-# judged against the SAME limit — a fresh one is a live duplicate clock, worth a
+# judged against the SAME window — a fresh one is a live duplicate clock, worth a
 # finding whether or not THIS session's own clock turns out to be stale or fine.
+#
+# ONE FIRE WINDOW IS THE RIGHT MEASURE FOR "LIVE" (REQ-1). A Patrol that is firing stamps
+# at least once per window by construction, so a rival stamp inside one is a clock that is
+# still running. This arm asks nothing about idleness: it is a statement about the OTHER
+# session, whose transcript this hook cannot read and whose busyness is not this session's
+# to judge.
 _rival_now="$(date -u +%s 2>/dev/null || echo 0)"
 for _rival_sf in "$BIONIC_ROOT"/.bionic/tmp/patrol-*.state; do
   [ -e "$_rival_sf" ] || [ -L "$_rival_sf" ] || continue
@@ -2042,7 +2069,7 @@ for _rival_sf in "$BIONIC_ROOT"/.bionic/tmp/patrol-*.state; do
   case "$_rival_mt" in ''|*[!0-9]*) continue ;; esac
   _rival_age=$(( _rival_now - _rival_mt ))
   [ "$_rival_age" -lt 0 ] && _rival_age=0
-  if [ "$_rival_age" -le "$LIMIT" ]; then
+  if [ "$_rival_age" -le "$WINDOW" ]; then
     fold_advise "patrol-revive: a second live Patrol stamp for session $(printf '%.8s' "$_rival_sid") exists here — one clock per run; delete the stray job and stamp"; _adv=1
   fi
 done
@@ -2051,7 +2078,38 @@ MTIME=$(stat -f %m "$STAMP_FILE" 2>/dev/null || stat -c %Y "$STAMP_FILE" 2>/dev/
 case "$MTIME" in ''|*[!0-9]*) return "$_adv" ;; esac
 AGE=$(( $(date -u +%s) - MTIME ))
 [ "$AGE" -lt 0 ] && AGE=0
-[ "$AGE" -gt "$LIMIT" ] || return "$_adv"
+[ "$AGE" -gt "$WINDOW" ] || return "$_adv"
+
+# ---------- the verdict: idle time, never wall time (REQ-1, ADR-028) ----------
+#
+# THE STAMP'S AGE IS NOT THE FINDING, and this is the whole of wave-15 REQ-1. A session
+# cron fires only while the session is IDLE, so a stamp past the window says one of two
+# things and age alone cannot tell them apart: the job is gone, or the orchestrator has
+# been working. On 2026-09-15 this notice blocked a healthy session on a 2459s stamp
+# against a 2400s limit because its orchestrator was simply busy.
+#
+# `patrol_verdict` answers the question that IS observable — has an idle stretch long
+# enough for one firing passed since the last proof of life, with no firing in it — off the
+# transcript this hook is already handed. Only `dead` blocks. `busy` and `unreadable` are
+# advisories, because a wall that cannot observe the thing it refuses on does not refuse
+# (ADR-028), and both name what they found so the degradation is visible rather than
+# silent.
+TRANSCRIPT=$(bionic_jq .transcript_path)
+VLINE="$(patrol_verdict "$STAMP_FILE" "$TRANSCRIPT" "$INTERVAL")"
+VERDICT="$(_patrol_field "$VLINE" verdict)"
+GAP="$(_patrol_field "$VLINE" gap)"
+WHY="$(_patrol_field "$VLINE" reason)"
+case "$VERDICT" in
+  dead) : ;;
+  busy)
+    fold_advise "patrol-revive: the Patrol stamp is ${AGE}s old, but this session has been busy — its longest idle gap since the stamp is ${GAP}s, under the ${WINDOW}s fire window, so the clock has had no opportunity to fire and its silence proves nothing"
+    return 1
+    ;;
+  *)
+    fold_advise "patrol-revive: the Patrol stamp is ${AGE}s old and this session's idle time could not be read (${WHY:-no reason given}) — advisory only, no verdict"
+    return 1
+    ;;
+esac
 
 # ---------- the notice ----------
 #
@@ -2076,16 +2134,17 @@ AGE=$(( $(date -u +%s) - MTIME ))
 # offers only "re-arm" to a run that meant to stop is the loop critic C-2 found.
 REASON="The Patrol died mid-run and nothing said so.
 
-Its last stamp is ${AGE}s old — past the ${LIMIT}s limit, which is 2x the ${INTERVAL}s poker-interval in force for this project:
+Its last stamp is ${AGE}s old, and this session has since sat idle for ${GAP}s in one stretch with no tick in it — past the ${WINDOW}s fire window, which is the ${INTERVAL}s poker-interval in force for this project plus the scheduler's jitter. An idle session is exactly when a session cron fires, so a whole window of idleness with no firing is the job being gone, not the machine being busy:
     ${STAMP_FILE}
 
 The CLI holds its cron table in process memory with no file behind it, so a plugin update, a /reload-plugins, a session continue or a /clear+resume deletes the job and leaves the stamp as the only trace. Nothing is ticking the poker now: no dispatched row is being judged against its declared duration, and anything this run launched is waiting on a clock that stopped.
 
-Re-arm it — both halves, the clock FIRST, because arming the stamp over an empty cron table buys a Patrol that reads alive and never fires:
-  1. CronCreate a RECURRING session job at the interval \`bash ${POKER} interval\` reports, carrying the patrol prompt (the canonical-sdlc skill's Dispatch section).
-  2. ONLY IF step 1 succeeded and returned a job: bash ${POKER} arm
+Re-arm it — LOOK FIRST, then the clock, then the stamp. The listing is free and tells you which of the two repairs you are doing; creating a second job over one that is still there is two clocks on one run, and arming the stamp over an empty cron table buys a Patrol that reads alive and never fires:
+  1. CronList — is this session's Patrol job still listed?
+  2. ONLY IF it is ABSENT: CronCreate a RECURRING session job at the interval \`bash ${POKER} interval\` reports, carrying the patrol prompt (the canonical-sdlc skill's Dispatch section).
+  3. ONLY IF step 2 succeeded and returned a job, or step 1 showed the job already listed: bash ${POKER} arm
 
-If step 1 is refused or fails, do NOT run step 2 — a fresh stamp over an empty cron table reads ALIVE to this hook, to the dispatch wall and to /bionic:doctor while nothing fires again, which is worse than the death this notice is reporting. Tell the user the Patrol is down and that CronCreate was refused, and leave the stamp stale.
+If step 2 is refused or fails, do NOT run step 3 — a fresh stamp over an empty cron table reads ALIVE to this hook, to the dispatch wall and to /bionic:doctor while nothing fires again, which is worse than the death this notice is reporting. Tell the user the Patrol is down and that CronCreate was refused, and leave the stamp stale.
 
 If this Patrol was stopped ON PURPOSE, record that instead of re-arming: \`bash ${POKER} disarm\` removes the stamp, and this notice goes with it.
 
