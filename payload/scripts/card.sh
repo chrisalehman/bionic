@@ -88,19 +88,66 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
   CARD_LINES=1; CARD_FMT_1=""; CARD_FOLD_1=0; CARD_NF_1=0
   CARD_FMT_2=""; CARD_FOLD_2=0; CARD_NF_2=0
   CARD_SECTION=""; CARD_HDRCOLS=""
+  # THE LABEL, WHEN A FOLDING CELL HAS ONE (epic-23 wave-15 T23; Chris's AC-10.1
+  # read, 2026-09-17). `provenance ` on the requirement row's second line and
+  # `surfaces ` on the ownership row are literal WORDS printed before the
+  # folding cell, not alignment spacing — and until this task they lived in the
+  # format's own pre-field literal, which meant a continuation line (which
+  # reprints that literal as blank spaces, per the WRAPPED shape) indented under
+  # the TEXT after the label rather than under the label itself, wasting exactly
+  # the label's own width on every line the fold produces. Moving the label into
+  # the cell's VALUE instead — and shrinking the literal to the bare separator
+  # that is left — makes the label print once, on the row's own first line
+  # exactly as before, and lets a continuation line start where the label
+  # started and use the label's own width too. See `_card_emit`'s use of these.
+  CARD_LABEL_1=""; CARD_LABEL_2=""
   case "${1:-}" in
     requirement)
       CARD_SECTION="Requirements"
-      CARD_LINES=2
-      CARD_FMT_1='    %-7s %s';                        CARD_NF_1=2; CARD_FOLD_1=1
-      CARD_FMT_2='            provenance %-48s  ACs %s'; CARD_NF_2=2; CARD_FOLD_2=0 ;;
+      # RULE 5 (Chris's third read, one stream): the title and the provenance
+      # are not two cells any more, or two lines — they are ONE word-wrapped
+      # stream, title then the seam " · " then provenance, filling the text
+      # column greedily. When the title leaves room on a line, provenance
+      # keeps going on that same line rather than starting a fresh one
+      # (rule 5's own picture: "that names none · provenance seed row 4…" on
+      # the SAME line). `_CARD_AWK`'s `flush_req` builds that single string
+      # for a whole card, and a hand-fed TSV row builds the identical seam by
+      # hand, before this kind's row is even reached — so the fold field here
+      # is ordinary text like any other kind's, no per-kind label mechanism
+      # needed for it any more (rules 1/4's old CARD_LABEL_2/CARD_FMT_2 retire
+      # with them; ownership's `surfaces` label is unrelated and unchanged).
+      #
+      # `ACs n` still lives on the row's own first line (rule 3), so the
+      # stream's column still needs a width of its OWN rather than the "rest
+      # of the line" fallback a trailing-less fold field would get — the
+      # fallback that would otherwise let the stream run to the edge and abut
+      # `ACs n` (rule 2). `_rq1_lit` is the two literals around it (id + one
+      # separating space, and two spaces + "ACs" + one space); the reserve
+      # past that is four columns — no shipped card has ever carried ten or
+      # more acceptance criteria on one requirement, so two digits already
+      # covers every real value, and the extra headroom is what keeps a
+      # same-shaped-but-wider ACs cell (this suite's own placeholder, `<n>`,
+      # is three columns) from tripping `_card_shrink_line`'s overflow path —
+      # which has nothing safe to shrink on this line but `id`, and would
+      # fold it (A-T23.1). Because the stream is now the row's ONLY fold
+      # field and nothing else trails `ACs`, rule 4's right-edge bound (the
+      # stream never running under `ACs n`) falls out of this ONE declared
+      # width for free — there is no second field left to keep it in step
+      # with.
+      local _rq1_lit=$(( 4 + 7 + 1 + 2 + 3 + 1 )) _rq1_w
+      _rq1_w=$(( BIONIC_LINE_WIDTH - _rq1_lit - 4 ))
+      CARD_FMT_1="    %-7s %-${_rq1_w}s  ACs %s"; CARD_NF_1=3; CARD_FOLD_1=1 ;;
     decision)
       CARD_SECTION="Decisions"
       CARD_HDRCOLS="2:serves 3:ADR"
       CARD_FMT_1='    %-4s %-44s %-14s %s';            CARD_NF_1=4; CARD_FOLD_1=1 ;;
     ownership)
       CARD_SECTION="Ownership"
-      CARD_FMT_1='    %-12s owner %-14s surfaces %-22s test %s'; CARD_NF_1=4; CARD_FOLD_1=2 ;;
+      # `surfaces ` moves out of the literal and into the folding cell's value
+      # (see CARD_LABEL_1 above); the one space left in the literal is the
+      # separator the `owner` column already printed before it.
+      CARD_FMT_1='    %-12s owner %-14s %-22s test %s'; CARD_NF_1=4; CARD_FOLD_1=2
+      CARD_LABEL_1="surfaces " ;;
     eval-design)
       CARD_SECTION="Eval design"
       CARD_HDRCOLS="2:static 3:unit 4:hermetic 5:live 6:human"
@@ -310,11 +357,39 @@ _card_widest_cells() {  # <line 1|2> — sets CARD_MAX[] over CARD_ROWS[]
   done
 }
 
+# THE LABEL'S WIDTH JOINS THE FOLD FIELD'S OWN, BUT ONLY WHEN SOMETHING
+# TRAILS IT (T23) — wherever CARD_W[] has just been parsed fresh from a format
+# string, for a fold field that carries a label (CARD_LABEL_1/2; see
+# `_card_spec`). This is called identically here and in `_card_emit`, which
+# each parse the format independently and would otherwise disagree about the
+# same field's width: `_card_shrink_line` deciding how much room a row needs
+# using the UNEXTENDED width while `_card_emit` rendered the EXTENDED one is
+# exactly the bug that shrinking the wrong candidate, or not enough of it,
+# would reproduce.
+#
+# WHEN THE FOLD FIELD IS THE LAST FIELD ON ITS LINE (requirement's
+# provenance), there is nothing downstream to protect a position for, and the
+# label is not free extra room — it is content, spending the SAME budget the
+# text does, because that budget is what rule 4 pins to the title field's own
+# right edge (Chris's second read: nothing may print under the `ACs n`
+# column). Extending it here would push provenance's right edge past the
+# title's, undoing rule 4 for the sake of a label. So the extension applies
+# only when `fold` is NOT the last field (`nf`) — ownership's `surfaces`,
+# which `test` trails, keeps it; provenance, which nothing trails, does not.
+_card_extend_fold_for_label() {  # <fold index> <line 1|2> <field count on this line>
+  local fold="$1" lineno="$2" nf="$3" label=""
+  [ "$fold" -lt "$(( nf - 1 ))" ] || return 0
+  [ "$lineno" = "2" ] && label="$CARD_LABEL_2" || label="$CARD_LABEL_1"
+  [ -n "$label" ] && [ -n "${CARD_W[$fold]:-}" ] || return 0
+  _bionic_cols_into "$label"; CARD_W[$fold]=$(( CARD_W[$fold] + BIONIC_COLS ))
+}
+
 _card_shrink_line() {  # <line 1|2> — narrows CARD_BW[] and sets CARD_FOLDSET[]
   local lineno="$1" fmt fold nf i
   if [ "$lineno" = "2" ]; then fmt="$CARD_FMT_2"; fold="$CARD_FOLD_2"; nf="$CARD_NF_2"
   else fmt="$CARD_FMT_1"; fold="$CARD_FOLD_1"; nf="$CARD_NF_1"; fi
   _card_parse "$fmt"
+  _card_extend_fold_for_label "$fold" "$lineno" "${#CARD_LIT[@]}"
   local nfields="${#CARD_LIT[@]}"
   [ "$nfields" -gt 0 ] || return 0
   _card_widest_cells "$lineno"
@@ -433,6 +508,30 @@ _card_emit() {  # <fmt> <fold index> <line 1|2> <cell>...
     [ "$i" -eq "$fold" ] && folds[$i]=1
     i=$(( i + 1 ))
   done
+
+  # THE LABEL MOVES FROM THE LITERAL INTO THE VALUE (T23, rule 1). `_card_spec`
+  # already shrank the pre-field literal down to its bare separator, so the
+  # label word itself has to be printed some other way — as the FRONT of the
+  # folding cell's own value, wrapped and folded exactly like the rest of it.
+  # That is what lets a continuation line start under the label rather than
+  # under the text after it: the literal a continuation line reprints as blank
+  # is now just the separator, not the separator-plus-label.
+  #
+  # A FIELD WITH SOMETHING TRAILING IT (ownership's `surfaces`, which `test`
+  # follows) gets its width WIDENED by the label's own column count, so the
+  # text half of the cell keeps exactly the room it had before — the row's
+  # first line, and every downstream column's start, comes out byte for byte
+  # what it always did (proved by hand before this task's commit: literal
+  # shrinks by the label's width, the field's effective width grows by the
+  # same amount, and the two cancel for anything printed after it). A field
+  # that is the LAST on its line (requirement's `provenance`) gets no such
+  # widening — its declared width is rule 4's right-edge bound (Chris's second
+  # read: nothing prints under the `ACs n` column), and the label spends that
+  # same budget rather than adding to it (`_card_extend_fold_for_label`).
+  local label=""
+  [ "$lineno" = "2" ] && label="$CARD_LABEL_2" || label="$CARD_LABEL_1"
+  [ -n "$label" ] && vals[$fold]="${label}${vals[$fold]:-}"
+  _card_extend_fold_for_label "$fold" "$lineno" "$nf"
 
   # PASS ONE: where each cell starts, and how many columns it occupies. The start
   # is computed against the ACTUAL values of the cells BEFORE it — a preceding
@@ -578,10 +677,16 @@ function cells(line, arr,   n, i) {
 }
 function err(m) { if (ERRMSG == "") ERRMSG = m }
 function flush_nd() { if (ndbuf != "") { print "ND" OFS clean(ndbuf); ndbuf = "" } }
-function flush_req() {
+function flush_req(   stream) {
   if (rid == "") return
   if (rprov == "") { err("REQ-" rid " has no provenance: line"); rid = ""; return }
-  print "RROW" OFS "REQ-" rid OFS rtext OFS rprov OFS racs
+  # RULE 5 (one stream): the title and the provenance are ONE folding cell,
+  # joined here by the seam " · provenance " before the row kind ever sees
+  # two separate cells — a hand-fed TSV row builds the identical string, so
+  # AC-10.3 byte identity holds by construction, not by two code paths
+  # agreeing to build the same seam twice.
+  stream = rtext " · provenance " rprov
+  print "RROW" OFS "REQ-" rid OFS stream OFS racs
   rid = ""; rtext = ""; rprov = ""; racs = 0
 }
 function flush_dec(   line, id, serves) {
