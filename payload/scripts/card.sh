@@ -64,6 +64,8 @@ set -u
 CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/width.sh"
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/root.sh"
 
 _card_usage() {  # <message>
   printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>\n' \
@@ -816,6 +818,50 @@ _card_pad() {  # <string> <width> -> the string padded to width IN COLUMNS
   printf '%s%s' "$s" "$(_card_spaces $(( ${2:-0} - BIONIC_COLS )))"
 }
 
+# THE ARTIFACTS PATH, PROJECT-ROOT-RELATIVE (epic-23 wave-15 T17; REQ-9 AC-9.4,
+# audit F2 — the absolute path this used to print WHOLE was 134 columns against
+# BIONIC_LINE_WIDTH=100, so the Artifacts block was exempted from the width
+# check; the exemption is retired here rather than kept, because it was hiding
+# a real overflow on the ordinary case, not a rare one).
+#
+# THIS IS A CITATION, NOT A FILESYSTEM OPERATION. It never checks the path
+# exists (the caller already did, at `-f "$2"`) and it never changes what gets
+# opened — a reader still opens the SAME file, spelled the way this repo's own
+# docs already spell one another (`.bionic/docs/specs/…`, per-wave record files
+# throughout). Only the SPELLING changes: absolute becomes root-relative when
+# the artifact resolves under the project, and is left untouched otherwise.
+#
+# NO realpath (root.sh's own finding: absent or flagless on some targets this
+# ships to). The directory half is resolved through `pwd -P`, the same idiom
+# lib/binding.sh's `_bind_resolve` and lib/root.sh's own walk use — collapsing
+# symlinks and `..` — and the final component is left alone, exactly as
+# `_bind_resolve` does and for the same reason: only the directory needs
+# canonicalising to decide whether the artifact is under the project.
+#
+# A PATH THAT RESOLVES OUTSIDE THE PROJECT PRINTS AS GIVEN. Folding or eliding a
+# path defeats the one thing an Artifacts line is for — being opened — so the
+# old exemption's rationale survives for exactly this case; the width invariant
+# does not bind it. A directory that fails to resolve (already gone, an
+# unreadable parent) prints the given path too, rather than guessing.
+_card_artifact_rel() {  # <path as given by the caller>
+  local given="${1:-}" abs d b root
+  case "$given" in
+    /*) abs="$given" ;;
+    *)  abs="${PWD%/}/$given" ;;
+  esac
+  d="$(dirname "$abs")"; b="$(basename "$abs")"
+  d="$(cd "$d" 2>/dev/null && pwd -P)" || { printf '%s' "$given"; return 0; }
+  case "$d" in
+    /) abs="/$b" ;;
+    *) abs="$d/$b" ;;
+  esac
+  root="$(project_root "$PWD" 2>/dev/null)"
+  case "$abs" in
+    "$root"/*) printf '%s' "${abs#"$root"/}"; return 0 ;;
+  esac
+  printf '%s' "$given"
+}
+
 # THE BRANCH BLOCK, WHICH SAYS "not declared" RATHER THAN GUESSING. The three
 # keys are frontmatter or they are absent; an absent branch is a real state
 # (a task-scale run, a spec written before the tree existed) and the card's job
@@ -929,10 +975,11 @@ case "$1" in
     [ "$#" -eq 2 ] || _card_usage "$1 takes exactly one artifact path (got $(( $# - 1 )))"
     [ -f "$2" ] && [ -r "$2" ] || _card_usage "$1: no readable artifact at '$2'"
     _card_load "$1" "$2" || _card_usage "$2: ${WCARD_ERR}"
+    _card_art="$(_card_artifact_rel "$2")"
     case "$1" in
-      step1) _card_step1 "$2" ;;
-      step2) _card_step2 "$2" ;;
-      step3) _card_step3 "$2" ;;
+      step1) _card_step1 "$_card_art" ;;
+      step2) _card_step2 "$_card_art" ;;
+      step3) _card_step3 "$_card_art" ;;
     esac
     exit 0 ;;
 esac
