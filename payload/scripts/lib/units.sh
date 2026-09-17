@@ -158,6 +158,7 @@ _units_read() {
       }
       if (col[1] == 0) next          # no `id` cell — not the header row
       found = 1
+      hdrn = n                       # the header field count, for the raw-pipe rule below
       state = 2
       next
     }
@@ -169,6 +170,13 @@ _units_read() {
       id = trim(c[col[1]])
       # The |---|---| separator, and any row whose id cell is empty or punctuation.
       if (id == "" || id ~ /^[-: ]+$/) next
+      # A RAW `|` INSIDE A CELL, which `esc()` has NOT folded (only `\|` is folded), is an
+      # ordinary separator to split() and opens a field the header does not have. The row
+      # is still emitted — every caller wants the cells it can get — but the id is recorded
+      # here so `units_validate` can say the one thing a reader can act on instead of the
+      # three misleading ones the shift produces. Reported as the field count less the
+      # trailing empty field, both sides the same way, so the two numbers compare.
+      if (hdrn > 0 && n > hdrn) over = (over == "" ? "" : over " ") id "=" (n - 1)
       line = ""
       for (k = 1; k <= 11; k++) {
         f = (col[k] > 0 && col[k] <= n) ? trim(c[col[k]]) : ""
@@ -185,7 +193,10 @@ _units_read() {
       # THE LOOP STOPS AT 10, NOT 11: slot 11 (`worktree`) is optional, and an absent
       # optional column is not a fault to report.
       for (k = 1; k <= 10; k++) if (col[k] == 0) missing = (missing == "") ? disp[k] : missing " " disp[k]
-      printf "# %s\n", missing
+      # THE CONTROL LINE IS TAB-SEPARATED: <missing columns> · <header width> · <id=width …>
+      # for every row wider than the header. `units_rows` drops this line whole, so no
+      # caller outside this file sees it; `units_validate` is the one reader of fields 2-3.
+      printf "# %s\t%d\t%s\n", missing, hdrn - 1, over
       for (i = 1; i <= nr; i++) print row[i]
     }
   '
@@ -305,7 +316,7 @@ units_ready() {
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
 units_validate() {
-  local plan="${1:-}" out rc missing rows violations _c found=0
+  local plan="${1:-}" out rc ctl missing cols over rows violations _c _o found=0
 
   out="$(_units_read "$plan")"; rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -313,7 +324,10 @@ units_validate() {
     return 1
   fi
 
-  missing="$(printf '%s\n' "$out" | awk 'NR == 1 { sub(/^# */, ""); print }')"
+  ctl="$(printf '%s\n' "$out" | awk 'NR == 1')"
+  missing="$(printf '%s\n' "$ctl" | awk -F'\t' '{ sub(/^# */, "", $1); print $1 }')"
+  cols="$(printf '%s\n' "$ctl" | awk -F'\t' '{ print $2 }')"
+  over="$(printf '%s\n' "$ctl" | awk -F'\t' '{ print $3 }')"
   if [ -n "$missing" ]; then
     for _c in $missing; do
       printf '## Tasks: missing column %s\n' "$_c"
@@ -321,10 +335,26 @@ units_validate() {
     done
   fi
 
+  # THE RAW PIPE, NAMED ONCE PER ROW — and it comes FIRST, before the per-row block, because
+  # it is the cause and everything that row would otherwise be accused of is the symptom.
+  # The repair is spelled out because `\|` is the only escape a GFM cell defines and nothing
+  # else in this output could tell a reader that.
+  for _o in $over; do
+    printf '%s: %s cells for %s columns — a raw | inside a cell? escape it as %s\n' \
+      "${_o%%=*}" "${_o##*=}" "$cols" '\|'
+    found=1
+  done
+
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
-    violations="$(printf '%s\n' "$rows" | awk -F'\t' '
+    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" '
       BEGIN {
+        # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
+        # accuse: its step cell cannot be trusted to make it a Step-4 row others must reach.
+        # It stays a legal dependency TARGET — slot 1 is before any shift, so its id is the
+        # one cell a raw pipe cannot move.
+        m0 = split(over, o0, " ")
+        for (i0 = 1; i0 <= m0; i0++) { sub(/=.*$/, "", o0[i0]); if (o0[i0] != "") skip[o0[i0]] = 1 }
         split("build test verify review doc integrate close prototype", kk, " ")
         for (i in kk) kinds[kk[i]] = 1
         split("pending active landed dropped", ss, " ")
@@ -334,6 +364,7 @@ units_validate() {
       { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; sta[n] = $10; count[$1]++ }
       END {
         for (i = 1; i <= n; i++) {
+          if (id[i] in skip) continue
           # IDs. Duplicate is reported once, on the second occurrence.
           if (id[i] !~ /^T[0-9]+$/)
             printf "%s: id does not match ^T[0-9]+$\n", id[i]
@@ -366,6 +397,7 @@ units_validate() {
         # `reach` is reset per row — a rule decided once for the whole
         # table is a different rule — and a cycle terminates because an id is enqueued once.
         for (i = 1; i <= n; i++) {
+          if (id[i] in skip) continue
           if (stp[i] !~ /^[0-9]+$/ || stp[i] + 0 < 5) continue
           split("", reach)
           qn = 0
@@ -385,6 +417,7 @@ units_validate() {
             }
           }
           for (k = 1; k <= n; k++) {
+            if (id[k] in skip) continue
             if (stp[k] + 0 != 4) continue
             if (id[k] in reach) continue
             printf "%s: step %s does not depend transitively on step-4 row %s\n", id[i], stp[i], id[k]
