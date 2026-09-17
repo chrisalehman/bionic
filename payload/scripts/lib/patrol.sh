@@ -156,9 +156,10 @@ patrol_live_sessions() {  # -> session=<sid>|pid=<pid>|cwd=<path>, one per line
 #
 # THE FILES THAT ARE NOT SESSION-KEYED ARE UNREACHABLE THROUGH THESE FUNCTIONS,
 # and that is a property of the shape rather than a list anyone maintains:
-# `context-spend.state`, `farm-out.state` and `stop-check.state` carry no session
-# id in their names, so no id derived here can address one. A non-session file
-# added later is safe on arrival for the same reason.
+# `context-spend.state` and `farm-out.state` carry no session id in their names,
+# so no id derived here can address one. A non-session file added later is safe on
+# arrival for the same reason. (`stop-check.state` was a third of these until
+# epic-23 wave-15 deleted the observation record itself — ADR-028.)
 PATROL_STATE_CLASSES="roster preflight engaged sweeper patrol stop-orders"
 PATROL_STATE_ARMED_SUFFIX=".armed"
 
