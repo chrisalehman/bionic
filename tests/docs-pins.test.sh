@@ -3180,11 +3180,14 @@ card_cols() {  # <line> -> its width in terminal columns, through width.sh
 }
 expect_true "147a: the card renderer the three cards now point at exists" test -f "$CARD_SH"
 
-# 148: Step-1 requirement row — two physical lines per row, no separate column header.
+# 148: Step-1 requirement row — ONE folding stream (title, the seam
+# " · provenance ", then the provenance text; T23 rule 5), no separate column
+# header, wrapping onto a second physical line with these sample values.
 REQ1_LINE_A="$(grep -m1 '^    REQ-<id>' "$STEP1_MD" 2>/dev/null)"
-REQ1_LINE_B="$(grep -m1 'provenance <user quote' "$STEP1_MD" 2>/dev/null)"
-REQ1_RENDERED="$(printf '%s\t%s\t%s\t%s\n' \
-  'REQ-<id>' '<the requirement in one line>' '<user quote | spec section | ticket | report>' '<n>' \
+REQ1_LINE_B="$(grep -m1 '| report>' "$STEP1_MD" 2>/dev/null)"
+REQ1_STREAM='<the requirement in one line> · provenance <user quote | spec section | ticket | report>'
+REQ1_RENDERED="$(printf '%s\t%s\t%s\n' \
+  'REQ-<id>' "$REQ1_STREAM" '<n>' \
   | card_rows requirement)"
 expect_eq "148: AC-9.1/AC-9.4 — steps/1.md's Requirements header and row are exactly what card.sh renders" \
   "$(printf '%s\n' '  Requirements' "$REQ1_LINE_A" "$REQ1_LINE_B")" "$REQ1_RENDERED"
