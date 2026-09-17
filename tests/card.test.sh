@@ -743,4 +743,180 @@ expect_eq "68: the artifact path is printed on exactly one line" "1" \
   "$(printf '%s\n' "$S1_ART" | grep -c . | tr -d ' ')"
 expect_eq "68a: …and whole, with nothing elided" "    requirements  ${REQ_FIX}" "$S1_ART"
 
+
+section "Section 8: T16 — no emitted line is wider than the budget, on a real card's batch"
+
+# WHY THESE ROWS AND NOT A SYNTHETIC ONE. A-T11.5 found the defect by rendering
+# this wave's OWN Step-2 and Step-3 cards from their artifacts: the ownership
+# block emitted a 297-column line and the task block a 115-column one, against
+# BIONIC_LINE_WIDTH=100. Section 4's repo-scale rows do not catch it, because they
+# are ONE row each — the overflow needs a BATCH, so that AC-9.5's per-batch
+# widening pushes the trailing column right, AND a trailing cell with no declared
+# width to run off the end once it is there. So the fixture is the batch itself,
+# copied out of the artifacts the live cards were rendered from
+# (record/wave-15-fixit-182/T11-step{2,3}-card-live.txt, parent ab78949).
+#
+# THE INVARIANT IS THE HARDER RULE (AC-9.4; A-orch-20 (2)). Per-batch widening may
+# not buy its alignment with a line the terminal wraps, because a wrapped line is
+# one row turned into two and the table stops being a table — lib/width.sh's
+# founding note. A structured column shrinks and folds INSIDE itself instead, and
+# the trailing columns still start on ONE column within the card: AC-9.5 kept.
+
+# COLUMN ARITHMETIC IN COLUMNS, NEVER WITH `cut -c`. The rows below carry § and —,
+# and a byte-indexed cut reads the wrong column the moment one does (A-T10.1, the
+# ruling Section 6 takes its differentials under). These read through width.sh's
+# own character walk, which is the one card.sh pads with.
+col_of() {  # <line> <needle> -> the 1-indexed column the FIRST occurrence starts at, or 0
+  local line="$1" needle="$2" head
+  case "$line" in
+    *"$needle"*) head="${line%%"$needle"*}"; printf '%s' "$(( $(cols "$head") + 1 ))" ;;
+    *) printf '0' ;;
+  esac
+}
+from_col() {  # <line> <1-indexed column> -> the rest of the line from that column on
+  # A budget of 0 is not "take nothing" to _bionic_head_cols — its "one character
+  # always goes" guard would eat one — so column 1 is answered here.
+  [ "${2:-1}" -gt 1 ] || { printf '%s' "${1:-}"; return 0; }
+  _bionic_head_cols "${1:-}" $(( ${2:-1} - 1 )); printf '%s' "$BIONIC_TAIL"
+}
+mid_col() {  # <line> <1-indexed column> <width> -> that many columns, from there
+  local t
+  t="$(from_col "${1:-}" "${2:-1}")"
+  [ -n "$t" ] || { printf ''; return 0; }
+  _bionic_head_cols "$t" "${3:-1}"; printf '%s' "$BIONIC_HEAD"
+}
+squash() { tr '\n' ' ' | tr -s ' ' | sed -e 's/^ //' -e 's/ *$//'; }
+read_col() {  # <block> <column> [<width>] -> that column of every line, in order, squashed
+  local blk="$1" c="$2" w="${3:-}" l
+  while IFS= read -r l; do
+    if [ -n "$w" ]; then mid_col "$l" "$c" "$w"; else from_col "$l" "$c"; fi
+    printf '\n'
+  done < <(printf '%s\n' "$blk") | squash
+}
+distinct_cols() {  # <block> <needle> -> how many DIFFERENT columns the needle starts at
+  local blk="$1" n="$2" l
+  while IFS= read -r l; do
+    case "$l" in *"$n"*) col_of "$l" "$n"; printf '\n' ;; esac
+  done < <(printf '%s\n' "$blk") | sort -u | grep -c . | tr -d ' '
+}
+
+# THE STEP-2 OWNERSHIP BATCH, as `card.sh step2` builds it from this wave's spec
+# (§3 Ownership table). Frozen here rather than read from the artifact: the suite
+# is hermetic and the artifact moves on, but the SHAPE — a 38-column concept, a
+# 46-column owner and a 160-column trailing `test` cell in one batch — is the
+# defect, and it has to stay put to keep walling it.
+# `read -d ''` and not `"$(cat <<EOF)"`: /bin/bash 3.2 parses a here-document
+# inside a command substitution by scanning for the closing paren first, so a row
+# carrying `(D1, ADR-028)` or a `<stamp>` ends up executed rather than read. The
+# read leaves a trailing newline behind, which is trimmed on the next line.
+IFS= read -r -d '' OWN_W15 <<'OWNEOF'
+Patrol verdict	lib/patrol.sh patrol_verdict	lib/stop.sh revive notice; dispatch-preflight.sh arming half	tests/patrol-revive.test.sh, tests/dispatch-preflight.test.sh; tests/cross-gate-agreement.test.sh pins both callers invoke the helper and neither types a multiplier
+Observation	lib/observe.sh observe_agent	hooks/stop-check.sh (prints), hooks/stop-guard.sh (decides)	tests/stop-check.test.sh, tests/stop-guard.test.sh over one fixture world
+Suite classification and backgrounding	lib/cmd-class.sh	lib/walls.sh background-suite guard ARM 1, budget arm	tests/cmd-class.test.sh, tests/background-suite-guard.test.sh
+Tasks table validity	lib/units.sh units_validate / units_rows	governing-skill hook (Write/Edit), evidence gate (commit), dispatch-preflight (REQ-5)	tests/units.test.sh; tests/cross-gate-agreement.test.sh
+Suite roster and self edge	tests/lib/impact.sh	dispatch suites_allowed, landing reconcile	tests/impact.test.sh
+Glyph column width	lib/width.sh	card.sh rows and whole cards; lib/fold.sh refusals	tests/width.test.sh, tests/card.test.sh
+Card content	the step artifact (requirements / spec / plan)	card.sh step1	step2
+Patrol duty text	agents-src/blocks/orchestrator-dispatch.md	rendered dispatch.md	tests/docs-pins.test.sh §18 (bytes), render check
+OWNEOF
+OWN_W15="${OWN_W15%$'\n'}"
+
+# THE STEP-3 TASK BATCH, likewise, from the same wave's plan (## Tasks). Its own
+# overflow has a different driver: `depends` widens to 44 columns on the floor
+# row's dependency list and pushes `agent` off the end.
+IFS= read -r -d '' TASK_W15 <<'TASKEOF'
+T1	REQ-1 (D1, ADR-028): patrol_verdict <stamp> <transcript> <interval> in lib/patrol.sh — reference instant = later of stamp mtime and last bionic-patrol session= user record; idle gaps from record timestamps (bounded tail moved beside it); dead iff an idle gap ≥ interval + interval/10 with no tick, busy, unreadable (reason named).	build	—	senior-implementor
+T2	REQ-2 (D2, ADR-028): extract the observation from hooks/stop-check.sh into payload/scripts/lib/observe.sh (observe_agent, observe_class → alive/idle/delivered; cadence from the roster row's contract, default per the verb's existing classification); stop-check.sh becomes a thin verb printing the same machine line; stop-guard.sh sources it, looks in-process, refuses only alive+undelivered with the four facts printed, allows idle/delivered/landed with the look on stderr; delete the record-lookup, D-1/D-2/D-3/D-6 arms, the consume lock and the duplicated helpers; delete execution-recorder.sh's observation-record arm; verify session-poker.sh and lib/patrol.sh mentions of stop-check.state are sweep references (spec assumption 4 — if a reader, keep the file and amend AC-2.5 with attribution in assumptions.md); name/id and fail-direction fixtures and §12 stop order preserved.	build	—	senior-implementor
+T3	REQ-3 (D5): in agents-src/blocks/orchestrator-dispatch.md the task-list duty line becomes "TaskList, then statuses reconciled with verified reality" (the reorder instruction removed); render; dispatch.md shrinks below 34,993 B; lib/stop.sh:1170 header comment drops the ListAgents duty claim; docs-pins §18 green; patrol-duties-gate §1–§3 unchanged and green.	build	T1	implementor
+T4	REQ-4 AC-4.1/4.2 (D6): tests/lib/impact.sh emits the self edge for any argument matching tests/*.test.sh whether or not the file exists; every other edge still from the ls roster; a non-suite path gains no self edge.	build	—	implementor
+T5	REQ-5 (D7): dispatch-preflight.sh gains units.sh in BIONIC_LIB_WANT and one arm — when the brief's declared or derived suites include tests/run.sh, read the bound plan's ## Tasks via units_rows; refuse naming every step-4/fold-in row at pending/active unless ## SDLC State carries regression-cause:; admit when all landed/dropped; open and silent with no bound plan or no table; no second Tasks parser.	build	T1	senior-implementor
+T6	REQ-4 AC-4.3/4.4 (D6): dispatch-preflight.sh refuses a brief whose subagent_type names the auditor role with Suites: none (fix "name the suites the auditor may re-execute"); researcher/test-runner briefs with Suites: none unchanged; a writer brief naming a not-yet-existing tests/<new>.test.sh under Files: gets it on its roster row (end-to-end of T4).	build	T5, T4	implementor
+T7	REQ-6 (D8): lib/cmd-class.sh — setsid joins the suite wrappers; new cmd_backgrounded <command> (trailing & outside quotes and not &&/2>&1, or a nohup/setsid wrapper); lib/walls.sh ARM 1 sets IS_BACKGROUND=yes when the tool flag is true OR cmd_backgrounded; the six shell forms refused, foreground forms and the main thread untouched; B0/B7/B11 green.	build	—	implementor
+T8	REQ-7 (D9): tests/landing-gate.test.sh:1483-1488 timing row prints info: (centiseconds, cap) and never fails; the four expect_* rows at :1453-1458 untouched; a mutation check (copy with the expected status flipped goes red) recorded in the task's evidence; stop.test.sh 6r/6s/6t and cross-gate §L.4c green.	test	—	implementor
+T9	REQ-8 REQUIRED (D10): units_validate names a raw pipe once (T<n>: <k> cells for <m> columns — a raw pipe inside a cell? escape it as backslash-pipe) and suppresses that row's per-column violations; canonical-sdlc-governing-skill.sh:575-590 builds CONTENT for Edit as the post-edit file (old_string→new_string, // under replace_all; old_string absent ⇒ arm skipped); header comment states both directions; evidence gate reports the same line through the same library; units §9 (escaped pipe) green.	build	—	senior-implementor
+T10	REQ-9 (D11 + AC-9.5): lib/width.sh closed one-column set gains § — “ ” … (plus any other glyph the three steps files' cards use, verified); card.sh computes each structured column's width per batch as max(format width, widest cell) so trailing columns align within a card; WRAPPED shape and all existing card/width pins unchanged; unknown glyphs still conservative.	build	—	implementor
+T11	REQ-10 (D12): card.sh step1 <requirements.md>, step2 <spec.md>, step3 <plan.md> — awk over frontmatter and headings builds the rows and feeds the existing per-kind renderer; Purpose from the first ## Goal paragraph; Branches from working-branch:/integration-branch:/base-sha: ("not declared" when absent); Not Doing bullets; Artifacts; approval line; whole-card row byte-identical to the TSV row; defective artifact ⇒ usage error exit 64; the three steps tmpl files replace their Rows: line with the whole-card invocation (one line each), render, docs-pins §18 green.	build	T10	senior-implementor
+T16	FOLD-IN (A-T11.5, A-orch-20; REQ-9 AC-9.4 line-width invariant vs AC-9.5 per-batch widening): card.sh never emits a line wider than BIONIC_LINE_WIDTH.	build	T11	senior-implementor
+T12	Step-5 floor, ONCE at the integration head: FARM_OUT_ALLOW=1 BIONIC_TEST_JOBS_CEILING=8 bash tests/run.sh in a detached worktree at the head after T1–T11 and T16 land, output to record/wave-15-fixit-182/floor-<sha>.txt; plus the AC-1.1 live read (patrol_verdict against this session's real stamp and transcript → busy) and the AC-10.1 human read (card.sh step1 over this wave's requirements file, shown to Chris) recorded in the walk artifact.	test	T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T16	test-runner
+T13	Step-5 independent auditor over the 45-row matrix at the floored head: falsify each row's evidence at its tier; verdict per row (CONFIRMED / REFUTED / UNVERIFIABLE) to record/wave-15-fixit-182/audit-<sha>.md; Suites: every suite named in the matrix.	verify	T12	auditor
+T14	Step-6 six-axis review (correctness, readability, architecture, security, performance, duplication) at the audited head to record/wave-15-fixit-182/review-summary-<sha>.md; critic only on rows raised to audited (none at approval).	review	T13	senior-implementor
+T15	Version bump 1.8.2 (plugin manifest, help/version examples, rendered manifest) judged at current: 7; ADR-028 status → Accepted with the ratification note.	build	T14	implementor
+TASKEOF
+TASK_W15="${TASK_W15%$'\n'}"
+
+OWN_W15_OUT="$(printf '%s\n' "$OWN_W15" | card ownership)"
+TASK_W15_OUT="$(printf '%s\n' "$TASK_W15" | card task)"
+
+# ── AC-9.4: the invariant itself ─────────────────────────────────────────────
+expect_empty "69: ownership — no line of a real Step-2 ownership batch exceeds the budget" \
+  "$(over_budget "$OWN_W15_OUT")"
+expect_empty "70: task — no line of a real Step-3 task batch exceeds the budget" \
+  "$(over_budget "$TASK_W15_OUT")"
+
+# ── AC-9.5 kept: the trailing columns still start on ONE column ───────────────
+#
+# The ownership format writes its column labels as LITERALS inside the row, so
+# the row's own ` owner `, ` surfaces ` and ` test ` are where those columns
+# start — one column each across the whole batch, or the widening bought nothing.
+expect_eq "69a: …and every row starts its owner column on the same column" "1" \
+  "$(distinct_cols "$OWN_W15_OUT" " owner ")"
+expect_eq "69b: …and its surfaces column" "1" \
+  "$(distinct_cols "$OWN_W15_OUT" " surfaces ")"
+expect_eq "69c: …and its test column" "1" \
+  "$(distinct_cols "$OWN_W15_OUT" " test ")"
+
+# A continuation line carries FOLDED CELL TEXT and nothing else — never a repeat
+# of the row's own column labels, which is what would make it read as a new row.
+OWN_CONT="$(printf '%s\n' "$OWN_W15_OUT" | grep -vF ' test ' | grep -v '^  Ownership$')"
+expect_absent "69d: no continuation line repeats the owner label" " owner " "$OWN_CONT"
+expect_absent "69e: …nor the surfaces label" " surfaces " "$OWN_CONT"
+
+# ── NOTHING IS LOST IN THE SHRINK ────────────────────────────────────────────
+#
+# Every word of the trailing `test` column comes back, in order, read off the
+# rendered block BY COLUMN. A renderer that met the invariant by truncating the
+# cell would pass every row above this one and fail here.
+OWN_TESTCOL="$(( $(col_of "$(printf '%s\n' "$OWN_W15_OUT" | grep -F ' test ' | sed -n '1p')" " test ") + 6 ))"
+# COMPARED WITH THE LAYOUT REMOVED, and that is the renderer's own rule rather
+# than a slack assertion: a suite path is longer than the column the shrink left,
+# and an over-long WORD is split at the column instead of being dropped (row 29,
+# width.sh's bionic_wrap). So the fold puts a line break inside `…patrol-revive.test`
+# / `.sh`, where no space ever was. What must hold here is that no CHARACTER was
+# lost and none was reordered; where the breaks fall is rows 15 and 29's business.
+nospace() { tr -d '[:space:]'; }
+expect_eq "69f: the trailing test column reads back character for character, every row" \
+  "$(printf '%s\n' "$OWN_W15" | awk -F'\t' '{print $4}' | nospace)" \
+  "$(read_col "$(printf '%s\n' "$OWN_W15_OUT" | tail -n +2)" "$OWN_TESTCOL" | nospace)"
+
+# The task card's own two: the structured `depends` column that had to shrink,
+# and the trailing `agent` column it was shrunk for. Both are read at the column
+# the HEADER labels, which pins the header to the rows it labels at the same time.
+TASK_HDR="$(printf '%s\n' "$TASK_W15_OUT" | sed -n '1p')"
+TASK_DEPCOL="$(col_of "$TASK_HDR" "depends")"
+TASK_AGCOL="$(col_of "$TASK_HDR" "agent")"
+TASK_BODY="$(printf '%s\n' "$TASK_W15_OUT" | tail -n +2)"
+expect_eq "70a: the depends column reads back word for word, every row" \
+  "$(printf '%s\n' "$TASK_W15" | awk -F'\t' '{print $4}' | squash)" \
+  "$(read_col "$TASK_BODY" "$TASK_DEPCOL" "$(( TASK_AGCOL - TASK_DEPCOL ))")"
+expect_eq "70b: …and so does the trailing agent column" \
+  "$(printf '%s\n' "$TASK_W15" | awk -F'\t' '{print $5}' | squash)" \
+  "$(read_col "$TASK_BODY" "$TASK_AGCOL")"
+
+# ── A BATCH THAT FITS IS UNTOUCHED ───────────────────────────────────────────
+#
+# The shrink is a response to an OVERFLOW, not a new default: a batch whose widest
+# row still fits the budget renders exactly what AC-9.5's widening alone rendered,
+# byte for byte, with no column narrowed and no structured cell folded. This is
+# Section 6's own AC-9.5 pair (rows 40/41) pinned as BYTES rather than as two
+# start columns, which is what stops a shrink rule from paying for the invariant
+# with every card that never had the problem.
+OWN_FIT_FMT='    %-12s owner %-19s surfaces %-22s test %s'
+OWN_FIT_WANT="$(printf '%s\n' \
+  "  Ownership" \
+  "$(fmt_render "$OWN_FIT_FMT" 'concept a' 'lib/x.sh' 'surfaces text a' 'test a' | sed -e 's/ *$//')" \
+  "$(fmt_render "$OWN_FIT_FMT" 'concept b' 'tests/lib/impact.sh' 'surfaces text b' 'test b' | sed -e 's/ *$//')")"
+OWN_FIT_GOT="$(printf 'concept a\tlib/x.sh\tsurfaces text a\ttest a\nconcept b\ttests/lib/impact.sh\tsurfaces text b\ttest b\n' | card ownership)"
+expect_eq "71: a batch that fits renders byte for byte what per-batch widening alone rendered" \
+  "$OWN_FIT_WANT" "$OWN_FIT_GOT"
+
 finish
