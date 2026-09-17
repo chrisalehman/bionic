@@ -1166,12 +1166,11 @@ return 2
 # THE PATROL-DUTIES WALL — task-dispatch-wall-channel-loss, T5.
 #
 # Stop. On every orchestrator turn end: if the turn was started by a PATROL TICK,
-# refuse the stop once unless the tick's THREE standing duties were performed
-# inside it — a subagent-panel refresh (`ListAgents`), a task-list refresh
-# (`TaskList`, or a write naming the active plan file), and an ANSWER to any
-# `poker: FILL` line the tick printed (the named dispatches, or an explicit
-# `fill-declined: <reason>`). Any other turn passes untouched, as does any
-# ambiguity along the way.
+# refuse the stop once unless the tick's TWO standing duties were performed
+# inside it — a task-list refresh (`TaskList`, or a write naming the active plan
+# file), and an ANSWER to any `poker: FILL` line the tick printed (the named
+# dispatches, or an explicit `fill-declined: <reason>`). Any other turn passes
+# untouched, as does any ambiguity along the way.
 #
 # WHY A WALL AND NOT BETTER WORDING. The duties live in the Patrol prompt today,
 # and a prompt is text: it asks. Every rule in this repo that actually binds is a
