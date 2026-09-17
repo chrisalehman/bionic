@@ -342,4 +342,78 @@ HDRONLY="$(printf '' | card decision)"
 expect_eq "32: with no rows on stdin the header prints alone" \
   "$(hdr_build "Decisions" "$OLD_FMT_DEC" "2:serves" "3:ADR")" "$HDRONLY"
 
+section "Section 6: T10 — REQ-9 the widened glyph set and per-batch column widths"
+
+# AC-9.1 / AC-9.2. A glyph outside the OLD closed set (§, the curly quotes) in
+# the row's own folding cell must not move a trailing column — for every kind,
+# not just requirement, which is what Chris's screenshot showed. Each pair below
+# differs ONLY in the folding cell (glyphs vs its ASCII twin, same word count),
+# fed as its OWN one-row batch so AC-9.5's per-batch widening (Section 6 below)
+# cannot be what is holding the columns together — this is the measurement bug
+# alone. Compared in COLUMNS via width.sh's own `bionic_cols` (already sourced
+# above as `cols`), never in bytes: this repo's `/usr/bin/awk` measures
+# multi-byte `length()` in bytes regardless of locale (verified live — the
+# `awk length` reading the task row names would silently pass on the very bug
+# this section exists to catch), so the differential is taken the way the rest
+# of this suite already takes one — bash's own character-aware string ops under
+# the ambient UTF-8 locale, `cols()` for the column count. See A-T10.1.
+GLYPH_FOLD='a § — “x” …'
+PLAIN_FOLD='a x x xxx x'
+
+REQ9_G="$(printf 'REQ-9\treq text\t%s\t3\n' "$GLYPH_FOLD" | card requirement | sed -n '3p')"
+REQ9_P="$(printf 'REQ-9\treq text\t%s\t3\n' "$PLAIN_FOLD" | card requirement | sed -n '3p')"
+expect_eq "33: requirement — § — “ ” … in the provenance cell do not move ACs" \
+  "$(cols "${REQ9_P%%ACs*}")" "$(cols "${REQ9_G%%ACs*}")"
+
+DEC9_G="$(printf 'D9\t%s\tREQ-9\tnone\n' "$GLYPH_FOLD" | card decision | grep -v '^  Decisions')"
+DEC9_P="$(printf 'D9\t%s\tREQ-9\tnone\n' "$PLAIN_FOLD" | card decision | grep -v '^  Decisions')"
+expect_eq "34: decision — § — “ ” … in the decision cell do not move REQ-9" \
+  "$(cols "${DEC9_P%%REQ-9*}")" "$(cols "${DEC9_G%%REQ-9*}")"
+
+OWN9_G="$(printf 'concept\towner\t%s\ttests/x.test.sh\n' "$GLYPH_FOLD" | card ownership | grep -v '^  Ownership')"
+OWN9_P="$(printf 'concept\towner\t%s\ttests/x.test.sh\n' "$PLAIN_FOLD" | card ownership | grep -v '^  Ownership')"
+expect_eq "35: ownership — § — “ ” … in the surfaces cell do not move test" \
+  "$(cols "${OWN9_P%%tests/x.test.sh*}")" "$(cols "${OWN9_G%%tests/x.test.sh*}")"
+
+EVAL9_G="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$GLYPH_FOLD" | card eval-design | tail -n +2)"
+EVAL9_P="$(printf 'REQ-9\t%s\t2\t1\t3\t0\t1\n' "$PLAIN_FOLD" | card eval-design | tail -n +2)"
+expect_eq "36: eval-design — § — “ ” … in the description cell keep every count column aligned" \
+  "$(cols "$EVAL9_P")" "$(cols "$EVAL9_G")"
+
+TASK9_G="$(printf 'T9\t%s\tbuild\t—\timplementor\n' "$GLYPH_FOLD" | card task | grep -v '^  Tasks')"
+TASK9_P="$(printf 'T9\t%s\tbuild\t—\timplementor\n' "$PLAIN_FOLD" | card task | grep -v '^  Tasks')"
+expect_eq "37: task — § — “ ” … in the task cell do not move build" \
+  "$(cols "${TASK9_P%%build*}")" "$(cols "${TASK9_G%%build*}")"
+
+# AC-9.3 (still holds with the widened set): a glyph-laden cell too long for its
+# column still folds, the trailing columns stay on line one, and a continuation
+# line carries none of them.
+LONG_GLYPH='a decision whose provenance carries a § mark, an — em dash, a “quoted” phrase and … more words to force the fold onto a continuation line'
+DEC_LONG_G="$(printf 'D9\t%s\tREQ-9\tnone\n' "$LONG_GLYPH" | card decision | grep -v '^  Decisions')"
+expect_true "38: the glyph-laden cell actually folded (more than one line)" \
+  test "$(printf '%s\n' "$DEC_LONG_G" | wc -l | tr -d ' ')" -ge 2
+DEC_LONG_CONT="$(printf '%s\n' "$DEC_LONG_G" | sed -n '2,$p')"
+expect_absent "38a: …and no continuation line carries the trailing REQ column" "REQ-9" "$DEC_LONG_CONT"
+expect_absent "38b: …and none carries the trailing ADR column" "none" "$DEC_LONG_CONT"
+
+# AC-9.4 (still holds): a glyph outside even the widened set (CJK) is read
+# conservatively and no emitted line exceeds the budget — task kind pins this
+# already (28/28a); this repeats it for a kind with a narrower fold column.
+CJK_DEC="$(printf 'D9\ta 設計 decision cell\tREQ-9\tnone\n' | card decision)"
+expect_empty "39: decision — a CJK cell stays inside the budget on every line" "$(over_budget "$CJK_DEC")"
+
+# AC-9.5. Two ownership rows in ONE batch whose OWNER cells differ in width
+# (`lib/x.sh` fits the format's own 14-column width; `tests/lib/impact.sh`
+# does not) must still start `surfaces` and `test` on the SAME column in both
+# rows — the format's declared width is a floor, not the answer, once a wider
+# cell has been seen anywhere in the same card.
+OWN_BATCH="$(printf 'concept a\tlib/x.sh\tsurfaces text a\ttest a\nconcept b\ttests/lib/impact.sh\tsurfaces text b\ttest b\n' \
+  | card ownership | grep -v '^  Ownership')"
+OWN_ROW1="$(printf '%s\n' "$OWN_BATCH" | sed -n '1p')"
+OWN_ROW2="$(printf '%s\n' "$OWN_BATCH" | sed -n '2p')"
+expect_eq "40: ownership — surfaces starts on the same column for both owner widths" \
+  "$(cols "${OWN_ROW1%%surfaces text a*}")" "$(cols "${OWN_ROW2%%surfaces text b*}")"
+expect_eq "41: ownership — test starts on the same column for both owner widths" \
+  "$(cols "${OWN_ROW1%%test a*}")" "$(cols "${OWN_ROW2%%test b*}")"
+
 finish
