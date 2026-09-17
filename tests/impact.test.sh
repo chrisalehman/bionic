@@ -174,6 +174,32 @@ section "§A the edge kinds"
 expect_eq "self: editing a suite derives that suite" \
   "a.test.sh" "$(suites "$FX" tests/a.test.sh)"
 
+# self, not-yet-existing (REQ-4 AC-4.1/4.2, D6). A writer's brief names a suite
+# it has not created yet: impact.sh:601 built the self edge exclusively from
+# `ls tests/*.test.sh` at graph-build time, so a not-yet-existing path derived
+# nothing and the writer creating it was refused permission to run it (wave-14
+# A-orch-62; research row 4a, proven live: `bash tests/lib/impact.sh
+# tests/brand-new-thing.test.sh` on the real tree prints three dir-ref lines and
+# no self edge). The self edge is a fact about the ARGUMENT's shape — does it
+# look like tests/<x>.test.sh — not about whether `ls` found it at graph-build
+# time, so it has to fire at query time, whether or not the file exists.
+expect_eq "self: a not-yet-existing tests/*.test.sh path still derives itself" \
+  "brand-new.test.sh" "$(suites "$FX" tests/brand-new.test.sh)"
+expect_eq "self: the reason for the not-yet-existing path is self, not absent" \
+  "self" "$(reason_for "$FX" brand-new.test.sh tests/brand-new.test.sh | cut -d: -f1)"
+# PAIRED: this does not widen to every path that merely looks like it belongs
+# under tests/ — a non-.test.sh file under tests/lib, or any path outside
+# tests/ altogether, still derives no self edge and no suite at all.
+expect_eq "self: a non-suite path under tests/lib gains no self edge" \
+  "" "$(suites "$FX" tests/lib/brand-new.sh)"
+expect_eq "self: a non-suite path outside tests/ gains no self edge" \
+  "" "$(suites "$FX" lib/brand-new.sh)"
+# PAIRED: an EXISTING suite's own self edge is unmoved by this — still exactly
+# one line, still reason self, not doubled by a synthesized edge alongside the
+# graph's real one.
+expect_eq "self: an existing suite still derives exactly one line, not doubled" \
+  "1" "$(BIONIC_IMPACT_ROOT="$FX" bash "$IMPACT" tests/a.test.sh 2>/dev/null | grep -c .)"
+
 # source — b sources tests/lib/helper.sh; nothing else does.
 expect_eq "source: the sourcing suite, and only it" \
   "b.test.sh" "$(suites "$FX" tests/lib/helper.sh)"
@@ -417,6 +443,20 @@ expect_eq "real: …by NAMING the path, not merely by copying the payload" \
 # suite: a payload file close-out.test.sh does NOT name answers `payload-copy`.
 expect_eq "real: …while a payload file that suite does NOT name is only a payload-copy" \
   "payload-copy" "$(reason_for "$REPO" close-out.test.sh payload/scripts/lib/width.sh | cut -d: -f1)"
+
+# REQ-4 AC-4.1 (D6) on the real tree — the exact fixture research row 4a proved
+# live at main @ c0e2c18: `bash tests/lib/impact.sh tests/brand-new-thing.test.sh`
+# printed three dir-ref lines and no self edge there. Here it must carry its own
+# self edge, with nothing on disk for it to.
+expect_contains "real: a not-yet-existing suite still derives itself" \
+  "brand-new-thing.test.sh" "$(oneline "$REPO" tests/brand-new-thing.test.sh)"
+expect_eq "real: …and the reason is self" \
+  "self" "$(reason_for "$REPO" brand-new-thing.test.sh tests/brand-new-thing.test.sh | cut -d: -f1)"
+# PAIRED: a Files: path outside tests/ — the AC-4.2 non-suite case — still
+# gains no self edge on the real tree either (there is no top-level lib/, and
+# nothing reads it).
+expect_eq "real: a non-suite path outside tests/ gains no self edge (AC-4.2)" \
+  "" "$(suites "$REPO" lib/x.sh)"
 
 # THE REGISTRATION-PIN CENSUS IS GONE (fixit 1.5.1, D-3). It derived the set of
 # suites asserting their own `run "<self>"` line in tests/run.sh and required
