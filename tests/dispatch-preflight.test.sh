@@ -2705,6 +2705,48 @@ s21_backdate() {  # <file> <seconds ago>
   touch -t "$ts" "$1"
 }
 
+# ---------- the transcript the staleness half reads (REQ-1, AC-1.1/1.2) ----------
+#
+# THE STALENESS HALF IS AN IDLE-TIME PREDICATE NOW (ADR-028). A session cron fires only
+# while the session is idle, so a stamp past the fire window is a DEATH only when an idle
+# gap at least that long has passed since it with no tick in it; a stamp that went stale
+# under a long busy turn is an advisory and the dispatch proceeds. Every armed-but-dead
+# fixture below therefore carries a transcript with a real gap, and the busy fixture carries
+# one without. The suite's default transcript (`S5_LIVE_TRANSCRIPT`, fixed 2026-09-05
+# timestamps) predates every stamp this section backdates, so it reads as BUSY and is the
+# right default for every fixture here that is not about the staleness half at all.
+#
+# RELATIVE TO NOW, REBUILT AT EACH CALL: the gap has to fall after the stamp, and the stamp
+# is backdated by between 50 and 4000 seconds. Nothing here sleeps.
+s21_iso() {  # <seconds ago>
+  date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
+}
+
+s21_idle_tr() {  # -> path of a transcript whose last turn opened after a long idle gap
+  { printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
+      "$(s21_iso 10000)"
+    printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"carry on"}}\n' \
+      "$(s21_iso 1)"
+  } > "$SANDBOX/.s21-idle.jsonl"
+  printf '%s' "$SANDBOX/.s21-idle.jsonl"
+}
+
+s21_busy_tr() {  # -> path of a transcript holding one continuous 2500s turn
+  { printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":"a long piece of work"}}\n' \
+      "$(s21_iso 2500)"
+    for _s21_s in 2400 2100 1800 1500 1200 900 600 300 120 30 5; do
+      printf '{"type":"assistant","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"working"}]}}\n' \
+        "$(s21_iso "$_s21_s")"
+    done
+  } > "$SANDBOX/.s21-busy.jsonl"
+  printf '%s' "$SANDBOX/.s21-busy.jsonl"
+}
+
+s21_stale_payload() {  # <sid> <repo> -> a dispatch payload carrying the idle transcript
+  mk_agent_payload "$1" "$2" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$(s21_idle_tr)"
+}
+
 # ---------- absent stamp: never armed ----------
 REPO=$(make_repo r21a yes)
 write_attestation "$REPO" "$SID_A"
@@ -2730,12 +2772,39 @@ expect_status "…and journals nothing: a refused dispatch is not a launch" "0" 
 # ---------- stale stamp: armed, then died ----------
 REPO=$(make_repo r21b yes)
 write_attestation "$REPO" "$SID_A"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1200s default
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # past the 1320s fire window
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "a STALE Patrol stamp refuses the dispatch" "2" "$GATE_ST"
 expect_contains "…and names the armed-but-dead state, not the never-armed one" \
   "stopped firing" "$GATE_ERR"
 expect_absent "…so the two arms cannot be confused in a transcript" "never armed" "$GATE_ERR"
+
+# ---------- stale stamp, busy session: an advisory, and the dispatch proceeds ----------
+#
+# AC-1.1, at the wall that blocks mid-turn by construction. The SAME 4000s stamp as r21b,
+# and the only thing that differs is the transcript: one continuous turn with no idle gap
+# in it, so the cron had no opportunity to fire and its silence proves nothing. This is the
+# 2026-09-15 field case — a dispatch refused because the orchestrator was working.
+REPO=$(make_repo r21b2 yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$(s21_busy_tr)")"
+expect_status "a stale stamp under a BUSY session lets the dispatch through" "0" "$GATE_ST"
+expect_absent "…and does not claim the Patrol stopped firing" "stopped firing" "$GATE_ERR"
+expect_contains "…but says the stamp is stale and why that is not a verdict" \
+  "busy" "$GATE_ERR"
+
+# ---------- stale stamp, unreadable idle time: an advisory naming the reason ----------
+#
+# AC-1.3 at this wall. The transcript path in the payload names a file that is not there;
+# a wall that cannot observe the thing it refuses on does not refuse.
+REPO=$(make_repo r21b3 yes)
+write_attestation "$REPO" "$SID_A"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" w99-impl claude-sonnet-5 "$SANDBOX/.s21-absent.jsonl")"
+expect_status "a stale stamp whose idle time cannot be read lets the dispatch through" \
+  "0" "$GATE_ST"
+expect_contains "…naming the reason it could not measure" "no readable transcript" "$GATE_ERR"
 
 # ---------- fresh stamp: passes, silently ----------
 REPO=$(make_repo r21c yes)
@@ -2761,22 +2830,28 @@ run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
 expect_status "with NO wave active an unarmed Patrol is not this gate's business" "0" "$GATE_ST"
 expect_empty "…and the gate is silent, as it is for every other check outside a wave" "$GATE_ERR"
 
-# ---------- the threshold is 2x the poker-interval, and follows the config knob ----------
+# ---------- the threshold is ONE FIRE WINDOW, and follows the config knob ----------
+#
+# AMENDED at REQ-1 (T1). The threshold was 2x the poker-interval (120s for this fixture's
+# 1m); it is the FIRE WINDOW now — the interval plus the scheduler's jitter, a tenth of the
+# period, so 66s — and the two fixtures move with it. The assertion is the same one either
+# side of the boundary: inside it the stamp is not stale at all, past it the transcript
+# decides.
 REPO=$(make_repo r21f yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 1m\n' > "$REPO/.bionic/config.yaml"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100     # inside 2 x 60s
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 50      # inside the 66s fire window
 run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
-expect_status "a stamp inside 2x the CONFIGURED interval passes (100s of 120s)" "0" "$GATE_ST"
+expect_status "a stamp inside the CONFIGURED fire window passes (50s of 66s)" "0" "$GATE_ST"
 
 REPO=$(make_repo r21g yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 1m\n' > "$REPO/.bionic/config.yaml"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 200     # past 2 x 60s
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 200     # past the 66s fire window
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "…and one past it refuses, on the same fixture the default would have passed" \
   "2" "$GATE_ST"
-expect_contains "…naming the interval it measured against" "120s" "$GATE_VERR"
+expect_contains "…naming the fire window it measured against" "66s fire window" "$GATE_VERR"
 
 # ---------- a symlinked stamp is refused, never followed ----------
 REPO=$(make_repo r21h yes)
@@ -2827,8 +2902,8 @@ expect_contains "…the never-armed arm still fires" "never armed" "$GATE_VERR"
 REPO=$(make_repo r21k yes)
 write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
-s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # > 2 x the 1200s default
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000   # past the 1320s default window
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "a stale stamp under an unreadable interval refuses at the DEFAULT threshold" \
   "2" "$GATE_ST"
 expect_contains "…naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
@@ -2868,10 +2943,14 @@ write_attestation "$REPO" "$SID_A"
 printf 'poker-interval: 30\n' > "$REPO/.bionic/config.yaml"
 s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 100   # fresh at 1200s, ancient at 10s
 S21_SAVED_GATE="$GATE"; GATE="$S21_TREE_HOOKS/dispatch-preflight.sh"
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "r21l the fallback threshold moves with the POKER's constant, not the gate's" \
   "2" "$GATE_ST"
-expect_contains "…and measures against 2x the doctored default" "20s" "$GATE_VERR"
+# AMENDED at REQ-1 (T1): the threshold is the fire window, so the doctored 10s default is
+# measured against as 11s rather than as 2x10s. The fact under test is unchanged — the
+# number moves with the POKER's constant and not with one typed in the gate.
+expect_contains "…and measures against the doctored default's own fire window" \
+  "11s fire window" "$GATE_VERR"
 GATE="$S21_SAVED_GATE"
 
 # r21m — THE POKER ITSELF UNREACHABLE. `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/` is the
@@ -5597,7 +5676,7 @@ expect_contains "§a3 …while still naming the one half the model owns" "CronCr
 REPO=$(make_repo ra3b yes)
 write_attestation "$REPO" "$SID_A"
 s21_backdate "$(s21_stamp_path "$REPO" "$SID_A")" 4000
-run_gate "$(mk_agent_payload "$SID_A" "$REPO")"
+run_gate "$(s21_stale_payload "$SID_A" "$REPO")"
 expect_status "§a3 the STALE arm is untouched by the A3 rewording" "2" "$GATE_ST"
 expect_contains "§a3 …still naming the armed-but-dead state" "stopped firing" "$GATE_ERR"
 expect_contains "§a3 …and still offering the hand re-arm, which is A4's remedy" \
