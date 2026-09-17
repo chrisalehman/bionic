@@ -3,9 +3,10 @@
 #
 # ONE script, THREE registrations, one job: write down what ACTUALLY RAN.
 #
-#   PostToolUse|Bash  — the OBSERVATION arm. When hooks/stop-check.sh has run and
-#                       printed its machine line, that line becomes the record a
-#                       later stop spends (target, activity level, observer).
+#   PostToolUse|Bash  — the PRESSURE arm, and nothing else since epic-23 wave-15. It
+#                       used to copy hooks/stop-check.sh's machine line into an
+#                       observation record a later stop spent; the stop gate takes its
+#                       own look now (ADR-028, REQ-2) and that record is deleted.
 #   PostToolUse|Agent — the ROSTER arm. When a dispatch has actually spawned, the
 #                       session roster's `intended` row is completed with the
 #                       full agent id and status `confirmed`.
@@ -16,27 +17,15 @@
 #                       `agent_type` — which carries the subagent TYPE, so the join
 #                       never matched (t4-probes-report.md §5.1).
 #
-# WHY POSTTOOLUSE IS THE WHOLE POINT. Both facts this script records are claims
-# that something HAPPENED, and a PreToolUse hook cannot make either one: it fires
-# before the tool runs and never learns whether it ran, succeeded, or was blocked
-# further down the pipeline. The predecessor recorded observations from
-# PreToolUse|Bash by re-parsing the command TEXT with a grammar of its own, and
-# paid for it twice — once when the two grammars diverged and the record named an
-# agent the operator had not examined (Step-6 review F-1), and once as the
-# standing residual where a refused or mistyped command still left a record
-# behind (tests/cross-gate-agreement.test.sh §C case 6, critic finding A). Both
-# defects are the same defect: a second reader guessing at what the first one
-# did. Here there is no second reader. The observation prints one machine line on
-# its success path and this script copies it; a command that was refused, that
-# exited non-zero, or that merely MENTIONS stop-check.sh prints no such line and
-# leaves nothing behind. Task 4/1's probe confirmed the harness never fires this
-# event for a call it blocked pre-dispatch, so the gating is the platform's, not
-# ours (record/w3-slice1-posttooluse-probe.md §5).
+# WHY POSTTOOLUSE IS THE WHOLE POINT. The facts this script records are claims that something
+# HAPPENED, and a PreToolUse hook cannot make one: it fires before the tool runs and never
+# learns whether it ran, succeeded, or was blocked further down the pipeline. Task 4/1's
+# probe confirmed the harness never fires this event for a call it blocked pre-dispatch, so
+# the gating is the platform's, not ours (record/w3-slice1-posttooluse-probe.md §5).
 #
 # IT NEVER BLOCKS — PostToolUse cannot: the tool has already run. Every failure
 # path here therefore exits 0 having recorded nothing, and the cost lands where
-# §7 puts it: an unwritten observation refuses a stop that one re-observation
-# immediately re-arms, and an uncompleted roster row stays `intended`, which is
+# §7 puts it: an uncompleted roster row stays `intended`, which is
 # exactly the signal that a dispatch never spawned.
 #
 # INERT OUTSIDE AN ACTIVE WAVE, like every other gate in this family, and inert
@@ -49,17 +38,10 @@
 
 set -uo pipefail
 
-STATE_VERSION="v1"
-# The most records the observation state may retain (inherited bound, Step-6
-# review P2): every stop walks this file line by line, so its length is a cost
-# each one pays. Fail-closed — a dropped record refuses a stop that one
-# re-observation re-arms.
-MAX_RECORDS=200
-# The producer's schema token, matched as a FIXED STRING and anchored at
-# line start. hooks/stop-check.sh owns the other half of this constant; the two
-# are held together by tests/cross-gate-agreement.test.sh §C case 6, which drives
-# the real producer's real output into this script.
-MACHINE_SCHEMA="stop-check-observation/v1"
+# THE OBSERVATION CONSTANTS ARE GONE WITH THE ARM (epic-23 wave-15, REQ-2): the record's
+# schema version, the cap on how many records it held, and the producer's machine-line token
+# this script matched as a fixed string. payload/scripts/lib/observe.sh owns the token now,
+# and nothing writes the record at all.
 ROSTER_VERSION="v1"
 
 BIONIC_INPUT=$(cat)
@@ -129,8 +111,6 @@ session_subagents_dir() {  # <transcript-path>
 # for the roster arm it is the presence of the two payload fields the completion
 # is made of. Everything expensive is below this line.
 
-STDOUT=""
-MLINES=""
 if [ -n "$IS_START" ]; then
   # THE ONE FIELD THE IDENTIFICATION IS MADE OF, and the whole of the cheap test
   # for this arm. It used to read `agent_type` beside it as "the teammate's
@@ -157,15 +137,13 @@ if [ -n "$IS_START" ]; then
   START_ID=$(_jq '.agent_id')
   [ -n "$START_ID" ] || exit 0
 elif [ "$TOOL_NAME" = "Bash" ]; then
-  # A Bash tool_response is an object carrying stdout/stderr (task 4/1 capture
-  # A); a failed call can hand back a bare string instead, and `tostring` keeps
-  # that case parseable rather than crashing jq. Only STDOUT is searched — the
-  # machine line is printed there, and searching stderr would let a quoted error
-  # message masquerade as evidence.
-  STDOUT=$(printf '%s' "$BIONIC_INPUT" \
-    | jq -r 'if (.tool_response | type) == "object" then (.tool_response.stdout // "")
-             else (.tool_response // "" | tostring) end' 2>/dev/null)
-  MLINES=$(printf '%s\n' "$STDOUT" | grep "^${MACHINE_SCHEMA}|")
+  # A BASH CALL HAS NOTHING TO READ ANY MORE (REQ-2). This branch used to pull the tool's
+  # whole stdout through jq and grep it for the observation's machine line, on EVERY Bash
+  # call in the session, so that the line could become a record a later stop spent. The stop
+  # gate takes its own look now and the record is deleted; what a Bash payload is still here
+  # for is the pressure sample below, which is a fact about the call having happened. No
+  # read, no grep, and the arm exits immediately after the sample.
+  : 
   # THE RESIDUAL, stated rather than claimed away: stdout is not a trusted
   # channel — a command that PRINTS a well-formed machine line produces a record
   # without any observation having run. It is a strictly smaller residual than
@@ -175,17 +153,11 @@ elif [ "$TOOL_NAME" = "Bash" ]; then
   # that agent's current log mtime and size, all of which the gate re-checks
   # against the live file before it discharges anything.
   #
-  # THE EARLY EXIT MOVED, IT DID NOT GO (wave-roster-lifecycle S9, then Step-6
-  # review P-2). It used to `exit 0` right here — the cheapest possible test,
-  # before any git resolution, for the overwhelming majority of Bash calls that
-  # never ran stop-check.sh. S9 needed a pressure sample on every ENGAGED Bash
-  # call, which is a fact about this call having happened rather than about what
-  # it printed, and the engagement switch is below the loader — so the exit had
-  # to move below the sample rather than stay above it. It was deleted instead,
-  # and this hook is PostToolUse on every Bash call: 0.01 s became 0.10 s. The
-  # exit now sits immediately after the sample (search: THE EARLY EXIT,
-  # RESTORED), which is the first line at which the sample has landed and
-  # nothing below it has any work to do for an empty MLINES.
+  # THE EARLY EXIT SITS IMMEDIATELY AFTER THE PRESSURE SAMPLE (wave-roster-lifecycle S9,
+  # then Step-6 review P-2, then REQ-2). S9 needed a sample on every ENGAGED Bash call and
+  # the engagement switch is below the loader, so the exit had to move below the sample
+  # rather than stay above it. With the observation arm deleted the sample is the only
+  # business a Bash payload has here, and the exit is unconditional.
 else
   # TWO SPELLINGS, ONE FACT (AC-10). The dispatch modes name the same field
   # differently: an async task launch returns `tool_response.agentId` (camel),
@@ -369,15 +341,13 @@ if [ "$TOOL_NAME" = "Bash" ]; then
   pressure_sample >/dev/null 2>&1 || :
 fi
 
-# ---------- THE EARLY EXIT, RESTORED (Step-6 review P-2) ----------
+# ---------- THE EARLY EXIT, NOW UNCONDITIONAL FOR BASH (Step-6 review P-2; REQ-2) ----------
 #
-# A Bash call that printed no machine line has nothing for any arm below: ARM 1 is the
-# only Bash consumer and its `<<<"$MLINES"` loop writes nothing on an empty value. The
-# sample above has already landed, so this exit costs the ring nothing — and it saves the
-# state-path resolution, the symlink guards and the roster read on the overwhelming
-# majority of Bash calls in a session. Measured on one synthetic PostToolUse Bash payload
-# with an empty MLINES: 0.10 s before, 0.02 s after.
-if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ] && [ -z "$MLINES" ]; then
+# A Bash call has no arm below it any more — the observation record went with ADR-028 — so
+# the sample above is the whole of this hook's business on that channel. It used to exit here
+# only when the call had printed no machine line, which cost a jq pass over every tool
+# response in the session; now nothing below this line runs for a Bash payload at all.
+if [ -z "$IS_START" ] && [ "$TOOL_NAME" = "Bash" ]; then
   exit 0
 fi
 
@@ -407,7 +377,6 @@ fi
 # shape. Refuse rather than follow; refusing to RECORD only makes the later stop
 # refuse, which is the safe direction.
 STATE_DIR="$BIONIC_ROOT/.bionic/tmp"
-STATE_FILE="$STATE_DIR/stop-check.state"
 ROSTER_FILE="$STATE_DIR/roster-${BIONIC_SID}.state"
 [ -L "$BIONIC_ROOT/.bionic" ] && exit 0
 [ -L "$STATE_DIR" ] && exit 0
@@ -594,19 +563,15 @@ if [ "$TOOL_NAME" = "Agent" ]; then
     END { if (tid != "" && !seen) printf "|teammate_id=%s", tid }')
   printf '%s\n' "$COMPLETED" >> "$ROSTER_FILE" 2>/dev/null
 
-  # NO BOUND ON THE ROSTER, deliberately, and NOT by inheritance from the
-  # observation state above — the two files answer different questions and only
-  # one of them can afford to forget (Step-6 critic F-1, reproduced end to end in
-  # record/w3-critic-repro-cap.sh).
-  #
-  # A record in `stop-check.state` is a LOOK, spent by the next stop; dropping the
-  # oldest refuses a stop that one re-observation immediately re-arms, so the cap
-  # there degrades to the closed side. A roster row is a CONTRACT — the only copy
+  # NO BOUND ON THE ROSTER, deliberately (Step-6 critic F-1, reproduced end to end in
+  # record/w3-critic-repro-cap.sh). The observation record this reasoning contrasted the
+  # roster with is deleted (REQ-2), and the half that mattered is the half that survives:
+  # a roster row is a CONTRACT — the only copy
   # of the progress path, cadence and subprocess claim the brief declared — and
-  # hooks/stop-guard.sh sources the D-6 progress-staleness refusal from it. Drop a
-  # LIVE agent's row and that wall cannot fire: the stop is PERMITTED, the operator
-  # is shown `progress=(none recorded)`, which is indistinguishable from "the brief
-  # declared no contract", and nothing warns on any surface. Eviction by recency
+  # the look hooks/stop-guard.sh takes reads its progress path, its deliverables and its
+  # cadence off it. Drop a LIVE agent's row and that look has nothing to measure: the stop is
+  # PERMITTED, the operator is shown a contract that says nothing, which is
+  # indistinguishable from "the brief declared no contract". Eviction by recency
   # cannot tell a finished agent from a running one, and the rows most likely to be
   # oldest are the long-running agents D-6 exists for. That is a wall going inert,
   # not a look being refused.
@@ -953,191 +918,19 @@ if [ -n "$IS_START" ]; then
 fi
 
 # ============================================================
-# ARM 1 — the OBSERVATION (PostToolUse|Bash).
+# ARM 1 — THE OBSERVATION RECORD IS GONE (epic-23 wave-15-fixit-182, REQ-2; ADR-028).
 # ============================================================
-
-[ -L "$STATE_FILE" ] && exit 0
-
-TRANSCRIPT=$(_jq '.transcript_path')
-SUB=$(session_subagents_dir "$TRANSCRIPT") || exit 0
-
-# THE OBSERVER (task 4/1, assumption A resolved FULL). A top-level `agent_id` is
-# present on subagent-invoked payloads and absent on the orchestrator's — that is
-# the entire discriminator, and it is positive rather than inferential: present
-# means "this subagent made the call, and here is which one". Absence is rendered
-# as a literal token rather than an empty value so a consumer never has to decide
-# whether a blank means "the orchestrator" or "the field was not written" — the
-# same absence-is-its-own-field rule the roster row follows. Agent ids are
-# `a`-prefixed hex (capture B/F), so the token cannot collide with one.
-OBSERVER=$(sanitize "$(_jq '.agent_id')" 200)
-[ -n "$OBSERVER" ] || OBSERVER="orchestrator"
-
-# THE DIRECTORIES THIS SESSION HAS ADOPTED INTO (epic-20 W1 B-1). DELIBERATELY DUPLICATED
-# from hooks/stop-guard.sh's copy, per TDD §9 and for the reason that file's header gives:
-# a sourced library the installer misses is a silently inert consumer, and this one decides
-# whether an observation is worth writing down at all.
 #
-# WHY THIS SCRIPT NEEDS IT. The scope test below asks whether the observed agent is one
-# this session can act on, and answered that with "is its log under THIS session's own
-# subagents directory". After a `/clear`+resume the agents the session has ADOPTED are
-# filed under the PREDECESSOR's directory — same processes, still working — so every
-# observation of one was dropped here, silently, and the stop gate then refused the stop for
-# want of a look that had in fact been taken. Widening the gate's resolution without
-# widening this test would leave the cure half-built: the gate would resolve the target and
-# still find no record to discharge it.
+# This arm read hooks/stop-check.sh's machine line out of a Bash tool response and wrote
+# `.bionic/tmp/stop-check.state` — the record hooks/stop-guard.sh spent to admit a stop,
+# under the D-1 freshness, D-2 consume, D-3 ownership and D-6 progress rules. All of it
+# asserted things about the RECORD and none of it about the TARGET, and on 2026-09-15 the
+# gate refused a correct stop with "no observation exists in this repo" because nobody had
+# run the verb. The gate observes its target for itself now, through
+# payload/scripts/lib/observe.sh, so there is nothing left for this script to record: one
+# writer of a state nobody reads is a state that should not exist.
 #
-# KEYED ON THE ROSTER, never a walk: this session may record observations of agents in
-# exactly those sessions its own roster says it adopted from, and in no others. Fail-closed
-# — an unreadable roster or a value that is not a session id yields no directory, so the
-# record is skipped and the later stop refuses, which is the safe side.
-adopted_subagent_dirs() {  # -> one directory per line
-  local line osid d p cfg seen=" "
-  [ -f "$ROSTER_FILE" ] || return 0
-  [ -L "$ROSTER_FILE" ] && return 0
-  cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-  while IFS= read -r line; do
-    case "$line" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-    osid=$(line_field "$line" adopted_from)
-    [ -n "$osid" ] || continue
-    case "$osid" in *[!A-Za-z0-9-]*) continue ;; esac
-    case "$seen" in *" $osid "*) continue ;; esac
-    seen="$seen$osid "
-    d="${TRANSCRIPT%/*}/$osid/subagents"
-    [ -d "$d" ] && printf '%s\n' "$d"
-    for p in "$cfg"/projects/*/; do
-      [ -d "${p}${osid}/subagents" ] || continue
-      [ "${p}${osid}/subagents" = "$d" ] && continue
-      printf '%s\n' "${p}${osid}/subagents"
-    done
-  done < "$ROSTER_FILE"
-  return 0
-}
-
-ADOPTED_DIRS=()
-while IFS= read -r _adir; do
-  [ -n "$_adir" ] && ADOPTED_DIRS+=("$_adir")
-done < <(adopted_subagent_dirs)
-
-log_in_scope() {  # <log path> -> 0 if this session can act on that agent
-  local l="$1" d
-  case "$l" in "$SUB"/*) return 0 ;; esac
-  for d in ${ADOPTED_DIRS+"${ADOPTED_DIRS[@]}"}; do
-    case "$l" in "$d"/*) return 0 ;; esac
-  done
-  return 1
-}
-
-# Write one observation under a lock. Read-modify-write on shared state races
-# otherwise (checklist A4), and the temp file must carry an unpredictable name
-# (checklist A2) — a predictable one plus a planted symlink was a proven
-# arbitrary-file overwrite.
-write_record() {  # <target-id> <typed> <log> <mtime> <size> <deliverables> <progress> <progress-mtime> <progress-state> <classification> <deliverable-source> <progress-source>
-  local tid="$1" typed="$2" log="$3" mt="$4" sz="$5" dl="$6" pp="$7" pm="$8" ps="$9"
-  local cl="${10}" dsrc="${11}" psrc="${12}"
-  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
-
-  local lock="$STATE_DIR/.stop-check.lock" tries=0 reclaimed=0
-  while ! mkdir "$lock" 2>/dev/null; do
-    tries=$((tries + 1))
-    # A lock left behind by a killed writer must not wall recording forever — but
-    # the reclaim gets exactly ONE go, and only against a lock that is actually
-    # there. `mkdir` also fails for reasons no reclaim can fix (an unwritable
-    # state directory, repo-controlled), and `rm -rf` of an ABSENT path SUCCEEDS,
-    # so an unbounded reclaim-and-retry loop spins forever (Step-6 review S2/A3).
-    if [ "$tries" -gt 20 ]; then
-      local age now
-      if [ "$reclaimed" -eq 0 ] && [ -d "$lock" ]; then
-        now=$(date -u +%s); age=$((now - $(file_mtime "$lock")))
-        if [ "$age" -gt 30 ]; then
-          reclaimed=1; tries=0
-          rm -rf "$lock" 2>/dev/null
-          continue
-        fi
-      fi
-      return 0   # this script never blocks — it simply records nothing
-    fi
-    sleep 0.1 2>/dev/null || sleep 1
-  done
-
-  local tmp
-  tmp=$(mktemp "$STATE_DIR/.stop-check.XXXXXX" 2>/dev/null) || { rm -rf "$lock"; return 0; }
-  {
-    printf '# bionic observation records — schema stop-check-state/%s\n' "$STATE_VERSION"
-    # One live record per (session, target): re-observing REPLACES, so a second
-    # stop can never find a second copy of the same look.
-    #
-    # Two bounds beyond that, both fail-closed — a dropped record refuses a stop
-    # that a re-observation immediately re-arms:
-    #   * records whose session's subagents directory is gone are inert (the gate
-    #     resolves targets only through that directory) and are dropped;
-    #   * the survivors are capped, oldest first.
-    if [ -f "$STATE_FILE" ]; then
-      {
-        while IFS= read -r line; do
-          case "$line" in '#'*|'') continue ;; esac
-          [ "$(line_field "$line" session)" = "$BIONIC_SID" ] \
-            && [ "$(line_field "$line" target)" = "$tid" ] && continue
-          local rlog rdir
-          rlog=$(line_field "$line" log); rdir="${rlog%/agent-*}"
-          [ -n "$rdir" ] && [ ! -d "$rdir" ] && continue
-          printf '%s\n' "$line"
-        done < "$STATE_FILE"
-      } | tail -n "$((MAX_RECORDS - 1))"
-    fi
-    # The first six fields are byte-identical in name to the schema the stop gate
-    # already reads; `observer` and the D-6 progress snapshot are additive, and
-    # the gate's by-key reader is inert to fields it does not know (checklist A6),
-    # which is why this is still `v1` rather than a version bump that would refuse
-    # every record until its reader caught up. Task 4/5 adds `classification` and
-    # the two contract-source fields the same way — copied verbatim from the
-    # producer's own machine line, additive, still `v1`.
-    printf '%s|session=%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|observer=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \
-      "$STATE_VERSION" "$BIONIC_SID" "$tid" "$typed" "$log" "$mt" "$sz" "$OBSERVER" "$dl" "$pp" "$pm" "$ps" "$cl" "$dsrc" "$psrc"
-  } > "$tmp" 2>/dev/null
-  mv -f "$tmp" "$STATE_FILE" 2>/dev/null || rm -f "$tmp"
-  rm -rf "$lock"
-  return 0
-}
-
-# One record per machine line: a single Bash call may chain two observations, and
-# each one printed its own line.
-while IFS= read -r mline; do
-  [ -n "$mline" ] || continue
-  M_TARGET=$(line_field "$mline" target)
-  M_LOG=$(line_field "$mline" log)
-  [ -n "$M_TARGET" ] && [ -n "$M_LOG" ] || continue
-
-  # A session can only stop its own tasks, so a record the gate could never match
-  # is not worth writing — and one written for another session's agent would
-  # claim evidence about work this session cannot act on. The observation
-  # deliberately resolves more widely than that (it must work from any cwd and
-  # reports out-of-project matches explicitly); this is where that wider view
-  # stops being dischargeable evidence.
-  # …and the sessions it has ADOPTED from, which are its own to act on by the row it
-  # wrote down (epic-20 W1 B-1). Anything else is still dropped.
-  log_in_scope "$M_LOG" || continue
-
-  # THE LOG MUST BE ON DISK. The residual disclosed above argues that forging a
-  # machine line costs the target's current log mtime and size, "which the gate
-  # re-checks against the live file". The re-check is real and has one hole: with
-  # no log on disk the gate reads mtime 0 / size 0, so a forged line carrying
-  # `mtime=0|size=0` matches it exactly, and with `progress_state=unnamed` the
-  # D-6 clause is skipped too (Step-6 review S-2). The producer just stat'ed the
-  # file it named, so this costs the real path nothing and closes the only
-  # match-by-zero shape.
-  [ -f "$M_LOG" ] || continue
-
-  M_MTIME=$(line_field "$mline" mtime); M_SIZE=$(line_field "$mline" size)
-  case "$M_MTIME" in ''|*[!0-9]*) continue ;; esac
-  case "$M_SIZE"  in ''|*[!0-9]*) continue ;; esac
-
-  write_record "$M_TARGET" "$(line_field "$mline" typed)" "$M_LOG" \
-    "$M_MTIME" "$M_SIZE" "$(line_field "$mline" deliverables)" \
-    "$(line_field "$mline" progress)" "$(line_field "$mline" progress_mtime)" \
-    "$(line_field "$mline" progress_state)" \
-    "$(line_field "$mline" classification)" \
-    "$(line_field "$mline" deliverable_source)" \
-    "$(line_field "$mline" progress_source)"
-done <<< "$MLINES"
-
+# WHAT STAYS ON THIS CHANNEL. The pressure sample above, which is a fact about a Bash call
+# having happened rather than about what it printed. A Bash payload reaches this line with
+# its sample already taken and nothing to do.
 exit 0

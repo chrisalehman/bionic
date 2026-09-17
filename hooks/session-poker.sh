@@ -1878,11 +1878,12 @@ adopt_abs() {  # <path> <repo root>
 #   sweeper-<sid>.state        hooks/session-sweeper.sh      the ack ledger
 #   patrol-<sid>.state[.armed] this file                     the Patrol stamp and its marker
 #
-# THE THREE FILES THAT ARE NOT SESSION-KEYED ARE THEREFORE UNREACHABLE FROM HERE, and that
-# is a property of the enumeration rather than a list to maintain: `context-spend.state`,
-# `farm-out.state` and `stop-check.state` carry no session id in their names, so no id this
-# walk derives can ever address one. A future non-session file is safe on arrival for the
-# same reason.
+# THE FILES THAT ARE NOT SESSION-KEYED ARE THEREFORE UNREACHABLE FROM HERE, and that
+# is a property of the enumeration rather than a list to maintain: `context-spend.state` and
+# `farm-out.state` carry no session id in their names, so no id this walk derives can ever
+# address one. A future non-session file is safe on arrival for the same reason.
+# (`stop-check.state` was the third of these until epic-23 wave-15 deleted the observation
+# record itself — ADR-028.)
 SWEEP_SCHEMA="poker-sweep/v1"
 
 # THE ENUMERATION IS THE LIBRARY'S, NOT A COPY (T5 phase 2). Which files belong
