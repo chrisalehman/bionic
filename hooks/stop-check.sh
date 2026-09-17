@@ -49,10 +49,9 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 
 MAX_MESSAGE_CHARS=600
 
-# The machine line's schema token. Versioned so the recorder can refuse a shape
-# it does not read rather than guess at it, and greppable as a fixed string so
-# the recorder's hot path is one `grep -F` on every Bash call in the session.
-MACHINE_SCHEMA="stop-check-observation/v1"
+# THE MACHINE LINE'S SCHEMA TOKEN LIVES WITH THE LINE (REQ-2). It was a constant here and,
+# byte for byte, in hooks/execution-recorder.sh; the recorder's arm that read it is gone and
+# payload/scripts/lib/observe.sh owns both the token and the printf that spells it.
 
 usage() {  # [reason]
   [ -n "${1:-}" ] && echo "$1" >&2
@@ -124,61 +123,13 @@ while [ "$ARGN" -gt 0 ]; do
   esac
 done
 
-# ---------- portable file facts ----------
-# DELIBERATELY DUPLICATED in hooks/stop-guard.sh, byte for byte. A shared
-# library is rejected by design (TDD §9): a sourced file the installer misses is
-# a silently inert wall. The copies are held together by the N-way agreement
-# suite, which drives every copy including this one.
-file_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
-file_size()  { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
-
-# One field out of a versioned pipe-delimited line, BY KEY, never by position
-# (checklist A6). DELIBERATELY DUPLICATED from hooks/execution-recorder.sh, which
-# reads the session roster with the identical function — the two copies are held
-# together by tests/cross-gate-agreement.test.sh. This copy reads the roster row
-# for classification and contract state (task 4/5); it never writes one.
-line_field() {  # <line> <key>
-  printf '%s' "$1" | tr '|' '\n' | grep "^$2=" | head -1 | cut -d= -f2-
-}
-
-# Existence only, for P2 (Liveness contract). `pgrep -f` matches the full
-# command line; a `ps` fallback covers a machine without it.
-claims_live() {  # <pattern> -> 0 if a process matches, 1 otherwise
-  local pat="$1"
-  if command -v pgrep >/dev/null 2>&1; then
-    pgrep -f -- "$pat" >/dev/null 2>&1
-    return $?
-  fi
-  ps -eo command 2>/dev/null | grep -qF -- "$pat"
-}
-
-# The machine line is pipe-delimited key=value, like the observation record it
-# becomes and like the roster row (hooks/dispatch-preflight.sh). A `|`, a newline
-# or a control character inside a VALUE would forge a field, and every value here
-# is operator-supplied — the typed target, the deliverable paths, the progress
-# path. They are normalized rather than refused: this command's job is to print
-# evidence, and a target with an odd character in it is still a target the
-# operator asked about.
-mline_value() {  # <value>
-  printf '%s' "$1" | tr '\n\r\t|' '    ' | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' \
-    -e 's/^ *//' -e 's/ *$//' | cut -c 1-400
-}
-
-fmt_epoch() {
-  date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
-    || printf 'epoch:%s\n' "$1"
-}
-
-fmt_age() {  # <seconds> -> "3m 12s"
-  local s="$1"
-  [ "$s" -lt 0 ] 2>/dev/null && s=0
-  if   [ "$s" -lt 60 ];    then printf '%ds\n' "$s"
-  elif [ "$s" -lt 3600 ];  then printf '%dm %ds\n' $((s / 60)) $((s % 60))
-  elif [ "$s" -lt 86400 ]; then printf '%dh %dm\n' $((s / 3600)) $(((s % 3600) / 60))
-  else                          printf '%dd %dh\n' $((s / 86400)) $(((s % 86400) / 3600))
-  fi
-}
+# ---------- the helpers live in the library now ----------
+#
+# `file_mtime`, `file_size`, `line_field`, `mline_value`, `fmt_epoch`, `fmt_age`,
+# `claims_live` and `slugify` were defined here and, byte for byte, in hooks/stop-guard.sh
+# — the price of the no-library rule (TDD §9), held together by the resolver agreement
+# battery in tests/cross-gate-agreement.test.sh §C. They are one definition now, in
+# payload/scripts/lib/observe.sh, sourced below with the observation itself (REQ-2, D2).
 
 # ---------- resolving the target (P5: the platform does not translate) ----------
 #
@@ -186,8 +137,8 @@ fmt_age() {  # <seconds> -> "3m 12s"
 # TaskStop inputs, and none of them is resolved for us. Comparison is LITERAL:
 # a target string is never treated as a pattern.
 # [WALL: tests/stop-check.test.sh]
-
-slugify() { printf '%s' "$1" | sed 's/[^a-zA-Z0-9]/-/g'; }
+#
+# `slugify` is the library's (payload/scripts/lib/observe.sh), sourced below.
 
 # WHERE CLAUDE CODE STORES SESSION AND PROJECT METADATA. One concept, three
 # renderings in this wave, and they must name one directory: hooks/stop-guard.sh
@@ -228,7 +179,7 @@ TARGET_BASE="${TARGET%@*}"
 # One loader idiom, byte-identical in every hook (spec AC-16). FAIL OPEN: this script
 # reports, it does not refuse, and a diagnosis that died with the thing being diagnosed
 # would be worth nothing.
-BIONIC_LIB_WANT="roots.sh root.sh session.sh agents.sh"
+BIONIC_LIB_WANT="roots.sh root.sh session.sh agents.sh observe.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -334,6 +285,10 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "stop-check"; fi
 # gate resolve one candidate set (AC-10) — where before they carried one loop in two copies.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/agents.sh"
+# THE OBSERVATION (REQ-2, D2; ADR-028). The resolution, the file facts, the contract
+# precedence and the classification, in the one place hooks/stop-guard.sh can reach them too.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/observe.sh"
 
 CWD="$(pwd)"
 # THE ROOT (spec AC-10, lib/root.sh). `rev-parse --show-toplevel` answers with whatever
@@ -376,13 +331,8 @@ fi
 PROJECT_DIR="${REPO_ROOT:-$CWD}"
 DOCS_ROOT="$(docs_root "$PROJECT_DIR")"
 
-abs_path() {  # <path, as the roster spells it> -> absolute
-  case "$1" in
-    /*)       printf '%s\n' "$1" ;;
-    record/*) printf '%s/%s\n' "$DOCS_ROOT" "$1" ;;
-    *)        printf '%s/%s\n' "$PROJECT_DIR" "$1" ;;
-  esac
-}
+# The resolver itself is `observe_abs_path` in the library, reading `OBSERVE_DOCS_ROOT` and
+# `OBSERVE_ROOT`, which this command sets from the two values below.
 
 # ---------- THIS SESSION'S OWN id, and the transcript the live set is read from ----------
 #
@@ -390,7 +340,6 @@ abs_path() {  # <path, as the roster spells it> -> absolute
 # harness exports into every Bash subprocess — the same resolution hooks/preflight-probe.sh
 # makes. Empty when the command runs outside a Claude Code session; the live set is then
 # unreadable and this command says so rather than guessing.
-ROSTER_VERSION="v1"
 OWN_SESSION_ID=$(session_id "" 2>/dev/null) || OWN_SESSION_ID=""
 
 # THE TRANSCRIPT. hooks/stop-guard.sh is handed one in its payload; this script has to find
@@ -414,90 +363,36 @@ own_transcript() {  # -> the transcript file of THIS session, or nothing
 }
 OWN_TRANSCRIPT=$(own_transcript) || OWN_TRANSCRIPT=""
 
-# ---------- the session roster, read BY BOTH KEYS before resolution ----------
+# ---------- THE LOOK ITSELF, taken by the library ----------
 #
-# The roster is read first because the transcript-form agent id is a spelling only it can
-# translate: the harness's answer lists teammates by NAME, so an id has to become a name
-# before the live set can be asked about it. And because the id is what the WORKING LOG is
-# filed under — `<session>/subagents/agent-<id>.jsonl` — which the deleted scan used to
-# supply and nothing else knows.
+# THE WHOLE OF THE RESOLUTION AND THE FACT-GATHERING MOVED (REQ-2, D2; ADR-028). What stood
+# here — the roster walk by both keys, the id-typed row override, the working-log path, the
+# contract-from-roster precedence, the deliverable and progress stats — is
+# `observe_agent` in payload/scripts/lib/observe.sh, because the STOP GATE needs the same
+# look and could not take one. It read a RECORD of an earlier run of this command instead,
+# and on 2026-09-15 refused a correct stop with "no observation exists in this repo" because
+# nobody had run it. One function, two callers: this one prints, hooks/stop-guard.sh decides.
 #
-# `confirmed` or `identified`, never `intended`: the id on an unconfirmed row is a claim
-# about a launch that has not been observed to happen (Step-6 review C-2). `identified` is
-# the state that makes the clause reachable for a teammate at all — a confirmed teammate
-# row's `agent_id=` is EMPTY by design, because the launch response knows only the addressing
-# form `name@session-xxxx`, and the transcript-form id first appears on SubagentStart.
-ROSTER_PATH=""
+# WHAT THIS COMMAND STILL IS. A PRODUCER that decides nothing (§4): every unresolved shape
+# prints what it saw, exits 1, and prints no machine line.
+OBSERVE_ROOT="$PROJECT_DIR"
+OBSERVE_SESSION="$OWN_SESSION_ID"
+OBSERVE_TRANSCRIPT="$OWN_TRANSCRIPT"
+OBSERVE_DOCS_ROOT="$DOCS_ROOT"
+OBSERVE_ROSTER=""
 if [ -n "$REPO_ROOT" ] && [ -n "$OWN_SESSION_ID" ]; then
-  ROSTER_PATH="$REPO_ROOT/.bionic/tmp/roster-${OWN_SESSION_ID}.state"
+  OBSERVE_ROSTER="$REPO_ROOT/.bionic/tmp/roster-${OWN_SESSION_ID}.state"
 fi
-ROSTER_ROW=""
-ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
-# TWO ROWS CAN CARRY ONE AGENT — the dispatch writes the CONTRACT, the recorder writes the id
-# one state later — so the id and the contract are collected separately rather than read off
-# one chosen row. Same walk as hooks/stop-guard.sh's, deliberately duplicated per TDD §9.
-roster_walk() {  # <key>
-  local key="$1" rline rid rname
-  ROW_BY_ID=""; ROW_BY_NAME=""; ROW_WITH_ID=""
-  [ -n "$ROSTER_PATH" ] || return 0
-  [ -f "$ROSTER_PATH" ] || return 0
-  [ -L "$ROSTER_PATH" ] && return 0
-  while IFS= read -r rline; do
-    case "$rline" in '#'*|'') continue ;; esac
-    case "$rline" in "roster-state/${ROSTER_VERSION}|"*) : ;; *) continue ;; esac
-    rid=$(line_field "$rline" agent_id)
-    rname=$(line_field "$rline" name)
-    case "$(line_field "$rline" status)" in
-      confirmed|identified)
-        [ -n "$rid" ] && [ "$rid" = "$key" ] && ROW_BY_ID="$rline"
-        [ -n "$rid" ] && [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_WITH_ID="$rline"
-        ;;
-    esac
-    [ -n "$rname" ] && [ "$rname" = "$key" ] && ROW_BY_NAME="$rline"
-  done < "$ROSTER_PATH"
-  return 0
-}
-roster_walk "$TARGET_BASE"
-# WHICH SPELLING THE OPERATOR TYPED IS A FACT THE RE-WALK BELOW DESTROYS (T32; A-T31.2 —
-# hooks/stop-guard.sh:473-484 carries the identical construction, T31 delta review D1).
-# `roster_walk` clears all three ROW_ variables on entry, so once an id has been translated
-# into the name it shares with the row a later re-walk finds, the row the operator actually
-# named is gone — and on an ambiguous roster the name alone cannot pick it back out. Keeping
-# it here is what lets the override below re-point onto it rather than onto the roster's
-# last row of that name.
-TYPED_ROW=""
-if [ -n "$ROW_BY_ID" ]; then
-  TYPED_ROW="$ROW_BY_ID"
-  TARGET_BASE=$(line_field "$ROW_BY_ID" name)
-  roster_walk "$TARGET_BASE"
-fi
-ROSTER_ROW="$ROW_BY_NAME"
+# The two flags, in the variable form the library takes. Empty is "not named", which is a
+# different fact from "named and absent" — the D-6 distinction a blank would erase.
+OBSERVE_PROGRESS_ARG=""
+[ "$PROGRESS_NAMED" -eq 1 ] && OBSERVE_PROGRESS_ARG="$PROGRESS_PATH"
+OBSERVE_CLAIMS_ARG=""
+[ "$CLAIMS_NAMED" -eq 1 ] && OBSERVE_CLAIMS_ARG="$CLAIMS_PATTERN"
 
-# ---------- resolution against the live set ----------
-#
-# Same function, same exit codes, same transcript the gate reads (AC-10). This command
-# DECIDES NOTHING, so every unresolved shape below prints what it saw, exits 1, and — the
-# half the whole C6 closure rests on — prints no machine line, because an operator who was
-# shown no evidence tier must leave the recorder nothing to copy.
 echo "OBSERVATION — target as typed: ${TARGET}"
 
-# EVERY ROSTER IN THIS REPO THAT CARRIES THIS NAME, as the addresses the platform's stop
-# primitive takes. This is the one spelling hooks/stop-guard.sh accepts as an alias and
-# `session-poker.sh adopt` prints for an adopted row (cross-gate Section R).
-accepted_addresses() {  # -> one "    <name>@session-xxxxxxxx" line per launcher roster
-  local f b out="" dir
-  dir="${ROSTER_PATH%/*}"
-  [ -n "$ROSTER_PATH" ] || return 0
-  for f in "$dir"/roster-*.state; do
-    [ -f "$f" ] || continue
-    [ -L "$f" ] && continue
-    grep -qF "|name=${TARGET_BASE}|" "$f" || continue
-    b="${f##*/roster-}"; b="${b%.state}"
-    out="${out}    stop it as: ${TARGET_BASE}@session-$(printf '%s' "$b" | cut -c1-8)
-"
-  done
-  printf '%s' "$out"
-}
+observe_agent "$TARGET" "$@"
 
 # THE ROSTER RESOLVED IT, AND THE ROSTER IS ALL THAT RESOLVES IT (T22, A-orch-33; AC-4.4).
 # Three arms stood here between wave-roster-lifecycle S6 and 1.7.1, all three driven off
@@ -506,37 +401,10 @@ accepted_addresses() {  # -> one "    <name>@session-xxxxxxxx" line per launcher
 # answer did not carry printed "not live". They are gone with the gate's copies of them. A
 # NAME now means one row on this session's roster, because `hooks/dispatch-preflight.sh`
 # refuses a dispatch that would make it mean two; the row carries the id; and this command,
-# which decides nothing, has nothing left to be unable to resolve except a missing id — the
-# arm immediately below, which was always the roster's own.
-
-# ---------- resolved: the id, the session it is filed under, and its files ----------
-#
-# The id and the owning session both come from the ROSTER ROW, the only record that ever knew
-# them. `adopted_from` names the session that LAUNCHED an agent this one took over after a
-# `/clear`: the working log stays filed there, and the row is where `adopt` wrote that down.
-AGENT_NAME="$TARGET_BASE"
-AGENT_ID=$(line_field "$ROW_WITH_ID" agent_id)
-ADOPTED_FROM=$(line_field "$ROSTER_ROW" adopted_from)
-case "$ADOPTED_FROM" in *[!A-Za-z0-9-]*) ADOPTED_FROM="" ;; esac
-
-# AN AGENT ID RESOLVES TO THE ROW THAT CARRIES IT, NEVER TO THE LAST ROW OF ITS NAME (T32;
-# A-T31.2 sibling of hooks/stop-guard.sh:507-509, T31 delta review D1). `ROW_WITH_ID` above is
-# the last confirmed/identified row of the NAME — right for a bare name, wrong for an id,
-# which names ONE row by construction. With two live rows of one name, an observation typed
-# as either twin's id used to record `target=` off whichever row is last, so the working-log
-# path, deliverable/progress/claims/cadence and the adopted-session note all belonged to the
-# OTHER agent — the look this producer exists to take could never discharge the twin it was
-# actually typed for.
-if [ -n "$TYPED_ROW" ]; then
-  ROSTER_ROW="$TYPED_ROW"
-  AGENT_ID=$(line_field "$TYPED_ROW" agent_id)
-  ADOPTED_FROM=$(line_field "$TYPED_ROW" adopted_from)
-  case "$ADOPTED_FROM" in *[!A-Za-z0-9-]*) ADOPTED_FROM="" ;; esac
-fi
-
-if [ -z "$AGENT_ID" ]; then
+# which decides nothing, has nothing left to be unable to resolve except a missing id.
+if [ "$OBS_OK" -ne 1 ]; then
   echo "Resolved:      live, but no agent id — this session's roster carries no \`confirmed\` or"
-  echo "               \`identified\` row with an agent id for '${AGENT_NAME}'."
+  echo "               \`identified\` row with an agent id for '${OBS_NAME:-$TARGET_BASE}'."
   echo ""
   echo "A working log is filed under an agent's id, and a dispatch records that id on its"
   echo "roster row when the agent starts. Without it there is no evidence tier to print."
@@ -544,137 +412,28 @@ if [ -z "$AGENT_ID" ]; then
   exit 1
 fi
 
-SESSION_ID="${ADOPTED_FROM:-$OWN_SESSION_ID}"
-SESSION_DIR="${OWN_TRANSCRIPT%.jsonl}"
-[ -n "$ADOPTED_FROM" ] && SESSION_DIR="${OWN_TRANSCRIPT%/*}/$ADOPTED_FROM"
-SUBDIR="$SESSION_DIR/subagents"
-LOG="$SUBDIR/agent-${AGENT_ID}.jsonl"
-META="$SUBDIR/agent-${AGENT_ID}.meta.json"
-
-# The type comes from the live set — it is what the harness reported for this teammate — and
-# the model and the description from the agent's own metadata, read at the ONE path the id
-# names. Reading a known path is not a scan: nothing is matched, nothing is searched.
-AGENT_TYPE=$(live_agents "$OWN_TRANSCRIPT" 2>/dev/null | awk -F'|' -v n="$AGENT_NAME" '$1==n {print $2; exit}')
-[ -n "$AGENT_TYPE" ] || AGENT_TYPE="—"
-AGENT_MODEL=$(jq -r '.model // "—"' "$META" 2>/dev/null)
-[ -n "$AGENT_MODEL" ] || AGENT_MODEL="—"
-AGENT_DESC=$(jq -r '.description // "—"' "$META" 2>/dev/null)
-[ -n "$AGENT_DESC" ] || AGENT_DESC="—"
-
-# ---------- classification (task 4/5, AC-6; re-keyed on the live set at S6) ----------
-#
-# WHAT THIS USED TO ASK, and why it no longer can. It asked whether the agent's metadata was
-# filed under this session's own `subagents/` directory, and answered FOREIGN or DEAD HISTORY
-# when it was not. That question was about RECORDS, and records outlive agents: it is why a
-# `/clear` left a live agent classified foreign by its own successor.
-#
-# The live set has already answered the only version of it that means anything: an agent the
-# harness reports as THIS session's teammate is ours. What is left to say is HOW — whether by
-# an ordinary dispatch or by adoption after a `/clear`, which is what tells the operator
-# whose directory the working log below is filed under. It is reported, never judged (§4:
-# this command decides nothing). `unknown` survives for the one degraded case that is real:
-# a run with no session key at all, which cannot reach a live set and never gets this far.
-CLASSIFICATION="ours"
-OURS_BECAUSE="the harness reports it as a teammate of this session (roster-${OWN_SESSION_ID}.state carries its row)"
-if [ -n "$ADOPTED_FROM" ]; then
-  # OURS BY ADOPTION, said out loud. A row carrying `adopted_from=` is one
-  # hooks/session-poker.sh's `adopt` wrote after a `/clear`+resume: the agent is still the
-  # predecessor's process, its working log still filed under the predecessor's directory,
-  # and this session took the contract over. Answering OURS mutely would leave the operator
-  # reading about an agent filed under a session they are not in with nothing to explain it.
-  OURS_BECAUSE="this session ADOPTED it (adopted_from=${ADOPTED_FROM}); the harness reports it as a teammate and its working log is still filed under the session that launched it"
-fi
-
-# ---------- contract state: roster-sourced when OURS, CLI always overrides ----------
-#
-# "Deliverable/progress display logic itself is unchanged — only the SOURCE of
-# the paths widens" (task 4/5 brief). An explicit CLI value always wins; when it
-# differs from what the roster recorded, that is printed, never judged (§4: this
-# command decides nothing).
-ROSTER_DELIVERABLE=""; ROSTER_PROGRESS=""; ROSTER_CLAIMS=""; ROSTER_CADENCE=""
-if [ -n "$ROSTER_ROW" ]; then
-  ROSTER_DELIVERABLE=$(line_field "$ROSTER_ROW" deliverable)
-  ROSTER_PROGRESS=$(line_field "$ROSTER_ROW" progress)
-  ROSTER_CLAIMS=$(line_field "$ROSTER_ROW" claims)
-  ROSTER_CADENCE=$(line_field "$ROSTER_ROW" cadence)
-fi
-
-ORIG_ARGS_COUNT="$#"
-ORIG_ARGS_JOINED=""
-if [ "$ORIG_ARGS_COUNT" -gt 0 ]; then
-  ORIG_ARGS_JOINED=$(IFS=,; echo "$*")
-fi
-
-DELIVERABLE_SOURCE="none"
-DELIVERABLE_MISMATCH=""
-if [ "$ORIG_ARGS_COUNT" -gt 0 ]; then
-  DELIVERABLE_SOURCE="args"
-  if [ -n "$ROSTER_DELIVERABLE" ] && [ "$ORIG_ARGS_JOINED" != "$ROSTER_DELIVERABLE" ]; then
-    DELIVERABLE_MISMATCH="$ROSTER_DELIVERABLE"
-  fi
-elif [ -n "$ROSTER_DELIVERABLE" ]; then
-  DELIVERABLE_SOURCE="roster"
-  # PATHNAME EXPANSION OFF for exactly this split. Setting IFS suppresses word
-  # splitting on other characters and says nothing about globbing, so a roster
-  # value of `docs/*.md` — which a brief can produce, since the lifter accepts
-  # any slash-and-letter token and the writer's sanitizer does not strip `*` —
-  # expanded against whatever happened to be sitting in the OBSERVER'S CWD.
-  # Files nobody contracted for were then reported PRESENT and rode into the
-  # durable record as confirmed deliverables (Step-6 review C-1/S-3). No wall
-  # opened; the human judgment this whole command exists to inform was the thing
-  # being fooled, which is worse to leave standing.
-  OLDIFS="$IFS"; IFS=','; set -f; set -- $ROSTER_DELIVERABLE; set +f; IFS="$OLDIFS"
-fi
-
-PROGRESS_SOURCE="none"
-PROGRESS_MISMATCH=""
-if [ "$PROGRESS_NAMED" -eq 1 ]; then
-  PROGRESS_SOURCE="args"
-  if [ -n "$ROSTER_PROGRESS" ] && [ "$PROGRESS_PATH" != "$ROSTER_PROGRESS" ]; then
-    PROGRESS_MISMATCH="$ROSTER_PROGRESS"
-  fi
-elif [ -n "$ROSTER_PROGRESS" ]; then
-  PROGRESS_SOURCE="roster"
-  PROGRESS_PATH="$ROSTER_PROGRESS"
-  PROGRESS_NAMED=1
-fi
-
-CLAIMS_SOURCE="none"
-if [ "$CLAIMS_NAMED" -eq 1 ]; then
-  CLAIMS_SOURCE="args"
-elif [ -n "$ROSTER_CLAIMS" ]; then
-  CLAIMS_SOURCE="roster"
-  CLAIMS_PATTERN="$ROSTER_CLAIMS"
-  CLAIMS_NAMED=1
-fi
-
-echo "Resolved:      ${AGENT_ID}"
-echo "               name: ${AGENT_NAME} · type: ${AGENT_TYPE} · model: ${AGENT_MODEL}"
-echo "               task: ${AGENT_DESC}"
-echo "Session:       ${SESSION_ID}"
+echo "Resolved:      ${OBS_ID}"
+echo "               name: ${OBS_NAME} · type: ${OBS_TYPE} · model: ${OBS_MODEL}"
+echo "               task: ${OBS_DESC}"
+echo "Session:       ${OBS_SESSION}"
 # FOREIGN and DEAD HISTORY are gone with the directory scan that produced them (S6). Both
 # were verdicts about where an agent's METADATA sat, and a target that reaches this line has
 # been named by the harness as a teammate of this session — which is the only sense in which
 # an agent is ours. `unknown` is unreachable for the same reason: a session with no key of
-# its own cannot read a live set and refuses above, before anything is resolved.
-echo "Classification: OURS — ${OURS_BECAUSE}."
-echo "Contract (roster):  deliverables=${ROSTER_DELIVERABLE:-(none recorded)}  progress=${ROSTER_PROGRESS:-(none recorded)}"
-if [ -n "$ADOPTED_FROM" ]; then
-  echo "Note:          its working log is filed under the session that launched it (${ADOPTED_FROM})."
+# its own cannot read a register and refuses above, before anything is resolved.
+echo "Classification: OURS — ${OBS_OURS_BECAUSE}."
+echo "Contract (roster):  deliverables=$(line_field "$OBS_ROW" deliverable || true)  progress=$(line_field "$OBS_ROW" progress || true)"
+if [ -n "$OBS_ADOPTED_FROM" ]; then
+  echo "Note:          its working log is filed under the session that launched it (${OBS_ADOPTED_FROM})."
 fi
 echo ""
 
 # ---------- evidence 1: the working log (§2.2 — unfakeable, written by working) ----------
-echo "Working log:   ${LOG}"
-LOG_MTIME=0
-LOG_SIZE=0
-if [ -f "$LOG" ]; then
-  LOG_MTIME=$(file_mtime "$LOG")
-  LOG_SIZE=$(file_size "$LOG")
-  NOW=$(date -u +%s)
-  echo "  last write:  $(fmt_epoch "$LOG_MTIME")  (age $(fmt_age $((NOW - LOG_MTIME))))"
-  echo "  size:        ${LOG_SIZE} bytes"
-  LAST_MSG=$(tail -400 "$LOG" 2>/dev/null \
+echo "Working log:   ${OBS_LOG}"
+if [ -f "$OBS_LOG" ]; then
+  echo "  last write:  $(fmt_epoch "$OBS_LOG_MTIME")  (age $(fmt_age "$OBS_LOG_AGE"))"
+  echo "  size:        ${OBS_LOG_SIZE} bytes"
+  LAST_MSG=$(tail -400 "$OBS_LOG" 2>/dev/null \
     | jq -R -r 'fromjson? | select(.type=="assistant")
                 | ((.message.content // []) | map(select(.type=="text").text) | join(" "))
                 | select(length > 0)' 2>/dev/null \
@@ -701,100 +460,75 @@ fi
 echo ""
 
 # ---------- evidence 3: the contracted deliverables (§2.2 — meaning from the contract) ----------
+#
+# THE STATES ARE THE LIBRARY'S, THE PROSE IS THIS COMMAND'S. `observe_agent` already stat'ed
+# every contracted path and recorded `<state>:<path>` per deliverable — the same comma-joined
+# list the roster row uses for the same concept — so what is left here is rendering it. A
+# second stat for the size and the age is a display, not a decision: the state a reader is
+# shown and the state a machine reads come off one computation (F-1).
 echo "Deliverables:"
-if [ -n "$DELIVERABLE_MISMATCH" ]; then
-  echo "  (note: the roster recorded a different deliverable set: ${DELIVERABLE_MISMATCH} — not judged)"
+if [ -n "$OBS_DELIV_MISMATCH" ]; then
+  echo "  (note: the roster recorded a different deliverable set: ${OBS_DELIV_MISMATCH} — not judged)"
 fi
-# Each deliverable's state is accumulated for the machine line as
-# `<state>:<path>`, comma-joined — the same comma-joined path list the roster row
-# uses for the same concept (hooks/dispatch-preflight.sh's `deliverable=`), so
-# the two machine artifacts in .bionic/tmp/ render one concept one way.
-DELIV_STATES=""
-add_deliv() { DELIV_STATES="${DELIV_STATES:+$DELIV_STATES,}$1:$(mline_value "$2")"; }
-if [ "$#" -eq 0 ]; then
+if [ -z "$OBS_DELIVERABLES" ]; then
   echo "  (none named on the command line — pass each contracted path as an argument)"
 else
-  NOW=$(date -u +%s)
-  # STAT THE RESOLVED PATH, REPORT THE CONTRACTED ONE. `$dp` is where this command looked;
-  # `$d` is what the contract spelled, and it is what the readback and the machine line
-  # carry — so the roster, the brief and this output all name the artifact the same way,
-  # which is the property the mismatch note above depends on.
-  for d in "$@"; do
-    dp="$(abs_path "$d")"
-    if [ -f "$dp" ]; then
-      DSIZE=$(file_size "$dp"); DMTIME=$(file_mtime "$dp")
-      if [ "$DSIZE" -eq 0 ]; then
-        echo "  ${d} — PRESENT but EMPTY, 0 bytes"
-        add_deliv empty "$d"
-      else
-        echo "  ${d} — PRESENT, ${DSIZE} bytes, last write $(fmt_epoch "$DMTIME") (age $(fmt_age $((NOW - DMTIME))))"
-        add_deliv present "$d"
-      fi
-    elif [ -d "$dp" ]; then
-      echo "  ${d} — PRESENT as a directory, $(find "$dp" -type f 2>/dev/null | grep -c .) file(s)"
-      add_deliv dir "$d"
-    else
-      echo "  ${d} — ABSENT"
-      add_deliv absent "$d"
-    fi
+  OLDIFS="$IFS"; IFS=','; set -f; set -- $OBS_DELIVERABLES; set +f; IFS="$OLDIFS"
+  for pair in "$@"; do
+    dstate="${pair%%:*}"; d="${pair#*:}"
+    dp="$(observe_abs_path "$d")"
+    case "$dstate" in
+      present)
+        echo "  ${d} — PRESENT, $(file_size "$dp") bytes, last write $(fmt_epoch "$(file_mtime "$dp")") (age $(fmt_age $((OBS_NOW - $(file_mtime "$dp")))))" ;;
+      empty)
+        echo "  ${d} — PRESENT but EMPTY, 0 bytes" ;;
+      dir)
+        echo "  ${d} — PRESENT as a directory, $(find "$dp" -type f 2>/dev/null | grep -c .) file(s)" ;;
+      *)
+        echo "  ${d} — ABSENT" ;;
+    esac
   done
 fi
 
 # ---------- evidence 4: the progress artifact (D-6 — the task's own byproducts) ----------
 #
-# An hour-long command silences the working log for its whole hour: one tool
-# call, one result at the end. "No activity for 47 minutes" therefore describes
-# a healthy suite and a wedged one identically, and no amount of reading the
-# agent will separate them. The separation lives one level DOWN, in the work's
-# own byproducts: a contract that requires the long command to accrue output at
-# a named path turns "log quiet 47 minutes, progress file grew 12 seconds ago"
-# into proof of life (design/orchestrator-subagent-coordination.md §5 D-6).
+# An hour-long command silences the working log for its whole hour: one tool call, one result
+# at the end. "No activity for 47 minutes" therefore describes a healthy suite and a wedged
+# one identically, and no amount of reading the agent will separate them. The separation
+# lives one level DOWN, in the work's own byproducts.
 #
-# Printed only when the contract named a path — the section is additive, and
-# without the flag this command's output is what it always was.
-PROGRESS_STATE="unnamed"
-PROGRESS_MTIME=0
-if [ "$PROGRESS_NAMED" -eq 1 ]; then
+# Printed only when the contract named a path — the section is additive.
+if [ "$OBS_PROGRESS_NAMED" -eq 1 ]; then
   echo ""
   echo "-- progress artifact (D-6) --"
-  if [ -n "$PROGRESS_MISMATCH" ]; then
-    echo "  (note: the roster recorded a different progress path: ${PROGRESS_MISMATCH} — not judged)"
+  if [ -n "$OBS_PROGRESS_MISMATCH" ]; then
+    echo "  (note: the roster recorded a different progress path: ${OBS_PROGRESS_MISMATCH} — not judged)"
   fi
-  # Same rule as the deliverables above: stat the resolved path, print the contracted one.
-  PROGRESS_ABS="$(abs_path "$PROGRESS_PATH")"
-  if [ -e "$PROGRESS_ABS" ]; then
-    PMTIME=$(file_mtime "$PROGRESS_ABS")
-    PSIZE=$(file_size "$PROGRESS_ABS")
-    NOW=$(date -u +%s)
-    echo "progress: ${PROGRESS_PATH}  last-write $(fmt_epoch "$PMTIME") ($(fmt_age $((NOW - PMTIME))) ago)  size ${PSIZE}B"
-    PROGRESS_STATE="present"; PROGRESS_MTIME="$PMTIME"
+  if [ "$OBS_PROGRESS_STATE" = "present" ]; then
+    echo "progress: ${OBS_PROGRESS}  last-write $(fmt_epoch "$OBS_PROGRESS_MTIME") ($(fmt_age "$OBS_PROGRESS_AGE") ago)  size $(file_size "$OBS_PROGRESS_ABS")B"
   else
-    echo "progress: ${PROGRESS_PATH}  ABSENT"
-    PROGRESS_STATE="absent"
+    echo "progress: ${OBS_PROGRESS}  ABSENT"
   fi
-  # THE DECLARED CADENCE, beside the age it qualifies. The ratified liveness
-  # contract extends the ≥15m rule by one number — "too quiet" means quieter than
-  # the AUTHOR'S OWN declaration, not a fixed clock — so the age above is
-  # unreadable without it. Printed, never compared: this command decides nothing,
-  # and the comparison belongs to whoever is doing the judging (P3's watcher, or
-  # the operator reading this).
-  if [ -n "$ROSTER_CADENCE" ]; then
-    echo "cadence:  ${ROSTER_CADENCE}  (declared in the dispatch contract)"
+  # THE DECLARED CADENCE, beside the age it qualifies. The ratified liveness contract extends
+  # the ≥15m rule by one number — "too quiet" means quieter than the AUTHOR'S OWN declaration,
+  # not a fixed clock — so the age above is unreadable without it. Printed here, never
+  # compared: this command decides nothing. The COMPARISON is the library's `observe_class`,
+  # and hooks/stop-guard.sh is who acts on it.
+  if [ -n "$OBS_CADENCE" ]; then
+    echo "cadence:  ${OBS_CADENCE}  (declared in the dispatch contract)"
   fi
 fi
 
 # ---------- P2: claimed-process liveness (Liveness contract, ratified 2026-08-05) ----------
 #
-# Existence only — is any process matching the claimed pattern running right
-# now? This is a display fact, exactly like everything else in this command: it
-# names nothing about health, only presence. Source is the roster's `claims=`
-# field when OURS and no --claims was typed, or the explicit flag when one
-# was — same override rule as deliverables and progress.
-if [ "$CLAIMS_NAMED" -eq 1 ]; then
+# Existence only — is any process matching the claimed pattern running right now? This is a
+# display fact, exactly like everything else in this command: it names nothing about health,
+# only presence.
+if [ "$OBS_CLAIMS_NAMED" -eq 1 ]; then
   echo ""
   echo "-- claimed process (P2) --"
-  echo "claims:   pattern='${CLAIMS_PATTERN}'  source=${CLAIMS_SOURCE}"
-  if claims_live "$CLAIMS_PATTERN"; then
+  echo "claims:   pattern='${OBS_CLAIMS}'  source=${OBS_CLAIMS_SOURCE}"
+  if observe_claims_live "$OBS_CLAIMS"; then
     echo "live:     yes — a process matching this pattern exists right now"
   else
     echo "live:     no — no process matching this pattern was found"
@@ -805,37 +539,15 @@ fi
 echo ""
 echo "This command decides nothing. It prints evidence; the judgment is yours."
 
-# ---------- the machine line (task 4/4 — the recorder's ONLY input) ----------
+# ---------- the machine line ----------
 #
-# Last line of a successful run, and the only line any machine reads. Three
-# properties earn their place:
+# Last line of a successful run, and the only line any machine reads. It is printed HERE,
+# past every refusal path, so its existence IS the proof that an observation ran and produced
+# an evidence tier — a usage error, an unresolved target and a target with no agent id all
+# exit non-zero having printed no such line.
 #
-#   * it is printed HERE, past every refusal path, so its existence IS the proof
-#     that an observation ran and produced an evidence tier. The recorder is
-#     PostToolUse and reads it out of the tool RESPONSE, so a command the harness
-#     refused to dispatch, a command that exited non-zero, and a command that
-#     merely MENTIONS this script all leave no line and therefore no record —
-#     the "recorded a look but nothing ran" class closed at its root rather than
-#     narrowed (tests/cross-gate-agreement.test.sh §C case 6);
-#   * it carries the RESOLVED identity and the file facts THIS RUN computed, so
-#     the recorder never re-resolves anything. One resolver decides who was
-#     looked at, which is what makes the operator's view and the record the same
-#     fact rather than two computations that must be kept in agreement (F-1);
-#   * `progress_state=unnamed` distinguishes "the contract named no progress
-#     artifact" from "it named one and the artifact is missing" — the D-6
-#     distinction a blank value would erase.
-printf '%s|target=%s|typed=%s|log=%s|mtime=%s|size=%s|deliverables=%s|progress=%s|progress_mtime=%s|progress_state=%s|classification=%s|deliverable_source=%s|progress_source=%s\n' \
-  "$MACHINE_SCHEMA" \
-  "$(mline_value "$AGENT_ID")" \
-  "$(mline_value "$TARGET")" \
-  "$(mline_value "$LOG")" \
-  "$LOG_MTIME" \
-  "$LOG_SIZE" \
-  "$DELIV_STATES" \
-  "$(mline_value "$PROGRESS_PATH")" \
-  "$PROGRESS_MTIME" \
-  "$PROGRESS_STATE" \
-  "$(mline_value "$CLASSIFICATION")" \
-  "$(mline_value "$DELIVERABLE_SOURCE")" \
-  "$(mline_value "$PROGRESS_SOURCE")"
+# ITS SHAPE BELONGS TO THE LIBRARY NOW (REQ-2). `observe_machine_line` renders the facts
+# `observe_agent` computed, so the identity and the file facts a reader sees above and the
+# ones a machine reads below are one computation rather than two kept in agreement (F-1).
+observe_machine_line
 exit 0
