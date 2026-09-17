@@ -2481,6 +2481,42 @@ Then retry the dispatch."
   dp_finding "this brief declares no Files: and no Suites:" "declare Files: or Suites:" "$_dp_detail"
 fi
 
+# AN AUDITOR MAY WAIVE NOTHING (T6, REQ-4 AC-4.3/4.4; D6). `Suites: none` is a legitimate
+# waiver for a role that never runs a suite — a researcher reads, a test-runner reports,
+# and both pass through unchanged (AC-4.4). An auditor's whole job at Step 5 is to
+# FALSIFY the matrix's evidence, which for a hermetic-tier row means re-running the named
+# suite (spec §Eval design, `## Verification Matrix` "auditor" column) — a `Suites: none`
+# auditor brief cannot do the one thing its role requires, so the waiver that is silence
+# for every other reading role is a defect here.
+#
+# ROLE MATCHED WHOLE, ON `subagent_type`, THE SAME WAY THE WRITER-CLASS ARM ABOVE DOES —
+# never on the brief's prose, which is a wish, not a wall. Both the fully-qualified name
+# this repo's roster actually carries (`bionic:auditor`) and the bare role word are
+# matched, since a brief authored by hand routinely drops the `bionic:` prefix the harness
+# itself never does.
+#
+# `$C_SUITES` IS THE LIFTED FIELD, ALREADY NORMALISED. `suite_names()` (above) prints the
+# literal token `none` for a whole-word waiver and nothing else ever equals it — a brief
+# that both waives and lists suites cannot reach this arm, because `Suites:` is a single
+# labelled span and its lift is one value, the waiver or the list, never both.
+case "$DP_SUBAGENT" in
+  bionic:auditor|auditor)
+    if [ "$C_SUITES" = "none" ]; then
+      dp_finding "an auditor names no suites" "name the suites to re-execute" \
+        "Role: ${DP_SUBAGENT}
+
+An auditor's Step-5 verdict is a re-run of the evidence, not a read of it — a hermetic-tier
+row in the matrix is falsified by running the suite the row names, and a brief that waives
+every suite gives the auditor nothing to run.
+
+Fix: name the suites the matrix binds this auditor to, on a line of its own —
+    Suites: tests/one.test.sh, tests/two.test.sh
+
+Then retry the dispatch."
+    fi
+    ;;
+esac
+
 # ---------- the derivation ----------
 #
 # THE COMMAND IS CONFIGURATION, THE PATHS ARE THE BRIEF. The command is word-split (it is
