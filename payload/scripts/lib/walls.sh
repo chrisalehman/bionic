@@ -3915,6 +3915,17 @@ wall_libs background-suite-guard cmd-class.sh || return 0
 
 [ "$(cmd_class "$COMMAND")" = "suite" ] || return 0
 
+# A SHELL-BACKGROUNDED SUITE IS CAUGHT LIKE A TOOL-BACKGROUNDED ONE (D8, REQ-6). The tool
+# flag read above sees only `run_in_background: true`; it has never seen `bash
+# tests/run.sh &`, a `nohup`/`setsid` wrapper, or a suite trailing a bare `&` behind a
+# redirect or a `while … done`. `cmd_backgrounded` reads the TEXT for exactly that, the
+# same positional discipline as `cmd_class` itself, and can only be asked once the library
+# above is loaded — this is the first point in the function where it is. Read AFTER the
+# suite check, not before: the predicate is real work only a suite command ever pays for.
+if [ "$IS_BACKGROUND" != yes ] && cmd_backgrounded "$COMMAND"; then
+  IS_BACKGROUND=yes
+fi
+
 # ---------- ARM 1 (B-9, AC-23): refuse, naming the shape that works ----------
 #
 # FIRST OF THREE, because it is the widest refusal: a backgrounded suite is refused whether
