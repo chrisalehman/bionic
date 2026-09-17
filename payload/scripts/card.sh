@@ -155,7 +155,11 @@ _card_header() {
       col=1; i=0
       while [ "$i" -lt "$idx" ]; do
         _bionic_cols_into "${CARD_LIT[$i]}"; col=$(( col + BIONIC_COLS ))
-        want="${CARD_W[$i]}"; [ -n "$want" ] || want=0
+        # THE BATCH WIDTH (AC-9.5), same one _card_emit applies to the rows —
+        # a header built from the format's own width alone would label a
+        # column the rows no longer start there.
+        want="${CARD_BW1[$i]:-}"; [ -n "$want" ] || want="${CARD_W[$i]:-}"
+        [ -n "$want" ] || want=0
         col=$(( col + want ))
         i=$(( i + 1 ))
       done
@@ -168,13 +172,100 @@ _card_header() {
   printf '\n'
 }
 
+# ── PER-BATCH COLUMN WIDTHS (AC-9.5) ─────────────────────────────────────────
+#
+# WHY A BATCH AND NOT A ROW. Every width above this point is either the
+# format's own declared width or that ONE row's own cell — so a structured
+# (non-folding) cell wider than its column, an owner such as
+# `tests/lib/impact.sh` against the ownership format's 14-column `owner`
+# field, pushed every trailing column on ITS OWN row right, and left every
+# OTHER row's trailing columns exactly where the format put them. Two
+# ownership rows in the same card then disagreed about where `surfaces` and
+# `test` start — not a fold problem (WRAPPED already handles a cell too long
+# for ITS OWN column) but a CROSS-ROW one: the same visual column meaning two
+# different things on two lines of one table. Chris "approved" 2026-09-16 on
+# the stated default: a structured column's width is the greater of the
+# format's own width and the widest cell that column holds ANYWHERE in this
+# card, so every row pads to the one number rather than to its own guess.
+#
+# THE FOLD COLUMN IS EXCLUDED ON PURPOSE. It already self-normalizes to its
+# own declared width every row (`bionic_wrap` plus the pad below never let it
+# render narrower OR wider than its budget), so batching it would only widen
+# it past that budget for no reason. The one field with NO declared width
+# (the row's own last cell — `ADR`, `test`, `agent`, `ACs`) is excluded too:
+# nothing trails it, so there is no column left of anything to keep constant,
+# and giving it a batch width would right-justify what a caller wrote to be
+# read left-aligned.
+CARD_BW1=(); CARD_BW2=()
+_card_compute_batch_widths() {  # reads CARD_ROWS[] — sets CARD_BW1[] CARD_BW2[]
+  _card_parse "$CARD_FMT_1"
+  local nf1="${#CARD_LIT[@]}" i=0
+  CARD_BW1=()
+  while [ "$i" -lt "$nf1" ]; do
+    if [ "$i" -ne "$CARD_FOLD_1" ] && [ -n "${CARD_W[$i]:-}" ]; then
+      CARD_BW1[$i]="${CARD_W[$i]}"
+    else
+      CARD_BW1[$i]=""
+    fi
+    i=$(( i + 1 ))
+  done
+  local nf2=0
+  if [ "$CARD_LINES" -gt 1 ]; then
+    _card_parse "$CARD_FMT_2"
+    nf2="${#CARD_LIT[@]}"
+    CARD_BW2=(); i=0
+    while [ "$i" -lt "$nf2" ]; do
+      if [ "$i" -ne "$CARD_FOLD_2" ] && [ -n "${CARD_W[$i]:-}" ]; then
+        CARD_BW2[$i]="${CARD_W[$i]}"
+      else
+        CARD_BW2[$i]=""
+      fi
+      i=$(( i + 1 ))
+    done
+  fi
+
+  local line
+  for line in "${CARD_ROWS[@]}"; do
+    [ -n "$line" ] || continue
+    _card_split "$line"
+    i=0
+    while [ "$i" -lt "$CARD_NF_1" ]; do
+      if [ -n "${CARD_BW1[$i]:-}" ]; then
+        _bionic_cols_into "${CARD_CELLS[$i]:-}"
+        [ "$BIONIC_COLS" -gt "${CARD_BW1[$i]}" ] && CARD_BW1[$i]="$BIONIC_COLS"
+      fi
+      i=$(( i + 1 ))
+    done
+    if [ "$nf2" -gt 0 ]; then
+      i=0
+      while [ "$i" -lt "$CARD_NF_2" ]; do
+        if [ -n "${CARD_BW2[$i]:-}" ]; then
+          _bionic_cols_into "${CARD_CELLS[$(( CARD_NF_1 + i ))]:-}"
+          [ "$BIONIC_COLS" -gt "${CARD_BW2[$i]}" ] && CARD_BW2[$i]="$BIONIC_COLS"
+        fi
+        i=$(( i + 1 ))
+      done
+    fi
+  done
+}
+
 # ── ONE ROW, WHICH MAY BE MORE THAN ONE LINE ─────────────────────────────────
-_card_emit() {  # <fmt> <fold index> <cell>...
-  local fmt="$1" fold="$2"; shift 2
+_card_emit() {  # <fmt> <fold index> <line 1|2> <cell>...
+  local fmt="$1" fold="$2" lineno="$3"; shift 3
   local vals=("$@")
   _card_parse "$fmt"
   local nf="${#CARD_LIT[@]}"
-  local i col=1 foldcol=1 val w eff
+  local i col=1 foldcol=1 val w eff bw
+
+  # THE BATCH WIDTH WINS OVER THE FORMAT'S OWN, for every field this card's
+  # rows actually widened (never less than the format's declared width — see
+  # _card_compute_batch_widths, which seeds each entry at that width).
+  i=0
+  while [ "$i" -lt "$nf" ]; do
+    if [ "$lineno" = "2" ]; then bw="${CARD_BW2[$i]:-}"; else bw="${CARD_BW1[$i]:-}"; fi
+    [ -n "$bw" ] && CARD_W[$i]="$bw"
+    i=$(( i + 1 ))
+  done
 
   # PASS ONE: where the free cell starts, and how much room it has. The start is
   # computed against the ACTUAL values of the cells BEFORE it — a preceding cell
@@ -243,22 +334,32 @@ _card_split() {  # <line> — sets CARD_CELLS[]
 [ "$#" -le 1 ] || _card_usage "one row kind at a time (got $#)"
 _card_spec "$1" || _card_usage "unknown row kind '$1'"
 
-_card_header
-
+# EVERY ROW IS READ BEFORE ANY ROW IS RENDERED (AC-9.5). A batch's per-column
+# widths cannot be known until the LAST row has been seen, so the first row
+# cannot be padded — or its header labelled — until then either.
+CARD_ROWS=()
 while IFS= read -r _card_row || [ -n "${_card_row:-}" ]; do
   [ -n "$_card_row" ] || continue
+  CARD_ROWS[${#CARD_ROWS[@]}]="$_card_row"
+done
+
+_card_compute_batch_widths
+
+_card_header
+
+for _card_row in "${CARD_ROWS[@]}"; do
   _card_split "$_card_row"
   _card_a=()
   _i=0
   while [ "$_i" -lt "$CARD_NF_1" ]; do _card_a[$_i]="${CARD_CELLS[$_i]:-}"; _i=$(( _i + 1 )); done
-  _card_emit "$CARD_FMT_1" "$CARD_FOLD_1" "${_card_a[@]}"
+  _card_emit "$CARD_FMT_1" "$CARD_FOLD_1" "1" "${_card_a[@]}"
   if [ "$CARD_LINES" -gt 1 ]; then
     _card_b=()
     _i=0
     while [ "$_i" -lt "$CARD_NF_2" ]; do
       _card_b[$_i]="${CARD_CELLS[$(( CARD_NF_1 + _i ))]:-}"; _i=$(( _i + 1 ))
     done
-    _card_emit "$CARD_FMT_2" "$CARD_FOLD_2" "${_card_b[@]}"
+    _card_emit "$CARD_FMT_2" "$CARD_FOLD_2" "2" "${_card_b[@]}"
   fi
 done
 

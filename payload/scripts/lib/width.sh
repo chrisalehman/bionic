@@ -55,10 +55,24 @@ BIONIC_LINE_WIDTH=100
 # exact — no locale to depend on, and no external process per cell. A glyph
 # added to a report and not to this list measures three columns too wide, and
 # the effect is a column that pads short, never a line that overflows.
+#
+# §, “, ” — ADDED AT bionic 1.8.2 (REQ-9, AC-9.1/AC-9.2; Chris's screenshot
+# 2026-09-16 "Content is still not being rendered properly"). All three are
+# TWO- or THREE-byte glyphs `card.sh`'s provenance and quoted-text cells
+# already carried, and none was in this list: a provenance cell with one `§`
+# measured two bytes for one visual column, so the pad computed for it came
+# out one column SHORT and every trailing column on that row (`ACs`, `serves`,
+# `surfaces`, …) landed one column left of a row without it — the opposite
+# direction of the "pads short, never over" rule one paragraph up, because
+# that rule is about the UNKNOWN-glyph case (still true, still conservative);
+# these three are no longer unknown. Found live by A-orch-2's reproduction:
+# `card.sh requirement` on this wave's own REQ-9 row, § once, drifted one
+# column; REQ-10's two `§` drifted two.
 _bionic_cols_into() {  # <string> — sets BIONIC_COLS; no subshell, for the loop below
   local s="${1:-}"
   s="${s//✓/.}"; s="${s//✗/.}"; s="${s//–/.}"; s="${s//—/.}"
   s="${s//≥/.}"; s="${s//…/.}"; s="${s//·/.}"
+  s="${s//§/.}"; s="${s//“/.}"; s="${s//”/.}"
   # THE ARROW AND THE BULLET, ADDED AT bionic 1.4.0 (spec AC-23). The arrow is
   # the most-printed non-ASCII glyph bionic has — it opens every FIX line and it
   # is the first character of the instruction `bionic_line` is asked to protect
