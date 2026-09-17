@@ -103,7 +103,7 @@ TOOL_NAME=$(_jq '.tool_name')
 # payload/scripts/lib/loader.sh. FAIL OPEN: this wall protects a dispatch, and a
 # dispatch that should have been refused can be stopped and re-run — refusing every
 # Agent call on the machine because a file is missing cannot be undone as cheaply.
-BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh"
+BIONIC_LIB_WANT="context.sh refuse.sh root.sh run.sh session.sh patrol.sh agents.sh roster.sh units.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -217,6 +217,12 @@ if [ -n "$BIONIC_LIB_MISSING" ]; then loader_fail_open "dispatch-preflight"; fi
 # string this hook used to carry (spec AC-25, design ledger D3).
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/roster.sh"
+# THE PLAN'S `## Tasks` LEDGER HAS ONE READER TOO (wave-15 REQ-5, D7). The floor-once wall
+# at the bottom of this file asks whether any step-4 row is still open, and it asks
+# `units_rows` — the library epic-23 wave-11 built to be the only parser of that table.
+# A second split in this hook is the exact defect REQ-1e removed from the evidence gate.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/units.sh"
 
 # THE RUN VERDICT IS ASKED FOR (epic-23 wave-14 REQ-4, spec D5). `bionic_context`
 # computes it only for a caller that sets this, because the plan scan behind it is
@@ -2622,6 +2628,7 @@ itself has become slow, that is the thing to fix: it runs on every dispatch."
       # below reads this set for `run.sh`; an overrun leaves it unbuilt, and the author
       # deserves to know that wall is still waiting rather than to meet it next attempt.
       dp_not_checked "one-regression" "a suite set"
+      dp_not_checked "floor-once" "a suite set"
       # THIS SPEND IS EARLY (Step-6 architecture review §2.2). Every other arm pools into
       # one `dp_refuse_findings` at the bottom of the file; this branch spends here instead
       # because the overrun destroys the one-regression wall's own input and there is
@@ -2714,6 +2721,9 @@ regression_causes() {  # -> how many `regression-cause:` lines the plan carries 
 # rather than answering "no". R2 Q2 lists it as the clearest case in the file.
 if [ -z "$SUITES_ALLOWED" ]; then
   dp_not_checked "one-regression" "a suite set"
+  # AND THE FLOOR-ONCE WALL BELOW READS THE SAME SET, for the same reason and with the
+  # same answer: two walls keyed on `run.sh` in the set, both unable to speak without one.
+  dp_not_checked "floor-once" "a suite set"
 fi
 case " $SUITES_ALLOWED " in
   *" run.sh "*)
@@ -2734,6 +2744,108 @@ Fix: record why this one is needed, under \`## SDLC State\` in —
 Then retry the dispatch. A narrower brief needs no cause: name only the suites
 the change actually reaches."
         dp_finding "this run already ran the full tree" "record the cause on the plan" "$_dp_detail"
+      fi
+    fi
+    ;;
+esac
+
+# ================================================= THE FLOOR-ONCE WALL (REQ-5, D7)
+# (seed row 5, Chris DevX item 1: six full floors in wave-14; the prose rule at
+# skills/canonical-sdlc/dispatch.md:12 made mechanical.)
+#
+# WHAT IT ASKS, AND WHY IT IS NOT THE WALL ABOVE. The one-regression wall counts full-tree
+# rows on the ROSTER and charges one written cause per extra run. It says nothing about
+# whether the work being proved is FINISHED, and that is the half wave-14 paid for six
+# times: a floor run while Step-4 rows are still open proves a tree that no longer exists
+# by the time those rows land, so its result is stale before it is read and the next floor
+# is owed anyway. This wall reads the PLAN's `## Tasks` ledger instead and refuses a
+# full-tree dispatch while any step-4 or fold-in row is `pending` or `active`.
+#
+# THE PREDICATE IS THE PLAN'S OWN VOCABULARY (A-T5.1). A row counts as open work when its
+# `step` cell is 4 — the deliverable phase — OR its task text names a FOLD-IN, whatever
+# step the row sits at. Fold-ins are the case the step cell cannot see: wave-14 carried
+# eleven of them registered at steps 5 and 6, each one a change to the tree the floor had
+# already proved (`wave-14-tune-181.plan.md` rows T14-T27, T11c). The reading is
+# deliberately WIDE — a row that merely mentions a fold-in is counted — because the cost of
+# a false positive here is one sentence on the plan and the cost of a false negative is a
+# floor nobody can trust.
+#
+# THE OVERRIDE IS THE SAME LINE THE WALL ABOVE ASKS FOR, read the same way: any
+# `regression-cause:` under `## SDLC State` releases this arm. Not counted, unlike the
+# regression wall's ledger — a run that has stated once, in writing, that it is flooring
+# over open rows has said the thing this wall exists to make it say (AC-5.3).
+#
+# OPEN AND SILENT WITH NOTHING TO READ. No bound plan, no `## Tasks` table, or a brief that
+# does not reach the full tree, and this arm never speaks (AC-5.4). `units_rows` exits 1
+# and prints nothing on a plan with no table, which is exactly the answer wanted.
+#
+# ONE PARSER. The ledger is read through `units_rows` (lib/units.sh), never by a split of
+# this hook's own — AC-5.5, and the defect REQ-1e existed to remove.
+floor_open_rows() {  # -> `id<TAB>step<TAB>status` for each open step-4/fold-in row
+  [ -n "$PLAN" ] && [ -f "$PLAN" ] || return 0
+  units_rows "$PLAN" 2>/dev/null | awk -F'\t' '
+    {
+      status = tolower($10)
+      if (status != "pending" && status != "active") next
+      if ($2 != "4" && index(tolower($4), "fold-in") == 0) next
+      printf "%s\t%s\t%s\n", $1, $2, status
+    }
+  '
+}
+case " $SUITES_ALLOWED " in
+  *" run.sh "*)
+    if [ -n "$PLAN" ]; then
+      _floor_open="$(floor_open_rows)"
+      _floor_causes=$(regression_causes)
+      case "$_floor_causes" in ''|*[!0-9]*) _floor_causes=0 ;; esac
+      if [ -n "$_floor_open" ] && [ "$_floor_causes" -eq 0 ]; then
+        # THE ONE LINE HAS A COLUMN BUDGET AND THE ID LIST DOES NOT (AC-E1.3). The wire is
+        # `bionic: dispatch refused — <fact> (<fix>)` capped at 100 columns with the fix at
+        # 40, so the fact gets 39: the ids are taken while they fit and the remainder is
+        # counted rather than dropped. Every open row is named in full in `detail`, which
+        # is where a reader who needs the list goes anyway.
+        _floor_n=0; _floor_shown=0; _floor_ids=""; _floor_lines=""
+        while IFS=$'\t' read -r _fo_id _fo_step _fo_status; do
+          [ -n "$_fo_id" ] || continue
+          _floor_n=$((_floor_n + 1))
+          # PADDED, so a reader scans the parenthesis column rather than the ids. One fork
+          # per open row, on a path that only runs when the dispatch is already refused.
+          _floor_lines="${_floor_lines}    $(printf '%-4s' "$_fo_id") (step ${_fo_step}, ${_fo_status})
+"
+          if [ "$_floor_n" -eq "$((_floor_shown + 1))" ]; then
+            _floor_cand="${_floor_ids:+$_floor_ids, }$_fo_id"
+            if [ "${#_floor_cand}" -le 17 ]; then
+              _floor_ids="$_floor_cand"; _floor_shown=$((_floor_shown + 1))
+            fi
+          fi
+        done <<FLOOR_OPEN_ROWS
+$_floor_open
+FLOOR_OPEN_ROWS
+        # AT LEAST ONE ID IS ALWAYS NAMED. A single id longer than the whole budget would
+        # otherwise leave the fact saying "+1" and naming nothing.
+        if [ "$_floor_shown" -eq 0 ]; then
+          _floor_ids="$(printf '%s' "${_floor_open%%$'\t'*}" | cut -c1-17)"
+          _floor_shown=1
+        fi
+        if [ "$_floor_shown" -lt "$_floor_n" ]; then
+          _floor_ids="$_floor_ids +$((_floor_n - _floor_shown))"
+        fi
+        _dp_detail="Open rows on the plan's \`## Tasks\` ledger:
+${_floor_lines}
+The full tree is proved ONCE per run, at integration close, over a tree nobody is
+still writing to. A floor run while Step-4 rows are open proves a tree that does not
+survive them landing: the result is stale before it is read, and the next floor is
+owed anyway. Six of wave-14's floors were spent that way.
+
+Fix: land or drop those rows, then retry the dispatch.
+
+Or, if this floor is deliberate, say so once under \`## SDLC State\` in —
+    $PLAN
+
+    regression-cause: <why the tree must be re-proved with rows open>
+
+A narrower brief needs no cause: name only the suites the change actually reaches."
+        dp_finding "Step-4 rows open: ${_floor_ids}" "land them, or state the cause" "$_dp_detail"
       fi
     fi
     ;;
