@@ -720,28 +720,91 @@ whole_card step1; S1_NOARG="$WC_OUT"
 expect_eq "66: a step verb with no artifact path exits 64" "64" "$WC_RC"
 expect_empty "66a: …and prints nothing on stdout" "$S1_NOARG"
 
-# EVERY EMITTED LINE STILL FITS THE BUDGET, on a whole card as on a row: the
-# fixed sections are folded by the same width.sh the rows are padded by.
+# EVERY EMITTED LINE STILL FITS THE BUDGET, ARTIFACTS INCLUDED (T17, retiring
+# the exemption below; audit F2, A-orch-34). The Artifacts block used to print
+# the artifact path ABSOLUTE, exempted from the width check because a folded or
+# truncated path is useless to a reader — and a whole card really did emit a
+# 134-column line. `card.sh` now prints that path PROJECT-ROOT-RELATIVE
+# (`.bionic/docs/specs/…`, the repo's own citation convention), which is short
+# for every REAL Step-1/2/3 artifact — they all live under the project — so the
+# exemption is retired for that case and the whole card, Artifacts included, is
+# held to the budget.
 #
-# THE ARTIFACTS BLOCK IS EXEMPT, AND THAT IS width.sh's OWN RULE, not a hole cut
-# for a failing row. An artifact line is a PATH — the thing the reader opens —
-# and `bionic_line` already exists because "the end of a bionic row is where the
-# thing to TYPE lives": a path folded across two lines cannot be copied and a
-# path truncated to fit cannot be opened, so a long docs root wins over the
-# column budget here and nowhere else. The exemption is paid for by row 68,
-# which pins the path out WHOLE, on one line, with nothing elided (A-T11.3).
-no_artifacts() { printf '%s\n' "$1" | sed -e '/^  Artifacts$/,/^$/d'; }
-expect_empty "67: no line of the Step-1 card exceeds the budget" \
-  "$(over_budget "$(no_artifacts "$S1")")"
-expect_empty "67a: …nor of the Step-2 card" "$(over_budget "$(no_artifacts "$S2")")"
-expect_empty "67b: …nor of the Step-3 card" "$(over_budget "$(no_artifacts "$S3")")"
+# A path that resolves OUTSIDE the project still prints AS GIVEN (there is no
+# folding a path and keeping it something a reader can open — the half of the
+# old rationale that survives) and stays UNBOUND by the width invariant, which
+# is why the width pin below runs against an in-tree COPY of the three fixture
+# artifacts (A-T17.1) rather than the originals above, which are deliberately
+# outside the project (this suite's own hermetic-fixture rule) and would still
+# overflow on this machine's own $TMPDIR depth — proving nothing about the fix.
+. "${REPO}/payload/scripts/lib/root.sh"
+CARD_ROOT_FOR_TEST="$(project_root "$PWD")"
+mkdir -p "${CARD_ROOT_FOR_TEST}/.bionic/tmp"
+CARD_INTREE="$(cd "$(mktemp -d "${CARD_ROOT_FOR_TEST}/.bionic/tmp/card-test-t17.XXXXXX")" && pwd -P)"
+card_intree_cleanup() { [ -n "${CARD_INTREE:-}" ] && rm -rf "$CARD_INTREE"; }
+cp "$REQ_FIX" "${CARD_INTREE}/wave-99-fixture.requirements.md"
+cp "$SPEC_FIX" "${CARD_INTREE}/wave-99-fixture.spec.md"
+cp "$PLAN_FIX" "${CARD_INTREE}/wave-99-fixture.plan.md"
+whole_card step1 "${CARD_INTREE}/wave-99-fixture.requirements.md"; S1_IT="$WC_OUT"
+whole_card step2 "${CARD_INTREE}/wave-99-fixture.spec.md"; S2_IT="$WC_OUT"
+whole_card step3 "${CARD_INTREE}/wave-99-fixture.plan.md"; S3_IT="$WC_OUT"
 
-# The exemption's other half: the path is printed WHOLE, on ONE line, however
-# long the docs root is — never folded, never elided with the truncator's ….
+# THE WAVE'S OWN ARTIFACTS: not synthetic — the real requirements/spec/plan this
+# very card renders from at every Step-1/2/3 approval gate in this wave, which
+# is the case the fix exists for.
+REAL_REQ="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-15-fixit-182.requirements.md"
+REAL_SPEC="${CARD_ROOT_FOR_TEST}/.bionic/docs/specs/epic-23-bionic-tech-debt/wave-15-fixit-182.spec.md"
+REAL_PLAN="${CARD_ROOT_FOR_TEST}/.bionic/docs/plans/epic-23-bionic-tech-debt/wave-15-fixit-182.plan.md"
+whole_card step1 "$REAL_REQ"; S1_REAL="$WC_OUT"
+whole_card step2 "$REAL_SPEC"; S2_REAL="$WC_OUT"
+whole_card step3 "$REAL_PLAN"; S3_REAL="$WC_OUT"
+
+expect_empty "67: no line of the in-tree Step-1 fixture card exceeds the budget, Artifacts included" \
+  "$(over_budget "$S1_IT")"
+expect_empty "67a: …nor of the in-tree Step-2 fixture card" "$(over_budget "$S2_IT")"
+expect_empty "67b: …nor of the in-tree Step-3 fixture card" "$(over_budget "$S3_IT")"
+expect_empty "67c: nor of the Step-1 card over this wave's own requirements" \
+  "$(over_budget "$S1_REAL")"
+expect_empty "67d: …nor of the Step-2 card over this wave's own spec" "$(over_budget "$S2_REAL")"
+expect_empty "67e: …nor of the Step-3 card over this wave's own plan" "$(over_budget "$S3_REAL")"
+
+# The exemption's surviving half: a path OUTSIDE the project (the original
+# system-tmp fixtures, S1 above) still prints AS GIVEN, whole, on ONE line —
+# never folded, never elided with the truncator's … — unchanged from before T17.
 S1_ART="$(printf '%s\n' "$S1" | grep -F "$REQ_FIX")"
-expect_eq "68: the artifact path is printed on exactly one line" "1" \
+expect_eq "68: an out-of-project artifact path is still printed on exactly one line" "1" \
   "$(printf '%s\n' "$S1_ART" | grep -c . | tr -d ' ')"
 expect_eq "68a: …and whole, with nothing elided" "    requirements  ${REQ_FIX}" "$S1_ART"
+
+# AC-9.4's other half: the printed path RESOLVES. Every requirements/spec/plan
+# Artifacts line rendered above, joined to the project root when it is not
+# already absolute, names a real file — so a renderer that printed a
+# plausible-looking but wrong relative path is caught here even on a card that
+# never overflows a line. (The `adrs` Artifacts line is a pre-existing,
+# DOCS-ROOT-relative citation — spec/plan frontmatter's own convention, unrelated
+# to this row — and is excluded.)
+artifact_paths() {  # <rendered card> -> the requirements/spec/plan line's path
+  printf '%s\n' "$1" | sed -n -e 's/^    \(requirements\|spec\|plan\)  //p'
+}
+check_artifact_resolves() {  # <label> <rendered card>
+  local label="$1" card="$2" p _pass=1 _bad=""
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    case "$p" in
+      /*) [ -f "$p" ] || { _pass=0; _bad="${_bad}${_bad:+, }${p}"; } ;;
+      *)  [ -f "${CARD_ROOT_FOR_TEST}/${p}" ] || { _pass=0; _bad="${_bad}${_bad:+, }${p}"; } ;;
+    esac
+  done < <(artifact_paths "$card")
+  if [ "$_pass" -eq 1 ]; then ok "$label"; else no "$label" "unresolved: $_bad"; fi
+}
+check_artifact_resolves "68b: the in-tree Step-1 fixture card's Artifacts path resolves to a real file" "$S1_IT"
+check_artifact_resolves "68c: …the in-tree Step-2 fixture card's" "$S2_IT"
+check_artifact_resolves "68d: …the in-tree Step-3 fixture card's" "$S3_IT"
+check_artifact_resolves "68e: …the Step-1 card over this wave's own requirements" "$S1_REAL"
+check_artifact_resolves "68f: …the Step-2 card over this wave's own spec" "$S2_REAL"
+check_artifact_resolves "68g: …the Step-3 card over this wave's own plan" "$S3_REAL"
+
+card_intree_cleanup
 
 
 section "Section 8: T16 — no emitted line is wider than the budget, on a real card's batch"
