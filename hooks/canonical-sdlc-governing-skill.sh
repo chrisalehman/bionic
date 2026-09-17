@@ -565,20 +565,63 @@ fi
 
 # Determine the content that will exist after the tool runs.
 # - Write: the posted `content` is the new file body in full.
-# - Edit: the file exists; the hook cannot cheaply simulate the edit, so
-#   it enforces a weaker invariant: the file already contains the
-#   frontmatter field. If a Write established valid frontmatter, any
-#   subsequent Edit inherits it. If an Edit targets a file that never
-#   had the frontmatter, the hook blocks and directs the user to Write
-#   the artifact from scratch with the required frontmatter block.
+# - Edit: the POST-EDIT body — the file with `old_string` replaced by
+#   `new_string`, every occurrence under `replace_all` (REQ-8, D10).
+#   The hook is judging what the tool is about to leave on disk, in BOTH
+#   directions: an Edit that breaks an artifact is refused even though the
+#   file as it stands is fine, and an Edit that REPAIRS a broken artifact is
+#   admitted even though the file as it stands is not. The second direction
+#   is the one that used to deadlock — the repairing edit was refused by the
+#   very fault it repaired, and the only way out was to rewrite the whole
+#   file with Write (wave-14 A-T21.4).
+# - Edit the hook cannot apply — `old_string` absent, or present more than
+#   once without `replace_all` — leaves `CONTENT` as the file stands and
+#   `EDIT_APPLIED=0`. The tool itself will fail on that input; a wall that
+#   refused it first would be asserting something it did not observe
+#   (ADR-028), and its refusal would name a fault the writer did not commit.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+#
+# THE SUBSTITUTION IS LITERAL AND IN-PROCESS. `${v//"$old"/$new}` quotes the
+# PATTERN, which is what turns off globbing, and leaves the REPLACEMENT
+# unquoted, which is what bash 3.2 needs: 3.2 does not strip quotes from the
+# replacement word and would plant them in the file's text. Neither shell
+# re-expands the replacement, so a `\|`, a `&` or a newline in `new_string`
+# survives byte for byte (measured on bash 3.2.57 and 5.3.15).
 CONTENT=""
+EDIT_APPLIED=0
 if [ "$TOOL" = "Write" ]; then
   CONTENT=$(echo "$BIONIC_INPUT" | jq -r '.tool_input.content // empty')
 else
   if [ -f "$FILE_PATH" ]; then
     if [ "$IN_SCOPE" -eq 1 ]; then
       CONTENT=$(cat "$FILE_PATH")
+      if [ "$TOOL" = "Edit" ]; then
+        # `jq -j` prints the raw value with NO trailing newline of its own, and the
+        # `printf X` guard keeps a value that legitimately ends in newlines from being
+        # eaten by command substitution.
+        _gs_old=$(printf '%s' "$BIONIC_INPUT" | jq -j '.tool_input.old_string // ""'; printf X)
+        _gs_old=${_gs_old%X}
+        _gs_new=$(printf '%s' "$BIONIC_INPUT" | jq -j '.tool_input.new_string // ""'; printf X)
+        _gs_new=${_gs_new%X}
+        _gs_all=$(printf '%s' "$BIONIC_INPUT" | jq -r '.tool_input.replace_all // false')
+        if [ -n "$_gs_old" ]; then
+          case "$CONTENT" in
+            *"$_gs_old"*)
+              if [ "$_gs_all" = "true" ]; then
+                CONTENT=${CONTENT//"$_gs_old"/$_gs_new}
+                EDIT_APPLIED=1
+              else
+                _gs_rest=${CONTENT#*"$_gs_old"}
+                case "$_gs_rest" in
+                  *"$_gs_old"*) : ;;   # not unique: the tool will fail, so judge nothing
+                  *) CONTENT=${CONTENT/"$_gs_old"/$_gs_new}; EDIT_APPLIED=1 ;;
+                esac
+              fi
+              ;;
+          esac
+        fi
+        unset _gs_old _gs_new _gs_all _gs_rest
+      fi
     else
       # Misplacement probe only. This path is reached on EVERY Edit anywhere
       # in the project, and all it inspects is the leading frontmatter block —
@@ -1055,15 +1098,22 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
           # commit time. `units_rows` answers non-zero for "no table" and this arm stops
           # there; a table that IS present is validated in full.
           #
-          # WRITE CONTENT ONLY — the known hole. `$CONTENT` is the posted body on a
-          # Write and the file AS IT STANDS on an Edit, so an Edit that breaks the table
-          # is judged against the pre-edit text and passes. That is this hook's existing
-          # limitation for every content arm in it (see the CONTENT derivation above),
-          # not a new one, and the evidence gate still catches the result at commit.
+          # THE POST-EDIT BODY, BOTH DIRECTIONS (REQ-8, AC-8.1/AC-8.4). `$CONTENT` is the
+          # posted body on a Write and, since D10, the file with the Edit APPLIED on an
+          # Edit — so an Edit that breaks a valid table is refused (it used to pass: the
+          # pre-edit text was still fine), and an Edit that REPAIRS a broken table is
+          # admitted (it used to be refused by the very fault it repaired, leaving a
+          # whole-file Write as the only way out — wave-14 A-T21.4).
+          #
+          # AN EDIT THE HOOK COULD NOT APPLY IS NOT JUDGED HERE. `old_string` absent, or
+          # present more than once without `replace_all`, leaves `EDIT_APPLIED=0`: the
+          # tool will fail on that input by itself, and a wall that refused it first
+          # would be asserting a fault nobody committed (ADR-028).
           #
           # A TEMP FILE, because the verbs are functions of a PATH: one plan, one copy,
           # removed on both paths out.
-          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ] && [ -n "$CONTENT" ]; then
+          if [ "$SDLC_STEP" -ge 3 ] 2>/dev/null && [ "$SCALE" != "task" ] && [ -n "$CONTENT" ] \
+             && { [ "$TOOL" != "Edit" ] || [ "$EDIT_APPLIED" -eq 1 ]; }; then
             _gs_units_tmp="$(mktemp "${TMPDIR:-/tmp}/bionic-units.XXXXXX")" || _gs_units_tmp=""
             if [ -n "$_gs_units_tmp" ]; then
               printf '%s\n' "$CONTENT" > "$_gs_units_tmp"
