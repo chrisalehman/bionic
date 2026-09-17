@@ -9492,7 +9492,13 @@ expect_eq "S19.3 …declared by 43 anchor calls (Section 8's doctoring rewrites 
 # `^IMPACT_BOUND_S=[0-9]+$` and `^LG_IMPACT_BOUND_S=[0-9]+$`. Two anchor calls for one
 # doctored file, which is what the helper's per-LINE count means: +2, 27 -> 29. RE-DERIVED
 # BY DIRECT GREP over this file at THIS commit.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 29 more" "29" \
+#
+# 30 at epic-23 wave-15-fixit-182 (2026-09-17, T1): §PV — the Patrol verdict's single
+# definition — anchors `^patrol_verdict\(\)` in lib/patrol.sh before asserting the
+# tree-wide count, so a second definition grown in a hook cannot make that row pass by
+# moving what it reads. One anchor call, 29 -> 30. RE-DERIVED BY DIRECT GREP over this file
+# at THIS commit, as every number in this section is.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 30 more" "30" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9568,7 +9574,9 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # the number of mutants. §S19.2's absence sweep already reads every suite in tests/,
 # including that one. What is missing is only this bookkeeping count, and adding a
 # fifth term to it is a change to a section task 11 does not own.
-expect_eq "S19.3 …76 anchor call sites across the four doctoring suites, all told" "76" \
+# 77 at epic-23 wave-15-fixit-182 (2026-09-17, T1): +1 from §PV's anchor above; the other
+# three files are untouched by that task.
+expect_eq "S19.3 …77 anchor call sites across the four doctoring suites, all told" "77" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -10515,6 +10523,65 @@ expect_ne "BR …and the SAME comparison calls the doctored copy a drift (the ge
   "$(fn_code "$BR_MUT" _detect_bound_kill_tree)" "$(br_code "$SSTART" ss_bound_kill_tree)"
 expect_eq "BR …while the OTHER primitive in the doctored copy still agrees (one function moved, not the file)" \
   "$(fn_code "$BR_MUT" _detect_bound_kill)" "$(br_code "$SSTART" ss_bound_kill)"
+
+# ============================================================
+section "PV — the Patrol verdict: ONE predicate, two blocking readers (epic-23 wave-15 REQ-1, AC-1.4)"
+# ============================================================
+#
+# THE DEFECT THIS SECTION EXISTS FOR. "How stale is stale" was a judgment call typed out at
+# three sites. lib/patrol.sh exported PATROL_STALE_MULTIPLIER to hold two of them together;
+# the third — the stop library's own death notice — typed `INTERVAL * 2` as a literal, so a
+# change to the judgment moved two readers and left the one that BLOCKS A TURN measuring
+# against a threshold nobody configured (research row 1, wave-15).
+#
+# ADR-028 replaced the threshold with an observation: the verdict is an idle-time predicate
+# over the session transcript, and it lives in lib/patrol.sh as `patrol_verdict`. Both
+# readers that can REFUSE on it — the stop library's revive notice and the dispatch wall's
+# staleness half — call that one function. This section pins the pair the way §Roots pins a
+# resolver: one definition, every caller, no private arithmetic.
+
+PV_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+[ -d "$PV_LIB" ] || PV_LIB="${BIONIC_SCRIPTS_DIR}/scripts/lib"
+PV_PATROL="$PV_LIB/patrol.sh"
+PV_STOP="$PV_LIB/stop.sh"
+PV_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
+
+# ONE DEFINITION, and it is the library's. Counted over every shell file the payload ships,
+# so a second copy grown in a hook is a failure here rather than a divergence discovered in
+# the field.
+PV_DEFS=$( { grep -l '^patrol_verdict()' "$PV_LIB"/*.sh 2>/dev/null
+             grep -l '^patrol_verdict()' "$BIONIC_HOOKS_DIR"/*.sh 2>/dev/null
+           } | sort -u | wc -l | tr -d ' ' )
+expect_eq "PV patrol_verdict is defined exactly once in the tree" "1" "$PV_DEFS"
+anchor -E "$PV_PATROL" '^patrol_verdict\(\)' 1
+
+# BOTH BLOCKING READERS CALL IT.
+if grep -q 'patrol_verdict' "$PV_STOP"; then
+  ok "PV the stop library's revive notice calls patrol_verdict"
+else
+  no "PV the stop library's revive notice calls patrol_verdict" "no call in $PV_STOP"
+fi
+if grep -q 'patrol_verdict' "$PV_DP"; then
+  ok "PV …and so does the dispatch wall's staleness half"
+else
+  no "PV …and so does the dispatch wall's staleness half" "no call in $PV_DP"
+fi
+
+# AND NEITHER TYPES A MULTIPLIER. The literal the stop library carried, and the exported
+# constant the dispatch wall read: the arithmetic is inside the predicate now, so both are
+# absent from both readers. PATROL_STALE_MULTIPLIER itself stays exported for the poker's
+# `adopt` liveness window, which is a different question with a different answer.
+expect_eq "PV the literal 2x multiplier is gone from the stop library" "0" \
+  "$(grep -c 'INTERVAL \* 2' "$PV_STOP" || true)"
+expect_eq "PV …and the dispatch wall no longer reads PATROL_STALE_MULTIPLIER either" "0" \
+  "$(grep -c 'PATROL_STALE_MULTIPLIER' "$PV_DP" || true)"
+
+# THE FIRE WINDOW IS THE LIBRARY'S ARITHMETIC, spelled once. A reader that recomputed it
+# would be the literal back under another name.
+expect_eq "PV the fire window is computed in exactly one place" "1" \
+  "$(grep -c 'iv / 10' "$PV_PATROL" || true)"
+expect_eq "PV …and neither reader recomputes it" "0" \
+  "$(( $(grep -c '/ 10' "$PV_STOP" || true) + $(grep -c '/ 10' "$PV_DP" || true) ))"
 
 # ============================================================
 finish
