@@ -80,8 +80,9 @@ unmet_row() {  # <project>
   } > "$1/.bionic/tmp/roster-$SID.state"
 }
 
-# A PATROL STAMP PAST 2x THE INTERVAL — patrol-revive's block. The interval is
-# pinned tiny through the project's own knob and the age is a backdated mtime.
+# A PATROL STAMP PAST ONE FIRE WINDOW — patrol-revive's block. The interval is
+# pinned tiny through the project's own knob and the age is a backdated mtime; the idle gap
+# the verdict needs beside it comes from `usage_tx`'s dated transcript above (REQ-1, T1).
 stale_stamp() {  # <project>
   printf 'poker-interval: 1s\n' > "$1/.bionic/config.yaml"
   printf 'patrol-stamp/v1|at=2026-08-27T00:00:00Z|session=%s|verb=arm\n' "$SID" \
@@ -91,8 +92,27 @@ stale_stamp() {  # <project>
 }
 
 # A TRANSCRIPT whose last assistant entry carries usage — what context-spend reads.
+#
+# AND WHOSE RECORDS ARE DATED, WITH ONE IDLE GAP IN THEM (amended at epic-23 wave-15 REQ-1,
+# T1). The Patrol verdict is an idle-time predicate now: `stop_patrol_revive` reads this
+# same `transcript_path` for the span between the last activity record and the next
+# turn-starting user record, and a stamp past the fire window is a DEATH only when such a
+# gap has passed with no tick in it. This fixture used to be one undated assistant record,
+# which the predicate reads — correctly — as "idle time cannot be measured here", so §1 and
+# §4d would have been asserting the advisory rather than the block they name. Every record
+# the CLI writes carries `.timestamp` (spec assumption 1, verified live 2026-09-16), so the
+# dated shape is also the faithful one. The usage entry stays LAST, which is what
+# context-spend reads.
 usage_tx() {  # <file>
-  jq -nc '{type:"assistant",message:{model:"claude-opus-5",usage:{input_tokens:1000,cache_creation_input_tokens:0,cache_read_input_tokens:0}}}' > "$1"
+  local t_old t_now
+  t_old="$(date -u -v-10000S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+           || date -u -d '-10000 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+  t_now="$(date -u -v-1S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+           || date -u -d '-1 seconds' +%Y-%m-%dT%H:%M:%SZ)"
+  { jq -nc --arg t "$t_old" '{type:"assistant",timestamp:$t,message:{role:"assistant",content:[{type:"text",text:"working"}]}}'
+    jq -nc --arg t "$t_now" '{type:"user",timestamp:$t,message:{role:"user",content:"carry on"}}'
+    jq -nc --arg t "$t_now" '{type:"assistant",timestamp:$t,message:{model:"claude-opus-5",usage:{input_tokens:1000,cache_creation_input_tokens:0,cache_read_input_tokens:0}}}'
+  } > "$1"
 }
 
 # ---------- driving ----------
