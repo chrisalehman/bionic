@@ -53,7 +53,15 @@ section "Section 1: every glyph in the closed set measures one column"
 # T10 / REQ-9 (AC-9.1, AC-9.2): § and the curly quotes “ ” join the set here —
 # the glyphs Chris's screenshot named, which were previously read at their
 # bytes (conservative, AC-9.4's ruling) and so padded a card row short.
-for g in '✓' '✗' '–' '—' '≥' '…' '·' '→' '•' '§' '“' '”'; do
+#
+# T11 / REQ-10 (A-orch-17, from T10's A-T10.2): × joins them. It is the
+# MULTIPLICATION SIGN, two bytes and one column, and it is not a decorative
+# glyph here — it is what a provenance cell writes a count of runs with
+# ("five reorders × 12 tool calls"), so the first card rendered from a real
+# requirements artifact by `card.sh step1` carries one. Left outside the set it
+# measures two, the row pads one column short, and every trailing column on it
+# lands left of its neighbours — the exact drift T10 closed for §.
+for g in '✓' '✗' '–' '—' '≥' '…' '·' '→' '•' '§' '“' '”' '×'; do
   expect_eq "1.${g}: '${g}' measures 1 under a UTF-8 locale" "1" "$(bionic_cols "$g")"
   expect_eq "1c.${g}: '${g}' measures 1 under LC_ALL=C" "1" "$(cols_c "$g")"
 done
@@ -276,6 +284,11 @@ forty-four column limit' "$WRAPPED"
   ASCII_SEC_S='a x mark inside a cell that must fold at its own column boundary here'
   expect_eq "17a: a section-sign glyph is measured at one column by the fold" \
     "$(bionic_wrap "$ASCII_SEC_S" 30 | sed -e 's/x/§/')" "$(bionic_wrap "$SEC_S" 30)"
+
+  TIMES_S='a count of 5 × 12 inside a cell that must fold at its own column boundary'
+  ASCII_TIMES_S='a count of 5 x 12 inside a cell that must fold at its own column boundary'
+  expect_eq "17c: a multiplication sign is measured at one column by the fold" \
+    "$(bionic_wrap "$ASCII_TIMES_S" 30 | sed -e 's/x/×/')" "$(bionic_wrap "$TIMES_S" 30)"
 
   QUOTE_S='a “quoted” word inside a cell that must fold at its own column boundary'
   ASCII_QUOTE_S='a xquotedx word inside a cell that must fold at its own column boundary'
