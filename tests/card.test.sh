@@ -42,8 +42,15 @@ CARD_SH="${REPO}/payload/scripts/card.sh"
 WIDTH_SH="${REPO}/payload/scripts/lib/width.sh"
 
 # ── the formats card.sh now owns, as the three cards stated them at 89f6944 ──
-OLD_FMT_REQ_A='    %-7s %s'
-OLD_FMT_REQ_B='            provenance %-48s  ACs %s'
+# REQ_A is the ONE exception: T23 (epic-23 wave-15, Chris's three reads
+# 2026-09-16/17) collapsed the row to ONE line whose folding cell is a single
+# stream — title, the seam " · provenance ", then the provenance text, fed as
+# one already-joined TSV cell — with `ACs n` trailing on that same line (18
+# fixed literal columns before the stream — id field + separators + "  ACs "
+# — plus a four-column reserve, against BIONIC_LINE_WIDTH=100, which
+# tests/lib/resolve-roots.sh never overrides). REQ_A states that CURRENT
+# shape rather than the 89f6944 baseline the other four constants still do.
+OLD_FMT_REQ_A='    %-7s %-78s  ACs %s'
 OLD_FMT_DEC='    %-4s %-44s %-14s %s'
 OLD_FMT_OWN='    %-12s owner %-14s surfaces %-22s test %s'
 OLD_FMT_EVAL='    %-8s %-36s %6s %5s %9s %5s %6s'
@@ -145,15 +152,24 @@ card() {  # <kind> — TSV rows on stdin
   bash "$CARD_SH" "$@" 2>/dev/null
 }
 
-# --- requirement (two physical lines per row, no column header) ---
-REQ_VALS_A=("REQ-<id>" "<the requirement in one line>")
-REQ_VALS_B=("<user quote | spec section | ticket | report>" "<n>")
+# --- requirement (ONE physical line's worth of text-column stream, no header) ---
+# T23 rule 5 (one stream): the title and the provenance are ONE folding cell
+# — title, the seam " · provenance ", then the provenance text — fed to
+# card.sh as ONE already-joined TSV cell (the seam is content, not a
+# card-runtime label any more), with the trailing ACs count on the row's own
+# first line (rule 3). Short placeholders here so the merged stream fits on
+# one line with no fold, matching the ORIGINAL single-line intent of this
+# section; Sections 3/4/9 pin the fold and the multi-line shapes.
+REQ_ID="REQ-<id>"
+REQ_TITLE="<title>"
+REQ_PROV_TEXT="<provenance>"
+REQ_ACS="<n>"
+REQ_STREAM="${REQ_TITLE} · provenance ${REQ_PROV_TEXT}"
 REQ_WANT="$(printf '%s\n' \
   "  Requirements" \
-  "$(fmt_render "$OLD_FMT_REQ_A" "${REQ_VALS_A[@]}")" \
-  "$(fmt_render "$OLD_FMT_REQ_B" "${REQ_VALS_B[@]}")")"
-REQ_GOT="$(printf '%s\t%s\t%s\t%s\n' "${REQ_VALS_A[0]}" "${REQ_VALS_A[1]}" "${REQ_VALS_B[0]}" "${REQ_VALS_B[1]}" | card requirement)"
-expect_eq "6: the requirement kind renders the card's own two-line row" "$REQ_WANT" "$REQ_GOT"
+  "$(fmt_render "$OLD_FMT_REQ_A" "$REQ_ID" "$REQ_STREAM" "$REQ_ACS")")"
+REQ_GOT="$(printf '%s\t%s\t%s\n' "$REQ_ID" "$REQ_STREAM" "$REQ_ACS" | card requirement)"
+expect_eq "6: the requirement kind renders the card's own one-line stream, ACs on it" "$REQ_WANT" "$REQ_GOT"
 
 # --- decision ---
 DEC_VALS=("D<n>" "<the decision in one line>" "<REQ ids>" "<file | none>")
@@ -248,7 +264,7 @@ over_budget() {  # <rendered block> -> the lines wider than the budget, if any
   printf '%s' "$_bad"
 }
 
-REQ_LONG="$(printf 'REQ-9\t%s\t%s\t4\n' "$LONG" "$LONG" | card requirement)"
+REQ_LONG="$(printf 'REQ-9\t%s · provenance %s\t4\n' "$LONG" "$LONG" | card requirement)"
 expect_empty "16: requirement — no line exceeds the budget on a repo-scale row" "$(over_budget "$REQ_LONG")"
 DEC_LONG="$(printf 'D4\t%s\tREQ-7, REQ-9\tadr-027-close-out-split.md\n' "$LONG" | card decision)"
 expect_empty "17: decision — no line exceeds the budget on a repo-scale row" "$(over_budget "$DEC_LONG")"
@@ -360,10 +376,16 @@ section "Section 6: T10 — REQ-9 the widened glyph set and per-batch column wid
 GLYPH_FOLD='a § — “x” …'
 PLAIN_FOLD='a x x xxx x'
 
-REQ9_G="$(printf 'REQ-9\treq text\t%s\t3\n' "$GLYPH_FOLD" | card requirement | sed -n '3p')"
-REQ9_P="$(printf 'REQ-9\treq text\t%s\t3\n' "$PLAIN_FOLD" | card requirement | sed -n '3p')"
-expect_eq "33: requirement — § — “ ” … in the provenance cell do not move ACs" \
-  "$(cols "${REQ9_P%%ACs*}")" "$(cols "${REQ9_G%%ACs*}")"
+# T23 rule 5 merges the title and provenance into ONE stream, so the
+# AC-9.1/9.2 concern for requirement now lives in that stream's own fold
+# budget: a glyph miscounted there would wrap the whole stream at the wrong
+# column, so the two twins — same word count, glyphs vs their ASCII
+# stand-ins, placed as the provenance half of the stream — must measure the
+# same rendered width.
+REQ9_G="$(printf 'REQ-9\treq text · provenance %s\t3\n' "$GLYPH_FOLD" | card requirement | sed -n '2p')"
+REQ9_P="$(printf 'REQ-9\treq text · provenance %s\t3\n' "$PLAIN_FOLD" | card requirement | sed -n '2p')"
+expect_eq "33: requirement — § — “ ” … in the stream measure the same width as their ASCII twin" \
+  "$(cols "$REQ9_P")" "$(cols "$REQ9_G")"
 
 DEC9_G="$(printf 'D9\t%s\tREQ-9\tnone\n' "$GLYPH_FOLD" | card decision | grep -v '^  Decisions')"
 DEC9_P="$(printf 'D9\t%s\tREQ-9\tnone\n' "$PLAIN_FOLD" | card decision | grep -v '^  Decisions')"
@@ -653,7 +675,7 @@ expect_contains "51b: …and so does the integration branch" \
 # `card.sh requirement` as TSV. Not a spot check of one cell: `cmp` over the
 # whole block, so a different fold, a different pad, a different batch width or
 # a different header all fail here rather than being discovered on a card.
-printf 'REQ-1\tthe first requirement in one line\tuser 2026-09-16 "do the thing"\t2\nREQ-2\tthe second requirement in one line\tseed row 2; research row 2\t1\n' \
+printf 'REQ-1\tthe first requirement in one line · provenance user 2026-09-16 "do the thing"\t2\nREQ-2\tthe second requirement in one line · provenance seed row 2; research row 2\t1\n' \
   | card requirement > "${CARD_SANDBOX}/tsv.txt"
 printf '%s\n' "$S1" | sed -n '/^  Requirements$/,/^$/p' | sed -e '/^$/d' \
   > "${CARD_SANDBOX}/whole.txt"
@@ -981,5 +1003,144 @@ OWN_FIT_WANT="$(printf '%s\n' \
 OWN_FIT_GOT="$(printf 'concept a\tlib/x.sh\tsurfaces text a\ttest a\nconcept b\ttests/lib/impact.sh\tsurfaces text b\ttest b\n' | card ownership)"
 expect_eq "71: a batch that fits renders byte for byte what per-batch widening alone rendered" \
   "$OWN_FIT_WANT" "$OWN_FIT_GOT"
+
+section "Section 9: T23 — the requirement row's shape (Chris's three reads)"
+
+# THE FIVE RULES, verbatim in substance from Chris's reads of the live Step-1
+# card (2026-09-17): (3) the trailing `ACs n` column sits on the row's own
+# FIRST line, beside the title; (2) a folded line always keeps at least one
+# column of space before a trailing column — "stop" must never abut "ACs 6";
+# (1) a continuation line indents to the fold cell's own start column (the
+# title-text column), never deeper; (4) no line's rendered text may reach as
+# far as the `ACs n` column; (5, "one stream") the title and the provenance
+# are not two cells or two lines any more — they are ONE word-wrapped stream,
+# title then the seam " · provenance " then the provenance text, filling the
+# text column greedily, so provenance CONTINUES on the title's own line when
+# there is room rather than always starting a fresh one.
+#
+# REQ-1 and REQ-2's OWN real title and provenance text, frozen out of this
+# wave's own requirements.md (Chris's own screenshot was of exactly this row)
+# rather than read from the artifact live — Section 8's own rule, for the same
+# reason: the shape that was wrong has to stay put to keep walling it. The
+# seam is built here exactly as `_CARD_AWK`'s `flush_req` builds it for a
+# whole card (rule 5), so this is also a hand-fed twin of that construction.
+REQ23_1_TITLE='The Patrol death notice judges on idle time, not wall time'
+REQ23_1_PROV='seed row 1 (RULED option 3, user 2026-09-16 "Option 3"; A-orch-4); field 2026-09-15 (stamp 2459 s vs the 2400 s limit while the orchestrator was busy — two ticks could not fire; Chris "the orchestrator is simply busy"); research row 1 (stop_patrol_revive() at payload/scripts/lib/stop.sh:1927-2101; the limit is the literal INTERVAL * 2 at :2026, not PATROL_STALE_MULTIPLIER from lib/patrol.sh:67 that session-start.sh:667 and dispatch-preflight.sh:653 read; the notice at :2077-2092 never mentions CronList; every transcript record carries .timestamp; the emitter at :1477-1487 already selects the current turn'"'"'s user record and does not emit its timestamp; the scan window is tail -n 2000 at :1445-1457)'
+REQ23_2_TITLE='The stop guard observes its target at the instant of the stop'
+REQ23_2_PROV='seed row 2 (RULED option 1, user 2026-09-16 "Option 1"; A-orch-5); field 2026-09-15 ("no observation exists in this repo" refused a stop of an agent nobody had examined); wave-14 A-orch-72; research row 2 (stop-guard.sh:900-1092 — record lookup, D-3 own-look, D-1 freshness, D-6 progress artifact, D-2 consume, all over stop-check.state written only by execution-recorder.sh:1094; stop-check.sh is an 841-line verb registered on no channel; the human order at stop-guard.sh:819-860 allows immediately and is TTL-bounded)'
+REQ23_1_STREAM="${REQ23_1_TITLE} · provenance ${REQ23_1_PROV}"
+REQ23_2_STREAM="${REQ23_2_TITLE} · provenance ${REQ23_2_PROV}"
+
+REQ23_OUT="$(printf 'REQ-1\t%s\t5\nREQ-2\t%s\t6\n' "$REQ23_1_STREAM" "$REQ23_2_STREAM" | card requirement)"
+expect_empty "72: the real REQ-1/REQ-2 batch stays inside the budget on every line" \
+  "$(over_budget "$REQ23_OUT")"
+
+REQ23_L1="$(printf '%s\n' "$REQ23_OUT" | grep 'REQ-1   ')"
+REQ23_L2="$(printf '%s\n' "$REQ23_OUT" | grep 'REQ-2   ')"
+
+# Rule 3: ACs is on the row's own first line, beside the title.
+expect_contains "73: rule 3 — REQ-1's ACs count is on the same line as its title" \
+  "ACs 5" "$REQ23_L1"
+expect_contains "73a: …and REQ-2's ACs count is on the same line as its title" \
+  "ACs 6" "$REQ23_L2"
+
+# Rule 2: at least one column of space always separates a folded cell from a
+# trailing column — REQ-2's title ends in the exact word ("stop") Chris found
+# abutting "ACs 6".
+gap_before() {  # <line> <landmark> -> columns of whitespace right before its first occurrence
+  local line="$1" landmark="$2" pre n=0
+  case "$line" in
+    *"$landmark"*) pre="${line%%"$landmark"*}" ;;
+    *) printf '0'; return 0 ;;
+  esac
+  while [ "${pre: -1}" = " " ]; do pre="${pre%?}"; n=$(( n + 1 )); done
+  printf '%s' "$n"
+}
+case "$REQ23_L2" in
+  *'stopACs'*) no "74: rule 2 — REQ-2's title does not abut ACs 6" "$REQ23_L2" ;;
+  *) ok "74: rule 2 — REQ-2's title does not abut ACs 6" ;;
+esac
+expect_true "74a: …and at least one column of space separates them" \
+  test "$(gap_before "$REQ23_L2" "ACs 6")" -ge 1
+
+# Rule 1: a continuation line of the stream indents to the fold cell's own
+# start column (13: four leading spaces, the seven-column id field, one
+# separator) — the general WRAPPED rule every other kind already gets, now
+# true here too because title and provenance are one fold field, not two.
+REQ23_CONT1="$(printf '%s\n' "$REQ23_OUT" | sed -n '/REQ-1   /,/REQ-2   /p' | sed -n '2p')"
+REQ23_INDENT="$(printf '%s' "$REQ23_CONT1" | sed -e 's/[^ ].*$//' | awk '{print length}')"
+expect_eq "75: rule 1 — a continuation line indents to the fold cell's own column" \
+  "12" "$REQ23_INDENT"
+expect_absent "75a: …and does not repeat the row's own id" "REQ-1" "$REQ23_CONT1"
+
+# Rule 4: the RIGHT edge lines up too — no continuation line (every line of
+# the row but its own first, which legitimately carries `ACs n` itself) may
+# print under the `ACs n` column. "Honor the column structure, left-aligned …
+# that's the whole point, so it's easy to read." The bound is read off REQ-1's
+# own first line (where "ACs" itself starts, minus the two-space gap rule 2
+# guarantees) rather than hardcoded, so a reserve changed in card.sh cannot
+# silently stop this row from meaning anything.
+right_edge_ok() {  # <block-of-continuation-lines> <bound col> -> true if none reaches it
+  local blk="$1" bound="$2" l
+  while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    [ "$(cols "$l")" -lt "$bound" ] || return 1
+  done < <(printf '%s\n' "$blk")
+  return 0
+}
+REQ23_1_CONTLINES="$(printf '%s\n' "$REQ23_OUT" | sed -n '/REQ-1   /,/REQ-2   /p' | sed '1d;$d')"
+REQ23_ACS_COL="$(col_of "$REQ23_L1" "ACs")"
+expect_true "80: rule 4 — no continuation line of REQ-1's row reaches under ACs n" \
+  right_edge_ok "$REQ23_1_CONTLINES" "$REQ23_ACS_COL"
+
+# Rule 5 (one stream): the seam " · provenance " appears exactly once in
+# REQ-1's row — never duplicated by a second fold pass — and provenance picks
+# up wherever the title's own wrap left off, on the SAME line when there was
+# room (REQ-1's title plus the seam plus the word "seed" all fit before the
+# 78-column budget: the stream's own first line carries the seam, not a
+# provenance line of its own).
+expect_eq "85: rule 5 — the seam appears exactly once in REQ-1's row" "1" \
+  "$(printf '%s\n' "$REQ23_OUT" | sed -n '/REQ-1   /,/REQ-2   /p' | sed '$d' | grep -c ' · provenance ')"
+expect_contains "85a: …and it lands on the row's own first line, beside the title" \
+  ' · provenance ' "$REQ23_L1"
+
+# ── rule 2, once per OTHER row kind with a folding cell ──────────────────────
+#
+# Every one of these already carries a DECLARED width on its folding cell, so
+# the pad that follows it is guaranteed by the same padding pass that has
+# always run — this pins that guarantee rather than assuming it, on the
+# Section 4 repo-scale fixtures whose fold cell is genuinely at its widest.
+expect_true "76: decision — rule 2, a repo-scale fold never abuts its trailing serves column" \
+  test "$(gap_before "$(printf '%s\n' "$DEC_LONG" | grep -v '^  Decisions')" "REQ-7, REQ-9")" -ge 1
+expect_true "77: ownership — rule 2, a repo-scale fold never abuts its trailing test column" \
+  test "$(gap_before "$(printf '%s\n' "$OWN_LONG" | grep -v '^  Ownership')" " test ")" -ge 1
+expect_true "78: eval-design — rule 2, a repo-scale fold never abuts its first count column" \
+  test "$(gap_before "$(printf '%s\n' "$EVAL_LONG" | tail -n +2 | sed -n '1p')" "2")" -ge 1
+expect_true "79: task — rule 2, a repo-scale fold never abuts its trailing kind column" \
+  test "$(gap_before "$(printf '%s\n' "$TASK_LONG" | grep -v '^  Tasks')" "build")" -ge 1
+
+# ── rule 4, once per OTHER row kind with a folding cell ──────────────────────
+#
+# No CONTINUATION line reaches as far as the column its own row's trailing
+# structured column starts at — structural wherever the fold field has a
+# declared width (padded or wrapped to EXACTLY that width, never more), so a
+# continuation line's blank-literal-plus-chunk can never run past where the
+# next field's own literal begins. Pinned on Section 4's repo-scale fixtures.
+DEC_LONG_NOHDR="$(printf '%s\n' "$DEC_LONG" | grep -v '^  Decisions')"
+expect_true "81: decision — rule 4, no continuation line reaches under serves" \
+  right_edge_ok "$(printf '%s\n' "$DEC_LONG_NOHDR" | tail -n +2)" \
+  "$(col_of "$(printf '%s\n' "$DEC_LONG_NOHDR" | sed -n 1p)" "REQ-7, REQ-9")"
+OWN_LONG_NOHDR="$(printf '%s\n' "$OWN_LONG" | grep -v '^  Ownership')"
+expect_true "82: ownership — rule 4, no continuation line reaches under test" \
+  right_edge_ok "$(printf '%s\n' "$OWN_LONG_NOHDR" | tail -n +2)" \
+  "$(col_of "$(printf '%s\n' "$OWN_LONG_NOHDR" | sed -n 1p)" " test ")"
+EVAL_LONG_NOHDR="$(printf '%s\n' "$EVAL_LONG" | tail -n +2)"
+expect_true "83: eval-design — rule 4, no continuation line reaches under the first count column" \
+  right_edge_ok "$(printf '%s\n' "$EVAL_LONG_NOHDR" | tail -n +2)" \
+  "$(col_of "$(printf '%s\n' "$EVAL_LONG_NOHDR" | sed -n 1p)" "2")"
+TASK_LONG_NOHDR="$(printf '%s\n' "$TASK_LONG" | grep -v '^  Tasks')"
+expect_true "84: task — rule 4, no continuation line reaches under kind" \
+  right_edge_ok "$(printf '%s\n' "$TASK_LONG_NOHDR" | tail -n +2)" \
+  "$(col_of "$(printf '%s\n' "$TASK_LONG_NOHDR" | sed -n 1p)" "build")"
 
 finish
