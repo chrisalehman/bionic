@@ -145,13 +145,20 @@ run_write() {
   rm -f "$tmp_err"
 }
 
-# run_edit <file> <old_string> <new_string> [replace_all]
+# run_edit <file> <old_string> <new_string> [replace_all] [interp]
 #
 # `replace_all` defaults to false and is posted either way, because the hook now APPLIES the
 # edit to decide (REQ-8) and the flag is part of what it applies. The CLI posts the same three
 # keys verbatim (spec §5 assumption 6).
+#
+# `interp` defaults to "bash" — PATH resolution, same as every pre-existing call site — and is
+# overridable so a fixture can drive the hook under a NAMED interpreter (e.g. `/bin/bash` or
+# `/opt/homebrew/bin/bash`), because the substitution the hook applies to derive an Edit's
+# post-edit body (REQ-8) is interpreter-version-sensitive: bash 5.2 turned on
+# `patsub_replacement`, under which an unquoted replacement treats an unescaped `&` as the
+# matched text (review R1, wave-15-fixit-182).
 run_edit() {
-  local file_path="$1" old_str="$2" new_str="$3" all="${4:-false}"
+  local file_path="$1" old_str="$2" new_str="$3" all="${4:-false}" interp="${5:-bash}"
   local input
   input=$(jq -n \
     --arg p "$file_path" \
@@ -162,7 +169,7 @@ run_edit() {
     '{session_id: $s, tool_name: "Edit", tool_input: {file_path: $p, old_string: $o, new_string: $n, replace_all: $r}}')
   local tmp_err
   tmp_err=$(mktemp)
-  if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+  if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" "$interp" "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
     HOOK_EXIT=0
   else
     HOOK_EXIT=$?
@@ -177,9 +184,29 @@ run_edit() {
   HOOK_VSTDERR=""
   if [ "$HOOK_EXIT" -ne 0 ]; then
     HOOK_VSTDERR=$(HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" BIONIC_WALL_VERBOSE=1 \
-      bash "$HOOK" <<< "$input" 2>&1 >/dev/null) || true
+      "$interp" "$HOOK" <<< "$input" 2>&1 >/dev/null) || true
   fi
   rm -f "$tmp_err"
+}
+
+# gs_find_bash52 — prints the path to a bash >= 5.2 interpreter (the version that turned on
+# `patsub_replacement`, review R1) if one is reachable, and fails silently otherwise. Checked in
+# this order because /opt/homebrew/bin/bash is the ONE named in the review's own measurement,
+# but a machine without Homebrew may still have a modern bash first on PATH.
+gs_find_bash52() {
+  local cand resolved ver major minor
+  for cand in /opt/homebrew/bin/bash /usr/local/bin/bash bash; do
+    resolved=$(command -v "$cand" 2>/dev/null) || continue
+    ver=$("$resolved" -c 'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"' 2>/dev/null) || continue
+    major="${ver%%.*}"
+    minor="${ver#*.}"
+    case "$major$minor" in *[!0-9]*) continue ;; esac
+    if [ "$major" -gt 5 ] || { [ "$major" -eq 5 ] && [ "$minor" -ge 2 ]; }; then
+      printf '%s' "$resolved"
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Same semantics as the framework's expect_eq (label, expected, actual;
@@ -2804,6 +2831,42 @@ run_edit "$gs_8_plan" 'a raw \| pipe' 'a raw | pipe' true
 assert_eq "8.1f exit 2" 2 "$HOOK_EXIT"
 assert_contains "8.1f the detail names the first shifted row" "T2: 12 cells" "$HOOK_VSTDERR"
 assert_contains "8.1f …and the second" "T3: 12 cells" "$HOOK_VSTDERR"
+
+# ---------- 8.1g/8.1h: the post-edit substitution keeps `&` byte-exact (review R1 fold-in) ----
+#
+# `old_string` here IS the raw pipe from `gs_tasks_raw` ('a raw | pipe'), so an unquoted
+# replacement that mishandles a `&` in `new_string` does not just misspell the cell — under
+# bash's `patsub_replacement` (5.2+) an unquoted `&` expands to the WHOLE matched text, i.e.
+# `old_string` itself, which reintroduces the very raw pipe this Edit is repairing. That makes
+# the substitution bug and the table's validity the SAME observable: correct behaviour repairs
+# the table (exit 0, silent) and the bug leaves it broken (exit 2, "12 cells for 11 columns"),
+# with no need to read $CONTENT directly.
+#
+# gs_r1_new deliberately contains a literal `&` and no `|` of its own, so the row it produces is
+# valid ONLY when `&` survives untouched.
+gs_r1_new='no pipe & safe'
+
+echo "8.1g: bash 3.2.57 — & in new_string survives; positive pair, correct before and after R1"
+printf '%s\n' "$(build_plan)$gs_tasks_raw" > "$gs_8_plan"
+run_edit "$gs_8_plan" 'a raw | pipe' "$gs_r1_new" false /bin/bash
+assert_eq "8.1g exit 0" 0 "$HOOK_EXIT"
+assert_eq "8.1g silent — the repair lands, & untouched on 3.2.57" "" "$HOOK_STDERR"
+
+GS_BASH52=""
+if GS_BASH52=$(gs_find_bash52); then
+  echo "8.1h: bash >= 5.2 ($GS_BASH52) — & in new_string must survive byte-exact (patsub_replacement)"
+  printf '%s\n' "$(build_plan)$gs_tasks_raw" > "$gs_8_plan"
+  run_edit "$gs_8_plan" 'a raw | pipe' "$gs_r1_new" false "$GS_BASH52"
+  assert_eq "8.1h exit 0" 0 "$HOOK_EXIT"
+  assert_eq "8.1h silent — an unquoted replacement would splice the old pipe back in and refuse this" \
+    "" "$HOOK_STDERR"
+else
+  # A-T20.1: this harness has no skip idiom (grep -n 'skip\|SKIP' tests/lib/assert.sh finds
+  # none), so the row is recorded `ok` with the reason in its own label rather than silently
+  # omitted — a suite with fewer TOTAL rows on one machine than another is exactly the drift
+  # the roster-is-the-directory rule (test-harness.md) exists to prevent.
+  ok "8.1h: skip: no bash >= 5.2 on this machine"
+fi
 
 # ---------- AC-8.4: an Edit this hook cannot apply is not this hook's to refuse ----------
 #
