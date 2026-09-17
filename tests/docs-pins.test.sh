@@ -3272,4 +3272,61 @@ expect_eq "153: AC-9.4 — a decision row nudged one column right no longer matc
 # steps/1.md, steps/2.md and steps/3.md unconditionally, so no separate pin is needed here;
 # a cap regression from this task's own additions shows up there, not in this section.
 
+section "Section 28: T3 — the Patrol's task-list duty is a refresh, not a reorder (REQ-3, AC-3.1)"
+#
+# WHAT THIS SECTION OWNS. wave-15-fixit-182 D5: the tick's task-list duty used to be
+# prescribed as a mechanical REORDER — fresh TaskCreate copies of every later-step entry,
+# TaskUpdate status=deleted on the stale originals, so the panel reads in chronological
+# display order — at a cost research row 3 measured as five reorders × twelve tool calls in
+# wave-14 alone. No hook ever enforced the reorder (`grep -rn chronological payload/` finds
+# only unrelated comments — research row 3(d)); it was prose-only, in this one block. The
+# duty line now reads "TaskList, then statuses reconciled with verified reality" — the
+# `TaskList` call and the reconciliation the gate at `lib/stop.sh` actually checks, nothing
+# more. This section pins that the reorder mechanics are gone from the rendered surface and
+# that the removal does not grow it.
+#
+# HERMETIC. Reads the committed rendered final by path.
+
+# 154: AC-3.1 — the mechanical reorder is gone: no rendered surface still tells the model to
+# invent fresh TaskCreate copies to fake chronological order.
+DISPATCH_REORDER_HITS="$(grep -c 'chronological' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+DISPATCH_REORDER_HITS="${DISPATCH_REORDER_HITS:-0}"
+expect_eq "154: AC-3.1 — dispatch.md carries no 'chronological' reorder text (fails-when: the reorder prose survives)" \
+  "0" "$DISPATCH_REORDER_HITS"
+
+# 155: the second half of the same fails-when clause — the specific mechanism phrase, not
+# just the word "chronological", in case a future edit renames the ordering without removing
+# the TaskCreate-copy machinery it drove.
+DISPATCH_TASKCREATE_HITS="$(grep -Fc 'TaskCreate fresh copies' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+DISPATCH_TASKCREATE_HITS="${DISPATCH_TASKCREATE_HITS:-0}"
+expect_eq "155: AC-3.1 — dispatch.md carries no 'TaskCreate fresh copies' text (fails-when: the reorder mechanism survives under a new name)" \
+  "0" "$DISPATCH_TASKCREATE_HITS"
+
+# 156: bytes go down, never up. 34,993 B is dispatch.md's own measured size at wave-15's
+# base commit (59456ce), before this task's cut — the fails-when clause is "its byte count
+# rises above 34,993", so strictly-under is the passing direction and equal-to is a miss
+# (a render that dropped the prose but re-added equal bytes elsewhere would not be a cut).
+DISPATCH_BYTES_156="$(wc -c < "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+if [ -n "$DISPATCH_BYTES_156" ] && [ "$DISPATCH_BYTES_156" -lt 34993 ] 2>/dev/null; then
+  ok "156: AC-3.1 — dispatch.md is smaller than its 34,993 B pre-cut baseline ($DISPATCH_BYTES_156 B < 34993 B)"
+else
+  no "156: AC-3.1 — dispatch.md is smaller than its 34,993 B pre-cut baseline" \
+     "${DISPATCH_BYTES_156:-unreadable} B"
+fi
+
+# Anti-vacuity: the two grep-based assertions above must actually discriminate. A copy of
+# dispatch.md with the reorder text reinstated must read back over 0.
+AC3_MUT_DIR="$TMP/ac3-reorder"; mkdir -p "$AC3_MUT_DIR"
+AC3_MUT="$AC3_MUT_DIR/dispatch-with-reorder.md"
+printf 'chronological display order, TaskCreate fresh copies of every entry\n' >> "$AC3_MUT" 2>/dev/null
+cat "$DISPATCH_MD" >> "$AC3_MUT" 2>/dev/null
+AC3_MUT_HITS="$(grep -c 'chronological' "$AC3_MUT" 2>/dev/null | tr -cd '0-9')"
+AC3_MUT_HITS="${AC3_MUT_HITS:-0}"
+if [ "$AC3_MUT_HITS" -gt 0 ] 2>/dev/null; then
+  ok "157: a dispatch.md with the reorder text reinstated reads back over 0 (154 is not vacuous, $AC3_MUT_HITS hit(s))"
+else
+  no "157: a dispatch.md with the reorder text reinstated reads back over 0 (154 is not vacuous)" \
+     "mutated copy still read 0"
+fi
+
 finish
