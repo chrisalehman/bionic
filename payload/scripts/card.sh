@@ -198,7 +198,9 @@ _card_header() {
 # and giving it a batch width would right-justify what a caller wrote to be
 # read left-aligned.
 CARD_BW1=(); CARD_BW2=()
-_card_compute_batch_widths() {  # reads CARD_ROWS[] — sets CARD_BW1[] CARD_BW2[]
+CARD_FOLDSET1=(); CARD_FOLDSET2=()
+_card_compute_batch_widths() {  # reads CARD_ROWS[] — sets CARD_BW1[] CARD_BW2[] CARD_FOLDSET1[] CARD_FOLDSET2[]
+  CARD_FOLDSET1=(); CARD_FOLDSET2=()
   _card_parse "$CARD_FMT_1"
   local nf1="${#CARD_LIT[@]}" i=0
   CARD_BW1=()
@@ -248,6 +250,163 @@ _card_compute_batch_widths() {  # reads CARD_ROWS[] — sets CARD_BW1[] CARD_BW2
       done
     fi
   done
+
+  _card_shrink_line 1
+  [ "$CARD_LINES" -gt 1 ] && _card_shrink_line 2
+  return 0
+}
+
+# ── THE LINE-WIDTH INVARIANT (AC-9.4), WHICH OUTRANKS THE WIDENING ───────────
+#
+# WHY A SHRINK EXISTS AT ALL. The widening above keeps a card's trailing columns
+# on one column by making every structured column as wide as the widest cell it
+# holds anywhere in the batch. On this wave's own Step-2 card that is a 38-column
+# `concept` beside a 46-column `owner`, and they push `test` — the row's last
+# cell, the one field the format gives no width at all — out to column 134, where
+# a 160-column suite list then runs to column 297. A wrapped line is one row
+# turned into two and the table stops being a table: lib/width.sh's founding note,
+# and the reason AC-9.4 is the harder of the two rules. So the widening may widen
+# only as far as the budget allows (A-T11.5, A-orch-20 (2); Chris may reverse the
+# rule at the Step-5 read).
+#
+# WHAT SHRINKS, AND ONLY WHEN. Nothing at all, unless the batch's widest row
+# actually overflows — a card that already fits renders byte for byte what it
+# rendered before, so the invariant costs the cards that never had the problem
+# nothing, and the AC-9.5 pair this suite pins (rows 40/41) does not move. When a
+# batch does overflow, the widest structured column gives up ONE column at a time
+# — so the next-widest takes its turn as soon as it is the widest, and they
+# converge rather than one of them collapsing alone — until the trailing cell has
+# CARD_MIN_TRAIL columns to fold inside. A column left narrower than a cell it
+# holds then FOLDS that cell inside itself: the D4 WRAPPED shape, applied to a
+# structured cell, with the trailing columns still on the row's first line and
+# still starting on one column across the card. AC-9.5 kept, AC-9.4 held.
+#
+# THE FLOOR IS THE FORMAT'S OWN DECLARED WIDTH, dropped to a single column only if
+# the trailing cell would otherwise have no room whatever. No format shipped here
+# needs that second pass; it is here so the invariant cannot be defeated by a
+# format added later with wider columns than the budget can hold.
+CARD_MIN_TRAIL=24
+
+# The widest cell each field holds in this batch — what the shrink needs in order
+# to know which columns will have to fold once they are narrowed.
+CARD_MAX=()
+_card_widest_cells() {  # <line 1|2> — sets CARD_MAX[] over CARD_ROWS[]
+  local nf off i line
+  if [ "$1" = "2" ]; then nf="$CARD_NF_2"; off="$CARD_NF_1"; else nf="$CARD_NF_1"; off=0; fi
+  CARD_MAX=()
+  i=0
+  while [ "$i" -lt "$nf" ]; do CARD_MAX[$i]=0; i=$(( i + 1 )); done
+  for line in ${CARD_ROWS[@]+"${CARD_ROWS[@]}"}; do
+    [ -n "$line" ] || continue
+    _card_split "$line"
+    i=0
+    while [ "$i" -lt "$nf" ]; do
+      _bionic_cols_into "${CARD_CELLS[$(( off + i ))]:-}"
+      [ "$BIONIC_COLS" -gt "${CARD_MAX[$i]}" ] && CARD_MAX[$i]="$BIONIC_COLS"
+      i=$(( i + 1 ))
+    done
+  done
+}
+
+_card_shrink_line() {  # <line 1|2> — narrows CARD_BW[] and sets CARD_FOLDSET[]
+  local lineno="$1" fmt fold nf i
+  if [ "$lineno" = "2" ]; then fmt="$CARD_FMT_2"; fold="$CARD_FOLD_2"; nf="$CARD_NF_2"
+  else fmt="$CARD_FMT_1"; fold="$CARD_FOLD_1"; nf="$CARD_NF_1"; fi
+  _card_parse "$fmt"
+  local nfields="${#CARD_LIT[@]}"
+  [ "$nfields" -gt 0 ] || return 0
+  _card_widest_cells "$lineno"
+
+  # THE WIDTH IN FORCE for every field, and the one field that has none. `tf` is
+  # the row's trailing cell — the last field the format declares no width for —
+  # which is the cell that runs off the line, because nothing bounds it.
+  local w=() floor=() litw=() start=() tf=-1
+  i=0
+  while [ "$i" -lt "$nfields" ]; do
+    _bionic_cols_into "${CARD_LIT[$i]}"; litw[$i]="$BIONIC_COLS"
+    floor[$i]="${CARD_W[$i]:-}"
+    if [ "$lineno" = "2" ]; then w[$i]="${CARD_BW2[$i]:-}"; else w[$i]="${CARD_BW1[$i]:-}"; fi
+    [ -n "${w[$i]}" ] || w[$i]="${CARD_W[$i]:-}"
+    [ -n "${CARD_W[$i]:-}" ] || tf="$i"
+    i=$(( i + 1 ))
+  done
+
+  # Where every field starts, and how wide the batch's widest FIRST line comes
+  # out, given the widths in force. Recomputed after every column given up.
+  local col over
+  _card_line_extent() {
+    col=1; i=0
+    while [ "$i" -lt "$nfields" ]; do
+      col=$(( col + ${litw[$i]} ))
+      start[$i]="$col"
+      [ -n "${w[$i]}" ] && col=$(( col + ${w[$i]} ))
+      i=$(( i + 1 ))
+    done
+    if [ "$tf" -ge 0 ]; then over=$(( ${start[$tf]} - 1 + ${CARD_MAX[$tf]:-0} ))
+    else over=$(( col - 1 )); fi
+  }
+
+  _card_line_extent
+  if [ "$lineno" = "2" ]; then CARD_FOLDSET2=(); else CARD_FOLDSET1=(); fi
+  i=0
+  while [ "$i" -lt "$nfields" ]; do
+    if [ "$lineno" = "2" ]; then CARD_FOLDSET2[$i]=0; else CARD_FOLDSET1[$i]=0; fi
+    i=$(( i + 1 ))
+  done
+  # NOTHING OVERFLOWS, NOTHING MOVES.
+  [ "$over" -gt "$BIONIC_LINE_WIDTH" ] || { unset -f _card_line_extent; return 0; }
+
+  local phase=1 want widest widx floorv
+  while [ "$phase" -le 2 ]; do
+    if [ "$phase" -eq 1 ]; then want="$CARD_MIN_TRAIL"; else want=1; fi
+    while :; do
+      _card_line_extent
+      if [ "$tf" -ge 0 ]; then
+        [ $(( ${start[$tf]} - 1 + want )) -gt "$BIONIC_LINE_WIDTH" ] || break
+      else
+        [ $(( col - 1 )) -gt "$BIONIC_LINE_WIDTH" ] || break
+      fi
+      widest=0; widx=-1; i=0
+      while [ "$i" -lt "$nfields" ]; do
+        if [ "$i" -ne "$fold" ] && [ -n "${w[$i]}" ]; then
+          if [ "$phase" -eq 1 ]; then floorv="${floor[$i]}"; else floorv=1; fi
+          [ -n "$floorv" ] || floorv=1
+          if [ "${w[$i]}" -gt "$floorv" ] && [ "${w[$i]}" -gt "$widest" ]; then
+            widest="${w[$i]}"; widx="$i"
+          fi
+        fi
+        i=$(( i + 1 ))
+      done
+      [ "$widx" -ge 0 ] || break
+      w[$widx]=$(( widest - 1 ))
+    done
+    _card_line_extent
+    if [ "$tf" -ge 0 ]; then
+      [ $(( ${start[$tf]} )) -gt "$BIONIC_LINE_WIDTH" ] || break
+    else
+      [ $(( col - 1 )) -gt "$BIONIC_LINE_WIDTH" ] || break
+    fi
+    phase=$(( phase + 1 ))
+  done
+  unset -f _card_line_extent
+
+  # The narrowed widths go back, and every column now narrower than a cell it
+  # holds — plus the trailing cell, which is what all of this was for — is marked
+  # to fold inside itself.
+  i=0
+  while [ "$i" -lt "$nfields" ]; do
+    if [ "$i" -ne "$fold" ] && [ -n "${floor[$i]}" ]; then
+      if [ "$lineno" = "2" ]; then CARD_BW2[$i]="${w[$i]}"; else CARD_BW1[$i]="${w[$i]}"; fi
+      if [ "${CARD_MAX[$i]:-0}" -gt "${w[$i]}" ]; then
+        if [ "$lineno" = "2" ]; then CARD_FOLDSET2[$i]=1; else CARD_FOLDSET1[$i]=1; fi
+      fi
+    fi
+    i=$(( i + 1 ))
+  done
+  if [ "$tf" -ge 0 ] && [ "$tf" -ne "$fold" ]; then
+    if [ "$lineno" = "2" ]; then CARD_FOLDSET2[$tf]=1; else CARD_FOLDSET1[$tf]=1; fi
+  fi
+  return 0
 }
 
 # ── ONE ROW, WHICH MAY BE MORE THAN ONE LINE ─────────────────────────────────
@@ -256,65 +415,99 @@ _card_emit() {  # <fmt> <fold index> <line 1|2> <cell>...
   local vals=("$@")
   _card_parse "$fmt"
   local nf="${#CARD_LIT[@]}"
-  local i col=1 foldcol=1 val w eff bw
+  local i col=1 val w eff bw budget chunk
+  local startcol=() effw=() folds=()
 
   # THE BATCH WIDTH WINS OVER THE FORMAT'S OWN, for every field this card's
-  # rows actually widened (never less than the format's declared width — see
-  # _card_compute_batch_widths, which seeds each entry at that width).
+  # rows actually widened — or, where the batch overflowed the budget, the
+  # NARROWED width _card_shrink_line left behind (never less than the format's
+  # declared width unless the trailing cell had no room at all). The same pass
+  # says which fields fold; the format's own free cell always does.
   i=0
   while [ "$i" -lt "$nf" ]; do
-    if [ "$lineno" = "2" ]; then bw="${CARD_BW2[$i]:-}"; else bw="${CARD_BW1[$i]:-}"; fi
+    if [ "$lineno" = "2" ]; then bw="${CARD_BW2[$i]:-}"; folds[$i]="${CARD_FOLDSET2[$i]:-0}"
+    else bw="${CARD_BW1[$i]:-}"; folds[$i]="${CARD_FOLDSET1[$i]:-0}"; fi
     [ -n "$bw" ] && CARD_W[$i]="$bw"
+    [ "$i" -eq "$fold" ] && folds[$i]=1
     i=$(( i + 1 ))
   done
 
-  # PASS ONE: where the free cell starts, and how much room it has. The start is
-  # computed against the ACTUAL values of the cells BEFORE it — a preceding cell
-  # wider than its column pushes this one right, and the continuation lines have
-  # to land under wherever it really is.
+  # PASS ONE: where each cell starts, and how many columns it occupies. The start
+  # is computed against the ACTUAL values of the cells BEFORE it — a preceding
+  # cell wider than its column pushes this one right, and the continuation lines
+  # have to land under wherever it really is. A cell that FOLDS occupies its own
+  # column and no more, because folding is exactly what keeps it there.
   i=0
   while [ "$i" -lt "$nf" ]; do
     _bionic_cols_into "${CARD_LIT[$i]}"; col=$(( col + BIONIC_COLS ))
-    [ "$i" -eq "$fold" ] && foldcol="$col"
-    val="${vals[$i]:-}"; _bionic_cols_into "$val"; eff="$BIONIC_COLS"
+    startcol[$i]="$col"
     w="${CARD_W[$i]}"
-    if [ -n "$w" ] && [ "$w" -gt "$eff" ]; then eff="$w"; fi
+    if [ "${folds[$i]}" = "1" ]; then
+      eff="$w"; [ -n "$eff" ] || eff=0
+    else
+      val="${vals[$i]:-}"; _bionic_cols_into "$val"; eff="$BIONIC_COLS"
+      if [ -n "$w" ] && [ "$w" -gt "$eff" ]; then eff="$w"; fi
+    fi
+    effw[$i]="$eff"
     col=$(( col + eff ))
     i=$(( i + 1 ))
   done
 
-  # THE BUDGET IS THE CELL'S OWN COLUMN, and for a free cell that ends the row
-  # (the requirement text, which has no trailing column at all) it is whatever is
-  # left of the line. Either way the fold, not the terminal, decides where the
-  # text breaks.
-  local budget="${CARD_W[$fold]}"
-  [ -n "$budget" ] || budget=$(( BIONIC_LINE_WIDTH - foldcol + 1 ))
-
-  local chunks=() chunk
-  while IFS= read -r chunk; do chunks[${#chunks[@]}]="$chunk"; done < <(bionic_wrap "${vals[$fold]:-}" "$budget")
-
-  # PASS TWO: the row's own first line carries chunk one and every trailing
-  # column; each further chunk is a line of its own, indented to the free cell.
-  vals[$fold]="${chunks[0]:-}"
-  local out="" pad dash
+  # THE CHUNKS. A folding cell is broken inside its own column — and for a free
+  # cell that ends the row (the requirement text, which has no trailing column at
+  # all) that column is whatever is left of the line. Either way the fold, not
+  # the terminal, decides where the text breaks. Every other cell is one chunk,
+  # the value exactly as given: a cell that FITS is never passed through the fold,
+  # so a batch inside the budget comes out byte for byte what it always did.
+  local chflat=() choff=() chcnt=() maxc=1
   i=0
   while [ "$i" -lt "$nf" ]; do
-    out="${out}${CARD_LIT[$i]}"
-    val="${vals[$i]:-}"; _bionic_cols_into "$val"; eff="$BIONIC_COLS"
-    w="${CARD_W[$i]}"; dash="${CARD_DASH[$i]}"; pad=""
-    if [ -n "$w" ] && [ "$w" -gt "$eff" ]; then pad="$(_card_spaces $(( w - eff )))"; fi
-    if [ "$dash" = "-" ]; then out="${out}${val}${pad}"; else out="${out}${pad}${val}"; fi
+    choff[$i]="${#chflat[@]}"
+    val="${vals[$i]:-}"
+    if [ "${folds[$i]}" = "1" ]; then
+      budget="${CARD_W[$i]}"
+      [ -n "$budget" ] || budget=$(( BIONIC_LINE_WIDTH - ${startcol[$i]} + 1 ))
+      [ "$budget" -ge 1 ] || budget=1
+      _bionic_cols_into "$val"
+      if [ "$i" -ne "$fold" ] && [ "$BIONIC_COLS" -le "$budget" ]; then
+        chflat[${#chflat[@]}]="$val"
+      else
+        while IFS= read -r chunk; do chflat[${#chflat[@]}]="$chunk"; done < <(bionic_wrap "$val" "$budget")
+      fi
+    else
+      chflat[${#chflat[@]}]="$val"
+    fi
+    chcnt[$i]=$(( ${#chflat[@]} - ${choff[$i]} ))
+    [ "${chcnt[$i]}" -gt "$maxc" ] && maxc="${chcnt[$i]}"
     i=$(( i + 1 ))
   done
-  _card_rstrip "${out}${CARD_TAIL}"; printf '\n'
 
-  local n=1
-  while [ "$n" -lt "${#chunks[@]}" ]; do
-    _card_rstrip "$(_card_spaces $(( foldcol - 1 )))${chunks[$n]}"; printf '\n'
-    n=$(( n + 1 ))
+  # PASS TWO: the row's own first line carries every cell's first chunk and every
+  # trailing column; each further line carries the next chunk of whatever is still
+  # folding, each under its own column, and nothing else — the literals that label
+  # a column are printed as the spaces they occupy, so a continuation line never
+  # reads as a row of its own.
+  local out pad dash k=0
+  while [ "$k" -lt "$maxc" ]; do
+    out=""
+    i=0
+    while [ "$i" -lt "$nf" ]; do
+      if [ "$k" -eq 0 ]; then
+        out="${out}${CARD_LIT[$i]}"
+      else
+        _bionic_cols_into "${CARD_LIT[$i]}"; out="${out}$(_card_spaces "$BIONIC_COLS")"
+      fi
+      if [ "$k" -lt "${chcnt[$i]}" ]; then val="${chflat[$(( ${choff[$i]} + k ))]}"; else val=""; fi
+      _bionic_cols_into "$val"; eff="$BIONIC_COLS"
+      w="${effw[$i]}"; dash="${CARD_DASH[$i]}"; pad=""
+      if [ "$w" -gt "$eff" ]; then pad="$(_card_spaces $(( w - eff )))"; fi
+      if [ "$dash" = "-" ]; then out="${out}${val}${pad}"; else out="${out}${pad}${val}"; fi
+      i=$(( i + 1 ))
+    done
+    _card_rstrip "${out}${CARD_TAIL}"; printf '\n'
+    k=$(( k + 1 ))
   done
 }
-
 # A row's cells, split on TABS — and on tabs only. `read -a` with IFS set to a tab
 # drops an empty field, and an empty free cell is a real row (a decision with no
 # ADR yet), so the split is done here by hand where it can keep one.
