@@ -145,15 +145,21 @@ run_write() {
   rm -f "$tmp_err"
 }
 
+# run_edit <file> <old_string> <new_string> [replace_all]
+#
+# `replace_all` defaults to false and is posted either way, because the hook now APPLIES the
+# edit to decide (REQ-8) and the flag is part of what it applies. The CLI posts the same three
+# keys verbatim (spec §5 assumption 6).
 run_edit() {
-  local file_path="$1" old_str="$2" new_str="$3"
+  local file_path="$1" old_str="$2" new_str="$3" all="${4:-false}"
   local input
   input=$(jq -n \
     --arg p "$file_path" \
     --arg o "$old_str" \
     --arg n "$new_str" \
+    --argjson r "$all" \
     --arg s "$GS_SID" \
-    '{session_id: $s, tool_name: "Edit", tool_input: {file_path: $p, old_string: $o, new_string: $n}}')
+    '{session_id: $s, tool_name: "Edit", tool_input: {file_path: $p, old_string: $o, new_string: $n, replace_all: $r}}')
   local tmp_err
   tmp_err=$(mktemp)
   if HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
@@ -2713,6 +2719,110 @@ echo "1e.5g: a plan with no Tasks table at all → allow (presence is the gate's
 run_write "$gs_1e_plan" "$(build_plan)"
 assert_eq "1e.5g exit 0" 0 "$HOOK_EXIT"
 assert_eq "1e.5g silent" "" "$HOOK_STDERR"
+
+# ============================================================
+section "REQ-8 AC-8.1/AC-8.4: on an Edit the Tasks arm judges the POST-EDIT body"
+# ============================================================
+#
+# fails-when: an Edit REPAIRING a broken Tasks table is refused, an Edit BREAKING a valid one
+# is admitted, or an Edit the tool itself cannot apply is refused by this arm.
+#
+# THE DEADLOCK THIS REPLACES (wave-14 A-T21.4). `$CONTENT` on an Edit used to be the file AS
+# IT STANDS, so the arm judged the PRE-edit text. Two consequences, both wrong and in
+# opposite directions: the Edit that repaired a broken table was refused by the very fault it
+# repaired — leaving a whole-file Write as the only way out of a one-character typo — and the
+# Edit that broke a valid table passed, to be caught a round trip later at commit.
+#
+# THE BROKEN TABLE IS THE RAW-PIPE ONE, so this section, tests/units.test.sh §9b and the
+# evidence gate's 22e5 are pinned to one fault, one repair and one message.
+#
+# THE ARM IS NOT SIMPLY OFF FOR EDITS — that would pass every repair case here by doing
+# nothing. 8.1b, 8.1c and 8.1e are the discriminators: each is an Edit whose POST-edit body is
+# the only thing that could refuse it.
+
+gs_8_project=$(make_project)
+gs_8_plan="$gs_8_project/.bionic/docs/plans/epic-01-demo/edit.plan.md"
+
+# A raw `|` in T2's agent cell opens a field the header does not have. The repair is the one
+# escape a GFM cell defines.
+gs_tasks_raw='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 5 | verify | do b | a raw | pipe | T1 | S | REQ-x | b.sh | pending |
+'
+gs_tasks_repaired="${gs_tasks_raw/| a raw | pipe |/| a raw \\| pipe |}"
+
+echo "8.1a: an Edit that REPAIRS a broken Tasks table → allow (the deadlock is gone)"
+printf '%s\n' "$(build_plan)$gs_tasks_raw" > "$gs_8_plan"
+run_edit "$gs_8_plan" 'a raw | pipe' 'a raw \| pipe'
+assert_eq "8.1a exit 0" 0 "$HOOK_EXIT"
+assert_eq "8.1a silent" "" "$HOOK_STDERR"
+
+echo "8.1b: an Edit that BREAKS a valid Tasks table → refused, naming the pipe"
+printf '%s\n' "$(build_plan)$gs_tasks_repaired" > "$gs_8_plan"
+run_edit "$gs_8_plan" 'a raw \| pipe' 'a raw | pipe'
+assert_eq "8.1b exit 2" 2 "$HOOK_EXIT"
+assert_contains "8.1b the detail names the row and both counts" \
+  "T2: 12 cells for 11 columns" "$HOOK_VSTDERR"
+assert_contains "8.1b …and the repair" "escape it as" "$HOOK_VSTDERR"
+
+echo "8.1c: the post-edit read is general, not raw-pipe-shaped — a status an Edit invents"
+printf '%s\n' "$(build_plan)$gs_tasks_repaired" > "$gs_8_plan"
+run_edit "$gs_8_plan" '| b.sh | pending |' '| b.sh | doing |'
+assert_eq "8.1c exit 2" 2 "$HOOK_EXIT"
+assert_contains "8.1c the detail names the status the edit would have written" \
+  "status doing is not one of" "$HOOK_VSTDERR"
+
+echo "8.1d: the control — the same broken table by Write is refused as it always was"
+run_write "$gs_8_plan" "$(build_plan)$gs_tasks_raw"
+assert_eq "8.1d exit 2" 2 "$HOOK_EXIT"
+assert_contains "8.1d …naming the same fault" "T2: 12 cells for 11 columns" "$HOOK_VSTDERR"
+
+echo "8.1e: replace_all applies to EVERY occurrence — two broken rows, one Edit → allow"
+gs_tasks_raw2='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | do b | a raw | pipe | T1 | S | REQ-x | b.sh | landed |
+| T3 | 5 | verify | do c | a raw | pipe | T1, T2 | S | REQ-x | c.sh | pending |
+'
+printf '%s\n' "$(build_plan)$gs_tasks_raw2" > "$gs_8_plan"
+run_edit "$gs_8_plan" 'a raw | pipe' 'a raw \| pipe' true
+assert_eq "8.1e exit 0" 0 "$HOOK_EXIT"
+assert_eq "8.1e silent — a hook that replaced only the first would still see a broken row" \
+  "" "$HOOK_STDERR"
+
+echo "8.1f: …and replace_all in the other direction breaks both rows → refused, naming both"
+gs_tasks_repaired2="${gs_tasks_raw2//| a raw | pipe |/| a raw \\| pipe |}"
+printf '%s\n' "$(build_plan)$gs_tasks_repaired2" > "$gs_8_plan"
+run_edit "$gs_8_plan" 'a raw \| pipe' 'a raw | pipe' true
+assert_eq "8.1f exit 2" 2 "$HOOK_EXIT"
+assert_contains "8.1f the detail names the first shifted row" "T2: 12 cells" "$HOOK_VSTDERR"
+assert_contains "8.1f …and the second" "T3: 12 cells" "$HOOK_VSTDERR"
+
+# ---------- AC-8.4: an Edit this hook cannot apply is not this hook's to refuse ----------
+#
+# The Edit tool fails on its own for an `old_string` that is absent or not unique. A wall that
+# refused first would be asserting a fault nobody committed (ADR-028) and would re-open the
+# deadlock through the back door: every one of these files is BROKEN, and refusing here would
+# again be refusing an edit for a fault it is not making.
+
+echo "8.4a: an Edit whose old_string is absent → the arm is skipped, allow"
+printf '%s\n' "$(build_plan)$gs_tasks_raw" > "$gs_8_plan"
+run_edit "$gs_8_plan" 'no such text anywhere in this plan' 'whatever'
+assert_eq "8.4a exit 0" 0 "$HOOK_EXIT"
+assert_eq "8.4a silent" "" "$HOOK_STDERR"
+
+echo "8.4b: an Edit whose old_string is not unique and carries no replace_all → skipped, allow"
+printf '%s\n' "$(build_plan)$gs_tasks_raw2" > "$gs_8_plan"
+run_edit "$gs_8_plan" 'a raw | pipe' 'a raw \| pipe'
+assert_eq "8.4b exit 0" 0 "$HOOK_EXIT"
+assert_eq "8.4b silent" "" "$HOOK_STDERR"
 
 # The live wave plan's own table is pinned hermetically by fixture 22e1 in
 # tests/canonical-sdlc-evidence-gate.test.sh, not read off disk here: `.bionic/` is
