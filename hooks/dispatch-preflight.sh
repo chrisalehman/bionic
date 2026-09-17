@@ -562,10 +562,12 @@ PATROL_FIX_NEVER="Fix: CronCreate a RECURRING session job at the interval \`bash
   hooks/engage.sh arms it as the session engages canonical-sdlc, so a session that engaged
   has one. Engage the skill again in this session if it is still missing."
 
-PATROL_FIX_STOPPED="Fix: re-arm the Patrol — both halves, the clock and the stamp:
-  1. CronCreate a RECURRING session job at the interval \`bash ${POKER_SCRIPT} interval\`
-     reports, carrying the patrol prompt (skills/canonical-sdlc/SKILL.md §Dispatch).
-  2. bash ${POKER_SCRIPT} arm"
+PATROL_FIX_STOPPED="Fix: re-arm the Patrol — look first, then the clock, then the stamp:
+  1. CronList — is this session's Patrol job still listed?
+  2. ONLY IF it is ABSENT: CronCreate a RECURRING session job at the interval
+     \`bash ${POKER_SCRIPT} interval\` reports, carrying the patrol prompt
+     (skills/canonical-sdlc/SKILL.md §Dispatch).
+  3. bash ${POKER_SCRIPT} arm"
 
 # RECORDS, NEVER EXITS (wave-14 REQ-8, D3). The frame is unchanged down to the byte — a
 # lone Patrol fault still refuses on `exit2` with exactly this text, because that is what
@@ -647,10 +649,14 @@ if [ "$PATROL_STAMPED" = "0" ]; then
 elif [ -z "$PATROL_INTERVAL" ] || [ "$PATROL_INTERVAL" -le 0 ]; then
   echo "dispatch-preflight: no Patrol interval could be obtained (${POKER_SCRIPT} is not readable on either lane); the staleness half of the arming wall did not run, though the never-armed half did." >&2
 else
-  # THE MULTIPLIER IS THE LIBRARY'S (spec AC-22). "Twice the interval" was a literal 2
-  # written out at three sites; lib/patrol.sh exports PATROL_STALE_MULTIPLIER and its own
-  # reader uses it, so a change to the judgment moves all of them at once.
-  PATROL_MAX_AGE=$(( PATROL_INTERVAL * PATROL_STALE_MULTIPLIER ))
+  # THE THRESHOLD IS THE LIBRARY'S FIRE WINDOW (epic-23 wave-15 REQ-1, ADR-028). It was
+  # the interval times the library's stale multiplier — twice the interval, a judgment call
+  # held in a shared constant because it was written out at three sites. It is not a multiplier at all
+  # now: one FIRE WINDOW is the longest idle span in which a session cron is guaranteed one
+  # opportunity to fire, the interval plus the scheduler's jitter, and `patrol_fire_window`
+  # is the one place that arithmetic lives. Past it the stamp is worth asking the
+  # transcript about; it is not, on its own, a finding.
+  PATROL_WINDOW="$(patrol_fire_window "$PATROL_INTERVAL")" || PATROL_WINDOW=""
   case "$PATROL_INTERVAL_SOURCE" in
     default) PATROL_INTERVAL_WORDS="the poker's ${PATROL_INTERVAL}s default interval (this project's configured value could not be read)" ;;
     *)       PATROL_INTERVAL_WORDS="the ${PATROL_INTERVAL}s poker-interval this project configures" ;;
@@ -665,13 +671,43 @@ else
     *)
       PATROL_AGE=$(( $(date -u +%s) - PATROL_MTIME ))
       [ "$PATROL_AGE" -lt 0 ] && PATROL_AGE=0
-      if [ "$PATROL_AGE" -gt "$PATROL_MAX_AGE" ]; then
-        patrol_deny "the Patrol was armed and stopped firing" "re-arm the Patrol, both halves" \
-          "$PATROL_FIX_STOPPED" \
-          "The Patrol was armed on this session and has stopped firing." \
-          "Its last stamp is ${PATROL_AGE}s old — past the ${PATROL_MAX_AGE}s limit," \
-          "which is 2x ${PATROL_INTERVAL_WORDS}:" \
-          "    ${PATROL_STAMP_FILE}"
+      if [ -n "$PATROL_WINDOW" ] && [ "$PATROL_AGE" -gt "$PATROL_WINDOW" ]; then
+        # ---------- the verdict: idle time, never wall time ----------
+        #
+        # A SESSION CRON FIRES ONLY WHILE THE SESSION IS IDLE, so a stamp past the window
+        # says one of two things and its age cannot tell them apart: the job is gone, or
+        # the orchestrator has been working. This wall is hit MID-TURN by construction —
+        # a dispatch happens inside a busy turn — which makes it the likeliest of the two
+        # blocking readers to meet a healthy session with a stale stamp, and on
+        # 2026-09-15 that is exactly what it refused.
+        #
+        # `patrol_verdict` (lib/patrol.sh) answers the observable question off the
+        # transcript this hook is already handed: has an idle stretch long enough for one
+        # firing passed since the last proof of life, with no firing in it. Only `dead`
+        # denies. `busy` and `unreadable` say what they found on stderr and let the
+        # dispatch through, because a wall that cannot observe the thing it refuses on
+        # does not refuse (ADR-028).
+        PATROL_VLINE="$(patrol_verdict "$PATROL_STAMP_FILE" "$(_jq '.transcript_path')" "$PATROL_INTERVAL")"
+        PATROL_VERDICT="$(_patrol_field "$PATROL_VLINE" verdict)"
+        PATROL_GAP="$(_patrol_field "$PATROL_VLINE" gap)"
+        PATROL_WHY="$(_patrol_field "$PATROL_VLINE" reason)"
+        case "$PATROL_VERDICT" in
+          dead)
+            patrol_deny "the Patrol was armed and stopped firing" "re-arm the Patrol, both halves" \
+              "$PATROL_FIX_STOPPED" \
+              "The Patrol was armed on this session and has stopped firing." \
+              "Its last stamp is ${PATROL_AGE}s old, and this session has since sat idle for" \
+              "${PATROL_GAP}s in one stretch with no tick in it — past the ${PATROL_WINDOW}s fire window," \
+              "which is ${PATROL_INTERVAL_WORDS} plus the scheduler's jitter:" \
+              "    ${PATROL_STAMP_FILE}"
+            ;;
+          busy)
+            echo "dispatch-preflight: the Patrol stamp is ${PATROL_AGE}s old, but this session has been busy — its longest idle gap since the stamp is ${PATROL_GAP}s, under the ${PATROL_WINDOW}s fire window, so the clock has had no opportunity to fire and its silence proves nothing." >&2
+            ;;
+          *)
+            echo "dispatch-preflight: the Patrol stamp is ${PATROL_AGE}s old and this session's idle time could not be read (${PATROL_WHY:-no reason given}); the staleness half of the arming wall reached no verdict." >&2
+            ;;
+        esac
       fi
       ;;
   esac
