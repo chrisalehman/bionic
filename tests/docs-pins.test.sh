@@ -3035,7 +3035,16 @@ done
 # The sentence survived the rewrite by design: "never padded by hand" was always the rule,
 # and what changed is only WHO does the padding. The tail below is identical in all three
 # pointer lines, which is what makes it one rule rather than three.
-CARD_RULE_LINE=', TSV in; cell folds, never padded by hand.'
+#
+# RE-SPELLED AGAIN AT wave-15 T11 (REQ-10, AC-10.5). The pointer line stopped being a row
+# recipe and became a WHOLE-CARD invocation: `card.sh step1 <requirements.md>` reads the
+# artifact and prints the card entire, so there is no TSV for a caller to assemble and no
+# cell left for a caller to pad. "never padded by hand" retired with the hand-fed row it
+# described; the rule that replaces it is the one the new design turns on — the renderer
+# needs NOTHING but the artifact, which is what makes the card a rendering of the file
+# rather than a retelling of it. Same three files, same one shared tail, same mutation arm
+# below; only the sentence moved.
+CARD_RULE_LINE=' renders it whole; no stdin.'
 for _pair in "141a:$STEP1_MD:steps/1.md" "141b:$STEP2_MD:steps/2.md" "141c:$STEP3_MD:steps/3.md"; do
   _n="${_pair%%:*}"; _rest="${_pair#*:}"; _file="${_rest%:*}"; _which="${_rest##*:}"
   expect_contains "${_n}: AC-9.1/AC-9.2 — ${_which} carries the shared pointer rule verbatim" \
