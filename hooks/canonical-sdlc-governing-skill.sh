@@ -581,12 +581,16 @@ fi
 #   (ADR-028), and its refusal would name a fault the writer did not commit.
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
-# THE SUBSTITUTION IS LITERAL AND IN-PROCESS. `${v//"$old"/$new}` quotes the
-# PATTERN, which is what turns off globbing, and leaves the REPLACEMENT
-# unquoted, which is what bash 3.2 needs: 3.2 does not strip quotes from the
-# replacement word and would plant them in the file's text. Neither shell
-# re-expands the replacement, so a `\|`, a `&` or a newline in `new_string`
-# survives byte for byte (measured on bash 3.2.57 and 5.3.15).
+# THE SUBSTITUTION IS LITERAL AND IN-PROCESS. `${v//"$old"/"$new"}` quotes
+# BOTH the pattern (what turns off globbing) and the replacement. Bash 5.2
+# turned `patsub_replacement` on by default: in an UNQUOTED replacement word,
+# an unescaped `&` expands to the whole matched text, and 3.2 has no such
+# expansion — so the two shells would read the identical unquoted line two
+# different ways. Quoting the replacement turns that expansion off on every
+# bash this hook runs under, so a `\|`, a `&` or a newline in `new_string`
+# survives byte for byte (measured: byte-exact on 3.2.57 and 5.3.15; the
+# unquoted form instead splices the match in for `&` on 5.3.15 — review R1,
+# wave-15-fixit-182).
 CONTENT=""
 EDIT_APPLIED=0
 if [ "$TOOL" = "Write" ]; then
@@ -608,13 +612,13 @@ else
           case "$CONTENT" in
             *"$_gs_old"*)
               if [ "$_gs_all" = "true" ]; then
-                CONTENT=${CONTENT//"$_gs_old"/$_gs_new}
+                CONTENT=${CONTENT//"$_gs_old"/"$_gs_new"}
                 EDIT_APPLIED=1
               else
                 _gs_rest=${CONTENT#*"$_gs_old"}
                 case "$_gs_rest" in
                   *"$_gs_old"*) : ;;   # not unique: the tool will fail, so judge nothing
-                  *) CONTENT=${CONTENT/"$_gs_old"/$_gs_new}; EDIT_APPLIED=1 ;;
+                  *) CONTENT=${CONTENT/"$_gs_old"/"$_gs_new"}; EDIT_APPLIED=1 ;;
                 esac
               fi
               ;;
