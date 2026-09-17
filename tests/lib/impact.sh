@@ -243,6 +243,30 @@ _impact_answer() {
   done
   sort -u "$WORK/query" -o "$WORK/query"
 
+  # SELF EDGE FOR A NOT-YET-EXISTING SUITE (REQ-4 AC-4.1/4.2, D6). $WORK/all is a
+  # pure function of the tree (built from `ls tests/*.test.sh`, cached by content
+  # hash — see below), so it can never carry a self edge for a tests/*.test.sh
+  # path this call is the first to name: a writer's own brief would be refused
+  # permission to run the suite it is about to create. The self edge is a fact
+  # about the ARGUMENT's shape, not about what `ls` found, so it is synthesized
+  # here at query time — after $WORK/query is built, on this process's own copy
+  # of the graph, never on the cached file — leaving the cache a pure function of
+  # the tree it hashed. A query path one level under tests/ ending in .test.sh
+  # gets it; a deeper path (tests/lib/x.test.sh) or anything outside tests/ does
+  # not, matching the same shape `ls tests/*.test.sh` would have matched had the
+  # file existed. An existing suite already carries this edge from the graph
+  # build; the synthesized line duplicates it harmlessly (same suite, same rank).
+  while IFS= read -r _q; do
+    case "$_q" in
+      tests/*.test.sh)
+        case "${_q#tests/}" in
+          */*) : ;; # nested under tests/ (e.g. tests/lib/x.test.sh) — not a suite
+          *) printf '%s\tself\tF:%s\n' "${_q#tests/}" "$_q" >>"$WORK/all" ;;
+        esac
+        ;;
+    esac
+  done <"$WORK/query"
+
   awk -F'\t' '
     function rank(k) {
       if (k == "self") return 1
