@@ -96,6 +96,28 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 
   at the top. The `canonical-sdlc-governing-skill.sh` PreToolUse|Write,Edit hook blocks writes missing the `governing-skill:` field. Non-artifact files (README.md, images) under those paths pass through.
 
+### The wave-scale `## Tasks` table
+
+A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale ledger `steps/3.md` documents inline (`| id | intent | rigor | description | status | worktree |`) — this is the register the wave's own Step-4 dispatch works from, and it carries eleven columns:
+
+```
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+```
+
+- **`id`** — `T<n>`, matching `^T[0-9]+$`, the row's own key.
+- **`step`** — the SDLC step this row executes at (4 for build/test rows; 5–9 for verify/review/document/integrate/close rows the wave also tables here).
+- **`kind`** — one of `build | test | verify | review | doc | integrate | close | prototype`.
+- **`task`** — the row's task in one line; `complexity: standard | complex` rides in this cell for Step-4 rows.
+- **`agent`** — the `subagent_type` this row dispatches to.
+- **`deps`** — bare task ids only (`T1`, or `T1, T4` for more than one), never prose. A prose token here (`"dep T17 (rows; lands after T15)"`) is parsed as its own id and refused as unknown — `units.sh`'s bring-forward validator splits this cell on `,` and every token must resolve in the id set.
+- **`size`** — the row's expected duration in minutes.
+- **`serves`** — the requirement id(s) this row discharges.
+- **`Files`** — every path the row may create or edit (the dispatch budget's source).
+- **`worktree`** — the row's tree path once created; `—` while none exists yet.
+- **`status`** — `pending | active | landed | dropped`. `done` is a TASK-SCALE word only (that ledger's own status enum) and never appears as a wave-table status — a row that has landed is `landed`, not `done`.
+
+**`working-branch:`** in the plan's frontmatter names the wave's own branch, and it is the key `lib/stop.sh`'s landing gate reads to merge-base a task tree against — "what this task added" is computed against that branch, not against the main checkout's current one. A plan naming none falls back to the main checkout's branch, announced inert.
+
 ## Design section authoring (the Step-2 back-half)
 
 SKILL.md carries the contract — the five parts, the three-way rule, the scale line, the
