@@ -616,7 +616,7 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
   # builtin, and `local SECONDS` turns it into an ordinary variable that never counts.
   # The derivation window below zeroes it; nothing else in this file or in hooks/stop.sh
   # reads it.
-  local LG_IMPACT_CLOCK LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY
+  local LG_IMPACT_CLOCK LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY LG_WORKING_BRANCH
   local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP
   local LG_IMPACT_PID LG_OVERRAN
 
@@ -1024,22 +1024,42 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
   if [ -n "$CFILES" ]; then
     LG_WT=$(_lg_worktree_for_name "$BIONIC_ROOT" "$NAME")
     if [ -n "$LG_WT" ] && [ -d "$LG_WT" ]; then
-      # THE BASE IS THE MERGE-BASE WITH THE MAIN CHECKOUT'S CURRENT BRANCH, recomputed here
-      # rather than read off a stored value: no roster field records the sha a worktree
-      # spawned from, and `worktree.sh`'s own `land` verb does not need one either — it
-      # counts commits `HEAD..branch` from the main checkout. A merge-base is exactly
-      # "everything this branch has added since it diverged", which is what a `Files:`
-      # declaration is a promise ABOUT, and recomputing it survives the ordinary case where
-      # the main branch has moved on since the tree was spawned — a stored base sha would not.
-      LG_MAIN_BRANCH=$(git -C "$BIONIC_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)
+      # THE BASE IS THE MERGE-BASE WITH THE PLAN'S DECLARED `working-branch:` — a BRANCH
+      # NAME, not a stored sha and, since epic-23 wave-16 REQ-7 (D4), not the main
+      # checkout's own current branch either. A branch is the right thing to merge-base
+      # against for the same reason a stored sha is the wrong one (rejected alternative,
+      # spec §4): "everything this branch has added since it diverged" has to keep meaning
+      # that after a writer merges the wave tip INTO the working branch, and a moving ref
+      # tracks that while a frozen sha would not. The MAIN CHECKOUT'S CURRENT BRANCH was
+      # the wrong stand-in for "the wave branch" all along — it happens to be right only
+      # when the orchestrator's own checkout sits on the wave tip, which is the ordinary
+      # case this repo's convention produces but never the only one a session can reach
+      # (bisecting, reviewing a peer wave, or simply parked on a different branch while a
+      # task tree tracks its own wave). A tree cut from `wave/x` reads `wave/x`'s WHOLE
+      # history as undeclared the moment the main checkout is on anything else (REQ-7,
+      # AC-7.1) — the plan is the one place that names the branch a task tree was cut
+      # FROM, so this reads it there instead of guessing from the checkout beside it.
+      LG_WORKING_BRANCH=""
+      [ -n "$BIONIC_RUN_PLAN" ] && LG_WORKING_BRANCH=$(plan_frontmatter_get "$BIONIC_RUN_PLAN" "working-branch")
+      LG_MAIN_BRANCH=""
+      if [ -n "$LG_WORKING_BRANCH" ] \
+        && git -C "$BIONIC_ROOT" show-ref --verify --quiet "refs/heads/${LG_WORKING_BRANCH}"; then
+        LG_MAIN_BRANCH="$LG_WORKING_BRANCH"
+      else
+        # TODAY'S PATH (spec A3): no plan bound, no `working-branch:` on the one that is,
+        # or a name that does not resolve to a branch this repository holds — every one of
+        # these takes the fallback this arm has always had, unchanged, rather than a
+        # refusal or a silent skip for a plan that simply predates this field.
+        LG_MAIN_BRANCH=$(git -C "$BIONIC_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null)
+        # A DETACHED MAIN CHECKOUT IS NOT A BRANCH NAME (review-a A-5). `rev-parse
+        # --abbrev-ref HEAD` prints the literal string `HEAD` there, and `HEAD` resolves
+        # INSIDE the worktree to the worktree's own tip — so the merge-base comes back
+        # non-empty, the diff comes back EMPTY, and every landing reconciles clean with no
+        # refusal and no diagnostic. `git bisect`, `git checkout <tag>` and a checkout parked
+        # on a sha are all ordinary states for this repository during an integration.
+        case "$LG_MAIN_BRANCH" in HEAD) LG_MAIN_BRANCH="" ;; esac
+      fi
       LG_BASE=""
-      # A DETACHED MAIN CHECKOUT IS NOT A BRANCH NAME (review-a A-5). `rev-parse
-      # --abbrev-ref HEAD` prints the literal string `HEAD` there, and `HEAD` resolves
-      # INSIDE the worktree to the worktree's own tip — so the merge-base comes back
-      # non-empty, the diff comes back EMPTY, and every landing reconciles clean with no
-      # refusal and no diagnostic. `git bisect`, `git checkout <tag>` and a checkout parked
-      # on a sha are all ordinary states for this repository during an integration.
-      case "$LG_MAIN_BRANCH" in HEAD) LG_MAIN_BRANCH="" ;; esac
       [ -n "$LG_MAIN_BRANCH" ] && LG_BASE=$(git -C "$LG_WT" merge-base "$LG_MAIN_BRANCH" HEAD 2>/dev/null)
       if [ -z "$LG_BASE" ]; then
         # ANNOUNCED INERT, the standard tests/run.sh:267-272 sets for the adoption wall:

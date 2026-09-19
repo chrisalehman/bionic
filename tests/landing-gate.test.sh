@@ -346,6 +346,30 @@ current: 4
 PLAN
 }
 
+# THE SAME PLAN, WITH `working-branch:` ADDED TO ITS FRONTMATTER (epic-23 wave-16, REQ-7,
+# D4). Overwrites `plan_active`'s file at the same path, so a fixture calls this AFTER
+# `make_wave_repo`/`make_git_wave_repo` to opt the plan into naming a landing base; every
+# fixture that never calls this keeps the D4-absent shape §16 already exercises.
+plan_with_working_branch() {  # <repo> <branch>
+  local d="$1/.bionic/docs/plans/epic-16-landing-contract"
+  mkdir -p "$d"
+  cat > "$d/wave-01-landing-contract.plan.md" <<PLAN
+---
+governing-skill: superpowers:writing-plans
+sdlc-step: 4
+canonical_sdlc_version: 14
+working-branch: $2
+---
+
+# Wave 01 — landing contract
+
+## SDLC State
+
+integration-branch: main
+current: 4
+PLAN
+}
+
 make_repo() {  # <label> -> repo path
   local r="$SANDBOX/$1"
   mkdir -p "$r/.bionic/tmp"
@@ -405,6 +429,17 @@ make_git_wave_repo() {  # <label> -> repo path
 make_slice_tree() {  # <repo> <name> -> worktree path
   local r="$1" name="$2" wt="$1/.worktrees/$2"
   git -C "$r" worktree add -q "$wt" -b "wt/$name" >/dev/null 2>&1
+  git_id "$wt"
+  printf '%s' "$wt"
+}
+
+# THE SAME THING, CUT FROM A NAMED REF rather than the repo's current HEAD (epic-23
+# wave-16, REQ-7, AC-7.1): the fixture the B2 shape needs — a tree based on a branch that is
+# NOT the main checkout's current one, which every §16 fixture above sidesteps by branching
+# off HEAD while the main checkout sits on the same commit.
+make_slice_tree_from() {  # <repo> <name> <ref> -> worktree path
+  local r="$1" name="$2" ref="$3" wt="$1/.worktrees/$2"
+  git -C "$r" worktree add -q "$wt" -b "wt/$name" "$ref" >/dev/null 2>&1
   git_id "$wt"
   printf '%s' "$wt"
 }
@@ -1672,5 +1707,74 @@ expect_contains "E1.5 …carries the per-row paragraph" "LANDING CONTRACT UNMET"
 expect_eq "E1.5 …with the one line still first" \
   "bionic: stop refused — a dispatched agent's contract is unmet (write the named artifacts)" \
   "$(printf '%s\n' "$OUT_STDERR" | head -1)"
+
+# ================================================================= Section 18
+section "Section 18: THE LANDING BASE IS THE PLAN'S working-branch:, not the main checkout's current branch (epic-23 wave-16, REQ-7, D4)"
+
+# --- 18a (AC-7.1): a tree cut from a wave-branch tip reads only the TASK'S OWN edits as
+# undeclared when the main checkout sits on a different branch. Before this task the base
+# was always the main checkout's current branch (`develop` here), a commit BEHIND the
+# tree's real base — so `wave/x`'s own earlier commit (`a.sh`) came back in the diff
+# alongside the task's `b.sh`, and the whole wave read as undeclared.
+R18A="$(make_git_wave_repo r18a)"
+git -C "$R18A" checkout -q -b wave/x
+echo wave >> "$R18A/a.sh"
+git -C "$R18A" add a.sh
+git -C "$R18A" commit -q -m "wave commit touching a.sh"
+WT18A=$(make_slice_tree_from "$R18A" slice18a wave/x)
+git -C "$R18A" checkout -q -b develop main
+plan_with_working_branch "$R18A" wave/x
+commit_files "$WT18A" "the task's own edit" b.sh
+add_row "$R18A" name=slice18a agent_id="$AID_A" deliverable=.bionic/docs/record/s18a.md \
+  files="b.sh" launched_at="$(iso_ago 600)"
+deliver "$R18A" .bionic/docs/record/s18a.md
+run_gate "$GATE" "$(stop_payload "$R18A" "$SID" false)"
+expect_status "18a: the task's own declared edit passes — the wave's earlier commit is NOT charged to it" "0" "$RC"
+expect_empty "18a: …silently" "$OUT_STDERR"
+
+# CONTROL: the identical fixture MINUS the plan's `working-branch:` — the main checkout's
+# own current branch (`develop`) is all the gate has, `a.sh` really is behind that base, and
+# the fixture refuses. Proves 18a is not a fixture that could never refuse.
+R18A_CTL="$(make_git_wave_repo r18a-ctl)"
+git -C "$R18A_CTL" checkout -q -b wave/x
+echo wave >> "$R18A_CTL/a.sh"
+git -C "$R18A_CTL" add a.sh
+git -C "$R18A_CTL" commit -q -m "wave commit touching a.sh"
+WT18A_CTL=$(make_slice_tree_from "$R18A_CTL" slice18actl wave/x)
+git -C "$R18A_CTL" checkout -q -b develop main
+commit_files "$WT18A_CTL" "the task's own edit" b.sh
+add_row "$R18A_CTL" name=slice18actl agent_id="$AID_A" deliverable=.bionic/docs/record/s18actl.md \
+  files="b.sh" launched_at="$(iso_ago 600)"
+deliver "$R18A_CTL" .bionic/docs/record/s18actl.md
+run_gate "$GATE" "$(stop_payload "$R18A_CTL" "$SID" false)"
+expect_status "18a-ctl: without working-branch:, the main checkout's own branch is charged the whole wave" "2" "$RC"
+expect_contains "18a-ctl: …naming the wave's earlier commit as undeclared" "a.sh" "$OUT_VSTDERR"
+
+# --- 18b (AC-7.2): a plan naming no `working-branch:`, and a detached main checkout, take
+# today's path and announce it — never silent, never refused.
+R18B="$(make_git_wave_repo r18b)"
+WT18B=$(make_slice_tree "$R18B" slice18b)
+commit_files "$WT18B" "out of scope" undeclared/five.sh
+add_row "$R18B" name=slice18b agent_id="$AID_A" deliverable=.bionic/docs/record/s18b.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R18B" .bionic/docs/record/s18b.md
+git -C "$R18B" checkout -q --detach HEAD
+run_gate "$GATE" "$(stop_payload "$R18B" "$SID" false)"
+expect_status "18b: a no-base fixture never refuses" "0" "$RC"
+expect_contains "18b: …announces the reconciliation is inert" "the Files: reconciliation is INERT" "$OUT_STDERR"
+expect_contains "18b: …naming the detached-HEAD reason" "detached HEAD" "$OUT_STDERR"
+
+# --- 18c: a `working-branch:` naming a branch this repo does NOT hold takes the same
+# fallback path as no field at all — never a refusal for a name that does not resolve.
+R18C="$(make_git_wave_repo r18c)"
+WT18C=$(make_slice_tree "$R18C" slice18c)
+commit_files "$WT18C" "in scope" declared/one.sh
+plan_with_working_branch "$R18C" wave/does-not-exist
+add_row "$R18C" name=slice18c agent_id="$AID_A" deliverable=.bionic/docs/record/s18c.md \
+  files="declared/" launched_at="$(iso_ago 600)"
+deliver "$R18C" .bionic/docs/record/s18c.md
+run_gate "$GATE" "$(stop_payload "$R18C" "$SID" false)"
+expect_status "18c: a working-branch: naming no real branch falls back to the main checkout's own" "0" "$RC"
+expect_empty "18c: …silently, same as no field at all" "$OUT_STDERR"
 
 finish
