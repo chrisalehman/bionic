@@ -101,8 +101,8 @@ Do not carve a sensitive concern into a tiny unflagged wave to dodge a floor. Th
 <docs-root>/ideas/                # deferred-work briefs awaiting a wave to adopt them
 .bionic/tests/                    # validation protocols re-run by hand, not by tests/run.sh
 .bionic/tmp/                      # ephemera only, wiped at Step 8 — NOT a home for evidence.
-                                  # Session-keyed state (engaged-/roster-/patrol-/preflight-/
-                                  # sweeper-*.state) is NOT ephemera and survives that wipe
+                                  # Session-keyed state survives while its owning session is
+                                  # alive, never by class name
 .bionic/.gitignore                # literally `*` — written on tree creation; this is what
                                   # keeps the whole tree out of git, not the project .gitignore
 .bionic/config.yaml               # optional; `docs-root:` moves <docs-root> off the default
@@ -131,8 +131,8 @@ write whose first section is not Goal, or whose Goal section is empty.
 **Anything the matrix cites as evidence goes in `record/`, never `tmp/`.** Auditor reports,
 critic findings, review-axis artifacts, test-run captures — the matrix names them by path, so
 they must outlive the run that produced them. `tmp/` is wiped at Step 8 and takes its contents
-with it — everything, that is, except the session-keyed state the wipe spares by name, which is
-live fleet state and not evidence either. Give an agent a `record/` path in its brief.
+with it — everything, that is, except a live session's own keyed state, which the wipe spares
+by owner liveness, not file name. Give an agent a `record/` path in its brief.
 
 Every artifact carries frontmatter with `governing-skill:`, `sdlc-step:`, `intent:`/`rigor:`/`scale:`, `canonical_sdlc_version: 14`, the 5 discriminator flags, the 2 opt-in flags, and `model_plan:`. A missing one blocks the write. Artifacts never declare `mode:`. Plan files additionally carry `walk: required | exempt` — Step 0's derivation, and the key the Verify gate reads — Step 0's `design-interview:` value beside it, and, where the run's rigor sits below its derived floor, `rigor-override:` beside those. None of the three is required to write, but a `walk:` value outside the enum blocks. Spec files at `scale: wave` or `scale: epic` carry `design: <path>` or `design-waived: <user> <date> <reason>` unless the `## Design` section is in place — the three-way rule, Step 2.
 
@@ -164,6 +164,7 @@ Progress artifact: <path>
 Cadence: <N> min
 Files: <every path the task may create or edit>        # writers; omit for a read-only brief
 Suites: none                                           # read-only brief; or test-file names only, on its own paragraph
+Re-executes: `<cmd>`
 Deliverable-waiver: <reason>                           # only for a report returned by message
 ```
 <!-- BRIEF-SCAFFOLD-END -->
