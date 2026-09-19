@@ -56,7 +56,7 @@ A **fresh, independent** exec-complex agent (`subagent_type: bionic:auditor`) �
 
 <!-- INJECT: auditor-mandate -->
 
-Bounds: audits the verification, not the wave — never re-verifies the feature, re-runs the whole suite, or reviews the code. The boundary with Step 6's critic sharpens rather than moves: the auditor proves the *verification* faithful to the *requirements*; the critic attacks the *code*. Read-only is literal — the revert-and-watch demonstration is performed by the `test-runner` on request and the auditor validates the capture it returns. One auditor, one pass, ≤3 re-executions.
+Bounds: audits the verification, not the wave — never re-verifies the feature, re-runs the whole suite, or reviews the code. The boundary with Step 6's critic sharpens rather than moves: the auditor proves the *verification* faithful to the *requirements*; the critic attacks the *code*. Read-only is literal — the revert-and-watch demonstration is performed by the `test-runner` on request and the auditor validates the capture it returns. One auditor, one pass, ≤3 re-executions. An auditor brief declares its re-executions under `Suites:` or `Re-executes:`.
 
 Row verdicts land in the matrix `auditor` column; the wave verdict lands on its own `auditor-wave: <verdict> — <coverage finding>` line beside `stack-health:` above the table (no hook reads it — the mandate is the enforcement). Any REFUTED or UNVERIFIABLE row blocks closure absent a waiver, and so does a non-CONFIRMED wave verdict — which is where a requirement with no row can be reported at all.
 

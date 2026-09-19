@@ -7,5 +7,6 @@ Progress artifact: <path>
 Cadence: <N> min
 Files: <every path the task may create or edit>        # writers; omit for a read-only brief
 Suites: none                                           # read-only brief; or test-file names only, on its own paragraph
+Re-executes: `<cmd>`
 Deliverable-waiver: <reason>                           # only for a report returned by message
 ```
