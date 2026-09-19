@@ -516,6 +516,111 @@ if [ -n "$TYPED_ROW" ]; then
   AGENT_ID=$(line_field "$TYPED_ROW" agent_id)
 fi
 
+# ---------- THE ORDER IS READ BEFORE STANDING (D14, REQ-6; T6) ----------
+#
+# MOVED AHEAD OF "this target is on no roster row of this session" (originally ~240 lines
+# below this point, immediately before the take_verdict()/case-V_STATE block that still lives
+# there). The refusal's own detail block has always advertised this escape hatch — "If a
+# human ordered this stop, it executes — record the order and stop again" — and until now
+# that promise was false for the one target the refusal actually names: a name this session's
+# roster carries no row for at all. `order_current()` ran only after standing, ambiguity and
+# the alias clause had all cleared, so a row-less target could never reach it.
+#
+# MATCHING ON $RAW (AC-6.1). `BASE`/`AGENT_NAME`/`AGENT_ID` are already resolved above this
+# point for every spelling this gate accepts, but for the row-less case REQ-6 exists to fix,
+# no roster row means `AGENT_NAME` is just `BASE` (i.e. `$RAW` with any `@alias` suffix
+# stripped) and `AGENT_ID` is empty — so the match `stop-orders.sh order <name>` recorded
+# reduces to the operator's own typed `$RAW`, exactly as the order verb wrote it. A rostered
+# target's order continues to match by name or id as it always did (Section 12).
+#
+# THE VERDICT DEGRADES GRACEFULLY (T6). `take_verdict()` asks the sweeper for this name's
+# contract; over a row-less name there is none, so `V_STATE` stays empty and the "what is
+# being given up" line takes the `[ -z "$V_STATE" ]` branch below — "No contract row of this
+# name is on the session roster" — which is simply true this early. `ORDER_TTL_SECONDS`
+# (line ~69) is unmoved and unchanged: the window an order is honoured within is not a
+# question this relocation touches.
+SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
+ORDERS_FILE="$STATE_DIR/stop-orders-${BIONIC_SID}.state"
+
+V_TAKEN=0; V_STATE=""; V_DETAIL=""; V_ACKED=""
+take_verdict() {
+  [ "$V_TAKEN" -eq 1 ] && return 0
+  V_TAKEN=1
+  [ -f "$SWEEPER" ] || return 0
+  [ -n "$AGENT_NAME" ] || return 0
+  # A NAME THAT CLEANS TO NOTHING WIDENS THE VERB, exactly as it does at the landing gate
+  # (Step-6 critic F-1): the verdict scopes on the sweeper's clean() of this value, and a
+  # name made only of the characters it folds scopes to the EMPTY predicate — one line per
+  # roster row, the first of which is some other agent's contract. Fold the same set and
+  # decline to ask rather than ask the wrong question.
+  case "$(printf '%s' "$AGENT_NAME" | tr -d '[:space:][:cntrl:]|')" in "") return 0 ;; esac
+  local out line
+  out=$( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
+         CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "$SWEEPER" verdict "$AGENT_NAME" 2>/dev/null )
+  line=$(printf '%s\n' "$out" | grep -F 'landing-verdict/v1|' | head -1)
+  [ -n "$line" ] || return 0
+  V_STATE=$(line_field "$line" state)
+  V_DETAIL=$(line_field "$line" detail)
+  V_ACKED=$(line_field "$line" acked)
+  return 0
+}
+
+# A HUMAN'S ORDER, and the one clock in this gate that belongs. D-1 refuses to put a window
+# on EVIDENCE, and that refusal stands: an observation is stale the moment its subject
+# writes, however recent, and good however old while the subject is dormant. An INSTRUCTION
+# is the other kind of thing — it is current when it is given and it stops being current,
+# and a standing order would open this gate for a name some later dispatch reuses. The
+# window is generous, the fail direction is the closed one (an expired order leaves the
+# ceremony exactly where it was), and the writer is hooks/stop-orders.sh.
+# WHO ORDERED IT, carried out of the read for the one line below (bionic 1.8.0, REQ-1 D1).
+# The READING is unchanged — an order is an order, and this gate discharges a stop for
+# either author at the same boundary — but since 1.8.0 an order can be written by the Patrol
+# as well as by a person, and a reader owed "executing" is also owed "on whose word". Absent
+# on a line written before 1.8.0, which reads back as the default the writer had then.
+ORDER_BY=""
+order_current() {
+  local f="$ORDERS_FILE" line t e now delta
+  ORDER_BY=""
+  [ -L "$f" ] && return 1
+  [ -f "$f" ] || return 1
+  now=$(date -u +%s)
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in "stop-order/v1|"*) : ;; *) continue ;; esac
+    t=$(line_field "$line" target)
+    [ -n "$t" ] || continue
+    # The order may name what the operator typed, the agent's name, or its id: all three
+    # are things a human says out loud, and an order that resolved to none of them would be
+    # a wall built out of spelling.
+    [ "$t" = "$RAW" ] || [ "$t" = "$AGENT_NAME" ] || [ "$t" = "$AGENT_ID" ] || continue
+    e=$(line_field "$line" epoch)
+    case "$e" in ''|*[!0-9]*) continue ;; esac
+    delta=$((now - e))
+    # A future-dated order is a skewed clock or a hand-edited file; a small tolerance
+    # absorbs the first and nothing here honours the second indefinitely.
+    if [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ]; then
+      ORDER_BY=$(line_field "$line" by)
+      case "$ORDER_BY" in human|patrol) : ;; *) ORDER_BY=human ;; esac
+      return 0
+    fi
+  done < "$f"
+  return 1
+}
+
+if order_current; then
+  take_verdict
+  # ONE LINE, and it is information rather than a verdict on the operator. R3: a
+  # user-ordered stop executes at once; what an unmet contract earns is a sentence naming
+  # what is being given up, never a refusal.
+  if [ -z "$V_STATE" ]; then
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. No contract row of this name is on the session roster." >&2
+  elif [ "$V_STATE" = "MET" ] || [ "$V_STATE" = "WAIVED" ]; then
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. Its contract stands ${V_STATE}: nothing is given up." >&2
+  else
+    echo "STOP ORDERED (by ${ORDER_BY}) — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
+  fi
+  exit 0
+fi
+
 # THE ROSTER DECIDES (T22, A-orch-33; AC-4.4). This gate used to ask `live_agents_has` —
 # the newest recorded ListAgents answer — whether exactly one live teammate answered to the
 # typed name, and it refused when the answer was STALE or absent, when the name was in it
@@ -776,87 +881,14 @@ fi
 # stop for an unrelated reason and the stand-down never sees one, so this is the reading all
 # three now share. Pinned in the suite beside its paired positive.
 
-SWEEPER="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/session-sweeper.sh"
-ORDERS_FILE="$STATE_DIR/stop-orders-${BIONIC_SID}.state"
-
-V_TAKEN=0; V_STATE=""; V_DETAIL=""; V_ACKED=""
-take_verdict() {
-  [ "$V_TAKEN" -eq 1 ] && return 0
-  V_TAKEN=1
-  [ -f "$SWEEPER" ] || return 0
-  [ -n "$AGENT_NAME" ] || return 0
-  # A NAME THAT CLEANS TO NOTHING WIDENS THE VERB, exactly as it does at the landing gate
-  # (Step-6 critic F-1): the verdict scopes on the sweeper's clean() of this value, and a
-  # name made only of the characters it folds scopes to the EMPTY predicate — one line per
-  # roster row, the first of which is some other agent's contract. Fold the same set and
-  # decline to ask rather than ask the wrong question.
-  case "$(printf '%s' "$AGENT_NAME" | tr -d '[:space:][:cntrl:]|')" in "") return 0 ;; esac
-  local out line
-  out=$( cd "$BIONIC_ROOT" 2>/dev/null || exit 9
-         CLAUDE_CODE_SESSION_ID="$BIONIC_SID" bash "$SWEEPER" verdict "$AGENT_NAME" 2>/dev/null )
-  line=$(printf '%s\n' "$out" | grep -F 'landing-verdict/v1|' | head -1)
-  [ -n "$line" ] || return 0
-  V_STATE=$(line_field "$line" state)
-  V_DETAIL=$(line_field "$line" detail)
-  V_ACKED=$(line_field "$line" acked)
-  return 0
-}
-
-# A HUMAN'S ORDER, and the one clock in this gate that belongs. D-1 refuses to put a window
-# on EVIDENCE, and that refusal stands: an observation is stale the moment its subject
-# writes, however recent, and good however old while the subject is dormant. An INSTRUCTION
-# is the other kind of thing — it is current when it is given and it stops being current,
-# and a standing order would open this gate for a name some later dispatch reuses. The
-# window is generous, the fail direction is the closed one (an expired order leaves the
-# ceremony exactly where it was), and the writer is hooks/stop-orders.sh.
-# WHO ORDERED IT, carried out of the read for the one line below (bionic 1.8.0, REQ-1 D1).
-# The READING is unchanged — an order is an order, and this gate discharges a stop for
-# either author at the same boundary — but since 1.8.0 an order can be written by the Patrol
-# as well as by a person, and a reader owed "executing" is also owed "on whose word". Absent
-# on a line written before 1.8.0, which reads back as the default the writer had then.
-ORDER_BY=""
-order_current() {
-  local f="$ORDERS_FILE" line t e now delta
-  ORDER_BY=""
-  [ -L "$f" ] && return 1
-  [ -f "$f" ] || return 1
-  now=$(date -u +%s)
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in "stop-order/v1|"*) : ;; *) continue ;; esac
-    t=$(line_field "$line" target)
-    [ -n "$t" ] || continue
-    # The order may name what the operator typed, the agent's name, or its id: all three
-    # are things a human says out loud, and an order that resolved to none of them would be
-    # a wall built out of spelling.
-    [ "$t" = "$RAW" ] || [ "$t" = "$AGENT_NAME" ] || [ "$t" = "$AGENT_ID" ] || continue
-    e=$(line_field "$line" epoch)
-    case "$e" in ''|*[!0-9]*) continue ;; esac
-    delta=$((now - e))
-    # A future-dated order is a skewed clock or a hand-edited file; a small tolerance
-    # absorbs the first and nothing here honours the second indefinitely.
-    if [ "$delta" -le "$ORDER_TTL_SECONDS" ] && [ "$delta" -ge -60 ]; then
-      ORDER_BY=$(line_field "$line" by)
-      case "$ORDER_BY" in human|patrol) : ;; *) ORDER_BY=human ;; esac
-      return 0
-    fi
-  done < "$f"
-  return 1
-}
-
-if order_current; then
-  take_verdict
-  # ONE LINE, and it is information rather than a verdict on the operator. R3: a
-  # user-ordered stop executes at once; what an unmet contract earns is a sentence naming
-  # what is being given up, never a refusal.
-  if [ -z "$V_STATE" ]; then
-    echo "STOP ORDERED (by ${ORDER_BY}) — executing. No contract row of this name is on the session roster." >&2
-  elif [ "$V_STATE" = "MET" ] || [ "$V_STATE" = "WAIVED" ]; then
-    echo "STOP ORDERED (by ${ORDER_BY}) — executing. Its contract stands ${V_STATE}: nothing is given up." >&2
-  else
-    echo "STOP ORDERED (by ${ORDER_BY}) — executing. Contract ${V_STATE}, giving up: ${V_DETAIL}" >&2
-  fi
-  exit 0
-fi
+# SWEEPER, ORDERS_FILE, take_verdict() AND order_current() MOVED AHEAD OF STANDING (D14,
+# REQ-6; T6). The order read used to sit here, 240-odd lines below the "no roster row of
+# this session" deny, which made the escape hatch this gate's own header advertises ("if a
+# human ordered this stop, it executes") unreachable for exactly the target that deny refuses
+# — a name with no row on this session's roster at all. They are now defined and the order
+# checked immediately after BASE/AGENT_NAME/AGENT_ID resolve, above the standing check, so an
+# order for a row-less name is honoured before this gate ever asks whether it has standing to
+# guard that name. See that earlier block for the definitions and the early exit.
 
 take_verdict
 [ "$V_ACKED" = "yes" ] && exit 0

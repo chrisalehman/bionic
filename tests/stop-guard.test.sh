@@ -1366,6 +1366,34 @@ order_stop "$O_REPO" "$SID_A" "stale-order" --at $(( $(date -u +%s) - 86400 ))
 run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "stale-order")"
 expect_status "an EXPIRED order does not discharge: REFUSED" 2 "$GUARD_ST"
 
+section "Section 12b: the order is read BEFORE roster standing (D14, REQ-6; AC-6.1/AC-6.2)"
+#
+# THE ESCAPE HATCH REACHES THE ONE TARGET ITS OWN REFUSAL NAMES. Every fixture in Section 12
+# plants a roster row before ordering a stop, so order_current() — which used to run some
+# 240 lines after the "no roster row of this session" deny — could never rescue the target
+# that refusal actually names. This section is that fixture: a name this session's roster
+# carries NO row for at all.
+
+# Precondition — row-less and unordered: the ordinary refusal, unchanged (AC-6.2).
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "R5")"
+expect_status "precondition — no row, no order: REFUSED" 2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'no roster row of this session' "$GUARD_ERR"
+
+# The order is recorded through the shipped verb, over a name that carries no roster row —
+# `stop-orders.sh order` never required one (it is only ever read, never gated on a row).
+order_stop "$O_REPO" "$SID_A" "R5"
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "R5")"
+expect_status "a row-less name with an order within its TTL: PERMITTED (AC-6.1)" 0 "$GUARD_ST"
+expect_contains "…and the order is named on stderr" "STOP ORDERED (by human)" "$GUARD_ERR"
+expect_contains "…the verdict degrades to the no-contract branch this early" \
+  "No contract row of this name is on the session roster" "$GUARD_ERR"
+
+# A DIFFERENT row-less name, never ordered, is still refused exactly as before (AC-6.2): the
+# early order read changes nothing about the deny for a target that has none.
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "R5-unordered")"
+expect_status "a different row-less name, never ordered: still REFUSED (AC-6.2)" 2 "$GUARD_ST"
+expect_regex "…same fault" 'no roster row of this session' "$GUARD_ERR"
+
 section "Section 13: name@session-<launcher> is an ALIAS, checked against that roster (AC-11)"
 #
 # The suffix is the spelling the platform's stop primitive takes for a teammate, and it is
