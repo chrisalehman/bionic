@@ -184,11 +184,11 @@
   <text x="629" y="991" font-size="10" font-weight="600" fill="#175cd3" text-anchor="middle">LOG ONLY</text>
   <text x="706" y="986" font-size="10.5" fill="#3a424c">One context-spend line per SDLC step boundary. A missing jq, transcript, usage block or plan means exit 0 and</text>
   <text x="706" y="1002" font-size="10.5" fill="#3a424c">silence; it never writes stdout at all, because a Stop hook's stdout could be read as a block payload.</text>
-  <!-- 13 · patrol-duties-gate.sh -->
+  <!-- 13 · stop.sh (stop_patrol_duties, lib/stop.sh) -->
   <rect x="40" y="1014" width="1320" height="46" fill="#fafbfc"/>
-  <text x="54" y="1034" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">patrol-duties-gate.sh</text>
-  <text x="54" y="1050" font-size="9.5" font-style="italic" fill="#8b949e">gate: Patrol-tick duties</text>
-  <text class="armed-entry" data-hook="patrol-duties-gate.sh" x="300" y="1034" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">skill</tspan> Stop</text>
+  <text x="54" y="1034" font-size="10.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138">stop.sh</text>
+  <text x="54" y="1050" font-size="9.5" font-style="italic" fill="#8b949e">gate: Patrol-tick duties (lib/stop.sh)</text>
+  <text class="armed-entry" data-hook="stop.sh" x="300" y="1034" font-size="9.5" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" fill="#2b3138"><tspan fill="#8b949e">skill</tspan> Stop</text>
   <rect x="566" y="1023" width="126" height="20" rx="4" fill="#fef3f2" stroke="#b42318" stroke-width="1.2"/>
   <text x="629" y="1037" font-size="10" font-weight="600" fill="#b42318" text-anchor="middle">BLOCK · once</text>
   <text x="706" y="1032" font-size="10.5" fill="#3a424c">Refuses a Patrol-tick turn's end, once, unless both standing duties ran since the tick fired — a</text>
