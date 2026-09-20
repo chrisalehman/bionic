@@ -761,6 +761,20 @@ expect_no_match "19.10: …nor the new-style line — nothing failed here" \
 expect_no_match "19.11: …and the predecessor line itself is not a ✗ row (count >= rows, 12f18)" \
   "*✗ predecessor*" "$OUT19D"
 
+# AC-11.3 (epic-23 wave-16 REQ-11). The two halves 19.9-19.11 leave implicit, said out loud,
+# because REQ-11 changes the reading of the stamp right beside this row and the row itself
+# must not move with it: the residue line carries the NIL glyph — a true fact about this
+# project that names no action — and it costs the page NOTHING in its problem count. The
+# measured shape (2026-09-19, this repo): `– predecessor 3fd4eb96 · 3 leftover files —
+# nothing open`.
+expect_match "19.12: the residue row carries the informational glyph" \
+  "*– predecessor 018c3ea1*" "$OUT19D"
+# THE DELTA AGAIN, against the same sibling baseline 19.6 uses: this machine's own toolchain
+# gaps are ✗ rows on every fixture here, so "unchanged" is a difference of zero and never an
+# absolute of zero.
+expect_eq "19.13: …and residue alone changes the page's problem count by nothing" \
+  "0" "$(( $(ds_r2_problems "$OUT19D") - $(ds_r2_problems "$OUT19A") ))"
+
 # ---------- the marker present: exactly one line, naming the rc ----------
 DS_R2_B="$(ds_r2_repo)"
 printf 'sweep-failed/v1|at=2026-09-07T00:00:00Z|rc=2\n' > "$DS_R2_B/.bionic/tmp/sweep-failed.state"
