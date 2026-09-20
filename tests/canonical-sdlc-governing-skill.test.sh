@@ -2892,4 +2892,330 @@ assert_eq "8.4b silent" "" "$HOOK_STDERR"
 # machine-local and absent from a fresh clone, so a fixture reading it would degrade to a
 # vacuous pass on exactly the machines this arm protects (Section 38f's rule).
 
+# ============================================================
+section "R2 — AC-2.1: the invalid-Tasks Write refusal carries the offending row, knob UNSET (ADR-030)"
+# ============================================================
+#
+# WHAT THIS SECTION EXISTS FOR (seed A §8a, carry-over 8, research R2 row 4). The
+# AC-1e.5 section above drives this same wall and reads the offending id — out of
+# `$HOOK_VSTDERR`, the second drive, taken with `BIONIC_WALL_VERBOSE=1`. Under ruling D-1
+# the drive a real Write gets printed one sentence, so an orchestrator repairing its own
+# plan learned that the table was invalid and not which row, and this suite could not see
+# that because every one of its detail assertions reads the verbose stream (research R2's
+# seam-blindness row). ADR-030 flips the `exit2` channel's field 9; the runner below reads
+# the stream the CLI actually delivers.
+#
+# ITS OWN RUNNER, ON PURPOSE: `run_write` sets `$HOOK_VSTDERR` from a second drive with the
+# knob, which is the seam this section is about. One drive, the knob removed from the
+# environment rather than merely unset in it, and the whole stream kept.
+#
+# fails-when: the refusal prints one line with the knob unset, or the violation list names
+# no row.
+# [REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]
+GS_R2_EXIT=0; GS_R2_ERR=""
+r2_write_knob_unset() {  # <path> <content> -> GS_R2_EXIT + GS_R2_ERR
+  local file_path="$1" content="$2" input tmp_err
+  input=$(jq -n --arg p "$file_path" --arg c "$content" --arg s "$GS_SID" \
+    '{session_id: $s, tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
+  tmp_err=$(mktemp)
+  if env -u BIONIC_WALL_VERBOSE HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" \
+       bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+    GS_R2_EXIT=0
+  else
+    GS_R2_EXIT=$?
+  fi
+  GS_R2_ERR=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+}
+require_helpers r2_write_knob_unset
+
+gs_r2_project=$(make_project)
+gs_r2_plan="$gs_r2_project/.bionic/docs/plans/epic-01-demo/r2.plan.md"
+gs_r2_tasks='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 5 | verify | the verify | auditor | T1 | 30m | REQ-x | b.sh | doing |
+'
+r2_write_knob_unset "$gs_r2_plan" "$(build_plan)$gs_r2_tasks"
+
+expect_status "R2a an invalid Tasks table is still refused at Write, fail-closed" "2" "$GS_R2_EXIT"
+expect_eq "R2b …and the verdict is the first rendered line, unchanged" \
+  "bionic: write refused — this plan's Tasks table is invalid (fix the row the detail names)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R2c …with the offending row named behind it (AC-2.1)" \
+  "T2: status doing is not one of pending active landed dropped" "$GS_R2_ERR"
+expect_contains "R2d …and the Fix prose that names the columns" \
+  "repair each row named above" "$GS_R2_ERR"
+expect_eq "R2e …so the stream is no longer the one line the defect shipped" "no" \
+  "$([ "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -c .)" = "1" ] && echo yes || echo no)"
+expect_eq "R2f …and still exactly one rendered refusal line, not two" "1" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -c '^bionic: ')"
+
+# THE OTHER DIRECTION: the same plan with the status repaired is written in silence, so
+# R2c read a refusal rather than a hook that talks on every Write.
+r2_write_knob_unset "$gs_r2_plan" "$(build_plan)${gs_r2_tasks/| b.sh | doing |/| b.sh | pending |}"
+expect_status "R2g the repaired table is allowed" "0" "$GS_R2_EXIT"
+expect_empty "R2h …and prints nothing" "$GS_R2_ERR"
+# [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]
+
+
+# ============================================================
+section "R3 — AC-3.1: the Write wall names every version-14 fault at once"
+# ============================================================
+#
+# ONE ROUND TRIP EARLIER THAN THE GATE (research R2 open question 4). This wall sees the
+# plan being EDITED, so it is where a bring-forward can be priced before a commit is ever
+# attempted. Under 1.8.2 it asked one question — is the `## Tasks` table valid — and the
+# other five version-14 faults waited for the evidence gate to meet them one at a time.
+#
+# THE SAME PREDICATE, THE SAME LIST. `plan_bring_forward` is one function in
+# `payload/scripts/lib/walls.sh` and both callers print what it returns, so this section
+# and the evidence-gate suite's `[REQ-3 BRING-FORWARD SECTION]` assert the same six
+# strings. A list that differed between the two would mean a writer repaired what the Write
+# wall named and then met a fault the gate had kept to itself.
+#
+# KNOB UNSET, for research R2's seam-blindness reason: the list rides `detail`, and under
+# `BIONIC_WALL_VERBOSE=1` it would ride it either way (A-T4.2).
+#
+# fails-when: the pre-14 Write prints fewer than six classes, or more than one refusal line.
+# [REQ-3 BRING-FORWARD SECTION: BEGIN]
+gs_r3_body='
+## SDLC State
+
+current: 5
+Step 1: opened 2026-09-19T22:00Z; research record/w16/r.md
+Step 5: cmd bash tests/run.sh; pass 9; total 9
+
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | the dispatched unit | done |
+'
+gs_r3_plan="$(build_plan step=5 goal=no)"
+gs_r3_plan="${gs_r3_plan/multi_agent: false/multi_agent: true}"
+gs_r3_project=$(make_project)
+gs_r3_path="$gs_r3_project/.bionic/docs/plans/epic-01-demo/r3.plan.md"
+r2_write_knob_unset "$gs_r3_path" "${gs_r3_plan}${gs_r3_body}"
+
+expect_status "R3a the pre-14 plan Write is refused, fail-closed" "2" "$GS_R2_EXIT"
+expect_eq "R3b …once: exactly one rendered refusal line" "1" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -c '^bionic: ')"
+expect_eq "R3c …and the verdict names the contract version, not one arm" \
+  "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3d(1) …the Tasks table's absent columns, named together on one line" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+expect_contains "R3d(2) …the wave-scale status vocabulary" \
+  "T1: status done is not one of pending active landed dropped" "$GS_R2_ERR"
+expect_contains "R3d(3) …the Step-1 requirements pointer" \
+  "## SDLC State: the Step 1 evidence names no 'requirements:' pointer" "$GS_R2_ERR"
+expect_contains "R3d(4) …the approval line" \
+  "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
+expect_contains "R3d(5) …the matrix's fails-when" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$GS_R2_ERR"
+expect_contains "R3d(6) …and the missing Goal section" \
+  "## Goal: the first section is not '## Goal'" "$GS_R2_ERR"
+
+# THE OTHER DIRECTION, and the pin that keeps the arm narrow: a plan whose table is at the
+# ten-column contract but carries ONE broken row still gets 1.8.2's own refusal, verbatim.
+# The bring-forward arm is for a body that is pre-14, not for an ordinary fault.
+gs_r3_ok_body='
+## SDLC State
+
+current: 5
+Step 1: opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w.requirements.md
+approved-by: fixture 2026-09-19T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | doing |
+'
+r2_write_knob_unset "$gs_r3_path" "${gs_r3_plan}${gs_r3_ok_body}"
+expect_eq "R3e a ten-column table with one broken row keeps 1.8.2's own verdict" \
+  "bionic: write refused — this plan's Tasks table is invalid (fix the row the detail names)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+
+# THE STAMP AND THE BODY DISAGREE, and only ONE of them is a fact about this plan (wave-16
+# T25, Step-6 critic §C1). `plan_bring_forward` used to be HANDED the step, and its two
+# callers handed it different things: the evidence gate passed the body's `current:`, this
+# hook passed the frontmatter's `sdlc-step:`. A frontmatter stamp is written once at Step 0
+# and almost never moved again — this repo's own archive carries `sdlc-step: 3` beside
+# `current: 9` — so the Write-side arm computed against step 3 for the whole life of the
+# plan and the two `>= 4` classes could never reach it. AC-3.1's "identical lists from both
+# callers" was unreachable past Step 3, and silently so: the author was refused for the
+# TABLE ALONE and never told about `approved-by:` or `fails-when:`.
+#
+# THE FIXTURE IS THAT DISAGREEMENT AND NOTHING ELSE: `sdlc-step: 3` in the frontmatter,
+# `current: 5` in the body, a Step-1 `requirements:` pointer PRESENT and a `## Goal`
+# PRESENT — so the classes left are the pre-14 table that arms the predicate and exactly
+# the two the stamp used to hide.
+#
+# fails-when: the verdict names the table rather than the contract version, either `>= 4`
+# class is absent from the detail, or a class the body satisfies is named anyway.
+gs_r3_stamp_body='
+## SDLC State
+
+current: 5
+Step 1: opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w.requirements.md
+
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | the dispatched unit | pending |
+'
+gs_r3_stamp_plan="$(build_plan step=3)"
+gs_r3_stamp_plan="${gs_r3_stamp_plan/multi_agent: false/multi_agent: true}"
+
+# META, so no row below can pass over a fixture that lost its own disagreement.
+expect_eq "R3s0 meta: the fixture's frontmatter stamp and its body really do disagree" \
+  "sdlc-step=3 current=5" \
+  "sdlc-step=$(printf '%s' "$gs_r3_stamp_plan" | /usr/bin/grep -m1 '^sdlc-step:' | tr -cd '0-9') current=$(printf '%s' "$gs_r3_stamp_body" | /usr/bin/grep -m1 '^current:' | tr -cd '0-9')"
+
+r2_write_knob_unset "$gs_r3_path" "${gs_r3_stamp_plan}${gs_r3_stamp_body}"
+
+expect_status "R3s1 the stamp-mismatched pre-14 Write is refused, fail-closed" "2" "$GS_R2_EXIT"
+expect_eq "R3s2 …and the verdict is the contract version, not the table alone" \
+  "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3s3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+expect_contains "R3s3(2) …the approval line, a class the frontmatter stamp used to hide" \
+  "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
+expect_contains "R3s3(3) …and the matrix's fails-when, the other hidden class" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$GS_R2_ERR"
+# THE LIST IS DERIVED, NOT BLANKET: the two classes this body SATISFIES are absent from it.
+# Paired with R3s3(1)-(3) over the same refusal, so neither reads a producer that never ran.
+expect_absent "R3s4(1) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$GS_R2_ERR"
+expect_absent "R3s4(2) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$GS_R2_ERR"
+
+# THE TWIN OF THIS FIXTURE IS THE EVIDENCE-GATE SUITE'S OWN R3s BLOCK, driving the OTHER
+# caller over the same five classes; the five strings below are the five it asserts.
+#
+# ONE SOURCE, ASSERTED AT THE FUNCTION ITSELF. The same plan text through the same
+# predicate the evidence gate calls, invoked the way BOTH callers now invoke it — with NO
+# step argument — must yield the list this hook just rendered. A caller that reintroduced a
+# step argument, or a predicate that went back to trusting one, moves one of these rows.
+gs_r3_stamp_file="$(mktemp "${TMPDIR:-/tmp}/gs-r3-stamp.XXXXXX")"
+printf '%s' "${gs_r3_stamp_plan}${gs_r3_stamp_body}" > "$gs_r3_stamp_file"
+gs_r3_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" "$gs_r3_stamp_file" 2>/dev/null || true)"
+rm -f "$gs_r3_stamp_file"
+expect_contains "R3s5 the predicate, called with NO step argument, derives step 5 from the body" \
+  "## SDLC State: no 'approved-by:' line" "$gs_r3_direct"
+# EVERY line it returned, against the refusal this hook rendered — the identical-lists half
+# of AC-3.1, read one line at a time so a list that agreed on three of five cannot pass.
+gs_r3_n=0
+while IFS= read -r gs_r3_line; do
+  [ -n "$gs_r3_line" ] || continue
+  gs_r3_n=$((gs_r3_n + 1))
+  expect_contains "R3s6.${gs_r3_n} …predicate line ${gs_r3_n} reached the rendered refusal" \
+    "$gs_r3_line" "$GS_R2_ERR"
+done <<< "$gs_r3_direct"
+# FIVE: the missing-column line, this row's two `units_validate` faults, `approved-by:` and
+# `fails-when:`. A count, so a predicate that returned one line could not satisfy the loop.
+expect_eq "R3s7 …and the predicate returned every line, not a prefix of them" "5" "$gs_r3_n"
+
+# THE CRLF TWIN (wave-16 T27, critic C7). Byte-for-byte the R3s fixture above — same
+# frontmatter-stamp/body disagreement, same pre-14 table — translated to CRLF line endings
+# with `perl -pe 's/\n/\r\n/'`, the critic's own repro technique. Before the fix,
+# `_bf_section` and the `first_heading` awk inside `plan_bring_forward` read the plan RAW:
+# a CRLF `## SDLC State` heading matched nothing, the derived step fell through to 0, and
+# the predicate returned silently — the Write-side arm ADMITTED a pre-14 CRLF plan the SAME
+# body's LF twin refuses six lines for (this is the RED; see T27-crlf-one-source.md).
+#
+# fails-when: the CRLF Write is admitted, or its refusal names a different list than the
+# LF twin's (R3s3(1)-(3) above).
+gs_r3t_lf="${gs_r3_stamp_plan}${gs_r3_stamp_body}"
+gs_r3t_crlf="$(printf '%s' "$gs_r3t_lf" | perl -pe 's/\n/\r\n/')"
+gs_r3t_file="$(mktemp "${TMPDIR:-/tmp}/gs-r3t-crlf.XXXXXX")"
+printf '%s' "$gs_r3t_crlf" > "$gs_r3t_file"
+
+# META FIRST, so no row below can pass over a fixture that lost its own CRLF-ness.
+expect_contains "R3t0 meta: the twin fixture really is CRLF-terminated" \
+  "CRLF" "$(file "$gs_r3t_file")"
+
+r2_write_knob_unset "$gs_r3_path" "$gs_r3t_crlf"
+
+expect_status "R3t1 the CRLF pre-14 Write is refused, fail-closed — same as its LF twin" "2" "$GS_R2_EXIT"
+expect_eq "R3t2 …with the contract-version verdict, not admitted silently" \
+  "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3t3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+expect_contains "R3t3(2) …the approval line, a class the frontmatter stamp used to hide" \
+  "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
+expect_contains "R3t3(3) …and the matrix's fails-when, the other hidden class" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$GS_R2_ERR"
+expect_absent "R3t3(4) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$GS_R2_ERR"
+expect_absent "R3t3(5) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$GS_R2_ERR"
+
+# THE FUNCTION-LEVEL ROW, no hook in the loop: `plan_bring_forward` on the CRLF fixture
+# must return rc=1 with the SAME lines as `plan_bring_forward` on the LF fixture (R3s5-7's
+# `$gs_r3_direct`, still in scope) — a diff of the two outputs must be empty. Sourced the
+# same minimal way R3s5 sources it (units.sh + walls.sh, NOT run.sh), which is also why the
+# fix normalizes line endings inline inside `plan_bring_forward` itself rather than by
+# calling `normalize_newlines` (run.sh) — this row would break if it depended on that.
+gs_r3t_rc=0
+gs_r3t_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" "$gs_r3t_file" 2>/dev/null)" || gs_r3t_rc=$?
+rm -f "$gs_r3t_file"
+expect_status "R3t4 the predicate returns rc=1 on the CRLF fixture, same as its LF twin" "1" "$gs_r3t_rc"
+expect_eq "R3t5 …and the SAME lines as the LF twin, byte for byte (diff empty)" \
+  "" "$(diff <(printf '%s\n' "$gs_r3_direct") <(printf '%s\n' "$gs_r3t_direct") 2>&1 || true)"
+# [REQ-3 BRING-FORWARD SECTION: END]
+
+
+# ============================================================
+section "R4 — walls.sh's prose-record reader cannot shadow observe.sh's roster reader (wave-16 T21, walk-2c882be.md §3)"
+# ============================================================
+#
+# THE COLLISION THE WALK FOUND. payload/scripts/lib/observe.sh (and its byte-identical
+# copies in session-poker.sh, stop-orders.sh, session-sweeper.sh, execution-recorder.sh)
+# define `line_field <line> <key>` as the PIPE-DELIMITED ROSTER-ROW reader. This wall's own
+# `requirements:`/`approved-by:`/`walk-artifact` reads need a different contract — a key
+# ANYWHERE on a semicolon-separated PROSE line — and until this task walls.sh defined a
+# SECOND function under the SAME name. No process sources both libraries today, so nothing
+# collided yet; a future `BIONIC_LIB_WANT` line naming both would have had the second
+# source silently win, misreading every roster row the caller touched afterwards.
+#
+# fails-when: walls.sh still defines a function literally named `line_field`, its
+# prose-record reader is not reachable under its own name, or a real call through that
+# name misreads the mid-record pointer shape the docblock documents.
+WALLS_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
+
+r4_has_fn() {  # <file> <fn-name> -> exit 0/1, real source in a subshell, no side effects
+  ( . "$1" >/dev/null 2>&1; declare -F "$2" >/dev/null 2>&1 )
+}
+
+expect_false "R4a walls.sh no longer defines a function literally named 'line_field'" \
+  r4_has_fn "$WALLS_LIB" line_field
+expect_true "R4b …and the renamed reader is reachable as 'evidence_line_field'" \
+  r4_has_fn "$WALLS_LIB" evidence_line_field
+
+# EXERCISED, not only declared: the exact mid-record shape line_field's docblock
+# documents, read by the real function under its new name — a real source, a real call.
+R4_REC="- Step 1: opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w.requirements.md; card approved"
+R4_GOT="$(bash -c '. "$1"; evidence_line_field "$2" requirements' _ "$WALLS_LIB" "$R4_REC" 2>/dev/null)"
+expect_eq "R4c …exercised: it reads a mid-record pointer by key, real call, real source" \
+  "specs/epic-01-demo/w.requirements.md" "$R4_GOT"
+
+# AND EXERCISED THROUGH THE LIVE W6 ARM. R3 above already drives THIS HOOK end to end
+# through `plan_bring_forward`, which is the caller this rename had to keep working:
+# R3d(3)/R3d(4) name the same `requirements:`/`approved-by:` reads this section isolates.
+# A rename that broke the caller rather than only the name would already have reddened R3;
+# nothing further needs to run here.
+
 finish

@@ -647,6 +647,241 @@ return 0
 # RC IS THE SIGNAL, because a subshell cannot hand a variable back. 0 means the five files
 # are there and the caller may read them; 1 means they are not and the caller must not.
 # [WALL: tests/bash-walls.test.sh §11]
+# ─── evidence_line_field — a key read ANYWHERE on a line, not only at its start ───────
+#
+# WHY IT IS NOT `grep -E '^[[:space:]]*<key>:'` (wave-16 REQ-3, AC-3.3; seed B B11). A
+# `## SDLC State` evidence line is a SEMICOLON-SEPARATED RECORD, not a one-key line:
+#
+#     - Step 1: opened 2026-09-19T22:00Z; requirements: specs/<epic>/<wave>.requirements.md; card approved
+#
+# Every pointer read in this file anchored its key at line start, so a record whose pointer
+# is not the FIRST field carried a perfectly good path the gate could not see, and the
+# commit was refused "Step 1's evidence names no requirements file". The value still ends
+# at the first `;` — that truncation has been the contract since plan assumption A17 — and
+# the continuation-line shape (`  requirements: …` on its own line) is unaffected, because
+# a key at line start is a key anywhere on the line.
+#
+# THE LEFT BOUNDARY IS WHAT KEEPS IT HONEST: `pre-requirements:` and `walk-artifact-sha:`
+# are different fields, so the key must be preceded by the start of the line or by a
+# character that cannot be part of a key, and followed by optional blanks and a colon.
+# awk's `match` takes the LEFTMOST match, so a record naming the key twice reads the first.
+#
+# A HERE-STRING, not a pipe: `awk … exit` quits early, and walls.sh header's SIGPIPE rule
+# (T37, wave-14) applies to every early-quitting reader under `pipefail`, not only grep.
+evidence_line_field() {  # <text> <key> -> the value, or empty
+  awk -v k="$2" '
+    {
+      if (match($0, "(^|[^-_[:alnum:]])" k "[[:space:]]*:[[:space:]]*")) {
+        v = substr($0, RSTART + RLENGTH)
+        sub(/;.*$/, "", v)
+        sub(/[[:space:]]+$/, "", v)
+        print v
+        exit
+      }
+    }' <<< "$1"
+}
+
+# ─── plan_bring_forward — every version-14 shape fault, in one pass ──────────
+#
+# WHAT IT IS FOR (spec D8; REQ-3, AC-3.1; research R2 §2c-2d). A plan whose frontmatter
+# says it is at the supported contract version and whose BODY is pre-14 used to meet the fleet one arm
+# at a time — `requirements:`, then `approved-by:`, then `fails-when:`, then the Tasks shape
+# — because every arm refuses by calling `refuse`, and `refuse` EXITS (refuse.sh:91-94).
+# Worse, the reveal order was data-dependent on the previous repair: the "row ahead of the
+# run" arm reads cells a pre-14 table does not have, so widening the table is what CREATES
+# the next refusal (R2 §2d). A writer paid one round trip per fault and could not see the
+# size of the job from the first one.
+#
+# SO IT VALIDATES THE TARGET SHAPE, NOT THE CURRENT ONE, and it is a PREDICATE: it prints,
+# it never refuses, and the two callers — the governing-skill hook at Write/Edit and the
+# evidence gate at commit — render the identical list through the channel ADR-030 opened.
+#
+# WHEN IT FIRES, AND WHY THE TRIGGER IS NARROW. Two conditions, together:
+#   (a) the `## Tasks` table is MISSING at least one required column — the structural
+#       signature of a pre-14 body, and the one fault that cannot be an ordinary typo; and
+#   (b) at least one of the version-14 KEYS the plan owes at this step is absent.
+# Either alone is an ordinary fault with an arm of its own that names the repair better
+# than a list can, and those arms are untouched: a ten-column table with one bad row still
+# gets `units_validate`'s own refusal, and a plan missing only `approved-by:` still gets
+# the arm that explains what an approval is. This is the summary for the case where a
+# reader needs the SHAPE of the job, not the next line of it.
+#
+# THE LANE GUARD IS validate_dispatch_ledger's, verbatim (D7): wave|epic + `rigor: audited`
+# + `multi_agent: true`. Below it the checks this function folds are themselves inert, so
+# firing there would invent enforcement rather than summarise it.
+#
+# AT WALLS.SH TOP LEVEL, OUTSIDE `_eg_body`, ON PURPOSE. Sourcing this file must define
+# this function and nothing else the governing-skill hook could collide with — every helper
+# `_eg_body` carries (`frontmatter_get`, `block_get`, `is_placeholder_value`, …) is nested
+# inside it and is not defined by a source. Which is also why this function re-reads the
+# plan from the PATH instead of using them: it is a pure read-only validator over the
+# target shape (research R2 §3(d) route 2), and its callers hand it a path — the gate the
+# bound plan, the hook a temp copy of the posted content.
+#
+# AND IT DERIVES THE STEP ITSELF (wave-16 T25, Step-6 critic §C1). It used to be HANDED the
+# step, and the two callers handed it different facts: the gate passed the body's
+# `current:`, the hook passed the frontmatter's `sdlc-step:`. A frontmatter stamp is written
+# once at Step 0 and almost never moved — this repo's own archive carries `sdlc-step: 3`
+# beside `current: 9` — so the Write-side arm computed against step 3 for the life of the
+# plan, the two `>= 4` classes below were unreachable there, and AC-3.1's "identical lists
+# from both callers" could not hold past Step 3. It failed SILENTLY: the hook simply printed
+# a shorter list. The step is a fact about the plan TEXT this function already holds, so it
+# reads it where the gate reads it — `current:` under `## SDLC State`, `a`/`b` suffix
+# stripped — and no caller can hand it the wrong one.
+_bf_fm_get() {  # <plan text> <frontmatter key> -> its value, or empty
+  awk -v k="$2" '
+    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; next }
+    /^---[[:space:]]*$/ { exit }
+    {
+      if (match($0, "^[[:space:]]*" k "[[:space:]]*:[[:space:]]*")) {
+        v = substr($0, RSTART + RLENGTH); sub(/[[:space:]]+$/, "", v); print v; exit
+      }
+    }' <<< "$1"
+}
+
+_bf_section() {  # <plan text> <exact "## Heading"> -> that section body, fence-aware
+  awk -v want="$2" '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ {
+      if (f) exit
+      if ($0 == want || index($0, want " ") == 1) { f = 1 }
+      next
+    }
+    f { print }
+  ' <<< "$1"
+}
+
+plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
+  # A STRAY SECOND ARGUMENT IS IGNORED, not used, for one release: both callers dropped it
+  # in this task, and a caller this tree has not seen must degrade to the derived step
+  # rather than to a silently different answer.
+  #
+  # THE LIST IS JUDGED AT THE PLAN'S OWN `current:` LINE, ALWAYS — deliberately, not by
+  # omission (wave-16 T27, Step-6 critic §C8, A-T27.1). The evidence gate substitutes
+  # `CURRENT="$_EG_RSTEP"` (walls.sh ~:2430) when a commit comes from a linked worktree
+  # whose `## Tasks` row names a step below the run's `current:`, so that OTHER arms judge
+  # that commit at the row's step — but that substituted value never reaches this function,
+  # with no argument to carry it even if it did. Passing it back in would reopen exactly the
+  # second-source hazard T25/§C1 closed (two callers, two facts); direction is fail-closed,
+  # since a plan-shape summary judged at a later `current:` can only ask for MORE, never
+  # fewer, than the row's own step would.
+  local plan="${1:-}" step
+  local scale rigor multi units_out missing rowfaults
+  local plan_text state b1 matrix first_heading goal_body
+  local faults="" keys=0
+
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+
+  # NORMALIZED ONCE, HERE, BEFORE ANY READ (wave-16 T27, Step-6 critic §C7). Every helper
+  # below — `_bf_fm_get`, `_bf_section`, the `first_heading` awk, the `current:` derivation
+  # — now reads `$plan_text`, never the path, so a CRLF plan's headings and keys match the
+  # same way an LF plan's do. Before this, `_bf_section` and `first_heading` read the file
+  # RAW and matched `## SDLC State` by string equality: on a CRLF plan the heading arrived
+  # as `## SDLC State\r`, matched nothing, `state` came back empty, `step` fell through to
+  # 0, `keys` stayed 0, and the predicate returned rc=0 with NOTHING — silently admitting a
+  # pre-14 CRLF plan the same body's LF twin refuses. Inlined rather than calling
+  # `normalize_newlines` (run.sh) by name: this file does not source run.sh, one caller (the
+  # evidence gate) sources both but the other (the governing-skill hook) sources this file
+  # lazily on its own, and a bare function name would make plan_bring_forward's correctness
+  # depend on sourcing order this file does not control. Same translation, same reason
+  # `_units_read` (units.sh:118) and `normalize_newlines` (run.sh:97) already use it: `sub`
+  # trims a trailing CR, `gsub` re-splits a CR-only file into real lines rather than
+  # collapsing it to one — `tr -d '\r'` would do the latter and read a live CR-only plan as
+  # closed, the fail-dangerous direction (.claude/rules/hook-authoring.md).
+  plan_text="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
+
+  case "$(_bf_fm_get "$plan_text" scale)" in wave|epic) : ;; *) return 0 ;; esac
+  [ "$(_bf_fm_get "$plan_text" rigor)" = "audited" ] || return 0
+  [ "$(_bf_fm_get "$plan_text" multi_agent)" = "true" ] || return 0
+
+  # (a) THE PRE-14 TABLE. `units_validate` is the one reader of `## Tasks` and already
+  # reports EVERY fault rather than the first (units.sh's own note) — it is the model this
+  # function generalises, and the only public verb that answers both halves here.
+  units_out="$(units_validate "$plan" 2>/dev/null)" || true
+  missing="$(printf '%s\n' "$units_out" | sed -n 's/^## Tasks: missing column //p' \
+             | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')"
+  [ -n "$missing" ] || return 0
+  rowfaults="$(printf '%s\n' "$units_out" | grep -v '^## Tasks: missing column ' || true)"
+
+  # (b) THE KEYS, each under the step guard its own arm carries: `requirements:` from
+  # current 2 (validate_requirements_pointer), `approved-by:` and `fails-when:` from 4
+  # (validate_approved_by, validate_fails_when). A key not yet owed is not a fault.
+  state="$(_bf_section "$plan_text" '## SDLC State')"
+  # THE ONE SOURCE. Same read as the evidence gate's own `CURRENT` (the `current:` line of
+  # `## SDLC State`, first hit, whitespace stripped) and the same `a`/`b` strip the gate
+  # applies at the call site — including the line-ending normalization: `plan_text` above
+  # was already put through the same translation `normalize_newlines` (run.sh) applies to
+  # build the gate's own `SECTION` (walls.sh:1709), so a CRLF plan's `## SDLC State` heading
+  # and its `current:` line are seen exactly as the gate sees them, not raw. Anything else —
+  # absent, `T<n>`, a word — reads as 0, which is the fallback the old `${2:-0}` default gave
+  # a caller that passed nothing.
+  step="$(printf '%s\n' "$state" \
+          | grep -E '^[[:space:]]*current[[:space:]]*:' \
+          | head -1 \
+          | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
+          | tr -d '[:space:]' \
+          | sed -E 's/[ab]$//')"
+  case "$step" in ''|*[!0-9]*) step=0 ;; esac
+  if [ "$step" -ge 2 ]; then
+    b1="$(awk '
+      /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:/ { f = 1; print; next }
+      f {
+        if ($0 ~ /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[ab]?[[:space:]]*:/) exit
+        if ($0 ~ /^[^[:space:]]/) exit
+        print
+      }' <<< "$state")"
+    if [ -z "$(evidence_line_field "$b1" requirements)" ]; then
+      faults="${faults}## SDLC State: the Step 1 evidence names no 'requirements:' pointer
+"
+      keys=$((keys + 1))
+    fi
+  fi
+  if [ "$step" -ge 4 ]; then
+    if [ -z "$(evidence_line_field "$state" approved-by)" ]; then
+      faults="${faults}## SDLC State: no 'approved-by:' line
+"
+      keys=$((keys + 1))
+    fi
+    # THE MATRIX HALF IS COARSER THAN validate_fails_when ON PURPOSE (A-T5): that arm
+    # judges each AC BLOCK and names the row; this one asks whether the section carries the
+    # key AT ALL, which is the question a pre-14 matrix answers no to. Naming one row here
+    # would duplicate `matrix_block` — the twin-that-drifts this repo spends real effort
+    # avoiding — for a list that exists to size the job, not to walk it.
+    matrix="$(_bf_section "$plan_text" '## Verification Matrix')"
+    if grep -qE '^[[:space:]]*\|' <<< "$matrix" \
+       && ! grep -qE '(^|[^-_[:alnum:]])fails-when[[:space:]]*:' <<< "$matrix"; then
+      faults="${faults}## Verification Matrix: no AC block names a 'fails-when:'
+"
+      keys=$((keys + 1))
+    fi
+  fi
+
+  # `## Goal` IS IN THE LIST BUT NOT IN THE TRIGGER. It is a Write-side arm (AC-K5.4) with
+  # no twin at the gate, so letting it ARM this predicate would make the gate refuse plans
+  # it admits today; reporting it once the predicate has already fired costs nothing and is
+  # what makes the Write-side and commit-side lists identical (AC-3.1).
+  first_heading="$(awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / { print; exit }' <<< "$plan_text")"
+  case "$first_heading" in
+    '## Goal'|'## Goal '*)
+      goal_body="$(_bf_section "$plan_text" '## Goal')"
+      grep -qE '[^[:space:]]' <<< "$goal_body" || faults="${faults}## Goal: the section is empty
+" ;;
+    *) faults="${faults}## Goal: the first section is not '## Goal'
+" ;;
+  esac
+
+  [ "$keys" -ge 1 ] || return 0
+
+  printf '## Tasks: the table is missing columns: %s\n' "$missing"
+  [ -n "$rowfaults" ] && printf '%s\n' "$rowfaults"
+  printf '%s' "$faults"
+  return 1
+}
+
 _eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail> -> 0 staged · 1 not
   local d="${1:-}" i=1 a
   shift
@@ -1083,6 +1318,26 @@ is_placeholder_value() {
 # path's own directory), so there is no fallback arm left to get wrong — the old
 # copy's second argument existed only because its git call could fail silently.
 # [INSTRUMENT]
+# A TABLE CELL THAT MEANS "NOTHING HERE" (wave-16 REQ-12, AC-12.2; carry-over 20).
+#
+# The ten-column `## Tasks` contract spells "none" as an em dash in its `deps` and
+# `worktree` cells, and a table author carries that spelling into every other free-text
+# cell — including the Verification Matrix's `auditor` cell, where "no verdict yet" is the
+# ordinary state of a T4 row. The T4 exemption asks for an auditor cell that is EMPTY or
+# `CONFIRMED` (see the arm below), so `—` took a row nobody had ruled on to the refusal
+# written for a STANDING FINDING, and told its author to settle a verdict that did not
+# exist. Three spellings fold: the em dash, a bare ASCII hyphen, and `n/a` in any case.
+#
+# WHAT DOES NOT FOLD is anything with content — `REFUTED`, `UNVERIFIABLE`, `n/a: <reason>`
+# — because those are verdicts, and the arm that exists for them must still meet them.
+# Both readers of an auditor cell fold the same way, which is the agreement D15 names.
+placeholder_cell() {  # $1 = a cell's text -> the text, or empty when it means "none"
+  case "$1" in
+    '—'|'-'|'n/a'|'N/A'|'n/A'|'N/a') printf '' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 audit_root() {
   local r
   r=$(project_root "$(dirname "$PLAN")")
@@ -2175,8 +2430,16 @@ Fix: commit from one directory — split the command in two, or spell it 'git -C
     printf 'evidence-gate: worktree %s is named by more than one ## Tasks row (%s) — judging at current: %s\n' \
       "$_EG_WT" "$_EG_ROW_DUP" "$CURRENT" >&2
   elif [ "$_EG_REG" -eq 0 ] && [ -z "$_EG_ROW" ]; then
-    printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
-      "$_EG_WT" "$CURRENT" >&2
+    # AC-3.2: "no row names this tree" and "this table has no `worktree` column" are two
+    # different facts and the lead-in used to print the first for both. `units_field <row>
+    # worktree` reads slot 11, which a header without the column leaves EMPTY on every row,
+    # so the loop above skipped every row and landed here — on a table that never claimed
+    # to track trees (research R2 row 6a). `units_has_column` is the discriminator, and the
+    # shape fault prints instead, from plan_bring_forward or from units_validate's own arm.
+    if units_has_column "$PLAN" worktree; then
+      printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
+        "$_EG_WT" "$CURRENT" >&2
+    fi
   elif [ -n "$_EG_ROW" ]; then
     _EG_RID="${_EG_ROW%%	*}"
     _EG_RSTEP="${_EG_ROW#*	}"
@@ -2342,9 +2605,10 @@ validate_requirements_pointer() {
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
 
   b1=$(step1_evidence_block)
-  raw=$(echo "$b1" | grep -E '^[[:space:]]*requirements[[:space:]]*:' | head -1 \
-        | sed -E 's/^[[:space:]]*requirements[[:space:]]*:[[:space:]]*//' \
-        | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
+  # ANYWHERE ON THE LINE (AC-3.3, seed B B11). The Step-1 evidence is a semicolon-separated
+  # record and the pointer is rarely its first field; see evidence_line_field's docblock for why the
+  # old line-start anchor refused a plan that named its requirements perfectly well.
+  raw=$(evidence_line_field "$b1" requirements)
   if [ -z "$raw" ]; then
     _eg_detail="canonical-sdlc step ${CURRENT} — the Step 1 evidence has no 'requirements:' field.
 Plan: $PLAN
@@ -2366,6 +2630,24 @@ Fix: write the requirements document at that path (K5 Step-1 artifact) before co
     refuse exit2 commit "the named requirements file does not exist" "write the requirements file" "$_eg_detail"
   fi
   return 0
+}
+
+# ---------- REQ-3 / AC-3.1: the bring-forward arm, ahead of the arms it folds ----------
+#
+# HERE, AND NOT LOWER, because the first arm it summarises is the one on the next line. Every
+# arm below refuses by calling `refuse`, which exits, so a summary written after any of them
+# would only ever be reached by a plan that did not need it.
+#
+# IT SPEAKS ONLY FOR A BODY THAT IS PRE-14 — a `## Tasks` table missing required columns AND
+# at least one version-14 key absent (plan_bring_forward's own trigger). Every other plan
+# falls straight through to the arms below, byte for byte as it does today.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+_eg_bf="$(plan_bring_forward "$PLAN")" || {
+  _eg_detail="canonical-sdlc this plan declares canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION} and its body does not match it:
+${_eg_bf}
+Plan: $PLAN
+Fix: repair every line above in one pass — each is a separate arm that would otherwise refuse the next commit in turn."
+  refuse exit2 commit "this plan's body is not at contract version ${SUPPORTED_SDLC_VERSION}" "bring the plan forward" "$_eg_detail"
 }
 
 validate_requirements_pointer
@@ -2729,7 +3011,7 @@ validate_matrix() {
     tier=$(echo "$line"   | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$3); print $3}')
     status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
     ev=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$5); print $5}')
-    aud=$(echo "$line"    | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    aud=$(placeholder_cell "$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')")
     # header row → skip
     [ "$ac" = "AC" ] && continue
     # malformed: a well-formed 5-cell row splits into exactly 7 fields on '|'.
@@ -3052,9 +3334,10 @@ validate_walk_artifact() {
   # "path" (plan assumption A17). The dedicated continuation-line shape has
   # no ';' in it, so the truncation is a no-op there.
   b5=$(step5_evidence_block)
-  raw=$(echo "$b5" | grep -E '^[[:space:]]*walk-artifact[[:space:]]*:' | head -1 \
-        | sed -E 's/^[[:space:]]*walk-artifact[[:space:]]*:[[:space:]]*//' \
-        | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
+  # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `evidence_line_field`
+  # keeps the first-`;` truncation this read already had and drops only the line-start
+  # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
+  raw=$(evidence_line_field "$b5" walk-artifact)
   if [ -z "$raw" ]; then
     block_matrix "rows are discharged with no walk recorded" "walk it, then name the file" \
       "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
@@ -3271,7 +3554,10 @@ validate_verify_step() {
         "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
         "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
     fi
-    aud=$(block_get auditor)
+    # THE SECOND READER OF AN AUDITOR CELL, folding the same way (D15). `auditor: —` in the
+    # Step-5 block is the absence `block_has` cannot see, and reading it as a verdict let a
+    # plan past the Verify gate with no audit recorded at all.
+    aud=$(placeholder_cell "$(block_get auditor)")
     if [ -z "$aud" ]; then
       block_matrix "the auditor verdict is blank" "record what the auditor said" \
         "the Step 5 'auditor:' pointer is empty." \
@@ -4008,29 +4294,46 @@ fi
 # this line. The reason is hooks/landing-gate.sh:284's about `agent_id`: a key carrying path
 # separators does not trip the symlink guards, it reads outside the directory those guards
 # protect.
-local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED BUDGET_LINE _TARGETS _target
+local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES BUDGET_LINE
+local _CLAIMS _kind _target _run _shown
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
+RE_EXECUTES=""
 if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
   # THE LAST ROW CARRYING THIS ID WINS, which is the whole fleet`s reading of the roster
   # (hooks/stop-guard.sh, hooks/session-poker.sh: "the last row carrying a name wins"). A
   # launch row is later joined by the recorder`s `status=confirmed` copy and, across a
   # /clear, by the poker`s adopted row; each carries the budget forward, and the newest is
   # the current statement about this agent.
+  #
+  # TWO FIELDS, ONE READ (REQ-1 AC-1.5). `re_executes=` is the same statement in the
+  # spelling a repository whose tests are not shell suites can make — the author-marked
+  # runs its brief declared under `Re-executes:`, marks kept and space-joined (A-T1.4) —
+  # and it is read off the SAME winning row, because a budget assembled from two different
+  # rows would hold an agent to a contract no single dispatch ever wrote. The answer comes
+  # back as two lines: the `<stated>:<allowed>` pair this arm has always read, then the
+  # declared runs behind an `R:` marker (a run may hold any character but `|` and a
+  # newline, both refused at the lift, so a marker is the only safe join).
   BUDGET_LINE=$(awk -F'|' -v id="$ACTOR" '
     /^roster-state\// {
-      hit = 0; stated = 0; allowed = ""
+      hit = 0; stated = 0; allowed = ""; runs = ""
       for (i = 1; i <= NF; i++) {
         if ($i == "agent_id=" id) hit = 1
         else if ($i ~ /^suites_allowed=/) { stated = 1; allowed = substr($i, 16) }
+        else if ($i ~ /^re_executes=/) { runs = substr($i, 13) }
       }
-      if (hit) last = stated ":" allowed
+      if (hit) { last = stated ":" allowed; lastruns = runs }
     }
-    END { if (last != "") print last }
+    END { if (last != "") { print last; print "R:" lastruns } }
   ' "$ROSTER_FILE" 2>/dev/null)
   case "$BUDGET_LINE" in
-    1:*) BUDGET_STATED=yes; SUITES_ALLOWED="${BUDGET_LINE#1:}" ;;
+    1:*) BUDGET_STATED=yes
+         SUITES_ALLOWED="${BUDGET_LINE%%$'\n'*}"
+         SUITES_ALLOWED="${SUITES_ALLOWED#1:}" ;;
+  esac
+  case "$BUDGET_LINE" in
+    *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}" ;;
   esac
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
@@ -4133,6 +4436,35 @@ _budget_wire_fact() {
   printf '%s%s' "$label" "$(_budget_wire_list "$allowed" "$room")"
 }
 
+# _run_is_declared <run> <the row's re_executes= field> -> 0 when the row declared EXACTLY
+# this run (REQ-1 AC-1.5).
+#
+# THE FIELD KEEPS THE AUTHOR S MARKS, space-joined (A-T1.4): `` `npx jest x` `pytest tests` ``.
+# The marks are what make it self-delimiting — a run holds spaces, commas and quotes, so no
+# punctuation separator is unambiguous, and a backtick cannot occur INSIDE a run because a
+# backtick is what ends one. So the split is on the marks and never on whitespace.
+#
+# EXACTLY, not a prefix. `npx jest` and `npx jest --testPathPatterns 'x'` are different
+# spends — the first runs the whole tree — and a match that accepted one for the other would
+# lose the one-regression rule to a spelling. Both sides are already collapsed by the time
+# they meet: the lift collapses each marked run before writing it
+# (hooks/dispatch-preflight.sh `collapse()`), the classifier collapses the argv text it read
+# (payload/scripts/lib/cmd-class.sh `ws1()`), and those two are the same rule written once
+# on each side of the roster row.
+_run_is_declared() {  # <run> <re_executes field>
+  local _want="$1" _rest="$2" _tok _bt
+  [ -n "$_want" ] && [ -n "$_rest" ] || return 1
+  _bt='`'
+  while :; do
+    case "$_rest" in *"$_bt"*) : ;; *) return 1 ;; esac
+    _rest="${_rest#*"$_bt"}"
+    case "$_rest" in *"$_bt"*) : ;; *) return 1 ;; esac
+    _tok="${_rest%%"$_bt"*}"
+    _rest="${_rest#*"$_bt"}"
+    [ "$_tok" = "$_want" ] && return 0
+  done
+}
+
 budget_refuse() {  # <suite basename>
   # A NAME THE SHELL HAS NOT EXPANDED YET IS A DIFFERENT REFUSAL (review-c C-5, A-35c). A
   # hook sees the command TEXT, so `for s in a b; do bash "tests/$s.test.sh"; done` reaches
@@ -4174,18 +4506,33 @@ its decision to make, and it is the one holding the one-regression budget for th
   return 2
 }
 
-# THE READING IS SCOPED TO THIS REPOSITORY and the split is guarded. `$BIONIC_ROOT` is what
-# turns "a file named x.test.sh" into "this row's suite x.test.sh" (critic K-2), and `set
-# -f` keeps a target carrying a glob metacharacter — `bash tests/*.test.sh` reads as the
-# literal `*.test.sh` — from being expanded against the HOOK PROCESS'S cwd before the loop
-# sees it (review-a A-7b). The sibling site at hooks/dispatch-preflight.sh does the same.
-_TARGETS=$(cmd_suite_targets "$COMMAND" "$BIONIC_ROOT")
-set -f
-# shellcheck disable=SC2086  # deliberate split of a newline-joined target list, globbing off
-for _target in $_TARGETS; do
-  if [ "$_target" = "run.sh" ]; then
-    # THE FULL TREE IS REFUSED WITHOUT A ROW THAT NAMES IT — the one place this arm fails
-    # closed. AC-21: "tests/run.sh is refused unless the row carries it."
+# THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
+# x.test.sh" into "this row's suite x.test.sh" (critic K-2). The library answers one CLAIM
+# per suite-class segment: `file` with the suite basename, for the shell suites this repo
+# budgets by, or `run` with the collapsed command, for a segment that runs a suite without
+# naming one of them — `pytest`, `npm test`, `npx jest`. Both carry the run beside the
+# target, so this loop can ask each of the row's two statements its own question.
+#
+# `set -f` IS GONE WITH THE SPLIT IT PROTECTED (it guarded `for _target in $_TARGETS`
+# against a target carrying a glob metacharacter — `bash tests/*.test.sh` reads as the
+# literal `*.test.sh`, review-a A-7b). `read` neither word-splits on anything but the tab
+# nor globs, so the metacharacter arrives literal with no process state touched at all —
+# which is the better answer to T23's finding that five walls share one shell. The sibling
+# site at hooks/dispatch-preflight.sh still splits and still guards.
+_CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT")
+while IFS=$'\t' read -r _kind _target _run; do
+  [ -n "$_kind" ] || continue
+
+  # ---------- THE FULL TREE, FIRST AND FAIL-CLOSED ----------
+  #
+  # AHEAD OF THE DECLARED RUNS, and that order is the whole of the one-regression rule.
+  # `tests/run.sh` is counted at dispatch by `regression_rows()`, which reads the `run.sh`
+  # token in `suites_allowed=` and nothing else — so a brief that declared the full tree
+  # under `Re-executes:` instead would be uncounted there AND admitted here, and one
+  # spelling would spend a budget the standing ruling caps at one per run. The full tree
+  # goes on a row that NAMES it, in the field the counter reads.
+  if [ "$_kind" = "file" ] && [ "$_target" = "run.sh" ]; then
+    # AC-21: "tests/run.sh is refused unless the row carries it."
     case " $SUITES_ALLOWED " in
       *" run.sh "*) continue ;;
     esac
@@ -4201,19 +4548,48 @@ On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent
 
 Run the suites your brief named instead. If the tree genuinely must be re-proved, say so
 in your report: the orchestrator records the cause on the plan and dispatches the runner."
-    # `set -f` IS PROCESS STATE NOW, not this hook's alone (T23). Five walls share one
-    # shell and the fold renders after them all, so a return that skipped the `set +f`
-    # below would leave globbing off for everything after it.
-    set +f
     return 2
   fi
+  # ---------- WHAT THE BRIEF SAID IT WOULD RUN, RUNS (REQ-1 AC-1.5) ----------
+  #
+  # `re_executes=` is a DECLARATION the dispatch wall already admitted, so a command that
+  # matches one exactly is a spend the orchestrator has already priced. It admits the runner
+  # spelling and the shell spelling alike, because `Suites:` and `Re-executes:` are two
+  # spellings of one statement (AC-1.2) and an arm honouring only one of them would refuse
+  # at run time what the dispatch wall let through. It does NOT admit the full tree: that
+  # arm ran above it, for the reason written there.
+  if _run_is_declared "$_run" "$RE_EXECUTES"; then continue; fi
+
+  # ---------- A RUNNER FORM IS HELD TO THAT DECLARATION (REQ-1 AC-1.5) ----------
+  #
+  # A suite-class command naming no file this repo budgets by used to pass in silence, on
+  # the reasoning that a repository bionic has no row about is not one this arm can speak
+  # for. The measurement says otherwise (research R1 Q2): the arm was not standing aside,
+  # it could not SEE the command — `pytest` and `npx jest` carried no target at all — so a
+  # writer in a jest repository had a budget in name only, and `Suites: none` did not mean
+  # what AC-1.7 says it means ("admitted at dispatch, every suite refused at run time").
+  # The row's declared runs are the whole set for this spelling: `suites_allowed=` holds
+  # shell-suite basenames and a run can never be on it, so there is no second set to ask.
+  #
+  # THE FAIL DIRECTION IS UNCHANGED. A row with NEITHER statement — no `suites_allowed=`
+  # key and no declared runs — is a bookkeeping failure the agent did not cause, and a
+  # named run passes in silence exactly as a named suite does.
+  if [ "$_kind" != "file" ]; then
+    [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || continue
+    # BOTH STATEMENTS ON THE WIRE, runs first: the reader ran a runner form, so the runs
+    # are the half of the budget that can answer it.
+    _shown="$RE_EXECUTES"
+    [ -z "$SUITES_ALLOWED" ] || _shown="${_shown:+$_shown }$SUITES_ALLOWED"
+    budget_refuse "$_run" "$_shown"
+    return 2
+  fi
+
   [ "$BUDGET_STATED" = yes ] || continue
   case " $SUITES_ALLOWED " in
     *" $_target "*) : ;;
-    *) budget_refuse "$_target" "$SUITES_ALLOWED"; set +f; return 2 ;;
+    *) budget_refuse "$_target" "$SUITES_ALLOWED"; return 2 ;;
   esac
-done
-set +f
+done <<< "$_CLAIMS"
 
 # ---------- ARM R (REQ-3, D4): repair a suite timeout below the harness maximum ----------
 #

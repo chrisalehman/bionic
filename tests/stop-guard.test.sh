@@ -480,10 +480,22 @@ run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
 expect_status "another session's marker is not this session's engagement: open" 0 "$GUARD_ST"
 rm -f "$P_REPO/.bionic/tmp/engaged-$SID_B.state"
 
-# restored, the refusal returns byte for byte.
+# restored, the refusal returns byte for byte — ON THE VERDICT LINE, which is the refusal
+# (ADR-030, epic-23 wave-16 T22). Before field 9 flipped, `exit2`'s stream WAS the verdict
+# and nothing else, so "the stream is byte-identical" and "the refusal is byte-identical"
+# were the same measurement. They are not any more: the gate's `detail` follows the verdict
+# on the same wire now, and this gate's detail reports a LIVE reading — `last write: Ns
+# ago` — which is a second older on the second drive and SHOULD be. Comparing whole
+# streams here would pin a clock, not a refusal. So the verdict is compared byte for byte
+# and the detail is asserted present on both drives, which is what keeps the narrowing
+# honest: a re-engagement that came back silent, or with a different verdict, still fails.
 : > "$P_REPO/.bionic/tmp/engaged-$SID_A.state"
 run_guard "$(mk_stop_payload "$SID_A" "$P_TR" "$P_REPO" "idle")"
-expect_eq "re-engaged: the refusal is byte-identical" "$P_REFUSAL" "$GUARD_ERR"
+expect_eq "re-engaged: the refusal is byte-identical" \
+  "$(printf '%s\n' "$P_REFUSAL" | /usr/bin/grep -m1 '^bionic: ')" \
+  "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_eq "re-engaged: …and both drives carried a detail beneath it, no knob set" "yes yes" \
+  "$([ "$(printf '%s\n' "$P_REFUSAL" | /usr/bin/grep -vc '^bionic: ')" -ge 1 ] && printf yes || printf no) $([ "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -vc '^bionic: ')" -ge 1 ] && printf yes || printf no)"
 
 # --- after the verdict: CLOSED and LOUD ---
 IFS='|' read -r W4_REPO W4_TR W4_SUB <<< "$(make_world w4 yes)"
@@ -1366,6 +1378,34 @@ order_stop "$O_REPO" "$SID_A" "stale-order" --at $(( $(date -u +%s) - 86400 ))
 run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "stale-order")"
 expect_status "an EXPIRED order does not discharge: REFUSED" 2 "$GUARD_ST"
 
+section "Section 12b: the order is read BEFORE roster standing (D14, REQ-6; AC-6.1/AC-6.2)"
+#
+# THE ESCAPE HATCH REACHES THE ONE TARGET ITS OWN REFUSAL NAMES. Every fixture in Section 12
+# plants a roster row before ordering a stop, so order_current() — which used to run some
+# 240 lines after the "no roster row of this session" deny — could never rescue the target
+# that refusal actually names. This section is that fixture: a name this session's roster
+# carries NO row for at all.
+
+# Precondition — row-less and unordered: the ordinary refusal, unchanged (AC-6.2).
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "R5")"
+expect_status "precondition — no row, no order: REFUSED" 2 "$GUARD_ST"
+expect_regex "…and the one line names the fault" 'no roster row of this session' "$GUARD_ERR"
+
+# The order is recorded through the shipped verb, over a name that carries no roster row —
+# `stop-orders.sh order` never required one (it is only ever read, never gated on a row).
+order_stop "$O_REPO" "$SID_A" "R5"
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "R5")"
+expect_status "a row-less name with an order within its TTL: PERMITTED (AC-6.1)" 0 "$GUARD_ST"
+expect_contains "…and the order is named on stderr" "STOP ORDERED (by human)" "$GUARD_ERR"
+expect_contains "…the verdict degrades to the no-contract branch this early" \
+  "No contract row of this name is on the session roster" "$GUARD_ERR"
+
+# A DIFFERENT row-less name, never ordered, is still refused exactly as before (AC-6.2): the
+# early order read changes nothing about the deny for a target that has none.
+run_guard "$(mk_stop_payload "$SID_A" "$O_TR" "$O_REPO" "R5-unordered")"
+expect_status "a different row-less name, never ordered: still REFUSED (AC-6.2)" 2 "$GUARD_ST"
+expect_regex "…same fault" 'no roster row of this session' "$GUARD_ERR"
+
 section "Section 13: name@session-<launcher> is an ALIAS, checked against that roster (AC-11)"
 #
 # The suffix is the spelling the platform's stop primitive takes for a teammate, and it is
@@ -1665,8 +1705,19 @@ expect_eq "T22-5 hooks/stop-guard.sh instructs no ListAgents call anywhere" \
 
 section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shape"
 
-# fails-when: a refusal reaches the user as more than one line, or in any shape but
-# `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`.
+# fails-when: a refusal reaches the user as more than one VERDICT line, or in any shape
+# but `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`.
+#
+# AC-E1.3 IS ABOUT THE VERDICT, AND ADR-030 MADE THAT DISTINCTION VISIBLE (epic-23
+# wave-16 T4/T19/T22). `exit2`'s field 9 (`detail_to_user`) is `yes` now, so this gate's
+# twelve-line frame follows the verdict on the same wire, bounded, with no knob set.
+# Until that flip, "the stream is one line" and "the verdict is one line" were the same
+# measurement on `exit2` and this sweep took the cheaper one — and the column budget it
+# checks beside it was only ever meaningful for the LINE, since the frame's paths and
+# indented fixture lines were never held to 100 columns and are not now. So the sweep
+# counts, shapes and measures the VERDICT, and carries a fourth tally beside them for the
+# refusals that reached the user with NOTHING under the verdict, which is the way a gate
+# gone silent still fails a sweep that used to catch it (A-T4.9, A-T22.3).
 #
 # WHY A SWEEP AND NOT ONE ROW PER SITE. All twenty-two of this gate's refusals go
 # through one frame (`deny`), and the sweep below re-drives EVERY refusal this suite
@@ -1678,16 +1729,24 @@ section "AC-E1.3/E1.5 — every refusal this gate makes is one line, in the shap
 SG_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 . "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/width.sh"
 
-SG_SEEN=0; SG_BAD_SHAPE=""; SG_BAD_LINES=""; SG_BAD_COLS=""; SG_FACTS=""
+SG_SEEN=0; SG_BAD_SHAPE=""; SG_BAD_LINES=""; SG_BAD_COLS=""; SG_FACTS=""; SG_NO_DETAIL=""
 sg_check() {  # <stderr> — called for every refusing run_guard below
-  local err="$1" n cols
-  n="$(printf '%s\n' "$err" | wc -l | tr -d ' ')"
-  cols="$(bionic_cols "$err")"
+  local err="$1" n cols line rest
+  # THE VERDICT, and what follows it. `line` is the sentence the reader is interrupted by;
+  # `rest` is every non-empty line beneath it — the wall's own `detail` since ADR-030.
+  n="$(printf '%s\n' "$err" | /usr/bin/grep -c '^bionic: ' | tr -d ' ')"
+  line="$(printf '%s\n' "$err" | /usr/bin/grep -m1 '^bionic: ')"
+  rest="$(printf '%s\n' "$err" | /usr/bin/grep -v '^bionic: ' | /usr/bin/grep -c . | tr -d ' ')"
+  cols="$(bionic_cols "$line")"
   SG_SEEN=$((SG_SEEN + 1))
-  printf '%s' "$err" | /usr/bin/grep -qE "$SG_RE" || SG_BAD_SHAPE="${SG_BAD_SHAPE}[$err] "
+  printf '%s' "$line" | /usr/bin/grep -qE "$SG_RE" || SG_BAD_SHAPE="${SG_BAD_SHAPE}[$line] "
   [ "$n" = "1" ] || SG_BAD_LINES="${SG_BAD_LINES}[$err] "
-  [ "${cols:-999}" -le 100 ] || SG_BAD_COLS="${SG_BAD_COLS}[$cols: $err] "
-  SG_FACTS="${SG_FACTS}${err}
+  [ "${cols:-999}" -le 100 ] || SG_BAD_COLS="${SG_BAD_COLS}[$cols: $line] "
+  # THE POSITIVE THAT KEEPS THE THREE NARROWED TALLIES HONEST: each of this gate's
+  # refusals composes a frame, so a refusal that arrived with nothing beneath its verdict
+  # is the regression a verdict-only sweep would otherwise sail past.
+  [ "$rest" -ge 1 ] || SG_NO_DETAIL="${SG_NO_DETAIL}[$line] "
+  SG_FACTS="${SG_FACTS}${line}
 "
 }
 
@@ -1710,8 +1769,10 @@ sg_sweep "$(jq -n --arg c "$R2_REPO" --arg t "$R2_TR" \
 expect_eq "E1.3 the sweep drove real refusals (not counting over air)" "yes" \
   "$([ "$SG_SEEN" -ge 4 ] && echo yes || echo no)"
 expect_eq "E1.3 every refusal matched the criterion's shape" "" "$SG_BAD_SHAPE"
-expect_eq "E1.3 every refusal was exactly one line" "" "$SG_BAD_LINES"
-expect_eq "E1.3 every refusal fitted the 100-column budget" "" "$SG_BAD_COLS"
+expect_eq "E1.3 every refusal was exactly one VERDICT line" "" "$SG_BAD_LINES"
+expect_eq "E1.3 every refusal's verdict fitted the 100-column budget" "" "$SG_BAD_COLS"
+expect_eq "E1.3 …and every one of them carried a detail beneath it, no knob set" "" \
+  "$SG_NO_DETAIL"
 expect_contains "E1.3 …and the facts are this gate's own, from the ruled table" \
   "bionic: stop refused — " "$SG_FACTS"
 
@@ -1719,27 +1780,48 @@ expect_contains "E1.3 …and the facts are this gate's own, from the ruled table
 # a symlinked state path, an ambiguous name.
 run_guard "$(mk_stop_payload "$SID_A" "$R2_TR" "$R2_REPO" "")"
 expect_eq "E1.3 row 15 (no target) is the table's line" \
-  "bionic: stop refused — this stop names no target (name the agent to stop)" "$GUARD_ERR"
+  "bionic: stop refused — this stop names no target (name the agent to stop)" \
+  "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 # ROW 18 MOVED WITH THE FILE IT NAMED (epic-23 wave-15). The ruled table's symlink line was
 # about the observation record's own path; the record is gone and the level this gate still
 # declines to read through is the state DIRECTORY, so the row is driven against that world.
 run_guard "$(mk_stop_payload "$SID_A" "$S2_TR" "$S2_REPO" "victim")"
 expect_eq "E1.3 row 18 (a symlinked state directory) is the table's line" \
-  "bionic: stop refused — the state directory is a symlink (remove that symlink)" "$GUARD_ERR"
+  "bionic: stop refused — the state directory is a symlink (remove that symlink)" \
+  "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 # ROW 20 IS RETIRED WITH ITS ARM (T22). The ruled table's ambiguous-name line had exactly
 # one site and that site is gone; the third shape of reason is now the roster's own — a
 # target this session's register carries no id for.
 run_guard "$(mk_stop_payload "$SID_A" "$T22_TR" "$T22_REPO" "claimed")"
 expect_eq "E1.3 the third shape (no id on the register) is the table's line" \
   "bionic: stop refused — the session roster carries no id for it (stop it yourself or order it)" \
-  "$GUARD_ERR"
+  "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 
-# AC-E1.5, the pair: the frame's twelve lines are off the user stream and on the knob.
-expect_absent "E1.5 the pasteable observe command is NOT on the user stream" \
-  "Fix: " "$GUARD_ERR"
-expect_contains "E1.5 …and BIONIC_WALL_VERBOSE=1 puts it back" "Fix: " "$GUARD_VERR"
-expect_contains "E1.5 …along with the human-order route the frame teaches" \
+# AC-E1.5, the pair, RE-AUTHORED BY ADR-030 (T22). The frame used to be off the user
+# stream entirely and on the knob; `exit2` carries it to the reader now, BOUNDED at
+# twelve lines (`_refuse_fold_detail`). So the split this pair holds has moved down one
+# level and is still a real one, because this gate's frame is LONGER than the bound:
+#   · the VERDICT LINE is the ruled sentence and carries none of the frame;
+#   · the pasteable observe command is beneath it with no knob set — inside the bound;
+#   · the human-order route falls PAST the bound, so the default stream announces it as
+#     a `+N more` count and the knob is what actually prints it.
+# That last row is the one place in this fleet where BIONIC_WALL_VERBOSE=1 still adds
+# something a suite can tell apart, and it is asserted both ways so neither half can pass
+# over an empty capture. The `+N more` line is matched on its SHAPE rather than its exact
+# count: the count is the bound's arithmetic, owned elsewhere and under repair in this
+# same wave, and pinning it here would make this gate's suite fail for another task's
+# off-by-one (A-T22.4).
+expect_absent "E1.5 the pasteable observe command is NOT on the verdict line" \
+  "Fix: " "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "E1.5 …it is beneath it, with no knob set at all" "Fix: " "$GUARD_ERR"
+expect_absent "E1.5 …but the human-order route falls past the twelve-line bound" \
+  "If a human ordered this stop" "$GUARD_ERR"
+expect_eq "E1.5 …which the default stream announces rather than swallows" "yes" \
+  "$(printf '%s\n' "$GUARD_ERR" | /usr/bin/grep -qE '^\+[0-9]+ more$' && printf yes || printf no)"
+expect_contains "E1.5 …and BIONIC_WALL_VERBOSE=1 puts it back" \
   "If a human ordered this stop" "$GUARD_VERR"
+expect_contains "E1.5 …along with the pasteable observe command the frame teaches" \
+  "Fix: " "$GUARD_VERR"
 expect_eq "E1.5 …with the one line still first" \
   "bionic: stop refused — the session roster carries no id for it (stop it yourself or order it)" \
   "$(printf '%s\n' "$GUARD_VERR" | head -1)"

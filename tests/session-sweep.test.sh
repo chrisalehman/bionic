@@ -865,4 +865,68 @@ expect_eq "7i.4 session-start exits 0" "0" "$RC"
 expect_false "7i.5 …and an AGED dead session is still swept under the same GNU stat" \
   test -e "$(f_of "$R7I2" roster "$SID_DEAD")"
 
+# =============================================================================
+section "7j. the mixed batch: an ancient dead session is swept although a younger dead one defers (REQ-8, AC-8.1/8.2)"
+# =============================================================================
+#
+# THE DEFECT THIS SECTION OWNS (seed B B9; measured in this repo 2026-09-19 —
+# `engaged`/`preflight`/`roster-3fd4eb96`, two days old, no failure marker, beside one live
+# session). The age gate §7c exercises used to be WHOLE-DIRECTORY: if ANY dead session under
+# .bionic/tmp had ANY file younger than one poker interval, hooks/session-start.sh skipped
+# the `sweep` call ALTOGETHER that run and every dead session's files waited together. On a
+# project that `/clear`s every few minutes there is always a corpse under 1200s old, so
+# nothing was ever swept.
+#
+# THE FIX IS THE VERB'S OWN FLAG, not a finer gate in the hook. `sweep --window` already
+# defers a dead session whose own newest file is younger than the interval, PER SESSION
+# (hooks/session-poker.sh's `--window`), so the hook passes it and asks nothing itself: one
+# answer to "who is young", in the verb that does the deleting.
+#
+# THE FIXTURE IS THE MIXED BATCH §7a-7i never built — dead A two days old, dead B whose
+# roster was touched five minutes ago, and a LIVE session C beside them. One drive, three
+# answers. §7c (a young dead session alone is deferred) and its paired positive still hold
+# the per-session rule from the other side.
+R7J="$(ss_make_project r7j 1200s)"
+live_home 7j "$SID_LIVE"; H7J="$CLAUDE_HOME"
+plant_session "$R7J" "$SID_DEAD"     # A — ancient
+plant_session "$R7J" "$SID_DEAD2"    # B — one young file
+plant_session "$R7J" "$SID_LIVE"     # C — alive, never a candidate
+plant_unkeyed "$R7J"
+for f7j in "$R7J/.bionic/tmp/"*"-$SID_DEAD.state"*;  do ss_backdate "$f7j" 172800; done
+for f7j in "$R7J/.bionic/tmp/"*"-$SID_DEAD2.state"*; do ss_backdate "$f7j" 172800; done
+for f7j in "$R7J/.bionic/tmp/"*"-$SID_LIVE.state"*;  do ss_backdate "$f7j" 172800; done
+# B's ONE young file: five minutes, well inside the 1200s window, and the whole of what used
+# to make the hook skip the directory.
+ss_backdate "$(f_of "$R7J" roster "$SID_DEAD2")" 300
+
+ss_drive_start "$HOOK_SESSION_START" "$R7J" "$H7J" "$CUR_SELF"
+expect_eq "7j.1 session-start exits 0" "0" "$RC"
+
+# AC-8.1 — A GOES, although B defers in the same run. This is the assertion the old gate
+# failed: A was left because B had a young file.
+expect_false "7j.2 the ancient dead session's roster is swept" \
+  test -e "$(f_of "$R7J" roster "$SID_DEAD")"
+expect_false "7j.3 …its preflight too" \
+  test -e "$(f_of "$R7J" preflight "$SID_DEAD")"
+expect_false "7j.4 …and its patrol stamp" \
+  test -e "$(f_of "$R7J" patrol "$SID_DEAD")"
+
+# AC-8.2 — B defers WHOLE, its young file and its old siblings together: the verb's unit is
+# the SESSION, so one young file keeps that session's state this round and no other's.
+expect_true "7j.5 the younger dead session's young roster survives" \
+  test -f "$(f_of "$R7J" roster "$SID_DEAD2")"
+expect_true "7j.6 …and its two-day-old siblings survive with it" \
+  test -f "$(f_of "$R7J" preflight "$SID_DEAD2")"
+
+# AC-8.2 — and a LIVE session is never a candidate, at any age.
+expect_true "7j.7 the live session's roster survives" \
+  test -f "$(f_of "$R7J" roster "$SID_LIVE")"
+expect_true "7j.8 …and its patrol stamp" \
+  test -f "$(f_of "$R7J" patrol "$SID_LIVE")"
+
+expect_false "7j.9 nothing failed — no sweep-failure marker" \
+  test -e "$R7J/.bionic/tmp/sweep-failed.state"
+expect_true "7j.10 …and the unkeyed ephemera no id addresses are untouched" \
+  test -f "$R7J/.bionic/tmp/context-spend.state"
+
 finish

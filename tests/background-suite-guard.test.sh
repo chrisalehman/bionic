@@ -213,11 +213,18 @@ guarded "$R1" 'git status --short'
 expect_eq "B1g a non-suite command is allowed" "0" "$ST"
 expect_empty "B1g …silently" "$OUT$ERR"
 
-# SUITE-CLASS AND FILELESS. `pytest` runs a suite and names no file this row can speak
-# about; inventing a refusal for it would be the wall guessing.
+# SUITE-CLASS AND FILELESS, AND NOW HELD (REQ-1 AC-1.5, 1.8.3). Until this wave `pytest`
+# ran a suite and named no file this row could speak about, so it passed in silence — and a
+# writer in a repository whose tests are not shell suites had a budget in name only
+# (research R1 Q2). The classifier now names the RUN a runner form makes, so the row's
+# recorded set is a statement about the whole instrument: a runner form the brief did not
+# declare is refused with the same budget refusal a suite file draws. R1's row declares no
+# runs, so `pytest` is outside its set.
 guarded "$R1" 'pytest'
-expect_eq "B1h a suite-class command naming no suite FILE is allowed" "0" "$ST"
-expect_empty "B1h …silently" "$OUT$ERR"
+expect_eq "B1h a suite-class runner form outside the row's set is REFUSED" "2" "$ST"
+expect_contains "B1h …naming the run that was asked for" "pytest" "$VERR"
+expect_contains "B1h …and calling itself a BUDGET, not a wall" "BUDGET" "$VERR"
+expect_empty "B1h …with nothing on stdout" "$OUT"
 
 section "B2 — tests/run.sh is refused unless the row carries it"
 guarded "$R1" 'bash tests/run.sh'
@@ -542,23 +549,42 @@ expect_eq "B10 …the call precedes the fold that reaches every wall" "yes" \
 
 section "B11 — AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 #
-# fails-when: a refusal reaches the user as more than one line, or in any shape but
-# `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. All four of this wall's refusal
+# fails-when: a refusal reaches the user as more than one VERDICT line, or in any shape
+# but `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. All four of this wall's refusal
 # sites are tripped for real and asserted against the criterion's own regex and then
 # against the exact wording the ruled table gives them (s12-refusal-wording-draft.md §1
-# rows 11 through 14). The detail every arm above reads lives behind the knob, and B11e
-# is the pair that proves the split rather than assuming it.
+# rows 11 through 14). B11e is the pair that proves the split rather than assuming it.
+#
+# AC-E1.3 IS ABOUT THE VERDICT, AND ADR-030 MADE THAT DISTINCTION VISIBLE (epic-23
+# wave-16 T4/T19/T22). `exit2`'s field 9 (`detail_to_user`) is `yes` now, so the detail
+# every arm above reads rides the same wire as the verdict, bounded at twelve lines, with
+# no knob needed. Until that flip, "the user stream is one line" and "the verdict is one
+# line" were the same measurement on `exit2`, and these pins took the cheaper one. What
+# AC-E1.3 actually asks for — a sentence the reader is interrupted by, never wrapped — is
+# the VERDICT, so that is what is counted and compared below; the detail is asserted
+# present as well, with a POSITIVE beside each narrowed count, so a wall that went silent
+# still fails a check that used to catch it (A-T4.9, A-T22.1).
 
 B11_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 b11_line() {  # <label> <expected line>   (reads $ERR from the last `guarded`)
-  local _n
-  _n="$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')"
-  if [ "$_n" = "1" ]; then ok "$1: exactly one line on the user stream"
-  else no "$1: exactly one line on the user stream" "got $_n lines: [$ERR]"; fi
-  if printf '%s' "$ERR" | /usr/bin/grep -qE "$B11_RE"; then ok "$1: in AC-E1.3's shape"
-  else no "$1: in AC-E1.3's shape" "line=[$ERR]"; fi
-  if [ "$ERR" = "$2" ]; then ok "$1: and it is the table's own wording"
-  else no "$1: and it is the table's own wording" "want [$2] got [$ERR]"; fi
+  local _n _line _rest
+  _n="$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ' | tr -d ' ')"
+  _line="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+  # WHAT FOLLOWS THE VERDICT, if anything: the stream minus its rendered line(s). Read
+  # here rather than asserted per caller, because every one of this wall's four sites
+  # carries a `detail` and a site that stopped carrying one is the regression worth
+  # seeing — narrowing the count without this would quietly weaken the section.
+  _rest="$(printf '%s\n' "$ERR" | /usr/bin/grep -v '^bionic: ' | /usr/bin/grep -c . | tr -d ' ')"
+  if [ "$_n" = "1" ]; then ok "$1: exactly one VERDICT line on the user stream"
+  else no "$1: exactly one VERDICT line on the user stream" "got $_n lines: [$ERR]"; fi
+  if printf '%s' "$_line" | /usr/bin/grep -qE "$B11_RE"; then ok "$1: in AC-E1.3's shape"
+  else no "$1: in AC-E1.3's shape" "line=[$_line]"; fi
+  if [ "$_line" = "$2" ]; then ok "$1: and it is the table's own wording"
+  else no "$1: and it is the table's own wording" "want [$2] got [$_line]"; fi
+  # THE POSITIVE THAT KEEPS THE COUNT HONEST (ADR-030, A-T4.9): the verdict is one line
+  # BECAUSE the detail is a separate thing beneath it, not because the wall went quiet.
+  if [ "$_rest" -ge 1 ]; then ok "$1: with its detail beneath it, no knob set"
+  else no "$1: with its detail beneath it, no knob set" "nothing after the verdict"; fi
 }
 
 guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" true
@@ -585,15 +611,30 @@ guarded "$R1" 'bash tests/run.sh'
 b11_line "B11d row 14 (the full tree)" \
   "bionic: suite-run refused — full tree refused; allowed: alpha.test.sh (run your brief's suites)"
 
-# AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 → T18 fcd5a16 → T25). What the knob
-# gates has moved: the compact fact line now carries the allowed set on the DEFAULT stream
-# too (AC-5.2's own fix), so the split this pair still proves is the explanatory PROSE
-# ("On the budget:"/"You asked for:") — present in the verbose detail only, never on the
-# one-line default. The label on the default line is now "allowed:", not "off budget:".
+# AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 → T18 fcd5a16 → T25), then
+# RE-AUTHORED BY ADR-030 (T22, the A-T4.10 precedent). What the knob gates has moved
+# twice. First the compact fact line took the allowed set onto the DEFAULT stream
+# (AC-5.2's own fix), leaving the explanatory PROSE ("On the budget:"/"You asked for:")
+# as the thing behind the knob. Then field 9 flipped and the prose came onto the default
+# stream too, beneath the verdict. So what this pair holds now is the SPLIT rather than
+# the absence: the verdict line is the ruled sentence and carries none of the prose, and
+# the prose is on the stream beneath it with no knob set. Asserted on the line and on the
+# stream separately, so neither half can pass over an empty capture.
 guarded "$R1" 'bash tests/gamma.test.sh'
 expect_contains "B11e even without the knob the allowed set now reaches the DEFAULT stream" \
   "alpha.test.sh beta.test.sh" "$ERR"
-expect_absent "B11e …but the explanatory PROSE does not" "On the budget:" "$ERR"
+expect_absent "B11e …but the explanatory PROSE is NOT on the verdict line" "On the budget:" \
+  "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "B11e …it is beneath it, with no knob set at all" \
+  "On the budget: alpha.test.sh beta.test.sh" "$ERR"
+# BIONIC_WALL_VERBOSE=1 ADDS NOTHING THIS SUITE CAN TELL APART (A-T22.1, the A-T19.1
+# precedent): field 9 already puts the bounded detail on the wire, and the longest detail
+# this wall composes is twelve lines, so the knob's "whole detail" and the channel's
+# "bounded detail" are byte-identical here — measured, `$ERR` and `$VERR` do not differ
+# for any of this section's four sites. The row stays and stays true, but it no longer
+# discriminates the knob from the default for THIS wall's messages; only a >12-line
+# detail would, and this wall has none. Kept for parity with the fleet's shape rather
+# than deleted, and flagged here rather than left to look like it proves knob-gating.
 expect_contains "B11e …and with BIONIC_WALL_VERBOSE=1 the prose is there too" \
   "On the budget: alpha.test.sh beta.test.sh" "$VERR"
 expect_eq "B11e …with the one line still first" \
@@ -652,5 +693,105 @@ expect_empty "B12f …silently" "$OUT$ERR"
 guarded "$R1" 'bash tests/run.sh &' ""
 expect_absent "B12g the main thread never hears this arm's fact" \
   "a backgrounded suite's result is never read" "$OUT$ERR"
+
+section "B13 — REQ-1 AC-1.5: the row's DECLARED runs are the budget for a runner form"
+# THE HOLE THIS CLOSES. `suites_allowed=` is a set of shell-suite BASENAMES, and a repo whose
+# tests are jest or pytest can put nothing in it — its brief declares its runs under
+# `Re-executes:` instead, which `hooks/dispatch-preflight.sh` lifts (marks kept, collapsed,
+# at most three — A-T1.4) onto the roster row as `re_executes=`. This section is the other
+# end of that field: the arm admits a suite-class command that is on `suites_allowed=` OR
+# equals one of the declared runs, and refuses the rest with the refusal B1c already pins.
+#
+# EXACTLY the declared run, not a prefix of it. `npx jest` and `npx jest --testPathPatterns
+# 'x'` are different spends — the first runs the whole tree — so a set that admitted the
+# bare form because the declared one starts with it would be the one-regression rule lost
+# by a spelling.
+
+R13=$(mk_repo b13)
+add_row "$R13" name=w-b13 "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
+  suites_source=declared files=src/widget.ts \
+  "re_executes=\`npx jest --testPathPatterns 'x'\`"
+
+guarded "$R13" "npx jest --testPathPatterns 'x'"
+expect_eq "B13a the run the brief DECLARED is allowed" "0" "$ST"
+expect_empty "B13a …silently" "$OUT$ERR"
+
+guarded "$R13" 'npx jest'
+expect_eq "B13b a runner form OUTSIDE the declared set is REFUSED" "2" "$ST"
+expect_contains "B13b …naming the run that was asked for" "npx jest" "$VERR"
+expect_contains "B13b …and the run that was on the budget" "--testPathPatterns" "$VERR"
+expect_contains "B13b …and calling itself a BUDGET, not a wall" "BUDGET" "$VERR"
+expect_empty "B13b …with nothing on stdout" "$OUT"
+
+# ONE RUN, TYPED WIDER. The lift collapses whitespace inside a marked run before it writes
+# the row, so the comparison collapses the command the same way or the two ends disagree
+# about a run they both hold.
+guarded "$R13" "npx   jest  --testPathPatterns 'x'"
+expect_eq "B13c the same run typed with wider spacing is the same run" "0" "$ST"
+expect_empty "B13c …silently" "$OUT$ERR"
+
+# A PREFIX THE LIBRARY ALREADY STRIPS is the same run too — the reading, not the typing,
+# decides. `timeout <n>` is the shape a dispatched writer's own brief tells it to use.
+guarded "$R13" "timeout 600 npx jest --testPathPatterns 'x'"
+expect_eq "B13d the declared run under a stripped prefix is allowed" "0" "$ST"
+expect_empty "B13d …silently" "$OUT$ERR"
+
+# THE SHELL SPELLING READS THE SAME FIELD. A declared run naming a shell suite admits that
+# suite even when `suites_allowed=` does not carry it: the two labels are two spellings of
+# one declaration (AC-1.2), and an arm that honoured only one of them would refuse a brief
+# the dispatch wall admitted.
+R13B=$(mk_repo b13b)
+add_row "$R13B" name=w-b13b "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
+  suites_source=declared files=payload/scripts/lib/widget.sh \
+  "re_executes=\`bash tests/gamma.test.sh\`"
+guarded "$R13B" 'bash tests/gamma.test.sh'
+expect_eq "B13e a declared run naming a shell suite is allowed" "0" "$ST"
+expect_empty "B13e …silently" "$OUT$ERR"
+guarded "$R13B" 'bash tests/delta.test.sh'
+expect_eq "B13f …and a suite NEITHER channel names is still refused" "2" "$ST"
+expect_contains "B13f …naming the suite that was asked for" "delta.test.sh" "$VERR"
+
+# THE FAIL DIRECTION IS UNCHANGED (the arm's own preamble). A row with no budget key at all
+# means the journal failed or the row predates the wall, and an agent is not punished for a
+# bookkeeping failure it did not cause: a NAMED run passes in silence, exactly as a named
+# suite does.
+R13C=$(mk_repo b13c)
+add_row "$R13C" name=w-b13c "agent_id=$ACTOR" files=src/widget.ts
+guarded "$R13C" "npx jest --testPathPatterns 'x'"
+expect_eq "B13g with NO budget on the row a runner form passes" "0" "$ST"
+expect_empty "B13g …silently" "$OUT$ERR"
+
+# …AND `Suites: none` IS A STATED EMPTY SET, for the runner spelling too. AC-1.7's words are
+# "admitted at dispatch, every suite refused at run time"; before this wave the runner forms
+# were the exception that made that sentence false.
+R13D=$(mk_repo b13d)
+add_row "$R13D" name=w-b13d "agent_id=$ACTOR" suites_allowed=none suites_source=declared files=
+guarded "$R13D" 'pytest tests/x.py'
+expect_eq "B13h a waived row refuses the runner spelling too" "2" "$ST"
+expect_contains "B13h …with the budget refusal" "BUDGET" "$VERR"
+
+# THE FULL-TREE ARM IS NOT WEAKENED BY THE NEW CHANNEL. `tests/run.sh` fails closed against
+# a row that does not carry it, whatever that row declares under `re_executes=`.
+guarded "$R13" 'bash tests/run.sh'
+expect_eq "B13i the full tree is still REFUSED against a row that does not carry it" "2" "$ST"
+expect_contains "B13i …by the one-regression arm, not the budget one" "One regression means one" "$VERR"
+
+# …AND A BRIEF CANNOT BUY THE FULL TREE WITH THE NEW LABEL. `regression_rows()` counts the
+# `run.sh` token in `suites_allowed=` and reads nothing else, so a run declared under
+# `Re-executes:` is uncounted at dispatch; if it were also admitted here, one spelling would
+# spend a budget the standing ruling caps at one per run and no counter would ever see it.
+# The full-tree arm therefore runs AHEAD of the declared runs, and this row is why.
+R13E=$(mk_repo b13e)
+add_row "$R13E" name=w-b13e "agent_id=$ACTOR" "suites_allowed=alpha.test.sh" \
+  suites_source=declared files=payload/scripts/lib/widget.sh \
+  "re_executes=\`bash tests/run.sh\`"
+guarded "$R13E" 'bash tests/run.sh'
+expect_eq "B13j a DECLARED run naming the full tree is still REFUSED" "2" "$ST"
+expect_contains "B13j …by the one-regression arm" "One regression means one" "$VERR"
+# The same row still holds its other half: the declared set is not voided by the refusal.
+guarded "$R13E" 'bash tests/alpha.test.sh'
+expect_eq "B13k …and the row's budgeted suite still runs" "0" "$ST"
+expect_empty "B13k …silently" "$OUT$ERR"
+
 
 finish

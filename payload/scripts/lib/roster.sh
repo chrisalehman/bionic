@@ -54,11 +54,15 @@
 # writes `teammate_id=` empty today, and a reader distinguishing "no address" from "not an
 # adopted row" would break if the field vanished with its value.
 #
-# THE THREE INSTRUMENT FIELDS (wave-01 S13, spec AC-20) ARE OPTIONAL FOR THE SAME REASON.
-# `files=`, `suites_allowed=` and `suites_source=` say how wide the dispatched agent's
-# instrument may be: the files its brief declared, the suite basenames it may run, and
-# whether that set was DERIVED from the tree by the configured impact command or DECLARED
-# by the brief. They are present-if-passed rather than always-emitted so that the captured
+# THE FOUR INSTRUMENT FIELDS (wave-01 S13, spec AC-20; `re_executes=` epic-23 wave-16,
+# REQ-1) ARE OPTIONAL FOR THE SAME REASON. `files=`, `suites_allowed=`, `suites_source=` and
+# `re_executes=` say how wide the dispatched agent's instrument may be: the files its brief
+# declared, the suite basenames it may run, whether that set was DERIVED from the tree by the
+# configured impact command or DECLARED by the brief, and — for a repository whose tests are
+# not shell suites at all — the author-marked commands the brief declared it will re-run,
+# marks kept, space-joined, at most three (hooks/dispatch-preflight.sh lifts them from the
+# brief text under `Re-executes:`). `re_executes=` is the LAST of the four and TRAILS them,
+# so a row written before the field existed reproduces byte for byte through this writer. They are present-if-passed rather than always-emitted so that the captured
 # rows in `tests/fixtures/roster-row.captured` — real rows written before this task
 # existed — still reproduce byte for byte through this writer. A row from before the wall
 # carries none of the three, and that absence is a THIRD state the readers partition on:
@@ -86,9 +90,9 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   local status="" session="" name="" agent_id="" launched_at="" subagent_type=""
   local model="" deliverable="" source="" duration="" progress="" claims=""
   local cadence="" absent="" waiver="" teammate_id="" adopted_from="" tool_use_id="" plan=""
-  local files="" suites_allowed="" suites_source=""
+  local files="" suites_allowed="" suites_source="" re_executes=""
   local has_teammate_id=0 has_adopted_from=0
-  local has_files=0 has_suites_allowed=0 has_suites_source=0
+  local has_files=0 has_suites_allowed=0 has_suites_source=0 has_re_executes=0
   local arg key val out
 
   for arg in "$@"; do
@@ -125,6 +129,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
       files)          files="$val";          has_files=1 ;;
       suites_allowed) suites_allowed="$val"; has_suites_allowed=1 ;;
       suites_source)  suites_source="$val";  has_suites_source=1 ;;
+      re_executes)    re_executes="$val";    has_re_executes=1 ;;
       *) return 2 ;;
     esac
   done
@@ -138,6 +143,7 @@ roster_row() {  # <key>=<value> ... -> the row on stdout; 2 on an unknown key or
   if [ "$has_files" -eq 1 ]; then          out="$out|files=$files"; fi
   if [ "$has_suites_allowed" -eq 1 ]; then out="$out|suites_allowed=$suites_allowed"; fi
   if [ "$has_suites_source" -eq 1 ]; then  out="$out|suites_source=$suites_source"; fi
+  if [ "$has_re_executes" -eq 1 ]; then    out="$out|re_executes=$re_executes"; fi
   if [ "$has_teammate_id" -eq 1 ]; then out="$out|teammate_id=$teammate_id"; fi
   if [ "$has_adopted_from" -eq 1 ]; then out="$out|adopted_from=$adopted_from"; fi
   out="$out|tool_use_id=$tool_use_id|plan=$plan"

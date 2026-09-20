@@ -2130,9 +2130,22 @@ section "Section 17: the lean spine — role files are role-sized and the dispat
 # further trim available). +43 B/file × 6 = +258 B put the measured total at 26,221 B, 221 B
 # over the old cap with only 37 B of headroom to spend against; same shape of ratchet as the
 # per-file raise above, same reason.
+#
+# ROLE_TOTAL_CAP RAISED 26,300 -> 26,400 (epic-23 wave-16-fixit-183 T3, A-T3.3, REQ-1 AC-1.8):
+# the brief-scaffold block's new `Re-executes:` line (AC-1.8 — the label must reach all six
+# role files, dispatch.md, and SKILL.md, rendered from agents-src/) costs a minimum of 21 B
+# per role file even at its shortest label-legal form, `` `Re-executes: `<cmd>`` `` with no
+# comment and a single placeholder (the two-command example and the ≤3 comment T3's own brief
+# suggested were cut first, in agents-src/blocks/brief-scaffold.md and
+# agents-src/templates/auditor.md.tmpl's own "Suites:/Re-executes:" sentence, which is a
+# byte-for-byte tightening of its pre-task wording, not a growth). 21 B/file × 6 = +126 B
+# against the 79 B of headroom the previous raise left (26,300 − 26,221) put the measured
+# total at 26,344 B, 44 B over. Raised here (T3's own declared Files: includes this suite)
+# rather than drop the label from a role file the AC names, or touch a template outside T3's
+# declared Files to trim further; logged as A-T3.3 in record/wave-16-fixit-183/assumptions.md.
 
 ROLE_CAP=5500
-ROLE_TOTAL_CAP=26300
+ROLE_TOTAL_CAP=26400
 ROLE_OVER=""
 ROLE_TOTAL=0
 ROLE_COUNT=0
@@ -3329,6 +3342,188 @@ if [ "$AC3_MUT_HITS" -gt 0 ] 2>/dev/null; then
   ok "157: a dispatch.md with the reorder text reinstated reads back over 0 (154 is not vacuous, $AC3_MUT_HITS hit(s))"
 else
   no "157: a dispatch.md with the reorder text reinstated reads back over 0 (154 is not vacuous)" \
+     "mutated copy still read 0"
+fi
+
+section "Section 29: T3 — rendered docs for wave-16-fixit-183 (REQ-1/REQ-4/REQ-8/REQ-10, AC-1.8/AC-4.1/AC-4.2/AC-8.3/AC-10.5)"
+#
+# WHAT THIS SECTION OWNS. Five doc-side acceptance criteria of bionic 1.8.3's declared-runs
+# repair, all rendered from agents-src/ by agents-src/render.sh: (1) the `Re-executes:` label
+# reaches the auditor role file, the dispatch reference and the Step-5 step file (AC-1.8's
+# docs half — the hook-side lift and the roster field are T1's, and the cross-gate
+# scaffold-verbatim pin that ties the two together lives in tests/cross-gate-agreement.test.sh,
+# not here); (2) the wave-scale `## Tasks` table, undocumented anywhere before this task
+# (research R2 finding 13), is now named in steps/3.md with its eleven columns, its `deps`
+# and status vocabulary, and the `working-branch:` key (AC-4.1); (3) the aggregate byte cap
+# of Section 18 still holds after this task's additions (AC-4.2 — no new pin, that section's
+# own arms cover it); (4) SKILL.md's Step-8 wipe sentence names owner liveness rather than
+# file name (AC-8.3); (5) the dead `hooks/patrol-duties-gate.sh` name is gone from every
+# rendered surface and the patrol prompt reads ListAgents before it ticks (AC-10.5).
+#
+# HERMETIC. Reads the committed rendered finals by path; doctored copies live under this
+# file's own mktemp dir.
+
+AUDITOR_MD="${REPO}/agents/auditor.md"
+
+# --- AC-1.8 (docs half): Re-executes reaches the auditor role file, dispatch.md, steps/5.md ---
+
+RE_EXEC_AUDITOR="$(grep -c 'Re-executes' "$AUDITOR_MD" 2>/dev/null | tr -cd '0-9')"
+RE_EXEC_AUDITOR="${RE_EXEC_AUDITOR:-0}"
+if [ "$RE_EXEC_AUDITOR" -ge 1 ] 2>/dev/null; then
+  ok "158: AC-1.8 — agents/auditor.md carries 'Re-executes' ($RE_EXEC_AUDITOR hit(s))"
+else
+  no "158: AC-1.8 — agents/auditor.md carries 'Re-executes'" "file: $AUDITOR_MD"
+fi
+
+RE_EXEC_DISPATCH="$(grep -c 'Re-executes' "$DISPATCH_MD" 2>/dev/null | tr -cd '0-9')"
+RE_EXEC_DISPATCH="${RE_EXEC_DISPATCH:-0}"
+if [ "$RE_EXEC_DISPATCH" -ge 1 ] 2>/dev/null; then
+  ok "159: AC-1.8 — dispatch.md carries 'Re-executes' ($RE_EXEC_DISPATCH hit(s))"
+else
+  no "159: AC-1.8 — dispatch.md carries 'Re-executes'" "file: $DISPATCH_MD"
+fi
+
+RE_EXEC_STEP5="$(grep -c 'Re-executes' "$STEP5_MD" 2>/dev/null | tr -cd '0-9')"
+RE_EXEC_STEP5="${RE_EXEC_STEP5:-0}"
+if [ "$RE_EXEC_STEP5" -ge 1 ] 2>/dev/null; then
+  ok "160: AC-1.8 — steps/5.md carries 'Re-executes' ($RE_EXEC_STEP5 hit(s))"
+else
+  no "160: AC-1.8 — steps/5.md carries 'Re-executes'" "file: $STEP5_MD"
+fi
+
+# Anti-vacuity: a copy of the auditor role file with the line stripped must read 0.
+AC158_MUT="$TMP/auditor-no-reexec.md"
+grep -v 'Re-executes' "$AUDITOR_MD" > "$AC158_MUT" 2>/dev/null
+expect_eq "161: a stripped copy of agents/auditor.md reads 0 'Re-executes' hits (158 is not vacuous)" \
+  "0" "$(grep -c 'Re-executes' "$AC158_MUT" 2>/dev/null | tr -cd '0-9')"
+
+# --- AC-4.1: the wave-scale Tasks table, its columns, deps, status vocabulary, no 'done' ---
+#
+# A-orch-9 (2026-09-19): the full documentation lives in operational-rules.md, a PLAIN file
+# AC-1b.4's own aggregate cap excludes by name (Section 18's own comment) — steps/3.md, which
+# IS inside that cap, carries only a one-sentence pointer to it. So the detail pins below read
+# operational-rules.md; steps/3.md is checked only for the pointer.
+
+WAVE_SECTION="$(sed -n '/### The wave-scale `## Tasks` table/,/^## /p' "$OPRULES" 2>/dev/null)"
+# wave-16 T21 (walk-2c882be.md §11): the header used to print `worktree | status`, transposed
+# relative to units.sh:127-129's contract order (`status` at slot 10, `worktree` at slot 11).
+# Harmless in practice — `_units_read` matches header cells by NAME, not position — but the
+# two documents disagreed, and this pin now reads the corrected, contract-matching order.
+WAVE_COLS='id | step | kind | task | agent | deps | size | serves | Files | status | worktree'
+
+if [ -n "$WAVE_SECTION" ]; then
+  case "$WAVE_SECTION" in
+    *"$WAVE_COLS"*)
+      ok "162: AC-4.1 — operational-rules.md names all eleven wave-scale columns verbatim" ;;
+    *)
+      no "162: AC-4.1 — operational-rules.md names all eleven wave-scale columns verbatim" "file: $OPRULES" ;;
+  esac
+else
+  no "162: AC-4.1 — operational-rules.md names all eleven wave-scale columns verbatim" \
+     "no 'wave-scale ## Tasks table' section found in $OPRULES"
+fi
+
+case "$WAVE_SECTION" in
+  *'pending | active | landed | dropped'*)
+    ok "163: AC-4.1 — operational-rules.md's wave-scale section names the status vocabulary 'pending | active | landed | dropped'" ;;
+  *)
+    no "163: AC-4.1 — operational-rules.md's wave-scale section names the status vocabulary 'pending | active | landed | dropped'" \
+       "section: ${WAVE_SECTION:-<absent>}" ;;
+esac
+
+# NOT a bare grep for the word "done": the correct prose (163's positive pin) explains
+# `done`'s absence using the word itself ("a row that has landed is `landed`, not `done`"),
+# which would make a naive `grep -c 'done'` self-defeating on the very sentence that
+# documents the fix. The real fails-when shape is `done` surviving INSIDE the pipe-delimited
+# status vocabulary — so this checks for that shape specifically.
+case "$WAVE_SECTION" in
+  *'pending | active | done'*|*'active | done | dropped'*)
+    no "164: AC-4.1 — 'done' does not survive inside the wave-scale status vocabulary" \
+       "section: ${WAVE_SECTION:-<absent>}" ;;
+  *)
+    ok "164: AC-4.1 — 'done' does not survive inside the wave-scale status vocabulary" ;;
+esac
+
+if has_pin "$OPRULES" 'working-branch'; then
+  ok "165: AC-4.1 — operational-rules.md names 'working-branch:' as the landing gate's key"
+else
+  no "165: AC-4.1 — operational-rules.md names 'working-branch:' as the landing gate's key" "file: $OPRULES"
+fi
+
+# steps/3.md itself: a one-sentence pointer into operational-rules.md, inside the aggregate
+# cap, naming the wave-scale table's variance from the task-scale ledger it documents inline.
+if has_pin "$STEP3_MD" 'Wave-scale variant' && has_pin "$STEP3_MD" 'operational-rules.md'; then
+  ok "165b: AC-4.1 — steps/3.md points to operational-rules.md for the wave-scale table"
+else
+  no "165b: AC-4.1 — steps/3.md points to operational-rules.md for the wave-scale table" "file: $STEP3_MD"
+fi
+
+# Anti-vacuity: a copy of the wave-scale columns string missing one column must not match.
+AC162_MUT_COLS='id | step | kind | task | agent | deps | size | serves | worktree | status'
+case "$WAVE_SECTION" in
+  *"$AC162_MUT_COLS"*)
+    no "166: a columns string with 'Files' dropped does not falsely match (162 is not vacuous)" \
+       "the shorter, wrong string still matched"
+    ;;
+  *)
+    ok "166: a columns string with 'Files' dropped does not falsely match (162 is not vacuous)"
+    ;;
+esac
+
+# --- AC-8.3: SKILL.md's Step-8 wipe sentence names owner liveness, not file name ---
+
+SKILL_SPARE_BY_NAME="$(grep -c 'spares by name' "$SKILL_MD" 2>/dev/null | tr -cd '0-9')"
+SKILL_SPARE_BY_NAME="${SKILL_SPARE_BY_NAME:-0}"
+expect_eq "167: AC-8.3 — SKILL.md no longer says the Step-8 wipe 'spares by name'" \
+  "0" "$SKILL_SPARE_BY_NAME"
+
+if has_pin "$SKILL_MD" 'owner liveness'; then
+  ok "168: AC-8.3 — SKILL.md's wipe description names owner liveness"
+else
+  no "168: AC-8.3 — SKILL.md's wipe description names owner liveness" "file: $SKILL_MD"
+fi
+
+# Anti-vacuity: a copy with the retired sentence reinstated must read back over 0.
+AC167_MUT="$TMP/skill-spare-by-name.md"
+{ printf 'the wipe spares by name\n'; cat "$SKILL_MD"; } > "$AC167_MUT" 2>/dev/null
+AC167_MUT_HITS="$(grep -c 'spares by name' "$AC167_MUT" 2>/dev/null | tr -cd '0-9')"
+AC167_MUT_HITS="${AC167_MUT_HITS:-0}"
+if [ "$AC167_MUT_HITS" -gt 0 ] 2>/dev/null; then
+  ok "169: a SKILL.md with 'spares by name' reinstated reads back over 0 (167 is not vacuous)"
+else
+  no "169: a SKILL.md with 'spares by name' reinstated reads back over 0 (167 is not vacuous)" \
+     "mutated copy still read 0"
+fi
+
+# --- AC-10.5: no dead hook name; ListAgents precedes the tick in the patrol prompt's reads ---
+
+# A-orch-9 (2026-09-19): this tree also carries a hand-composed, unrendered diagram
+# (skills/canonical-sdlc/diagrams/hook-chain.svg, SKILL.md.tmpl:197: "hand-composed text, no
+# paired drawing file") that drew a box for this retired hook name; entry 13's label, its
+# data-hook attribute and its subtitle were re-pointed at stop.sh/lib/stop.sh (Files widened)
+# so the eval design's own literal instrument, unscoped, now reads zero across every surface.
+AC10_5_HITS="$(grep -rn 'patrol-duties-gate.sh' "${REPO}/skills" "${REPO}/agents" 2>/dev/null || true)"
+expect_eq "170: AC-10.5 — no surface under skills/ or agents/ still names hooks/patrol-duties-gate.sh" \
+  "" "$AC10_5_HITS"
+
+LISTAGENTS_LINE="$(grep -n 'ListAgents' "$DISPATCH_MD" 2>/dev/null | head -1 | cut -d: -f1)"
+TICK_LINE="$(grep -n -- '\*\*Tick the poker\.\*\*' "$DISPATCH_MD" 2>/dev/null | head -1 | cut -d: -f1)"
+if [ -n "$LISTAGENTS_LINE" ] && [ -n "$TICK_LINE" ] && [ "$LISTAGENTS_LINE" -lt "$TICK_LINE" ] 2>/dev/null; then
+  ok "171: AC-10.5 — dispatch.md's patrol prompt reads ListAgents (line $LISTAGENTS_LINE) before it ticks (line $TICK_LINE)"
+else
+  no "171: AC-10.5 — dispatch.md's patrol prompt reads ListAgents before it ticks" \
+     "ListAgents line=${LISTAGENTS_LINE:-absent} tick line=${TICK_LINE:-absent}"
+fi
+
+# Anti-vacuity: a copy of dispatch.md with the dead hook name reinstated must read back over 0.
+AC170_MUT="$TMP/dispatch-with-dead-hook.md"
+{ printf 'hooks/patrol-duties-gate.sh\n'; cat "$DISPATCH_MD"; } > "$AC170_MUT" 2>/dev/null
+AC170_MUT_HITS="$(grep -c 'patrol-duties-gate.sh' "$AC170_MUT" 2>/dev/null | tr -cd '0-9')"
+AC170_MUT_HITS="${AC170_MUT_HITS:-0}"
+if [ "$AC170_MUT_HITS" -gt 0 ] 2>/dev/null; then
+  ok "172: a dispatch.md with the dead hook name reinstated reads back over 0 (170 is not vacuous)"
+else
+  no "172: a dispatch.md with the dead hook name reinstated reads back over 0 (170 is not vacuous)" \
      "mutated copy still read 0"
 fi
 

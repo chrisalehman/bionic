@@ -1315,11 +1315,10 @@ EOF
 #     Patrols or nothing" needs a way to know which; this is the only one.
 PATROL_ROWS=""
 _patrol_add() { PATROL_ROWS="${PATROL_ROWS}$1"$'\n'; }
-PATROL_LIVE=0
 
 PATROL_LINES="$(patrol_report 2>/dev/null)"
 
-_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""
+_p_sid=""; _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""; _p_reason=""
 _p_here=""
 
 # WHY THE JOB COUNT ALONE CANNOT ANSWER "IS IT RUNNING" (Step-6 correctness C1,
@@ -1341,14 +1340,28 @@ _p_here=""
 # nothing, it GATES.
 #
 #   firing      — the row prints, exactly as before.
-#   not-firing  — a stamp that has gone stale: armed, and no longer ticking.
+#   not-firing  — a stamp that has gone stale AND a session whose transcript shows
+#                 an idle stretch long enough for a firing with no firing in it.
 #                 No row (F3's ratified rule is running-or-nothing, and a dead
 #                 Patrol is nothing), and one FIX line, because this is the one
-#                 state of the three that a person can and should act on.
+#                 state a person can and should act on.
+#   unreadable  — the stamp is past one fire window and the idle time could not be
+#                 read (no transcript, no user record in the window, a record that
+#                 cannot be dated). One informational row naming the library's own
+#                 reason, and NO fix line: the accusation above is one this page
+#                 cannot support, and making it anyway is the defect wave-16 REQ-11
+#                 removes (ADR-028 one layer up from the walls — the 2026-09-19
+#                 report of "/doctor still reports bionic unhealthy").
 #   anything else — never armed, or deliberately ended: the disarm verb REMOVES
 #                 the stamp (S10), so an absent stamp is a decision, not a
 #                 fault. No row and no fix line, which is what the section
 #                 already does for a machine with no Patrol at all.
+#
+# THE STAMP'S AGE IS NO LONGER THE QUESTION IT ANSWERS. `patrol_stamp_state` graded
+# the age against twice the poker interval until wave-16; it now thresholds on the
+# library's fire window and, past it, on `patrol_verdict`'s reading of idle time. The
+# three states above are what this renderer receives, so the mapping lives there and
+# this file renders it.
 _patrol_flush() {
   [ -n "$_p_sid" ] || return 0
   # THIS PROJECT'S SESSIONS ONLY (T3 finding 1). lib/patrol.sh walks every live
@@ -1360,11 +1373,10 @@ _patrol_flush() {
   # in is not a repair they can make.
   [ "$_p_here" = "yes" ] || return 0
   [ "$_p_n_patrol" -gt 0 ] || return 0
-  local short="${_p_sid%%-*}" j id extras="" n open=0 blind="${_p_blind}"
+  local short="${_p_sid%%-*}" j id extras="" n open=0 blind="${_p_blind}" _p_lead
   case "$blind" in ''|*[!0-9]*) blind=0 ;; esac
   case "$_p_stamp" in
     firing)
-      PATROL_LIVE=$((PATROL_LIVE + 1))
       # ENGAGED / NOT ENGAGED — report only (T4/AC-16). `engaged_session` is
       # the same single switch every run-scoped hook reads first (lib/run.sh);
       # doctor changes nothing on disk, it only says which side of it this
@@ -1425,6 +1437,19 @@ _patrol_flush() {
       fi ;;
     not-firing)
       fix "session ${short}: the Patrol is armed but not firing → ask Claude to re-arm the Patrol" ;;
+    unreadable)
+      # ONE ROW, THE NIL GLYPH, NO FIX (REQ-11, AC-11.1). The state is neither a running
+      # Patrol nor a stopped one, and the reason is the library's own words — the same
+      # sentence the two walls put on stderr for the same input, so the three surfaces
+      # degrade in one vocabulary. `$DOCTOR_NIL` for the reason `active run: none` uses it:
+      # a true fact that names no action is informational, not a problem to be counted.
+      #
+      # CUT WITH THE PRODUCT'S OWN RULER. The reason can run to 200 characters (the
+      # library's own clamp) and this page's rows are 100 columns, so the row's fixed part
+      # is measured and the reason absorbs the shortfall — `bionic_trunc` drops whole words.
+      _p_lead="  ${DOCTOR_NIL} session ${short} · the Patrol cannot be graded — "
+      _patrol_add "${_p_lead}$(bionic_trunc "${_p_reason:-the reason was not recorded}" \
+        "$(( BIONIC_LINE_WIDTH - $(bionic_cols "$_p_lead") ))")" ;;
   esac
 
   # THE DUPLICATE VERDICT KEEPS THE NEWEST and names every older one. Creation
@@ -1455,7 +1480,7 @@ while IFS= read -r _p_line; do
     "patrol-session/v1|"*)
       _patrol_flush
       _p_sid="$(_doctor_pfield "$_p_line" session)"
-      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""
+      _p_jobs=""; _p_n_patrol=0; _p_open=0; _p_present=""; _p_stamp=""; _p_blind=""; _p_reason=""
       _p_here=no
       if _doctor_session_here "$(_doctor_pfield "$_p_line" cwd)"; then _p_here=yes; fi ;;
     "patrol-job/v1|"*)
@@ -1466,7 +1491,11 @@ while IFS= read -r _p_line; do
     "patrol-stamp/v1|"*)
       # Read for the gate above and rendered nowhere — the stamp's age,
       # interval and provenance stay deleted (spec AC-F3).
-      _p_stamp="$(_doctor_pfield "$_p_line" state)" ;;
+      _p_stamp="$(_doctor_pfield "$_p_line" state)"
+      # THE REASON RIDES WITH THE STATE, and only an `unreadable` one carries text: the
+      # library says why it could not read idle time, and this page repeats that rather
+      # than inventing a second wording for the same finding.
+      _p_reason="$(_doctor_pfield "$_p_line" reason)" ;;
     "patrol-roster/v1|"*)
       _p_open="$(_doctor_pfield "$_p_line" open)"
       _p_present="$(_doctor_pfield "$_p_line" present)" ;;
@@ -2509,10 +2538,15 @@ printf '%s' "$RESOURCES_ROWS"
 # arrive inside everything that reads it.
 echo ""
 echo "PATROL"
-if [ "$PATROL_LIVE" = "0" ]; then
-  _doctor_item "$DOCTOR_NIL" "none running" ""
-else
+# GATED ON WHETHER THERE IS ANYTHING TO SAY, not on the count of firing Patrols (REQ-11).
+# The two are the same question until a session reaches the `unreadable` state — a stale
+# stamp whose idle time could not be read — which produces a row without producing a
+# running Patrol. Counting firings would have discarded that row and printed `none running`
+# in its place: a claim this page has just finished saying it cannot make.
+if [ -n "$PATROL_ROWS" ]; then
   printf '%s' "$PATROL_ROWS"
+else
+  _doctor_item "$DOCTOR_NIL" "none running" ""
 fi
 # THE RUN, THE PREDECESSORS AND THE LEGACY LINKS — the three rows that are about
 # this PROJECT rather than about this machine, printed under the Patrol because

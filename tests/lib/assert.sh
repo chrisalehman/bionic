@@ -12,6 +12,10 @@
 #   setup_section <name>  opens a section exempt from that rule (fixture building)
 #   ok <msg>              record a pass
 #   no <msg> [detail]     record a fail
+#   advise <msg> <reading> <cmd>...  record an ADVISORY row: it prints the
+#                         reading and the reference it is read against, and it
+#                         moves NO counter and NO verdict. See THE ADVISORY ROW
+#                         below for what belongs in one.
 #   THE GENERIC ASSERTION FAMILY — the thirteen names below are the framework's
 #   and no suite's (A-16, spec AC-12). Every one reports through ok/no, so the
 #   counters and the section floor see it.
@@ -197,6 +201,60 @@
 # renderer was given, or against a non-truncating surface, and let the render
 # assertion pin only the framing.
 #
+# ── THE ADVISORY ROW: A READING, NOT A VERDICT (T24, wave-16 D13/Δ12) ─────────
+#
+# A SUITE MAKES TWO KINDS OF CLAIM AND THE TALLY USED TO WELD THEM INTO ONE
+# NUMBER. An ARTIFACT claim is about the code: deterministic, reproducible on any
+# machine, and the thing a gate exists to hold. An ENVIRONMENT claim is about the
+# machine that happened to run it — "this drive finished in under two seconds" —
+# and it is true or false about the hardware, the load and the hour, not about
+# the tree. Welded together, a FAIL cannot say which kind it is, so a human
+# adjudicates every red; and that is precisely the work the gate was built to
+# remove. Three waves of "red, but actually fine" taught the author to override
+# the gate, each override correct and the sum fatal.
+#
+# SO AN ENVIRONMENT CLAIM GETS ITS OWN LINE KIND. `advise` prints the reading it
+# took and the reference it was read against, says whether the reading was within
+# that reference, and stops there:
+#
+#   ADVISORY: within   16.2 the two report loops ... - 0.826s against AC-6.1's
+#                      ruled 2 seconds ...
+#   ADVISORY: exceeded 16.8 the whole hook ... - 17.623s against a 10s contract ...
+#
+# The kind is neither `PASS:` nor `FAIL:`, so `^ADVISORY: ` counts every advisory
+# row a suite took and `^ADVISORY: exceeded ` counts the ones that went past their
+# reference. That is the marker a later gate reads to report "N/N gating, M
+# advisory exceeded" (chartered, 1.8.4); nothing reads it yet, and the row is
+# already worth its line to the human who reads the output.
+#
+# IT MOVES NOTHING. Not PASS, not FAIL, not TOTAL, not the suite's exit status.
+# An advisory row cannot turn a suite red and cannot turn one green.
+#
+# AND IT DOES NOT COUNT AS AN ASSERTION (`_TF_SECTION_ROWS` is untouched). A
+# section holding nothing but advisory rows still trips `finish`'s empty-section
+# rule and is named a failure — because it IS the shape that rule exists to
+# refuse: a section that reported and asserted nothing, reading green. Counting
+# advisories there would have bought an advisory-only section the appearance of
+# coverage, which is the same lie one level down. The consequence is deliberate
+# and is the design: EVERY advisory row is written BESIDE the gating row that
+# holds its claim, never instead of one. §16 of tests/session-start.test.sh is
+# the worked example - its two wall-clock readings are advisory and the
+# load-cancelling RATIO rows beside them (16.2b, 16.8b) are what gate, because a
+# ratio of two drives of the same code on the same machine is unitless and a busy
+# machine slows both terms alike.
+#
+# WHAT BELONGS IN THE `<reading>` ARGUMENT. Both numbers and what they mean: the
+# measurement, the reference it is against, and - where exceeding the reference
+# has a real consequence - what that consequence is. "17.623s against a 10s
+# contract" tells a reader the size of the miss; it is the sentence after it that
+# tells them whether to act.
+#
+# NOT TO BE CONFUSED WITH `fold_advise` (payload/scripts/lib/fold.sh), which is a
+# product function writing a wall's advisory text to a hook's stderr. This is a
+# test-framework row kind on a suite's stdout. They share the word and nothing
+# else, and no suite's stdout carries a line starting `ADVISORY: ` from any other
+# source.
+#
 # ── HELPER DERIVATION (AC-14) ────────────────────────────────────────────────
 #
 # Every suite here runs under `set -uo pipefail` with NO `-e`, so a call to an
@@ -208,7 +266,7 @@
 #
 # So the framework does not wait to be told which helpers a suite uses. At load
 # it scans the suite's own source ($0) for call tokens matching
-# `ok|no|expect_[a-z_]+|anchor` in command position, and exits 1 naming any name
+# `ok|no|advise|expect_[a-z_]+|anchor` in command position, and exits 1 naming any name
 # that neither this file defines nor the suite itself defines. The explicit
 # `require_helpers a b c` form stays for the two suites that call it, and for
 # names the derivation cannot see.
@@ -217,6 +275,12 @@
 PASS=0
 FAIL=0
 TOTAL=0
+
+# THE ADVISORY TALLY, kept APART from the three above on purpose: an advisory row
+# is not a result, so it must never be addable to one. These two are read only by
+# `finish`, for the tally's trailing field.
+_TF_ADVISORIES=0
+_TF_ADVISORIES_EXCEEDED=0
 
 # THIS FILE'S OWN PATH, absolute. `_tf_owned_names` reads the ownership list out
 # of it at call time, and callers run from their own cwd (tests/run.sh cds to the
@@ -283,6 +347,23 @@ no() {
   _TF_SECTION_ROWS=$((_TF_SECTION_ROWS + 1))
   echo "FAIL: $1"
   [ -n "${2:-}" ] && echo "      $2"
+  return 0
+}
+
+# advise <label> <reading> <cmd>... - AN ADVISORY ROW. The command's own output is
+# silenced, exactly as expect_true's is; its exit status decides only which of the
+# two words this row prints. See THE ADVISORY ROW in the docblock above for why it
+# moves no counter and does not satisfy the empty-section rule.
+advise() {
+  local _l="$1" _r="$2"
+  shift 2
+  _TF_ADVISORIES=$((_TF_ADVISORIES + 1))
+  if "$@" >/dev/null 2>&1; then
+    echo "ADVISORY: within   $_l — $_r"
+  else
+    _TF_ADVISORIES_EXCEEDED=$((_TF_ADVISORIES_EXCEEDED + 1))
+    echo "ADVISORY: exceeded $_l — $_r"
+  fi
   return 0
 }
 
@@ -408,8 +489,15 @@ anchor() {
 # `tests/patrol-marker.test.sh` legitimately open no `section` at all and assert
 # from the top level (`sections=0`, TOTAL > 0); they are not the shape this
 # refuses. TOTAL is what a result is made of, so TOTAL is what is floored.
+#
+# THE ADVISORY FIELD IS CONDITIONAL, and that is not cosmetics. A suite that took
+# no advisory reading prints the tally it has always printed, byte for byte, so
+# nothing downstream that ever learned this line's shape has to be taught the new
+# one for a change it did not make. A suite that DID take readings says so, and
+# says how many went past their reference - which is the count the chartered
+# gate (1.8.4) will read.
 finish() {
-  local name suite
+  local name suite adv=""
   _tf_close_section
   if [ -n "$_TF_EMPTY" ]; then
     while IFS= read -r name; do
@@ -427,7 +515,9 @@ TF_EMPTY_SECTIONS
   fi
   echo ""
   echo "──────────────────────────────────────────────"
-  echo "${suite}: ${PASS}/${TOTAL} passed, ${FAIL} failed  sections=${_TF_SECTIONS} setup=${_TF_SETUPS}"
+  [ "$_TF_ADVISORIES" -eq 0 ] || \
+    adv="  advisory=${_TF_ADVISORIES} exceeded=${_TF_ADVISORIES_EXCEEDED}"
+  echo "${suite}: ${PASS}/${TOTAL} passed, ${FAIL} failed  sections=${_TF_SECTIONS} setup=${_TF_SETUPS}${adv}"
   [ "$FAIL" -eq 0 ] || exit 1
   exit 0
 }
@@ -437,6 +527,12 @@ TF_EMPTY_SECTIONS
 # require_helpers <name>... -> exit 1, naming every undefined one, if any name
 # passed is not a defined shell function. Call it once, after every assertion
 # helper the suite defines for itself has been defined.
+#
+# IT NEEDED NOTHING FOR `advise` (T24). It carries no list of its own — it tests
+# whatever names it is handed — so `require_helpers advise` already worked the day
+# the name existed. What DID need teaching is the derivation below, which owns a
+# name family rather than a list, and `_tf_owned_names`, which the adoption wall
+# reads.
 require_helpers() {
   local missing="" name
   for name in "$@"; do
@@ -449,7 +545,7 @@ require_helpers() {
 }
 
 # _tf_scan <file> — prints `CALL <name>` for every call token in command
-# position matching ok|no|expect_[a-z_]+|anchor, and `DEF <name>` for every
+# position matching ok|no|advise|expect_[a-z_]+|anchor, and `DEF <name>` for every
 # function this file defines itself. Heredoc BODIES are skipped: a suite that
 # writes a scratch suite with a planted undefined helper is not itself calling
 # it. Full-line comments are skipped. Command position means: first word of a
@@ -610,7 +706,7 @@ _tf_scan() {
         if (t == "") continue
         if (prev == "\001" || prev == "then" || prev == "else" || prev == "elif" \
             || prev == "do" || prev == "if" || prev == "while" || prev == "until" || prev == "!") {
-          if (t ~ /^(ok|no|expect_[a-z_]+|anchor)$/) print "CALL " t
+          if (t ~ /^(ok|no|advise|expect_[a-z_]+|anchor)$/) print "CALL " t
           else if (t == "finish") print "USES finish"
         }
         prev = t
@@ -659,7 +755,7 @@ _tf_scan() {
 # structural names. A helper added below is owned the moment it is written.
 _tf_owned_names() {
   awk '/^expect_[a-z_]+\(\)/ { n = $0; sub(/\(\).*/, "", n); print n }' "$_TF_LIB"
-  printf '%s\n' ok no section setup_section finish anchor
+  printf '%s\n' ok no advise section setup_section finish anchor
 }
 
 # _tf_adoption_refusal <suite> — prints ONE line naming the suite, the shadowed
@@ -707,7 +803,8 @@ _tf_adoption_refusal() {
 #
 # WHAT IT CAN AND CANNOT SEE (Step-5 audit §5.1, substance finding 1). It derives
 # the FRAMEWORK'S OWN name family and nothing else: `_tf_scan` records a CALL
-# only for `ok`, `no`, `anchor` and `expect_[a-z_]+` — lower-case and underscores,
+# only for `ok`, `no`, `advise`, `anchor` and `expect_[a-z_]+` — lower-case and
+# underscores,
 # so `expect_case2` is outside it too. A suite that calls a vanished helper under
 # any other name is invisible here. The walk demonstrated the consequence live:
 # an undefined `walk_vanished_helper` inserted above `finish` left

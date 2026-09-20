@@ -14,12 +14,16 @@
 #         exit 1 and silent for an unknown mode or field.
 #   refuse_modes -> the modes usable as a refusal channel, one per line.
 #
-# THE USER SEES EXACTLY ONE LINE:
+# THE VERDICT IS EXACTLY ONE LINE:
 #
 #     bionic: <verb> refused — <fact> (<fix>)
 #
 # and the model reads `detail` as well, over whichever channel the E1 measurement
-# proved carries it. `BIONIC_WALL_VERBOSE=1` puts `detail` on the user stream too.
+# proved carries it. On `exit2`, which has one wire for both readers, `detail` follows
+# the verdict after a blank line, bounded at twelve lines plus one `+N more` count —
+# ADR-030, superseding ruling D-1, written into field 9 of the channel table below. On
+# the two JSON modes the reader still gets the verdict alone, and `BIONIC_WALL_VERBOSE=1`
+# is what puts `detail` on their user stream as well.
 #
 # THE ONE CLASS `detail` DOES NOT HANDLE (Step-6 critic, issue 4): a raw byte >= 0x80
 # that is not valid UTF-8 passes through unescaped — `_refuse_json_escape` below
@@ -60,21 +64,37 @@
 #   9  detail_to_user    does THIS renderer also put `detail` on the user stream
 #   10 source            the measurement row every cell above is quoted from
 #
-# FIELD 9 IS THE ONE SWITCH TASK 12 OWNED, AND IT IS NOW `no` EVERYWHERE. It is why
-# the table is data rather than a `case`. On `deny` and `block` the split is real:
-# `detail` rides the JSON reason, the user line rides stderr, and the user stream is
-# one line. On `exit2` there is one wire for both — the CLI wraps the hook's stderr
-# into the model's tool_result and, §D-2 finding F-D2-3 showed, paints that same
-# stderr to the user in red, whole, under the refused tool's own header. So there is
-# no split to spend: whatever `exit2` gives the model it gives the reader. Ruling
-# D-1 ("a refusal is a sentence with a pointer", Chris 2026-09-07) spends that one
-# wire on the line alone — `exit2` ships with `detail_to_user=no`, the reader is
-# interrupted by one sentence, and `detail` lives in the hook's own log and behind
-# `BIONIC_WALL_VERBOSE=1`. The cost is design D4's degradation taken deliberately:
-# on `exit2` the model reads the line and no more, so a migrated wall's `detail`
-# must be worth reading where it does land. tests/refuse.test.sh §2 asserts that
-# shape literally rather than reading it back out of this table, which is why the
-# flip made it go red and be edited on purpose.
+# FIELD 9 IS THE SWITCH, AND IT IS `yes` FOR `exit2` ONLY. It is why the table is data
+# rather than a `case`. On `deny` and `block` the split is real: `detail` rides the JSON
+# reason, the user line rides stderr, and the user stream is one line. On `exit2` there is
+# one wire for both — the CLI wraps the hook's stderr into the model's tool_result and,
+# §D-2 finding F-D2-3 showed, paints that same stderr to the user in red, whole, under the
+# refused tool's own header. So there is no split to spend: whatever `exit2` gives the
+# model it gives the reader.
+#
+# RULING D-1, SUPERSEDED AND KEPT HERE. "A refusal is a sentence with a pointer" (Chris,
+# 2026-09-07) spent that one wire on the line alone: `exit2` shipped with
+# `detail_to_user=no`, the reader was interrupted by one sentence, and `detail` lived in
+# the hook's own log and behind `BIONIC_WALL_VERBOSE=1`. Its reason was the reader's
+# interruption; its cost was design D4's degradation taken deliberately — on `exit2` the
+# model read the line and no more, so a migrated wall's `detail` had to be worth reading
+# where it did land.
+#
+# ADR-030 REPLACED IT (`a refusal prints what it knows`, Chris 2026-09-19;
+# .bionic/docs/adrs/epic-23-bionic-tech-debt/adr-030-a-refusal-prints-what-it-knows.md).
+# What D-1 priced as one sentence of interruption cost one attempt per fault in the field:
+# a wall computed its whole violation list — `units_validate`'s, at the evidence gate's
+# dispatch-ledger arm and the governing-skill hook's Write arm — handed it to this
+# renderer, and neither reader ever saw it, so a consumer's orchestrator sourced the
+# validator by hand and met one fault per attempt across three days (seed A §8a,
+# carry-over 8, research R2). The interruption is BOUNDED now rather than spent:
+# `_refuse_fold_detail` below prints at most BIONIC_REFUSE_DETAIL_LINES lines of `detail`
+# and then one line naming how many it held back. `deny` and `block` keep `no`, because
+# they have somewhere else to put `detail`; only `exit2` had nowhere.
+#
+# tests/refuse.test.sh §2 and §6 assert both shapes literally rather than reading them
+# back out of this table, which is why each flip of this cell made a row go red and be
+# edited on purpose. §6 is the one that runs with `BIONIC_WALL_VERBOSE` unset.
 #
 # WHY exit2 IS STILL SUPPORTED. Nine of the real walls and all 21 loader walls use
 # it, and four hook events in the roster (SubagentStop, PostToolUse, SessionStart,
@@ -131,8 +151,50 @@ fi
 BIONIC_REFUSE_FIX_WORDS=6
 BIONIC_REFUSE_FIX_COLS=40
 
+# THE DETAIL BUDGET (ADR-030). Twelve is the `exit2` row's own field 6, measured on CLI
+# 2.1.263: an interactive terminal paints "about 12 lines then +N lines" and folds the rest
+# away. A detail longer than that is bytes no reader sees, and a reader who cannot tell a
+# fold from the end of a list reads a truncation as the whole answer. So the library bounds
+# it here, and says how many lines it held back.
+BIONIC_REFUSE_DETAIL_LINES=12
+
+# _refuse_fold_detail <detail> -> at most BIONIC_REFUSE_DETAIL_LINES lines of it, plus one
+# final line `+N more` when there were more. Empty in, nothing out.
+#
+# awk, NOT `head`: `producer | head -n 12` closes the pipe on the producer's thirteenth line,
+# which is the SIGPIPE-under-`pipefail` class this tree has been bitten by twice (the
+# `grep -q` rule in .claude/rules, and wave-14 T37, where every commit was falsely refused).
+# awk reads its whole input, so there is no early exit against the producer, and it counts
+# what it dropped without a second pass to learn the total.
+#
+# THE TRAILING NEWLINE IS TRIMMED BEFORE COUNTING (wave-16 T21; walk-2c882be.md §2). Several
+# call sites build `detail` by appending "…\n" per row, so the value can already end in a
+# newline. `printf '%s\n' "$1"` unconditionally appends its own, so a detail with one already
+# on it produced TWO — and awk's NR counted the resulting empty final record as one more
+# dropped line than the caller's content actually held (twenty real lines read as twenty-one
+# records: `+8 more` became `+9 more`). The trim removes every trailing newline the caller's
+# string carries, so the record count that follows reflects real lines only, regardless of
+# how the caller terminated its string.
+#
+# THE DEFAULT IS IN THE EXPANSION, not only in the assignment above: a hook that sourced
+# this library under `set -u` with the constant unset must still be able to format its
+# refusal, and a wall that cannot format one must not therefore fail open.
+_refuse_fold_detail() {
+  [ -n "${1:-}" ] || return 0
+  local _d="$1"
+  # STRIP EVERY TRAILING NEWLINE FIRST, so `printf '%s\n'` below adds exactly one and awk's
+  # NR counts real lines, not an extra empty record the caller's own terminator produced.
+  while [ -n "$_d" ] && [ "${_d%$'\n'}" != "$_d" ]; do
+    _d="${_d%$'\n'}"
+  done
+  printf '%s\n' "$_d" | awk -v max="${BIONIC_REFUSE_DETAIL_LINES:-12}" '
+    NR <= max { print; next }
+    { dropped++ }
+    END { if (dropped > 0) printf "+%d more\n", dropped }'
+}
+
 # THE CHANNEL TABLE. Every cell quoted from record/wave-01-plugin-only/e1-measurement.md.
-BIONIC_REFUSE_TABLE='exit2|exit 2 with the text on stderr|yes|yes|none|the whole stderr painted in red as the error result of the refused tool call, about 12 lines then "+N lines", for every non-Bash tool; a Bash call collapses to "Ran N shell commands" at the default view until ctrl+o|the full stderr text, wrapped in a synthetic is_error tool_result prefixed "PreToolUse:<tool> hook error"|no|no|e1-measurement.md channel table, mode 1 + D-2
+BIONIC_REFUSE_TABLE='exit2|exit 2 with the text on stderr|yes|yes|none|the whole stderr painted in red as the error result of the refused tool call, about 12 lines then "+N lines", for every non-Bash tool; a Bash call collapses to "Ran N shell commands" at the default view until ctrl+o|the full stderr text, wrapped in a synthetic is_error tool_result prefixed "PreToolUse:<tool> hook error"|no|yes|e1-measurement.md channel table, mode 1 + D-2
 deny|PreToolUse JSON hookSpecificOutput.permissionDecision=deny with permissionDecisionReason, exit 0|yes|yes|none|nothing raw at the default view: "Ran 1 shell command" collapsed, then whatever the model says next; on a non-Bash tool the reason lands in the same is_error tool_result slot and is expected to paint as exit2 does — inferred, not measured|permissionDecisionReason verbatim, unwrapped, as a synthetic is_error tool_result|yes|no|e1-measurement.md channel table, mode 2 + D-2
 systemmessage|top-level JSON systemMessage, exit 0|no|no|none|unverified|nothing in the conversation: a stream-json system/informational event and no more|no|n-a|e1-measurement.md channel table, mode 3
 block|JSON decision=block with reason on stdout, exit 0|yes|yes|none|nothing raw, and on PreToolUse the command RAN anyway ("Ran 2 shell commands", then its output) — not a reliable interactive block, so PreToolUse block is off the table|reason verbatim: an is_error tool_result on PreToolUse, a synthetic user turn "Stop hook feedback" on Stop|yes|no|e1-measurement.md channel table, mode 4 + D-2
@@ -282,8 +344,23 @@ refuse() {
     model_out="$line
 
 $detail"
-    if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ] || [ "$(refuse_channel "$mode" detail_to_user)" = "yes" ]; then
+    # THE KNOB IS STILL PURE ADDITION, AND THE BOUND IS FOR THE PATH NOBODY ASKED FOR
+    # (ADR-030, A-T4.2). Two different readers reach `detail` on the user stream. One did
+    # not ask for it: the channel hands it over because there is nowhere else to put it,
+    # and twelve lines is what that reader's terminal paints before folding the rest away,
+    # so the library folds it on the way out and no call site can exceed the rule. The
+    # other TYPED `BIONIC_WALL_VERBOSE=1` to see the facts — the header's reason for the
+    # knob being an env variable at all is that it can only ADD output — and bounding what
+    # that reader explicitly asked for would delete diagnostics on the one path whose whole
+    # purpose is to show them. So: knob set, the whole detail; channel, the bounded one.
+    # `model_out` is untouched either way, which is what keeps a model-only channel's
+    # findings list whole (wave-12 T17).
+    if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
       user_out="$model_out"
+    elif [ "$(refuse_channel "$mode" detail_to_user)" = "yes" ]; then
+      user_out="$line
+
+$(_refuse_fold_detail "$detail")"
     fi
   fi
 
