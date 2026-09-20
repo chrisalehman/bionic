@@ -2376,7 +2376,13 @@ _eg_row_for_worktree() {
     [ "${_cell##*/}" = "$_want" ] || continue
     _id="$(units_field "$_line" id)"
     if [ -z "$_EG_ROW" ]; then
-      _EG_ROW="$_id	$(units_field "$_line" step)"
+      # THREE CELLS, TAB-SEPARATED: id, step, status (wave-17 REQ-1, D1, ADR-031). The
+      # status cell has been validated since wave-11 and read by nothing; it is what says
+      # whether a commit out of this tree discharges the obligations of the TASK or of the
+      # RUN, and the fork below cannot ask that question of a value it was never handed.
+      # One more cell of a table this function already parses — no new fact is fetched
+      # (the D11 freeze, .claude/rules/hook-authoring.md).
+      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)"
       _EG_ROW_DUP="$_id"
     else
       _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
@@ -2443,6 +2449,8 @@ Fix: commit from one directory — split the command in two, or spell it 'git -C
   elif [ -n "$_EG_ROW" ]; then
     _EG_RID="${_EG_ROW%%	*}"
     _EG_RSTEP="${_EG_ROW#*	}"
+    _EG_RSTATUS="${_EG_RSTEP#*	}"   # third field — empty on a table whose rows are short
+    _EG_RSTEP="${_EG_RSTEP%%	*}"
     _EG_CURNUM="${CURRENT%[ab]}"
     case "$_EG_RSTEP" in
       ''|*[!0-9]*) : ;;   # a row whose step cell is unusable decides nothing; units_validate
@@ -2466,6 +2474,39 @@ Fix: commit from one directory — split the command in two, or spell it 'git -C
 Plan: $PLAN
 Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not reached it — advance the run to step ${_EG_RSTEP}, or correct row ${_EG_RID}'s step cell, before committing from ${_EG_WT}."
           refuse exit2 commit "that worktree's task is ahead of the run" "advance the run first" "$_eg_detail"
+        elif [ "$_EG_RSTATUS" = "active" ]; then
+          # A COMMIT HAS ONE OF TWO SUBJECTS (wave-17 REQ-1, D1, ADR-031). The row stands
+          # exactly where the run stands, so there is no step to substitute — and that is
+          # the case the whole catch-22 lived in: a writer dispatched at Step 5, whose row
+          # therefore reads 5, was judged by the run's Verify arm and refused for the green
+          # floor that writer's own task exists to produce (bug 2; carry-over 1; three D10
+          # `current:` regressions in wave-16). The row's `status` is what resolves it: this
+          # tree has a writer in it, so this commit discharges the TASK's obligations, and
+          # the arms it owes are the task arms.
+          #
+          # WHY THAT IS SPELLED `CURRENT=4` AND NOT A SECOND ARM TABLE. The task arms
+          # already have a home: `dispatch`'s `4)` case is `shape_block worktree base-sha
+          # branch`, and the matrix `fails-when:` presence arm runs for every commit at
+          # step ≥ 4 regardless. Step 4 IS the arm set a task owes, so naming it is the
+          # whole implementation — a parallel dispatcher would be a second place to keep in
+          # step with the first. The run's arms (the floor block, the walk artifact, the
+          # auditor cell, the ADR, the merge, the ship) all hang off steps 5 and up and are
+          # simply never reached.
+          #
+          # THE NOTE IS MANDATORY, for the reason the step substitution's note above is:
+          # this is a wall judging a commit by something other than the run's declared
+          # `current:`, and it says so, naming the ROW — because the row is the subject.
+          # Printed BEFORE the substitution, so `current:` reads as the run declared it.
+          #
+          # ONLY `active`, AND ONLY AT THE ROW'S OWN STEP. A `pending`, `landed` or
+          # `dropped` row is nobody at work: its tree falls through to `current:` exactly as
+          # it does today (25g(k2)), and a row AHEAD of the run keeps its refusal above. A
+          # row BEHIND the run keeps the wave-14 substitution and its wording, which for the
+          # step-4 rows that make up every real task batch resolves to these same task arms
+          # — see A-T1.2 for the residual case that leaves open.
+          printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
+            "$_EG_RID" "$CURRENT" >&2
+          CURRENT=4
         fi
         ;;
     esac

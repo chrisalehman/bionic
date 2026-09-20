@@ -2742,6 +2742,25 @@ assert_eq "1e.5i exit 2" 2 "$HOOK_EXIT"
 assert_contains "1e.5i the detail names the offending id" "T2" "$HOOK_VSTDERR"
 assert_contains "1e.5i …and the rule it broke" "status doing is not one of" "$HOOK_VSTDERR"
 
+# 1e.5j/1e.5k — AN ACTIVE ROW NAMES ITS TREE (wave-17 REQ-1, AC-1.2, ADR-032). The register
+# the evidence gate reads is written HERE, at the Step-3 write, and through wave-16 every row
+# of every plan this repo shipped left the cell at `—` — so the gate's row arm was never
+# reached and a writer's commit was judged at the run's step (research R1). The fault belongs
+# at the write, not at the writer's commit a round trip later, and this is the same
+# `units_validate` call the evidence gate makes: one rule, two doors.
+gs_tasks_wt_active="${gs_tasks_worktree/| b.sh | — | pending |/| b.sh | — | active |}"
+
+echo "1e.5j: an ACTIVE row with no tree in its cell → refused, naming the id and the rule"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_wt_active"
+assert_eq "1e.5j exit 2" 2 "$HOOK_EXIT"
+assert_contains "1e.5j the detail names the offending id and the rule" \
+  "T2: active row names no worktree" "$HOOK_VSTDERR"
+
+echo "1e.5k: …and the SAME empty cell on a pending row is still allowed (1e.5h is the control)"
+run_write "$gs_1e_plan" "$(build_plan)$gs_tasks_worktree"
+assert_eq "1e.5k exit 0" 0 "$HOOK_EXIT"
+assert_eq "1e.5k silent" "" "$HOOK_STDERR"
+
 echo "1e.5g: a plan with no Tasks table at all → allow (presence is the gate's rule)"
 run_write "$gs_1e_plan" "$(build_plan)"
 assert_eq "1e.5g exit 0" 0 "$HOOK_EXIT"

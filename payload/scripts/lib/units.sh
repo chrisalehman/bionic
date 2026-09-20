@@ -347,7 +347,7 @@ units_ready() {
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
 units_validate() {
-  local plan="${1:-}" out rc ctl missing cols over rows violations _c _o found=0
+  local plan="${1:-}" out rc ctl missing cols over rows violations _c _o found=0 haswt
 
   out="$(_units_read "$plan")"; rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -376,9 +376,18 @@ units_validate() {
     found=1
   done
 
+  # THE HEADER IS ASKED ONCE, HERE, AND THE ANSWER IS HANDED TO awk (wave-17 REQ-1, AC-1.2).
+  # Slot 11 is optional, so `units_field` reads an ABSENT column as an empty cell on every
+  # row — indistinguishable, inside the row loop, from a column that is there and blank. The
+  # arm below must fire on the second and never on the first, and `units_has_column` is the
+  # only reader that can tell them apart (its own docblock, wave-16 AC-3.2). Asked outside
+  # the loop because it is a fact about the table, not about a row.
+  haswt=0
+  if units_has_column "$plan" worktree; then haswt=1; fi
+
   rows="$(printf '%s\n' "$out" | awk 'NR > 1')"
   if [ -n "$rows" ]; then
-    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" '
+    violations="$(printf '%s\n' "$rows" | awk -F'\t' -v over="$over" -v haswt="$haswt" '
       BEGIN {
         # EVERY CELL OF A SHIFTED ROW IS SUSPECT, so the row is neither accused nor used to
         # accuse: its step cell cannot be trusted to make it a Step-4 row others must reach.
@@ -392,7 +401,7 @@ units_validate() {
         for (i in ss) states[ss[i]] = 1
       }
       $1 == "" { next }
-      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; sta[n] = $10; count[$1]++ }
+      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; sta[n] = $10; wtc[n] = $11; count[$1]++ }
       END {
         for (i = 1; i <= n; i++) {
           if (id[i] in skip) continue
@@ -412,6 +421,28 @@ units_validate() {
           if (!(sta[i] in states))
             printf "%s: status %s is not one of pending active landed dropped\n", \
               id[i], (sta[i] == "" ? "(empty)" : sta[i])
+
+          # THE ROW IS THE RECORD OF THE TREE (wave-17 REQ-1, AC-1.2, D2, ADR-032).
+          # `active` means a writer is in a tree right now, and the evidence gate resolves
+          # that writer commit by matching the basename of this very cell — so a row that
+          # claims a writer and names no tree makes the gate fall through and judge a task
+          # commit by the arms of the run. Through wave-16 that was every row of every plan
+          # this repo shipped (research R1), and the only symptom was an orchestrator
+          # regressing `current:` by hand. Reported at the WRITE, the one place that can
+          # still fix it cheaply.
+          #
+          # NAMES NO TREE IS THE ABSENCE OF AN ALPHANUMERIC, not equality with the em dash:
+          # an em dash, a hyphen, a space and an empty cell are one fact spelled four ways,
+          # and `deps` already reads its own "none" exactly this way two arms down. A real
+          # basename cannot be alphanumeric-free.
+          #
+          # ONLY `active`. A `pending` row has no tree yet, a `landed` or `dropped` one may
+          # have had its tree torn down (close-out does exactly that), and refusing either
+          # would refuse the ordinary end state of every wave.
+          # NO APOSTROPHE ANYWHERE ABOVE: this comment is inside the single-quoted awk
+          # program, and one would close the quote (the header note says so).
+          if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/)
+            printf "%s: active row names no worktree\n", id[i]
 
           d = dep[i]
           gsub(/[ \t]/, "", d)
