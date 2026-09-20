@@ -775,14 +775,64 @@ T16_PY() { python3 -c 'import time; print(time.time())' 2>/dev/null; }
 # §17 drives the same machinery — so what is left on the clock is the two loops AC-6.1 is
 # about. Its cost is one killed fork, and a `sweep-failed` marker this section clears before
 # the second drive reads it.
+# A CONTROL DRIVE AT SMALL n, SO THE BIG ONE CAN BE READ (T22). Every wall-clock bound in
+# this section states a number of SECONDS, and seconds are a property of the machine as much
+# as of the code: this suite already runs solo (`# runner: solo`, T20/A-orch-28, honoured by
+# tests/run.sh), and the wave floor at 2c882be STILL measured §16.8 at 8.296s against the
+# 5.067s the identical tree gives on a quiet runner — because holding the runner's own batch
+# off the CPU does nothing about the six other agents a wave has working on the same machine.
+# So a second, load-CANCELLING reading is taken beside each absolute one. This control is the
+# same hook, the same drive, the same process, moments apart, over EIGHT aged predecessors
+# instead of four hundred — eight being the real field pile-up this section's own comment
+# below cites. Contention scales the control and the measurement together, so their RATIO is
+# the hook's own scaling in n and nothing else, which is what rows 16.2b and 16.8b assert.
+P16C=$(make_env 3600s)
+CTL_I=1
+while [ "$CTL_I" -le 8 ]; do
+  CTL_SID=$(printf 'ctl00000-ctl0-ctl0-ctl0-%012d' "$CTL_I")
+  roster_rows "$P16C/.bionic/tmp/roster-$CTL_SID.state" "$CTL_SID" "W-CTL$CTL_I"
+  backdate "$P16C/.bionic/tmp/roster-$CTL_SID.state" 604800
+  write_stamp "$P16C" "$CTL_SID"
+  backdate "$P16C/.bionic/tmp/patrol-$CTL_SID.state" 604800
+  CTL_I=$((CTL_I + 1))
+done
+roster_rows "$P16C/.bionic/tmp/roster-$CUR_SID.state" "$CUR_SID" "W-MINE"
+write_stamp "$P16C" "$CUR_SID"
+T16C_START="$(T16_PY)"
+OUT16C=$(BIONIC_SWEEP_BOUND_SECONDS=0 drive "$P16C" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
+T16C_END="$(T16_PY)"
+T16C_ELAPSED="$(python3 -c "print(f'{${T16C_END:-0} - ${T16C_START:-0}:.3f}')" 2>/dev/null || echo 0)"
+# THE CONTROL IS ITSELF ASSERTED, so a ratio is never taken over a drive that did not happen:
+# a zero or unreadable control would make every ratio below divide by nothing and pass.
+expect_true "16.1c the control drive ran and timed (${T16C_ELAPSED}s over 8 predecessors)" \
+  python3 -c "import sys; sys.exit(0 if ${T16C_ELAPSED:-0} > 0 else 1)"
+has   "16.1d …and it is the same report, listing the control predecessors" \
+  "predecessor stamps:" "$OUT16C"
+
 T16_START="$(T16_PY)"
 OUT=$(BIONIC_SWEEP_BOUND_SECONDS=0 drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 T16_END="$(T16_PY)"
 T16_ELAPSED="$(python3 -c "print(f'{${T16_END:-0} - ${T16_START:-0}:.3f}')" 2>/dev/null || echo 999)"
 
 eq    "16.1 exit 0" "0" "$(rc)"
+# 16.2 IS AC-6.1'S OWN NUMBER AND IT IS NOT MOVED HERE. Two seconds is the criterion, not a
+# margin this suite chose, so T22 left it exactly where it is and wrote down what it holds
+# under instead: a runner on which this suite is the only bionic suite (the solo marker
+# above), measured 0.83-0.87s idle and 1.389s on the wave floor at 2c882be. It is an
+# ABSOLUTE bound on a shared machine, so it can still be outrun by contention rather than by
+# a regression — which is exactly what happened once at 5.336s (A-T1.11), and was root-caused
+# afterwards to the sweep's cost landing inside a report-loop bound and fixed by splitting
+# the drives (A-T8.8), not to load. 16.2b is the row that stays readable either way.
 expect_true "16.2 the two report loops finish in under 2 seconds against 400 aged predecessors (${T16_ELAPSED}s)" \
   python3 -c "import sys; sys.exit(0 if ${T16_ELAPSED:-999} < 2 else 1)"
+# THE SAME CRITERION, MEASURED SO THAT LOAD CANCELS: fifty times the predecessors must not
+# cost more than eight times the report. Measured 3.31, 3.39 and 3.33 on three drives. The
+# regression AC-6.1 exists to stop — the report loops as they cost before REQ-6 bounded them,
+# ~10.4s over this fixture — lands near forty on this ratio, so the bound is generous to the
+# machine and still nowhere near the defect. A bound on the RATIO cannot be outrun by a busy
+# machine, because a busy machine slows the control in the same proportion (A-T22.6).
+expect_true "16.2b …and fifty times the predecessors costs under eight times the report, whatever the machine is doing (${T16_ELAPSED}s / ${T16C_ELAPSED}s)" \
+  python3 -c "import sys; sys.exit(0 if ${T16C_ELAPSED:-0} > 0 and ${T16_ELAPSED:-999} < 8 * ${T16C_ELAPSED:-0} else 1)"
 has   "16.3 the fresh predecessor roster is still listed" "roster-$FRESH_SID.state" "$OUT"
 has   "16.4 the predecessor stamps section still appears" "predecessor stamps:" "$OUT"
 has   "16.5 …naming the fresh predecessor by its short id" "${FRESH_SID:0:8}" "$OUT"
@@ -803,8 +853,35 @@ T16B_START="$(T16_PY)"
 OUT16B=$(drive "$P16" clear "$CUR_SID" "$CUR_SID" "$CUR_SID")
 T16B_END="$(T16_PY)"
 T16B_ELAPSED="$(python3 -c "print(f'{${T16B_END:-0} - ${T16B_START:-0}:.3f}')" 2>/dev/null || echo 999)"
-expect_true "16.8 the whole hook, sweeping that residue, stays well inside its 10s CLI timeout (${T16B_ELAPSED}s)" \
-  python3 -c "import sys; sys.exit(0 if ${T16B_ELAPSED:-999} < 8 else 1)"
+# THE BOUND IS THE CLI'S OWN NUMBER, READ FROM THE FILE THAT DECLARES IT (T22). This row
+# used to assert 8 seconds — T8's margin under a 10-second timeout, not a ruled criterion —
+# and the wave floor at 2c882be measured 8.296s and failed it, on a runner where this suite
+# ran ALONE (the solo marker holds off tests/run.sh's batch, and the floor honoured it). The
+# same tree gives 5.067s on a quiet machine, so what the failing row measured was the other
+# agents on the machine, not the hook. A typed margin cannot tell those apart, and raising it
+# until it passes would only move the next false failure further out. So the assertion is now
+# the contract the CLI actually enforces, parsed out of hooks/hooks.json rather than typed
+# here: past this number the hook is KILLED and the reader loses the page, which is a real
+# failure at any load and must never be waived. The design budget it used to carry moves to
+# 16.8b, where load cannot counterfeit it.
+SS_TIMEOUT="$(jq -r '.hooks.SessionStart[]?.hooks[]?
+  | select(.command | test("session-start\\.sh$")) | .timeout' \
+  "${BIONIC_HOOKS_DIR}/hooks.json" 2>/dev/null | head -1)"
+case "$SS_TIMEOUT" in ''|*[!0-9]*) SS_TIMEOUT="" ;; esac
+# PAIRED, so the row below cannot pass because the timeout could not be read: a comparison
+# against an empty bound is a comparison against nothing.
+expect_eq "16.8a hooks.json declares this hook's CLI timeout, and it is readable" "yes" \
+  "$([ -n "$SS_TIMEOUT" ] && echo yes || echo no)"
+expect_true "16.8 the whole hook, sweeping that residue, comes in under the ${SS_TIMEOUT:-?}s CLI timeout hooks.json gives it (${T16B_ELAPSED}s)" \
+  python3 -c "import sys; sys.exit(0 if ${SS_TIMEOUT:-0} > 0 and ${T16B_ELAPSED:-999} < ${SS_TIMEOUT:-0} else 1)"
+# AND THE DESIGN BUDGET, MEASURED SO THAT LOAD CANCELS. The sweep is roughly four fifths of
+# this hook's cost, so the whole drive against the report-only drive over the SAME fixture,
+# in the same process seconds apart, is the sweep's own share — and it is the reading that
+# survives a busy machine. Measured 5.831 on a quiet runner and 5.973 on the wave floor whose
+# absolute numbers were 64% higher: a 2.4% spread against a 64% swing, which is what makes a
+# ratio the honest instrument here and eight a bound with room in it (A-T22.5).
+expect_true "16.8b …and the sweep costs under eight times the report it is bundled with, whatever the machine is doing (${T16B_ELAPSED}s / ${T16_ELAPSED}s)" \
+  python3 -c "import sys; sys.exit(0 if ${T16_ELAPSED:-0} > 0 and ${T16B_ELAPSED:-999} < 8 * ${T16_ELAPSED:-0} else 1)"
 expect_false "16.9 …and the aged residue is gone, at four hundred sessions' scale (REQ-8)" \
   test -e "$P16/.bionic/tmp/patrol-dead0000-dead-dead-dead-000000000001.state"
 expect_true "16.10 …while the fresh predecessor, inside one interval, is deferred" \
