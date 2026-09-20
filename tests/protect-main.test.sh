@@ -416,12 +416,21 @@ fi
 section "AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 # ============================================================
 #
-# fails-when: a refusal reaches the user as more than one line, or in any shape but
+# fails-when: a refusal reaches the user as more than one VERDICT line, or in any shape but
 # `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. Each of this wall's three
 # refusal sites is TRIPPED for real here — the stderr asserted is the one a live
 # session would paint (e1-measurement.md §D-2 F-D2-3) — and each is checked against
 # the criterion's own regex, then against the exact line the ruled wording table
 # gives it (s12-refusal-wording-draft.md §1 rows 2, 3 and 4).
+#
+# AC-E1.3 IS ABOUT THE VERDICT, AND ADR-030 MADE THAT DISTINCTION VISIBLE (epic-23
+# wave-16 T4). Under ruling D-1 the `exit2` stream was the verdict and nothing else, so
+# "the stream is one line" and "the verdict is one line" were the same measurement and this
+# helper took the cheaper one. They are not the same any more: the wall's `detail` follows
+# the verdict on that same wire now, bounded, with no knob set. What the criterion asks —
+# a refusal the reader can read as one sentence, in the ruled wording, never wrapped — is
+# the VERDICT, so that is what the rows below count and compare. The detail is asserted to
+# be there as well, or narrowing the count would quietly weaken the section.
 
 PM_LINE_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 pm_stderr() {  # <branch> <command> -> the hook's stderr, verbatim
@@ -432,17 +441,29 @@ pm_stderr() {  # <branch> <command> -> the hook's stderr, verbatim
 }
 
 pm_one_line() {  # <label> <branch> <command> <expected line>
-  local _lbl="$1" _br="$2" _cmd="$3" _want="$4" _got _n
+  local _lbl="$1" _br="$2" _cmd="$3" _want="$4" _got _n _line _rest
   _got="$(pm_stderr "$_br" "$_cmd")"
-  _n="$(wc -l < "$PM_SANDBOX/.err" | tr -d ' ')"
+  _n="$(/usr/bin/grep -c '^bionic: ' "$PM_SANDBOX/.err" | tr -d ' ')"
+  _line="$(/usr/bin/grep -m1 '^bionic: ' "$PM_SANDBOX/.err")"
+  # WHAT FOLLOWS THE VERDICT, if anything: the stream minus its rendered line(s). Read
+  # here rather than asserted per caller, because every site of this wall carries a
+  # `detail` and a row that stopped carrying one is the regression worth seeing.
+  _rest="$(/usr/bin/grep -v '^bionic: ' "$PM_SANDBOX/.err" | /usr/bin/grep -c . | tr -d ' ')"
   eq_or() { if [ "$2" = "$3" ]; then ok "$1"; else no "$1" "want [$3] got [$2]"; fi; }
-  eq_or "$_lbl: exactly one line on the user stream" "$_n" "1"
-  if printf '%s' "$_got" | /usr/bin/grep -qE "$PM_LINE_RE"; then
+  eq_or "$_lbl: exactly one VERDICT line on the user stream" "$_n" "1"
+  if printf '%s' "$_line" | /usr/bin/grep -qE "$PM_LINE_RE"; then
     ok "$_lbl: in AC-E1.3's shape"
   else
-    no "$_lbl: in AC-E1.3's shape" "line=[$_got]"
+    no "$_lbl: in AC-E1.3's shape" "line=[$_line]"
   fi
-  eq_or "$_lbl: and it is the table's own wording" "$_got" "$_want"
+  eq_or "$_lbl: and it is the table's own wording" "$_line" "$_want"
+  # THE POSITIVE THAT KEEPS THE COUNT HONEST (ADR-030): the verdict is one line BECAUSE
+  # the detail is a separate thing beneath it, not because the wall went quiet.
+  if [ "$_rest" -ge 1 ]; then
+    ok "$_lbl: with its detail beneath it, no knob set"
+  else
+    no "$_lbl: with its detail beneath it, no knob set" "nothing after the verdict"
+  fi
 }
 
 pm_one_line "row 2 (a protected destination)" "feature/x" "git push origin main" \
@@ -452,18 +473,26 @@ pm_one_line "row 3 (a force push)" "feature/x" "git push --force origin feature/
 pm_one_line "row 4 (pushing from a protected branch)" "main" "git push origin feature/x" \
   "bionic: push refused — the current branch is protected (switch to a feature branch)"
 
-# THE DETAIL IS BEHIND THE KNOB, end to end through this real wall (AC-E1.5). The
-# branch name is the value the one line had no room for, and the knob is where it
-# lives — asserted absent without it and present with it, so neither half can pass
-# over an empty stream.
+# THE DETAIL IS ON THE WIRE, end to end through this real wall (AC-E1.5, re-authored by
+# ADR-030). The branch name is the value the one line had no room for. It used to live
+# behind the knob and nowhere else; `exit2` carries it to the reader now, so what this pair
+# holds is the SPLIT rather than the absence: the verdict line is still the ruled sentence
+# and carries no detail, and the detail sentence is on the stream beneath it with no knob
+# set. Asserted on the line and on the stream separately, so neither half can pass over an
+# empty capture.
 PM_KNOB_OFF="$(pm_stderr "main" "git push origin feature/x")"
-case "$PM_KNOB_OFF" in
-  *"feature branch"*) ok "AC-E1.5 without the knob the user line carries no detail" ;;
-  *) no "AC-E1.5 without the knob the user line carries no detail" ;;
+PM_KNOB_OFF_LINE="$(/usr/bin/grep -m1 '^bionic: ' "$PM_SANDBOX/.err")"
+case "$PM_KNOB_OFF_LINE" in
+  *"feature branch"*) ok "AC-E1.5 the verdict line is the ruled sentence, fix and all" ;;
+  *) no "AC-E1.5 the verdict line is the ruled sentence, fix and all" "line=[$PM_KNOB_OFF_LINE]" ;;
+esac
+case "$PM_KNOB_OFF_LINE" in
+  *'The current branch is'*) no "AC-E1.5 …and the detail sentence is NOT on that line" ;;
+  *) ok "AC-E1.5 …and the detail sentence is NOT on that line" ;;
 esac
 case "$PM_KNOB_OFF" in
-  *'The current branch is'*) no "AC-E1.5 …the detail sentence is NOT on the user stream" ;;
-  *) ok "AC-E1.5 …the detail sentence is NOT on the user stream" ;;
+  *'The current branch is "main"'*) ok "AC-E1.5 …it is beneath it, with no knob set at all" ;;
+  *) no "AC-E1.5 …it is beneath it, with no knob set at all" "got=[$PM_KNOB_OFF]" ;;
 esac
 pm_payload "$ENGAGED_REPO" "git push origin feature/x" \
   | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= FAKE_BRANCH="main" \
