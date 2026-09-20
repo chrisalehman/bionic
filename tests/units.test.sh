@@ -1041,7 +1041,7 @@ current: 4
 | id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
 |---|---|---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-2 | a.sh | 14-T1 | landed |
-| T2 | 4 | build | the build that has no tree yet | implementor | T1 | 30m | REQ-2 | b.sh | — | active |
+| T2 | 4 | build | the build that has no tree yet | implementor | T1 | 30m | REQ-2 | b.sh | — | pending |
 | T3 | 6 | review | the review | critic | T1, T2 | 30m | REQ-2 | c.sh | 14-T3 | pending |
 
 ## Verification Matrix
@@ -1069,6 +1069,11 @@ expect_eq "…nor Files" "a.sh" \
 
 # A row whose tree is an em dash is a row with NO tree — the same "none" spelling `deps`
 # uses — and it comes through as the literal cell, not as an error.
+#
+# THE ROW IS `pending`, AND THAT IS load-BEARING SINCE WAVE-17 (REQ-1, AC-1.2, ADR-032): a
+# row with no tree yet is a row nobody is working in. §12 is where the `active` twin of this
+# exact row becomes a fault, and this fixture is its silent control — so the clean-validate
+# assertion below asserts the rule discriminates, not that the rule is absent.
 expect_eq "a row with no tree yet reads its cell literally" "—" \
   "$(call units_field "$(printf '%s\n' "$ROWS_WT" | sed -n 2p)" worktree)"
 
@@ -1130,5 +1135,98 @@ expect_eq "11.5 a file with no ## Tasks table answers no" "1" \
 # column and still says so.
 expect_eq "11.6 reversing every column does not change the answer" "0" \
   "$(call_rc units_has_column "$SANDBOX/worktree-column-reversed.md" worktree)"
+
+
+# ============================================================
+section "12 — an ACTIVE row names its tree, or the table is wrong (wave-17 REQ-1, AC-1.2, ADR-032)"
+# ============================================================
+#
+# THE REGISTER WAS UNFED, AND NOTHING SAID SO. The evidence gate resolves a worktree commit
+# to the `## Tasks` row that names the tree, and every row of every plan this repo shipped
+# through wave-16 carried `—` in that cell (research R1, "The one fact"): the arm was not
+# broken, it was never reached, and the only symptom was a run whose `current:` had to be
+# regressed by hand to land a writer's commit. ADR-032 makes the row the tree's record, and a
+# record that does not record is a shape fault — caught where the plan is written, not one
+# round trip later at the writer's commit.
+#
+# THE RULE IS THREE-WAY, and all three ways are asserted here because only the set of them is
+# the rule:
+#   active + no cell, in a table WITH the column  → a fault naming the id;
+#   pending + no cell                             → silent (a row nobody is working in);
+#   any status, in a table WITHOUT the column     → silent (a plan that never tracked trees).
+# The third is the one that decides whether this arm can ship at all: `units_field` reads an
+# absent column as an empty cell on every row, so an arm that skipped `units_has_column`
+# would refuse every pre-wave-14 and every solo-writer plan in existence.
+#
+# fails-when: the active row draws no line, or the pending row / the column-less table draws
+# one.
+
+cat > "$SANDBOX/active-no-tree.md" <<'ACT_EOF'
+---
+current: 4
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-1 | a.sh | 17-T1 | active |
+| T2 | 4 | build | the build whose tree the row forgot | implementor | — | 30m | REQ-1 | b.sh | — | active |
+| T3 | 4 | build | the build dispatched with no cell at all | implementor | — | 30m | REQ-1 | c.sh |  | active |
+| T4 | 4 | build | the build not dispatched yet | implementor | — | 30m | REQ-1 | d.sh | — | pending |
+| T5 | 4 | build | the build that landed and was torn down | implementor | — | 30m | REQ-1 | e.sh | — | landed |
+| T6 | 6 | review | the review | critic | T1, T2, T3, T4, T5 | 30m | REQ-1 | f.sh | — | pending |
+
+## Verification Matrix
+ACT_EOF
+
+VAL_ACT="$(call units_validate "$SANDBOX/active-no-tree.md")"
+
+expect_eq "12.1 an active row whose cell is an em dash is named" "1" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T2: active row names no worktree' | tr -d ' ')"
+expect_eq "12.2 …and an active row whose cell is empty is named the same way" "1" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T3: active row names no worktree' | tr -d ' ')"
+expect_eq "12.3 the active row that DOES name its tree draws nothing" "0" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T1:' | tr -d ' ')"
+# THE TWO SILENT STATUSES, asserted BY ID rather than by counting lines: a rule that fired on
+# every empty cell would still pass a total-count assertion if the active rows were absent.
+expect_eq "12.4 a pending row with no tree is not a fault" "0" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T4:' | tr -d ' ')"
+expect_eq "12.5 …nor is a landed one whose tree is gone" "0" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T5:' | tr -d ' ')"
+expect_eq "12.6 the table breaks this invariant twice and no other" "2" "$(nlines "$VAL_ACT")"
+expect_eq "12.7 …and units_validate exits 1 for it" "1" \
+  "$(call_rc units_validate "$SANDBOX/active-no-tree.md")"
+
+# ---------- the column-less table: the arm must not reach it ----------
+#
+# The same rows, one column narrower. Every `worktree` cell now reads empty for the reason
+# §10 gives — slot 11 of a header that has no slot 11 — and the rule must stay silent, or
+# every plan written before wave-14 becomes invalid on the day this ships.
+cat > "$SANDBOX/active-no-column.md" <<'ACC_EOF'
+---
+current: 4
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | senior-implementor | — | 60m | REQ-1 | a.sh | active |
+| T2 | 4 | build | the other build | implementor | — | 30m | REQ-1 | b.sh | active |
+| T6 | 6 | review | the review | critic | T1, T2 | 30m | REQ-1 | f.sh | pending |
+
+## Verification Matrix
+ACC_EOF
+
+expect_eq "12.8 a table with no worktree column raises no worktree fault, whatever the status" "" \
+  "$(call units_validate "$SANDBOX/active-no-column.md")"
+expect_eq "12.9 …and exits 0" "0" "$(call_rc units_validate "$SANDBOX/active-no-column.md")"
+# AND THE DISCRIMINATOR IS THE HEADER, not the fixture: the same two active rows, in a table
+# that carries the column, are two faults (12.1/12.2 above prove the positive half).
+expect_eq "12.10 units_has_column is what tells the two fixtures apart" "0 1" \
+  "$(printf '%s %s' "$(call_rc units_has_column "$SANDBOX/active-no-tree.md" worktree)" \
+     "$(call_rc units_has_column "$SANDBOX/active-no-column.md" worktree)")"
+
 
 finish
