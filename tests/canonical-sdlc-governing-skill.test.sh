@@ -3124,6 +3124,57 @@ done <<< "$gs_r3_direct"
 # FIVE: the missing-column line, this row's two `units_validate` faults, `approved-by:` and
 # `fails-when:`. A count, so a predicate that returned one line could not satisfy the loop.
 expect_eq "R3s7 …and the predicate returned every line, not a prefix of them" "5" "$gs_r3_n"
+
+# THE CRLF TWIN (wave-16 T27, critic C7). Byte-for-byte the R3s fixture above — same
+# frontmatter-stamp/body disagreement, same pre-14 table — translated to CRLF line endings
+# with `perl -pe 's/\n/\r\n/'`, the critic's own repro technique. Before the fix,
+# `_bf_section` and the `first_heading` awk inside `plan_bring_forward` read the plan RAW:
+# a CRLF `## SDLC State` heading matched nothing, the derived step fell through to 0, and
+# the predicate returned silently — the Write-side arm ADMITTED a pre-14 CRLF plan the SAME
+# body's LF twin refuses six lines for (this is the RED; see T27-crlf-one-source.md).
+#
+# fails-when: the CRLF Write is admitted, or its refusal names a different list than the
+# LF twin's (R3s3(1)-(3) above).
+gs_r3t_lf="${gs_r3_stamp_plan}${gs_r3_stamp_body}"
+gs_r3t_crlf="$(printf '%s' "$gs_r3t_lf" | perl -pe 's/\n/\r\n/')"
+gs_r3t_file="$(mktemp "${TMPDIR:-/tmp}/gs-r3t-crlf.XXXXXX")"
+printf '%s' "$gs_r3t_crlf" > "$gs_r3t_file"
+
+# META FIRST, so no row below can pass over a fixture that lost its own CRLF-ness.
+expect_contains "R3t0 meta: the twin fixture really is CRLF-terminated" \
+  "CRLF" "$(file "$gs_r3t_file")"
+
+r2_write_knob_unset "$gs_r3_path" "$gs_r3t_crlf"
+
+expect_status "R3t1 the CRLF pre-14 Write is refused, fail-closed — same as its LF twin" "2" "$GS_R2_EXIT"
+expect_eq "R3t2 …with the contract-version verdict, not admitted silently" \
+  "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3t3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+expect_contains "R3t3(2) …the approval line, a class the frontmatter stamp used to hide" \
+  "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
+expect_contains "R3t3(3) …and the matrix's fails-when, the other hidden class" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$GS_R2_ERR"
+expect_absent "R3t3(4) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$GS_R2_ERR"
+expect_absent "R3t3(5) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$GS_R2_ERR"
+
+# THE FUNCTION-LEVEL ROW, no hook in the loop: `plan_bring_forward` on the CRLF fixture
+# must return rc=1 with the SAME lines as `plan_bring_forward` on the LF fixture (R3s5-7's
+# `$gs_r3_direct`, still in scope) — a diff of the two outputs must be empty. Sourced the
+# same minimal way R3s5 sources it (units.sh + walls.sh, NOT run.sh), which is also why the
+# fix normalizes line endings inline inside `plan_bring_forward` itself rather than by
+# calling `normalize_newlines` (run.sh) — this row would break if it depended on that.
+gs_r3t_rc=0
+gs_r3t_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" "$gs_r3t_file" 2>/dev/null)" || gs_r3t_rc=$?
+rm -f "$gs_r3t_file"
+expect_status "R3t4 the predicate returns rc=1 on the CRLF fixture, same as its LF twin" "1" "$gs_r3t_rc"
+expect_eq "R3t5 …and the SAME lines as the LF twin, byte for byte (diff empty)" \
+  "" "$(diff <(printf '%s\n' "$gs_r3_direct") <(printf '%s\n' "$gs_r3t_direct") 2>&1 || true)"
 # [REQ-3 BRING-FORWARD SECTION: END]
 
 

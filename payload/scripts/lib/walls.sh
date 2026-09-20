@@ -728,7 +728,7 @@ evidence_line_field() {  # <text> <key> -> the value, or empty
 # a shorter list. The step is a fact about the plan TEXT this function already holds, so it
 # reads it where the gate reads it — `current:` under `## SDLC State`, `a`/`b` suffix
 # stripped — and no caller can hand it the wrong one.
-_bf_fm_get() {  # <plan> <frontmatter key> -> its value, or empty
+_bf_fm_get() {  # <plan text> <frontmatter key> -> its value, or empty
   awk -v k="$2" '
     NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; next }
     /^---[[:space:]]*$/ { exit }
@@ -736,10 +736,10 @@ _bf_fm_get() {  # <plan> <frontmatter key> -> its value, or empty
       if (match($0, "^[[:space:]]*" k "[[:space:]]*:[[:space:]]*")) {
         v = substr($0, RSTART + RLENGTH); sub(/[[:space:]]+$/, "", v); print v; exit
       }
-    }' "$1"
+    }' <<< "$1"
 }
 
-_bf_section() {  # <plan> <exact "## Heading"> -> that section body, fence-aware
+_bf_section() {  # <plan text> <exact "## Heading"> -> that section body, fence-aware
   awk -v want="$2" '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
@@ -749,22 +749,51 @@ _bf_section() {  # <plan> <exact "## Heading"> -> that section body, fence-aware
       next
     }
     f { print }
-  ' "$1"
+  ' <<< "$1"
 }
 
 plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   # A STRAY SECOND ARGUMENT IS IGNORED, not used, for one release: both callers dropped it
   # in this task, and a caller this tree has not seen must degrade to the derived step
   # rather than to a silently different answer.
+  #
+  # THE LIST IS JUDGED AT THE PLAN'S OWN `current:` LINE, ALWAYS — deliberately, not by
+  # omission (wave-16 T27, Step-6 critic §C8, A-T27.1). The evidence gate substitutes
+  # `CURRENT="$_EG_RSTEP"` (walls.sh ~:2430) when a commit comes from a linked worktree
+  # whose `## Tasks` row names a step below the run's `current:`, so that OTHER arms judge
+  # that commit at the row's step — but that substituted value never reaches this function,
+  # with no argument to carry it even if it did. Passing it back in would reopen exactly the
+  # second-source hazard T25/§C1 closed (two callers, two facts); direction is fail-closed,
+  # since a plan-shape summary judged at a later `current:` can only ask for MORE, never
+  # fewer, than the row's own step would.
   local plan="${1:-}" step
   local scale rigor multi units_out missing rowfaults
-  local state b1 matrix first_heading goal_body
+  local plan_text state b1 matrix first_heading goal_body
   local faults="" keys=0
 
   [ -n "$plan" ] && [ -f "$plan" ] || return 0
-  case "$(_bf_fm_get "$plan" scale)" in wave|epic) : ;; *) return 0 ;; esac
-  [ "$(_bf_fm_get "$plan" rigor)" = "audited" ] || return 0
-  [ "$(_bf_fm_get "$plan" multi_agent)" = "true" ] || return 0
+
+  # NORMALIZED ONCE, HERE, BEFORE ANY READ (wave-16 T27, Step-6 critic §C7). Every helper
+  # below — `_bf_fm_get`, `_bf_section`, the `first_heading` awk, the `current:` derivation
+  # — now reads `$plan_text`, never the path, so a CRLF plan's headings and keys match the
+  # same way an LF plan's do. Before this, `_bf_section` and `first_heading` read the file
+  # RAW and matched `## SDLC State` by string equality: on a CRLF plan the heading arrived
+  # as `## SDLC State\r`, matched nothing, `state` came back empty, `step` fell through to
+  # 0, `keys` stayed 0, and the predicate returned rc=0 with NOTHING — silently admitting a
+  # pre-14 CRLF plan the same body's LF twin refuses. Inlined rather than calling
+  # `normalize_newlines` (run.sh) by name: this file does not source run.sh, one caller (the
+  # evidence gate) sources both but the other (the governing-skill hook) sources this file
+  # lazily on its own, and a bare function name would make plan_bring_forward's correctness
+  # depend on sourcing order this file does not control. Same translation, same reason
+  # `_units_read` (units.sh:118) and `normalize_newlines` (run.sh:97) already use it: `sub`
+  # trims a trailing CR, `gsub` re-splits a CR-only file into real lines rather than
+  # collapsing it to one — `tr -d '\r'` would do the latter and read a live CR-only plan as
+  # closed, the fail-dangerous direction (.claude/rules/hook-authoring.md).
+  plan_text="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
+
+  case "$(_bf_fm_get "$plan_text" scale)" in wave|epic) : ;; *) return 0 ;; esac
+  [ "$(_bf_fm_get "$plan_text" rigor)" = "audited" ] || return 0
+  [ "$(_bf_fm_get "$plan_text" multi_agent)" = "true" ] || return 0
 
   # (a) THE PRE-14 TABLE. `units_validate` is the one reader of `## Tasks` and already
   # reports EVERY fault rather than the first (units.sh's own note) — it is the model this
@@ -778,11 +807,15 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   # (b) THE KEYS, each under the step guard its own arm carries: `requirements:` from
   # current 2 (validate_requirements_pointer), `approved-by:` and `fails-when:` from 4
   # (validate_approved_by, validate_fails_when). A key not yet owed is not a fault.
-  state="$(_bf_section "$plan" '## SDLC State')"
+  state="$(_bf_section "$plan_text" '## SDLC State')"
   # THE ONE SOURCE. Same read as the evidence gate's own `CURRENT` (the `current:` line of
   # `## SDLC State`, first hit, whitespace stripped) and the same `a`/`b` strip the gate
-  # applies at the call site. Anything else — absent, `T<n>`, a word — reads as 0, which is
-  # the fallback the old `${2:-0}` default gave a caller that passed nothing.
+  # applies at the call site — including the line-ending normalization: `plan_text` above
+  # was already put through the same translation `normalize_newlines` (run.sh) applies to
+  # build the gate's own `SECTION` (walls.sh:1709), so a CRLF plan's `## SDLC State` heading
+  # and its `current:` line are seen exactly as the gate sees them, not raw. Anything else —
+  # absent, `T<n>`, a word — reads as 0, which is the fallback the old `${2:-0}` default gave
+  # a caller that passed nothing.
   step="$(printf '%s\n' "$state" \
           | grep -E '^[[:space:]]*current[[:space:]]*:' \
           | head -1 \
@@ -815,7 +848,7 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
     # key AT ALL, which is the question a pre-14 matrix answers no to. Naming one row here
     # would duplicate `matrix_block` — the twin-that-drifts this repo spends real effort
     # avoiding — for a list that exists to size the job, not to walk it.
-    matrix="$(_bf_section "$plan" '## Verification Matrix')"
+    matrix="$(_bf_section "$plan_text" '## Verification Matrix')"
     if grep -qE '^[[:space:]]*\|' <<< "$matrix" \
        && ! grep -qE '(^|[^-_[:alnum:]])fails-when[[:space:]]*:' <<< "$matrix"; then
       faults="${faults}## Verification Matrix: no AC block names a 'fails-when:'
@@ -831,10 +864,10 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   first_heading="$(awk '
     /^[[:space:]]*```/ { fence = !fence; next }
     fence { next }
-    /^## / { print; exit }' "$plan")"
+    /^## / { print; exit }' <<< "$plan_text")"
   case "$first_heading" in
     '## Goal'|'## Goal '*)
-      goal_body="$(_bf_section "$plan" '## Goal')"
+      goal_body="$(_bf_section "$plan_text" '## Goal')"
       grep -qE '[^[:space:]]' <<< "$goal_body" || faults="${faults}## Goal: the section is empty
 " ;;
     *) faults="${faults}## Goal: the first section is not '## Goal'

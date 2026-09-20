@@ -10892,15 +10892,32 @@ bf_calls() {  # <file> -> the call lines, `file:line:text`
 # match — which is why this asks for the shape of an ARGUMENT rather than for "anything".
 bf_second_arg() { grep -E 'plan_bring_forward "[^"]*"[[:space:]]+["$]' || true; }
 
-BF_CALLS="$(bf_calls "$BF_LIB"; bf_calls "$BF_GSKILL")"
+# THE WHOLE TRACKED TREE, NOT TWO NAMED FILES (wave-16 T27, critic C9). `BF_LIB` and
+# `BF_GSKILL` above name the two callers the section already knows about — a census built by
+# reading only them cannot see a THIRD caller anywhere else, which is exactly the section's
+# own `fails-when` clause below and was unpinnable by construction before this row (a third
+# caller moved none of the old counts, because the old counts were grep hits inside files
+# the count itself named). Real source only: `hooks/`, `payload/scripts/`, `payload/commands/`,
+# `payload/skills/`, `agents/` — `payload/hooks` and `payload/agents` are symlinks onto
+# `hooks/` and `agents/` (`ls -ld payload/*`), so grepping them too would double-count the
+# same lines rather than widen the census; `tests/` stays out, same as `bf_calls` above, and
+# comments/the definition are excluded by the same `#`-at-content-start rule, adapted for
+# `grep -r`'s `file:line:text` shape (single-file `bf_calls` gets `line:text`).
+BF_TREE_DIRS="$REPO_ROOT/hooks $REPO_ROOT/payload/scripts $REPO_ROOT/payload/commands $REPO_ROOT/payload/skills $REPO_ROOT/agents"
+bf_tree_calls() {  # -> `file:line:text` across the real tree, comments/definition excluded
+  grep -rn 'plan_bring_forward "' $BF_TREE_DIRS 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'
+}
+
+BF_TREE_CALLS="$(bf_tree_calls)"
 expect_eq "the tree holds exactly two callers of plan_bring_forward" "2" \
-  "$(printf '%s\n' "$BF_CALLS" | grep -c 'plan_bring_forward "')"
+  "$(printf '%s\n' "$BF_TREE_CALLS" | grep -c 'plan_bring_forward "')"
 expect_eq "…the evidence gate is one of them" "1" \
   "$(bf_calls "$BF_LIB" | grep -c 'plan_bring_forward "')"
 expect_eq "…and the governing-skill hook is the other" "1" \
   "$(bf_calls "$BF_GSKILL" | grep -c 'plan_bring_forward "')"
 expect_empty "…and NEITHER hands it a step: the predicate reads current: itself" \
-  "$(printf '%s\n' "$BF_CALLS" | bf_second_arg)"
+  "$(printf '%s\n' "$BF_TREE_CALLS" | bf_second_arg)"
 
 # THE MUTATION, so the row above is not passing over a detector that can never fire: a COPY
 # of the library with the gate caller handed a step again must be caught by the same shape.
@@ -10914,5 +10931,29 @@ expect_nonempty "…and a doctored copy that hands the gate caller a step IS cau
 cp "$BF_LIB" "$BF_MUT_DIR/walls.clean.sh"
 expect_empty "control: an UNMUTATED copy is still clean" \
   "$(bf_calls "$BF_MUT_DIR/walls.clean.sh" | bf_second_arg)"
+
+# THE THIRD-CALLER MUTATION (critic C9's FIRST clause — "a third caller appears unpinned" —
+# which the two-named-file census could never catch by construction, whichever two files it
+# named). A scratch tree shaped like `BF_TREE_DIRS`, carrying the two real callers PLUS one
+# extra file naming `plan_bring_forward "…"` in a spot the old census never read
+# (`payload/commands/`), must move the whole-tree count from 2 to 3.
+BF_3RD_DIR="$SANDBOX/bring-forward-third-caller"
+mkdir -p "$BF_3RD_DIR/hooks" "$BF_3RD_DIR/payload/scripts/lib" "$BF_3RD_DIR/payload/commands" \
+  "$BF_3RD_DIR/payload/skills" "$BF_3RD_DIR/agents"
+cp "$BF_LIB" "$BF_3RD_DIR/payload/scripts/lib/walls.sh"
+cp "$BF_GSKILL" "$BF_3RD_DIR/hooks/canonical-sdlc-governing-skill.sh"
+printf 'planted_third_caller() {\n  plan_bring_forward "$1"\n}\n' \
+  > "$BF_3RD_DIR/payload/commands/planted-third-caller.sh"
+BF_3RD_TREE_DIRS="$BF_3RD_DIR/hooks $BF_3RD_DIR/payload/scripts $BF_3RD_DIR/payload/commands $BF_3RD_DIR/payload/skills $BF_3RD_DIR/agents"
+bf_3rd_calls() {
+  grep -rn 'plan_bring_forward "' $BF_3RD_TREE_DIRS 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'
+}
+expect_eq "…and a planted THIRD caller elsewhere in the tree IS caught: the count moves to 3" "3" \
+  "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
+# CONTROL — the same scratch tree with the plant removed reads back to 2, so the row above
+# is reading the plant and not a miscounted copy.
+rm -f "$BF_3RD_DIR/payload/commands/planted-third-caller.sh"
+expect_eq "control: the same scratch tree with the plant removed reads back to 2" "2" \
+  "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
 
 finish
