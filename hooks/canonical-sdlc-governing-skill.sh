@@ -1121,12 +1121,47 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
             _gs_units_tmp="$(mktemp "${TMPDIR:-/tmp}/bionic-units.XXXXXX")" || _gs_units_tmp=""
             if [ -n "$_gs_units_tmp" ]; then
               printf '%s\n' "$CONTENT" > "$_gs_units_tmp"
+              # THE BRING-FORWARD SUMMARY COMES FIRST (wave-16 REQ-3, AC-3.1; spec D8).
+              # A plan whose frontmatter says version 14 and whose body is pre-14 used to
+              # meet this wall for its table, the evidence gate for `requirements:`, the
+              # gate again for `approved-by:`, and again for `fails-when:` — one round trip
+              # per fault, in an order that depended on the previous repair (research R2
+              # §2d). `plan_bring_forward` answers all of it at the moment of the EDIT,
+              # which is one round trip earlier than any commit-time check can be.
+              #
+              # WALLS.SH IS SOURCED HERE, NOT IN `BIONIC_LIB_WANT`, and the reasoning is
+              # the one tests/cross-gate-agreement.test.sh §AP wrote down when it declined
+              # to make walls.sh this hook's owner: WANT is a FAIL-CLOSED list, so naming a
+              # 236 KB file there would refuse every artifact write on a tree missing it,
+              # and it would be parsed on every Write in the fleet. Sourced from inside this
+              # arm it is parsed only when a non-task-scale PLAN at sdlc-step >= 3 is
+              # written — and a tree without it simply keeps 1.8.2's table-only refusal,
+              # which is the fail-open an advisory read is allowed (walls.sh's own
+              # `wall_libs` sets that precedent for cmd-class.sh).
+              _gs_bf=""; _gs_bf_fired=0
+              if [ -r "$BIONIC_LIB/walls.sh" ]; then
+                if ! declare -F plan_bring_forward >/dev/null 2>&1; then
+                  # shellcheck source=/dev/null
+                  . "$BIONIC_LIB/walls.sh"
+                fi
+                if declare -F plan_bring_forward >/dev/null 2>&1; then
+                  _gs_bf="$(plan_bring_forward "$_gs_units_tmp" "$SDLC_STEP" 2>/dev/null)" \
+                    || _gs_bf_fired=1
+                fi
+              fi
               if units_rows "$_gs_units_tmp" >/dev/null 2>&1; then
                 _gs_units_bad="$(units_validate "$_gs_units_tmp" 2>/dev/null)" || true
               else
                 _gs_units_bad=""
               fi
               rm -f "$_gs_units_tmp"
+              if [ "$_gs_bf_fired" -eq 1 ]; then
+                _gs_detail="canonical-sdlc plan '$BASENAME' declares canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION} and its body does not match it:
+${_gs_bf}
+Path: $FILE_PATH
+Fix: repair every line above in one pass — each is a separate arm that would otherwise refuse the next commit in turn."
+                refuse exit2 write "this plan's body is not at contract version ${SUPPORTED_SDLC_VERSION}" "bring the plan forward" "$_gs_detail"
+              fi
               if [ -n "$_gs_units_bad" ]; then
                 _gs_detail="canonical-sdlc plan '$BASENAME' (sdlc-step ${SDLC_STEP}) has a '## Tasks' table that breaks the Task invariants:
 ${_gs_units_bad}

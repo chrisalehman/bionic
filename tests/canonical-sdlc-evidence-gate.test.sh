@@ -7124,4 +7124,222 @@ expect_status "R2g the repaired table commits" "0" "$EG_R2_EXIT"
 expect_empty "R2h …and prints nothing, so R2c read a refusal and not a chatty hook" "$EG_R2_ERR"
 # [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]
 
+
+# ============================================================
+section "R3 — AC-3.1/AC-3.2: a pre-14 plan meets every version-14 fault at once"
+# ============================================================
+#
+# WHAT THIS SECTION EXISTS FOR (seed A §8b–8c, research R2 §2d). A plan whose frontmatter
+# says `canonical_sdlc_version: 14` and whose BODY is pre-14 met the gate one arm at a
+# time: the `requirements:` arm, then `approved-by:`, then `fails-when:`, then the Tasks
+# shape — and the reveal order was DATA-DEPENDENT on the previous repair, because widening
+# the table is what makes the next arm reachable (R2 §2d). A round trip per fault, and no
+# way to see the size of the job from the first refusal.
+#
+# AND THE LEAD-IN LIED ON THE WAY (§8b, R2 row 6a). `units_field <row> worktree` reads slot
+# 11, which a header without the column leaves EMPTY for every row, so the register arm
+# concluded "no ## Tasks row names worktree <tree>" about a table that never claimed to
+# track trees. `units_has_column` is the discriminator (tests/units.test.sh §11).
+#
+# THE FIXTURE IS ONE PLAN CARRYING SIX FAULT CLASSES: a five-column task-scale `## Tasks`
+# header (seven required columns absent), the task-scale status word `done`, no
+# `requirements:` on the Step-1 line, no `approved-by:` line, a matrix AC block with no
+# `fails-when:`, and no `## Goal` first section. It is driven FROM A REAL LINKED WORKTREE,
+# because the lead-in this section also pins only speaks on a worktree commit.
+#
+# fails-when: the pre-14 fixture reveals its faults across two or more attempts at commit,
+# or stderr carries "no ## Tasks row names worktree".
+# [REQ-3 BRING-FORWARD SECTION: BEGIN]
+R3_EXIT=0; R3_ERR=""
+r3_commit_knob_unset() {  # <home> <project> <payload cwd> <command> -> R3_EXIT + R3_ERR
+  local home_dir="$1" project_dir="$2" payload_cwd="$3" command="$4" input tmp_err
+  input=$(jq -n --arg c "$command" --arg cwd "$payload_cwd" --arg s "$EG_SID" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
+  tmp_err=$(mktemp)
+  if env -u BIONIC_WALL_VERBOSE HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" \
+       CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+    R3_EXIT=0
+  else
+    R3_EXIT=$?
+  fi
+  R3_ERR=$(grep -v -E "$EG_RESOLUTION_RE" "$tmp_err" || true)
+  rm -f "$tmp_err"
+}
+require_helpers r3_commit_knob_unset
+
+# The pre-14 body. Note what it does NOT have: `## Goal`, the ten columns, `requirements:`,
+# `approved-by:`, `fails-when:` — and note that `current: 5` and the Step-5 block ARE
+# well-formed, so nothing upstream of the bring-forward arm can claim this refusal.
+r3_pre14_tasks="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | the dispatched unit | done |"
+
+r3_pre14_plan() {
+  # d7_wave_frontmatter, not matrix_frontmatter: the requirements and fails-when arms are
+  # guarded to `rigor: audited` + `multi_agent: true` + wave|epic (walls.sh's D7 guard), and
+  # matrix_frontmatter writes no `multi_agent:` line at all — a fixture built on it would
+  # exercise only the two unguarded halves and call that the whole list.
+  printf '%s\n' "$(d7_wave_frontmatter audited true)"
+  printf '## Overview\n\nA plan written to the pre-14 contract.\n\n'
+  printf '## SDLC State\ncurrent: 5\nStep 1: opened 2026-09-19T22:00Z; research record/w16/r.md\nStep 5:\n%s\n- T1: bash suite 9/9 green\n\n' "$step5_base"
+  printf '%s\n\n' "$r3_pre14_tasks"
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n\n'
+  printf 'AC-1:\n  evidence: record/w16/r.md\n'
+}
+
+r3_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$r3_tmp")
+r3_main="$r3_tmp/main"
+mkdir -p "$r3_main/.bionic/docs/plans" "$r3_main/.bionic/docs/record/w16"
+printf 'evidence\n' > "$r3_main/.bionic/docs/record/w16/r.md"
+git -C "$r3_main" init -q .
+git -C "$r3_main" commit -q --allow-empty -m init
+engage "$r3_main"
+r3_pre14_plan > "$r3_main/.bionic/docs/plans/wave-16-pre14.plan.md"
+git -C "$r3_main" worktree add -q "$r3_tmp/wt-T1" -b r3-t1
+
+expect_eq "R3.0 the fixture's tree really is a LINKED worktree (its .git is a file)" "file" \
+  "$(if [ -f "$r3_tmp/wt-T1/.git" ]; then echo file; else echo none; fi)"
+
+r3_commit_knob_unset "$(make_home)" "$r3_main" "$r3_tmp/wt-T1" 'git commit -m "x"'
+
+expect_status "R3a the pre-14 plan is refused, fail-closed" "2" "$R3_EXIT"
+expect_eq "R3b …once: exactly one rendered refusal line" "1" \
+  "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -c '^bionic: ')"
+expect_eq "R3c …and the verdict names the contract version, not one arm" \
+  "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+# THE SIX CLASSES, each read by the one string only its own check can produce. Six
+# assertions rather than a count, so a list that names five and repeats one cannot pass.
+expect_contains "R3d(1) …the Tasks table's absent columns, named together on one line" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+expect_contains "R3d(2) …the wave-scale status vocabulary" \
+  "T1: status done is not one of pending active landed dropped" "$R3_ERR"
+expect_contains "R3d(3) …the Step-1 requirements pointer" \
+  "## SDLC State: the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
+expect_contains "R3d(4) …the approval line" \
+  "## SDLC State: no 'approved-by:' line" "$R3_ERR"
+expect_contains "R3d(5) …the matrix's fails-when" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$R3_ERR"
+expect_contains "R3d(6) …and the missing Goal section" \
+  "## Goal: the first section is not '## Goal'" "$R3_ERR"
+# AC-3.2. The lead-in is a bare printf on stderr, not a refusal, so it is read off the
+# whole stream and asserted ABSENT.
+expect_absent "R3e AC-3.2 the worktree lead-in does not print when the table has no worktree column" \
+  "no ## Tasks row names worktree" "$R3_ERR"
+# NOT VACUOUS: the same commit from the same tree against a plan whose table DOES carry the
+# column, and no row naming this tree, still prints the lead-in — so R3e read a suppression
+# and not a hook that stopped printing lead-ins.
+r3_wt_plan() {
+  printf '%s\n' "$(d7_wave_frontmatter audited true)"
+  printf '## Goal\n\nThe control.\n\n'
+  printf '## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-19T00:00Z "approved"\nStep 1: requirements: record/w16/r.md\nStep 5:\n%s\n- T1: bash suite 9/9 green\n\n' "$step5_base"
+  printf '## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n'
+  printf '|---|---|---|---|---|---|---|---|---|---|---|\n'
+  printf '| T1 | 4 | build | the unit | implementor | — | 30m | REQ-x | a.sh | wt-elsewhere | active |\n\n'
+  printf '%s\n' "$matrix_complete"
+}
+r3_main2="$r3_tmp/main2"
+mkdir -p "$r3_main2/.bionic/docs/plans" "$r3_main2/.bionic/docs/record/w16"
+printf 'evidence\n' > "$r3_main2/.bionic/docs/record/w16/r.md"
+printf 'evidence\n' > "$r3_main2/.bionic/docs/record/generic-evidence.md"
+git -C "$r3_main2" init -q .
+git -C "$r3_main2" commit -q --allow-empty -m init
+engage "$r3_main2"
+r3_wt_plan > "$r3_main2/.bionic/docs/plans/wave-16-wt.plan.md"
+git -C "$r3_main2" worktree add -q "$r3_tmp/wt-T2" -b r3-t2
+r3_commit_knob_unset "$(make_home)" "$r3_main2" "$r3_tmp/wt-T2" 'git commit -m "x"'
+expect_contains "R3f …while a table that DOES carry the column still gets the lead-in (the control)" \
+  "no ## Tasks row names worktree" "$R3_ERR"
+# [REQ-3 BRING-FORWARD SECTION: END]
+
+# ============================================================
+section "R3 — AC-3.3: 'requirements:' is read anywhere on the Step-1 line (seed B B11)"
+# ============================================================
+#
+# THE FIELD REPRO (seed B B11, measured 2026-09-19). `validate_requirements_pointer` greps
+# `^[[:space:]]*requirements[[:space:]]*:` against the Step-1 evidence BLOCK, so a Step-1
+# line that opens with anything else — `- Step 1: opened …; requirements: specs/…; card …`,
+# the shape this wave's own plan very nearly took — carries a resolving pointer the arm
+# cannot see, and the commit is refused "Step 1's evidence names no requirements file".
+# The sibling pointer read on the Step-5 line (`walk-artifact:`) has the same anchor and
+# gets the same tolerance; its control is R3j below.
+#
+# fails-when: the B11 line is refused, or a line with NO requirements pointer is admitted.
+# [REQ-3 POINTER-TOLERANCE SECTION: BEGIN]
+r3b11_plan() {  # $1 = the Step-1 line's text after "Step 1: "
+  printf '%s\n' "$(d7_wave_frontmatter audited true)"
+  printf '## Goal\n\nThe B11 fixture.\n\n'
+  printf '## SDLC State\ncurrent: 4\napproved-by: fixture 2026-09-19T00:00Z "approved"\n- Step 1: %s\nStep 4: opened; evidence record/generic-evidence.md\n\n' "$1"
+  printf '%s\n\n' "$tasks_one_done"
+  printf -- '- T1: bash suite 9/9 green\n\n'
+  printf '%s\n' "$matrix_complete"
+}
+
+h_r3b11=$(make_home)
+mkdir -p "$h_r3b11/.bionic/docs/specs/epic-01-demo"
+printf 'requirements\n' > "$h_r3b11/.bionic/docs/specs/epic-01-demo/w16.requirements.md"
+write_plan "$h_r3b11" "$(r3b11_plan 'opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w16.requirements.md; card approved by chris')" > /dev/null
+expect_allow "R3g AC-3.3 the B11 line — 'requirements:' mid-line — is admitted" \
+  "$h_r3b11" 'git commit -m "x"'
+
+# THE CONTROL, so R3g did not pass because the arm stopped asking: the same line with the
+# pointer removed is still refused, and a pointer that resolves to nothing still is.
+h_r3b11b=$(make_home)
+write_plan "$h_r3b11b" "$(r3b11_plan 'opened 2026-09-19T22:00Z; card approved by chris')" > /dev/null
+expect_block "R3h …a Step-1 line with no requirements pointer at all is still refused" \
+  "$h_r3b11b" 'git commit -m "x"' "requirements"
+h_r3b11c=$(make_home)
+write_plan "$h_r3b11c" "$(r3b11_plan 'opened; requirements: specs/epic-01-demo/absent.requirements.md; card approved')" > /dev/null
+expect_block "R3i …and a mid-line pointer naming no file is refused for THAT reason" \
+  "$h_r3b11c" 'git commit -m "x"' "does not resolve"
+# AND IT MUST NOT MATCH A LONGER KEY: `pre-requirements:` is a different field and naming
+# one is not naming the artifact.
+h_r3b11d=$(make_home)
+write_plan "$h_r3b11d" "$(r3b11_plan 'opened; pre-requirements: specs/epic-01-demo/w16.requirements.md; card approved')" > /dev/null
+expect_block "R3j …and 'pre-requirements:' is not 'requirements:'" \
+  "$h_r3b11d" 'git commit -m "x"' "requirements"
+# [REQ-3 POINTER-TOLERANCE SECTION: END]
+
+# ============================================================
+section "R12 — AC-12.2: a placeholder auditor cell parses empty (carry-over 20)"
+# ============================================================
+#
+# CARRY-OVER 20. A matrix row's auditor cell is a free-text cell, and a table author who has
+# no verdict to record writes the same em dash the `deps` and `worktree` cells use for
+# "none". The T4 exemption asks for an auditor cell that is EMPTY or `CONFIRMED`
+# (walls.sh:2953), so `—` — which means exactly "empty" to every human who reads the table
+# and to every other cell in the ten-column contract — took the row to the refusal that
+# exists for a STANDING FINDING, and told its author to settle a verdict nobody had given.
+#
+# THREE SPELLINGS, one rule: `—`, `-` and `n/a` fold to empty. A real verdict does not.
+#
+# fails-when: the `—` fixture refuses, or `REFUTED` stops refusing.
+# [REQ-12 AUDITOR-CELL SECTION: BEGIN]
+h_r12a=$(make_home)
+write_plan "$h_r12a" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 "—" "$GOOD_CONFIRM")")" > /dev/null
+expect_allow "R12a AC-12.2 a T4 row whose auditor cell is an em dash discharges on user-confirmed" \
+  "$h_r12a" 'git commit -m "x"'
+h_r12b=$(make_home)
+write_plan "$h_r12b" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 "-" "$GOOD_CONFIRM")")" > /dev/null
+expect_allow "R12b …and an ASCII hyphen" "$h_r12b" 'git commit -m "x"'
+h_r12c=$(make_home)
+write_plan "$h_r12c" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 "n/a" "$GOOD_CONFIRM")")" > /dev/null
+expect_allow "R12c …and 'n/a'" "$h_r12c" 'git commit -m "x"'
+# THE DISCRIMINATION. A cell carrying a real verdict is not a placeholder, and the arm that
+# exists for a standing finding still fires on it.
+h_r12d=$(make_home)
+write_plan "$h_r12d" "$(wave_plan 6 "$step6_body" "$(t4_matrix T4 "REFUTED" "$GOOD_CONFIRM")")" > /dev/null
+expect_block "R12d …while a standing REFUTED still refuses (the fold discriminates)" \
+  "$h_r12d" 'git commit -m "x"' "REFUTED"
+# AND THE NON-T4 DIRECTION IS UNTOUCHED: a T3 row's placeholder cell is not a confirmation.
+h_r12e=$(make_home)
+write_plan "$h_r12e" "$(wave_plan 6 "$step6_body" "$(t4_matrix T3 "—" "$GOOD_CONFIRM")")" > /dev/null
+expect_block "R12e …and a T3 row with the same placeholder cell still needs its auditor" \
+  "$h_r12e" 'git commit -m "x"' "auditor"
+# [REQ-12 AUDITOR-CELL SECTION: END]
+
 finish
