@@ -3040,6 +3040,90 @@ r2_write_knob_unset "$gs_r3_path" "${gs_r3_plan}${gs_r3_ok_body}"
 expect_eq "R3e a ten-column table with one broken row keeps 1.8.2's own verdict" \
   "bionic: write refused — this plan's Tasks table is invalid (fix the row the detail names)" \
   "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+
+# THE STAMP AND THE BODY DISAGREE, and only ONE of them is a fact about this plan (wave-16
+# T25, Step-6 critic §C1). `plan_bring_forward` used to be HANDED the step, and its two
+# callers handed it different things: the evidence gate passed the body's `current:`, this
+# hook passed the frontmatter's `sdlc-step:`. A frontmatter stamp is written once at Step 0
+# and almost never moved again — this repo's own archive carries `sdlc-step: 3` beside
+# `current: 9` — so the Write-side arm computed against step 3 for the whole life of the
+# plan and the two `>= 4` classes could never reach it. AC-3.1's "identical lists from both
+# callers" was unreachable past Step 3, and silently so: the author was refused for the
+# TABLE ALONE and never told about `approved-by:` or `fails-when:`.
+#
+# THE FIXTURE IS THAT DISAGREEMENT AND NOTHING ELSE: `sdlc-step: 3` in the frontmatter,
+# `current: 5` in the body, a Step-1 `requirements:` pointer PRESENT and a `## Goal`
+# PRESENT — so the classes left are the pre-14 table that arms the predicate and exactly
+# the two the stamp used to hide.
+#
+# fails-when: the verdict names the table rather than the contract version, either `>= 4`
+# class is absent from the detail, or a class the body satisfies is named anyway.
+gs_r3_stamp_body='
+## SDLC State
+
+current: 5
+Step 1: opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w.requirements.md
+
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | the dispatched unit | pending |
+'
+gs_r3_stamp_plan="$(build_plan step=3)"
+gs_r3_stamp_plan="${gs_r3_stamp_plan/multi_agent: false/multi_agent: true}"
+
+# META, so no row below can pass over a fixture that lost its own disagreement.
+expect_eq "R3s0 meta: the fixture's frontmatter stamp and its body really do disagree" \
+  "sdlc-step=3 current=5" \
+  "sdlc-step=$(printf '%s' "$gs_r3_stamp_plan" | /usr/bin/grep -m1 '^sdlc-step:' | tr -cd '0-9') current=$(printf '%s' "$gs_r3_stamp_body" | /usr/bin/grep -m1 '^current:' | tr -cd '0-9')"
+
+r2_write_knob_unset "$gs_r3_path" "${gs_r3_stamp_plan}${gs_r3_stamp_body}"
+
+expect_status "R3s1 the stamp-mismatched pre-14 Write is refused, fail-closed" "2" "$GS_R2_EXIT"
+expect_eq "R3s2 …and the verdict is the contract version, not the table alone" \
+  "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3s3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+expect_contains "R3s3(2) …the approval line, a class the frontmatter stamp used to hide" \
+  "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
+expect_contains "R3s3(3) …and the matrix's fails-when, the other hidden class" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$GS_R2_ERR"
+# THE LIST IS DERIVED, NOT BLANKET: the two classes this body SATISFIES are absent from it.
+# Paired with R3s3(1)-(3) over the same refusal, so neither reads a producer that never ran.
+expect_absent "R3s4(1) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$GS_R2_ERR"
+expect_absent "R3s4(2) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$GS_R2_ERR"
+
+# THE TWIN OF THIS FIXTURE IS THE EVIDENCE-GATE SUITE'S OWN R3s BLOCK, driving the OTHER
+# caller over the same five classes; the five strings below are the five it asserts.
+#
+# ONE SOURCE, ASSERTED AT THE FUNCTION ITSELF. The same plan text through the same
+# predicate the evidence gate calls, invoked the way BOTH callers now invoke it — with NO
+# step argument — must yield the list this hook just rendered. A caller that reintroduced a
+# step argument, or a predicate that went back to trusting one, moves one of these rows.
+gs_r3_stamp_file="$(mktemp "${TMPDIR:-/tmp}/gs-r3-stamp.XXXXXX")"
+printf '%s' "${gs_r3_stamp_plan}${gs_r3_stamp_body}" > "$gs_r3_stamp_file"
+gs_r3_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" "$gs_r3_stamp_file" 2>/dev/null || true)"
+rm -f "$gs_r3_stamp_file"
+expect_contains "R3s5 the predicate, called with NO step argument, derives step 5 from the body" \
+  "## SDLC State: no 'approved-by:' line" "$gs_r3_direct"
+# EVERY line it returned, against the refusal this hook rendered — the identical-lists half
+# of AC-3.1, read one line at a time so a list that agreed on three of five cannot pass.
+gs_r3_n=0
+while IFS= read -r gs_r3_line; do
+  [ -n "$gs_r3_line" ] || continue
+  gs_r3_n=$((gs_r3_n + 1))
+  expect_contains "R3s6.${gs_r3_n} …predicate line ${gs_r3_n} reached the rendered refusal" \
+    "$gs_r3_line" "$GS_R2_ERR"
+done <<< "$gs_r3_direct"
+# FIVE: the missing-column line, this row's two `units_validate` faults, `approved-by:` and
+# `fails-when:`. A count, so a predicate that returned one line could not satisfy the loop.
+expect_eq "R3s7 …and the predicate returned every line, not a prefix of them" "5" "$gs_r3_n"
 # [REQ-3 BRING-FORWARD SECTION: END]
 
 
