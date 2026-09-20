@@ -4456,6 +4456,47 @@ else
     "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
+# --- 25g(j2) / AC-3.1: the ambiguity is the COMMAND's, not the first directory's ----------
+#
+# THE FAIL-OPEN HALF OF 25g(j) (wave-17 REQ-3, D4; bug 6). The arm above lived inside the
+# `_EG_WT` guard, so it only ever saw a command whose FIRST directory git had confirmed as a
+# linked worktree of this repository. Every other first directory — the main checkout, a
+# records directory under it, `/tmp` — left `_EG_WT` empty, skipped the whole block, and the
+# commit was judged at the run's `current:` with no word said about the second `cd`. That is
+# the shape a consumer actually wrote (`cd <records-dir>; …; cd <tree> && git commit`) and
+# the shape that produced an unrelated wave-level refusal instead of an answer.
+#
+# NOTHING IN THE TEXT SAYS WHICH DIRECTORY OBEYS, and that is true whatever the first one is:
+# a `;` runs the rest wherever the shell is standing, a failed `cd` leaves it in the old
+# place, and a `&&` only looks decisive. So the refusal is a property of the COMMAND and the
+# arm is asked before any directory is resolved. Driven from the same `current: 5` fixture,
+# with an ordinary directory (the main checkout's own record/ tree) in first position — the
+# one position that used to buy silence.
+s25r_amb="cd $s25r_main/.bionic/docs/record/w25g; printf 'x\\n' > y.md; cd $s25r_tmp/wt-T3 && git commit -m \"x\""
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "$s25r_amb"
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25r_main/.bionic/docs/record/w25g" <<<"$HOOK_VSTDERR" \
+   && grep -qF "$s25r_tmp/wt-T3" <<<"$HOOK_VSTDERR" \
+   && grep -qF "git -C <dir> commit" <<<"$HOOK_VSTDERR"; then
+  ok "25g(j2) AC-3.1 two directories before the commit are refused when the FIRST is an ordinary directory too"
+else
+  no "25g(j2) AC-3.1 two directories before the commit are refused when the FIRST is an ordinary directory too" \
+    "expected exit 2 'two directories are named before the commit' naming both dirs and git -C; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the control that keeps it from becoming "any cd is a refusal": the SAME first
+# directory, one `cd`, is judged at `current:` exactly as 25g(i) and 25g(d) are.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_main/.bionic/docs/record/w25g || exit 1; git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+   && ! grep -qF "two directories" <<<"$HOOK_STDERR"; then
+  ok "25g(j2) …and ONE cd into that same directory is still judged at current: 5, not refused as ambiguous"
+else
+  no "25g(j2) …and ONE cd into that same directory is still judged at current: 5, not refused as ambiguous" \
+    "expected the Step-5 refusal and no ambiguity line; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
 # --- 25g(k) / AC-1.1: the row stands where the run stands, and it is ACTIVE ---------------
 #
 # THE SUBJECT IS RESOLVED BEFORE ANY ARM JUDGES (wave-17 REQ-1, D1, ADR-031). Row T5 sits at
@@ -4688,6 +4729,118 @@ unset -f _eg_wt_name
 eg_wt_extract "$EGWT_WALLS"
 expect_eq "25g(o) …and the real copy still agrees, restored after the mutation proof" \
   "$(eg_wt_root_at "$s25r_tmp/wt-T3")" "$(_eg_wt_name "$s25r_tmp/wt-T3")"
+
+# --- 25g(p)-(q): ANOTHER REPOSITORY'S TREE IS OUTSIDE THIS RUN (wave-17 REQ-4, T1) --------
+#
+# WHAT WENT WRONG (bug 7). A commit made in a linked worktree of a DIFFERENT repository
+# reaches this gate whenever the session's project is this one: `_eg_wt_name` reads the
+# tree's `.git` file and answers a name, `_eg_git_wt_name` asks git and finds the common dir
+# is not this repository's, and the arm declines — correctly, because this plan's register
+# has nothing to say about that tree. But the decline fell THROUGH to the run's own
+# `current:`, so the other repository's commit was judged by this run's Verify arm and
+# refused for a floor it has no part in producing. The gate had already said out loud that it
+# could not place the commit; it then judged it anyway.
+#
+# THE EXEMPTION IS NOT THE DECLINE. `_eg_git_wt_name` used to `return 0` with `_EG_GITWT`
+# empty for every failure alike — no git, an old git, a deleted directory, a bare repository,
+# a forged `.git` file, another repository's tree. Only the last of those is a tree git
+# positively placed somewhere else, and only it is exempt; everything else is still a decline
+# judged at `current:`. 25g(i) above is the discrimination: a forged `.git` naming row T3's
+# tree gets no exemption, because git never answered for it at all.
+#
+# A SECOND REAL REPOSITORY, never a hand-planted file: `git worktree add` in a scratch repo
+# of its own, so the common dir the arm compares is one git itself wrote.
+s25x_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25x_tmp")
+s25x_other="$s25x_tmp/other"
+mkdir -p "$s25x_other"
+git -C "$s25x_other" init -q .
+git -C "$s25x_other" commit -q --allow-empty -m init
+git -C "$s25x_other" worktree add -q "$s25x_tmp/other-wt" -b s25x-wt
+s25x_wt="$s25x_tmp/other-wt"
+# The expected common dir is derived from the FIXTURE's own layout — `<other repo>/.git` —
+# and never from the `git rev-parse` the arm itself runs, or the pin would be the code
+# agreeing with itself.
+s25x_common="$s25x_other/.git"
+
+expect_eq "25g(p) the foreign tree really is a LINKED worktree (its .git is a file)" "file" \
+  "$(if [ -f "$s25x_wt/.git" ]; then echo file; elif [ -d "$s25x_wt/.git" ]; then echo dir; else echo none; fi)"
+expect_contains "25g(p) …whose gitdir points into the OTHER repository, not this fixture's" \
+  "$s25x_common/worktrees/other-wt" "$(cat "$s25x_wt/.git")"
+expect_ne "25g(p) …and that common dir is not the bound plan's repository" \
+  "$s25r_main/.git" "$s25x_common"
+
+# --- 25g(p) / AC-4.1: the foreign tree is exempt, and the line names the boundary ---------
+#
+# The bound plan is the SAME `current: 5` fixture with the red Step-5 block that refuses
+# 25g(d), 25g(f), 25g(i) and 25g(k2). If the exemption were not there this commit would be
+# refused for `pass=331` like all of them, which is what makes the allow below a verdict
+# about the repository boundary and not about a lenient fixture.
+s25x_note="evidence-gate: $s25x_wt is a linked worktree of another repository ($s25x_common) — this run's step arms do not apply"
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25x_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25x_note" ]; then
+  ok "25g(p) AC-4.1 a commit from another repository's linked worktree is exempt, and one line names the tree and the repository"
+else
+  no "25g(p) AC-4.1 a commit from another repository's linked worktree is exempt, and one line names the tree and the repository" \
+    "expected exit 0 and exactly '$s25x_note'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(q) / AC-4.3: the always-on guards are not exempt with it -------------------------
+#
+# THE EXEMPTION IS THE EVIDENCE GATE'S ALONE. It says this RUN's step arms do not reach that
+# tree; it does not say bionic is off there. The walls that never read a plan — farm-out here,
+# and the background-suite guard beside it — are folded into the SAME process as the gate, so
+# an exemption spelled as an early `exit 0` out of the gate's own subshell must leave them
+# standing. A foreign tree is not a corner of the machine where a suite runs on the
+# orchestrator thread.
+#
+# ITS OWN RUNNER, AND THE REASON (fixture fidelity, per .claude memory
+# fixtures-can-pin-away-the-test). Every runner above posts `{session_id, tool_input, cwd}`,
+# because the evidence gate reads no more than that — but `wall_farm_out_reminder` screens on
+# `.tool_name` (walls.sh) and a payload without it returns before classifying anything. The
+# real PreToolUse envelope always carries it, so the omission is the fixtures' and not the
+# platform's; this arm posts the field rather than widening 460 other payloads to reach one
+# wall. The deny channel exits 0 and renders JSON on stdout beside its line on stderr, so both
+# streams are captured here.
+s25x_run_bash() {  # <project_dir> <payload cwd> <command> -> S25X_OUT, S25X_ERR, S25X_RC
+  local home_dir project_dir payload_cwd command input tmp_err
+  home_dir="$(make_home)"; project_dir="$1"; payload_cwd="$2"; command="$3"
+  input=$(jq -n --arg c "$command" --arg cwd "$payload_cwd" --arg s "$EG_SID" \
+            '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Bash",
+              tool_input: {command: $c}, cwd: $cwd}')
+  tmp_err=$(mktemp)
+  S25X_OUT=$(HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" \
+    bash "$HOOK" <<< "$input" 2>"$tmp_err") && S25X_RC=0 || S25X_RC=$?
+  S25X_ERR=$(cat "$tmp_err"); rm -f "$tmp_err"
+}
+
+# The control first: the SAME runner, the same tree, an ordinary command no wall classifies —
+# so the two arms below cannot both be "this runner always refuses".
+s25x_run_bash "$s25r_main" "$s25x_wt" 'echo hello'
+if [ "$S25X_RC" -eq 0 ] && ! grep -qF "belongs in a subagent" <<<"$S25X_ERR"; then
+  ok "25g(q) an ordinary command from the foreign tree is not refused by any wall"
+else
+  no "25g(q) an ordinary command from the foreign tree is not refused by any wall" \
+    "expected silence; rc=$S25X_RC stderr='$S25X_ERR'"
+fi
+
+s25x_run_bash "$s25r_main" "$s25x_wt" 'bash tests/run.sh'
+if grep -qF "belongs in a subagent" <<<"$S25X_ERR" \
+   && grep -qF '"permissionDecision":"deny"' <<<"$S25X_OUT"; then
+  ok "25g(q) AC-4.3 a suite command from the exempt foreign tree still meets the farm-out wall"
+else
+  no "25g(q) AC-4.3 a suite command from the exempt foreign tree still meets the farm-out wall" \
+    "expected the farm-out deny on both streams; rc=$S25X_RC stdout='$S25X_OUT' stderr='$S25X_ERR'"
+fi
+
+# …and the override still works from there, so the arm above is the wall's verdict and not a
+# property of the tree.
+s25x_run_bash "$s25r_main" "$s25x_wt" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
+if ! grep -qF "belongs in a subagent" <<<"$S25X_ERR"; then
+  ok "25g(q) …and FARM_OUT_ALLOW=1 from the same tree is sanctioned as anywhere else"
+else
+  no "25g(q) …and FARM_OUT_ALLOW=1 from the same tree is sanctioned as anywhere else" \
+    "expected no farm-out refusal under the override; rc=$S25X_RC stderr='$S25X_ERR'"
+fi
 
 # ============================================================
 # Section 26: the walk-artifact arm (AC-1, AC-2)
