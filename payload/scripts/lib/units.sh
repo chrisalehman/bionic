@@ -324,11 +324,13 @@ units_ready() {
 
 # units_validate <plan> -> one line per broken invariant; exit 1 if any, else 0.
 #
-# `worktree` HAS NO INVARIANT. It is a free-form name written by the dispatcher — whatever
-# git called the tree — and there is nothing here that could check it against the machine
-# without this library growing a git dependency it has never had. The gate resolves a name it
-# cannot match to a row by judging at `current:` and saying so, which is the fail-safe
-# direction; a wall here would refuse plans for trees that had simply been torn down.
+# `worktree` AND `base` EACH CARRY ONE INVARIANT, and both stop short of the machine: an
+# `active` row must name a tree (§12), and a `base` cell, when it holds anything, must be a
+# 7–40 hex commit id or one of the four spellings of "declared nothing" — em dash, hyphen,
+# blank, empty (§13). Neither arm asks git whether the name or the id is real — this library
+# stays a pure function of a file — so the gate that does fork git still judges at `current:`
+# and says so when a name doesn't resolve, which is the fail-safe direction; a wall here would
+# refuse plans for trees that had simply been torn down.
 #
 # THE INVARIANTS (spec Design §1 "Task", verbatim): id unique and matching `^T[0-9]+$`; step
 # in 3–9; kind in build · test · verify · review · doc · integrate · close · prototype;

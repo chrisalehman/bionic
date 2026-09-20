@@ -1242,7 +1242,7 @@ expect_eq "12.10 units_has_column is what tells the two fixtures apart" "0 1" \
      "$(call_rc units_has_column "$SANDBOX/active-no-column.md" worktree)")"
 
 # ============================================================
-section "13 — the transitive arm names EVERY unreached step-4 row (wave-17 REQ-5, AC-5.2)"
+section "14 — the transitive arm names EVERY unreached step-4 row (wave-17 REQ-5, AC-5.2)"
 # ============================================================
 #
 # WHY THIS SECTION EXISTS. The arm used to `break` after the first Step-4 row an offending
@@ -1270,18 +1270,18 @@ THREE_EOF
 
 VAL_THREE="$(call units_validate "$SANDBOX/three-missing.md")"
 
-expect_eq "13.1 a Step-5 row missing three step-4 rows reports three violations" "3" \
+expect_eq "14.1 a Step-5 row missing three step-4 rows reports three violations" "3" \
   "$(nlines "$VAL_THREE")"
-expect_contains "13.2 …naming the first" \
+expect_contains "14.2 …naming the first" \
   "T9: step 5 does not depend transitively on step-4 row T3" "$VAL_THREE"
-expect_contains "13.3 …the second" \
+expect_contains "14.3 …the second" \
   "T9: step 5 does not depend transitively on step-4 row T4" "$VAL_THREE"
-expect_contains "13.4 …and the third" \
+expect_contains "14.4 …and the third" \
   "T9: step 5 does not depend transitively on step-4 row T5" "$VAL_THREE"
-expect_eq "13.5 …and exits 1" "1" "$(call_rc units_validate "$SANDBOX/three-missing.md")"
+expect_eq "14.5 …and exits 1" "1" "$(call_rc units_validate "$SANDBOX/three-missing.md")"
 # THE ROW IT DOES REACH IS NOT ACCUSED, and neither is the Step-3 row: only Step-4 rows are
 # owed, and only the unreached ones are named.
-expect_eq "13.6 the reached step-4 row and the step-3 row draw nothing" "" \
+expect_eq "14.6 the reached step-4 row and the step-3 row draw nothing" "" \
   "$(printf '%s\n' "$VAL_THREE" | /usr/bin/grep -E 'step-4 row (T1|T2)$')"
 
 # THE MUTATION ARM. Put the `break` back into a scratch copy of the shipped library: the
@@ -1295,7 +1295,7 @@ awk '{ print }
   "$LIB" > "$MUTANT_BREAK"
 MUTANT_BREAK_OUT="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_validate "$2"' \
   _ "$MUTANT_BREAK" "$SANDBOX/three-missing.md")"
-expect_eq "13.7 the shipped library reports three; the mutant that breaks reports one" \
+expect_eq "14.7 the shipped library reports three; the mutant that breaks reports one" \
   "3 1" "$(nlines "$VAL_THREE") $(nlines "$MUTANT_BREAK_OUT")"
 
 
