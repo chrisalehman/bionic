@@ -16,20 +16,27 @@
 #   §3  AC-E1.5. `BIONIC_WALL_VERBOSE=1` puts `detail` on the user stream, in every
 #       mode, and its absence keeps it off the modes that have somewhere else to put it.
 #   §4  the model stream's shape per mode: `deny` carries `detail` in
-#       `permissionDecisionReason`, `block` in `reason`, and `exit2` carries the one
-#       line and nothing else — its single wire is the user's, so D-1 keeps `detail`
-#       off it entirely and `BIONIC_WALL_VERBOSE=1` is the only way back to it.
+#       `permissionDecisionReason`, `block` in `reason`, and `exit2` carries the verdict
+#       and the detail on the one wire it has for both readers, so what the model reads
+#       there is what the reader reads (ADR-030).
 #   §5  the fail-closed properties. `refuse` exits and never returns to a call site
 #       that could then wave the action through, and every path out of it — including
 #       every authoring error — leaves a non-zero status or a blocking JSON verdict.
+#   §6  ADR-030, with `BIONIC_WALL_VERBOSE` UNSET — the state a real refusal runs in and
+#       the one no other detail assertion in this tree is taken in: an `exit2` wall's
+#       computed detail reaches the reader, at most twelve lines of it plus a `+N more`.
 #
-# THE SHAPES ARE ASSERTED LITERALLY, NOT READ BACK OUT OF THE TABLE. §2's exit2 row
-# says "exactly one line, and the detail is not on it" as a literal expectation, not
-# as `refuse_channel exit2 detail_to_user`. A suite that asks the library what to
-# expect and then checks the library did it agrees with itself for any value of the
-# cell. Task 12 owned that cell and flipped it to `no` (ruling D-1, "a refusal is a
-# sentence with a pointer"); this row went red on that flip and was edited on
-# purpose, in task 13, which is exactly what it is here to force.
+# THE SHAPES ARE ASSERTED LITERALLY, NOT READ BACK OUT OF THE TABLE. §2's exit2 rows say
+# what the stream IS — a verdict line, then the detail behind it — as a literal
+# expectation, never as `refuse_channel exit2 detail_to_user`. A suite that asks the
+# library what to expect and then checks the library did it agrees with itself for any
+# value of the cell, which is the one thing these rows exist to make impossible.
+#
+# THE CELL HAS MOVED TWICE, AND BOTH TIMES THESE ROWS WENT RED AND WERE EDITED ON PURPOSE.
+# Task 12 flipped it to `no` under ruling D-1 ("a refusal is a sentence with a pointer",
+# 2026-09-07) and task 13 re-authored them; epic-23 wave-16 T4 flipped it back to `yes`
+# under ADR-030 ("a refusal prints what it knows", 2026-09-19) and re-authored them again.
+# A pin that had read the cell would have gone green through both.
 #
 # EVERY ASSERTION HAS A MUTANT. Each section drives a scratch copy of refuse.sh with
 # exactly one guard removed and requires the copy to fail where the shipped file
@@ -230,10 +237,10 @@ expect_eq "1n block is model-only, on PreToolUse and on Stop alike" \
 expect_eq "1o exit2 is NOT model-only: one wire carries both halves" \
   "no" "$(cell exit2 model_only)"
 
-# (d) FIELD 9, the switch task 12 owns. Asserted by value so the ruling is a
+# (d) FIELD 9, the switch ADR-030 moved. Asserted by value so the ruling is a
 # deliberate edit here and not a silent library change.
-expect_eq "1p exit2 does NOT put detail on the user stream — ruling D-1 flipped this cell" \
-  "no" "$(cell exit2 detail_to_user)"
+expect_eq "1p exit2 DOES put detail on the user stream — ADR-030 flipped this cell back" \
+  "yes" "$(cell exit2 detail_to_user)"
 expect_eq "1q deny does not: it has a model-only channel" "no" "$(cell deny detail_to_user)"
 expect_eq "1r block does not, for the same reason" "no" "$(cell block detail_to_user)"
 
@@ -250,13 +257,13 @@ section "2 — AC-E1.3: the user stream is one line, in the criterion's shape"
 # fails-when: two lines, or a fix over six words. Both halves are driven below, and
 # both have a mutant.
 #
-# ALL THREE MODES AGREE ON THE USER STREAM, AND THE REASON DIFFERS. `deny` and
-# `block` have a model-only channel, so their user stream is one line because the
-# detail has somewhere else to be. `exit2` has ONE wire for both halves, and ruling
-# D-1 ("a refusal is a sentence with a pointer") spends it on the line alone: the
-# detail goes to the hook's log and to `BIONIC_WALL_VERBOSE=1`, never to the reader
-# who is being interrupted. Each is spelled out here rather than derived from the
-# table.
+# THE THREE MODES AGREE ON THE VERDICT AND NOT ON WHAT FOLLOWS IT. `deny` and `block`
+# have a model-only channel, so their user stream is one line and the detail has somewhere
+# else to be. `exit2` has ONE wire for both halves: ruling D-1 spent it on the line alone
+# and ADR-030 spends it on the line plus the bounded detail, because a detail that reaches
+# neither reader is a fault the wall already diagnosed and then withheld. Either way the
+# VERDICT is one line in the criterion's shape, which is what AC-E1.3 asks. Each is
+# spelled out here rather than derived from the table.
 
 # --- (a) deny and block: exactly one line on the user stream. ---
 for _m in deny block; do
@@ -269,18 +276,21 @@ for _m in deny block; do
     "A path-qualified" "$DRV_ERR"
 done
 
-# --- (b) exit2: the one line, and nothing after it. Its single wire is the user's,
-# so the detail is not on it either — the positive (2e/2e2) and the negative (2g)
-# are asserted together, because "the detail is absent" is worthless beside a stream
-# that is empty for some other reason. ---
+# --- (b) exit2: one verdict line, and the detail behind it. Its single wire is the
+# user's, so ADR-030 puts the detail on it — and the shape rows (2e/2e2/2f) are asserted
+# together with the content row (2g), because "the verdict is one line" is worthless
+# beside a stream that carries nothing else and "the detail is there" is worthless beside
+# a stream whose first line has stopped being the verdict. ---
 drive "$LIB" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
 expect_regex "2e exit2: the FIRST line matches AC-E1.3's shape" "$USER_LINE_RE" "$DRV_ERR_1"
 expect_eq "2e2 exit2: …spelled from the object's four fields" \
   "bionic: $FX_VERB refused — $FX_FACT ($FX_FIX)" "$DRV_ERR_1"
-expect_eq "2f exit2: …and it is the WHOLE stream — exactly one line, no blank, no detail" \
-  "1" "$DRV_ERR_LINES"
-expect_absent "2g exit2: the detail is not on the wire the user reads (ruling D-1)" \
+expect_eq "2f exit2: …and the verdict is exactly ONE line of the stream — it does not wrap" \
+  "1" "$(printf '%s\n' "$DRV_ERR" | /usr/bin/grep -c '^bionic: ')"
+expect_contains "2g exit2: …with the detail on the same wire behind it (ADR-030 superseded D-1)" \
   "A path-qualified" "$DRV_ERR"
+expect_eq "2g2 exit2: …and a blank line between the two, so the verdict reads as a sentence" \
+  "" "$(sed -n '2p' "$SANDBOX/.err")"
 expect_eq "2h exit2: nothing at all on stdout (stdout is the JSON modes' wire)" "" "$DRV_OUT"
 
 # --- (c) with no detail, every mode's user stream is one line and only one. ---
@@ -446,18 +456,20 @@ expect_contains "4h block: reason opens with the user line" \
   "bionic: $FX_VERB refused — $FX_FACT ($FX_FIX)" "$BLOCK_REASON"
 expect_contains "4i block: …and carries the detail" "A path-qualified" "$BLOCK_REASON"
 
-# exit2 has no second channel: the model reads the same stderr the user does, so
-# under D-1 the model gets the one line and the detail is the log's and the knob's.
-# That is the D4 degradation named in refuse.sh's header, and it is why a migrated
-# wall's `detail` must also be worth reading in the hook's own log.
+# exit2 has no second channel: the model reads the same stderr the user does. Under D-1
+# that meant the model got the one line and the detail was the log's and the knob's — the
+# D4 degradation named in refuse.sh's header. ADR-030 ends it in the only way one wire
+# allows, by giving both readers the detail, which is why the knob has nothing left to add
+# on this mode (4k2).
 drive "$LIB" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
 expect_contains "4j exit2: stderr carries the one line, which is what the model reads" \
   "bionic: $FX_VERB refused — $FX_FACT ($FX_FIX)" "$DRV_ERR_1"
-expect_absent "4k exit2: …and the detail is not on it, in either direction" \
+expect_contains "4k exit2: …and the detail is on it too, in both directions (ADR-030)" \
   "A path-qualified" "$DRV_ERR"
+EXIT2_KNOB_OFF="$DRV_ERR"
 drive_v 1 "$LIB" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
-expect_contains "4k2 exit2: the knob is the way back to it, on the same wire" \
-  "A path-qualified" "$DRV_ERR"
+expect_eq "4k2 exit2: the knob adds nothing here — this channel already carries the detail" \
+  "$EXIT2_KNOB_OFF" "$DRV_ERR"
 
 # THE ESCAPER, on the shapes that break a hand-rolled one: a lone backslash before a
 # quote, a tab, a carriage return. A refusal naming a Windows path or a regex is not
@@ -552,5 +564,122 @@ SRC_OUT="$(bash -c '. "$1"' _ "$LIB" 2>&1)"
 expect_empty "5g sourcing refuse.sh alone prints nothing and needs no other library" "$SRC_OUT"
 expect_true "5h …and defines the whole interface" \
   bash -c '. "$1"; declare -F refuse >/dev/null && declare -F refuse_channel >/dev/null && declare -F refuse_modes >/dev/null' _ "$LIB"
+
+# ============================================================
+section "6 — ADR-030: an exit2 refusal prints the detail it computed, bounded"
+# ============================================================
+#
+# THE DEFECT THIS SECTION EXISTS FOR (seed A §8a, carry-over 8, research R2, ADR-030).
+# Field 9 shipped `no` for `exit2` under ruling D-1, and `exit2` has ONE wire: the evidence
+# gate computed the whole `units_validate` violation list, handed it to `refuse`, and the
+# list reached neither reader. A consumer's orchestrator read "that dispatched task's row is
+# invalid (fix the row the detail names)" and sourced the validator by hand to learn which
+# row. ADR-030 flips the cell and bounds what prints instead of spending the wire on the
+# headline alone.
+#
+# EVERY ROW HERE RUNS WITH THE KNOB UNSET, which is the state a real refusal runs in and
+# the seam that hid the defect for three releases: §3's rows pass either way because they
+# SET `BIONIC_WALL_VERBOSE`, so not one of them could express this. `drive` passes an empty
+# value, which also masks an inherited one from the environment.
+#
+# THE BOUND IS ON WHAT PRINTS, NOT ON WHAT THE MODEL READS (A-T4.1). Twelve is the number
+# the terminal paints before it folds the rest away — the `exit2` row's own field 6, measured
+# on CLI 2.1.263 — so the fold applies where `detail` lands on the USER stream. A channel
+# whose `detail` is model-only (`deny`, `block`) still carries its whole list to the model:
+# wave-12 T17's combined findings list is tens of lines and rides that field precisely
+# because the measurement proved it arrives in full. 6p/6q pin both halves of that split.
+#
+# fails-when: an exit2 refusal prints one line with the knob unset; or a thirty-line detail
+# prints thirty lines; or the `+N more` line is absent or names the wrong count; or the
+# bound is off by one at twelve or thirteen; or the fold reaches a model-only channel.
+# [REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]
+
+# --- (a) AC-2.1 at the library: the detail is on the wire the reader reads. ---
+drive "$LIB" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
+expect_regex "6a exit2, knob unset: the first line is still the one-line verdict" \
+  "$USER_LINE_RE" "$DRV_ERR_1"
+expect_contains "6b …and the detail it computed is on the wire behind it (ADR-030)" \
+  "A path-qualified" "$DRV_ERR"
+expect_eq "6c …separated from the verdict by one blank line" "" "$(sed -n '2p' "$SANDBOX/.err")"
+expect_eq "6d …carrying the whole three-line detail and nothing more" "5" "$DRV_ERR_LINES"
+expect_status "6d2 …and it still blocks by status" "2" "$DRV_RC"
+
+# --- (b) AC-2.2 the bound, driven through the same real call site. Thirty lines in,
+# twelve out, and one line naming the eighteen that were dropped. ---
+FX_D30="$(awk 'BEGIN { for (i = 1; i <= 30; i++) printf "D%02d a violation line\n", i }')"
+drive "$LIB" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_D30"
+expect_contains "6e a thirty-line detail: the twelfth line prints" "D12 a violation line" "$DRV_ERR"
+expect_absent "6f …and the thirteenth does not" "D13 a violation line" "$DRV_ERR"
+expect_absent "6g …nor the thirtieth" "D30 a violation line" "$DRV_ERR"
+expect_contains "6h …with one line naming how many were dropped" "+18 more" "$DRV_ERR"
+expect_eq "6i …so the stream is fifteen lines: the verdict, a blank, twelve, the count" \
+  "15" "$DRV_ERR_LINES"
+expect_regex "6j …and the verdict is still the first line, untouched by the fold" \
+  "$USER_LINE_RE" "$DRV_ERR_1"
+expect_eq "6k …with the count line last, and nothing after it" "+18 more" \
+  "$(sed -n '15p' "$SANDBOX/.err")"
+
+# --- (c) THE HELPER'S OWN EDGES, as a unit: 0 prints nothing, 12 prints twelve with no
+# count line, 13 prints twelve and `+1 more`. A bound asserted only at thirty cannot tell
+# twelve from eleven. ---
+fold_detail() { bash -c '. "$1"; _refuse_fold_detail "$2"' _ "$LIB" "${1:-}"; }
+require_helpers fold_detail
+FX_D12="$(awk 'BEGIN { for (i = 1; i <= 12; i++) printf "L%02d\n", i }')"
+FX_D13="$(awk 'BEGIN { for (i = 1; i <= 13; i++) printf "L%02d\n", i }')"
+expect_eq "6l the helper on no detail at all emits nothing" "" "$(fold_detail "")"
+expect_eq "6m …on exactly twelve lines emits twelve" "12" \
+  "$(fold_detail "$FX_D12" | wc -l | tr -d ' ')"
+expect_absent "6n …and no count line, because none were dropped" "more" "$(fold_detail "$FX_D12")"
+expect_eq "6o …on thirteen it emits thirteen: the twelve and the count" "13" \
+  "$(fold_detail "$FX_D13" | wc -l | tr -d ' ')"
+expect_eq "6p …whose twelfth line is the twelfth line in, unrewritten" "L12" \
+  "$(fold_detail "$FX_D13" | sed -n '12p')"
+expect_eq "6q …and whose last line names the one it dropped" "+1 more" \
+  "$(fold_detail "$FX_D13" | sed -n '13p')"
+
+# --- (d) THE SPLIT IS UNCHANGED FOR THE MODEL-ONLY CHANNELS. `deny` and `block` keep
+# their `detail_to_user=no` cell, so the reader still gets one line there, and their
+# model wire still carries the whole list — the property wave-12 T17's combined refusal
+# depends on (tests/fold.test.sh 13i, tests/dispatch-preflight.test.sh §combined-deny). ---
+drive "$LIB" deny "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_D30"
+expect_eq "6r deny: the user stream is still exactly one line — the flip is exit2's alone" \
+  "1" "$DRV_ERR_LINES"
+expect_contains "6s …while the model's wire still carries the thirtieth line, unfolded" \
+  "D30 a violation line" "$DRV_OUT"
+expect_absent "6t …and no count line was spliced into it" "+18 more" "$DRV_OUT"
+
+# --- (e) THE MUTANTS. Both halves of ADR-030 have one: the cell, and the fold. ---
+mutant m-cell 's/refuse_channel "\$mode" detail_to_user/echo no/' 'refuse_channel "$mode" detail_to_user'
+M_CELL="$MUT_PATH"
+drive "$M_CELL" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_DETAIL"
+expect_absent "6u MUTANT with the cell forced back to no, exit2's detail vanishes again" \
+  "A path-qualified" "$DRV_ERR"
+expect_eq "6v MUTANT …and the user stream is the one line the defect shipped (the arm discriminates)" \
+  "1" "$DRV_ERR_LINES"
+
+mutant m-bound 's/_refuse_fold_detail "\$detail"/printf %s "\$detail"/' '_refuse_fold_detail "$detail"'
+M_BOUND="$MUT_PATH"
+drive "$M_BOUND" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_D30"
+expect_contains "6w MUTANT without the fold the thirtieth line prints (the bound is what stops it)" \
+  "D30 a violation line" "$DRV_ERR"
+expect_absent "6x MUTANT …and no count line is emitted at all" "+18 more" "$DRV_ERR"
+expect_eq "6y MUTANT …so the stream is the whole thirty-two lines the call site handed it" \
+  "32" "$DRV_ERR_LINES"
+# [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]
+
+# --- (f) THE KNOB IS STILL PURE ADDITION, AND THESE TWO ROWS SIT OUTSIDE THE MARKED SPAN
+# BECAUSE OF IT (A-T4.2). Two readers reach `detail` on the user stream: one did not ask
+# for it and gets the bounded twelve, because twelve is what that reader's terminal paints;
+# the other typed `BIONIC_WALL_VERBOSE=1` to see the facts, and bounding what they asked
+# for would delete diagnostics on the one path whose purpose is to show them (the
+# stop-guard arms in tests/cross-gate-agreement.test.sh read exactly such a line out of an
+# eighteen-line detail). The asymmetry is the decision, so it is pinned rather than
+# discovered. The span above is the knob-UNSET harness AC-2.3 holds to that rule, and a
+# knob-on row inside it would read as a breach of the very thing it marks. ---
+drive_v 1 "$LIB" exit2 "$FX_VERB" "$FX_FACT" "$FX_FIX" "$FX_D30"
+expect_contains "6z with the knob set the thirtieth line prints too — the knob only adds" \
+  "D30 a violation line" "$DRV_ERR"
+expect_absent "6z2 …and no count line, because nothing was held back" "+18 more" "$DRV_ERR"
+expect_eq "6z3 …so the whole thirty-two lines are on the stream" "32" "$DRV_ERR_LINES"
 
 finish

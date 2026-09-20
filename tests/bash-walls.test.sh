@@ -267,11 +267,19 @@ expect_true "3d: …in manifest order, by line" \
 # against the originals at the base SHA — T23 report section 7.
 expect_eq "3e: exactly one user line per blocker — no more, no fewer" "2" \
   "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
-# …AND STILL NO `detail` ON THE exit2 WIRE. Ruling D-1 spends that channel's one stream
-# on the sentence alone; a fold composing two reasons must not start leaking the
-# paragraphs behind them onto a stream that never carried one.
-expect_absent "3f: the exit2 channel still carries no detail" \
-  "The destination this segment resolved to" "$ERR$OUT"
+# …AND THE `detail` RIDES THAT WIRE NOW (ADR-030, epic-23 wave-16). Ruling D-1 spent the
+# channel's one stream on the sentences alone; field 9 is `yes` for `exit2` since that
+# ruling was superseded, so the composed detail follows them, bounded at twelve lines.
+# WHAT 3e GUARDS IS UNCHANGED AND IS THE POINT: one SENTENCE per blocker, never two. The
+# fold's extra-lines branch used to print each later blocker's line because the detail
+# reached nobody; now that the detail carries that line itself, the branch stands down
+# (fold.sh, A-T4.6), and 3f2 is where a return of the doubling would show.
+expect_contains "3f: the exit2 channel carries the composed detail too" \
+  "The destination this segment resolved to" "$ERR"
+expect_eq "3f2: …with the second wall's sentence on it exactly once, not twice" "1" \
+  "$(printf '%s\n' "$ERR" | /usr/bin/grep -c 'sql refused')"
+expect_absent "3f3: …and none of it on stdout, which is the JSON modes' wire" \
+  "The destination this segment resolved to" "$OUT"
 
 # ---------------------------------------------------------------------------
 section "4 — a block and a model-facing nudge on one payload (R7)"
@@ -913,7 +921,15 @@ expect_status "15a: an off-budget suite is still refused" 2 "$ST"
 expect_contains "15a2: …and the DEFAULT (non-verbose) exit-2 stderr carries the FIRST allowed token" \
   "archive.test.sh" "$ERR"
 expect_contains "15a3: …and the SECOND" "run.sh" "$ERR"
-expect_eq "15a4: …still exactly one line" "1" "$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')"
+# ONE VERDICT LINE, AND A DETAIL BENEATH IT (ADR-030). Until field 9 flipped, "the stream
+# is one line" and "the verdict is one line" were the same measurement on `exit2`. AC-E1.3
+# asks for the second — a sentence the reader is interrupted by, never wrapped — so that is
+# what is counted, with the positive beside it so narrowing the count cannot pass over a
+# wall that went quiet.
+expect_eq "15a4: …still exactly one VERDICT line" "1" \
+  "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
+expect_eq "15a4b: …with its detail beneath it, no knob set" "yes" \
+  "$([ "$(printf '%s\n' "$ERR" | /usr/bin/grep -v '^bionic: ' | /usr/bin/grep -c .)" -ge 1 ] && echo yes || echo no)"
 if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
   ok "15a5: …and still in AC-E1.3's one-line shape"
 else
@@ -952,7 +968,12 @@ run_hook "$(mk_payload "$R15N" 'bash tests/gamma.test.sh' "$ACTOR" omit Bash tes
 expect_status "15d: a Suites: none row still refuses" 2 "$ST"
 expect_contains "15d2: …and the DEFAULT stderr says so honestly — 'none' on the wire" \
   "none" "$ERR"
-expect_absent "15d3: …never a fabricated suite token" "gamma.test.sh" "$ERR"
+# ON THE VERDICT LINE, which is where a fabricated token would do the damage: the line is
+# what the reader is interrupted by and what names the budget. The refused command itself
+# appears in the wall's `detail`, and since ADR-030 that detail is on the same stream, so a
+# whole-stream grep can no longer tell the two apart.
+expect_absent "15d3: …never a fabricated suite token on the verdict line" "gamma.test.sh" \
+  "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
 
 # (e) A WIDE BUDGET (A-orch-17's own incident: "the row carried a 38-suite set") still
 # fits ONE line — token boundaries, not a mid-name cut, and a "+N more" count for what
@@ -967,7 +988,8 @@ roster_row_fixture "session=$SID" name=t15wide "agent_id=$ACTOR" \
   >> "$R15W/.bionic/tmp/roster-$SID.state"
 run_hook "$(mk_payload "$R15W" 'bash tests/zzz-off-budget.test.sh' "$ACTOR" omit Bash test-runner)"
 expect_status "15e: an off-budget suite against a 38-suite row is refused" 2 "$ST"
-expect_eq "15e2: …still exactly one line" "1" "$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')"
+expect_eq "15e2: …still exactly one VERDICT line" "1" \
+  "$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ')"
 if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
   ok "15e3: …still in AC-E1.3's one-line shape (never overflows past refuse()'s own cap)"
 else
@@ -1009,8 +1031,11 @@ expect_status "15g1: an unexpanded name against a too-long single suite is still
 expect_contains "15g1: …and the line falls back to an honest count, never a cut name" \
   "1 suite" "$ERR"
 expect_absent "15g1: …never a mid-name character cut (the ellipsis glyph)" "…" "$ERR"
-expect_absent "15g1: …and never the truncated fragment itself" \
-  "tests/a-suite-name-far" "$ERR"
+# ON THE VERDICT LINE for the same reason as 15d3, and here the distinction is sharper
+# still: the wall's detail names the suite in FULL, and the full name begins with the
+# fragment a mid-name cut would leave. Only the line can answer whether anything was cut.
+expect_absent "15g1: …and never the truncated fragment itself on the verdict line" \
+  "tests/a-suite-name-far" "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
 if printf '%s' "$ERR" | /usr/bin/grep -qE "$WIRE_RE"; then
   ok "15g1: …still in AC-E1.3's one-line shape"
 else

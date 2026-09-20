@@ -2892,4 +2892,73 @@ assert_eq "8.4b silent" "" "$HOOK_STDERR"
 # machine-local and absent from a fresh clone, so a fixture reading it would degrade to a
 # vacuous pass on exactly the machines this arm protects (Section 38f's rule).
 
+# ============================================================
+section "R2 — AC-2.1: the invalid-Tasks Write refusal carries the offending row, knob UNSET (ADR-030)"
+# ============================================================
+#
+# WHAT THIS SECTION EXISTS FOR (seed A §8a, carry-over 8, research R2 row 4). The
+# AC-1e.5 section above drives this same wall and reads the offending id — out of
+# `$HOOK_VSTDERR`, the second drive, taken with `BIONIC_WALL_VERBOSE=1`. Under ruling D-1
+# the drive a real Write gets printed one sentence, so an orchestrator repairing its own
+# plan learned that the table was invalid and not which row, and this suite could not see
+# that because every one of its detail assertions reads the verbose stream (research R2's
+# seam-blindness row). ADR-030 flips the `exit2` channel's field 9; the runner below reads
+# the stream the CLI actually delivers.
+#
+# ITS OWN RUNNER, ON PURPOSE: `run_write` sets `$HOOK_VSTDERR` from a second drive with the
+# knob, which is the seam this section is about. One drive, the knob removed from the
+# environment rather than merely unset in it, and the whole stream kept.
+#
+# fails-when: the refusal prints one line with the knob unset, or the violation list names
+# no row.
+# [REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]
+GS_R2_EXIT=0; GS_R2_ERR=""
+r2_write_knob_unset() {  # <path> <content> -> GS_R2_EXIT + GS_R2_ERR
+  local file_path="$1" content="$2" input tmp_err
+  input=$(jq -n --arg p "$file_path" --arg c "$content" --arg s "$GS_SID" \
+    '{session_id: $s, tool_name: "Write", tool_input: {file_path: $p, content: $c}}')
+  tmp_err=$(mktemp)
+  if env -u BIONIC_WALL_VERBOSE HOME="$FAKE_HOME" CLAUDE_CODE_SESSION_ID="$GS_SID" \
+       bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+    GS_R2_EXIT=0
+  else
+    GS_R2_EXIT=$?
+  fi
+  GS_R2_ERR=$(cat "$tmp_err")
+  rm -f "$tmp_err"
+}
+require_helpers r2_write_knob_unset
+
+gs_r2_project=$(make_project)
+gs_r2_plan="$gs_r2_project/.bionic/docs/plans/epic-01-demo/r2.plan.md"
+gs_r2_tasks='
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 5 | verify | the verify | auditor | T1 | 30m | REQ-x | b.sh | doing |
+'
+r2_write_knob_unset "$gs_r2_plan" "$(build_plan)$gs_r2_tasks"
+
+expect_status "R2a an invalid Tasks table is still refused at Write, fail-closed" "2" "$GS_R2_EXIT"
+expect_eq "R2b …and the verdict is the first rendered line, unchanged" \
+  "bionic: write refused — this plan's Tasks table is invalid (fix the row the detail names)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R2c …with the offending row named behind it (AC-2.1)" \
+  "T2: status doing is not one of pending active landed dropped" "$GS_R2_ERR"
+expect_contains "R2d …and the Fix prose that names the columns" \
+  "repair each row named above" "$GS_R2_ERR"
+expect_eq "R2e …so the stream is no longer the one line the defect shipped" "no" \
+  "$([ "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -c .)" = "1" ] && echo yes || echo no)"
+expect_eq "R2f …and still exactly one rendered refusal line, not two" "1" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -c '^bionic: ')"
+
+# THE OTHER DIRECTION: the same plan with the status repaired is written in silence, so
+# R2c read a refusal rather than a hook that talks on every Write.
+r2_write_knob_unset "$gs_r2_plan" "$(build_plan)${gs_r2_tasks/| b.sh | doing |/| b.sh | pending |}"
+expect_status "R2g the repaired table is allowed" "0" "$GS_R2_EXIT"
+expect_empty "R2h …and prints nothing" "$GS_R2_ERR"
+# [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]
+
 finish
