@@ -647,6 +647,183 @@ return 0
 # RC IS THE SIGNAL, because a subshell cannot hand a variable back. 0 means the five files
 # are there and the caller may read them; 1 means they are not and the caller must not.
 # [WALL: tests/bash-walls.test.sh §11]
+# ─── line_field — a key read ANYWHERE on a line, not only at its start ───────
+#
+# WHY IT IS NOT `grep -E '^[[:space:]]*<key>:'` (wave-16 REQ-3, AC-3.3; seed B B11). A
+# `## SDLC State` evidence line is a SEMICOLON-SEPARATED RECORD, not a one-key line:
+#
+#     - Step 1: opened 2026-09-19T22:00Z; requirements: specs/<epic>/<wave>.requirements.md; card approved
+#
+# Every pointer read in this file anchored its key at line start, so a record whose pointer
+# is not the FIRST field carried a perfectly good path the gate could not see, and the
+# commit was refused "Step 1's evidence names no requirements file". The value still ends
+# at the first `;` — that truncation has been the contract since plan assumption A17 — and
+# the continuation-line shape (`  requirements: …` on its own line) is unaffected, because
+# a key at line start is a key anywhere on the line.
+#
+# THE LEFT BOUNDARY IS WHAT KEEPS IT HONEST: `pre-requirements:` and `walk-artifact-sha:`
+# are different fields, so the key must be preceded by the start of the line or by a
+# character that cannot be part of a key, and followed by optional blanks and a colon.
+# awk's `match` takes the LEFTMOST match, so a record naming the key twice reads the first.
+#
+# A HERE-STRING, not a pipe: `awk … exit` quits early, and walls.sh header's SIGPIPE rule
+# (T37, wave-14) applies to every early-quitting reader under `pipefail`, not only grep.
+line_field() {  # <text> <key> -> the value, or empty
+  awk -v k="$2" '
+    {
+      if (match($0, "(^|[^-_[:alnum:]])" k "[[:space:]]*:[[:space:]]*")) {
+        v = substr($0, RSTART + RLENGTH)
+        sub(/;.*$/, "", v)
+        sub(/[[:space:]]+$/, "", v)
+        print v
+        exit
+      }
+    }' <<< "$1"
+}
+
+# ─── plan_bring_forward — every version-14 shape fault, in one pass ──────────
+#
+# WHAT IT IS FOR (spec D8; REQ-3, AC-3.1; research R2 §2c-2d). A plan whose frontmatter
+# says it is at the supported contract version and whose BODY is pre-14 used to meet the fleet one arm
+# at a time — `requirements:`, then `approved-by:`, then `fails-when:`, then the Tasks shape
+# — because every arm refuses by calling `refuse`, and `refuse` EXITS (refuse.sh:91-94).
+# Worse, the reveal order was data-dependent on the previous repair: the "row ahead of the
+# run" arm reads cells a pre-14 table does not have, so widening the table is what CREATES
+# the next refusal (R2 §2d). A writer paid one round trip per fault and could not see the
+# size of the job from the first one.
+#
+# SO IT VALIDATES THE TARGET SHAPE, NOT THE CURRENT ONE, and it is a PREDICATE: it prints,
+# it never refuses, and the two callers — the governing-skill hook at Write/Edit and the
+# evidence gate at commit — render the identical list through the channel ADR-030 opened.
+#
+# WHEN IT FIRES, AND WHY THE TRIGGER IS NARROW. Two conditions, together:
+#   (a) the `## Tasks` table is MISSING at least one required column — the structural
+#       signature of a pre-14 body, and the one fault that cannot be an ordinary typo; and
+#   (b) at least one of the version-14 KEYS the plan owes at this step is absent.
+# Either alone is an ordinary fault with an arm of its own that names the repair better
+# than a list can, and those arms are untouched: a ten-column table with one bad row still
+# gets `units_validate`'s own refusal, and a plan missing only `approved-by:` still gets
+# the arm that explains what an approval is. This is the summary for the case where a
+# reader needs the SHAPE of the job, not the next line of it.
+#
+# THE LANE GUARD IS validate_dispatch_ledger's, verbatim (D7): wave|epic + `rigor: audited`
+# + `multi_agent: true`. Below it the checks this function folds are themselves inert, so
+# firing there would invent enforcement rather than summarise it.
+#
+# AT WALLS.SH TOP LEVEL, OUTSIDE `_eg_body`, ON PURPOSE. Sourcing this file must define
+# this function and nothing else the governing-skill hook could collide with — every helper
+# `_eg_body` carries (`frontmatter_get`, `block_get`, `is_placeholder_value`, …) is nested
+# inside it and is not defined by a source. Which is also why this function re-reads the
+# plan from the PATH instead of using them: it is a pure read-only validator over the
+# target shape (research R2 §3(d) route 2), and its callers hand it a path — the gate the
+# bound plan, the hook a temp copy of the posted content.
+_bf_fm_get() {  # <plan> <frontmatter key> -> its value, or empty
+  awk -v k="$2" '
+    NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; next }
+    /^---[[:space:]]*$/ { exit }
+    {
+      if (match($0, "^[[:space:]]*" k "[[:space:]]*:[[:space:]]*")) {
+        v = substr($0, RSTART + RLENGTH); sub(/[[:space:]]+$/, "", v); print v; exit
+      }
+    }' "$1"
+}
+
+_bf_section() {  # <plan> <exact "## Heading"> -> that section body, fence-aware
+  awk -v want="$2" '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ {
+      if (f) exit
+      if ($0 == want || index($0, want " ") == 1) { f = 1 }
+      next
+    }
+    f { print }
+  ' "$1"
+}
+
+plan_bring_forward() {  # <plan file> <step number> -> the list on stdout; rc 1 when it fires
+  local plan="${1:-}" step="${2:-0}"
+  local scale rigor multi units_out missing rowfaults
+  local state b1 matrix first_heading goal_body
+  local faults="" keys=0
+
+  [ -n "$plan" ] && [ -f "$plan" ] || return 0
+  case "$(_bf_fm_get "$plan" scale)" in wave|epic) : ;; *) return 0 ;; esac
+  [ "$(_bf_fm_get "$plan" rigor)" = "audited" ] || return 0
+  [ "$(_bf_fm_get "$plan" multi_agent)" = "true" ] || return 0
+
+  # (a) THE PRE-14 TABLE. `units_validate` is the one reader of `## Tasks` and already
+  # reports EVERY fault rather than the first (units.sh's own note) — it is the model this
+  # function generalises, and the only public verb that answers both halves here.
+  units_out="$(units_validate "$plan" 2>/dev/null)" || true
+  missing="$(printf '%s\n' "$units_out" | sed -n 's/^## Tasks: missing column //p' \
+             | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')"
+  [ -n "$missing" ] || return 0
+  rowfaults="$(printf '%s\n' "$units_out" | grep -v '^## Tasks: missing column ' || true)"
+
+  # (b) THE KEYS, each under the step guard its own arm carries: `requirements:` from
+  # current 2 (validate_requirements_pointer), `approved-by:` and `fails-when:` from 4
+  # (validate_approved_by, validate_fails_when). A key not yet owed is not a fault.
+  state="$(_bf_section "$plan" '## SDLC State')"
+  if [ "${step:-0}" -ge 2 ] 2>/dev/null; then
+    b1="$(awk '
+      /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:/ { f = 1; print; next }
+      f {
+        if ($0 ~ /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+[0-9]+[ab]?[[:space:]]*:/) exit
+        if ($0 ~ /^[^[:space:]]/) exit
+        print
+      }' <<< "$state")"
+    if [ -z "$(line_field "$b1" requirements)" ]; then
+      faults="${faults}## SDLC State: the Step 1 evidence names no 'requirements:' pointer
+"
+      keys=$((keys + 1))
+    fi
+  fi
+  if [ "${step:-0}" -ge 4 ] 2>/dev/null; then
+    if [ -z "$(line_field "$state" approved-by)" ]; then
+      faults="${faults}## SDLC State: no 'approved-by:' line
+"
+      keys=$((keys + 1))
+    fi
+    # THE MATRIX HALF IS COARSER THAN validate_fails_when ON PURPOSE (A-T5): that arm
+    # judges each AC BLOCK and names the row; this one asks whether the section carries the
+    # key AT ALL, which is the question a pre-14 matrix answers no to. Naming one row here
+    # would duplicate `matrix_block` — the twin-that-drifts this repo spends real effort
+    # avoiding — for a list that exists to size the job, not to walk it.
+    matrix="$(_bf_section "$plan" '## Verification Matrix')"
+    if grep -qE '^[[:space:]]*\|' <<< "$matrix" \
+       && ! grep -qE '(^|[^-_[:alnum:]])fails-when[[:space:]]*:' <<< "$matrix"; then
+      faults="${faults}## Verification Matrix: no AC block names a 'fails-when:'
+"
+      keys=$((keys + 1))
+    fi
+  fi
+
+  # `## Goal` IS IN THE LIST BUT NOT IN THE TRIGGER. It is a Write-side arm (AC-K5.4) with
+  # no twin at the gate, so letting it ARM this predicate would make the gate refuse plans
+  # it admits today; reporting it once the predicate has already fired costs nothing and is
+  # what makes the Write-side and commit-side lists identical (AC-3.1).
+  first_heading="$(awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^## / { print; exit }' "$plan")"
+  case "$first_heading" in
+    '## Goal'|'## Goal '*)
+      goal_body="$(_bf_section "$plan" '## Goal')"
+      grep -qE '[^[:space:]]' <<< "$goal_body" || faults="${faults}## Goal: the section is empty
+" ;;
+    *) faults="${faults}## Goal: the first section is not '## Goal'
+" ;;
+  esac
+
+  [ "$keys" -ge 1 ] || return 0
+
+  printf '## Tasks: the table is missing columns: %s\n' "$missing"
+  [ -n "$rowfaults" ] && printf '%s\n' "$rowfaults"
+  printf '%s' "$faults"
+  return 1
+}
+
 _eg_stage_refusal() {  # <dir> <mode> <verb> <fact> <fix> <detail> -> 0 staged · 1 not
   local d="${1:-}" i=1 a
   shift
@@ -1083,6 +1260,26 @@ is_placeholder_value() {
 # path's own directory), so there is no fallback arm left to get wrong — the old
 # copy's second argument existed only because its git call could fail silently.
 # [INSTRUMENT]
+# A TABLE CELL THAT MEANS "NOTHING HERE" (wave-16 REQ-12, AC-12.2; carry-over 20).
+#
+# The ten-column `## Tasks` contract spells "none" as an em dash in its `deps` and
+# `worktree` cells, and a table author carries that spelling into every other free-text
+# cell — including the Verification Matrix's `auditor` cell, where "no verdict yet" is the
+# ordinary state of a T4 row. The T4 exemption asks for an auditor cell that is EMPTY or
+# `CONFIRMED` (see the arm below), so `—` took a row nobody had ruled on to the refusal
+# written for a STANDING FINDING, and told its author to settle a verdict that did not
+# exist. Three spellings fold: the em dash, a bare ASCII hyphen, and `n/a` in any case.
+#
+# WHAT DOES NOT FOLD is anything with content — `REFUTED`, `UNVERIFIABLE`, `n/a: <reason>`
+# — because those are verdicts, and the arm that exists for them must still meet them.
+# Both readers of an auditor cell fold the same way, which is the agreement D15 names.
+placeholder_cell() {  # $1 = a cell's text -> the text, or empty when it means "none"
+  case "$1" in
+    '—'|'-'|'n/a'|'N/A'|'n/A'|'N/a') printf '' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 audit_root() {
   local r
   r=$(project_root "$(dirname "$PLAN")")
@@ -2175,8 +2372,16 @@ Fix: commit from one directory — split the command in two, or spell it 'git -C
     printf 'evidence-gate: worktree %s is named by more than one ## Tasks row (%s) — judging at current: %s\n' \
       "$_EG_WT" "$_EG_ROW_DUP" "$CURRENT" >&2
   elif [ "$_EG_REG" -eq 0 ] && [ -z "$_EG_ROW" ]; then
-    printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
-      "$_EG_WT" "$CURRENT" >&2
+    # AC-3.2: "no row names this tree" and "this table has no `worktree` column" are two
+    # different facts and the lead-in used to print the first for both. `units_field <row>
+    # worktree` reads slot 11, which a header without the column leaves EMPTY on every row,
+    # so the loop above skipped every row and landed here — on a table that never claimed
+    # to track trees (research R2 row 6a). `units_has_column` is the discriminator, and the
+    # shape fault prints instead, from plan_bring_forward or from units_validate's own arm.
+    if units_has_column "$PLAN" worktree; then
+      printf 'evidence-gate: no ## Tasks row names worktree %s — judging at current: %s\n' \
+        "$_EG_WT" "$CURRENT" >&2
+    fi
   elif [ -n "$_EG_ROW" ]; then
     _EG_RID="${_EG_ROW%%	*}"
     _EG_RSTEP="${_EG_ROW#*	}"
@@ -2342,9 +2547,10 @@ validate_requirements_pointer() {
   [ "$current_num" -ge 2 ] 2>/dev/null || return 0
 
   b1=$(step1_evidence_block)
-  raw=$(echo "$b1" | grep -E '^[[:space:]]*requirements[[:space:]]*:' | head -1 \
-        | sed -E 's/^[[:space:]]*requirements[[:space:]]*:[[:space:]]*//' \
-        | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
+  # ANYWHERE ON THE LINE (AC-3.3, seed B B11). The Step-1 evidence is a semicolon-separated
+  # record and the pointer is rarely its first field; see line_field's docblock for why the
+  # old line-start anchor refused a plan that named its requirements perfectly well.
+  raw=$(line_field "$b1" requirements)
   if [ -z "$raw" ]; then
     _eg_detail="canonical-sdlc step ${CURRENT} — the Step 1 evidence has no 'requirements:' field.
 Plan: $PLAN
@@ -2366,6 +2572,24 @@ Fix: write the requirements document at that path (K5 Step-1 artifact) before co
     refuse exit2 commit "the named requirements file does not exist" "write the requirements file" "$_eg_detail"
   fi
   return 0
+}
+
+# ---------- REQ-3 / AC-3.1: the bring-forward arm, ahead of the arms it folds ----------
+#
+# HERE, AND NOT LOWER, because the first arm it summarises is the one on the next line. Every
+# arm below refuses by calling `refuse`, which exits, so a summary written after any of them
+# would only ever be reached by a plan that did not need it.
+#
+# IT SPEAKS ONLY FOR A BODY THAT IS PRE-14 — a `## Tasks` table missing required columns AND
+# at least one version-14 key absent (plan_bring_forward's own trigger). Every other plan
+# falls straight through to the arms below, byte for byte as it does today.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+_eg_bf="$(plan_bring_forward "$PLAN" "${CURRENT%[ab]}")" || {
+  _eg_detail="canonical-sdlc this plan declares canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION} and its body does not match it:
+${_eg_bf}
+Plan: $PLAN
+Fix: repair every line above in one pass — each is a separate arm that would otherwise refuse the next commit in turn."
+  refuse exit2 commit "this plan's body is not at contract version ${SUPPORTED_SDLC_VERSION}" "bring the plan forward" "$_eg_detail"
 }
 
 validate_requirements_pointer
@@ -2729,7 +2953,7 @@ validate_matrix() {
     tier=$(echo "$line"   | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$3); print $3}')
     status=$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$4); print $4}')
     ev=$(echo "$line"     | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$5); print $5}')
-    aud=$(echo "$line"    | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')
+    aud=$(placeholder_cell "$(echo "$line" | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/,"",$6); print $6}')")
     # header row → skip
     [ "$ac" = "AC" ] && continue
     # malformed: a well-formed 5-cell row splits into exactly 7 fields on '|'.
@@ -3052,9 +3276,10 @@ validate_walk_artifact() {
   # "path" (plan assumption A17). The dedicated continuation-line shape has
   # no ';' in it, so the truncation is a no-op there.
   b5=$(step5_evidence_block)
-  raw=$(echo "$b5" | grep -E '^[[:space:]]*walk-artifact[[:space:]]*:' | head -1 \
-        | sed -E 's/^[[:space:]]*walk-artifact[[:space:]]*:[[:space:]]*//' \
-        | sed -E 's/;.*$//' | sed -E 's/[[:space:]]+$//')
+  # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `line_field`
+  # keeps the first-`;` truncation this read already had and drops only the line-start
+  # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
+  raw=$(line_field "$b5" walk-artifact)
   if [ -z "$raw" ]; then
     block_matrix "rows are discharged with no walk recorded" "walk it, then name the file" \
       "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
@@ -3271,7 +3496,10 @@ validate_verify_step() {
         "the Verify gate requires 'auditor: <verdict summary + report pointer>' in the Step 5 block." \
         "record the independent auditor's one-line verdict summary and report pointer as 'auditor: ...'."
     fi
-    aud=$(block_get auditor)
+    # THE SECOND READER OF AN AUDITOR CELL, folding the same way (D15). `auditor: —` in the
+    # Step-5 block is the absence `block_has` cannot see, and reading it as a verdict let a
+    # plan past the Verify gate with no audit recorded at all.
+    aud=$(placeholder_cell "$(block_get auditor)")
     if [ -z "$aud" ]; then
       block_matrix "the auditor verdict is blank" "record what the auditor said" \
         "the Step 5 'auditor:' pointer is empty." \
