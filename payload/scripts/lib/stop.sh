@@ -2045,7 +2045,7 @@ fi
 #
 # THIS USED TO BE TWICE THE INTERVAL, THE MULTIPLIER TYPED HERE (wave-15 REQ-1, ADR-028).
 # "How stale is stale" was a judgment call written out at three sites; lib/patrol.sh exported
-# PATROL_STALE_MULTIPLIER to hold two of them together and this one — the site that BLOCKS
+# the retired stale multiplier to hold two of them together and this one — the site that BLOCKS
 # A TURN — kept its own literal, so a change to the judgment moved two readers and left the
 # third measuring against a threshold nobody configured.
 #
