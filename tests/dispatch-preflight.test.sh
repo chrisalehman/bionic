@@ -5176,8 +5176,14 @@ expect_absent "§combined …no Fix: block" "Fix: " "$GATE_VERR"
 # set leaves two walls unable to answer rather than one, and AC-8.2's rule is that each of
 # them says so. The fault count did not move — the third `not checked:` line is a new wall
 # declaring itself, which is the growth this cap is meant to permit.
-expect_status "§combined …the wire is at most 14 lines (10 + 1 extra fault + 3 not-checked)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 14 ] && echo 0 || echo 1)"
+#
+# RAISED 14 -> 15 (epic-23 wave-16, REQ-1 AC-1.8, A-T2.7), by the cap's oldest clause: it
+# "tracks the scaffold's own line count by construction", and the scaffold gained the
+# `Re-executes:` line. The FIXED part is now eleven — one refusal line, a blank, EIGHT
+# scaffold lines, a blank, the pointer — and the variable part is unmoved at one extra
+# fault plus three not-checked lines. No fault and no wall was added by that change.
+expect_status "§combined …the wire is at most 15 lines (11 + 1 extra fault + 3 not-checked)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 15 ] && echo 0 || echo 1)"
 # AND THE THIRD LINE IS THE NEW WALL'S, NAMED — a cap raised without saying which line
 # filled it is a widened tolerance, which is the mistake the comment above warns about.
 expect_contains "§combined …and the line that filled it is the floor-once wall's" \
@@ -6018,13 +6024,15 @@ expect_contains "§three-arms …and the budget fault" \
 expect_contains "§three-arms …and the brief-shape fault" \
   "this brief names no deliverable" "$GATE_REASON"
 
-# AC-8.3 — THE LINE BUDGET IS A FORMULA NOW, not a tolerance. Wave-13's cap is ten lines
+# AC-8.3 — THE LINE BUDGET IS A FORMULA NOW, not a tolerance. Wave-13's cap was ten lines
 # (one refusal line, a blank, the seven scaffold lines, a blank, the pointer) and it tracks
-# the scaffold's own length by construction. REQ-8 adds ONE line per ADDITIONAL fault: the
-# first fault is already the user line and costs nothing, faults 2..N cost a line each, and
-# so does every `not checked:` line. Three faults, no not-checked line: ten plus two.
-expect_status "§three-arms …and the wire is at most 12 lines (10 + one per additional fault)" "0" \
-  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 12 ] && echo 0 || echo 1)"
+# the scaffold's own length by construction; epic-23 wave-16's `Re-executes:` line makes the
+# scaffold eight lines and the fixed part eleven (REQ-1 AC-1.8, A-T2.7). REQ-8 adds ONE line
+# per ADDITIONAL fault: the first fault is already the user line and costs nothing, faults
+# 2..N cost a line each, and so does every `not checked:` line. Three faults, no not-checked
+# line: eleven plus two.
+expect_status "§three-arms …and the wire is at most 13 lines (11 + one per additional fault)" "0" \
+  "$([ "$(printf '%s' "$GATE_REASON" | wc -l | tr -d ' ')" -le 13 ] && echo 0 || echo 1)"
 # NOT VACUOUS: a wire that named nothing extra would also be under twelve. It has to have
 # GROWN by exactly the two lines the two extra faults bought.
 expect_status "§three-arms …and it really grew: more than the ten-line single-arm wire" "0" \
@@ -6890,9 +6898,24 @@ expect_eq "E1.3 row 48 (no deliverable) is the table's line" \
   "bionic: dispatch refused — this brief names no deliverable (add an Expected artifact: line)" \
   "$(printf '%s\n' "$GATE_ERR" | /usr/bin/grep '^bionic: ')"
 
-# AC-E1.5, the pair: the frame's Fix block is off the user stream and on the knob.
-expect_absent "E1.5 the Fix block is NOT on the user stream" \
-  "Then retry the dispatch" "$GATE_ERR"
+# AC-E1.5, the pair: the user stream LEADS with the verdict line, and the knob carries the
+# frame's Fix block.
+#
+# RE-AUTHORED FROM A LINE COUNT TO THE LINE (REQ-2, D2/ADR-030; A-orch-13/A-orch-14). This
+# assertion used to read "the Fix block is NOT on the user stream", which was the 1.8.2
+# reading of AC-E1.5: an `exit2` refusal rendered its one line and nothing else, so the
+# absence of any detail text WAS the criterion. D2 reverses that by Chris's own call — an
+# `exit2` refusal now prints its bounded violation detail under the verdict — and an absence
+# pin would red at the wave head for the change it was never about. What AC-E1.5 has always
+# been about is that the READER GETS THE VERDICT: one line, in the table's words, first.
+# That claim holds on both sides of the flip, and it is what is pinned here.
+# THE FIRST `bionic: ` LINE, not the first line and not the only line. The user stream can
+# carry an advisory above the verdict — this very fixture draws `dispatch-preflight: run
+# resolved by newest-plan fallback` — and under D2 it carries bounded detail below it, so
+# both edges of the refusal are lines this assertion must not count.
+expect_eq "E1.5 the verdict reaches the USER stream, in the table's words" \
+  "bionic: dispatch refused — this brief names no deliverable (add an Expected artifact: line)" \
+  "$(printf '%s\n' "$GATE_ERR" | awk '/^bionic: / { print; exit }')"
 expect_contains "E1.5 …and BIONIC_WALL_VERBOSE=1 puts it back" \
   "Then retry the dispatch" "$GATE_VERR"
 expect_contains "E1.5 …with the one line still in it" \
