@@ -340,9 +340,13 @@ units_ready() {
 # on. Table-level faults — an absent section, a missing column — are named against
 # `## Tasks`, since there is no row to blame.
 #
-# THE TRANSITIVE RULE reports the FIRST Step-4 row, in table order, that the row fails to
-# reach. A row is a Step-4 row by its `step` cell alone: a row whose id is also malformed is
-# still one, and naming it is more useful than silently exempting it.
+# THE TRANSITIVE RULE reports EVERY Step-4 row, in table order, that the row fails to reach
+# (wave-17 REQ-5, AC-5.2). It used to stop at the first, which made an unthreaded row cost
+# one refused commit per missing edge — wave-16's A-orch-59 is the ten-edge specimen — and
+# made this arm the one exception to the paragraph below. A row is a Step-4 row by its
+# `step` cell alone: a row whose id is also malformed is still one, and naming it is more
+# useful than silently exempting it. Reachability is keyed on the ID, so a duplicated id
+# that the row reaches is reached in both of its rows.
 #
 # EVERY FAULT IS REPORTED, not just the first. A writer fixing one line at a time against a
 # wall that stops at the first complaint pays a round trip per fault.
@@ -483,7 +487,6 @@ units_validate() {
             if (stp[k] + 0 != 4) continue
             if (id[k] in reach) continue
             printf "%s: step %s does not depend transitively on step-4 row %s\n", id[i], stp[i], id[k]
-            break
           }
         }
       }')"
