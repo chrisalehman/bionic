@@ -9627,7 +9627,14 @@ expect_eq "S19.3 …declared by 43 anchor calls (Section 8's doctoring rewrites 
 # tree-wide count, so a second definition grown in a hook cannot make that row pass by
 # moving what it reads. One anchor call, 29 -> 30. RE-DERIVED BY DIRECT GREP over this file
 # at THIS commit, as every number in this section is.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 30 more" "30" \
+#
+# 31 at epic-23 wave-16-fixit-183 (2026-09-19, T4): §R2 — the knob-unset harness ADR-030's
+# tests must run under — anchors the `[REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]` marker in
+# tests/refuse.test.sh before the awk that splices `export BIONIC_WALL_VERBOSE=1` in after
+# it, so a renamed marker cannot leave the doctored copy byte-identical to the shipped suite
+# and the four absence greps passing over it. One anchor call, 30 -> 31. RE-DERIVED BY DIRECT
+# GREP over this file at THIS commit, as every number in this section is.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 31 more" "31" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9705,7 +9712,7 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # fifth term to it is a change to a section task 11 does not own.
 # 77 at epic-23 wave-15-fixit-182 (2026-09-17, T1): +1 from §PV's anchor above; the other
 # three files are untouched by that task.
-expect_eq "S19.3 …77 anchor call sites across the four doctoring suites, all told" "77" \
+expect_eq "S19.3 …78 anchor call sites across the four doctoring suites, all told" "78" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -10752,4 +10759,98 @@ expect_eq "PV …and neither reader recomputes it" "0" \
   "$(( $(grep -c '/ 10' "$PV_STOP" || true) + $(grep -c '/ 10' "$PV_DP" || true) ))"
 
 # ============================================================
+# ============================================================
+section "R2 — the knob-unset harness, and the cell ADR-030 flipped (epic-23 wave-16 REQ-2, AC-2.3/AC-2.4)"
+# ============================================================
+#
+# THE SEAM THIS SECTION GUARDS. Every detail assertion in the fleet reads a stream taken
+# with `BIONIC_WALL_VERBOSE=1` — `expect_block` in the evidence-gate suite, the
+# `HOOK_VSTDERR` pair in the governing-skill suite, `GATE_VERR` in the dispatch-preflight
+# suite, and this very file's own `export` at :55. That is the substitution research R2
+# found: the suites pinned "the detail names the offending id" on a channel no agent ever
+# reads, so a wall that printed NOTHING to either reader stayed green for three releases
+# (seed A §8a, carry-over 8). ADR-030's own tests therefore have to run on the other
+# stream, and a later editor reaching for the familiar helper would quietly undo the fix
+# while every row stayed green.
+#
+# So each of the three suites marks its ADR-030 span, and this file — the one that reads
+# other suites rather than driving a component — holds the span to the rule. The mutation
+# arm at the end proves the check can fail: the same greps over a doctored copy of one span
+# find what the shipped spans do not have.
+#
+# fails-when: a marked span is missing or empty; or it sets the knob; or it calls
+# `expect_block`, `HOOK_VSTDERR` or `GATE_VERR`; or the library stops naming ADR-030; or a
+# pin of the old `detail_to_user=no` cell survives.
+
+R2_TESTS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+R2_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+[ -d "$R2_LIB" ] || R2_LIB="${BIONIC_SCRIPTS_DIR}/scripts/lib"
+R2_REFUSE="$R2_LIB/refuse.sh"
+R2_BEGIN='# [REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]'
+R2_END='# [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]'
+
+# r2_span <file> — the marked span, markers excluded. awk and not `sed -n '/a/,/b/p'`,
+# because the markers carry `[` and `]` and a regex range would read them as a class.
+r2_span() {
+  awk -v b="$R2_BEGIN" -v e="$R2_END" '
+    index($0, b) { f = 1; next }
+    index($0, e) { f = 0 }
+    f' "$1"
+}
+require_helpers r2_span
+
+for _r2f in refuse.test.sh canonical-sdlc-evidence-gate.test.sh canonical-sdlc-governing-skill.test.sh; do
+  _r2p="$R2_TESTS_DIR/$_r2f"
+  # THE POSITIVE FIRST. Three greps for absence over an empty string all pass, which is
+  # the vacuous shape this repo's own doctrine forbids: the span has to exist and carry
+  # assertions before its absences mean anything.
+  expect_eq "R2 $_r2f: carries exactly one ADR-030 span opener" "1" \
+    "$(grep -cF "$R2_BEGIN" "$_r2p" || true)"
+  expect_eq "R2 $_r2f: …and exactly one closer" "1" \
+    "$(grep -cF "$R2_END" "$_r2p" || true)"
+  expect_eq "R2 $_r2f: the marked span drives at least six assertions" "yes" \
+    "$([ "$(r2_span "$_r2p" | grep -c '^expect_')" -ge 6 ] && echo yes || echo no)"
+  # AND THE ABSENCES. A bare mention of the knob's NAME is allowed — `env -u
+  # BIONIC_WALL_VERBOSE` is how a runner removes it — so what is forbidden is an
+  # ASSIGNMENT of it, which is what turns the detail on.
+  expect_eq "R2 $_r2f: …and never assigns BIONIC_WALL_VERBOSE" "0" \
+    "$(r2_span "$_r2p" | grep -c 'BIONIC_WALL_VERBOSE=' || true)"
+  expect_eq "R2 $_r2f: …nor calls expect_block, which takes the verbose drive" "0" \
+    "$(r2_span "$_r2p" | grep -c 'expect_block' || true)"
+  expect_eq "R2 $_r2f: …nor reads HOOK_VSTDERR" "0" \
+    "$(r2_span "$_r2p" | grep -c 'HOOK_VSTDERR' || true)"
+  expect_eq "R2 $_r2f: …nor GATE_VERR" "0" \
+    "$(r2_span "$_r2p" | grep -c 'GATE_VERR' || true)"
+done
+
+# THE MUTATION ARM. The four greps above pass just as loudly if `r2_span` prints nothing,
+# so one span is doctored IN THE SANDBOX — an `export BIONIC_WALL_VERBOSE=1` spliced in
+# where a later editor would put it — and the same check is re-run against the copy.
+R2_MUT="$SANDBOX/r2-knob-mutant.test.sh"
+anchor "$R2_TESTS_DIR/refuse.test.sh" "$R2_BEGIN" 1
+awk -v b="$R2_BEGIN" '{ print } index($0, b) { print "export BIONIC_WALL_VERBOSE=1" }' \
+  "$R2_TESTS_DIR/refuse.test.sh" > "$R2_MUT"
+expect_eq "R2 MUTANT the doctored span DOES set the knob, so the check can fail" "1" \
+  "$(r2_span "$R2_MUT" | grep -c 'BIONIC_WALL_VERBOSE=' || true)"
+expect_eq "R2 MUTANT …and the shipped span still does not, over the same extractor" "0" \
+  "$(r2_span "$R2_TESTS_DIR/refuse.test.sh" | grep -c 'BIONIC_WALL_VERBOSE=' || true)"
+
+# AC-2.4 — THE LIBRARY'S SIDE. The cell is `yes` now, read back through the library's own
+# accessor rather than grepped out of the table; the channel-table comment records the ADR
+# that replaced ruling D-1, and keeps D-1 itself; and no pin of the old cell survives.
+expect_eq "R2 the exit2 channel now puts detail on the user stream" "yes" \
+  "$(bash -c '. "$1"; refuse_channel exit2 detail_to_user' _ "$R2_REFUSE" 2>/dev/null)"
+expect_eq "R2 …while deny keeps its model-only split" "no" \
+  "$(bash -c '. "$1"; refuse_channel deny detail_to_user' _ "$R2_REFUSE" 2>/dev/null)"
+expect_eq "R2 …and block too" "no" \
+  "$(bash -c '. "$1"; refuse_channel block detail_to_user' _ "$R2_REFUSE" 2>/dev/null)"
+expect_eq "R2 the channel table names ADR-030 as the ruling that superseded D-1" "yes" \
+  "$([ "$(grep -c 'ADR-030' "$R2_REFUSE")" -ge 1 ] && echo yes || echo no)"
+expect_eq "R2 …and still carries D-1's own text, superseded rather than deleted" "yes" \
+  "$([ "$(grep -c -i 'a refusal is a sentence with a pointer' "$R2_REFUSE")" -ge 1 ] && echo yes || echo no)"
+expect_eq "R2 no pin of the old exit2 detail_to_user=no cell survives in refuse.test.sh" "0" \
+  "$(grep -cF '"no" "$(cell exit2 detail_to_user)"' "$R2_TESTS_DIR/refuse.test.sh" || true)"
+expect_eq "R2 …and the pin that replaced it asserts yes" "1" \
+  "$(grep -cF '"yes" "$(cell exit2 detail_to_user)"' "$R2_TESTS_DIR/refuse.test.sh" || true)"
+
 finish

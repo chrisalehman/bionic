@@ -127,6 +127,28 @@ STUB_BLOCK_EXIT2_B='blockE2() {
   return 2
 }'
 
+# A FOURTEEN-LINE DETAIL, for the one interaction ADR-030 introduced: `refuse` bounds what
+# it prints at twelve lines plus a `+N more` count, so a later blocker's sentence sitting
+# past that bound is folded behind the count. §13's last rows measure that rather than
+# leaving it to be found in the field.
+STUB_BLOCK_EXIT2_LONG='blockELong() {
+  fold_block exit2 stop "the long exit2 fact" "fix the long one" "LONG-01
+LONG-02
+LONG-03
+LONG-04
+LONG-05
+LONG-06
+LONG-07
+LONG-08
+LONG-09
+LONG-10
+LONG-11
+LONG-12
+LONG-13
+LONG-14"
+  return 2
+}'
+
 STUB_ADVISE='adviseA() {
   fold_advise "ADVISORY-ONE from a function with no refusal"
   return 1
@@ -257,8 +279,17 @@ section "8: one blocker renders its OWN object, verbatim"
 # walls this fold serves.
 drive "$STUB_BLOCK_EXIT2" Stop blockE
 expect_status "8a: a lone exit2 blocker exits 2, as that channel does" "2" "$FOLD_RC"
-expect_eq "8b: …with the one line on stderr and nothing else" \
-  "bionic: stop refused — the exit2 fact (fix the exit2)" "$FOLD_ERR"
+# ADR-030 MOVED WHAT "VERBATIM" MEANS HERE, and this row is the differential's foundation,
+# so it says the whole stream rather than the first line of it. `exit2` carries `detail` to
+# the reader now (refuse.sh field 9), so what a lone blocker's own `refuse` call produces —
+# and therefore what the fold must produce byte for byte — is the headline, a blank line and
+# that blocker's detail.
+expect_eq "8b: …with its own line AND its own detail on stderr, byte for byte" \
+  "bionic: stop refused — the exit2 fact (fix the exit2)
+
+REASON-EXIT2 for the model" "$FOLD_ERR"
+expect_eq "8b2: …and exactly one rendered line in it" "1" \
+  "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -c '^bionic: ')"
 expect_empty "8c: …and nothing on stdout, as exit2 has no JSON wire" "$FOLD_OUT"
 
 drive "$STUB_BLOCK_A" Stop blockA
@@ -268,12 +299,12 @@ expect_contains "8e: …with its detail on the JSON wire" "REASON-ALPHA" "$(reas
 # ─────────────────────────────────────────────────────────────────────────────
 section "9: mixed channels — the composed verdict rides the one that carries detail"
 
-# `exit2` renders the line and DROPS the detail (refuse.sh's channel table:
-# model_only=no, and the exit2 arm emits `user_out` alone). So when blockers
-# disagree about the channel, composing onto exit2 would discard every reason the
-# fold exists to keep. The rule is data-driven — the first blocker's mode whose
-# `model_only` cell says yes — and not a hardcoded preference, so T23's `deny` walls
-# compose by the same sentence.
+# `exit2` has ONE wire and it is the user's: `model_only=no`, so what it gives the model it
+# gives the reader, bounded at twelve lines since ADR-030. Composing onto it would put every
+# reason the fold exists to keep behind that bound and behind a terminal's own fold, while
+# `deny` and `block` were measured to deliver the whole payload to the model. The rule is
+# data-driven — the first blocker's mode whose `model_only` cell says yes — and not a
+# hardcoded preference, so T23's `deny` walls compose by the same sentence.
 drive "$STUB_BLOCK_EXIT2
 $STUB_BLOCK_A" Stop blockE blockA
 expect_contains "9a: the exit2 blocker's reason survives the mixed fold" \
@@ -419,9 +450,16 @@ section "13: two blockers on a channel that carries no detail — no reason is d
 #
 # THE FIX, on both halves of the wire: every blocker after the first leads its own
 # `detail` with its own rendered line (so a channel that carries detail carries the
-# sentence too), and where the channel carries no detail the extra lines follow the
+# sentence too), and where the channel carries detail to NOBODY the extra lines follow the
 # headline on the user's stream. One line per blocker, in the order the functions were
 # named, and nothing that was not on that stream before the merge.
+#
+# ADR-030 CLOSED THE SECOND HALF OF THAT FIX AND OPENED A WAY TO DOUBLE IT (epic-23
+# wave-16 T4). `exit2` carries `detail` to the reader now, so the sentence arrives inside
+# the composed detail — and the extra-lines branch, still printing, put it on the stream
+# TWICE. A refusal prints its detail once: the branch stands down wherever the detail
+# already reached a reader, and the rows below pin ONE occurrence per sentence rather than
+# merely "not deleted".
 
 drive "$STUB_BLOCK_EXIT2
 $STUB_BLOCK_EXIT2_B" Stop blockE blockE2
@@ -435,9 +473,16 @@ expect_eq "13d: one line per blocker — two blockers, two lines" "2" \
 expect_true "13e: …in the order the functions were named" \
   test "$(awk '/the exit2 fact/{print NR; exit}' <<<"$FOLD_ERR")" -lt \
        "$(awk '/the second exit2 fact/{print NR; exit}' <<<"$FOLD_ERR")"
-# THE CHANNEL IS UNCHANGED BY THE REPAIR: `exit2` still carries no `detail`.
-expect_absent "13f: …and still no detail on a channel that has no room for it" \
-  "REASON-EXIT2" "$FOLD_ERR"
+# THE CHANNEL HAS ROOM NOW (ADR-030), so the detail is there — and each sentence is there
+# ONCE. The count is the assertion that matters: 13c says the second sentence was not
+# deleted, and 13f1 says the fold did not answer that by printing it twice.
+expect_contains "13f: …and the detail is on the stream too, both blockers' (ADR-030)" \
+  "REASON-EXIT2 for the model" "$FOLD_ERR"
+expect_contains "13f0: …the second blocker's as well" "REASON-EXIT2-B for the model" "$FOLD_ERR"
+expect_eq "13f1: …with the second blocker's SENTENCE printed exactly once, not twice" "1" \
+  "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -c 'the second exit2 fact')"
+expect_eq "13f2: …and the first's once as well" "1" \
+  "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -c 'the exit2 fact')"
 
 # ONE BLOCKER IS UNTOUCHED — the verbatim case the whole merge rests on.
 drive "$STUB_BLOCK_EXIT2" Stop blockE
@@ -482,6 +527,40 @@ drive_verbose "$STUB_BLOCK_EXIT2
 $STUB_BLOCK_EXIT2_B" Stop blockE blockE2
 expect_eq "13k: under the verbose knob the second sentence appears once, not twice" "1" \
   "$(printf '%s\n' "$FOLD_VERBOSE_ERR" | /usr/bin/grep -c 'the second exit2 fact')"
+
+# THE RESIDUAL ADR-030 LEAVES, MEASURED RATHER THAN ASSUMED (A-T4.6). `refuse` bounds what
+# it prints at BIONIC_REFUSE_DETAIL_LINES lines plus one `+N more` count, and the composed
+# detail puts each later blocker's sentence AFTER the previous blockers' details. So a first
+# blocker whose own detail is longer than the bound pushes the second blocker's sentence
+# behind the count: the reader is told something was held back, and is not told what.
+#
+# WHY IT IS PINNED AND NOT REPAIRED HERE. It is a bounded, ANNOUNCED fold and not T23's
+# silent deletion — the count is on the stream, `exit 2` still blocks, and the knob shows
+# everything (13n). Twelve lines is a measurement of the terminal, so raising it for this
+# case would print lines the terminal folds away anyway. A repair that re-ordered the
+# composed detail to put every sentence first would change the model's payload shape on
+# `deny` and `block` too, which is a decision and not an implementor's call. The row exists
+# so the next reader meets this as a known cost with a name.
+drive "$STUB_BLOCK_EXIT2_LONG
+$STUB_BLOCK_EXIT2_B" Stop blockELong blockE2
+expect_status "13l: two exit2 blockers, the first with a fourteen-line detail, still exit 2" \
+  "2" "$FOLD_RC"
+expect_contains "13l2: …the headline is the first blocker's" \
+  "bionic: stop refused — the long exit2 fact (fix the long one)" "$FOLD_ERR"
+expect_contains "13l3: …the twelfth detail line prints" "LONG-12" "$FOLD_ERR"
+expect_absent "13l4: …the thirteenth does not" "LONG-13" "$FOLD_ERR"
+expect_regex "13m: …and the count line says how much was held back" '\+[0-9]+ more' "$FOLD_ERR"
+expect_absent "13m2: …which is where the second blocker's sentence went (the named residual)" \
+  "the second exit2 fact" "$FOLD_ERR"
+expect_eq "13m3: …so the stream is the bound: a headline, twelve detail lines and the count" \
+  "14" "$(printf '%s\n' "$FOLD_ERR" | /usr/bin/grep -c .)"
+expect_eq "13m4: …fifteen lines all told, the blank between headline and detail included" \
+  "15" "$(printf '%s\n' "$FOLD_ERR" | wc -l | tr -d ' ')"
+drive_verbose "$STUB_BLOCK_EXIT2_LONG
+$STUB_BLOCK_EXIT2_B" Stop blockELong blockE2
+expect_contains "13n: …and the knob still shows the second blocker's sentence in full" \
+  "the second exit2 fact" "$FOLD_VERBOSE_ERR"
+expect_contains "13n2: …with its detail behind it" "REASON-EXIT2-B for the model" "$FOLD_VERBOSE_ERR"
 
 # ---------------------------------------------------------------------------
 section "14: the stderr capture is private — a planted symlink at its old name is not truncated (security F-2)"
