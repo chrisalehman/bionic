@@ -4734,6 +4734,116 @@ expect_absent "27n2 …never the unrelated no-instrument text" \
   "declares no Files: and no Suites:" "$GATE_ERR"
 
 # ============================================================================
+section "S27p: a trailing # comment is not a dropped Suites: token (T23, review R1)"
+# ============================================================================
+#
+# THE SHIPPED SCAFFOLD CARRIES ONE. `agents-src/blocks/brief-scaffold.md` renders
+# `Suites: none                     # read-only brief; or test-file names only` into all
+# eight surfaces, and an author who fills the scaffold in keeps the comment. The drop
+# refusal above read EVERY whitespace-separated token on the span, so `#`, `read-only`,
+# `brief;` and the rest each scored as a file the shell runner cannot run, and a brief was
+# refused for carrying this repo's own teaching text — with a message that names
+# `Re-executes:` and never mentions the comment, so the repair was not discoverable from
+# it (Step-6 review R1, HIGH; the base at 72e07ec admitted the same brief). `suite_names()`
+# now stops reading the span at the first token beginning with `#`.
+#
+# fails-when: a commented span refuses; a word of the comment reaches the roster row; the
+# comment changes the budget the bare span would have produced; or stopping at `#` also
+# stopped the drop arm from seeing a real dropped token.
+
+R27P_BRIEF='Your task: build it.
+Expected artifact: .bionic/docs/record/w27p.md
+Suites: tests/a.test.sh  # the impacted suite'
+R27P_BARE='Your task: build it.
+Expected artifact: .bionic/docs/record/w27p.md
+Suites: tests/a.test.sh'
+
+REPO=$(make_repo r27p yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$R27P_BRIEF" "w27p-comment")"
+expect_status "27p a filled brief whose Suites: line ends in a comment is ADMITTED" \
+  "0" "$GATE_ST"
+expect_status "27p …on the deny channel as well as the exit one" "allow" "$GATE_VERDICT"
+ROW_COMMENTED=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "27p …the budget is the declared suite alone" "a.test.sh" \
+  "$(roster_field "$ROW_COMMENTED" suites_allowed)"
+expect_status "27p …declared, because a human declared it" "declared" \
+  "$(roster_field "$ROW_COMMENTED" suites_source)"
+expect_absent "27p …no word of the comment reaches the row" "impacted" "$ROW_COMMENTED"
+expect_absent "27p …and the suite-drop refusal never fires" \
+  "Suites: names a file the shell runner cannot run" "$GATE_ERR"
+
+# THE CONTROL: the same brief with the comment deleted. The row is compared WHOLE, field
+# for field, `launched_at=` excepted — that cell is one `date -u` per drive and the two
+# drives can straddle a second boundary.
+REPO=$(make_repo r27p2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$R27P_BARE" "w27p-comment")"
+expect_status "27p2 the same brief without the comment is ADMITTED too" "0" "$GATE_ST"
+ROW_BARE=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "27p2 …and its row is the commented brief's row, field for field" \
+  "$(printf '%s' "$ROW_COMMENTED" | sed 's/launched_at=[^|]*/launched_at=/')" \
+  "$(printf '%s' "$ROW_BARE"      | sed 's/launched_at=[^|]*/launched_at=/')"
+expect_contains "27p2 …non-vacuity: the compared row really carries the budget" \
+  "suites_allowed=a.test.sh" "$ROW_BARE"
+
+# THE WAIVER, COMMENTED — the scaffold line as it ships, filled in and left commented.
+REPO=$(make_repo r27p3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: read the tree and report.
+Expected artifact: .bionic/docs/record/w27p3.md
+Suites: none                                           # read-only brief; or test-file names only' \
+  "w27p-waiver")"
+expect_status "27p3 a commented Suites: none is the waiver it always was" "0" "$GATE_ST"
+# ...and on the OTHER channel too: a several-fault refusal exits 0 and denies on stdout, so
+# the exit status alone would score this ADMITTED whatever the gate decided (wave-12 T17).
+expect_status "27p3 …no refusal verdict on either channel" "allow" "$GATE_VERDICT"
+expect_status "27p3 …the waiver on the row, where the writer-side guard reads it" "none" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+# THE SAME LINE ON THE ROLE WHOSE OWN FILE SHIPS IT. `agents/auditor.md` carries the
+# scaffold, and an auditor that waives every suite must declare runs instead (16lb1/16lb2) —
+# so this is that admitted shape with the comment left on, and the control below is the same
+# brief without the runs, which must still meet the AUDITOR arm and not the drop arm.
+REPO=$(make_repo r27p3b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w27p3b-audit.md
+Expected duration: ~30 minutes.
+Suites: none                                           # read-only brief; or test-file names only
+Re-executes: `pytest tests/unit`' "w27p-aud-waiver" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" \
+  "bionic:auditor")"
+expect_status "27p3b an auditor waiving suites in a comment-carrying line, declaring runs, is ADMITTED" \
+  "0" "$GATE_ST"
+expect_status "27p3b …the waiver on the row" "none" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+REPO=$(make_repo r27p3c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w27p3c-audit.md
+Expected duration: ~30 minutes.
+Suites: none                                           # read-only brief; or test-file names only' \
+  "w27p-aud-bare" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "27p3c …and the same line without runs still meets the AUDITOR arm" "2" "$GATE_ST"
+expect_contains "27p3c …named as an auditor that re-executes nothing" \
+  "an auditor names no suites" "$GATE_ERR"
+expect_absent "27p3c …never the suite-drop refusal" \
+  "Suites: names a file the shell runner cannot run" "$GATE_ERR"
+
+# THE DISCRIMINATOR: a genuinely dropped token AHEAD of a comment still refuses, naming the
+# token and no word of the comment. §27n/§27n2 pin the whole-span case; this pins that
+# stopping at `#` did not stop the arm.
+REPO=$(make_repo r27p4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27p4.md
+Suites: image-id.spec.ts  # the impacted suite' "w27p-drop")"
+expect_status "27p4 a dropped token ahead of a comment is still REFUSED" "2" "$GATE_ST"
+expect_contains "27p4 …naming the token it saw" "image-id.spec.ts" "$GATE_VERR"
+expect_absent "27p4 …and never a word of the comment" "impacted" "$GATE_VERR"
+
+# ============================================================================
 section "S28: one regression per run (AC-24)"
 # ============================================================================
 #
@@ -5741,13 +5851,14 @@ REPO=$(make_repo rscaff3 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
 $SCAFFOLD_RAW" "scaffoldbot3")"
-# T3 (REQ-8): the scaffold's own `Suites: none   # …, on its own paragraph` comment now
-# ALSO trips the loud suite-drop refusal (its trailing prose tokens match nothing a shell
-# runner can run), beside the pre-existing "names no deliverable" fault — two faults route
-# to the deny channel rather than one to exit2 (task 12/T17's own rule), so the channel
-# this refusal lands on is no longer pinned to exit2; that it refuses at all still is.
-expect_ne "§scaffold the scaffold with its placeholders still in it is REFUSED" \
-  "allow" "$GATE_VERDICT"
+# T23 (review R1): the scaffold's own `Suites: none   # read-only brief; …` comment is no
+# longer read as a span of dropped suites, so the unfilled scaffold is once again refused
+# for its REAL fault — its deliverable is an unfilled `<…>` slot, which is one fault, which
+# is the exit-2 channel (task 12/T17's rule: one fault exits 2, several deny). T6 had
+# weakened this to `expect_ne allow` when the comment added a second fault; the channel is
+# pinned again, because a channel nobody pins is a channel that drifts.
+expect_status "§scaffold the scaffold with its placeholders still in it is REFUSED" \
+  "2" "$GATE_ST"
 
 # ---- the SECOND home: SKILL.md carries the same scaffold, injected (T2, AC-2.2/AC-2.3) ----
 #
@@ -5776,10 +5887,10 @@ REPO=$(make_repo rscaff5 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
 $SCAFFOLD_RAW" "scaffoldbot5")"
-# T3 (REQ-8): as the dispatch.md variant above — the drop refusal joins the pre-existing
-# fault and moves this to the deny channel; still a refusal, on whichever channel.
-expect_ne "§scaffold …SKILL.md's scaffold, unfilled, is REFUSED the same way" \
-  "allow" "$GATE_VERDICT"
+# T23 (review R1): as the dispatch.md variant above — the comment is no longer a drop, the
+# one remaining fault is the unfilled deliverable slot, and the exit-2 channel is pinned.
+expect_status "§scaffold …SKILL.md's scaffold, unfilled, is REFUSED the same way" \
+  "2" "$GATE_ST"
 
 # ============================================================================
 section "§a3-text — the Patrol stamp is armed at engagement, not by hand (D4, REQ-3)"
