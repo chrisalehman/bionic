@@ -1786,7 +1786,16 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         else if (tok ~ /[$][A-Za-z_{]/) why = "an unexpanded shell variable"
         if (why != "") { print "re_executes_bad=" why ": " collapse(tok); continue }
         tok = collapse(tok)
-        if (tok == "") continue
+        # A TEMPLATE LIFTS NOTHING (epic-23 wave-16 T20; walk finding 1). The brief scaffold
+        # carries its own guidance line, `` Re-executes: `<cmd>` ``, an unfilled slot —
+        # the identical shape `istemplate()` already rejects on the `Files:` and `Suites:`
+        # readers (`ispath()` and `suite_names()` both call it). Without this check a brief
+        # that pasted the scaffold unfilled satisfied the suite-allowance wall on a budget
+        # entry no real command could ever equal, and `dp_scaffold_marked` read the
+        # placeholder as a real declaration and left the whole instrument triple unmarked. A
+        # template is silently skipped here exactly as on the other two readers, never a
+        # `re_executes_bad` fault: the author wrote guidance, not a mistake.
+        if (tok == "" || istemplate(tok)) continue
         if (c < RUNS_MAX) {
           out = (out == "" ? BT tok BT : out " " BT tok BT)
           c++
