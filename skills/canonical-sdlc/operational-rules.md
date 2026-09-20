@@ -101,7 +101,7 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale ledger `steps/3.md` documents inline (`| id | intent | rigor | description | status | worktree |`) — this is the register the wave's own Step-4 dispatch works from, and it carries eleven columns:
 
 ```
-| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |
 ```
 
 - **`id`** — `T<n>`, matching `^T[0-9]+$`, the row's own key.

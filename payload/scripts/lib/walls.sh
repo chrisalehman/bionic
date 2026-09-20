@@ -647,7 +647,7 @@ return 0
 # RC IS THE SIGNAL, because a subshell cannot hand a variable back. 0 means the five files
 # are there and the caller may read them; 1 means they are not and the caller must not.
 # [WALL: tests/bash-walls.test.sh §11]
-# ─── line_field — a key read ANYWHERE on a line, not only at its start ───────
+# ─── evidence_line_field — a key read ANYWHERE on a line, not only at its start ───────
 #
 # WHY IT IS NOT `grep -E '^[[:space:]]*<key>:'` (wave-16 REQ-3, AC-3.3; seed B B11). A
 # `## SDLC State` evidence line is a SEMICOLON-SEPARATED RECORD, not a one-key line:
@@ -668,7 +668,7 @@ return 0
 #
 # A HERE-STRING, not a pipe: `awk … exit` quits early, and walls.sh header's SIGPIPE rule
 # (T37, wave-14) applies to every early-quitting reader under `pipefail`, not only grep.
-line_field() {  # <text> <key> -> the value, or empty
+evidence_line_field() {  # <text> <key> -> the value, or empty
   awk -v k="$2" '
     {
       if (match($0, "(^|[^-_[:alnum:]])" k "[[:space:]]*:[[:space:]]*")) {
@@ -773,14 +773,14 @@ plan_bring_forward() {  # <plan file> <step number> -> the list on stdout; rc 1 
         if ($0 ~ /^[^[:space:]]/) exit
         print
       }' <<< "$state")"
-    if [ -z "$(line_field "$b1" requirements)" ]; then
+    if [ -z "$(evidence_line_field "$b1" requirements)" ]; then
       faults="${faults}## SDLC State: the Step 1 evidence names no 'requirements:' pointer
 "
       keys=$((keys + 1))
     fi
   fi
   if [ "${step:-0}" -ge 4 ] 2>/dev/null; then
-    if [ -z "$(line_field "$state" approved-by)" ]; then
+    if [ -z "$(evidence_line_field "$state" approved-by)" ]; then
       faults="${faults}## SDLC State: no 'approved-by:' line
 "
       keys=$((keys + 1))
@@ -2548,9 +2548,9 @@ validate_requirements_pointer() {
 
   b1=$(step1_evidence_block)
   # ANYWHERE ON THE LINE (AC-3.3, seed B B11). The Step-1 evidence is a semicolon-separated
-  # record and the pointer is rarely its first field; see line_field's docblock for why the
+  # record and the pointer is rarely its first field; see evidence_line_field's docblock for why the
   # old line-start anchor refused a plan that named its requirements perfectly well.
-  raw=$(line_field "$b1" requirements)
+  raw=$(evidence_line_field "$b1" requirements)
   if [ -z "$raw" ]; then
     _eg_detail="canonical-sdlc step ${CURRENT} — the Step 1 evidence has no 'requirements:' field.
 Plan: $PLAN
@@ -3276,10 +3276,10 @@ validate_walk_artifact() {
   # "path" (plan assumption A17). The dedicated continuation-line shape has
   # no ';' in it, so the truncation is a no-op there.
   b5=$(step5_evidence_block)
-  # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `line_field`
+  # THE SIBLING POINTER READ (AC-3.3). Same record shape, same tolerance: `evidence_line_field`
   # keeps the first-`;` truncation this read already had and drops only the line-start
   # anchor, so a Step-5 line that opens with `cmd: …` no longer hides its walk artifact.
-  raw=$(line_field "$b5" walk-artifact)
+  raw=$(evidence_line_field "$b5" walk-artifact)
   if [ -z "$raw" ]; then
     block_matrix "rows are discharged with no walk recorded" "walk it, then name the file" \
       "the walk gate: matrix rows are discharged but the Step 5 evidence has no 'walk-artifact:' line." \
