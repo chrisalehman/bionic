@@ -1378,7 +1378,7 @@ sanitize() {  # <value> <max-chars> [<field name>]
     | tr '\n\r\t|' '    ' \
     | sed -e 's/[[:cntrl:]]/ /g' -e 's/  */ /g' -e 's/^ *//' -e 's/ *$//')"
   case "${3:-}" in
-    files|suites_allowed) printf '%s' "$out" ;;
+    files|suites_allowed|re_executes) printf '%s' "$out" ;;
     *) printf '%s' "$out" | cut -c "1-$2" ;;
   esac
 }
@@ -1647,7 +1647,26 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # assumption 48); a template <slot> is not a concrete path (ispath rejects it), so a
     # brief that declares only a slot yields nothing here and the absent-deliverable wall
     # refuses it.
-    function decl_deliverable(   j, best, t, visited) {
+    #
+    # EVERY HIT, NOT THE FIRST THAT ANSWERS (carry-over 14, research R3 row 35; REQ-12
+    # AC-12.1). The walk used to RETURN at the first deliverable-kind hit that yielded a
+    # path, so the rule was POSITION and nothing else: a brief carrying
+    # `Expected artifact: a.md` and, lower down, a real `Deliverable: b.md` line was
+    # contracted to whichever came first, recorded `source=declared` as though a human had
+    # chosen, with the other path discarded in silence. `Expected artifact` holds no
+    # precedence over `Deliverable` and never did — and the ambiguity wall could not see the
+    # conflict, because each hit owns its own span and each span held exactly one path.
+    #
+    # SO THE PATHS OF EVERY HIT ARE UNIONED, DISTINCT, IN POSITION ORDER. Two labels naming
+    # two paths now reach `deliverable_ambiguous=` exactly as one label naming two paths
+    # always has: one refusal, both candidates handed back, no guess — assumption 48 applied
+    # to the case where the second path is under a second label instead of beside the first.
+    # The same path under both labels is ONE path and is admitted: an author who repeated
+    # themselves has not created an ambiguity, and refusing that would be a wall with no
+    # fault to name. A pathless hit still contributes nothing, which is what kept the
+    # "...per deliverable:" prose specimen from shadowing a real labelled line.
+    function decl_deliverable(   j, best, t, visited, out, seen, m, k, arr) {
+      out = ""
       for (;;) {
         best = 0
         for (j = 1; j <= nh; j++) {
@@ -1658,9 +1677,16 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         if (best == 0) break
         visited[best] = 1
         t = span_paths(best)
-        if (t != "") return t
+        if (t == "") continue
+        m = split(t, arr, ",")
+        for (k = 1; k <= m; k++) {
+          if (arr[k] == "") continue
+          if (arr[k] in seen) continue
+          seen[arr[k]] = 1
+          out = (out == "" ? arr[k] : out "," arr[k])
+        }
       }
-      return ""
+      return out
     }
     # A waiver REASON that is the angle-bracketed slot out of the wall message,
     # copied rather than filled in. A real reason never opens with one.
@@ -1695,6 +1721,17 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
         if (t == "" || istemplate(t)) continue
+        # AN UNEXPANDED NAME IS NOT A SUITE, AND NOW SAYS SO HERE (REQ-1 AC-1.4, ADR-029).
+        # The refusal prose at the suite-allowance wall has promised "one path per token, no
+        # shell variables" since wave-01, and nothing at dispatch enforced it: `istemplate`
+        # rejects `<slot>` forms only, so `tests/$X.test.sh` was basenamed to `$X.test.sh`,
+        # matched the filter and lifted onto the row as a budget entry no command could ever
+        # equal. The run-time twin already exists and already says why
+        # (payload/scripts/lib/walls.sh budget_refuse: "unexpanded name; allowed: …"), so
+        # this is the same rule read at the moment the author can still fix it. A bare `$`
+        # (a regex anchor inside a quoted pattern) is not a variable — the token must be a
+        # `$` followed by a name character or a brace.
+        if (t ~ /[$][A-Za-z_{]/) { print "suites_bad=" t; continue }
         b = t; sub(/.*\//, "", b)
         if (b !~ /\.test\.sh$/ && !(b == "run.sh" && index(t, "/") > 0)) continue
         if (seen[b]) continue
@@ -1708,6 +1745,59 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       if (out != "") return out
       if (tolower(collapse(s)) ~ /^none([^a-z0-9]|$)/) return "none"
       return ""
+    }
+    # THE AUTHOR-MARKED RUNS on a `Re-executes:` span — each backtick-delimited command, in
+    # position order, marks KEPT, space-joined, at most RUNS_MAX of them.
+    #
+    # WHY THE AUTHOR MARKS THEM (D3; research R1 open question 2). A run holds spaces, and
+    # commas, and quotes, so token-splitting is wrong and any punctuation separator is
+    # ambiguous with a command that contains it. `claimpat()` above already prefers an
+    # author-marked run for exactly this reason; this is that precedent applied to a list.
+    # Text OUTSIDE the marks is not a run — a brief that writes prose on the span has
+    # declared nothing, which is the honest reading and the one the cap can bound.
+    #
+    # THE MARKS STAY ON THE VALUE. The roster field is what the writer-side budget arm
+    # compares a real command against, and "the exact marked run" is only a thing to compare
+    # when the row still carries the marks. It also makes the field self-delimiting: a
+    # backtick cannot occur inside a run, because a backtick is what ends one.
+    #
+    # THREE REFUSALS AT THE LIFT, each naming the token (REQ-1 AC-1.4, ADR-029). A `|` would
+    # forge a roster segment; a newline means the marks never closed on their own line; an
+    # unexpanded `$name` is a budget entry no command can equal (see the same rule on the
+    # `Suites:` span above). The refusal is made on the bash side — this prints the fact.
+    #
+    # A CAP HIT IS LOUD, the `suite_names()` precedent: a silently dropped fourth run is a
+    # declared command the budget arm would then refuse at run time, for a reason the author
+    # was never told.
+    function marked_runs(s,   i, j, tok, out, c, dropped, why) {
+      out = ""; c = 0; dropped = ""
+      i = 1
+      for (;;) {
+        j = index(substr(s, i), BT)
+        if (j == 0) break
+        i = i + j                              # first character after the opening mark
+        j = index(substr(s, i), BT)
+        if (j == 0) break                      # an unclosed mark is not a run
+        tok = substr(s, i, j - 1)
+        i = i + j                              # first character after the closing mark
+        why = ""
+        if (index(tok, "\n") > 0)       why = "a newline"
+        else if (index(tok, "|") > 0)   why = "a pipe"
+        else if (tok ~ /[$][A-Za-z_{]/) why = "an unexpanded shell variable"
+        if (why != "") { print "re_executes_bad=" why ": " collapse(tok); continue }
+        tok = collapse(tok)
+        if (tok == "") continue
+        if (c < RUNS_MAX) {
+          out = (out == "" ? BT tok BT : out " " BT tok BT)
+          c++
+        } else {
+          dropped = (dropped == "" ? BT tok BT : dropped " " BT tok BT)
+        }
+      }
+      if (dropped != "") {
+        print "re_executes_capwarn=Re-executes: line exceeds the " RUNS_MAX "-run cap — dropped: " dropped
+      }
+      return out
     }
     function paths(s, maxn, warnlabel,   n, arr, i, t, out, seen, c, dropped) {
       n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""
@@ -1741,6 +1831,20 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # silent exit 0.
       FILES_MAX = 200
       SUITES_MAX = 200
+      # HOW MANY RUNS A `Re-executes:` SPAN DECLARES (D3; REQ-1 AC-1.6). Three, because
+      # three is the cap the auditor mandate already states for re-executions
+      # (skills/canonical-sdlc/steps/5.md: "One auditor, one pass, <=3 re-executions") and a
+      # second number for the same idea is a second answer. Unlike FILES_MAX/SUITES_MAX this
+      # is not a bound on the width of a row field — it is the ceiling of the declaration
+      # itself — so
+      # hitting it is a fact about the brief, and loud: see marked_runs() above.
+      RUNS_MAX = 3
+      # THE MARK THE AUTHOR WRITES, NAMED RATHER THAN SPELT. This whole program is one single-quoted
+      # shell word, so a backtick literal inside it would be one more character the shell
+      # reads before awk does; `QUOTE_CHARS` is assembled above this function with the
+      # backtick first, for claimpat(), and this is the same character read off the same
+      # source.
+      BT = substr(QUOTES, 1, 1)
       # LONGEST FIRST — see the nesting note above. `-` marks a label that only
       # BOUNDS a span; it is a real brief field, just not one the roster lifts.
       #
@@ -1824,6 +1928,14 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # deliverable-kind labels are: every refusal below quotes them back as a
       # copy-paste example, and a brief that repeats the example mid-sentence has
       # documented the wall, not declared a field.
+      # THE THIRD INSTRUMENT LABEL (epic-23 wave-16, REQ-1, D1, ADR-029), PINNED TO LINE
+      # START like the other two and for the same reason: the refusals below quote it back as
+      # a copy-paste example. `Files:` declares intent and `Suites:` the shell-suite
+      # consequence; `Re-executes:` declares the consequence for every OTHER runner — jest,
+      # pytest, go test, a live read — which had no spelling at all until now, so a brief in
+      # such a repository could declare nothing true and the walls held nothing (research R1
+      # section 9.1). It sits above `suites` because the table runs longest label first.
+      addlabel("re-executes",        "runs",   "", 1)
       addlabel("suites",             "suites", "", 1)
       addlabel("files",              "files",  "", 1)
       addlabel("scope",              "-")
@@ -1919,6 +2031,14 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       # no budget at all, and refused by the guard for every suite.
       h = firsthit("suites")
       if (h > 0) { v = suite_names(spanof(h)); if (v != "") print "suites=" v }
+      # THE RUNS THE BRIEF DECLARES, MARKS AND ALL (REQ-1 AC-1.1/AC-1.6). List-valued and
+      # self-delimiting: the value is the author-marked runs, space-joined, so the roster row
+      # carries the same spelling the author wrote and the writer-side budget arm can compare
+      # a real command against an exact marked run. There is no `none` waiver here — the
+      # absence of the label IS the absence of the declaration, and `Suites: none` remains the
+      # one way a brief waives a budget outright.
+      h = firsthit("runs")
+      if (h > 0) { v = marked_runs(spanof(h)); if (v != "") print "re_executes=" v }
     }
   ' 2>/dev/null
 }
@@ -2034,6 +2154,11 @@ C_SUITES_CAPWARN=$(field_of suites_capwarn)
 [ -n "$C_SUITES_CAPWARN" ] && warn "$C_SUITES_CAPWARN"
 C_FILES_CAPWARN=$(field_of files_capwarn)
 [ -n "$C_FILES_CAPWARN" ] && warn "$C_FILES_CAPWARN"
+# The runs cap (REQ-1 AC-1.6), on the same pipe and the same `warn` as the two above: a
+# fourth declared run is DROPPED, and a silently dropped declaration is a command the
+# writer-side budget arm would refuse at run time for a reason the author was never told.
+C_RUNS_CAPWARN=$(field_of re_executes_capwarn)
+[ -n "$C_RUNS_CAPWARN" ] && warn "$C_RUNS_CAPWARN"
 C_DELIVERABLE=$(sanitize "$(field_of deliverable)" 300)
 # Never both: the extractor prints ONE of these two, so a non-empty list here means
 # `deliverable=` is empty and the ambiguity wall below owns the dispatch.
@@ -2054,6 +2179,18 @@ C_WAIVER=$(sanitize "$(field_of waiver)" 300)
 # `clean()` already carries on the read/adopt side (task T9).
 C_FILES=$(sanitize "$(field_of files)" 900 files)
 C_SUITES=$(sanitize "$(field_of suites)" 900 suites_allowed)
+# THE THIRD INSTRUMENT FIELD (epic-23 wave-16, REQ-1, D1, ADR-029). `Re-executes:` is the
+# runner-agnostic declaration: the author-marked commands this agent will re-run, marks kept,
+# space-joined. List-valued like the two above, so it passes its own field name as
+# `sanitize`s third argument — three marked jest invocations run past the 300-char caps the
+# single-value fields use, and a cut there would narrow a budget the wall never agreed to.
+C_RE_EXECUTES=$(sanitize "$(field_of re_executes)" 900 re_executes)
+# WHAT THE LIFT REFUSED TO TAKE, read here so the arm below can name it. The extractor emits
+# one of these per bad token (`field_of` returns the first, which is the one the author fixes
+# first); a value present means the span carried something that is not a literal command or a
+# literal suite name, and the token is in the value.
+C_RUNS_BAD=$(sanitize "$(field_of re_executes_bad)" 300)
+C_SUITES_BAD=$(sanitize "$(field_of suites_bad)" 300)
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
@@ -2194,8 +2331,19 @@ dp_scaffold_marked() {
       # here would tell the author to add a line they already wrote.
       "Expected artifact")  [ -n "$C_DELIVERABLE" ] || [ -n "$C_WAIVER" ] || \
                              [ -n "$C_DELIVERABLE_CANDIDATES" ] || line="${line} <ADD>" ;;
-      "Files")               [ -n "$C_FILES" ]       || [ -n "$C_SUITES" ] || line="${line} <ADD>" ;;
-      "Suites")              [ -n "$C_SUITES" ]      || line="${line} <ADD>" ;;
+      # THE INSTRUMENT LABELS ARE A TRIPLE NOW, NOT A PAIR (epic-23 wave-16, REQ-1 AC-1.8).
+      # `Re-executes:` satisfies the suite-allowance wall on its own, so the same rule the
+      # `Files:`/`Suites:` pair has followed since wave-14 extends to all three: each is
+      # marked only when NONE of the three is satisfied, which is again exactly the condition
+      # of the wall that refuses the brief. Marking `Files:` beside a declared set of runs
+      # would tell a jest author to name shell files they will not touch — the same wrong
+      # instruction D8 removed, arriving by a new route.
+      "Files")               [ -n "$C_FILES" ]       || [ -n "$C_SUITES" ] || \
+                             [ -n "$C_RE_EXECUTES" ] || line="${line} <ADD>" ;;
+      "Suites")              [ -n "$C_SUITES" ]      || [ -n "$C_RE_EXECUTES" ] || \
+                             line="${line} <ADD>" ;;
+      "Re-executes")         [ -n "$C_RE_EXECUTES" ] || [ -n "$C_SUITES" ] || \
+                             [ -n "$C_FILES" ]       || line="${line} <ADD>" ;;
       "Deliverable-waiver")  [ -n "$C_WAIVER" ]      || [ -n "$C_DELIVERABLE" ] || line="${line} <ADD>" ;;
     esac
     printf '%s\n' "$line"
@@ -2429,6 +2577,57 @@ Then retry the dispatch."
   fi
 fi
 
+# ===================================== A DECLARATION IS LITERAL TEXT (REQ-1 AC-1.4)
+# (epic-23 wave-16, D1/D3, ADR-029.)
+#
+# THE RULE THE PROSE HAS PROMISED SINCE WAVE-01, now enforced. The suite-allowance
+# refusal below has always ended "one path per token, no shell variables … a name that
+# is still a variable when a hook sees it can be neither derived from nor checked
+# against anything" — and nothing at dispatch checked it (research R1 Q3). A token
+# `tests/$X.test.sh` was basenamed to `$X.test.sh` and lifted onto the roster row as a
+# budget entry, where the writer-side guard then refused every command the agent ran,
+# with its own honest message about an unexpanded name, 40 minutes after the moment the
+# author could have fixed it in a word.
+#
+# BOTH SPELLINGS, ONE ARM. `Re-executes:` gains the rule at birth and `Suites:` gains it
+# here, because a wall whose prose is true for one of two spellings of one idea is a wall
+# nobody can read. A run also refuses on a `|` (it would forge a roster segment) or on a
+# newline (the marks never closed on their own line).
+#
+# THE TOKEN IS IN THE DETAIL, NOT THE ONE LINE. A command is arbitrarily long and the
+# refusal line is bounded at 100 columns (AC-E1.3); the fact fits the line, the evidence
+# goes where the rest of every Fix block goes.
+if [ -n "$C_RUNS_BAD" ]; then
+  _dp_detail="The span offered this, and it is not a command that can be re-run:
+    ${C_RUNS_BAD}
+
+A declared run is matched against what the agent actually types, before any shell has
+expanded anything — so a name that is still a variable here can be neither derived from
+nor checked against anything, and a run carrying a pipe or spanning a line break is not
+one run.
+
+Fix: mark each run with backticks, on a line of its own, at most three —
+    Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
+
+Then retry the dispatch."
+  dp_finding "a declared run is not a literal command" "spell each run literally" "$_dp_detail"
+fi
+
+if [ -n "$C_SUITES_BAD" ]; then
+  _dp_detail="The Suites: span offered this token, and it is not a suite name:
+    ${C_SUITES_BAD}
+
+The declared set goes on the roster row and the writer-side guard compares the agent's own
+command against it, both of them as literal text — so a token that is still a variable when
+a hook sees it can be neither derived from nor checked against anything.
+
+Fix: spell each suite literally, one path per token —
+    Suites: tests/one.test.sh, tests/two.test.sh
+
+Then retry the dispatch."
+  dp_finding "a declared suite is not a literal name" "spell each suite literally" "$_dp_detail"
+fi
+
 # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
 # (seed .bionic/docs/ideas/suite-allowance-wall.md items 1-2; design ledger D2,
 # Chris 2026-09-05 "Option 2": a brief declares INTENT, the machine derives the
@@ -2457,7 +2656,13 @@ fi
 # A BRIEF WITH NEITHER IS REFUSED, and that is the whole wall. Everything else here is
 # bookkeeping: without one of the two labels there is no budget on the row, and a guard
 # with no budget to enforce is the prose the incident already proved does not bind.
-if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ]; then
+#
+# `Re-executes:` IS THE THIRD WAY THROUGH (REQ-1 AC-1.3, D1). The field is a budget
+# declaration in exactly the sense this wall means: a closed set of commands, on the roster
+# row, for the writer-side guard to hold the agent to. It is the only declaration available
+# to an agent in a repository whose tests are not shell suites, so refusing a brief that
+# carries it for "declaring no instrument" would be the wall contradicting itself.
+if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ]; then
   _dp_detail="An agent with no declared instrument runs whatever it decides to run. Two writers
 read \"run the impacted suites\" as the whole tree and spent 40 minutes each
 re-proving the world; the budget only binds when it is on the roster row.
@@ -2468,6 +2673,10 @@ Fix: declare the files this task will touch, on a line of its own —
 
 Where no impact command is configured, name the closed set yourself —
     Suites: tests/one.test.sh, tests/two.test.sh
+
+Where the tests are not shell suites, name the commands themselves instead — each marked
+with backticks, at most three —
+    Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
 
 Or waive the budget for a brief that runs no suite at all —
     Suites: none
@@ -2501,7 +2710,14 @@ fi
 # labelled span and its lift is one value, the waiver or the list, never both.
 case "$DP_SUBAGENT" in
   bionic:auditor|auditor)
-    if [ "$C_SUITES" = "none" ]; then
+    # THE PREDICATE IS NOW "NO SUITES AND NO DECLARED RUNS" (epic-23 wave-16, REQ-1 AC-1.2,
+    # D1, ADR-029). An auditor in a jest, pytest or go repository has a real re-execution to
+    # declare and no shell suite to name it with; refusing that brief was this arm asking for
+    # a spelling the repository does not have, and the fix text it printed named the only
+    # spelling that could not answer. `Suites: none` beside a non-empty `Re-executes:` is an
+    # auditor that waived the shell-suite budget and declared what it will actually re-run,
+    # which is the whole of what this arm exists to require.
+    if [ "$C_SUITES" = "none" ] && [ -z "$C_RE_EXECUTES" ]; then
       dp_finding "an auditor names no suites" "name the suites to re-execute" \
         "Role: ${DP_SUBAGENT}
 
@@ -2509,8 +2725,13 @@ An auditor's Step-5 verdict is a re-run of the evidence, not a read of it — a 
 row in the matrix is falsified by running the suite the row names, and a brief that waives
 every suite gives the auditor nothing to run.
 
-Fix: name the suites the matrix binds this auditor to, on a line of its own —
+Fix: name what the matrix binds this auditor to re-execute, on a line of its own. For
+shell suites —
     Suites: tests/one.test.sh, tests/two.test.sh
+
+  For any other runner, name the commands themselves, each marked with backticks, at
+  most three —
+    Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
 
 Then retry the dispatch."
     fi
@@ -3007,12 +3228,13 @@ ROSTER_PLAN=$(sanitize "$(session_plan "$BIONIC_ROOT" "$BIONIC_SID")" 400)
 # passed explicitly rather than omitted: a launch-time row has no id yet, and saying so is
 # the field's content, not its absence.
 #
-# THE THREE INSTRUMENT FIELDS ARE ALWAYS NAMED HERE (spec AC-20), even when the wall above
-# derived an empty set, for the same reason: a launch row that reached this line passed the
-# suite-allowance wall, so it HAS a budget statement, and an omitted key would say the row
-# predates the wall entirely. They are optional in `roster_row` so the captured rows in
-# tests/fixtures/roster-row.captured — written before this task existed — still rebuild
-# byte for byte; they are not optional to this writer.
+# THE FOUR INSTRUMENT FIELDS ARE ALWAYS NAMED HERE (spec AC-20; `re_executes=` added epic-23
+# wave-16, REQ-1), even when the wall above derived an empty set, for the same reason: a
+# launch row that reached this line passed the suite-allowance wall, so it HAS a budget
+# statement, and an omitted key would say the row predates the wall entirely. They are
+# optional in `roster_row` so the captured rows in tests/fixtures/roster-row.captured —
+# written before this task existed — still rebuild byte for byte; they are not optional to
+# this writer.
 ROW=$(roster_row \
   status=intended \
   "session=${BIONIC_SID}" \
@@ -3032,6 +3254,7 @@ ROW=$(roster_row \
   "files=${C_FILES}" \
   "suites_allowed=${SUITES_ALLOWED}" \
   "suites_source=${SUITES_SOURCE}" \
+  "re_executes=${C_RE_EXECUTES}" \
   "tool_use_id=${TOOL_USE_ID}" \
   "plan=${ROSTER_PLAN}") || ROW=""
 
