@@ -1,12 +1,32 @@
 ---
 paths:
   - "hooks/*.sh"
+  - "payload/scripts/lib/walls.sh"
 ---
 
 # Hook authoring
 
 Anchors for the recurring traps when changing hooks in `bionic/hooks/`. Migrated from
 `.bionic/memory/hooks-rules.md` (epic-12 wave-01 slice 6) with the correction ledger applied.
+
+## The freeze (D11, 2026-09-20)
+
+A wall is a pure predicate over the facts it is handed. The freeze states that as a rule:
+**a wall must never fetch its own facts**. It does not read a plan, a roster, a file's
+existence, or a typed command string to discover what it is judging — the caller hands it
+the fact, or it gives no verdict. Why: every one of wave-16's findings was one wall reaching
+for a fact about an artifact it was not handed, and a wrong reach never fails loudly — it
+passes.
+
+The freeze forbids, effective now, any NEW wall fetching its own facts. A new check either
+takes presented facts from its caller, or it waits for bionic 1.8.4, the purity wave: one
+collector gathers the facts and resolves identity once, every wall becomes a predicate over
+that record, and the whole class becomes testable by the line **no wall performs I/O**. The
+freeze permits repairs of EXISTING checks without adding a new reach — the wave's own
+D13/D14 rows are the precedent.
+
+Ruling: `.bionic/docs/record/wave-16-fixit-183/design-ledger.md` Δ10, and
+ADR-029/030 under `.bionic/docs/adrs/epic-23-bionic-tech-debt/`.
 
 ## Registration
 
