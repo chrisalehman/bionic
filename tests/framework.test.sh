@@ -1555,4 +1555,118 @@ expect_contains "17: the wall refuses a suite that defines its own advise() at c
 expect_contains "17: …naming the framework as the owner" "tests/lib/assert.sh" \
   "$(f16_wall shadowadvise)"
 
+# ============================================================
+section "18: the runner reports advisory readings apart from the gate (T7, REQ-10)"
+# ============================================================
+#
+# §17 proved the advisory row is a READING and moves no counter. That left the
+# reading invisible: `tests/run.sh` never read a suite's captured output for it,
+# so on a green run nobody could tell whether a reference had been blown. The
+# runner now counts the two line-start markers §17 pins — `^ADVISORY: ` for every
+# reading, `^ADVISORY: exceeded ` for the ones past their reference — across the
+# captures it already walks, and prints ONE line after the tally.
+#
+# THE LINE IS ADDED, NEVER FOLDED IN. Nine rows across four suites pin
+# `Gating: N passed, M failed` verbatim; an advisory count spliced into that line
+# moves all nine and, worse, would make a reading look like a verdict. It is a
+# separate line, and it is printed only when a reading was actually taken — the
+# same conditional rule `finish` applies to its own tally field (§17), and what
+# keeps a run that took no reading byte-identical to the run before this change.
+
+A_TREE="$SB/adv-tree"
+A_RING="$SB/adv-ring"
+mkdir -p "$A_TREE/tests/lib" "$A_TREE/payload/scripts/lib"
+cp "$REPO/tests/run.sh"               "$A_TREE/tests/run.sh"
+cp "$REPO/tests/lib/resolve-roots.sh" "$A_TREE/tests/lib/resolve-roots.sh"
+cp "$FRAMEWORK"                       "$A_TREE/tests/lib/assert.sh"
+cp "$REPO"/payload/scripts/lib/*.sh   "$A_TREE/payload/scripts/lib/" 2>/dev/null
+
+cat > "$A_TREE/tests/a-plain.test.sh" <<'A_PLANT_PLAIN'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+section "a plain suite, no readings anywhere"
+ok "a gating row"
+finish
+A_PLANT_PLAIN
+
+# a_reading <with|without> — the same suite, same filename, written with its two
+# readings or without them. Same tree, same labels, same tally: the ONLY thing
+# that moves between the two drives below is whether a reading was taken.
+a_reading() {
+  { printf '#!/bin/bash\n'
+    printf 'set -uo pipefail\n'
+    printf '. "$(dirname "$0")/lib/assert.sh"\n'
+    printf 'section "a suite that takes readings beside its gating row"\n'
+    printf 'ok "a gating row"\n'
+    if [ "$1" = "with" ]; then
+      printf 'advise "inside its reference" "0.826s against a 2s reference" true\n'
+      printf 'advise "past its reference" "17.623s against a 10s contract" false\n'
+    fi
+    printf 'finish\n'
+  } > "$A_TREE/tests/a-reading.test.sh"
+}
+
+# a_drive — one run of the scratch runner over A_TREE, with a freshly seeded
+# pressure ring so two drives print the same `samples=` reading.
+A_OUT=""; A_RC=0
+a_drive() {
+  printf '1700000000|44|0|0.1|2\n' > "$A_RING"
+  A_OUT="$( cd "$A_TREE" && \
+    BIONIC_PRESSURE_RING="$A_RING" \
+    BIONIC_NOW_EPOCH="1700000000" \
+    BIONIC_TEST_JOBS_CEILING="2" \
+    BIONIC_PROBE_FREE_PCT="44" \
+    BIONIC_PROBE_SWAP_PCT="0" \
+    BIONIC_PROBE_LOAD_1M="0.1" \
+    bash tests/run.sh 2>&1 )"
+  A_RC=$?
+}
+
+# a_norm <report> — the report with its one per-run nonce masked: the interpreter
+# pin's own `mktemp -d` path, a fresh directory on every invocation.
+a_norm() { printf '%s\n' "$1" | sed -e 's|path=[^ ]*|path=PIN|g'; }
+
+a_reading with
+a_drive
+A_WITH="$A_OUT"
+
+expect_eq "18: the reading tree is green — an exceeded reading is not a failure" "0" "$A_RC"
+expect_eq "18: …and the gating tally is untouched, byte for byte" "yes" \
+  "$(contains "$A_WITH" "Gating: 2 passed, 0 failed")"
+expect_eq "18: the report carries the advisory tally, counting both readings and the one exceed" "yes" \
+  "$(contains "$A_WITH" "Advisory: 2 readings, 1 exceeded")"
+expect_eq "18: …on its own line, directly after the tally it must never be folded into" \
+  "$(printf 'Gating: 2 passed, 0 failed\nAdvisory: 2 readings, 1 exceeded\n')" \
+  "$(printf '%s\n' "$A_WITH" | /usr/bin/grep -A1 '^Gating: ')"
+
+a_reading without
+a_drive
+A_WITHOUT="$A_OUT"
+
+expect_eq "18: the same tree without the two readings is green too" "0" "$A_RC"
+expect_eq "18: …and prints no advisory line at all" "no" \
+  "$(contains "$A_WITHOUT" "Advisory:")"
+# THE BYTE CONTROL. Two drives of one tree, differing only in whether a reading
+# was taken: the reports must differ by exactly the one added line and nothing
+# else — no reordering, no widened tally, no blank line.
+expect_eq "18: …and the two reports differ by exactly that one added line" \
+  "> Advisory: 2 readings, 1 exceeded" \
+  "$(diff <(a_norm "$A_WITHOUT") <(a_norm "$A_WITH") | /usr/bin/grep '^[<>]')"
+# PAIRED POSITIVE: the thing being diffed is a real report of a real run.
+expect_eq "18: …over a report that really ran both suites" "yes" \
+  "$(contains "$A_WITHOUT" "a-reading.test.sh")"
+
+# THE PROGRESS KNOB IS DOCUMENTED WHERE THE TIMING KNOB IS (T7, AC-9.4). Both
+# are opt-in file knobs on the same runner, and `--help` is the one place a
+# caller looks before typing one. A-47's trap is why the wording says FILE: a
+# brief that writes `=1` instead of a path creates a file named `1`.
+A_HELP="$( cd "$A_TREE" && bash tests/run.sh --help 2>&1 )"
+expect_eq "18: --help names the progress knob" "yes" \
+  "$(contains "$A_HELP" "BIONIC_TEST_PROGRESS")"
+expect_eq "18: …and says what it is, in the timing knob's own words" "yes" \
+  "$(contains "$A_HELP" "a file to append to")"
+expect_eq "18: …and the timing knob is still documented beside it" "yes" \
+  "$(contains "$A_HELP" "BIONIC_TEST_TIMING")"
+
 finish
