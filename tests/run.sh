@@ -34,6 +34,8 @@
 #   bash tests/run.sh --dry-run    print the job width and exit, run nothing
 #   BIONIC_TEST_JOBS_CEILING=8 bash tests/run.sh   the ceiling the rung reads against
 #   BIONIC_TEST_TIMING=t.tsv bash tests/run.sh   also write <label>TAB<seconds>
+#   BIONIC_TEST_PROGRESS=p.tsv bash tests/run.sh also append <UTC>TAB<label>TAB<rc>
+#                                    as each suite lands, so a long run can be watched
 #
 # The derived roster below is the roster in BOTH modes — the directory is the
 # only place a suite is named, and neither mode has a list of its own. In
@@ -127,9 +129,48 @@ if [ "${1:-}" = "--one" ]; then
   $_one_cmd >"$_one_work/${_one_label}.out" 2>&1
   _one_rc=$?
   printf '%s\n' "$_one_rc" >"$_one_work/${_one_label}.rc"
+  # THE PROGRESS LINE, WHERE THE VERDICT FIRST EXISTS. This is the only writer
+  # during a default run and it covers both drains — the parallel batch and the
+  # solo suites below re-enter this same worker — so one append here is every
+  # suite, as it lands. A suite whose worker dies before this line simply has no
+  # line, which is the property the file is for: it never names a suite that did
+  # not finish.
+  #
+  # ONE SHORT printf, AND ON PURPOSE. Up to $JOBS workers append to this file at
+  # once. A single short write to a file opened O_APPEND is one write(2) and does
+  # not interleave; a second printf, or a record long enough to be split, would.
+  [ -n "${_BIONIC_TEST_PROGRESS_FILE:-}" ] && \
+    printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$_one_label" "$_one_rc" \
+      >>"$_BIONIC_TEST_PROGRESS_FILE"
   printf '%s\n' "$(( $(date +%s) - _one_start ))" >"$_one_work/${_one_label}.sec"
   exit 0
 fi
+
+# ── THE PROGRESS KNOB, READ ONCE, HERE (T7; REQ-9) ───────────────────────────
+#
+# Opt-in for the reason `BIONIC_TEST_TIMING` is: a gating run's output must not
+# change because someone wanted to watch it. What it buys is the hour a floor run
+# is otherwise silent — nothing prints a verdict in the default mode until the
+# whole queue has drained, so a watcher cannot tell a run that is working from a
+# run that is wedged, and a run killed mid-drain leaves nothing behind naming the
+# suites that did land.
+#
+# WHY THE PUBLIC NAME IS TRADED FOR A PRIVATE ONE. The workers are forked
+# children, so the destination can only reach them through the environment — but
+# four suites in this roster drive a NESTED `bash tests/run.sh` over a scratch
+# tree, and a nested run inheriting the knob would append its fixture labels
+# (`w-ok.test.sh`, `aaa-solo.test.sh`, …) to the file a human is watching. So the
+# knob is read once, HERE, in the parent: the public name is unset and the
+# workers are handed `_BIONIC_TEST_PROGRESS_FILE` instead. A nested run re-runs
+# this block, finds no public knob, and clears the private name it inherited —
+# which is why this sits BELOW the `--one` branch above rather than at the top of
+# the file. A worker never reaches it, so a worker's destination survives.
+if [ -n "${BIONIC_TEST_PROGRESS:-}" ]; then
+  export _BIONIC_TEST_PROGRESS_FILE="$BIONIC_TEST_PROGRESS"
+else
+  unset _BIONIC_TEST_PROGRESS_FILE
+fi
+unset BIONIC_TEST_PROGRESS
 
 # ── argv ─────────────────────────────────────────────────────────────────────
 # Refused, not ignored. Before this task the runner read no argv at all, so
@@ -147,6 +188,8 @@ while [ $# -gt 0 ]; do
       echo "  --dry-run           print the job width and exit; run nothing"
       echo "  BIONIC_TEST_JOBS_CEILING  the ceiling the pressure rung reads against (default 8)"
       echo "  BIONIC_TEST_TIMING  a file to append <label>TAB<seconds> to"
+      echo "  BIONIC_TEST_PROGRESS  a file to append to, one <UTC>TAB<label>TAB<rc>"
+      echo "                        line per suite as it lands"
       exit 0
       ;;
     *)
@@ -619,8 +662,39 @@ if [ "$SERIAL" -eq 0 ]; then
   done <"$QUEUE"
 fi
 
+# ── THE ADVISORY TALLY (T7; REQ-10) ──────────────────────────────────────────
+#
+# An advisory row is a READING, not a verdict (tests/lib/assert.sh's own
+# docblock): it moves no counter, so `pass`/`total` already count gating rows
+# only. That left every reading invisible on a green run — the runner echoes a
+# suite's capture only when it FAILS — so a blown reference was reported nowhere.
+#
+# COUNTED FROM THE CAPTURES, ADDED AS A LINE, NEVER FOLDED IN. The two markers
+# are the ones the framework promises: `^ADVISORY: ` is every reading and
+# `^ADVISORY: exceeded ` the ones past their reference. Nine rows across four
+# suites pin `Gating: N passed, M failed` verbatim, and a count spliced into that
+# line would move all nine and make a reading read as a verdict. It is a separate
+# line, printed only when a reading was taken — `finish`'s own conditional rule —
+# which is what keeps a run that took none byte-identical to the run before this.
+#
+# awk, NOT `grep | head`. This file runs under `pipefail`, where a reader that
+# closes early takes the producer down with SIGPIPE and a 141 nobody reads.
+_advisory=""
+_adv_seen=0
+for _adv_out in "$TMP"/*.out; do
+  [ -f "$_adv_out" ] && { _adv_seen=1; break; }
+done
+if [ "$_adv_seen" -eq 1 ]; then
+  _advisory="$(LC_ALL=C awk '
+    /^ADVISORY: / { n++ }
+    /^ADVISORY: exceeded / { m++ }
+    END { if (n+0 > 0) printf "Advisory: %d readings, %d exceeded\n", n+0, m+0 }
+  ' "$TMP"/*.out)"
+fi
+
 echo "──────────────────────────────────────────────"
 echo "Gating: ${pass} passed, ${fail} failed"
+[ -n "$_advisory" ] && echo "$_advisory"
 echo "$ENV_STAMP"
 if [ "$fail" -ne 0 ]; then
   echo -e "Failed:${failed}"
