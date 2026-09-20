@@ -304,9 +304,26 @@ wt_branches() {
   return 0
 }
 
-# wt_unreached -> every wt/* branch carrying a commit the working branch never took.
+# wt_unreached -> every wt/* branch carrying a commit the working branch never took. The
+# candidate list is the register census (`wt_branches`, D5/ADR-032) when the plan's
+# `## Tasks` table declares the `worktree` column. A table WITHOUT that column — every
+# plan this repository shipped through wave-16, and every consumer plan on 1.8.3 (critic
+# C4) — reads an empty register, and an empty register here is the PERMISSIVE failure:
+# this arm's whole job is to refuse, and an empty census means it never can, silently.
+# `units_has_column` (lib/units.sh — the SSoT for "does this table carry that column at
+# all") tells the two shapes apart; a column-less table falls back to the pre-register
+# glob census — every `wt/*` branch this repository holds, UNSCOPED by any wave number
+# so no shape guess can refuse a consumer's `working-branch:` the way the retired
+# WT_NUM/WT_PREFIX derivation once did (R6 finding 1; ADR-032 retired that refusal on
+# purpose) — and announces the fallback once on stderr so it is never silent either way.
 wt_unreached() {
-  local b _co_cherry
+  local b _co_cherry candidates
+  if units_has_column "$PLAN" worktree; then
+    candidates="$(wt_branches)"
+  else
+    echo "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to every wt/* branch" >&2
+    candidates="$(git -C "$ROOT" for-each-ref --format='%(refname:short)' 'refs/heads/wt/*' 2>/dev/null)"
+  fi
   while IFS= read -r b; do
     [ -n "$b" ] || continue
     # THE CENSUS IS CAPTURED BEFORE IT IS SEARCHED. `git cherry … | grep -q` under
@@ -318,7 +335,7 @@ wt_unreached() {
     if grep -q '^+' <<< "$_co_cherry"; then
       printf '%s\n' "$b"
     fi
-  done <<< "$(wt_branches)"
+  done <<< "$candidates"
   return 0
 }
 
@@ -751,7 +768,7 @@ insert_archived() {
 # usually a refusal, because the block `run` is about to write is not written yet. That is
 # the answer, not an error, so this verb exits 0 either way.
 do_check() {
-  local ws is verdict unreached branches wt_list wt_count wt_word count hook sid marker input rc
+  local ws is verdict unreached branches wt_list wt_count wt_word wt_desc count hook sid marker input rc
   ws="$(git -C "$ROOT" rev-parse --short "$WORKING" 2>/dev/null)"
   is="$(git -C "$ROOT" rev-parse --short "$INTEGRATION" 2>/dev/null)"
   if git -C "$ROOT" merge-base --is-ancestor "$WORKING" "$INTEGRATION" 2>/dev/null; then
@@ -767,17 +784,27 @@ do_check() {
   # by eye. Zero registered trees is the conservative failure and says so BY NAME
   # rather than printing an empty list a reader could mistake for a scan that found
   # nothing to scan.
+  #
+  # THE TWO CENSUSES CAN DISAGREE (C4). `wt_unreached` falls back to the unregistered
+  # `wt/*` glob on a column-less table (above), so `unreached` can be non-empty while
+  # the REGISTER's own `wt_count` reads zero — a plan with no `worktree` column at all
+  # registers nothing, but its fallback census can still name a branch to refuse on.
+  # The WOULD-REFUSE clause is therefore keyed on `unreached` alone, never gated behind
+  # `wt_count`, so `check` never goes silent on exactly the plans C4 found silent.
   wt_list="$(wt_branches)"
   wt_count="$(printf '%s\n' "$wt_list" | grep -c '[^[:space:]]')"
   unreached="$(wt_unreached)"
   branches="$(printf '%s' "$wt_list" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//')"
   wt_word="tree"; [ "$wt_count" = 1 ] || wt_word="trees"
   if [ "$wt_count" -eq 0 ]; then
-    say "worktree-removed: census: no registered trees"
-  elif [ -n "$unreached" ]; then
-    say "worktree-removed: ${branches} (${wt_count} registered ${wt_word}) WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took"
+    wt_desc="census: no registered trees"
   else
-    say "worktree-removed: ${branches} (${wt_count} registered ${wt_word})"
+    wt_desc="${branches} (${wt_count} registered ${wt_word})"
+  fi
+  if [ -n "$unreached" ]; then
+    say "worktree-removed: ${wt_desc} WOULD REFUSE — $(printf '%s' "$unreached" | tr '\n' ' ' | sed -E 's/[[:space:]]+$//') carries a commit $WORKING never took"
+  else
+    say "worktree-removed: ${wt_desc}"
   fi
 
   count="$(tmp_count)"
