@@ -360,6 +360,72 @@ mk_census_branch() {
   fixture_git "$1" branch "$2" >/dev/null 2>&1
 }
 
+# mk_census_fixture_nowt <name> <working-branch> <tasks-rows> -> like mk_census_fixture,
+# but the `## Tasks` header carries NO `worktree` column at all (10 cells, not 11) — the
+# shape research R1 reports as every plan this repository shipped through wave-16, and
+# every consumer plan on 1.8.3 (critic C4). `units_has_column <plan> worktree` reads
+# false against this table, which is the fork `wt_unreached`'s C4 fix reads.
+mk_census_fixture_nowt() {
+  local name="$1" working="$2" rows="$3"
+  local p="$SANDBOX/$name"
+  local aroot="$SANDBOX/$name-archive"
+  mkdir -p "$p/.bionic/docs/plans/epic-fx" "$p/.bionic/tmp" "$aroot"
+  printf 'archive-root: %s\n' "$aroot" > "$p/.bionic/config.yaml"
+  cat > "$p/.bionic/docs/plans/epic-fx/wave-01-fixture.plan.md" <<PLAN_CENSUS
+---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+intent: bugfix
+rigor: tested
+scale: wave
+deploy_target: n/a
+use_worktree: false
+has_ui: false
+multi_agent: false
+walk: exempt
+archive-root: ${aroot}
+---
+
+# fixture register plan — no worktree column at all (C4)
+
+## SDLC State
+
+integration-branch: main
+working-branch: ${working}
+base: main @ fixture
+intent: bugfix
+rigor: tested
+scale: wave
+current: 8
+approved-by: fixture 2026-09-14T00:00Z "approved"
+
+- Step 7: CLOSED — n/a: no ADR owed by a fixture
+- Step 8: (pending)
+- Step 9: (pending)
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+${rows}
+
+## Handoff
+
+- resume point: Step 8 open; the tail has not run.
+- open blockers: none.
+PLAN_CENSUS
+  (
+    in_fixture "$p" || exit 1
+    git init -q . >/dev/null 2>&1
+    git symbolic-ref HEAD refs/heads/main
+    printf '.bionic/\n' > .gitignore
+    printf 'seed\n' > file.txt
+    git add -A >/dev/null 2>&1
+    git commit -q -m "seed" >/dev/null 2>&1
+  )
+  printf '%s\n' "$p"
+}
+
 PLAN_REL=".bionic/docs/plans/epic-fx/wave-01-fixture.plan.md"
 EPIC_REL=".bionic/docs/plans/epic-fx/epic.plan.md"
 CONT_REL=".bionic/docs/record/wave-01-fixture/continuation.md"
@@ -471,7 +537,7 @@ branch_exists() {
 require_helpers in_fixture fixture_git contains fixture_plan_text fixture_epic_text mk_fixture \
                 add_unreached_branch add_foreign_unreached_branch run_close run_close_as gate_rc \
                 run_open_rc tmp_entries sha_of branch_exists plant_tmp_session tmp_file_exists \
-                mk_census_fixture mk_census_branch
+                mk_census_fixture mk_census_branch mk_census_fixture_nowt
 
 # ============================================================
 section "0 — the script exists, parses, and refuses an unusable call"
@@ -572,6 +638,68 @@ expect_eq "0n3: run refuses — the registered wt/16-b carries unreached work" "
 expect_eq "0n4: …naming it" "yes" "$(contains "$CO_OUT" "wt/16-b")"
 expect_eq "0n5: …and the fully-reachable wt/16-a still survives the refusal" "yes" \
   "$(branch_exists "$P0N" "wt/16-a")"
+
+# ============================================================
+section "0o — C4: no worktree column at all falls back to the pre-wave glob census"
+# ============================================================
+#
+# Critic C4's reproduction: a plan whose `## Tasks` table has NO `worktree` column at
+# all (every plan this repository shipped through wave-16; every consumer plan on 1.8.3)
+# yields an EMPTY register census, which silently turned `wt_unreached`'s refusal into a
+# no-op — the arm's whole job is to refuse, and an empty census means it never can. The
+# fix: when the table has no `worktree` column, `wt_unreached` falls back to the census
+# every `wt/*` branch this repository holds, announced once on stderr so the fallback is
+# never silent either way.
+
+ROWS_NOWT="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | active |"
+
+# 0o1-0o5: an unmerged wt/01-T1 (git cherry shows a `+` line against the working
+# branch) — today (unfixed) this passes silently; the fix must refuse and say so.
+P0O="$(mk_census_fixture_nowt p0o "wave/01-x" "$ROWS_NOWT")"
+(
+  in_fixture "$P0O" || exit 1
+  git checkout -q -b wave/01-x
+  printf 'work\n' >> file.txt
+  git commit -q -am "wave work" >/dev/null 2>&1
+  git checkout -q -b wt/01-T1 wave/01-x
+  printf 'never landed\n' >> file.txt
+  git commit -q -am "unreached" >/dev/null 2>&1
+  git checkout -q main
+  git merge -q --no-ff -m "merge wave" wave/01-x >/dev/null 2>&1
+)
+run_close "$P0O" check
+expect_eq "0o1: check WOULD REFUSE naming wt/01-T1 though the register census is empty" "yes" \
+  "$(contains "$CO_OUT" "WOULD REFUSE")"
+expect_eq "0o2: …naming the branch" "yes" "$(contains "$CO_OUT" "wt/01-T1")"
+expect_eq "0o3: …and announces the fallback on stderr, verbatim" "yes" \
+  "$(contains "$CO_OUT" "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to every wt/* branch")"
+
+run_close "$P0O" run
+expect_eq "0o4: run refuses — the fallback census carries unreached work" "2" "$CO_RC"
+expect_eq "0o5: …naming wt/01-T1" "yes" "$(contains "$CO_OUT" "wt/01-T1")"
+expect_eq "0o5b: …the branch survives (nothing was deleted, nothing else was done)" "yes" \
+  "$(branch_exists "$P0O" "wt/01-T1")"
+
+# 0p: a columnless table whose only wt/* branch is fully merged — the fallback still
+# fires (announced) but finds nothing to refuse, and the run proceeds.
+P0P="$(mk_census_fixture_nowt p0p "wave/01-x" "$ROWS_NOWT")"
+(
+  in_fixture "$P0P" || exit 1
+  git checkout -q -b wave/01-x
+  printf 'work\n' >> file.txt
+  git commit -q -am "wave work" >/dev/null 2>&1
+  git branch wt/01-T1 wave/01-x
+  git checkout -q main
+  git merge -q --no-ff -m "merge wave" wave/01-x >/dev/null 2>&1
+)
+run_close "$P0P" check
+expect_eq "0p1: check does not WOULD-REFUSE — the only wt/* branch is fully merged" "no" \
+  "$(contains "$CO_OUT" "WOULD REFUSE")"
+expect_eq "0p2: …but still announces the fallback (a columnless table, either way)" "yes" \
+  "$(contains "$CO_OUT" "unreached-work census falls back to every wt/* branch")"
+
+run_close "$P0P" run
+expect_eq "0p3: run proceeds — nothing in the fallback census carries unreached work" "0" "$CO_RC"
 
 # ============================================================
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"
