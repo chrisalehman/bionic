@@ -431,4 +431,106 @@ anchor -E "$STOP_LIB" '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' 1
 expect_empty "6u: …and a copy with that line cut has no source line left to find" \
   "$(/usr/bin/grep -nE '^[[:space:]]*(\.|source)[[:space:]]+.*bounds\.sh' "$S_MUTD/stop.sh")"
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+section "7: the tick's FILL still reaches the duty wall (REQ-10 AC-10.2; D5)"
+
+# THE SEAM THIS SECTION OWNS. `decision=` became the ranked maximum DISARM > NOTIFY > FILL >
+# QUIET, with the fill ids carried in a `fill=` field on the `poker-tick/v1` line. The duty
+# wall does not read that line: it reads the PRINTED `poker: FILL <ids>` out of the tick's
+# tool result, cuts the ids at the first escaped newline, and refuses a turn that neither
+# dispatched nor declined them. Both halves changed in one wave — one in the tick, one
+# nowhere — and nothing between them would have said so.
+#
+# THE FILL LINE IS THE REAL TICK'S, not a literal. tests/patrol-duties-gate.test.sh drives
+# every arm of the wall against synthesised text, which is right for a suite about the wall
+# and cannot see a tick that stopped printing the line. So this section RUNS the poker into a
+# fixture wave and feeds the wall exactly what came back — the whole channel, notes, rung
+# report, decision line and all.
+S7_POKER="${BIONIC_HOOKS_DIR}/session-poker.sh"
+expect_true "7a: the poker is where this section expects it" test -f "$S7_POKER"
+
+# A wave fixture the tick will FILL: writers=2, one pending task, an empty roster. The plan
+# is at `current: 4`, since a fill before Step-3 approval is withheld by design.
+s7_fixture() {  # -> project dir on stdout
+  local d
+  d=$(cd "$(mktemp -d)" && pwd -P)
+  mkdir -p "$d/.bionic/tmp" "$d/.bionic/docs/plans/epic-99-fixture"
+  : > "$d/.bionic/tmp/engaged-$SID.state"
+  { printf -- '---\ngoverning-skill: superpowers:writing-plans\n'
+    printf 'parallel-budget: writers=2 suites=2 worktrees=8 test_jobs=8 source=probe\n'
+    printf -- '---\n\n# fixture plan\n\n## SDLC State\n\ncurrent: 4\n\n- Step 4: in progress\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T13 | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |\n'
+  } > "$d/.bionic/docs/plans/epic-99-fixture/wave-01-fixture.plan.md"
+  printf '# bionic session roster — schema roster-state/v1 — machine-local, safe to delete\n' \
+    > "$d/.bionic/tmp/roster-$SID.state"
+  printf '%s' "$d"
+}
+
+S7_D="$(s7_fixture)"
+S7_TICK="$( cd "$S7_D" && env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PROBE_FREE_MB=8192 \
+            BIONIC_PROBE_LOAD_1M=1.0 bash "$S7_POKER" tick 2>/dev/null )"
+expect_contains "7b: the fixture wave really does fill — the tick printed the line" \
+  "poker: FILL T13" "$S7_TICK"
+expect_contains "7c: …and the decision line carries the band, which is what D5 added" \
+  "decision=FILL" "$S7_TICK"
+
+# THE TURN: a Patrol tick prompt, the two standing duties answered, the tick's own output as
+# a tool result, and NO dispatch after it. The prompt shape is the one the wall recognises
+# (it carries the literal `session-poker.sh tick`), mirrored from
+# tests/patrol-duties-gate.test.sh's `u_tick`.
+s7_transcript() {  # <file> <tick output> [extra assistant tool_use name]
+  local f="$1" out="$2"
+  { jq -nc --arg t "bionic-patrol session=${SID:0:8} — Patrol tick for the fixture wave (bionic). Run: bash /abs/hooks/session-poker.sh tick — the poker decides per row." \
+      '{type:"user",isMeta:true,isSidechain:false,userType:"external",timestamp:"2026-09-19T00:00:00Z",message:{role:"user",content:$t}}'
+    jq -nc '{type:"assistant",isSidechain:false,timestamp:"2026-09-19T00:00:01Z",
+             message:{role:"assistant",content:[{type:"tool_use",id:"toolu_la",name:"ListAgents",input:{}}]}}'
+    jq -nc '{type:"assistant",isSidechain:false,timestamp:"2026-09-19T00:00:02Z",
+             message:{role:"assistant",content:[{type:"tool_use",id:"toolu_tl",name:"TaskList",input:{}}]}}'
+    jq -nc --arg t "$out" '{type:"user",isSidechain:false,timestamp:"2026-09-19T00:00:03Z",
+             message:{role:"user",content:[{type:"tool_result",tool_use_id:"toolu_x",content:$t}]}}'
+    shift 2
+    local n
+    for n in "$@"; do
+      jq -nc --arg n "$n" '{type:"assistant",isSidechain:false,timestamp:"2026-09-19T00:00:04Z",
+               message:{role:"assistant",content:[{type:"tool_use",id:"toolu_ag",name:"Agent",
+                        input:{name:$n,description:"task",subagent_type:"bionic:implementor",prompt:("Task " + $n)}}]}}'
+    done
+  } > "$f"
+}
+
+# THE DRIVER, this file's own `fire` with one thing changed: the transcript is ours, not
+# `usage_tx`'s. Everything else — the blanked CLAUDE_PROJECT_DIR, the fixture HOME, the
+# session key on both channels — is the same environment §1-§5 drive.
+s7_fire() {  # <project> <transcript>
+  local home
+  home=$(cd "$(mktemp -d)" && pwd -P)
+  local payload
+  payload=$(jq -nc --arg c "$1" --arg t "$2" --arg s "$SID" \
+    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false,background_tasks:[]}')
+  STOP_OUT=$(env HOME="$home" CLAUDE_PROJECT_DIR="" CLAUDE_CODE_SESSION_ID="$SID" \
+    bash "$HOOK" <<< "$payload" 2>"$STOP_ERRFILE")
+  STOP_RC=$?
+  STOP_ERR=$(cat "$STOP_ERRFILE" 2>/dev/null)
+}
+
+require_helpers s7_fixture s7_transcript s7_fire
+
+S7_TX="$(mktemp)"
+s7_transcript "$S7_TX" "$S7_TICK"
+s7_fire "$S7_D" "$S7_TX"
+expect_contains "7d: an undispatched FILL still refuses the turn's end" \
+  "Patrol fill unanswered" "$(reason_of)"
+expect_contains "7e: …naming the task the tick asked for" "T13" "$(reason_of)"
+
+# THE PAIRED POSITIVE, or 7d passes against a wall that refuses every Patrol turn.
+S7_TX2="$(mktemp)"
+s7_transcript "$S7_TX2" "$S7_TICK" "T13"
+s7_fire "$S7_D" "$S7_TX2"
+expect_absent "7f: …and a turn that dispatched the named task is not refused for the fill" \
+  "Patrol fill unanswered" "$(reason_of)$STOP_ERR"
+
 finish
