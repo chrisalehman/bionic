@@ -7600,6 +7600,116 @@ expect_absent "R3t4(1) …the requirements pointer this body carries is not name
   "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
 expect_absent "R3t4(2) …nor the '## Goal' section this body carries" \
   "## Goal:" "$R3_ERR"
+
+# THE BOM TWIN (T8; REQ-11; wave-16 critic-b77d5aa C10; research R4 §D3). Byte-for-byte the
+# r3t_lf plan above, prefixed with a UTF-8 byte-order mark on its very first byte.
+# `plan_bring_forward`'s normalization awk compares the whole first record to "---" with
+# `==`, which is BOM-insensitive, but every reader downstream (`_bf_fm_get`, `first_heading`)
+# matches an ANCHORED regex, which the BOM defeats the same way a CRLF line ending defeated
+# it above — so a BOM-prefixed pre-14 plan admitted silently before the fix (research R4
+# D3.3-D3.4: octal and `\x` escapes in an awk REGEX do not strip a BOM on awk 20200816; only
+# a STRING compare against "\357\273\277" does).
+#
+# fails-when: the BOM commit is admitted, or its refusal names a different list than the LF
+# twin's (R3t3(1)-(5) above); or a direct call to `plan_bring_forward` on the BOM twin
+# differs from a direct call on the LF twin.
+r3u_bom="$(printf '\357\273\277%s' "$r3t_lf")"
+r3u_bomcrlf="$(printf '\357\273\277%s' "$r3t_crlf")"
+
+r3u_main="$r3_tmp/main-t8-bom"
+mkdir -p "$r3u_main/.bionic/docs/plans" "$r3u_main/.bionic/docs/record/w16" \
+  "$r3u_main/.bionic/docs/specs/epic-01-demo"
+printf 'evidence\n' > "$r3u_main/.bionic/docs/record/w16/r.md"
+printf 'requirements\n' > "$r3u_main/.bionic/docs/specs/epic-01-demo/w.requirements.md"
+git -C "$r3u_main" init -q .
+git -C "$r3u_main" commit -q --allow-empty -m init
+engage "$r3u_main"
+printf '%s' "$r3u_bom" > "$r3u_main/.bionic/docs/plans/wave-16-t8-bom.plan.md"
+
+# META FIRST, so no row below can pass over a fixture that lost its own BOM.
+expect_eq "R3u0 meta: the twin fixture really opens with a UTF-8 BOM" "efbbbf" \
+  "$(head -c3 "$r3u_main/.bionic/docs/plans/wave-16-t8-bom.plan.md" | xxd -p)"
+
+r3_commit_knob_unset "$(make_home)" "$r3u_main" "$r3u_main" 'git commit -m "x"'
+
+expect_status "R3u1 the BOM pre-14 plan is refused at commit, fail-closed — same as its LF twin" "2" "$R3_EXIT"
+expect_eq "R3u2 …with the contract-version verdict, not admitted silently" \
+  "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3u3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+expect_contains "R3u3(2) …the first row fault a five-column header forces" \
+  "T1: step (empty) is outside 3-9" "$R3_ERR"
+expect_contains "R3u3(3) …the second" \
+  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+expect_contains "R3u3(4) …the approval line, owed from current 4 and answered for current 5" \
+  "## SDLC State: no 'approved-by:' line" "$R3_ERR"
+expect_contains "R3u3(5) …and the matrix's fails-when, owed from the same step" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$R3_ERR"
+expect_absent "R3u4(1) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
+expect_absent "R3u4(2) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$R3_ERR"
+
+# THE BOM+CRLF TWIN — a Windows editor emits both at once (research R4 D3.6 row-27 note).
+# Same six checks, same file, over the combined fixture.
+r3v_main="$r3_tmp/main-t8-bomcrlf"
+mkdir -p "$r3v_main/.bionic/docs/plans" "$r3v_main/.bionic/docs/record/w16" \
+  "$r3v_main/.bionic/docs/specs/epic-01-demo"
+printf 'evidence\n' > "$r3v_main/.bionic/docs/record/w16/r.md"
+printf 'requirements\n' > "$r3v_main/.bionic/docs/specs/epic-01-demo/w.requirements.md"
+git -C "$r3v_main" init -q .
+git -C "$r3v_main" commit -q --allow-empty -m init
+engage "$r3v_main"
+printf '%s' "$r3u_bomcrlf" > "$r3v_main/.bionic/docs/plans/wave-16-t8-bomcrlf.plan.md"
+
+expect_eq "R3v0 meta: the BOM+CRLF twin opens with the BOM and is CRLF-terminated" "efbbbf CRLF" \
+  "$(head -c3 "$r3v_main/.bionic/docs/plans/wave-16-t8-bomcrlf.plan.md" | xxd -p) $(file "$r3v_main/.bionic/docs/plans/wave-16-t8-bomcrlf.plan.md" | /usr/bin/grep -o CRLF)"
+
+r3_commit_knob_unset "$(make_home)" "$r3v_main" "$r3v_main" 'git commit -m "x"'
+
+expect_status "R3v1 the BOM+CRLF pre-14 plan is refused at commit, fail-closed" "2" "$R3_EXIT"
+expect_eq "R3v2 …with the contract-version verdict, not admitted silently" \
+  "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3v3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+expect_contains "R3v3(2) …the first row fault a five-column header forces" \
+  "T1: step (empty) is outside 3-9" "$R3_ERR"
+expect_contains "R3v3(3) …the second" \
+  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+expect_contains "R3v3(4) …the approval line, owed from current 4 and answered for current 5" \
+  "## SDLC State: no 'approved-by:' line" "$R3_ERR"
+expect_contains "R3v3(5) …and the matrix's fails-when, owed from the same step" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$R3_ERR"
+expect_absent "R3v4(1) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
+expect_absent "R3v4(2) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$R3_ERR"
+
+# THE FUNCTION-LEVEL ROW, no hook in the loop — AC-11.1's "same list at both callers" read
+# directly: `plan_bring_forward` on the BOM twin, and on the BOM+CRLF twin, must return the
+# SAME lines as `plan_bring_forward` on the LF twin — a diff of the outputs empty.
+r3u_lf_file="$(mktemp "${TMPDIR:-/tmp}/r3u-lf.XXXXXX")"
+printf '%s' "$r3t_lf" > "$r3u_lf_file"
+r3u_lf_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" "$r3u_lf_file" 2>/dev/null || true)"
+rm -f "$r3u_lf_file"
+
+r3u_bom_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" \
+  "$r3u_main/.bionic/docs/plans/wave-16-t8-bom.plan.md" 2>/dev/null || true)"
+expect_eq "R3u5 …the predicate's own output on the BOM twin, diffed against the LF twin's — empty" \
+  "" "$(diff <(printf '%s\n' "$r3u_lf_direct") <(printf '%s\n' "$r3u_bom_direct") 2>&1 || true)"
+
+r3v_bomcrlf_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" \
+  "$r3v_main/.bionic/docs/plans/wave-16-t8-bomcrlf.plan.md" 2>/dev/null || true)"
+expect_eq "R3v5 …the predicate's own output on the BOM+CRLF twin, diffed against the LF twin's — empty" \
+  "" "$(diff <(printf '%s\n' "$r3u_lf_direct") <(printf '%s\n' "$r3v_bomcrlf_direct") 2>&1 || true)"
 # [REQ-3 BRING-FORWARD SECTION: END]
 
 # ============================================================
