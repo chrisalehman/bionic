@@ -6756,6 +6756,58 @@ Suites: \$SUITE" "w16-var-suite")"
 expect_status "16ld2 a Suites: token that is still a variable is REFUSED" "2" "$GATE_ST"
 expect_contains "16ld2 …naming the token it saw" "\$SUITE" "$GATE_VERR"
 
+# ---- AC-1.4 (cont.): a bracket that is not a WHOLE slot is a fault, named ----
+#
+# THE SILENT DROP THIS CLOSES (wave-16 T25, walk §W7). `istemplate()` carries two arms for
+# trimtok RESIDUE — an opening bracket whose closer trimtok ate, and the mirror — and they
+# are right where they were written, on `Files:` and `Suites:`, whose readers call trimtok
+# first. `marked_runs()` never calls trimtok, so at THAT call site the same two arms fired
+# on shell redirections: `> out`, `2>&1`, `<in`. The run was `continue`d with no
+# `re_executes_bad` and no capwarn, the dispatch was ADMITTED with an empty or truncated
+# `re_executes=` field, and the writer-side budget arm refused the agent's own command 40
+# minutes later as undeclared. A pipe in the same position is refused loudly one line
+# earlier and an unexpanded `$name` is refused with the token named (16ld1); this was the
+# one shape that failed quietly.
+#
+# REFUSAL, NOT PASSTHROUGH (Chris, D14 option 3). An author who means a redirection is told
+# which token and why, rather than having the wall silently agree to a budget entry nothing
+# will ever equal.
+#
+# fails-when: a redirection run is admitted, its token is absent from the detail, or a
+# roster row is written for the refused dispatch.
+REPO=$(make_repo r16ld3 yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w16-redir.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}bash tests/x.test.sh > out 2>&1${RL_BT}" "w16-redir-run")"
+expect_status "16ld3 a marked run carrying a shell redirection is REFUSED" "2" "$GATE_ST"
+expect_contains "16ld3 …naming the whole token it saw, redirection and all" \
+  "bash tests/x.test.sh > out 2>&1" "$GATE_VERR"
+# AND NOTHING REACHED THE ROSTER. Under the old lift the row was written with the
+# redirection tokens silently gone; this reads the absence of the row itself, and its
+# failure message prints whatever row was written instead. Paired with the two positive
+# rows above over the same fixture.
+expect_empty "16ld3 …and no roster row was written for the refused dispatch" \
+  "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+
+# THE PAIRED POSITIVE, one fixture, both halves: a WHOLE `<...>` slot is still read as
+# guidance — no fault, nothing lifted — and an ordinary run beside it still lifts with its
+# marks intact. Without this row 16ld3 could pass on a lift that refused every run.
+REPO=$(make_repo r16ld4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w16-redir-ok.md
+Expected duration: ~20 minutes.
+Re-executes: ${RL_JEST} ${RL_BT}<cmd>${RL_BT}" "w16-redir-ok")"
+expect_status "16ld4 a whole <cmd> slot beside an ordinary run is still ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "16ld4 …the slot lifted nothing and the ordinary run kept its marks" \
+  "$RL_JEST" "$(roster_field "$ROW" re_executes)"
+
 # ---- AC-1.6: at most three runs, loudly; and unmarked text is not a run ----
 REPO=$(make_repo r16le yes)
 write_attestation "$REPO" "$SID_A"

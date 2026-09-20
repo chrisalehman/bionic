@@ -717,6 +717,17 @@ evidence_line_field() {  # <text> <key> -> the value, or empty
 # plan from the PATH instead of using them: it is a pure read-only validator over the
 # target shape (research R2 §3(d) route 2), and its callers hand it a path — the gate the
 # bound plan, the hook a temp copy of the posted content.
+#
+# AND IT DERIVES THE STEP ITSELF (wave-16 T25, Step-6 critic §C1). It used to be HANDED the
+# step, and the two callers handed it different facts: the gate passed the body's
+# `current:`, the hook passed the frontmatter's `sdlc-step:`. A frontmatter stamp is written
+# once at Step 0 and almost never moved — this repo's own archive carries `sdlc-step: 3`
+# beside `current: 9` — so the Write-side arm computed against step 3 for the life of the
+# plan, the two `>= 4` classes below were unreachable there, and AC-3.1's "identical lists
+# from both callers" could not hold past Step 3. It failed SILENTLY: the hook simply printed
+# a shorter list. The step is a fact about the plan TEXT this function already holds, so it
+# reads it where the gate reads it — `current:` under `## SDLC State`, `a`/`b` suffix
+# stripped — and no caller can hand it the wrong one.
 _bf_fm_get() {  # <plan> <frontmatter key> -> its value, or empty
   awk -v k="$2" '
     NR == 1 { if ($0 !~ /^---[[:space:]]*$/) exit; next }
@@ -741,8 +752,11 @@ _bf_section() {  # <plan> <exact "## Heading"> -> that section body, fence-aware
   ' "$1"
 }
 
-plan_bring_forward() {  # <plan file> <step number> -> the list on stdout; rc 1 when it fires
-  local plan="${1:-}" step="${2:-0}"
+plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
+  # A STRAY SECOND ARGUMENT IS IGNORED, not used, for one release: both callers dropped it
+  # in this task, and a caller this tree has not seen must degrade to the derived step
+  # rather than to a silently different answer.
+  local plan="${1:-}" step
   local scale rigor multi units_out missing rowfaults
   local state b1 matrix first_heading goal_body
   local faults="" keys=0
@@ -765,7 +779,18 @@ plan_bring_forward() {  # <plan file> <step number> -> the list on stdout; rc 1 
   # current 2 (validate_requirements_pointer), `approved-by:` and `fails-when:` from 4
   # (validate_approved_by, validate_fails_when). A key not yet owed is not a fault.
   state="$(_bf_section "$plan" '## SDLC State')"
-  if [ "${step:-0}" -ge 2 ] 2>/dev/null; then
+  # THE ONE SOURCE. Same read as the evidence gate's own `CURRENT` (the `current:` line of
+  # `## SDLC State`, first hit, whitespace stripped) and the same `a`/`b` strip the gate
+  # applies at the call site. Anything else — absent, `T<n>`, a word — reads as 0, which is
+  # the fallback the old `${2:-0}` default gave a caller that passed nothing.
+  step="$(printf '%s\n' "$state" \
+          | grep -E '^[[:space:]]*current[[:space:]]*:' \
+          | head -1 \
+          | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
+          | tr -d '[:space:]' \
+          | sed -E 's/[ab]$//')"
+  case "$step" in ''|*[!0-9]*) step=0 ;; esac
+  if [ "$step" -ge 2 ]; then
     b1="$(awk '
       /^[[:space:]]*-?[[:space:]]*Step[[:space:]]+1[[:space:]]*:/ { f = 1; print; next }
       f {
@@ -779,7 +804,7 @@ plan_bring_forward() {  # <plan file> <step number> -> the list on stdout; rc 1 
       keys=$((keys + 1))
     fi
   fi
-  if [ "${step:-0}" -ge 4 ] 2>/dev/null; then
+  if [ "$step" -ge 4 ]; then
     if [ -z "$(evidence_line_field "$state" approved-by)" ]; then
       faults="${faults}## SDLC State: no 'approved-by:' line
 "
@@ -2584,7 +2609,7 @@ Fix: write the requirements document at that path (K5 Step-1 artifact) before co
 # at least one version-14 key absent (plan_bring_forward's own trigger). Every other plan
 # falls straight through to the arms below, byte for byte as it does today.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-_eg_bf="$(plan_bring_forward "$PLAN" "${CURRENT%[ab]}")" || {
+_eg_bf="$(plan_bring_forward "$PLAN")" || {
   _eg_detail="canonical-sdlc this plan declares canonical_sdlc_version: ${SUPPORTED_SDLC_VERSION} and its body does not match it:
 ${_eg_bf}
 Plan: $PLAN

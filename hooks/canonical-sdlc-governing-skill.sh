@@ -1145,7 +1145,10 @@ Fix: derive the matrix at Step 0 (see SKILL.md §Step 0 'the Verification Matrix
                   . "$BIONIC_LIB/walls.sh"
                 fi
                 if declare -F plan_bring_forward >/dev/null 2>&1; then
-                  _gs_bf="$(plan_bring_forward "$_gs_units_tmp" "$SDLC_STEP" 2>/dev/null)" \
+                  # NO STEP ARGUMENT (wave-16 T25, critic §C1). `$SDLC_STEP` is the
+                  # FRONTMATTER stamp, which is not the step this plan is at; the predicate
+                  # reads `current:` out of the body it was just handed.
+                  _gs_bf="$(plan_bring_forward "$_gs_units_tmp" 2>/dev/null)" \
                     || _gs_bf_fired=1
                 fi
               fi

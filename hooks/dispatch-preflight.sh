@@ -1497,6 +1497,18 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       if (t ~ /^[^<>]*>/)  return 1     # closing bracket, opener eaten by trimtok
       return 0
     }
+    # THE SAME QUESTION ASKED OF A TOKEN THAT NEVER MET trimtok (wave-16 T25, walk §W7).
+    # The two residue arms in `istemplate` are correct for the callers it has — `ispath()`
+    # and `suite_names()` both trim the token first, and the LEAD/TRAIL sets trimtok carries
+    # contain both brackets, so `<somewhere>/out.md` really does arrive there as
+    # `somewhere>/out.md`.
+    # `marked_runs()` does NOT trim: a run is taken verbatim between its marks, so those two
+    # arms meet shell redirections instead of residue and used to swallow `> out`, `2>&1`
+    # and `<in` as "guidance". This predicate asks the only question that is meaningful on an
+    # untrimmed run: is the token NOTHING BUT a slot. Anchored, because a run that merely
+    # CONTAINS one — `cmd <in >out` matches `<[^<>]*>` — is a redirection, not a placeholder,
+    # and reading it as guidance is the silent drop this closes.
+    function wholeslot(t) { return (t ~ /^<[^<>]*>$/) }
     function pathshaped(t) {
       if (length(t) < 3)        return 0
       if (index(t, "/") == 0)   return 0
@@ -1761,10 +1773,12 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # when the row still carries the marks. It also makes the field self-delimiting: a
     # backtick cannot occur inside a run, because a backtick is what ends one.
     #
-    # THREE REFUSALS AT THE LIFT, each naming the token (REQ-1 AC-1.4, ADR-029). A `|` would
-    # forge a roster segment; a newline means the marks never closed on their own line; an
-    # unexpanded `$name` is a budget entry no command can equal (see the same rule on the
-    # `Suites:` span above). The refusal is made on the bash side — this prints the fact.
+    # FOUR REFUSALS AT THE LIFT, each naming the token (REQ-1 AC-1.4, ADR-029; wave-16 T25).
+    # A `|` would forge a roster segment; a newline means the marks never closed on their own
+    # line; an unexpanded `$name` is a budget entry no command can equal (see the same rule on
+    # the `Suites:` span above); and an angle bracket that is not a whole slot is a shell
+    # redirection, which used to be dropped in silence. The refusal is made on the bash side —
+    # this prints the fact.
     #
     # A CAP HIT IS LOUD, the `suite_names()` precedent: a silently dropped fourth run is a
     # declared command the budget arm would then refuse at run time, for a reason the author
@@ -1795,7 +1809,14 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         # placeholder as a real declaration and left the whole instrument triple unmarked. A
         # template is silently skipped here exactly as on the other two readers, never a
         # `re_executes_bad` fault: the author wrote guidance, not a mistake.
-        if (tok == "" || istemplate(tok)) continue
+        #
+        # A WHOLE SLOT ONLY (wave-16 T25, walk §W7). Anything else carrying a bracket is a
+        # redirection and is REFUSED with the token named, the same way `|` and `$name` are
+        # one and two lines up — it used to `continue` here, and the dispatch was admitted
+        # with an empty or truncated `re_executes=` that the writer-side budget arm then
+        # refused at run time as undeclared, 40 minutes after the author could have fixed it.
+        if (tok == "" || wholeslot(tok)) continue
+        if (tok ~ /[<>]/) { print "re_executes_bad=a redirection: " tok; continue }
         if (c < RUNS_MAX) {
           out = (out == "" ? BT tok BT : out " " BT tok BT)
           c++
@@ -2600,8 +2621,9 @@ fi
 #
 # BOTH SPELLINGS, ONE ARM. `Re-executes:` gains the rule at birth and `Suites:` gains it
 # here, because a wall whose prose is true for one of two spellings of one idea is a wall
-# nobody can read. A run also refuses on a `|` (it would forge a roster segment) or on a
-# newline (the marks never closed on their own line).
+# nobody can read. A run also refuses on a `|` (it would forge a roster segment), on a
+# newline (the marks never closed on their own line), or on an angle bracket that is not a
+# whole slot (a redirection — wave-16 T25, walk §W7).
 #
 # THE TOKEN IS IN THE DETAIL, NOT THE ONE LINE. A command is arbitrarily long and the
 # refusal line is bounded at 100 columns (AC-E1.3); the fact fits the line, the evidence
@@ -2612,8 +2634,10 @@ if [ -n "$C_RUNS_BAD" ]; then
 
 A declared run is matched against what the agent actually types, before any shell has
 expanded anything — so a name that is still a variable here can be neither derived from
-nor checked against anything, and a run carrying a pipe or spanning a line break is not
-one run.
+nor checked against anything, and a run carrying a pipe, a redirection, or spanning a line
+break is not one run. Declare the command; leave the shell plumbing off the span. An
+unfilled \`<slot>\` on its own is guidance and is ignored, but a bracket anywhere else in
+the run is read as redirection.
 
 Fix: mark each run with backticks, on a line of its own, at most three —
     Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
