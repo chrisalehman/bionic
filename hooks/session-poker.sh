@@ -270,7 +270,7 @@ BIONIC_LOADER_REFUSE
 # own brief declared. Both readers in this file — the tick's row loop and `adopt`'s liveness
 # verdict — ask it, so the fleet holds two staleness arithmetics (a stamp against its fire
 # window, a row against its cadence) where it held four: this verb used to multiply a cadence
-# by `PATROL_STALE_MULTIPLIER` and the tick measured no cadence at all.
+# by a second multiplier of its own and the tick measured no cadence at all.
 #
 # THIS FILE'S OWN `file_mtime`, `line_field` and `parse_seconds` are defined BELOW this line
 # and are CODE-IDENTICAL to the library's (tests/cross-gate-agreement.test.sh §C and §O hold
@@ -2498,7 +2498,8 @@ case "$VERB" in
         # the window, which is a state worth waking someone for.
         #
         # THE WINDOW IS ONE CADENCE, AND THE CLASSIFICATION IS THE LIBRARY'S (REQ-10 D9).
-        # This arm used to compute `PATROL_STALE_MULTIPLIER × cadence` here, on the reasoning
+        # This arm used to compute twice the cadence here, from a constant of its own, on the
+        # reasoning
         # that a row promising a line every ten minutes is up to ten minutes stale at any
         # random instant while perfectly healthy. The reasoning is sound and the consequence
         # was not: `observe_class` (payload/scripts/lib/observe.sh) answers the SAME question

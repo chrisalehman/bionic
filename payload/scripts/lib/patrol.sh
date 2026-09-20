@@ -64,7 +64,6 @@ PATROL_INTERVAL_LAST_RESORT=1200
 # it for `adopt`'s liveness window (task POKER, 1.6). `dispatch-preflight.sh`
 # keeps its own inline `* 2` until task ADOPT switches it; the three are held
 # in agreement on the VALUE by tests/patrol-stale.test.sh §4 in the meantime.
-export PATROL_STALE_MULTIPLIER=2
 
 _patrol_self_dir() { dirname "${BASH_SOURCE[0]:-$0}"; }
 # roots.sh, THE SOFT SOURCE — the idiom lib/detect.sh uses for lib/deps.sh, taken at source
