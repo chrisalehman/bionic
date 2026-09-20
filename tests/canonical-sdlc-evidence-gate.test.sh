@@ -4309,8 +4309,9 @@ git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T5" -b s25r-t5
 # wave the gate spoke when it DECLINED to use the register (25g(f)) and stayed silent when it
 # used it \u2014 so the one case where a wall substitutes a different value for the run's declared
 # `current:` was the one case with no record of having done it. Every allow below that is
-# judged behind `current:` now carries this exact line, and 25g(k) is the control: where the
-# row's step EQUALS `current:` nothing was substituted and nothing is printed.
+# judged behind `current:` now carries this exact line. (25g(k) was the silence control for
+# it until wave-17; a row standing where the run stands is now read for its `status` and gets
+# a note of its own — ADR-031, and the re-authored 25g(k) below.)
 s25r_note_T3="evidence-gate: judged at row T3's step 4 (run at current: 5)"
 
 expect_eq "25g(c) the fixture's tree really is a LINKED worktree (its .git is a file)" "file" \
@@ -4412,7 +4413,7 @@ fi
 # else:
 #   (i) the tree is not git's       — a hand-written `.git` file naming any row's cell;
 #   (j) the text names two trees    — `cd <tree> && cd <main> && git commit`;
-#   (k) the row stands where the run stands — the note must NOT print;
+#   (k) the row stands where the run stands — its `status` decides (k2 is the control);
 #   (l) two rows name one tree      — the register is ambiguous, not resolvable by order;
 #   (m) `git -C <relative>`         — a real worktree commit that used to lose its row;
 #   (n) `g\<newline>it commit`      — a real commit the cheap screen called "provably not".
@@ -4455,19 +4456,79 @@ else
     "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25g(k): where the row stands exactly where the run stands, nothing was substituted ---
+# --- 25g(k) / AC-1.1: the row stands where the run stands, and it is ACTIVE ---------------
 #
-# THE CONTROL FOR THE NOTE, and the reason it can be added at all. Row T5 is at step 5 and
-# the run is at `current: 5`, so the arm changes nothing — and a wall that says nothing when
-# it did nothing is the byte-identical common case. A note here would put a line on every
-# ordinary worktree commit in every project whose row is current.
+# THE SUBJECT IS RESOLVED BEFORE ANY ARM JUDGES (wave-17 REQ-1, D1, ADR-031). Row T5 sits at
+# step 5, the run is at `current: 5`, and the Step-5 block is red — the exact shape that
+# refused a writer for the floor that writer's own task exists to produce (bug 2; carry-over
+# 1; three D10 `current:` regressions in wave-16). What decides is the row's `status` cell,
+# validated since wave-11 and read by nobody until now: `active` means this commit discharges
+# T5's obligations and not the run's, so the TASK arms judge it — the Step-4 block shape and
+# the matrix `fails-when:` presence — and the run's Verify arm never sees it.
+#
+# THE NOTE IS NOT OPTIONAL, for the reason the step substitution's note one case up is not:
+# this is the second place in the fleet where a wall judges a commit by something other than
+# the run's declared `current:`, and an operator who cannot explain why a commit passed must
+# not have to read the source. It names the ROW, because the row is the subject.
+#
+# WHAT THIS ROW USED TO PIN, and why the pin moved (AC-1.4, ADR-031). Until wave-17 this was
+# the silence control: step == current substituted nothing, so nothing printed. That silence
+# WAS the catch-22 — it is how the run's red floor reached a task tree. 25g(k2) below is the
+# control that replaces it: the SAME tree, the SAME red floor, the row `landed` instead of
+# `active`.
+s25r_note_T5="evidence-gate: judged by row T5's task arms (run at current: 5)"
 run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T5" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
-   && ! grep -q "judged at row" <<<"$HOOK_STDERR"; then
-  ok "25g(k) a row whose step EQUALS current: is judged there in silence — no note"
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T5" ]; then
+  ok "25g(k) AC-1.1 a commit from an ACTIVE row's tree meets the task arms, not the run's red floor, and the note names the row"
 else
-  no "25g(k) a row whose step EQUALS current: is judged there in silence — no note" \
-    "expected the Step-5 refusal and no row note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(k) AC-1.1 a commit from an ACTIVE row's tree meets the task arms, not the run's red floor, and the note names the row" \
+    "expected allow + '$s25r_note_T5'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(k2) / AC-1.3: `landed` is not `active`, and status is the whole discrimination ----
+#
+# THE EXEMPTION IS THE ACTIVE ROW'S ALONE. A tree whose task has already landed is not a
+# writer at work: nothing is in flight there, and a commit out of it is the run's like any
+# other — so the red floor still refuses it, at `current:`, and the refusal names the step it
+# judged at so the reader can tell WHICH arm spoke. `pending` and `dropped` are the same
+# case; `landed` is the one a real run actually produces, because every row of a wave ends
+# there and the tree survives until Step 8 tears it down.
+#
+# ONE FIXTURE AWAY FROM 25g(k): same plan, same red Step-5 block, same tree name, same
+# commit. The status cell is the input and nothing else is, which is what makes the pair a
+# discrimination rather than two assertions.
+#
+# (THE LABEL. The spec's Eval design calls this row "25g(n) new"; 25g(n) has named the
+# `g\<newline>it commit` row since wave-14 and is pinned green by AC-1.4, so the new row is
+# (k2), beside the row it controls. See A-T1.3.)
+s25n_tasks="${s25r_tasks/| c.sh | wt-T5 | active |/| c.sh | wt-T5 | landed |}"
+s25n_plan() {
+  printf '%s\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-14T00:00Z "approved"\nStep 4:\n%s\nStep 5:\n%s\n\n%s\n\n%s\n' \
+    "$(matrix_frontmatter true none true)" "$s25r_step4" "$s25r_step5_red" "$s25n_tasks" "$matrix_w25g"
+}
+expect_eq "25g(k2) the fixture carries T5's row as landed" "1" \
+  "$(s25n_plan | grep -c 'wt-T5 | landed' | tr -d ' ')"
+expect_eq "25g(k2) …and 25g(k)'s own fixture still carries it as active" "1" \
+  "$(s25r_plan | grep -c 'wt-T5 | active' | tr -d ' ')"
+
+s25n_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25n_tmp")
+s25n_main="$s25n_tmp/main"
+mkdir -p "$s25n_main/.bionic/docs/plans" "$s25n_main/.bionic/docs/record/w25g"
+printf 'evidence\n' > "$s25n_main/.bionic/docs/record/w25g/x.md"
+git -C "$s25n_main" init -q .
+git -C "$s25n_main" commit -q --allow-empty -m init
+engage "$s25n_main"
+s25n_plan > "$s25n_main/.bionic/docs/plans/wave-01-x.plan.md"
+git -C "$s25n_main" worktree add -q "$s25n_tmp/wt-T5" -b s25n-t5
+
+run_hook_cwd "$(make_home)" "$s25n_main" "$s25n_tmp/wt-T5" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+   && grep -q "canonical-sdlc step 5" <<<"$HOOK_VSTDERR" \
+   && ! grep -q "task arms" <<<"$HOOK_STDERR"; then
+  ok "25g(k2) AC-1.3 a commit from a LANDED row's tree is still judged at current:, and the refusal names step 5"
+else
+  no "25g(k2) AC-1.3 a commit from a LANDED row's tree is still judged at current:, and the refusal names step 5" \
+    "expected the Step-5 refusal naming the step, and no task-arms note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
 # --- 25g(m): `git -C .` inside a worktree keeps its row -----------------------------------
