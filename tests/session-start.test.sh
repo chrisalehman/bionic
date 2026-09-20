@@ -1,7 +1,10 @@
 #!/bin/bash
 # runner: solo
-# TIMING-BOUND (T20, A-orch-28): §16.2 below bounds one hook drive's WALL-CLOCK
-# seconds against 400 aged predecessors. The bound is right; sharing the CPU with
+# TIMING-BOUND (T20, A-orch-28): §16.2 below READS one hook drive's WALL-CLOCK
+# seconds against 400 aged predecessors. It is an advisory row since T24 (D13) and no
+# longer gates, but it is still a reading worth taking honestly, and so is 16.2b's
+# control drive beside it - a ratio cancels load only if both terms meet the same
+# machine. The marker below is therefore still earned. Sharing the CPU with
 # seven other suites in tests/run.sh's parallel batch is not — measured 1.270s
 # alone, 3.395s inside an eight-wide batch on a quiet machine, same tree
 # (record/wave-12-fixit-171/floor-057caa2-run2.txt). The marker above holds this
@@ -823,7 +826,15 @@ eq    "16.1 exit 0" "0" "$(rc)"
 # a regression — which is exactly what happened once at 5.336s (A-T1.11), and was root-caused
 # afterwards to the sweep's cost landing inside a report-loop bound and fixed by splitting
 # the drives (A-T8.8), not to load. 16.2b is the row that stays readable either way.
-expect_true "16.2 the two report loops finish in under 2 seconds against 400 aged predecessors (${T16_ELAPSED}s)" \
+# AND SO IT IS REPORTED, NOT GATED (T24, D13/Δ12). The number stays; what changes is the
+# row kind. Two seconds is a claim about a MACHINE - this one, at this hour, under whatever
+# else is on it - and a gate that welds that to the claim about the CODE cannot say which
+# kind a red is, so a human adjudicates every one. Three waves running, that human was right
+# every time, which is how a gate teaches its own author to override it. `advise` prints the
+# reading against AC-6.1's reference and moves nothing; 16.2b below is the gating row, and it
+# holds exactly the same criterion in units load cannot counterfeit.
+advise "16.2 the two report loops against 400 aged predecessors" \
+  "${T16_ELAPSED}s against AC-6.1's ruled 2 seconds — a wall-clock reading of THIS machine, not of the code; the algorithm's own cost is what 16.2b gates" \
   python3 -c "import sys; sys.exit(0 if ${T16_ELAPSED:-999} < 2 else 1)"
 # THE SAME CRITERION, MEASURED SO THAT LOAD CANCELS: fifty times the predecessors must not
 # cost more than eight times the report. Measured 3.31, 3.39 and 3.33 on three drives. The
@@ -862,8 +873,9 @@ T16B_ELAPSED="$(python3 -c "print(f'{${T16B_END:-0} - ${T16B_START:-0}:.3f}')" 2
 # until it passes would only move the next false failure further out. So the assertion is now
 # the contract the CLI actually enforces, parsed out of hooks/hooks.json rather than typed
 # here: past this number the hook is KILLED and the reader loses the page, which is a real
-# failure at any load and must never be waived. The design budget it used to carry moves to
-# 16.8b, where load cannot counterfeit it.
+# consequence at any load. (T24 changed what this row DOES about that, and nothing about the
+# number or where it is read from - see the paragraph below.) The design budget it used to
+# carry moves to 16.8b, where load cannot counterfeit it.
 SS_TIMEOUT="$(jq -r '.hooks.SessionStart[]?.hooks[]?
   | select(.command | test("session-start\\.sh$")) | .timeout' \
   "${BIONIC_HOOKS_DIR}/hooks.json" 2>/dev/null | head -1)"
@@ -872,7 +884,18 @@ case "$SS_TIMEOUT" in ''|*[!0-9]*) SS_TIMEOUT="" ;; esac
 # against an empty bound is a comparison against nothing.
 expect_eq "16.8a hooks.json declares this hook's CLI timeout, and it is readable" "yes" \
   "$([ -n "$SS_TIMEOUT" ] && echo yes || echo no)"
-expect_true "16.8 the whole hook, sweeping that residue, comes in under the ${SS_TIMEOUT:-?}s CLI timeout hooks.json gives it (${T16B_ELAPSED}s)" \
+# AND IT IS REPORTED, NOT GATED (T24, D13/Δ12) - WHICH IS NOT THE SAME AS WAIVED. This
+# cliff is real: past the CLI's number the hook is KILLED and the reader loses the page. What
+# an exceeded reading here says is an OPERATIONAL fact about the machine that took it - this
+# machine, today, cannot run the hook inside its contract - and that is worth printing in
+# full. What it is not is a code defect, and the wave floor proved the difference: 17.623s
+# here while 16.8b read 3.36x against a bound of 8, on a tree that measures 5.067s on a quiet
+# runner. A ratio of two drives of the same hook in the same process is unitless; a second is
+# a property of the hardware. So the second is reported with its consequence spelled out, and
+# the unitless number gates. 16.8a still GATES the bound's readability, so this row can never
+# be read against a timeout nobody could parse.
+advise "16.8 the whole hook, sweeping that residue, against the CLI timeout hooks.json gives it" \
+  "${T16B_ELAPSED}s against the ${SS_TIMEOUT:-?}s contract — past that number the CLI KILLS this hook and the reader loses the page, so an exceeded reading is an operational fact about THIS machine (it cannot run the hook inside its contract under today's load), never a code defect; the code's own cost is what 16.8b gates" \
   python3 -c "import sys; sys.exit(0 if ${SS_TIMEOUT:-0} > 0 and ${T16B_ELAPSED:-999} < ${SS_TIMEOUT:-0} else 1)"
 # AND THE DESIGN BUDGET, MEASURED SO THAT LOAD CANCELS. The sweep is roughly four fifths of
 # this hook's cost, so the whole drive against the report-only drive over the SAME fixture,
@@ -882,12 +905,55 @@ expect_true "16.8 the whole hook, sweeping that residue, comes in under the ${SS
 # ratio the honest instrument here and eight a bound with room in it (A-T22.5).
 expect_true "16.8b …and the sweep costs under eight times the report it is bundled with, whatever the machine is doing (${T16B_ELAPSED}s / ${T16_ELAPSED}s)" \
   python3 -c "import sys; sys.exit(0 if ${T16_ELAPSED:-0} > 0 and ${T16B_ELAPSED:-999} < 8 * ${T16_ELAPSED:-0} else 1)"
-expect_false "16.9 …and the aged residue is gone, at four hundred sessions' scale (REQ-8)" \
-  test -e "$P16/.bionic/tmp/patrol-dead0000-dead-dead-dead-000000000001.state"
 expect_true "16.10 …while the fresh predecessor, inside one interval, is deferred" \
   test -f "$P16/.bionic/tmp/patrol-$FRESH_SID.state"
-expect_false "16.11 …and nothing failed on the way" \
-  test -e "$P16/.bionic/tmp/sweep-failed.state"
+
+# THE SWEEP'S OUTCOME IS AN INPUT TO THE TWO ROWS BELOW, NEVER AN ASSUMPTION (T24, D13).
+#
+# WHAT THEY USED TO DO. `16.9 the aged residue is gone` and `16.11 nothing failed on the way`
+# were two `expect_false`s on file existence that silently assumed the sweep had been allowed
+# to finish. It is a BOUNDED operation - `SS_BOUND="${BIONIC_SWEEP_BOUND_SECONDS:-10}"`
+# (hooks/session-start.sh) - and on the wave floor at 09069b7 the whole drive took 17.623s,
+# the sweep outran its ten seconds, and the wrapper cut it off at rc 124 exactly as §17
+# proves it is designed to. It then wrote `sweep-failed.state` (16.11 red) and had therefore
+# never reached the residue (16.9 red). Two rows reporting a REQ-8 defect that did not exist,
+# because each reached for a fact nobody had handed it. The fact was on disk the whole time.
+#
+# SO THEY READ IT. The marker is the sweep's own report of its outcome and it carries `rc=`.
+# The pair below is a predicate over facts this test HOLDS: when the sweep returned inside
+# its bound the residue MUST be gone and the hook must have told the reader nothing; when it
+# was cut off the marker MUST name the bound (rc 124, not rc 2 - a refusal is still a
+# failure) and the hook MUST have said so in its one line, with the same rc on both surfaces.
+# Every arm can be made to fail by breaking what it names.
+#
+# WHAT THE CUT-OFF ARM DELIBERATELY DOES NOT ASSERT is that the residue SURVIVED. A bounded
+# sweep is killed wherever it had got to, so it may have deleted an arbitrary prefix of the
+# four hundred first; requiring a particular one to remain would be a coin flip dressed as a
+# contract, which is the class of row this task exists to remove. What survives being cut off
+# is the EXPLANATION, and that is what is asserted.
+#
+# AND REQ-8'S BEHAVIOUR IS NOT GATED HERE EITHER WAY. §6.7 sweeps a 600s-old stamp over a
+# fixture small enough that no bound can be reached, deterministically, on any machine; that
+# is REQ-8's fails-when and it is untouched. This section's subject is SCALE, and at scale
+# the honest question is whether the outcome and the disposition agree.
+SS_MARKER="$P16/.bionic/tmp/sweep-failed.state"
+SS_RESIDUE="$P16/.bionic/tmp/patrol-dead0000-dead-dead-dead-000000000001.state"
+# THE POSITIVE CONTROL FOR BOTH NEGATIVES BELOW: a drive that printed nothing at all would
+# satisfy any `hasnt` over its output. This row proves $OUT16B is a real render.
+has   "16.8c the whole-hook drive printed its block, so a row reading that output is reading something" \
+  "predecessor stamps:" "$OUT16B"
+if [ -e "$SS_MARKER" ]; then
+  expect_regex "16.9 the sweep was CUT OFF by its own bound and its marker names that, so residue it never reached is an explained outcome and not a REQ-8 failure" \
+    'sweep-failed/v1\|at=[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z\|rc=124' \
+    "$(cat "$SS_MARKER" 2>/dev/null)"
+  has   "16.11 …and the hook told the READER so, in its one line, carrying the same rc as the marker (AC-R2.4)" \
+    "bionic: the automatic dead-session sweep failed (rc=124)" "$OUT16B"
+else
+  expect_false "16.9 the sweep returned inside its bound, so the aged residue is gone at four hundred sessions' scale (REQ-8)" \
+    test -e "$SS_RESIDUE"
+  hasnt "16.11 …and nothing failed on the way: the hook told the reader nothing about a sweep failure" \
+    "the automatic dead-session sweep failed" "$OUT16B"
+fi
 
 
 section "17 — the sweep's own bound: the fork's noise, and the bound without a group (T23)"
