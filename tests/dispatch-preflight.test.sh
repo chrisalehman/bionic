@@ -6791,6 +6791,75 @@ expect_status "16lf …and nothing unmarked was lifted as a run" \
 # A researcher and a test-runner brief with `Suites: none` and no `Re-executes:` are still
 # admitted; that is S33's own row 33d, and it is the pin this criterion is discharged by.
 
+# ---- AC-1.8 — the scaffold's OWN placeholder lifts NOTHING (wave-16 T20; walk finding 1) ----
+#
+# `agents-src/blocks/brief-scaffold.md` carries `` Re-executes: `<cmd>` `` as guidance —
+# rendered into dispatch.md verbatim. That is a TEMPLATE, exactly the shape `istemplate()`
+# already rejects on the `Files:` and `Suites:` readers (`paths()`/`ispath()` and
+# `suite_names()` both call it). `marked_runs()` did not, so a brief that pasted the scaffold
+# without filling it in satisfied the suite-allowance wall on a budget entry
+# (`` `<cmd>` ``) no real command could ever equal, and `dp_scaffold_marked` — which marks a
+# label only when NONE of the three instrument fields is set — read the placeholder as a
+# real declaration and left `Files:`/`Suites:`/`Re-executes:` all unmarked.
+#
+# THE LINE IS READ OUT OF THE SHIPPED FILE, never transcribed, exactly as the rest of this
+# section's fixtures are.
+RL_RE_EXECUTES_RAW_LINE="$(scaffold_raw_line "$DISPATCH_FILE" "Re-executes")"
+expect_eq "16lg meta: the scaffold's own Re-executes line, unfilled, out of dispatch.md" \
+  'Re-executes: `<cmd>`' "$RL_RE_EXECUTES_RAW_LINE"
+
+# (a) the rendered scaffold placeholder, lifted as written, yields an EMPTY re_executes=
+# field — `Suites: none` carries the instrument, so this brief still dispatches, and the
+# placeholder must contribute nothing to the row.
+REPO=$(make_repo r16lg1 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
+Expected artifact: .bionic/docs/record/w16-scaffold-run.md
+Expected duration: ~20 minutes.
+Suites: none
+${RL_RE_EXECUTES_RAW_LINE}" "w16-scaffold-run")"
+expect_status "16lg1 a brief satisfying the instrument via Suites: none still dispatches" \
+  "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "16lg1 …and the scaffold's own placeholder lifts NOTHING onto the row" \
+  "" "$(roster_field "$ROW" re_executes)"
+
+# (b) with NO other instrument declared, an unfilled placeholder refuses exactly as an
+# absent `Re-executes:` line would, and the several-fault scaffold marks ALL THREE
+# instrument labels — reusing `$SM_FILES_LINE`/`$SM_SUITES_LINE` from §scaffold-marks
+# above, plus the placeholder line itself as the (unsatisfied) `Re-executes:` line. The
+# ambiguous-deliverable line is what keeps this on the several-fault deny wire (two
+# faults: ambiguity + no instrument) rather than the single-arm exit2 wire, which never
+# renders the scaffold at all (see §scaffold-marks (a)).
+REPO=$(make_repo r16lg2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: review the wave.
+Expected artifact: compare .bionic/docs/record/a-notes.md against .bionic/docs/record/b-notes.md
+Expected duration: 20 minutes.
+${RL_RE_EXECUTES_RAW_LINE}" "w16-scaffold-only")"
+expect_status "16lg2 an unfilled placeholder beside another fault reaches the deny wire" \
+  "0" "$([ -n "$GATE_DENY" ] && echo 0 || echo 1)"
+expect_contains "16lg2 …the Files: line IS marked (the placeholder satisfied nothing)" \
+  "${SM_FILES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "16lg2 …the Suites: line IS marked" \
+  "${SM_SUITES_LINE} <ADD>" "$GATE_VERR"
+expect_contains "16lg2 …and the Re-executes: line ITSELF is marked, not read as satisfied" \
+  "${RL_RE_EXECUTES_RAW_LINE} <ADD>" "$GATE_VERR"
+
+# (c) a real marked run BESIDE the scaffold's placeholder lifts exactly the real run — the
+# placeholder neither shadows it nor occupies one of the three cap slots.
+RL_PLACEHOLDER="${RL_BT}<cmd>${RL_BT}"
+REPO=$(make_repo r16lg3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w16-scaffold-run3.md
+Expected duration: ~20 minutes.
+Re-executes: ${RL_PYTEST} ${RL_PLACEHOLDER}" "w16-mixed-run")"
+expect_status "16lg3 a real run beside the scaffold's placeholder is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "16lg3 …and only the real run reaches the row; the placeholder lifts nothing" \
+  "$RL_PYTEST" "$(roster_field "$ROW" re_executes)"
+
 # ============================================================================
 section "§two-deliverables — two deliverable labels, two paths, one refusal (REQ-12 AC-12.1)"
 # ============================================================================
