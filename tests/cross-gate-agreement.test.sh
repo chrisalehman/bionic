@@ -6602,6 +6602,43 @@ expect_eq "roster_row reproduces the captured launch-time row byte for byte" \
 expect_eq "roster_row reproduces the captured adopt-time row byte for byte" \
   "$RA2_CAP_A" "$(ra2_rebuild "$RA2_CAP_A")"
 
+# REQ-7 AC-7.3 (epic-23 wave-16, 1.8.3) — THE NEW FIELD IS TRAILING AND OPTIONAL, and the
+# capture is the proof. `re_executes=` is the runner-agnostic half of the instrument
+# declaration (REQ-1): the dispatch wall lifts it off a brief's `Re-executes:` span and
+# writes it here beside `suites_allowed=`. A schema field that changed the row's existing
+# bytes would silently invalidate every reader built against what is on disk, so the claim
+# has two halves and both are driven through the one writer.
+#
+# HALF ONE — ABSENT MEANS ABSENT. The captured rows predate the field; they must still come
+# back byte for byte, which the two equalities above already require. The non-vacuity here is
+# that the capture really does lack the key, so those equalities are saying something.
+expect_absent "the captured launch-time row predates re_executes= (so the pin above is load-bearing)" \
+  "re_executes=" "$RA2_CAP_I"
+expect_absent "…and so does the captured adopt-time row" "re_executes=" "$RA2_CAP_A"
+
+# HALF TWO — PASSED MEANS PRESENT, IN ITS PLACE. The same capture handed the same reversed
+# bag PLUS one `re_executes=` pair comes back as the capture with exactly that field spliced
+# in beside the other contract fields — after `waiver=`/the instrument group and before
+# `tool_use_id=`. The expected string is DERIVED from the capture rather than transcribed, so
+# it cannot drift away from the row on disk.
+RA2_RUN='`npx jest --testPathPatterns x`'
+ra2_rebuild_plus() {  # <row> <extra key=value> -> roster_row's output for that row plus the field
+  local row="$1" extra="$2" f
+  local args=("$extra")
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    args=("$f" ${args[@]+"${args[@]}"})
+  done <<RA2_PLUS
+$(printf '%s' "$row" | tr '|' '\n' | tail -n +2)
+RA2_PLUS
+  ( . "$RA2_ROSTER_LIB" >/dev/null 2>&1 && roster_row "${args[@]}" )
+}
+RA2_EXPECT_RUN="${RA2_CAP_I/|tool_use_id=/|re_executes=${RA2_RUN}|tool_use_id=}"
+expect_eq "the expected string really differs from the capture (the splice is load-bearing)" "no" \
+  "$([ "$RA2_EXPECT_RUN" = "$RA2_CAP_I" ] && echo yes || echo no)"
+expect_eq "roster_row writes re_executes= as a trailing optional field, ahead of tool_use_id=" \
+  "$RA2_EXPECT_RUN" "$(ra2_rebuild_plus "$RA2_CAP_I" "re_executes=$RA2_RUN")"
+
 # THE MUTATION ARMS. Two, because the pin has two halves that can rot independently.
 #
 # ARM 1 — DOCTOR THE ROW. One field's value is changed in the capture handed to the

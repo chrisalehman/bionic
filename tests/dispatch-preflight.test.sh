@@ -3508,6 +3508,53 @@ expect_status "r22mkg seven landed rows give their suite claims back too -> ALLO
   "0" "$GATE_ST"
 expect_absent "…and no suite count is printed" "suites:" "$GATE_ERR"
 
+# (i) REQ-9 AC-9.3 — A CLOSED ROW STOPS COUNTING, AT THE CEILING EXACTLY. The criterion's
+# own numbers rather than (a)'s: EIGHT rows, SIX closed by a landing marker, a ceiling of
+# eight writers. Nothing on a roster ever says `landed` (research R3 row 5), so "closed" is
+# derived — a `landing-swept/v1|state=MET` marker with no live row after it — and the
+# fallback is the reading that has to derive it, because a dark panel is the state a
+# resumed or unpanelled session is in. open=2 and this dispatch is the third: ALLOWED at
+# eight.
+#
+# fails-when: eight rows, six followed by a landing marker, refuse a dispatch at ceiling 8.
+S22MK9_NAMES="n1 n2 n3 n4 n5 n6 n7 n8"
+S22MK9_LANDED="n1 n2 n3 n4 n5 n6"
+R22MK9_STALE="$SANDBOX/.r22mk9-stale.jsonl"
+# shellcheck disable=SC2086
+mk_transcript "$R22MK9_STALE" stale $S22MK9_NAMES
+
+REPO=$(make_repo r22mki yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=probe"
+for _n in $S22MK9_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK9_LANDED; do s22_sweep "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK9_STALE")"
+expect_status "r22mki eight rows, six closed by a landing marker, writers=8 -> ALLOWED" "0" "$GATE_ST"
+expect_absent "r22mki …so no writers count is printed at all" "writers:" "$GATE_ERR"
+
+# (i.2) THE DISCRIMINATOR. The same eight rows and the same ceiling with no markers: open=8,
+# the ninth is over, and the refusal names the count. Without this arm a rule that had simply
+# stopped counting rows would pass (i) too.
+REPO=$(make_repo r22mki2 yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=probe"
+for _n in $S22MK9_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK9_STALE")"
+expect_status "r22mki2 the same eight rows UNMARKED at the same ceiling -> REFUSED" "2" "$GATE_ST"
+expect_contains "r22mki2 …naming the count the roster holds" \
+  "writers: budget=8 open=8 with-this-dispatch=9" "$GATE_VERR"
+
+# (i.3) THE ACK IS THE SECOND CLOSING TRUTH AT THESE NUMBERS TOO (AC-9.3 names both). Six of
+# the eight acked on the sweeper's own ledger instead of marked: open=2, ALLOWED.
+REPO=$(make_repo r22mki3 yes)
+write_attestation "$REPO" "$SID_A"
+s22_set_budget "$REPO" "writers=8 suites=8 worktrees=8 test_jobs=4 source=probe"
+for _n in $S22MK9_NAMES; do s22_roster_row "$REPO" "$SID_A" "$_n"; done
+for _n in $S22MK9_LANDED; do s22_ack "$REPO" "$SID_A" "$_n"; done
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w99-impl" "claude-sonnet-5" "$R22MK9_STALE")"
+expect_status "r22mki3 six rows ACKED at ceiling 8 -> ALLOWED" "0" "$GATE_ST"
+expect_absent "r22mki3 …and no writers count is printed" "writers:" "$GATE_ERR"
+
 # (h) THE CLOSED-SET LOOKUP DOES NOT LOSE A ROW TO ITS OWN PIPE (correctness review F8,
 # wave-14 T26; memory grep-q-sigpipe-under-pipefail). `budget_roster_counts`'s dark-rows
 # settlement asked `printf '%s\n' "$closed" | grep -qxF -- "$nm"` under this file's own
@@ -4446,17 +4493,25 @@ expect_status "declared-new-suite …non-vacuity: tests/close-out.test.sh is abs
 expect_status "declared-new-suite …non-vacuity: an impact command WAS configured for this repo" \
   "0" "$([ -f "$REPO/.bionic/config.yaml" ] && echo 0 || echo 1)"
 
-# --- S27g: the row's three fields never disturb the ones already on it ---
+# --- S27g: the row's instrument fields never disturb the ones already on it ---
+#
+# RE-AUTHORED FOR THE FOURTH FIELD (epic-23 wave-16, REQ-1/REQ-7 AC-7.3). `re_executes=` is
+# the runner-agnostic half of the instrument declaration and joins the group as its LAST
+# member, so the contiguity claim below is now over four keys rather than three. The claim
+# itself is unchanged and is the one that matters: the group sits between `waiver=` and
+# `tool_use_id=`, it does not interleave with anything, and `plan=` is still last on the row.
+# A field appended anywhere else would pass a key-by-key read and still move bytes the
+# captured row in tests/fixtures/roster-row.captured pins (cross-gate §RA.2).
 REPO=$(make_repo r27g yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_FULL" "w27-shape")"
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "27g the deliverable is unmoved by the three new fields" \
+expect_status "27g the deliverable is unmoved by the instrument fields" \
   ".bionic/docs/record/w99-widget.txt" "$(roster_field "$ROW" deliverable)"
 expect_status "27g …and plan= is still the LAST field on the row" "0" \
   "$(printf '%s' "$ROW" | grep -qE '\|plan=[^|]*$' && echo 0 || echo 1)"
-expect_status "27g the three fields sit between waiver= and tool_use_id=" "0" \
-  "$(printf '%s' "$ROW" | grep -qE '\|waiver=[^|]*\|files=[^|]*\|suites_allowed=[^|]*\|suites_source=[^|]*\|tool_use_id=' && echo 0 || echo 1)"
+expect_status "27g the four instrument fields sit between waiver= and tool_use_id=" "0" \
+  "$(printf '%s' "$ROW" | grep -qE '\|waiver=[^|]*\|files=[^|]*\|suites_allowed=[^|]*\|suites_source=[^|]*\|re_executes=[^|]*\|tool_use_id=' && echo 0 || echo 1)"
 
 # --- S27h: SELF-CONSISTENCY — a brief following this wall's own Fix lines passes ---
 #
@@ -6565,6 +6620,220 @@ expect_status "33e …the derived set is exactly the real tree's answer (self + 
 expect_status "33e …and the row says the set was DERIVED, not declared" \
   "derived" "$(roster_field "$ROW" suites_source)"
 
+section "§runs-lift — a brief declares what it will RUN, in any runner (REQ-1, D1, D3, ADR-029)"
+# ============================================================================
+#
+# WHAT THIS SECTION IS FOR. Until 1.8.3 "suite" meant "shell suite" at five independent
+# sites (research R1 §9.1), so an agent working in a jest, pytest or go project could
+# declare nothing true: the auditor arm refused it and the writer budget held nothing.
+# `Re-executes:` is the one runner-agnostic label — lifted from the brief TEXT exactly as
+# `Suites:` is, for every role, recorded on the roster row as its own field, and held by
+# the writer-side budget arm (that half is T2's).
+#
+# THE GRAMMAR IS AUTHOR-MARKED (D3). A run is a backtick-delimited command on the span, in
+# position order, at most three of them; text outside the marks is not a run; a run carrying
+# a pipe, a newline or an unexpanded shell variable is refused at the lift with the token
+# named. The marks are KEPT on the roster field, which is what makes "the exact marked run"
+# a thing the budget arm can compare against.
+#
+# fails-when: the field is absent from the row; an auditor brief declaring runs and waiving
+# suites is refused; a brief carrying only this label is refused for declaring no
+# instrument; an unexpanded name is admitted under either spelling; a fourth run reaches the
+# row; unmarked text on the span is lifted as a run.
+
+# THE MARK, HELD IN A VARIABLE. A backtick inside a double-quoted string here would be a
+# command substitution, and a backtick pair inside a double-quoted ASSERTION NAME is the
+# fault cross-gate §B pins against tree-wide. Every run below is built from this.
+RL_BT='`'
+RL_JEST="${RL_BT}npx jest --testPathPatterns 'x'${RL_BT}"
+RL_PYTEST="${RL_BT}pytest tests/unit${RL_BT}"
+RL_GO="${RL_BT}go test ./...${RL_BT}"
+RL_NPM="${RL_BT}npm test${RL_BT}"
+
+# ---- AC-1.1: the field is lifted and lands on the roster row ----
+REPO=$(make_repo r16la yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w16-audit.md
+Expected duration: ~30 minutes.
+Suites: none
+Re-executes: ${RL_JEST}" "w16-auditor" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "16la an auditor brief declaring a marked run and waiving suites is ADMITTED" \
+  "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "16la …and the roster row carries the run, marks and all" \
+  "$RL_JEST" "$(roster_field "$ROW" re_executes)"
+expect_status "16la …with the waiver still recorded as the declared suite set" \
+  "none" "$(roster_field "$ROW" suites_allowed)"
+
+# ---- AC-1.2: the auditor arm reads BOTH spellings, and its Fix text shows both ----
+# Row 1 of the seed's §7 table: a named suite list is admitted (33c drives this too; it is
+# repeated here as this section's own control, at the same fixture shape as rows 2 and 3).
+REPO=$(make_repo r16lb1 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w16-audit.md
+Expected duration: ~30 minutes.
+Suites: tests/widget.test.sh" "w16-aud-suites" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "16lb1 an auditor naming a suite list is ADMITTED" "0" "$GATE_ST"
+
+# Row 2: the waiver plus declared runs is admitted — the arm's predicate is "no suites AND
+# no declared runs", not "no suites".
+REPO=$(make_repo r16lb2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w16-audit.md
+Expected duration: ~30 minutes.
+Suites: none
+Re-executes: ${RL_PYTEST}" "w16-aud-runs" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "16lb2 an auditor waiving suites but declaring runs is ADMITTED" "0" "$GATE_ST"
+
+# Row 3: the waiver alone is still refused, and the Fix text now names both spellings — an
+# auditor in a jest repo must be able to read its way out of this refusal.
+REPO=$(make_repo r16lb3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S33_WAIVED_BRIEF" "w16-aud-bare" \
+                             "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "16lb3 an auditor waiving suites with no declared runs is REFUSED" "2" "$GATE_ST"
+expect_contains "16lb3 …and the Fix text shows the suite spelling" \
+  "Suites: tests/one.test.sh" "$GATE_VERR"
+expect_contains "16lb3 …and the runner spelling beside it" \
+  "Re-executes:" "$GATE_VERR"
+
+# ---- AC-1.3: the field is a budget declaration — it satisfies the Files-or-Suites arm ----
+REPO=$(make_repo r16lc yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests and report.
+Expected artifact: .bionic/docs/record/w16-runs.md
+Expected duration: ~20 minutes.
+Re-executes: ${RL_GO}" "w16-runsonly")"
+expect_status "16lc a brief carrying only the runs label is ADMITTED" "0" "$GATE_ST"
+expect_absent "16lc …the no-instrument arm did not fire" \
+  "declares no Files: and no Suites:" "$GATE_ERR"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "16lc …and the declared run is the budget on the row" \
+  "$RL_GO" "$(roster_field "$ROW" re_executes)"
+
+# ---- AC-1.4: an unexpanded shell variable is refused at the lift, under BOTH spellings ----
+# EACH FIXTURE CARRIES A VALID `Files:` LINE so the bad declaration is the brief's ONLY
+# fault and the refusal lands on the single-arm exit2 wire, where the detail (and so the
+# named token) is readable under the verbose knob.
+REPO=$(make_repo r16ld1 yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool: the impact command is not under test in this
+# section, and the real one over the real tree runs 11-17 s against a 10 s bound under
+# wave-scale machine load (measured 2026-09-19), which would make these rows report the
+# derivation bound instead of the fault they exist for.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w16-var.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}\$JEST x${RL_BT}" "w16-var-run")"
+expect_status "16ld1 a marked run holding an unexpanded name is REFUSED" "2" "$GATE_ST"
+expect_contains "16ld1 …naming the token it saw" "\$JEST x" "$GATE_VERR"
+
+REPO=$(make_repo r16ld2 yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool: the impact command is not under test in this
+# section, and the real one over the real tree runs 11-17 s against a 10 s bound under
+# wave-scale machine load (measured 2026-09-19), which would make these rows report the
+# derivation bound instead of the fault they exist for.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: run the suite.
+Expected artifact: .bionic/docs/record/w16-var2.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Suites: \$SUITE" "w16-var-suite")"
+expect_status "16ld2 a Suites: token that is still a variable is REFUSED" "2" "$GATE_ST"
+expect_contains "16ld2 …naming the token it saw" "\$SUITE" "$GATE_VERR"
+
+# ---- AC-1.6: at most three runs, loudly; and unmarked text is not a run ----
+REPO=$(make_repo r16le yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w16-cap.md
+Expected duration: ~20 minutes.
+Re-executes: ${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_NPM}" "w16-cap")"
+expect_status "16le a four-run span is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "16le …with exactly the first three runs on the row, in order" \
+  "$RL_JEST $RL_PYTEST $RL_GO" "$(roster_field "$ROW" re_executes)"
+expect_contains "16le …and the cap hit is LOUD, never silent" \
+  "exceeds the 3-run cap" "$GATE_ERR"
+
+REPO=$(make_repo r16lf yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool: the impact command is not under test in this
+# section, and the real one over the real tree runs 11-17 s against a 10 s bound under
+# wave-scale machine load (measured 2026-09-19), which would make these rows report the
+# derivation bound instead of the fault they exist for.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w16-unmarked.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: npx jest --testPathPatterns 'x' and then pytest tests/unit" "w16-unmarked")"
+expect_status "16lf a span with no marks at all is ADMITTED on its Files: line" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "16lf …and nothing unmarked was lifted as a run" \
+  "" "$(roster_field "$ROW" re_executes)"
+
+# ---- AC-1.7: the read-only roles are UNCHANGED — driven at :6531 (33d), unchanged here ----
+# A researcher and a test-runner brief with `Suites: none` and no `Re-executes:` are still
+# admitted; that is S33's own row 33d, and it is the pin this criterion is discharged by.
+
+# ============================================================================
+section "§two-deliverables — two deliverable labels, two paths, one refusal (REQ-12 AC-12.1)"
+# ============================================================================
+#
+# THE CARRY-OVER THIS CLOSES (row 14; research R3 row 35). `decl_deliverable` walked the
+# deliverable-kind label hits in position order and returned the paths of the FIRST that
+# yielded any — so a brief carrying `Expected artifact: a.md` and, lower down, a real
+# `Deliverable: b.md` line was contracted to whichever came first, recorded `source=declared`
+# as though a human had named one, with the other path silently discarded. The rule was
+# POSITION, never label rank, and the ambiguity wall never saw two paths because each hit
+# owned its own span.
+#
+# THE FIX IS THE WALL THIS FILE ALREADY HAS. The walk now unions the distinct paths of every
+# deliverable-kind hit, so two labels naming two paths reach `deliverable_ambiguous=` exactly
+# as one label naming two paths always has — one refusal, both candidates handed back, no
+# guess. The same path under both labels is one path and is admitted: an author who repeated
+# themselves has not created an ambiguity.
+#
+# fails-when: the two-path brief is admitted with one of the paths on the row, or the
+# one-path brief is refused.
+
+REPO=$(make_repo r16ma yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: write the report.
+Expected artifact: .bionic/docs/record/w16-a.md
+Deliverable: .bionic/docs/record/w16-b.md
+Expected duration: ~20 minutes.
+Suites: tests/widget.test.sh" "w16-two-deliv")"
+expect_status "16ma two deliverable labels naming two paths is REFUSED" "2" "$GATE_ST"
+expect_contains "16ma …on the ambiguity arm, not on a guess" \
+  "the deliverable label names several paths" "$GATE_ERR"
+expect_contains "16ma …handing back the first candidate" \
+  ".bionic/docs/record/w16-a.md" "$GATE_VERR"
+expect_contains "16ma …and the second" \
+  ".bionic/docs/record/w16-b.md" "$GATE_VERR"
+expect_status "16ma …and no roster row was journalled" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+REPO=$(make_repo r16mb yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: write the report.
+Expected artifact: .bionic/docs/record/w16-a.md
+Deliverable: .bionic/docs/record/w16-a.md
+Expected duration: ~20 minutes.
+Suites: tests/widget.test.sh" "w16-one-deliv")"
+expect_status "16mb the same path under both labels is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "16mb …and that one path is the contract on the row" \
+  ".bionic/docs/record/w16-a.md" "$(roster_field "$ROW" deliverable)"
+
+# ============================================================================
 section "§no-listagents — no brief, in any session state, is told to call ListAgents"
 
 # READ OF THE DRIVER SWEEP INSTALLED IN run_gate. Every payload this file drives — every
