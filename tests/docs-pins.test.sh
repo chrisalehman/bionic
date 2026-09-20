@@ -3405,7 +3405,11 @@ expect_eq "161: a stripped copy of agents/auditor.md reads 0 'Re-executes' hits 
 # operational-rules.md; steps/3.md is checked only for the pointer.
 
 WAVE_SECTION="$(sed -n '/### The wave-scale `## Tasks` table/,/^## /p' "$OPRULES" 2>/dev/null)"
-WAVE_COLS='id | step | kind | task | agent | deps | size | serves | Files | worktree | status'
+# wave-16 T21 (walk-2c882be.md §11): the header used to print `worktree | status`, transposed
+# relative to units.sh:127-129's contract order (`status` at slot 10, `worktree` at slot 11).
+# Harmless in practice — `_units_read` matches header cells by NAME, not position — but the
+# two documents disagreed, and this pin now reads the corrected, contract-matching order.
+WAVE_COLS='id | step | kind | task | agent | deps | size | serves | Files | status | worktree'
 
 if [ -n "$WAVE_SECTION" ]; then
   case "$WAVE_SECTION" in
