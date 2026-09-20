@@ -3042,4 +3042,45 @@ expect_eq "R3e a ten-column table with one broken row keeps 1.8.2's own verdict"
   "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 # [REQ-3 BRING-FORWARD SECTION: END]
 
+
+# ============================================================
+section "R4 — walls.sh's prose-record reader cannot shadow observe.sh's roster reader (wave-16 T21, walk-2c882be.md §3)"
+# ============================================================
+#
+# THE COLLISION THE WALK FOUND. payload/scripts/lib/observe.sh (and its byte-identical
+# copies in session-poker.sh, stop-orders.sh, session-sweeper.sh, execution-recorder.sh)
+# define `line_field <line> <key>` as the PIPE-DELIMITED ROSTER-ROW reader. This wall's own
+# `requirements:`/`approved-by:`/`walk-artifact` reads need a different contract — a key
+# ANYWHERE on a semicolon-separated PROSE line — and until this task walls.sh defined a
+# SECOND function under the SAME name. No process sources both libraries today, so nothing
+# collided yet; a future `BIONIC_LIB_WANT` line naming both would have had the second
+# source silently win, misreading every roster row the caller touched afterwards.
+#
+# fails-when: walls.sh still defines a function literally named `line_field`, its
+# prose-record reader is not reachable under its own name, or a real call through that
+# name misreads the mid-record pointer shape the docblock documents.
+WALLS_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh"
+
+r4_has_fn() {  # <file> <fn-name> -> exit 0/1, real source in a subshell, no side effects
+  ( . "$1" >/dev/null 2>&1; declare -F "$2" >/dev/null 2>&1 )
+}
+
+expect_false "R4a walls.sh no longer defines a function literally named 'line_field'" \
+  r4_has_fn "$WALLS_LIB" line_field
+expect_true "R4b …and the renamed reader is reachable as 'evidence_line_field'" \
+  r4_has_fn "$WALLS_LIB" evidence_line_field
+
+# EXERCISED, not only declared: the exact mid-record shape line_field's docblock
+# documents, read by the real function under its new name — a real source, a real call.
+R4_REC="- Step 1: opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w.requirements.md; card approved"
+R4_GOT="$(bash -c '. "$1"; evidence_line_field "$2" requirements' _ "$WALLS_LIB" "$R4_REC" 2>/dev/null)"
+expect_eq "R4c …exercised: it reads a mid-record pointer by key, real call, real source" \
+  "specs/epic-01-demo/w.requirements.md" "$R4_GOT"
+
+# AND EXERCISED THROUGH THE LIVE W6 ARM. R3 above already drives THIS HOOK end to end
+# through `plan_bring_forward`, which is the caller this rename had to keep working:
+# R3d(3)/R3d(4) name the same `requirements:`/`approved-by:` reads this section isolates.
+# A rename that broke the caller rather than only the name would already have reddened R3;
+# nothing further needs to run here.
+
 finish

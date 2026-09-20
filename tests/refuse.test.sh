@@ -637,6 +637,31 @@ expect_eq "6p …whose twelfth line is the twelfth line in, unrewritten" "L12" \
 expect_eq "6q …and whose last line names the one it dropped" "+1 more" \
   "$(fold_detail "$FX_D13" | sed -n '13p')"
 
+# --- (c2) THE TRAILING-NEWLINE OFF-BY-ONE (wave-16 T21; walk-2c882be.md §2). A caller
+# that builds `detail` by appending "…\n" per row hands the helper a string that already
+# ends in a newline; `printf '%s\n' "$1"` then adds a SECOND one, and `awk`'s NR sees the
+# resulting empty final record as one more line to count — twenty real lines read as
+# twenty-one records, so `+8 more` (20 - 12) becomes `+9 more` for no reason the caller's
+# content explains. The fix must count real lines only, regardless of how the caller
+# terminated its string.
+#
+# fails-when: a detail ending in a trailing newline reports a different `+N more` count,
+# or a different total line count, than the SAME content with no trailing newline.
+FX_D20="$(awk 'BEGIN { for (i = 1; i <= 20; i++) printf "N%02d\n", i }')"
+# `$( )` strips ALL trailing newlines from FX_D20 itself, so the "with a trailing newline"
+# fixture below adds exactly one back — deliberately, not incidentally.
+FX_D20_NL="${FX_D20}
+"
+expect_eq "6q2 no trailing newline: twenty lines, twelve minus eight, fold to +8 more" \
+  "+8 more" "$(fold_detail "$FX_D20" | tail -1)"
+expect_eq "6q3 ONE trailing newline: the count is UNCHANGED, not inflated to +9 more" \
+  "+8 more" "$(fold_detail "$FX_D20_NL" | tail -1)"
+expect_eq "6q4 …and the two fixtures fold to the identical LINE COUNT as well" \
+  "$(fold_detail "$FX_D20" | wc -l | tr -d ' ')" \
+  "$(fold_detail "$FX_D20_NL" | wc -l | tr -d ' ')"
+expect_eq "6q5 …thirteen lines each: the twelve kept plus the one count line" "13" \
+  "$(fold_detail "$FX_D20_NL" | wc -l | tr -d ' ')"
+
 # --- (d) THE SPLIT IS UNCHANGED FOR THE MODEL-ONLY CHANNELS. `deny` and `block` keep
 # their `detail_to_user=no` cell, so the reader still gets one line there, and their
 # model wire still carries the whole list — the property wave-12 T17's combined refusal

@@ -167,12 +167,27 @@ BIONIC_REFUSE_DETAIL_LINES=12
 # awk reads its whole input, so there is no early exit against the producer, and it counts
 # what it dropped without a second pass to learn the total.
 #
+# THE TRAILING NEWLINE IS TRIMMED BEFORE COUNTING (wave-16 T21; walk-2c882be.md §2). Several
+# call sites build `detail` by appending "…\n" per row, so the value can already end in a
+# newline. `printf '%s\n' "$1"` unconditionally appends its own, so a detail with one already
+# on it produced TWO — and awk's NR counted the resulting empty final record as one more
+# dropped line than the caller's content actually held (twenty real lines read as twenty-one
+# records: `+8 more` became `+9 more`). The trim removes every trailing newline the caller's
+# string carries, so the record count that follows reflects real lines only, regardless of
+# how the caller terminated its string.
+#
 # THE DEFAULT IS IN THE EXPANSION, not only in the assignment above: a hook that sourced
 # this library under `set -u` with the constant unset must still be able to format its
 # refusal, and a wall that cannot format one must not therefore fail open.
 _refuse_fold_detail() {
   [ -n "${1:-}" ] || return 0
-  printf '%s\n' "$1" | awk -v max="${BIONIC_REFUSE_DETAIL_LINES:-12}" '
+  local _d="$1"
+  # STRIP EVERY TRAILING NEWLINE FIRST, so `printf '%s\n'` below adds exactly one and awk's
+  # NR counts real lines, not an extra empty record the caller's own terminator produced.
+  while [ -n "$_d" ] && [ "${_d%$'\n'}" != "$_d" ]; do
+    _d="${_d%$'\n'}"
+  done
+  printf '%s\n' "$_d" | awk -v max="${BIONIC_REFUSE_DETAIL_LINES:-12}" '
     NR <= max { print; next }
     { dropped++ }
     END { if (dropped > 0) printf "+%d more\n", dropped }'
