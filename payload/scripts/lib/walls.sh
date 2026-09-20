@@ -2333,6 +2333,55 @@ _eg_cd_second() {
   return 0
 }
 
+# _eg_path_fold <path> -> _EG_FOLD, the same path with its empty and `.` components folded
+# away, so `/a/b`, `/a//b`, `/a/b/` and `/a/./b` are one string.
+#
+# LEXICAL, AND THAT IS THE WHOLE CONTRACT. `..` is deliberately NOT folded: through a symlink
+# only a stat could say which directory `/a/b/..` is, and the freeze (D11) forbids a wall
+# fetching its own facts. So a path carrying `..` never folds onto another one, and the caller
+# below keeps refusing it — the direction a wall that cannot tell has to take.
+#
+# IT ASSIGNS RATHER THAN PRINTS, like every reader around it: a command substitution here
+# would be one fork per commit for a pure string operation.
+_EG_FOLD=""
+_eg_path_fold() {
+  local _in="${1:-}" _seg _out="" _oldifs="$IFS" _hadf=0
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f
+  IFS='/'
+  # shellcheck disable=SC2086  # deliberate split on '/' with globbing disabled
+  set -- $_in
+  IFS="$_oldifs"
+  [ "$_hadf" -eq 1 ] || set +f
+  for _seg in "$@"; do
+    case "$_seg" in ''|'.') continue ;; esac
+    _out="$_out/$_seg"
+  done
+  _EG_FOLD="${_out:-/}"
+}
+
+# _eg_cd_one_dir -> 0 when the two `cd` targets the text names RESOLVE to ONE directory.
+#
+# THE ARM FIRED ON THE SECOND `cd` TOKEN, NEVER ON A DIFFERENCE (critic C3). `cd X && cd X`
+# and `cd X && cd .` were both refused, and the refusal read "the command changes into 'X'
+# and then into 'X'" — a sentence that answers its own complaint. D4 ratified that the gate
+# does not interpret the shell; comparing two targets it has ALREADY extracted is not
+# interpretation, and both values are in hand here.
+#
+# THE SECOND TARGET IS READ AS THE FIRST ONE IS, and a relative target is joined to the
+# first — which is where the shell is standing when the second `cd` runs. Nothing else about
+# the command is read, nothing is stat-ed and nothing is expanded, so `~`, an unexpanded
+# variable and any `..` component stay two directories and stay refused.
+_eg_cd_one_dir() {
+  local _first
+  _eg_path_fold "$_EG_CWD"; _first="$_EG_FOLD"
+  case "$_EG_CD2" in
+    /*) _eg_path_fold "$_EG_CD2" ;;
+    *)  _eg_path_fold "${_EG_CWD%/}/${_EG_CD2}" ;;
+  esac
+  [ "$_first" = "$_EG_FOLD" ]
+}
+
 # _eg_commit_cwd -> sets _EG_CWD (the directory the commit is made IN), _EG_CWD_SRC (which
 # of the three spellings answered) and, through `_eg_cd_second`, _EG_CD2.
 #
@@ -2503,8 +2552,13 @@ _eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CD2
 # `_EG_CD2` IS SET ONLY BY THE LEADING-`cd` BRANCH of `_eg_commit_cwd` — a `git -C <dir>`
 # commit never consults it — so the `_EG_CWD_SRC` test names the branch that answered rather
 # than narrowing the arm.
+#
+# TWO TOKENS ARE NOT TWO DIRECTORIES (critic C3). `cd X && cd X` and `cd X && cd .` name one
+# directory twice, and the arm used to refuse them with a sentence that answered its own
+# complaint. `_eg_cd_one_dir` compares the two RESOLVED targets — the values this arm already
+# prints — and only a real difference is an ambiguity.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CD2" ]; then
+if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CD2" ] && ! _eg_cd_one_dir; then
   _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD2}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
 Plan: $PLAN
 Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
@@ -2602,7 +2656,7 @@ if [ -n "$_EG_WT" ]; then
 Plan: $PLAN
 Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not reached it — advance the run to step ${_EG_RSTEP}, or correct row ${_EG_RID}'s step cell, before committing from ${_EG_WT}."
           refuse exit2 commit "that worktree's task is ahead of the run" "advance the run first" "$_eg_detail"
-        elif [ "$_EG_RSTATUS" = "active" ]; then
+        elif [ "$_EG_RSTATUS" = "active" ] && [ "$_EG_RSTEP" -ge 4 ]; then
           # A COMMIT HAS ONE OF TWO SUBJECTS (wave-17 REQ-1, D1, ADR-031). The row stands
           # exactly where the run stands, so there is no step to substitute — and that is
           # the case the whole catch-22 lived in: a writer dispatched at Step 5, whose row
@@ -2632,6 +2686,15 @@ Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not rea
           # row BEHIND the run keeps the wave-14 substitution and its wording, which for the
           # step-4 rows that make up every real task batch resolves to these same task arms
           # — see A-T1.2 for the residual case that leaves open.
+          #
+          # AND ONLY FROM STEP 4 UP (critic C1). `CURRENT=4` is a LOWERING for every row the
+          # register admits above step 4 and a no-op at 4 — but `units_validate` admits a
+          # step cell of 3, where it is a RAISE: a run at `current: 3` with an active step-3
+          # row was judged at a step the run had not started and refused for a `Step 4:`
+          # evidence line its author could only write by claiming Step 4 in a Step-3 plan.
+          # That is REQ-1 inverted — the requirement exists so a task commit is not held to
+          # the arms of a LATER step. Below 4 the row keeps today's `current:` path, which is
+          # the behaviour the design already blesses for every other status (25g(r)).
           printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
             "$_EG_RID" "$CURRENT" >&2
           CURRENT=4
@@ -3926,7 +3989,7 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
     _eg_detail="canonical-sdlc audited multi_agent wave plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status."
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status."
     refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
   fi
   # PRESENCE IS ASKED OF THE WHOLE TABLE AT ONCE (AC-5.1). This loop used to refuse at the

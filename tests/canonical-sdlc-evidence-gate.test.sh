@@ -4497,6 +4497,55 @@ else
     "expected the Step-5 refusal and no ambiguity line; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
+# --- 25g(s) / C3: two `cd`s that name ONE directory are one directory ---------------------
+#
+# The arm fired on the PRESENCE of a second `cd` token and never on whether the two
+# directories differ, so `cd X && cd X` was refused with a sentence that answers its own
+# complaint — "the command changes into 'X' and then into 'X'" — and `cd X && cd .` with it.
+# Nothing is ambiguous about a command that names one directory twice: the shell is standing
+# in the same place whichever `cd` obeyed, and the gate holds both values before it speaks.
+# So the arm compares the two RESOLVED targets and refuses only when they DIFFER. 25g(j) and
+# 25g(j2) above are the controls that keep this from becoming "any second cd is fine".
+#
+# RESOLVED, NOT INTERPRETED (D4). The second target is read exactly as the first one is, and
+# a relative target is joined to the first — which is where the shell stands when the second
+# `cd` runs. A `.` segment and a trailing slash fold away lexically; nothing is stat-ed,
+# nothing is expanded, and `..`, `~` and an unexpanded variable stay ambiguous and stay
+# refused (A-T22.2).
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(s) C3 'cd X && cd X && git commit' names ONE directory and is judged at row T3's step 4"
+else
+  no "25g(s) C3 'cd X && cd X && git commit' names ONE directory and is judged at row T3's step 4" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the same directory spelled `.`, which is the form a writer actually types. It is one
+# directory by the same resolution, not by a special case for the string.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd . && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(s) …and 'cd X && cd . && git commit' resolves to that same one directory too"
+else
+  no "25g(s) …and 'cd X && cd . && git commit' resolves to that same one directory too" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the one-cell-away control, in the SAME fixture: two tree paths that really are two
+# directories are still the refusal REQ-3 exists for, with its text unchanged.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25r_tmp/wt-T3" <<<"$HOOK_VSTDERR" \
+   && grep -qF "$s25r_tmp/wt-T5" <<<"$HOOK_VSTDERR"; then
+  ok "25g(s) …while two DISTINCT resolved directories are still refused, naming both"
+else
+  no "25g(s) …while two DISTINCT resolved directories are still refused, naming both" \
+    "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
 # --- 25g(k) / AC-1.1: the row stands where the run stands, and it is ACTIVE ---------------
 #
 # THE SUBJECT IS RESOLVED BEFORE ANY ARM JUDGES (wave-17 REQ-1, D1, ADR-031). Row T5 sits at
@@ -4570,6 +4619,71 @@ if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
 else
   no "25g(k2) AC-1.3 a commit from a LANDED row's tree is still judged at current:, and the refusal names step 5" \
     "expected the Step-5 refusal naming the step, and no task-arms note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(r) / C1: the task-arms fork belongs to rows at step 4 and above ------------------
+#
+# THE FORK NAMES STEP 4, SO IT CAN ONLY BE ASKED OF A ROW THAT HAS REACHED IT. `CURRENT=4`
+# was written whenever an `active` row stood where the run stands, and `units_validate`
+# admits a step cell of 3 — so a run at `current: 3` with an `active` step-3 row committing
+# out of its tree was judged at step 4, a step the run has not started, and refused for a
+# `Step 4:` evidence line its author could only produce by writing a Step-4 claim into a
+# Step-3 plan. That is the requirement inverted: REQ-1 exists so a task commit is not held
+# to the arms of a LATER step, and this held it to the arms of a step the run had not
+# reached. The guard is the row's own step (`>= 4`), and below it the row keeps today's path
+# — judged at `current:`, no note, nothing substituted — which is the pending/landed/dropped
+# behaviour the design already blesses.
+#
+# THE DISCRIMINATION IS ONE CELL, AND BOTH HALVES MUST AGREE. `active` and `landed` are
+# driven against the same plan, the same tree and the same commit, and the fix is what makes
+# their verdicts identical — so this pair goes red on any change that lets the fork reach a
+# step-3 row, whatever refusal it produces. 25g(k) is the other side of the same guard: an
+# `active` row AT step 5 still takes the fork, and it stays green unedited.
+s25p_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25p_tmp")
+s25p_main="$s25p_tmp/main"
+mkdir -p "$s25p_main/.bionic/docs/plans" "$s25p_main/.bionic/docs/record/w25g"
+printf 'evidence\n' > "$s25p_main/.bionic/docs/record/w25g/x.md"
+git -C "$s25p_main" init -q .
+git -C "$s25p_main" commit -q --allow-empty -m init
+engage "$s25p_main"
+
+s25p_plan() {  # $1 = the step-3 row's status cell — the only variable in the pair
+  printf '%s\n## SDLC State\ncurrent: 3\nStep 1: requirements: .bionic/docs/plans/wave-01-x.plan.md\napproved-by: fixture 2026-09-20T00:00Z "approved"\nStep 3: .bionic/docs/record/w25g/x.md\n- T3: .bionic/docs/record/w25g/x.md\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n|---|---|---|---|---|---|---|---|---|---|---|\n| T3 | 3 | doc | the row standing exactly where a run at Step 3 stands | implementor | — | 20m | REQ-2 | a.sh | wt-T3r | %s |\n\n%s\n' \
+    "$(matrix_frontmatter true none true)" "$1" "$matrix_w25g"
+}
+s25p_plan active > "$s25p_main/.bionic/docs/plans/wave-01-x.plan.md"
+git -C "$s25p_main" worktree add -q "$s25p_tmp/wt-T3r" -b s25p-t3r
+expect_eq "25g(r) the fixture's step-3 row really is active" "1" \
+  "$(s25p_plan active | grep -c 'wt-T3r | active' | tr -d ' ')"
+expect_eq "25g(r) …and the run really is at current: 3" "1" \
+  "$(s25p_plan active | grep -c '^current: 3$' | tr -d ' ')"
+
+run_hook_cwd "$(make_home)" "$s25p_main" "$s25p_tmp/wt-T3r" 'git commit -m "x"'
+s25p_active_exit="$HOOK_EXIT"; s25p_active_err="$HOOK_STDERR"; s25p_active_detail="$HOOK_VSTDERR"
+
+s25p_plan landed > "$s25p_main/.bionic/docs/plans/wave-01-x.plan.md"
+run_hook_cwd "$(make_home)" "$s25p_main" "$s25p_tmp/wt-T3r" 'git commit -m "x"'
+s25p_landed_exit="$HOOK_EXIT"; s25p_landed_err="$HOOK_STDERR"
+
+if [ "$s25p_active_exit" = "$s25p_landed_exit" ] && [ "$s25p_active_err" = "$s25p_landed_err" ]; then
+  ok "25g(r) C1 an ACTIVE step-3 row is judged exactly as the LANDED one is — the fork does not reach below step 4"
+else
+  no "25g(r) C1 an ACTIVE step-3 row is judged exactly as the LANDED one is — the fork does not reach below step 4" \
+    "active exit=$s25p_active_exit stderr='$s25p_active_err' vs landed exit=$s25p_landed_exit stderr='$s25p_landed_err'"
+fi
+
+if ! grep -qF "task arms" <<<"$s25p_active_err"; then
+  ok "25g(r) …so no task-arms note is printed for a row below step 4"
+else
+  no "25g(r) …so no task-arms note is printed for a row below step 4" \
+    "expected no task-arms note; stderr='$s25p_active_err'"
+fi
+
+if ! grep -qF "'Step 4:'" <<<"$s25p_active_detail"; then
+  ok "25g(r) …and the run at current: 3 is never refused for a 'Step 4:' line it cannot honestly carry"
+else
+  no "25g(r) …and the run at current: 3 is never refused for a 'Step 4:' line it cannot honestly carry" \
+    "expected no Step 4 demand; exit=$s25p_active_exit detail='$s25p_active_detail'"
 fi
 
 # --- 25g(m): `git -C .` inside a worktree keeps its row -----------------------------------
@@ -7319,8 +7433,8 @@ expect_eq "R2b …and the verdict is the first line, unchanged" \
   "$(printf '%s\n' "$EG_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R2c …with units_validate's violation line behind it (AC-2.1)" \
   "T2: dep T99 names no row in the table" "$EG_R2_ERR"
-expect_contains "R2d …and the Fix prose that names the ten columns" \
-  "the columns are id | step | kind | task | agent | deps | size | serves | Files | status" \
+expect_contains "R2d …and the Fix prose that names all TWELVE columns (R7/W3c)" \
+  "the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status" \
   "$EG_R2_ERR"
 expect_eq "R2e …so the stream is no longer the one line the defect shipped" "no" \
   "$([ "$(printf '%s\n' "$EG_R2_ERR" | /usr/bin/grep -c .)" = "1" ] && echo yes || echo no)"
