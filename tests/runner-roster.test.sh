@@ -38,7 +38,7 @@
 # / `BIONIC_PROBE_LOAD_1M` to the same calm reading §8.9's ring is seeded with
 # (44/0/0.1, resources.sh's `_res_free_pct` / `_res_swap_pct` / `_res_load_1m`
 # overrides): `tests/run.sh` samples the machine's LIVE pressure into that ring
-# on every non-dry invocation (tests/run.sh:320), so an unpinned drive on a
+# on every non-dry invocation (tests/run.sh:363), so an unpinned drive on a
 # loaded machine appends a real sample and can move a later `pressure_level`
 # read off the fixture's own band (floor-e199431 §8.9, T28).
 #
@@ -602,5 +602,241 @@ expect_contains "8.11 …labelled solo, not folded silently into the width" "sol
 # PAIRED NEGATIVE: a plain sibling is not mislabelled solo.
 expect_absent "8.12 …and an ordinary sibling is not listed as solo" "sib-a.test.sh" \
   "$(printf '%s\n' "$RR8_DRY_OUT" | grep -i solo)"
+
+# ============================================================
+section "§9 the progress knob: one line per suite as it lands (T7, REQ-9)"
+# ============================================================
+#
+# WHAT IT COVERS. Nothing in a default run prints a verdict until the whole queue
+# has drained (tests/run.sh's own drain comment), so a floor run that takes an
+# hour is a silent hour: a watcher cannot tell a run that is working from a run
+# that is wedged, and a run killed mid-drain leaves nothing behind that names the
+# suites that did land. `BIONIC_TEST_PROGRESS` is the opt-in answer, written to
+# the same rule `BIONIC_TEST_TIMING` was: a gating run's OUTPUT must not change
+# because someone wanted to watch it.
+#
+# THE FOUR CLAIMS:
+#   (a) knob set -> one TAB line per suite, `<UTC>TAB<label>TAB<rc>`, as it lands.
+#   (b) a suite whose worker is killed before it writes its verdict contributes no
+#       line, while its siblings' lines are all there — the file never names a
+#       suite that never finished.
+#   (c) knob unset -> not one byte of the report moves, and no file is created.
+#   (d) a NESTED `bash tests/run.sh` (four suites in this repo drive one) does not
+#       append its scratch labels to the outer watcher's file.
+#
+# …and one more, which is not about the knob at all: the progress file is the
+# first thing in this repo that records COMPLETION order, so it is what finally
+# makes the report's ROSTER-order contract falsifiable. §1.4 and §8.6 compare
+# sorted sets and would pass an implementation that printed in completion order.
+
+RR9_RING="$TMPROOT/t9-ring"
+
+# rr9_drive <dir> <progress-file-or-empty> — a drive with its own freshly seeded
+# pressure ring, so two drives of one tree print the same `samples=` reading and
+# can be compared byte for byte. An empty second argument means the knob is not
+# in the environment at all, which is the control §9 rests on.
+RR9_OUT=""; RR9_RC=0
+rr9_drive() {
+  local dir="$1" prog="${2:-}"
+  printf '%s|44|0|0.1|2\n' "$RR_NOW" > "$RR9_RING"
+  if [ -n "$prog" ]; then
+    RR9_OUT="$( cd "$dir" && \
+      RR_MARKS="$RR_MARKS" \
+      BIONIC_PRESSURE_RING="$RR9_RING" \
+      BIONIC_NOW_EPOCH="$RR_NOW" \
+      BIONIC_TEST_JOBS_CEILING="2" \
+      BIONIC_PROBE_FREE_PCT="44" \
+      BIONIC_PROBE_SWAP_PCT="0" \
+      BIONIC_PROBE_LOAD_1M="0.1" \
+      BIONIC_TEST_PROGRESS="$prog" \
+      bash tests/run.sh 2>&1 )"
+  else
+    RR9_OUT="$( cd "$dir" && \
+      RR_MARKS="$RR_MARKS" \
+      BIONIC_PRESSURE_RING="$RR9_RING" \
+      BIONIC_NOW_EPOCH="$RR_NOW" \
+      BIONIC_TEST_JOBS_CEILING="2" \
+      BIONIC_PROBE_FREE_PCT="44" \
+      BIONIC_PROBE_SWAP_PCT="0" \
+      BIONIC_PROBE_LOAD_1M="0.1" \
+      bash tests/run.sh 2>&1 )"
+  fi
+  RR9_RC=$?
+}
+
+# rr9_norm <report> — the report with its one per-run nonce masked: the
+# interpreter pin's own `mktemp -d` path, which is a fresh directory on every
+# invocation and is no product of this knob. Everything else is compared as it
+# was printed.
+rr9_norm() { printf '%s\n' "$1" | sed -e 's|path=[^ ]*|path=PIN|g'; }
+
+# rr9_shaped <file> — how many of the file's lines carry the pinned progress
+# shape: exactly three TAB fields, a UTC stamp, a suite label, a numeric rc.
+rr9_shaped() {
+  LC_ALL=C awk -F'\t' '
+    NF == 3 &&
+    $1 ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/ &&
+    $2 ~ /\.test\.sh$/ &&
+    $3 ~ /^[0-9]+$/ { n++ }
+    END { print n+0 }' "$1" 2>/dev/null
+}
+
+# rr9_prog_labels <file> — the labels the progress file recorded, sorted.
+rr9_prog_labels() { LC_ALL=C awk -F'\t' '{ print $2 }' "$1" 2>/dev/null | sort -u; }
+
+# rr_labels_ordered <output> — the labels the runner printed, IN PRINTED ORDER.
+# rr_labels sorts, which is what makes §1.4 and §8.6 set comparisons; the roster
+# -order claim needs the sequence.
+rr_labels_ordered() {
+  printf '%s\n' "$1" | sed -n 's/^  \([A-Za-z0-9_.-]*\.test\.sh\) .*/\1/p'
+}
+
+# ---- (a) the knob set: one shaped line per suite ---------------------------
+T9="$TMPROOT/t9"
+rr_tree "$T9"
+for RR_N in alpha bravo charlie; do rr_stub "$T9" "$RR_N"; done
+P9="$TMPROOT/t9.progress.tsv"
+rm -f "$P9"
+rr9_drive "$T9" "$P9"
+
+expect_eq "9.1 the run is green over the three suites" "0" "$RR9_RC"
+expect_eq "9.2 the knob created the progress file" "yes" \
+  "$([ -f "$P9" ] && echo yes || echo no)"
+expect_eq "9.3 it holds one line per suite, no more" "3" \
+  "$(LC_ALL=C awk 'END { print NR+0 }' "$P9")"
+expect_eq "9.4 …and every one of those lines carries the pinned shape" "3" \
+  "$(rr9_shaped "$P9")"
+expect_eq "9.5 …naming exactly the suites in the glob, as a set" \
+  "$(rr_glob "$T9")" "$(rr9_prog_labels "$P9")"
+expect_eq "9.6 …each with the rc its suite actually exited with (all green)" "3" \
+  "$(LC_ALL=C awk -F'\t' '$3 == "0" { n++ } END { print n+0 }' "$P9")"
+# PAIRED NEGATIVE for 9.4: the shape check counts zero over a file that holds a
+# line of the wrong shape, so 9.4's three is three shaped lines and not three
+# lines of anything at all.
+printf 'not a progress line\n' > "$TMPROOT/t9-bogus.tsv"
+expect_eq "9.7 …and that shape check is not vacuous (a malformed file counts zero)" "0" \
+  "$(rr9_shaped "$TMPROOT/t9-bogus.tsv")"
+
+# ---- (c) the knob unset: no file, and not one byte of the report -----------
+P9U="$TMPROOT/t9-unset.progress.tsv"
+rm -f "$P9U"
+RR9_WITH="$RR9_OUT"
+rr9_drive "$T9" ""
+expect_eq "9.8 the unset run is green too" "0" "$RR9_RC"
+expect_eq "9.9 …and wrote no progress file anywhere" "no" \
+  "$([ -f "$P9U" ] && echo yes || echo no)"
+expect_eq "9.10 …and its report is the watched run's, byte for byte" \
+  "$(rr9_norm "$RR9_WITH")" "$(rr9_norm "$RR9_OUT")"
+# PAIRED POSITIVE for 9.10: the thing compared is a real report, not two empties.
+expect_contains "9.11 …and that report is a real one (the tally is in it)" \
+  "Gating: 3 passed, 0 failed" "$RR9_OUT"
+expect_absent "9.12 …and no run of either kind prints a progress path" \
+  "$P9" "$RR9_WITH"
+
+# ---- (b) a suite whose worker dies contributes no line ---------------------
+#
+# The shape that matters is a verdict that never reached disk, which is the
+# worker dying — not the suite exiting non-zero. The planted suite kills its own
+# parent (the `--one` worker) with SIGKILL, so no `.rc` is ever written and the
+# runner reports it KILLED. It is marked `# runner: solo` so it drains through
+# the solo loop rather than under xargs, which abandons a queue when a child dies
+# by signal and would take its siblings' evidence with it.
+T9K="$TMPROOT/t9k"
+rr_tree "$T9K"
+for RR_N in k-one k-two; do rr_stub "$T9K" "$RR_N"; done
+cat > "$T9K/tests/zzz-killed.test.sh" <<'RR9_KILLED'
+#!/bin/bash
+# runner: solo
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+kill -9 "$PPID"
+sleep 0.5
+section "zzz-killed"
+expect_eq "unreachable: the worker died before this suite could finish" "x" "x"
+finish
+RR9_KILLED
+P9K="$TMPROOT/t9k.progress.tsv"
+rm -f "$P9K"
+rr9_drive "$T9K" "$P9K"
+
+expect_contains "9.13 the runner reports the suite whose worker died as KILLED" \
+  "✗ KILLED (no exit status recorded)" "$RR9_OUT"
+expect_eq "9.14 …and the run is red, as it must be" "1" "$RR9_RC"
+expect_eq "9.15 the progress file names the two suites that DID land" \
+  "$(printf 'k-one.test.sh\nk-two.test.sh\n')" "$(rr9_prog_labels "$P9K")"
+expect_absent "9.16 …and never names the one that never finished" \
+  "zzz-killed.test.sh" "$(cat "$P9K")"
+expect_eq "9.17 …so the file holds two lines, not three" "2" \
+  "$(LC_ALL=C awk 'END { print NR+0 }' "$P9K")"
+# PAIRED: the killed suite IS in the report, so 9.16 is a missing progress line
+# and not a suite the roster never carried.
+expect_contains "9.18 …while the report still carries it, in roster order" \
+  "zzz-killed.test.sh" "$RR9_OUT"
+
+# ---- (d) a nested run does not pollute the outer watcher's file ------------
+T9N_INNER="$TMPROOT/t9n-inner"
+rr_tree "$T9N_INNER"
+rr_stub "$T9N_INNER" "zin-inner"
+export RR9_INNER="$T9N_INNER"
+
+T9N="$TMPROOT/t9n"
+rr_tree "$T9N"
+rr_stub "$T9N" "n-plain"
+cat > "$T9N/tests/n-outer.test.sh" <<'RR9_NESTED'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+: > "$RR_MARKS/n-outer.ran"
+section "n-outer"
+( cd "$RR9_INNER" && bash tests/run.sh >/dev/null 2>&1 )
+expect_eq "the nested run over the inner tree is green" "0" "$?"
+finish
+RR9_NESTED
+P9N="$TMPROOT/t9n.progress.tsv"
+rm -f "$P9N" "$RR_MARKS/zin-inner.ran"
+rr9_drive "$T9N" "$P9N"
+
+expect_eq "9.19 the outer run is green, nested drive and all" "0" "$RR9_RC"
+# PAIRED POSITIVE, and the whole point of it: the inner suite really ran. Its
+# absence from the outer file below is a knob that did not leak, not a nested run
+# that never happened.
+expect_eq "9.20 the nested run really ran its own suite" "yes" \
+  "$([ -f "$RR_MARKS/zin-inner.ran" ] && echo yes || echo no)"
+expect_eq "9.21 the outer file names the outer tree's two suites" \
+  "$(printf 'n-outer.test.sh\nn-plain.test.sh\n')" "$(rr9_prog_labels "$P9N")"
+expect_absent "9.22 …and carries no label from the nested tree" \
+  "zin-inner.test.sh" "$(cat "$P9N")"
+expect_eq "9.23 …so it holds two lines, not three" "2" \
+  "$(LC_ALL=C awk 'END { print NR+0 }' "$P9N")"
+
+# ---- the report is in ROSTER order, and now that is falsifiable ------------
+#
+# The runner's drain comment says a reader comparing two runs is comparing
+# rosters, not schedules. Until there was a progress file nothing in this repo
+# could tell the two apart: §1.4 and §8.6 sort both sides. Here the slow suite is
+# alphabetically FIRST and lands LAST, so the two orders genuinely disagree and
+# the report has to pick the roster's.
+T9O="$TMPROOT/t9o"
+rr_tree "$T9O"
+for RR_N in mmm-mid zzz-fast; do rr_stub "$T9O" "$RR_N"; done
+{ printf '#!/bin/bash\n'
+  printf 'set -uo pipefail\n'
+  printf '. "$(dirname "$0")/lib/assert.sh"\n'
+  printf 'sleep 2\n'
+  printf 'section "aaa-slow"\n'
+  printf 'expect_eq "aaa-slow ran" "x" "x"\n'
+  printf 'finish\n'
+} > "$T9O/tests/aaa-slow.test.sh"
+P9O="$TMPROOT/t9o.progress.tsv"
+rm -f "$P9O"
+rr9_drive "$T9O" "$P9O"
+
+expect_eq "9.24 the run is green over the three" "0" "$RR9_RC"
+expect_eq "9.25 the report prints the roster's ORDER, not a sorted set of it" \
+  "$(rr_glob "$T9O")" "$(rr_labels_ordered "$RR9_OUT")"
+expect_eq "9.26 …and completion order really did disagree: the slow suite landed LAST" \
+  "aaa-slow.test.sh" "$(LC_ALL=C awk -F'\t' 'END { print $2 }' "$P9O")"
+expect_eq "9.27 …while the report printed that same suite FIRST" \
+  "aaa-slow.test.sh" "$(rr_labels_ordered "$RR9_OUT" | sed -n '1p')"
 
 finish
