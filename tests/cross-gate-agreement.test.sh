@@ -10956,4 +10956,69 @@ rm -f "$BF_3RD_DIR/payload/commands/planted-third-caller.sh"
 expect_eq "control: the same scratch tree with the plant removed reads back to 2" "2" \
   "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
 
+# ============================================================
+section "SV — the shared brief-scaffold block is byte-identical across all eight rendered surfaces, and re-authored to the new span rule (epic-23 wave-17-fixit-184 T9, REQ-7 AC-7.1)"
+# ============================================================
+#
+# WHY THIS LIVES HERE, NOT IN docs-pins.test.sh. `agents-src/blocks/brief-scaffold.md` is
+# ONE shared source `agents-src/render.sh` injects into SKILL.md, dispatch.md and all six
+# `agents/*.md` role files (research R2 §B4: before this task, three of those eight copies —
+# SKILL.md's, dispatch.md's, and every role file's — carried a stale "on its own paragraph"
+# comment the parser has not enforced since commit 9bf75d7). docs-pins.test.sh pins what each
+# rendered FINAL says; this file's whole purpose is agreement BETWEEN renders of the same
+# source, so the pin that the eight copies are one block rather than eight independent
+# opportunities to drift belongs here. `Suites: none` is the discriminating line: it is the
+# one row of the scaffold that changed text, so an EQ compare of that one line across all
+# eight copies is the tightest agreement pin — a byte-for-byte diff of the whole block would
+# also pass on eight copies that agree with each other while still teaching the old rule.
+#
+# HERMETIC. Reads the committed rendered finals by path; a mutated copy lives under
+# $SANDBOX.
+
+SV_SKILL="$BIONIC_SKILLS_DIR/canonical-sdlc/SKILL.md"
+SV_DISPATCH="$BIONIC_SKILLS_DIR/canonical-sdlc/dispatch.md"
+SV_SUITES_LINE='Suites: none                                           # read-only brief; or test-file names only'
+
+sv_suites_line() {  # <file> -> the scaffold's Suites: line, or empty
+  awk '/^Suites: none/ { print; exit }' "$1" 2>/dev/null
+}
+
+SV_SURFACES="$SV_SKILL $SV_DISPATCH"
+for _sv_f in "$BIONIC_SCRIPTS_DIR"/agents/*.md; do
+  [ -f "$_sv_f" ] && SV_SURFACES="$SV_SURFACES $_sv_f"
+done
+
+SV_DISAGREE=""
+SV_COUNT=0
+for _sv_f in $SV_SURFACES; do
+  SV_COUNT=$((SV_COUNT + 1))
+  _sv_got="$(sv_suites_line "$_sv_f")"
+  [ "$_sv_got" = "$SV_SUITES_LINE" ] || SV_DISAGREE="${SV_DISAGREE} ${_sv_f##*/}=[${_sv_got:-<absent>}]"
+done
+expect_eq "SV all eight rendered surfaces carry the shared scaffold's new Suites: line" \
+  "8 " "$SV_COUNT $SV_DISAGREE"
+
+# THE OLD LINE IS GONE, EVERYWHERE, NOT JUST REPLACED SOMEWHERE. A partial render (the
+# block updated in the source but only some templates re-rendered) would leave some copies
+# on the new line and others on the old — the equality above catches drift on the new text,
+# this catches survival of the old text.
+SV_STALE=0
+for _sv_f in $SV_SURFACES; do
+  /usr/bin/grep -qF 'on its own paragraph' "$_sv_f" 2>/dev/null && SV_STALE=$((SV_STALE + 1))
+done
+expect_eq "SV …and none of the eight still carries the retired 'on its own paragraph' comment" \
+  "0" "$SV_STALE"
+
+# ANTI-VACUITY: a doctored copy of one surface, reverted to the old comment, DOES disagree
+# with the shared constant — proving the equality pin above is load-bearing rather than
+# comparing an empty string to itself.
+SV_MUT="$SANDBOX/skill-stale-scaffold.md"
+sed 's/# read-only brief; or test-file names only$/# read-only brief; or test-file names only, on its own paragraph/' \
+  "$SV_SKILL" > "$SV_MUT" 2>/dev/null
+SV_MUT_LINE="$(sv_suites_line "$SV_MUT")"
+expect_eq "SV MUTANT a doctored copy with the old comment reinstated no longer matches the shared line" \
+  "no" "$([ "$SV_MUT_LINE" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
+expect_eq "SV MUTANT …and the un-doctored SKILL.md still does" \
+  "yes" "$([ "$(sv_suites_line "$SV_SKILL")" = "$SV_SUITES_LINE" ] && echo yes || echo no)"
+
 finish
