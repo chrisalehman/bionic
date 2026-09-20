@@ -9634,7 +9634,13 @@ expect_eq "S19.3 …declared by 43 anchor calls (Section 8's doctoring rewrites 
 # it, so a renamed marker cannot leave the doctored copy byte-identical to the shipped suite
 # and the four absence greps passing over it. One anchor call, 30 -> 31. RE-DERIVED BY DIRECT
 # GREP over this file at THIS commit, as every number in this section is.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 31 more" "31" \
+#
+# 32 at epic-23 wave-16-fixit-183 (2026-09-20, T25): §bring-forward — one source for the
+# step both callers judge against — anchors the gate caller line in payload/scripts/lib/walls.sh
+# before the sed that hands that caller a step again, so the row asserting neither caller
+# passes one is provably able to fail. One anchor call, 31 -> 32. RE-DERIVED BY DIRECT GREP
+# over this file at THIS commit, as every number in this section is.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 32 more" "32" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9712,7 +9718,10 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # fifth term to it is a change to a section task 11 does not own.
 # 77 at epic-23 wave-15-fixit-182 (2026-09-17, T1): +1 from §PV's anchor above; the other
 # three files are untouched by that task.
-expect_eq "S19.3 …78 anchor call sites across the four doctoring suites, all told" "78" \
+# 79 at epic-23 wave-16-fixit-183: +1 from this wave's T4 (§R2's knob-unset splice) and +1
+# from T25 (§bring-forward's caller mutant), both in this file; the other three are
+# untouched by either task.
+expect_eq "S19.3 …79 anchor call sites across the four doctoring suites, all told" "79" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -10852,5 +10861,58 @@ expect_eq "R2 no pin of the old exit2 detail_to_user=no cell survives in refuse.
   "$(grep -cF '"no" "$(cell exit2 detail_to_user)"' "$R2_TESTS_DIR/refuse.test.sh" || true)"
 expect_eq "R2 …and the pin that replaced it asserts yes" "1" \
   "$(grep -cF '"yes" "$(cell exit2 detail_to_user)"' "$R2_TESTS_DIR/refuse.test.sh" || true)"
+
+# ============================================================
+section "§bring-forward — one source for the step both callers judge against (wave-16 T25, critic C1)"
+# ============================================================
+#
+# THE DISAGREEMENT THIS PINS SHUT. `plan_bring_forward` used to take the step as an
+# argument, and the two callers passed different facts: the evidence gate passed the plan
+# body's `current:`, the governing-skill hook passed the frontmatter's `sdlc-step:`. A
+# frontmatter stamp is written once at Step 0 and almost never moved — this repo's archive
+# carries `sdlc-step: 3` beside `current: 9` — so the Write-side arm computed against step 3
+# for the life of the plan and printed a SHORTER list than the gate would, silently. The
+# predicate now derives the step from the plan text it already holds, and this section is
+# the wall that keeps it that way: a caller that starts handing it one again is the exact
+# regression, and no per-file suite can see it, because each call site reads fine alone.
+#
+# fails-when: a third caller appears unpinned, either caller hands the predicate an
+# argument after the plan path, or the detector cannot catch one that does.
+BF_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
+[ -r "$BF_LIB" ] || BF_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
+BF_GSKILL="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
+
+# EVERY CALL, definition and `declare -F` probe excluded: a call is the name followed by a
+# quoted argument, which is how both sites spell it and how a third would.
+bf_calls() {  # <file> -> the call lines, `file:line:text`
+  grep -n 'plan_bring_forward "' "$1" 2>/dev/null | grep -v '^[0-9]*:[[:space:]]*#'
+}
+# A SECOND ARGUMENT, if one is ever passed: the plan path, then whitespace, then another
+# quoted or `$`-led word. A trailing redirection (`2>/dev/null`) is not one and does not
+# match — which is why this asks for the shape of an ARGUMENT rather than for "anything".
+bf_second_arg() { grep -E 'plan_bring_forward "[^"]*"[[:space:]]+["$]' || true; }
+
+BF_CALLS="$(bf_calls "$BF_LIB"; bf_calls "$BF_GSKILL")"
+expect_eq "the tree holds exactly two callers of plan_bring_forward" "2" \
+  "$(printf '%s\n' "$BF_CALLS" | grep -c 'plan_bring_forward "')"
+expect_eq "…the evidence gate is one of them" "1" \
+  "$(bf_calls "$BF_LIB" | grep -c 'plan_bring_forward "')"
+expect_eq "…and the governing-skill hook is the other" "1" \
+  "$(bf_calls "$BF_GSKILL" | grep -c 'plan_bring_forward "')"
+expect_empty "…and NEITHER hands it a step: the predicate reads current: itself" \
+  "$(printf '%s\n' "$BF_CALLS" | bf_second_arg)"
+
+# THE MUTATION, so the row above is not passing over a detector that can never fire: a COPY
+# of the library with the gate caller handed a step again must be caught by the same shape.
+BF_MUT_DIR="$SANDBOX/bring-forward-mutant"; mkdir -p "$BF_MUT_DIR"
+anchor "$BF_LIB" 'plan_bring_forward "$PLAN")' 1
+sed 's/plan_bring_forward "$PLAN")/plan_bring_forward "$PLAN" "$CURRENT")/' \
+  "$BF_LIB" > "$BF_MUT_DIR/walls.sh"
+expect_nonempty "…and a doctored copy that hands the gate caller a step IS caught" \
+  "$(bf_calls "$BF_MUT_DIR/walls.sh" | bf_second_arg)"
+# CONTROL — the same copy machinery, unmutated, is still clean.
+cp "$BF_LIB" "$BF_MUT_DIR/walls.clean.sh"
+expect_empty "control: an UNMUTATED copy is still clean" \
+  "$(bf_calls "$BF_MUT_DIR/walls.clean.sh" | bf_second_arg)"
 
 finish
