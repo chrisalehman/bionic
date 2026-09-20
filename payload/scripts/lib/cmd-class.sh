@@ -65,6 +65,14 @@
 #                                because they name no file this repo budgets by. GIVEN A
 #                                REPO ROOT the answer is scoped to that repo's tests/ and a
 #                                `--dry-run` segment names nothing — see the function.
+#   cmd_suite_claims   <cmd> [<root>]
+#                             -> what each suite-class segment CLAIMS, one
+#                                `<kind>\t<target>\t<run>` line per segment: kind `file`
+#                                with the suite basename (the line above's answer), or kind
+#                                `run` with the collapsed command, for a segment that runs a
+#                                suite naming no file this repo budgets by. The budget arm
+#                                reads this: `suites_allowed=` is compared to the first,
+#                                `re_executes=` to the second (REQ-1 AC-1.5).
 #   cmd_class          <cmd>  -> the whole command's class, by PRIORITY not by position:
 #                                suite > bootstrap > install > build > none. Priority, so
 #                                that `make widget && bash tests/run.sh` still routes to
@@ -84,6 +92,26 @@ _cmd_class_awk() {  # <mode> ; command on stdin
   awk -v mode="$1" '
     function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
     function base(p) { sub(/.*\//, "", p); return p }
+    # ONE RUN, ONE SPELLING (REQ-1 AC-1.5). The same collapse
+    # `hooks/dispatch-preflight.sh` applies to an author-marked run before it writes it onto
+    # the roster row (its `collapse()`, :1508), so a run typed with wider spacing here and a
+    # run declared with narrower spacing there are the same string when the budget arm
+    # compares them. Two collapses that disagreed would be a budget nobody could satisfy.
+    function ws1(s) { gsub(/[ \t\r\n]+/, " ", s); sub(/^ +/, "", s); sub(/ +$/, "", s); return s }
+    # NON-EXECUTING RUNNER FLAGS (REQ-5, D13). A TABLE, because the difference between
+    # reading a suite and running one is a property of the flag and of nothing else: `-n`
+    # (and its long spelling) makes the shell parse the file and stop, `--help`/`--version`
+    # make it print and exit, and in every one of them the same words name a suite that is
+    # never spent. `-x` and `-v` DO execute, so they are ordinary options and the suite they
+    # name is still a real run (AC-5.2). A SHORT CLUSTER IS READ LETTER BY LETTER — `bash
+    # -nx` and `bash -xn` are `-n` with a trace folded in, which is how anybody types it —
+    # while a LONG option is matched whole, so `--verbose` is never read as a cluster
+    # carrying `n`.
+    function sh_noexec(w) {
+      if (w == "--noexec" || w == "--help" || w == "--version") return 1
+      if (w ~ /^-[A-Za-z]+$/ && index(w, "n") > 0) return 1
+      return 0
+    }
 
     # ---------- 1. heredocs ----------
     # The tag opened by this line, or "" — quote-aware, so a `<<` inside a string is text.
@@ -317,7 +345,7 @@ _cmd_class_awk() {  # <mode> ; command on stdin
     # positions this does. It is set ONLY for the two script forms that name a file —
     # pytest, `npm test`, `go test` and `make test` are suite-class and name no
     # tests/<x>.test.sh, so they leave it empty and the caller reports no target.
-    function classify_argv(s,   a, n, i, a1, a2, b0, b1) {
+    function classify_argv_read(s,   a, n, i, a1, a2, b0, b1, npxshift) {
       LAST_TARGET = ""; LAST_PATH = ""; LAST_DRY = 0
       n = argv_tok(s, a)
       if (n == 0) return "none"
@@ -327,10 +355,35 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       # anybody types. The CLASS is untouched: the command still runs the runner.
       for (i = 1; i <= n; i++) if (a[i] == "--dry-run") LAST_DRY = 1
       b0 = base(a[1])
+      # A PACKAGE RUNNER IS A PREFIX, NOT A COMMAND (REQ-1 AC-1.5). `npx jest …` runs jest
+      # and spends what a jest run spends; `npx create-react-app x` runs something else
+      # entirely, and the tier-2 nudge is the wall that speaks for those. The prefix comes
+      # off HERE, inside the argv reading, and deliberately not in `strip_leading`: that
+      # function feeds `cmd_unwrap_head`, whose whole job is to hand the farm-out nudge the
+      # `npx …` head it matches on (B-4a), and stripping it there would take the nudge s
+      # subject away from it.
+      npxshift = 0
+      if (b0 == "npx" || b0 == "bunx" || b0 == "pnpx") npxshift = 1
+      else if ((b0 == "npm" || b0 == "pnpm" || b0 == "yarn" || b0 == "bun") && n >= 2 && (a[2] == "dlx" || a[2] == "exec")) npxshift = 2
+      if (npxshift > 0 && n > npxshift) {
+        for (i = 1; i + npxshift <= n; i++) a[i] = a[i + npxshift]
+        n = n - npxshift
+        b0 = base(a[1])
+      }
       if (b0 == "bash" || b0 == "sh" || b0 == "zsh" || b0 == "dash" || b0 == "ksh") {
-        # skip the runner s own options: `bash -x tests/run.sh` runs the same suite
+        # SKIP THE RUNNER S OWN OPTIONS — BUT READ THEM FIRST (REQ-5, D13). This loop used
+        # to skip every leading flag alike, so `bash -n tests/x.test.sh` reached the suite
+        # arm with the same target `bash tests/x.test.sh` does and a writer checking a
+        # suite s SYNTAX was refused for running it. A non-executing flag ends the reading
+        # here: the command names a file it will not run, so it is not suite-class and it
+        # names no target for any budget to hold. `-o <mode>` takes its value as a separate
+        # word, which comes off with it or the mode word becomes a phantom script.
         i = 2
-        while (i <= n && substr(a[i], 1, 1) == "-") i++
+        while (i <= n && substr(a[i], 1, 1) == "-") {
+          if (sh_noexec(a[i])) return "none"
+          if (a[i] == "-o") { i++; if (i <= n && a[i] == "noexec") return "none" }
+          i++
+        }
         a1 = (i <= n ? a[i] : ""); b1 = base(a1)
         if (b1 ~ /^claude-(bootstrap|reset)\.sh$/) return "bootstrap"
         if (b1 == "test.sh" || b1 ~ /\.test\.sh$/) { LAST_TARGET = b1; LAST_PATH = a1; return "suite" }
@@ -355,6 +408,9 @@ _cmd_class_awk() {  # <mode> ; command on stdin
         return "suite"
       }
       if (b0 == "pytest") return "suite"
+      # `jest` NAMED, the runner the seed and D1 are about. Bare, or behind the `npx`
+      # prefix dropped above — both are one run of one project s tests.
+      if (b0 == "jest") return "suite"
       if (b0 == "npm" || b0 == "pnpm" || b0 == "yarn") {
         if (a1 == "test") return "suite"
         if (a1 == "install" || a1 == "add" || a1 == "ci") return "install"
@@ -378,6 +434,28 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       if (b0 == "brew") return (a1 == "install" ? "install" : "none")
       if (b0 == "docker") return (a1 == "build" ? "build" : "none")
       return "none"
+    }
+
+    # EVERY SUITE-CLASS SEGMENT NAMES SOMETHING NOW (REQ-1 AC-1.5). A reading that answered
+    # only "this is a suite" left the budget arm in `payload/scripts/lib/walls.sh` with nothing to
+    # compare for `pytest`, `npm test`, `go test` and `npx jest` — not a wall that let them
+    # through on purpose, a wall that could not see them (research R1 Q2). So a suite-class
+    # segment that named no FILE names its RUN instead: the argv text this reading actually
+    # read, collapsed, which is the same shape `Re-executes:` puts on the roster row.
+    #
+    # KIND IS PART OF THE ANSWER, not something a caller re-derives from an empty column. A
+    # `file` claim carries a basename the budget compares against `suites_allowed=`; a `run`
+    # claim carries a command the budget compares against `re_executes=`. They are different
+    # comparisons, and a caller that had to guess which one it held would guess wrong the
+    # first time a suite file was named by a runner that is not a shell.
+    function classify_argv(s,   c) {
+      LAST_RUN = ws1(s)
+      c = classify_argv_read(s)
+      if (c != "suite") { LAST_KIND = ""; return c }
+      if (LAST_TARGET != "") { LAST_KIND = "file"; return c }
+      LAST_TARGET = LAST_RUN
+      LAST_KIND = "run"
+      return c
     }
 
     function class_seg(seg, depth,   u0, u, m, sub_, i, c) {
@@ -441,17 +519,25 @@ _cmd_class_awk() {  # <mode> ; command on stdin
       for (i = 1; i <= k; i++) {
         t = trim(seg[i])
         if (t == "") continue
-        LAST_TARGET = ""
+        LAST_TARGET = ""; LAST_KIND = ""; LAST_RUN = ""
         cls = class_seg(t, 0)
         if (mode == "targets") {
-          # ONE LINE PER DISTINCT SUITE, in position order. A command naming the same
+          # ONE LINE PER DISTINCT CLAIM, in position order. A command naming the same
           # suite twice states one budget claim, and the caller compares a set.
           if (cls == "suite" && LAST_TARGET != "" && !LAST_DRY && !(LAST_TARGET in tgt_seen)) {
             tgt_seen[LAST_TARGET] = 1
-            # BASENAME AND PATH, tab-separated. The shell wrapper is the only caller and
-            # reduces this to the basename; it needs the path to answer "whose suite is
-            # this?", which a basename cannot (critic K-2).
-            printf "%s\t%s\n", LAST_TARGET, LAST_PATH
+            # KIND, TARGET, RUN AND PATH, tab-separated. The shell wrappers are the only
+            # callers: `cmd_suite_claims` scopes the path to a repository and drops it,
+            # `cmd_suite_targets` keeps the basename of the file claims. The path answers
+            # "whose suite is this?", which a basename cannot (critic K-2); the run answers
+            # "which run is this?", which a basename cannot either.
+            #
+            # THE PATH IS LAST BECAUSE IT IS THE ONLY ONE THAT CAN BE EMPTY, and a tab is an
+            # IFS WHITESPACE character: bash `read` folds a run of them into one delimiter,
+            # so an empty column anywhere but the end shifts every column after it by one.
+            # Measured here, not reasoned about — a run claim (no path) handed its run to
+            # the path variable and left the run empty.
+            printf "%s\t%s\t%s\t%s\n", LAST_KIND, LAST_TARGET, LAST_RUN, LAST_PATH
           }
         } else {
           printf "%s\t%s\n", cls, t
@@ -503,10 +589,20 @@ cmd_class_lines() {  # <command> -> "<class>\t<segment>" per non-empty segment
   printf '%s' "${1-}" | _cmd_class_awk lines
 }
 
-cmd_suite_targets() {  # <command> [<repo root>] -> the suite BASENAME each suite-class segment runs
-  # WITH A REPO ROOT the answer is SCOPED: a segment names a target only when the path it
-  # runs resolves to that repository's `tests/<basename>`. Without one the answer is the
-  # bare basename, which is what it always was — the reading, not the row, decides.
+cmd_suite_claims() {  # <command> [<repo root>] -> "<kind>\t<target>\t<run>" per suite-class segment
+  # WHAT A SUITE-CLASS COMMAND CLAIMS, which is two different things depending on what it
+  # named. `file` carries the suite BASENAME the segment runs — the budget's unit since
+  # wave-01 — and `run` carries the collapsed command text, for a segment that runs a suite
+  # without naming a file this repository budgets by (`pytest`, `npm test`, `npx jest`).
+  # Both carry the run beside the target, because `payload/scripts/lib/walls.sh` holds a
+  # rostered agent to `suites_allowed=` AND to `re_executes=` and needs the two keys those
+  # two fields are written in.
+  #
+  # WITH A REPO ROOT THE FILE CLAIMS ARE SCOPED: a segment names a target only when the path
+  # it runs resolves to that repository's `tests/<basename>`. Without one the answer is the
+  # bare basename, which is what it always was — the reading, not the row, decides. A RUN
+  # claim is not scoped, because a run names no path to scope: it is the command itself, and
+  # the row that declared it is the only thing that can say whether it belongs here.
   #
   # WHY SCOPING EXISTS (critic K-2, review-a A-7). A bare basename made any file on the
   # machine ending `.test.sh` this row's business: a scratch probe under /tmp and another
@@ -524,23 +620,36 @@ cmd_suite_targets() {  # <command> [<repo root>] -> the suite BASENAME each suit
   #     resolve against, and the full tree is the one act this budget fails CLOSED on;
   #   * a token carrying `$` or a backtick cannot be resolved at hook time at all — the
   #     guard has a refusal written for exactly that state.
-  local _root="${2-}" _b _p _abs
-  if [ -z "$_root" ]; then
-    printf '%s' "${1-}" | _cmd_class_awk targets | awk -F'\t' '{ print $1 }'
-    return 0
-  fi
-  printf '%s' "${1-}" | _cmd_class_awk targets | while IFS=$'\t' read -r _b _p; do
+  local _root="${2-}" _k _b _r _p _abs
+  printf '%s' "${1-}" | _cmd_class_awk targets | while IFS=$'\t' read -r _k _b _r _p; do
+    [ -n "$_k" ] || continue
+    if [ "$_k" != "file" ]; then printf '%s\t%s\t%s\n' "$_k" "$_b" "$_r"; continue; fi
     [ -n "$_b" ] || continue
+    if [ -z "$_root" ]; then printf 'file\t%s\t%s\n' "$_b" "$_r"; continue; fi
     case "$_p" in
-      *'$'*|*'`'*) printf '%s\n' "$_b"; continue ;;
+      *'$'*|*'`'*) printf 'file\t%s\t%s\n' "$_b" "$_r"; continue ;;
       */*) : ;;
-      *) printf '%s\n' "$_b"; continue ;;
+      *) printf 'file\t%s\t%s\n' "$_b" "$_r"; continue ;;
     esac
     case "$_p" in
       /*) _abs="$_p" ;;
       *)  _abs="$_root/${_p#./}" ;;
     esac
-    if [ "$_abs" = "$_root/tests/$_b" ]; then printf '%s\n' "$_b"; fi
+    if [ "$_abs" = "$_root/tests/$_b" ]; then printf 'file\t%s\t%s\n' "$_b" "$_r"; fi
+  done
+  return 0
+}
+
+cmd_suite_targets() {  # <command> [<repo root>] -> the suite BASENAME each suite-class segment runs
+  # THE FILE HALF OF `cmd_suite_claims`, and nothing else. It is a projection rather than a
+  # second reading for the reason this whole file exists: the scoping rules above are the
+  # kind of thing that drifts the moment they are spelled twice. Callers that budget by
+  # suite FILE — `hooks/dispatch-preflight.sh`'s derivation round-trip, the full-tree arm —
+  # read this; a caller that also holds runner forms reads the claims.
+  local _k _b _r
+  cmd_suite_claims "${1-}" "${2-}" | while IFS=$'\t' read -r _k _b _r; do
+    [ "$_k" = "file" ] || continue
+    printf '%s\n' "$_b"
   done
   return 0
 }

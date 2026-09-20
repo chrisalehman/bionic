@@ -4008,29 +4008,46 @@ fi
 # this line. The reason is hooks/landing-gate.sh:284's about `agent_id`: a key carrying path
 # separators does not trip the symlink guards, it reads outside the directory those guards
 # protect.
-local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED BUDGET_LINE _TARGETS _target
+local ROSTER_FILE BUDGET_STATED SUITES_ALLOWED RE_EXECUTES BUDGET_LINE
+local _CLAIMS _kind _target _run _shown
 ROSTER_FILE="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
 BUDGET_STATED=no
 SUITES_ALLOWED=""
+RE_EXECUTES=""
 if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; then
   # THE LAST ROW CARRYING THIS ID WINS, which is the whole fleet`s reading of the roster
   # (hooks/stop-guard.sh, hooks/session-poker.sh: "the last row carrying a name wins"). A
   # launch row is later joined by the recorder`s `status=confirmed` copy and, across a
   # /clear, by the poker`s adopted row; each carries the budget forward, and the newest is
   # the current statement about this agent.
+  #
+  # TWO FIELDS, ONE READ (REQ-1 AC-1.5). `re_executes=` is the same statement in the
+  # spelling a repository whose tests are not shell suites can make — the author-marked
+  # runs its brief declared under `Re-executes:`, marks kept and space-joined (A-T1.4) —
+  # and it is read off the SAME winning row, because a budget assembled from two different
+  # rows would hold an agent to a contract no single dispatch ever wrote. The answer comes
+  # back as two lines: the `<stated>:<allowed>` pair this arm has always read, then the
+  # declared runs behind an `R:` marker (a run may hold any character but `|` and a
+  # newline, both refused at the lift, so a marker is the only safe join).
   BUDGET_LINE=$(awk -F'|' -v id="$ACTOR" '
     /^roster-state\// {
-      hit = 0; stated = 0; allowed = ""
+      hit = 0; stated = 0; allowed = ""; runs = ""
       for (i = 1; i <= NF; i++) {
         if ($i == "agent_id=" id) hit = 1
         else if ($i ~ /^suites_allowed=/) { stated = 1; allowed = substr($i, 16) }
+        else if ($i ~ /^re_executes=/) { runs = substr($i, 13) }
       }
-      if (hit) last = stated ":" allowed
+      if (hit) { last = stated ":" allowed; lastruns = runs }
     }
-    END { if (last != "") print last }
+    END { if (last != "") { print last; print "R:" lastruns } }
   ' "$ROSTER_FILE" 2>/dev/null)
   case "$BUDGET_LINE" in
-    1:*) BUDGET_STATED=yes; SUITES_ALLOWED="${BUDGET_LINE#1:}" ;;
+    1:*) BUDGET_STATED=yes
+         SUITES_ALLOWED="${BUDGET_LINE%%$'\n'*}"
+         SUITES_ALLOWED="${SUITES_ALLOWED#1:}" ;;
+  esac
+  case "$BUDGET_LINE" in
+    *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}" ;;
   esac
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
@@ -4133,6 +4150,35 @@ _budget_wire_fact() {
   printf '%s%s' "$label" "$(_budget_wire_list "$allowed" "$room")"
 }
 
+# _run_is_declared <run> <the row's re_executes= field> -> 0 when the row declared EXACTLY
+# this run (REQ-1 AC-1.5).
+#
+# THE FIELD KEEPS THE AUTHOR S MARKS, space-joined (A-T1.4): `` `npx jest x` `pytest tests` ``.
+# The marks are what make it self-delimiting — a run holds spaces, commas and quotes, so no
+# punctuation separator is unambiguous, and a backtick cannot occur INSIDE a run because a
+# backtick is what ends one. So the split is on the marks and never on whitespace.
+#
+# EXACTLY, not a prefix. `npx jest` and `npx jest --testPathPatterns 'x'` are different
+# spends — the first runs the whole tree — and a match that accepted one for the other would
+# lose the one-regression rule to a spelling. Both sides are already collapsed by the time
+# they meet: the lift collapses each marked run before writing it
+# (hooks/dispatch-preflight.sh `collapse()`), the classifier collapses the argv text it read
+# (payload/scripts/lib/cmd-class.sh `ws1()`), and those two are the same rule written once
+# on each side of the roster row.
+_run_is_declared() {  # <run> <re_executes field>
+  local _want="$1" _rest="$2" _tok _bt
+  [ -n "$_want" ] && [ -n "$_rest" ] || return 1
+  _bt='`'
+  while :; do
+    case "$_rest" in *"$_bt"*) : ;; *) return 1 ;; esac
+    _rest="${_rest#*"$_bt"}"
+    case "$_rest" in *"$_bt"*) : ;; *) return 1 ;; esac
+    _tok="${_rest%%"$_bt"*}"
+    _rest="${_rest#*"$_bt"}"
+    [ "$_tok" = "$_want" ] && return 0
+  done
+}
+
 budget_refuse() {  # <suite basename>
   # A NAME THE SHELL HAS NOT EXPANDED YET IS A DIFFERENT REFUSAL (review-c C-5, A-35c). A
   # hook sees the command TEXT, so `for s in a b; do bash "tests/$s.test.sh"; done` reaches
@@ -4174,18 +4220,33 @@ its decision to make, and it is the one holding the one-regression budget for th
   return 2
 }
 
-# THE READING IS SCOPED TO THIS REPOSITORY and the split is guarded. `$BIONIC_ROOT` is what
-# turns "a file named x.test.sh" into "this row's suite x.test.sh" (critic K-2), and `set
-# -f` keeps a target carrying a glob metacharacter — `bash tests/*.test.sh` reads as the
-# literal `*.test.sh` — from being expanded against the HOOK PROCESS'S cwd before the loop
-# sees it (review-a A-7b). The sibling site at hooks/dispatch-preflight.sh does the same.
-_TARGETS=$(cmd_suite_targets "$COMMAND" "$BIONIC_ROOT")
-set -f
-# shellcheck disable=SC2086  # deliberate split of a newline-joined target list, globbing off
-for _target in $_TARGETS; do
-  if [ "$_target" = "run.sh" ]; then
-    # THE FULL TREE IS REFUSED WITHOUT A ROW THAT NAMES IT — the one place this arm fails
-    # closed. AC-21: "tests/run.sh is refused unless the row carries it."
+# THE READING IS SCOPED TO THIS REPOSITORY. `$BIONIC_ROOT` is what turns "a file named
+# x.test.sh" into "this row's suite x.test.sh" (critic K-2). The library answers one CLAIM
+# per suite-class segment: `file` with the suite basename, for the shell suites this repo
+# budgets by, or `run` with the collapsed command, for a segment that runs a suite without
+# naming one of them — `pytest`, `npm test`, `npx jest`. Both carry the run beside the
+# target, so this loop can ask each of the row's two statements its own question.
+#
+# `set -f` IS GONE WITH THE SPLIT IT PROTECTED (it guarded `for _target in $_TARGETS`
+# against a target carrying a glob metacharacter — `bash tests/*.test.sh` reads as the
+# literal `*.test.sh`, review-a A-7b). `read` neither word-splits on anything but the tab
+# nor globs, so the metacharacter arrives literal with no process state touched at all —
+# which is the better answer to T23's finding that five walls share one shell. The sibling
+# site at hooks/dispatch-preflight.sh still splits and still guards.
+_CLAIMS=$(cmd_suite_claims "$COMMAND" "$BIONIC_ROOT")
+while IFS=$'\t' read -r _kind _target _run; do
+  [ -n "$_kind" ] || continue
+
+  # ---------- THE FULL TREE, FIRST AND FAIL-CLOSED ----------
+  #
+  # AHEAD OF THE DECLARED RUNS, and that order is the whole of the one-regression rule.
+  # `tests/run.sh` is counted at dispatch by `regression_rows()`, which reads the `run.sh`
+  # token in `suites_allowed=` and nothing else — so a brief that declared the full tree
+  # under `Re-executes:` instead would be uncounted there AND admitted here, and one
+  # spelling would spend a budget the standing ruling caps at one per run. The full tree
+  # goes on a row that NAMES it, in the field the counter reads.
+  if [ "$_kind" = "file" ] && [ "$_target" = "run.sh" ]; then
+    # AC-21: "tests/run.sh is refused unless the row carries it."
     case " $SUITES_ALLOWED " in
       *" run.sh "*) continue ;;
     esac
@@ -4201,19 +4262,48 @@ On the budget: ${SUITES_ALLOWED:-(nothing — no set was recorded for this agent
 
 Run the suites your brief named instead. If the tree genuinely must be re-proved, say so
 in your report: the orchestrator records the cause on the plan and dispatches the runner."
-    # `set -f` IS PROCESS STATE NOW, not this hook's alone (T23). Five walls share one
-    # shell and the fold renders after them all, so a return that skipped the `set +f`
-    # below would leave globbing off for everything after it.
-    set +f
     return 2
   fi
+  # ---------- WHAT THE BRIEF SAID IT WOULD RUN, RUNS (REQ-1 AC-1.5) ----------
+  #
+  # `re_executes=` is a DECLARATION the dispatch wall already admitted, so a command that
+  # matches one exactly is a spend the orchestrator has already priced. It admits the runner
+  # spelling and the shell spelling alike, because `Suites:` and `Re-executes:` are two
+  # spellings of one statement (AC-1.2) and an arm honouring only one of them would refuse
+  # at run time what the dispatch wall let through. It does NOT admit the full tree: that
+  # arm ran above it, for the reason written there.
+  if _run_is_declared "$_run" "$RE_EXECUTES"; then continue; fi
+
+  # ---------- A RUNNER FORM IS HELD TO THAT DECLARATION (REQ-1 AC-1.5) ----------
+  #
+  # A suite-class command naming no file this repo budgets by used to pass in silence, on
+  # the reasoning that a repository bionic has no row about is not one this arm can speak
+  # for. The measurement says otherwise (research R1 Q2): the arm was not standing aside,
+  # it could not SEE the command — `pytest` and `npx jest` carried no target at all — so a
+  # writer in a jest repository had a budget in name only, and `Suites: none` did not mean
+  # what AC-1.7 says it means ("admitted at dispatch, every suite refused at run time").
+  # The row's declared runs are the whole set for this spelling: `suites_allowed=` holds
+  # shell-suite basenames and a run can never be on it, so there is no second set to ask.
+  #
+  # THE FAIL DIRECTION IS UNCHANGED. A row with NEITHER statement — no `suites_allowed=`
+  # key and no declared runs — is a bookkeeping failure the agent did not cause, and a
+  # named run passes in silence exactly as a named suite does.
+  if [ "$_kind" != "file" ]; then
+    [ "$BUDGET_STATED" = yes ] || [ -n "$RE_EXECUTES" ] || continue
+    # BOTH STATEMENTS ON THE WIRE, runs first: the reader ran a runner form, so the runs
+    # are the half of the budget that can answer it.
+    _shown="$RE_EXECUTES"
+    [ -z "$SUITES_ALLOWED" ] || _shown="${_shown:+$_shown }$SUITES_ALLOWED"
+    budget_refuse "$_run" "$_shown"
+    return 2
+  fi
+
   [ "$BUDGET_STATED" = yes ] || continue
   case " $SUITES_ALLOWED " in
     *" $_target "*) : ;;
-    *) budget_refuse "$_target" "$SUITES_ALLOWED"; set +f; return 2 ;;
+    *) budget_refuse "$_target" "$SUITES_ALLOWED"; return 2 ;;
   esac
-done
-set +f
+done <<< "$_CLAIMS"
 
 # ---------- ARM R (REQ-3, D4): repair a suite timeout below the harness maximum ----------
 #
