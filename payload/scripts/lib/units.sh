@@ -193,16 +193,47 @@ _units_read() {
       # THE LOOP STOPS AT 10, NOT 11: slot 11 (`worktree`) is optional, and an absent
       # optional column is not a fault to report.
       for (k = 1; k <= 10; k++) if (col[k] == 0) missing = (missing == "") ? disp[k] : missing " " disp[k]
+      # FIELD 4 NAMES WHAT THE HEADER CARRIES — every contract column present, including
+      # the optional `worktree`, which field 1 deliberately cannot report (field 1 lists
+      # what is MISSING, and an absent optional column is not missing). `units_has_column`
+      # is its one reader, and the evidence gate worktree lead-in is why it exists: an
+      # absent `worktree` column reads every row cell empty, which is indistinguishable
+      # from "no row names this tree" to `units_rows` alone (wave-16 REQ-3, AC-3.2).
+      # NO APOSTROPHE ON ANY LINE INSIDE THIS awk PROGRAM: it is single-quoted, and one
+      # would close the quote and hand the rest of the parser to bash.
+      for (k = 1; k <= 11; k++) if (col[k] > 0) present = (present == "") ? disp[k] : present " " disp[k]
       # THE CONTROL LINE IS TAB-SEPARATED: <missing columns> · <header width> · <id=width …>
-      # for every row wider than the header. `units_rows` drops this line whole, so no
-      # caller outside this file sees it; `units_validate` is the one reader of fields 2-3.
-      printf "# %s\t%d\t%s\n", missing, hdrn - 1, over
+      # · <columns present>. `units_rows` drops this line whole, so no caller outside this
+      # file sees it; `units_validate` reads fields 2-3 and `units_has_column` field 4.
+      printf "# %s\t%d\t%s\t%s\n", missing, hdrn - 1, over, present
       for (i = 1; i <= nr; i++) print row[i]
     }
   '
 }
 
 # ── THE THREE VERBS, AND THE ONE ACCESSOR ────────────────────────────────────
+
+# units_has_column <plan> <column> -> 0 when the `## Tasks` header carries that contract
+# column, 1 otherwise (and 1 when there is no table at all).
+#
+# WHY IT IS NOT `units_validate | grep missing` (wave-16 REQ-3, AC-3.2). The missing-column
+# set stops at slot 10 because `worktree` is OPTIONAL — an absent optional column is not a
+# fault to report — so the one column a caller most needs to ask about is precisely the one
+# that set can never mention. This verb reads the control line's fourth field, which names
+# what the header HAS, and answers for required and optional columns alike.
+#
+# THE COLUMN NAME IS THE CONTRACT SPELLING (`Files`, not `files`); the header cell it was
+# matched against may have been written in any case, because `_units_read` lower-cases both
+# sides before comparing and records the contract spelling. `grep -qxF` over the field's
+# words, so `status` never matches inside `worktree` and an empty needle matches nothing.
+units_has_column() {
+  local plan="${1:-}" want="${2:-}" ctl
+  [ -n "$want" ] || return 1
+  ctl="$(_units_read "$plan" 2>/dev/null | awk 'NR == 1')" || return 1
+  [ -n "$ctl" ] || return 1
+  printf '%s\n' "$ctl" | awk -F'\t' '{ print $4 }' | tr ' ' '\n' | grep -qxF -- "$want"
+}
+
 
 # units_field <record> <column> -> that column's cell of one `units_rows` line.
 #

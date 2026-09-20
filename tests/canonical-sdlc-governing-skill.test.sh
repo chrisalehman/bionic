@@ -2961,4 +2961,85 @@ expect_status "R2g the repaired table is allowed" "0" "$GS_R2_EXIT"
 expect_empty "R2h …and prints nothing" "$GS_R2_ERR"
 # [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]
 
+
+# ============================================================
+section "R3 — AC-3.1: the Write wall names every version-14 fault at once"
+# ============================================================
+#
+# ONE ROUND TRIP EARLIER THAN THE GATE (research R2 open question 4). This wall sees the
+# plan being EDITED, so it is where a bring-forward can be priced before a commit is ever
+# attempted. Under 1.8.2 it asked one question — is the `## Tasks` table valid — and the
+# other five version-14 faults waited for the evidence gate to meet them one at a time.
+#
+# THE SAME PREDICATE, THE SAME LIST. `plan_bring_forward` is one function in
+# `payload/scripts/lib/walls.sh` and both callers print what it returns, so this section
+# and the evidence-gate suite's `[REQ-3 BRING-FORWARD SECTION]` assert the same six
+# strings. A list that differed between the two would mean a writer repaired what the Write
+# wall named and then met a fault the gate had kept to itself.
+#
+# KNOB UNSET, for research R2's seam-blindness reason: the list rides `detail`, and under
+# `BIONIC_WALL_VERBOSE=1` it would ride it either way (A-T4.2).
+#
+# fails-when: the pre-14 Write prints fewer than six classes, or more than one refusal line.
+# [REQ-3 BRING-FORWARD SECTION: BEGIN]
+gs_r3_body='
+## SDLC State
+
+current: 5
+Step 1: opened 2026-09-19T22:00Z; research record/w16/r.md
+Step 5: cmd bash tests/run.sh; pass 9; total 9
+
+## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | the dispatched unit | done |
+'
+gs_r3_plan="$(build_plan step=5 goal=no)"
+gs_r3_plan="${gs_r3_plan/multi_agent: false/multi_agent: true}"
+gs_r3_project=$(make_project)
+gs_r3_path="$gs_r3_project/.bionic/docs/plans/epic-01-demo/r3.plan.md"
+r2_write_knob_unset "$gs_r3_path" "${gs_r3_plan}${gs_r3_body}"
+
+expect_status "R3a the pre-14 plan Write is refused, fail-closed" "2" "$GS_R2_EXIT"
+expect_eq "R3b …once: exactly one rendered refusal line" "1" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -c '^bionic: ')"
+expect_eq "R3c …and the verdict names the contract version, not one arm" \
+  "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3d(1) …the Tasks table's absent columns, named together on one line" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+expect_contains "R3d(2) …the wave-scale status vocabulary" \
+  "T1: status done is not one of pending active landed dropped" "$GS_R2_ERR"
+expect_contains "R3d(3) …the Step-1 requirements pointer" \
+  "## SDLC State: the Step 1 evidence names no 'requirements:' pointer" "$GS_R2_ERR"
+expect_contains "R3d(4) …the approval line" \
+  "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
+expect_contains "R3d(5) …the matrix's fails-when" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$GS_R2_ERR"
+expect_contains "R3d(6) …and the missing Goal section" \
+  "## Goal: the first section is not '## Goal'" "$GS_R2_ERR"
+
+# THE OTHER DIRECTION, and the pin that keeps the arm narrow: a plan whose table is at the
+# ten-column contract but carries ONE broken row still gets 1.8.2's own refusal, verbatim.
+# The bring-forward arm is for a body that is pre-14, not for an ordinary fault.
+gs_r3_ok_body='
+## SDLC State
+
+current: 5
+Step 1: opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w.requirements.md
+approved-by: fixture 2026-09-19T00:00Z "approved"
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | doing |
+'
+r2_write_knob_unset "$gs_r3_path" "${gs_r3_plan}${gs_r3_ok_body}"
+expect_eq "R3e a ten-column table with one broken row keeps 1.8.2's own verdict" \
+  "bionic: write refused — this plan's Tasks table is invalid (fix the row the detail names)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+# [REQ-3 BRING-FORWARD SECTION: END]
+
 finish
