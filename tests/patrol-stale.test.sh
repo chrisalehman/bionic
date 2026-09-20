@@ -53,16 +53,17 @@ sourced() {  # <fn-or-expr...> — run against a clean copy of patrol.sh's globa
   bash -c '. "$1"; shift; "$@"' _ "$PATROL_SH" "$@" 2>/dev/null
 }
 
-section "Section 1: the multiplier has no reader left in this payload"
+section "Section 1: the multiplier is gone, and the predicate that replaced it works"
 
-# THE LINE ITSELF OUTLIVES ITS LAST READER BY ONE TASK, and that is deliberate. Every reader
-# that graded a Patrol STAMP is off it (Section 3 below names them); the one line anywhere
-# that still uses the name multiplies a ROW's declared CADENCE in the poker's `adopt` window
-# — a different question — and wave-16 REQ-10 moves that onto `observe_class` and deletes the
-# export with it. Deleting the definition first would leave a head reading an unset name
-# under `set -u`, so this suite pins what is true at every head: no READER among the files
-# that grade a stamp. The tree-wide absence of the name is the wave head's own pin, in
-# tests/cross-gate-agreement.test.sh §PV, where both halves have landed.
+# THE RETIREMENT IS COMPLETE AT THIS HEAD (epic-23 wave-16, T9 commit 33d3d12, re-authored
+# here by T22). This section used to pin the opposite: the export OUTLIVED its last reader by
+# one task, deliberately, because deleting the definition before the readers moved would have
+# left a head reading an unset name under `set -u` (A-orch-6, A-orch-12). Both halves have
+# landed now — T8 moved the last stamp-grading readers onto `patrol_verdict`, T9 deleted the
+# `export` line — so the state this section must assert has INVERTED, and rows 1 and 1b say
+# so. The rows below were measured green in a tree that still carried the export (T8's 18/18,
+# per A-orch-6's own revert), which is why their staleness only surfaced at the wave head's
+# floor; the pins follow the code rather than the order the tasks were written in.
 SP="${BIONIC_HOOKS_DIR}/session-poker.sh"
 DP="${BIONIC_HOOKS_DIR}/dispatch-preflight.sh"
 SS="${BIONIC_HOOKS_DIR}/session-start.sh"
@@ -79,14 +80,30 @@ stale_lines() {  # <file> -> the number of non-comment lines naming the constant
   printf '%s' "$n"
 }
 
-# THE LIBRARY HOLDS THE DEFINITION AND NOTHING ELSE: one non-comment line, and it is the
-# export. Paired, so "no reader here" cannot pass by the name having vanished early — which
-# is the state this section must NOT assert, because the deletion belongs to the task that
-# removes the last reader.
-expect_eq "1: the library names the constant on exactly one non-comment line" "1" \
+# THE LIBRARY HOLDS NEITHER THE DEFINITION NOR A READER: the name is gone from this file
+# entirely, narration included, and the export line in particular is gone.
+expect_eq "1: the library names the constant on no non-comment line at all" "0" \
   "$(stale_lines "$PATROL_SH")"
-expect_eq "1b: …and that line is the export itself, not a reader" "1" \
+expect_eq "1b: …and the export line itself is gone, not merely unread" "0" \
   "$(grep -c '^export PATROL_STALE_MULTIPLIER=' "$PATROL_SH" || true)"
+
+# THE POSITIVE THAT KEEPS THAT ABSENCE FROM BEING VACUOUS. An absence row passes over a file
+# that was emptied, renamed or broken as readily as over one that was correctly retired, so
+# the two rows above are paired with the thing that REPLACED the constant — and paired by
+# EXERCISING it, not by grepping for its name, because a grep would pass on a definition that
+# no longer runs. `patrol_fire_window` is the arithmetic the multiplier used to carry and
+# `patrol_verdict` is the predicate that reads it; both are called here against a clean
+# sourced copy of the library under test. 1c drives the window on a real interval and checks
+# it against the formula's own terms rather than a number typed here; 1d drives the verdict
+# on a stamp path that does not exist, which is the one branch that needs no fixture, and
+# reads back the record shape every caller parses.
+PS_IV=1200
+expect_eq "1c: …because patrol_fire_window computes that window instead, and runs" \
+  "$(( PS_IV + PS_IV / 10 ))" "$(sourced patrol_fire_window "$PS_IV")"
+expect_eq "1d: …and patrol_verdict runs and answers in the record shape its callers read" \
+  "yes" \
+  "$(printf '%s' "$(sourced patrol_verdict "$TMP/no-such-stamp" "$TMP/no-such-transcript" "$PS_IV")" \
+     | grep -qE '^verdict=[a-z]+\|ref=[0-9]+\|gap=[0-9]+\|window=[0-9]+\|reason=' && echo yes || echo no)"
 
 # AND EVERY READER THAT GRADES A STAMP IS OFF IT. Four files, one row each side of the
 # blocking/reporting divide: the doctor's reading and the banner moved at wave-16, the

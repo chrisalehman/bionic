@@ -549,23 +549,42 @@ expect_eq "B10 …the call precedes the fold that reaches every wall" "yes" \
 
 section "B11 — AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 #
-# fails-when: a refusal reaches the user as more than one line, or in any shape but
-# `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. All four of this wall's refusal
+# fails-when: a refusal reaches the user as more than one VERDICT line, or in any shape
+# but `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. All four of this wall's refusal
 # sites are tripped for real and asserted against the criterion's own regex and then
 # against the exact wording the ruled table gives them (s12-refusal-wording-draft.md §1
-# rows 11 through 14). The detail every arm above reads lives behind the knob, and B11e
-# is the pair that proves the split rather than assuming it.
+# rows 11 through 14). B11e is the pair that proves the split rather than assuming it.
+#
+# AC-E1.3 IS ABOUT THE VERDICT, AND ADR-030 MADE THAT DISTINCTION VISIBLE (epic-23
+# wave-16 T4/T19/T22). `exit2`'s field 9 (`detail_to_user`) is `yes` now, so the detail
+# every arm above reads rides the same wire as the verdict, bounded at twelve lines, with
+# no knob needed. Until that flip, "the user stream is one line" and "the verdict is one
+# line" were the same measurement on `exit2`, and these pins took the cheaper one. What
+# AC-E1.3 actually asks for — a sentence the reader is interrupted by, never wrapped — is
+# the VERDICT, so that is what is counted and compared below; the detail is asserted
+# present as well, with a POSITIVE beside each narrowed count, so a wall that went silent
+# still fails a check that used to catch it (A-T4.9, A-T22.1).
 
 B11_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 b11_line() {  # <label> <expected line>   (reads $ERR from the last `guarded`)
-  local _n
-  _n="$(printf '%s\n' "$ERR" | wc -l | tr -d ' ')"
-  if [ "$_n" = "1" ]; then ok "$1: exactly one line on the user stream"
-  else no "$1: exactly one line on the user stream" "got $_n lines: [$ERR]"; fi
-  if printf '%s' "$ERR" | /usr/bin/grep -qE "$B11_RE"; then ok "$1: in AC-E1.3's shape"
-  else no "$1: in AC-E1.3's shape" "line=[$ERR]"; fi
-  if [ "$ERR" = "$2" ]; then ok "$1: and it is the table's own wording"
-  else no "$1: and it is the table's own wording" "want [$2] got [$ERR]"; fi
+  local _n _line _rest
+  _n="$(printf '%s\n' "$ERR" | /usr/bin/grep -c '^bionic: ' | tr -d ' ')"
+  _line="$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+  # WHAT FOLLOWS THE VERDICT, if anything: the stream minus its rendered line(s). Read
+  # here rather than asserted per caller, because every one of this wall's four sites
+  # carries a `detail` and a site that stopped carrying one is the regression worth
+  # seeing — narrowing the count without this would quietly weaken the section.
+  _rest="$(printf '%s\n' "$ERR" | /usr/bin/grep -v '^bionic: ' | /usr/bin/grep -c . | tr -d ' ')"
+  if [ "$_n" = "1" ]; then ok "$1: exactly one VERDICT line on the user stream"
+  else no "$1: exactly one VERDICT line on the user stream" "got $_n lines: [$ERR]"; fi
+  if printf '%s' "$_line" | /usr/bin/grep -qE "$B11_RE"; then ok "$1: in AC-E1.3's shape"
+  else no "$1: in AC-E1.3's shape" "line=[$_line]"; fi
+  if [ "$_line" = "$2" ]; then ok "$1: and it is the table's own wording"
+  else no "$1: and it is the table's own wording" "want [$2] got [$_line]"; fi
+  # THE POSITIVE THAT KEEPS THE COUNT HONEST (ADR-030, A-T4.9): the verdict is one line
+  # BECAUSE the detail is a separate thing beneath it, not because the wall went quiet.
+  if [ "$_rest" -ge 1 ]; then ok "$1: with its detail beneath it, no knob set"
+  else no "$1: with its detail beneath it, no knob set" "nothing after the verdict"; fi
 }
 
 guarded "$R1" 'bash tests/alpha.test.sh' "$ACTOR" true
@@ -592,15 +611,30 @@ guarded "$R1" 'bash tests/run.sh'
 b11_line "B11d row 14 (the full tree)" \
   "bionic: suite-run refused — full tree refused; allowed: alpha.test.sh (run your brief's suites)"
 
-# AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 → T18 fcd5a16 → T25). What the knob
-# gates has moved: the compact fact line now carries the allowed set on the DEFAULT stream
-# too (AC-5.2's own fix), so the split this pair still proves is the explanatory PROSE
-# ("On the budget:"/"You asked for:") — present in the verbose detail only, never on the
-# one-line default. The label on the default line is now "allowed:", not "off budget:".
+# AC-E1.5, the pair — RE-SPELLED (wave-14 T8 c088189 → T18 fcd5a16 → T25), then
+# RE-AUTHORED BY ADR-030 (T22, the A-T4.10 precedent). What the knob gates has moved
+# twice. First the compact fact line took the allowed set onto the DEFAULT stream
+# (AC-5.2's own fix), leaving the explanatory PROSE ("On the budget:"/"You asked for:")
+# as the thing behind the knob. Then field 9 flipped and the prose came onto the default
+# stream too, beneath the verdict. So what this pair holds now is the SPLIT rather than
+# the absence: the verdict line is the ruled sentence and carries none of the prose, and
+# the prose is on the stream beneath it with no knob set. Asserted on the line and on the
+# stream separately, so neither half can pass over an empty capture.
 guarded "$R1" 'bash tests/gamma.test.sh'
 expect_contains "B11e even without the knob the allowed set now reaches the DEFAULT stream" \
   "alpha.test.sh beta.test.sh" "$ERR"
-expect_absent "B11e …but the explanatory PROSE does not" "On the budget:" "$ERR"
+expect_absent "B11e …but the explanatory PROSE is NOT on the verdict line" "On the budget:" \
+  "$(printf '%s\n' "$ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "B11e …it is beneath it, with no knob set at all" \
+  "On the budget: alpha.test.sh beta.test.sh" "$ERR"
+# BIONIC_WALL_VERBOSE=1 ADDS NOTHING THIS SUITE CAN TELL APART (A-T22.1, the A-T19.1
+# precedent): field 9 already puts the bounded detail on the wire, and the longest detail
+# this wall composes is twelve lines, so the knob's "whole detail" and the channel's
+# "bounded detail" are byte-identical here — measured, `$ERR` and `$VERR` do not differ
+# for any of this section's four sites. The row stays and stays true, but it no longer
+# discriminates the knob from the default for THIS wall's messages; only a >12-line
+# detail would, and this wall has none. Kept for parity with the fleet's shape rather
+# than deleted, and flagged here rather than left to look like it proves knob-gating.
 expect_contains "B11e …and with BIONIC_WALL_VERBOSE=1 the prose is there too" \
   "On the budget: alpha.test.sh beta.test.sh" "$VERR"
 expect_eq "B11e …with the one line still first" \

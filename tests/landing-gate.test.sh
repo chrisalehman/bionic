@@ -1671,9 +1671,20 @@ expect_contains "17d …and the builder is a real function" "function" "$SM_OUT3
 
 section "AC-E1.3/E1.5: the refusal is one line, in the criterion's shape"
 
-# fails-when: a refusal reaches the user as more than one line, or in any shape but
-# `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. Both of this gate's refusal kinds
-# are tripped on their own fixture with the knob OFF, which is what a live session sees.
+# fails-when: a refusal reaches the user as more than one VERDICT line, or in any shape
+# but `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. Both of this gate's refusal
+# kinds are tripped on their own fixture with the knob OFF, which is what a live session
+# sees.
+#
+# AC-E1.3 IS ABOUT THE VERDICT, AND ADR-030 MADE THAT DISTINCTION VISIBLE (epic-23
+# wave-16 T4/T19/T22). `exit2`'s field 9 (`detail_to_user`) is `yes` now, so this gate's
+# per-row paragraph follows the verdict on the same wire, bounded at twelve lines, with
+# no knob set. Until that flip, "the stream is one line" and "the verdict is one line"
+# were the same measurement on `exit2` and this section took the cheaper one. What the
+# criterion asks for — a refusal the reader takes in as one sentence, never wrapped — is
+# the VERDICT, so that is what is counted and compared below, with the paragraph asserted
+# present beneath it so narrowing the count cannot pass over a gate that went silent
+# (A-T4.9, A-T22.2).
 
 LG_E1_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 GATE_VERBOSE=0
@@ -1684,26 +1695,45 @@ add_row "$RE1" name=we1-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/nev
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$RE1" "$SID" false)"
 expect_status "E1.3 an unmet contract still refuses" 2 "$RC"
-expect_eq "E1.3 …in exactly one line" "1" "$(printf '%s\n' "$OUT_STDERR" | wc -l | tr -d ' ')"
-if printf '%s' "$OUT_STDERR" | /usr/bin/grep -qE "$LG_E1_RE"; then
+LG_E1_LINE="$(printf '%s\n' "$OUT_STDERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_eq "E1.3 …in exactly one VERDICT line" "1" \
+  "$(printf '%s\n' "$OUT_STDERR" | /usr/bin/grep -c '^bionic: ' | tr -d ' ')"
+if printf '%s' "$LG_E1_LINE" | /usr/bin/grep -qE "$LG_E1_RE"; then
   ok "E1.3 …in AC-E1.3's shape"
 else
-  no "E1.3 …in AC-E1.3's shape" "line=[$OUT_STDERR]"
+  no "E1.3 …in AC-E1.3's shape" "line=[$LG_E1_LINE]"
 fi
 expect_eq "E1.3 …and it is the table's own wording (row 108)" \
   "bionic: stop refused — a dispatched agent's contract is unmet (write the named artifacts)" \
-  "$OUT_STDERR"
-expect_absent "E1.5 the per-row paragraph is NOT on the user stream" \
-  "LANDING CONTRACT UNMET" "$OUT_STDERR"
+  "$LG_E1_LINE"
+# THE SPLIT, not the absence (ADR-030, the A-T4.10 precedent). The per-row paragraph is
+# the value the one line had no room for. It used to live behind the knob and nowhere
+# else; the gate carries it to the reader now, so the pair below holds that the VERDICT
+# LINE is still the ruled sentence and carries none of it, and that the paragraph is on
+# the stream beneath it with no knob set. The positive is what keeps the narrowed
+# absence honest: a gate that stopped composing a paragraph at all would fail it.
+expect_absent "E1.5 the per-row paragraph is NOT on the verdict line" \
+  "LANDING CONTRACT UNMET" "$LG_E1_LINE"
+expect_contains "E1.5 …it is beneath it, with no knob set at all" \
+  "LANDING CONTRACT UNMET — we1-s5: missing=.bionic/docs/record/never.md" "$OUT_STDERR"
 
-# (b) the same fixture with the knob ON: the paragraph is back, the line still first.
+# (b) the same fixture with the knob ON: the paragraph is there, the line still first.
+# BIONIC_WALL_VERBOSE=1 ADDS NOTHING THIS SUITE CAN TELL APART (A-T22.2, the A-T19.1
+# precedent): field 9 already puts the bounded detail on the wire, and this gate composes
+# ONE paragraph per unmet row, well under `_refuse_fold_detail`'s twelve-line bound, so
+# the knob's "whole detail" and the channel's "bounded detail" are byte-identical here —
+# measured, the (a) and (b) streams differ only in the fixture's own row name. These rows
+# stay and stay true, and a gate that dropped the knob-set path entirely would still fail
+# them, but they no longer discriminate the knob from the default for THIS gate; only a
+# >12-line detail would, and this gate has none. Flagged rather than left to look like
+# they prove a knob-gating they no longer can.
 GATE_VERBOSE=1
 RE2="$(make_wave_repo re2)"
 add_row "$RE2" name=we2-s5 agent_id="$AID_A" deliverable=.bionic/docs/record/never.md \
   launched_at="$(iso_ago 600)"
 run_gate "$GATE" "$(stop_payload "$RE2" "$SID" false)"
 expect_status "E1.5 the same refusal with the knob" 2 "$RC"
-expect_contains "E1.5 …carries the per-row paragraph" "LANDING CONTRACT UNMET" "$OUT_STDERR"
+expect_contains "E1.5 …carries the per-row paragraph too" "LANDING CONTRACT UNMET" "$OUT_STDERR"
 expect_eq "E1.5 …with the one line still first" \
   "bionic: stop refused — a dispatched agent's contract is unmet (write the named artifacts)" \
   "$(printf '%s\n' "$OUT_STDERR" | head -1)"
