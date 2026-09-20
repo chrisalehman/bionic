@@ -7332,6 +7332,60 @@ expect_absent "R3s4(1) …the requirements pointer this body carries is not name
   "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
 expect_absent "R3s4(2) …nor the '## Goal' section this body carries" \
   "## Goal:" "$R3_ERR"
+
+# THE CRLF TWIN (wave-16 T27, critic C7). Byte-for-byte the R3s fixture above — same
+# frontmatter-stamp/body disagreement, same pre-14 table — translated to CRLF line endings
+# with `perl -pe 's/\n/\r\n/'`, the critic's own repro technique. Before the fix,
+# `_bf_section` and the `first_heading` awk inside `plan_bring_forward` read the plan RAW:
+# a CRLF `## SDLC State` heading matched nothing, the derived step fell through to 0, and
+# the predicate returned silently — the gate ADMITTED a pre-14 CRLF plan the SAME body's LF
+# twin refuses six lines for (this is the RED; see T27-crlf-one-source.md). This is the
+# governing-skill suite's R3t twin, driving the OTHER caller over the same body.
+#
+# fails-when: the CRLF commit is admitted, or its refusal names a different list than the
+# LF twin's (R3s3(1)-(5) above).
+r3t_lf="$(r3s_plan)"
+r3t_crlf="$(printf '%s' "$r3t_lf" | perl -pe 's/\n/\r\n/')"
+
+r3t_main="$r3_tmp/main-t27"
+mkdir -p "$r3t_main/.bionic/docs/plans" "$r3t_main/.bionic/docs/record/w16" \
+  "$r3t_main/.bionic/docs/specs/epic-01-demo"
+printf 'evidence\n' > "$r3t_main/.bionic/docs/record/w16/r.md"
+# `r3s_plan`'s Step 1 line names this file but never creates it (true of R3s above too) —
+# harmless there because the bring-forward arm refuses first on the LF twin, but on the
+# UNFIXED CRLF path bring-forward fails open and this arm is next, which would refuse for
+# an unrelated reason and mask the defect this row exists to show. Created here so R3t
+# isolates the one thing under test.
+printf 'requirements\n' > "$r3t_main/.bionic/docs/specs/epic-01-demo/w.requirements.md"
+git -C "$r3t_main" init -q .
+git -C "$r3t_main" commit -q --allow-empty -m init
+engage "$r3t_main"
+printf '%s' "$r3t_crlf" > "$r3t_main/.bionic/docs/plans/wave-16-t27-crlf.plan.md"
+
+# META FIRST, so no row below can pass over a fixture that lost its own CRLF-ness.
+expect_contains "R3t0 meta: the twin fixture really is CRLF-terminated" \
+  "CRLF" "$(file "$r3t_main/.bionic/docs/plans/wave-16-t27-crlf.plan.md")"
+
+r3_commit_knob_unset "$(make_home)" "$r3t_main" "$r3t_main" 'git commit -m "x"'
+
+expect_status "R3t1 the CRLF pre-14 plan is refused at commit, fail-closed — same as its LF twin" "2" "$R3_EXIT"
+expect_eq "R3t2 …with the contract-version verdict, not admitted silently" \
+  "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3t3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+expect_contains "R3t3(2) …the first row fault a five-column header forces" \
+  "T1: step (empty) is outside 3-9" "$R3_ERR"
+expect_contains "R3t3(3) …the second" \
+  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+expect_contains "R3t3(4) …the approval line, owed from current 4 and answered for current 5" \
+  "## SDLC State: no 'approved-by:' line" "$R3_ERR"
+expect_contains "R3t3(5) …and the matrix's fails-when, owed from the same step" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$R3_ERR"
+expect_absent "R3t4(1) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
+expect_absent "R3t4(2) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$R3_ERR"
 # [REQ-3 BRING-FORWARD SECTION: END]
 
 # ============================================================
