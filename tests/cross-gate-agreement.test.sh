@@ -10604,7 +10604,7 @@ expect_eq "BR …while the OTHER primitive in the doctored copy still agrees (on
   "$(fn_code "$BR_MUT" _detect_bound_kill)" "$(br_code "$SSTART" ss_bound_kill)"
 
 # ============================================================
-section "PV — the Patrol verdict: ONE predicate, two blocking readers (epic-23 wave-15 REQ-1, AC-1.4)"
+section "PV — the Patrol verdict: ONE predicate, every reader (epic-23 wave-15 REQ-1 AC-1.4; wave-16 REQ-11 AC-11.2)"
 # ============================================================
 #
 # THE DEFECT THIS SECTION EXISTS FOR. "How stale is stale" was a judgment call typed out at
@@ -10646,14 +10646,53 @@ else
   no "PV …and so does the dispatch wall's staleness half" "no call in $PV_DP"
 fi
 
-# AND NEITHER TYPES A MULTIPLIER. The literal the stop library carried, and the exported
+# AND THE TWO REPORTING READERS CALL IT TOO (wave-16 REQ-11, AC-11.2). Wave-15 moved the
+# readers that can REFUSE; doctor's own reading — `patrol_stamp_state`, in this same library
+# — and the session-start banner went on multiplying the interval by two, so the page a
+# person reads and the wall that lets them work answered one question two ways, 1080s apart
+# at a 1200s interval. Both are on the predicate now, and the multiplier they shared is
+# deleted.
+PV_SSTART="$BIONIC_HOOKS_DIR/session-start.sh"
+# COUNTED AS A CALL, NOT A MENTION: the predicate is DEFINED in this file, so containment
+# alone would pass on the definition.
+expect_eq "PV the doctor's own reading of the stamp asks the predicate" "1" \
+  "$(grep -c '\$(patrol_verdict ' "$PV_PATROL" || true)"
+if grep -q 'patrol_verdict' "$PV_SSTART"; then
+  ok "PV …and so does the session-start banner"
+else
+  no "PV …and so does the session-start banner" "no call in $PV_SSTART"
+fi
+
+# AND NOBODY TYPES A MULTIPLIER. The literal the stop library carried, and the exported
 # constant the dispatch wall read: the arithmetic is inside the predicate now, so both are
-# absent from both readers. PATROL_STALE_MULTIPLIER itself stays exported for the poker's
-# `adopt` liveness window, which is a different question with a different answer.
+# absent from every reader — and the constant itself has no definition left to read
+# (tests/patrol-stale.test.sh §1 owns its retirement; the poker's `adopt` window, which
+# multiplied a CADENCE rather than the interval, moves to `observe_class` under REQ-10).
 expect_eq "PV the literal 2x multiplier is gone from the stop library" "0" \
   "$(grep -c 'INTERVAL \* 2' "$PV_STOP" || true)"
 expect_eq "PV …and the dispatch wall no longer reads PATROL_STALE_MULTIPLIER either" "0" \
   "$(grep -c 'PATROL_STALE_MULTIPLIER' "$PV_DP" || true)"
+expect_eq "PV …nor the banner that read it" "0" \
+  "$(grep -c 'PATROL_STALE_MULTIPLIER' "$PV_SSTART" || true)"
+
+# THE WAVE HEAD'S OWN ROW, and the only place the tree-wide absence is asserted (REQ-11
+# AC-11.2). It takes TWO landings to go green and each is a different task's: the readers
+# that graded a Patrol stamp had to move off the constant before the constant could be
+# deleted, or a head in between would read an unset name under `set -u`, and the last
+# reader of all was the poker's `adopt` window — which multiplies a ROW's cadence, a
+# different question, and moves to `observe_class` with REQ-10. Counted over the shipped
+# shell files by NAME rather than by `grep -r payload/`, where `hooks/` is a symlink a
+# recursive grep never follows. CODE LINES, NOT PROSE: two files narrate the retirement in
+# a comment — this library's own paragraph and the stop library's account of the three
+# sites — and a row that counted narration would be a row against the history.
+PV_NAMED=0
+for _pv_f in "$PV_LIB"/*.sh "$BIONIC_HOOKS_DIR"/*.sh "${BIONIC_SCRIPTS_DIR}/payload/scripts"/*.sh; do
+  [ -f "$_pv_f" ] || continue
+  PV_NAMED=$(( PV_NAMED + $(grep -cE '^[[:space:]]*[^#[:space:]].*PATROL_STALE_MULTIPLIER' \
+                            "$_pv_f" 2>/dev/null || true) ))
+done
+expect_eq "PV no shell file the payload ships defines or reads the retired multiplier" \
+  "0" "$PV_NAMED"
 
 # THE FIRE WINDOW IS THE LIBRARY'S ARITHMETIC, spelled once. A reader that recomputed it
 # would be the literal back under another name.
