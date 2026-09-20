@@ -7029,11 +7029,99 @@ expect_eq "E1.3 …with the parametric table's line for :1798" \
   "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
 expect_eq "E1.3 …inside the 100-column budget" "yes" \
   "$([ "$(bionic_cols "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')")" -le 100 ] && echo yes || echo no)"
-expect_absent "E1.5 the section name the old headline carried is NOT on the user line" \
+# THE HEADLINE IS WHAT THIS ARM IS ABOUT, AND ADR-030 MOVED THE STREAM UNDER IT. The old
+# headline named the section; the migration put that name in `detail`, and under ruling D-1
+# `detail` was on no stream a reader saw, so "not on the user stream" and "not on the
+# verdict line" were the same assertion. They are not the same any more: the detail now
+# rides the same wire (refuse.sh field 9, ADR-030). So the row reads the VERDICT LINE,
+# which is the sentence it was always about, and its twin asserts the name is still
+# somewhere a reader can reach.
+expect_absent "E1.5 the section name the old headline carried is NOT on the verdict line" \
+  "## Verification Matrix" "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "E1.5 …and it rides the detail beneath it, with no knob set at all" \
   "## Verification Matrix" "$HOOK_STDERR"
 expect_contains "E1.5 …and BIONIC_WALL_VERBOSE=1 carries it, with the step number" \
   "canonical-sdlc step" "$HOOK_VSTDERR"
 expect_contains "E1.5 …and the caller's repair prose" \
   "Verification Matrix" "$HOOK_VSTDERR"
+
+# ============================================================
+section "R2 — AC-2.1: the invalid-row refusal carries its violation list, knob UNSET (ADR-030)"
+# ============================================================
+#
+# WHAT THIS SECTION EXISTS FOR (seed A §8a, carry-over 8, research R2 row 15). Section 22e2
+# above already drives this exact fixture and reads `T99` — out of `$HOOK_VSTDERR`, the
+# SECOND drive, taken with `BIONIC_WALL_VERBOSE=1`. Under ruling D-1 the first drive printed
+# one sentence and the violation list reached no reader at all, and because every detail
+# assertion in this suite reads the verbose stream, the suite was green for three releases
+# while a consumer's orchestrator sourced `units_validate` by hand to learn which row was
+# broken. ADR-030 flips the `exit2` channel's field 9; this section reads the stream a real
+# commit actually gets.
+#
+# ITS OWN RUNNER, ON PURPOSE. `expect_block` calls `eg_e1_check` and then greps
+# `$HOOK_VSTDERR`; using it here would re-introduce the very seam the section is about. The
+# runner below drives the hook ONCE, with the knob explicitly removed from the environment
+# rather than merely unset in it, and keeps the whole stream minus the run-resolution
+# announcements (`split_stderr`'s rule, spelled once more so the assertions below are about
+# the refusal and not about a diagnostic).
+#
+# fails-when: the refusal prints one line with the knob unset; or the violation list names
+# no row; or the verdict is no longer the first line.
+# [REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]
+EG_R2_EXIT=0; EG_R2_ERR=""
+r2_commit_knob_unset() {  # <home> <command> -> EG_R2_EXIT + EG_R2_ERR (announcements split off)
+  local home_dir="$1" command="$2" input tmp_err
+  input=$(jq -n --arg c "$command" --arg cwd "$home_dir" --arg s "$EG_SID" \
+            '{session_id: $s, tool_input: {command: $c}, cwd: $cwd}')
+  tmp_err=$(mktemp)
+  if env -u BIONIC_WALL_VERBOSE HOME="$home_dir" CLAUDE_PROJECT_DIR="" \
+       CLAUDE_CODE_SESSION_ID="$EG_SID" bash "$HOOK" <<< "$input" >/dev/null 2>"$tmp_err"; then
+    EG_R2_EXIT=0
+  else
+    EG_R2_EXIT=$?
+  fi
+  EG_R2_ERR=$(grep -v -E "$EG_RESOLUTION_RE" "$tmp_err" || true)
+  rm -f "$tmp_err"
+}
+require_helpers r2_commit_knob_unset
+
+# THE FIXTURE IS ITS OWN, not 22e2's variable reached across three thousand lines: a dep
+# naming no row is the violation `units_validate` alone knows about, and two rows make the
+# list name WHICH row rather than being the only row there is.
+r2_tasks_bad="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the dispatched unit | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 5 | verify | the other unit | auditor | T99 | 30m | REQ-x | b.sh | pending |"
+h_r2=$(make_home)
+write_plan "$h_r2" "$(d7_wave_plan "$r2_tasks_bad" "- T1: bash suite 9/9 green
+- T2: bash suite 9/9 green")" > /dev/null
+r2_commit_knob_unset "$h_r2" 'git commit -m "x"'
+
+expect_status "R2a an invalid-row commit is still refused, fail-closed" "2" "$EG_R2_EXIT"
+expect_eq "R2b …and the verdict is the first line, unchanged" \
+  "bionic: commit refused — that dispatched task's row is invalid (fix the row the detail names)" \
+  "$(printf '%s\n' "$EG_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R2c …with units_validate's violation line behind it (AC-2.1)" \
+  "T2: dep T99 names no row in the table" "$EG_R2_ERR"
+expect_contains "R2d …and the Fix prose that names the ten columns" \
+  "the columns are id | step | kind | task | agent | deps | size | serves | Files | status" \
+  "$EG_R2_ERR"
+expect_eq "R2e …so the stream is no longer the one line the defect shipped" "no" \
+  "$([ "$(printf '%s\n' "$EG_R2_ERR" | /usr/bin/grep -c .)" = "1" ] && echo yes || echo no)"
+expect_eq "R2f …and still exactly one rendered refusal line, not two" "1" \
+  "$(printf '%s\n' "$EG_R2_ERR" | /usr/bin/grep -c '^bionic: ')"
+
+# THE OTHER DIRECTION, so R2c is not passing on a stream that carries everything: an
+# ALLOWED commit on the repaired table says nothing at all, knob unset or not.
+r2_tasks_good="${r2_tasks_bad/| auditor | T99 |/| auditor | T1 |}"
+h_r2b=$(make_home)
+write_plan "$h_r2b" "$(d7_wave_plan "$r2_tasks_good" "- T1: bash suite 9/9 green
+- T2: bash suite 9/9 green")" > /dev/null
+r2_commit_knob_unset "$h_r2b" 'git commit -m "x"'
+expect_status "R2g the repaired table commits" "0" "$EG_R2_EXIT"
+expect_empty "R2h …and prints nothing, so R2c read a refusal and not a chatty hook" "$EG_R2_ERR"
+# [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]
 
 finish
