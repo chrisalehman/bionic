@@ -1513,9 +1513,10 @@ expect_eq "…and --report-only is not a flag the tick takes" "2" "$RC"
 # the two mtimes, and SILENT means both of them are stale — an agent that has neither
 # written a line nor taken a turn inside the window its own row declared.
 #
-# THE WINDOW is `PATROL_STALE_MULTIPLIER × cadence`, read from payload/scripts/lib/patrol.sh
-# rather than from an inline `* 2` (spec AC-22: one constant, three readers). The mutation
-# at the end of this block is what proves the reader is the constant.
+# THE WINDOW is ONE declared cadence, and the classification is `observe_class`'s
+# (payload/scripts/lib/observe.sh; REQ-10 D9, which retired this verb's own doubled window —
+# the fleet had two answers to one question). The mutation at the end of this block is what
+# proves the verdict comes from that function rather than from arithmetic here.
 R8L="$(make_repo s8-liveness)"; new_roster "$R8L"
 mkdir -p "$R8L/.bionic/docs/record"
 ID_TXFRESH="atxfresh-one-9999999999999999"
@@ -1545,25 +1546,15 @@ expect_contains "…and both mtimes stale reads SILENT" \
 expect_contains "…the transcript's age is printed, so the verdict can be checked" \
   "transcript_age=" "$OUT"
 
-# THE THRESHOLD IS THE LIBRARY'S CONSTANT, NOT A LITERAL 2 — proven by mutation, the same
-# way §2 proves the interval default is read from POKER_INTERVAL_DEFAULT. A row whose only
-# fresh-ish input sits BETWEEN one cadence and two is RUNNING while the multiplier is 2 and
-# SILENT the moment it is 1, so a poker carrying its own `* 2` answers RUNNING on both runs.
-# The doctored tree is the shape the plugin ships (hooks/ beside scripts/lib) and its library
-# is a COPY, because this is the one fixture that must not read the shipped constant.
-MULT_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-mult-mut.XXXXXX")"
-mkdir -p "$MULT_MUT_ROOT/hooks" "$MULT_MUT_ROOT/scripts"
-cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$MULT_MUT_ROOT/scripts/lib"
-sed -i.bak 's/^export PATROL_STALE_MULTIPLIER=2$/export PATROL_STALE_MULTIPLIER=1/' \
-  "$MULT_MUT_ROOT/scripts/lib/patrol.sh"
-cp "$POKER" "$MULT_MUT_ROOT/hooks/session-poker.sh"
-if grep -qF 'export PATROL_STALE_MULTIPLIER=1' "$MULT_MUT_ROOT/scripts/lib/patrol.sh"; then
-  ok "8j meta: the doctored multiplier landed (the sed anchor still matches)"
-else
-  no "8j meta: the doctored multiplier did NOT land — the pair below proves nothing"
-fi
-
-R8M="$(make_repo s8-multiplier)"; new_roster "$R8M"
+# THE WINDOW IS ONE CADENCE, AND THE PREDICATE IS THE LIBRARY'S (re-authored at REQ-10 D9).
+# This block used to prove the window was `PATROL_STALE_MULTIPLIER x cadence` by mutating the
+# constant. The fleet carried four staleness arithmetics for three questions, two of them
+# over a row and a cadence — `observe_class` at one cadence (payload/scripts/lib/observe.sh)
+# and this verb at two — so a row read alive to one reader and silent to the other. D9 keeps
+# the library's: one cadence, both readers, and the tick's own row loop asks the same
+# function. A row 1.5 cadences quiet is SILENT now, where the doubled window called it
+# RUNNING.
+R8M="$(make_repo s8-window)"; new_roster "$R8M"
 mkdir -p "$R8M/.bionic/docs/record"
 add_row_to "$R8M" "$ADOPT_A" name=between status=identified \
   agent_id=abetween-one-bbbbbbbbbbbbbbbb subagent_type=bionic:implementor \
@@ -1571,15 +1562,50 @@ add_row_to "$R8M" "$ADOPT_A" name=between status=identified \
   deliverable="$R8M/.bionic/docs/record/between.md" \
   progress="$R8M/.bionic/tmp/progress-between.md"
 printf 'progress\n' > "$R8M/.bionic/tmp/progress-between.md"
-backdate "$R8M/.bionic/tmp/progress-between.md" 900   # > one cadence, < two
+backdate "$R8M/.bionic/tmp/progress-between.md" 900   # 1.5x a 10-minute cadence
 
 poke "$R8M" adopt --report-only
-expect_contains "at 1.5x the cadence the shipped multiplier (2) still reads RUNNING" \
-  "name=between|verdict=RUNNING" "$OUT"
-OUT="$( cd "$R8M" && env CLAUDE_CODE_SESSION_ID="$SID" \
-        bash "$MULT_MUT_ROOT/hooks/session-poker.sh" adopt --report-only 2>&1 )"
-expect_contains "…and the SAME row reads SILENT against a library whose multiplier is 1" \
+expect_contains "at 1.5x the declared cadence the row is SILENT — one cadence, not two" \
   "name=between|verdict=SILENT" "$OUT"
+
+# THE BOUNDARY, FROM THE OTHER SIDE. Half a cadence is RUNNING, so the row above is not
+# SILENT because this verb stopped reading mtimes.
+R8N="$(make_repo s8-window-inside)"; new_roster "$R8N"
+mkdir -p "$R8N/.bionic/docs/record"
+add_row_to "$R8N" "$ADOPT_A" name=inside status=identified \
+  agent_id=ainside-one-bbbbbbbbbbbbbbbc subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R8N/.bionic/docs/record/inside.md" \
+  progress="$R8N/.bionic/tmp/progress-inside.md"
+printf 'progress\n' > "$R8N/.bionic/tmp/progress-inside.md"
+backdate "$R8N/.bionic/tmp/progress-inside.md" 300    # half a cadence
+poke "$R8N" adopt --report-only
+expect_contains "…and half a cadence still reads RUNNING" \
+  "name=inside|verdict=RUNNING" "$OUT"
+
+# THE VERDICT IS THE LIBRARY'S ANSWER, proven by mutation — the same shape the multiplier
+# proof used, aimed at the function that owns the question now. A copy of the library whose
+# `observe_class` always answers `alive` must turn the SILENT row above into a RUNNING one; a
+# verb carrying its own arithmetic would answer SILENT against both trees. The doctored tree
+# is the shape the plugin ships (hooks/ beside scripts/lib) and its library is a COPY,
+# because this is the one fixture that must not read the shipped predicate.
+OBS_MUT_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/poker-obs-mut.XXXXXX")"
+mkdir -p "$OBS_MUT_ROOT/hooks" "$OBS_MUT_ROOT/scripts"
+cp -R "$(cd "$(dirname "$POKER")/../payload/scripts/lib" && pwd -P)" "$OBS_MUT_ROOT/scripts/lib"
+cat >> "$OBS_MUT_ROOT/scripts/lib/observe.sh" <<'OBS_MUT'
+
+observe_class() { OBS_CLASS=alive; echo alive; return 0; }
+OBS_MUT
+cp "$POKER" "$OBS_MUT_ROOT/hooks/session-poker.sh"
+if grep -qF 'OBS_CLASS=alive; echo alive' "$OBS_MUT_ROOT/scripts/lib/observe.sh"; then
+  ok "8j meta: the doctored predicate landed (the pair below proves something)"
+else
+  no "8j meta: the doctored predicate did NOT land — the pair below proves nothing"
+fi
+OUT="$( cd "$R8M" && env CLAUDE_CODE_SESSION_ID="$SID" \
+        bash "$OBS_MUT_ROOT/hooks/session-poker.sh" adopt --report-only 2>&1 )"
+expect_contains "…and the SAME row reads RUNNING against a library whose predicate says alive" \
+  "name=between|verdict=RUNNING" "$OUT"
 
 unset CLAUDE_CONFIG_DIR
 
@@ -2577,8 +2603,11 @@ expect_eq "12a-T22-i2 …and no order is written for it" "no" \
   "$([ -f "$R12ST/.bionic/tmp/stop-orders-$SID.state" ] && echo yes || echo no)"
 expect_eq "12a-T22-i3 …and it is not acked either — a stale reading is not evidence it is gone" "no" \
   "$([ -f "$R12ST/.bionic/tmp/sweeper-$SID.state" ] && echo yes || echo no)"
-expect_contains "12a-T22-i4 …and the tick says exactly why, once" \
-  "poker: stand-down deferred — the panel reading is stale; ListAgents and the next tick decides" \
+# RE-AUTHORED AT REQ-10 AC-10.4 (D5): the deferral is a FACT the reader cannot act on
+# differently for knowing it, so it prints as `poker: note:` above the decision line. The
+# sentence is unchanged; the channel marker in front of it is new.
+expect_contains "12a-T22-i4 …and the tick says exactly why, once, as a note" \
+  "poker: note: stand-down deferred — the panel reading is stale; ListAgents and the next tick decides" \
   "$OUT"
 expect_eq "12a-T22-i5 …and only once" "1" \
   "$(printf '%s\n' "$OUT" | grep -c 'stand-down deferred' | tr -d ' ')"
@@ -2906,7 +2935,14 @@ section "Section 14: the LEASE OVERRUN — a worktree outliving its row (AC-28)"
 # THE TICK REMOVES NOTHING. It says the tree is standing; landing it is
 # `spawn-worktree.sh land`, which the orchestrator runs.
 
-# --- a discharged row whose tree still stands -> one NOTIFY line naming both ---
+# --- a discharged row whose tree still stands -> a NOTE and a field, never an alarm ---
+#
+# RE-AUTHORED AT REQ-10 AC-10.3 (D5). This case pinned `decision=NOTIFY` and the absence of
+# `decision=QUIET`, which is the defect B4 reported: a standing tree is a FACT about disk,
+# discovered fresh on every tick for the life of the tree, and it took the band the Patrol's
+# prompt reads for something needing attention. It is a `poker: note:` line and a `trees=`
+# field now, and the decision line says what the roster says.
+#
 # No delivered plan, so DISARM cannot fire and the tick reaches its decision the long way.
 R14="$(make_repo s14-overrun)"; new_roster "$R14"
 mkdir -p "$R14/.worktrees/foo" "$R14/.bionic/docs/record"
@@ -2916,12 +2952,15 @@ poke "$R14" tick
 # The PHYSICAL path, because the tick resolves its root with `pwd -P` and the temporary
 # directory this suite builds in is reached through a symlink on macOS.
 R14P="$(cd "$R14" && pwd -P)"
-expect_contains "a discharged row whose tree still stands is one lease-overrun line" \
-  "NOTIFY lease-overrun $R14P/.worktrees/foo row=W-FOO" "$OUT"
-expect_eq "…and the tick takes the NOTIFY band (exit 1)" "1" "$RC"
-expect_contains "…with a decision line a machine can read" "decision=NOTIFY" "$OUT"
-expect_contains "…naming the row the lease was bound to" "W-FOO" "$OUT"
-expect_absent "…never QUIET on the same tick" "decision=QUIET" "$OUT"
+expect_contains "a discharged row whose tree still stands is one note naming the tree" \
+  "poker: note: tree stands $R14P/.worktrees/foo — row discharged; land or remove" "$OUT"
+expect_contains "…and the decision line carries the tree in its own field" \
+  "|trees=$R14P/.worktrees/foo" "$OUT"
+expect_contains "…while the decision itself is what the roster says: QUIET" \
+  "decision=QUIET" "$OUT"
+expect_eq "…and the tick does NOT take the NOTIFY band on a standing tree (exit 0)" "0" "$RC"
+expect_absent "…nothing on this tick is a NOTIFY" "decision=NOTIFY" "$OUT"
+expect_absent "…and the old alarm wording is gone" "NOTIFY lease-overrun" "$OUT"
 expect_eq "…and the tree is not removed: the tick lands nothing" "1" \
   "$(ls "$R14/.worktrees" | grep -c .)"
 
@@ -2931,7 +2970,7 @@ R14B="$(make_repo s14-live-lease)"; new_roster "$R14B"
 mkdir -p "$R14B/.worktrees/bar"
 add_row "$R14B" name=W-BAR deliverable="$R14B/.bionic/docs/record/w-bar.md" duration="4 hours"
 poke "$R14B" tick
-expect_absent "an UNMET row's tree is a live lease, not an overrun" "lease-overrun" "$OUT"
+expect_absent "an UNMET row's tree is a live lease, not an overrun" "tree stands" "$OUT"
 expect_eq "…and the tick is QUIET (exit 0)" "0" "$RC"
 
 # --- the other half of the discriminator: a discharged row whose tree is already gone.
@@ -2941,7 +2980,7 @@ mkdir -p "$R14C/.worktrees" "$R14C/.bionic/docs/record"
 add_row "$R14C" name=W-GONE deliverable="$R14C/.bionic/docs/record/w-gone.md" duration="4 hours"
 printf 'the report\n' > "$R14C/.bionic/docs/record/w-gone.md"
 poke "$R14C" tick
-expect_absent "a discharged row whose tree is gone reports nothing" "lease-overrun" "$OUT"
+expect_absent "a discharged row whose tree is gone reports nothing" "tree stands" "$OUT"
 
 # --- a project with no .worktrees at all is silent, and cheap ---
 R14D="$(make_repo s14-no-trees)"; new_roster "$R14D"
@@ -2949,7 +2988,7 @@ mkdir -p "$R14D/.bionic/docs/record"
 add_row "$R14D" name=W-NONE deliverable="$R14D/.bionic/docs/record/w-none.md" duration="4 hours"
 printf 'the report\n' > "$R14D/.bionic/docs/record/w-none.md"
 poke "$R14D" tick
-expect_absent "no .worktrees directory, no walk and no line" "lease-overrun" "$OUT"
+expect_absent "no .worktrees directory, no walk and no line" "tree stands" "$OUT"
 
 # --- THE LIBRARY IS THE ONE DEFINITION. The tick declares worktree.sh and sources it;
 # a private copy of "discharged" or of the tree-to-row convention here would be the third.
@@ -4643,5 +4682,370 @@ expect_eq "26e a tick with no panel answer still exits 0" "0" "$RC"
 expect_absent "26e2 …stands nothing down on an answer it does not have" "STANDDOWN" "$OUT"
 expect_eq "26e3 …and closes nothing on it either" "no" \
   "$([ -f "$(ack_ledger_of "$R26E")" ] && echo yes || echo no)"
+
+
+# ============================================================
+section "Section 27: the tick's VERDICT — cadence liveness, the FILL band, notes, decision last (REQ-10; D5, D9)"
+# ============================================================
+#
+# FOUR DEFECTS, ONE LINE. The tick decided from `duration=` alone while its own prompt
+# promised a reading against the contracted `cadence=` (B5); `poker: FILL` printed as a side
+# channel on a tick whose decision line said QUIET (B6); a standing worktree whose row was
+# discharged — a FACT, not an alarm — took the NOTIFY band (B4); and two unactionable
+# advisories printed BELOW the decision, so the last thing an operator read was not the
+# answer (B7, seed A 8e). D5 makes `decision=` the ranked maximum DISARM > NOTIFY > FILL >
+# QUIET with `fill=` and `trees=` beside it, D9 gives liveness to the library's one
+# predicate — `observe_class`, payload/scripts/lib/observe.sh — and the decision line is the
+# last line a tick prints.
+#
+# THE WINDOW IS ONE CADENCE, and it is the library's (D9). `adopt` used to multiply a
+# cadence by PATROL_STALE_MULTIPLIER and the tick measured nothing at all; both ask
+# `observe_class` now, so the fleet has two staleness arithmetics (stamp vs fire window, row
+# vs cadence) where it had four.
+
+# STDOUT ALONE, because "the decision line is the LAST line" is a claim about the machine
+# channel. `poke` merges stderr into OUT, which is right for every other case in this file
+# and cannot answer this one: a `die` WARN on stderr would read as the last line.
+S27_OUT=""; S27_ERR=""
+poke_split() {  # <repo> <args...> -> sets S27_OUT (stdout), S27_ERR (stderr), RC
+  local repo="$1"; shift
+  ( cd "$repo" && exec env CLAUDE_CODE_SESSION_ID="$SID" bash "$POKER" "$@" ) \
+    > "$TMPROOT/s27.out" 2> "$TMPROOT/s27.err"
+  RC=$?
+  S27_OUT="$(cat "$TMPROOT/s27.out")"; S27_ERR="$(cat "$TMPROOT/s27.err")"
+}
+
+last_line() { printf '%s\n' "$1" | tail -1; }
+
+# The mtime the tick is supposed to PRINT, read the way the hook reads it (epoch_iso over
+# stat) — never a literal, so the assertion cannot drift from the file it describes.
+iso_of_mtime() {  # <file> -> UTC ISO-8601 of its mtime
+  local e
+  e="$(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null)"
+  date -u -r "$e" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$e" +%Y-%m-%dT%H:%M:%SZ
+}
+
+require_helpers poke_split last_line iso_of_mtime
+
+# ---------- 27a: a row quieter than ONE cadence NOTIFIES, and names the mtime it read ----
+#
+# THE SEED'S OWN SHAPE (B5, 20:40Z): `cadence=15 min`, a progress artifact 35 minutes old,
+# and a duration nowhere near exceeded — the tick read QUIET and said "none past their
+# declared duration", which was true about what it measured and silent about the agent that
+# had stopped writing.
+R27A="$(make_repo s27-cadence)"; new_roster "$R27A"
+mkdir -p "$R27A/.bionic/docs/record"
+P27A="$R27A/.bionic/tmp/progress-quiet.md"
+printf 'progress\n' > "$P27A"
+backdate "$P27A" 2100                                  # 35 minutes
+add_row "$R27A" name=quiet-writer status=identified agent_id=aquiet-one-2700000000000001 \
+  deliverable="$R27A/.bionic/docs/record/quiet.md" duration="4 hours" \
+  launched_at="$(iso_ago 300)" cadence="15 minutes" progress="$P27A"
+s19_answer none
+poke "$R27A" tick
+expect_contains "27a a row quieter than its declared cadence takes the NOTIFY band" \
+  "decision=NOTIFY" "$OUT"
+expect_eq "27a2 …and the tick exits 1, the band the Patrol's prompt reads" "1" "$RC"
+expect_contains "27a3 …naming the row" "rows=quiet-writer" "$OUT"
+expect_contains "27a4 …the cadence it was measured against" "cadence 900s" "$OUT"
+expect_contains "27a5 …and the MTIME it read, not merely an age" \
+  "$(iso_of_mtime "$P27A")" "$OUT"
+expect_contains "27a6 …with the channel it read it from" "$P27A" "$OUT"
+expect_absent "27a7 …and it is not the duration arm speaking: nothing is past its duration" \
+  "past declared duration" "$OUT"
+
+# ---------- 27b: THE CONTROL — the same row inside its cadence is QUIET ----------
+#
+# Byte for byte 27a's fixture with one number moved: the progress file is two minutes old
+# instead of thirty-five. Without this, 27a passes against a tick that notifies every row.
+R27B="$(make_repo s27-cadence-fresh)"; new_roster "$R27B"
+mkdir -p "$R27B/.bionic/docs/record"
+P27B="$R27B/.bionic/tmp/progress-live.md"
+printf 'progress\n' > "$P27B"
+backdate "$P27B" 120
+add_row "$R27B" name=live-writer status=identified agent_id=alive-one-27000000000000002 \
+  deliverable="$R27B/.bionic/docs/record/live.md" duration="4 hours" \
+  launched_at="$(iso_ago 300)" cadence="15 minutes" progress="$P27B"
+s19_answer none
+poke "$R27B" tick
+expect_contains "27b a row that wrote inside its cadence is QUIET" "decision=QUIET" "$OUT"
+expect_eq "27b2 …exit 0" "0" "$RC"
+expect_absent "27b3 …and is never named on a NOTIFY" "rows=live-writer" "$OUT"
+
+# ---------- 27c: THE TRANSCRIPT IS THE SECOND CHANNEL, exactly as adopt reads it ----------
+#
+# A progress artifact is a promise an agent keeps by hand; the transcript is the harness's
+# own record of a turn taken. `observe_class` reads either, so a row whose progress file
+# went stale while its agent kept working is ALIVE — the asymmetry that keeps this arm from
+# notifying the busiest writer on the roster.
+R27C="$(make_repo s27-transcript)"; new_roster "$R27C"
+mkdir -p "$R27C/.bionic/docs/record" "$S19_CFG/projects/-fixture-project/$SID/subagents"
+P27C="$R27C/.bionic/tmp/progress-stale.md"
+printf 'progress\n' > "$P27C"
+backdate "$P27C" 3000
+ID27C="atx-one-270000000000000000003"
+TX27C="$S19_CFG/projects/-fixture-project/$SID/subagents/agent-$ID27C.jsonl"
+: > "$TX27C"                                            # written just now
+add_row "$R27C" name=tx-writer status=identified agent_id="$ID27C" \
+  deliverable="$R27C/.bionic/docs/record/tx.md" duration="4 hours" \
+  launched_at="$(iso_ago 300)" cadence="15 minutes" progress="$P27C"
+s19_answer none
+poke "$R27C" tick
+expect_contains "27c a stale progress file with a FRESH transcript is still QUIET" \
+  "decision=QUIET" "$OUT"
+expect_absent "27c2 …and the row is not named" "rows=tx-writer" "$OUT"
+# …and the same row with BOTH channels stale notifies, which is what makes the pair honest.
+# The transcript is the NEWER of the two (2100s against the progress file's 3000s), because
+# "last heard from" is the later channel and that is the one the line has to name: the row is
+# quiet only when both are, so the newest is what the verdict rests on.
+backdate "$TX27C" 2100
+poke "$R27C" tick
+expect_contains "27c3 …while both channels stale takes the NOTIFY band" "decision=NOTIFY" "$OUT"
+expect_contains "27c4 …naming the transcript it read" "$TX27C" "$OUT"
+
+# ---------- 27d: a row with NO readable channel is not notified for silence ----------
+#
+# There is no mtime to print, so there is nothing observed to report: the duration arm still
+# answers for such a row and this one says nothing. A NOTIFY naming no evidence is the noise
+# the cadence read exists to replace.
+R27D="$(make_repo s27-no-channel)"; new_roster "$R27D"
+mkdir -p "$R27D/.bionic/docs/record"
+add_row "$R27D" name=mute-writer status=identified agent_id=amute-one-2700000000000004 \
+  deliverable="$R27D/.bionic/docs/record/mute.md" duration="4 hours" \
+  launched_at="$(iso_ago 300)" cadence="15 minutes"
+s19_answer none
+poke "$R27D" tick
+expect_contains "27d a row that declared no progress artifact and has no transcript is QUIET" \
+  "decision=QUIET" "$OUT"
+expect_absent "27d2 …and is not named on a NOTIFY" "rows=mute-writer" "$OUT"
+
+# ---------- 27e: FILL IS A DECISION, and it rides the decision line ----------
+#
+# B6, 19:00:46Z: `poker: FILL T13` printed and the line beneath it read `decision=QUIET`.
+# The duty wall (payload/scripts/lib/stop.sh) reads the PRINTED line and is unchanged; what
+# changes is that a tick that ordered work no longer reports nothing was wanted.
+R27E="$(make_repo s27-fill)"; new_roster "$R27E"
+wave_plan "$R27E" "writers=8 suites=4 worktrees=32 test_jobs=8 source=probe" \
+  "| T13 | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+s19_answer none
+poke_pressure "$R27E" 8192 1.0 tick
+expect_contains "27e the FILL line the duty wall reads is unchanged" "poker: FILL T13" "$OUT"
+expect_contains "27e2 …and the decision line carries the band" "decision=FILL" "$OUT"
+expect_contains "27e3 …with the ids in their own field" "|fill=T13" "$OUT"
+expect_absent "27e4 …never QUIET on a tick that ordered work" "decision=QUIET" "$OUT"
+expect_eq "27e5 …and FILL is not the exit-1 band: NOTIFY alone is" "0" "$RC"
+
+# ---------- 27f: THE RANK — NOTIFY outranks FILL, and the fill is still reported ----------
+#
+# Both facts are true on one tick: a row is overdue AND the budget has room. The band is the
+# higher of the two and nothing the tick learned is dropped, which is the whole content of
+# "ranked maximum" as against "first arm wins".
+R27F="$(make_repo s27-rank)"; new_roster "$R27F"
+mkdir -p "$R27F/.bionic/docs/record"
+wave_plan "$R27F" "writers=8 suites=4 worktrees=32 test_jobs=8 source=probe" \
+  "| T13 | 4 | build | fixture task | implementor | — | 15m | REQ-x | a.sh | pending |"
+add_row "$R27F" name=overdue-writer status=identified agent_id=aover-one-27000000000000005 \
+  deliverable="$R27F/.bionic/docs/record/over.md" duration="1 minute" \
+  launched_at="$(iso_ago 3600)"
+s19_answer none
+poke_pressure "$R27F" 8192 1.0 tick
+expect_contains "27f an overdue row and a fillable gap on one tick: NOTIFY wins the band" \
+  "decision=NOTIFY" "$OUT"
+expect_contains "27f2 …and the fill it ordered is still on the line" "|fill=T13" "$OUT"
+expect_contains "27f3 …with the FILL line itself still printed for the duty wall" \
+  "poker: FILL T13" "$OUT"
+expect_eq "27f4 …exit 1, the NOTIFY band" "1" "$RC"
+
+# ---------- 27g: THE ADVISORIES ARE NOTES, AND THE DECISION IS LAST ----------
+#
+# The stale-panel deferral and the no-budget line are both true and unactionable, and both
+# printed below the decision. A `poker: note:` above the decision line is what a fact gets;
+# the decision line is the tick's last word.
+R27G="$(make_repo s27-order)"; new_roster "$R27G"
+mkdir -p "$R27G/.bionic/docs/record"
+write_plan "$R27G" "$(plan_body 4 'in progress')"        # a plan with NO parallel-budget
+DEL27G="$R27G/.bionic/docs/record/met.md"; printf 'done\n' > "$DEL27G"
+add_row "$R27G" name=met-writer status=identified agent_id=amet-one-270000000000000006 \
+  deliverable="$DEL27G" duration="4 hours" launched_at="$(iso_ago 600)"
+add_row "$R27G" name=open-writer status=identified agent_id=aopen-one-27000000000000007 \
+  deliverable="$R27G/.bionic/docs/record/open.md" duration="4 hours" launched_at="$(iso_ago 60)"
+s19_answer stale "open-writer:running"
+poke_split "$R27G" tick
+expect_contains "27g the stale-panel deferral prints as a note" \
+  "poker: note: stand-down deferred" "$S27_OUT"
+expect_contains "27g2 …the missing budget prints as a note" \
+  "poker: note: no FILL —" "$S27_OUT"
+expect_contains "27g3 …and names the field it could not read" \
+  "parallel-budget: writers" "$S27_OUT"
+expect_eq "27g4 the LAST stdout line is the decision line" "poker-tick/v1" \
+  "$(printf '%s' "$(last_line "$S27_OUT")" | cut -d'|' -f1)"
+expect_contains "27g5 …and that line is QUIET, the band the facts leave" "decision=QUIET" \
+  "$(last_line "$S27_OUT")"
+
+# ---------- 27h: every band's decision line is last, NOTIFY and DISARM included ----------
+#
+# One arm printing its sentence beneath the machine line is all it takes for a reader to
+# have to know which arm answered, so the rule is asserted per band rather than once.
+poke_split "$R27A" tick
+expect_eq "27h a NOTIFY tick ends on its decision line" "poker-tick/v1" \
+  "$(printf '%s' "$(last_line "$S27_OUT")" | cut -d'|' -f1)"
+expect_contains "27h2 …and the sentence that explains it printed above" \
+  "poker: NOTIFY" "$S27_OUT"
+
+R27I="$(make_repo s27-disarm)"; new_roster "$R27I"; armed_ago "$R27I"; delivered_plan "$R27I"
+s19_answer none
+poke_split "$R27I" tick
+expect_contains "27i a delivered run still DISARMs" "decision=DISARM" "$S27_OUT"
+expect_eq "27i2 …and that line is its last" "poker-tick/v1" \
+  "$(printf '%s' "$(last_line "$S27_OUT")" | cut -d'|' -f1)"
+
+R27J="$(make_repo s27-armed-empty)"; armed_ago "$R27J"
+s19_answer none
+poke_split "$R27J" tick
+expect_contains "27j an armed session with nothing dispatched is QUIET" "decision=QUIET" "$S27_OUT"
+expect_eq "27j2 …and ends on the decision line too" "poker-tick/v1" \
+  "$(printf '%s' "$(last_line "$S27_OUT")" | cut -d'|' -f1)"
+
+# ============================================================
+section "Section 28: adopt offers only OPEN runs' rows, once each (REQ-9; D10)"
+# ============================================================
+#
+# THE DEFECT (B8, measured 2026-09-19). `adopt` walked every `roster-*.state` in the project
+# and offered every row no marker and no ack had closed — with no reading of whether the run
+# that dispatched it is still open, and none of whether the session that launched it is dead
+# and its files already sweepable. A roster left behind by a released wave was therefore
+# offered on every resume, forever, and an agent adopted N times appeared N times, once per
+# roster that had adopted it.
+#
+# CLOSURE IS DERIVED, NEVER STORED (spec §1): a row's run is closed when `run_open` says so
+# of its own `plan=`, and a session is dead when the dead-session walk names it AND its state
+# files are older than the window the sweep defers inside. Both are questions this verb can
+# ask cheaply; neither is a new field.
+#
+# THE PARTITION IS `closed`, and it is listed NOWHERE — not adopted, not shown, counted on
+# the summary line so the drop is visible rather than silent.
+
+# A predecessor session id per case: the walk is over filenames, so two cases sharing one id
+# would share a roster.
+S28_A="aaaa0000-28aa-4bbb-8ccc-000000000001"
+S28_B="bbbb0000-28bb-4bbb-8ccc-000000000002"
+
+# The `closed=` / `dupes=` counters off the summary line, by key.
+s28_field() {  # <output> <key> -> the value on the poker-adopt summary line
+  printf '%s\n' "$1" | /usr/bin/grep '^poker-adopt/v1|' | /usr/bin/grep '|scanned=' \
+    | tail -1 | tr '|' '\n' | /usr/bin/grep "^$2=" | head -1 | cut -d= -f2-
+}
+require_helpers s28_field
+
+# ---------- 28a: a row whose `plan=` run is CLOSED is offered nowhere ----------
+#
+# The in-house repro: the 1.8.2 session's roster folds to one open row whose plan is a
+# delivered wave. `run_open` reads that plan and says closed; the row is residue, not work.
+R28A="$(make_repo s28-closed-run)"; new_roster "$R28A"
+mkdir -p "$R28A/.bionic/docs/record"
+P28A_CLOSED="$(plan_at "$R28A" 'epic-28/wave-closed.plan.md' \
+  "$(plan_body 9 'delivered: bionic 9.9.9; report: record/fixture/close-out.md')")"
+add_row_to "$R28A" "$S28_A" name=closed-run-writer status=identified \
+  agent_id=aclosed-run-2800000000000001 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" plan="$P28A_CLOSED" \
+  deliverable="$R28A/.bionic/docs/record/closed-run.md"
+poke "$R28A" adopt
+expect_absent "28a a row whose run is closed is not listed at all" "closed-run-writer" "$OUT"
+expect_eq "28a2 …and the summary counts it closed" "1" "$(s28_field "$OUT" closed)"
+expect_eq "28a3 …with nothing open to adopt" "0" "$(s28_field "$OUT" open)"
+expect_contains "28a4 …so the verb says there is nothing to adopt" "nothing to adopt" "$OUT"
+expect_eq "28a5 …and nothing was written to this session's roster" "0" \
+  "$(/usr/bin/grep -c 'source=adopted' "$(roster_of "$R28A")" || true)"
+
+# ---------- 28b: THE PAIRED POSITIVE — the same row under an OPEN run is adopted ----------
+#
+# One field moves: the plan the row names is at `current: 4` instead of delivered. Without
+# this, 28a passes against a verb that offers nothing at all.
+R28B="$(make_repo s28-open-run)"; new_roster "$R28B"
+mkdir -p "$R28B/.bionic/docs/record"
+P28B_OPEN="$(plan_at "$R28B" 'epic-28/wave-open.plan.md' "$(plan_body 4 'in progress')")"
+add_row_to "$R28B" "$S28_A" name=open-run-writer status=identified \
+  agent_id=aopen-run-28000000000000001 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" plan="$P28B_OPEN" \
+  deliverable="$R28B/.bionic/docs/record/open-run.md"
+poke "$R28B" adopt
+expect_contains "28b a row whose run is still open is offered" "open-run-writer" "$OUT"
+expect_eq "28b2 …counted open" "1" "$(s28_field "$OUT" open)"
+expect_eq "28b3 …and nothing is closed" "0" "$(s28_field "$OUT" closed)"
+expect_eq "28b4 …and the row lands on this session's roster" "1" \
+  "$(/usr/bin/grep -c '|name=open-run-writer|' "$(roster_of "$R28B")" || true)"
+
+# ---------- 28c: a DEAD session whose files the sweep would take is offered nowhere ------
+#
+# The other half of closure, and the one that makes `adopt` agree with `sweep`: a session no
+# process answers for, whose newest state file is older than the poker interval, is a session
+# the next SessionStart deletes. Offering its rows hands the operator work that is about to
+# vanish.
+R28C="$(make_repo s28-dead-sweepable)"; new_roster "$R28C"
+mkdir -p "$R28C/.bionic/docs/record"
+add_row_to "$R28C" "$S28_B" name=dead-session-writer status=identified \
+  agent_id=adead-one-280000000000000001 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R28C/.bionic/docs/record/dead.md"
+backdate "$(roster_of "$R28C" "$S28_B")" 4000            # past the 1200s default window
+poke "$R28C" adopt
+expect_absent "28c a dead session's sweepable row is not listed" "dead-session-writer" "$OUT"
+expect_eq "28c2 …and the summary counts it closed" "1" "$(s28_field "$OUT" closed)"
+
+# ---------- 28d: THE PAIRED POSITIVE — a dead session's YOUNG row is still adopted -------
+#
+# This is the case `adopt` exists for. A `/clear` leaves the predecessor id dead within
+# seconds, and its roster is the freshest file in the directory; the sweep defers exactly
+# that session, so the verb must too. The fixture is 28c with the mtime left alone.
+R28D="$(make_repo s28-dead-young)"; new_roster "$R28D"
+mkdir -p "$R28D/.bionic/docs/record"
+add_row_to "$R28D" "$S28_B" name=fresh-corpse-writer status=identified \
+  agent_id=afresh-one-28000000000000001 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R28D/.bionic/docs/record/fresh.md"
+poke "$R28D" adopt
+expect_contains "28d a just-dead session's row is still offered" "fresh-corpse-writer" "$OUT"
+expect_eq "28d2 …and nothing is counted closed" "0" "$(s28_field "$OUT" closed)"
+
+# ---------- 28e: ONE AGENT ID APPEARS ONCE ----------
+#
+# Adoption files a copy of the row on the adopter's roster, so N resumes leave N rows for one
+# agent across N rosters and this verb read all of them. Three rows, three names, one id.
+R28E="$(make_repo s28-dupes)"; new_roster "$R28E"
+mkdir -p "$R28E/.bionic/docs/record"
+ID28E="adupe-one-2800000000000000005"
+for _n in dupe-a dupe-b dupe-c; do
+  add_row_to "$R28E" "$S28_A" name="$_n" status=identified agent_id="$ID28E" \
+    subagent_type=bionic:implementor duration="45 minutes" cadence="10 minutes" \
+    deliverable="$R28E/.bionic/docs/record/$_n.md"
+done
+poke "$R28E" adopt
+expect_eq "28e three rows carrying one agent id are offered once" "1" \
+  "$(printf '%s\n' "$OUT" | /usr/bin/grep -c "^poker-adopt/v1|.*|agent_id=$ID28E|" || true)"
+expect_eq "28e2 …and the two it folded away are counted" "2" "$(s28_field "$OUT" dupes)"
+expect_eq "28e3 …so exactly one row lands on this session's roster" "1" \
+  "$(/usr/bin/grep -c "|agent_id=$ID28E|" "$(roster_of "$R28E")" || true)"
+
+# ---------- 28f: THE REBUILT ROW CARRIES `re_executes=` (REQ-1 AC-1.1's adopt half) ------
+#
+# The field is a budget declaration — the commands a brief said it would re-run — and the
+# writer-side guard reads it off the row for the agent's own id. A resumed writer whose
+# adopted row lost it comes out of a `/clear` with no budget on it, which is the same failure
+# the three instrument fields were carried forward to prevent. The fixture appends it as the
+# TRAILING field a roster row carries it in.
+R28F="$(make_repo s28-re-executes)"; new_roster "$R28F"
+mkdir -p "$R28F/.bionic/docs/record"
+S28F_ROSTER="$(roster_of "$R28F" "$S28_A")"
+roster_header > "$S28F_ROSTER"
+mkrow session="$S28_A" name=rerun-writer status=identified \
+  agent_id=arerun-one-2800000000000006 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R28F/.bionic/docs/record/rerun.md" \
+  | sed 's/$/|re_executes=npx jest tests\/unit/' >> "$S28F_ROSTER"
+poke "$R28F" adopt
+expect_contains "28f the adopted row carries the declared runs forward" \
+  "re_executes=npx jest tests/unit" "$(cat "$(roster_of "$R28F")")"
+expect_eq "28f2 …on the row this adopt wrote, not on a second one" "1" \
+  "$(/usr/bin/grep -c 'source=adopted' "$(roster_of "$R28F")" || true)"
 
 finish

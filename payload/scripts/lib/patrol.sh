@@ -67,14 +67,11 @@ PATROL_INTERVAL_LAST_RESORT=1200
 # this file's own `patrol_stamp_state`, `hooks/session-start.sh`'s banner,
 # `hooks/dispatch-preflight.sh` and the stop library all read that pair now.
 #
-# SO NOTHING HERE READS THE LINE BELOW. Its one remaining reader anywhere is
-# `hooks/session-poker.sh`'s `adopt` window, which multiplies a ROW's declared
-# CADENCE rather than the poker interval — a different question that borrowed
-# this name for the number — and wave-16 REQ-10 moves that onto `observe_class`.
-# The line goes with it; until then it is kept so no head reads an unset name.
+# THE EXPORT ITSELF IS GONE (wave-16 REQ-10 moved `adopt`'s window — a ROW's
+# declared CADENCE, a different question that borrowed this name for the number —
+# onto `observe_class`, and this file's readers went with REQ-11).
 # tests/patrol-stale.test.sh holds the readers; the tree-wide absence is pinned
 # at the wave head in tests/cross-gate-agreement.test.sh §PV.
-export PATROL_STALE_MULTIPLIER=2
 
 _patrol_self_dir() { dirname "${BASH_SOURCE[0]:-$0}"; }
 # roots.sh, THE SOFT SOURCE — the idiom lib/detect.sh uses for lib/deps.sh, taken at source
