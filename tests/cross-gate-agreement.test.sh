@@ -6641,8 +6641,21 @@ RA2_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 RA2_PK="$BIONIC_HOOKS_DIR/session-poker.sh"
 expect_eq "dispatch-preflight builds its row by calling roster_row, and holds no row literal" \
   "1 0" "$(ra2_code_hits "$RA2_DP" 'roster_row ') $(ra2_code_hits "$RA2_DP" "$RA2_BUILT_ROW")"
-expect_eq "session-poker's adopt builds its row by calling roster_row, and holds no row literal" \
-  "1 0" "$(ra2_code_hits "$RA2_PK" 'roster_row ') $(ra2_code_hits "$RA2_PK" "$RA2_BUILT_ROW")"
+# THE POKER CALLS THE BUILDER TWICE, AND ONE BUILDER IS STILL ONE SHAPE (re-authored at
+# epic-23 wave-16, REQ-1 AC-1.1's adopt half). `adopt_write_row` passes the new trailing
+# `re_executes=` field to `roster_row` and, for as long as the library's key table does not
+# carry it, falls back to a call without it and appends the field itself — two call sites of
+# ONE builder. What this row exists to hold is that no hook hand-writes a row: that is the
+# second number, and it stays 0. A call count of exactly one was never the property; a
+# LITERAL is, so the reading is "at least one call, and no literal".
+RA2_PK_CALLS="$(ra2_code_hits "$RA2_PK" 'roster_row ')"
+expect_eq "session-poker's adopt holds no row literal — the shape is the library's" \
+  "0" "$(ra2_code_hits "$RA2_PK" "$RA2_BUILT_ROW")"
+if [ "${RA2_PK_CALLS:-0}" -ge 1 ] 2>/dev/null; then
+  ok "…and it builds the row by calling roster_row ($RA2_PK_CALLS call site(s), one builder)"
+else
+  no "…and it builds the row by calling roster_row" "no call to roster_row in $RA2_PK"
+fi
 
 
 # ============================================================
@@ -10648,8 +10661,9 @@ fi
 
 # AND NEITHER TYPES A MULTIPLIER. The literal the stop library carried, and the exported
 # constant the dispatch wall read: the arithmetic is inside the predicate now, so both are
-# absent from both readers. PATROL_STALE_MULTIPLIER itself stays exported for the poker's
-# `adopt` liveness window, which is a different question with a different answer.
+# absent from both readers. PATROL_STALE_MULTIPLIER's last reader — the poker's `adopt`
+# liveness window — went with it at epic-23 wave-16 (REQ-10 D9): that row-against-a-cadence
+# question is `observe_class`'s, at one cadence, for every reader in the fleet.
 expect_eq "PV the literal 2x multiplier is gone from the stop library" "0" \
   "$(grep -c 'INTERVAL \* 2' "$PV_STOP" || true)"
 expect_eq "PV …and the dispatch wall no longer reads PATROL_STALE_MULTIPLIER either" "0" \
