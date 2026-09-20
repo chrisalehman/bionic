@@ -1732,6 +1732,16 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""; baddrop = ""
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
+        # A TRAILING COMMENT ENDS THE SPAN (T23, Step-6 review R1). The brief scaffold this
+        # repo ships reads `Suites: none   # read-only brief; or test-file names only`, and
+        # an author who fills that scaffold in keeps the comment. Every word after the `#` is a
+        # whitespace-separated token like any other, so the drop refusal below scored `#`,
+        # `read-only` and `brief;` as suites the shell runner cannot run and refused briefs
+        # the base admitted — with a message pointing at `Re-executes:` that never mentioned
+        # the comment, so the repair was not discoverable from it. `#` STOPS THE SCAN rather
+        # than being skipped: a comment runs to end of span, and skipping would let a word
+        # inside prose ("# see tests/other.test.sh") lift onto the row as a budget entry.
+        if (substr(t, 1, 1) == "#") break
         if (t == "" || istemplate(t)) continue
         # AN UNEXPANDED NAME IS NOT A SUITE, AND NOW SAYS SO HERE (REQ-1 AC-1.4, ADR-029).
         # The refusal prose at the suite-allowance wall has promised "one path per token, no
@@ -2687,6 +2697,14 @@ fi
 # real. This puts the drop on the SAME channel the unexpanded-variable arm above already
 # uses, named, and — because the guard on the no-instrument arm below also checks this
 # field — that arm is never reached by a brief that named a token here.
+#
+# ONE DROPPED TOKEN IS ENOUGH; THE WHOLE SPAN NEED NOT BE DROPPED (walk W4b — the code was
+# always stricter than this note). `Suites: tests/one.test.sh tests/unit/foo.spec.ts`
+# refuses, and should: a half-dropped line is a line whose budget is not what its author
+# wrote, and the writer-side guard would refuse the jest run 40 minutes later anyway.
+# What is NOT a dropped token: the literal waiver `none`, and anything from the first `#`
+# onwards — `suite_names()` stops the scan there (T23, review R1), so a trailing scaffold
+# comment reaches neither this arm nor the roster row.
 if [ -n "$C_SUITES_DROPPED" ]; then
   _dp_detail="The Suites: span offered this, and its basename is not one this repo's shell
 suite runner can run — neither \`*.test.sh\` nor a path-qualified \`run.sh\`:
@@ -2743,10 +2761,10 @@ fi
 # carries it for "declaring no instrument" would be the wall contradicting itself.
 #
 # A BRIEF THAT NAMED A DROPPED TOKEN DECLARED SOMETHING (T3, REQ-8). `C_SUITES_DROPPED`
-# is checked here too, so a `Suites:` line whose only tokens the filter above refused never
-# falls through to this arm's "declares no Files: and no Suites:" — that refusal is the
-# suite-drop arm's above, named by the actual token, not this one's guess that nothing was
-# declared at all.
+# is checked here too, so a `Suites:` line that lost ANY token to the filter above — not
+# only one that lost every token — never falls through to this arm's "declares no Files:
+# and no Suites:" (walk W4b). That refusal is the suite-drop arm's above, named by the
+# actual token, not this one's guess that nothing was declared at all.
 if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ] && [ -z "$C_SUITES_DROPPED" ]; then
   _dp_detail="An agent with no declared instrument runs whatever it decides to run. Two writers
 read \"run the impacted suites\" as the whole tree and spent 40 minutes each
