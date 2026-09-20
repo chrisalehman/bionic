@@ -160,7 +160,7 @@ BIONIC_LOADER_REFUSE
 . "$BIONIC_LIB/context.sh"  || exit 0   # bionic_context, bionic_jq
 . "$BIONIC_LIB/root.sh"     || exit 0   # project_root
 . "$BIONIC_LIB/session.sh"  || exit 0   # session_id, and its one divergence warning
-. "$BIONIC_LIB/patrol.sh"   || exit 0   # PATROL_STALE_MULTIPLIER
+. "$BIONIC_LIB/patrol.sh"   || exit 0   # patrol_fire_window, patrol_verdict, patrol_dead_sessions
 . "$BIONIC_LIB/run.sh"      || exit 0   # active_run, engaged_session
 . "$BIONIC_LIB/worktree.sh" || exit 0   # worktree_legacy_links (AC-11/AC-7.1, A-orch-24)
 
@@ -602,8 +602,9 @@ ss_bound_kill() {  # <pid> — stop the bounded sweep and its children, group or
 # specific tick count) while completion is now detected within one 0.1s window
 # instead of one whole second.
 SS_POLL_TICKS_PER_SEC=10
-ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep, 124 on timeout
+ss_bounded_sweep() {  # <poker path> <bound seconds> [sweep flag...] -> stdout; rc mirrors sweep, 124 on timeout
   local poker="$1" limit="$2" pid ticks=0 max_ticks rc out had_monitor
+  shift 2
   max_ticks=$(( limit * SS_POLL_TICKS_PER_SEC ))
   out="${TMPDIR:-/tmp}/bionic-sweep.$$.out"
   : > "$out" 2>/dev/null || out="/dev/null"
@@ -633,7 +634,7 @@ ss_bounded_sweep() {  # <poker path> <bound seconds> -> stdout; rc mirrors sweep
   # reason the out-file exists: a sweep that outlives its bound must not be left
   # holding any of this hook's own streams open.
   { set -m
-    ( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" sweep ) </dev/null >"$out" 2>/dev/null 9>&- &
+    ( cd "$BIONIC_ROOT" 2>/dev/null && bash "$poker" sweep "$@" ) </dev/null >"$out" 2>/dev/null 9>&- &
     pid=$!
     [ "$had_monitor" = "yes" ] || set +m
   } 9>&2 2>/dev/null
@@ -664,14 +665,33 @@ wait "$SS_INTERVAL_PID" 2>/dev/null
 SS_INTERVAL_VAL="$(cat "$SS_INTERVAL_OUT" 2>/dev/null)"
 rm -f "$SS_INTERVAL_OUT" 2>/dev/null
 case "$SS_INTERVAL_VAL" in ''|*[!0-9]*) SS_INTERVAL_VAL="$(ss_interval)" ;; esac
-LIMIT=$(( SS_INTERVAL_VAL * PATROL_STALE_MULTIPLIER ))
+# ONE FIRE WINDOW, NOT TWICE THE INTERVAL (epic-23 wave-16 REQ-11, AC-11.1/11.2; ADR-028).
+# This banner and doctor's own reading were the last two surfaces grading a Patrol stamp by
+# `interval * 2` — a judgment call the two WALLS stopped making at wave-15, because a session
+# cron fires only while the session is IDLE and age past a threshold cannot tell a dead job
+# from a working orchestrator. `patrol_fire_window` (lib/patrol.sh) is the one threshold left:
+# the interval plus the scheduler's jitter, the longest idle span in which a firing is
+# guaranteed an opportunity. A stamp inside it is fresh, full stop.
+SS_WINDOW="$(patrol_fire_window "$SS_INTERVAL_VAL")" || SS_WINDOW=""
+case "$SS_WINDOW" in ''|*[!0-9]*) SS_WINDOW="$SS_INTERVAL_VAL" ;; esac
 NOW="$(date -u +%s 2>/dev/null || echo 0)"
 
+# WHO IS STILL RUNNING, read once for the loop below. Past one fire window the two answers
+# part company: a stamp belonging to a LIVE session is graded on IDLE TIME, through the same
+# `patrol_verdict` the walls call, because its owner may simply have been busy — while a
+# stamp whose session is GONE is stale on the plainest fact available, that there is no
+# process left to fire anything. The verdict would call that one `busy`: a dead session's
+# transcript ends when the session did, so it holds no idle GAP to measure, and asking the
+# predicate about a corpse would report a two-day-old stamp as fresh. This branch is the
+# difference between the two questions, not a second threshold.
+SS_LIVE_IDS="$(patrol_live_session_ids 2>/dev/null)"
+
 # ONE `stat` INVOCATION FOR EVERY PREDECESSOR STAMP, not one per file (REQ-6,
-# same defect and the same fix shape as the roster loop above, and the same
-# batched-stat idiom the sweep gate further down already established — one
-# flavour probe, then a single `xargs` pass over every candidate path rather
-# than a `stat` fork per file). The filtering loop stays pure bash builtins
+# same defect and the same fix shape as the roster loop above — one flavour
+# probe, then a single `xargs` pass over every candidate path rather than a
+# `stat` fork per file; the sweep gate below this used to carry the second copy
+# of the idiom and was deleted whole at wave-16 REQ-8, leaving this one).
+# The filtering loop stays pure bash builtins
 # (glob + `[ -f ]`/`[ -L ]`, no fork) and records each survivor's path in
 # ORDER; `stat`'s own output preserves that order one line per input, so the
 # second loop below zips path[i] back to mtime[i] positionally rather than
@@ -709,8 +729,28 @@ EOF_MTS
     [ -n "$OSID" ] || continue
     case "$MT" in ''|*[!0-9]*) continue ;; esac
     AGE=$(( NOW - MT )); [ "$AGE" -ge 0 ] || AGE=0
-    if [ "$AGE" -gt "$LIMIT" ]; then STATE="stale"; else STATE="fresh"; fi
-    STAMPS="${STAMPS}  ${OSID:0:8} — ${AGE}s old (stale past ${LIMIT}s) — $STATE
+    STATE="fresh"; WHY=""
+    if [ "$AGE" -gt "$SS_WINDOW" ]; then
+      STATE="stale"
+      # NEWLINE-DELIMITED CONTAINMENT, so a dead session whose id is a PREFIX of a live one
+      # is not mistaken for it — `patrol_dead_sessions`'s own idiom, for its own reason.
+      case "
+$SS_LIVE_IDS
+" in
+        *"
+$OSID
+"*)
+          SS_VLINE="$(patrol_verdict "$TMP/patrol-$OSID.state" \
+                        "$(patrol_transcript "$OSID" 2>/dev/null)" "$SS_INTERVAL_VAL" 2>/dev/null)"
+          case "$(_patrol_field "$SS_VLINE" verdict)" in
+            busy) STATE="fresh"; WHY=" — that session has been working" ;;
+            dead) STATE="stale" ;;
+            *)    STATE="unreadable"
+                  WHY=" — $(_patrol_field "$SS_VLINE" reason)" ;;
+          esac ;;
+      esac
+    fi
+    STAMPS="${STAMPS}  ${OSID:0:8} — ${AGE}s old (a firing lands inside ${SS_WINDOW}s)${WHY} — $STATE
 "
   done
   exec 8<&- 9<&-
@@ -750,27 +790,27 @@ done < <(worktree_legacy_links "$BIONIC_ROOT")
 # untouched (A-5) — this hook only ever decides WHETHER to invoke it; it never
 # deletes a file itself.
 #
-# THE AGE GATE (AC-R2.3) IS THIS HOOK'S OWN, not the verb's. `sweep` judges
-# liveness alone — a session dead one second after `/clear` re-keys its pid file
-# is exactly as dead as one a week stale — which is right for a verb a human runs
-# on purpose. A hook that fires on every conversation start is not that: the
-# predecessor roster this same run just reported above would be deleted before
-# anyone could act on it if sweep touched it immediately. So a dead session's
-# files get one Patrol interval of grace before this hook will let `sweep` near
-# them. `patrol_dead_sessions` and `patrol_session_state_files` are the SAME
-# library functions the verb and doctor's own detector call, read here directly
-# (no subprocess) so "who is dead" can never come apart between the three readers.
+# THE AGE GRACE IS THE VERB'S, AND IT IS PER SESSION (epic-23 wave-16 REQ-8, AC-8.1/8.2).
+# `sweep` judges liveness alone by default — a session dead one second after `/clear` re-keys
+# its pid file is exactly as dead as one a week stale — which is right for a verb a human runs
+# on purpose. A hook that fires on every conversation start is not that: the predecessor
+# roster this same run just reported above would be deleted before anyone could act on it. So
+# the call asks for `--window`, and the verb defers a dead session whose own newest file is
+# younger than one Patrol interval — that session alone.
 #
-# THE GATE IS PER SESSION START, NOT PER FILE. `sweep` takes no operand (by
-# design — see its own docblock), so there is no way to ask it for "everyone
-# dead EXCEPT this one young file": if ANY dead session anywhere under
-# .bionic/tmp has ANY file younger than the interval, this hook skips calling
-# `sweep` AT ALL this run, and every dead session's files wait for the NEXT
-# session start together. A young file next to an ancient one is rare — a
-# session dies once, its files age together — and the alternative (calling
-# `sweep` anyway and accepting that a too-young file gets deleted early) is the
-# one failure mode this gate exists to prevent. tests/session-start.test.sh §6
-# is where a mixed batch is deliberately constructed and this tradeoff is felt.
+# THIS HOOK USED TO ASK THE QUESTION ITSELF, AND ASKED IT OF THE WHOLE DIRECTORY. It stat-ed
+# every dead session's every file and, if ANY of them was younger than the interval, skipped
+# calling `sweep` AT ALL that run — so one five-minute-old corpse kept every other dead
+# session's residue, however ancient, for the NEXT session start, which had the same corpse
+# problem. On a project that `/clear`s every few minutes there is always a file under one
+# interval old: measured in this repo on 2026-09-19 as sixteen `engaged-*` and fifteen
+# `roster-*` files beside one live session, the oldest two days stale (seed B, item B9). The
+# verb has always had the finer answer and this hook simply never asked for it.
+#
+# SO THE GATE IS GONE, NOT REPLACED. One reader of "who is young" instead of two, in the
+# process that does the deleting. tests/session-sweep.test.sh §7j builds the mixed batch the
+# old shape failed — ancient dead, young dead, live, in one directory — and §7c holds the
+# per-session deferral from the other side.
 #
 # SILENT ON SUCCESS, ONE LINE ON FAILURE (AC-R2.4, scope constraint). `sweep`'s
 # own exit codes: 0 is swept-or-nothing-to-sweep, 1 is "every session here is
@@ -782,111 +822,24 @@ done < <(worktree_legacy_links "$BIONIC_ROOT")
 # stops being reported the moment sweeping actually works again.
 SWEEP_FAIL_LINE=""
 if [ -d "$TMP" ] && [ ! -L "$TMP" ]; then
-  SS_DEAD_IDS="$(patrol_dead_sessions "$BIONIC_ROOT" "$BIONIC_SID" 2>/dev/null)"
-  SS_YOUNG=no
-  if [ -n "$SS_DEAD_IDS" ]; then
-    SS_LIMIT="$(ss_interval)"
-    SS_NOW="$(date -u +%s 2>/dev/null || echo 0)"
-    # ONE `stat` CALL FOR THE WHOLE GATE, not one per file (Step-6 review F-4).
-    # The shape this replaces ran a `stat` process per state file per dead session,
-    # ahead of the bounded sweep rather than inside it, so its cost was neither
-    # small nor bounded: 400 dead sessions measured 13.8 s against the 10-second
-    # timeout hooks/hooks.json registers for this hook, and BIONIC_SWEEP_BOUND_SECONDS
-    # defaults to that same 10 so the guard below could never fire first. The sweep
-    # runs AFTER the report is built, so a CLI timeout here discards the report — on
-    # exactly the residue-heavy project the report is most useful on.
-    #
-    # THE FILE LIST IS STILL THE LIBRARY'S ANSWER, BY CONSTANT, NOT BY CALL (T16,
-    # follow-up to T6, AC-6.1). This used to call
-    # `patrol_session_state_files "$BIONIC_ROOT" "$SS_SID"` once per dead session —
-    # itself no globbing (every candidate is an exact path), but its first line,
-    # `d="$(tmp_root "${1:-}")"`, is a COMMAND SUBSTITUTION, and `tmp_root` itself
-    # is `printf '%s\n' "$(bionic_root "$1")/tmp"` — a SECOND command substitution
-    # inside the first. Two forks per call, 401 calls: 802 forks measured (via
-    # EPOCHREALTIME checkpoints either side of this loop) at ~0.64s of AC-6.1's
-    # remaining budget, the largest single cost left once the sweep-side and
-    # roster/stamp-loop costs were fixed. `$TMP` is already this exact hook's own
-    # `$BIONIC_ROOT/.bionic/tmp` (set once, near the top of this file) — the same
-    # answer `tmp_root` computes, at zero additional cost — so walking
-    # `$PATROL_STATE_CLASSES`/`$PATROL_STATE_ARMED_SUFFIX` directly against it
-    # reaches the identical path list `patrol_session_state_files` would have,
-    # without calling it or forking at all. "Who is dead and what did they leave"
-    # still cannot come apart between this hook, the verb and doctor: the CLASSES
-    # and the ARMED SUFFIX remain the library's one definition, read here as
-    # constants rather than through a per-session function call. The collection
-    # loop is still ONE subshell for the whole set, exactly as before.
-    SS_FILES="$(while IFS= read -r SS_SID; do
-        [ -n "$SS_SID" ] || continue
-        for SS_C in $PATROL_STATE_CLASSES; do
-          for SS_F in "$TMP/$SS_C-$SS_SID.state" \
-                      "$TMP/$SS_C-$SS_SID.state$PATROL_STATE_ARMED_SUFFIX"; do
-            [ -e "$SS_F" ] || [ -L "$SS_F" ] || continue
-            printf '%s\n' "$SS_F"
-          done
-        done
-      done <<EOF
-$SS_DEAD_IDS
-EOF
-)"
-    if [ -n "$SS_FILES" ]; then
-      # THE FLAVOUR PROBE RUNS ONCE, not per file, and it DISCRIMINATES rather than
-      # falling through on emptiness (Step-6 critic, issue 1). `stat -c %Y /dev/null`
-      # is a number on GNU coreutils and on busybox, and nothing at all on BSD, which
-      # rejects `-c` outright — so the probe's OUTPUT chooses the form. What it must
-      # never do is try the BSD form first and treat a non-empty capture as proof
-      # that it worked: GNU's `-f` is `--file-system`, so `%m` is read as a FILE
-      # operand, and GNU complains about `%m` on stderr while still printing a full
-      # file-system report for the real files on STDOUT and exiting 1. That capture
-      # is non-empty and entirely non-numeric, so an emptiness test never reaches the
-      # GNU form, every line fails the numeric case below, and the gate concludes
-      # nothing is young — deleting seconds-old state on every Linux and WSL install.
-      # tests/session-sweep.test.sh §7i plants a GNU-shaped `stat` on PATH and holds
-      # this.
-      #
-      # `tr` + `xargs -0` rather than `stat $SS_FILES` so a residue far larger than
-      # this one cannot overflow the argument list, and so a path carrying a space is
-      # one operand rather than two.
-      case "$(stat -c %Y /dev/null 2>/dev/null)" in
-        ''|*[!0-9]*)
-          SS_MTS="$(printf '%s\n' "$SS_FILES" | tr '\n' '\0' | xargs -0 stat -f %m 2>/dev/null)"
-          ;;
-        *)
-          SS_MTS="$(printf '%s\n' "$SS_FILES" | tr '\n' '\0' | xargs -0 stat -c %Y 2>/dev/null)"
-          ;;
-      esac
-      # A mtime NEWER than the cutoff is a file inside the interval. Spelled as a
-      # comparison against the cutoff rather than as an age subtraction because the
-      # two are the same statement and this one needs no clamp: a mtime in the
-      # future is newer than the cutoff, which is the deferring answer the age
-      # form reached by clamping a negative age to zero.
-      SS_CUTOFF=$(( SS_NOW - SS_LIMIT ))
-      while IFS= read -r SS_MT; do
-        case "$SS_MT" in ''|*[!0-9]*) continue ;; esac
-        if [ "$SS_MT" -gt "$SS_CUTOFF" ]; then SS_YOUNG=yes; break; fi
-      done <<EOF
-$SS_MTS
-EOF
-    fi
-  fi
-
-  if [ "$SS_YOUNG" = no ]; then
-    SS_POKER="$HOOK_ROOT/hooks/session-poker.sh"
-    if [ -f "$SS_POKER" ]; then
-      SS_BOUND="${BIONIC_SWEEP_BOUND_SECONDS:-10}"
-      ss_bounded_sweep "$SS_POKER" "$SS_BOUND" >/dev/null
-      SS_RC=$?
-      SWEEP_MARKER="$TMP/sweep-failed.state"
-      case "$SS_RC" in
-        0|1)
-          rm -f "$SWEEP_MARKER" 2>/dev/null
-          ;;
-        *)
-          printf 'sweep-failed/v1|at=%s|rc=%s\n' \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" "$SS_RC" > "$SWEEP_MARKER" 2>/dev/null
-          SWEEP_FAIL_LINE="bionic: the automatic dead-session sweep failed (rc=${SS_RC}) — run /bionic:doctor for the fix"
-          ;;
-      esac
-    fi
+  SS_POKER="$HOOK_ROOT/hooks/session-poker.sh"
+  if [ -f "$SS_POKER" ]; then
+    SS_BOUND="${BIONIC_SWEEP_BOUND_SECONDS:-10}"
+    # `--window` IS THE WHOLE OF THIS HOOK'S AGE POLICY NOW (REQ-8): everything the gate
+    # above used to compute for itself is one flag to the verb that does the deleting.
+    ss_bounded_sweep "$SS_POKER" "$SS_BOUND" --window >/dev/null
+    SS_RC=$?
+    SWEEP_MARKER="$TMP/sweep-failed.state"
+    case "$SS_RC" in
+      0|1)
+        rm -f "$SWEEP_MARKER" 2>/dev/null
+        ;;
+      *)
+        printf 'sweep-failed/v1|at=%s|rc=%s\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" "$SS_RC" > "$SWEEP_MARKER" 2>/dev/null
+        SWEEP_FAIL_LINE="bionic: the automatic dead-session sweep failed (rc=${SS_RC}) — run /bionic:doctor for the fix"
+        ;;
+    esac
   fi
 fi
 

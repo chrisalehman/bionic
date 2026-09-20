@@ -157,6 +157,54 @@ plant_patrol_stamp() {  # <repo> <sid> [<backdate-hours>]
   return 0
 }
 
+# ISO instants, and the two record shapes a gap is measured between — the same builders
+# tests/patrol-revive.test.sh uses on the same predicate, so the two surfaces are driven by
+# one fixture idiom rather than two.
+dp_iso() {  # <seconds ago> -> ISO-8601 Z
+  date -u -v-"$1"S +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d "-$1 seconds" +%Y-%m-%dT%H:%M:%SZ
+}
+dp_assistant() {  # <transcript> <seconds ago>
+  jq -nc --arg ts "$(dp_iso "$2")" \
+    '{type:"assistant",isSidechain:false,timestamp:$ts,
+      message:{role:"assistant",content:[{type:"text",text:"working"}]}}' >> "$1"
+}
+dp_user() {  # <transcript> <seconds ago> <text>
+  jq -nc --arg ts "$(dp_iso "$2")" --arg t "$3" \
+    '{type:"user",isSidechain:false,timestamp:$ts,
+      message:{role:"user",content:[{type:"text",text:$t}]}}' >> "$1"
+}
+# A stamp aged in SECONDS. `plant_patrol_stamp` takes whole hours, which cannot express the
+# field's own number (2459s against a 1320s window).
+dp_backdate() {  # <file> <seconds ago>
+  local ts
+  ts="$(date -v-"$2"S +%Y%m%d%H%M.%S 2>/dev/null || date -d "-$2 seconds" +%Y%m%d%H%M.%S)"
+  touch -t "$ts" "$1"
+}
+# `plant_patrol_job` with its two records DATED. The job join reads `C` records whatever
+# their date (the roster window gates only the `A`/`R` records it counts), but the verdict
+# scan dates every record it sees and one it cannot date poisons the whole answer — so a
+# fixture that wants a verdict has to date the job too.
+plant_patrol_job_dated() {  # <transcript> <tool_use_id> <job-id> <seconds ago>
+  local t="$1" tid="$2" jobid="$3" ts; ts="$(dp_iso "$4")"
+  jq -nc --arg id "$tid" --arg ts "$ts" \
+    '{type:"assistant",isSidechain:false,timestamp:$ts,
+      message:{role:"assistant",content:[{type:"tool_use",id:$id,name:"CronCreate",
+        input:{cron:"*/20 * * * *",recurring:true,
+               prompt:"Patrol tick for the fixture (bionic). Run: bash /abs/hooks/session-poker.sh tick — then continue."}}]}}' \
+    >> "$t"
+  jq -nc --arg id "$tid" --arg ts "$ts" --arg c "Scheduled recurring job ${jobid} (*/20 * * * *) — Patrol tick" \
+    '{type:"user",isSidechain:false,timestamp:$ts,
+      message:{role:"user",content:[{type:"tool_result",tool_use_id:$id,content:$c}]}}' \
+    >> "$t"
+}
+# THE INTERVAL IS PINNED IN THE FIXTURE, not inherited from the poker's built-in default:
+# this section's numbers (2459s and 1500s against a 1320s window) only mean what they say at
+# a 1200s interval.
+dp_pin_interval() {  # <repo>
+  printf 'poker-interval: 20m\n' > "$1/.bionic/config.yaml"
+}
+
 # A repo whose session never wrote a roster at all — the state this suite's
 # Sections 7 and 9 are about, and the one lib/patrol.sh reports as
 # `present=no|rows=0|open=0`. `make_repo_with_roster` called with no names
@@ -305,7 +353,14 @@ section "Section 4: the job is in the transcript and the Patrol is DEAD"
 # tool call behind them. So the count stays positive on a machine where nothing
 # is firing, and doctor printed `✓ session … · N open dispatches` for it: the
 # Step-6 correctness FAIL against AC-F3. The fixture is Section 2's, with one
-# thing changed — the stamp is three hours old, well past the 3600s limit.
+# thing changed — the stamp is three hours old, well past the fire window.
+#
+# AND THE STAMP'S AGE IS NO LONGER THE WHOLE FIXTURE (epic-23 wave-16 REQ-11). A session
+# cron fires only while the session is idle, so "dead" is now an idle gap at least one fire
+# window long since the stamp with no tick in it — read off the transcript, which therefore
+# has to be DATABLE and has to hold that gap. Three hours of stamp with one turn-starting
+# user record a second ago is the same machine this section always described, said in the
+# terms the reading now uses. Section 17 holds the other three verdicts.
 
 SID4="dddddddd-1111-2222-3333-444455556666"
 SHORT4="${SID4%%-*}"
@@ -313,7 +368,8 @@ spawn_live_pid; PID4="$LIVE_PID"
 REPO4="$(make_repo_with_roster "$SID4" beta -- alpha)"
 HOME4="$(make_claude_home "$SID4" "$PID4" "$REPO4")"
 TR4="$(transcript_of "$HOME4" "$SID4")"
-plant_patrol_job "$TR4" "toolu_1" "abc12345"
+plant_patrol_job_dated "$TR4" "toolu_1" "abc12345" 10000
+dp_user "$TR4" 1 "carry on"
 plant_patrol_stamp "$REPO4" "$SID4" 3
 
 OUT4="$(run_doctor "$HOME4" "$REPO4")"
@@ -1095,5 +1151,152 @@ expect_match "77: …while the live session's attestation is still there" \
   "*session e96260d1*" "$(printf '%s\n' "$OUT16B" | awk '/^RESOURCES$/{f=1;next} f && /^[A-Z][A-Z]/{exit} f')"
 expect_true "78: …and the unkeyed context-spend.state was never the subject" \
   test -f "$REPO16/.bionic/tmp/context-spend.state"
+
+# =============================================================================
+section "Section 17: the stamp is graded by IDLE time, never wall time (epic-23 wave-16 REQ-11, AC-11.1; ADR-028)"
+# =============================================================================
+#
+# THE DEFECT THIS SECTION OWNS (carry-over 18, promoted by the user 2026-09-19: "/doctor
+# still reports bionic unhealthy"). A session cron fires only while the session is IDLE, so
+# a stamp older than any threshold says one of two things and arithmetic cannot tell them
+# apart: the job is gone, or the orchestrator has been working. Wave-15 moved the two
+# BLOCKING readers onto `patrol_verdict` (ADR-028) and left doctor's own reading — 
+# `patrol_stamp_state` — multiplying the interval by two, so a busy orchestrator with a
+# 2459s stamp against a 2400s limit was still told its Patrol was "armed but not firing".
+#
+# THE THRESHOLD IS THE FIRE WINDOW AND THE VERDICT IS THE TRANSCRIPT'S. Past one fire
+# window (`patrol_fire_window`: the interval plus a tenth for jitter) the stamp is worth
+# READING THE TRANSCRIPT about and is not, on its own, a verdict — the same two-step the
+# stop library's revive notice and the dispatch wall take, for the same reason.
+#
+# SECTIONS 2, 7, 8 AND 10 ABOVE ARE THE OTHER HALF OF THIS PIN, unedited: their stamps are
+# FRESH and their transcripts carry no dates at all, and they still print `✓`. A stamp
+# inside one fire window cannot have missed a firing, so no scan is taken and an undatable
+# transcript never costs a healthy session its row.
+
+# ---------- AC-11.1, the field's own fixture: stale, and every second of it a busy turn ----
+#
+# 2459s stamp, 1200s interval, 1320s fire window, and a transcript holding ONE continuous
+# 2500s turn — a prompt, then assistant records all the way to now, with no turn-starting
+# user record after the prompt. There is no idle gap to measure, so the clock has had no
+# opportunity to fire and its silence proves nothing.
+SID17A="17aaaaaa-1111-2222-3333-444455556666"
+SHORT17A="${SID17A%%-*}"
+spawn_live_pid; PID17A="$LIVE_PID"
+REPO17A="$(make_repo_with_roster "$SID17A" beta -- alpha)"
+dp_pin_interval "$REPO17A"
+HOME17A="$(make_claude_home "$SID17A" "$PID17A" "$REPO17A")"
+TR17A="$(transcript_of "$HOME17A" "$SID17A")"
+plant_patrol_job_dated "$TR17A" "toolu_1" "abc12345" 2600
+dp_user "$TR17A" 2500 "a long piece of work"
+for s17a in 2400 2100 1800 1500 1200 900 600 300 120 30 5; do dp_assistant "$TR17A" "$s17a"; done
+plant_patrol_stamp "$REPO17A" "$SID17A"
+dp_backdate "$REPO17A/.bionic/tmp/patrol-$SID17A.state" 2459
+
+OUT17A="$(run_doctor "$HOME17A" "$REPO17A")"
+PB17A="$(patrol_block "$OUT17A")"
+
+expect_match "79: a stale stamp whose staleness is all busy turns keeps its running row" \
+  "*✓ session ${SHORT17A}*" "$PB17A"
+expect_no_match "80: …and earns no fix line" \
+  "*session ${SHORT17A}: the Patrol is armed but not firing*" "$OUT17A"
+
+# ---------- AC-11.1, the discrimination: the same stamp, an idle gap, no tick ----------
+#
+# CHANGE THE TRANSCRIPT ALONE and the same page accuses. Without this, 79 is a row anyone
+# could earn by breaking the gate.
+SID17B="17bbbbbb-1111-2222-3333-444455556666"
+SHORT17B="${SID17B%%-*}"
+spawn_live_pid; PID17B="$LIVE_PID"
+REPO17B="$(make_repo_with_roster "$SID17B" beta -- alpha)"
+dp_pin_interval "$REPO17B"
+HOME17B="$(make_claude_home "$SID17B" "$PID17B" "$REPO17B")"
+TR17B="$(transcript_of "$HOME17B" "$SID17B")"
+plant_patrol_job_dated "$TR17B" "toolu_1" "abc12345" 10000
+dp_user "$TR17B" 1 "carry on"
+plant_patrol_stamp "$REPO17B" "$SID17B"
+dp_backdate "$REPO17B/.bionic/tmp/patrol-$SID17B.state" 1500
+
+OUT17B="$(run_doctor "$HOME17B" "$REPO17B")"
+PB17B="$(patrol_block "$OUT17B")"
+
+expect_match "81: an idle gap of a full fire window since the stamp, with no tick, is not firing" \
+  "*session ${SHORT17B}: the Patrol is armed but not firing*" "$OUT17B"
+expect_no_match "82: …and the section prints no running row for it" \
+  "*✓ session ${SHORT17B}*" "$PB17B"
+
+# ---------- the tick itself is the proof of life ----------
+#
+# A `bionic-patrol session=` prompt after the stamp IS the cron firing, whatever the
+# stamp's own mtime says: the reference instant moves to the tick and there is no gap left
+# to be dead about. The stamp here is three hours old.
+SID17C="17cccccc-1111-2222-3333-444455556666"
+SHORT17C="${SID17C%%-*}"
+spawn_live_pid; PID17C="$LIVE_PID"
+REPO17C="$(make_repo_with_roster "$SID17C" beta -- alpha)"
+dp_pin_interval "$REPO17C"
+HOME17C="$(make_claude_home "$SID17C" "$PID17C" "$REPO17C")"
+TR17C="$(transcript_of "$HOME17C" "$SID17C")"
+plant_patrol_job_dated "$TR17C" "toolu_1" "abc12345" 10000
+dp_user "$TR17C" 60 "bionic-patrol session=${SID17C} — patrol tick"
+dp_assistant "$TR17C" 30
+plant_patrol_stamp "$REPO17C" "$SID17C" 3
+
+OUT17C="$(run_doctor "$HOME17C" "$REPO17C")"
+PB17C="$(patrol_block "$OUT17C")"
+
+expect_match "83: a tick since the stamp is the Patrol firing — the row prints" \
+  "*✓ session ${SHORT17C}*" "$PB17C"
+expect_no_match "84: …and no fix line" \
+  "*session ${SHORT17C}: the Patrol is armed but not firing*" "$OUT17C"
+
+# ---------- idle time that cannot be read is an advisory, with the reason ----------
+#
+# THE PAGE SAYS WHAT IT COULD NOT OBSERVE (ADR-028, one layer up from the walls). A stale
+# stamp whose transcript cannot be dated is neither a running Patrol nor a stopped one:
+# doctor prints the NIL glyph, names the reason the library gave, and raises NO fix line —
+# an accusation doctor cannot support is the very defect this requirement removes. The
+# fixture is the undated one every section above this wave used.
+SID17D="17dddddd-1111-2222-3333-444455556666"
+SHORT17D="${SID17D%%-*}"
+spawn_live_pid; PID17D="$LIVE_PID"
+REPO17D="$(make_repo_with_roster "$SID17D" beta -- alpha)"
+dp_pin_interval "$REPO17D"
+HOME17D="$(make_claude_home "$SID17D" "$PID17D" "$REPO17D")"
+TR17D="$(transcript_of "$HOME17D" "$SID17D")"
+plant_patrol_job "$TR17D" "toolu_1" "abc12345"
+plant_patrol_stamp "$REPO17D" "$SID17D" 3
+
+OUT17D="$(run_doctor "$HOME17D" "$REPO17D")"
+PB17D="$(patrol_block "$OUT17D")"
+
+expect_match "85: a stale stamp over an undatable transcript is reported, not graded" \
+  "*session ${SHORT17D} · the Patrol cannot be graded*" "$PB17D"
+# THE REASON AS FAR AS THE ROW HAS ROOM FOR IT. The library's sentence here is "a record in
+# the scanned window carries no readable timestamp" — 59 columns against the 52 this row's
+# fixed part leaves — so what the page carries is its head plus the product's own ellipsis.
+# Matched on the head rather than the tail on purpose: the tail is what the budget cuts, and
+# an assertion against it would be an assertion against the cut.
+expect_match "86: …naming the reason the library gave, as far as the row has room for it" \
+  "*a record in the scanned window*" "$PB17D"
+expect_match "87: …and the cut is the product's, visible rather than silent" \
+  "*…*" "$PB17D"
+expect_no_match "88: …and it is never the not-firing accusation" \
+  "*session ${SHORT17D}: the Patrol is armed but not firing*" "$OUT17D"
+expect_no_match "89: …nor a running row" "*✓ session ${SHORT17D}*" "$PB17D"
+
+# THE BUDGET, WITH THE PRODUCT'S OWN RULER (Section 9's, reused): the advisory carries a
+# library reason that can run long, so the row is the one new line on this page that has to
+# be cut to fit.
+WIDE17="$(first_over_budget "${PB17A}
+${PB17B}
+${PB17C}
+${PB17D}")"
+if [ -z "$WIDE17" ]; then
+  ok "90: every row of the four verdict fixtures fits the ${BIONIC_LINE_WIDTH}-column budget"
+else
+  no "90: a verdict row exceeds the ${BIONIC_LINE_WIDTH}-column budget" \
+     "$(bionic_cols "$WIDE17") columns: ${WIDE17}"
+fi
 
 finish
