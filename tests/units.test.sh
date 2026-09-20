@@ -1098,4 +1098,37 @@ expect_eq "the reversed widened fixture's header starts at status and ends at id
 expect_eq "reversing every column of the widened table changes not one byte of the TSV" \
   "$ROWS_WT" "$(call units_rows "$SANDBOX/worktree-column-reversed.md")"
 
+# ============================================================
+section "11 — units_has_column: the header's own answer (wave-16 REQ-3, AC-3.2)"
+# ============================================================
+#
+# WHY A FOURTH VERB. The evidence gate's worktree lead-in ("no ## Tasks row names worktree
+# <tree>") fires whenever no row's `worktree` cell matches the tree it is committing from —
+# and an ABSENT `worktree` column reads every row's cell as empty, so a pre-14 table gets
+# the register's lead-in when what it actually has is a table that never claimed to track
+# trees (research R2 row 6a). The gate cannot tell those apart from `units_rows` alone:
+# slot 11 is optional, so it is deliberately absent from the missing-column set §10 pins.
+# This verb answers the one question that discriminates, off the same single parse.
+#
+# fails-when: a table carrying the column answers no, or a table without it answers yes.
+
+expect_eq "11.1 a table that carries the worktree column answers yes" "0" \
+  "$(call_rc units_has_column "$SANDBOX/worktree-column.md" worktree)"
+expect_eq "11.2 …and the live specimen, which omits it, answers no" "1" \
+  "$(call_rc units_has_column "$SANDBOX/live.md" worktree)"
+# THE REQUIRED COLUMNS TOO, so the verb is not a worktree special case: the same question
+# asked of `step` discriminates the fixture §10 uses for the missing-column rule.
+expect_eq "11.3 a required column the header carries answers yes" "0" \
+  "$(call_rc units_has_column "$SANDBOX/live.md" id)"
+expect_eq "11.4 …and one it does not answers no" "1" \
+  "$(call_rc units_has_column "$SANDBOX/missing-column.md" step)"
+# NO TABLE IS NOT A COLUMN. The verb answers about a header, and a file with no `## Tasks`
+# table has none — same non-zero `_units_read` gives `units_rows`, never a crash.
+expect_eq "11.5 a file with no ## Tasks table answers no" "1" \
+  "$(call_rc units_has_column "$SANDBOX/no-table.md" worktree)"
+# AND IT IS HEADER-KEYED, not positional: the reversed widened fixture still carries the
+# column and still says so.
+expect_eq "11.6 reversing every column does not change the answer" "0" \
+  "$(call_rc units_has_column "$SANDBOX/worktree-column-reversed.md" worktree)"
+
 finish
