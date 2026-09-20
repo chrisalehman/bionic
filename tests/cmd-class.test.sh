@@ -1011,4 +1011,110 @@ bg_is no 'echo "sudo bash tests/run.sh &"'
 # `2>&1` alone, with no trailing bare `&`, backgrounds nothing
 bg_is no 'bash tests/run.sh 2>&1 | tee /tmp/evidence.log'
 
+section "C10 — REQ-1 AC-1.5 / REQ-5 AC-5.1-5.2: a runner names its RUN, a flag that runs nothing is not a run"
+# TWO HALVES OF ONE READING, both measured here because both are the same question asked
+# of argv: does this command RUN a suite, and — when it does — WHICH run is it.
+#
+# (a) REQ-1 AC-1.5. `pytest`, `npm test`, `go test`, `jest` and `npx jest` have been
+#     suite-CLASS since wave-01 and named nothing at all, because the only target this
+#     library knew how to name was a shell suite FILE. A target-less suite-class command
+#     cannot be compared to anything, so `payload/scripts/lib/walls.sh`'s budget arm had
+#     nothing to hold a writer in a jest repo to (research R1 Q2: "it is not that the arm
+#     rejects jest, it is that the arm cannot see it"). A runner form now names its RUN —
+#     the argv text the classifier read, whitespace-collapsed — which is exactly the shape
+#     `hooks/dispatch-preflight.sh` writes onto the roster row under `re_executes=`
+#     (A-T1.4: the author's marked run, collapsed), so the two ends compare.
+#
+# (b) REQ-5 AC-5.1/5.2. `bash -n <suite>` READS a suite and runs none of it; the flag skip
+#     at the bash arm treated `-n` as an ordinary option and classified the same words as a
+#     run. The table below is the discriminator: a non-executing flag makes the command
+#     `none`, and `-x`/`-v`, which do execute, stay `suite`.
+#
+# THE SUPERSET RULE CUTS BOTH WAYS HERE (:47-51). Widening the class is a wall that can
+# now refuse what it used to allow, so every row below is stated in both directions: the
+# runner forms name a run AND still name no suite FILE (C7's answer is unchanged), and the
+# reading forms are `none` AND silent at the farm-out wall.
+
+claims_of() {  # <command> -> "<kind>\t<target>\t<run>" per suite-class segment
+  printf '%s' "$1" | bash -c '
+    set -uo pipefail
+    . "$1" || { echo "SOURCE-FAILED"; exit 1; }
+    cmd_suite_claims "$(cat)"
+  ' _ "$LIB" 2>&1
+}
+claim_kinds_of() { claims_of "$1" | awk -F'\t' '{ print $1 }'; }
+claim_run_of()   { claims_of "$1" | awk -F'\t' 'NR == 1 { print $3 }'; }
+
+# --- (a) AC-1.5: every runner form names the run it will make ---
+runner_row() {  # <command>
+  expect_eq "C10 [$1] is suite-class" "suite" "$(class_of "$1")"
+  expect_eq "C10 …and names the RUN it will make, not nothing" "$1" "$(claim_run_of "$1")"
+  expect_eq "C10 …as a run, not as a suite file" "run" "$(claim_kinds_of "$1")"
+  expect_eq "C10 …and C7's answer is unchanged: it names no suite FILE" "" "$(targets_of "$1")"
+}
+runner_row "npx jest --testPathPatterns 'x'"
+runner_row "jest --testPathPatterns 'x'"
+runner_row 'npx jest'
+runner_row 'pytest tests/x.py'
+runner_row 'go test ./...'
+runner_row 'npm test'
+
+# The run is the text the CLASSIFIER read, so the prefixes this library already strips do
+# not change which run a command is — `timeout 600 npx jest …` is the same spend as
+# `npx jest …`, and a writer who declared one has declared the other.
+expect_eq "C10 a stripped prefix leaves the same run" \
+  "npx jest --testPathPatterns 'x'" "$(claim_run_of "timeout 600 npx jest --testPathPatterns 'x'")"
+expect_eq "C10 …and so does wider spacing (collapsed, as the lift collapses it)" \
+  "npx jest --testPathPatterns 'x'" "$(claim_run_of "npx    jest   --testPathPatterns 'x'")"
+
+# A SHELL SUITE STILL ANSWERS AS A FILE, with its run beside it — the budget arm needs both
+# (the basename to compare against `suites_allowed=`, the run to compare against
+# `re_executes=`), and a file that answered only as a run would silently retire AC-21.
+expect_eq "C10 a shell suite is still a FILE claim" "file" "$(claim_kinds_of 'bash tests/alpha.test.sh')"
+expect_eq "C10 …carrying its run beside the basename" \
+  "bash tests/alpha.test.sh" "$(claim_run_of 'bash tests/alpha.test.sh')"
+
+# NEGATIVE CONTROL: `npx` is not a suite verb. Stripping it must not make every npx call a
+# suite — the tier-2 nudge (B-4a) is the wall that speaks for those.
+expect_eq "C10 npx create-react-app is NOT suite-class" "none" "$(class_of 'npx create-react-app x')"
+expect_eq "C10 …and names no run" "" "$(claims_of 'npx create-react-app x')"
+
+# --- (b) AC-5.1: a flag that runs nothing is not a run ---
+reads_only() {  # <command>
+  expect_eq "C10 [$1] runs nothing, so it is not suite-class" "none" "$(class_of "$1")"
+  expect_eq "C10 …and names nothing for a budget to hold" "" "$(claims_of "$1")"
+}
+reads_only 'bash -n tests/x.test.sh'
+reads_only 'bash --noexec tests/x.test.sh'
+reads_only 'bash -nx tests/x.test.sh'
+reads_only 'bash -xn tests/x.test.sh'
+reads_only 'bash -o noexec tests/x.test.sh'
+reads_only 'chmod +x tests/x.test.sh'
+reads_only 'cat tests/x.test.sh'
+reads_only 'ls tests/*.test.sh'
+
+# AT THE WALL, not just in the library: AC-5.1's words are "pass the farm-out wall".
+expect_empty "AC-5.1 farm-out is SILENT on bash -n tests/x.test.sh" \
+  "$(farm_decision 'bash -n tests/x.test.sh')"
+expect_empty "AC-5.1 …on chmod +x tests/x.test.sh" \
+  "$(farm_decision 'chmod +x tests/x.test.sh')"
+expect_empty "AC-5.1 …on cat tests/x.test.sh" \
+  "$(farm_decision 'cat tests/x.test.sh')"
+expect_empty "AC-5.1 …on ls tests/*.test.sh" \
+  "$(farm_decision 'ls tests/*.test.sh')"
+
+# --- (b) AC-5.2: the flags that DO execute are untouched ---
+still_runs() {  # <command> <expected target>
+  expect_eq "C10 [$1] still executes, so it stays suite-class" "suite" "$(class_of "$1")"
+  expect_eq "C10 …and still names its suite" "$2" "$(targets_of "$1")"
+}
+still_runs 'bash tests/x.test.sh' 'x.test.sh'
+still_runs 'bash -x tests/x.test.sh' 'x.test.sh'
+still_runs 'bash -v tests/x.test.sh' 'x.test.sh'
+still_runs 'bash -o errexit tests/x.test.sh' 'x.test.sh'
+# The ANTI-VACUITY arm for the table: the letter that disqualifies is read on its own, not
+# as a substring of every flag that happens to contain it.
+still_runs 'bash --verbose tests/x.test.sh' 'x.test.sh'
+
+
 finish

@@ -55,16 +55,23 @@ PATROL_WALL_SCHEMA="patrol-wall/v1"
 # built-in — because two copies of a constant drift the first time either moves.
 PATROL_INTERVAL_LAST_RESORT=1200
 
-# HOW STALE IS STALE (L-DETECT/4.5, improvement, spec AC-22). "The stamp is
-# stale past twice the poker interval" is a judgment call three sites in this
-# payload each carry as their own inline arithmetic: this file's own
-# `patrol_stamp_state` below, `hooks/session-poker.sh` and `hooks/dispatch-
-# preflight.sh`. One exported constant is the single owner of the multiplier;
-# `patrol_stamp_state` reads it a few lines down, and `session-poker.sh` reads
-# it for `adopt`'s liveness window (task POKER, 1.6). `dispatch-preflight.sh`
-# keeps its own inline `* 2` until task ADOPT switches it; the three are held
-# in agreement on the VALUE by tests/patrol-stale.test.sh §4 in the meantime.
-export PATROL_STALE_MULTIPLIER=2
+# HOW STALE IS STALE IS NOT A MULTIPLE OF THE INTERVAL ANY MORE (epic-23 wave-16
+# REQ-11, retiring L-DETECT/4.5's constant below). It held one judgment call —
+# "the stamp is stale past twice the poker interval" — for the three sites that
+# each used to type it out. Every one of them has stopped asking: age past a
+# threshold cannot tell a dead cron from a busy orchestrator, because a session
+# cron fires only while the session is IDLE. `patrol_fire_window` below is the
+# one threshold left (the interval plus the scheduler's jitter, the longest idle
+# span in which a firing is GUARANTEED an opportunity), and past it the answer
+# comes from `patrol_verdict` over the transcript rather than from arithmetic —
+# this file's own `patrol_stamp_state`, `hooks/session-start.sh`'s banner,
+# `hooks/dispatch-preflight.sh` and the stop library all read that pair now.
+#
+# THE EXPORT ITSELF IS GONE (wave-16 REQ-10 moved `adopt`'s window — a ROW's
+# declared CADENCE, a different question that borrowed this name for the number —
+# onto `observe_class`, and this file's readers went with REQ-11).
+# tests/patrol-stale.test.sh holds the readers; the tree-wide absence is pinned
+# at the wave head in tests/cross-gate-agreement.test.sh §PV.
 
 _patrol_self_dir() { dirname "${BASH_SOURCE[0]:-$0}"; }
 # roots.sh, THE SOFT SOURCE — the idiom lib/detect.sh uses for lib/deps.sh, taken at source
@@ -466,11 +473,33 @@ _patrol_mtime() {  # <file>
 # table, so a job deleted a moment ago still stamps fresh for up to one stale
 # window — which is why the job table above and this line are two facts printed
 # side by side rather than one verdict merged out of both.
-patrol_stamp_state() {  # <repo-root> <sid> -> state=…|age=…|limit=…|interval=…|source=…|path=…
-  local repo="${1:-}" sid="${2:-}" f iv secs src mt age limit state
+#
+# AND ITS AGE ALONE IS NOT A VERDICT (epic-23 wave-16 REQ-11, AC-11.1/11.2; ADR-028).
+# This is DOCTOR'S READING of the stamp, and it used to be `age > interval * 2` — the
+# same arithmetic wave-15 removed from the two walls, left in the surface a person
+# actually reads. So on 2026-09-15 the walls let a busy orchestrator work while the page
+# in front of it said "the Patrol is armed but not firing", 1080s apart at a 1200s
+# interval. A session cron fires only while the session is IDLE: past one fire window
+# the stamp is worth READING THE TRANSCRIPT about, and `patrol_verdict` is what reads it.
+#
+# THE TWO-STEP IS THE WALLS' OWN, copied deliberately rather than shared through a
+# fourth function: inside one fire window no firing can have been missed, so the scan is
+# not taken and a transcript that cannot be dated never costs a healthy session its row.
+# Past it, the verdict's three answers map onto the three this record has always carried
+# plus one new one — `busy` is `firing`, `dead` is `not-firing`, and `unreadable` is
+# itself, with the library's own reason, because a surface that cannot observe the thing
+# it would accuse does not accuse (ADR-028, one layer up from the wall).
+#
+# THE TRANSCRIPT IS AN ARGUMENT, not a second lookup: `patrol_report`'s walk has already
+# resolved it for its own scan, and resolving it again here would be a second `stat` walk
+# over `projects/` per session. A caller that has not got it (doctor's own tests, any
+# direct reader) may leave it out and this function resolves it itself.
+patrol_stamp_state() {  # <repo-root> <sid> [<transcript>] -> state=…|age=…|limit=…|interval=…|source=…|path=…|reason=…
+  local repo="${1:-}" sid="${2:-}" tr="${3:-}" f iv secs src mt age window state
+  local vline verdict reason=""
   f="$(tmp_root "$repo")/patrol-${sid}.state"
   iv="$(patrol_interval "$repo")"; secs="${iv%% *}"; src="${iv##* }"
-  limit=$(( secs * PATROL_STALE_MULTIPLIER ))
+  window="$(patrol_fire_window "$secs")" || window=""
   if [ -L "$f" ] || [ ! -f "$f" ]; then
     state="never-armed"; age=""
   else
@@ -480,11 +509,26 @@ patrol_stamp_state() {  # <repo-root> <sid> -> state=…|age=…|limit=…|inter
       *)
         age=$(( $(date -u +%s 2>/dev/null || echo 0) - mt ))
         [ "$age" -lt 0 ] && age=0
-        if [ "$age" -gt "$limit" ]; then state="not-firing"; else state="firing"; fi ;;
+        if [ -z "$window" ]; then
+          # No readable interval, so there is no window to measure against and no
+          # threshold to be past. The same answer the predicate gives, for the same input.
+          state="unreadable"; reason="the Patrol interval is not a readable number"
+        elif [ "$age" -le "$window" ]; then
+          state="firing"
+        else
+          [ -n "$tr" ] || tr="$(patrol_transcript "$sid")" || tr=""
+          vline="$(patrol_verdict "$f" "$tr" "$secs")"
+          verdict="$(_patrol_field "$vline" verdict)"
+          case "$verdict" in
+            busy) state="firing" ;;
+            dead) state="not-firing" ;;
+            *)    state="unreadable"; reason="$(_patrol_field "$vline" reason)" ;;
+          esac
+        fi ;;
     esac
   fi
-  printf 'state=%s|age=%s|limit=%s|interval=%s|source=%s|path=%s' \
-    "$state" "$age" "$limit" "$secs" "$src" "$f"
+  printf 'state=%s|age=%s|limit=%s|interval=%s|source=%s|path=%s|reason=%s' \
+    "$state" "$age" "${window:-0}" "$secs" "$src" "$f" "$reason"
 }
 
 # ─── THE PATROL VERDICT: idle time, never wall time (epic-23 wave-15 REQ-1, ADR-028) ──
@@ -638,8 +682,13 @@ patrol_fire_window() {  # <interval seconds> -> seconds, or empty on a bad inter
   printf '%s' "$(( iv + iv / 10 ))"
 }
 
+# ONE LINE, AND IT ENDS LIKE ONE (wave-15 carry-over 13, wave-16 AC-10.6). Every caller
+# today captures this in `$( )`, which strips the trailing newline either way — so the
+# missing `\n` was harmless and invisible, which is exactly how a line-oriented record
+# reaches a caller that reads it with `read` or appends it to a log and finds two records
+# glued together. A record whose shape is a line terminates like one.
 _patrol_verdict_line() {  # <verdict> <ref> <gap> <window> <reason>
-  printf 'verdict=%s|ref=%s|gap=%s|window=%s|reason=%s' \
+  printf 'verdict=%s|ref=%s|gap=%s|window=%s|reason=%s\n' \
     "${1:-unreadable}" "${2:-0}" "${3:-0}" "${4:-0}" "$(_patrol_clean "${5:-}" 200)"
 }
 
@@ -796,7 +845,11 @@ EOF
     fi
     case "$refused" in ''|*[!0-9]*) refused=0 ;; esac
 
-    printf '%s|session=%s|%s\n' "$PATROL_STAMP_SCHEMA_OUT" "$sid" "$(patrol_stamp_state "$repo" "$sid")"
+    # THE TRANSCRIPT THIS WALK ALREADY RESOLVED is handed to the stamp's reading, which
+    # needs it for the idle-time verdict past one fire window (REQ-11). Empty is fine —
+    # `patrol_stamp_state` resolves it itself then, and the verdict's own `unreadable`
+    # answer covers a session with no transcript at all.
+    printf '%s|session=%s|%s\n' "$PATROL_STAMP_SCHEMA_OUT" "$sid" "$(patrol_stamp_state "$repo" "$sid" "$tr")"
 
     rline="$(patrol_roster_state "$repo" "$sid")"
     printf '%s|session=%s|%s\n' "$PATROL_ROSTER_SCHEMA" "$sid" "$rline"

@@ -405,24 +405,45 @@ $_BF_PEND_CONTEXT"
 
   # ── THE OTHER BLOCKERS' LINES, WHERE NO STREAM AT ALL RECEIVED THEM ─────────
   #
-  # `model_only` IS THE TEST, AND `detail_to_user` IS NOT. On `deny` and `block` the
-  # composed detail reaches the MODEL in full, every later blocker's sentence with it,
-  # and the user's one line is refuse.sh's ruling D-1 working as intended — T12 pinned
-  # that shape (tests/fold.test.sh 2f, tests/stop.test.sh 1e) and it stands.
+  # THE TEST IS "DID THE DETAIL REACH A READER AT ALL", AND IT TAKES THREE CELLS NOW.
+  # On `deny` and `block` the composed detail reaches the MODEL in full, every later
+  # blocker's sentence with it (`model_only=yes`), and the user's one line is what
+  # refuse.sh's channel table says it is — T12 pinned that shape (tests/fold.test.sh 2f,
+  # tests/stop.test.sh 1e) and it stands.
   #
-  # `exit2` is the case with nowhere to put them: one wire for both readers, spent on
-  # the headline, `detail` never emitted at all. With one blocker that is still the
-  # ruling. With two it DELETED a wall's verdict outright — neither reader learned the
-  # second wall had refused anything — while the processes this fold replaced each
-  # printed their own line and a reader saw both. So on a channel that carries detail
-  # to nobody, the later blockers' lines follow the headline: the same sentences, in
-  # manifest order, and nothing that was not on that stream before the merge.
+  # `exit2` USED TO BE THE CASE WITH NOWHERE TO PUT THEM: one wire for both readers,
+  # spent on the headline under ruling D-1, `detail` never emitted at all. With one
+  # blocker that was the ruling; with two it DELETED a wall's verdict outright — neither
+  # reader learned the second wall had refused anything — while the processes this fold
+  # replaced each printed their own line and a reader saw both. So the later blockers'
+  # lines followed the headline on that stream: the same sentences, in manifest order.
   #
-  # NOT UNDER THE VERBOSE KNOB, which already put the whole composed detail — extra
-  # sentences and all — on the user stream through `refuse`.
+  # ADR-030 GAVE `exit2` SOMEWHERE TO PUT THEM (epic-23 wave-16 T4, 2026-09-19), and this
+  # branch had to learn it. Field 9 is `yes` for that mode now, so `refuse` prints the
+  # composed detail beneath the headline — and every later blocker's sentence LEADS its own
+  # detail inside it (the loop above builds `_bline` into both places). Printing
+  # `BIONIC_FOLD_LINES` as well put a second wall's sentence on the stream TWICE. A refusal
+  # prints its detail once, so the branch stands down wherever the detail already reached
+  # the reader: by the model's channel (`model_only`), by the user's (`detail_to_user`), or
+  # by the knob, which puts the whole composed detail there through `refuse`.
+  #
+  # WHAT IS LEFT OF THE BRANCH, and why it is not deleted. Nothing in the shipped table
+  # reaches it today: all three refusal channels now carry `detail` to one reader or the
+  # other. It is the fail-SAFE side of a data-driven table — a mode added to
+  # `BIONIC_REFUSE_TABLE` with `model_only=no` and `detail_to_user=no` would silently
+  # delete a second wall's verdict again, which is precisely the defect T23 found — and it
+  # costs one `refuse_channel` read on a path that has already refused.
+  #
+  # THE RESIDUAL, NAMED (A-T4.6). `refuse` bounds what it prints at
+  # BIONIC_REFUSE_DETAIL_LINES lines plus a `+N more` count, so on `exit2` a later
+  # blocker's sentence sitting past that bound is folded behind the count rather than
+  # printed. That is a bounded, ANNOUNCED fold and not T23's silent deletion, and it is the
+  # cost ADR-030 priced; §13's long-detail row measures it rather than leaving it to be
+  # discovered.
   if [ -n "$BIONIC_FOLD_LINES" ] \
      && [ "${BIONIC_WALL_VERBOSE:-}" != "1" ] \
-     && [ "$(refuse_channel "$BIONIC_FOLD_MODE" model_only 2>/dev/null || echo no)" != "yes" ]; then
+     && [ "$(refuse_channel "$BIONIC_FOLD_MODE" model_only 2>/dev/null || echo no)" != "yes" ] \
+     && [ "$(refuse_channel "$BIONIC_FOLD_MODE" detail_to_user 2>/dev/null || echo no)" != "yes" ]; then
     printf '%s\n' "$BIONIC_FOLD_LINES" >&2
   fi
 

@@ -154,7 +154,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh observe.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -265,6 +265,19 @@ BIONIC_LOADER_REFUSE
 # from here; this hook parses no plan table of its own.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
+# THE ONE PREDICATE FOR "TOO QUIET" (REQ-10 AC-10.1, D9; ADR-028). `observe_class` classifies
+# a dispatched row `delivered`/`alive`/`idle` from two mtimes against the cadence the row's
+# own brief declared. Both readers in this file — the tick's row loop and `adopt`'s liveness
+# verdict — ask it, so the fleet holds two staleness arithmetics (a stamp against its fire
+# window, a row against its cadence) where it held four: this verb used to multiply a cadence
+# by a second multiplier of its own and the tick measured no cadence at all.
+#
+# THIS FILE'S OWN `file_mtime`, `line_field` and `parse_seconds` are defined BELOW this line
+# and are CODE-IDENTICAL to the library's (tests/cross-gate-agreement.test.sh §C and §O hold
+# all three copies together), so the redefinitions that follow change nothing either caller
+# reads.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/observe.sh"
 
 POKER_DECISION_SCHEMA="poker-tick/v1"
 POKER_INTERVAL_DEFAULT="20m"
@@ -1539,7 +1552,7 @@ agent_report_tail() {  # <transcript> -> the tail on stdout, nonzero if nothing 
 # Output is one `|`-delimited record per open row. `|` rather than a tab because every value
 # on a roster row is cleaned of `|` at write time, while the shell collapses runs of tabs
 # and would silently merge two empty fields into one.
-adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source
+adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progress|cadence|launched_at|origin|plan|waiver|files|suites_allowed|suites_source|re_executes
   awk -v ackfile="$2" '
     function kv(line, key,   n, a, i, eq, k) {
       n = split(line, a, "|")
@@ -1589,6 +1602,13 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
       v = kv($0, "files");          if (v != "") files[n]  = v
       v = kv($0, "suites_allowed"); if (v != "") sallow[n] = v
       v = kv($0, "suites_source");  if (v != "") ssrc[n]   = v
+      # THE DECLARED RUNS (REQ-1 AC-1.1, this wave). A trailing optional field carried
+      # forward exactly as the three instrument fields above are, and for the same reason:
+      # it is a BUDGET declaration, and the writer-side guard reads it off the row for the
+      # agent own id. A resumed writer whose adopted row lost it comes out of a clear with
+      # no budget on it. An apostrophe cannot appear in this comment: the awk program is one
+      # single-quoted argument.
+      v = kv($0, "re_executes");    if (v != "") rex[n]    = v
       # THE ATTRIBUTION, carried forward exactly as the contract fields are. It is the bound
       # plan of the session that dispatched the row, stamped at the instant the row was
       # written (hooks/dispatch-preflight.sh). Rows written before this wave carry no such
@@ -1612,10 +1632,10 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
         n = order[i]
         if (n in met) continue
         if (n in acked) continue
-        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
+        printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s\n", n, id[n], stype[n], deliv[n], prog[n], cad[n], \
                launch[n], ((n in afrom) ? afrom[n] : sess[n]), \
                ((n in hasplan) ? (plan[n] == "" ? "none" : plan[n]) : ""), waiv[n], \
-               files[n], sallow[n], ssrc[n]
+               files[n], sallow[n], ssrc[n], rex[n]
       }
     }
   ' "$1" 2>/dev/null
@@ -1675,10 +1695,12 @@ adopt_fold() {  # <roster file> <ack ledger> -> name|id|type|deliverable|progres
 # where two sessions hand a run back and forth. The value is the ADOPTER's binding, because
 # the adopter is now the session that owns the row — the launching session is already
 # recorded, separately, in `adopted_from=`.
-adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> -> 0 written/already there, 1 not
+adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <progress> <cadence> <launched> <from-sid> <teammate address> <plan|none> <waiver> <files> <suites_allowed> <suites_source> <re_executes> -> 0 written/already there, 1 not
   local f="$1" sid="$2" name="$3" id="$4" typ="$5" deliv="$6" prog="$7" cad="$8"
   local launch="$9" osid="${10}" addr="${11}" plan="${12:-none}" waiver="${13:-}" d
-  local files="${14:-}" sallow="${15:-}" ssrc="${16:-}"
+  local files="${14:-}" sallow="${15:-}" ssrc="${16:-}" rex="${17:-}"
+  local -a RR_ARGS
+  local ROW=""
   local -a INSTRUMENT_FIELDS
   [ -n "$id" ] || return 1
   [ -n "$sid" ] || return 1
@@ -1743,28 +1765,47 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # both of the fields no other writer does (`teammate_id=`, `adopted_from=`), empty address
   # included. `clean()` stays here: it is this file's cap on a value, while the row's SHAPE
   # is the library's.
-  roster_row \
-    status=identified \
-    "session=$(clean "$sid")" \
-    "name=$(clean "$name")" \
-    "agent_id=$(clean "$id")" \
-    "launched_at=$(clean "$launch")" \
-    "subagent_type=$(clean "$typ")" \
-    model= \
-    "deliverable=$(clean "$deliv")" \
-    source=adopted \
-    duration= \
-    "progress=$(clean "$prog")" \
-    claims= \
-    "cadence=$(clean "$cad")" \
-    absent= \
-    "waiver=$(clean "$waiver")" \
-    ${INSTRUMENT_FIELDS[@]+"${INSTRUMENT_FIELDS[@]}"} \
-    "teammate_id=$(clean "$addr")" \
-    "adopted_from=$(clean "$osid")" \
-    tool_use_id= \
-    "plan=$(clean "$plan")" \
-    >> "$f" 2>/dev/null || return 1
+  RR_ARGS=(
+    status=identified
+    "session=$(clean "$sid")"
+    "name=$(clean "$name")"
+    "agent_id=$(clean "$id")"
+    "launched_at=$(clean "$launch")"
+    "subagent_type=$(clean "$typ")"
+    model=
+    "deliverable=$(clean "$deliv")"
+    source=adopted
+    duration=
+    "progress=$(clean "$prog")"
+    claims=
+    "cadence=$(clean "$cad")"
+    absent=
+    "waiver=$(clean "$waiver")"
+    ${INSTRUMENT_FIELDS[@]+"${INSTRUMENT_FIELDS[@]}"}
+    "teammate_id=$(clean "$addr")"
+    "adopted_from=$(clean "$osid")"
+    tool_use_id=
+    "plan=$(clean "$plan")"
+  )
+  # THE DECLARED RUNS, CARRIED BY NAME (REQ-1 AC-1.1's adopt half). `re_executes=` is a
+  # trailing optional field of the row, and the row's SHAPE is `roster_row`'s — so it is
+  # passed there first and appended here only if that writer does not know the key yet.
+  # `roster_row` returns 2 on an unknown key rather than emitting a row, and dropping the
+  # field on that answer would hand a resumed writer an empty budget: the exact failure the
+  # three instrument fields are carried forward to prevent. The fallback is a TRAILING
+  # append, which is where the field lives either way, and every reader in the fleet reads a
+  # row BY KEY — so the two spellings differ in position and in nothing a reader sees.
+  if [ -n "$rex" ]; then
+    ROW="$(roster_row "${RR_ARGS[@]}" "re_executes=$(clean "$rex")")" || ROW=""
+    if [ -z "$ROW" ]; then
+      ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
+      ROW="${ROW}|re_executes=$(clean "$rex")"
+    fi
+  else
+    ROW="$(roster_row "${RR_ARGS[@]}")" || return 1
+  fi
+  [ -n "$ROW" ] || return 1
+  printf '%s\n' "$ROW" >> "$f" 2>/dev/null || return 1
   return 0
 }
 
@@ -1851,6 +1892,181 @@ adopt_abs() {  # <path> <repo root>
     *)  printf '%s/%s' "$2" "$1" ;;
   esac
 }
+
+# ---------------------------------------------------------------- is this session's residue gone?
+#
+# THE SWEEP'S OWN QUESTION, ASKED OF ONE SESSION (REQ-9 AC-9.1; D10). `adopt` offered every
+# row on every roster in the project, so a wave released two days ago was still offering its
+# agents at every resume. A session nobody can act on, whose state files the next
+# SessionStart deletes, has nothing left to adopt — and the two halves of that sentence are
+# the two facts the `sweep` verb already decides with: the session is not in
+# `patrol_live_session_ids`, and its own newest state file is older than the window a
+# windowed sweep defers inside.
+#
+# BOTH HALVES, NEVER ONE. Deadness alone is the WRONG answer here and would break the verb's
+# whole purpose: a `/clear` leaves the predecessor id dead within seconds while its roster is
+# the freshest file in the directory, and that is precisely the roster `adopt` exists to read.
+# The sweep defers exactly that session (hooks/session-start.sh passes `--window`), so this
+# verb defers with it and the two agree by construction.
+#
+# THE LIVE SET IS RESOLVED ONCE PER RUN, by the caller, and handed in: it reads one file per
+# running process out of the claude home and is the same answer for every roster in the walk.
+#
+# A SESSION WHOSE FILES CANNOT BE STAT'D AT ALL is treated as old enough, exactly as the
+# sweep treats it (its own comment: an age gate exists to protect a session that JUST died,
+# not to withhold state this verb can no longer measure).
+adopt_residue_swept() {  # <root> <sid> <live id list> <window s> <now> -> 0 the sweep would take it
+  local root="$1" sid="$2" live="$3" window="$4" now="$5" f mt newest=0
+  [ -n "$sid" ] || return 1
+  case "
+$live
+" in
+    *"
+$sid
+"*) return 1 ;;
+  esac
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    mt="$(file_mtime "$f")"
+    case "$mt" in ''|*[!0-9]*) continue ;; esac
+    [ "$mt" -gt "$newest" ] && newest="$mt"
+  done <<EOF
+$(patrol_session_state_files "$root" "$sid")
+EOF
+  [ "$newest" -gt 0 ] && [ $(( now - newest )) -lt "$window" ] && return 1
+  return 0
+}
+
+# ---------------------------------------------------------------- is this row too quiet?
+#
+# ONE PREDICATE, AND IT IS THE LIBRARY'S (REQ-10 AC-10.1; D9). The tick used to decide a row
+# needed surfacing from `duration=` alone, while skills/canonical-sdlc/dispatch.md promised
+# the opposite in so many words: "a row is quiet when it is quieter than the `cadence` its own
+# brief declared". Nothing in the tick opened the progress artifact or the transcript. This
+# function is the missing read, and it is `observe_class`'s answer rather than a fifth
+# arithmetic: the row's declared cadence, both activity channels, one window.
+#
+# THE WINDOW IS ONE CADENCE, not two. `adopt` doubled it on the reasoning that a row
+# promising a line every ten minutes is, at any random instant, up to ten minutes stale while
+# perfectly healthy — true, and the library's own answer to it is the same one the liveness
+# contract ratified: "too quiet" means quieter than the AUTHOR'S OWN declaration, and an
+# author who wants slack declares it. Two readers, one number (D9).
+#
+# WHAT IS RESET, AND WHY ALL OF IT. `observe_class` reads six globals that `observe_agent`
+# normally fills. This caller already holds the row, so it fills them itself and clears every
+# one first: a value left over from the previous row would be read as this row's evidence.
+#
+# NOTHING OBSERVED IS NOT SILENCE (exit 2). A row that declared no progress artifact and
+# whose agent has no transcript on disk offers no mtime to measure or to print — and a NOTIFY
+# that names no evidence is the noise this read exists to replace. The duration arm still
+# answers for such a row.
+#
+# THE DELIVERY STATE IS `none` DELIBERATELY. `observe_class` ranks `delivered` above `alive`,
+# and this caller is inside the UNMET arm of a verdict the sweeper has already taken over the
+# same contract — re-deriving delivery from disk here would be a second answer to a question
+# one owner already answered (D0).
+TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
+row_quiet() {  # <roster-state row> <now epoch> -> 0 quiet, 1 alive, 2 nothing to observe
+  local row="$1" now="$2" cad cad_s prog pm=0 id rsid sub tx lm=0
+
+  TICK_QUIET_MTIME=""; TICK_QUIET_CHANNEL=""; TICK_QUIET_AGE=""; TICK_QUIET_CAD=""
+  OBS_DELIV_STATE=none
+  OBS_LOG_MTIME=0; OBS_LOG_AGE=0
+  OBS_PROGRESS_STATE=unnamed; OBS_PROGRESS_AGE=0
+  OBS_CADENCE_S="$OBSERVE_CADENCE_DEFAULT_S"
+
+  # THE DECLARED CADENCE, and the library's own fallback when the row declared none or
+  # declared it unreadably — the same default `observe_agent` applies, for the same reason:
+  # a guess about the number is worse than the rule the liveness contract widened.
+  cad="$(line_field "$row" cadence)"
+  if [ -n "$cad" ]; then
+    cad_s="$(parse_seconds "$cad")" && [ -n "$cad_s" ] && OBS_CADENCE_S="$cad_s"
+  fi
+  TICK_QUIET_CAD="$OBS_CADENCE_S"
+
+  # CHANNEL 1 — the contracted progress artifact, as the row spells it.
+  prog="$(adopt_abs "$(line_field "$row" progress)" "$REPO_REAL")"
+  if [ -n "$prog" ] && [ -f "$prog" ]; then
+    OBS_PROGRESS_STATE=present
+    pm="$(file_mtime "$prog")"
+    OBS_PROGRESS_AGE=$(( now - pm ))
+    [ "$OBS_PROGRESS_AGE" -lt 0 ] && OBS_PROGRESS_AGE=0
+  fi
+
+  # CHANNEL 2 — the agent's own transcript, which the harness appends to on every turn it
+  # takes. It is the channel a role with no Write tool has, and the one a working agent
+  # cannot forget to keep. An ADOPTED row is still filed under the session that LAUNCHED it,
+  # which is what `adopted_from=` records.
+  tx=""
+  id="$(line_field "$row" agent_id)"
+  if [ -n "$id" ]; then
+    rsid="$(line_field "$row" adopted_from)"
+    [ -n "$rsid" ] || rsid="$SESSION_ID"
+    sub="$(session_subagent_dir "$rsid")" || sub=""
+    if [ -n "$sub" ] && [ -f "$sub/agent-${id}.jsonl" ]; then
+      tx="$sub/agent-${id}.jsonl"
+      OBS_LOG_MTIME="$(file_mtime "$tx")"
+      lm="$OBS_LOG_MTIME"
+      OBS_LOG_AGE=$(( now - OBS_LOG_MTIME ))
+      [ "$OBS_LOG_AGE" -lt 0 ] && OBS_LOG_AGE=0
+    fi
+  fi
+
+  [ "$OBS_PROGRESS_STATE" = present ] || [ "$lm" -gt 0 ] || return 2
+
+  # THE MTIME THE READER IS SHOWN is the NEWEST of the two, because that is the one the
+  # verdict rests on: the row is quiet only if BOTH channels are, so the later of them is
+  # what "last heard from" means. Printed as an instant and not only as an age — an age is
+  # relative to a tick nobody kept.
+  if [ "$lm" -gt "$pm" ]; then
+    TICK_QUIET_CHANNEL="transcript $tx"
+    TICK_QUIET_MTIME="$(epoch_iso "$lm")"
+    TICK_QUIET_AGE="$OBS_LOG_AGE"
+  else
+    TICK_QUIET_CHANNEL="progress $prog"
+    TICK_QUIET_MTIME="$(epoch_iso "$pm")"
+    TICK_QUIET_AGE="$OBS_PROGRESS_AGE"
+  fi
+
+  [ "$(observe_class)" = idle ] && return 0
+  return 1
+}
+
+# ---------------------------------------------------------------- the decision line
+#
+# THE TICK'S LAST LINE, AND THE ONLY PLACE THIS SCHEMA IS PRINTED (REQ-10 AC-10.2/10.4; D5).
+# Four arms used to print it inline and three of them followed it with the sentence that
+# explained it, so the last thing an operator read was never reliably the answer. One printer
+# means one field order, one place a field is added, and a caller that cannot print its
+# sentence afterwards by accident.
+#
+# `decision=` IS THE RANKED MAXIMUM DISARM > NOTIFY > FILL > QUIET. Each band is raised by a
+# fact this tick computed; the highest wins the field and every lower one keeps its own, so a
+# tick that ordered work and found an overdue row reports both rather than whichever arm ran
+# first. DISARM is terminal and exits above the fold, so the fold there is over three.
+#
+# THE SCHEMA NAME IS UNCHANGED AND THE NEW FIELDS ARE TRAILING (A2). `fill=` and `trees=`
+# print only when they carry something: a reader that does not know them is inert to them,
+# and the existing `decision=|total=|open=` run stays byte-adjacent for the readers that
+# match on it (tests/cross-gate-agreement.test.sh's `la6_open_tick`). `rows=`/`detail=` keep
+# their positions, which is why they are passed through this printer rather than appended by
+# the NOTIFY arm.
+tick_decision_line() {  # <decision> <total> <open> [rows] [detail] [fill ids] [tree paths]
+  local line
+  line="$(printf '%s|at=%s|session=%s|decision=%s|total=%s|open=%s' \
+    "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$1" "$2" "$3")"
+  [ -n "${4:-}" ] && line="${line}|rows=${4}"
+  [ -n "${5:-}" ] && line="${line}|detail=${5}"
+  [ -n "${6:-}" ] && line="${line}|fill=${6}"
+  [ -n "${7:-}" ] && line="${line}|trees=${7}"
+  printf '%s\n' "$line"
+}
+
+# A FACT, NOT AN ALARM (REQ-10 AC-10.3/10.4; D5). Three things the tick knows and nobody can
+# act on differently for knowing them — a standing worktree, a panel too stale to write
+# against, a plan with no budget — used to print as ordinary lines, two of them BELOW the
+# decision. `poker: note:` is what a fact gets, and every note prints above the decision line.
+note() { printf 'poker: note: %s\n' "$1"; }
 
 # ---------------------------------------------------------------- the sweep
 #
@@ -2098,7 +2314,30 @@ case "$VERB" in
     [ -n "$ADOPT_OWN_PLAN" ] && ADOPT_OWN_KEY="$(adopt_plan_key "$ADOPT_OWN_PLAN")"
     ADOPT_ADOPTED=0
     ADOPT_LISTED=0
+    ADOPT_CLOSED=0
+    ADOPT_DUPES=0
     ADOPT_LAST_PART=""
+    # THE IDS THIS RUN HAS ALREADY OFFERED (REQ-9 AC-9.2; D10). Adoption files a copy of the
+    # row on the ADOPTER's roster, so an agent resumed N times leaves N rows for one agent id
+    # across N rosters — and this walk read all of them, offering one running agent as N
+    # things to ledger, message and stop. The id is the identity; the name is not (a rename
+    # under `-r<n>` is this verb's own convention). First row carrying an id wins, in roster
+    # order, which is the same "the last row of a name wins / the first sighting of an id
+    # counts" direction every other reader in the fleet takes.
+    ADOPT_SEEN_IDS="|"
+    # CLOSURE'S TWO INPUTS, RESOLVED ONCE PER RUN. The live session set is one file per
+    # running process out of the claude home, and the window is this project's own poker
+    # interval — the same knob the `sweep` verb reads for `--window`, with the same fallback
+    # to this script's built-in default so a malformed override cannot disable the read.
+    ADOPT_LIVE_IDS="$(patrol_live_session_ids)"
+    ADOPT_LIVE_IDS="${ADOPT_LIVE_IDS}${ADOPT_LIVE_IDS:+
+}${SESSION_ID}"
+    ADOPT_WINDOW="$(poker_interval_seconds 2>/dev/null)"
+    case "$ADOPT_WINDOW" in ''|*[!0-9]*) ADOPT_WINDOW="$(parse_seconds "$POKER_INTERVAL_DEFAULT" 2>/dev/null)" ;; esac
+    case "$ADOPT_WINDOW" in ''|*[!0-9]*) ADOPT_WINDOW=1200 ;; esac
+    # ONE ANSWER PER PREDECESSOR SESSION, not one per row: the residue question is about the
+    # session's files, and every row on a roster shares them.
+    ADOPT_SESSION_SWEPT=no
 
     for ADOPT_RF in "$ADOPT_DIR"/roster-*.state; do
       [ -f "$ADOPT_RF" ] || continue
@@ -2112,15 +2351,70 @@ case "$VERB" in
       [ -f "$ADOPT_LEDGER" ] && [ ! -L "$ADOPT_LEDGER" ] || ADOPT_LEDGER=""
       ADOPT_OUT="$(adopt_fold "$ADOPT_RF" "$ADOPT_LEDGER")"
       [ -n "$ADOPT_OUT" ] || continue
-      ADOPT_SESSIONS=$((ADOPT_SESSIONS + 1))
+      # THE RESIDUE QUESTION, ONCE PER ROSTER (REQ-9 AC-9.1). A dead session whose files the
+      # next sweep takes has nothing to hand over; its rows are counted `closed` below and
+      # printed nowhere.
+      ADOPT_SESSION_SWEPT=no
+      adopt_residue_swept "$REPO_REAL" "$OSID" "$ADOPT_LIVE_IDS" "$ADOPT_WINDOW" "$ADOPT_NOW" \
+        && ADOPT_SESSION_SWEPT=yes
+      # COUNTED WHEN IT CONTRIBUTES, not when it is merely read. A predecessor whose every
+      # row is closed is residue, and "N open row(s) from M predecessor session(s)" would be
+      # a sentence naming sessions the reader was shown nothing from.
+      ADOPT_SESSION_COUNTED=no
 
       # Resolved ONCE per predecessor session, not once per row: the walk is the same for
       # every agent that session launched.
       OSUB="$(session_subagent_dir "$OSID")" || OSUB=""
 
       while IFS='|' read -r RNAME RID RTYPE RDELIV RPROG RCAD RLAUNCH RORIG RPLAN RWAIVER \
-                            RFILES RSALLOW RSSRC; do
+                            RFILES RSALLOW RSSRC RREX; do
         [ -n "$RNAME" ] || continue
+
+        # ---- IS THIS ROW STILL SOMEBODY'S WORK? (REQ-9 AC-9.1/9.2; D10)
+        #
+        # CLOSURE IS DERIVED, NEVER STORED (spec §1). Two independent facts close a row for
+        # this verb, and neither is a new field: the run its own `plan=` names is closed
+        # (`run_open`, the same predicate `bind` and the tick's run-state read use), or the
+        # session that launched it is dead and its files are already sweepable. Either way
+        # there is nothing to take over, and a row offered anyway costs the operator a ledger
+        # entry, a message address and a stop for work that no longer exists.
+        #
+        # CHECKED BEFORE THE PARTITION, AND ABOVE `own` INCLUDED. The plan partition answers
+        # "whose run is this row"; closure answers "is there a run at all". A row of OUR OWN
+        # closed binding is residue exactly as a neighbour's is, and adopting it would take
+        # ownership of an agent whose contract nothing is left to discharge.
+        #
+        # AN UNREADABLE PLAN IS NOT A CLOSED ONE. `run_open` says nothing about a path that
+        # is not a file here — another root's plan, a plan since deleted — so the row keeps
+        # today's partition and is listed. A verb that cannot read a fact does not guess it.
+        ADOPT_ROW_CLOSED=no
+        if [ "$ADOPT_SESSION_SWEPT" = yes ]; then
+          ADOPT_ROW_CLOSED=yes
+        elif [ -n "$RPLAN" ] && [ "$RPLAN" != none ]; then
+          ADOPT_ROW_PLAN_ABS="$(adopt_abs "$RPLAN" "$REPO_REAL")"
+          if [ -f "$ADOPT_ROW_PLAN_ABS" ] && ! run_open "$ADOPT_ROW_PLAN_ABS"; then
+            ADOPT_ROW_CLOSED=yes
+          fi
+        fi
+        if [ "$ADOPT_ROW_CLOSED" = yes ]; then
+          ADOPT_CLOSED=$((ADOPT_CLOSED + 1))
+          continue
+        fi
+
+        # ---- ONE AGENT ID, ONE OFFER (AC-9.2). An empty id is never deduped: an
+        # UNADDRESSABLE row has no identity to be the same as another's, and folding two of
+        # them together would hide a row the operator has to fix at its source.
+        if [ -n "$RID" ]; then
+          case "$ADOPT_SEEN_IDS" in
+            *"|${RID}|"*) ADOPT_DUPES=$((ADOPT_DUPES + 1)); continue ;;
+          esac
+          ADOPT_SEEN_IDS="${ADOPT_SEEN_IDS}${RID}|"
+        fi
+
+        if [ "$ADOPT_SESSION_COUNTED" = no ]; then
+          ADOPT_SESSIONS=$((ADOPT_SESSIONS + 1))
+          ADOPT_SESSION_COUNTED=yes
+        fi
         ADOPT_ROWS=$((ADOPT_ROWS + 1))
 
         # ---- THE STOP ADDRESS, BUILT FROM THE SESSION THAT LAUNCHED THE AGENT
@@ -2150,14 +2444,18 @@ case "$VERB" in
         # ---- the progress file's age against the cadence its own row declared
         RPROG_ABS="$(adopt_abs "$RPROG" "$REPO_REAL")"
         PROG_AGE=""
-        [ -n "$RPROG_ABS" ] && [ -f "$RPROG_ABS" ] \
-          && PROG_AGE=$(( ADOPT_NOW - $(file_mtime "$RPROG_ABS") ))
+        PROG_MTIME=0
+        if [ -n "$RPROG_ABS" ] && [ -f "$RPROG_ABS" ]; then
+          PROG_MTIME="$(file_mtime "$RPROG_ABS")"
+          PROG_AGE=$(( ADOPT_NOW - PROG_MTIME ))
+        fi
         CAD_S="$(parse_seconds "$RCAD")" || CAD_S=""
 
         # ---- the three addresses, all of them derived from the one id
         TX=""
         TX_PRESENT=no
         TX_AGE=""
+        TX_MTIME=0
         if [ -n "$RID" ]; then
           if [ -n "$OSUB" ]; then
             TX="$OSUB/agent-${RID}.jsonl"
@@ -2166,7 +2464,8 @@ case "$VERB" in
               # THE SECOND LIVENESS INPUT. The harness appends to this file on every turn
               # the agent takes, so its mtime is a fact about the agent rather than a
               # promise the agent has to remember to keep.
-              TX_AGE=$(( ADOPT_NOW - $(file_mtime "$TX") ))
+              TX_MTIME="$(file_mtime "$TX")"
+              TX_AGE=$(( ADOPT_NOW - TX_MTIME ))
             fi
           else
             # The slug could not be resolved — say where to look rather than inventing a
@@ -2198,18 +2497,35 @@ case "$VERB" in
         # standing in for. SILENT now means neither a written line nor a turn taken inside
         # the window, which is a state worth waking someone for.
         #
-        # THE WINDOW is `PATROL_STALE_MULTIPLIER × cadence`, out of the library
-        # (payload/scripts/lib/patrol.sh) rather than an inline `* 2` — one constant, three
-        # readers, spec AC-22. It is more than one cadence because a row promising a line
-        # every 10 minutes is, at any random instant, up to 10 minutes stale while perfectly
-        # healthy; a threshold at the cadence itself would call half the live fleet SILENT.
-        # Same slack hooks/dispatch-preflight.sh allows the Patrol stamp.
+        # THE WINDOW IS ONE CADENCE, AND THE CLASSIFICATION IS THE LIBRARY'S (REQ-10 D9).
+        # This arm used to compute twice the cadence here, from a constant of its own, on the
+        # reasoning
+        # that a row promising a line every ten minutes is up to ten minutes stale at any
+        # random instant while perfectly healthy. The reasoning is sound and the consequence
+        # was not: `observe_class` (payload/scripts/lib/observe.sh) answers the SAME question
+        # at ONE cadence for the stop gates, so one row was alive to one reader and silent to
+        # another, and the fleet carried four staleness arithmetics for three questions. Both
+        # readers ask the function now; an author who wants slack declares it in the cadence,
+        # which is the liveness contract's own rule ("too quiet" means quieter than the
+        # AUTHOR'S OWN declaration).
+        #
+        # THE SIX INPUTS ARE FILLED BY HAND because this caller already holds the row and the
+        # two stats — `observe_agent` would re-resolve a target against THIS session's roster,
+        # which is not where these rows live. Delivery is left `none`: the verdict order below
+        # asks about the deliverable itself one branch later, and `observe_class` outranking it
+        # here would answer the same question twice.
         LIVE=no
-        if [ -n "$CAD_S" ]; then
-          STALE_LIMIT=$(( CAD_S * PATROL_STALE_MULTIPLIER ))
-          [ -n "$PROG_AGE" ] && [ "$PROG_AGE" -le "$STALE_LIMIT" ] && LIVE=yes
-          [ -n "$TX_AGE" ] && [ "$TX_AGE" -le "$STALE_LIMIT" ] && LIVE=yes
+        OBS_DELIV_STATE=none
+        OBS_PROGRESS_STATE=unnamed; OBS_PROGRESS_AGE=0
+        OBS_LOG_MTIME=0; OBS_LOG_AGE=0
+        OBS_CADENCE_S="${CAD_S:-$OBSERVE_CADENCE_DEFAULT_S}"
+        if [ -n "$PROG_AGE" ]; then
+          OBS_PROGRESS_STATE=present; OBS_PROGRESS_AGE="$PROG_AGE"
         fi
+        if [ -n "$TX_AGE" ]; then
+          OBS_LOG_MTIME="$TX_MTIME"; OBS_LOG_AGE="$TX_AGE"
+        fi
+        [ "$(observe_class)" = alive ] && LIVE=yes
 
         if [ -z "$RID" ]; then
           VERDICT=UNADDRESSABLE
@@ -2304,7 +2620,7 @@ case "$VERB" in
               if adopt_write_row "$ADOPT_OWN_ROSTER" "$SESSION_ID" "$RNAME" "$RID" "$RTYPE" \
                    "$RDELIV" "$RPROG" "$RCAD" "$RLAUNCH" "$OSID" "$ADOPT_ADDR" \
                    "${ADOPT_OWN_PLAN:-none}" "$RWAIVER" \
-                   "$RFILES" "$RSALLOW" "$RSSRC"; then
+                   "$RFILES" "$RSALLOW" "$RSSRC" "$RREX"; then
                 ROW_JOURNALLED=yes
                 # THE MARKER COPY (S17, AC-12 attempt 2). `hooks/landing-gate.sh` is this
                 # schema's one writer today — its own comment at :561-563 calls a second
@@ -2423,9 +2739,19 @@ $ADOPT_OUT
 EOF
     done
 
-    printf '%s|at=%s|session=%s|scanned=%s|open=%s|adopted=%s|listed=%s\n' \
+    # THE TWO NEW COUNTERS ARE TRAILING AND ADDITIVE (REQ-9 AC-9.1/9.2). A row this verb
+    # dropped is invisible by design — that is the fix — so the COUNT of what was dropped is
+    # on the line that answers for the run, or the drop could not be told from a walk that
+    # found nothing.
+    printf '%s|at=%s|session=%s|scanned=%s|open=%s|adopted=%s|listed=%s|closed=%s|dupes=%s\n' \
       "$ADOPT_SCHEMA" "$(iso_now)" "$SESSION_ID" "$ADOPT_SESSIONS" "$ADOPT_ROWS" \
-      "$ADOPT_ADOPTED" "$ADOPT_LISTED"
+      "$ADOPT_ADOPTED" "$ADOPT_LISTED" "$ADOPT_CLOSED" "$ADOPT_DUPES"
+    # SAID ONCE, AND ONLY WHEN THERE IS SOMETHING TO SAY. An operator who expected a
+    # predecessor's rows and was shown none is owed the reason.
+    [ "$ADOPT_CLOSED" -gt 0 ] \
+      && say "$ADOPT_CLOSED row(s) skipped: their run is closed, or their session is dead and its state files are already sweepable — there is nothing left to take over."
+    [ "$ADOPT_DUPES" -gt 0 ] \
+      && say "$ADOPT_DUPES duplicate row(s) folded: one agent id is one agent, however many rosters carry a row for it."
     if [ "$ADOPT_ROWS" -eq 0 ]; then
       say "nothing to adopt — no other session has an open row on this project's rosters."
       exit 0
@@ -3023,6 +3349,9 @@ EOF
     fi
 
     TOTAL=0; OPEN=0; NOTIFY_ROWS=""; NOTIFY_DETAIL=""
+    # THE CADENCE HALF OF THE NOTIFY DETAIL, kept apart from the duration half so each gets
+    # the sentence that describes it and the machine line gets both (REQ-10 AC-10.1).
+    QUIET_DETAIL=""
     # THE MET LINEAGES THIS SESSION HAS NOT CLOSED (T22, A-orch-33). `payload/scripts/lib/stop.sh`
     # used to refuse the end of a Patrol turn until the transcript showed a ListAgents call —
     # a chore demanded of the model before a gate would judge, which is the rule ADR-024
@@ -3117,15 +3446,34 @@ EOF
       ROW_LINE="$(grep -F "roster-state/v1|" "$ROSTER_FILE" 2>/dev/null \
         | grep -F "|name=${RNAME}|" | tail -1)"
       [ -n "$ROW_LINE" ] || continue
+
+      # ---- ARM 1: past its declared DURATION. Unchanged arithmetic, restructured off
+      # `continue` so that an unreadable duration no longer skips the row entirely — the
+      # cadence read below is a second, independent question about the same row, and a row
+      # whose `duration=` will not parse is exactly the row most worth asking it about.
+      ROW_OVERDUE=no
       DUR_RAW="$(line_field "$ROW_LINE" duration)"
       LAUNCHED_RAW="$(line_field "$ROW_LINE" launched_at)"
-      DUR_S="$(parse_seconds "$DUR_RAW")" || continue
+      DUR_S="$(parse_seconds "$DUR_RAW")" || DUR_S=""
       LE="$(iso_epoch "$LAUNCHED_RAW")"
-      [ -n "$LE" ] || continue
-      AGE=$(( $(now_epoch) - LE ))
-      [ "$AGE" -gt "$DUR_S" ] || continue
-      NOTIFY_ROWS="${NOTIFY_ROWS}${NOTIFY_ROWS:+,}$(clean "$RNAME")"
-      NOTIFY_DETAIL="${NOTIFY_DETAIL}${NOTIFY_DETAIL:+; }$(clean "$RNAME"): $(line_field "$LINE" detail) (elapsed ${AGE}s past declared duration \"$DUR_RAW\" (${DUR_S}s))"
+      if [ -n "$DUR_S" ] && [ -n "$LE" ]; then
+        AGE=$(( $(now_epoch) - LE ))
+        if [ "$AGE" -gt "$DUR_S" ]; then
+          ROW_OVERDUE=yes
+          NOTIFY_ROWS="${NOTIFY_ROWS}${NOTIFY_ROWS:+,}$(clean "$RNAME")"
+          NOTIFY_DETAIL="${NOTIFY_DETAIL}${NOTIFY_DETAIL:+; }$(clean "$RNAME"): $(line_field "$LINE" detail) (elapsed ${AGE}s past declared duration \"$DUR_RAW\" (${DUR_S}s))"
+        fi
+      fi
+
+      # ---- ARM 2: QUIETER THAN ITS OWN DECLARED CADENCE (REQ-10 AC-10.1; D9). The read the
+      # Patrol prompt has promised since wave-01 and no code took: the row's `progress=` and
+      # `cadence=` through `observe_class`, with the mtime that decided it printed beside the
+      # verdict so the reader can check it. A row is named ONCE however many arms found it.
+      if row_quiet "$ROW_LINE" "$(now_epoch)"; then
+        [ "$ROW_OVERDUE" = yes ] \
+          || NOTIFY_ROWS="${NOTIFY_ROWS}${NOTIFY_ROWS:+,}$(clean "$RNAME")"
+        QUIET_DETAIL="${QUIET_DETAIL}${QUIET_DETAIL:+; }$(clean "$RNAME"): no line for ${TICK_QUIET_AGE}s against cadence ${TICK_QUIET_CAD}s (${TICK_QUIET_CHANNEL}, mtime ${TICK_QUIET_MTIME})"
+      fi
     done <<EOF
 $VERDICT_OUT
 EOF
@@ -3469,7 +3817,7 @@ EOF
         # A-orch-31: something WOULD have been decided (a MET row, or a duplicate start,
         # is sitting in the candidate sets above) but the panel reading is not fresh enough
         # to trust with a write. One line, said once, never a STANDDOWN, an order or an ack.
-        say "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
+        note "stand-down deferred — the panel reading is stale; ListAgents and the next tick decides"
       fi
     fi
 
@@ -3510,9 +3858,11 @@ EOF
         # dispatch by design — so it is also the tick where the width the machine will carry
         # is most worth knowing, right before the batch that has not been sent yet.
         rung_report "$REPO_REAL" "$SESSION_ID"
-        printf '%s|at=%s|session=%s|decision=QUIET|total=%s|open=%s\n' \
-          "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
+        # THE SENTENCE FIRST, THE DECISION LINE LAST (REQ-10 AC-10.4). Every band in this
+        # verb prints its explanation above its machine line, so the last line a tick prints
+        # is always the answer — whichever arm answered.
         say "QUIET — armed, nothing dispatched yet on this session"
+        tick_decision_line QUIET "$TOTAL" "$OPEN"
         exit 0
       fi
       die "REFUSED — no roster at $ROSTER_FILE; this is not the same as an empty one."
@@ -3571,9 +3921,8 @@ EOF
       # reports it, and an operator reading the last tick of a run in a transcript should not
       # have to know which arm printed the line and which did not.
       rung_report "$REPO_REAL" "$SESSION_ID"
-      printf '%s|at=%s|session=%s|decision=DISARM|total=%s|open=%s\n' \
-        "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
       say "DISARM — no open row on this roster and the run is delivered (${RUN_STATE_WHY}); the Patrol may stop."
+      tick_decision_line DISARM "$TOTAL" "$OPEN"
       # THE LAST ACT OF A DISARM TICK. The decision is terminal — "the Patrol may stop" —
       # so the stamp this very tick wrote before it decided has to stop claiming a live
       # clock, or hooks/patrol-revive.sh reads the stop this line just chose as a death and
@@ -3612,7 +3961,15 @@ EOF
     #
     # IT REMOVES NOTHING. `spawn-worktree.sh land` is the act and the orchestrator runs it;
     # the tick says the tree is standing and stops there.
-    LEASE_ROWS=""; LEASE_DETAIL=""
+    #
+    # AND IT IS A NOTE, NOT A BAND (REQ-10 AC-10.3; D5). This walk used to feed NOTIFY, so a
+    # tree left standing after its row was discharged raised the exit-1 band on EVERY tick
+    # for the life of the tree — nothing here is remembered between ticks — and buried the
+    # decision the roster had actually reached. A standing tree is a fact about disk: it
+    # prints as `poker: note:` and it rides the decision line in a `trees=` field of its own,
+    # where a reader that wants to act on it can find it without the tick having claimed
+    # something was wrong.
+    LEASE_TREES=""
     LEASE_FILE="$(mktemp "${TMPDIR:-/tmp}/bionic-poker-verdict.XXXXXX" 2>/dev/null)" || LEASE_FILE=""
     if [ -n "$LEASE_FILE" ]; then
       printf '%s\n' "$VERDICT_OUT" > "$LEASE_FILE" 2>/dev/null
@@ -3621,9 +3978,8 @@ EOF
         LEASE_PATH="$(printf '%s' "$LEASE_LINE" | cut -f1)"
         LEASE_ROW="$(printf '%s' "$LEASE_LINE" | cut -f2)"
         [ -n "$LEASE_PATH" ] && [ -n "$LEASE_ROW" ] || continue
-        say "NOTIFY lease-overrun $LEASE_PATH row=$LEASE_ROW"
-        LEASE_ROWS="${LEASE_ROWS}${LEASE_ROWS:+,}$(clean "$LEASE_ROW")"
-        LEASE_DETAIL="${LEASE_DETAIL}${LEASE_DETAIL:+; }$(clean "$LEASE_ROW"): lease-overrun, $(clean "$LEASE_PATH") still stands after the row was discharged"
+        note "tree stands $LEASE_PATH — row discharged; land or remove"
+        LEASE_TREES="${LEASE_TREES}${LEASE_TREES:+,}$(clean "$LEASE_PATH")"
       done <<EOF
 $(worktree_lease_overruns "$REPO_REAL" "$LEASE_FILE")
 EOF
@@ -3643,6 +3999,9 @@ EOF
     #
     # PRESSURE FIRST, ALWAYS. See the block comment above `space_field` for why the order is
     # not negotiable and why nothing here re-derives the budget.
+    # THE FILL THIS TICK ORDERED, empty until the scheduler names one — the FILL band's own
+    # input to the ranked decision below (D5).
+    SCHED_FILL=""
     SCHED_CORES="$(space_field "$(resources_probe)" cores)"
     case "${SCHED_CORES:-}" in ''|*[!0-9]*) SCHED_CORES=1 ;; esac
     [ "$SCHED_CORES" -ge 1 ] || SCHED_CORES=1
@@ -3723,10 +4082,14 @@ EOF
       elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
         say "no FILL — plan at current: ${SCHED_CURRENT}, Step-3 approval pending"
       elif [ -z "$SCHED_WRITERS" ]; then
+        # A NOTE, BECAUSE NOTHING FOLLOWS FROM IT THIS TICK (REQ-10 AC-10.4; seed A 8e). A run
+        # with no budget in its plan gets this line on every tick of its life, and no act the
+        # reader can take makes the next tick quieter — a budget is a ceiling a run opts into,
+        # and opting in is a plan edit nobody is being asked for here.
         if [ -z "$SCHED_PLAN" ]; then
-          say "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
+          note "no FILL — no plan carrying an unfenced \"## SDLC State\" to read a budget or a task table from."
         else
-          say "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
+          note "no FILL — ${SCHED_PLAN} carries no readable parallel-budget: writers field in its frontmatter; a budget is a ceiling a run opts into."
         fi
       else
         # THE GAP IS MEASURED AGAINST THE RUNG, NOT THE CEILING (AC-17). The ceiling is what
@@ -3767,7 +4130,13 @@ EOF
 $SCHED_READY
 EOF
           if [ "$SCHED_N" -gt 0 ]; then
+            # THE PRINTED LINE IS THE DUTY WALL'S (payload/scripts/lib/stop.sh reads
+            # `poker: FILL ` out of this turn's raw tool result) and is unchanged to the byte.
+            # WHAT CHANGES is that the ids are also carried to the decision line, so a tick
+            # that ordered work stops reporting that nothing was wanted (REQ-10 AC-10.2, D5:
+            # observed 19:00:46Z as `poker: FILL T13` above `decision=QUIET`).
             say "FILL ${SCHED_IDS}"
+            SCHED_FILL="$SCHED_IDS"
           else
             say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending step-${SCHED_CURRENT} task has all its dependencies landed."
           fi
@@ -3775,24 +4144,33 @@ EOF
       fi
     fi
 
-    # ONE NOTIFY BAND, TWO CONTRIBUTORS. An overdue row and a standing lease are both
-    # "something needs surfacing", and the exit-1 band is what the Patrol's prompt reads;
-    # a lease overrun that decided QUIET would print a line and then tell the reader
-    # nothing was wrong. The rows and the details are concatenated rather than given a
-    # field of their own, so no consumer of this schema has to learn a new key to see them.
-    if [ -n "$NOTIFY_ROWS" ] || [ -n "$LEASE_ROWS" ]; then
-      printf '%s|at=%s|session=%s|decision=NOTIFY|total=%s|open=%s|rows=%s|detail=%s\n' \
-        "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN" \
-        "${NOTIFY_ROWS}${NOTIFY_ROWS:+${LEASE_ROWS:+,}}${LEASE_ROWS}" \
-        "$(clean "${NOTIFY_DETAIL}${NOTIFY_DETAIL:+${LEASE_DETAIL:+; }}${LEASE_DETAIL}")"
-      # The lease lines were said where they were found; only the duration half needs a
-      # sentence here, and a tick that has only the other half must not print an empty one.
+    # ─────────────────────────────────────── the ranked decision (REQ-10 AC-10.2; D5)
+    #
+    # ONE NOTIFY BAND, TWO CONTRIBUTORS, AND THEY ARE BOTH ABOUT A ROW: past its declared
+    # duration, or quieter than its declared cadence. The standing worktree was the third
+    # until this wave and is not one any more — it is a fact, printed as a note above and
+    # carried in `trees=` below (AC-10.3). The rows and details are concatenated rather than
+    # given a field each, so no consumer of this schema has to learn a new key to see them.
+    #
+    # THE BAND IS THE RANKED MAXIMUM, ascending: QUIET is the floor, a fill raises it to
+    # FILL, a row needing surfacing raises it to NOTIFY. DISARM is terminal and has already
+    # exited. Every lower band keeps its own field, so nothing this tick learned is lost to
+    # the band that won — a NOTIFY tick still reports the fill it ordered.
+    TICK_DECISION=QUIET
+    [ -n "$SCHED_FILL" ] && TICK_DECISION=FILL
+    [ -n "$NOTIFY_ROWS" ] && TICK_DECISION=NOTIFY
+
+    if [ "$TICK_DECISION" = NOTIFY ]; then
+      # THE SENTENCES FIRST, ONE PER ARM THAT HAS SOMETHING — a tick holding only the other
+      # arm's finding must not print an empty one.
       [ -n "$NOTIFY_DETAIL" ] && say "NOTIFY — past declared duration: $NOTIFY_DETAIL"
+      [ -n "$QUIET_DETAIL" ] && say "NOTIFY — quieter than the declared cadence: $QUIET_DETAIL"
+      tick_decision_line NOTIFY "$TOTAL" "$OPEN" "$NOTIFY_ROWS" \
+        "$(clean "${NOTIFY_DETAIL}${NOTIFY_DETAIL:+${QUIET_DETAIL:+; }}${QUIET_DETAIL}")" \
+        "$SCHED_FILL" "$LEASE_TREES"
       exit 1
     fi
 
-    printf '%s|at=%s|session=%s|decision=QUIET|total=%s|open=%s\n' \
-      "$POKER_DECISION_SCHEMA" "$(iso_now)" "$SESSION_ID" "$TOTAL" "$OPEN"
     # THE QUIET LINE HAS TWO READINGS NOW, and printing the wrong one is how this fix would
     # be mistaken for the bug it repairs. "0 open row(s), none past their declared duration"
     # over a mid-run lull says nothing about why the Patrol did not stop, and its reader is a
@@ -3803,11 +4181,20 @@ EOF
     # a statement about the roster, which a liveness reading does not get to make false. The
     # live number is `open=` on the decision line, and the trim line above says so
     # whenever the two differ.
-    if [ "$OPEN_ROSTER" -eq 0 ]; then
+    if [ "$TICK_DECISION" = FILL ]; then
+      # THE FILL BAND'S OWN SENTENCE. The `poker: FILL <ids>` line the duty wall reads was
+      # printed by the scheduler where it was decided; this says what the decision line then
+      # says, so the two channels agree on one tick (D5).
+      say "FILL — ${SCHED_FILL} named for dispatch; the decision line carries them."
+    elif [ "$OPEN_ROSTER" -eq 0 ]; then
       say "QUIET — no open row on this roster, but the run is not delivered (${RUN_STATE_WHY}); the Patrol keeps its stamp and its clock."
     else
-      say "QUIET — $OPEN_ROSTER open row(s) on this roster, none past their declared duration."
+      # NAMING BOTH READINGS, because both are now taken: a row can be inside its duration
+      # and still have gone quiet, and a QUIET tick that named only the duration was the
+      # sentence B5 reported as true-but-silent.
+      say "QUIET — $OPEN_ROSTER open row(s) on this roster, none past their declared duration and none quieter than its declared cadence."
     fi
+    tick_decision_line "$TICK_DECISION" "$TOTAL" "$OPEN" "" "" "$SCHED_FILL" "$LEASE_TREES"
     exit 0
     ;;
 esac

@@ -6602,6 +6602,43 @@ expect_eq "roster_row reproduces the captured launch-time row byte for byte" \
 expect_eq "roster_row reproduces the captured adopt-time row byte for byte" \
   "$RA2_CAP_A" "$(ra2_rebuild "$RA2_CAP_A")"
 
+# REQ-7 AC-7.3 (epic-23 wave-16, 1.8.3) — THE NEW FIELD IS TRAILING AND OPTIONAL, and the
+# capture is the proof. `re_executes=` is the runner-agnostic half of the instrument
+# declaration (REQ-1): the dispatch wall lifts it off a brief's `Re-executes:` span and
+# writes it here beside `suites_allowed=`. A schema field that changed the row's existing
+# bytes would silently invalidate every reader built against what is on disk, so the claim
+# has two halves and both are driven through the one writer.
+#
+# HALF ONE — ABSENT MEANS ABSENT. The captured rows predate the field; they must still come
+# back byte for byte, which the two equalities above already require. The non-vacuity here is
+# that the capture really does lack the key, so those equalities are saying something.
+expect_absent "the captured launch-time row predates re_executes= (so the pin above is load-bearing)" \
+  "re_executes=" "$RA2_CAP_I"
+expect_absent "…and so does the captured adopt-time row" "re_executes=" "$RA2_CAP_A"
+
+# HALF TWO — PASSED MEANS PRESENT, IN ITS PLACE. The same capture handed the same reversed
+# bag PLUS one `re_executes=` pair comes back as the capture with exactly that field spliced
+# in beside the other contract fields — after `waiver=`/the instrument group and before
+# `tool_use_id=`. The expected string is DERIVED from the capture rather than transcribed, so
+# it cannot drift away from the row on disk.
+RA2_RUN='`npx jest --testPathPatterns x`'
+ra2_rebuild_plus() {  # <row> <extra key=value> -> roster_row's output for that row plus the field
+  local row="$1" extra="$2" f
+  local args=("$extra")
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    args=("$f" ${args[@]+"${args[@]}"})
+  done <<RA2_PLUS
+$(printf '%s' "$row" | tr '|' '\n' | tail -n +2)
+RA2_PLUS
+  ( . "$RA2_ROSTER_LIB" >/dev/null 2>&1 && roster_row "${args[@]}" )
+}
+RA2_EXPECT_RUN="${RA2_CAP_I/|tool_use_id=/|re_executes=${RA2_RUN}|tool_use_id=}"
+expect_eq "the expected string really differs from the capture (the splice is load-bearing)" "no" \
+  "$([ "$RA2_EXPECT_RUN" = "$RA2_CAP_I" ] && echo yes || echo no)"
+expect_eq "roster_row writes re_executes= as a trailing optional field, ahead of tool_use_id=" \
+  "$RA2_EXPECT_RUN" "$(ra2_rebuild_plus "$RA2_CAP_I" "re_executes=$RA2_RUN")"
+
 # THE MUTATION ARMS. Two, because the pin has two halves that can rot independently.
 #
 # ARM 1 — DOCTOR THE ROW. One field's value is changed in the capture handed to the
@@ -6641,8 +6678,21 @@ RA2_DP="$BIONIC_HOOKS_DIR/dispatch-preflight.sh"
 RA2_PK="$BIONIC_HOOKS_DIR/session-poker.sh"
 expect_eq "dispatch-preflight builds its row by calling roster_row, and holds no row literal" \
   "1 0" "$(ra2_code_hits "$RA2_DP" 'roster_row ') $(ra2_code_hits "$RA2_DP" "$RA2_BUILT_ROW")"
-expect_eq "session-poker's adopt builds its row by calling roster_row, and holds no row literal" \
-  "1 0" "$(ra2_code_hits "$RA2_PK" 'roster_row ') $(ra2_code_hits "$RA2_PK" "$RA2_BUILT_ROW")"
+# THE POKER CALLS THE BUILDER TWICE, AND ONE BUILDER IS STILL ONE SHAPE (re-authored at
+# epic-23 wave-16, REQ-1 AC-1.1's adopt half). `adopt_write_row` passes the new trailing
+# `re_executes=` field to `roster_row` and, for as long as the library's key table does not
+# carry it, falls back to a call without it and appends the field itself — two call sites of
+# ONE builder. What this row exists to hold is that no hook hand-writes a row: that is the
+# second number, and it stays 0. A call count of exactly one was never the property; a
+# LITERAL is, so the reading is "at least one call, and no literal".
+RA2_PK_CALLS="$(ra2_code_hits "$RA2_PK" 'roster_row ')"
+expect_eq "session-poker's adopt holds no row literal — the shape is the library's" \
+  "0" "$(ra2_code_hits "$RA2_PK" "$RA2_BUILT_ROW")"
+if [ "${RA2_PK_CALLS:-0}" -ge 1 ] 2>/dev/null; then
+  ok "…and it builds the row by calling roster_row ($RA2_PK_CALLS call site(s), one builder)"
+else
+  no "…and it builds the row by calling roster_row" "no call to roster_row in $RA2_PK"
+fi
 
 
 # ============================================================
@@ -9577,7 +9627,20 @@ expect_eq "S19.3 …declared by 43 anchor calls (Section 8's doctoring rewrites 
 # tree-wide count, so a second definition grown in a hook cannot make that row pass by
 # moving what it reads. One anchor call, 29 -> 30. RE-DERIVED BY DIRECT GREP over this file
 # at THIS commit, as every number in this section is.
-expect_eq "S19.3 …and this suite's own mutant trees and lifts by 30 more" "30" \
+#
+# 31 at epic-23 wave-16-fixit-183 (2026-09-19, T4): §R2 — the knob-unset harness ADR-030's
+# tests must run under — anchors the `[REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]` marker in
+# tests/refuse.test.sh before the awk that splices `export BIONIC_WALL_VERBOSE=1` in after
+# it, so a renamed marker cannot leave the doctored copy byte-identical to the shipped suite
+# and the four absence greps passing over it. One anchor call, 30 -> 31. RE-DERIVED BY DIRECT
+# GREP over this file at THIS commit, as every number in this section is.
+#
+# 32 at epic-23 wave-16-fixit-183 (2026-09-20, T25): §bring-forward — one source for the
+# step both callers judge against — anchors the gate caller line in payload/scripts/lib/walls.sh
+# before the sed that hands that caller a step again, so the row asserting neither caller
+# passes one is provably able to fail. One anchor call, 31 -> 32. RE-DERIVED BY DIRECT GREP
+# over this file at THIS commit, as every number in this section is.
+expect_eq "S19.3 …and this suite's own mutant trees and lifts by 32 more" "32" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_TESTS_DIR/cross-gate-agreement.test.sh")"
 # The two suites the waiver used to name. `mutate_guard` anchors per call (its callers pass
 # the shipped line they delete). landing-gate anchors its inverted-guard awk, and — since
@@ -9655,7 +9718,10 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # fifth term to it is a change to a section task 11 does not own.
 # 77 at epic-23 wave-15-fixit-182 (2026-09-17, T1): +1 from §PV's anchor above; the other
 # three files are untouched by that task.
-expect_eq "S19.3 …77 anchor call sites across the four doctoring suites, all told" "77" \
+# 79 at epic-23 wave-16-fixit-183: +1 from this wave's T4 (§R2's knob-unset splice) and +1
+# from T25 (§bring-forward's caller mutant), both in this file; the other three are
+# untouched by either task.
+expect_eq "S19.3 …79 anchor call sites across the four doctoring suites, all told" "79" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
@@ -10604,7 +10670,7 @@ expect_eq "BR …while the OTHER primitive in the doctored copy still agrees (on
   "$(fn_code "$BR_MUT" _detect_bound_kill)" "$(br_code "$SSTART" ss_bound_kill)"
 
 # ============================================================
-section "PV — the Patrol verdict: ONE predicate, two blocking readers (epic-23 wave-15 REQ-1, AC-1.4)"
+section "PV — the Patrol verdict: ONE predicate, every reader (epic-23 wave-15 REQ-1 AC-1.4; wave-16 REQ-11 AC-11.2)"
 # ============================================================
 #
 # THE DEFECT THIS SECTION EXISTS FOR. "How stale is stale" was a judgment call typed out at
@@ -10646,14 +10712,53 @@ else
   no "PV …and so does the dispatch wall's staleness half" "no call in $PV_DP"
 fi
 
-# AND NEITHER TYPES A MULTIPLIER. The literal the stop library carried, and the exported
+# AND THE TWO REPORTING READERS CALL IT TOO (wave-16 REQ-11, AC-11.2). Wave-15 moved the
+# readers that can REFUSE; doctor's own reading — `patrol_stamp_state`, in this same library
+# — and the session-start banner went on multiplying the interval by two, so the page a
+# person reads and the wall that lets them work answered one question two ways, 1080s apart
+# at a 1200s interval. Both are on the predicate now, and the multiplier they shared is
+# deleted.
+PV_SSTART="$BIONIC_HOOKS_DIR/session-start.sh"
+# COUNTED AS A CALL, NOT A MENTION: the predicate is DEFINED in this file, so containment
+# alone would pass on the definition.
+expect_eq "PV the doctor's own reading of the stamp asks the predicate" "1" \
+  "$(grep -c '\$(patrol_verdict ' "$PV_PATROL" || true)"
+if grep -q 'patrol_verdict' "$PV_SSTART"; then
+  ok "PV …and so does the session-start banner"
+else
+  no "PV …and so does the session-start banner" "no call in $PV_SSTART"
+fi
+
+# AND NOBODY TYPES A MULTIPLIER. The literal the stop library carried, and the exported
 # constant the dispatch wall read: the arithmetic is inside the predicate now, so both are
-# absent from both readers. PATROL_STALE_MULTIPLIER itself stays exported for the poker's
-# `adopt` liveness window, which is a different question with a different answer.
+# absent from every reader — and the constant itself has no definition left to read
+# (tests/patrol-stale.test.sh §1 owns its retirement; the poker's `adopt` window, which
+# multiplied a CADENCE rather than the interval, moves to `observe_class` under REQ-10).
 expect_eq "PV the literal 2x multiplier is gone from the stop library" "0" \
   "$(grep -c 'INTERVAL \* 2' "$PV_STOP" || true)"
 expect_eq "PV …and the dispatch wall no longer reads PATROL_STALE_MULTIPLIER either" "0" \
   "$(grep -c 'PATROL_STALE_MULTIPLIER' "$PV_DP" || true)"
+expect_eq "PV …nor the banner that read it" "0" \
+  "$(grep -c 'PATROL_STALE_MULTIPLIER' "$PV_SSTART" || true)"
+
+# THE WAVE HEAD'S OWN ROW, and the only place the tree-wide absence is asserted (REQ-11
+# AC-11.2). It takes TWO landings to go green and each is a different task's: the readers
+# that graded a Patrol stamp had to move off the constant before the constant could be
+# deleted, or a head in between would read an unset name under `set -u`, and the last
+# reader of all was the poker's `adopt` window — which multiplies a ROW's cadence, a
+# different question, and moves to `observe_class` with REQ-10. Counted over the shipped
+# shell files by NAME rather than by `grep -r payload/`, where `hooks/` is a symlink a
+# recursive grep never follows. CODE LINES, NOT PROSE: two files narrate the retirement in
+# a comment — this library's own paragraph and the stop library's account of the three
+# sites — and a row that counted narration would be a row against the history.
+PV_NAMED=0
+for _pv_f in "$PV_LIB"/*.sh "$BIONIC_HOOKS_DIR"/*.sh "${BIONIC_SCRIPTS_DIR}/payload/scripts"/*.sh; do
+  [ -f "$_pv_f" ] || continue
+  PV_NAMED=$(( PV_NAMED + $(grep -cE '^[[:space:]]*[^#[:space:]].*PATROL_STALE_MULTIPLIER' \
+                            "$_pv_f" 2>/dev/null || true) ))
+done
+expect_eq "PV no shell file the payload ships defines or reads the retired multiplier" \
+  "0" "$PV_NAMED"
 
 # THE FIRE WINDOW IS THE LIBRARY'S ARITHMETIC, spelled once. A reader that recomputed it
 # would be the literal back under another name.
@@ -10663,4 +10768,192 @@ expect_eq "PV …and neither reader recomputes it" "0" \
   "$(( $(grep -c '/ 10' "$PV_STOP" || true) + $(grep -c '/ 10' "$PV_DP" || true) ))"
 
 # ============================================================
+# ============================================================
+section "R2 — the knob-unset harness, and the cell ADR-030 flipped (epic-23 wave-16 REQ-2, AC-2.3/AC-2.4)"
+# ============================================================
+#
+# THE SEAM THIS SECTION GUARDS. Every detail assertion in the fleet reads a stream taken
+# with `BIONIC_WALL_VERBOSE=1` — `expect_block` in the evidence-gate suite, the
+# `HOOK_VSTDERR` pair in the governing-skill suite, `GATE_VERR` in the dispatch-preflight
+# suite, and this very file's own `export` at :55. That is the substitution research R2
+# found: the suites pinned "the detail names the offending id" on a channel no agent ever
+# reads, so a wall that printed NOTHING to either reader stayed green for three releases
+# (seed A §8a, carry-over 8). ADR-030's own tests therefore have to run on the other
+# stream, and a later editor reaching for the familiar helper would quietly undo the fix
+# while every row stayed green.
+#
+# So each of the three suites marks its ADR-030 span, and this file — the one that reads
+# other suites rather than driving a component — holds the span to the rule. The mutation
+# arm at the end proves the check can fail: the same greps over a doctored copy of one span
+# find what the shipped spans do not have.
+#
+# fails-when: a marked span is missing or empty; or it sets the knob; or it calls
+# `expect_block`, `HOOK_VSTDERR` or `GATE_VERR`; or the library stops naming ADR-030; or a
+# pin of the old `detail_to_user=no` cell survives.
+
+R2_TESTS_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+R2_LIB="${BIONIC_SCRIPTS_DIR}/payload/scripts/lib"
+[ -d "$R2_LIB" ] || R2_LIB="${BIONIC_SCRIPTS_DIR}/scripts/lib"
+R2_REFUSE="$R2_LIB/refuse.sh"
+R2_BEGIN='# [REQ-2 AC-2.3 KNOB-UNSET SECTION: BEGIN]'
+R2_END='# [REQ-2 AC-2.3 KNOB-UNSET SECTION: END]'
+
+# r2_span <file> — the marked span, markers excluded. awk and not `sed -n '/a/,/b/p'`,
+# because the markers carry `[` and `]` and a regex range would read them as a class.
+r2_span() {
+  awk -v b="$R2_BEGIN" -v e="$R2_END" '
+    index($0, b) { f = 1; next }
+    index($0, e) { f = 0 }
+    f' "$1"
+}
+require_helpers r2_span
+
+for _r2f in refuse.test.sh canonical-sdlc-evidence-gate.test.sh canonical-sdlc-governing-skill.test.sh; do
+  _r2p="$R2_TESTS_DIR/$_r2f"
+  # THE POSITIVE FIRST. Three greps for absence over an empty string all pass, which is
+  # the vacuous shape this repo's own doctrine forbids: the span has to exist and carry
+  # assertions before its absences mean anything.
+  expect_eq "R2 $_r2f: carries exactly one ADR-030 span opener" "1" \
+    "$(grep -cF "$R2_BEGIN" "$_r2p" || true)"
+  expect_eq "R2 $_r2f: …and exactly one closer" "1" \
+    "$(grep -cF "$R2_END" "$_r2p" || true)"
+  expect_eq "R2 $_r2f: the marked span drives at least six assertions" "yes" \
+    "$([ "$(r2_span "$_r2p" | grep -c '^expect_')" -ge 6 ] && echo yes || echo no)"
+  # AND THE ABSENCES. A bare mention of the knob's NAME is allowed — `env -u
+  # BIONIC_WALL_VERBOSE` is how a runner removes it — so what is forbidden is an
+  # ASSIGNMENT of it, which is what turns the detail on.
+  expect_eq "R2 $_r2f: …and never assigns BIONIC_WALL_VERBOSE" "0" \
+    "$(r2_span "$_r2p" | grep -c 'BIONIC_WALL_VERBOSE=' || true)"
+  expect_eq "R2 $_r2f: …nor calls expect_block, which takes the verbose drive" "0" \
+    "$(r2_span "$_r2p" | grep -c 'expect_block' || true)"
+  expect_eq "R2 $_r2f: …nor reads HOOK_VSTDERR" "0" \
+    "$(r2_span "$_r2p" | grep -c 'HOOK_VSTDERR' || true)"
+  expect_eq "R2 $_r2f: …nor GATE_VERR" "0" \
+    "$(r2_span "$_r2p" | grep -c 'GATE_VERR' || true)"
+done
+
+# THE MUTATION ARM. The four greps above pass just as loudly if `r2_span` prints nothing,
+# so one span is doctored IN THE SANDBOX — an `export BIONIC_WALL_VERBOSE=1` spliced in
+# where a later editor would put it — and the same check is re-run against the copy.
+R2_MUT="$SANDBOX/r2-knob-mutant.test.sh"
+anchor "$R2_TESTS_DIR/refuse.test.sh" "$R2_BEGIN" 1
+awk -v b="$R2_BEGIN" '{ print } index($0, b) { print "export BIONIC_WALL_VERBOSE=1" }' \
+  "$R2_TESTS_DIR/refuse.test.sh" > "$R2_MUT"
+expect_eq "R2 MUTANT the doctored span DOES set the knob, so the check can fail" "1" \
+  "$(r2_span "$R2_MUT" | grep -c 'BIONIC_WALL_VERBOSE=' || true)"
+expect_eq "R2 MUTANT …and the shipped span still does not, over the same extractor" "0" \
+  "$(r2_span "$R2_TESTS_DIR/refuse.test.sh" | grep -c 'BIONIC_WALL_VERBOSE=' || true)"
+
+# AC-2.4 — THE LIBRARY'S SIDE. The cell is `yes` now, read back through the library's own
+# accessor rather than grepped out of the table; the channel-table comment records the ADR
+# that replaced ruling D-1, and keeps D-1 itself; and no pin of the old cell survives.
+expect_eq "R2 the exit2 channel now puts detail on the user stream" "yes" \
+  "$(bash -c '. "$1"; refuse_channel exit2 detail_to_user' _ "$R2_REFUSE" 2>/dev/null)"
+expect_eq "R2 …while deny keeps its model-only split" "no" \
+  "$(bash -c '. "$1"; refuse_channel deny detail_to_user' _ "$R2_REFUSE" 2>/dev/null)"
+expect_eq "R2 …and block too" "no" \
+  "$(bash -c '. "$1"; refuse_channel block detail_to_user' _ "$R2_REFUSE" 2>/dev/null)"
+expect_eq "R2 the channel table names ADR-030 as the ruling that superseded D-1" "yes" \
+  "$([ "$(grep -c 'ADR-030' "$R2_REFUSE")" -ge 1 ] && echo yes || echo no)"
+expect_eq "R2 …and still carries D-1's own text, superseded rather than deleted" "yes" \
+  "$([ "$(grep -c -i 'a refusal is a sentence with a pointer' "$R2_REFUSE")" -ge 1 ] && echo yes || echo no)"
+expect_eq "R2 no pin of the old exit2 detail_to_user=no cell survives in refuse.test.sh" "0" \
+  "$(grep -cF '"no" "$(cell exit2 detail_to_user)"' "$R2_TESTS_DIR/refuse.test.sh" || true)"
+expect_eq "R2 …and the pin that replaced it asserts yes" "1" \
+  "$(grep -cF '"yes" "$(cell exit2 detail_to_user)"' "$R2_TESTS_DIR/refuse.test.sh" || true)"
+
+# ============================================================
+section "§bring-forward — one source for the step both callers judge against (wave-16 T25, critic C1)"
+# ============================================================
+#
+# THE DISAGREEMENT THIS PINS SHUT. `plan_bring_forward` used to take the step as an
+# argument, and the two callers passed different facts: the evidence gate passed the plan
+# body's `current:`, the governing-skill hook passed the frontmatter's `sdlc-step:`. A
+# frontmatter stamp is written once at Step 0 and almost never moved — this repo's archive
+# carries `sdlc-step: 3` beside `current: 9` — so the Write-side arm computed against step 3
+# for the life of the plan and printed a SHORTER list than the gate would, silently. The
+# predicate now derives the step from the plan text it already holds, and this section is
+# the wall that keeps it that way: a caller that starts handing it one again is the exact
+# regression, and no per-file suite can see it, because each call site reads fine alone.
+#
+# fails-when: a third caller appears unpinned, either caller hands the predicate an
+# argument after the plan path, or the detector cannot catch one that does.
+BF_LIB="$BIONIC_HOOKS_DIR/../payload/scripts/lib/walls.sh"
+[ -r "$BF_LIB" ] || BF_LIB="$BIONIC_HOOKS_DIR/../scripts/lib/walls.sh"
+BF_GSKILL="$BIONIC_HOOKS_DIR/canonical-sdlc-governing-skill.sh"
+
+# EVERY CALL, definition and `declare -F` probe excluded: a call is the name followed by a
+# quoted argument, which is how both sites spell it and how a third would.
+bf_calls() {  # <file> -> the call lines, `file:line:text`
+  grep -n 'plan_bring_forward "' "$1" 2>/dev/null | grep -v '^[0-9]*:[[:space:]]*#'
+}
+# A SECOND ARGUMENT, if one is ever passed: the plan path, then whitespace, then another
+# quoted or `$`-led word. A trailing redirection (`2>/dev/null`) is not one and does not
+# match — which is why this asks for the shape of an ARGUMENT rather than for "anything".
+bf_second_arg() { grep -E 'plan_bring_forward "[^"]*"[[:space:]]+["$]' || true; }
+
+# THE WHOLE TRACKED TREE, NOT TWO NAMED FILES (wave-16 T27, critic C9). `BF_LIB` and
+# `BF_GSKILL` above name the two callers the section already knows about — a census built by
+# reading only them cannot see a THIRD caller anywhere else, which is exactly the section's
+# own `fails-when` clause below and was unpinnable by construction before this row (a third
+# caller moved none of the old counts, because the old counts were grep hits inside files
+# the count itself named). Real source only: `hooks/`, `payload/scripts/`, `payload/commands/`,
+# `payload/skills/`, `agents/` — `payload/hooks` and `payload/agents` are symlinks onto
+# `hooks/` and `agents/` (`ls -ld payload/*`), so grepping them too would double-count the
+# same lines rather than widen the census; `tests/` stays out, same as `bf_calls` above, and
+# comments/the definition are excluded by the same `#`-at-content-start rule, adapted for
+# `grep -r`'s `file:line:text` shape (single-file `bf_calls` gets `line:text`).
+BF_TREE_DIRS="$REPO_ROOT/hooks $REPO_ROOT/payload/scripts $REPO_ROOT/payload/commands $REPO_ROOT/payload/skills $REPO_ROOT/agents"
+bf_tree_calls() {  # -> `file:line:text` across the real tree, comments/definition excluded
+  grep -rn 'plan_bring_forward "' $BF_TREE_DIRS 2>/dev/null \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'
+}
+
+BF_TREE_CALLS="$(bf_tree_calls)"
+expect_eq "the tree holds exactly two callers of plan_bring_forward" "2" \
+  "$(printf '%s\n' "$BF_TREE_CALLS" | grep -c 'plan_bring_forward "')"
+expect_eq "…the evidence gate is one of them" "1" \
+  "$(bf_calls "$BF_LIB" | grep -c 'plan_bring_forward "')"
+expect_eq "…and the governing-skill hook is the other" "1" \
+  "$(bf_calls "$BF_GSKILL" | grep -c 'plan_bring_forward "')"
+expect_empty "…and NEITHER hands it a step: the predicate reads current: itself" \
+  "$(printf '%s\n' "$BF_TREE_CALLS" | bf_second_arg)"
+
+# THE MUTATION, so the row above is not passing over a detector that can never fire: a COPY
+# of the library with the gate caller handed a step again must be caught by the same shape.
+BF_MUT_DIR="$SANDBOX/bring-forward-mutant"; mkdir -p "$BF_MUT_DIR"
+anchor "$BF_LIB" 'plan_bring_forward "$PLAN")' 1
+sed 's/plan_bring_forward "$PLAN")/plan_bring_forward "$PLAN" "$CURRENT")/' \
+  "$BF_LIB" > "$BF_MUT_DIR/walls.sh"
+expect_nonempty "…and a doctored copy that hands the gate caller a step IS caught" \
+  "$(bf_calls "$BF_MUT_DIR/walls.sh" | bf_second_arg)"
+# CONTROL — the same copy machinery, unmutated, is still clean.
+cp "$BF_LIB" "$BF_MUT_DIR/walls.clean.sh"
+expect_empty "control: an UNMUTATED copy is still clean" \
+  "$(bf_calls "$BF_MUT_DIR/walls.clean.sh" | bf_second_arg)"
+
+# THE THIRD-CALLER MUTATION (critic C9's FIRST clause — "a third caller appears unpinned" —
+# which the two-named-file census could never catch by construction, whichever two files it
+# named). A scratch tree shaped like `BF_TREE_DIRS`, carrying the two real callers PLUS one
+# extra file naming `plan_bring_forward "…"` in a spot the old census never read
+# (`payload/commands/`), must move the whole-tree count from 2 to 3.
+BF_3RD_DIR="$SANDBOX/bring-forward-third-caller"
+mkdir -p "$BF_3RD_DIR/hooks" "$BF_3RD_DIR/payload/scripts/lib" "$BF_3RD_DIR/payload/commands" \
+  "$BF_3RD_DIR/payload/skills" "$BF_3RD_DIR/agents"
+cp "$BF_LIB" "$BF_3RD_DIR/payload/scripts/lib/walls.sh"
+cp "$BF_GSKILL" "$BF_3RD_DIR/hooks/canonical-sdlc-governing-skill.sh"
+printf 'planted_third_caller() {\n  plan_bring_forward "$1"\n}\n' \
+  > "$BF_3RD_DIR/payload/commands/planted-third-caller.sh"
+BF_3RD_TREE_DIRS="$BF_3RD_DIR/hooks $BF_3RD_DIR/payload/scripts $BF_3RD_DIR/payload/commands $BF_3RD_DIR/payload/skills $BF_3RD_DIR/agents"
+bf_3rd_calls() {
+  grep -rn 'plan_bring_forward "' $BF_3RD_TREE_DIRS 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#'
+}
+expect_eq "…and a planted THIRD caller elsewhere in the tree IS caught: the count moves to 3" "3" \
+  "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
+# CONTROL — the same scratch tree with the plant removed reads back to 2, so the row above
+# is reading the plant and not a miscounted copy.
+rm -f "$BF_3RD_DIR/payload/commands/planted-third-caller.sh"
+expect_eq "control: the same scratch tree with the plant removed reads back to 2" "2" \
+  "$(bf_3rd_calls | grep -c 'plan_bring_forward "')"
+
 finish
