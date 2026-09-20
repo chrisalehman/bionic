@@ -3194,6 +3194,86 @@ rm -f "$gs_r3t_file"
 expect_status "R3t4 the predicate returns rc=1 on the CRLF fixture, same as its LF twin" "1" "$gs_r3t_rc"
 expect_eq "R3t5 …and the SAME lines as the LF twin, byte for byte (diff empty)" \
   "" "$(diff <(printf '%s\n' "$gs_r3_direct") <(printf '%s\n' "$gs_r3t_direct") 2>&1 || true)"
+
+# THE BOM TWIN (T8; REQ-11; wave-16 critic-b77d5aa C10; research R4 §D3). Byte-for-byte the
+# gs_r3t_lf fixture above, prefixed with a UTF-8 byte-order mark on its very first byte.
+# `plan_bring_forward`'s normalization awk compares the whole first record to "---" with
+# `==`, which is BOM-insensitive, but every reader downstream (`_bf_fm_get`, `first_heading`)
+# matches an ANCHORED regex, which the BOM defeats the same way the CRLF twin's line endings
+# did before its own fix (research R4 D3.3-D3.4: octal and `\x` escapes in an awk REGEX do
+# not strip a BOM on awk 20200816; only a STRING compare against "\357\273\277" does).
+#
+# fails-when: the BOM Write is admitted, or its refusal names a different list than the LF
+# twin's (R3s3(1)-(3) above); or a direct call to `plan_bring_forward` on the BOM twin
+# differs from the LF twin's own direct-call output.
+gs_r3u_bom="$(printf '\357\273\277%s' "$gs_r3t_lf")"
+gs_r3u_file="$(mktemp "${TMPDIR:-/tmp}/gs-r3u-bom.XXXXXX")"
+printf '%s' "$gs_r3u_bom" > "$gs_r3u_file"
+
+# META FIRST, so no row below can pass over a fixture that lost its own BOM.
+expect_eq "R3u0 meta: the twin fixture really opens with a UTF-8 BOM" "efbbbf" \
+  "$(head -c3 "$gs_r3u_file" | xxd -p)"
+
+r2_write_knob_unset "$gs_r3_path" "$gs_r3u_bom"
+
+expect_status "R3u1 the BOM pre-14 Write is refused, fail-closed — same as its LF twin" "2" "$GS_R2_EXIT"
+expect_eq "R3u2 …with the contract-version verdict, not admitted silently" \
+  "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3u3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+expect_contains "R3u3(2) …the approval line, a class the frontmatter stamp used to hide" \
+  "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
+expect_contains "R3u3(3) …and the matrix's fails-when, the other hidden class" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$GS_R2_ERR"
+expect_absent "R3u3(4) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$GS_R2_ERR"
+expect_absent "R3u3(5) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$GS_R2_ERR"
+
+gs_r3u_rc=0
+gs_r3u_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" "$gs_r3u_file" 2>/dev/null)" || gs_r3u_rc=$?
+rm -f "$gs_r3u_file"
+expect_status "R3u4 the predicate returns rc=1 on the BOM fixture, same as its LF twin" "1" "$gs_r3u_rc"
+expect_eq "R3u5 …and the SAME lines as the LF twin, byte for byte (diff empty)" \
+  "" "$(diff <(printf '%s\n' "$gs_r3_direct") <(printf '%s\n' "$gs_r3u_direct") 2>&1 || true)"
+
+# THE BOM+CRLF TWIN — a Windows editor emits both at once (research R4 D3.6 row-27 note).
+# Same shape as the BOM twin above, over the combined fixture.
+gs_r3v_bomcrlf="$(printf '\357\273\277%s' "$gs_r3t_crlf")"
+gs_r3v_file="$(mktemp "${TMPDIR:-/tmp}/gs-r3v-bomcrlf.XXXXXX")"
+printf '%s' "$gs_r3v_bomcrlf" > "$gs_r3v_file"
+
+expect_eq "R3v0 meta: the BOM+CRLF twin opens with the BOM and is CRLF-terminated" "efbbbf CRLF" \
+  "$(head -c3 "$gs_r3v_file" | xxd -p) $(file "$gs_r3v_file" | /usr/bin/grep -o CRLF)"
+
+r2_write_knob_unset "$gs_r3_path" "$gs_r3v_bomcrlf"
+
+expect_status "R3v1 the BOM+CRLF pre-14 Write is refused, fail-closed" "2" "$GS_R2_EXIT"
+expect_eq "R3v2 …with the contract-version verdict, not admitted silently" \
+  "bionic: write refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$GS_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3v3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$GS_R2_ERR"
+expect_contains "R3v3(2) …the approval line, a class the frontmatter stamp used to hide" \
+  "## SDLC State: no 'approved-by:' line" "$GS_R2_ERR"
+expect_contains "R3v3(3) …and the matrix's fails-when, the other hidden class" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$GS_R2_ERR"
+expect_absent "R3v3(4) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$GS_R2_ERR"
+expect_absent "R3v3(5) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$GS_R2_ERR"
+
+gs_r3v_rc=0
+gs_r3v_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" "$gs_r3v_file" 2>/dev/null)" || gs_r3v_rc=$?
+rm -f "$gs_r3v_file"
+expect_status "R3v4 the predicate returns rc=1 on the BOM+CRLF fixture, same as its LF twin" "1" "$gs_r3v_rc"
+expect_eq "R3v5 …and the SAME lines as the LF twin, byte for byte (diff empty)" \
+  "" "$(diff <(printf '%s\n' "$gs_r3_direct") <(printf '%s\n' "$gs_r3v_direct") 2>&1 || true)"
 # [REQ-3 BRING-FORWARD SECTION: END]
 
 

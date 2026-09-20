@@ -1728,8 +1728,8 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # underlying fd 2 the shell already pointed at /dev/null). Printing a `<kind>_capwarn=`
     # line instead puts it on stdout, where the bash side field_of and warn() -- the same
     # path the ABSENT-field warning already uses -- carry it to the real stderr untouched.
-    function suite_names(s,   n, arr, i, t, b, out, seen, c, dropped) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""
+    function suite_names(s,   n, arr, i, t, b, out, seen, c, dropped, baddrop) {
+      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""; baddrop = ""
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
         if (t == "" || istemplate(t)) continue
@@ -1745,7 +1745,18 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         # `$` followed by a name character or a brace.
         if (t ~ /[$][A-Za-z_{]/) { print "suites_bad=" t; continue }
         b = t; sub(/.*\//, "", b)
-        if (b !~ /\.test\.sh$/ && !(b == "run.sh" && index(t, "/") > 0)) continue
+        if (b !~ /\.test\.sh$/ && !(b == "run.sh" && index(t, "/") > 0)) {
+          # A DROPPED TOKEN IS NOW A REFUSAL (T3, REQ-8; wave-17, research R3 §C1.4 option 3
+          # — a repair of THIS existing check, no new I/O, D11-compliant). Until now a token
+          # whose basename was neither `*.test.sh` nor a path-qualified `run.sh` — a jest
+          # spec, a pytest module, a bare `run.sh` — fell off in total silence: `suites=`
+          # ended up empty, and the brief then met the UNRELATED no-instrument arm below for
+          # "declaring no Files: and no Suites:", forty minutes before the writer-side guard
+          # refused the exact command the brief had named. `none` is the waiver (checked
+          # below, on the collapsed whole span) and is never a drop.
+          if (tolower(b) != "none") { baddrop = (baddrop == "" ? t : baddrop " " t) }
+          continue
+        }
         if (seen[b]) continue
         seen[b] = 1
         if (c < SUITES_MAX) { out = (out == "" ? b : out " " b); c++ }
@@ -1754,6 +1765,7 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
       if (dropped != "") {
         print "suites_capwarn=Suites: line exceeds the " SUITES_MAX "-suite cap — dropped: " dropped
       }
+      if (baddrop != "") { print "suites_dropped=" baddrop }
       if (out != "") return out
       if (tolower(collapse(s)) ~ /^none([^a-z0-9]|$)/) return "none"
       return ""
@@ -2221,6 +2233,11 @@ C_RE_EXECUTES=$(sanitize "$(field_of re_executes)" 900 re_executes)
 # literal suite name, and the token is in the value.
 C_RUNS_BAD=$(sanitize "$(field_of re_executes_bad)" 300)
 C_SUITES_BAD=$(sanitize "$(field_of suites_bad)" 300)
+# A Suites: TOKEN THE FILTER DROPPED (T3, REQ-8) — `suite_names()` records the exact
+# tokens whose basename is neither `*.test.sh` nor a path-qualified `run.sh`, the literal
+# waiver `none` excepted. Read here so the arm below can refuse on it by name, before the
+# no-instrument arm gets a chance to see an empty `suites=` and blame the wrong thing.
+C_SUITES_DROPPED=$(sanitize "$(field_of suites_dropped)" 300)
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
@@ -2661,6 +2678,35 @@ Then retry the dispatch."
   dp_finding "a declared suite is not a literal name" "spell each suite literally" "$_dp_detail"
 fi
 
+# A DROPPED Suites: TOKEN IS A REFUSAL (T3, REQ-8; wave-17, research R3 §C1.4 option 3 — a
+# repair of the EXISTING basename filter above, no new I/O, D11-compliant). Until now a
+# token whose basename was neither `*.test.sh` nor a path-qualified `run.sh` — a jest spec,
+# a pytest module, a bare `run.sh` — fell off `suite_names()` in total silence: `suites=`
+# ended up empty, and a brief naming only such tokens then met the UNRELATED no-instrument
+# arm below ("this brief declares no Files: and no Suites:") for having declared something
+# real. This puts the drop on the SAME channel the unexpanded-variable arm above already
+# uses, named, and — because the guard on the no-instrument arm below also checks this
+# field — that arm is never reached by a brief that named a token here.
+if [ -n "$C_SUITES_DROPPED" ]; then
+  _dp_detail="The Suites: span offered this, and its basename is not one this repo's shell
+suite runner can run — neither \`*.test.sh\` nor a path-qualified \`run.sh\`:
+    ${C_SUITES_DROPPED}
+
+A jest spec, a pytest module or any other non-shell test file is never run by this label;
+it dropped off the row in silence until now, and the writer's own command was then refused
+40 minutes later for running exactly what its brief had named.
+
+Fix: where the tests are not shell suites, name the command itself under Re-executes:,
+marked with backticks —
+    Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
+
+Or, where they are shell suites, spell the *.test.sh path —
+    Suites: tests/one.test.sh
+
+Then retry the dispatch."
+  dp_finding "Suites: names a file the shell runner cannot run" "use Re-executes:" "$_dp_detail"
+fi
+
 # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
 # (seed .bionic/docs/ideas/suite-allowance-wall.md items 1-2; design ledger D2,
 # Chris 2026-09-05 "Option 2": a brief declares INTENT, the machine derives the
@@ -2695,7 +2741,13 @@ fi
 # row, for the writer-side guard to hold the agent to. It is the only declaration available
 # to an agent in a repository whose tests are not shell suites, so refusing a brief that
 # carries it for "declaring no instrument" would be the wall contradicting itself.
-if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ]; then
+#
+# A BRIEF THAT NAMED A DROPPED TOKEN DECLARED SOMETHING (T3, REQ-8). `C_SUITES_DROPPED`
+# is checked here too, so a `Suites:` line whose only tokens the filter above refused never
+# falls through to this arm's "declares no Files: and no Suites:" — that refusal is the
+# suite-drop arm's above, named by the actual token, not this one's guess that nothing was
+# declared at all.
+if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ] && [ -z "$C_SUITES_DROPPED" ]; then
   _dp_detail="An agent with no declared instrument runs whatever it decides to run. Two writers
 read \"run the impacted suites\" as the whole tree and spent 40 minutes each
 re-proving the world; the budget only binds when it is on the roster row.

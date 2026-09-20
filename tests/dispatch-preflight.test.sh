@@ -2565,6 +2565,31 @@ expect_absent "R6-3: …with no dangling open bracket for parse_seconds to choke
 expect_absent "R6-3: …and none of the parentheticals own numbers" \
   "phase" "$(roster_field "$ROW" duration)"
 
+# ---- S18c: Files: then Suites: on ADJACENT LINES, no blank between — both read (T3,
+# REQ-7 AC-7.2) ----
+#
+# B4's static analysis (research R2 step1-research-R2-refusal-detail.md) found the span
+# rule already correct at HEAD: `spanend()`'s first bound is the next REGISTERED label's
+# start (`:1579`), and `Suites:`/`Files:` are both registered with `bol=1` — so a `Files:`
+# span has always stopped at the following `Suites:` line, with or without a blank line
+# between them. What was missing was a PIN saying so, against the real hook, now that the
+# scaffold and dispatch.md no longer teach "own paragraph"/"to the next blank line" (T9).
+BRIEF_ADJACENT_LABELS='Your task: build the widget.
+Expected artifact: .bionic/docs/record/w18c.md
+Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh'
+
+REPO=$(make_repo r18adj yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ADJACENT_LABELS" "adjacentbot")"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "S18c a Files: line directly followed by a Suites: line is ADMITTED" \
+  "0" "$GATE_ST"
+expect_status "S18c …Files: reads only its own line" \
+  "payload/scripts/lib/widget.sh" "$(roster_field "$ROW" files)"
+expect_status "S18c …and Suites: reads its own line too, carried onto suites_allowed=" \
+  "widget.test.sh" "$(roster_field "$ROW" suites_allowed)"
+
 section "S19 — deliverable-kind labels are LINE-START ONLY (R8: final-audit A-1)"
 #
 # record/w2-r7-audit.md A-1: R7's ambiguity wall refuses when a deliverable SPAN
@@ -4670,6 +4695,45 @@ expect_status "27m …never a SILENT exit 0 — stderr is non-empty" "0" \
   "$([ -n "$GATE_ERR" ] && echo 0 || echo 1)"
 
 # ============================================================================
+section "S27n: a dropped Suites: token is a refusal, not a silent no-instrument arm (T3, REQ-8, AC-8.1)"
+# ============================================================================
+#
+# `suite_names()`'s filter (`:1748`) has always kept only a `*.test.sh` basename or a
+# path-qualified `run.sh`; everything else fell off in total silence — a jest spec name,
+# a pytest module — and the brief then met the UNRELATED "no Files: and no Suites:" arm,
+# for having named something real. This puts the drop on the same channel the unexpanded-
+# variable arm already uses (`:1746`, `suites_bad=`), named, before that arm is reached
+# (research R3 §C1.4, option 3 — no existence check, D11-compliant).
+
+REPO=$(make_repo r27n yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w27n-audit.md
+Expected duration: ~30 minutes.
+Suites: image-id.spec.ts" "w27n-aud-spec" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "27n an auditor brief naming a dropped token is REFUSED" "2" "$GATE_ST"
+expect_contains "27n …naming the token it saw" "image-id.spec.ts" "$GATE_VERR"
+expect_contains "27n …the new verdict" \
+  "Suites: names a file the shell runner cannot run" "$GATE_ERR"
+expect_contains "27n …the fix points at Re-executes:" "Re-executes:" "$GATE_VERR"
+expect_absent "27n …never the unrelated no-instrument text" \
+  "declares no Files: and no Suites:" "$GATE_ERR"
+expect_status "27n …no roster row for the refused dispatch" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+REPO=$(make_repo r27n2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27n-writer.md
+Expected duration: ~30 minutes.
+Suites: image-id.spec.ts" "w27n-writer-spec")"
+expect_status "27n2 a writer brief naming the same dropped token is REFUSED likewise" \
+  "2" "$GATE_ST"
+expect_contains "27n2 …naming the token it saw" "image-id.spec.ts" "$GATE_VERR"
+expect_absent "27n2 …never the unrelated no-instrument text" \
+  "declares no Files: and no Suites:" "$GATE_ERR"
+
+# ============================================================================
 section "S28: one regression per run (AC-24)"
 # ============================================================================
 #
@@ -5677,8 +5741,13 @@ REPO=$(make_repo rscaff3 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
 $SCAFFOLD_RAW" "scaffoldbot3")"
-expect_status "§scaffold the scaffold with its placeholders still in it is REFUSED" \
-  "2" "$GATE_ST"
+# T3 (REQ-8): the scaffold's own `Suites: none   # …, on its own paragraph` comment now
+# ALSO trips the loud suite-drop refusal (its trailing prose tokens match nothing a shell
+# runner can run), beside the pre-existing "names no deliverable" fault — two faults route
+# to the deny channel rather than one to exit2 (task 12/T17's own rule), so the channel
+# this refusal lands on is no longer pinned to exit2; that it refuses at all still is.
+expect_ne "§scaffold the scaffold with its placeholders still in it is REFUSED" \
+  "allow" "$GATE_VERDICT"
 
 # ---- the SECOND home: SKILL.md carries the same scaffold, injected (T2, AC-2.2/AC-2.3) ----
 #
@@ -5707,7 +5776,10 @@ REPO=$(make_repo rscaff5 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
 $SCAFFOLD_RAW" "scaffoldbot5")"
-expect_status "§scaffold …SKILL.md's scaffold, unfilled, is REFUSED the same way" "2" "$GATE_ST"
+# T3 (REQ-8): as the dispatch.md variant above — the drop refusal joins the pre-existing
+# fault and moves this to the deny channel; still a refusal, on whichever channel.
+expect_ne "§scaffold …SKILL.md's scaffold, unfilled, is REFUSED the same way" \
+  "allow" "$GATE_VERDICT"
 
 # ============================================================================
 section "§a3-text — the Patrol stamp is armed at engagement, not by hand (D4, REQ-3)"
