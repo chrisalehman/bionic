@@ -2228,13 +2228,25 @@ _eg_wt_name() {
 # as the directory it is rather than as the string it was spelled with.
 #
 # EVERY FAILURE IS A DECLINE, never a lowered step: no git, an older git with no
-# `--path-format`, a deleted directory, another repository's tree, a bare repository. The
-# caller then judges at `current:` and says so, which is what the gate did before this
-# register existed.
+# `--path-format`, a deleted directory, a bare repository. The caller then judges at
+# `current:` and says so, which is what the gate did before this register existed.
+#
+# WITH ONE ANSWER THAT IS NOT A FAILURE (wave-17 REQ-4, T1; bug 7). Another repository's
+# linked worktree used to leave by the same `return 0` as all of those, and the caller could
+# not tell the two apart: a FORGED `.git` file is a directory git refused to place at all,
+# while a foreign tree is one git placed precisely — in a repository this plan's register has
+# nothing to say about. Both arrived as an empty `_EG_GITWT`, and the second was then judged
+# by this run's step arms, which is the defect. So this one path returns **4** and publishes
+# the common dir git named in `_EG_GITWT_FOREIGN`: the fact is already in hand at the
+# comparison below and nothing new is fetched for it (the D11 freeze,
+# .claude/rules/hook-authoring.md). `_EG_GITWT` stays EMPTY on that path, so every reader
+# that only asks "is this a tree of mine" keeps today's answer; only a caller that reads the
+# status learns the difference.
 _EG_GITWT=""
+_EG_GITWT_FOREIGN=""
 _eg_git_wt_name() {
   local _d="${1:-}" _both _common _gitdir _main
-  _EG_GITWT=""
+  _EG_GITWT=""; _EG_GITWT_FOREIGN=""
   case "$_d" in /*) : ;; *) return 0 ;; esac
   _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 0
   _common="${_both%%$'\n'*}"
@@ -2250,7 +2262,16 @@ _eg_git_wt_name() {
     _main="${_main%%$'\n'*}"
   fi
   [ -n "$_main" ] || return 0
-  [ "$_common" = "$_main" ] || [ "$_common" -ef "$_main" ] || return 0
+  if [ "$_common" != "$_main" ] && ! [ "$_common" -ef "$_main" ]; then
+    # GIT ANSWERED, AND IT ANSWERED SOMEWHERE ELSE. Everything above has already established
+    # that this directory IS a linked worktree — git resolved it, the git dir differs from
+    # the common dir and carries a `/worktrees/` segment — so the only thing left in doubt
+    # was whose, and this line is where that is settled. Rc 4, not an empty name, because
+    # "placed in another repository" and "not placed at all" are different facts and the
+    # caller acts differently on them.
+    _EG_GITWT_FOREIGN="$_common"
+    return 4
+  fi
   _EG_GITWT="${_gitdir##*/}"
   return 0
 }
@@ -2463,6 +2484,33 @@ _eg_row_for_worktree() {
 
 _EG_WT=""
 _eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CD2
+
+# WHICH DIRECTORY DOES THIS COMMIT RUN IN? (critic issue 1; wave-17 REQ-3, D4.) When the
+# command text names a second directory before the commit, no reading of the text answers
+# that, so the arm refuses and names both rather than judging at the first one.
+#
+# ASKED BEFORE ANY DIRECTORY IS RESOLVED, AND THAT IS THE REPAIR (bug 6). The arm used to sit
+# inside the `if [ -n "$_EG_WT" ]` block below, so it was reached only when git had already
+# confirmed the FIRST directory as a linked worktree of this repository. Every other first
+# directory — the main checkout, a record/ directory under it, /tmp — left `_EG_WT` empty,
+# skipped the whole block, and the commit was judged at the run's `current:` with nothing said
+# about the second `cd`: fail-open for `cd <records-dir>; …; cd <tree> && git commit`, which is
+# the shape a consumer actually wrote. THE AMBIGUITY IS THE COMMAND'S PROPERTY, not the first
+# directory's: a `;` runs the rest wherever the shell is standing, a failed `cd` leaves it
+# where it was, and a `&&` only looks decisive. So the question is asked of the text, here,
+# where it costs no `read` and no fork and reaches every first directory alike.
+#
+# `_EG_CD2` IS SET ONLY BY THE LEADING-`cd` BRANCH of `_eg_commit_cwd` — a `git -C <dir>`
+# commit never consults it — so the `_EG_CWD_SRC` test names the branch that answered rather
+# than narrowing the arm.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CD2" ]; then
+  _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD2}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
+Plan: $PLAN
+Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
+  refuse exit2 commit "two directories are named before the commit" "name one directory" "$_eg_detail"
+fi
+
 if [ -n "$BIONIC_WORKTREE" ] && [ "$_EG_CWD" = "$BIONIC_CWD" ]; then
   _EG_WT="$BIONIC_WORKTREE"          # the ladder already asked GIT about this very directory
 elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
@@ -2470,27 +2518,43 @@ elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
   # directory MIGHT be a linked worktree, for the price of one `read` and no fork; every
   # main-root commit and every ordinary directory has already left without paying for a git
   # call. What remains is the small set worth one fork, and git decides it.
-  _eg_git_wt_name "$_EG_CWD"
+  _eg_git_wt_name "$_EG_CWD"; _EG_GITWT_RC=$?
   _EG_WT="$_EG_GITWT"
+  if [ "$_EG_GITWT_RC" -eq 4 ]; then
+    # OUTSIDE THE RUN, NOT BEHIND IT (wave-17 REQ-4, T1; bug 7). Git placed this tree in
+    # another repository, so nothing in THIS plan describes the work it holds: its `## Tasks`
+    # register cannot name the tree, its `current:` is not the step that commit is part of,
+    # and its Step-5 floor is a floor that commit has no part in producing. Until this line
+    # the gate said all of that out loud — the announce below has named the boundary since
+    # wave-14 — and then judged the commit at `current:` anyway, refusing another
+    # repository's work for this run's evidence. A wall that has just admitted it cannot
+    # place a commit does not go on to sentence it.
+    #
+    # EXEMPTION, NEVER ADOPTION. The commit is not matched to a row, not judged at a lowered
+    # step and not allowed by any arm — this gate simply has no jurisdiction and says so.
+    # Matching a foreign tree against this plan's rows is out of scope by the charter, and
+    # the note at `_eg_row_for_worktree` says why: loose matching on the derived side is how
+    # a commit reaches another task's step.
+    #
+    # AND IT EXEMPTS THIS GATE ALONE. The `exit 0` leaves `_eg_body`, which runs in
+    # `wall_evidence_gate`'s subshell; the walls folded beside it in hooks/bash-walls.sh —
+    # protect-main, protect-database, farm-out, the background-suite guard — never see it and
+    # keep their verdicts, which is what 25g(q) pins.
+    printf "evidence-gate: %s is a linked worktree of another repository (%s) — this run's step arms do not apply\n" \
+      "$_EG_CWD" "$_EG_GITWT_FOREIGN" >&2
+    exit 0
+  fi
   if [ -z "$_EG_WT" ]; then
     # NOT SILENCE. A `.git` file that names a worktree git does not know is an anomaly
-    # wherever it came from — a moved tree, another repository's, or a planted one — and the
-    # reader needs to know the register was not consulted for this commit.
+    # wherever it came from — a moved tree, a forged one, or one whose target is gone — and
+    # the reader needs to know the register was not consulted for this commit. A tree of
+    # another repository no longer arrives here: git placed it, and it left above.
     printf 'evidence-gate: %s is not a linked worktree of this repository — judging at current: %s\n' \
       "$_EG_CWD" "$CURRENT" >&2
   fi
 fi
 
 if [ -n "$_EG_WT" ]; then
-  # THE TREE IS GIT'S, BUT IS IT THE ONE THE COMMIT LANDS IN? (critic issue 1.) When the
-  # command text named a second directory before the commit, no reading of the text answers
-  # that, so the arm refuses and names both rather than judging at the first one's row.
-  if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CD2" ]; then
-    _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD2}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
-Plan: $PLAN
-Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
-    refuse exit2 commit "two directories are named before the commit" "name one directory" "$_eg_detail"
-  fi
   # A plan with NO `## Tasks` table has no register, and there is nothing to say about a tree
   # it does not claim to track — `_eg_row_for_worktree` returns 1 for that, and this arm stays
   # silent, which is what keeps a solo-writer project's worktree commits byte-identical to
