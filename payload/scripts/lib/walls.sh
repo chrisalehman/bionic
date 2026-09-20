@@ -1598,6 +1598,62 @@ Audited rigor makes the ledger-shape checks blocking; a non-audited plan would l
 #     and BLOCKS unconditionally at any frontmatter rigor before this
 #     status-based branching; see that guard for the rationale.
 # [INSTRUMENT]
+# ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
+#
+# ONE LINE PER `## Tasks` ROW, and the refusal says so. Two arms check it — the addressed
+# unit's at task scale, and every dispatched row's at wave scale — and both used to name
+# ONE id and ask for "a '- <id>:' evidence line". An author owing eighteen of them learned
+# of the second only after landing the first (wave-16's A-orch-10 is that specimen), and
+# neither arm ever said the obligation was per row. So the COUNT and the IDS come from the
+# whole table in one pass, whichever arm fires.
+#
+# THE TRIGGER DOES NOT MOVE. At task scale the arm still fires on the ADDRESSED unit's
+# missing line — a non-addressed `active|done` row short of one is a different refusal
+# (ledger_shape_fail, blocking only at audited rigor) and stays that way. What changed is
+# what the refusal then says.
+#
+# NO NEW FACT IS FETCHED (D11): the rows are the caller's own `units_rows` output and the
+# lookup is the same anchored grep over `$SECTION` both arms already ran, asked once per
+# row instead of once.
+missing_evidence_ids() {  # $1 = units_rows output -> the T-ids with no line, one per line
+  local line id ev
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    id=$(units_field "$line" id)
+    case "$id" in T[0-9]*) : ;; *) continue ;; esac
+    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
+         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+    [ -n "$ev" ] || printf '%s\n' "$id"
+  done <<< "$1"
+}
+
+# Refuse for EVERY row short of its evidence line, or return 0 if none is. The id list is
+# printed as the lines the author has to write, so the repair is a copy out of the refusal;
+# it sits LAST so refuse.sh's twelve-line fold (BIONIC_REFUSE_DETAIL_LINES, a ratified
+# bound this does not move) bites the list rather than the instruction above it.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+refuse_missing_evidence_lines() {  # $1 = units_rows output
+  local ids count subject verdict
+  ids="$(missing_evidence_ids "$1")"
+  [ -n "$ids" ] || return 0
+  count=$(printf '%s\n' "$ids" | wc -l | tr -d ' ')
+  if [ "$count" -eq 1 ]; then
+    verdict="1 task has no evidence line"
+    subject="1 '## Tasks' row has"
+  else
+    verdict="${count} tasks have no evidence line"
+    subject="${count} '## Tasks' rows have"
+  fi
+  _eg_detail="canonical-sdlc: ${subject} no '- T<id>:' evidence line in '## SDLC State'.
+Plan: $PLAN
+Fix: add one line per row named below, each recording what proves that row, before committing.
+$(printf '%s\n' "$ids" | sed -E 's/^/- /; s/$/:/')"
+  # THE FIX FIELD IS SIX WORDS AND FORTY COLUMNS (refuse.sh's own self-check, ratified
+  # constants this does not move), so the `## Tasks` half of the rule rides the detail
+  # above rather than the one line: "per row" is the part a committer acts on.
+  refuse exit2 commit "$verdict" "add one '- T<id>:' per row" "$_eg_detail"
+}
+
 validate_task_ledger() {
   local rows rc line id status rigor_cell ev eff addressed_found=0
   # THE ROWS COME FROM lib/units.sh (REQ-1e, AC-1e.1), header-keyed. The cells this
@@ -1670,10 +1726,9 @@ Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited b
       # THE ADDRESSED UNIT: the tested floor is BLOCKING (task 4/1).
       addressed_found=1
       if [ -z "$ev" ]; then
-        _eg_detail="canonical-sdlc task ${id} has no '- ${id}:' evidence line in '## SDLC State'.
-Plan: $PLAN
-Fix: record the evidence artifact on a '- ${id}:' line before committing."
-        refuse exit2 commit "that task has no evidence line" "add a '- <id>:' evidence line" "$_eg_detail"
+        # The addressed unit is short, which is what fires the arm; the refusal then
+        # names EVERY row that is (AC-5.1), the addressed one among them.
+        refuse_missing_evidence_lines "$rows"
       fi
       if is_placeholder_value "$ev"; then
         _eg_detail="canonical-sdlc task ${id} evidence line is a placeholder ('${ev}').
@@ -2755,10 +2810,20 @@ step_prefix() {
 # pass==total. Used by the Step-5 verify gate.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_tests_block() {
-  local step="$1" pass total prefix
+  local step="$1" pass total prefix advisory
   shape_block cmd pass total output
   pass=$(block_get pass)
   total=$(block_get total)
+  # THE GATE RECORDS THE ADVISORY COUNTER AND NEVER JUDGES IT (wave-17 REQ-10, AC-10.2).
+  # `pass:`/`total:` are the GATING rows — the ones a red suite fails on. An advisory
+  # reading is a measurement the framework took and nothing gated on (tests/run.sh prints
+  # `Advisory: N readings, M exceeded` beneath `Gating:` when one was taken), so the block
+  # may carry it and this function reads it into nothing: it appears in no comparison
+  # below, and a block that omits it is the pre-wave block, unchanged. The key was already
+  # INERT — shape_block asserts presence and there is no unknown-key arm anywhere in this
+  # file — so this read is the CONTRACT made explicit, not a new refusal.
+  advisory=$(block_get 'advisory-exceeded')
+  : "$advisory"
   prefix=$(step_prefix "$step")
   if ! grep -qE '^[0-9]+$' <<< "$pass" || ! grep -qE '^[0-9]+$' <<< "$total"; then
     _eg_detail="${prefix} 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}').
@@ -3216,6 +3281,22 @@ validate_matrix() {
         # key first; this branch only bites a block that was otherwise complete.
         # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
         if [ "$key" = "evidence" ]; then
+          # ONE PATH PER AC, AND A `;` IS NOT A SEPARATOR (wave-17 REQ-5, AC-5.3). The
+          # whole cell text is the path — nothing here splits it — so `a.md; b.md` was
+          # handed to the resolver entire, missed, and refused as "names no real file",
+          # which sent the author to write a file at a path nobody meant to name. The
+          # sibling reader of the walk artifact has truncated at the first `;` since
+          # epic-14 (evidence_line_field); this cell is the outlier, and the repair is to
+          # say the rule rather than to start splitting. FIRST in the branch, ahead of the
+          # climb-out and file tests: a cell holding two paths has no single path for
+          # either of them to be asked about.
+          # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+          case "$val" in
+            *\;*)
+              block_matrix "evidence: names more than one path" "one path under record/ per AC" \
+                "matrix row '${ac}' evidence '${val}' names more than one path (the value carries a ';')." \
+                "the '${ac}:' block's evidence key takes exactly ONE path under record/. Cite the one file that proves this criterion; a second artifact belongs inside that file, or in its own AC row." ;;
+          esac
           if grep -qE '(^|/)\.\.(/|$)' <<< "$val"; then
             block_matrix "${ac}'s evidence path climbs out of record/" "name it under record/" \
               "matrix row '${ac}' evidence '${val}' climbs out of the record directory and so does not resolve under ${DOCS_ROOT}/record/." \
@@ -3277,6 +3358,25 @@ validate_matrix() {
            && { [ -z "$aud" ] || [ "$aud" = "CONFIRMED" ]; }; then
         :
       elif [ "$aud" != "CONFIRMED" ]; then
+        # THE CELL IS AN EQUALITY, AND THE VERDICT NOW SAYS WHICH FAULT IT IS (wave-17
+        # REQ-5, AC-5.4). `CONFIRMED (audit-b3b87dc.md)` refused with "the auditor has not
+        # confirmed <AC>" — a sentence that reads as "no audit happened" to the one person
+        # who knows one did and annotated the cell with its path. The equality does not
+        # move: an annotated cell still refuses, because a reader scanning the column has
+        # to be able to compare it, and the audit's own path has a key of its own. A cell
+        # that does NOT start with the token is a different fact (no verdict, or a
+        # standing one) and keeps the verdict it has always had, below.
+        #
+        # AHEAD OF THE T4 BRANCHES ON PURPOSE: the shape fault is the same fault whatever
+        # the row's tier, and a T4 row annotated past the token would otherwise be told
+        # its user-confirmation was the problem.
+        # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+        case "$aud" in
+          CONFIRMED*)
+            block_matrix "the auditor cell is not the bare token" "write CONFIRMED; cite in evidence:" \
+              "matrix row '${ac}' auditor cell is '${aud}' — it starts with CONFIRMED but is not the bare token, at step ${CURRENT}." \
+              "write exactly 'CONFIRMED' in the auditor cell and cite the audit's own path in the row's 'evidence:' key — the column is compared, not read." ;;
+        esac
         if [ "$tier" = "T4" ]; then
           if user_confirmed_form_ok "$block_txt"; then
             block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
@@ -3756,6 +3856,13 @@ Plan: $PLAN
 Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status."
     refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
   fi
+  # PRESENCE IS ASKED OF THE WHOLE TABLE AT ONCE (AC-5.1). This loop used to refuse at the
+  # first id it found short, so a wave owing three lines paid three refused commits; the
+  # shared arm below counts every row and prints the lines the author owes. It runs ahead
+  # of the placeholder walk: "you wrote nothing" and "you wrote a placeholder" are two
+  # findings, and the first is the one a whole-table answer can give.
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  refuse_missing_evidence_lines "$rows"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     id=$(units_field "$line" id)
@@ -3764,12 +3871,6 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    if [ -z "$ev" ]; then
-      _eg_detail="canonical-sdlc dispatched task ${id} has no '- ${id}:' evidence line in '## SDLC State'.
-Plan: $PLAN
-Fix: record the dispatched unit's evidence artifact on a '- ${id}:' line before committing."
-      refuse exit2 commit "that dispatched task has no evidence line" "add a '- <id>:' evidence line" "$_eg_detail"
-    fi
     if is_placeholder_value "$ev"; then
       _eg_detail="canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}').
 Plan: $PLAN

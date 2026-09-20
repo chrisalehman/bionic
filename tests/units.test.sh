@@ -434,7 +434,10 @@ section "6 — units_validate: one line per broken invariant, naming the id and 
 
 VAL_BAD="$(call units_validate "$SANDBOX/broken.md")"
 
-expect_eq "a table breaking seven invariants reports seven violations" "7" "$(nlines "$VAL_BAD")"
+# TEN, NOT SEVEN (wave-17 REQ-5, AC-5.2). Seven invariants are broken, but the transitive
+# arm now reports EVERY Step-4 row the offending row fails to reach rather than the first —
+# T7 reaches only T1, so it misses X1, T4, T5 and T6, which is four lines from one row.
+expect_eq "a table breaking seven invariants reports ten violations" "10" "$(nlines "$VAL_BAD")"
 expect_eq "…and exits 1" "1" "$(call_rc units_validate "$SANDBOX/broken.md")"
 
 expect_contains "an id used twice is named once, as a duplicate" \
@@ -449,8 +452,15 @@ expect_contains "a status outside the four names the status and the vocabulary" 
   "T5: status done is not one of pending active landed dropped" "$VAL_BAD"
 expect_contains "a dep naming no row names the dep" \
   "T6: dep T99 names no row in the table" "$VAL_BAD"
-expect_contains "a Step-6 row that reaches no Step-4 row names the first one it misses" \
+expect_contains "a Step-6 row that reaches no Step-4 row names the ones it misses" \
   "T7: step 6 does not depend transitively on step-4 row X1" "$VAL_BAD"
+# …AND NAMES ALL OF THEM, IN TABLE ORDER. The author threading a plan reads the whole debt
+# in one pass instead of one edge per round trip (AC-5.2; A-orch-59 of wave-16 is the
+# ten-round-trip specimen). The duplicate `T1` row is a Step-4 row too, and it is NOT
+# reported: T7 reaches the id, and reachability is keyed on the id, not on the row.
+expect_eq "…every one of them, once each, in table order" \
+  "X1 T4 T5 T6" \
+  "$(printf '%s\n' "$VAL_BAD" | /usr/bin/grep '^T7: step 6 does not depend' | sed -E 's/.*step-4 row //' | tr '\n' ' ' | sed -E 's/ $//')"
 
 # PAIRED POSITIVE. The good row is in the same table and is not accused of anything.
 expect_eq "the one well-formed row draws no violation of its own" "0" \
@@ -1227,6 +1237,63 @@ expect_eq "12.9 …and exits 0" "0" "$(call_rc units_validate "$SANDBOX/active-n
 expect_eq "12.10 units_has_column is what tells the two fixtures apart" "0 1" \
   "$(printf '%s %s' "$(call_rc units_has_column "$SANDBOX/active-no-tree.md" worktree)" \
      "$(call_rc units_has_column "$SANDBOX/active-no-column.md" worktree)")"
+
+# ============================================================
+section "13 — the transitive arm names EVERY unreached step-4 row (wave-17 REQ-5, AC-5.2)"
+# ============================================================
+#
+# WHY THIS SECTION EXISTS. The arm used to `break` after the first Step-4 row an offending
+# row failed to reach, so an author threading a Step-5 row against four build rows learned
+# of the second missing edge only after fixing the first, and paid one refused commit per
+# edge. wave-16's A-orch-59 is the field specimen: a mid-run row unthreaded from ten rows,
+# ten round trips. The file's own contract paragraph says EVERY FAULT IS REPORTED; this arm
+# was the exception to it.
+#
+# THE SMALLEST TABLE THAT SHOWS IT is one Step-5 row threaded to exactly one of four Step-4
+# rows: one line proves nothing about the bound, three do.
+
+cat > "$SANDBOX/three-missing.md" <<'THREE_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 3 | doc | plan written | orchestrator | — | 30m | all | plan | landed |
+| T2 | 4 | build | first | implementor | T1 | 15m | REQ-x | a.sh | landed |
+| T3 | 4 | build | second | implementor | T1 | 15m | REQ-x | b.sh | landed |
+| T4 | 4 | build | third | implementor | T1 | 15m | REQ-x | c.sh | landed |
+| T5 | 4 | build | fourth | implementor | T1 | 15m | REQ-x | d.sh | landed |
+| T9 | 5 | test | the floor, threaded to one build row of four | test-runner | T2 | 40m | all | f.md | pending |
+THREE_EOF
+
+VAL_THREE="$(call units_validate "$SANDBOX/three-missing.md")"
+
+expect_eq "13.1 a Step-5 row missing three step-4 rows reports three violations" "3" \
+  "$(nlines "$VAL_THREE")"
+expect_contains "13.2 …naming the first" \
+  "T9: step 5 does not depend transitively on step-4 row T3" "$VAL_THREE"
+expect_contains "13.3 …the second" \
+  "T9: step 5 does not depend transitively on step-4 row T4" "$VAL_THREE"
+expect_contains "13.4 …and the third" \
+  "T9: step 5 does not depend transitively on step-4 row T5" "$VAL_THREE"
+expect_eq "13.5 …and exits 1" "1" "$(call_rc units_validate "$SANDBOX/three-missing.md")"
+# THE ROW IT DOES REACH IS NOT ACCUSED, and neither is the Step-3 row: only Step-4 rows are
+# owed, and only the unreached ones are named.
+expect_eq "13.6 the reached step-4 row and the step-3 row draw nothing" "" \
+  "$(printf '%s\n' "$VAL_THREE" | /usr/bin/grep -E 'step-4 row (T1|T2)$')"
+
+# THE MUTATION ARM. Put the `break` back into a scratch copy of the shipped library: the
+# same table then yields one line instead of three. Without this arm, an implementation
+# that reported three lines for some other reason — or a fixture that happened to miss one
+# row — would read identically.
+anchor "$LIB" 'does not depend transitively on step-4 row %s' 1
+MUTANT_BREAK="$SANDBOX/units-mutant-break.sh"
+awk '{ print }
+     index($0, "does not depend transitively on step-4 row %s") { print "            break" }' \
+  "$LIB" > "$MUTANT_BREAK"
+MUTANT_BREAK_OUT="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_validate "$2"' \
+  _ "$MUTANT_BREAK" "$SANDBOX/three-missing.md")"
+expect_eq "13.7 the shipped library reports three; the mutant that breaks reports one" \
+  "3 1" "$(nlines "$VAL_THREE") $(nlines "$MUTANT_BREAK_OUT")"
 
 
 finish
