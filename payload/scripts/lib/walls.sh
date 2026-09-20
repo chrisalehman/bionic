@@ -789,7 +789,16 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   # trims a trailing CR, `gsub` re-splits a CR-only file into real lines rather than
   # collapsing it to one — `tr -d '\r'` would do the latter and read a live CR-only plan as
   # closed, the fail-dangerous direction (.claude/rules/hook-authoring.md).
-  plan_text="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
+  # THE BOM (T8, REQ-11; wave-16 critic-b77d5aa C10; research R4 §D3). `NR==1` compares the
+  # first record to "---" with `==`, which is BOM-insensitive, but every reader downstream
+  # (`_bf_fm_get`, `first_heading`) matches an ANCHORED regex, which a leading BOM defeats —
+  # so a BOM-prefixed pre-14 plan admitted silently until this line stripped it. A STRING
+  # compare, not a regex: octal and `\x` escapes inside an awk REGEX LITERAL do not strip a
+  # BOM on awk 20200816 (measured, R4 D3.4); only `substr`/`==` against the octal STRING
+  # `"\357\273\277"` does. Ordered before the CR translation on the same record so a
+  # BOM+CRLF plan strips both.
+  plan_text="$(awk 'NR==1 && substr($0,1,3)=="\357\273\277" { $0 = substr($0,4) }
+                    { sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
 
   case "$(_bf_fm_get "$plan_text" scale)" in wave|epic) : ;; *) return 0 ;; esac
   [ "$(_bf_fm_get "$plan_text" rigor)" = "audited" ] || return 0
