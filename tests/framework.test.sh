@@ -489,7 +489,7 @@ expect_eq "5: …and both rows are counted as failures" \
 section "6: the framework owns the counters and the helpers"
 # ============================================================
 
-for _fn in section setup_section ok no finish require_helpers \
+for _fn in section setup_section ok no advise finish require_helpers \
           expect_eq expect_ne expect_true expect_false expect_contains expect_absent \
           expect_match expect_no_match expect_status expect_empty expect_nonempty \
           expect_regex expect_no_regex; do
@@ -1439,5 +1439,120 @@ expect_eq "16: …and the verdict reads REFUSED" "yes" \
   "$(contains "$W_OUT" "- w-unadopted.test.sh (refused by the adoption wall, never run)")"
 expect_contains "16: --serial refuses it in the same words" \
   "adoption wall: tests/w-unadopted.test.sh never calls finish" "$W_SERIAL_OUT"
+
+# ============================================================
+setup_section "plant the advisory scratch suites (T24)"
+# ============================================================
+#
+# Both are written through heredocs, so the derivation reads no `advise` call in
+# THIS file - which is what lets the section below name the helper before, and
+# after, the framework defines it.
+
+cat > "$SB/tests/p-advise.test.sh" <<'PLANT_ADVISE'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+section "one gating row and two readings"
+ok "a real row"
+advise "a reading inside its reference" "0.826s against a 2s reference" true
+advise "a reading past its reference" "17.623s against a 10s contract" false
+echo "COUNTERS PASS=$PASS FAIL=$FAIL TOTAL=$TOTAL"
+
+finish
+PLANT_ADVISE
+
+cat > "$SB/tests/p-advise-only.test.sh" <<'PLANT_ADVISE_ONLY'
+#!/bin/bash
+set -uo pipefail
+. "$(dirname "$0")/lib/assert.sh"
+
+section "nothing but readings"
+advise "a reading" "0.826s against a 2s reference" true
+
+section "a real row, so the WHOLE-SUITE floor is not what fails this"
+ok "a real row"
+
+finish
+PLANT_ADVISE_ONLY
+
+# ============================================================
+section "17: the advisory row reports a reading and never gates (T24, D13)"
+# ============================================================
+#
+# D13 separated the two claim classes a suite welds into one number: an ARTIFACT
+# claim is about the tree and gates; an ENVIRONMENT claim ("this machine ran it
+# under N seconds") is about the hardware and the hour and must be reported
+# instead. `advise` is that second kind of row. Everything below is the contract
+# tests/session-start.test.sh §16 now rests on.
+
+expect_eq "17: the framework defines advise" "function" "$(type -t advise)"
+
+plant_run p-advise.test.sh
+expect_contains "17: a reading inside its reference prints the row, the reading and the word WITHIN" \
+  "ADVISORY: within   a reading inside its reference — 0.826s against a 2s reference" "$P_OUT"
+expect_contains "17: a reading past its reference prints the same row shape and the word EXCEEDED" \
+  "ADVISORY: exceeded a reading past its reference — 17.623s against a 10s contract" "$P_OUT"
+# THE KIND IS THE POINT: neither arm may be mistakable for a result by anything
+# that reads this output, which is what the chartered 1.8.4 gate will do.
+expect_eq "17: neither arm is a PASS: line" "1" \
+  "$(printf '%s\n' "$P_OUT" | /usr/bin/grep -c '^PASS: ' | tr -d ' ')"
+expect_eq "17: …and neither is a FAIL: line" "0" \
+  "$(printf '%s\n' "$P_OUT" | /usr/bin/grep -c '^FAIL: ' | tr -d ' ')"
+expect_eq "17: a line-start ADVISORY marker counts every reading the suite took" "2" \
+  "$(printf '%s\n' "$P_OUT" | /usr/bin/grep -c '^ADVISORY: ' | tr -d ' ')"
+expect_eq "17: …and the exceeded marker counts only the ones past their reference" "1" \
+  "$(printf '%s\n' "$P_OUT" | /usr/bin/grep -c '^ADVISORY: exceeded ' | tr -d ' ')"
+
+# IT MOVES NO COUNTER. Read from inside the planted suite, after both rows ran.
+expect_contains "17: an advisory row moves neither PASS, FAIL nor TOTAL" \
+  "COUNTERS PASS=1 FAIL=0 TOTAL=1" "$P_OUT"
+expect_eq "17: …so the tally counts the one real row and nothing else" \
+  "p-advise.test.sh: 1/1 passed, 0 failed  sections=1 setup=0  advisory=2 exceeded=1" \
+  "$(printf '%s\n' "$P_OUT" | sed -n 's/^\(p-advise\.test\.sh: .*\)$/\1/p')"
+# AND IT MOVES NO VERDICT: a reading past its reference is not a failing suite.
+expect_eq "17: …and an exceeded reading leaves the suite green" "0" "$P_RC"
+
+# THE TALLY'S NEW FIELD IS CONDITIONAL, so a suite that took no reading prints
+# the line it has always printed. p-counters is that suite, asserted whole at §6.
+plant_run p-counters.test.sh
+expect_absent "17: a suite that took no reading carries no advisory field at all" \
+  "advisory=" "$P_OUT"
+
+# THE EMPTY-SECTION RULE STAYS HONEST (the decision this row pins). An advisory
+# row does NOT count toward _TF_SECTION_ROWS, so a section holding only readings
+# is still a section that asserted nothing and is still named as a failure -
+# which is why every advisory row in the tree is written BESIDE a gating row and
+# never instead of one.
+plant_run p-advise-only.test.sh
+expect_contains "17: a section of nothing but readings still asserts nothing, and is named" \
+  "FAIL: section asserted nothing: nothing but readings" "$P_OUT"
+expect_eq "17: …and that failure is the suite's verdict" "1" "$P_RC"
+# PAIRED: the sibling section in the same suite, which DID assert, is not named.
+expect_absent "17: …while the section beside it that asserted is not named" \
+  "section asserted nothing: a real row, so the WHOLE-SUITE floor" "$P_OUT"
+
+# THE DERIVATION SEES IT. `advise` joins the framework's own name family, so a
+# call to a MISSPELLED advise is red at load rather than a silent
+# `command not found` on a stderr tests/run.sh discards - the AC-14 class.
+expect_contains "17: the derivation records an advise call as one of its own family" \
+  "CALL advise" "$(_tf_scan "$SB/tests/p-advise.test.sh")"
+expect_absent "17: …and invents none for a suite that takes no reading" \
+  "CALL advise" "$(_tf_scan "$SB/tests/p-counters.test.sh")"
+
+# THE ADOPTION WALL OWNS THE NAME. A suite may not define its own `advise` at
+# column 0, for the reason it may not define its own `ok`: a second spelling of
+# a row kind is a second definition of what a result is (D1).
+cat > "$F16_D/shadowadvise.sh" <<'F17_SHADOW'
+#!/bin/bash
+. "$(dirname "$0")/lib/assert.sh"
+advise() { echo "my own reading: $1"; }
+ok "a row"
+finish
+F17_SHADOW
+expect_contains "17: the wall refuses a suite that defines its own advise() at column 0" \
+  "defines advise() at column 0" "$(f16_wall shadowadvise)"
+expect_contains "17: …naming the framework as the owner" "tests/lib/assert.sh" \
+  "$(f16_wall shadowadvise)"
 
 finish
