@@ -7254,6 +7254,84 @@ git -C "$r3_main2" worktree add -q "$r3_tmp/wt-T2" -b r3-t2
 r3_commit_knob_unset "$(make_home)" "$r3_main2" "$r3_tmp/wt-T2" 'git commit -m "x"'
 expect_contains "R3f …while a table that DOES carry the column still gets the lead-in (the control)" \
   "no ## Tasks row names worktree" "$R3_ERR"
+
+# THE OTHER CALLER, ON THE SAME BODY (wave-16 T25, Step-6 critic §C1). `plan_bring_forward`
+# used to be HANDED the step, and this gate and the governing-skill hook handed it different
+# facts: the gate the body's `current:`, the hook the frontmatter's `sdlc-step:`. The gate
+# was never wrong — the hook was — but AC-3.1 is about the two lists being THE SAME, and a
+# fixture carrying a misleading stamp is the only fixture that can say so. This one carries
+# `sdlc-step: 3` in its frontmatter and `current: 5` in its body, and the gate must answer
+# for the body: the stamp is not a fact about where the plan is.
+#
+# THE SAME FAULT CLASSES THE GOVERNING-SKILL SUITE DRIVES through its own caller (that
+# suite's R3s0-R3s7): the same five-column `## Tasks` table byte for byte, the same Step-1
+# `requirements:` pointer present, a `## Goal` present, and `approved-by:` and `fails-when:`
+# absent. Each suite builds its frontmatter and its Step-5 block with its own helpers —
+# neither is a class in the list — so what is shared is exactly what is under test.
+# The five strings below are the five that suite asserts — a list that differed between the
+# two callers would mean a writer repaired what one named and then met what the other kept
+# to itself, which is the whole of AC-3.1.
+#
+# fails-when: the stamped fixture is admitted, the gate answers for `sdlc-step` rather than
+# `current:`, or its list is not the governing-skill hook's list.
+# The same table as the governing-skill suite drives, with a status word the wave-scale
+# vocabulary accepts — so the only row faults in the list are the ones a five-column header
+# forces, and the two `>= 4` classes are what the fixture is really about.
+r3_pre14_tasks_pending="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | the dispatched unit | pending |"
+
+r3s_frontmatter() {  # d7_wave_frontmatter + the misleading Step-0 stamp, inserted in place
+  d7_wave_frontmatter audited true | awk '/^---$/ && ++n == 2 { print "sdlc-step: 3" } { print }'
+}
+r3s_plan() {
+  printf '%s\n' "$(r3s_frontmatter)"
+  printf '## Goal\n\nThe stamp fixture.\n\n'
+  # The Step-5 block is here because arms UPSTREAM of the bring-forward one refuse a plan
+  # with no evidence line for its current step, and a fixture stopped there would say
+  # nothing about the predicate. It is well-formed for the same reason `current: 5` is.
+  printf '## SDLC State\ncurrent: 5\nStep 1: opened 2026-09-19T22:00Z; requirements: specs/epic-01-demo/w.requirements.md\nStep 5:\n%s\n- T1: bash suite 9/9 green\n\n' "$step5_base"
+  printf '%s\n\n' "$r3_pre14_tasks_pending"
+  printf '## Verification Matrix\n\nstack-health: n/a: no long-running serve\n\n'
+  printf '| AC | tier | status | evidence | auditor |\n|---|---|---|---|---|\n'
+  printf '| AC-1 | T1 | discharged | see AC-1 | CONFIRMED |\n'
+}
+r3s_main="$r3_tmp/main3"
+mkdir -p "$r3s_main/.bionic/docs/plans" "$r3s_main/.bionic/docs/record/w16"
+printf 'evidence\n' > "$r3s_main/.bionic/docs/record/w16/r.md"
+git -C "$r3s_main" init -q .
+git -C "$r3s_main" commit -q --allow-empty -m init
+engage "$r3s_main"
+r3s_plan > "$r3s_main/.bionic/docs/plans/wave-16-stamp.plan.md"
+
+expect_eq "R3s0 meta: the fixture really does carry a stamp its body disagrees with" \
+  "sdlc-step=3 current=5" \
+  "sdlc-step=$(/usr/bin/grep -m1 '^sdlc-step:' "$r3s_main/.bionic/docs/plans/wave-16-stamp.plan.md" | tr -cd '0-9') current=$(/usr/bin/grep -m1 '^current:' "$r3s_main/.bionic/docs/plans/wave-16-stamp.plan.md" | tr -cd '0-9')"
+
+r3_commit_knob_unset "$(make_home)" "$r3s_main" "$r3s_main" 'git commit -m "x"'
+
+expect_status "R3s1 the stamped pre-14 plan is refused, fail-closed" "2" "$R3_EXIT"
+expect_eq "R3s2 …with the contract-version verdict, not the table alone" \
+  "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3s3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+expect_contains "R3s3(2) …the first row fault a five-column header forces" \
+  "T1: step (empty) is outside 3-9" "$R3_ERR"
+expect_contains "R3s3(3) …the second" \
+  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+expect_contains "R3s3(4) …the approval line, owed from current 4 and answered for current 5" \
+  "## SDLC State: no 'approved-by:' line" "$R3_ERR"
+expect_contains "R3s3(5) …and the matrix's fails-when, owed from the same step" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$R3_ERR"
+# DERIVED, NOT BLANKET — the two classes this body satisfies are absent, exactly as they are
+# from the governing-skill hook's list. Paired with R3s3(1)-(5) over the same refusal.
+expect_absent "R3s4(1) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
+expect_absent "R3s4(2) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$R3_ERR"
 # [REQ-3 BRING-FORWARD SECTION: END]
 
 # ============================================================
