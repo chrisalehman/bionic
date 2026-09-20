@@ -212,12 +212,22 @@ unengaged "AC-20 ...another session's marker is not engagement" "psql -c 'DROP T
 section "AC-E1.3/E1.5: every refusal is one line, in the criterion's shape"
 # ============================================================
 #
-# fails-when: a refusal reaches the user as more than one line, or in any shape but
-# `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. All six of this wall's refusal
-# sites are tripped for real and each is asserted against the criterion's own regex
-# and then against the exact wording the ruled table gives it
-# (s12-refusal-wording-draft.md §1 rows 5 through 10). The pattern that matched is the
-# value the one line had no room for; it lives in `detail`, behind the knob.
+# fails-when: a refusal reaches the user as more than one VERDICT line, or in any
+# shape but `bionic: <verb> refused — <fact> (<fix ≤ 40 cols>)`. All six of this
+# wall's refusal sites are tripped for real and each is asserted against the
+# criterion's own regex and then against the exact wording the ruled table gives it
+# (s12-refusal-wording-draft.md §1 rows 5 through 10).
+#
+# AC-E1.3 IS ABOUT THE VERDICT, AND ADR-030 MADE THAT DISTINCTION VISIBLE (epic-23
+# wave-16 T4/T19). `exit2`'s field 9 (`detail_to_user`) is `yes` now, so the pattern
+# that matched — the value the one line had no room for — rides the same wire as the
+# verdict, bounded, with no knob needed. Until that flip, "the user stream is one
+# line" and "the verdict is one line" were the same measurement on `exit2`, and this
+# helper took the cheaper one. What AC-E1.3 actually asks for — a sentence the reader
+# is interrupted by, never wrapped — is the VERDICT, so that is what is counted and
+# compared below; the detail is asserted present as well, with a POSITIVE beside the
+# narrowed count, so a wall that went silent still fails a check that used to catch
+# it (bash-walls.test.sh / protect-main.test.sh, T4, A-T4.9).
 
 PDB_LINE_RE='^bionic: [a-z-]+ refused — .+ \(.{1,40}\)$'
 pdb_stderr() {  # <command> -> the hook's stderr, verbatim
@@ -228,18 +238,31 @@ pdb_stderr() {  # <command> -> the hook's stderr, verbatim
 }
 
 pdb_one_line() {  # <label> <command> <expected line>
-  local _lbl="$1" _cmd="$2" _want="$3" _got _n
+  local _lbl="$1" _cmd="$2" _want="$3" _got _n _line _rest
   _got="$(pdb_stderr "$_cmd")"
-  _n="$(wc -l < "$SANDBOX/.err" | tr -d ' ')"
-  if [ "$_n" = "1" ]; then ok "$_lbl: exactly one line on the user stream"
-  else no "$_lbl: exactly one line on the user stream" "got $_n lines"; fi
-  if printf '%s' "$_got" | /usr/bin/grep -qE "$PDB_LINE_RE"; then
+  _n="$(/usr/bin/grep -c '^bionic: ' "$SANDBOX/.err" | tr -d ' ')"
+  _line="$(/usr/bin/grep -m1 '^bionic: ' "$SANDBOX/.err")"
+  # WHAT FOLLOWS THE VERDICT, if anything: the stream minus its rendered line(s).
+  # Read here rather than asserted per caller, because every row below carries a
+  # `detail` now and a row that stopped carrying one is the regression worth seeing.
+  _rest="$(/usr/bin/grep -v '^bionic: ' "$SANDBOX/.err" | /usr/bin/grep -c . | tr -d ' ')"
+  if [ "$_n" = "1" ]; then ok "$_lbl: exactly one VERDICT line on the user stream"
+  else no "$_lbl: exactly one VERDICT line on the user stream" "got $_n lines"; fi
+  if printf '%s' "$_line" | /usr/bin/grep -qE "$PDB_LINE_RE"; then
     ok "$_lbl: in AC-E1.3's shape"
   else
-    no "$_lbl: in AC-E1.3's shape" "line=[$_got]"
+    no "$_lbl: in AC-E1.3's shape" "line=[$_line]"
   fi
-  if [ "$_got" = "$_want" ]; then ok "$_lbl: and it is the table's own wording"
-  else no "$_lbl: and it is the table's own wording" "want [$_want] got [$_got]"; fi
+  if [ "$_line" = "$_want" ]; then ok "$_lbl: and it is the table's own wording"
+  else no "$_lbl: and it is the table's own wording" "want [$_want] got [$_line]"; fi
+  # THE POSITIVE THAT KEEPS THE COUNT HONEST (ADR-030, A-T4.9): the verdict is one
+  # line BECAUSE the detail is a separate thing beneath it, not because the wall
+  # went quiet.
+  if [ "$_rest" -ge 1 ]; then
+    ok "$_lbl: with its detail beneath it, no knob set"
+  else
+    no "$_lbl: with its detail beneath it, no knob set" "nothing after the verdict"
+  fi
 }
 
 pdb_one_line "row 5 (a dropped object)" "psql -c 'DROP TABLE users'" \
@@ -260,21 +283,39 @@ pdb_one_line "row 10 (statement hidden in a heredoc)" \
   "$(printf 'bash << %s\nDROP TABLE users\nEOF\n' "'EOF'")" \
   "bionic: sql refused — destructive SQL is piped to a db client (run the migration yourself)"
 
-# AC-E1.5 end to end through this wall: the matched pattern is absent from the one
-# line and present under the knob. Both halves together, so neither passes over an
-# empty stream.
+# AC-E1.5 end to end through this wall, re-authored by ADR-030 (T19, A-T4.10's
+# precedent): the branch/pattern name is the value the one line had no room for. It
+# used to live behind the knob and nowhere else; `exit2` carries it to the reader
+# now, with no knob needed, so what this pair holds is the SPLIT rather than the
+# absence — the verdict line is still the ruled sentence and carries no detail, and
+# the detail sentence is on the stream beneath it, no knob set. Asserted on the line
+# and on the stream separately, so neither half can pass over an empty capture.
 PDB_OFF="$(pdb_stderr "psql -c 'TRUNCATE users'")"
-case "$PDB_OFF" in
-  *"The matched pattern"*) no "AC-E1.5 the matched pattern is NOT on the one line" ;;
-  *) ok "AC-E1.5 the matched pattern is NOT on the one line" ;;
+PDB_OFF_LINE="$(/usr/bin/grep -m1 '^bionic: ' "$SANDBOX/.err")"
+case "$PDB_OFF_LINE" in
+  *"The matched pattern"*) no "AC-E1.5 the matched pattern is NOT on the verdict line" ;;
+  *) ok "AC-E1.5 the matched pattern is NOT on the verdict line" ;;
 esac
+case "$PDB_OFF" in
+  *"The matched pattern is TRUNCATE"*) ok "AC-E1.5 …and it is beneath it, with no knob set at all" ;;
+  *) no "AC-E1.5 …and it is beneath it, with no knob set at all" "got=[$PDB_OFF]" ;;
+esac
+# BIONIC_WALL_VERBOSE=1 still ADDS NOTHING THIS SUITE CAN TELL APART (A-T19.1): field
+# 9 already puts the bounded detail on the wire, and every detail this wall composes
+# is one sentence, well under the twelve-line bound, so the knob's "whole detail"
+# and the channel's "bounded detail" are byte-identical here. The row stays — it is
+# still true, and a wall that dropped the knob-set path entirely would still pass it
+# — but it no longer discriminates the knob from the default for THIS wall's
+# messages; only a >12-line detail would, and this wall has none. Kept for parity
+# with the fleet's shape rather than deleted, and flagged here rather than silently
+# left to look like it proves something it cannot.
 pdb_payload "$ENGAGED_REPO" "psql -c 'TRUNCATE users'" \
   | env CLAUDE_CODE_SESSION_ID="$SID" CLAUDE_PROJECT_DIR= BIONIC_WALL_VERBOSE=1 \
       bash "$HOOK" 2>"$SANDBOX/.errv" >/dev/null || true
 PDB_ON="$(cat "$SANDBOX/.errv")"
 case "$PDB_ON" in
-  *"The matched pattern"*) ok "AC-E1.5 …and BIONIC_WALL_VERBOSE=1 puts it there" ;;
-  *) no "AC-E1.5 …and BIONIC_WALL_VERBOSE=1 puts it there" "got=[$PDB_ON]" ;;
+  *"The matched pattern"*) ok "AC-E1.5 …and BIONIC_WALL_VERBOSE=1 puts it there too" ;;
+  *) no "AC-E1.5 …and BIONIC_WALL_VERBOSE=1 puts it there too" "got=[$PDB_ON]" ;;
 esac
 if printf '%s' "$PDB_ON" | head -1 | /usr/bin/grep -qE "$PDB_LINE_RE"; then
   ok "AC-E1.5 …with the one line still first"
