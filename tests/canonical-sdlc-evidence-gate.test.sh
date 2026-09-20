@@ -7645,4 +7645,274 @@ expect_block "R12e …and a T3 row with the same placeholder cell still needs it
   "$h_r12e" 'git commit -m "x"' "auditor"
 # [REQ-12 AUDITOR-CELL SECTION: END]
 
+# ============================================================
+section "Section 17t: §17's cells refuse by their SHAPE (wave-17 REQ-5, REQ-10; AC-5.1-5.4, AC-10.2)"
+# ============================================================
+#
+# WHAT THIS SECTION IS ABOUT. Four arms that knew the whole fault and printed a fraction of
+# it, and one key the Step-5 block may now carry. Each row here reads the VERDICT LINE — the
+# one line a committer actually sees — not just the detail, because the wording IS the
+# subject: the old verdicts were true sentences that sent the author to the wrong place.
+#
+# fails-when: any of the four prints its pre-wave verdict, or a control that must stay
+# admitted is refused.
+
+# ---- AC-5.1: both evidence-line arms count every row, and say the rule ----
+#
+# THE OLD BEHAVIOUR. Each arm named ONE id and asked for "a '- <id>:' evidence line", so an
+# author owing eighteen of them learned of the second only after landing the first
+# (wave-16 A-orch-10 is that specimen, eighteen lines deep). Neither said the obligation is
+# one line PER ROW.
+#
+# THE TRIGGER IS UNCHANGED at task scale: the arm still fires on the ADDRESSED unit's
+# missing line. What changed is what it then says — the count and the ids come from every
+# `## Tasks` row, not from the one row that tripped it. So T1 and T3 below are `pending`
+# (the non-addressed `active|done` shape-fail arm is a different refusal, pinned by 22c3)
+# and the fixture isolates the wording.
+v17t_task_none="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | first | pending |
+| T2 | build | audited | the addressed unit | active |
+| T3 | build | audited | third | pending |
+
+## SDLC State
+
+scale: task
+current: T2
+approved-by: fixture 2026-09-07T00:00Z \"approved\""
+h17t1=$(make_home)
+write_plan "$h17t1" "$(task_plan "$v17t_task_none")" > /dev/null
+expect_block "17t1 task scale, three rows and no evidence lines at all → block" \
+  "$h17t1" 'git commit -m "x"' "3 tasks have no evidence line"
+expect_eq "17t1b …and the verdict line counts the rows and names the shape that is owed" \
+  "bionic: commit refused — 3 tasks have no evidence line (add one '- T<id>:' per row)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "17t1c …and the detail names the first id" "- T1:" "$HOOK_VSTDERR"
+expect_contains "17t1d …the second" "- T2:" "$HOOK_VSTDERR"
+expect_contains "17t1e …and the third, so one pass shows the whole debt" "- T3:" "$HOOK_VSTDERR"
+
+# THE SINGULAR IS NOT "1 tasks". One row owing one line is the ordinary case, and the
+# verdict is a sentence a person reads.
+v17t_task_one="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | first | pending |
+| T2 | build | audited | the addressed unit | active |
+
+## SDLC State
+
+scale: task
+current: T2
+approved-by: fixture 2026-09-07T00:00Z \"approved\"
+
+- T1: bash suite 9/9 green"
+h17t2=$(make_home)
+write_plan "$h17t2" "$(task_plan "$v17t_task_one")" > /dev/null
+expect_block "17t2 task scale, one row short of its line → block" \
+  "$h17t2" 'git commit -m "x"' "1 task has no evidence line"
+expect_eq "17t2b …and the verdict agrees with itself in number" \
+  "bionic: commit refused — 1 task has no evidence line (add one '- T<id>:' per row)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+
+# THE SAME WORDING AT THE OTHER ARM. validate_dispatch_ledger walks every row of an audited
+# multi_agent wave's table; it used to refuse at the FIRST id it found short.
+tasks_three_rows="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the first unit | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | the second unit | implementor | — | 30m | REQ-x | b.sh | landed |
+| T3 | 4 | build | the third unit | implementor | — | 30m | REQ-x | c.sh | landed |"
+h17t3=$(make_home)
+write_plan "$h17t3" "$(d7_wave_plan "$tasks_three_rows" "")" > /dev/null
+expect_block "17t3 wave scale, three dispatched rows and no evidence lines → block" \
+  "$h17t3" 'git commit -m "x"' "3 tasks have no evidence line"
+expect_eq "17t3b …in the same words the task-scale arm uses" \
+  "bionic: commit refused — 3 tasks have no evidence line (add one '- T<id>:' per row)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "17t3c …and the detail names every one of the three" "- T3:" "$HOOK_VSTDERR"
+
+# THE MIDDLE ROW ALONE. The arm that stopped at the first id could not see T2 at all while
+# T1 was short; this row proves the walk reaches past a row that IS satisfied.
+h17t4=$(make_home)
+write_plan "$h17t4" "$(d7_wave_plan "$tasks_three_rows" "- T1: bash suite 9/9 green
+- T3: bash suite 9/9 green")" > /dev/null
+expect_block "17t4 wave scale, only the middle row short → block, naming it" \
+  "$h17t4" 'git commit -m "x"' "1 task has no evidence line"
+expect_contains "17t4b …and the detail names T2, not T1 or T3" "- T2:" "$HOOK_VSTDERR"
+
+# THE CONTROL. Three rows, three lines, nothing owed.
+h17t5=$(make_home)
+write_plan "$h17t5" "$(d7_wave_plan "$tasks_three_rows" "- T1: bash suite 9/9 green
+- T2: bash suite 9/9 green
+- T3: bash suite 9/9 green")" > /dev/null
+expect_allow "17t5 wave scale, every row carries its line → allow" \
+  "$h17t5" 'git commit -m "x"'
+
+# ---- AC-5.3: `evidence:` takes one path, and a `;` is not a separator ----
+#
+# THE OLD BEHAVIOUR. `evidence: a.md; b.md` was handed whole to the path resolver, which
+# prefixed a root and found no such file, so the refusal read "names no real file" and sent
+# the author to write a file at a path no one had meant to name. The sibling reader of the
+# walk artifact has truncated at the first `;` since epic-14; this cell is the outlier.
+# The arm sits FIRST in the `evidence:` branch, ahead of the climb-out and file tests, so
+# the shape fault is named before any question about where the value points.
+h17t6=$(make_home)
+write_plan "$h17t6" "$(plan 6 "$step6_body" \
+  "$(evidence_matrix 'record/generic-evidence.md; record/second-file.md')")" > /dev/null
+expect_block "17t6 an evidence: value carrying two paths → block on the shape" \
+  "$h17t6" 'git commit -m "x"' "evidence: names more than one path"
+expect_eq "17t6b …and the verdict names the cell and the rule, not the missing file" \
+  "bionic: commit refused — evidence: names more than one path (one path under record/ per AC)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "17t6c …while the detail names the AC and prints the value back" \
+  "AC-1" "$HOOK_VSTDERR"
+expect_contains "17t6d …the value included" "record/second-file.md" "$HOOK_VSTDERR"
+
+# THE BARE CONTROL, same fixture, one path: still admitted.
+h17t7=$(make_home)
+write_plan "$h17t7" "$(plan 6 "$step6_body" "$(evidence_matrix 'record/generic-evidence.md')")" > /dev/null
+expect_allow "17t7 …and one path under record/ is admitted exactly as before" \
+  "$h17t7" 'git commit -m "x"'
+
+# AND THE ARM DID NOT SWALLOW THE ONES BEHIND IT: a single path that names no file still
+# refuses in its own words.
+h17t8=$(make_home)
+write_plan "$h17t8" "$(plan 6 "$step6_body" "$(evidence_matrix 'record/never-written.md')")" > /dev/null
+expect_block "17t8 …and a single path naming no file keeps its own refusal" \
+  "$h17t8" 'git commit -m "x"' "names no real file"
+
+# ---- AC-5.4: the auditor cell is an equality, and the verdict says so ----
+#
+# THE OLD BEHAVIOUR. `CONFIRMED (audit-b3b87dc.md)` refused with "the auditor has not
+# confirmed AC-1" — which reads as "no audit happened" to the one person who knows an audit
+# did happen and annotated the cell with its path. The equality is right; the sentence was
+# not. A cell that does NOT start with CONFIRMED is a different fact and keeps its verdict.
+aud_matrix() {  # $1 = the auditor cell to write
+  cat <<EOF
+## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | $1 |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted
+  evidence: record/generic-evidence.md
+EOF
+}
+
+h17t9=$(make_home)
+write_plan "$h17t9" "$(plan 6 "$step6_body" "$(aud_matrix 'CONFIRMED (audit-x.md)')")" > /dev/null
+expect_block "17t9 an auditor cell annotated past the token → block on the shape" \
+  "$h17t9" 'git commit -m "x"' "the auditor cell is not the bare token"
+expect_eq "17t9b …and the verdict no longer says the audit did not happen" \
+  "bionic: commit refused — the auditor cell is not the bare token (write CONFIRMED; cite in evidence:)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "17t9c …while the detail prints the cell back verbatim" \
+  "CONFIRMED (audit-x.md)" "$HOOK_VSTDERR"
+# THE WIDEST LINE THIS WAVE ADDS, PINNED AT ITS MEASURED WIDTH. Both halves are constants,
+# so the number is deterministic — and it sits ON the ratified 100-column bound, which
+# refuse.sh self-refuses past. Pinned here so a later edit to either half is caught in the
+# section that owns the words, not as a refuse-call self-refusal in some unrelated suite.
+expect_eq "17t9d …and the rendered line is exactly at the ratified column bound" "100" \
+  "$(bionic_cols "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')")"
+
+# THE BARE CONTROL: the token alone is admitted.
+h17t10=$(make_home)
+write_plan "$h17t10" "$(plan 6 "$step6_body" "$(aud_matrix 'CONFIRMED')")" > /dev/null
+expect_allow "17t10 …and the bare token is admitted exactly as before" \
+  "$h17t10" 'git commit -m "x"'
+
+# THE DISCRIMINATOR: a cell that does not start with CONFIRMED is not a shape fault, and
+# the arm that has always spoken for it still does.
+h17t11=$(make_home)
+write_plan "$h17t11" "$(plan 6 "$step6_body" "$(aud_matrix 'REFUTED')")" > /dev/null
+expect_block "17t11 …while a REFUTED cell keeps the pre-wave verdict" \
+  "$h17t11" 'git commit -m "x"' "the auditor has not confirmed"
+h17t12=$(make_home)
+write_plan "$h17t12" "$(plan 6 "$step6_body" "$(aud_matrix ' ')")" > /dev/null
+expect_block "17t12 …and so does an empty one" \
+  "$h17t12" 'git commit -m "x"' "the auditor has not confirmed"
+
+# ---- AC-10.2: the Step-5 block's two refusals, pinned; then the new key ----
+#
+# THE TWO REFUSALS BELOW WERE UNPINNED until this wave (research R4 D2.6: no test file
+# contained either string). A task that adds a key to this function has to leave them
+# standing, and a pin written AFTER the change would prove only that the change kept what
+# the change left.
+step5_72="  cmd: bash tests/run.sh
+  pass: 72
+  total: 72
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+step5_71="  cmd: bash tests/run.sh
+  pass: 71
+  total: 72
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+step5_words="  cmd: bash tests/run.sh
+  pass: most of them
+  total: 72
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+
+h17t13=$(make_home)
+write_plan "$h17t13" "$(plan 5 "$step5_words" "$matrix_complete")" > /dev/null
+expect_block "17t13 a Step-5 block whose counters are not integers → block" \
+  "$h17t13" 'git commit -m "x"' "'pass:' and 'total:' are not both integers"
+expect_eq "17t13b …in those words" \
+  "bionic: commit refused — 'pass:' and 'total:' are not both integers (write both as integers)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+
+h17t14=$(make_home)
+write_plan "$h17t14" "$(plan 5 "$step5_71" "$matrix_complete")" > /dev/null
+expect_block "17t14 a Step-5 block one test short → block" \
+  "$h17t14" 'git commit -m "x"' "the suite is not fully green"
+expect_eq "17t14b …in those words" \
+  "bionic: commit refused — the suite is not fully green (make pass equal total)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+
+# THE NEW KEY. `pass:`/`total:` are the GATING counters; an advisory reading is a
+# measurement the framework took and nobody gated on, so the gate RECORDS it and does not
+# judge it. A block carrying three exceeded advisories on a fully green suite commits.
+step5_advisory="  cmd: bash tests/run.sh
+  pass: 72
+  total: 72
+  advisory-exceeded: 3
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+h17t15=$(make_home)
+write_plan "$h17t15" "$(plan 5 "$step5_advisory" "$matrix_complete")" > /dev/null
+expect_allow "17t15 a green Step-5 block carrying advisory-exceeded: 3 → allow (recorded, not judged)" \
+  "$h17t15" 'git commit -m "x"'
+
+# THE CONTROL IN THE OTHER DIRECTION: the key launders nothing. A red block carrying a
+# zero advisory count is still red.
+step5_71_advisory="  cmd: bash tests/run.sh
+  pass: 71
+  total: 72
+  advisory-exceeded: 0
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+h17t16=$(make_home)
+write_plan "$h17t16" "$(plan 5 "$step5_71_advisory" "$matrix_complete")" > /dev/null
+expect_block "17t16 …and the key does not launder a red block" \
+  "$h17t16" 'git commit -m "x"' "the suite is not fully green"
+
+# AND THE KEY IS OPTIONAL: the same green block without it is the pre-wave fixture, byte
+# for byte, and still commits.
+h17t17=$(make_home)
+write_plan "$h17t17" "$(plan 5 "$step5_72" "$matrix_complete")" > /dev/null
+expect_allow "17t17 …and a green block that never mentions it is untouched" \
+  "$h17t17" 'git commit -m "x"'
+
+
 finish
