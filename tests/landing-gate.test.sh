@@ -370,6 +370,36 @@ current: 4
 PLAN
 }
 
+# THE SAME PLAN AGAIN, THIS TIME CARRYING A `## Tasks` ROW THAT REGISTERS THE TREE
+# (epic-23 wave-17, REQ-2, D3, ADR-032). The row is the tree's record: its `worktree` cell
+# names the tree by basename — the match `_eg_row_for_worktree` makes — and its `base` cell
+# names the commit the tree was cut from, which the landing gate takes as the diff base.
+#
+# `<base cell>` IS WRITTEN LITERALLY, em dash and all, so one helper builds both the declared
+# and the undeclared fixture and the only difference between them is the cell under test.
+# `<working branch>` is optional: omitted, the plan carries no `working-branch:` at all, which
+# is the shape whose fallback the announcement has to name.
+plan_with_task_row() {  # <repo> <worktree basename> <base cell> [working branch]
+  local d="$1/.bionic/docs/plans/epic-16-landing-contract"
+  mkdir -p "$d"
+  {
+    printf -- '---\n'
+    printf 'governing-skill: superpowers:writing-plans\n'
+    printf 'sdlc-step: 4\n'
+    printf 'canonical_sdlc_version: 14\n'
+    [ -n "${4:-}" ] && printf 'working-branch: %s\n' "$4"
+    printf -- '---\n\n'
+    printf '# Wave 01 — landing contract\n\n'
+    printf '## SDLC State\n\n'
+    printf 'integration-branch: main\n'
+    printf 'current: 4\n\n'
+    printf '## Tasks\n\n'
+    printf '| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |\n'
+    printf '|---|---|---|---|---|---|---|---|---|---|---|---|\n'
+    printf '| T1 | 4 | build | the task in its own tree | implementor | — | 30m | REQ-2 | b.sh | %s | %s | active |\n' "$2" "$3"
+  } > "$d/wave-01-landing-contract.plan.md"
+}
+
 make_repo() {  # <label> -> repo path
   local r="$SANDBOX/$1"
   mkdir -p "$r/.bionic/tmp"
@@ -1326,8 +1356,18 @@ add_row "$R16B" name=slice16b agent_id="$AID_A" deliverable=.bionic/docs/record/
   files="declared/" launched_at="$(iso_ago 600)"
 deliver "$R16B" .bionic/docs/record/s16b.md
 run_gate "$GATE" "$(stop_payload "$R16B" "$SID" false)"
+# THE PASSING HALF OF THE PAIR SPEAKS TOO, SINCE WAVE-17 REQ-2 (D3, ADR-032) — and the
+# passing half is where it matters most. These fixtures name no `working-branch:` and register
+# no tree, so the base is the main checkout current branch: the guess this gate has always
+# made, right only while that checkout sits on the wave tip. A reconciliation that PASSES
+# against a base nobody declared is the false negative the announcement exists to expose; a
+# refusal at least tells a reader something was judged. The VERDICT is unchanged — 0, nothing
+# outside the declared set — and the line beneath it names the base that verdict was reached
+# against.
 expect_status "16b: a diff wholly inside the declared Files: passes" "0" "$RC"
-expect_empty "16b: …silently" "$OUT_STDERR"
+expect_absent "16b: …with no refusal" "LANDING DIFF OUTSIDE" "$OUT_STDERR"
+expect_contains "16b: …naming the undeclared base it passed against" \
+  "landing gate: no declared base and no working-branch resolves; diffing against main" "$OUT_STDERR"
 expect_eq "16b: …and the row really was processed (marked swept once)" "1" "$(swept_count "$R16B")"
 
 # --- 16c: A Suites:-only brief — no `files=` on the row at all — is not reconciled against
@@ -1384,7 +1424,9 @@ add_row "$R16F" name=slice16f agent_id="$AID_A" deliverable=.bionic/docs/record/
 deliver "$R16F" .bionic/docs/record/s16f.md
 run_gate "$GATE" "$(stop_payload "$R16F" "$SID" false)"
 expect_status "16f: a declared directory with no trailing slash still covers its files" "0" "$RC"
-expect_empty "16f: …silently" "$OUT_STDERR"
+expect_absent "16f: …with no refusal" "LANDING DIFF OUTSIDE" "$OUT_STDERR"
+expect_contains "16f: …over the same announced fallback base as 16b" \
+  "landing gate: no declared base and no working-branch resolves; diffing against main" "$OUT_STDERR"
 expect_eq "16f: …and the row really was processed" "1" "$(swept_count "$R16F")"
 
 # --- 16g: an `impact-command:` configured in .bionic/config.yaml — same key S13's dispatch
@@ -1794,8 +1836,12 @@ expect_status "18b: a no-base fixture never refuses" "0" "$RC"
 expect_contains "18b: …announces the reconciliation is inert" "the Files: reconciliation is INERT" "$OUT_STDERR"
 expect_contains "18b: …naming the detached-HEAD reason" "detached HEAD" "$OUT_STDERR"
 
-# --- 18c: a `working-branch:` naming a branch this repo does NOT hold takes the same
-# fallback path as no field at all — never a refusal for a name that does not resolve.
+# --- 18c (AC-2.2): a `working-branch:` naming a branch this repo does NOT hold takes the
+# same fallback path as no field at all — never a refusal for a name that does not resolve,
+# and SINCE WAVE-17 REQ-2 never in silence either. This is the one base the gate takes that
+# nothing declared: the main checkout's own current branch, which is right only while that
+# checkout happens to sit on the wave tip. The line names the branch it diffed against so a
+# reader can see the guess being made instead of inferring it from a verdict.
 R18C="$(make_git_wave_repo r18c)"
 WT18C=$(make_slice_tree "$R18C" slice18c)
 commit_files "$WT18C" "in scope" declared/one.sh
@@ -1805,6 +1851,103 @@ add_row "$R18C" name=slice18c agent_id="$AID_A" deliverable=.bionic/docs/record/
 deliver "$R18C" .bionic/docs/record/s18c.md
 run_gate "$GATE" "$(stop_payload "$R18C" "$SID" false)"
 expect_status "18c: a working-branch: naming no real branch falls back to the main checkout's own" "0" "$RC"
-expect_empty "18c: …silently, same as no field at all" "$OUT_STDERR"
+expect_contains "18c: …and says so, naming the base it took and why" \
+  "landing gate: no declared base and no working-branch resolves; diffing against main" "$OUT_STDERR"
+
+# ================================================================= Section 18d
+#
+# THE DECLARED ORIGIN (epic-23 wave-17, REQ-2, AC-2.3, D3, ADR-032). The base above is a
+# merge-base against a BRANCH, and a branch answers "everything this branch added since it
+# diverged" — the right question only while the tree was cut from that branch own history.
+# The tree own cut point is a fact `spawn-worktree.sh` printed at creation and, through
+# wave-16, nothing recorded. The `## Tasks` row records it now, and this is where the gate
+# reads it back.
+#
+# THE FIXTURE, AND WHY IT DISCRIMINATES. `wave/x` carries three commits on top of `main`
+# (`a.sh`, `mid.sh`, `tip.sh`); the tree is cut from the FIRST of them, two commits behind the
+# branch tip, and commits its own `b.sh`. The main checkout is parked on `develop`, which
+# diverged before any of the three, and the plan names no `working-branch:` — so the fallback
+# base is `develop`, genuinely EARLIER than the tree own cut point, and it charges the tree
+# with `a.sh`. 18d declares the cut point and passes; 18d-ctl is the same fixture with the
+# cell emptied, and refuses. The pair is what proves the declared base is doing the work:
+# nothing else about the two fixtures differs.
+#
+# fails-when: 18d reports `a.sh`, or 18d-ctl passes, or either takes its base in silence.
+
+# ASSIGNS RATHER THAN PRINTS, and that is not a style choice: this builder answers TWO
+# questions — where the repo is and which commit the tree was cut from — and a command
+# substitution would run it in a subshell, where the second answer is lost the moment the
+# first is read back. `_eg_row_for_worktree` assigns for the same reason.
+make_18d_repo() {  # <label> <tree name> -> sets REPO18D and BASE18D
+  local r wt
+  r="$(make_git_wave_repo "$1")"
+  git -C "$r" checkout -q -b wave/x
+  echo wave >> "$r/a.sh";   git -C "$r" add a.sh;   git -C "$r" commit -q -m "wave commit touching a.sh"
+  BASE18D=$(git -C "$r" rev-parse HEAD)
+  echo mid >> "$r/mid.sh";  git -C "$r" add mid.sh; git -C "$r" commit -q -m "wave commit touching mid.sh"
+  echo tip >> "$r/tip.sh";  git -C "$r" add tip.sh; git -C "$r" commit -q -m "wave commit touching tip.sh"
+  wt="$r/.worktrees/$2"
+  git -C "$r" worktree add -q "$wt" -b "wt/$2" "$BASE18D" >/dev/null 2>&1
+  git_id "$wt"
+  git -C "$r" checkout -q -b develop main
+  commit_files "$wt" "the task own edit" b.sh
+  REPO18D="$r"
+}
+
+make_18d_repo r18d slice18d; R18D="$REPO18D"
+plan_with_task_row "$R18D" slice18d "$BASE18D"
+add_row "$R18D" name=slice18d agent_id="$AID_A" deliverable=.bionic/docs/record/s18d.md \
+  files="b.sh" launched_at="$(iso_ago 600)"
+deliver "$R18D" .bionic/docs/record/s18d.md
+run_gate "$GATE" "$(stop_payload "$R18D" "$SID" false)"
+expect_status "18d: the declared base is the diff base — the wave commits behind the cut point are not charged" "0" "$RC"
+expect_absent "18d: …and a.sh, which the fallback base would charge, is not named" "a.sh" "$OUT_VSTDERR"
+expect_absent "18d: …no fallback is announced, because none was taken" "landing gate:" "$OUT_STDERR"
+
+# CONTROL: the identical fixture with the row base cell emptied to an em dash. The gate has
+# nothing declared to diff against, falls back exactly as it did through wave-16 — and now
+# says which base it took and why.
+make_18d_repo r18d-ctl slice18dctl; R18D_CTL="$REPO18D"
+plan_with_task_row "$R18D_CTL" slice18dctl "—"
+add_row "$R18D_CTL" name=slice18dctl agent_id="$AID_A" deliverable=.bionic/docs/record/s18dctl.md \
+  files="b.sh" launched_at="$(iso_ago 600)"
+deliver "$R18D_CTL" .bionic/docs/record/s18dctl.md
+run_gate "$GATE" "$(stop_payload "$R18D_CTL" "$SID" false)"
+expect_status "18d-ctl: with the base cell emptied the same tree is charged the wave commit" "2" "$RC"
+expect_contains "18d-ctl: …naming a.sh as undeclared" "a.sh" "$OUT_VSTDERR"
+expect_contains "18d-ctl: …and announcing the base it fell back to" \
+  "landing gate: row T1 declares no base" "$OUT_STDERR"
+expect_contains "18d-ctl: …naming the branch it diffed against" "diffing against develop" "$OUT_STDERR"
+
+# --- 18e (AC-2.2): a registered row that declares no origin, on a plan whose
+# `working-branch:` DOES resolve. This is the reconstruction ADR-032 keeps as the fallback,
+# and the line it owes is the first of the two the gate can print. The verdict is unchanged
+# from wave-16 — the merge-base against `wave/x` is the tree own cut point here — so the
+# announcement is the whole of what this row asserts.
+make_18d_repo r18e slice18e; R18E="$REPO18D"
+plan_with_task_row "$R18E" slice18e "—" wave/x
+add_row "$R18E" name=slice18e agent_id="$AID_A" deliverable=.bionic/docs/record/s18e.md \
+  files="b.sh" launched_at="$(iso_ago 600)"
+deliver "$R18E" .bionic/docs/record/s18e.md
+run_gate "$GATE" "$(stop_payload "$R18E" "$SID" false)"
+expect_status "18e: a row that declares no origin still lands on the reconstructed base" "0" "$RC"
+expect_contains "18e: …and the reconstruction is announced, naming the row and the branch" \
+  "landing gate: row T1 declares no base; diffing against working-branch wave/x" "$OUT_STDERR"
+
+# --- 18f: a row that declares an origin THIS TREE DOES NOT HOLD. The record is wrong — a
+# sha from another repository, or a commit rewritten out of existence — and the gate must
+# neither charge the tree against a base it could not resolve nor pass in silence. It falls
+# back like any undeclared row and names the cell it could not use.
+make_18d_repo r18f slice18f; R18F="$REPO18D"
+plan_with_task_row "$R18F" slice18f 0000000000000000000000000000000000000000 wave/x
+add_row "$R18F" name=slice18f agent_id="$AID_A" deliverable=.bionic/docs/record/s18f.md \
+  files="b.sh" launched_at="$(iso_ago 600)"
+deliver "$R18F" .bionic/docs/record/s18f.md
+run_gate "$GATE" "$(stop_payload "$R18F" "$SID" false)"
+expect_status "18f: a declared base the tree does not hold is not a refusal" "0" "$RC"
+expect_contains "18f: …the gate names the cell it could not use" \
+  "row T1 declares base 0000000000000000000000000000000000000000, which is not a commit this tree holds" "$OUT_STDERR"
+expect_contains "18f: …and the base it took instead" "diffing against working-branch wave/x" "$OUT_STDERR"
 
 finish
+
