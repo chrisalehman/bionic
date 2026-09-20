@@ -6,8 +6,8 @@
 # at Steps 3–9 — and the three questions asked of it. Pure functions of a file; nothing here
 # writes, and nothing here runs at source time:
 #
-#   units_rows <plan>          one TSV line per row, the eleven fields in the FIXED order
-#                              id·step·kind·task·agent·deps·size·serves·Files·status·worktree,
+#   units_rows <plan>          one TSV line per row, the twelve fields in the FIXED order
+#                              id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base,
 #                              in TABLE order. Exit 1 and silent when the plan carries no
 #                              `## Tasks` table.
 #   units_ready <plan> <step>  the ids of rows whose status is `pending`, whose step is
@@ -126,8 +126,8 @@ _units_read() {
       # lower-cased text a header cell is matched against.
       disp[1] = "id";    disp[2] = "step";   disp[3] = "kind";   disp[4] = "task"
       disp[5] = "agent"; disp[6] = "deps";   disp[7] = "size";   disp[8] = "serves"
-      disp[9] = "Files"; disp[10] = "status"; disp[11] = "worktree"
-      for (k = 1; k <= 11; k++) want[k] = tolower(disp[k])
+      disp[9] = "Files"; disp[10] = "status"; disp[11] = "worktree"; disp[12] = "base"
+      for (k = 1; k <= 12; k++) want[k] = tolower(disp[k])
       alt[3] = "rigor"   # slot 3 as the task-scale ledger spells it
       state = 0   # 0 before the section · 1 in it, header not yet seen · 2 in the table · 3 done
     }
@@ -154,7 +154,7 @@ _units_read() {
       for (i = 1; i <= n; i++) {
         t = tolower(trim(c[i]))
         if (t == "") continue
-        for (k = 1; k <= 11; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
+        for (k = 1; k <= 12; k++) if ((t == want[k] || t == alt[k]) && col[k] == 0) col[k] = i
       }
       if (col[1] == 0) next          # no `id` cell — not the header row
       found = 1
@@ -178,7 +178,7 @@ _units_read() {
       # trailing empty field, both sides the same way, so the two numbers compare.
       if (hdrn > 0 && n > hdrn) over = (over == "" ? "" : over " ") id "=" (n - 1)
       line = ""
-      for (k = 1; k <= 11; k++) {
+      for (k = 1; k <= 12; k++) {
         f = (col[k] > 0 && col[k] <= n) ? trim(c[col[k]]) : ""
         line = (k == 1) ? f : line "\t" f
       }
@@ -190,8 +190,8 @@ _units_read() {
     END {
       if (!found) exit 1
       missing = ""
-      # THE LOOP STOPS AT 10, NOT 11: slot 11 (`worktree`) is optional, and an absent
-      # optional column is not a fault to report.
+      # THE LOOP STOPS AT 10, NOT 12: slots 11 (`worktree`) and 12 (`base`) are optional,
+      # and an absent optional column is not a fault to report.
       for (k = 1; k <= 10; k++) if (col[k] == 0) missing = (missing == "") ? disp[k] : missing " " disp[k]
       # FIELD 4 NAMES WHAT THE HEADER CARRIES — every contract column present, including
       # the optional `worktree`, which field 1 deliberately cannot report (field 1 lists
@@ -201,7 +201,7 @@ _units_read() {
       # from "no row names this tree" to `units_rows` alone (wave-16 REQ-3, AC-3.2).
       # NO APOSTROPHE ON ANY LINE INSIDE THIS awk PROGRAM: it is single-quoted, and one
       # would close the quote and hand the rest of the parser to bash.
-      for (k = 1; k <= 11; k++) if (col[k] > 0) present = (present == "") ? disp[k] : present " " disp[k]
+      for (k = 1; k <= 12; k++) if (col[k] > 0) present = (present == "") ? disp[k] : present " " disp[k]
       # THE CONTROL LINE IS TAB-SEPARATED: <missing columns> · <header width> · <id=width …>
       # · <columns present>. `units_rows` drops this line whole, so no caller outside this
       # file sees it; `units_validate` reads fields 2-3 and `units_has_column` field 4.
@@ -245,7 +245,7 @@ units_has_column() {
 # fold, and an absent trailing cell reads empty rather than shifting.
 #
 # BY NAME, NOT BY NUMBER, for the reason the parse is header-keyed: a caller that wrote
-# `10` would have to be found again if the contract ever grew an eleventh field. The name
+# `10` would have to be found again if the contract ever grew a twelfth field. The name
 # is this library's own contract spelling, NOT the table's header text — `rigor` is
 # accepted as the second name of slot 3, the same alias the header scan takes.
 units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on a bad name
@@ -253,7 +253,7 @@ units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on 
   case "${2:-}" in
     id) n=1 ;;    step) n=2 ;;   kind|rigor) n=3 ;; task) n=4 ;;  agent) n=5 ;;
     deps) n=6 ;;  size) n=7 ;;   serves) n=8 ;;     Files) n=9 ;;  status) n=10 ;;
-    worktree) n=11 ;;
+    worktree) n=11 ;; base) n=12 ;;
     *) return 1 ;;
   esac
   while [ "$n" -gt 1 ]; do
@@ -267,7 +267,7 @@ units_field() {  # <record> <column name> -> the cell, empty if absent; rc 1 on 
 }
 
 
-# units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree,
+# units_rows <plan> -> id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base,
 #                      tab-separated, one line per row, in TABLE order. Exit 1 when there is
 #                      no table.
 #
@@ -405,7 +405,8 @@ units_validate() {
         for (i in ss) states[ss[i]] = 1
       }
       $1 == "" { next }
-      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; sta[n] = $10; wtc[n] = $11; count[$1]++ }
+      { n++; id[n] = $1; stp[n] = $2; knd[n] = $3; dep[n] = $6; sta[n] = $10; wtc[n] = $11
+        bsc[n] = $12; count[$1]++ }
       END {
         for (i = 1; i <= n; i++) {
           if (id[i] in skip) continue
@@ -447,6 +448,27 @@ units_validate() {
           # program, and one would close the quote (the header note says so).
           if (haswt == 1 && sta[i] == "active" && wtc[i] !~ /[A-Za-z0-9]/)
             printf "%s: active row names no worktree\n", id[i]
+
+          # THE ORIGIN IS DECLARED BESIDE THE IDENTITY (wave-17 REQ-2, AC-2.1, D3, ADR-032).
+          # Slot 12 is the commit the tree was cut from, as spawn-worktree.sh printed it, and
+          # the landing gate takes it as the diff base. A cell that is not a commit id would
+          # send that gate to `git merge-base <junk> HEAD`, which fails silently and lands the
+          # tree on the announced fallback — the record would be wrong and the gate would
+          # never say so. Checked here, at the write, for the same reason the worktree arm is.
+          #
+          # NO COLUMN QUESTION IS ASKED, unlike the worktree arm two lines up. That arm has to
+          # tell an absent column from a blank cell because it fires on ABSENCE; this one fires
+          # only on a cell that HOLDS something, and an absent column reads empty on every row.
+          #
+          # DECLARING NOTHING IS LEGAL. An em dash, a hyphen, a space and an empty cell are one
+          # fact spelled four ways (the deps cell reads its own none this way), and a row with
+          # no declared origin is exactly what the landing gate announces its fallback for.
+          #
+          # LENGTH RATHER THAN A BOUNDED REPETITION: an interval like {7,40} is not portable
+          # across the awks this fleet runs under, and the two comparisons say the same thing.
+          if (bsc[i] ~ /[A-Za-z0-9]/ \
+              && (bsc[i] !~ /^[0-9a-fA-F]+$/ || length(bsc[i]) < 7 || length(bsc[i]) > 40))
+            printf "%s: base %s is not a commit id\n", id[i], bsc[i]
 
           d = dep[i]
           gsub(/[ \t]/, "", d)
