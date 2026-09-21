@@ -113,7 +113,7 @@ A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale
 - **`size`** — the row's expected duration in minutes.
 - **`serves`** — the requirement id(s) this row discharges.
 - **`Files`** — every path the row may create or edit (the dispatch budget's source).
-- **`worktree`** — the row's tree path once created; `—` while none exists yet.
+- **`worktree`** (optional) — the row's tree path once created; `—` while none exists yet.
 - **`base`** (optional, ADR-032) — rides beside `worktree`: the commit the tree was cut from, as `spawn-worktree.sh` printed it at creation. Absent (`—`) means the landing gate reconstructs the base from `working-branch:` instead, and says so.
 - **`status`** — `pending | active | landed | dropped`. `done` is a TASK-SCALE word only (that ledger's own status enum) and never appears as a wave-table status — a row that has landed is `landed`, not `done`.
 
