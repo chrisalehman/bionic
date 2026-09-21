@@ -535,10 +535,10 @@ else
   section "§F the planted-edit proof"
   PLOG="${BIONIC_IMPACT_PLANTED_LOG:-$TMP/planted-edits.log}"
 
-  # WIDTH IS READ, NOT SET — the same rule tests/run.sh:168 follows, and the
+  # WIDTH IS READ, NOT SET — the same rule tests/run.sh:211 follows, and the
   # same ceiling. Six whole-roster runs at width one would take the better part
   # of an hour; the roster's own isolation audit is what makes running them at
-  # once safe (tests/run.sh:52-70).
+  # once safe (tests/run.sh:54-72).
   PJOBS=8
   if [ -f "$REPO/payload/scripts/lib/resources.sh" ]; then
     # shellcheck source=/dev/null
