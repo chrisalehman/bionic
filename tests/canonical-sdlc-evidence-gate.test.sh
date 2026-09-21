@@ -4546,6 +4546,82 @@ else
     "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
+# --- 25g(t) / W6: EVERY `cd` before the commit is a directory the arm has to fold ---------
+#
+# THE HOLE C3's FIX OPENED (re-walk at 4e2ac66, W6). The reader took the FIRST `cd` after the
+# first separator and returned; every later one was invisible to it. While the PRESENCE of a
+# second `cd` refused, that cost nothing — the command was refused before the third target
+# could matter. Once two matching targets became an allow, `cd X && cd X && cd Y` walked
+# through the arm and was judged at X's row, while the shell commits in Y, which another row
+# owns at another step. Fail-open, and one `&&` away from the shape 25g(j) refuses.
+#
+# SO THE ARM FOLDS THE WHOLE LIST, not its first two entries. Every `cd` target before the
+# commit is resolved in order — each relative to the directory the previous one left the shell
+# standing in — and the command names ONE directory only when they all fold alike. The first
+# target that does not is the one the refusal names, so the detail always reads as a real
+# disagreement and never as a sentence answering its own complaint (C3).
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
+   && grep -qF "changes into '$s25r_tmp/wt-T3' and then into '$s25r_tmp/wt-T5'" <<<"$HOOK_VSTDERR"; then
+  ok "25g(t) W6 a THIRD cd into another directory is refused, and the detail names the pair that differs"
+else
+  no "25g(t) W6 a THIRD cd into another directory is refused, and the detail names the pair that differs" \
+    "expected exit 2 naming wt-T3 then wt-T5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the difference is caught wherever it sits in the list: here the SECOND target is the
+# odd one and the third returns to the first. A commit is still not placed by this text.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && cd $s25r_tmp/wt-T3 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
+   && grep -qF "changes into '$s25r_tmp/wt-T3' and then into '$s25r_tmp/wt-T5'" <<<"$HOOK_VSTDERR"; then
+  ok "25g(t) …and a cd AWAY and BACK is refused too, naming the target that differs"
+else
+  no "25g(t) …and a cd AWAY and BACK is refused too, naming the target that differs" \
+    "expected exit 2 naming wt-T3 then wt-T5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …the control that keeps this from becoming "three cds are a refusal": three spellings of the
+# ONE directory are one directory, by the same fold that answers for two.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(t) …while THREE cds into the same directory stay one directory, judged at row T3's step 4"
+else
+  no "25g(t) …while THREE cds into the same directory stay one directory, judged at row T3's step 4" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the same three directories spelled the three ways a writer actually types them: the
+# relative `./` is joined to where the shell is standing, and the trailing slash folds away.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd ./ && cd $s25r_tmp/wt-T3/ && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(t) …and 'cd X && cd ./ && cd X/' folds to that one directory as well"
+else
+  no "25g(t) …and 'cd X && cd ./ && cd X/' folds to that one directory as well" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and what a `git -C` does to the whole question, pinned as it stands (A-T31.3). `-C` is
+# branch (1) of `_eg_commit_cwd` and it answers first, because git's own cwd override is what
+# the commit obeys whatever the shell did: the `cd` list is never read, the arm never fires,
+# and the commit is judged at the tree `-C` names — here row T3's, though the text last
+# changed into row T5's tree. This is the escape the refusal's own Fix line offers, so it has
+# to keep working; the row exists so that a later widening of the arm cannot take it away
+# silently.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T5 && git -C $s25r_tmp/wt-T3 commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(t) …and a 'git -C <dir>' still overrides the cds the text names, judged at row T3's step 4"
+else
+  no "25g(t) …and a 'git -C <dir>' still overrides the cds the text names, judged at row T3's step 4" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
 # --- 25g(k) / AC-1.1: the row stands where the run stands, and it is ACTIVE ---------------
 #
 # THE SUBJECT IS RESOLVED BEFORE ANY ARM JUDGES (wave-17 REQ-1, D1, ADR-031). Row T5 sits at
