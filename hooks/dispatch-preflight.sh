@@ -1728,21 +1728,36 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # underlying fd 2 the shell already pointed at /dev/null). Printing a `<kind>_capwarn=`
     # line instead puts it on stdout, where the bash side field_of and warn() -- the same
     # path the ABSENT-field warning already uses -- carry it to the real stderr untouched.
-    function suite_names(s,   n, arr, i, t, b, out, seen, c, dropped, baddrop) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""; baddrop = ""
+    function suite_names(s,   nl, lines, li, n, arr, i, t, b, out, seen, c, dropped, baddrop, cmt, real) {
+      nl = split(s, lines, /\n/); out = ""; c = 0; dropped = ""; baddrop = ""; cmt = 0; real = 0
+      for (li = 1; li <= nl; li++) {
+      n = split(lines[li], arr, /[ \t\r]+/)
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
-        # A TRAILING COMMENT ENDS THE SPAN (T23, Step-6 review R1). The brief scaffold this
-        # repo ships reads `Suites: none   # read-only brief; or test-file names only`, and
-        # an author who fills that scaffold in keeps the comment. Every word after the `#` is a
-        # whitespace-separated token like any other, so the drop refusal below scored `#`,
-        # `read-only` and `brief;` as suites the shell runner cannot run and refused briefs
-        # the base admitted — with a message pointing at `Re-executes:` that never mentioned
-        # the comment, so the repair was not discoverable from it. `#` STOPS THE SCAN rather
-        # than being skipped: a comment runs to end of span, and skipping would let a word
-        # inside prose ("# see tests/other.test.sh") lift onto the row as a budget entry.
+        # A COMMENT ENDS ITS OWN LINE (T23, Step-6 review R1; line-scoped by T35, critic C8).
+        # The brief scaffold this repo ships reads `Suites: none   # read-only brief; or
+        # test-file names only`, and an author who fills that scaffold in keeps the comment.
+        # Every word after the `#` is a whitespace-separated token like any other, so the drop
+        # refusal below scored `#`, `read-only` and `brief;` as suites the shell runner cannot
+        # run and refused briefs the base admitted — with a message pointing at `Re-executes:`
+        # that never mentioned the comment, so the repair was not discoverable from it. `#`
+        # STOPS THE SCAN rather than being skipped: skipping would let a word inside prose
+        # ("# see tests/other.test.sh") lift onto the row as a budget entry its author never
+        # declared, and the writer-side guard would then hold the agent to it.
+        #
+        # WHAT IT STOPS IS THE LINE, NOT THE SPAN. A span is `spanof()`: everything up to the
+        # next labelled line or the next blank one, so a roster wrapped across lines is ONE
+        # span and a comment on its first line used to discard every suite declared below —
+        # silently, no `suites_dropped=`, nothing on the row, the loud drop arm turned into a
+        # quiet budget cut (critic C8). A comment runs to end of LINE, which is what `#` means
+        # everywhere else a shell reader meets it; the scan resumes at the next line, and a
+        # comment that opens a continuation line contributes nothing from that line alone.
         if (substr(t, 1, 1) == "#") break
         if (t == "" || istemplate(t)) continue
+        # SOMETHING REAL WAS READ. Recorded for the all-comment case below, and set here —
+        # before the shape filters — because an unexpanded name and a dropped token are both
+        # declarations the author made, however the arms downstream answer them.
+        real = 1
         # AN UNEXPANDED NAME IS NOT A SUITE, AND NOW SAYS SO HERE (REQ-1 AC-1.4, ADR-029).
         # The refusal prose at the suite-allowance wall has promised "one path per token, no
         # shell variables" since wave-01, and nothing at dispatch enforced it: `istemplate`
@@ -1772,12 +1787,22 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         if (c < SUITES_MAX) { out = (out == "" ? b : out " " b); c++ }
         else { dropped = (dropped == "" ? b : dropped " " b) }
       }
+      # The inner loop LEFT EARLY iff it met a `#`, and `i` holds that token index.
+      if (i <= n) cmt = 1
+      }
       if (dropped != "") {
         print "suites_capwarn=Suites: line exceeds the " SUITES_MAX "-suite cap — dropped: " dropped
       }
       if (baddrop != "") { print "suites_dropped=" baddrop }
       if (out != "") return out
       if (tolower(collapse(s)) ~ /^none([^a-z0-9]|$)/) return "none"
+      # A SPAN THAT IS ALL COMMENT DECLARED A LABEL AND NOTHING ELSE (critic C9). It lifts
+      # no suites, no drop and no waiver, so all four guards of the no-instrument arm read
+      # empty and the brief is refused for "declaring no Files: and no Suites:" — of a brief
+      # that declares `Suites:` in as many words, the self-refuting shape C3 was fixed for.
+      # The refusal is right (there is no budget for the row to carry) and stays where it is;
+      # this fact is what lets its DETAIL say which of the two things happened.
+      if (cmt && !real) { print "suites_commented=1" }
       return ""
     }
     # THE AUTHOR-MARKED RUNS on a `Re-executes:` span — each backtick-delimited command, in
@@ -2248,6 +2273,12 @@ C_SUITES_BAD=$(sanitize "$(field_of suites_bad)" 300)
 # waiver `none` excepted. Read here so the arm below can refuse on it by name, before the
 # no-instrument arm gets a chance to see an empty `suites=` and blame the wrong thing.
 C_SUITES_DROPPED=$(sanitize "$(field_of suites_dropped)" 300)
+# A Suites: SPAN THAT WAS ENTIRELY A COMMENT (T35, critic C9). Not a fault of its own and
+# not a fifth guard on the no-instrument arm below — the brief really does carry no budget,
+# so it really is refused. This says WHICH of the two shapes the author wrote, so the arm's
+# detail can stop telling a brief that declares `Suites:` in as many words that it declared
+# no `Suites:` at all.
+C_SUITES_COMMENTED=$(sanitize "$(field_of suites_commented)" 8)
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
@@ -2766,7 +2797,17 @@ fi
 # and no Suites:" (walk W4b). That refusal is the suite-drop arm's above, named by the
 # actual token, not this one's guess that nothing was declared at all.
 if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ] && [ -z "$C_SUITES_DROPPED" ]; then
-  _dp_detail="An agent with no declared instrument runs whatever it decides to run. Two writers
+  # THE CLAUSE GOES FIRST, NOT LAST (critic C9). refuse.sh folds a detail to twelve lines on
+  # the channel that hands it to a reader who did not ask for it, and this detail is already
+  # longer than that, so a sentence appended at the end is bytes nobody sees. One clause, at
+  # the top, where the fold cannot reach it; the verdict and the fix line are untouched.
+  _dp_suites_comment=""
+  if [ -n "$C_SUITES_COMMENTED" ]; then
+    _dp_suites_comment="Suites: was declared, but its span is a comment, so it named nothing — write \`none\` to waive.
+
+"
+  fi
+  _dp_detail="${_dp_suites_comment}An agent with no declared instrument runs whatever it decides to run. Two writers
 read \"run the impacted suites\" as the whole tree and spent 40 minutes each
 re-proving the world; the budget only binds when it is on the roster row.
 
