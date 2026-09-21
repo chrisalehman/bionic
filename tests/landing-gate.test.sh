@@ -1952,9 +1952,12 @@ expect_contains "18f: …and the base it took instead" "diffing against working-
 # --- 18g (AC-2.1): the 18d shape again, this time with a MIXED-CASE tree name. `_lg_worktree_for_name`
 # resolves the row's tree through `worktree_for_row`, which LOWERCASES the name it is given
 # (`payload/scripts/lib/worktree.sh`'s own docblock: "the fleet's one mapping" folds case) — so
-# `LG_WT`'s basename is always lowercase even when the tree and the plan row spell the name with
-# capitals. `_lg_row_for_tree` must fold the plan's `worktree` cell the same way before comparing,
-# or a row named anything but all-lowercase never matches and REQ-2's declared-base feature goes
+# `LG_WT`'s basename arrives lowercase on a case-INSENSITIVE filesystem, where the lowercased
+# path already exists and `-d` takes it as-is, and in the tree's OWN case on a case-sensitive
+# one, where that `-d` fails and the fallback scan returns the real name (18g(fold) below pins
+# the compare directly, since this fixture alone cannot exercise both classes on one runner).
+# `_lg_row_for_tree` must fold the plan's `worktree` cell the same way before comparing, or a
+# row named anything but all-lowercase never matches and REQ-2's declared-base feature goes
 # silently inert for it — exactly the live-topology defect this row reproduces (every real row this
 # wave is named `17-T<n>`, which is exactly this shape).
 #
@@ -1983,6 +1986,32 @@ expect_status "18g-ctl: a mixed-case row whose declared base this tree does not 
 expect_contains "18g-ctl: …naming a.sh as undeclared" "a.sh" "$OUT_VSTDERR"
 expect_contains "18g-ctl: …and announcing the row it matched and the base it could not use" \
   "landing gate: row T1 declares base deadbeef, which is not a commit this tree holds" "$OUT_STDERR"
+
+# --- 18g(fold) / critic C12 (wave-17-fixit-184, T46): 18g's own MATCH is vacuous on a
+# case-SENSITIVE filesystem. `_lg_worktree_for_name`'s `-d` test on the lowercased candidate
+# path fails there, the fallback scan returns the tree's REAL name (`Slice18G`), and 18g's
+# plan cell is written in that SAME real case — so the PRE-fix exact compare already matches,
+# for a reason that has nothing to do with the fold this task pins. A green 18g on such a
+# runner would be mistaken for proof the fix holds when it is really an accident of which
+# path `_lg_worktree_for_name` took. The probe below names which class this runner is
+# (informational only), and the direct drive beneath it is the actual pin: it bypasses
+# `_lg_worktree_for_name` (and its filesystem-dependent `-d`) entirely, handing
+# `_lg_row_for_tree` an EXPLICITLY LOWERCASED basename (`slice18g`) against 18g's own
+# mixed-case cell (`Slice18G`) — so the compare the fold added is asserted on its own terms,
+# true on every filesystem class this suite can run on, not only the one 18g's ordinary
+# fixture happens to exercise through `-d`.
+_LG_CSPROBE="$SANDBOX/csprobe18g"; mkdir -p "$_LG_CSPROBE"
+: > "$_LG_CSPROBE/A"
+if [ -e "$_LG_CSPROBE/a" ]; then _LG_FSCLASS="case-insensitive"; else _LG_FSCLASS="case-sensitive"; fi
+ok "18g(fold): this runner's filesystem is $_LG_FSCLASS (informational — the direct-drive pin below runs on every class)"
+
+_LG_18G_PLAN="$R18G/.bionic/docs/plans/epic-16-landing-contract/wave-01-landing-contract.plan.md"
+_LG_LIBDIR="$(dirname "$GATE_SRC")"
+_LG_DIRECT="$(bash -c '. "'"$_LG_LIBDIR"'/units.sh"; . "'"$_LG_LIBDIR"'/stop.sh"; \
+  _lg_row_for_tree "'"$_LG_18G_PLAN"'" "slice18g"; \
+  printf "rc=%s id=%s base=%s\n" "$?" "$_LG_ROW_ID" "$_LG_ROW_BASE"' 2>/dev/null)"
+expect_contains "18g(fold): _lg_row_for_tree itself folds the cell — an explicitly lowercased basename ('slice18g') still matches the plan's mixed-case cell ('Slice18G'), pinned on both filesystem classes" \
+  "rc=0 id=T1" "$_LG_DIRECT"
 
 finish
 
