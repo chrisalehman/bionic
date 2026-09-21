@@ -2550,7 +2550,11 @@ _eg_row_for_worktree() {
     _cell="$(units_field "$_line" worktree)"
     [ -n "$_cell" ] || continue
     _cell="${_cell%/}"
-    [ "${_cell##*/}" = "$_want" ] || continue
+    # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14): that
+    # function folds both sides; this one folds only the CELL, because `$_want` here is
+    # never a lossy read — it is the literal basename git itself gave the tree
+    # (`_eg_git_wt_name`), so it needs no folding to be trustworthy on either filesystem.
+    [ "$(printf '%s' "${_cell##*/}" | tr '[:upper:]' '[:lower:]')" = "$_want" ] || continue
     _id="$(units_field "$_line" id)"
     if [ -z "$_EG_ROW" ]; then
       # THREE CELLS, TAB-SEPARATED: id, step, status (wave-17 REQ-1, D1, ADR-031). The
