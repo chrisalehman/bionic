@@ -247,11 +247,15 @@ _lg_worktree_for_name() {  # <repo> <row name> -> abs worktree path on stdout, o
 # by BASENAME — so a cell holding `17-T3`, `.worktrees/17-T3` or an absolute path all name
 # the same tree, and two walls reading one record can never disagree about which row that is.
 #
-# THE BASENAME ARRIVES CASE-FOLDED, so the cell is compared case-folded too (L1, bit
-# epic-23 wave-17 T41): `_want` is `${LG_WT##*/}` at the call site, and `LG_WT` comes from
-# `_lg_worktree_for_name` above, which resolves through `worktree_for_row` — the fleet's one
-# name-to-path mapping, whose own docblock says it lowercases the row name before building
-# the path. A plan row spelled with capitals (every real row this wave: `17-T<n>`) then never
+# THE BASENAME ARRIVES CASE-FOLDED ON A CASE-INSENSITIVE FILESYSTEM (macOS: the lowercased
+# path `worktree_for_row` builds already exists, so `_lg_worktree_for_name`'s `-d` takes it
+# as-is) AND IN THE TREE'S OWN CASE OTHERWISE (a case-sensitive filesystem fails that `-d`
+# and the fallback scan above returns the real name, case and all) — so the cell is compared
+# case-folded too (L1, hit epic-23 wave-17 T41), which covers both classes: `_want` is
+# `${LG_WT##*/}` at the call site, and `LG_WT` comes from `_lg_worktree_for_name` above,
+# which resolves through `worktree_for_row` — the fleet's one name-to-path mapping, whose own
+# docblock says it lowercases the row name before building the path. A plan row spelled with
+# capitals (every real row this wave: `17-T<n>`) then never
 # matched a case-sensitive compare, so `_LG_ROW_ID`/`_LG_ROW_BASE` stayed empty and REQ-2's
 # declared-base feature went silently inert. Folding both sides here, rather than un-folding
 # `_want`, keeps the one mapping in one place — this function absorbs the case the mapping
