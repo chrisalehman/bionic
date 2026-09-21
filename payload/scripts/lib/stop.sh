@@ -1181,7 +1181,7 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
         LG_BASE=$(git -C "$LG_WT" merge-base "$LG_MAIN_BRANCH" HEAD 2>/dev/null)
       fi
       if [ -z "$LG_BASE" ]; then
-        # ANNOUNCED INERT, the standard tests/run.sh:267-272 sets for the adoption wall:
+        # ANNOUNCED INERT, the standard tests/run.sh:310-315 sets for the adoption wall:
         # "a wall that is off and quiet is indistinguishable from a wall that is passing
         # everything". Unrelated histories, a worktree with no commits and any other
         # merge-base failure land here too, and each says so rather than passing silently.

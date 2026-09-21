@@ -190,3 +190,15 @@ section, and of this file, was never bootstrap-era and is unchanged.)*
   the same agent, both times in a comment, both caught by `bash -n` before commit. Rule:
   `bash -n <hook>` after ANY edit near an awk block, and reword comments rather than
   escaping ("it's" → "it is").
+
+- **An apostrophe inside a DOUBLE-quoted bash string re-opens the quote just as badly**
+  (2026-09-20, epic-23 wave-17, A-T3.8). `lib/stop.sh` had `"row ${ID}'s declared base …"` —
+  the apostrophe closed the double-quoted string early, and everything after it on the line,
+  and every arm below it in the function, was swallowed into a string literal that still
+  parsed: `bash -n` passed clean, `declare -f` showed the remainder verbatim as string text,
+  and the function silently returned before doing any of its real work. This is the
+  double-quoted cousin of the single-quoted-awk rule above — same failure shape, different
+  quoting context. Caught by `tests/landing-gate.test.sh` reporting 32 failures while the gate
+  itself passed everything and stderr was empty (a wall that swallowed its own logic looks,
+  from outside, like a wall that never fires). Rule: reword rather than escape ("it's" →
+  "its own" or similar) in ANY double- or single-quoted bash string, not only inside awk.
