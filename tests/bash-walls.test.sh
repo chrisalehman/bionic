@@ -1061,4 +1061,119 @@ G7_EMPTY=$(bash -c '. "'"$G7_LIB"'/refuse.sh"; . "'"$G7_LIB"'/fold.sh"; \
 expect_eq "15g2: …and a GENUINELY empty set still says 'none' (the control this pin needs)" \
   "none" "$G7_EMPTY"
 
+# ---------------------------------------------------------------------------
+section "16 — the evidence gate folds a mis-cased worktree cell too, as the landing gate does (critic C14, T46)"
+#
+# T41 folded `_lg_row_for_tree` (payload/scripts/lib/stop.sh) so the LANDING gate matches a
+# plan row's `worktree` cell against a tree's real basename case-insensitively — the tree
+# name a real dispatch produces is always `<NN>-T<n>` (capital T) while a hand-edited cell
+# can drift in case. `_eg_row_for_worktree` (walls.sh) makes the SAME match for the EVIDENCE
+# gate and, until this fold, still compared exactly: a row cell spelled `17-T5` against a
+# real tree directory git itself named `17-t5` (lowercase) matched in one wall and not the
+# other — one plan, two answers for which row owns the tree, exactly what ADR-032 exists to
+# prevent. `## Tasks` at step 4/active drives the D1/ADR-031 subject fork
+# (`_EG_RSTATUS = active` and `_EG_RSTEP >= 4`, both required): found, the commit is judged
+# by the row's task arms and says so; missed, the gate falls back to `current:` and says
+# THAT instead. Both plans below hold `current: 4`, so the fork is a no-op on `CURRENT`
+# either way — the two arms differ only in which line they print, which is what these
+# assertions read.
+#
+# A REAL LINKED WORKTREE, never a hand-planted `.git` file (mirrors
+# tests/canonical-sdlc-evidence-gate.test.sh's 25g fixtures): the name the arm reads is the
+# one git itself chose out of `<main>/.git/worktrees/<name>`, and on any filesystem that name
+# is the literal basename `git worktree add` was given — lowercase here, deliberately, so the
+# row's capitalized cell is the one thing this fixture makes wrong.
+R_ROWFOLD="$(mk_repo rowfold)"
+git -C "$R_ROWFOLD" worktree add -q "$R_ROWFOLD/.worktrees/17-t5" -b wt/17-t5 2>/dev/null
+expect_eq "16a: the fixture's tree really is a linked worktree, named lowercase by git" \
+  "17-t5" "$(basename "$(git -C "$R_ROWFOLD/.worktrees/17-t5" rev-parse --git-dir)")"
+
+T46_ROWFOLD_PLAN='---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+intent: build
+rigor: audited
+scale: wave
+deploy_target: none
+use_worktree: true
+has_ui: false
+walk: exempt
+---
+# plan
+
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-09-21T00:00Z "approved"
+Step 4:
+  worktree: .worktrees/17-t5
+  base-sha: 0fe69ed
+  branch: wt/17-t5
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | mis-cased worktree cell against the real (lowercase) tree | senior-implementor | — | 20m | REQ-2 | a.sh | 17-T5 | active |
+'
+printf '%s\n' "$T46_ROWFOLD_PLAN" > "$R_ROWFOLD/.bionic/docs/plans/active.md"
+
+run_hook "$(mk_payload "$R_ROWFOLD/.worktrees/17-t5" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_ROWFOLD"
+expect_status "16b: the commit is still allowed either way (Step 4's shape is honest regardless of which row answers)" 0 "$ST"
+expect_contains "16c: the gate judges by the ROW's task arms — T1's cell (17-T5) still names the real (lowercase) tree" \
+  "evidence-gate: judged by row T1's task arms (run at current: 4)" "$ERR"
+expect_absent "16d: …never falling back to 'no ## Tasks row names worktree', which is the pre-fold miss" \
+  "no ## Tasks row names worktree" "$ERR"
+
+# THE MIRROR CASE (T50, T47's floor RED, §25g): 16a–16d's tree was lowercase, so `$_want`
+# (the literal basename git gave the tree) happened to already equal a folded cell without
+# needing any fold of its own — that fixture could not see a one-sided fold miss the OTHER
+# direction. A real dispatch tree is never lowercase; `_eg_git_wt_name` hands back the
+# capitalized name git itself chose (`<NN>-T<n>`, T46's own comment says so), and when the
+# cell is spelled with the SAME case a one-sided fold still breaks the match: the cell gets
+# folded to lowercase, `$_want` does not, and two identical strings compare unequal. That is
+# the exact §25g failure (12 rows, `wt-T3`/`wt-T5`/`wt-T9`/`14-TC`), reproduced here with a
+# real linked worktree so this file — not just the evidence-gate suite — pins it.
+R_ROWFOLD2="$(mk_repo rowfold2)"
+git -C "$R_ROWFOLD2" worktree add -q "$R_ROWFOLD2/.worktrees/17-T7" -b wt/17-T7 2>/dev/null
+expect_eq "16e: the fixture's tree really is a linked worktree, named mixed-case by git (a real dispatch shape)" \
+  "17-T7" "$(basename "$(git -C "$R_ROWFOLD2/.worktrees/17-T7" rev-parse --git-dir)")"
+
+T50_ROWFOLD_PLAN='---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+intent: build
+rigor: audited
+scale: wave
+deploy_target: none
+use_worktree: true
+has_ui: false
+walk: exempt
+---
+# plan
+
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-09-21T00:00Z "approved"
+Step 4:
+  worktree: .worktrees/17-T7
+  base-sha: 0fe69ed
+  branch: wt/17-T7
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | mixed-case worktree cell against the real (mixed-case) tree | senior-implementor | — | 20m | REQ-2 | a.sh | 17-T7 | active |
+'
+printf '%s\n' "$T50_ROWFOLD_PLAN" > "$R_ROWFOLD2/.bionic/docs/plans/active.md"
+
+run_hook "$(mk_payload "$R_ROWFOLD2/.worktrees/17-T7" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_ROWFOLD2"
+expect_status "16f: the commit is still allowed either way (Step 4's shape is honest regardless of which row answers)" 0 "$ST"
+expect_contains "16g: the gate judges by the ROW's task arms — T1's cell (17-T7) still names the real (mixed-case) tree" \
+  "evidence-gate: judged by row T1's task arms (run at current: 4)" "$ERR"
+expect_absent "16h: …never falling back to 'no ## Tasks row names worktree', which is the ONE-SIDED-fold miss (T47 §25g)" \
+  "no ## Tasks row names worktree" "$ERR"
+
 finish

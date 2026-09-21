@@ -1728,11 +1728,36 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # underlying fd 2 the shell already pointed at /dev/null). Printing a `<kind>_capwarn=`
     # line instead puts it on stdout, where the bash side field_of and warn() -- the same
     # path the ABSENT-field warning already uses -- carry it to the real stderr untouched.
-    function suite_names(s,   n, arr, i, t, b, out, seen, c, dropped) {
-      n = split(s, arr, /[ \t\r\n]+/); out = ""; c = 0; dropped = ""
+    function suite_names(s,   nl, lines, li, n, arr, i, t, b, out, seen, c, dropped, baddrop, cmt, real) {
+      nl = split(s, lines, /\n/); out = ""; c = 0; dropped = ""; baddrop = ""; cmt = 0; real = 0
+      for (li = 1; li <= nl; li++) {
+      n = split(lines[li], arr, /[ \t\r]+/)
       for (i = 1; i <= n; i++) {
         t = trimtok(arr[i])
+        # A COMMENT ENDS ITS OWN LINE (T23, Step-6 review R1; line-scoped by T35, critic C8).
+        # The brief scaffold this repo ships reads `Suites: none   # read-only brief; or
+        # test-file names only`, and an author who fills that scaffold in keeps the comment.
+        # Every word after the `#` is a whitespace-separated token like any other, so the drop
+        # refusal below scored `#`, `read-only` and `brief;` as suites the shell runner cannot
+        # run and refused briefs the base admitted — with a message pointing at `Re-executes:`
+        # that never mentioned the comment, so the repair was not discoverable from it. `#`
+        # STOPS THE SCAN rather than being skipped: skipping would let a word inside prose
+        # ("# see tests/other.test.sh") lift onto the row as a budget entry its author never
+        # declared, and the writer-side guard would then hold the agent to it.
+        #
+        # WHAT IT STOPS IS THE LINE, NOT THE SPAN. A span is `spanof()`: everything up to the
+        # next labelled line or the next blank one, so a roster wrapped across lines is ONE
+        # span and a comment on its first line used to discard every suite declared below —
+        # silently, no `suites_dropped=`, nothing on the row, the loud drop arm turned into a
+        # quiet budget cut (critic C8). A comment runs to end of LINE, which is what `#` means
+        # everywhere else a shell reader meets it; the scan resumes at the next line, and a
+        # comment that opens a continuation line contributes nothing from that line alone.
+        if (substr(t, 1, 1) == "#") break
         if (t == "" || istemplate(t)) continue
+        # SOMETHING REAL WAS READ. Recorded for the all-comment case below, and set here —
+        # before the shape filters — because an unexpanded name and a dropped token are both
+        # declarations the author made, however the arms downstream answer them.
+        real = 1
         # AN UNEXPANDED NAME IS NOT A SUITE, AND NOW SAYS SO HERE (REQ-1 AC-1.4, ADR-029).
         # The refusal prose at the suite-allowance wall has promised "one path per token, no
         # shell variables" since wave-01, and nothing at dispatch enforced it: `istemplate`
@@ -1745,17 +1770,39 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
         # `$` followed by a name character or a brace.
         if (t ~ /[$][A-Za-z_{]/) { print "suites_bad=" t; continue }
         b = t; sub(/.*\//, "", b)
-        if (b !~ /\.test\.sh$/ && !(b == "run.sh" && index(t, "/") > 0)) continue
+        if (b !~ /\.test\.sh$/ && !(b == "run.sh" && index(t, "/") > 0)) {
+          # A DROPPED TOKEN IS NOW A REFUSAL (T3, REQ-8; wave-17, research R3 §C1.4 option 3
+          # — a repair of THIS existing check, no new I/O, D11-compliant). Until now a token
+          # whose basename was neither `*.test.sh` nor a path-qualified `run.sh` — a jest
+          # spec, a pytest module, a bare `run.sh` — fell off in total silence: `suites=`
+          # ended up empty, and the brief then met the UNRELATED no-instrument arm below for
+          # "declaring no Files: and no Suites:", forty minutes before the writer-side guard
+          # refused the exact command the brief had named. `none` is the waiver (checked
+          # below, on the collapsed whole span) and is never a drop.
+          if (tolower(b) != "none") { baddrop = (baddrop == "" ? t : baddrop " " t) }
+          continue
+        }
         if (seen[b]) continue
         seen[b] = 1
         if (c < SUITES_MAX) { out = (out == "" ? b : out " " b); c++ }
         else { dropped = (dropped == "" ? b : dropped " " b) }
       }
+      # The inner loop LEFT EARLY iff it met a `#`, and `i` holds that token index.
+      if (i <= n) cmt = 1
+      }
       if (dropped != "") {
         print "suites_capwarn=Suites: line exceeds the " SUITES_MAX "-suite cap — dropped: " dropped
       }
+      if (baddrop != "") { print "suites_dropped=" baddrop }
       if (out != "") return out
       if (tolower(collapse(s)) ~ /^none([^a-z0-9]|$)/) return "none"
+      # A SPAN THAT IS ALL COMMENT DECLARED A LABEL AND NOTHING ELSE (critic C9). It lifts
+      # no suites, no drop and no waiver, so all four guards of the no-instrument arm read
+      # empty and the brief is refused for "declaring no Files: and no Suites:" — of a brief
+      # that declares `Suites:` in as many words, the self-refuting shape C3 was fixed for.
+      # The refusal is right (there is no budget for the row to carry) and stays where it is;
+      # this fact is what lets its DETAIL say which of the two things happened.
+      if (cmt && !real) { print "suites_commented=1" }
       return ""
     }
     # THE AUTHOR-MARKED RUNS on a `Re-executes:` span — each backtick-delimited command, in
@@ -2221,6 +2268,17 @@ C_RE_EXECUTES=$(sanitize "$(field_of re_executes)" 900 re_executes)
 # literal suite name, and the token is in the value.
 C_RUNS_BAD=$(sanitize "$(field_of re_executes_bad)" 300)
 C_SUITES_BAD=$(sanitize "$(field_of suites_bad)" 300)
+# A Suites: TOKEN THE FILTER DROPPED (T3, REQ-8) — `suite_names()` records the exact
+# tokens whose basename is neither `*.test.sh` nor a path-qualified `run.sh`, the literal
+# waiver `none` excepted. Read here so the arm below can refuse on it by name, before the
+# no-instrument arm gets a chance to see an empty `suites=` and blame the wrong thing.
+C_SUITES_DROPPED=$(sanitize "$(field_of suites_dropped)" 300)
+# A Suites: SPAN THAT WAS ENTIRELY A COMMENT (T35, critic C9). Not a fault of its own and
+# not a fifth guard on the no-instrument arm below — the brief really does carry no budget,
+# so it really is refused. This says WHICH of the two shapes the author wrote, so the arm's
+# detail can stop telling a brief that declares `Suites:` in as many words that it declared
+# no `Suites:` at all.
+C_SUITES_COMMENTED=$(sanitize "$(field_of suites_commented)" 8)
 # ---------- provenance (epic-16 wave-02, R1 — inference withdrawn) ----------
 #
 # The deliverable is DECLARED or it is ABSENT. The wall never guesses one from prose,
@@ -2661,6 +2719,43 @@ Then retry the dispatch."
   dp_finding "a declared suite is not a literal name" "spell each suite literally" "$_dp_detail"
 fi
 
+# A DROPPED Suites: TOKEN IS A REFUSAL (T3, REQ-8; wave-17, research R3 §C1.4 option 3 — a
+# repair of the EXISTING basename filter above, no new I/O, D11-compliant). Until now a
+# token whose basename was neither `*.test.sh` nor a path-qualified `run.sh` — a jest spec,
+# a pytest module, a bare `run.sh` — fell off `suite_names()` in total silence: `suites=`
+# ended up empty, and a brief naming only such tokens then met the UNRELATED no-instrument
+# arm below ("this brief declares no Files: and no Suites:") for having declared something
+# real. This puts the drop on the SAME channel the unexpanded-variable arm above already
+# uses, named, and — because the guard on the no-instrument arm below also checks this
+# field — that arm is never reached by a brief that named a token here.
+#
+# ONE DROPPED TOKEN IS ENOUGH; THE WHOLE SPAN NEED NOT BE DROPPED (walk W4b — the code was
+# always stricter than this note). `Suites: tests/one.test.sh tests/unit/foo.spec.ts`
+# refuses, and should: a half-dropped line is a line whose budget is not what its author
+# wrote, and the writer-side guard would refuse the jest run 40 minutes later anyway.
+# What is NOT a dropped token: the literal waiver `none`, and anything from the first `#`
+# onwards — `suite_names()` stops the scan there (T23, review R1), so a trailing scaffold
+# comment reaches neither this arm nor the roster row.
+if [ -n "$C_SUITES_DROPPED" ]; then
+  _dp_detail="The Suites: span offered this, and its basename is not one this repo's shell
+suite runner can run — neither \`*.test.sh\` nor a path-qualified \`run.sh\`:
+    ${C_SUITES_DROPPED}
+
+A jest spec, a pytest module or any other non-shell test file is never run by this label;
+it dropped off the row in silence until now, and the writer's own command was then refused
+40 minutes later for running exactly what its brief had named.
+
+Fix: where the tests are not shell suites, name the command itself under Re-executes:,
+marked with backticks —
+    Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`
+
+Or, where they are shell suites, spell the *.test.sh path —
+    Suites: tests/one.test.sh
+
+Then retry the dispatch."
+  dp_finding "Suites: names a file the shell runner cannot run" "use Re-executes:" "$_dp_detail"
+fi
+
 # ============================================== THE SUITE-ALLOWANCE WALL (AC-20)
 # (seed .bionic/docs/ideas/suite-allowance-wall.md items 1-2; design ledger D2,
 # Chris 2026-09-05 "Option 2": a brief declares INTENT, the machine derives the
@@ -2695,8 +2790,24 @@ fi
 # row, for the writer-side guard to hold the agent to. It is the only declaration available
 # to an agent in a repository whose tests are not shell suites, so refusing a brief that
 # carries it for "declaring no instrument" would be the wall contradicting itself.
-if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ]; then
-  _dp_detail="An agent with no declared instrument runs whatever it decides to run. Two writers
+#
+# A BRIEF THAT NAMED A DROPPED TOKEN DECLARED SOMETHING (T3, REQ-8). `C_SUITES_DROPPED`
+# is checked here too, so a `Suites:` line that lost ANY token to the filter above — not
+# only one that lost every token — never falls through to this arm's "declares no Files:
+# and no Suites:" (walk W4b). That refusal is the suite-drop arm's above, named by the
+# actual token, not this one's guess that nothing was declared at all.
+if [ -z "$C_FILES" ] && [ -z "$C_SUITES" ] && [ -z "$C_RE_EXECUTES" ] && [ -z "$C_SUITES_DROPPED" ]; then
+  # THE CLAUSE GOES FIRST, NOT LAST (critic C9). refuse.sh folds a detail to twelve lines on
+  # the channel that hands it to a reader who did not ask for it, and this detail is already
+  # longer than that, so a sentence appended at the end is bytes nobody sees. One clause, at
+  # the top, where the fold cannot reach it; the verdict and the fix line are untouched.
+  _dp_suites_comment=""
+  if [ -n "$C_SUITES_COMMENTED" ]; then
+    _dp_suites_comment="Suites: was declared, but its span is a comment, so it named nothing — write \`none\` to waive.
+
+"
+  fi
+  _dp_detail="${_dp_suites_comment}An agent with no declared instrument runs whatever it decides to run. Two writers
 read \"run the impacted suites\" as the whole tree and spent 40 minutes each
 re-proving the world; the budget only binds when it is on the roster row.
 

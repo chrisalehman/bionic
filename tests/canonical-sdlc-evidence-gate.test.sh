@@ -4309,8 +4309,9 @@ git -C "$s25r_main" worktree add -q "$s25r_tmp/wt-T5" -b s25r-t5
 # wave the gate spoke when it DECLINED to use the register (25g(f)) and stayed silent when it
 # used it \u2014 so the one case where a wall substitutes a different value for the run's declared
 # `current:` was the one case with no record of having done it. Every allow below that is
-# judged behind `current:` now carries this exact line, and 25g(k) is the control: where the
-# row's step EQUALS `current:` nothing was substituted and nothing is printed.
+# judged behind `current:` now carries this exact line. (25g(k) was the silence control for
+# it until wave-17; a row standing where the run stands is now read for its `status` and gets
+# a note of its own — ADR-031, and the re-authored 25g(k) below.)
 s25r_note_T3="evidence-gate: judged at row T3's step 4 (run at current: 5)"
 
 expect_eq "25g(c) the fixture's tree really is a LINKED worktree (its .git is a file)" "file" \
@@ -4412,7 +4413,7 @@ fi
 # else:
 #   (i) the tree is not git's       — a hand-written `.git` file naming any row's cell;
 #   (j) the text names two trees    — `cd <tree> && cd <main> && git commit`;
-#   (k) the row stands where the run stands — the note must NOT print;
+#   (k) the row stands where the run stands — its `status` decides (k2 is the control);
 #   (l) two rows name one tree      — the register is ambiguous, not resolvable by order;
 #   (m) `git -C <relative>`         — a real worktree commit that used to lose its row;
 #   (n) `g\<newline>it commit`      — a real commit the cheap screen called "provably not".
@@ -4455,19 +4456,310 @@ else
     "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
 fi
 
-# --- 25g(k): where the row stands exactly where the run stands, nothing was substituted ---
+# --- 25g(j2) / AC-3.1: the ambiguity is the COMMAND's, not the first directory's ----------
 #
-# THE CONTROL FOR THE NOTE, and the reason it can be added at all. Row T5 is at step 5 and
-# the run is at `current: 5`, so the arm changes nothing — and a wall that says nothing when
-# it did nothing is the byte-identical common case. A note here would put a line on every
-# ordinary worktree commit in every project whose row is current.
-run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T5" 'git commit -m "x"'
-if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
-   && ! grep -q "judged at row" <<<"$HOOK_STDERR"; then
-  ok "25g(k) a row whose step EQUALS current: is judged there in silence — no note"
+# THE FAIL-OPEN HALF OF 25g(j) (wave-17 REQ-3, D4; bug 6). The arm above lived inside the
+# `_EG_WT` guard, so it only ever saw a command whose FIRST directory git had confirmed as a
+# linked worktree of this repository. Every other first directory — the main checkout, a
+# records directory under it, `/tmp` — left `_EG_WT` empty, skipped the whole block, and the
+# commit was judged at the run's `current:` with no word said about the second `cd`. That is
+# the shape a consumer actually wrote (`cd <records-dir>; …; cd <tree> && git commit`) and
+# the shape that produced an unrelated wave-level refusal instead of an answer.
+#
+# NOTHING IN THE TEXT SAYS WHICH DIRECTORY OBEYS, and that is true whatever the first one is:
+# a `;` runs the rest wherever the shell is standing, a failed `cd` leaves it in the old
+# place, and a `&&` only looks decisive. So the refusal is a property of the COMMAND and the
+# arm is asked before any directory is resolved. Driven from the same `current: 5` fixture,
+# with an ordinary directory (the main checkout's own record/ tree) in first position — the
+# one position that used to buy silence.
+s25r_amb="cd $s25r_main/.bionic/docs/record/w25g; printf 'x\\n' > y.md; cd $s25r_tmp/wt-T3 && git commit -m \"x\""
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" "$s25r_amb"
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25r_main/.bionic/docs/record/w25g" <<<"$HOOK_VSTDERR" \
+   && grep -qF "$s25r_tmp/wt-T3" <<<"$HOOK_VSTDERR" \
+   && grep -qF "git -C <dir> commit" <<<"$HOOK_VSTDERR"; then
+  ok "25g(j2) AC-3.1 two directories before the commit are refused when the FIRST is an ordinary directory too"
 else
-  no "25g(k) a row whose step EQUALS current: is judged there in silence — no note" \
-    "expected the Step-5 refusal and no row note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+  no "25g(j2) AC-3.1 two directories before the commit are refused when the FIRST is an ordinary directory too" \
+    "expected exit 2 'two directories are named before the commit' naming both dirs and git -C; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the control that keeps it from becoming "any cd is a refusal": the SAME first
+# directory, one `cd`, is judged at `current:` exactly as 25g(i) and 25g(d) are.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_main/.bionic/docs/record/w25g || exit 1; git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+   && ! grep -qF "two directories" <<<"$HOOK_STDERR"; then
+  ok "25g(j2) …and ONE cd into that same directory is still judged at current: 5, not refused as ambiguous"
+else
+  no "25g(j2) …and ONE cd into that same directory is still judged at current: 5, not refused as ambiguous" \
+    "expected the Step-5 refusal and no ambiguity line; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(s) / C3: two `cd`s that name ONE directory are one directory ---------------------
+#
+# The arm fired on the PRESENCE of a second `cd` token and never on whether the two
+# directories differ, so `cd X && cd X` was refused with a sentence that answers its own
+# complaint — "the command changes into 'X' and then into 'X'" — and `cd X && cd .` with it.
+# Nothing is ambiguous about a command that names one directory twice: the shell is standing
+# in the same place whichever `cd` obeyed, and the gate holds both values before it speaks.
+# So the arm compares the two RESOLVED targets and refuses only when they DIFFER. 25g(j) and
+# 25g(j2) above are the controls that keep this from becoming "any second cd is fine".
+#
+# RESOLVED, NOT INTERPRETED (D4). The second target is read exactly as the first one is, and
+# a relative target is joined to the first — which is where the shell stands when the second
+# `cd` runs. A `.` segment and a trailing slash fold away lexically; nothing is stat-ed,
+# nothing is expanded, and `..`, `~` and an unexpanded variable stay ambiguous and stay
+# refused (A-T22.2).
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(s) C3 'cd X && cd X && git commit' names ONE directory and is judged at row T3's step 4"
+else
+  no "25g(s) C3 'cd X && cd X && git commit' names ONE directory and is judged at row T3's step 4" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the same directory spelled `.`, which is the form a writer actually types. It is one
+# directory by the same resolution, not by a special case for the string.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd . && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(s) …and 'cd X && cd . && git commit' resolves to that same one directory too"
+else
+  no "25g(s) …and 'cd X && cd . && git commit' resolves to that same one directory too" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the one-cell-away control, in the SAME fixture: two tree paths that really are two
+# directories are still the refusal REQ-3 exists for, with its text unchanged.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
+   && grep -qF "$s25r_tmp/wt-T3" <<<"$HOOK_VSTDERR" \
+   && grep -qF "$s25r_tmp/wt-T5" <<<"$HOOK_VSTDERR"; then
+  ok "25g(s) …while two DISTINCT resolved directories are still refused, naming both"
+else
+  no "25g(s) …while two DISTINCT resolved directories are still refused, naming both" \
+    "expected exit 2 naming both dirs; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(t) / W6: EVERY `cd` before the commit is a directory the arm has to fold ---------
+#
+# THE HOLE C3's FIX OPENED (re-walk at 4e2ac66, W6). The reader took the FIRST `cd` after the
+# first separator and returned; every later one was invisible to it. While the PRESENCE of a
+# second `cd` refused, that cost nothing — the command was refused before the third target
+# could matter. Once two matching targets became an allow, `cd X && cd X && cd Y` walked
+# through the arm and was judged at X's row, while the shell commits in Y, which another row
+# owns at another step. Fail-open, and one `&&` away from the shape 25g(j) refuses.
+#
+# SO THE ARM FOLDS THE WHOLE LIST, not its first two entries. Every `cd` target before the
+# commit is resolved in order — each relative to the directory the previous one left the shell
+# standing in — and the command names ONE directory only when they all fold alike. The first
+# target that does not is the one the refusal names, so the detail always reads as a real
+# disagreement and never as a sentence answering its own complaint (C3).
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
+   && grep -qF "changes into '$s25r_tmp/wt-T3' and then into '$s25r_tmp/wt-T5'" <<<"$HOOK_VSTDERR"; then
+  ok "25g(t) W6 a THIRD cd into another directory is refused, and the detail names the pair that differs"
+else
+  no "25g(t) W6 a THIRD cd into another directory is refused, and the detail names the pair that differs" \
+    "expected exit 2 naming wt-T3 then wt-T5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the difference is caught wherever it sits in the list: here the SECOND target is the
+# odd one and the third returns to the first. A commit is still not placed by this text.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T5 && cd $s25r_tmp/wt-T3 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 2 ] && eg_e1_check \
+   && grep -qF "two directories are named before the commit" <<<"$HOOK_STDERR" \
+   && grep -qF "changes into '$s25r_tmp/wt-T3' and then into '$s25r_tmp/wt-T5'" <<<"$HOOK_VSTDERR"; then
+  ok "25g(t) …and a cd AWAY and BACK is refused too, naming the target that differs"
+else
+  no "25g(t) …and a cd AWAY and BACK is refused too, naming the target that differs" \
+    "expected exit 2 naming wt-T3 then wt-T5; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …the control that keeps this from becoming "three cds are a refusal": three spellings of the
+# ONE directory are one directory, by the same fold that answers for two.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && cd $s25r_tmp/wt-T3 && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(t) …while THREE cds into the same directory stay one directory, judged at row T3's step 4"
+else
+  no "25g(t) …while THREE cds into the same directory stay one directory, judged at row T3's step 4" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and the same three directories spelled the three ways a writer actually types them: the
+# relative `./` is joined to where the shell is standing, and the trailing slash folds away.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T3 && cd ./ && cd $s25r_tmp/wt-T3/ && git commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(t) …and 'cd X && cd ./ && cd X/' folds to that one directory as well"
+else
+  no "25g(t) …and 'cd X && cd ./ && cd X/' folds to that one directory as well" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# …and what a `git -C` does to the whole question, pinned as it stands (A-T31.3). `-C` is
+# branch (1) of `_eg_commit_cwd` and it answers first, because git's own cwd override is what
+# the commit obeys whatever the shell did: the `cd` list is never read, the arm never fires,
+# and the commit is judged at the tree `-C` names — here row T3's, though the text last
+# changed into row T5's tree. This is the escape the refusal's own Fix line offers, so it has
+# to keep working; the row exists so that a later widening of the arm cannot take it away
+# silently.
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_main" \
+  "cd $s25r_tmp/wt-T5 && git -C $s25r_tmp/wt-T3 commit -m \"x\""
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T3" ]; then
+  ok "25g(t) …and a 'git -C <dir>' still overrides the cds the text names, judged at row T3's step 4"
+else
+  no "25g(t) …and a 'git -C <dir>' still overrides the cds the text names, judged at row T3's step 4" \
+    "expected allow + '$s25r_note_T3'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(k) / AC-1.1: the row stands where the run stands, and it is ACTIVE ---------------
+#
+# THE SUBJECT IS RESOLVED BEFORE ANY ARM JUDGES (wave-17 REQ-1, D1, ADR-031). Row T5 sits at
+# step 5, the run is at `current: 5`, and the Step-5 block is red — the exact shape that
+# refused a writer for the floor that writer's own task exists to produce (bug 2; carry-over
+# 1; three D10 `current:` regressions in wave-16). What decides is the row's `status` cell,
+# validated since wave-11 and read by nobody until now: `active` means this commit discharges
+# T5's obligations and not the run's, so the TASK arms judge it — the Step-4 block shape and
+# the matrix `fails-when:` presence — and the run's Verify arm never sees it.
+#
+# THE NOTE IS NOT OPTIONAL, for the reason the step substitution's note one case up is not:
+# this is the second place in the fleet where a wall judges a commit by something other than
+# the run's declared `current:`, and an operator who cannot explain why a commit passed must
+# not have to read the source. It names the ROW, because the row is the subject.
+#
+# WHAT THIS ROW USED TO PIN, and why the pin moved (AC-1.4, ADR-031). Until wave-17 this was
+# the silence control: step == current substituted nothing, so nothing printed. That silence
+# WAS the catch-22 — it is how the run's red floor reached a task tree. 25g(k2) below is the
+# control that replaces it: the SAME tree, the SAME red floor, the row `landed` instead of
+# `active`.
+s25r_note_T5="evidence-gate: judged by row T5's task arms (run at current: 5)"
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25r_tmp/wt-T5" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25r_note_T5" ]; then
+  ok "25g(k) AC-1.1 a commit from an ACTIVE row's tree meets the task arms, not the run's red floor, and the note names the row"
+else
+  no "25g(k) AC-1.1 a commit from an ACTIVE row's tree meets the task arms, not the run's red floor, and the note names the row" \
+    "expected allow + '$s25r_note_T5'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(k2) / AC-1.3: `landed` is not `active`, and status is the whole discrimination ----
+#
+# THE EXEMPTION IS THE ACTIVE ROW'S ALONE. A tree whose task has already landed is not a
+# writer at work: nothing is in flight there, and a commit out of it is the run's like any
+# other — so the red floor still refuses it, at `current:`, and the refusal names the step it
+# judged at so the reader can tell WHICH arm spoke. `pending` and `dropped` are the same
+# case; `landed` is the one a real run actually produces, because every row of a wave ends
+# there and the tree survives until Step 8 tears it down.
+#
+# ONE FIXTURE AWAY FROM 25g(k): same plan, same red Step-5 block, same tree name, same
+# commit. The status cell is the input and nothing else is, which is what makes the pair a
+# discrimination rather than two assertions.
+#
+# (THE LABEL. The spec's Eval design calls this row "25g(n) new"; 25g(n) has named the
+# `g\<newline>it commit` row since wave-14 and is pinned green by AC-1.4, so the new row is
+# (k2), beside the row it controls. See A-T1.3.)
+s25n_tasks="${s25r_tasks/| c.sh | wt-T5 | active |/| c.sh | wt-T5 | landed |}"
+s25n_plan() {
+  printf '%s\n## SDLC State\ncurrent: 5\napproved-by: fixture 2026-09-14T00:00Z "approved"\nStep 4:\n%s\nStep 5:\n%s\n\n%s\n\n%s\n' \
+    "$(matrix_frontmatter true none true)" "$s25r_step4" "$s25r_step5_red" "$s25n_tasks" "$matrix_w25g"
+}
+expect_eq "25g(k2) the fixture carries T5's row as landed" "1" \
+  "$(s25n_plan | grep -c 'wt-T5 | landed' | tr -d ' ')"
+expect_eq "25g(k2) …and 25g(k)'s own fixture still carries it as active" "1" \
+  "$(s25r_plan | grep -c 'wt-T5 | active' | tr -d ' ')"
+
+s25n_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25n_tmp")
+s25n_main="$s25n_tmp/main"
+mkdir -p "$s25n_main/.bionic/docs/plans" "$s25n_main/.bionic/docs/record/w25g"
+printf 'evidence\n' > "$s25n_main/.bionic/docs/record/w25g/x.md"
+git -C "$s25n_main" init -q .
+git -C "$s25n_main" commit -q --allow-empty -m init
+engage "$s25n_main"
+s25n_plan > "$s25n_main/.bionic/docs/plans/wave-01-x.plan.md"
+git -C "$s25n_main" worktree add -q "$s25n_tmp/wt-T5" -b s25n-t5
+
+run_hook_cwd "$(make_home)" "$s25n_main" "$s25n_tmp/wt-T5" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR" \
+   && grep -q "canonical-sdlc step 5" <<<"$HOOK_VSTDERR" \
+   && ! grep -q "task arms" <<<"$HOOK_STDERR"; then
+  ok "25g(k2) AC-1.3 a commit from a LANDED row's tree is still judged at current:, and the refusal names step 5"
+else
+  no "25g(k2) AC-1.3 a commit from a LANDED row's tree is still judged at current:, and the refusal names step 5" \
+    "expected the Step-5 refusal naming the step, and no task-arms note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(r) / C1: the task-arms fork belongs to rows at step 4 and above ------------------
+#
+# THE FORK NAMES STEP 4, SO IT CAN ONLY BE ASKED OF A ROW THAT HAS REACHED IT. `CURRENT=4`
+# was written whenever an `active` row stood where the run stands, and `units_validate`
+# admits a step cell of 3 — so a run at `current: 3` with an `active` step-3 row committing
+# out of its tree was judged at step 4, a step the run has not started, and refused for a
+# `Step 4:` evidence line its author could only produce by writing a Step-4 claim into a
+# Step-3 plan. That is the requirement inverted: REQ-1 exists so a task commit is not held
+# to the arms of a LATER step, and this held it to the arms of a step the run had not
+# reached. The guard is the row's own step (`>= 4`), and below it the row keeps today's path
+# — judged at `current:`, no note, nothing substituted — which is the pending/landed/dropped
+# behaviour the design already blesses.
+#
+# THE DISCRIMINATION IS ONE CELL, AND BOTH HALVES MUST AGREE. `active` and `landed` are
+# driven against the same plan, the same tree and the same commit, and the fix is what makes
+# their verdicts identical — so this pair goes red on any change that lets the fork reach a
+# step-3 row, whatever refusal it produces. 25g(k) is the other side of the same guard: an
+# `active` row AT step 5 still takes the fork, and it stays green unedited.
+s25p_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25p_tmp")
+s25p_main="$s25p_tmp/main"
+mkdir -p "$s25p_main/.bionic/docs/plans" "$s25p_main/.bionic/docs/record/w25g"
+printf 'evidence\n' > "$s25p_main/.bionic/docs/record/w25g/x.md"
+git -C "$s25p_main" init -q .
+git -C "$s25p_main" commit -q --allow-empty -m init
+engage "$s25p_main"
+
+s25p_plan() {  # $1 = the step-3 row's status cell — the only variable in the pair
+  printf '%s\n## SDLC State\ncurrent: 3\nStep 1: requirements: .bionic/docs/plans/wave-01-x.plan.md\napproved-by: fixture 2026-09-20T00:00Z "approved"\nStep 3: .bionic/docs/record/w25g/x.md\n- T3: .bionic/docs/record/w25g/x.md\n\n## Tasks\n\n| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |\n|---|---|---|---|---|---|---|---|---|---|---|\n| T3 | 3 | doc | the row standing exactly where a run at Step 3 stands | implementor | — | 20m | REQ-2 | a.sh | wt-T3r | %s |\n\n%s\n' \
+    "$(matrix_frontmatter true none true)" "$1" "$matrix_w25g"
+}
+s25p_plan active > "$s25p_main/.bionic/docs/plans/wave-01-x.plan.md"
+git -C "$s25p_main" worktree add -q "$s25p_tmp/wt-T3r" -b s25p-t3r
+expect_eq "25g(r) the fixture's step-3 row really is active" "1" \
+  "$(s25p_plan active | grep -c 'wt-T3r | active' | tr -d ' ')"
+expect_eq "25g(r) …and the run really is at current: 3" "1" \
+  "$(s25p_plan active | grep -c '^current: 3$' | tr -d ' ')"
+
+run_hook_cwd "$(make_home)" "$s25p_main" "$s25p_tmp/wt-T3r" 'git commit -m "x"'
+s25p_active_exit="$HOOK_EXIT"; s25p_active_err="$HOOK_STDERR"; s25p_active_detail="$HOOK_VSTDERR"
+
+s25p_plan landed > "$s25p_main/.bionic/docs/plans/wave-01-x.plan.md"
+run_hook_cwd "$(make_home)" "$s25p_main" "$s25p_tmp/wt-T3r" 'git commit -m "x"'
+s25p_landed_exit="$HOOK_EXIT"; s25p_landed_err="$HOOK_STDERR"
+
+if [ "$s25p_active_exit" = "$s25p_landed_exit" ] && [ "$s25p_active_err" = "$s25p_landed_err" ]; then
+  ok "25g(r) C1 an ACTIVE step-3 row is judged exactly as the LANDED one is — the fork does not reach below step 4"
+else
+  no "25g(r) C1 an ACTIVE step-3 row is judged exactly as the LANDED one is — the fork does not reach below step 4" \
+    "active exit=$s25p_active_exit stderr='$s25p_active_err' vs landed exit=$s25p_landed_exit stderr='$s25p_landed_err'"
+fi
+
+if ! grep -qF "task arms" <<<"$s25p_active_err"; then
+  ok "25g(r) …so no task-arms note is printed for a row below step 4"
+else
+  no "25g(r) …so no task-arms note is printed for a row below step 4" \
+    "expected no task-arms note; stderr='$s25p_active_err'"
+fi
+
+if ! grep -qF "'Step 4:'" <<<"$s25p_active_detail"; then
+  ok "25g(r) …and the run at current: 3 is never refused for a 'Step 4:' line it cannot honestly carry"
+else
+  no "25g(r) …and the run at current: 3 is never refused for a 'Step 4:' line it cannot honestly carry" \
+    "expected no Step 4 demand; exit=$s25p_active_exit detail='$s25p_active_detail'"
 fi
 
 # --- 25g(m): `git -C .` inside a worktree keeps its row -----------------------------------
@@ -4627,6 +4919,118 @@ unset -f _eg_wt_name
 eg_wt_extract "$EGWT_WALLS"
 expect_eq "25g(o) …and the real copy still agrees, restored after the mutation proof" \
   "$(eg_wt_root_at "$s25r_tmp/wt-T3")" "$(_eg_wt_name "$s25r_tmp/wt-T3")"
+
+# --- 25g(p)-(q): ANOTHER REPOSITORY'S TREE IS OUTSIDE THIS RUN (wave-17 REQ-4, T1) --------
+#
+# WHAT WENT WRONG (bug 7). A commit made in a linked worktree of a DIFFERENT repository
+# reaches this gate whenever the session's project is this one: `_eg_wt_name` reads the
+# tree's `.git` file and answers a name, `_eg_git_wt_name` asks git and finds the common dir
+# is not this repository's, and the arm declines — correctly, because this plan's register
+# has nothing to say about that tree. But the decline fell THROUGH to the run's own
+# `current:`, so the other repository's commit was judged by this run's Verify arm and
+# refused for a floor it has no part in producing. The gate had already said out loud that it
+# could not place the commit; it then judged it anyway.
+#
+# THE EXEMPTION IS NOT THE DECLINE. `_eg_git_wt_name` used to `return 0` with `_EG_GITWT`
+# empty for every failure alike — no git, an old git, a deleted directory, a bare repository,
+# a forged `.git` file, another repository's tree. Only the last of those is a tree git
+# positively placed somewhere else, and only it is exempt; everything else is still a decline
+# judged at `current:`. 25g(i) above is the discrimination: a forged `.git` naming row T3's
+# tree gets no exemption, because git never answered for it at all.
+#
+# A SECOND REAL REPOSITORY, never a hand-planted file: `git worktree add` in a scratch repo
+# of its own, so the common dir the arm compares is one git itself wrote.
+s25x_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25x_tmp")
+s25x_other="$s25x_tmp/other"
+mkdir -p "$s25x_other"
+git -C "$s25x_other" init -q .
+git -C "$s25x_other" commit -q --allow-empty -m init
+git -C "$s25x_other" worktree add -q "$s25x_tmp/other-wt" -b s25x-wt
+s25x_wt="$s25x_tmp/other-wt"
+# The expected common dir is derived from the FIXTURE's own layout — `<other repo>/.git` —
+# and never from the `git rev-parse` the arm itself runs, or the pin would be the code
+# agreeing with itself.
+s25x_common="$s25x_other/.git"
+
+expect_eq "25g(p) the foreign tree really is a LINKED worktree (its .git is a file)" "file" \
+  "$(if [ -f "$s25x_wt/.git" ]; then echo file; elif [ -d "$s25x_wt/.git" ]; then echo dir; else echo none; fi)"
+expect_contains "25g(p) …whose gitdir points into the OTHER repository, not this fixture's" \
+  "$s25x_common/worktrees/other-wt" "$(cat "$s25x_wt/.git")"
+expect_ne "25g(p) …and that common dir is not the bound plan's repository" \
+  "$s25r_main/.git" "$s25x_common"
+
+# --- 25g(p) / AC-4.1: the foreign tree is exempt, and the line names the boundary ---------
+#
+# The bound plan is the SAME `current: 5` fixture with the red Step-5 block that refuses
+# 25g(d), 25g(f), 25g(i) and 25g(k2). If the exemption were not there this commit would be
+# refused for `pass=331` like all of them, which is what makes the allow below a verdict
+# about the repository boundary and not about a lenient fixture.
+s25x_note="evidence-gate: $s25x_wt is a linked worktree of another repository ($s25x_common) — this run's step arms do not apply"
+run_hook_cwd "$(make_home)" "$s25r_main" "$s25x_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ "$HOOK_STDERR" = "$s25x_note" ]; then
+  ok "25g(p) AC-4.1 a commit from another repository's linked worktree is exempt, and one line names the tree and the repository"
+else
+  no "25g(p) AC-4.1 a commit from another repository's linked worktree is exempt, and one line names the tree and the repository" \
+    "expected exit 0 and exactly '$s25x_note'; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25g(q) / AC-4.3: the always-on guards are not exempt with it -------------------------
+#
+# THE EXEMPTION IS THE EVIDENCE GATE'S ALONE. It says this RUN's step arms do not reach that
+# tree; it does not say bionic is off there. The walls that never read a plan — farm-out here,
+# and the background-suite guard beside it — are folded into the SAME process as the gate, so
+# an exemption spelled as an early `exit 0` out of the gate's own subshell must leave them
+# standing. A foreign tree is not a corner of the machine where a suite runs on the
+# orchestrator thread.
+#
+# ITS OWN RUNNER, AND THE REASON (fixture fidelity, per .claude memory
+# fixtures-can-pin-away-the-test). Every runner above posts `{session_id, tool_input, cwd}`,
+# because the evidence gate reads no more than that — but `wall_farm_out_reminder` screens on
+# `.tool_name` (walls.sh) and a payload without it returns before classifying anything. The
+# real PreToolUse envelope always carries it, so the omission is the fixtures' and not the
+# platform's; this arm posts the field rather than widening 460 other payloads to reach one
+# wall. The deny channel exits 0 and renders JSON on stdout beside its line on stderr, so both
+# streams are captured here.
+s25x_run_bash() {  # <project_dir> <payload cwd> <command> -> S25X_OUT, S25X_ERR, S25X_RC
+  local home_dir project_dir payload_cwd command input tmp_err
+  home_dir="$(make_home)"; project_dir="$1"; payload_cwd="$2"; command="$3"
+  input=$(jq -n --arg c "$command" --arg cwd "$payload_cwd" --arg s "$EG_SID" \
+            '{session_id: $s, hook_event_name: "PreToolUse", tool_name: "Bash",
+              tool_input: {command: $c}, cwd: $cwd}')
+  tmp_err=$(mktemp)
+  S25X_OUT=$(HOME="$home_dir" CLAUDE_PROJECT_DIR="$project_dir" CLAUDE_CODE_SESSION_ID="$EG_SID" \
+    bash "$HOOK" <<< "$input" 2>"$tmp_err") && S25X_RC=0 || S25X_RC=$?
+  S25X_ERR=$(cat "$tmp_err"); rm -f "$tmp_err"
+}
+
+# The control first: the SAME runner, the same tree, an ordinary command no wall classifies —
+# so the two arms below cannot both be "this runner always refuses".
+s25x_run_bash "$s25r_main" "$s25x_wt" 'echo hello'
+if [ "$S25X_RC" -eq 0 ] && ! grep -qF "belongs in a subagent" <<<"$S25X_ERR"; then
+  ok "25g(q) an ordinary command from the foreign tree is not refused by any wall"
+else
+  no "25g(q) an ordinary command from the foreign tree is not refused by any wall" \
+    "expected silence; rc=$S25X_RC stderr='$S25X_ERR'"
+fi
+
+s25x_run_bash "$s25r_main" "$s25x_wt" 'bash tests/run.sh'
+if grep -qF "belongs in a subagent" <<<"$S25X_ERR" \
+   && grep -qF '"permissionDecision":"deny"' <<<"$S25X_OUT"; then
+  ok "25g(q) AC-4.3 a suite command from the exempt foreign tree still meets the farm-out wall"
+else
+  no "25g(q) AC-4.3 a suite command from the exempt foreign tree still meets the farm-out wall" \
+    "expected the farm-out deny on both streams; rc=$S25X_RC stdout='$S25X_OUT' stderr='$S25X_ERR'"
+fi
+
+# …and the override still works from there, so the arm above is the wall's verdict and not a
+# property of the tree.
+s25x_run_bash "$s25r_main" "$s25x_wt" 'FARM_OUT_ALLOW=1 bash tests/run.sh'
+if ! grep -qF "belongs in a subagent" <<<"$S25X_ERR"; then
+  ok "25g(q) …and FARM_OUT_ALLOW=1 from the same tree is sanctioned as anywhere else"
+else
+  no "25g(q) …and FARM_OUT_ALLOW=1 from the same tree is sanctioned as anywhere else" \
+    "expected no farm-out refusal under the override; rc=$S25X_RC stderr='$S25X_ERR'"
+fi
 
 # ============================================================
 # Section 26: the walk-artifact arm (AC-1, AC-2)
@@ -7105,8 +7509,8 @@ expect_eq "R2b …and the verdict is the first line, unchanged" \
   "$(printf '%s\n' "$EG_R2_ERR" | /usr/bin/grep -m1 '^bionic: ')"
 expect_contains "R2c …with units_validate's violation line behind it (AC-2.1)" \
   "T2: dep T99 names no row in the table" "$EG_R2_ERR"
-expect_contains "R2d …and the Fix prose that names the ten columns" \
-  "the columns are id | step | kind | task | agent | deps | size | serves | Files | status" \
+expect_contains "R2d …and the Fix prose that names all TWELVE columns (R7/W3c)" \
+  "the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status" \
   "$EG_R2_ERR"
 expect_eq "R2e …so the stream is no longer the one line the defect shipped" "no" \
   "$([ "$(printf '%s\n' "$EG_R2_ERR" | /usr/bin/grep -c .)" = "1" ] && echo yes || echo no)"
@@ -7386,6 +7790,116 @@ expect_absent "R3t4(1) …the requirements pointer this body carries is not name
   "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
 expect_absent "R3t4(2) …nor the '## Goal' section this body carries" \
   "## Goal:" "$R3_ERR"
+
+# THE BOM TWIN (T8; REQ-11; wave-16 critic-b77d5aa C10; research R4 §D3). Byte-for-byte the
+# r3t_lf plan above, prefixed with a UTF-8 byte-order mark on its very first byte.
+# `plan_bring_forward`'s normalization awk compares the whole first record to "---" with
+# `==`, which is BOM-insensitive, but every reader downstream (`_bf_fm_get`, `first_heading`)
+# matches an ANCHORED regex, which the BOM defeats the same way a CRLF line ending defeated
+# it above — so a BOM-prefixed pre-14 plan admitted silently before the fix (research R4
+# D3.3-D3.4: octal and `\x` escapes in an awk REGEX do not strip a BOM on awk 20200816; only
+# a STRING compare against "\357\273\277" does).
+#
+# fails-when: the BOM commit is admitted, or its refusal names a different list than the LF
+# twin's (R3t3(1)-(5) above); or a direct call to `plan_bring_forward` on the BOM twin
+# differs from a direct call on the LF twin.
+r3u_bom="$(printf '\357\273\277%s' "$r3t_lf")"
+r3u_bomcrlf="$(printf '\357\273\277%s' "$r3t_crlf")"
+
+r3u_main="$r3_tmp/main-t8-bom"
+mkdir -p "$r3u_main/.bionic/docs/plans" "$r3u_main/.bionic/docs/record/w16" \
+  "$r3u_main/.bionic/docs/specs/epic-01-demo"
+printf 'evidence\n' > "$r3u_main/.bionic/docs/record/w16/r.md"
+printf 'requirements\n' > "$r3u_main/.bionic/docs/specs/epic-01-demo/w.requirements.md"
+git -C "$r3u_main" init -q .
+git -C "$r3u_main" commit -q --allow-empty -m init
+engage "$r3u_main"
+printf '%s' "$r3u_bom" > "$r3u_main/.bionic/docs/plans/wave-16-t8-bom.plan.md"
+
+# META FIRST, so no row below can pass over a fixture that lost its own BOM.
+expect_eq "R3u0 meta: the twin fixture really opens with a UTF-8 BOM" "efbbbf" \
+  "$(head -c3 "$r3u_main/.bionic/docs/plans/wave-16-t8-bom.plan.md" | xxd -p)"
+
+r3_commit_knob_unset "$(make_home)" "$r3u_main" "$r3u_main" 'git commit -m "x"'
+
+expect_status "R3u1 the BOM pre-14 plan is refused at commit, fail-closed — same as its LF twin" "2" "$R3_EXIT"
+expect_eq "R3u2 …with the contract-version verdict, not admitted silently" \
+  "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3u3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+expect_contains "R3u3(2) …the first row fault a five-column header forces" \
+  "T1: step (empty) is outside 3-9" "$R3_ERR"
+expect_contains "R3u3(3) …the second" \
+  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+expect_contains "R3u3(4) …the approval line, owed from current 4 and answered for current 5" \
+  "## SDLC State: no 'approved-by:' line" "$R3_ERR"
+expect_contains "R3u3(5) …and the matrix's fails-when, owed from the same step" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$R3_ERR"
+expect_absent "R3u4(1) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
+expect_absent "R3u4(2) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$R3_ERR"
+
+# THE BOM+CRLF TWIN — a Windows editor emits both at once (research R4 D3.6 row-27 note).
+# Same six checks, same file, over the combined fixture.
+r3v_main="$r3_tmp/main-t8-bomcrlf"
+mkdir -p "$r3v_main/.bionic/docs/plans" "$r3v_main/.bionic/docs/record/w16" \
+  "$r3v_main/.bionic/docs/specs/epic-01-demo"
+printf 'evidence\n' > "$r3v_main/.bionic/docs/record/w16/r.md"
+printf 'requirements\n' > "$r3v_main/.bionic/docs/specs/epic-01-demo/w.requirements.md"
+git -C "$r3v_main" init -q .
+git -C "$r3v_main" commit -q --allow-empty -m init
+engage "$r3v_main"
+printf '%s' "$r3u_bomcrlf" > "$r3v_main/.bionic/docs/plans/wave-16-t8-bomcrlf.plan.md"
+
+expect_eq "R3v0 meta: the BOM+CRLF twin opens with the BOM and is CRLF-terminated" "efbbbf CRLF" \
+  "$(head -c3 "$r3v_main/.bionic/docs/plans/wave-16-t8-bomcrlf.plan.md" | xxd -p) $(file "$r3v_main/.bionic/docs/plans/wave-16-t8-bomcrlf.plan.md" | /usr/bin/grep -o CRLF)"
+
+r3_commit_knob_unset "$(make_home)" "$r3v_main" "$r3v_main" 'git commit -m "x"'
+
+expect_status "R3v1 the BOM+CRLF pre-14 plan is refused at commit, fail-closed" "2" "$R3_EXIT"
+expect_eq "R3v2 …with the contract-version verdict, not admitted silently" \
+  "bionic: commit refused — this plan's body is not at contract version 14 (bring the plan forward)" \
+  "$(printf '%s\n' "$R3_ERR" | /usr/bin/grep -m1 '^bionic: ')"
+expect_contains "R3v3(1) …the pre-14 table that arms the predicate" \
+  "## Tasks: the table is missing columns: step task agent deps size serves Files" "$R3_ERR"
+expect_contains "R3v3(2) …the first row fault a five-column header forces" \
+  "T1: step (empty) is outside 3-9" "$R3_ERR"
+expect_contains "R3v3(3) …the second" \
+  "T1: kind audited is not one of build test verify review doc integrate close prototype" "$R3_ERR"
+expect_contains "R3v3(4) …the approval line, owed from current 4 and answered for current 5" \
+  "## SDLC State: no 'approved-by:' line" "$R3_ERR"
+expect_contains "R3v3(5) …and the matrix's fails-when, owed from the same step" \
+  "## Verification Matrix: no AC block names a 'fails-when:'" "$R3_ERR"
+expect_absent "R3v4(1) …the requirements pointer this body carries is not named" \
+  "the Step 1 evidence names no 'requirements:' pointer" "$R3_ERR"
+expect_absent "R3v4(2) …nor the '## Goal' section this body carries" \
+  "## Goal:" "$R3_ERR"
+
+# THE FUNCTION-LEVEL ROW, no hook in the loop — AC-11.1's "same list at both callers" read
+# directly: `plan_bring_forward` on the BOM twin, and on the BOM+CRLF twin, must return the
+# SAME lines as `plan_bring_forward` on the LF twin — a diff of the outputs empty.
+r3u_lf_file="$(mktemp "${TMPDIR:-/tmp}/r3u-lf.XXXXXX")"
+printf '%s' "$r3t_lf" > "$r3u_lf_file"
+r3u_lf_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" "$r3u_lf_file" 2>/dev/null || true)"
+rm -f "$r3u_lf_file"
+
+r3u_bom_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" \
+  "$r3u_main/.bionic/docs/plans/wave-16-t8-bom.plan.md" 2>/dev/null || true)"
+expect_eq "R3u5 …the predicate's own output on the BOM twin, diffed against the LF twin's — empty" \
+  "" "$(diff <(printf '%s\n' "$r3u_lf_direct") <(printf '%s\n' "$r3u_bom_direct") 2>&1 || true)"
+
+r3v_bomcrlf_direct="$(bash -c '. "$1"; . "$2"; plan_bring_forward "$3"' _ \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/units.sh" \
+  "${BIONIC_SCRIPTS_DIR}/payload/scripts/lib/walls.sh" \
+  "$r3v_main/.bionic/docs/plans/wave-16-t8-bomcrlf.plan.md" 2>/dev/null || true)"
+expect_eq "R3v5 …the predicate's own output on the BOM+CRLF twin, diffed against the LF twin's — empty" \
+  "" "$(diff <(printf '%s\n' "$r3u_lf_direct") <(printf '%s\n' "$r3v_bomcrlf_direct") 2>&1 || true)"
 # [REQ-3 BRING-FORWARD SECTION: END]
 
 # ============================================================
@@ -7473,5 +7987,275 @@ write_plan "$h_r12e" "$(wave_plan 6 "$step6_body" "$(t4_matrix T3 "—" "$GOOD_C
 expect_block "R12e …and a T3 row with the same placeholder cell still needs its auditor" \
   "$h_r12e" 'git commit -m "x"' "auditor"
 # [REQ-12 AUDITOR-CELL SECTION: END]
+
+# ============================================================
+section "Section 17t: §17's cells refuse by their SHAPE (wave-17 REQ-5, REQ-10; AC-5.1-5.4, AC-10.2)"
+# ============================================================
+#
+# WHAT THIS SECTION IS ABOUT. Four arms that knew the whole fault and printed a fraction of
+# it, and one key the Step-5 block may now carry. Each row here reads the VERDICT LINE — the
+# one line a committer actually sees — not just the detail, because the wording IS the
+# subject: the old verdicts were true sentences that sent the author to the wrong place.
+#
+# fails-when: any of the four prints its pre-wave verdict, or a control that must stay
+# admitted is refused.
+
+# ---- AC-5.1: both evidence-line arms count every row, and say the rule ----
+#
+# THE OLD BEHAVIOUR. Each arm named ONE id and asked for "a '- <id>:' evidence line", so an
+# author owing eighteen of them learned of the second only after landing the first
+# (wave-16 A-orch-10 is that specimen, eighteen lines deep). Neither said the obligation is
+# one line PER ROW.
+#
+# THE TRIGGER IS UNCHANGED at task scale: the arm still fires on the ADDRESSED unit's
+# missing line. What changed is what it then says — the count and the ids come from every
+# `## Tasks` row, not from the one row that tripped it. So T1 and T3 below are `pending`
+# (the non-addressed `active|done` shape-fail arm is a different refusal, pinned by 22c3)
+# and the fixture isolates the wording.
+v17t_task_none="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | first | pending |
+| T2 | build | audited | the addressed unit | active |
+| T3 | build | audited | third | pending |
+
+## SDLC State
+
+scale: task
+current: T2
+approved-by: fixture 2026-09-07T00:00Z \"approved\""
+h17t1=$(make_home)
+write_plan "$h17t1" "$(task_plan "$v17t_task_none")" > /dev/null
+expect_block "17t1 task scale, three rows and no evidence lines at all → block" \
+  "$h17t1" 'git commit -m "x"' "3 tasks have no evidence line"
+expect_eq "17t1b …and the verdict line counts the rows and names the shape that is owed" \
+  "bionic: commit refused — 3 tasks have no evidence line (add one '- T<id>:' per row)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "17t1c …and the detail names the first id" "- T1:" "$HOOK_VSTDERR"
+expect_contains "17t1d …the second" "- T2:" "$HOOK_VSTDERR"
+expect_contains "17t1e …and the third, so one pass shows the whole debt" "- T3:" "$HOOK_VSTDERR"
+
+# THE SINGULAR IS NOT "1 tasks". One row owing one line is the ordinary case, and the
+# verdict is a sentence a person reads.
+v17t_task_one="## Tasks
+
+| id | intent | rigor | description | status |
+|---|---|---|---|---|
+| T1 | build | audited | first | pending |
+| T2 | build | audited | the addressed unit | active |
+
+## SDLC State
+
+scale: task
+current: T2
+approved-by: fixture 2026-09-07T00:00Z \"approved\"
+
+- T1: bash suite 9/9 green"
+h17t2=$(make_home)
+write_plan "$h17t2" "$(task_plan "$v17t_task_one")" > /dev/null
+expect_block "17t2 task scale, one row short of its line → block" \
+  "$h17t2" 'git commit -m "x"' "1 task has no evidence line"
+expect_eq "17t2b …and the verdict agrees with itself in number" \
+  "bionic: commit refused — 1 task has no evidence line (add one '- T<id>:' per row)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+
+# THE SAME WORDING AT THE OTHER ARM. validate_dispatch_ledger walks every row of an audited
+# multi_agent wave's table; it used to refuse at the FIRST id it found short.
+tasks_three_rows="## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the first unit | implementor | — | 30m | REQ-x | a.sh | landed |
+| T2 | 4 | build | the second unit | implementor | — | 30m | REQ-x | b.sh | landed |
+| T3 | 4 | build | the third unit | implementor | — | 30m | REQ-x | c.sh | landed |"
+h17t3=$(make_home)
+write_plan "$h17t3" "$(d7_wave_plan "$tasks_three_rows" "")" > /dev/null
+expect_block "17t3 wave scale, three dispatched rows and no evidence lines → block" \
+  "$h17t3" 'git commit -m "x"' "3 tasks have no evidence line"
+expect_eq "17t3b …in the same words the task-scale arm uses" \
+  "bionic: commit refused — 3 tasks have no evidence line (add one '- T<id>:' per row)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "17t3c …and the detail names every one of the three" "- T3:" "$HOOK_VSTDERR"
+
+# THE MIDDLE ROW ALONE. The arm that stopped at the first id could not see T2 at all while
+# T1 was short; this row proves the walk reaches past a row that IS satisfied.
+h17t4=$(make_home)
+write_plan "$h17t4" "$(d7_wave_plan "$tasks_three_rows" "- T1: bash suite 9/9 green
+- T3: bash suite 9/9 green")" > /dev/null
+expect_block "17t4 wave scale, only the middle row short → block, naming it" \
+  "$h17t4" 'git commit -m "x"' "1 task has no evidence line"
+expect_contains "17t4b …and the detail names T2, not T1 or T3" "- T2:" "$HOOK_VSTDERR"
+
+# THE CONTROL. Three rows, three lines, nothing owed.
+h17t5=$(make_home)
+write_plan "$h17t5" "$(d7_wave_plan "$tasks_three_rows" "- T1: bash suite 9/9 green
+- T2: bash suite 9/9 green
+- T3: bash suite 9/9 green")" > /dev/null
+expect_allow "17t5 wave scale, every row carries its line → allow" \
+  "$h17t5" 'git commit -m "x"'
+
+# ---- AC-5.3: `evidence:` takes one path, and a `;` is not a separator ----
+#
+# THE OLD BEHAVIOUR. `evidence: a.md; b.md` was handed whole to the path resolver, which
+# prefixed a root and found no such file, so the refusal read "names no real file" and sent
+# the author to write a file at a path no one had meant to name. The sibling reader of the
+# walk artifact has truncated at the first `;` since epic-14; this cell is the outlier.
+# The arm sits FIRST in the `evidence:` branch, ahead of the climb-out and file tests, so
+# the shape fault is named before any question about where the value points.
+h17t6=$(make_home)
+write_plan "$h17t6" "$(plan 6 "$step6_body" \
+  "$(evidence_matrix 'record/generic-evidence.md; record/second-file.md')")" > /dev/null
+expect_block "17t6 an evidence: value carrying two paths → block on the shape" \
+  "$h17t6" 'git commit -m "x"' "evidence: names more than one path"
+expect_eq "17t6b …and the verdict names the cell and the rule, not the missing file" \
+  "bionic: commit refused — evidence: names more than one path (one path under record/ per AC)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "17t6c …while the detail names the AC and prints the value back" \
+  "AC-1" "$HOOK_VSTDERR"
+expect_contains "17t6d …the value included" "record/second-file.md" "$HOOK_VSTDERR"
+
+# THE BARE CONTROL, same fixture, one path: still admitted.
+h17t7=$(make_home)
+write_plan "$h17t7" "$(plan 6 "$step6_body" "$(evidence_matrix 'record/generic-evidence.md')")" > /dev/null
+expect_allow "17t7 …and one path under record/ is admitted exactly as before" \
+  "$h17t7" 'git commit -m "x"'
+
+# AND THE ARM DID NOT SWALLOW THE ONES BEHIND IT: a single path that names no file still
+# refuses in its own words.
+h17t8=$(make_home)
+write_plan "$h17t8" "$(plan 6 "$step6_body" "$(evidence_matrix 'record/never-written.md')")" > /dev/null
+expect_block "17t8 …and a single path naming no file keeps its own refusal" \
+  "$h17t8" 'git commit -m "x"' "names no real file"
+
+# ---- AC-5.4: the auditor cell is an equality, and the verdict says so ----
+#
+# THE OLD BEHAVIOUR. `CONFIRMED (audit-b3b87dc.md)` refused with "the auditor has not
+# confirmed AC-1" — which reads as "no audit happened" to the one person who knows an audit
+# did happen and annotated the cell with its path. The equality is right; the sentence was
+# not. A cell that does NOT start with CONFIRMED is a different fact and keeps its verdict.
+aud_matrix() {  # $1 = the auditor cell to write
+  cat <<EOF
+## Verification Matrix
+
+stack-health: n/a: no long-running serve
+
+| AC | tier | status | evidence | auditor |
+|---|---|---|---|---|
+| AC-1 | T1 | discharged | see AC-1 | $1 |
+
+AC-1:
+  fails-when: the planted defect this eval must go red on
+  tier-run: bash test.sh — unit suite
+  readback: 332/332 asserted
+  evidence: record/generic-evidence.md
+EOF
+}
+
+h17t9=$(make_home)
+write_plan "$h17t9" "$(plan 6 "$step6_body" "$(aud_matrix 'CONFIRMED (audit-x.md)')")" > /dev/null
+expect_block "17t9 an auditor cell annotated past the token → block on the shape" \
+  "$h17t9" 'git commit -m "x"' "the auditor cell is not the bare token"
+expect_eq "17t9b …and the verdict no longer says the audit did not happen" \
+  "bionic: commit refused — the auditor cell is not the bare token (write CONFIRMED; cite in evidence:)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+expect_contains "17t9c …while the detail prints the cell back verbatim" \
+  "CONFIRMED (audit-x.md)" "$HOOK_VSTDERR"
+# THE WIDEST LINE THIS WAVE ADDS, PINNED AT ITS MEASURED WIDTH. Both halves are constants,
+# so the number is deterministic — and it sits ON the ratified 100-column bound, which
+# refuse.sh self-refuses past. Pinned here so a later edit to either half is caught in the
+# section that owns the words, not as a refuse-call self-refusal in some unrelated suite.
+expect_eq "17t9d …and the rendered line is exactly at the ratified column bound" "100" \
+  "$(bionic_cols "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')")"
+
+# THE BARE CONTROL: the token alone is admitted.
+h17t10=$(make_home)
+write_plan "$h17t10" "$(plan 6 "$step6_body" "$(aud_matrix 'CONFIRMED')")" > /dev/null
+expect_allow "17t10 …and the bare token is admitted exactly as before" \
+  "$h17t10" 'git commit -m "x"'
+
+# THE DISCRIMINATOR: a cell that does not start with CONFIRMED is not a shape fault, and
+# the arm that has always spoken for it still does.
+h17t11=$(make_home)
+write_plan "$h17t11" "$(plan 6 "$step6_body" "$(aud_matrix 'REFUTED')")" > /dev/null
+expect_block "17t11 …while a REFUTED cell keeps the pre-wave verdict" \
+  "$h17t11" 'git commit -m "x"' "the auditor has not confirmed"
+h17t12=$(make_home)
+write_plan "$h17t12" "$(plan 6 "$step6_body" "$(aud_matrix ' ')")" > /dev/null
+expect_block "17t12 …and so does an empty one" \
+  "$h17t12" 'git commit -m "x"' "the auditor has not confirmed"
+
+# ---- AC-10.2: the Step-5 block's two refusals, pinned; then the new key ----
+#
+# THE TWO REFUSALS BELOW WERE UNPINNED until this wave (research R4 D2.6: no test file
+# contained either string). A task that adds a key to this function has to leave them
+# standing, and a pin written AFTER the change would prove only that the change kept what
+# the change left.
+step5_72="  cmd: bash tests/run.sh
+  pass: 72
+  total: 72
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+step5_71="  cmd: bash tests/run.sh
+  pass: 71
+  total: 72
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+step5_words="  cmd: bash tests/run.sh
+  pass: most of them
+  total: 72
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+
+h17t13=$(make_home)
+write_plan "$h17t13" "$(plan 5 "$step5_words" "$matrix_complete")" > /dev/null
+expect_block "17t13 a Step-5 block whose counters are not integers → block" \
+  "$h17t13" 'git commit -m "x"' "'pass:' and 'total:' are not both integers"
+expect_eq "17t13b …in those words" \
+  "bionic: commit refused — 'pass:' and 'total:' are not both integers (write both as integers)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+
+h17t14=$(make_home)
+write_plan "$h17t14" "$(plan 5 "$step5_71" "$matrix_complete")" > /dev/null
+expect_block "17t14 a Step-5 block one test short → block" \
+  "$h17t14" 'git commit -m "x"' "the suite is not fully green"
+expect_eq "17t14b …in those words" \
+  "bionic: commit refused — the suite is not fully green (make pass equal total)" \
+  "$(printf '%s\n' "$HOOK_STDERR" | /usr/bin/grep '^bionic: ')"
+
+# THE NEW KEY. `pass:`/`total:` are the GATING counters; an advisory reading is a
+# measurement the framework took and nobody gated on, so the gate RECORDS it and does not
+# judge it. A block carrying three exceeded advisories on a fully green suite commits.
+step5_advisory="  cmd: bash tests/run.sh
+  pass: 72
+  total: 72
+  advisory-exceeded: 3
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+h17t15=$(make_home)
+write_plan "$h17t15" "$(plan 5 "$step5_advisory" "$matrix_complete")" > /dev/null
+expect_allow "17t15 a green Step-5 block carrying advisory-exceeded: 3 → allow (recorded, not judged)" \
+  "$h17t15" 'git commit -m "x"'
+
+# THE CONTROL IN THE OTHER DIRECTION: the key launders nothing. A red block carrying a
+# zero advisory count is still red.
+step5_71_advisory="  cmd: bash tests/run.sh
+  pass: 71
+  total: 72
+  advisory-exceeded: 0
+  output: .bionic/docs/plans/wave-01.plan.md#step-5
+  auditor: 3 rows CONFIRMED — report .bionic/tmp/audit.md"
+h17t16=$(make_home)
+write_plan "$h17t16" "$(plan 5 "$step5_71_advisory" "$matrix_complete")" > /dev/null
+expect_block "17t16 …and the key does not launder a red block" \
+  "$h17t16" 'git commit -m "x"' "the suite is not fully green"
+
+# AND THE KEY IS OPTIONAL: the same green block without it is the pre-wave fixture, byte
+# for byte, and still commits.
+h17t17=$(make_home)
+write_plan "$h17t17" "$(plan 5 "$step5_72" "$matrix_complete")" > /dev/null
+expect_allow "17t17 …and a green block that never mentions it is untouched" \
+  "$h17t17" 'git commit -m "x"'
+
 
 finish

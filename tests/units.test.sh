@@ -6,10 +6,12 @@
 # checks and its prototype check, the tick's FILL, and the governing-skill Step-3 wall — so
 # that none of them carries a parser of its own. Three questions, one per function:
 #
-#   §1 units_rows <plan>          the eleven fields, in the FIXED order, whatever order the
+#   §1 units_rows <plan>          the twelve fields, in the FIXED order, whatever order the
 #                                 table's columns are written in
 #   §10 the `worktree` cell        slot 11, OPTIONAL: a table without the column is valid
 #                                 and reads it empty (wave-14 REQ-2, ADR-027)
+#   §13 the `base` cell            slot 12, OPTIONAL, and a commit id when it holds one
+#                                 (wave-17 REQ-2, ADR-032)
 #   §4 units_ready <plan> <step>  which rows at that step may be dispatched now
 #   §5 units_validate <plan>      which of the Task invariants the table breaks
 #
@@ -252,22 +254,23 @@ expect_eq "sourcing units.sh prints nothing on stdout" "" "$(bash -c '. "$1"' _ 
 expect_eq "…and nothing on stderr" "" "$(bash -c '. "$1"' _ "$LIB" 2>&1 >/dev/null)"
 
 # ============================================================
-section "1 — units_rows: the live table, eleven fields per row, in the fixed order"
+section "1 — units_rows: the live table, twelve fields per row, in the fixed order"
 # ============================================================
 
 expect_eq "the live specimen yields one line per data row (22)" "22" "$(nlines "$ROWS_LIVE")"
 
-# ELEVEN, NOT TEN, SINCE wave-14 REQ-2 — and the specimen carries no `worktree` column, so
-# every one of the 22 lines ends in an EMPTY eleventh field rather than stopping at ten. A
-# record whose width depended on which columns the table happened to carry would put every
-# caller back to counting cells, which is the whole of what this reader exists to stop.
-expect_eq "every line carries exactly eleven tab-separated fields" "22" \
-  "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' 'NF == 11 { n++ } END { print n + 0 }')"
+# TWELVE SINCE wave-17 REQ-2 (eleven since wave-14 REQ-2, ten before that) — and the
+# specimen carries neither the `worktree` nor the `base` column, so every one of the 22 lines
+# ends in two EMPTY fields rather than stopping at ten. A record whose width depended on which
+# columns the table happened to carry would put every caller back to counting cells, which is
+# the whole of what this reader exists to stop.
+expect_eq "every line carries exactly twelve tab-separated fields" "22" \
+  "$(printf '%s\n' "$ROWS_LIVE" | awk -F'\t' 'NF == 12 { n++ } END { print n + 0 }')"
 
 # THE FIRST ROW, WHOLE. Written out by hand from the plan, which is the point: a row asserted
 # against a value the reader itself produced would pass on any consistent misreading.
-expect_eq "T1 renders id·step·kind·task·agent·deps·size·serves·Files·status·worktree in that order" \
-  "$(printf 'T1\t3\tdoc\tPlan, Tasks and matrix written; Step-3 card approved\torchestrator\t—\t30m\tall\tplan\tlanded\t')" \
+expect_eq "T1 renders id·step·kind·task·agent·deps·size·serves·Files·status·worktree·base in that order" \
+  "$(printf 'T1\t3\tdoc\tPlan, Tasks and matrix written; Step-3 card approved\torchestrator\t—\t30m\tall\tplan\tlanded\t\t')" \
   "$(printf '%s\n' "$ROWS_LIVE" | sed -n '1p')"
 
 # THE COLLISION measure §4.3 names, asserted field by field. In the shipped five-column
@@ -434,7 +437,10 @@ section "6 — units_validate: one line per broken invariant, naming the id and 
 
 VAL_BAD="$(call units_validate "$SANDBOX/broken.md")"
 
-expect_eq "a table breaking seven invariants reports seven violations" "7" "$(nlines "$VAL_BAD")"
+# TEN, NOT SEVEN (wave-17 REQ-5, AC-5.2). Seven invariants are broken, but the transitive
+# arm now reports EVERY Step-4 row the offending row fails to reach rather than the first —
+# T7 reaches only T1, so it misses X1, T4, T5 and T6, which is four lines from one row.
+expect_eq "a table breaking seven invariants reports ten violations" "10" "$(nlines "$VAL_BAD")"
 expect_eq "…and exits 1" "1" "$(call_rc units_validate "$SANDBOX/broken.md")"
 
 expect_contains "an id used twice is named once, as a duplicate" \
@@ -449,8 +455,15 @@ expect_contains "a status outside the four names the status and the vocabulary" 
   "T5: status done is not one of pending active landed dropped" "$VAL_BAD"
 expect_contains "a dep naming no row names the dep" \
   "T6: dep T99 names no row in the table" "$VAL_BAD"
-expect_contains "a Step-6 row that reaches no Step-4 row names the first one it misses" \
+expect_contains "a Step-6 row that reaches no Step-4 row names the ones it misses" \
   "T7: step 6 does not depend transitively on step-4 row X1" "$VAL_BAD"
+# …AND NAMES ALL OF THEM, IN TABLE ORDER. The author threading a plan reads the whole debt
+# in one pass instead of one edge per round trip (AC-5.2; A-orch-59 of wave-16 is the
+# ten-round-trip specimen). The duplicate `T1` row is a Step-4 row too, and it is NOT
+# reported: T7 reaches the id, and reachability is keyed on the id, not on the row.
+expect_eq "…every one of them, once each, in table order" \
+  "X1 T4 T5 T6" \
+  "$(printf '%s\n' "$VAL_BAD" | /usr/bin/grep '^T7: step 6 does not depend' | sed -E 's/.*step-4 row //' | tr '\n' ' ' | sed -E 's/ $//')"
 
 # PAIRED POSITIVE. The good row is in the same table and is not accused of anything.
 expect_eq "the one well-formed row draws no violation of its own" "0" \
@@ -814,8 +827,8 @@ ESCAPED_EOF
 ROWS_ESC="$(call units_rows "$SANDBOX/escaped-cell.md")"
 
 expect_eq "three data rows, escapes and all" "3" "$(nlines "$ROWS_ESC")"
-expect_eq "every row still carries exactly eleven fields" "3" \
-  "$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' 'NF == 11 { n++ } END { print n + 0 }')"
+expect_eq "every row still carries exactly twelve fields" "3" \
+  "$(printf '%s\n' "$ROWS_ESC" | awk -F'\t' 'NF == 12 { n++ } END { print n + 0 }')"
 
 # THE WHOLE ROW, field by field. The shift this section exists for moves every cell AFTER
 # the escape, so asserting the escaped cell alone would pass on a reader that recovered the
@@ -1008,13 +1021,13 @@ VAL_BOTH="$(call units_validate "$SANDBOX/raw-and-escaped.md")"
 expect_eq "a row carrying an escape AND a raw pipe is named once, for the raw one" \
   'T1: 12 cells for 11 columns — a raw | inside a cell? escape it as \|' "$VAL_BOTH"
 
-# units_rows IS UNTOUCHED BY THE RULE. The shifted row is still emitted with its eleven
+# units_rows IS UNTOUCHED BY THE RULE. The shifted row is still emitted with its twelve
 # fields: the violation is advice to whoever wrote the plan, not a reason to hide a row from
 # the schedulers that can still read most of it.
 ROWS_RAW="$(call units_rows "$SANDBOX/raw-pipe.md")"
 expect_eq "both rows still come through units_rows" "2" "$(nlines "$ROWS_RAW")"
-expect_eq "…each carrying eleven fields" "2" \
-  "$(printf '%s\n' "$ROWS_RAW" | awk -F'\t' 'NF == 11 { n++ } END { print n + 0 }')"
+expect_eq "…each carrying twelve fields" "2" \
+  "$(printf '%s\n' "$ROWS_RAW" | awk -F'\t' 'NF == 12 { n++ } END { print n + 0 }')"
 
 # ============================================================
 section "10 — the worktree cell: slot 11, header-keyed, and OPTIONAL (wave-14 REQ-2, ADR-027)"
@@ -1041,7 +1054,7 @@ current: 4
 | id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
 |---|---|---|---|---|---|---|---|---|---|---|
 | T1 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-2 | a.sh | 14-T1 | landed |
-| T2 | 4 | build | the build that has no tree yet | implementor | T1 | 30m | REQ-2 | b.sh | — | active |
+| T2 | 4 | build | the build that has no tree yet | implementor | T1 | 30m | REQ-2 | b.sh | — | pending |
 | T3 | 6 | review | the review | critic | T1, T2 | 30m | REQ-2 | c.sh | 14-T3 | pending |
 
 ## Verification Matrix
@@ -1050,8 +1063,8 @@ WT_COL_EOF
 ROWS_WT="$(call units_rows "$SANDBOX/worktree-column.md")"
 
 expect_eq "the widened table yields one line per data row (3)" "3" "$(nlines "$ROWS_WT")"
-expect_eq "…each carrying eleven fields" "3" \
-  "$(printf '%s\n' "$ROWS_WT" | awk -F'\t' 'NF == 11 { n++ } END { print n + 0 }')"
+expect_eq "…each carrying twelve fields" "3" \
+  "$(printf '%s\n' "$ROWS_WT" | awk -F'\t' 'NF == 12 { n++ } END { print n + 0 }')"
 
 # THE CELL ITSELF, through the accessor the gate uses — never by number.
 expect_eq "units_field reads T1's worktree cell by name" "14-T1" \
@@ -1069,6 +1082,11 @@ expect_eq "…nor Files" "a.sh" \
 
 # A row whose tree is an em dash is a row with NO tree — the same "none" spelling `deps`
 # uses — and it comes through as the literal cell, not as an error.
+#
+# THE ROW IS `pending`, AND THAT IS load-BEARING SINCE WAVE-17 (REQ-1, AC-1.2, ADR-032): a
+# row with no tree yet is a row nobody is working in. §12 is where the `active` twin of this
+# exact row becomes a fault, and this fixture is its silent control — so the clean-validate
+# assertion below asserts the rule discriminates, not that the rule is absent.
 expect_eq "a row with no tree yet reads its cell literally" "—" \
   "$(call units_field "$(printf '%s\n' "$ROWS_WT" | sed -n 2p)" worktree)"
 
@@ -1130,5 +1148,274 @@ expect_eq "11.5 a file with no ## Tasks table answers no" "1" \
 # column and still says so.
 expect_eq "11.6 reversing every column does not change the answer" "0" \
   "$(call_rc units_has_column "$SANDBOX/worktree-column-reversed.md" worktree)"
+
+
+# ============================================================
+section "12 — an ACTIVE row names its tree, or the table is wrong (wave-17 REQ-1, AC-1.2, ADR-032)"
+# ============================================================
+#
+# THE REGISTER WAS UNFED, AND NOTHING SAID SO. The evidence gate resolves a worktree commit
+# to the `## Tasks` row that names the tree, and every row of every plan this repo shipped
+# through wave-16 carried `—` in that cell (research R1, "The one fact"): the arm was not
+# broken, it was never reached, and the only symptom was a run whose `current:` had to be
+# regressed by hand to land a writer's commit. ADR-032 makes the row the tree's record, and a
+# record that does not record is a shape fault — caught where the plan is written, not one
+# round trip later at the writer's commit.
+#
+# THE RULE IS THREE-WAY, and all three ways are asserted here because only the set of them is
+# the rule:
+#   active + no cell, in a table WITH the column  → a fault naming the id;
+#   pending + no cell                             → silent (a row nobody is working in);
+#   any status, in a table WITHOUT the column     → silent (a plan that never tracked trees).
+# The third is the one that decides whether this arm can ship at all: `units_field` reads an
+# absent column as an empty cell on every row, so an arm that skipped `units_has_column`
+# would refuse every pre-wave-14 and every solo-writer plan in existence.
+#
+# fails-when: the active row draws no line, or the pending row / the column-less table draws
+# one.
+
+cat > "$SANDBOX/active-no-tree.md" <<'ACT_EOF'
+---
+current: 4
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build in its own tree | senior-implementor | — | 60m | REQ-1 | a.sh | 17-T1 | active |
+| T2 | 4 | build | the build whose tree the row forgot | implementor | — | 30m | REQ-1 | b.sh | — | active |
+| T3 | 4 | build | the build dispatched with no cell at all | implementor | — | 30m | REQ-1 | c.sh |  | active |
+| T4 | 4 | build | the build not dispatched yet | implementor | — | 30m | REQ-1 | d.sh | — | pending |
+| T5 | 4 | build | the build that landed and was torn down | implementor | — | 30m | REQ-1 | e.sh | — | landed |
+| T6 | 6 | review | the review | critic | T1, T2, T3, T4, T5 | 30m | REQ-1 | f.sh | — | pending |
+
+## Verification Matrix
+ACT_EOF
+
+VAL_ACT="$(call units_validate "$SANDBOX/active-no-tree.md")"
+
+expect_eq "12.1 an active row whose cell is an em dash is named" "1" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T2: active row names no worktree' | tr -d ' ')"
+expect_eq "12.2 …and an active row whose cell is empty is named the same way" "1" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T3: active row names no worktree' | tr -d ' ')"
+expect_eq "12.3 the active row that DOES name its tree draws nothing" "0" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T1:' | tr -d ' ')"
+# THE TWO SILENT STATUSES, asserted BY ID rather than by counting lines: a rule that fired on
+# every empty cell would still pass a total-count assertion if the active rows were absent.
+expect_eq "12.4 a pending row with no tree is not a fault" "0" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T4:' | tr -d ' ')"
+expect_eq "12.5 …nor is a landed one whose tree is gone" "0" \
+  "$(printf '%s\n' "$VAL_ACT" | grep -c '^T5:' | tr -d ' ')"
+expect_eq "12.6 the table breaks this invariant twice and no other" "2" "$(nlines "$VAL_ACT")"
+expect_eq "12.7 …and units_validate exits 1 for it" "1" \
+  "$(call_rc units_validate "$SANDBOX/active-no-tree.md")"
+
+# ---------- the column-less table: the arm must not reach it ----------
+#
+# The same rows, one column narrower. Every `worktree` cell now reads empty for the reason
+# §10 gives — slot 11 of a header that has no slot 11 — and the rule must stay silent, or
+# every plan written before wave-14 becomes invalid on the day this ships.
+cat > "$SANDBOX/active-no-column.md" <<'ACC_EOF'
+---
+current: 4
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build | senior-implementor | — | 60m | REQ-1 | a.sh | active |
+| T2 | 4 | build | the other build | implementor | — | 30m | REQ-1 | b.sh | active |
+| T6 | 6 | review | the review | critic | T1, T2 | 30m | REQ-1 | f.sh | pending |
+
+## Verification Matrix
+ACC_EOF
+
+expect_eq "12.8 a table with no worktree column raises no worktree fault, whatever the status" "" \
+  "$(call units_validate "$SANDBOX/active-no-column.md")"
+expect_eq "12.9 …and exits 0" "0" "$(call_rc units_validate "$SANDBOX/active-no-column.md")"
+# AND THE DISCRIMINATOR IS THE HEADER, not the fixture: the same two active rows, in a table
+# that carries the column, are two faults (12.1/12.2 above prove the positive half).
+expect_eq "12.10 units_has_column is what tells the two fixtures apart" "0 1" \
+  "$(printf '%s %s' "$(call_rc units_has_column "$SANDBOX/active-no-tree.md" worktree)" \
+     "$(call_rc units_has_column "$SANDBOX/active-no-column.md" worktree)")"
+
+# ============================================================
+section "14 — the transitive arm names EVERY unreached step-4 row (wave-17 REQ-5, AC-5.2)"
+# ============================================================
+#
+# WHY THIS SECTION EXISTS. The arm used to `break` after the first Step-4 row an offending
+# row failed to reach, so an author threading a Step-5 row against four build rows learned
+# of the second missing edge only after fixing the first, and paid one refused commit per
+# edge. wave-16's A-orch-59 is the field specimen: a mid-run row unthreaded from ten rows,
+# ten round trips. The file's own contract paragraph says EVERY FAULT IS REPORTED; this arm
+# was the exception to it.
+#
+# THE SMALLEST TABLE THAT SHOWS IT is one Step-5 row threaded to exactly one of four Step-4
+# rows: one line proves nothing about the bound, three do.
+
+cat > "$SANDBOX/three-missing.md" <<'THREE_EOF'
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | status |
+|---|---|---|---|---|---|---|---|---|---|
+| T1 | 3 | doc | plan written | orchestrator | — | 30m | all | plan | landed |
+| T2 | 4 | build | first | implementor | T1 | 15m | REQ-x | a.sh | landed |
+| T3 | 4 | build | second | implementor | T1 | 15m | REQ-x | b.sh | landed |
+| T4 | 4 | build | third | implementor | T1 | 15m | REQ-x | c.sh | landed |
+| T5 | 4 | build | fourth | implementor | T1 | 15m | REQ-x | d.sh | landed |
+| T9 | 5 | test | the floor, threaded to one build row of four | test-runner | T2 | 40m | all | f.md | pending |
+THREE_EOF
+
+VAL_THREE="$(call units_validate "$SANDBOX/three-missing.md")"
+
+expect_eq "14.1 a Step-5 row missing three step-4 rows reports three violations" "3" \
+  "$(nlines "$VAL_THREE")"
+expect_contains "14.2 …naming the first" \
+  "T9: step 5 does not depend transitively on step-4 row T3" "$VAL_THREE"
+expect_contains "14.3 …the second" \
+  "T9: step 5 does not depend transitively on step-4 row T4" "$VAL_THREE"
+expect_contains "14.4 …and the third" \
+  "T9: step 5 does not depend transitively on step-4 row T5" "$VAL_THREE"
+expect_eq "14.5 …and exits 1" "1" "$(call_rc units_validate "$SANDBOX/three-missing.md")"
+# THE ROW IT DOES REACH IS NOT ACCUSED, and neither is the Step-3 row: only Step-4 rows are
+# owed, and only the unreached ones are named.
+expect_eq "14.6 the reached step-4 row and the step-3 row draw nothing" "" \
+  "$(printf '%s\n' "$VAL_THREE" | /usr/bin/grep -E 'step-4 row (T1|T2)$')"
+
+# THE MUTATION ARM. Put the `break` back into a scratch copy of the shipped library: the
+# same table then yields one line instead of three. Without this arm, an implementation
+# that reported three lines for some other reason — or a fixture that happened to miss one
+# row — would read identically.
+anchor "$LIB" 'does not depend transitively on step-4 row %s' 1
+MUTANT_BREAK="$SANDBOX/units-mutant-break.sh"
+awk '{ print }
+     index($0, "does not depend transitively on step-4 row %s") { print "            break" }' \
+  "$LIB" > "$MUTANT_BREAK"
+MUTANT_BREAK_OUT="$(bash -c '. "$1" >/dev/null 2>&1 || exit 127; units_validate "$2"' \
+  _ "$MUTANT_BREAK" "$SANDBOX/three-missing.md")"
+expect_eq "14.7 the shipped library reports three; the mutant that breaks reports one" \
+  "3 1" "$(nlines "$VAL_THREE") $(nlines "$MUTANT_BREAK_OUT")"
+
+
+# ============================================================
+section "13 — the base cell: slot 12, OPTIONAL, and a commit id when it holds one (wave-17 REQ-2, AC-2.1, ADR-032)"
+# ============================================================
+#
+# WHY THE COLUMN EXISTS. `spawn-worktree.sh` prints the commit it cut a tree from
+# (`base=<sha>` on its contract line) and, through wave-16, nothing wrote that anywhere: the
+# landing gate reconstructed the tree's origin by merge-basing against a BRANCH NAME, which is
+# right only while the tree was cut from that branch's own history (research R1 A2). ADR-032
+# makes the row the tree's record, and this is the origin half of it — declared in the same
+# edit as the `worktree` cell, read by the landing gate as the diff base.
+#
+# WHAT IS VALIDATED, AND WHAT IS NOT. The SHAPE of the cell, here, at the write: 7 to 40 hex
+# characters, the range `git rev-parse` itself takes. Whether the repository HOLDS that commit
+# is not asked — this library is a pure function of a file, no plan reader forks git, and the
+# landing gate that does fork git announces the fallback when the id resolves to nothing.
+#
+# THE RULE IS FOUR-WAY, and all four are asserted because only the set of them is the rule:
+#   a 7-hex or 40-hex cell        -> silent, whatever the status;
+#   an em dash / an empty cell    -> silent (declaring no origin is legal);
+#   a cell that is not hex, or is -> a fault naming the id and the cell;
+#     shorter than 7 / longer than 40
+#   a table with no base column   -> silent (every plan written before this wave).
+#
+# fails-when: a junk cell draws no line, or a legal cell / a column-less table draws one.
+
+cat > "$SANDBOX/base-column.md" <<'BASE_EOF'
+---
+current: 4
+---
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | the build whose row records its origin | senior-implementor | — | 60m | REQ-2 | a.sh | 17-T1 | 73a05e0 | active |
+| T2 | 4 | build | the build that declares no origin | implementor | — | 30m | REQ-2 | b.sh | 17-T2 | — | active |
+| T3 | 4 | build | the build whose origin cell is a branch | implementor | — | 30m | REQ-2 | c.sh | 17-T3 | wave/17-fixit | active |
+| T4 | 4 | build | the build whose origin is a full sha | implementor | — | 30m | REQ-2 | d.sh | 17-T4 | 73a05e0c0b37191bdc67ed3ad56f3a6fa16e5d3a | active |
+| T5 | 4 | build | the build whose origin is a character short | implementor | — | 30m | REQ-2 | e.sh | 17-T5 | 73a05e | active |
+| T6 | 4 | build | the build whose origin is a character long | implementor | — | 30m | REQ-2 | f.sh | 17-T6 | 73a05e0c0b37191bdc67ed3ad56f3a6fa16e5d3ab | active |
+| T7 | 4 | build | the build with no origin cell at all | implementor | — | 30m | REQ-2 | g.sh | 17-T7 |  | active |
+| T8 | 4 | build | the build whose origin is upper-cased | implementor | — | 30m | REQ-2 | h.sh | 17-T8 | 73A05E0 | active |
+| T9 | 6 | review | the review | critic | T1, T2, T3, T4, T5, T6, T7, T8 | 30m | REQ-2 | i.sh | — | — | pending |
+
+## Verification Matrix
+BASE_EOF
+
+ROWS_BASE="$(call units_rows "$SANDBOX/base-column.md")"
+VAL_BASE="$(call units_validate "$SANDBOX/base-column.md")"
+
+# ---------- the cell comes through, by name, without shifting its neighbours ----------
+expect_eq "the twelve-column table yields one line per data row (9)" "9" "$(nlines "$ROWS_BASE")"
+expect_eq "units_field reads T1's base cell by name" "73a05e0" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_BASE" | sed -n 1p)" base)"
+expect_eq "…and T4's, a full forty" "73a05e0c0b37191bdc67ed3ad56f3a6fa16e5d3a" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_BASE" | sed -n 4p)" base)"
+# THE DISCRIMINATOR, the same one §10 makes for slot 11: the column sits between `worktree`
+# and `status`, which is where this wave's own plan carries it. A reader that took `status`
+# positionally now reads a sha as a status and refuses every row.
+expect_eq "inserting the column ahead of status does not shift status" "active" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_BASE" | sed -n 1p)" status)"
+expect_eq "…nor the worktree cell beside it" "17-T1" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_BASE" | sed -n 1p)" worktree)"
+# A row that declares no origin reads its cell literally, exactly as the worktree cell does.
+expect_eq "a row that declares no origin reads its cell literally" "—" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_BASE" | sed -n 2p)" base)"
+
+# ---------- the shape rule ----------
+expect_eq "13.1 a cell that is not hex at all is named" "1" \
+  "$(printf '%s\n' "$VAL_BASE" | grep -c '^T3: base wave/17-fixit is not a commit id' | tr -d ' ')"
+expect_eq "13.2 …a cell one character short of seven is named" "1" \
+  "$(printf '%s\n' "$VAL_BASE" | grep -c '^T5: base 73a05e is not a commit id' | tr -d ' ')"
+expect_eq "13.3 …and one character past forty" "1" \
+  "$(printf '%s\n' "$VAL_BASE" | grep -c '^T6: base 73a05e0c0b37191bdc67ed3ad56f3a6fa16e5d3ab is not a commit id' | tr -d ' ')"
+# THE LEGAL CELLS, ASSERTED BY ID rather than by counting lines: a rule that fired on every
+# non-empty cell would still satisfy a total-count assertion if the junk rows were absent.
+expect_eq "13.4 a seven-hex cell draws nothing" "0" \
+  "$(printf '%s\n' "$VAL_BASE" | grep -c '^T1:' | tr -d ' ')"
+expect_eq "13.5 …nor does a full forty" "0" \
+  "$(printf '%s\n' "$VAL_BASE" | grep -c '^T4:' | tr -d ' ')"
+expect_eq "13.6 …nor an em dash, which is how a row declares no origin" "0" \
+  "$(printf '%s\n' "$VAL_BASE" | grep -c '^T2:' | tr -d ' ')"
+expect_eq "13.7 …nor an empty cell, the same fact spelled differently" "0" \
+  "$(printf '%s\n' "$VAL_BASE" | grep -c '^T7:' | tr -d ' ')"
+# UPPER CASE IS A COMMIT ID: `git rev-parse` and `git merge-base` both take one (measured),
+# so the cell the landing gate will hand to git is legal and this arm must not refuse it.
+expect_eq "13.8 …nor an upper-cased sha, which git itself resolves" "0" \
+  "$(printf '%s\n' "$VAL_BASE" | grep -c '^T8:' | tr -d ' ')"
+expect_eq "13.9 the table breaks this invariant three times and no other" "3" "$(nlines "$VAL_BASE")"
+expect_eq "13.10 …and units_validate exits 1 for it" "1" \
+  "$(call_rc units_validate "$SANDBOX/base-column.md")"
+
+# ---------- the column is OPTIONAL: no table written before this wave carries it ----------
+#
+# §7's `missing column` rule stops at the ten required slots and must not reach this one, for
+# the reason §10 gives for slot 11: an absent optional column reads as an empty cell on every
+# row, and a rule that fired there would invalidate every plan in existence.
+expect_eq "13.11 a table with no base column raises no missing-column violation" "" \
+  "$(call units_validate "$SANDBOX/live.md" | grep 'base' || true)"
+expect_eq "13.12 …and its rows read the absent cell as empty" "" \
+  "$(call units_field "$(printf '%s\n' "$ROWS_LIVE" | sed -n 1p)" base)"
+expect_eq "13.13 …and the wave-14 fixture, which carries worktree but no base, still validates clean" "" \
+  "$(call units_validate "$SANDBOX/worktree-column.md")"
+
+# ---------- units_has_column answers for it, and the answer is the header's ----------
+expect_eq "13.14 a table that carries the base column answers yes" "0" \
+  "$(call_rc units_has_column "$SANDBOX/base-column.md" base)"
+expect_eq "13.15 …and the wave-14 fixture, which carries only worktree, answers no" "1" \
+  "$(call_rc units_has_column "$SANDBOX/worktree-column.md" base)"
+
+# ---------- header-keyed, proved the name-blind way §2 and §10 prove it ----------
+reverse_cells "$SANDBOX/base-column.md" > "$SANDBOX/base-column-reversed.md"
+expect_eq "13.16 reversing every column of the twelve-column table changes not one byte of the TSV" \
+  "$ROWS_BASE" "$(call units_rows "$SANDBOX/base-column-reversed.md")"
+expect_eq "13.17 …and it reports the same three faults, in the same words" \
+  "$VAL_BASE" "$(call units_validate "$SANDBOX/base-column-reversed.md")"
+
+
 
 finish
