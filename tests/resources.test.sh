@@ -11,7 +11,7 @@
 #
 # WHY MEMORY IS THE HARD TERM AND COMPUTE THE SOFT ONE (user 2026-09-02, "1 amended").
 # The measured failure is a kernel SIGKILL: seven concurrent suites on an 8 GB machine
-# drove free memory to ~188 MB and the kernel killed a suite mid-run (tests/run.sh:63-68).
+# drove free memory to ~188 MB and the kernel killed a suite mid-run (tests/run.sh:65-70).
 # Over-subscribing cores costs wall time; over-subscribing memory destroys work. So the
 # memory term is measured and binding, and the compute term carries `measured: pending`
 # until AC-32's live run at the wave head replaces CORES_PER_SUITE with a number.
@@ -115,8 +115,8 @@ expect_true "CORES_PER_SUITE carries its AC-32 measurement (date, jobs, sha, rec
 expect_true "CORES_PER_SUITE names the full-suite record it was measured from" \
   grep -q 'record/wave-1.4.0/step5-full-suite-report.md' "$LIB"
 # The 8 GB kernel-SIGKILL measurement is the memory term's whole justification.
-expect_true "MEM_PER_SUITE_GB cites the tests/run.sh:81-87 kill datum" \
-  grep -q 'tests/run.sh:81-87' "$LIB"
+expect_true "MEM_PER_SUITE_GB cites the tests/run.sh:83-89 kill datum" \
+  grep -q 'tests/run.sh:83-89' "$LIB"
 
 # ════════════════════════════════════════════════════════════ §B — resources_budget
 
