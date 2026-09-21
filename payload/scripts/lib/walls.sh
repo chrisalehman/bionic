@@ -2545,15 +2545,21 @@ _eg_row_for_worktree() {
   [ -n "$_want" ] || return 0
   _rows="$(units_rows "$PLAN")" || return 1
   [ -n "$_rows" ] || return 0
+  # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14; both sides
+  # T50, T47's floor RED): that function folds both sides and this one now does too, for
+  # the reason case-folding always needs both sides folded — `$_want` is the literal
+  # basename git gave the tree, and that basename carries the tree's REAL case (a real
+  # dispatch tree is always `<NN>-T<n>`, capital T), while the cell is authored text that
+  # can drift in case either direction. Folding only the cell does not make the compare
+  # case-insensitive; it makes it fail on every mixed-case tree, including an EXACT match,
+  # because a lowercased cell can never equal an unlowercased `$_want`. Both walls must
+  # fold the same way to keep one plan from giving two answers for which row owns a tree.
+  _want="$(printf '%s' "$_want" | tr '[:upper:]' '[:lower:]')"
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _cell="$(units_field "$_line" worktree)"
     [ -n "$_cell" ] || continue
     _cell="${_cell%/}"
-    # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14): that
-    # function folds both sides; this one folds only the CELL, because `$_want` here is
-    # never a lossy read — it is the literal basename git itself gave the tree
-    # (`_eg_git_wt_name`), so it needs no folding to be trustworthy on either filesystem.
     [ "$(printf '%s' "${_cell##*/}" | tr '[:upper:]' '[:lower:]')" = "$_want" ] || continue
     _id="$(units_field "$_line" id)"
     if [ -z "$_EG_ROW" ]; then
