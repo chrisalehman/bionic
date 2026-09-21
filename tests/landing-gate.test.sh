@@ -1949,5 +1949,40 @@ expect_contains "18f: …the gate names the cell it could not use" \
   "row T1 declares base 0000000000000000000000000000000000000000, which is not a commit this tree holds" "$OUT_STDERR"
 expect_contains "18f: …and the base it took instead" "diffing against working-branch wave/x" "$OUT_STDERR"
 
+# --- 18g (AC-2.1): the 18d shape again, this time with a MIXED-CASE tree name. `_lg_worktree_for_name`
+# resolves the row's tree through `worktree_for_row`, which LOWERCASES the name it is given
+# (`payload/scripts/lib/worktree.sh`'s own docblock: "the fleet's one mapping" folds case) — so
+# `LG_WT`'s basename is always lowercase even when the tree and the plan row spell the name with
+# capitals. `_lg_row_for_tree` must fold the plan's `worktree` cell the same way before comparing,
+# or a row named anything but all-lowercase never matches and REQ-2's declared-base feature goes
+# silently inert for it — exactly the live-topology defect this row reproduces (every real row this
+# wave is named `17-T<n>`, which is exactly this shape).
+#
+# fails-when: 18g reports `a.sh` (the declared base was never matched, so the gate fell back), or
+# either arm announces a fallback that was never supposed to be taken.
+make_18d_repo r18g Slice18G; R18G="$REPO18D"
+plan_with_task_row "$R18G" Slice18G "$BASE18D"
+add_row "$R18G" name=Slice18G agent_id="$AID_A" deliverable=.bionic/docs/record/s18g.md \
+  files="b.sh" launched_at="$(iso_ago 600)"
+deliver "$R18G" .bionic/docs/record/s18g.md
+run_gate "$GATE" "$(stop_payload "$R18G" "$SID" false)"
+expect_status "18g: a mixed-case tree name still matches its plan row — the declared base is the diff base" "0" "$RC"
+expect_absent "18g: …and a.sh, which the fallback base would charge, is not named" "a.sh" "$OUT_VSTDERR"
+expect_absent "18g: …no fallback is announced, because none was taken" "landing gate:" "$OUT_STDERR"
+
+# CONTROL: the identical mixed-case fixture with the row's base cell set to a sha this tree does
+# not hold, proving the row was actually MATCHED (a row that never matched cannot report a base
+# mismatch — it would fall back silently instead, which is exactly 18g's own failure mode pre-fix).
+make_18d_repo r18g-ctl Slice18Gctl; R18G_CTL="$REPO18D"
+plan_with_task_row "$R18G_CTL" Slice18Gctl deadbeef
+add_row "$R18G_CTL" name=Slice18Gctl agent_id="$AID_A" deliverable=.bionic/docs/record/s18gctl.md \
+  files="b.sh" launched_at="$(iso_ago 600)"
+deliver "$R18G_CTL" .bionic/docs/record/s18gctl.md
+run_gate "$GATE" "$(stop_payload "$R18G_CTL" "$SID" false)"
+expect_status "18g-ctl: a mixed-case row whose declared base this tree does not hold is charged the fallback" "2" "$RC"
+expect_contains "18g-ctl: …naming a.sh as undeclared" "a.sh" "$OUT_VSTDERR"
+expect_contains "18g-ctl: …and announcing the row it matched and the base it could not use" \
+  "landing gate: row T1 declares base deadbeef, which is not a commit this tree holds" "$OUT_STDERR"
+
 finish
 
