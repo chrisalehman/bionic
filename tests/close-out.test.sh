@@ -671,8 +671,8 @@ run_close "$P0O" check
 expect_eq "0o1: check WOULD REFUSE naming wt/01-T1 though the register census is empty" "yes" \
   "$(contains "$CO_OUT" "WOULD REFUSE")"
 expect_eq "0o2: …naming the branch" "yes" "$(contains "$CO_OUT" "wt/01-T1")"
-expect_eq "0o3: …and announces the fallback on stderr, verbatim" "yes" \
-  "$(contains "$CO_OUT" "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to every wt/* branch")"
+expect_eq "0o3: …and announces the fallback on stderr, verbatim (scoped to this wave's wt/01-*, C7)" "yes" \
+  "$(contains "$CO_OUT" "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to wt/01-* (1.8.3 census)")"
 
 run_close "$P0O" run
 expect_eq "0o4: run refuses — the fallback census carries unreached work" "2" "$CO_RC"
@@ -695,11 +695,79 @@ P0P="$(mk_census_fixture_nowt p0p "wave/01-x" "$ROWS_NOWT")"
 run_close "$P0P" check
 expect_eq "0p1: check does not WOULD-REFUSE — the only wt/* branch is fully merged" "no" \
   "$(contains "$CO_OUT" "WOULD REFUSE")"
-expect_eq "0p2: …but still announces the fallback (a columnless table, either way)" "yes" \
-  "$(contains "$CO_OUT" "unreached-work census falls back to every wt/* branch")"
+expect_eq "0p2: …but still announces the fallback (a columnless table, either way), scoped to wt/01-*" "yes" \
+  "$(contains "$CO_OUT" "unreached-work census falls back to wt/01-* (1.8.3 census)")"
 
 run_close "$P0P" run
 expect_eq "0p3: run proceeds — nothing in the fallback census carries unreached work" "0" "$CO_RC"
+
+# ============================================================
+section "0q — C7: the column-less fallback is scoped to wt/<NN>-*, exactly as 1.8.3 was"
+# ============================================================
+#
+# Critic C7's reproduction: the fallback T24 shipped was `git for-each-ref 'refs/heads/wt/*'`
+# — every `wt/*` branch this repository holds, unscoped by wave number. On a column-less
+# plan (0o/0p's own shape) that means a DIFFERENT wave's leftover branch — one this task's
+# wave never spawned and never merged — could trip act 2's refusal, or (on 1.8.3, the
+# behaviour this restores) never could. Same fixture as 0p (own tree wt/01-T1 fully
+# merged, so nothing of THIS wave's is unreached) plus a foreign wave's leftover
+# (`wt/07-z`, cut from main, one unmerged commit — `add_foreign_unreached_branch`, whose
+# own contract at :272-275 is that this branch "must never see it: not refused on, not
+# deleted"). At 4e2ac66 (unfixed) this WOULD-REFUSEs and `run` refuses rc=2; at 72e07ec
+# (1.8.3) and after this fix, `wt/07-z` falls outside `wt/01-*` and is invisible.
+
+P0Q="$(mk_census_fixture_nowt p0q "wave/01-x" "$ROWS_NOWT")"
+(
+  in_fixture "$P0Q" || exit 1
+  git checkout -q -b wave/01-x
+  printf 'work\n' >> file.txt
+  git commit -q -am "wave work" >/dev/null 2>&1
+  git branch wt/01-T1 wave/01-x
+  git checkout -q main
+  git merge -q --no-ff -m "merge wave" wave/01-x >/dev/null 2>&1
+)
+add_foreign_unreached_branch "$P0Q"
+run_close "$P0Q" check
+expect_eq "0q1: check does not WOULD-REFUSE over a foreign wt/07-z (out of wt/01-* scope)" "no" \
+  "$(contains "$CO_OUT" "WOULD REFUSE")"
+expect_eq "0q2: …never naming the foreign branch" "no" "$(contains "$CO_OUT" "wt/07-z")"
+expect_eq "0q3: …still announces the fallback, scoped to this wave's wt/01-*" "yes" \
+  "$(contains "$CO_OUT" "unreached-work census falls back to wt/01-* (1.8.3 census)")"
+
+run_close "$P0Q" run
+expect_eq "0q4: run does not refuse on the foreign branch" "0" "$CO_RC"
+expect_eq "0q5: …wt/07-z survives — a foreign wave's tree is not this run's to judge" "yes" \
+  "$(branch_exists "$P0Q" "wt/07-z")"
+
+# ============================================================
+section "0r — C7: a column-less plan whose working-branch is not wave/<digits>-<slug> shaped refuses, as 1.8.3 did"
+# ============================================================
+#
+# 1.8.3 derived its ENTIRE census (there was no register) from `working-branch:`'s shape
+# and refused outright — before act 1, for both `check` and `run` — when no wave number
+# could be read off it (`git show 72e07ec:payload/scripts/close-out.sh:242-245`). ADR-032
+# retired that refusal for the register path (a `worktree` column names its own trees, no
+# wave number needed), but a column-less plan has no register to fall back on — it is
+# exactly 1.8.3's shape, and it must refuse exactly as 1.8.3 did rather than silently
+# reach for an unscoped repo-wide census (C7's own finding).
+
+P0R="$(mk_census_fixture_nowt p0r "topic/not-a-wave-branch" "$ROWS_NOWT")"
+run_close "$P0R" check
+expect_eq "0r1: check refuses (1.8.3 refused before act 1, for either verb)" "2" "$CO_RC"
+expect_eq "0r2: …with 1.8.3's own wording" "yes" \
+  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to")"
+
+run_close "$P0R" run
+expect_eq "0r3: run refuses identically" "2" "$CO_RC"
+expect_eq "0r4: …with the same wording" "yes" \
+  "$(contains "$CO_OUT" "the plan's working-branch 'topic/not-a-wave-branch' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to")"
+
+# A table WITH the worktree column never derives a wave number at all — the register
+# names its own trees — so the same non-wave-shaped working-branch is untouched there.
+ROWS_WT_SHAPED="| T1 | 4 | build | fixture writer one | implementor | — | 10 | AC-1 | file.txt | active | 01-T1 |"
+P0S="$(mk_census_fixture p0s "topic/not-a-wave-branch" "$ROWS_WT_SHAPED")"
+run_close "$P0S" check
+expect_eq "0s1: a registered table with the same branch shape is never refused for it" "0" "$CO_RC"
 
 # ============================================================
 section "1 — AC-4.1: run performs the tail and the gate allows the commit"

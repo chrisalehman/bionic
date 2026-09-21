@@ -245,6 +245,25 @@ command -v jq  >/dev/null 2>&1 || _co_refuse "jq is not on PATH — the gate dry
 # trees gets an EMPTY census — the conservative failure, never a refusal — and a plan
 # naming exactly N trees gets exactly those N, however `working-branch:` is spelled.
 
+# THE COLUMN-LESS FALLBACK IS SCOPED EXACTLY AS 1.8.3 WAS (critic C7). A table with no
+# `worktree` column at all has no register to read at all, so `wt_unreached` (below)
+# falls back to a name-shape glob the way 1.8.3's ONLY census worked — but that glob has
+# to be `wt/<NN>-*`, the same scope 1.8.3 used, not the unscoped `wt/*` this file shipped
+# between the register's introduction and this fix (C7: 55 foreign branches in this
+# repository alone, any one of which could trip a column-less consumer's close-out on a
+# wave it never touched). `WT_NUM` is read off `working-branch:` exactly as 1.8.3 read it
+# (`git show 72e07ec:payload/scripts/close-out.sh:244`), and a `working-branch:` that is
+# not `wave/<digits>-<slug>` shaped refuses HERE — before act 1, for both `check` and
+# `run`, exactly as 1.8.3 refused unconditionally — because a repo-wide census on that
+# shape would be, in 1.8.3's own words, "the defect wearing a guard". A table WITH the
+# `worktree` column never reaches this at all: the register names its own trees and needs
+# no wave number to scope anything to (ADR-032's retirement stands, unchanged, for it).
+WT_NUM=""
+if ! units_has_column "$PLAN" worktree; then
+  WT_NUM="$(printf '%s' "$WORKING" | sed -nE 's#^wave/([0-9]+)-.*#\1#p')"
+  [ -n "$WT_NUM" ] || _co_refuse "the plan's working-branch '$WORKING' is not wave/<digits>-<slug> shaped — the worktree census needs a wave number to scope wt/NN-* to"
+fi
+
 # THE BINDING, ASKED BEFORE THE FIRST ACT (AC-4.2, D6). `archive_run` carries this check
 # too — that is where it belongs, so every caller inherits it — but by the time the move
 # is asked for, eight acts have already happened. A destination that drifted since Step 0
@@ -312,17 +331,19 @@ wt_branches() {
 # this arm's whole job is to refuse, and an empty census means it never can, silently.
 # `units_has_column` (lib/units.sh — the SSoT for "does this table carry that column at
 # all") tells the two shapes apart; a column-less table falls back to the pre-register
-# glob census — every `wt/*` branch this repository holds, UNSCOPED by any wave number
-# so no shape guess can refuse a consumer's `working-branch:` the way the retired
-# WT_NUM/WT_PREFIX derivation once did (R6 finding 1; ADR-032 retired that refusal on
-# purpose) — and announces the fallback once on stderr so it is never silent either way.
+# glob census — `wt/<NN>-*`, scoped to `$WT_NUM` exactly as 1.8.3 scoped it (derived and
+# validated once, above, before act 1 — a working-branch that could not supply a wave
+# number already refused there and never reaches this function at all) — and announces
+# the fallback once on stderr so it is never silent either way. Critic C7: the unscoped
+# `wt/*` this arm shipped with between the register's introduction and this fix could
+# trip on a DIFFERENT wave's leftover branch; `wt/<NN>-*` cannot.
 wt_unreached() {
   local b _co_cherry candidates
   if units_has_column "$PLAN" worktree; then
     candidates="$(wt_branches)"
   else
-    echo "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to every wt/* branch" >&2
-    candidates="$(git -C "$ROOT" for-each-ref --format='%(refname:short)' 'refs/heads/wt/*' 2>/dev/null)"
+    echo "close-out: no worktree column in the ## Tasks table; unreached-work census falls back to wt/${WT_NUM}-* (1.8.3 census)" >&2
+    candidates="$(git -C "$ROOT" for-each-ref --format='%(refname:short)' "refs/heads/wt/${WT_NUM}-*" 2>/dev/null)"
   fi
   while IFS= read -r b; do
     [ -n "$b" ] || continue
