@@ -98,10 +98,10 @@ nothing loads it unprompted, and being copied beside the skill is not the same a
 
 ### The wave-scale `## Tasks` table
 
-A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale ledger `steps/3.md` documents inline (`| id | intent | rigor | description | status | worktree |`) — this is the register the wave's own Step-4 dispatch works from, and it carries ten required columns, plus an optional eleventh (`worktree`):
+A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale ledger `steps/3.md` documents inline (`| id | intent | rigor | description | status | worktree |`) — this is the register the wave's own Step-4 dispatch works from, and it carries twelve columns: ten required, plus the optional `worktree` and `base`:
 
 ```
-| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status |
 ```
 
 - **`id`** — `T<n>`, matching `^T[0-9]+$`, the row's own key.
@@ -113,9 +113,9 @@ A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale
 - **`size`** — the row's expected duration in minutes.
 - **`serves`** — the requirement id(s) this row discharges.
 - **`Files`** — every path the row may create or edit (the dispatch budget's source).
-- **`status`** — `pending | active | landed | dropped`. `done` is a TASK-SCALE word only (that ledger's own status enum) and never appears as a wave-table status — a row that has landed is `landed`, not `done`.
 - **`worktree`** — the row's tree path once created; `—` while none exists yet.
 - **`base`** (optional, ADR-032) — rides beside `worktree`: the commit the tree was cut from, as `spawn-worktree.sh` printed it at creation. Absent (`—`) means the landing gate reconstructs the base from `working-branch:` instead, and says so.
+- **`status`** — `pending | active | landed | dropped`. `done` is a TASK-SCALE word only (that ledger's own status enum) and never appears as a wave-table status — a row that has landed is `landed`, not `done`.
 
 **`working-branch:`** in the plan's frontmatter names the wave's own branch, and it is the key `lib/stop.sh`'s landing gate reads to merge-base a task tree against — "what this task added" is computed against that branch, not against the main checkout's current one. A plan naming none falls back to the main checkout's branch, announced inert.
 
