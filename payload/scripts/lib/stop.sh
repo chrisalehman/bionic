@@ -125,6 +125,24 @@ if [ -z "${LG_IMPACT_BOUND_S:-}" ]; then
   . "$_STOP_LIB_DIR/bounds.sh"
 fi
 
+# ─── FILE SCOPE: the `## Tasks` table, which this file must not parse ────────
+#
+# THE ROW IS THE TREE'S RECORD (epic-23 wave-17, REQ-2, D3, ADR-032). The landing gate needs
+# one cell of it — the commit a task tree was cut from — and `payload/scripts/lib/units.sh`
+# is the ONE reader of that table; a second parser here would be the exact duplication that
+# library exists to stop, and it would be the copy nobody updates when a column moves.
+#
+# SOURCED THE WAY fold.sh, root.sh AND bounds.sh ARE, and guarded on the verb this file
+# actually calls. hooks/stop.sh does not source it — no other verdict in this process reads
+# the table — so in the shipped process this guard is what loads it, and a caller that has it
+# already (the evidence gate's own process, a suite driving this library directly) pays
+# nothing. units.sh defines functions and runs nothing at source time, which is why sourcing
+# it here costs one parse and no forks.
+if ! declare -F units_rows >/dev/null 2>&1; then
+  # shellcheck source=/dev/null
+  . "$_STOP_LIB_DIR/units.sh"
+fi
+
 # ─── FILE SCOPE: the hook's own directory, resolved at most once ─────────────
 #
 # THREE VERDICTS ASKED THE SAME QUESTION THREE TIMES (REQ-10, T11): `stop_landing_gate`
@@ -219,6 +237,61 @@ _lg_worktree_for_name() {  # <repo> <row name> -> abs worktree path on stdout, o
     fi
   done
   return 1
+}
+
+# WHICH `## Tasks` ROW OWNS THIS TREE, AND WHAT ORIGIN IT DECLARES (epic-23 wave-17,
+# REQ-2, D3, ADR-032).
+#
+# THE MATCH IS THE ONE THE EVIDENCE GATE ALREADY MAKES (`_eg_row_for_worktree`,
+# payload/scripts/lib/walls.sh): the row's `worktree` cell, trailing slash stripped, compared
+# by BASENAME — so a cell holding `17-T3`, `.worktrees/17-T3` or an absolute path all name
+# the same tree, and two walls reading one record can never disagree about which row that is.
+#
+# THE BASENAME ARRIVES CASE-FOLDED ON A CASE-INSENSITIVE FILESYSTEM (macOS: the lowercased
+# path `worktree_for_row` builds already exists, so `_lg_worktree_for_name`'s `-d` takes it
+# as-is) AND IN THE TREE'S OWN CASE OTHERWISE (a case-sensitive filesystem fails that `-d`
+# and the fallback scan above returns the real name, case and all) — so the cell is compared
+# case-folded too (L1, hit epic-23 wave-17 T41), which covers both classes: `_want` is
+# `${LG_WT##*/}` at the call site, and `LG_WT` comes from `_lg_worktree_for_name` above,
+# which resolves through `worktree_for_row` — the fleet's one name-to-path mapping, whose own
+# docblock says it lowercases the row name before building the path. A plan row spelled with
+# capitals (every real row this wave: `17-T<n>`) then never
+# matched a case-sensitive compare, so `_LG_ROW_ID`/`_LG_ROW_BASE` stayed empty and REQ-2's
+# declared-base feature went silently inert. Folding both sides here, rather than un-folding
+# `_want`, keeps the one mapping in one place — this function absorbs the case the mapping
+# already threw away instead of trying to recover it.
+#
+# IT ASSIGNS RATHER THAN PRINTS, and returns 3 on a collision, for that function's own
+# reasons: two answers do not fit in a command substitution, and a wall that cannot tell
+# which row owns a tree must not pick one. The caller treats 3 as "no declared origin" and
+# says so — the conservative direction, because the fallback it then takes is announced.
+#
+# A CELL THAT NAMES NO COMMIT IS NO CELL. An em dash, a hyphen, a space and an empty cell are
+# one fact spelled four ways — the same reading `units_ready` gives its own `deps` cell and
+# `units_validate` gives this one — and all four mean the row declares no origin.
+_lg_row_for_tree() {  # <plan> <tree basename> -> assigns _LG_ROW_ID, _LG_ROW_BASE; 3 = collision
+  local _plan="${1:-}" _want="${2:-}" _rows _line _cell
+  _LG_ROW_ID=""; _LG_ROW_BASE=""
+  [ -n "$_plan" ] && [ -n "$_want" ] || return 0
+  declare -F units_rows >/dev/null 2>&1 || return 0
+  _rows="$(units_rows "$_plan" 2>/dev/null)" || return 0
+  _want="$(printf '%s' "$_want" | tr '[:upper:]' '[:lower:]')"
+  while IFS= read -r _line; do
+    [ -n "$_line" ] || continue
+    _cell="$(units_field "$_line" worktree)"
+    [ -n "$_cell" ] || continue
+    _cell="${_cell%/}"
+    _cell="${_cell##*/}"
+    [ "$(printf '%s' "$_cell" | tr '[:upper:]' '[:lower:]')" = "$_want" ] || continue
+    if [ -n "$_LG_ROW_ID" ]; then
+      _LG_ROW_ID=""; _LG_ROW_BASE=""
+      return 3
+    fi
+    _LG_ROW_ID="$(units_field "$_line" id)"
+    _LG_ROW_BASE="$(units_field "$_line" base)"
+    case "$_LG_ROW_BASE" in *[A-Za-z0-9]*) ;; *) _LG_ROW_BASE="" ;; esac
+  done <<< "$_rows"
+  return 0
 }
 
 # Is a path the diff touched inside the declared set? Exact match, or under a declared
@@ -617,6 +690,8 @@ stop_landing_gate() {  # <event> -> 0 nothing · 1 advisory · 2 block
   # The derivation window below zeroes it; nothing else in this file or in hooks/stop.sh
   # reads it.
   local LG_IMPACT_CLOCK LG_WT LG_MAIN_BRANCH LG_BASE LG_WHY LG_WORKING_BRANCH
+  local LG_ROW_RC LG_ROW_ID LG_ROW_BASE LG_FALLBACK_WHY LG_BASE_SRC
+  local _LG_ROW_ID _LG_ROW_BASE
   local LG_OUTSIDE LG_DF LG_IMPACT_CMD LG_SUITES LG_SUITES_NOTE LG_IMPACT_TMP
   local LG_IMPACT_PID LG_OVERRAN
 
@@ -1039,12 +1114,46 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
       # history as undeclared the moment the main checkout is on anything else (REQ-7,
       # AC-7.1) — the plan is the one place that names the branch a task tree was cut
       # FROM, so this reads it there instead of guessing from the checkout beside it.
+      # AND SINCE WAVE-17 REQ-2 (D3, ADR-032) THE BRANCH IS THE SECOND QUESTION, NOT THE
+      # FIRST. A merge-base against a branch answers "everything this branch has added since
+      # it diverged", which is the tree's own cut point only while the tree was cut from that
+      # branch's history. `spawn-worktree.sh` has always PRINTED the commit it cut from
+      # (`base=<sha>` on its contract line) and through wave-16 nothing recorded it, so the
+      # gate had nothing to prefer. The `## Tasks` row records it now. A declared origin is
+      # taken as the diff base; every other path is a RECONSTRUCTION, and each one says so.
+      #
+      # `merge-base <declared> HEAD` RATHER THAN THE CELL ITSELF, which is not a formality:
+      # it answers the cell's own sha whenever HEAD descends from it (the ordinary case, and
+      # the case after a writer merges the wave tip in), and it answers NOTHING when the cell
+      # names a commit this tree does not hold — which is how a wrong record is caught here
+      # instead of charging a writer against a base that means nothing to its history.
+      LG_ROW_ID=""; LG_ROW_BASE=""; LG_FALLBACK_WHY=""; LG_ROW_RC=0
+      if [ -n "$BIONIC_RUN_PLAN" ]; then
+        _lg_row_for_tree "$BIONIC_RUN_PLAN" "${LG_WT##*/}" || LG_ROW_RC=$?
+        LG_ROW_ID="$_LG_ROW_ID"; LG_ROW_BASE="$_LG_ROW_BASE"
+      fi
+      LG_BASE=""
+      if [ "$LG_ROW_RC" = 3 ]; then
+        LG_FALLBACK_WHY="two rows of the plan name this tree"
+      elif [ -n "$LG_ROW_BASE" ]; then
+        LG_BASE=$(git -C "$LG_WT" merge-base "$LG_ROW_BASE" HEAD 2>/dev/null)
+        # NO APOSTROPHE IN THIS STRING, and that is not a style note: `row T1s` reads badly
+        # enough to invite one, and a bare quote here re-opens the line and swallows the rest
+        # of this function into a string that still parses (measured, this task: every arm
+        # below it went silently unreachable and the suite reported the gate passing).
+        [ -n "$LG_BASE" ] || LG_FALLBACK_WHY="row ${LG_ROW_ID} declares base ${LG_ROW_BASE}, which is not a commit this tree holds"
+      elif [ -n "$LG_ROW_ID" ]; then
+        LG_FALLBACK_WHY="row ${LG_ROW_ID} declares no base"
+      fi
+
       LG_WORKING_BRANCH=""
       [ -n "$BIONIC_RUN_PLAN" ] && LG_WORKING_BRANCH=$(plan_frontmatter_get "$BIONIC_RUN_PLAN" "working-branch")
       LG_MAIN_BRANCH=""
+      LG_BASE_SRC=""
       if [ -n "$LG_WORKING_BRANCH" ] \
         && git -C "$BIONIC_ROOT" show-ref --verify --quiet "refs/heads/${LG_WORKING_BRANCH}"; then
         LG_MAIN_BRANCH="$LG_WORKING_BRANCH"
+        LG_BASE_SRC=working-branch
       else
         # TODAY'S PATH (spec A3): no plan bound, no `working-branch:` on the one that is,
         # or a name that does not resolve to a branch this repository holds — every one of
@@ -1058,11 +1167,37 @@ while IFS=$'\t' read -r AID NAME KIND CFILES; do
         # refusal and no diagnostic. `git bisect`, `git checkout <tag>` and a checkout parked
         # on a sha are all ordinary states for this repository during an integration.
         case "$LG_MAIN_BRANCH" in HEAD) LG_MAIN_BRANCH="" ;; esac
+        [ -n "$LG_MAIN_BRANCH" ] && LG_BASE_SRC=checkout
       fi
-      LG_BASE=""
-      [ -n "$LG_MAIN_BRANCH" ] && LG_BASE=$(git -C "$LG_WT" merge-base "$LG_MAIN_BRANCH" HEAD 2>/dev/null)
+
+      # NO RECONSTRUCTION IS SILENT (D3, ADR-032). Two lines, because there are two of them
+      # and they are not equally safe. The first is the plan's own `working-branch:`, taken
+      # for a REGISTERED tree whose row declared no origin (or declared one this tree does
+      # not hold, or collided): the row is named, so a reader knows which row to fix. The
+      # second is the main checkout's current branch — the guess this gate has always fallen
+      # back to, right only while that checkout sits on the wave tip — and it is announced
+      # for EVERY tree, registered or not, because nothing about it was declared anywhere.
+      #
+      # A TREE NO ROW NAMES, on a plan whose `working-branch:` resolves, stays SILENT: that
+      # is wave-16 REQ-7's behaviour on wave-16's own record, and a plan that predates the
+      # `base` column must not start narrating every landing the day this ships. The fallback
+      # it takes was declared — by the plan, in its frontmatter — which is the whole
+      # distinction the two lines above draw.
+      if [ -z "$LG_BASE" ] && [ -n "$LG_MAIN_BRANCH" ]; then
+        if [ "$LG_BASE_SRC" = working-branch ]; then
+          if [ -n "$LG_FALLBACK_WHY" ]; then
+            fold_advise "landing gate: ${LG_FALLBACK_WHY}; diffing against working-branch ${LG_MAIN_BRANCH}"; _adv=1
+          fi
+        else
+          fold_advise "landing gate: ${LG_FALLBACK_WHY:-no declared base} and no working-branch resolves; diffing against ${LG_MAIN_BRANCH}"; _adv=1
+        fi
+      fi
+
+      if [ -z "$LG_BASE" ] && [ -n "$LG_MAIN_BRANCH" ]; then
+        LG_BASE=$(git -C "$LG_WT" merge-base "$LG_MAIN_BRANCH" HEAD 2>/dev/null)
+      fi
       if [ -z "$LG_BASE" ]; then
-        # ANNOUNCED INERT, the standard tests/run.sh:267-272 sets for the adoption wall:
+        # ANNOUNCED INERT, the standard tests/run.sh:310-315 sets for the adoption wall:
         # "a wall that is off and quiet is indistinguishable from a wall that is passing
         # everything". Unrelated histories, a worktree with no commits and any other
         # merge-base failure land here too, and each says so rather than passing silently.

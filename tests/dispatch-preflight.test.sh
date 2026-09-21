@@ -2565,6 +2565,31 @@ expect_absent "R6-3: …with no dangling open bracket for parse_seconds to choke
 expect_absent "R6-3: …and none of the parentheticals own numbers" \
   "phase" "$(roster_field "$ROW" duration)"
 
+# ---- S18c: Files: then Suites: on ADJACENT LINES, no blank between — both read (T3,
+# REQ-7 AC-7.2) ----
+#
+# B4's static analysis (research R2 step1-research-R2-refusal-detail.md) found the span
+# rule already correct at HEAD: `spanend()`'s first bound is the next REGISTERED label's
+# start (`:1579`), and `Suites:`/`Files:` are both registered with `bol=1` — so a `Files:`
+# span has always stopped at the following `Suites:` line, with or without a blank line
+# between them. What was missing was a PIN saying so, against the real hook, now that the
+# scaffold and dispatch.md no longer teach "own paragraph"/"to the next blank line" (T9).
+BRIEF_ADJACENT_LABELS='Your task: build the widget.
+Expected artifact: .bionic/docs/record/w18c.md
+Files: payload/scripts/lib/widget.sh
+Suites: tests/widget.test.sh'
+
+REPO=$(make_repo r18adj yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$BRIEF_ADJACENT_LABELS" "adjacentbot")"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "S18c a Files: line directly followed by a Suites: line is ADMITTED" \
+  "0" "$GATE_ST"
+expect_status "S18c …Files: reads only its own line" \
+  "payload/scripts/lib/widget.sh" "$(roster_field "$ROW" files)"
+expect_status "S18c …and Suites: reads its own line too, carried onto suites_allowed=" \
+  "widget.test.sh" "$(roster_field "$ROW" suites_allowed)"
+
 section "S19 — deliverable-kind labels are LINE-START ONLY (R8: final-audit A-1)"
 #
 # record/w2-r7-audit.md A-1: R7's ambiguity wall refuses when a deliverable SPAN
@@ -4670,6 +4695,307 @@ expect_status "27m …never a SILENT exit 0 — stderr is non-empty" "0" \
   "$([ -n "$GATE_ERR" ] && echo 0 || echo 1)"
 
 # ============================================================================
+section "S27n: a dropped Suites: token is a refusal, not a silent no-instrument arm (T3, REQ-8, AC-8.1)"
+# ============================================================================
+#
+# `suite_names()`'s filter (`:1748`) has always kept only a `*.test.sh` basename or a
+# path-qualified `run.sh`; everything else fell off in total silence — a jest spec name,
+# a pytest module — and the brief then met the UNRELATED "no Files: and no Suites:" arm,
+# for having named something real. This puts the drop on the same channel the unexpanded-
+# variable arm already uses (`:1746`, `suites_bad=`), named, before that arm is reached
+# (research R3 §C1.4, option 3 — no existence check, D11-compliant).
+
+REPO=$(make_repo r27n yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w27n-audit.md
+Expected duration: ~30 minutes.
+Suites: image-id.spec.ts" "w27n-aud-spec" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "27n an auditor brief naming a dropped token is REFUSED" "2" "$GATE_ST"
+expect_contains "27n …naming the token it saw" "image-id.spec.ts" "$GATE_VERR"
+expect_contains "27n …the new verdict" \
+  "Suites: names a file the shell runner cannot run" "$GATE_ERR"
+expect_contains "27n …the fix points at Re-executes:" "Re-executes:" "$GATE_VERR"
+expect_absent "27n …never the unrelated no-instrument text" \
+  "declares no Files: and no Suites:" "$GATE_ERR"
+expect_status "27n …no roster row for the refused dispatch" \
+  "0" "$(roster_rows "$(roster_path "$REPO" "$SID_A")")"
+
+REPO=$(make_repo r27n2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build it.
+Expected artifact: .bionic/docs/record/w27n-writer.md
+Expected duration: ~30 minutes.
+Suites: image-id.spec.ts" "w27n-writer-spec")"
+expect_status "27n2 a writer brief naming the same dropped token is REFUSED likewise" \
+  "2" "$GATE_ST"
+expect_contains "27n2 …naming the token it saw" "image-id.spec.ts" "$GATE_VERR"
+expect_absent "27n2 …never the unrelated no-instrument text" \
+  "declares no Files: and no Suites:" "$GATE_ERR"
+
+# ============================================================================
+section "S27p: a trailing # comment is not a dropped Suites: token (T23, review R1)"
+# ============================================================================
+#
+# THE SHIPPED SCAFFOLD CARRIES ONE. `agents-src/blocks/brief-scaffold.md` renders
+# `Suites: none                     # read-only brief; or test-file names only` into all
+# eight surfaces, and an author who fills the scaffold in keeps the comment. The drop
+# refusal above read EVERY whitespace-separated token on the span, so `#`, `read-only`,
+# `brief;` and the rest each scored as a file the shell runner cannot run, and a brief was
+# refused for carrying this repo's own teaching text — with a message that names
+# `Re-executes:` and never mentions the comment, so the repair was not discoverable from
+# it (Step-6 review R1, HIGH; the base at 72e07ec admitted the same brief). `suite_names()`
+# now stops reading the span at the first token beginning with `#`.
+#
+# fails-when: a commented span refuses; a word of the comment reaches the roster row; the
+# comment changes the budget the bare span would have produced; or stopping at `#` also
+# stopped the drop arm from seeing a real dropped token.
+
+R27P_BRIEF='Your task: build it.
+Expected artifact: .bionic/docs/record/w27p.md
+Suites: tests/a.test.sh  # the impacted suite'
+R27P_BARE='Your task: build it.
+Expected artifact: .bionic/docs/record/w27p.md
+Suites: tests/a.test.sh'
+
+REPO=$(make_repo r27p yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$R27P_BRIEF" "w27p-comment")"
+expect_status "27p a filled brief whose Suites: line ends in a comment is ADMITTED" \
+  "0" "$GATE_ST"
+expect_status "27p …on the deny channel as well as the exit one" "allow" "$GATE_VERDICT"
+ROW_COMMENTED=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "27p …the budget is the declared suite alone" "a.test.sh" \
+  "$(roster_field "$ROW_COMMENTED" suites_allowed)"
+expect_status "27p …declared, because a human declared it" "declared" \
+  "$(roster_field "$ROW_COMMENTED" suites_source)"
+expect_absent "27p …no word of the comment reaches the row" "impacted" "$ROW_COMMENTED"
+expect_absent "27p …and the suite-drop refusal never fires" \
+  "Suites: names a file the shell runner cannot run" "$GATE_ERR"
+
+# THE CONTROL: the same brief with the comment deleted. The row is compared WHOLE, field
+# for field, `launched_at=` excepted — that cell is one `date -u` per drive and the two
+# drives can straddle a second boundary.
+REPO=$(make_repo r27p2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$R27P_BARE" "w27p-comment")"
+expect_status "27p2 the same brief without the comment is ADMITTED too" "0" "$GATE_ST"
+ROW_BARE=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "27p2 …and its row is the commented brief's row, field for field" \
+  "$(printf '%s' "$ROW_COMMENTED" | sed 's/launched_at=[^|]*/launched_at=/')" \
+  "$(printf '%s' "$ROW_BARE"      | sed 's/launched_at=[^|]*/launched_at=/')"
+expect_contains "27p2 …non-vacuity: the compared row really carries the budget" \
+  "suites_allowed=a.test.sh" "$ROW_BARE"
+
+# THE WAIVER, COMMENTED — the scaffold line as it ships, filled in and left commented.
+REPO=$(make_repo r27p3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: read the tree and report.
+Expected artifact: .bionic/docs/record/w27p3.md
+Suites: none                                           # read-only brief; or test-file names only' \
+  "w27p-waiver")"
+expect_status "27p3 a commented Suites: none is the waiver it always was" "0" "$GATE_ST"
+# ...and on the OTHER channel too: a several-fault refusal exits 0 and denies on stdout, so
+# the exit status alone would score this ADMITTED whatever the gate decided (wave-12 T17).
+expect_status "27p3 …no refusal verdict on either channel" "allow" "$GATE_VERDICT"
+expect_status "27p3 …the waiver on the row, where the writer-side guard reads it" "none" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+# THE SAME LINE ON THE ROLE WHOSE OWN FILE SHIPS IT. `agents/auditor.md` carries the
+# scaffold, and an auditor that waives every suite must declare runs instead (16lb1/16lb2) —
+# so this is that admitted shape with the comment left on, and the control below is the same
+# brief without the runs, which must still meet the AUDITOR arm and not the drop arm.
+REPO=$(make_repo r27p3b yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w27p3b-audit.md
+Expected duration: ~30 minutes.
+Suites: none                                           # read-only brief; or test-file names only
+Re-executes: `pytest tests/unit`' "w27p-aud-waiver" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" \
+  "bionic:auditor")"
+expect_status "27p3b an auditor waiving suites in a comment-carrying line, declaring runs, is ADMITTED" \
+  "0" "$GATE_ST"
+expect_status "27p3b …the waiver on the row" "none" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+REPO=$(make_repo r27p3c yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: audit the wave-99 matrix.
+Expected artifact: .bionic/docs/record/w27p3c-audit.md
+Expected duration: ~30 minutes.
+Suites: none                                           # read-only brief; or test-file names only' \
+  "w27p-aud-bare" "claude-sonnet-5" "$S5_LIVE_TRANSCRIPT" "bionic:auditor")"
+expect_status "27p3c …and the same line without runs still meets the AUDITOR arm" "2" "$GATE_ST"
+expect_contains "27p3c …named as an auditor that re-executes nothing" \
+  "an auditor names no suites" "$GATE_ERR"
+expect_absent "27p3c …never the suite-drop refusal" \
+  "Suites: names a file the shell runner cannot run" "$GATE_ERR"
+
+# THE DISCRIMINATOR: a genuinely dropped token AHEAD of a comment still refuses, naming the
+# token and no word of the comment. §27n/§27n2 pin the whole-span case; this pins that
+# stopping at `#` did not stop the arm.
+REPO=$(make_repo r27p4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27p4.md
+Suites: image-id.spec.ts  # the impacted suite' "w27p-drop")"
+expect_status "27p4 a dropped token ahead of a comment is still REFUSED" "2" "$GATE_ST"
+expect_contains "27p4 …naming the token it saw" "image-id.spec.ts" "$GATE_VERR"
+expect_absent "27p4 …and never a word of the comment" "impacted" "$GATE_VERR"
+
+# ============================================================================
+section "S27q: a # comment ends its LINE, not the whole span (critic C8/C9)"
+# ============================================================================
+#
+# A `Suites:` SPAN IS NOT A LINE. `spanof()` runs to the next LABELLED line or the next
+# blank line, so a roster wrapped across several lines is one span — and this wave's own
+# dispatches carry 19-suite rosters. §27p above stopped the scan at the first `#` token
+# anywhere in that span, so a comment on the FIRST line silently discarded every suite
+# declared on the continuation lines: no refusal, no `suites_dropped=`, nothing on the
+# roster row to show it happened, and the writer met the run-time budget wall instead
+# (critic C8 — the loud drop §27n installed turned back into a quiet budget cut).
+#
+# THE RULE IS NOW LINE-SCOPED: a `#` token ends the tokens of ITS OWN line, and the scan
+# resumes at the next line of the span. §27p's whole promise is kept — no word of a
+# comment reaches the row or the drop refusal — and a comment that opens a CONTINUATION
+# line ends that line only, contributing nothing from it.
+#
+# AND A SPAN THAT IS ALL COMMENT NOW SAYS SO (critic C9). `Suites: # read-only` lifts
+# nothing, so all four guards of the no-instrument arm read empty and the brief is refused
+# for "declaring no Files: and no Suites:" — of a brief that declares `Suites:` in as many
+# words, the self-refuting shape C3 was fixed for. The verdict and the fix stay as they
+# are (there genuinely is no budget for the row to carry); the DETAIL now opens by naming
+# what happened and the one-word repair, first so it survives refuse.sh's twelve-line fold.
+#
+# fails-when: a suite declared on a continuation line is dropped behind a comment; a word
+# of a comment reaches the row or a refusal; a dropped token on a continuation line goes
+# silent; or an all-comment span is still refused as a brief that declared nothing.
+
+S27Q_WRAP='Your task: build it.
+Expected artifact: .bionic/docs/record/w27q.md
+Suites: tests/a.test.sh   # the impact set
+  tests/b.test.sh tests/c.test.sh'
+S27Q_WRAP_BARE='Your task: build it.
+Expected artifact: .bionic/docs/record/w27q.md
+Suites: tests/a.test.sh
+  tests/b.test.sh tests/c.test.sh'
+
+REPO=$(make_repo r27q yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S27Q_WRAP" "w27q-wrap")"
+expect_status "27q a wrapped Suites: span whose first line ends in a comment is ADMITTED" \
+  "0" "$GATE_ST"
+ROW_WRAP=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "27q …and the budget is every suite the SPAN names, not the first line's alone" \
+  "a.test.sh b.test.sh c.test.sh" "$(roster_field "$ROW_WRAP" suites_allowed)"
+expect_absent "27q …no word of the comment reaches the row" "impact" "$ROW_WRAP"
+
+# THE CONTROL: the same wrapped span with the comment deleted. Row compared WHOLE, field
+# for field, `launched_at=` excepted — one `date -u` per drive, two drives can straddle a
+# second boundary (§27p2's rule).
+REPO=$(make_repo r27q2 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "$S27Q_WRAP_BARE" "w27q-wrap")"
+expect_status "27q2 the same wrapped span without the comment is ADMITTED too" "0" "$GATE_ST"
+ROW_WRAP_BARE=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "27q2 …and its row is the commented span's row, field for field" \
+  "$(printf '%s' "$ROW_WRAP"      | sed 's/launched_at=[^|]*/launched_at=/')" \
+  "$(printf '%s' "$ROW_WRAP_BARE" | sed 's/launched_at=[^|]*/launched_at=/')"
+expect_contains "27q2 …non-vacuity: the compared row really carries all three suites" \
+  "suites_allowed=a.test.sh b.test.sh c.test.sh" "$ROW_WRAP_BARE"
+
+# THE COMMENT'S OWN WORDS ARE STILL NOT TOKENS — the hazard `break` was chosen for
+# (A-T23.1). A suite NAMED INSIDE the comment is prose, not a declaration, on the comment's
+# own line and glued to the `#` alike.
+REPO=$(make_repo r27q3 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27q3.md
+Suites: tests/a.test.sh  # and tests/b.test.sh' "w27q-prose")"
+expect_status "27q3 a suite named inside the comment is not declared" "0" "$GATE_ST"
+expect_status "27q3 …the budget is the declared suite alone" "a.test.sh" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+REPO=$(make_repo r27q4 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27q4.md
+Suites: tests/a.test.sh #tests/b.test.sh' "w27q-glued")"
+expect_status "27q4 …and a comment glued to its own marker reads the same" "0" "$GATE_ST"
+expect_status "27q4 …the budget is the declared suite alone" "a.test.sh" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+# A CONTINUATION LINE THAT IS ITSELF ALL COMMENT contributes nothing, and does not end the
+# span's reading either — the line scope cuts both ways.
+REPO=$(make_repo r27q5 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27q5.md
+Suites: tests/a.test.sh
+  # tests/b.test.sh is out of scope
+  tests/c.test.sh' "w27q-contcomment")"
+expect_status "27q5 an all-comment continuation line is ADMITTED" "0" "$GATE_ST"
+expect_status "27q5 …contributes nothing, and does not stop the line after it" \
+  "a.test.sh c.test.sh" \
+  "$(roster_field "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)" suites_allowed)"
+
+# THE DISCRIMINATOR FOR C8: a genuinely dropped token on a CONTINUATION line, behind a
+# comment on the first. §27p4 pins the same token ahead of a comment; this is the shape
+# `break` silenced.
+REPO=$(make_repo r27q6 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27q6.md
+Suites: tests/a.test.sh  # the impact set
+  image-id.spec.ts' "w27q-contdrop")"
+expect_status "27q6 a dropped token on a continuation line behind a comment is REFUSED" \
+  "2" "$GATE_ST"
+expect_contains "27q6 …naming the token it saw" "image-id.spec.ts" "$GATE_VERR"
+expect_absent "27q6 …and never a word of the comment" "impact set" "$GATE_VERR"
+
+# --- C9: a span that is ALL comment is refused for what it is ---------------------
+REPO=$(make_repo r27q7 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27q7.md
+Suites: # none needed, this is read-only' "w27q-allcomment")"
+expect_status "27q7 a Suites: span that is entirely a comment is REFUSED" "2" "$GATE_ST"
+expect_contains "27q7 …the verdict is the no-instrument one, unchanged" \
+  "declares no Files: and no Suites:" "$GATE_ERR"
+expect_contains "27q7 …and the detail names what actually happened" \
+  "its span is a comment" "$GATE_ERR"
+expect_contains "27q7 …with the one-word repair beside it" \
+  "write \`none\` to waive" "$GATE_ERR"
+expect_absent "27q7 …no word of the comment is read as a suite" \
+  "read-only" "$GATE_VERR"
+
+# NON-VACUITY, BOTH WAYS. (i) An ordinary no-instrument brief — no `Suites:` label at all —
+# keeps the detail it has always had and never gains the clause. (ii) An all-comment
+# `Suites:` beside a `Files:` declaration is not refused at all: the clause is a sentence
+# in one arm's detail, never a new refusal.
+REPO=$(make_repo r27q8 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27q8.md' "w27q-noinstrument")"
+expect_status "27q8 a brief with no Suites: label at all is refused as before" "2" "$GATE_ST"
+expect_contains "27q8 …same verdict" "declares no Files: and no Suites:" "$GATE_ERR"
+expect_absent "27q8 …and never the comment clause" "its span is a comment" "$GATE_ERR"
+
+REPO=$(make_repo r27q9 yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" 'Your task: build it.
+Expected artifact: .bionic/docs/record/w27q9.md
+Suites: # the marked runs below are the whole budget
+Re-executes: `pytest tests/unit`' "w27q-runsplus")"
+expect_status "27q9 an all-comment Suites: beside a declared run is ADMITTED" \
+  "0" "$GATE_ST"
+S27Q9_ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_contains "27q9 …non-vacuity: the declared run really is the row's budget" \
+  "re_executes=\`pytest tests/unit\`" "$S27Q9_ROW"
+expect_absent "27q9 …and no word of the comment reaches the row" "whole budget" \
+  "$S27Q9_ROW"
+
+# ============================================================================
 section "S28: one regression per run (AC-24)"
 # ============================================================================
 #
@@ -5677,6 +6003,12 @@ REPO=$(make_repo rscaff3 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
 $SCAFFOLD_RAW" "scaffoldbot3")"
+# T23 (review R1): the scaffold's own `Suites: none   # read-only brief; …` comment is no
+# longer read as a span of dropped suites, so the unfilled scaffold is once again refused
+# for its REAL fault — its deliverable is an unfilled `<…>` slot, which is one fault, which
+# is the exit-2 channel (task 12/T17's rule: one fault exits 2, several deny). T6 had
+# weakened this to `expect_ne allow` when the comment added a second fault; the channel is
+# pinned again, because a channel nobody pins is a channel that drifts.
 expect_status "§scaffold the scaffold with its placeholders still in it is REFUSED" \
   "2" "$GATE_ST"
 
@@ -5707,7 +6039,10 @@ REPO=$(make_repo rscaff5 yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: build the widget.
 $SCAFFOLD_RAW" "scaffoldbot5")"
-expect_status "§scaffold …SKILL.md's scaffold, unfilled, is REFUSED the same way" "2" "$GATE_ST"
+# T23 (review R1): as the dispatch.md variant above — the comment is no longer a drop, the
+# one remaining fault is the unfilled deliverable slot, and the exit-2 channel is pinned.
+expect_status "§scaffold …SKILL.md's scaffold, unfilled, is REFUSED the same way" \
+  "2" "$GATE_ST"
 
 # ============================================================================
 section "§a3-text — the Patrol stamp is armed at engagement, not by hand (D4, REQ-3)"

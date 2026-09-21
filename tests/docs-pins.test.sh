@@ -3406,20 +3406,27 @@ expect_eq "161: a stripped copy of agents/auditor.md reads 0 'Re-executes' hits 
 
 WAVE_SECTION="$(sed -n '/### The wave-scale `## Tasks` table/,/^## /p' "$OPRULES" 2>/dev/null)"
 # wave-16 T21 (walk-2c882be.md §11): the header used to print `worktree | status`, transposed
-# relative to units.sh:127-129's contract order (`status` at slot 10, `worktree` at slot 11).
-# Harmless in practice — `_units_read` matches header cells by NAME, not position — but the
-# two documents disagreed, and this pin now reads the corrected, contract-matching order.
-WAVE_COLS='id | step | kind | task | agent | deps | size | serves | Files | status | worktree'
+# relative to units.sh:127-129's contract order. Harmless in practice — `_units_read` matches
+# header cells by NAME, not position — but the two documents disagreed, and this pin read the
+# corrected order.
+#
+# RE-PINNED AT TWELVE (epic-23 wave-17 T35, critic C10). This wave added `base` (REQ-2,
+# ADR-032) and repaired the refusal that names the columns (R7, lib/walls.sh) without
+# touching the document that teaches them, so the eleven-column order above outlived the
+# table it described. The order here is the one the live plans and the wall's fix line both
+# write; Section 31 pins the same header AGAINST that wall line, so a future column can only
+# land in one of the two places before an arm goes red.
+WAVE_COLS='id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status'
 
 if [ -n "$WAVE_SECTION" ]; then
   case "$WAVE_SECTION" in
     *"$WAVE_COLS"*)
-      ok "162: AC-4.1 — operational-rules.md names all eleven wave-scale columns verbatim" ;;
+      ok "162: AC-4.1 — operational-rules.md names all twelve wave-scale columns verbatim" ;;
     *)
-      no "162: AC-4.1 — operational-rules.md names all eleven wave-scale columns verbatim" "file: $OPRULES" ;;
+      no "162: AC-4.1 — operational-rules.md names all twelve wave-scale columns verbatim" "file: $OPRULES" ;;
   esac
 else
-  no "162: AC-4.1 — operational-rules.md names all eleven wave-scale columns verbatim" \
+  no "162: AC-4.1 — operational-rules.md names all twelve wave-scale columns verbatim" \
      "no 'wave-scale ## Tasks table' section found in $OPRULES"
 fi
 
@@ -3525,6 +3532,249 @@ if [ "$AC170_MUT_HITS" -gt 0 ] 2>/dev/null; then
 else
   no "172: a dispatch.md with the dead hook name reinstated reads back over 0 (170 is not vacuous)" \
      "mutated copy still read 0"
+fi
+
+# ============================================================
+section "Section 30: T9 — the scaffold span rule, cell shapes and the two counters (epic-23 wave-17-fixit-184, REQ-5/REQ-7/REQ-10, AC-5.5/AC-7.1/AC-10.3)"
+# ============================================================
+#
+# WHAT THIS SECTION OWNS. Three doc-side acceptance criteria of bionic 1.8.4's gates-judge-
+# the-tree-in-hand repair, all rendered from agents-src/ by agents-src/render.sh except
+# operational-rules.md (a PLAIN file, never rendered, edited directly): (1) the stale
+# "blank line" rule for a brief label's span (research R2 §B4: the parser has read to the
+# next LABELLED line since commit 9bf75d7, but the scaffold and dispatch.md still taught the
+# old blank-line rule) is gone from every rendered surface and the "next labelled line" fact
+# is on the record (AC-7.1); (2) the four authoring-time cell shapes research R2 §B2 found
+# undocumented outside historical version bullets — the per-row evidence line, the one-path
+# `evidence:` cell, the bare `CONFIRMED` token, and the `base` column beside `worktree` — are
+# now stated at the authoring section beside the wave-scale `## Tasks` table, not buried in a
+# `v11`/`D7` bullet (AC-5.5); (3) the two Step-5 counters research R4 §D2.5 designed —
+# `pass:`/`total:` gate rows only, `advisory-exceeded:` is recorded and never judged — are
+# named in both steps/5.md and operational-rules.md (AC-10.3). The aggregate byte cap of
+# Section 18 still holds after this task's edits — no new pin, that section's own arms cover
+# it (measured before this task's edits: 109,997 B against the 110,000 B cap, a 3 B margin;
+# the fix nets negative — the retired "own paragraph"/"blank line" prose is longer than the
+# span-rule and cell-shape sentences that replace it).
+#
+# HERMETIC. Reads the committed rendered finals and the plain operational-rules.md file by
+# path; doctored copies live under this file's own mktemp dir.
+
+# --- AC-7.1: the stale span-rule wording is gone from every rendered surface, and the ---
+# --- true rule ("next labelled line") is on the record somewhere a dispatcher reads.  ---
+
+AC7_1_SURFACES="$SKILL_MD $DISPATCH_MD"
+for _rf in "${REPO}"/agents/*.md; do
+  [ -f "$_rf" ] && AC7_1_SURFACES="$AC7_1_SURFACES $_rf"
+done
+
+AC7_1_STALE=""
+for _sf in $AC7_1_SURFACES; do
+  [ -f "$_sf" ] || { AC7_1_STALE="${AC7_1_STALE} missing:${_sf}"; continue; }
+  if has_pin "$_sf" 'own paragraph'; then
+    AC7_1_STALE="${AC7_1_STALE} ${_sf##*/}(own paragraph)"
+  fi
+  if has_pin "$_sf" 'only to the next blank line'; then
+    AC7_1_STALE="${AC7_1_STALE} ${_sf##*/}(only to the next blank line)"
+  fi
+done
+if [ -z "$AC7_1_STALE" ]; then
+  ok "173: AC-7.1 — no rendered surface (SKILL.md, dispatch.md, agents/*.md) still teaches 'own paragraph' or 'only to the next blank line'"
+else
+  no "173: AC-7.1 — no rendered surface still teaches the stale span rule" "found:${AC7_1_STALE}"
+fi
+
+if has_pin "$DISPATCH_MD" 'next labelled line'; then
+  ok "174: AC-7.1 — dispatch.md states the true rule: a label's span ends at the next labelled line"
+else
+  no "174: AC-7.1 — dispatch.md states the true rule ('next labelled line')" "file: $DISPATCH_MD"
+fi
+
+# Anti-vacuity: a copy of dispatch.md with the retired wording reinstated must read back over 0
+# on has_pin, proving 173's absence check actually discriminates.
+AC173_MUT="$TMP/dispatch-with-stale-span-rule.md"
+{ printf 'since the wall reads a label only to the next blank line, on its own paragraph\n'; cat "$DISPATCH_MD"; } \
+  > "$AC173_MUT" 2>/dev/null
+if has_pin "$AC173_MUT" 'own paragraph' && has_pin "$AC173_MUT" 'only to the next blank line'; then
+  ok "175: a dispatch.md with the stale span rule reinstated reads back positive (173 is not vacuous)"
+else
+  no "175: a dispatch.md with the stale span rule reinstated reads back positive (173 is not vacuous)" \
+     "mutated copy still read 0 on has_pin"
+fi
+
+# --- AC-5.5: the four cell shapes, at authoring time, beside the wave-scale table ---
+# --- section — not inside a historical (v11/D7) version bullet.                   ---
+
+CELL_SHAPES_SECTION="$(sed -n '/### The wave-scale `## Tasks` table/,/^## /p' "$OPRULES" 2>/dev/null)"
+
+case "$CELL_SHAPES_SECTION" in
+  *'one `- T<n>:` line per'*)
+    ok "176: AC-5.5 — operational-rules.md's authoring section states 'one \`- T<n>:\` line per' (## Tasks row, inside ## SDLC State)" ;;
+  *)
+    no "176: AC-5.5 — operational-rules.md's authoring section states 'one \`- T<n>:\` line per'" \
+       "section: ${CELL_SHAPES_SECTION:-<absent>}" ;;
+esac
+
+case "$CELL_SHAPES_SECTION" in
+  *'exactly one path under `record/`'*)
+    ok "177: AC-5.5 — …and 'exactly one path under \`record/\`' for the matrix evidence: cell" ;;
+  *)
+    no "177: AC-5.5 — …and 'exactly one path under \`record/\`' for the matrix evidence: cell" \
+       "section: ${CELL_SHAPES_SECTION:-<absent>}" ;;
+esac
+
+case "$CELL_SHAPES_SECTION" in
+  *'bare token `CONFIRMED`'*)
+    ok "178: AC-5.5 — …and 'bare token \`CONFIRMED\`' for the auditor cell" ;;
+  *)
+    no "178: AC-5.5 — …and 'bare token \`CONFIRMED\`' for the auditor cell" \
+       "section: ${CELL_SHAPES_SECTION:-<absent>}" ;;
+esac
+
+# NOT inside a historical version bullet: the three shapes above must land in the
+# authoring-time "Cell shapes" paragraph this task adds beside the wave-scale table, never
+# inside a "v11"/"D7 " prefixed historical bullet, which the file's own line 17 already
+# frames as "historical record only" — a reader would never find an authoring rule there.
+case "$CELL_SHAPES_SECTION" in
+  *'**Cell shapes'*)
+    ok "179: AC-5.5 — the three shapes ride in a 'Cell shapes' authoring paragraph, not a historical version bullet" ;;
+  *)
+    no "179: AC-5.5 — the three shapes ride in a 'Cell shapes' authoring paragraph" \
+       "no '**Cell shapes' heading found beside the wave-scale table section" ;;
+esac
+
+case "$CELL_SHAPES_SECTION" in
+  *'`base`** (optional, ADR-032) — rides beside `worktree`'*)
+    ok "180: AC-5.5 — the optional \`base\` column beside \`worktree\` is documented in the same section" ;;
+  *)
+    no "180: AC-5.5 — the optional \`base\` column beside \`worktree\` is documented in the same section" \
+       "section: ${CELL_SHAPES_SECTION:-<absent>}" ;;
+esac
+
+# Anti-vacuity: a plan section carrying none of the three shape strings reads back negative
+# on all three, proving 176-178 discriminate rather than passing on any prose.
+AC176_MUT="$TMP/cell-shapes-blank-section.md"
+printf '### The wave-scale `## Tasks` table\n\nNothing to see here.\n\n## Design section authoring\n' \
+  > "$AC176_MUT" 2>/dev/null
+AC176_MUT_SECTION="$(sed -n '/### The wave-scale `## Tasks` table/,/^## /p' "$AC176_MUT" 2>/dev/null)"
+case "$AC176_MUT_SECTION" in
+  *'one `- T<n>:` line per'*|*'exactly one path under `record/`'*|*'bare token `CONFIRMED`'*)
+    no "181: a blank wave-scale section reads back negative on all three shape strings (176-178 are not vacuous)" \
+       "mutated section unexpectedly matched" ;;
+  *)
+    ok "181: a blank wave-scale section reads back negative on all three shape strings (176-178 are not vacuous)" ;;
+esac
+
+# --- AC-10.3: the two Step-5 counters, named in BOTH the runner-facing step file and ---
+# --- the authoring reference.                                                       ---
+
+if has_pin "$STEP5_MD" 'advisory-exceeded:'; then
+  ok "182: AC-10.3 — steps/5.md names 'advisory-exceeded:'"
+else
+  no "182: AC-10.3 — steps/5.md names 'advisory-exceeded:'" "file: $STEP5_MD"
+fi
+
+if has_pin "$OPRULES" 'advisory-exceeded:'; then
+  ok "183: AC-10.3 — operational-rules.md names 'advisory-exceeded:' too"
+else
+  no "183: AC-10.3 — operational-rules.md names 'advisory-exceeded:' too" "file: $OPRULES"
+fi
+
+# steps/5.md also carries the one-path sentence for the evidence: cell (AC-5.5's other half:
+# the runner-facing step file, not just the authoring reference).
+if has_pin "$STEP5_MD" 'record/` path per cell'; then
+  ok "184: AC-5.5 — steps/5.md carries the one-path evidence: sentence too"
+else
+  no "184: AC-5.5 — steps/5.md carries the one-path evidence: sentence too" "file: $STEP5_MD"
+fi
+
+# Anti-vacuity: a stripped copy of steps/5.md loses both 182 and 184's hits.
+AC182_MUT="$TMP/step5-no-counters.md"
+grep -v 'advisory-exceeded:' "$STEP5_MD" > "$AC182_MUT" 2>/dev/null
+if has_pin "$AC182_MUT" 'advisory-exceeded:'; then
+  no "185: a steps/5.md stripped of 'advisory-exceeded:' reads back negative (182 is not vacuous)" \
+     "mutated copy still matched"
+else
+  ok "185: a steps/5.md stripped of 'advisory-exceeded:' reads back negative (182 is not vacuous)"
+fi
+
+# --- AC-4.2 (unchanged, restated): the aggregate byte cap still holds after this task's ---
+# --- edits. Section 18's own arms (111-117) already re-measure the committed finals on  ---
+# --- every run; this is a comment, not a new pin, matching Section 29's own precedent.  ---
+# (operational-rules.md is excluded from that cap by AC-1b.4's own wording — nothing tells
+# the model to read it — so Section 31's edits below spend none of the 110,000 B budget.)
+
+# ============================================================
+section "Section 31: T35 — the ## Tasks header render carries every column the plan writes (epic-23 wave-17-fixit-184, critic C10)"
+# ============================================================
+#
+# WHAT THIS SECTION OWNS. The wave added a column (REQ-2, `base`) and repaired the refusal
+# that names the columns (R7, walls.sh), and the one SHIPPED DOCUMENT that teaches the
+# columns was touched by neither: operational-rules.md rendered ten-plus-one in a different
+# order, carried `base` in its bullet list and nowhere in its header, and so sent an author
+# repairing a refused row to a table the refusal contradicts (critic C10).
+#
+# THE PIN IS AN AGREEMENT, NOT A TRANSCRIPTION. The expected header is DERIVED from the
+# wall's own fix line in lib/walls.sh — the sentence the author is actually reading when
+# they go looking for this table — so the two cannot drift apart again without one of these
+# arms going red. A literal header copied into this file would only pin the doc to itself.
+#
+# HERMETIC. Reads the committed walls.sh and the plain operational-rules.md by path.
+
+T35_WALL_COLS="$(/usr/bin/grep -m1 -o 'the columns are id |[^.]*' "${REPO}/payload/scripts/lib/walls.sh" 2>/dev/null \
+  | sed 's/^the columns are //')"
+T35_WALL_HEADER="| ${T35_WALL_COLS} |"
+T35_WALL_N=0
+[ -z "$T35_WALL_COLS" ] || T35_WALL_N=$(printf '%s' "$T35_WALL_COLS" | awk -F'|' '{print NF}')
+
+# 186 guards the derivation itself: an arm that compares against an empty string passes on
+# everything, so the source sentence has to be found and has to name twelve columns first.
+if [ "$T35_WALL_N" = "12" ]; then
+  ok "186: the twelve-column list is readable from lib/walls.sh's own fix line (the pins below have a source)"
+else
+  no "186: the twelve-column list is readable from lib/walls.sh's own fix line" \
+     "read ${T35_WALL_N} columns from: ${T35_WALL_COLS:-<absent>}"
+fi
+
+T35_SECTION="$(sed -n '/### The wave-scale `## Tasks` table/,/^## /p' "$OPRULES" 2>/dev/null)"
+T35_DOC_HEADER="$(printf '%s\n' "$T35_SECTION" | /usr/bin/grep -m1 '^| id |')"
+
+if [ -n "$T35_WALL_COLS" ] && [ "$T35_DOC_HEADER" = "$T35_WALL_HEADER" ]; then
+  ok "187: operational-rules.md renders the ## Tasks header in the wall's own column order, byte for byte"
+else
+  no "187: operational-rules.md renders the ## Tasks header in the wall's own column order" \
+     "doc: ${T35_DOC_HEADER:-<absent>} / wall: ${T35_WALL_HEADER}"
+fi
+
+case "$T35_DOC_HEADER" in
+  *'| base |'*)
+    ok "188: …and the rendered header carries \`base\`, the column this wave added (REQ-2, ADR-032)" ;;
+  *)
+    no "188: …and the rendered header carries \`base\`, the column this wave added" \
+       "header: ${T35_DOC_HEADER:-<absent>}" ;;
+esac
+
+# The COUNT the same paragraph states, which is the half a reader meets before the fence.
+case "$T35_SECTION" in
+  *'twelve columns: ten required, plus the optional `worktree` and `base`'*)
+    ok "189: …and the sentence above it counts twelve — ten required, plus the two optional" ;;
+  *)
+    no "189: …and the sentence above it counts twelve — ten required, plus the two optional" \
+       "section: ${T35_SECTION:-<absent>}" ;;
+esac
+
+# Anti-vacuity: the pre-1.8.4 header (ten-plus-one, `status` before `worktree`, no `base`)
+# must read back UNEQUAL against the same derived expectation, and must fail 188's test —
+# proving 187/188 discriminate rather than passing on any pipe-delimited line.
+T35_OLD_HEADER="| id | step | kind | task | agent | deps | size | serves | Files | status | worktree |"
+if [ "$T35_OLD_HEADER" != "$T35_WALL_HEADER" ]; then
+  case "$T35_OLD_HEADER" in
+    *'| base |'*) no "190: the pre-1.8.4 eleven-column header reads back negative (187/188 are not vacuous)" \
+                     "the old header unexpectedly carried base" ;;
+    *)            ok "190: the pre-1.8.4 eleven-column header reads back negative (187/188 are not vacuous)" ;;
+  esac
+else
+  no "190: the pre-1.8.4 eleven-column header reads back negative (187/188 are not vacuous)" \
+     "the old header equals the wall's list — the comparison cannot discriminate"
 fi
 
 finish

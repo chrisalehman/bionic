@@ -789,7 +789,16 @@ plan_bring_forward() {  # <plan file> -> the list on stdout; rc 1 when it fires
   # trims a trailing CR, `gsub` re-splits a CR-only file into real lines rather than
   # collapsing it to one — `tr -d '\r'` would do the latter and read a live CR-only plan as
   # closed, the fail-dangerous direction (.claude/rules/hook-authoring.md).
-  plan_text="$(awk '{ sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
+  # THE BOM (T8, REQ-11; wave-16 critic-b77d5aa C10; research R4 §D3). `NR==1` compares the
+  # first record to "---" with `==`, which is BOM-insensitive, but every reader downstream
+  # (`_bf_fm_get`, `first_heading`) matches an ANCHORED regex, which a leading BOM defeats —
+  # so a BOM-prefixed pre-14 plan admitted silently until this line stripped it. A STRING
+  # compare, not a regex: octal and `\x` escapes inside an awk REGEX LITERAL do not strip a
+  # BOM on awk 20200816 (measured, R4 D3.4); only `substr`/`==` against the octal STRING
+  # `"\357\273\277"` does. Ordered before the CR translation on the same record so a
+  # BOM+CRLF plan strips both.
+  plan_text="$(awk 'NR==1 && substr($0,1,3)=="\357\273\277" { $0 = substr($0,4) }
+                    { sub(/\r$/, ""); gsub(/\r/, "\n"); print }' "$plan")"
 
   case "$(_bf_fm_get "$plan_text" scale)" in wave|epic) : ;; *) return 0 ;; esac
   [ "$(_bf_fm_get "$plan_text" rigor)" = "audited" ] || return 0
@@ -1598,6 +1607,62 @@ Audited rigor makes the ledger-shape checks blocking; a non-audited plan would l
 #     and BLOCKS unconditionally at any frontmatter rigor before this
 #     status-based branching; see that guard for the rationale.
 # [INSTRUMENT]
+# ---------- the per-row evidence-line obligation (wave-17 REQ-5, AC-5.1) ----------
+#
+# ONE LINE PER `## Tasks` ROW, and the refusal says so. Two arms check it — the addressed
+# unit's at task scale, and every dispatched row's at wave scale — and both used to name
+# ONE id and ask for "a '- <id>:' evidence line". An author owing eighteen of them learned
+# of the second only after landing the first (wave-16's A-orch-10 is that specimen), and
+# neither arm ever said the obligation was per row. So the COUNT and the IDS come from the
+# whole table in one pass, whichever arm fires.
+#
+# THE TRIGGER DOES NOT MOVE. At task scale the arm still fires on the ADDRESSED unit's
+# missing line — a non-addressed `active|done` row short of one is a different refusal
+# (ledger_shape_fail, blocking only at audited rigor) and stays that way. What changed is
+# what the refusal then says.
+#
+# NO NEW FACT IS FETCHED (D11): the rows are the caller's own `units_rows` output and the
+# lookup is the same anchored grep over `$SECTION` both arms already ran, asked once per
+# row instead of once.
+missing_evidence_ids() {  # $1 = units_rows output -> the T-ids with no line, one per line
+  local line id ev
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    id=$(units_field "$line" id)
+    case "$id" in T[0-9]*) : ;; *) continue ;; esac
+    ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
+         | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
+    [ -n "$ev" ] || printf '%s\n' "$id"
+  done <<< "$1"
+}
+
+# Refuse for EVERY row short of its evidence line, or return 0 if none is. The id list is
+# printed as the lines the author has to write, so the repair is a copy out of the refusal;
+# it sits LAST so refuse.sh's twelve-line fold (BIONIC_REFUSE_DETAIL_LINES, a ratified
+# bound this does not move) bites the list rather than the instruction above it.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+refuse_missing_evidence_lines() {  # $1 = units_rows output
+  local ids count subject verdict
+  ids="$(missing_evidence_ids "$1")"
+  [ -n "$ids" ] || return 0
+  count=$(printf '%s\n' "$ids" | wc -l | tr -d ' ')
+  if [ "$count" -eq 1 ]; then
+    verdict="1 task has no evidence line"
+    subject="1 '## Tasks' row has"
+  else
+    verdict="${count} tasks have no evidence line"
+    subject="${count} '## Tasks' rows have"
+  fi
+  _eg_detail="canonical-sdlc: ${subject} no '- T<id>:' evidence line in '## SDLC State'.
+Plan: $PLAN
+Fix: add one line per row named below, each recording what proves that row, before committing.
+$(printf '%s\n' "$ids" | sed -E 's/^/- /; s/$/:/')"
+  # THE FIX FIELD IS SIX WORDS AND FORTY COLUMNS (refuse.sh's own self-check, ratified
+  # constants this does not move), so the `## Tasks` half of the rule rides the detail
+  # above rather than the one line: "per row" is the part a committer acts on.
+  refuse exit2 commit "$verdict" "add one '- T<id>:' per row" "$_eg_detail"
+}
+
 validate_task_ledger() {
   local rows rc line id status rigor_cell ev eff addressed_found=0
   # THE ROWS COME FROM lib/units.sh (REQ-1e, AC-1e.1), header-keyed. The cells this
@@ -1670,10 +1735,9 @@ Fix: set the '${id}' row's rigor cell to one of tested, peer-reviewed, audited b
       # THE ADDRESSED UNIT: the tested floor is BLOCKING (task 4/1).
       addressed_found=1
       if [ -z "$ev" ]; then
-        _eg_detail="canonical-sdlc task ${id} has no '- ${id}:' evidence line in '## SDLC State'.
-Plan: $PLAN
-Fix: record the evidence artifact on a '- ${id}:' line before committing."
-        refuse exit2 commit "that task has no evidence line" "add a '- <id>:' evidence line" "$_eg_detail"
+        # The addressed unit is short, which is what fires the arm; the refusal then
+        # names EVERY row that is (AC-5.1), the addressed one among them.
+        refuse_missing_evidence_lines "$rows"
       fi
       if is_placeholder_value "$ev"; then
         _eg_detail="canonical-sdlc task ${id} evidence line is a placeholder ('${ev}').
@@ -2164,13 +2228,25 @@ _eg_wt_name() {
 # as the directory it is rather than as the string it was spelled with.
 #
 # EVERY FAILURE IS A DECLINE, never a lowered step: no git, an older git with no
-# `--path-format`, a deleted directory, another repository's tree, a bare repository. The
-# caller then judges at `current:` and says so, which is what the gate did before this
-# register existed.
+# `--path-format`, a deleted directory, a bare repository. The caller then judges at
+# `current:` and says so, which is what the gate did before this register existed.
+#
+# WITH ONE ANSWER THAT IS NOT A FAILURE (wave-17 REQ-4, T1; bug 7). Another repository's
+# linked worktree used to leave by the same `return 0` as all of those, and the caller could
+# not tell the two apart: a FORGED `.git` file is a directory git refused to place at all,
+# while a foreign tree is one git placed precisely — in a repository this plan's register has
+# nothing to say about. Both arrived as an empty `_EG_GITWT`, and the second was then judged
+# by this run's step arms, which is the defect. So this one path returns **4** and publishes
+# the common dir git named in `_EG_GITWT_FOREIGN`: the fact is already in hand at the
+# comparison below and nothing new is fetched for it (the D11 freeze,
+# .claude/rules/hook-authoring.md). `_EG_GITWT` stays EMPTY on that path, so every reader
+# that only asks "is this a tree of mine" keeps today's answer; only a caller that reads the
+# status learns the difference.
 _EG_GITWT=""
+_EG_GITWT_FOREIGN=""
 _eg_git_wt_name() {
   local _d="${1:-}" _both _common _gitdir _main
-  _EG_GITWT=""
+  _EG_GITWT=""; _EG_GITWT_FOREIGN=""
   case "$_d" in /*) : ;; *) return 0 ;; esac
   _both="$(git -C "$_d" rev-parse --path-format=absolute --git-common-dir --git-dir 2>/dev/null)" || return 0
   _common="${_both%%$'\n'*}"
@@ -2186,13 +2262,23 @@ _eg_git_wt_name() {
     _main="${_main%%$'\n'*}"
   fi
   [ -n "$_main" ] || return 0
-  [ "$_common" = "$_main" ] || [ "$_common" -ef "$_main" ] || return 0
+  if [ "$_common" != "$_main" ] && ! [ "$_common" -ef "$_main" ]; then
+    # GIT ANSWERED, AND IT ANSWERED SOMEWHERE ELSE. Everything above has already established
+    # that this directory IS a linked worktree — git resolved it, the git dir differs from
+    # the common dir and carries a `/worktrees/` segment — so the only thing left in doubt
+    # was whose, and this line is where that is settled. Rc 4, not an empty name, because
+    # "placed in another repository" and "not placed at all" are different facts and the
+    # caller acts differently on them.
+    _EG_GITWT_FOREIGN="$_common"
+    return 4
+  fi
   _EG_GITWT="${_gitdir##*/}"
   return 0
 }
 
-# _eg_cd_second <command text> -> sets _EG_CD2 to the SECOND directory the text changes into
-# before the commit, empty when the text names only one.
+# _eg_cd_targets <command text> -> sets _EG_CDS to EVERY directory the text changes into
+# before the commit AFTER the leading one, in the order the shell would obey them, one per
+# line; empty when the text names only the leading directory.
 #
 # WHY A SECOND `cd` IS A REFUSAL AND NOT A TIE-BREAK (critic issue 1, FAIL-OPEN). Branch (2)
 # below reads the LEADING `cd` and truncates at the first `;`, `&`, `|` or newline, so every
@@ -2209,10 +2295,24 @@ _eg_git_wt_name() {
 # already run, so the scan stops at the first `git` in the text. If the text carries none this
 # reader can see — a spelling only `git_argv_expand` resolves — the whole remainder is
 # scanned, which refuses rather than allows.
-_EG_CD2=""
-_eg_cd_second() {
+#
+# EVERY TARGET, NOT THE FIRST OF THEM (W6, the re-walk at 4e2ac66). This reader used to take
+# the first `cd` after the first separator and return, which cost nothing while the PRESENCE
+# of a second `cd` refused: the command was already refused before a third target could
+# matter. Once two targets that fold alike became one directory (C3), `cd X && cd X && cd Y
+# && git commit` walked through the arm and was judged at X's row with Y never read — while
+# the shell commits in Y, which another row owns at another step. That is the fail-open this
+# arm exists to close, one `&&` away from the shape it does close. So the scan collects the
+# whole list and the caller folds all of it.
+#
+# ONE PER LINE, AND THE SEPARATOR IS SAFE BY CONSTRUCTION: a newline is one of the four
+# characters this scan splits segments on, so no target it yields can contain one. A path
+# holding a space or a glob character is carried intact, and `_eg_path_fold`'s own `set -f`
+# guard is what keeps it intact downstream.
+_EG_CDS=""
+_eg_cd_targets() {
   local _t="${1:-}" _rest _seg _p
-  _EG_CD2=""
+  _EG_CDS=""
   case "$_t" in
     *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
     *) return 0 ;;
@@ -2240,16 +2340,93 @@ _eg_cd_second() {
           "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
         esac
         [ -n "$_p" ] || _p='~'
-        _EG_CD2="$_p"
-        return 0
+        _EG_CDS="${_EG_CDS}${_p}"$'\n'
         ;;
     esac
   done
   return 0
 }
 
+# _eg_path_fold <path> -> _EG_FOLD, the same path with its empty and `.` components folded
+# away, so `/a/b`, `/a//b`, `/a/b/` and `/a/./b` are one string.
+#
+# LEXICAL, AND THAT IS THE WHOLE CONTRACT. `..` is deliberately NOT folded: through a symlink
+# only a stat could say which directory `/a/b/..` is, and the freeze (D11) forbids a wall
+# fetching its own facts. So a path carrying `..` never folds onto another one, and the caller
+# below keeps refusing it — the direction a wall that cannot tell has to take.
+#
+# IT ASSIGNS RATHER THAN PRINTS, like every reader around it: a command substitution here
+# would be one fork per commit for a pure string operation.
+_EG_FOLD=""
+_eg_path_fold() {
+  local _in="${1:-}" _seg _out="" _oldifs="$IFS" _hadf=0
+  case "$-" in *f*) _hadf=1 ;; esac
+  set -f
+  IFS='/'
+  # shellcheck disable=SC2086  # deliberate split on '/' with globbing disabled
+  set -- $_in
+  IFS="$_oldifs"
+  [ "$_hadf" -eq 1 ] || set +f
+  for _seg in "$@"; do
+    case "$_seg" in ''|'.') continue ;; esac
+    _out="$_out/$_seg"
+  done
+  _EG_FOLD="${_out:-/}"
+}
+
+# _eg_cd_one_dir -> 0 when EVERY `cd` target the text names RESOLVES to ONE directory, and
+# 1 with _EG_CD_DIFF set to the first target that does not — the one the refusal names.
+#
+# THE ARM FIRED ON THE SECOND `cd` TOKEN, NEVER ON A DIFFERENCE (critic C3). `cd X && cd X`
+# and `cd X && cd .` were both refused, and the refusal read "the command changes into 'X'
+# and then into 'X'" — a sentence that answers its own complaint. D4 ratified that the gate
+# does not interpret the shell; comparing targets it has ALREADY extracted is not
+# interpretation, and every value is in hand here.
+#
+# ALL OF THEM, IN ORDER (W6). Reading only the first two let a third `cd` into another
+# directory through: two matching targets answered for a command that goes on to name a
+# third. So the whole list is walked and the command names one directory only when every
+# target folds onto the leading one. Each target is read as the leading one is, and a
+# relative target is joined to the directory the PREVIOUS target left the shell standing in.
+# The walk stops at the first difference, so that previous directory is always the leading
+# one — a relative target after a divergence is never resolved against a guess.
+#
+# NOTHING IS STAT-ED AND NOTHING IS EXPANDED, so `~`, an unexpanded variable and any `..`
+# component stay a second directory and stay refused (A-T22.2, and the D11 freeze).
+#
+# IT NAMES THE PAIR THAT DISAGREES rather than the first two tokens: the refusal's detail is
+# built from `_EG_CWD` and `_EG_CD_DIFF`, so a reader is always shown a real disagreement.
+_EG_CD_DIFF=""
+_eg_cd_one_dir() {
+  local _first _prev _rest _one
+  _EG_CD_DIFF=""
+  _eg_path_fold "$_EG_CWD"; _first="$_EG_FOLD"; _prev="$_first"
+  _rest="$_EG_CDS"
+  while [ -n "$_rest" ]; do
+    # THE LIST IS CONSUMED WITHOUT ASSUMING ITS SHAPE. Every entry `_eg_cd_targets` writes is
+    # newline-TERMINATED, so the `*` branch is unreachable today — and a `${_rest#*NL}` on a
+    # string carrying no newline returns it unchanged, which is a wall that never returns and
+    # therefore a commit that never lands. The branch costs one `case` and removes that class.
+    case "$_rest" in
+      *$'\n'*) _one="${_rest%%$'\n'*}"; _rest="${_rest#*$'\n'}" ;;
+      *)        _one="$_rest"; _rest="" ;;
+    esac
+    [ -n "$_one" ] || continue
+    case "$_one" in
+      /*) _eg_path_fold "$_one" ;;
+      *)  _eg_path_fold "${_prev%/}/${_one}" ;;
+    esac
+    if [ "$_EG_FOLD" != "$_first" ]; then
+      _EG_CD_DIFF="$_one"
+      return 1
+    fi
+    _prev="$_EG_FOLD"
+  done
+  return 0
+}
+
 # _eg_commit_cwd -> sets _EG_CWD (the directory the commit is made IN), _EG_CWD_SRC (which
-# of the three spellings answered) and, through `_eg_cd_second`, _EG_CD2.
+# of the three spellings answered) and, through `_eg_cd_targets`, _EG_CDS.
 #
 # THREE SPELLINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
 #   1. `git -C <dir> commit` — git's own cwd override, and it wins over everything;
@@ -2275,7 +2452,7 @@ _eg_cd_second() {
 # a cwd — and a command substitution would leave them behind in a subshell.
 _eg_commit_cwd() {
   local _line _oldifs _hadf _p _c
-  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CD2=""
+  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   case " $COMMAND " in
     *" -C "*|*" -C"[\"\']*)
@@ -2329,7 +2506,7 @@ _eg_commit_cwd() {
       case "$_p" in
         /*) if [ -d "$_p" ]; then
               _EG_CWD="$_p"; _EG_CWD_SRC="cd"
-              _eg_cd_second "$_c"
+              _eg_cd_targets "$_c"
               return 0
             fi ;;
       esac
@@ -2368,15 +2545,31 @@ _eg_row_for_worktree() {
   [ -n "$_want" ] || return 0
   _rows="$(units_rows "$PLAN")" || return 1
   [ -n "$_rows" ] || return 0
+  # THE TWIN OF stop.sh's `_lg_row_for_tree` FOLD (L1, wave-17 T41, critic C14; both sides
+  # T50, T47's floor RED): that function folds both sides and this one now does too, for
+  # the reason case-folding always needs both sides folded — `$_want` is the literal
+  # basename git gave the tree, and that basename carries the tree's REAL case (a real
+  # dispatch tree is always `<NN>-T<n>`, capital T), while the cell is authored text that
+  # can drift in case either direction. Folding only the cell does not make the compare
+  # case-insensitive; it makes it fail on every mixed-case tree, including an EXACT match,
+  # because a lowercased cell can never equal an unlowercased `$_want`. Both walls must
+  # fold the same way to keep one plan from giving two answers for which row owns a tree.
+  _want="$(printf '%s' "$_want" | tr '[:upper:]' '[:lower:]')"
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _cell="$(units_field "$_line" worktree)"
     [ -n "$_cell" ] || continue
     _cell="${_cell%/}"
-    [ "${_cell##*/}" = "$_want" ] || continue
+    [ "$(printf '%s' "${_cell##*/}" | tr '[:upper:]' '[:lower:]')" = "$_want" ] || continue
     _id="$(units_field "$_line" id)"
     if [ -z "$_EG_ROW" ]; then
-      _EG_ROW="$_id	$(units_field "$_line" step)"
+      # THREE CELLS, TAB-SEPARATED: id, step, status (wave-17 REQ-1, D1, ADR-031). The
+      # status cell has been validated since wave-11 and read by nothing; it is what says
+      # whether a commit out of this tree discharges the obligations of the TASK or of the
+      # RUN, and the fork below cannot ask that question of a value it was never handed.
+      # One more cell of a table this function already parses — no new fact is fetched
+      # (the D11 freeze, .claude/rules/hook-authoring.md).
+      _EG_ROW="$_id	$(units_field "$_line" step)	$(units_field "$_line" status)"
       _EG_ROW_DUP="$_id"
     else
       _EG_ROW_DUP="$_EG_ROW_DUP, $_id"
@@ -2392,7 +2585,47 @@ _eg_row_for_worktree() {
 }
 
 _EG_WT=""
-_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CD2
+_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS
+
+# WHICH DIRECTORY DOES THIS COMMIT RUN IN? (critic issue 1; wave-17 REQ-3, D4.) When the
+# command text names a second directory before the commit, no reading of the text answers
+# that, so the arm refuses and names both rather than judging at the first one.
+#
+# ASKED BEFORE ANY DIRECTORY IS RESOLVED, AND THAT IS THE REPAIR (bug 6). The arm used to sit
+# inside the `if [ -n "$_EG_WT" ]` block below, so it was reached only when git had already
+# confirmed the FIRST directory as a linked worktree of this repository. Every other first
+# directory — the main checkout, a record/ directory under it, /tmp — left `_EG_WT` empty,
+# skipped the whole block, and the commit was judged at the run's `current:` with nothing said
+# about the second `cd`: fail-open for `cd <records-dir>; …; cd <tree> && git commit`, which is
+# the shape a consumer actually wrote. THE AMBIGUITY IS THE COMMAND'S PROPERTY, not the first
+# directory's: a `;` runs the rest wherever the shell is standing, a failed `cd` leaves it
+# where it was, and a `&&` only looks decisive. So the question is asked of the text, here,
+# where it costs no `read` and no fork and reaches every first directory alike.
+#
+# `_EG_CDS` IS SET ONLY BY THE LEADING-`cd` BRANCH of `_eg_commit_cwd` — a `git -C <dir>`
+# commit never consults it — so the `_EG_CWD_SRC` test names the branch that answered rather
+# than narrowing the arm.
+#
+# TWO TOKENS ARE NOT TWO DIRECTORIES (critic C3). `cd X && cd X` and `cd X && cd .` name one
+# directory twice, and the arm used to refuse them with a sentence that answered its own
+# complaint. `_eg_cd_one_dir` compares the RESOLVED targets — the values this arm already
+# prints — and only a real difference is an ambiguity.
+#
+# AND IT COMPARES EVERY ONE OF THEM (W6). The reader behind C3's fix stopped at the first
+# `cd` after the leading one, so `cd X && cd X && cd Y && git commit` was allowed and judged
+# at X while the shell commits in Y: two matching targets answered for a command that goes
+# on to name a third. `_eg_cd_one_dir` now walks the whole list and the arm fires on the
+# FIRST target that disagrees with the leading directory, which is the pair the detail names.
+# A `git -C <dir> commit` still overrides all of it — branch (1) answers before this list is
+# ever built, which is why the Fix line below can offer that spelling as the way out.
+# [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; then
+  _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD_DIFF}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
+Plan: $PLAN
+Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
+  refuse exit2 commit "two directories are named before the commit" "name one directory" "$_eg_detail"
+fi
+
 if [ -n "$BIONIC_WORKTREE" ] && [ "$_EG_CWD" = "$BIONIC_CWD" ]; then
   _EG_WT="$BIONIC_WORKTREE"          # the ladder already asked GIT about this very directory
 elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
@@ -2400,27 +2633,43 @@ elif [ -n "$_EG_CWD" ] && [ -n "$(_eg_wt_name "$_EG_CWD")" ]; then
   # directory MIGHT be a linked worktree, for the price of one `read` and no fork; every
   # main-root commit and every ordinary directory has already left without paying for a git
   # call. What remains is the small set worth one fork, and git decides it.
-  _eg_git_wt_name "$_EG_CWD"
+  _eg_git_wt_name "$_EG_CWD"; _EG_GITWT_RC=$?
   _EG_WT="$_EG_GITWT"
+  if [ "$_EG_GITWT_RC" -eq 4 ]; then
+    # OUTSIDE THE RUN, NOT BEHIND IT (wave-17 REQ-4, T1; bug 7). Git placed this tree in
+    # another repository, so nothing in THIS plan describes the work it holds: its `## Tasks`
+    # register cannot name the tree, its `current:` is not the step that commit is part of,
+    # and its Step-5 floor is a floor that commit has no part in producing. Until this line
+    # the gate said all of that out loud — the announce below has named the boundary since
+    # wave-14 — and then judged the commit at `current:` anyway, refusing another
+    # repository's work for this run's evidence. A wall that has just admitted it cannot
+    # place a commit does not go on to sentence it.
+    #
+    # EXEMPTION, NEVER ADOPTION. The commit is not matched to a row, not judged at a lowered
+    # step and not allowed by any arm — this gate simply has no jurisdiction and says so.
+    # Matching a foreign tree against this plan's rows is out of scope by the charter, and
+    # the note at `_eg_row_for_worktree` says why: loose matching on the derived side is how
+    # a commit reaches another task's step.
+    #
+    # AND IT EXEMPTS THIS GATE ALONE. The `exit 0` leaves `_eg_body`, which runs in
+    # `wall_evidence_gate`'s subshell; the walls folded beside it in hooks/bash-walls.sh —
+    # protect-main, protect-database, farm-out, the background-suite guard — never see it and
+    # keep their verdicts, which is what 25g(q) pins.
+    printf "evidence-gate: %s is a linked worktree of another repository (%s) — this run's step arms do not apply\n" \
+      "$_EG_CWD" "$_EG_GITWT_FOREIGN" >&2
+    exit 0
+  fi
   if [ -z "$_EG_WT" ]; then
     # NOT SILENCE. A `.git` file that names a worktree git does not know is an anomaly
-    # wherever it came from — a moved tree, another repository's, or a planted one — and the
-    # reader needs to know the register was not consulted for this commit.
+    # wherever it came from — a moved tree, a forged one, or one whose target is gone — and
+    # the reader needs to know the register was not consulted for this commit. A tree of
+    # another repository no longer arrives here: git placed it, and it left above.
     printf 'evidence-gate: %s is not a linked worktree of this repository — judging at current: %s\n' \
       "$_EG_CWD" "$CURRENT" >&2
   fi
 fi
 
 if [ -n "$_EG_WT" ]; then
-  # THE TREE IS GIT'S, BUT IS IT THE ONE THE COMMIT LANDS IN? (critic issue 1.) When the
-  # command text named a second directory before the commit, no reading of the text answers
-  # that, so the arm refuses and names both rather than judging at the first one's row.
-  if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CD2" ]; then
-    _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD2}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
-Plan: $PLAN
-Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
-    refuse exit2 commit "two directories are named before the commit" "name one directory" "$_eg_detail"
-  fi
   # A plan with NO `## Tasks` table has no register, and there is nothing to say about a tree
   # it does not claim to track — `_eg_row_for_worktree` returns 1 for that, and this arm stays
   # silent, which is what keeps a solo-writer project's worktree commits byte-identical to
@@ -2443,6 +2692,8 @@ Fix: commit from one directory — split the command in two, or spell it 'git -C
   elif [ -n "$_EG_ROW" ]; then
     _EG_RID="${_EG_ROW%%	*}"
     _EG_RSTEP="${_EG_ROW#*	}"
+    _EG_RSTATUS="${_EG_RSTEP#*	}"   # third field — empty on a table whose rows are short
+    _EG_RSTEP="${_EG_RSTEP%%	*}"
     _EG_CURNUM="${CURRENT%[ab]}"
     case "$_EG_RSTEP" in
       ''|*[!0-9]*) : ;;   # a row whose step cell is unusable decides nothing; units_validate
@@ -2466,6 +2717,48 @@ Fix: commit from one directory — split the command in two, or spell it 'git -C
 Plan: $PLAN
 Fix: this tree's task is scheduled for step ${_EG_RSTEP} and the run has not reached it — advance the run to step ${_EG_RSTEP}, or correct row ${_EG_RID}'s step cell, before committing from ${_EG_WT}."
           refuse exit2 commit "that worktree's task is ahead of the run" "advance the run first" "$_eg_detail"
+        elif [ "$_EG_RSTATUS" = "active" ] && [ "$_EG_RSTEP" -ge 4 ]; then
+          # A COMMIT HAS ONE OF TWO SUBJECTS (wave-17 REQ-1, D1, ADR-031). The row stands
+          # exactly where the run stands, so there is no step to substitute — and that is
+          # the case the whole catch-22 lived in: a writer dispatched at Step 5, whose row
+          # therefore reads 5, was judged by the run's Verify arm and refused for the green
+          # floor that writer's own task exists to produce (bug 2; carry-over 1; three D10
+          # `current:` regressions in wave-16). The row's `status` is what resolves it: this
+          # tree has a writer in it, so this commit discharges the TASK's obligations, and
+          # the arms it owes are the task arms.
+          #
+          # WHY THAT IS SPELLED `CURRENT=4` AND NOT A SECOND ARM TABLE. The task arms
+          # already have a home: `dispatch`'s `4)` case is `shape_block worktree base-sha
+          # branch`, and the matrix `fails-when:` presence arm runs for every commit at
+          # step ≥ 4 regardless. Step 4 IS the arm set a task owes, so naming it is the
+          # whole implementation — a parallel dispatcher would be a second place to keep in
+          # step with the first. The run's arms (the floor block, the walk artifact, the
+          # auditor cell, the ADR, the merge, the ship) all hang off steps 5 and up and are
+          # simply never reached.
+          #
+          # THE NOTE IS MANDATORY, for the reason the step substitution's note above is:
+          # this is a wall judging a commit by something other than the run's declared
+          # `current:`, and it says so, naming the ROW — because the row is the subject.
+          # Printed BEFORE the substitution, so `current:` reads as the run declared it.
+          #
+          # ONLY `active`, AND ONLY AT THE ROW'S OWN STEP. A `pending`, `landed` or
+          # `dropped` row is nobody at work: its tree falls through to `current:` exactly as
+          # it does today (25g(k2)), and a row AHEAD of the run keeps its refusal above. A
+          # row BEHIND the run keeps the wave-14 substitution and its wording, which for the
+          # step-4 rows that make up every real task batch resolves to these same task arms
+          # — see A-T1.2 for the residual case that leaves open.
+          #
+          # AND ONLY FROM STEP 4 UP (critic C1). `CURRENT=4` is a LOWERING for every row the
+          # register admits above step 4 and a no-op at 4 — but `units_validate` admits a
+          # step cell of 3, where it is a RAISE: a run at `current: 3` with an active step-3
+          # row was judged at a step the run had not started and refused for a `Step 4:`
+          # evidence line its author could only write by claiming Step 4 in a Step-3 plan.
+          # That is REQ-1 inverted — the requirement exists so a task commit is not held to
+          # the arms of a LATER step. Below 4 the row keeps today's `current:` path, which is
+          # the behaviour the design already blesses for every other status (25g(r)).
+          printf "evidence-gate: judged by row %s's task arms (run at current: %s)\n" \
+            "$_EG_RID" "$CURRENT" >&2
+          CURRENT=4
         fi
         ;;
     esac
@@ -2714,10 +3007,20 @@ step_prefix() {
 # pass==total. Used by the Step-5 verify gate.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
 validate_tests_block() {
-  local step="$1" pass total prefix
+  local step="$1" pass total prefix advisory
   shape_block cmd pass total output
   pass=$(block_get pass)
   total=$(block_get total)
+  # THE GATE RECORDS THE ADVISORY COUNTER AND NEVER JUDGES IT (wave-17 REQ-10, AC-10.2).
+  # `pass:`/`total:` are the GATING rows — the ones a red suite fails on. An advisory
+  # reading is a measurement the framework took and nothing gated on (tests/run.sh prints
+  # `Advisory: N readings, M exceeded` beneath `Gating:` when one was taken), so the block
+  # may carry it and this function reads it into nothing: it appears in no comparison
+  # below, and a block that omits it is the pre-wave block, unchanged. The key was already
+  # INERT — shape_block asserts presence and there is no unknown-key arm anywhere in this
+  # file — so this read is the CONTRACT made explicit, not a new refusal.
+  advisory=$(block_get 'advisory-exceeded')
+  : "$advisory"
   prefix=$(step_prefix "$step")
   if ! grep -qE '^[0-9]+$' <<< "$pass" || ! grep -qE '^[0-9]+$' <<< "$total"; then
     _eg_detail="${prefix} 'pass:' and 'total:' must be integers (got pass='${pass}', total='${total}').
@@ -3175,6 +3478,22 @@ validate_matrix() {
         # key first; this branch only bites a block that was otherwise complete.
         # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
         if [ "$key" = "evidence" ]; then
+          # ONE PATH PER AC, AND A `;` IS NOT A SEPARATOR (wave-17 REQ-5, AC-5.3). The
+          # whole cell text is the path — nothing here splits it — so `a.md; b.md` was
+          # handed to the resolver entire, missed, and refused as "names no real file",
+          # which sent the author to write a file at a path nobody meant to name. The
+          # sibling reader of the walk artifact has truncated at the first `;` since
+          # epic-14 (evidence_line_field); this cell is the outlier, and the repair is to
+          # say the rule rather than to start splitting. FIRST in the branch, ahead of the
+          # climb-out and file tests: a cell holding two paths has no single path for
+          # either of them to be asked about.
+          # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+          case "$val" in
+            *\;*)
+              block_matrix "evidence: names more than one path" "one path under record/ per AC" \
+                "matrix row '${ac}' evidence '${val}' names more than one path (the value carries a ';')." \
+                "the '${ac}:' block's evidence key takes exactly ONE path under record/. Cite the one file that proves this criterion; a second artifact belongs inside that file, or in its own AC row." ;;
+          esac
           if grep -qE '(^|/)\.\.(/|$)' <<< "$val"; then
             block_matrix "${ac}'s evidence path climbs out of record/" "name it under record/" \
               "matrix row '${ac}' evidence '${val}' climbs out of the record directory and so does not resolve under ${DOCS_ROOT}/record/." \
@@ -3236,6 +3555,25 @@ validate_matrix() {
            && { [ -z "$aud" ] || [ "$aud" = "CONFIRMED" ]; }; then
         :
       elif [ "$aud" != "CONFIRMED" ]; then
+        # THE CELL IS AN EQUALITY, AND THE VERDICT NOW SAYS WHICH FAULT IT IS (wave-17
+        # REQ-5, AC-5.4). `CONFIRMED (audit-b3b87dc.md)` refused with "the auditor has not
+        # confirmed <AC>" — a sentence that reads as "no audit happened" to the one person
+        # who knows one did and annotated the cell with its path. The equality does not
+        # move: an annotated cell still refuses, because a reader scanning the column has
+        # to be able to compare it, and the audit's own path has a key of its own. A cell
+        # that does NOT start with the token is a different fact (no verdict, or a
+        # standing one) and keeps the verdict it has always had, below.
+        #
+        # AHEAD OF THE T4 BRANCHES ON PURPOSE: the shape fault is the same fault whatever
+        # the row's tier, and a T4 row annotated past the token would otherwise be told
+        # its user-confirmation was the problem.
+        # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+        case "$aud" in
+          CONFIRMED*)
+            block_matrix "the auditor cell is not the bare token" "write CONFIRMED; cite in evidence:" \
+              "matrix row '${ac}' auditor cell is '${aud}' — it starts with CONFIRMED but is not the bare token, at step ${CURRENT}." \
+              "write exactly 'CONFIRMED' in the auditor cell and cite the audit's own path in the row's 'evidence:' key — the column is compared, not read." ;;
+        esac
         if [ "$tier" = "T4" ]; then
           if user_confirmed_form_ok "$block_txt"; then
             block_matrix "the auditor's finding on ${ac} stands" "settle it with the auditor" \
@@ -3712,9 +4050,16 @@ Fix: add a '## Tasks' section (a header plus a 'none dispatched' line is fine); 
     _eg_detail="canonical-sdlc audited multi_agent wave plan's '## Tasks' table breaks the Task invariants:
 ${violations}
 Plan: $PLAN
-Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | status."
+Fix: repair each row named above; the columns are id | step | kind | task | agent | deps | size | serves | Files | worktree | base | status."
     refuse exit2 commit "that dispatched task's row is invalid" "fix the row the detail names" "$_eg_detail"
   fi
+  # PRESENCE IS ASKED OF THE WHOLE TABLE AT ONCE (AC-5.1). This loop used to refuse at the
+  # first id it found short, so a wave owing three lines paid three refused commits; the
+  # shared arm below counts every row and prints the lines the author owes. It runs ahead
+  # of the placeholder walk: "you wrote nothing" and "you wrote a placeholder" are two
+  # findings, and the first is the one a whole-table answer can give.
+  # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+  refuse_missing_evidence_lines "$rows"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     id=$(units_field "$line" id)
@@ -3723,12 +4068,6 @@ Fix: repair each row named above; the columns are id | step | kind | task | agen
     # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
     ev=$(echo "$SECTION" | grep -E "^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:" | head -1 \
          | sed -E "s/^[[:space:]]*-?[[:space:]]*${id}[[:space:]]*:[[:space:]]*//" | sed -E 's/[[:space:]]+$//')
-    if [ -z "$ev" ]; then
-      _eg_detail="canonical-sdlc dispatched task ${id} has no '- ${id}:' evidence line in '## SDLC State'.
-Plan: $PLAN
-Fix: record the dispatched unit's evidence artifact on a '- ${id}:' line before committing."
-      refuse exit2 commit "that dispatched task has no evidence line" "add a '- <id>:' evidence line" "$_eg_detail"
-    fi
     if is_placeholder_value "$ev"; then
       _eg_detail="canonical-sdlc dispatched task ${id} evidence line is a placeholder ('${ev}').
 Plan: $PLAN
