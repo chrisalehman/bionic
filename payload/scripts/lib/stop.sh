@@ -247,6 +247,16 @@ _lg_worktree_for_name() {  # <repo> <row name> -> abs worktree path on stdout, o
 # by BASENAME — so a cell holding `17-T3`, `.worktrees/17-T3` or an absolute path all name
 # the same tree, and two walls reading one record can never disagree about which row that is.
 #
+# THE BASENAME ARRIVES CASE-FOLDED, so the cell is compared case-folded too (L1, bit
+# epic-23 wave-17 T41): `_want` is `${LG_WT##*/}` at the call site, and `LG_WT` comes from
+# `_lg_worktree_for_name` above, which resolves through `worktree_for_row` — the fleet's one
+# name-to-path mapping, whose own docblock says it lowercases the row name before building
+# the path. A plan row spelled with capitals (every real row this wave: `17-T<n>`) then never
+# matched a case-sensitive compare, so `_LG_ROW_ID`/`_LG_ROW_BASE` stayed empty and REQ-2's
+# declared-base feature went silently inert. Folding both sides here, rather than un-folding
+# `_want`, keeps the one mapping in one place — this function absorbs the case the mapping
+# already threw away instead of trying to recover it.
+#
 # IT ASSIGNS RATHER THAN PRINTS, and returns 3 on a collision, for that function's own
 # reasons: two answers do not fit in a command substitution, and a wall that cannot tell
 # which row owns a tree must not pick one. The caller treats 3 as "no declared origin" and
@@ -261,12 +271,14 @@ _lg_row_for_tree() {  # <plan> <tree basename> -> assigns _LG_ROW_ID, _LG_ROW_BA
   [ -n "$_plan" ] && [ -n "$_want" ] || return 0
   declare -F units_rows >/dev/null 2>&1 || return 0
   _rows="$(units_rows "$_plan" 2>/dev/null)" || return 0
+  _want="$(printf '%s' "$_want" | tr '[:upper:]' '[:lower:]')"
   while IFS= read -r _line; do
     [ -n "$_line" ] || continue
     _cell="$(units_field "$_line" worktree)"
     [ -n "$_cell" ] || continue
     _cell="${_cell%/}"
-    [ "${_cell##*/}" = "$_want" ] || continue
+    _cell="${_cell##*/}"
+    [ "$(printf '%s' "$_cell" | tr '[:upper:]' '[:lower:]')" = "$_want" ] || continue
     if [ -n "$_LG_ROW_ID" ]; then
       _LG_ROW_ID=""; _LG_ROW_BASE=""
       return 3
