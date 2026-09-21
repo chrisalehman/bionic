@@ -1125,4 +1125,55 @@ expect_contains "16c: the gate judges by the ROW's task arms — T1's cell (17-T
 expect_absent "16d: …never falling back to 'no ## Tasks row names worktree', which is the pre-fold miss" \
   "no ## Tasks row names worktree" "$ERR"
 
+# THE MIRROR CASE (T50, T47's floor RED, §25g): 16a–16d's tree was lowercase, so `$_want`
+# (the literal basename git gave the tree) happened to already equal a folded cell without
+# needing any fold of its own — that fixture could not see a one-sided fold miss the OTHER
+# direction. A real dispatch tree is never lowercase; `_eg_git_wt_name` hands back the
+# capitalized name git itself chose (`<NN>-T<n>`, T46's own comment says so), and when the
+# cell is spelled with the SAME case a one-sided fold still breaks the match: the cell gets
+# folded to lowercase, `$_want` does not, and two identical strings compare unequal. That is
+# the exact §25g failure (12 rows, `wt-T3`/`wt-T5`/`wt-T9`/`14-TC`), reproduced here with a
+# real linked worktree so this file — not just the evidence-gate suite — pins it.
+R_ROWFOLD2="$(mk_repo rowfold2)"
+git -C "$R_ROWFOLD2" worktree add -q "$R_ROWFOLD2/.worktrees/17-T7" -b wt/17-T7 2>/dev/null
+expect_eq "16e: the fixture's tree really is a linked worktree, named mixed-case by git (a real dispatch shape)" \
+  "17-T7" "$(basename "$(git -C "$R_ROWFOLD2/.worktrees/17-T7" rev-parse --git-dir)")"
+
+T50_ROWFOLD_PLAN='---
+governing-skill: canonical-sdlc
+canonical_sdlc_version: 14
+intent: build
+rigor: audited
+scale: wave
+deploy_target: none
+use_worktree: true
+has_ui: false
+walk: exempt
+---
+# plan
+
+## SDLC State
+
+current: 4
+approved-by: fixture 2026-09-21T00:00Z "approved"
+Step 4:
+  worktree: .worktrees/17-T7
+  base-sha: 0fe69ed
+  branch: wt/17-T7
+
+## Tasks
+
+| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |
+|---|---|---|---|---|---|---|---|---|---|---|
+| T1 | 4 | build | mixed-case worktree cell against the real (mixed-case) tree | senior-implementor | — | 20m | REQ-2 | a.sh | 17-T7 | active |
+'
+printf '%s\n' "$T50_ROWFOLD_PLAN" > "$R_ROWFOLD2/.bionic/docs/plans/active.md"
+
+run_hook "$(mk_payload "$R_ROWFOLD2/.worktrees/17-T7" 'git commit -m "x"')" CLAUDE_PROJECT_DIR="$R_ROWFOLD2"
+expect_status "16f: the commit is still allowed either way (Step 4's shape is honest regardless of which row answers)" 0 "$ST"
+expect_contains "16g: the gate judges by the ROW's task arms — T1's cell (17-T7) still names the real (mixed-case) tree" \
+  "evidence-gate: judged by row T1's task arms (run at current: 4)" "$ERR"
+expect_absent "16h: …never falling back to 'no ## Tasks row names worktree', which is the ONE-SIDED-fold miss (T47 §25g)" \
+  "no ## Tasks row names worktree" "$ERR"
+
 finish
