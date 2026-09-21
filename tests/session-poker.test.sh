@@ -1925,7 +1925,7 @@ section "Section 11: pressure — HOLD, EMERGENCY, and the RUNG (AC-17, AC-30, S
 # fill, because filling a machine that is already starving is the one scheduling mistake
 # that costs WORK rather than time: the measured failure is a kernel SIGKILL, seven
 # concurrent suites on an 8 GB machine driving free memory to ~188 MB and a suite dying
-# mid-run (tests/run.sh:63-68).
+# mid-run (tests/run.sh:65-70).
 #
 # CLOCK AND MACHINE DISCIPLINE, the same house rule the rest of this suite keeps: nothing
 # here waits for the machine to get into trouble, and nothing reads this machine at all.
