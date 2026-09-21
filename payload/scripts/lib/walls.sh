@@ -2276,8 +2276,9 @@ _eg_git_wt_name() {
   return 0
 }
 
-# _eg_cd_second <command text> -> sets _EG_CD2 to the SECOND directory the text changes into
-# before the commit, empty when the text names only one.
+# _eg_cd_targets <command text> -> sets _EG_CDS to EVERY directory the text changes into
+# before the commit AFTER the leading one, in the order the shell would obey them, one per
+# line; empty when the text names only the leading directory.
 #
 # WHY A SECOND `cd` IS A REFUSAL AND NOT A TIE-BREAK (critic issue 1, FAIL-OPEN). Branch (2)
 # below reads the LEADING `cd` and truncates at the first `;`, `&`, `|` or newline, so every
@@ -2294,10 +2295,24 @@ _eg_git_wt_name() {
 # already run, so the scan stops at the first `git` in the text. If the text carries none this
 # reader can see — a spelling only `git_argv_expand` resolves — the whole remainder is
 # scanned, which refuses rather than allows.
-_EG_CD2=""
-_eg_cd_second() {
+#
+# EVERY TARGET, NOT THE FIRST OF THEM (W6, the re-walk at 4e2ac66). This reader used to take
+# the first `cd` after the first separator and return, which cost nothing while the PRESENCE
+# of a second `cd` refused: the command was already refused before a third target could
+# matter. Once two targets that fold alike became one directory (C3), `cd X && cd X && cd Y
+# && git commit` walked through the arm and was judged at X's row with Y never read — while
+# the shell commits in Y, which another row owns at another step. That is the fail-open this
+# arm exists to close, one `&&` away from the shape it does close. So the scan collects the
+# whole list and the caller folds all of it.
+#
+# ONE PER LINE, AND THE SEPARATOR IS SAFE BY CONSTRUCTION: a newline is one of the four
+# characters this scan splits segments on, so no target it yields can contain one. A path
+# holding a space or a glob character is carried intact, and `_eg_path_fold`'s own `set -f`
+# guard is what keeps it intact downstream.
+_EG_CDS=""
+_eg_cd_targets() {
   local _t="${1:-}" _rest _seg _p
-  _EG_CD2=""
+  _EG_CDS=""
   case "$_t" in
     *[\;\&\|$'\n']*) _rest="${_t#*[;&|$'\n']}" ;;
     *) return 0 ;;
@@ -2325,8 +2340,7 @@ _eg_cd_second() {
           "'"*"'") _p="${_p#\'}"; _p="${_p%\'}" ;;
         esac
         [ -n "$_p" ] || _p='~'
-        _EG_CD2="$_p"
-        return 0
+        _EG_CDS="${_EG_CDS}${_p}"$'\n'
         ;;
     esac
   done
@@ -2360,30 +2374,59 @@ _eg_path_fold() {
   _EG_FOLD="${_out:-/}"
 }
 
-# _eg_cd_one_dir -> 0 when the two `cd` targets the text names RESOLVE to ONE directory.
+# _eg_cd_one_dir -> 0 when EVERY `cd` target the text names RESOLVES to ONE directory, and
+# 1 with _EG_CD_DIFF set to the first target that does not — the one the refusal names.
 #
 # THE ARM FIRED ON THE SECOND `cd` TOKEN, NEVER ON A DIFFERENCE (critic C3). `cd X && cd X`
 # and `cd X && cd .` were both refused, and the refusal read "the command changes into 'X'
 # and then into 'X'" — a sentence that answers its own complaint. D4 ratified that the gate
-# does not interpret the shell; comparing two targets it has ALREADY extracted is not
-# interpretation, and both values are in hand here.
+# does not interpret the shell; comparing targets it has ALREADY extracted is not
+# interpretation, and every value is in hand here.
 #
-# THE SECOND TARGET IS READ AS THE FIRST ONE IS, and a relative target is joined to the
-# first — which is where the shell is standing when the second `cd` runs. Nothing else about
-# the command is read, nothing is stat-ed and nothing is expanded, so `~`, an unexpanded
-# variable and any `..` component stay two directories and stay refused.
+# ALL OF THEM, IN ORDER (W6). Reading only the first two let a third `cd` into another
+# directory through: two matching targets answered for a command that goes on to name a
+# third. So the whole list is walked and the command names one directory only when every
+# target folds onto the leading one. Each target is read as the leading one is, and a
+# relative target is joined to the directory the PREVIOUS target left the shell standing in.
+# The walk stops at the first difference, so that previous directory is always the leading
+# one — a relative target after a divergence is never resolved against a guess.
+#
+# NOTHING IS STAT-ED AND NOTHING IS EXPANDED, so `~`, an unexpanded variable and any `..`
+# component stay a second directory and stay refused (A-T22.2, and the D11 freeze).
+#
+# IT NAMES THE PAIR THAT DISAGREES rather than the first two tokens: the refusal's detail is
+# built from `_EG_CWD` and `_EG_CD_DIFF`, so a reader is always shown a real disagreement.
+_EG_CD_DIFF=""
 _eg_cd_one_dir() {
-  local _first
-  _eg_path_fold "$_EG_CWD"; _first="$_EG_FOLD"
-  case "$_EG_CD2" in
-    /*) _eg_path_fold "$_EG_CD2" ;;
-    *)  _eg_path_fold "${_EG_CWD%/}/${_EG_CD2}" ;;
-  esac
-  [ "$_first" = "$_EG_FOLD" ]
+  local _first _prev _rest _one
+  _EG_CD_DIFF=""
+  _eg_path_fold "$_EG_CWD"; _first="$_EG_FOLD"; _prev="$_first"
+  _rest="$_EG_CDS"
+  while [ -n "$_rest" ]; do
+    # THE LIST IS CONSUMED WITHOUT ASSUMING ITS SHAPE. Every entry `_eg_cd_targets` writes is
+    # newline-TERMINATED, so the `*` branch is unreachable today — and a `${_rest#*NL}` on a
+    # string carrying no newline returns it unchanged, which is a wall that never returns and
+    # therefore a commit that never lands. The branch costs one `case` and removes that class.
+    case "$_rest" in
+      *$'\n'*) _one="${_rest%%$'\n'*}"; _rest="${_rest#*$'\n'}" ;;
+      *)        _one="$_rest"; _rest="" ;;
+    esac
+    [ -n "$_one" ] || continue
+    case "$_one" in
+      /*) _eg_path_fold "$_one" ;;
+      *)  _eg_path_fold "${_prev%/}/${_one}" ;;
+    esac
+    if [ "$_EG_FOLD" != "$_first" ]; then
+      _EG_CD_DIFF="$_one"
+      return 1
+    fi
+    _prev="$_EG_FOLD"
+  done
+  return 0
 }
 
 # _eg_commit_cwd -> sets _EG_CWD (the directory the commit is made IN), _EG_CWD_SRC (which
-# of the three spellings answered) and, through `_eg_cd_second`, _EG_CD2.
+# of the three spellings answered) and, through `_eg_cd_targets`, _EG_CDS.
 #
 # THREE SPELLINGS, IN PRECEDENCE ORDER, and the order is which one the commit actually obeys:
 #   1. `git -C <dir> commit` — git's own cwd override, and it wins over everything;
@@ -2409,7 +2452,7 @@ _eg_cd_one_dir() {
 # a cwd — and a command substitution would leave them behind in a subshell.
 _eg_commit_cwd() {
   local _line _oldifs _hadf _p _c
-  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CD2=""
+  _EG_CWD=""; _EG_CWD_SRC=""; _EG_CDS=""
   # (1) — prechecked on the raw string so an ordinary commit pays for no second argv pass.
   case " $COMMAND " in
     *" -C "*|*" -C"[\"\']*)
@@ -2463,7 +2506,7 @@ _eg_commit_cwd() {
       case "$_p" in
         /*) if [ -d "$_p" ]; then
               _EG_CWD="$_p"; _EG_CWD_SRC="cd"
-              _eg_cd_second "$_c"
+              _eg_cd_targets "$_c"
               return 0
             fi ;;
       esac
@@ -2532,7 +2575,7 @@ _eg_row_for_worktree() {
 }
 
 _EG_WT=""
-_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CD2
+_eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CDS
 
 # WHICH DIRECTORY DOES THIS COMMIT RUN IN? (critic issue 1; wave-17 REQ-3, D4.) When the
 # command text names a second directory before the commit, no reading of the text answers
@@ -2549,17 +2592,25 @@ _eg_commit_cwd                       # sets _EG_CWD, _EG_CWD_SRC and _EG_CD2
 # where it was, and a `&&` only looks decisive. So the question is asked of the text, here,
 # where it costs no `read` and no fork and reaches every first directory alike.
 #
-# `_EG_CD2` IS SET ONLY BY THE LEADING-`cd` BRANCH of `_eg_commit_cwd` — a `git -C <dir>`
+# `_EG_CDS` IS SET ONLY BY THE LEADING-`cd` BRANCH of `_eg_commit_cwd` — a `git -C <dir>`
 # commit never consults it — so the `_EG_CWD_SRC` test names the branch that answered rather
 # than narrowing the arm.
 #
 # TWO TOKENS ARE NOT TWO DIRECTORIES (critic C3). `cd X && cd X` and `cd X && cd .` name one
 # directory twice, and the arm used to refuse them with a sentence that answered its own
-# complaint. `_eg_cd_one_dir` compares the two RESOLVED targets — the values this arm already
+# complaint. `_eg_cd_one_dir` compares the RESOLVED targets — the values this arm already
 # prints — and only a real difference is an ambiguity.
+#
+# AND IT COMPARES EVERY ONE OF THEM (W6). The reader behind C3's fix stopped at the first
+# `cd` after the leading one, so `cd X && cd X && cd Y && git commit` was allowed and judged
+# at X while the shell commits in Y: two matching targets answered for a command that goes
+# on to name a third. `_eg_cd_one_dir` now walks the whole list and the arm fires on the
+# FIRST target that disagrees with the leading directory, which is the pair the detail names.
+# A `git -C <dir> commit` still overrides all of it — branch (1) answers before this list is
+# ever built, which is why the Fix line below can offer that spelling as the way out.
 # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
-if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CD2" ] && ! _eg_cd_one_dir; then
-  _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD2}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
+if [ "$_EG_CWD_SRC" = "cd" ] && [ -n "$_EG_CDS" ] && ! _eg_cd_one_dir; then
+  _eg_detail="canonical-sdlc cannot tell which directory this commit runs in: the command changes into '${_EG_CWD}' and then into '${_EG_CD_DIFF}' before committing, and a commit is judged at the step of the '## Tasks' row that owns the tree it lands in.
 Plan: $PLAN
 Fix: commit from one directory — split the command in two, or spell it 'git -C <dir> commit' so git names the tree itself."
   refuse exit2 commit "two directories are named before the commit" "name one directory" "$_eg_detail"
