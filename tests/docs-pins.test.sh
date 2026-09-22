@@ -2014,9 +2014,15 @@ fi
 # card carries now (the paragraph above it became a pointer), so it is pinned to the
 # RENDERER, not to a word list: its section headings and its Artifacts labels must equal
 # what `card.sh step3` prints for a plan. A section added to one side only goes red here.
-card3_shape() {  # <card text on stdin> -> each section heading's first word, then each artifact label
-  awk '/^  [A-Z]/ { print $1; art = ($1 == "Artifacts"); next }
-       art && /^    [a-z]/ { print "artifact:" $1 }'
+# C8 (wave-19-fixit-186 critic, 26b6b65): the pin stopped at section headings and
+# Artifacts labels, so a `batch <k> · <n> of <n>` line under `Parallel width` — the card's
+# OWN output, per `_card_batch_widths` — went unseen on both sides. `pw` counts those
+# lines (marker only, not the numbers, which are plan-specific) the same way `art` counts
+# artifact labels, so a side that drops the line goes red against the side that keeps it.
+card3_shape() {  # <card text on stdin> -> each section heading's first word, artifact labels, batch-line count
+  awk '/^  [A-Z]/ { print $1; art = ($1 == "Artifacts"); pw = ($1 == "Parallel"); next }
+       art && /^    [a-z]/ { print "artifact:" $1 }
+       pw && /^    batch / { print "batch" }'
 }
 SHAPE_PLAN="$TMP/wave-97-shape.plan.md"
 printf '%s\n' '---' 'scale: wave' 'walk: required' 'rigor: audited' \
@@ -2044,6 +2050,21 @@ if [ "$(card_span "$DOCTORED_OPEN_AT" 'Step 3 · Plan' | card3_shape)" = "$SHAPE
   no "107f: a scaffold carrying a section the renderer never emits still matches (pin is vacuous)"
 else
   ok "107f: a scaffold carrying a section the renderer never emits fails 107e (pin discriminates)"
+fi
+
+# 107g: Anti-vacuity — C8 (wave-19-fixit-186 critic, 26b6b65). 107f mutates a whole
+# section that never renders; that proves the pin sees a section-level drift, but says
+# nothing about a single line dropped FROM a section the renderer does emit, which is
+# exactly the shape C8 found (the `batch <k> · <n> of <n>` line under `Parallel width`
+# was simply absent — no stray section, no wrong label, just a missing line). This
+# mutation strips only that line and leaves `Parallel width` and every other section
+# intact, so it targets 107e's `pw` arm specifically.
+DOCTORED_NO_BATCH="$TMP/step3-no-batch-line.md"
+awk '/^    batch / { next } { print }' "$STEP3_MD" > "$DOCTORED_NO_BATCH"
+if [ "$(card_span "$DOCTORED_NO_BATCH" 'Step 3 · Plan' | card3_shape)" = "$SHAPE_RENDERED" ]; then
+  no "107g: a scaffold missing the renderer's batch line still matches (pin is vacuous)"
+else
+  ok "107g: a scaffold missing the renderer's batch line fails 107e (pin discriminates)"
 fi
 
 section "Section 16: K5.4 — the goal-paragraph rule text (design ledger K5.4, plan task 21)"
