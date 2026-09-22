@@ -334,6 +334,37 @@ BIONIC_FINDING_SUBJECT="$FILE_PATH"
 GS_FINDING_ROOT="$PROJECT_ROOT_FROM_PATH"
 bionic_finding_root() { printf '%s' "$GS_FINDING_ROOT"; }
 
+# ---------- THE ENGAGEMENT GUARD (AC-7): is this session bionic's at all? ----------
+#
+# FIRST, above the four-clause project disjunction below. Chris, 2026-09-03: "all
+# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
+# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
+# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked.
+#
+# IT SUPERSEDES THE DISJUNCTION WITHOUT REPLACING IT. Those four clauses answer "is this
+# artifact one this lifecycle owns" — an open run, a `.bionic/` tree, a path inside one,
+# or content declaring `canonical_sdlc_version:`. Every one of them can be true in a
+# session that never invoked the skill: a bystander editing a plan file in a repo where
+# somebody else ran a wave was exactly the reproduction. So this asks the prior question
+# and the disjunction keeps asking its own, unchanged, for engaged sessions.
+#
+# THE MARKER IS LOOKED FOR UNDER THE ARTIFACT'S ROOT, not the invoking session's cwd —
+# the same root every clause below uses. A hook that scoped itself by one root and
+# enforced against another would go quiet exactly where it was added to bind.
+#
+# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
+# foreign or unshaped session key, no key at all. The arming partition is the consent
+# boundary (1.3.2 close-out).
+# AND IT SCOPES EVERY EVENT BUT THE BIND ARM (epic-23 wave-18-fixit-185, REQ-2, D5). The arm
+# below asks the same question of the root the SESSION engaged under, which is the one case
+# this line cannot answer — it is asking about a root walked up from the artifact, and the arm
+# exists for the writes where those two roots differ. The line itself is unchanged, at column
+# zero, where every reader of this file and the cross-gate roster both look for it.
+# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
+if [ "$EVENT" != "PostToolUse" ]; then
+engaged_session "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" || exit 0
+fi
+
 # ---------- THE BIND ARM (AC-9): a new run's plan claims the session that wrote it ----------
 #
 # PostToolUse ONLY, and it does nothing else. The tool has already run, so this arm cannot
@@ -359,11 +390,12 @@ bionic_finding_root() { printf '%s' "$GS_FINDING_ROOT"; }
 # second time inside this hook would give the fleet two readings of "is this a plan", which
 # is the class of drift `lib/run.sh` was extracted to end (spec §Ownership table).
 #
-# IT SITS ABOVE THE ENGAGEMENT GUARD NOW (epic-23 wave-18-fixit-185, REQ-2, spec §1 "Session
-# root", D5). That guard asks its question against the root walked up from the ARTIFACT, and
-# this arm's whole subject is the case where that walk answers a different root than the one
-# the session engaged under — so an arm underneath it could never see, let alone report, the
-# state it exists to diagnose. The guard is unchanged for every other event.
+# THE ENGAGEMENT GUARD ABOVE NO LONGER SPEAKS FOR IT (epic-23 wave-18-fixit-185, REQ-2,
+# spec §1 "Session root", D5). That guard asks its question against the root walked up from
+# the ARTIFACT, and this arm's whole subject is the case where that walk answers a different
+# root than the one the session engaged under — an arm behind it could never see, let alone
+# report, the state it exists to diagnose. So the guard now scopes every OTHER event, byte
+# for byte as before, and this arm asks the same question for itself, of the session's root.
 #
 # AND EVERY EXIT SAYS WHY (REQ-2 AC-2.1). Ten declines used to be silent and one success
 # spoke, so a consumer whose plan did not bind had nothing to read and no way to tell a
@@ -439,9 +471,9 @@ if [ "$EVENT" = "PostToolUse" ]; then
   # root, and that root is where its marker is.
   #
   # THE ARTIFACT'S ROOT IS THE SECOND RUNG, NOT A REJECTED ONE (A-T3.3). `bionic_context`'s
-  # cwd ladder ends at `pwd`, which for a hook process is not the session's cwd at all, so
-  # a payload that carries no `.cwd` would otherwise lose every binding it makes today —
-  # fail-silent, in the one arm this task exists to stop being silent.
+  # cwd ladder ends at `pwd`, which for a hook process is not the session's directory at all,
+  # so a payload that names no directory of its own would otherwise lose every binding it
+  # makes today — fail-silent, in the one arm this task exists to stop being silent.
   GS_BIND_ROOT=""
   if engaged_session "$BIONIC_ROOT" "$BIONIC_SID"; then
     GS_BIND_ROOT="$BIONIC_ROOT"
@@ -561,29 +593,6 @@ if [ "$EVENT" = "PostToolUse" ]; then
   exit 0
 fi
 
-# ---------- THE ENGAGEMENT GUARD (AC-7): is this session bionic's at all? ----------
-#
-# FIRST, above the four-clause project disjunction below. Chris, 2026-09-03: "all
-# guardrails imposed by bionic should only apply when exercising bionic. Nothing should
-# apply until bionic is triggered" — and the trigger is the canonical-sdlc skill, which
-# writes `.bionic/tmp/engaged-<sid>.state` at the instant it is invoked.
-#
-# IT SUPERSEDES THE DISJUNCTION WITHOUT REPLACING IT. Those four clauses answer "is this
-# artifact one this lifecycle owns" — an open run, a `.bionic/` tree, a path inside one,
-# or content declaring `canonical_sdlc_version:`. Every one of them can be true in a
-# session that never invoked the skill: a bystander editing a plan file in a repo where
-# somebody else ran a wave was exactly the reproduction. So this asks the prior question
-# and the disjunction keeps asking its own, unchanged, for engaged sessions.
-#
-# THE MARKER IS LOOKED FOR UNDER THE ARTIFACT'S ROOT, not the invoking session's cwd —
-# the same root every clause below uses. A hook that scoped itself by one root and
-# enforced against another would go quiet exactly where it was added to bind.
-#
-# EVERY UNREADABLE STATE READS AS NOT ENGAGED — absent marker, a symlink at the path, a
-# foreign or unshaped session key, no key at all. The arming partition is the consent
-# boundary (1.3.2 close-out).
-# [WALL: tests/canonical-sdlc-governing-skill.test.sh]
-engaged_session "$PROJECT_ROOT_FROM_PATH" "$BIONIC_SID" || exit 0
 
 # ---------- THE SESSION'S RUN, NOT THE ROOT'S (AC-1, AC-3, AC-6) ----------
 #
