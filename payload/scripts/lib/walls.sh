@@ -4570,14 +4570,16 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   [ "$(bionic_jq .tool_name)" = "Bash" ] || return 0
   [ -n "$COMMAND" ] || return 0
 
-  # TWO REFUSING ARMS LIVE IN THIS FUNCTION, and the cheap pre-filter is their union. (A
-  # third, ARM R, repairs rather than refuses and rides the same union — it needs no gate of
+  # THREE REFUSING ARMS LIVE IN THIS FUNCTION, and the cheap pre-filter is their union. (A
+  # fourth, ARM R, repairs rather than refuses and rides the same union — it needs no gate of
   # its own; see its header, below ARM 2.)
   #
   #   B-9 (AC-23)  a BACKGROUNDED suite — nobody reads the result.
   #   S13 (AC-21)  a suite OUTSIDE THE ROW'S BUDGET, inside a dispatched agent —
   #                foreground or not, because an extra full-tree run costs 40 minutes
   #                either way.
+  #   ARM C        a `git commit` from a READ-ONLY ROLE's row (wave-19 REQ-8) — inside a
+  #                dispatched agent only, answered below the partition.
   IS_BACKGROUND=no
   [ "$(bionic_jq '.tool_input.run_in_background|tostring')" = "true" ] && IS_BACKGROUND=yes
   # THE ACTOR (design D1, task 4/1 probe): an agent-context payload carries a top-level
@@ -4605,6 +4607,44 @@ wall_background_suite_guard() {  # <event> -> 0 nothing · 2 block
   [ ! -L "$BIONIC_ROOT/.bionic" ] && [ ! -L "$BIONIC_ROOT/.bionic/tmp" ] || return 0
   _bsg_roster="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
   [ ! -L "$_bsg_roster" ] && [ -f "$_bsg_roster" ] || return 0
+
+  # ---------- ARM C (wave-19 REQ-8, D9): a read-only role never commits ----------
+  #
+  # THE BREACH (wave-18 T7c-green). The four read-only roles carry `disallowedTools: Write,
+  # Edit, NotebookEdit` and never `Bash`, so "never commits" was prose: a `bionic:test-runner`
+  # committed its own green run. This arm makes the promise a wall.
+  #
+  # ABOVE THE SUITE FILTER, because a commit is not a suite and everything below returns 0
+  # on a non-suite command. The screen is the evidence gate's own (`_wall_mentions_git` then
+  # `git_argv_has_sub … commit`), so `git -C <dir> commit` is a commit and a quoted
+  # "git commit" is not.
+  #
+  # THE ROLE IS THE ROSTER ROW'S `subagent_type=`, READ BY THE SAME JOIN ARM 2 MAKES — the
+  # last row carrying this `agent_id` wins. Never the payload's `agent_type`: for a teammate
+  # it is the dispatch NAME (R3 Q2), and a name like `x-runner` is not a role. The match is
+  # the exact plugin-qualified spelling, so a consumer's own `acme:test-runner` is not ours.
+  # No row, or a row with no role → no statement about this agent, and silence.
+  if _wall_mentions_git "$COMMAND" && git_argv_has_sub "$COMMAND" commit; then
+    local _bsg_role
+    _bsg_role=$(awk -F'|' -v id="$ACTOR" '
+      /^roster-state\// {
+        hit = 0; role = ""
+        for (i = 1; i <= NF; i++) {
+          if ($i == "agent_id=" id) hit = 1
+          else if ($i ~ /^subagent_type=/) role = substr($i, 15)
+        }
+        if (hit) last = role
+      }
+      END { print last }
+    ' "$_bsg_roster" 2>/dev/null)
+    case "$_bsg_role" in
+      bionic:test-runner|bionic:researcher|bionic:auditor|bionic:critic)
+        fold_block exit2 commit "$_bsg_role: a read-only role never commits" "send your report" \
+          "Your roster row names you $_bsg_role, and a read-only role's deliverable is its report,
+never a commit. Leave the tree as it is and send the report; the orchestrator lands the work."
+        return 2 ;;
+    esac
+  fi
 
 # ---------- THE ENGAGEMENT GUARD (AC-20): is this session bionic's at all? ----------
 #

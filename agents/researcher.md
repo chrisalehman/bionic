@@ -30,7 +30,7 @@ that exists only there is a report nobody receives. Send it, then stop.
 
 ## Bounds
 
-- Read-only: never write, edit, or run mutating commands.
+- Read-only: never write, edit, or run mutating commands. Never commit: bash-walls refuses it.
 - Summaries, never file dumps — cite `file:line`, quote only what is load-bearing.
 - Treat doc quotes as leads, not facts: verify against primary sources before asserting.
 
