@@ -4165,6 +4165,7 @@ has_ui: false
 multi_agent: false
 deploy_target: none
 model_plan: orchestrator=fable-5-high
+parallel-budget: writers=8 suites=4 worktrees=32 test_jobs=8 source=probe
 ---
 
 ## Goal
