@@ -1824,9 +1824,9 @@ VERDICT=$(printf '%s\n' "$STREAM" | awk -F'\t' -v plan="$PLAN_NAME" -v mark="$TI
 # turn just declined to order. So this reads `pressure_level` the way the tick's own
 # `rung_report` does (lib/resources.sh, ceiling = the declared `writers=`) and falls back to
 # the ceiling only when the rung will not parse — `SCHED_WIDTH="${SCHED_RUNG:-$SCHED_WRITERS}"`
-# at hooks/session-poker.sh:4253, restated here rather than shared, the way
-# `_fill_current_field` restates its own twin (A-T2.3): this file and the tick are bound by
-# a test, not a delegation. `pressure_level` SAMPLES only when the ring is cold, and by the
+# in hooks/session-poker.sh, restated here rather than shared: the width is one line of
+# arithmetic over a reading both sides take from `pressure_level`, and this file and the tick
+# are bound on it by a test (patrol-duties-gate 69, session-poker 12l2), not a delegation. `pressure_level` SAMPLES only when the ring is cold, and by the
 # time a Stop fires the ring has almost always been sampled already this turn — every
 # engaged Bash call appends one (hooks/execution-recorder.sh, spec AC-15) — so on the turns
 # where the tick and this wall could disagree, both are reading the same warm ring; the rare
@@ -1878,8 +1878,10 @@ if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
   FILL_ROSTER="$BIONIC_ROOT/.bionic/tmp/roster-${BIONIC_SID}.state"
   FILL_ACKS="$BIONIC_ROOT/.bionic/tmp/sweeper-${BIONIC_SID}.state"
   if [ -z "$FILL_CEILING" ]; then
-    _FILL_STEP="$(fill_step_token "$PLAN")"
-    [ -n "$_FILL_STEP" ] && [ -n "$(units_ready "$PLAN" "$_FILL_STEP" 2>/dev/null)" ] && FILL_NO_BUDGET=1
+    # "AT LEAST ONE ROW READY AT THE UNIT" IS THE READY SET AT WIDTH ONE: the same step token,
+    # the same `units_ready`, one parse of the table (wave-19 REQ-6, D7) instead of two calls
+    # that each read it.
+    [ -n "$(fill_ready_set "$PLAN" 1 0 2>/dev/null)" ] && FILL_NO_BUDGET=1
   elif [ -L "$FILL_ROSTER" ] || [ -L "$FILL_ACKS" ]; then
     :   # an unreadable occupancy: skipped, never judged on zero (the docblock above)
   else
@@ -1933,8 +1935,10 @@ if [ -n "$PLAN" ] && fill_ledger_live "$PLAN"; then
     fi
     # ONE LINE, SPACE-SEPARATED, because that is the shape the fold below already reads the
     # tick's own ids in. A trailing separator opens an empty field, which the id filter in
-    # that fold drops on its own.
-    FILL_READY="$(fill_ready_set "$PLAN" "$FILL_WIDTH" "$FILL_OPEN" | tr '\n' ' ')"
+    # that fold drops on its own. Joined by parameter expansion, not a `tr` process: the
+    # substitution drops the last newline, so the separator it stood for is put back.
+    FILL_READY="$(fill_ready_set "$PLAN" "$FILL_WIDTH" "$FILL_OPEN")"
+    [ -z "$FILL_READY" ] || FILL_READY="${FILL_READY//$'\n'/ } "
   fi
 fi
 

@@ -550,7 +550,8 @@ drive() {  # <condition>
 # ============================================================
 # THE TABLE. One row per driven condition; the `direction` column is the §7 cell
 # it discharges. OPEN = exit 0; CLOSED = exit 2 (the code that blocks the tool
-# call). SILENT = nothing on either stream; LOUD = a refusal on stderr;
+# call), or `deny` = exit 0 with a PreToolUse deny verdict (the start gate's brief/state
+# refusals since wave-19 T4, where the verdict is the block). SILENT = nothing on either stream; LOUD = a refusal on stderr;
 # SILENT-WITH-ANNOUNCE = exit 0, stdout empty, but ONE operator-facing line on
 # stderr reporting that the wall took an action on the operator's behalf (R5:
 # the auto-probe ran and passed) — distinct from LOUD, which reports a refusal.
@@ -567,7 +568,7 @@ TABLE='
 start|irrelevant-tool|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|empty-cwd|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|non-git-cwd-no-bionic|0|silent|Start gate — A2: a non-git cwd with no .bionic above it is not a project, so there is nothing to protect: OPEN, silent
-start|non-git-cwd-with-bionic|2|loud|Start gate — A2: the same non-git cwd INSIDE a project with an open run reaches the arming wall, which the old git-toplevel precondition hid entirely
+start|non-git-cwd-with-bionic|deny|loud|Start gate — A2: the same non-git cwd INSIDE a project with an open run reaches the arming wall, which the old git-toplevel precondition hid entirely
 start|no-plan|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|plan-names-no-step|0|silent|Start gate — any ambiguity, anywhere: OPEN, silent
 start|no-session-key|0|silent|Payload missing its session key — start: OPEN
@@ -576,7 +577,7 @@ start|foreign-attestation|0|silent-with-announce|Start gate — R5 attestation n
 start|attested|0|silent|Start gate — the positive pair: pass in silence
 start|attested-unbound|0|silent-with-announce|Start gate — engaged but UNBOUND session: the dispatch proceeds and the wall announces the newest-plan fallback it took (wave-session-bound-run AC-3), one line on stderr, exit 0
 start|probe-refuses|2|loud|Start gate — one of two surviving refusals under R5: the auto-probe itself genuinely fails (unwritable state dir), so the dispatch is REFUSED quoting the reason the probe gives
-start|patrol-unarmed|2|loud|Start gate — the arming wall: environment sound, brief well-formed, but no Patrol has stamped this session, so nothing would notice the dispatched agent dying — REFUSED with both re-arm commands named
+start|patrol-unarmed|deny|loud|Start gate — the arming wall: environment sound, brief well-formed, but no Patrol has stamped this session, so nothing would notice the dispatched agent dying — REFUSED with both re-arm commands named
 stop|irrelevant-tool|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|empty-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
 stop|non-git-cwd|0|silent|Stop gate — before the active-wave verdict: OPEN, silent
@@ -606,7 +607,17 @@ section "§7 rows driven as behaviour (AC-10)"
 while IFS='|' read -r surface cond want_exit want_loud row; do
   [ -n "$surface" ] || continue
   drive "$surface:$cond"
-  if [ "$DRV_ST" = "$want_exit" ]; then
+  # DENY = CLOSED on the start gate's one refusal wire (wave-19 T4, REQ-7): exit 0 with a
+  # PreToolUse deny verdict on stdout. The verdict, not the status, is the block.
+  if [ "$want_exit" = "deny" ]; then
+    _fd_deny=""
+    case "$DRV_OUT" in *'"permissionDecision":"deny"'*) _fd_deny=1 ;; esac
+    if [ "$DRV_ST" = "0" ] && [ -n "$_fd_deny" ]; then
+      ok "$surface/$cond refuses with a deny verdict — $row"
+    else
+      no "$surface/$cond refuses with a deny verdict — $row" "got exit $DRV_ST; stdout: $(printf '%s' "$DRV_OUT" | head -c 200)"
+    fi
+  elif [ "$DRV_ST" = "$want_exit" ]; then
     ok "$surface/$cond exits $want_exit — $row"
   else
     no "$surface/$cond exits $want_exit — $row" "got exit $DRV_ST; stderr: $(printf '%s' "$DRV_ERR" | head -1)"

@@ -1253,31 +1253,15 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 # awk/grep/sed pipeline, not the caller, keeps the two readings from ever disagreeing about
 # what one `current:` line says.
 #
-# AND A THIRD READER NOW, FOR THE SAME REASON AND UNDER THE SAME RULE (wave-18 REQ-3, D2;
-# A-T2.3). `payload/scripts/lib/fill.sh` asks whether the run's ledger is live and has no
-# poker to ask, so `_fill_current_field` carries this grammar — fence toggle and translation
-# included. It is not folded into this one: this BODY is what §CG of
-# tests/cross-gate-agreement.test.sh extracts as TEXT and evals beside `run_open`, where a
-# delegating body answers nothing, and re-pointing that suite is outside this row's declared
-# files. §32 of tests/session-poker.test.sh binds the pair instead — both driven for real
-# over one table of `current:` shapes, required to answer identically on every row — which is
-# §CG's own remedy for the duplication it polices. The fold belongs in the edit that
-# re-points §CG.
-_sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or "" if
-                               # no plan, no ## SDLC State section, or no current: line
-  local plan="$1" section
-  [ -n "$plan" ] && [ -f "$plan" ] || { printf ''; return 0; }
-  section="$(normalize_newlines "$plan" | awk '
-    /^[[:space:]]*```/ { fence = !fence; next }
-    fence { next }
-    /^## SDLC State/ { flag=1; next }
-    /^## / { flag=0 }
-    flag')"
-  printf '%s\n' "$section" \
-    | grep -E '^[[:space:]]*current[[:space:]]*:' \
-    | head -1 \
-    | sed -E 's/^[[:space:]]*current[[:space:]]*:[[:space:]]*//' \
-    | tr -d '[:space:]'
+# AND THE PARSER IS THE LIBRARY'S (wave-19 REQ-6, D7; AC-6.1). The fence-aware read described
+# above lives once, in `payload/scripts/lib/fill.sh`'s `_fill_current_field` (sourced above
+# with units.sh), which the stop wall's fill duty reads through as well. This name stays as a
+# one-line wrapper rather than disappearing: §CG of tests/cross-gate-agreement.test.sh
+# extracts it as text and drives it beside `run_open` with fill.sh sourced, and §32 of
+# tests/session-poker.test.sh drives it beside the library — a poker that called the library
+# directly would leave §32 comparing one function with itself.
+_sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or ""
+  _fill_current_field "$@"
 }
 
 # THE ONE GRAMMAR THIS REPO ALREADY HAS (Step-6 review-a C-5, review-b finding (c)/N-2).
@@ -4258,6 +4242,10 @@ EOF
       # token is the number at wave scale, `T<n>` at task scale, and empty when the two
       # disagree. The withhold above is exactly that empty answer, so the shape this arm was
       # built for — a wave table sitting at `current: T1` (§22g) — still fills nothing.
+      # ONE READ OF THE FIELD FOR THE WHOLE TICK (wave-19 REQ-6, D7): loaded here, in this
+      # shell, so every `$( )` reader below — the step, the approval gate, the unreadable
+      # report, the ready set — inherits the answer instead of parsing the plan again.
+      [ -n "$SCHED_PLAN" ] && _fill_current_load "$SCHED_PLAN"
       SCHED_CURRENT=""
       [ -n "$SCHED_PLAN" ] && SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
       SCHED_STEP=""

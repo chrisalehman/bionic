@@ -1082,6 +1082,64 @@ d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3" "$LED
 u_prompt "$d" "anything else ready?"
 fire "$d"; expect_block "69d: a rung equal to the ceiling names every ready row, T20 included" "T20"
 
+# ============================================================
+# 70: ONE PARSE PER STOP (wave-19 REQ-6, D7; AC-6.2). The fill duty asks three questions of
+# one plan — is the ledger live, which unit is it on, which rows are ready — and each used to
+# re-read the file: `current:` three times on every live Stop, the `## Tasks` table three
+# times at task scale. The answers are facts of the plan, which no Stop writes, so each is
+# read once. The instrument is the R2 PATH shim (record/wave-19-fixit-186/
+# step2-research-R2-fill-invariant.md Q4): an `awk` in front of PATH that logs its program
+# and execs the real one by ABSOLUTE path (a bare `exec awk` re-enters the shim). A parse is
+# counted by its program's own text, and 70g pins that each text is spelled once in its
+# library, so the count cannot go quietly to zero when a program is rewritten.
+PDG_SHIM="$(mktemp -d)"
+printf '%s\n' '#!/bin/bash' \
+  'a="$*"; a="${a//$'"'"'\n'"'"'/ }"; printf "%s\n" "${a:0:400}" >> "$PDG_AWKLOG"' \
+  'exec /usr/bin/awk "$@"' > "$PDG_SHIM/awk"
+chmod +x "$PDG_SHIM/awk"
+PDG_CUR_SIG='/^## SDLC State/ { flag = 1; next }'   # fill.sh's current: reader
+PDG_TBL_SIG='FOLDS THE ESCAPE'                      # units.sh's _units_read
+fire_counted() {  # <project> -> fire, with every awk this Stop runs logged to $PDG_AWKLOG
+  local _path="$PATH"
+  export PDG_AWKLOG="$1/awk.log"; : > "$PDG_AWKLOG"
+  PATH="$PDG_SHIM:$PATH"; fire "$1"; PATH="$_path"
+}
+pdg_count() { LC_ALL=C grep -cF -- "$1" "$PDG_AWKLOG"; }
+
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+ledger_roster "$d" acked T1
+u_prompt "$d" "merge the landed tree and tell me where we are"
+fire_counted "$d"
+expect_block "70a: the counted Stop still computes the ready set (wave scale), naming T2" "T2"
+expect_eq "70b: …after ONE read of current: (the gate, the step token and the set share it)" \
+  "1" "$(pdg_count "$PDG_CUR_SIG")"
+expect_eq "70c: …and ONE parse of the table" "1" "$(pdg_count "$PDG_TBL_SIG")"
+
+# Task scale: `current: T<n>` against a table of units, where the step token asks the header
+# twice (`units_has_column` step, then id) before the ready set reads the rows.
+d=$(make_env_ledger T2)
+{
+  printf -- '---\ngoverning-skill: canonical-sdlc\n%s\n---\n\n# fixture task plan\n\n' "$LEDGER_BUDGET"
+  printf '## SDLC State\n\ncurrent: T2\n\n## Tasks\n\n'
+  printf '| id | intent | rigor | description | status | worktree |\n|---|---|---|---|---|---|\n'
+  printf '| T1 | bugfix | standard | the done unit | done | — |\n'
+  printf '| T2 | bugfix | standard | the unit the run is on | pending | — |\n'
+  printf '| T3 | bugfix | standard | the next unit | pending | — |\n'
+} > "$d/.bionic/docs/plans/$PLAN_REL"
+u_prompt "$d" "carry on"
+fire_counted "$d"
+expect_block "70d: the counted Stop still computes the ready set (task scale), naming T2" "T2"
+expect_eq "70e: …after ONE read of current:" "1" "$(pdg_count "$PDG_CUR_SIG")"
+expect_eq "70f: …and ONE parse of the table, the header questions included" \
+  "1" "$(pdg_count "$PDG_TBL_SIG")"
+
+# 70g: THE COUNTER'S OWN CONTROL. Each signature is spelled exactly once in its library, so a
+# zero above is a reader that stopped running, never a program that changed its text.
+expect_eq "70g: fill.sh spells the current: reader's program once" \
+  "1" "$(LC_ALL=C grep -cF -- "$PDG_CUR_SIG" "${HOOK_SRC%/*}/fill.sh")"
+expect_eq "70g: …and units.sh the table parse's" \
+  "1" "$(LC_ALL=C grep -cF -- "$PDG_TBL_SIG" "${HOOK_SRC%/*}/units.sh")"
+
 unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ============================================================
