@@ -836,5 +836,34 @@ expect_contains "B13n4 …and the budget it prints holds the pipe, not the encod
   "(a|b).spec.ts" "$VERR"
 expect_absent "B13n5 …with no percent-encoding shown to the reader" "%7C" "$VERR"
 
+# ---- B13o/B13p (epic-23 wave-18, T5; REQ-8 AC-8.1, D12): TWO declared runs, both on the
+# budget, an undeclared third still refused ----
+#
+# THE CONTROL FOR THE DISPATCH-SIDE FIX. `tests/dispatch-preflight.test.sh` 18T5a proves the
+# LIFT reads two runs back onto the roster row; this is the far end, over a row the
+# production writer built the same way B13m/B13n above prove it for one run — the
+# suite-run wall (`_run_is_declared`, `payload/scripts/lib/walls.sh`) loops every
+# backtick-marked run on `re_executes=`, so a row declaring two must admit either one, and
+# still refuse a run neither declares.
+#
+# fails-when: the second declared run is refused, or the undeclared control is admitted.
+R13G=$(mk_repo b13g)
+add_row "$R13G" name=w-b13g "agent_id=$ACTOR" \
+  suites_source=declared files=src/widget.ts \
+  "re_executes=\`npx jest --testPathPatterns 'x'\` \`pytest tests/unit\`"
+
+guarded "$R13G" "npx jest --testPathPatterns 'x'"
+expect_eq "B13o the first declared run is allowed" "0" "$ST"
+expect_empty "B13o …silently" "$OUT$ERR"
+
+guarded "$R13G" 'pytest tests/unit'
+expect_eq "B13o2 the second declared run is allowed too" "0" "$ST"
+expect_empty "B13o2 …silently" "$OUT$ERR"
+
+guarded "$R13G" 'go test ./...'
+expect_eq "B13p a run NEITHER declared run named is still REFUSED" "2" "$ST"
+expect_contains "B13p …naming the run that was asked for" "go test" "$VERR"
+expect_contains "B13p …and calling itself a BUDGET, not a wall" "BUDGET" "$VERR"
+
 
 finish
