@@ -7010,6 +7010,23 @@ expect_status "16la …and the roster row carries the run, marks and all" \
 expect_status "16la …with the waiver still recorded as the declared suite set" \
   "none" "$(roster_field "$ROW" suites_allowed)"
 
+# ---- AC-8.1 (T5, REQ-8, D12): a span WITHIN the cap reads back every run it declared ----
+# THE CONTROL FOR AC-8.2 BELOW. Two runs is under `RUNS_MAX` (3), so neither the cap-hit
+# refusal nor its own drop field should ever fire here — the lift reads back exactly what
+# was declared, space-joined, marks and all, and the dispatch is ADMITTED. Without this row
+# a broken lift that dropped every second run, or one that refused ANY multi-run span, could
+# pass 16le/16lf below green for the wrong reason.
+REPO=$(make_repo r18t5a yes)
+write_attestation "$REPO" "$SID_A"
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
+Expected artifact: .bionic/docs/record/w18-t5a.md
+Expected duration: ~20 minutes.
+Re-executes: ${RL_JEST} ${RL_PYTEST}" "w18-t5a")"
+expect_status "18T5a a two-run span, under the cap, is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "18T5a …and the lift reads BOTH runs back, in order" \
+  "$RL_JEST $RL_PYTEST" "$(roster_field "$ROW" re_executes)"
+
 # ---- AC-1.2: the auditor arm reads BOTH spellings, and its Fix text shows both ----
 # Row 1 of the seed's §7 table: a named suite list is admitted (33c drives this too; it is
 # repeated here as this section's own control, at the same fixture shape as rows 2 and 3).
@@ -7212,20 +7229,33 @@ expect_empty "18T4b3 …and no roster row was written for the refused dispatch" 
 expect_contains "18T4c the detail names the unquoted pipe" "an unquoted pipe" "$GATE_VERR"
 expect_absent "18T4c2 …and no longer calls every pipe plumbing" \
   "carrying a pipe" "$GATE_VERR"
+# THE EVIDENCE MUST SHOW THE CHARACTER IT NAMES (T5, T4 carry-over). `C_RUNS_BAD` used to
+# be sanitized with no field name, so `sanitize` folded this token's `|` to a space — the
+# detail said "a pipe" beside a token that, as printed, no longer carried one. Passing the
+# `re_executes` field name (the same case that keeps `re_executes=` itself pipe-intact)
+# keeps the character in the evidence the classification names.
+expect_contains "18T4c3 …and the shown token still carries the pipe it names" \
+  "tests/x.test.sh | tee out" "$GATE_VERR"
 
-# ---- AC-1.6: at most three runs, loudly; and unmarked text is not a run ----
+# ---- AC-8.2 (T5, REQ-8, D12), supersedes AC-1.6: an over-cap span is REFUSED, naming the
+# dropped run; unmarked text is not a run ----
+# WHAT WAS WRONG. A four-run span used to be ADMITTED with three of the four on the row and
+# a `warn()` line nobody in particular reads; the fourth run was left for the writer-side
+# budget arm to refuse 40 minutes later, as undeclared, for a fact the author was never told
+# at dispatch — the same shape T3 (REQ-8) closed for a dropped `Suites:` token. `RUNS_MAX`
+# (3) is unchanged; only the fourth-and-up runs fate is.
 REPO=$(make_repo r16le yes)
 write_attestation "$REPO" "$SID_A"
 run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the evidence.
 Expected artifact: .bionic/docs/record/w16-cap.md
 Expected duration: ~20 minutes.
 Re-executes: ${RL_JEST} ${RL_PYTEST} ${RL_GO} ${RL_NPM}" "w16-cap")"
-expect_status "16le a four-run span is ADMITTED" "0" "$GATE_ST"
-ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
-expect_status "16le …with exactly the first three runs on the row, in order" \
-  "$RL_JEST $RL_PYTEST $RL_GO" "$(roster_field "$ROW" re_executes)"
-expect_contains "16le …and the cap hit is LOUD, never silent" \
+expect_status "16le a four-run span is REFUSED" "2" "$GATE_ST"
+expect_contains "16le …naming the fourth (dropped) run" "npm test" "$GATE_VERR"
+expect_contains "16le …and the fact names the 3-run cap" \
   "exceeds the 3-run cap" "$GATE_ERR"
+expect_empty "16le …with no roster row written for the refused dispatch" \
+  "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
 
 REPO=$(make_repo r16lf yes)
 write_attestation "$REPO" "$SID_A"

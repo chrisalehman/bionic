@@ -1847,9 +1847,14 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
     # that reading was defending against is solved where it lives, in the row
     # (`payload/scripts/lib/roster.sh` escapes the field), not by refusing the command.
     #
-    # A CAP HIT IS LOUD, the `suite_names()` precedent: a silently dropped fourth run is a
-    # declared command the budget arm would then refuse at run time, for a reason the author
-    # was never told.
+    # A CAP HIT IS A REFUSAL, NOT A WARNING (T5, REQ-8, D12). The bad-token drop on
+    # `suite_names()` above (`suites_dropped=`, two screens up) is the precedent this
+    # follows, not its own cap-warn sibling: a run dropped here is a run the author
+    # declared and the writer-side budget arm would then refuse at run time, 40 minutes
+    # later, for a reason the author was never told at dispatch — so admitting the
+    # dispatch with three of the four runs on the roster is the same hole `suites_dropped=`
+    # closed for `Suites:`, reopened for `Re-executes:`. `RUNS_MAX` (3) is unchanged; it is
+    # the ceiling on the declaration, never a bound the field silently narrows to.
     # WHETHER A TOKEN CARRIES A PIPE THE SHELL WOULD READ AS PLUMBING (T4; REQ-7, D4).
     #
     # THE STATE MACHINE IS THE ONE THE SHELL USES, minus what a `|` cannot escape into: a single
@@ -1918,8 +1923,12 @@ lift_contract_fields() {  # <brief text> -> `kind=value` lines, absent kinds omi
           dropped = (dropped == "" ? BT tok BT : dropped " " BT tok BT)
         }
       }
+      # NAMED, NOT WARNED (T5, REQ-8, D12): `re_executes_dropped=` reaches the same refusal
+      # channel `suites_dropped=` does — read by the bash side below, which turns a non-empty
+      # value into a `dp_finding` — never `warn()`, which is the several-fault ADMIT wire the
+      # old `re_executes_capwarn=` field used.
       if (dropped != "") {
-        print "re_executes_capwarn=Re-executes: line exceeds the " RUNS_MAX "-run cap — dropped: " dropped
+        print "re_executes_dropped=" dropped
       }
       return out
     }
@@ -2284,11 +2293,14 @@ C_SUITES_CAPWARN=$(field_of suites_capwarn)
 [ -n "$C_SUITES_CAPWARN" ] && warn "$C_SUITES_CAPWARN"
 C_FILES_CAPWARN=$(field_of files_capwarn)
 [ -n "$C_FILES_CAPWARN" ] && warn "$C_FILES_CAPWARN"
-# The runs cap (REQ-1 AC-1.6), on the same pipe and the same `warn` as the two above: a
-# fourth declared run is DROPPED, and a silently dropped declaration is a command the
-# writer-side budget arm would refuse at run time for a reason the author was never told.
-C_RUNS_CAPWARN=$(field_of re_executes_capwarn)
-[ -n "$C_RUNS_CAPWARN" ] && warn "$C_RUNS_CAPWARN"
+# THE RUNS CAP IS NOT ON THIS LIST (T5, REQ-8, D12). Until this wave a fourth declared run
+# came through here as `re_executes_capwarn=` — the same warn-and-admit shape as the two
+# caps above — so a brief that named four runs was DISPATCHED with three of them on the
+# roster and no line telling the author the fourth was silently cut. `SUITES_MAX`/`FILES_MAX`
+# bound a ROW FIELD's width, which is a storage limit nobody chose to hit; `RUNS_MAX` bounds
+# the DECLARATION itself (`marked_runs()`'s own comment, two screens up), which the author
+# chose and can fix at dispatch. `re_executes_dropped=`, read beside `C_SUITES_DROPPED`
+# below, carries this fact to a `dp_finding` refusal instead.
 C_DELIVERABLE=$(sanitize "$(field_of deliverable)" 300)
 # Never both: the extractor prints ONE of these two, so a non-empty list here means
 # `deliverable=` is empty and the ambiguity wall below owns the dispatch.
@@ -2319,13 +2331,26 @@ C_RE_EXECUTES=$(sanitize "$(field_of re_executes)" 900 re_executes)
 # one of these per bad token (`field_of` returns the first, which is the one the author fixes
 # first); a value present means the span carried something that is not a literal command or a
 # literal suite name, and the token is in the value.
-C_RUNS_BAD=$(sanitize "$(field_of re_executes_bad)" 300)
+#
+# THE FIELD NAME IS `re_executes` (T5, T4 carry-over). Without it, `sanitize` folds this
+# value's `|` to a space — the fold every field but `re_executes` keeps — so a pipe-fault
+# token showed a detail that SAID "a pipe" while DISPLAYING a token with none, the exact
+# character the classification named having been erased from the evidence beside it. The
+# same case in `sanitize` that keeps `re_executes=` itself pipe-intact (immediately above)
+# applies here for the identical reason: this value is read by a human, not compared
+# against anything, and it is at most one command wide — the 300-char cut this case also
+# lifts is not a budget any real single command threatens.
+C_RUNS_BAD=$(sanitize "$(field_of re_executes_bad)" 300 re_executes)
 C_SUITES_BAD=$(sanitize "$(field_of suites_bad)" 300)
 # A Suites: TOKEN THE FILTER DROPPED (T3, REQ-8) — `suite_names()` records the exact
 # tokens whose basename is neither `*.test.sh` nor a path-qualified `run.sh`, the literal
 # waiver `none` excepted. Read here so the arm below can refuse on it by name, before the
 # no-instrument arm gets a chance to see an empty `suites=` and blame the wrong thing.
 C_SUITES_DROPPED=$(sanitize "$(field_of suites_dropped)" 300)
+# A Re-executes: RUN THE CAP DROPPED (T5, REQ-8, D12) — `marked_runs()` records the exact
+# backtick-marked runs past `RUNS_MAX`, mirroring `C_SUITES_DROPPED` immediately above.
+# `RUNS_MAX` (3) is unchanged; only the fourth-and-up run's fate is.
+C_RUNS_DROPPED=$(sanitize "$(field_of re_executes_dropped)" 300)
 # A Suites: SPAN THAT WAS ENTIRELY A COMMENT (T35, critic C9). Not a fault of its own and
 # not a fifth guard on the no-instrument arm below — the brief really does carry no budget,
 # so it really is refused. This says WHICH of the two shapes the author wrote, so the arm's
@@ -2757,6 +2782,29 @@ Fix: mark each run with backticks, on a line of its own, at most three —
 
 Then retry the dispatch."
   dp_finding "a declared run is not a literal command" "spell each run literally" "$_dp_detail"
+fi
+
+# AN OVER-CAP Re-executes: BRIEF IS REFUSED (T5, REQ-8, D12; mirrors the Suites: dropped-
+# token refusal directly below, wave-17 T3). Until now a fourth backtick-marked run fell
+# off `marked_runs()` with a loud `warn()` line but the dispatch was still ADMITTED — the
+# roster row carried three of the four runs the author declared, and the fourth was refused
+# by the writer-side budget arm 40 minutes later as undeclared, for a fact the author was
+# never told at dispatch. `RUNS_MAX` (3) is unchanged; a brief within the cap never reaches
+# this arm.
+if [ -n "$C_RUNS_DROPPED" ]; then
+  _dp_detail="The Re-executes: span named more runs than the 3-run cap admits, and this one
+was dropped:
+    ${C_RUNS_DROPPED}
+
+Every declared run goes on the roster row, and the writer-side budget arm compares the
+agent's own command against exactly that set — a run dropped here is a command that would
+be refused there 40 minutes later, for running exactly what its own brief had named.
+
+Fix: mark at most three runs with backticks, one line —
+    Re-executes: \`npx jest --testPathPatterns 'x'\`, \`pytest tests/unit\`, \`go test ./...\`
+
+Then retry the dispatch."
+  dp_finding "Re-executes: line exceeds the 3-run cap" "declare at most three runs" "$_dp_detail"
 fi
 
 if [ -n "$C_SUITES_BAD" ]; then
