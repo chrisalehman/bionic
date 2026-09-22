@@ -375,7 +375,7 @@ SURVIVAL_BLOCK="${REPO}/agents-src/blocks/survival.md"
 AGENT_RULES="${REPO}/.claude/rules/agent-discipline.md"
 
 # The four pinned strings, spelled here exactly as they must appear on disk.
-PIN_PROBE='`resources_probe` and `resources_budget` from `<plugin-root>/scripts/lib/resources.sh` yield the run'"'"'s `parallel-budget:` — one string, recorded verbatim in plan frontmatter, printed in the display, and never re-derived downstream.'
+PIN_PROBE='`resources_probe` prints `cores=… mem_gb=… disk_free_gb=…`; `resources_budget <cores> <mem_gb> <disk_free_gb>` yields the run'"'"'s `parallel-budget:`, verbatim in plan frontmatter, displayed, never re-derived downstream.'
 # RE-POINTED AT THE CORRECTED DOCTRINE (Step-6 architecture A-2). The old needle pinned
 # `dispatches in one batch up to `writers`` — the ceiling, unregulated — while the tick fills
 # to the RUNG off a live-trimmed open count, so the pin was holding a contradiction green. A
