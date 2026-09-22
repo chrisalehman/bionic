@@ -2070,6 +2070,10 @@ expect_contains "…and prints HOLD with the free-memory reading" "poker: HOLD f
 expect_contains "…and the load reading beside it" "load_1m=1.0" "$OUT"
 expect_contains "…saying plainly that nothing is being filled" "no fills" "$OUT"
 expect_absent "…and fills nothing, though a ready task and a gap both exist" "poker: FILL" "$OUT"
+# THE WITHHELD LINE (wave-19 REQ-4 AC-4.1, D6). The stop wall exempts a tick turn from the
+# fill invariant only on this line, so the HOLD path prints it beside its measurement.
+expect_contains "11a2 …and prints the withheld line the stop wall reads, with the measurement" \
+  "poker: fill withheld — HOLD free_mb=512 load_1m=1.0" "$OUT"
 
 # The paired positive: the SAME repo, the SAME plan, with the machine reading healthy.
 # Without it, 11a passes on a tick that can never fill anything.
@@ -2077,6 +2081,7 @@ poke_pressure "$R11A" 8192 1.0 tick
 expect_contains "the same fixture with memory to spare DOES fill (11a discriminates)" \
   "poker: FILL NEXT" "$OUT"
 expect_absent "…and prints no HOLD" "poker: HOLD" "$OUT"
+expect_absent "11a3 …and withholds nothing" "fill withheld" "$OUT"
 
 # ---------- 11b: ONE rung line per tick, on QUIET and on FILL alike (AC-17) ----------
 #
@@ -2291,7 +2296,8 @@ wave_plan "$R11C6" "-" "| A | 4 | build | fixture task | implementor | — | 15m
 poke_rung "$R11C6" 60 0 tick
 expect_contains "a plan with no parallel-budget still prints the rung line" \
   "poker: rung=-/- writers=- test_jobs=-" "$OUT"
-expect_contains "…and says why it is not filling" "no readable parallel-budget" "$OUT"
+expect_contains "…and says why it is not filling, naming the key (wave-19 REQ-3 AC-3.2)" \
+  "carries no parallel-budget: writers=" "$OUT"
 
 # ---------- 11c3: NARROW and its counter file are GONE (AC-17) ----------
 #
@@ -2375,6 +2381,8 @@ expect_contains "…naming the YOUNGEST suite-running writer, at the stop addres
 expect_absent "…never the older one" "old-suite-runner@" "$OUT"
 expect_absent "…and never a writer that claimed no suite" "no-claim-writer@" "$OUT"
 expect_absent "…and fills nothing at the kill floor" "poker: FILL" "$OUT"
+expect_contains "11d2 …and prints the withheld line the stop wall reads, with the measurement" \
+  "poker: fill withheld — EMERGENCY free_mb=100" "$OUT"
 
 # A roster with no suite-claiming row says so rather than naming a writer at random: the
 # pressure is real and it is not this session's to relieve.
@@ -2386,6 +2394,8 @@ add_row "$R11E" status=intended name=quiet-writer deliverable=a.md duration="4 h
 poke_pressure "$R11E" 100 1.0 tick
 expect_contains "an EMERGENCY with no suite-running writer names no one" \
   "no suite-running writer on this roster to stop" "$OUT"
+expect_contains "11e2 …and still withholds the fill, by its measurement" \
+  "poker: fill withheld — EMERGENCY free_mb=100" "$OUT"
 
 # ---------- 11f: an unreadable reading is ZERO FREE MEMORY, and that is the kill floor ----
 #
@@ -2651,7 +2661,8 @@ wave_plan "$R12D" "-" \
 poke_pressure "$R12D" 8192 1.0 tick
 expect_eq "a plan with no parallel-budget line still ticks cleanly (exit 0)" "0" "$RC"
 expect_absent "…and fills nothing" "poker: FILL" "$OUT"
-expect_contains "…naming the missing field as the reason" "no readable parallel-budget: writers field" "$OUT"
+expect_contains "…naming the missing key as the reason, as Step 0 writes it" \
+  "carries no parallel-budget: writers=<n>" "$OUT"
 
 # ---------- 12e: a pending task with an unlanded dependency is not ready ----------
 R12E="$(make_repo s12-unlanded-dep)"; new_roster "$R12E"
@@ -2811,6 +2822,43 @@ sp_plan_at_step "$R12K3" 6 \
 poke_pressure "$R12K3" 8192 1.0 tick
 expect_contains "a step with no ready row says which step it asked about" \
   "no pending step-6 task has all its dependencies landed" "$OUT"
+
+# 12l — THE DIFFERENTIAL (wave-19 REQ-5 AC-5.2, D6; ADR-034 decision 2). The tick and the
+# stop wall now count ONE occupancy — this session's roster rows that are not acked — so on
+# the fixture where the roster and the plan disagree they must name the same rows. The
+# mismatch: BASE is `landed` in the plan (no `active` row anywhere) while its roster row is
+# still open (never acked; its deliverable is not on disk). writers=2, one open → gap one.
+# The tick fills ONE. Pre-fix the wall read the plan's `active` column (zero) and named
+# ONE and TWO; post-fix it reads the roster and names ONE. The row carries no `agent_id=`,
+# so the landing gate in the same Stop hook cannot place it and stays out of the verdict.
+STOP_HOOK_12L="${BIONIC_HOOKS_DIR}/stop.sh"
+R12L="$(make_repo s12-differential)"; new_roster "$R12L"
+wave_plan "$R12L" "writers=2 suites=2 worktrees=8 test_jobs=8 source=probe" \
+  "| BASE | 4 | build | landed, its row still open on the roster | implementor | — | 15m | REQ-x | a.sh | landed |" \
+  "| ONE | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |" \
+  "| TWO | 4 | build | fixture task | implementor | BASE | 15m | REQ-x | a.sh | pending |"
+add_row "$R12L" status=intended name=BASE agent_id= deliverable="$R12L/.bionic/docs/record/base.md" \
+  duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R12L" 8192 1.0 tick
+# The FILL line proper — `poker: FILL <ids>` — not the later `poker: FILL — … named for
+# dispatch` echo beside the decision line (session-poker.sh, the decision block).
+S12L_TICK="$(printf '%s\n' "$OUT" | /usr/bin/grep '^poker: FILL [A-Za-z0-9]' | head -1 | sed 's/^poker: FILL //' \
+  | tr ' ' '\n' | /usr/bin/grep -v '^$' | sort | tr '\n' ' ')"
+# The wall, on the same repo: an ordinary (non-tick) turn that dispatched nothing.
+S12L_TR="$R12L/transcript-12l.jsonl"
+jq -nc '{type:"user",isSidechain:false,userType:"external",message:{role:"user",content:"where are we?"}}' > "$S12L_TR"
+S12L_OUT="$(cd "$R12L" && jq -nc --arg t "$S12L_TR" --arg c "$R12L" --arg s "$SID" \
+  '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}' \
+  | env CLAUDE_CODE_SESSION_ID="$SID" BIONIC_PRESSURE_RING="$TMPROOT/ring-12l" BIONIC_PROBE_FREE_PCT=80 \
+      BIONIC_PROBE_SWAP_PCT=0 BIONIC_PROBE_LOAD_1M=1.0 bash "$STOP_HOOK_12L" 2>/dev/null)"
+S12L_REASON="$(printf '%s' "$S12L_OUT" | jq -r '.reason // ""' 2>/dev/null)"
+S12L_WALL=""
+for _id in BASE ONE TWO; do
+  case " $(printf '%s' "$S12L_REASON" | tr -c 'A-Za-z0-9_.-' ' ') " in *" $_id "*) S12L_WALL="${S12L_WALL}${_id} " ;; esac
+done
+expect_eq "12l the tick fills one row against one open roster row (the fixture discriminates)" \
+  "ONE " "$S12L_TICK"
+expect_eq "12l2 AC-5.2 the stop wall names exactly the ids the tick filled" "$S12L_TICK" "$S12L_WALL"
 
 # ============================================================
 section "Section 13: the absent roster splits — QUIET before the first dispatch (AC-38)"
@@ -4875,8 +4923,10 @@ expect_contains "27g the stale-panel deferral prints as a note" \
   "poker: note: stand-down deferred" "$S27_OUT"
 expect_contains "27g2 …the missing budget prints as a note" \
   "poker: note: no FILL —" "$S27_OUT"
-expect_contains "27g3 …and names the field it could not read" \
-  "parallel-budget: writers" "$S27_OUT"
+expect_contains "27g3 …and names the key it could not read, as Step 0 writes it" \
+  "parallel-budget: writers=" "$S27_OUT"
+expect_absent "27g3b …and no longer calls the budget an opt-in (wave-19 REQ-3, ADR-035)" \
+  "opts into" "$S27_OUT"
 expect_eq "27g4 the LAST stdout line is the decision line" "poker-tick/v1" \
   "$(printf '%s' "$(last_line "$S27_OUT")" | cut -d'|' -f1)"
 expect_contains "27g5 …and that line is QUIET, the band the facts leave" "decision=QUIET" \
