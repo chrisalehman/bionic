@@ -5049,7 +5049,7 @@ expect_eq "28f2 …on the row this adopt wrote, not on a second one" "1" \
   "$(/usr/bin/grep -c 'source=adopted' "$(roster_of "$R28F")" || true)"
 
 # ============================================================
-section "Section 29: the ledger is live at task scale — the tick fills, and the wall agrees (wave-18 REQ-3, AC-3.1/AC-3.3; ADR-033 d2)"
+section "Section 31: the ledger is live at task scale — the tick fills, and the wall agrees (wave-18 REQ-3, AC-3.1/AC-3.3; ADR-033 d2)"
 # ============================================================
 #
 # THE RUN SHAPE THAT REPORTED THE FRICTION. A task-scale plan carries six columns and a
@@ -5068,7 +5068,7 @@ section "Section 29: the ledger is live at task scale — the tick fills, and th
 # same ones back when the turn ends without dispatching them. A row that drove only the tick
 # would leave the invariant's whole point — that the two cannot disagree — unpinned.
 
-s29_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2/T3 pending
+s31_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2/T3 pending
   local repo="$1" cur="$2"
   local f="$repo/.bionic/docs/plans/epic-01-task-scale/task-01-fixture.plan.md"
   mkdir -p "$(dirname "$f")"
@@ -5090,27 +5090,27 @@ s29_task_plan() {  # <repo> <current> -> the path; six columns, T1 in flight, T2
   printf '%s' "$f"
 }
 
-# ---------- 29a: the tick fills a task-scale ledger, in table order ----------
-R29A="$(make_repo s29-task-fill)"; new_roster "$R29A"
-s29_task_plan "$R29A" T1 >/dev/null
-add_row "$R29A" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
-poke_pressure "$R29A" 8192 1.0 tick
-expect_eq "29a a task-scale plan ticks cleanly (exit 0)" "0" "$RC"
-expect_contains "29a2 …and fills the two pending rows, in table order" \
+# ---------- 31a: the tick fills a task-scale ledger, in table order ----------
+R31A="$(make_repo s29-task-fill)"; new_roster "$R31A"
+s31_task_plan "$R31A" T1 >/dev/null
+add_row "$R31A" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
+poke_pressure "$R31A" 8192 1.0 tick
+expect_eq "31a a task-scale plan ticks cleanly (exit 0)" "0" "$RC"
+expect_contains "31a2 …and fills the two pending rows, in table order" \
   "poker: FILL T2 T3" "$OUT"
-expect_absent "29a3 …never the unreadable wording — T<n> is this repo's other current: shape" \
+expect_absent "31a3 …never the unreadable wording — T<n> is this repo's other current: shape" \
   "plan current: unreadable" "$OUT"
-expect_absent "29a4 …and the row in flight is not offered again" "FILL T1" "$OUT"
+expect_absent "31a4 …and the row in flight is not offered again" "FILL T1" "$OUT"
 
-# ---------- 29b: the wall names the same two rows when the turn dispatched neither ----------
+# ---------- 31b: the wall names the same two rows when the turn dispatched neither ----------
 #
 # Driven through the SHIPPED Stop process (hooks/stop.sh), on the same fixture the tick just
 # ran on: same plan, same roster, same session. The transcript holds an ordinary user turn —
 # no Patrol tick in it at all, which is the whole point: before this wave the duty was
 # derivative of a tick having printed a line, so a turn that simply ended with work ready and
 # nobody dispatched ended in silence.
-S29_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
-s29_transcript() {  # <repo> <text>... -> the transcript path
+S31_STOP_HOOK="${BIONIC_HOOKS_DIR}/stop.sh"
+s31_transcript() {  # <repo> <text>... -> the transcript path
   local repo="$1"; shift
   local tr="$repo/transcript.jsonl"
   : > "$tr"
@@ -5121,43 +5121,43 @@ s29_transcript() {  # <repo> <text>... -> the transcript path
   done
   printf '%s' "$tr"
 }
-s29_stop() {  # <repo> <transcript> -> sets S29_OUT, S29_RC
-  S29_OUT="$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$S29_STOP_HOOK" <<EOF 2>/dev/null
+s31_stop() {  # <repo> <transcript> -> sets S31_OUT, S31_RC
+  S31_OUT="$(env CLAUDE_CODE_SESSION_ID="$SID" bash "$S31_STOP_HOOK" <<EOF 2>/dev/null
 $(jq -nc --arg t "$2" --arg c "$1" --arg s "$SID" \
    '{session_id:$s,transcript_path:$t,cwd:$c,hook_event_name:"Stop",stop_hook_active:false}')
 EOF
 )"
-  S29_RC=$?
+  S31_RC=$?
 }
-s29_reason() { printf '%s' "$S29_OUT" | jq -r '.reason // ""' 2>/dev/null; }
-s29_decision() { printf '%s' "$S29_OUT" | jq -r '.decision // ""' 2>/dev/null; }
+s31_reason() { printf '%s' "$S31_OUT" | jq -r '.reason // ""' 2>/dev/null; }
+s31_decision() { printf '%s' "$S31_OUT" | jq -r '.decision // ""' 2>/dev/null; }
 
-S29_TR="$(s29_transcript "$R29A" "have a look at the next two units")"
-s29_stop "$R29A" "$S29_TR"
-expect_eq "29b the turn is refused — the ledger is live and two rows are ready" \
-  "block" "$(s29_decision)"
-expect_contains "29b2 …naming T2, the first ready row" "T2" "$(s29_reason)"
-expect_contains "29b3 …and T3, the second — named, not counted" "T3" "$(s29_reason)"
-expect_contains "29b4 …and saying what answers it" "fill-declined:" "$(s29_reason)"
+S31_TR="$(s31_transcript "$R31A" "have a look at the next two units")"
+s31_stop "$R31A" "$S31_TR"
+expect_eq "31b the turn is refused — the ledger is live and two rows are ready" \
+  "block" "$(s31_decision)"
+expect_contains "31b2 …naming T2, the first ready row" "T2" "$(s31_reason)"
+expect_contains "31b3 …and T3, the second — named, not counted" "T3" "$(s31_reason)"
+expect_contains "31b4 …and saying what answers it" "fill-declined:" "$(s31_reason)"
 
-# ---------- 29c: the same turn, with the rows dispatched, ends in silence ----------
+# ---------- 31c: the same turn, with the rows dispatched, ends in silence ----------
 #
 # The discharge the tick-printed duty already had, on the ids this arm computed itself: an
 # `Agent` tool_use naming each row answers for it.
-R29C="$(make_repo s29-task-dispatched)"; new_roster "$R29C"
-s29_task_plan "$R29C" T1 >/dev/null
-add_row "$R29C" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
-S29C_TR="$(s29_transcript "$R29C" "dispatch the batch")"
+R31C="$(make_repo s29-task-dispatched)"; new_roster "$R31C"
+s31_task_plan "$R31C" T1 >/dev/null
+add_row "$R31C" name=T1 deliverable=t1.md duration="4 hours" launched_at="$(iso_ago 60)"
+S31C_TR="$(s31_transcript "$R31C" "dispatch the batch")"
 jq -nc '{type:"assistant",isSidechain:false,
          message:{role:"assistant",content:[
            {type:"tool_use",id:"toolu_1",name:"Agent",input:{name:"T2",prompt:"row T2"}},
            {type:"tool_use",id:"toolu_2",name:"Agent",input:{name:"T3",prompt:"row T3"}}]}}' \
-  >> "$S29C_TR"
-s29_stop "$R29C" "$S29C_TR"
-expect_eq "29c a turn that dispatched both ready rows is not refused" "" "$(s29_decision)"
+  >> "$S31C_TR"
+s31_stop "$R31C" "$S31C_TR"
+expect_eq "31c a turn that dispatched both ready rows is not refused" "" "$(s31_decision)"
 
 # ============================================================
-section "Section 30: two readers of the current: field, bound by this row (wave-18 REQ-3, D2; A-T2.3)"
+section "Section 32: two readers of the current: field, bound by this row (wave-18 REQ-3, D2; A-T2.3)"
 # ============================================================
 #
 # WHAT IS DUPLICATED, AND WHY IT IS NOT FOLDED. The stop library's fill duty has to know
@@ -5175,19 +5175,19 @@ section "Section 30: two readers of the current: field, bound by this row (wave-
 # one table of shapes, the poker's extracted the way §CG extracts it, and the row fails the
 # moment either moves without the other.
 
-S30_LIB_DIR="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" 2>/dev/null && pwd -P)" \
-  || S30_LIB_DIR="$(cd "${BIONIC_HOOKS_DIR}/../scripts/lib" && pwd -P)"
+S32_LIB_DIR="$(cd "${BIONIC_HOOKS_DIR}/../payload/scripts/lib" 2>/dev/null && pwd -P)" \
+  || S32_LIB_DIR="$(cd "${BIONIC_HOOKS_DIR}/../scripts/lib" && pwd -P)"
 
-s30_poker_read() {  # <plan> -> _sched_plan_current_field's answer, extracted and eval'd
-  ( . "$S30_LIB_DIR/run.sh" >/dev/null 2>&1      # normalize_newlines is run.sh's
+s32_poker_read() {  # <plan> -> _sched_plan_current_field's answer, extracted and eval'd
+  ( . "$S32_LIB_DIR/run.sh" >/dev/null 2>&1      # normalize_newlines is run.sh's
     eval "$(awk '$0 ~ "^_sched_plan_current_field\\(\\)" {f=1} f{print; if ($0=="}") exit}' "$POKER")"
     _sched_plan_current_field "$1" ) 2>/dev/null
 }
-s30_fill_read() {  # <plan> -> _fill_current_field's answer, from the library itself
-  ( . "$S30_LIB_DIR/fill.sh" >/dev/null 2>&1; _fill_current_field "$1" ) 2>/dev/null
+s32_fill_read() {  # <plan> -> _fill_current_field's answer, from the library itself
+  ( . "$S32_LIB_DIR/fill.sh" >/dev/null 2>&1; _fill_current_field "$1" ) 2>/dev/null
 }
 
-s30_plan() {  # <label> <body...> -> a plan path carrying exactly the bytes given
+s32_plan() {  # <label> <body...> -> a plan path carrying exactly the bytes given
   local f="$TMPROOT/s30-$1.plan.md"; shift
   mkdir -p "$(dirname "$f")"
   printf '%s' "$1" > "$f"
@@ -5198,7 +5198,7 @@ s30_plan() {  # <label> <body...> -> a plan path carrying exactly the bytes give
 # real section, a second `## ` heading closing the section, a `current:` that lives only
 # inside the fence, no section at all, and a CR-only file (the line-ending case both readers
 # translate rather than delete).
-S30_LF='# p
+S32_LF='# p
 
 ## SDLC State
 
@@ -5206,13 +5206,13 @@ current: 4
 
 - Step 4: in progress
 '
-S30_T='# p
+S32_T='# p
 
 ## SDLC State
 
 current: T7
 '
-S30_FENCED='# p
+S32_FENCED='# p
 
 ```
 ## SDLC State
@@ -5224,7 +5224,7 @@ current: 9
 
 current: 5
 '
-S30_ONLY_FENCED='# p
+S32_ONLY_FENCED='# p
 
 ```
 ## SDLC State
@@ -5236,7 +5236,7 @@ current: 9
 
 | id |
 '
-S30_CLOSED='# p
+S32_CLOSED='# p
 
 ## SDLC State
 
@@ -5246,41 +5246,41 @@ S30_CLOSED='# p
 
 current: 7
 '
-S30_NOSECTION='# p
+S32_NOSECTION='# p
 
 current: 4
 '
-S30_SUBSTEP='# p
+S32_SUBSTEP='# p
 
 ## SDLC State
 
 current: 3b
 '
 
-s30_row() {  # <label> <body> <expected>
-  local f; f="$(s30_plan "$1" "$2")"
+s32_row() {  # <label> <body> <expected>
+  local f; f="$(s32_plan "$1" "$2")"
   local a b
-  a="$(s30_poker_read "$f")"
-  b="$(s30_fill_read "$f")"
-  expect_eq "30 the poker reads $1 as <$3>" "$3" "$a"
-  expect_eq "30 …and fill.sh answers the same on $1" "$a" "$b"
+  a="$(s32_poker_read "$f")"
+  b="$(s32_fill_read "$f")"
+  expect_eq "32 the poker reads $1 as <$3>" "$3" "$a"
+  expect_eq "32 …and fill.sh answers the same on $1" "$a" "$b"
 }
 
-s30_row "plain" "$S30_LF" "4"
-s30_row "substep" "$S30_SUBSTEP" "3b"
-s30_row "task-scale" "$S30_T" "T7"
-s30_row "fenced-decoy" "$S30_FENCED" "5"
-s30_row "only-fenced" "$S30_ONLY_FENCED" ""
-s30_row "closed-section" "$S30_CLOSED" ""
-s30_row "no-section" "$S30_NOSECTION" ""
+s32_row "plain" "$S32_LF" "4"
+s32_row "substep" "$S32_SUBSTEP" "3b"
+s32_row "task-scale" "$S32_T" "T7"
+s32_row "fenced-decoy" "$S32_FENCED" "5"
+s32_row "only-fenced" "$S32_ONLY_FENCED" ""
+s32_row "closed-section" "$S32_CLOSED" ""
+s32_row "no-section" "$S32_NOSECTION" ""
 
 # CR-only, the classic-Mac shape: a reader that DELETED the carriage returns would see one
 # line and answer nothing, and both of these translate instead.
-S30_CR="$(printf '# p\r\r## SDLC State\r\rcurrent: 6\r')"
-s30_row "cr-only" "$S30_CR" "6"
+S32_CR="$(printf '# p\r\r## SDLC State\r\rcurrent: 6\r')"
+s32_row "cr-only" "$S32_CR" "6"
 
 # A path that is not a file at all — the silent, empty answer both give.
-expect_eq "30 the poker answers nothing for a missing plan" "" "$(s30_poker_read "$TMPROOT/s30-absent.md")"
-expect_eq "30 …and so does fill.sh" "" "$(s30_fill_read "$TMPROOT/s30-absent.md")"
+expect_eq "32 the poker answers nothing for a missing plan" "" "$(s32_poker_read "$TMPROOT/s30-absent.md")"
+expect_eq "32 …and so does fill.sh" "" "$(s32_fill_read "$TMPROOT/s30-absent.md")"
 
 finish

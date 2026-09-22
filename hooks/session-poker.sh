@@ -1219,7 +1219,7 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 # included. It is not folded into this one: this BODY is what §CG of
 # tests/cross-gate-agreement.test.sh extracts as TEXT and evals beside `run_open`, where a
 # delegating body answers nothing, and re-pointing that suite is outside this row's declared
-# files. §30 of tests/session-poker.test.sh binds the pair instead — both driven for real
+# files. §32 of tests/session-poker.test.sh binds the pair instead — both driven for real
 # over one table of `current:` shapes, required to answer identically on every row — which is
 # §CG's own remedy for the duplication it polices. The fold belongs in the edit that
 # re-points §CG.
