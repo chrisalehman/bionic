@@ -2636,8 +2636,14 @@ write_plan "$h22b2" "$(task_plan_rigor tested "$v22b_t2_proof")" > /dev/null
 expect_allow "22b2 addressed row peer-reviewed active proof-shaped evidence → allow" \
   "$h22b2" 'git commit -m "x"'
 
-# 22b3 — a DONE non-addressed row (T1, peer-reviewed) with proof-shaped
-# evidence but no 'auditor' token → block (done needs auditor).
+# 22b3 — a DONE non-addressed row (T1, peer-reviewed) with proof-shaped evidence and no
+# 'auditor' token, while the run sits at `current: T2` → ALLOW (ADR-033, wave-18 REQ-1). The
+# verdict lanes are STEP-GATED: Step 5 produces the auditor verdict and Step 6 the critic, so
+# at `current: T<n>` no honest row can carry either, and demanding them is what left a
+# finished task with no true word to write. The row still owes its `- T1:` line and its proof
+# shape, which is what keeps this an allow about TIMING and nothing else (22c-t3 pins the
+# line, 22b8a/b the shape). The demand itself lives at 25gT(i) now, where the run has reached
+# Step 6 and the verdict can exist.
 v22b_t1_no_auditor="## Tasks
 
 | id | intent | rigor | description | status |
@@ -2655,8 +2661,8 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T2: fixed enum check, bash suite 12/12"
 h22b3=$(make_home)
 write_plan "$h22b3" "$(task_plan_rigor tested "$v22b_t1_no_auditor")" > /dev/null
-expect_block "22b3 done row peer-reviewed proof-shaped but no auditor token → block" \
-  "$h22b3" 'git commit -m "x"' "auditor"
+expect_allow "22b3 done row peer-reviewed, no auditor token, at current: T2 → allow (step-gated; 25gT(i) owns the demand)" \
+  "$h22b3" 'git commit -m "x"' 
 
 # 22b4 — same row with an 'auditor' token in the evidence → allow.
 v22b_t1_auditor="## Tasks
@@ -2679,8 +2685,9 @@ write_plan "$h22b4" "$(task_plan_rigor tested "$v22b_t1_auditor")" > /dev/null
 expect_allow "22b4 done row peer-reviewed with auditor token → allow" \
   "$h22b4" 'git commit -m "x"'
 
-# 22b5 — a DONE row at audited rigor with 'auditor' but no 'critic' → block
-# (audited done additionally needs critic).
+# 22b5 — a DONE row at audited rigor with 'auditor' but no 'critic', at `current: T2` →
+# ALLOW, for 22b3's reason: the critic verdict is Step 6's and this run has not reached it
+# (ADR-033). 25gT(k) carries the audited lane's critic demand, at current: 6.
 v22b_t1_audited_no_critic="## Tasks
 
 | id | intent | rigor | description | status |
@@ -2698,8 +2705,8 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T2: fixed enum check, bash suite 12/12"
 h22b5=$(make_home)
 write_plan "$h22b5" "$(task_plan_rigor tested "$v22b_t1_audited_no_critic")" > /dev/null
-expect_block "22b5 done row audited with auditor but no critic → block" \
-  "$h22b5" 'git commit -m "x"' "critic"
+expect_allow "22b5 done row audited with auditor but no critic, at current: T2 → allow (step-gated; 25gT(k) owns the demand)" \
+  "$h22b5" 'git commit -m "x"' 
 
 # 22b6 — same row with both 'auditor' and 'critic' tokens → allow.
 v22b_t1_audited_complete="## Tasks
@@ -2836,6 +2843,63 @@ h22c2=$(make_home)
 write_plan "$h22c2" "$(task_plan_rigor peer-reviewed "$v22c_bad_enum")" > /dev/null
 expect_finding "22c2 same fixture at peer-reviewed → finding (still log-only)" \
   "$h22c2" 'git commit -m "x"' "task-ledger"
+
+# ---- 22c-t: the six-column task ledger, and the STEP-GATED verdict lanes ----
+#
+# ADR-033 (wave-18 REQ-1, D1): `done` is the ONE terminal word at task scale — the work is
+# finished and the tree released — and the auditor/critic lanes it used to carry
+# unconditionally are STEP-GATED now. They fire only when the plan's `current:` is numeric
+# and >= 6, which is the first moment the verdicts they demand can exist: a task whose code
+# work finishes while the run is still at `current: T<n>` had no honest word before this
+# (`active` on a released tree is false, `done` was refused for verdicts Step 6 had not
+# produced), and a consumer run spawned six worktrees for two lines of work to dodge it.
+# While `current:` is `T<n>` a `done` row owes exactly one thing: its `- T<n>:` evidence
+# line. 22c-t3 is that half, and 25gT(e)-(g) below are the OTHER half — the same lanes
+# firing, on the same shape, once the run reaches `current: 6`.
+#
+# THE TABLE IS THE SIX-COLUMN SHAPE the consumer writes (`id | intent | rigor | description
+# | status | worktree`), not the five-column one every 22b/22c row above carries: the
+# worktree cell is what the subject fork reads (25gT), and a `done` row whose tree is
+# released names no tree at all — the cell reads `—`.
+
+v22ct_done_no_verdicts="## Tasks
+
+| id | intent | rigor | description | status | worktree |
+|---|---|---|---|---|---|
+| T1 | build | audited | the finished work, its tree released | done | — |
+| T2 | build | audited | the addressed work | active | 18-T2 |
+
+## SDLC State
+
+scale: task
+current: T2
+approved-by: fixture 2026-09-22T00:00Z "approved"
+
+- T1: bash tests/run.sh 31/31 green
+- T2: bash tests/run.sh 31/31 green"
+h22ct1=$(make_home)
+write_plan "$h22ct1" "$(task_plan "$v22ct_done_no_verdicts")" > /dev/null
+expect_allow "22c-t1 AC-1.2 a done row with '—' and no verdicts commits at current: T2 (the lanes are step-gated)" \
+  "$h22ct1" 'git commit -m "x"'
+
+# 22c-t2 — THE ENUM IS UNTOUCHED (AC-1.1). The same six-column shape with `wip` in the
+# status cell is refused on an audited plan and the refusal names the enum, exactly as the
+# five-column 22c1 pins it. Step-gating the lanes widened no word.
+v22ct_bad_enum="${v22ct_done_no_verdicts/| T1 | build | audited | the finished work, its tree released | done | — |/| T1 | build | audited | the finished work, its tree released | wip | — |}"
+h22ct2=$(make_home)
+write_plan "$h22ct2" "$(task_plan "$v22ct_bad_enum")" > /dev/null
+expect_block "22c-t2 AC-1.1 'wip' on the six-column table is still refused, naming the enum" \
+  "$h22ct2" 'git commit -m "x"' "want pending|active|done|dropped"
+
+# 22c-t3 — the ONE thing a `done` row still owes at `current: T<n>`: its `- T<n>:` line.
+# Drop it and the audited router blocks, naming the row. Without this row 22c-t1 would be
+# indistinguishable from "a done row owes nothing here".
+v22ct_done_no_line="${v22ct_done_no_verdicts/
+- T1: bash tests\/run.sh 31\/31 green/}"
+h22ct3=$(make_home)
+write_plan "$h22ct3" "$(task_plan "$v22ct_done_no_line")" > /dev/null
+expect_block "22c-t3 AC-1.2 the same done row WITHOUT its '- T1:' line is refused, naming T1" \
+  "$h22ct3" 'git commit -m "x"' "T1"
 
 # 22c3 — audited task plan, addressed T1 clean, non-addressed T2 status done with
 # NO `- T2:` evidence line → BLOCK (audited promotes the missing-evidence check).
@@ -3298,8 +3362,11 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash test.sh 12/12 auditor CONFIRMED"
 h22d5b=$(make_home)
 write_plan "$h22d5b" "$(task_plan_rigor tested "$v22d5_body_no_critic")" > /dev/null
-expect_block "22d5b same, drop critic token → block (cell audited lane still demands it)" \
-  "$h22d5b" 'git commit -m "x"' "critic"
+# ADR-033: at `current: T1` the cell's audited lane demands the proof shape and the evidence
+# line, not a verdict Step 6 has not produced. 25gT(k) drives this same discrimination — a
+# tested plan, a cell raised to audited, no standalone critic — at current: 6.
+expect_allow "22d5b same, drop critic token → allow at current: T1 (step-gated; 25gT(k) owns the demand)" \
+  "$h22d5b" 'git commit -m "x"' 
 
 # 22d6 — an off-enum rigor cell 'reviewed' on a NON-addressed 'done' row.
 # effective_row_rigor("reviewed") resolves to the INVALID sentinel. Task 4/4
@@ -3689,8 +3756,10 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T1: bash test.sh 9/9, auditor CONFIRMED, fixed a critical path bug"
 h22f7a=$(make_home)
 write_plan "$h22f7a" "$(task_plan "$v22f7a_body")" > /dev/null
-expect_block "22f7a audited done row, 'critical' (no standalone critic) → block (word-boundary critic token)" \
-  "$h22f7a" 'git commit -m "x"' "critic"
+# ADR-033 moved the word-boundary pin to 25gT(k), which runs this same `critical` evidence at
+# `current: 6`; at `current: T1` there is no verdict yet for a word to be matched in.
+expect_allow "22f7a audited done row, 'critical', at current: T1 → allow (step-gated; 25gT(k) is the word-boundary pin)" \
+  "$h22f7a" 'git commit -m "x"' 
 
 v22f7b_body="## Tasks
 
@@ -5032,6 +5101,192 @@ else
     "expected no farm-out refusal under the override; rc=$S25X_RC stderr='$S25X_ERR'"
 fi
 
+
+# --- 25gT: A ROW'S TREE IS JUDGED BY ITS ROW AT TASK SCALE TOO (wave-18 REQ-11, D3, ADR-033)
+#
+# 25g(c)-(f) above prove the rule at WAVE scale, where the `## Tasks` table carries a `step`
+# cell. The task-scale table carries none — it is the six-column `id | intent | rigor |
+# description | status | worktree` shape — so `units_field <row> step` read EMPTY, the
+# unusable-step arm of the fork decided nothing, and a commit from a row's own tree was
+# judged by the RUN's numbered-step block: a fixup writer committing while the run sat at
+# `current: 5` was refused for a Verify block naming a floor that writer's own task exists to
+# produce. The consumer hand-wrote a mid-discharge Step-5 block to get past it. The empty-step
+# arm now recognises the task-scale shape by its header and runs the row's OWN four arms —
+# the same set the `current: T<n>` early exit runs — and says so on stderr.
+#
+# THE `current: 6` ROWS ARE THE STEP-GATE'S OTHER HALF (AC-1.3). 22c-t1 pins that a `done`
+# row owes no verdicts while `current:` is `T<n>`; these pin that it owes BOTH the moment the
+# run reaches Step 6 — and they are the only reachable way to drive that arm, because
+# `validate_task_ledger` is called from exactly two places (the `current: T<n>` early exit,
+# and this fork) and a main-root commit at a numeric `current:` reaches neither (A-T1.3).
+#
+# REAL LINKED WORKTREES, spelled `18-T<n>` — the shape `git worktree add` actually produces
+# for a dispatched row of this wave (research R1 Q5; the `wt-T<n>` spelling above is this
+# suite's own older convention and not a product shape).
+
+s25t_tmp=$(cd "$(mktemp -d)" && pwd -P); cleanup_dirs+=("$s25t_tmp")
+s25t_main="$s25t_tmp/main"
+mkdir -p "$s25t_main/.bionic/docs/plans"
+git -C "$s25t_main" init -q .
+git -C "$s25t_main" commit -q --allow-empty -m init
+engage "$s25t_main"
+git -C "$s25t_main" worktree add -q "$s25t_main/.worktrees/18-T1" -b s25t-t1 2>/dev/null
+s25t_wt="$s25t_main/.worktrees/18-T1"
+
+# $1 current:  $2 T1's status  $3 T1's evidence (empty => the `- T1:` line is OMITTED)
+# $4 T1's rigor CELL (default audited)  $5 the FRONTMATTER rigor (default audited).
+# The Step-5 block is deliberately NOT green (331 of 332), so a main-root commit at
+# `current: 5` is still refused by the run's own Verify arm — 25gT(c) is that control, and
+# it is what makes 25gT(b) a discrimination rather than a fixture that admits everything.
+# The two rigor parameters are what let 25gT(i)-(l) carry the lane discriminations that used
+# to live at `current: T<n>` (22b3/22b5, 22d5b, 22f7a, 32k) to the step where the lanes fire.
+s25t_plan() {
+  printf -- '---\ngoverning-skill: canonical-sdlc\ncanonical_sdlc_version: 14\nintent: build\nrigor: %s\nscale: task\ndeploy_target: none\nuse_worktree: false\nhas_ui: false\nwalk: exempt\n---\n' "${5:-audited}"
+  printf '# plan\n\n## Tasks\n\n'
+  printf '| id | intent | rigor | description | status | worktree |\n'
+  printf '|---|---|---|---|---|---|\n'
+  printf '| T1 | build | %s | the row that owns the tree | %s | 18-T1 |\n' "${4:-audited}" "$2"
+  printf '| T2 | build | audited | the row after it | pending | — |\n\n'
+  printf '## SDLC State\n\ncurrent: %s\napproved-by: fixture 2026-09-22T00:00Z approved\n' "$1"
+  printf 'Step 5:\n  cmd: bash tests/run.sh\n  pass: 331\n  total: 332\n  output: .bionic/docs/plans/task-01-x.plan.md#step-5\n  auditor: 1 row CONFIRMED — report .bionic/tmp/audit.md\n'
+  if [ -n "${3:-}" ]; then printf -- '\n- T1: %s\n' "$3"; fi
+}
+s25t_write() { s25t_plan "$@" > "$s25t_main/.bionic/docs/plans/task-01-x.plan.md"; }
+
+expect_eq "25gT(a) the fixture's tree really is a LINKED worktree, named 18-T1 by git" \
+  "18-T1" "$(basename "$(git -C "$s25t_wt" rev-parse --git-dir)")"
+
+# --- 25gT(b) / AC-11.2: the tree's commit is judged by its row, at a numeric current: ------
+s25t_write 5 active 'bash tests/run.sh 31/31 green'
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] \
+   && [ "$HOOK_STDERR" = "evidence-gate: judged by row T1's task arms (run at current: 5)" ]; then
+  ok "25gT(b) AC-11.2 a commit from row T1's tree at current: 5 is judged by the row's task arms, allowed, and the note says so"
+else
+  no "25gT(b) AC-11.2 a commit from row T1's tree at current: 5 is judged by the row's task arms, allowed, and the note says so" \
+    "expected allow + the note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25gT(c) / AC-11.2: the main root still meets the run's numbered-step block ------------
+run_hook_with_project "$(make_home)" "$s25t_main" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "pass=331" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(c) AC-11.2 the SAME plan still refuses a main-root commit at current: 5 for pass != total"
+else
+  no "25gT(c) AC-11.2 the SAME plan still refuses a main-root commit at current: 5 for pass != total" \
+    "expected the Step-5 block; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25gT(d): the `current: T<n>` early exit is untouched ---------------------------------
+#
+# The fork is reached only from the numbered-step path. At `current: T1` the early exit owns
+# the commit exactly as it always has — four arms, no note, allowed — and nothing below it
+# runs. This is the row that fails if the empty-step arm is ever reached from the T-format.
+s25t_write T1 active 'bash tests/run.sh 31/31 green'
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] && [ -z "$HOOK_STDERR" ]; then
+  ok "25gT(d) at current: T1 the task-scale early exit still owns the commit — allowed, and silent"
+else
+  no "25gT(d) at current: T1 the task-scale early exit still owns the commit — allowed, and silent" \
+    "expected a silent allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25gT(e) / AC-1.3: at current: 6 a `done` row owes its auditor verdict -----------------
+s25t_write 6 done 'bash tests/run.sh 31/31 green'
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "T1" <<<"$HOOK_VSTDERR" && grep -q "auditor" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(e) AC-1.3 the same done row, at current: 6, is refused naming T1 and the auditor lane"
+else
+  no "25gT(e) AC-1.3 the same done row, at current: 6, is refused naming T1 and the auditor lane" \
+    "expected a block naming T1 + auditor; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25gT(f) / AC-1.3: audited demands the critic verdict too ------------------------------
+s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED'
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "critic" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(f) AC-1.3 with the auditor verdict but no critic, the audited lane still refuses at current: 6"
+else
+  no "25gT(f) AC-1.3 with the auditor verdict but no critic, the audited lane still refuses at current: 6" \
+    "expected a block naming critic; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25gT(g) / AC-1.3: with both verdicts the same commit is admitted ----------------------
+s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED, critic no-blocking'
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ] \
+   && [ "$HOOK_STDERR" = "evidence-gate: judged by row T1's task arms (run at current: 6)" ]; then
+  ok "25gT(g) AC-1.3 with both verdicts on the line the commit is admitted, and the note names the run's step"
+else
+  no "25gT(g) AC-1.3 with both verdicts on the line the commit is admitted, and the note names the run's step" \
+    "expected allow + the note; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25gT(h) / AC-1.2: the evidence line is owed at every current: -------------------------
+s25t_write 5 done ''
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "T1" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(h) AC-1.2 a done row with no '- T1:' line is refused by its own arms, naming T1"
+else
+  no "25gT(h) AC-1.2 a done row with no '- T1:' line is refused by its own arms, naming T1" \
+    "expected a block naming T1; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# --- 25gT(i)-(l): THE LANE'S OWN DISCRIMINATIONS, AT THE STEP THE LANE FIRES ---------------
+#
+# Step-gating changed WHEN the verdict arms run, not WHICH verdict each rigor owes nor how a
+# token is matched. Four pins carried those facts at `current: T<n>` before ADR-033 — 22b3
+# and 32k (a peer-reviewed lane, however it is reached, owes an auditor), 22b5 and 22d5b (an
+# audited lane owes a critic on top), 22f7a (`critical` embeds `critic` and is not it) — and
+# at `current: T<n>` there is nothing left for them to assert, so each of those rows is
+# re-authored as the timing control it has become and the fact it carried is pinned here
+# instead, on the same six-column shape, at `current: 6`.
+
+# (i) THE CELL DRIVES THE LANE, NOT THE FRONTMATTER (22b3, 32k): a `tested` plan whose row
+# RAISES itself to peer-reviewed owes the auditor verdict — the lane is keyed to the
+# EFFECTIVE rigor, never to the frontmatter alone.
+s25t_write 6 done 'bash tests/run.sh 31/31 green' peer-reviewed tested
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "auditor" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(i) a tested plan's row RAISED to peer-reviewed owes the auditor verdict at current: 6"
+else
+  no "25gT(i) a tested plan's row RAISED to peer-reviewed owes the auditor verdict at current: 6" \
+    "expected a block naming auditor; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# (j) …and peer-reviewed owes the auditor ALONE (22b4's discrimination): the critic arm is
+# the audited lane's, so the same row with an auditor verdict and no critic is admitted.
+s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED' peer-reviewed tested
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ]; then
+  ok "25gT(j) …and with the auditor verdict it is admitted — the critic arm is the audited lane's alone"
+else
+  no "25gT(j) …and with the auditor verdict it is admitted — the critic arm is the audited lane's alone" \
+    "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# (k) THE CRITIC TOKEN IS A WHOLE WORD (22f7a, F3): `critical` embeds the substring and is
+# not the verdict. The cell raises a tested plan's row to audited, so this carries 22d5b's
+# fact in the same breath — the CELL's audited lane is what demands the critic.
+s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED, fixed a critical path bug' audited tested
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 2 ] && grep -q "critic" <<<"$HOOK_VSTDERR"; then
+  ok "25gT(k) 'critical' is not a critic verdict — the audited cell's lane still refuses at current: 6"
+else
+  no "25gT(k) 'critical' is not a critic verdict — the audited cell's lane still refuses at current: 6" \
+    "expected a block naming critic; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
+# (l) …and the standalone token satisfies it (22f7b's twin), so (k) is a word-boundary pin
+# and not a fixture that refuses everything.
+s25t_write 6 done 'bash tests/run.sh 31/31 green, auditor CONFIRMED, critic no-blocking' audited tested
+run_hook_cwd "$(make_home)" "$s25t_main" "$s25t_wt" 'git commit -m "x"'
+if [ "$HOOK_EXIT" -eq 0 ]; then
+  ok "25gT(l) …and a standalone 'critic' token on the same line is admitted"
+else
+  no "25gT(l) …and a standalone 'critic' token on the same line is admitted" \
+    "expected allow; exit=$HOOK_EXIT stderr='$HOOK_STDERR' detail='$HOOK_VSTDERR'"
+fi
+
 # ============================================================
 # Section 26: the walk-artifact arm (AC-1, AC-2)
 # ============================================================
@@ -6087,8 +6342,10 @@ approved-by: fixture 2026-09-07T00:00Z "approved"
 - T2: fixed enum check, bash suite 12/12"
 h32k=$(make_home)
 write_plan "$h32k" "$(task_plan_rigor tested "$v32k_body")" > /dev/null
-expect_block "32k task scale: tested plan, one row raised to peer-reviewed, no auditor → block" \
-  "$h32k" 'git commit -m "x"' "no 'auditor' verdict"
+# ADR-033: the RAISE still drives the lane — at current: 6, where 25gT(i) pins it. Here the
+# run is at `current: T2`, so the row owes its line and its proof shape and no verdict.
+expect_allow "32k task scale: tested plan, one row raised to peer-reviewed, no auditor, at current: T2 → allow (step-gated; 25gT(i) owns the demand)" \
+  "$h32k" 'git commit -m "x"' 
 
 # ---- fail-closed on an unknown or missing rigor ----------------------------
 
@@ -8127,6 +8384,25 @@ h17t8=$(make_home)
 write_plan "$h17t8" "$(plan 6 "$step6_body" "$(evidence_matrix 'record/never-written.md')")" > /dev/null
 expect_block "17t8 …and a single path naming no file keeps its own refusal" \
   "$h17t8" 'git commit -m "x"' "names no real file"
+
+# ---- AC-9.1: the evidence: cell tolerates a trailing note (wave-18 REQ-9, D13) ----
+#
+# THE CELL MAY CARRY A NOTE. Split on the first ' — ' (space, em dash, space) before either
+# test above: the path half is what the ';' check and the resolver ever see, so a note that
+# itself carries a ';' never trips the "names more than one path" refusal, and the path half
+# alone resolves under record/. The note half is discarded — never parsed, never required to
+# resolve.
+h17t8a=$(make_home)
+write_plan "$h17t8a" "$(plan 6 "$step6_body" \
+  "$(evidence_matrix 'record/generic-evidence.md — RED on a; GREEN on b')")" > /dev/null
+expect_allow "17t8a an evidence: value with a trailing note (the note itself carrying a ';') → the path resolves, admitted" \
+  "$h17t8a" 'git commit -m "x"'
+
+# AND A BARE ';'-JOINED VALUE WITH NO NOTE (NO EM DASH) IS STILL REFUSED, TODAY'S WORDING.
+h17t8b=$(make_home)
+write_plan "$h17t8b" "$(plan 6 "$step6_body" "$(evidence_matrix 'a.md; b.md')")" > /dev/null
+expect_block "17t8b …while a bare ';'-joined two-path value with no note is refused exactly as before" \
+  "$h17t8b" 'git commit -m "x"' "evidence: names more than one path"
 
 # ---- AC-5.4: the auditor cell is an equality, and the verdict says so ----
 #
