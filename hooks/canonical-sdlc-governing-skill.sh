@@ -1242,13 +1242,18 @@ fi
 # [WALL: tests/canonical-sdlc-governing-skill.test.sh]
 #
 # Present means a `parallel-budget:` line whose value carries `writers=` followed by digits
-# as its own field — the same extraction payload/scripts/lib/stop.sh and the tick apply
-# (`*writers=*`, cut at the next space, digits only), so a header this admits is a header
+# as its own field, KEYED BY THE SAME SPELLING the tick and the dispatch wall read: exactly
+# `parallel-budget:` at column 0, colon immediately after the key, no leading whitespace and
+# none before the colon (`hooks/session-poker.sh`'s `plan_budget_line`, byte-identical to
+# `hooks/dispatch-preflight.sh`'s budget arm). Before wave-19-fixit-186 C5, this hook's own
+# pattern admitted `  parallel-budget:` and `parallel-budget :` too — spellings the tick and
+# the dispatch wall silently treat as carrying no line at all, so a header this admitted
+# could still leave every other reader unmeasured. A header this admits now is a header
 # every reader can size a run from, and a header it refuses is one they could not.
 case "$BASENAME" in
   *.plan.md)
     _gs_budget=$(awk '
-      /^[[:space:]]*parallel-budget[[:space:]]*:/ { sub(/^[[:space:]]*parallel-budget[[:space:]]*:/, ""); print; exit }
+      /^parallel-budget:[ \t]*/ { sub(/^parallel-budget:[ \t]*/, ""); print; exit }
     ' <<< "$FRONTMATTER")
     case " $_gs_budget" in
       *[[:space:]]writers=*) _gs_writers="${_gs_budget#*writers=}"; _gs_writers="${_gs_writers%%[[:space:]]*}" ;;
