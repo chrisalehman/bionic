@@ -6976,8 +6976,8 @@ section "§runs-lift — a brief declares what it will RUN, in any runner (REQ-1
 #
 # THE GRAMMAR IS AUTHOR-MARKED (D3). A run is a backtick-delimited command on the span, in
 # position order, at most three of them; text outside the marks is not a run; a run carrying
-# a pipe, a newline or an unexpanded shell variable is refused at the lift with the token
-# named. The marks are KEPT on the roster field, which is what makes "the exact marked run"
+# an UNQUOTED pipe, a newline or an unexpanded shell variable is refused at the lift with the
+# token named (a pipe inside quotes is an ordinary argument — 18T4a/18T4b below). The marks are KEPT on the roster field, which is what makes "the exact marked run"
 # a thing the budget arm can compare against.
 #
 # fails-when: the field is absent from the row; an auditor brief declaring runs and waiving
@@ -7143,6 +7143,75 @@ expect_status "16ld4 a whole <cmd> slot beside an ordinary run is still ADMITTED
 ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
 expect_status "16ld4 …the slot lifted nothing and the ordinary run kept its marks" \
   "$RL_JEST" "$(roster_field "$ROW" re_executes)"
+
+# ---- AC-7.1 / AC-7.2 (epic-23 wave-18, T4; REQ-7, D4): a QUOTED pipe is not a pipe ----
+#
+# WHAT WAS WRONG. The lift's pipe test was a whole-token scan — `index(tok, "|") > 0` — so
+# a pipe inside single quotes, double quotes, a bracket expression or a regex alternation
+# was refused identically to shell plumbing. A jest repository cannot declare its own runs
+# without one: `--testPathPattern='(a|b)...'` is the ordinary spelling, and the refusal it
+# drew told the author to "leave the shell plumbing off the span" about a character that
+# was never plumbing. Research R2 §2 measured that the branch had NEVER been executed by a
+# test in either direction, which is how the reading survived two waves.
+#
+# WHY BOTH HALVES ARE HERE. Making the scan quote-aware is necessary and not sufficient:
+# the roster row is pipe-delimited, and the writer folded `|` to a space in every field —
+# so an admitted run reached the row as a command no agent could ever type back, and the
+# writer-side budget arm would refuse at run time the run this wall had just admitted (the
+# wave-16 T25 failure through a different door). The row now percent-encodes the pipe in
+# `re_executes=` and every reader decodes it, so the ADMIT row below asserts the encoded
+# field, not just the exit status.
+#
+# fails-when: the quoted-pipe brief is refused; the unquoted one is admitted; the row
+# carries a folded space where the pipe was; or the refusal still promises that any pipe
+# is plumbing.
+RL_QP_CMD="npx jest --testPathPattern='(a|b)\\.spec\\.ts'"
+RL_QP_ENC="npx jest --testPathPattern='(a%7Cb)\\.spec\\.ts'"
+
+# THE BRIEF CARRIES A VALID `Files:` LINE so the quoted pipe is its ONLY candidate fault.
+# Without one the no-instrument arm fires beside it and the refusal leaves on the
+# SEVERAL-fault wire, which is a `deny` verdict at exit 0 — a status this row would then
+# read as admission, and the whole assertion would be green against the broken lift.
+REPO=$(make_repo r18t4a yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w18-qpipe.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}${RL_QP_CMD}${RL_BT}" "w18-qpipe")"
+expect_status "18T4a a quoted pipe is not a pipe — the run is ADMITTED" "0" "$GATE_ST"
+ROW=$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)
+expect_status "18T4a2 …and the row carries the run with its pipe percent-encoded" \
+  "${RL_BT}${RL_QP_ENC}${RL_BT}" "$(roster_field "$ROW" re_executes)"
+# THE SEGMENT COUNT IS THE PROPERTY (S25d5's reasoning). A field that still held the raw
+# pipe would read as one more segment to every by-key reader in the fleet.
+expect_status "18T4a3 …and the run forged no segment of its own" "1" \
+  "$(printf '%s' "$ROW" | tr '|' '\n' | grep -c '^re_executes=' | tr -d ' ')"
+
+# THE OTHER DIRECTION, over the same shape. An UNQUOTED pipe is still shell plumbing and
+# is still refused with the token named — the half that keeps 18T4a from being a hole.
+REPO=$(make_repo r18t4b yes)
+write_attestation "$REPO" "$SID_A"
+# THE STUB DERIVATION, not the real tool — same reason as 16ld1 above.
+s27_impact "$REPO" widget.test.sh
+run_gate "$(mk_agent_payload "$SID_A" "$REPO" "Your task: re-run the unit tests.
+Expected artifact: .bionic/docs/record/w18-upipe.md
+Expected duration: ~20 minutes.
+Files: payload/scripts/lib/widget.sh
+Re-executes: ${RL_BT}bash tests/x.test.sh | tee out${RL_BT}" "w18-upipe")"
+expect_status "18T4b an unquoted pipe IS a pipe — the run is REFUSED" "2" "$GATE_ST"
+expect_contains "18T4b2 …naming the fault as a pipe" "a pipe" "$GATE_VERR"
+expect_empty "18T4b3 …and no roster row was written for the refused dispatch" \
+  "$(roster_nth_row "$(roster_path "$REPO" "$SID_A")" 1)"
+
+# THE PROSE IS THE THIRD READER (AC-7.1). A wall whose sentence is false for the shape it
+# now admits sends the author to fix a command that was never wrong; the detail must say
+# UNQUOTED, and must no longer promise that any pipe at all is shell plumbing.
+expect_contains "18T4c the detail names the unquoted pipe" "an unquoted pipe" "$GATE_VERR"
+expect_absent "18T4c2 …and no longer calls every pipe plumbing" \
+  "carrying a pipe" "$GATE_VERR"
 
 # ---- AC-1.6: at most three runs, loudly; and unmarked text is not a run ----
 REPO=$(make_repo r16le yes)

@@ -5048,6 +5048,41 @@ expect_contains "28f the adopted row carries the declared runs forward" \
 expect_eq "28f2 …on the row this adopt wrote, not on a second one" "1" \
   "$(/usr/bin/grep -c 'source=adopted' "$(roster_of "$R28F")" || true)"
 
+# ---------- 28g: AND IT DOES NOT RE-ENCODE WHAT IT CARRIES (epic-23 wave-18, T4) ---------
+#
+# REQ-7 / D4. `re_executes=` is the one field whose value is a COMMAND compared back,
+# character for character, against what a writer types — so the row percent-encodes the
+# `|` it cannot hold literally, and every reader decodes it. `adopt` is the reader that is
+# also a WRITER: it lifts the field off the source row and hands it to `roster_row` again.
+# A reader that decoded without the writer re-encoding would put a raw pipe on the line and
+# forge a segment; a writer that re-encoded an already-encoded value would turn `%7C` into
+# `%257C` and hand a resumed agent a budget holding a command no shell could run. Both
+# failures are invisible to 28f, whose run carries no pipe at all.
+#
+# fails-when: the adopted field differs by one byte from the source row's, or decoding it
+# does not give back the command the brief declared.
+R28G="$(make_repo s28-re-executes-pipe)"; new_roster "$R28G"
+mkdir -p "$R28G/.bionic/docs/record"
+S28G_ROSTER="$(roster_of "$R28G" "$S28_A")"
+roster_header > "$S28G_ROSTER"
+# THE STORED FORM IS THE WRITER'S OWN, taken from `roster_row` rather than typed here, so a
+# fixture cannot disagree with the encoding production uses.
+S28G_CMD="npx jest --testPathPattern='(a|b).spec.ts'"
+S28G_ENC="$(roster_pipe_escape "$S28G_CMD")"
+mkrow session="$S28_A" name=rerun-pipe status=identified \
+  agent_id=arerun-two-2800000000000007 subagent_type=bionic:implementor \
+  duration="45 minutes" cadence="10 minutes" \
+  deliverable="$R28G/.bionic/docs/record/rerun-pipe.md" \
+  | sed "s|\$|\|re_executes=$S28G_ENC|" >> "$S28G_ROSTER"
+poke "$R28G" adopt
+S28G_ROW="$(grep 'source=adopted' "$(roster_of "$R28G")" | tail -1)"
+S28G_FIELD="$(printf '%s' "$S28G_ROW" | tr '|' '\n' | grep '^re_executes=' | head -1 | cut -d= -f2-)"
+expect_eq "28g the adopted row carries the declared run byte for byte" \
+  "$S28G_ENC" "$S28G_FIELD"
+expect_eq "28g2 …so it still decodes to the command the brief declared" \
+  "$S28G_CMD" "$(roster_pipe_unescape "$S28G_FIELD")"
+expect_eq "28g3 …and the value is still ONE field of the row" "1" \
+  "$(printf '%s' "$S28G_ROW" | tr '|' '\n' | grep -c '^re_executes=' | tr -d ' ')"
 # ============================================================
 section "Section 29: extend — re-opening a MET row (REQ-10; D11, T-h)"
 # ============================================================
