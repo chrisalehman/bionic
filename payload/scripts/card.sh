@@ -1207,6 +1207,9 @@ _card_project() {
       # batch silently reading zero.
       if (!seen) { print ""; print "## SDLC State"; print ""; print "current: " cur }
     }' "${1:-}" > "${5:-/dev/null}"
+  # THE PROJECTION PATH IS REWRITTEN PER BATCH with a different `current:`, and fill.sh
+  # memoises that field per process by path — so the writer forgets it (wave-19 critic C2).
+  fill_current_forget
 }
 
 _card_batch_widths() {  # <plan> <rung> <scale> -> one `batch <k> · <n> of <rung>` per batch
