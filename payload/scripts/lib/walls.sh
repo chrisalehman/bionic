@@ -3478,8 +3478,18 @@ validate_matrix() {
         # key first; this branch only bites a block that was otherwise complete.
         # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
         if [ "$key" = "evidence" ]; then
+          # THE CELL MAY CARRY A TRAILING NOTE (wave-18 REQ-9, D13, AC-9.1). Split on the
+          # FIRST ' — ' (space, em dash, space) before either test below: the path half is
+          # all the ';' check and the resolver ever see, so a note that itself carries a
+          # ';' (e.g. 'RED on a; GREEN on b') never trips the "more than one path" refusal.
+          # The note half is discarded right here — never parsed, never resolved, never
+          # required to name anything.
+          # [WALL: tests/canonical-sdlc-evidence-gate.test.sh]
+          case "$val" in
+            *" — "*) val="${val%% — *}" ;;
+          esac
           # ONE PATH PER AC, AND A `;` IS NOT A SEPARATOR (wave-17 REQ-5, AC-5.3). The
-          # whole cell text is the path — nothing here splits it — so `a.md; b.md` was
+          # path half — see the split above — is tested here, so `a.md; b.md` was
           # handed to the resolver entire, missed, and refused as "names no real file",
           # which sent the author to write a file at a path nobody meant to name. The
           # sibling reader of the walk artifact has truncated at the first `;` since
