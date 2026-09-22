@@ -1746,6 +1746,7 @@ esac
 
 # 92a3: Anti-vacuity — the retired section put back into a copy of the scaffold must fail
 # 92a2's check, proving 92a2 discriminates rather than being vacuously true forever.
+anchor "$STEP2_MD" '  Artifacts' 1
 DOCTORED_STEP2_OPEN_AT="$TMP/step2-open-at-approval.md"
 awk '/^  Artifacts$/ { print "  Open at approval"; print "    <design question still open>   → <what closes it>"; print "" }
      { print }' "$STEP2_MD" > "$DOCTORED_STEP2_OPEN_AT"
@@ -2088,6 +2089,7 @@ fi
 # was simply absent — no stray section, no wrong label, just a missing line). This
 # mutation strips only that line and leaves `Parallel width` and every other section
 # intact, so it targets 107e's `pw` arm specifically.
+anchor "$STEP3_MD" '    batch ' 1
 DOCTORED_NO_BATCH="$TMP/step3-no-batch-line.md"
 awk '/^    batch / { next } { print }' "$STEP3_MD" > "$DOCTORED_NO_BATCH"
 if [ "$(card_span "$DOCTORED_NO_BATCH" 'Step 3 · Plan' | card3_shape)" = "$SHAPE_RENDERED" ]; then
