@@ -4763,6 +4763,23 @@ if [ -n "$BIONIC_SID" ] && [ ! -L "$ROSTER_FILE" ] && [ -f "$ROSTER_FILE" ]; the
   case "$BUDGET_LINE" in
     *$'\n'R:*) RE_EXECUTES="${BUDGET_LINE#*$'\n'R:}" ;;
   esac
+  # DECODED ONCE, HERE, BEFORE ANYTHING READS IT (T4; REQ-7, D4). The row stores this field
+  # percent-encoded because the line is pipe-delimited and a declared run may legitimately
+  # hold a pipe inside quotes — `payload/scripts/lib/roster.sh` owns that encoding and
+  # carries the reasoning; `roster_pipe_escape`/`roster_pipe_unescape` there are these two
+  # expansions, and the pair is the definition this copy answers to.
+  #
+  # SPELLED HERE RATHER THAN SOURCED. This file runs inside `hooks/bash-walls.sh`, whose
+  # `BIONIC_LIB_WANT` does not carry `roster.sh`; adding it would grow the wall-library
+  # table and the loader contract for two parameter expansions. The twin is the posture
+  # `sanitize`/`clean` and `parse_seconds` already hold in this fleet.
+  #
+  # ONE DECODE, NOT ONE PER READER. `_run_is_declared` compares against this variable and
+  # `budget_refuse` PRINTS it to a reader who is about to retype the command — so decoding
+  # inside the compare would leave the refusal advertising a command no shell can run,
+  # while decoding in both places would turn a literal `%7C` in a command into a pipe.
+  RE_EXECUTES="${RE_EXECUTES//\%7C/|}"
+  RE_EXECUTES="${RE_EXECUTES//\%25/%}"
 fi
 [ -n "$SUITES_ALLOWED" ] || BUDGET_STATED=no
 
@@ -4864,8 +4881,14 @@ _budget_wire_fact() {
   printf '%s%s' "$label" "$(_budget_wire_list "$allowed" "$room")"
 }
 
-# _run_is_declared <run> <the row's re_executes= field> -> 0 when the row declared EXACTLY
-# this run (REQ-1 AC-1.5).
+# _run_is_declared <run> <the row's re_executes= field, DECODED> -> 0 when the row declared
+# EXACTLY this run (REQ-1 AC-1.5).
+#
+# THE FIELD ARRIVES PLAIN (T4; REQ-7, D4). The row stores it percent-encoded, and the one
+# read of that row decodes it before this function or any refusal sees it — see the decode
+# beside `BUDGET_LINE` above for why there is exactly one decode and not one per reader. A
+# caller that hands this function a raw row field compares against the storage spelling and
+# will not match a command holding a pipe.
 #
 # THE FIELD KEEPS THE AUTHOR S MARKS, space-joined (A-T1.4): `` `npx jest x` `pytest tests` ``.
 # The marks are what make it self-delimiting — a run holds spaces, commas and quotes, so no
