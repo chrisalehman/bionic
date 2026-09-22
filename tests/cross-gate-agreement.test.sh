@@ -9650,13 +9650,25 @@ expect_eq "S19.2 …and the same sweep DOES fire on a copy with the idiom plante
 # mutation arm is deliberately NOT a site: `REPLANTED_FMT` APPENDS a format line to a copy
 # rather than stripping one, and an append cannot silently match nothing — the same call
 # §Roots makes, for the same reason, and the reason this census counts strips.
+# 44 sites / 45 anchors at epic-23 wave-19-fixit-186 (2026-09-22, T9c fold-in), TWO GAPS
+# CLOSED TOGETHER rather than one: wave-19 T11/Tdoc (9d1a7e8) added DOCTORED_STEP2_OPEN_AT
+# (Section 12, rows 92a2/92a3 — the Step-2 sibling to Section 15's 107f/107g pattern,
+# proving the retired "Open at approval" section stays out of the Step-2 card scaffold)
+# without its own anchor call. Auditing the modelled-on pair found the model itself
+# short one: wave-18-fixit-185 T8 (0ee1a5d) had already added DOCTORED_NO_BATCH (Section
+# 15's 107g, the dropped-batch-line anti-vacuity arm) the same way, unanchored, and no
+# task since had it in Files: to close it — the same shape T32's DOCTORED_PATROL_T28 gap
+# held until T33 closed it (A-T32.2, above). T9c closes both: `anchor "$STEP2_MD" '  Arti-
+# facts' 1` immediately above DOCTORED_STEP2_OPEN_AT, and `anchor "$STEP3_MD" '    batch '
+# 1` immediately above DOCTORED_NO_BATCH. Net: sites 42->44 (+2, one per gap), anchor CALLS
+# 43->45 (+2, one new anchor per newly-declared site, no pre-existing offset absorbed).
 # RE-DERIVED BY DIRECT GREP over docs-pins.test.sh at THIS commit, as every number in this
 # section is:
-#   grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' tests/docs-pins.test.sh        -> 42
-#   grep -cE '^[[:space:]]*anchor[[:space:]]' tests/docs-pins.test.sh     -> 43
-expect_eq "S19.3 docs-pins holds 42 doctoring sites" "42" \
+#   grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' tests/docs-pins.test.sh        -> 44
+#   grep -cE '^[[:space:]]*anchor[[:space:]]' tests/docs-pins.test.sh     -> 45
+expect_eq "S19.3 docs-pins holds 44 doctoring sites" "44" \
   "$(/usr/bin/grep -cE '^DOCTORED[A-Z0-9_]*="\$TMP/' "$S19_DOCS_PINS")"
-expect_eq "S19.3 …declared by 43 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor; wave-14 T36 adds one, the nudged-card-row discriminator)" "43" \
+expect_eq "S19.3 …declared by 45 anchor calls (Section 8's doctoring rewrites two sentences; Section 12 adds three, K1; Section 6 adds three, K3; Section 13 adds three, K5; Section 15 adds two, K4; Section 16 adds one, K5.4; Section 17 adds two, wave-11 1c; Section 18 adds one, the oversized-core mutant; Section 24 adds one, wave-13 T3's repair-rule mutant; Section 27 adds one, wave-14 T10's rule-line mutant; wave-14 T28 rewrites one in place, no net change; wave-14 T33 adds one, DOCTORED_PATROL_T28's own anchor; wave-14 T36 adds one, the nudged-card-row discriminator; wave-18 T8's Section-15 107g gap and wave-19 T11/Tdoc's Section-12 92a3 gap each add one, both closed by wave-19 T9c)" "45" \
   "$(/usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]' "$S19_DOCS_PINS")"
 # 25 since Step 6: §S13.2 lifts the wall's own reduction out of the hook and
 # anchors both lines it lifts (review-b B-3). 26 at epic-21 wave-02 S12, when §V's
@@ -9782,7 +9794,12 @@ expect_eq "S19.3 …and landing-gate by three: the inverted-guard mutant, and th
 # 79 at epic-23 wave-16-fixit-183: +1 from this wave's T4 (§R2's knob-unset splice) and +1
 # from T25 (§bring-forward's caller mutant), both in this file; the other three are
 # untouched by either task.
-expect_eq "S19.3 …79 anchor call sites across the four doctoring suites, all told" "79" \
+# 81 at epic-23 wave-19-fixit-186 (2026-09-22, T9c fold-in): 44 + 32 + 1 + 3, the docs-pins
+# term alone moving again — T9c's two new anchor calls (the row above this one, S19.3's
+# second row) closing the DOCTORED_STEP2_OPEN_AT and DOCTORED_NO_BATCH gaps.
+# cross-gate-agreement.test.sh, agent-context-guard and landing-gate are unmoved and were
+# re-measured, not assumed.
+expect_eq "S19.3 …81 anchor call sites across the four doctoring suites, all told" "81" \
   "$(cat "$S19_DOCS_PINS" "$S19_TESTS_DIR/cross-gate-agreement.test.sh" \
         "$S19_TESTS_DIR/agent-context-guard.test.sh" "$S19_TESTS_DIR/landing-gate.test.sh" \
      | /usr/bin/grep -cE '^[[:space:]]*anchor[[:space:]]')"
