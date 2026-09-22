@@ -1970,6 +1970,34 @@ assert_eq "walls-1e a budget line carrying no writers= is refused" 2 "$HOOK_EXIT
 run_write "$walls_plan" "$(walls_with_budget "writers=many suites=18 source=probe")"
 assert_eq "walls-1e2 …and so is a writers= that is not digits" 2 "$HOOK_EXIT"
 
+# walls-1i/1j (critic C5, wave-19): the ONE key spelling every reader shares is
+# `parallel-budget:` at column 0, colon immediately after — no leading whitespace, no
+# whitespace before the colon. That is byte-identical to `hooks/session-poker.sh`'s
+# `plan_budget_line` (`/^parallel-budget:[ \t]*/`) and `hooks/dispatch-preflight.sh`'s
+# budget wall (same awk pattern). Before the fix this hook's own pattern
+# (`^[[:space:]]*parallel-budget[[:space:]]*:`) admitted both variants below — a header
+# the tick and the dispatch wall would then read as carrying NO parallel-budget: line at
+# all, so a plan judged fine here goes unmeasured everywhere else. Refused after the fix.
+walls_with_budget_raw() {  # <literal header line> -> the keyless header carrying that line verbatim
+  printf '%s' "$WALLS_PLAN_NO_BUDGET" | awk -v v="$1" '
+    NR == 1 && $0 == "---" { print; print v; next }
+    { print }'
+}
+
+echo "Write: leading whitespace before the key → block (tick/dispatch-wall cannot read it)"
+run_write "$walls_plan" "$(walls_with_budget_raw " parallel-budget: writers=4 suites=2 worktrees=8 test_jobs=4 source=probe")"
+assert_eq "walls-1i leading whitespace before parallel-budget: is refused" 2 "$HOOK_EXIT"
+assert_contains "walls-1i2 …naming the key" "parallel-budget:" "$HOOK_STDERR"
+
+echo "Write: whitespace before the colon → block (tick/dispatch-wall cannot read it)"
+run_write "$walls_plan" "$(walls_with_budget_raw "parallel-budget : writers=4 suites=2 worktrees=8 test_jobs=4 source=probe")"
+assert_eq "walls-1j whitespace before the colon is refused" 2 "$HOOK_EXIT"
+assert_contains "walls-1j2 …naming the key" "parallel-budget:" "$HOOK_STDERR"
+
+echo "Write: the canonical spelling, no whitespace anywhere near the key → allow (control)"
+run_write "$walls_plan" "$(walls_with_budget_raw "parallel-budget: writers=4 suites=2 worktrees=8 test_jobs=4 source=probe")"
+assert_eq "walls-1k the canonical spelling still writes" 0 "$HOOK_EXIT"
+
 echo "Write: a SPEC with no parallel-budget: → allow (the arm is the plan's alone)"
 run_write "$project/.bionic/docs/specs/epic-01-demo/walls-nobudget.spec.md" \
   "$(build_plan omit=parallel-budget waived="$SPEC_DESIGN_WAIVER")"
