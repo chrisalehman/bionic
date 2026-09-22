@@ -2157,6 +2157,9 @@ run_post() {  # <tool> <file-path> <tool_response.type|NONE> [agent_id] [cwd]
 # THE DURABLE HALF OF EVERY DECLINE (AC-2.1). `log_finding` puts the line on stderr AND
 # appends it under $HOME, and the journal is the half that outlives the session — so every
 # exit row below reads both, and a line that only ever reached stderr would fail here.
+# EXCEPT b7 (R9, wave-18-fixit-185 T3b): the one decline an UNENGAGED session can reach
+# stays stderr-only, because the arming partition is the consent boundary and a session
+# that never invoked the skill must cause no durable write under $HOME.
 journal_of() {  # <project root> -> the audit file the hook's findings land in
   printf '%s/.claude/logs/%s/sdlc-audit.md' "${GS_POST_HOME:-$FAKE_HOME}" "$(slug_for "$1")"
 }
@@ -2271,7 +2274,27 @@ assert_eq "b7 ...and no marker is created" 0 "$(marker_lines "$b_u")"
 assert_eq "b7 ...exit 0" 0 "$HOOK_EXIT"
 assert_contains "b7 ...and says the engagement is what is missing" \
   "bind]: engagement absent under $b_u" "$HOOK_STDERR"
-assert_eq "b7 ...and the journal keeps it" "yes" "$(journal_has "$b_u" "bind: engagement absent")"
+# R9 (wave-18-fixit-185, T3b): a session that never invoked the skill must cause no
+# durable write under $HOME — the arming partition is the consent boundary. Before this
+# fix `gs_bind_decline` routed through `log_finding`, which `mkdir -p`'d and appended a
+# line here even though the session never engaged. Checked as file existence, not
+# `journal_has`, because the claim is that NOTHING was written, not that one substring
+# is missing from something that was.
+assert_eq "b7 ...and NO journal file appears under \$HOME/.claude/logs" "no" \
+  "$([ -f "$(journal_of "$b_u")" ] && echo yes || echo no)"
+
+# --- b7b: an ENGAGED decline still journals (paired control for b7) ---
+# Same guard shape as b6 (not under plans/ or incidents/), on a fresh project, to prove
+# the fix is scoped to the unengaged branch alone: every OTHER exit of this arm still
+# calls `gs_bind_decline` → `log_finding`, both halves, unchanged.
+b7b_p=$(make_project)
+b7b_rec="$b7b_p/.bionic/docs/record/wave-01/notes.md"
+plant_plan "$b7b_rec" open
+run_post Write "$b7b_rec" create
+assert_contains "b7b an engaged decline still says which half of the docs tree it wanted" \
+  "bind]: not under plans/ or incidents/ of $b7b_p/.bionic/docs" "$HOOK_STDERR"
+assert_eq "b7b ...and the journal still keeps it" "yes" \
+  "$(journal_has "$b7b_p" "bind: not under plans/ or incidents/")"
 
 # --- b8: PostToolUse NEVER blocks, not even on a plan this hook would refuse ---
 # The same content at PreToolUse is exit 2 (invalid `intent:`), which is the control
