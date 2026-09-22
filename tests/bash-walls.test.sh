@@ -1362,4 +1362,55 @@ run_hook "$(mk_payload "$R_RO" 'git status && echo "git commit later"' "$RO_ID" 
 expect_status "17j: a bionic:test-runner's git status / quoted 'git commit' is ADMITTED" 0 "$ST"
 
 
+# ---------------------------------------------------------------------------
+section "18 — a commit into another repository is outside the evidence gate, and only it (wave-19 REQ-9, D10)"
+#
+# THE FAULT (A-T11.1). From an engaged session, `git -C <scratch repo> commit` was judged by
+# the evidence gate against THIS repository's plan and refused for its evidence. The gate now
+# asks which repository the commit lands in before it reads a plan; another repository — a
+# scratch one, or one NESTED under the root — is admitted with one line. The walls folded
+# beside the gate never read a plan and are not exempted with it: the read-only-role arm (T5)
+# still refuses a test-runner's commit wherever it lands.
+#
+# R_COMMIT carries `block_plan` (current: 5, a placeholder Step-5 line), so every commit the
+# gate still judges there is refused — the control that makes each allow a boundary verdict.
+R_SCR="$SANDBOX/scratchpad/scratch-repo"
+mkdir -p "$R_SCR"; git -C "$R_SCR" init -q 2>/dev/null
+R_NEST="$R_COMMIT/.bionic/docs/record/x/bed"
+mkdir -p "$R_NEST"; git -C "$R_NEST" init -q 2>/dev/null
+jur_line() {  # <the commit's repository> [engaged root, default R_COMMIT]
+  printf 'evidence-gate: %s is outside the engaged repository (%s); the evidence gate has no plan here' "$1" "${2:-$R_COMMIT}"
+}
+
+run_hook "$(mk_payload "$R_COMMIT" 'git commit -m "x"')"
+expect_status "18a: control — a commit inside the engaged root under block_plan is refused as before" 2 "$ST"
+expect_contains "18a: …by the evidence gate" "commit refused" "$ERR"
+
+run_hook "$(mk_payload "$R_COMMIT" "git -C $R_SCR commit -q --allow-empty -m x")"
+expect_status "18b: AC-9.1 — 'git -C <scratch repo> commit' from the engaged root is ADMITTED" 0 "$ST"
+expect_eq "18b: …with exactly one line naming both repositories" "$(jur_line "$R_SCR")" "$ERR"
+expect_empty "18b: …and nothing on stdout" "$OUT"
+
+run_hook "$(mk_payload "$R_COMMIT" "git -C $R_NEST commit -q --allow-empty -m x")"
+expect_status "18c: AC-9.3 — a repository nested at <root>/.bionic/docs/record/x/bed is ADMITTED" 0 "$ST"
+expect_eq "18c: …with the same one line" "$(jur_line "$R_NEST")" "$ERR"
+
+# THE EXEMPTION IS THE GATE'S ALONE. A bionic:test-runner row committing into the scratch
+# repo is outside the gate's jurisdiction and still inside the role arm's: refused, by ARM C.
+R_JUR_RO="$(mk_repo jurisdiction-ro)"; block_plan "$R_JUR_RO"
+roster_header > "$R_JUR_RO/.bionic/tmp/roster-$SID.state"
+ro_rows "$R_JUR_RO" w19-jur-runner ajurrunner-0123456789abcdef bionic:test-runner
+run_hook "$(mk_payload "$R_JUR_RO" "git -C $R_SCR commit -q --allow-empty -m x" ajurrunner-0123456789abcdef omit Bash w19-jur-runner)"
+expect_status "18d: a bionic:test-runner's commit into the scratch repo is still REFUSED (the role arm is not exempt)" 2 "$ST"
+expect_contains "18d: …by the role arm" "a read-only role never commits" "$ERR"
+expect_contains "18d: …while the gate itself only names the boundary" "$(jur_line "$R_SCR" "$R_JUR_RO")" "$ERR"
+expect_eq "18d: …so exactly one refusal is rendered" "1" "$(printf '%s\n' "$ERR" | grep -c 'refused')"
+
+# A LINKED WORKTREE of the engaged repository shares its common dir and is inside: judged.
+git -C "$R_COMMIT" worktree add -q "$R_COMMIT/.worktrees/19-T6" -b wt/19-T6 2>/dev/null
+run_hook "$(mk_payload "$R_COMMIT" "git -C $R_COMMIT/.worktrees/19-T6 commit -m x")"
+expect_status "18e: a commit from a linked worktree of the engaged repository is still judged — refused" 2 "$ST"
+expect_absent "18e: …and never called outside" "outside the engaged repository" "$ERR"
+
+
 finish
