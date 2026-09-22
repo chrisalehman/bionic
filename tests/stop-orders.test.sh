@@ -629,4 +629,49 @@ run_orders_cfg "$R10" standdown
 expect_contains "under a stale panel the acked-gone row keeps its address" \
   "acked-gone@session-6c85684c   (acked — acked-gone)" "$OUT"
 
+# ---------- standdown ENDS THE LEASE of an acked-and-gone row too (wave-19 T1b, R2) ----------
+#
+# `continue`-ing out of the acked-and-gone branch before the LANDED/REFUSED block runs
+# means the common path — land, stop, tick ack — never reaches worktree_land for that row:
+# the tree stands until someone runs `spawn-worktree.sh land` by hand, which undoes spec
+# AC-28 (1.4.0, "standing an agent down is where the lease ends"). The row stays out of
+# READY — an ack already closed it and there is nobody left to stop — but its lease still
+# has to end here, because standdown is the only pass that will ever look at this row again.
+R11="$(make_repo standdown-acked-gone-lease)"
+echo seed > "$R11/README.md"
+git -C "$R11" add README.md >/dev/null 2>&1
+git -C "$R11" commit -qm seed >/dev/null 2>&1
+git -C "$R11" worktree add -q -b acked-gone-lease "$R11/.worktrees/acked-gone-lease" >/dev/null 2>&1
+echo work > "$R11/.worktrees/acked-gone-lease/work.txt"
+git -C "$R11/.worktrees/acked-gone-lease" add -A >/dev/null 2>&1
+git -C "$R11/.worktrees/acked-gone-lease" commit -qm "acked-gone-lease work" >/dev/null 2>&1
+
+R11SLUG=$(printf '%s' "$R11" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R11SLUG"
+R11TR="$R8CFG/projects/$R11SLUG/$SID.jsonl"
+so_roster_row "$R11" "acked-gone-lease" ".bionic/docs/record/n3.md" "" "acked-gone-lease@session-6c85684c"
+( cd "$R11" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-gone-lease ) >/dev/null 2>&1
+# A fresh panel that lists nobody: the row's agent is gone, not merely stale.
+plant_live "$R11TR" fresh
+run_orders_cfg "$R11" standdown
+expect_status "standdown over an acked-and-gone row with a tree exits clean" 0 "$ST"
+
+R11_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
+expect_absent "the acked-and-gone row is kept out of READY (AC-1.3 unchanged by R2)" \
+  "acked-gone-lease" "$R11_SD"
+expect_contains "…but its lease still ends, reported under LEASES ENDED" \
+  "LANDED branch=acked-gone-lease" "$OUT"
+expect_contains "…attributable to its row by name" \
+  "(acked-gone-lease)" "$OUT"
+if [ ! -d "$R11/.worktrees/acked-gone-lease" ]; then
+  ok "the acked-and-gone row's tree is actually landed, not just reported"
+else
+  no "the acked-and-gone row's tree is actually landed, not just reported"
+fi
+if git -C "$R11" rev-list --count "HEAD..acked-gone-lease" 2>/dev/null | grep -qx 0; then
+  ok "…its work is merged into the main checkout"
+else
+  no "…its work is merged into the main checkout"
+fi
+
 finish

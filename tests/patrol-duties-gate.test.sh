@@ -1061,6 +1061,17 @@ u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: QUIET"
 a_text "$d" "fill-declined: the wave head is mid-merge; both rows base off it."
 fire "$d"; expect_allow "68h: fill-declined answers a tick turn's gap"
 
+# 68i: THE WITHHELD LINE IS ANCHORED TO THE TICK'S OWN OUTPUT (Step-5/6 review R5, wave-19
+# T2b). A tool_result that merely ECHOES the literal words — a `grep -rn` hit, or a `cat`/`sed`
+# of this very test file's source — is not the tick having printed them. The record below
+# carries the phrase with a GAP before it (a grep-style `file:line:` prefix), exactly the shape
+# `grep -rn 'poker: fill withheld — \(HOLD\|EMERGENCY\)' tests` produces, so it must not exempt
+# the turn: the gap arm judges the ready set and names it.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
+u_tick "$d"; both_duties "$d"
+u_tick_out "$d" "tests/patrol-duties-gate.test.sh:1034:poker: fill withheld — HOLD free_mb=512 load_1m=1.0"
+fire "$d"; expect_block "68i: a withheld line read off a grep/cat echo (a gap before it) exempts nothing" "T2"
+
 # 69: THE RUNG, NOT THE CEILING (Step-6 review R1, wave-18 T2b). Three rows are ready
 # (T2, T3, T20) against a declared ceiling of 8 — the pre-fix wall would have named all
 # three. LOADED_RING pins a critical-band sample (free_pct=10, inside [0, 12)) against
