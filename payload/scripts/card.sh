@@ -66,6 +66,28 @@ CARD_SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${CARD_SELF_DIR}/lib/width.sh"
 # shellcheck source=/dev/null
 . "${CARD_SELF_DIR}/lib/root.sh"
+# THE TWO LIBRARIES THE STEP-3 CARD ASKS ITS LAST TWO QUESTIONS OF (epic-23
+# wave-18-fixit-185, T10; REQ-4 D9, REQ-3 AC-3.4). `roots.sh` owns the ONE reading of
+# `.bionic/config.yaml`, so the floor line names what the dispatch wall and the landing
+# gate name; `fill.sh` owns the ONE computation of "which rows may run now", so a
+# per-batch width on the approval card is the same answer the tick will give when the
+# batch comes up. Neither is re-implemented here: a card that counted rows its own way
+# would be a second opinion at the gate where the first one is being ratified.
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/roots.sh"
+# shellcheck source=/dev/null
+. "${CARD_SELF_DIR}/lib/fill.sh"
+
+# THE SCALE, WHICH IS A PROPERTY OF THE ARTIFACT AND NOT OF THE ROW KIND (D8). The
+# `## Tasks` ledger has two shapes — the wave's eleven columns and the task run's six,
+# in a different ORDER — and until this task card.sh knew only the first, reading a
+# task-scale row positionally as a wave row: `rigor` printed under a heading saying
+# `kind`, `worktree` under `depends`, `status` under `agent` (research R3). The whole-card
+# verbs set this from the artifact's own `scale:` frontmatter; a hand-fed TSV row leaves
+# it at `wave`, which is the shape every existing caller feeds and the reason this is a
+# global rather than a new row kind: a second kind would be a second name for one card
+# row, and the row kinds are an interface.
+CARD_SCALE="wave"
 
 _card_usage() {  # <message>
   printf 'card.sh: %s — usage: card.sh <requirement|decision|ownership|eval-design|task> with TSV rows on stdin, or card.sh <step1|step2|step3> <artifact>\n' \
@@ -154,7 +176,16 @@ _card_spec() {  # <kind> -> 0 and the spec globals, or 1 for an unknown kind
       CARD_FMT_1='    %-8s %-36s %6s %5s %9s %5s %6s';  CARD_NF_1=7; CARD_FOLD_1=1 ;;
     task)
       CARD_SECTION="Tasks"
-      CARD_HDRCOLS="2:kind 3:depends 4:agent"
+      # THE HEADINGS FOLLOW THE SCALE, THE WIDTHS DO NOT. A task-scale row carries the
+      # same five cells in the same five columns — id, description, and three structured
+      # cells — so the format, the fold column and pin 152's equality are untouched; only
+      # the three labels change, because at task scale those columns hold `rigor`,
+      # `status` and `worktree` (steps/3.md:22's own column order).
+      if [ "${CARD_SCALE:-wave}" = "task" ]; then
+        CARD_HDRCOLS="2:rigor 3:status 4:worktree"
+      else
+        CARD_HDRCOLS="2:kind 3:depends 4:agent"
+      fi
       CARD_FMT_1='    %-5s %-30s %-10s %-13s %s';       CARD_NF_1=5; CARD_FOLD_1=1 ;;
     *) return 1 ;;
   esac
@@ -720,6 +751,7 @@ fm == 1 && $0 == "---" { fm = 0; next }
 fm == 1 {
   k = $0; sub(/:.*$/, "", k); v = $0; sub(/^[^:]*:[ \t]*/, "", v)
   if (k == "working-branch") WB = v
+  else if (k == "scale") SCALE = v
   else if (k == "integration-branch") IB = v
   else if (k == "base-sha") BASE = v
   else if (k == "rigor") RIGOR = v
@@ -734,6 +766,7 @@ fm == 1 {
   flush_all()
   h = substr($0, 4); sub2 = ""
   if (h == "Goal") { sec = "goal"; sawgoal = 1 }
+  else if (h == "Design") { sec = "design"; sawdesign = 1 }
   else if (h == "Not Doing") sec = "nd"
   else if (h == "Tasks") { sec = "tasks"; sawtasks = 1; trow = 0 }
   else if (h == "Eval design") { sec = "eval"; saweval = 1; erow = 0 }
@@ -762,6 +795,19 @@ sec == "goal" && goaldone != 1 {
   else GOAL = GOAL (GOAL == "" ? "" : " ") clean($0)
   next
 }
+# THE DESIGN PARAGRAPH (D8). A task-scale run writes its design as a PARAGRAPH in the
+# session plan and owes no `## Design` heading at all (steps/2.md:60, "no wall at task
+# scale at all") — so this reads the first paragraph under the heading WHEN THERE IS ONE
+# and the Step-2 card falls back to the Goal of the plan when there is not. The first
+# paragraph only: a design section is a document, the card is a line, and the artifact
+# path is the depth. A wave-scale spec runs through here too and nothing reads DESIGN on
+# that card, because the wave card already renders the decisions, the ownership and the
+# eval design the wave design is MADE of.
+sec == "design" && designdone != 1 {
+  if (trim($0) == "") { if (DESIGN != "") designdone = 1 }
+  else DESIGN = DESIGN (DESIGN == "" ? "" : " ") clean($0)
+  next
+}
 sec == "nd" {
   if (/^- /) { flush_nd(); ndbuf = substr($0, 3) }
   else if (/^[ \t]+[^ \t]/ && ndbuf != "") ndbuf = ndbuf " " trim($0)
@@ -778,8 +824,25 @@ sec == "tasks" && /^[ \t]*\|/ {
   if (trow <= 2) next
   n = cells($0, c)
   if (n < 6) next
-  print "TROW" OFS c[1] OFS clean(firstsent(c[4])) OFS c[3] OFS c[6] OFS c[5]
-  if (c[2] == "4" && (c[6] == "—" || c[6] == "-" || c[6] == "")) {
+  # TWO TABLE SHAPES, TWO MAPS (D8). The wave ledger is
+  # `| id | step | kind | task | agent | deps | size | serves | Files | worktree | status |`
+  # and the task ledger is `| id | intent | rigor | description | status | worktree |`
+  # (steps/3.md:22/24) — six cells in a DIFFERENT ORDER, not a prefix of the eleven. Read
+  # with the wave map a task row printed its rigor under `kind`, its worktree under
+  # `depends` and its status under `agent`; the worktree one is the reason this is a
+  # correctness defect and not a cosmetic one, because `.worktrees/18-T2` under a column
+  # headed `depends` reads as a dependency that exists.
+  if (SCALE == "task") print "TROW" OFS c[1] OFS clean(firstsent(c[4])) OFS c[3] OFS c[5] OFS c[6]
+  else                 print "TROW" OFS c[1] OFS clean(firstsent(c[4])) OFS c[3] OFS c[6] OFS c[5]
+  # THE FIRST BATCH, ASKED OF EACH TABLE IN ITS OWN TERMS. A wave row is in the first
+  # batch when it is a Step-4 row depending on nothing; a task row has no step cell and
+  # no deps cell to ask about — the task arm of `units_ready` says so, "READY is `pending`
+  # alone" — so the question there is the status cell, and a card that kept the wave
+  # predicate said "first batch not declared" on every task-scale plan ever written.
+  if (SCALE == "task") {
+    if (c[5] == "pending") FIRSTB = FIRSTB (FIRSTB == "" ? "" : ", ") c[1]
+  }
+  else if (c[2] == "4" && (c[6] == "—" || c[6] == "-" || c[6] == "")) {
     FIRSTB = FIRSTB (FIRSTB == "" ? "" : ", ") c[1]
   }
   next
@@ -828,7 +891,10 @@ END {
   flush_all()
   if (!sawgoal) err("the artifact has no ## Goal section")
   if (verb == "step3" && !sawtasks) err("the plan has no ## Tasks ledger")
-  if (verb == "step2" && !saweval) err("the spec has no ## Eval design table")
+  # THE EVAL TABLE IS A WAVE OBLIGATION (D8). At task scale the design is a paragraph in
+  # the session plan and there is no eval-design wall at all, so demanding the table here
+  # refused the very artifact the arm exists to render (research R3: exit 64 at d7e841c).
+  if (verb == "step2" && !saweval && SCALE != "task") err("the spec has no ## Eval design table")
   if (ERRMSG != "") { print "ERR" OFS ERRMSG; exit 0 }
   print "GOAL" OFS GOAL
   print "META" OFS "wb" OFS WB
@@ -836,6 +902,8 @@ END {
   print "META" OFS "base" OFS BASE
   print "META" OFS "rigor" OFS RIGOR
   print "META" OFS "walk" OFS WALK
+  print "META" OFS "scale" OFS SCALE
+  print "META" OFS "design" OFS DESIGN
   print "META" OFS "adrs" OFS ADRS
   print "META" OFS "writers" OFS WRITERS
   print "META" OFS "firstb" OFS FIRSTB
@@ -858,7 +926,7 @@ END {
 '
 
 _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR and 1
-  WCARD_ERR=""; WCARD_GOAL=""
+  WCARD_ERR=""; WCARD_GOAL=""; WCARD_DESIGN=""; WCARD_SCALE=""
   WCARD_WB=""; WCARD_IB=""; WCARD_BASE=""; WCARD_RIGOR=""; WCARD_WALK=""; WCARD_ADRS=""
   WCARD_WRITERS=""; WCARD_FIRSTB=""; WCARD_MROWS="0"
   WCARD_T0="0"; WCARD_T1="0"; WCARD_T2="0"; WCARD_T3="0"; WCARD_T4="0"
@@ -880,6 +948,7 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
           wb) WCARD_WB="$v" ;;           ib) WCARD_IB="$v" ;;
           base) WCARD_BASE="$v" ;;       rigor) WCARD_RIGOR="$v" ;;
           walk) WCARD_WALK="$v" ;;       adrs) WCARD_ADRS="$v" ;;
+          scale) WCARD_SCALE="$v" ;;     design) WCARD_DESIGN="$v" ;;
           writers) WCARD_WRITERS="$v" ;; firstb) WCARD_FIRSTB="$v" ;;
           mrows) WCARD_MROWS="$v" ;;
           t0) WCARD_T0="$v" ;; t1) WCARD_T1="$v" ;; t2) WCARD_T2="$v" ;;
@@ -895,6 +964,12 @@ _card_load() {  # <verb> <artifact> — sets the WCARD_* globals, or WCARD_ERR a
             WCARD_ADRV[${#WCARD_ADRV[@]}]="${rest#*"$CARD_TAB"}" ;;
     esac
   done < <(printf '%s\n' "$out")
+  # THE ONE ASSIGNMENT OF THE SCALE, made before any row is spec'd: `_card_spec task`
+  # reads it, and a whole card is the only caller that can know it.
+  case "$WCARD_SCALE" in
+    task) CARD_SCALE="task" ;;
+    *)    CARD_SCALE="wave" ;;
+  esac
   return 0
 }
 
@@ -982,6 +1057,212 @@ _card_branches() {
   _card_rstrip "    $(_card_pad integration 14)$(_card_pad "$ib" 22)(Step 8 merges here)"; printf '\n'
 }
 
+# ── THE FLOOR, WHICH IS CONFIGURED AND NOT ASSUMED (D9, AC-4.3) ──────────────
+#
+# THE LINE USED TO BE A LITERAL. `floor tests/run.sh` was typed into the Verification
+# line's format string, over a skill picture that says `floor <suite>` — so the card
+# asserted a fact about a project it had never asked, at the one gate whose entire job
+# is to be true, and it asserted the same one in a project that has no `tests/run.sh`.
+# The configured answer is `impact-command:` in `.bionic/config.yaml`, which is what
+# the dispatch wall (hooks/dispatch-preflight.sh:2904) and the landing gate already
+# read, through the SAME `config_value` this calls — one reading of one file.
+#
+# UNDER THE PLAN'S ROOT, NOT THE RENDERER'S. A card is often rendered from a worktree
+# or from an orchestrator standing somewhere else entirely, and the floor that governs
+# a plan is the one configured where the plan LIVES.
+#
+# AN UNCONFIGURED ROOT PRINTS AN EM DASH, the card's own spelling for "declared
+# nothing" (`_card_branches`'s "not declared", the ledger's `—`), because a floor this
+# file invented is exactly the defect being closed.
+_card_plan_root() {  # <plan path> -> the project root it resolves under, or ""
+  local d
+  d="$(dirname "${1:-.}")"
+  d="$(cd "$d" 2>/dev/null && pwd -P)" || { printf ''; return 0; }
+  project_root "$d" 2>/dev/null
+}
+
+_card_floor() {  # <plan path> -> the configured impact command, or an em dash
+  local root floor=""
+  root="$(_card_plan_root "${1:-}")"
+  [ -n "$root" ] && floor="$(config_value "$root" "impact-command" "")"
+  [ -n "$floor" ] || floor="—"
+  printf '%s' "$floor"
+}
+
+# ── PER-BATCH WIDTH AGAINST THE RUNG (AC-3.4) ────────────────────────────────
+#
+# WHAT A BATCH IS: the rows at one DEPENDENCY DEPTH. Depth 0 rows depend on nothing and
+# run together; a row whose deps are all depth 0 runs in batch 2; and so on. The card
+# used to print ONE number — the writer budget — which says how wide the machine is and
+# nothing about whether the plan can use it. A plan of twelve rows in six batches of two
+# against a rung of eight is a plan that will run two at a time for six rounds, and the
+# Step-3 gate is the last moment where re-threading the dependencies is cheap.
+#
+# THE READY COUNT COMES FROM `fill_ready_set`, NOT FROM COUNTING ROWS HERE. That library
+# is the one computation of "which rows may be dispatched now" (wave-18 D2) — status,
+# step cell, dependency word, scale, and the trim to the gap, all of it — and a card
+# that counted its own way would be a second opinion displayed at the gate where the
+# first one is being ratified. The card's number is therefore the number the tick will
+# print when that batch comes up.
+#
+# WHICH MEANS A PROJECTION, because `fill_ready_set` answers about NOW and a batch past
+# the first is a hypothesis: "when the batches before it are in, what runs together?" So
+# each batch is asked of a copy of the plan with the earlier batches' rows carrying the
+# terminal word their scale uses (`landed` at wave scale, `done` at task scale — ADR-033
+# decision 1) and `current:` naming that batch's own step. The copy is read and deleted;
+# nothing under the project is written.
+#
+# A ROW THAT IS ALREADY LANDED IS NOT READY, and that is deliberate: a plan mid-run
+# renders the widths that are LEFT, which is what a reader of a live plan wants, and a
+# plan at its Step-3 gate — every row pending — renders the widths it was planned at.
+#
+# NO TABLE, NO RUNG, OR NO BATCH: nothing is printed and the writer-budget line stands
+# alone, exactly as before this task. A width this file could not compute is not a width
+# it may guess.
+_card_batch_rows() {  # <plan> -> `<batch>\t<step>\t<id>` per row, in table order
+  local rows
+  rows="$(units_rows "${1:-}" 2>/dev/null)" || return 1
+  [ -n "$rows" ] || return 1
+  printf '%s\n' "$rows" | awk -F'\t' '
+    $1 == "" { next }
+    { n++; id[n] = $1; stp[n] = $2; dep[n] = $6; idx[$1] = n; d[n] = 0 }
+    END {
+      if (n == 0) exit 1
+      # RELAXATION, BOUNDED BY THE ROW COUNT, so a cyclic `deps` cell — which
+      # units_validate refuses but this file may still be handed — terminates instead
+      # of spinning. A dependency this table does not carry is not a depth either.
+      for (pass = 1; pass <= n; pass++) {
+        changed = 0
+        for (i = 1; i <= n; i++) {
+          s = dep[i]; gsub(/[ \t]/, "", s)
+          if (s !~ /[A-Za-z0-9]/) continue
+          m = split(s, a, ",")
+          for (j = 1; j <= m; j++) {
+            if (a[j] == "" || !(a[j] in idx)) continue
+            k = idx[a[j]]
+            if (k == i) continue
+            if (d[k] + 1 > d[i]) { d[i] = d[k] + 1; changed = 1 }
+          }
+        }
+        if (!changed) break
+      }
+      for (i = 1; i <= n; i++) print (d[i] + 1) "\t" stp[i] "\t" id[i]
+    }'
+}
+
+# _card_project <plan> <ids> <terminal word> <current token> <out path>
+#
+# The copy described above. FENCE-AWARE and header-keyed for the same reason
+# `lib/units.sh` is both: a plan documenting its own table inside a fence is prose, and
+# the status column is wherever that table's header put it.
+_card_project() {
+  awk -v want="${2:-}" -v word="${3:-landed}" -v cur="${4:-}" '
+    function trim(v) { sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+    # THE ESCAPE IS FOLDED BEFORE THE SPLIT AND RESTORED AFTER IT, exactly as
+    # `lib/units.sh` does and for the same reason: this repo writes `\|` inside ledger
+    # cells, and a raw split on `|` opens a field the header does not have — so the
+    # status cell is rewritten one column left of where it is, the row stays pending,
+    # and the batch width is wrong rather than absent. `unesc` rebuilds by
+    # concatenation rather than through a gsub replacement, where a backslash is the
+    # one character whose meaning is not the character.
+    function esc(v)   { gsub(/\\[|]/, SUBSEP, v); return v }
+    function unesc(v,   parts, m, i, out) {
+      m = split(v, parts, SUBSEP)
+      out = parts[1]
+      for (i = 2; i <= m; i++) out = out "\\" "|" parts[i]
+      return out
+    }
+    BEGIN { n = split(want, a, " "); for (i = 1; i <= n; i++) W[a[i]] = 1 }
+    /^[ \t]*```/ { fence = !fence; print; next }
+    fence { print; next }
+    /^## / {
+      insdlc  = ($0 ~ /^##[ \t]+SDLC State([ \t].*)?$/)
+      intasks = ($0 ~ /^##[ \t]+[Tt]asks([ \t].*)?$/)
+      print; next
+    }
+    insdlc && /^[ \t]*current[ \t]*:/ && !seen { print "current: " cur; seen = 1; next }
+    intasks && /^[ \t]*\|/ {
+      n = split(esc($0), f, "|")
+      if (!hdr) {
+        for (i = 1; i <= n; i++) {
+          t = tolower(trim(f[i]))
+          if (t == "id" && idc == 0) idc = i
+          if (t == "status" && stc == 0) stc = i
+        }
+        if (idc > 0) hdr = 1
+        print; next
+      }
+      if (idc > 0 && stc > 0 && idc <= n && stc <= n && (trim(f[idc]) in W)) {
+        f[stc] = " " word " "
+        line = f[1]
+        for (i = 2; i <= n; i++) line = line "|" f[i]
+        print unesc(line); next
+      }
+      print; next
+    }
+    { print }
+    END {
+      # A plan with no `## SDLC State` section has no `current:` to project onto, and a
+      # ledger with no current is not live — so the section is appended rather than the
+      # batch silently reading zero.
+      if (!seen) { print ""; print "## SDLC State"; print ""; print "current: " cur }
+    }' "${1:-}" > "${5:-/dev/null}"
+}
+
+_card_batch_widths() {  # <plan> <rung> <scale> -> one `batch <k> · <n> of <rung>` per batch
+  local plan="${1:-}" rung="${2:-}" scale="${3:-wave}" rows maxk k prior steps step
+  local word tmpd proj idsf n token
+  case "$rung" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$rung" -gt 0 ] || return 1
+  rows="$(_card_batch_rows "$plan")" || return 1
+  [ -n "$rows" ] || return 1
+  maxk="$(printf '%s\n' "$rows" | awk -F'\t' 'BEGIN { m = 0 } $1 + 0 > m { m = $1 + 0 } END { print m + 0 }')"
+  [ "$maxk" -gt 0 ] || return 1
+  word="landed"
+  if [ "$scale" = "task" ]; then
+    word="done"
+    # THE TASK-SCALE TOKEN NAMES A UNIT, NOT A NUMBER (`current: T<n>`), and
+    # `units_ready`'s task arm reads its SHAPE rather than its number: which unit the
+    # run is on does not change which rows are dispatchable. The plan's own field is
+    # used when it carries one, so the projection differs from the artifact in the one
+    # thing it is supposed to differ in.
+    token="$(_fill_current_field "$plan")"
+    case "$token" in
+      T*) case "${token#T}" in ''|*[!0-9]*) token="T1" ;; esac ;;
+      *) token="T1" ;;
+    esac
+  fi
+  tmpd="$(mktemp -d "${TMPDIR:-/tmp}/card-batch.XXXXXX")" || return 1
+  proj="${tmpd}/plan.md"
+  idsf="${tmpd}/ids"
+  k=1
+  while [ "$k" -le "$maxk" ]; do
+    prior="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '$1 + 0 < k { printf "%s ", $3 }')"
+    : > "$idsf"
+    if [ "$scale" = "task" ]; then
+      _card_project "$plan" "$prior" "$word" "$token" "$proj"
+      fill_ready_set "$proj" "$rung" 0 >> "$idsf"
+    else
+      # THE STEP CELLS THIS BATCH HOLDS. A wave batch is normally one step, but a
+      # Step-5 row depending on every Step-4 row sits in its own batch at its own
+      # step, so the token is asked per distinct step rather than once for the plan.
+      steps="$(printf '%s\n' "$rows" | awk -F'\t' -v k="$k" '$1 + 0 == k && $2 != "" { print $2 }' | sort -u)"
+      for step in $steps; do
+        _card_project "$plan" "$prior" "$word" "$step" "$proj"
+        fill_ready_set "$proj" "$rung" 0 >> "$idsf"
+      done
+    fi
+    # DISTINCT IDS, counted with a counter rather than `length(array)`: this platform's
+    # awk is the 2007 one-true-awk and does not answer that for an array.
+    n="$(awk 'NF && !($1 in seen) { seen[$1] = 1; c++ } END { print c + 0 }' "$idsf")"
+    [ "$n" -le "$rung" ] || n="$rung"
+    printf '    batch %s · %s of %s\n' "$k" "$n" "$rung"
+    k=$(( k + 1 ))
+  done
+  rm -rf "$tmpd"
+  return 0
+}
+
 _card_step1() {  # <artifact path>
   printf 'Step 1 · Requirements\n\n  Purpose\n'
   _card_fold_at 4 "$WCARD_GOAL"
@@ -998,7 +1279,28 @@ _card_step1() {  # <artifact path>
   printf 'explain <requirement>\n'
 }
 
+# THE TASK-SCALE STEP-2 CARD IS A PARAGRAPH, BECAUSE THE DESIGN IS ONE (D8). A wave
+# design is a document with decisions, an ownership table and an eval-design table, and
+# the card renders those three batches. A task run writes "a design paragraph per
+# non-trivial task, in the session plan — a prose obligation the reviewer reads, with no
+# wall at task scale at all" (steps/2.md:60), so there are no decisions to tabulate and
+# no eval design to count: the card shows the paragraph, names the artifact, and asks
+# its question. It does NOT offer `show evals` or `explain <decision>`, because a card
+# that offers an affordance over content it is not carrying is the same lying surface
+# the floor line was.
+_card_step2_task() {  # <citation path>
+  local d="$WCARD_DESIGN"
+  [ -n "$d" ] || d="$WCARD_GOAL"
+  printf 'Step 2 · Design\n\n'
+  _card_branches
+  printf '\n  Design\n'
+  _card_fold_at 4 "$d"
+  printf '\n  Artifacts\n    plan  %s\n' "$1"
+  printf '\nDo you approve this design? Reply "approved" to approve it.\n'
+}
+
 _card_step2() {  # <artifact path>
+  if [ "$CARD_SCALE" = "task" ]; then _card_step2_task "$1"; return 0; fi
   printf 'Step 2 · Design\n\n'
   _card_branches
   printf '\n'
@@ -1020,7 +1322,12 @@ _card_step2() {  # <artifact path>
   printf 'show evals <req> · explain <decision>\n'
 }
 
-_card_step3() {  # <artifact path>
+# TWO PATHS, AND THEY ARE NOT THE SAME PATH. `$1` is the CITATION — the
+# project-root-relative spelling the Artifacts block prints — and `$2` is the path as
+# the caller gave it, which is what the floor and the batch widths must be read from:
+# a citation is for a reader to open, and `.bionic/docs/plans/…` resolves against the
+# renderer's own cwd rather than against the plan.
+_card_step3() {  # <citation path> <artifact path as given>
   printf 'Step 3 · Plan\n\n  Problem\n'
   _card_fold_at 4 "$WCARD_GOAL"
   printf '\n'
@@ -1032,10 +1339,11 @@ _card_step3() {  # <artifact path>
   [ -n "$w" ] || w="not declared"
   [ -n "$fb" ] || fb="not declared"
   printf '\n  Parallel width\n    %s writers · first batch %s\n' "$w" "$fb"
+  _card_batch_widths "$2" "$WCARD_WRITERS" "$CARD_SCALE" || :
   printf '\n  Eval design\n    %s criteria · %s static · %s unit · %s hermetic · %s live · %s human\n' \
     "$WCARD_MROWS" "$WCARD_T0" "$WCARD_T1" "$WCARD_T2" "$WCARD_T3" "$WCARD_T4"
-  printf '\n  Verification\n    %s matrix rows · floor tests/run.sh · walk %s · auditor %s\n' \
-    "$WCARD_MROWS" "${WCARD_WALK:-not declared}" "${WCARD_RIGOR:-not declared}"
+  printf '\n  Verification\n    %s matrix rows · floor %s · walk %s · auditor %s\n' \
+    "$WCARD_MROWS" "$(_card_floor "$2")" "${WCARD_WALK:-not declared}" "${WCARD_RIGOR:-not declared}"
   printf '\n  Artifacts\n    plan  %s\n\n' "$1"
   printf 'Do you approve this plan? Reply "approved" to approve it.\n'
   printf 'show evals <req> · show task <n> · explain <decision>\n'
@@ -1084,7 +1392,7 @@ case "$1" in
     case "$1" in
       step1) _card_step1 "$_card_art" ;;
       step2) _card_step2 "$_card_art" ;;
-      step3) _card_step3 "$_card_art" ;;
+      step3) _card_step3 "$_card_art" "$2" ;;
     esac
     exit 0 ;;
 esac
