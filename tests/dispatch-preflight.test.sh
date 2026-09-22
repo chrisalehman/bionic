@@ -6975,8 +6975,8 @@ section "§runs-lift — a brief declares what it will RUN, in any runner (REQ-1
 #
 # THE GRAMMAR IS AUTHOR-MARKED (D3). A run is a backtick-delimited command on the span, in
 # position order, at most three of them; text outside the marks is not a run; a run carrying
-# a pipe, a newline or an unexpanded shell variable is refused at the lift with the token
-# named. The marks are KEPT on the roster field, which is what makes "the exact marked run"
+# an UNQUOTED pipe, a newline or an unexpanded shell variable is refused at the lift with the
+# token named (a pipe inside quotes is an ordinary argument — 18T4a/18T4b below). The marks are KEPT on the roster field, which is what makes "the exact marked run"
 # a thing the budget arm can compare against.
 #
 # fails-when: the field is absent from the row; an auditor brief declaring runs and waiving
