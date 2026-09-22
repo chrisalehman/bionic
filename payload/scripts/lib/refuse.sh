@@ -101,6 +101,12 @@
 # UserPromptSubmit) have no JSON refusal channel at all. A mode the tree needs is
 # not made safer by leaving it out of the one renderer.
 #
+# A CALLER PICKS THE MODE BY AUDIENCE, NEVER BY HOW MANY FAULTS IT HOLDS (wave-19 T4,
+# REQ-7). The dispatch gate once sent one brief fault on `exit2` and several on `deny`,
+# so the same kind of refusal left at status 2 or 0 by count. Every brief or state fault
+# there now leaves on `deny` — the model fixes the brief, and `detail` reaches it whole —
+# and only its environment refusals, which the human at the machine fixes, keep `exit2`.
+#
 # THE MODE IS AN ARGUMENT AND NEVER AN ENVIRONMENT VARIABLE. `BIONIC_WALL_VERBOSE`
 # is an env knob because it can only ADD output; the mode decides whether the wall
 # blocks at all (`exit 2` versus `exit 0` with JSON), so an env spelling of it would
@@ -354,7 +360,7 @@ $detail"
     # that reader explicitly asked for would delete diagnostics on the one path whose whole
     # purpose is to show them. So: knob set, the whole detail; channel, the bounded one.
     # `model_out` is untouched either way, which is what keeps a model-only channel's
-    # findings list whole (wave-12 T17).
+    # detail whole — one fault's or a findings list's (wave-12 T17; wave-19 T4).
     if [ "${BIONIC_WALL_VERBOSE:-}" = "1" ]; then
       user_out="$model_out"
     elif [ "$(refuse_channel "$mode" detail_to_user)" = "yes" ]; then

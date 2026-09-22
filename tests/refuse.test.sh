@@ -501,10 +501,11 @@ expect_status "4q block: the same detail parses on the block wire" "0" "$?"
 expect_contains "4r block: …and the bytes survive there too" "$CTRL" "$CTRL_BACK"
 expect_absent "4s block: …and no raw control byte is on the wire" "$CTRL" "$DRV_OUT"
 
-# A MANY-LINE DETAIL ON THE `deny` WIRE (wave-12 T17). The dispatch gate's combined
-# brief-shape refusal is a FINDINGS LIST — a count header and one block per fault, tens of
-# lines — and it rides this field because it is the one the measurement proved reaches the
-# model in full. Three properties it depends on, pinned here rather than inferred from the
+# A MANY-LINE DETAIL ON THE `deny` WIRE (wave-12 T17). The dispatch gate's refusals ride
+# this field whatever their fault count (wave-19 T4, REQ-7): a lone fault's own detail, or
+# several faults' lines and a marked scaffold — tens of lines either way — because it is
+# the one the measurement proved reaches the model in full. The fixture below keeps the
+# older findings-list shape; the properties it pins do not depend on the shape. Three properties it depends on, pinned here rather than inferred from the
 # newline arm above: the verdict is ONE line of output whatever the detail's shape, no raw
 # newline survives onto the wire, and the list comes back from a parser byte-identical,
 # blank lines and indentation included. A wall whose JSON spanned several lines would be a
