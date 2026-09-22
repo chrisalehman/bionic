@@ -154,7 +154,7 @@ HOOK_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 # FAIL OPEN, deliberately. The poker is not a wall: it prints one decision line and holds no
 # authority (ADR-003), so the cost of a missing library is a tick that cannot answer, not an
 # irreversible action taken blind. It says so in one line and steps aside.
-BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh observe.sh"
+BIONIC_LIB_WANT="root.sh session.sh run.sh binding.sh patrol.sh resources.sh worktree.sh agents.sh roster.sh units.sh fill.sh observe.sh"
 # --- bionic-loader/v2 BEGIN
 # Find the bionic library — pasted BYTE-IDENTICALLY into all 15 carriers, because a library
 # cannot load itself. payload/scripts/lib/loader.sh owns this text and its header holds the
@@ -265,6 +265,14 @@ BIONIC_LOADER_REFUSE
 # from here; this hook parses no plan table of its own.
 # shellcheck source=/dev/null
 . "$BIONIC_LIB/units.sh"
+# THE ONE COMPUTATION OF READINESS (wave-18 REQ-3, D2; ADR-033 decision 2). The FILL arm
+# below asks `fill_ready_set` for the ids and `fill_step_token` for the step it asks them at,
+# and `fill_name` — which lived in this file — moved there with them. What that buys is a
+# SECOND reader: `payload/scripts/lib/stop.sh`'s fill duty computes the same set at the end
+# of every turn, so a turn that ends with rows ready is refused whether or not a tick fired
+# in it, and the two can never name different rows.
+# shellcheck source=/dev/null
+. "$BIONIC_LIB/fill.sh"
 # THE ONE PREDICATE FOR "TOO QUIET" (REQ-10 AC-10.1, D9; ADR-028). `observe_class` classifies
 # a dispatched row `delivered`/`alive`/`idle` from two mtimes against the cadence the row's
 # own brief declared. Both readers in this file — the tick's row loop and `adopt`'s liveness
@@ -1204,6 +1212,17 @@ sched_budget_read() {  # <project root> <session id> -> sets SCHED_PLAN/SCHED_BU
 # DISARM decision to the FILL decision — two arms this wave's scope keeps apart. Sharing the
 # awk/grep/sed pipeline, not the caller, keeps the two readings from ever disagreeing about
 # what one `current:` line says.
+#
+# AND A THIRD READER NOW, FOR THE SAME REASON AND UNDER THE SAME RULE (wave-18 REQ-3, D2;
+# A-T2.3). `payload/scripts/lib/fill.sh` asks whether the run's ledger is live and has no
+# poker to ask, so `_fill_current_field` carries this grammar — fence toggle and translation
+# included. It is not folded into this one: this BODY is what §CG of
+# tests/cross-gate-agreement.test.sh extracts as TEXT and evals beside `run_open`, where a
+# delegating body answers nothing, and re-pointing that suite is outside this row's declared
+# files. §30 of tests/session-poker.test.sh binds the pair instead — both driven for real
+# over one table of `current:` shapes, required to answer identically on every row — which is
+# §CG's own remedy for the duplication it polices. The fold belongs in the edit that
+# re-points §CG.
 _sched_plan_current_field() {  # <plan path> -> the RAW current: value (trimmed), or "" if
                                # no plan, no ## SDLC State section, or no current: line
   local plan="$1" section
@@ -1326,41 +1345,11 @@ rung_report() {  # <project root> <session id> -> sets SCHED_RUNG/SCHED_JOBS_RUN
 # THE NAME A DISPATCH USES IS DERIVED, NEVER CHOSEN (T22, A-orch-33; Chris, first
 # principles: the roster is the identity register).
 #
-# THE DEFECT IT ENDS. A name is an identity everywhere downstream — `hooks/stop-guard.sh`
-# resolves one, `adopt` prints one as the message address, the landing sweep folds the
-# roster to the latest row per name. When a model invented a name for a task that had
-# already had a run, two agents ended up behind one row and one address, and the stop gate
-# carried a whole ambiguity arm to survive it. Prevention beats the arm: the tick prints the
-# name, the orchestrator copies it, and `hooks/dispatch-preflight.sh` refuses anything else.
-#
-# THE ROSTER IS WHAT "SPENT" MEANS, not the plan. The plan's `## Tasks` row keeps its id —
-# `T5` is still `T5` to a human reading the ledger — and the roster is the record of which
-# names THIS SESSION has actually handed out. A name is spent if any row carries it, in any
-# state: an open row obviously cannot be reused, and a CLOSED one is the common case (a
-# landed task being run again) where reuse would put a second lineage on a name the sweep
-# has already discharged.
-#
-# PER SESSION, exactly as the dispatch wall's in-flight arm reads it, so the two cannot
-# disagree about which names are available. A predecessor's roster reserves nothing.
-#
-# THE COUNT IS A SEARCH, NOT AN INCREMENT: `-r2`, then `-r3`, until a name no row carries.
-# A rule that always appended `-r2` would hand out a taken name on the third run.
-fill_name() {  # <roster file> <task id> -> the agent name to dispatch under
-  local f="$1" id="$2" n=2 cand
-  [ -n "$id" ] || return 0
-  if [ ! -f "$f" ] || [ -L "$f" ] || ! grep -qF "|name=${id}|" "$f" 2>/dev/null; then
-    printf '%s' "$id"; return 0
-  fi
-  # A bound, so a corrupt roster cannot spin here. Ninety-eight runs of one task is a
-  # different problem than this function can solve, and printing the id back is the
-  # fail-visible answer: the dispatch wall refuses it and says the name is in flight.
-  while [ "$n" -le 99 ]; do
-    cand="${id}-r${n}"
-    grep -qF "|name=${cand}|" "$f" 2>/dev/null || { printf '%s' "$cand"; return 0; }
-    n=$((n + 1))
-  done
-  printf '%s' "$id"
-}
+# `fill_name` AND ITS REASONING MOVED TO payload/scripts/lib/fill.sh (wave-18 REQ-3, D2).
+# It went where the ready set went: `payload/scripts/lib/stop.sh`'s fill duty names rows this
+# tick may also have printed, and a second idea of which name is free would let the two
+# disagree about what "dispatch T5" means. The body is unchanged, and the tick and `adopt`
+# call it exactly as they did.
 
 youngest_suite_writer() {  # <roster file> <session-id> -> <name>@session-<id8>, or empty
   local roster="$1" sid="$2" swept cands live_cands live_ok tr lrc name tab RL RN CL
@@ -1718,8 +1707,8 @@ adopt_write_row() {  # <roster file> <sid> <name> <id> <type> <deliverable> <pro
   # `hooks/stop-guard.sh`'s own stop refusal exists to police (T29 §7). `live_ids_of_name` is
   # that refusal's own predicate, moved to the one library both files source
   # (`payload/scripts/lib/roster.sh`): a non-empty answer means this name is already live
-  # here, so this adopt takes the `-r<n>` search (`fill_name`, already this file's own
-  # convention for a spent id, :1335) instead of the name it was asked for, and says so once
+  # here, so this adopt takes the `-r<n>` search (`fill_name`, the fleet's one convention for a
+  # spent id, payload/scripts/lib/fill.sh) instead of the name it was asked for, and says so once
   # on stderr — this call site is otherwise silent.
   local ROSTER_FILE="$f"
   if [ -n "$(live_ids_of_name "$name")" ]; then
@@ -4066,17 +4055,26 @@ EOF
       # more branch beside them.
       #
       # AN UNREADABLE `current:` WITHHOLDS TOO, UNCONDITIONALLY (Step-6 review-a C-5,
-      # review-b finding (c)/N-2). A task-scale `current: T<n>` (no numbered step to compare
-      # against 4), an empty field, or a line that will not parse are all cases where this
-      # gate cannot tell whether Step 3 has passed — and falling through to the
-      # readiness/budget checks below on THAT basis is DOUBT-then-FILL: the one shape this
-      # arm exists to prevent, measured live on a plan whose `current:` carried a sub-step
-      # letter (`3b`) that the old digit-only read rejected as unreadable and then filled
-      # anyway. So this differs from an unreadable RUNG, which falls back to the ceiling —
-      # there is no safe fallback for "did Step 3 pass," only "no."
+      # review-b finding (c)/N-2). An empty field, a line that will not parse, or a `T<n>`
+      # against a table that NUMBERS its rows are all cases where this gate cannot tell which
+      # unit the run is on — and falling through to the readiness/budget checks on THAT basis
+      # is DOUBT-then-FILL: the one shape this arm exists to prevent, measured live on a plan
+      # whose `current:` carried a sub-step letter (`3b`) that the old digit-only read
+      # rejected as unreadable and then filled anyway. So this differs from an unreadable
+      # RUNG, which falls back to the ceiling — there is no safe fallback for "did Step 3
+      # pass," only "no."
+      #
+      # A TASK-SCALE `current: T<n>` IS READABLE NOW, against a task-shaped table (wave-18
+      # REQ-3, D2; ADR-033 decision 2). It names the unit the run is on, which is a run past
+      # its plan, and `fill_step_token` is what pairs the field with the table's shape: the
+      # token is the number at wave scale, `T<n>` at task scale, and empty when the two
+      # disagree. The withhold above is exactly that empty answer, so the shape this arm was
+      # built for — a wave table sitting at `current: T1` (§22g) — still fills nothing.
       SCHED_CURRENT=""
       [ -n "$SCHED_PLAN" ] && SCHED_CURRENT="$(sched_plan_current "$SCHED_PLAN")"
-      if [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_CURRENT" ]; then
+      SCHED_STEP=""
+      [ -n "$SCHED_PLAN" ] && SCHED_STEP="$(fill_step_token "$SCHED_PLAN")"
+      if [ -n "$SCHED_PLAN" ] && [ -z "$SCHED_STEP" ]; then
         SCHED_CURRENT_RAW="$(_sched_plan_current_field "$SCHED_PLAN")"
         say "no FILL — plan current: unreadable (${SCHED_CURRENT_RAW:-none})"
       elif [ -n "$SCHED_CURRENT" ] && [ "$SCHED_CURRENT" -lt 4 ]; then
@@ -4109,16 +4107,22 @@ EOF
           # `## Tasks` table covers Steps 3-9 in one schedule, so "pending with every
           # dependency landed" is no longer the whole question: a Step-6 review row
           # whose deps happen to be landed is ready in the dependency sense and is
-          # still not this step's work. `units_ready` takes the step as its second
-          # argument and `SCHED_CURRENT` is the step this run is on — already read
-          # and already proven numeric by the approval gate above, which is why this
-          # needs no second parse and no fallback: a `current:` that would not parse
-          # took the withhold arm and never reached here.
-          SCHED_READY="$(units_ready "$SCHED_PLAN" "$SCHED_CURRENT")"
+          # still not this step's work. `SCHED_STEP` is the unit this run is on —
+          # already read and already proven readable by the approval gate above, which
+          # is why this needs no second parse and no fallback: a `current:` that would
+          # not parse took the withhold arm and never reached here.
+          #
+          # AND THE SET IS THE LIBRARY'S, TRIM INCLUDED (wave-18 REQ-3, D2; ADR-033
+          # decision 2). `fill_ready_set` is what `payload/scripts/lib/stop.sh`'s fill
+          # duty computes at the end of every turn, so the rows this tick ORDERS and the
+          # rows that turn's end REFUSES to leave undispatched are one answer rather than
+          # two. It takes the width and the occupancy this arm measured — the rung, and
+          # the roster's own open count — because the wall measures those two differently
+          # and both are right; what may not differ is the set.
+          SCHED_READY="$(fill_ready_set "$SCHED_PLAN" "$SCHED_WIDTH" "$OPEN")"
           SCHED_IDS=""; SCHED_N=0
           while IFS= read -r TASK_ID; do
             [ -n "$TASK_ID" ] || continue
-            [ "$SCHED_N" -lt "$SCHED_GAP" ] || break
             # THE LINE PRINTS THE AGENT NAME, NOT THE TASK ID (T22, A-orch-33). They are the
             # same string for a task that has never run, which is why every fixture and every
             # doc example still reads `FILL T1 T2`. They diverge when the id is already spent,
@@ -4138,7 +4142,7 @@ EOF
             say "FILL ${SCHED_IDS}"
             SCHED_FILL="$SCHED_IDS"
           else
-            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending step-${SCHED_CURRENT} task has all its dependencies landed."
+            say "no FILL — rung=${SCHED_RUNG:--} of writers=${SCHED_WRITERS} open=${OPEN} gap=${SCHED_GAP}, and no pending step-${SCHED_STEP} task has all its dependencies landed."
           fi
         fi
       fi
