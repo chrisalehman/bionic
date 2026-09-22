@@ -115,7 +115,7 @@ A `scale: wave` plan's `## Tasks` table is a different shape from the task-scale
 - **`Files`** — every path the row may create or edit (the dispatch budget's source).
 - **`worktree`** (optional) — the row's tree path once created; `—` while none exists yet.
 - **`base`** (optional, ADR-032) — rides beside `worktree`: the commit the tree was cut from, as `spawn-worktree.sh` printed it at creation. Absent (`—`) means the landing gate reconstructs the base from `working-branch:` instead, and says so.
-- **`status`** — `pending | active | landed | dropped`. `done` is a TASK-SCALE word only (that ledger's own status enum) and never appears as a wave-table status — a row that has landed is `landed`, not `done`.
+- **`status`** — the two ledgers side by side: a wave row is `pending | active | landed | dropped`; a task-scale row is one of `pending`, `active`, `done`, `dropped` (`steps/3.md` documents that ledger). The terminal words never cross: a wave row that has landed is `landed`, not `done`, and `done` never appears as a wave-table status. At task scale `done` means the work is finished and the tree released, and the auditor and critic verdicts it owes are owed from Step 6 — a numeric `current:` of 6 or more, the first moment those verdicts can exist — never while `current:` is still `T<n>` (ADR-033).
 
 **`working-branch:`** in the plan's frontmatter names the wave's own branch, and it is the key `lib/stop.sh`'s landing gate reads to merge-base a task tree against — "what this task added" is computed against that branch, not against the main checkout's current one. A plan naming none falls back to the main checkout's branch, announced inert.
 
