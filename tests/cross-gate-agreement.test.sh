@@ -9337,22 +9337,35 @@ expect_eq "S13.3 …over a set with something in it" "0" \
 # --- §S13.4 the three fields go through the ONE row writer, from both call sites ---
 #
 # §RA.2 pins that the row has one writer. This pins that the fields S13 added did not
-# quietly acquire a second one: neither hook may hold a `suites_allowed=` literal of its
+# quietly acquire a second one: neither hook may hold a `suites_allowed=` ASSEMBLER of its
 # own, and the library must know all three keys. A hook that built the field into a
 # format string beside the call would pass §RA.2 (the captured rows carry none of the
 # three) and be invisible until a reader met a row with the key in the wrong place.
+#
+# THREE FILES, NAMED INDIVIDUALLY — this is not a directory scan, and a fourth file could
+# spell the assembler shape and this pin would never see it:
+#   hooks/dispatch-preflight.sh ($S13_DP)                 must not assemble the row segment
+#   hooks/session-poker.sh                                must not assemble the row segment
+#   payload/scripts/lib/roster.sh ($S13_ROSTER_LIB)        is the one file that may
 for _s13_key in files suites_allowed suites_source; do
   expect_eq "S13.4 roster.sh knows the key [$_s13_key]" "1" \
     "$(awk '/^roster_row\(\)/,/^\}/' "$S13_ROSTER_LIB" | grep -cE "^ *${_s13_key}\)")"
 done
-# THE ROW-BUILDING SPELLING IS `|suites_allowed=` — a pipe in front of the key is a
-# format string assembling the row, and it may exist in exactly one file.
+# THE ROW-BUILDING SPELLING IS `=[^=]*|suites_allowed=$` — an assignment whose right-hand
+# side appends the pipe-prefixed key immediately followed by a `$` (the format string a
+# writer uses to splice in the value). A plain literal-substring grep for `|suites_allowed=`
+# cannot tell this apart from a `case`/substring PRESENCE test spelling the same key —
+# `*"|suites_allowed="*`, no trailing `=$` — and T7's `extend` tripped exactly that false
+# positive and had to route its own presence check through a generic, indirected helper
+# (`row_has_key`, session-poker.sh) purely to dodge this pin (ideas row 11). The shape-aware
+# grep below reads 0 on a presence test and 1 on an assembler, so the dodge is no longer
+# needed — `row_has_key` keeps its shape on its own merits, not because of this pin.
 expect_eq "S13.4 dispatch-preflight assembles no row segment of its own" "0" \
-  "$(grep -c '|suites_allowed=' "$S13_DP")"
+  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$S13_DP")"
 expect_eq "S13.4 …and neither does session-poker's adopt" "0" \
-  "$(grep -c '|suites_allowed=' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$BIONIC_HOOKS_DIR/session-poker.sh")"
 expect_eq "S13.4 …because the one library that may is the one that does" "1" \
-  "$(grep -c '|suites_allowed=' "$S13_ROSTER_LIB")"
+  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$S13_ROSTER_LIB")"
 # The paired POSITIVE: both writers do pass the key by name, so the two zeros above are
 # "no second speller" and not "nobody writes it".
 expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
@@ -9363,6 +9376,21 @@ expect_eq "S13.4 dispatch-preflight passes suites_allowed= to the writer" "1" \
 # one call) did not.
 expect_eq "S13.4 …and session-poker builds its three as one group" "1" \
   "$(grep -c 'suites_allowed=\$(clean "\$sallow" suites_allowed)' "$BIONIC_HOOKS_DIR/session-poker.sh")"
+
+# MUTATION (§N-shaped, :3572-3588) — the shape-aware grep must actually REJECT a planted
+# assembler, not merely fail to see one that was never there. ONE copy of
+# dispatch-preflight.sh is doctored in the SANDBOX — never in the tree — by appending a
+# second, illegitimate `suites_allowed=` format-string line; the same grep that reads 0 on
+# the real tree above must read 1 on the doctored copy.
+mkdir -p "$SANDBOX/fx"
+S13_MUT_DP="$SANDBOX/fx/dispatch-preflight-planted-assembler.sh"
+{ cat "$S13_DP"; printf '%s\n' 'out="$out|suites_allowed=$suites_allowed"'; } > "$S13_MUT_DP"
+expect_ne "S13.4 mutation: the planted copy really differs (not a byte-identical copy)" \
+  "$(cat "$S13_DP")" "$(cat "$S13_MUT_DP")"
+expect_eq "S13.4 mutation: the shape-aware grep is red on the doctored copy" "1" \
+  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$S13_MUT_DP")"
+expect_eq "S13.4 mutation: …and stays green on the real tree" "0" \
+  "$(grep -cE '=[^=]*\|suites_allowed=\$' "$S13_DP")"
 
 # --- §S13.5 the field the wall writes is the field the guard reads ---
 #

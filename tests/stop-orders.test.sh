@@ -565,4 +565,68 @@ expect_absent "…never annotated live off the neighbour its pattern would have 
 expect_contains "…while the real still-at-it beside it is still live" "[live]" \
   "$(printf '%s\n' "$R8_LA4" | grep -F 'still-at-it   (UNMET')"
 
+
+# ============================================================
+section "Section 8: stopped <name> acks the row it stops; standdown drops a row only when acked AND gone (wave-19 T1; REQ-1 AC-1.2/1.3; D3; ADR-034)"
+# ============================================================
+#
+# THE ACK IS THE CLOSE (ADR-034 d1). A TaskStop ends a process; nothing in it closes the
+# name. `stopped <name>` is the verb that does, beside the stop: one verdict read decides
+# whether there is a row to close, and the close goes through the sweeper's own `ack` verb —
+# the same call shape the tick's STANDDOWN close makes — never a private ledger write.
+# An unknown or already-acked name is a refusal, exit 2: the sweeper would record an unknown
+# name and warn, and a second ack says nothing new.
+R9="$(make_repo stopped)"
+so_roster_row "$R9" "open-one" ".bionic/docs/record/never.md" "" "open-one@session-6c85684c"
+s9_ledger() { cat "$R9/.bionic/tmp/sweeper-$SID.state" 2>/dev/null; }
+
+run_orders "$R9" stopped open-one
+expect_status "stopped on an OPEN row exits 0" 0 "$ST"
+expect_contains "…and acks it through the sweeper, by the Patrol, reason landed" \
+  "|name=open-one|by=patrol|reason=landed" "$(s9_ledger)"
+expect_contains "…on the sweeper's own ledger schema" "sweeper-ledger/v1|event=ack|" "$(s9_ledger)"
+expect_contains "…so the one verdict line now reports it closed" "|acked=yes|" \
+  "$( cd "$R9" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict open-one 2>/dev/null )"
+
+run_orders "$R9" stopped open-one
+expect_status "stopped on an ALREADY-ACKED name is refused, exit 2" 2 "$ST"
+expect_contains "…saying why in one line" "open-one" "$OUT$ERR"
+expect_eq "…and writes no second ack" "1" \
+  "$(s9_ledger | grep -c '|event=ack|' | tr -d ' ')"
+
+run_orders "$R9" stopped nobody-here
+expect_status "stopped on an UNKNOWN name is refused, exit 2" 2 "$ST"
+expect_eq "…in exactly one line" "1" \
+  "$(printf '%s\n' "$OUT$ERR" | grep -c . | tr -d ' ')"
+expect_absent "…and nothing is recorded for it" "|name=nobody-here|" "$(s9_ledger)"
+
+run_orders "$R9" stopped
+expect_status "stopped with no target is a usage refusal" 2 "$ST"
+run_orders "$R9" stopped --by human
+expect_status "stopped takes the target first, as order does" 2 "$ST"
+expect_contains "…and says so" "the target comes first" "$ERR"
+
+# ---------- standdown: an acked row keeps its address until a FRESH panel shows it gone ----------
+R10="$(make_repo standdown-acked)"
+R10SLUG=$(printf '%s' "$R10" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R10SLUG"
+R10TR="$R8CFG/projects/$R10SLUG/$SID.jsonl"
+so_roster_row "$R10" "acked-live" ".bionic/docs/record/n1.md" "" "acked-live@session-6c85684c"
+so_roster_row "$R10" "acked-gone" ".bionic/docs/record/n2.md" "" "acked-gone@session-6c85684c"
+( cd "$R10" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" ack acked-live acked-gone ) >/dev/null 2>&1
+plant_live "$R10TR" fresh "acked-live"
+run_orders_cfg "$R10" standdown
+expect_status "standdown with acked rows exits clean" 0 "$ST"
+R10_SD=$(printf '%s\n' "$OUT" | sed -n '/STAND DOWN/,/LEFT ALONE/p')
+expect_contains "an acked row the fresh panel still lists keeps its stop address (AC-1.3)" \
+  "acked-live@session-6c85684c   (acked — acked-live)" "$R10_SD"
+expect_absent "an acked row a fresh panel shows GONE is not listed at all (AC-1.3)" \
+  "acked-gone" "$OUT"
+
+# A STALE panel is not evidence the agent left: the acked row keeps its address.
+plant_live "$R10TR" stale "acked-live"
+run_orders_cfg "$R10" standdown
+expect_contains "under a stale panel the acked-gone row keeps its address" \
+  "acked-gone@session-6c85684c   (acked — acked-gone)" "$OUT"
+
 finish
