@@ -777,6 +777,20 @@ LEDGER_READY_2='| T2 | 4 | build | the first ready row | implementor | — | 30m
 LEDGER_READY_3='| T3 | 4 | build | the second ready row | implementor | — | 30m | REQ-x | c.sh | pending | — |'
 LEDGER_ACTIVE='| T4 | 4 | build | the row in flight | implementor | — | 30m | REQ-x | d.sh | active | 18-T4 |'
 LEDGER_BLOCKED='| T5 | 4 | build | a row behind an unlanded dep | implementor | T2 | 30m | REQ-x | e.sh | pending | — |'
+LEDGER_READY_20='| T20 | 4 | build | the third ready row | implementor | — | 30m | REQ-x | h2.sh | pending | — |'
+
+# THE RING IS SANDBOXED FOR THIS SECTION (wave-18 T2b, R1). Every fixture below carries a
+# `parallel-budget:`, so `stop_patrol_duties`'s fill duty now reads the same rung the tick
+# reads (`pressure_level`, payload/scripts/lib/resources.sh — this row's fix). Undriven, that
+# would read and occasionally sample THIS MACHINE'S real ring
+# (`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/bionic/pressure.ring`), which is neither hermetic nor
+# safe to touch from a suite. CLEAR_RING pins a warm, clear sample so `pressure_level 8`
+# answers `rung=8` — the same width the pre-fix ceiling always gave — so every row below that
+# predates this fix (59-68) is unchanged by it. Row 69 swaps in a second, loaded ring to
+# prove the RUNG, not the ceiling, is what caps the refusal.
+CLEAR_RING="$(mktemp -d)/clear.ring"
+printf '1700000000|80|0|1.0|8\n' > "$CLEAR_RING"
+export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
 
 # 59: THE INVARIANT. A live ledger, two ready rows, an ordinary turn that dispatched
 # neither and never saw a tick -> REFUSE, naming both rows.
@@ -872,6 +886,29 @@ fire "$d"; expect_block "67b: …in the tick arm's own wording" "the tick printe
 d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3")
 u_tick "$d"; both_duties "$d"; u_tick_out "$d" "poker: no FILL — rung=8 of writers=8 and 8 open row(s): the budget is full."
 fire "$d"; expect_allow "68: a tick that printed no FILL is not overruled by the plan's own reading"
+
+# 69: THE RUNG, NOT THE CEILING (Step-6 review R1, wave-18 T2b). Three rows are ready
+# (T2, T3, T20) against a declared ceiling of 8 — the pre-fix wall would have named all
+# three. LOADED_RING pins a critical-band sample (free_pct=10, inside [0, 12)) against
+# that ceiling: rung = (8 + 3) / 4 = 2. The wall must name exactly the rung-minus-open
+# count — T2 and T3 — and never T20, which the tick's own rung declined to order.
+LOADED_RING="$(mktemp -d)/loaded.ring"
+printf '1700000000|10|0|1.0|8\n' > "$LOADED_RING"
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3" "$LEDGER_READY_20")
+u_prompt "$d" "anything else ready?"
+export BIONIC_PRESSURE_RING="$LOADED_RING" BIONIC_NOW_EPOCH="1700000000"
+fire "$d"; expect_block "69a: a rung pinned below the ceiling caps the refusal at rung - open" "T2"
+fire "$d"; expect_block "69b: …and the second row, at the rung's width" "T3"
+fire "$d"; expect_block "69c: …and never the ceiling's wider count — T20 stays unnamed" "fill-declined" "T20"
+export BIONIC_PRESSURE_RING="$CLEAR_RING" BIONIC_NOW_EPOCH="1700000000"
+
+# 69d: THE PAIRED CASE, rung = ceiling. The same three-ready-row table, back on the clear
+# ring: rung=8, gap=8-0=8, and all three ready rows fit inside it — unchanged from 59-68.
+d=$(make_env_ledger 4 "$LEDGER_LANDED" "$LEDGER_READY_2" "$LEDGER_READY_3" "$LEDGER_READY_20")
+u_prompt "$d" "anything else ready?"
+fire "$d"; expect_block "69d: a rung equal to the ceiling names every ready row, T20 included" "T20"
+
+unset BIONIC_PRESSURE_RING BIONIC_NOW_EPOCH
 
 # ============================================================
 section "Section 6: marker scope — a file the agent merely READ is not a decline (review F2)"
