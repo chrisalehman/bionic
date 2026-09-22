@@ -3,7 +3,8 @@
 # WHAT IT OWNS (wave-session-bound-run, 2026-09-04, spec §Design "Session binding";
 # AC-7/AC-8/AC-9). Exactly one function, and it is the only code in this tree permitted to
 # create or rewrite `<root>/.bionic/tmp/engaged-<sid>.state`:
-#   bind_plan <root> <sid> <plan|none> -> 0 written · 1 refused-invalid · 2 write failure
+#   bind_plan <root> <sid> <plan|none> -> 0 written · 1 refused-invalid · 2 write failure,
+#                                          and BIND_REFUSAL naming WHICH of the five
 #
 # WHY A FILE OF ITS OWN, for one function. Three callers write this marker —
 # `hooks/engage.sh` at invocation, `hooks/session-poker.sh bind` when the operator names a
@@ -33,7 +34,32 @@
 # tree that cannot take the write is a different answer — 2 — because a refusal is the
 # caller's fault and a broken tree is not.
 #
-# PRINTS NOTHING, EVER. Callers print; `bind_plan` reports by exit status alone.
+# PRINTS NOTHING, EVER. Callers print; `bind_plan` reports by exit status and by
+# `BIND_REFUSAL` alone.
+#
+# WHICH REFUSAL IS A VARIABLE, NOT A WIDER SET OF EXIT CODES (epic-23 wave-18-fixit-185,
+# REQ-2 AC-2.2; A-T3.1). Five causes shared one status, so every caller that wanted to say
+# why had to re-derive it from the filesystem afterwards — hooks/session-poker.sh:3203 does
+# exactly that, in a comment calling the re-derivation "POSITIONAL", and the PostToolUse
+# bind arm cannot re-derive anything: by the time it runs the tool has already written the
+# file. The five names below are therefore set on the way out, beside the status rather
+# than inside it. WIDENING THE STATUS WAS THE FIRST DESIGN AND IT INVERTS TWO READERS
+# OUTSIDE THIS FILE: tests/engage.test.sh §E8 (f)(g)(g2)(h) pins `exit 1` for four of the
+# five, and hooks/session-poker.sh:3199 reads `BIND_RC -ge 2` as "the marker write failed",
+# so a sixth code would report a valid refusal as a broken tree. The status contract is
+# unchanged and the distinction rides beside it. [WALL: tests/binding.test.sh]
+#
+#   BIND_REFUSAL — empty on success, and CLEARED ON ENTRY so a reader can never attribute
+#   the previous call's decline to this one:
+#
+#     1 sid                 the sid is empty, `unknown`, or outside [A-Za-z0-9_-]
+#     2 marker-dir-symlink  `.bionic` or `.bionic/tmp` on the marker's own path is a link
+#     3 marker-symlink      the marker file itself is a link
+#     4 unresolvable        the plan is not an absolute path whose directory resolves, or
+#                           the open-run set could not be read
+#     5 not-an-open-run     the plan resolves and is not a member of `open_runs "$root"`
+#     6 write-failed        the write itself failed — status 2, a broken tree and not a
+#                           refusal, which is why it is numbered with them and not among them
 #
 # DEPENDS ON run.sh, which must be sourced first: `engaged_marker_path` owns the sid shape
 # rule and the marker path, `open_runs` owns the set, `_run_lines` owns the line-ending
@@ -75,7 +101,9 @@ _bind_resolve() {
 bind_plan() {
   local root="$1" sid="$2" plan="$3"
   local path
-  path=$(engaged_marker_path "$root" "$sid") || return 1
+  # CLEARED FIRST, ABOVE EVERY ARM THAT COULD REFUSE.
+  BIND_REFUSAL=""
+  path=$(engaged_marker_path "$root" "$sid") || { BIND_REFUSAL="sid"; return 1; }
 
   # THE WHOLE MARKER PATH, NOT JUST ITS LEAF (S10a, review SEC F1). A leaf-only `-L` test
   # answers "is the marker a link" and leaves "is the marker's DIRECTORY a link" unasked, so
@@ -86,13 +114,13 @@ bind_plan() {
   local mtmp mbio
   mtmp=$(dirname "$path")
   mbio=$(dirname "$mtmp")
-  if [ -L "$mtmp" ] || [ -L "$mbio" ]; then return 1; fi
+  if [ -L "$mtmp" ] || [ -L "$mbio" ]; then BIND_REFUSAL="marker-dir-symlink"; return 1; fi
 
   # Refused BEFORE it is followed, and before anything is read out of it: a planted link
   # would otherwise have this function read a stamp out of, and then clobber, a file outside
   # the tree on the one write bionic performs at the invocation the user just typed. It is
   # tested AGAIN immediately before the write — see there for why once is not enough.
-  [ -L "$path" ] && return 1
+  [ -L "$path" ] && { BIND_REFUSAL="marker-symlink"; return 1; }
 
   # MEMBERSHIP, not existence. `open_runs` is the same set `session_run` rules on, so a
   # binding this accepts is one the reader will honour.
@@ -107,14 +135,14 @@ bind_plan() {
   local value="$plan"
   if [ "$plan" != "none" ]; then
     local want runs cand c found=0
-    want=$(_bind_resolve "$plan") || return 1
-    runs=$(open_runs "$root" 2>/dev/null) || return 1
+    want=$(_bind_resolve "$plan") || { BIND_REFUSAL="unresolvable"; return 1; }
+    runs=$(open_runs "$root" 2>/dev/null) || { BIND_REFUSAL="unresolvable"; return 1; }
     while IFS= read -r cand; do
       [ -n "$cand" ] || continue
       c=$(_bind_resolve "$cand") || continue
       if [ "$c" = "$want" ]; then found=1; break; fi
     done <<< "$runs"
-    [ "$found" -eq 1 ] || return 1
+    [ "$found" -eq 1 ] || { BIND_REFUSAL="not-an-open-run"; return 1; }
     value="$want"
   fi
 
@@ -130,7 +158,7 @@ bind_plan() {
   fi
   if [ -z "$stamp" ]; then
     stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) || stamp=""
-    [ -n "$stamp" ] || return 2
+    [ -n "$stamp" ] || { BIND_REFUSAL="write-failed"; return 2; }
   fi
 
   # THE LEAF IS TESTED AGAIN, HERE, AND THAT IS THE ONE THAT MATTERS (S10a, review SEC F2).
@@ -141,13 +169,14 @@ bind_plan() {
   # immediately before the redirect shrinks the window to the gap between two adjacent
   # commands, at the cost of one `test`. The earlier check is not redundant: it is what keeps
   # the `engaged_at` read above from following a link out of the tree in the first place.
-  [ -L "$path" ] && return 1
+  [ -L "$path" ] && { BIND_REFUSAL="marker-symlink"; return 1; }
 
   # `umask` is shell-global, so the write runs in a subshell rather than leaking a
   # tightened mask back to a hook that has other files to create. The explicit chmod is
   # NOT redundant with it: `>` onto an existing file keeps that file's mode, so a marker
   # first written under a looser umask would stay loose forever without this.
-  ( umask 077; printf 'plan=%s\nengaged_at=%s\n' "$value" "$stamp" > "$path" ) 2>/dev/null || return 2
+  ( umask 077; printf 'plan=%s\nengaged_at=%s\n' "$value" "$stamp" > "$path" ) 2>/dev/null \
+    || { BIND_REFUSAL="write-failed"; return 2; }
   chmod 600 "$path" 2>/dev/null || :
   return 0
 }
