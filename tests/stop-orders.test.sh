@@ -576,21 +576,64 @@ section "Section 8: stopped <name> acks the row it stops; standdown drops a row 
 # the same call shape the tick's STANDDOWN close makes — never a private ledger write.
 # An unknown or already-acked name is a refusal, exit 2: the sweeper would record an unknown
 # name and warn, and a second ack says nothing new.
+#
+# STOPPED NOW CHECKS WHAT STANDDOWN ALREADY CHECKS (wave-19 T1 follow-up, critic C4). Before
+# this fix `stopped` acked ANY open row on the strength of the name alone — still-live or
+# UNMET — and since T4 that ack frees the name for a fresh dispatch while the agent it named
+# is still running (dispatch-preflight.sh:2272 treats any ack newer than the launch as the
+# name closing). So the verdict must be LANDED (MET or WAIVED; an UNMET row is refused,
+# naming the state) AND a FRESH panel reading must confirm the name is gone: present on the
+# panel -> refused, naming it live; a stale or absent panel -> refused, because a verb that
+# cannot see does not ack. The ack it writes is `--by human`, never `--by patrol`: this is a
+# deliberate model-callable verb, not the tick's own automated sweep.
 R9="$(make_repo stopped)"
+R9SLUG=$(printf '%s' "$R9" | sed 's/[^a-zA-Z0-9]/-/g')
+mkdir -p "$R8CFG/projects/$R9SLUG"
+R9TR="$R8CFG/projects/$R9SLUG/$SID.jsonl"
 so_roster_row "$R9" "open-one" ".bionic/docs/record/never.md" "" "open-one@session-6c85684c"
 s9_ledger() { cat "$R9/.bionic/tmp/sweeper-$SID.state" 2>/dev/null; }
 
-run_orders "$R9" stopped open-one
-expect_status "stopped on an OPEN row exits 0" 0 "$ST"
-expect_contains "…and acks it through the sweeper, by the Patrol, reason landed" \
-  "|name=open-one|by=patrol|reason=landed" "$(s9_ledger)"
+# UNMET, and gone from a fresh panel: still refused, naming the verdict. This is the
+# finding's own reproduction — `open-one`'s deliverable never exists — and the old
+# behaviour acked it as `landed` anyway.
+plant_live "$R9TR" fresh
+run_orders_cfg "$R9" stopped open-one
+expect_status "stopped on an UNMET row is refused, exit 2, even with the agent gone (C4)" 2 "$ST"
+expect_contains "…naming the verdict" "UNMET" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=open-one|" "$(s9_ledger)"
+
+# MET, but the fresh panel still lists the agent: refused, naming it live (C4) — the
+# defect's sharper edge, a landed contract whose agent is still working.
+echo landed > "$R9/.bionic/docs/record/met-live.md"
+so_roster_row "$R9" "met-live" ".bionic/docs/record/met-live.md" "" "met-live@session-6c85684c"
+plant_live "$R9TR" fresh "met-live"
+run_orders_cfg "$R9" stopped met-live
+expect_status "stopped on a row the fresh panel still lists is refused, exit 2 (C4)" 2 "$ST"
+expect_contains "…naming it as live" "met-live" "$OUT$ERR"
+expect_absent "…and acks nothing" "|name=met-live|" "$(s9_ledger)"
+
+# A STALE panel: refused too — a verb that cannot see does not ack (C4). Still MET, still
+# actually gone; only the panel reading is untrustworthy.
+plant_live "$R9TR" stale
+run_orders_cfg "$R9" stopped met-live
+expect_status "stopped under a stale panel is refused, exit 2 (C4)" 2 "$ST"
+expect_absent "…and acks nothing" "|name=met-live|" "$(s9_ledger)"
+
+# MET, and the fresh panel shows the agent gone: acked, by a human verb, reason landed (C4).
+# This is the one case `stopped` still closes — the verb runs beside TaskStop, after the
+# agent is gone.
+plant_live "$R9TR" fresh
+run_orders_cfg "$R9" stopped met-live
+expect_status "stopped on a MET row the fresh panel shows gone acks it, exit 0" 0 "$ST"
+expect_contains "…acked through the sweeper, by a human verb, reason landed" \
+  "|name=met-live|by=human|reason=landed" "$(s9_ledger)"
 expect_contains "…on the sweeper's own ledger schema" "sweeper-ledger/v1|event=ack|" "$(s9_ledger)"
 expect_contains "…so the one verdict line now reports it closed" "|acked=yes|" \
-  "$( cd "$R9" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict open-one 2>/dev/null )"
+  "$( cd "$R9" && CLAUDE_CODE_SESSION_ID="$SID" bash "$SWEEPER" verdict met-live 2>/dev/null )"
 
-run_orders "$R9" stopped open-one
+run_orders_cfg "$R9" stopped met-live
 expect_status "stopped on an ALREADY-ACKED name is refused, exit 2" 2 "$ST"
-expect_contains "…saying why in one line" "open-one" "$OUT$ERR"
+expect_contains "…saying why in one line" "met-live" "$OUT$ERR"
 expect_eq "…and writes no second ack" "1" \
   "$(s9_ledger | grep -c '|event=ack|' | tr -d ' ')"
 
